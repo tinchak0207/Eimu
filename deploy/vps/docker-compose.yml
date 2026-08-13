@@ -1,0 +1,77 @@
+services:
+  nextjs:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    container_name: imagesite-nextjs
+    restart: unless-stopped
+    env_file:
+      - ./app/.env.production
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+    depends_on:
+      - new-api
+    networks:
+      - imagesite
+
+  generation-worker:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+      target: generation-worker
+    container_name: imagesite-generation-worker
+    restart: unless-stopped
+    env_file:
+      - ./app/.env.production
+    environment:
+      NODE_ENV: production
+    networks:
+      - imagesite
+
+  new-api:
+    image: calciumion/new-api:latest
+    container_name: imagesite-new-api
+    restart: unless-stopped
+    environment:
+      PORT: 3001
+      TZ: Asia/Hong_Kong
+      SESSION_SECRET: ${NEW_API_SESSION_SECRET}
+    volumes:
+      - ./new-api-data:/data
+    ports:
+      - "127.0.0.1:3001:3001"
+    networks:
+      - imagesite
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: imagesite-nginx
+    restart: unless-stopped
+    depends_on:
+      - nextjs
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./certbot/www:/var/www/certbot
+      - ./certbot/conf:/etc/letsencrypt
+    networks:
+      - imagesite
+
+  certbot:
+    image: certbot/certbot:latest
+    container_name: imagesite-certbot
+    profiles:
+      - manual
+    volumes:
+      - ./certbot/www:/var/www/certbot
+      - ./certbot/conf:/etc/letsencrypt
+    networks:
+      - imagesite
+
+networks:
+  imagesite:
+    driver: bridge

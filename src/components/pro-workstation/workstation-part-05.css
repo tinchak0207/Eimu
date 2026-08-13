@@ -1,0 +1,754 @@
+
+@media (max-width: 430px) {
+  .pro-app-shell .pro-glass-panel {
+    max-width: 100%;
+    border-color: rgba(255, 255, 255, 0.62);
+    border-bottom-color: rgba(0, 0, 0, 0.05);
+    background: rgba(255, 255, 255, 0.48);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  .pro-app-shell .pro-mobile-nav {
+    border-color: rgba(255, 255, 255, 0.68);
+    background: rgba(255, 255, 255, 0.52);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.84), 0 8px 24px rgba(45, 49, 66, 0.06);
+    -webkit-backdrop-filter: blur(24px) saturate(1.5) brightness(1.03);
+    backdrop-filter: blur(24px) saturate(1.5) brightness(1.03);
+  }
+
+  .pro-mobile-nav button {
+    min-height: 2.75rem;
+    color: rgba(0, 0, 0, 0.62);
+    font-size: 0.8125rem;
+    font-weight: 500;
+  }
+
+  .pro-mobile-nav button.is-active {
+    background: rgba(0, 122, 255, 0.12);
+    color: #007aff;
+    box-shadow: none;
+  }
+
+  #pro-tour-run {
+    background: #007aff;
+  }
+
+  #pro-tour-run:disabled {
+    background: rgba(0, 0, 0, 0.10) !important;
+    color: rgba(0, 0, 0, 0.48) !important;
+  }
+
+  .pro-app-shell .pro-panel-hint {
+    display: none;
+  }
+
+  .pro-app-shell .pro-panel-stack,
+  .pro-app-shell .pro-panel-stack > *,
+  .pro-app-shell .pro-accordion {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .pro-app-shell .pro-accordion {
+    background: transparent;
+    box-shadow: none;
+    padding: 1rem;
+  }
+
+  .pro-app-shell .pro-panel-title {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: rgba(0, 0, 0, 0.36);
+    margin-bottom: 0.5rem;
+    line-height: 1.35;
+  }
+
+  .pro-app-shell .pro-section-note {
+    color: rgba(0, 0, 0, 0.40);
+    font-size: 0.75rem;
+    font-weight: 400;
+    line-height: 1.5;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .pro-app-shell textarea,
+  .pro-app-shell input:not([type="range"]),
+  .pro-app-shell select {
+    font-size: 1rem !important;
+    font-weight: 400;
+    line-height: 1.375;
+  }
+
+  .pro-app-shell input:not([type="range"]),
+  .pro-app-shell select {
+    min-height: 2.75rem;
+  }
+
+  .pro-app-shell textarea::placeholder,
+  .pro-app-shell input::placeholder {
+    color: rgba(0, 0, 0, 0.52);
+  }
+
+  .pro-app-shell .pro-prompt-meter {
+    color: rgba(0, 0, 0, 0.58);
+    font-size: 0.8125rem;
+    font-weight: 500;
+  }
+
+  .pro-app-shell .pro-prompt-meter span:only-child {
+    display: inline;
+  }
+
+  .pro-app-shell .pro-panel-stack button {
+    font-size: 0.8125rem;
+  }
+
+  .pro-app-shell .pro-add-row-button,
+  .pro-app-shell .pro-empty-cta {
+    min-height: 2.75rem;
+  }
+
+  .pro-app-shell .pro-control-row {
+    font-weight: 500;
+  }
+
+  /* label/value 層級：label 更小更淡，value 更清晰 */
+  .pro-app-shell .pro-control-row {
+    font-size: 0.875rem;
+    font-weight: 400;
+    gap: 0.6rem;
+  }
+
+  /* label 欄（左側 3.2rem 列）：變細變淡 */
+  .pro-app-shell .pro-control-row > :first-child {
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: rgba(0, 0, 0, 0.44);
+  }
+
+  /* control-row 的 output/value：更突出 */
+  .pro-app-shell .pro-control-row output {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: rgba(0, 0, 0, 0.72);
+  }
+
+  .pro-app-shell .pro-panel-stack small,
+  .pro-app-shell .pro-panel-stack em {
+    font-size: 0.75rem;
+    line-height: 1.35;
+  }
+
+  .pro-app-shell .pro-chip-grid,
+  .pro-app-shell .pro-chip-row,
+  .pro-app-shell .pro-style-grid {
+    min-width: 0;
+    max-width: 100%;
+    overflow: visible;
+    padding-inline-end: 0;
+    touch-action: auto;
+  }
+
+  .pro-app-shell .pro-chip-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .pro-app-shell .pro-chip-row {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .pro-app-shell .pro-style-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .pro-app-shell .pro-chip-grid button,
+  .pro-app-shell .pro-chip-row button,
+  .pro-app-shell .pro-style-grid button {
+    min-height: 2.75rem;
+    min-width: 0;
+    color: rgba(0, 0, 0, 0.64);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    overflow-wrap: anywhere;
+  }
+
+  .pro-app-shell .pro-chip-grid button.is-active,
+  .pro-app-shell .pro-chip-row button.is-active,
+  .pro-app-shell .pro-style-grid button.is-active {
+    border: 1px solid rgba(0, 122, 255, 0.24);
+    background: rgba(0, 122, 255, 0.12);
+    color: #007aff;
+    box-shadow: none;
+  }
+
+  .pro-app-shell :where(button, input, select, textarea):focus-visible {
+    outline: 2px solid rgba(0, 122, 255, 0.82);
+    outline-offset: 2px;
+  }
+
+  .pro-app-shell .pro-model-control:focus-within {
+    border-radius: 1rem;
+    box-shadow: 0 0 0 2px rgba(0, 122, 255, 0.58);
+  }
+
+  /* generate bar show/hide handled in 1023px block above */
+
+  .pro-mobile-generate-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    width: 100%;
+    min-height: 3rem;
+    border-radius: 1rem;
+    background: #007aff;
+    color: #fff;
+    font-size: 1rem;
+    font-weight: 600;
+    box-shadow: 0 4px 20px rgba(0, 122, 255, 0.32);
+    transition: background 150ms ease, box-shadow 150ms ease;
+  }
+
+  .pro-mobile-generate-btn:hover:not([data-disabled]) {
+    background: #0066dd;
+  }
+
+  .pro-mobile-generate-btn[data-disabled] {
+    background: rgba(0, 0, 0, 0.10);
+    color: rgba(0, 0, 0, 0.42);
+    box-shadow: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pro-app-shell *,
+  .pro-app-shell *::before,
+  .pro-app-shell *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ── 历史面板（HistoryInspectorPanel） ──────────────────────
+ * 侧栏只有 320px，信息密度要比 /history 页高得多：
+ * 一行 = 缩略图 + 两行文字 + 悬停浮出的操作按钮。
+ */
+
+.pro-history-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pro-history-filters {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pro-history-search {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.38);
+  color: rgba(0, 0, 0, 0.34);
+  transition: background 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.pro-history-search:focus-within {
+  background: rgba(255, 255, 255, 0.62);
+  box-shadow: 0 0 0 2px rgba(0, 122, 255, 0.16);
+}
+
+.pro-history-search input {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.68);
+  outline: none;
+}
+
+.pro-history-search input::placeholder {
+  color: rgba(0, 0, 0, 0.28);
+  font-weight: 500;
+}
+
+/* 搜索框自带的清除叉在玻璃背景上很难看，隐藏掉，用键盘清空即可。 */
+.pro-history-search input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.pro-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  /* 超过约 7 行就滚动，不让侧栏被历史撑到无限长。 */
+  max-height: 320px;
+  overflow-y: auto;
+  margin: 0 -4px;
+  padding: 0 4px;
+}
+
+.pro-history-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 12px;
+  transition: background 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.pro-history-row:hover {
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.pro-history-main {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 12px;
+}
+
+.pro-history-main:focus-visible {
+  outline: 2px solid rgba(0, 122, 255, 0.5);
+  outline-offset: -2px;
+}
+
+.pro-history-thumb {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.pro-history-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.pro-history-text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.pro-history-label {
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(0, 0, 0, 0.66);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pro-history-text small {
+  overflow: hidden;
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.34);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pro-history-tools {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  padding-right: 6px;
+}
+
+.pro-history-tool {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(0, 0, 0, 0.36);
+  cursor: pointer;
+  transition: background 0.2s cubic-bezier(0.4, 0, 0.2, 1), color 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.pro-history-tool:hover {
+  background: rgba(255, 255, 255, 0.74);
+  color: rgba(0, 0, 0, 0.62);
+}
+
+.pro-history-tool.is-active {
+  color: #ffb300;
+}
+
+.pro-history-tool:focus-visible {
+  outline: 2px solid rgba(0, 122, 255, 0.5);
+  outline-offset: 1px;
+}
+
+.pro-history-empty {
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.3);
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.38);
+}
+
+/*
+ * 指针设备上操作按钮淡出但不消失；触摸设备始终全显。
+ *
+ * 原本 opacity:0 = 完全不存在：收藏和「作为参考图继续」两个功能，用户必须先
+ * 偶然把鼠标停在某一行上才可能发现。0.38 保留可见的轮廓（看得出有东西可点），
+ * 又不与主内容抢注意力。
+ */
+@media (hover: hover) and (pointer: fine) {
+  .pro-history-tools {
+    opacity: 0.38;
+    transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .pro-history-row:hover .pro-history-tools,
+  .pro-history-row:focus-within .pro-history-tools {
+    opacity: 1;
+  }
+
+  /* 已收藏的星标必须始终可见，否则用户看不出哪些收藏过。 */
+  .pro-history-tools:has(.is-active) {
+    opacity: 1;
+  }
+}
+
+/* 全屏查看成片：portal 到 body，避开 .pro-studio-shell 的 backdrop-filter
+   containing block，任何缩放/布局下都相对视口固定。 */
+.pro-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 12, 18, 0.82);
+  backdrop-filter: blur(14px) saturate(1.1);
+  cursor: zoom-out;
+  animation: pro-lightbox-in 200ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes pro-lightbox-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.pro-lightbox-stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  max-width: calc(100vw - 3.5rem);
+  max-height: calc(100vh - 8.5rem);
+  cursor: default;
+}
+
+.pro-lightbox-stage img,
+.pro-lightbox-stage video {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 1.1rem;
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.55);
+}
+
+.pro-lightbox-close {
+  position: absolute;
+  top: 1.2rem;
+  right: 1.2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(12px);
+  transition: background 180ms ease, transform 180ms ease;
+}
+
+.pro-lightbox-close:hover {
+  background: rgba(255, 255, 255, 0.24);
+  transform: scale(1.06);
+}
+
+/*
+ * 全屏灯箱里原本没有翻页：8 张一批要一张张「关闭 → 点下一张 → 再放大」。
+ * 左右按钮 + ← / → 键让全屏成为真正的审片态。
+ */
+.pro-lightbox-page {
+  position: absolute;
+  top: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 3rem;
+  height: 3rem;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(12px);
+  transform: translateY(-50%);
+  transition: background 180ms ease, transform 180ms ease;
+}
+
+.pro-lightbox-page:hover {
+  background: rgba(255, 255, 255, 0.24);
+}
+
+.pro-lightbox-page--prev {
+  left: 1.2rem;
+}
+
+.pro-lightbox-page--next {
+  right: 1.2rem;
+}
+
+@media (max-width: 640px) {
+  .pro-lightbox-page {
+    width: 2.5rem;
+    height: 2.5rem;
+  }
+
+  .pro-lightbox-page--prev {
+    left: 0.5rem;
+  }
+
+  .pro-lightbox-page--next {
+    right: 0.5rem;
+  }
+}
+
+.pro-lightbox-meta {
+  position: absolute;
+  bottom: 1.4rem;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  max-width: calc(100vw - 3rem);
+  transform: translateX(-50%);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+  background: rgba(24, 27, 36, 0.62);
+  padding: 0.45rem 0.6rem 0.45rem 1rem;
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 0.7rem;
+  font-weight: 650;
+  backdrop-filter: blur(12px);
+  white-space: nowrap;
+  flex-wrap: wrap;
+}
+
+.pro-lightbox-meta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pro-lightbox-meta button,
+.pro-lightbox-meta a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  padding: 0.38rem 0.85rem;
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-decoration: none;
+  transition: background 180ms ease;
+}
+
+.pro-lightbox-meta button:hover,
+.pro-lightbox-meta a:hover {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+@media (max-width: 640px) {
+  .pro-lightbox-stage {
+    max-width: calc(100vw - 1.5rem);
+    max-height: calc(100vh - 8rem);
+  }
+
+  .pro-lightbox-meta {
+    bottom: 1rem;
+    max-width: calc(100vw - 1.5rem);
+    white-space: normal;
+    flex-wrap: wrap;
+    justify-content: center;
+    border-radius: 1.1rem;
+  }
+}
+
+.pro-canvas-stale-dismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  margin-left: 0.25rem;
+  border-radius: 999px;
+  padding: 0.15rem;
+  color: rgba(0, 0, 0, 0.46);
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.pro-canvas-stale-dismiss:hover {
+  background: rgba(0, 0, 0, 0.07);
+  color: rgba(0, 0, 0, 0.72);
+}
+
+/*
+ * 键盘焦点环：全站生效，不再只活在 max-width:430px 里。
+ *
+ * 本文件有 7 处 `outline: none`（输入框、搜索框、小型 select 等），
+ * 原本只有手机断点内才补回 focus-visible，桌面用 Tab 键走一遍面板
+ * 完全看不出焦点在哪。这里放在文件末尾并带 .pro-app-shell 前缀，
+ * 特异性高于那些裸元素规则，把焦点环统一还回来。
+ */
+.pro-app-shell :where(button, a, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid rgba(0, 122, 255, 0.82);
+  outline-offset: 2px;
+}
+
+/* 半透明玻璃底上的浅色描边看不清，容器内改用高对比蓝环 + 白描边垫底。 */
+.pro-app-shell .pro-glass-panel :where(input, textarea, select):focus-visible {
+  outline: 2px solid rgba(0, 122, 255, 0.82);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.7);
+}
+
+/* 拖动分隔条是 separator，聚焦时要看得见自己在哪一侧。 */
+.pro-app-shell .pro-resize-handle:focus-visible {
+  outline: 2px solid rgba(0, 122, 255, 0.9);
+  outline-offset: -1px;
+}
+
+/*
+ * 引导弹层的移动端适配。
+ *
+ * driver.js 的弹层是 position:fixed + 自身宽高实测定位。桌面端那份样式
+ * （max-width:330px、0.7rem 的按钮、28px 高的关闭键）搬到手机上会出三件事：
+ * 1. 330px 弹层 + 两侧箭头在 360px 机型上几乎顶满，稍长的说明就横向溢出；
+ * 2. 说明文字 0.76rem ≈ 12px，低于 iOS 的可读下限，且会触发输入区聚焦缩放；
+ * 3. 关闭键 32×28 远低于 44×44 的触摸命中面积，手指点不中。
+ * 弹层还必须能滚动并加上安全区内边距 —— 说明一长（带示例图那几步）就会
+ * 超过可视高度，而 driver.js 是按实测高度定位的，量到一个比屏幕还高的弹层
+ * 时它会退化成贴底显示，底部按钮正好落在 home 手势条下面点不到。
+ *
+ * 放在文件末尾：本仓库用 lightningcss，插在中部的结构性规则曾被吞掉。
+ */
+@media (max-width: 1023px) {
+  .driver-popover.pro-tour-popover {
+    box-sizing: border-box;
+    width: calc(100vw - 1.75rem);
+    min-width: 0;
+    max-width: calc(100vw - 1.75rem);
+    max-height: min(72vh, calc(100dvh - 8rem));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    border-radius: 1.35rem;
+    padding: 1rem 1.05rem calc(0.9rem + env(safe-area-inset-bottom, 0px));
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .driver-popover.pro-tour-popover .driver-popover-title {
+    font-size: 1rem;
+    line-height: 1.4;
+  }
+
+  .driver-popover.pro-tour-popover .driver-popover-description {
+    font-size: 0.8125rem;
+    line-height: 1.62;
+  }
+
+  .driver-popover.pro-tour-popover .driver-popover-progress-text {
+    font-size: 0.75rem;
+  }
+
+  /* 44×44 触摸命中面积：底部三颗按钮（上一步/下一步/跳过）都要点得中 */
+  .driver-popover.pro-tour-popover .driver-popover-footer {
+    gap: 0.4rem;
+    margin-top: 0.9rem;
+    flex-wrap: wrap;
+  }
+
+  .driver-popover.pro-tour-popover .driver-popover-footer button {
+    min-height: 2.75rem;
+    padding: 0.55rem 1.05rem;
+    font-size: 0.8125rem;
+  }
+
+  .driver-popover.pro-tour-popover .driver-popover-close-btn {
+    width: 2.75rem;
+    height: 2.75rem;
+    font-size: 1.35rem;
+    line-height: 2.75rem;
+  }
+
+  /* 弹层内嵌的示例图在窄屏上压矮，给正文和按钮留出高度 */
+  .driver-popover.pro-tour-popover .driver-popover-description img {
+    height: 96px;
+  }
+}
+
+/*
+ * 手机横屏（可视高度极矮）：弹层压到 62vh 并允许滚动，
+ * 否则 driver.js 量到超屏高度就退化成贴底、按钮被手势条盖住。
+ */
+@media (max-width: 1023px) and (max-height: 480px) {
+  .driver-popover.pro-tour-popover {
+    max-height: 62vh;
+  }
+
+  .driver-popover.pro-tour-popover .driver-popover-description img {
+    display: none;
+  }
+}

@@ -1,0 +1,42 @@
+# Vercel CLI only falls back to .gitignore when this file does NOT exist.
+# Because this file exists, every exclusion the deployment needs must be listed here.
+# Paths are gitignore syntax: a leading "/" anchors to the repo root.
+# Do NOT drop the leading slash on /docs/ or /output/ — unanchored "docs/" would
+# also match the real Next.js route src/app/docs/.
+
+# dependencies (Vercel installs from package.json / package-lock.json)
+node_modules
+
+# build output & stale build snapshots
+/.next/
+/.next.bak-*/
+/out/
+/build
+
+# local tooling binaries (tools/bin/cloudflared.exe alone is ~52 MB)
+/tools/
+
+# local scratch, diagnostics and captures
+/tmp/
+/sub2api-local/
+/output/
+/test-results/
+/.playwright-cli/
+/coverage/
+/.next-start.log
+/.next-dev-*.log
+
+# documentation & design assets (build-time only; no runtime code reads these)
+/docs/
+/design-system/
+/deploy/
+
+# tests are never executed on Vercel
+**/*.test.ts
+**/*.test.tsx
+
+# vcs & local env
+.git
+.gitignore
+*.tsbuildinfo
+.env*

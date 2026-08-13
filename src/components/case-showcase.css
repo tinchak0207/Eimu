@@ -1,0 +1,537 @@
+/* ════════════════════════════════════════════════════
+   CASE SHOWCASE — 空间轮播（Spatial Carousel）
+   六个案例排成一个环，绕 Y 轴旋转；滚动页面即转动轮盘。
+
+   为什么不用 transform-style: preserve-3d：
+   共享 3D 上下文会让 Safari 把带 backdrop-filter / filter 的子节点
+   意外拍平（或直接丢掉模糊），文字在被父层整体旋转后也会重采样发虚。
+   这里改成「每张卡各自 flatten，共用同一个 perspective 消失点」——
+   几何上等价于一个环，但每张卡是独立合成层：文字清晰、层序由我算、
+   filter 行为在 WebKit 上可预测。代价是 z-index 要手动给（已在 JS 里算）。
+   ════════════════════════════════════════════════════ */
+
+.case-viewport {
+  /* 边卡故意溢出到视口边缘（coverflow 的正确观感），clip 只裁横向，
+     纵向留给前卡的落影，不会产生横向滚动条。 */
+  overflow-x: clip;
+}
+
+.case-stage {
+  position: relative;
+  width: 100%;
+  perspective: 1400px;
+  /* 略高于中线的消失点：视线像微微仰看这排玻璃，和参考图一致。 */
+  perspective-origin: 50% 42%;
+  touch-action: pan-y; /* 横向手势归我，纵向滚动永远归用户 */
+  cursor: grab;
+  outline: none;
+
+  /* 宽屏默认几何。水合后 JS 用实测宽度覆写这三个值（见 measure()）；
+     写在这里是为了首帧和无 JS 状态就有正确尺寸，而不是先撑出一个错的高度再跳。 */
+  --case-card-w: 520px;
+  --case-card-h: 390px;
+  --case-radius: 812px;
+  /* 玻璃厚度（幾何深度）。側壁投影最寬时就是这个值，跟着卡宽缩放。 */
+  --case-bevel-w: calc(var(--case-card-w) * 0.062);
+
+  /* ── 倒邊寬度：厚度的真正載體 ──
+     必須與 CaseGlassWebGL 的 BEVEL 同值。
+
+     這一圈顯示的是**同一張照片被玻璃折射擠壓後的樣子**。厚玻璃壓在照片上時，
+     邊緣看到的是被壓縮拉扯的畫面本身，一個像素的白邊都沒有；人腦看到
+     「只有透明厚物體才會這樣壓縮影像」就直接讀出厚度。
+
+     曾經把照片內縮讓出空間、再在裡面塗一圈不透明白 —— 那不是玻璃，那是塑膠
+     相框。方向錯了，不是參數調得不好。 */
+  --case-band-w: calc(var(--case-card-w) * 0.065);
+  height: 468px; /* = card-h × 1.2，留出抬升与落影的余量 */
+}
+
+.case-stage[data-dragging="true"] {
+  cursor: grabbing;
+}
+
+/* 非正面的卡：点一下把它转到正面，所以给指针光标。
+   正面那张继承舞台的 grab —— 它只能被拖，不接管点击。 */
+.case-slab[data-front="false"] {
+  cursor: pointer;
+}
+
+/* 前卡下方的接触影：一片静态椭圆，比复制图像做倒影便宜得多，
+   但足以把整排卡「放」在一个平面上而不是浮在空气里。 */
+.case-stage::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 6%;
+  width: var(--case-card-w, 520px);
+  height: 42px;
+  transform: translateX(-50%);
+  background: radial-gradient(
+    50% 50% at 50% 50%,
+    rgba(0, 0, 0, 0.14) 0%,
+    rgba(0, 0, 0, 0.075) 38%,
+    rgba(0, 0, 0, 0.028) 62%,
+    transparent 82%
+  );
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ── 氛围光：当前案例的主色从卡后面透出来 ──
+   玻璃需要有东西可折射。站点底色接近纯白，只靠白玻璃边会看不出材质，
+   所以让前卡的主色在它背后铺一层极淡的光晕，随轮盘切换而过渡。
+   用多档 alpha 停靠点复现高斯衰减，不用 filter: blur()（零合成层）。 */
+.case-glow {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  height: calc(var(--case-card-w, 520px) * 1.05);
+  width: calc(var(--case-card-w, 520px) * 1.45);
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  background: radial-gradient(
+    closest-side,
+    rgba(var(--case-glow-rgb, 120 160 200), 0.170) 0%,
+    rgba(var(--case-glow-rgb, 120 160 200), 0.128) 22%,
+    rgba(var(--case-glow-rgb, 120 160 200), 0.078) 42%,
+    rgba(var(--case-glow-rgb, 120 160 200), 0.038) 60%,
+    rgba(var(--case-glow-rgb, 120 160 200), 0.013) 78%,
+    transparent 92%
+  );
+  transition: background 520ms var(--lg-ease, ease);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ── 一片玻璃 ── */
+.case-slab {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: var(--case-card-w, 520px);
+  height: var(--case-card-h, 390px);
+  /* 非对称圆角，且半径跟着卡宽缩放（不是固定 px）—— 手机上卡只有 279px 宽，
+     固定 48px 会把整张卡吃成药丸；四角倍率各不相同，边缘才不读作「矩形卡片」，
+     而更接近一块被打磨过的玻璃切片。 */
+  border-radius:
+    calc(var(--case-card-w, 520px) * 0.088)
+    calc(var(--case-card-w, 520px) * 0.104)
+    calc(var(--case-card-w, 520px) * 0.092)
+    calc(var(--case-card-w, 520px) * 0.076);
+  transform-origin: 50% 50%;
+  will-change: transform, opacity;
+  /* margin 负值把卡心对准 stage 中心，之后 transform 全部是纯几何位移，
+     不必在每帧的 translate3d 里混入 -50% 这种百分比。 */
+  margin-left: calc(var(--case-card-w, 520px) / -2);
+  margin-top: calc(var(--case-card-h, 390px) / -2);
+}
+
+/* 随景深加重的投影层：opacity 由 JS 每帧写入的 --case-depth 驱动（1=最前）。
+   Vision Pro 的窗体是「悬浮在深空里」，投影比一般卡片深得多且散得很开。 */
+.case-slab::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow:
+    0 58px 96px rgba(0, 0, 0, 0.22),
+    0 22px 44px rgba(0, 0, 0, 0.13),
+    0 6px 12px rgba(0, 0, 0, 0.07);
+  opacity: var(--case-depth, 1);
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* ── 正面那一疊 ──
+   景深模糊掛在這裡，不在 .case-slab 上：filter 會裁掉溢出的子節點，而側壁
+   （厚度的唯一證據）本來就必須伸出卡面之外。所以模糊只作用在正面這一疊，
+   側壁是它的兄弟節點，不進濾鏡。 */
+.case-face {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  filter: blur(var(--case-blur, 0px));
+  z-index: 1;
+}
+
+/* ── 图像仓：滿版 ──
+   照片不內縮。厚度由 CaseGlassWebGL 在照片自己的邊緣上折射擠壓畫面表達 ——
+   那才是玻璃；讓照片內縮、在讓出來的空間裡塗一圈不透明白，做出來的是塑膠相框。
+
+   曾經掛著 SVG 位移滤镜（#case-liquid-edge），已移除：feMorphology 的結構元素
+   是矩形，侵蝕圓角矩形會得到方角遮罩，那個硬邊直角框就是使用者看到的「分層」。 */
+.case-media {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  z-index: 1;
+}
+
+/* 照片本体。玻璃有厚度，所以照片是「沉在玻璃背面」的：卡片侧倾时照片相对
+   玻璃框反向错开一点（视差），这是单张贴图永远做不出来的深度线索。
+   scale 稍微放大是为了错开后边缘不露白。 */
+.case-photo {
+  position: absolute;
+  inset: 0;
+  /* scale 餘量必須大於最大視差錯開量（卡寬的 GLASS×0.25 ≈ 3.1%，每側 → 至少
+     1.062），否則側看時照片邊緣會離開容器、露出底下的白。 */
+  transform: translate3d(var(--case-parallax, 0px), 0, 0) scale(1.075);
+}
+
+.case-media img {
+  border-radius: inherit;
+}
+
+
+/* ── 外棱：一條掠射亮線，僅此而已 ──
+   厚玻璃正對鏡頭時，唯一「白」的地方就是最外緣那條掠射高光（Fresnel 接近 1）。
+   其餘全部是被折射擠壓的畫面。所以這一層只有兩條 1px 的線，沒有任何面積 ——
+   上一版給了它 43px 的面積，那就是使用者看到的塑膠相框。 */
+.case-edge {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.52),
+    inset 0 -1px 0 rgba(188, 222, 244, 0.20);
+}
+
+/* ── 牆體②：WebGL 的真折射（只有正面那張、只畫牆那一圈） ──
+   沒有 mix-blend-mode、沒有容器 opacity：這一層的 alpha 由 shader 決定，牆內
+   是 1、平面是 0。上一版拿 screen 疊一份全幅扭曲影像，那就是「重疊/散光」。 */
+/* 跟 .case-media 同框滿版。shader 讀這個宿主的 computed border-radius，
+   所以圓角永遠和照片的裁切同步，不會在交界處露出月牙。 */
+/* ── GL 宿主：必須比卡框大 ──
+   輪廓要外凸、要起伏、轉開時側壁要伸出去 —— 這些全部落在卡框之外。inset: 0 加
+   overflow: hidden 會把凸出來的部分切成一條直邊，那就又回到「完美圓角矩形」，
+   也就是使用者說的死板。所以往外留 MARGIN，且絕不裁切。
+   border-radius 留著不是為了裁切（沒有 overflow: hidden），是給 JS 讀四角半徑用。 */
+.case-glass-webgl {
+  position: absolute;
+  inset: calc(var(--case-card-w, 520px) * -0.10);
+  z-index: 2;
+  overflow: visible;
+  border-radius: inherit;
+  pointer-events: none;
+  /* 景深模糊：GL 就緒後這一層就是卡片本體，模糊得跟著它走。 */
+  filter: blur(var(--case-blur, 0px));
+}
+
+.case-glass-webgl canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* 替身仍然貼在卡框上（它只是 CSS 版的邊光，沒有有機輪廓可言）。 */
+.case-glass-webgl-fallback {
+  position: absolute;
+  inset: calc(var(--case-card-w, 520px) * 0.10);
+  pointer-events: none;
+}
+
+.case-glass-webgl canvas {
+  display: block;
+  opacity: 0;
+  transition: opacity 260ms var(--lg-ease, ease);
+}
+
+.case-glass-webgl[data-ready="true"] canvas {
+  opacity: 1;
+}
+
+/* GL 就緒後撤掉 CSS 版的折射暗示，避免同一圈被算兩次。 */
+.case-glass-webgl[data-ready="true"] .case-glass-webgl-fallback {
+  opacity: 0;
+}
+
+/* ── GL 就緒 → HTML 那一疊退場 ──
+   shader 現在畫的是整張卡（照片＋玻璃殼＋倒邊）。HTML 的 <img> 是矩形、
+   .case-surface 的 inset box-shadow 是矩形、.case-side 是矩形 —— 任何一個留著，
+   它的硬直邊都會壓在有機輪廓上，於是整張卡又讀成「圓角矩形貼了效果」。
+   用 visibility 不用 display：版面尺寸要留著（GL 靠 slab.offsetWidth 定尺），
+   <img> 也要留在 DOM 裡當貼圖來源與 SEO/無 JS 的內容。 */
+.case-slab[data-glass="on"] > .case-face,
+.case-slab[data-glass="on"] > .case-side {
+  visibility: hidden;
+}
+
+/* WebGL 缺席時的誠實替身：同樣只作用在牆那一圈，只是折射改用漸層近似。
+   它不假裝有折射，只補一點牆面的冷光層次。 */
+.case-glass-webgl-fallback {
+  border-radius: inherit;
+  opacity: 1;
+  box-shadow:
+    inset 0 0 calc(var(--case-band-w) * 0.30) calc(var(--case-band-w) * 0.10) rgba(214, 236, 255, 0.13),
+    inset 0 0 calc(var(--case-band-w) * 0.62) calc(var(--case-band-w) * 0.30) rgba(198, 226, 250, 0.06);
+  transition: opacity 260ms var(--lg-ease, ease);
+}
+
+/* ── 表面层：不进滤镜 ──
+   镜面高光、侧切面、发丝边这些是「玻璃表面的光」，不该被玻璃自身的折射搅动，
+   所以是 .case-media 的兄弟节点而不是子节点。自带圆角裁切。 */
+.case-surface {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 4;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.48),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.18),
+    inset 0 -10px 20px -16px rgba(44, 84, 112, 0.10);
+}
+
+/* 镜面高光。光源固定在左前方，卡片转动时这条光带扫过表面 ——
+   强度和位置都由 JS 每帧按 cos³(φ−φ光源) 写进 CSS 变量。
+   「光随转动移动」是大脑判定实体/贴图的首要线索，比任何静态材质都重要。 */
+.case-sheen {
+  position: absolute;
+  inset: -20%;
+  pointer-events: none;
+  opacity: calc(var(--case-sheen, 0.4) * 0.56);
+  background: linear-gradient(
+    104deg,
+    rgba(255, 255, 255, 0) 34%,
+    rgba(255, 255, 255, 0.06) 44%,
+    rgba(255, 255, 255, 0.24) 50%,
+    rgba(192, 231, 255, 0.07) 56%,
+    rgba(255, 255, 255, 0) 66%
+  );
+  transform: translate3d(var(--case-sheen-x, 0px), 0, 0);
+}
+
+/* 一小片焦散：玻璃把光聚成的亮斑，位置固定在左上（跟光源同侧）。 */
+.case-surface::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(28% 18% at 22% 10%, rgba(255, 255, 255, 0.18), transparent 72%);
+}
+
+/* ── 側壁：厚度的幾何證據 ──
+   關鍵在 right/left: 100% —— 這一條帶子長在卡面**外面**。
+
+   一塊厚 T 的板轉 θ 之後，投影輪廓寬 = W·cosθ + T·sinθ：側面出現在正面投影
+   之外，輪廓因此變寬。上一版把側面畫在卡面裡（inset + scaleX），輪廓永遠等於
+   正面投影，於是不管漸層怎麼調，側看都是一張紙。這是幾何問題，不是材質問題。
+
+   寬度由 JS 給 T·tanθ（見 computeFrame 的 wall）：這條帶子和卡面一起吃了
+   rotateY 的 cosθ 壓縮，給 tan 才能投影出 sin。tilt=0 時寬度為 0，看不見側面
+   （正確）；越側越寬。 */
+.case-side {
+  position: absolute;
+  /* 卡片圓角是卡寬的 ~9%（高的 ~12%），所以右緣「真正是直的」只有中間那段。
+     上一版給 top/bottom: 2%，帶子在圓角處直接伸出輪廓 → 兩端各多出一個突兀的
+     白角，正是使用者看到的「粗製濫造」。收到 9% 讓它落在直邊範圍內，兩端再用
+     mask 淡出，接圓角時不留任何硬邊。 */
+  top: 9%;
+  bottom: 9%;
+  pointer-events: none;
+  z-index: 0;
+  -webkit-mask-image: linear-gradient(
+    180deg,
+    transparent 0%,
+    #000 11%,
+    #000 89%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    180deg,
+    transparent 0%,
+    #000 11%,
+    #000 89%,
+    transparent 100%
+  );
+}
+
+/* rotateY(+θ) 時右緣轉離視線 → 露出的是「左」側面。 */
+.case-side-l {
+  right: 100%;
+  width: var(--case-side-l, 0px);
+  border-radius: calc(var(--case-card-w) * 0.03) 0 0 calc(var(--case-card-w) * 0.03);
+  /* 從後緣（左）到前緣（右）：後棱亮 → 壁身半透 → 前棱最亮（迎光側的高光棱）。
+     這條剖面就是厚玻璃側壁在光下的樣子，不是一片實色。 */
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.30) 0%,
+    rgba(210, 237, 252, 0.14) 14%,
+    rgba(182, 221, 244, 0.08) 42%,
+    rgba(216, 240, 253, 0.16) 74%,
+    rgba(255, 255, 255, 0.42) 100%
+  );
+  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.26);
+}
+
+.case-side-r {
+  left: 100%;
+  width: var(--case-side-r, 0px);
+  border-radius: 0 calc(var(--case-card-w) * 0.03) calc(var(--case-card-w) * 0.03) 0;
+  /* 背光側：同一條剖面，整體壓暗（光源固定在左前方）。 */
+  background: linear-gradient(
+    270deg,
+    rgba(255, 255, 255, 0.22) 0%,
+    rgba(203, 230, 248, 0.11) 16%,
+    rgba(176, 211, 236, 0.07) 46%,
+    rgba(210, 235, 250, 0.13) 76%,
+    rgba(255, 255, 255, 0.32) 100%
+  );
+  box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.20);
+}
+
+/* 迎光那一侧的边缘亮线。和侧切面同侧、更窄更亮，是切面的高光棱。 */
+.case-rim {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1.5px;
+  pointer-events: none;
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.case-rim-l {
+  left: 0;
+  opacity: var(--case-rim-l, 0);
+}
+
+.case-rim-r {
+  right: 0;
+  opacity: var(--case-rim-r, 0);
+}
+
+/* θ=0 的静态环（首帧 / 无 JS 状态）不写在这里 —— 它由组件的 frameStyle()
+   直接算成 inline style 渲进 SSR HTML。曾经这段是六条 nth-child 规则，
+   但那要求 CSS 里再抄一份 sin/cos/opacity/blur 曲线，和 JS 那份必然分叉；
+   而且 .case-glow 是舞台的第一个子节点，nth-child(1) 根本选不到第一张卡。
+   现在公式只有一份，首帧和水合后逐帧用的是同一个函数。 */
+
+/* ── 焦点卡的说明面板 ──
+   六张卡各带一份 结果注释 + CTA + 提示词折叠 会让环长得没法看，
+   而且转动中改变高度。所以这三样收进环下方这块静止的平面里，
+   环只负责视觉，面板负责阅读和动作。 */
+.case-panel {
+  margin: 0 auto;
+  max-width: 46rem;
+  text-align: center;
+}
+
+.case-panel-swap {
+  animation: case-panel-in 420ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+@keyframes case-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(7px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ── 控制行：箭头 + 圆点。常显，不藏在 hover 后面（触屏没有 hover）。 ── */
+.case-arrow {
+  display: inline-flex;
+  height: 2.75rem;
+  width: 2.75rem;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: rgba(0, 0, 0, 0.62);
+  transition: background 0.2s var(--lg-ease, ease), color 0.2s var(--lg-ease, ease);
+}
+
+.case-arrow:hover {
+  color: rgba(0, 0, 0, 0.86);
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.case-dot {
+  display: block;
+  height: 1.75rem;
+  width: 1.125rem;
+  flex: none;
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+/* 命中区 28px（拇指够得着），可见的点 7px —— 触控目标不该等于视觉尺寸。 */
+.case-dot::after {
+  content: "";
+  display: block;
+  height: 7px;
+  width: 7px;
+  margin: 0 auto;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.20);
+  transition: background 0.25s var(--lg-ease, ease), transform 0.25s var(--lg-ease, ease);
+}
+
+.case-dot:hover::after {
+  background: rgba(0, 0, 0, 0.34);
+}
+
+.case-dot[aria-current="true"]::after {
+  background: #007AFF;
+  transform: scale(1.5);
+}
+
+/* 键盘焦点。全站踩过的坑：:focus-visible 规则只写在窄屏 media query 里，
+   桌面端整个键盘焦点不可见 —— 这几条放在无条件作用域。 */
+.case-stage:focus-visible,
+.case-arrow:focus-visible,
+.case-dot:focus-visible {
+  outline: 2px solid rgba(0, 122, 255, 0.55);
+  outline-offset: 3px;
+  border-radius: 12px;
+}
+
+.case-dot:focus-visible {
+  border-radius: 999px;
+}
+
+@media (hover: none) {
+  .case-stage {
+    cursor: default;
+  }
+}
+
+@media (max-width: 767px) {
+  .case-stage {
+    /* 窄屏主要靠横滑，鼠标抓手没有意义 */
+    cursor: default;
+
+    /* 窄屏几何，同样是 measure() 那套公式的 CSS 表达（stage 宽 = 视口 − page-shell
+       的 px-4）。没有这段，首帧会按宽屏的 468px 撑高，水合后再塌到 270px ——
+       整个页面下半部分跳一次。 */
+    --case-card-w: min(calc((100vw - 2rem) * 0.78), 340px);
+    --case-card-h: calc(var(--case-card-w) * 0.75);
+    --case-radius: calc(var(--case-card-w) * 1.68);
+    /* 折射帶是比例量，窄屏不必改：10.5% 在 265px 卡上是 28px，仍讀得出壓縮。 */
+    height: calc(var(--case-card-w) * 0.9);
+  }
+}
+
+/* ── prefers-reduced-motion ──
+   环本身保留（是布局，不是动效），但取消所有逐帧插值和入场动画：
+   点箭头/圆点是瞬时切换。滚动驱动的旋转在组件里一并关掉。 */
+@media (prefers-reduced-motion: reduce) {
+  .case-glow,
+  .case-panel-swap {
+    transition-duration: 1ms !important;
+    animation: none !important;
+  }
+}

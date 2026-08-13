@@ -1,0 +1,180 @@
+/*
+ * 生成历史的专属样式，命名空间 hist-*。
+ *
+ * 只放三类东西：Tailwind 表达不了的（瀑布流列、滚动条细节）、
+ * 需要跨组件复用的动画，以及必须自带的减弱动效声明 ——
+ * globals.css 的 prefers-reduced-motion 只覆盖了进度条，
+ * workstation.css 的那份又限定在 .pro-app-shell 里，/history 两边都不沾。
+ */
+
+/* ── 瀑布流 ─────────────────────────────────────────────
+ * CSS multi-column 的瀑布流：不需要测量、不需要 JS，
+ * 而且图片是懒加载的，列高会随加载自然收敛。
+ */
+.hist-masonry {
+  column-gap: 0.875rem;
+  columns: 1;
+}
+
+@media (min-width: 480px) {
+  .hist-masonry { columns: 2; }
+}
+
+@media (min-width: 900px) {
+  .hist-masonry { columns: 3; }
+}
+
+@media (min-width: 1280px) {
+  .hist-masonry { columns: 4; }
+}
+
+/* multi-column 会在列边界处把元素劈开，必须显式禁止。 */
+.hist-masonry-item {
+  break-inside: avoid;
+  margin-bottom: 0.875rem;
+  -webkit-column-break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+/* ── 卡片 ─────────────────────────────────────────────── */
+
+.hist-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: 1.5rem;
+  background: rgba(255, 255, 255, 0.56);
+  border-top: 1px solid rgba(255, 255, 255, 0.82);
+  border-left: 1px solid rgba(255, 255, 255, 0.38);
+  border-right: 1px solid rgba(255, 255, 255, 0.38);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  -webkit-backdrop-filter: blur(28px) saturate(160%) brightness(1.06);
+  backdrop-filter: blur(28px) saturate(160%) brightness(1.06);
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+              box-shadow 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+              border-color 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.hist-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.hist-card.is-selected {
+  border-color: rgba(0, 122, 255, 0.5);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.52), 0 0 0 3px rgba(0, 122, 255, 0.14);
+}
+
+/* 图片未加载完时先占住位置，避免瀑布流在加载过程中反复重排。 */
+.hist-card-media {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  background: rgba(0, 0, 0, 0.035);
+}
+
+.hist-card-media img {
+  display: block;
+  width: 100%;
+  height: auto;
+  opacity: 0;
+  transition: opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.hist-card-media img.is-loaded {
+  opacity: 1;
+}
+
+/* 悬停时才浮出的操作条；触摸设备上始终可见。 */
+.hist-card-actions {
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+              transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .hist-card-actions {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  .hist-card:hover .hist-card-actions,
+  .hist-card:focus-within .hist-card-actions {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ── 灯箱 ─────────────────────────────────────────────── */
+
+.hist-lightbox-enter {
+  animation: hist-fade-in 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.hist-lightbox-figure {
+  animation: hist-zoom-in 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes hist-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes hist-zoom-in {
+  from { opacity: 0; transform: scale(0.965); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* 胶片条：横向滚动，隐藏滚动条但保留键盘与滚轮操作。 */
+.hist-filmstrip {
+  scrollbar-width: none;
+}
+
+.hist-filmstrip::-webkit-scrollbar {
+  display: none;
+}
+
+/* ── 骨架屏 ───────────────────────────────────────────── */
+
+.hist-skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.3) 0%,
+    rgba(255, 255, 255, 0.6) 50%,
+    rgba(255, 255, 255, 0.3) 100%
+  );
+  background-color: rgba(0, 0, 0, 0.04);
+  background-size: 200% 100%;
+  animation: hist-shimmer 1.8s ease-in-out infinite;
+}
+
+@keyframes hist-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ── 减弱动效 ─────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .hist-card,
+  .hist-card-media img,
+  .hist-card-actions {
+    transition-duration: 0.01ms !important;
+  }
+
+  .hist-card:hover {
+    transform: none;
+  }
+
+  .hist-lightbox-enter,
+  .hist-lightbox-figure,
+  .hist-skeleton {
+    animation: none !important;
+  }
+
+  /* 关闭动画后图片必须立刻可见，否则会永远停在 opacity: 0。 */
+  .hist-card-media img {
+    opacity: 1;
+  }
+}

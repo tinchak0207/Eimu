@@ -1,0 +1,37 @@
+{
+  "name": "image-studio-mcp-server",
+  "version": "1.0.0",
+  "description": "MCP server that exposes Image Studio's OpenAI-compatible generation API (image/video) as MCP tools.",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "image-studio-mcp": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "start:dev": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "smoke": "tsx --test smoke.test.ts"
+  },
+  "keywords": [
+    "mcp",
+    "image-studio",
+    "image-generation",
+    "video-generation"
+  ],
+  "author": "Image Studio",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=18.17"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "tsx": "^4.23.12",
+    "typescript": "^5.9.3"
+  }
+}

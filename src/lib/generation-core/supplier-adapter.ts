@@ -1,0 +1,164 @@
+import { aspectRatioFromImageSize } from "@/lib/generation-model-catalog";
+import { resolveAdobe2ApiImageModelId, resolveAdobe2ApiVideoModelId } from "@/lib/generation-core/adobe2api-upstream";
+import { resolveSenseNovaImageSize } from "@/lib/provider-config";
+import { SupplierRequestError } from "./failure-classifier";
+import type { SupplierGenerationInput, SupplierGenerationOutput, SupplierRecord } from "./types";
+
+type ProviderPayload = {
+  data?: Array<{ b64_json?: string; url?: string; id?: string }>;
+  choices?: Array<{ message?: { content?: string } }>;
+  id?: string;
+  task_id?: string;
+  error?: { message?: string };
+};
+
+function cleanBaseUrl(value: string): string {
+  return value.replace(/\/+$/, "");
+}
+
+function readCredential(supplier: SupplierRecord): string {
+  const value = process.env[supplier.account.credentialRef] ?? process.env[supplier.credentialRef] ?? "";
+  if (!value.trim()) throw new SupplierRequestError(`Missing configured credential ${supplier.account.credentialRef}.`, 401);
+  return value.trim();
+}
+
+async function readPayload(response: Response): Promise<ProviderPayload | null> {
+  const text = await response.text();
+  if (!text) return null;
+  try {
+    return JSON.parse(text) as ProviderPayload;
+  } catch {
+    if (!response.ok) throw new SupplierRequestError(text.slice(0, 1000), response.status, response.headers.get("retry-after"), text.slice(0, 1000));
+    return null;
+  }
+}
+
+function adobeOutputUrl(payload: ProviderPayload | null): string | null {
+  const direct = payload?.data?.[0]?.url;
+  if (direct?.startsWith("http://") || direct?.startsWith("https://")) return direct;
+  const text = payload?.choices?.[0]?.message?.content ?? "";
+  return text.match(/!\[[^\]]*\]\((https?:\/\/[^\s)]+)\)/)?.[1] ?? null;
+}
+
+async function referencesAsFormData(references: SupplierGenerationInput["workflow"]["references"]): Promise<FormData> {
+  const body = new FormData();
+  for (const reference of references ?? []) {
+    const response = await fetch(reference.url, { signal: AbortSignal.timeout(30_000) });
+    if (!response.ok) throw new SupplierRequestError(`Failed to download reference image: HTTP ${response.status}.`, response.status, response.headers.get("retry-after"));
+    const bytes = await response.arrayBuffer();
+    body.append("image", new Blob([bytes], { type: reference.mimeType || response.headers.get("content-type") || "image/png" }), reference.name || "reference-image.png");
+  }
+  return body;
+}
+
+function adobeModel(input: SupplierGenerationInput): string {
+  const ratio = (input.ratio ?? aspectRatioFromImageSize(input.size ?? "1024x1024"));
+  const resolution = (input.resolution ?? (input.quality === "quality" ? "2k" : "1k")) as "1k" | "2k" | "4k";
+  if (input.kind === "video_generate") {
+    const duration = Number(input.workflow.durationSeconds ?? 5);
+    const result = resolveAdobe2ApiVideoModelId(input.modelId, ratio as never, resolution as never, duration);
+    if (!result) throw new SupplierRequestError(`Capability contract rejects Adobe video variant ${input.modelId} ${ratio} ${resolution}.`, 400);
+    return result;
+  }
+  const result = resolveAdobe2ApiImageModelId(input.modelId, ratio as never, resolution as never);
+  if (!result) throw new SupplierRequestError(`Capability contract rejects Adobe image variant ${input.modelId} ${ratio} ${resolution}.`, 400);
+  return result;
+}
+
+async function requestSupplier(supplier: SupplierRecord, input: SupplierGenerationInput): Promise<SupplierGenerationOutput> {
+  const upstreamModel = supplier.supplierModelId ?? (supplier.adapterType === "adobe2api" ? adobeModel(input) : input.modelId);
+  const references = input.workflow.references ?? [];
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${readCredential(supplier)}`,
+  };
+  let path = input.kind === "video_generate" ? "/videos/generations" : "/images/generations";
+  let body: BodyInit;
+
+  if (supplier.adapterType === "adobe2api" && (references.length || input.kind === "video_generate")) {
+    path = "/chat/completions";
+    headers["Content-Type"] = "application/json";
+    body = JSON.stringify({
+      model: upstreamModel,
+      messages: [{
+        role: "user",
+        content: [
+          { type: "text", text: input.prompt },
+          ...references.map((reference) => ({ type: "image_url", image_url: { url: reference.url } })),
+        ],
+      }],
+      ...(input.kind === "video_generate" ? { generate_audio: input.workflow.generateAudio === true } : {}),
+    });
+  } else if (supplier.adapterType === "openai_images" && references.length && input.kind !== "video_generate") {
+    path = "/images/edits";
+    const form = await referencesAsFormData(references);
+    form.append("model", upstreamModel);
+    form.append("prompt", input.prompt);
+    if (input.size) form.append("size", input.size);
+    form.append("quality", input.quality === "quality" ? "high" : "medium");
+    body = form;
+  } else {
+    headers["Content-Type"] = "application/json";
+    const size = input.size ?? "1024x1024";
+    const upstreamBody: Record<string, unknown> = {
+      model: upstreamModel,
+      prompt: input.prompt,
+      n: 1,
+      size: input.modelId === "sensenova-u1-fast" ? resolveSenseNovaImageSize(size) : size,
+      quality: input.quality === "quality" ? "high" : "medium",
+    };
+    // ControlNet 透傳線路：workflow.metadata.controlNets 是已歸一成 pixai 形狀的
+    // entries（見 pixai-controlnets.ts）。只鬆散讀 metadata —— 構造來源是上游
+    // 請求路由，任何其他 job 若塞了非法 metadata 會在這裡被當作普通欄位忽略。
+    const metadataControlNets = input.workflow.metadata?.controlNets;
+    if (Array.isArray(metadataControlNets) && metadataControlNets.length > 0) {
+      upstreamBody.controlNets = metadataControlNets;
+    }
+    body = JSON.stringify(upstreamBody);
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${cleanBaseUrl(supplier.baseUrl)}${path}`, {
+      method: "POST",
+      headers,
+      body,
+      signal: AbortSignal.timeout(Number(process.env.GENERATION_SUPPLIER_TIMEOUT_MS ?? 100_000)),
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "TimeoutError") throw new SupplierRequestError("Supplier request timed out.", 408);
+    throw error;
+  }
+  const payload = await readPayload(response);
+  if (!response.ok) {
+    throw new SupplierRequestError(
+      payload?.error?.message ?? `Supplier request failed: HTTP ${response.status}.`,
+      response.status,
+      response.headers.get("retry-after"),
+    );
+  }
+  // 202 Accepted 不是成功：任务已收、成品未回。worker 不做轮询，202 一律记失败
+  // （providerHttpStatus=202），调度器会换下一个 supplier 重试。
+  if (response.status === 202) {
+    throw new SupplierRequestError(
+      `Supplier ${supplier.label} returned HTTP 202 (accepted) without an image; the worker does not poll tasks.`,
+      202,
+    );
+  }
+  const first = payload?.data?.[0];
+  const url = supplier.adapterType === "adobe2api" ? adobeOutputUrl(payload) : first?.url ?? null;
+  if (!first?.b64_json && !url) throw new SupplierRequestError("Supplier result was empty.", response.status);
+  return {
+    base64: first?.b64_json ?? null,
+    url,
+    providerRequestId: payload?.id ?? first?.id,
+    providerTaskId: payload?.task_id,
+    httpStatus: response.status,
+    endpointLabel: supplier.label,
+    supplierModelId: upstreamModel,
+    evidence: { adapter: supplier.adapterType, supplierId: supplier.id, failureDomain: supplier.failureDomain },
+  };
+}
+
+export async function generateWithSupplier(supplier: SupplierRecord, input: SupplierGenerationInput): Promise<SupplierGenerationOutput> {
+  return requestSupplier(supplier, input);
+}

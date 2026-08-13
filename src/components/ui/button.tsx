@@ -1,0 +1,67 @@
+import * as React from "react";
+import { Slot } from "@radix-ui/react-slot";
+import { cva, type VariantProps } from "class-variance-authority";
+import { cn } from "@/lib/utils";
+
+const buttonVariants = cva(
+  "inline-flex select-none items-center justify-center gap-2 whitespace-nowrap rounded-full text-sm font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+  {
+    variants: {
+      variant: {
+        default:
+          "bg-primary text-primary-foreground shadow-[0_16px_32px_rgba(45,49,66,0.12)] hover:-translate-y-[1px] hover:bg-primary/94",
+        destructive:
+          "bg-destructive text-destructive-foreground shadow-[0_16px_32px_rgba(177,96,86,0.12)] hover:bg-destructive/92",
+        // Every fraction below used Tailwind's bare opacity modifier (color/NN),
+        // which only resolves against the theme's opacity scale (multiples of
+        // 5 by default). None of 56/58/74/52/64/48 are on that scale, so these
+        // silently compiled to nothing — every button using outline/secondary/
+        // ghost had no background at all. rgba() bracket values always compile.
+        outline:
+          "border border-[rgba(255,255,255,0.56)] bg-[rgba(255,255,255,0.58)] text-foreground shadow-[0_10px_24px_rgba(89,103,122,0.04)] backdrop-blur-[22px] hover:-translate-y-[1px] hover:bg-[rgba(255,255,255,0.74)]",
+        secondary:
+          "bg-[rgba(255,255,255,0.52)] text-foreground shadow-[0_8px_18px_rgba(89,103,122,0.03)] backdrop-blur-[20px] hover:bg-[rgba(255,255,255,0.64)]",
+        ghost: "text-[#6f7987] hover:bg-[rgba(255,255,255,0.48)] hover:text-foreground",
+        inactive: "",
+        active:
+          "bg-[radial-gradient(circle_at_30%_30%,rgba(184,205,193,0.54),rgba(184,205,193,0.18)_46%,rgba(255,255,255,0.85)_100%)] text-foreground shadow-[0_10px_24px_rgba(89,103,122,0.06)]",
+        link: "text-primary underline-offset-4 hover:underline",
+      },
+      size: {
+        default: "h-10 px-4 py-2",
+        sm: "h-8 px-3 text-xs",
+        lg: "h-11 px-8",
+        icon: "h-10 w-10",
+        iconSm: "h-8 w-8",
+      },
+    },
+    defaultVariants: {
+      variant: "default",
+      size: "default",
+    },
+  },
+);
+
+export interface ButtonProps
+  extends React.ButtonHTMLAttributes<HTMLButtonElement>,
+    VariantProps<typeof buttonVariants> {
+  asChild?: boolean;
+}
+
+const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
+  ({ className, variant, size, asChild = false, ...props }, ref) => {
+    const Comp = asChild ? Slot : "button";
+
+    return (
+      <Comp
+        className={cn(buttonVariants({ variant, size, className }))}
+        ref={ref}
+        {...props}
+      />
+    );
+  },
+);
+
+Button.displayName = "Button";
+
+export { Button, buttonVariants };

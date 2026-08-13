@@ -1,0 +1,9 @@
+name = "render-keepalive-image-tinchak0207"
+main = "worker.js"
+compatibility_date = "2026-05-28"
+
+[triggers]
+crons = ["*/10 * * * *"]
+
+[vars]
+RENDER_HEALTHCHECK_URL = "https://market.tinchak0207.xyz/api/healthz"

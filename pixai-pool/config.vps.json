@@ -1,0 +1,28 @@
+{
+  "yescaptcha": {
+    "client_key_file": "/opt/pixai-bridge/.keys/yescaptcha_client_key.txt"
+  },
+  "pixai": {
+    "api_base": "https://api.pixai.art",
+    "graphql": "https://api.pixai.art/graphql",
+    "site_url": "https://pixai.art/en/login",
+    "recaptcha_key": "6Ld_hskiAAAAADfg9HredZvZx8Z_C8FrNJ519Rc6",
+    "recaptcha_action": "registerOrLogin",
+    "turnstile_managed_key": "0x4AAAAAABkbsz0wsSnkOIKt",
+    "haruka_v2_version_id": "1983308862240288769",
+    "daily_claim_id": "pixai-daily-credits"
+  },
+  "pool": {
+    "pool_file": "pool.json",
+    "register_interval_sec": 90,
+    "claim_interval_sec": 15,
+    "claim_retry_429_wait_sec": 90,
+    "refresh_before_expiry_hours": 24,
+    "outlook_pool_file": "",
+    "email_domain": "outlook.com"
+  },
+  "log": {
+    "file": "pool.log",
+    "level": "INFO"
+  }
+}

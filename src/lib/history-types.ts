@@ -1,0 +1,663 @@
+// 生成历史的统一数据模型。
+//
+// 历史记录来自三个互不相同的源头，字段和 id 规则都不一样：
+//   - "local"   浏览器 localStorage 缓存，id = `${userId}-${客户端 Date.now()}`
+//   - "server"  Vercel Blob 持久化记录，id = `${userId}-${服务端 Date.now()}`
+//   - "billing" 上游 New API 计费日志，只有 model_name / quota / created_at，没有提示词和图
+// 同一次生成会同时出现在三处，但三个 id 互不相等，时间戳也差几百毫秒到几秒。
+// 因此这里既按 id 精确去重，也按「提示词 + 模型 + 邻近时间」模糊归并，
+// 把服务端的图、本地的工作流参数、计费日志的真实消耗合并成同一条记录。
+//
+// 本模块只用 `import type` 跨文件引用，保证可以在 `node --test` 下直接导入做单元测试。
+
+import type { GenerationWorkflowMetadata } from "./image-types";
+import { QUOTA_PER_COIN } from "./quota-constants";
+
+export { QUOTA_PER_COIN };
+
+/** 当前实体的 schema 版本，写入 Blob 与 localStorage，便于日后迁移。 */
+export const HISTORY_SCHEMA_VERSION = 3;
+
+/** 服务端每页返回的默认条数。 */
+export const HISTORY_PAGE_SIZE = 24;
+
+/** 单个用户在服务端保留的历史上限。旧实现是 20，这里放大到能真正当作素材库用。 */
+export const MAX_HISTORY_ENTRIES_PER_USER = 500;
+
+/** 模糊归并的时间容差：两条记录相差在此之内、且提示词与模型相同，视为同一次生成。 */
+export const HISTORY_MERGE_TOLERANCE_MS = 120_000;
+
+/** POST /api/history 的输入上限，防止有人拿这个端点当免费对象存储。 */
+export const HISTORY_MAX_PROMPT_LENGTH = 8_000;
+export const HISTORY_MAX_RESULTS_PER_ENTRY = 8;
+export const HISTORY_MAX_IMAGE_BYTES = 12 * 1024 * 1024;
+
+export type HistorySource = "local" | "server" | "billing";
+
+export interface HistoryResult {
+  provider: string;
+  modelId: string;
+  image: string | null;
+  imageUrl: string | null;
+  endpointLabel?: string;
+  resultId?: string;
+  taskId?: string;
+  videoUrl?: string | null;
+  mediaType?: "image" | "video";
+}
+
+export interface HistoryEntry {
+  id: string;
+  prompt: string;
+  /** 毫秒时间戳。计费日志的 created_at 是秒，读入时必须 ×1000。 */
+  generatedAt: number;
+  results: HistoryResult[];
+  source: HistorySource;
+  workflow?: GenerationWorkflowMetadata;
+  /** 上游计费日志里的原始配额消耗；只有 billing 源才有，归并后会带到主记录上。 */
+  quota?: number;
+  /** 主模型，用于筛选与分面统计。缺省时取第一个结果的 modelId。 */
+  modelId?: string;
+  starred?: boolean;
+  schemaVersion?: number;
+  taskId?: string;
+  generationId?: string;
+  primaryResultId?: string;
+  retryOfTaskId?: string;
+  taskStatus?: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "refunded" | "unknown";
+  errorCode?: string;
+}
+
+/** 服务端存储实体：比 HistoryEntry 多一个 userId。 */
+export interface ServerHistoryEntry extends HistoryEntry {
+  userId: number;
+}
+
+export type HistorySortOrder = "newest" | "oldest";
+
+export interface HistoryQuery {
+  /** 自由文本，匹配提示词与模型名。 */
+  keyword?: string;
+  /** 模型精确筛选。 */
+  modelId?: string;
+  /** 出图尺寸筛选，取自 workflow.imageSize。 */
+  imageSize?: string;
+  /** 只看已收藏。 */
+  starredOnly?: boolean;
+  /** 只看带图的记录（计费日志没有图）。 */
+  withImageOnly?: boolean;
+  /** 闭区间，毫秒时间戳。 */
+  since?: number;
+  until?: number;
+  sort?: HistorySortOrder;
+}
+
+export interface HistoryPage {
+  entries: HistoryEntry[];
+  /** 下一页游标；为 null 表示已到末尾。 */
+  cursor: string | null;
+  total: number;
+}
+
+export interface HistoryPatch {
+  starred?: boolean;
+}
+
+export interface HistoryFacetBucket {
+  value: string;
+  label: string;
+  count: number;
+}
+
+export interface HistoryFacets {
+  models: HistoryFacetBucket[];
+  imageSizes: HistoryFacetBucket[];
+  starredCount: number;
+  withImageCount: number;
+  total: number;
+}
+
+export interface HistoryStats {
+  /** 记录条数。 */
+  entries: number;
+  /** 出图张数。 */
+  images: number;
+  /** 累计消耗的配额单位。 */
+  quota: number;
+  /** 已收藏条数。 */
+  starred: number;
+  /** 最早与最近一条的时间戳；无数据时为 null。 */
+  firstAt: number | null;
+  lastAt: number | null;
+}
+
+export type HistoryDayBucket = "today" | "yesterday" | "week" | "earlier";
+
+export interface HistoryGroup {
+  bucket: HistoryDayBucket;
+  label: string;
+  entries: HistoryEntry[];
+}
+
+const DAY_BUCKET_LABELS: Record<HistoryDayBucket, string> = {
+  today: "今天",
+  yesterday: "昨天",
+  week: "本周",
+  earlier: "更早",
+};
+
+/** 归并时谁当主记录：服务端记录字段最全，计费日志最贫瘠。 */
+const SOURCE_PRIORITY: Record<HistorySource, number> = {
+  server: 3,
+  local: 2,
+  billing: 1,
+};
+
+// ─────────────────────────────────────────────────────────── 基础工具
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+/**
+ * 把配额单位换算成「张」。返回数字，调用方自己决定怎么格式化。
+ * 旧代码里有两个互相打架的实现（一个 toFixed(3) 返回字符串、一个 Math.floor 返回数字），
+ * 这里统一成一个。
+ */
+export function coinsFromQuota(quota: number | undefined | null): number {
+  if (typeof quota !== "number" || !Number.isFinite(quota) || quota <= 0) return 0;
+  return quota / QUOTA_PER_COIN;
+}
+
+/** 展示用的消耗文案：不足一张时保留三位小数，否则最多一位。 */
+export function formatCoins(quota: number | undefined | null): string {
+  const coins = coinsFromQuota(quota);
+  if (coins === 0) return "0";
+  if (coins < 1) return coins.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
+  return Number.isInteger(coins) ? String(coins) : coins.toFixed(1);
+}
+
+/**
+ * 清洗要拼进 Blob 路径的片段。
+ * 旧实现把 entryId 和 provider 直接拼进 `history/{userId}/{entryId}-{provider}.png`，
+ * 而 POST /api/history 的 body 是完全未校验的客户端输入 —— 传个 `../123/x` 就能写到别人的目录下。
+ */
+export function sanitizeBlobSegment(value: string, fallback = "item"): string {
+  const cleaned = String(value ?? "")
+    .replace(/[^a-zA-Z0-9._-]/g, "-")
+    .replace(/\.{2,}/g, "-")
+    .replace(/^[.-]+/, "")
+    .replace(/[.-]+$/, "")
+    .slice(0, 80);
+  return cleaned || fallback;
+}
+
+/** 提示词指纹：用于跨源模糊归并，忽略空白与大小写差异。 */
+export function promptFingerprint(prompt: string): string {
+  return String(prompt ?? "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120);
+}
+
+/** 一条记录的主模型。 */
+export function primaryModelId(entry: HistoryEntry): string {
+  return entry.modelId ?? entry.results[0]?.modelId ?? "";
+}
+
+/** 是否带图。计费日志永远没有图。 */
+export function hasImage(entry: HistoryEntry): boolean {
+  return entry.results.some((result) => Boolean(result.image || result.imageUrl || result.videoUrl));
+}
+
+/** 精确去重键。 */
+export function historyEntryKey(entry: HistoryEntry): string {
+  return entry.taskId ?? entry.id;
+}
+
+// ─────────────────────────────────────────────────────────── 规范化
+
+/** 把任意来源的原始对象规范化成 HistoryEntry；无法识别时返回 null。 */
+export function normalizeHistoryEntry(raw: unknown, source: HistorySource): HistoryEntry | null {
+  if (!isRecord(raw)) return null;
+
+  const id = nonEmptyString(raw.id);
+  const generatedAt = finiteNumber(raw.generatedAt);
+  if (!id || generatedAt === undefined || generatedAt <= 0) return null;
+
+  const results = Array.isArray(raw.results)
+    ? raw.results.flatMap((item): HistoryResult[] => {
+        if (!isRecord(item)) return [];
+        const modelId = nonEmptyString(item.modelId);
+        if (!modelId) return [];
+        return [{
+          provider: nonEmptyString(item.provider) ?? "image_tinchak",
+          modelId,
+          image: typeof item.image === "string" && item.image ? item.image : null,
+          imageUrl: typeof item.imageUrl === "string" && item.imageUrl ? item.imageUrl : null,
+          ...(nonEmptyString(item.endpointLabel) ? { endpointLabel: nonEmptyString(item.endpointLabel) } : {}),
+          ...(nonEmptyString(item.resultId) ? { resultId: nonEmptyString(item.resultId) } : {}),
+          ...(nonEmptyString(item.taskId) ? { taskId: nonEmptyString(item.taskId) } : {}),
+          ...(nonEmptyString(item.videoUrl) ? { videoUrl: nonEmptyString(item.videoUrl) } : {}),
+          ...(item.mediaType === "video" ? { mediaType: "video" as const } : {}),
+        }];
+      }).slice(0, HISTORY_MAX_RESULTS_PER_ENTRY)
+    : [];
+
+  const quota = finiteNumber(raw.quota);
+  const modelId = nonEmptyString(raw.modelId) ?? results[0]?.modelId;
+
+  return {
+    id,
+    prompt: typeof raw.prompt === "string" ? raw.prompt.slice(0, HISTORY_MAX_PROMPT_LENGTH) : "",
+    generatedAt,
+    results,
+    source,
+    ...(isRecord(raw.workflow) ? { workflow: raw.workflow as GenerationWorkflowMetadata } : {}),
+    ...(quota !== undefined ? { quota } : {}),
+    ...(modelId ? { modelId } : {}),
+    ...(raw.starred === true ? { starred: true } : {}),
+    ...(nonEmptyString(raw.taskId) ? { taskId: nonEmptyString(raw.taskId) } : {}),
+    ...(nonEmptyString(raw.generationId) ? { generationId: nonEmptyString(raw.generationId) } : {}),
+    ...(nonEmptyString(raw.primaryResultId) ? { primaryResultId: nonEmptyString(raw.primaryResultId) } : {}),
+    ...(nonEmptyString(raw.retryOfTaskId) ? { retryOfTaskId: nonEmptyString(raw.retryOfTaskId) } : {}),
+    ...(["queued", "running", "succeeded", "failed", "cancelled", "refunded", "unknown"].includes(String(raw.taskStatus))
+      ? { taskStatus: raw.taskStatus as HistoryEntry["taskStatus"] }
+      : {}),
+    ...(nonEmptyString(raw.errorCode) ? { errorCode: nonEmptyString(raw.errorCode) } : {}),
+    schemaVersion: finiteNumber(raw.schemaVersion) ?? HISTORY_SCHEMA_VERSION,
+  };
+}
+
+/**
+ * 把上游计费日志行转成 HistoryEntry。
+ *
+ * 上游字段是 `model_name` / `quota` / `created_at`（秒），
+ * 旧的 HistoryClient 读的是 `model` / `prompt` / `image`，全都不存在 ——
+ * 这正是历史页提示词一直为空、搜索一搜就崩的根因。
+ */
+export function normalizeBillingLogEntry(raw: unknown): HistoryEntry | null {
+  if (!isRecord(raw)) return null;
+
+  const createdAt = finiteNumber(raw.created_at);
+  if (createdAt === undefined || createdAt <= 0) return null;
+
+  const modelName = nonEmptyString(raw.model_name) ?? "";
+  const rawId = finiteNumber(raw.id);
+  // 上游把 id 重写成了每页序号，跨页并不唯一，所以拼上时间戳与模型名保证稳定。
+  const id = `billing-${createdAt}-${modelName || "unknown"}-${rawId ?? 0}`;
+
+  return {
+    id,
+    prompt: nonEmptyString(raw.content) ?? "",
+    generatedAt: createdAt * 1000,
+    results: [],
+    source: "billing",
+    quota: finiteNumber(raw.quota) ?? 0,
+    ...(modelName ? { modelId: modelName } : {}),
+    schemaVersion: HISTORY_SCHEMA_VERSION,
+  };
+}
+
+// ─────────────────────────────────────────────────────────── 归并
+
+/** 把 b 的信息补进 a，不覆盖 a 已有的有效值。 */
+function enrich(base: HistoryEntry, extra: HistoryEntry): HistoryEntry {
+  const merged: HistoryEntry = { ...base };
+
+  if (!merged.prompt && extra.prompt) merged.prompt = extra.prompt;
+  if (!merged.results.length && extra.results.length) merged.results = extra.results;
+  if (!merged.workflow && extra.workflow) merged.workflow = extra.workflow;
+  if (merged.quota === undefined && extra.quota !== undefined) merged.quota = extra.quota;
+  if (!merged.modelId && extra.modelId) merged.modelId = extra.modelId;
+  if (!merged.taskId && extra.taskId) merged.taskId = extra.taskId;
+  if (!merged.generationId && extra.generationId) merged.generationId = extra.generationId;
+  if (!merged.primaryResultId && extra.primaryResultId) merged.primaryResultId = extra.primaryResultId;
+  if (!merged.retryOfTaskId && extra.retryOfTaskId) merged.retryOfTaskId = extra.retryOfTaskId;
+  if (!merged.taskStatus && extra.taskStatus) merged.taskStatus = extra.taskStatus;
+  if (!merged.errorCode && extra.errorCode) merged.errorCode = extra.errorCode;
+  if (extra.starred) merged.starred = true;
+  // 取更早的那个时间戳：客户端在所有出图落地后才记录，服务端在单个出图成功时就记录。
+  if (extra.generatedAt < merged.generatedAt) merged.generatedAt = extra.generatedAt;
+
+  return merged;
+}
+
+/** 模型是否可视为同一个：两边相同，或其中一边缺失。 */
+function modelsCompatible(a: HistoryEntry, b: HistoryEntry): boolean {
+  const ma = primaryModelId(a);
+  const mb = primaryModelId(b);
+  return !ma || !mb || ma === mb;
+}
+
+/**
+ * 判断两条生成记录是否同一次生成。
+ *
+ * 只在提示词指纹完全一致时才归并 —— 本地缓存与服务端 Blob 记录的是同一段提示词，
+ * 而它们的 id 分别由客户端与服务端各自取 Date.now() 生成，永远不会相等。
+ */
+function isSameGeneration(a: HistoryEntry, b: HistoryEntry): boolean {
+  if (a.taskId && b.taskId) return a.taskId === b.taskId;
+  if (a.source === b.source) return false;
+  if (Math.abs(a.generatedAt - b.generatedAt) > HISTORY_MERGE_TOLERANCE_MS) return false;
+  if (!modelsCompatible(a, b)) return false;
+
+  const pa = promptFingerprint(a.prompt);
+  const pb = promptFingerprint(b.prompt);
+  return Boolean(pa) && pa === pb;
+}
+
+/**
+ * 合并多组生成记录（local 与 server），先按 id 精确去重，再按「提示词 + 模型 + 邻近时间」归并。
+ * 输入顺序不影响结果：主记录始终由 SOURCE_PRIORITY 决定。
+ * 返回按时间倒序排列的数组。
+ *
+ * 计费日志不参与这里的归并 —— 它没有提示词也没有图，无法可靠对应到具体某一次生成，
+ * 单价信息改由 attachBillingCosts 在能唯一确定时才附加。
+ */
+export function mergeHistoryEntries(...groups: HistoryEntry[][]): HistoryEntry[] {
+  const byId = new Map<string, HistoryEntry>();
+
+  for (const group of groups) {
+    for (const entry of group) {
+      if (!entry) continue;
+      const key = historyEntryKey(entry);
+      const existing = byId.get(key);
+      if (!existing) {
+        byId.set(key, entry);
+        continue;
+      }
+      // id 相同：留下源优先级更高的那条，另一条补充字段。
+      const [primary, secondary] = SOURCE_PRIORITY[entry.source] > SOURCE_PRIORITY[existing.source]
+        ? [entry, existing]
+        : [existing, entry];
+      byId.set(key, enrich(primary, secondary));
+    }
+  }
+
+  // 按时间正序扫描，把落在容差窗口内的同一次生成合并到已保留的记录上。
+  const sorted = [...byId.values()].sort((a, b) => a.generatedAt - b.generatedAt);
+  const kept: HistoryEntry[] = [];
+
+  for (const entry of sorted) {
+    let mergedInto = false;
+    // 只需回看容差窗口内的记录；数组按时间正序，越靠后越新。
+    for (let i = kept.length - 1; i >= 0; i -= 1) {
+      const candidate = kept[i];
+      if (entry.generatedAt - candidate.generatedAt > HISTORY_MERGE_TOLERANCE_MS) break;
+      if (!isSameGeneration(candidate, entry)) continue;
+
+      const [primary, secondary] = SOURCE_PRIORITY[entry.source] > SOURCE_PRIORITY[candidate.source]
+        ? [entry, candidate]
+        : [candidate, entry];
+      kept[i] = enrich(primary, secondary);
+      mergedInto = true;
+      break;
+    }
+    if (!mergedInto) kept.push(entry);
+  }
+
+  return sortHistoryEntries(kept, "newest");
+}
+
+/**
+ * 把计费日志里的真实消耗附加到对应的生成记录上。
+ *
+ * 上游日志只有 model_name / quota / created_at，没有提示词也没有图，
+ * 因此只在「同模型 + 时间容差内 + 候选唯一」时才认定配对成功。
+ * 存在歧义（比如同一分钟内用同一模型生成了多次）时宁可不附加，也不显示一个猜出来的数字。
+ * 页面顶部的累计消耗仍旧直接取上游统计接口，不受这里影响。
+ */
+export function attachBillingCosts(
+  entries: HistoryEntry[],
+  billingEntries: HistoryEntry[],
+  toleranceMs: number = HISTORY_MERGE_TOLERANCE_MS,
+): HistoryEntry[] {
+  if (!billingEntries.length) return entries;
+
+  const claimed = new Set<number>();
+
+  return entries.map((entry) => {
+    if (entry.quota !== undefined) return entry;
+
+    const model = primaryModelId(entry);
+    if (!model) return entry;
+
+    const matches: number[] = [];
+    for (let i = 0; i < billingEntries.length; i += 1) {
+      if (claimed.has(i)) continue;
+      const log = billingEntries[i];
+      if (primaryModelId(log) !== model) continue;
+      if (Math.abs(log.generatedAt - entry.generatedAt) > toleranceMs) continue;
+      matches.push(i);
+      if (matches.length > 1) break;
+    }
+
+    if (matches.length !== 1) return entry;
+
+    claimed.add(matches[0]);
+    return { ...entry, quota: billingEntries[matches[0]].quota };
+  });
+}
+
+// ─────────────────────────────────────────────────────────── 查询
+
+export function sortHistoryEntries(entries: HistoryEntry[], order: HistorySortOrder = "newest"): HistoryEntry[] {
+  const sorted = [...entries];
+  sorted.sort((a, b) => (order === "newest" ? b.generatedAt - a.generatedAt : a.generatedAt - b.generatedAt));
+  return sorted;
+}
+
+export function matchesHistoryQuery(entry: HistoryEntry, query: HistoryQuery): boolean {
+  const keyword = query.keyword?.trim().toLowerCase();
+  if (keyword) {
+    const haystack = `${entry.prompt} ${primaryModelId(entry)} ${entry.workflow?.workflowPresetLabel ?? ""}`.toLowerCase();
+    if (!haystack.includes(keyword)) return false;
+  }
+  if (query.modelId && primaryModelId(entry) !== query.modelId) return false;
+  if (query.imageSize && entry.workflow?.imageSize !== query.imageSize) return false;
+  if (query.starredOnly && !entry.starred) return false;
+  if (query.withImageOnly && !hasImage(entry)) return false;
+  if (query.since !== undefined && entry.generatedAt < query.since) return false;
+  if (query.until !== undefined && entry.generatedAt > query.until) return false;
+  return true;
+}
+
+export function filterHistoryEntries(entries: HistoryEntry[], query: HistoryQuery): HistoryEntry[] {
+  return entries.filter((entry) => matchesHistoryQuery(entry, query));
+}
+
+// ─────────────────────────────────────────────────────────── 分面与统计
+
+export function buildHistoryFacets(entries: HistoryEntry[]): HistoryFacets {
+  const models = new Map<string, number>();
+  const imageSizes = new Map<string, number>();
+  let starredCount = 0;
+  let withImageCount = 0;
+
+  for (const entry of entries) {
+    const model = primaryModelId(entry);
+    if (model) models.set(model, (models.get(model) ?? 0) + 1);
+
+    const size = entry.workflow?.imageSize;
+    if (size) imageSizes.set(size, (imageSizes.get(size) ?? 0) + 1);
+
+    if (entry.starred) starredCount += 1;
+    if (hasImage(entry)) withImageCount += 1;
+  }
+
+  const toBuckets = (map: Map<string, number>, label: (value: string) => string): HistoryFacetBucket[] =>
+    [...map.entries()]
+      .map(([value, count]) => ({ value, label: label(value), count }))
+      .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
+
+  return {
+    models: toBuckets(models, formatModelLabel),
+    imageSizes: toBuckets(imageSizes, (value) => value),
+    starredCount,
+    withImageCount,
+    total: entries.length,
+  };
+}
+
+/** 模型名去掉路径前缀，只留最后一段，和 imageHelpers.formatModelId 保持一致。 */
+export function formatModelLabel(modelId: string): string {
+  const segments = String(modelId ?? "").split("/");
+  return segments[segments.length - 1] || modelId;
+}
+
+export function buildHistoryStats(entries: HistoryEntry[]): HistoryStats {
+  let images = 0;
+  let quota = 0;
+  let starred = 0;
+  let firstAt: number | null = null;
+  let lastAt: number | null = null;
+
+  for (const entry of entries) {
+    images += entry.results.filter((result) => result.image || result.imageUrl).length;
+    quota += entry.quota ?? 0;
+    if (entry.starred) starred += 1;
+    if (firstAt === null || entry.generatedAt < firstAt) firstAt = entry.generatedAt;
+    if (lastAt === null || entry.generatedAt > lastAt) lastAt = entry.generatedAt;
+  }
+
+  return { entries: entries.length, images, quota, starred, firstAt, lastAt };
+}
+
+// ─────────────────────────────────────────────────────────── 分组
+
+/** 取本地时区当天 00:00 的时间戳。 */
+function startOfLocalDay(timestamp: number): number {
+  const date = new Date(timestamp);
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+}
+
+/**
+ * 按「今天 / 昨天 / 本周 / 更早」分组。
+ * 使用本地时区的自然日边界，而不是「距今 24 小时」，否则凌晨看会全部落进「昨天」。
+ * now 作为参数传入，便于测试。
+ */
+export function groupHistoryByDay(entries: HistoryEntry[], now: number = Date.now()): HistoryGroup[] {
+  const todayStart = startOfLocalDay(now);
+  const yesterdayStart = startOfLocalDay(todayStart - 1);
+  const weekStart = todayStart - 6 * 24 * 60 * 60 * 1000;
+
+  const order: HistoryDayBucket[] = ["today", "yesterday", "week", "earlier"];
+  const grouped = new Map<HistoryDayBucket, HistoryEntry[]>();
+
+  for (const entry of sortHistoryEntries(entries, "newest")) {
+    let bucket: HistoryDayBucket;
+    if (entry.generatedAt >= todayStart) bucket = "today";
+    else if (entry.generatedAt >= yesterdayStart) bucket = "yesterday";
+    else if (entry.generatedAt >= weekStart) bucket = "week";
+    else bucket = "earlier";
+
+    const list = grouped.get(bucket);
+    if (list) list.push(entry);
+    else grouped.set(bucket, [entry]);
+  }
+
+  return order
+    .filter((bucket) => grouped.has(bucket))
+    .map((bucket) => ({
+      bucket,
+      label: DAY_BUCKET_LABELS[bucket],
+      entries: grouped.get(bucket) as HistoryEntry[],
+    }));
+}
+
+// ─────────────────────────────────────────────────────────── 游标分页
+
+/**
+ * 游标编码为 `${generatedAt}:${id}`。
+ * 只按时间戳翻页会在同毫秒的多条记录处漏数据，所以带上 id 做二级排序键。
+ */
+export function encodeHistoryCursor(entry: HistoryEntry): string {
+  return `${entry.generatedAt}:${entry.id}`;
+}
+
+export function decodeHistoryCursor(cursor: string | null | undefined): { generatedAt: number; id: string } | null {
+  if (!cursor) return null;
+  const separator = cursor.indexOf(":");
+  if (separator <= 0) return null;
+  const generatedAt = Number(cursor.slice(0, separator));
+  const id = cursor.slice(separator + 1);
+  if (!Number.isFinite(generatedAt) || !id) return null;
+  return { generatedAt, id };
+}
+
+/**
+ * 从已排序（倒序）的数组中切出一页。
+ * 游标是「上一页最后一条」，本页从严格小于它的位置开始，因此不会重复也不会跳过。
+ */
+export function paginateHistoryEntries(
+  entries: HistoryEntry[],
+  cursor: string | null | undefined,
+  pageSize: number = HISTORY_PAGE_SIZE,
+): HistoryPage {
+  const size = Math.max(1, Math.min(100, Math.floor(pageSize) || HISTORY_PAGE_SIZE));
+  const sorted = sortHistoryEntries(entries, "newest");
+  const decoded = decodeHistoryCursor(cursor);
+
+  let startIndex = 0;
+  if (decoded) {
+    const anchor = sorted.findIndex(
+      (entry) => entry.generatedAt === decoded.generatedAt && entry.id === decoded.id,
+    );
+    if (anchor >= 0) {
+      startIndex = anchor + 1;
+    } else {
+      // 游标指向的记录已被删除：退化为按时间戳定位，保证翻页不中断。
+      const fallback = sorted.findIndex((entry) => entry.generatedAt < decoded.generatedAt);
+      startIndex = fallback >= 0 ? fallback : sorted.length;
+    }
+  }
+
+  const slice = sorted.slice(startIndex, startIndex + size);
+  const hasMore = startIndex + size < sorted.length;
+
+  return {
+    entries: slice,
+    cursor: hasMore && slice.length ? encodeHistoryCursor(slice[slice.length - 1]) : null,
+    total: sorted.length,
+  };
+}
+
+// ─────────────────────────────────────────────────────────── 时间展示
+
+/** 相对时间文案，供列表使用。 */
+export function formatRelativeTime(timestamp: number, now: number = Date.now()): string {
+  const diff = now - timestamp;
+  if (diff < 0) return "刚刚";
+  const minutes = Math.floor(diff / 60_000);
+  if (minutes < 1) return "刚刚";
+  if (minutes < 60) return `${minutes} 分钟前`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} 小时前`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days} 天前`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months} 个月前`;
+  return `${Math.floor(months / 12)} 年前`;
+}
+
+/** 绝对时间文案，供详情与导出使用。 */
+export function formatAbsoluteTime(timestamp: number): string {
+  return new Date(timestamp).toLocaleString("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}

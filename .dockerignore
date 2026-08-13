@@ -1,0 +1,30 @@
+# Docker does NOT read .gitignore, so the build context must be trimmed here.
+# Build context is this directory: deploy/vps/docker-compose.yml declares
+# `context: ./app`, and ./app on the VPS is a copy of this repo root.
+# Critical: node_modules must be excluded, otherwise `COPY . .` in
+# deploy/vps/Dockerfile overwrites the node_modules that the deps stage
+# just produced with `npm ci`.
+
+node_modules
+.next
+.next.bak-*
+out
+build
+
+tmp
+sub2api-local
+tools/bin
+output
+test-results
+.playwright-cli
+coverage
+
+.git
+.gitignore
+.vercel
+.vercelignore
+*.tsbuildinfo
+.next-start.log
+.next-dev-*.log
+.env*
+npm-debug.log*

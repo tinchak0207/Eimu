@@ -1,0 +1,184 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+const root = process.cwd();
+
+function read(relPath: string) {
+  return readFileSync(join(root, relPath), "utf8");
+}
+
+test("navbar exposes wallet, history and top-up controls on mobile", () => {
+  const source = read("src/components/Navbar.tsx");
+  assert.match(source, /href="\/pricing"/);
+  assert.match(source, /href="\/history"/);
+  assert.match(source, /href="\/docs"/);
+  assert.match(source, /SplitLoginButton/);
+  assert.doesNotMatch(source, /openAuth|openLogin|openRegister/);
+  assert.match(source, /mobile-nav-actions/);
+  assert.match(source, /mobile-wallet-balance/);
+  assert.match(source, /<CheckinCalendar className="shrink-0" \/>/);
+  assert.match(source, /<WalletBadge\s+showTopUp=\{false\}\s+showCheckin=\{false\}\s+className="mobile-wallet-balance min-w-0 flex-1 sm:flex-none"\s*\/>/);
+  assert.match(source, /mobile-nav-actions flex min-w-0 flex-1 items-center justify-end gap-1\.5/);
+  // 极简 header：所有动作（历史/文档/充值/签到）只显图标，文字恒 sr-only。
+  assert.match(source, /sr-only/);
+  assert.doesNotMatch(source, /sr-only sm:not-sr-only/, "动作文字不得在桌面恢复显示");
+  assert.doesNotMatch(source, /flex-col gap-2/);
+  assert.doesNotMatch(source, /grid-cols-\[minmax/);
+  assert.doesNotMatch(source, /mobile-nav-actions[\s\S]{0,180}overflow-x-auto/);
+  assert.doesNotMatch(source, /href="\/history"[\s\S]{0,220}hidden sm:flex/);
+  assert.doesNotMatch(source, /href="\/pricing"[\s\S]{0,220}hidden sm:flex/);
+});
+
+test("wallet badge can be compacted for mobile navigation", () => {
+  const source = read("src/components/WalletBadge.tsx");
+  assert.match(source, /showCheckin = true/);
+  assert.match(source, /showCheckin && canCheckin/);
+  assert.match(source, /max-w-full/);
+});
+
+test("checkin calendar opens a calendar modal and awards random image credits", () => {
+  const source = read("src/components/CheckinCalendar.tsx");
+
+  assert.match(source, /fetchCheckinStatus/);
+  assert.match(source, /doCheckin/);
+  assert.match(source, /quotaToRewardCount/);
+  assert.match(source, /formatCheckinRewardText/);
+  assert.match(source, /Array\.from\(\{ length: 7 \}/);
+  assert.match(source, /role="dialog"/);
+  assert.match(source, /签到领取/);
+  assert.match(source, /每日签到可随机获得 1 到 3 张额度/);
+  assert.match(source, /今日签到已获得/);
+  assert.match(source, /await refresh\(\)/);
+  // bg-[#1f2230]/38 曾静默编译成空（/38 不在默认透明度刻度上），遮罩全透明。
+  // 必须是 rgba() 任意值形式，且深度与历史灯箱一致（0.74）保证 gauss 模糊有暗底可辨。
+  assert.match(source, /bg-\[rgba\(31,34,48,0\.74\)\]/);
+  assert.doesNotMatch(source, /bg-\[#1f2230\]\/38/);
+  assert.match(source, /backdrop-blur-md/);
+  // 弹层材质必须是全站的 lg-sheet 玻璃，不允许回到灰底 + 黑描边的平面卡。
+  assert.match(source, /lg-sheet/);
+  assert.doesNotMatch(source, /bg-\[#f7f8fb\]/);
+  assert.doesNotMatch(source, /border border-\[rgba\(0,0,0,0\.08\)\]/);
+  assert.match(source, /max-w-\[440px\]/);
+  assert.match(source, /w-\[min\(calc\(100vw-20px\),440px\)\]/);
+  assert.doesNotMatch(source, /sm:bg-\[#f4f5f7\]/);
+  assert.doesNotMatch(source, /max-w-\[390px\]/);
+});
+
+test("mobile pages reserve space for the single-row navbar", () => {
+  for (const relPath of [
+    "src/components/HistoryClient.tsx",
+    "src/components/PricingClient.tsx",
+  ]) {
+    const source = read(relPath);
+    assert.match(source, /pt-20/);
+    assert.doesNotMatch(source, /pt-32/);
+  }
+});
+
+/**
+ * 首页的间距比其他页小一半，是刻意的。
+ *
+ * navbar 在 layout.tsx 里是 `<main>` 的兄弟节点，header 本身是 relative（不是
+ * fixed），所以它占真实布局空间 —— 这个 pt 纯粹是「header 下面留多少空」，
+ * 不是防遮挡的净空。因此改小不会把内容压到 navbar 底下。
+ * 上限仍然钉住：pt-32 是两行 navbar 时代的旧值，不许回归。
+ */
+test("首页工作台与出图框离 header 的距离是其他页的一半", () => {
+  const source = read("src/components/ImagePlayground.tsx");
+  // 左侧工作台与右侧出图框在同一个 wrapper 里，一个值同时管两边。
+  assert.match(source, /min-h-screen bg-transparent pb-28 pt-10 sm:pb-32/);
+  assert.doesNotMatch(source, /pt-20/);
+  assert.doesNotMatch(source, /pt-32/);
+});
+
+test("pricing page removes the bottom external store link and uses zh-CN locale", () => {
+  const pricing = read("src/components/PricingClient.tsx");
+  const layout = read("src/app/layout.tsx");
+
+  assert.doesNotMatch(pricing, /前往充值商店/);
+  assert.doesNotMatch(pricing, /href="https:\/\/store\.tinchak0207\.xyz"/);
+  assert.match(layout, /<html lang="zh-CN"/);
+});
+
+test("pricing copy uses simplified Chinese for the back button and redeem flow", () => {
+  const pricing = read("src/components/PricingClient.tsx");
+
+  assert.match(pricing, /返回做图/);
+  assert.match(pricing, /兑换码/);
+  assert.match(pricing, /兑换成功/);
+  assert.doesNotMatch(pricing, /返回做圖/);
+  assert.doesNotMatch(pricing, /兌換碼/);
+});
+
+test("pricing page has a compact mobile-first recharge layout", () => {
+  const pricing = read("src/components/PricingClient.tsx");
+
+  assert.match(pricing, /mobile-pricing-compact/);
+  assert.match(pricing, /mobile-pricing-plans/);
+  assert.match(pricing, /mobile-pricing-tools/);
+  // 页首与 /history、/docs 统一为左对齐 iOS 大标题，不再单独居中。
+  assert.doesNotMatch(pricing, /sm:text-center/);
+  // 手机上方案卡是横向一行（名称 ←→ 价格），桌面才展开成竖排卡片。
+  assert.match(pricing, /items-center justify-between[\s\S]{0,220}sm:block/);
+  assert.match(pricing, /hidden sm:block/);
+});
+
+test("pricing plans are selectable cards with one checkout bar, not six buttons", () => {
+  const pricing = read("src/components/PricingClient.tsx");
+
+  // App Store 收银架构：先选方案（radio 卡），支付入口全页只有一个。
+  assert.match(pricing, /role="radiogroup" aria-label="充值方案"/);
+  assert.match(pricing, /aria-checked=\{selected\}/);
+  assert.match(pricing, /useState\("popular"\)/);
+  assert.match(pricing, /立即支付 ¥\{selectedPlan\.price\}/);
+  // 旧版每张卡塞两个支付按钮 —— 不允许回归。
+  assert.doesNotMatch(pricing, /handleMapayBuy\(plan\.id/);
+  // 支付在新窗口完成，页内必须有「刷新余额」的闭环反馈。
+  assert.match(pricing, /支付页已在新窗口打开/);
+  assert.match(pricing, /已完成支付，刷新余额/);
+});
+
+test("pricing page exposes docs link and redeem anchor for cdk delivery", () => {
+  const pricing = read("src/components/PricingClient.tsx");
+
+  assert.match(pricing, /id="redeem"/);
+  assert.match(pricing, /href="\/docs"/);
+});
+
+test("pricing checkout keeps WeChat first and still routes through mapay", () => {
+  const pricing = read("src/components/PricingClient.tsx");
+
+  assert.match(pricing, /微信支付/);
+  assert.match(pricing, /支付宝支付/);
+  // 支付方式在结账栏的分段控件里选，支付动作只有一处。
+  assert.match(pricing, /role="radiogroup" aria-label="支付方式"/);
+  assert.match(pricing, /handleMapayBuy\(selectedPlan\.id, payMethod\)/);
+  assert.match(pricing, /\/api\/payments\/mapay\/checkout\?plan=/);
+  assert.match(pricing, /type=\$\{encodeURIComponent\(type\)\}/);
+  assert.ok(pricing.indexOf("微信支付") < pricing.indexOf("支付宝支付"));
+  assert.doesNotMatch(pricing, /淘宝购买/);
+});
+
+test("pricing page pre-fills cdk returned from mapay", () => {
+  const pricing = read("src/components/PricingClient.tsx");
+
+  assert.match(pricing, /new URLSearchParams\(window\.location\.search\)\.get\("cdk"\)/);
+  assert.match(pricing, /if \(cdk\) setRedeemCode\(cdk\)/);
+});
+
+test("pricing redeem refreshes the displayed quota after successful cdk redemption", () => {
+  const pricing = read("src/components/PricingClient.tsx");
+
+  assert.match(pricing, /const \{ token, isLoggedIn, refresh \} = useAuth\(\)/);
+  assert.match(pricing, /await refresh\(\)/);
+  assert.ok(pricing.indexOf("redeemTopupCode") < pricing.indexOf("await refresh()"));
+});
+
+test("auth refresh persists the latest quota returned by new-api", () => {
+  const auth = read("src/hooks/use-auth.tsx");
+
+  assert.match(auth, /setStoredToken\(t, result\.user\)/);
+  assert.match(auth, /setStoredToken\(storedToken, result\.user\)/);
+});

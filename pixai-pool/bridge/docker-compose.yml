@@ -1,0 +1,21 @@
+version: "3.8"
+
+services:
+  pixai-bridge:
+    build: .
+    container_name: pixai-bridge
+    ports:
+      - "18090:18090"
+    environment:
+      - TZ=Asia/Shanghai
+      - PIXAI_BRIDGE_API_KEY=${PIXAI_BRIDGE_API_KEY:-pixai-bridge-local}
+    volumes:
+      - ./pixai_pool:/app/pixai_pool
+    networks:
+      - imagesite
+    restart: always
+
+networks:
+  imagesite:
+    external: true
+    name: imagesite_imagesite

@@ -1,0 +1,7 @@
+/* 专业工作站专用样式入口。原为单文件，已按顶层规则边界拆分为多份，
+   依序 @import 拼接，层叠顺序与原文件完全一致。 */
+@import "./workstation-part-01.css";
+@import "./workstation-part-02.css";
+@import "./workstation-part-03.css";
+@import "./workstation-part-04.css";
+@import "./workstation-part-05.css";

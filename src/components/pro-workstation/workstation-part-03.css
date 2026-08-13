@@ -1,0 +1,878 @@
+
+.pro-zoom-toggle button {
+  border-radius: 999px;
+  padding: 0.26rem 0.6rem;
+  color: rgba(0, 0, 0, 0.50);
+  font-size: 0.64rem;
+  font-weight: 760;
+  transition: background 160ms ease, color 160ms ease;
+}
+
+.pro-zoom-toggle button:hover,
+.pro-zoom-toggle button.is-active {
+  background: rgba(255, 255, 255, 0.96);
+  color: rgba(0, 122, 255, 0.85);
+  box-shadow: 0 4px 12px rgba(45, 49, 66, 0.10);
+}
+
+/*
+ * 原图模式改为「滚轮缩放 + 拖拽平移」的视口。
+ *
+ * 旧版是 overflow:auto 的滚动容器，看细节只能拖滚动条、且最大只有 100%。
+ * 现在容器裁切、内部图片用 transform 缩放平移，手势与所有看图软件一致。
+ */
+.pro-canvas-actual {
+  justify-self: stretch;
+  align-self: stretch;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: inherit;
+  cursor: grab;
+  touch-action: none;
+}
+
+.pro-canvas-actual[data-panning="true"] {
+  cursor: grabbing;
+}
+
+.pro-canvas-actual img {
+  max-width: none;
+  /* 缩放围绕图片中心，配合 JS 的等比位移换算 */
+  transform-origin: center center;
+  will-change: transform;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+/*
+ * 配置漂移提示。
+ *
+ * 改完模型/尺寸/提示词但还没重新生成时，画布上那张图已经不是当前设置的产物 ——
+ * 旧版没有任何标记，用户会拿着旧图判断新参数的效果。因此这条提示不做 hover 淡出：
+ * 常显在左上角（右上留给缩放按钮），z-index 高于翻页器。
+ */
+.pro-canvas-stale {
+  position: absolute;
+  top: 0.7rem;
+  left: 0.7rem;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  max-width: calc(100% - 6.4rem);
+  border-radius: 999px;
+  background: rgba(255, 244, 214, 0.94);
+  box-shadow: 0 8px 22px rgba(150, 108, 0, 0.16);
+  padding: 0.28rem 0.34rem 0.28rem 0.7rem;
+  color: rgba(122, 78, 0, 0.9);
+  font-size: 0.66rem;
+  font-weight: 720;
+  backdrop-filter: blur(16px);
+}
+
+.pro-canvas-stale > svg {
+  flex-shrink: 0;
+}
+
+.pro-canvas-stale span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pro-canvas-stale button {
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: rgba(122, 78, 0, 0.12);
+  padding: 0.28rem 0.6rem;
+  color: rgba(122, 78, 0, 0.95);
+  font-weight: 780;
+  transition: background 160ms ease;
+}
+
+.pro-canvas-stale button:hover {
+  background: rgba(122, 78, 0, 0.2);
+}
+
+/*
+ * 成片缩略条：横向滚动，不抢画布高度（缩略图 3.4rem，整条约 4rem）。
+ * 只在画布模式且这批多于一张时渲染，因此空态不占行。
+ */
+.pro-film-strip {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.35rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.1rem 0.05rem 0.25rem;
+  scrollbar-width: thin;
+}
+
+.pro-film-strip button {
+  position: relative;
+  display: grid;
+  width: 3.4rem;
+  height: 3.4rem;
+  flex-shrink: 0;
+  overflow: hidden;
+  place-items: center;
+  border-radius: 0.7rem;
+  border: 2px solid transparent;
+  background: rgba(255, 255, 255, 0.42);
+  transition: border-color 160ms ease, transform 160ms ease;
+}
+
+.pro-film-strip button:hover {
+  transform: translateY(-1px);
+  border-color: rgba(0, 122, 255, 0.4);
+}
+
+.pro-film-strip button.is-active {
+  border-color: rgba(0, 122, 255, 0.9);
+}
+
+.pro-film-strip img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.pro-film-strip-video {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.55);
+  color: rgba(255, 255, 255, 0.92);
+}
+
+/* 序号角标：缩略图看不出顺序，翻页提示说的「3 / 8」要能对上。 */
+.pro-film-strip em {
+  position: absolute;
+  right: 0.12rem;
+  bottom: 0.12rem;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  padding: 0 0.25rem;
+  color: #fff;
+  font-size: 0.56rem;
+  font-style: normal;
+  font-weight: 780;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * 画布信息条压在图片底部，会挡住画面下缘（人物脚部、字幕区常在这里）。
+ * 默认半透明缩在角落，指针进入画布或键盘聚焦到条上时才完全显形。
+ */
+.pro-canvas-meta {
+  position: absolute;
+  bottom: 0.7rem;
+  left: 50%;
+  z-index: 2;
+  opacity: 0.32;
+  transition: opacity 180ms ease;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  max-width: calc(100% - 1.4rem);
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.80);
+  box-shadow: 0 10px 28px rgba(45, 49, 66, 0.12);
+  padding: 0.28rem 0.32rem 0.28rem 0.8rem;
+  color: rgba(0, 0, 0, 0.56);
+  font-size: 0.66rem;
+  font-weight: 720;
+  backdrop-filter: blur(18px);
+}
+
+.pro-canvas-meta span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pro-canvas-meta button {
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: rgba(0, 122, 255, 0.10);
+  padding: 0.3rem 0.62rem;
+  color: rgba(0, 122, 255, 0.85);
+  font-weight: 770;
+  transition: background 160ms ease;
+}
+
+.pro-canvas-meta button:hover {
+  background: rgba(0, 122, 255, 0.16);
+}
+
+.pro-canvas-stage:hover .pro-canvas-meta,
+.pro-canvas-meta:hover,
+.pro-canvas-meta:focus-within {
+  opacity: 1;
+}
+
+/* 触控设备没有 hover，直接常显，否则信息条永远是半透明的。 */
+@media (hover: none) {
+  .pro-canvas-meta {
+    opacity: 1;
+  }
+}
+
+.pro-annotate-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  touch-action: none;
+}
+
+.pro-annotate-layer[data-active="false"] {
+  pointer-events: none;
+}
+
+/* 适应模式的成片：绝对定位撑满预览盒。
+   若留在流内，它会落进 .pro-canvas-preview 的隐式 auto 行 + place-items:center
+   （= align-self:center，不拉伸），此时 h-full 的 100% 变成循环百分比、退回原图
+   高度（例如 1024px），超出预览盒后被 overflow:hidden 裁掉上下两截。
+   几何必须与 .pro-annotate-layer 保持一致（inset:0 + contain 居中）：
+   标注导出的 scale / offsetX / offsetY 计算以此为前提。 */
+.pro-canvas-preview > .pro-canvas-media {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: inherit;
+}
+
+.pro-canvas-preview[data-canvas-tool="annotate"] {
+  cursor: crosshair;
+}
+
+.pro-canvas-preview[data-canvas-tool="erase"] {
+  cursor: cell;
+}
+
+.pro-chip-row,
+.pro-chip-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.pro-chip-row {
+  margin-bottom: 0.5rem;
+}
+
+.pro-chip-row button,
+.pro-chip-grid button {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.46);
+  padding: 0.34rem 0.7rem;
+  color: rgba(0, 0, 0, 0.56);
+  font-size: 0.66rem;
+  font-weight: 740;
+  white-space: nowrap;
+  transition: background 220ms var(--pro-spring, ease), color 220ms var(--pro-spring, ease), transform 220ms var(--pro-spring, ease);
+}
+
+.pro-chip-row button:hover,
+.pro-chip-grid button:hover {
+  background: rgba(255, 255, 255, 0.74);
+  transform: translateY(-1px);
+}
+
+.pro-chip-row button.is-active,
+.pro-chip-grid button.is-active {
+  background: #007aff;
+  color: #fff;
+  box-shadow: 0 8px 20px rgba(0, 122, 255, 0.26);
+}
+
+.pro-style-grid {
+  display: grid;
+  max-height: 186px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.35rem;
+  overflow: auto;
+  padding-right: 0.1rem;
+}
+
+.pro-style-grid button {
+  overflow: hidden;
+  border-radius: 0.8rem;
+  background: rgba(255, 255, 255, 0.42);
+  padding: 0.45rem 0.5rem;
+  color: rgba(0, 0, 0, 0.58);
+  font-size: 0.66rem;
+  font-weight: 720;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: background 220ms var(--pro-spring, ease), color 220ms var(--pro-spring, ease);
+}
+
+.pro-style-grid button:hover {
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.pro-style-grid button.is-active {
+  background: #007aff;
+  color: #fff;
+  box-shadow: 0 8px 20px rgba(0, 122, 255, 0.26);
+}
+
+.pro-resource-library {
+  display: grid;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.pro-resource-toolbar {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.pro-resource-search {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid rgba(255, 255, 255, 0.58);
+  border-radius: 0.85rem;
+  background: rgba(255, 255, 255, 0.42);
+  padding: 0.42rem 0.55rem;
+  color: rgba(0, 0, 0, 0.4);
+}
+
+.pro-resource-search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: rgba(0, 0, 0, 0.72);
+  font-size: 0.72rem;
+  font-weight: 620;
+  outline: 0;
+}
+
+.pro-resource-search input::placeholder {
+  color: rgba(0, 0, 0, 0.36);
+}
+
+.pro-resource-filter {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.18rem;
+  border-radius: 0.85rem;
+  background: rgba(255, 255, 255, 0.32);
+  padding: 0.2rem;
+}
+
+.pro-resource-filter button {
+  min-width: 0;
+  min-height: 2rem;
+  border-radius: 0.65rem;
+  padding: 0.26rem 0.35rem;
+  color: rgba(0, 0, 0, 0.48);
+  font-size: 0.61rem;
+  font-weight: 730;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+  transition: background 180ms ease, color 180ms ease, box-shadow 180ms ease;
+}
+
+.pro-resource-filter button:hover {
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.pro-resource-filter button.is-active {
+  background: rgba(255, 255, 255, 0.92);
+  color: rgba(0, 96, 202, 0.9);
+  box-shadow: 0 4px 12px rgba(45, 49, 66, 0.07);
+}
+
+.pro-resource-list {
+  display: grid;
+  max-height: 21rem;
+  gap: 0.45rem;
+  overflow: auto;
+  padding-right: 0.1rem;
+}
+
+.pro-resource-card {
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.52);
+  border-radius: 0.95rem;
+  background: rgba(255, 255, 255, 0.31);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
+  padding: 0.62rem;
+}
+
+.pro-resource-card-head,
+.pro-resource-card-footer {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+}
+
+.pro-resource-card-actions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.28rem;
+}
+
+.pro-resource-model,
+.pro-resource-category {
+  min-width: 0;
+  border-radius: 999px;
+  background: rgba(0, 122, 255, 0.1);
+  padding: 0.18rem 0.42rem;
+  color: rgba(0, 94, 192, 0.86);
+  font-size: 0.58rem;
+  font-weight: 760;
+  line-height: 1.1;
+}
+
+.pro-resource-model.is-nano {
+  background: rgba(52, 199, 89, 0.12);
+  color: rgba(19, 123, 53, 0.9);
+}
+
+.pro-resource-model.is-scenario {
+  background: rgba(175, 82, 222, 0.11);
+  color: rgba(116, 45, 153, 0.9);
+}
+
+.pro-resource-category {
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.48);
+  color: rgba(0, 0, 0, 0.4);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pro-resource-favorite {
+  display: grid;
+  width: 1.6rem;
+  height: 1.6rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 0.55rem;
+  background: rgba(255, 255, 255, 0.44);
+  color: rgba(0, 0, 0, 0.32);
+  transition: background 180ms ease, color 180ms ease, transform 180ms ease;
+}
+
+.pro-resource-favorite:hover {
+  background: rgba(255, 204, 0, 0.14);
+  color: rgba(180, 125, 0, 0.84);
+  transform: scale(1.05);
+}
+
+.pro-resource-favorite.is-active {
+  background: rgba(255, 204, 0, 0.18);
+  color: rgba(172, 119, 0, 0.92);
+}
+
+.pro-resource-preview {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1.72;
+  margin-top: 0.55rem;
+  border-radius: 0.7rem;
+  object-fit: cover;
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.pro-resource-card h4 {
+  margin: 0.48rem 0 0;
+  color: rgba(0, 0, 0, 0.7);
+  font-size: 0.76rem;
+  font-weight: 760;
+  line-height: 1.25;
+}
+
+.pro-resource-card p,
+.pro-resource-card small {
+  display: block;
+  margin: 0.28rem 0 0;
+  color: rgba(0, 0, 0, 0.48);
+  font-size: 0.65rem;
+  font-weight: 590;
+  line-height: 1.4;
+}
+
+.pro-resource-card small {
+  color: rgba(0, 0, 0, 0.34);
+}
+
+.pro-resource-card-footer {
+  margin-top: 0.58rem;
+}
+
+.pro-resource-card-footer a {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.18rem;
+  overflow: hidden;
+  color: rgba(0, 91, 184, 0.72);
+  font-size: 0.59rem;
+  font-weight: 690;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pro-resource-card-footer a:hover {
+  color: rgba(0, 91, 184, 1);
+}
+
+.pro-template-source {
+  color: rgba(0, 0, 0, 0.36);
+  font-size: 0.59rem;
+  font-weight: 690;
+}
+
+.pro-resource-card-footer button {
+  flex: 0 0 auto;
+  min-height: 1.75rem;
+  border-radius: 0.62rem;
+  background: rgba(0, 122, 255, 0.1);
+  padding: 0.25rem 0.52rem;
+  color: rgba(0, 95, 195, 0.92);
+  font-size: 0.65rem;
+  font-weight: 760;
+  transition: background 180ms ease, color 180ms ease;
+}
+
+.pro-resource-card-footer button:hover {
+  background: #007aff;
+  color: #fff;
+}
+
+.pro-resource-empty {
+  margin: 0;
+  padding: 0.8rem;
+  color: rgba(0, 0, 0, 0.4);
+  font-size: 0.7rem;
+  text-align: center;
+}
+
+.pro-template-confirm {
+  display: grid;
+  gap: 0.45rem;
+  border: 1px solid rgba(0, 122, 255, 0.22);
+  border-radius: 0.95rem;
+  background: rgba(240, 248, 255, 0.72);
+  padding: 0.7rem;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78);
+}
+
+.pro-template-confirm > div:first-child {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.pro-template-confirm > div:first-child span,
+.pro-template-confirm > p {
+  margin: 0;
+  color: rgba(0, 0, 0, 0.46);
+  font-size: 0.63rem;
+  font-weight: 690;
+}
+
+.pro-template-confirm > div:first-child strong {
+  overflow: hidden;
+  color: rgba(0, 75, 160, 0.9);
+  font-size: 0.73rem;
+  font-weight: 780;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pro-template-impact {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.pro-template-impact span {
+  border-radius: 999px;
+  background: rgba(0, 122, 255, 0.1);
+  padding: 0.2rem 0.42rem;
+  color: rgba(0, 87, 184, 0.84);
+  font-size: 0.59rem;
+  font-weight: 720;
+}
+
+.pro-template-confirm-actions,
+.pro-requirement-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.4rem;
+}
+
+.pro-template-confirm-actions button,
+.pro-requirement-actions button,
+.pro-template-undo {
+  min-height: 2rem;
+  border-radius: 0.7rem;
+  background: rgba(255, 255, 255, 0.72);
+  color: rgba(0, 0, 0, 0.56);
+  font-size: 0.65rem;
+  font-weight: 750;
+  transition: background 180ms ease, color 180ms ease;
+}
+
+.pro-template-confirm-actions button.is-primary {
+  background: #007aff;
+  color: #fff;
+}
+
+.pro-template-undo {
+  display: inline-flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  background: rgba(255, 149, 0, 0.1);
+  color: rgba(171, 86, 0, 0.9);
+}
+
+.pro-template-undo:hover {
+  background: rgba(255, 149, 0, 0.17);
+}
+
+.pro-requirement-group {
+  display: grid;
+  gap: 0.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.5);
+  padding-top: 0.75rem;
+}
+
+.pro-requirement-group + .pro-requirement-group {
+  margin-top: 0.8rem;
+}
+
+.pro-requirement-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.pro-requirement-heading span {
+  color: rgba(0, 0, 0, 0.64);
+  font-size: 0.72rem;
+  font-weight: 780;
+}
+
+.pro-requirement-heading em {
+  border-radius: 999px;
+  background: rgba(0, 122, 255, 0.1);
+  padding: 0.16rem 0.4rem;
+  color: rgba(0, 91, 190, 0.8);
+  font-size: 0.58rem;
+  font-style: normal;
+  font-weight: 740;
+}
+
+.pro-requirement-group > p,
+.pro-requirement-message {
+  margin: 0;
+  color: rgba(0, 0, 0, 0.42);
+  font-size: 0.64rem;
+  font-weight: 590;
+  line-height: 1.4;
+}
+
+.pro-size-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.pro-size-options button {
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.56);
+  border-radius: 0.95rem;
+  background: rgba(255, 255, 255, 0.38);
+  padding: 0.55rem 0.4rem;
+  text-align: center;
+  transition: background 220ms var(--pro-spring, ease), border-color 220ms var(--pro-spring, ease), box-shadow 220ms var(--pro-spring, ease);
+}
+
+.pro-size-options button strong {
+  display: block;
+  color: rgba(0, 0, 0, 0.66);
+  font-size: 0.68rem;
+  font-weight: 760;
+}
+
+.pro-size-options button small {
+  display: block;
+  margin-top: 0.2rem;
+  color: rgba(0, 0, 0, 0.4);
+  font-size: 0.56rem;
+  line-height: 1.35;
+}
+
+.pro-size-options button.is-active {
+  border-color: rgba(0, 122, 255, 0.22);
+  background: rgba(0, 122, 255, 0.1);
+}
+
+/* ---------- 场景模板面板（TemplatePanel） ---------- */
+.pro-template-library {
+  display: grid;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.pro-template-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.8rem 0.2rem;
+  color: rgba(0, 0, 0, 0.46);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.pro-template-loading svg {
+  animation: pro-spin 900ms linear infinite;
+}
+
+@keyframes pro-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.pro-template-control-label {
+  color: rgba(0, 0, 0, 0.56);
+  font-size: 0.68rem;
+  font-weight: 780;
+}
+
+.pro-template-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.4rem;
+}
+
+.pro-template-scene-card {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.56);
+  border-radius: 0.85rem;
+  background: rgba(255, 255, 255, 0.34);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
+  text-align: left;
+  transition: border-color 180ms ease, transform 180ms ease;
+}
+
+.pro-template-scene-card:hover {
+  transform: translateY(-1px);
+}
+
+.pro-template-scene-card.is-active {
+  border-color: rgba(0, 122, 255, 0.55);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55), 0 0 0 3px rgba(0, 122, 255, 0.14);
+}
+
+.pro-template-scene-card img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  background: rgba(255, 255, 255, 0.42);
+}
+
+.pro-template-scene-placeholder {
+  display: grid;
+  width: 100%;
+  aspect-ratio: 1;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.42);
+  color: rgba(0, 0, 0, 0.3);
+  font-size: 0.6rem;
+  font-weight: 690;
+}
+
+.pro-template-scene-card strong {
+  display: block;
+  overflow: hidden;
+  padding: 0.4rem 0.45rem 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(0, 0, 0, 0.68);
+  font-size: 0.66rem;
+  font-weight: 740;
+}
+
+.pro-template-scene-card small {
+  display: inline-block;
+  margin: 0.2rem 0.45rem 0.4rem;
+  border-radius: 999px;
+  background: rgba(0, 122, 255, 0.1);
+  padding: 0.12rem 0.4rem;
+  color: rgba(0, 94, 192, 0.85);
+  font-size: 0.56rem;
+  font-weight: 760;
+}
+
+.pro-template-preset-list {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.pro-template-preset {
+  display: grid;
+  gap: 0.3rem;
+  border: 1px solid rgba(255, 255, 255, 0.52);
+  border-radius: 0.95rem;
+  background: rgba(255, 255, 255, 0.32);
+  padding: 0.5rem 0.55rem;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
+}
+
+.pro-template-preset.is-active {
+  border-color: rgba(0, 122, 255, 0.4);
+  background: rgba(240, 248, 255, 0.55);
+}
+
+.pro-template-preset-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  text-align: left;
+  color: rgba(0, 0, 0, 0.62);
+}
+
+.pro-template-preset-check {
+  display: grid;
+  width: 1.05rem;
+  height: 1.05rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 999px;
+  border: 1.5px solid rgba(0, 0, 0, 0.2);
+  color: #fff;
+}

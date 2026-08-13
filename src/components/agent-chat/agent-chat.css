@@ -1,0 +1,150 @@
+/* 智能体对话（Agent Chat）组件专用样式。
+   布局骨架尽量用 Tailwind utility 在 JSX 完成，这里只放 utility 写不出的部分：
+   打字光标动画、新条目入场动画、滚动条定制、参数区展开过渡。
+   沿用全站 Liquid Glass 层级（lg-card / lg-float / lg-bar / lg-sheet / lg-tint-*），
+   不另造新玻璃材质。 */
+
+.agent-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+/* 滚动区：细滚动条，与站内 iOS 风格一致 */
+.agent-transcript {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.18) transparent;
+}
+.agent-transcript::-webkit-scrollbar {
+  width: 6px;
+}
+.agent-transcript::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.18);
+  border-radius: 999px;
+}
+.agent-transcript::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 新条目入场 */
+@keyframes agent-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.agent-rise {
+  animation: agent-rise 0.28s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* 串流打字光标 */
+@keyframes agent-caret-blink {
+  0%,
+  45% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+.agent-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  border-radius: 1px;
+  background: currentColor;
+  animation: agent-caret-blink 1s step-end infinite;
+}
+
+/* 工具卡参数区展开 / 收起 */
+.agent-args {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.agent-args.is-open {
+  grid-template-rows: 1fr;
+}
+.agent-args-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ── D-23 窄屏参数抽屉 ─────────────────────────────────────────
+   窄屏是另一个布局：参数从底部盖上来，聊天流留在原地不被顶走。
+   只在窄屏挂载（JSX 侧用 useIsNarrow 判断），所以这里不再包 media query——
+   包了反而会出现「JS 认为要抽屉、CSS 不给样式」的裸 DOM。 */
+.agent-param-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: flex-end;
+  background: rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(2px);
+  animation: agent-scrim-in 0.2s ease-out both;
+}
+
+@keyframes agent-scrim-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.agent-param-drawer {
+  width: 100%;
+  max-height: 76dvh;
+  display: flex;
+  flex-direction: column;
+  padding-top: 0.5rem;
+  /* 底部补安全区：iPhone 的 home indicator 会盖住最后一行参数。 */
+  padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+  border-radius: 1.25rem 1.25rem 0 0;
+  animation: agent-drawer-up 0.28s cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
+@keyframes agent-drawer-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+.agent-param-drawer-grip {
+  display: block;
+  width: 2.25rem;
+  height: 0.25rem;
+  margin: 0 auto 0.5rem;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.agent-param-drawer-body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 1rem;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* 抽屉的入场位移对晕动症使用者不友好；关掉动画但保留最终位置。 */
+@media (prefers-reduced-motion: reduce) {
+  .agent-param-scrim,
+  .agent-param-drawer {
+    animation: none;
+  }
+}

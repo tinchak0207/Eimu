@@ -1,0 +1,62 @@
+services:
+  generation-postgres:
+    image: postgres:16-alpine
+    container_name: image-control-postgres
+    restart: unless-stopped
+    env_file:
+      - ./.env.control-plane
+    environment:
+      POSTGRES_DB: image_control
+      POSTGRES_USER: image_control
+      POSTGRES_PASSWORD: ${GENERATION_POSTGRES_PASSWORD}
+    volumes:
+      - ./generation-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U image_control -d image_control"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks:
+      - imagesite
+
+  generation-api:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+      target: runner
+    container_name: image-control-api
+    restart: unless-stopped
+    env_file:
+      - ./.env.control-plane
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+    depends_on:
+      generation-postgres:
+        condition: service_healthy
+    networks:
+      - imagesite
+
+  generation-worker:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+      target: generation-worker
+    container_name: image-control-worker
+    restart: unless-stopped
+    env_file:
+      - ./.env.control-plane
+    environment:
+      NODE_ENV: production
+    depends_on:
+      generation-postgres:
+        condition: service_healthy
+    networks:
+      - imagesite
+
+networks:
+  imagesite:
+    external: true
+    name: imagesite_imagesite
+

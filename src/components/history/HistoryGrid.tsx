@@ -1,0 +1,107 @@
+"use client";
+
+import { useEffect, useRef } from "react";
+import { groupHistoryByDay } from "@/lib/history-types";
+import type { HistoryEntry } from "@/lib/history-types";
+import { HistoryCard } from "./HistoryCard";
+import { HistorySkeleton } from "./HistorySkeleton";
+
+export interface HistoryGridProps {
+  entries: HistoryEntry[];
+  selectionMode: boolean;
+  selectedIds: Set<string>;
+  loadingMore: boolean;
+  hasMore: boolean;
+  onLoadMore: () => void;
+  onOpen: (entry: HistoryEntry) => void;
+  onToggleSelect: (id: string) => void;
+  onToggleStar: (id: string) => void;
+  onDownload: (entry: HistoryEntry) => void;
+  onDelete: (id: string) => void;
+  onReuse?: (entry: HistoryEntry) => void;
+  /** D-18：把这条记录交给 AI 助理继续做。缺席时卡片不挂这颗按钮。 */
+  onOpenAgent?: (entry: HistoryEntry) => void;
+}
+
+export function HistoryGrid({
+  entries,
+  selectionMode,
+  selectedIds,
+  loadingMore,
+  hasMore,
+  onLoadMore,
+  onOpen,
+  onToggleSelect,
+  onToggleStar,
+  onDownload,
+  onDelete,
+  onReuse,
+  onOpenAgent,
+}: HistoryGridProps) {
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  /** 放在 ref 里，这样 observer 不必因为回调变化而反复重建。 */
+  const loadMoreRef = useRef(onLoadMore);
+  loadMoreRef.current = onLoadMore;
+
+  // 滚到底自动加载下一页。
+  useEffect(() => {
+    if (!hasMore) return;
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+
+    const observer = new IntersectionObserver(
+      (observed) => {
+        if (observed.some((item) => item.isIntersecting)) loadMoreRef.current();
+      },
+      // 提前一屏开始加载，滚动时基本感觉不到等待。
+      { rootMargin: "600px 0px" },
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMore]);
+
+  const groups = groupHistoryByDay(entries);
+
+  return (
+    <div>
+      {groups.map((group) => (
+        <section key={group.bucket} className="mb-6" aria-label={group.label}>
+          <div className="mb-2.5 flex items-baseline gap-2">
+            <h2 className="text-ios-subhead font-semibold text-[rgba(0,0,0,0.72)]">{group.label}</h2>
+            <span className="text-ios-caption1 tabular-nums text-[rgba(0,0,0,0.58)]">
+              {group.entries.length}
+            </span>
+          </div>
+
+          <div className="hist-masonry">
+            {group.entries.map((entry) => (
+              <HistoryCard
+                key={entry.id}
+                entry={entry}
+                selectionMode={selectionMode}
+                selected={selectedIds.has(entry.id)}
+                onOpen={onOpen}
+                onToggleSelect={onToggleSelect}
+                onToggleStar={onToggleStar}
+                onDownload={onDownload}
+                onDelete={onDelete}
+                {...(onReuse ? { onReuse } : {})}
+                {...(onOpenAgent ? { onOpenAgent } : {})}
+              />
+            ))}
+          </div>
+        </section>
+      ))}
+
+      {/* 无限滚动哨兵。有下一页时才渲染，否则 observer 会一直空转。 */}
+      {hasMore && <div ref={sentinelRef} aria-hidden="true" className="h-px w-full" />}
+
+      {loadingMore && (
+        <div className="hist-masonry" role="status" aria-label="正在加载更多">
+          <HistorySkeleton count={4} />
+        </div>
+      )}
+    </div>
+  );
+}

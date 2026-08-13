@@ -1,0 +1,901 @@
+﻿@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer components {
+  /* Single source of truth for the page gutter. The floating navbar and the
+     content grid must resolve to the same left/right edges at every width —
+     they previously used different max-widths (1660 vs 1440) and different
+     padding (px-4 vs lg:px-8), so the navbar overhung the cards by up to
+     110px on each side on a wide display. */
+  .page-shell {
+    @apply mx-auto w-full max-w-[1440px] px-4 sm:px-6 lg:px-8;
+  }
+
+  .admin-field {
+    @apply mt-2 w-full rounded-md border border-black/10 bg-[#f4f5f7] px-3 py-2.5 text-sm font-normal text-[#242830] outline-none transition-colors placeholder:text-black/25 focus:border-[#2878d0] focus:ring-2 focus:ring-[#2878d0]/15;
+  }
+}
+
+@layer base {
+  :root {
+    /* ── Semantic tokens ── */
+    --background: 0 0% 97%;
+    --foreground: 0 0% 8%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 8%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 8%;
+    --primary: 0 0% 8%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 0 0% 94%;
+    --secondary-foreground: 0 0% 8%;
+    --muted: 0 0% 92%;
+    --muted-foreground: 0 0% 44%;
+    --accent: 211 100% 50%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 4 86% 58%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 88%;
+    --input: 0 0% 92%;
+    --ring: 211 100% 50%;
+    --radius: 1.25rem;
+
+    /* --agent-shell-offset 已删除：聊天区不再占满视口，它是首页那张卡片里
+       一块定高的区域（PromptInput 的 AGENT_SURFACE_HEIGHT），
+       不需要为浮动导航栏和底部安全区扣高度。 */
+
+    /* ── Liquid Glass material tokens ── */
+    --lg-blur: 40px;
+    --lg-saturate: 180%;
+    --lg-brightness: 1.08;
+    --lg-bg-primary: rgba(255, 255, 255, 0.72);
+    --lg-bg-secondary: rgba(255, 255, 255, 0.56);
+    --lg-bg-tertiary: rgba(255, 255, 255, 0.38);
+    --lg-border-top: rgba(255, 255, 255, 0.92);
+    --lg-border-side: rgba(255, 255, 255, 0.48);
+    --lg-border-bottom: rgba(0, 0, 0, 0.06);
+    --lg-shadow-ambient: 0 2px 8px rgba(0, 0, 0, 0.04);
+    --lg-shadow-card: 0 8px 32px rgba(0, 0, 0, 0.06), 0 2px 8px rgba(0, 0, 0, 0.04);
+    --lg-shadow-elevated: 0 20px 60px rgba(0, 0, 0, 0.10), 0 4px 16px rgba(0, 0, 0, 0.06);
+    --lg-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+    --lg-ease: cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow-x: clip;
+  }
+
+  body {
+    @apply text-foreground;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
+      "Hiragino Sans GB", "Microsoft YaHei", var(--font-geist-sans), system-ui, sans-serif;
+    font-feature-settings: "kern" 1, "liga" 1, "calt" 1;
+    min-height: 100vh;
+    /* Trans flag ambient gradient — #55CDFC blue / #F7A8B8 pink, very subtle */
+    background:
+      radial-gradient(ellipse 130% 90% at 15% 5%,
+        rgba(85, 205, 252, 0.12) 0%,
+        transparent 60%
+      ),
+      radial-gradient(ellipse 110% 75% at 85% 95%,
+        rgba(247, 168, 184, 0.12) 0%,
+        transparent 60%
+      ),
+      radial-gradient(ellipse 90% 65% at 80% 10%,
+        rgba(85, 205, 252, 0.08) 0%,
+        transparent 55%
+      ),
+      linear-gradient(160deg,
+        #f4fbff 0%,
+        #fdf4f7 50%,
+        #f4fbff 100%
+      );
+    background-attachment: fixed;
+    overflow-x: clip;
+    max-width: 100%;
+  }
+
+  /* Subtle noise texture overlay — mimics Apple's material grain */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.025;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+    background-size: 128px 128px;
+    z-index: 0;
+  }
+
+  ::selection {
+    background: rgba(0, 122, 255, 0.18);
+    color: #1d1d1f;
+  }
+
+  *::-webkit-scrollbar { width: 8px; height: 8px; }
+  *::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.14);
+    border: 2px solid transparent;
+    border-radius: 999px;
+    background-clip: padding-box;
+  }
+  *::-webkit-scrollbar-track { background: transparent; }
+}
+
+@media (max-width: 767px) {
+  html,
+  body {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+    overscroll-behavior-x: none;
+  }
+}
+
+@layer utilities {
+
+  /* ════════════════════════════════════════════════════
+     LIQUID GLASS MATERIAL SYSTEM
+     Based on Apple iOS 26 / WWDC25 "Meet Liquid Glass"
+     Three tiers: primary (cards) → secondary (floats) → tertiary (overlays)
+     ════════════════════════════════════════════════════ */
+
+  /* Primary material — main content cards */
+  .lg-card {
+    background: var(--lg-bg-primary);
+    border-top: 1px solid var(--lg-border-top);
+    border-left: 1px solid var(--lg-border-side);
+    border-right: 1px solid var(--lg-border-side);
+    border-bottom: 1px solid var(--lg-border-bottom);
+    box-shadow:
+      0 12px 40px rgba(0, 0, 0, 0.08),
+      0 2px 8px rgba(0, 0, 0, 0.04),
+      inset 0 1px 0 rgba(255, 255, 255, 0.90);
+    backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-saturate)) brightness(var(--lg-brightness));
+    -webkit-backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-saturate)) brightness(var(--lg-brightness));
+  }
+
+  /* Secondary material — floating pills, badges, secondary panels */
+  .lg-float {
+    background: var(--lg-bg-secondary);
+    border-top: 1px solid rgba(255, 255, 255, 0.82);
+    border-left: 1px solid rgba(255, 255, 255, 0.38);
+    border-right: 1px solid rgba(255, 255, 255, 0.38);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+    box-shadow: var(--lg-shadow-ambient);
+    backdrop-filter: blur(28px) saturate(160%) brightness(1.06);
+    -webkit-backdrop-filter: blur(28px) saturate(160%) brightness(1.06);
+  }
+
+  /* Tertiary material — dock, toolbar, bottom bar */
+  .lg-bar {
+    background: rgba(255, 255, 255, 0.62);
+    border-top: 1px solid rgba(255, 255, 255, 0.88);
+    border-left: 1px solid rgba(255, 255, 255, 0.42);
+    border-right: 1px solid rgba(255, 255, 255, 0.42);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+    box-shadow: 0 -1px 0 rgba(0,0,0,0.04), var(--lg-shadow-card);
+    /* 28px 是本设计语言里已验证的上限（.lg-float 同值）。半径越大，合成器
+       每帧要回读并重模糊的背景区域就越大，中低端 Android 上是明确的掉帧来源；
+       底色本身是 0.62 白，48px → 28px 的观感差异在这个不透明度下不可见。 */
+    backdrop-filter: blur(28px) saturate(200%) brightness(1.1);
+    -webkit-backdrop-filter: blur(28px) saturate(200%) brightness(1.1);
+  }
+
+  /* Elevated material — modals, sheets, popovers */
+  .lg-sheet {
+    background: rgba(255, 255, 255, 0.82);
+    border-top: 1px solid rgba(255, 255, 255, 0.96);
+    border-left: 1px solid rgba(255, 255, 255, 0.52);
+    border-right: 1px solid rgba(255, 255, 255, 0.52);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+    box-shadow: var(--lg-shadow-elevated);
+    /* 60px 是全站最大的模糊半径，也是最贵的一层：sheet 通常铺满视口，
+       合成器每帧要对整屏背景做一次 60px 半径的两遍高斯。底色已是 0.82 白，
+       背景几乎全被遮住，28px 与 60px 在这个不透明度下肉眼无法区分。 */
+    backdrop-filter: blur(28px) saturate(200%) brightness(1.12);
+    -webkit-backdrop-filter: blur(28px) saturate(200%) brightness(1.12);
+  }
+
+  /* ── Tinted glass variants (for status/accent states) ── */
+  .lg-tint-blue {
+    background: rgba(0, 122, 255, 0.10);
+    border-top: 1px solid rgba(0, 122, 255, 0.22);
+    border-left: 1px solid rgba(0, 122, 255, 0.10);
+    border-right: 1px solid rgba(0, 122, 255, 0.10);
+    border-bottom: 1px solid rgba(0, 122, 255, 0.06);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+  }
+
+  .lg-tint-green {
+    background: rgba(52, 199, 89, 0.10);
+    border-top: 1px solid rgba(52, 199, 89, 0.22);
+    border-left: 1px solid rgba(52, 199, 89, 0.10);
+    border-right: 1px solid rgba(52, 199, 89, 0.10);
+    border-bottom: 1px solid rgba(52, 199, 89, 0.06);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+  }
+
+  .lg-tint-red {
+    background: rgba(255, 59, 48, 0.10);
+    border-top: 1px solid rgba(255, 59, 48, 0.22);
+    border-left: 1px solid rgba(255, 59, 48, 0.10);
+    border-right: 1px solid rgba(255, 59, 48, 0.10);
+    border-bottom: 1px solid rgba(255, 59, 48, 0.06);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+  }
+
+  .lg-tint-gold {
+    background: rgba(255, 179, 0, 0.10);
+    border-top: 1px solid rgba(255, 179, 0, 0.24);
+    border-left: 1px solid rgba(255, 179, 0, 0.10);
+    border-right: 1px solid rgba(255, 179, 0, 0.10);
+    border-bottom: 1px solid rgba(255, 179, 0, 0.06);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+  }
+
+  /* ── Active / selected fill (iOS "tinted fill") ── */
+  .lg-fill-active {
+    background: rgba(0, 122, 255, 0.12);
+    border-top: 1px solid rgba(0, 122, 255, 0.28);
+    border-left: 1px solid rgba(0, 122, 255, 0.14);
+    border-right: 1px solid rgba(0, 122, 255, 0.14);
+    border-bottom: 1px solid rgba(0, 122, 255, 0.08);
+  }
+
+  /* ── Specular highlight line (top edge glow) ── */
+  .lg-specular::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.48) 0%,
+      rgba(255, 255, 255, 0.0) 40%
+    );
+    z-index: 1;
+  }
+
+  /* ── Ambient light blobs (background decoration) ── */
+  .lg-ambient {
+    position: relative;
+    isolation: isolate;
+  }
+
+  /* 这两层纯装饰光晕原本用 `filter: blur()` 把一个硬边渐变磨软。
+     `filter` 会让节点升格为独立合成层，并让合成器每帧对整块区域跑一次高斯，
+     而光晕本身既不动也不响应交互 —— 完全没必要在运行时算。
+     这里把模糊「烘」进渐变本身：加大盒子以补回 blur 原本向外扩散的范围
+     （盒子每边各长 40px / 32px，故 inset 同量回收以保持圆心位置不变），
+     再用多档缓和的 alpha 停靠点复现高斯的衰减曲线。观感等价，零合成层。 */
+  .lg-ambient::before {
+    content: "";
+    position: absolute;
+    inset: calc(5% - 40px) calc(8% - 40px) auto auto;
+    height: 280px;
+    width: 280px;
+    border-radius: 999px;
+    background: radial-gradient(
+      circle,
+      rgba(85, 205, 252, 0.100) 0%,
+      rgba(85, 205, 252, 0.082) 18%,
+      rgba(85, 205, 252, 0.052) 36%,
+      rgba(85, 205, 252, 0.026) 54%,
+      rgba(85, 205, 252, 0.009) 72%,
+      transparent 88%
+    );
+    pointer-events: none;
+    z-index: -1;
+  }
+
+  .lg-ambient::after {
+    content: "";
+    position: absolute;
+    inset: auto auto calc(5% - 32px) calc(8% - 32px);
+    height: 204px;
+    width: 204px;
+    border-radius: 999px;
+    background: radial-gradient(
+      circle,
+      rgba(247, 168, 184, 0.084) 0%,
+      rgba(247, 168, 184, 0.068) 18%,
+      rgba(247, 168, 184, 0.043) 36%,
+      rgba(247, 168, 184, 0.021) 54%,
+      rgba(247, 168, 184, 0.007) 72%,
+      transparent 88%
+    );
+    pointer-events: none;
+    z-index: -1;
+  }
+
+  /* ── iOS-style spring transitions ── */
+  .lg-spring {
+    transition: transform 0.4s var(--lg-spring), opacity 0.3s var(--lg-ease);
+  }
+
+  .lg-transition {
+    transition: all 0.25s var(--lg-ease);
+  }
+
+  /* ── Coin / wallet badge ── */
+  .coin-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    border-radius: 9999px;
+    padding: 0.375rem 0.875rem;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    color: #b8860b;
+    background: rgba(255, 179, 0, 0.12);
+    border-top: 1px solid rgba(255, 179, 0, 0.28);
+    border-left: 1px solid rgba(255, 179, 0, 0.12);
+    border-right: 1px solid rgba(255, 179, 0, 0.12);
+    border-bottom: 1px solid rgba(255, 179, 0, 0.06);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    transition: transform 0.3s var(--lg-spring);
+  }
+
+  .coin-badge:hover {
+    transform: scale(1.02) translateY(-1px);
+  }
+
+/* LoRA 首次引导（普通模式 ModelPicker 触发）：大 popover，容纳例图与要点。
+   driver.css 在普通模式是动态 import 的，样式必须全站可用，不能放 workstation.css。 */
+.driver-popover.lora-tour-popover {
+  max-width: 380px;
+  border-radius: 1.35rem;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow:
+    0 24px 70px rgba(45, 49, 66, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.92);
+  color: rgba(0, 0, 0, 0.78);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+  backdrop-filter: blur(40px) saturate(1.8);
+  padding: 1.1rem 1.2rem;
+}
+
+.driver-popover.lora-tour-popover .driver-popover-title {
+  color: rgba(0, 0, 0, 0.84);
+  font-size: 0.95rem;
+  font-weight: 780;
+}
+
+.driver-popover.lora-tour-popover .driver-popover-description {
+  color: rgba(0, 0, 0, 0.60);
+  font-size: 0.78rem;
+  line-height: 1.6;
+}
+
+.driver-popover.lora-tour-popover .driver-popover-progress-text {
+  color: rgba(0, 122, 255, 0.82);
+  font-size: 0.68rem;
+  font-weight: 720;
+}
+
+.driver-popover.lora-tour-popover .driver-popover-footer button {
+  border: 0;
+  border-radius: 999px;
+  background: rgba(0, 122, 255, 0.10);
+  padding: 0.38rem 0.9rem;
+  color: #0066dd;
+  font-size: 0.72rem;
+  font-weight: 740;
+  text-shadow: none;
+  transition: background 220ms var(--lg-ease, ease);
+}
+
+.driver-popover.lora-tour-popover .driver-popover-footer button:hover {
+  background: rgba(0, 122, 255, 0.16);
+}
+
+.driver-popover.lora-tour-popover .driver-popover-arrow-side-left {
+  border-left-color: rgba(255, 255, 255, 0.96);
+}
+
+.driver-popover.lora-tour-popover .driver-popover-arrow-side-right {
+  border-right-color: rgba(255, 255, 255, 0.96);
+}
+
+.driver-popover.lora-tour-popover .driver-popover-arrow-side-top {
+  border-top-color: rgba(255, 255, 255, 0.96);
+}
+
+.driver-popover.lora-tour-popover .driver-popover-arrow-side-bottom {
+  border-bottom-color: rgba(255, 255, 255, 0.96);
+}
+
+
+.driver-active [role="menu"] * {
+  pointer-events: auto !important;
+}
+
+
+
+  /* ── Style preset chip ── */  /* Sits inside a single-line scroll rail: fixed 36px height to match the
+     segmented control, no transform on hover (a scaled chip gets clipped by
+     the rail's overflow). Quiet gray FILL, no border: 描边胶囊 × 几十个就是
+     「分割感非常重」的来源——填充让整条控制轨和画质分段控件读成同一族，
+     分组靠留白而不是线。 */
+  .style-chip {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 0.375rem;
+    border-radius: 9999px;
+    white-space: nowrap;
+    height: 2.25rem;
+    padding: 0 0.875rem;
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    color: rgba(0, 0, 0, 0.62);
+    cursor: pointer;
+    transition: background 0.2s var(--lg-ease), color 0.2s var(--lg-ease);
+    background: rgba(0, 0, 0, 0.045);
+    border: none;
+  }
+
+  .style-chip:hover {
+    background: rgba(0, 0, 0, 0.08);
+    color: rgba(0, 0, 0, 0.86);
+  }
+
+  .style-chip.active {
+    background: rgba(0, 122, 255, 0.12);
+    color: #007aff;
+  }
+
+  .style-chip.active:hover {
+    background: rgba(0, 122, 255, 0.17);
+  }
+
+  /* ── Professional mode toggle switch ── */
+  .pro-mode-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-shrink: 0;
+    white-space: nowrap;
+    height: 2.25rem;
+    padding: 0 0.5rem 0 0.375rem;
+    border-radius: 9999px;
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    color: rgba(0, 0, 0, 0.55);
+    background: none;
+    border: none;
+    cursor: pointer;
+  }
+
+  .pro-mode-toggle:hover:not(.active) {
+    color: rgba(0, 0, 0, 0.75);
+  }
+
+  /* Track: inactive → transition defined，下次啟動會動畫 */
+  .pro-mode-toggle-track {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    width: 2rem;
+    height: 1.125rem;
+    border-radius: 9999px;
+    background: rgba(0, 0, 0, 0.15);
+    flex-shrink: 0;
+    transition: background-color 0.3s ease;
+  }
+
+  .pro-mode-toggle:hover:not(.active) .pro-mode-toggle-track {
+    background: rgba(0, 0, 0, 0.22);
+  }
+
+  /* Thumb: inactive → transition defined，下次啟動會動畫 */
+  .pro-mode-toggle-thumb {
+    position: absolute;
+    left: 2px;
+    width: 14px;
+    height: 14px;
+    border-radius: 9999px;
+    background: white;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    transition: transform 0.3s ease;
+  }
+
+  /* Active state: transition: none →離開時立即回位，無動畫 */
+  .pro-mode-toggle.active .pro-mode-toggle-track {
+    background: #007aff;
+    transition: none;
+  }
+
+  .pro-mode-toggle.active .pro-mode-toggle-thumb {
+    transform: translateX(14px);
+    transition: none;
+  }
+
+  .pro-mode-toggle.active .pro-mode-toggle-label {
+    color: #007aff;
+  }
+
+  /* ── Skeleton shimmer ── */
+  @keyframes lg-shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      rgba(255,255,255,0.3) 25%,
+      rgba(255,255,255,0.6) 50%,
+      rgba(255,255,255,0.3) 75%
+    );
+    background-size: 200% 100%;
+    animation: lg-shimmer 1.8s ease-in-out infinite;
+    border-radius: inherit;
+  }
+
+  /* ── Coin deduct pulse ── */
+  @keyframes coin-deduct {
+    0% { transform: scale(1); }
+    25% { transform: scale(0.90); }
+    100% { transform: scale(1); }
+  }
+
+  .coin-deduct { animation: coin-deduct 0.35s var(--lg-spring); }
+
+  /* ── iOS-style divider ── */
+  .lg-divider {
+    height: 0.5px;
+    background: rgba(0, 0, 0, 0.10);
+  }
+
+  /* ── Legacy aliases (keep existing code working) ── */
+  .paper-card   { @apply lg-card; border-radius: 2rem; }
+  .paper-float  { @apply lg-float; border-radius: 9999px; }
+  .zen-panel    { @apply lg-float; border-radius: 1.5rem; }
+  .zen-dock     { @apply lg-bar; }
+  .ink-wash     { @apply lg-fill-active; }
+  .soft-divider { @apply lg-divider; }
+  .ambient-border { border: 1px solid rgba(255,255,255,0.52); }
+  .liquid-stage { @apply lg-ambient; }
+  .auth-surface { @apply lg-sheet; }
+  .nav-surface  { @apply lg-bar; }
+}
+
+/* ── Force body background outside any layer — highest specificity ── */
+body {
+  background:
+    radial-gradient(ellipse 130% 90% at 15% 5%,
+      rgba(85, 205, 252, 0.10) 0%,
+      transparent 60%
+    ),
+    radial-gradient(ellipse 110% 75% at 85% 95%,
+      rgba(247, 168, 184, 0.10) 0%,
+      transparent 60%
+    ),
+    radial-gradient(ellipse 90% 65% at 80% 10%,
+      rgba(85, 205, 252, 0.07) 0%,
+      transparent 55%
+    ),
+    linear-gradient(160deg,
+      #f5fbff 0%,
+      #fef5f7 50%,
+      #f5fbff 100%
+    ) !important;
+  background-attachment: fixed !important;
+}
+
+.generation-progress-glass {
+  position: relative;
+  width: min(19rem, 100%);
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.74);
+  border-radius: 1.75rem;
+  padding: 1.15rem;
+  background:
+    radial-gradient(circle at 18% 0%, rgba(255, 255, 255, 0.88), transparent 42%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.66), rgba(255, 255, 255, 0.34) 52%, rgba(245, 251, 255, 0.54)),
+    rgba(255, 255, 255, 0.46);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.96),
+    inset 0 -24px 44px rgba(255, 255, 255, 0.16),
+    0 18px 50px rgba(45, 49, 66, 0.10);
+  backdrop-filter: blur(42px) saturate(180%) brightness(1.08);
+  -webkit-backdrop-filter: blur(42px) saturate(180%) brightness(1.08);
+}
+
+.generation-progress-glass::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(112deg, rgba(255, 255, 255, 0.68), transparent 32%),
+    linear-gradient(286deg, transparent 58%, rgba(255, 255, 255, 0.24));
+  opacity: 0.58;
+}
+
+.generation-progress-glass > * {
+  position: relative;
+  z-index: 1;
+}
+
+.generation-progress-header {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin-bottom: 0.8rem;
+}
+
+.generation-progress-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 999px;
+  background: rgba(0, 122, 255, 0.78);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.82),
+    0 0 18px rgba(0, 122, 255, 0.30);
+}
+
+.generation-progress-title {
+  flex: 1;
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: 0;
+  color: rgba(0, 0, 0, 0.72);
+}
+
+.generation-progress-value {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.82rem;
+  font-weight: 650;
+  line-height: 1;
+  color: rgba(0, 0, 0, 0.52);
+}
+
+.generation-progress-track {
+  position: relative;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.64), rgba(255, 255, 255, 0.28)),
+    rgba(0, 0, 0, 0.06);
+  box-shadow:
+    inset 0 1px 3px rgba(0, 0, 0, 0.12),
+    0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+.generation-progress-track::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.62), transparent 48%);
+  opacity: 0.50;
+}
+
+.generation-progress-fill {
+  position: relative;
+  height: 100%;
+  min-width: 7px;
+  overflow: hidden;
+  border-radius: inherit;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.48), rgba(255, 255, 255, 0.08)),
+    linear-gradient(90deg, rgba(0, 122, 255, 0.70), rgba(85, 205, 252, 0.82), rgba(234, 247, 255, 0.92));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.70),
+    0 0 18px rgba(0, 122, 255, 0.18);
+  transition: width 520ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.generation-progress-shine {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.62), transparent);
+  transform: translateX(-62%);
+  animation: generation-progress-shine 2.4s ease-in-out infinite;
+}
+
+@keyframes generation-progress-shine {
+  0%, 100% { opacity: 0.16; transform: translateX(-62%); }
+  52% { opacity: 0.58; transform: translateX(62%); }
+}
+
+.pro-app-shell {
+  height: 100svh;
+  overflow: hidden;
+  padding: 0.75rem 0.75rem 0.6rem;
+}
+
+/* 专业模式：全局导航让位给工作站顶栏，页面上只保留一条 header。 */
+body.pro-mode-active #global-navbar {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .generation-progress-fill,
+  .generation-progress-shine {
+    animation: none !important;
+    transition-duration: 1ms !important;
+  }
+
+  /* 全站基线：lg-* 材质的过渡与出现动画此前只在 history.css / workstation.css
+     里各自声明了 reduce，globals 这份覆盖 /pricing、导航栏等其余页面。 */
+  .lg-spring,
+  .lg-transition,
+  .coin-badge,
+  .style-chip,
+  .pro-mode-toggle-track,
+  .pro-mode-toggle-thumb {
+    transition-duration: 1ms !important;
+  }
+
+  .pro-mode-toggle-track,
+  .pro-mode-toggle-thumb {
+    transition-duration: 1ms !important;
+  }
+
+  .animate-lg-appear,
+  .animate-lg-dismiss,
+  .animate-lg-shimmer,
+  .skeleton,
+  .coin-deduct {
+    animation: none !important;
+  }
+
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+/* 引导期间恢复模型选择下拉菜单的点击：driver.js 会给 `.driver-active *` 加
+   pointer-events:none（除高亮元素外全禁点），且它的 SVG 遮罩 path 自带
+   inline pointer-events:auto、z-index 10000，portal 里的菜单（z-50）会被
+   SVG 拦在下面点不动，用户会误以为引导致卡死、点外面反而把菜单关了。
+   把菜单抬到 SVG 之上（10001）并恢复点击即可正常 hover/点选。 */
+.driver-active [role="menu"] {
+  z-index: 10001 !important;
+  pointer-events: auto !important;
+}
+.driver-active [role="menu"] [role="menuitem"] {
+  pointer-events: auto !important;
+}
+
+/* 引导演示用的假鼠标：macOS 风格指针（白色实心箭头 + 细黑描边 + 柔和阴影），
+   按步骤序列移动/点击/打字，像看着别人教一遍——悬停模型按钮 → 落到 PixAI → 点选；
+   或飞入输入框缓速逐字打出示例关键词（如 anime）。指针尖端朝左上，以尖端对准目标。 */
+.tour-fake-cursor {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 1000000002;
+  width: 24px;
+  height: 26px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 26'%3E%3Cpath d='M3 2.5 L20 2.5 L15.5 13 L19 19.5 L13.8 21.8 L11 16.5 L5.5 20 Z' fill='%23ffffff' stroke='%23111111' stroke-width='1.5' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-size: contain;
+  background-repeat: no-repeat;
+  filter: drop-shadow(0 1.5px 3.5px rgba(0, 0, 0, 0.35));
+  pointer-events: none;
+  transition: transform 650ms cubic-bezier(0.22, 1, 0.36, 1), opacity 300ms ease, scale 120ms ease;
+  will-change: transform, scale;
+}
+
+.tour-fake-cursor.is-pressing {
+  scale: 0.85;
+}
+
+/*
+ * 普通模式 PixAI 引导弹层的手机适配。
+ *
+ * 桌面版 max-width 是 340px，360px 宽的机器上左右几乎贴边；driver.js 又是
+ * fixed 定位、按 window.innerWidth 夹取坐标，弹层一旦比可用宽度大就会被推
+ * 到边缘甚至溢出。这里改成跟着视口算宽度，并给足底部安全区。
+ */
+@media (max-width: 1023px) {
+  .driver-popover.lora-tour-popover {
+    max-width: min(340px, calc(100vw - 1.75rem));
+    max-height: min(72svh, calc(100vh - 7rem));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 0.95rem 1rem calc(0.95rem + env(safe-area-inset-bottom, 0px));
+    /* 高于底部导航的合成层，避免被 backdrop-filter 图层盖住 */
+    z-index: 1000000001;
+  }
+
+  .driver-popover.lora-tour-popover .driver-popover-description {
+    font-size: 0.8125rem;
+    line-height: 1.6;
+  }
+
+  /* 触摸目标：桌面 0.7rem 的小药丸在手机上按不准 */
+  .driver-popover.lora-tour-popover .driver-popover-footer button {
+    min-height: 2.75rem;
+    padding: 0.5rem 1.05rem;
+    font-size: 0.8125rem;
+  }
+
+  .driver-popover.lora-tour-popover .driver-popover-close-btn {
+    width: 2.75rem;
+    height: 2.75rem;
+    font-size: 1.25rem;
+  }
+}
+
+/* ─── Dust transition ─────────────────────────────────────── */
+.dust-transition {
+  will-change: filter, transform, opacity;
+}
+
+/* 散開：向上模糊消失 */
+@keyframes dust-exit-kf {
+  0%   { opacity: 1; filter: blur(0px);   transform: scale(1)    translateY(0px); }
+  50%  { opacity: 0.5; filter: blur(6px);  transform: scale(0.97) translateY(-6px); }
+  100% { opacity: 0;   filter: blur(12px); transform: scale(0.93) translateY(-14px); }
+}
+
+/* 重組：從下方模糊匯聚進來 */
+@keyframes dust-enter-kf {
+  0%   { opacity: 0;   filter: blur(10px); transform: scale(1.03) translateY(14px); }
+  60%  { opacity: 0.85; filter: blur(2px);  transform: scale(1.01) translateY(-2px); }
+  100% { opacity: 1;   filter: blur(0px);  transform: scale(1)    translateY(0px); }
+}
+
+.dust-exit {
+  animation: dust-exit-kf 260ms cubic-bezier(0.4, 0, 0.8, 0) forwards;
+  pointer-events: none;
+}
+
+.dust-enter {
+  animation: dust-enter-kf 320ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  pointer-events: none;
+}
+
+/* GitHub 登入進行中：按鈕外圈順時針掃動的進度環。
+   conic-gradient + radial mask，只露最外一環，繼承按鈕圓角，永遠貼合——
+   不用 SVG 幾何縮放，所以不會出現圓角失真的問題。 */
+@keyframes login-border-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.login-progress-ring {
+  position: absolute;
+  inset: -1.5px;
+  border-radius: 9999px;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    transparent 260deg,
+    rgba(255, 255, 255, 0.95) 340deg,
+    transparent 360deg
+  );
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
+  animation: login-border-spin 1.1s linear infinite;
+}
+
+
+
+

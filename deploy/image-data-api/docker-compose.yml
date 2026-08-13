@@ -1,0 +1,19 @@
+services:
+  image-data-api:
+    build: .
+    image: image-data-api:local
+    container_name: image-data-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data:/data/files
+    networks:
+      - sub2api-test_sub2api-network
+      - imagesite_imagesite
+
+networks:
+  sub2api-test_sub2api-network:
+    external: true
+  imagesite_imagesite:
+    external: true

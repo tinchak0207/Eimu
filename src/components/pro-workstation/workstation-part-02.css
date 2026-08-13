@@ -1,0 +1,887 @@
+
+.pro-app-shell .pro-studio-shell {
+  height: 100%;
+  min-height: 0;
+  gap: 0.35rem;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+}
+
+.pro-studio-topbar,
+.pro-glass-panel {
+  border-color: rgba(255, 255, 255, 0.58);
+  background: rgba(255, 255, 255, 0.44);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.72),
+    0 12px 36px rgba(45, 49, 66, 0.06);
+}
+
+.pro-studio-body {
+  grid-template-columns: minmax(250px, 440px) minmax(420px, 1fr) minmax(290px, 340px);
+}
+
+.pro-app-shell .pro-studio-topbar {
+  min-height: 0;
+  padding: 0.4rem 0.6rem;
+}
+
+.pro-app-shell .pro-studio-topbar h2 {
+  font-size: 0.95rem;
+  line-height: 1.2;
+}
+
+.pro-app-shell .pro-studio-topbar p {
+  font-size: 0.66rem;
+  line-height: 1.2;
+}
+
+.pro-app-shell .pro-studio-body {
+  min-height: 0;
+  gap: 0.7rem;
+  grid-template-columns:
+    minmax(200px, var(--pro-left-w, 440px))
+    minmax(320px, 1fr)
+    minmax(220px, var(--pro-right-w, 320px));
+}
+
+/* 三栏拖拽把手：钉在左右面板的边界线上，鼠标拖动动态分配各栏宽度。 */
+.pro-resize-handle {
+  position: absolute;
+  top: 0.4rem;
+  bottom: 0.4rem;
+  width: 12px;
+  z-index: 12;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.pro-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 3px;
+  height: 3rem;
+  border-radius: 999px;
+  background: rgba(0, 122, 255, 0);
+  transform: translate(-50%, -50%);
+  transition: background 200ms ease;
+}
+
+.pro-resize-handle:hover::after,
+.pro-resize-handle.is-dragging::after {
+  background: rgba(0, 122, 255, 0.30);
+}
+
+.pro-resize-handle--left {
+  left: calc(var(--pro-left-w, 440px) - 6px);
+}
+
+.pro-resize-handle--right {
+  left: calc(100% - var(--pro-right-w, 320px) - 6px);
+}
+
+@media (min-width: 1024px) {
+  .pro-app-shell .pro-studio-body[data-inspector-state="rail"] {
+    grid-template-columns:
+      minmax(200px, var(--pro-left-w, 440px))
+      minmax(360px, 1fr)
+      72px;
+  }
+
+  .pro-app-shell .pro-studio-body[data-inspector-state="expanded"] {
+    grid-template-columns:
+      minmax(200px, var(--pro-left-w, 440px))
+      minmax(320px, 1fr)
+      minmax(220px, var(--pro-right-w, 320px));
+  }
+
+  .pro-app-shell .pro-studio-body[data-inspector-state="rail"][data-explorer-focus="lora"] {
+    grid-template-columns: clamp(520px, 43vw, 620px) minmax(320px, 1fr) 72px;
+  }
+
+  .pro-studio-body[data-explorer-focus="lora"] .pro-lora-card-grid {
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  }
+
+  .pro-studio-body[data-inspector-state="rail"] .pro-inspector {
+    grid-template-rows: auto;
+    align-content: start;
+    padding: 0.45rem;
+  }
+
+  .pro-studio-body[data-inspector-state="rail"] .pro-inspector-tabs {
+    grid-template-columns: minmax(0, 1fr);
+    align-content: start;
+    gap: 0.3rem;
+    border-radius: 1.1rem;
+    padding: 0.25rem;
+  }
+
+  .pro-studio-body[data-inspector-state="rail"] .pro-inspector-tabs button {
+    width: 100%;
+    min-width: 0;
+    min-height: 2.75rem;
+    padding: 0;
+  }
+
+  .pro-studio-body[data-inspector-state="rail"] .pro-inspector-tab-icon {
+    width: 1.15rem;
+    height: 1.15rem;
+  }
+
+  /* 收起态右栏被钉成 72px，把手要跟着贴到轨道边上，否则它会停在画布中间。 */
+  .pro-studio-body[data-inspector-state="rail"] .pro-resize-handle--right {
+    left: calc(100% - 72px - 6px);
+  }
+
+  .pro-studio-body[data-inspector-state="rail"] .pro-inspector-tab-label,
+  /* 收放按钮要留着，否则收起后没有把手能展开回来。 */
+  .pro-studio-body[data-inspector-state="rail"] .pro-inspector > :not(.pro-inspector-tabs, .pro-inspector-collapse),
+  .pro-studio-body[data-explorer-focus="lora"] .pro-resize-handle--left {
+    display: none;
+  }
+
+  /* 收起态右栏固定 72px，把分隔条挪到轨道边缘，仍可拖着直接把右栏拉出来。 */
+  .pro-studio-body[data-inspector-state="rail"] .pro-resize-handle--right {
+    left: calc(100% - 72px - 6px);
+  }
+}
+
+@media (max-width: 1023px) {
+  .pro-resize-handle {
+    display: none;
+  }
+}
+
+.pro-left-panel,
+.pro-inspector,
+.pro-canvas-stage {
+  border-radius: 1.55rem;
+}
+
+.pro-app-shell .pro-left-panel,
+.pro-app-shell .pro-inspector,
+.pro-app-shell .pro-canvas-stage {
+  min-height: 0;
+}
+
+.pro-app-shell .pro-glass-panel {
+  padding: 0.7rem;
+}
+
+.pro-app-shell .pro-canvas-stage {
+  gap: 0.6rem;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+}
+
+.pro-app-shell .pro-canvas-preview {
+  min-height: 0;
+}
+
+.pro-app-shell .pro-panel-stack {
+  overflow: auto;
+}
+
+.pro-app-shell .pro-accordion {
+  padding: 0.62rem;
+}
+
+.pro-app-shell .pro-accordion[open] summary {
+  margin-bottom: 0.5rem;
+}
+
+.pro-gallery-toolbar,
+.pro-tool-strip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.34);
+  padding: 0.25rem;
+}
+
+.pro-gallery-toolbar button,
+.pro-tool-strip button {
+  border-radius: 999px;
+  padding: 0.42rem 0.72rem;
+  color: rgba(0, 0, 0, 0.48);
+  font-size: 0.68rem;
+  font-weight: 760;
+}
+
+.pro-gallery-toolbar button:hover,
+.pro-gallery-toolbar button.is-active,
+.pro-tool-strip button:hover,
+.pro-tool-strip button.is-active {
+  background: rgba(255, 255, 255, 0.72);
+  color: rgba(0, 0, 0, 0.72);
+  box-shadow: 0 8px 20px rgba(45, 49, 66, 0.06);
+}
+
+.pro-control-row {
+  grid-template-columns: 2.7rem minmax(0, 1fr);
+}
+
+.pro-range-control {
+  grid-template-columns: 2.7rem minmax(0, 1fr) auto;
+}
+
+.pro-control-row select,
+.pro-studio-shell textarea,
+.pro-studio-shell input:not([type="range"]) {
+  border: 0 !important;
+  background: rgba(255, 255, 255, 0.38) !important;
+  color: rgba(0, 0, 0, 0.68) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.52);
+}
+
+.pro-studio-shell textarea::placeholder,
+.pro-studio-shell input::placeholder {
+  color: rgba(0, 0, 0, 0.34);
+}
+
+.pro-canvas-preview {
+  position: relative;
+  border-radius: 1.55rem;
+  border-color: rgba(255, 255, 255, 0.58);
+  background:
+    linear-gradient(45deg, rgba(255, 255, 255, 0.28) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(255, 255, 255, 0.28) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(255, 255, 255, 0.28) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(255, 255, 255, 0.28) 75%),
+    rgba(255, 255, 255, 0.24);
+  background-position: 0 0, 0 0.75rem, 0.75rem -0.75rem, -0.75rem 0;
+  background-size: 1.5rem 1.5rem;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.58);
+}
+
+.pro-viewer-grid {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 0.7rem;
+  padding: 0.8rem;
+}
+
+.pro-gallery-grid {
+  display: grid;
+  min-height: 0;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 0.7rem;
+  overflow: auto;
+}
+
+/*
+ * 卡片外面多一层 .pro-gallery-item，只为一件事：下载按钮不能嵌在卡片按钮里面
+ * （button 套 button 是非法 HTML，浏览器会把内层拆出去，点击目标随之错位）。
+ * 外层负责定位，卡片与下载按钮是兄弟节点。
+ */
+.pro-gallery-item {
+  position: relative;
+  min-width: 0;
+}
+
+.pro-gallery-download {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  display: grid;
+  width: 1.75rem;
+  height: 1.75rem;
+  place-items: center;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 6px 16px rgba(45, 49, 66, 0.16);
+  color: rgba(0, 0, 0, 0.62);
+  opacity: 0;
+  transition: opacity 160ms ease, background 160ms ease;
+}
+
+.pro-gallery-item:hover .pro-gallery-download,
+.pro-gallery-download:focus-visible {
+  opacity: 1;
+}
+
+.pro-gallery-download:hover {
+  background: #fff;
+  color: rgba(0, 0, 0, 0.82);
+}
+
+/* 触屏没有 hover：下载按钮常驻，否则永远点不到。 */
+@media (hover: none) {
+  .pro-gallery-download {
+    opacity: 1;
+  }
+}
+
+.pro-gallery-card {
+  display: block;
+  overflow: hidden;
+  min-width: 0;
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.56);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.34);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.52);
+  text-align: left;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+button.pro-gallery-card:not(:disabled):hover {
+  border-color: rgba(0, 122, 255, 0.32);
+  transform: translateY(-1px);
+}
+
+.pro-gallery-card.is-selected,
+.pro-provenance-card.is-selected {
+  border-color: rgba(0, 122, 255, 0.50);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.52),
+    0 0 0 3px rgba(0, 122, 255, 0.14);
+}
+
+.pro-gallery-card img,
+.pro-gallery-empty {
+  display: grid;
+  width: 100%;
+  aspect-ratio: 1;
+  place-items: center;
+  object-fit: cover;
+  background: rgba(255, 255, 255, 0.42);
+}
+
+.pro-gallery-card span {
+  display: block;
+  overflow: hidden;
+  padding: 0.45rem 0.55rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(0, 0, 0, 0.54);
+  font-size: 0.68rem;
+  font-weight: 720;
+}
+
+.pro-reference-tile {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.56);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.34);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.52);
+}
+
+.pro-reference-tile img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+}
+
+.pro-reference-tile-body {
+  display: grid;
+  gap: 0.32rem;
+  padding: 0.5rem;
+}
+
+.pro-reference-tile-body p {
+  overflow: hidden;
+  margin: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(0, 0, 0, 0.62);
+  font-size: 0.64rem;
+  font-weight: 740;
+}
+
+.pro-reference-tile-body label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: rgba(0, 0, 0, 0.44);
+  font-size: 0.62rem;
+  font-weight: 700;
+}
+
+.pro-reference-tile-body select {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  border-radius: 0.6rem;
+  background: rgba(255, 255, 255, 0.5);
+  padding: 0.25rem 0.35rem;
+  color: rgba(0, 0, 0, 0.62);
+  font-size: 0.64rem;
+  font-weight: 720;
+  outline: none;
+}
+
+.pro-reference-tile-body input[type="range"] {
+  flex: 1;
+  min-width: 0;
+  accent-color: #007aff;
+}
+
+.pro-reference-tile-body strong {
+  flex-shrink: 0;
+  color: rgba(0, 122, 255, 0.78);
+  font-size: 0.6rem;
+}
+
+.pro-tool-strip {
+  display: flex;
+  flex-wrap: wrap;
+  margin-bottom: 0;
+}
+
+.pro-layer-remove {
+  flex-shrink: 0;
+  border-radius: 0.8rem;
+  background: rgba(255, 255, 255, 0.42);
+  padding: 0.46rem 0.5rem;
+  color: rgba(0, 122, 255, 0.72);
+  font-size: 0.66rem;
+  font-weight: 760;
+}
+
+.pro-regional-list {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.pro-regional-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.52);
+  border-radius: 0.95rem;
+  background: rgba(255, 255, 255, 0.30);
+  padding: 0.5rem;
+}
+
+.pro-regional-row.is-muted {
+  opacity: 0.52;
+}
+
+.pro-regional-row .pro-layer-toggle {
+  margin-top: 0.5rem;
+}
+
+.pro-add-row-button {
+  display: inline-flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  margin-top: 0.55rem;
+  border-radius: 0.9rem;
+  background: rgba(255, 255, 255, 0.46);
+  padding: 0.5rem;
+  color: rgba(0, 122, 255, 0.78);
+  font-size: 0.68rem;
+  font-weight: 760;
+  transition: background 220ms var(--pro-spring, ease), transform 220ms var(--pro-spring, ease);
+}
+
+.pro-add-row-button:hover {
+  background: rgba(255, 255, 255, 0.72);
+  transform: translateY(-1px);
+}
+
+.pro-layer-toggle {
+  width: 0.72rem;
+  height: 0.72rem;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.16);
+}
+
+.pro-layer-toggle.is-active {
+  background: #007aff;
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.12);
+}
+
+.pro-slot-row strong {
+  color: rgba(0, 0, 0, 0.52);
+  background: rgba(255, 255, 255, 0.42);
+}
+
+.pro-slot-row em,
+.pro-metric-card span,
+.pro-recent-item small {
+  color: rgba(0, 0, 0, 0.38);
+}
+
+.pro-metric-card strong {
+  color: rgba(0, 0, 0, 0.70);
+}
+
+.pro-recent-item:hover {
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.pro-topbar-chips {
+  display: none;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+/* 1180px 让 13" 笔电（1280 逻辑宽常见缩放后约 1097）永远看不到模型/尺寸摘要，下调到 1024。 */
+@media (min-width: 1024px) {
+  .pro-topbar-chips {
+    display: inline-flex;
+  }
+}
+
+/*
+ * 速览筹码现在是真按钮：看到「失败 2」的下一个动作必然是「去看哪两个失败了」，
+ * 旧版是纯 <span>，点下去毫无反应，用户只能自己去右栏找队列 tab。
+ */
+.pro-topbar-chips button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.32rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.46);
+  /* 触控最小 28px 高：原本 0.26rem 内距只有约 22px，指尖点不准 */
+  padding: 0.35rem 0.6rem;
+  color: rgba(0, 0, 0, 0.50);
+  font-size: 0.64rem;
+  font-weight: 740;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 180ms ease, color 180ms ease, transform 180ms ease;
+}
+
+.pro-topbar-chips button:hover {
+  background: rgba(255, 255, 255, 0.78);
+  color: rgba(0, 0, 0, 0.70);
+  transform: translateY(-1px);
+}
+
+.pro-topbar-chips button::before {
+  content: "";
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.20);
+}
+
+.pro-topbar-chips button[data-state="done"]::before {
+  background: #34c759;
+}
+
+.pro-topbar-chips button[data-state="running"]::before {
+  background: #007aff;
+}
+
+.pro-topbar-chips button[data-state="failed"]::before {
+  background: #ff3b30;
+}
+
+/* 有失败任务时筹码本身带底色，不用去数字里找 */
+.pro-topbar-chips button[data-state="failed"][data-alert="true"] {
+  background: rgba(255, 59, 48, 0.12);
+  color: rgba(200, 30, 20, 0.88);
+}
+
+/*
+ * 生成进度条 + 骨架屏。
+ *
+ * 旧版整个等待过程只有「正在生成」四个字：一批 8 张跑两三分钟，用户不知道
+ * 到第几张、还要多久，只能反复切队列数格子。
+ */
+.pro-run-progress-track {
+  position: relative;
+  width: 100%;
+  height: 0.32rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.pro-run-progress-track > span {
+  display: block;
+  height: 100%;
+  min-width: 0.32rem;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(0, 122, 255, 0.72), rgba(0, 122, 255, 0.95));
+  transition: width 420ms var(--pro-spring, ease);
+}
+
+.pro-run-progress {
+  display: grid;
+  gap: 0.35rem;
+  margin-bottom: 0.55rem;
+}
+
+.pro-run-progress p {
+  color: rgba(0, 0, 0, 0.46);
+  font-size: 0.64rem;
+  font-weight: 700;
+}
+
+.pro-canvas-skeleton {
+  display: grid;
+  place-items: center;
+  gap: 0.85rem;
+  width: 100%;
+  max-width: 26rem;
+  padding: 1rem;
+}
+
+.pro-canvas-skeleton-frame {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border-radius: 1.2rem;
+  background: linear-gradient(
+    100deg,
+    rgba(255, 255, 255, 0.30) 28%,
+    rgba(255, 255, 255, 0.68) 46%,
+    rgba(255, 255, 255, 0.30) 64%
+  );
+  background-size: 320% 100%;
+  animation: pro-skeleton-sweep 1500ms ease-in-out infinite;
+}
+
+@keyframes pro-skeleton-sweep {
+  from {
+    background-position: 130% 0;
+  }
+  to {
+    background-position: -30% 0;
+  }
+}
+
+.pro-canvas-skeleton-copy {
+  display: grid;
+  justify-items: center;
+  gap: 0.4rem;
+  width: 100%;
+}
+
+.pro-canvas-skeleton-copy strong {
+  color: rgba(0, 0, 0, 0.62);
+  font-size: 0.72rem;
+  font-weight: 780;
+}
+
+.pro-canvas-skeleton-copy span {
+  color: rgba(0, 0, 0, 0.42);
+  font-size: 0.64rem;
+  font-weight: 700;
+}
+
+.pro-canvas-dock {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  border-radius: 1.2rem;
+  background: rgba(255, 255, 255, 0.34);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
+  padding: 0.45rem 0.55rem;
+  backdrop-filter: blur(28px) saturate(1.6);
+}
+
+.pro-dock-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+/* 笔粗选择条：只在标注 / 擦除工具激活时出现，与工具条同一材质。 */
+.pro-brush-strip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.34);
+  padding: 0.25rem;
+}
+
+.pro-brush-strip button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.32rem;
+  border-radius: 999px;
+  padding: 0.35rem 0.6rem;
+  color: rgba(0, 0, 0, 0.48);
+  font-size: 0.64rem;
+  font-weight: 740;
+}
+
+.pro-brush-strip button span {
+  display: inline-block;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.pro-brush-strip button:hover,
+.pro-brush-strip button.is-active {
+  background: rgba(255, 255, 255, 0.72);
+  color: rgba(0, 122, 255, 0.85);
+  box-shadow: 0 8px 20px rgba(45, 49, 66, 0.06);
+}
+
+.pro-dock-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.52);
+  padding: 0.42rem 0.7rem;
+  color: rgba(0, 0, 0, 0.58);
+  font-size: 0.66rem;
+  font-weight: 740;
+  white-space: nowrap;
+  transition: background 220ms var(--pro-spring, ease), color 220ms var(--pro-spring, ease), transform 220ms var(--pro-spring, ease);
+}
+
+.pro-dock-actions button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.82);
+  color: rgba(0, 0, 0, 0.72);
+  transform: translateY(-1px);
+}
+
+.pro-dock-actions button:disabled {
+  color: rgba(0, 0, 0, 0.24);
+  cursor: default;
+}
+
+/*
+ * 通知区。旧版单条 nowrap + ellipsis：「已调整版位：所选模型不支…」——
+ * 恰好把原因截掉，留下的是没有信息量的前半句。现在允许两行换行，
+ * 并按 info / warn / error 三级配色，错误不再和「已存入预设」长一个样。
+ */
+.pro-canvas-notices {
+  display: flex;
+  min-width: 0;
+  max-width: 58%;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.25rem;
+}
+
+.pro-canvas-notice {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: 0.85rem;
+  background: rgba(0, 122, 255, 0.10);
+  padding: 0.3rem 0.65rem;
+  color: rgba(0, 90, 200, 0.85);
+  font-size: 0.66rem;
+  font-style: normal;
+  font-weight: 720;
+  line-height: 1.35;
+  text-align: right;
+}
+
+.pro-canvas-notice[data-level="warn"] {
+  background: rgba(255, 149, 0, 0.14);
+  color: rgba(150, 78, 0, 0.92);
+}
+
+.pro-canvas-notice[data-level="error"] {
+  background: rgba(255, 59, 48, 0.14);
+  color: rgba(168, 26, 18, 0.94);
+}
+
+.pro-canvas-notice > button {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 0.15rem;
+  color: inherit;
+  opacity: 0.62;
+  transition: opacity 160ms var(--pro-spring, ease);
+}
+
+.pro-canvas-notice > button:hover {
+  opacity: 1;
+}
+
+.pro-empty-cta {
+  border-radius: 999px;
+  background: rgba(0, 122, 255, 0.10);
+  padding: 0.45rem 0.95rem;
+  color: #0066dd;
+  font-size: 0.7rem;
+  font-weight: 760;
+  transition: background 220ms var(--pro-spring, ease), transform 220ms var(--pro-spring, ease);
+}
+
+.pro-empty-cta:hover {
+  background: rgba(0, 122, 255, 0.16);
+  transform: translateY(-1px);
+}
+
+/*
+ * 成片翻页。原本切换成片的唯一入口是右栏图库或中栏成片墙 —— 看第 5 张要先离开画布、
+ * 回到网格、再点进来，标注和缩放全部重置。这里就地翻页，键盘 ← → 等价。
+ */
+.pro-canvas-pager {
+  position: absolute;
+  bottom: 0.7rem;
+  left: 50%;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 8px 22px rgba(45, 49, 66, 0.12);
+  padding: 0.2rem;
+  backdrop-filter: blur(16px);
+}
+
+.pro-canvas-pager button {
+  display: grid;
+  width: 1.9rem;
+  height: 1.9rem;
+  place-items: center;
+  border-radius: 999px;
+  color: rgba(0, 0, 0, 0.6);
+  transition: background 160ms ease, color 160ms ease;
+}
+
+.pro-canvas-pager button:hover {
+  background: rgba(0, 122, 255, 0.10);
+  color: #0066dd;
+}
+
+.pro-canvas-pager span {
+  min-width: 3rem;
+  padding: 0 0.2rem;
+  text-align: center;
+  color: rgba(0, 0, 0, 0.56);
+  font-size: 0.66rem;
+  font-weight: 760;
+  font-variant-numeric: tabular-nums;
+}
+
+.pro-zoom-toggle {
+  position: absolute;
+  top: 0.7rem;
+  right: 0.7rem;
+  z-index: 2;
+  display: inline-flex;
+  gap: 0.2rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.74);
+  box-shadow: 0 8px 22px rgba(45, 49, 66, 0.10);
+  padding: 0.2rem;
+  backdrop-filter: blur(16px);
+}

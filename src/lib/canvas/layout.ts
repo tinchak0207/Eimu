@@ -1,0 +1,525 @@
+// 畫布純函式層：事件分流、事件正規化、幾何、歷史快照、專案序列化。
+//
+// 為什麼要有這一層：gateway 的 canvas.* payload 是「寬鬆解析」過的
+// （src/lib/agent-chat-types.ts 的 AgentCanvas* 型別：node 只有 id/type/title/metadata，
+// 沒有 position/width/height），而 src/lib/canvas/reducer.ts 吃的是完整的 CanvasNode。
+// 中間這一步轉換必須是純函式，否則 React 元件裡混進契約補齊邏輯，測不了也講不清。
+//
+// 排版座標一律留 (0,0) 交給 reducer 的 nextPosition 決定（PRD §5：不允許在
+// reducer 外再寫一套排版）。這裡只補「尺寸」與「型別」這種契約缺口。
+
+import type { AgentSseEvent } from "@/lib/agent-chat-types";
+import type { CanvasReducerState } from "./reducer";
+import {
+  CANVAS_NODE_DEFAULT_SIZE,
+  CanvasNodeType,
+  type CanvasConnection,
+  type CanvasNode,
+  type CanvasNodeMetadata,
+  type CanvasNodeStatus,
+  type CanvasPosition,
+  type CanvasProject,
+  type CanvasSseEvent,
+  type CanvasViewport,
+} from "./types";
+
+// ─────────────────────────────────────────── 事件分流
+
+/** canvas.* = 畫布事件；其餘進既有 transcript reducer。 */
+export function isCanvasEventName(name: string): boolean {
+  return name.startsWith("canvas.");
+}
+
+/** 純展示型畫布事件（reducer 不吃，UI 直接透傳顯示）。 */
+export type CanvasPassthroughEvent =
+  | { name: "canvas.derive.started"; data: { unit_id: string; source_node_id: string; instruction: string; interpretation?: string } }
+  | { name: "canvas.budget.updated"; data: { unit_id?: string; used_coins: number; remaining_coins: number } };
+
+/** reducer 吃得下的事件名（會改變 nodes/connections/units）。 */
+const REDUCIBLE = new Set([
+  "canvas.plan",
+  "canvas.node.created",
+  "canvas.node.updated",
+  "canvas.node.connected",
+  "canvas.node.generating",
+  "canvas.node.deleted",
+]);
+
+export function isReducibleCanvasEvent(name: string): boolean {
+  return REDUCIBLE.has(name);
+}
+
+// ─────────────────────────────────────────── 型別/尺寸正規化
+
+const NODE_TYPES = new Set<string>(Object.values(CanvasNodeType));
+
+/** 未知 type 一律退成 text：畫得出來的節點勝過畫不出來的正確性。 */
+export function toNodeType(raw: unknown): CanvasNodeType {
+  return typeof raw === "string" && NODE_TYPES.has(raw) ? (raw as CanvasNodeType) : CanvasNodeType.Text;
+}
+
+const STATUSES = new Set<CanvasNodeStatus>(["idle", "success", "loading", "error"]);
+
+/**
+ * gateway 的 status 詞彙比前端寬（running/pending/queued/failed…）。
+ * 映射到四態，UI 才只需要處理四種顏色。
+ */
+export function toNodeStatus(raw: unknown): CanvasNodeStatus | undefined {
+  if (typeof raw !== "string" || raw.length === 0) return undefined;
+  if (STATUSES.has(raw as CanvasNodeStatus)) return raw as CanvasNodeStatus;
+  if (raw === "running" || raw === "pending" || raw === "queued" || raw === "generating") return "loading";
+  if (raw === "failed" || raw === "error") return "error";
+  if (raw === "done" || raw === "succeeded" || raw === "completed") return "success";
+  return undefined;
+}
+
+function num(v: unknown): number | undefined {
+  return typeof v === "number" && Number.isFinite(v) ? v : undefined;
+}
+
+function str(v: unknown): string | undefined {
+  return typeof v === "string" ? v : undefined;
+}
+
+/** 把寬鬆 metadata 收斂成 CanvasNodeMetadata（丟掉不認得的欄位，status 走映射）。 */
+export function toNodeMetadata(raw: unknown): CanvasNodeMetadata {
+  if (!raw || typeof raw !== "object") return {};
+  const m = raw as Record<string, unknown>;
+  const status = toNodeStatus(m.status);
+  return {
+    ...(str(m.content) !== undefined ? { content: str(m.content) } : {}),
+    ...(str(m.prompt) !== undefined ? { prompt: str(m.prompt) } : {}),
+    ...(str(m.negativePrompt) !== undefined ? { negativePrompt: str(m.negativePrompt) } : {}),
+    ...(str(m.model) !== undefined ? { model: str(m.model) } : {}),
+    ...(str(m.size) !== undefined ? { size: str(m.size) } : {}),
+    ...(str(m.quality) !== undefined ? { quality: str(m.quality) } : {}),
+    ...(num(m.count) !== undefined ? { count: num(m.count) } : {}),
+    ...(str(m.kind) !== undefined ? { kind: str(m.kind) } : {}),
+    ...(m.source_image === null || str(m.source_image) !== undefined
+      ? { source_image: (str(m.source_image) ?? null) as string | null }
+      : {}),
+    ...(status ? { status } : {}),
+    ...(str(m.errorDetails) !== undefined ? { errorDetails: str(m.errorDetails) } : {}),
+    ...(num(m.naturalWidth) !== undefined ? { naturalWidth: num(m.naturalWidth) } : {}),
+    ...(num(m.naturalHeight) !== undefined ? { naturalHeight: num(m.naturalHeight) } : {}),
+    ...(num(m.cost_coins) !== undefined ? { cost_coins: num(m.cost_coins) } : {}),
+    ...(str(m.imageTaskId) !== undefined ? { imageTaskId: str(m.imageTaskId) } : {}),
+    ...(num(m.startedAt) !== undefined ? { startedAt: num(m.startedAt) } : {}),
+    ...(num(m.progress) !== undefined ? { progress: num(m.progress) } : {}),
+  };
+}
+
+/**
+ * 補齊節點契約缺口：type 收斂、尺寸取預設、position 留 (0,0)。
+ *
+ * position 留 0,0 是刻意的 —— reducer 的 upsertNode 看到 0,0 才會呼叫
+ * nextPosition 自動排版。gateway 不給座標，版面權在前端 reducer 一處。
+ */
+export function normalizeCanvasNode(raw: {
+  id: string;
+  type: string;
+  title: string;
+  position?: CanvasPosition;
+  width?: number;
+  height?: number;
+  metadata?: Record<string, unknown>;
+}): CanvasNode {
+  const type = toNodeType(raw.type);
+  const size = CANVAS_NODE_DEFAULT_SIZE[type];
+  return {
+    id: raw.id,
+    type,
+    title: raw.title || size.title,
+    position: raw.position && (raw.position.x || raw.position.y) ? raw.position : { x: 0, y: 0 },
+    width: num(raw.width) ?? size.width,
+    height: num(raw.height) ?? size.height,
+    metadata: toNodeMetadata(raw.metadata),
+  };
+}
+
+/**
+ * AgentSseEvent（寬鬆）→ CanvasSseEvent（reducer 契約）。
+ * 非 canvas 事件、或 canvas 事件但 reducer 不吃的（derive/budget）回 null。
+ */
+export function normalizeCanvasEvent(event: AgentSseEvent): CanvasSseEvent | null {
+  switch (event.name) {
+    case "canvas.plan":
+      return { name: "canvas.plan", data: { ...event.data } };
+    case "canvas.node.created": {
+      const node = event.data.node;
+      if (!node || typeof node.id !== "string" || node.id.length === 0) return null;
+      return {
+        name: "canvas.node.created",
+        data: {
+          unit_id: event.data.unit_id,
+          node: normalizeCanvasNode(node),
+          ...(event.data.target_kind ? { target_kind: event.data.target_kind } : {}),
+        },
+      };
+    }
+    case "canvas.node.updated": {
+      if (!event.data.node_id) return null;
+      const patch = toNodeMetadata(event.data.patch);
+      return {
+        name: "canvas.node.updated",
+        data: {
+          unit_id: event.data.unit_id,
+          node_id: event.data.node_id,
+          patch,
+          ...(event.data.url ? { url: event.data.url } : {}),
+          ...(typeof event.data.cost_coins === "number" ? { cost_coins: event.data.cost_coins } : {}),
+        },
+      };
+    }
+    case "canvas.node.connected": {
+      const c = event.data.connection;
+      if (!c || !c.id || !c.fromNodeId || !c.toNodeId) return null;
+      return {
+        name: "canvas.node.connected",
+        data: {
+          unit_id: event.data.unit_id,
+          connection: { id: c.id, fromNodeId: c.fromNodeId, toNodeId: c.toNodeId },
+          ...(event.data.target_kind ? { target_kind: event.data.target_kind } : {}),
+        },
+      };
+    }
+    case "canvas.node.generating": {
+      if (!event.data.node_id) return null;
+      return {
+        name: "canvas.node.generating",
+        data: {
+          unit_id: event.data.unit_id,
+          node_id: event.data.node_id,
+          // reducer 會把 status 原樣塞進 metadata，所以這裡就先映射成四態之一。
+          status: toNodeStatus(event.data.status) ?? "loading",
+          ...(typeof event.data.progress === "number" ? { progress: event.data.progress } : {}),
+        },
+      };
+    }
+    case "canvas.node.deleted":
+      return {
+        name: "canvas.node.deleted",
+        data: { unit_id: event.data.unit_id, ...(event.data.node_id ? { node_id: event.data.node_id } : {}) },
+      };
+    default:
+      return null;
+  }
+}
+
+// ─────────────────────────────────────────── canvas_state 摘要（上送 gateway）
+
+export interface CanvasStateSummaryNode {
+  id: string;
+  type: string;
+  title: string;
+  status?: CanvasNodeStatus;
+  model?: string;
+  size?: string;
+  cost_coins?: number;
+}
+
+export interface CanvasStateSummary {
+  nodes: CanvasStateSummaryNode[];
+  connections: { id: string; fromNodeId: string; toNodeId: string }[];
+  units: { unit_id: string; tool: string; node_count: number }[];
+}
+
+/** 摘要上限：畫布可以有 500 個節點，但沒必要把 500 個都塞進每一次 send。 */
+export const CANVAS_SUMMARY_MAX_NODES = 60;
+
+/**
+ * 純 metadata 摘要，**永不含圖片 base64／dataURL**。
+ * content 一律不帶：圖節點的 content 是 URL、文本節點的 content 是整段 prompt，
+ * 兩者都可能很長，而 gateway 要的只是「畫布上有什麼」。
+ */
+export function summarizeCanvasState(state: CanvasReducerState): CanvasStateSummary {
+  const nodes = state.nodes.slice(-CANVAS_SUMMARY_MAX_NODES).map((n) => ({
+    id: n.id,
+    type: String(n.type),
+    title: n.title,
+    ...(n.metadata?.status ? { status: n.metadata.status } : {}),
+    ...(n.metadata?.model ? { model: n.metadata.model } : {}),
+    ...(n.metadata?.size ? { size: n.metadata.size } : {}),
+    ...(typeof n.metadata?.cost_coins === "number" ? { cost_coins: n.metadata.cost_coins } : {}),
+  }));
+  const kept = new Set(nodes.map((n) => n.id));
+  return {
+    nodes,
+    connections: state.connections
+      .filter((c) => kept.has(c.fromNodeId) && kept.has(c.toNodeId))
+      .map((c) => ({ id: c.id, fromNodeId: c.fromNodeId, toNodeId: c.toNodeId })),
+    units: state.units.map((u) => ({ unit_id: u.unitId, tool: u.tool, node_count: u.nodes.length })),
+  };
+}
+
+// ─────────────────────────────────────────── 視口幾何
+
+export const CANVAS_MIN_SCALE = 0.05;
+export const CANVAS_MAX_SCALE = 5;
+export const CANVAS_GRID_BASE = 48;
+
+export function clampScale(k: number): number {
+  if (!Number.isFinite(k)) return 1;
+  return Math.min(CANVAS_MAX_SCALE, Math.max(CANVAS_MIN_SCALE, k));
+}
+
+/** 滾輪縮放：factor = 1.1^(-deltaY/100)，錨點固定在游標下的世界座標。 */
+export function zoomAtPoint(vp: CanvasViewport, deltaY: number, px: number, py: number): CanvasViewport {
+  const factor = Math.pow(1.1, -deltaY / 100);
+  const k = clampScale(vp.k * factor);
+  if (k === vp.k) return vp;
+  // 游標下的世界點在縮放前後必須落在同一個螢幕位置：
+  //   world = (screen - translate) / k  → translate' = screen - world * k'
+  const worldX = (px - vp.x) / vp.k;
+  const worldY = (py - vp.y) / vp.k;
+  return { x: px - worldX * k, y: py - worldY * k, k };
+}
+
+export function screenToWorld(vp: CanvasViewport, px: number, py: number): CanvasPosition {
+  return { x: (px - vp.x) / vp.k, y: (py - vp.y) / vp.k };
+}
+
+export function worldToScreen(vp: CanvasViewport, wx: number, wy: number): CanvasPosition {
+  return { x: wx * vp.k + vp.x, y: wy * vp.k + vp.y };
+}
+
+export interface CanvasBounds {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+  width: number;
+  height: number;
+}
+
+/** 小地圖的世界範圍：節點 min/max 各留 pad（PRD §7.4 預設 ±500）。 */
+export function computeWorldBounds(nodes: CanvasNode[], pad = 500): CanvasBounds {
+  if (nodes.length === 0) {
+    return { minX: -pad, minY: -pad, maxX: pad, maxY: pad, width: pad * 2, height: pad * 2 };
+  }
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const n of nodes) {
+    minX = Math.min(minX, n.position.x);
+    minY = Math.min(minY, n.position.y);
+    maxX = Math.max(maxX, n.position.x + n.width);
+    maxY = Math.max(maxY, n.position.y + n.height);
+  }
+  minX -= pad;
+  minY -= pad;
+  maxX += pad;
+  maxY += pad;
+  return { minX, minY, maxX, maxY, width: maxX - minX, height: maxY - minY };
+}
+
+/** 把整張畫布塞進視口（含邊距），回新的 viewport。 */
+export function fitToNodes(
+  nodes: CanvasNode[],
+  viewportWidth: number,
+  viewportHeight: number,
+  padding = 80,
+): CanvasViewport {
+  if (nodes.length === 0 || viewportWidth <= 0 || viewportHeight <= 0) return { x: 0, y: 0, k: 1 };
+  const b = computeWorldBounds(nodes, 0);
+  const k = clampScale(
+    Math.min((viewportWidth - padding * 2) / Math.max(b.width, 1), (viewportHeight - padding * 2) / Math.max(b.height, 1)),
+  );
+  return {
+    x: viewportWidth / 2 - (b.minX + b.width / 2) * k,
+    y: viewportHeight / 2 - (b.minY + b.height / 2) * k,
+    k,
+  };
+}
+
+/** 貝茲連線：出右側中點、進左側中點，curvature = max(|dx|*0.5, 50)。 */
+export function bezierPath(from: CanvasNode, to: CanvasNode): string {
+  const x1 = from.position.x + from.width;
+  const y1 = from.position.y + from.height / 2;
+  const x2 = to.position.x;
+  const y2 = to.position.y + to.height / 2;
+  const c = Math.max(Math.abs(x2 - x1) * 0.5, 50);
+  return `M ${x1} ${y1} C ${x1 + c} ${y1}, ${x2 - c} ${y2}, ${x2} ${y2}`;
+}
+
+/** 網格背景：gridSize 跟著縮放走，backgroundPosition 取視口的模，格線才不會漂。 */
+export function gridBackground(vp: CanvasViewport, mode: "dots" | "lines" | "blank"): {
+  backgroundImage?: string;
+  backgroundSize?: string;
+  backgroundPosition?: string;
+} {
+  if (mode === "blank") return {};
+  const size = CANVAS_GRID_BASE * vp.k;
+  if (size < 6) return {}; // 縮太小時格線變噪點，直接不畫
+  const offsetX = ((vp.x % size) + size) % size;
+  const offsetY = ((vp.y % size) + size) % size;
+  if (mode === "lines") {
+    return {
+      backgroundImage:
+        "linear-gradient(to right, rgba(0,0,0,0.06) 1px, transparent 1px), linear-gradient(to bottom, rgba(0,0,0,0.06) 1px, transparent 1px)",
+      backgroundSize: `${size}px ${size}px`,
+      backgroundPosition: `${offsetX}px ${offsetY}px`,
+    };
+  }
+  return {
+    backgroundImage: "radial-gradient(circle, rgba(0,0,0,0.13) 1px, transparent 1px)",
+    backgroundSize: `${size}px ${size}px`,
+    backgroundPosition: `${offsetX}px ${offsetY}px`,
+  };
+}
+
+// ─────────────────────────────────────────── 歷史快照（undo/redo）
+
+export interface CanvasSnapshot {
+  nodes: CanvasNode[];
+  connections: CanvasConnection[];
+  viewport: CanvasViewport;
+}
+
+export interface CanvasHistory {
+  past: CanvasSnapshot[];
+  future: CanvasSnapshot[];
+}
+
+export const CANVAS_HISTORY_LIMIT = 50;
+export const CANVAS_EMPTY_HISTORY: CanvasHistory = { past: [], future: [] };
+
+/** 推一格快照。任何新動作都會清空 future（分岔後舊的 redo 已經沒有意義）。 */
+export function pushSnapshot(history: CanvasHistory, snapshot: CanvasSnapshot): CanvasHistory {
+  const past = [...history.past, snapshot];
+  return { past: past.slice(Math.max(0, past.length - CANVAS_HISTORY_LIMIT)), future: [] };
+}
+
+/** 撤銷：把 current 推進 future，回上一格。沒得撤銷時回 null。 */
+export function undoSnapshot(
+  history: CanvasHistory,
+  current: CanvasSnapshot,
+): { history: CanvasHistory; snapshot: CanvasSnapshot } | null {
+  if (history.past.length === 0) return null;
+  const snapshot = history.past[history.past.length - 1];
+  return {
+    history: { past: history.past.slice(0, -1), future: [current, ...history.future].slice(0, CANVAS_HISTORY_LIMIT) },
+    snapshot,
+  };
+}
+
+/** 重做：把 current 推回 past，回 future 的第一格。沒得重做時回 null。 */
+export function redoSnapshot(
+  history: CanvasHistory,
+  current: CanvasSnapshot,
+): { history: CanvasHistory; snapshot: CanvasSnapshot } | null {
+  if (history.future.length === 0) return null;
+  const snapshot = history.future[0];
+  return {
+    history: { past: [...history.past, current].slice(-CANVAS_HISTORY_LIMIT), future: history.future.slice(1) },
+    snapshot,
+  };
+}
+
+// ─────────────────────────────────────────── 專案序列化（Blob / 匯出匯入）
+
+/** reducer state + 視口 → 可存的 CanvasProject。 */
+export function toCanvasProject(
+  base: { id: string; title: string; createdAt?: string },
+  state: CanvasReducerState,
+  viewport: CanvasViewport,
+  backgroundMode: "dots" | "lines" | "blank",
+  budget?: { totalCoins: number; usedCoins: number },
+): CanvasProject {
+  const now = new Date().toISOString();
+  return {
+    id: base.id,
+    title: base.title || "未命名画布",
+    createdAt: base.createdAt ?? now,
+    updatedAt: now,
+    nodes: state.nodes,
+    connections: state.connections,
+    viewport,
+    backgroundMode,
+    ...(budget ? { budget } : {}),
+  };
+}
+
+/**
+ * CanvasProject → reducer state。units 一律回空陣列：
+ * 單元是「這次會話的生成批次」，跨刷新沒有意義，節點/連線才是畫布本體。
+ */
+export function fromCanvasProject(project: {
+  nodes?: unknown;
+  connections?: unknown;
+}): CanvasReducerState {
+  const rawNodes = Array.isArray(project.nodes) ? project.nodes : [];
+  const nodes = rawNodes.flatMap((n) => {
+    if (!n || typeof n !== "object") return [];
+    const r = n as Record<string, unknown>;
+    if (typeof r.id !== "string" || r.id.length === 0) return [];
+    const node = normalizeCanvasNode({
+      id: r.id,
+      type: String(r.type ?? ""),
+      title: String(r.title ?? ""),
+      ...(r.position && typeof r.position === "object"
+        ? { position: r.position as CanvasPosition }
+        : {}),
+      ...(num(r.width) !== undefined ? { width: num(r.width) } : {}),
+      ...(num(r.height) !== undefined ? { height: num(r.height) } : {}),
+      ...(r.metadata && typeof r.metadata === "object" ? { metadata: r.metadata as Record<string, unknown> } : {}),
+    });
+    // 存檔裡的座標要原樣還原（normalizeCanvasNode 只在缺座標時給 0,0）。
+    const pos = r.position as CanvasPosition | undefined;
+    return [pos && num(pos.x) !== undefined && num(pos.y) !== undefined ? { ...node, position: { x: pos.x, y: pos.y } } : node];
+  });
+  const ids = new Set(nodes.map((n) => n.id));
+  const rawConns = Array.isArray(project.connections) ? project.connections : [];
+  const connections = rawConns.flatMap((c) => {
+    if (!c || typeof c !== "object") return [];
+    const r = c as Record<string, unknown>;
+    if (typeof r.id !== "string" || typeof r.fromNodeId !== "string" || typeof r.toNodeId !== "string") return [];
+    // 懸空連線不還原：一頭找不到節點的線畫出來是一條指向虛空的曲線。
+    if (!ids.has(r.fromNodeId) || !ids.has(r.toNodeId)) return [];
+    return [{ id: r.id, fromNodeId: r.fromNodeId, toNodeId: r.toNodeId }];
+  });
+  return { units: [], nodes, connections };
+}
+
+/** 匯出檔的信封（帶 kind/version，匯入時才能認出這不是別的 JSON）。 */
+export const CANVAS_EXPORT_KIND = "image-studio.canvas";
+export const CANVAS_EXPORT_VERSION = 1;
+
+export interface CanvasExportFile {
+  kind: typeof CANVAS_EXPORT_KIND;
+  version: number;
+  exportedAt: string;
+  project: CanvasProject;
+}
+
+export function buildExportFile(project: CanvasProject): CanvasExportFile {
+  return {
+    kind: CANVAS_EXPORT_KIND,
+    version: CANVAS_EXPORT_VERSION,
+    exportedAt: new Date().toISOString(),
+    project,
+  };
+}
+
+/** 匯入：認信封也認裸 project（別人手改過的檔案不該直接失敗）。回 null = 不是畫布檔。 */
+export function parseImportFile(raw: unknown): { nodes: CanvasNode[]; connections: CanvasConnection[]; viewport?: CanvasViewport; backgroundMode?: "dots" | "lines" | "blank"; title?: string } | null {
+  if (!raw || typeof raw !== "object") return null;
+  const env = raw as Record<string, unknown>;
+  const project = (env.kind === CANVAS_EXPORT_KIND && env.project && typeof env.project === "object"
+    ? (env.project as Record<string, unknown>)
+    : env) as Record<string, unknown>;
+  if (!Array.isArray(project.nodes)) return null;
+  const state = fromCanvasProject(project as { nodes?: unknown; connections?: unknown });
+  const vp = project.viewport as CanvasViewport | undefined;
+  const bg = project.backgroundMode;
+  return {
+    nodes: state.nodes,
+    connections: state.connections,
+    ...(vp && num(vp.x) !== undefined && num(vp.y) !== undefined && num(vp.k) !== undefined
+      ? { viewport: { x: vp.x, y: vp.y, k: clampScale(vp.k) } }
+      : {}),
+    ...(bg === "dots" || bg === "lines" || bg === "blank" ? { backgroundMode: bg } : {}),
+    ...(typeof project.title === "string" ? { title: project.title } : {}),
+  };
+}

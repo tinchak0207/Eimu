@@ -1,0 +1,36 @@
+storage:
+  type: sqlite
+  path: /data/gatus.db
+  maximum-number-of-results: 1500
+  maximum-number-of-events: 100
+
+ui:
+  title: Image API Status
+  header: Image API Status
+  default-sort-by: group
+
+endpoints:
+  - name: GPT Image 2 - 1K generation
+    group: Production
+    url: https://image.tinchak0207.xyz/v1/images/generations
+    method: POST
+    interval: 2h
+    headers:
+      Authorization: "Bearer ${IMAGE_API_KEY}"
+      Content-Type: application/json
+    body: |
+      {"model":"gpt-image-2","prompt":"Uptime monitor probe. Create a single minimal blue square on a white background.","size":"1024x1024","n":1}
+    client:
+      timeout: 10m
+    conditions:
+      # production 的 /v1/images/generations 是非同步 API：POST 一律回 202 + task body。
+      # 探測必須驗證「202 + task id 存在」，而不是寬鬆的 2xx——否則卡 202 也算成功。
+      - "[STATUS] == 202"
+      - "[BODY].id != \"\""
+    ui:
+      hide-hostname: true
+      hide-port: true
+      hide-errors: false
+      badge:
+        response-time:
+          thresholds: [10000, 30000, 60000, 120000, 300000]

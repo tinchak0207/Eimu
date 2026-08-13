@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: image-tinchak0207
+    env: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    autoDeploy: true
+    healthCheckPath: /api/healthz
+    envVars:
+      - key: IMAGE_API_KEY
+        sync: false
+      - key: IMAGE_API_BASE_URL
+        value: https://share-api.com/v1
+      - key: IMAGE_API_MODEL
+        value: gpt-image-2
+      - key: IMAGE_API_KEY_FALLBACK
+        sync: false
+      - key: IMAGE_API_BASE_URL_FALLBACK
+        value: https://happycode.vip/v1

@@ -1,0 +1,912 @@
+
+.pro-template-preset.is-active .pro-template-preset-check {
+  border-color: #007aff;
+  background: #007aff;
+}
+
+.pro-template-preset-head strong {
+  font-size: 0.68rem;
+  font-weight: 760;
+}
+
+.pro-template-prompt-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  align-self: start;
+  color: rgba(0, 91, 184, 0.8);
+  font-size: 0.6rem;
+  font-weight: 690;
+}
+
+.pro-template-prompt-toggle svg {
+  transition: transform 180ms ease;
+}
+
+.pro-template-prompt-toggle svg.is-open {
+  transform: rotate(180deg);
+}
+
+.pro-template-prompt-body {
+  max-height: 8rem;
+  overflow: auto;
+  margin: 0;
+  border-radius: 0.6rem;
+  background: rgba(255, 255, 255, 0.5);
+  padding: 0.5rem;
+  color: rgba(0, 0, 0, 0.58);
+  font-family: inherit;
+  font-size: 0.62rem;
+  font-weight: 590;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.pro-template-config {
+  display: grid;
+  gap: 0.6rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.5);
+  padding-top: 0.6rem;
+}
+
+.pro-template-subject {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.pro-template-subject span {
+  color: rgba(0, 0, 0, 0.54);
+  font-size: 0.64rem;
+  font-weight: 740;
+}
+
+.pro-template-subject input {
+  width: 100%;
+  border: 0 !important;
+  border-radius: 0.7rem;
+  background: rgba(255, 255, 255, 0.42) !important;
+  padding: 0.42rem 0.55rem;
+  color: rgba(0, 0, 0, 0.68) !important;
+  font-size: 0.7rem;
+  font-weight: 620;
+  outline: none;
+}
+
+.pro-template-subject input::placeholder {
+  color: rgba(0, 0, 0, 0.34);
+}
+
+.pro-template-count {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.pro-template-count > span {
+  color: rgba(0, 0, 0, 0.54);
+  font-size: 0.66rem;
+  font-weight: 740;
+}
+
+.pro-template-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.46);
+  padding: 0.2rem;
+}
+
+.pro-template-stepper button {
+  display: grid;
+  width: 1.6rem;
+  height: 1.6rem;
+  place-items: center;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.6);
+  color: rgba(0, 122, 255, 0.85);
+  font-size: 1rem;
+  font-weight: 780;
+}
+
+.pro-template-stepper strong {
+  min-width: 1.4rem;
+  text-align: center;
+  color: rgba(0, 0, 0, 0.66);
+  font-size: 0.72rem;
+  font-weight: 780;
+  font-variant-numeric: tabular-nums;
+}
+
+.pro-template-total {
+  color: rgba(0, 0, 0, 0.5);
+  font-size: 0.68rem;
+  font-weight: 690;
+}
+
+.pro-template-total strong {
+  color: rgba(0, 90, 200, 0.9);
+  font-weight: 800;
+}
+
+.pro-template-submit {
+  display: inline-flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  min-height: 2.3rem;
+  border-radius: 0.95rem;
+  background: #007aff;
+  box-shadow: 0 10px 26px rgba(0, 122, 255, 0.3);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 790;
+  transition: background 200ms ease, transform 200ms ease;
+}
+
+.pro-template-submit:hover:not(:disabled) {
+  background: #0066dd;
+  transform: translateY(-1px);
+}
+
+.pro-template-submit:disabled {
+  background: rgba(0, 0, 0, 0.16);
+  box-shadow: none;
+}
+
+.pro-template-empty {
+  margin: 0;
+  padding: 0.5rem 0.2rem;
+  color: rgba(0, 0, 0, 0.4);
+  font-size: 0.68rem;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+/* ---------- PixAI 改图模式 chip（Phase 1，仅 UI） ---------- */
+.pro-edit-mode-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  border-radius: 999px;
+  background: rgba(0, 122, 255, 0.12);
+  padding: 0.2rem 0.5rem;
+  color: rgba(0, 102, 221, 0.92);
+  font-size: 0.6rem;
+  font-weight: 780;
+}
+
+.pro-size-options button.is-active strong {
+  color: #0066dd;
+}
+
+.pro-brand-form {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.pro-brand-form input {
+  width: 100%;
+  border: 0;
+  border-radius: 0.8rem;
+  padding: 0.55rem 0.7rem;
+  font-size: 0.7rem;
+  font-weight: 620;
+  outline: none;
+}
+
+.pro-boards {
+  display: grid;
+  align-content: start;
+  gap: 0.5rem;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 0.1rem;
+}
+
+.pro-board-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.pro-board-chips button {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.46);
+  padding: 0.3rem 0.65rem;
+  color: rgba(0, 0, 0, 0.56);
+  font-size: 0.64rem;
+  font-weight: 740;
+  white-space: nowrap;
+  transition: background 220ms var(--pro-spring, ease), color 220ms var(--pro-spring, ease);
+}
+
+.pro-board-chips button.is-active {
+  background: #007aff;
+  color: #fff;
+  box-shadow: 0 8px 20px rgba(0, 122, 255, 0.26);
+}
+
+.pro-board-create {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.pro-board-create input {
+  flex: 1;
+  min-width: 120px;
+  border: 0;
+  border-radius: 0.8rem;
+  padding: 0.45rem 0.6rem;
+  font-size: 0.66rem;
+  font-weight: 650;
+  outline: none;
+}
+
+.pro-board-create button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.52);
+  padding: 0.4rem 0.65rem;
+  color: rgba(0, 0, 0, 0.58);
+  font-size: 0.64rem;
+  font-weight: 740;
+  white-space: nowrap;
+  transition: background 220ms var(--pro-spring, ease), color 220ms var(--pro-spring, ease);
+}
+
+.pro-board-create button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.pro-board-create button:disabled {
+  color: rgba(0, 0, 0, 0.24);
+  cursor: default;
+}
+
+.pro-shot-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+  gap: 0.5rem;
+}
+
+.pro-shot-card {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.56);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.34);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.52);
+}
+
+.pro-shot-card img,
+.pro-shot-loading {
+  display: grid;
+  width: 100%;
+  aspect-ratio: 1;
+  place-items: center;
+  object-fit: cover;
+  background: rgba(255, 255, 255, 0.42);
+  color: rgba(0, 0, 0, 0.35);
+  font-size: 0.62rem;
+  font-weight: 700;
+}
+
+.pro-shot-body {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.45rem 0.5rem;
+}
+
+.pro-shot-body p {
+  overflow: hidden;
+  margin: 0;
+  color: rgba(0, 0, 0, 0.62);
+  font-size: 0.62rem;
+  font-weight: 740;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pro-shot-body small {
+  overflow: hidden;
+  color: rgba(0, 0, 0, 0.4);
+  font-size: 0.56rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pro-shot-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.pro-shot-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  /* 24px 命中区（旧版 0.22rem padding + 0.6rem 字 ≈ 15px），删除与下载之间还有 0.4rem 间隔 */
+  min-width: 1.5rem;
+  min-height: 1.5rem;
+  border-radius: 0.55rem;
+  background: rgba(255, 255, 255, 0.5);
+  padding: 0.22rem 0.4rem;
+  color: rgba(0, 0, 0, 0.55);
+  font-size: 0.6rem;
+  font-weight: 740;
+  transition: background 200ms var(--pro-spring, ease), color 200ms var(--pro-spring, ease);
+}
+
+/*
+ * 删除与下载分开。
+ *
+ * 旧版两个钮紧贴，都是 15px 见方的无标签小方块，点错一次就丢一张成片
+ * （删除没有确认，已在 handleDeleteShot 补上）。这里再加物理间隔与红色语义，
+ * 让「不可逆」在视觉上先于点击被看见。
+ */
+.pro-shot-actions .pro-shot-danger {
+  margin-left: 0.4rem;
+  background: rgba(255, 59, 48, 0.10);
+  color: rgba(255, 59, 48, 0.82);
+}
+
+.pro-shot-actions .pro-shot-danger:hover {
+  background: rgba(255, 59, 48, 0.18);
+  color: #ff3b30;
+}
+
+.pro-shot-actions button:hover {
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.pro-shot-actions button.is-active {
+  color: #ff9500;
+}
+
+.pro-shot-actions select {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  border-radius: 0.55rem;
+  background: rgba(255, 255, 255, 0.5);
+  padding: 0.22rem 0.3rem;
+  color: rgba(0, 0, 0, 0.58);
+  font-size: 0.58rem;
+  font-weight: 700;
+  outline: none;
+}
+
+.pro-boards-empty {
+  border-radius: 0.9rem;
+  background: rgba(255, 255, 255, 0.3);
+  padding: 0.6rem;
+  color: rgba(0, 0, 0, 0.42);
+  font-size: 0.68rem;
+  font-weight: 650;
+  line-height: 1.5;
+}
+
+.driver-popover.pro-tour-popover {
+  max-width: 330px;
+  border-radius: 1.25rem;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow:
+    0 24px 70px rgba(45, 49, 66, 0.20),
+    inset 0 1px 0 rgba(255, 255, 255, 0.92);
+  color: rgba(0, 0, 0, 0.78);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+  backdrop-filter: blur(40px) saturate(1.8);
+  padding: 1rem 1.1rem;
+}
+
+.driver-popover.pro-tour-popover .driver-popover-title {
+  color: rgba(0, 0, 0, 0.84);
+  font-size: 0.9rem;
+  font-weight: 760;
+}
+
+.driver-popover.pro-tour-popover .driver-popover-description {
+  color: rgba(0, 0, 0, 0.60);
+  font-size: 0.76rem;
+  line-height: 1.6;
+}
+
+.driver-popover.pro-tour-popover .driver-popover-progress-text {
+  color: rgba(0, 122, 255, 0.82);
+  font-size: 0.68rem;
+  font-weight: 720;
+}
+
+.driver-popover.pro-tour-popover .driver-popover-footer button {
+  border: 0;
+  border-radius: 999px;
+  background: rgba(0, 122, 255, 0.10);
+  padding: 0.38rem 0.85rem;
+  color: #0066dd;
+  font-size: 0.7rem;
+  font-weight: 740;
+  text-shadow: none;
+  transition: background 220ms var(--pro-spring, ease);
+}
+
+.driver-popover.pro-tour-popover .driver-popover-footer button:hover {
+  background: rgba(0, 122, 255, 0.16);
+}
+
+.driver-popover.pro-tour-popover .driver-popover-arrow-side-left {
+  border-left-color: rgba(255, 255, 255, 0.94);
+}
+
+.driver-popover.pro-tour-popover .driver-popover-arrow-side-right {
+  border-right-color: rgba(255, 255, 255, 0.94);
+}
+
+.driver-popover.pro-tour-popover .driver-popover-arrow-side-top {
+  border-top-color: rgba(255, 255, 255, 0.94);
+}
+
+.driver-popover.pro-tour-popover .driver-popover-arrow-side-bottom {
+  border-bottom-color: rgba(255, 255, 255, 0.94);
+}
+
+.pro-mobile-nav {
+  display: none;
+}
+
+/*
+ * 手机版进度条：桌面端进度在画布骨架屏和队列里，手机版这两处都要切面板才看得到。
+ * 生成期间常驻在导航下方一条，不用离开当前面板就知道跑到第几张。
+ */
+.pro-mobile-generate-bar {
+  display: none;
+}
+
+.pro-mobile-bottom-area {
+  display: none;
+}
+
+.pro-mobile-progress {
+  display: none;
+}
+
+.pro-title-mobile {
+  display: none;
+}
+
+/*
+ * 跨 tab 跳转链接在桌面端原本 display:none —— 只有 1023px 以下才出现。
+ * 桌面端「写提示词时想加参考图」照样要自己找到第二个 tab；有现成的
+ * 一键跳转却对着最常用的屏幕尺寸藏起来，没有理由。
+ */
+.pro-inline-panel-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-left: auto;
+  border-radius: 999px;
+  background: rgba(0, 122, 255, 0.10);
+  padding: 0.24rem 0.6rem;
+  color: #007aff;
+  font-size: 0.64rem;
+  font-weight: 740;
+  white-space: nowrap;
+  transition: background 180ms ease;
+}
+
+.pro-inline-panel-link:hover {
+  background: rgba(0, 122, 255, 0.18);
+}
+
+.pro-inline-panel-link em {
+  font-style: normal;
+  opacity: 0.72;
+}
+
+@media (max-width: 1023px) {
+  .pro-app-shell {
+    padding: 2.15rem 1rem 1rem;
+  }
+
+  .pro-app-shell .pro-studio-shell {
+    grid-template-rows: auto auto minmax(0, 1fr);
+    gap: 0.65rem;
+  }
+
+  .pro-studio-topbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.5rem;
+    min-height: 2.75rem;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    padding: 0 0.1rem;
+    backdrop-filter: none;
+  }
+
+  .pro-studio-topbar::before {
+    display: none;
+  }
+
+  .pro-mode-segment,
+  .pro-topbar-chips {
+    display: none;
+  }
+
+  .pro-title-desktop {
+    display: none;
+  }
+
+  .pro-title-mobile {
+    display: inline;
+  }
+
+  .pro-topbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+
+  .pro-topbar-actions button {
+    min-width: 0;
+    justify-content: center;
+    min-height: 2.75rem;
+    border-radius: 999px;
+    padding: 0.52rem 0.85rem;
+    font-size: 0.8125rem;
+    white-space: nowrap;
+  }
+
+  .pro-topbar-actions .pro-topbar-tool {
+    width: 2.75rem;
+    padding: 0;
+  }
+
+  .pro-action-label {
+    display: none;
+  }
+
+  #pro-tour-run {
+    min-width: 6.75rem;
+  }
+
+  /*
+    生成按钮不再用 disabled 属性（点了没反应等于哑巴），改成 data-disabled：
+    看起来是禁用态，但点击会告诉用户缺什么并把焦点送到提示词框。
+  */
+  #pro-tour-run[data-disabled] {
+    background: rgba(0, 0, 0, 0.14) !important;
+    color: rgba(255, 255, 255, 0.86);
+    box-shadow: none;
+  }
+
+  /*
+    手机上左栏只有一列，「更多要求」「LoRA 风格」这类可选深度面板排到主链之后，
+    别插在「画面描述 → 创作模板 → 运行」中间把主流程顶下去。
+    （这个类以前挂在 JSX 上但整份样式表里没有任何规则，等于装饰。）
+  */
+  .pro-collapsed-mobile {
+    order: 2;
+  }
+
+  /* mobile generate: hide topbar button, in-panel run bar; show bottom area wrapper */
+  .pro-topbar-actions #pro-tour-run {
+    display: none !important;
+  }
+
+  .pro-run-bar {
+    display: none;
+  }
+
+  .pro-mobile-bottom-area {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .pro-mobile-bottom-area .pro-mobile-generate-bar {
+    display: flex;
+    padding: 0 0 0.5rem;
+  }
+
+  .pro-mobile-nav {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.25rem;
+    border: 1px solid rgba(255, 255, 255, 0.76);
+    border-radius: 1.2rem;
+    background: rgba(255, 255, 255, 0.52);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.88), 0 8px 24px rgba(45, 49, 66, 0.045);
+    padding: 0.25rem;
+    /* 移动端底部导航常驻合成层：半径收敛到 28px，saturate/brightness 不变。 */
+    backdrop-filter: blur(28px) saturate(1.65) brightness(1.04);
+  }
+
+  .pro-mobile-nav button {
+    min-height: 2.5rem;
+    border-radius: 0.95rem;
+    color: rgba(0, 0, 0, 0.48);
+    font-size: 0.8125rem;
+    font-weight: 700;
+  }
+
+  .pro-mobile-nav button.is-active {
+    background: rgba(255, 255, 255, 0.94);
+    color: #0066d6;
+    box-shadow: 0 4px 12px rgba(45, 49, 66, 0.07);
+  }
+
+  .pro-mobile-nav button:disabled {
+    color: rgba(0, 0, 0, 0.32);
+    cursor: default;
+  }
+
+  /* 手机上没有右栏可看队列，进度只能在导航下面这一条里说清楚 */
+  .pro-mobile-progress {
+    display: grid;
+    gap: 0.3rem;
+    border-radius: 1rem;
+    background: rgba(255, 255, 255, 0.52);
+    padding: 0.45rem 0.6rem;
+  }
+
+  .pro-mobile-progress span {
+    color: rgba(0, 0, 0, 0.56);
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+
+  .pro-inline-panel-link {
+    display: inline-flex;
+    min-height: 2.75rem;
+    align-items: center;
+    gap: 0.35rem;
+    margin-left: auto;
+    border-radius: 999px;
+    background: rgba(0, 122, 255, 0.10);
+    padding: 0 0.75rem;
+    color: #007aff;
+    font-size: 0.8125rem;
+    font-weight: 500;
+  }
+
+  .pro-inline-panel-link em {
+    font-size: 0.75rem;
+    font-style: normal;
+  }
+
+  .pro-studio-body {
+    grid-template-columns: minmax(0, 1fr);
+    overflow-x: hidden;
+    overflow-y: auto;
+    padding-right: 0.1rem;
+    scrollbar-width: none;
+  }
+
+  .pro-studio-body::-webkit-scrollbar {
+    display: none;
+  }
+
+  .pro-app-shell .pro-studio-body {
+    grid-template-columns: minmax(0, 1fr);
+    overflow-x: hidden;
+    overflow-y: auto;
+    padding-right: 0.1rem;
+  }
+
+  .pro-studio-body[data-mobile-panel="create"] .pro-canvas-stage,
+  .pro-studio-body[data-mobile-panel="create"] .pro-inspector,
+  .pro-studio-body[data-mobile-panel="settings"] .pro-canvas-stage,
+  .pro-studio-body[data-mobile-panel="settings"] .pro-inspector,
+  .pro-studio-body[data-mobile-panel="canvas"] .pro-left-panel,
+  .pro-studio-body[data-mobile-panel="canvas"] .pro-inspector,
+  .pro-studio-body[data-mobile-panel="output"] .pro-left-panel,
+  .pro-studio-body[data-mobile-panel="output"] .pro-canvas-stage {
+    display: none;
+  }
+
+  .pro-left-panel,
+  .pro-inspector,
+  .pro-canvas-stage,
+  .pro-app-shell .pro-left-panel,
+  .pro-app-shell .pro-inspector,
+  .pro-app-shell .pro-canvas-stage {
+    min-height: 0;
+  }
+
+  .pro-glass-panel {
+    border-color: rgba(255, 255, 255, 0.78);
+    background: rgba(255, 255, 255, 0.64);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.86), 0 14px 36px rgba(45, 49, 66, 0.05);
+  }
+
+  .pro-app-shell .pro-glass-panel {
+    padding: 0.85rem;
+  }
+
+  /* 手机：模型行 / 提示行 / 内容 / 运行条（.pro-side-tabs 在这里是 display:none） */
+  .pro-left-panel {
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    gap: 0.15rem;
+  }
+
+  .pro-side-tabs {
+    display: none;
+  }
+
+  .pro-inspector-tabs {
+    border-radius: 0;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.07);
+    background: transparent;
+    padding: 0 0 0.45rem;
+  }
+
+  .pro-inspector-tabs button {
+    min-height: 2.5rem;
+    border-radius: 0.85rem;
+    font-size: 0.8125rem;
+  }
+
+  .pro-panel-hint {
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    padding: 0 0.15rem 0.4rem;
+    color: rgba(0, 0, 0, 0.5);
+    font-size: 0.875rem;
+    line-height: 1.45;
+  }
+
+  .pro-left-panel .pro-accordion,
+  .pro-inspector .pro-accordion {
+    border-top: 1px solid rgba(0, 0, 0, 0.065);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    padding: 0.9rem 0.15rem;
+  }
+
+  .pro-panel-stack > .pro-accordion:first-child {
+    border-top: 0;
+    padding-top: 0.35rem;
+  }
+
+  .pro-panel-title {
+    font-size: 0.875rem;
+    font-weight: 600;
+  }
+
+  .pro-section-note {
+    font-size: 0.8125rem;
+    line-height: 1.48;
+  }
+
+  .pro-studio-shell textarea {
+    font-size: 0.875rem !important;
+    line-height: 1.55;
+  }
+
+  .pro-prompt-meter {
+    gap: 0.75rem;
+    font-size: 0.75rem;
+  }
+
+  .pro-prompt-meter span,
+  .pro-prompt-meter strong {
+    background: transparent;
+    padding: 0;
+  }
+
+  .pro-prompt-meter span:nth-child(2),
+  .pro-prompt-meter span:last-child {
+    display: none;
+  }
+
+  .pro-chip-grid,
+  .pro-chip-row {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+
+  .pro-chip-grid::-webkit-scrollbar,
+  .pro-chip-row::-webkit-scrollbar,
+  .pro-style-grid::-webkit-scrollbar {
+    display: none;
+  }
+
+  .pro-chip-grid button,
+  .pro-chip-row button {
+    min-height: 2.5rem;
+    padding: 0.5rem 0.8rem;
+    font-size: 0.8125rem;
+  }
+
+  .pro-style-grid {
+    display: flex;
+    max-height: none;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+
+  .pro-style-grid button {
+    flex: 0 0 auto;
+    min-width: 6.25rem;
+    min-height: 2.5rem;
+    font-size: 0.8125rem;
+  }
+
+  .pro-control-row {
+    min-height: 3rem;
+    grid-template-columns: 3.4rem minmax(0, 1fr);
+    font-size: 0.875rem;
+  }
+
+  .pro-control-row strong {
+    display: none;
+  }
+
+  .pro-range-control {
+    grid-template-columns: 3.4rem minmax(0, 1fr) auto;
+  }
+
+  .pro-range-control output {
+    display: block;
+    min-width: 2.6rem;
+  }
+
+  .pro-control-row select,
+  .pro-studio-shell input:not([type="range"]) {
+    font-size: 0.8125rem !important;
+  }
+
+  .pro-size-options button {
+    min-height: 2.75rem;
+  }
+
+  .pro-size-options button strong {
+    font-size: 0.8125rem;
+  }
+
+  .pro-size-options button small {
+    display: none;
+  }
+
+  .pro-metric-card span,
+  .pro-slot-row,
+  .pro-slot-row em {
+    font-size: 0.8125rem;
+  }
+
+  .pro-left-panel,
+  .pro-inspector {
+    overflow: visible;
+  }
+
+  .pro-app-shell .pro-panel-stack {
+    overflow: visible;
+  }
+
+  .pro-app-shell .pro-canvas-stage {
+    grid-template-rows: auto minmax(320px, 1fr) auto;
+  }
+}
+
+@media (max-width: 359px) {
+  #pro-tour-run {
+    min-width: 5.75rem;
+  }
+}

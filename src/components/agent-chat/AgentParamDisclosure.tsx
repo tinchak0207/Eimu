@@ -1,0 +1,138 @@
+"use client";
+
+// D-23 参数卡片在窄屏是**底部抽屉**，宽屏是就地手风琴。
+//
+// 为什么不是同一套 UI 缩一缩：手机上聊天流本来就只有一屏，
+// 就地展开一张参数表会把刚出的图顶出视野，人得往回滚才找得到自己在看什么。
+// 抽屉从底部盖上来，图还在原地，关掉就回到原位——这是「另一个布局」，
+// 不是把桌面那套压窄。
+//
+// 展开状态两个布局共用一个 `open`：转屏 / 拉窗宽时抽屉变手风琴，
+// 展开的东西继续展开，不会因为换布局就莫名收起来，也不会留一层
+// 关不掉的遮罩在屏幕上。
+
+import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { ChevronDown, SlidersHorizontal, X } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { useIsNarrow } from "@/hooks/use-is-narrow";
+import { AgentParamCard } from "./AgentParamCard";
+
+export interface AgentParamDisclosureProps {
+  argsSummary: string;
+  /** 折叠区 / 抽屉的 DOM id 前缀，同一页多张卡不能撞。 */
+  idPrefix: string;
+  /** 抽屉标题里的工具名，让人知道这张参数属于哪次调用。 */
+  toolName?: string;
+}
+
+export function AgentParamDisclosure({ argsSummary, idPrefix, toolName }: AgentParamDisclosureProps) {
+  const [open, setOpen] = useState(false);
+  const narrow = useIsNarrow();
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const titleId = useId();
+
+  const drawerOpen = open && narrow;
+
+  const close = useCallback((): void => {
+    setOpen(false);
+    // 焦点还回触发它的按钮：抽屉关掉后焦点若留在已卸载的节点上，
+    // 键盘用户会被扔回文档开头。
+    triggerRef.current?.focus();
+  }, []);
+
+  // Esc 关闭 + 背景锁滚动。只在抽屉真的开着时装，
+  // 依赖里带上 drawerOpen，所以拉宽窗口（抽屉变手风琴）会自动解锁——
+  // 少了这一层，转屏后 body 会永久卡在 overflow:hidden。
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        close();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    // 存原值而不是收尾时写死 ""：这个页面别处也可能在锁滚动，
+    // 直接清空会把别人的锁一起解开。
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    closeRef.current?.focus();
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [drawerOpen, close]);
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-controls={`${idPrefix}-params`}
+        className="inline-flex w-fit cursor-pointer items-center gap-1 text-ios-caption1 font-medium text-[rgba(0,0,0,0.50)] transition-colors hover:text-[rgba(0,0,0,0.80)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)]"
+      >
+        {/* 窄屏点开的是抽屉，图标跟着语义换：手风琴才有「转箭头」这回事。 */}
+        {narrow ? (
+          <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
+        ) : (
+          <ChevronDown
+            className={cn("h-3.5 w-3.5 transition-transform duration-200", open && "rotate-180")}
+            aria-hidden="true"
+          />
+        )}
+        {open && !narrow ? "收起参数" : "查看参数"}
+      </button>
+
+      {narrow ? (
+        drawerOpen && (
+          <div
+            className="agent-param-scrim"
+            role="presentation"
+            onClick={(event) => {
+              if (event.target === event.currentTarget) close();
+            }}
+          >
+            <div
+              id={`${idPrefix}-params`}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby={titleId}
+              className="agent-param-drawer lg-sheet"
+            >
+              {/* 抓手是可见的可抓性提示，不是装饰；真正的关闭靠右上角按钮与点遮罩。 */}
+              <span className="agent-param-drawer-grip" aria-hidden="true" />
+              <div className="flex items-start gap-2 px-4 pb-2">
+                <p id={titleId} className="min-w-0 flex-1 text-ios-subhead font-semibold text-[rgba(0,0,0,0.85)]">
+                  {toolName ? `${toolName} 的参数` : "这次用到的参数"}
+                </p>
+                <button
+                  ref={closeRef}
+                  type="button"
+                  onClick={close}
+                  aria-label="关闭参数"
+                  className="-mt-0.5 flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full bg-[rgba(0,0,0,0.05)] text-[rgba(0,0,0,0.50)] transition-colors hover:bg-[rgba(0,0,0,0.09)] hover:text-[rgba(0,0,0,0.80)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)]"
+                >
+                  <X className="h-4 w-4" aria-hidden="true" />
+                </button>
+              </div>
+              <div className="agent-param-drawer-body">
+                <AgentParamCard argsSummary={argsSummary} idPrefix={`${idPrefix}-drawer`} />
+              </div>
+            </div>
+          </div>
+        )
+      ) : (
+        <div id={`${idPrefix}-params`} className={cn("agent-args", open && "is-open")}>
+          <div className="agent-args-inner">
+            {/* D-19：参数分常用层／进阶层两段，不再是一坨 JSON 原文。
+                花费不往下传：卡片头已经常驻显示，展开后再来一次是噪音。 */}
+            <AgentParamCard argsSummary={argsSummary} idPrefix={idPrefix} />
+          </div>
+        </div>
+      )}
+    </>
+  );
+}

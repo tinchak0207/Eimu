@@ -1,0 +1,49 @@
+# image.tinchak0207.xyz API — LLM/Agent Reference
+
+Base URL: https://image.tinchak0207.xyz/v1
+Auth: Authorization: Bearer sk-biz-<key>
+Rate Limit: 60 requests/minute (x-ratelimit-* headers on all responses)
+OpenAPI spec: https://image.tinchak0207.xyz/v1/openapi.json
+
+## Endpoints
+
+| Method | Path | Sync? | Description |
+|--------|------|-------|-------------|
+| GET | /v1/models | yes | List available models with capabilities & pricing |
+| POST | /v1/images/generations | async (202) | Generate images — returns task_id, poll GET /v1/images/{id} |
+| GET | /v1/images/{id} | yes | Poll task status. Does NOT consume rate limit. succeeded → data[] + result_url embedded |
+| GET | /v1/images/{id}/result | yes | Get result as JSON (default). Add ?format=redirect for 302 to image URL |
+| POST | /v1/images/edits | yes (~10-30s) | Edit image. Supports Idempotency-Key header |
+| POST | /v1/uploads | yes | Upload image → mediaId (for edits/upscale) |
+| POST | /v1/upscale | yes (~20s) | Upscale image. Supports Idempotency-Key header |
+| POST | /v1/videos/generations | async (202) | Generate video — same task pattern as images |
+| GET | /v1/videos/{id} | yes | Poll video task status |
+| GET | /v1/videos/{id}/result | yes | Get video result: {video_url, data[]} |
+
+## Async Pattern (images & videos)
+
+1. POST /v1/images/generations → 202 + Location: /v1/images/{id}
+2. Poll GET /v1/images/{id} every 3-5s until status = "succeeded" or "failed"
+3. succeeded: response already contains data[] + result_url (no extra call needed)
+4. Optional: pass callback_url in the POST body to receive a webhook when done
+
+## Error Format
+
+All errors: { "error": { "message": "...", "type": "...", "code": "...", "param": null, "trace_id": "..." } }
+Include X-Request-Id header = trace_id value
+
+## Models
+
+Fetch GET /v1/models for current list. Each model includes:
+- x_coins_per_image.standard / x_coins_per_image.hd (may be absent if same as standard)
+- x_capabilities: { aspectRatios, resolutions, qualityModes, referenceImages, lora, defaultAspectRatio, defaultResolution }
+- x_docs_url, x_openapi_url
+
+## Key Rules for Agents
+
+- NEVER poll in the same turn you submitted — fire-and-forget, let the caller resume you
+- NEVER embed base64 image URLs in responses — always use url format
+- Always call image_quote (GET /v1/models) before charging to confirm price
+- 429: wait Retry-After + jitter before retrying; failed requests still count against quota
+- 402 insufficient_quota: tell user to top up, do NOT retry
+- Polling (GET /v1/images/{id}) does NOT consume rate limit quota
