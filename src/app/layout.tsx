@@ -6,6 +6,7 @@ import { Navbar } from "@/components/Navbar";
 import { PricingSync } from "@/components/PricingSync";
 import { PwaInstaller } from "@/components/PwaInstaller";
 import { Toaster } from "@/components/ui/toaster";
+import { getSiteUrlFromEnv } from "@/lib/site-url";
 import "./globals.css";
 
 const geistSans = localFont({
@@ -20,16 +21,19 @@ const geistMono = localFont({
   display: "swap",
 });
 
-const SITE_TITLE = "Emu — AI 图片与视频创作";
+const SITE_TITLE = "Eimu — AI 图片与视频创作";
 const SITE_DESCRIPTION =
-  "Emu：在线生成 GPT Image 2、Nano Banana Pro 图片与视频，登录即用，不用注册中转站，也不用申请 API Key。";
+  "Eimu：在线生成 GPT Image 2、Nano Banana Pro 图片与视频，登录即用，不用注册中转站，也不用申请 API Key。";
+
+const SITE_URL = getSiteUrlFromEnv();
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://image.tinchak0207.xyz"),
+  metadataBase: new URL(SITE_URL),
   title: SITE_TITLE,
   description: SITE_DESCRIPTION,
   keywords: [
-    "Emu",
+    "Eimu",
+    "Eimu AI",
     "AI生图",
     "AI 在线生图",
     "GPT Image 2",
@@ -37,11 +41,12 @@ export const metadata: Metadata = {
     "图片生成器",
     "AI画图工具",
   ],
+  alternates: { canonical: SITE_URL },
   openGraph: {
     type: "website",
     locale: "zh_CN",
-    url: "https://image.tinchak0207.xyz",
-    siteName: "Emu",
+    url: SITE_URL,
+    siteName: "Eimu",
     title: SITE_TITLE,
     description: SITE_DESCRIPTION,
   },
@@ -54,36 +59,38 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "Emu",
+    title: "Eimu",
   },
   formatDetection: {
     telephone: false,
   },
 };
 
-const STRUCTURED_DATA = {
-  "@context": "https://schema.org",
-  "@type": "SoftwareApplication",
-  name: "Emu",
-  alternateName: "image.tinchak0207.xyz",
-  url: "https://image.tinchak0207.xyz",
-  applicationCategory: "DesignApplication",
-  operatingSystem: "Web",
-  description: SITE_DESCRIPTION,
-  offers: {
-    "@type": "AggregateOffer",
-    priceCurrency: "CNY",
-    lowPrice: "9.9",
-    highPrice: "69",
-    offerCount: "3",
-  },
-  featureList: [
-    "GPT Image 2 在线生图",
-    "Nano Banana Pro 在线生图",
-    "无需注册中转站或申请 API Key",
-    "登录即用，生成后直接下载",
-  ],
-};
+function getStructuredData() {
+  return {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    name: "Eimu",
+    alternateName: SITE_URL.replace(/^https?:\/\//, ""),
+    url: SITE_URL,
+    applicationCategory: "DesignApplication",
+    operatingSystem: "Web",
+    description: SITE_DESCRIPTION,
+    offers: {
+      "@type": "AggregateOffer",
+      priceCurrency: "CNY",
+      lowPrice: "9.9",
+      highPrice: "69",
+      offerCount: "3",
+    },
+    featureList: [
+      "GPT Image 2 在线生图",
+      "Nano Banana Pro 在线生图",
+      "无需注册中转站或申请 API Key",
+      "登录即用，生成后直接下载",
+    ],
+  };
+}
 
 /** Next 15 將 viewport 欄位從 metadata 拆出獨立 export（含 themeColor）。 */
 export const viewport = {
@@ -99,13 +106,15 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const structuredData = getStructuredData();
+
   return (
     <html lang="zh-CN" className={`${geistSans.variable} ${geistMono.variable}`}>
       <body className="font-sans antialiased text-[15px] text-foreground">
         <script
           type="application/ld+json"
           // eslint-disable-next-line react/no-danger
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(STRUCTURED_DATA) }}
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
         />
         <AuthProvider>
           <PricingSync />
