@@ -930,7 +930,7 @@ export function generationModel(modelId: string): GenerationModelDefinition | nu
 }
 
 export function generationCapabilities(modelId: string): GenerationCapabilityProjection | null {
-  const model = generationModel(modelId);
+  const model = effectiveCatalog[modelId] ?? GENERATION_MODEL_CATALOG[modelId];
   if (!model) return null;
   return {
     modelId: model.id,
