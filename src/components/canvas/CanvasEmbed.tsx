@@ -22,11 +22,21 @@ export interface CanvasEmbedProps {
   canvas: UseCanvasChatReturn;
   /** embed 高度；不傳則撐滿父容器。 */
   height?: string;
+  /** 全屏展開態（宿主用固定定位包住這個 embed）。 */
+  expanded?: boolean;
   /** 面板關閉（回到 ImageDisplay 模式）時觸發。 */
   onClose?: () => void;
+  /** 展開/收合切換（宿主維護展開狀態）。 */
+  onToggleExpand?: () => void;
 }
 
-export function CanvasEmbed({ canvas, height = "100%", onClose }: CanvasEmbedProps) {
+export function CanvasEmbed({
+  canvas,
+  height = "100%",
+  expanded = false,
+  onClose,
+  onToggleExpand,
+}: CanvasEmbedProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
   const viewportSizeRef = useRef(viewportSize);
@@ -89,13 +99,22 @@ export function CanvasEmbed({ canvas, height = "100%", onClose }: CanvasEmbedPro
         <span className="rounded-full bg-white/80 px-2.5 py-1 text-ios-caption1 font-medium text-[rgba(0,0,0,0.65)] shadow-sm backdrop-blur">
           画布
         </span>
-        {onClose && (
+        {onClose && !expanded && (
           <button
             type="button"
             onClick={onClose}
             className="pointer-events-auto cursor-pointer rounded-full bg-white/80 px-2.5 py-1 text-ios-caption1 font-medium text-[#007AFF] shadow-sm backdrop-blur hover:bg-white"
           >
             关闭画布
+          </button>
+        )}
+        {expanded && onToggleExpand && (
+          <button
+            type="button"
+            onClick={onToggleExpand}
+            className="pointer-events-auto cursor-pointer rounded-full bg-white/80 px-2.5 py-1 text-ios-caption1 font-medium text-[#007AFF] shadow-sm backdrop-blur hover:bg-white"
+          >
+            收合画布
           </button>
         )}
       </div>
