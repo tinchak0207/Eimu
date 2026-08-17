@@ -25,7 +25,6 @@ const IMAGE_VENDORS: Record<string, string> = {
   Dreamina: "/brands/dreamina.png",
   Luma: "/brands/luma.png",
   Runway: "/brands/runway.png",
-  SenseNova: "/brands/sensetime.png",
 };
 
 const BRAND_BG: Record<string, string> = {
@@ -38,7 +37,6 @@ const BRAND_BG: Record<string, string> = {
   Runway: "#1F2937",
   FLUX: "#FFFFFF",
   Luma: "#FFFFFF",
-  SenseNova: "#C8102E",
 };
 
 export function VendorIcon({ vendor, className = "h-7 w-7", innerClassName }: VendorIconProps) {

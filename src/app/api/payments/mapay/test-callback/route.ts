@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
     out_trade_no: `TEST${createMapayOrderId().slice(3)}`,
     trade_no: `SIM${Date.now().toString(36).toUpperCase()}`,
     trade_status: "TRADE_SUCCESS",
-    name: `image.tinchak0207.xyz ${plan.name} ${plan.coins}金币`,
+    name: `${config.siteUrl.replace(/^https?:\/\//, "")} ${plan.name} ${plan.coins}金币`,
     money: formatMapayMoney(plan.price),
     param: plan.id,
   };

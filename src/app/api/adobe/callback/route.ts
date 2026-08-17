@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { list, put } from "@/lib/blob-backend";
+import { getSiteUrlFromEnv } from "@/lib/site-url";
 
 function redirectUri() {
-  return process.env.ADOBE_OAUTH_REDIRECT_URI ?? "https://image.tinchak0207.xyz/api/adobe/callback";
+  return process.env.ADOBE_OAUTH_REDIRECT_URI ?? `${getSiteUrlFromEnv()}/api/adobe/callback`;
 }
 
 export async function GET(req: NextRequest) {

@@ -2263,11 +2263,11 @@ export function InvokeInspiredWorkstation({
             className="lg-float flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-ios-lg"
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/icon.png" alt="Emu" width={32} height={32} className="h-full w-full object-cover" />
+            <img src="/icon.png" alt="Eimu" width={32} height={32} className="h-full w-full object-cover" />
           </Link>
           <h2 className="flex min-w-0 items-baseline gap-1.5 truncate text-ios-subhead font-bold text-[rgba(0,0,0,0.84)]">
-            <span className="pro-title-desktop shrink-0">Emu · 创作工作站</span>
-            <span className="pro-title-mobile">Emu</span>
+            <span className="pro-title-desktop shrink-0">Eimu · 创作工作站</span>
+            <span className="pro-title-mobile">Eimu</span>
           </h2>
           <p className="hidden truncate text-ios-caption1 font-semibold text-[rgba(0,0,0,0.40)] lg:block">{activeWorkspace.title}</p>
         </div>

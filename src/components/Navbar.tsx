@@ -95,13 +95,13 @@ export function Navbar({ className }: NavbarProps) {
             className="flex min-w-0 shrink-0 items-center gap-2.5 rounded-full lg-transition hover:opacity-70 focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)]"
             aria-label="回到首页"
           >
-            {/* Emu app icon */}
+            {/* Eimu app icon */}
             <div className="lg-float flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-ios-lg sm:h-8 sm:w-8">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/icon.png" alt="Emu" width={44} height={44} className="h-full w-full object-cover" />
+              <img src="/icon.png" alt="Eimu" width={44} height={44} className="h-full w-full object-cover" />
             </div>
             <span className="hidden text-ios-body font-bold tracking-tight text-[rgba(0,0,0,0.85)] sm:inline">
-              Emu
+              Eimu
             </span>
           </Link>
 

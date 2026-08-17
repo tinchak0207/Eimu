@@ -1,8 +1,8 @@
 import { Suspense } from "react";
 import { HistoryClient } from "@/components/HistoryClient";
 
-const HISTORY_TITLE = "生成历史 · Emu";
-const HISTORY_DESCRIPTION = "查看你在 Emu 用 GPT Image 2、Nano Banana Pro 生成的所有历史记录和金币消耗明细。";
+const HISTORY_TITLE = "生成历史 · Eimu";
+const HISTORY_DESCRIPTION = "查看你在 Eimu 用 GPT Image 2、Nano Banana Pro 生成的所有历史记录和金币消耗明细。";
 
 export const metadata = {
   title: HISTORY_TITLE,

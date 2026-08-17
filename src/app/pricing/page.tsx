@@ -1,6 +1,6 @@
 import { PricingClient } from "@/components/PricingClient";
 
-const PRICING_TITLE = "充值方案 · Emu";
+const PRICING_TITLE = "充值方案 · Eimu";
 const PRICING_DESCRIPTION =
   "GPT Image 2、Nano Banana Pro 生图充值方案，¥9.9 起，不用申请中转站 API Key，登录即可按张生成。";
 

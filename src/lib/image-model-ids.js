@@ -1,5 +1,4 @@
 export const DEFAULT_IMAGE_MODEL_ID = /** @type {const} */ ("gpt-image-2");
-export const SENSENOVA_U1_FAST_MODEL_ID = /** @type {const} */ ("sensenova-u1-fast");
 export const ADOBE_FIREFLY_MODEL_ID = /** @type {const} */ ("adobe-firefly");
 export const NANO_BANANA_MODEL_ID = /** @type {const} */ ("gemini-2.5-flash-image");
 export const NANO_BANANA_PRO_MODEL_ID = /** @type {const} */ ("gemini-3-image");
@@ -52,7 +51,6 @@ export const KLING_25_TURBO_MODEL_ID = /** @type {const} */ ("kling-2.5-turbo");
 
 export const SUPPORTED_IMAGE_MODEL_IDS = [
   PIXAI_TSUBAKI2_MODEL_ID,
-  SENSENOVA_U1_FAST_MODEL_ID,
   DEFAULT_IMAGE_MODEL_ID,
   NANO_BANANA_2_MODEL_ID,
   ADOBE_FIREFLY_MODEL_ID,

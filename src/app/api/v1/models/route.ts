@@ -6,6 +6,7 @@ import { imageGenerationCoins, modelDisplayName } from "@/lib/provider-config";
 import { generationCapabilities, generationCoins } from "@/lib/generation-model-catalog";
 import { syncModelPricing } from "@/lib/pricing-runtime";
 import { addRateLimitHeaders } from "@/lib/biz-rate-limit-response-headers";
+import { getSiteUrlFromRequest } from "@/lib/site-url";
 
 export const runtime = "nodejs";
 export const preferredRegion = "sfo1";
@@ -42,6 +43,7 @@ export async function GET(req: NextRequest) {
 
   await syncModelPricing();
 
+  const siteUrl = getSiteUrlFromRequest(req);
   const created = Math.floor(new Date("2026-01-01T00:00:00Z").getTime() / 1000);
 
   const data = SUPPORTED_GENERATION_MODEL_IDS.filter((modelId) => isModelAllowedForKey(auth.key, modelId)).map(
@@ -59,8 +61,8 @@ export async function GET(req: NextRequest) {
         x_endpoint: isVideo ? "/v1/videos/generations" : "/v1/images/generations",
         // 能力面投影：聚合平台可用它決定是否把模型上架；目錄查不到的模型省略。
         ...(capabilities ? { x_capabilities: capabilities } : {}),
-        x_docs_url: "https://image.tinchak0207.xyz/docs",
-        x_openapi_url: "https://image.tinchak0207.xyz/v1/openapi.json",
+        x_docs_url: `${siteUrl}/docs`,
+        x_openapi_url: `${siteUrl}/v1/openapi.json`,
       };
 
       if (!isVideo) {

@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { getSiteUrlFromEnv } from "@/lib/site-url";
 
 export type MapayPaymentType = "alipay" | "wxpay" | "qqpay";
 
@@ -19,7 +20,7 @@ export interface MapayPlanInput {
 export type MapayFields = Record<string, string>;
 
 const DEFAULT_GATEWAY_URL = "https://mzf.mapay.cc/xpay/epay/";
-const DEFAULT_SITE_URL = "https://image.tinchak0207.xyz";
+const DEFAULT_SITE_URL = /* @__PURE__ */ getSiteUrlFromEnv();
 const PAYMENT_TYPES = new Set<MapayPaymentType>(["alipay", "wxpay", "qqpay"]);
 
 export function getMapayConfig(env: Record<string, string | undefined> = process.env): MapayConfig {
@@ -84,16 +85,17 @@ export function buildMapayCheckoutFields(input: {
   plan: MapayPlanInput;
 }): MapayFields {
   const { config, orderId, paymentType, plan } = input;
+  const siteHostname = config.siteUrl.replace(/^https?:\/\//, "");
   const fields: MapayFields = {
     pid: config.pid,
     type: paymentType,
     out_trade_no: orderId,
     notify_url: `${config.siteUrl}/api/payments/mapay/notify`,
     return_url: `${config.siteUrl}/api/payments/mapay/return`,
-    name: `image.tinchak0207.xyz ${plan.name} ${plan.coins}金币`,
+    name: `${siteHostname} ${plan.name} ${plan.coins}金币`,
     money: formatMapayMoney(plan.price),
     param: plan.id,
-    sitename: "image.tinchak0207.xyz",
+    sitename: siteHostname,
   };
 
   return {

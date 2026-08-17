@@ -20,6 +20,7 @@ import { publicImageUrl } from "@/lib/image-url";
 import {
   canPersistGeneratedImages,
   persistGeneratedImage,
+  persistUpstreamImageBytes,
   saveGeneratedHistoryEntry,
 } from "@/lib/server-history-store";
 import { authenticateImageUser, refundImageQuota, reserveImageQuota } from "@/lib/image-billing";
@@ -31,10 +32,8 @@ import {
 import type { GenerationWorkflowMetadata } from "@/lib/image-types";
 import {
   NANO_BANANA_PRO_MODEL_ID,
-  SENSENOVA_U1_FAST_MODEL_ID,
   imageGenerationCoins,
   isSupportedImageModel,
-  resolveSenseNovaImageSize,
   resolveUpstreamModelId,
   type ModelMode,
 } from "@/lib/provider-config";
@@ -248,14 +247,6 @@ function buildUpstreamImageRequestBody(
   loraModelVersionIds?: string[],
   controlNets?: PixaiControlNetEntry[],
 ): { path: string; body: BodyInit; headers: Record<string, string> } {
-  if (modelId === SENSENOVA_U1_FAST_MODEL_ID) {
-    return {
-      path: IMAGE_GENERATIONS_PATH,
-      body: JSON.stringify({ model: modelId, prompt, n: 1, size: resolveSenseNovaImageSize(imageSize) }),
-      headers: { "Content-Type": "application/json" },
-    };
-  }
-
   const quality = qualityMode === "quality" ? "high" : "medium";
   if (referenceImages.length > 0) {
     const body = new FormData();
@@ -502,15 +493,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid request parameters" }, { status: 400 });
   }
 
-  if (modelId === SENSENOVA_U1_FAST_MODEL_ID && referenceImages.length > 0) {
-    return NextResponse.json({ error: "SenseNova U1 Fast does not support reference images." }, { status: 400 });
-  }
-
   // Both kicked off before authenticating: neither shares data with auth, and both
   // swallow their own errors (pools -> [], overrides -> last-known-good), so neither can
   // reject unhandled. Awaiting them after auth would turn independent round-trips into
   // sequential ones.
-  const poolsPromise = modelId === SENSENOVA_U1_FAST_MODEL_ID ? null : getRuntimeGatewayPools();
+  const poolsPromise = getRuntimeGatewayPools();
   const overridesPromise = getRuntimeChannelOverrides();
 
   const authResult = await authenticateImageUser(req.headers, generationQuota);
@@ -527,7 +514,7 @@ export async function POST(req: NextRequest) {
 
   // ── Real mode ──────────────────────────────────────────────────────────────
   // buildModelQueue is the registry's single queue function — the same one the /admin
-  // routing panel and the upstream probe call. SenseNova rotation, env channels, admin
+  // routing panel and the upstream probe call. Env channels, admin
   // pools and admin overrides are all resolved inside it; this route no longer has a
   // private opinion about what the queue is.
   const endpoints = prioritizeHealthyEndpoints(
@@ -568,9 +555,7 @@ export async function POST(req: NextRequest) {
     await emitRoutingEvent("no-endpoints");
     return NextResponse.json(
       {
-        error: modelId === SENSENOVA_U1_FAST_MODEL_ID
-          ? "SenseNova U1 Fast is not configured or has been disabled in routing controls."
-          : `No compatible image generation endpoint configured for ${modelId}.`,
+        error: `No compatible image generation endpoint configured for ${modelId}.`,
       },
       { status: 500 },
     );
@@ -650,17 +635,27 @@ export async function POST(req: NextRequest) {
         // (which also flirts with the 4.5MB non-streaming response ceiling). History
         // uploaded the same bytes moments later anyway, so this moves the work rather
         // than adding it — and the PNG is then served from the Blob CDN near the user.
-        if (responseImage && authenticatedUser.id && canPersistGeneratedImages()) {
+        //
+        // 2026-08-15 根因修复：上游可能回 url（短时签名链接）而非 b64_json。
+        // 旧逻辑此时完全跳过 Blob，把短时链接直接存进 Canvas metadata.content，
+        // 链接过期即破图。这里统一转存，让 Canvas/History 拿到的永远是本站持久 URL。
+        // 转存失败则退化为保留上游原 URL（不阻塞响应），由 onError 兜底展示。
+        if (authenticatedUser.id && canPersistGeneratedImages() && (responseImage || responseImageUrl)) {
           try {
-            responseImageUrl = await persistGeneratedImage(
-              authenticatedUser.id,
-              entryId,
-              "image_tinchak",
-              responseImage,
-            );
-            responseImage = null;
+            if (responseImage) {
+              responseImageUrl = await persistGeneratedImage(
+                authenticatedUser.id,
+                entryId,
+                "image_tinchak",
+                responseImage,
+              );
+              responseImage = null;
+            } else if (responseImageUrl?.startsWith("http")) {
+              responseImageUrl = await persistUpstreamImageBytes(authenticatedUser.id, entryId, responseImageUrl);
+            }
           } catch (error) {
             // Inline the base64 instead: an oversized response beats no image at all.
+            // For upstream-URL re-hosting failures, the original URL simply stays.
             console.error(`Failed to persist generated image [requestId=${requestId}]`, error);
           }
         }

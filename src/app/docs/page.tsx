@@ -1,9 +1,9 @@
 import Link from "next/link";
-import { BookOpen, Plug, ArrowUpRight } from "lucide-react";
+import { BookOpen, Bot, Plug, ArrowUpRight } from "lucide-react";
 
-const DOCS_TITLE = "文档中心 | Emu";
+const DOCS_TITLE = "文档中心 | Eimu";
 const DOCS_DESCRIPTION =
-  "Emu文档中心：OpenAI 兼容生成 API 文档、MCP 接入指南、模型与计费说明。";
+  "Eimu文档中心：OpenAI 兼容生成 API 文档、MCP 接入指南、模型与计费说明。";
 
 export const metadata = {
   title: DOCS_TITLE,
@@ -32,8 +32,15 @@ const SECTIONS = [
     href: "/docs/mcp",
     icon: Plug,
     label: "MCP 接入",
-    description: "把Emu接入 Claude / Codex / Cursor。agent 说一句话，直接出图出视频，返回成品 URL。",
+    description: "把Eimu接入 Claude / Codex / Cursor。agent 说一句话，直接出图出视频，返回成品 URL。",
     tags: ["Claude", "Codex", "Cursor", "stdio"],
+  },
+  {
+    href: "/docs/harness",
+    icon: Bot,
+    label: "DeepSeek Harness",
+    description: "零基础教程：下载、安装、使用 DeepSeek 官方开源智能体框架，照着做 10 分钟跑起来。",
+    tags: ["Node.js", "npx", "AI Agent", "教程"],
   },
 ];
 

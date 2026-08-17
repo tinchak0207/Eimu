@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
+import { getSiteUrlFromEnv } from "@/lib/site-url";
 
-const REDIRECT_URI = "https://image.tinchak0207.xyz/api/adobe/callback";
+const REDIRECT_URI = `${getSiteUrlFromEnv()}/api/adobe/callback`;
 
 export async function GET() {
   const clientId = process.env.ADOBE_OAUTH_CLIENT_ID?.trim();

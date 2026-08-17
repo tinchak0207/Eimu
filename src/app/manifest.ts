@@ -2,8 +2,8 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Emu — AI 创作",
-    short_name: "Emu",
+    name: "Eimu — AI 创作",
+    short_name: "Eimu",
     description: "在线生成 GPT Image 2、Nano Banana Pro 图片，登录即用，不用注册中转站，也不用申请 API Key。",
     id: "/",
     start_url: "/",

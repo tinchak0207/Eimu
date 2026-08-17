@@ -1,20 +1,19 @@
 // 渠道連通性探測：對支持 OpenAI 風格 /models 的渠道發一次帶授權的 GET。
 // 絕不觸發真實出圖——那是 image-upstream-probe 的職責（會扣費）。
 //
-// 誠實原則：sensenova 沒有 /models 端點，硬探只會恆紅騙人，
+// 誠實原則：某些渠道沒有 /models 端點，硬探只會恆紅騙人，
 // 所以明確回報「不支持探測」而不是假裝探測失敗。
 
 import { NextRequest, NextResponse } from "next/server";
 import { readAdminPools } from "@/lib/admin-pool-store";
 import { requireAdminSession } from "@/lib/admin-session";
-import { SENSENOVA_CHANNEL_ID } from "@/lib/channel-registry";
 import { describeEnvChannels } from "@/lib/sub2api";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const PROBEABLE_ENV_CHANNEL_IDS = new Set(["env:sub2api", "env:primary", "env:fallback"]);
-const UNPROBEABLE_CHANNEL_IDS = new Set([SENSENOVA_CHANNEL_ID]);
+const UNPROBEABLE_CHANNEL_IDS = new Set<string>([]);
 
 interface ProbeResult {
   ok: boolean;

@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useRef } from "react";
 import {
@@ -48,15 +48,15 @@ interface VendorGroup {
   models: string[];
 }
 
-/** 模型按厂商分组展示：OpenAI / Google / PixAI / SenseNova */
-const VENDOR_ORDER = ["OpenAI", "Google", "PixAI", "SenseNova"];
+/** 模型按厂商分组展示：OpenAI / Google / PixAI */
+const VENDOR_ORDER = ["OpenAI", "Google", "PixAI"];
 
 const VENDOR_TAGS: Record<string, string> = {
   PixAI: "二次元",
 };
 
 /** 匹配厂商前缀，例如 Google Veo 3.1 只显示 Veo 3.1 */
-const VENDOR_PREFIX_RE = /^(Google|Adobe|PixAI|Dreamina|Runway|Luma AI|OpenAI|SenseNova)\s+/;
+const VENDOR_PREFIX_RE = /^(Google|Adobe|PixAI|Dreamina|Runway|Luma AI|OpenAI)\s+/;
 
 function modelPickerName(modelId: string, stripVendor: boolean): string {
   const name = modelBaseName(modelId);

@@ -36,7 +36,6 @@ import {
   RUNWAY_GEN45_VIDEO_MODEL_ID,
   SEEDANCE_20_FAST_MODEL_ID,
   SEEDANCE_20_MODEL_ID,
-  SENSENOVA_U1_FAST_MODEL_ID,
   SUPPORTED_GENERATION_MODEL_IDS,
   SUPPORTED_IMAGE_MODEL_IDS,
   SUPPORTED_VIDEO_MODEL_IDS,
@@ -156,19 +155,6 @@ const IMAGE_RESOLUTIONS = ["1k", "2k", "4k"] as const;
 const SEEDANCE_DURATIONS = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] as const;
 
 export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition> = {
-  [SENSENOVA_U1_FAST_MODEL_ID]: {
-    id: SENSENOVA_U1_FAST_MODEL_ID,
-    displayName: "SenseNova U1 Fast",
-    kind: "image",
-    popularity: 100,
-    vendor: "SenseNova",
-    aspectRatios: ["1:1", "3:2", "2:3"],
-    resolutions: ["2k"],
-    defaultAspectRatio: "1:1",
-    defaultResolution: "2k",
-    fixedCoins: 0.1,
-    referenceImages: false,
-  },
   [DEFAULT_IMAGE_MODEL_ID]: {
     id: DEFAULT_IMAGE_MODEL_ID,
     displayName: "GPT Image 2",

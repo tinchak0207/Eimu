@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getSiteUrlFromEnv } from "@/lib/site-url";
 
 export async function GET() {
   const clientId = process.env.ADOBE_OAUTH_CLIENT_ID?.trim();
@@ -9,7 +10,7 @@ export async function GET() {
     );
   }
 
-  const redirectUri = "https://image.tinchak0207.xyz/api/adobe/callback";
+  const redirectUri = `${getSiteUrlFromEnv()}/api/adobe/callback`;
   const scope = "openid,AdobeID,profile,email,additional_info.roles,org.read,firefly_api,ff_apis";
 
   const params = new URLSearchParams({

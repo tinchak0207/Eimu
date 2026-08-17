@@ -1,6 +1,5 @@
 import { aspectRatioFromImageSize } from "@/lib/generation-model-catalog";
 import { resolveAdobe2ApiImageModelId, resolveAdobe2ApiVideoModelId } from "@/lib/generation-core/adobe2api-upstream";
-import { resolveSenseNovaImageSize } from "@/lib/provider-config";
 import { SupplierRequestError } from "./failure-classifier";
 import type { SupplierGenerationInput, SupplierGenerationOutput, SupplierRecord } from "./types";
 
@@ -103,7 +102,7 @@ async function requestSupplier(supplier: SupplierRecord, input: SupplierGenerati
       model: upstreamModel,
       prompt: input.prompt,
       n: 1,
-      size: input.modelId === "sensenova-u1-fast" ? resolveSenseNovaImageSize(size) : size,
+      size,
       quality: input.quality === "quality" ? "high" : "medium",
     };
     // ControlNet 透傳線路：workflow.metadata.controlNets 是已歸一成 pixai 形狀的

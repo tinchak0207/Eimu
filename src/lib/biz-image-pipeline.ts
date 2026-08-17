@@ -22,8 +22,6 @@ import { type GatewayEndpoint } from "./sub2api";
 import { publicImageUrl } from "./image-url";
 import type { PixaiControlNetEntry } from "./pixai-controlnets";
 import {
-  SENSENOVA_U1_FAST_MODEL_ID,
-  resolveSenseNovaImageSize,
   resolveUpstreamModelId,
   type ModelMode,
 } from "./provider-config";
@@ -107,9 +105,7 @@ async function requestOnce(
   if (!upstreamModelId) throw new Error(`Adobe2API does not support ${modelId} ${imageSize}.`);
 
   let body: string;
-  if (modelId === SENSENOVA_U1_FAST_MODEL_ID) {
-    body = JSON.stringify({ model: upstreamModelId, prompt, n: 1, size: resolveSenseNovaImageSize(imageSize) });
-  } else if (endpoint.protocol === "adobe2api") {
+  if (endpoint.protocol === "adobe2api") {
     body = JSON.stringify({ model: upstreamModelId, prompt });
   } else {
     const payload: Record<string, unknown> = {

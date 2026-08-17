@@ -3,8 +3,12 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, ArrowUpRight, CheckCircle2 } from "lucide-react";
 import { USE_CASES, getUseCase, relatedUseCases } from "@/lib/use-cases";
+import { getSiteUrl } from "@/lib/site-url";
 
 type RouteParams = { params: Promise<{ slug: string }> };
+
+// 動態渲染以支援雙域名 runtime 檢測（不走靜態生成）
+export const dynamic = "force-dynamic";
 
 export function generateStaticParams() {
   return USE_CASES.map((item) => ({ slug: item.slug }));
@@ -15,17 +19,23 @@ export async function generateMetadata({ params }: RouteParams): Promise<Metadat
   const useCase = getUseCase(slug);
   if (!useCase) return {};
 
-  const title = `${useCase.title} | Emu`;
+  const siteUrl = await getSiteUrl();
+  const title = `${useCase.title} | Eimu`;
   const description = useCase.heroDescription.slice(0, 120);
+
+  const canonicalUrl = `${siteUrl}/use-cases/${useCase.slug}`;
 
   return {
     title,
     description,
     keywords: [useCase.keyword, "AI生图", "GPT Image 2", "Nano Banana Pro"],
+    alternates: {
+      canonical: canonicalUrl,
+    },
     openGraph: {
       title,
       description,
-      url: `https://image.tinchak0207.xyz/use-cases/${useCase.slug}`,
+      url: canonicalUrl,
     },
     twitter: {
       card: "summary_large_image",
@@ -40,6 +50,7 @@ export default async function UseCasePage({ params }: RouteParams) {
   const useCase = getUseCase(slug);
   if (!useCase) notFound();
 
+  const siteUrl = await getSiteUrl();
   const related = relatedUseCases(useCase);
 
   const structuredData = {
@@ -49,6 +60,28 @@ export default async function UseCasePage({ params }: RouteParams) {
     description: useCase.heroDescription,
     keywords: useCase.keyword,
     citation: useCase.citation.url,
+    author: {
+      "@type": "Organization",
+      name: useCase.author.name,
+      url: useCase.author.url,
+    },
+    publisher: {
+      "@type": "Organization",
+      name: "Eimu",
+      url: siteUrl,
+    },
+    datePublished: "2026-08-15",
+    dateModified: "2026-08-15",
+  };
+
+  const faqStructuredData = {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    mainEntity: useCase.faqs.map((faq) => ({
+      "@type": "Question",
+      name: faq.question,
+      acceptedAnswer: { "@type": "Answer", text: faq.answer },
+    })),
   };
 
   return (
@@ -57,6 +90,11 @@ export default async function UseCasePage({ params }: RouteParams) {
         type="application/ld+json"
         // eslint-disable-next-line react/no-danger
         dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
+      />
+      <script
+        type="application/ld+json"
+        // eslint-disable-next-line react/no-danger
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(faqStructuredData) }}
       />
       <div className="mx-auto w-full max-w-4xl">
         <Link
@@ -122,6 +160,33 @@ export default async function UseCasePage({ params }: RouteParams) {
               </div>
             ))}
           </div>
+        </section>
+
+        {useCase.faqs.length > 0 && (
+          <section className="mt-4 lg-card rounded-ios-3xl p-4 sm:rounded-ios-4xl sm:p-6">
+            <h2 className="text-ios-title3 font-semibold text-[rgba(0,0,0,0.85)]">常见问题</h2>
+            <div className="mt-4 grid gap-3">
+              {useCase.faqs.map((faq) => (
+                <details
+                  key={faq.question}
+                  className="group rounded-ios-2xl bg-[rgba(255,255,255,0.42)] px-3.5 py-3 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.70)]"
+                >
+                  <summary className="cursor-pointer list-none text-ios-footnote font-semibold text-[rgba(0,0,0,0.72)]">
+                    {faq.question}
+                  </summary>
+                  <p className="mt-2 text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.58)]">{faq.answer}</p>
+                </details>
+              ))}
+            </div>
+          </section>
+        )}
+
+        <section className="mt-4 lg-card rounded-ios-3xl p-4 sm:rounded-ios-4xl sm:p-6">
+          <h2 className="text-ios-title3 font-semibold text-[rgba(0,0,0,0.85)]">关于 Eimu</h2>
+          <p className="mt-3 text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.62)]">
+            {useCase.author.name} 是一站式 AI 图片与视频创作工作台，直接接入 GPT Image 2、Nano Banana Pro
+            等主流模型。内容由 Eimu 团队基于模型能力与行业实践整理，引用来源已标注，供创作者参考。
+          </p>
         </section>
 
         {related.length > 0 && (

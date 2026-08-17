@@ -59,7 +59,7 @@ function errorMessage(body: unknown, fallback: string): string {
   return fallback;
 }
 
-const KIND_LABELS: Record<ChannelDescriptor["kind"], string> = { env: "env", pool: "池", sensenova: "直连" };
+const KIND_LABELS: Record<ChannelDescriptor["kind"], string> = { env: "env", pool: "池" };
 
 const OUTCOME_META: Record<RoutingOutcome, { text: string; tone: PillTone }> = {
   delivered: { text: "已出图", tone: "green" },
@@ -89,7 +89,6 @@ function Pill({ tone, children }: { tone: PillTone; children: React.ReactNode })
 
 function envGroupName(name: string): string {
   if (name.startsWith("SUB2API")) return "sub2api";
-  if (name.startsWith("SENSENOVA")) return "sensenova";
   if (name.startsWith("FIREFLY") || name.startsWith("ADOBE")) return "firefly";
   if (name.includes("FALLBACK")) return "fallback";
   if (name.startsWith("IMAGE_API") || name.startsWith("GATEWAY")) return "primary / gateway";
@@ -97,7 +96,7 @@ function envGroupName(name: string): string {
   return "其他";
 }
 
-const ENV_GROUP_ORDER = ["sub2api", "primary / gateway", "fallback", "firefly", "sensenova", "blob 存储", "其他"];
+const ENV_GROUP_ORDER = ["sub2api", "primary / gateway", "fallback", "firefly", "blob 存储", "其他"];
 
 function groupEnvPresence(presence: Record<string, boolean>): Array<[string, Array<[string, boolean]>]> {
   const groups = new Map<string, Array<[string, boolean]>>();
@@ -322,7 +321,7 @@ export function AdminRoutingPanel({ onOpenRelays }: { onOpenRelays?: () => void 
             <div className="flex items-center justify-between gap-3 border-b border-black/10 px-5 py-4">
               <div>
                 <h3 className="font-semibold">渠道总表</h3>
-                <p className="mt-1 text-xs text-black/40">env 与 sensenova 渠道可在此启停、调优先级（0 最高、99 最低）；池渠道在中转渠道页维护。</p>
+                <p className="mt-1 text-xs text-black/40">env 渠道可在此启停、调优先级（0 最高、99 最低）；池渠道在中转渠道页维护。</p>
               </div>
               <button
                 type="button"
@@ -537,7 +536,7 @@ export function AdminRoutingPanel({ onOpenRelays }: { onOpenRelays?: () => void 
         <section className="rounded-md border border-black/10 bg-white px-5 py-4">
           <p className="text-xs text-black/45">{data.propagationNote}</p>
           <p className="mt-2 text-xs text-black/45">
-            仍需改环境变量并重新部署的操作：SenseNova key 内容更换、env 渠道地址/密钥更换、firefly 支持模型清单、计费网关地址。
+            仍需改环境变量并重新部署的操作：env 渠道地址/密钥更换、firefly 支持模型清单、计费网关地址。
           </p>
         </section>
       )}

@@ -1,4 +1,4 @@
-﻿@tailwind base;
+@tailwind base;
 @tailwind components;
 @tailwind utilities;
 
@@ -894,6 +894,21 @@ body.pro-mode-active #global-navbar {
   -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
   mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
   animation: login-border-spin 1.1s linear infinite;
+}
+
+/* ─── Agent 聊天區高度（PromptInput AGENT_SURFACE_HEIGHT）───────────
+    桌面：clamp(400px, calc(100dvh - 240px), 820px)——下方保留改图/放大/AI
+    助理按鈕行 + 頁面 padding 的空間，避免按鈕被推出可視區。
+    行動端：clamp(320px, 60dvh, 820px)——獨立處理，鍵盤彈出時靠 composer
+    anchor scroll 邏輯處理。 */
+:root {
+  --agent-surface-height: clamp(400px, calc(100dvh - 240px), 820px);
+}
+
+@media (max-width: 639.98px) {
+  :root {
+    --agent-surface-height: clamp(320px, 60dvh, 820px);
+  }
 }
 
 

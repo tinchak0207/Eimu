@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BookOpen, House, Plug } from "lucide-react";
+import { BookOpen, Bot, Compass, House, Plug } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const SECTIONS = [
@@ -12,6 +12,8 @@ const SECTIONS = [
       { href: "/docs", label: "概览", icon: House },
       { href: "/docs/api", label: "API 文档", icon: BookOpen },
       { href: "/docs/mcp", label: "MCP 接入", icon: Plug },
+      { href: "/docs/harness", label: "DeepSeek Harness", icon: Bot },
+      { href: "/docs/harness/deep", label: "Harness 深度指南", icon: Compass },
     ],
   },
 ];

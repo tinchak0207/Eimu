@@ -254,6 +254,41 @@ export async function persistGeneratedImage(
   return blob.url;
 }
 
+/**
+ * 把上游回传的图片 URL（签名/短时链接）下载并转存到本站 Blob，返回持久 URL。
+ *
+ * 2026-08-15 根因修复：上游（new-api/pixai/Adobe）可能回传 url 而非 b64_json，
+ * 此时旧逻辑直接把这个短时链接存进 Canvas metadata.content，链接过期即破图。
+ * 这里统一在「响应前」把字节转存，让 Canvas 与历史拿到的永远是本站托管的持久 URL。
+ * 失败由调用方兜底（保留原 URL），这里只负责尽力转存。
+ */
+export async function persistUpstreamImageBytes(
+  userId: number,
+  entryId: string,
+  upstreamUrl: string,
+): Promise<string> {
+  const res = await fetch(upstreamUrl, {
+    signal: AbortSignal.timeout(20_000),
+    redirect: "follow",
+  });
+  if (!res.ok) throw new Error(`upstream image fetch failed: HTTP ${res.status}`);
+  const contentType = res.headers.get("content-type") ?? "";
+  if (!contentType.startsWith("image/")) {
+    throw new Error(`upstream is not an image (${contentType || "no content-type"})`);
+  }
+  const buffer = Buffer.from(await res.arrayBuffer());
+  if (buffer.byteLength === 0 || buffer.byteLength > HISTORY_MAX_IMAGE_BYTES) {
+    throw new Error(`upstream image empty or over ${HISTORY_MAX_IMAGE_BYTES} bytes`);
+  }
+  const blob = await put(imageBlobPath(userId, entryId, "image_tinchak"), buffer, {
+    access: "public",
+    contentType,
+    allowOverwrite: true,
+    cacheControlMaxAge: 31_536_000,
+  });
+  return blob.url;
+}
+
 /** 把还留在记录里的 base64 转存到独立 Blob；索引会被整份读写，绝不能塞进几 MB 的字符串。 */
 async function persistImages(entry: ServerHistoryEntry): Promise<ServerHistoryEntry> {
   if (!hasBlobStore()) {
@@ -366,7 +401,7 @@ export async function patchHistoryEntry(
   });
 }
 
-/** 删除若干条记录，并清理它们名下的图片 Blob。返回实际删除的条数。 */
+/** 删除若干条记录。返回实际删除的条数。 */
 export async function deleteHistoryEntries(userId: number, ids: string[]): Promise<number> {
   const targets = new Set(ids.filter(Boolean));
   if (!targets.size) return 0;
@@ -378,15 +413,10 @@ export async function deleteHistoryEntries(userId: number, ids: string[]): Promi
 
     await writeEntries(userId, entries.filter((entry) => !targets.has(entry.id)));
 
-    if (hasBlobStore()) {
-      const urls = ownedImageUrls(removed);
-      if (urls.length) {
-        await del(urls).catch((error) => {
-          console.error("[history] 清理已删除记录的图片失败。", error);
-        });
-      }
-    }
-
+    // 2026-08-15 修复：不再连带删除图片 Blob。
+    // 同一颗 Blob 可能同时被 Canvas 节点的 metadata.content 与历史记录引用，
+    // 这里删图会把画布上仍在使用的图片打成破图。引用数无法在 Blob 上追踪，
+    // 取舍是「宁可留垃圾也不破图」——后续要清理时按存留时间（LRU）单独处理。
     return removed.length;
   });
 }
@@ -398,15 +428,8 @@ export async function clearHistoryEntries(userId: number): Promise<number> {
     if (!entries.length) return 0;
 
     await writeEntries(userId, []);
-
-    if (hasBlobStore()) {
-      const urls = ownedImageUrls(entries);
-      if (urls.length) {
-        await del(urls).catch((error) => {
-          console.error("[history] 清空历史时清理图片失败。", error);
-        });
-      }
-    }
+    // 2026-08-15 修复：与 deleteHistoryEntries 一致，清历史不删图片 Blob，
+    // 避免把 Canvas 节点仍在引用的图片打成破图。
 
     return entries.length;
   });

@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 
+import { getSiteUrlFromEnv } from "@/lib/site-url";
+
 export const runtime = "nodejs";
-export const dynamic = "force-static";
+export const dynamic = "auto"; // 依賴環境變數，不強制靜態
 
 /**
  * OpenAPI 3.1 spec — 從代碼派生，不手寫漂移。
@@ -45,7 +47,7 @@ function authErrorResponses() {
 const SPEC = {
   openapi: "3.1.0",
   info: {
-    title: "image.tinchak0207.xyz API",
+    title: "Eimu API",
     description:
       "OpenAI 相容的圖像 + 影片生成 API，供 AI 聚合平台與 agent 自我發現。\n\n" +
       "認證：`Authorization: Bearer sk-biz-<key>`。限流 60 requests/minute，所有認證通過的回應都帶 `x-ratelimit-*` 頭。\n\n" +
@@ -53,7 +55,10 @@ const SPEC = {
       "錯誤體為 OpenAI 風格 `{ error: { message, type, code, param, trace_id } }`；trace_id 同步落在 `X-Request-Id` 回應頭。",
     version: "1.0.0",
   },
-  servers: [{ url: "https://image.tinchak0207.xyz/v1", description: "Production" }],
+  servers: [
+    { url: `${getSiteUrlFromEnv()}/v1`, description: "Production" },
+    { url: "https://image.tinchak0207.xyz/v1", description: "Legacy" },
+  ],
   security: [bearerAuth],
   paths: {
     "/models": {

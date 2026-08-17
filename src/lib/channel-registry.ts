@@ -1,7 +1,7 @@
 // 渠道註冊表：整個生圖系統的「隊列真相」只能從這裡產生。
 //
 // 在此之前，隊列邏輯散在四處各自為戰：generate-images 路由（env 端點 + 池合併 +
-// sensenova 專用分支）、biz-image-pipeline（同一套邏輯的手工拷貝，外加自己一份
+// 專用分支）、biz-image-pipeline（同一套邏輯的手工拷貝，外加自己一份
 // 冷卻記憶）、admin 的 image-upstream-probe（直接調 buildGatewayEndpoints，admin
 // 停用了渠道它照樣打）、account-pools 的 routing 診斷（又一份）。/admin 顯示的
 // 隊列與生產實際使用的隊列因此可以各說各話——這正是本模組要消滅的病。
@@ -9,7 +9,7 @@
 // 三條硬性質：
 //  1. 單一事實來源：所有消費者（user 管線、biz 管線、admin 預覽、探測）都必須
 //     透過 buildModelQueue 取得隊列，輸入相同則輸出相同。
-//  2. 可控：admin overrides 能啟停/調序 env 渠道與 sensenova（池有自己的 CRUD，
+//  2. 可控：admin overrides 能啟停/調序 env 渠道（池有自己的 CRUD，
 //     不重複管轄），不需要改 env 重新部署。
 //  3. 誠實：describeChannels 枚舉「全部」渠道——包含未配置的與被停用的——
 //     並標明每一項數值的來源；未配置的渠道顯示為未配置，而不是隱形。
@@ -22,10 +22,7 @@ import {
 } from "./sub2api";
 import { buildGatewayEndpointsWithPools, inferSupportedModels, type AdminPool } from "./admin-pools";
 import type { ChannelOverrides } from "./channel-overrides";
-import { SENSENOVA_U1_FAST_MODEL_ID, resolveSenseNovaApiKeys } from "./provider-config";
 
-export const SENSENOVA_API_BASE_URL = "https://token.sensenova.cn/v1";
-export const SENSENOVA_CHANNEL_ID = "sensenova";
 
 /**
  * env 渠道的固定基準優先級。
@@ -49,11 +46,10 @@ export const ENV_CHANNEL_PRIORITIES: Record<string, number> = {
   primary: 51,
   fallback: 90,
 };
-const SENSENOVA_BASE_PRIORITY = 10;
 
 export interface ChannelDescriptor {
   id: string;
-  kind: "env" | "pool" | "sensenova";
+  kind: "env" | "pool";
   label: string;
   /** host + path，永不含 key。 */
   host: string;
@@ -85,7 +81,7 @@ export function safeEndpointHost(baseURL: string): string {
 
 /**
  * 對外回應的通道標籤：只透露「是否走了回退通道」，不透露具體供應商名。
- * 內部 label（adobe2api / sub2api / sensenova-N / admin 池名等）一律歸一成
+ * 內部 label（adobe2api / sub2api / admin 池名等）一律歸一成
  * "primary"，避免客戶端從回應體拼出上游供應鏈。前端只依賴
  * `endpointLabel === "fallback"` 這一個值，因此語義保持不變。
  */
@@ -153,17 +149,6 @@ function envChannelOverride(overrides: ChannelOverrides, channel: EnvChannelDesc
   return overrides[channel.id] ?? {};
 }
 
-function sensenovaEndpoints(env: EnvLike): GatewayEndpoint[] {
-  const apiKeys = resolveSenseNovaApiKeys(env.SENSENOVA_API_KEY, env.SENSENOVA_API_KEYS);
-  if (!apiKeys.length) return [];
-  // 起點隨機化，把負載攤到多個 key 上；label 維持 sensenova-N 保持日誌連續性。
-  const start = Math.floor(Math.random() * apiKeys.length);
-  return apiKeys.map((_, index) => {
-    const keyIndex = (start + index) % apiKeys.length;
-    return { apiKey: apiKeys[keyIndex], baseURL: SENSENOVA_API_BASE_URL, label: `sensenova-${keyIndex + 1}` };
-  });
-}
-
 /**
  * 生產與 admin 共用的唯一隊列函式。
  *
@@ -177,12 +162,6 @@ export function buildModelQueue(
   pools: AdminPool[],
   overrides: ChannelOverrides,
 ): GatewayEndpoint[] {
-  if (modelId === SENSENOVA_U1_FAST_MODEL_ID) {
-    // sensenova 走專用直連（請求體格式不同），不讀中轉池；admin 仍可用 override 停用。
-    if (overrides[SENSENOVA_CHANNEL_ID]?.enabled === false) return [];
-    return sensenovaEndpoints(env);
-  }
-
   const envChannels = describeEnvChannels(env);
   const enabledEnvEndpoints: GatewayEndpoint[] = [];
   const environmentPriorities: Record<string, number> = {};
@@ -229,34 +208,6 @@ export function describeChannels(
     });
   }
 
-  const sensenovaKeys = resolveSenseNovaApiKeys(env.SENSENOVA_API_KEY, env.SENSENOVA_API_KEYS);
-  const sensenovaOverride = overrides[SENSENOVA_CHANNEL_ID] ?? {};
-  const sensenovaConfigured = sensenovaKeys.length > 0;
-  // 生產隊列對 sensenova-N 端點逐一套用冷卻——描述表也要如實：任一 key 冷卻中
-  // 即標記，不能寫死 false 讓「全部 key 冷卻」在渠道總表上隱形。
-  const sensenovaCooling = sensenovaKeys.some((_, index) =>
-    isEndpointCoolingDown({ label: `sensenova-${index + 1}`, baseURL: SENSENOVA_API_BASE_URL }),
-  );
-  channels.push({
-    id: SENSENOVA_CHANNEL_ID,
-    kind: "sensenova",
-    label: "sensenova",
-    host: safeEndpointHost(SENSENOVA_API_BASE_URL),
-    configured: sensenovaConfigured,
-    defaultEnabled: sensenovaConfigured,
-    enabled: sensenovaOverride.enabled ?? sensenovaConfigured,
-    basePriority: SENSENOVA_BASE_PRIORITY,
-    priority: sensenovaOverride.priority ?? SENSENOVA_BASE_PRIORITY,
-    supportedModels: [SENSENOVA_U1_FAST_MODEL_ID],
-    source: sensenovaKeys.length ? "SENSENOVA_API_KEY(S)" : "SENSENOVA_API_KEY / SENSENOVA_API_KEYS",
-    usesBillingGateway: false,
-    overridden: {
-      enabled: sensenovaOverride.enabled !== undefined,
-      priority: sensenovaOverride.priority !== undefined,
-    },
-    coolingDown: sensenovaCooling,
-  });
-
   for (const pool of pools) {
     channels.push({
       id: `pool:${pool.id}`,
@@ -283,5 +234,5 @@ export function describeChannels(
 
 /** admin overrides 允許出現的渠道 id 白名單（池不在內——池有自己的 CRUD）。 */
 export function overridableChannelIds(): string[] {
-  return ["env:sub2api", "env:adobe2api", "env:pixai", "env:primary", "env:fallback", SENSENOVA_CHANNEL_ID];
+  return ["env:sub2api", "env:adobe2api", "env:pixai", "env:primary", "env:fallback"];
 }

@@ -43,8 +43,6 @@ const ENV_PRESENCE_KEYS = [
   "ADOBE2API_ENABLED",
   "ADOBE2API_BASE_URL",
   "ADOBE2API_API_KEY",
-  "SENSENOVA_API_KEY",
-  "SENSENOVA_API_KEYS",
   "GATEWAY_BASE_URL",
   "GATEWAY_ADMIN_ACCESS_TOKEN",
   "GATEWAY_ADMIN_USER_ID",
@@ -86,9 +84,9 @@ async function buildChannelsPayload(
   ]);
 
   const channels = describeChannels(process.env, pools, overrides);
-  // 隊列端點的生效優先級以 label 對回描述表（sensenova-N 歸戶到 sensenova）。
-  // 池名是自由文本，可與 env 渠道 label（"primary"/"sensenova" 等）撞名。Map 後寫者
-  // 勝，若池在後寫入，env 條目會顯示池的優先級——所以 env/sensenova 條目最後寫入，
+  // 隊列端點的生效優先級以 label 對回描述表。
+  // 池名是自由文本，可與 env 渠道 label 撞名。Map 後寫者
+  // 勝，若池在後寫入，env 條目會顯示池的優先級——所以 env 條目最後寫入，
   // 保證同名衝突時以 env 渠道的生效值為準（隊列裡的 env 條目數量遠多於撞名池）。
   const priorityByLabel = new Map<string, number>();
   for (const channel of channels.filter((item) => item.kind === "pool")) {

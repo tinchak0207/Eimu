@@ -45,9 +45,9 @@ const VERIFY_CURL = `# 用密钥验证连通性（也适用于直接 REST 调用
 curl https://image.tinchak0207.xyz/v1/models \\
   -H "Authorization: Bearer sk-biz-你的密钥"`;
 
-const MCP_TITLE = "MCP 接入 | 文档中心 | Emu";
+const MCP_TITLE = "MCP 接入 | 文档中心 | Eimu";
 const MCP_DESCRIPTION =
-  "把Emu（image.tinchak0207.xyz）接入 Claude / Codex / Cursor 等 MCP 客户端：安装、配置、可用工具。";
+  "把Eimu（image.tinchak0207.xyz）接入 Claude / Codex / Cursor 等 MCP 客户端：安装、配置、可用工具。";
 
 export const metadata = {
   title: MCP_TITLE,
@@ -87,7 +87,7 @@ export default function McpDocsPage() {
       <section className="pt-2">
         <p className="text-ios-footnote font-semibold text-[#007AFF]">Agent 集成</p>
         <h1 className="mt-2 text-ios-title1 font-bold tracking-tight text-[rgba(0,0,0,0.85)] sm:text-ios-largetitle">
-          把Emu接入你的 AI Agent
+          把Eimu接入你的 AI Agent
         </h1>
         <p className="mt-3 max-w-2xl text-ios-body leading-relaxed text-[rgba(0,0,0,0.58)]">
           通过 MCP（Model Context Protocol），Claude、Codex、Cursor 等 agent 可以调用我们的生成能力——你说一句话，

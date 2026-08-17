@@ -9,7 +9,10 @@ interface StartResponse {
   success: boolean;
   code?: string;
   state?: string;
-ttlSec?: number;
+  ttlSec?: number;
+  mpQrImgUrl?: string | null;
+  officialQrUrl?: string | null;
+  botQrUrl?: string | null;
   message?: string;
 }
 
@@ -27,9 +30,11 @@ export default function WechatLoginPage() {
   const [phase, setPhase] = useState<"loading" | "waiting" | "done" | "error">("loading");
   const [error, setError] = useState("");
   const [countdown, setCountdown] = useState(600);
+  const [mpQrImgUrl, setMpQrImgUrl] = useState<string | null>(null);
+  const [officialQrUrl, setOfficialQrUrl] = useState<string | null>(null);
 
   // QR 動態刷新：worker 每 120s 換新 QR，這裡每 60s 重新載入一次 QR 圖，
-  // 確保掃碼時永遠是有效的新碼（iLink QR 有效期短）。
+  // 確保掃碼時永遠是有效的新碼（iLink QR 有效期短）。測試號 QR 固定，無需刷新。
   const [qrTs, setQrTs] = useState(() => Date.now());
   const [copyOk, setCopyOk] = useState(false);
 
@@ -44,6 +49,8 @@ export default function WechatLoginPage() {
       setCode(data.code);
       setState(data.state);
       setCountdown(data.ttlSec ?? 600);
+      setMpQrImgUrl(data.mpQrImgUrl ?? null);
+      setOfficialQrUrl(data.officialQrUrl ?? null);
       setPhase("waiting");
     } catch (e) {
       setError(e instanceof Error ? e.message : "获取登录码失败");
@@ -105,17 +112,17 @@ if (data.success && data.status === "completed" && data.token && data.user) {
     return () => window.clearInterval(t);
   }, [phase, countdown]);
 
-  // QR 每 30 秒刷新（worker 120s 換新碼，這裡更頻確保掃到新鮮 QR）
+  // 帶參數 QR 有效期與登入碼一致（10 分鐘），無需刷新；僅固定 QR（iLink）需定時刷新
   useEffect(() => {
-    if (phase !== "waiting") return;
+    if (phase !== "waiting" || mpQrImgUrl) return;
     const t = window.setInterval(() => setQrTs(Date.now()), 30_000);
     return () => window.clearInterval(t);
-  }, [phase]);
+  }, [phase, mpQrImgUrl]);
 
   const mins = Math.floor(countdown / 60);
   const secs = String(countdown % 60).padStart(2, "0");
   const padded = String(secs);
-  const displayCode = code ? code.split(/(.{2})/).filter(Boolean).join("  ") : "";
+  const displayCode = code || "";
 
   return (
     <main style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f5f5f7", fontFamily: "-apple-system, PingFang SC, Microsoft YaHei, sans-serif" }}>
@@ -123,8 +130,8 @@ if (data.success && data.status === "completed" && data.token && data.user) {
         <span style={{ background: "#07C160", width: 52, height: 52, margin: "0 auto 12px", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 16 }}>
           <MessageCircle size={26} color="#fff" />
         </span>
-        <h1 style={{ fontSize: 18, fontWeight: 600, margin: "0 0 4px" }}>微信登录</h1>
-        <p style={{ fontSize: 13, color: "#888", margin: "0 0 20px" }}>把下方登录码发给微信机器人</p>
+<h1 style={{ fontSize: 18, fontWeight: 600, margin: "0 0 4px" }}>微信登录</h1>
+        <p style={{ fontSize: 13, color: "#888", margin: "0 0 20px" }}>手机微信扫码关注公众号，把下方登录码发给公众号</p>
 
         {phase === "loading" && <p style={{ fontSize: 14, color: "#888" }}>正在获取登录码…</p>}
 
@@ -154,17 +161,45 @@ if (data.success && data.status === "completed" && data.token && data.user) {
                 {copyOk ? "已复制 ✓" : "复制"}
               </button>
             </div>
-            <p style={{ fontSize: 13, color: "#666", lineHeight: 1.9, margin: "0 0 14px", textAlign: "left" }}>
-              <span style={{ fontWeight: 600 }}>1.</span> 手机：<b>长按二维码</b> → 微信「识别图中二维码」<br />
-              <span style={{ fontWeight: 600 }}>2.</span> 微信里向机器人<b>粘贴</b>刚复制的验证码，发送即可
-            </p>
-            <img
-              src={"/api/auth/wechat/qr?size=240&t=" + qrTs}
-              alt="长按识别二维码"
-              width={240}
-              height={240}
-              style={{ borderRadius: 12, border: "1px solid #eee", margin: "4px auto 8px", display: "block", maxWidth: "100%" }}
-            />
+            {mpQrImgUrl ? (
+              <>
+                <p style={{ fontSize: 13, color: "#666", lineHeight: 1.9, margin: "0 0 14px", textAlign: "left" }}>
+                  <span style={{ fontWeight: 600 }}>1.</span> 手机：<b>微信扫码</b>关注公众号（已关注直接扫码）<br />
+                  <span style={{ fontWeight: 600 }}>2.</span> 扫码后把<b>下方四字验证码</b>发给公众号，即自动登录
+                </p>
+                <img
+                  src={mpQrImgUrl}
+                  alt="微信扫码登录"
+                  width={240}
+                  height={240}
+                  style={{ borderRadius: 12, border: "1px solid #eee", margin: "4px auto 8px", display: "block", maxWidth: "100%" }}
+                />
+              </>
+            ) : (
+              <>
+                <p style={{ fontSize: 13, color: "#666", lineHeight: 1.9, margin: "0 0 14px", textAlign: "left" }}>
+                  <span style={{ fontWeight: 600 }}>1.</span> 手机：<b>微信扫码</b>关注公众号（已关注可跳过）<br />
+                  <span style={{ fontWeight: 600 }}>2.</span> 在公众号对话里<b>粘贴</b>刚复制的验证码，发送即可
+                </p>
+                {officialQrUrl ? (
+                  <img
+                    src={officialQrUrl}
+                    alt="微信扫码关注公众号"
+                    width={240}
+                    height={240}
+                    style={{ borderRadius: 12, border: "1px solid #eee", margin: "4px auto 8px", display: "block", maxWidth: "100%" }}
+                  />
+                ) : (
+                  <img
+                    src={"/api/auth/wechat/qr?size=240&t=" + qrTs}
+                    alt="长按识别二维码"
+                    width={240}
+                    height={240}
+                    style={{ borderRadius: 12, border: "1px solid #eee", margin: "4px auto 8px", display: "block", maxWidth: "100%" }}
+                  />
+                )}
+              </>
+            )}
             <p style={{ fontSize: 12, color: "#aaa", margin: "6px 0 0" }}>电脑/另一台手机可扫二维码 · {mins}:{padded} 后过期</p>
           </>
         )}
