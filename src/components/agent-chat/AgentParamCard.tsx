@@ -26,14 +26,19 @@ function formatCoins(n: number): string {
 }
 
 function ParamRow({ param }: { param: AgentParam }) {
+  // 结构化值（JSON 列表/对象，例如模型清单、LoRA 数组）必须整段可见：
+  // 手机没有 title 悬浮提示，truncate 等于把内容藏起来。
+  const structured = param.value.startsWith("[") || param.value.startsWith("{");
+  const wrap = param.wide || structured;
   return (
-    <div className={cn("min-w-0", param.wide && "col-span-full")}>
+    <div className={cn("min-w-0", wrap && "col-span-full")}>
       <dt className="text-ios-caption1 text-[rgba(0,0,0,0.42)]">{param.label}</dt>
       <dd
         className={cn(
           "mt-0.5 text-ios-footnote text-[rgba(0,0,0,0.78)]",
-          // 长文本允许折行，短值保持单行不撑破网格
-          param.wide ? "break-words leading-relaxed" : "truncate tabular-nums",
+          // 长文本允许折行（overflow-wrap:anywhere 连无空格的长 JSON 也折），
+          // 短值保持单行不撑破网格
+          wrap ? "[overflow-wrap:anywhere] leading-relaxed" : "truncate tabular-nums",
         )}
         title={param.value}
       >
@@ -56,7 +61,9 @@ function AgentParamCardComponent({ argsSummary, costCoins, idPrefix }: AgentPara
   // 不把半截 JSON 编成看起来完整的参数表。
   if (common.length === 0 && advanced.length === 0) {
     return (
-      <p className="rounded-ios-md bg-[rgba(0,0,0,0.03)] px-3 py-2 font-mono text-ios-footnote leading-[1.5] text-[rgba(0,0,0,0.60)]">
+      // 原文可能是被截断的 JSON / 错误载荷：保换行、长 token 也折行，
+      // 不许横向溢出卡片（手机上没有 hover 能看全）。
+      <p className="whitespace-pre-wrap rounded-ios-md bg-[rgba(0,0,0,0.03)] px-3 py-2 font-mono text-ios-footnote leading-[1.5] text-[rgba(0,0,0,0.60)] [overflow-wrap:anywhere]">
         {parsed.raw}
       </p>
     );
@@ -89,18 +96,20 @@ function AgentParamCardComponent({ argsSummary, costCoins, idPrefix }: AgentPara
             onClick={() => setAdvancedOpen((open) => !open)}
             aria-expanded={advancedOpen}
             aria-controls={`${idPrefix}-advanced`}
-            className="inline-flex w-fit cursor-pointer items-center gap-1 text-ios-caption1 font-medium text-[rgba(0,0,0,0.46)] transition-colors duration-200 hover:text-[rgba(0,0,0,0.78)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)]"
+            className="inline-flex min-h-11 w-fit cursor-pointer touch-manipulation items-center gap-1.5 self-start rounded-full px-2.5 text-[14px] font-medium leading-[1.25rem] text-[rgba(0,0,0,0.55)] transition-colors duration-200 hover:text-[rgba(0,0,0,0.80)] active:bg-[rgba(0,0,0,0.06)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] motion-reduce:transition-none [-webkit-tap-highlight-color:transparent]"
           >
-            <SlidersHorizontal className="h-3 w-3" aria-hidden="true" />
+            <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
             进阶参数
             <span className="tabular-nums text-[rgba(0,0,0,0.46)]">{advanced.length}</span>
             <ChevronDown
-              className={cn("h-3.5 w-3.5 transition-transform duration-200", advancedOpen && "rotate-180")}
+              className={cn("h-4 w-4 transition-transform duration-200 motion-reduce:transition-none", advancedOpen && "rotate-180")}
               aria-hidden="true"
             />
           </button>
           <div id={`${idPrefix}-advanced`} className={cn("agent-args", advancedOpen && "is-open")}>
-            <div className="agent-args-inner">
+            {/* 长参数表在卡内滚动而不是把卡片撑到看不见底：50dvh 封顶。
+                overflow-y 用内联样式盖过 .agent-args-inner 的 overflow:hidden。 */}
+            <div className="agent-args-inner max-h-[50dvh] overscroll-contain" style={{ overflowY: "auto" }}>
               <dl className="grid grid-cols-2 gap-x-4 gap-y-2 border-t border-[rgba(0,0,0,0.06)] pt-2 sm:grid-cols-3">
                 {advanced.map((param) => (
                   <ParamRow key={param.key} param={param} />

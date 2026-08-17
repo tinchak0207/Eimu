@@ -93,6 +93,19 @@ interface PromptInputProps {
   onCanvasEvent?: (event: AgentSseEvent) => void;
   /** 發送前提供畫布摘要（v3 embed）。 */
   canvasStateProvider?: () => unknown;
+  /**
+   * agent session 切換時回調（畫布 session 隔離）：
+   * 新 session 開起來時舊畫布必須清掉，否則新 agent session 的節點會
+   * 疊在上一次 canvas session 的節點上，用戶分不清哪些是這次做的。
+   */
+  onSessionChange?: (sessionId: string | null) => void;
+  /**
+   * 畫布工作站浮動面板態：面板自己有確定高度（桌面全高 / 手機 46dvh 抽屜），
+   * 聊天區改為填滿面板剩餘空間，由 transcript 內部滾動。仍然用
+   * --agent-surface-height 固定高的話，60dvh 的聊天區塞進 46dvh 的抽屜，
+   * 輸入區和最新一條訊息會被面板底邊裁掉。
+   */
+  fillAvailableHeight?: boolean;
 }
 
 /**
@@ -170,12 +183,13 @@ const AgentChatSurface = dynamic(
 );
 
 /**
- * 聊天区在卡片里的高度。
- * 下限 420px：低于这个值 transcript 只剩两三行，读不成对话。
- * 62dvh：手机地址栏收放时 vh 会骗人，dvh 才跟着实际可视区走。
- * 上限 720px：大屏上再高就把右边结果画布和下面的案例区推出首屏。
+ * 聊天区在卡片里的高度（CSS 变量，globals.css 定义）。
+ * 桌面：clamp(400px, calc(100dvh - 240px), 820px)——减去的 240px 是下方
+ * 改图/放大/AI助理按钮行 + 卡片/页面 padding 的預留，保證按鈕不被推出可視區。
+ * 行动端（<640px）：clamp(320px, 60dvh, 820px)——键盘弹出时靠 composer
+ * anchor scroll 逻辑把输入区滚回可视区。
  */
-const AGENT_SURFACE_HEIGHT = "clamp(500px, 72dvh, 860px)";
+const AGENT_SURFACE_HEIGHT = "var(--agent-surface-height)";
 
 /** 这两个面不需要卡片顶部那个描述框：放大没有描述，agent 自带输入区。 */
 const MODES_WITHOUT_TEXTAREA = new Set<PromptInputMode>(["upscale", "agent"]);
@@ -214,6 +228,8 @@ export function PromptInput({
   onImageResult,
   onCanvasEvent,
   canvasStateProvider,
+  onSessionChange,
+  fillAvailableHeight = false,
 }: PromptInputProps) {
   // 订阅定价覆写：管理员改价后本页报价立即重算。
   usePricingRevision();
@@ -473,11 +489,17 @@ export function PromptInput({
     // 参考图预览浮层（absolute -bottom-3）仍可正常溢出。
     // 卡片本身不参与模式切换动画：模式切换只「散开／重组」中间控件区，
     // 底板、描述框与底部那一排按钮原地不动。
-    <section className="lg-card relative overflow-x-clip rounded-ios-3xl p-5 pb-6 sm:p-6 sm:pb-7">
+    <section
+      className={cn(
+        "lg-card relative overflow-x-clip rounded-ios-3xl p-5 pb-6 sm:p-6 sm:pb-7",
+        // 工作站面板態：卡片成為 flex 鏈的一環（高度由面板分配，不由內容撐）。
+        fillAvailableHeight && "flex min-h-0 flex-1 flex-col",
+      )}
+    >
       {/* Specular top edge */}
       <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white to-transparent opacity-80" aria-hidden="true" />
 
-      <div className="relative space-y-4">
+      <div className={cn("relative space-y-4", fillAvailableHeight && "flex min-h-0 flex-1 flex-col")}>
 
         {/* ── 画面描述 ── 改图模式复用同一个输入框，只换 placeholder；
             放大模式不需要描述，进入时随动画「消散」。 ── */}
@@ -876,9 +898,16 @@ export function PromptInput({
               和改图、放大同一层：toggle 一下换掉这块控件区，卡片底板、下面那排
               按钮、右边结果画布、底下案例区全部原地不动。不跳 /agent 独立页。
               高度写死在这里而不是靠内容撑：聊天区内部靠 flex-1 + min-h-0 自己滚，
-              外层不给定高度的话 transcript 会把卡片撑到无限长，输入区被推出屏幕。 */}
+              外层不给定高度的话 transcript 会把卡片撑到无限长，输入区被推出屏幕。
+              例外：工作站浮動面板態（fillAvailableHeight）外層已有確定高度，
+              改為 flex-1 填滿——固定 60dvh 塞進窄手機抽屜會裁掉輸入區。
+              agent 面的「改图/放大/专业控制/开始创作」列本来就不需要：
+              agent 面只有输入区自己送出，摆一排模式切换会跟 composer 抢底部空间。 */}
           {displayMode === "agent" && (
-            <div className="flex flex-col pt-1" style={{ height: AGENT_SURFACE_HEIGHT }}>
+            <div
+              className="flex min-h-0 flex-1 flex-col pt-1"
+              style={fillAvailableHeight ? { flex: "1 1 0%", minHeight: 0 } : { height: AGENT_SURFACE_HEIGHT }}
+            >
               <AgentChatSurface
                 variant="inline"
                 // 挂载时读一次：外面已经打好的半句话，或别的页面交接过来的一句话。
@@ -888,6 +917,7 @@ export function PromptInput({
                 {...(onImageResult ? { onImageResult } : {})}
                 {...(onCanvasEvent ? { onCanvasEvent } : {})}
                 {...(canvasStateProvider ? { canvasStateProvider } : {})}
+                {...(onSessionChange ? { onSessionChange } : {})}
                 currentModelId={modelId}
               />
             </div>
@@ -898,8 +928,14 @@ export function PromptInput({
             这一排不参与模式动画，始终原地不动：改图／放大切换、已套用风格、
             专业控制开关都随用户随时开关。
             手机上纵向堆叠：`w-full` 的 CTA 混在 flex-wrap 行里，宽度要靠换行才
-            正确，很容易被同行的 ml-auto 顶出边界。改成 column，CTA 天然满宽。 */}
-        <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+            正确，很容易被同行的 ml-auto 顶出边界。改成 column，CTA 天然满宽。
+             工作站面板态：加 border-t 分隔，底部留 safe-area 空间。 */}
+        <div
+          className={cn(
+            "flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:gap-3",
+            fillAvailableHeight && "border-t border-[rgba(0,0,0,0.06)] pt-3 pb-[env(safe-area-inset-bottom,12px)]",
+          )}
+        >
           {/* 改图 / 放大 快捷入口 — 左侧，专业控制 toggle 左边 */}
           <div className="flex items-center gap-1.5 shrink-0 self-start">
             <button
@@ -962,22 +998,25 @@ export function PromptInput({
             </div>
           ) : null}
 
-          {/* 专业模式 toggle switch */}
-          <button
-            type="button"
-            onClick={onToggleProfessionalMode}
-            aria-pressed={isProfessionalMode}
-            title="打开专业工作站：多图队列、局部要求、项目信息"
-            className={cn(
-              "pro-mode-toggle self-start sm:ml-auto",
-              isProfessionalMode && "active",
-            )}
-          >
-            <span className="pro-mode-toggle-track" aria-hidden="true">
-              <span className="pro-mode-toggle-thumb" />
-            </span>
-            <span className="pro-mode-toggle-label">专业控制</span>
-          </button>
+          {/* 专业模式 toggle switch（agent 面不需要：工作站态已由 rails/面板承载切换，
+              摆在这里会和 composer 抢底部空间） */}
+          {displayMode !== "agent" && (
+            <button
+              type="button"
+              onClick={onToggleProfessionalMode}
+              aria-pressed={isProfessionalMode}
+              title="打开专业工作站：多图队列、局部要求、项目信息"
+              className={cn(
+                "pro-mode-toggle self-start sm:ml-auto",
+                isProfessionalMode && "active",
+              )}
+            >
+              <span className="pro-mode-toggle-track" aria-hidden="true">
+                <span className="pro-mode-toggle-thumb" />
+              </span>
+              <span className="pro-mode-toggle-label">专业控制</span>
+            </button>
+          )}
 
           {/* Single CTA — elevated blue, strong shadow, scale on hover。
               改图／放大模式下，同一颗按钮承担对应动作。

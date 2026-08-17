@@ -280,6 +280,14 @@ export async function deleteAgentSession(sessionId: string): Promise<void> {
   await agentFetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
 }
 
+/**
+ * 強制中止當下這輪生成（系统层取消，不是发 prompt 软停）。
+ * 网道转发到 opencode 的 /session/:id/abort，正在跑的 assistant turn 立刻终止。
+ */
+export async function abortAgentSession(sessionId: string): Promise<void> {
+  await agentFetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}/abort`, { method: "POST" });
+}
+
 /** 查额度，回传已对齐 AgentQuotaState 形状的结果（reducer 的 applyQuotaSnapshot 直接吃）。 */
 export async function fetchAgentQuota(): Promise<AgentQuotaState> {
   const data = await agentFetch("/api/agent/quota");

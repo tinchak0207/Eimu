@@ -31,14 +31,27 @@ function key(code: string): string {
  * - TTL 僅 10 分鐘且一次性，記憶體不會長存洩漏。
  */
 const memoryStore = new Map<string, WechatLoginState>();
+const stateIndex = new Map<string, string>();
 
 function memoryKey(code: string): string {
   return code.replace(/[\s，。、]/g, "");
 }
 
+/** state → code 的 blob 索引 key（subscribe/SCAN 事件反查用）。 */
+function stateKey(state: string): string {
+  return `${PREFIX}/by-state/${state}.json`;
+}
+
 async function blobPut(state: WechatLoginState): Promise<void> {
   try {
     await put(key(state.code), JSON.stringify(state), {
+      cacheControlMaxAge: TTL_SEC,
+      allowOverwrite: true,
+      addRandomSuffix: false,
+      access: "public",
+    });
+    // state 索引：掃碼事件（EventKey=state）跨 instance 也能反查登入碼
+    await put(stateKey(state.state), JSON.stringify({ code: state.code }), {
       cacheControlMaxAge: TTL_SEC,
       allowOverwrite: true,
       addRandomSuffix: false,
@@ -79,6 +92,7 @@ export async function createWechatLoginState(): Promise<WechatLoginState> {
     expiresAt: now + TTL_SEC * 1000,
   };
   memoryStore.set(memoryKey(state.code), state);
+  stateIndex.set(state.state, state.code);
   void blobPut(state);
   return state;
 }
@@ -91,6 +105,30 @@ export async function getWechatLoginState(code: string): Promise<WechatLoginStat
   const blobState = await blobGet(clean);
   if (blobState) memoryStore.set(memoryKey(clean), blobState);
   return blobState;
+}
+
+/**
+ * 由 state（掃碼二維碼 scene 值）反查登入記錄。
+ * 事件推送只帶 EventKey=scene=state，不帶驗證碼，需經 state 索引找 code。
+ */
+export async function getWechatLoginStateByState(state: string): Promise<WechatLoginState | null> {
+  if (!state) return null;
+  const memCode = stateIndex.get(state);
+  if (memCode) {
+    const mem = memoryStore.get(memoryKey(memCode));
+    if (mem) return mem;
+  }
+  try {
+    const blob = await get(stateKey(state), { access: "public" });
+    if (!blob) return null;
+    const { code } = JSON.parse(await new Response(blob.stream).text()) as { code?: string };
+    if (!code) return null;
+    const record = await getWechatLoginState(code);
+    if (record?.state === state) return record;
+  } catch {
+    // ignore
+  }
+  return null;
 }
 
 /** 兌換（一次性）：把登入碼標記為已綁定，並寫入頒發的 session。 */
@@ -111,6 +149,8 @@ export async function completeWechatLogin(code: string, peerId: string, token: s
 
 export async function expireWechatLogin(code: string): Promise<void> {
   const clean = code.replace(/[\s，。、]/g, "");
+  const record = memoryStore.get(memoryKey(clean));
+  if (record) stateIndex.delete(record.state);
   memoryStore.delete(memoryKey(clean));
   try {
     await del([key(clean)]);

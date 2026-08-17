@@ -8,8 +8,8 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  height: 100%;
   min-height: 0;
+  flex: 1;
 }
 
 /* 滚动区：细滚动条，与站内 iOS 风格一致 */
@@ -146,5 +146,63 @@
   .agent-param-scrim,
   .agent-param-drawer {
     animation: none;
+  }
+  /* 新条目入场位移、串流打字光标、思考三点跳动一起让位；
+     各自的基础态（opacity 1 / 静止光标 / 静止圆点）保留，布局不变。 */
+  .agent-rise,
+  .agent-caret,
+  .agent-panel .animate-bounce {
+    animation: none !important;
+  }
+}
+
+/* ── 行動端適配 ─────────────────────────────────────────────
+   断点对齐 useIsNarrow / Tailwind sm 断点（≤639.98px 算窄屏），
+   与 D-23 参数抽屉的窄屏判定是同一个数，避免 CSS/JS 错位。
+   只叠加行动端缺的东西：触控目标、iOS 键盘、可读字级、溢出保护；
+   桌面样式不动。 */
+
+/* 面板在 flex 容器里不把自己撑破（长消息卡片也不许把面板顶出横向滚动）。 */
+.agent-panel {
+  min-width: 0;
+}
+
+/* 长字 / URL / 代码 / JSON 不横向溢出：文本在气泡内任意换行；
+   等宽代码块保持不折行，容器内横向滚动。 */
+.agent-transcript {
+  overflow-wrap: anywhere;
+}
+.agent-transcript pre {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+@media (max-width: 639.98px) {
+  /* 触控优化：去点击高亮延迟 + 点按高亮色块，交给各自 active 态给回馈。 */
+  .agent-panel button,
+  .agent-composer button {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* 所有可点项 ≥44×44：状态行重试、历史、放弃、错误重试、
+     composer 的两颗圆形钮（直接子级，避开附件 chip 里的小移除钮）。 */
+  .agent-retry,
+  .agent-meta-link,
+  .agent-draft-discard,
+  .agent-surface-retry,
+  .agent-composer > button {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  /* 整行可点的药丸 / 错误条也给足点按高度。 */
+  .agent-surface-draft,
+  .agent-surface-error {
+    min-height: 44px;
+  }
+
+  /* iOS focus 不自动放大页面的唯一解：输入区字号 ≥16px。 */
+  .agent-composer textarea {
+    font-size: 16px;
   }
 }

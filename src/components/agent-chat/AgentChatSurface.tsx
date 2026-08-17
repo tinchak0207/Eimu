@@ -84,6 +84,8 @@ export interface AgentChatSurfaceProps {
   onCanvasEvent?: (event: import("@/lib/agent-chat-types").AgentSseEvent) => void;
   /** 發送前提供畫布摘要（v3 embed）。 */
   canvasStateProvider?: () => unknown;
+  /** 當 agent session 變化時通知父組件（用於同步清空畫布）。 */
+  onSessionChange?: (sessionId: string | null) => void;
 }
 
 export function AgentChatSurface({
@@ -94,6 +96,7 @@ export function AgentChatSurface({
   onImageResult,
   onCanvasEvent,
   canvasStateProvider,
+  onSessionChange,
 }: AgentChatSurfaceProps) {
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
   // 承接进来的半句话；续写或手动放弃后就不再显示。
@@ -110,6 +113,7 @@ export function AgentChatSurface({
     answerQuestion,
     retry,
     resumable,
+    abort,
     discardAndStartNew,
   } = useAgentChat({
     autoStart: true,
@@ -183,6 +187,14 @@ export function AgentChatSurface({
   // 用 ref 记住处理过的条目 id——重渲染不该把同一次调用回流两次，
   // 那会把使用者刚手动改回去的值又冲掉。
   const reflectedRef = useRef<string | null>(null);
+
+  // 監聽 sessionId 變化，通知父組件（用於同步清空畫布）
+  useEffect(() => {
+    if (onSessionChange) {
+      onSessionChange(sessionId);
+    }
+  }, [sessionId, onSessionChange]);
+
   useEffect(() => {
     if (!onParamsReflected) return;
     // 从后往前找最新一条带参数的工具条目
@@ -280,16 +292,12 @@ export function AgentChatSurface({
   }, [anchor]);
 
   /**
-   * D-26「随时可停」。网关没有中断端点（只有 DELETE session = 整个会话收摊），
-   * 所以这里能做的是**明确要求 agent 停手**，并把这句话摆进 transcript 让人看见。
-   *
-   * 刻意不叫「立即停止」：正在跑的那一张仍会跑完（钱已经花出去了），
-   * 停的是后面还没开始的。按钮文案与提示都照这个语义写，不给假承诺。
-   * 真正的即时中断要网关加 abort 端点，那是后端的事，不在这里假装。
+   * D-26「随时可停」。系统层强制中止：网关 /session/:id/abort 打到 opencode，
+   * 正在跑的这一轮直接终止（不再花后面的钱）。这不是发 prompt 软停。
    */
   const onStopGeneration = useCallback((): void => {
-    void send("停下，不要再生成新的图了。当前这张跑完就停，剩下的先别开始。");
-  }, [send]);
+    void abort();
+  }, [abort]);
 
   const imageActions: AgentTranscriptProps["imageActions"] = {
     onSaveToLibrary,
@@ -314,7 +322,7 @@ export function AgentChatSurface({
             type="button"
             onClick={() => setShowHistory((prev) => !prev)}
             aria-expanded={showHistory}
-            className="flex cursor-pointer items-center gap-1 text-[11px] font-medium text-[rgba(0,0,0,0.35)] transition-colors duration-200 hover:text-[rgba(0,0,0,0.55)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,0,0,0.20)]"
+            className="agent-meta-link flex cursor-pointer items-center gap-1 text-ios-caption1 font-medium text-[rgba(0,0,0,0.35)] transition-colors duration-200 hover:text-[rgba(0,0,0,0.55)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,0,0,0.20)]"
           >
             <History className="h-3 w-3" aria-hidden="true" />
             对话历史
@@ -336,12 +344,12 @@ export function AgentChatSurface({
       {/* D-24：承接使用者已打的半句话，点一下搬进输入框接着写（不自动送出，
           半句话直接送可能立刻扣费）；右侧「放弃」直接丢掉。 */}
       {draft && (
-        <div className="mb-2.5 flex shrink-0 items-center gap-2 rounded-ios-2xl bg-[rgba(0,122,255,0.07)] px-3 py-2 ring-1 ring-[rgba(0,122,255,0.16)]">
+        <div className="agent-surface-draft mb-2.5 flex shrink-0 items-center gap-2 rounded-ios-2xl bg-[rgba(0,122,255,0.07)] px-3 py-2 ring-1 ring-[rgba(0,122,255,0.16)]">
           <Bot className="h-3.5 w-3.5 shrink-0 text-[#007AFF]" aria-hidden="true" />
           <button
             type="button"
             onClick={continueDraft}
-            className="min-w-0 flex-1 cursor-pointer truncate text-left text-ios-footnote text-[rgba(0,0,0,0.72)] lg-transition hover:text-[#007AFF]"
+            className="min-w-0 flex-1 cursor-pointer truncate text-left text-sm text-[rgba(0,0,0,0.72)] lg-transition hover:text-[#007AFF] sm:text-ios-footnote"
             title="填进输入框接着写"
           >
             接着写：<span className="font-medium">{draft}</span>
@@ -349,7 +357,7 @@ export function AgentChatSurface({
           <button
             type="button"
             onClick={() => setDraft("")}
-            className="shrink-0 cursor-pointer rounded-full px-2 py-0.5 text-ios-caption1 font-medium text-[rgba(0,0,0,0.40)] lg-transition hover:bg-[rgba(0,0,0,0.06)] hover:text-[rgba(0,0,0,0.66)]"
+            className="agent-draft-discard shrink-0 cursor-pointer rounded-full px-2 py-0.5 text-ios-caption1 font-medium text-[rgba(0,0,0,0.40)] lg-transition hover:bg-[rgba(0,0,0,0.06)] hover:text-[rgba(0,0,0,0.66)]"
             aria-label="不要这句话"
           >
             放弃
@@ -358,19 +366,19 @@ export function AgentChatSurface({
       )}
 
       {error && !isActive && (
-        <div className="mb-2.5 flex shrink-0 items-center justify-between gap-3 rounded-ios-2xl bg-[rgba(255,59,48,0.08)] px-3.5 py-2.5">
-          <p className="min-w-0 flex-1 text-ios-footnote text-[rgba(160,30,25,0.90)]">{error}</p>
+        <div className="agent-surface-error mb-2.5 flex shrink-0 items-center justify-between gap-3 rounded-ios-2xl bg-[rgba(255,59,48,0.08)] px-3.5 py-2.5">
+          <p className="min-w-0 flex-1 text-sm text-[rgba(160,30,25,0.90)] sm:text-ios-footnote">{error}</p>
           <button
             type="button"
             onClick={() => void retry()}
-            className="shrink-0 cursor-pointer rounded-full bg-[rgba(255,59,48,0.14)] px-3 py-1 text-ios-caption1 font-semibold text-[#FF3B30] lg-transition hover:bg-[rgba(255,59,48,0.22)]"
+            className="agent-surface-retry shrink-0 cursor-pointer rounded-full bg-[rgba(255,59,48,0.14)] px-3 py-1 text-ios-caption1 font-semibold text-[#FF3B30] lg-transition hover:bg-[rgba(255,59,48,0.22)]"
           >
             重试
           </button>
         </div>
       )}
 
-      <div className="min-h-0 flex-1">
+      <div className="flex min-h-0 flex-1 flex-col">
         <AgentChatPanel
           state={state}
           connection={connection}

@@ -14,12 +14,14 @@ interface ToolStatusMeta {
   label: string;
   Icon: ComponentType<{ className?: string; "aria-hidden"?: boolean | "true" | "false" }>;
   tone: string;
+  /** 徽章底色：液态玻璃着色层（lg-tint-*），窄屏上比纯文字更可读。 */
+  badge: string;
 }
 
 const STATUS_META: Record<AgentToolCallItem["status"], ToolStatusMeta> = {
-  running: { label: "运行中…", Icon: Loader2, tone: "text-[#007AFF]" },
-  ok: { label: "已完成", Icon: Check, tone: "text-[#34C759]" },
-  failed: { label: "失败", Icon: X, tone: "text-[#FF3B30]" },
+  running: { label: "运行中…", Icon: Loader2, tone: "text-[#007AFF]", badge: "lg-tint-blue" },
+  ok: { label: "已完成", Icon: Check, tone: "text-[#248A3D]", badge: "lg-tint-green" },
+  failed: { label: "失败", Icon: X, tone: "text-[#FF3B30]", badge: "lg-tint-red" },
 };
 
 /** 展示用的金币数：整数原样，浮点去掉多余尾巴。 */
@@ -48,7 +50,15 @@ function AgentToolCardComponent({ item }: AgentToolCardProps) {
             </p>
           )}
         </div>
-        <span className={cn("shrink-0 text-ios-caption1 font-medium", status.tone)}>
+        {/* 状态徽章：着色胶囊比纯文字在窄屏更可读；whitespace-nowrap 保证不被
+            长工具名挤出卡片（工具名那一侧自己 truncate 让位）。 */}
+        <span
+          className={cn(
+            "inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2.5 py-1 text-ios-footnote font-semibold",
+            status.badge,
+            status.tone,
+          )}
+        >
           {status.label}
         </span>
       </div>

@@ -18,6 +18,9 @@ export enum CanvasNodeType {
   Config = "config",
   Video = "video",
   Group = "group",
+  CharacterCard = "character_card",
+  SceneCard = "scene_card",
+  Audio = "audio",
 }
 
 export type CanvasNodeStatus = "idle" | "success" | "loading" | "error";
@@ -41,6 +44,26 @@ export interface CanvasNodeMetadata {
   imageTaskId?: string;
   startedAt?: number;
   progress?: number;
+  // P1-3: 鏡頭語言 metadata
+  shot_size?: string; // 景別：特寫/近景/中景/全景/遠景
+  camera_move?: string; // 運鏡：固定/推進/拉遠/搖鏡/跟拍
+  // P1: workflow 識別
+  workflow_id?: string;
+  session_id?: string;
+  // P2: 角色卡/場景卡 metadata
+  description?: string;
+  key_features?: string[];
+  role?: string;
+  locked?: boolean;
+  // P3: 批次 & 查閱 metadata
+  referenceNodeIds?: string[];
+  batchIndex?: number;
+  batchTotal?: number;
+  storageKey?: string;
+  mimeType?: string;
+  bytes?: number;
+  /** 文本節點字號（px）；未設取 14.5。 */
+  fontSize?: number;
 }
 
 export interface CanvasNode {
@@ -51,6 +74,14 @@ export interface CanvasNode {
   width: number;
   height: number;
   metadata?: CanvasNodeMetadata;
+  /** 手動拖動過 = 不再參與自動排版（用戶掌控位置） */
+  moved?: boolean;
+  /** 批次父節點：子節點 id 列表 */
+  batchChildren?: string[];
+  /** 批次是否展開（收起時只顯示主圖片） */
+  batchExpanded?: boolean;
+  /** 批次主圖片節點 id（縮圖/封面） */
+  batchPrimaryImageId?: string;
 }
 
 export interface CanvasConnection {
@@ -115,7 +146,8 @@ export type CanvasSseEvent =
   | { name: "canvas.node.generating"; data: { unit_id: string; node_id: string; status: string; progress?: number } }
   | { name: "canvas.node.deleted"; data: { unit_id: string; node_id?: string } }
   | { name: "canvas.derive.started"; data: { unit_id: string; source_node_id: string; instruction: string; interpretation?: string } }
-  | { name: "canvas.budget.updated"; data: { unit_id?: string; used_coins: number; remaining_coins: number } };
+  | { name: "canvas.budget.updated"; data: { unit_id?: string; used_coins: number; remaining_coins: number } }
+  | { name: "canvas.ops"; data: CanvasAgentOpsEvent };
 
 export const CANVAS_EVENT_NAMES = [
   "canvas.plan",
@@ -126,7 +158,32 @@ export const CANVAS_EVENT_NAMES = [
   "canvas.node.deleted",
   "canvas.derive.started",
   "canvas.budget.updated",
+  "canvas.ops",
 ] as const;
+
+// ─────────────────────────────────────────── Agent 操作畫布（Wave C）
+
+/**
+ * Agent 批量畫布操作：gateway 的 canvas_apply_ops 工具經 SSE 下發，
+ * 前端執行（可先過確認閘）後把結果 POST 回 gateway resolve 該工具調用。
+ * 與 infinite-canvas 的 8-op DSL 對齊，執行語義全在前端 reducer。
+ */
+export type CanvasAgentOp =
+  | { type: "add_node"; node: Partial<CanvasNode> & { id: string; type: CanvasNodeType | string } }
+  | { type: "update_node"; id: string; patch: { title?: string; position?: CanvasPosition; width?: number; height?: number; metadata?: Partial<CanvasNodeMetadata> } }
+  | { type: "delete_nodes"; ids: string[] }
+  | { type: "connect_nodes"; connections: { fromNodeId: string; toNodeId: string }[] }
+  | { type: "delete_connections"; ids: string[] }
+  | { type: "select_nodes"; ids: string[] }
+  | { type: "set_viewport"; viewport: Partial<CanvasViewport> }
+  | { type: "run_generation"; node_id: string; prompt?: string; model?: string; size?: string; count?: number };
+
+export interface CanvasAgentOpsEvent {
+  request_id: string;
+  ops: CanvasAgentOp[];
+  /** 給確認閘顯示的一句話意圖（agent 提供）。 */
+  label?: string;
+}
 
 // ─────────────────────────────────────────── 畫布專案（雲端持久化）
 
@@ -150,4 +207,27 @@ export const CANVAS_NODE_DEFAULT_SIZE: Record<CanvasNodeType, { width: number; h
   [CanvasNodeType.Config]: { width: 440, height: 240, title: "生成配置" },
   [CanvasNodeType.Video]: { width: 420, height: 236, title: "视频" },
   [CanvasNodeType.Group]: { width: 760, height: 480, title: "组" },
+  [CanvasNodeType.CharacterCard]: { width: 340, height: 280, title: "角色卡" },
+  [CanvasNodeType.SceneCard]: { width: 340, height: 280, title: "场景卡" },
+  [CanvasNodeType.Audio]: { width: 340, height: 240, title: "音频" },
 };
+
+// ─────────────────────────────────────────── 批次 & 資源參考
+
+/** 資源參考：節點關聯的可查閱資源（圖片/音訊等）。 */
+export interface CanvasResourceReference {
+  nodeId: string;
+  kind: string; // 資源種類，如 "image" | "audio"
+  label: string;
+  title: string;
+  previewUrl?: string;
+  text?: string;
+  active: boolean;
+}
+
+/** 批次操作指令：前端對批次父節點的本地操作。 */
+export type CanvasBatchOperation =
+  | { type: "add_child"; childId: string; imageUrl: string }
+  | { type: "set_primary"; childId: string }
+  | { type: "delete_child"; childId: string }
+  | { type: "toggle_expanded" };

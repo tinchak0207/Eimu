@@ -39,7 +39,7 @@ function AgentAnchorCardComponent({ anchor, onAnchor, onReanchor, onDismiss, bus
           <p className="text-ios-subhead font-semibold text-[rgba(0,0,0,0.85)]">
             第 {anchor.seq} 张出来了，就按这张的风格出完整批？
           </p>
-          <p className="mt-0.5 text-ios-footnote leading-[1.5] text-[rgba(0,0,0,0.55)]">
+          <p className="mt-0.5 text-sm leading-[1.55] text-[rgba(0,0,0,0.55)]">
             锚定后整批沿用同一套参数，第 100 张不会跟第 1 张跑偏。
           </p>
           {preview.length > 0 && (
@@ -47,14 +47,14 @@ function AgentAnchorCardComponent({ anchor, onAnchor, onReanchor, onDismiss, bus
               {preview.map((param) => (
                 <li
                   key={param.key}
-                  className="max-w-[14rem] truncate rounded-full bg-[rgba(0,0,0,0.05)] px-2.5 py-0.5 text-ios-caption1 text-[rgba(0,0,0,0.60)]"
-                  title={`${param.label}：${param.value}`}
+                  className="min-w-0 rounded-full bg-[rgba(0,0,0,0.05)] px-2.5 py-1 text-sm leading-[1.4] text-[rgba(0,0,0,0.62)] [overflow-wrap:anywhere] sm:max-w-[14rem] sm:truncate"
+                  title={param.label + "：" + param.value}
                 >
                   {param.label} {param.value}
                 </li>
               ))}
               {rest > 0 && (
-                <li className="rounded-full bg-[rgba(0,0,0,0.05)] px-2.5 py-0.5 text-ios-caption1 text-[rgba(0,0,0,0.50)]">
+                <li className="rounded-full bg-[rgba(0,0,0,0.05)] px-2.5 py-1 text-sm leading-[1.4] text-[rgba(0,0,0,0.50)]">
                   另 {rest} 项
                 </li>
               )}
@@ -62,38 +62,44 @@ function AgentAnchorCardComponent({ anchor, onAnchor, onReanchor, onDismiss, bus
           )}
           {/* 上游截断过就说出来：锚定可能锚不全，不让使用者以为万无一失。 */}
           {anchor.truncated && (
-            <p className="mt-1.5 text-ios-caption1 text-[rgba(0,0,0,0.46)]">
+            <p className="mt-1.5 text-sm text-[rgba(0,0,0,0.46)]">
               上游只回传了参数摘要，可能有参数锚不住
             </p>
           )}
         </div>
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
-        <button
-          type="button"
-          onClick={onDismiss}
-          disabled={busy}
-          className="cursor-pointer rounded-full px-3 py-1.5 text-ios-caption1 font-medium text-[rgba(0,0,0,0.48)] transition-colors hover:bg-[rgba(0,0,0,0.05)] hover:text-[rgba(0,0,0,0.78)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,0,0,0.20)] disabled:cursor-not-allowed disabled:text-[rgba(0,0,0,0.34)]"
-        >
-          不用了
-        </button>
-        <button
-          type="button"
-          onClick={onReanchor}
-          disabled={busy}
-          title="先只出 1 张换个方向，满意了再出整批"
-          className="inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-[rgba(0,0,0,0.05)] px-3.5 py-1.5 text-ios-caption1 font-semibold text-[rgba(0,0,0,0.62)] transition-colors hover:bg-[rgba(0,0,0,0.09)] hover:text-[rgba(0,0,0,0.86)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,0,0,0.20)] disabled:cursor-not-allowed disabled:text-[rgba(0,0,0,0.34)]"
-        >
-          <RefreshCw className="h-3 w-3" aria-hidden="true" />
-          换个方向
-        </button>
+      {/*
+        窄屏：次按钮（不用了 / 换个方向）并排在上，主按钮「就按这张」整行垫底，
+        紧贴输入区、拇指最顺；宽屏回到原来的右对齐一行。
+      */}
+      <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
+        <div className="flex w-full gap-2 sm:w-auto">
+          <button
+            type="button"
+            onClick={onDismiss}
+            disabled={busy}
+            className="min-h-11 flex-1 cursor-pointer rounded-full px-4 text-sm font-medium text-[rgba(0,0,0,0.52)] transition-colors duration-150 active:bg-[rgba(0,0,0,0.07)] active:text-[rgba(0,0,0,0.80)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,0,0,0.20)] disabled:cursor-not-allowed disabled:opacity-40 sm:flex-none [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
+          >
+            不用了
+          </button>
+          <button
+            type="button"
+            onClick={onReanchor}
+            disabled={busy}
+            title="先只出 1 张换个方向，满意了再出整批"
+            className="inline-flex min-h-11 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-full bg-[rgba(0,0,0,0.05)] px-4 text-sm font-semibold text-[rgba(0,0,0,0.66)] transition-colors duration-150 active:bg-[rgba(0,0,0,0.09)] active:text-[rgba(0,0,0,0.86)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,0,0,0.20)] disabled:cursor-not-allowed disabled:opacity-40 sm:flex-none [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
+          >
+            <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+            换个方向
+          </button>
+        </div>
         <button
           type="button"
           onClick={onAnchor}
           disabled={busy}
           title="把这张实际用过的参数念回给助理，整批照抄"
-          className="cursor-pointer rounded-full bg-[#007AFF] px-4 py-1.5 text-ios-caption1 font-semibold text-white shadow-[0_4px_12px_rgba(0,122,255,0.30)] transition-all duration-200 hover:-translate-y-[1px] hover:bg-[#0066DD] active:scale-[0.97] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.40)] disabled:cursor-not-allowed disabled:bg-[rgba(0,0,0,0.10)] disabled:text-[rgba(0,0,0,0.34)] disabled:shadow-none"
+          className="inline-flex min-h-12 w-full cursor-pointer items-center justify-center gap-1.5 rounded-full bg-[#007AFF] px-5 text-ios-subhead font-semibold text-white shadow-[0_4px_12px_rgba(0,122,255,0.30)] transition-all duration-200 active:scale-[0.98] active:bg-[#0066DD] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.40)] disabled:cursor-not-allowed disabled:bg-[rgba(0,0,0,0.12)] disabled:text-[rgba(0,0,0,0.34)] disabled:shadow-none disabled:active:scale-100 sm:w-auto [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
         >
           就按这张
         </button>

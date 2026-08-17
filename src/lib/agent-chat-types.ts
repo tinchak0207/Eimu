@@ -9,6 +9,8 @@
 // 站上目前没有任何 SSE 消费者（全站都是轮询），所以没有既有模式可抄；
 // 反过来说也没有既有包袱，这里定的形状就是后续所有 agent UI 的地基。
 
+import type { CanvasAgentOpsEvent } from "@/lib/canvas/types";
+
 // ─────────────────────────── 事件名
 
 export interface AgentQuestionRequest {
@@ -51,6 +53,7 @@ export const AGENT_EVENT_NAMES = [
   "canvas.node.deleted",
   "canvas.derive.started",
   "canvas.budget.updated",
+  "canvas.ops",
   "question.request",
   "question.replied",
   "question.rejected",
@@ -233,6 +236,7 @@ export type AgentSseEvent = WithEventId &
     | { name: "canvas.node.deleted"; data: AgentCanvasNodeDeleted }
     | { name: "canvas.derive.started"; data: AgentCanvasDeriveStarted }
     | { name: "canvas.budget.updated"; data: AgentCanvasBudgetUpdated }
+    | { name: "canvas.ops"; data: CanvasAgentOpsEvent }
     | { name: "question.request"; data: AgentQuestionRequest }
     | { name: "question.replied"; data: AgentQuestionReplied }
     | { name: "question.rejected"; data: AgentQuestionRejected }
@@ -414,6 +418,20 @@ export function parseAgentSseEvent(name: string, rawData: string): AgentSseEvent
           remaining_coins: num(d.remaining_coins) ?? 0,
         },
       };
+    case "canvas.ops": {
+      const requestId = str(d.request_id);
+      const ops = d.ops;
+      if (!requestId || !Array.isArray(ops)) return null;
+      return {
+        name,
+        event_id: eventId,
+        data: {
+          request_id: requestId,
+          ops: ops as CanvasAgentOpsEvent["ops"],
+          ...(str(d.label) ? { label: str(d.label) } : {}),
+        },
+      };
+    }
     case "question.request": {
       const requestId = str(d.request_id);
       const questions = parseQuestionItems(d.questions);

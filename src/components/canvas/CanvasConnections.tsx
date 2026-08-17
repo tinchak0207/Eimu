@@ -10,6 +10,12 @@ export interface CanvasConnectionsProps {
   /** 高亮的连线（例如选中节点的相邻线） */
   activeNodeId?: string | null;
   onSelectConnection?: (connectionId: string) => void;
+  /** A5：選中的連線（點擊選中 → Delete 可刪）。 */
+  selectedConnectionId?: string | null;
+  /** A5：連線右鍵（clientX/Y 為 viewport 座標，宿主自行換算）。 */
+  onConnectionContextMenu?: (connectionId: string, clientX: number, clientY: number) => void;
+  /** 連線拖拽中的預覽路徑（世界座標 SVG path d）；null = 沒在拖。 */
+  pendingPath?: string | null;
 }
 
 function CanvasConnections({
@@ -17,6 +23,9 @@ function CanvasConnections({
   connections,
   activeNodeId,
   onSelectConnection,
+  selectedConnectionId = null,
+  onConnectionContextMenu,
+  pendingPath = null,
 }: CanvasConnectionsProps) {
   const nodeMap = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
   const bounds = useMemo(() => computeWorldBounds(nodes, 200), [nodes]);
@@ -64,31 +73,55 @@ function CanvasConnections({
         const from = nodeMap.get(c.fromNodeId);
         const to = nodeMap.get(c.toNodeId);
         if (!from || !to) return null;
-        const active = activeNodeId === c.fromNodeId || activeNodeId === c.toNodeId;
+        const isSelected = selectedConnectionId === c.id;
+        const active = isSelected || activeNodeId === c.fromNodeId || activeNodeId === c.toNodeId;
         const d = bezierPath(from, to);
         return (
           <g key={c.id}>
-            {/* 透明命中区：16px 宽的描边，负责接收点击 */}
+            {/* 透明命中区：负责接收点击。螢幕上恆約 24px 寬（縮放時用
+                --canvas-inverse-scale 反向補償，手指在任意縮放級別都點得到），
+                觸控點擊用 manipulation 避免任何點擊延遲。 */}
             <path
               d={d}
               fill="none"
               stroke="transparent"
-              strokeWidth={16}
-              style={{ pointerEvents: "stroke", cursor: "pointer" }}
+              style={{
+                pointerEvents: "stroke",
+                cursor: "pointer",
+                strokeWidth: "calc(24px * var(--canvas-inverse-scale, 1))",
+                touchAction: "manipulation",
+              }}
               onClick={() => onSelectConnection?.(c.id)}
+              onContextMenu={(e) => {
+                if (!onConnectionContextMenu) return;
+                e.preventDefault();
+                e.stopPropagation();
+                onConnectionContextMenu(c.id, e.clientX, e.clientY);
+              }}
             />
-            {/* 可见连线 */}
+            {/* 可见连线（選中 = 更粗更藍，Delete 可刪） */}
             <path
               d={d}
               fill="none"
               strokeLinecap="round"
-              stroke={active ? "rgba(0,122,255,0.85)" : "rgba(0,0,0,0.22)"}
-              strokeWidth={active ? 3 : 1.5}
+              stroke={isSelected ? "rgba(0,122,255,1)" : active ? "rgba(0,122,255,0.85)" : "rgba(0,0,0,0.14)"}
+              strokeWidth={isSelected ? 3 : active ? 2.5 : 1.2}
               markerEnd={active ? "url(#canvas-conn-arrow-active)" : "url(#canvas-conn-arrow)"}
             />
           </g>
         );
       })}
+      {/* 連線拖拽預覽：藍色虛線，不吃指標事件 */}
+      {pendingPath && (
+        <path
+          d={pendingPath}
+          fill="none"
+          strokeLinecap="round"
+          stroke="rgba(0,122,255,0.75)"
+          strokeWidth={2}
+          strokeDasharray="6 5"
+        />
+      )}
     </svg>
   );
 }

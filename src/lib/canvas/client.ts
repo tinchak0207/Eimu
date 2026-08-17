@@ -17,7 +17,7 @@ export interface CanvasClientResult<T> {
   message?: string;
 }
 
-function authHeaders(): Record<string, string> | null {
+export function authHeaders(): Record<string, string> | null {
   const token = getStoredToken();
   const userId = getStoredUser()?.id;
   if (!token || !userId) return null;
@@ -107,4 +107,46 @@ export function downloadJson(filename: string, payload: unknown): void {
   a.click();
   a.remove();
   URL.revokeObjectURL(href);
+}
+
+// ─────────────────────────────────────────── Wave C：agent 操作畫布的上行通道
+
+/** 壓縮畫布快照 → gateway（agent 的 canvas_get_state 讀這份）。失敗靜默：快照是盡力而為。 */
+export async function postCanvasSnapshot(sessionId: string, state: unknown): Promise<void> {
+  const headers = authHeaders();
+  if (!headers) return; // 未登入安靜降級，不送 401 請求。
+  headers["Content-Type"] = "application/json";
+  try {
+    await fetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}/canvas-state`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ state }),
+      cache: "no-store",
+      keepalive: true,
+    });
+  } catch {
+    /* 盡力而為：斷網不打擾創作 */
+  }
+}
+
+/** canvas.ops 執行結果回報 → gateway resolve 對應的 canvas_apply_ops 工具調用。 */
+export async function postCanvasOpsResult(
+  sessionId: string,
+  requestId: string,
+  result: { ok: boolean; error?: string; created_node_ids?: string[] },
+): Promise<void> {
+  const headers = authHeaders();
+  if (!headers) return; // 未登入不可能有 agent 會話在跑，安靜返回。
+  headers["Content-Type"] = "application/json";
+  try {
+    await fetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}/canvas-ops-result`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ request_id: requestId, ...result }),
+      cache: "no-store",
+      keepalive: true,
+    });
+  } catch {
+    /* gateway 端 30s 超時兜底，不重試 */
+  }
 }

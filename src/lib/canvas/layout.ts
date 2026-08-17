@@ -314,33 +314,59 @@ export function computeWorldBounds(nodes: CanvasNode[], pad = 500): CanvasBounds
   return { minX, minY, maxX, maxY, width: maxX - minX, height: maxY - minY };
 }
 
-/** 把整張畫布塞進視口（含邊距），回新的 viewport。 */
+/**
+ * 「可讀縮放」下限：全圖 fit 低於它時寧可不顯示全部，也要保證節點文字可讀。
+ * 暴君原則：一進來就要看到清楚的內容，而不是縮成一團的整張圖。
+ */
+export const CANVAS_READABLE_MIN_SCALE = 0.85;
+
+/** 把整張畫布帶進視口（含邊距），回新的 viewport。
+ *  minScale > 0 時是「可讀優先」模式：全圖 fit 的縮放低於 minScale，
+ *  改用 minScale 並把視口對齊內容開頭（第一個/上游節點清晰可見），
+ *  其餘節點平移查看——不會出現「小到看不清」的整圖縮略。 */
 export function fitToNodes(
   nodes: CanvasNode[],
   viewportWidth: number,
   viewportHeight: number,
   padding = 80,
+  minScale = 0,
 ): CanvasViewport {
   if (nodes.length === 0 || viewportWidth <= 0 || viewportHeight <= 0) return { x: 0, y: 0, k: 1 };
   const b = computeWorldBounds(nodes, 0);
-  const k = clampScale(
+  const kFit = clampScale(
     Math.min((viewportWidth - padding * 2) / Math.max(b.width, 1), (viewportHeight - padding * 2) / Math.max(b.height, 1)),
   );
+  const k = clampScale(Math.max(kFit, minScale));
+  if (k === kFit) {
+    return {
+      x: viewportWidth / 2 - (b.minX + b.width / 2) * k,
+      y: viewportHeight / 2 - (b.minY + b.height / 2) * k,
+      k,
+    };
+  }
+  // 全圖 fit 太小：放大到可讀縮放，視口對齊內容左上（padding 邊距），
+  // 讓上游第一個節點（劇本/描述）清晰可見。
   return {
-    x: viewportWidth / 2 - (b.minX + b.width / 2) * k,
-    y: viewportHeight / 2 - (b.minY + b.height / 2) * k,
+    x: padding - b.minX * k,
+    y: padding - b.minY * k,
     k,
   };
 }
 
-/** 貝茲連線：出右側中點、進左側中點，curvature = max(|dx|*0.5, 50)。 */
+/** 貝茲連線：方向自適應（from 中心在左 → 出右側進左側；反之出左側進右側，
+    反向連線不再繞一大圈回來）。curvature = clamp(|dx|*0.5, 50, 200)——上限讓
+    長距離連線不會無限平緩成「僵硬直線」。 */
 export function bezierPath(from: CanvasNode, to: CanvasNode): string {
-  const x1 = from.position.x + from.width;
+  const fromRight = from.position.x + from.width;
+  const toRight = to.position.x + to.width;
   const y1 = from.position.y + from.height / 2;
-  const x2 = to.position.x;
   const y2 = to.position.y + to.height / 2;
-  const c = Math.max(Math.abs(x2 - x1) * 0.5, 50);
-  return `M ${x1} ${y1} C ${x1 + c} ${y1}, ${x2 - c} ${y2}, ${x2} ${y2}`;
+  const forward = from.position.x + from.width / 2 <= to.position.x + to.width / 2;
+  const x1 = forward ? fromRight : from.position.x;
+  const x2 = forward ? to.position.x : toRight;
+  const c = Math.min(Math.max(Math.abs(x2 - x1) * 0.5, 50), 200);
+  const dir = forward ? 1 : -1;
+  return `M ${x1} ${y1} C ${x1 + dir * c} ${y1}, ${x2 - dir * c} ${y2}, ${x2} ${y2}`;
 }
 
 /** 網格背景：gridSize 跟著縮放走，backgroundPosition 取視口的模，格線才不會漂。 */

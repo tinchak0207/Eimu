@@ -1,7 +1,7 @@
 "use client";
 
-import { memo } from "react";
-import { Coins, Sparkles } from "lucide-react";
+import { memo, useState } from "react";
+import { Coins, Loader2, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AgentPendingConfirm } from "@/lib/agent-chat-types";
 
@@ -16,6 +16,11 @@ export interface AgentConfirmCardProps {
    * assistant 文本，不凭空造字段。缺 sentiment 时卡片退回纯花费确认。
    */
   contextText?: string;
+  /**
+   * 裁决已提交、等待结果时的宿主信号（如网络往返期间）。
+   * 缺席时卡片用内部状态在点击瞬间锁住按钮，防双指连点同一笔花费。
+   */
+  busy?: boolean;
 }
 
 /**
@@ -31,15 +36,19 @@ function formatCoins(n: number): string {
   return String(Math.max(0, Math.floor(n * 1e5) / 1e5));
 }
 
-function AgentConfirmCardComponent({ confirm, onConfirm, contextText }: AgentConfirmCardProps) {
+function AgentConfirmCardComponent({ confirm, onConfirm, contextText, busy = false }: AgentConfirmCardProps) {
   const { requestId, amountCoins, description } = confirm;
+  // 点下去的瞬间锁住两颗按钮：同一笔花费不该被连点两次裁决。
+  // 宿主传入 busy 时以宿主信号为准；没有接线时内部状态兜底。
+  const [pending, setPending] = useState<"approve" | "reject" | null>(null);
+  const locked = busy || pending !== null;
 
   // D-25：解读 = description（confirm.request 的事件本体）+ 这轮已流出的 assistant 文本。
   // 没有解读可搬时退回纯花费确认，不让卡片空白。
   const interpret = [description, contextText].filter((t): t is string => !!t && t.trim().length > 0).join(" ");
 
   return (
-    <div className="agent-rise lg-sheet rounded-ios-2xl p-3.5">
+    <div className="agent-rise lg-sheet rounded-ios-2xl p-3.5" aria-busy={locked}>
       {interpret && (
         <div className="flex items-start gap-3">
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[rgba(122,73,255,0.14)] text-[#7C4DFF]">
@@ -49,44 +58,70 @@ function AgentConfirmCardComponent({ confirm, onConfirm, contextText }: AgentCon
             <p className="text-ios-subhead font-semibold text-[rgba(0,0,0,0.85)]">
               我这么理解你的愿望
             </p>
-            <p className="mt-0.5 text-ios-footnote leading-[1.5] text-[rgba(0,0,0,0.55)]">
+            <p className="mt-0.5 text-sm leading-[1.55] text-[rgba(0,0,0,0.55)]">
               {interpret}
             </p>
           </div>
         </div>
       )}
+      {/* 扣费数字是这张卡的主角：金额单独成行放大加粗，金币单位跟行尾，一眼看清要扣多少。 */}
       <div className="mt-3 flex items-start gap-3">
         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[rgba(255,179,0,0.16)] text-[#B8860B]">
           <Coins className="h-4 w-4" aria-hidden="true" />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-ios-subhead font-semibold text-[rgba(0,0,0,0.85)]">
-            将花费 {formatCoins(amountCoins)} 金币
+          <p className="text-sm font-medium text-[rgba(0,0,0,0.55)]">
+            将花费
+          </p>
+          <p className="mt-0.5 flex items-baseline gap-1.5">
+            <span className="text-ios-title2 font-bold leading-none tabular-nums text-[#B8860B]">
+              {formatCoins(amountCoins)}
+            </span>
+            <span className="text-ios-subhead font-semibold text-[rgba(0,0,0,0.72)]">金币</span>
           </p>
           {description && (
-            <p className="mt-0.5 text-ios-footnote leading-[1.5] text-[rgba(0,0,0,0.55)]">
+            <p className="mt-1.5 text-sm leading-[1.55] text-[rgba(0,0,0,0.55)]">
               {description}
             </p>
           )}
         </div>
       </div>
-      <div className="mt-3 flex justify-end gap-2">
+      {/* 两颗大按钮并排各占一半，拇指直接盖住；取消是中性灰，确认是实心蓝，视觉绝不混淆。 */}
+      <div className="mt-3.5 grid grid-cols-2 gap-2.5">
         <button
           type="button"
-          onClick={() => onConfirm(requestId, false)}
-          className="rounded-full px-4 py-1.5 text-ios-caption1 font-semibold text-[rgba(0,0,0,0.55)] transition-colors hover:bg-[rgba(0,0,0,0.05)] hover:text-[rgba(0,0,0,0.80)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)]"
+          onClick={() => {
+            setPending("reject");
+            onConfirm(requestId, false);
+          }}
+          disabled={locked}
+          className={cn(
+            "flex min-h-12 items-center justify-center gap-1.5 rounded-full text-ios-subhead font-semibold",
+            "bg-[rgba(0,0,0,0.06)] text-[rgba(0,0,0,0.72)] transition-colors duration-150 active:bg-[rgba(0,0,0,0.10)]",
+            "focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,0,0,0.20)]",
+            "disabled:cursor-not-allowed disabled:opacity-50",
+            "[touch-action:manipulation] [-webkit-tap-highlight-color:transparent]",
+          )}
         >
+          {pending === "reject" && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
           取消
         </button>
         <button
           type="button"
-          onClick={() => onConfirm(requestId, true)}
+          onClick={() => {
+            setPending("approve");
+            onConfirm(requestId, true);
+          }}
+          disabled={locked}
           className={cn(
-            "rounded-full bg-[#007AFF] px-4 py-1.5 text-ios-caption1 font-semibold text-white shadow-[0_4px_12px_rgba(0,122,255,0.32)]",
-            "transition-all duration-200 hover:-translate-y-[1px] active:scale-[0.97]",
+            "flex min-h-12 items-center justify-center gap-1.5 rounded-full text-ios-subhead font-semibold text-white",
+            "bg-[#007AFF] shadow-[0_4px_12px_rgba(0,122,255,0.32)] transition-all duration-200 active:scale-[0.98] active:bg-[#0066DD]",
             "focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.40)]",
+            "disabled:cursor-not-allowed disabled:bg-[rgba(0,0,0,0.12)] disabled:shadow-none disabled:active:scale-100",
+            "[touch-action:manipulation] [-webkit-tap-highlight-color:transparent]",
           )}
         >
+          {pending === "approve" && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
           确认
         </button>
       </div>

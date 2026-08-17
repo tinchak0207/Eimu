@@ -75,6 +75,18 @@ function AgentChatPanelComponent({
   awaitingChoice = false,
 }: AgentChatPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  // 输入区锚点：虚拟键盘弹起后，拿它判断「输入区是不是被键盘盖住了」。
+  const composerAnchorRef = useRef<HTMLDivElement>(null);
+
+  /** 空态快捷示例：点一下就发送（ChatGPT 同款模式），当回合结束后输入区自动沉到底部。 */
+  const EXAMPLES = [
+    "画一只戴帽子的橘猫，水彩风格",
+    "让这瓶香水出现在落日海滩，自然光",
+    "生成秦始皇骑北极熊的大电影",
+  ];
+  // 用户是否停在列表底部附近。串流/新条目只在「本来就在底部」时自动贴底，
+  // 往上翻历史时不许把滚动条强拉回底部（「往上翻不強拉」）。
+  const isNearBottomRef = useRef(true);
   const { items, pendingConfirms, pendingQuestions, closed, closedReason, turnActive, lastEventId } = state;
 
   // D-25：解读上下文 = 该轮已收到的 message.delta 文本（最新一条 assistant 条目的累计文本）。
@@ -88,10 +100,54 @@ function AgentChatPanelComponent({
   })();
 
   // 新条目 / 串流进行时滚到底部，让最新内容可见。
+  // 只在用户本来就停在底部附近时贴底：往上翻历史时新内容到达也不拽人下去。
   useEffect(() => {
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el && isNearBottomRef.current) el.scrollTop = el.scrollHeight;
   }, [items.length, lastEventId, turnActive]);
+
+  // 滚动时实时记录「在不在底部附近」。128px 阈值 = 翻看最后几条时也算「在底部」，
+  // 新内容会温柔地贴上来；翻到历史深处就不再自动滚。
+  const handleTranscriptScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    isNearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 128;
+  };
+
+  // 虚拟键盘 / 捏合缩放：视觉视口被吃掉后，底部输入区可能被键盘盖住。
+  // visualViewport 的 resize/scroll 是唯一可靠的信号——部分浏览器（键盘 overlay
+  // 模式、iOS 某些路径）下 window.innerHeight 不会跟着变，layout viewport 也不缩。
+  // 只在「视口真的被吃掉 ≥80px」且「输入区底部掉出可视区」时把输入区滚回可见；
+  // 键盘收起、纯地址栏伸缩不触发，避免和用户翻历史打架。
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.visualViewport) return;
+    const vv = window.visualViewport;
+    const reduceMotion =
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let raf = 0;
+    const adjust = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const anchor = composerAnchorRef.current;
+        if (!anchor) return;
+        if (vv.height < window.innerHeight - 80) {
+          const rect = anchor.getBoundingClientRect();
+          const visibleBottom = vv.offsetTop + vv.height;
+          if (rect.bottom > visibleBottom - 12) {
+            anchor.scrollIntoView({ block: "nearest", behavior: reduceMotion ? "auto" : "smooth" });
+          }
+        }
+      });
+    };
+    vv.addEventListener("resize", adjust);
+    vv.addEventListener("scroll", adjust);
+    return () => {
+      vv.removeEventListener("resize", adjust);
+      vv.removeEventListener("scroll", adjust);
+      cancelAnimationFrame(raf);
+    };
+  }, []);
 
   // 等用户二选一时，「未连接」的红灯是误报：没连是因为在等他决定。
   const meta = awaitingChoice
@@ -101,15 +157,16 @@ function AgentChatPanelComponent({
 
   return (
     <section className="agent-panel" aria-label="智能体对话">
-      {/* 连接状态：一行不占体积，重连时提供手动重试，不遮挡正文。 */}
-      <div className="flex items-center gap-2 px-1 pb-2 pt-1">
+      {/* 连接状态：一行不占体积，重连时提供手动重试，不遮挡正文。
+          窄屏上状态字升到 iOS caption1（12px），保证在手机上读得清。 */}
+      <div className="agent-panel-status flex items-center gap-2 px-0.5 pb-2 pt-1">
         <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", meta.dotClass)} aria-hidden="true" />
-        <span className="text-[11px] font-medium text-[rgba(0,0,0,0.35)]">{meta.label}</span>
+        <span className="text-ios-caption1 font-medium text-[rgba(0,0,0,0.35)]">{meta.label}</span>
         {connection === "reconnecting" && (
           <button
             type="button"
             onClick={onRetryConnection}
-            className="ml-auto inline-flex items-center gap-1.5 rounded-full bg-[rgba(0,122,255,0.10)] px-3 py-1 text-ios-caption1 font-semibold text-[#007AFF] transition-colors hover:bg-[rgba(0,122,255,0.18)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)]"
+            className="agent-retry ml-auto inline-flex items-center gap-1.5 rounded-full bg-[rgba(0,122,255,0.10)] px-3 py-1 text-ios-caption1 font-semibold text-[#007AFF] transition-colors hover:bg-[rgba(0,122,255,0.18)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)]"
           >
             <RotateCcw className="h-3 w-3" aria-hidden="true" />
             重试
@@ -119,7 +176,7 @@ function AgentChatPanelComponent({
           <Loader2 className="ml-auto h-3.5 w-3.5 animate-spin text-[rgba(0,0,0,0.35)]" aria-hidden="true" />
         )}
         {closed && closedReason && (
-          <span className="ml-auto truncate text-[11px] text-[rgba(0,0,0,0.35)]">
+          <span className="ml-auto truncate text-ios-caption1 text-[rgba(0,0,0,0.35)]">
             原因：{closedReason}
           </span>
         )}
@@ -134,19 +191,34 @@ function AgentChatPanelComponent({
       <div
         ref={scrollRef}
         aria-live="polite"
-        className="agent-transcript min-h-0 flex-1 overflow-y-auto overscroll-contain px-0.5 py-1"
+        onScroll={handleTranscriptScroll}
+        className="agent-transcript min-h-0 flex-1 overflow-y-auto overscroll-contain px-0.5 pb-3 pt-1"
       >
         {items.length === 0 && connection === "open" ? (
-          <div className="flex h-full min-h-40 flex-col items-center justify-center gap-2 px-6 text-center">
-            <span className="flex h-11 w-11 items-center justify-center rounded-full bg-[rgba(0,122,255,0.10)] text-[#007AFF]">
+          <div className="agent-empty flex h-full min-h-40 flex-col items-center justify-center gap-5 px-6 text-center">
+            <span className="flex h-12 w-12 items-center justify-center rounded-full bg-[rgba(0,122,255,0.10)] text-[#007AFF] ring-1 ring-[rgba(0,122,255,0.22)] shadow-[0_10px_28px_rgba(0,122,255,0.20),inset_0_1px_0_rgba(255,255,255,0.85)] backdrop-blur-[20px]">
               <Sparkles className="h-5 w-5" aria-hidden="true" />
             </span>
-            <p className="text-ios-subhead font-medium text-[rgba(0,0,0,0.72)]">
-              和智能体聊聊，让它帮你生成图片
-            </p>
-            <p className="max-w-[30rem] text-ios-footnote leading-[1.5] text-[rgba(0,0,0,0.45)]">
-              例如：画一只戴帽子的橘猫，水彩风格
-            </p>
+            <div>
+              <p className="text-ios-subhead font-semibold text-[rgba(0,0,0,0.78)]">
+                和智能体聊聊，让它帮你生成图片
+              </p>
+              <p className="agent-empty-hint mx-auto mt-1.5 max-w-[30rem] text-sm leading-[1.5] text-[rgba(0,0,0,0.45)] sm:text-ios-footnote">
+                说一句话，它自动选好模型、风格和比例
+              </p>
+            </div>
+            <div className="flex max-w-[28rem] flex-wrap items-center justify-center gap-2">
+              {EXAMPLES.map((ex) => (
+                <button
+                  key={ex}
+                  type="button"
+                  onClick={() => onSend(ex)}
+                  className="lg-float cursor-pointer rounded-full px-3.5 py-2 text-ios-footnote font-medium text-[rgba(0,0,0,0.62)] transition-all duration-200 hover:-translate-y-0.5 hover:text-[#007AFF] hover:shadow-[0_6px_18px_rgba(0,0,0,0.10)] active:translate-y-0 active:scale-[0.97]"
+                >
+                  {ex}
+                </button>
+              ))}
+            </div>
           </div>
         ) : (
           <AgentTranscript items={items} imageActions={imageActions} />
@@ -163,7 +235,7 @@ function AgentChatPanelComponent({
           回合一结束 turnActive 落下，泡泡跟着消失，不用另外清理。
         */}
         {turnActive && items[items.length - 1]?.kind !== "assistant" && (
-          <div className="flex items-center gap-2 px-1 py-2" role="status" aria-label="助手正在思考">
+          <div className="agent-thinking flex items-center gap-2 px-1 py-2" role="status" aria-label="助手正在思考">
             <span className="flex items-end gap-[3px]" aria-hidden="true">
               {[0, 160, 320].map((delay) => (
                 <span
@@ -173,7 +245,7 @@ function AgentChatPanelComponent({
                 />
               ))}
             </span>
-            <span className="text-[11px] text-[rgba(0,0,0,0.35)]">正在思考…</span>
+            <span className="text-ios-caption1 text-[rgba(0,0,0,0.35)]">正在思考…</span>
           </div>
         )}
       </div>
@@ -201,39 +273,50 @@ function AgentChatPanelComponent({
       {/* 待确认卡片浮在输入区上方，任何时刻 0..n 张。
           D-25：解读 = 该轮已收到的 message.delta 文本（lastAssistantText），
           与 confirm 事件的 description 一起由确认卡拼装成「我这么理解你的愿望」；
-          缺省时确认卡退回纯花费确认。 */}
+          缺省时确认卡退回纯花费确认。
+          2026-08-16：卡片区有界 + 内部滚动（最高 min(60dvh, 28rem)）——高卡片
+          不会再被面板高度裁掉底部选项，也不会把 transcript 挤到零高度。 */}
       {pendingConfirms.length > 0 && (
-        <div className="flex flex-col gap-2 px-0.5 pb-2">
-          {pendingConfirms.map((confirm) => (
-            <AgentConfirmCard
-              key={confirm.requestId}
-              confirm={confirm}
-              onConfirm={onConfirm}
-              contextText={lastAssistantText}
-            />
-          ))}
+        <div className="min-h-0 max-h-[min(60dvh,28rem)] shrink-0 overflow-y-auto overscroll-contain px-0.5 pb-2">
+          <div className="flex flex-col gap-2">
+            {pendingConfirms.map((confirm) => (
+              <AgentConfirmCard
+                key={confirm.requestId}
+                confirm={confirm}
+                onConfirm={onConfirm}
+                contextText={lastAssistantText}
+              />
+            ))}
+          </div>
         </div>
       )}
 
       {pendingConfirms.length === 0 && pendingQuestions.length > 0 && (
-        <div className="flex flex-col gap-2 px-0.5 pb-2">
-          {pendingQuestions.map((question) => (
-            <AgentQuestionCard
-              key={question.requestId}
-              question={question}
-              onAnswer={onAnswerQuestion}
-            />
-          ))}
+        <div className="min-h-0 max-h-[min(60dvh,28rem)] shrink-0 overflow-y-auto overscroll-contain px-0.5 pb-2">
+          {/* 問題卡串行：一次只出一張，答完（reducer 移除該 requestId）再浮出下一張，
+              不讓多張疊在一起同時逼用戶做決定。 */}
+          <div className="flex flex-col gap-2">
+            {pendingQuestions.slice(0, 1).map((question) => (
+              <AgentQuestionCard
+                key={question.requestId}
+                question={question}
+                onAnswer={onAnswerQuestion}
+              />
+            ))}
+          </div>
         </div>
       )}
 
-      <AgentComposer
-        disabled={composerDisabled}
-        onSend={onSend}
-        sessionId={sessionId}
-        prefill={prefill}
-        onPrefillConsumed={onPrefillConsumed}
-      />
+      {/* 输入区锚点：键盘弹起时以此为基准判断可见性，滚回可视区。 */}
+      <div ref={composerAnchorRef} className="agent-composer-anchor">
+        <AgentComposer
+          disabled={composerDisabled}
+          onSend={onSend}
+          sessionId={sessionId}
+          prefill={prefill}
+          onPrefillConsumed={onPrefillConsumed}
+        />
+      </div>
     </section>
   );
 }

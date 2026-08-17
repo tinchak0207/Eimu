@@ -30,6 +30,7 @@ import {
   resolveAgentConfirm,
   replyAgentQuestion,
   sendAgentMessage,
+  abortAgentSession,
 } from "@/lib/agent-chat-client";
 import {
   clearPersisted,
@@ -130,6 +131,10 @@ let sessionTouchedInThisVisit = false;
 
 export interface UseAgentChatOptions {
   autoStart?: boolean;
+  /** 畫布 SSE 事件分流（v3 embed）：canvas.* 事件轉交右側 CanvasEmbed。 */
+  onCanvasEvent?: (event: AgentSseEvent) => void;
+  /** 發送前提供畫布摘要（v3 embed）。 */
+  canvasStateProvider?: () => unknown;
 }
 
 /**
@@ -156,6 +161,7 @@ export interface UseAgentChatReturn {
   answerQuestion: (requestId: string, answers: string[][]) => Promise<void>;
   retry: () => Promise<void>;
   end: () => Promise<void>;
+  abort: () => Promise<void>;
   // D-17：上次会话存档。非空时，autoStart 不会自动开新会话，交给 UI 二选一。
   resumable: ResumableAgentChat | null;
   resume: () => Promise<void>;
@@ -163,7 +169,7 @@ export interface UseAgentChatReturn {
 }
 
 export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn {
-  const { autoStart = false } = options ?? {};
+  const { autoStart = false, onCanvasEvent, canvasStateProvider } = options ?? {};
 
   const [state, dispatch] = useReducer(chatReducer, EMPTY_AGENT_CHAT_STATE);
   const [connection, setConnection] = useState<UseAgentChatReturn["connection"]>("idle");
@@ -181,6 +187,10 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
   const closedRef = useRef(false);
   const startedRef = useRef(false);
   const mountedRef = useRef(true);
+  // v3 embed：onCanvasEvent 经 ref 转交，避免 EventSource 注册时抓到旧闭包。
+  const onCanvasEventRef = useRef(onCanvasEvent);
+  // v3 embed：canvasStateProvider 经 ref 转交，send 时抓最新摘要。
+  const canvasStateProviderRef = useRef(canvasStateProvider);
   // D-17：最后一次读到的存档（供 resume 直接取，避免重新读 localStorage）。
   const persistedRef = useRef<PersistedAgentChat | null>(null);
   // D-17：刚点了「开新会话」/ 存档被清掉后，start() 不再被存档挡住。
@@ -192,6 +202,11 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
+
+  useEffect(() => {
+    onCanvasEventRef.current = onCanvasEvent;
+    canvasStateProviderRef.current = canvasStateProvider;
+  }, [onCanvasEvent, canvasStateProvider]);
 
   // D-17：mount 时读一次本地存档，决定「有可恢复的上次会话」。
   useEffect(() => {
@@ -382,6 +397,12 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
       const raw = typeof msg.data === "string" ? msg.data : "";
       const evt = parseAgentSseEvent(name, raw);
       if (!evt) return;
+      // v3 embed：canvas 事件 + 完成訊號（image.done/turn.done/session.closed）也
+      // 分流給右側 CanvasEmbed（走 useCanvasChat），讓畫布能對「圖完成」做最終一
+      // 致性收斂，不依賴 gateway 一定發出 canvas.node.updated。
+      if (evt.name.startsWith("canvas.") || evt.name === "image.done" || evt.name === "turn.done" || evt.name === "session.closed") {
+        onCanvasEventRef.current?.(evt);
+      }
       if (evt.name === "session.closed") {
         // 终结事件：马上关 ES、清计时器，剩下的交给 state.closed effect。
         closedRef.current = true;
@@ -452,7 +473,9 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
         return;
       }
       try {
-        await sendAgentMessage(sid, trimmed);
+        await sendAgentMessage(sid, trimmed, {
+          canvasState: canvasStateProviderRef.current?.(),
+        });
       } catch (err) {
         dispatchNotice("error", err instanceof Error ? err.message : "消息传送失败，请重试。");
       }
@@ -506,6 +529,17 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
     backoffRef.current = INITIAL_BACKOFF_MS;
     await openConnection();
   }, [start, openConnection]);
+
+  const abort = useCallback(async (): Promise<void> => {
+    if (closedRef.current) return;
+    const sid = sessionIdRef.current;
+    if (!sid) return;
+    try {
+      await abortAgentSession(sid);
+    } catch (err) {
+      dispatchNotice("error", err instanceof Error ? err.message : "中止失败，请重试。");
+    }
+  }, [dispatchNotice]);
 
   const end = useCallback(async (): Promise<void> => {
     closedRef.current = true;
@@ -650,6 +684,7 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
     end,
     resumable,
     resume,
+    abort,
     discardAndStartNew,
   };
 }

@@ -72,14 +72,14 @@ export function AgentParamDisclosure({ argsSummary, idPrefix, toolName }: AgentP
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-controls={`${idPrefix}-params`}
-        className="inline-flex w-fit cursor-pointer items-center gap-1 text-ios-caption1 font-medium text-[rgba(0,0,0,0.50)] transition-colors hover:text-[rgba(0,0,0,0.80)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)]"
+        className="inline-flex min-h-11 w-fit cursor-pointer touch-manipulation items-center gap-1.5 self-start rounded-full px-2.5 text-[14px] font-medium leading-[1.25rem] text-[rgba(0,122,255,0.92)] transition-colors duration-200 hover:text-[#007AFF] active:bg-[rgba(0,122,255,0.10)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] motion-reduce:transition-none [-webkit-tap-highlight-color:transparent]"
       >
         {/* 窄屏点开的是抽屉，图标跟着语义换：手风琴才有「转箭头」这回事。 */}
         {narrow ? (
-          <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
+          <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
         ) : (
           <ChevronDown
-            className={cn("h-3.5 w-3.5 transition-transform duration-200", open && "rotate-180")}
+            className={cn("h-4 w-4 transition-transform duration-200 motion-reduce:transition-none", open && "rotate-180")}
             aria-hidden="true"
           />
         )}
@@ -104,7 +104,7 @@ export function AgentParamDisclosure({ argsSummary, idPrefix, toolName }: AgentP
             >
               {/* 抓手是可见的可抓性提示，不是装饰；真正的关闭靠右上角按钮与点遮罩。 */}
               <span className="agent-param-drawer-grip" aria-hidden="true" />
-              <div className="flex items-start gap-2 px-4 pb-2">
+              <div className="flex items-center gap-2 px-4 pb-2">
                 <p id={titleId} className="min-w-0 flex-1 text-ios-subhead font-semibold text-[rgba(0,0,0,0.85)]">
                   {toolName ? `${toolName} 的参数` : "这次用到的参数"}
                 </p>
@@ -113,9 +113,9 @@ export function AgentParamDisclosure({ argsSummary, idPrefix, toolName }: AgentP
                   type="button"
                   onClick={close}
                   aria-label="关闭参数"
-                  className="-mt-0.5 flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full bg-[rgba(0,0,0,0.05)] text-[rgba(0,0,0,0.50)] transition-colors hover:bg-[rgba(0,0,0,0.09)] hover:text-[rgba(0,0,0,0.80)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)]"
+                  className="flex h-11 w-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full bg-[rgba(0,0,0,0.05)] text-[rgba(0,0,0,0.50)] transition-colors hover:bg-[rgba(0,0,0,0.09)] hover:text-[rgba(0,0,0,0.80)] active:bg-[rgba(0,0,0,0.13)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] motion-reduce:transition-none [-webkit-tap-highlight-color:transparent]"
                 >
-                  <X className="h-4 w-4" aria-hidden="true" />
+                  <X className="h-5 w-5" aria-hidden="true" />
                 </button>
               </div>
               <div className="agent-param-drawer-body">
@@ -126,7 +126,9 @@ export function AgentParamDisclosure({ argsSummary, idPrefix, toolName }: AgentP
         )
       ) : (
         <div id={`${idPrefix}-params`} className={cn("agent-args", open && "is-open")}>
-          <div className="agent-args-inner">
+          {/* 展开后的长参数在卡内滚动，不把整张卡撑出视野：60dvh 封顶。
+              overflow-y 用内联样式盖过 .agent-args-inner 的 overflow:hidden。 */}
+          <div className="agent-args-inner max-h-[60dvh] overscroll-contain" style={{ overflowY: "auto" }}>
             {/* D-19：参数分常用层／进阶层两段，不再是一坨 JSON 原文。
                 花费不往下传：卡片头已经常驻显示，展开后再来一次是噪音。 */}
             <AgentParamCard argsSummary={argsSummary} idPrefix={idPrefix} />

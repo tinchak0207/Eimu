@@ -120,6 +120,8 @@ function AgentComposerComponent({
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // 键盘规避：composer 根元素需要被抬升/复位，所以给它一个 ref。
+  const composerRef = useRef<HTMLDivElement>(null);
   const trimmed = text.trim();
 
   const handlePick = useCallback(() => {
@@ -272,6 +274,55 @@ function AgentComposerComponent({
     };
   }, []);
 
+  /**
+   * 移动端虚拟键盘规避。
+   *
+   * iOS 弹键盘时 window.innerHeight 不变，只有 visualViewport 缩小，
+   * composer 所在的卡片是定高（AGENT_SURFACE_HEIGHT），系统自动滚页未必
+   * 能把输入区完全抬出键盘——于是 composer 被盖住、看不到自己在打什么。
+   * 这里监听 visualViewport 的 resize/scroll（弹键盘、滚页都会触发），
+   * 量出 composer 底部相对键盘顶部的实际越界量，用 transform 抬到键盘上方；
+   * 不假设窗口高度，也不依赖具体布局。桌面（fine pointer）完全不介入。
+   */
+  useEffect(() => {
+    const el = composerRef.current;
+    if (!el) return;
+    if (window.matchMedia("(pointer: fine)").matches) return;
+    const vv = window.visualViewport ?? null;
+    const KEYBOARD_GAP = 8;
+    const apply = () => {
+      const rect = el.getBoundingClientRect();
+      const offsetTop = vv ? vv.offsetTop : 0;
+      const height = vv ? vv.height : window.innerHeight;
+      // composer 底部在可视区里比键盘顶（= 可视区底）低多少。
+      const overlap = rect.bottom - offsetTop - height + KEYBOARD_GAP;
+      if (overlap > 4) {
+        el.style.transform = "translateY(" + -overlap + "px)";
+        el.style.transition = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+          ? "none"
+          : "transform 0.2s cubic-bezier(0.4, 0, 0.2, 1)";
+      } else {
+        el.style.transform = "";
+        el.style.transition = "";
+      }
+    };
+    if (vv) {
+      vv.addEventListener("resize", apply);
+      vv.addEventListener("scroll", apply);
+    }
+    window.addEventListener("resize", apply);
+    apply();
+    return () => {
+      if (vv) {
+        vv.removeEventListener("resize", apply);
+        vv.removeEventListener("scroll", apply);
+      }
+      window.removeEventListener("resize", apply);
+      el.style.transform = "";
+      el.style.transition = "";
+    };
+  }, []);
+
   const handleKeyDown = useCallback(
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
       // Enter 发送，Shift+Enter 换行。
@@ -292,7 +343,10 @@ function AgentComposerComponent({
   );
 
   return (
-    <div className="agent-composer flex items-end gap-2 rounded-[22px] bg-white/70 px-3 py-2 ring-1 ring-black/[0.08] shadow-[0_2px_16px_rgba(0,0,0,0.05)] backdrop-blur-xl">
+    <div
+      ref={composerRef}
+      className="agent-composer flex items-end gap-2 rounded-[22px] bg-white px-3 py-2 ring-1 ring-black/[0.08] shadow-[0_2px_16px_rgba(0,0,0,0.05)] touch-manipulation [-webkit-tap-highlight-color:transparent] focus-within:ring-2 focus-within:ring-[rgba(0,122,255,0.30)]"
+    >
       {/*
         附件按钮：点击打开隐式文件选择，一次可选多个文件，选完即逐个上传。
         上传中的 chip 显示 spinner，失败显示错误态（可移除重传或删除）。
@@ -304,10 +358,11 @@ function AgentComposerComponent({
         aria-label="添加附件"
         title="添加附件（图片 / 视频 / 文档）"
         className={cn(
-          "flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
-          "text-[#007AFF] transition-colors",
-          "hover:bg-[rgba(0,122,255,0.08)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)]",
-          "disabled:cursor-not-allowed disabled:text-[rgba(0,0,0,0.30)]",
+          "flex h-11 w-11 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-full",
+          "bg-[rgba(0,122,255,0.10)] text-[#007AFF] transition-colors",
+          "touch-manipulation [-webkit-tap-highlight-color:transparent]",
+          "hover:bg-[rgba(0,122,255,0.16)] active:bg-[rgba(0,122,255,0.22)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)]",
+          "disabled:cursor-not-allowed disabled:bg-transparent disabled:text-[rgba(0,0,0,0.30)]",
         )}
       >
         <ImagePlus className="h-5 w-5" aria-hidden="true" />
@@ -356,9 +411,9 @@ function AgentComposerComponent({
                   type="button"
                   onClick={() => removeAttachment(att.id)}
                   aria-label={`移除 ${att.fileName}`}
-                  className="shrink-0 rounded-full p-0.5 text-current transition-colors hover:bg-[rgba(0,0,0,0.08)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)]"
+                  className="shrink-0 rounded-full p-2 text-current transition-colors hover:bg-[rgba(0,0,0,0.08)] active:bg-[rgba(0,0,0,0.14)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] touch-manipulation [-webkit-tap-highlight-color:transparent]"
                 >
-                  <X className="h-3 w-3" aria-hidden="true" />
+                  <X className="h-3.5 w-3.5" aria-hidden="true" />
                 </button>
               </span>
             ))}
@@ -403,6 +458,7 @@ function AgentComposerComponent({
         <label htmlFor="agent-composer-input" className="sr-only">
           输入消息
         </label>
+        {/* 移动端虚拟键盘把回车键显示成「发送」，回车即送出（Shift+Enter 换行不变）。 */}
         <textarea
           id="agent-composer-input"
           ref={textareaRef}
@@ -412,12 +468,14 @@ function AgentComposerComponent({
             autoGrow(event.currentTarget);
           }}
           onKeyDown={handleKeyDown}
+          enterKeyHint="send"
           disabled={disabled}
           placeholder={placeholder}
           rows={1}
           className={cn(
-            "max-h-32 w-full resize-none bg-transparent py-2 text-[15px] text-[rgba(0,0,0,0.85)]",
+            "max-h-32 w-full resize-none bg-transparent py-2 text-base text-[rgba(0,0,0,0.85)] sm:text-[15px]",
             "placeholder:text-[rgba(0,0,0,0.36)] focus:outline-none",
+            "touch-manipulation [-webkit-tap-highlight-color:transparent]",
             "disabled:cursor-not-allowed disabled:opacity-50",
           )}
         />
@@ -429,14 +487,15 @@ function AgentComposerComponent({
         disabled={disabled || !trimmed}
         aria-label="发送"
         className={cn(
-          "flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-all duration-200",
+          "flex h-11 w-11 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-full transition-all duration-200",
+          "touch-manipulation [-webkit-tap-highlight-color:transparent]",
           "bg-[#007AFF] text-white shadow-[0_2px_8px_rgba(0,122,255,0.32)]",
           "hover:opacity-90 active:scale-[0.94]",
           "focus:outline-none focus:ring-2 focus:ring-[rgba(0,122,255,0.40)]",
           "disabled:cursor-not-allowed disabled:bg-[rgba(0,122,255,0.30)] disabled:text-white/70 disabled:shadow-none",
         )}
       >
-        <Send className="h-4 w-4" aria-hidden="true" />
+        <Send className="h-5 w-5" aria-hidden="true" />
       </button>
     </div>
   );
