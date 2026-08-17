@@ -926,7 +926,7 @@ export function baseGenerationModel(modelId: string): GenerationModelDefinition 
 }
 
 export function generationModel(modelId: string): GenerationModelDefinition | null {
-  return effectiveCatalog[modelId] ?? null;
+  return effectiveCatalog[modelId] ?? GENERATION_MODEL_CATALOG[modelId] ?? null;
 }
 
 export function generationCapabilities(modelId: string): GenerationCapabilityProjection | null {
