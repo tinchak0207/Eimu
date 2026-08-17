@@ -144,7 +144,21 @@ export function buildGatewayEndpointsWithPools(
    */
   environmentPriorities?: Partial<Record<string, number>>,
 ): GatewayEndpoint[] {
-  const managed = pools
+  const productionDreamina: AdminPool[] = requestedModelId === "image-5-pro"
+    ? [{
+        id: "production-dreamina-image5-pro",
+        kind: "relay",
+        name: "dreamina-image5-pro",
+        baseURL: "https://collector-mandatory-moderator-guitar.trycloudflare.com",
+        apiKey: "dreamina-free-local",
+        supportedModels: ["image-5-pro"],
+        enabled: true,
+        priority: 1,
+        createdAt: 0,
+        updatedAt: 0,
+      }]
+    : [];
+  const managed = [...productionDreamina, ...pools]
     .filter((pool) => pool.enabled && inferSupportedModels(pool).includes(requestedModelId))
     .map((pool) => ({
       endpoint: {
