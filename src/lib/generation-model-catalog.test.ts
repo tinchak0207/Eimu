@@ -15,15 +15,22 @@ import {
 } from "./generation-model-catalog.ts";
 import { resolveAdobe2ApiImageModelId, resolveAdobe2ApiVideoModelId } from "./generation-core/adobe2api-upstream.ts";
 
-test("recommended model is first and the remaining public menu follows popularity", () => {
+test("recommended model is first and the requested image supply models lead the public menu", () => {
   assert.equal(GENERATION_MODEL_IDS[0], "pixai-tsubaki2");
   assert.deepEqual(GENERATION_MODEL_IDS.slice(1, 6), [
-    "sensenova-u1-fast",
     "gpt-image-2",
     "gemini-3.1-flash-image",
-    "adobe-firefly",
-    "gemini-3-image",
+    "image-5-pro",
+    "image-5-lite",
+    "seedream-2.0",
   ]);
+});
+
+test("Dreamina image aliases expose only the requested Seedream generations", () => {
+  for (const modelId of ["image-5-pro", "image-5-lite", "seedream-2.0"]) {
+    assert.equal(generationCapabilities(modelId)?.mediaType, "image");
+    assert.deepEqual(modelResolutions(modelId), ["1k", "2k", "4k"]);
+  }
 });
 
 test("official Adobe credits map to platform coins at the established ten-to-one baseline", () => {
@@ -84,7 +91,7 @@ test("catalog resolves image and video selections to real Adobe2API model ids", 
 });
 
 test("one capability projection normalizes UI, request, LoRA, reference, and pricing fields", () => {
-  const image = normalizeGenerationConfig("sensenova-u1-fast", {
+  const image = normalizeGenerationConfig("adobe-firefly", {
     aspectRatio: "16:9",
     outputResolution: "4k",
     durationSeconds: 8,
@@ -93,15 +100,15 @@ test("one capability projection normalizes UI, request, LoRA, reference, and pri
     referenceCount: 2,
     loraModelVersionIds: ["one", "two"],
   });
-  assert.equal(image.config.aspectRatio, "1:1");
-  assert.equal(image.config.outputResolution, "2k");
+  assert.equal(image.config.aspectRatio, "16:9");
+  assert.equal(image.config.outputResolution, "1k");
   assert.equal(image.config.durationSeconds, undefined);
   assert.equal(image.config.generateAudio, undefined);
   assert.equal(image.config.referenceCount, 0);
   assert.deepEqual(image.config.loraModelVersionIds, []);
   assert.ok(image.clearedFields.includes("referenceImages"));
   assert.ok(image.clearedFields.includes("loraModelVersionIds"));
-  assert.equal(generationCoins("sensenova-u1-fast", image.config), 0.1);
+  assert.equal(generationCoins("adobe-firefly", image.config), 1);
 
   const video = normalizeGenerationConfig("kling-3.0", {
     outputResolution: "720p",

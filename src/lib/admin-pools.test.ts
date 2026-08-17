@@ -122,6 +122,34 @@ test("scheduler filters by requested model and merges admin and env priorities",
   assert.equal(environmentEndpointPriority(environment[1], 1), 90);
 });
 
+test("Dreamina relay is restricted to the verified Image 5 Pro upstream", () => {
+  const requested = ["image-5-pro"];
+  const dreamina: AdminPool = {
+    id: "dreamina",
+    kind: "relay",
+    name: "dreamina-free",
+    baseURL: "https://dreamina.example",
+    apiKey: "dreamina-key",
+    supportedModels: requested,
+    enabled: true,
+    priority: 40,
+    createdAt: 1,
+    updatedAt: 1,
+  };
+
+  for (const modelId of requested) {
+    assert.deepEqual(
+      buildGatewayEndpointsWithPools([dreamina], [], modelId).map((endpoint) => endpoint.label),
+      ["dreamina-free"],
+    );
+  }
+  assert.equal(buildGatewayEndpointsWithPools([dreamina], [], "gpt-image-2").length, 0);
+  assert.equal(buildGatewayEndpointsWithPools([dreamina], [], "gemini-3.1-flash-image").length, 0);
+  assert.equal(buildGatewayEndpointsWithPools([dreamina], [], "image-5-lite").length, 0);
+  assert.equal(buildGatewayEndpointsWithPools([dreamina], [], "seedream-2.0").length, 0);
+  assert.equal(buildGatewayEndpointsWithPools([dreamina], [], "flux-2").length, 0);
+});
+
 test("Sub2API precedes managed relays so its account scheduler owns K12 priority", () => {
   const pools: AdminPool[] = [
     { id: "relay", kind: "relay", name: "relay", baseURL: "https://relay.example/v1", apiKey: "relay-key", supportedModels: ["gpt-image-2"], enabled: true, priority: 1, createdAt: 1, updatedAt: 1 },

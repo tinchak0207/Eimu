@@ -12,6 +12,9 @@ export const FLUX_11_ULTRA_MODEL_ID = /** @type {const} */ ("flux-1.1-ultra");
 export const FLUX_KONTEXT_PRO_MODEL_ID = /** @type {const} */ ("flux-kontext-pro");
 export const FLUX_KONTEXT_MAX_MODEL_ID = /** @type {const} */ ("flux-kontext-max");
 export const RUNWAY_GEN4_IMAGE_MODEL_ID = /** @type {const} */ ("runway-gen-4-image");
+export const IMAGE_5_PRO_MODEL_ID = /** @type {const} */ ("image-5-pro");
+export const IMAGE_5_LITE_MODEL_ID = /** @type {const} */ ("image-5-lite");
+export const SEEDREAM_20_MODEL_ID = /** @type {const} */ ("seedream-2.0");
 
 // 服務類定價條目（非生成模型）：不加入 SUPPORTED_* 列表，因此不會出現在用戶端
 // 模型選單 /v1/models；只作為 admin 定價面板與對應計費 route 的定價鍵。
@@ -53,6 +56,9 @@ export const SUPPORTED_IMAGE_MODEL_IDS = [
   PIXAI_TSUBAKI2_MODEL_ID,
   DEFAULT_IMAGE_MODEL_ID,
   NANO_BANANA_2_MODEL_ID,
+  IMAGE_5_PRO_MODEL_ID,
+  IMAGE_5_LITE_MODEL_ID,
+  SEEDREAM_20_MODEL_ID,
   ADOBE_FIREFLY_MODEL_ID,
   NANO_BANANA_PRO_MODEL_ID,
   GPT_IMAGE_15_MODEL_ID,
