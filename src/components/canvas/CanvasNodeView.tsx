@@ -130,11 +130,26 @@ function thumbUrl(url: string, displayWidth: number): string {
   return `/_next/image?url=${encodeURIComponent(url)}&w=${w}&q=70`;
 }
 
-function renderBrokenImage(): React.ReactNode {
+/** 直链加载失败后的同源代理兜底（上游 CDN 可能要登录/过期/CORS，代理 302 拉回）。 */
+function proxySrc(url: string): string {
+  return `/api/canvas/image-proxy?url=${encodeURIComponent(url)}`;
+}
+
+/** 破图占位：给出明确失败提示 + 重新加载入口（网络抖动/临时签名过期可一键恢复）。
+ * 因为图片其实可能只是临时加载失败，绝不把它伪装成生成失败。 */
+function renderBrokenImage(onRetry: () => void): React.ReactNode {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-2 p-3">
       <ImageIcon className="h-8 w-8 text-[rgba(0,0,0,0.2)]" />
-      <span className="text-[13px] text-[rgba(0,0,0,0.4)]">图片加载失败</span>
+      <span className="text-[13px] font-medium text-[rgba(0,0,0,0.6)]">图片加载失败</span>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-[rgba(0,122,255,0.10)] px-3 py-1.5 text-[12px] font-medium text-[#007AFF] transition-colors duration-150 hover:bg-[rgba(0,122,255,0.18)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)]"
+      >
+        <RefreshCw className="h-3 w-3" aria-hidden="true" />
+        重新加载
+      </button>
     </div>
   );
 }
@@ -202,10 +217,11 @@ export function CanvasNodeView({
   const [mounted, setMounted] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const [imgError, setImgError] = useState(false);
+  /** 是否已试过同源代理兜底（直链失败后切代理；代理也失败才落 imgError）。 */
+  const [useProxy, setUseProxy] = useState(false);
   // A10/A11：就地編輯態（null = 未在編輯）
   const [editingTitle, setEditingTitle] = useState<string | null>(null);
   const [editingText, setEditingText] = useState<string | null>(null);
-  const handleImgError = useCallback(() => setImgError(true), []);
   const dragRef = useRef<{
     pointerId: number;
     startPointerX: number;
@@ -237,10 +253,26 @@ export function CanvasNodeView({
     setMounted(true);
   }, []);
 
-  // 圖片 URL 變更時重置錯誤狀態
+  // 圖片 URL 變更時重置錯誤狀態，重新走「直鏈 → 代理 → 破圖」鏈路
   useEffect(() => {
     setImgError(false);
+    setUseProxy(false);
   }, [node.metadata?.content]);
+
+  /** 圖片加載失敗：先切到同源代理試一次，代理也失敗才宣告破圖。 */
+  const handleImgError = useCallback(() => {
+    setUseProxy((prev) => {
+      if (!prev) return true; // 首次失敗 → 切代理
+      setImgError(true); // 代理也失敗 → 破圖
+      return prev;
+    });
+  }, []);
+
+  /** 破圖後手動重試：清掉錯誤標記，重新從直鏈開始加載。 */
+  const handleRetryImage = useCallback(() => {
+    setImgError(false);
+    setUseProxy(false);
+  }, []);
 
   const handleScrollAreaDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
@@ -436,7 +468,7 @@ export function CanvasNodeView({
           >
             生成图片
           </button>
-          <span className="text-[11.5px] text-[rgba(0,0,0,0.35)]">结果将直接填入此节点</span>
+          <span className="text-[11.5px] text-[rgba(0,0,0,0.55)]">结果将直接填入此节点</span>
         </div>
       );
     }
@@ -446,7 +478,7 @@ export function CanvasNodeView({
         <div className="h-3 w-3/4 animate-pulse rounded-full bg-[rgba(0,0,0,0.06)] motion-reduce:animate-none" />
         <div className="h-3 w-1/2 animate-pulse rounded-full bg-[rgba(0,0,0,0.05)] [animation-delay:120ms] motion-reduce:animate-none" />
         <div className="h-3 w-2/3 animate-pulse rounded-full bg-[rgba(0,0,0,0.04)] [animation-delay:240ms] motion-reduce:animate-none" />
-        <span className="mt-1 text-[12px] text-[rgba(0,0,0,0.35)]">{statusLabel} · 等待 agent 填充</span>
+        <span className="mt-1 text-[12px] text-[rgba(0,0,0,0.55)]">{statusLabel} · 等待 agent 填充</span>
       </div>
     );
   };
@@ -459,16 +491,16 @@ export function CanvasNodeView({
       (node.type === CanvasNodeType.Image || node.type === CanvasNodeType.Video) && metadata?.content && isUrl(metadata.content);
     if (batchPrimaryImageUrl && batchExpanded === false && !ownImage) {
       if (imgError) {
-        return renderBrokenImage();
+        return renderBrokenImage(handleRetryImage);
       }
       return (
         <img
-          src={batchPrimaryImageUrl}
+          src={useProxy && batchPrimaryImageUrl.startsWith("http") ? proxySrc(batchPrimaryImageUrl) : batchPrimaryImageUrl}
           alt={`${node.title} 主图`}
           loading="lazy"
           draggable={false}
           className="h-full w-full object-cover"
-          onError={() => setImgError(true)}
+          onError={handleImgError}
         />
       );
     }
@@ -481,11 +513,12 @@ export function CanvasNodeView({
             return <video src={content} controls className="h-full w-full object-cover" data-canvas-interactive />;
           }
           if (imgError) {
-            return renderBrokenImage();
+            return renderBrokenImage(handleRetryImage);
           }
+          const rawContent = content.startsWith("data:") ? content : thumbUrl(content, node.width * scale);
           return (
             <img
-              src={thumbUrl(content, node.width * scale)}
+              src={useProxy && content.startsWith("http") ? proxySrc(content) : rawContent}
               alt={node.title}
               loading="lazy"
               decoding="async"
@@ -528,7 +561,7 @@ export function CanvasNodeView({
             {description.trim() ? (
               <p className="whitespace-pre-wrap break-words text-[13.5px] leading-relaxed text-[rgba(0,0,0,0.75)]">{description}</p>
             ) : (
-              <span className="text-[12px] text-[rgba(0,0,0,0.35)]">（未填写描述）</span>
+              <span className="text-[12px] text-[rgba(0,0,0,0.55)]">（未填写描述）</span>
             )}
             {features.length > 0 && (
               <div className="flex flex-wrap gap-1">
@@ -591,7 +624,7 @@ export function CanvasNodeView({
             {text?.trim() ? (
               text
             ) : (
-              <span className="text-[12px] text-[rgba(0,0,0,0.35)]">（未填写内容，双击编辑）</span>
+              <span className="text-[12px] text-[rgba(0,0,0,0.55)]">（未填写内容，双击编辑）</span>
             )}
           </div>
         );
@@ -618,7 +651,7 @@ export function CanvasNodeView({
           >
             {rows.map((row) => (
               <div key={row.label} className="flex items-baseline justify-between gap-2">
-                <span className="shrink-0 text-[12.5px] text-[rgba(0,0,0,0.4)]">{row.label}</span>
+                <span className="shrink-0 text-[12.5px] font-medium text-[rgba(0,0,0,0.62)]">{row.label}</span>
                 <span className="min-w-0 max-sm:text-[14px] truncate font-mono text-[13px] text-[rgba(0,0,0,0.7)]">
                   {row.value}
                 </span>
@@ -630,7 +663,7 @@ export function CanvasNodeView({
       case CanvasNodeType.Group:
         return (
           <div className="m-3 flex flex-1 items-center justify-center rounded-xl border-2 border-dashed border-[rgba(0,0,0,0.12)]">
-            <span className="px-3 text-center text-[13px] text-[rgba(0,0,0,0.45)]">{node.title}</span>
+            <span className="px-3 text-center text-[13px] font-medium text-[rgba(0,0,0,0.6)]">{node.title}</span>
           </div>
         );
     }
@@ -738,7 +771,7 @@ export function CanvasNodeView({
               )}
             </span>
           )}
-          <span className="shrink-0 text-[12px] text-[rgba(0,0,0,0.35)]">{typeLabel}</span>
+          <span className="shrink-0 text-[12px] text-[rgba(0,0,0,0.55)]">{typeLabel}</span>
           <span
             className={cn(
               "shrink-0 rounded-full px-2 py-0.5 text-[11.5px] font-medium",

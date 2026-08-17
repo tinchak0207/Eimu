@@ -192,7 +192,7 @@ function AgentChatPanelComponent({
         ref={scrollRef}
         aria-live="polite"
         onScroll={handleTranscriptScroll}
-        className="agent-transcript min-h-0 flex-1 overflow-y-auto overscroll-contain px-0.5 pb-3 pt-1"
+        className="agent-transcript min-h-0 flex-1 overflow-y-auto overscroll-contain px-0.5 pb-8 pt-1"
       >
         {items.length === 0 && connection === "open" ? (
           <div className="agent-empty flex h-full min-h-40 flex-col items-center justify-center gap-5 px-6 text-center">

@@ -14,6 +14,13 @@ const nextConfig = {
         hostname: "raw.githubusercontent.com",
         pathname: "/freestylefly/awesome-gpt-image-2/**",
       },
+      // Canvas 节点缩略图走 /_next/image 优化器（CanvasNodeView 的 thumbUrl），
+      // 上游生成结果存在 Vercel Blob。Blob 域不在白名单时优化器直接回 400，
+      // 导致 <img> onError → 节点显示「图片加载失败」。必须放行。
+      {
+        protocol: "https",
+        hostname: "*.public.blob.vercel-storage.com",
+      },
     ],
   },
   async rewrites() {

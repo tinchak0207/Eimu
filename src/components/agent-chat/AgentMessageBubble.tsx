@@ -47,11 +47,11 @@ function AgentMessageBubbleComponent({ item }: AgentMessageBubbleProps) {
           <details className="mb-1.5 select-none" open>
             {/* 觸控目標 ≥44px：行動端沒有 hover，摘要行要按得到（詳情由內部 span 撐高）。 */}
             <summary className="block min-h-11 cursor-pointer touch-manipulation [-webkit-tap-highlight-color:transparent]">
-              <span className="flex min-h-11 items-center text-[13px] font-medium text-[rgba(0,0,0,0.38)]">
+              <span className="flex min-h-11 items-center text-[13px] font-medium text-[rgba(0,0,0,0.55)]">
                 思考過程
               </span>
             </summary>
-            <div className="mt-1 whitespace-pre-wrap break-words border-l-2 border-black/10 pl-2.5 text-[13px] leading-[1.5] text-[rgba(0,0,0,0.45)] italic [overflow-wrap:anywhere]">
+            <div className="mt-1 whitespace-pre-wrap break-words border-l-2 border-black/10 pl-2.5 text-[13px] leading-[1.5] text-[rgba(0,0,0,0.6)] italic [overflow-wrap:anywhere]">
               {item.reasoning}
             </div>
           </details>
