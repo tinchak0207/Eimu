@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { ArrowUpRight, Bot, ImagePlus, Pencil, RefreshCw, Volume2, VolumeX, X, ZoomIn } from "lucide-react";
 import type { AgentSseEvent } from "@/lib/agent-chat-types";
@@ -331,6 +331,8 @@ export function PromptInput({
   const durations = modelDurations(modelId);
   const isVideo = selectedModel?.kind === "video";
   const supportsAudio = modelSupportsAudio(modelId);
+  // 当前模型是否支持参考图：不支持时隐藏上传入口，而不是让用户上传完被清空。
+  const referenceImagesSupported = Boolean(selectedModel?.referenceImages);
 
   const editBusy = editStage === "uploading" || editStage === "generating";
   const upscaleBusy = upscaleStage === "uploading" || upscaleStage === "generating";
@@ -472,6 +474,53 @@ export function PromptInput({
     }
   };
 
+  // ── 参考图：拖拽 / Ctrl+V 粘贴 两路补充入口（与 ReferenceImageUpload 按钮共用同一管道）。
+  //    只在 generate 模式且当前模型支持参考图时生效；不支持的模型干脆不挂，
+  //    避免「上传完被 effect 清空」的怪体验。
+  const refUploadRef = useRef<{ acceptFiles: (files: File[]) => Promise<void> } | null>(null);
+  const [dragActive, setDragActive] = useState(false);
+  const dragDepthRef = useRef(0);
+
+  const handleDragEnter = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    if (!referenceImagesSupported || displayMode !== "generate") return;
+    dragDepthRef.current += 1;
+    setDragActive(true);
+  }, [referenceImagesSupported, displayMode]);
+
+  const handleDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  }, []);
+
+  const handleDragLeave = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    dragDepthRef.current -= 1;
+    if (dragDepthRef.current <= 0) {
+      dragDepthRef.current = 0;
+      setDragActive(false);
+    }
+  }, []);
+
+  const handleDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    dragDepthRef.current = 0;
+    setDragActive(false);
+    const files = Array.from(event.dataTransfer.files ?? []);
+    if (files.length === 0) return;
+    event.preventDefault();
+    if (!referenceImagesSupported || displayMode !== "generate") return;
+    void refUploadRef.current?.acceptFiles(files);
+  }, [referenceImagesSupported, displayMode]);
+
+  /** Ctrl+V：剪贴板里有图片文件才拦下走参考图；纯文本/HTML 正常放行。 */
+  const handlePaste = useCallback((event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = Array.from(event.clipboardData?.files ?? []);
+    if (files.length === 0) return;
+    if (!referenceImagesSupported || displayMode !== "generate") return;
+    event.preventDefault();
+    void refUploadRef.current?.acceptFiles(files);
+  }, [referenceImagesSupported, displayMode]);
+
   const primaryDisabled = displayMode === "edit"
     ? editBusy || !editSource || !input.trim()
     : displayMode === "upscale"
@@ -504,23 +553,42 @@ export function PromptInput({
         {/* ── 画面描述 ── 改图模式复用同一个输入框，只换 placeholder；
             放大模式不需要描述，进入时随动画「消散」。 ── */}
         <div
+          onDragEnter={handleDragEnter}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
           className={cn(
             "relative",
             textareaHidden && "hidden",
             textareaDissolving && "dust-exit",
             textareaReforming && "dust-enter",
+            dragActive && "rounded-ios-2xl ring-2 ring-[rgba(0,122,255,0.45)] bg-[rgba(0,122,255,0.04)]",
           )}
         >
+          {dragActive && (
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-3 z-30 flex items-center justify-center rounded-ios-xl bg-[rgba(0,122,255,0.08)] text-sm font-semibold text-[#007AFF]"
+            >
+              松开以添加参考图
+            </div>
+          )}
           <Textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             placeholder={displayMode === "edit" ? "描述想改成什么样子…" : "描述你的想法。例如：让这瓶香水出现在落日海滩，自然光线，质感高级。"}
             rows={5}
             className="min-h-[180px] rounded-ios-2xl border-0 bg-[rgba(0,0,0,0.04)] px-5 py-4 pb-14 text-[16px] leading-6 text-[rgba(0,0,0,0.85)] placeholder:text-[rgba(0,0,0,0.44)] focus:bg-[rgba(0,122,255,0.04)] focus:ring-2 focus:ring-[rgba(0,122,255,0.20)] resize-none transition-all duration-200 [background-image:none]"
           />
-          {displayMode === "generate" && (
-            <ReferenceImageUpload variant="prompt" value={referenceImages} onChange={onReferenceImagesChange} />
+          {displayMode === "generate" && referenceImagesSupported && (
+            <ReferenceImageUpload
+              variant="prompt"
+              value={referenceImages}
+              onChange={onReferenceImagesChange}
+              ref={refUploadRef}
+            />
           )}
           <p className="pointer-events-none absolute bottom-3 right-4 hidden select-none text-ios-caption1 text-[rgba(0,0,0,0.46)] sm:block">
             按 Enter 生成 · Shift + Enter 换行

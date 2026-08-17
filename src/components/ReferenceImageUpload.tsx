@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { ImagePlus, Images, Loader2, Plus, X } from "lucide-react";
 import { useDropzone } from "react-dropzone";
 import type { ReferenceImage } from "@/lib/image-types";
@@ -8,6 +8,11 @@ import { cn } from "@/lib/utils";
 import { extractWorkflowFromPng } from "@/lib/workflow-png";
 
 export const MAX_REFERENCE_IMAGES = 6;
+
+/** 暴露给外部的句柄，用于 PromptInput 从容器拖拽/粘贴直接喂文件。 */
+export interface ReferenceImageUploadHandle {
+  acceptFiles: (files: File[]) => Promise<void>;
+}
 
 interface ReferenceImageUploadProps {
   value: ReferenceImage[];
@@ -28,12 +33,16 @@ function createReferenceId(file: File) {
  * 都会让两份各自重跑一次 useDropzone()。props（value / onChange）本来就是
  * 稳定引用，浅比较能直接命中。
  */
-export const ReferenceImageUpload = memo(function ReferenceImageUpload({ value, onChange, compact, variant = "panel", onWorkflowDetected }: ReferenceImageUploadProps) {
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [isExpanded, setIsExpanded] = useState(false);
-  const [activePreview, setActivePreview] = useState<ReferenceImage | null>(null);
-  const [pendingCount, setPendingCount] = useState(0);
-  const valueRef = useRef(value);
+export const ReferenceImageUpload = memo(
+  forwardRef<ReferenceImageUploadHandle, ReferenceImageUploadProps>(function ReferenceImageUpload(
+    { value, onChange, compact, variant = "panel", onWorkflowDetected },
+    ref,
+  ) {
+    const [isProcessing, setIsProcessing] = useState(false);
+    const [isExpanded, setIsExpanded] = useState(false);
+    const [activePreview, setActivePreview] = useState<ReferenceImage | null>(null);
+    const [pendingCount, setPendingCount] = useState(0);
+    const valueRef = useRef(value);
 
   useEffect(() => {
     valueRef.current = value;
@@ -107,6 +116,10 @@ export const ReferenceImageUpload = memo(function ReferenceImageUpload({ value, 
       setIsProcessing(false);
     }
   }, [onChange, onWorkflowDetected]);
+
+  // 暴露给外部：PromptInput 的容器拖拽 / Ctrl+V 粘贴拿到文件后，
+  // 走同一条处理管道（工作流探测 + 压缩 + 入列），而不是另起一套逻辑。
+  useImperativeHandle(ref, () => ({ acceptFiles: onDrop }), [onDrop]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     accept: { "image/*": [] },
@@ -241,4 +254,5 @@ export const ReferenceImageUpload = memo(function ReferenceImageUpload({ value, 
       )}
     </div>
   );
-});
+  }),
+);

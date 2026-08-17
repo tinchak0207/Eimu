@@ -225,14 +225,15 @@ test("D-26 first-image anchor is offered, and never offered when it cannot hold"
 });
 
 test("D-26 stop button promises only what the gateway can deliver", () => {
-  // 网关没有 abort 端点，所以「停」是要求 agent 停手，不是即时中断。
-  // 文案不许出现「立即」这类假承诺。
-  assert.doesNotMatch(batchProgress, /立即停止|马上停止/);
-  assert.match(batchProgress, /当前这张跑完就停/);
+  // 网关现在有 abort 端点：/session/:id/abort 打到 opencode，正在跑的一轮直接终止。
+  // 按钮文案「立即中止」是准确描述，不再要求「当前这张跑完就停」。
+  assert.match(batchProgress, /立即中止当前这轮生成/);
+  assert.match(batchProgress, /停下/);
   // 回合结束时没有东西可停，按钮就不该在。
   assert.match(surface, /onStopGeneration=\{state\.turnActive \? onStopGeneration : undefined\}/);
-  // 停止是送一句看得见的话进对话，不是偷偷调用什么。
-  assert.match(surface, /停下，不要再生成新的图了/);
+  // 停止按钮接到 abort 端点（hook 的 abort），不是往对话里送一句停止指令。
+  assert.match(surface, /const onStopGeneration = useCallback/);
+  assert.match(surface, /void abort\(\)/);
 });
 
 test("batch progress does not announce a denominator it does not have", () => {
@@ -310,8 +311,9 @@ test("D-1 the agent face never grows a second send button or a second textarea",
   // 两个输入框并排会有「我该往哪打字」的歧义。
   assert.match(code, /MODES_WITHOUT_TEXTAREA = new Set<PromptInputMode>\(\["upscale", "agent"\]\)/);
   // 聊天区内部靠 flex-1 + min-h-0 自己滚，外层必须给定高度。
-  assert.match(code, /AGENT_SURFACE_HEIGHT/);
-  assert.match(code, /clamp\(500px, 72dvh, 860px\)/);
+  // 高度改由 CSS 变量（--agent-surface-height）驱动，不再在组件中写死 clamp 值。
+  assert.match(code, /AGENT_SURFACE_HEIGHT = "var\(--agent-surface-height\)"/);
+  assert.match(code, /height: AGENT_SURFACE_HEIGHT/);
 });
 
 test("ImagePlayground no longer hides itself to make room for the agent", () => {
@@ -440,4 +442,76 @@ test("a 401 says which kind of 401 it is", () => {
   assert.match(client, /mapErrorCode\(data, res\.status\)/);
   const hook = readCode(read("src/hooks/use-agent-chat.ts"));
   assert.match(hook, /err\.code === "not_authenticated"[\s\S]{0,80}closedRef\.current = true;/);
+});
+
+/**
+ * D-27：AI 助理输入框接受「Ctrl+V 粘贴文件」与「拖拽放入」，与附件按钮共用同一条上传管道。
+ * 核心契约：纯文本粘贴必须放行（文件獥查为空就不该拦），有文件才截下走附件。
+ */
+test("composer accepts pasted files (Ctrl+V) and dragged-in files, sharing the upload pipeline", () => {
+  const code = readCode(composer);
+
+  // 公共入队函数存在，且三个入口（文件选择、粘贴、拖放）都走它。
+  assert.match(code, /const enqueueFiles = useCallback/);
+  assert.match(code, /enqueueFiles\(Array\.from\(event\.target\.files \?\? \[\]\)\)/);
+  assert.match(code, /onPaste=\{handlePaste\}/);
+  assert.match(code, /handlePaste[\s\S]{0,400}enqueueFiles\(Array\.from\(files\)\)/);
+
+  // 文本粘贴放行：没有文件就不 intercept，浏览器默认插入文本。
+  assert.match(code, /const files = event\.clipboardData\?\.files;/);
+  assert.match(code, /if \(!files \|\| files\.length === 0\) return;/);
+
+  // 拖拽四件套挂在根元素上，drop 收文件、dragover 必须 preventDefault 才能 drop。
+  assert.match(code, /onDragEnter=\{handleDragEnter\}/);
+  assert.match(code, /onDragOver=\{handleDragOver\}/);
+  assert.match(code, /onDragLeave=\{handleDragLeave\}/);
+  assert.match(code, /onDrop=\{handleDrop\}/);
+  assert.match(code, /event\.dataTransfer\.dropEffect = "copy"/);
+
+  // 拖入悬停要有可见反馈，且提示条不吃鼠标事件。
+  assert.match(code, /dragActive && "ring-2 ring-\[rgba\(0,122,255,0\.45\)\]/);
+  assert.match(code, /松开以添加附件/);
+  assert.match(code, /pointer-events-none/);
+
+  // drop 复位高亮状态、有文件才 enqueue；无文件时不 preventDefault（文本拖入按默认插入）。
+  assert.match(code, /handleDrop[\s\S]{0,120}setDragActive\(false\)/);
+  assert.match(code, /const files = event\.dataTransfer\.files;/);
+  assert.match(code, /event\.preventDefault\(\);[\s\S]{0,40}enqueueFiles\(Array\.from\(files\)\)/);
+
+  // disabled 输入区三个入口一律不收。
+  assert.match(code, /if \(disabled\) return;/);
+});
+
+/**
+ * D-27b：生图输入框（PromptInput）也支持参考图的拖拽 / Ctrl+V 粘贴，
+ * 且模型不支持参考图时隐藏上传入口（否则上传完被清空，等于「上传后立马消失」）。
+ */
+test("PromptInput accepts reference images by drag & paste, and hides upload when model can't take them", () => {
+  const code = readCode(promptInput);
+
+  // 拖拽四件套挂在描述框容器上，悬停提示「松开以添加参考图」。
+  assert.match(code, /onDragEnter=\{handleDragEnter\}/);
+  assert.match(code, /onDragOver=\{handleDragOver\}/);
+  assert.match(code, /onDragLeave=\{handleDragLeave\}/);
+  assert.match(code, /onDrop=\{handleDrop\}/);
+  assert.match(code, /松开以添加参考图/);
+  // 容器级拖拽要 preventDefault，否则浏览器直接打开图片。
+  assert.match(code, /event\.dataTransfer\.dropEffect = "copy"/);
+  assert.match(code, /event\.preventDefault\(\);/);
+
+  // Ctrl+V：剪贴板有文件才拦，交给同一管道；纯文本粘贴必须放行。
+  assert.match(code, /onPaste=\{handlePaste\}/);
+  assert.match(code, /event\.clipboardData\?\.files/);
+  assert.match(code, /if \(files\.length === 0\) return;/);
+
+  // 与 ReferenceImageUpload 共用一条处理管道：acceptFiles 经 ref 传入。
+  assert.match(code, /refUploadRef/);
+  assert.match(code, /ref=\{refUploadRef\}/);
+  assert.match(code, /acceptFiles\(files\)/);
+
+  // 模型不支持参考图时整个入口隐藏，杜绝「上传后立马消失」。
+  assert.match(code, /const referenceImagesSupported = Boolean\(selectedModel\?\.referenceImages\);/);
+  assert.match(code, /displayMode === "generate" && referenceImagesSupported &&/);
+  // 能力开关与容器拖拽/粘贴 handler 串起来：不支持时不挂。
+  assert.match(code, /if \(!referenceImagesSupported \|\| displayMode !== "generate"\) return;/);
 });

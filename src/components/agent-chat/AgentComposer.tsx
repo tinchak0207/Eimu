@@ -1,6 +1,16 @@
 "use client";
 
-import { memo, useCallback, useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type ClipboardEvent,
+  type DragEvent,
+  type KeyboardEvent,
+} from "react";
 import { ImagePlus, Loader2, Send, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -179,12 +189,16 @@ function AgentComposerComponent({
     [patchAttachment],
   );
 
-  const handleFileInput = useCallback(
-    (event: ChangeEvent<HTMLInputElement>) => {
-      const files = event.target.files;
+  /**
+   * 公共入队函数：把一批 File 逐个加入 chip 行并触发上传。
+   * 拖拽、Ctrl+V 粘贴、隐式文件选择三条入口共用这一条管道。
+   */
+  const enqueueFiles = useCallback(
+    (files: File[]) => {
+      if (disabled) return;
+      if (!sessionId) return;
+      if (files.length === 0) return;
       const session = sessionId;
-      if (!files || files.length === 0) return;
-      if (!session) return;
 
       // 每个文件独立处理，各自的失败不拖累其他文件。
       Array.from(files).forEach((file) => {
@@ -200,11 +214,17 @@ function AgentComposerComponent({
           patchAttachment(id, { status: "error", errorMessage: message });
         });
       });
+    },
+    [disabled, sessionId, uploadPlainFile, uploadVideoFile, patchAttachment],
+  );
 
+  const handleFileInput = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      enqueueFiles(Array.from(event.target.files ?? []));
       // 清空 input.value，好让同一文件能再次选择。
       event.target.value = "";
     },
-    [sessionId, uploadPlainFile, uploadVideoFile, patchAttachment],
+    [enqueueFiles],
   );
 
   const removeAttachment = useCallback((id: string) => {
@@ -335,6 +355,66 @@ function AgentComposerComponent({
     [trimmed, handleSend],
   );
 
+  /** Ctrl+V 粘贴：有文件时走附件管道，纯文本/HTML 放行。 */
+  const handlePaste = useCallback(
+    (event: ClipboardEvent<HTMLTextAreaElement>) => {
+      if (disabled) return;
+      const files = event.clipboardData?.files;
+      if (!files || files.length === 0) return;
+      event.preventDefault();
+      enqueueFiles(Array.from(files));
+    },
+    [disabled, enqueueFiles],
+  );
+
+  const [dragActive, setDragActive] = useState(false);
+  const dragDepthRef = useRef(0);
+
+  const handleDragEnter = useCallback(
+    (event: DragEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      if (disabled) return;
+      dragDepthRef.current += 1;
+      setDragActive(true);
+    },
+    [disabled],
+  );
+
+  const handleDragOver = useCallback(
+    (event: DragEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "copy";
+    },
+    [],
+  );
+
+  const handleDragLeave = useCallback(
+    (event: DragEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      dragDepthRef.current -= 1;
+      if (dragDepthRef.current <= 0) {
+        dragDepthRef.current = 0;
+        setDragActive(false);
+      }
+    },
+    [],
+  );
+
+  const handleDrop = useCallback(
+    (event: DragEvent<HTMLDivElement>) => {
+      dragDepthRef.current = 0;
+      setDragActive(false);
+      const files = event.dataTransfer.files;
+      if (files.length === 0) return;
+      // 有文件进来必须先拦下浏览器的默认行为（否则会直接打开文件/跳页），
+      // 再判断 disabled —— 禁用的输入区拖文件进来同样不能触发打开。
+      event.preventDefault();
+      if (disabled) return;
+      enqueueFiles(Array.from(files));
+    },
+    [disabled, enqueueFiles],
+  );
+
   const canAttach = !disabled && Boolean(sessionId);
   // 已经抽出帧的影片才进预览区（extracting 期间没有缩图可显示）。
   const videoPreviews = attachments.filter(
@@ -345,8 +425,24 @@ function AgentComposerComponent({
   return (
     <div
       ref={composerRef}
-      className="agent-composer flex items-end gap-2 rounded-[22px] bg-white px-3 py-2 ring-1 ring-black/[0.08] shadow-[0_2px_16px_rgba(0,0,0,0.05)] touch-manipulation [-webkit-tap-highlight-color:transparent] focus-within:ring-2 focus-within:ring-[rgba(0,122,255,0.30)]"
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      className={cn(
+        "agent-composer relative flex items-end gap-2 rounded-[22px] bg-white px-3 py-2 ring-1 ring-black/[0.08] shadow-[0_2px_16px_rgba(0,0,0,0.05)] touch-manipulation [-webkit-tap-highlight-color:transparent] focus-within:ring-2 focus-within:ring-[rgba(0,122,255,0.30)]",
+        dragActive && "ring-2 ring-[rgba(0,122,255,0.45)] bg-[rgba(0,122,255,0.04)]",
+      )}
     >
+      {/* 拖拽悬停提示：只是视觉反馈，不吃鼠标事件（pointer-events-none）。 */}
+      {dragActive && (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-x-2 inset-y-1 flex items-center justify-center rounded-[16px] bg-[rgba(0,122,255,0.08)] text-sm font-medium text-[#007AFF]"
+        >
+          松开以添加附件
+        </div>
+      )}
       {/*
         附件按钮：点击打开隐式文件选择，一次可选多个文件，选完即逐个上传。
         上传中的 chip 显示 spinner，失败显示错误态（可移除重传或删除）。
@@ -468,6 +564,7 @@ function AgentComposerComponent({
             autoGrow(event.currentTarget);
           }}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           enterKeyHint="send"
           disabled={disabled}
           placeholder={placeholder}
