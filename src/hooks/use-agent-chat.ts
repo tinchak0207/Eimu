@@ -457,7 +457,14 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
       // v3 embed：canvas 事件 + 完成訊號（image.done/turn.done/session.closed）也
       // 分流給右側 CanvasEmbed（走 useCanvasChat），讓畫布能對「圖完成」做最終一
       // 致性收斂，不依賴 gateway 一定發出 canvas.node.updated。
-      if (evt.name.startsWith("canvas.") || evt.name === "image.done" || evt.name === "turn.done" || evt.name === "session.closed") {
+      if (
+        evt.name.startsWith("canvas.") ||
+        evt.name === "image.done" ||
+        evt.name === "turn.done" ||
+        evt.name === "session.closed" ||
+        // 第一次 workflow_start 調用即分流：右側面板要在工作流真正落地前就切畫布。
+        (evt.name === "tool.invoke" && evt.data.tool === "workflow_start")
+      ) {
         onCanvasEventRef.current?.(evt);
       }
       // 静默教训提炼（L0）：每轮 turn.done 后，旁生一个后台请求从本轮回合

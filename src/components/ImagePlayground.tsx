@@ -115,6 +115,16 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
   // 用 ref 解開循環依賴：onCanvasEvent 轉交 canvasHostRef；canvasHost 後建，餵回 ref。
   const canvasHostRef = useRef<UseCanvasChatReturn | null>(null);
   const handleCanvasEvent = useCallback((event: AgentSseEvent) => {
+    // 第一次 workflow_start 調用即切畫布：不等 canvas.plan/節點事件落地，agent 一發起
+    // 工作流右側面板就進 canvas 模式（黏性旗標照舊，畫布清空也不會被踢回圖片模式）。
+    if (event.name === "tool.invoke") {
+      if (event.data.tool === "workflow_start") {
+        enteredCanvasRef.current = true;
+        setResultMode("canvas");
+      }
+      // 畫布資料管線只吃 canvas 結構事件，tool.invoke 不入 reducer。
+      return;
+    }
     canvasHostRef.current?.feedCanvasEvent(event);
   }, []);
   const handleCanvasSummary = useCallback(() => canvasHostRef.current?.summarize(), []);
