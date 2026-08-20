@@ -1480,14 +1480,12 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
           .ce-embed-topbar, .ce-embed-leftpop { transition: none; }
         }
 
-        /* 工作站態：頂欄與左側彈層向右避讓聊天面板（宿主經 --ce-chrome-left 下發，
-           面板收合/拖寬時跟著平移）。行動端面板在底部，不避讓。 */
-        .ce-embed-topbar, .ce-embed-leftpop {
-          transition: left 0.32s cubic-bezier(0.2, 0.8, 0.2, 1);
-        }
+        /* 工作站態避讓改由宿主完成：ImagePlayground 把整個 overlay 向右 dock
+           （--ce-dock-left = 面板寬 + 12px），畫布全域隨之右移，頂欄與左側彈層
+           不再各自加 --ce-chrome-left（避免雙重位移）。行動端面板在底部，
+           宿主把 overlay 復位成全屏，這裡只保留頂欄右緣約束讓 chips 能換行。 */
         @media (max-width: 767px) {
-          .ce-embed-topbar { left: calc(0.75rem + env(safe-area-inset-left, 0px)) !important; right: 0.75rem; }
-          .ce-embed-leftpop { left: calc(0.75rem + env(safe-area-inset-left, 0px)) !important; }
+          .ce-embed-topbar { right: 0.75rem; }
           /* 行動端 chips 收斂：一排放得下，不再炸成兩行大藥丸。 */
           .ce-embed-topbar .ce-embed-bar-btn {
             min-width: 0;
@@ -1635,7 +1633,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
         <div
           className="ce-embed-topbar pointer-events-none absolute left-3 top-3 z-10 flex flex-wrap items-center gap-2"
           style={{
-            left: "calc(0.75rem + env(safe-area-inset-left, 0px) + var(--ce-chrome-left, 0px))",
+            left: "calc(0.75rem + env(safe-area-inset-left, 0px))",
             top: "calc(0.75rem + env(safe-area-inset-top, 0px))",
           }}
         >
@@ -1777,7 +1775,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
             aria-label="历史画布列表"
             className="ce-embed-leftpop pointer-events-auto absolute z-20 w-64 max-w-[calc(100vw-1.5rem)] overflow-y-auto rounded-ios-2xl bg-white shadow-[0_8px_32px_rgba(0,0,0,0.16)]"
             style={{
-              left: "calc(0.75rem + env(safe-area-inset-left, 0px) + var(--ce-chrome-left, 0px))",
+              left: "calc(0.75rem + env(safe-area-inset-left, 0px))",
               top: "calc(3.5rem + env(safe-area-inset-top, 0px))",
               maxHeight: "min(60dvh, 360px)",
             }}
@@ -1811,7 +1809,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
             data-canvas-interactive
             className="ce-embed-leftpop pointer-events-auto absolute z-20 w-60 overflow-y-auto rounded-ios-2xl bg-white shadow-[0_8px_32px_rgba(0,0,0,0.16)]"
             style={{
-              left: "calc(0.75rem + env(safe-area-inset-left, 0px) + var(--ce-chrome-left, 0px))",
+              left: "calc(0.75rem + env(safe-area-inset-left, 0px))",
               top: "calc(3.5rem + env(safe-area-inset-top, 0px))",
               maxHeight: "min(64dvh, 420px)",
             }}

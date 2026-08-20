@@ -59,9 +59,10 @@ test("the result column is the canvas alone, with no duplicated chrome", () => {
   // ImageDisplay directly ??no wrapper card, identity header, or second status
   // badge on top of the one ImageDisplay already draws.
   // 2026-08-16 暴君裁定「擠」：畫布模式 = 全場畫布工作站（canvas-ws-overlay），
-  // 不再有 compact 嵌右欄；聊天卡變左側浮動面板（canvas-chat-panel）。
+  // 不再有 compact 嵌右欄；聊天卡變左側固定面板（canvas-chat-panel）。
+  // 2026-08-21：overlay 向右 dock（right-0 + --ce-dock-left），面板不再蓋住畫布左緣節點。
   assert.match(source, /inCanvasWorkstation = displayMode === "agent" && resultMode === "canvas" && !showProfessionalMode/);
-  assert.match(source, /canvas-ws-overlay fixed inset-x-0 top-0 z-50 h-\[100dvh\] bg-\[#F2F2F7\]/);
+  assert.match(source, /canvas-ws-overlay fixed right-0 top-0 z-50 h-\[100dvh\] bg-\[#F2F2F7\]/);
   assert.match(source, /<CanvasEmbed canvas=\{canvasHost\} expanded onClose=\{\(\) => setResultMode\("image"\)\}/);
   assert.match(source, /<ImageDisplay/);
   assert.match(source, /chatPanelState === "expanded" \? \{ width: chatPanelWidth \}/);
@@ -78,7 +79,9 @@ test("canvas workstation is a fullscreen overlay with expandable chat panel", ()
   assert.match(source, /const \[chatPanelWidth, setChatPanelWidth\] = useState\(420\)/);
   assert.match(source, /canvas-chat-resize/);
   assert.match(source, /chatPanelState === "rail" && "canvas-chat-rail"/);
-  assert.match(source, /--ce-chrome-left/);
+  // 畫布 dock 偏移（面板寬 + 12px 間隙），overlay 自身 left 用它避讓面板。
+  assert.match(source, /--ce-dock-left/);
+  assert.match(source, /left: "calc\(0\.75rem \+ var\(--ce-dock-left, 0px\)\)"/);
   assert.match(embed, /expanded = false/);
   assert.match(nodeView, /enterDelay/);
   assert.match(nodeView, /transitionDelay/);

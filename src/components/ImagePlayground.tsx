@@ -604,7 +604,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
               from { opacity: 0; transform: translateX(-18px) scale(0.985); }
               to { opacity: 1; transform: none; }
             }
-            .canvas-ws-overlay { animation: canvas-ws-fade 0.32s ease-out; }
+            .canvas-ws-overlay { animation: canvas-ws-fade 0.32s ease-out; transition: left 0.32s cubic-bezier(0.2, 0.8, 0.2, 1); }
             .canvas-chat-panel {
               position: fixed;
               z-index: 60;
@@ -676,8 +676,11 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
             @media (prefers-reduced-motion: reduce) {
               .canvas-ws-overlay, .canvas-chat-panel { animation: none; }
               .canvas-chat-panel { transition: none; }
+              .canvas-ws-overlay { transition: none; }
             }
             @media (max-width: 767px) {
+              /* 行動端面板變底部抽屜，畫布恢復全屏。 */
+              .canvas-ws-overlay { left: 0 !important; }
               .canvas-chat-panel {
                 left: 0.5rem;
                 right: 0.5rem;
@@ -704,12 +707,18 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
             }
           `}</style>
           {/* 畫布工作站：畫布吃滿全場（遼闊是預設，不再塞右欄縫裡），聊天卡原地
-              換裝成左側浮動面板——DOM 不搬家，SSE 會話與輸入狀態零丟失。
-              --ce-chrome-left：畫布頂欄 chips 向右避讓面板，跟著面板寬度過渡。 */}
+              換裝成左側固定面板——DOM 不搬家，SSE 會話與輸入狀態零丟失。
+              面板不能蓋住畫布左緣的節點：整個 overlay 向右 dock，left = 0.75rem
+              + 面板寬 + 12px 間隙（--ce-dock-left 跟隨面板寬度過渡，動畫同步）。 */}
           {inCanvasWorkstation && (
             <div
-              className="canvas-ws-overlay fixed inset-x-0 top-0 z-50 h-[100dvh] bg-[#F2F2F7]"
-              style={{ "--ce-chrome-left": `${chatPanelState === "expanded" ? chatPanelWidth + 12 : 64}px` } as React.CSSProperties}
+              className="canvas-ws-overlay fixed right-0 top-0 z-50 h-[100dvh] bg-[#F2F2F7]"
+              style={
+                {
+                  "--ce-dock-left": `${chatPanelState === "expanded" ? chatPanelWidth + 12 : 64}px`,
+                  left: "calc(0.75rem + var(--ce-dock-left, 0px))",
+                } as React.CSSProperties
+              }
             >
               <CanvasEmbed canvas={canvasHost} expanded onClose={() => setResultMode("image")} />
             </div>
