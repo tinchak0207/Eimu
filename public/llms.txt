@@ -1,9 +1,9 @@
-# image.tinchak0207.xyz API — LLM/Agent Reference
+# Eimu API — LLM/Agent Reference
 
-Base URL: https://image.tinchak0207.xyz/v1
+Base URL: https://eimu.dev/v1
 Auth: Authorization: Bearer sk-biz-<key>
 Rate Limit: 60 requests/minute (x-ratelimit-* headers on all responses)
-OpenAPI spec: https://image.tinchak0207.xyz/v1/openapi.json
+OpenAPI spec: https://eimu.dev/v1/openapi.json
 
 ## Endpoints
 

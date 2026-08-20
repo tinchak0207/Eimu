@@ -3,7 +3,7 @@
 
 ## Identity
 - **Product**: Commercial AI image generation SaaS (中轉站)
-- **URL**: image.tinchak0207.xyz
+- **URL**: eimu.dev
 - **Stack**: Next.js 15, Tailwind CSS 3, shadcn/ui, TypeScript
 - **Target**: Non-technical users (小白), mobile-first
 

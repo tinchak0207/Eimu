@@ -4,7 +4,7 @@
 
 | 項目 | 值 |
 |---|---|
-| Base URL | `https://image.tinchak0207.xyz/v1` |
+| Base URL | `https://eimu.dev/v1` |
 | 認證 | `Authorization: Bearer sk-biz-…` |
 | 請求體 | `Content-Type: application/json` |
 | 追蹤 | 每個回應帶 `X-Request-Id`；錯誤體內同值為 `trace_id` |
@@ -29,7 +29,7 @@ GET  /v1/images/{task_id}/result → 302 跳轉到圖片 URL（或 ?format=json 
 
 ```bash
 KEY="sk-biz-…"
-BASE="https://image.tinchak0207.xyz/v1"
+BASE="https://eimu.dev/v1"
 
 # 1. 列出可用模型
 curl -s "$BASE/models" -H "Authorization: Bearer $KEY"

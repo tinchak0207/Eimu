@@ -1,3 +1,6 @@
+// build-cache-bust: 9d2f4a81c3e7 (2026-08-21) — 生产再次被 stale 构建命中（/v1/model-status
+// 404、视频模型报「不支持」）。此注释仅改变文件哈希，让下一次部署绕过 Vercel 远程缓存的
+// 旧构建层；同时本文件新增 resolveGenerationModelId（显示名风格 id 宽容归一）。
 import {
   ADOBE_FIREFLY_FILL_MODEL_ID,
   ADOBE_FIREFLY_MODEL_ID,
@@ -39,6 +42,7 @@ import {
   SEEDANCE_20_FAST_MODEL_ID,
   SEEDANCE_20_MODEL_ID,
   SEEDREAM_20_MODEL_ID,
+  SENSENOVA_U1_FAST_MODEL_ID,
   SUPPORTED_GENERATION_MODEL_IDS,
   SUPPORTED_IMAGE_MODEL_IDS,
   SUPPORTED_VIDEO_MODEL_IDS,
@@ -222,6 +226,19 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     defaultResolution: "1k",
     imageCredits: { "1k": 5, "2k": 10, "4k": 20 },
     referenceImages: true,
+  },
+  [SENSENOVA_U1_FAST_MODEL_ID]: {
+    id: SENSENOVA_U1_FAST_MODEL_ID,
+    displayName: "SenseNova U1 Fast",
+    kind: "image",
+    popularity: 95,
+    vendor: "SenseNova",
+    aspectRatios: ["1:1", "3:2", "2:3"],
+    resolutions: ["2k"],
+    defaultAspectRatio: "1:1",
+    defaultResolution: "2k",
+    fixedCoins: 0.1,
+    referenceImages: false,
   },
   [ADOBE_FIREFLY_MODEL_ID]: {
     id: ADOBE_FIREFLY_MODEL_ID,
@@ -927,6 +944,25 @@ export function baseGenerationModel(modelId: string): GenerationModelDefinition 
 
 export function generationModel(modelId: string): GenerationModelDefinition | null {
   return effectiveCatalog[modelId] ?? GENERATION_MODEL_CATALOG[modelId] ?? null;
+}
+
+/**
+ * 寬容的 model id 解析：精確命中優先；未命中時把空格/底線/點/大小寫歸一成連字號再比對。
+ * 修的是「workflow 節點或 agent 傳了顯示名風格 id（如 `seedance 2.0`）被 400 擋下」的問題——
+ * 同一個模型不該因為分隔符寫法不同而報「不支持的模型」。找不到對應時回 null（調用方照舊走原 id 報錯）。
+ */
+export function resolveGenerationModelId(modelId: string): string | null {
+  const raw = modelId.trim();
+  if (!raw) return null;
+  if (generationModel(raw)) return raw;
+  const normalize = (s: string) => s.trim().toLowerCase().replace(/[\s_.]+/g, "-");
+  const wanted = normalize(raw);
+  if (!wanted) return null;
+  const candidates = new Set([...Object.keys(effectiveCatalog), ...Object.keys(GENERATION_MODEL_CATALOG)]);
+  for (const candidate of candidates) {
+    if (normalize(candidate) === wanted) return candidate;
+  }
+  return null;
 }
 
 export function generationCapabilities(modelId: string): GenerationCapabilityProjection | null {

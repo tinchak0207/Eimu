@@ -4,11 +4,27 @@
 # Do NOT drop the leading slash on /docs/ or /output/ — unanchored "docs/" would
 # also match the real Next.js route src/app/docs/.
 
-# dependencies (Vercel installs from package.json / package-lock.json)
-node_modules
+# Remote builds install dependencies themselves. Local `vercel build --prod` emits
+# filePathMap entries for these traced runtime packages, so prebuilt uploads must
+# include exactly this allowlist instead of dropping node_modules wholesale.
+node_modules/*
+!node_modules/@swc/
+node_modules/@swc/*
+!node_modules/@swc/helpers/
+!node_modules/@swc/helpers/**
+!node_modules/client-only/
+!node_modules/client-only/**
+!node_modules/next/
+!node_modules/next/**
+!node_modules/react/
+!node_modules/react/**
+!node_modules/react-dom/
+!node_modules/react-dom/**
+!node_modules/styled-jsx/
+!node_modules/styled-jsx/**
 
-# build output & stale build snapshots
-/.next/
+# Prebuilt deployments need the traced .next runtime files referenced by
+# .vercel/output/functions/*/.vc-config.json. Keep only stale snapshots ignored.
 /.next.bak-*/
 /out/
 /build

@@ -40,7 +40,7 @@ export function AdminLogin() {
           </div>
           <div>
             <h1 className="text-lg font-semibold text-[#20242c]">管理员登录</h1>
-            <p className="text-xs text-black/45">image.tinchak0207.xyz</p>
+            <p className="text-xs text-black/45">eimu.dev</p>
           </div>
         </div>
         <label className="mb-4 block text-sm font-medium text-[#30343b]">

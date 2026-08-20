@@ -1,4 +1,4 @@
-# Image Studio — image.tinchak0207.xyz
+# Eimu — eimu.dev
 
 > 一站式 AI 影像／影片生成工作台，C 端 SaaS 與 B 端 API 轉售雙軌並行。
 > 本專案為**私有專案（Proprietary, All Rights Reserved）**，README 記載的是我們與市面上所有同類產品之間的「對稱差」——只寫我們有、別人沒有的東西。
@@ -261,4 +261,4 @@ retryable / switchSupplier / quarantineSupplier / cooldownUntil
 
 ---
 
-*Proprietary. All rights reserved. Image Studio — image.tinchak0207.xyz.*
+*Proprietary. All rights reserved. Eimu — eimu.dev.*

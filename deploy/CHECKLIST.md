@@ -16,7 +16,7 @@ codex/image-tinchak0207
 2. Commit to a dedicated branch
 3. Import that repo into Vercel
 4. Set the production branch in Vercel to the branch you want to deploy from
-5. Bind `image.tinchak0207.xyz`
+5. Bind `eimu.dev`
 
 ## Option B: Keep `market` in the same repo
 

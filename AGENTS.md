@@ -63,3 +63,40 @@ Garbage time. Minimize ruthlessly. NEVER perform:
 - State important beliefs as `FACT`, `INFERENCE`, or `HYPOTHESIS`. Each accepted issue must name the dominant bottleneck, smallest useful intervention, acceptance evidence, and what remains out of scope.
 - Verification depth is a product decision. Use expected-pass contract tests, type checks, and production builds by default; add browser automation only when its result can change a decision. If the user takes over visual acceptance, report it as pending and stop after the agreed deploy boundary.
 - When implementation is requested and expected-pass gates succeed, Image Studio changes default to production deployment unless the user explicitly limits the task to research, planning, documentation, or local-only work.
+
+## B 端 API 密钥位置（2026-08-19 用户签发，仅此一把不再签发）
+- 明文密钥文件：`.env.biz-key`（权限 600，`.gitignore` 的 `.env*` 已覆盖，不进 git）
+- 用途：调 `https://image.tinchak0207.xyz/v1/*`（B 端 OpenAI 兼容端点），`Authorization: Bearer sk-biz-...`
+- 丢失/泄露只能吊销重签——用户明确不会再签发下一把，务必保管
+
+## 生图"卡"完整根因与修复（2026-08-19/20 彻查+修复+真图验证）
+### 根因链（FACT，全部实测）
+1. **表层**：adobe2api 容器健康端点是 `/api/v1/health`（200），但控制面 `adobe-health.ts` 默认 healthPath="health" 且曾配错路径 → 健康检查失败
+2. **核心**：adobe2api health 新响应结构 `{status:"ok", accounts:[{auto_refresh_count, active_token_count, healthy}]}` 与 `adobe-health.ts` 解析的旧字段（顶层 `token_source`/`refresh_status`/`expires_at`）**不匹配** → account 永远判 `token_source=空、refresh_status=failing、health=degraded`
+3. **放大**：scheduler `acquireSupplierLease` 的 adobe2api 门禁要求 `token_source='auto_refresh' AND refresh_status='healthy' AND credential_expires_at > now()+2min AND health_observed_at > now()-2min AND success_rate_5m>=0.8` → adobe2api 永不被选中 → gpt-image-2 任务全部 `capacity_saturated`（870 个任务 0 成功，诊断误报"all healthy"因为诊断的 notCooling 查询不含 token 门禁，与 acquire 不一致）
+### 修复（已生效并出真图）
+- 改 `src/lib/generation-core/adobe-health.ts`：兼容两代响应结构——顶层 status=="ok" → refresh_status=healthy；accounts 里有 `auto_refresh_count>0 且 healthy` → token_source=auto_refresh；有 active_token_count → 视为未过期；accounts 全空或任一 healthy → anyHealthy
+- healthPath 保持 `http://adobe2api:6001/api/v1/health`（Docker 内部直连，worker 同网 imagesite_imagesite，可达）
+- 同步到 VPS `/opt/image-control-plane/app` 后 `docker compose -f control-plane-compose.yml build + up -d generation-worker` 重建
+- 验证：account 变 `auto_refresh/healthy/healthy`，B 端 key 提交 gpt-image-2 任务 succeeded，出图 1024x1024 PNG（1.1MB，endpointLabel=adobe2api，sha256 匹配）
+### 排障秘诀（下次直接抄）
+- **VPS 访问**：`node .dsh-ssh/exec.js "<命令>"`（ssh2 + ~/.ssh/new.pem，user=ubuntu，43.172.85.76:**22443**）；无 ssh 二进制时这是唯一通道。注意：**22 端口已废弃**（VPS 曾对 22 做主机侧防护黑洞，sshd 现双端口监听 22+22443，22 外部不可达），一律走 22443
+- **控制面 DB**：`sudo docker exec image-control-postgres psql -U image_control -d image_control -c "<SQL>"`（VPS 上）
+- **容器状态**：`sudo docker ps -a --format '{{.Names}} | {{.Status}}'`
+- **capacity_saturated 诊断顺序**：① 查 supplier_lease 残留 → ② 查 supplier_account 的 token_source/refresh_status/health → ③ 查 adobe2api 容器真实 health 路径（容器内 `python3 urllib` 探测各路径）→ ④ 对照 adobe-health.ts 解析字段
+- **adobe2api 容器无 curl/wget**，容器内探测用 python3 urllib
+### agent 网关 CORS 拦截（2026-08-20 修复）
+- **症状**：浏览器从 `https://www.eimu.dev` 请求 `store.tinchak0207.xyz/agent/v1/sessions/*/events`（SSE 会话事件流）被 CORS 拦截（无 Access-Control-Allow-Origin）
+- **根因**：agent 网关（VPS `/opt/agent-harness/gateway/index.ts`，systemd agent-gateway，端口 8081，nginx `/agent/` → `host.docker.internal:8081`）的 CORS 白名单默认 `https://image.tinchak0207.xyz`，`CORS_ORIGINS` 环境变量未配置 → `www.eimu.dev`/`eimu.dev` 不在白名单 → corsOriginFor 返回 null → 无 CORS 头
+- **修复**：`/opt/agent-harness/.env` 追加 `CORS_ORIGINS="https://image.tinchak0207.xyz,https://eimu.dev,https://www.eimu.dev"`，`systemctl restart agent-gateway`
+- **验证**：OPTIONS/GET 均返回 `access-control-allow-origin: https://www.eimu.dev`（含 allow-methods/headers/max-age/vary: Origin）
+- **排障要点**：网关 index.ts 的 `corsOriginFor`（2492 行）/`corsHeaders`（2502 行）；`.env` 有 10 个键（OPENCODE_SERVER_PASSWORD/HARNESS_API_KEY/GROQ_API_KEY 等），修改前先 `cp .env .env.bak-*`
+- **CORS 修复补完（SSE 200 路径）**：仅配 CORS_ORIGINS 不够——`openEventStream`（gateway index.ts 587 行）的 SSE 响应头**硬编码**（Content-Type/Cache-Control/X-Accel-Buffering/Connection），**不经过 corsHeaders()**，导致 200 事件流仍无 CORS 头（401/JSON 路径反而有）。修复=函数签名加 `req?: Request`，headers 合并 `...corsHeaders(corsOriginFor(req?.headers.get("origin") ?? null))`，两个调用点（handleEventStream 1344、ticket 路径 2636）传 req。改完 `bun build index.ts` 语法检查 + `systemctl restart agent-gateway`
+- **SSE 端到端验证法**（无需用户侧 ticket）：用 B 端 key `POST /agent/v1/sessions` 建测试 session → `POST /agent/v1/sessions/:id/sse-ticket` 签发 ticket → `GET .../events?ticket=X` 带 Origin 头，看 200 + `access-control-allow-origin` + `event: connected` 流内容；测完 DELETE 清理
+- **判别新旧错误**：用户贴的 CORS 错误若 ticket 值与上次完全相同，多为修复前的旧日志；以实测 200 SSE 路径为准
+### agent 会话 404 "session not found"（2026-08-20 修复）
+- **症状**：浏览器 console `Failed to load resource: /api/agent/sessions/<id> 404`（资源加载失败格式，多为 DELETE 清理旧会话时）
+- **根因**：网关 session 存在**内存 Map**（index.ts `sessions`），`getOwnedSession` 按 key 隔离且**进程重启即全丢**——任何 `systemctl restart agent-gateway`（如 CORS 修复部署）都会让所有已创建 session 变 404。前端"开新会话"（discardAndStartNew）best-effort 清理旧存档 → DELETE 已回收 session → 网关 404 → 站点透传 → console 噪音
+- **修复**：站点 `src/app/api/agent/sessions/[id]/route.ts` DELETE 幂等化——网关 404 且 `code==="not_found"` 时返回 `200 {success:true, already_gone:true}`（目标已不存在=删除成功），其他 4xx/5xx 原样透传
+- **验证**：`route.test.ts` 12/12 通过 + tsc 无错 + `vercel --prod` 部署
+- **排障要点**：`journalctl -u agent-gateway` 看 session created 时间线对照重启时间（`systemctl show agent-gateway --property=ActiveEnterTimestamp`）；会话进程重启即断是架构事实（内存 Map），若要持久化需另做；DELETE 幂等化只吞 not_found

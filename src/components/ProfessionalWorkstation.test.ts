@@ -105,7 +105,7 @@ test("professional workstation copy follows the Apple-style simplified Chinese c
   const displayed = readCode("src/components/pro-workstation/InvokeInspiredWorkstation.tsx");
 
   [
-    "Emu · 创作工作站",
+    "Eimu · 创作工作站",
     "画面描述",
     "创作模板",
     "更多要求",

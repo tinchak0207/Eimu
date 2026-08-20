@@ -3,10 +3,19 @@
 // 純代理：身份與 key 由 resolveAgentCaller 統一解決，剩下就是把請求轉給
 // agent 閘道並原樣回傳結果。任何地方都不該自己再碰身份 —— 那是入口的事。
 // 建立會話的 body 沒有本地校驗需求，把閘道當權威，原樣透傳。
+//
+// L0 账户画像注入：本站是「账户级记忆」的权威（profile + lessons 落本站存储）。
+// 每次开新会话时把已确认的画像 + 最近教训带进网关 —— 模型开聊就认识用户，
+// 不再从零问「你的行业/规格/风格」。空画像则什么都不带，不占上下文。
 
 import { NextRequest, NextResponse } from "next/server";
 import { callAgentGateway, type AgentGatewayResponse } from "@/lib/agent-gateway";
 import { agentCallerFailureCode, resolveAgentCaller } from "@/lib/agent-session-guard";
+import {
+  buildAgentMemoryInjection,
+  listAgentLessons,
+  loadAgentProfile,
+} from "@/lib/agent-profile-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,9 +47,28 @@ export async function POST(req: NextRequest) {
     body = {};
   }
 
+  // L0：账户级记忆注入（静默，不占上下文除非真有画像）。
+  let memoryInjection: { user_profile: Record<string, unknown>; lessons: string[] } | null = null;
+  try {
+    const [profile, lessons] = await Promise.all([
+      loadAgentProfile(caller.userId),
+      listAgentLessons(caller.userId),
+    ]);
+    memoryInjection = buildAgentMemoryInjection(profile, lessons);
+  } catch {
+    memoryInjection = null; // 画像存储失败不阻塞开新会话
+  }
+
+  const payload: Record<string, unknown> =
+    typeof body === "object" && body !== null ? { ...(body as Record<string, unknown>) } : {};
+  if (memoryInjection) {
+    payload.user_profile = memoryInjection.user_profile;
+    payload.lessons = memoryInjection.lessons;
+  }
+
   let resp: AgentGatewayResponse;
   try {
-    resp = await callAgentGateway("/agent/v1/sessions", { method: "POST", key: caller.key, body: body ?? {} });
+    resp = await callAgentGateway("/agent/v1/sessions", { method: "POST", key: caller.key, body: payload });
   } catch {
     return fail(502, "Agent 网关连接失败，请稍后重试。", "agent_gateway_unreachable");
   }

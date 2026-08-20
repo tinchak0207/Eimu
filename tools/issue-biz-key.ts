@@ -113,7 +113,7 @@ async function main(): Promise<void> {
   const issued = await issueBizApiKey(draft.draft, generateBizApiKey());
 
   console.log("\n密钥已签发。明文只出现这一次，请立刻保存。\n");
-  console.log("  Base URL   https://image.tinchak0207.xyz/v1");
+  console.log("  Base URL   https://eimu.dev/v1");
   console.log(`  API Key    ${issued.key}`);
   console.log(`\n  客户       ${issued.record.label}`);
   console.log(`  计费用户   ${issued.record.userId}（消耗从该账户余额扣除，请先确认已充值）`);

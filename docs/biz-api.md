@@ -6,7 +6,7 @@ OpenAI 兼容的图像生成接口，供 API 聚合平台与企业客户直接�
 
 | 项目 | 值 |
 | --- | --- |
-| Base URL | `https://image.tinchak0207.xyz/v1` |
+| Base URL | `https://eimu.dev/v1` |
 | 认证方式 | `Authorization: Bearer sk-biz-…` |
 | 请求编码 | `application/json`，UTF-8 |
 | 兼容性 | OpenAI Images API 形状，可直接用官方 SDK |
@@ -20,7 +20,7 @@ OpenAI 兼容的图像生成接口，供 API 聚合平台与企业客户直接�
 返回当前密钥有权调用的模型。聚合平台可用它做模型发现与可用性探测。
 
 ```bash
-curl https://image.tinchak0207.xyz/v1/models \
+curl https://eimu.dev/v1/models \
   -H "Authorization: Bearer $API_KEY"
 ```
 
@@ -45,7 +45,7 @@ curl https://image.tinchak0207.xyz/v1/models \
 ### `POST /v1/images/generations`
 
 ```bash
-curl https://image.tinchak0207.xyz/v1/images/generations \
+curl https://eimu.dev/v1/images/generations \
   -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -89,7 +89,7 @@ from openai import OpenAI
 
 client = OpenAI(
     api_key="sk-biz-…",
-    base_url="https://image.tinchak0207.xyz/v1",
+    base_url="https://eimu.dev/v1",
 )
 
 result = client.images.generate(
@@ -105,7 +105,7 @@ import OpenAI from "openai";
 
 const client = new OpenAI({
   apiKey: "sk-biz-…",
-  baseURL: "https://image.tinchak0207.xyz/v1",
+  baseURL: "https://eimu.dev/v1",
 });
 
 const result = await client.images.generate({

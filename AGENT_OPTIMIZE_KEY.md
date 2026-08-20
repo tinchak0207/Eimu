@@ -6,7 +6,7 @@
 
 ## 值從哪裡來
 VPS 上 `/opt/agent-harness/.env` 的 `HARNESS_API_KEY`（`sk-biz-` 前綴，39 字元）。
-gateway 驗證任何 `sk-biz-*` key 時打 `image.tinchak0207.xyz/v1/models`，此 key 已在 harness 作業流程中通過該驗證。
+gateway 驗證任何 `sk-biz-*` key 時打 `eimu.dev/v1/models`，此 key 已在 harness 作業流程中通過該驗證。
 
 ## 不設會怎樣
 Agent 層直接跳過（回原 prompt），自動降級到規則層（`invisible-prompt-director`）。

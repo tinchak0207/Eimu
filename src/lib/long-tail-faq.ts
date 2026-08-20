@@ -37,7 +37,7 @@ export const FAQ_ITEMS: FaqItem[] = [
   {
     question: "新手不会写代码，怎么用 GPT Image 2 生成图片？",
     answer:
-      "不需要写代码。打开 image.tinchak0207.xyz，登录后在输入框描述你想要的画面，选择 GPT Image 2 或 Nano Banana Pro 模型，点击生成，几十秒后就能在页面里下载图片。",
+      "不需要写代码。打开 eimu.dev，登录后在输入框描述你想要的画面，选择 GPT Image 2 或 Nano Banana Pro 模型，点击生成，几十秒后就能在页面里下载图片。",
   },
 ];
 

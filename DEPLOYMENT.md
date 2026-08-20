@@ -2,8 +2,8 @@
 
 ## Recommended split
 
-- `image.tinchak0207.xyz`
-  - Deploy on **Vercel**
+- `eimu.dev` (primary domain, deploy on **Vercel**)
+- `image.tinchak0207.xyz` (legacy API domain, keep until API migration)
   - Use for this Next.js image generation frontend
 - `market.tinchak0207.xyz`
   - Keep on **Render**

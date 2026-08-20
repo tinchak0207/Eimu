@@ -11,7 +11,7 @@ export const metadata = {
   openGraph: {
     title: DOCS_TITLE,
     description: DOCS_DESCRIPTION,
-    url: "https://image.tinchak0207.xyz/docs/harness",
+    url: "https://eimu.dev/docs/harness",
   },
 };
 

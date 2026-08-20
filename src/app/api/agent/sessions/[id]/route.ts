@@ -26,6 +26,17 @@ function gatewayResponse(resp: AgentGatewayResponse): NextResponse {
     : new NextResponse(resp.text || "", { status: resp.status, headers: { "Content-Type": "text/plain; charset=utf-8" } });
 }
 
+/**
+ * DELETE 幂等化：閘道回 404 "session not found" 時視同刪除成功（目標已不存在）。
+ * 網關 session 存在記憶體，進程重啟（如 CORS 修復部署）會讓舊 session 全數消失，
+ * 前端 best-effort 清理舊存檔會打到這種 404 —— 若不吞掉，瀏覽器 console 持續噴
+ * "Failed to load resource: 404" 噪音。只有 not_found 才吞；其他 4xx/5xx 原樣透傳。
+ */
+function isGatewaySessionNotFound(resp: AgentGatewayResponse): boolean {
+  const json = resp.json as { code?: unknown } | null;
+  return resp.status === 404 && typeof json?.code === "string" && json.code === "not_found";
+}
+
 export async function DELETE(req: NextRequest, context: { params: Promise<{ id: string }> }) {
   const caller = await resolveAgentCaller(req);
   if (!caller.ok) {
@@ -42,6 +53,10 @@ export async function DELETE(req: NextRequest, context: { params: Promise<{ id: 
     resp = await callAgentGateway(`/agent/v1/sessions/${id}`, { method: "DELETE", key: caller.key });
   } catch {
     return fail(502, "Agent 网关连接失败，请稍后重试。", "agent_gateway_unreachable");
+  }
+  // 已回收的 session 視同刪除成功（冪等），不再向瀏覽器噴 404 噪音。
+  if (isGatewaySessionNotFound(resp)) {
+    return NextResponse.json({ success: true, already_gone: true }, { status: 200, headers: { "Cache-Control": "no-store" } });
   }
   return gatewayResponse(resp);
 }

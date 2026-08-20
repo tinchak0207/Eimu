@@ -1,5 +1,5 @@
 export interface ServerConfig {
-  /** Normalized API base URL without a trailing slash, e.g. https://image.tinchak0207.xyz/api/v1 */
+  /** Normalized API base URL without a trailing slash, e.g. https://eimu.dev/api/v1 */
   apiBase: string;
   /** Biz API key (sk-biz-...) read from environment only. Never logged. */
   apiKey: string;
@@ -9,7 +9,7 @@ export interface ServerConfig {
   pollTimeoutMs: number;
 }
 
-export const DEFAULT_API_BASE = "https://image.tinchak0207.xyz/api/v1";
+export const DEFAULT_API_BASE = "https://eimu.dev/api/v1";
 export const DEFAULT_POLL_INTERVAL_SECONDS = 3;
 export const DEFAULT_POLL_TIMEOUT_SECONDS = 1800;
 

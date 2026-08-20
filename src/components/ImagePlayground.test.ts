@@ -58,28 +58,28 @@ test("the result column is the canvas alone, with no duplicated chrome", () => {
   // The model picker moved onto the left rail, so the right column renders
   // ImageDisplay directly ??no wrapper card, identity header, or second status
   // badge on top of the one ImageDisplay already draws.
-  // v5 嵌合畫布：canvas 模式預設嵌在右側欄（compact），可展開全屏（fixed overlay）可收合。
-  assert.match(source, /resultMode === "canvas" && canvasExpanded && \(/);
-  assert.match(source, /<div className="fixed inset-0 z-50 bg-\[#F2F2F7\]">/);
-  assert.match(source, /resultMode === "canvas" && !canvasExpanded \? \(/);
-  assert.match(source, /height="min\(46vh, 440px\)"/);
-  assert.match(source, /onToggleExpand=\{\(\) => setCanvasExpanded\(true\)\}/);
-  assert.match(source, /<CanvasEmbed/);
+  // 2026-08-16 暴君裁定「擠」：畫布模式 = 全場畫布工作站（canvas-ws-overlay），
+  // 不再有 compact 嵌右欄；聊天卡變左側浮動面板（canvas-chat-panel）。
+  assert.match(source, /inCanvasWorkstation = displayMode === "agent" && resultMode === "canvas" && !showProfessionalMode/);
+  assert.match(source, /canvas-ws-overlay fixed inset-x-0 top-0 z-50 h-\[100dvh\] bg-\[#F2F2F7\]/);
+  assert.match(source, /<CanvasEmbed canvas=\{canvasHost\} expanded onClose=\{\(\) => setResultMode\("image"\)\}/);
   assert.match(source, /<ImageDisplay/);
+  assert.match(source, /chatPanelState === "expanded" \? \{ width: chatPanelWidth \}/);
   assert.doesNotMatch(source, /ModelSelect/);
-  assert.match(source, /const resultView = useMemo/);
 });
 
-test("canvas fullscreen overlay is expandable and collapsible", () => {
+test("canvas workstation is a fullscreen overlay with expandable chat panel", () => {
   const source = read("src/components/ImagePlayground.tsx");
   const embed = read("src/components/canvas/CanvasEmbed.tsx");
   const nodeView = read("src/components/canvas/CanvasNodeView.tsx");
 
-  assert.match(source, /const \[canvasExpanded, setCanvasExpanded\] = useState\(false\)/);
-  assert.match(source, /canvasExpanded \? \(/);
+  // 工作站：畫布吃滿全場，聊天面板 expanded|rail 兩態 + 右緣拖寬，localStorage 記憶。
+  assert.match(source, /const \[chatPanelState, setChatPanelState\] = useState<"expanded" \| "rail">\("expanded"\)/);
+  assert.match(source, /const \[chatPanelWidth, setChatPanelWidth\] = useState\(420\)/);
+  assert.match(source, /canvas-chat-resize/);
+  assert.match(source, /chatPanelState === "rail" && "canvas-chat-rail"/);
+  assert.match(source, /--ce-chrome-left/);
   assert.match(embed, /expanded = false/);
-  assert.match(embed, /onToggleExpand/);
-  assert.match(embed, /expanded \? "收合" : "展开"/);
   assert.match(nodeView, /enterDelay/);
   assert.match(nodeView, /transitionDelay/);
 });
@@ -126,4 +126,21 @@ test("professional mode keeps its draft mounted after returning home", () => {
   assert.match(source, /aria-hidden=\{!showProfessionalMode\}/);
   assert.match(source, /!showProfessionalMode && \(/);
   assert.doesNotMatch(source, /if \(showProfessionalMode\) \{\s*return/);
+});
+
+test("canvas workstation chat panel keeps the composer inside the panel", () => {
+  const source = read("src/components/ImagePlayground.tsx");
+
+  // 面板是 fixed + overflow:hidden 的 flex 容器：内容超高时若高度链没把
+  // transcript 的滚动接住，输入区会被推出面板外（用户截图：底部只见
+  // 被裁掉的「思考过程」最后一行、输入框整体不可见）。加固规则：
+  //  - 面板给 min-height:0 / max-height 兜底（bottom 已定界，双保险）
+  //  - section.lg-card 拿 flex:1 之外再显式 min-height:0 + overflow:hidden，
+  //    不许 agent 面把卡片按内容撑高
+  //  - 非 lg-card 兄弟（如 agentBaseline 撤回条）shrink-0，不抢高度
+  //  - composer 锚点 shrink-0，永不被 flex 压没
+  assert.match(source, /\.canvas-chat-panel \{[^}]*min-height: 0;[^}]*max-height: calc\(100dvh - 1\.5rem[^}]*\}/);
+  assert.match(source, /\.canvas-chat-scroll-fill > section\.lg-card \{[^}]*flex: 1 1 0%;[^}]*min-height: 0;[^}]*overflow: hidden;/);
+  assert.match(source, /\.canvas-chat-scroll-fill > :not\(section\.lg-card\) \{ flex-shrink: 0; \}/);
+  assert.match(source, /\.agent-composer-anchor \{ flex-shrink: 0; \}/);
 });

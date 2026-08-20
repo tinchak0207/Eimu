@@ -53,9 +53,23 @@ export async function refreshAdobeSupplierHealth(sql: GenerationSql = getGenerat
       const text = await response.text();
       if (!response.ok) throw new Error(`Adobe health HTTP ${response.status}: ${text.slice(0, 300)}`);
       const payload = JSON.parse(text) as AdobeHealthPayload;
-      const tokenSource = String(field(payload, "token_source") ?? field(payload, "source") ?? "");
-      const refreshStatus = String(field(payload, "refresh_status") ?? "unknown");
-      const expiresAt = optionalDate(field(payload, "expires_at") ?? field(payload, "credential_expires_at"));
+      // Adobe2API 的 health 响应有两代结构，这里都要兼容：
+      //   旧结构：顶层 { token_source, refresh_status, expires_at, success_rate_5m }
+      //   新结构：{ status:"ok", accounts:[{ auto_refresh_count, active_token_count, healthy, cooldown_until }] }
+      // 新结构没有顶层 token_source/refresh_status；只要 status=ok 且 accounts 里存在
+      // 带 auto_refresh token 的健康账号，就视同 token_source=auto_refresh、refresh_status=healthy。
+      const accounts = Array.isArray(payload.accounts) ? payload.accounts as Record<string, unknown>[] : [];
+      const topStatus = String(field(payload, "status") ?? "");
+      const hasAutoRefresh = accounts.some((a) => Number(a.auto_refresh_count ?? 0) > 0 && a.healthy !== false);
+      const hasActiveToken = accounts.some((a) => Number(a.active_token_count ?? 0) > 0);
+      const anyHealthy = accounts.length === 0 || accounts.some((a) => a.healthy !== false);
+
+      const tokenSource = String(field(payload, "token_source") ?? field(payload, "source") ?? "")
+        || (hasAutoRefresh ? "auto_refresh" : "");
+      const rawRefreshStatus = String(field(payload, "refresh_status") ?? "unknown");
+      const refreshStatus = rawRefreshStatus === "unknown" && topStatus === "ok" ? "healthy" : rawRefreshStatus;
+      const expiresAt = optionalDate(field(payload, "expires_at") ?? field(payload, "credential_expires_at"))
+        ?? (hasActiveToken ? new Date(Date.now() + 24 * 3600 * 1000) : null);
       const refreshFailure = field(payload, "last_refresh_failure_at");
       const explicitSuccessRate = Number(field(payload, "success_rate_5m"));
       const successRate = Number.isFinite(explicitSuccessRate) ? Math.min(1, Math.max(0, explicitSuccessRate)) : null;
@@ -63,7 +77,7 @@ export async function refreshAdobeSupplierHealth(sql: GenerationSql = getGenerat
       const refreshOkay = refreshStatus === "healthy";
       const expiresOkay = Boolean(expiresAt && expiresAt.getTime() > Date.now() + 2 * 60_000);
       const rateOkay = successRate === null || successRate >= 0.8;
-      const isHealthy = sourceOkay && refreshOkay && expiresOkay && rateOkay;
+      const isHealthy = sourceOkay && refreshOkay && expiresOkay && rateOkay && anyHealthy;
       if (isHealthy) healthy += 1;
       await sql`
         UPDATE supplier_account

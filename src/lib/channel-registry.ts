@@ -22,7 +22,11 @@ import {
 } from "./sub2api";
 import { buildGatewayEndpointsWithPools, inferSupportedModels, type AdminPool } from "./admin-pools";
 import type { ChannelOverrides } from "./channel-overrides";
+import { resolveSenseNovaApiKeys, SENSENOVA_U1_FAST_MODEL_ID } from "./provider-config";
 
+export const SENSENOVA_CHANNEL_ID = "sensenova";
+const SENSENOVA_BASE_URL = "https://token.sensenova.cn/v1";
+const SENSENOVA_PRIORITY = 20;
 
 /**
  * env 渠道的固定基準優先級。
@@ -162,6 +166,19 @@ export function buildModelQueue(
   pools: AdminPool[],
   overrides: ChannelOverrides,
 ): GatewayEndpoint[] {
+  if (modelId === SENSENOVA_U1_FAST_MODEL_ID) {
+    const override = overrides[SENSENOVA_CHANNEL_ID] ?? {};
+    if (override.enabled === false) return [];
+    const keys = resolveSenseNovaApiKeys(env.SENSENOVA_API_KEY, env.SENSENOVA_API_KEYS);
+    return keys.map((apiKey, keyIndex) => ({
+      apiKey,
+      baseURL: SENSENOVA_BASE_URL,
+      label: `sensenova-${keyIndex + 1}`,
+      protocol: "sensenova",
+      supportedModels: [SENSENOVA_U1_FAST_MODEL_ID],
+    }));
+  }
+
   const envChannels = describeEnvChannels(env);
   const enabledEnvEndpoints: GatewayEndpoint[] = [];
   const environmentPriorities: Record<string, number> = {};
@@ -208,6 +225,32 @@ export function describeChannels(
     });
   }
 
+  const senseNovaKeys = resolveSenseNovaApiKeys(env.SENSENOVA_API_KEY, env.SENSENOVA_API_KEYS);
+  const senseNovaOverride = overrides[SENSENOVA_CHANNEL_ID] ?? {};
+  const senseNovaConfigured = senseNovaKeys.length > 0;
+  const senseNovaEndpoint = senseNovaConfigured
+    ? { label: "sensenova-1", baseURL: SENSENOVA_BASE_URL }
+    : null;
+  channels.push({
+    id: SENSENOVA_CHANNEL_ID,
+    kind: "env",
+    label: SENSENOVA_CHANNEL_ID,
+    host: senseNovaConfigured ? safeEndpointHost(SENSENOVA_BASE_URL) : "",
+    configured: senseNovaConfigured,
+    defaultEnabled: senseNovaConfigured,
+    enabled: senseNovaConfigured && (senseNovaOverride.enabled ?? true),
+    basePriority: SENSENOVA_PRIORITY,
+    priority: senseNovaOverride.priority ?? SENSENOVA_PRIORITY,
+    supportedModels: [SENSENOVA_U1_FAST_MODEL_ID],
+    source: "SENSENOVA_API_KEY / SENSENOVA_API_KEYS",
+    usesBillingGateway: false,
+    overridden: {
+      enabled: senseNovaOverride.enabled !== undefined,
+      priority: senseNovaOverride.priority !== undefined,
+    },
+    coolingDown: senseNovaEndpoint ? isEndpointCoolingDown(senseNovaEndpoint) : false,
+  });
+
   for (const pool of pools) {
     channels.push({
       id: `pool:${pool.id}`,
@@ -234,5 +277,5 @@ export function describeChannels(
 
 /** admin overrides 允許出現的渠道 id 白名單（池不在內——池有自己的 CRUD）。 */
 export function overridableChannelIds(): string[] {
-  return ["env:sub2api", "env:adobe2api", "env:pixai", "env:primary", "env:fallback"];
+  return ["env:sub2api", "env:adobe2api", "env:pixai", "env:primary", "env:fallback", SENSENOVA_CHANNEL_ID];
 }

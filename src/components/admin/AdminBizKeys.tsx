@@ -252,7 +252,7 @@ export function AdminBizKeys() {
         <div>
           <h2 className="text-lg font-semibold">B 端密钥</h2>
           <p className="mt-1 text-sm text-black/45">
-            供 API 聚合平台调用。Base URL 为 <code className="rounded bg-black/5 px-1">https://image.tinchak0207.xyz/v1</code>
+            供 API 聚合平台调用。Base URL 为 <code className="rounded bg-black/5 px-1">https://eimu.dev/v1</code>
             ，计费从绑定的用户账户扣除。
           </p>
         </div>
@@ -515,7 +515,7 @@ export function AdminBizKeys() {
               <div>
                 <span className="text-xs font-semibold text-black/55">Base URL</span>
                 <code className="mt-1 block truncate rounded-md bg-black/5 px-3 py-2 font-mono text-xs">
-                  https://image.tinchak0207.xyz/v1
+                  https://eimu.dev/v1
                 </code>
               </div>
             </div>

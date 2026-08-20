@@ -77,7 +77,7 @@ export default function ApiDocsPage() {
               <p className="text-ios-footnote font-semibold text-[rgba(0,0,0,0.72)]">Base URL</p>
             </div>
             <code className="mt-2 block overflow-x-auto rounded-ios-xl bg-[rgba(0,0,0,0.05)] px-3 py-2 text-ios-footnote text-[#242830]">
-              https://image.tinchak0207.xyz/v1
+              https://eimu.dev/v1
             </code>
           </div>
           <div>

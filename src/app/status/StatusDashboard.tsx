@@ -97,7 +97,7 @@ export function StatusDashboard({ initialEndpoints }: Props) {
         <header className="border-b border-[#dfe3e8] pb-8">
           <div className="flex items-start justify-between gap-5">
             <div>
-              <p className="text-sm font-semibold text-[#65707d]">image.tinchak0207.xyz</p>
+              <p className="text-sm font-semibold text-[#65707d]">eimu.dev</p>
               <h1 className="mt-2 text-3xl font-bold text-[#111318] sm:text-4xl">系统状态</h1>
             </div>
             <button

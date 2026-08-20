@@ -28,7 +28,13 @@ export async function generateMetadata({ params }: RouteParams): Promise<Metadat
   return {
     title,
     description,
-    keywords: [useCase.keyword, "AI生图", "GPT Image 2", "Nano Banana Pro"],
+    keywords: [
+      useCase.keyword,
+      ...(useCase.searchVariants ?? []),
+      "AI生图",
+      "GPT Image 2",
+      "Nano Banana Pro",
+    ],
     alternates: {
       canonical: canonicalUrl,
     },
@@ -58,8 +64,10 @@ export default async function UseCasePage({ params }: RouteParams) {
     "@type": "Article",
     headline: useCase.title,
     description: useCase.heroDescription,
-    keywords: useCase.keyword,
-    citation: useCase.citation.url,
+    keywords: [useCase.keyword, ...(useCase.searchVariants ?? [])].join(", "),
+    citation: useCase.redditEvidence?.length
+      ? useCase.redditEvidence.map((evidence) => evidence.url)
+      : useCase.citation.url,
     author: {
       "@type": "Organization",
       name: useCase.author.name,
@@ -149,6 +157,63 @@ export default async function UseCasePage({ params }: RouteParams) {
             </a>
           </p>
         </section>
+
+        {useCase.redditEvidence && useCase.redditEvidence.length > 0 && (
+          <section className="mt-4 lg-card rounded-ios-3xl p-4 sm:rounded-ios-4xl sm:p-6">
+            <h2 className="text-ios-title3 font-semibold text-[rgba(0,0,0,0.85)]">Reddit 用户怎么描述这个问题</h2>
+            <p className="mt-2 text-ios-caption1 leading-relaxed text-[rgba(0,0,0,0.46)]">
+              以下是公开社区讨论的定性样本，不是搜索量统计，也不代表所有用户都能得到相同结果。
+            </p>
+            <div className="mt-4 grid gap-3">
+              {useCase.redditEvidence.map((evidence) => (
+                <article key={evidence.url} className="rounded-ios-2xl bg-[rgba(255,255,255,0.42)] p-3.5 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.70)]">
+                  <a href={evidence.url} target="_blank" rel="noopener noreferrer nofollow" className="text-ios-footnote font-semibold text-[#007AFF] underline-offset-2 hover:underline">
+                    {evidence.title}
+                  </a>
+                  <p className="mt-2 text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.62)]">{evidence.quote}</p>
+                  {(evidence.score !== undefined || evidence.comments !== undefined) && (
+                    <p className="mt-2 text-ios-caption2 text-[rgba(0,0,0,0.4)]">
+                      存档快照：{evidence.score !== undefined ? `${evidence.score} 分` : "未记录分数"}
+                      {evidence.comments !== undefined ? ` · ${evidence.comments} 条评论` : ""}
+                    </p>
+                  )}
+                </article>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {useCase.workflowSteps && useCase.workflowSteps.length > 0 && (
+          <section className="mt-4 lg-card rounded-ios-3xl p-4 sm:rounded-ios-4xl sm:p-6">
+            <h2 className="text-ios-title3 font-semibold text-[rgba(0,0,0,0.85)]">按这个顺序做</h2>
+            <ol className="mt-4 grid gap-3">
+              {useCase.workflowSteps.map((step, index) => (
+                <li key={step} className="flex gap-3 text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.62)]">
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[rgba(0,122,255,0.10)] text-ios-caption1 font-semibold text-[#007AFF]">{index + 1}</span>
+                  <span className="pt-0.5">{step}</span>
+                </li>
+              ))}
+            </ol>
+          </section>
+        )}
+
+        {useCase.fitBoundary && (
+          <section className="mt-4 rounded-ios-3xl border border-[rgba(255,149,0,0.20)] bg-[rgba(255,149,0,0.07)] p-4 sm:rounded-ios-4xl sm:p-6">
+            <h2 className="text-ios-title3 font-semibold text-[rgba(0,0,0,0.85)]">适用边界</h2>
+            <p className="mt-3 text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.62)]">{useCase.fitBoundary}</p>
+          </section>
+        )}
+
+        {useCase.searchVariants && useCase.searchVariants.length > 0 && (
+          <section className="mt-4 lg-card rounded-ios-3xl p-4 sm:rounded-ios-4xl sm:p-6">
+            <h2 className="text-ios-title3 font-semibold text-[rgba(0,0,0,0.85)]">相关搜索表达</h2>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {useCase.searchVariants.map((variant) => (
+                <span key={variant} className="rounded-full bg-[rgba(0,122,255,0.08)] px-3 py-1.5 text-ios-caption1 text-[rgba(0,0,0,0.62)]">{variant}</span>
+              ))}
+            </div>
+          </section>
+        )}
 
         <section className="mt-4 lg-card rounded-ios-3xl p-4 sm:rounded-ios-4xl sm:p-6">
           <h2 className="text-ios-title3 font-semibold text-[rgba(0,0,0,0.85)]">可以直接抄的提示词</h2>

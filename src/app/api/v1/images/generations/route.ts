@@ -11,7 +11,7 @@ import { generateBizImage, resolveBizEndpoints } from "@/lib/biz-image-pipeline"
 import { refundImageQuota, reserveImageQuota } from "@/lib/image-billing";
 import { imageGenerationCoins, isSupportedImageModel, type ModelMode } from "@/lib/provider-config";
 import { ADOBE_FIREFLY_MODEL_ID } from "@/lib/provider-config";
-import { aspectRatioFromImageSize } from "@/lib/generation-model-catalog";
+import { aspectRatioFromImageSize, resolveGenerationModelId } from "@/lib/generation-model-catalog";
 import { normalizeControlNets, toPixaiControlNets, MAX_CONTROL_NETS } from "@/lib/pixai-controlnets";
 import { generationControlPlaneEnabled } from "@/lib/generation-core/database";
 import { submitGenerationCommand } from "@/lib/generation-core/command-service";
@@ -128,10 +128,12 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const modelId = typeof body.model === "string" && body.model ? body.model : "";
-  if (!modelId) {
+  const rawModelId = typeof body.model === "string" && body.model ? body.model : "";
+  if (!rawModelId) {
     return errorResponse(400, "缺少必填参数 model。", "invalid_request_error", "missing_model", traceId);
   }
+  // 宽容解析：显示名风格分隔符（`seedream 2.0`/`image 5 pro`）归一成连字符 id，同一模型不因写法被拒。
+  const modelId = resolveGenerationModelId(rawModelId) ?? rawModelId;
   if (!isSupportedImageModel(modelId)) {
     return errorResponse(
       400,

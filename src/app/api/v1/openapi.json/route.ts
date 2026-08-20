@@ -57,7 +57,7 @@ const SPEC = {
   },
   servers: [
     { url: `${getSiteUrlFromEnv()}/v1`, description: "Production" },
-    { url: "https://image.tinchak0207.xyz/v1", description: "Legacy" },
+    { url: "https://image.tinchak0207.xyz/v1", description: "Legacy (旧域名，仍可用)" },
   ],
   security: [bearerAuth],
   paths: {

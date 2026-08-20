@@ -243,8 +243,8 @@ test("/v1 对外路径通过重写指向 /api/v1，客户填的 Base URL 不带 
 
   // 文档里给客户的 Base URL 必须与重写规则一致
   const doc = read("docs/biz-api.md");
-  assert.match(doc, /https:\/\/image\.tinchak0207\.xyz\/v1/);
-  assert.doesNotMatch(doc, /image\.tinchak0207\.xyz\/api\/v1/, "对外文档不应暴露 /api/v1");
+  assert.match(doc, /https:\/\/eimu\.dev\/v1/);
+  assert.doesNotMatch(doc, /eimu\.dev\/api\/v1/, "对外文档不应暴露 /api/v1");
 });
 
 test("代理到控制面的端點必須同時覆蓋裸路徑與子路徑", () => {

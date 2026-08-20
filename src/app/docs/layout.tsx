@@ -4,7 +4,7 @@ import { DocsSidebar } from "./DocsSidebar";
 export const metadata: Metadata = {
   title: "文档中心 | Eimu",
   description:
-    "Eimu（image.tinchak0207.xyz）使用指南：CDK 兑换、B 端 OpenAI 兼容 API 文档、MCP 接入教学。",
+    "Eimu 使用指南：CDK 兑换、B 端 OpenAI 兼容 API 文档、MCP 接入教学。",
 };
 
 export default function DocsLayout({ children }: { children: React.ReactNode }) {

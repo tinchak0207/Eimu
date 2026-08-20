@@ -42,14 +42,29 @@ export interface NewApiImageResponse {
 const TOKEN_KEY = "napi_token";
 const USER_KEY  = "napi_user";
 
+/** 登录 cookie 的存活天数。比 localStorage 更持久：换浏览器/清缓存也能从 cookie 恢复。 */
+const AUTH_COOKIE_MAX_AGE_DAYS = 30;
+const AUTH_COOKIE_MAX_AGE_SEC = AUTH_COOKIE_MAX_AGE_DAYS * 24 * 60 * 60;
+
+function setCookieValue(name: string, value: string, maxAgeSec: number): void {
+  if (typeof document === "undefined") return;
+  document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=${maxAgeSec}; SameSite=Lax`;
+}
+
 export function getStoredToken(): string | null {
   if (typeof window === "undefined") return null;
-  return localStorage.getItem(TOKEN_KEY);
+  const local = localStorage.getItem(TOKEN_KEY);
+  if (local) return local;
+  // localStorage 被清 / 换浏览器仍带着 cookie → 从 cookie 恢复（固化）。
+  return getCookieValue(TOKEN_KEY);
 }
 
 export function setStoredToken(token: string, user: NewApiUser): void {
   localStorage.setItem(TOKEN_KEY, token);
   localStorage.setItem(USER_KEY, JSON.stringify(user));
+  // 同步写持久 cookie，作为 localStorage 被清理后的兜底。
+  setCookieValue(TOKEN_KEY, token, AUTH_COOKIE_MAX_AGE_SEC);
+  setCookieValue(USER_KEY, JSON.stringify(user), AUTH_COOKIE_MAX_AGE_SEC);
 }
 
 function getCookieValue(name: string): string | null {
@@ -89,7 +104,8 @@ export function clearStoredToken(): void {
 
 export function getStoredUser(): NewApiUser | null {
   if (typeof window === "undefined") return null;
-  const raw = localStorage.getItem(USER_KEY);
+  let raw = localStorage.getItem(USER_KEY);
+  if (!raw) raw = getCookieValue(USER_KEY); // cookie 固化兜底
   if (!raw) return null;
   try { return JSON.parse(raw) as NewApiUser; } catch { return null; }
 }

@@ -7,6 +7,7 @@ import {
   generationCoins,
   isSupportedVideoModel,
   normalizeGenerationConfig,
+  resolveGenerationModelId,
 } from "@/lib/generation-model-catalog";
 import { generationControlPlaneEnabled } from "@/lib/generation-core/database";
 import { submitGenerationCommand } from "@/lib/generation-core/command-service";
@@ -124,10 +125,12 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const modelId = typeof body.model === "string" && body.model ? body.model : "";
-  if (!modelId) {
+  const rawModelId = typeof body.model === "string" && body.model ? body.model : "";
+  if (!rawModelId) {
     return errorResponse(400, "缺少必填参数 model。", "invalid_request_error", "missing_model", traceId);
   }
+  // 宽容解析：`seedance 2.0`（显示名风格分隔符）归一成 `seedance-2.0`，同一模型不因写法被拒。
+  const modelId = resolveGenerationModelId(rawModelId) ?? rawModelId;
   if (!isSupportedVideoModel(modelId)) {
     return errorResponse(
       400,

@@ -14,7 +14,7 @@ test("docs home links into api and mcp sections with stable copy", () => {
   assert.match(source, /href: "\/docs\/mcp"/, "首页必须带 MCP 接入入口");
   assert.match(source, /API 文档/, "入口必须写清 API 文档");
   assert.match(source, /MCP 接入/, "入口必须写清 MCP 接入");
-  assert.match(source, /image\.tinchak0207\.xyz/, "必须提及站点");
+  assert.match(source, /eimu\.dev/, "必须提及站点");
   // CDK 兑换教学已下架：首页不再出现兑换引导，也不引用 redeem 锚点。
   assert.doesNotMatch(source, /CDK/, "CDK 兑换教学已移除");
   assert.doesNotMatch(source, /href="\/pricing#redeem"/, "兑换锚点已移除");
@@ -39,7 +39,7 @@ test("api docs renders live from the openapi spec instead of hand-written copies
   assert.match(apiPage, /\/api\/v1\/openapi\.json/, "必须 fetch 真实 openapi spec");
   assert.match(apiPage, /sk-biz-/, "必须说明 B 端密钥认证");
   assert.match(apiPage, /Authorization: Bearer/, "必须给出认证方式");
-  assert.match(apiPage, /image\.tinchak0207\.xyz\/v1/, "必须给出 base URL");
+  assert.match(apiPage, /eimu\.dev\/v1/, "必须给出 base URL");
 
   // docs 不得抄 openapi：端点信息必须来自 fetch 后遍历 spec.paths，不允许内联手写。
   assert.doesNotMatch(apiPage, /"\/images\/generations"/, "端点路径必须来自运行的 spec，不内联手写");

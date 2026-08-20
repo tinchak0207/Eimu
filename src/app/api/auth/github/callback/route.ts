@@ -37,7 +37,7 @@ async function fetchGithubProfile(accessToken: string) {
     headers: {
       Authorization: `Bearer ${accessToken}`,
       Accept: "application/vnd.github+json",
-      "User-Agent": "image.tinchak0207.xyz",
+      "User-Agent": "eimu.dev",
     },
     cache: "no-store",
   });

@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "系统状态 | Eimu",
-  description: "image.tinchak0207.xyz GPT Image 2 生成接口实时状态。",
+  description: "Eimu GPT Image 2 生成接口实时状态。",
 };
 
 async function getInitialStatus(): Promise<GatusEndpoint[]> {

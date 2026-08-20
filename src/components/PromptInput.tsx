@@ -639,6 +639,10 @@ export function PromptInput({
         <div
           className={cn(
             "dust-transition",
+            // 工作站面板态：模式控件区必须加入 flex 链（flex + min-h-0），
+            // 否则 agent 聊天区的 flex-1 没有 flex 父容器会失效，
+            // transcript 被内容撑高、composer 被推出面板外裁掉。
+            fillAvailableHeight && "flex min-h-0 flex-1 flex-col",
             animState === "exit" && "dust-exit",
             animState === "enter" && "dust-enter",
           )}

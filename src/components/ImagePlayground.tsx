@@ -603,6 +603,8 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
               left: 0.75rem;
               display: flex;
               flex-direction: column;
+              min-height: 0;
+              max-height: calc(100dvh - 1.5rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
               max-width: calc(100vw - 1.5rem);
               border-radius: 22px;
               background: rgba(255, 255, 255, 0.78);
@@ -632,7 +634,15 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
               overflow-y: hidden;
             }
             .canvas-chat-scroll-fill > * { min-height: 0; }
-            .canvas-chat-scroll-fill > section.lg-card { flex: 1 1 0%; }
+            .canvas-chat-scroll-fill > section.lg-card {
+              flex: 1 1 0%;
+              /* 防御：卡片内部（agent 面）超高时也不许把 section 撑高，
+                 滚动一律收进 transcript；否则 composer 会被推出面板外。 */
+              min-height: 0;
+              overflow: hidden;
+            }
+            .canvas-chat-scroll-fill > :not(section.lg-card) { flex-shrink: 0; }
+            .agent-composer-anchor { flex-shrink: 0; }
             /* 卡中卡拍扁：面板已是玻璃面，內層卡片交出自己的底/影/框，內容直接坐在玻璃上。 */
             .canvas-chat-scroll > .lg-card {
               background: transparent;
@@ -759,7 +769,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
                       </>
                     )}
                   </div>
-                  <div className={inCanvasWorkstation ? "canvas-chat-scroll canvas-chat-scroll-fill space-y-3" : "space-y-3"}>
+                  <div className={inCanvasWorkstation ? cn("canvas-chat-scroll min-w-0 flex-1 space-y-3", chatPanelState === "expanded" && "canvas-chat-scroll-fill") : "space-y-3"}>
                   {/* D-12：助理改过的项在这里显形，可逐项撤销，也可一键恢复原设定。
                       不显示「原值 → 现值」的箭头对照：控件上已经是现值，
                       再画一遍只是噪音；使用者要的是「这项被动过」和「还我」。 */}

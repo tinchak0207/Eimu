@@ -11,7 +11,7 @@ export const metadata = {
   openGraph: {
     title: PRICING_TITLE,
     description: PRICING_DESCRIPTION,
-    url: "https://image.tinchak0207.xyz/pricing",
+    url: "https://eimu.dev/pricing",
   },
   twitter: {
     card: "summary_large_image",

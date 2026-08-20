@@ -30,7 +30,7 @@ const MCP_SOURCE = `  "mcpServers": {
       "command": "node",
       "args": ["/absolute/path/to/github-image-json-new-api-https/mcp-server/dist/index.js"],
       "env": {
-        "IMAGE_STUDIO_API_BASE": "https://image.tinchak0207.xyz/api/v1",
+        "IMAGE_STUDIO_API_BASE": "https://eimu.dev/api/v1",
         "IMAGE_STUDIO_BIZ_KEY": "sk-biz-你的密钥"
       }
     }
@@ -42,12 +42,12 @@ npm install
 npm run build`;
 
 const VERIFY_CURL = `# 用密钥验证连通性（也适用于直接 REST 调用）
-curl https://image.tinchak0207.xyz/v1/models \\
+curl https://eimu.dev/v1/models \\
   -H "Authorization: Bearer sk-biz-你的密钥"`;
 
 const MCP_TITLE = "MCP 接入 | 文档中心 | Eimu";
 const MCP_DESCRIPTION =
-  "把Eimu（image.tinchak0207.xyz）接入 Claude / Codex / Cursor 等 MCP 客户端：安装、配置、可用工具。";
+  "把Eimu接入 Claude / Codex / Cursor 等 MCP 客户端：安装、配置、可用工具。";
 
 export const metadata = {
   title: MCP_TITLE,
@@ -55,7 +55,7 @@ export const metadata = {
   openGraph: {
     title: MCP_TITLE,
     description: MCP_DESCRIPTION,
-    url: "https://image.tinchak0207.xyz/docs/mcp",
+    url: "https://eimu.dev/docs/mcp",
   },
   twitter: {
     card: "summary_large_image",

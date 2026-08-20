@@ -30,7 +30,7 @@ export const CANVAS_INITIAL_STATE: CanvasReducerState = {
 };
 
 /** 節點加入時自動排版的間距與起點。 */
-const LAYOUT_GAP_X = 96;
+const LAYOUT_GAP_X = 60;
 const LAYOUT_GAP_Y = 40;
 const LAYOUT_START = { x: 40, y: 40 };
 
@@ -50,6 +50,12 @@ const LAYOUT_START = { x: 40, y: 40 };
 function layoutGraph(state: CanvasReducerState): CanvasReducerState {
   const { nodes, connections } = state;
   if (nodes.length === 0) return state;
+  if (connections.length === 0) {
+    return {
+      ...state,
+      nodes: nodes.map((node, index) => node.moved ? node : { ...node, position: nextPosition(nodes.slice(0, index)) }),
+    };
+  }
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const depth = new Map<string, number>();
   for (const n of nodes) depth.set(n.id, 0);

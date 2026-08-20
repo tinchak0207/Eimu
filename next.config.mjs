@@ -56,7 +56,7 @@ const nextConfig = {
     return {
       beforeFiles: controlPlaneRewrites,
       afterFiles: [
-      // B 端的 Base URL 对外是 `https://image.tinchak0207.xyz/v1`，
+      // B 端的 Base URL 对外是 `https://eimu.dev/v1`，
       // OpenAI SDK 会在其后拼上 `/images/generations`，而路由实际住在 /api/v1 下。
       // 用重写而不是让客户填 `/api/v1`：Base URL 里带 `/api` 不像正经 API 服务，
       // 而且日后把 /v1 挪到独立子域或独立服务时，客户端不用改配置。

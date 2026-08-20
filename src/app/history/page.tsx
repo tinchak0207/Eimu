@@ -10,7 +10,7 @@ export const metadata = {
   openGraph: {
     title: HISTORY_TITLE,
     description: HISTORY_DESCRIPTION,
-    url: "https://image.tinchak0207.xyz/history",
+    url: "https://eimu.dev/history",
   },
   twitter: {
     card: "summary_large_image",

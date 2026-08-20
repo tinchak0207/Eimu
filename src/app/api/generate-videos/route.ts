@@ -19,6 +19,7 @@ import {
   generationCoins,
   isSupportedVideoModel,
   modelSupportsAudio,
+  resolveGenerationModelId,
   resolveSupportedAspectRatio,
   resolveSupportedDuration,
   resolveSupportedResolution,
@@ -177,7 +178,8 @@ export async function POST(req: NextRequest) {
   const startedAt = Date.now();
   const parsed = await readVideoRequest(req);
   const prompt = parsed.prompt.trim();
-  const modelId = parsed.modelId.trim();
+  // 宽容解析：`seedance 2.0`（显示名风格分隔符）归一成 `seedance-2.0`，同一模型不因写法被拒。
+  const modelId = resolveGenerationModelId(parsed.modelId.trim()) ?? parsed.modelId.trim();
   if (!prompt || !isSupportedVideoModel(modelId)) {
     return NextResponse.json({ error: "Invalid video generation parameters." }, { status: 400 });
   }

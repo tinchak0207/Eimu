@@ -17,7 +17,7 @@ import { buildWechatUsername } from "@/lib/wechat-identity";
 export const preferredRegion = "sfo1";
 
 /**
- * 測試號/訂閱號接口配置 URL：https://image.tinchak0207.xyz/api/auth/wechat/msg
+ * 測試號/訂閱號接口配置 URL：https://eimu.dev/api/auth/wechat/msg
  * GET：微信伺服器驗證（回 echostr）。
  * POST：被動回覆在部分場景不被微信接受（體感「不說話/暫時無法提供服務」），
  * 此處一律回 200 空；兌換結果與所有提示改走**客服消息接口**主動推送

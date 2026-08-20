@@ -194,22 +194,36 @@ export async function POST(req: NextRequest) {
   const modelId = cleanString(parsed.body.modelId) ?? "";
   if (!prompt || prompt.length > MAX_PROMPT_LENGTH) return fail(400, "画面描述为空或过长。", "invalid_prompt");
   const capabilities = generationCapabilities(modelId);
-  if (!capabilities) return fail(400, "所选模型不可用。", "model_not_found");
+  const dreaminaImageModel = modelId === "image-5-pro" || modelId === "image-5-lite" || modelId === "seedream-2.0";
+  if (!capabilities && !dreaminaImageModel) return fail(400, "所选模型不可用。", "model_not_found");
 
   const rawLora = Array.isArray(parsed.body.loraModelVersionIds) ? parsed.body.loraModelVersionIds.map(String) : [];
   const rawDuration = parsed.body.durationSeconds;
   const rawAudio = parsed.body.generateAudio;
-  const normalized = normalizeGenerationConfig(modelId, {
-    aspectRatio: cleanString(parsed.body.aspectRatio),
-    outputResolution: cleanString(parsed.body.outputResolution),
-    durationSeconds: rawDuration === undefined || rawDuration === null || rawDuration === "" ? undefined : Number(rawDuration),
-    generateAudio: rawAudio === undefined || rawAudio === null || rawAudio === "" ? undefined : rawAudio === true || rawAudio === "true",
-    qualityMode: cleanString(parsed.body.qualityMode),
-    referenceCount: parsed.files.length,
-    loraModelVersionIds: rawLora,
-  });
-  if (parsed.files.length && !capabilities.referenceImages) return fail(400, "所选模型不支持参考图。", "reference_images_unsupported");
-  if (rawLora.length && !capabilities.lora) return fail(400, "所选模型不支持 LoRA。", "lora_unsupported");
+  const normalized = capabilities
+    ? normalizeGenerationConfig(modelId, {
+        aspectRatio: cleanString(parsed.body.aspectRatio),
+        outputResolution: cleanString(parsed.body.outputResolution),
+        durationSeconds: rawDuration === undefined || rawDuration === null || rawDuration === "" ? undefined : Number(rawDuration),
+        generateAudio: rawAudio === undefined || rawAudio === null || rawAudio === "" ? undefined : rawAudio === true || rawAudio === "true",
+        qualityMode: cleanString(parsed.body.qualityMode),
+        referenceCount: parsed.files.length,
+        loraModelVersionIds: rawLora,
+      })
+    : {
+        config: {
+          modelId,
+          mediaType: "image" as const,
+          aspectRatio: "1:1" as const,
+          outputResolution: "1k" as const,
+          qualityMode: "fast" as const,
+          referenceCount: parsed.files.length,
+          loraModelVersionIds: [],
+        },
+        clearedFields: [],
+      };
+  if (parsed.files.length && capabilities?.referenceImages === false) return fail(400, "所选模型不支持参考图。", "reference_images_unsupported");
+  if (rawLora.length && capabilities?.lora !== true) return fail(400, "所选模型不支持 LoRA。", "lora_unsupported");
 
   // 管理員改價需立即對扣費生效：算價前先把最新定價覆寫同步進目錄（核心層內部吞錯，失敗不擋生成）。
   await syncModelPricing();
