@@ -52,7 +52,10 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
   const prompt = decryptGenerationPrompt(job.promptCiphertext);
   let completed = job.completedCount;
   const heartbeat = setInterval(() => {
-    void heartbeatGenerationJob(job.id, workerId, options.jobLeaseMs, sql);
+    // 心跳失敗只是暫時寫不進 DB，租約到期會自然回收，不值得殺整個進程。
+    void heartbeatGenerationJob(job.id, workerId, options.jobLeaseMs, sql).catch((error) => {
+      console.error(`[generation-worker] 心跳寫入失敗（非致命） job=${job.id}`, error);
+    });
   }, Math.max(1_000, Math.floor(options.jobLeaseMs / 3)));
 
   try {
@@ -91,7 +94,10 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
         return;
       }
       const supplierHeartbeat = setInterval(() => {
-        void heartbeatSupplierLease(supplierLease.id, workerId, options.supplierLeaseMs, sql);
+        // 心跳失敗只是暫時寫不進 DB，租約到期會自然回收，不值得殺整個進程。
+        void heartbeatSupplierLease(supplierLease.id, workerId, options.supplierLeaseMs, sql).catch((error) => {
+          console.error(`[generation-worker] 供應商租約心跳失敗（非致命） lease=${supplierLease.id}`, error);
+        });
       }, Math.max(1_000, Math.floor(options.supplierLeaseMs / 3)));
       const startedAt = Date.now();
       let attemptId: string | null = null;
@@ -215,14 +221,20 @@ export async function runGenerationWorker(options: GenerationWorkerOptions = {})
   let lastMaintenance = 0;
   const billingExecutorId = `billing:${process.env.HOSTNAME ?? "local"}:${process.pid}`;
   while (!stopping) {
-    const now = Date.now();
-    if (now - lastMaintenance > 30_000) {
-      await recoverExpiredGenerationLeases(sql);
-      await reconcileGenerationBilling({ executorId: billingExecutorId, sql });
-      await refreshAdobeSupplierHealth(sql);
-      lastMaintenance = now;
+    try {
+      const now = Date.now();
+      if (now - lastMaintenance > 30_000) {
+        await recoverExpiredGenerationLeases(sql);
+        await reconcileGenerationBilling({ executorId: billingExecutorId, sql });
+        await refreshAdobeSupplierHealth(sql);
+        lastMaintenance = now;
+      }
+      const processed = await runGenerationWorkerOnce({ ...options, sql });
+      if (!processed) await new Promise((resolve) => setTimeout(resolve, pollMs));
+    } catch (error) {
+      // 迭代失敗（暫時性，繼續輪詢）
+      console.error("[generation-worker] 迭代失敗（暫時性，繼續輪詢）", error);
+      await new Promise((resolve) => setTimeout(resolve, pollMs));
     }
-    const processed = await runGenerationWorkerOnce({ ...options, sql });
-    if (!processed) await new Promise((resolve) => setTimeout(resolve, pollMs));
   }
 }
