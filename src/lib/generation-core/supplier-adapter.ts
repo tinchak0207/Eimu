@@ -121,7 +121,8 @@ async function requestSupplier(supplier: SupplierRecord, input: SupplierGenerati
       method: "POST",
       headers,
       body,
-      signal: AbortSignal.timeout(Number(process.env.GENERATION_SUPPLIER_TIMEOUT_MS ?? 100_000)),
+      // 影片生成實測遠長於圖片（kling 8s 片 2-6 分鐘）；單一 100s 預設會讓影片永遠超時。
+      signal: AbortSignal.timeout(Number(process.env.GENERATION_SUPPLIER_TIMEOUT_MS ?? (input.kind === "video_generate" ? 600_000 : 100_000))),
     });
   } catch (error) {
     if (error instanceof Error && error.name === "TimeoutError") throw new SupplierRequestError("Supplier request timed out.", 408);

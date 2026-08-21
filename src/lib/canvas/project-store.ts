@@ -64,6 +64,10 @@ function normalizeProject(payload: unknown): CanvasProject | null {
     viewport: p.viewport ?? { x: 0, y: 0, k: 1 },
     backgroundMode: p.backgroundMode === "blank" || p.backgroundMode === "lines" ? p.backgroundMode : "dots",
     ...(p.budget ? { budget: p.budget } : {}),
+    // P2：鎖定的角色/場景卡 id（清洗 + 去重 + 上限 100）。
+    ...(Array.isArray(p.cardIds)
+      ? { cardIds: [...new Set(p.cardIds.filter((id): id is string => typeof id === "string" && id.length > 0))].slice(0, 100) }
+      : {}),
   };
 }
 

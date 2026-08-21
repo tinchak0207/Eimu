@@ -29,6 +29,13 @@ const nextConfig = {
         // Vercel remains the public web edge while durable work runs beside its
         // PostgreSQL database and worker on the VPS.
         { source: "/v1/:path*", destination: `${controlPlaneOrigin}/image-control/v1/:path*` },
+        // /api/v1/* 與 /v1/* 是同一套 B 端 API 的兩個入口（afterFiles 把 /v1 視為
+        // /api/v1 的別名）。若不在 beforeFiles 一併代理，直打 /api/v1 的請求會落在
+        // Vercel 本地 route——而 Vercel 按 设计不持有 GENERATION_DATABASE_URL，
+        // getGenerationJobForTenant 首次觸庫即拋錯 → 任何任務 ID 都 500（2026-08-21
+        // 實測：成功任務、不存在任務全部 500）。控制面在 /image-control/api/v1/*
+        // 前綴下可達（已驗證 200），代理後兩個入口語義一致。
+        { source: "/api/v1/:path*", destination: `${controlPlaneOrigin}/image-control/api/v1/:path*` },
         { source: "/api/generate-images", destination: `${controlPlaneOrigin}/image-control/api/generate-images` },
         // 裸路徑要單獨列一條。Next 的 `/:path*` 不匹配「後面完全沒有一段」的
         // `/api/generation-jobs`，而前端提交新任務打的正是這個裸路徑（帶 :path*

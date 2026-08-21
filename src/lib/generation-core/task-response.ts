@@ -10,6 +10,16 @@ export function taskStatus(job: GenerationJob): "queued" | "running" | "succeede
   return "failed";
 }
 
+/**
+ * job kind → 對外 REST 路徑段。圖像走 /v1/images、影片走 /v1/videos、
+ * AV 成片鏈路（配音/數字人/唇形）各走自己的資源名。
+ */
+export function taskResourcePath(kind: GenerationJob["kind"]): "images" | "videos" | "tts" | "avatar" | "lipsync" {
+  if (kind === "video_generate") return "videos";
+  if (kind === "tts" || kind === "avatar" || kind === "lipsync") return kind;
+  return "images";
+}
+
 export function generationTaskResponse(job: GenerationJob) {
   const status = taskStatus(job);
   return {
@@ -24,7 +34,7 @@ export function generationTaskResponse(job: GenerationJob) {
     primary_result_id: job.primaryResultId ?? job.result?.artifacts[0]?.id ?? null,
     result_ids: job.result?.artifacts.map((artifact) => artifact.id) ?? [],
     retry_of_task_id: job.retryOfTaskId,
-    task_url: `/v1/${job.kind === "video_generate" ? "videos" : "images"}/${job.id}`,
+    task_url: `/v1/${taskResourcePath(job.kind)}/${job.id}`,
     request_config: {
       model: job.modelId,
       ...(job.size ? { size: job.size } : {}),
@@ -35,7 +45,7 @@ export function generationTaskResponse(job: GenerationJob) {
         ? { prompt: ((job.workflow as { prompt?: string }).prompt ?? "").slice(0, 500) }
         : {}),
     },
-    ...(status === "succeeded" ? { result_url: `/v1/${job.kind === "video_generate" ? "videos" : "images"}/${job.id}/result`, data: job.result?.artifacts ?? [] } : {}),
+    ...(status === "succeeded" ? { result_url: `/v1/${taskResourcePath(job.kind)}/${job.id}/result`, data: job.result?.artifacts ?? [] } : {}),
     ...(job.failureClass ? { error: failureError(job) } : {}),
   };
 }

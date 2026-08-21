@@ -18,7 +18,7 @@ interface ImageDisplayProps {
   image: string | null | undefined;
   imageUrl?: string | null | undefined;
   videoUrl?: string | null | undefined;
-  mediaType?: "image" | "video";
+  mediaType?: "image" | "video" | "audio";
   timing?: ProviderTiming;
   failed?: boolean;
   fallbackIcon?: React.ReactNode;

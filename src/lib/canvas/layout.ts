@@ -9,6 +9,7 @@
 // reducer 外再寫一套排版）。這裡只補「尺寸」與「型別」這種契約缺口。
 
 import type { AgentSseEvent } from "@/lib/agent-chat-types";
+import { isReferenceImageRole } from "@/lib/image-types";
 import type { CanvasReducerState } from "./reducer";
 import {
   CANVAS_NODE_DEFAULT_SIZE,
@@ -106,6 +107,8 @@ export function toNodeMetadata(raw: unknown): CanvasNodeMetadata {
     ...(str(m.imageTaskId) !== undefined ? { imageTaskId: str(m.imageTaskId) } : {}),
     ...(num(m.startedAt) !== undefined ? { startedAt: num(m.startedAt) } : {}),
     ...(num(m.progress) !== undefined ? { progress: num(m.progress) } : {}),
+    // reference 節點角色：只收合法 ReferenceImageRole，未知值丟棄（收斂在讀取端做）。
+    ...(isReferenceImageRole(m.referenceRole) ? { referenceRole: m.referenceRole } : {}),
   };
 }
 
@@ -452,6 +455,7 @@ export function toCanvasProject(
   viewport: CanvasViewport,
   backgroundMode: "dots" | "lines" | "blank",
   budget?: { totalCoins: number; usedCoins: number },
+  cardIds?: string[],
 ): CanvasProject {
   const now = new Date().toISOString();
   return {
@@ -464,6 +468,7 @@ export function toCanvasProject(
     viewport,
     backgroundMode,
     ...(budget ? { budget } : {}),
+    ...(cardIds && cardIds.length > 0 ? { cardIds } : {}),
   };
 }
 

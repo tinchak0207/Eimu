@@ -46,11 +46,14 @@ import {
   SUPPORTED_GENERATION_MODEL_IDS,
   SUPPORTED_IMAGE_MODEL_IDS,
   SUPPORTED_VIDEO_MODEL_IDS,
+  TTS_1_MODEL_ID,
+  AVATAR_1_MODEL_ID,
+  LIPSYNC_1_MODEL_ID,
   VEO_31_FAST_MODEL_ID,
   VEO_31_MODEL_ID,
 } from "./image-model-ids.js";
 
-export type MediaKind = "image" | "video";
+export type MediaKind = "image" | "video" | "audio";
 export type AspectRatio =
   | "1:1"
   | "1:8"
@@ -90,6 +93,8 @@ export interface GenerationModelDefinition {
   popularity: number;
   /** 模型所屬廠商/平台，模型選單的一級目錄按此分組。 */
   vendor: string;
+  /** AV 成片鏈路的提交端點與能力探測路由鍵（tts/avatar/lipsync）；一般模型無此欄位。 */
+  pipeline?: "tts" | "avatar" | "lipsync";
   promotionTag?: string;
   aspectRatios: readonly AspectRatio[];
   resolutions: readonly OutputResolution[];
@@ -777,6 +782,52 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     videoCreditsPerSecond: { "1080p": 15 },
     referenceImages: true,
   },
+
+  // ── AV 成片鏈路（B 端專用）：配音 TTS / 數字人口播 / 唇形。不入 SUPPORTED_* 列表，
+  // C 端選單看不到；上游供應商全部由 DB supplier 行驅動（minimax / did 適配器）。
+  // fixedCoins 預設 0 = 試運行價；正式上線前必須由 admin 定價覆寫（覆寫禁止 0）。
+  [TTS_1_MODEL_ID]: {
+    id: TTS_1_MODEL_ID,
+    displayName: "TTS 1",
+    kind: "audio",
+    pipeline: "tts",
+    popularity: 40,
+    vendor: "MiniMax",
+    aspectRatios: [],
+    resolutions: [],
+    defaultAspectRatio: "1:1",
+    defaultResolution: "1k",
+    fixedCoins: 0,
+    referenceImages: false,
+  },
+  [AVATAR_1_MODEL_ID]: {
+    id: AVATAR_1_MODEL_ID,
+    displayName: "Avatar 1",
+    kind: "video",
+    pipeline: "avatar",
+    popularity: 40,
+    vendor: "D-ID",
+    aspectRatios: VIDEO_RATIOS,
+    resolutions: [],
+    defaultAspectRatio: "16:9",
+    defaultResolution: "1080p",
+    fixedCoins: 0,
+    referenceImages: true,
+  },
+  [LIPSYNC_1_MODEL_ID]: {
+    id: LIPSYNC_1_MODEL_ID,
+    displayName: "Lipsync 1",
+    kind: "video",
+    pipeline: "lipsync",
+    popularity: 40,
+    vendor: "D-ID",
+    aspectRatios: VIDEO_RATIOS,
+    resolutions: [],
+    defaultAspectRatio: "16:9",
+    defaultResolution: "1080p",
+    fixedCoins: 0,
+    referenceImages: true,
+  },
 };
 
 export const IMAGE_MODEL_IDS = SUPPORTED_IMAGE_MODEL_IDS as readonly string[];
@@ -1065,6 +1116,18 @@ export function isSupportedImageModel(modelId: string): boolean {
 
 export function isSupportedVideoModel(modelId: string): boolean {
   return generationModel(modelId)?.kind === "video";
+}
+
+/** AV 成片鏈路的管道種類（提交端點與能力探測的路由鍵）。 */
+export type AvPipelineKind = "tts" | "avatar" | "lipsync";
+
+/** 模型所屬的 AV 管道；非 AV 模型回 null。 */
+export function generationPipeline(modelId: string): AvPipelineKind | null {
+  return generationModel(modelId)?.pipeline ?? null;
+}
+
+export function isSupportedAvModel(modelId: string): boolean {
+  return generationPipeline(modelId) !== null;
 }
 
 export function modelBaseName(modelId: string): string {

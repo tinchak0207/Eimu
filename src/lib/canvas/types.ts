@@ -1,11 +1,16 @@
 // 畫布指揮臺：資料結構與 SSE 事件契約。
 //
+// 角色 owner：reference 節點的 referenceRole 直接引用 image-types 的
+// ReferenceImageRole（type-only import），不建第二套枚舉。
+//
 // 架構（暴君立場定稿 2026-08-12）：
 //   deepseek（opencode agent）不思考畫布的事。它只提交 image_* 生成請求。
 //   VPS gateway 攔截每個 image_* 工具的參數與結果，自動產生「畫布單元」，
 //   並以 canvas.* 事件推送到前端。前端 reducer 接住事件自動渲染畫布。
 //
 // 本檔案 = 前端與後端共用的契約。任何改動必須同步兩端。
+
+import type { ReferenceImageRole } from "../image-types";
 
 export type CanvasPosition = { x: number; y: number };
 
@@ -21,6 +26,10 @@ export enum CanvasNodeType {
   CharacterCard = "character_card",
   SceneCard = "scene_card",
   Audio = "audio",
+  /** 提示詞備忘節點：可直編文本，連到生成節點時文本注入為 prompt 前綴。 */
+  Prompt = "prompt",
+  /** 帶角色的參考圖節點：復用 ReferenceImageRole，連到生成節點時自動帶圖+角色。 */
+  Reference = "reference",
 }
 
 export type CanvasNodeStatus = "idle" | "success" | "loading" | "error";
@@ -64,6 +73,8 @@ export interface CanvasNodeMetadata {
   bytes?: number;
   /** 文本節點字號（px）；未設取 14.5。 */
   fontSize?: number;
+  /** reference 節點的參考圖角色（復用 ReferenceImageRole，不另立枚舉）。 */
+  referenceRole?: ReferenceImageRole;
 }
 
 export interface CanvasNode {
@@ -197,6 +208,8 @@ export interface CanvasProject {
   viewport: CanvasViewport;
   backgroundMode: "dots" | "lines" | "blank";
   budget?: { totalCoins: number; usedCoins: number };
+  /** P2 跨鏡頭一致性：鎖定到本畫布的角色/場景卡 id（CharacterCard.id）。 */
+  cardIds?: string[];
 }
 
 // ─────────────────────────────────────────── 節點預設尺寸
@@ -210,6 +223,8 @@ export const CANVAS_NODE_DEFAULT_SIZE: Record<CanvasNodeType, { width: number; h
   [CanvasNodeType.CharacterCard]: { width: 340, height: 280, title: "角色卡" },
   [CanvasNodeType.SceneCard]: { width: 340, height: 280, title: "场景卡" },
   [CanvasNodeType.Audio]: { width: 340, height: 240, title: "音频" },
+  [CanvasNodeType.Prompt]: { width: 340, height: 200, title: "提示词" },
+  [CanvasNodeType.Reference]: { width: 300, height: 260, title: "参考图" },
 };
 
 // ─────────────────────────────────────────── 批次 & 資源參考

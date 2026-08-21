@@ -25,7 +25,7 @@ import type { EnvLike } from "./sub2api";
 
 export type ModelAvailability = "available" | "unavailable" | "unknown";
 export type ModelFunction = "generate" | "edit" | "upscale";
-export type ModelMediaType = "image" | "video";
+export type ModelMediaType = "image" | "video" | "audio";
 export type GenerationEndpoint = "/v1/images/generations" | "/v1/videos/generations";
 
 export interface ProbeEndpointInput {
@@ -64,6 +64,7 @@ export interface ModelStatusSummary {
   by_media_type: {
     image: { total: number; available: number };
     video: { total: number; available: number };
+    audio: { total: number; available: number };
   };
 }
 
@@ -193,6 +194,7 @@ function computeSummary(models: ModelStatusEntry[]): ModelStatusSummary {
   const byMediaType: ModelStatusSummary["by_media_type"] = {
     image: { total: 0, available: 0 },
     video: { total: 0, available: 0 },
+    audio: { total: 0, available: 0 },
   };
   let available = 0;
   let unavailable = 0;

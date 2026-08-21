@@ -57,6 +57,7 @@ export async function PUT(req: NextRequest) {
       viewport: body.viewport ?? { x: 0, y: 0, k: 1 },
       backgroundMode: body.backgroundMode === "blank" || body.backgroundMode === "lines" ? body.backgroundMode : "dots",
       ...(body.budget ? { budget: body.budget } : {}),
+      ...(Array.isArray(body.cardIds) ? { cardIds: body.cardIds } : {}),
     });
     return NextResponse.json({ success: true }, { status: 200 });
   } catch (error) {

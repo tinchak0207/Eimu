@@ -21,6 +21,16 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import type { UseCanvasChatReturn } from "@/hooks/use-canvas-chat";
 import { CanvasNodeType, type CanvasConnection, type CanvasNode, type CanvasPosition } from "@/lib/canvas/types";
+import {
+  composeGenerationPrompt,
+  mergeGenerationReferences,
+  resolveGenerationInputs,
+  type CanvasGenerationReference,
+} from "@/lib/canvas/semantic-nodes";
+import { toReferenceImageRole } from "@/lib/image-types";
+import type { ReferenceImageRole } from "@/lib/image-types";
+import { applyCharacterCardsToPayload } from "@/lib/character-cards";
+import type { CardAwareGeneratePayload, CharacterCard, CharacterCardKind } from "@/lib/character-cards";
 import { bezierPath } from "@/lib/canvas/layout";
 import { createBatchChildNode } from "@/lib/canvas/batch-utils";
 import {
@@ -101,11 +111,11 @@ function usePrefersReducedMotion(): boolean {
   return reduced;
 }
 
-/** 節點的可下載/可編輯圖片 URL（僅 http(s)/data:）。 */
+/** 節點的可下載/可編輯圖片 URL（僅 http(s)/data:）；image 與 reference 節點。 */
 function imageUrlOf(node: CanvasNode | undefined): string | null {
   const content = node?.metadata?.content;
   if (!content) return null;
-  if (node?.type !== CanvasNodeType.Image) return null;
+  if (node?.type !== CanvasNodeType.Image && node?.type !== CanvasNodeType.Reference) return null;
   return content.startsWith("http") || content.startsWith("data:") ? content : null;
 }
 
@@ -228,6 +238,8 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
   const [helpOpen, setHelpOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [elementListOpen, setElementListOpen] = useState(false);
+  // P2：角色/場景卡面板（左側彈出，與歷史畫布/節點清單同模式）。
+  const [cardsOpen, setCardsOpen] = useState(false);
   const [agentAutoApprove, setAgentAutoApprove] = useState(false);
   const clipboardRef = useRef<{ nodes: CanvasNode[]; connections: CanvasConnection[] } | null>(null);
   const pasteCountRef = useRef(0);
@@ -431,12 +443,19 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
     canvasStateRef.current.selectNode(nodeId);
   }, []);
 
-  /** A2：乾淨點擊 → 開節點面板（修飾鍵/連線模式/Group 除外）。 */
+  /** A2：乾淨點擊 → 開節點面板（修飾鍵/連線模式/Group/Prompt 除外——
+   *  prompt 節點是備忘卡不是生成落地位，雙擊正文直編即可，不開生成面板）。 */
   const handleNodeClick = useCallback((nodeId: string) => {
     if (modifiersRef.current.ctrl || modifiersRef.current.shift) return;
     if (connectingRef.current || portDragRef.current) return;
     const node = canvasStateRef.current.nodes.find((n) => n.id === nodeId);
-    if (!node || node.type === CanvasNodeType.Group || node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio) return;
+    if (
+      !node ||
+      node.type === CanvasNodeType.Group ||
+      node.type === CanvasNodeType.Video ||
+      node.type === CanvasNodeType.Audio ||
+      node.type === CanvasNodeType.Prompt
+    ) return;
     setPromptPanelNodeId(nodeId);
   }, []);
 
@@ -596,14 +615,21 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
   );
 
   // ── 生成核心（A4 原地回填 / 批次子節點 / A12 重試 / 停止）
+  // P2 掛接點：鎖定的角色/場景卡在這裡注入——手動面板、agent run_generation、
+  // 編輯器派生全部經過 callCanvasGenerate，一處掛接保證項目級鎖定對所有
+  // 畫布生成生效（片段前綴 + 參考圖 + 負面詞；無卡時 payload 原樣通過）。
   const callCanvasGenerate = useCallback(
     async (payload: Record<string, unknown>, signal: AbortSignal) => {
       const headers = buildAuthHeaders();
       if (!headers) throw new Error("请先登录再生成图片");
+      const lockedCards = canvasStateRef.current.activeCharacterCards ?? [];
+      const finalPayload: Record<string, unknown> = lockedCards.length
+        ? applyCharacterCardsToPayload(payload as CardAwareGeneratePayload, lockedCards as CharacterCard[])
+        : payload;
       const res = await fetch(`/api/canvas/generate`, {
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(finalPayload),
         signal,
       });
       const data = (await res.json().catch(() => null)) as
@@ -617,16 +643,23 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
     [],
   );
 
-  /** 原地生成：結果回填該節點本體（A4 / A12 重試共用）。 */
+  /**
+   * 原地生成：結果回填該節點本體（A4 / A12 重試 / agent run_generation 共用）。
+   * 語義接線（2026-08-22）：連入的 prompt 節點文本自動作為 prompt 前綴、
+   * 連入的 reference 節點自動帶圖+角色進生成請求——手動 UI 與 agent 同一條路。
+   */
   const generateIntoNode = useCallback(
-    async (nodeId: string, params: { prompt: string; model?: string; size?: string; sourceImage?: string | null; referenceUrls?: string[] }) => {
+    async (nodeId: string, params: { prompt: string; model?: string; size?: string; sourceImage?: string | null; references?: CanvasGenerationReference[] }) => {
       const state = canvasStateRef.current;
       const controller = new AbortController();
       abortRef.current = controller;
       setIsGenerating(true);
+      const semantic = resolveGenerationInputs(state.nodes, state.connections, nodeId);
+      const finalPrompt = composeGenerationPrompt(semantic.promptParts, params.prompt);
+      const references = mergeGenerationReferences(params.references ?? [], semantic.references);
       state.patchNodeMetadata(nodeId, {
         status: "loading",
-        prompt: params.prompt,
+        prompt: finalPrompt,
         ...(params.model ? { model: params.model } : {}),
         ...(params.size ? { size: params.size } : {}),
         errorDetails: undefined,
@@ -634,12 +667,12 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
       try {
         const images = await callCanvasGenerate(
           {
-            prompt: params.prompt,
+            prompt: finalPrompt,
             model: params.model,
             size: params.size,
             count: 1,
             source_image: params.sourceImage ?? null,
-            reference_image_urls: params.referenceUrls ?? [],
+            reference_images: references.map(({ url, role, name }) => ({ url, role, name })),
           },
           controller.signal,
         );
@@ -677,16 +710,27 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
       const state = canvasStateRef.current;
       const node = state.nodes.find((n) => n.id === nodeId);
       if (!node) return;
-      const refUrls = panelRefIds
-        .map((id) => imageUrlOf(state.nodes.find((n) => n.id === id)))
-        .filter((u): u is string => !!u);
+      // @引用（顯式選取）+ 連入 reference 節點（自動帶入）→ 帶角色的參考圖清單。
+      const panelRefs: CanvasGenerationReference[] = panelRefIds
+        .map((id) => state.nodes.find((n) => n.id === id))
+        .filter((n): n is CanvasNode => !!n && !!imageUrlOf(n))
+        .map((n) => ({
+          nodeId: n.id,
+          url: imageUrlOf(n)!,
+          role: n.type === CanvasNodeType.Reference ? toReferenceImageRole(n.metadata?.referenceRole) : "general",
+          name: n.title || "参考图",
+        }));
+      const semantic = resolveGenerationInputs(state.nodes, state.connections, nodeId);
+      const references = mergeGenerationReferences(panelRefs, semantic.references);
+      const finalPrompt = composeGenerationPrompt(semantic.promptParts, prompt);
+      const refNodeIds = references.map((r) => r.nodeId).filter((id): id is string => !!id);
       const count = Math.min(Math.max(1, options.count ?? 1), 4);
       const sourceUrl = imageUrlOf(node);
 
       // A4：空圖片節點 + 單張 → 原地變身，不另建節點。
       if (node.type === CanvasNodeType.Image && !sourceUrl && count === 1) {
         setPromptPanelNodeId(null);
-        await generateIntoNode(nodeId, { prompt, model: options.model, size: options.size, referenceUrls: refUrls });
+        await generateIntoNode(nodeId, { prompt, model: options.model, size: options.size, references });
         setPanelRefIds([]);
         return;
       }
@@ -697,13 +741,13 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
       try {
         const images = await callCanvasGenerate(
           {
-            prompt,
+            prompt: finalPrompt,
             model: options.model,
             size: options.size,
             quality: options.quality,
             count,
             source_image: sourceUrl,
-            reference_image_urls: refUrls,
+            reference_images: references.map(({ url, role, name }) => ({ url, role, name })),
           },
           controller.signal,
         );
@@ -713,13 +757,13 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
           const child = createBatchChildNode(node, img.url, existing + i, existing + images.length, {
             id: `${nodeId}-b-${ts}-${i}`,
             metadata: {
-              prompt,
+              prompt: finalPrompt,
               model: options.model,
               size: options.size,
               ...(typeof img.cost_coins === "number" ? { cost_coins: img.cost_coins } : {}),
               ...(img.natural_width ? { naturalWidth: img.natural_width } : {}),
               ...(img.natural_height ? { naturalHeight: img.natural_height } : {}),
-              ...(panelRefIds.length > 0 ? { referenceNodeIds: [...panelRefIds] } : {}),
+              ...(refNodeIds.length > 0 ? { referenceNodeIds: [...refNodeIds] } : {}),
             },
           });
           state.addBatchChild(nodeId, child);
@@ -753,15 +797,22 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
         showError("该节点没有保存生成参数，无法重试");
         return;
       }
-      const refUrls = (node.metadata?.referenceNodeIds ?? [])
-        .map((id) => imageUrlOf(canvasStateRef.current.nodes.find((n) => n.id === id)))
-        .filter((u): u is string => !!u);
+      const references: CanvasGenerationReference[] = (node.metadata?.referenceNodeIds ?? [])
+        .map((id): CanvasGenerationReference | null => {
+          const refNode = canvasStateRef.current.nodes.find((n) => n.id === id);
+          const url = imageUrlOf(refNode);
+          if (!refNode || !url) return null;
+          const role: ReferenceImageRole =
+            refNode.type === CanvasNodeType.Reference ? toReferenceImageRole(refNode.metadata?.referenceRole) : "general";
+          return { nodeId: refNode.id, url, role, name: refNode.title || "参考图" };
+        })
+        .filter((r): r is CanvasGenerationReference => r !== null);
       void generateIntoNode(nodeId, {
         prompt,
         model: node.metadata?.model,
         size: node.metadata?.size,
         sourceImage: node.metadata?.source_image ?? null,
-        referenceUrls: refUrls,
+        references,
       });
     },
     [generateIntoNode, showError],
@@ -831,23 +882,37 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
 
   // ── 建節點（雙擊/連線拖放/庫插入/導入共用）
   const createNodeAt = useCallback(
-    (type: "text" | "image", world: CanvasPosition, extras?: { content?: string; title?: string; width?: number; height?: number }) => {
+    (
+      type: "text" | "image" | "prompt" | "reference",
+      world: CanvasPosition,
+      extras?: { content?: string; title?: string; width?: number; height?: number; referenceRole?: ReferenceImageRole },
+    ) => {
       const state = canvasStateRef.current;
       const id = `n-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
-      const isText = type === "text";
+      const nodeType =
+        type === "text"
+          ? CanvasNodeType.Text
+          : type === "prompt"
+            ? CanvasNodeType.Prompt
+            : type === "reference"
+              ? CanvasNodeType.Reference
+              : CanvasNodeType.Image;
+      const defaultTitle = type === "text" ? "文本" : type === "prompt" ? "提示词" : type === "reference" ? "参考图" : "图片";
+      const role = extras?.referenceRole;
       const node: CanvasNode = {
         id,
-        type: isText ? CanvasNodeType.Text : CanvasNodeType.Image,
-        title: extras?.title ?? (isText ? "文本" : "图片"),
+        type: nodeType,
+        title: extras?.title ?? defaultTitle,
         position: world,
-        width: extras?.width ?? 340,
-        height: extras?.height ?? 240,
+        width: extras?.width ?? (type === "reference" ? 300 : 340),
+        height: extras?.height ?? (type === "prompt" ? 200 : 240),
         moved: true,
-        metadata: isText
-          ? { content: extras?.content ?? "", status: "idle" }
-          : extras?.content
-            ? { content: extras.content, status: "success" }
-            : { status: "idle" },
+        metadata:
+          type === "text" || type === "prompt"
+            ? { content: extras?.content ?? "", status: "idle" }
+            : extras?.content
+              ? { content: extras.content, status: "success", ...(role ? { referenceRole: role } : {}) }
+              : { status: "idle", ...(role ? { referenceRole: role } : {}) },
       };
       state.addNodes([node]);
       setSelectedIds(new Set([id]));
@@ -857,21 +922,23 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
     [],
   );
 
-  /** 本地圖片檔 → 畫布節點（壓縮後 dataURL；多檔階梯錯位）。 */
+  /** 本地圖片檔 → 畫布節點（壓縮後 dataURL；多檔階梯錯位）。
+   *  kind="reference" → 建成帶角色的 reference 節點（默認 general，節點上可切換）。 */
   const importImageFiles = useCallback(
-    async (files: File[], world: CanvasPosition) => {
+    async (files: File[], world: CanvasPosition, kind: "image" | "reference" = "image") => {
       let index = 0;
       for (const file of files.slice(0, 8)) {
         if (!file.type.startsWith("image/")) continue;
         try {
           const { dataUrl, width, height } = await fileToDataUrl(file);
-          const nodeW = 340;
+          const nodeW = kind === "reference" ? 300 : 340;
           const nodeH = width > 0 ? Math.min(Math.max(Math.round((nodeW * height) / width), 120), 460) : 240;
-          const id = createNodeAt("image", { x: world.x + index * IMPORT_STAGGER, y: world.y + index * IMPORT_STAGGER }, {
+          const id = createNodeAt(kind, { x: world.x + index * IMPORT_STAGGER, y: world.y + index * IMPORT_STAGGER }, {
             content: dataUrl,
-            title: safeFilename(file.name.replace(/\.[^.]+$/, "")) || "图片",
+            title: safeFilename(file.name.replace(/\.[^.]+$/, "")) || (kind === "reference" ? "参考图" : "图片"),
             width: nodeW,
             height: nodeH,
+            ...(kind === "reference" ? { referenceRole: "general" as ReferenceImageRole } : {}),
           });
           canvasStateRef.current.patchNodeMetadata(id, { naturalWidth: width, naturalHeight: height, bytes: file.size, mimeType: file.type }, { history: false });
           index += 1;
@@ -935,7 +1002,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
 
   /** 建節點選單確認（雙擊空白 / 連線拖放共用）。 */
   const handleCreateFromMenu = useCallback(
-    (type: "text" | "image") => {
+    (type: "text" | "image" | "prompt") => {
       const cm = createMenuRef.current;
       if (!cm) return;
       setCreateMenu(null);
@@ -949,11 +1016,11 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
   );
 
   const handleCreateMenuUpload = useCallback(
-    (files: File[]) => {
+    (files: File[], kind: "image" | "reference" = "image") => {
       const cm = createMenuRef.current;
       setCreateMenu(null);
       if (!cm) return;
-      void importImageFiles(files, cm.world).then(() => {
+      void importImageFiles(files, cm.world, kind).then(() => {
         // 連線拖放上傳：與第一個導入節點連線（importImageFiles 已選中最後一個，
         // 簡化：不強行連線，交用戶手動——多檔語義不明確時不猜）。
       });
@@ -975,6 +1042,39 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
   const openCanvasMenu = useCallback((screen: { x: number; y: number }, world: { x: number; y: number }) => {
     setMenu({ position: screen, world, targetNodeId: null });
   }, []);
+
+  /** P2：從 reference 節點「存為卡」——取節點圖 + 角色建卡，存檔並鎖定到本畫布。 */
+  const saveNodeAsCard = useCallback(
+    async (node: CanvasNode, kind: CharacterCardKind) => {
+      const url = imageUrlOf(node);
+      if (!url) return;
+      const now = new Date().toISOString();
+      const card: CharacterCard = {
+        id: `card-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+        name: node.title || (kind === "character" ? "角色卡" : "场景卡"),
+        kind,
+        // 純參考圖卡：locked 片段為空，鎖定的是參考圖與角色（可日後補描述）。
+        prompt: "",
+        references: [
+          {
+            url,
+            role: node.type === CanvasNodeType.Reference ? toReferenceImageRole(node.metadata?.referenceRole) : "general",
+            name: node.title || "参考图",
+          },
+        ],
+        createdAt: now,
+        updatedAt: now,
+      };
+      const ok = await canvasStateRef.current.upsertCharacterCard(card);
+      if (!ok) {
+        showError("存卡失败，请稍后再试");
+        return;
+      }
+      canvasStateRef.current.toggleCharacterCard(card.id); // 存為卡即鎖定（生成自動攜帶）
+      showError(`已存为${kind === "character" ? "角色" : "场景"}卡并锁定：${card.name}`);
+    },
+    [showError],
+  );
 
   const menuItems = useMemo((): (CanvasMenuItem | "separator")[] => {
     if (!menu) return [];
@@ -1044,11 +1144,40 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
       { id: "paste", label: "粘贴", shortcut: "Ctrl+V", disabled: !clipboardRef.current?.nodes.length, onSelect: () => pasteClipboard(menu.world) },
       { id: "duplicate", label: "创建副本", shortcut: "Ctrl+D", onSelect: duplicateSelection },
     ];
-    if (node.type === CanvasNodeType.Text) {
+    if (node.type === CanvasNodeType.Text || node.type === CanvasNodeType.Prompt) {
       items.push("separator");
       items.push({ id: "font-up", label: "放大字号", onSelect: () => state.patchNodeMetadata(node.id, { fontSize: Math.min(28, (node.metadata?.fontSize ?? 14.5) + 2) }) });
       items.push({ id: "font-down", label: "缩小字号", onSelect: () => state.patchNodeMetadata(node.id, { fontSize: Math.max(10, (node.metadata?.fontSize ?? 14.5) - 2) }) });
       items.push({ id: "save-asset-text", label: "存入素材库", onSelect: () => void saveNodeToAssets(node.id) });
+    }
+    // P2：reference 節點 → 存為角色/場景卡（鎖定到本畫布，所有生成自動攜帶）。
+    if (node.type === CanvasNodeType.Reference && url) {
+      items.push("separator");
+      items.push({
+        id: "save-as-card",
+        label: "存为卡并锁定",
+        children: [
+          { id: "save-card-character", label: "存为角色卡", onSelect: () => void saveNodeAsCard(node, "character") },
+          { id: "save-card-scene", label: "存为场景卡", onSelect: () => void saveNodeAsCard(node, "scene") },
+        ],
+      });
+    }
+    // 圖片節點 → 帶角色的參考圖節點（保留位置/尺寸/圖片，補默認角色）。
+    if (node.type === CanvasNodeType.Image && url) {
+      items.push("separator");
+      items.push({
+        id: "to-reference",
+        label: "转为参考图节点",
+        onSelect: () => {
+          state.addNodes([
+            {
+              ...node,
+              type: CanvasNodeType.Reference,
+              metadata: { ...node.metadata, referenceRole: node.metadata?.referenceRole ?? "general" },
+            },
+          ]);
+        },
+      });
     }
     if (url) {
       items.push("separator");
@@ -1093,7 +1222,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
     });
     return items;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [menu, nodeById, childToParent, visibleNodes, upscalingIds]);
+  }, [menu, nodeById, childToParent, visibleNodes, upscalingIds, saveNodeAsCard]);
 
   // ── 舊 workflow 節點動作
   const handleRerun = useCallback(async (nodeId: string) => {
@@ -1136,7 +1265,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
       const node = canvasStateRef.current.nodes.find((n) => n.id === nodeId);
       if (!node) return;
       const url = imageUrlOf(node);
-      const isText = node.type === CanvasNodeType.Text;
+      const isText = node.type === CanvasNodeType.Text || node.type === CanvasNodeType.Prompt;
       const content = node.metadata?.content ?? node.metadata?.prompt ?? "";
       if (!url && !(isText && content.trim())) {
         showError("该节点没有可保存的内容");
@@ -1385,7 +1514,12 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
         metadata: { status: "loading", prompt: params.prompt, source_image: sourceUrl },
       };
       state.addNodes([child], [{ id: `conn-${sourceId}-${id}`, fromNodeId: sourceId, toNodeId: id }]);
-      void generateIntoNode(id, { prompt: params.prompt, sourceImage: sourceUrl, referenceUrls: params.referenceUrls });
+      const references: CanvasGenerationReference[] = (params.referenceUrls ?? []).map((url) => ({
+        url,
+        role: "general",
+        name: "reference",
+      }));
+      void generateIntoNode(id, { prompt: params.prompt, sourceImage: sourceUrl, references });
     },
     [generateIntoNode],
   );
@@ -1590,6 +1724,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
                 onNodeContextMenu={openNodeMenu}
                 onRename={canvas.renameNode}
                 onUpdateText={(nid, text) => canvas.patchNodeMetadata(nid, { content: text })}
+                onUpdateReferenceRole={(nid, role) => canvas.patchNodeMetadata(nid, { referenceRole: role })}
                 onRetry={node.metadata?.status === "error" ? retryNode : undefined}
               />
             );
@@ -1680,6 +1815,16 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
           >
             资源库
           </button>
+          {/* P2：角色/場景卡——badge 數字 = 當前鎖定生效的卡數 */}
+          <button
+            type="button"
+            onClick={() => setCardsOpen((v) => !v)}
+            aria-pressed={cardsOpen}
+            aria-label="角色与场景卡"
+            className="ce-embed-bar-btn pointer-events-auto cursor-pointer rounded-full bg-white/80 font-medium text-[#007AFF] shadow-sm backdrop-blur hover:bg-white active:bg-white"
+          >
+            角色卡{canvas.activeCardIds.length > 0 ? ` · ${canvas.activeCardIds.length}` : ""}
+          </button>
           {expanded && (
             <button
               type="button"
@@ -1764,6 +1909,78 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
             <button type="button" onClick={() => setActionError(null)} aria-label="关闭提示" className="shrink-0 opacity-80 hover:opacity-100">
               ✕
             </button>
+          </div>
+        )}
+
+        {/* P2：角色/場景卡面板——卡列表、生效 badge、鎖定/解鎖、刪卡 */}
+        {cardsOpen && (
+          <div
+            data-canvas-interactive
+            className="ce-embed-leftpop pointer-events-auto absolute z-20 w-72 max-w-[calc(100vw-1.5rem)] overflow-y-auto rounded-ios-2xl bg-white shadow-[0_8px_32px_rgba(0,0,0,0.16)]"
+            style={{
+              left: "calc(0.75rem + env(safe-area-inset-left, 0px))",
+              top: "calc(3.5rem + env(safe-area-inset-top, 0px))",
+              maxHeight: "min(64dvh, 420px)",
+            }}
+          >
+            <div className="border-b border-[rgba(0,0,0,0.05)] px-3 py-2.5">
+              <p className="text-[12.5px] font-semibold text-[rgba(0,0,0,0.8)]">角色 / 场景卡</p>
+              <p className="mt-0.5 text-[11px] leading-snug text-[rgba(0,0,0,0.45)]">
+                锁定后本画布所有生成自动携带（提示词前缀 + 参考图 + 负面词）
+              </p>
+            </div>
+            {canvas.characterCards.length === 0 ? (
+              <p className="px-3.5 py-3 text-ios-caption1 text-[rgba(0,0,0,0.45)]">
+                还没有卡 · 右键参考图节点「存为卡并锁定」
+              </p>
+            ) : (
+              canvas.characterCards.map((card) => {
+                const active = canvas.activeCardIds.includes(card.id);
+                return (
+                  <div
+                    key={card.id}
+                    className="flex items-center gap-2 border-b border-[rgba(0,0,0,0.05)] px-3 py-2.5 last:border-b-0"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="flex items-center gap-1.5 truncate text-[12.5px] font-medium text-[rgba(0,0,0,0.85)]">
+                        <span className="truncate">{card.name}</span>
+                        <span className="shrink-0 rounded-full bg-[rgba(0,0,0,0.05)] px-1.5 py-0.5 text-[10px] text-[rgba(0,0,0,0.5)]">
+                          {card.kind === "scene" ? "场景" : "角色"}
+                        </span>
+                      </p>
+                      <p className="mt-0.5 truncate text-[11px] text-[rgba(0,0,0,0.42)]">
+                        {active ? (
+                          <span className="font-medium text-[#34C759]">生效中</span>
+                        ) : (
+                          "未锁定"
+                        )}
+                        {card.references.length > 0 ? ` · ${card.references.length} 张参考图` : ""}
+                        {card.prompt ? " · 有描述" : ""}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => canvas.toggleCharacterCard(card.id)}
+                      className={
+                        active
+                          ? "shrink-0 cursor-pointer rounded-lg bg-[rgba(52,199,89,0.12)] px-2 py-1 text-[11.5px] font-medium text-[#248A3D] hover:bg-[rgba(52,199,89,0.2)]"
+                          : "shrink-0 cursor-pointer rounded-lg bg-[rgba(0,0,0,0.06)] px-2 py-1 text-[11.5px] font-medium text-[rgba(0,0,0,0.6)] hover:bg-[rgba(0,0,0,0.1)]"
+                      }
+                    >
+                      {active ? "解锁" : "锁定"}
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`删除卡 ${card.name}`}
+                      onClick={() => void canvas.removeCharacterCard(card.id)}
+                      className="shrink-0 cursor-pointer rounded-lg px-1.5 py-1 text-[11.5px] text-[rgba(0,0,0,0.35)] hover:bg-[rgba(0,0,0,0.06)] hover:text-[#FF3B30]"
+                    >
+                      删除
+                    </button>
+                  </div>
+                );
+              })
+            )}
           </div>
         )}
 

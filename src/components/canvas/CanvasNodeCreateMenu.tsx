@@ -2,9 +2,9 @@
 
 // CanvasNodeCreateMenu —— 新建節點小型 popover（雙擊空白 / 拉線到空白處彈出）。
 //
-// 只管「開在哪、怎麼關、三個入口」：文本節點、空白圖片節點、上傳圖片
-// （內藏 hidden file input，選檔後回調 onUploadFiles 並自動關閉）；
-// 建立語義由呼叫端接手。標題列可換文案（如「连接到新节点」）。
+// 只管「開在哪、怎麼關、五個入口」：文本節點、空白圖片節點、提示詞節點、
+// 上傳圖片、上傳參考圖（內藏 hidden file input，選檔後回調 onUploadFiles
+// 並自動關閉）；建立語義由呼叫端接手。標題列可換文案（如「连接到新节点」）。
 //
 // 定位：position = 相對畫布容器左上的座標；useLayoutEffect 量測實際尺寸
 // 後，超出容器右 / 下緣就翻轉到另一側 —— paint 前完成，首幀即最終位置。
@@ -13,17 +13,19 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
-import { ImageIcon, Type, Upload } from "lucide-react";
+import { ImageIcon, Sparkles, Type, Upload } from "lucide-react";
+
+export type CanvasCreateMenuKind = "text" | "image" | "prompt";
 
 export interface CanvasNodeCreateMenuProps {
   open: boolean;
   /** 相對畫布容器的座標 */
   position: { x: number; y: number };
   onClose: () => void;
-  /** type: "text" | "image"（空節點） */
-  onCreate: (type: "text" | "image") => void;
-  /** 用戶選了本地圖片檔 */
-  onUploadFiles: (files: File[]) => void;
+  /** type: "text" | "image"（空節點）| "prompt"（提示詞備忘節點） */
+  onCreate: (type: CanvasCreateMenuKind) => void;
+  /** 用戶選了本地圖片檔；kind="reference" 表示建成帶角色的參考圖節點 */
+  onUploadFiles: (files: File[], kind?: "image" | "reference") => void;
   /** 標題列說明（如「新建节点」/「连接到新节点」），預設「新建节点」 */
   title?: string;
 }
@@ -42,6 +44,7 @@ function CanvasNodeCreateMenu({
 }: CanvasNodeCreateMenuProps) {
   const menuRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const referenceInputRef = useRef<HTMLInputElement | null>(null);
   const [adjusted, setAdjusted] = useState(position);
 
   // 翻轉定位：量測實際尺寸，超出畫布容器右 / 下緣就翻到游標另一側。
@@ -82,17 +85,17 @@ function CanvasNodeCreateMenu({
 
   if (!open) return null;
 
-  const handleCreate = (type: "text" | "image") => {
+  const handleCreate = (type: CanvasCreateMenuKind) => {
     onCreate(type);
     onClose();
   };
 
   // 選檔後回調並關閉；清空 value 讓下次選同一批檔案仍會觸發 change。
-  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (e: ChangeEvent<HTMLInputElement>, kind: "image" | "reference") => {
     const files = Array.from(e.target.files ?? []);
     e.target.value = "";
     if (files.length === 0) return;
-    onUploadFiles(files);
+    onUploadFiles(files, kind);
     onClose();
   };
 
@@ -119,13 +122,38 @@ function CanvasNodeCreateMenu({
         <span className="flex-1 truncate">空白图片节点</span>
       </button>
 
+      <button type="button" role="menuitem" className={ITEM_CLASS} onClick={() => handleCreate("prompt")}>
+        <Sparkles className="h-4 w-4 shrink-0 text-[rgba(0,0,0,0.55)]" />
+        <span className="flex-1 truncate">提示词节点</span>
+      </button>
+
       <button type="button" role="menuitem" className={ITEM_CLASS} onClick={() => fileInputRef.current?.click()}>
         <Upload className="h-4 w-4 shrink-0 text-[rgba(0,0,0,0.55)]" />
         <span className="flex-1 truncate">上传图片…</span>
       </button>
 
-      {/* 隱藏檔案選擇器：點「上传图片…」代為觸發 */}
-      <input ref={fileInputRef} type="file" accept="image/*" multiple hidden onChange={handleFileChange} />
+      <button type="button" role="menuitem" className={ITEM_CLASS} onClick={() => referenceInputRef.current?.click()}>
+        <Upload className="h-4 w-4 shrink-0 text-[rgba(0,0,0,0.55)]" />
+        <span className="flex-1 truncate">上传参考图…</span>
+      </button>
+
+      {/* 隱藏檔案選擇器：點「上传图片…」/「上传参考图…」代為觸發 */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        hidden
+        onChange={(e) => handleFileChange(e, "image")}
+      />
+      <input
+        ref={referenceInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        hidden
+        onChange={(e) => handleFileChange(e, "reference")}
+      />
     </div>
   );
 }

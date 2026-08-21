@@ -12,7 +12,7 @@
 
 import { getGenerationSql, type GenerationSql } from "./database";
 import { mapGenerationJob } from "./job-repository";
-import { taskStatus } from "./task-response";
+import { taskResourcePath, taskStatus } from "./task-response";
 import type { FailureClass, GenerationJob, GenerationJobStatus } from "./types";
 
 /** 金鑰計費主體 → 控制面 tenant。與 images/generations 的提交路徑同源。 */
@@ -73,7 +73,7 @@ export interface JobStatusSnapshot {
 }
 
 export function toJobStatusSnapshot(job: GenerationJob): JobStatusSnapshot {
-  const kindPath = job.kind === "video_generate" ? "videos" : "images";
+  const kindPath = taskResourcePath(job.kind);
   return {
     object: "image_generation.task",
     id: job.id,

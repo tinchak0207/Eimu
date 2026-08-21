@@ -33,6 +33,12 @@ import {
   type CanvasSnapshot,
 } from "@/lib/canvas/layout";
 import { listCanvasProjects, saveCanvasProject, postCanvasSnapshot, postCanvasOpsResult } from "@/lib/canvas/client";
+import {
+  deleteCharacterCards as deleteCharacterCardsRemote,
+  listCharacterCards as fetchCharacterCardsRemote,
+  saveCharacterCard as saveCharacterCardRemote,
+} from "@/lib/character-card-client";
+import type { CharacterCard } from "@/lib/character-cards";
 import { CANVAS_NODE_DEFAULT_SIZE, CanvasNodeType } from "@/lib/canvas/types";
 import type {
   CanvasAgentOp,
@@ -436,6 +442,8 @@ function compactMetadataForAgent(metadata: CanvasNodeMetadata | undefined): Reco
   if (metadata.model) out.model = metadata.model;
   if (metadata.size) out.size = metadata.size;
   if (metadata.status) out.status = metadata.status;
+  // reference 節點角色讓 agent 知道「這張圖以什麼身份參與生成」。
+  if (metadata.referenceRole) out.referenceRole = metadata.referenceRole;
   if (typeof metadata.count === "number") out.count = metadata.count;
   if (typeof metadata.cost_coins === "number") out.cost_coins = metadata.cost_coins;
   return Object.keys(out).length > 0 ? out : undefined;
@@ -516,6 +524,18 @@ export interface UseCanvasChatReturn {
   savedProjects: CanvasProjectSummary[];
   refreshSavedProjects: () => Promise<void>;
   openSavedCanvas: (id: string) => Promise<void>;
+  // ── 角色/場景卡（P2 跨鏡頭一致性）：卡列表 + 項目級鎖定
+  characterCards: CharacterCard[];
+  /** 鎖定到當前畫布項目的卡 id（持久化在 CanvasProject.cardIds）。 */
+  activeCardIds: string[];
+  /** 鎖定中的卡實體（生成時自動注入：片段前綴 + 參考圖 + 負面詞）。 */
+  activeCharacterCards: CharacterCard[];
+  /** 建卡/更新卡（upsert）。 */
+  upsertCharacterCard: (card: CharacterCard) => Promise<boolean>;
+  /** 刪卡（同時解除鎖定）。 */
+  removeCharacterCard: (id: string) => Promise<boolean>;
+  /** 鎖定/解鎖（解鎖=從項目卡列表移除，歷史結果不受影響）。 */
+  toggleCharacterCard: (id: string) => void;
   // ── 幾何工具（元件用）
   pathFor: (connection: CanvasConnection) => string | null;
 }
@@ -535,6 +555,9 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
   const [savedProjects, setSavedProjects] = useState<CanvasProjectSummary[]>([]);
   // Wave C：agent 下發、待確認/執行的批量畫布操作。
   const [pendingAgentOps, setPendingAgentOps] = useState<CanvasAgentOpsEvent | null>(null);
+  // P2：角色/場景卡。characterCards = 用戶全部卡；activeCardIds = 鎖定到本畫布項目的卡。
+  const [characterCards, setCharacterCards] = useState<CharacterCard[]>([]);
+  const [activeCardIds, setActiveCardIds] = useState<string[]>([]);
 
   // ── refs：給不參與 render 的路徑讀最新值
   const canvasRef = useRef(canvas);
@@ -552,6 +575,10 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
   selectedNodeIdRef.current = selectedNodeId;
   const pendingAgentOpsRef = useRef(pendingAgentOps);
   pendingAgentOpsRef.current = pendingAgentOps;
+  const characterCardsRef = useRef(characterCards);
+  characterCardsRef.current = characterCards;
+  const activeCardIdsRef = useRef(activeCardIds);
+  activeCardIdsRef.current = activeCardIds;
   const sessionIdRef = useRef(sessionId);
   sessionIdRef.current = sessionId;
   /** flyTo 動畫的 rAF 句柄（新動畫/卸載時取消）。 */
@@ -573,6 +600,46 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
   // 最終一致性收斂：image.done 的 URL 佇列，供 settleStaleNodes 對賬用。
   const imageDoneQueueRef = useRef<AgentImageDone[]>([]);
 
+  // ─────────────────────── 角色/場景卡（P2 跨鏡頭一致性）
+
+  /** 進頁載入用戶全部卡。失敗靜默：卡是順手鎖定的配置，不打擾創作。 */
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const res = await fetchCharacterCardsRemote();
+      if (!cancelled && res.ok && res.data) setCharacterCards(res.data);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /** 鎖定中的卡實體：生成時注入的就是這份（applyCharacterCards 按 id 序冪等注入）。 */
+  const activeCharacterCards = useMemo(
+    () => characterCards.filter((c) => activeCardIds.includes(c.id)),
+    [characterCards, activeCardIds],
+  );
+
+  const upsertCharacterCard = useCallback(async (card: CharacterCard): Promise<boolean> => {
+    const res = await saveCharacterCardRemote(card);
+    if (!res.ok) return false;
+    setCharacterCards((prev) => [card, ...prev.filter((c) => c.id !== card.id)]);
+    return true;
+  }, []);
+
+  const removeCharacterCard = useCallback(async (id: string): Promise<boolean> => {
+    const res = await deleteCharacterCardsRemote([id]);
+    if (!res.ok) return false;
+    setCharacterCards((prev) => prev.filter((c) => c.id !== id));
+    // 刪卡同時解除鎖定（該 id 不再出現在項目 cardIds）。
+    setActiveCardIds((prev) => prev.filter((x) => x !== id));
+    return true;
+  }, []);
+
+  const toggleCharacterCard = useCallback((id: string) => {
+    setActiveCardIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }, []);
+
   // ─────────────────────── 換畫布 / 歷史清單
 
   /** 開一張全新畫布（換 session 或使用者手動「新建画布」）。 */
@@ -591,6 +658,8 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     setHistory(CANVAS_EMPTY_HISTORY);
     setProjectTitle("未命名画布");
     setViewportState({ x: 0, y: 0, k: 1 });
+    // 新畫布 = 新項目：卡鎖定是項目級配置，隨舊項目留在歷史裡。
+    setActiveCardIds([]);
     // 新畫布要有新身份：後續存檔才會寫進新的一份，而不是覆寫上一張。
     projectIdRef.current = `canvas-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     createdAtRef.current = new Date().toISOString();
@@ -622,6 +691,7 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     setViewportState(target.viewport ?? { x: 0, y: 0, k: 1 });
     setBackgroundMode(target.backgroundMode ?? "dots");
     setProjectTitle(target.title || "未命名画布");
+    setActiveCardIds(Array.isArray(target.cardIds) ? target.cardIds.filter(Boolean) : []);
     if (target.budget) {
       setBudget({
         usedCoins: target.budget.usedCoins,
@@ -860,11 +930,22 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
   // 附帶用戶當前選區與視口縮放：agent 不再是瞎子，能圍繞「用戶正在看的節點」幹活。
   const summarize = () => {
     const state = canvasRef.current;
-    if (state.nodes.length === 0 && state.units.length === 0) return undefined;
+    const lockedCards = characterCardsRef.current.filter((c) => activeCardIdsRef.current.includes(c.id));
+    if (state.nodes.length === 0 && state.units.length === 0 && lockedCards.length === 0) return undefined;
     const base = summarizeCanvasState(state) as unknown as Record<string, unknown>;
     const selected = selectedNodeIdRef.current;
     if (selected) base.selected_node_id = selected;
     base.viewport_scale = Math.round(viewportRef.current.k * 100) / 100;
+    // P2：鎖定卡進上行摘要（agent 可見——知道哪些外觀/場景約束已生效）。
+    base.character_cards = lockedCards.map((c) => ({
+      id: c.id,
+      kind: c.kind,
+      name: c.name,
+      prompt: c.prompt,
+      ...(c.negativePrompt ? { negative_prompt: c.negativePrompt } : {}),
+      reference_count: c.references.length,
+      ...(c.loraIds?.length ? { lora_ids: c.loraIds } : {}),
+    }));
     return base;
   };
 
@@ -903,6 +984,7 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
       viewportRef.current,
       backgroundRef.current,
       b ? { totalCoins: b.usedCoins + b.remainingCoins, usedCoins: b.usedCoins } : undefined,
+      activeCardIdsRef.current,
     );
   }, []);
 
@@ -926,7 +1008,7 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     // 依賴畫布本體與視口/背景/標題：任何一項變化都該落盤。
     // saveState 刻意不進依賴 —— 它由這個 effect 自己寫，進去會變成自觸發循環。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canvas, viewport, backgroundMode, projectTitle, buildProject]);
+  }, [canvas, viewport, backgroundMode, projectTitle, activeCardIds, buildProject]);
 
   // ─────────────────────── Wave C1：壓縮快照上行（agent 的眼睛）
   // 300ms 尾隨防抖：持續平移/拖動期間不上報，停手才推最新一幀。失敗靜默。
@@ -946,10 +1028,20 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
         connections: canvas.connections,
         selectedNodeIds: selectedNodeId ? [selectedNodeId] : [],
         viewport,
+        // P2：鎖定卡進快照（agent 的 canvas_get_state 讀這份）。
+        character_cards: activeCharacterCards.map((c) => ({
+          id: c.id,
+          kind: c.kind,
+          name: c.name,
+          prompt: c.prompt,
+          ...(c.negativePrompt ? { negative_prompt: c.negativePrompt } : {}),
+          reference_count: c.references.length,
+          ...(c.loraIds?.length ? { lora_ids: c.loraIds } : {}),
+        })),
       });
     }, 300);
     return () => window.clearTimeout(t);
-  }, [sessionId, canvas.nodes, canvas.connections, selectedNodeId, viewport]);
+  }, [sessionId, canvas.nodes, canvas.connections, selectedNodeId, viewport, activeCharacterCards]);
 
   // ─────────────────────── 視口
 
@@ -1315,5 +1407,11 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     pendingAgentOps,
     applyAgentOps,
     dismissAgentOps,
+    characterCards,
+    activeCardIds,
+    activeCharacterCards,
+    upsertCharacterCard,
+    removeCharacterCard,
+    toggleCharacterCard,
   };
 }

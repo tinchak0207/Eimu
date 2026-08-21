@@ -40,7 +40,8 @@
     "react-dom": "^19.2.2",
     "react-dropzone": "^15.0.0",
     "tailwind-merge": "^2.6.0",
-    "tsx": "^4.20.6"
+    "tsx": "^4.20.6",
+    "ws": "^8.21.3"
   },
   "devDependencies": {
     "@types/node": "^22.10.7",

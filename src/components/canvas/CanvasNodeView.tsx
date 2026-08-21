@@ -15,6 +15,9 @@ import { CanvasNodeHoverToolbar } from "./CanvasNodeHoverToolbar";
 import { CanvasNodePromptPanel } from "./CanvasNodePromptPanel";
 import { cn } from "@/lib/utils";
 import { CanvasNodeType, type CanvasNode, type CanvasNodeStatus } from "@/lib/canvas/types";
+import { REFERENCE_IMAGE_ROLES } from "../pro-workstation/workstation-constants";
+import { toReferenceImageRole } from "@/lib/image-types";
+import type { ReferenceImageRole } from "@/lib/image-types";
 
 export interface CanvasNodeViewProps {
   node: CanvasNode;
@@ -73,6 +76,8 @@ export interface CanvasNodeViewProps {
   onRename?: (nodeId: string, title: string) => void;
   /** A11：文本節點就地編輯提交（雙擊正文觸發）。 */
   onUpdateText?: (nodeId: string, text: string) => void;
+  /** reference 節點角色切換（復用 ReferenceImageRole 枚舉）。 */
+  onUpdateReferenceRole?: (nodeId: string, role: ReferenceImageRole) => void;
   /** A12：失敗節點就地重試（沿用保存的生成參數）。 */
   onRetry?: (nodeId: string) => void;
   /** A2：乾淨點擊（選取且未拖動）——宿主用它「點選即開面板」。 */
@@ -110,6 +115,8 @@ const TYPE_LABEL: Record<CanvasNodeType, string> = {
   [CanvasNodeType.CharacterCard]: "角色卡",
   [CanvasNodeType.SceneCard]: "场景卡",
   [CanvasNodeType.Audio]: "音频",
+  [CanvasNodeType.Prompt]: "提示词",
+  [CanvasNodeType.Reference]: "参考图",
 };
 
 function isUrl(value: string): boolean {
@@ -209,6 +216,7 @@ export function CanvasNodeView({
   adjacent,
   onRename,
   onUpdateText,
+  onUpdateReferenceRole,
   onRetry,
   onNodeClick,
   onStopGenerate,
@@ -452,6 +460,15 @@ export function CanvasNodeView({
         </div>
       );
     }
+    // reference 節點空態：等待填入圖片（agent 建的空殼或數據異常）。
+    if (node.type === CanvasNodeType.Reference && statusValue === "idle") {
+      return (
+        <div className="flex flex-1 flex-col items-center justify-center gap-2 p-4">
+          <ImageIcon className="h-7 w-7 text-[rgba(0,0,0,0.15)]" aria-hidden="true" />
+          <span className="text-[12px] text-[rgba(0,0,0,0.55)]">参考图 · 等待填入图片</span>
+        </div>
+      );
+    }
     // A4：空圖片節點是生成落地位——給一個顯眼入口，點開面板就地生成回填。
     if (node.type === CanvasNodeType.Image && statusValue === "idle") {
       return (
@@ -506,6 +523,7 @@ export function CanvasNodeView({
     }
     switch (node.type) {
       case CanvasNodeType.Image:
+      case CanvasNodeType.Reference:
       case CanvasNodeType.Video: {
         const content = metadata?.content;
         if (content && isUrl(content)) {
@@ -575,9 +593,12 @@ export function CanvasNodeView({
           </div>
         );
       }
-      case CanvasNodeType.Text: {
+      case CanvasNodeType.Text:
+      case CanvasNodeType.Prompt: {
         const text = metadata?.content ?? metadata?.prompt;
         const fontSize = typeof metadata?.fontSize === "number" ? metadata.fontSize : 14.5;
+        // prompt 節點 = 提示詞備忘：雙擊直編（與文本節點同款交互），文案不同。
+        const emptyHint = node.type === CanvasNodeType.Prompt ? "（未填写提示词，双击编辑）" : "（未填写内容，双击编辑）";
         // A11：雙擊直編。textarea 蓋滿正文區，blur/Ctrl+Enter 提交、Esc 取消。
         if (editingText !== null) {
           return (
@@ -624,7 +645,7 @@ export function CanvasNodeView({
             {text?.trim() ? (
               text
             ) : (
-              <span className="text-[12px] text-[rgba(0,0,0,0.55)]">（未填写内容，双击编辑）</span>
+              <span className="text-[12px] text-[rgba(0,0,0,0.55)]">{emptyHint}</span>
             )}
           </div>
         );
@@ -866,6 +887,31 @@ export function CanvasNodeView({
             upscaling={upscaling}
             onSetPrimary={onSetPrimary}
           />
+        )}
+        {/* reference 節點角色 badge：復用 REFERENCE_IMAGE_ROLES，切換即改生成請求裡的角色。 */}
+        {node.type === CanvasNodeType.Reference && onUpdateReferenceRole && (
+          <div
+            data-canvas-interactive
+            className="absolute bottom-2 left-2 z-10"
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <select
+              aria-label="参考图角色"
+              title="参考图角色（连线生成时带入）"
+              value={toReferenceImageRole(node.metadata?.referenceRole)}
+              onChange={(e) => {
+                e.stopPropagation();
+                onUpdateReferenceRole(node.id, e.target.value as ReferenceImageRole);
+              }}
+              className="cursor-pointer rounded-full border-0 bg-[rgba(0,0,0,0.6)] px-2 py-0.5 text-[11px] font-medium text-white outline-none"
+            >
+              {REFERENCE_IMAGE_ROLES.map((r) => (
+                <option key={r.id} value={r.id} className="bg-white text-[rgba(0,0,0,0.8)]">
+                  {r.label}
+                </option>
+              ))}
+            </select>
+          </div>
         )}
         {/* 批次堆疊指示器 */}
         {typeof batchChildCount === "number" && batchChildCount > 0 && (

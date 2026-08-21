@@ -85,9 +85,16 @@ export async function refreshAdobeSupplierHealth(sql: GenerationSql = getGenerat
             refresh_status = ${refreshStatus === "healthy" ? "healthy" : refreshStatus === "expired" ? "expired" : "failing"},
             last_refresh_at = CASE WHEN ${refreshStatus} = 'healthy' THEN now() ELSE last_refresh_at END,
             last_refresh_failure_at = CASE WHEN ${refreshFailure ? true : false} THEN now() ELSE last_refresh_failure_at END,
-            success_rate_5m = COALESCE(${successRate}, success_rate_5m),
+            success_rate_5m = COALESCE(${successRate},
+              CASE WHEN health.attempts = 0 THEN 1 ELSE health.successes::float / health.attempts END),
+            attempts_5m = health.attempts, successes_5m = health.successes,
             health_status = ${isHealthy ? "healthy" : "degraded"},
             health_observed_at = now(), updated_at = now()
+        FROM (
+          SELECT count(*)::int AS attempts, count(*) FILTER (WHERE outcome = 'success')::int AS successes
+          FROM supplier_health_event
+          WHERE supplier_account_id = ${account.id} AND observed_at >= now() - interval '5 minutes'
+        ) health
         WHERE id = ${account.id}
       `;
     } catch (error) {

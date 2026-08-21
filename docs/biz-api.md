@@ -171,6 +171,85 @@ const result = await client.images.generate({
 
 请求会依次尝试多个上游端点；连续失败的端点会进入 60 秒冷却并被排到队尾，因此单个上游故障通常不会影响可用性。所有端点都失败时返回 502，`message` 里列出每个端点的失败原因，便于双方对账排查。
 
+
+---
+
+## 模板 SKU（营销成片模板，2026-08-21 新增）
+
+SKU 是把营销模板产品化后的「一句话/一张表批量下单」接口：你提供商品信息或痛点描述，平台按固定镜头结构（钩子/卖点/场景/CTA）展开成一组生成任务，逐镜头走与 `/v1/images/generations` 完全相同的提交/计费/调度管线。**它卖的是编排结构（人工节省 + 投放节奏适配），不是模型单价**——镜头计划展开是纯文本模板 + 变量替换，不经过 LLM，同一份输入永远得到同一份镜头计划（可预测、可对账、可重放）。
+
+与 `GET /v1/templates`（PixAI 上游场景预设）是两套东西：SKU 是我方自有产品层。
+
+### `GET /v1/skus`（公开，无需鉴权）
+
+返回 SKU 目录：每个 SKU 的输入 schema（字段名/类型/必填/区间/示例，可直接编程生成下单表单）、镜头结构、输出规格、计价模式与能力边界（`notes` 如实标注——当前输出为**分镜静帧图组**，不是成片；平台未接入 TTS/剪辑/数字人）。
+
+首批三个 SKU：
+
+| id | 结构 | 输入 | 输出 |
+| --- | --- | --- | --- |
+| `sku-ecommerce-15s` | 开箱钩子 → 卖点特写×N → 场景演示 → CTA | 商品名 + 1-3 条卖点（+可选受众/商品图 URL） | 4-6 张 9:16 分镜图 |
+| `sku-pain-point-ad` | 问题钩子 → 放大 → 转折 → 证明 → CTA | 痛点 + 解决方案 + 受众 | 5 张 9:16 分镜图 |
+| `sku-multi-angle` | N 条同构变体（角度/光线/场景按 8 档内置池轮换注入） | 主体描述 + 变体条数 1-8（缺省 3，可自带角度池） | N 张 1:1 变体图 |
+
+### `POST /v1/skus/{sku_id}/runs`
+
+```bash
+curl https://eimu.dev/v1/skus/sku-multi-angle/runs \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: my-run-20260821-001" \
+  -d '{
+    "base_subject": "磨砂黑便携保温杯",
+    "variant_count": 3
+  }'
+```
+
+```json
+{
+  "object": "sku.run",
+  "run_id": "my-run-20260821-001",
+  "sku_id": "sku-multi-angle",
+  "model": "gpt-image-2",
+  "created": 1787308800,
+  "idempotent_replay": false,
+  "items": [
+    { "shot_index": 0, "shot_id": "variant-1", "kind": "image", "task_id": "…", "task_url": "/v1/images/…", "accepted": true, "prompt": "磨砂黑便携保温杯，正面平视构图，…" }
+  ],
+  "failed_items": [],
+  "estimated_coins": 3,
+  "run_url": "/v1/skus/runs/my-run-20260821-001"
+}
+```
+
+- **202** 表示全部镜头已提交为异步任务；单镜头结果用 `items[].task_url`（即 `GET /v1/images/{id}` 与 `/result`）逐个取件，或用 run 聚合端点看整体进度。
+- 顶层保留字段：`model`（覆盖 SKU 默认模型，需在密钥模型白名单内）、`callback_url`（透传到每个镜头任务）。其余字段即 SKU 输入。
+- **表格批量**：body 传 `{ "inputs": [输入对象, …] }`（或直接顶层数组），每项一轮 run（上限 10 轮），响应为 `{ "object": "sku.run.set", "runs": […], "failed_inputs": […] }`，每轮的 `run_id` 为 `<根>-<序号>`。
+- **幂等**：`Idempotency-Key` 头 = run 根。同一键重放会命中既有镜头任务（不重复建任务/扣费，`idempotent_replay: true`）；中途失败的镜头重放时自动补齐。同键但输入/model 变了 → 409 `idempotency_key_reused`。run_id 需为 8-128 位字母数字开头字符串（可含 `-`/`_`）。
+- **计费**：v1 按 `per_shot` 逐镜头计费（单价见 `GET /v1/models`），提交时预留、失败自动退回，与单任务端点同一套账本。`estimated_coins` 为预估值。
+- 输入验证失败（单轮）→ 400，`error.code` 为 `missing_field`/`invalid_field`/`field_too_long`，`error.param` 指明字段；批量模式下单项验证失败进 `failed_inputs`，不炸整批。
+
+### `GET /v1/skus/runs/{run_id}`
+
+按 run 聚合进度（鉴权同其他端点；轮询不消耗限流额度）：
+
+```json
+{
+  "object": "sku.run.status",
+  "run_id": "my-run-20260821-001",
+  "sku_id": "sku-multi-angle",
+  "status": "open",
+  "counts": { "total": 3, "submitted": 3, "unsubmitted": 0, "pending": 1, "running": 1, "succeeded": 1, "failed": 0, "cancelled": 0, "refunded": 0, "unknown": 0 },
+  "billing": { "reserved_total": 1500000, "charged_total": 500000, "refunded_total": 0, "pending_total": 1000000 },
+  "all_terminal": false,
+  "items": [
+    { "shot_index": 0, "shot_id": "variant-1", "task_id": "…", "task_state": "succeeded", "billed": true, "result_url": "/v1/images/…/result", … }
+  ]
+}
+```
+
+`all_terminal: true`（或 `status: "completed"`）表示全部镜头已终结；部分成功语义下 `succeeded` 的镜头随时可经 `result_url` 取件。run 不占新表——`run_id` 即幂等键根，镜头任务的冪等键为 `skurun:<run_id>:<shot_index>`，聚合视图直接从任务事实源构建。
+
 ---
 
 ## 我方内部：签发密钥

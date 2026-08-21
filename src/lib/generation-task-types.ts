@@ -24,7 +24,7 @@ export interface GenerationTaskProjection {
   taskId: string;
   status: PublicGenerationTaskStatus;
   modelId: string;
-  kind: "image_generate" | "image_edit" | "video_generate";
+  kind: "image_generate" | "image_edit" | "video_generate" | "tts" | "avatar" | "lipsync";
   submittedConfig: NormalizedGenerationConfig & { workflow?: GenerationWorkflowMetadata };
   prompt?: string;
   resultIds: string[];

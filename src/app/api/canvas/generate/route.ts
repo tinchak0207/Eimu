@@ -16,6 +16,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { generationModel } from "@/lib/generation-model-catalog";
 import { imageGenerationCoins, type ModelMode } from "@/lib/provider-config";
 import { DEFAULT_IMAGE_MODEL_ID, SUPPORTED_GENERATION_MODEL_IDS } from "@/lib/image-model-ids.js";
+import { isReferenceImageRole, toReferenceImageRole, type ReferenceImageRole } from "@/lib/image-types";
 import { syncModelPricing } from "@/lib/pricing-runtime";
 
 export const runtime = "nodejs";
@@ -29,6 +30,16 @@ export interface CanvasGenerateRequest {
   count?: number;
   source_image?: string | null;
   reference_image_urls?: string[];
+  /**
+   * 語義參考圖（2026-08-22）：帶角色的 reference 節點輸出。
+   * 與 reference_image_urls 併存（後者無角色，視為 general）。
+   */
+  reference_images?: { url?: unknown; role?: unknown; name?: unknown }[];
+  /**
+   * 負面詞（P2 角色/場景卡）：與參考圖角色一起走既有 workflow 鏈路
+   * （generate-images 的 buildWorkflowPrompt 會寫成 "Avoid:" 段）。
+   */
+  negative_prompt?: string;
 }
 
 export interface CanvasImageResult {
@@ -115,26 +126,71 @@ export async function POST(req: NextRequest) {
   const count = Math.min(Math.max(1, Math.round(body.count ?? 1)), 4);
   const aspectRatio = body.size ?? "1:1";
   const qualityMode: ModelMode = body.quality === "high" || body.quality === "quality" ? "quality" : "fast";
+  // P2：卡鎖定的負面詞（可選；空字串 = 未帶，行為與舊路徑一致）。
+  const negativePrompt =
+    typeof body.negative_prompt === "string" ? body.negative_prompt.trim().slice(0, 1000) : "";
 
-  // 參考圖：source_image 排首位，@引用其後；只收 https/data:image，最多 5 張。
-  const refUrls: string[] = [];
-  if (body.source_image) refUrls.push(body.source_image);
+  // 參考圖：source_image 排首位，語義參考圖（帶角色）與 @引用其後；
+  // 只收 https/data:image，最多 5 張。角色走 workflow.referenceImages 既有鏈路
+  // （generate-images 的 buildWorkflowPrompt 會把「name as role」寫進最終 prompt）。
+  interface RefSpec {
+    url: string;
+    role: ReferenceImageRole;
+    name: string;
+  }
+  const refSpecs: RefSpec[] = [];
+  if (body.source_image && typeof body.source_image === "string") {
+    refSpecs.push({ url: body.source_image, role: "general", name: "source-image" });
+  }
+  for (const ref of Array.isArray(body.reference_images) ? body.reference_images : []) {
+    if (!ref || typeof ref.url !== "string") continue;
+    if (!(ref.url.startsWith("https:") || ref.url.startsWith("data:image/"))) continue;
+    refSpecs.push({
+      url: ref.url,
+      role: isReferenceImageRole(ref.role) ? ref.role : toReferenceImageRole(ref.role),
+      name:
+        typeof ref.name === "string" && ref.name.trim()
+          ? truncate(ref.name.trim(), 60)
+          : "reference-" + String(refSpecs.length + 1),
+    });
+  }
   for (const url of body.reference_image_urls ?? []) {
     if (typeof url === "string" && (url.startsWith("https:") || url.startsWith("data:image/"))) {
-      refUrls.push(url);
+      refSpecs.push({ url, role: "general", name: "reference-" + String(refSpecs.length + 1) });
     }
   }
-  const limitedRefUrls = refUrls.slice(0, MAX_REFERENCE_IMAGES);
+  // 同 URL 去重後限量。
+  const seenRefUrls = new Set<string>();
+  const limitedRefSpecs = refSpecs
+    .filter((r) => {
+      if (seenRefUrls.has(r.url)) return false;
+      seenRefUrls.add(r.url);
+      return true;
+    })
+    .slice(0, MAX_REFERENCE_IMAGES);
 
   const referenceBuffers: { buffer: Buffer; mime: string }[] = [];
-  for (const url of limitedRefUrls) {
+  for (const spec of limitedRefSpecs) {
     try {
-      referenceBuffers.push(await fetchReferenceBuffer(url));
+      referenceBuffers.push(await fetchReferenceBuffer(spec.url));
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      return fail(400, `参考图获取失败（${truncate(url, 80)}）：${truncate(reason, 100)}`, "reference_fetch_failed");
+      return fail(400, `参考图获取失败（${truncate(spec.url, 80)}）：${truncate(reason, 100)}`, "reference_fetch_failed");
     }
   }
+
+  // 有任何非 general 角色或負面詞才帶 workflow（兩者皆無時請求位元組與舊路徑完全一致，零行為漂移）。
+  const roleMetadata = limitedRefSpecs
+    .filter((r) => r.role !== "general")
+    .map((r) => ({ name: r.name, role: r.role }));
+  const workflowField =
+    roleMetadata.length > 0 || negativePrompt
+      ? JSON.stringify({
+          schemaVersion: 2,
+          ...(roleMetadata.length > 0 ? { referenceImages: roleMetadata } : {}),
+          ...(negativePrompt ? { negativePrompt } : {}),
+        })
+      : undefined;
 
   // 展示價：與扣費同源（syncModelPricing 先灌 admin 覆寫）。算不出 → null，不騙 0。
   let costCoins: number | null = null;
@@ -161,6 +217,9 @@ export async function POST(req: NextRequest) {
       form.append("modelId", modelId);
       form.append("qualityMode", qualityMode);
       form.append("aspectRatio", aspectRatio);
+      // 參考圖角色（reference 節點語義）：交給 generate-images 的既有
+      // workflow.referenceImages 鏈路 → buildWorkflowPrompt 寫進最終 prompt。
+      if (workflowField) form.append("workflow", workflowField);
       referenceBuffers.forEach((ref, i) => {
         form.append(
           "referenceImages",
@@ -182,6 +241,9 @@ export async function POST(req: NextRequest) {
           modelId,
           qualityMode,
           aspectRatio,
+          // JSON body 的 workflow 欄位 generate-images 同样接收（字串會被
+          // readWorkflowMetadata 解析）；無卡負面詞時不帶，位元組不變。
+          ...(workflowField ? { workflow: workflowField } : {}),
         }),
       });
     }

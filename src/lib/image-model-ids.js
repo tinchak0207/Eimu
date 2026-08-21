@@ -104,6 +104,13 @@ export const SUPPORTED_GENERATION_MODEL_IDS = [
   ...SUPPORTED_VIDEO_MODEL_IDS,
 ];
 
+// ── AV 成片链路（配音/数字人/唇形）。不入 SUPPORTED_* 列表：C 端选单与 canvas
+// 管线不受影响，只有 B 端 /v1/models、/v1/object_info 与 model-status 显式附加。
+export const TTS_1_MODEL_ID = /** @type {const} */ ("tts-1");
+export const AVATAR_1_MODEL_ID = /** @type {const} */ ("avatar-1");
+export const LIPSYNC_1_MODEL_ID = /** @type {const} */ ("lipsync-1");
+export const SUPPORTED_AV_MODEL_IDS = [TTS_1_MODEL_ID, AVATAR_1_MODEL_ID, LIPSYNC_1_MODEL_ID];
+
 export const ADOBE2API_MODEL_IDS = [
   DEFAULT_IMAGE_MODEL_ID,
   NANO_BANANA_2_MODEL_ID,

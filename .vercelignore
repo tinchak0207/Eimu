@@ -42,6 +42,22 @@ node_modules/@swc/*
 /.next-start.log
 /.next-dev-*.log
 
+# local tooling home / caches / heavy non-deploy artifacts (workbuddy-linux alone is 1.9G,
+# including a 449MB wb.dmg that trips Vercel's 100MB per-file limit)
+/.tmp-home/
+/.tmp-vercel-cache/
+/.tmp-vercel-config/
+/workbuddy-linux/
+/.dsh-ssh/
+/.dsh-vision-router/
+/.tsdeps/
+/.pixai-refresh/
+/browser-probe/
+/browser-screenshots/
+/pixai-pool-new.json
+/dreamina_output.webp
+/deploy_out.log
+
 # documentation & design assets (build-time only; no runtime code reads these)
 /docs/
 /design-system/

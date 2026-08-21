@@ -3,7 +3,7 @@ import type { GenerationWorkflowMetadata } from "@/lib/image-types";
 
 export interface PublicGenerationSummaryInput {
   modelId?: string;
-  mediaType?: "image" | "video";
+  mediaType?: "image" | "video" | "audio";
   workflow?: GenerationWorkflowMetadata;
 }
 

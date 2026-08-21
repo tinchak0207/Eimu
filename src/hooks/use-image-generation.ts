@@ -59,7 +59,7 @@ type GenerationResponse = {
   image?: string | null;
   imageUrl?: string | null;
   videoUrl?: string | null;
-  mediaType?: "image" | "video";
+  mediaType?: "image" | "video" | "audio";
   endpointLabel?: string;
   task_id?: string;
   taskId?: string;

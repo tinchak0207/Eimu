@@ -32,7 +32,7 @@ interface TierPricingModelPayload {
   id: string;
   displayName: string;
   vendor: string;
-  kind: "image" | "video";
+  kind: "image" | "video" | "audio";
   resolutions: string[];
   /** 該解析度的基準幣價（generation coins，圖片= 幣/張，影片= 幣/秒）。 */
   baseCoins: Record<string, number>;

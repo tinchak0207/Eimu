@@ -7,7 +7,7 @@ export interface PersistedGenerationResult {
   image: string | null;
   imageUrl: string | null;
   videoUrl?: string | null;
-  mediaType?: "image" | "video";
+  mediaType?: "image" | "video" | "audio";
   endpointLabel?: string;
   taskId?: string;
   resultId?: string;

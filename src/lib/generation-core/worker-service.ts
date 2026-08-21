@@ -130,7 +130,7 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
           base64: output.base64,
           url: output.url,
           endpointLabel: output.endpointLabel,
-          mediaKind: job.kind === "video_generate" ? "video" : "image",
+          mediaKind: job.kind === "tts" ? "audio" : (job.kind === "video_generate" || job.kind === "avatar" || job.kind === "lipsync") ? "video" : "image",
         }, sql);
         const latencyMs = Date.now() - startedAt;
         await completeGenerationAttempt({

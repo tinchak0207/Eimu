@@ -19,7 +19,7 @@ export interface GenerationCommand {
   billingUserId?: number | null;
   source: "web" | "biz" | "canary";
   idempotencyKey?: string | null;
-  kind: "image_generate" | "image_edit" | "video_generate";
+  kind: "image_generate" | "image_edit" | "video_generate" | "tts" | "avatar" | "lipsync";
   routingClass?: "generic" | "firefly_only";
   modelId: string;
   prompt: string;
@@ -31,6 +31,9 @@ export interface GenerationCommand {
   responseFormat?: "b64_json" | "url";
   callbackUrl?: string | null;
   retryOfTaskId?: string | null;
+  /** 批量編排層（/v1/batches）回填：任務所屬批與批內序號；單任務提交不帶。 */
+  batchId?: string | null;
+  batchIndex?: number | null;
   referenceArtifacts?: CreateGenerationJobInput["referenceArtifacts"];
   requestedCount?: number;
   billingAmount?: number;
@@ -82,6 +85,8 @@ export async function submitGenerationCommand(
     responseFormat: command.responseFormat ?? "b64_json",
     callbackUrl: command.callbackUrl ?? null,
     retryOfTaskId: command.retryOfTaskId ?? null,
+    batchId: command.batchId ?? null,
+    batchIndex: command.batchIndex ?? null,
     referenceArtifacts: command.referenceArtifacts ?? [],
     requestedCount,
     billingAmount: command.billingAmount ?? 0,

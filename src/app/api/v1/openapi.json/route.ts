@@ -529,6 +529,147 @@ const SPEC = {
         },
       },
     },
+    "/batches": {
+      post: {
+        operationId: "createBatch",
+        summary: "批量生成（圖片/視頻混合，異步 202）",
+        description:
+          "一次提交最多 100 個生成任務（常量 MAX_BATCH_SIZE，可按需上調）。requests 每項帶 kind（image/video；缺省時由 duration_seconds/generate_audio 判別，再缺省視為 image），欄位與 /images/generations、/videos/generations 一致。\n" +
+          "逐項驗證：單項失敗不炸整批，回應逐項標 items[].accepted 與 failed_items[].error。每項走與單任務完全相同的提交/計費/調度路徑。\n" +
+          "支援 batch 級 Idempotency-Key 請求頭：重複提交回同一批；崩潰後重放會補齊未提交項（已提交項不重複扣費）。\n" +
+          "max_in_flight 為聲明性欄位——實際併發由平台池化治理（全量提交 + scheduler 排隊），可承諾併發請與平台確認。",
+        security: [bearerAuth],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/BatchRequest" },
+            },
+          },
+        },
+        responses: {
+          202: {
+            description: "批已接受（異步）。Location 指向批聚合視圖。",
+            headers: {
+              ...RATE_LIMIT_HEADERS,
+              Location: { description: "批聚合視圖 URL：/v1/batches/{id}", schema: { type: "string" } },
+            },
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/BatchAccepted" },
+              },
+            },
+          },
+          400: {
+            description: "invalid_json / missing_requests / empty_requests / batch_too_large / invalid_max_in_flight",
+            headers: RATE_LIMIT_HEADERS,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorResponse" },
+              },
+            },
+          },
+          409: {
+            description: "idempotency_key_reused（同鍵不同內容）",
+            headers: RATE_LIMIT_HEADERS,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorResponse" },
+              },
+            },
+          },
+          ...authErrorResponses(),
+          503: {
+            description: "control_plane_unavailable",
+            headers: RATE_LIMIT_HEADERS,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorResponse" },
+              },
+            },
+          },
+        },
+      },
+    },
+    "/batches/{id}": {
+      get: {
+        operationId: "getBatch",
+        summary: "查詢批聚合視圖（輪詢不消耗限流）",
+        description:
+          "counts 按 pending/running/succeeded/failed/cancelled/refunded 分桶（另計 unsubmitted = 驗證被拒項）。\n" +
+          "批終結判定：全部已提交項終結即 completed。部分成功語義：任何時刻 succeeded 的項都可經 /v1/images/{id}/result（或 /videos）單獨取件，不必等整批。",
+        security: [bearerAuth],
+        parameters: [
+          {
+            name: "id",
+            in: "path",
+            required: true,
+            description: "批 id（POST /batches 的 202 回應中的 id）",
+            schema: { type: "string" },
+          },
+        ],
+        responses: {
+          200: {
+            description: "批聚合視圖",
+            headers: RATE_LIMIT_HEADERS,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Batch" },
+              },
+            },
+          },
+          404: {
+            description: "batch_not_found",
+            headers: RATE_LIMIT_HEADERS,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorResponse" },
+              },
+            },
+          },
+          ...authErrorResponses(),
+        },
+      },
+    },
+    "/batches/{id}/reconciliation": {
+      get: {
+        operationId: "getBatchReconciliation",
+        summary: "對賬導出（JSON；CSV 後續可加）",
+        description:
+          "月結對賬面：任務 ID、成功/失敗數、逐項失敗原因 class、計費金額彙總（charged = succeeded 合計；失敗退費=按成功計費；refunded = 非成功終結項退回合計；pending = 在途預留）。輪詢不消耗限流。",
+        security: [bearerAuth],
+        parameters: [
+          {
+            name: "id",
+            in: "path",
+            required: true,
+            description: "批 id",
+            schema: { type: "string" },
+          },
+        ],
+        responses: {
+          200: {
+            description: "對賬文檔",
+            headers: RATE_LIMIT_HEADERS,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/BatchReconciliation" },
+              },
+            },
+          },
+          404: {
+            description: "batch_not_found",
+            headers: RATE_LIMIT_HEADERS,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ErrorResponse" },
+              },
+            },
+          },
+          ...authErrorResponses(),
+        },
+      },
+    },
   },
   components: {
     securitySchemes: {
@@ -569,7 +710,7 @@ const SPEC = {
           code: {
             type: "string",
             description:
-              "穩定錯誤代碼：invalid_json, missing_prompt, prompt_too_long, missing_model, model_not_found, model_not_permitted, unsupported_size, invalid_n, no_endpoints, insufficient_quota, upstream_failed, control_plane_unavailable, idempotency_key_reused, task_not_found, result_not_ready, missing_image, missing_data, image_too_large, method_not_allowed",
+              "穩定錯誤代碼：invalid_json, missing_prompt, prompt_too_long, missing_model, model_not_found, model_not_permitted, unsupported_size, invalid_n, no_endpoints, insufficient_quota, upstream_failed, control_plane_unavailable, idempotency_key_reused, task_not_found, result_not_ready, missing_image, missing_data, image_too_large, method_not_allowed, invalid_request_body, missing_requests, empty_requests, batch_too_large, invalid_max_in_flight, invalid_item, invalid_kind, invalid_control_nets, submission_failed, batch_not_found",
           },
           param: { type: ["string", "null"] },
           trace_id: { type: "string", description: "與 X-Request-Id 回應頭相同。" },
@@ -580,6 +721,199 @@ const SPEC = {
         required: ["error"],
         properties: {
           error: { $ref: "#/components/schemas/ErrorBody" },
+        },
+      },
+      BatchItemRequest: {
+        type: "object",
+        description:
+          "單個生成請求：欄位與 /images/generations（kind=image）或 /videos/generations（kind=video）的請求體一致。kind 缺省時由 duration_seconds/generate_audio 判別，再缺省視為 image。",
+        required: ["model", "prompt"],
+        properties: {
+          kind: { type: "string", enum: ["image", "video", "image_generate", "video_generate"] },
+          model: { type: "string" },
+          prompt: { type: "string", maxLength: 4000 },
+          n: { type: "integer", minimum: 1, maximum: 4 },
+          size: { type: "string" },
+          quality: { type: "string", enum: ["standard", "hd", "high"], description: "hd/high → quality 檔，其餘 fast。" },
+          response_format: { type: "string", enum: ["url", "b64_json"] },
+          duration_seconds: { type: "number", description: "視頻項專屬。" },
+          generate_audio: { type: "boolean", description: "視頻項專屬。" },
+          callback_url: { type: "string", format: "uri" },
+          control_nets: {
+            type: "array",
+            description: "圖片項專屬，最多 4 項，規則同 /images/generations。",
+            items: { type: "object" },
+          },
+        },
+      },
+      BatchRequest: {
+        type: "object",
+        required: ["requests"],
+        properties: {
+          requests: {
+            type: "array",
+            minItems: 1,
+            maxItems: 100,
+            description: "上限 100（MAX_BATCH_SIZE 常量）；超限整批 400 batch_too_large。",
+            items: { $ref: "#/components/schemas/BatchItemRequest" },
+          },
+          max_in_flight: {
+            type: "integer",
+            minimum: 1,
+            description: "聲明性欄位：實際併發由平台池化治理（全量提交 + scheduler 排隊）。",
+          },
+        },
+      },
+      BatchAcceptedItem: {
+        type: "object",
+        required: ["index", "task_id", "accepted", "task_url"],
+        properties: {
+          index: { type: "integer", description: "對應 requests 索引（0 起）。" },
+          task_id: { type: "string" },
+          accepted: { type: "boolean", enum: [true] },
+          task_url: { type: "string", description: "/v1/images/{id} 或 /v1/videos/{id}。" },
+        },
+      },
+      BatchFailedItem: {
+        type: "object",
+        required: ["index", "error"],
+        properties: {
+          index: { type: "integer" },
+          error: { $ref: "#/components/schemas/ErrorBody" },
+        },
+      },
+      BatchAccepted: {
+        type: "object",
+        required: ["object", "id", "batch_id", "status", "total_count", "created", "created_at", "idempotent_replay", "items", "failed_items", "counts", "batch_url"],
+        properties: {
+          object: { type: "string", enum: ["image_generation.batch"] },
+          id: { type: "string" },
+          batch_id: { type: "string" },
+          status: { type: "string", enum: ["open", "completed", "cancelled"] },
+          total_count: { type: "integer" },
+          max_in_flight: { type: ["integer", "null"] },
+          created: { type: "integer", description: "epoch 秒。" },
+          created_at: { type: "string", format: "date-time" },
+          idempotent_replay: { type: "boolean", description: "true = 同一 Idempotency-Key 的重放，回同一批。" },
+          items: { type: "array", items: { $ref: "#/components/schemas/BatchAcceptedItem" } },
+          failed_items: { type: "array", items: { $ref: "#/components/schemas/BatchFailedItem" } },
+          counts: {
+            type: "object",
+            properties: { accepted: { type: "integer" }, failed: { type: "integer" } },
+          },
+          batch_url: { type: "string" },
+        },
+      },
+      BatchStatusCounts: {
+        type: "object",
+        required: ["total", "submitted", "unsubmitted", "pending", "running", "succeeded", "failed", "cancelled", "refunded", "unknown"],
+        properties: {
+          total: { type: "integer" },
+          submitted: { type: "integer", description: "已成為任務的項數。" },
+          unsubmitted: { type: "integer", description: "驗證/提交失敗、永遠不會變成任務的項數。" },
+          pending: { type: "integer" },
+          running: { type: "integer" },
+          succeeded: { type: "integer" },
+          failed: { type: "integer" },
+          cancelled: { type: "integer" },
+          refunded: { type: "integer" },
+          unknown: { type: "integer", description: "billing_unknown / submit_unknown。" },
+        },
+      },
+      BatchBillingSummary: {
+        type: "object",
+        description: "quota 單位。charged = succeeded 合計（失敗退費=按成功計費）；refunded = 非成功終結項退回；pending = 在途預留。",
+        required: ["reserved_total", "charged_total", "refunded_total", "pending_total"],
+        properties: {
+          reserved_total: { type: "integer" },
+          charged_total: { type: "integer" },
+          refunded_total: { type: "integer" },
+          pending_total: { type: "integer" },
+        },
+      },
+      BatchItemView: {
+        type: "object",
+        required: ["index", "accepted", "task_id", "task_url", "status", "task_state", "model", "kind", "billed", "failure_class", "failure_detail", "error", "created_at", "finished_at"],
+        properties: {
+          index: { type: "integer" },
+          accepted: { type: "boolean" },
+          task_id: { type: ["string", "null"] },
+          task_url: { type: ["string", "null"] },
+          status: { type: ["string", "null"], description: "內部原始狀態。" },
+          task_state: { $ref: "#/components/schemas/TaskStatus" },
+          model: { type: ["string", "null"] },
+          kind: { type: ["string", "null"] },
+          billed: { type: "boolean", description: "成功才計費：只有 succeeded 為 true。" },
+          failure_class: { type: ["string", "null"] },
+          failure_detail: { type: ["string", "null"] },
+          error: { type: ["object", "null"], description: "未提交項的拒絕原因（ErrorBody 形狀）。" },
+          created_at: { type: ["string", "null"], format: "date-time" },
+          finished_at: { type: ["string", "null"], format: "date-time" },
+        },
+      },
+      Batch: {
+        type: "object",
+        required: ["object", "id", "batch_id", "status", "total_count", "counts", "billing", "items", "created", "created_at", "completed_at", "batch_url", "reconciliation_url"],
+        properties: {
+          object: { type: "string", enum: ["image_generation.batch"] },
+          id: { type: "string" },
+          batch_id: { type: "string" },
+          status: { type: "string", enum: ["open", "completed", "cancelled"] },
+          total_count: { type: "integer" },
+          max_in_flight: { type: ["integer", "null"] },
+          counts: { $ref: "#/components/schemas/BatchStatusCounts" },
+          billing: { $ref: "#/components/schemas/BatchBillingSummary" },
+          items: { type: "array", items: { $ref: "#/components/schemas/BatchItemView" } },
+          created: { type: "integer" },
+          created_at: { type: "string", format: "date-time" },
+          completed_at: { type: ["string", "null"], format: "date-time" },
+          batch_url: { type: "string" },
+          reconciliation_url: { type: "string" },
+        },
+      },
+      BatchReconciliation: {
+        type: "object",
+        required: ["object", "batch_id", "status", "totals", "billing", "failure_breakdown", "items", "created_at", "completed_at", "generated_at"],
+        properties: {
+          object: { type: "string", enum: ["image_generation.batch_reconciliation"] },
+          batch_id: { type: "string" },
+          status: { type: "string", enum: ["open", "completed", "cancelled"] },
+          totals: { $ref: "#/components/schemas/BatchStatusCounts" },
+          billing: { $ref: "#/components/schemas/BatchBillingSummary" },
+          failure_breakdown: {
+            type: "array",
+            description: "失敗原因分佈：job 的 failure_class + 未提交項的驗證錯誤碼。",
+            items: {
+              type: "object",
+              required: ["failure_class", "count"],
+              properties: { failure_class: { type: "string" }, count: { type: "integer" } },
+            },
+          },
+          items: {
+            type: "array",
+            items: {
+              type: "object",
+              required: ["index", "task_id", "model", "kind", "status", "task_state", "billed", "billing_amount", "failure_class", "failure_detail", "error_code", "created_at", "finished_at"],
+              properties: {
+                index: { type: "integer" },
+                task_id: { type: ["string", "null"] },
+                model: { type: ["string", "null"] },
+                kind: { type: ["string", "null"] },
+                status: { type: ["string", "null"] },
+                task_state: { type: ["string", "null"] },
+                billed: { type: "boolean" },
+                billing_amount: { type: "integer" },
+                failure_class: { type: ["string", "null"] },
+                failure_detail: { type: ["string", "null"], description: "截斷至 200 字符。" },
+                error_code: { type: ["string", "null"], description: "未提交項的驗證錯誤碼。" },
+                created_at: { type: ["string", "null"], format: "date-time" },
+                finished_at: { type: ["string", "null"], format: "date-time" },
+              },
+            },
+          },
+          created_at: { type: "string", format: "date-time" },
+          completed_at: { type: ["string", "null"], format: "date-time" },
+          generated_at: { type: "string", format: "date-time" },
         },
       },
       TaskStatus: {

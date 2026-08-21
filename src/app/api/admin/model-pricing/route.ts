@@ -40,7 +40,7 @@ interface PricingModelPayload {
   id: string;
   displayName: string;
   vendor: string;
-  kind: "image" | "video";
+  kind: "image" | "video" | "audio";
   resolutions: string[];
   durations: number[];
   supportsAudio: boolean;

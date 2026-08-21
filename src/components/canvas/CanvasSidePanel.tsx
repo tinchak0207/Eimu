@@ -42,6 +42,8 @@ const NODE_TYPE_LABEL: Record<CanvasNodeType, string> = {
   [CanvasNodeType.CharacterCard]: "角色卡",
   [CanvasNodeType.SceneCard]: "场景卡",
   [CanvasNodeType.Audio]: "音频",
+  [CanvasNodeType.Prompt]: "提示词",
+  [CanvasNodeType.Reference]: "参考图",
 };
 
 const SECTION_HEADING = "px-1 pb-1.5 text-[11px] font-semibold tracking-wide text-[rgba(0,0,0,0.35)] uppercase";

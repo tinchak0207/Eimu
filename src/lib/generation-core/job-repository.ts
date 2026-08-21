@@ -62,6 +62,8 @@ export function mapGenerationJob(row: Row): GenerationJob {
     callbackUrl: row.callback_url === null ? null : String(row.callback_url),
     retryOfTaskId: row.retry_of_job_id === null || row.retry_of_job_id === undefined ? null : String(row.retry_of_job_id),
     primaryResultId: row.primary_artifact_id === null || row.primary_artifact_id === undefined ? null : String(row.primary_artifact_id),
+    batchId: row.batch_id === null || row.batch_id === undefined ? null : String(row.batch_id),
+    batchIndex: row.batch_index === null || row.batch_index === undefined ? null : Number(row.batch_index),
     status: row.status as GenerationJobStatus,
     requestedCount: Number(row.requested_count),
     completedCount: Number(row.completed_count),
@@ -95,14 +97,16 @@ export async function createGenerationJob(
       INSERT INTO generation_job (
         id, tenant_id, api_key_id, billing_user_id, source, idempotency_key, request_hash,
         kind, routing_class, model_id, size, ratio, resolution, quality, prompt_ciphertext,
-        workflow_json, response_format, callback_url, retry_of_job_id, requested_count, billing_amount, deadline_at
+        workflow_json, response_format, callback_url, retry_of_job_id, requested_count, billing_amount, deadline_at,
+        batch_id, batch_index
       ) VALUES (
         ${input.id}, ${input.tenantId}, ${input.apiKeyId ?? null}, ${input.billingUserId ?? null},
         ${input.source}, ${input.idempotencyKey ?? null}, ${input.requestHash}, ${input.kind},
         ${input.routingClass}, ${input.modelId}, ${input.size ?? null}, ${input.ratio ?? null},
         ${input.resolution ?? null}, ${input.quality ?? null}, ${input.promptCiphertext},
         ${tx.json(JSON.parse(JSON.stringify(input.workflow ?? {})) as never)}, ${input.responseFormat ?? "b64_json"},
-        ${input.callbackUrl ?? null}, ${input.retryOfTaskId ?? null}, ${input.requestedCount}, ${input.billingAmount}, ${input.deadlineAt}
+        ${input.callbackUrl ?? null}, ${input.retryOfTaskId ?? null}, ${input.requestedCount}, ${input.billingAmount}, ${input.deadlineAt},
+        ${input.batchId ?? null}, ${input.batchIndex ?? null}
       )
       ON CONFLICT (tenant_id, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
       RETURNING *

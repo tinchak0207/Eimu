@@ -198,8 +198,34 @@ function detectVideoMimeType(buffer: Buffer): string | null {
   return null;
 }
 
-export function validateOutputMediaBuffer(buffer: Buffer, kind: "image" | "video"): ValidateImageResult {
+/**
+ * 音頻魔數嗅探（AV 成片鏈路的 TTS 輸出）：
+ *   - mp3：ID3 標頭或 MPEG 幀同步（0xFF Ex/Fx）。
+ *   - wav：RIFF 容器 + "WAVE"。
+ *   - ogg："OggS" 頁首。
+ *   - m4a：MP4 容器的 "ftyp" at offset 4。
+ */
+export function detectAudioMimeType(buffer: Buffer): string | null {
+  if (buffer.length >= 3 && buffer[0] === 0x49 && buffer[1] === 0x44 && buffer[2] === 0x33) return "audio/mpeg";
+  if (buffer.length >= 2 && buffer[0] === 0xff && (buffer[1] & 0xe0) === 0xe0) return "audio/mpeg";
+  if (buffer.length >= 12 && buffer.subarray(0, 4).toString("ascii") === "RIFF" && buffer.subarray(8, 12).toString("ascii") === "WAVE") return "audio/wav";
+  if (buffer.length >= 4 && buffer.subarray(0, 4).toString("ascii") === "OggS") return "audio/ogg";
+  if (buffer.length >= 8 && buffer.subarray(4, 8).toString("ascii") === "ftyp") return "audio/mp4";
+  return null;
+}
+
+export function validateOutputMediaBuffer(buffer: Buffer, kind: "image" | "video" | "audio"): ValidateImageResult {
   if (kind === "image") return validateImageBuffer(buffer);
+  if (kind === "audio") {
+    const mimeType = detectAudioMimeType(buffer);
+    if (!mimeType) return { error: "Unsupported or malformed audio output; expected MP3/WAV/OGG/M4A." };
+    return {
+      mimeType,
+      width: 0,
+      height: 0,
+      sha256: createHash("sha256").update(buffer).digest("hex"),
+    };
+  }
   const mimeType = detectVideoMimeType(buffer);
   if (!mimeType) return { error: "Unsupported or malformed video output; expected MP4 or WebM." };
   return {
@@ -283,6 +309,10 @@ function extensionForMimeType(mimeType: string): string {
   if (mimeType === "image/webp") return "webp";
   if (mimeType === "video/mp4") return "mp4";
   if (mimeType === "video/webm") return "webm";
+  if (mimeType === "audio/mpeg") return "mp3";
+  if (mimeType === "audio/wav") return "wav";
+  if (mimeType === "audio/ogg") return "ogg";
+  if (mimeType === "audio/mp4") return "m4a";
   return "png";
 }
 
@@ -310,7 +340,7 @@ export async function persistOutputArtifact(input: {
   base64: string | null;
   url: string | null;
   endpointLabel: string;
-  mediaKind?: "image" | "video";
+  mediaKind?: "image" | "video" | "audio";
   retentionExpiresAt?: Date | null;
 }, sql: GenerationSql = getGenerationSql()): Promise<PersistedOutputArtifact> {
   if (!process.env.BLOB_READ_WRITE_TOKEN) throw new Error("BLOB_READ_WRITE_TOKEN is required to persist generation outputs.");

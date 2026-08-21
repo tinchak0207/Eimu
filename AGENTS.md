@@ -10,15 +10,15 @@ Golden time only: decide what to change → edit code → deploy → write memor
 
 Garbage time. Minimize ruthlessly. NEVER perform:
 - **No self UI checks.** The user owns aesthetics. Dev server / Playwright / screenshots to verify layout, ratios, or appearance = garbage. Finish the edit, deploy, and let the user look.
-- **No self-invented helper scripts/tools** (deploy.ps1, check scripts, etc.) unless the user explicitly names them.
+- **No self-invented helper scripts/tools** (deploy/check scripts, etc.) unless the user explicitly names them.
 - **Cooking order:** do non-waiting work first (rules, memory, local edits), waiting work LAST (deploy, long verifications, external calls). Deploy is always the final step.
 - **Stop guessing:** after 3 reads/probes without producing a code change, ask the user one question. Never guess-screen sizes, states, or intentions from files.
-- **Grep-first for research:** locate evidence with targeted grep/Select-String, do NOT full-read large files (>200 lines) unless the task requires holistic understanding. Full-read pollutes context and is slower than 3 greps.
+- **Grep-first for research:** locate evidence with targeted grep/ripgrep, do NOT full-read large files (>200 lines) unless the task requires holistic understanding. Full-read pollutes context and is slower than 3 greps.
 - **No self-narration:** never output lines like "I will now read...", "analysis complete". Output decisions, evidence, and results only.
 - **Never re-run a completed closed loop** ("run it again to see").
-- **Memory discipline:** every finished usable tool, solved recurring problem, or user-corrected behavior MUST be written to memory the same session (`C:\Users\lenovo\.codex\memories\extensions\ad_hoc\notes\` note + `memory_summary.md` update). Not writing it = intelligence reset next session.
+- **Memory discipline:** every finished usable tool, solved recurring problem, or user-corrected behavior MUST be written to memory the same session (`/home/lenovo/.codex/memories/extensions/ad_hoc/notes/` note + `memory_summary.md` update). Not writing it = intelligence reset next session.
 - **Harness iteration loop (2026-08-02):** when the user reports a harness effect (time still being wasted, a rule not taking effect), fix the corresponding rule/flow IMMEDIATELY, before any other work, same session. Every user report is one compression.
-- Respond in Traditional Chinese; run commands with Windows PowerShell syntax.
+- Respond in Traditional Chinese; run commands with bash syntax (this machine is Arch Linux since 2026-08-17; PowerShell/Windows paths are legacy and wrong).
 
 ## First-principles mainline
 
@@ -80,7 +80,7 @@ Garbage time. Minimize ruthlessly. NEVER perform:
 - 同步到 VPS `/opt/image-control-plane/app` 后 `docker compose -f control-plane-compose.yml build + up -d generation-worker` 重建
 - 验证：account 变 `auto_refresh/healthy/healthy`，B 端 key 提交 gpt-image-2 任务 succeeded，出图 1024x1024 PNG（1.1MB，endpointLabel=adobe2api，sha256 匹配）
 ### 排障秘诀（下次直接抄）
-- **VPS 访问**：`node .dsh-ssh/exec.js "<命令>"`（ssh2 + ~/.ssh/new.pem，user=ubuntu，43.172.85.76:**22443**）；无 ssh 二进制时这是唯一通道。注意：**22 端口已废弃**（VPS 曾对 22 做主机侧防护黑洞，sshd 现双端口监听 22+22443，22 外部不可达），一律走 22443
+- **VPS 访问（2026-08-21 起主用 SSH-over-443）**：`bash .pixai-refresh/start-ssh443.sh`（幂等启动本地隧道）→ `node .dsh-ssh/exec-443.js "<命令>"`。链路：本机 127.0.0.1:22222 → ws 隧道 → `wss://store.tinchak0207.xyz/ssh` → nginx `/ssh` → gost `forward+ws://0.0.0.0:18083/127.0.0.1:22`（VPS systemd warp-proxy-gost，0.0.0.0 监听因 nginx 容器经网关 172.20.0.1 访问，UFW 已放行 172.16.0.0/12→18082/18083）→ sshd。**443 永通，连续 5 连间隔 1s 稳定，完全免疫 ISP 对 SSH 端口的 DPI 限流**。旧通道 22443 仍可用（`node .dsh-ssh/exec.js`）但连续 2-3 次即被 RST，仅低频兜底；22 端口已废弃（路径级封锁，不可修）。gost 若偶发卡死（forward+ws 连接泄漏，症状=ws 隧道 up 但 SSH 握手失败），VNC `sudo systemctl restart warp-proxy-gost` 即恢复
 - **控制面 DB**：`sudo docker exec image-control-postgres psql -U image_control -d image_control -c "<SQL>"`（VPS 上）
 - **容器状态**：`sudo docker ps -a --format '{{.Names}} | {{.Status}}'`
 - **capacity_saturated 诊断顺序**：① 查 supplier_lease 残留 → ② 查 supplier_account 的 token_source/refresh_status/health → ③ 查 adobe2api 容器真实 health 路径（容器内 `python3 urllib` 探测各路径）→ ④ 对照 adobe-health.ts 解析字段

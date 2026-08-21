@@ -1,5 +1,5 @@
 export type GenerationSource = "web" | "biz" | "canary";
-export type GenerationKind = "image_generate" | "image_edit" | "video_generate";
+export type GenerationKind = "image_generate" | "image_edit" | "video_generate" | "tts" | "avatar" | "lipsync";
 export type RoutingClass = "generic" | "firefly_only";
 export type GenerationJobStatus =
   | "pending_billing"
@@ -67,6 +67,10 @@ export interface GenerationJob {
   callbackUrl: string | null;
   retryOfTaskId: string | null;
   primaryResultId: string | null;
+  /** 批量生成編排層（/v1/batches）回填的歸屬；非批量任務為 null。 */
+  batchId?: string | null;
+  /** 批內序號（0 起，對應 POST /v1/batches 的 requests 索引）；非批量任務為 null。 */
+  batchIndex?: number | null;
   status: GenerationJobStatus;
   requestedCount: number;
   completedCount: number;
@@ -123,6 +127,9 @@ export interface CreateGenerationJobInput {
   responseFormat?: "b64_json" | "url";
   callbackUrl?: string | null;
   retryOfTaskId?: string | null;
+  /** 批量生成編排層（/v1/batches）回填的歸屬；單任務提交不帶。 */
+  batchId?: string | null;
+  batchIndex?: number | null;
   referenceArtifacts?: CreateGenerationReferenceArtifactInput[];
   requestedCount: number;
   billingAmount: number;
@@ -147,7 +154,7 @@ export interface CreateGenerationReferenceArtifactInput {
 export interface SupplierRecord {
   id: string;
   label: string;
-  adapterType: "adobe2api" | "openai_images";
+  adapterType: "adobe2api" | "openai_images" | "minimax" | "did";
   supplyTier: "first_party" | "managed_pool" | "relay" | "fallback";
   failureDomain: string;
   baseUrl: string;

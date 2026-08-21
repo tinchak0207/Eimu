@@ -21,6 +21,31 @@ export type ReferenceImageRole =
   | "face"
   | "general";
 
+/**
+ * ReferenceImageRole 的唯一運行時清單（2026-08-22 補）：
+ * 角色枚舉的 owner 就是本檔案；畫布 reference 節點、API 校驗一律引用這裡，
+ * 不另立第二套枚舉。標籤文案在 workstation-constants.REFERENCE_IMAGE_ROLES。
+ */
+export const REFERENCE_IMAGE_ROLE_VALUES: readonly ReferenceImageRole[] = [
+  "style",
+  "character",
+  "composition",
+  "product",
+  "face",
+  "general",
+];
+
+/** 未知值一律收斂為 "general"（舊數據/agent 亂填都不炸）。 */
+export function toReferenceImageRole(value: unknown): ReferenceImageRole {
+  return typeof value === "string" && (REFERENCE_IMAGE_ROLE_VALUES as readonly string[]).includes(value)
+    ? (value as ReferenceImageRole)
+    : "general";
+}
+
+export function isReferenceImageRole(value: unknown): value is ReferenceImageRole {
+  return typeof value === "string" && (REFERENCE_IMAGE_ROLE_VALUES as readonly string[]).includes(value);
+}
+
 export interface ReferenceImageMetadata {
   name: string;
   role: ReferenceImageRole;
@@ -66,7 +91,7 @@ export interface GeneratedImage {
   image: string | null;
   imageUrl?: string | null;
   videoUrl?: string | null;
-  mediaType?: "image" | "video";
+  mediaType?: "image" | "video" | "audio";
   modelId?: string;
   endpointLabel?: string;
   referenceImageNames?: string[];
@@ -81,7 +106,7 @@ export interface ImageResult {
   image: string | null;
   imageUrl: string | null;
   videoUrl?: string | null;
-  mediaType?: "image" | "video";
+  mediaType?: "image" | "video" | "audio";
   modelId: string;
   endpointLabel?: string;
   referenceImageNames?: string[];
