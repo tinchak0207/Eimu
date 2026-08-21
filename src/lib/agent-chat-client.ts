@@ -106,10 +106,16 @@ function fallbackMessage(status: number): string {
  * 抽出可读的错误讯息：站内代理回 `{ success:false, error, code }`，
  * 网道回 `{ error: { message, type, code } }`，兩种都要能读。
  */
+/** 網關技術名詞 → 使用者能懂的人話。只映射確定語義的，未知的原樣透傳。 */
+const GATEWAY_MESSAGE_ZH: Record<string, string> = {
+  "question request unknown or already resolved": "这个选择已经提交过了，无需重复操作。",
+  "confirm request unknown or already resolved": "这个确认已处理过，请继续对话。",
+};
+
 function extractMessage(data: unknown, status: number): string {
   if (data !== null && typeof data === "object") {
     const d = data as Record<string, unknown>;
-    if (typeof d.error === "string" && d.error.length > 0) return d.error;
+    if (typeof d.error === "string" && d.error.length > 0) return GATEWAY_MESSAGE_ZH[d.error] ?? d.error;
     if (typeof d.message === "string" && d.message.length > 0) return d.message;
     if (d.error !== null && typeof d.error === "object") {
       const e = d.error as Record<string, unknown>;
