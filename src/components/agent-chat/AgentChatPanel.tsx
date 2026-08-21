@@ -277,7 +277,7 @@ function AgentChatPanelComponent({
           2026-08-16：卡片区有界 + 内部滚动（最高 min(60dvh, 28rem)）——高卡片
           不会再被面板高度裁掉底部选项，也不会把 transcript 挤到零高度。 */}
       {pendingConfirms.length > 0 && (
-        <div className="min-h-0 max-h-[min(60dvh,28rem)] shrink-0 overflow-y-auto overscroll-contain px-0.5 pb-2">
+        <div className="min-h-0 max-h-[min(40dvh,20rem)] shrink overflow-y-auto overscroll-contain px-0.5 pb-2">
           <div className="flex flex-col gap-2">
             {pendingConfirms.map((confirm) => (
               <AgentConfirmCard
@@ -292,7 +292,7 @@ function AgentChatPanelComponent({
       )}
 
       {pendingConfirms.length === 0 && pendingQuestions.length > 0 && (
-        <div className="min-h-0 max-h-[min(60dvh,28rem)] shrink-0 overflow-y-auto overscroll-contain px-0.5 pb-2">
+        <div className="min-h-0 max-h-[min(40dvh,20rem)] shrink overflow-y-auto overscroll-contain px-0.5 pb-2">
           {/* 問題卡串行：一次只出一張，答完（reducer 移除該 requestId）再浮出下一張，
               不讓多張疊在一起同時逼用戶做決定。 */}
           <div className="flex flex-col gap-2">
