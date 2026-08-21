@@ -121,7 +121,7 @@ let attachmentSeq = 0;
 function AgentComposerComponent({
   disabled,
   onSend,
-  placeholder = "输入消息…",
+  placeholder = "描述新需求，或要求修改上一轮的图…",
   sessionId,
   prefill,
   onPrefillConsumed,
@@ -554,7 +554,10 @@ function AgentComposerComponent({
         <label htmlFor="agent-composer-input" className="sr-only">
           输入消息
         </label>
-        {/* 移动端虚拟键盘把回车键显示成「发送」，回车即送出（Shift+Enter 换行不变）。 */}
+        {/* 移动端虚拟键盘把回车键显示成「发送」，回车即送出（Shift+Enter 换行不变）。
+            2026-08-22 完美主義審視：默認高度從 1 行加到 ~3 行（min-h）——
+            聊天面上半屏大量留白時，輸入框太矮是最高頻摩擦點；寫長願望
+            第一眼就能看見三四行。autoGrow 長高、max-h 到頂自滾。 */}
         <textarea
           id="agent-composer-input"
           ref={textareaRef}
@@ -568,9 +571,9 @@ function AgentComposerComponent({
           enterKeyHint="send"
           disabled={disabled}
           placeholder={placeholder}
-          rows={1}
+          rows={3}
           className={cn(
-            "max-h-32 w-full resize-none bg-transparent py-2 text-base text-[rgba(0,0,0,0.85)] sm:text-[15px]",
+            "min-h-[72px] max-h-52 w-full resize-none bg-transparent py-2 text-base text-[rgba(0,0,0,0.85)] sm:min-h-[84px] sm:text-[15px]",
             "placeholder:text-[rgba(0,0,0,0.36)] focus:outline-none",
             "touch-manipulation [-webkit-tap-highlight-color:transparent]",
             "disabled:cursor-not-allowed disabled:opacity-50",

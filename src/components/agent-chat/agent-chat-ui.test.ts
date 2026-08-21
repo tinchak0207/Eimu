@@ -157,13 +157,27 @@ test("D-17 有存档时默认开新对话，不拦人做选择题", () => {
    */
   assert.match(surface, /resumable,/);
   assert.match(surface, /discardAndStartNew,/);
-  // mount 后发现存档 → 存快照 → 静默开新，不问。
+  // mount 后发现存档 → 存快照 → 静默续上，不问（2026-08-21 会话持久化后
+  // 由删旧开新改为 resume；discardAndStartNew 保留在 hook 里但已无 UI 调用方）。
   assert.match(surface, /didAutoDiscardRef/);
   assert.match(surface, /setHistorySnapshot\(\{ itemCount: resumable\.itemCount, savedAt: resumable\.savedAt \}\)/);
-  assert.match(surface, /void discardAndStartNew\(\)/);
+  assert.match(surface, /void resume\(\)/);
   // 存档信息收进一颗默认折起来的按钮，想看的人自己点。
   assert.match(surface, /对话历史/);
   assert.match(surface, /aria-expanded=\{showHistory\}/);
+  // 2026-08-21（第三版）：Header 重排——拖拽手柄 + 「AI 助理」+ 呼吸绿点 +
+  // 右侧图标组（历史记录/开新对话/收起）。對話流里不再有散落的「對話歷史」
+  // 文字链接和常驻「已连接」状态行；開新對話留在歷史裡可切回（留舊開新）。
+  const hook = readCode(read("src/hooks/use-agent-chat.ts"));
+  assert.match(hook, /startNewSession/);
+  assert.match(surface, /onStartNewSession/);
+  assert.match(surface, /AI 助理<\/h2>/);
+  assert.match(surface, /bg-emerald-500 animate-pulse/);
+  assert.match(surface, /bg-slate-300/);
+  assert.match(surface, /aria-label="历史记录"/);
+  assert.match(surface, /aria-label="开新对话"/);
+  assert.match(surface, /aria-label="收起"/);
+  assert.match(surface, /top-full right-0/);
 
   /*
    * 下面查的是「界面上没有这些字」，所以要剥掉注释再查——
@@ -311,9 +325,12 @@ test("D-1 the agent face never grows a second send button or a second textarea",
   // 两个输入框并排会有「我该往哪打字」的歧义。
   assert.match(code, /MODES_WITHOUT_TEXTAREA = new Set<PromptInputMode>\(\["upscale", "agent"\]\)/);
   // 聊天区内部靠 flex-1 + min-h-0 自己滚，外层必须给定高度。
-  // 高度改由 CSS 变量（--agent-surface-height）驱动，不再在组件中写死 clamp 值。
+  // 2026-08-22：高度改为「generate 面实测自然高」锁定（contentRef/contentHeight），
+  // 所有模式共用同一外框——不再在组件中写死 clamp 或单一 CSS 变量高度。
   assert.match(code, /AGENT_SURFACE_HEIGHT = "var\(--agent-surface-height\)"/);
-  assert.match(code, /height: AGENT_SURFACE_HEIGHT/);
+  assert.match(code, /contentRef/);
+  assert.match(code, /contentHeight/);
+  assert.match(code, /height: contentHeight/);
 });
 
 test("ImagePlayground no longer hides itself to make room for the agent", () => {

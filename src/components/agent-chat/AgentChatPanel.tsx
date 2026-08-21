@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useEffect, useRef } from "react";
-import { Loader2, RotateCcw, Sparkles } from "lucide-react";
+import { RotateCcw, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AgentAssistantTextItem, AgentChatState } from "@/lib/agent-chat-types";
 import type { BatchAnchor } from "@/lib/agent-batch-anchor";
@@ -157,30 +157,30 @@ function AgentChatPanelComponent({
 
   return (
     <section className="agent-panel" aria-label="智能体对话">
-      {/* 连接状态：一行不占体积，重连时提供手动重试，不遮挡正文。
-          窄屏上状态字升到 iOS caption1（12px），保证在手机上读得清。 */}
-      <div className="agent-panel-status flex items-center gap-2 px-0.5 pb-2 pt-1">
-        <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", meta.dotClass)} aria-hidden="true" />
-        <span className="text-ios-caption1 font-medium text-[rgba(0,0,0,0.35)]">{meta.label}</span>
-        {connection === "reconnecting" && (
-          <button
-            type="button"
-            onClick={onRetryConnection}
-            className="agent-retry ml-auto inline-flex items-center gap-1.5 rounded-full bg-[rgba(0,122,255,0.10)] px-3 py-1 text-ios-caption1 font-semibold text-[#007AFF] transition-colors hover:bg-[rgba(0,122,255,0.18)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)]"
-          >
-            <RotateCcw className="h-3 w-3" aria-hidden="true" />
-            重试
-          </button>
-        )}
-        {connection === "connecting" && (
-          <Loader2 className="ml-auto h-3.5 w-3.5 animate-spin text-[rgba(0,0,0,0.35)]" aria-hidden="true" />
-        )}
-        {closed && closedReason && (
-          <span className="ml-auto truncate text-ios-caption1 text-[rgba(0,0,0,0.35)]">
-            原因：{closedReason}
-          </span>
-        )}
-      </div>
+      {/* 状态行（2026-08-21 收缩）：常驻「已连接/连接中」由 Surface Header 的
+          呼吸绿点承担，这里只在需要人做决定/知晓时出现——等待二选一、
+          断线可重试、会话关闭带原因。 */}
+      {(awaitingChoice || connection === "reconnecting" || (closed && closedReason)) && (
+        <div className="agent-panel-status flex items-center gap-2 px-0.5 pb-2 pt-1">
+          <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", meta.dotClass)} aria-hidden="true" />
+          <span className="text-ios-caption1 font-medium text-[rgba(0,0,0,0.35)]">{meta.label}</span>
+          {connection === "reconnecting" && (
+            <button
+              type="button"
+              onClick={onRetryConnection}
+              className="agent-retry ml-auto inline-flex items-center gap-1.5 rounded-full bg-[rgba(0,122,255,0.10)] px-3 py-1 text-ios-caption1 font-semibold text-[#007AFF] transition-colors hover:bg-[rgba(0,122,255,0.18)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)]"
+            >
+              <RotateCcw className="h-3 w-3" aria-hidden="true" />
+              重试
+            </button>
+          )}
+          {closed && closedReason && !awaitingChoice && (
+            <span className="ml-auto truncate text-ios-caption1 text-[rgba(0,0,0,0.35)]">
+              原因：{closedReason}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* D-26：批量愿望的燃烧进度常驻在顶部，不用点开才知道烧到哪。 */}
       <div className="px-0.5 pb-1.5">
@@ -192,7 +192,7 @@ function AgentChatPanelComponent({
         ref={scrollRef}
         aria-live="polite"
         onScroll={handleTranscriptScroll}
-        className="agent-transcript min-h-0 flex-1 overflow-y-auto overscroll-contain px-0.5 pb-8 pt-1"
+        className="agent-transcript min-h-0 flex-1 overflow-y-auto overscroll-contain px-0.5 pb-3 pt-0.5"
       >
         {items.length === 0 && connection === "open" ? (
           <div className="agent-empty flex h-full min-h-40 flex-col items-center justify-center gap-5 px-6 text-center">

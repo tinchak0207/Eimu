@@ -178,6 +178,14 @@ export interface AgentSessionSummary {
   last_activity_at: number;
 }
 
+/** 會話記憶補注：resume/switch 的老會話補上帳戶畫像（best-effort，失敗不打擾）。 */
+export async function patchAgentSessionMemory(sessionId: string): Promise<void> {
+  try {
+    await agentFetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}/memory`, { method: "POST" });
+  } catch {
+    // 補不上就算了：下一次建新會話時記憶仍會正常注入。
+  }
+}
 /** 列出當前用戶的歷史會話（按 updated_at 降序）。 */
 export async function listAgentSessions(): Promise<AgentSessionSummary[]> {
   const data = await agentFetch('/api/agent/sessions', { method: 'GET' });

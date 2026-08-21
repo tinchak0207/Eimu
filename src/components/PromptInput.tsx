@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { ArrowUpRight, Bot, ImagePlus, Pencil, RefreshCw, Volume2, VolumeX, X, ZoomIn } from "lucide-react";
+import { ArrowUpRight, Bot, ChevronLeft, ImagePlus, Pencil, RefreshCw, Volume2, VolumeX, X, ZoomIn } from "lucide-react";
 import type { AgentSseEvent } from "@/lib/agent-chat-types";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
@@ -254,6 +254,38 @@ export function PromptInput({
   useEffect(() => {
     prevDisplayModeRef.current = displayMode;
   }, [displayMode]);
+
+  // ── 全模式共用外框高度（2026-08-22 暴君裁定：AI 助理 toggle 時大面板高度
+  //    不可變，溢出不可接受）──
+  // 不猜固定數字：在 generate/edit（textarea 可見）時實測內容區自然高度，
+  // 鎖定為所有模式的外框高度。generate 回到原本自然高（零溢出）；
+  // agent/upscale 複製同一高度，內容由 flex-1 拉滿、內部自滾——切換零跳動。
+  // 內容多寡隨模型變化（視頻有 時長/音訊 行），所以進 generate/edit、換模型、
+  // 窗口縮放都要重測。測量前先把舊鎖定清掉，避免 offsetHeight 被自己撐住。
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const [contentHeight, setContentHeight] = useState<number | null>(null);
+  const measureContentHeight = useCallback(() => {
+    if (fillAvailableHeight) return;
+    const el = contentRef.current;
+    if (!el) return;
+    const textareaVisible = !MODES_WITHOUT_TEXTAREA.has(displayMode);
+    if (!textareaVisible) return;
+    // 先解除鎖定再量：否則固定的 height 會讓 offsetHeight 恆等於上次值。
+    setContentHeight(null);
+    requestAnimationFrame(() => {
+      const el2 = contentRef.current;
+      if (el2 && el2.offsetHeight > 0) setContentHeight(el2.offsetHeight);
+    });
+  }, [displayMode, fillAvailableHeight]);
+  useEffect(() => {
+    measureContentHeight();
+  }, [measureContentHeight, modelId, displayMode]);
+  useEffect(() => {
+    if (fillAvailableHeight) return;
+    window.addEventListener("resize", measureContentHeight);
+    return () => window.removeEventListener("resize", measureContentHeight);
+  }, [measureContentHeight, fillAvailableHeight]);
+
 
   // 放大模式没有描述框；agent 模式自带输入区（AgentComposer），
   // 两个框并排会出现「我该往哪打字」的歧义，所以这里也让它消散。
@@ -539,16 +571,30 @@ export function PromptInput({
     // 卡片本身不参与模式切换动画：模式切换只「散开／重组」中间控件区，
     // 底板、描述框与底部那一排按钮原地不动。
     <section
+      ref={contentRef}
       className={cn(
         "lg-card relative overflow-x-clip rounded-ios-3xl p-5 pb-6 sm:p-6 sm:pb-7",
         // 工作站面板態：卡片成為 flex 鏈的一環（高度由面板分配，不由內容撐）。
         fillAvailableHeight && "flex min-h-0 flex-1 flex-col",
       )}
+      style={
+        !fillAvailableHeight && contentHeight !== null
+          ? { height: contentHeight, display: "flex", flexDirection: "column" }
+          : undefined
+      }
     >
       {/* Specular top edge */}
       <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white to-transparent opacity-80" aria-hidden="true" />
 
-      <div className={cn("relative space-y-4", fillAvailableHeight && "flex min-h-0 flex-1 flex-col")}>
+      {/* 2026-08-22：高度鎖升級到 section 級——generate/edit 實測整卡自然高，
+          所有模式共用。內容區 flex-1 吸收底行高度差（agent 面底行換成極簡
+          返回條也不影響外框），底部行 shrink-0。切換零跳動、零溢出。 */}
+      <div
+        className={cn(
+          "relative space-y-4 min-h-0",
+          (fillAvailableHeight || contentHeight !== null) && "flex flex-1 flex-col",
+        )}
+      >
 
         {/* ── 画面描述 ── 改图模式复用同一个输入框，只换 placeholder；
             放大模式不需要描述，进入时随动画「消散」。 ── */}
@@ -635,7 +681,10 @@ export function PromptInput({
           </div>
         )}
 
-        {/* ── 模式控件区：只有这里参与模式切换动画 ── */}
+        {/* ── 模式控件区：只有这里参与模式切换动画 ──
+            2026-08-22：高度改由外層 contentRef 容器統一鎖定（實測自然高），
+            這層只負責在鎖定態用 flex-1 拉滿外框（agent/upscale 內容少也填滿），
+            內容超出外框時內部滾動，不推高卡片。工作站態走 flex 鏈。 */}
         <div
           className={cn(
             "dust-transition",
@@ -643,6 +692,8 @@ export function PromptInput({
             // 否则 agent 聊天区的 flex-1 没有 flex 父容器会失效，
             // transcript 被内容撑高、composer 被推出面板外裁掉。
             fillAvailableHeight && "flex min-h-0 flex-1 flex-col",
+            // 非工作站態：外層已定高（flex-col），這裡 flex-1 拉滿 + 內部自滾。
+            !fillAvailableHeight && "flex min-h-0 flex-1 flex-col overflow-y-auto",
             animState === "exit" && "dust-exit",
             animState === "enter" && "dust-enter",
           )}
@@ -978,7 +1029,9 @@ export function PromptInput({
           {displayMode === "agent" && (
             <div
               className="flex min-h-0 flex-1 flex-col pt-1"
-              style={fillAvailableHeight ? { flex: "1 1 0%", minHeight: 0 } : { height: AGENT_SURFACE_HEIGHT }}
+              // 2026-08-22：父容器（模式控件區）非工作站態已寫死同一高度，
+              // 這裡 flex-1 填滿即可；不再自己設 height（雙重定高無益）。
+              style={fillAvailableHeight ? { flex: "1 1 0%", minHeight: 0 } : { flex: "1 1 0%", minHeight: 0 }}
             >
               <AgentChatSurface
                 variant="inline"
@@ -1001,10 +1054,28 @@ export function PromptInput({
             专业控制开关都随用户随时开关。
             手机上纵向堆叠：`w-full` 的 CTA 混在 flex-wrap 行里，宽度要靠换行才
             正确，很容易被同行的 ml-auto 顶出边界。改成 column，CTA 天然满宽。
-             工作站面板态：加 border-t 分隔，底部留 safe-area 空间。 */}
+             工作站面板态：加 border-t 分隔，底部留 safe-area 空间。
+             agent 面板态（2026-08-22 完美主義審視）：這排換成極簡返回條——
+             用戶已在 AI 面，「改图/放大/AI助理」三顆 toggle 是視覺噪音且搶
+             輸入框空間；退出助理由返回條承擔，模式快捷鍵收進 Header 的
+             历史下拉。高度鎖在 section 級，底行高度差由控件區 flex-1 吸收，
+             外框紋絲不動。 */}
+        {displayMode === "agent" && !fillAvailableHeight ? (
+          <div className="flex min-w-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onModeChange("generate")}
+              title="返回生成模式"
+              className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full bg-[rgba(0,0,0,0.04)] px-3.5 text-[13px] font-medium text-[rgba(0,0,0,0.55)] transition-all duration-200 hover:bg-[rgba(0,0,0,0.08)] hover:text-[rgba(0,0,0,0.75)]"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />返回生成
+            </button>
+            <span className="text-ios-caption1 text-[rgba(0,0,0,0.35)]">改图 / 放大请先返回生成模式</span>
+          </div>
+        ) : (
         <div
           className={cn(
-            "flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:gap-3",
+            "flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:gap-4",
             fillAvailableHeight && "border-t border-[rgba(0,0,0,0.06)] pt-3 pb-[env(safe-area-inset-bottom,12px)]",
           )}
         >
@@ -1123,7 +1194,7 @@ export function PromptInput({
           </button>
           )}
         </div>
-
+        )}
       </div>
     </section>
   );

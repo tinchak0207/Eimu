@@ -14,7 +14,7 @@
 // agent 聊天区在两个模式下是同一套东西」——所以这里只有一套组件。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bot, History, Loader2 } from "lucide-react";
+import { Bot, ChevronDown, History, Loader2, MessageSquarePlus } from "lucide-react";
 import {
   hasReflectedParams,
   reflectParams,
@@ -70,6 +70,9 @@ async function triggerDownload(url: string, filename: string): Promise<void> {
 export interface AgentChatSurfaceProps {
   /** page = 独立路由页；inline = 从卡片入口进来的内嵌聊天区（D-1）。 */
   variant?: "page" | "inline";
+  /** 嵌入態（工作站面板）：外層已有拖拽把手與容器，Surface 不再自帶把手，
+      邊距收緊——單層容器，不留二次 padding。 */
+  embedded?: boolean;
   /**
    * 入口按下那一刻输入框里已经打好的半句话（D-24「承接使用者已打的半句话」）。
    * 不自动送出：半句话直接送出去可能立刻触发扣费，与 D-5「花钱前必定交用户确认」
@@ -100,6 +103,7 @@ export interface AgentChatSurfaceProps {
 
 export function AgentChatSurface({
   variant = "page",
+  embedded = false,
   initialPrompt = "",
   onParamsReflected,
   currentModelId,
@@ -107,6 +111,7 @@ export function AgentChatSurface({
   onCanvasEvent,
   canvasStateProvider,
   onSessionChange,
+  onExit,
 }: AgentChatSurfaceProps) {
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
   // 承接进来的半句话；续写或手动放弃后就不再显示。
@@ -127,6 +132,7 @@ export function AgentChatSurface({
     discardAndStartNew,
     resume,
     switchSession,
+    startNewSession,
   } = useAgentChat({
     autoStart: true,
     ...(onCanvasEvent ? { onCanvasEvent } : {}),
@@ -151,6 +157,7 @@ export function AgentChatSurface({
   // 会话目录（对话历史 dropdown 的数据）：null = 未加载，[] = 已加载但为空。
   const [historyList, setHistoryList] = useState<AgentSessionSummary[] | null>(null);
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
+  const [startingNew, setStartingNew] = useState(false);
   const historyRef = useRef<HTMLDivElement | null>(null);
 
   // 開著的 dropdown：點外面就收——浮層不該把人鎖在原地。
@@ -193,6 +200,22 @@ export function AgentChatSurface({
     }
   }, [switchingTo, switchSession]);
   const didAutoDiscardRef = useRef(false);
+
+  /** 開新對話：舊會話留在歷史裡可切回；成功後收 dropdown 並讓歷史目錄重拉。 */
+  const onStartNewSession = useCallback(async (): Promise<void> => {
+    if (startingNew) return;
+    setStartingNew(true);
+    try {
+      const ok = await startNewSession();
+      if (ok) {
+        setShowHistory(false);
+        setHistorySnapshot(null);
+        setHistoryList(null); // 置 null = 未載入，下次打開 dropdown 重新拉目錄（新會話入列）
+      }
+    } finally {
+      setStartingNew(false);
+    }
+  }, [startingNew, startNewSession]);
 
   // quota 字段保留在 hook state 里但不再展示——余额端点缺失是已知稳态，
   // 展示「余额未知」只浪费布局空间，扣费仍正常记账。
@@ -368,39 +391,72 @@ export function AgentChatSurface({
 
   return (
     <div
-      className={isInline ? "flex min-h-0 flex-1 flex-col overflow-hidden pb-2.5" : "page-shell flex flex-col pb-4 pt-3"}
+      className={isInline ? cn("flex min-h-0 flex-1 flex-col overflow-hidden", embedded ? "pb-1" : "pb-2.5") : "page-shell flex flex-col pb-4 pt-3"}
       style={isInline ? undefined : { minHeight: "calc(100dvh - 5rem)", height: "calc(100dvh - 5rem)" }}
     >
       {/*
-        D-17：上次对话的存档收进一颗默认折起来的按钮里。
-        默认状态是「什么都没发生，你可以直接打字」——想知道上次那段去哪了的人
-        才需要点开，不点开的人一眼都不用花。
+        面板 Header（2026-08-21 移动端抽屉规范重排）：
+        拖拽手柄 + 「AI 助理」标题 + 呼吸绿点（连接态，替代消息流里的状态文字行）
+        + 右侧图标组（历史记录 / 开新对话 / 收起）。散落的「对话历史」文字链接
+        与常驻「已连接」状态行全部收编到这里——对话流里只剩对话。
+        embedded（工作站面板態）：外層面板已有把手，這裡的把手省掉——單層。
       */}
-      <div ref={historyRef} className="relative mb-2 flex shrink-0 flex-col items-start gap-1.5">
-        <button
-          type="button"
-          onClick={() => void toggleHistory()}
-          aria-expanded={showHistory}
-          className="agent-meta-link flex cursor-pointer items-center gap-1 text-ios-caption1 font-medium text-[rgba(0,0,0,0.35)] transition-colors duration-200 hover:text-[rgba(0,0,0,0.55)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,0,0,0.20)]"
-        >
-          <History className="h-3 w-3" aria-hidden="true" />
-          对话历史
-          {historyList === null ? null : (
-            <span className="rounded-full bg-[rgba(0,0,0,0.05)] px-1.5 text-[11px] tabular-nums text-[rgba(0,0,0,0.45)]">
-              {historyList.length}
-            </span>
-          )}
-        </button>
+      <header className={cn("flex shrink-0 flex-col", embedded ? "mb-1" : "pb-3")}>
+        {/* 2026-08-22：拖拽把手已移除——黑色長條佔位搶文字空間，用戶裁定拿掉。 */}
+        <div className="flex items-center gap-1.5">
+          <h2 className="text-[15px] font-semibold text-[rgba(0,0,0,0.78)]">AI 助理</h2>
+          <span
+            className={cn(
+              "h-1.5 w-1.5 shrink-0 rounded-full",
+              connection === "open" ? "bg-emerald-500 animate-pulse" : "bg-slate-300",
+            )}
+            title={connection === "open" ? "已连接" : "未连接"}
+            aria-label={connection === "open" ? "已连接" : "未连接"}
+          />
+          <div className="ml-auto flex items-center gap-0.5">
+            <div ref={historyRef} className="relative">
+              <button
+                type="button"
+                onClick={() => void toggleHistory()}
+                aria-expanded={showHistory}
+                aria-label="历史记录"
+                title="对话历史"
+                className="relative flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-[rgba(0,0,0,0.45)] transition-colors hover:bg-[rgba(0,0,0,0.06)] hover:text-[rgba(0,0,0,0.75)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] touch-manipulation"
+              >
+                <History className="h-4 w-4" aria-hidden="true" />
+                {historyList !== null && historyList.length > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-[#007AFF] px-1 text-[10px] font-semibold leading-none tabular-nums text-white">
+                    {historyList.length}
+                  </span>
+                )}
+              </button>
         {showHistory && (
-          <div className="absolute top-full -left-2 z-50 mt-0.5 w-56 rounded-ios-2xl border border-[rgba(0,0,0,0.08)] bg-white p-1 shadow-md">
+          <div className="absolute top-full right-0 z-50 mt-0.5 w-56 rounded-ios-2xl border border-[rgba(0,0,0,0.08)] bg-white p-1 shadow-md">
             {historyList === null ? (
               <p className="px-2.5 py-3 text-center text-ios-caption1 text-[rgba(0,0,0,0.40)]">
                 正在加载历史会话…
               </p>
             ) : historyList.length === 0 ? (
-              <p className="px-2.5 py-3 text-center text-ios-caption1 text-[rgba(0,0,0,0.40)]">
-                还没有历史会话
-              </p>
+              /* 2026-08-22 完美主義審視：空狀態不只是宣告「沒有」——左對齊 +
+                 引導文案 + 一顆 inline 開新對話，讓第一次打開 dropdown 的人
+                 知道下一步做什麼。 */
+              <div className="flex flex-col items-start gap-1.5 px-2.5 py-3">
+                <MessageSquarePlus className="h-4 w-4 text-[rgba(0,0,0,0.22)]" aria-hidden="true" />
+                <p className="text-left text-ios-caption1 leading-relaxed text-[rgba(0,0,0,0.42)]">
+                  还没有历史对话
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowHistory(false);
+                    void onStartNewSession();
+                  }}
+                  disabled={startingNew}
+                  className="cursor-pointer text-left text-ios-caption1 font-medium text-[#007AFF] transition-colors hover:text-[#0066DD] disabled:cursor-wait"
+                >
+                  {startingNew ? "正在开启…" : "开始新对话 →"}
+                </button>
+              </div>
             ) : (
               <div className="max-h-64 overflow-y-auto overscroll-contain">
                 {historyList.map((it) => {
@@ -439,7 +495,35 @@ export function AgentChatSurface({
             )}
           </div>
         )}
-      </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => void onStartNewSession()}
+              disabled={startingNew}
+              aria-label="开新对话"
+              title="开新对话（当前对话保留在历史里）"
+              className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-[rgba(0,0,0,0.45)] transition-colors hover:bg-[rgba(0,0,0,0.06)] hover:text-[rgba(0,0,0,0.75)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] touch-manipulation disabled:cursor-wait"
+            >
+              {startingNew ? (
+                <Loader2 className="h-4 w-4 animate-spin text-[#007AFF]" aria-hidden="true" />
+              ) : (
+                <MessageSquarePlus className="h-4 w-4" aria-hidden="true" />
+              )}
+            </button>
+            {onExit && (
+              <button
+                type="button"
+                onClick={onExit}
+                aria-label="收起"
+                title="收起助理，返回生成模式"
+                className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-[rgba(0,0,0,0.45)] transition-colors hover:bg-[rgba(0,0,0,0.06)] hover:text-[rgba(0,0,0,0.75)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] touch-manipulation"
+              >
+                <ChevronDown className="h-4 w-4" aria-hidden="true" />
+              </button>
+            )}
+          </div>
+        </div>
+      </header>
 
       {/* D-24：承接使用者已打的半句话，点一下搬进输入框接着写（不自动送出，
           半句话直接送可能立刻扣费）；右侧「放弃」直接丢掉。 */}
