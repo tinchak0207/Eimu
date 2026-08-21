@@ -115,6 +115,7 @@ export function AgentChatSurface({
     resumable,
     abort,
     discardAndStartNew,
+    resume,
   } = useAgentChat({
     autoStart: true,
     ...(onCanvasEvent ? { onCanvasEvent } : {}),
@@ -250,9 +251,13 @@ export function AgentChatSurface({
   useEffect(() => {
     if (!resumable || didAutoDiscardRef.current) return;
     didAutoDiscardRef.current = true;
+    // 2026-08-21：网关会话已持久化（bun:sqlite + lazy reload），刷新/重开
+    // 不再等于会话消亡。D-17 的「进来先删旧开新」把可恢复的上下文直接
+    // 丢掉了。现在改为静默续上：transcript 原样回来（含 workflow/canvas
+    // 事件流）。会话真被回收时 resume() 自己会清档开新并提示。
     setHistorySnapshot({ itemCount: resumable.itemCount, savedAt: resumable.savedAt });
-    void discardAndStartNew();
-  }, [resumable, discardAndStartNew]);
+    void resume();
+  }, [resumable, resume]);
 
   /**
    * D-26 首张锚定。第一张图 + 产出它的那次工具调用参数都在 transcript 里，
@@ -308,7 +313,7 @@ export function AgentChatSurface({
 
   return (
     <div
-      className={isInline ? "flex min-h-0 flex-1 flex-col" : "page-shell flex flex-col pb-4 pt-3"}
+      className={isInline ? "flex min-h-0 flex-1 flex-col pb-2.5" : "page-shell flex flex-col pb-4 pt-3"}
       style={isInline ? undefined : { minHeight: "calc(100dvh - 5rem)", height: "calc(100dvh - 5rem)" }}
     >
       {/*
@@ -334,7 +339,7 @@ export function AgentChatSurface({
               </p>
               {/* 会话本体已经关掉，这里只是告知，不给一颗按下去必然失败的「继续」。 */}
               <p className="mt-0.5 text-ios-caption1 text-[rgba(0,0,0,0.35)]">
-                已经为你开了新的对话
+                已为你接续上次的对话
               </p>
             </div>
           )}
