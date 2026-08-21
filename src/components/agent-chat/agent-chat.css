@@ -10,7 +10,6 @@
   flex-direction: column;
   min-height: 0;
   flex: 1;
-  overflow: hidden;
 }
 
 /* 滚动区：细滚动条，与站内 iOS 风格一致 */

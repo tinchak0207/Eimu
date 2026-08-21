@@ -151,6 +151,19 @@ export function AgentChatSurface({
   // 会话目录（对话历史 dropdown 的数据）：null = 未加载，[] = 已加载但为空。
   const [historyList, setHistoryList] = useState<AgentSessionSummary[] | null>(null);
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
+  const historyRef = useRef<HTMLDivElement | null>(null);
+
+  // 開著的 dropdown：點外面就收——浮層不該把人鎖在原地。
+  useEffect(() => {
+    if (!showHistory) return;
+    const onDocPointerDown = (ev: PointerEvent): void => {
+      if (historyRef.current && !historyRef.current.contains(ev.target as Node)) {
+        setShowHistory(false);
+      }
+    };
+    document.addEventListener("pointerdown", onDocPointerDown);
+    return () => document.removeEventListener("pointerdown", onDocPointerDown);
+  }, [showHistory]);
 
   /** dropdown 开关：第一次打开时拉取目录（之后直接切换显示，不重复请求）。 */
   const toggleHistory = useCallback(async (): Promise<void> => {
@@ -355,7 +368,7 @@ export function AgentChatSurface({
 
   return (
     <div
-      className={isInline ? "flex min-h-0 flex-1 flex-col pb-2.5" : "page-shell flex flex-col pb-4 pt-3"}
+      className={isInline ? "flex min-h-0 flex-1 flex-col overflow-hidden pb-2.5" : "page-shell flex flex-col pb-4 pt-3"}
       style={isInline ? undefined : { minHeight: "calc(100dvh - 5rem)", height: "calc(100dvh - 5rem)" }}
     >
       {/*
@@ -363,7 +376,7 @@ export function AgentChatSurface({
         默认状态是「什么都没发生，你可以直接打字」——想知道上次那段去哪了的人
         才需要点开，不点开的人一眼都不用花。
       */}
-      <div className="relative mb-2 flex shrink-0 flex-col items-start gap-1.5">
+      <div ref={historyRef} className="relative mb-2 flex shrink-0 flex-col items-start gap-1.5">
         <button
           type="button"
           onClick={() => void toggleHistory()}
@@ -399,14 +412,14 @@ export function AgentChatSurface({
                       disabled={switchingTo !== null}
                       onClick={() => void onPickSession(it.session_id)}
                       className={cn(
-                        "flex w-full cursor-pointer items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left transition-colors",
+                        "flex w-full cursor-pointer items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left leading-normal transition-colors",
                         active
                           ? "bg-[rgba(0,122,255,0.10)]"
                           : "hover:bg-[rgba(0,0,0,0.05)]",
                         switchingTo === it.session_id && "opacity-50",
                       )}
                     >
-                      <span className="min-w-0 flex-1">
+                      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                         <span className="block truncate text-ios-caption1 font-medium text-[rgba(0,0,0,0.72)]">
                           {formatSessionLabel(it)}
                         </span>
