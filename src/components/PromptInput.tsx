@@ -1009,12 +1009,7 @@ export function PromptInput({
           )}
         >
           {/* 改图 / 放大 快捷入口 — 左侧，专业控制 toggle 左边 */}
-          <div
-            className={cn(
-              "flex items-center gap-1.5 shrink-0 self-start",
-              displayMode === "agent" && "sm:flex-1 sm:justify-between",
-            )}
-          >
+          <div className="flex items-center gap-1.5 shrink-0 self-start">
             <button
               type="button"
               onClick={() => onModeChange(mode === "edit" ? "generate" : "edit")}
