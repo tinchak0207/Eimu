@@ -64,6 +64,9 @@ export async function POST(req: NextRequest) {
   if (memoryInjection) {
     payload.user_profile = memoryInjection.user_profile;
     payload.lessons = memoryInjection.lessons;
+  } else {
+    // 账户还没有画像：告知网关，首条消息时引导 agent 用选择题做 onboarding。
+    payload.memory_empty = true;
   }
 
   let resp: AgentGatewayResponse;
