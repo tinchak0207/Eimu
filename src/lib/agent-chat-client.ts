@@ -164,6 +164,28 @@ async function agentFetch(path: string, init?: RequestInit): Promise<unknown> {
 
 // ─────────────────────────── 公开 API
 
+/** 會話目錄項：對話歷史 dropdown 的數據源（網關 GET /agent/v1/sessions 透傳）。 */
+export interface AgentSessionSummary {
+  session_id: string;
+  created_at: number;
+  updated_at: number;
+  last_activity_at: number;
+}
+
+/** 列出當前用戶的歷史會話（按 updated_at 降序）。 */
+export async function listAgentSessions(): Promise<AgentSessionSummary[]> {
+  const data = await agentFetch('/api/agent/sessions', { method: 'GET' });
+  const sessions = (data as { sessions?: unknown })?.sessions;
+  if (!Array.isArray(sessions)) return [];
+  return sessions.filter(
+    (it): it is AgentSessionSummary =>
+      typeof it === 'object' && it !== null && typeof (it as AgentSessionSummary).session_id === 'string',
+  );
+}
+
+// ─────────────────────────── 公开 API
+
+
 /** 建一个 agent 会话。 */
 export async function createAgentSession(): Promise<AgentSessionInfo> {
   const data = await agentFetch("/api/agent/sessions", { method: "POST", body: "{}" });

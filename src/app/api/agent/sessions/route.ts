@@ -74,3 +74,20 @@ export async function POST(req: NextRequest) {
   }
   return gatewayResponse(resp);
 }
+
+// GET /api/agent/sessions - 會話目錄（對話歷史 dropdown 的數據源）。
+// 網關按 key 隔離，返回該 key 的歷史會話元數據（id/時間/最後活動）。
+export async function GET(req: NextRequest) {
+  const caller = await resolveAgentCaller(req);
+  if (!caller.ok) {
+    return fail(caller.status, caller.message, agentCallerFailureCode(caller));
+  }
+
+  let resp: AgentGatewayResponse;
+  try {
+    resp = await callAgentGateway("/agent/v1/sessions", { method: "GET", key: caller.key });
+  } catch {
+    return fail(502, "Agent 网关连接失败，请稍后重试。", "agent_gateway_unreachable");
+  }
+  return gatewayResponse(resp);
+}

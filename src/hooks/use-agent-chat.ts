@@ -222,6 +222,8 @@ export interface UseAgentChatReturn {
   // D-17：上次会话存档。非空时，autoStart 不会自动开新会话，交给 UI 二选一。
   resumable: ResumableAgentChat | null;
   resume: () => Promise<void>;
+  /** 切换到指定的历史会话（对话历史 dropdown）。 */
+  switchSession: (targetSessionId: string) => Promise<boolean>;
   discardAndStartNew: () => Promise<void>;
 }
 
@@ -703,6 +705,51 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
     }
   }, [dispatch, dispatchNotice, openConnection, start]);
 
+  /**
+   * 切换到指定的历史会话（对话历史 dropdown 的「回到某个会话」）。
+   *
+   * 与 resume() 的差别：目标会话由参数指定而不是 localStorage 存档。
+   * transcript 处理：若存档恰好就是这个会话则原样 restore；否则从空白
+   * transcript 开始——agent 端（网关 + opencode）的完整上下文仍在，
+   * 后续对话不会失忆，只是本地不再回放旧消息。
+   */
+  const switchSession = useCallback(
+    async (targetSessionId: string): Promise<boolean> => {
+      if (closedRef.current || !targetSessionId) return false;
+      // 断掉当前流：switch 语义就是换轨，旧流的尾部事件不该再进来。
+      if (esRef.current) {
+        esRef.current.close();
+        esRef.current = null;
+      }
+      backoffRef.current = INITIAL_BACKOFF_MS;
+      try {
+        const ticket = await requestSseTicket(targetSessionId);
+        if (!mountedRef.current) return false;
+        sessionIdRef.current = targetSessionId;
+        setSessionId(targetSessionId);
+        sessionTouchedInThisVisit = true;
+        // 存档属于目标会话：原样回放；属于别的会话：保留它但重置画面。
+        const saved = persistedRef.current;
+        if (saved && saved.sessionId === targetSessionId) {
+          dispatch({ type: 'restore', items: saved.items, lastEventId: saved.lastEventId });
+          await openConnection(saved.lastEventId, ticket);
+        } else {
+          dispatch({ type: 'reset' });
+          await openConnection(0, ticket);
+        }
+        return true;
+      } catch (err) {
+        if (isSessionReclaimed(err)) {
+          dispatchNotice('info', '该会话已被回收，无法恢复。');
+        } else {
+          setError(err instanceof Error ? err.message : '切换会话失败，请重试。');
+        }
+        return false;
+      }
+    },
+    [dispatch, dispatchNotice, openConnection],
+  );
+
   /** D-17：删掉上次的会话并开一个全新会话。 */
   const discardAndStartNew = useCallback(async (): Promise<void> => {
     // 别让存档挡住开新会话。
@@ -754,6 +801,7 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
     end,
     resumable,
     resume,
+    switchSession,
     abort,
     discardAndStartNew,
   };

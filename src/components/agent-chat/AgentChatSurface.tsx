@@ -14,12 +14,14 @@
 // agent 聊天区在两个模式下是同一套东西」——所以这里只有一套组件。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bot, History } from "lucide-react";
+import { Bot, History, Loader2 } from "lucide-react";
 import {
   hasReflectedParams,
   reflectParams,
   type ReflectedParams,
 } from "@/lib/agent-param-reflect";
+import { cn } from "@/lib/utils";
+import { listAgentSessions, type AgentSessionSummary } from "@/lib/agent-chat-client";
 import { useAgentChat } from "@/hooks/use-agent-chat";
 import {
   buildAnchorMessage,
@@ -39,6 +41,14 @@ function formatSavedAt(savedAt: number): string {
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours} 小时前`;
   return new Date(savedAt).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" });
+}
+
+/** 会话目录条目标题：无标题数据源，用创建时间 + 相对新近度组合一个可读标签。 */
+function formatSessionLabel(it: AgentSessionSummary): string {
+  const d = new Date(it.created_at);
+  const date = d.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' });
+  const time = d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+  return `${date} ${time} 的对话`;
 }
 
 async function triggerDownload(url: string, filename: string): Promise<void> {
@@ -116,6 +126,7 @@ export function AgentChatSurface({
     abort,
     discardAndStartNew,
     resume,
+    switchSession,
   } = useAgentChat({
     autoStart: true,
     ...(onCanvasEvent ? { onCanvasEvent } : {}),
@@ -137,6 +148,37 @@ export function AgentChatSurface({
    */
   const [historySnapshot, setHistorySnapshot] = useState<{ itemCount: number; savedAt: number } | null>(null);
   const [showHistory, setShowHistory] = useState(false);
+  // 会话目录（对话历史 dropdown 的数据）：null = 未加载，[] = 已加载但为空。
+  const [historyList, setHistoryList] = useState<AgentSessionSummary[] | null>(null);
+  const [switchingTo, setSwitchingTo] = useState<string | null>(null);
+
+  /** dropdown 开关：第一次打开时拉取目录（之后直接切换显示，不重复请求）。 */
+  const toggleHistory = useCallback(async (): Promise<void> => {
+    setShowHistory((prev) => {
+      const next = !prev;
+      if (next && historyList === null) {
+        void listAgentSessions()
+          .then(setHistoryList)
+          .catch(() => setHistoryList([]));
+      }
+      return next;
+    });
+  }, [historyList]);
+
+  /** 点选某个历史会话：切过去（SSE 续传 agent 端上下文），成功后收起 dropdown。 */
+  const onPickSession = useCallback(async (targetSessionId: string): Promise<void> => {
+    if (switchingTo !== null) return;
+    setSwitchingTo(targetSessionId);
+    try {
+      const ok = await switchSession(targetSessionId);
+      if (ok) {
+        setShowHistory(false);
+        setHistorySnapshot(null);
+      }
+    } finally {
+      setSwitchingTo(null);
+    }
+  }, [switchingTo, switchSession]);
   const didAutoDiscardRef = useRef(false);
 
   // quota 字段保留在 hook state 里但不再展示——余额端点缺失是已知稳态，
@@ -321,30 +363,70 @@ export function AgentChatSurface({
         默认状态是「什么都没发生，你可以直接打字」——想知道上次那段去哪了的人
         才需要点开，不点开的人一眼都不用花。
       */}
-      {historySnapshot && (
-        <div className="mb-2 flex shrink-0 flex-col items-start gap-1.5">
-          <button
-            type="button"
-            onClick={() => setShowHistory((prev) => !prev)}
-            aria-expanded={showHistory}
-            className="agent-meta-link flex cursor-pointer items-center gap-1 text-ios-caption1 font-medium text-[rgba(0,0,0,0.35)] transition-colors duration-200 hover:text-[rgba(0,0,0,0.55)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,0,0,0.20)]"
-          >
-            <History className="h-3 w-3" aria-hidden="true" />
-            对话历史
-          </button>
-          {showHistory && (
-            <div className="rounded-ios-xl bg-[rgba(0,0,0,0.04)] px-3 py-2">
-              <p className="text-ios-caption1 text-[rgba(0,0,0,0.52)]">
-                上次 {historySnapshot.itemCount} 条消息 · {formatSavedAt(historySnapshot.savedAt)}
-              </p>
-              {/* 会话本体已经关掉，这里只是告知，不给一颗按下去必然失败的「继续」。 */}
-              <p className="mt-0.5 text-ios-caption1 text-[rgba(0,0,0,0.35)]">
-                已为你接续上次的对话
-              </p>
-            </div>
+      <div className="relative mb-2 flex shrink-0 flex-col items-start gap-1.5">
+        <button
+          type="button"
+          onClick={() => void toggleHistory()}
+          aria-expanded={showHistory}
+          className="agent-meta-link flex cursor-pointer items-center gap-1 text-ios-caption1 font-medium text-[rgba(0,0,0,0.35)] transition-colors duration-200 hover:text-[rgba(0,0,0,0.55)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,0,0,0.20)]"
+        >
+          <History className="h-3 w-3" aria-hidden="true" />
+          对话历史
+          {historyList === null ? null : (
+            <span className="rounded-full bg-[rgba(0,0,0,0.05)] px-1.5 text-[11px] tabular-nums text-[rgba(0,0,0,0.45)]">
+              {historyList.length}
+            </span>
           )}
-        </div>
-      )}
+        </button>
+        {showHistory && (
+          <div className="absolute top-full left-0 z-30 mt-1 w-64 rounded-ios-2xl border border-[rgba(0,0,0,0.08)] bg-white/95 p-1.5 shadow-lg backdrop-blur">
+            {historyList === null ? (
+              <p className="px-2.5 py-3 text-center text-ios-caption1 text-[rgba(0,0,0,0.40)]">
+                正在加载历史会话…
+              </p>
+            ) : historyList.length === 0 ? (
+              <p className="px-2.5 py-3 text-center text-ios-caption1 text-[rgba(0,0,0,0.40)]">
+                还没有历史会话
+              </p>
+            ) : (
+              <div className="max-h-64 overflow-y-auto overscroll-contain">
+                {historyList.map((it) => {
+                  const active = it.session_id === sessionId;
+                  return (
+                    <button
+                      key={it.session_id}
+                      type="button"
+                      disabled={switchingTo !== null}
+                      onClick={() => void onPickSession(it.session_id)}
+                      className={cn(
+                        "flex w-full cursor-pointer items-center justify-between gap-2 rounded-xl px-2.5 py-2 text-left transition-colors",
+                        active
+                          ? "bg-[rgba(0,122,255,0.10)]"
+                          : "hover:bg-[rgba(0,0,0,0.05)]",
+                        switchingTo === it.session_id && "opacity-50",
+                      )}
+                    >
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-ios-caption1 font-medium text-[rgba(0,0,0,0.72)]">
+                          {formatSessionLabel(it)}
+                        </span>
+                        <span className="block truncate text-[11px] text-[rgba(0,0,0,0.38)]">
+                          最后活动 {formatSavedAt(it.last_activity_at)}
+                        </span>
+                      </span>
+                      {active ? (
+                        <span className="shrink-0 text-[11px] font-medium text-[#007AFF]">当前</span>
+                      ) : switchingTo === it.session_id ? (
+                        <Loader2 className="h-3 w-3 shrink-0 animate-spin text-[rgba(0,0,0,0.35)]" aria-hidden="true" />
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* D-24：承接使用者已打的半句话，点一下搬进输入框接着写（不自动送出，
           半句话直接送可能立刻扣费）；右侧「放弃」直接丢掉。 */}
