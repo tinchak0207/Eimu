@@ -50,17 +50,14 @@ import { usePricingRevision } from "@/hooks/use-pricing-revision";
 // base64 → data URL 的对象身份缓存，与标准模式的 ImageDisplay 共用同一份实现
 import { resultSrc } from "@/components/image-src";
 import type { ImageResult, ReferenceImageRole } from "@/lib/image-types";
-import type { PersistedGenerationEntry } from "@/lib/generation-cache";
 import type { GenerationTaskProjection } from "@/lib/generation-task-types";
 import { cn } from "@/lib/utils";
-import { WORKFLOW_SCHEMA_VERSION } from "@/lib/generation-workflow";
 import { formatPublicGenerationSummary } from "@/lib/public-generation-summary";
 import {
   mobilePanelForTaskStage,
   workstationTaskStage,
   type WorkstationTaskStage,
 } from "@/lib/workstation-mobile-stage";
-import { extractPromptSection, parseWorkflowRecallConfig, type WorkflowRecallConfig } from "@/lib/workflow-recall";
 import { embedWorkflowIntoPng } from "@/lib/workflow-png";
 import {
   WORKSTATION_COMMANDS,
@@ -165,6 +162,7 @@ import {
 import { usePanelResize } from "./use-panel-resize";
 import { useCanvasAnnotation } from "./use-canvas-annotation";
 import { useBoardsLibrary } from "./use-boards-library";
+import { useWorkstationRecall } from "./workstation-recall";
 import { createWorkstationTours } from "./workstation-tours";
 export { INVOKE_AI_WORKSTATION_SOURCE, WORKFLOW_PRESETS, REFERENCE_IMAGE_ROLES } from "./workstation-constants";
 export type { ProfessionalRunConfig } from "./workstation-subcomponents";
@@ -983,15 +981,6 @@ export function InvokeInspiredWorkstation({
     setRegionalPrompts((items) => items.filter((item) => item.id !== id));
   };
 
-  const restoreRegionalPrompts = (entries?: Array<{ text: string; weight?: number }>) => {
-    if (!entries?.length) return;
-    setRegionalPrompts(entries.map((entry, index) => ({
-      id: `recall-${Date.now()}-${index}`,
-      text: entry.text,
-      enabled: true,
-    })));
-  };
-
   const openResultOnCanvas = (image: ImageResult) => {
     if (!image.image && !image.imageUrl && !image.videoUrl) return;
     manualResultSelectionRef.current = true;
@@ -1076,6 +1065,68 @@ export function InvokeInspiredWorkstation({
     if (!response.ok) throw new Error(`status ${response.status}`);
     return response.blob();
   };
+
+  /**
+   * 「这张图当时用的提示词」。
+   *
+   * workflow 元数据里存了除提示词以外的一切；提示词挂在产出它的 task 上。
+   * 找不到 task 的只能是本轮本地结果，此时编辑器内容才等于它的提示词。
+   */
+  const promptForResult = (image: ImageResult): string | undefined => {
+    const fromTask = tasks.find((task) => task.taskId === image.taskId)?.prompt?.trim();
+    if (fromTask) return fromTask;
+    return image.taskId ? undefined : prompt.trim() || undefined;
+  };
+
+  // ── 配置召回（2026-08-22 拆出 workstation-recall）────────────────────────
+
+  const {
+    buildProvenanceConfig,
+    copyProvenanceConfig,
+    restoreProvenanceConfig,
+    restoreProvenanceConfigFromPng,
+    restoreHistoryEntry,
+  } = useWorkstationRecall({
+    modelId,
+    prompt,
+    contextPrompt,
+    negativePrompt,
+    workflowPreset,
+    productionIntent,
+    imageSize,
+    imageSizes,
+    styleTemplateId,
+    qualityProfile,
+    seedHint,
+    copies,
+    concurrency,
+    activeRegionalPrompts,
+    activePreset,
+    referenceImages,
+    restoreConfigText,
+    promptForResult,
+    captureTemplateState,
+    onModelChange,
+    onReferenceImagesChange,
+    setCanvasNotice,
+    setLeftPanelTab,
+    setRestoreConfigMessage,
+    setters: {
+      setPrompt,
+      setContextPrompt,
+      setNegativePrompt,
+      setWorkflowPreset,
+      setProductionIntent,
+      setImageSizes,
+      setStyleTemplateId,
+      setQualityProfile,
+      setSeedHint,
+      setCopies,
+      setConcurrency,
+      setTemplateUndo,
+      setRegionalPrompts,
+    },
+  });
 
   /**
    * 下载成片。
@@ -1167,18 +1218,6 @@ export function InvokeInspiredWorkstation({
       } as ImageResult);
     },
   );
-
-  /**
-   * 「这张图当时用的提示词」。
-   *
-   * workflow 元数据里存了除提示词以外的一切；提示词挂在产出它的 task 上。
-   * 找不到 task 的只能是本轮本地结果，此时编辑器内容才等于它的提示词。
-   */
-  const promptForResult = (image: ImageResult): string | undefined => {
-    const fromTask = tasks.find((task) => task.taskId === image.taskId)?.prompt?.trim();
-    if (fromTask) return fromTask;
-    return image.taskId ? undefined : prompt.trim() || undefined;
-  };
 
   // ── 成片文件夹（2026-08-22 拆出 use-boards-library）─────────────────────
 
@@ -1331,182 +1370,6 @@ export function InvokeInspiredWorkstation({
     setContextPrompt,
     appendUniqueText,
   });
-
-  // ── 配置召回 ─────────────────────────────────────────────────────────────
-
-  /**
-   * 以「这张成片的」配置为准，缺字段才回落到当前编辑器 state。
-   *
-   * 与 copyProvenanceConfig / downloadResult（PNG 嵌入）共用同一个权威来源，
-   * 避免「可以复现的东西会在两处各写一份各不相同」。
-   */
-  const buildProvenanceConfig = (image?: ImageResult) => {
-    const workflow = image?.workflow;
-    return {
-      schemaVersion: workflow?.schemaVersion ?? WORKFLOW_SCHEMA_VERSION,
-      prompt: (image ? promptForResult(image) : undefined) ?? prompt.trim(),
-      contextPrompt: workflow?.contextPrompt ?? contextPrompt.trim(),
-      negativePrompt: workflow?.negativePrompt ?? negativePrompt.trim(),
-      workflowPreset: workflow?.workflowPreset ?? workflowPreset,
-      workflowPresetLabel: workflow?.workflowPresetLabel ?? activePreset.label,
-      promptHint: workflow?.promptHint ?? activePreset.promptHint,
-      negativeHint: workflow?.negativeHint ?? activePreset.negativeHint,
-      productionIntent: workflow?.productionIntent ?? productionIntent,
-      imageSize: workflow?.imageSize ?? imageSize,
-      imageSizes: workflow?.imageSizes ?? imageSizes,
-      styleTemplate: workflow?.styleTemplate ?? styleTemplateId ?? undefined,
-      qualityProfile: workflow?.qualityProfile ?? qualityProfile,
-      seedHint: workflow?.seedHint ?? seedHint,
-      regionalPrompts: workflow?.regionalPrompts
-        ?? activeRegionalPrompts.map((item) => ({ text: item.text.trim() })),
-      copies: workflow?.copies ?? copies,
-      concurrency: workflow?.concurrency ?? concurrency,
-      modelId: image?.modelId ?? modelId,
-      referenceImages: workflow?.referenceImages ?? referenceImages.map((ref) => ({
-        name: ref.name,
-        role: ref.role ?? activePreset.defaultRole,
-        size: ref.size,
-        strength: ref.strength ?? 80,
-      })),
-    };
-  };
-
-  /**
-   * 复制「这张成片的」配置，而不是「编辑器现在的」配置。
-   *
-   * 旧版无论点哪张图，导出的 JSON 全部读当前 state —— 只有 modelId 来自那张图。
-   * 于是「复制配置 → 粘贴回来复现」得到的是现在的参数配上旧模型名，
-   * 这个功能存在的唯一理由（复现某张图）恰好是它做不到的事。
-   * 传入的成片带 workflow 元数据时以它为准，缺字段才回落到当前 state。
-   */
-  const copyProvenanceConfig = async (image?: ImageResult) => {
-    const fromResult = Boolean(image?.workflow);
-    const config = buildProvenanceConfig(image);
-    await navigator.clipboard.writeText(JSON.stringify(config, null, 2));
-    setCanvasNotice(fromResult ? "已复制这张成片的配置。" : "已复制当前配置。");
-  };
-
-  /** 把解析出的工作流配置写回编辑器（粘贴 JSON 与 PNG 内嵌工作流共用）。 */
-  const applyWorkflowRecallConfig = (config: WorkflowRecallConfig) => {
-    if (config.prompt !== undefined) setPrompt(config.prompt);
-    if (config.contextPrompt !== undefined) setContextPrompt(config.contextPrompt);
-    if (config.negativePrompt !== undefined) setNegativePrompt(config.negativePrompt);
-    if (config.workflowPreset && WORKFLOW_PRESETS.some((preset) => preset.id === config.workflowPreset)) {
-      setWorkflowPreset(config.workflowPreset);
-    }
-    if (config.productionIntent) setProductionIntent(config.productionIntent);
-    if (config.imageSizes?.length) {
-      setImageSizes(normalizeSizeSelection(config.imageSizes));
-    } else if (config.imageSize) {
-      setImageSizes(normalizeSizeSelection([config.imageSize]));
-    }
-    if (config.styleTemplate !== undefined) {
-      setStyleTemplateId(getStyleById(config.styleTemplate)?.id ?? null);
-    }
-    if (config.qualityProfile) setQualityProfile(config.qualityProfile);
-    if (config.seedHint !== undefined) setSeedHint(config.seedHint);
-    if (config.copies) setCopies(config.copies);
-    if (config.concurrency) setConcurrency(config.concurrency);
-    restoreRegionalPrompts(config.regionalPrompts);
-    if (config.referenceImageRolesByName) {
-      onReferenceImagesChange(referenceImages.map((image) => {
-        const role = config.referenceImageRolesByName?.[image.name];
-        return role ? { ...image, role } : image;
-      }));
-    }
-  };
-
-  const restoreProvenanceConfig = () => {
-    const result = parseWorkflowRecallConfig(restoreConfigText);
-    if (!result.ok) {
-      setRestoreConfigMessage(result.error);
-      return;
-    }
-
-    applyWorkflowRecallConfig(result.config);
-    setRestoreConfigMessage("配置已导入。");
-  };
-
-  /** 拖入带内嵌工作流的 PNG 时的一键还原：沿用粘贴还原路径，并补回模型。 */
-  const restoreProvenanceConfigFromPng = useEventCallback((workflowJson: string) => {
-    const result = parseWorkflowRecallConfig(workflowJson);
-    if (!result.ok) {
-      setRestoreConfigMessage(result.error);
-      setCanvasNotice("这张图片的内嵌工作流无法还原。", "warn");
-      return;
-    }
-
-    setTemplateUndo({ label: "还原 PNG 工作流", snapshot: captureTemplateState() });
-    let embeddedModelId: string | undefined;
-    try {
-      const raw = JSON.parse(workflowJson) as { modelId?: unknown };
-      embeddedModelId = typeof raw.modelId === "string" ? raw.modelId : undefined;
-    } catch {
-      // parseWorkflowRecallConfig 已保证可解析，这里只是取额外字段
-    }
-    if (embeddedModelId && embeddedModelId !== modelId) onModelChange(embeddedModelId);
-
-    applyWorkflowRecallConfig(result.config);
-    setLeftPanelTab("prompt");
-    setRestoreConfigMessage("已还原 PNG 内嵌的工作流。");
-    setCanvasNotice(embeddedModelId && embeddedModelId !== modelId
-      ? `已还原 PNG 内嵌的工作流，并切回 ${modelBaseName(embeddedModelId)}。可撤销。`
-      : "已还原 PNG 内嵌的工作流。可撤销。");
-  });
-
-  const restoreHistoryEntry = (entry: PersistedGenerationEntry) => {
-    const workflow = entry.workflow;
-    /**
-     * 恢复历史会整份覆盖编辑器，因此先存一份撤销快照 —— 与「套用场景 / 套用模板」
-     * 同一套机制。旧版这里没有快照：点错一条历史记录，正在写的提示词、尺寸、张数
-     * 全部消失且无法回退。
-     */
-    setTemplateUndo({ label: "恢复历史", snapshot: captureTemplateState() });
-    /**
-     * 模型也要跟着回到当时那个。
-     *
-     * 旧版只改本地状态、从不调 onModelChange，于是恢复一条 PixAI 的历史后，
-     * 界面显示的是历史里的参数、真正发请求用的却是当前模型 —— 出图与预期不符，
-     * 且完全没有任何提示。
-     */
-    const historyModelId = entry.results.find((result) => result.modelId)?.modelId;
-    if (historyModelId && historyModelId !== modelId) onModelChange(historyModelId);
-    setPrompt(extractPromptSection(entry.prompt));
-    setContextPrompt(workflow?.contextPrompt ?? "");
-    setNegativePrompt(workflow?.negativePrompt ?? "");
-    if (workflow?.workflowPreset && WORKFLOW_PRESETS.some((preset) => preset.id === workflow.workflowPreset)) {
-      setWorkflowPreset(workflow.workflowPreset);
-    }
-    if (workflow?.productionIntent) setProductionIntent(workflow.productionIntent);
-    if (workflow?.imageSizes?.length) {
-      setImageSizes(normalizeSizeSelection(workflow.imageSizes));
-    } else if (workflow?.imageSize) {
-      setImageSizes(normalizeSizeSelection([workflow.imageSize]));
-    }
-    // 历史记录里的提示词已包含风格文本，这里不再恢复风格，避免二次套用
-    setStyleTemplateId(null);
-    if (workflow?.qualityProfile) setQualityProfile(workflow.qualityProfile);
-    setSeedHint(workflow?.seedHint ?? "");
-    if (workflow?.copies) setCopies(workflow.copies);
-    if (workflow?.concurrency) setConcurrency(workflow.concurrency);
-    restoreRegionalPrompts(workflow?.regionalPrompts);
-    if (workflow?.referenceImages?.length) {
-      const rolesByName = Object.fromEntries(workflow.referenceImages.map((image) => [image.name, image.role]));
-      onReferenceImagesChange(referenceImages.map((image) => {
-        const role = rolesByName[image.name];
-        return role ? { ...image, role } : image;
-      }));
-    }
-    setLeftPanelTab("prompt");
-    // 提示走画布通知：setRestoreConfigMessage 只渲染在右栏「导入配置」手风琴里，
-    // 而历史列表在另一个 tab —— 旧版恢复成功后用户看不到任何反馈。
-    setRestoreConfigMessage("已恢复最近任务。");
-    setCanvasNotice(
-      historyModelId && historyModelId !== modelId
-        ? `已恢复这条历史，并切回 ${modelBaseName(historyModelId)}。可撤销。`
-        : "已恢复这条历史的全部参数。可撤销。",
-    );
-  };
 
   // ── 引导 ────────────────────────────────────────────────────────────────
 
