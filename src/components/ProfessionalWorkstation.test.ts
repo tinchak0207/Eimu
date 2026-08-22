@@ -26,6 +26,7 @@ const WORKSTATION_TSX_MODULES = [
   "src/components/pro-workstation/workstation-cursor-demo.ts",
   "src/components/pro-workstation/use-panel-resize.ts",
   "src/components/pro-workstation/use-canvas-annotation.ts",
+  "src/components/pro-workstation/use-boards-library.ts",
 ];
 
 const WORKSTATION_CSS_MODULES = [
