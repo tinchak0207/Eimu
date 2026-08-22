@@ -27,10 +27,10 @@ export interface CanvasSidePanelProps {
 }
 
 const STATUS_COLOR: Record<CanvasNodeStatus, string> = {
-  idle: "rgba(0,0,0,0.18)",
-  success: "#34C759",
-  loading: "#007AFF",
-  error: "#FF3B30",
+  idle: "bg-black/20",
+  success: "bg-ios-green",
+  loading: "bg-ios-blue",
+  error: "bg-destructive",
 };
 
 const NODE_TYPE_LABEL: Record<CanvasNodeType, string> = {
@@ -46,7 +46,7 @@ const NODE_TYPE_LABEL: Record<CanvasNodeType, string> = {
   [CanvasNodeType.Reference]: "参考图",
 };
 
-const SECTION_HEADING = "px-1 pb-1.5 text-[11px] font-semibold tracking-wide text-[rgba(0,0,0,0.35)] uppercase";
+const SECTION_HEADING = "px-1 pb-1.5 text-ios-caption2 font-semibold tracking-wide text-foreground/45 uppercase";
 
 const MOBILE_MQ = "(max-width: 767px)";
 
@@ -57,7 +57,7 @@ const FLING_MIN_PX = 48;
 
 function Chip({ children }: { children: React.ReactNode }) {
   return (
-    <span className="max-sm:text-[12px] rounded-full bg-[rgba(0,0,0,0.05)] px-2 py-0.5 text-[11px] text-[rgba(0,0,0,0.6)]">
+    <span className="max-sm:text-ios-caption1 rounded-full bg-black/5 px-2 py-0.5 text-ios-caption2 text-muted-foreground">
       {children}
     </span>
   );
@@ -153,17 +153,17 @@ export function CanvasSidePanel({
         <section>
           <h3 className={SECTION_HEADING}>生成计划</h3>
           {plans.length === 0 ? (
-            <p className="max-sm:text-[13px] rounded-xl bg-[rgba(0,0,0,0.03)] px-3 py-4 text-center text-[12px] text-[rgba(0,0,0,0.45)]">
+            <p className="max-sm:text-ios-footnote rounded-xl bg-black/5 px-3 py-4 text-center text-ios-caption1 text-foreground/45">
               还没有生成计划，右侧对话里说一句就行
             </p>
           ) : (
             <div className="space-y-2">
               {plans.map((plan) => (
                 <div key={plan.unit_id} className="lg-card rounded-xl p-3">
-                  <p className="max-sm:text-[14px] truncate text-[13px] font-semibold text-[rgba(0,0,0,0.85)]">
+                  <p className="max-sm:text-ios-subhead truncate text-ios-footnote font-semibold text-foreground">
                     {plan.label}
                   </p>
-                  <p className="max-sm:text-[13px] mt-1 line-clamp-2 text-[12px] leading-relaxed text-[rgba(0,0,0,0.6)]">
+                  <p className="max-sm:text-ios-footnote mt-1 line-clamp-2 text-ios-caption1 leading-relaxed text-muted-foreground">
                     {plan.prompt}
                   </p>
                   <div className="mt-2 flex flex-wrap gap-1">
@@ -174,7 +174,7 @@ export function CanvasSidePanel({
                     {plan.source_image != null ? <Chip>图生图</Chip> : null}
                   </div>
                   {typeof plan.cost_hint === "number" ? (
-                    <p className="max-sm:text-[12px] mt-2 text-[11px] tabular-nums text-[rgba(0,0,0,0.45)]">
+                    <p className="max-sm:text-ios-caption1 mt-2 text-ios-caption2 tabular-nums text-foreground/45">
                       预计 {plan.cost_hint} 币
                     </p>
                   ) : null}
@@ -191,11 +191,11 @@ export function CanvasSidePanel({
             <div className="space-y-2">
               {derives.map((d) => (
                 <div key={d.unitId} className="lg-tint-blue rounded-xl p-3">
-                  <p className="max-sm:text-[14px] text-[13px] font-medium text-[rgba(0,0,0,0.8)]">
+                  <p className="max-sm:text-ios-subhead text-ios-footnote font-medium text-foreground">
                     改图：{d.instruction}
                   </p>
                   {d.interpretation ? (
-                    <p className="max-sm:text-[13px] mt-1 text-[12px] leading-relaxed text-[rgba(0,0,0,0.55)]">
+                    <p className="max-sm:text-ios-footnote mt-1 text-ios-caption1 leading-relaxed text-muted-foreground">
                       {d.interpretation}
                     </p>
                   ) : null}
@@ -209,14 +209,14 @@ export function CanvasSidePanel({
         <section>
           <h3 className={SECTION_HEADING}>节点</h3>
           {nodes.length === 0 ? (
-            <p className="max-sm:text-[13px] rounded-xl bg-[rgba(0,0,0,0.03)] px-3 py-4 text-center text-[12px] text-[rgba(0,0,0,0.45)]">
+            <p className="max-sm:text-ios-footnote rounded-xl bg-black/5 px-3 py-4 text-center text-ios-caption1 text-foreground/45">
               画布还是空的
             </p>
           ) : (
             <div className="space-y-3">
               {units.map((unit, idx) => (
                 <div key={unit.unitId}>
-                  <p className="px-1 pb-1 text-[11px] font-medium text-[rgba(0,0,0,0.35)]">
+                  <p className="px-1 pb-1 text-ios-caption2 font-medium text-foreground/45">
                     批次 {idx + 1} · {unit.tool}
                   </p>
                   <div className="space-y-1">
@@ -236,7 +236,7 @@ export function CanvasSidePanel({
               ))}
               {unassigned.length > 0 && (
                 <div>
-                  <p className="px-1 pb-1 text-[11px] font-medium text-[rgba(0,0,0,0.35)]">其他</p>
+                  <p className="px-1 pb-1 text-ios-caption2 font-medium text-foreground/45">其他</p>
                   <div className="space-y-1">
                     {unassigned.map((n) => (
                       <NodeRow
@@ -258,7 +258,7 @@ export function CanvasSidePanel({
       </div>
 
       {budget && (
-        <p className="max-sm:min-h-11 max-sm:text-[13px] flex shrink-0 items-center border-t border-[rgba(0,0,0,0.06)] px-3 py-2.5 text-[12px] tabular-nums text-[rgba(0,0,0,0.5)]">
+        <p className="max-sm:min-h-11 max-sm:text-ios-footnote flex shrink-0 items-center border-t px-3 py-2.5 text-ios-caption1 tabular-nums text-muted-foreground">
           已花 {budget.usedCoins} / 剩 {budget.remainingCoins} 币
         </p>
       )}
@@ -279,7 +279,7 @@ export function CanvasSidePanel({
           data-canvas-interactive
           onClick={() => setOpen(true)}
           aria-label="打开侧栏"
-          className="lg-float flex h-11 touch-manipulation items-center gap-1.5 rounded-full px-4 text-[13px] font-medium text-[rgba(0,0,0,0.7)] shadow-lg active:scale-95"
+          className="lg-float flex h-11 touch-manipulation items-center gap-1.5 rounded-full px-4 text-ios-footnote font-medium text-muted-foreground active:scale-95"
         >
           <ChevronUp className="h-4 w-4" aria-hidden="true" />
           {plans.length > 0 ? `计划 ${plans.length}` : "面板"}
@@ -320,13 +320,13 @@ export function CanvasSidePanel({
               role="presentation"
               aria-hidden="true"
             >
-              <span className="h-1 w-10 rounded-full bg-[rgba(0,0,0,0.16)]" aria-hidden="true" />
+              <span className="h-1 w-10 rounded-full bg-black/15" aria-hidden="true" />
             </div>
             <button
               type="button"
               onClick={() => setOpen(false)}
               aria-label="收起侧栏"
-              className="absolute top-0 right-2 flex h-11 w-11 touch-manipulation items-center justify-center rounded-full text-[rgba(0,0,0,0.45)] active:bg-[rgba(0,0,0,0.06)]"
+              className="absolute top-0 right-2 flex h-11 w-11 touch-manipulation items-center justify-center rounded-full text-foreground/45 active:bg-black/5"
             >
               <ChevronDown className="h-5 w-5" aria-hidden="true" />
             </button>
@@ -354,18 +354,17 @@ function NodeRow({
       className={cn(
         // 行動端：≥44px 觸控目標；桌面維持原緊湊高度
         "flex min-h-11 w-full touch-manipulation items-center gap-2 rounded-lg px-2 py-2 text-left transition-colors",
-        "hover:bg-[rgba(0,0,0,0.04)] active:bg-[rgba(0,0,0,0.06)]",
+        "hover:bg-black/5 active:bg-black/5",
         "sm:min-h-0 sm:py-1.5",
         selected && "lg-fill-active",
       )}
     >
       <span
-        className="h-2 w-2 shrink-0 rounded-full"
-        style={{ background: STATUS_COLOR[node.metadata?.status ?? "idle"] }}
+        className={cn("h-2 w-2 shrink-0 rounded-full", STATUS_COLOR[node.metadata?.status ?? "idle"])}
         aria-hidden="true"
       />
-      <span className="min-w-0 max-sm:text-[14px] flex-1 truncate text-[13px] text-[rgba(0,0,0,0.8)]">{node.title}</span>
-      <span className="shrink-0 text-[11px] text-[rgba(0,0,0,0.35)]">{NODE_TYPE_LABEL[node.type]}</span>
+      <span className="min-w-0 max-sm:text-ios-subhead flex-1 truncate text-ios-footnote text-foreground">{node.title}</span>
+      <span className="shrink-0 text-ios-caption2 text-foreground/45">{NODE_TYPE_LABEL[node.type]}</span>
     </button>
   );
 }

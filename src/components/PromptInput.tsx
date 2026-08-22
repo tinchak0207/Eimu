@@ -106,6 +106,11 @@ interface PromptInputProps {
    * 輸入區和最新一條訊息會被面板底邊裁掉。
    */
   fillAvailableHeight?: boolean;
+  /**
+   * 工作站態把「收合面板」等面板級按鈕併入聊天 header（觸發前後同一個 UI，
+   * 面板不再自長頂欄）。主頁態不傳。
+   */
+  chatHeaderExtra?: import("react").ReactNode;
 }
 
 /**
@@ -230,6 +235,7 @@ export function PromptInput({
   canvasStateProvider,
   onSessionChange,
   fillAvailableHeight = false,
+  chatHeaderExtra,
 }: PromptInputProps) {
   // 订阅定价覆写：管理员改价后本页报价立即重算。
   usePricingRevision();
@@ -692,8 +698,11 @@ export function PromptInput({
             // 否则 agent 聊天区的 flex-1 没有 flex 父容器会失效，
             // transcript 被内容撑高、composer 被推出面板外裁掉。
             fillAvailableHeight && "flex min-h-0 flex-1 flex-col",
-            // 非工作站態：外層已定高（flex-col），這裡 flex-1 拉滿 + 內部自滾。
-            !fillAvailableHeight && "flex min-h-0 flex-1 flex-col overflow-y-auto",
+            // 非工作站態：外層已定高（flex-col），這裡 flex-1 拉滿。
+            // agent 面**不加** overflow-y-auto：聊天面自己管滾動（transcript 內滾），
+            // 外層再滾一根只會在卡片右上角卡出一小段尷尬滾動條（2026-08-22 裁定）。
+            !fillAvailableHeight && displayMode !== "agent" && "flex min-h-0 flex-1 flex-col overflow-y-auto",
+            !fillAvailableHeight && displayMode === "agent" && "flex min-h-0 flex-1 flex-col",
             animState === "exit" && "dust-exit",
             animState === "enter" && "dust-enter",
           )}
@@ -1038,6 +1047,7 @@ export function PromptInput({
                 // 挂载时读一次：外面已经打好的半句话，或别的页面交接过来的一句话。
                 initialPrompt={agentSeed || input.trim()}
                 onExit={() => onModeChange("generate")}
+                {...(chatHeaderExtra ? { headerExtra: chatHeaderExtra } : {})}
                 {...(onParamsReflected ? { onParamsReflected } : {})}
                 {...(onImageResult ? { onImageResult } : {})}
                 {...(onCanvasEvent ? { onCanvasEvent } : {})}
@@ -1060,7 +1070,7 @@ export function PromptInput({
              輸入框空間；退出助理由返回條承擔，模式快捷鍵收進 Header 的
              历史下拉。高度鎖在 section 級，底行高度差由控件區 flex-1 吸收，
              外框紋絲不動。 */}
-        {displayMode === "agent" && !fillAvailableHeight ? (
+        {displayMode === "agent" ? (
           <div className="flex min-w-0 items-center gap-2">
             <button
               type="button"
@@ -1070,7 +1080,7 @@ export function PromptInput({
             >
               <ChevronLeft className="h-3.5 w-3.5" />返回生成
             </button>
-            <span className="text-ios-caption1 text-[rgba(0,0,0,0.35)]">改图 / 放大请先返回生成模式</span>
+            <span className="text-ios-caption1 text-foreground/45">改图 / 放大请先返回生成模式</span>
           </div>
         ) : (
         <div
@@ -1142,30 +1152,27 @@ export function PromptInput({
           ) : null}
 
           {/* 专业模式 toggle switch（agent 面不需要：工作站态已由 rails/面板承载切换，
-              摆在这里会和 composer 抢底部空间） */}
-          {displayMode !== "agent" && (
-            <button
-              type="button"
-              onClick={onToggleProfessionalMode}
-              aria-pressed={isProfessionalMode}
-              title="打开专业工作站：多图队列、局部要求、项目信息"
-              className={cn(
-                "pro-mode-toggle self-start sm:ml-auto",
-                isProfessionalMode && "active",
-              )}
-            >
-              <span className="pro-mode-toggle-track" aria-hidden="true">
-                <span className="pro-mode-toggle-thumb" />
-              </span>
-              <span className="pro-mode-toggle-label">专业控制</span>
-            </button>
-          )}
+              摆在这里会和 composer 抢底部空间；agent 態整排已被上面的三元換成返回條） */}
+          <button
+            type="button"
+            onClick={onToggleProfessionalMode}
+            aria-pressed={isProfessionalMode}
+            title="打开专业工作站：多图队列、局部要求、项目信息"
+            className={cn(
+              "pro-mode-toggle self-start sm:ml-auto",
+              isProfessionalMode && "active",
+            )}
+          >
+            <span className="pro-mode-toggle-track" aria-hidden="true">
+              <span className="pro-mode-toggle-thumb" />
+            </span>
+            <span className="pro-mode-toggle-label">专业控制</span>
+          </button>
 
           {/* Single CTA — elevated blue, strong shadow, scale on hover。
               改图／放大模式下，同一颗按钮承担对应动作。
               agent 模式下这颗按钮**不存在**：送出由聊天区自己的输入区负责，
               这里再摆一颗「开始创作」会有两个送出口，按哪个都说不清。 */}
-          {displayMode !== "agent" && (
           <button
             type="button"
             onClick={handlePrimaryAction}
@@ -1192,7 +1199,6 @@ export function PromptInput({
               )
             )}
           </button>
-          )}
         </div>
         )}
       </div>

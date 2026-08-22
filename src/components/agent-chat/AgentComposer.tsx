@@ -430,15 +430,15 @@ function AgentComposerComponent({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
       className={cn(
-        "agent-composer relative flex items-end gap-2 rounded-[22px] bg-white px-3 py-2 ring-1 ring-black/[0.08] shadow-[0_2px_16px_rgba(0,0,0,0.05)] touch-manipulation [-webkit-tap-highlight-color:transparent] focus-within:ring-2 focus-within:ring-[rgba(0,122,255,0.30)]",
-        dragActive && "ring-2 ring-[rgba(0,122,255,0.45)] bg-[rgba(0,122,255,0.04)]",
+        "agent-composer lg-float relative flex items-end gap-2 rounded-[22px] px-3 py-2 touch-manipulation [-webkit-tap-highlight-color:transparent] focus-within:ring-2 focus-within:ring-ios-blue/30",
+        dragActive && "!ring-2 !ring-ios-blue/45 !bg-ios-blue/[0.04]",
       )}
     >
       {/* 拖拽悬停提示：只是视觉反馈，不吃鼠标事件（pointer-events-none）。 */}
       {dragActive && (
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute inset-x-2 inset-y-1 flex items-center justify-center rounded-[16px] bg-[rgba(0,122,255,0.08)] text-sm font-medium text-[#007AFF]"
+          className="pointer-events-none absolute inset-x-2 inset-y-1 flex items-center justify-center rounded-[16px] bg-ios-blue/[0.08] text-sm font-medium text-ios-blue"
         >
           松开以添加附件
         </div>
@@ -455,10 +455,10 @@ function AgentComposerComponent({
         title="添加附件（图片 / 视频 / 文档）"
         className={cn(
           "flex h-11 w-11 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-full",
-          "bg-[rgba(0,122,255,0.10)] text-[#007AFF] transition-colors",
+          "bg-ios-blue/10 text-ios-blue transition-colors",
           "touch-manipulation [-webkit-tap-highlight-color:transparent]",
-          "hover:bg-[rgba(0,122,255,0.16)] active:bg-[rgba(0,122,255,0.22)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)]",
-          "disabled:cursor-not-allowed disabled:bg-transparent disabled:text-[rgba(0,0,0,0.30)]",
+          "hover:bg-ios-blue/[0.16] active:bg-ios-blue/[0.22] focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30",
+          "disabled:cursor-not-allowed disabled:bg-transparent disabled:text-foreground/45",
         )}
       >
         <ImagePlus className="h-5 w-5" aria-hidden="true" />
@@ -484,11 +484,11 @@ function AgentComposerComponent({
                 key={att.id}
                 className={cn(
                   "inline-flex max-w-[14rem] items-center gap-1.5 rounded-full px-2.5 py-1 text-ios-caption1",
-                  att.status === "error" && "bg-[rgba(255,59,48,0.10)] text-[#FF3B30]",
+                  att.status === "error" && "bg-destructive/10 text-destructive",
                   att.status === "ready" &&
-                    "bg-[rgba(0,122,255,0.10)] text-[rgba(0,0,0,0.75)]",
+                    "bg-ios-blue/10 text-muted-foreground",
                   (att.status === "uploading" || att.status === "extracting") &&
-                    "bg-[rgba(0,0,0,0.05)] text-[rgba(0,0,0,0.45)]",
+                    "bg-black/5 text-foreground/45",
                 )}
               >
                 {(att.status === "uploading" || att.status === "extracting") && (
@@ -507,7 +507,7 @@ function AgentComposerComponent({
                   type="button"
                   onClick={() => removeAttachment(att.id)}
                   aria-label={`移除 ${att.fileName}`}
-                  className="shrink-0 rounded-full p-2 text-current transition-colors hover:bg-[rgba(0,0,0,0.08)] active:bg-[rgba(0,0,0,0.14)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] touch-manipulation [-webkit-tap-highlight-color:transparent]"
+                  className="shrink-0 rounded-full p-2 text-current transition-colors hover:bg-black/[0.08] active:bg-black/[0.14] focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 touch-manipulation [-webkit-tap-highlight-color:transparent]"
                 >
                   <X className="h-3.5 w-3.5" aria-hidden="true" />
                 </button>
@@ -573,8 +573,8 @@ function AgentComposerComponent({
           placeholder={placeholder}
           rows={3}
           className={cn(
-            "min-h-[72px] max-h-52 w-full resize-none bg-transparent py-2 text-base text-[rgba(0,0,0,0.85)] sm:min-h-[84px] sm:text-[15px]",
-            "placeholder:text-[rgba(0,0,0,0.36)] focus:outline-none",
+            "min-h-[72px] max-h-52 w-full resize-none bg-transparent py-2 text-base text-foreground sm:min-h-[84px] sm:text-[15px]",
+            "placeholder:text-muted-foreground/70 focus:outline-none",
             "touch-manipulation [-webkit-tap-highlight-color:transparent]",
             "disabled:cursor-not-allowed disabled:opacity-50",
           )}
@@ -589,10 +589,10 @@ function AgentComposerComponent({
         className={cn(
           "flex h-11 w-11 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-full transition-all duration-200",
           "touch-manipulation [-webkit-tap-highlight-color:transparent]",
-          "bg-[#007AFF] text-white shadow-[0_2px_8px_rgba(0,122,255,0.32)]",
+          "bg-ios-blue text-white shadow-[0_2px_8px_rgba(0,122,255,0.32)]",
           "hover:opacity-90 active:scale-[0.94]",
-          "focus:outline-none focus:ring-2 focus:ring-[rgba(0,122,255,0.40)]",
-          "disabled:cursor-not-allowed disabled:bg-[rgba(0,122,255,0.30)] disabled:text-white/70 disabled:shadow-none",
+          "focus:outline-none focus:ring-2 focus:ring-ios-blue/40",
+          "disabled:cursor-not-allowed disabled:bg-ios-blue/30 disabled:text-white/70 disabled:shadow-none",
         )}
       >
         <Send className="h-5 w-5" aria-hidden="true" />

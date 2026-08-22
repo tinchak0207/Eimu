@@ -20,6 +20,13 @@ Garbage time. Minimize ruthlessly. NEVER perform:
 - **Harness iteration loop (2026-08-02):** when the user reports a harness effect (time still being wasted, a rule not taking effect), fix the corresponding rule/flow IMMEDIATELY, before any other work, same session. Every user report is one compression.
 - Respond in Traditional Chinese; run commands with bash syntax (this machine is Arch Linux since 2026-08-17; PowerShell/Windows paths are legacy and wrong).
 
+## 任务定性优先（2026-08-22 用户纠偏，永久生效，先于一切 skill/纪律选择）
+
+- 接到请求第一步先定性任务类型：**【能力建设】**（探测绕过/避免限流/造新能力/给系统做加法/集成轮子）还是**【修复】**（修好已坏路径/排查为什么失败）。定性看用户的动词：「避免、绕过、加法、造、集成、强化、让 X > Y」= 能力建设；「修好、恢复、为什么坏了」= 修复。
+- **修复型纪律只对修复型任务生效。** 冻结组件、禁止重放请求、只准翻日志这类保守框架，严禁套到能力建���任务上——在能力建设里它们是毒药：会让 agent 把「保护现状」误当主线。
+- **用户点名原材料时，第一动作是解剖原材料**（读它的技术文档/源码结构/模式清单），而不是翻生产日志或历史故障档案。旧日志最多是背景参考，永远不是主线步骤。
+- 判断自己跑偏的硬指标：花在「维护现状」上的工具调用数超过花在「新增能力」上的调用数 = 已经跑偏，立即回到主线。
+
 ## First-principles mainline
 
 - Define the final user outcome, primitive system, dominant bottleneck, highest-leverage action, and proof before using project workflows.
@@ -100,3 +107,11 @@ Garbage time. Minimize ruthlessly. NEVER perform:
 - **修复**：站点 `src/app/api/agent/sessions/[id]/route.ts` DELETE 幂等化——网关 404 且 `code==="not_found"` 时返回 `200 {success:true, already_gone:true}`（目标已不存在=删除成功），其他 4xx/5xx 原样透传
 - **验证**：`route.test.ts` 12/12 通过 + tsc 无错 + `vercel --prod` 部署
 - **排障要点**：`journalctl -u agent-gateway` 看 session created 时间线对照重启时间（`systemctl show agent-gateway --property=ActiveEnterTimestamp`）；会话进程重启即断是架构事实（内存 Map），若要持久化需另做；DELETE 幂等化只吞 not_found
+
+## UI 設計記憶（2026-08-22 重建，來源已成權威，禁止繞過）
+
+- **唯一權威**：`design-system/MASTER.md`（Liquid Glass iOS 26 材料、`lg-*` 類體系、色板、字級、間距、反模式）+ `DESIGN.md`（impeccable 規範的機器可讀 token 層）+ `tailwind.config.ts`（iOS 26 token 實作）。
+- **impeccable skill 已安裝**（`~/.agents/skills/impeccable`，v4.1.1，pbakaus/impeccable）：任何 UI 設計/改版/審查/打磨任務，先載入該 skill，依其 `context.mjs` 指示執行（它會載入專案根 `PRODUCT.md` 與 `DESIGN.md`）。
+- **品牌**：Emu（非「影像工作室」）；網站文案簡體中文；套餐 夢芽/夢影/夢虹（簡體）；圖標 `/icon.png`（Cursive E 微縮景物填充）。
+- **Agent 交互鎖定決策**：見記憶檔 2026-08-08-agent-frontend-design-rules.md（確認卡先行、批量願望、自癒透明化）。
+- **UI 質量回歸路線**：新 UI 一律 `lg-*` 體系；新組件禁 paper-card/zen-dock/ink-wash（legacy 別名不新增）；禁用 emoji 圖示；無 dark mode 預設；hover 不得 layout shift；正文不小於 13px。

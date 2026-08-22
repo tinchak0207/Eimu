@@ -40,8 +40,8 @@ export interface CanvasContextMenuProps {
 /** 子選單收合延遲：游標離開後在此時間內移回（跨過父項與子選單的縫隙）不收合。 */
 const SUBMENU_CLOSE_DELAY_MS = 200;
 
-/** 主選單與子選單同一套面板皮膚（iOS 質感：白玻璃 + 大圓角 + 柔影）。 */
-const PANEL_CLASS = "rounded-2xl bg-white/95 p-1 shadow-[0_8px_32px_rgba(0,0,0,0.16)] backdrop-blur";
+/** 主選單與子選單同一套面板皮膚（iOS 質感：lg-sheet 白玻璃 + 大圓角）。 */
+const PANEL_CLASS = "rounded-2xl lg-sheet p-1";
 
 function CanvasContextMenu({ open, position, items, onClose }: CanvasContextMenuProps) {
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -136,18 +136,18 @@ function CanvasContextMenu({ open, position, items, onClose }: CanvasContextMenu
       role="menuitem"
       disabled={item.disabled}
       className={cn(
-        "flex min-h-[36px] w-full items-center gap-2 rounded-xl px-3 text-left text-[13px] transition-colors",
-        item.danger ? "text-[#FF3B30]" : "text-[#1d1d1f]",
-        item.disabled ? "cursor-default opacity-40" : "hover:bg-[rgba(0,0,0,0.05)]",
+        "flex min-h-[36px] w-full items-center gap-2 rounded-xl px-3 text-left text-ios-footnote transition-colors",
+        item.danger ? "text-destructive" : "text-foreground",
+        item.disabled ? "cursor-default opacity-40" : "hover:bg-black/5",
       )}
       onClick={() => handleSelect(item)}
     >
       {item.icon ? <span className="flex h-4 w-4 shrink-0 items-center justify-center">{item.icon}</span> : null}
       <span className="flex-1 truncate">{item.label}</span>
-      {item.shortcut ? <span className="shrink-0 text-[11px] text-[rgba(0,0,0,0.35)]">{item.shortcut}</span> : null}
+      {item.shortcut ? <span className="shrink-0 text-ios-caption2 text-foreground/45">{item.shortcut}</span> : null}
       {!inSubmenu && item.children?.length ? (
-        <svg className="shrink-0" width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden>
-          <path d="M3.5 1.5 7 5 3.5 8.5" stroke="rgba(0,0,0,0.4)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        <svg className="shrink-0 text-foreground/45" width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden>
+          <path d="M3.5 1.5 7 5 3.5 8.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       ) : null}
     </button>
@@ -164,7 +164,7 @@ function CanvasContextMenu({ open, position, items, onClose }: CanvasContextMenu
     >
       {items.map((item, i) => {
         if (item === "separator") {
-          return <div key={`sep-${i}`} role="separator" className="my-1 h-px bg-[rgba(0,0,0,0.06)]" />;
+          return <div key={`sep-${i}`} role="separator" className="my-1 h-px bg-black/5" />;
         }
         const hasChildren = Boolean(item.children?.length);
         return (

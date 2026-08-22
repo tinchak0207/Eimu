@@ -38,8 +38,8 @@ function AgentMessageBubbleComponent({ item }: AgentMessageBubbleProps) {
           "min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-[15px]",
           item.kind === "assistant" && item.reasoning ? "w-full" : "max-w-[85%]",
           isUser
-            ? "ml-auto rounded-[18px] rounded-br-[4px] bg-gradient-to-br from-[#007AFF] to-[#0055D4] px-3.5 py-2.5 text-white leading-[1.45] shadow-[0_4px_16px_rgba(0,122,255,0.32)]"
-            : "rounded-[18px] rounded-bl-[4px] bg-[rgba(120,120,128,0.12)] px-4 py-3 text-[rgba(0,0,0,0.84)] leading-[1.55] ring-1 ring-black/[0.06] shadow-[0_2px_12px_rgba(0,0,0,0.06)] backdrop-blur-xl",
+            ? "ml-auto rounded-[18px] rounded-br-[4px] bg-gradient-to-br from-ios-blue to-[#0055D4] px-3.5 py-2.5 text-white leading-[1.45] shadow-[0_4px_16px_rgba(0,122,255,0.32)]"
+            : "rounded-[18px] rounded-bl-[4px] bg-[rgba(120,120,128,0.12)] px-4 py-3 text-foreground leading-[1.55] ring-1 ring-black/[0.06] shadow-[0_2px_12px_rgba(0,0,0,0.06)] backdrop-blur-xl",
         )}
       >
         {/* 思维链：灰色小字，串流时也实时追加，让「AI 在想什么」可见（不再黑盒） */}
@@ -47,11 +47,11 @@ function AgentMessageBubbleComponent({ item }: AgentMessageBubbleProps) {
           <details className="mb-1.5 select-none" open>
             {/* 觸控目標 ≥44px：行動端沒有 hover，摘要行要按得到（詳情由內部 span 撐高）。 */}
             <summary className="block min-h-11 cursor-pointer touch-manipulation [-webkit-tap-highlight-color:transparent]">
-              <span className="flex min-h-11 items-center text-[13px] font-medium text-[rgba(0,0,0,0.55)]">
+              <span className="flex min-h-11 items-center text-ios-footnote font-medium text-muted-foreground">
                 思考過程
               </span>
             </summary>
-            <div className="mt-1 whitespace-pre-wrap break-words border-l-2 border-black/10 pl-2.5 text-[13px] leading-[1.5] text-[rgba(0,0,0,0.6)] italic [overflow-wrap:anywhere]">
+            <div className="mt-1 whitespace-pre-wrap break-words border-l-2 border-black/10 pl-2.5 text-ios-footnote leading-[1.5] text-muted-foreground italic [overflow-wrap:anywhere]">
               {item.reasoning}
             </div>
           </details>

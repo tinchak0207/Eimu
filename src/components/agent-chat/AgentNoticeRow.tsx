@@ -36,14 +36,14 @@ function AgentNoticeRowComponent({ item }: AgentNoticeRowProps) {
       role="status"
       className={cn(
         "agent-rise flex items-start gap-1.5 rounded-ios-2xl py-1 pl-3.5 pr-1.5 text-ios-footnote leading-[1.5]",
-        isError ? "lg-tint-red text-[#B3261E]" : "bg-[rgba(0,0,0,0.03)] text-[rgba(0,0,0,0.55)]",
+        isError ? "lg-tint-red text-destructive" : "bg-black/[0.03] text-muted-foreground",
       )}
       style={reducedMotion ? { animation: "none" } : undefined}
     >
       <Icon
         className={cn(
           "mt-3 h-4 w-4 shrink-0",
-          isError ? "text-[#FF3B30]" : "text-[rgba(0,0,0,0.38)]",
+          isError ? "text-destructive" : "text-foreground/45",
         )}
         aria-hidden="true"
       />
@@ -55,7 +55,7 @@ function AgentNoticeRowComponent({ item }: AgentNoticeRowProps) {
         type="button"
         aria-label="关闭提示"
         onClick={() => setDismissed(true)}
-        className="flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-full text-[rgba(0,0,0,0.38)] transition-colors active:bg-[rgba(0,0,0,0.06)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] [-webkit-tap-highlight-color:transparent]"
+        className="flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-full text-foreground/45 transition-colors active:bg-black/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 [-webkit-tap-highlight-color:transparent]"
       >
         <X className="h-4 w-4" aria-hidden="true" />
       </button>

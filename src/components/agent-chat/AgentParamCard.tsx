@@ -32,10 +32,10 @@ function ParamRow({ param }: { param: AgentParam }) {
   const wrap = param.wide || structured;
   return (
     <div className={cn("min-w-0", wrap && "col-span-full")}>
-      <dt className="text-ios-caption1 text-[rgba(0,0,0,0.42)]">{param.label}</dt>
+      <dt className="text-ios-caption1 text-foreground/45">{param.label}</dt>
       <dd
         className={cn(
-          "mt-0.5 text-ios-footnote text-[rgba(0,0,0,0.78)]",
+          "mt-0.5 text-ios-footnote text-foreground",
           // 长文本允许折行（overflow-wrap:anywhere 连无空格的长 JSON 也折），
           // 短值保持单行不撑破网格
           wrap ? "[overflow-wrap:anywhere] leading-relaxed" : "truncate tabular-nums",
@@ -63,14 +63,14 @@ function AgentParamCardComponent({ argsSummary, costCoins, idPrefix }: AgentPara
     return (
       // 原文可能是被截断的 JSON / 错误载荷：保换行、长 token 也折行，
       // 不许横向溢出卡片（手机上没有 hover 能看全）。
-      <p className="whitespace-pre-wrap rounded-ios-md bg-[rgba(0,0,0,0.03)] px-3 py-2 font-mono text-ios-footnote leading-[1.5] text-[rgba(0,0,0,0.60)] [overflow-wrap:anywhere]">
+      <p className="whitespace-pre-wrap rounded-ios-md bg-black/[0.03] px-3 py-2 font-mono text-ios-footnote leading-[1.5] text-muted-foreground [overflow-wrap:anywhere]">
         {parsed.raw}
       </p>
     );
   }
 
   return (
-    <div className="flex flex-col gap-2 rounded-ios-md bg-[rgba(0,0,0,0.025)] px-3 py-2.5">
+    <div className="flex flex-col gap-2 rounded-ios-md bg-black/[0.025] px-3 py-2.5">
       {common.length > 0 && (
         <dl className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3">
           {common.map((param) => (
@@ -79,7 +79,7 @@ function AgentParamCardComponent({ argsSummary, costCoins, idPrefix }: AgentPara
           {/* 花费和参数并排：D-19 把「花费」算进常用层。 */}
           {costCoins !== undefined && (
             <div className="min-w-0">
-              <dt className="text-ios-caption1 text-[rgba(0,0,0,0.42)]">花费</dt>
+              <dt className="text-ios-caption1 text-foreground/45">花费</dt>
               <dd className="mt-0.5 flex items-center gap-1 text-ios-footnote font-medium tabular-nums text-[rgba(120,90,20,0.88)]">
                 <Coins className="h-3 w-3 shrink-0" aria-hidden="true" />
                 {formatCoins(costCoins)} 币
@@ -96,11 +96,11 @@ function AgentParamCardComponent({ argsSummary, costCoins, idPrefix }: AgentPara
             onClick={() => setAdvancedOpen((open) => !open)}
             aria-expanded={advancedOpen}
             aria-controls={`${idPrefix}-advanced`}
-            className="inline-flex min-h-11 w-fit cursor-pointer touch-manipulation items-center gap-1.5 self-start rounded-full px-2.5 text-[14px] font-medium leading-[1.25rem] text-[rgba(0,0,0,0.55)] transition-colors duration-200 hover:text-[rgba(0,0,0,0.80)] active:bg-[rgba(0,0,0,0.06)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] motion-reduce:transition-none [-webkit-tap-highlight-color:transparent]"
+            className="inline-flex min-h-11 w-fit cursor-pointer touch-manipulation items-center gap-1.5 self-start rounded-full px-2.5 text-ios-subhead font-medium text-muted-foreground transition-colors duration-200 hover:text-foreground active:bg-black/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 motion-reduce:transition-none [-webkit-tap-highlight-color:transparent]"
           >
             <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
             进阶参数
-            <span className="tabular-nums text-[rgba(0,0,0,0.46)]">{advanced.length}</span>
+            <span className="tabular-nums text-foreground/45">{advanced.length}</span>
             <ChevronDown
               className={cn("h-4 w-4 transition-transform duration-200 motion-reduce:transition-none", advancedOpen && "rotate-180")}
               aria-hidden="true"
@@ -122,7 +122,7 @@ function AgentParamCardComponent({ argsSummary, costCoins, idPrefix }: AgentPara
 
       {/* 上游截断过就说出来，不让使用者以为这就是全部参数。 */}
       {parsed.truncated && (
-        <p className="text-ios-caption1 text-[rgba(0,0,0,0.46)]">
+        <p className="text-ios-caption1 text-foreground/45">
           上游只回传了参数摘要，可能不完整
         </p>
       )}

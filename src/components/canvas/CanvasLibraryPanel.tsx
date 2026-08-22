@@ -59,16 +59,16 @@ function useDebouncedValue(value: string, delayMs = 300): string {
 }
 
 const INPUT_CLASS =
-  "w-full rounded-lg border border-[rgba(0,0,0,0.1)] bg-[rgba(0,0,0,0.03)] py-2 pl-8 pr-3 text-xs outline-none transition-colors focus:border-[#2f80ff] dark:border-[rgba(255,255,255,0.1)] dark:bg-[rgba(255,255,255,0.05)] dark:text-white dark:focus:border-[#5a9bff]";
+  "w-full rounded-lg border border-input bg-black/5 py-2 pl-8 pr-3 text-xs outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-ios-blue";
 
 const SELECT_CLASS =
-  "rounded-lg border border-[rgba(0,0,0,0.1)] bg-[rgba(0,0,0,0.03)] px-2 py-1.5 text-xs outline-none dark:border-[rgba(255,255,255,0.1)] dark:bg-[rgba(255,255,255,0.05)] dark:text-white";
+  "rounded-lg border border-input bg-black/5 px-2 py-1.5 text-xs outline-none";
 
 const ACTION_BTN_CLASS =
-  "rounded-md bg-[rgba(0,0,0,0.05)] px-2 py-1 text-[11px] font-medium text-[rgba(0,0,0,0.65)] transition-colors hover:bg-[rgba(0,0,0,0.1)] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[rgba(255,255,255,0.08)] dark:text-[rgba(255,255,255,0.65)] dark:hover:bg-[rgba(255,255,255,0.14)]";
+  "rounded-md bg-black/5 px-2 py-1 text-ios-caption2 font-medium text-muted-foreground transition-colors hover:bg-black/10 disabled:cursor-not-allowed disabled:opacity-50";
 
 const PRIMARY_BTN_CLASS =
-  "rounded-md bg-black px-2 py-1 text-[11px] font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-white dark:text-black";
+  "rounded-md bg-primary px-2 py-1 text-ios-caption2 font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40";
 
 export function CanvasLibraryPanel({ open, onClose, onInsertText, onInsertImage, onUsePrompt }: CanvasLibraryPanelProps) {
   const [tab, setTab] = useState<LibraryTab>("prompts");
@@ -298,7 +298,7 @@ export function CanvasLibraryPanel({ open, onClose, onInsertText, onInsertImage,
       aria-label="资源库"
       aria-hidden={!open}
       className={cn(
-        "fixed bottom-0 right-0 top-0 z-[90] flex w-[min(360px,92vw)] flex-col border-l border-[rgba(0,0,0,0.08)] bg-white shadow-[-12px_0_32px_rgba(0,0,0,0.12)] transition-transform duration-300 dark:border-[rgba(255,255,255,0.08)] dark:bg-[#1c1c1e]",
+        "fixed bottom-0 right-0 top-0 z-[90] flex w-[min(360px,92vw)] flex-col lg-sheet transition-transform duration-300",
         open ? "translate-x-0" : "pointer-events-none translate-x-full",
       )}
       onMouseDown={stopPropagation}
@@ -307,20 +307,20 @@ export function CanvasLibraryPanel({ open, onClose, onInsertText, onInsertImage,
       onClick={stopPropagation}
     >
       {/* 頭部 */}
-      <div className="flex items-center justify-between border-b border-[rgba(0,0,0,0.06)] px-4 py-3 dark:border-[rgba(255,255,255,0.06)]">
-        <h2 className="text-sm font-semibold text-[rgba(0,0,0,0.85)] dark:text-[rgba(255,255,255,0.85)]">资源库</h2>
+      <div className="flex items-center justify-between border-b px-4 py-3">
+        <h2 className="text-sm font-semibold text-foreground">资源库</h2>
         <button
           type="button"
           onClick={onClose}
           title="关闭"
-          className="flex h-7 w-7 items-center justify-center rounded-md text-[rgba(0,0,0,0.4)] hover:bg-[rgba(0,0,0,0.06)] dark:text-[rgba(255,255,255,0.4)] dark:hover:bg-[rgba(255,255,255,0.08)]"
+          className="flex h-7 w-7 items-center justify-center rounded-md text-foreground/45 hover:bg-black/5"
         >
           <X className="h-4 w-4" />
         </button>
       </div>
 
       {/* tab 切換 */}
-      <div className="flex gap-1 border-b border-[rgba(0,0,0,0.06)] px-3 py-2 dark:border-[rgba(255,255,255,0.06)]">
+      <div className="flex gap-1 border-b px-3 py-2">
         {(
           [
             { id: "prompts", label: "提示词库" },
@@ -334,8 +334,8 @@ export function CanvasLibraryPanel({ open, onClose, onInsertText, onInsertImage,
             className={cn(
               "rounded-lg px-3 py-1.5 text-xs font-medium transition-colors",
               tab === t.id
-                ? "bg-black text-white dark:bg-white dark:text-black"
-                : "text-[rgba(0,0,0,0.55)] hover:bg-[rgba(0,0,0,0.05)] dark:text-[rgba(255,255,255,0.55)] dark:hover:bg-[rgba(255,255,255,0.08)]",
+                ? "lg-fill-active text-ios-blue"
+                : "text-muted-foreground hover:bg-black/5",
             )}
           >
             {t.label}
@@ -346,10 +346,10 @@ export function CanvasLibraryPanel({ open, onClose, onInsertText, onInsertImage,
       {/* ── 提示詞庫 tab */}
       {tab === "prompts" && (
         <div className="flex min-h-0 flex-1 flex-col">
-          <div className="space-y-2 border-b border-[rgba(0,0,0,0.06)] px-3 py-2.5 dark:border-[rgba(255,255,255,0.06)]">
+          <div className="space-y-2 border-b px-3 py-2.5">
             <div className="flex items-center gap-2">
               <div className="relative flex-1">
-                <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[rgba(0,0,0,0.3)] dark:text-[rgba(255,255,255,0.3)]" />
+                <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-foreground/45" />
                 <input
                   value={promptQuery}
                   onChange={(e) => setPromptQuery(e.target.value)}
@@ -374,10 +374,10 @@ export function CanvasLibraryPanel({ open, onClose, onInsertText, onInsertImage,
                     type="button"
                     onClick={() => setTagFilter((current) => (current === t ? "" : t))}
                     className={cn(
-                      "shrink-0 rounded-full px-2.5 py-1 text-[11px] transition-colors",
+                      "shrink-0 rounded-full px-2.5 py-1 text-ios-caption2 transition-colors",
                       tagFilter === t
-                        ? "bg-black text-white dark:bg-white dark:text-black"
-                        : "bg-[rgba(0,0,0,0.05)] text-[rgba(0,0,0,0.6)] hover:bg-[rgba(0,0,0,0.1)] dark:bg-[rgba(255,255,255,0.08)] dark:text-[rgba(255,255,255,0.6)]",
+                        ? "lg-fill-active text-ios-blue"
+                        : "bg-black/5 text-muted-foreground hover:bg-black/10",
                     )}
                   >
                     {t}
@@ -391,14 +391,14 @@ export function CanvasLibraryPanel({ open, onClose, onInsertText, onInsertImage,
             {promptsLoading && !promptsData && (
               <>
                 {[0, 1, 2, 3].map((i) => (
-                  <div key={i} className="h-24 animate-pulse rounded-xl bg-[rgba(0,0,0,0.05)] dark:bg-[rgba(255,255,255,0.06)]" />
+                  <div key={i} className="h-24 animate-pulse rounded-xl bg-black/5" />
                 ))}
               </>
             )}
 
             {promptsError && !promptsData && (
               <div className="flex flex-col items-center gap-2 py-10 text-center">
-                <p className="text-xs text-[rgba(0,0,0,0.5)] dark:text-[rgba(255,255,255,0.5)]">加载失败：{promptsError}</p>
+                <p className="text-xs text-muted-foreground">加载失败：{promptsError}</p>
                 <button type="button" onClick={() => void loadPrompts()} className={cn(ACTION_BTN_CLASS, "flex items-center gap-1")}>
                   <RefreshCw className="h-3 w-3" /> 重试
                 </button>
@@ -406,13 +406,13 @@ export function CanvasLibraryPanel({ open, onClose, onInsertText, onInsertImage,
             )}
 
             {promptsData && filteredPrompts.length === 0 && (
-              <p className="py-10 text-center text-xs text-[rgba(0,0,0,0.4)] dark:text-[rgba(255,255,255,0.4)]">没有匹配的提示词</p>
+              <p className="py-10 text-center text-xs text-foreground/45">没有匹配的提示词</p>
             )}
 
             {filteredPrompts.map((p) => (
               <div
                 key={p.id}
-                className="rounded-xl border border-[rgba(0,0,0,0.08)] bg-white p-3 dark:border-[rgba(255,255,255,0.08)] dark:bg-[rgba(255,255,255,0.03)]"
+                className="rounded-xl border border-border bg-card p-3"
               >
                 <div className="flex gap-2.5">
                   {p.cover && (
@@ -422,21 +422,21 @@ export function CanvasLibraryPanel({ open, onClose, onInsertText, onInsertImage,
                       alt={p.title}
                       loading="lazy"
                       draggable={false}
-                      className="h-14 w-14 shrink-0 rounded-lg bg-[rgba(0,0,0,0.04)] object-cover dark:bg-[rgba(255,255,255,0.06)]"
+                      className="h-14 w-14 shrink-0 rounded-lg bg-black/5 object-cover"
                     />
                   )}
                   <div className="min-w-0 flex-1">
                     <div className="flex items-start justify-between gap-2">
-                      <p className="truncate text-[13px] font-medium text-[rgba(0,0,0,0.85)] dark:text-[rgba(255,255,255,0.85)]">{p.title}</p>
-                      <span className="shrink-0 rounded-md bg-[rgba(0,0,0,0.05)] px-1.5 py-0.5 text-[10px] text-[rgba(0,0,0,0.45)] dark:bg-[rgba(255,255,255,0.08)] dark:text-[rgba(255,255,255,0.45)]">
+                      <p className="truncate text-ios-footnote font-medium text-foreground">{p.title}</p>
+                      <span className="shrink-0 rounded-md bg-black/5 px-1.5 py-0.5 text-ios-caption2 text-foreground/45">
                         {sourceLabels.get(p.source) ?? p.source}
                       </span>
                     </div>
-                    <p className="mt-0.5 line-clamp-2 text-xs leading-relaxed text-[rgba(0,0,0,0.55)] dark:text-[rgba(255,255,255,0.55)]">{p.prompt}</p>
+                    <p className="mt-0.5 line-clamp-2 text-xs leading-relaxed text-muted-foreground">{p.prompt}</p>
                     {p.tags.length > 0 && (
                       <div className="mt-1 flex flex-wrap gap-1">
                         {p.tags.slice(0, 3).map((t) => (
-                          <span key={t} className="rounded bg-[rgba(0,0,0,0.04)] px-1.5 py-0.5 text-[10px] text-[rgba(0,0,0,0.45)] dark:bg-[rgba(255,255,255,0.06)] dark:text-[rgba(255,255,255,0.45)]">
+                          <span key={t} className="rounded bg-black/5 px-1.5 py-0.5 text-ios-caption2 text-foreground/45">
                             {t}
                           </span>
                         ))}
@@ -472,12 +472,12 @@ export function CanvasLibraryPanel({ open, onClose, onInsertText, onInsertImage,
       {tab === "assets" && (
         <div className="flex min-h-0 flex-1 flex-col">
           {assetsUnauthorized ? (
-            <p className="py-12 text-center text-xs text-[rgba(0,0,0,0.5)] dark:text-[rgba(255,255,255,0.5)]">登录后可用云端素材库</p>
+            <p className="py-12 text-center text-xs text-muted-foreground">登录后可用云端素材库</p>
           ) : (
             <>
-              <div className="flex items-center gap-2 border-b border-[rgba(0,0,0,0.06)] px-3 py-2.5 dark:border-[rgba(255,255,255,0.06)]">
+              <div className="flex items-center gap-2 border-b px-3 py-2.5">
                 <div className="relative flex-1">
-                  <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[rgba(0,0,0,0.3)] dark:text-[rgba(255,255,255,0.3)]" />
+                  <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-foreground/45" />
                   <input
                     value={assetQuery}
                     onChange={(e) => setAssetQuery(e.target.value)}
@@ -490,25 +490,25 @@ export function CanvasLibraryPanel({ open, onClose, onInsertText, onInsertImage,
                   <option value="text">文本</option>
                   <option value="image">图片</option>
                 </select>
-                {assetsLoading && assets !== null && <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-[rgba(0,0,0,0.35)] dark:text-[rgba(255,255,255,0.35)]" />}
+                {assetsLoading && assets !== null && <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-foreground/45" />}
               </div>
 
               <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-3">
                 {assetActionError && (
-                  <p className="rounded-lg bg-[rgba(255,59,48,0.08)] px-2.5 py-1.5 text-[11px] text-[#d93025] dark:text-[#ff6b60]">{assetActionError}</p>
+                  <p className="rounded-lg bg-destructive/10 px-2.5 py-1.5 text-ios-caption2 text-destructive">{assetActionError}</p>
                 )}
 
                 {assetsLoading && assets === null && (
                   <>
                     {[0, 1, 2].map((i) => (
-                      <div key={i} className="h-20 animate-pulse rounded-xl bg-[rgba(0,0,0,0.05)] dark:bg-[rgba(255,255,255,0.06)]" />
+                      <div key={i} className="h-20 animate-pulse rounded-xl bg-black/5" />
                     ))}
                   </>
                 )}
 
                 {assetsError && assets === null && !assetsLoading && (
                   <div className="flex flex-col items-center gap-2 py-10 text-center">
-                    <p className="text-xs text-[rgba(0,0,0,0.5)] dark:text-[rgba(255,255,255,0.5)]">加载失败：{assetsError}</p>
+                    <p className="text-xs text-muted-foreground">加载失败：{assetsError}</p>
                     <button type="button" onClick={() => void loadAssets()} className={cn(ACTION_BTN_CLASS, "flex items-center gap-1")}>
                       <RefreshCw className="h-3 w-3" /> 重试
                     </button>
@@ -516,7 +516,7 @@ export function CanvasLibraryPanel({ open, onClose, onInsertText, onInsertImage,
                 )}
 
                 {assets !== null && filteredAssets.length === 0 && !assetsLoading && (
-                  <p className="py-10 text-center text-xs text-[rgba(0,0,0,0.4)] dark:text-[rgba(255,255,255,0.4)]">
+                  <p className="py-10 text-center text-xs text-foreground/45">
                     {assets.length === 0 ? "还没有素材，从提示词库或画布节点存入" : "没有匹配的素材"}
                   </p>
                 )}
@@ -524,7 +524,7 @@ export function CanvasLibraryPanel({ open, onClose, onInsertText, onInsertImage,
                 {filteredAssets.map((a) => (
                   <div
                     key={a.id}
-                    className="rounded-xl border border-[rgba(0,0,0,0.08)] bg-white p-3 dark:border-[rgba(255,255,255,0.08)] dark:bg-[rgba(255,255,255,0.03)]"
+                    className="rounded-xl border border-border bg-card p-3"
                   >
                     {a.kind === "image" && a.imageUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
@@ -533,17 +533,17 @@ export function CanvasLibraryPanel({ open, onClose, onInsertText, onInsertImage,
                         alt={a.title}
                         loading="lazy"
                         draggable={false}
-                        className="mb-2 h-28 w-full rounded-lg bg-[rgba(0,0,0,0.04)] object-cover dark:bg-[rgba(255,255,255,0.06)]"
+                        className="mb-2 h-28 w-full rounded-lg bg-black/5 object-cover"
                       />
                     ) : null}
-                    <p className="truncate text-[13px] font-medium text-[rgba(0,0,0,0.85)] dark:text-[rgba(255,255,255,0.85)]">{a.title}</p>
+                    <p className="truncate text-ios-footnote font-medium text-foreground">{a.title}</p>
                     {a.kind === "text" && a.content ? (
-                      <p className="mt-0.5 line-clamp-3 text-xs leading-relaxed text-[rgba(0,0,0,0.55)] dark:text-[rgba(255,255,255,0.55)]">{a.content}</p>
+                      <p className="mt-0.5 line-clamp-3 text-xs leading-relaxed text-muted-foreground">{a.content}</p>
                     ) : null}
                     {a.tags.length > 0 && (
                       <div className="mt-1 flex flex-wrap gap-1">
                         {a.tags.slice(0, 4).map((t) => (
-                          <span key={t} className="rounded bg-[rgba(0,0,0,0.04)] px-1.5 py-0.5 text-[10px] text-[rgba(0,0,0,0.45)] dark:bg-[rgba(255,255,255,0.06)] dark:text-[rgba(255,255,255,0.45)]">
+                          <span key={t} className="rounded bg-black/5 px-1.5 py-0.5 text-ios-caption2 text-foreground/45">
                             {t}
                           </span>
                         ))}

@@ -90,7 +90,7 @@ function HistoryRow({
             /* eslint-disable-next-line @next/next/no-img-element */
             <img src={thumb} alt="" loading="lazy" decoding="async" />
           ) : (
-            <ImageOff className="h-3 w-3 text-[rgba(0,0,0,0.22)]" />
+            <ImageOff className="h-3 w-3 text-foreground/45" />
           )}
         </span>
         <span className="pro-history-text">

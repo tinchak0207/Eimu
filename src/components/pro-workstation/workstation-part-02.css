@@ -65,14 +65,14 @@
   width: 3px;
   height: 3rem;
   border-radius: 999px;
-  background: rgba(0, 122, 255, 0);
+  background: transparent;
   transform: translate(-50%, -50%);
   transition: background 200ms ease;
 }
 
 .pro-resize-handle:hover::after,
 .pro-resize-handle.is-dragging::after {
-  background: rgba(0, 122, 255, 0.30);
+  background: hsl(var(--accent) / 0.3);
 }
 
 .pro-resize-handle--left {
@@ -207,7 +207,7 @@
 .pro-tool-strip button {
   border-radius: 999px;
   padding: 0.42rem 0.72rem;
-  color: rgba(0, 0, 0, 0.48);
+  color: hsl(var(--foreground) / 0.45);
   font-size: 0.68rem;
   font-weight: 760;
 }
@@ -217,7 +217,7 @@
 .pro-tool-strip button:hover,
 .pro-tool-strip button.is-active {
   background: rgba(255, 255, 255, 0.72);
-  color: rgba(0, 0, 0, 0.72);
+  color: hsl(var(--muted-foreground));
   box-shadow: 0 8px 20px rgba(45, 49, 66, 0.06);
 }
 
@@ -234,21 +234,20 @@
 .pro-studio-shell input:not([type="range"]) {
   border: 0 !important;
   background: rgba(255, 255, 255, 0.38) !important;
-  color: rgba(0, 0, 0, 0.68) !important;
+  color: hsl(var(--muted-foreground)) !important;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.52);
 }
 
 .pro-studio-shell textarea::placeholder,
 .pro-studio-shell input::placeholder {
-  color: rgba(0, 0, 0, 0.34);
+  color: hsl(var(--muted-foreground) / 0.7);
 }
 
 .pro-canvas-preview {
   position: relative;
   border-radius: 1.55rem;
   border-color: rgba(255, 255, 255, 0.58);
-  background:
-    linear-gradient(45deg, rgba(255, 255, 255, 0.28) 25%, transparent 25%),
+  background: linear-gradient(45deg, rgba(255, 255, 255, 0.28) 25%, transparent 25%),
     linear-gradient(-45deg, rgba(255, 255, 255, 0.28) 25%, transparent 25%),
     linear-gradient(45deg, transparent 75%, rgba(255, 255, 255, 0.28) 75%),
     linear-gradient(-45deg, transparent 75%, rgba(255, 255, 255, 0.28) 75%),
@@ -296,7 +295,7 @@
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.86);
   box-shadow: 0 6px 16px rgba(45, 49, 66, 0.16);
-  color: rgba(0, 0, 0, 0.62);
+  color: hsl(var(--muted-foreground));
   opacity: 0;
   transition: opacity 160ms ease, background 160ms ease;
 }
@@ -308,7 +307,7 @@
 
 .pro-gallery-download:hover {
   background: #fff;
-  color: rgba(0, 0, 0, 0.82);
+  color: hsl(var(--foreground));
 }
 
 /* 触屏没有 hover：下载按钮常驻，否则永远点不到。 */
@@ -332,16 +331,15 @@
 }
 
 button.pro-gallery-card:not(:disabled):hover {
-  border-color: rgba(0, 122, 255, 0.32);
+  border-color: hsl(var(--accent) / 0.3);
   transform: translateY(-1px);
 }
 
 .pro-gallery-card.is-selected,
 .pro-provenance-card.is-selected {
-  border-color: rgba(0, 122, 255, 0.50);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.52),
-    0 0 0 3px rgba(0, 122, 255, 0.14);
+  border-color: hsl(var(--accent) / 0.5);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.52),
+    0 0 0 3px hsl(var(--accent) / 0.15);
 }
 
 .pro-gallery-card img,
@@ -360,7 +358,7 @@ button.pro-gallery-card:not(:disabled):hover {
   padding: 0.45rem 0.55rem;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: rgba(0, 0, 0, 0.54);
+  color: hsl(var(--muted-foreground));
   font-size: 0.68rem;
   font-weight: 720;
 }
@@ -392,7 +390,7 @@ button.pro-gallery-card:not(:disabled):hover {
   margin: 0;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: rgba(0, 0, 0, 0.62);
+  color: hsl(var(--muted-foreground));
   font-size: 0.64rem;
   font-weight: 740;
 }
@@ -401,7 +399,7 @@ button.pro-gallery-card:not(:disabled):hover {
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  color: rgba(0, 0, 0, 0.44);
+  color: hsl(var(--foreground) / 0.45);
   font-size: 0.62rem;
   font-weight: 700;
 }
@@ -413,7 +411,7 @@ button.pro-gallery-card:not(:disabled):hover {
   border-radius: 0.6rem;
   background: rgba(255, 255, 255, 0.5);
   padding: 0.25rem 0.35rem;
-  color: rgba(0, 0, 0, 0.62);
+  color: hsl(var(--muted-foreground));
   font-size: 0.64rem;
   font-weight: 720;
   outline: none;
@@ -422,12 +420,12 @@ button.pro-gallery-card:not(:disabled):hover {
 .pro-reference-tile-body input[type="range"] {
   flex: 1;
   min-width: 0;
-  accent-color: #007aff;
+  accent-color: hsl(var(--accent));
 }
 
 .pro-reference-tile-body strong {
   flex-shrink: 0;
-  color: rgba(0, 122, 255, 0.78);
+  color: hsl(var(--accent) / 0.8);
   font-size: 0.6rem;
 }
 
@@ -442,7 +440,7 @@ button.pro-gallery-card:not(:disabled):hover {
   border-radius: 0.8rem;
   background: rgba(255, 255, 255, 0.42);
   padding: 0.46rem 0.5rem;
-  color: rgba(0, 122, 255, 0.72);
+  color: hsl(var(--accent) / 0.7);
   font-size: 0.66rem;
   font-weight: 760;
 }
@@ -481,7 +479,7 @@ button.pro-gallery-card:not(:disabled):hover {
   border-radius: 0.9rem;
   background: rgba(255, 255, 255, 0.46);
   padding: 0.5rem;
-  color: rgba(0, 122, 255, 0.78);
+  color: hsl(var(--accent) / 0.8);
   font-size: 0.68rem;
   font-weight: 760;
   transition: background 220ms var(--pro-spring, ease), transform 220ms var(--pro-spring, ease);
@@ -500,23 +498,23 @@ button.pro-gallery-card:not(:disabled):hover {
 }
 
 .pro-layer-toggle.is-active {
-  background: #007aff;
-  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.12);
+  background: hsl(var(--accent));
+  box-shadow: 0 0 0 3px hsl(var(--accent) / 0.1);
 }
 
 .pro-slot-row strong {
-  color: rgba(0, 0, 0, 0.52);
+  color: hsl(var(--muted-foreground));
   background: rgba(255, 255, 255, 0.42);
 }
 
 .pro-slot-row em,
 .pro-metric-card span,
 .pro-recent-item small {
-  color: rgba(0, 0, 0, 0.38);
+  color: hsl(var(--foreground) / 0.45);
 }
 
 .pro-metric-card strong {
-  color: rgba(0, 0, 0, 0.70);
+  color: hsl(var(--muted-foreground));
 }
 
 .pro-recent-item:hover {
@@ -549,7 +547,7 @@ button.pro-gallery-card:not(:disabled):hover {
   background: rgba(255, 255, 255, 0.46);
   /* 触控最小 28px 高：原本 0.26rem 内距只有约 22px，指尖点不准 */
   padding: 0.35rem 0.6rem;
-  color: rgba(0, 0, 0, 0.50);
+  color: hsl(var(--muted-foreground));
   font-size: 0.64rem;
   font-weight: 740;
   white-space: nowrap;
@@ -559,7 +557,7 @@ button.pro-gallery-card:not(:disabled):hover {
 
 .pro-topbar-chips button:hover {
   background: rgba(255, 255, 255, 0.78);
-  color: rgba(0, 0, 0, 0.70);
+  color: hsl(var(--muted-foreground));
   transform: translateY(-1px);
 }
 
@@ -576,17 +574,17 @@ button.pro-gallery-card:not(:disabled):hover {
 }
 
 .pro-topbar-chips button[data-state="running"]::before {
-  background: #007aff;
+  background: hsl(var(--accent));
 }
 
 .pro-topbar-chips button[data-state="failed"]::before {
-  background: #ff3b30;
+  background: hsl(var(--destructive));
 }
 
 /* 有失败任务时筹码本身带底色，不用去数字里找 */
 .pro-topbar-chips button[data-state="failed"][data-alert="true"] {
-  background: rgba(255, 59, 48, 0.12);
-  color: rgba(200, 30, 20, 0.88);
+  background: hsl(var(--destructive) / 0.1);
+  color: hsl(var(--destructive) / 0.9);
 }
 
 /*
@@ -609,7 +607,7 @@ button.pro-gallery-card:not(:disabled):hover {
   height: 100%;
   min-width: 0.32rem;
   border-radius: 999px;
-  background: linear-gradient(90deg, rgba(0, 122, 255, 0.72), rgba(0, 122, 255, 0.95));
+  background: linear-gradient(90deg, hsl(var(--accent) / 0.7), hsl(var(--accent) / 0.95));
   transition: width 420ms var(--pro-spring, ease);
 }
 
@@ -620,7 +618,7 @@ button.pro-gallery-card:not(:disabled):hover {
 }
 
 .pro-run-progress p {
-  color: rgba(0, 0, 0, 0.46);
+  color: hsl(var(--foreground) / 0.45);
   font-size: 0.64rem;
   font-weight: 700;
 }
@@ -665,13 +663,13 @@ button.pro-gallery-card:not(:disabled):hover {
 }
 
 .pro-canvas-skeleton-copy strong {
-  color: rgba(0, 0, 0, 0.62);
+  color: hsl(var(--muted-foreground));
   font-size: 0.72rem;
   font-weight: 780;
 }
 
 .pro-canvas-skeleton-copy span {
-  color: rgba(0, 0, 0, 0.42);
+  color: hsl(var(--foreground) / 0.45);
   font-size: 0.64rem;
   font-weight: 700;
 }
@@ -713,7 +711,7 @@ button.pro-gallery-card:not(:disabled):hover {
   gap: 0.32rem;
   border-radius: 999px;
   padding: 0.35rem 0.6rem;
-  color: rgba(0, 0, 0, 0.48);
+  color: hsl(var(--foreground) / 0.45);
   font-size: 0.64rem;
   font-weight: 740;
 }
@@ -728,7 +726,7 @@ button.pro-gallery-card:not(:disabled):hover {
 .pro-brush-strip button:hover,
 .pro-brush-strip button.is-active {
   background: rgba(255, 255, 255, 0.72);
-  color: rgba(0, 122, 255, 0.85);
+  color: hsl(var(--accent) / 0.85);
   box-shadow: 0 8px 20px rgba(45, 49, 66, 0.06);
 }
 
@@ -739,7 +737,7 @@ button.pro-gallery-card:not(:disabled):hover {
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.52);
   padding: 0.42rem 0.7rem;
-  color: rgba(0, 0, 0, 0.58);
+  color: hsl(var(--muted-foreground));
   font-size: 0.66rem;
   font-weight: 740;
   white-space: nowrap;
@@ -748,12 +746,12 @@ button.pro-gallery-card:not(:disabled):hover {
 
 .pro-dock-actions button:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.82);
-  color: rgba(0, 0, 0, 0.72);
+  color: hsl(var(--muted-foreground));
   transform: translateY(-1px);
 }
 
 .pro-dock-actions button:disabled {
-  color: rgba(0, 0, 0, 0.24);
+  color: hsl(var(--foreground) / 0.45);
   cursor: default;
 }
 
@@ -776,9 +774,9 @@ button.pro-gallery-card:not(:disabled):hover {
   align-items: center;
   gap: 0.35rem;
   border-radius: 0.85rem;
-  background: rgba(0, 122, 255, 0.10);
+  background: hsl(var(--accent) / 0.1);
   padding: 0.3rem 0.65rem;
-  color: rgba(0, 90, 200, 0.85);
+  color: hsl(var(--accent) / 0.85);
   font-size: 0.66rem;
   font-style: normal;
   font-weight: 720;
@@ -792,8 +790,8 @@ button.pro-gallery-card:not(:disabled):hover {
 }
 
 .pro-canvas-notice[data-level="error"] {
-  background: rgba(255, 59, 48, 0.14);
-  color: rgba(168, 26, 18, 0.94);
+  background: hsl(var(--destructive) / 0.15);
+  color: hsl(var(--destructive) / 0.95);
 }
 
 .pro-canvas-notice > button {
@@ -814,16 +812,16 @@ button.pro-gallery-card:not(:disabled):hover {
 
 .pro-empty-cta {
   border-radius: 999px;
-  background: rgba(0, 122, 255, 0.10);
+  background: hsl(var(--accent) / 0.1);
   padding: 0.45rem 0.95rem;
-  color: #0066dd;
+  color: hsl(var(--accent) / 0.9);
   font-size: 0.7rem;
   font-weight: 760;
   transition: background 220ms var(--pro-spring, ease), transform 220ms var(--pro-spring, ease);
 }
 
 .pro-empty-cta:hover {
-  background: rgba(0, 122, 255, 0.16);
+  background: hsl(var(--accent) / 0.15);
   transform: translateY(-1px);
 }
 
@@ -853,20 +851,20 @@ button.pro-gallery-card:not(:disabled):hover {
   height: 1.9rem;
   place-items: center;
   border-radius: 999px;
-  color: rgba(0, 0, 0, 0.6);
+  color: hsl(var(--muted-foreground));
   transition: background 160ms ease, color 160ms ease;
 }
 
 .pro-canvas-pager button:hover {
-  background: rgba(0, 122, 255, 0.10);
-  color: #0066dd;
+  background: hsl(var(--accent) / 0.1);
+  color: hsl(var(--accent) / 0.9);
 }
 
 .pro-canvas-pager span {
   min-width: 3rem;
   padding: 0 0.2rem;
   text-align: center;
-  color: rgba(0, 0, 0, 0.56);
+  color: hsl(var(--muted-foreground));
   font-size: 0.66rem;
   font-weight: 760;
   font-variant-numeric: tabular-nums;

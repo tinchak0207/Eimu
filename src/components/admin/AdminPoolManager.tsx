@@ -6,15 +6,16 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { CircleDollarSign, KeyRound, LayoutDashboard, Layers3, LogOut, Route, ServerCog, Waypoints } from "lucide-react";
+import { CircleDollarSign, KeyRound, LayoutDashboard, Layers3, LogOut, Network, Route, ServerCog, Waypoints } from "lucide-react";
 import { AdminHome } from "@/components/admin/AdminHome";
 import { AdminModelPricing } from "@/components/admin/AdminModelPricing";
 import { AdminRelayChannels } from "@/components/admin/AdminRelayChannels";
 import { AdminBizKeys } from "@/components/admin/AdminBizKeys";
 import { AdminRoutingPanel } from "@/components/admin/AdminRoutingPanel";
 import { AdminTemplateManager } from "@/components/admin/AdminTemplateManager";
+import { AdminProxyPool } from "@/components/admin/AdminProxyPool";
 
-type NavKey = "home" | "relays" | "pricing" | "bizKeys" | "routing" | "templates";
+type NavKey = "home" | "relays" | "pricing" | "bizKeys" | "routing" | "templates" | "proxyPool";
 
 const NAV_ITEMS: Array<{ key: NavKey; label: string; icon: typeof LayoutDashboard }> = [
   { key: "home", label: "总览", icon: LayoutDashboard },
@@ -23,6 +24,7 @@ const NAV_ITEMS: Array<{ key: NavKey; label: string; icon: typeof LayoutDashboar
   { key: "bizKeys", label: "B 端密钥", icon: KeyRound },
   { key: "routing", label: "路由调度", icon: Route },
   { key: "templates", label: "场景模板", icon: Layers3 },
+  { key: "proxyPool", label: "代理池", icon: Network },
 ];
 
 export function AdminPoolManager({ username }: { username: string }) {
@@ -79,6 +81,8 @@ export function AdminPoolManager({ username }: { username: string }) {
             <AdminBizKeys />
           ) : nav === "templates" ? (
             <AdminTemplateManager />
+          ) : nav === "proxyPool" ? (
+            <AdminProxyPool />
           ) : (
             <AdminRoutingPanel onOpenRelays={() => setNav("relays")} />
           )}

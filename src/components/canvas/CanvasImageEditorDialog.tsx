@@ -542,13 +542,13 @@ export function CanvasImageEditorDialog({
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 p-4" data-canvas-interactive>
-      <div className="flex h-[min(88vh,720px)] w-[min(92vw,960px)] flex-col overflow-hidden rounded-2xl bg-white shadow-[0_16px_64px_rgba(0,0,0,0.32)]">
+      <div className="flex h-[min(88vh,720px)] w-[min(92vw,960px)] flex-col overflow-hidden rounded-2xl lg-sheet">
         {/* 頂欄：標題 + tab + 關閉 */}
-        <div className="flex items-center gap-3 border-b border-[rgba(0,0,0,0.06)] px-4 py-2.5">
-          <span className="min-w-0 flex-1 truncate text-[14px] font-semibold text-[rgba(0,0,0,0.85)]">
+        <div className="flex items-center gap-3 border-b px-4 py-2.5">
+          <span className="min-w-0 flex-1 truncate text-ios-subhead font-semibold text-foreground">
             编辑图片 · {nodeTitle}
           </span>
-          <div className="flex items-center gap-1 rounded-lg bg-[rgba(0,0,0,0.05)] p-0.5">
+          <div className="flex items-center gap-1 rounded-lg bg-black/5 p-0.5">
             {modeTabs.map((tab) => (
               <button
                 key={tab.id}
@@ -556,7 +556,7 @@ export function CanvasImageEditorDialog({
                 onClick={() => setMode(tab.id)}
                 className={cn(
                   "flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[12.5px] font-medium transition-colors",
-                  activeMode === tab.id ? "bg-white text-[rgba(0,0,0,0.85)] shadow-sm" : "text-[rgba(0,0,0,0.5)] hover:text-[rgba(0,0,0,0.75)]",
+                  activeMode === tab.id ? "bg-white text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
                 )}
               >
                 {tab.icon}
@@ -568,7 +568,7 @@ export function CanvasImageEditorDialog({
             type="button"
             onClick={onClose}
             aria-label="关闭"
-            className="flex h-8 w-8 items-center justify-center rounded-full text-[rgba(0,0,0,0.45)] hover:bg-[rgba(0,0,0,0.06)]"
+            className="flex h-8 w-8 items-center justify-center rounded-full text-foreground/45 hover:bg-black/5"
           >
             <X className="h-4 w-4" />
           </button>
@@ -596,7 +596,7 @@ export function CanvasImageEditorDialog({
                       setLoading(false);
                     });
                 }}
-                className="rounded-full bg-white px-4 py-1.5 text-[13px] font-medium text-black"
+                className="rounded-full bg-white px-4 py-1.5 text-ios-footnote font-medium text-foreground"
               >
                 重试
               </button>
@@ -652,7 +652,7 @@ export function CanvasImageEditorDialog({
                           onPointerUp={endCropDrag}
                           onPointerCancel={endCropDrag}
                         >
-                          <span className="absolute bottom-1 right-1.5 rounded bg-black/60 px-1.5 py-0.5 text-[11px] tabular-nums text-white">
+                          <span className="absolute bottom-1 right-1.5 rounded bg-black/60 px-1.5 py-0.5 text-ios-caption2 tabular-nums text-white">
                             {cropRect.width}×{cropRect.height}
                           </span>
                         </div>
@@ -660,7 +660,7 @@ export function CanvasImageEditorDialog({
                         {(["nw", "ne", "sw", "se"] as const).map((h) => (
                           <div
                             key={h}
-                            className="absolute h-4 w-4 rounded-sm border-2 border-white bg-[#007AFF]"
+                            className="absolute h-4 w-4 rounded-sm border-2 border-white bg-ios-blue"
                             style={{
                               left: (h === "nw" || h === "sw" ? rx : rx + rw) - 8,
                               top: (h === "nw" || h === "ne" ? ry : ry + rh) - 8,
@@ -689,7 +689,7 @@ export function CanvasImageEditorDialog({
                   {splitRects.map((r, i) => (
                     <span
                       key={`n-${i}`}
-                      className="pointer-events-none absolute rounded bg-black/50 px-1 text-[10px] font-medium leading-4 text-white/90"
+                      className="pointer-events-none absolute rounded bg-black/50 px-1 text-ios-caption2 font-medium leading-4 text-white/90"
                       style={{ left: r.x * display.scale + 3, top: r.y * display.scale + 3 }}
                     >
                       {i + 1}
@@ -712,7 +712,7 @@ export function CanvasImageEditorDialog({
                           className={cn(
                             "absolute inset-y-0 left-1/2 w-[2px] -translate-x-1/2 transition-colors",
                             isSelected
-                              ? "bg-[#0A84FF] shadow-[0_0_8px_rgba(10,132,255,0.9)]"
+                              ? "bg-ios-blue shadow-[0_0_8px_rgba(0,122,255,0.9)]"
                               : "bg-white/75 group-hover:bg-white group-hover:shadow-[0_0_6px_rgba(255,255,255,0.8)]",
                           )}
                         />
@@ -736,7 +736,7 @@ export function CanvasImageEditorDialog({
                           className={cn(
                             "absolute inset-x-0 top-1/2 h-[2px] -translate-y-1/2 transition-colors",
                             isSelected
-                              ? "bg-[#0A84FF] shadow-[0_0_8px_rgba(10,132,255,0.9)]"
+                              ? "bg-ios-blue shadow-[0_0_8px_rgba(0,122,255,0.9)]"
                               : "bg-white/75 group-hover:bg-white group-hover:shadow-[0_0_6px_rgba(255,255,255,0.8)]",
                           )}
                         />
@@ -763,18 +763,18 @@ export function CanvasImageEditorDialog({
         </div>
 
         {/* 模式參數列 */}
-        <div className="border-t border-[rgba(0,0,0,0.06)] px-4 py-2.5">
+        <div className="border-t px-4 py-2.5">
           {activeMode === "crop" && (
             <div className="flex flex-wrap items-center gap-1.5">
-              <span className="mr-1 text-[12px] text-[rgba(0,0,0,0.45)]">比例</span>
+              <span className="mr-1 text-ios-caption1 text-foreground/45">比例</span>
               {ASPECT_PRESETS.map((p) => (
                 <button
                   key={p.label}
                   type="button"
                   onClick={() => applyAspect(p.ratio)}
                   className={cn(
-                    "rounded-full px-2.5 py-1 text-[12px] font-medium transition-colors",
-                    aspect === p.ratio ? "bg-black text-white" : "bg-[rgba(0,0,0,0.05)] text-[rgba(0,0,0,0.6)] hover:bg-[rgba(0,0,0,0.09)]",
+                    "rounded-full px-2.5 py-1 text-ios-caption1 font-medium transition-colors",
+                    aspect === p.ratio ? "bg-primary text-primary-foreground" : "bg-black/5 text-muted-foreground hover:bg-black/10",
                   )}
                 >
                   {p.label}
@@ -789,7 +789,7 @@ export function CanvasImageEditorDialog({
                 ["列", splitXs.length + 1, "x"],
               ] as const).map(([label, current, axis]) => (
                 <div key={label} className="flex items-center gap-1.5">
-                  <span className="text-[12px] text-[rgba(0,0,0,0.45)]">{label}</span>
+                  <span className="text-ios-caption1 text-foreground/45">{label}</span>
                   {[1, 2, 3, 4].map((n) => (
                     <button
                       key={n}
@@ -797,7 +797,7 @@ export function CanvasImageEditorDialog({
                       onClick={() => applySplitQuick(axis, n)}
                       className={cn(
                         "h-7 w-7 rounded-md text-[12.5px] font-medium transition-colors",
-                        current === n ? "bg-black text-white" : "bg-[rgba(0,0,0,0.05)] text-[rgba(0,0,0,0.6)] hover:bg-[rgba(0,0,0,0.09)]",
+                        current === n ? "bg-primary text-primary-foreground" : "bg-black/5 text-muted-foreground hover:bg-black/10",
                       )}
                     >
                       {n}
@@ -810,7 +810,7 @@ export function CanvasImageEditorDialog({
                   type="button"
                   onClick={() => addSplitLine("x")}
                   disabled={vSpot === null}
-                  className="rounded-full bg-[rgba(0,0,0,0.05)] px-2.5 py-1 text-[12px] font-medium text-[rgba(0,0,0,0.6)] transition-colors hover:bg-[rgba(0,0,0,0.09)] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-[rgba(0,0,0,0.05)]"
+                  className="rounded-full bg-black/5 px-2.5 py-1 text-ios-caption1 font-medium text-muted-foreground transition-colors hover:bg-black/10 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-black/5"
                 >
                   + 竖线
                 </button>
@@ -818,7 +818,7 @@ export function CanvasImageEditorDialog({
                   type="button"
                   onClick={() => addSplitLine("y")}
                   disabled={hSpot === null}
-                  className="rounded-full bg-[rgba(0,0,0,0.05)] px-2.5 py-1 text-[12px] font-medium text-[rgba(0,0,0,0.6)] transition-colors hover:bg-[rgba(0,0,0,0.09)] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-[rgba(0,0,0,0.05)]"
+                  className="rounded-full bg-black/5 px-2.5 py-1 text-ios-caption1 font-medium text-muted-foreground transition-colors hover:bg-black/10 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-black/5"
                 >
                   + 横线
                 </button>
@@ -826,17 +826,17 @@ export function CanvasImageEditorDialog({
                   type="button"
                   onClick={deleteSelectedLine}
                   disabled={!selectedLine}
-                  className="rounded-full bg-[rgba(0,0,0,0.05)] px-2.5 py-1 text-[12px] font-medium text-[rgba(0,0,0,0.6)] transition-colors hover:bg-[rgba(0,0,0,0.09)] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-[rgba(0,0,0,0.05)]"
+                  className="rounded-full bg-black/5 px-2.5 py-1 text-ios-caption1 font-medium text-muted-foreground transition-colors hover:bg-black/10 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-black/5"
                 >
                   删除此线
                 </button>
               </div>
-              <span className="text-[12px] text-[rgba(0,0,0,0.4)]">共 {splitCount} 张 · 可拖动分割线，选中后按 Del 删除</span>
+              <span className="text-ios-caption1 text-foreground/45">共 {splitCount} 张 · 可拖动分割线，选中后按 Del 删除</span>
             </div>
           )}
           {activeMode === "mask" && (
             <div className="flex flex-wrap items-center gap-3">
-              <label className="flex items-center gap-2 text-[12px] text-[rgba(0,0,0,0.45)]">
+              <label className="flex items-center gap-2 text-ios-caption1 text-foreground/45">
                 笔刷
                 <input
                   type="range"
@@ -846,15 +846,15 @@ export function CanvasImageEditorDialog({
                   onChange={(e) => setBrushSize(Number(e.target.value))}
                   className="w-28"
                 />
-                <span className="w-6 tabular-nums text-[rgba(0,0,0,0.6)]">{brushSize}</span>
+                <span className="w-6 tabular-nums text-muted-foreground">{brushSize}</span>
               </label>
               <button
                 type="button"
                 onClick={() => setEraserMode((v) => !v)}
                 aria-pressed={eraserMode}
                 className={cn(
-                  "rounded-full px-2.5 py-1 text-[12px] font-medium transition-colors",
-                  eraserMode ? "bg-black text-white" : "bg-[rgba(0,0,0,0.05)] text-[rgba(0,0,0,0.6)] hover:bg-[rgba(0,0,0,0.09)]",
+                  "rounded-full px-2.5 py-1 text-ios-caption1 font-medium transition-colors",
+                  eraserMode ? "bg-primary text-primary-foreground" : "bg-black/5 text-muted-foreground hover:bg-black/10",
                 )}
               >
                 橡皮擦
@@ -862,12 +862,12 @@ export function CanvasImageEditorDialog({
               <button
                 type="button"
                 onClick={clearMask}
-                className="rounded-full bg-[rgba(0,0,0,0.05)] px-2.5 py-1 text-[12px] font-medium text-[rgba(0,0,0,0.6)] hover:bg-[rgba(0,0,0,0.09)]"
+                className="rounded-full bg-black/5 px-2.5 py-1 text-ios-caption1 font-medium text-muted-foreground hover:bg-black/10"
               >
                 清除全部
               </button>
               {onRequestInpaint && (
-                <div className="flex items-center gap-0.5 rounded-lg bg-[rgba(0,0,0,0.05)] p-0.5">
+                <div className="flex items-center gap-0.5 rounded-lg bg-black/5 p-0.5">
                   {([
                     ["erase", "抠除(透明)"],
                     ["inpaint", "AI 重绘(实验)"],
@@ -877,8 +877,8 @@ export function CanvasImageEditorDialog({
                       type="button"
                       onClick={() => setMaskOutput(id)}
                       className={cn(
-                        "rounded-md px-2.5 py-1 text-[12px] font-medium transition-colors",
-                        effectiveMaskOutput === id ? "bg-white text-[rgba(0,0,0,0.85)] shadow-sm" : "text-[rgba(0,0,0,0.5)] hover:text-[rgba(0,0,0,0.75)]",
+                        "rounded-md px-2.5 py-1 text-ios-caption1 font-medium transition-colors",
+                        effectiveMaskOutput === id ? "bg-white text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
                       )}
                     >
                       {label}
@@ -892,33 +892,33 @@ export function CanvasImageEditorDialog({
                   value={inpaintInstruction}
                   onChange={(e) => setInpaintInstruction(e.target.value)}
                   placeholder="把涂抹区域改成什么…"
-                  className="h-8 min-w-44 flex-1 rounded-lg border border-[rgba(0,0,0,0.1)] bg-white px-2.5 text-[12.5px] text-[rgba(0,0,0,0.8)] outline-none placeholder:text-[rgba(0,0,0,0.3)] focus:border-[#0A84FF]"
+                  className="h-8 min-w-44 flex-1 rounded-lg border border-input bg-white px-2.5 text-[12.5px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-ios-blue"
                 />
               ) : (
-                <span className="text-[12px] text-[rgba(0,0,0,0.4)]">涂抹区域将变为透明</span>
+                <span className="text-ios-caption1 text-foreground/45">涂抹区域将变为透明</span>
               )}
             </div>
           )}
           {activeMode === "rotate" && (
             <div className="flex items-center gap-2">
-              <button type="button" onClick={() => setDeg((d) => (d + 270) % 360)} className="flex items-center gap-1.5 rounded-full bg-[rgba(0,0,0,0.05)] px-3 py-1.5 text-[12.5px] font-medium text-[rgba(0,0,0,0.65)] hover:bg-[rgba(0,0,0,0.09)]">
+              <button type="button" onClick={() => setDeg((d) => (d + 270) % 360)} className="flex items-center gap-1.5 rounded-full bg-black/5 px-3 py-1.5 text-[12.5px] font-medium text-muted-foreground hover:bg-black/10">
                 <RotateCcw className="h-3.5 w-3.5" /> 左转 90°
               </button>
-              <button type="button" onClick={() => setDeg((d) => (d + 90) % 360)} className="flex items-center gap-1.5 rounded-full bg-[rgba(0,0,0,0.05)] px-3 py-1.5 text-[12.5px] font-medium text-[rgba(0,0,0,0.65)] hover:bg-[rgba(0,0,0,0.09)]">
+              <button type="button" onClick={() => setDeg((d) => (d + 90) % 360)} className="flex items-center gap-1.5 rounded-full bg-black/5 px-3 py-1.5 text-[12.5px] font-medium text-muted-foreground hover:bg-black/10">
                 <RotateCw className="h-3.5 w-3.5" /> 右转 90°
               </button>
-              <button type="button" onClick={() => setFlipH((v) => !v)} aria-pressed={flipH} className={cn("flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12.5px] font-medium", flipH ? "bg-black text-white" : "bg-[rgba(0,0,0,0.05)] text-[rgba(0,0,0,0.65)] hover:bg-[rgba(0,0,0,0.09)]")}>
+              <button type="button" onClick={() => setFlipH((v) => !v)} aria-pressed={flipH} className={cn("flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12.5px] font-medium", flipH ? "bg-primary text-primary-foreground" : "bg-black/5 text-muted-foreground hover:bg-black/10")}>
                 <FlipHorizontal2 className="h-3.5 w-3.5" /> 水平翻转
               </button>
-              <button type="button" onClick={() => setFlipV((v) => !v)} aria-pressed={flipV} className={cn("flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12.5px] font-medium", flipV ? "bg-black text-white" : "bg-[rgba(0,0,0,0.05)] text-[rgba(0,0,0,0.65)] hover:bg-[rgba(0,0,0,0.09)]")}>
+              <button type="button" onClick={() => setFlipV((v) => !v)} aria-pressed={flipV} className={cn("flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12.5px] font-medium", flipV ? "bg-primary text-primary-foreground" : "bg-black/5 text-muted-foreground hover:bg-black/10")}>
                 <FlipVertical2 className="h-3.5 w-3.5" /> 垂直翻转
               </button>
-              <span className="text-[12px] tabular-nums text-[rgba(0,0,0,0.4)]">当前 {deg}°</span>
+              <span className="text-ios-caption1 tabular-nums text-foreground/45">当前 {deg}°</span>
             </div>
           )}
           {activeMode === "angle" && (
             <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5">
-              <label className="flex items-center gap-2 text-[12px] text-[rgba(0,0,0,0.45)]">
+              <label className="flex items-center gap-2 text-ios-caption1 text-foreground/45">
                 水平旋转
                 <input
                   type="range"
@@ -929,9 +929,9 @@ export function CanvasImageEditorDialog({
                   onChange={(e) => setYawDeg(Number(e.target.value))}
                   className="w-32"
                 />
-                <span className="w-9 text-right tabular-nums text-[rgba(0,0,0,0.6)]">{yawDeg}°</span>
+                <span className="w-9 text-right tabular-nums text-muted-foreground">{yawDeg}°</span>
               </label>
-              <label className="flex items-center gap-2 text-[12px] text-[rgba(0,0,0,0.45)]">
+              <label className="flex items-center gap-2 text-ios-caption1 text-foreground/45">
                 俯仰
                 <input
                   type="range"
@@ -942,9 +942,9 @@ export function CanvasImageEditorDialog({
                   onChange={(e) => setPitchDeg(Number(e.target.value))}
                   className="w-28"
                 />
-                <span className="w-9 text-right tabular-nums text-[rgba(0,0,0,0.6)]">{pitchDeg}°</span>
+                <span className="w-9 text-right tabular-nums text-muted-foreground">{pitchDeg}°</span>
               </label>
-              <label className="flex items-center gap-2 text-[12px] text-[rgba(0,0,0,0.45)]">
+              <label className="flex items-center gap-2 text-ios-caption1 text-foreground/45">
                 距离
                 <input
                   type="range"
@@ -955,7 +955,7 @@ export function CanvasImageEditorDialog({
                   onChange={(e) => setDistance(Number(e.target.value))}
                   className="w-28"
                 />
-                <span className="w-10 text-right tabular-nums text-[rgba(0,0,0,0.6)]">{distance.toFixed(2)}x</span>
+                <span className="w-10 text-right tabular-nums text-muted-foreground">{distance.toFixed(2)}x</span>
               </label>
               <button
                 type="button"
@@ -964,21 +964,21 @@ export function CanvasImageEditorDialog({
                   setPitchDeg(0);
                   setDistance(1);
                 }}
-                className="rounded-full bg-[rgba(0,0,0,0.05)] px-2.5 py-1 text-[12px] font-medium text-[rgba(0,0,0,0.6)] hover:bg-[rgba(0,0,0,0.09)]"
+                className="rounded-full bg-black/5 px-2.5 py-1 text-ios-caption1 font-medium text-muted-foreground hover:bg-black/10"
               >
                 复位
               </button>
-              <span className="basis-full text-[12px] text-[rgba(0,0,0,0.4)]">预览为示意，确认后由 AI 按角度重绘生成新图</span>
+              <span className="basis-full text-ios-caption1 text-foreground/45">预览为示意，确认后由 AI 按角度重绘生成新图</span>
             </div>
           )}
         </div>
 
         {/* 底部按鈕 */}
-        <div className="flex items-center justify-end gap-2 border-t border-[rgba(0,0,0,0.06)] px-4 py-3">
+        <div className="flex items-center justify-end gap-2 border-t px-4 py-3">
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg px-4 py-2 text-[13.5px] font-medium text-[rgba(0,0,0,0.6)] hover:bg-[rgba(0,0,0,0.05)]"
+            className="rounded-lg px-4 py-2 text-[13.5px] font-medium text-muted-foreground hover:bg-black/5"
           >
             取消
           </button>
@@ -986,7 +986,7 @@ export function CanvasImageEditorDialog({
             type="button"
             onClick={handleConfirm}
             disabled={!bmp || busy || (activeMode === "mask" && effectiveMaskOutput === "inpaint" && inpaintInstruction.trim() === "")}
-            className="flex items-center gap-2 rounded-lg bg-black px-5 py-2 text-[13.5px] font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+            className="flex items-center gap-2 rounded-lg bg-primary px-5 py-2 text-[13.5px] font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {busy && <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />}
             {activeMode === "split"

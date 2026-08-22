@@ -10,10 +10,11 @@ export interface CanvasBudgetBarProps {
   className?: string;
 }
 
+/** 進度條狀態色（預算用量：<60% 綠 / ≤85% 黃 / >85% 紅），走 token。 */
 function fillColorFor(pct: number): string {
-  if (pct < 60) return "#34C759";
-  if (pct <= 85) return "#FFB300";
-  return "#FF3B30";
+  if (pct < 60) return "bg-ios-green";
+  if (pct <= 85) return "bg-ios-yellow";
+  return "bg-destructive";
 }
 
 export function CanvasBudgetBar({ budget, className }: CanvasBudgetBarProps) {
@@ -35,13 +36,16 @@ export function CanvasBudgetBar({ budget, className }: CanvasBudgetBarProps) {
         className,
       )}
     >
-      <span className="text-[12px] font-medium whitespace-nowrap text-[rgba(0,0,0,0.65)] tabular-nums">
+      <span className="text-ios-caption1 font-medium whitespace-nowrap text-muted-foreground tabular-nums">
         已花 {budget.usedCoins} / 共 {total} 币
       </span>
-      <span className="block h-1.5 w-16 overflow-hidden rounded-full bg-[rgba(0,0,0,0.08)] max-sm:hidden">
+      <span className="block h-1.5 w-16 overflow-hidden rounded-full bg-black/10 max-sm:hidden">
         <span
-          className="block h-full rounded-full transition-all duration-300 motion-reduce:transition-none"
-          style={{ width: `${pct}%`, background: fillColorFor(pct) }}
+          className={cn(
+            "block h-full rounded-full transition-all duration-300 motion-reduce:transition-none",
+            fillColorFor(pct),
+          )}
+          style={{ width: `${pct}%` }}
         />
       </span>
     </div>

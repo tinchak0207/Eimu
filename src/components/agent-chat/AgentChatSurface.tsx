@@ -81,6 +81,9 @@ export interface AgentChatSurfaceProps {
   initialPrompt?: string;
   /** inline 变体的退出去向（回工作台）。page 变体不用。 */
   onExit?: () => void;
+  /** 2026-08-22：工作站態把「收合成細欄」按鈕併入這裡的圖標組——
+      面板不再自長一條頂欄，觸發前後是同一個 header。 */
+  headerExtra?: import("react").ReactNode;
   /**
    * D-12：助理实际用过的参数回流给工作台控件。
    * 只在内嵌变体有意义（独立页背后没有控件可回填），缺席就不回流。
@@ -112,6 +115,7 @@ export function AgentChatSurface({
   canvasStateProvider,
   onSessionChange,
   onExit,
+  headerExtra,
 }: AgentChatSurfaceProps) {
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
   // 承接进来的半句话；续写或手动放弃后就不再显示。
@@ -404,7 +408,7 @@ export function AgentChatSurface({
       <header className={cn("flex shrink-0 flex-col", embedded ? "mb-1" : "pb-3")}>
         {/* 2026-08-22：拖拽把手已移除——黑色長條佔位搶文字空間，用戶裁定拿掉。 */}
         <div className="flex items-center gap-1.5">
-          <h2 className="text-[15px] font-semibold text-[rgba(0,0,0,0.78)]">AI 助理</h2>
+          <h2 className="text-[15px] font-semibold text-foreground">AI 助理</h2>
           <span
             className={cn(
               "h-1.5 w-1.5 shrink-0 rounded-full",
@@ -421,19 +425,19 @@ export function AgentChatSurface({
                 aria-expanded={showHistory}
                 aria-label="历史记录"
                 title="对话历史"
-                className="relative flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-[rgba(0,0,0,0.45)] transition-colors hover:bg-[rgba(0,0,0,0.06)] hover:text-[rgba(0,0,0,0.75)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] touch-manipulation"
+                className="relative flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-foreground/45 transition-colors hover:bg-black/5 hover:text-foreground/75 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 touch-manipulation"
               >
                 <History className="h-4 w-4" aria-hidden="true" />
                 {historyList !== null && historyList.length > 0 && (
-                  <span className="absolute -top-0.5 -right-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-[#007AFF] px-1 text-[10px] font-semibold leading-none tabular-nums text-white">
+                  <span className="absolute -top-0.5 -right-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-ios-blue px-1 text-[10px] font-semibold leading-none tabular-nums text-white">
                     {historyList.length}
                   </span>
                 )}
               </button>
         {showHistory && (
-          <div className="absolute top-full right-0 z-50 mt-0.5 w-56 rounded-ios-2xl border border-[rgba(0,0,0,0.08)] bg-white p-1 shadow-md">
+          <div className="lg-sheet absolute top-full right-0 z-50 mt-0.5 w-56 rounded-ios-2xl p-1">
             {historyList === null ? (
-              <p className="px-2.5 py-3 text-center text-ios-caption1 text-[rgba(0,0,0,0.40)]">
+              <p className="px-2.5 py-3 text-center text-ios-caption1 text-foreground/45">
                 正在加载历史会话…
               </p>
             ) : historyList.length === 0 ? (
@@ -441,8 +445,8 @@ export function AgentChatSurface({
                  引導文案 + 一顆 inline 開新對話，讓第一次打開 dropdown 的人
                  知道下一步做什麼。 */
               <div className="flex flex-col items-start gap-1.5 px-2.5 py-3">
-                <MessageSquarePlus className="h-4 w-4 text-[rgba(0,0,0,0.22)]" aria-hidden="true" />
-                <p className="text-left text-ios-caption1 leading-relaxed text-[rgba(0,0,0,0.42)]">
+                <MessageSquarePlus className="h-4 w-4 text-foreground/45" aria-hidden="true" />
+                <p className="text-left text-ios-caption1 leading-relaxed text-foreground/45">
                   还没有历史对话
                 </p>
                 <button
@@ -452,7 +456,7 @@ export function AgentChatSurface({
                     void onStartNewSession();
                   }}
                   disabled={startingNew}
-                  className="cursor-pointer text-left text-ios-caption1 font-medium text-[#007AFF] transition-colors hover:text-[#0066DD] disabled:cursor-wait"
+                  className="cursor-pointer text-left text-ios-caption1 font-medium text-ios-blue transition-colors hover:text-ios-blue/80 disabled:cursor-wait"
                 >
                   {startingNew ? "正在开启…" : "开始新对话 →"}
                 </button>
@@ -470,23 +474,23 @@ export function AgentChatSurface({
                       className={cn(
                         "flex w-full cursor-pointer items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left leading-normal transition-colors",
                         active
-                          ? "bg-[rgba(0,122,255,0.10)]"
-                          : "hover:bg-[rgba(0,0,0,0.05)]",
+                          ? "bg-ios-blue/10"
+                          : "hover:bg-black/5",
                         switchingTo === it.session_id && "opacity-50",
                       )}
                     >
                       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                        <span className="block truncate text-ios-caption1 font-medium text-[rgba(0,0,0,0.72)]">
+                        <span className="block truncate text-ios-caption1 font-medium text-muted-foreground">
                           {formatSessionLabel(it)}
                         </span>
-                        <span className="block truncate text-[11px] text-[rgba(0,0,0,0.38)]">
+                        <span className="block truncate text-ios-caption2 text-foreground/45">
                           最后活动 {formatSavedAt(it.last_activity_at)}
                         </span>
                       </span>
                       {active ? (
-                        <span className="shrink-0 text-[11px] font-medium text-[#007AFF]">当前</span>
+                        <span className="shrink-0 text-ios-caption2 font-medium text-ios-blue">当前</span>
                       ) : switchingTo === it.session_id ? (
-                        <Loader2 className="h-3 w-3 shrink-0 animate-spin text-[rgba(0,0,0,0.35)]" aria-hidden="true" />
+                        <Loader2 className="h-3 w-3 shrink-0 animate-spin text-foreground/45" aria-hidden="true" />
                       ) : null}
                     </button>
                   );
@@ -502,21 +506,22 @@ export function AgentChatSurface({
               disabled={startingNew}
               aria-label="开新对话"
               title="开新对话（当前对话保留在历史里）"
-              className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-[rgba(0,0,0,0.45)] transition-colors hover:bg-[rgba(0,0,0,0.06)] hover:text-[rgba(0,0,0,0.75)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] touch-manipulation disabled:cursor-wait"
+              className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-foreground/45 transition-colors hover:bg-black/5 hover:text-foreground/75 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 touch-manipulation disabled:cursor-wait"
             >
               {startingNew ? (
-                <Loader2 className="h-4 w-4 animate-spin text-[#007AFF]" aria-hidden="true" />
+                <Loader2 className="h-4 w-4 animate-spin text-ios-blue" aria-hidden="true" />
               ) : (
                 <MessageSquarePlus className="h-4 w-4" aria-hidden="true" />
               )}
             </button>
+            {headerExtra}
             {onExit && (
               <button
                 type="button"
                 onClick={onExit}
                 aria-label="收起"
                 title="收起助理，返回生成模式"
-                className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-[rgba(0,0,0,0.45)] transition-colors hover:bg-[rgba(0,0,0,0.06)] hover:text-[rgba(0,0,0,0.75)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] touch-manipulation"
+                className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-foreground/45 transition-colors hover:bg-black/5 hover:text-foreground/75 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 touch-manipulation"
               >
                 <ChevronDown className="h-4 w-4" aria-hidden="true" />
               </button>
@@ -528,12 +533,12 @@ export function AgentChatSurface({
       {/* D-24：承接使用者已打的半句话，点一下搬进输入框接着写（不自动送出，
           半句话直接送可能立刻扣费）；右侧「放弃」直接丢掉。 */}
       {draft && (
-        <div className="agent-surface-draft mb-2.5 flex shrink-0 items-center gap-2 rounded-ios-2xl bg-[rgba(0,122,255,0.07)] px-3 py-2 ring-1 ring-[rgba(0,122,255,0.16)]">
-          <Bot className="h-3.5 w-3.5 shrink-0 text-[#007AFF]" aria-hidden="true" />
+        <div className="agent-surface-draft mb-2.5 flex shrink-0 items-center gap-2 rounded-ios-2xl bg-ios-blue/[0.07] px-3 py-2 ring-1 ring-ios-blue/[0.16]">
+          <Bot className="h-3.5 w-3.5 shrink-0 text-ios-blue" aria-hidden="true" />
           <button
             type="button"
             onClick={continueDraft}
-            className="min-w-0 flex-1 cursor-pointer truncate text-left text-sm text-[rgba(0,0,0,0.72)] lg-transition hover:text-[#007AFF] sm:text-ios-footnote"
+            className="min-w-0 flex-1 cursor-pointer truncate text-left text-sm text-muted-foreground lg-transition hover:text-ios-blue sm:text-ios-footnote"
             title="填进输入框接着写"
           >
             接着写：<span className="font-medium">{draft}</span>
@@ -541,7 +546,7 @@ export function AgentChatSurface({
           <button
             type="button"
             onClick={() => setDraft("")}
-            className="agent-draft-discard shrink-0 cursor-pointer rounded-full px-2 py-0.5 text-ios-caption1 font-medium text-[rgba(0,0,0,0.40)] lg-transition hover:bg-[rgba(0,0,0,0.06)] hover:text-[rgba(0,0,0,0.66)]"
+            className="agent-draft-discard shrink-0 cursor-pointer rounded-full px-2 py-0.5 text-ios-caption1 font-medium text-foreground/45 lg-transition hover:bg-black/5 hover:text-muted-foreground"
             aria-label="不要这句话"
           >
             放弃
@@ -550,12 +555,12 @@ export function AgentChatSurface({
       )}
 
       {error && !isActive && (
-        <div className="agent-surface-error mb-2.5 flex shrink-0 items-center justify-between gap-3 rounded-ios-2xl bg-[rgba(255,59,48,0.08)] px-3.5 py-2.5">
-          <p className="min-w-0 flex-1 text-sm text-[rgba(160,30,25,0.90)] sm:text-ios-footnote">{error}</p>
+        <div className="agent-surface-error mb-2.5 flex shrink-0 items-center justify-between gap-3 rounded-ios-2xl bg-destructive/[0.08] px-3.5 py-2.5">
+          <p className="min-w-0 flex-1 text-sm text-destructive sm:text-ios-footnote">{error}</p>
           <button
             type="button"
             onClick={() => void retry()}
-            className="agent-surface-retry shrink-0 cursor-pointer rounded-full bg-[rgba(255,59,48,0.14)] px-3 py-1 text-ios-caption1 font-semibold text-[#FF3B30] lg-transition hover:bg-[rgba(255,59,48,0.22)]"
+            className="agent-surface-retry shrink-0 cursor-pointer rounded-full bg-destructive/[0.14] px-3 py-1 text-ios-caption1 font-semibold text-destructive lg-transition hover:bg-destructive/[0.22]"
           >
             重试
           </button>

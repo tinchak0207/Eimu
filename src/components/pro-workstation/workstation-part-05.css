@@ -3,7 +3,7 @@
   .pro-app-shell .pro-glass-panel {
     max-width: 100%;
     border-color: rgba(255, 255, 255, 0.62);
-    border-bottom-color: rgba(0, 0, 0, 0.05);
+    border-bottom-color: hsl(var(--foreground) / 0.45);
     background: rgba(255, 255, 255, 0.48);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
     -webkit-backdrop-filter: none;
@@ -20,24 +20,24 @@
 
   .pro-mobile-nav button {
     min-height: 2.75rem;
-    color: rgba(0, 0, 0, 0.62);
+    color: hsl(var(--muted-foreground));
     font-size: 0.8125rem;
     font-weight: 500;
   }
 
   .pro-mobile-nav button.is-active {
-    background: rgba(0, 122, 255, 0.12);
-    color: #007aff;
+    background: hsl(var(--accent) / 0.1);
+    color: hsl(var(--accent));
     box-shadow: none;
   }
 
   #pro-tour-run {
-    background: #007aff;
+    background: hsl(var(--accent));
   }
 
   #pro-tour-run:disabled {
     background: rgba(0, 0, 0, 0.10) !important;
-    color: rgba(0, 0, 0, 0.48) !important;
+    color: hsl(var(--foreground) / 0.45) !important;
   }
 
   .pro-app-shell .pro-panel-hint {
@@ -62,13 +62,13 @@
     font-weight: 600;
     letter-spacing: 0.05em;
     text-transform: uppercase;
-    color: rgba(0, 0, 0, 0.36);
+    color: hsl(var(--foreground) / 0.45);
     margin-bottom: 0.5rem;
     line-height: 1.35;
   }
 
   .pro-app-shell .pro-section-note {
-    color: rgba(0, 0, 0, 0.40);
+    color: hsl(var(--foreground) / 0.45);
     font-size: 0.75rem;
     font-weight: 400;
     line-height: 1.5;
@@ -93,11 +93,11 @@
 
   .pro-app-shell textarea::placeholder,
   .pro-app-shell input::placeholder {
-    color: rgba(0, 0, 0, 0.52);
+    color: hsl(var(--muted-foreground) / 0.7);
   }
 
   .pro-app-shell .pro-prompt-meter {
-    color: rgba(0, 0, 0, 0.58);
+    color: hsl(var(--muted-foreground));
     font-size: 0.8125rem;
     font-weight: 500;
   }
@@ -130,14 +130,14 @@
   .pro-app-shell .pro-control-row > :first-child {
     font-size: 0.75rem;
     font-weight: 500;
-    color: rgba(0, 0, 0, 0.44);
+    color: hsl(var(--foreground) / 0.45);
   }
 
   /* control-row 的 output/value：更突出 */
   .pro-app-shell .pro-control-row output {
     font-size: 0.875rem;
     font-weight: 600;
-    color: rgba(0, 0, 0, 0.72);
+    color: hsl(var(--muted-foreground));
   }
 
   .pro-app-shell .pro-panel-stack small,
@@ -176,7 +176,7 @@
   .pro-app-shell .pro-style-grid button {
     min-height: 2.75rem;
     min-width: 0;
-    color: rgba(0, 0, 0, 0.64);
+    color: hsl(var(--muted-foreground));
     font-size: 0.8125rem;
     font-weight: 500;
     overflow-wrap: anywhere;
@@ -185,20 +185,20 @@
   .pro-app-shell .pro-chip-grid button.is-active,
   .pro-app-shell .pro-chip-row button.is-active,
   .pro-app-shell .pro-style-grid button.is-active {
-    border: 1px solid rgba(0, 122, 255, 0.24);
-    background: rgba(0, 122, 255, 0.12);
-    color: #007aff;
+    border: 1px solid hsl(var(--accent) / 0.25);
+    background: hsl(var(--accent) / 0.1);
+    color: hsl(var(--accent));
     box-shadow: none;
   }
 
   .pro-app-shell :where(button, input, select, textarea):focus-visible {
-    outline: 2px solid rgba(0, 122, 255, 0.82);
+    outline: 2px solid hsl(var(--accent) / 0.8);
     outline-offset: 2px;
   }
 
   .pro-app-shell .pro-model-control:focus-within {
     border-radius: 1rem;
-    box-shadow: 0 0 0 2px rgba(0, 122, 255, 0.58);
+    box-shadow: 0 0 0 2px hsl(var(--accent) / 0.6);
   }
 
   /* generate bar show/hide handled in 1023px block above */
@@ -211,21 +211,21 @@
     width: 100%;
     min-height: 3rem;
     border-radius: 1rem;
-    background: #007aff;
+    background: hsl(var(--accent));
     color: #fff;
     font-size: 1rem;
     font-weight: 600;
-    box-shadow: 0 4px 20px rgba(0, 122, 255, 0.32);
+    box-shadow: 0 4px 20px hsl(var(--accent) / 0.3);
     transition: background 150ms ease, box-shadow 150ms ease;
   }
 
   .pro-mobile-generate-btn:hover:not([data-disabled]) {
-    background: #0066dd;
+    background: hsl(var(--accent) / 0.9);
   }
 
   .pro-mobile-generate-btn[data-disabled] {
     background: rgba(0, 0, 0, 0.10);
-    color: rgba(0, 0, 0, 0.42);
+    color: hsl(var(--foreground) / 0.45);
     box-shadow: none;
   }
 }
@@ -266,13 +266,13 @@
   padding: 6px 10px;
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.38);
-  color: rgba(0, 0, 0, 0.34);
+  color: hsl(var(--foreground) / 0.45);
   transition: background 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .pro-history-search:focus-within {
   background: rgba(255, 255, 255, 0.62);
-  box-shadow: 0 0 0 2px rgba(0, 122, 255, 0.16);
+  box-shadow: 0 0 0 2px hsl(var(--accent) / 0.15);
 }
 
 .pro-history-search input {
@@ -281,12 +281,12 @@
   background: transparent;
   font-size: 11px;
   font-weight: 600;
-  color: rgba(0, 0, 0, 0.68);
+  color: hsl(var(--muted-foreground));
   outline: none;
 }
 
 .pro-history-search input::placeholder {
-  color: rgba(0, 0, 0, 0.28);
+  color: hsl(var(--muted-foreground) / 0.7);
   font-weight: 500;
 }
 
@@ -334,7 +334,7 @@
 }
 
 .pro-history-main:focus-visible {
-  outline: 2px solid rgba(0, 122, 255, 0.5);
+  outline: 2px solid hsl(var(--accent) / 0.5);
   outline-offset: -2px;
 }
 
@@ -367,7 +367,7 @@
   overflow: hidden;
   font-size: 11px;
   font-weight: 700;
-  color: rgba(0, 0, 0, 0.66);
+  color: hsl(var(--muted-foreground));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -376,7 +376,7 @@
   overflow: hidden;
   font-size: 10px;
   font-weight: 600;
-  color: rgba(0, 0, 0, 0.34);
+  color: hsl(var(--foreground) / 0.45);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -397,14 +397,14 @@
   border: 0;
   border-radius: 999px;
   background: transparent;
-  color: rgba(0, 0, 0, 0.36);
+  color: hsl(var(--foreground) / 0.45);
   cursor: pointer;
   transition: background 0.2s cubic-bezier(0.4, 0, 0.2, 1), color 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .pro-history-tool:hover {
   background: rgba(255, 255, 255, 0.74);
-  color: rgba(0, 0, 0, 0.62);
+  color: hsl(var(--muted-foreground));
 }
 
 .pro-history-tool.is-active {
@@ -412,7 +412,7 @@
 }
 
 .pro-history-tool:focus-visible {
-  outline: 2px solid rgba(0, 122, 255, 0.5);
+  outline: 2px solid hsl(var(--accent) / 0.5);
   outline-offset: 1px;
 }
 
@@ -422,7 +422,7 @@
   background: rgba(255, 255, 255, 0.3);
   font-size: 11px;
   font-weight: 600;
-  color: rgba(0, 0, 0, 0.38);
+  color: hsl(var(--foreground) / 0.45);
 }
 
 /*
@@ -636,13 +636,13 @@
   margin-left: 0.25rem;
   border-radius: 999px;
   padding: 0.15rem;
-  color: rgba(0, 0, 0, 0.46);
+  color: hsl(var(--foreground) / 0.45);
   transition: background 150ms ease, color 150ms ease;
 }
 
 .pro-canvas-stale-dismiss:hover {
   background: rgba(0, 0, 0, 0.07);
-  color: rgba(0, 0, 0, 0.72);
+  color: hsl(var(--muted-foreground));
 }
 
 /*
@@ -654,20 +654,20 @@
  * 特异性高于那些裸元素规则，把焦点环统一还回来。
  */
 .pro-app-shell :where(button, a, input, select, textarea, summary, [tabindex]):focus-visible {
-  outline: 2px solid rgba(0, 122, 255, 0.82);
+  outline: 2px solid hsl(var(--accent) / 0.8);
   outline-offset: 2px;
 }
 
 /* 半透明玻璃底上的浅色描边看不清，容器内改用高对比蓝环 + 白描边垫底。 */
 .pro-app-shell .pro-glass-panel :where(input, textarea, select):focus-visible {
-  outline: 2px solid rgba(0, 122, 255, 0.82);
+  outline: 2px solid hsl(var(--accent) / 0.8);
   outline-offset: 1px;
   box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.7);
 }
 
 /* 拖动分隔条是 separator，聚焦时要看得见自己在哪一侧。 */
 .pro-app-shell .pro-resize-handle:focus-visible {
-  outline: 2px solid rgba(0, 122, 255, 0.9);
+  outline: 2px solid hsl(var(--accent) / 0.9);
   outline-offset: -1px;
 }
 

@@ -62,7 +62,7 @@ function AgentBatchProgressComponent({ items, onStop, total }: AgentBatchProgres
   return (
     <div className="agent-rise lg-card rounded-ios-2xl px-3.5 py-3">
       <div className="flex items-center gap-2.5">
-        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[rgba(0,122,255,0.10)] text-[#007AFF]">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ios-blue/10 text-ios-blue">
           <Images className="h-4 w-4" aria-hidden="true" />
         </span>
         {/*
@@ -72,11 +72,11 @@ function AgentBatchProgressComponent({ items, onStop, total }: AgentBatchProgres
           总数未知的进度只能是文字状态区，等后端真的给出分母再升级成 progressbar。
         */}
         <div role="status" aria-live="polite" className="min-w-0 flex-1">
-          <p className="text-ios-subhead font-semibold leading-[1.4] text-[rgba(0,0,0,0.85)]">
+          <p className="text-ios-subhead font-semibold leading-[1.4] text-foreground">
             已出 {images} 张{hasTotal ? " / 共 " + totalCount + " 张" : ""}
           </p>
           {hasTotal && (
-            <p className="mt-0.5 text-sm font-semibold tabular-nums leading-[1.4] text-[#007AFF]">
+            <p className="mt-0.5 text-sm font-semibold tabular-nums leading-[1.4] text-ios-blue">
               已完成 {pct}%
             </p>
           )}
@@ -93,7 +93,7 @@ function AgentBatchProgressComponent({ items, onStop, total }: AgentBatchProgres
             onClick={onStop}
             aria-label="中止助理生成"
             title="立即中止当前这轮生成"
-            className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-full bg-[rgba(255,59,48,0.09)] px-4 text-sm font-semibold text-[#FF3B30] transition-colors duration-150 active:bg-[rgba(255,59,48,0.16)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(255,59,48,0.30)] [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
+            className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-full bg-destructive/[0.09] px-4 text-sm font-semibold text-destructive transition-colors duration-150 active:bg-destructive/[0.16] focus:outline-none focus-visible:ring-2 focus-visible:ring-destructive/30 [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
           >
             <Square className="h-3.5 w-3.5" aria-hidden="true" />
             停下

@@ -337,7 +337,7 @@ export function createWorkstationTours({
         skip.type = "button";
         skip.className = "pro-tour-skip";
         skip.textContent = "跳过引导";
-        skip.style.cssText = "border:0;background:none;color:rgba(0,0,0,0.42);font-size:0.68rem;font-weight:700;cursor:pointer;margin-left:auto;padding:0.2rem 0.5rem;";
+        skip.style.cssText = "border:0;background:none;color:hsl(var(--foreground) / 0.45);font-size:0.68rem;font-weight:700;cursor:pointer;margin-left:auto;padding:0.2rem 0.5rem;";
         skip.onclick = () => {
           window.localStorage.setItem(LORA_TOUR_STORAGE_KEY, "1");
           loraTourRef.current?.destroy();
@@ -419,7 +419,7 @@ export function createWorkstationTours({
               const status = document.createElement("div");
               status.className = "pro-input-guide-status";
               status.textContent = "输入后按回车即可搜索";
-              status.style.cssText = "margin-top:8px;font-size:12px;color:rgba(0,122,255,0.9);font-weight:700;";
+              status.style.cssText = "margin-top:8px;font-size:12px;color:hsl(var(--accent) / 0.9);font-weight:700;";
               const applyExample = (example: string) => {
                 if (!input) return;
                 const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
@@ -432,9 +432,9 @@ export function createWorkstationTours({
                 const chip = document.createElement("button");
                 chip.type = "button";
                 chip.textContent = example;
-                chip.style.cssText = "border:0;border-radius:999px;background:rgba(0,122,255,0.10);color:#007AFF;font-size:11px;font-weight:700;padding:4px 10px;cursor:pointer;transition:background 180ms;";
-                chip.onmouseenter = () => { chip.style.background = "rgba(0,122,255,0.18)"; };
-                chip.onmouseleave = () => { chip.style.background = "rgba(0,122,255,0.10)"; };
+                chip.style.cssText = "border:0;border-radius:999px;background:hsl(var(--accent) / 0.1);color:hsl(var(--accent));font-size:11px;font-weight:700;padding:4px 10px;cursor:pointer;transition:background 180ms;";
+                chip.onmouseenter = () => { chip.style.background = "hsl(var(--accent) / 0.2)"; };
+                chip.onmouseleave = () => { chip.style.background = "hsl(var(--accent) / 0.1)"; };
                 chip.onclick = () => applyExample(example);
                 row.appendChild(chip);
               }

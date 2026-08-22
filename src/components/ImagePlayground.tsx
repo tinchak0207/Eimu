@@ -616,22 +616,29 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
               min-height: 0;
               max-height: calc(100dvh - 1.5rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
               max-width: calc(100vw - 1.5rem);
-              border-radius: 22px;
-              background: rgba(255, 255, 255, 0.78);
-              backdrop-filter: blur(28px) saturate(180%);
-              -webkit-backdrop-filter: blur(28px) saturate(180%);
-              border: 1px solid rgba(255, 255, 255, 0.55);
-              box-shadow: 0 16px 56px rgba(0, 0, 0, 0.16), inset 0 0 0 0.5px rgba(255, 255, 255, 0.4);
-              overflow: hidden;
+              /* 2026-08-22 統一裁定：面板只是定位殼，零自帶 chrome——
+                 內層 lg-card 以主頁原皮（白底/圓角/陰影）浮在畫布上，
+                 觸發前後是同一張卡（寬度除外）。 */
+              overflow: visible;
               transition: width 0.32s cubic-bezier(0.2, 0.8, 0.2, 1);
               animation: canvas-ws-panel-in 0.36s cubic-bezier(0.2, 0.8, 0.2, 1);
             }
-            .canvas-chat-rail { width: 3.25rem !important; }
+            .canvas-chat-rail {
+              width: 3.25rem !important;
+              /* 面板殼已零 chrome，細欄自己帶最小可見度（否則按鈕浮在點陣上看不清）。 */
+              background: rgba(255, 255, 255, 0.86);
+              backdrop-filter: blur(20px) saturate(160%);
+              -webkit-backdrop-filter: blur(20px) saturate(160%);
+              border: 1px solid rgba(255, 255, 255, 0.55);
+              border-radius: 18px;
+              box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+              overflow: hidden;
+            }
             .canvas-chat-scroll {
               flex: 1;
               min-height: 0;
               overflow-y: auto;
-              padding: 0.5rem 0.625rem 0.625rem;
+              padding: 0;
               overscroll-behavior: contain;
             }
             .canvas-chat-rail .canvas-chat-scroll { display: none; }
@@ -653,15 +660,6 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
             }
             .canvas-chat-scroll-fill > :not(section.lg-card) { flex-shrink: 0; }
             .agent-composer-anchor { flex-shrink: 0; }
-            /* 卡中卡拍扁：面板已是玻璃面，內層卡片交出自己的底/影/框，內容直接坐在玻璃上。 */
-            .canvas-chat-scroll > .lg-card {
-              background: transparent;
-              box-shadow: none;
-              border: 0;
-              border-radius: 0;
-              backdrop-filter: none;
-              -webkit-backdrop-filter: none;
-            }
             .canvas-chat-resize {
               position: absolute;
               top: 0;
@@ -740,55 +738,29 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
                   )}
                   style={inCanvasWorkstation && chatPanelState === "expanded" ? { width: chatPanelWidth } : undefined}
                 >
-                  {/* 面板頂欄（工作站態才顯形）：標題 + 收合/展開 */}
-                  <div
-                    className={
-                      inCanvasWorkstation
-                        ? cn(
-                            "flex shrink-0 items-center gap-1.5 border-b border-[rgba(0,0,0,0.06)] px-2.5 py-2",
-                            chatPanelState === "rail" && "h-full flex-col justify-start gap-2 border-b-0 py-2.5 max-md:h-auto max-md:flex-row",
-                          )
-                        : "hidden"
-                    }
-                  >
-                    {chatPanelState === "expanded" ? (
-                      <>
-                        <MessageCircle className="h-4 w-4 shrink-0 text-[#007AFF]" aria-hidden="true" />
-                        <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-[rgba(0,0,0,0.75)]">
-                          AI 助理
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => setChatPanelState("rail")}
-                          title="收起对话面板"
-                          aria-label="收起对话面板"
-                          className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-[rgba(0,0,0,0.45)] transition-colors hover:bg-[rgba(0,0,0,0.06)] hover:text-[rgba(0,0,0,0.75)]"
-                        >
-                          <PanelLeftClose className="h-4 w-4 max-md:hidden" aria-hidden="true" />
-                          <ChevronDown className="hidden h-4 w-4 max-md:block" aria-hidden="true" />
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => setChatPanelState("expanded")}
-                          title="展开对话面板"
-                          aria-label="展开对话面板"
-                          className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-[#007AFF] transition-colors hover:bg-[rgba(0,122,255,0.1)]"
-                        >
-                          <PanelLeftOpen className="h-4 w-4 max-md:hidden" aria-hidden="true" />
-                          <ChevronUp className="hidden h-4 w-4 max-md:block" aria-hidden="true" />
-                        </button>
-                        <MessageCircle
-                          className={cn("h-4 w-4 shrink-0 text-[rgba(0,0,0,0.35)]", isLoading && "animate-pulse text-[#007AFF]")}
-                          aria-hidden="true"
-                        />
-                        <span className="hidden text-[12px] font-medium text-[rgba(0,0,0,0.45)] max-md:inline">AI 助理</span>
-                      </>
-                    )}
-                  </div>
-                  <div className={inCanvasWorkstation ? cn("canvas-chat-scroll min-w-0 flex-1 space-y-3", chatPanelState === "expanded" && "canvas-chat-scroll-fill") : "space-y-3"}>
+                  {/* 面板頂欄（2026-08-22 統一裁定）：只在 rail 細欄態存在——
+                      細欄需要一顆展開按鈕。expanded 態不渲染頂欄：收合按鈕
+                      併入聊天 header（chatHeaderExtra），觸發前後同一個 UI。 */}
+                  {inCanvasWorkstation && chatPanelState === "rail" && (
+                    <div className="flex h-full flex-col justify-start gap-2 py-2.5 max-md:h-auto max-md:flex-row">
+                      <button
+                        type="button"
+                        onClick={() => setChatPanelState("expanded")}
+                        title="展开对话面板"
+                        aria-label="展开对话面板"
+                        className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-[#007AFF] transition-colors hover:bg-[rgba(0,122,255,0.1)]"
+                      >
+                        <PanelLeftOpen className="h-4 w-4 max-md:hidden" aria-hidden="true" />
+                        <ChevronUp className="hidden h-4 w-4 max-md:block" aria-hidden="true" />
+                      </button>
+                      <MessageCircle
+                        className={cn("h-4 w-4 shrink-0 text-[rgba(0,0,0,0.35)]", isLoading && "animate-pulse text-[#007AFF]")}
+                        aria-hidden="true"
+                      />
+                      <span className="hidden text-[12px] font-medium text-[rgba(0,0,0,0.45)] max-md:inline">AI 助理</span>
+                    </div>
+                  )}
+                  <div className={inCanvasWorkstation ? cn("canvas-chat-scroll min-w-0 flex-1 space-y-3", chatPanelState === "expanded" && "canvas-chat-scroll-fill") : "min-w-0 space-y-3"}>
                   {/* D-12：助理改过的项在这里显形，可逐项撤销，也可一键恢复原设定。
                       不显示「原值 → 现值」的箭头对照：控件上已经是现值，
                       再画一遍只是噪音；使用者要的是「这项被动过」和「还我」。 */}
@@ -851,6 +823,21 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
                     animState={animState}
                     displayMode={displayMode}
                     fillAvailableHeight={inCanvasWorkstation}
+                    /* 收合面板按鈕併入聊天 header——面板頂欄已刪，觸發前後
+                       同一個 header 同一套操作（2026-08-22 統一裁定）。 */
+                    chatHeaderExtra={
+                      inCanvasWorkstation && chatPanelState === "expanded" ? (
+                        <button
+                          type="button"
+                          onClick={() => setChatPanelState("rail")}
+                          title="收起对话面板"
+                          aria-label="收起对话面板"
+                          className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-[rgba(0,0,0,0.45)] transition-colors hover:bg-[rgba(0,0,0,0.06)] hover:text-[rgba(0,0,0,0.75)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)]"
+                        >
+                          <PanelLeftClose className="h-4 w-4" aria-hidden="true" />
+                        </button>
+                      ) : undefined
+                    }
                     onEditResult={setPixaiResultUrl}
                     onUpscaleResult={setPixaiResultUrl}
                     onParamsReflected={handleParamsReflected}

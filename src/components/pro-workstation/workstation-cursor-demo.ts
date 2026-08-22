@@ -128,7 +128,7 @@ export function runCursorDemo(steps: CursorStep[], onDone?: () => void): void {
             i += 1;
             setter?.call(input, s.text.slice(0, i));
             input.dispatchEvent(new Event("input", { bubbles: true }));
-            input.style.color = "rgba(0,0,0,0.34)";
+            input.style.color = "hsl(var(--foreground) / 0.45)";
             window.setTimeout(typeChar, 130);
           };
           window.setTimeout(typeChar, 120);

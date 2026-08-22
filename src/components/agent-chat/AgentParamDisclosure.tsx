@@ -72,7 +72,7 @@ export function AgentParamDisclosure({ argsSummary, idPrefix, toolName }: AgentP
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-controls={`${idPrefix}-params`}
-        className="inline-flex min-h-11 w-fit cursor-pointer touch-manipulation items-center gap-1.5 self-start rounded-full px-2.5 text-[14px] font-medium leading-[1.25rem] text-[rgba(0,122,255,0.92)] transition-colors duration-200 hover:text-[#007AFF] active:bg-[rgba(0,122,255,0.10)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] motion-reduce:transition-none [-webkit-tap-highlight-color:transparent]"
+        className="inline-flex min-h-11 w-fit cursor-pointer touch-manipulation items-center gap-1.5 self-start rounded-full px-2.5 text-ios-subhead font-medium text-ios-blue/[0.92] transition-colors duration-200 hover:text-ios-blue active:bg-ios-blue/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 motion-reduce:transition-none [-webkit-tap-highlight-color:transparent]"
       >
         {/* 窄屏点开的是抽屉，图标跟着语义换：手风琴才有「转箭头」这回事。 */}
         {narrow ? (
@@ -105,7 +105,7 @@ export function AgentParamDisclosure({ argsSummary, idPrefix, toolName }: AgentP
               {/* 抓手是可见的可抓性提示，不是装饰；真正的关闭靠右上角按钮与点遮罩。 */}
               <span className="agent-param-drawer-grip" aria-hidden="true" />
               <div className="flex items-center gap-2 px-4 pb-2">
-                <p id={titleId} className="min-w-0 flex-1 text-ios-subhead font-semibold text-[rgba(0,0,0,0.85)]">
+                <p id={titleId} className="min-w-0 flex-1 text-ios-subhead font-semibold text-foreground">
                   {toolName ? `${toolName} 的参数` : "这次用到的参数"}
                 </p>
                 <button
@@ -113,7 +113,7 @@ export function AgentParamDisclosure({ argsSummary, idPrefix, toolName }: AgentP
                   type="button"
                   onClick={close}
                   aria-label="关闭参数"
-                  className="flex h-11 w-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full bg-[rgba(0,0,0,0.05)] text-[rgba(0,0,0,0.50)] transition-colors hover:bg-[rgba(0,0,0,0.09)] hover:text-[rgba(0,0,0,0.80)] active:bg-[rgba(0,0,0,0.13)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] motion-reduce:transition-none [-webkit-tap-highlight-color:transparent]"
+                  className="flex h-11 w-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full bg-black/5 text-muted-foreground transition-colors hover:bg-black/[0.09] hover:text-foreground active:bg-black/[0.13] focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 motion-reduce:transition-none [-webkit-tap-highlight-color:transparent]"
                 >
                   <X className="h-5 w-5" aria-hidden="true" />
                 </button>

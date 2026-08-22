@@ -30,7 +30,7 @@ export interface CanvasNodeHoverToolbarProps {
   onSetPrimary?: (nodeId: string) => void;
 }
 
-const BUTTON_CLASS = "flex h-7 w-7 items-center justify-center rounded-md text-[rgba(0,0,0,0.45)] transition-colors hover:bg-[rgba(0,0,0,0.08)] active:bg-[rgba(0,0,0,0.12)] disabled:cursor-not-allowed disabled:opacity-40 dark:text-[rgba(255,255,255,0.55)] dark:hover:bg-[rgba(255,255,255,0.1)] dark:active:bg-[rgba(255,255,255,0.15)]";
+const BUTTON_CLASS = "flex h-7 w-7 items-center justify-center rounded-md text-foreground/45 transition-colors hover:bg-black/10 active:bg-black/10 disabled:cursor-not-allowed disabled:opacity-40";
 
 export function CanvasNodeHoverToolbar({
   nodeId,
@@ -55,7 +55,7 @@ export function CanvasNodeHoverToolbar({
   return (
     <div
       data-canvas-interactive
-      className="absolute right-1 top-1 z-40 flex items-center gap-0.5 rounded-lg border border-[rgba(0,0,0,0.08)] bg-white/90 px-1 py-0.5 shadow-sm backdrop-blur-sm dark:border-[rgba(255,255,255,0.1)] dark:bg-[rgba(30,30,32,0.9)]"
+      className="absolute right-1 top-1 z-40 flex items-center gap-0.5 rounded-lg lg-float px-1 py-0.5"
       style={{ transform: `scale(${Math.min(1, 1 / scale)})`, transformOrigin: "top right" }}
       onMouseDown={stopPropagation}
       onTouchStart={stopPropagation}
@@ -108,7 +108,7 @@ export function CanvasNodeHoverToolbar({
       )}
       {onDelete && (
         <>
-          <div className="mx-0.5 h-4 w-px bg-[rgba(0,0,0,0.1)] dark:bg-[rgba(255,255,255,0.1)]" />
+          <div className="mx-0.5 h-4 w-px bg-black/10" />
           <button className={BUTTON_CLASS} onClick={() => onDelete(nodeId)} title="删除节点">
             <Trash2 className="h-3.5 w-3.5" />
           </button>

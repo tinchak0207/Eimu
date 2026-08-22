@@ -12,6 +12,8 @@
 // 签名载荷带上 "biz-key-sync" 前缀做域分隔：同一把密钥在计费中继上是
 // 「控制面 → Vercel 扣费」，在这里是「Vercel → 控制面写密钥」，
 // 两个方向的报文不能互相重放。
+// 其他内部只读端点可复用这条签名通道，但必须传入自己的域前缀
+// （signBizKeySync 的 signatureDomain 参数），不得沿用 "biz-key-sync"。
 
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { BizApiKey } from "./biz-api-keys";
@@ -33,12 +35,17 @@ export type BizKeySyncOperation =
   // 校验不了管理员会话，而 Postgres 只在那一侧。
   | { op: "diagnostics" };
 
-function hmac(secret: string, timestamp: string, rawBody: string): string {
-  return createHmac("sha256", secret).update(`${SIGNATURE_DOMAIN}.${timestamp}.${rawBody}`).digest("hex");
+function hmac(secret: string, timestamp: string, rawBody: string, signatureDomain: string = SIGNATURE_DOMAIN): string {
+  return createHmac("sha256", secret).update(`${signatureDomain}.${timestamp}.${rawBody}`).digest("hex");
 }
 
-export function signBizKeySync(secret: string, timestamp: string, rawBody: string): string {
-  return `sha256=${hmac(secret, timestamp, rawBody)}`;
+export function signBizKeySync(
+  secret: string,
+  timestamp: string,
+  rawBody: string,
+  signatureDomain: string = SIGNATURE_DOMAIN,
+): string {
+  return `sha256=${hmac(secret, timestamp, rawBody, signatureDomain)}`;
 }
 
 export function verifyBizKeySync(input: {
@@ -47,11 +54,13 @@ export function verifyBizKeySync(input: {
   signature: string | null;
   rawBody: string;
   now?: number;
+  /** 域分隔前缀，默认 "biz-key-sync"。其他内部端点复用通道时必须传自己的前缀。 */
+  signatureDomain?: string;
 }): boolean {
   if (!input.timestamp || !input.signature || !input.secret) return false;
   const timestampMs = Number(input.timestamp);
   if (!Number.isFinite(timestampMs) || Math.abs((input.now ?? Date.now()) - timestampMs) > MAX_CLOCK_SKEW_MS) return false;
-  const expected = signBizKeySync(input.secret, input.timestamp, input.rawBody);
+  const expected = signBizKeySync(input.secret, input.timestamp, input.rawBody, input.signatureDomain ?? SIGNATURE_DOMAIN);
   const actual = Buffer.from(input.signature);
   const expectedBytes = Buffer.from(expected);
   return actual.length === expectedBytes.length && timingSafeEqual(actual, expectedBytes);

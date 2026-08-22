@@ -19,9 +19,9 @@ interface ToolStatusMeta {
 }
 
 const STATUS_META: Record<AgentToolCallItem["status"], ToolStatusMeta> = {
-  running: { label: "运行中…", Icon: Loader2, tone: "text-[#007AFF]", badge: "lg-tint-blue" },
+  running: { label: "运行中…", Icon: Loader2, tone: "text-ios-blue", badge: "lg-tint-blue" },
   ok: { label: "已完成", Icon: Check, tone: "text-[#248A3D]", badge: "lg-tint-green" },
-  failed: { label: "失败", Icon: X, tone: "text-[#FF3B30]", badge: "lg-tint-red" },
+  failed: { label: "失败", Icon: X, tone: "text-destructive", badge: "lg-tint-red" },
 };
 
 /** 展示用的金币数：整数原样，浮点去掉多余尾巴。 */
@@ -36,11 +36,11 @@ function AgentToolCardComponent({ item }: AgentToolCardProps) {
   return (
     <div className="agent-rise lg-card flex flex-col gap-2 rounded-ios-2xl px-3.5 py-3">
       <div className="flex items-center gap-2.5">
-        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[rgba(0,0,0,0.04)] text-[rgba(0,0,0,0.55)]">
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-black/[0.04] text-muted-foreground">
           <status.Icon className={cn("h-4 w-4", running && "animate-spin")} aria-hidden="true" />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-ios-subhead font-semibold text-[rgba(0,0,0,0.85)]">
+          <p className="truncate text-ios-subhead font-semibold text-foreground">
             {item.tool}
           </p>
           {item.costCoins !== undefined && (

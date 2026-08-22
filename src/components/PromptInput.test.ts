@@ -62,7 +62,8 @@ test("no settings row can widen the card, so phones never scroll sideways", () =
   assert.doesNotMatch(source, /<div className="flex items-center gap-2">\s*<span className=\{LABEL_CLASS\}/);
 
   // The auto-sized grid column takes its floor from the item's min-content too.
-  assert.match(playground, /<div className="min-w-0 space-y-3">/);
+  // 2026-08-22: 该列改为条件渲染（canvas 工作台分支）——普通分支必须保留 min-w-0。
+  assert.match(playground, /: "min-w-0 space-y-3"\}/);
 
   // Backstop so a future row can only ever clip, never push the page.
   assert.match(source, /lg-card relative overflow-x-clip rounded-ios-3xl/);

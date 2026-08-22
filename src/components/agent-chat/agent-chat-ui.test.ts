@@ -319,7 +319,10 @@ test("D-1 AI 助理 is a toggle beside 改图/放大, not a page takeover", () =
 test("D-1 the agent face never grows a second send button or a second textarea", () => {
   const code = readCode(promptInput);
   // 送出归聊天区自己的输入区：卡片底部那颗 CTA 在 agent 面不存在。
-  assert.match(code, /\{displayMode !== "agent" && \(/);
+  // 2026-08-22：agent 面底行整排由三元換成返回條（工作站態同款），
+  // CTA/pro-toggle 只存在於非 agent 分支。
+  assert.match(code, /\{displayMode === "agent" \? \(/);
+  assert.match(code, /返回生成/);
   // 键盘旁路也要堵掉，否则 Enter 还能从别处触发一次生成。
   assert.match(code, /if \(displayMode === "agent"\) return;/);
   // 两个输入框并排会有「我该往哪打字」的歧义。
@@ -486,7 +489,10 @@ test("composer accepts pasted files (Ctrl+V) and dragged-in files, sharing the u
   assert.match(code, /event\.dataTransfer\.dropEffect = "copy"/);
 
   // 拖入悬停要有可见反馈，且提示条不吃鼠标事件。
-  assert.match(code, /dragActive && "ring-2 ring-\[rgba\(0,122,255,0\.45\)\]/);
+  // 2026-08-22 lg-* 迁移：composer 根元素挂 lg-float 玻璃后，拖拽高亮必须用
+  // !important 前缀才能盖过 .lg-float 的 background/box-shadow（同特异性下
+  // 手写 utilities 层的 lg-* 排在生成的 utility 之后）。
+  assert.match(code, /dragActive && "!ring-2 !ring-ios-blue\/45 !bg-ios-blue\/\[0\.04\]"/);
   assert.match(code, /松开以添加附件/);
   assert.match(code, /pointer-events-none/);
 

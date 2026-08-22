@@ -52,10 +52,10 @@ function ImageAction({
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        "flex h-11 items-center gap-1.5 rounded-full px-3.5 text-[0.875rem] font-medium transition-all duration-200",
-        "bg-[rgba(255,255,255,0.78)] text-[rgba(0,0,0,0.72)] backdrop-blur-[22px]",
-        "hover:bg-[rgba(255,255,255,0.94)] active:scale-[0.97] focus:outline-none focus:ring-2 focus:ring-[rgba(0,122,255,0.30)]",
-        "disabled:cursor-not-allowed disabled:text-[rgba(0,0,0,0.28)] disabled:hover:bg-[rgba(255,255,255,0.78)]",
+        "flex h-11 items-center gap-1.5 rounded-full px-3.5 text-ios-subhead font-medium transition-all duration-200",
+        "lg-float text-muted-foreground",
+        "enabled:hover:bg-white/[0.94] active:scale-[0.97] focus:outline-none focus:ring-2 focus:ring-ios-blue/30",
+        "disabled:cursor-not-allowed disabled:text-foreground/45",
         "[touch-action:manipulation] [-webkit-tap-highlight-color:transparent]",
       )}
     >
@@ -340,12 +340,12 @@ function ImageLightbox({ src, alt, onClose }: { src: string; alt: string; onClos
           cancelClose();
           onClose();
         }}
-        className="absolute right-[max(1rem,env(safe-area-inset-right))] top-[max(1rem,env(safe-area-inset-top))] flex h-11 w-11 items-center justify-center rounded-full bg-[rgba(255,255,255,0.14)] text-white backdrop-blur-md transition-colors duration-200 hover:bg-[rgba(255,255,255,0.24)] focus:outline-none focus:ring-2 focus:ring-white/50 [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
+        className="absolute right-[max(1rem,env(safe-area-inset-right))] top-[max(1rem,env(safe-area-inset-top))] flex h-11 w-11 items-center justify-center rounded-full bg-white/[0.14] text-white backdrop-blur-md transition-colors duration-200 hover:bg-white/[0.24] focus:outline-none focus:ring-2 focus:ring-white/50 [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
       >
         <X className="h-5 w-5" aria-hidden="true" />
       </button>
       <div className="pointer-events-none absolute inset-x-0 bottom-[max(1.25rem,env(safe-area-inset-bottom))] flex justify-center">
-        <div className="rounded-full bg-[rgba(255,255,255,0.12)] px-3.5 py-1.5 text-ios-footnote text-white/80 backdrop-blur-md">
+        <div className="rounded-full bg-white/[0.12] px-3.5 py-1.5 text-ios-footnote text-white/80 backdrop-blur-md">
           轻点关闭 · 双指缩放
         </div>
       </div>
@@ -408,7 +408,7 @@ function AgentImageCardComponent({
         role="button"
         tabIndex={0}
         aria-label="查看大图"
-        className="group relative aspect-square max-h-[min(420px,52dvh)] w-full cursor-zoom-in select-none bg-[rgba(0,0,0,0.03)] [touch-action:manipulation] [-webkit-tap-highlight-color:transparent] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)]"
+        className="group relative aspect-square max-h-[min(420px,52dvh)] w-full cursor-zoom-in select-none bg-black/[0.03] [touch-action:manipulation] [-webkit-tap-highlight-color:transparent] focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30"
         onPointerDown={() => {
           pressRef.current = { dt: 0, t: Date.now() };
         }}
@@ -438,18 +438,18 @@ function AgentImageCardComponent({
           <div className="skeleton absolute inset-0" aria-hidden="true" />
         )}
         {failed ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-[rgba(0,0,0,0.03)] p-4">
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[rgba(255,59,48,0.10)] text-[#FF3B30]">
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/[0.03] p-4">
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10 text-destructive">
               <AlertTriangle className="h-6 w-6" aria-hidden="true" />
             </div>
-            <p className="text-[0.875rem] font-medium text-[rgba(0,0,0,0.55)]">图片加载失败</p>
+            <p className="text-ios-subhead font-medium text-muted-foreground">图片加载失败</p>
             <button
               type="button"
               onClick={(event) => {
                 event.stopPropagation();
                 handleRetry();
               }}
-              className="flex h-11 items-center gap-1.5 rounded-full bg-[rgba(0,122,255,0.10)] px-4 text-[0.875rem] font-medium text-[#007AFF] backdrop-blur-[22px] transition-colors duration-200 hover:bg-[rgba(0,122,255,0.16)] active:scale-[0.97] focus:outline-none focus:ring-2 focus:ring-[rgba(0,122,255,0.30)] [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
+              className="flex h-11 items-center gap-1.5 rounded-full bg-ios-blue/10 px-4 text-ios-subhead font-medium text-ios-blue backdrop-blur-[22px] transition-colors duration-200 hover:bg-ios-blue/[0.16] active:scale-[0.97] focus:outline-none focus:ring-2 focus:ring-ios-blue/30 [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
             >
               <RotateCw className="h-4 w-4" aria-hidden="true" />
               重试

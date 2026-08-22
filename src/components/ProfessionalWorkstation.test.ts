@@ -619,7 +619,7 @@ test("professional workstation exposes one complete work surface at a time on mo
   assert.match(styles, /\.pro-studio-body::-webkit-scrollbar/);
   assert.match(styles, /\.pro-panel-stack\s*\{[^}]*min-width: 0/);
   assert.match(styles, /\.pro-app-shell \.pro-glass-panel\s*\{[^}]*backdrop-filter: none/);
-  assert.match(styles, /#pro-tour-run:disabled\s*\{[^}]*color: rgba\(0, 0, 0/);
+  assert.match(styles, /#pro-tour-run:disabled\s*\{[^}]*color: hsl\(var\(--foreground\) \/ 0\.45\)/);
   assert.match(styles, /\.pro-app-shell textarea/);
   assert.match(styles, /\.pro-app-shell input:not\(\[type="range"\]\)/);
   assert.match(styles, /\.pro-app-shell select/);
@@ -674,7 +674,7 @@ test("LoRA exploration enlarges readable cards inside a bounded replacement page
   assert.match(source, /\[contain:inline-size\]/);
   assert.match(source, /pro-lora-card-title/);
   assert.match(source, /pro-lora-selected-title/);
-  assert.match(source, /text-\[14px\]/);
+  assert.match(source, /text-ios-subhead/);
   assert.match(source, /min-h-11/);
   assert.match(source, /h-10 w-10/);
   assert.doesNotMatch(source, /pro-lora-card-title[^\n]*truncate/);

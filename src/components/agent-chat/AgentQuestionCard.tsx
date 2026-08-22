@@ -49,16 +49,16 @@ function AgentQuestionCardComponent({ question, onAnswer }: AgentQuestionCardPro
     <div className="agent-rise lg-sheet rounded-ios-2xl p-3.5" aria-busy={busy}>
       <div key={`${requestId}-${current}`}>
         <div className="flex items-start gap-3">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[rgba(0,122,255,0.12)] text-[#007AFF]">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-ios-blue/[0.12] text-ios-blue">
             <HelpCircle className="h-4 w-4" aria-hidden="true" />
           </span>
           <div className="min-w-0 flex-1">
             {item.header && (
-              <p className="text-sm font-medium text-[rgba(0,0,0,0.42)]">{item.header}</p>
+              <p className="text-sm font-medium text-foreground/45">{item.header}</p>
             )}
-            <p className="text-ios-subhead font-semibold text-[rgba(0,0,0,0.85)]">{item.question}</p>
+            <p className="text-ios-subhead font-semibold text-foreground">{item.question}</p>
             {questions.length > 1 && (
-              <p className="mt-0.5 text-ios-caption1 text-[rgba(0,0,0,0.32)]">
+              <p className="mt-0.5 text-ios-caption1 text-foreground/45">
                 {current + 1} / {questions.length}
               </p>
             )}
@@ -76,23 +76,23 @@ function AgentQuestionCardComponent({ question, onAnswer }: AgentQuestionCardPro
                 onClick={() => pick(opt.label)}
                 className={cn(
                   "flex min-h-12 w-full items-center gap-2.5 rounded-ios-xl px-4 py-2.5 text-left",
-                  "bg-[rgba(0,122,255,0.06)] transition-all duration-150 active:scale-[0.99] active:bg-[rgba(0,122,255,0.14)]",
-                  "focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)]",
+                  "bg-ios-blue/[0.06] transition-all duration-150 active:scale-[0.99] active:bg-ios-blue/[0.14]",
+                  "focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30",
                   "disabled:cursor-wait disabled:opacity-60",
                   "touch-manipulation [-webkit-tap-highlight-color:transparent]",
-                  isPicked && "bg-[rgba(0,122,255,0.12)] ring-1 ring-[rgba(0,122,255,0.35)]",
+                  isPicked && "bg-ios-blue/[0.12] ring-1 ring-ios-blue/35",
                 )}
               >
                 <span className="min-w-0 flex-1">
-                  <span className="block text-ios-subhead font-semibold text-[rgba(0,0,0,0.85)]">{opt.label}</span>
+                  <span className="block text-ios-subhead font-semibold text-foreground">{opt.label}</span>
                   {opt.description && (
-                    <span className="mt-0.5 block text-sm leading-[1.5] text-[rgba(0,0,0,0.52)]">
+                    <span className="mt-0.5 block text-sm leading-[1.5] text-muted-foreground">
                       {opt.description}
                     </span>
                   )}
                 </span>
                 {isPicked && (
-                  <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[#007AFF]" aria-hidden="true" />
+                  <Loader2 className="h-4 w-4 shrink-0 animate-spin text-ios-blue" aria-hidden="true" />
                 )}
               </button>
             );

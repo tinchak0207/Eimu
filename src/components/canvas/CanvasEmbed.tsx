@@ -1568,6 +1568,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
           .ce-embed-root.ce-compact { height: min(72dvh, 620px) !important; }
         }
 
+        /* 材質（背景/陰影/模糊）改由 lg-float 供給；這裡只留尺寸與排版。 */
         .ce-embed-bar-btn {
           touch-action: manipulation;
           -webkit-tap-highlight-color: transparent;
@@ -1581,17 +1582,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
           font-size: 0.875rem;
           line-height: 1.25rem;
           border: none;
-          background: rgba(255, 255, 255, 0.96);
-          box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
-          backdrop-filter: blur(12px);
-          -webkit-backdrop-filter: blur(12px);
           transition: background-color 0.2s ease, transform 0.15s ease;
-        }
-        .ce-embed-title-pill {
-          background: rgba(255, 255, 255, 0.96);
-          box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
-          backdrop-filter: blur(12px);
-          -webkit-backdrop-filter: blur(12px);
         }
         .ce-embed-bar-btn:active { transform: scale(0.96); }
 
@@ -1772,7 +1763,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
             top: "calc(0.75rem + env(safe-area-inset-top, 0px))",
           }}
         >
-          <span className="ce-embed-title-pill rounded-full px-2.5 py-1 text-ios-caption1 font-medium text-[rgba(0,0,0,0.65)] max-md:hidden">
+          <span className="ce-embed-title-pill lg-float rounded-full px-2.5 py-1 text-ios-caption1 font-medium text-muted-foreground max-md:hidden">
             画布
           </span>
           {onToggleExpand && (
@@ -1780,7 +1771,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
               type="button"
               onClick={onToggleExpand}
               aria-pressed={expanded}
-              className="ce-embed-bar-btn pointer-events-auto cursor-pointer rounded-full bg-white/80 font-medium text-[#007AFF] shadow-sm backdrop-blur hover:bg-white active:bg-white"
+              className="ce-embed-bar-btn lg-float pointer-events-auto cursor-pointer rounded-full font-medium text-ios-blue hover:bg-white active:bg-white"
             >
               {expanded ? "收合" : "展开"}
             </button>
@@ -1789,7 +1780,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
             type="button"
             onClick={() => canvas.newCanvasSession()}
             aria-label="新建画布"
-            className="ce-embed-bar-btn pointer-events-auto cursor-pointer rounded-full bg-white/80 font-medium text-[#007AFF] shadow-sm backdrop-blur hover:bg-white active:bg-white"
+            className="ce-embed-bar-btn lg-float pointer-events-auto cursor-pointer rounded-full font-medium text-ios-blue hover:bg-white active:bg-white"
           >
             新建画布
           </button>
@@ -1803,7 +1794,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
             aria-expanded={historyOpen}
             aria-haspopup="listbox"
             aria-label="历史画布"
-            className="ce-embed-bar-btn pointer-events-auto cursor-pointer rounded-full bg-white/80 font-medium text-[#007AFF] shadow-sm backdrop-blur hover:bg-white active:bg-white"
+            className="ce-embed-bar-btn lg-float pointer-events-auto cursor-pointer rounded-full font-medium text-ios-blue hover:bg-white active:bg-white"
           >
             历史画布
           </button>
@@ -1811,7 +1802,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
             type="button"
             onClick={() => setLibraryOpen(true)}
             aria-label="提示词库与素材"
-            className="ce-embed-bar-btn pointer-events-auto cursor-pointer rounded-full bg-white/80 font-medium text-[#007AFF] shadow-sm backdrop-blur hover:bg-white active:bg-white"
+            className="ce-embed-bar-btn lg-float pointer-events-auto cursor-pointer rounded-full font-medium text-ios-blue hover:bg-white active:bg-white"
           >
             资源库
           </button>
@@ -1821,7 +1812,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
             onClick={() => setCardsOpen((v) => !v)}
             aria-pressed={cardsOpen}
             aria-label="角色与场景卡"
-            className="ce-embed-bar-btn pointer-events-auto cursor-pointer rounded-full bg-white/80 font-medium text-[#007AFF] shadow-sm backdrop-blur hover:bg-white active:bg-white"
+            className="ce-embed-bar-btn lg-float pointer-events-auto cursor-pointer rounded-full font-medium text-ios-blue hover:bg-white active:bg-white"
           >
             角色卡{canvas.activeCardIds.length > 0 ? ` · ${canvas.activeCardIds.length}` : ""}
           </button>
@@ -1831,7 +1822,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
               onClick={() => setElementListOpen((v) => !v)}
               aria-pressed={elementListOpen}
               aria-label="节点清单"
-              className="ce-embed-bar-btn pointer-events-auto cursor-pointer rounded-full bg-white/80 font-medium text-[#007AFF] shadow-sm backdrop-blur hover:bg-white active:bg-white max-md:hidden"
+              className="ce-embed-bar-btn lg-float pointer-events-auto cursor-pointer rounded-full font-medium text-ios-blue hover:bg-white active:bg-white max-md:hidden"
             >
               节点清单
             </button>
@@ -1841,7 +1832,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
               type="button"
               onClick={onClose}
               aria-label="关闭画布，回到图片结果"
-              className="ce-embed-bar-btn pointer-events-auto cursor-pointer rounded-full bg-white/80 font-medium text-[#007AFF] shadow-sm backdrop-blur hover:bg-white active:bg-white"
+              className="ce-embed-bar-btn lg-float pointer-events-auto cursor-pointer rounded-full font-medium text-ios-blue hover:bg-white active:bg-white"
             >
               关闭画布
             </button>
@@ -1850,16 +1841,16 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
 
         {/* 連線模式提示 */}
         {(connecting || portDrag) && (
-          <div className="pointer-events-none absolute left-1/2 top-14 z-20 -translate-x-1/2 rounded-full bg-[rgba(0,122,255,0.92)] px-3 py-1.5 text-[12.5px] font-medium text-white shadow-md">
+          <div className="pointer-events-none absolute left-1/2 top-14 z-20 -translate-x-1/2 rounded-full bg-ios-blue/90 px-3 py-1.5 text-[12.5px] font-medium text-white shadow-md">
             {portDrag ? "拖到目标节点成线 · 松手在空白处新建节点" : "点击目标节点完成连线 · Esc 取消"}
           </div>
         )}
 
         {/* Wave C：agent 操作確認閘 */}
         {pendingOps && !agentAutoApprove && (
-          <div className="pointer-events-auto absolute bottom-16 left-1/2 z-40 w-[min(92%,460px)] -translate-x-1/2 rounded-2xl bg-white p-3.5 shadow-[0_12px_48px_rgba(0,0,0,0.22)]" data-canvas-interactive>
-            <p className="text-[13.5px] font-semibold text-[rgba(0,0,0,0.85)]">AI 助理想操作画布</p>
-            <p className="mt-0.5 text-[12.5px] leading-relaxed text-[rgba(0,0,0,0.55)]">
+          <div className="pointer-events-auto absolute bottom-16 left-1/2 z-40 w-[min(92%,460px)] -translate-x-1/2 rounded-2xl lg-sheet p-3.5" data-canvas-interactive>
+            <p className="text-[13.5px] font-semibold text-foreground">AI 助理想操作画布</p>
+            <p className="mt-0.5 text-[12.5px] leading-relaxed text-muted-foreground">
               {pendingOps.label || `共 ${pendingOps.ops.length} 步操作`}
               {" · "}
               {pendingOps.ops.map((op) => op.type).join("、")}
@@ -1868,19 +1859,19 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
               <button
                 type="button"
                 onClick={approveAgentOps}
-                className="flex-1 rounded-lg bg-black px-3 py-2 text-[13px] font-medium text-white hover:opacity-90"
+                className="flex-1 rounded-lg bg-primary px-3 py-2 text-ios-footnote font-medium text-primary-foreground hover:opacity-90"
               >
                 允许
               </button>
               <button
                 type="button"
                 onClick={() => canvas.dismissAgentOps()}
-                className="flex-1 rounded-lg bg-[rgba(0,0,0,0.06)] px-3 py-2 text-[13px] font-medium text-[rgba(0,0,0,0.65)] hover:bg-[rgba(0,0,0,0.1)]"
+                className="flex-1 rounded-lg bg-black/5 px-3 py-2 text-ios-footnote font-medium text-muted-foreground hover:bg-black/10"
               >
                 拒绝
               </button>
             </div>
-            <label className="mt-2 flex cursor-pointer items-center gap-1.5 text-[11.5px] text-[rgba(0,0,0,0.45)]">
+            <label className="mt-2 flex cursor-pointer items-center gap-1.5 text-[11.5px] text-foreground/45">
               <input
                 type="checkbox"
                 checked={agentAutoApprove}
@@ -1894,7 +1885,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
           </div>
         )}
         {agentAutoApprove && pendingOps && (
-          <div className="pointer-events-none absolute bottom-16 left-1/2 z-40 -translate-x-1/2 rounded-full bg-[rgba(0,0,0,0.75)] px-3 py-1.5 text-[12px] text-white">
+          <div className="pointer-events-none absolute bottom-16 left-1/2 z-40 -translate-x-1/2 rounded-full bg-black/75 px-3 py-1.5 text-ios-caption1 text-white">
             正在执行 AI 画布操作…
           </div>
         )}
@@ -1903,7 +1894,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
         {actionError && (
           <div
             role="alert"
-            className="pointer-events-auto absolute bottom-4 left-1/2 z-30 flex max-w-[85%] -translate-x-1/2 items-center gap-2 rounded-full bg-[rgba(20,20,22,0.92)] px-4 py-2 text-[12.5px] font-medium text-white shadow-lg"
+            className="pointer-events-auto absolute bottom-4 left-1/2 z-30 flex max-w-[85%] -translate-x-1/2 items-center gap-2 rounded-full bg-black/90 px-4 py-2 text-[12.5px] font-medium text-white shadow-lg"
           >
             <span className="min-w-0 truncate">{actionError}</span>
             <button type="button" onClick={() => setActionError(null)} aria-label="关闭提示" className="shrink-0 opacity-80 hover:opacity-100">
@@ -1916,21 +1907,21 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
         {cardsOpen && (
           <div
             data-canvas-interactive
-            className="ce-embed-leftpop pointer-events-auto absolute z-20 w-72 max-w-[calc(100vw-1.5rem)] overflow-y-auto rounded-ios-2xl bg-white shadow-[0_8px_32px_rgba(0,0,0,0.16)]"
+            className="ce-embed-leftpop lg-sheet pointer-events-auto absolute z-20 w-72 max-w-[calc(100vw-1.5rem)] overflow-y-auto rounded-ios-2xl"
             style={{
               left: "calc(0.75rem + env(safe-area-inset-left, 0px))",
               top: "calc(3.5rem + env(safe-area-inset-top, 0px))",
               maxHeight: "min(64dvh, 420px)",
             }}
           >
-            <div className="border-b border-[rgba(0,0,0,0.05)] px-3 py-2.5">
-              <p className="text-[12.5px] font-semibold text-[rgba(0,0,0,0.8)]">角色 / 场景卡</p>
-              <p className="mt-0.5 text-[11px] leading-snug text-[rgba(0,0,0,0.45)]">
+            <div className="border-b px-3 py-2.5">
+              <p className="text-[12.5px] font-semibold text-foreground">角色 / 场景卡</p>
+              <p className="mt-0.5 text-ios-caption2 leading-snug text-foreground/45">
                 锁定后本画布所有生成自动携带（提示词前缀 + 参考图 + 负面词）
               </p>
             </div>
             {canvas.characterCards.length === 0 ? (
-              <p className="px-3.5 py-3 text-ios-caption1 text-[rgba(0,0,0,0.45)]">
+              <p className="px-3.5 py-3 text-ios-caption1 text-foreground/45">
                 还没有卡 · 右键参考图节点「存为卡并锁定」
               </p>
             ) : (
@@ -1939,18 +1930,18 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
                 return (
                   <div
                     key={card.id}
-                    className="flex items-center gap-2 border-b border-[rgba(0,0,0,0.05)] px-3 py-2.5 last:border-b-0"
+                    className="flex items-center gap-2 border-b px-3 py-2.5 last:border-b-0"
                   >
                     <div className="min-w-0 flex-1">
-                      <p className="flex items-center gap-1.5 truncate text-[12.5px] font-medium text-[rgba(0,0,0,0.85)]">
+                      <p className="flex items-center gap-1.5 truncate text-[12.5px] font-medium text-foreground">
                         <span className="truncate">{card.name}</span>
-                        <span className="shrink-0 rounded-full bg-[rgba(0,0,0,0.05)] px-1.5 py-0.5 text-[10px] text-[rgba(0,0,0,0.5)]">
+                        <span className="shrink-0 rounded-full bg-black/5 px-1.5 py-0.5 text-ios-caption2 text-muted-foreground">
                           {card.kind === "scene" ? "场景" : "角色"}
                         </span>
                       </p>
-                      <p className="mt-0.5 truncate text-[11px] text-[rgba(0,0,0,0.42)]">
+                      <p className="mt-0.5 truncate text-ios-caption2 text-foreground/45">
                         {active ? (
-                          <span className="font-medium text-[#34C759]">生效中</span>
+                          <span className="font-medium text-ios-green">生效中</span>
                         ) : (
                           "未锁定"
                         )}
@@ -1963,8 +1954,8 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
                       onClick={() => canvas.toggleCharacterCard(card.id)}
                       className={
                         active
-                          ? "shrink-0 cursor-pointer rounded-lg bg-[rgba(52,199,89,0.12)] px-2 py-1 text-[11.5px] font-medium text-[#248A3D] hover:bg-[rgba(52,199,89,0.2)]"
-                          : "shrink-0 cursor-pointer rounded-lg bg-[rgba(0,0,0,0.06)] px-2 py-1 text-[11.5px] font-medium text-[rgba(0,0,0,0.6)] hover:bg-[rgba(0,0,0,0.1)]"
+                          ? "shrink-0 cursor-pointer rounded-lg bg-ios-green/10 px-2 py-1 text-[11.5px] font-medium text-[#248A3D] hover:bg-ios-green/20"
+                          : "shrink-0 cursor-pointer rounded-lg bg-black/5 px-2 py-1 text-[11.5px] font-medium text-muted-foreground hover:bg-black/10"
                       }
                     >
                       {active ? "解锁" : "锁定"}
@@ -1973,7 +1964,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
                       type="button"
                       aria-label={`删除卡 ${card.name}`}
                       onClick={() => void canvas.removeCharacterCard(card.id)}
-                      className="shrink-0 cursor-pointer rounded-lg px-1.5 py-1 text-[11.5px] text-[rgba(0,0,0,0.35)] hover:bg-[rgba(0,0,0,0.06)] hover:text-[#FF3B30]"
+                      className="shrink-0 cursor-pointer rounded-lg px-1.5 py-1 text-[11.5px] text-foreground/45 hover:bg-black/5 hover:text-destructive"
                     >
                       删除
                     </button>
@@ -1990,7 +1981,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
             data-canvas-interactive
             role="listbox"
             aria-label="历史画布列表"
-            className="ce-embed-leftpop pointer-events-auto absolute z-20 w-64 max-w-[calc(100vw-1.5rem)] overflow-y-auto rounded-ios-2xl bg-white shadow-[0_8px_32px_rgba(0,0,0,0.16)]"
+            className="ce-embed-leftpop lg-sheet pointer-events-auto absolute z-20 w-64 max-w-[calc(100vw-1.5rem)] overflow-y-auto rounded-ios-2xl"
             style={{
               left: "calc(0.75rem + env(safe-area-inset-left, 0px))",
               top: "calc(3.5rem + env(safe-area-inset-top, 0px))",
@@ -1998,7 +1989,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
             }}
           >
             {canvas.savedProjects.length === 0 ? (
-              <p className="px-4 py-3 text-ios-caption1 text-[rgba(0,0,0,0.45)]">还没有保存的画布</p>
+              <p className="px-4 py-3 text-ios-caption1 text-foreground/45">还没有保存的画布</p>
             ) : (
               canvas.savedProjects.map((p) => (
                 <button
@@ -2008,10 +1999,10 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
                   onClick={() => {
                     void canvas.openSavedCanvas(p.id).then(() => setHistoryOpen(false));
                   }}
-                  className="flex min-h-[44px] w-full flex-col items-start justify-center gap-0.5 border-b border-[rgba(0,0,0,0.05)] px-4 py-2.5 text-left last:border-b-0 hover:bg-[rgba(0,0,0,0.04)]"
+                  className="flex min-h-[44px] w-full flex-col items-start justify-center gap-0.5 border-b px-4 py-2.5 text-left last:border-b-0 hover:bg-black/5"
                 >
-                  <span className="w-full truncate text-ios-caption1 font-medium text-[rgba(0,0,0,0.85)]">{p.title}</span>
-                  <span className="text-ios-footnote text-[rgba(0,0,0,0.42)]">
+                  <span className="w-full truncate text-ios-caption1 font-medium text-foreground">{p.title}</span>
+                  <span className="text-ios-footnote text-foreground/45">
                     {p.nodeCount} 个节点 · {formatRelative(p.updatedAt)}
                   </span>
                 </button>
@@ -2024,7 +2015,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
         {elementListOpen && expanded && (
           <div
             data-canvas-interactive
-            className="ce-embed-leftpop pointer-events-auto absolute z-20 w-60 overflow-y-auto rounded-ios-2xl bg-white shadow-[0_8px_32px_rgba(0,0,0,0.16)]"
+            className="ce-embed-leftpop lg-sheet pointer-events-auto absolute z-20 w-60 overflow-y-auto rounded-ios-2xl"
             style={{
               left: "calc(0.75rem + env(safe-area-inset-left, 0px))",
               top: "calc(3.5rem + env(safe-area-inset-top, 0px))",
@@ -2032,7 +2023,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
             }}
           >
             {canvas.nodes.length === 0 ? (
-              <p className="px-4 py-3 text-ios-caption1 text-[rgba(0,0,0,0.45)]">画布还没有节点</p>
+              <p className="px-4 py-3 text-ios-caption1 text-foreground/45">画布还没有节点</p>
             ) : (
               canvas.nodes.map((n) => (
                 <button
@@ -2044,23 +2035,22 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
                     setSelectedIds(new Set([n.id]));
                     canvas.selectNode(n.id);
                   }}
-                  className="flex min-h-[38px] w-full items-center gap-2 border-b border-[rgba(0,0,0,0.05)] px-3 py-2 text-left last:border-b-0 hover:bg-[rgba(0,0,0,0.04)]"
+                  className="flex min-h-[38px] w-full items-center gap-2 border-b px-3 py-2 text-left last:border-b-0 hover:bg-black/5"
                 >
                   <span
-                    className="h-2 w-2 shrink-0 rounded-full"
-                    style={{
-                      background:
-                        n.metadata?.status === "success"
-                          ? "#34C759"
-                          : n.metadata?.status === "loading"
-                            ? "#007AFF"
-                            : n.metadata?.status === "error"
-                              ? "#FF3B30"
-                              : "rgba(0,0,0,0.18)",
-                    }}
+                    className={cn(
+                      "h-2 w-2 shrink-0 rounded-full",
+                      n.metadata?.status === "success"
+                        ? "bg-ios-green"
+                        : n.metadata?.status === "loading"
+                          ? "bg-ios-blue"
+                          : n.metadata?.status === "error"
+                            ? "bg-destructive"
+                            : "bg-black/20",
+                    )}
                     aria-hidden="true"
                   />
-                  <span className="min-w-0 flex-1 truncate text-[12.5px] text-[rgba(0,0,0,0.75)]">{n.title}</span>
+                  <span className="min-w-0 flex-1 truncate text-[12.5px] text-muted-foreground">{n.title}</span>
                 </button>
               ))
             )}
@@ -2080,7 +2070,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
 
         {!hasNodes && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <p className="ce-embed-empty rounded-ios-2xl bg-white/80 px-4 py-2 text-[rgba(0,0,0,0.5)] shadow-sm backdrop-blur">
+            <p className="ce-embed-empty lg-float rounded-ios-2xl px-4 py-2 text-muted-foreground">
               双击空白新建节点，或拖入图片开始 · agent 生成会自动落到这里
             </p>
           </div>

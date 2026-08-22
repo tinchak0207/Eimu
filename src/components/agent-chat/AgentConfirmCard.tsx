@@ -55,10 +55,10 @@ function AgentConfirmCardComponent({ confirm, onConfirm, contextText, busy = fal
             <Sparkles className="h-4 w-4" aria-hidden="true" />
           </span>
           <div className="min-w-0 flex-1">
-            <p className="text-ios-subhead font-semibold text-[rgba(0,0,0,0.85)]">
+            <p className="text-ios-subhead font-semibold text-foreground">
               我这么理解你的愿望
             </p>
-            <p className="mt-0.5 text-sm leading-[1.55] text-[rgba(0,0,0,0.55)]">
+            <p className="mt-0.5 text-sm leading-[1.55] text-muted-foreground">
               {interpret}
             </p>
           </div>
@@ -70,17 +70,17 @@ function AgentConfirmCardComponent({ confirm, onConfirm, contextText, busy = fal
           <Coins className="h-4 w-4" aria-hidden="true" />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-[rgba(0,0,0,0.55)]">
+          <p className="text-sm font-medium text-muted-foreground">
             将花费
           </p>
           <p className="mt-0.5 flex items-baseline gap-1.5">
             <span className="text-ios-title2 font-bold leading-none tabular-nums text-[#B8860B]">
               {formatCoins(amountCoins)}
             </span>
-            <span className="text-ios-subhead font-semibold text-[rgba(0,0,0,0.72)]">金币</span>
+            <span className="text-ios-subhead font-semibold text-muted-foreground">金币</span>
           </p>
           {description && (
-            <p className="mt-1.5 text-sm leading-[1.55] text-[rgba(0,0,0,0.55)]">
+            <p className="mt-1.5 text-sm leading-[1.55] text-muted-foreground">
               {description}
             </p>
           )}
@@ -97,8 +97,8 @@ function AgentConfirmCardComponent({ confirm, onConfirm, contextText, busy = fal
           disabled={locked}
           className={cn(
             "flex min-h-12 items-center justify-center gap-1.5 rounded-full text-ios-subhead font-semibold",
-            "bg-[rgba(0,0,0,0.06)] text-[rgba(0,0,0,0.72)] transition-colors duration-150 active:bg-[rgba(0,0,0,0.10)]",
-            "focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,0,0,0.20)]",
+            "bg-black/[0.06] text-muted-foreground transition-colors duration-150 active:bg-black/10",
+            "focus:outline-none focus-visible:ring-2 focus-visible:ring-foreground/20",
             "disabled:cursor-not-allowed disabled:opacity-50",
             "[touch-action:manipulation] [-webkit-tap-highlight-color:transparent]",
           )}
@@ -115,9 +115,9 @@ function AgentConfirmCardComponent({ confirm, onConfirm, contextText, busy = fal
           disabled={locked}
           className={cn(
             "flex min-h-12 items-center justify-center gap-1.5 rounded-full text-ios-subhead font-semibold text-white",
-            "bg-[#007AFF] shadow-[0_4px_12px_rgba(0,122,255,0.32)] transition-all duration-200 active:scale-[0.98] active:bg-[#0066DD]",
-            "focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.40)]",
-            "disabled:cursor-not-allowed disabled:bg-[rgba(0,0,0,0.12)] disabled:shadow-none disabled:active:scale-100",
+            "bg-ios-blue shadow-[0_4px_12px_rgba(0,122,255,0.32)] transition-all duration-200 active:scale-[0.98] active:bg-ios-blue/80",
+            "focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/40",
+            "disabled:cursor-not-allowed disabled:bg-black/[0.12] disabled:shadow-none disabled:active:scale-100",
             "[touch-action:manipulation] [-webkit-tap-highlight-color:transparent]",
           )}
         >

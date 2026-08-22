@@ -93,10 +93,10 @@ const MIN_HEIGHT = 90;
 const MOVE_THRESHOLD_PX = 5;
 
 const STATUS_COLOR: Record<CanvasNodeStatus, string> = {
-  idle: "rgba(0,0,0,0.18)",
-  success: "#34C759",
-  loading: "#007AFF",
-  error: "#FF3B30",
+  idle: "bg-black/20",
+  success: "bg-ios-green",
+  loading: "bg-ios-blue",
+  error: "bg-destructive",
 };
 
 const STATUS_LABEL: Record<CanvasNodeStatus, string> = {
@@ -147,12 +147,12 @@ function proxySrc(url: string): string {
 function renderBrokenImage(onRetry: () => void): React.ReactNode {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-2 p-3">
-      <ImageIcon className="h-8 w-8 text-[rgba(0,0,0,0.2)]" />
-      <span className="text-[13px] font-medium text-[rgba(0,0,0,0.6)]">图片加载失败</span>
+      <ImageIcon className="h-8 w-8 text-foreground/45" />
+      <span className="text-ios-footnote font-medium text-muted-foreground">图片加载失败</span>
       <button
         type="button"
         onClick={onRetry}
-        className="inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-[rgba(0,122,255,0.10)] px-3 py-1.5 text-[12px] font-medium text-[#007AFF] transition-colors duration-150 hover:bg-[rgba(0,122,255,0.18)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)]"
+        className="inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-ios-blue/10 px-3 py-1.5 text-ios-caption1 font-medium text-ios-blue transition-colors duration-150 hover:bg-ios-blue/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30"
       >
         <RefreshCw className="h-3 w-3" aria-hidden="true" />
         重新加载
@@ -424,12 +424,12 @@ export function CanvasNodeView({
       return (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 p-3">
           <div
-            className="h-5 w-5 animate-spin rounded-full border-2 border-[rgba(0,0,0,0.15)] border-t-[#007AFF] motion-reduce:animate-none"
+            className="h-5 w-5 animate-spin rounded-full border-2 border-black/15 border-t-ios-blue motion-reduce:animate-none"
             aria-hidden="true"
           />
-          <span className="text-[14px] text-[rgba(0,0,0,0.55)]">生成中…</span>
+          <span className="text-ios-subhead text-muted-foreground">生成中…</span>
           {typeof metadata?.progress === "number" && (
-            <span className="text-[13px] tabular-nums text-[rgba(0,0,0,0.4)]">{formatProgress(metadata.progress)}</span>
+            <span className="text-ios-footnote tabular-nums text-foreground/45">{formatProgress(metadata.progress)}</span>
           )}
         </div>
       );
@@ -437,9 +437,9 @@ export function CanvasNodeView({
     if (statusValue === "error") {
       return (
         <div className="flex flex-1 flex-col items-center justify-center gap-1.5 p-3">
-          <span className="text-[14px] font-medium text-[#FF3B30]">失败</span>
+          <span className="text-ios-subhead font-medium text-destructive">失败</span>
           {metadata?.errorDetails ? (
-            <span className="max-sm:text-[13px] break-words text-center text-[12px] leading-snug text-[#FF3B30]">
+            <span className="max-sm:text-ios-footnote break-words text-center text-ios-caption1 leading-snug text-destructive">
               {metadata.errorDetails}
             </span>
           ) : null}
@@ -451,7 +451,7 @@ export function CanvasNodeView({
                 e.stopPropagation();
                 onRetry(node.id);
               }}
-              className="mt-1 flex items-center gap-1 rounded-full bg-[rgba(255,59,48,0.1)] px-3 py-1 text-[12px] font-medium text-[#FF3B30] hover:bg-[rgba(255,59,48,0.16)]"
+              className="mt-1 flex items-center gap-1 rounded-full bg-destructive/10 px-3 py-1 text-ios-caption1 font-medium text-destructive hover:bg-destructive/15"
             >
               <RefreshCw className="h-3 w-3" aria-hidden="true" />
               重试
@@ -464,8 +464,8 @@ export function CanvasNodeView({
     if (node.type === CanvasNodeType.Reference && statusValue === "idle") {
       return (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 p-4">
-          <ImageIcon className="h-7 w-7 text-[rgba(0,0,0,0.15)]" aria-hidden="true" />
-          <span className="text-[12px] text-[rgba(0,0,0,0.55)]">参考图 · 等待填入图片</span>
+          <ImageIcon className="h-7 w-7 text-foreground/45" aria-hidden="true" />
+          <span className="text-ios-caption1 text-muted-foreground">参考图 · 等待填入图片</span>
         </div>
       );
     }
@@ -473,7 +473,7 @@ export function CanvasNodeView({
     if (node.type === CanvasNodeType.Image && statusValue === "idle") {
       return (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 p-4">
-          <ImageIcon className="h-7 w-7 text-[rgba(0,0,0,0.15)]" aria-hidden="true" />
+          <ImageIcon className="h-7 w-7 text-foreground/45" aria-hidden="true" />
           <button
             type="button"
             data-canvas-interactive
@@ -481,21 +481,21 @@ export function CanvasNodeView({
               e.stopPropagation();
               onEditPrompt(node.id);
             }}
-            className="rounded-full bg-black px-3.5 py-1.5 text-[12.5px] font-medium text-white transition-opacity hover:opacity-85"
+            className="rounded-full bg-primary px-3.5 py-1.5 text-[12.5px] font-medium text-primary-foreground transition-opacity hover:opacity-85"
           >
             生成图片
           </button>
-          <span className="text-[11.5px] text-[rgba(0,0,0,0.55)]">结果将直接填入此节点</span>
+          <span className="text-[11.5px] text-muted-foreground">结果将直接填入此节点</span>
         </div>
       );
     }
     // idle：骨架屏取代死白 —— 卡片一出生就有結構感，不是一塊「待处理」空白。
     return (
       <div className="flex flex-1 flex-col justify-center gap-2.5 p-4" aria-label={statusLabel}>
-        <div className="h-3 w-3/4 animate-pulse rounded-full bg-[rgba(0,0,0,0.06)] motion-reduce:animate-none" />
-        <div className="h-3 w-1/2 animate-pulse rounded-full bg-[rgba(0,0,0,0.05)] [animation-delay:120ms] motion-reduce:animate-none" />
-        <div className="h-3 w-2/3 animate-pulse rounded-full bg-[rgba(0,0,0,0.04)] [animation-delay:240ms] motion-reduce:animate-none" />
-        <span className="mt-1 text-[12px] text-[rgba(0,0,0,0.55)]">{statusLabel} · 等待 agent 填充</span>
+        <div className="h-3 w-3/4 animate-pulse rounded-full bg-black/5 motion-reduce:animate-none" />
+        <div className="h-3 w-1/2 animate-pulse rounded-full bg-black/5 [animation-delay:120ms] motion-reduce:animate-none" />
+        <div className="h-3 w-2/3 animate-pulse rounded-full bg-black/5 [animation-delay:240ms] motion-reduce:animate-none" />
+        <span className="mt-1 text-ios-caption1 text-muted-foreground">{statusLabel} · 等待 agent 填充</span>
       </div>
     );
   };
@@ -572,19 +572,19 @@ export function CanvasNodeView({
             className="canvas-node-scroll touch-pan-y overscroll-contain flex-1 space-y-2 overflow-auto p-3"
           >
             {metadata?.locked && (
-              <span className="inline-block rounded-full bg-[rgba(0,0,0,0.06)] px-2 py-0.5 text-[11px] font-medium text-[rgba(0,0,0,0.55)]">
+              <span className="inline-block rounded-full bg-black/5 px-2 py-0.5 text-ios-caption2 font-medium text-muted-foreground">
                 已锁定 · 结果不再重生成
               </span>
             )}
             {description.trim() ? (
-              <p className="whitespace-pre-wrap break-words text-[13.5px] leading-relaxed text-[rgba(0,0,0,0.75)]">{description}</p>
+              <p className="whitespace-pre-wrap break-words text-[13.5px] leading-relaxed text-muted-foreground">{description}</p>
             ) : (
-              <span className="text-[12px] text-[rgba(0,0,0,0.55)]">（未填写描述）</span>
+              <span className="text-ios-caption1 text-muted-foreground">（未填写描述）</span>
             )}
             {features.length > 0 && (
               <div className="flex flex-wrap gap-1">
                 {features.map((f) => (
-                  <span key={f} className="rounded-full bg-[rgba(0,122,255,0.1)] px-2 py-0.5 text-[11.5px] text-[#0A6CFF]">
+                  <span key={f} className="rounded-full bg-ios-blue/10 px-2 py-0.5 text-[11.5px] text-ios-blue">
                     {f}
                   </span>
                 ))}
@@ -621,7 +621,7 @@ export function CanvasNodeView({
                 if (editingText !== (text ?? "")) onUpdateText?.(node.id, editingText);
                 setEditingText(null);
               }}
-              className="flex-1 resize-none whitespace-pre-wrap break-words border-0 bg-[rgba(0,122,255,0.04)] p-3 leading-relaxed text-[rgba(0,0,0,0.82)] outline-none"
+              className="flex-1 resize-none whitespace-pre-wrap break-words border-0 bg-ios-blue/5 p-3 leading-relaxed text-foreground outline-none"
               style={{ fontSize }}
               aria-label="编辑文本内容"
             />
@@ -639,13 +639,13 @@ export function CanvasNodeView({
               setEditingText(text ?? "");
             }}
             title={onUpdateText ? "双击编辑文字" : undefined}
-            className="canvas-node-scroll touch-pan-y overscroll-contain overflow-auto whitespace-pre-wrap break-words p-3 leading-relaxed text-[rgba(0,0,0,0.78)]"
+            className="canvas-node-scroll touch-pan-y overscroll-contain overflow-auto whitespace-pre-wrap break-words p-3 leading-relaxed text-foreground"
             style={{ fontSize }}
           >
             {text?.trim() ? (
               text
             ) : (
-              <span className="text-[12px] text-[rgba(0,0,0,0.55)]">{emptyHint}</span>
+              <span className="text-ios-caption1 text-muted-foreground">{emptyHint}</span>
             )}
           </div>
         );
@@ -672,8 +672,8 @@ export function CanvasNodeView({
           >
             {rows.map((row) => (
               <div key={row.label} className="flex items-baseline justify-between gap-2">
-                <span className="shrink-0 text-[12.5px] font-medium text-[rgba(0,0,0,0.62)]">{row.label}</span>
-                <span className="min-w-0 max-sm:text-[14px] truncate font-mono text-[13px] text-[rgba(0,0,0,0.7)]">
+                <span className="shrink-0 text-[12.5px] font-medium text-muted-foreground">{row.label}</span>
+                <span className="min-w-0 max-sm:text-ios-subhead truncate font-mono text-ios-footnote text-muted-foreground">
                   {row.value}
                 </span>
               </div>
@@ -683,8 +683,8 @@ export function CanvasNodeView({
       }
       case CanvasNodeType.Group:
         return (
-          <div className="m-3 flex flex-1 items-center justify-center rounded-xl border-2 border-dashed border-[rgba(0,0,0,0.12)]">
-            <span className="px-3 text-center text-[13px] font-medium text-[rgba(0,0,0,0.6)]">{node.title}</span>
+          <div className="m-3 flex flex-1 items-center justify-center rounded-xl border-2 border-dashed border-black/10">
+            <span className="px-3 text-center text-ios-footnote font-medium text-muted-foreground">{node.title}</span>
           </div>
         );
     }
@@ -743,11 +743,11 @@ export function CanvasNodeView({
       <div
         className={cn(
           "lg-card relative flex h-full flex-col overflow-hidden rounded-2xl transition-shadow duration-150",
-          selected && "ring-2 ring-[rgba(0,122,255,0.5)]",
-          !selected && adjacent && "ring-2 ring-[rgba(0,122,255,0.18)]",
+          selected && "ring-2 ring-ios-blue/50",
+          !selected && adjacent && "ring-2 ring-ios-blue/20",
         )}
       >
-        <div className="h-[3px] w-full shrink-0" style={{ background: statusColor }} />
+        <div className={cn("h-[3px] w-full shrink-0", statusColor)} />
         <div className="flex items-center gap-2 px-3 py-2">
           {editingTitle !== null ? (
             <input
@@ -771,12 +771,12 @@ export function CanvasNodeView({
                 if (t && t !== node.title) onRename?.(node.id, t);
                 setEditingTitle(null);
               }}
-              className="min-w-0 flex-1 rounded-md border border-[rgba(0,122,255,0.4)] bg-white px-1.5 py-0.5 text-[14px] font-semibold text-[rgba(0,0,0,0.85)] outline-none"
+              className="min-w-0 flex-1 rounded-md border border-ios-blue/40 bg-white px-1.5 py-0.5 text-ios-subhead font-semibold text-foreground outline-none"
               aria-label="重命名节点"
             />
           ) : (
             <span
-              className="min-w-0 flex-1 truncate text-[15px] font-semibold text-[rgba(0,0,0,0.85)]"
+              className="min-w-0 flex-1 truncate text-[15px] font-semibold text-foreground"
               onDoubleClick={(e) => {
                 if (!onRename) return;
                 e.stopPropagation();
@@ -786,20 +786,20 @@ export function CanvasNodeView({
             >
               {node.title}
               {node.metadata?.role && (
-                <span className="ml-2 text-[11px] px-1.5 py-0.5 bg-blue-500/15 text-blue-600 rounded">
+                <span className="ml-2 text-ios-caption2 px-1.5 py-0.5 bg-ios-blue/15 text-ios-blue rounded">
                   {node.metadata.role}
                 </span>
               )}
             </span>
           )}
-          <span className="shrink-0 text-[12px] text-[rgba(0,0,0,0.55)]">{typeLabel}</span>
+          <span className="shrink-0 text-ios-caption1 text-muted-foreground">{typeLabel}</span>
           <span
             className={cn(
               "shrink-0 rounded-full px-2 py-0.5 text-[11.5px] font-medium",
-              status === "idle" && "bg-[rgba(0,0,0,0.06)] text-[rgba(0,0,0,0.5)]",
-              status === "success" && "bg-[rgba(52,199,89,0.14)] text-[#248A3D]",
-              status === "loading" && "bg-[rgba(0,122,255,0.12)] text-[#007AFF]",
-              status === "error" && "bg-[rgba(255,59,48,0.12)] text-[#FF3B30]",
+              status === "idle" && "bg-black/5 text-muted-foreground",
+              status === "success" && "bg-ios-green/15 text-[#248A3D]",
+              status === "loading" && "bg-ios-blue/10 text-ios-blue",
+              status === "error" && "bg-destructive/10 text-destructive",
             )}
           >
             {statusLabel}
@@ -813,10 +813,10 @@ export function CanvasNodeView({
               title="重新生成"
               aria-label="重新生成此節點"
               className={cn(
-                "shrink-0 rounded-full p-1 text-[rgba(0,0,0,0.4)] transition-colors",
+                "shrink-0 rounded-full p-1 text-foreground/45 transition-colors",
                 "touch-manipulation [-webkit-tap-highlight-color:transparent]",
-                "hover:bg-[rgba(0,0,0,0.06)] hover:text-[rgba(0,0,0,0.7)]",
-                "max-sm:h-11 max-sm:w-11 max-sm:active:bg-[rgba(0,0,0,0.08)]",
+                "hover:bg-black/5 hover:text-muted-foreground",
+                "max-sm:h-11 max-sm:w-11 max-sm:active:bg-black/10",
               )}
             >
               <RefreshCw className="h-3.5 w-3.5 max-sm:h-[18px] max-sm:w-[18px]" aria-hidden="true" />
@@ -841,10 +841,10 @@ export function CanvasNodeView({
               title="編輯參數"
               aria-label="編輯節點參數"
               className={cn(
-                "shrink-0 rounded-full p-1 text-[rgba(0,0,0,0.4)] transition-colors",
+                "shrink-0 rounded-full p-1 text-foreground/45 transition-colors",
                 "touch-manipulation [-webkit-tap-highlight-color:transparent]",
-                "hover:bg-[rgba(0,0,0,0.06)] hover:text-[rgba(0,0,0,0.7)]",
-                "max-sm:h-11 max-sm:w-11 max-sm:active:bg-[rgba(0,0,0,0.08)]",
+                "hover:bg-black/5 hover:text-muted-foreground",
+                "max-sm:h-11 max-sm:w-11 max-sm:active:bg-black/10",
               )}
             >
               <Edit2 className="h-3.5 w-3.5 max-sm:h-[18px] max-sm:w-[18px]" aria-hidden="true" />
@@ -859,11 +859,11 @@ export function CanvasNodeView({
               title="删除节点"
               aria-label="删除节点"
               className={cn(
-                "shrink-0 rounded-full p-1 text-[rgba(0,0,0,0.4)] transition-colors",
+                "shrink-0 rounded-full p-1 text-foreground/45 transition-colors",
                 "touch-manipulation [-webkit-tap-highlight-color:transparent]",
-                "hover:bg-[rgba(0,0,0,0.06)] hover:text-[rgba(0,0,0,0.7)]",
+                "hover:bg-black/5 hover:text-muted-foreground",
                 // 行動端：≥44px 觸控熱區 + 按壓回饋（行動端沒有 hover）
-                "max-sm:-mr-1.5 max-sm:h-11 max-sm:w-11 max-sm:active:bg-[rgba(0,0,0,0.08)] max-sm:active:text-[rgba(0,0,0,0.7)] max-sm:hover:bg-transparent",
+                "max-sm:-mr-1.5 max-sm:h-11 max-sm:w-11 max-sm:active:bg-black/10 max-sm:active:text-muted-foreground max-sm:hover:bg-transparent",
               )}
             >
               <X className="h-3.5 w-3.5 max-sm:h-[18px] max-sm:w-[18px]" aria-hidden="true" />
@@ -903,10 +903,10 @@ export function CanvasNodeView({
                 e.stopPropagation();
                 onUpdateReferenceRole(node.id, e.target.value as ReferenceImageRole);
               }}
-              className="cursor-pointer rounded-full border-0 bg-[rgba(0,0,0,0.6)] px-2 py-0.5 text-[11px] font-medium text-white outline-none"
+              className="cursor-pointer rounded-full border-0 bg-black/60 px-2 py-0.5 text-ios-caption2 font-medium text-white outline-none"
             >
               {REFERENCE_IMAGE_ROLES.map((r) => (
-                <option key={r.id} value={r.id} className="bg-white text-[rgba(0,0,0,0.8)]">
+                <option key={r.id} value={r.id} className="bg-white text-foreground">
                   {r.label}
                 </option>
               ))}
@@ -918,7 +918,7 @@ export function CanvasNodeView({
           <button
             data-canvas-interactive
             onClick={(e) => { e.stopPropagation(); onToggleBatch?.(node.id); }}
-            className="absolute bottom-2 left-2 z-10 flex items-center gap-1 rounded-full bg-[rgba(0,0,0,0.6)] px-2 py-0.5 text-[11px] text-white"
+            className="absolute bottom-2 left-2 z-10 flex items-center gap-1 rounded-full bg-black/60 px-2 py-0.5 text-ios-caption2 text-white"
           >
             <ImageIcon className="h-3 w-3" />
             <span>{batchChildCount}</span>
@@ -927,7 +927,7 @@ export function CanvasNodeView({
         )}
         <div className="relative min-h-0 flex-1">{renderBody()}</div>
         {showCostBadge && (
-          <span className="pointer-events-none absolute right-2 bottom-2 rounded-full bg-[rgba(0,0,0,0.6)] px-2 py-0.5 text-[12.5px] font-medium text-white">
+          <span className="pointer-events-none absolute right-2 bottom-2 rounded-full bg-black/60 px-2 py-0.5 text-[12.5px] font-medium text-white">
             {node.metadata?.cost_coins} 币
           </span>
         )}
@@ -953,10 +953,10 @@ export function CanvasNodeView({
       {/* 批次子節點摘要列（展開時）：數量 + 下載全部 */}
       {batchExpanded && batchChildCount && batchChildCount > 0 && (
         <div
-          className="absolute bottom-0 left-0 right-0 z-30 flex items-center justify-center gap-2 rounded-b-2xl bg-[rgba(0,0,0,0.05)] py-1"
+          className="absolute bottom-0 left-0 right-0 z-30 flex items-center justify-center gap-2 rounded-b-2xl bg-black/5 py-1"
           data-canvas-interactive
         >
-          <span className="text-[11px] text-[rgba(0,0,0,0.4)]">
+          <span className="text-ios-caption2 text-foreground/45">
             {batchChildCount} 张结果
           </span>
           {onDownloadAll && (
@@ -966,7 +966,7 @@ export function CanvasNodeView({
                 e.stopPropagation();
                 onDownloadAll(node.id);
               }}
-              className="flex items-center gap-1 rounded-full bg-white/80 px-2 py-0.5 text-[11px] font-medium text-[#007AFF] hover:bg-white"
+              className="flex items-center gap-1 rounded-full bg-white/80 px-2 py-0.5 text-ios-caption2 font-medium text-ios-blue hover:bg-white"
             >
               <Download className="h-3 w-3" aria-hidden="true" />
               下载全部
@@ -1000,7 +1000,7 @@ export function CanvasNodeView({
             aria-label={side === "right" ? "从此节点拖出连线" : "拖入连线到此节点"}
           >
             <span
-              className="rounded-full border-2 border-white bg-[#007AFF] shadow-sm transition-transform hover:scale-125"
+              className="rounded-full border-2 border-white bg-ios-blue shadow-sm transition-transform hover:scale-125"
               style={{
                 width: "calc(12px * var(--canvas-inverse-scale, 1))",
                 height: "calc(12px * var(--canvas-inverse-scale, 1))",
@@ -1020,7 +1020,7 @@ export function CanvasNodeView({
               onPointerCancel={endResize}
               className={cn(
                 "z-10 flex touch-manipulation items-center justify-center rounded-[3px]",
-                "border border-[rgba(0,122,255,0.6)] bg-[rgba(0,122,255,0.2)]",
+                "border border-ios-blue/60 bg-ios-blue/20",
                 // 行動端：44px 觸控熱區（外框隱形，靠中心小方塊提示），縮放保持世界座標不變
                 "max-sm:rounded-lg max-sm:border-transparent max-sm:bg-transparent",
                 "max-sm:!h-[calc(44px*var(--canvas-inverse-scale,1))] max-sm:!w-[calc(44px*var(--canvas-inverse-scale,1))]",
@@ -1033,7 +1033,7 @@ export function CanvasNodeView({
               }}
             >
               <span
-                className="hidden h-3 w-3 rounded-[2px] border border-[rgba(0,122,255,0.7)] bg-[rgba(0,122,255,0.35)] max-sm:block"
+                className="hidden h-3 w-3 rounded-[2px] border border-ios-blue/70 bg-ios-blue/35 max-sm:block"
                 aria-hidden="true"
               />
             </div>

@@ -174,7 +174,7 @@ function createChipElement(cand: CanvasReferenceCandidate): HTMLSpanElement {
   chip.dataset.title = cand.title;
   chip.title = cand.title;
   chip.className =
-    "mx-0.5 inline-flex max-w-[140px] select-none items-center gap-1 rounded-md bg-[rgba(47,128,255,0.14)] px-1.5 py-0.5 align-middle text-xs font-medium text-[#2f80ff] dark:bg-[rgba(90,155,255,0.22)] dark:text-[#5a9bff]";
+    "mx-0.5 inline-flex max-w-[140px] select-none items-center gap-1 rounded-md bg-ios-blue/15 px-1.5 py-0.5 align-middle text-xs font-medium text-ios-blue";
   if (cand.previewUrl) {
     const img = document.createElement("img");
     img.src = cand.previewUrl;
@@ -551,11 +551,11 @@ export function CanvasNodePromptPanel({
       onPointerDown={stopPropagation}
       onClick={stopPropagation}
     >
-      <div className="overflow-hidden rounded-xl border border-[rgba(0,0,0,0.08)] bg-white shadow-lg backdrop-blur-sm dark:border-[rgba(255,255,255,0.08)] dark:bg-[#1c1c1e]">
+      <div className="overflow-hidden rounded-xl lg-card">
         {/* @引用：上游圖片縮圖 chips（自動編號；與輸入框內 chip 雙向同步） */}
         {referenceCandidates.length > 0 && (
-          <div className="border-b border-[rgba(0,0,0,0.06)] px-3 pb-2 pt-2.5 dark:border-[rgba(255,255,255,0.06)]">
-            <p className="mb-1.5 text-[11px] font-medium text-[rgba(0,0,0,0.45)] dark:text-[rgba(255,255,255,0.45)]">
+          <div className="border-b px-3 pb-2 pt-2.5">
+            <p className="mb-1.5 text-ios-caption2 font-medium text-foreground/45">
               引用上游图片作参考（已选 {selectedReferenceIds.length}）
             </p>
             <div className="flex flex-wrap gap-1.5">
@@ -573,13 +573,13 @@ export function CanvasNodePromptPanel({
                     aria-pressed={active}
                     className={cn(
                       "relative h-12 w-12 overflow-hidden rounded-lg border-2 transition-colors",
-                      active ? "border-[#007AFF]" : "border-transparent opacity-70 hover:opacity-100",
+                      active ? "border-ios-blue" : "border-transparent opacity-70 hover:opacity-100",
                     )}
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={cand.previewUrl} alt={cand.title} className="h-full w-full object-cover" draggable={false} />
                     {active && (
-                      <span className="absolute left-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-[#007AFF] text-[10px] font-semibold text-white">
+                      <span className="absolute left-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-ios-blue text-ios-caption2 font-semibold text-white">
                         {idx + 1}
                       </span>
                     )}
@@ -601,9 +601,9 @@ export function CanvasNodePromptPanel({
             aria-label="提示词输入框"
             data-placeholder="编辑提示词… 输入 @ 引用上游图片"
             className={cn(
-              "max-h-[180px] min-h-[88px] w-full cursor-text overflow-y-auto whitespace-pre-wrap break-words rounded-lg border border-[rgba(0,0,0,0.1)] bg-[rgba(0,0,0,0.03)] p-2.5 text-sm leading-relaxed outline-none transition-colors focus:border-[#2f80ff] dark:border-[rgba(255,255,255,0.1)] dark:bg-[rgba(255,255,255,0.05)] dark:text-white dark:focus:border-[#5a9bff]",
+              "max-h-[180px] min-h-[88px] w-full cursor-text overflow-y-auto whitespace-pre-wrap break-words rounded-lg border border-input bg-black/5 p-2.5 text-sm leading-relaxed outline-none transition-colors focus:border-ios-blue",
               // 佔位符：contentEditable 用 :empty::before 呈現（syncFromEditor 會清掉殘留 <br> 保住 :empty）。
-              "empty:before:pointer-events-none empty:before:text-[rgba(0,0,0,0.35)] empty:before:content-[attr(data-placeholder)] dark:empty:before:text-[rgba(255,255,255,0.35)]",
+              "empty:before:pointer-events-none empty:before:text-muted-foreground/70 empty:before:content-[attr(data-placeholder)]",
             )}
             onInput={() => {
               if (!composingRef.current) syncFromEditor();
@@ -626,17 +626,17 @@ export function CanvasNodePromptPanel({
         </div>
 
         {/* 參數與設置 */}
-        <div className="border-t border-[rgba(0,0,0,0.06)] px-3 py-2 dark:border-[rgba(255,255,255,0.06)]">
+        <div className="border-t px-3 py-2">
           <div className="flex items-center gap-2">
             {/* 快速參數列 */}
             <div className="flex min-w-0 flex-1 items-center gap-1.5">
-              <span className="truncate rounded-md bg-[rgba(0,0,0,0.05)] px-2 py-1 text-xs font-medium text-[rgba(0,0,0,0.6)] dark:bg-[rgba(255,255,255,0.08)] dark:text-[rgba(255,255,255,0.6)]">
+              <span className="truncate rounded-md bg-black/5 px-2 py-1 text-xs font-medium text-muted-foreground">
                 {modelLabel}
               </span>
-              <span className="shrink-0 rounded-md bg-[rgba(0,0,0,0.05)] px-2 py-1 text-xs text-[rgba(0,0,0,0.5)] dark:bg-[rgba(255,255,255,0.08)] dark:text-[rgba(255,255,255,0.5)]">
+              <span className="shrink-0 rounded-md bg-black/5 px-2 py-1 text-xs text-muted-foreground">
                 {size}
               </span>
-              <span className="shrink-0 rounded-md bg-[rgba(0,0,0,0.05)] px-2 py-1 text-xs text-[rgba(0,0,0,0.5)] dark:bg-[rgba(255,255,255,0.08)] dark:text-[rgba(255,255,255,0.5)]">
+              <span className="shrink-0 rounded-md bg-black/5 px-2 py-1 text-xs text-muted-foreground">
                 {count}张
               </span>
             </div>
@@ -645,7 +645,7 @@ export function CanvasNodePromptPanel({
             {onOpenPromptLibrary && (
               <button
                 onClick={onOpenPromptLibrary}
-                className="flex h-7 w-7 items-center justify-center rounded-md text-[rgba(0,0,0,0.4)] hover:bg-[rgba(0,0,0,0.06)] dark:text-[rgba(255,255,255,0.4)] dark:hover:bg-[rgba(255,255,255,0.08)]"
+                className="flex h-7 w-7 items-center justify-center rounded-md text-foreground/45 hover:bg-black/5"
                 title="提示词库"
               >
                 <BookOpen className="h-3.5 w-3.5" />
@@ -654,7 +654,7 @@ export function CanvasNodePromptPanel({
 
             <button
               onClick={() => setShowSettings(!showSettings)}
-              className="flex h-7 w-7 items-center justify-center rounded-md text-[rgba(0,0,0,0.4)] hover:bg-[rgba(0,0,0,0.06)] dark:text-[rgba(255,255,255,0.4)] dark:hover:bg-[rgba(255,255,255,0.08)]"
+              className="flex h-7 w-7 items-center justify-center rounded-md text-foreground/45 hover:bg-black/5"
               title="进阶参数"
             >
               <Settings2 className="h-3.5 w-3.5" />
@@ -662,7 +662,7 @@ export function CanvasNodePromptPanel({
 
             <button
               onClick={onClose}
-              className="flex h-7 w-7 items-center justify-center rounded-md text-[rgba(0,0,0,0.4)] hover:bg-[rgba(0,0,0,0.06)] dark:text-[rgba(255,255,255,0.4)] dark:hover:bg-[rgba(255,255,255,0.08)]"
+              className="flex h-7 w-7 items-center justify-center rounded-md text-foreground/45 hover:bg-black/5"
               title="关闭面板"
             >
               <X className="h-3.5 w-3.5" />
@@ -671,15 +671,15 @@ export function CanvasNodePromptPanel({
 
           {/* 展開的進階參數 */}
           {showSettings && (
-            <div className="mt-2 grid grid-cols-3 gap-2 border-t border-[rgba(0,0,0,0.06)] pt-2 dark:border-[rgba(255,255,255,0.06)]">
+            <div className="mt-2 grid grid-cols-3 gap-2 border-t pt-2">
               <div>
-                <label className="mb-1 block text-[11px] font-medium text-[rgba(0,0,0,0.5)] dark:text-[rgba(255,255,255,0.5)]">
+                <label className="mb-1 block text-ios-caption2 font-medium text-muted-foreground">
                   模型
                 </label>
                 <select
                   value={model}
                   onChange={(e) => setModel(e.target.value)}
-                  className="w-full rounded-md border border-[rgba(0,0,0,0.1)] bg-[rgba(0,0,0,0.03)] px-2 py-1.5 text-xs outline-none dark:border-[rgba(255,255,255,0.1)] dark:bg-[rgba(255,255,255,0.05)] dark:text-white"
+                  className="w-full rounded-md border border-input bg-black/5 px-2 py-1.5 text-xs outline-none"
                 >
                   {modelOptions.map((opt) => (
                     <option key={opt.id} value={opt.id}>{opt.label}</option>
@@ -687,13 +687,13 @@ export function CanvasNodePromptPanel({
                 </select>
               </div>
               <div>
-                <label className="mb-1 block text-[11px] font-medium text-[rgba(0,0,0,0.5)] dark:text-[rgba(255,255,255,0.5)]">
+                <label className="mb-1 block text-ios-caption2 font-medium text-muted-foreground">
                   比例
                 </label>
                 <select
                   value={size}
                   onChange={(e) => setSize(e.target.value)}
-                  className="w-full rounded-md border border-[rgba(0,0,0,0.1)] bg-[rgba(0,0,0,0.03)] px-2 py-1.5 text-xs outline-none dark:border-[rgba(255,255,255,0.1)] dark:bg-[rgba(255,255,255,0.05)] dark:text-white"
+                  className="w-full rounded-md border border-input bg-black/5 px-2 py-1.5 text-xs outline-none"
                 >
                   {SIZE_OPTIONS.map((opt) => (
                     <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -701,13 +701,13 @@ export function CanvasNodePromptPanel({
                 </select>
               </div>
               <div>
-                <label className="mb-1 block text-[11px] font-medium text-[rgba(0,0,0,0.5)] dark:text-[rgba(255,255,255,0.5)]">
+                <label className="mb-1 block text-ios-caption2 font-medium text-muted-foreground">
                   张数
                 </label>
                 <select
                   value={count}
                   onChange={(e) => setCount(Number(e.target.value))}
-                  className="w-full rounded-md border border-[rgba(0,0,0,0.1)] bg-[rgba(0,0,0,0.03)] px-2 py-1.5 text-xs outline-none dark:border-[rgba(255,255,255,0.1)] dark:bg-[rgba(255,255,255,0.05)] dark:text-white"
+                  className="w-full rounded-md border border-input bg-black/5 px-2 py-1.5 text-xs outline-none"
                 >
                   {COUNT_OPTIONS.map((n) => (
                     <option key={n} value={n}>{n} 张</option>
@@ -720,12 +720,12 @@ export function CanvasNodePromptPanel({
 
         {/* 生成按鈕（帶與扣費同源的估價；算不出就不顯示，不騙 0）；
             生成中拆兩段：左段轉圈、右段紅色停止（onStop 存在才顯示） */}
-        <div className="border-t border-[rgba(0,0,0,0.06)] p-3 dark:border-[rgba(255,255,255,0.06)]">
+        <div className="border-t p-3">
           {isRunning ? (
             <div className="flex items-stretch gap-2">
               <button
                 disabled
-                className="flex flex-1 cursor-default items-center justify-center gap-2 rounded-lg bg-black px-4 py-2.5 text-sm font-medium text-white opacity-60 dark:bg-white dark:text-black"
+                className="flex flex-1 cursor-default items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground opacity-60"
               >
                 <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
                 生成中…
@@ -733,7 +733,7 @@ export function CanvasNodePromptPanel({
               {onStop && (
                 <button
                   onClick={onStop}
-                  className="shrink-0 rounded-lg bg-[#ff3b30] px-4 py-2.5 text-sm font-medium text-white transition-opacity hover:opacity-90"
+                  className="shrink-0 rounded-lg bg-destructive px-4 py-2.5 text-sm font-medium text-white transition-opacity hover:opacity-90"
                 >
                   停止
                 </button>
@@ -743,7 +743,7 @@ export function CanvasNodePromptPanel({
             <button
               onClick={handleGenerate}
               disabled={!promptText.trim()}
-              className="flex w-full items-center justify-center gap-2 rounded-lg bg-black px-4 py-2.5 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-white dark:text-black"
+              className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Bot className="h-4 w-4" />
               生成 {count} 张{estimatedCoins !== null ? ` · 约 ${estimatedCoins} 币` : ""}
@@ -757,7 +757,7 @@ export function CanvasNodePromptPanel({
         <div
           role="listbox"
           aria-label="引用候选"
-          className="absolute z-10 max-h-52 w-56 overflow-y-auto rounded-xl border border-[rgba(0,0,0,0.08)] bg-white p-1 shadow-xl dark:border-[rgba(255,255,255,0.1)] dark:bg-[#2c2c2e]"
+          className="absolute z-10 max-h-52 w-56 overflow-y-auto rounded-xl lg-sheet p-1"
           style={{ left: mention.left, top: mention.top }}
         >
           {mentionCandidates.map((cand, index) => {
@@ -773,8 +773,8 @@ export function CanvasNodePromptPanel({
                 className={cn(
                   "flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors",
                   isActive
-                    ? "bg-[rgba(47,128,255,0.12)] text-[#2f80ff]"
-                    : "text-[rgba(0,0,0,0.75)] hover:bg-[rgba(0,0,0,0.05)] dark:text-[rgba(255,255,255,0.75)] dark:hover:bg-[rgba(255,255,255,0.08)]",
+                    ? "bg-ios-blue/10 text-ios-blue"
+                    : "text-muted-foreground hover:bg-black/5",
                 )}
                 // preventDefault 避免輸入框失焦（blur 會延時關閉選單）。
                 onMouseDown={(e) => {
@@ -793,7 +793,7 @@ export function CanvasNodePromptPanel({
                   {cand.title}
                 </span>
                 {selectedIdx >= 0 && (
-                  <span className="shrink-0 rounded-full bg-[#007AFF] px-1.5 text-[10px] font-semibold leading-4 text-white">
+                  <span className="shrink-0 rounded-full bg-ios-blue px-1.5 text-ios-caption2 font-semibold leading-4 text-white">
                     {selectedIdx + 1}
                   </span>
                 )}

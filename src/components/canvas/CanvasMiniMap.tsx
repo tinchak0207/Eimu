@@ -97,13 +97,13 @@ function CanvasMiniMap({
     <div data-canvas-interactive className={cn("absolute right-4 bottom-4", className)}>
       <div className="lg-float overflow-hidden rounded-2xl">
         <div className="flex items-center justify-between gap-2 px-3 pt-2">
-          <span className="text-[11px] font-medium text-black/50 max-sm:hidden">缩略图</span>
+          <span className="text-ios-caption2 font-medium text-muted-foreground max-sm:hidden">缩略图</span>
           {onClose ? (
             <button
               type="button"
               onClick={onClose}
               aria-label="关闭缩略图"
-              className="flex h-5 w-5 touch-manipulation items-center justify-center rounded-full text-black/40 transition-colors hover:bg-black/5 hover:text-black/70 max-sm:h-11 max-sm:w-11 max-sm:active:bg-black/5"
+              className="flex h-5 w-5 touch-manipulation items-center justify-center rounded-full text-foreground/45 transition-colors hover:bg-black/5 hover:text-muted-foreground max-sm:h-11 max-sm:w-11 max-sm:active:bg-black/5"
             >
               <X className="h-3.5 w-3.5 max-sm:h-5 max-sm:w-5" />
             </button>
@@ -112,7 +112,7 @@ function CanvasMiniMap({
         <div className="relative" style={{ width: mapWidth, height: mapHeight }}>
           {nodes.length === 0 ? (
             <div className="flex h-full w-full items-center justify-center">
-              <span className="text-xs text-black/40">暂无节点</span>
+              <span className="text-ios-caption1 text-foreground/45">暂无节点</span>
             </div>
           ) : (
             <button
@@ -136,7 +136,7 @@ function CanvasMiniMap({
                 />
               ))}
               <div
-                className="pointer-events-none absolute border border-[rgba(0,122,255,0.9)] bg-[rgba(0,122,255,0.08)]"
+                className="pointer-events-none absolute border border-ios-blue/90 bg-ios-blue/10"
                 style={{ left: rectLeft, top: rectTop, width: rectWidth, height: rectHeight }}
               />
             </button>

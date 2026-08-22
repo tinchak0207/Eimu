@@ -32,7 +32,7 @@ export interface CanvasNodeCreateMenuProps {
 
 /** 選單項目統一皮膚（≥36px 熱區 + hover 態）。 */
 const ITEM_CLASS =
-  "flex min-h-[36px] w-full items-center gap-2 rounded-lg px-3 text-left text-[13px] text-[#1d1d1f] transition-colors hover:bg-[rgba(0,0,0,0.05)]";
+  "flex min-h-[36px] w-full items-center gap-2 rounded-lg px-3 text-left text-ios-footnote text-foreground transition-colors hover:bg-black/5";
 
 function CanvasNodeCreateMenu({
   open,
@@ -105,35 +105,35 @@ function CanvasNodeCreateMenu({
       data-canvas-interactive
       role="menu"
       aria-label={title}
-      className="absolute z-50 w-[200px] select-none rounded-xl bg-white/95 p-1 shadow-[0_8px_32px_rgba(0,0,0,0.16)] backdrop-blur"
+      className="absolute z-50 w-[200px] select-none rounded-xl lg-sheet p-1"
       style={{ left: adjusted.x, top: adjusted.y }}
       onContextMenu={(e) => e.preventDefault()}
     >
       {/* 標題列 */}
-      <p className="px-3 pb-1 pt-1.5 text-[11px] font-medium text-[rgba(0,0,0,0.4)]">{title}</p>
+      <p className="px-3 pb-1 pt-1.5 text-ios-caption2 font-medium text-foreground/45">{title}</p>
 
       <button type="button" role="menuitem" className={ITEM_CLASS} onClick={() => handleCreate("text")}>
-        <Type className="h-4 w-4 shrink-0 text-[rgba(0,0,0,0.55)]" />
+        <Type className="h-4 w-4 shrink-0 text-muted-foreground" />
         <span className="flex-1 truncate">文本节点</span>
       </button>
 
       <button type="button" role="menuitem" className={ITEM_CLASS} onClick={() => handleCreate("image")}>
-        <ImageIcon className="h-4 w-4 shrink-0 text-[rgba(0,0,0,0.55)]" />
+        <ImageIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
         <span className="flex-1 truncate">空白图片节点</span>
       </button>
 
       <button type="button" role="menuitem" className={ITEM_CLASS} onClick={() => handleCreate("prompt")}>
-        <Sparkles className="h-4 w-4 shrink-0 text-[rgba(0,0,0,0.55)]" />
+        <Sparkles className="h-4 w-4 shrink-0 text-muted-foreground" />
         <span className="flex-1 truncate">提示词节点</span>
       </button>
 
       <button type="button" role="menuitem" className={ITEM_CLASS} onClick={() => fileInputRef.current?.click()}>
-        <Upload className="h-4 w-4 shrink-0 text-[rgba(0,0,0,0.55)]" />
+        <Upload className="h-4 w-4 shrink-0 text-muted-foreground" />
         <span className="flex-1 truncate">上传图片…</span>
       </button>
 
       <button type="button" role="menuitem" className={ITEM_CLASS} onClick={() => referenceInputRef.current?.click()}>
-        <Upload className="h-4 w-4 shrink-0 text-[rgba(0,0,0,0.55)]" />
+        <Upload className="h-4 w-4 shrink-0 text-muted-foreground" />
         <span className="flex-1 truncate">上传参考图…</span>
       </button>
 

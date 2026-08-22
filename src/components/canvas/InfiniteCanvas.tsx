@@ -628,14 +628,12 @@ function InfiniteCanvas({
       {marqueeRect ? (
         // 框選矩形：螢幕座標、蓋在內容層之上；pointer-events-none 不干擾手勢。
         <div
-          className="pointer-events-none absolute"
+          className="pointer-events-none absolute border border-ios-blue/80 bg-ios-blue/10"
           style={{
             left: marqueeRect.x,
             top: marqueeRect.y,
             width: marqueeRect.width,
             height: marqueeRect.height,
-            border: "1px solid rgba(0,122,255,0.8)",
-            background: "rgba(0,122,255,0.08)",
           }}
         />
       ) : null}

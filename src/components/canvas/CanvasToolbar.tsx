@@ -49,16 +49,16 @@ export interface CanvasToolbarProps {
 const ICON_BUTTON =
   "h-8 w-8 inline-flex shrink-0 items-center justify-center rounded-full transition-colors " +
   "touch-manipulation [-webkit-tap-highlight-color:transparent] " +
-  "hover:bg-[rgba(0,0,0,0.06)] active:bg-[rgba(0,0,0,0.08)] disabled:opacity-35 disabled:cursor-not-allowed " +
+  "hover:bg-black/5 active:bg-black/10 disabled:opacity-35 disabled:cursor-not-allowed " +
   // 行動端：≥44px 觸控目標，關掉 sticky hover，改用按下回饋
-  "max-sm:h-11 max-sm:w-11 max-sm:hover:bg-transparent max-sm:active:bg-[rgba(0,0,0,0.08)]";
+  "max-sm:h-11 max-sm:w-11 max-sm:hover:bg-transparent max-sm:active:bg-black/10";
 const ICON = "h-4 w-4 max-sm:h-5 max-sm:w-5";
 
 const SAVE_STATE_TEXT: Record<CanvasToolbarProps["saveState"], { text: string; className: string }> = {
   idle: { text: "", className: "" },
-  saving: { text: "保存中…", className: "text-[rgba(0,0,0,0.5)]" },
-  saved: { text: "已保存", className: "text-[rgba(0,0,0,0.45)]" },
-  error: { text: "保存失败", className: "text-[#FF3B30]" },
+  saving: { text: "保存中…", className: "text-muted-foreground" },
+  saved: { text: "已保存", className: "text-foreground/45" },
+  error: { text: "保存失败", className: "text-destructive" },
   offline: { text: "未登录，仅本地", className: "text-[#B76E00]" },
 };
 
@@ -103,7 +103,7 @@ export function CanvasToolbar({
   const saveIndicator = SAVE_STATE_TEXT[saveState];
   const saveLabel =
     saveState !== "idle" && saveIndicator.text !== "" ? (
-      <span className={cn("text-[12px] whitespace-nowrap", saveIndicator.className)}>{saveIndicator.text}</span>
+      <span className={cn("text-ios-caption1 whitespace-nowrap", saveIndicator.className)}>{saveIndicator.text}</span>
     ) : null;
 
   // 動作按鈕組：桌面與行動端各渲染一份（各自 hidden，同一時刻只有一份可見）。
@@ -135,7 +135,7 @@ export function CanvasToolbar({
         aria-pressed={minimapVisible}
         title="缩略图"
         aria-label="缩略图"
-        className={cn(ICON_BUTTON, minimapVisible && "bg-[rgba(0,122,255,0.12)] text-[#007AFF]")}
+        className={cn(ICON_BUTTON, minimapVisible && "lg-fill-active text-ios-blue")}
       >
         <Map className={ICON} aria-hidden="true" />
       </button>
@@ -183,7 +183,7 @@ export function CanvasToolbar({
           }}
           title="确认清空？"
           aria-label="确认清空？"
-          className="inline-flex h-8 touch-manipulation items-center justify-center rounded-full bg-[#FF3B30] px-3 text-[12px] font-medium text-white transition-colors hover:bg-[#E03126] max-sm:h-11 max-sm:px-4 max-sm:text-[13px]"
+          className="inline-flex h-8 touch-manipulation items-center justify-center rounded-full bg-destructive px-3 text-ios-caption1 font-medium text-white transition-colors hover:bg-destructive/90 max-sm:h-11 max-sm:px-4 max-sm:text-ios-footnote"
         >
           确认清空？
         </button>
@@ -218,9 +218,9 @@ export function CanvasToolbar({
           value={projectTitle}
           onChange={(e) => onProjectTitleChange(e.target.value)}
           spellCheck={false}
-          className="w-44 bg-transparent text-[15px] font-medium text-[rgba(0,0,0,0.85)] focus:outline-none"
+          className="w-44 bg-transparent text-[15px] font-medium text-foreground focus:outline-none"
         />
-        <span className="mx-1 h-5 w-px shrink-0 bg-[rgba(0,0,0,0.08)]" aria-hidden="true" />
+        <span className="mx-1 h-5 w-px shrink-0 bg-black/10" aria-hidden="true" />
         {actionButtons}
         <div className="ml-auto flex shrink-0 items-center gap-2">
           {saveLabel}
@@ -235,7 +235,7 @@ export function CanvasToolbar({
           value={projectTitle}
           onChange={(e) => onProjectTitleChange(e.target.value)}
           spellCheck={false}
-          className="w-auto min-w-0 flex-1 bg-transparent text-base font-medium text-[rgba(0,0,0,0.85)] focus:outline-none"
+          className="w-auto min-w-0 flex-1 bg-transparent text-base font-medium text-foreground focus:outline-none"
         />
         {!collapsed && saveLabel}
         {!collapsed && <CanvasBudgetBar budget={budget} />}
@@ -244,7 +244,7 @@ export function CanvasToolbar({
           onClick={() => setCollapsed((c) => !c)}
           aria-label={collapsed ? "展开工具栏" : "收起工具栏"}
           aria-expanded={!collapsed}
-          className="flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-full text-[rgba(0,0,0,0.45)] active:bg-[rgba(0,0,0,0.08)]"
+          className="flex h-11 w-11 shrink-0 touch-manipulation items-center justify-center rounded-full text-foreground/45 active:bg-black/10"
         >
           {collapsed ? (
             <ChevronUp className="h-5 w-5" aria-hidden="true" />

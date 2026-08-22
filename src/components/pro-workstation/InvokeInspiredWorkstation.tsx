@@ -2265,11 +2265,11 @@ export function InvokeInspiredWorkstation({
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/icon.png" alt="Eimu" width={32} height={32} className="h-full w-full object-cover" />
           </Link>
-          <h2 className="flex min-w-0 items-baseline gap-1.5 truncate text-ios-subhead font-bold text-[rgba(0,0,0,0.84)]">
+          <h2 className="flex min-w-0 items-baseline gap-1.5 truncate text-ios-subhead font-bold text-foreground">
             <span className="pro-title-desktop shrink-0">Eimu · 创作工作站</span>
             <span className="pro-title-mobile">Eimu</span>
           </h2>
-          <p className="hidden truncate text-ios-caption1 font-semibold text-[rgba(0,0,0,0.40)] lg:block">{activeWorkspace.title}</p>
+          <p className="hidden truncate text-ios-caption1 font-semibold text-foreground/45 lg:block">{activeWorkspace.title}</p>
         </div>
         <div className="pro-mode-segment" id="pro-tour-segment" aria-label="中央视图切换">
           {WORKSPACE_MODES.map((mode) => (
@@ -2310,7 +2310,7 @@ export function InvokeInspiredWorkstation({
                 href="/history"
                 aria-label="历史"
                 title="历史"
-                className="pro-topbar-tool hidden items-center gap-1.5 rounded-ios-xl bg-[rgba(255,255,255,0.56)] px-3 py-1.5 text-ios-footnote font-semibold text-[rgba(0,0,0,0.58)] shadow-[0_8px_22px_rgba(45,49,66,0.06)] transition-all hover:bg-[rgba(255,255,255,0.74)] lg:inline-flex"
+                className="pro-topbar-tool hidden items-center gap-1.5 rounded-ios-xl lg-float px-3 py-1.5 text-ios-footnote font-semibold text-muted-foreground transition-all hover:bg-white/75 lg:inline-flex"
               >
                 <History className="h-3.5 w-3.5" />
               </Link>
@@ -2318,7 +2318,7 @@ export function InvokeInspiredWorkstation({
                 href="/pricing"
                 aria-label="充值"
                 title="充值"
-                className="pro-topbar-tool hidden items-center gap-1.5 rounded-ios-xl bg-[#007AFF] px-3 py-1.5 text-ios-footnote font-semibold text-white shadow-[0_8px_22px_rgba(0,122,255,0.30)] transition-all hover:bg-[#0066DD] lg:inline-flex"
+                className="pro-topbar-tool hidden items-center gap-1.5 rounded-ios-xl bg-ios-blue px-3 py-1.5 text-ios-footnote font-semibold text-white shadow-[0_8px_22px_rgba(0,122,255,0.30)] transition-all hover:bg-ios-blue/80 lg:inline-flex"
               >
                 <CreditCard className="h-3.5 w-3.5" />
               </Link>
@@ -2329,7 +2329,7 @@ export function InvokeInspiredWorkstation({
             onClick={() => executeCommand("show_commands")}
             aria-label="查看工作台快捷键"
             title="快捷键（?）"
-            className="pro-topbar-tool inline-flex items-center gap-1.5 rounded-ios-xl bg-[rgba(255,255,255,0.56)] px-3 py-1.5 text-ios-footnote font-semibold text-[rgba(0,0,0,0.58)] shadow-[0_8px_22px_rgba(45,49,66,0.06)] transition-all hover:bg-[rgba(255,255,255,0.74)]"
+            className="pro-topbar-tool inline-flex items-center gap-1.5 rounded-ios-xl lg-float px-3 py-1.5 text-ios-footnote font-semibold text-muted-foreground transition-all hover:bg-white/75"
           >
             <Keyboard className="h-3.5 w-3.5" />
           </button>
@@ -2338,15 +2338,15 @@ export function InvokeInspiredWorkstation({
             onClick={startTour}
             aria-label="播放引导"
             title="播放引导"
-            className="pro-topbar-tool inline-flex items-center gap-1.5 rounded-ios-xl bg-[rgba(255,255,255,0.56)] px-3 py-1.5 text-ios-footnote font-semibold text-[rgba(0,0,0,0.56)] shadow-[0_8px_22px_rgba(45,49,66,0.06)] transition-all hover:bg-[rgba(255,255,255,0.74)]"
+            className="pro-topbar-tool inline-flex items-center gap-1.5 rounded-ios-xl lg-float px-3 py-1.5 text-ios-footnote font-semibold text-muted-foreground transition-all hover:bg-white/75"
           >
             <CircleHelp className="h-3.5 w-3.5" />
             <span className="pro-action-label">播放引导</span>
           </button>
           {isLoggedIn && user && (
-            <div className="pro-topbar-tool hidden items-center gap-1.5 rounded-ios-xl bg-[rgba(255,255,255,0.56)] px-3 py-1.5 xl:inline-flex">
-              <User className="h-3.5 w-3.5 text-[rgba(0,0,0,0.44)]" aria-hidden="true" />
-              <span className="max-w-[88px] truncate text-ios-footnote font-medium text-[rgba(0,0,0,0.56)]">
+            <div className="pro-topbar-tool hidden items-center gap-1.5 rounded-ios-xl lg-float px-3 py-1.5 xl:inline-flex">
+              <User className="h-3.5 w-3.5 text-foreground/45" aria-hidden="true" />
+              <span className="max-w-[88px] truncate text-ios-footnote font-medium text-muted-foreground">
                 {user.display_name || user.username}
               </span>
               <button
@@ -2354,7 +2354,7 @@ export function InvokeInspiredWorkstation({
                 onClick={logout}
                 aria-label="退出登录"
                 title="退出登录"
-                className="flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded-full text-[rgba(0,0,0,0.44)] transition-colors hover:text-[rgba(0,0,0,0.72)]"
+                className="flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 transition-colors hover:text-muted-foreground"
               >
                 <LogOut className="h-3 w-3" />
               </button>
@@ -2366,7 +2366,7 @@ export function InvokeInspiredWorkstation({
               onClick={onExitProfessionalMode}
               aria-label="返回普通模式"
               title="返回普通模式"
-              className="pro-topbar-tool inline-flex items-center gap-2 rounded-ios-xl bg-[rgba(255,255,255,0.56)] px-3 py-1.5 text-ios-footnote font-semibold text-[rgba(0,0,0,0.56)] shadow-[0_8px_22px_rgba(45,49,66,0.06)] transition-all hover:bg-[rgba(255,255,255,0.74)]"
+              className="pro-topbar-tool inline-flex items-center gap-2 rounded-ios-xl lg-float px-3 py-1.5 text-ios-footnote font-semibold text-muted-foreground transition-all hover:bg-white/75"
             >
               <ArrowLeft className="h-3.5 w-3.5" />
               <span className="pro-action-label">返回普通模式</span>
@@ -2542,7 +2542,7 @@ export function InvokeInspiredWorkstation({
                     value={prompt}
                     onChange={(event) => setPrompt(event.target.value)}
                     placeholder="例如：奶白色护肤精华放在哑光石台上，柔和晨光，背景虚化。"
-                    className="min-h-[200px] w-full resize-y rounded-ios-2xl border-0 bg-[rgba(255,255,255,0.42)] px-3.5 py-3 pb-12 text-ios-footnote text-[rgba(0,0,0,0.78)] outline-none ring-0 transition-all focus:bg-[rgba(255,255,255,0.64)] focus:ring-2 focus:ring-[rgba(0,122,255,0.18)]"
+                    className="min-h-[200px] w-full resize-y rounded-ios-2xl border-0 bg-white/40 px-3.5 py-3 pb-12 text-ios-footnote text-foreground outline-none ring-0 transition-all focus:bg-white/65 focus:ring-2 focus:ring-ios-blue/20"
                   />
                   <ReferenceImageUpload variant="prompt" value={referenceImages} onChange={onReferenceImagesChange} onWorkflowDetected={restoreProvenanceConfigFromPng} />
                 </div>
@@ -2668,7 +2668,7 @@ export function InvokeInspiredWorkstation({
                           value={item.text}
                           onChange={(event) => updateRegionalPrompt(item.id, { text: event.target.value })}
                           placeholder="例如：左上角留出干净的文案空间"
-                          className="w-full rounded-ios-xl border-0 bg-white/40 px-2.5 py-1.5 text-[11px] font-semibold text-[rgba(0,0,0,0.68)] outline-none transition-all focus:bg-white/60 focus:ring-2 focus:ring-[rgba(0,122,255,0.16)]"
+                          className="w-full rounded-ios-xl border-0 bg-white/40 px-2.5 py-1.5 text-ios-caption2 font-semibold text-muted-foreground outline-none transition-all focus:bg-white/60 focus:ring-2 focus:ring-ios-blue/15"
                         />
                         <button type="button" onClick={() => removeRegionalPrompt(item.id)} className="pro-layer-remove">移除</button>
                       </div>
@@ -2690,7 +2690,7 @@ export function InvokeInspiredWorkstation({
                     value={contextPrompt}
                     onChange={(event) => setContextPrompt(event.target.value)}
                     placeholder="项目背景、受众、投放渠道或画面限制"
-                    className="min-h-[88px] w-full resize-none rounded-ios-2xl border-0 bg-[rgba(255,255,255,0.38)] px-3.5 py-3 text-ios-footnote text-[rgba(0,0,0,0.72)] outline-none ring-0 transition-all focus:bg-[rgba(255,255,255,0.58)] focus:ring-2 focus:ring-[rgba(0,122,255,0.16)]"
+                    className="min-h-[88px] w-full resize-none rounded-ios-2xl border-0 bg-white/40 px-3.5 py-3 text-ios-footnote text-muted-foreground outline-none ring-0 transition-all focus:bg-white/60 focus:ring-2 focus:ring-ios-blue/15"
                   />
                   <div className="pro-brand-form">
                     <input value={brandKit.brandName} onChange={(event) => setBrandKit((current) => ({ ...current, brandName: event.target.value }))} placeholder="品牌名称" />
@@ -2711,7 +2711,7 @@ export function InvokeInspiredWorkstation({
                     value={negativePrompt}
                     onChange={(event) => setNegativePrompt(event.target.value)}
                     placeholder="例如：水印、畸形手指、文字乱码、低清晰度"
-                    className="min-h-[80px] w-full resize-none rounded-ios-2xl border-0 bg-[rgba(255,255,255,0.38)] px-3.5 py-3 text-ios-footnote text-[rgba(0,0,0,0.72)] outline-none ring-0 transition-all focus:bg-[rgba(255,255,255,0.58)] focus:ring-2 focus:ring-[rgba(0,122,255,0.16)]"
+                    className="min-h-[80px] w-full resize-none rounded-ios-2xl border-0 bg-white/40 px-3.5 py-3 text-ios-footnote text-muted-foreground outline-none ring-0 transition-all focus:bg-white/60 focus:ring-2 focus:ring-ios-blue/15"
                   />
                 </section>
               </details>
@@ -2796,7 +2796,7 @@ export function InvokeInspiredWorkstation({
                   ))}
                 </div>
                 {referenceImages.length === 0 && (
-                  <p className="rounded-ios-xl bg-white/30 px-3 py-2 text-[11px] font-semibold text-[rgba(0,0,0,0.38)]">
+                  <p className="rounded-ios-xl bg-white/30 px-3 py-2 text-ios-caption2 font-semibold text-foreground/45">
                     还没有参考图。可直接生成，也可以上传产品图或人物图。
                   </p>
                 )}
@@ -2948,7 +2948,7 @@ export function InvokeInspiredWorkstation({
                   <input id="pro-concurrency" min={1} max={4} type="range" value={concurrency} aria-valuetext={`${concurrency} 个任务`} onChange={(event) => setConcurrency(Number(event.target.value))} />
                   <output htmlFor="pro-concurrency">{concurrency}</output>
                 </label>
-                <div className="mt-3 rounded-ios-2xl bg-[rgba(255,255,255,0.38)] px-3 py-2 text-ios-caption1 font-semibold text-[rgba(0,0,0,0.54)]">
+                <div className="mt-3 rounded-ios-2xl bg-white/40 px-3 py-2 text-ios-caption1 font-semibold text-muted-foreground">
                   预计 {copies} {runUnit} · {totalCoins} 币 · {isVideoModel
                     ? `${durationSeconds ?? defaultDuration(modelId)} 秒${generateAudio ? " · 含音效" : ""}`
                     : imageSizeLabel}
@@ -3119,7 +3119,7 @@ export function InvokeInspiredWorkstation({
                 )}
                 {((viewerGalleryMode === "images" && allResults.length === 0) || (viewerGalleryMode === "assets" && referenceImages.length === 0)) && (
                   <div className="pro-canvas-empty">
-                    <Images className="h-8 w-8 text-[rgba(0,0,0,0.28)]" />
+                    <Images className="h-8 w-8 text-foreground/45" />
                     <span>{viewerGalleryMode === "images" ? "还没有成片" : "还没有参考图"}</span>
                     {/*
                       空态的下一步是「去写提示词」，不是「回到画布」——
@@ -3208,7 +3208,7 @@ export function InvokeInspiredWorkstation({
                   </div>
                 ) : (
                   <div className="pro-canvas-empty">
-                    <Bot className="h-8 w-8 text-[rgba(0,0,0,0.28)]" />
+                    <Bot className="h-8 w-8 text-foreground/45" />
                     <span>在左侧描述画面，然后生成。</span>
                     <button type="button" onClick={() => executeCommand("focus_prompt")} className="pro-empty-cta">
                       去写画面描述
@@ -3567,7 +3567,7 @@ export function InvokeInspiredWorkstation({
                   onClick={() => firstFailedTask ? retryTask(firstFailedTask) : run(Math.max(1, failedSlotCount))}
                   disabled={isLoading || failedSlotCount === 0}
                   title={failedSlotCount ? `用当前配置重新生成 ${failedSlotCount} 个失败任务` : "没有失败任务"}
-                  className="mt-2 inline-flex w-full items-center justify-center gap-1 rounded-ios-xl bg-[rgba(255,255,255,0.46)] px-3 py-2 text-[11px] font-bold text-[rgba(0,0,0,0.56)] transition-colors hover:bg-white/70 disabled:text-[rgba(0,0,0,0.24)]"
+                  className="mt-2 inline-flex w-full items-center justify-center gap-1 rounded-ios-xl bg-white/45 px-3 py-2 text-ios-caption2 font-bold text-muted-foreground transition-colors hover:bg-white/70 disabled:text-foreground/45"
                 >
                   <RotateCcw className="h-3 w-3" />
                   重试失败任务
@@ -3610,7 +3610,7 @@ export function InvokeInspiredWorkstation({
                 <div className="grid max-h-[420px] grid-cols-2 gap-2 overflow-y-auto pr-1">
                   {inspectorGalleryMode === "images" && allResults.map((image, index) => (
                     <div key={image.resultId ?? image.slotId ?? index} className={cn("pro-provenance-card", (image.resultId ?? image.slotId) === selectedSlotId && "is-selected")}>
-                      <div className={cn("aspect-square overflow-hidden rounded-ios-xl bg-[rgba(255,255,255,0.42)]", !image.image && !image.imageUrl && !image.videoUrl && "flex items-center justify-center")}>
+                      <div className={cn("aspect-square overflow-hidden rounded-ios-xl bg-white/40", !image.image && !image.imageUrl && !image.videoUrl && "flex items-center justify-center")}>
                         {image.image || image.imageUrl || image.videoUrl ? (
                           image.mediaType === "video" && image.videoUrl ? (
                             <video src={image.videoUrl} muted playsInline className="h-full w-full object-cover" />
@@ -3619,10 +3619,10 @@ export function InvokeInspiredWorkstation({
                             <img src={resultSrc(image)} alt="生成结果" className="h-full w-full object-cover" />
                           )
                         ) : (
-                          <Bot className="h-5 w-5 text-[rgba(0,0,0,0.28)]" />
+                          <Bot className="h-5 w-5 text-foreground/45" />
                         )}
                       </div>
-                      <div className="mt-2 space-y-1 text-[10px] font-semibold text-[rgba(0,0,0,0.46)]">
+                      <div className="mt-2 space-y-1 text-ios-caption2 font-semibold text-foreground/45">
                         <div className="flex items-center gap-1">
                           <Clipboard className="h-3 w-3" />
                           <span className="truncate">生成信息</span>
@@ -3635,14 +3635,14 @@ export function InvokeInspiredWorkstation({
                             type="button"
                             onClick={() => openResultOnCanvas(image)}
                             disabled={!image.image && !image.imageUrl && !image.videoUrl}
-                            className="mt-1 inline-flex items-center justify-center gap-1 rounded-lg bg-[rgba(255,255,255,0.46)] px-2 py-1 text-[10px] font-bold text-[rgba(0,0,0,0.56)] transition-colors hover:bg-white/70 disabled:text-[rgba(0,0,0,0.24)]"
+                            className="mt-1 inline-flex items-center justify-center gap-1 rounded-lg bg-white/45 px-2 py-1 text-ios-caption2 font-bold text-muted-foreground transition-colors hover:bg-white/70 disabled:text-foreground/45"
                           >
                             打开
                           </button>
                           <button
                             type="button"
                             onClick={() => copyProvenanceConfig(image)}
-                            className="mt-1 inline-flex items-center justify-center gap-1 rounded-lg bg-[rgba(255,255,255,0.46)] px-2 py-1 text-[10px] font-bold text-[rgba(0,0,0,0.56)] transition-colors hover:bg-white/70"
+                            className="mt-1 inline-flex items-center justify-center gap-1 rounded-lg bg-white/45 px-2 py-1 text-ios-caption2 font-bold text-muted-foreground transition-colors hover:bg-white/70"
                           >
                             <Clipboard className="h-3 w-3" />
                             复制配置
@@ -3652,7 +3652,7 @@ export function InvokeInspiredWorkstation({
                             onClick={() => saveResultToBoard(image)}
                             disabled={!image.image && !image.imageUrl && !image.videoUrl || image.mediaType === "video"}
                             title="保存到文件夹"
-                            className="col-span-2 mt-1 inline-flex items-center justify-center gap-1 rounded-lg bg-[rgba(255,255,255,0.46)] px-2 py-1 text-[10px] font-bold text-[rgba(0,0,0,0.56)] transition-colors hover:bg-white/70 disabled:text-[rgba(0,0,0,0.24)]"
+                            className="col-span-2 mt-1 inline-flex items-center justify-center gap-1 rounded-lg bg-white/45 px-2 py-1 text-ios-caption2 font-bold text-muted-foreground transition-colors hover:bg-white/70 disabled:text-foreground/45"
                           >
                             <FolderOpen className="h-3 w-3" />
                             存入文件夹
@@ -3663,11 +3663,11 @@ export function InvokeInspiredWorkstation({
                   ))}
                   {inspectorGalleryMode === "assets" && referenceImages.map((image) => (
                     <div key={image.id} className="pro-provenance-card">
-                      <div className="aspect-square overflow-hidden rounded-ios-xl bg-[rgba(255,255,255,0.42)]">
+                      <div className="aspect-square overflow-hidden rounded-ios-xl bg-white/40">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={image.previewUrl} alt={image.name} className="h-full w-full object-cover" />
                       </div>
-                      <div className="mt-2 space-y-1 text-[10px] font-semibold text-[rgba(0,0,0,0.46)]">
+                      <div className="mt-2 space-y-1 text-ios-caption2 font-semibold text-foreground/45">
                         <p className="truncate">参考图</p>
                         <p className="truncate">{image.name}</p>
                         <p className="truncate">
@@ -3679,7 +3679,7 @@ export function InvokeInspiredWorkstation({
                 </div>
                 )}
                 {((inspectorGalleryMode === "images" && allResults.length === 0) || (inspectorGalleryMode === "assets" && referenceImages.length === 0)) && (
-                  <div className="mt-2 rounded-ios-2xl bg-[rgba(255,255,255,0.34)] px-3 py-3 text-[11px] font-medium leading-relaxed text-[rgba(0,0,0,0.46)]">
+                  <div className="mt-2 rounded-ios-2xl bg-white/35 px-3 py-3 text-ios-caption2 font-medium leading-relaxed text-foreground/45">
                     <RotateCcw className="mr-1.5 inline h-3 w-3" />
                     {inspectorGalleryMode === "images" ? "生成后，这里会显示模型、参数和可导入配置。" : "添加参考图后，这里会显示素材。"}
                   </div>
@@ -3736,13 +3736,13 @@ export function InvokeInspiredWorkstation({
                   value={restoreConfigText}
                   onChange={(event) => setRestoreConfigText(event.target.value)}
                   placeholder='{"prompt": "...", "workflowPreset": "product-shot", ...}'
-                  className="min-h-[82px] w-full resize-none rounded-ios-2xl border-0 bg-[rgba(255,255,255,0.38)] px-3.5 py-3 text-[11px] text-[rgba(0,0,0,0.68)] outline-none ring-0 transition-all focus:bg-[rgba(255,255,255,0.58)] focus:ring-2 focus:ring-[rgba(0,122,255,0.16)]"
+                  className="min-h-[82px] w-full resize-none rounded-ios-2xl border-0 bg-white/40 px-3.5 py-3 text-ios-caption2 text-muted-foreground outline-none ring-0 transition-all focus:bg-white/60 focus:ring-2 focus:ring-ios-blue/15"
                 />
                 <div className="mt-2 grid grid-cols-2 gap-2">
                   <button
                     type="button"
                     onClick={restoreProvenanceConfig}
-                    className="inline-flex items-center justify-center gap-1.5 rounded-ios-xl bg-[rgba(255,255,255,0.52)] px-3 py-2 text-[11px] font-bold text-[rgba(0,0,0,0.58)] transition-colors hover:bg-[rgba(255,255,255,0.74)]"
+                    className="inline-flex items-center justify-center gap-1.5 rounded-ios-xl bg-white/50 px-3 py-2 text-ios-caption2 font-bold text-muted-foreground transition-colors hover:bg-white/75"
                   >
                     <FileJson className="h-3 w-3" />
                     导入
@@ -3750,14 +3750,14 @@ export function InvokeInspiredWorkstation({
                   <button
                     type="button"
                     onClick={() => copyProvenanceConfig(visibleResult)}
-                    className="inline-flex items-center justify-center gap-1.5 rounded-ios-xl bg-[rgba(255,255,255,0.52)] px-3 py-2 text-[11px] font-bold text-[rgba(0,0,0,0.58)] transition-colors hover:bg-[rgba(255,255,255,0.74)]"
+                    className="inline-flex items-center justify-center gap-1.5 rounded-ios-xl bg-white/50 px-3 py-2 text-ios-caption2 font-bold text-muted-foreground transition-colors hover:bg-white/75"
                   >
                     <Clipboard className="h-3 w-3" />
                     复制当前配置
                   </button>
                 </div>
                 {restoreConfigMessage && (
-                  <p className="mt-2 truncate text-[11px] font-semibold text-[rgba(0,0,0,0.42)]">{restoreConfigMessage}</p>
+                  <p className="mt-2 truncate text-ios-caption2 font-semibold text-foreground/45">{restoreConfigMessage}</p>
                 )}
               </details>
             </div>
@@ -3774,13 +3774,13 @@ export function InvokeInspiredWorkstation({
             if (event.target === event.currentTarget) executeCommand("close_overlay");
           }}
         >
-          <div className="w-full max-w-lg overflow-hidden rounded-ios-3xl bg-[rgba(248,248,250,0.97)] p-4 shadow-2xl">
+          <div className="w-full max-w-lg overflow-hidden rounded-ios-3xl lg-sheet p-4">
             <div className="mb-3 flex items-center justify-between gap-3">
               <div>
-                <h3 className="text-[17px] font-bold text-[rgba(0,0,0,0.84)]">工作台快捷键</h3>
-                <p className="mt-0.5 text-[12px] font-semibold text-[rgba(0,0,0,0.52)]">输入框与输入法组合期间不会误触。</p>
+                <h3 className="text-[17px] font-bold text-foreground">工作台快捷键</h3>
+                <p className="mt-0.5 text-ios-caption1 font-semibold text-muted-foreground">输入框与输入法组合期间不会误触。</p>
               </div>
-              <button type="button" onClick={() => executeCommand("close_overlay")} className="flex h-10 w-10 items-center justify-center rounded-full bg-black/5 text-[rgba(0,0,0,0.64)]" aria-label="关闭快捷键">
+              <button type="button" onClick={() => executeCommand("close_overlay")} className="flex h-10 w-10 items-center justify-center rounded-full bg-black/5 text-muted-foreground" aria-label="关闭快捷键">
                 <X className="h-4 w-4" />
               </button>
             </div>
@@ -3797,10 +3797,10 @@ export function InvokeInspiredWorkstation({
                   className="flex min-h-12 items-center gap-3 rounded-ios-xl px-3 text-left transition-colors hover:bg-black/5 disabled:opacity-40"
                 >
                   <span className="min-w-0 flex-1">
-                    <strong className="block text-[14px] text-[rgba(0,0,0,0.78)]">{command.label}</strong>
-                    <span className="block text-[11px] font-semibold text-[rgba(0,0,0,0.50)]">{command.description}</span>
+                    <strong className="block text-ios-subhead text-foreground">{command.label}</strong>
+                    <span className="block text-ios-caption2 font-semibold text-muted-foreground">{command.description}</span>
                   </span>
-                  <kbd className="shrink-0 rounded-lg bg-white px-2 py-1 text-[11px] font-bold text-[rgba(0,0,0,0.58)] shadow-sm">{command.shortcut}</kbd>
+                  <kbd className="shrink-0 rounded-lg bg-white px-2 py-1 text-ios-caption2 font-bold text-muted-foreground shadow-sm">{command.shortcut}</kbd>
                 </button>
               ))}
             </div>

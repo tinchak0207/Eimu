@@ -73,7 +73,7 @@ const GROUPS: ShortcutGroup[] = [
 /** kbd 膠囊：按鍵與手勢共用一套皮膚。 */
 function Kbd({ children }: { children: string }) {
   return (
-    <kbd className="whitespace-nowrap rounded-md border border-[rgba(0,0,0,0.12)] bg-[rgba(0,0,0,0.04)] px-1.5 py-[3px] font-sans text-[11px] font-medium leading-none text-[rgba(0,0,0,0.65)]">
+    <kbd className="whitespace-nowrap rounded-md border border-black/10 bg-black/5 px-1.5 py-[3px] font-sans text-ios-caption2 font-medium leading-none text-muted-foreground">
       {children}
     </kbd>
   );
@@ -112,23 +112,23 @@ function CanvasShortcutsHelp({ open, onClose }: CanvasShortcutsHelpProps) {
       className="fixed inset-0 z-[110] flex items-center justify-center p-4"
     >
       {/* 半透明幕布（點擊由 window capture 統一處理關閉） */}
-      <div className="absolute inset-0 bg-[rgba(0,0,0,0.32)] backdrop-blur-[2px]" aria-hidden />
+      <div className="absolute inset-0 bg-black/30 backdrop-blur-[2px]" aria-hidden />
 
       <div
         ref={cardRef}
         role="dialog"
         aria-modal="true"
         aria-label="键盘快捷键"
-        className="relative flex max-h-[80vh] w-full max-w-[560px] flex-col overflow-hidden rounded-2xl bg-white shadow-[0_24px_64px_rgba(0,0,0,0.24)]"
+        className="relative flex max-h-[80vh] w-full max-w-[560px] flex-col overflow-hidden rounded-2xl lg-sheet"
       >
         {/* 標題列 */}
-        <div className="flex shrink-0 items-center justify-between border-b border-[rgba(0,0,0,0.06)] px-5 pb-3 pt-4">
-          <h2 className="text-[15px] font-semibold text-[#1d1d1f]">键盘快捷键</h2>
+        <div className="flex shrink-0 items-center justify-between border-b px-5 pb-3 pt-4">
+          <h2 className="text-[15px] font-semibold text-foreground">键盘快捷键</h2>
           <button
             type="button"
             aria-label="关闭"
             title="关闭"
-            className="flex h-7 w-7 items-center justify-center rounded-full text-[rgba(0,0,0,0.45)] transition-colors hover:bg-[rgba(0,0,0,0.06)] hover:text-[#1d1d1f]"
+            className="flex h-7 w-7 items-center justify-center rounded-full text-foreground/45 transition-colors hover:bg-black/5 hover:text-foreground"
             onClick={onClose}
           >
             <X className="h-4 w-4" />
@@ -139,21 +139,21 @@ function CanvasShortcutsHelp({ open, onClose }: CanvasShortcutsHelpProps) {
         <div className="grid gap-x-8 gap-y-5 overflow-y-auto px-5 pb-5 pt-4 sm:grid-cols-2">
           {GROUPS.map((group) => (
             <section key={group.title}>
-              <h3 className="mb-1 text-[12px] font-semibold text-[rgba(0,0,0,0.4)]">{group.title}</h3>
-              <div className="divide-y divide-[rgba(0,0,0,0.05)]">
+              <h3 className="mb-1 text-ios-caption1 font-semibold text-foreground/45">{group.title}</h3>
+              <div className="divide-y divide-black/5">
                 {group.rows.map((row) => (
                   <div key={row.desc} className="flex min-h-[34px] items-center justify-between gap-3 py-1.5">
-                    <span className="text-[13px] text-[#1d1d1f]">{row.desc}</span>
+                    <span className="text-ios-footnote text-foreground">{row.desc}</span>
                     <span className="flex flex-wrap items-center justify-end gap-1">
                       {row.combos.map((combo, comboIndex) => (
                         <span key={comboIndex} className="flex items-center gap-1">
                           {comboIndex > 0 ? (
-                            <span className="text-[11px] text-[rgba(0,0,0,0.35)]">或</span>
+                            <span className="text-ios-caption2 text-foreground/45">或</span>
                           ) : null}
                           {combo.map((key, keyIndex) => (
                             <span key={keyIndex} className="flex items-center gap-0.5">
                               {keyIndex > 0 ? (
-                                <span className="text-[10px] text-[rgba(0,0,0,0.35)]">+</span>
+                                <span className="text-ios-caption2 text-foreground/45">+</span>
                               ) : null}
                               <Kbd>{key}</Kbd>
                             </span>

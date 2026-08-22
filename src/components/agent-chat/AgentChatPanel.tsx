@@ -47,11 +47,11 @@ export interface AgentChatPanelProps {
 }
 
 const CONNECTION_META: Record<AgentChatPanelProps["connection"], { label: string; dotClass: string }> = {
-  idle: { label: "未连接", dotClass: "bg-[rgba(0,0,0,0.25)]" },
-  connecting: { label: "连接中…", dotClass: "bg-[#FF9500]" },
-  open: { label: "已连接", dotClass: "bg-[#34C759]" },
-  reconnecting: { label: "正在重新连接…", dotClass: "bg-[#FF9500]" },
-  closed: { label: "会话已结束", dotClass: "bg-[#FF3B30]" },
+  idle: { label: "未连接", dotClass: "bg-black/25" },
+  connecting: { label: "连接中…", dotClass: "bg-ios-orange" },
+  open: { label: "已连接", dotClass: "bg-ios-green" },
+  reconnecting: { label: "正在重新连接…", dotClass: "bg-ios-orange" },
+  closed: { label: "会话已结束", dotClass: "bg-destructive" },
 };
 
 function AgentChatPanelComponent({
@@ -151,7 +151,7 @@ function AgentChatPanelComponent({
 
   // 等用户二选一时，「未连接」的红灯是误报：没连是因为在等他决定。
   const meta = awaitingChoice
-    ? { label: "等你选择上面的对话", dotClass: "bg-[#007AFF]" }
+    ? { label: "等你选择上面的对话", dotClass: "bg-ios-blue" }
     : CONNECTION_META[connection];
   const composerDisabled = disabled || closed;
 
@@ -163,19 +163,19 @@ function AgentChatPanelComponent({
       {(awaitingChoice || connection === "reconnecting" || (closed && closedReason)) && (
         <div className="agent-panel-status flex items-center gap-2 px-0.5 pb-2 pt-1">
           <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", meta.dotClass)} aria-hidden="true" />
-          <span className="text-ios-caption1 font-medium text-[rgba(0,0,0,0.35)]">{meta.label}</span>
+          <span className="text-ios-caption1 font-medium text-foreground/45">{meta.label}</span>
           {connection === "reconnecting" && (
             <button
               type="button"
               onClick={onRetryConnection}
-              className="agent-retry ml-auto inline-flex items-center gap-1.5 rounded-full bg-[rgba(0,122,255,0.10)] px-3 py-1 text-ios-caption1 font-semibold text-[#007AFF] transition-colors hover:bg-[rgba(0,122,255,0.18)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)]"
+              className="agent-retry ml-auto inline-flex items-center gap-1.5 rounded-full bg-ios-blue/10 px-3 py-1 text-ios-caption1 font-semibold text-ios-blue transition-colors hover:bg-ios-blue/[0.18] focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30"
             >
               <RotateCcw className="h-3 w-3" aria-hidden="true" />
               重试
             </button>
           )}
           {closed && closedReason && !awaitingChoice && (
-            <span className="ml-auto truncate text-ios-caption1 text-[rgba(0,0,0,0.35)]">
+            <span className="ml-auto truncate text-ios-caption1 text-foreground/45">
               原因：{closedReason}
             </span>
           )}
@@ -196,14 +196,14 @@ function AgentChatPanelComponent({
       >
         {items.length === 0 && connection === "open" ? (
           <div className="agent-empty flex h-full min-h-40 flex-col items-center justify-center gap-5 px-6 text-center">
-            <span className="flex h-12 w-12 items-center justify-center rounded-full bg-[rgba(0,122,255,0.10)] text-[#007AFF] ring-1 ring-[rgba(0,122,255,0.22)] shadow-[0_10px_28px_rgba(0,122,255,0.20),inset_0_1px_0_rgba(255,255,255,0.85)] backdrop-blur-[20px]">
+            <span className="lg-tint-blue flex h-12 w-12 items-center justify-center rounded-full text-ios-blue">
               <Sparkles className="h-5 w-5" aria-hidden="true" />
             </span>
             <div>
-              <p className="text-ios-subhead font-semibold text-[rgba(0,0,0,0.78)]">
+              <p className="text-ios-subhead font-semibold text-foreground">
                 和智能体聊聊，让它帮你生成图片
               </p>
-              <p className="agent-empty-hint mx-auto mt-1.5 max-w-[30rem] text-sm leading-[1.5] text-[rgba(0,0,0,0.45)] sm:text-ios-footnote">
+              <p className="agent-empty-hint mx-auto mt-1.5 max-w-[30rem] text-sm leading-[1.5] text-foreground/45 sm:text-ios-footnote">
                 说一句话，它自动选好模型、风格和比例
               </p>
             </div>
@@ -213,7 +213,7 @@ function AgentChatPanelComponent({
                   key={ex}
                   type="button"
                   onClick={() => onSend(ex)}
-                  className="lg-float cursor-pointer rounded-full px-3.5 py-2 text-ios-footnote font-medium text-[rgba(0,0,0,0.62)] transition-all duration-200 hover:-translate-y-0.5 hover:text-[#007AFF] hover:shadow-[0_6px_18px_rgba(0,0,0,0.10)] active:translate-y-0 active:scale-[0.97]"
+                  className="lg-float cursor-pointer rounded-full px-3.5 py-2 text-ios-footnote font-medium text-muted-foreground transition-all duration-200 hover:-translate-y-0.5 hover:text-ios-blue hover:shadow-[0_6px_18px_rgba(0,0,0,0.10)] active:translate-y-0 active:scale-[0.97]"
                 >
                   {ex}
                 </button>
@@ -240,12 +240,12 @@ function AgentChatPanelComponent({
               {[0, 160, 320].map((delay) => (
                 <span
                   key={delay}
-                  className="inline-block animate-bounce rounded-full bg-[rgba(0,0,0,0.22)]"
+                  className="inline-block animate-bounce rounded-full bg-black/[0.22]"
                   style={{ width: 6, height: 6, animationDelay: `${delay}ms`, animationDuration: "1.1s" }}
                 />
               ))}
             </span>
-            <span className="text-ios-caption1 text-[rgba(0,0,0,0.35)]">正在思考…</span>
+            <span className="text-ios-caption1 text-foreground/45">正在思考…</span>
           </div>
         )}
       </div>
@@ -307,16 +307,21 @@ function AgentChatPanelComponent({
         </div>
       )}
 
-      {/* 输入区锚点：键盘弹起时以此为基准判断可见性，滚回可视区。 */}
-      <div ref={composerAnchorRef} className="agent-composer-anchor">
-        <AgentComposer
-          disabled={composerDisabled}
-          onSend={onSend}
-          sessionId={sessionId}
-          prefill={prefill}
-          onPrefillConsumed={onPrefillConsumed}
-        />
-      </div>
+      {/* 输入区锚点：键盘弹起时以此为基准判断可见性，滚回可视区。
+          2026-08-22 完美主義審視：有待回答的問題/確認卡時輸入區**讓位消失**——
+          決策卡與輸入框兩個操作層級重疊會打架（「必須選一個」vs「可以直接打字」
+          沒有主次，輸入框還視覺上壓住最後一個選項）。答完卡，輸入區自動回來。 */}
+      {pendingQuestions.length === 0 && pendingConfirms.length === 0 && (
+        <div ref={composerAnchorRef} className="agent-composer-anchor">
+          <AgentComposer
+            disabled={composerDisabled}
+            onSend={onSend}
+            sessionId={sessionId}
+            prefill={prefill}
+            onPrefillConsumed={onPrefillConsumed}
+          />
+        </div>
+      )}
     </section>
   );
 }

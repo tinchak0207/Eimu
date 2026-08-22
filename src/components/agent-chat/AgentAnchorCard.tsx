@@ -32,14 +32,14 @@ function AgentAnchorCardComponent({ anchor, onAnchor, onReanchor, onDismiss, bus
   return (
     <div className="agent-rise lg-sheet rounded-ios-2xl p-3.5">
       <div className="flex items-start gap-3">
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[rgba(0,122,255,0.12)] text-[#007AFF]">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-ios-blue/[0.12] text-ios-blue">
           <Anchor className="h-4 w-4" aria-hidden="true" />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-ios-subhead font-semibold text-[rgba(0,0,0,0.85)]">
+          <p className="text-ios-subhead font-semibold text-foreground">
             第 {anchor.seq} 张出来了，就按这张的风格出完整批？
           </p>
-          <p className="mt-0.5 text-sm leading-[1.55] text-[rgba(0,0,0,0.55)]">
+          <p className="mt-0.5 text-sm leading-[1.55] text-muted-foreground">
             锚定后整批沿用同一套参数，第 100 张不会跟第 1 张跑偏。
           </p>
           {preview.length > 0 && (
@@ -47,14 +47,14 @@ function AgentAnchorCardComponent({ anchor, onAnchor, onReanchor, onDismiss, bus
               {preview.map((param) => (
                 <li
                   key={param.key}
-                  className="min-w-0 rounded-full bg-[rgba(0,0,0,0.05)] px-2.5 py-1 text-sm leading-[1.4] text-[rgba(0,0,0,0.62)] [overflow-wrap:anywhere] sm:max-w-[14rem] sm:truncate"
+                  className="min-w-0 rounded-full bg-black/5 px-2.5 py-1 text-sm leading-[1.4] text-muted-foreground [overflow-wrap:anywhere] sm:max-w-[14rem] sm:truncate"
                   title={param.label + "：" + param.value}
                 >
                   {param.label} {param.value}
                 </li>
               ))}
               {rest > 0 && (
-                <li className="rounded-full bg-[rgba(0,0,0,0.05)] px-2.5 py-1 text-sm leading-[1.4] text-[rgba(0,0,0,0.50)]">
+                <li className="rounded-full bg-black/5 px-2.5 py-1 text-sm leading-[1.4] text-muted-foreground">
                   另 {rest} 项
                 </li>
               )}
@@ -62,7 +62,7 @@ function AgentAnchorCardComponent({ anchor, onAnchor, onReanchor, onDismiss, bus
           )}
           {/* 上游截断过就说出来：锚定可能锚不全，不让使用者以为万无一失。 */}
           {anchor.truncated && (
-            <p className="mt-1.5 text-sm text-[rgba(0,0,0,0.46)]">
+            <p className="mt-1.5 text-sm text-foreground/45">
               上游只回传了参数摘要，可能有参数锚不住
             </p>
           )}
@@ -79,7 +79,7 @@ function AgentAnchorCardComponent({ anchor, onAnchor, onReanchor, onDismiss, bus
             type="button"
             onClick={onDismiss}
             disabled={busy}
-            className="min-h-11 flex-1 cursor-pointer rounded-full px-4 text-sm font-medium text-[rgba(0,0,0,0.52)] transition-colors duration-150 active:bg-[rgba(0,0,0,0.07)] active:text-[rgba(0,0,0,0.80)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,0,0,0.20)] disabled:cursor-not-allowed disabled:opacity-40 sm:flex-none [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
+            className="min-h-11 flex-1 cursor-pointer rounded-full px-4 text-sm font-medium text-muted-foreground transition-colors duration-150 active:bg-black/[0.07] active:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-foreground/20 disabled:cursor-not-allowed disabled:opacity-40 sm:flex-none [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
           >
             不用了
           </button>
@@ -88,7 +88,7 @@ function AgentAnchorCardComponent({ anchor, onAnchor, onReanchor, onDismiss, bus
             onClick={onReanchor}
             disabled={busy}
             title="先只出 1 张换个方向，满意了再出整批"
-            className="inline-flex min-h-11 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-full bg-[rgba(0,0,0,0.05)] px-4 text-sm font-semibold text-[rgba(0,0,0,0.66)] transition-colors duration-150 active:bg-[rgba(0,0,0,0.09)] active:text-[rgba(0,0,0,0.86)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,0,0,0.20)] disabled:cursor-not-allowed disabled:opacity-40 sm:flex-none [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
+            className="inline-flex min-h-11 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-full bg-black/5 px-4 text-sm font-semibold text-muted-foreground transition-colors duration-150 active:bg-black/[0.09] active:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-foreground/20 disabled:cursor-not-allowed disabled:opacity-40 sm:flex-none [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
           >
             <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
             换个方向
@@ -99,7 +99,7 @@ function AgentAnchorCardComponent({ anchor, onAnchor, onReanchor, onDismiss, bus
           onClick={onAnchor}
           disabled={busy}
           title="把这张实际用过的参数念回给助理，整批照抄"
-          className="inline-flex min-h-12 w-full cursor-pointer items-center justify-center gap-1.5 rounded-full bg-[#007AFF] px-5 text-ios-subhead font-semibold text-white shadow-[0_4px_12px_rgba(0,122,255,0.30)] transition-all duration-200 active:scale-[0.98] active:bg-[#0066DD] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.40)] disabled:cursor-not-allowed disabled:bg-[rgba(0,0,0,0.12)] disabled:text-[rgba(0,0,0,0.34)] disabled:shadow-none disabled:active:scale-100 sm:w-auto [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
+          className="inline-flex min-h-12 w-full cursor-pointer items-center justify-center gap-1.5 rounded-full bg-ios-blue px-5 text-ios-subhead font-semibold text-white shadow-[0_4px_12px_rgba(0,122,255,0.30)] transition-all duration-200 active:scale-[0.98] active:bg-ios-blue/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/40 disabled:cursor-not-allowed disabled:bg-black/[0.12] disabled:text-foreground/45 disabled:shadow-none disabled:active:scale-100 sm:w-auto [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
         >
           就按这张
         </button>

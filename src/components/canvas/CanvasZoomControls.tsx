@@ -45,7 +45,7 @@ const tToScale = (t: number) =>
 
 /** 圓形小按鈕統一皮膚（28px 熱區 + hover 態）。 */
 const BUTTON_CLASS =
-  "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[rgba(0,0,0,0.62)] transition-colors hover:bg-[rgba(0,0,0,0.06)] hover:text-[#1d1d1f] disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent";
+  "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-black/5 hover:text-foreground disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent";
 
 function CanvasZoomControls({ scale, onZoomTo, onFit, onHelp, className }: CanvasZoomControlsProps) {
   const trackRef = useRef<HTMLDivElement | null>(null);
@@ -71,7 +71,7 @@ function CanvasZoomControls({ scale, onZoomTo, onFit, onHelp, className }: Canva
       data-canvas-interactive
       aria-label="缩放控制"
       className={cn(
-        "inline-flex w-11 select-none flex-col items-center gap-0.5 rounded-full bg-white/95 p-1.5 shadow-[0_8px_32px_rgba(0,0,0,0.16)] backdrop-blur",
+        "inline-flex w-11 select-none flex-col items-center gap-0.5 rounded-full lg-float p-1.5",
         className,
       )}
     >
@@ -97,7 +97,7 @@ function CanvasZoomControls({ scale, onZoomTo, onFit, onHelp, className }: Canva
         aria-valuenow={percent}
         aria-valuetext={`${percent}%`}
         tabIndex={0}
-        className="relative h-24 w-7 shrink-0 cursor-pointer touch-none rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[#0A84FF]/30"
+        className="relative h-24 w-7 shrink-0 cursor-pointer touch-none rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30"
         onPointerDown={(e) => {
           e.preventDefault();
           e.currentTarget.setPointerCapture(e.pointerId);
@@ -121,9 +121,9 @@ function CanvasZoomControls({ scale, onZoomTo, onFit, onHelp, className }: Canva
       >
         {/* 軌道上下各內縮 7px（半個 thumb），thumb 到極值也不溢出熱區 */}
         <div ref={trackRef} className="absolute inset-x-0 bottom-[7px] top-[7px]">
-          <div className="absolute left-1/2 top-0 h-full w-[3px] -translate-x-1/2 rounded-full bg-[rgba(0,0,0,0.08)]" />
+          <div className="absolute left-1/2 top-0 h-full w-[3px] -translate-x-1/2 rounded-full bg-black/10" />
           <div
-            className="absolute bottom-0 left-1/2 w-[3px] -translate-x-1/2 rounded-full bg-[#0A84FF]"
+            className="absolute bottom-0 left-1/2 w-[3px] -translate-x-1/2 rounded-full bg-ios-blue"
             style={{ height: `${t * 100}%` }}
           />
           <div
@@ -147,19 +147,19 @@ function CanvasZoomControls({ scale, onZoomTo, onFit, onHelp, className }: Canva
         <Minus className="h-4 w-4" />
       </button>
 
-      <div className="my-0.5 h-px w-4 bg-[rgba(0,0,0,0.08)]" />
+      <div className="my-0.5 h-px w-4 bg-black/10" />
 
       {/* 當前百分比（四捨五入整數；點擊重置 100%） */}
       <button
         type="button"
-        className="flex h-7 w-full items-center justify-center rounded-full text-[11px] font-medium tabular-nums text-[#1d1d1f] transition-colors hover:bg-[rgba(0,0,0,0.06)]"
+        className="flex h-7 w-full items-center justify-center rounded-full text-ios-caption2 font-medium tabular-nums text-foreground transition-colors hover:bg-black/5"
         title="重置为 100%"
         onClick={() => onZoomTo(1)}
       >
         {percent}%
       </button>
 
-      <div className="my-0.5 h-px w-4 bg-[rgba(0,0,0,0.08)]" />
+      <div className="my-0.5 h-px w-4 bg-black/10" />
 
       <button type="button" className={BUTTON_CLASS} title="适应视图" aria-label="适应视图" onClick={onFit}>
         <Maximize className="h-4 w-4" />
