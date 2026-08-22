@@ -28,6 +28,7 @@ const WORKSTATION_TSX_MODULES = [
   "src/components/pro-workstation/use-canvas-annotation.ts",
   "src/components/pro-workstation/use-boards-library.ts",
   "src/components/pro-workstation/workstation-recall.ts",
+  "src/components/pro-workstation/panels/WorkstationTopbar.tsx",
 ];
 
 const WORKSTATION_CSS_MODULES = [
