@@ -26,10 +26,10 @@ interface OpenApiSchema {
 
 const METHOD_COLORS: Record<string, string> = {
   get: "bg-[#007AFF]/10 text-[#007AFF]",
-  post: "bg-[#34C759]/12 text-[#1E9E4F]",
-  put: "bg-[#FF9500]/12 text-[#C76A00]",
-  delete: "bg-[#FF3B30]/12 text-[#D92A20]",
-  patch: "bg-[#AF52DE]/12 text-[#9B3FBF]",
+  post: "bg-[#34C759]/[0.12] text-[#1E9E4F]",
+  put: "bg-[#FF9500]/[0.12] text-[#C76A00]",
+  delete: "bg-[#FF3B30]/[0.12] text-[#D92A20]",
+  patch: "bg-[#AF52DE]/[0.12] text-[#9B3FBF]",
 };
 
 function schemaName(ref: string | undefined): string {
