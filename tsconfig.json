@@ -39,6 +39,7 @@
     "node_modules",
     "tmp",
     "mcp-server",
+    "plugins",
     "**/*.test.ts",
     "**/*.test.tsx"
   ]

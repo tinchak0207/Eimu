@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { loginViaNewApi, getGatewayBaseUrl } from "@/lib/new-api-auth-server";
+import { signEmuOauthCode } from "@/lib/emu-oauth";
 import {
   buildGitHubEmail,
   buildGitHubPassword,
@@ -119,6 +120,18 @@ export async function GET(req: NextRequest) {
       sameSite: "lax",
       secure: true,
     });
+    // Emu OAuth 回环：start 路由种过 emu_oauth_loopback cookie 时，
+    // 把用户已登录的事实签成 60s 凭证，302 回插件本地 loopback server。
+    // napi_token / napi_user 照常设置 —— 用户同时保持站点登录。
+    const loopback = req.cookies.get("emu_oauth_loopback")?.value;
+    if (loopback) {
+      const code = signEmuOauthCode(loginResult.user.id);
+      redirect.cookies.set("emu_oauth_loopback", "", { path: "/", maxAge: 0 });
+      redirect.headers.set(
+        "Location",
+        `${loopback}/emu-oauth/callback?code=${encodeURIComponent(code)}`,
+      );
+    }
     return redirect;
   } catch (error) {
     console.error("[auth/github/callback]", error);

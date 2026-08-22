@@ -27,6 +27,20 @@ export const BIZ_KEY_DEFAULT_RPM = 60;
 export const BIZ_KEY_MAX_RPM = 600;
 export const BIZ_KEY_MAX_LABEL_LENGTH = 60;
 
+/** 个人用户自助签发的密钥上限。 */
+export const USER_API_KEY_LIMIT = 3;
+/** 个人用户未填写名称时的默认密钥名称。 */
+export const USER_API_KEY_DEFAULT_LABEL = "DSH 插件";
+
+/**
+ * 个人密钥名称规范化：可选字段，trim 后截断到上限；空串用默认名称。
+ * 与后台 normalizeBizKeyDraft 分开：后台要求必填客户名称，个人面板允许留空。
+ */
+export function normalizeUserBizKeyLabel(input: unknown): string {
+  const raw = typeof input === "string" ? input.trim() : "";
+  return raw.slice(0, BIZ_KEY_MAX_LABEL_LENGTH) || USER_API_KEY_DEFAULT_LABEL;
+}
+
 export interface BizApiKey {
   id: string;
   /** 客户名称，仅用于后台识别。 */

@@ -2,8 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { BookOpen, CreditCard, History, LogOut, User } from "lucide-react";
+import { BookOpen, CreditCard, History, KeyRound, LogOut, User } from "lucide-react";
 import { WalletBadge } from "@/components/WalletBadge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { CheckinCalendar } from "@/components/CheckinCalendar";
 import { SplitLoginButton } from "@/components/SplitLoginButton";
 import { useAuth } from "@/hooks/use-auth";
@@ -152,22 +158,33 @@ export function Navbar({ className }: NavbarProps) {
                   <span className="sr-only">充值</span>
                 </Link>
 
-                {/* User pill */}
-                <div className="lg-float hidden shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 sm:flex">
-                  <User className="h-3.5 w-3.5 text-[rgba(0,0,0,0.44)]" aria-hidden="true" />
-                  <span className="max-w-[88px] truncate text-ios-footnote font-medium text-[rgba(0,0,0,0.56)]">
-                    {user.display_name || user.username}
-                  </span>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={logout}
-                  className="lg-float hidden h-8 w-8 shrink-0 items-center justify-center rounded-full text-[rgba(0,0,0,0.44)] lg-transition hover:text-[rgba(0,0,0,0.72)] cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:flex"
-                  aria-label="退出登录"
-                >
-                  <LogOut className="h-3.5 w-3.5" />
-                </button>
+                {/* User menu */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label="用户菜单"
+                      className="lg-float hidden shrink-0 cursor-pointer items-center gap-1.5 rounded-full px-3 py-1.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:flex"
+                    >
+                      <User className="h-3.5 w-3.5 text-[rgba(0,0,0,0.44)]" aria-hidden="true" />
+                      <span className="max-w-[88px] truncate text-ios-footnote font-medium text-[rgba(0,0,0,0.56)]">
+                        {user.display_name || user.username}
+                      </span>
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" sideOffset={8}>
+                    <DropdownMenuItem asChild>
+                      <Link href="/settings/api-keys" className="cursor-pointer">
+                        <KeyRound className="mr-2 h-3.5 w-3.5 text-[rgba(0,0,0,0.44)]" aria-hidden="true" />
+                        API 密钥
+                      </Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => logout()} className="cursor-pointer">
+                      <LogOut className="mr-2 h-3.5 w-3.5 text-[rgba(0,0,0,0.44)]" aria-hidden="true" />
+                      退出登录
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </>
             ) : (
               <SplitLoginButton
