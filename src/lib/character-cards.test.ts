@@ -165,7 +165,16 @@ test("normalizeCharacterCard：清洗、上限與非法輸入", () => {
 import { readFileSync } from "node:fs";
 
 test("掛接契約：CanvasEmbed 生成唯一出口注入卡（手動+agent 同路）", () => {
-  const source = readFileSync("src/components/canvas/CanvasEmbed.tsx", "utf8");
+  // 2026-08-22 CanvasEmbed 域拆分（Task 7）：生成編排搬 embed/use-canvas-generation.ts、
+  // 存為卡搬 embed/use-canvas-interaction.ts、卡面板搬 embed/CanvasEmbedOverlays.tsx——
+  // 斷言語義不變，read 路徑改為殼+新檔拼接（同本檔 use-canvas-chat 拆分後的模式）。
+  const source = [
+    "src/components/canvas/CanvasEmbed.tsx",
+    "src/components/canvas/embed/use-canvas-generation.ts",
+    "src/components/canvas/embed/use-canvas-interaction.ts",
+    "src/components/canvas/embed/context-menu-items.ts",
+    "src/components/canvas/embed/CanvasEmbedOverlays.tsx",
+  ].map((p) => readFileSync(p, "utf8")).join("\n");
   assert.match(source, /applyCharacterCardsToPayload\(payload as CardAwareGeneratePayload/);
   assert.match(source, /canvasStateRef\.current\.activeCharacterCards/);
   // 存為卡動作 + 卡面板（生效 badge）

@@ -15,34 +15,20 @@
 //      執行後結果回流 gateway；run_generation 由本層代跑
 //   D  提示詞庫/雲端素材庫面板接線；編輯器角度重繪/AI 重繪回調接生成管線
 //
+// 2026-08-22 域拆分（docs/plans/2026-08-22-large-file-refactor.md Task 7）：
+// 純函數/類型 → embed/embed-helpers.ts、交互域 → embed/use-canvas-interaction.ts、
+// 生成編排 → embed/use-canvas-generation.ts、鍵盤/剪貼簿 → embed/use-canvas-shortcuts.ts、
+// 右鍵選單 → embed/context-menu-items.ts、浮層+樣式 → embed/CanvasEmbedOverlays.tsx。
+// 本檔保留組件殼 + 節點掛載（visibleNodes.map 的 CanvasNodeView）+ 頂欄。
+//
 // 認證立場：生成/超分走 Bearer + x-user-id（與 playground 同款 getStoredToken），
 // 未登入誠實報錯，不假裝能生成。
 
 import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import type { UseCanvasChatReturn } from "@/hooks/use-canvas-chat";
-import { CanvasNodeType, type CanvasConnection, type CanvasNode, type CanvasPosition } from "@/lib/canvas/types";
-import {
-  composeGenerationPrompt,
-  mergeGenerationReferences,
-  resolveGenerationInputs,
-  type CanvasGenerationReference,
-} from "@/lib/canvas/semantic-nodes";
-import { toReferenceImageRole } from "@/lib/image-types";
-import type { ReferenceImageRole } from "@/lib/image-types";
-import { applyCharacterCardsToPayload } from "@/lib/character-cards";
-import type { CardAwareGeneratePayload, CharacterCard, CharacterCardKind } from "@/lib/character-cards";
+import { CanvasNodeType, type CanvasConnection, type CanvasNode } from "@/lib/canvas/types";
+import type { CanvasGenerationReference } from "@/lib/canvas/semantic-nodes";
 import { bezierPath } from "@/lib/canvas/layout";
-import { createBatchChildNode } from "@/lib/canvas/batch-utils";
-import {
-  alignNodes,
-  arrangeGrid,
-  cloneForPaste,
-  distributeNodes,
-  nodesInRect,
-  type AlignMode,
-  type WorldRect,
-} from "@/lib/canvas/interaction";
-import { getStoredToken, getStoredUser } from "@/lib/new-api-client";
 import { InfiniteCanvas } from "./InfiniteCanvas";
 import { CanvasConnections } from "./CanvasConnections";
 import { CanvasNodeView } from "./CanvasNodeView";
@@ -54,6 +40,12 @@ import { CanvasShortcutsHelp } from "./CanvasShortcutsHelp";
 import { CanvasNodeCreateMenu } from "./CanvasNodeCreateMenu";
 import { CanvasLibraryPanel } from "./CanvasLibraryPanel";
 import { cn } from "@/lib/utils";
+import { AGENT_AUTO_APPROVE_KEY, CULL_MARGIN_PX, ENTER_STAGGER_MS, buildAuthHeaders, imageUrlOf } from "./embed/embed-helpers";
+import { useCanvasInteraction } from "./embed/use-canvas-interaction";
+import { useCanvasGeneration } from "./embed/use-canvas-generation";
+import { useCanvasShortcuts } from "./embed/use-canvas-shortcuts";
+import { buildCanvasEmbedMenuItems } from "./embed/context-menu-items";
+import { CanvasEmbedOverlays } from "./embed/CanvasEmbedOverlays";
 
 export interface CanvasEmbedProps {
   /** useCanvasChat 的完整 return（chat 部分由宿主另外用，這裡只用畫布部分）。 */
@@ -66,32 +58,6 @@ export interface CanvasEmbedProps {
   expanded?: boolean;
   /** 展開/收合切換：compact 時顯示「展开」、全屏時顯示「收合」。 */
   onToggleExpand?: () => void;
-}
-
-/** 同一批節點進場的間隔（ms）。 */
-const ENTER_STAGGER_MS = 110;
-/** B1 視口裁剪的螢幕外緩衝（px）。 */
-const CULL_MARGIN_PX = 280;
-/** 拖圖/多檔導入的階梯錯位（px）。 */
-const IMPORT_STAGGER = 40;
-/** agent 自動允許的 localStorage key（會話級信任開關）。 */
-const AGENT_AUTO_APPROVE_KEY = "canvas-agent-auto-approve";
-
-function toDvh(height: string): string {
-  return height.replace(/vh/g, "dvh");
-}
-
-function formatRelative(updatedAt: string): string {
-  const ts = Date.parse(updatedAt);
-  if (!Number.isFinite(ts)) return "";
-  const diff = Date.now() - ts;
-  if (diff < 0) return "刚刚";
-  const min = Math.floor(diff / 60000);
-  if (min < 1) return "刚刚";
-  if (min < 60) return `${min} 分钟前`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr} 小时前`;
-  return new Date(ts).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" });
 }
 
 function usePrefersReducedMotion(): boolean {
@@ -111,106 +77,6 @@ function usePrefersReducedMotion(): boolean {
   return reduced;
 }
 
-/** 節點的可下載/可編輯圖片 URL（僅 http(s)/data:）；image 與 reference 節點。 */
-function imageUrlOf(node: CanvasNode | undefined): string | null {
-  const content = node?.metadata?.content;
-  if (!content) return null;
-  if (node?.type !== CanvasNodeType.Image && node?.type !== CanvasNodeType.Reference) return null;
-  return content.startsWith("http") || content.startsWith("data:") ? content : null;
-}
-
-function safeFilename(name: string): string {
-  return name.replace(/[\\/:*?"<>|\r\n]+/g, "_").slice(0, 80) || "image";
-}
-
-async function fetchImageBlob(url: string): Promise<Blob> {
-  if (url.startsWith("data:")) {
-    return (await fetch(url)).blob();
-  }
-  try {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`获取失败（${res.status}）`);
-    return await res.blob();
-  } catch {
-    const res = await fetch(`/api/canvas/image-proxy?url=${encodeURIComponent(url)}`);
-    if (!res.ok) throw new Error(`图片获取失败（${res.status}）`);
-    return res.blob();
-  }
-}
-
-function triggerDownload(blob: Blob, filename: string) {
-  const objectUrl = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = objectUrl;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 4000);
-}
-
-function buildAuthHeaders(): Record<string, string> | null {
-  const token = getStoredToken();
-  const user = getStoredUser();
-  if (!token || !user?.id) return null;
-  return { Authorization: `Bearer ${token}`, "x-user-id": String(user.id) };
-}
-
-/** 本地圖片檔 → 壓縮 dataURL（browser-image-compression，1600px/1.5MB 上限）。 */
-async function fileToDataUrl(file: File): Promise<{ dataUrl: string; width: number; height: number }> {
-  const { default: imageCompression } = await import("browser-image-compression");
-  const compressed = await imageCompression(file, { maxWidthOrHeight: 1600, maxSizeMB: 1.5, useWebWorker: true });
-  const dataUrl = await imageCompression.getDataUrlFromFile(compressed);
-  const size = await new Promise<{ width: number; height: number }>((resolve) => {
-    const img = new Image();
-    img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
-    img.onerror = () => resolve({ width: 0, height: 0 });
-    img.src = dataUrl;
-  });
-  return { dataUrl, ...size };
-}
-
-/** 環路檢查：from→to 加入後是否成環（to 沿出邊可達 from）。 */
-function wouldCreateCycle(connections: CanvasConnection[], fromId: string, toId: string): boolean {
-  const out = new Map<string, string[]>();
-  for (const c of connections) out.set(c.fromNodeId, [...(out.get(c.fromNodeId) ?? []), c.toNodeId]);
-  const queue = [toId];
-  const seen = new Set<string>();
-  while (queue.length > 0) {
-    const cur = queue.pop()!;
-    if (cur === fromId) return true;
-    if (seen.has(cur)) continue;
-    seen.add(cur);
-    for (const next of out.get(cur) ?? []) queue.push(next);
-  }
-  return false;
-}
-
-interface MenuState {
-  position: { x: number; y: number };
-  world: { x: number; y: number };
-  targetNodeId: string | null;
-  targetConnectionId?: string | null;
-}
-
-interface EditorState {
-  nodeId: string;
-  mode: CanvasImageEditMode;
-}
-
-interface PortDragState {
-  sourceId: string;
-  side: "left" | "right";
-  cursor: CanvasPosition | null;
-}
-
-interface CreateMenuState {
-  position: { x: number; y: number };
-  world: CanvasPosition;
-  /** 連線拖放到空白時：建完自動與該節點連線。 */
-  connectFrom?: { nodeId: string; side: "left" | "right" };
-}
-
 export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false, onToggleExpand }: CanvasEmbedProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
@@ -222,54 +88,18 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
   const reduceMotion = usePrefersReducedMotion();
   const [historyOpen, setHistoryOpen] = useState(false);
   const [promptPanelNodeId, setPromptPanelNodeId] = useState<string | null>(null);
-  const [isGenerating, setIsGenerating] = useState(false);
-  // ── 交互狀態
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
-  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
-  const [menu, setMenu] = useState<MenuState | null>(null);
-  const [connecting, setConnecting] = useState<{ sourceId: string; cursor: CanvasPosition | null } | null>(null);
-  const [portDrag, setPortDrag] = useState<PortDragState | null>(null);
-  const [createMenu, setCreateMenu] = useState<CreateMenuState | null>(null);
-  const [editor, setEditor] = useState<EditorState | null>(null);
-  const [panelRefIds, setPanelRefIds] = useState<string[]>([]);
-  const [upscalingIds, setUpscalingIds] = useState<Set<string>>(new Set());
-  const [actionError, setActionError] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [elementListOpen, setElementListOpen] = useState(false);
   // P2：角色/場景卡面板（左側彈出，與歷史畫布/節點清單同模式）。
   const [cardsOpen, setCardsOpen] = useState(false);
   const [agentAutoApprove, setAgentAutoApprove] = useState(false);
-  const clipboardRef = useRef<{ nodes: CanvasNode[]; connections: CanvasConnection[] } | null>(null);
-  const pasteCountRef = useRef(0);
-  const modifiersRef = useRef({ ctrl: false, shift: false });
-  const abortRef = useRef<AbortController | null>(null);
 
-  // ── 最新值 refs
+  // ── 最新值 refs（組件殼域）
   const canvasStateRef = useRef(canvas);
   canvasStateRef.current = canvas;
-  const selectedIdsRef = useRef(selectedIds);
-  selectedIdsRef.current = selectedIds;
-  const connectingRef = useRef(connecting);
-  connectingRef.current = connecting;
-  const portDragRef = useRef(portDrag);
-  portDragRef.current = portDrag;
-  const menuRef = useRef(menu);
-  menuRef.current = menu;
-  const editorRef = useRef(editor);
-  editorRef.current = editor;
   const promptPanelRef = useRef(promptPanelNodeId);
   promptPanelRef.current = promptPanelNodeId;
-  const selectedConnectionRef = useRef(selectedConnectionId);
-  selectedConnectionRef.current = selectedConnectionId;
-  const createMenuRef = useRef(createMenu);
-  createMenuRef.current = createMenu;
-
-  const showError = useCallback((message: string) => {
-    setActionError(message);
-    window.setTimeout(() => setActionError((prev) => (prev === message ? null : prev)), 6000);
-  }, []);
 
   // ── 派生索引
   const nodeById = useMemo(() => {
@@ -285,40 +115,6 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
     }
     return map;
   }, [canvas.nodes]);
-
-  /** A7：鄰接集合（hover 優先，退回選中主節點）。 */
-  const highlightNodeId = hoveredNodeId ?? canvas.selectedNodeId;
-  const adjacentIds = useMemo(() => {
-    const set = new Set<string>();
-    if (!highlightNodeId) return set;
-    for (const c of canvas.connections) {
-      if (c.fromNodeId === highlightNodeId) set.add(c.toNodeId);
-      if (c.toNodeId === highlightNodeId) set.add(c.fromNodeId);
-    }
-    return set;
-  }, [canvas.connections, highlightNodeId]);
-
-  // 批次收起 → 子節點隱藏；B1 視口裁剪 → 螢幕外 ±280px 不渲染。
-  const visibleNodes = useMemo(() => {
-    const vp = canvas.viewport;
-    const cullEnabled = viewportSize.width > 0 && canvas.nodes.length > 24;
-    const pad = CULL_MARGIN_PX / vp.k;
-    const worldLeft = -vp.x / vp.k - pad;
-    const worldTop = -vp.y / vp.k - pad;
-    const worldRight = worldLeft + viewportSize.width / vp.k + pad * 2;
-    const worldBottom = worldTop + viewportSize.height / vp.k + pad * 2;
-    return canvas.nodes.filter((n) => {
-      const parentId = childToParent.get(n.id);
-      if (parentId && nodeById.get(parentId)?.batchExpanded === false) return false;
-      if (!cullEnabled) return true;
-      return (
-        n.position.x + n.width >= worldLeft &&
-        n.position.x <= worldRight &&
-        n.position.y + n.height >= worldTop &&
-        n.position.y <= worldBottom
-      );
-    });
-  }, [canvas.nodes, canvas.viewport, viewportSize, childToParent, nodeById]);
 
   useEffect(() => {
     if (!historyOpen) return;
@@ -374,855 +170,156 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
     return () => clearTimeout(t);
   }, [expanded, fitView]);
 
-  // ── 座標工具
-  const screenToWorld = useCallback((clientX: number, clientY: number): CanvasPosition | null => {
-    const el = containerRef.current;
-    if (!el) return null;
-    const rect = el.getBoundingClientRect();
-    const vp = canvasStateRef.current.viewport;
-    return { x: (clientX - rect.left - vp.x) / vp.k, y: (clientY - rect.top - vp.y) / vp.k };
-  }, []);
-
-  const screenInContainer = useCallback((clientX: number, clientY: number): { x: number; y: number } => {
-    const el = containerRef.current;
-    const rect = el?.getBoundingClientRect();
-    return { x: clientX - (rect?.left ?? 0), y: clientY - (rect?.top ?? 0) };
-  }, []);
-
-  // ── 選取
-  const clearSelection = useCallback(() => {
-    setSelectedIds(new Set());
-    setSelectedConnectionId(null);
-    canvasStateRef.current.selectNode(null);
-  }, []);
-
-  /** 手動建線（環路阻止 + 去重提示）。 */
-  const tryConnect = useCallback(
-    (fromId: string, toId: string) => {
-      if (fromId === toId) return;
-      const state = canvasStateRef.current;
-      if (wouldCreateCycle(state.connections, fromId, toId)) {
-        showError("会形成循环连接，已阻止");
-        return;
-      }
-      state.addConnection(fromId, toId);
-    },
-    [showError],
-  );
-
-  const handleSelectNode = useCallback((nodeId: string) => {
-    const conn = connectingRef.current;
-    if (conn) {
-      if (conn.sourceId !== nodeId) {
-        const state = canvasStateRef.current;
-        if (wouldCreateCycle(state.connections, conn.sourceId, nodeId)) {
-          setActionError("会形成循环连接，已阻止");
-        } else {
-          state.addConnection(conn.sourceId, nodeId);
-        }
-      }
-      setConnecting(null);
-      return;
-    }
-    setSelectedConnectionId(null);
-    const { ctrl, shift } = modifiersRef.current;
-    setSelectedIds((prev) => {
-      if (ctrl) {
-        const next = new Set(prev);
-        if (next.has(nodeId)) next.delete(nodeId);
-        else next.add(nodeId);
-        return next;
-      }
-      if (shift) {
-        const next = new Set(prev);
-        next.add(nodeId);
-        return next;
-      }
-      return new Set([nodeId]);
+  // 批次收起 → 子節點隱藏；B1 視口裁剪 → 螢幕外 ±280px 不渲染。
+  const visibleNodes = useMemo(() => {
+    const vp = canvas.viewport;
+    const cullEnabled = viewportSize.width > 0 && canvas.nodes.length > 24;
+    const pad = CULL_MARGIN_PX / vp.k;
+    const worldLeft = -vp.x / vp.k - pad;
+    const worldTop = -vp.y / vp.k - pad;
+    const worldRight = worldLeft + viewportSize.width / vp.k + pad * 2;
+    const worldBottom = worldTop + viewportSize.height / vp.k + pad * 2;
+    return canvas.nodes.filter((n) => {
+      const parentId = childToParent.get(n.id);
+      if (parentId && nodeById.get(parentId)?.batchExpanded === false) return false;
+      if (!cullEnabled) return true;
+      return (
+        n.position.x + n.width >= worldLeft &&
+        n.position.x <= worldRight &&
+        n.position.y + n.height >= worldTop &&
+        n.position.y <= worldBottom
+      );
     });
-    canvasStateRef.current.selectNode(nodeId);
-  }, []);
+  }, [canvas.nodes, canvas.viewport, viewportSize, childToParent, nodeById]);
 
-  /** A2：乾淨點擊 → 開節點面板（修飾鍵/連線模式/Group/Prompt 除外——
-   *  prompt 節點是備忘卡不是生成落地位，雙擊正文直編即可，不開生成面板）。 */
-  const handleNodeClick = useCallback((nodeId: string) => {
-    if (modifiersRef.current.ctrl || modifiersRef.current.shift) return;
-    if (connectingRef.current || portDragRef.current) return;
-    const node = canvasStateRef.current.nodes.find((n) => n.id === nodeId);
-    if (
-      !node ||
-      node.type === CanvasNodeType.Group ||
-      node.type === CanvasNodeType.Video ||
-      node.type === CanvasNodeType.Audio ||
-      node.type === CanvasNodeType.Prompt
-    ) return;
-    setPromptPanelNodeId(nodeId);
-  }, []);
+  // ── 交互域（選取/框選/連線/埠拖拽/對齊/下載/建節點/右鍵選單定位；L227-237 交互 state 與鏡像 refs 由 hook 持有並回傳）
+  const interaction = useCanvasInteraction({
+    canvasStateRef,
+    containerRef,
+    visibleNodes,
+    childToParent,
+    setPromptPanelNodeId,
+  });
+  const {
+    selectedIds,
+    setSelectedIds,
+    selectedConnectionId,
+    setSelectedConnectionId,
+    hoveredNodeId,
+    setHoveredNodeId,
+    menu,
+    setMenu,
+    connecting,
+    setConnecting,
+    portDrag,
+    setPortDrag,
+    createMenu,
+    setCreateMenu,
+    editor,
+    setEditor,
+    panelRefIds,
+    setPanelRefIds,
+    actionError,
+    setActionError,
+    showError,
+    selectedIdsRef,
+    connectingRef,
+    portDragRef,
+    menuRef,
+    editorRef,
+    selectedConnectionRef,
+    createMenuRef,
+    clipboardRef,
+    modifiersRef,
+    screenToWorld,
+    screenInContainer,
+    clearSelection,
+    handleSelectNode,
+    handleNodeClick,
+    handleMarqueeSelect,
+    handleNodeMove,
+    handleDeleteNode,
+    deleteSelected,
+    copySelection,
+    pasteClipboard,
+    duplicateSelection,
+    alignSelection,
+    distributeSelection,
+    arrangeSelection,
+    downloadNode,
+    downloadBatch,
+    createNodeAt,
+    importImageFiles,
+    startPortDrag,
+    handleCreateFromMenu,
+    handleCreateMenuUpload,
+    openNodeMenu,
+    openCanvasMenu,
+    saveNodeAsCard,
+  } = interaction;
 
-  const handleMarqueeSelect = useCallback(
-    (rect: WorldRect, additive: boolean) => {
-      const ids = nodesInRect(visibleNodes, rect);
-      setSelectedIds((prev) => {
-        const next = additive ? new Set(prev) : new Set<string>();
-        for (const id of ids) next.add(id);
-        return next;
-      });
-      if (ids.length > 0) canvasStateRef.current.selectNode(ids[ids.length - 1]);
-    },
-    [visibleNodes],
-  );
+  /** A7：鄰接集合（hover 優先，退回選中主節點）。 */
+  const highlightNodeId = hoveredNodeId ?? canvas.selectedNodeId;
 
-  const handleNodeMove = useCallback((nodeId: string, position: CanvasPosition) => {
-    const state = canvasStateRef.current;
-    const sel = selectedIdsRef.current;
-    const dragged = state.nodes.find((n) => n.id === nodeId);
-    if (!dragged) return;
-    if (sel.has(nodeId) && sel.size > 1) {
-      const dx = position.x - dragged.position.x;
-      const dy = position.y - dragged.position.y;
-      const moves = state.nodes
-        .filter((n) => sel.has(n.id))
-        .map((n) => ({
-          nodeId: n.id,
-          position: n.id === nodeId ? position : { x: n.position.x + dx, y: n.position.y + dy },
-        }));
-      state.moveNodes(moves);
-    } else {
-      state.moveNode(nodeId, position);
+  // ── 生成編排域（A4 原地回填 / 批次子節點 / A12 重試 / 停止 / 高清放大 / agent 代跑）
+  const {
+    isGenerating,
+    upscalingIds,
+    generateIntoNode,
+    handleGenerateFromNode,
+    stopGeneration,
+    retryNode,
+    upscaleNode,
+    runAgentGeneration,
+  } = useCanvasGeneration({
+    canvasStateRef,
+    viewportSizeRef,
+    showError,
+    panelRefIds,
+    setPromptPanelNodeId,
+    setPanelRefIds,
+    setSelectedIds,
+  });
+
+  // ── 鍵盤快捷鍵 + 系統剪貼簿（A8）
+  useCanvasShortcuts({
+    canvasStateRef,
+    containerRef,
+    viewportSizeRef,
+    clipboardRef,
+    editorRef,
+    promptPanelRef,
+    selectedIdsRef,
+    selectedConnectionRef,
+    connectingRef,
+    portDragRef,
+    menuRef,
+    createMenuRef,
+    setPortDrag,
+    setConnecting,
+    setCreateMenu,
+    setMenu,
+    setPromptPanelNodeId,
+    setSelectedConnectionId,
+    setSelectedIds,
+    clearSelection,
+    copySelection,
+    pasteClipboard,
+    duplicateSelection,
+    deleteSelected,
+    importImageFiles,
+    createNodeAt,
+  });
+
+  const adjacentIds = useMemo(() => {
+    const set = new Set<string>();
+    if (!highlightNodeId) return set;
+    for (const c of canvas.connections) {
+      if (c.fromNodeId === highlightNodeId) set.add(c.toNodeId);
+      if (c.toNodeId === highlightNodeId) set.add(c.fromNodeId);
     }
-  }, []);
-
-  const handleDeleteNode = useCallback(
-    (nodeId: string) => {
-      const parentId = childToParent.get(nodeId);
-      if (parentId) canvasStateRef.current.deleteBatchChild(parentId, nodeId);
-      else canvasStateRef.current.removeNode(nodeId);
-      setSelectedIds((prev) => {
-        if (!prev.has(nodeId)) return prev;
-        const next = new Set(prev);
-        next.delete(nodeId);
-        return next;
-      });
-    },
-    [childToParent],
-  );
-
-  const deleteSelected = useCallback(() => {
-    const ids = [...selectedIdsRef.current];
-    if (ids.length === 0) return;
-    canvasStateRef.current.deleteNodes(ids);
-    setSelectedIds(new Set());
-  }, []);
-
-  // ── 複製 / 貼上 / 複本
-  const copySelection = useCallback(() => {
-    const state = canvasStateRef.current;
-    const sel = selectedIdsRef.current;
-    if (sel.size === 0) return;
-    clipboardRef.current = {
-      nodes: state.nodes.filter((n) => sel.has(n.id)),
-      connections: state.connections,
-    };
-    pasteCountRef.current = 0;
-  }, []);
-
-  const pasteClipboard = useCallback((at?: CanvasPosition) => {
-    const clip = clipboardRef.current;
-    const state = canvasStateRef.current;
-    if (!clip || clip.nodes.length === 0) return;
-    pasteCountRef.current += 1;
-    const existingIds = new Set<string>([...state.nodes.map((n) => n.id), ...state.connections.map((c) => c.id)]);
-    const offset = at ? { x: 0, y: 0 } : { x: 32 * pasteCountRef.current, y: 32 * pasteCountRef.current };
-    const clone = cloneForPaste(clip.nodes, clip.connections, clip.nodes.map((n) => n.id), existingIds, offset);
-    if (at && clone.nodes.length > 0) {
-      const minX = Math.min(...clone.nodes.map((n) => n.position.x));
-      const minY = Math.min(...clone.nodes.map((n) => n.position.y));
-      for (const n of clone.nodes) {
-        n.position = { x: n.position.x - minX + at.x, y: n.position.y - minY + at.y };
-      }
-    }
-    state.addNodes(clone.nodes, clone.connections);
-    setSelectedIds(new Set(clone.nodes.map((n) => n.id)));
-    if (clone.nodes.length > 0) state.selectNode(clone.nodes[0].id);
-  }, []);
-
-  const duplicateSelection = useCallback(() => {
-    copySelection();
-    pasteClipboard();
-  }, [copySelection, pasteClipboard]);
-
-  // ── 對齊 / 均分 / 整理
-  const applyMoves = useCallback((moves: { nodeId: string; position: CanvasPosition }[]) => {
-    if (moves.length === 0) return;
-    const state = canvasStateRef.current;
-    state.commitInteraction();
-    state.moveNodes(moves);
-  }, []);
-
-  const alignSelection = useCallback(
-    (mode: AlignMode) => applyMoves(alignNodes(canvasStateRef.current.nodes, [...selectedIdsRef.current], mode)),
-    [applyMoves],
-  );
-  const distributeSelection = useCallback(
-    (axis: "h" | "v") => applyMoves(distributeNodes(canvasStateRef.current.nodes, [...selectedIdsRef.current], axis)),
-    [applyMoves],
-  );
-  const arrangeSelection = useCallback(
-    () => applyMoves(arrangeGrid(canvasStateRef.current.nodes, [...selectedIdsRef.current])),
-    [applyMoves],
-  );
-
-  // ── 下載
-  const downloadNode = useCallback(
-    async (nodeId: string) => {
-      const node = canvasStateRef.current.nodes.find((n) => n.id === nodeId);
-      const url = imageUrlOf(node);
-      if (!node || !url) return;
-      try {
-        triggerDownload(await fetchImageBlob(url), `${safeFilename(node.title)}.png`);
-      } catch (error) {
-        showError(error instanceof Error ? error.message : "下载失败");
-      }
-    },
-    [showError],
-  );
-
-  const downloadBatch = useCallback(
-    async (parentId: string) => {
-      const state = canvasStateRef.current;
-      const parent = state.nodes.find((n) => n.id === parentId);
-      if (!parent) return;
-      const children = (parent.batchChildren ?? [])
-        .map((id) => state.nodes.find((n) => n.id === id))
-        .filter((n): n is CanvasNode => !!n && !!imageUrlOf(n));
-      if (children.length === 0) {
-        showError("批次里没有可下载的图片");
-        return;
-      }
-      try {
-        const { default: JSZip } = await import("jszip");
-        const zip = new JSZip();
-        for (const child of children) {
-          const blob = await fetchImageBlob(imageUrlOf(child)!);
-          zip.file(`${safeFilename(child.title)}.png`, blob);
-        }
-        triggerDownload(await zip.generateAsync({ type: "blob" }), `${safeFilename(parent.title)}-批次.zip`);
-      } catch (error) {
-        showError(error instanceof Error ? error.message : "打包下载失败");
-      }
-    },
-    [showError],
-  );
-
-  // ── 生成核心（A4 原地回填 / 批次子節點 / A12 重試 / 停止）
-  // P2 掛接點：鎖定的角色/場景卡在這裡注入——手動面板、agent run_generation、
-  // 編輯器派生全部經過 callCanvasGenerate，一處掛接保證項目級鎖定對所有
-  // 畫布生成生效（片段前綴 + 參考圖 + 負面詞；無卡時 payload 原樣通過）。
-  const callCanvasGenerate = useCallback(
-    async (payload: Record<string, unknown>, signal: AbortSignal) => {
-      const headers = buildAuthHeaders();
-      if (!headers) throw new Error("请先登录再生成图片");
-      const lockedCards = canvasStateRef.current.activeCharacterCards ?? [];
-      const finalPayload: Record<string, unknown> = lockedCards.length
-        ? applyCharacterCardsToPayload(payload as CardAwareGeneratePayload, lockedCards as CharacterCard[])
-        : payload;
-      const res = await fetch(`/api/canvas/generate`, {
-        method: "POST",
-        headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify(finalPayload),
-        signal,
-      });
-      const data = (await res.json().catch(() => null)) as
-        | { ok?: boolean; images?: { url: string; cost_coins: number | null; natural_width: number | null; natural_height: number | null }[]; error?: string }
-        | null;
-      if (!res.ok || !data?.ok || !data.images?.length) {
-        throw new Error(data?.error || `生成失败（${res.status}）`);
-      }
-      return data.images;
-    },
-    [],
-  );
-
-  /**
-   * 原地生成：結果回填該節點本體（A4 / A12 重試 / agent run_generation 共用）。
-   * 語義接線（2026-08-22）：連入的 prompt 節點文本自動作為 prompt 前綴、
-   * 連入的 reference 節點自動帶圖+角色進生成請求——手動 UI 與 agent 同一條路。
-   */
-  const generateIntoNode = useCallback(
-    async (nodeId: string, params: { prompt: string; model?: string; size?: string; sourceImage?: string | null; references?: CanvasGenerationReference[] }) => {
-      const state = canvasStateRef.current;
-      const controller = new AbortController();
-      abortRef.current = controller;
-      setIsGenerating(true);
-      const semantic = resolveGenerationInputs(state.nodes, state.connections, nodeId);
-      const finalPrompt = composeGenerationPrompt(semantic.promptParts, params.prompt);
-      const references = mergeGenerationReferences(params.references ?? [], semantic.references);
-      state.patchNodeMetadata(nodeId, {
-        status: "loading",
-        prompt: finalPrompt,
-        ...(params.model ? { model: params.model } : {}),
-        ...(params.size ? { size: params.size } : {}),
-        errorDetails: undefined,
-      });
-      try {
-        const images = await callCanvasGenerate(
-          {
-            prompt: finalPrompt,
-            model: params.model,
-            size: params.size,
-            count: 1,
-            source_image: params.sourceImage ?? null,
-            reference_images: references.map(({ url, role, name }) => ({ url, role, name })),
-          },
-          controller.signal,
-        );
-        const img = images[0];
-        state.patchNodeMetadata(
-          nodeId,
-          {
-            content: img.url,
-            status: "success",
-            ...(typeof img.cost_coins === "number" ? { cost_coins: img.cost_coins } : {}),
-            ...(img.natural_width ? { naturalWidth: img.natural_width } : {}),
-            ...(img.natural_height ? { naturalHeight: img.natural_height } : {}),
-          },
-          { history: false },
-        );
-      } catch (error) {
-        const aborted = error instanceof DOMException && error.name === "AbortError";
-        state.patchNodeMetadata(
-          nodeId,
-          { status: "error", errorDetails: aborted ? "已停止" : error instanceof Error ? error.message : "生成失败" },
-          { history: false },
-        );
-        if (!aborted) showError(error instanceof Error ? error.message : "生成失败");
-      } finally {
-        setIsGenerating(false);
-        if (abortRef.current === controller) abortRef.current = null;
-      }
-    },
-    [callCanvasGenerate, showError],
-  );
-
-  /** 面板生成：空圖片節點 count=1 原地回填；其餘批次子節點插回。 */
-  const handleGenerateFromNode = useCallback(
-    async (nodeId: string, prompt: string, options: { model?: string; size?: string; quality?: string; count?: number }) => {
-      const state = canvasStateRef.current;
-      const node = state.nodes.find((n) => n.id === nodeId);
-      if (!node) return;
-      // @引用（顯式選取）+ 連入 reference 節點（自動帶入）→ 帶角色的參考圖清單。
-      const panelRefs: CanvasGenerationReference[] = panelRefIds
-        .map((id) => state.nodes.find((n) => n.id === id))
-        .filter((n): n is CanvasNode => !!n && !!imageUrlOf(n))
-        .map((n) => ({
-          nodeId: n.id,
-          url: imageUrlOf(n)!,
-          role: n.type === CanvasNodeType.Reference ? toReferenceImageRole(n.metadata?.referenceRole) : "general",
-          name: n.title || "参考图",
-        }));
-      const semantic = resolveGenerationInputs(state.nodes, state.connections, nodeId);
-      const references = mergeGenerationReferences(panelRefs, semantic.references);
-      const finalPrompt = composeGenerationPrompt(semantic.promptParts, prompt);
-      const refNodeIds = references.map((r) => r.nodeId).filter((id): id is string => !!id);
-      const count = Math.min(Math.max(1, options.count ?? 1), 4);
-      const sourceUrl = imageUrlOf(node);
-
-      // A4：空圖片節點 + 單張 → 原地變身，不另建節點。
-      if (node.type === CanvasNodeType.Image && !sourceUrl && count === 1) {
-        setPromptPanelNodeId(null);
-        await generateIntoNode(nodeId, { prompt, model: options.model, size: options.size, references });
-        setPanelRefIds([]);
-        return;
-      }
-
-      const controller = new AbortController();
-      abortRef.current = controller;
-      setIsGenerating(true);
-      try {
-        const images = await callCanvasGenerate(
-          {
-            prompt: finalPrompt,
-            model: options.model,
-            size: options.size,
-            quality: options.quality,
-            count,
-            source_image: sourceUrl,
-            reference_images: references.map(({ url, role, name }) => ({ url, role, name })),
-          },
-          controller.signal,
-        );
-        const existing = node.batchChildren?.length ?? 0;
-        const ts = Date.now().toString(36);
-        images.forEach((img, i) => {
-          const child = createBatchChildNode(node, img.url, existing + i, existing + images.length, {
-            id: `${nodeId}-b-${ts}-${i}`,
-            metadata: {
-              prompt: finalPrompt,
-              model: options.model,
-              size: options.size,
-              ...(typeof img.cost_coins === "number" ? { cost_coins: img.cost_coins } : {}),
-              ...(img.natural_width ? { naturalWidth: img.natural_width } : {}),
-              ...(img.natural_height ? { naturalHeight: img.natural_height } : {}),
-              ...(refNodeIds.length > 0 ? { referenceNodeIds: [...refNodeIds] } : {}),
-            },
-          });
-          state.addBatchChild(nodeId, child);
-          state.addConnection(nodeId, child.id);
-        });
-        setPromptPanelNodeId(null);
-        setPanelRefIds([]);
-        const size = viewportSizeRef.current;
-        if (size.width > 0) state.fitView(size.width, size.height);
-      } catch (error) {
-        const aborted = error instanceof DOMException && error.name === "AbortError";
-        if (!aborted) showError(error instanceof Error ? error.message : "生成失败，请稍后再试");
-      } finally {
-        setIsGenerating(false);
-        if (abortRef.current === controller) abortRef.current = null;
-      }
-    },
-    [panelRefIds, generateIntoNode, callCanvasGenerate, showError],
-  );
-
-  const stopGeneration = useCallback(() => {
-    abortRef.current?.abort();
-  }, []);
-
-  /** A12：失敗重試——沿用節點 metadata 保存的參數，結果回填原節點。 */
-  const retryNode = useCallback(
-    (nodeId: string) => {
-      const node = canvasStateRef.current.nodes.find((n) => n.id === nodeId);
-      const prompt = node?.metadata?.prompt;
-      if (!node || !prompt) {
-        showError("该节点没有保存生成参数，无法重试");
-        return;
-      }
-      const references: CanvasGenerationReference[] = (node.metadata?.referenceNodeIds ?? [])
-        .map((id): CanvasGenerationReference | null => {
-          const refNode = canvasStateRef.current.nodes.find((n) => n.id === id);
-          const url = imageUrlOf(refNode);
-          if (!refNode || !url) return null;
-          const role: ReferenceImageRole =
-            refNode.type === CanvasNodeType.Reference ? toReferenceImageRole(refNode.metadata?.referenceRole) : "general";
-          return { nodeId: refNode.id, url, role, name: refNode.title || "参考图" };
-        })
-        .filter((r): r is CanvasGenerationReference => r !== null);
-      void generateIntoNode(nodeId, {
-        prompt,
-        model: node.metadata?.model,
-        size: node.metadata?.size,
-        sourceImage: node.metadata?.source_image ?? null,
-        references,
-      });
-    },
-    [generateIntoNode, showError],
-  );
-
-  // ── 高清放大
-  const upscaleNode = useCallback(
-    async (nodeId: string) => {
-      const state = canvasStateRef.current;
-      const node = state.nodes.find((n) => n.id === nodeId);
-      const url = imageUrlOf(node);
-      if (!node || !url) return;
-      if (!url.startsWith("http")) {
-        showError("本地编辑结果暂不支持高清放大（需要先生成为在线图片）");
-        return;
-      }
-      const headers = buildAuthHeaders();
-      if (!headers) {
-        showError("请先登录再使用高清放大");
-        return;
-      }
-      setUpscalingIds((prev) => new Set(prev).add(nodeId));
-      try {
-        const size =
-          node.metadata?.naturalWidth && node.metadata?.naturalHeight
-            ? `${node.metadata.naturalWidth}x${node.metadata.naturalHeight}`
-            : undefined;
-        const res = await fetch("/api/pixai/upscale", {
-          method: "POST",
-          headers: { ...headers, "Content-Type": "application/json" },
-          body: JSON.stringify({ image: url, factor: 2, ...(size ? { size } : {}) }),
-        });
-        const body = (await res.json().catch(() => null)) as
-          | { data?: Array<{ url?: string }>; url?: string; images?: Array<{ url?: string }>; message?: string }
-          | null;
-        if (!res.ok) throw new Error(body?.message || `放大失败（${res.status}）`);
-        const resultUrl =
-          (Array.isArray(body?.data) ? body.data[0]?.url : undefined) ||
-          body?.url ||
-          (Array.isArray(body?.images) ? body.images[0]?.url : undefined);
-        if (!resultUrl) throw new Error("放大失败：未返回图片");
-        const child: CanvasNode = {
-          id: `${nodeId}-up-${Date.now().toString(36)}`,
-          type: CanvasNodeType.Image,
-          title: `${node.title} · 高清`,
-          position: { x: node.position.x + node.width + 60, y: node.position.y },
-          width: node.width,
-          height: node.height,
-          moved: true,
-          metadata: { content: resultUrl, status: "success", source_image: url, prompt: node.metadata?.prompt },
-        };
-        state.addNodes([child], [{ id: `conn-${nodeId}-${child.id}`, fromNodeId: nodeId, toNodeId: child.id }]);
-        setSelectedIds(new Set([child.id]));
-        state.selectNode(child.id);
-      } catch (error) {
-        showError(error instanceof Error ? error.message : "放大失败");
-      } finally {
-        setUpscalingIds((prev) => {
-          const next = new Set(prev);
-          next.delete(nodeId);
-          return next;
-        });
-      }
-    },
-    [showError],
-  );
-
-  // ── 建節點（雙擊/連線拖放/庫插入/導入共用）
-  const createNodeAt = useCallback(
-    (
-      type: "text" | "image" | "prompt" | "reference",
-      world: CanvasPosition,
-      extras?: { content?: string; title?: string; width?: number; height?: number; referenceRole?: ReferenceImageRole },
-    ) => {
-      const state = canvasStateRef.current;
-      const id = `n-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
-      const nodeType =
-        type === "text"
-          ? CanvasNodeType.Text
-          : type === "prompt"
-            ? CanvasNodeType.Prompt
-            : type === "reference"
-              ? CanvasNodeType.Reference
-              : CanvasNodeType.Image;
-      const defaultTitle = type === "text" ? "文本" : type === "prompt" ? "提示词" : type === "reference" ? "参考图" : "图片";
-      const role = extras?.referenceRole;
-      const node: CanvasNode = {
-        id,
-        type: nodeType,
-        title: extras?.title ?? defaultTitle,
-        position: world,
-        width: extras?.width ?? (type === "reference" ? 300 : 340),
-        height: extras?.height ?? (type === "prompt" ? 200 : 240),
-        moved: true,
-        metadata:
-          type === "text" || type === "prompt"
-            ? { content: extras?.content ?? "", status: "idle" }
-            : extras?.content
-              ? { content: extras.content, status: "success", ...(role ? { referenceRole: role } : {}) }
-              : { status: "idle", ...(role ? { referenceRole: role } : {}) },
-      };
-      state.addNodes([node]);
-      setSelectedIds(new Set([id]));
-      state.selectNode(id);
-      return id;
-    },
-    [],
-  );
-
-  /** 本地圖片檔 → 畫布節點（壓縮後 dataURL；多檔階梯錯位）。
-   *  kind="reference" → 建成帶角色的 reference 節點（默認 general，節點上可切換）。 */
-  const importImageFiles = useCallback(
-    async (files: File[], world: CanvasPosition, kind: "image" | "reference" = "image") => {
-      let index = 0;
-      for (const file of files.slice(0, 8)) {
-        if (!file.type.startsWith("image/")) continue;
-        try {
-          const { dataUrl, width, height } = await fileToDataUrl(file);
-          const nodeW = kind === "reference" ? 300 : 340;
-          const nodeH = width > 0 ? Math.min(Math.max(Math.round((nodeW * height) / width), 120), 460) : 240;
-          const id = createNodeAt(kind, { x: world.x + index * IMPORT_STAGGER, y: world.y + index * IMPORT_STAGGER }, {
-            content: dataUrl,
-            title: safeFilename(file.name.replace(/\.[^.]+$/, "")) || (kind === "reference" ? "参考图" : "图片"),
-            width: nodeW,
-            height: nodeH,
-            ...(kind === "reference" ? { referenceRole: "general" as ReferenceImageRole } : {}),
-          });
-          canvasStateRef.current.patchNodeMetadata(id, { naturalWidth: width, naturalHeight: height, bytes: file.size, mimeType: file.type }, { history: false });
-          index += 1;
-        } catch {
-          showError(`「${file.name}」导入失败`);
-        }
-      }
-    },
-    [createNodeAt, showError],
-  );
-
-  // ── A1：port 拖線（window 級 move/up，capture 保證不被節點吃掉）
-  const startPortDrag = useCallback((nodeId: string, side: "left" | "right", clientX: number, clientY: number) => {
-    setMenu(null);
-    setConnecting(null);
-    setPortDrag({ sourceId: nodeId, side, cursor: screenToWorld(clientX, clientY) });
-  }, [screenToWorld]);
-
-  useEffect(() => {
-    if (!portDrag) return;
-    const onMove = (e: PointerEvent) => {
-      setPortDrag((prev) => (prev ? { ...prev, cursor: screenToWorld(e.clientX, e.clientY) } : prev));
-    };
-    const onUp = (e: PointerEvent) => {
-      const drag = portDragRef.current;
-      setPortDrag(null);
-      if (!drag) return;
-      const el = document.elementFromPoint(e.clientX, e.clientY);
-      const nodeEl = el?.closest<HTMLElement>("[data-canvas-node]");
-      const targetId = nodeEl?.getAttribute("data-canvas-node");
-      if (targetId && targetId !== drag.sourceId) {
-        // 右 port = 出邊（source→target）、左 port = 入邊（target→source）
-        if (drag.side === "right") tryConnect(drag.sourceId, targetId);
-        else tryConnect(targetId, drag.sourceId);
-        return;
-      }
-      if (!targetId) {
-        // 鬆手在空白 → 就地建節點選單，建完自動連線（藤蔓式生長）。
-        const world = screenToWorld(e.clientX, e.clientY);
-        if (world) {
-          setCreateMenu({
-            position: screenInContainer(e.clientX, e.clientY),
-            world,
-            connectFrom: { nodeId: drag.sourceId, side: drag.side },
-          });
-        }
-      }
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setPortDrag(null);
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp, { capture: true });
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp, { capture: true });
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [portDrag, screenToWorld, screenInContainer, tryConnect]);
-
-  /** 建節點選單確認（雙擊空白 / 連線拖放共用）。 */
-  const handleCreateFromMenu = useCallback(
-    (type: "text" | "image" | "prompt") => {
-      const cm = createMenuRef.current;
-      if (!cm) return;
-      setCreateMenu(null);
-      const id = createNodeAt(type, cm.world);
-      if (cm.connectFrom) {
-        if (cm.connectFrom.side === "right") tryConnect(cm.connectFrom.nodeId, id);
-        else tryConnect(id, cm.connectFrom.nodeId);
-      }
-    },
-    [createNodeAt, tryConnect],
-  );
-
-  const handleCreateMenuUpload = useCallback(
-    (files: File[], kind: "image" | "reference" = "image") => {
-      const cm = createMenuRef.current;
-      setCreateMenu(null);
-      if (!cm) return;
-      void importImageFiles(files, cm.world, kind).then(() => {
-        // 連線拖放上傳：與第一個導入節點連線（importImageFiles 已選中最後一個，
-        // 簡化：不強行連線，交用戶手動——多檔語義不明確時不猜）。
-      });
-    },
-    [importImageFiles],
-  );
-
-  // ── 右鍵選單（沿用 v4 + 連線右鍵 + 字號）
-  const openNodeMenu = useCallback((nodeId: string, clientX: number, clientY: number) => {
-    const vpPos = screenInContainer(clientX, clientY);
-    const world = screenToWorld(clientX, clientY) ?? { x: 0, y: 0 };
-    if (!selectedIdsRef.current.has(nodeId)) {
-      setSelectedIds(new Set([nodeId]));
-      canvasStateRef.current.selectNode(nodeId);
-    }
-    setMenu({ position: vpPos, world, targetNodeId: nodeId });
-  }, [screenInContainer, screenToWorld]);
-
-  const openCanvasMenu = useCallback((screen: { x: number; y: number }, world: { x: number; y: number }) => {
-    setMenu({ position: screen, world, targetNodeId: null });
-  }, []);
-
-  /** P2：從 reference 節點「存為卡」——取節點圖 + 角色建卡，存檔並鎖定到本畫布。 */
-  const saveNodeAsCard = useCallback(
-    async (node: CanvasNode, kind: CharacterCardKind) => {
-      const url = imageUrlOf(node);
-      if (!url) return;
-      const now = new Date().toISOString();
-      const card: CharacterCard = {
-        id: `card-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-        name: node.title || (kind === "character" ? "角色卡" : "场景卡"),
-        kind,
-        // 純參考圖卡：locked 片段為空，鎖定的是參考圖與角色（可日後補描述）。
-        prompt: "",
-        references: [
-          {
-            url,
-            role: node.type === CanvasNodeType.Reference ? toReferenceImageRole(node.metadata?.referenceRole) : "general",
-            name: node.title || "参考图",
-          },
-        ],
-        createdAt: now,
-        updatedAt: now,
-      };
-      const ok = await canvasStateRef.current.upsertCharacterCard(card);
-      if (!ok) {
-        showError("存卡失败，请稍后再试");
-        return;
-      }
-      canvasStateRef.current.toggleCharacterCard(card.id); // 存為卡即鎖定（生成自動攜帶）
-      showError(`已存为${kind === "character" ? "角色" : "场景"}卡并锁定：${card.name}`);
-    },
-    [showError],
-  );
-
-  const menuItems = useMemo((): (CanvasMenuItem | "separator")[] => {
-    if (!menu) return [];
-    const state = canvasStateRef.current;
-    const sel = selectedIdsRef.current;
-    const alignChildren: CanvasMenuItem[] = [
-      { id: "align-left", label: "左对齐", onSelect: () => alignSelection("left") },
-      { id: "align-right", label: "右对齐", onSelect: () => alignSelection("right") },
-      { id: "align-top", label: "顶对齐", onSelect: () => alignSelection("top") },
-      { id: "align-bottom", label: "底对齐", onSelect: () => alignSelection("bottom") },
-      { id: "align-ch", label: "水平居中", onSelect: () => alignSelection("center-h") },
-      { id: "align-cv", label: "垂直居中", onSelect: () => alignSelection("center-v") },
-      { id: "dist-h", label: "水平均分", disabled: sel.size < 3, onSelect: () => distributeSelection("h") },
-      { id: "dist-v", label: "垂直均分", disabled: sel.size < 3, onSelect: () => distributeSelection("v") },
-      { id: "arrange", label: "网格整理", onSelect: () => arrangeSelection() },
-    ];
-    if (menu.targetConnectionId) {
-      return [
-        {
-          id: "delete-connection",
-          label: "删除连线",
-          danger: true,
-          shortcut: "Del",
-          onSelect: () => {
-            state.removeConnection(menu.targetConnectionId!);
-            setSelectedConnectionId(null);
-          },
-        },
-      ];
-    }
-    if (!menu.targetNodeId) {
-      return [
-        { id: "new-node", label: "新建节点…", onSelect: () => setCreateMenu({ position: menu.position, world: menu.world }) },
-        { id: "paste", label: "粘贴", shortcut: "Ctrl+V", disabled: !clipboardRef.current?.nodes.length, onSelect: () => pasteClipboard(menu.world) },
-        { id: "select-all", label: "全选", shortcut: "Ctrl+A", disabled: visibleNodes.length === 0, onSelect: () => setSelectedIds(new Set(visibleNodes.map((n) => n.id))) },
-        ...(sel.size >= 2 ? ([{ id: "align", label: "对齐与排列", children: alignChildren }] as CanvasMenuItem[]) : []),
-        "separator" as const,
-        { id: "library", label: "提示词库 / 素材", onSelect: () => setLibraryOpen(true) },
-        { id: "fit", label: "适应视图", onSelect: () => {
-          const size = viewportSizeRef.current;
-          if (size.width > 0) state.fitView(size.width, size.height);
-        } },
-        { id: "bg", label: "切换背景", onSelect: () => state.cycleBackground() },
-        { id: "help", label: "快捷键帮助", onSelect: () => setHelpOpen(true) },
-      ];
-    }
-    const node = nodeById.get(menu.targetNodeId);
-    if (!node) return [];
-    const url = imageUrlOf(node);
-    const parentId = childToParent.get(node.id);
-    const isWorkflowNode = !!(node.metadata?.workflow_id && node.metadata?.session_id);
-    const items: (CanvasMenuItem | "separator")[] = [
-      { id: "edit-prompt", label: "编辑提示词并生成", onSelect: () => setPromptPanelNodeId(node.id) },
-      ...(isWorkflowNode ? ([{ id: "rerun", label: "重新生成（工作流）", onSelect: () => void handleRerun(node.id) }] as CanvasMenuItem[]) : []),
-      ...(node.metadata?.status === "error" && node.metadata?.prompt
-        ? ([{ id: "retry", label: "重试（沿用参数）", onSelect: () => retryNode(node.id) }] as CanvasMenuItem[])
-        : []),
-      { id: "connect", label: "连线到其他节点", onSelect: () => setConnecting({ sourceId: node.id, cursor: null }) },
-      { id: "rename", label: "重命名", onSelect: () => {
-        // 觸發節點內編輯：直接改 title 為當前值走 NodeView 雙擊路徑成本更高，
-        // 這裡用 prompt() 太醜——選單觸發交給 NodeView 的雙擊；此項用瀏覽器原生輸入。
-        const next = window.prompt("重命名节点", node.title);
-        if (next && next.trim() && next.trim() !== node.title) state.renameNode(node.id, next.trim());
-      } },
-      "separator",
-      { id: "copy", label: "复制", shortcut: "Ctrl+C", onSelect: copySelection },
-      { id: "paste", label: "粘贴", shortcut: "Ctrl+V", disabled: !clipboardRef.current?.nodes.length, onSelect: () => pasteClipboard(menu.world) },
-      { id: "duplicate", label: "创建副本", shortcut: "Ctrl+D", onSelect: duplicateSelection },
-    ];
-    if (node.type === CanvasNodeType.Text || node.type === CanvasNodeType.Prompt) {
-      items.push("separator");
-      items.push({ id: "font-up", label: "放大字号", onSelect: () => state.patchNodeMetadata(node.id, { fontSize: Math.min(28, (node.metadata?.fontSize ?? 14.5) + 2) }) });
-      items.push({ id: "font-down", label: "缩小字号", onSelect: () => state.patchNodeMetadata(node.id, { fontSize: Math.max(10, (node.metadata?.fontSize ?? 14.5) - 2) }) });
-      items.push({ id: "save-asset-text", label: "存入素材库", onSelect: () => void saveNodeToAssets(node.id) });
-    }
-    // P2：reference 節點 → 存為角色/場景卡（鎖定到本畫布，所有生成自動攜帶）。
-    if (node.type === CanvasNodeType.Reference && url) {
-      items.push("separator");
-      items.push({
-        id: "save-as-card",
-        label: "存为卡并锁定",
-        children: [
-          { id: "save-card-character", label: "存为角色卡", onSelect: () => void saveNodeAsCard(node, "character") },
-          { id: "save-card-scene", label: "存为场景卡", onSelect: () => void saveNodeAsCard(node, "scene") },
-        ],
-      });
-    }
-    // 圖片節點 → 帶角色的參考圖節點（保留位置/尺寸/圖片，補默認角色）。
-    if (node.type === CanvasNodeType.Image && url) {
-      items.push("separator");
-      items.push({
-        id: "to-reference",
-        label: "转为参考图节点",
-        onSelect: () => {
-          state.addNodes([
-            {
-              ...node,
-              type: CanvasNodeType.Reference,
-              metadata: { ...node.metadata, referenceRole: node.metadata?.referenceRole ?? "general" },
-            },
-          ]);
-        },
-      });
-    }
-    if (url) {
-      items.push("separator");
-      items.push({ id: "download", label: "下载图片", onSelect: () => void downloadNode(node.id) });
-      items.push({
-        id: "edit-image",
-        label: "编辑图片",
-        children: [
-          { id: "crop", label: "裁剪", onSelect: () => setEditor({ nodeId: node.id, mode: "crop" }) },
-          { id: "split", label: "切图", onSelect: () => setEditor({ nodeId: node.id, mode: "split" }) },
-          { id: "mask", label: "抠除 / AI 重绘", onSelect: () => setEditor({ nodeId: node.id, mode: "mask" }) },
-          { id: "rotate", label: "旋转", onSelect: () => setEditor({ nodeId: node.id, mode: "rotate" }) },
-          { id: "angle", label: "角度（AI 重绘）", onSelect: () => setEditor({ nodeId: node.id, mode: "angle" }) },
-        ],
-      });
-      if (url.startsWith("http")) {
-        items.push({ id: "upscale", label: "高清放大", disabled: upscalingIds.has(node.id), onSelect: () => void upscaleNode(node.id) });
-      }
-      items.push({ id: "save-asset-image", label: "存入素材库", onSelect: () => void saveNodeToAssets(node.id) });
-    }
-    if (parentId) {
-      items.push("separator");
-      items.push({ id: "set-primary", label: "设为主图", onSelect: () => state.setBatchPrimary(parentId, node.id) });
-      items.push({ id: "remove-from-batch", label: "从批次中删除", danger: true, onSelect: () => handleDeleteNode(node.id) });
-    }
-    if ((node.batchChildren?.length ?? 0) > 0) {
-      items.push("separator");
-      items.push({ id: "toggle-batch", label: node.batchExpanded === false ? "展开批次" : "收起批次", onSelect: () => state.toggleBatchExpanded(node.id) });
-      items.push({ id: "download-all", label: "下载全部子图 (zip)", onSelect: () => void downloadBatch(node.id) });
-    }
-    if (sel.size >= 2) {
-      items.push("separator");
-      items.push({ id: "align", label: "对齐与排列", children: alignChildren });
-    }
-    items.push("separator");
-    items.push({
-      id: "delete",
-      label: sel.size > 1 ? `删除 ${sel.size} 个节点` : "删除节点",
-      shortcut: "Del",
-      danger: true,
-      onSelect: () => (sel.size > 1 ? deleteSelected() : handleDeleteNode(node.id)),
-    });
-    return items;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [menu, nodeById, childToParent, visibleNodes, upscalingIds, saveNodeAsCard]);
+    return set;
+  }, [canvas.connections, highlightNodeId]);
 
   // ── 舊 workflow 節點動作
   const handleRerun = useCallback(async (nodeId: string) => {
@@ -1295,118 +392,52 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
     [showError],
   );
 
-  // ── 鍵盤快捷鍵
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (
-        e.isComposing ||
-        (target &&
-          (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable))
-      ) {
-        return;
-      }
-      if (editorRef.current) return;
-      const mod = e.ctrlKey || e.metaKey;
-      if (e.key === "Escape") {
-        if (portDragRef.current) setPortDrag(null);
-        else if (connectingRef.current) setConnecting(null);
-        else if (createMenuRef.current) setCreateMenu(null);
-        else if (menuRef.current) setMenu(null);
-        else if (promptPanelRef.current) setPromptPanelNodeId(null);
-        else clearSelection();
-        return;
-      }
-      if (mod && (e.key === "a" || e.key === "A")) {
-        e.preventDefault();
-        const nodes = canvasStateRef.current.nodes;
-        const byId = new Map(nodes.map((n) => [n.id, n]));
-        const parentOf = new Map<string, string>();
-        for (const n of nodes) for (const cid of n.batchChildren ?? []) parentOf.set(cid, n.id);
-        const all = nodes.filter((n) => {
-          const pid = parentOf.get(n.id);
-          return !pid || byId.get(pid)?.batchExpanded !== false;
-        });
-        setSelectedIds(new Set(all.map((n) => n.id)));
-        return;
-      }
-      if (mod && (e.key === "c" || e.key === "C")) {
-        copySelection();
-        return;
-      }
-      if (mod && (e.key === "v" || e.key === "V")) {
-        // 內部剪貼簿優先；空的話交給 window paste 事件讀系統剪貼簿。
-        if (clipboardRef.current?.nodes.length) pasteClipboard();
-        return;
-      }
-      if (mod && (e.key === "d" || e.key === "D")) {
-        e.preventDefault();
-        duplicateSelection();
-        return;
-      }
-      if (mod && (e.key === "z" || e.key === "Z")) {
-        e.preventDefault();
-        if (e.shiftKey) canvasStateRef.current.redo();
-        else canvasStateRef.current.undo();
-        return;
-      }
-      if (mod && (e.key === "y" || e.key === "Y")) {
-        e.preventDefault();
-        canvasStateRef.current.redo();
-        return;
-      }
-      if (e.key === "Delete" || e.key === "Backspace") {
-        if (selectedConnectionRef.current) {
-          e.preventDefault();
-          canvasStateRef.current.removeConnection(selectedConnectionRef.current);
-          setSelectedConnectionId(null);
-          return;
-        }
-        if (selectedIdsRef.current.size > 0) {
-          e.preventDefault();
-          deleteSelected();
-        }
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [clearSelection, copySelection, pasteClipboard, duplicateSelection, deleteSelected]);
-
-  // ── A8：系統剪貼簿貼圖/貼文字（畫布容器有 hover/焦點語境時）
-  useEffect(() => {
-    const onPaste = (e: ClipboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
-      if (clipboardRef.current?.nodes.length) return; // 內部剪貼簿優先（keydown 已處理）
-      const el = containerRef.current;
-      if (!el) return;
-      const files = Array.from(e.clipboardData?.files ?? []).filter((f) => f.type.startsWith("image/"));
-      const vp = canvasStateRef.current.viewport;
-      const center = {
-        x: (viewportSizeRef.current.width / 2 - vp.x) / vp.k,
-        y: (viewportSizeRef.current.height / 2 - vp.y) / vp.k,
-      };
-      if (files.length > 0) {
-        e.preventDefault();
-        void importImageFiles(files, center);
-        return;
-      }
-      const text = e.clipboardData?.getData("text/plain")?.trim();
-      if (text) {
-        e.preventDefault();
-        createNodeAt("text", center, { content: text, title: text.slice(0, 12) || "文本" });
-      }
-    };
-    window.addEventListener("paste", onPaste);
-    return () => window.removeEventListener("paste", onPaste);
-  }, [importImageFiles, createNodeAt]);
+  const menuItems = useMemo(
+    (): (CanvasMenuItem | "separator")[] =>
+      buildCanvasEmbedMenuItems({
+        menu,
+        nodeById,
+        childToParent,
+        visibleNodes,
+        upscalingIds,
+        selectedIdsRef,
+        canvasStateRef,
+        clipboardRef,
+        viewportSizeRef,
+        alignSelection,
+        distributeSelection,
+        arrangeSelection,
+        setSelectedConnectionId,
+        setCreateMenu,
+        pasteClipboard,
+        setSelectedIds,
+        setLibraryOpen,
+        setHelpOpen,
+        setPromptPanelNodeId,
+        handleRerun,
+        retryNode,
+        setConnecting,
+        copySelection,
+        duplicateSelection,
+        saveNodeAsCard,
+        saveNodeToAssets,
+        setEditor,
+        upscaleNode,
+        downloadNode,
+        downloadBatch,
+        handleDeleteNode,
+        deleteSelected,
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [menu, nodeById, childToParent, visibleNodes, upscalingIds, saveNodeAsCard],
+  );
 
   // ── 連線模式（工具列 Link2）游標跟隨
   const handleContainerPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     if (!connectingRef.current) return;
     const world = screenToWorld(e.clientX, e.clientY);
     if (world) setConnecting((prev) => (prev ? { ...prev, cursor: world } : prev));
-  }, [screenToWorld]);
+  }, [screenToWorld, connectingRef]);
 
   const pendingPath = useMemo(() => {
     const active = portDrag?.cursor
@@ -1493,7 +524,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
     state.addNodes(newNodes, newConns);
     setSelectedIds(new Set(newNodes.map((n) => n.id)));
     if (newNodes.length > 0) state.selectNode(newNodes[0].id);
-  }, []);
+  }, [editorRef, canvasStateRef, setSelectedIds]);
 
   /** D：角度 AI 重繪 / mask AI 重繪 → 生成 loading 子節點 → 原地回填。 */
   const generateChildFromSource = useCallback(
@@ -1521,31 +552,19 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
       }));
       void generateIntoNode(id, { prompt: params.prompt, sourceImage: sourceUrl, references });
     },
-    [generateIntoNode],
+    [generateIntoNode, canvasStateRef],
   );
 
   // ── Wave C：agent 操作確認閘
-  const runAgentGeneration = useCallback(
-    (items: { nodeId: string; prompt?: string; model?: string; size?: string; count?: number }[]) => {
-      for (const item of items) {
-        const node = canvasStateRef.current.nodes.find((n) => n.id === item.nodeId);
-        if (!node) continue;
-        const prompt = item.prompt ?? node.metadata?.prompt;
-        if (!prompt) continue;
-        if ((item.count ?? 1) <= 1) {
-          void generateIntoNode(item.nodeId, { prompt, model: item.model ?? node.metadata?.model, size: item.size ?? node.metadata?.size });
-        } else {
-          void handleGenerateFromNode(item.nodeId, prompt, { model: item.model, size: item.size, count: item.count });
-        }
-      }
-    },
-    [generateIntoNode, handleGenerateFromNode],
-  );
-
   const approveAgentOps = useCallback(() => {
     const { runGeneration } = canvasStateRef.current.applyAgentOps();
     runAgentGeneration(runGeneration);
-  }, [runAgentGeneration]);
+  }, [runAgentGeneration, canvasStateRef]);
+
+  const handleToggleAgentAutoApprove = useCallback((checked: boolean) => {
+    setAgentAutoApprove(checked);
+    window.localStorage.setItem(AGENT_AUTO_APPROVE_KEY, checked ? "1" : "0");
+  }, []);
 
   // 自動允許開啟時：ops 一到即執行（信任已由用戶顯式授予並可隨時關閉）。
   useEffect(() => {
@@ -1560,68 +579,6 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
 
   return (
     <>
-      <style>{`
-        .ce-embed-root { height: ${height}; }
-        @supports (height: 1dvh) { .ce-embed-root { height: ${toDvh(height)}; } }
-
-        @media (max-width: 767px) {
-          .ce-embed-root.ce-compact { height: min(72dvh, 620px) !important; }
-        }
-
-        /* 材質（背景/陰影/模糊）改由 lg-float 供給；這裡只留尺寸與排版。 */
-        .ce-embed-bar-btn {
-          touch-action: manipulation;
-          -webkit-tap-highlight-color: transparent;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          white-space: nowrap;
-          min-width: 2.75rem;
-          min-height: 2.75rem;
-          padding: 0 1rem;
-          font-size: 0.875rem;
-          line-height: 1.25rem;
-          border: none;
-          transition: background-color 0.2s ease, transform 0.15s ease;
-        }
-        .ce-embed-bar-btn:active { transform: scale(0.96); }
-
-        .ce-embed-empty { font-size: 0.875rem; }
-
-        @media (min-width: 768px) {
-          .ce-embed-bar-btn {
-            min-width: 0;
-            min-height: 0;
-            padding: 0.25rem 0.625rem;
-            font-size: 0.75rem;
-            line-height: 1.125rem;
-          }
-          .ce-embed-bar-btn:active { transform: none; }
-          .ce-embed-empty { font-size: 0.8125rem; }
-        }
-
-        @media (prefers-reduced-motion: reduce) {
-          .ce-embed-bar-btn { transition: none; }
-          .ce-embed-topbar, .ce-embed-leftpop { transition: none; }
-        }
-
-        /* 工作站態避讓改由宿主完成：ImagePlayground 把整個 overlay 向右 dock
-           （--ce-dock-left = 面板寬 + 12px），畫布全域隨之右移，頂欄與左側彈層
-           不再各自加 --ce-chrome-left（避免雙重位移）。行動端面板在底部，
-           宿主把 overlay 復位成全屏，這裡只保留頂欄右緣約束讓 chips 能換行。 */
-        @media (max-width: 767px) {
-          .ce-embed-topbar { right: 0.75rem; }
-          /* 行動端 chips 收斂：一排放得下，不再炸成兩行大藥丸。 */
-          .ce-embed-topbar .ce-embed-bar-btn {
-            min-width: 0;
-            min-height: 2.125rem;
-            padding: 0 0.7rem;
-            font-size: 0.75rem;
-            line-height: 1rem;
-          }
-        }
-      `}</style>
-
       <div
         ref={containerRef}
         className={cn("ce-embed-root relative w-full overflow-hidden", !expanded && "ce-compact")}
@@ -1846,49 +803,22 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
           </div>
         )}
 
-        {/* Wave C：agent 操作確認閘 */}
-        {pendingOps && !agentAutoApprove && (
-          <div className="pointer-events-auto absolute bottom-16 left-1/2 z-40 w-[min(92%,460px)] -translate-x-1/2 rounded-2xl lg-sheet p-3.5" data-canvas-interactive>
-            <p className="text-[13.5px] font-semibold text-foreground">AI 助理想操作画布</p>
-            <p className="mt-0.5 text-[12.5px] leading-relaxed text-muted-foreground">
-              {pendingOps.label || `共 ${pendingOps.ops.length} 步操作`}
-              {" · "}
-              {pendingOps.ops.map((op) => op.type).join("、")}
-            </p>
-            <div className="mt-2.5 flex items-center gap-2">
-              <button
-                type="button"
-                onClick={approveAgentOps}
-                className="flex-1 rounded-lg bg-primary px-3 py-2 text-ios-footnote font-medium text-primary-foreground hover:opacity-90"
-              >
-                允许
-              </button>
-              <button
-                type="button"
-                onClick={() => canvas.dismissAgentOps()}
-                className="flex-1 rounded-lg bg-black/5 px-3 py-2 text-ios-footnote font-medium text-muted-foreground hover:bg-black/10"
-              >
-                拒绝
-              </button>
-            </div>
-            <label className="mt-2 flex cursor-pointer items-center gap-1.5 text-[11.5px] text-foreground/45">
-              <input
-                type="checkbox"
-                checked={agentAutoApprove}
-                onChange={(e) => {
-                  setAgentAutoApprove(e.target.checked);
-                  window.localStorage.setItem(AGENT_AUTO_APPROVE_KEY, e.target.checked ? "1" : "0");
-                }}
-              />
-              本设备自动允许画布操作（可随时取消）
-            </label>
-          </div>
-        )}
-        {agentAutoApprove && pendingOps && (
-          <div className="pointer-events-none absolute bottom-16 left-1/2 z-40 -translate-x-1/2 rounded-full bg-black/75 px-3 py-1.5 text-ios-caption1 text-white">
-            正在执行 AI 画布操作…
-          </div>
-        )}
+        {/* 浮層（agent 確認閘 / 角色卡 / 歷史畫布 / 節點清單）+ .ce-embed-* 樣式塊（須無條件掛載，殼層頂欄樣式依賴它） */}
+        <CanvasEmbedOverlays
+          height={height}
+          expanded={expanded}
+          pendingOps={pendingOps}
+          agentAutoApprove={agentAutoApprove}
+          onToggleAgentAutoApprove={handleToggleAgentAutoApprove}
+          onApproveAgentOps={approveAgentOps}
+          cardsOpen={cardsOpen}
+          historyOpen={historyOpen}
+          onCloseHistory={() => setHistoryOpen(false)}
+          elementListOpen={elementListOpen}
+          canvas={canvas}
+          viewportSizeRef={viewportSizeRef}
+          setSelectedIds={setSelectedIds}
+        />
 
         {/* 操作錯誤/提示 */}
         {actionError && (
@@ -1900,160 +830,6 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
             <button type="button" onClick={() => setActionError(null)} aria-label="关闭提示" className="shrink-0 opacity-80 hover:opacity-100">
               ✕
             </button>
-          </div>
-        )}
-
-        {/* P2：角色/場景卡面板——卡列表、生效 badge、鎖定/解鎖、刪卡 */}
-        {cardsOpen && (
-          <div
-            data-canvas-interactive
-            className="ce-embed-leftpop lg-sheet pointer-events-auto absolute z-20 w-72 max-w-[calc(100vw-1.5rem)] overflow-y-auto rounded-ios-2xl"
-            style={{
-              left: "calc(0.75rem + env(safe-area-inset-left, 0px))",
-              top: "calc(3.5rem + env(safe-area-inset-top, 0px))",
-              maxHeight: "min(64dvh, 420px)",
-            }}
-          >
-            <div className="border-b px-3 py-2.5">
-              <p className="text-[12.5px] font-semibold text-foreground">角色 / 场景卡</p>
-              <p className="mt-0.5 text-ios-caption2 leading-snug text-foreground/45">
-                锁定后本画布所有生成自动携带（提示词前缀 + 参考图 + 负面词）
-              </p>
-            </div>
-            {canvas.characterCards.length === 0 ? (
-              <p className="px-3.5 py-3 text-ios-caption1 text-foreground/45">
-                还没有卡 · 右键参考图节点「存为卡并锁定」
-              </p>
-            ) : (
-              canvas.characterCards.map((card) => {
-                const active = canvas.activeCardIds.includes(card.id);
-                return (
-                  <div
-                    key={card.id}
-                    className="flex items-center gap-2 border-b px-3 py-2.5 last:border-b-0"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <p className="flex items-center gap-1.5 truncate text-[12.5px] font-medium text-foreground">
-                        <span className="truncate">{card.name}</span>
-                        <span className="shrink-0 rounded-full bg-black/5 px-1.5 py-0.5 text-ios-caption2 text-muted-foreground">
-                          {card.kind === "scene" ? "场景" : "角色"}
-                        </span>
-                      </p>
-                      <p className="mt-0.5 truncate text-ios-caption2 text-foreground/45">
-                        {active ? (
-                          <span className="font-medium text-ios-green">生效中</span>
-                        ) : (
-                          "未锁定"
-                        )}
-                        {card.references.length > 0 ? ` · ${card.references.length} 张参考图` : ""}
-                        {card.prompt ? " · 有描述" : ""}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => canvas.toggleCharacterCard(card.id)}
-                      className={
-                        active
-                          ? "shrink-0 cursor-pointer rounded-lg bg-ios-green/10 px-2 py-1 text-[11.5px] font-medium text-[#248A3D] hover:bg-ios-green/20"
-                          : "shrink-0 cursor-pointer rounded-lg bg-black/5 px-2 py-1 text-[11.5px] font-medium text-muted-foreground hover:bg-black/10"
-                      }
-                    >
-                      {active ? "解锁" : "锁定"}
-                    </button>
-                    <button
-                      type="button"
-                      aria-label={`删除卡 ${card.name}`}
-                      onClick={() => void canvas.removeCharacterCard(card.id)}
-                      className="shrink-0 cursor-pointer rounded-lg px-1.5 py-1 text-[11.5px] text-foreground/45 hover:bg-black/5 hover:text-destructive"
-                    >
-                      删除
-                    </button>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        )}
-
-        {/* 歷史畫布下拉 */}
-        {historyOpen && (
-          <div
-            data-canvas-interactive
-            role="listbox"
-            aria-label="历史画布列表"
-            className="ce-embed-leftpop lg-sheet pointer-events-auto absolute z-20 w-64 max-w-[calc(100vw-1.5rem)] overflow-y-auto rounded-ios-2xl"
-            style={{
-              left: "calc(0.75rem + env(safe-area-inset-left, 0px))",
-              top: "calc(3.5rem + env(safe-area-inset-top, 0px))",
-              maxHeight: "min(60dvh, 360px)",
-            }}
-          >
-            {canvas.savedProjects.length === 0 ? (
-              <p className="px-4 py-3 text-ios-caption1 text-foreground/45">还没有保存的画布</p>
-            ) : (
-              canvas.savedProjects.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  role="option"
-                  onClick={() => {
-                    void canvas.openSavedCanvas(p.id).then(() => setHistoryOpen(false));
-                  }}
-                  className="flex min-h-[44px] w-full flex-col items-start justify-center gap-0.5 border-b px-4 py-2.5 text-left last:border-b-0 hover:bg-black/5"
-                >
-                  <span className="w-full truncate text-ios-caption1 font-medium text-foreground">{p.title}</span>
-                  <span className="text-ios-footnote text-foreground/45">
-                    {p.nodeCount} 个节点 · {formatRelative(p.updatedAt)}
-                  </span>
-                </button>
-              ))
-            )}
-          </div>
-        )}
-
-        {/* B2：節點清單（全屏態）→ 點擊飛行聚焦 */}
-        {elementListOpen && expanded && (
-          <div
-            data-canvas-interactive
-            className="ce-embed-leftpop lg-sheet pointer-events-auto absolute z-20 w-60 overflow-y-auto rounded-ios-2xl"
-            style={{
-              left: "calc(0.75rem + env(safe-area-inset-left, 0px))",
-              top: "calc(3.5rem + env(safe-area-inset-top, 0px))",
-              maxHeight: "min(64dvh, 420px)",
-            }}
-          >
-            {canvas.nodes.length === 0 ? (
-              <p className="px-4 py-3 text-ios-caption1 text-foreground/45">画布还没有节点</p>
-            ) : (
-              canvas.nodes.map((n) => (
-                <button
-                  key={n.id}
-                  type="button"
-                  onClick={() => {
-                    const size = viewportSizeRef.current;
-                    canvas.flyTo({ x: n.position.x + n.width / 2, y: n.position.y + n.height / 2 }, size.width, size.height);
-                    setSelectedIds(new Set([n.id]));
-                    canvas.selectNode(n.id);
-                  }}
-                  className="flex min-h-[38px] w-full items-center gap-2 border-b px-3 py-2 text-left last:border-b-0 hover:bg-black/5"
-                >
-                  <span
-                    className={cn(
-                      "h-2 w-2 shrink-0 rounded-full",
-                      n.metadata?.status === "success"
-                        ? "bg-ios-green"
-                        : n.metadata?.status === "loading"
-                          ? "bg-ios-blue"
-                          : n.metadata?.status === "error"
-                            ? "bg-destructive"
-                            : "bg-black/20",
-                    )}
-                    aria-hidden="true"
-                  />
-                  <span className="min-w-0 flex-1 truncate text-[12.5px] text-muted-foreground">{n.title}</span>
-                </button>
-              ))
-            )}
           </div>
         )}
 
