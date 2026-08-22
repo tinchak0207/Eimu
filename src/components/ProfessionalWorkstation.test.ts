@@ -29,6 +29,7 @@ const WORKSTATION_TSX_MODULES = [
   "src/components/pro-workstation/use-boards-library.ts",
   "src/components/pro-workstation/workstation-recall.ts",
   "src/components/pro-workstation/panels/WorkstationTopbar.tsx",
+  "src/components/pro-workstation/panels/InspectorPanel.tsx",
 ];
 
 const WORKSTATION_CSS_MODULES = [
