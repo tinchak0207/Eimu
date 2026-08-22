@@ -7,6 +7,20 @@ function read(relPath: string) {
   return readFileSync(join(process.cwd(), relPath), "utf8");
 }
 
+// Task 10：畫布工作站的殼（inline style / overlay / 面板殼 / 拖寬手柄）與
+// 面板兩態 state 分別搬到 canvas-workstation/CanvasChatWorkstation.tsx 與
+// canvas-workstation/use-chat-panel.ts——被搬走的宣告按「舊檔＋新檔」拼接
+// 讀取，語義不放寬。
+function readWorkstationSources() {
+  return (
+    read("src/components/ImagePlayground.tsx") +
+    "\n" +
+    read("src/components/canvas-workstation/CanvasChatWorkstation.tsx") +
+    "\n" +
+    read("src/components/canvas-workstation/use-chat-panel.ts")
+  );
+}
+
 test("image playground controls normal, fallback, and failed progress timing", () => {
   const source = read("src/components/ImagePlayground.tsx");
   assert.match(source, /NORMAL_PROGRESS_DURATION_MS/);
@@ -53,7 +67,7 @@ test("professional workstation stylesheet stays out of the first-paint bundle", 
 });
 
 test("the result column is the canvas alone, with no duplicated chrome", () => {
-  const source = read("src/components/ImagePlayground.tsx");
+  const source = readWorkstationSources();
 
   // The model picker moved onto the left rail, so the right column renders
   // ImageDisplay directly ??no wrapper card, identity header, or second status
@@ -70,7 +84,7 @@ test("the result column is the canvas alone, with no duplicated chrome", () => {
 });
 
 test("canvas workstation is a fullscreen overlay with expandable chat panel", () => {
-  const source = read("src/components/ImagePlayground.tsx");
+  const source = readWorkstationSources();
   const embed = read("src/components/canvas/CanvasEmbed.tsx");
   const nodeView = read("src/components/canvas/CanvasNodeView.tsx");
 
@@ -89,7 +103,8 @@ test("canvas workstation is a fullscreen overlay with expandable chat panel", ()
 
 test("the model picker is wired into the left prompt panel", () => {
   const source = read("src/components/ImagePlayground.tsx");
-  const prompt = read("src/components/PromptInput.tsx");
+  // Task 9：<ModelPicker> JSX 抽到 GenerateControls —— 拼接讀取，斷言語義不變。
+  const prompt = read("src/components/PromptInput.tsx") + "\n" + read("src/components/prompt-input/GenerateControls.tsx");
 
   assert.match(source, /models=\{PROVIDERS\.image_tinchak\.models\}/);
   assert.match(source, /modelId=\{selectedModels\.image_tinchak\}/);
@@ -108,7 +123,8 @@ test("public image generation never launches the browser-only Adobe adapter", ()
 
 test("professional mode is a toggle inside the prompt card, not a bare row", () => {
   const source = read("src/components/ImagePlayground.tsx");
-  const prompt = read("src/components/PromptInput.tsx");
+  // Task 9：专业控制 toggle 抽到 ActionRow —— 拼接讀取，斷言語義不變。
+  const prompt = read("src/components/PromptInput.tsx") + "\n" + read("src/components/prompt-input/ActionRow.tsx");
 
   // It used to occupy a whole right-aligned row above the grid.
   assert.doesNotMatch(source, /mb-4 flex justify-end/);
@@ -132,7 +148,8 @@ test("professional mode keeps its draft mounted after returning home", () => {
 });
 
 test("canvas workstation chat panel keeps the composer inside the panel", () => {
-  const source = read("src/components/ImagePlayground.tsx");
+  // style 塊（面板高度鏈加固）隨面板殼搬進 CanvasChatWorkstation，讀取路徑跟著走。
+  const source = read("src/components/canvas-workstation/CanvasChatWorkstation.tsx");
 
   // 面板是 fixed + overflow:hidden 的 flex 容器：内容超高时若高度链没把
   // transcript 的滚动接住，输入区会被推出面板外（用户截图：底部只见
