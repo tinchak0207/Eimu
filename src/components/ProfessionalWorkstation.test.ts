@@ -24,6 +24,7 @@ const WORKSTATION_TSX_MODULES = [
   "src/components/pro-workstation/workstation-subcomponents.tsx",
   "src/components/pro-workstation/workstation-tours.ts",
   "src/components/pro-workstation/workstation-cursor-demo.ts",
+  "src/components/pro-workstation/use-panel-resize.ts",
 ];
 
 const WORKSTATION_CSS_MODULES = [

@@ -155,7 +155,6 @@ import {
   type LayoutPrefs,
   type PromptDraft,
   readLayoutPrefs,
-  writeLayoutPrefs,
   readPromptDraft,
   writePromptDraft,
   DEFAULT_SECTION_OPEN,
@@ -180,6 +179,7 @@ import {
   QueueSlotList,
   BoardsPanel,
 } from "./workstation-subcomponents";
+import { usePanelResize } from "./use-panel-resize";
 import { createWorkstationTours } from "./workstation-tours";
 export { INVOKE_AI_WORKSTATION_SOURCE, WORKFLOW_PRESETS, REFERENCE_IMAGE_ROLES } from "./workstation-constants";
 export type { ProfessionalRunConfig } from "./workstation-subcomponents";
@@ -260,10 +260,6 @@ export function InvokeInspiredWorkstation({
    */
   const [viewerGalleryMode, setViewerGalleryMode] = useState<GalleryMode>("images");
   const [inspectorGalleryMode, setInspectorGalleryMode] = useState<GalleryMode>("images");
-  const [panelWidths, setPanelWidths] = useState({
-    left: initialLayout.left ?? 440,
-    right: initialLayout.right ?? 320,
-  });
   /**
    * 手风琴开合状态提升为受控 state。
    *
@@ -282,8 +278,6 @@ export function InvokeInspiredWorkstation({
   });
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [dismissedStaleResultKey, setDismissedStaleResultKey] = useState<string | null>(null);
-  const [resizingSide, setResizingSide] = useState<"left" | "right" | null>(null);
-  const panelResizeRef = useRef<{ side: "left" | "right"; startX: number; startWidth: number; container: number } | null>(null);
   const loraTourRef = useRef<Driver | null>(null);
   const loraGridWaitingRef = useRef(false);
   const loraTourAdvancingRef = useRef(false);
@@ -350,20 +344,6 @@ export function InvokeInspiredWorkstation({
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, [active, prompt]);
-
-  /** 布局偏好落盘：分栏宽度、当前 tab、手风琴开合。 */
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      writeLayoutPrefs({
-        left: panelWidths.left,
-        right: panelWidths.right,
-        leftTab: leftPanelTab,
-        inspectorTab,
-        sections: sectionOpen,
-      });
-    }, 300);
-    return () => window.clearTimeout(timer);
-  }, [panelWidths, leftPanelTab, inspectorTab, sectionOpen]);
 
   /**
    * 版位与质量档位都由模型能力表派生，不再硬编码。
@@ -531,6 +511,28 @@ export function InvokeInspiredWorkstation({
   const manualResultSelectionRef = useRef(false);
   const lastAutoSelectedTaskRef = useRef<string | null>(null);
   const lastMobileTaskStageRef = useRef<WorkstationTaskStage>("prepare");
+
+  // 面板缩放引擎：分栏宽度 + 拖拽 + 键盘调栏 + 佈局落盘（2026-08-22 拆出 use-panel-resize）。
+  const {
+    panelWidths,
+    resizingSide,
+    startPanelResize,
+    handlePanelResize,
+    endPanelResize,
+    nudgePanel,
+    resetPanel,
+    handleResizeKeyDown,
+  } = usePanelResize({
+    initialLayout,
+    leftPanelTab,
+    inspectorTab,
+    sectionOpen,
+    inspectorExpanded,
+    setInspectorExpanded,
+    setCanvasNotice,
+    studioBodyRef,
+  });
+
   const activePreset = WORKFLOW_PRESETS.find((preset) => preset.id === workflowPreset) ?? WORKFLOW_PRESETS[0];
   const allResults = useMemo(() => {
     const current = [...images];
@@ -1965,90 +1967,6 @@ export function InvokeInspiredWorkstation({
   };
 
   // ── 引导 ────────────────────────────────────────────────────────────────
-
-  const startPanelResize = (side: "left" | "right", event: React.PointerEvent<HTMLButtonElement>) => {
-    // 收起态右栏宽度被 CSS 钉在 72px，先展开再让拖动接管，否则拖了没反应。
-    if (side === "right" && !inspectorExpanded) setInspectorExpanded(true);
-    const container = studioBodyRef.current?.clientWidth ?? 1200;
-    panelResizeRef.current = {
-      side,
-      startX: event.clientX,
-      startWidth: side === "left" ? panelWidths.left : panelWidths.right,
-      container,
-    };
-    setResizingSide(side);
-    event.currentTarget.setPointerCapture?.(event.pointerId);
-    event.preventDefault();
-  };
-
-  const handlePanelResize = (event: React.PointerEvent<HTMLButtonElement>) => {
-    const drag = panelResizeRef.current;
-    if (!drag) return;
-    const delta = event.clientX - drag.startX;
-    if (drag.side === "left") {
-      // 右栏至少 220、中栏至少 320，其余空间让给左栏。
-      const max = drag.container - 220 - 320;
-      const next = Math.min(Math.max(drag.startWidth + delta, 200), Math.max(max, 200));
-      setPanelWidths((current) => (current.left === next ? current : { ...current, left: next }));
-    } else {
-      const max = drag.container - 200 - 320;
-      const next = Math.min(Math.max(drag.startWidth - delta, 220), Math.max(max, 220));
-      setPanelWidths((current) => (current.right === next ? current : { ...current, right: next }));
-    }
-  };
-
-  const endPanelResize = () => {
-    panelResizeRef.current = null;
-    setResizingSide(null);
-  };
-
-  /**
-   * 键盘调栏 + 双击复位。
-   *
-   * 分隔条原本只认 pointer 事件：不用鼠标的人完全没法调栏宽，而拖坏了比例
-   * 也只能一点点拖回去。方向键每次 24px、Shift 加速到 96px，Home/双击回默认值。
-   */
-  const nudgePanel = useEventCallback((side: "left" | "right", delta: number) => {
-    const container = studioBodyRef.current?.clientWidth ?? 1200;
-    setPanelWidths((current) => {
-      if (side === "left") {
-        const max = Math.max(container - 220 - 320, 200);
-        const next = Math.min(Math.max(current.left + delta, 200), max);
-        return current.left === next ? current : { ...current, left: next };
-      }
-      const max = Math.max(container - 200 - 320, 220);
-      const next = Math.min(Math.max(current.right + delta, 220), max);
-      return current.right === next ? current : { ...current, right: next };
-    });
-  });
-
-  const resetPanel = useEventCallback((side: "left" | "right") => {
-    setPanelWidths((current) =>
-      side === "left" ? { ...current, left: 440 } : { ...current, right: 320 },
-    );
-    setCanvasNotice(side === "left" ? "左栏宽度已复位。" : "右栏宽度已复位。");
-  });
-
-  const handleResizeKeyDown = useEventCallback(
-    (side: "left" | "right", event: React.KeyboardEvent<HTMLButtonElement>) => {
-      const step = event.shiftKey ? 96 : 24;
-      // 左栏向右拖是变宽，右栏向右拖是变窄，所以右栏的方向要反过来。
-      const sign = side === "left" ? 1 : -1;
-      if (event.key === "ArrowLeft") {
-        event.preventDefault();
-        event.stopPropagation();
-        nudgePanel(side, -step * sign);
-      } else if (event.key === "ArrowRight") {
-        event.preventDefault();
-        event.stopPropagation();
-        nudgePanel(side, step * sign);
-      } else if (event.key === "Home" || event.key === "Enter") {
-        event.preventDefault();
-        event.stopPropagation();
-        resetPanel(side);
-      }
-    },
-  );
 
   const { startTour, startLoraTour } = createWorkstationTours({
     tourRef,
