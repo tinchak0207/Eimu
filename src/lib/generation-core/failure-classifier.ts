@@ -45,6 +45,9 @@ export function classifySupplierFailure(error: unknown, now = new Date()): Class
   if (error instanceof Error && error.name === "AbortError") {
     return { failureClass: "network", retryable: true, switchSupplier: true, quarantineSupplier: false, cooldownUntil: new Date(now.getTime() + 30_000), detail };
   }
+  if (status === 451 || containsAny(normalized, ["legal_error", "content_rejected", "compliance filter"])) {
+    return { failureClass: "content_rejected", retryable: false, switchSupplier: false, quarantineSupplier: false, cooldownUntil: null, detail, httpStatus: status };
+  }
   if (containsAny(normalized, ["missing image output", "empty image result", "result was empty"])) {
     return { failureClass: "empty_result", retryable: true, switchSupplier: true, quarantineSupplier: false, cooldownUntil: new Date(now.getTime() + 5 * 60_000), detail, httpStatus: status };
   }

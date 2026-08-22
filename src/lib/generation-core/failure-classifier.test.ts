@@ -47,3 +47,23 @@ test("invalid input and unsupported model stop supplier fan-out", () => {
   assert.equal(model.switchSupplier, false);
 });
 
+test("451 legal_error is a permanent content rejection, never retried", () => {
+  const result = classifySupplierFailure(
+    new SupplierRequestError('video submit failed: 451 {"error_code":"legal_error"}', 451),
+    NOW,
+  );
+  assert.equal(result.failureClass, "content_rejected");
+  assert.equal(result.retryable, false);
+  assert.equal(result.switchSupplier, false);
+  assert.equal(result.quarantineSupplier, false);
+});
+
+test("503 wrapping a legal_error body is still classified as content rejection", () => {
+  const result = classifySupplierFailure(
+    new SupplierRequestError("Upstream is temporarily unavailable", 503, null, '{"error_code":"legal_error"}'),
+    NOW,
+  );
+  assert.equal(result.failureClass, "content_rejected");
+  assert.equal(result.retryable, false);
+});
+

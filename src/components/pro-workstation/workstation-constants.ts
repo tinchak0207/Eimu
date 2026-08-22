@@ -133,7 +133,8 @@ export function adSizeOptionsForModel(modelId: string): AdSizeOption[] {
 export function failureHint(task?: { errorCode?: string; errorMessage?: string }): string {
   const raw = `${task?.errorCode ?? ""} ${task?.errorMessage ?? ""}`.toLowerCase();
   if (!raw.trim()) return "失败原因未回传，可直接重试";
-  if (/moderat|safety|content_policy|审核|违规/.test(raw)) return "内容审核未通过 · 请改写提示词";
+  if (/video entitlement|lacks video/.test(raw)) return "當前帳號無影片生成權益 · 請聯繫管理員";
+  if (/moderat|safety|content_policy|legal_error|content_rejected|审核|违规/.test(raw)) return "内容审核未通过 · 请改写提示词";
   if (/quota|insufficient|balance|余额|额度/.test(raw)) return "额度不足 · 请充值后重试";
   if (/timeout|timed out|超时/.test(raw)) return "模型超时 · 直接重试通常可成功";
   if (/rate|429|too many/.test(raw)) return "请求过于频繁 · 稍后重试";
