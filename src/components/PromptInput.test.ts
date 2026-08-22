@@ -237,7 +237,7 @@ test("the model picker groups models by vendor submenus and prices every option"
   assert.match(picker, /generationModel\(model\)\?\.vendor/);
   assert.match(picker, /DropdownMenuSubTrigger/);
   assert.match(picker, /DropdownMenuSubContent/);
-  const catalog = read("src/lib/generation-model-catalog.ts");
+  const catalog = read("src/lib/generation-model-catalog/catalog.ts");
   assert.match(catalog, /vendor: "PixAI",/);
   const triggerBlock = picker.slice(picker.indexOf("<DropdownMenuTrigger"), picker.indexOf("</DropdownMenuTrigger>"));
   assert.doesNotMatch(triggerBlock, /modelPriceLabel|币\/张|币\/条/);
