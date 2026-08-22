@@ -30,6 +30,7 @@ const WORKSTATION_TSX_MODULES = [
   "src/components/pro-workstation/workstation-recall.ts",
   "src/components/pro-workstation/panels/WorkstationTopbar.tsx",
   "src/components/pro-workstation/panels/CanvasStage.tsx",
+  "src/components/pro-workstation/panels/LeftPromptTab.tsx",
   "src/components/pro-workstation/panels/LeftSettingsTab.tsx",
   "src/components/pro-workstation/panels/InspectorPanel.tsx",
 ];
