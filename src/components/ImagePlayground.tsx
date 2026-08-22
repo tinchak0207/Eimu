@@ -9,7 +9,6 @@ import { FaqSection } from "@/components/FaqSection";
 import { UseCaseLinks } from "@/components/UseCaseLinks";
 import { useCanvasChat, type UseCanvasChatReturn } from "@/hooks/use-canvas-chat";
 import type { AgentSseEvent } from "@/lib/agent-chat-types";
-const CanvasEmbed = dynamic(() => import("@/components/canvas/CanvasEmbed").then((m) => m.CanvasEmbed), { ssr: false });
 import {
   FALLBACK_PROGRESS_DURATION_MS,
   NORMAL_PROGRESS_DURATION_MS,
@@ -37,8 +36,7 @@ import {
   type OutputResolution,
 } from "@/lib/generation-model-catalog";
 import { enhancePrompt, type StylePreset } from "@/lib/prompt-enhancer";
-import type { ReflectedParams } from "@/lib/agent-param-reflect";
-import { Bot, ChevronDown, ChevronUp, MessageCircle, PanelLeftClose, PanelLeftOpen, RotateCcw } from "lucide-react";
+import { Bot, ChevronDown, RotateCcw } from "lucide-react";
 import { hasEnoughQuota } from "@/lib/new-api-client";
 import { LOCAL_TEST_MODE } from "@/lib/sub2api";
 import { PRO_LORA_TOUR_ARMED_KEY } from "@/lib/lora-tour-content";
@@ -46,6 +44,8 @@ import { cn } from "@/lib/utils";
 import { getInitialSuggestions, type Suggestion } from "@/lib/suggestions";
 import type { ReferenceImage } from "@/lib/image-types";
 import type { ProfessionalRunConfig } from "@/components/pro-workstation/InvokeInspiredWorkstation";
+import { CanvasChatWorkstation } from "@/components/canvas-workstation/CanvasChatWorkstation";
+import { useAgentParamReflect, AGENT_PARAM_LABELS } from "@/hooks/use-agent-param-reflect";
 
 // workstation.css 有意「不」在这里 import：它是 ~37KB 的专业模式专用样式，
 // 从这里静态 import 会让它进入首页的 render-blocking <link rel=stylesheet>。
@@ -57,15 +57,8 @@ const InvokeInspiredWorkstation = dynamic(() => import("@/components/pro-worksta
   loading: () => <div className="lg-card rounded-ios-4xl p-5 text-ios-footnote text-[rgba(0,0,0,0.46)]">加载专业工作站...</div>,
 });
 
-/** D-12 撤销条上的项目名。顺序即显示顺序。 */
-const AGENT_PARAM_LABELS: ReadonlyArray<{
-  key: "modelId" | "aspectRatio" | "resolution";
-  label: string;
-}> = [
-  { key: "modelId", label: "模型" },
-  { key: "aspectRatio", label: "比例" },
-  { key: "resolution", label: "解析度" },
-];
+// AGENT_PARAM_LABELS（D-12 撤销条项目名）随三态復原一起抽到
+// hooks/use-agent-param-reflect.ts，从这里 import。
 
 // 聊天区的懒加载 import 在 PromptInput 里：聊天区是那张卡片的一个面，
 // 由持有 toggle 的组件自己按需拉 chunk，这里不再需要它。
@@ -108,9 +101,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
   // 畫布工作站（2026-08-16，暴君裁定「擠」）：畫布模式 = 全場畫布，聊天卡
   // 變成左側浮動面板，expanded|rail 兩態 + 右緣拖寬，localStorage 記憶。
   // 遼闊是預設，不是獎勵——不再有「compact 嵌右欄」這種把畫布塞縫裡的狀態。
-  const [chatPanelState, setChatPanelState] = useState<"expanded" | "rail">("expanded");
-  const [chatPanelWidth, setChatPanelWidth] = useState(420);
-  const chatPanelDragRef = useRef<{ pointerId: number; startX: number; startW: number } | null>(null);
+  // 面板兩態/寬度/拖寬與 localStorage 持久化抽到 canvas-workstation/use-chat-panel。
   // 單一 SSE：AgentChatSurface 自建 useAgentChat，其 onCanvasEvent 出口餵回畫布。
   // 用 ref 解開循環依賴：onCanvasEvent 轉交 canvasHostRef；canvasHost 後建，餵回 ref。
   const canvasHostRef = useRef<UseCanvasChatReturn | null>(null);
@@ -172,26 +163,8 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
     }
   }, [displayMode, canvasHost.nodes.length, canvasHost.plans.length]);
 
-  // ─── 畫布工作站：面板記憶載入/持久化 + 畫布模式鎖頁面捲動 ───
-  useEffect(() => {
-    const s = window.localStorage.getItem("canvas-chat-panel-state");
-    if (s === "rail") {
-      setChatPanelState("rail");
-    } else if (!s && window.matchMedia("(max-width: 767px)").matches) {
-      // 手機首次進工作站：抽屜預設收成 rail。展開態是 46dvh 的底部抽屜，
-      // 一進場就蓋掉半屏畫布（節點卡只剩標題列可見）——要看畫布再收、要聊再開。
-      setChatPanelState("rail");
-    }
-    const w = Number(window.localStorage.getItem("canvas-chat-panel-width"));
-    if (Number.isFinite(w) && w >= 320 && w <= 560) setChatPanelWidth(w);
-  }, []);
-  useEffect(() => {
-    window.localStorage.setItem("canvas-chat-panel-state", chatPanelState);
-  }, [chatPanelState]);
-  useEffect(() => {
-    window.localStorage.setItem("canvas-chat-panel-width", String(chatPanelWidth));
-  }, [chatPanelWidth]);
   const inCanvasWorkstation = displayMode === "agent" && resultMode === "canvas" && !showProfessionalMode;
+  // ─── 畫布工作站：畫布模式鎖頁面捲動（面板記憶載入/持久化在 use-chat-panel）───
   useEffect(() => {
     if (!inCanvasWorkstation) return;
     const prev = document.body.style.overflow;
@@ -276,100 +249,27 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
     // 参考图的清理交给下面的 effect：副作用（提示）不能写在 setState 的 updater 里。
   }, []);
 
-  // ── D-12：助理动过的参数回流到工作台控件 ──
-  // 三态就是这里的 baseline / 现值 两者比对出来的：
-  //   原值      = agentBaseline 里存的那份（助理第一次改之前的快照）
-  //   agent 改成 = agentTouched 里有这个 key，且现值 !== baseline
-  //   使用者手改 = 使用者自己动了控件 → 该 key 从 agentTouched 移除
-  // 只快照一次：助理连改三轮，「恢复我的设定」也要回到它插手之前那一版。
-  const [agentBaseline, setAgentBaseline] = useState<{
-    modelId: string;
-    aspectRatio: AspectRatio;
-    resolution: OutputResolution;
-  } | null>(null);
-  const [agentTouched, setAgentTouched] = useState<Set<"modelId" | "aspectRatio" | "resolution">>(
-    new Set(),
-  );
-
-  const handleParamsReflected = useCallback((params: ReflectedParams) => {
-    setAgentBaseline((prev) =>
-      prev ?? {
-        modelId: selectedModels.image_tinchak,
-        aspectRatio,
-        resolution: outputResolution,
-      },
-    );
-    const touched = new Set<"modelId" | "aspectRatio" | "resolution">();
-    if (params.modelId !== undefined) {
-      touched.add("modelId");
-      handleModelChange(params.modelId);
-    }
-    // 模型换了之后比例/解析度的合法集合也变了，但 reflectParams 已按
-    // 助理选的模型校验过，这里直接写入即可。
-    if (params.aspectRatio !== undefined) {
-      touched.add("aspectRatio");
-      setAspectRatio(params.aspectRatio);
-    }
-    if (params.resolution !== undefined) {
-      touched.add("resolution");
-      setOutputResolution(params.resolution);
-    }
-    setAgentTouched((prev) => new Set([...prev, ...touched]));
-  }, [selectedModels.image_tinchak, aspectRatio, outputResolution, handleModelChange]);
-
-  /** 逐项撤销：把某一项还原成助理插手之前的值。 */
-  const undoAgentParam = useCallback((key: "modelId" | "aspectRatio" | "resolution") => {
-    if (!agentBaseline) return;
-    if (key === "modelId") handleModelChange(agentBaseline.modelId);
-    if (key === "aspectRatio") setAspectRatio(agentBaseline.aspectRatio);
-    if (key === "resolution") setOutputResolution(agentBaseline.resolution);
-    setAgentTouched((prev) => {
-      const next = new Set(prev);
-      next.delete(key);
-      return next;
-    });
-  }, [agentBaseline, handleModelChange]);
-
-  // 三态里的第三态：使用者自己动了控件 → 这一项不再算「agent 改成」。
-  // 关键是不共用 setter：助理回流走 setAspectRatio/setOutputResolution 原始
-  // setter，使用者走下面这两个包装。这样不需要任何「现在是谁在改」的标志位，
-  // 也就没有标志位漏关导致误判的可能。
-  const userSetAspectRatio = useCallback((next: AspectRatio) => {
-    setAspectRatio(next);
-    setAgentTouched((prev) => {
-      if (!prev.has("aspectRatio")) return prev;
-      const s = new Set(prev);
-      s.delete("aspectRatio");
-      return s;
-    });
-  }, []);
-
-  const userSetOutputResolution = useCallback((next: OutputResolution) => {
-    setOutputResolution(next);
-    setAgentTouched((prev) => {
-      if (!prev.has("resolution")) return prev;
-      const s = new Set(prev);
-      s.delete("resolution");
-      return s;
-    });
-  }, []);
-
-  const userSetModel = useCallback((next: string) => {
-    handleModelChange(next);
-    // 换模型会顺带重置比例与解析度（normalizeGenerationConfig），
-    // 所以这三项的 agent 标记一起清掉，否则会留下指向旧模型的假标记。
-    setAgentTouched((prev) => (prev.size === 0 ? prev : new Set()));
-  }, [handleModelChange]);
-
-  /** 全局「恢复我的设定」：三项一起回到助理插手之前。 */
-  const restoreMyParams = useCallback(() => {
-    if (!agentBaseline) return;
-    handleModelChange(agentBaseline.modelId);
-    setAspectRatio(agentBaseline.aspectRatio);
-    setOutputResolution(agentBaseline.resolution);
-    setAgentTouched(new Set());
-  }, [agentBaseline, handleModelChange]);
-
+  // ── D-12：助理动过的参数回流到工作台控件（三态復原抽到 use-agent-param-reflect）──
+  // userSet* 系列 setter 的身分（useCallback 依賴陣列）在 hook 內原樣保留：
+  // PromptInput 那側沒有 memo 依賴，但工作站 onModelChange 的穩定引用設計
+  // 不允許這裡換身分。
+  const {
+    agentBaseline,
+    agentTouched,
+    handleParamsReflected,
+    undoAgentParam,
+    restoreMyParams,
+    userSetAspectRatio,
+    userSetOutputResolution,
+    userSetModel,
+  } = useAgentParamReflect({
+    modelId: selectedModels.image_tinchak,
+    aspectRatio,
+    outputResolution,
+    handleModelChange,
+    setAspectRatio,
+    setOutputResolution,
+  });
 
   /**
    * 模型不支持参考图时清空并说明原因。
@@ -592,175 +492,30 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
 
       {!showProfessionalMode && (
         <>
-          {/* 畫布工作站樣式：面板 fixed 浮於畫布上、兩態寬度過渡、行動端改底部抽屜。
-              Liquid glass 紀律：面板是唯一一層玻璃卡——內層 PromptInput 的 lg-card
-              在工作站態拍扁（透明、無影、無圓角），不許卡中卡堆疊。 */}
-          <style>{`
-            @keyframes canvas-ws-fade {
-              from { opacity: 0; }
-              to { opacity: 1; }
-            }
-            @keyframes canvas-ws-panel-in {
-              from { opacity: 0; transform: translateX(-18px) scale(0.985); }
-              to { opacity: 1; transform: none; }
-            }
-            .canvas-ws-overlay { animation: canvas-ws-fade 0.32s ease-out; transition: left 0.32s cubic-bezier(0.2, 0.8, 0.2, 1); }
-            .canvas-chat-panel {
-              position: fixed;
-              z-index: 60;
-              top: calc(0.75rem + env(safe-area-inset-top, 0px));
-              bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
-              left: 0.75rem;
-              display: flex;
-              flex-direction: column;
-              min-height: 0;
-              max-height: calc(100dvh - 1.5rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
-              max-width: calc(100vw - 1.5rem);
-              /* 2026-08-22 統一裁定：面板只是定位殼，零自帶 chrome——
-                 內層 lg-card 以主頁原皮（白底/圓角/陰影）浮在畫布上，
-                 觸發前後是同一張卡（寬度除外）。 */
-              overflow: visible;
-              transition: width 0.32s cubic-bezier(0.2, 0.8, 0.2, 1);
-              animation: canvas-ws-panel-in 0.36s cubic-bezier(0.2, 0.8, 0.2, 1);
-            }
-            .canvas-chat-rail {
-              width: 3.25rem !important;
-              /* 面板殼已零 chrome，細欄自己帶最小可見度（否則按鈕浮在點陣上看不清）。 */
-              background: rgba(255, 255, 255, 0.86);
-              backdrop-filter: blur(20px) saturate(160%);
-              -webkit-backdrop-filter: blur(20px) saturate(160%);
-              border: 1px solid rgba(255, 255, 255, 0.55);
-              border-radius: 18px;
-              box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
-              overflow: hidden;
-            }
-            .canvas-chat-scroll {
-              flex: 1;
-              min-height: 0;
-              overflow-y: auto;
-              padding: 0;
-              overscroll-behavior: contain;
-            }
-            .canvas-chat-rail .canvas-chat-scroll { display: none; }
-            /* 面板態聊天區填滿面板：scroll 容器變縱向 flex、不再自己滾，
-               滾動收進 transcript 內部（agent 面的固定高在 46dvh 抽屜裡會溢出被裁）。 */
-            .canvas-chat-scroll.canvas-chat-scroll-fill {
-              display: flex;
-              flex-direction: column;
-              overflow: hidden;
-              overflow-y: hidden;
-            }
-            .canvas-chat-scroll-fill > * { min-height: 0; }
-            .canvas-chat-scroll-fill > section.lg-card {
-              flex: 1 1 0%;
-              /* 防御：卡片内部（agent 面）超高时也不许把 section 撑高，
-                 滚动一律收进 transcript；否则 composer 会被推出面板外。 */
-              min-height: 0;
-              overflow: hidden;
-            }
-            .canvas-chat-scroll-fill > :not(section.lg-card) { flex-shrink: 0; }
-            .agent-composer-anchor { flex-shrink: 0; }
-            .canvas-chat-resize {
-              position: absolute;
-              top: 0;
-              bottom: 0;
-              right: -2px;
-              width: 10px;
-              cursor: col-resize;
-              z-index: 5;
-              touch-action: none;
-            }
-            .canvas-chat-resize:hover { background: linear-gradient(to right, transparent, rgba(0, 122, 255, 0.25)); }
-            @media (prefers-reduced-motion: reduce) {
-              .canvas-ws-overlay, .canvas-chat-panel { animation: none; }
-              .canvas-chat-panel { transition: none; }
-              .canvas-ws-overlay { transition: none; }
-            }
-            @media (max-width: 767px) {
-              /* 行動端面板變底部抽屜，畫布恢復全屏。 */
-              .canvas-ws-overlay { left: 0 !important; }
-              .canvas-chat-panel {
-                left: 0.5rem;
-                right: 0.5rem;
-                top: calc(5rem + env(safe-area-inset-top, 0px));
-                bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px));
-                height: auto;
-                width: auto !important;
-                transition: top 0.32s cubic-bezier(0.2, 0.8, 0.2, 1);
-              }
-              .canvas-chat-panel::before {
-                content: "";
-                position: absolute;
-                top: 6px;
-                left: 50%;
-                transform: translateX(-50%);
-                width: 36px;
-                height: 4px;
-                border-radius: 999px;
-                background: rgba(0, 0, 0, 0.16);
-              }
-              .canvas-chat-rail { top: auto; height: 3.25rem; width: auto !important; }
-              .canvas-chat-rail::before { display: none; }
-              .canvas-chat-resize { display: none; }
-            }
-          `}</style>
-          {/* 畫布工作站：畫布吃滿全場（遼闊是預設，不再塞右欄縫裡），聊天卡原地
-              換裝成左側固定面板——DOM 不搬家，SSE 會話與輸入狀態零丟失。
-              面板不能蓋住畫布左緣的節點：整個 overlay 向右 dock，left = 0.75rem
-              + 面板寬 + 12px 間隙（--ce-dock-left 跟隨面板寬度過渡，動畫同步）。 */}
-          {inCanvasWorkstation && (
-            <div
-              className="canvas-ws-overlay fixed right-0 top-0 z-50 h-[100dvh] bg-[#F2F2F7]"
-              style={
-                {
-                  "--ce-dock-left": `${chatPanelState === "expanded" ? chatPanelWidth + 12 : 64}px`,
-                  left: "calc(0.75rem + var(--ce-dock-left, 0px))",
-                } as React.CSSProperties
-              }
-            >
-              <CanvasEmbed canvas={canvasHost} expanded onClose={() => setResultMode("image")} />
-            </div>
-          )}
-          {/* 这一层不参与模式转场：dust 动画的范围只有卡片中间那块控件区
-              （在 PromptInput 里）。上一版让整页跟着翻面，等于为了开个聊天区
-              把首页整块换掉——使用者要的是卡片换一面，不是换个网站。 */}
+          {/* 這一層不參與模式轉場：dust 動畫的範圍只有卡片中間那塊控制區
+              （在 PromptInput 裡）。上一版讓整頁跟著翻面，等於為了開個聊天區
+              把首頁整塊換掉——使用者要的是卡片換一面，不是換個網站。 */}
           <div className="min-h-screen bg-transparent pb-28 pt-10 sm:pb-32">
             <div className="page-shell">
               <div className={inCanvasWorkstation ? "block" : "grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(380px,460px)]"}>
                 {/* min-w-0 is load-bearing: an auto-sized grid column takes its
                     minimum from the item's min-content, so a single nowrap
                     control inside the card would widen the column past the
-                    viewport and push the whole page sideways on phones. */}
-                <div
-                  className={cn(
-                    inCanvasWorkstation ? "canvas-chat-panel" : "min-w-0",
-                    inCanvasWorkstation && chatPanelState === "rail" && "canvas-chat-rail",
-                  )}
-                  style={inCanvasWorkstation && chatPanelState === "expanded" ? { width: chatPanelWidth } : undefined}
+                    viewport and push the whole page sideways on phones.
+                    畫布工作站的殼（inline style + 全場畫布 overlay + 面板殼/拖寬
+                    手柄）抽到 canvas-workstation/CanvasChatWorkstation；inCanvas
+                    Workstation 仍在這裡派生並經 props 下發。面板內容（D-12 撤銷條
+                    + PromptInput）經 children 原地注入——聊天卡 DOM 不搬家，SSE
+                    會話與輸入狀態零丟失；chatHeaderExtra（收合按鈕）由面板兩態
+                    決定，經 render prop 回傳接線。 */}
+                <CanvasChatWorkstation
+                  inCanvasWorkstation={inCanvasWorkstation}
+                  isLoading={isLoading}
+                  canvasHost={canvasHost}
+                  setResultMode={setResultMode}
                 >
-                  {/* 面板頂欄（2026-08-22 統一裁定）：只在 rail 細欄態存在——
-                      細欄需要一顆展開按鈕。expanded 態不渲染頂欄：收合按鈕
-                      併入聊天 header（chatHeaderExtra），觸發前後同一個 UI。 */}
-                  {inCanvasWorkstation && chatPanelState === "rail" && (
-                    <div className="flex h-full flex-col justify-start gap-2 py-2.5 max-md:h-auto max-md:flex-row">
-                      <button
-                        type="button"
-                        onClick={() => setChatPanelState("expanded")}
-                        title="展开对话面板"
-                        aria-label="展开对话面板"
-                        className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-[#007AFF] transition-colors hover:bg-[rgba(0,122,255,0.1)]"
-                      >
-                        <PanelLeftOpen className="h-4 w-4 max-md:hidden" aria-hidden="true" />
-                        <ChevronUp className="hidden h-4 w-4 max-md:block" aria-hidden="true" />
-                      </button>
-                      <MessageCircle
-                        className={cn("h-4 w-4 shrink-0 text-[rgba(0,0,0,0.35)]", isLoading && "animate-pulse text-[#007AFF]")}
-                        aria-hidden="true"
-                      />
-                      <span className="hidden text-[12px] font-medium text-[rgba(0,0,0,0.45)] max-md:inline">AI 助理</span>
-                    </div>
-                  )}
-                  <div className={inCanvasWorkstation ? cn("canvas-chat-scroll min-w-0 flex-1 space-y-3", chatPanelState === "expanded" && "canvas-chat-scroll-fill") : "min-w-0 space-y-3"}>
+                  {(chatHeaderExtra) => (
+                    <>
                   {/* D-12：助理改过的项在这里显形，可逐项撤销，也可一键恢复原设定。
                       不显示「原值 → 现值」的箭头对照：控件上已经是现值，
                       再画一遍只是噪音；使用者要的是「这项被动过」和「还我」。 */}
@@ -824,20 +579,10 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
                     displayMode={displayMode}
                     fillAvailableHeight={inCanvasWorkstation}
                     /* 收合面板按鈕併入聊天 header——面板頂欄已刪，觸發前後
-                       同一個 header 同一套操作（2026-08-22 統一裁定）。 */
-                    chatHeaderExtra={
-                      inCanvasWorkstation && chatPanelState === "expanded" ? (
-                        <button
-                          type="button"
-                          onClick={() => setChatPanelState("rail")}
-                          title="收起对话面板"
-                          aria-label="收起对话面板"
-                          className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-[rgba(0,0,0,0.45)] transition-colors hover:bg-[rgba(0,0,0,0.06)] hover:text-[rgba(0,0,0,0.75)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)]"
-                        >
-                          <PanelLeftClose className="h-4 w-4" aria-hidden="true" />
-                        </button>
-                      ) : undefined
-                    }
+                       同一個 header 同一套操作（2026-08-22 統一裁定）。按鈕本體
+                       在 CanvasChatWorkstation（面板兩態是它的私有狀態），經
+                       render prop 回傳到這裡接線。 */
+                    chatHeaderExtra={chatHeaderExtra}
                     onEditResult={setPixaiResultUrl}
                     onUpscaleResult={setPixaiResultUrl}
                     onParamsReflected={handleParamsReflected}
@@ -847,29 +592,9 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
                     canvasStateProvider={handleCanvasSummary}
                     onSessionChange={setCurrentSessionId}
                   />
-                  </div>
-                  {/* 面板右緣拖寬手柄（320–560px） */}
-                  <div
-                    className={inCanvasWorkstation && chatPanelState === "expanded" ? "canvas-chat-resize" : "hidden"}
-                    onPointerDown={(e) => {
-                      chatPanelDragRef.current = { pointerId: e.pointerId, startX: e.clientX, startW: chatPanelWidth };
-                      e.currentTarget.setPointerCapture(e.pointerId);
-                      e.preventDefault();
-                    }}
-                    onPointerMove={(e) => {
-                      const d = chatPanelDragRef.current;
-                      if (!d || d.pointerId !== e.pointerId) return;
-                      setChatPanelWidth(Math.min(560, Math.max(320, d.startW + (e.clientX - d.startX))));
-                    }}
-                    onPointerUp={(e) => {
-                      if (chatPanelDragRef.current?.pointerId === e.pointerId) chatPanelDragRef.current = null;
-                    }}
-                    onPointerCancel={(e) => {
-                      if (chatPanelDragRef.current?.pointerId === e.pointerId) chatPanelDragRef.current = null;
-                    }}
-                    aria-hidden="true"
-                  />
-                </div>
+                    </>
+                  )}
+                </CanvasChatWorkstation>
 
                 {/* Result canvas only — the picker moved onto the left rail, so
                     this column no longer needs an identity header or a status
