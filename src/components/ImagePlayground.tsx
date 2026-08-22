@@ -79,6 +79,8 @@ export function ImagePlayground({ suggestions }: { suggestions: Suggestion[] }) 
   const [animState, setAnimState] = useState<"idle" | "exit" | "enter">("idle");
   // 别的页面（D-18 图库卡）用 ?agent=1&q= 交接过来的一句话。
   const [agentSeed, setAgentSeed] = useState("");
+  // wish 插件深链（?agent=1&session=<uuid>）：落地后直开该会话而非新开对话。
+  const [initialAgentSessionId, setInitialAgentSessionId] = useState("");
   // 只有从普通模式 LoRA 引导末步「前往专业模式」进入时才为 true，触发专业模式 LoRA 教学
   const [loraTourFromGuide, setLoraTourFromGuide] = useState(false);
   const { images, timings, failedProviders, isLoading, recentWorkflows, tasks, startGeneration } = useImageGeneration({ enableServerHistory: showProfessionalMode });
@@ -210,6 +212,9 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
     if (params.get("agent") !== "1") return;
     // URL 里塞进来的东西不可信，截一下长度，别让它撑爆输入区。
     setAgentSeed((params.get("q") ?? "").slice(0, 500));
+    // 会话深链：只接受 UUID 形状（36 位十六进制+连字符），别的值当没带。
+    const sessionParam = params.get("session") ?? "";
+    if (/^[0-9a-f-]{36}$/i.test(sessionParam)) setInitialAgentSessionId(sessionParam);
     setMode("agent");
     setDisplayMode("agent");
     window.history.replaceState(null, "", window.location.pathname);
@@ -588,6 +593,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
                     onParamsReflected={handleParamsReflected}
                     onImageResult={setPixaiResultUrl}
                     agentSeed={agentSeed}
+                    initialAgentSessionId={initialAgentSessionId}
                     onCanvasEvent={handleCanvasEvent}
                     canvasStateProvider={handleCanvasSummary}
                     onSessionChange={setCurrentSessionId}

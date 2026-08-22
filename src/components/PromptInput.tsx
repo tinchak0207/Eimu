@@ -67,6 +67,11 @@ interface PromptInputProps {
    * 它跟 agent 模式同一批 setState 落地，所以聊天区挂载时就能读到。
    */
   agentSeed?: string;
+  /**
+   * 会话深链（wish 插件 ?agent=1&session=<uuid>）：落地时直开指定会话。
+   * 与 agentSeed 同批 setState 落地，聊天区挂载时即可读到；空串表示无深链。
+   */
+  initialAgentSessionId?: string;
   /** agent 产出新图时回调，把 URL 推进右侧 ImageDisplay。 */
   onImageResult?: (url: string) => void;
   /** 畫布 SSE 事件分流（v3 embed），轉交 AgentChatSurface → useAgentChat。 */
@@ -164,6 +169,7 @@ export function PromptInput({
   onUpscaleResult,
   onParamsReflected,
   agentSeed = "",
+  initialAgentSessionId = "",
   onImageResult,
   onCanvasEvent,
   canvasStateProvider,
@@ -558,6 +564,7 @@ export function PromptInput({
                 variant="inline"
                 // 挂载时读一次：外面已经打好的半句话，或别的页面交接过来的一句话。
                 initialPrompt={agentSeed || input.trim()}
+                {...(initialAgentSessionId ? { initialSessionId: initialAgentSessionId } : {})}
                 onExit={() => onModeChange("generate")}
                 {...(chatHeaderExtra ? { headerExtra: chatHeaderExtra } : {})}
                 {...(onParamsReflected ? { onParamsReflected } : {})}

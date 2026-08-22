@@ -79,6 +79,12 @@ export interface AgentChatSurfaceProps {
    * 冲突。这里呈现成一颗可点的续写药丸，点一下才进对话。
    */
   initialPrompt?: string;
+  /**
+   * 会话深链（wish 插件 ?agent=1&session=<uuid>）：挂载时直开该会话。
+   * 提供时跳过 autoStart 的自动开场，改为 switchSession 到目标会话；
+   * 目标不存在/已被回收则静默退回「开新会话」，不弹错打断落地体验。
+   */
+  initialSessionId?: string;
   /** inline 变体的退出去向（回工作台）。page 变体不用。 */
   onExit?: () => void;
   /** 2026-08-22：工作站態把「收合成細欄」按鈕併入這裡的圖標組——
@@ -108,6 +114,7 @@ export function AgentChatSurface({
   variant = "page",
   embedded = false,
   initialPrompt = "",
+  initialSessionId,
   onParamsReflected,
   currentModelId,
   onImageResult,
@@ -138,7 +145,9 @@ export function AgentChatSurface({
     switchSession,
     startNewSession,
   } = useAgentChat({
-    autoStart: true,
+    // 深链接管开场：有 initialSessionId 时不自动开新会话（否则会先建一个
+    // 空会话再切走，网关历史里多一条垃圾），由下面的 mount effect 切目标。
+    autoStart: !initialSessionId,
     ...(onCanvasEvent ? { onCanvasEvent } : {}),
     ...(canvasStateProvider ? { canvasStateProvider } : {}),
   });
@@ -204,6 +213,21 @@ export function AgentChatSurface({
     }
   }, [switchingTo, switchSession]);
   const didAutoDiscardRef = useRef(false);
+
+  // 深链落地：mount 时切到 URL 指定的会话（wish 插件 ?agent=1&session=<uuid>）。
+  // 只试一次；失败（会话不存在/已被回收/网关重启丢会话）静默退回开新会话——
+  // 落地体验不该被一条死链接卡住，切换失败的具体原因由 switchSession 自己记录。
+  const didApplyDeepLinkRef = useRef(false);
+  useEffect(() => {
+    if (!initialSessionId || didApplyDeepLinkRef.current) return;
+    didApplyDeepLinkRef.current = true;
+    void (async () => {
+      const ok = await switchSession(initialSessionId);
+      if (!ok) await startNewSession();
+    })();
+    // 深链只属于挂载那一刻；switchSession / startNewSession 引用稳定。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialSessionId]);
 
   /** 開新對話：舊會話留在歷史裡可切回；成功後收 dropdown 並讓歷史目錄重拉。 */
   const onStartNewSession = useCallback(async (): Promise<void> => {
