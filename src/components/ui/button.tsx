@@ -9,9 +9,9 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default:
-          "bg-primary text-primary-foreground shadow-[0_16px_32px_rgba(45,49,66,0.12)] hover:-translate-y-[1px] hover:bg-primary/94",
+          "bg-primary text-primary-foreground shadow-[0_16px_32px_rgba(45,49,66,0.12)] hover:-translate-y-[1px] hover:bg-primary/[0.94]",
         destructive:
-          "bg-destructive text-destructive-foreground shadow-[0_16px_32px_rgba(177,96,86,0.12)] hover:bg-destructive/92",
+          "bg-destructive text-destructive-foreground shadow-[0_16px_32px_rgba(177,96,86,0.12)] hover:bg-destructive/[0.92]",
         // Every fraction below used Tailwind's bare opacity modifier (color/NN),
         // which only resolves against the theme's opacity scale (multiples of
         // 5 by default). None of 56/58/74/52/64/48 are on that scale, so these

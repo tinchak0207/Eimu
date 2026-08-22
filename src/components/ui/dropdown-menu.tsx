@@ -44,7 +44,7 @@ const DropdownMenuItem = React.forwardRef<
   <DropdownMenuPrimitive.Item
     ref={ref}
     className={cn(
-      "relative flex w-full cursor-default select-none items-center rounded-[1rem] py-2.5 pl-3 pr-8 text-sm text-foreground/88 outline-none focus:bg-[rgba(184,205,193,0.16)] focus:text-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+      "relative flex w-full cursor-default select-none items-center rounded-[1rem] py-2.5 pl-3 pr-8 text-sm text-foreground/[0.88] outline-none focus:bg-[rgba(184,205,193,0.16)] focus:text-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
       className,
     )}
     {...props}
@@ -60,7 +60,7 @@ const DropdownMenuCheckboxItem = React.forwardRef<
   <DropdownMenuPrimitive.CheckboxItem
     ref={ref}
     className={cn(
-      "relative flex w-full cursor-default select-none items-center rounded-[1rem] py-2.5 pl-8 pr-2 text-sm text-foreground/88 outline-none focus:bg-[rgba(184,205,193,0.16)] focus:text-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+      "relative flex w-full cursor-default select-none items-center rounded-[1rem] py-2.5 pl-8 pr-2 text-sm text-foreground/[0.88] outline-none focus:bg-[rgba(184,205,193,0.16)] focus:text-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
       className,
     )}
     checked={checked}
@@ -84,7 +84,7 @@ const DropdownMenuSubTrigger = React.forwardRef<
   <DropdownMenuPrimitive.SubTrigger
     ref={ref}
     className={cn(
-      "relative flex w-full cursor-default select-none items-center rounded-[1rem] py-2.5 pl-3 pr-2 text-sm text-foreground/88 outline-none focus:bg-[rgba(184,205,193,0.16)] focus:text-foreground data-[state=open]:bg-[rgba(184,205,193,0.16)] data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+      "relative flex w-full cursor-default select-none items-center rounded-[1rem] py-2.5 pl-3 pr-2 text-sm text-foreground/[0.88] outline-none focus:bg-[rgba(184,205,193,0.16)] focus:text-foreground data-[state=open]:bg-[rgba(184,205,193,0.16)] data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
       inset && "pl-8",
       className,
     )}

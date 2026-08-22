@@ -19,15 +19,20 @@ import { join } from "node:path";
  * Textarea), ReferenceImageUpload, and ~40 spots in the professional
  * workstation had the same dead classes for backgrounds, borders, and text.
  *
- * The fix is always the same: replace `color/NN` with a bracket arbitrary
- * value — `bg-[rgba(255,255,255,0.74)]` — which Tailwind treats as a literal
- * CSS value with no scale lookup, so it always compiles regardless of the
+ * The fix is always the same: replace `color/NN` with a bracket value —
+ * either an arbitrary color `bg-[rgba(255,255,255,0.74)]` or an arbitrary
+ * alpha on the theme token `bg-primary/[0.94]` — which Tailwind treats as a
+ * literal with no scale lookup, so it always compiles regardless of the
  * fraction. This test scans every .tsx file under src/ and fails if that
  * dead pattern reappears.
  */
 
 const SRC_ROOT = join(process.cwd(), "src");
-const DEAD_MODIFIER = /\b(?:white|black|#[0-9a-fA-F]{3,8})\/(\d{1,3})\b/g;
+// Covers bare color names (white/black), arbitrary hex colors, AND named
+// theme colors behind a utility prefix (bg-primary/94, text-foreground/88).
+// The utility prefix is required for named colors so ordinary code (x/2 in
+// arithmetic, 1k/2k in copy, w-1/2 fractions) never false-positives.
+const DEAD_MODIFIER = /\b(?:(?:bg|text|border|ring|from|via|to|fill|stroke|divide|outline|accent|caret|decoration|shadow)-[a-z0-9-]+|white|black|#[0-9a-fA-F]{3,8})\/(\d{1,3})\b/g;
 
 function listTsxFiles(dir: string): string[] {
   const out: string[] = [];
