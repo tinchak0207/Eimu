@@ -1,0 +1,165 @@
+// 畫布專案持久化（自 use-canvas-chat.ts 外圍搬遷）。
+// 三個持久化 effect：進頁初始化（歷史清單）、儲存 debounce 400ms、壓縮快照上行。
+// 擁有 refs：projectId / createdAt / saveTimer / hydrated / everHadNodes ——
+// 主 hook 經回傳值讀寫這些身份/節流狀態（newCanvasSession / openSavedCanvas 等）。
+"use client";
+
+import { useCallback, useEffect, useRef } from "react";
+import type { Dispatch, SetStateAction } from "react";
+import { listCanvasProjects, postCanvasSnapshot, saveCanvasProject } from "@/lib/canvas/client";
+import type { CanvasReducerState } from "@/lib/canvas/reducer";
+import { toCanvasProject } from "@/lib/canvas/layout";
+import type { CanvasProject, CanvasViewport } from "@/lib/canvas/types";
+import type { CharacterCard } from "@/lib/character-cards";
+import {
+  SAVE_DEBOUNCE_MS,
+  compactMetadataForAgent,
+  toProjectSummaries,
+  type CanvasBackgroundMode,
+  type CanvasBudget,
+  type CanvasProjectSummary,
+} from "./canvas-chat-types";
+
+/** useCanvasProjectSync 需要的共享 refs / 當前值 / setters（皆由主 hook 提供）。 */
+export interface UseCanvasProjectSyncParams {
+  // ── 主 hook 維護的「最新值鏈像 ref」（render 期間同步賦值）
+  canvasRef: { current: CanvasReducerState };
+  viewportRef: { current: CanvasViewport };
+  backgroundRef: { current: CanvasBackgroundMode };
+  titleRef: { current: string };
+  budgetRef: { current: CanvasBudget | null };
+  activeCardIdsRef: { current: string[] };
+  mountedRef: { current: boolean };
+  // ── 當前 render 的值（effect 依賴）
+  canvas: CanvasReducerState;
+  viewport: CanvasViewport;
+  backgroundMode: CanvasBackgroundMode;
+  projectTitle: string;
+  activeCardIds: string[];
+  saveState: "idle" | "saving" | "saved" | "error" | "offline";
+  sessionId?: string | null;
+  selectedNodeId: string | null;
+  activeCharacterCards: CharacterCard[];
+  // ── 主 hook 的 state setters（持久化結果寫回）
+  setSavedProjects: Dispatch<SetStateAction<CanvasProjectSummary[]>>;
+  setSaveState: Dispatch<SetStateAction<"idle" | "saving" | "saved" | "error" | "offline">>;
+  setLoading: Dispatch<SetStateAction<boolean>>;
+}
+
+/**
+ * 專案持久化域：進頁初始化（只抓歷史清單，不自動還原畫布）、
+ * 專案儲存（debounce 400ms）、Wave C1 壓縮快照上行（agent 的眼睛）。
+ * effect 註冊順序與原 use-canvas-chat 內聯版一致（init → debounce → snapshot）。
+ */
+export function useCanvasProjectSync(params: UseCanvasProjectSyncParams) {
+  const {
+    canvasRef, viewportRef, backgroundRef, titleRef, budgetRef, activeCardIdsRef, mountedRef,
+    canvas, viewport, backgroundMode, projectTitle, activeCardIds, saveState,
+    sessionId, selectedNodeId, activeCharacterCards,
+    setSavedProjects, setSaveState, setLoading,
+  } = params;
+
+  const projectIdRef = useRef<string | null>(null);
+  const createdAtRef = useRef<string | null>(null);
+  const saveTimerRef = useRef<number | null>(null);
+  // 載入完成前不要存：初始空畫布會把雲端那份覆蓋成空的。
+  const hydratedRef = useRef(false);
+  // 畫布是否曾有節點：空專案不存，避免歷史清單塞滿剛開又關的空殼。
+  const everHadNodesRef = useRef(false);
+
+  // ─────────────────────── 進頁初始化（只抓歷史清單，不自動還原畫布）
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const res = await listCanvasProjects();
+      if (cancelled || !mountedRef.current) return;
+      if (res.ok && res.data) {
+        setSavedProjects(toProjectSummaries(res.data));
+      } else if (res.reason === "not_authenticated") {
+        // 沒登入：畫布照常能用，只是不存雲端。不擋路、也不假裝存了。
+        setSaveState("offline");
+      }
+      // 進頁永遠開一張全新畫布：不還原最近一份 —— 那正是新舊 session 混淆的根源。
+      projectIdRef.current = `canvas-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      createdAtRef.current = new Date().toISOString();
+      hydratedRef.current = true;
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // ─────────────────────── 專案儲存（debounce 400ms）
+
+  const buildProject = useCallback((): CanvasProject => {
+    const id = projectIdRef.current ?? `canvas-${Date.now()}`;
+    const b = budgetRef.current;
+    return toCanvasProject(
+      { id, title: titleRef.current, ...(createdAtRef.current ? { createdAt: createdAtRef.current } : {}) },
+      canvasRef.current,
+      viewportRef.current,
+      backgroundRef.current,
+      b ? { totalCoins: b.usedCoins + b.remainingCoins, usedCoins: b.usedCoins } : undefined,
+      activeCardIdsRef.current,
+    );
+  }, []);
+
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    if (saveState === "offline") return;
+    // 有節點才記住「曾經有過」；空畫布從不寫入歷史（避免塞滿剛開又關的空殼）。
+    if (canvas.nodes.length > 0) everHadNodesRef.current = true;
+    if (canvas.nodes.length === 0 && !everHadNodesRef.current) return;
+    if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = window.setTimeout(() => {
+      saveTimerRef.current = null;
+      const project = buildProject();
+      setSaveState("saving");
+      void saveCanvasProject(project).then((res) => {
+        if (!mountedRef.current) return;
+        if (res.ok) setSaveState("saved");
+        else setSaveState(res.reason === "not_authenticated" ? "offline" : "error");
+      });
+    }, SAVE_DEBOUNCE_MS);
+    // 依賴畫布本體與視口/背景/標題：任何一項變化都該落盤。
+    // saveState 刻意不進依賴 —— 它由這個 effect 自己寫，進去會變成自觸發循環。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canvas, viewport, backgroundMode, projectTitle, activeCardIds, buildProject]);
+
+  // ─────────────────────── Wave C1：壓縮快照上行（agent 的眼睛）
+  // 300ms 尾隨防抖：持續平移/拖動期間不上報，停手才推最新一幀。失敗靜默。
+  useEffect(() => {
+    if (!sessionId) return;
+    const t = window.setTimeout(() => {
+      void postCanvasSnapshot(sessionId, {
+        nodes: canvas.nodes.map((n) => ({
+          id: n.id,
+          type: String(n.type),
+          title: n.title,
+          position: n.position,
+          width: n.width,
+          height: n.height,
+          ...(compactMetadataForAgent(n.metadata) ? { metadata: compactMetadataForAgent(n.metadata) } : {}),
+        })),
+        connections: canvas.connections,
+        selectedNodeIds: selectedNodeId ? [selectedNodeId] : [],
+        viewport,
+        // P2：鎖定卡進快照（agent 的 canvas_get_state 讀這份）。
+        character_cards: activeCharacterCards.map((c) => ({
+          id: c.id,
+          kind: c.kind,
+          name: c.name,
+          prompt: c.prompt,
+          ...(c.negativePrompt ? { negative_prompt: c.negativePrompt } : {}),
+          reference_count: c.references.length,
+          ...(c.loraIds?.length ? { lora_ids: c.loraIds } : {}),
+        })),
+      });
+    }, 300);
+    return () => window.clearTimeout(t);
+  }, [sessionId, canvas.nodes, canvas.connections, selectedNodeId, viewport, activeCharacterCards]);
+
+  return { projectIdRef, createdAtRef, saveTimerRef, everHadNodesRef, buildProject };
+}

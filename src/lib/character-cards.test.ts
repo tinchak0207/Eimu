@@ -174,7 +174,14 @@ test("掛接契約：CanvasEmbed 生成唯一出口注入卡（手動+agent 同�
 });
 
 test("掛接契約：use-canvas-chat 持久化 cardIds 並暴露鎖定卡", () => {
-  const source = readFileSync("src/hooks/use-canvas-chat.ts", "utf8");
+  const source = [
+    "src/hooks/use-canvas-chat.ts",
+    "src/hooks/canvas/canvas-chat-types.ts",
+    "src/hooks/canvas/canvas-project-sync.ts",
+    "src/hooks/canvas/use-canvas-cards.ts",
+    "src/hooks/canvas/canvas-event-settler.ts",
+    "src/hooks/canvas/canvas-reducer-adapter.ts",
+  ].map((p) => readFileSync(p, "utf8")).join("\n");
   assert.match(source, /activeCardIdsRef\.current,/);
   assert.match(source, /target\.cardIds/);
   assert.match(source, /const activeCharacterCards = useMemo/);
