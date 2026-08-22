@@ -1,42 +1,25 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { ArrowUpRight, Bot, ChevronLeft, ImagePlus, Pencil, RefreshCw, Volume2, VolumeX, X, ZoomIn } from "lucide-react";
+import { Bot, X } from "lucide-react";
 import type { AgentSseEvent } from "@/lib/agent-chat-types";
-import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
-import { StylePresets } from "@/components/StylePresets";
-import { ModelPicker } from "@/components/ModelPicker";
 import { getRandomSuggestions, Suggestion } from "@/lib/suggestions";
 import { STYLE_PRESETS, type StylePreset } from "@/lib/prompt-enhancer";
-import {
-  generationCoins,
-  generationModel,
-  modelAspectRatios,
-  modelDurations,
-  modelResolutions,
-  modelSupportsAudio,
-  resolutionFromImageSize,
-  resolutionLabel,
-  type AspectRatio,
-  type OutputResolution,
-} from "@/lib/generation-model-catalog";
-import { PIXAI_EDIT_MODEL_ID, PIXAI_UPSCALE_MODEL_ID } from "@/lib/image-model-ids.js";
+import { generationCoins, generationModel, type AspectRatio, type OutputResolution } from "@/lib/generation-model-catalog";
 import { insertPromptSnippet, replacePromptStyleSuffix } from "@/lib/prompt-compose";
 import type { ReferenceImage } from "@/lib/image-types";
 import { usePricingRevision } from "@/hooks/use-pricing-revision";
 import type { ReflectedParams } from "@/lib/agent-param-reflect";
-import { imageHelpers } from "@/lib/image-helpers";
 import { cn } from "@/lib/utils";
-import {
-  PIXAI_RATIO_CHIPS,
-  pickSourceFile,
-  usePixaiEdit,
-  usePixaiUpscale,
-} from "@/components/prompt-input/use-pixai-tools-panel";
+import { usePixaiEdit, usePixaiUpscale } from "@/components/prompt-input/use-pixai-tools-panel";
 import { useAgentHint } from "@/components/prompt-input/use-agent-hint";
 import { MODES_WITHOUT_TEXTAREA, useHeightLock } from "@/components/prompt-input/use-height-lock";
+import { ActionRow } from "@/components/prompt-input/ActionRow";
+import { EditPanel } from "@/components/prompt-input/EditPanel";
+import { GenerateControls } from "@/components/prompt-input/GenerateControls";
+import { UpscalePanel } from "@/components/prompt-input/UpscalePanel";
 
 /**
  * 卡片的四个面。agent 与 edit / upscale 是同一层级的 toggle——
@@ -111,28 +94,6 @@ interface PromptInputProps {
 }
 
 /**
- * 三行控制共用同一条左侧标签栏，让画质／风格／示例读起来是同一层级。
- * 每行控件统一 36px 高，标签因此可以直接垂直居中对齐。
- */
-const LABEL_CLASS = "w-8 shrink-0 text-ios-footnote font-medium text-[rgba(0,0,0,0.50)]";
-
-/**
- * 始终单行横向滑动，绝不换行：换行会把标签挤到两行中间形成错位，
- * 并留下「4+1」「5+2」这样的孤儿行。宽屏放得下就是一整行，
- * 放不下就横滑，两种情况标签都对齐。
- */
-const RAIL_CLASS =
-  "flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden";
-
-/**
- * 每一行都是「固定宽度标签 + 可收缩控件区」。min-w-0 不是保险而是必需：
- * 控件区里的胶囊都是 flex-shrink:0 + nowrap，少了它，行的 min-content 会等于
- * 所有胶囊的总宽，向上顶宽卡片、顶宽 grid 列，最终把整个页面推得横向溢出。
- * 装不下时应该是控件区内部横滑，而不是把版面撑破。
- */
-const ROW_CLASS = "flex min-w-0 items-center gap-2";
-
-/**
  * 参考图上传必须懒加载：它依赖 react-dropzone → file-selector，后者内嵌了
  * 一整份 MIME 副档名对照表（数千条，实测 40.2KB raw / 9.4KB gz）。
  * 静态 import 会把这份表拉进首屏 chunk。
@@ -169,13 +130,7 @@ const AgentChatSurface = dynamic(
   },
 );
 
-/**
- * 聊天区在卡片里的高度（CSS 变量，globals.css 定义）。
- * 桌面：clamp(400px, calc(100dvh - 240px), 820px)——减去的 240px 是下方
- * 改图/放大/AI助理按钮行 + 卡片/页面 padding 的預留，保證按鈕不被推出可視區。
- * 行动端（<640px）：clamp(320px, 60dvh, 820px)——键盘弹出时靠 composer
- * anchor scroll 逻辑把输入区滚回可视区。
- */
+/** 聊天区在卡片里的高度（CSS 变量，globals.css 定义；占位与实体同高防跳动）。 */
 const AGENT_SURFACE_HEIGHT = "var(--agent-surface-height)";
 
 export function PromptInput({
@@ -282,16 +237,8 @@ export function PromptInput({
     handleUpscaleSubmit,
   } = usePixaiUpscale({ isLoggedIn, onUpscaleResult, suppress });
 
-  const activeStyle = useMemo(
-    () => STYLE_PRESETS.find((preset) => preset.key === stylePreset),
-    [stylePreset],
-  );
   const selectedModel = generationModel(modelId);
-  const aspectRatios = modelAspectRatios(modelId);
-  const resolutions = modelResolutions(modelId);
-  const durations = modelDurations(modelId);
   const isVideo = selectedModel?.kind === "video";
-  const supportsAudio = modelSupportsAudio(modelId);
   // 当前模型是否支持参考图：不支持时隐藏上传入口，而不是让用户上传完被清空。
   const referenceImagesSupported = Boolean(selectedModel?.referenceImages);
 
@@ -540,322 +487,55 @@ export function PromptInput({
           )}
         >
           {displayMode === "generate" && (
-            <>
-              {/* ── 示例：紧跟描述框，因为它填的就是上面这个框 ── */}
-              <div className={ROW_CLASS}>
-                <span className={LABEL_CLASS}>示例</span>
-                <div className={RAIL_CLASS}>
-                  {suggestions.map((suggestion) => (
-                    <button
-                      key={suggestion.text}
-                      type="button"
-                      onClick={() => handleSuggestionSelect(suggestion.prompt)}
-                      title={suggestion.prompt}
-                      className="style-chip"
-                    >
-                      {suggestion.text}
-                    </button>
-                  ))}
-                </div>
-                <button
-                  type="button"
-                  onClick={updateSuggestions}
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:bg-[rgba(0,0,0,0.05)] hover:text-[rgba(0,0,0,0.72)] cursor-pointer"
-                  aria-label="换一批示例"
-                  title="换一批示例"
-                >
-                  <RefreshCw className="h-3.5 w-3.5" />
-                </button>
-              </div>
-
-              {/* ── 生成设置：模型 + 比例 + 清晰度 + 时长 + 风格，同一套胶囊语言。
-                  与上方「写什么」的分组靠留白完成，不画分隔线——线只会加重分割感。 ── */}
-              <div className="space-y-2.5 pt-1">
-                <div className={ROW_CLASS}>
-                  <span className={LABEL_CLASS}>模型</span>
-                  <div className={RAIL_CLASS}>
-                    <ModelPicker
-                      models={models}
-                      value={modelId}
-                      onChange={onModelChange}
-                      resolution={outputResolution}
-                      durationSeconds={durationSeconds}
-                      generateAudio={generateAudio}
-                      onOpenProfessionalMode={onToggleProfessionalMode}
-                    />
-                  </div>
-                </div>
-
-                <div className={ROW_CLASS}>
-                  <span className={LABEL_CLASS}>比例</span>
-                  <div className={RAIL_CLASS}>
-                    {aspectRatios.map((ratio) => (
-                      <button
-                        key={ratio}
-                        type="button"
-                        onClick={() => onAspectRatioChange(ratio)}
-                        className={cn("style-chip", aspectRatio === ratio && "active")}
-                      >
-                        {ratio}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className={ROW_CLASS}>
-                  <span className={LABEL_CLASS}>画质</span>
-                  <div className={RAIL_CLASS}>
-                    {resolutions.map((resolution) => (
-                      <button
-                        key={resolution}
-                        type="button"
-                        onClick={() => onOutputResolutionChange(resolution)}
-                        className={cn("style-chip gap-1.5", outputResolution === resolution && "active")}
-                      >
-                        {resolutionLabel(resolution)}
-                        <span className="tabular-nums text-[rgba(0,0,0,0.52)]">
-                          · {generationCoins(modelId, { resolution, durationSeconds, generateAudio })} 币/张
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {isVideo && durations.length > 0 ? (
-                  <div className={ROW_CLASS}>
-                    <span className={LABEL_CLASS}>时长</span>
-                    <div className={RAIL_CLASS}>
-                      {durations.map((duration) => (
-                        <button
-                          key={duration}
-                          type="button"
-                          onClick={() => onDurationChange(duration)}
-                          className={cn("style-chip gap-1.5", durationSeconds === duration && "active")}
-                        >
-                          {duration} 秒
-                          <span className="tabular-nums text-[rgba(0,0,0,0.52)]">
-                            {generationCoins(modelId, {
-                              resolution: outputResolution,
-                              durationSeconds: duration,
-                              generateAudio,
-                            })} 币
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-
-                {isVideo && supportsAudio ? (
-                  <div className={ROW_CLASS}>
-                    <span className={LABEL_CLASS}>音讯</span>
-                    <div className={RAIL_CLASS}>
-                      <button
-                        type="button"
-                        onClick={() => onGenerateAudioChange(!generateAudio)}
-                        aria-pressed={generateAudio}
-                        aria-label={generateAudio ? "关闭生成音讯" : "开启生成音讯"}
-                        title={generateAudio ? "关闭生成音讯" : "开启生成音讯"}
-                        className={cn("style-chip gap-1.5", generateAudio && "active")}
-                      >
-                        {generateAudio ? <Volume2 className="h-3.5 w-3.5" /> : <VolumeX className="h-3.5 w-3.5" />}
-                        生成音讯
-                        <span className="tabular-nums text-[rgba(0,0,0,0.52)]">
-                          {generationCoins(modelId, {
-                            resolution: outputResolution,
-                            durationSeconds,
-                            generateAudio,
-                          })} 币
-                        </span>
-                      </button>
-                    </div>
-                  </div>
-                ) : null}
-
-                <div className={ROW_CLASS}>
-                  <span className={LABEL_CLASS}>风格</span>
-                  {/* 无「默认」胶囊：全部未高亮即默认态。多一颗胶囊会把这一行挤到
-                      换行，而清除入口已由下方「已套用 ✕」和再点一次选中项承担。 */}
-                  <div className={RAIL_CLASS}>
-                    <StylePresets value={stylePreset} onChange={handleStyleChange} inline />
-                  </div>
-                </div>
-              </div>
-            </>
+            <GenerateControls
+              suggestions={suggestions}
+              handleSuggestionSelect={handleSuggestionSelect}
+              updateSuggestions={updateSuggestions}
+              models={models}
+              modelId={modelId}
+              onModelChange={onModelChange}
+              aspectRatio={aspectRatio}
+              onAspectRatioChange={onAspectRatioChange}
+              outputResolution={outputResolution}
+              onOutputResolutionChange={onOutputResolutionChange}
+              durationSeconds={durationSeconds}
+              onDurationChange={onDurationChange}
+              generateAudio={generateAudio}
+              onGenerateAudioChange={onGenerateAudioChange}
+              stylePreset={stylePreset}
+              handleStyleChange={handleStyleChange}
+              onToggleProfessionalMode={onToggleProfessionalMode}
+            />
           )}
 
           {displayMode === "edit" && (
-            <div className="space-y-2.5 pt-1">
-              {/* 原图：胶囊即上传入口，选中后变为缩略图胶囊，可移除 */}
-              <div className={ROW_CLASS}>
-                <span className={LABEL_CLASS}>原图</span>
-                <div className={RAIL_CLASS}>
-                  {editSource ? (
-                    <span className="style-chip gap-1.5 pr-1">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={editSource.previewUrl} alt="" className="h-5 w-5 shrink-0 rounded-md object-cover" />
-                      <span className="max-w-[120px] truncate">{editSource.label}</span>
-                      <button
-                        type="button"
-                        onClick={() => { setEditSource(null); setEditResultUrl(""); setEditError(""); setEditStage("idle"); }}
-                        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full lg-transition hover:bg-[rgba(0,0,0,0.08)] cursor-pointer"
-                        aria-label="移除原图"
-                        title="移除原图"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </span>
-                  ) : (
-                    <label className="style-chip cursor-pointer gap-1.5">
-                      <ImagePlus className="h-3.5 w-3.5" />
-                      上传原图
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={(e) => {
-                          pickSourceFile(e, (image) => {
-                            setEditSource(image);
-                            setEditResultUrl("");
-                            setEditError("");
-                            setEditStage("idle");
-                          });
-                        }}
-                      />
-                    </label>
-                  )}
-                </div>
-              </div>
-
-              <div className={ROW_CLASS}>
-                <span className={LABEL_CLASS}>比例</span>
-                <div className={RAIL_CLASS}>
-                  {PIXAI_RATIO_CHIPS.map((key) => (
-                    <button
-                      key={key}
-                      type="button"
-                      onClick={() => setEditRatio(key)}
-                      className={cn("style-chip", editRatio === key && "active")}
-                    >
-                      {key === "original" ? "跟随原图" : key}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <p className="text-ios-footnote text-[rgba(0,0,0,0.46)]">
-                改图 {generationCoins(PIXAI_EDIT_MODEL_ID, { resolution: "1k" })} 币起（按解析度浮动）
-              </p>
-
-              {editStage === "error" && editError && (
-                <p className="text-ios-footnote text-[#FF3B30]">{editError}</p>
-              )}
-
-              {editStage === "done" && editResultUrl && (
-                <div className="flex items-center gap-2 rounded-ios-2xl border border-[rgba(0,0,0,0.08)] p-2">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={editResultUrl} alt="改图结果" className="h-10 w-10 shrink-0 rounded-ios-md object-cover" />
-                  <span className="min-w-0 flex-1 truncate text-ios-footnote text-[rgba(0,0,0,0.55)]">改图完成</span>
-                  <button
-                    type="button"
-                    onClick={() => imageHelpers.download(editResultUrl, "edit")}
-                    className="inline-flex h-8 shrink-0 cursor-pointer items-center gap-1 rounded-full bg-[rgba(0,0,0,0.05)] px-3 text-ios-footnote font-medium text-[rgba(0,0,0,0.65)] hover:bg-[rgba(0,0,0,0.09)]"
-                  >
-                    下载
-                  </button>
-                </div>
-              )}
-            </div>
+            <EditPanel
+              editSource={editSource}
+              setEditSource={setEditSource}
+              editRatio={editRatio}
+              setEditRatio={setEditRatio}
+              editStage={editStage}
+              setEditStage={setEditStage}
+              editError={editError}
+              setEditError={setEditError}
+              editResultUrl={editResultUrl}
+              setEditResultUrl={setEditResultUrl}
+            />
           )}
 
           {displayMode === "upscale" && (
-            <div className="space-y-2.5 pt-1">
-              <div className={ROW_CLASS}>
-                <span className={LABEL_CLASS}>原图</span>
-                <div className={RAIL_CLASS}>
-                  {upscaleSource ? (
-                    <span className="style-chip gap-1.5 pr-1">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={upscaleSource.previewUrl}
-                        alt=""
-                        className="h-5 w-5 shrink-0 rounded-md object-cover"
-                        onLoad={(e) => {
-                          const el = e.currentTarget;
-                          if (el.naturalWidth && el.naturalHeight) {
-                            setUpscaleSourceSize({ width: el.naturalWidth, height: el.naturalHeight });
-                          }
-                        }}
-                      />
-                      <span className="max-w-[120px] truncate">{upscaleSource.label}</span>
-                      <button
-                        type="button"
-                        onClick={() => { setUpscaleSource(null); setUpscaleSourceSize(null); setUpscaleResultUrl(""); setUpscaleError(""); setUpscaleStage("idle"); }}
-                        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full lg-transition hover:bg-[rgba(0,0,0,0.08)] cursor-pointer"
-                        aria-label="移除原图"
-                        title="移除原图"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </span>
-                  ) : (
-                    <label className="style-chip cursor-pointer gap-1.5">
-                      <ImagePlus className="h-3.5 w-3.5" />
-                      上传原图
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={(e) => {
-                          pickSourceFile(e, (image) => {
-                            setUpscaleSource(image);
-                            setUpscaleResultUrl("");
-                            setUpscaleError("");
-                            setUpscaleStage("idle");
-                          });
-                        }}
-                      />
-                    </label>
-                  )}
-                </div>
-              </div>
-
-              <div className={ROW_CLASS}>
-                <span className={LABEL_CLASS}>倍數</span>
-                <div className={RAIL_CLASS}>
-                  <span className="style-chip active">2×</span>
-                </div>
-              </div>
-
-              <p className="text-ios-footnote text-[rgba(0,0,0,0.46)]">
-                固定 2 倍放大 · 价格{" "}
-                {generationCoins(PIXAI_UPSCALE_MODEL_ID, {
-                  resolution: upscaleSourceSize
-                    ? resolutionFromImageSize(`${upscaleSourceSize.width}x${upscaleSourceSize.height}`)
-                    : "1k",
-                })}{" "}
-                币{upscaleSourceSize ? "（按解析度浮动）" : "起（按解析度浮动）"}
-              </p>
-
-              {upscaleStage === "error" && upscaleError && (
-                <p className="text-ios-footnote text-[#FF3B30]">{upscaleError}</p>
-              )}
-
-              {upscaleStage === "done" && upscaleResultUrl && (
-                <div className="flex items-center gap-2 rounded-ios-2xl border border-[rgba(0,0,0,0.08)] p-2">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={upscaleResultUrl} alt="放大结果" className="h-10 w-10 shrink-0 rounded-ios-md object-cover" />
-                  <span className="min-w-0 flex-1 truncate text-ios-footnote text-[rgba(0,0,0,0.55)]">放大完成</span>
-                  <button
-                    type="button"
-                    onClick={() => imageHelpers.download(upscaleResultUrl, "upscale")}
-                    className="inline-flex h-8 shrink-0 cursor-pointer items-center gap-1 rounded-full bg-[rgba(0,0,0,0.05)] px-3 text-ios-footnote font-medium text-[rgba(0,0,0,0.65)] hover:bg-[rgba(0,0,0,0.09)]"
-                  >
-                    下载
-                  </button>
-                </div>
-              )}
-            </div>
+            <UpscalePanel
+              upscaleSource={upscaleSource}
+              setUpscaleSource={setUpscaleSource}
+              upscaleSourceSize={upscaleSourceSize}
+              setUpscaleSourceSize={setUpscaleSourceSize}
+              upscaleStage={upscaleStage}
+              setUpscaleStage={setUpscaleStage}
+              upscaleError={upscaleError}
+              setUpscaleError={setUpscaleError}
+              upscaleResultUrl={upscaleResultUrl}
+              setUpscaleResultUrl={setUpscaleResultUrl}
+            />
           )}
 
           {/* ── AI 助理（D-1 / D-24 状态B）──
@@ -891,148 +571,26 @@ export function PromptInput({
           )}
         </div>
 
-        {/* ── 已套用状态 + 专业模式 + 出图按钮 ──
-            这一排不参与模式动画，始终原地不动：改图／放大切换、已套用风格、
-            专业控制开关都随用户随时开关。
-            手机上纵向堆叠：`w-full` 的 CTA 混在 flex-wrap 行里，宽度要靠换行才
-            正确，很容易被同行的 ml-auto 顶出边界。改成 column，CTA 天然满宽。
-             工作站面板态：加 border-t 分隔，底部留 safe-area 空间。
-             agent 面板态（2026-08-22 完美主義審視）：這排換成極簡返回條——
-             用戶已在 AI 面，「改图/放大/AI助理」三顆 toggle 是視覺噪音且搶
-             輸入框空間；退出助理由返回條承擔，模式快捷鍵收進 Header 的
-             历史下拉。高度鎖在 section 級，底行高度差由控件區 flex-1 吸收，
-             外框紋絲不動。 */}
-        {displayMode === "agent" ? (
-          <div className="flex min-w-0 items-center gap-2">
-            <button
-              type="button"
-              onClick={() => onModeChange("generate")}
-              title="返回生成模式"
-              className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full bg-[rgba(0,0,0,0.04)] px-3.5 text-[13px] font-medium text-[rgba(0,0,0,0.55)] transition-all duration-200 hover:bg-[rgba(0,0,0,0.08)] hover:text-[rgba(0,0,0,0.75)]"
-            >
-              <ChevronLeft className="h-3.5 w-3.5" />返回生成
-            </button>
-            <span className="text-ios-caption1 text-foreground/45">改图 / 放大请先返回生成模式</span>
-          </div>
-        ) : (
-        <div
-          className={cn(
-            "flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:gap-4",
-            fillAvailableHeight && "border-t border-[rgba(0,0,0,0.06)] pt-3 pb-[env(safe-area-inset-bottom,12px)]",
-          )}
-        >
-          {/* 改图 / 放大 快捷入口 — 左侧，专业控制 toggle 左边 */}
-          <div className="flex items-center gap-1.5 shrink-0 self-start">
-            <button
-              type="button"
-              onClick={() => onModeChange(mode === "edit" ? "generate" : "edit")}
-              className={cn(
-                "inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium transition-all duration-200",
-                mode === "edit"
-                  ? "bg-[rgba(0,122,255,0.12)] text-[#007AFF] ring-1 ring-[rgba(0,122,255,0.25)]"
-                  : "bg-[rgba(0,0,0,0.05)] text-[rgba(0,0,0,0.65)] hover:bg-[rgba(0,0,0,0.09)]"
-              )}
-            >
-              <Pencil className="h-3 w-3" />改图
-            </button>
-            <button
-              type="button"
-              onClick={() => onModeChange(mode === "upscale" ? "generate" : "upscale")}
-              className={cn(
-                "inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium transition-all duration-200",
-                mode === "upscale"
-                  ? "bg-[rgba(0,122,255,0.12)] text-[#007AFF] ring-1 ring-[rgba(0,122,255,0.25)]"
-                  : "bg-[rgba(0,0,0,0.05)] text-[rgba(0,0,0,0.65)] hover:bg-[rgba(0,0,0,0.09)]"
-              )}
-            >
-              <ZoomIn className="h-3 w-3" />放大
-            </button>
-            {/* Agent 入口（D-1 / D-24 状态B）：与改图、放大**完全同一颗按钮的语法**
-                ——同样的 toggle、同样的选中态、同样只换中间控件区。
-                D-24 状态B 写的是「改图/放大入口旁常驻可开关」，
-                所以它没有自己的常亮蓝底，未选中时和邻居一样是灰的。
-                承接半句话（D-24）由 initialPrompt 负责，不用重打一遍。 */}
-            <button
-              type="button"
-              onClick={() => onModeChange(mode === "agent" ? "generate" : "agent")}
-              aria-pressed={mode === "agent"}
-              title="交给 AI 助理：说一句话，它自动选模型、风格、比例并出图"
-              className={cn(
-                "inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium transition-all duration-200",
-                mode === "agent"
-                  ? "bg-[rgba(0,122,255,0.12)] text-[#007AFF] ring-1 ring-[rgba(0,122,255,0.25)]"
-                  : "bg-[rgba(0,0,0,0.05)] text-[rgba(0,0,0,0.65)] hover:bg-[rgba(0,0,0,0.09)]"
-              )}
-            >
-              <Bot className="h-3 w-3" />AI 助理
-            </button>
-          </div>
-
-          {activeStyle ? (
-            <div className="lg-tint-blue inline-flex h-9 min-w-0 max-w-full shrink-0 items-center gap-1 self-start rounded-full pl-3.5 pr-1 text-ios-footnote font-medium text-[#007AFF]">
-              <span className="truncate">已套用 {activeStyle.label}</span>
-              <button
-                type="button"
-                onClick={() => handleStyleChange("none")}
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full lg-transition hover:bg-[rgba(0,122,255,0.14)] cursor-pointer"
-                aria-label={`清除${activeStyle.label}风格`}
-                title="清除风格"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          ) : null}
-
-          {/* 专业模式 toggle switch（agent 面不需要：工作站态已由 rails/面板承载切换，
-              摆在这里会和 composer 抢底部空间；agent 態整排已被上面的三元換成返回條） */}
-          <button
-            type="button"
-            onClick={onToggleProfessionalMode}
-            aria-pressed={isProfessionalMode}
-            title="打开专业工作站：多图队列、局部要求、项目信息"
-            className={cn(
-              "pro-mode-toggle self-start sm:ml-auto",
-              isProfessionalMode && "active",
-            )}
-          >
-            <span className="pro-mode-toggle-track" aria-hidden="true">
-              <span className="pro-mode-toggle-thumb" />
-            </span>
-            <span className="pro-mode-toggle-label">专业控制</span>
-          </button>
-
-          {/* Single CTA — elevated blue, strong shadow, scale on hover。
-              改图／放大模式下，同一颗按钮承担对应动作。
-              agent 模式下这颗按钮**不存在**：送出由聊天区自己的输入区负责，
-              这里再摆一颗「开始创作」会有两个送出口，按哪个都说不清。 */}
-          <button
-            type="button"
-            onClick={handlePrimaryAction}
-            disabled={primaryDisabled}
-            className="inline-flex h-11 w-full shrink-0 items-center justify-center gap-2 rounded-ios-xl bg-[#007AFF] px-6 text-ios-body font-semibold text-white shadow-[0_6px_24px_rgba(0,122,255,0.40),0_2px_8px_rgba(0,122,255,0.24)] transition-all duration-200 hover:bg-[#0066DD] hover:shadow-[0_10px_32px_rgba(0,122,255,0.52),0_4px_12px_rgba(0,122,255,0.30)] hover:scale-[1.025] active:scale-[0.97] disabled:cursor-not-allowed disabled:bg-[rgba(0,0,0,0.16)] disabled:shadow-none disabled:scale-100 cursor-pointer sm:w-auto"
-          >
-            {displayMode === "edit" ? (
-              editBusy ? (
-                <><Spinner className="h-4 w-4 text-white" />{editStage === "uploading" ? "上传中" : "改图中"}</>
-              ) : (
-                <><Pencil className="h-4 w-4" />开始改图<ArrowUpRight className="h-4 w-4" /></>
-              )
-            ) : displayMode === "upscale" ? (
-              upscaleBusy ? (
-                <><Spinner className="h-4 w-4 text-white" />{upscaleStage === "uploading" ? "上传中" : "放大中"}</>
-              ) : (
-                <><ZoomIn className="h-4 w-4" />开始放大<ArrowUpRight className="h-4 w-4" /></>
-              )
-            ) : (
-              isLoading ? (
-                <><Spinner className="h-4 w-4 text-white" />正在生成</>
-              ) : (
-                <>{isVideo ? "生成视频" : "开始创作"}<ArrowUpRight className="h-4 w-4" /></>
-              )
-            )}
-          </button>
-        </div>
-        )}
+        {/* ── 已套用状态 + 专业模式 + 出图按钮（Task 9 抽成 ActionRow）──
+            agent 面整排换返回条；不参与模式动画，底行 shrink-0 原地不动。 */}
+        <ActionRow
+          displayMode={displayMode}
+          mode={mode}
+          onModeChange={onModeChange}
+          fillAvailableHeight={fillAvailableHeight}
+          stylePreset={stylePreset}
+          handleStyleChange={handleStyleChange}
+          isProfessionalMode={isProfessionalMode}
+          onToggleProfessionalMode={onToggleProfessionalMode}
+          handlePrimaryAction={handlePrimaryAction}
+          primaryDisabled={primaryDisabled}
+          editBusy={editBusy}
+          editStage={editStage}
+          upscaleBusy={upscaleBusy}
+          upscaleStage={upscaleStage}
+          isLoading={isLoading}
+          isVideo={isVideo}
+        />
       </div>
     </section>
   );

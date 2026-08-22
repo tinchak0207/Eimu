@@ -32,6 +32,12 @@ test("pricing/docs/shared-ui text never drops below the AA contrast floor", () =
     "src/components/WalletBadge.tsx",
     "src/components/ModelPicker.tsx",
     "src/components/PromptInput.tsx",
+    // Task 6+9 抽出的面板与 rail 常量：文字随 JSX 迁移，对比度下限继续盯住。
+    "src/components/prompt-input/rail-classes.ts",
+    "src/components/prompt-input/GenerateControls.tsx",
+    "src/components/prompt-input/EditPanel.tsx",
+    "src/components/prompt-input/UpscalePanel.tsx",
+    "src/components/prompt-input/ActionRow.tsx",
     "src/components/ImageDisplay.tsx",
   ];
 

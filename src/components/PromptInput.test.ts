@@ -7,8 +7,21 @@ function read(relPath: string) {
   return readFileSync(join(process.cwd(), relPath), "utf8");
 }
 
+/**
+ * Task 6+9：JSX 面板（GenerateControls / EditPanel / UpscalePanel / ActionRow）与
+ * rail 類常量抽到 prompt-input/ 底下——断言按「旧档＋新档」拼接读取，语义不变。
+ */
+const PROMPT_INPUT_SURFACE = [
+  "src/components/PromptInput.tsx",
+  "src/components/prompt-input/rail-classes.ts",
+  "src/components/prompt-input/GenerateControls.tsx",
+  "src/components/prompt-input/EditPanel.tsx",
+  "src/components/prompt-input/UpscalePanel.tsx",
+  "src/components/prompt-input/ActionRow.tsx",
+].map(read).join("\n\n");
+
 test("prompt input inserts example snippets instead of replacing typed text", () => {
-  const source = read("src/components/PromptInput.tsx");
+  const source = PROMPT_INPUT_SURFACE;
   assert.match(source, /insertPromptSnippet/);
   assert.match(source, /externalPrompt/);
   assert.match(source, /handleSuggestionSelect/);
@@ -18,7 +31,7 @@ test("prompt input inserts example snippets instead of replacing typed text", ()
 });
 
 test("style selection immediately appends its prompt suffix without duplicating it on submit", () => {
-  const prompt = read("src/components/PromptInput.tsx");
+  const prompt = PROMPT_INPUT_SURFACE;
   const enhancer = read("src/lib/prompt-enhancer.ts");
 
   assert.match(prompt, /const handleStyleChange/);
@@ -29,7 +42,7 @@ test("style selection immediately appends its prompt suffix without duplicating 
 });
 
 test("prompt input renders one control set for every breakpoint", () => {
-  const source = read("src/components/PromptInput.tsx");
+  const source = PROMPT_INPUT_SURFACE;
 
   // 画质／风格／示例 share a single responsive implementation — no mobile-only
   // duplicate of the same three controls.
@@ -49,8 +62,12 @@ test("prompt input renders one control set for every breakpoint", () => {
 });
 
 test("no settings row can widen the card, so phones never scroll sideways", () => {
-  const source = read("src/components/PromptInput.tsx");
-  const playground = read("src/components/ImagePlayground.tsx");
+  const source = PROMPT_INPUT_SURFACE;
+// Task 10：聊天卡捲動容器隨面板殼搬到 canvas-workstation/，playground
+// 讀取改為「舊檔＋新檔」拼接，語義不變。
+  const playground =
+    read("src/components/ImagePlayground.tsx") +
+    read("src/components/canvas-workstation/CanvasChatWorkstation.tsx");
 
   // Chips are flex-shrink:0 + nowrap, so a row without min-w-0 reports their
   // full combined width as its min-content and drags the card past the
@@ -70,7 +87,7 @@ test("no settings row can widen the card, so phones never scroll sideways", () =
 });
 
 test("chip rails never wrap, so labels cannot drift between rows", () => {
-  const source = read("src/components/PromptInput.tsx");
+  const source = PROMPT_INPUT_SURFACE;
   const css = read("src/app/globals.css");
 
   // Wrapping is what produced misaligned labels and orphan "4+1" rows:
@@ -87,7 +104,7 @@ test("chip rails never wrap, so labels cannot drift between rows", () => {
 });
 
 test("every generated option uses the shared 36px chip control", () => {
-  const source = read("src/components/PromptInput.tsx");
+  const source = PROMPT_INPUT_SURFACE;
   const css = read("src/app/globals.css");
 
   // Model capabilities are rendered as the same 36px chips; refresh is h-9 too.
@@ -111,7 +128,7 @@ test("chips are quiet gray fills, not another wall of outlined boxes", () => {
 });
 
 test("example chips carry no decorative arrow glyph", () => {
-  const source = read("src/components/PromptInput.tsx");
+  const source = PROMPT_INPUT_SURFACE;
 
   // The inline SVG arrow rendered like a stray "return" symbol next to every
   // example and added nothing the chip's affordance did not already say.
@@ -119,13 +136,13 @@ test("example chips carry no decorative arrow glyph", () => {
 });
 
 test("prompt input separates groups with whitespace, never divider lines", () => {
-  const source = read("src/components/PromptInput.tsx");
+  const source = PROMPT_INPUT_SURFACE;
   // 硬分隔线是「分割感」的另一半来源；分组交给留白。
   assert.ok((source.match(/lg-divider/g) ?? []).length === 0);
 });
 
 test("prompt input exposes model-specific ratio, resolution, duration, and price controls", () => {
-  const source = read("src/components/PromptInput.tsx");
+  const source = PROMPT_INPUT_SURFACE;
 
   assert.match(source, /modelAspectRatios\(modelId\)/);
   assert.match(source, /modelResolutions\(modelId\)/);
@@ -136,7 +153,7 @@ test("prompt input exposes model-specific ratio, resolution, duration, and price
 });
 
 test("prompt input gives style selection visible applied state and a clear control", () => {
-  const source = read("src/components/PromptInput.tsx");
+  const source = PROMPT_INPUT_SURFACE;
 
   assert.match(source, /const activeStyle = useMemo/);
   assert.match(source, /已套用 \{activeStyle\.label\}/);
@@ -149,7 +166,7 @@ test("prompt input gives style selection visible applied state and a clear contr
 });
 
 test("prompt input keeps the example rail refreshable next to the description box", () => {
-  const source = read("src/components/PromptInput.tsx");
+  const source = PROMPT_INPUT_SURFACE;
 
   assert.match(source, /suggestions\.map/);
   assert.match(source, /换一批示例/);
@@ -159,7 +176,7 @@ test("prompt input keeps the example rail refreshable next to the description bo
 });
 
 test("the action row stacks on phones and right-aligns from sm up", () => {
-  const source = read("src/components/PromptInput.tsx");
+  const source = PROMPT_INPUT_SURFACE;
 
   // A `w-full` CTA sharing a flex-wrap row with an `ml-auto` sibling only lands
   // correctly once it wraps; stacking removes that dependency entirely.
@@ -173,7 +190,7 @@ test("the action row stacks on phones and right-aligns from sm up", () => {
 });
 
 test("professional mode reads as a toggle rather than a navigation link", () => {
-  const source = read("src/components/PromptInput.tsx");
+  const source = PROMPT_INPUT_SURFACE;
 
   assert.match(source, /aria-pressed=\{isProfessionalMode\}/);
   assert.match(source, /onClick=\{onToggleProfessionalMode\}/);
@@ -193,7 +210,7 @@ test("the result canvas sizes to its content instead of a blank square", () => {
 });
 
 test("prompt input prevents iOS zoom and keeps controls tappable", () => {
-  const source = read("src/components/PromptInput.tsx");
+  const source = PROMPT_INPUT_SURFACE;
 
   // The textarea is the only native text input, so it carries the 16px rule.
   assert.match(source, /min-h-\[180px\][^\"]*text-\[16px\]/);
@@ -205,7 +222,7 @@ test("prompt input prevents iOS zoom and keeps controls tappable", () => {
 });
 
 test("resolution and duration cost is derived from the selected model, never hardcoded", () => {
-  const source = read("src/components/PromptInput.tsx");
+  const source = PROMPT_INPUT_SURFACE;
 
   assert.doesNotMatch(source, /快速 · 1 币|高清 · 2 币/);
   assert.match(source, /generationCoins\(modelId, \{ resolution, durationSeconds, generateAudio \}\)/);
@@ -214,7 +231,7 @@ test("resolution and duration cost is derived from the selected model, never har
 });
 
 test("audio-capable video models expose an accessible toggle with live pricing", () => {
-  const source = read("src/components/PromptInput.tsx");
+  const source = PROMPT_INPUT_SURFACE;
   const picker = read("src/components/ModelPicker.tsx");
 
   assert.match(source, /isVideo && supportsAudio/);
