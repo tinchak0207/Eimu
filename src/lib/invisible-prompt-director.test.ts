@@ -1,6 +1,76 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { directVideoPrompt } from "./invisible-prompt-director";
+import { directImagePrompt, directVideoPrompt } from "./invisible-prompt-director";
+
+// ─────────────────────────────────────────────── directImagePrompt（图片规则层）
+
+/** 图片产物绝对不允许的影片语汇（镜头运动/音效/剪辑/抖动/帧）。 */
+const VIDEO_VOCAB = /\b(camera|sfx|cut|cuts|jitter|frame|frames|flicker|audio|music|motion|movement)\b/i;
+
+test("directImagePrompt: 图片产物绝不含影片语汇（镜头/SFX/剪辑/抖动/帧）", () => {
+  const out = directImagePrompt("a cat sitting on a windowsill");
+  assert.doesNotMatch(out, VIDEO_VOCAB);
+  assert.match(out, /windowsill/);
+});
+
+test("directImagePrompt: 裸 prompt 补齐六槽结构", () => {
+  const out = directImagePrompt("a cat");
+  assert.match(out, /Subject:/);
+  assert.match(out, /Setting:/);
+  assert.match(out, /Composition:/);
+  assert.match(out, /Lighting:/);
+  assert.match(out, /Style:/);
+  assert.match(out, /sharp focus, detailed texture, no distortion/i);
+});
+
+test("directImagePrompt: 已有槽位不重复注入", () => {
+  const out = directImagePrompt(
+    "a fluffy cat with detailed fur texture, sitting on a sunlit windowsill, close-up composition, soft morning light, cinematic style",
+  );
+  assert.doesNotMatch(out, /Subject: concrete physical detail/);
+  assert.doesNotMatch(out, /Setting: a specific/);
+  assert.doesNotMatch(out, /Composition: balanced layout/);
+  assert.doesNotMatch(out, /Lighting: one motivated light source/);
+  assert.doesNotMatch(out, /Style: refined color grade/);
+});
+
+test("directImagePrompt: 质量尾不重复追加", () => {
+  const out = directImagePrompt("a cat, sharp focus, detailed texture, no distortion");
+  const matches = out.match(/sharp focus/g);
+  assert.equal(matches?.length, 1);
+});
+
+test("directImagePrompt: anti-slop 替换空形容词且不产生运动语汇", () => {
+  const out = directImagePrompt("a beautiful dynamic scene of a cat, high quality");
+  assert.doesNotMatch(out, /beautiful/);
+  assert.doesNotMatch(out, /\bdynamic\b/);
+  assert.doesNotMatch(out, /high quality/);
+  assert.match(out, /striking detail/);
+  assert.doesNotMatch(out, VIDEO_VOCAB);
+});
+
+test("directImagePrompt: 情感分解为静态身体特征（无时间性语汇）", () => {
+  const out = directImagePrompt("a cat that looks scared");
+  assert.match(out, /widened eyes|clenched jaw/i);
+  assert.doesNotMatch(out, /\bscared\b/i);
+  assert.doesNotMatch(out, /builds|gradually|shifts from/i);
+});
+
+test("directImagePrompt: age-blind 同样生效", () => {
+  const out = directImagePrompt("a young man holding a coffee cup");
+  assert.doesNotMatch(out, /\byoung man\b/i);
+});
+
+test("directImagePrompt: 不做影片同义词替换（drawing/bolt 等静物名词保留）", () => {
+  const out = directImagePrompt("a pencil drawing of a rock and a metal bolt");
+  assert.match(out, /drawing/);
+  assert.match(out, /\brock\b/);
+  assert.match(out, /\bbolt\b/);
+});
+
+test("directImagePrompt: 空输入原样返回", () => {
+  assert.equal(directImagePrompt("   "), "   ".trim());
+});
 
 test("appends quality tail when the prompt is bare", () => {
   const out = directVideoPrompt("a cat on a windowsill");

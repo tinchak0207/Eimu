@@ -5,6 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { directImagePrompt } from "../../../../lib/invisible-prompt-director";
 
 const source = readFileSync(
   join(process.cwd(), "src/app/api/agent/optimize-prompt/route.ts"),
@@ -59,13 +60,38 @@ test("限流：每 IP 每 10 分钟 20 次，内存 Map 尽力而为", () => {
 
 test("Agent 层优先、规则层兜底、都失败才 502", () => {
   const c = code();
-  assert.match(c, /optimizeVideoPromptWithAgent\(prompt\)/);
+  assert.match(c, /optimizeVideoPromptWithAgent\(agentPrompt\)/);
   assert.match(c, /usedAgent: true/);
   assert.match(c, /directVideoPrompt\(prompt\)/);
   assert.match(c, /ruled !== prompt/);
   assert.match(c, /usedAgent: false/);
   assert.match(c, /502/);
   assert.match(c, /"optimize_failed"/);
+});
+
+test("media_type 入参校验：非法值 400，image/video 合法，缺省默认 image", () => {
+  const c = code();
+  // 白名单与 400 分支
+  assert.match(c, /MEDIA_TYPES\s*=\s*\["image", "video"\] as const/);
+  assert.match(c, /"invalid_media_type"/);
+  assert.match(c, /media_type 只能是 image 或 video/);
+  // 默认 image：非 video 一律按 image 处理
+  assert.match(c, /mediaTypeRaw === "video" \? "video" : "image"/);
+});
+
+test("media_type=image：Agent 请求前置静帧指令，fallback 走 directImagePrompt", () => {
+  const c = code();
+  assert.match(c, /STILL_IMAGE_AGENT_DIRECTIVE/);
+  assert.match(c, /Treat this as a STILL IMAGE prompt/);
+  assert.match(c, /mediaType === "image" \? `\$\{STILL_IMAGE_AGENT_DIRECTIVE\}\\n\$\{prompt\}` : prompt/);
+  assert.match(c, /mediaType === "video" \? directVideoPrompt\(prompt\) : directImagePrompt\(prompt\)/);
+  assert.match(c, /import \{ directImagePrompt, directVideoPrompt, extractSixSlots \}/);
+});
+
+test("image fallback（directImagePrompt）产物不含视频词汇", () => {
+  const out = directImagePrompt("a cat sitting on a windowsill");
+  assert.doesNotMatch(out, /\b(camera|sfx|cut|cuts|jitter|frame|frames|flicker)\b/i);
+  assert.match(out, /sharp focus, detailed texture, no distortion/i);
 });
 
 test("optimize-prompt 是 nodejs 路由且固定区域", () => {

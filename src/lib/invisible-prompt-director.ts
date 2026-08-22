@@ -155,6 +155,208 @@ function fillMissingSlots(
   return additions;
 }
 
+// ───────────────────────────────────────────────
+// 圖片規則層（directImagePrompt）
+// ───────────────────────────────────────────────
+
+/**
+ * 圖片六槽偵測用正則。與影片版分開：圖片沒有 camera 槽（鏡頭運動是影片概念），
+ * 改成主體細節 / 場景環境 / 構圖視角 / 光線 / 風格色調 五個偵測槽 + 質量尾。
+ * setting / style / lighting 沿用影片版偵測（語義媒體無關）。
+ */
+const IMAGE_SLOT_PATTERNS = {
+  subject: /(texture|textures|textured|fur|hair|skin|fabric|surface|material|wearing|holding|carrying|detail(?:ed|s)?|pattern|eyes|paws|feathers|wings|scales)/i,
+  setting: SLOT_PATTERNS.setting,
+  composition: /(composition|composed|centered|centred|close-?up|wide|medium shot|overhead|from above|from below|eye level|profile|symmetr|rule of thirds|negative space|portrait|headshot|full body|macro|perspective|background|foreground|depth of field|bokeh|leading lines)/i,
+  style: SLOT_PATTERNS.style,
+  lighting: SLOT_PATTERNS.lighting,
+};
+
+/**
+ * 圖片 anti-slop：空形容詞 → 具體可採樣語彙。
+ * 與影片版差異：不產生運動語彙（影片版的 fast-tracking / match-cut 是鏡頭語言）。
+ */
+const IMAGE_SLOP_WORDS: ReadonlyArray<[RegExp, string]> = [
+  [/beautiful/g, "striking detail"],
+  [/stunning/g, "arresting composition"],
+  [/amazing/g, "remarkable"],
+  [/\bepic\b/g, "large-scale"],
+  [/\bdynamic\b/g, "bold compositional flow"],
+  [/\benergetic\b/g, "vigorous"],
+  [/\bhigh quality\b/g, "sharp"],
+  [/\bhigh-res\b/g, "sharp"],
+];
+
+/**
+ * 情感標籤 → 可見的靜態身體特徵（圖片版）：模型 render 一個瞬間的形態，
+ * 不寫時間性語彙（builds / shifts / gradual 是影片語言）。
+ */
+const IMAGE_EMOTION_TO_PHYSICS: Record<string, string> = {
+  scared: "widened eyes, clenched jaw, shoulders pulled inward",
+  angry: "drawn brows, set jaw, expanded chest",
+  sad: "settled posture, relaxed mouth, downcast gaze",
+  surprised: "widened eyes, parted lips, a hand raised toward the chest",
+  shocked: "widened eyes, parted lips, body held still",
+  happy: "bright catchlights in the eyes, relaxed shoulders, a full smile",
+  excited: "wide eyes, gesturing hands, weight forward on the feet",
+  tired: "low settled posture, soft eyes, mouth relaxed open",
+  nervous: "fingers pressed together, quick darting gaze, shallow chest breath visible",
+  calm: "steady gaze, relaxed jaw, soft settled shoulders",
+  tense: "locked shoulders, set jaw, gaze fixed and watchful",
+  determined: "set jaw, locked gaze, hands steady",
+  thoughtful: "drifting gaze, furrowed brow, head tilted, a hand at the chin",
+};
+
+/** 圖片品質尾：靜態畫面適用的保底（絕不含鏡頭運動 / SFX / 剪輯 / 抖動 / 幀 語彙）。 */
+const IMAGE_QUALITY_TAIL =
+  "Sharp focus, detailed texture, no distortion, faithful proportions, clean edges.";
+
+/** 圖片品質鎖：畫面不發明 / 物件不複製（靜態版，無 every cut 這類剪輯語）。 */
+const IMAGE_POSITIVE_LOCKS =
+  "The image contains only what is described — no extra people, no duplicated objects, background consistent with the setting.";
+
+/** 分解泛情緒字（圖片版）：只處理獨立的情緒名詞/形容詞。 */
+function decomposeGenericEmotionForImage(prompt: string): string {
+  let out = prompt;
+  for (const [emotion, physics] of Object.entries(IMAGE_EMOTION_TO_PHYSICS)) {
+    const pattern = new RegExp(`\\b(?:looks?|feels?|seems?|is|gets?) (${emotion})\\b`, "gi");
+    out = out.replace(pattern, (m) => {
+      const subject = m.split(" ")[0];
+      return `${subject} with ${physics}`;
+    });
+  }
+  return out;
+}
+
+/** 偵測圖片槽位缺漏，缺的補中性指令——不替用戶決定具體構圖。 */
+function fillMissingImageSlots(
+  subjectPresent: boolean,
+  settingPresent: boolean,
+  compositionPresent: boolean,
+  stylePresent: boolean,
+  lightingPresent: boolean,
+): string[] {
+  const additions: string[] = [];
+  if (!subjectPresent) {
+    additions.push("Subject: concrete physical detail — surface texture, form, and material.");
+  }
+  if (!settingPresent) {
+    additions.push("Setting: a specific, believable environment with tangible background detail.");
+  }
+  if (!compositionPresent) {
+    additions.push("Composition: balanced layout, one clear focal point, clean negative space.");
+  }
+  if (!stylePresent) {
+    additions.push("Style: refined color grade with a named palette — muted shadows, warm highlights.");
+  }
+  if (!lightingPresent) {
+    additions.push("Lighting: one motivated light source, consistent shadow direction, soft falloff.");
+  }
+  return additions;
+}
+
+/**
+ * 優化一段圖片 prompt。純函數、無副作用、同步執行——零成本零延遲。
+ * 輸入已 trim 過。與 directVideoPrompt 同構：anti-slop → age-blind → 情感分解
+ * → 正向化 → 補槽 → 質量尾 + 品質鎖。注意：此函數的產物**絕不出現**影片語彙
+ * （camera movement / SFX / cut / jitter / frame 等），也不做影片版同義詞替換
+ * （drawing / bolt / rock 在圖片語境是常見靜物名詞，替換反而破壞語義）。
+ * durationSeconds / generateAudio 屬影片選項，此處忽略。
+ */
+export function directImagePrompt(rawPrompt: string, _options: DirectorOptions = {}): string {
+  const user = rawPrompt.trim();
+  if (!user) return user;
+
+  const subjectPresent = IMAGE_SLOT_PATTERNS.subject.test(user);
+  const settingPresent = IMAGE_SLOT_PATTERNS.setting.test(user);
+  const compositionPresent = IMAGE_SLOT_PATTERNS.composition.test(user);
+  const stylePresent = IMAGE_SLOT_PATTERNS.style.test(user);
+  const lightingPresent = IMAGE_SLOT_PATTERNS.lighting.test(user);
+
+  let enhanced = user;
+  enhanced = replaceAll(enhanced, IMAGE_SLOP_WORDS);
+  enhanced = enforceAgeBlind(enhanced);
+  enhanced = decomposeGenericEmotionForImage(enhanced);
+  enhanced = enforcePositivePhrasing(enhanced);
+
+  const parts: string[] = [enhanced];
+  parts.push(
+    ...fillMissingImageSlots(subjectPresent, settingPresent, compositionPresent, stylePresent, lightingPresent),
+  );
+
+  if (!/(sharp focus|detailed texture|no distortion)/i.test(enhanced)) {
+    parts.push(IMAGE_QUALITY_TAIL);
+  }
+  if (!/no extra people|no duplicated/i.test(enhanced)) {
+    parts.push(IMAGE_POSITIVE_LOCKS);
+  }
+
+  return parts.join(" ");
+}
+
+export interface SixSlots {
+  /** image: 主體細節 / video: 鏡頭語言 */
+  subject: string;
+  /** image: 場景環境 / video: 場景 */
+  scene: string;
+  /** image: 構圖視角 / video: 動作（影片無構圖槽，動作是時間軸概念） */
+  composition: string;
+  lighting: string;
+  style: string;
+  /** image: 質量鎖 / video: 無質量槽，併入 style */
+  quality: string;
+}
+
+const QUALITY_PATTERN = /(sharp focus|detailed texture|no distortion|faithful proportions|clean edges|photoreal|stable composition|no flicker|no frame jitter|identity|wardrobe|no extra people|no duplicated|only what is described|sfx|no music)/i;
+
+/**
+ * 從（優化後的）prompt 提取六槽結構化視圖。免費層展示用——把長 prompt
+ * 拆成六個語義槽位，讓用戶看到「專業結構」而不是一坨文字。
+ * 純函數：按句號/破折號切分短句，正則歸類到槽位；歸不進任何槽的短句
+ * 併入主體（用戶的原話幾乎總是主體描述）。
+ */
+export function extractSixSlots(prompt: string, mediaType: "image" | "video"): SixSlots {
+  const clauses = prompt
+    .split(/[.。]|\s—\s/)
+    .map((clause) => clause.trim())
+    .filter(Boolean);
+  const slots: SixSlots = { subject: "", scene: "", composition: "", lighting: "", style: "", quality: "" };
+  const patterns =
+    mediaType === "image"
+      ? { subject: IMAGE_SLOT_PATTERNS.subject, scene: IMAGE_SLOT_PATTERNS.setting, composition: IMAGE_SLOT_PATTERNS.composition, lighting: IMAGE_SLOT_PATTERNS.lighting, style: IMAGE_SLOT_PATTERNS.style }
+      : { subject: /\b(man|woman|cat|dog|person|people|figure|character|he|she|it|they)\b/i, scene: SLOT_PATTERNS.setting, composition: SLOT_PATTERNS.action, lighting: SLOT_PATTERNS.lighting, style: SLOT_PATTERNS.style };
+
+  for (const clause of clauses) {
+    if (QUALITY_PATTERN.test(clause)) {
+      slots.quality = [slots.quality, clause].filter(Boolean).join(". ");
+      continue;
+    }
+    let classified = false;
+    for (const [slot, pattern] of Object.entries(patterns) as Array<[keyof typeof patterns, RegExp]>) {
+      if (pattern.test(clause)) {
+        // scene/composition/lighting/style 槽優先歸類；subject 正則只是「細節詞」提示，
+        // 留到最後兜底，避免主體句搶走場景句。
+        if (slot !== "subject") {
+          slots[slot] = [slots[slot], clause].filter(Boolean).join(". ");
+          classified = true;
+          break;
+        }
+      }
+    }
+    if (!classified) slots.subject = [slots.subject, clause].filter(Boolean).join(". ");
+  }
+
+  const fallbacks =
+    mediaType === "image"
+      ? { scene: "（原始 prompt 未指定場景，建議補充）", composition: "（未指定構圖，模型自由發揮）", lighting: "（未指定光線）", style: "（未指定風格）", quality: "（無質量鎖）" }
+      : { scene: "（未指定場景）", composition: "（未指定動作）", lighting: "（未指定光線）", style: "（未指定風格）", quality: "（無質量鎖）" };
+  for (const [slot, fallback] of Object.entries(fallbacks) as Array<[keyof SixSlots, string]>) {
+    if (!slots[slot]) slots[slot] = fallback;
+  }
+  if (!slots.subject) slots.subject = prompt.slice(0, 120);
+  return slots;
+}
+
 /**
  * 優化一段影片 prompt。純函數、無副作用、同步執行——零成本零延遲。
  * 輸入已 trim 過。
