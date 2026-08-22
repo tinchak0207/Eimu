@@ -68,7 +68,11 @@ async function proxy(req: NextRequest, context: RouteContext, method: "GET" | "P
   const { path } = await context.params;
   // catch-all 的段已被 Next 解码；逐段重新编码再拼接，防止路径里的特殊字符
   // 改变上游路由语义。空路径直接 404（不是网关语义，是本路由不存在）。
-  const subPath = (path ?? []).map((segment) => encodeURIComponent(segment)).join("/");
+  // 插件 baseUrl 可能带 agent/v1 前缀（.../biz/agent/v1），拼接时剥掉重复段，
+  // 两种写法（.../biz/sessions 与 .../biz/agent/v1/sessions）都归一到同一上游路径。
+  const segs = (path ?? []).map((segment) => encodeURIComponent(segment))
+  while (segs.length >= 2 && segs[0] === "agent" && segs[1] === "v1") segs.splice(0, 2)
+  const subPath = segs.join("/");
   if (!subPath) {
     return fail(404, "路径不存在。", "not_found");
   }
