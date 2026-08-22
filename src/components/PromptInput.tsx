@@ -25,21 +25,18 @@ import {
 import { PIXAI_EDIT_MODEL_ID, PIXAI_UPSCALE_MODEL_ID } from "@/lib/image-model-ids.js";
 import { insertPromptSnippet, replacePromptStyleSuffix } from "@/lib/prompt-compose";
 import type { ReferenceImage } from "@/lib/image-types";
-import { useAuth } from "@/hooks/use-auth";
-import { useToast } from "@/hooks/use-toast";
 import { usePricingRevision } from "@/hooks/use-pricing-revision";
-import { LOCAL_TEST_MODE } from "@/lib/sub2api";
-import {
-  PixaiError,
-  resolveToPayload,
-  runEdit,
-  runUpscale,
-  uploadMedia,
-} from "@/components/pixai-tools/shared";
-import type { PickedImage } from "@/components/pixai-tools/PixaiSourceInput";
 import type { ReflectedParams } from "@/lib/agent-param-reflect";
 import { imageHelpers } from "@/lib/image-helpers";
 import { cn } from "@/lib/utils";
+import {
+  PIXAI_RATIO_CHIPS,
+  pickSourceFile,
+  usePixaiEdit,
+  usePixaiUpscale,
+} from "@/components/prompt-input/use-pixai-tools-panel";
+import { useAgentHint } from "@/components/prompt-input/use-agent-hint";
+import { MODES_WITHOUT_TEXTAREA, useHeightLock } from "@/components/prompt-input/use-height-lock";
 
 /**
  * 卡片的四个面。agent 与 edit / upscale 是同一层级的 toggle——
@@ -135,21 +132,6 @@ const RAIL_CLASS =
  */
 const ROW_CLASS = "flex min-w-0 items-center gap-2";
 
-/** D-24 状态A 一个 session 只提示一次的记号。 */
-const AGENT_HINT_SEEN_KEY = "agent-hint-seen-v1";
-
-/** 改图比例胶囊：跟随原图 = 服务端回退 1024x1024，其余按固定尺寸传给 edit API。 */
-type PixaiRatioKey = "original" | "1:1" | "4:3" | "3:4" | "9:16";
-const PIXAI_RATIO_SIZES: Record<Exclude<PixaiRatioKey, "original">, string> = {
-  "1:1": "1024x1024",
-  "4:3": "1024x768",
-  "3:4": "768x1024",
-  "9:16": "768x1365",
-};
-const PIXAI_RATIO_CHIPS: PixaiRatioKey[] = ["original", "1:1", "4:3", "3:4", "9:16"];
-
-type PixaiStage = "idle" | "uploading" | "generating" | "done" | "error";
-
 /**
  * 参考图上传必须懒加载：它依赖 react-dropzone → file-selector，后者内嵌了
  * 一整份 MIME 副档名对照表（数千条，实测 40.2KB raw / 9.4KB gz）。
@@ -196,9 +178,6 @@ const AgentChatSurface = dynamic(
  */
 const AGENT_SURFACE_HEIGHT = "var(--agent-surface-height)";
 
-/** 这两个面不需要卡片顶部那个描述框：放大没有描述，agent 自带输入区。 */
-const MODES_WITHOUT_TEXTAREA = new Set<PromptInputMode>(["upscale", "agent"]);
-
 export function PromptInput({
   suggestions: initialSuggestions,
   isLoading,
@@ -241,57 +220,16 @@ export function PromptInput({
   usePricingRevision();
   const [input, setInput] = useState("");
   const [suggestions, setSuggestions] = useState<Suggestion[]>(initialSuggestions);
-  const { token, user } = useAuth();
-  const { toast } = useToast();
-
-  // 改图 / 放大各自维护来源图、阶段与结果；模式切换只换控件区，状态保留。
-  const [editSource, setEditSource] = useState<PickedImage | null>(null);
-  const [editRatio, setEditRatio] = useState<PixaiRatioKey>("original");
-  const [editStage, setEditStage] = useState<PixaiStage>("idle");
-  const [editError, setEditError] = useState("");
-  const [editResultUrl, setEditResultUrl] = useState("");
-  const [upscaleSource, setUpscaleSource] = useState<PickedImage | null>(null);
-  const [upscaleSourceSize, setUpscaleSourceSize] = useState<{ width: number; height: number } | null>(null);
-  const [upscaleStage, setUpscaleStage] = useState<PixaiStage>("idle");
-  const [upscaleError, setUpscaleError] = useState("");
-  const [upscaleResultUrl, setUpscaleResultUrl] = useState("");
 
   const prevDisplayModeRef = useRef(displayMode);
   useEffect(() => {
     prevDisplayModeRef.current = displayMode;
   }, [displayMode]);
 
-  // ── 全模式共用外框高度（2026-08-22 暴君裁定：AI 助理 toggle 時大面板高度
-  //    不可變，溢出不可接受）──
-  // 不猜固定數字：在 generate/edit（textarea 可見）時實測內容區自然高度，
-  // 鎖定為所有模式的外框高度。generate 回到原本自然高（零溢出）；
-  // agent/upscale 複製同一高度，內容由 flex-1 拉滿、內部自滾——切換零跳動。
-  // 內容多寡隨模型變化（視頻有 時長/音訊 行），所以進 generate/edit、換模型、
-  // 窗口縮放都要重測。測量前先把舊鎖定清掉，避免 offsetHeight 被自己撐住。
-  const contentRef = useRef<HTMLDivElement | null>(null);
-  const [contentHeight, setContentHeight] = useState<number | null>(null);
-  const measureContentHeight = useCallback(() => {
-    if (fillAvailableHeight) return;
-    const el = contentRef.current;
-    if (!el) return;
-    const textareaVisible = !MODES_WITHOUT_TEXTAREA.has(displayMode);
-    if (!textareaVisible) return;
-    // 先解除鎖定再量：否則固定的 height 會讓 offsetHeight 恆等於上次值。
-    setContentHeight(null);
-    requestAnimationFrame(() => {
-      const el2 = contentRef.current;
-      if (el2 && el2.offsetHeight > 0) setContentHeight(el2.offsetHeight);
-    });
-  }, [displayMode, fillAvailableHeight]);
-  useEffect(() => {
-    measureContentHeight();
-  }, [measureContentHeight, modelId, displayMode]);
-  useEffect(() => {
-    if (fillAvailableHeight) return;
-    window.addEventListener("resize", measureContentHeight);
-    return () => window.removeEventListener("resize", measureContentHeight);
-  }, [measureContentHeight, fillAvailableHeight]);
-
+  // ── 全模式共用外框高度（Task 3 抽成 use-height-lock.ts）──
+  // generate/edit 實測自然高鎖為全模式外框高；測量根仍是本組件 JSX 裡
+  // 綁定 contentRef 的那個 section（包含所有模式面的同一 DOM 節點）。
+  const { contentRef, contentHeight } = useHeightLock({ displayMode, modelId, fillAvailableHeight });
 
   // 放大模式没有描述框；agent 模式自带输入区（AgentComposer），
   // 两个框并排会出现「我该往哪打字」的歧义，所以这里也让它消散。
@@ -309,55 +247,40 @@ export function PromptInput({
     }
   }, [externalPrompt]);
 
-  // ── D-24 状态A：渐进披露第一层 ──
-  // 打了第一个字之后停顿 >5 秒（= 卡住了，不是打字中），才在输入框下面浮一条
-  // 「Agent 帮你完成」。一个 session 只出现一次，用过或关掉就不再烦。
-  // 不能一进页面就弹：那是广告，不是帮忙。
-  const [agentHintOpen, setAgentHintOpen] = useState(false);
-  const [agentHintSpent, setAgentHintSpent] = useState(false);
-  // 已送出（生成中/完成後看圖）→ 抑制提示：提示只屬於「還沒送出、卡在輸入」的時段。
-  // input 內容一變（使用者重新寫新任務）就解除，讓新任務也能獲得一次提示機會。
-  const [agentHintSuppressed, setAgentHintSuppressed] = useState(false);
-  const agentHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // ── D-24 状态A：渐进披露第一层（Task 3 抽成 use-agent-hint.ts）──
+  // 提示开关 / sessionStorage 记号 / 5 秒计时 / 送出抑制全在 hook 里；
+  // suppress 由 hook 回傳，generate / edit / upscale 三条送出路径闭包共享同一下发。
+  const { agentHintOpen, spendAgentHint, suppress } = useAgentHint({ displayMode, input, isLoading });
 
-  useEffect(() => {
-    // 只跟 sessionStorage：换 tab 重来一次可以，同一 session 内不重复。
-    try {
-      if (sessionStorage.getItem(AGENT_HINT_SEEN_KEY) === "1") setAgentHintSpent(true);
-    } catch {
-      // 隐私模式下 sessionStorage 会抛，当成没看过即可
-    }
-  }, []);
-
-  useEffect(() => {
-    if (agentHintTimerRef.current) clearTimeout(agentHintTimerRef.current);
-    // 只在生成模式、已经打了字、还没用掉、还没送出、且不正在生成的情况下计时。
-    // isLoading = 生成请求已发出：任务在跑时不弹「AI 助理帮你完成」，避免打断等待。
-    // agentHintSuppressed = 已送出：生成完成後看圖/檢查圖片期間也不彈，直到重新輸入新任务。
-    if (agentHintSpent || agentHintSuppressed || displayMode !== "generate" || input.trim().length === 0 || isLoading) {
-      setAgentHintOpen(false);
-      return;
-    }
-    agentHintTimerRef.current = setTimeout(() => setAgentHintOpen(true), 5000);
-    return () => {
-      if (agentHintTimerRef.current) clearTimeout(agentHintTimerRef.current);
-    };
-  }, [input, displayMode, agentHintSpent, agentHintSuppressed, isLoading]);
-
-  // 送出後 suppress 只被「输入内容变化」解除：改成新任务的字才重新计时。
-  useEffect(() => {
-    setAgentHintSuppressed(false);
-  }, [input]);
-
-  const spendAgentHint = () => {
-    setAgentHintOpen(false);
-    setAgentHintSpent(true);
-    try {
-      sessionStorage.setItem(AGENT_HINT_SEEN_KEY, "1");
-    } catch {
-      // 存不下就只在本次挂载内生效，不影响主流程
-    }
-  };
+  // 改图 / 放大各自维护来源图、阶段与结果；模式切换只换控件区，状态保留。
+  const {
+    editSource,
+    setEditSource,
+    editRatio,
+    setEditRatio,
+    editStage,
+    setEditStage,
+    editError,
+    setEditError,
+    editResultUrl,
+    setEditResultUrl,
+    editBusy,
+    handleEditSubmit,
+  } = usePixaiEdit({ prompt: input, isLoggedIn, onEditResult, suppress });
+  const {
+    upscaleSource,
+    setUpscaleSource,
+    upscaleSourceSize,
+    setUpscaleSourceSize,
+    upscaleStage,
+    setUpscaleStage,
+    upscaleError,
+    setUpscaleError,
+    upscaleResultUrl,
+    setUpscaleResultUrl,
+    upscaleBusy,
+    handleUpscaleSubmit,
+  } = usePixaiUpscale({ isLoggedIn, onUpscaleResult, suppress });
 
   const activeStyle = useMemo(
     () => STYLE_PRESETS.find((preset) => preset.key === stylePreset),
@@ -371,9 +294,6 @@ export function PromptInput({
   const supportsAudio = modelSupportsAudio(modelId);
   // 当前模型是否支持参考图：不支持时隐藏上传入口，而不是让用户上传完被清空。
   const referenceImagesSupported = Boolean(selectedModel?.referenceImages);
-
-  const editBusy = editStage === "uploading" || editStage === "generating";
-  const upscaleBusy = upscaleStage === "uploading" || upscaleStage === "generating";
 
   const handleSuggestionSelect = (prompt: string) => {
     setInput((current) => insertPromptSnippet(current, prompt));
@@ -394,102 +314,14 @@ export function PromptInput({
   const handleSubmit = () => {
     // Not logged in: always allow click → parent will open auth modal
     if (!isLoggedIn) {
-      setAgentHintOpen(false);
-      setAgentHintSuppressed(true);
+      suppress();
       onSubmit(input);
       return;
     }
     if (!isLoading && input.trim()) {
       // 送出即代表这次「卡住」已结束：关掉提示，生成完成后的看图时段不再弹。
-      setAgentHintOpen(false);
-      setAgentHintSuppressed(true);
+      suppress();
       onSubmit(input);
-    }
-  };
-
-  const redirectToGithub = () => {
-    window.location.href = "/api/auth/github/start";
-  };
-
-  const pickSourceFile = (
-    e: React.ChangeEvent<HTMLInputElement>,
-    onPick: (image: PickedImage) => void,
-  ) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    onPick({
-      source: { kind: "file", file, mimeType: file.type || "image/png" },
-      previewUrl: URL.createObjectURL(file),
-      label: file.name,
-    });
-  };
-
-  const handleEditSubmit = async () => {
-    if (!editSource) {
-      toast({ title: "请先选择图片", variant: "destructive" });
-      return;
-    }
-    if (!input.trim()) {
-      toast({ title: "请描述想改成什么样子", variant: "destructive" });
-      return;
-    }
-    if (!LOCAL_TEST_MODE && !isLoggedIn) {
-      redirectToGithub();
-      return;
-    }
-    const tokenValue = token ?? "";
-    // 编辑请求已送出：之后的看图/调整时段不再弹「AI 助理帮你完成」。
-    setAgentHintOpen(false);
-    setAgentHintSuppressed(true);
-    try {
-      setEditError("");
-      setEditStage("uploading");
-      const payload = await resolveToPayload(editSource.source);
-      const mediaId = await uploadMedia(payload, tokenValue, user?.id ?? 0);
-      setEditStage("generating");
-      const size = editRatio === "original" ? "1024x1024" : PIXAI_RATIO_SIZES[editRatio];
-      const url = await runEdit({ mediaId, prompt: input.trim(), size, token: tokenValue, userId: user?.id ?? 0 });
-      setEditResultUrl(url);
-      setEditStage("done");
-      onEditResult?.(url);
-    } catch (e) {
-      const message = e instanceof PixaiError ? e.message : e instanceof Error ? e.message : "生成失败，请重试";
-      setEditError(message);
-      setEditStage("error");
-      toast({ title: "改图失败", description: message, variant: "destructive" });
-    }
-  };
-
-  const handleUpscaleSubmit = async () => {
-    if (!upscaleSource) {
-      toast({ title: "请先选择图片", variant: "destructive" });
-      return;
-    }
-    if (!LOCAL_TEST_MODE && !isLoggedIn) {
-      redirectToGithub();
-      return;
-    }
-    const tokenValue = token ?? "";
-    // 放大请求已送出：之后的看图/调整时段不再弹「AI 助理帮你完成」。
-    setAgentHintOpen(false);
-    setAgentHintSuppressed(true);
-    try {
-      setUpscaleError("");
-      setUpscaleStage("uploading");
-      const payload = await resolveToPayload(upscaleSource.source);
-      const mediaId = await uploadMedia(payload, tokenValue, user?.id ?? 0);
-      setUpscaleStage("generating");
-      const sizeLabel = upscaleSourceSize ? `${upscaleSourceSize.width}x${upscaleSourceSize.height}` : undefined;
-      const url = await runUpscale({ mediaId, factor: 2, size: sizeLabel, token: tokenValue, userId: user?.id ?? 0 });
-      setUpscaleResultUrl(url);
-      setUpscaleStage("done");
-      onUpscaleResult?.(url);
-    } catch (e) {
-      const message = e instanceof PixaiError ? e.message : e instanceof Error ? e.message : "生成失败，请重试";
-      setUpscaleError(message);
-      setUpscaleStage("error");
-      toast({ title: "放大失败", description: message, variant: "destructive" });
     }
   };
 

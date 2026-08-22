@@ -24,6 +24,8 @@ const batchProgress = read("src/components/agent-chat/AgentBatchProgress.tsx");
 const disclosure = read("src/components/agent-chat/AgentParamDisclosure.tsx");
 const chatCss = read("src/components/agent-chat/agent-chat.css");
 const promptInput = read("src/components/PromptInput.tsx");
+// Task 3：PromptInput 的高度鎖 / 無描述框模式集合抽到 hooks —— 斷言按「舊檔＋新檔」拼接讀取。
+const promptInputHeightLock = read("src/components/prompt-input/use-height-lock.ts");
 const playground = read("src/components/ImagePlayground.tsx");
 const navbar = read("src/components/Navbar.tsx");
 const agentRoute = read("src/app/agent/page.tsx");
@@ -317,7 +319,9 @@ test("D-1 AI 助理 is a toggle beside 改图/放大, not a page takeover", () =
 });
 
 test("D-1 the agent face never grows a second send button or a second textarea", () => {
-  const code = readCode(promptInput);
+  // MODES_WITHOUT_TEXTAREA 宣告隨高度鎖抽到 use-height-lock.ts（Task 3），
+  // 斷言語義不變：PromptInput 及其抽出 hooks 構成的同一組件表面。
+  const code = readCode(promptInput) + "\n" + readCode(promptInputHeightLock);
   // 送出归聊天区自己的输入区：卡片底部那颗 CTA 在 agent 面不存在。
   // 2026-08-22：agent 面底行整排由三元換成返回條（工作站態同款），
   // CTA/pro-toggle 只存在於非 agent 分支。
