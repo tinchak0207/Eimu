@@ -1,0 +1,204 @@
+{
+ "meta": {
+  "total_posts": 1,
+  "subreddits": [
+   "aiVideo",
+   "StableDiffusion"
+  ],
+  "mode": "question",
+  "filter": "question",
+  "post_type": "all",
+  "flair": null,
+  "days": 365,
+  "query": "video generation takes",
+  "title": null,
+  "exclude": null,
+  "min_score": 0,
+  "fetched_at": "2026-08-21T08:05:51.688936+00:00",
+  "api": "https://arctic-shift.photon-reddit.com/api"
+ },
+ "intent_stats": {
+  "free_cost": {
+   "count": 1,
+   "label": "价格/免费",
+   "samples": [
+    "What can I do with a 32gb 5090 that would be prohibitively slow on a 24gb 3090?"
+   ]
+  },
+  "legal": {
+   "count": 1,
+   "label": "授权/法律",
+   "samples": [
+    "What can I do with a 32gb 5090 that would be prohibitively slow on a 24gb 3090?"
+   ]
+  }
+ },
+ "attitude_stats": {
+  "asking": {
+   "count": 1,
+   "label": "求助",
+   "samples": [
+    "What can I do with a 32gb 5090 that would be prohibitively slow on a 24gb 3090?"
+   ]
+  }
+ },
+ "matrix": {
+  "价格/免费": {
+   "praise": 0,
+   "complain": 0,
+   "warning": 0,
+   "asking": 1
+  },
+  "授权/法律": {
+   "praise": 0,
+   "complain": 0,
+   "warning": 0,
+   "asking": 1
+  }
+ },
+ "trends": {
+  "direction": "falling",
+  "first_half_avg_per_bucket": 0.2,
+  "last_half_avg_per_bucket": 0.0,
+  "buckets": [
+   {
+    "bucket": 1,
+    "start": "2025-08-21",
+    "end": "2025-09-18",
+    "posts": 1,
+    "avg_score": 33.0,
+    "question_share": 100.0
+   },
+   {
+    "bucket": 2,
+    "start": "2025-09-18",
+    "end": "2025-10-16",
+    "posts": 0,
+    "avg_score": 0,
+    "question_share": 0
+   },
+   {
+    "bucket": 3,
+    "start": "2025-10-16",
+    "end": "2025-11-13",
+    "posts": 0,
+    "avg_score": 0,
+    "question_share": 0
+   },
+   {
+    "bucket": 4,
+    "start": "2025-11-13",
+    "end": "2025-12-11",
+    "posts": 0,
+    "avg_score": 0,
+    "question_share": 0
+   },
+   {
+    "bucket": 5,
+    "start": "2025-12-11",
+    "end": "2026-01-08",
+    "posts": 0,
+    "avg_score": 0,
+    "question_share": 0
+   },
+   {
+    "bucket": 6,
+    "start": "2026-01-08",
+    "end": "2026-02-05",
+    "posts": 0,
+    "avg_score": 0,
+    "question_share": 0
+   },
+   {
+    "bucket": 7,
+    "start": "2026-02-05",
+    "end": "2026-03-05",
+    "posts": 0,
+    "avg_score": 0,
+    "question_share": 0
+   },
+   {
+    "bucket": 8,
+    "start": "2026-03-05",
+    "end": "2026-04-02",
+    "posts": 0,
+    "avg_score": 0,
+    "question_share": 0
+   },
+   {
+    "bucket": 9,
+    "start": "2026-04-02",
+    "end": "2026-05-01",
+    "posts": 0,
+    "avg_score": 0,
+    "question_share": 0
+   },
+   {
+    "bucket": 10,
+    "start": "2026-05-01",
+    "end": "2026-05-29",
+    "posts": 0,
+    "avg_score": 0,
+    "question_share": 0
+   },
+   {
+    "bucket": 11,
+    "start": "2026-05-29",
+    "end": "2026-06-26",
+    "posts": 0,
+    "avg_score": 0,
+    "question_share": 0
+   },
+   {
+    "bucket": 12,
+    "start": "2026-06-26",
+    "end": "2026-07-24",
+    "posts": 0,
+    "avg_score": 0,
+    "question_share": 0
+   },
+   {
+    "bucket": 13,
+    "start": "2026-07-24",
+    "end": "2026-08-21",
+    "posts": 0,
+    "avg_score": 0,
+    "question_share": 0
+   }
+  ]
+ },
+ "patterns": [],
+ "posts": [
+  {
+   "_ts": 1756124640,
+   "_filtered_by": "question",
+   "subreddit": "StableDiffusion",
+   "id": "1mzp0v7",
+   "title": "What can I do with a 32gb 5090 that would be prohibitively slow on a 24gb 3090?",
+   "score": 33,
+   "num_comments": 99,
+   "date": "2025-08-25",
+   "url": "https://reddit.com/r/StableDiffusion/comments/1mzp0v7/what_can_i_do_with_a_32gb_5090_that_would_be/",
+   "selftext_excerpt": "I'm currently debating myself whether to get a 3090 24G for ~ 600$ or a 5090 32G for ~2400$\n\nPrice matters, and for stuff that simply takes ~4times longer on a 3090 than on a 5090 i'll rather go with ",
+   "post_type": "self",
+   "flair": "Question - Help",
+   "intents": [
+    {
+     "key": "free_cost",
+     "label": "价格/免费"
+    },
+    {
+     "key": "legal",
+     "label": "授权/法律"
+    }
+   ],
+   "attitudes": [
+    {
+     "key": "asking",
+     "label": "求助"
+    }
+   ]
+  }
+ ],
+ "comments": []
+}

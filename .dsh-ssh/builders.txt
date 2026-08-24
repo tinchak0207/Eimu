@@ -1,0 +1,6 @@
+START
+proxy disabled for upstream requests
+generate sig params: ['token', 'prompt', 'arp_session_id', 'aspect_ratio', 'output_resolution', 'upstream_model_id', 'upstream_model_version', 'quality_level']
+builder: _build_payload_candidates
+builder: _build_video_payload
+DONE

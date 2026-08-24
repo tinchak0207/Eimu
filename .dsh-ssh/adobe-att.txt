@@ -1,0 +1,6 @@
+supplier_id  | failure_class  |                           det                            | provider_http_status |          created_at           
+---------------+----------------+----------------------------------------------------------+----------------------+-------------------------------
+ env:adobe2api | overloaded     | Upstream is temporarily unavailable. Please retry later. |                  503 | 2026-08-21 07:24:46.476135+00
+ env:adobe2api | authentication | All available tokens are invalid or expired              |                  401 | 2026-08-19 20:12:37.46783+00
+ env:adobe2api |                |                                                          |                  200 | 2026-08-19 19:03:32.744521+00
+(3 rows)

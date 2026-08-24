@@ -1,0 +1,13 @@
+model_id   |  status   | count 
+-------------+-----------+-------
+ gpt-image-2 | queued    |     1
+ gpt-image-2 | refunded  |     1
+ gpt-image-2 | succeeded |     1
+ kling-3.0   | queued    |     2
+ kling-3.0   | refunded  |     1
+(5 rows)
+
+                  id                  |  model_id   |  status   |                                                                          left                                                                          
+--------------------------------------+-------------+-----------+--------------------------------------------------------------------------------------------------------------------------------------------------------
+ 5d6b123f-e013-4638-aca3-80243f1e0cb0 | gpt-image-2 | succeeded | {"created": 1787300348, "artifacts": [{"id": "57b10804-ce65-4817-9247-4de5fe44bf1f", "url": "https://store.tinchak0207.xyz/image-data/files/generation
+(1 row)

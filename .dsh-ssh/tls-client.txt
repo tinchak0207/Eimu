@@ -1,0 +1,5 @@
+proxy disabled for upstream requests
+session type: builtins.method
+curl_cffi available
+httpx NOT installed
+requests available

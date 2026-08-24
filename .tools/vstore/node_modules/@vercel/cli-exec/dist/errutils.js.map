@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": ["../src/errutils.ts"],
+  "sourcesContent": ["/**\n * Converts any thrown value into a message suitable for diagnostics.\n */\nexport function getErrorMessage(error: unknown): string {\n  if (error instanceof Error) {\n    return error.message;\n  }\n\n  return String(error);\n}\n\n/**\n * Returns whether a filesystem error means the requested path is absent.\n */\nexport function isMissingPathError(error: unknown): boolean {\n  return (\n    typeof error === 'object' &&\n    error !== null &&\n    'code' in error &&\n    (error.code === 'ENOENT' || error.code === 'ENOTDIR')\n  );\n}\n"],
+  "mappings": ";;;;;;;;;;;;;;;;;;AAAA;AAAA;AAAA;AAAA;AAAA;AAAA;AAGO,SAAS,gBAAgB,OAAwB;AACtD,MAAI,iBAAiB,OAAO;AAC1B,WAAO,MAAM;AAAA,EACf;AAEA,SAAO,OAAO,KAAK;AACrB;AAKO,SAAS,mBAAmB,OAAyB;AAC1D,SACE,OAAO,UAAU,YACjB,UAAU,QACV,UAAU,UACT,MAAM,SAAS,YAAY,MAAM,SAAS;AAE/C;",
+  "names": []
+}

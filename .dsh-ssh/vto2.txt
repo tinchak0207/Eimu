@@ -1,0 +1,38 @@
+"task_status": "FAILED",
+                                "task_progress": progress_val
+                                if progress_val is not None
+                                else 0.0,
+                                "upstream_job_id": upstream_job_id,
+                                "retry_after": None,
+                                "error": f"video job failed: {latest}",
+                            }
+                        )
+                    except Exception:
+                        pass
+                raise AdobeRequestError(f"video job failed: {latest}")
+
+            if time.time() - start > timeout:
+                if progress_cb:
+                    try:
+                        progress_cb(
+                            {
+                                "task_status": "FAILED",
+                                "task_progress": progress_val
+                                if "progress_val" in locals()
+                                and progress_val is not None
+                                else 0.0,
+                                "upstream_job_id": upstream_job_id,
+                                "retry_after": None,
+                                "error": "video generation timed out",
+                            }
+                        )
+                    except Exception:
+                        pass
+                raise AdobeRequestError("video generation timed out")
+            time.sleep(self._poll_delay(time.time() - start))
+
+    def generate(
+        self,
+        token: str,
+===DEFTIMEOUT===
+1398:    def generate_video(

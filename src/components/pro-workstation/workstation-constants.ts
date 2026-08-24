@@ -273,6 +273,7 @@ export function writePromptDraft(draft: PromptDraft) {
  * 等于一份没人用的过期副本。
  */
 export const DEFAULT_SECTION_OPEN: Record<string, boolean> = {
+  recipeTemplates: false,
   resources: false,
   style: false,
   more: false,

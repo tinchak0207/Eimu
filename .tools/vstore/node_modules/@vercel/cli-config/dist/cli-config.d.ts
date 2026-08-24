@@ -1,0 +1,26 @@
+import { z } from 'zod';
+import type { AuthConfig, AuthFileConfig, GlobalConfig } from './types';
+import { getAuthConfigFilePath, getConfigFilePath, getDataPath, getGlobalPathConfig } from './paths';
+export { getAuthConfigFilePath, getConfigFilePath, getDataPath, getGlobalPathConfig, };
+type WriteConfigFileOptions = {
+    indent?: number | string;
+    mode?: number;
+};
+export declare const defaultGlobalConfig: GlobalConfig;
+export declare function getDefaultAuthConfig(): AuthConfig;
+export declare const defaultAuthConfig: AuthConfig;
+export declare function parseGlobalConfig(value: unknown): GlobalConfig;
+export declare function parseAuthConfig(value: unknown): AuthConfig;
+export declare function parseAuthFileConfig(value: unknown): AuthFileConfig;
+export declare function readConfigFile<S extends z.ZodType>(configPath: string, schema: S): z.output<S>;
+export declare function writeConfigFile<S extends z.ZodType>(configPath: string, schema: S, config: z.output<S>, options?: WriteConfigFileOptions): void;
+export declare function readGlobalConfigFile(configPath: string): GlobalConfig;
+export declare function writeGlobalConfigFile(configPath: string, config: GlobalConfig): void;
+export declare function readAuthConfigFile(configPath: string): AuthConfig;
+export declare function readAuthFileConfig(configPath: string): AuthFileConfig;
+export declare function readAuthConfig(configDir: string): AuthConfig;
+export declare function tryReadAuthConfig(configDir: string): AuthConfig | null;
+export declare function writeAuthConfigFile(configPath: string, authConfig: AuthConfig): void;
+export declare function writeAuthConfig(configDir: string, authConfig: AuthConfig): void;
+export declare function deleteAuthConfigFile(configPath: string): void;
+export declare function deleteAuthConfig(configDir: string): void;

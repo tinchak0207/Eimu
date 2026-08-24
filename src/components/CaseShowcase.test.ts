@@ -106,7 +106,9 @@ test("each showcase case carries an ambient glow colour for the ring", () => {
   assert.equal(SHOWCASE_CASES.length, 6);
   assert.equal(SHOWCASE_CASES.every((item) => /^#[0-9A-Fa-f]{6}$/.test(item.glow)), true);
   assert.match(read("src/components/case-showcase.css"), /--case-glow-rgb/);
-  assert.match(read("src/components/CaseShowcase.tsx"), /rgbTriple\(SHOWCASE_CASES\[frontIndex\]\.glow\)/);
+  // 2026-08-25 案例双向化：环数据源改为 cases（官方 + 本机用户投稿），
+  // 正面卡（含投稿案例）的 glow 驱动环境光。
+  assert.match(read("src/components/CaseShowcase.tsx"), /rgbTriple\(cases\[frontIndex\]\.glow\)/);
 });
 
 test("motion is a dt-integrated second-order spring, not frame-coupled lerp", () => {
@@ -531,4 +533,50 @@ test("corner radius and ring geometry scale with the measured card width", () =>
   assert.match(mobile, /--case-card-w:/);
   assert.match(mobile, /--case-radius:/);
   assert.match(mobile, /height:/);
+});
+
+test("showcase cases carry executable recipes wired into the workstation recall pipeline", () => {
+  const showcaseLib = read("src/lib/showcase-cases.ts");
+  const showcase = read("src/components/CaseShowcase.tsx");
+  const playground = read("src/components/ImagePlayground.tsx");
+  const workstation = read("src/components/pro-workstation/InvokeInspiredWorkstation.tsx");
+  const recall = read("src/components/pro-workstation/workstation-recall.ts");
+
+  // ① 官方案例全部携带配方快照（WorkflowRecallConfig 同构 + 加法式扩展字段）。
+  assert.equal(
+    SHOWCASE_CASES.every((item) => item.recipe && item.recipe.modelId),
+    true,
+  );
+
+  // ② 案例卡「用此工作流打开」只在案例携带配方时渲染（无配方优雅降级为纯展示）。
+  assert.match(showcase, /onOpenWorkflow && active\.recipe/);
+
+  // ③ 案例卡 prompt 明文可复制。
+  assert.match(showcase, /CasePromptReveal/);
+  assert.match(showcase, /navigator\.clipboard\.writeText\(prompt\)/);
+
+  // ④ 注入走既有 workstation-recall 管线：nonce 驱动 + applyRecipeTemplate
+  //    （其内部与 R 键共用 parseWorkflowRecallConfig → applyWorkflowRecallConfig）。
+  assert.match(playground, /setShowcaseRecipe\(\{ json: JSON\.stringify\(item\.recipe\), nonce: Date\.now\(\) \}\)/);
+  assert.match(playground, /externalRecipeJson=\{showcaseRecipe\}/);
+  assert.match(workstation, /applyRecipeTemplate\(recipe, "案例配方"\)/);
+  assert.match(recall, /parseWorkflowRecallConfig\(JSON\.stringify\(config\)\)/);
+});
+
+test("history cards can publish a recipe back into the showcase ring", () => {
+  const card = read("src/components/history/HistoryCard.tsx");
+  const lightbox = read("src/components/history/HistoryLightbox.tsx");
+  const client = read("src/components/HistoryClient.tsx");
+  const userCases = read("src/lib/showcase-user-cases.ts");
+  const showcase = read("src/components/CaseShowcase.tsx");
+
+  // 对向动作：历史卡与灯箱各有一颗「发布为案例」，由 HistoryClient 统一落库。
+  assert.match(card, /onPublishCase/);
+  assert.match(card, /label="发布为案例"/);
+  assert.match(lightbox, /label="发布为案例"/);
+  assert.match(client, /publishUserShowcaseCase\(entry\)/);
+
+  // 数据层扩展点：localStorage 存储 + 首页案例环合并展示（官方在前、投稿在后）。
+  assert.match(userCases, /export function publishUserShowcaseCase/);
+  assert.match(showcase, /mergeShowcaseCases\(SHOWCASE_CASES, user\)/);
 });

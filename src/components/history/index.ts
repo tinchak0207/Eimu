@@ -3,6 +3,8 @@ export { HistoryEmptyState, type HistoryEmptyReason, type HistoryEmptyStateProps
 export { HistoryFilterBar, type HistoryFilterBarProps } from "./HistoryFilterBar";
 export { HistoryGrid, type HistoryGridProps } from "./HistoryGrid";
 export { HistoryLightbox, type HistoryLightboxProps } from "./HistoryLightbox";
+export { SaveCardDialog, type SaveCardDialogProps } from "./SaveCardDialog";
+export { RerunDialog, type RerunDialogProps, type HistoryRerunMode } from "./RerunDialog";
 export { HistorySelectionBar, type HistorySelectionBarProps } from "./HistorySelectionBar";
 export { HistorySkeleton } from "./HistorySkeleton";
 export { HistoryStats, type HistoryStatsProps } from "./HistoryStats";

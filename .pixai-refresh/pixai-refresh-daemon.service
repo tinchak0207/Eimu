@@ -1,0 +1,14 @@
+[Unit]
+Description=PixAI pool token refresh daemon (24/7)
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/home/lenovo/.nvm/versions/node/v24.19.0/bin/node /home/lenovo/Desktop/image-app/.pixai-refresh/pixai-refresh-daemon.js
+WorkingDirectory=/home/lenovo/Desktop/image-app/.pixai-refresh
+Restart=always
+RestartSec=120
+Environment=HOME=/home/lenovo
+
+[Install]
+WantedBy=default.target

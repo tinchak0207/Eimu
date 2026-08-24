@@ -1,0 +1,6 @@
+id                  | model_id  |  status  | left 
+--------------------------------------+-----------+----------+------
+ 44b8dd74-e5fa-4e9a-b8ba-0ee29a6881ee | kling-3.0 | refunded | 
+ 2a8d8416-2e3c-4aae-bf2b-bf13bf860af6 | kling-3.0 | refunded | 
+ 3fc6a564-b365-44bf-94bc-c29a8ed9db1c | kling-3.0 | queued   | 
+(3 rows)

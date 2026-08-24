@@ -1,0 +1,5 @@
+===
+[36mINFO[0m[0301] outbound/vless[rot-11-2-26-66-36]: outbound connection to www.gstatic.com:443
+2026/08/21 15:42:10 manager.go:753: [boxmgr] WARN: probe failed for rot-11-2-26-66-36: read response: EOF
+2026/08/21 15:42:10 manager.go:749: [boxmgr] health check completed: 4 available, 9 failed
+/opt/easy-proxies/easy_proxies

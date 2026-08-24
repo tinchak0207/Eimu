@@ -9,11 +9,11 @@
 
 市場上「AI 生圖網站」有一百個，多數是同一套模板換皮：一個 prompt 輸入框、一個下拉選模型、一個生成鈕。我們不是。
 
-Image Studio 是一個**以「生產力」為設計目標的專業影像生成工作台**，同時服務兩種客戶：
+Emu（eimu.dev）是一個**以「生產力」為設計目標的專業影像生成工作台**，同時服務兩種客戶：
 
 | 客戶 | 入口 | 核心需求 |
 |---|---|---|
-| C 端創作者 | 網頁工作台 | 想得到 → 調得出 → 用得上（prompt 到成品的一條龍） |
+| C 端創作者 | 網頁工作台（含無限畫布與 AI 助理） | 想得到 → 調得出 → 用得上（prompt 到成品的一條龍） |
 | B 端平台／開發者 | OpenAI 相容 API | 穩定、可計費、可對帳、失敗可診斷的生成服務 |
 
 別人賣「生成圖片」；我們賣「**把生成變成工作流**」。
@@ -52,11 +52,11 @@ Image Studio 是一個**以「生產力」為設計目標的專業影像生成�
 
 ### 2.4 去廠商化的模型心智
 
-`stripVendorPrefix`：`Google Veo 3.1` 在 UI 上就是 **Veo 3.1**，`Gemini Nano Banana Pro` 就是 **Nano Banana Pro**。用戶選的是「這個模型適不適合我的活」，不是「我在跟哪家公司打交道」。
+`stripVendorPrefix`（`ModelPicker.tsx`）：`Google Veo 3.1` 在 UI 上就是 **Veo 3.1**，`Gemini Nano Banana Pro` 就是 **Nano Banana Pro**。用戶選的是「這個模型適不適合我的活」，不是「我在跟哪家公司打交道」。
 
 ### 2.5 Liquid Glass 設計語言
 
-- iOS 26 啟發的液態玻璃質感、微漸變、情境光暈
+- iOS 26 啟發的液態玻璃質感、微漸變、情境光暈；規範唯一權威落在 `design-system/MASTER.md`（`lg-*` 類體系、色板、字級、間距、反模式）
 - 每個案例卡帶 `glow` 色值——環轉到誰，背景光就被誰暈染（案例卡的沉浸式「環境色」設計）
 - 行動端保持「單面工作台」：畫布為核心，一切工具可呼出可收回
 
@@ -70,14 +70,48 @@ Image Studio 是一個**以「生產力」為設計目標的專業影像生成�
 - 六種風格預設（realistic / anime / street / product / poster / watercolor），自動追加品質後綴——小白寫短 prompt 也出好圖
 - **創作者資源庫**：每個資源帶 `sourceName / sourceUrl / sourceCommit` 的完整來源追溯，不是抄來的 prompt 大雜燴
 - 場景模板（`scenario-templates`）＋風格庫（`style-library`）
+- **Invisible Prompt Director**（`invisible-prompt-director.ts`）：規則層影片提示詞導演——偵測六槽公式（Camera + Subject + Action + Setting + Style + Lighting）缺漏並補齊、替換 anti-slop 空形容詞、把負面句改成正向聲明、執行引擎規則（age-blind、≤3 tracked characters）、附加品質鎖。全程後端發生，用戶無感
 
 ### 2.8 Workflow Recall：工作流記憶
 
 `workflow-recall.ts`：prompt、負向 prompt、尺寸、風格模板、參考圖角色、區域 prompt 的完整工作流狀態，一鍵復原。**換個活，不重頭搭。**
 
+配套還有 **Workflow PNG**（`workflow-png.ts`）：把工作流配置以 trailing-data 格式（JSON payload + 8-byte `WFSTUDIO` magic + version + 長度）嵌入 PNG 檔尾——提取只需讀最後 13 個位元組，magic + PNG 簽名 + JSON 合法性三重校驗擋壞檔誤判，零依賴。**圖片本身就是工作流的載體。**
+
 ### 2.9 案例庫 → 工作台的閉環
 
 首頁 3D 環上的每個案例，都來自 `showcase-cases.ts` 的**真實生成結果**（附 prompt、風格、生成後記）。點一下案例卡，prompt + 風格預設直接注入工作台——「看到好圖 → 復刻它」的路徑是一步，不是三步。
+
+### 2.10 無限畫布工作站：生成閉環的畫布協作
+
+`src/components/canvas` + `src/lib/canvas` + `/api/canvas/*` 構成的無限畫布，定位是「生成工作流的組織層」，不是畫圖軟體：
+
+- **DAG 分層自動排版**（`canvas/reducer.ts`）：節點按最長上游路徑分層、barycenter 兩趟掃描最小化連線交叉、層內縱向堆疊垂直置中——連線永遠短距離左進右出。手動拖過的節點（`moved`）不重排，但仍佔排序位，鄰居的邊不亂
+- **語義連線**（`semantic-nodes.ts`）：prompt 節點與 reference 節點沿「入邊」收集，手動 UI 與 agent `run_generation` 共用同一個 `resolveGenerationInputs`——兩條路徑的接線語義完全一致，不建第二套
+- **非破壞性像素編輯**（`canvas/image-edit.ts`）：裁剪／切图／抠除／旋轉的純數學層可被 node:test 直測；編輯結果一律作為**新子節點**落回畫布，原節點不動。「角度」模式不產出像素，只組裝生圖指令交由宿主 AI 重繪
+- **雲端持久化**：畫布專案（`project-store`，每用戶上限 50 個）與素材庫（`asset-store`，上限 500 個）走 Blob 世代寫入模式，單用戶寫入串行
+- **提示詞庫聚合**（`/api/canvas/prompts`）：並行抓多個遠端 prompt 源、每源 8s timeout、失敗跳過、模組級快取 1 小時 stale-while-revalidate
+- **同源圖片代理**（`/api/canvas/image-proxy`）：只為把公網圖片變同源（供像素編輯讀入 `<canvas>`），只服務登入用戶、只認 https 公網主機、拒絕 IP 字面量與 localhost——不提供內網探測面
+
+### 2.11 AI 助理：對話驅動的許願工作流
+
+`src/components/agent-chat` + `src/lib/agent-*` 構成的許願 Agent 面板，交互原則是「確認卡先行、批量願望、自癒透明化」：
+
+- **沒有獨立頁**：`/agent` 路由只負責把舊書簽重定向回首頁；AI 助理是首頁卡片上的一個 toggle（與「改圖」「放大」同層級），按下去只換卡片中間的控件區
+- **確認卡（`AgentConfirmCard`）**：工具調用先出確認卡，用戶批准才執行——agent 花的是用戶的錢，用戶要有否決權
+- **批量錨定（`agent-batch-anchor`）**：第一張滿意後顯式錨定，把第一張**實際用過的參數原樣念回給 agent 照抄**，整批不漂移。只引用事件流裡真實出現過的參數；湊不出可複現參數時寧可不給錨定按鈕——一顆按下去不保證同風格的按鈕，比沒有按鈕更糟
+- **參數卡（`agent-tool-params`）**：常用層（模型/尺寸/張數/花費）默認展開、進階層（LoRA/權重/sampler/steps/seed）默認收起；參數唯一來源是 `tool.invoke` 的 `args_summary`，被截斷就退化顯示原文，**絕不把半截 JSON 編成看起來完整的參數表**
+- **賬戶記憶**：`/api/agent/profile`（用戶確認過的「我是誰、怎麼合作」）與 `/api/agent/profile/lessons`（回合收官後靜默提煉的教訓，只提議、用戶確認後才注入）分開存儲；resume 老會話時走 `/memory` 補針
+- **額度與附件**：`/api/agent/quota` 查額度（閘道權威、無本地副本）、`/attachments` multipart 原樣透傳（不重組 boundary）
+- **Prompt 優化**：`/api/agent/optimize-prompt`——Agent 層（deepseek）優先，失敗 fallback 規則層（invisible-prompt-director），再失敗返回原 prompt，全程服務端、免登入免金鑰
+
+### 2.12 PWA：可安裝的工作台
+
+`manifest.ts`（standalone、主題色、雙尺寸圖標）+ `PwaInstaller`（HTTPS 下靜默註冊 `/sw.js`，註冊失敗靜默忽略、不阻塞任何功能）。
+
+### 2.13 歷史與導出
+
+歷史頁（`src/components/history`）支援篩選、統計、Lightbox；導出三格式（`history-export.ts`）：ZIP（圖片＋清單，`export-zip.ts` 做檔名清洗擋目錄穿越）、JSON（完整檔案）、CSV（表格）。取不到的圖跳過並計數，**不讓整個導出失敗**。
 
 ---
 
@@ -90,27 +124,43 @@ Image Studio 是一個**以「生產力」為設計目標的專業影像生成�
 | C 端 | 註冊用戶 | 用戶帳號＋餘額 | 網頁工作台 |
 | B 端 | 平台／開發者 | **API 金鑰本身**（`sk-biz-`） | `/api/v1` |
 
-B 端金鑰的設計要點：外部平台只會透傳 `Authorization: Bearer sk-...`，**不會帶我們內部的 `x-user-id`**——所以金鑰本身必須是獨立的計費主體，而不是某個用戶的附屬品。計費帳本仍然記在上游（New API），每個 B 端金鑰綁定獨立使用者 id，**不自建第二套額度系統**——重造計費只會讓「同一個信用額度」在兩處互相打架。
+B 端金鑰的設計要點：外部平台只會透傳 `Authorization: Bearer sk-...`，**不會帶我們內部的 `x-user-id`**——所以金鑰本身必須是獨立的計費主體，而不是某個用戶的附屬品。計費帳本仍然記在上游（New API），每個 B 端金鑰綁定獨立使用者 id（`tools/provision-biz-account.ts` 簽發專用計費賬戶），**不自建第二套額度系統**——重造計費只會讓「同一個信用額度」在兩處互相打架。
 
-### 3.2 統一幣制：generation coins
+### 3.2 分層價目（tier-pricing）：代理分銷的拿貨價體系
 
-`generation-model-catalog`：每個模型 × 解析度 × 生成種類，映射單一「代幣」計價。套餐、餘額、SLO 單位成本、金鑰額度全部跑在同一套幣制上——**跨模型可比較、可對帳**。
+`tier-pricing.ts`：按金鑰/租戶掛 tier（internal / reseller / enterprise），每個 tier 對「model × resolution」覆寫**絕對幣價**——高於基準是加成、低於基準是拿貨價，一個數字同時涵蓋兩種語意。優先順序：tier 覆寫 → 基準價（generation coins 經全局 pricing-overrides 後的 effective 價）；C 端不吃這一層。清洗規則複用 generation-model-catalog 的口徑，避免兩套定價規則漂移。
 
-### 3.3 C 端成長閉環
+### 3.3 統一幣制：generation coins
 
-- GitHub OAuth 登入＋註冊
-- 每日簽到（`CheckinCalendar`，`checkin-copy` 文案系統化）
-- 充值：Mapay 支付（alipay / wxpay / qqpay）＋回調驗簽＋測試回調端點
-- 聯盟行銷（`/api/user/aff`）
-- 用量查詢、歷史統計
+`generation-model-catalog`（已重構為 types / catalog / pricing-overrides / capabilities / pricing / resolution 六模組，原路徑保留為純 re-export barrel）：每個模型 × 解析度 × 生成種類，映射單一「代幣」計價。套餐、餘額、SLO 單位成本、金鑰額度、PixAI 改圖/放大/模板全部跑在同一套幣制上——**跨模型可比較、可對帳**。
 
-### 3.4 對外 API 契約（B 端）
+### 3.4 C 端成長閉環
 
-- OpenAI 相容：`/api/v1/images/generations`、`/api/v1/models`、`/api/v1/images/{id}/result`
+- **三軌登入**：GitHub OAuth（`/api/auth/github/*`）；微信掃碼（`/api/auth/wechat/*`——每次請求觸發動態 QR 建立新 bot 實體、poll 輪詢、公眾號消息簽名校驗、詞庫自動鑄造用戶名）；Emu OAuth 回環授權（`/api/auth/emu-oauth/*`——DSH 插件 loopback server 走 GitHub OAuth 後換 60 秒過期的無狀態 HMAC code，再 exchange 換自動簽發的 B 端密鑰，全程無需複製粘貼任何密鑰）
+- 每日簽到（`CheckinCalendar`，`checkin-copy` 文案系統化，隨機 1～3 枚額度幣）
+- 充值：套餐（夢芽/夢影/夢虹，`plans.ts`）走 Mapay 支付（alipay / wxpay / qqpay，`/api/payments/mapay/*`：checkout / notify 驗簽 / return / 測試回調）＋兌換碼 topup
+- 聯盟行銷（`/api/user/aff`）、用量查詢、歷史統計
+- **內容增長面**：17 個行業 base use-case（`src/lib/use-cases/`）＋ Reddit 挖掘的真實需求 use-case（`reddit-use-cases*` 五個維度檔）、長尾 FAQ（`long-tail-faq.ts`）、文檔中心（`/docs`：OpenAPI 渲染的 API 文檔、MCP 接入指南、DeepSeek Harness 零基礎教程）、狀態頁（`/status`，Gatus 端點健康）——SEO 與信任資產都是程式碼維護的，不是一次性運營物料
+
+### 3.5 對外 API 契約（B 端）
+
+OpenAI 相容端面（`/api/v1/*`），全部走 biz key 鑑權、限流頭、trace_id、OpenAI 風格錯誤體：
+
+- **圖像**：`/v1/images/generations`（非同步 202 task）、`/v1/images/{id}`（狀態輪詢，不消耗限流）、`/v1/images/{id}/result`（取結果）、`/v1/images/edits`（改圖，定價走 generationCoins(pixai-edit)）
+- **影片**：`/v1/videos/generations`、`/v1/videos/{id}`、`/v1/videos/{id}/result`
+- **語音**：`/v1/tts/generations`、`/v1/tts/{id}`（tts-1）
+- **批量與對帳**：`/v1/batches`（圖片/視頻混合批量，202）、`/v1/batches/{id}`（聚合視圖）、`/v1/batches/{id}/reconciliation`（對賬導出，含失敗分解）——批內 item 各自冪等（`batchItemIdempotencyKey`），聚合數學只有一份（`computeBatchAggregate`）
+- **SKU 下單**：`/v1/skus`（公開營銷 SKU 目錄，輸入 schema/鏡頭結構/輸出規格/計價模式全部可編程消費）、`/v1/skus/{id}/runs`（輸入 → 鏡頭計劃展開 → 逐鏡頭提交，支持表格批量）、`/v1/skus/runs/{id}`（run 聚合進度，**無狀態**：run_id 就是冪等鍵根，不落新表）
+- **工具端點**：`/v1/uploads`（上傳參考圖換 mediaId）、`/v1/upscale`（高清放大）、`/v1/templates` + `/v1/template-generations`（PixAI 場景模板）
+- **觀測端點**：`/v1/models`、`/v1/model-status`（每個生成模型的可用性 + 能力 + 功能標註；探測只發 GET {baseURL}/models，不觸發真實生成不扣費，結果快取 60 秒；不支持 /models 的渠道回報 unknown + note 而不是假裝探測失敗）、`/v1/queue`（租戶活躍任務）、`/v1/history`（歷史分頁）、`/v1/system_stats`（平台統計）、`/v1/object_info`（能力描述，ComfyUI 風格）、`/v1/openapi.json`（OpenAPI 3.1 spec，**從代碼派生不手寫漂移**）
 - **冪等**：`Idempotency-Key`，重複提交直接回同一個 job（衝突時 `IdempotencyConflictError` 拒絕，而不是默默覆寫）
 - **穩定錯誤碼分類學**（`api-error-codes.ts`）：外部客戶會程式化解析 `error.code`，所以對外碼一旦發佈永不改變語義；內部分類（FailureClass、HTTP 狀態、供應商錯誤字串）自由演進——內部可以拆得更細，外部只看到承諾過的碼
 - 多個客戶端不可區分的內部失敗（如 malformed_output / empty_result / artifact_download）**刻意收斂成同一個碼**，不逼客戶去分支處理只有我們運維才需要知道的區別
 - 請求追蹤：`X-Request-Id`（客戶自帶的 id 若通過白名單格式則原樣回顯，失敗時有東西可以報給客服）
+
+### 3.6 Emu OAuth：把「API 金鑰發放」做成一次點擊
+
+B 端密鑰的發放通常是「註冊 → 進後台 → 複製密鑰 → 粘貼到客戶端」。我們的 Emu OAuth（`emu-oauth.ts`）把這條路壓縮成 GitHub 一次授權：插件本地 loopback server → 站點簽發 60 秒過期的無狀態 HMAC code → exchange 換自動簽發的 B 端密鑰並直接寫入客戶端憑據。憑證不寫庫、驗證只需重算 HMAC——沒有可以被重放的長期 token，也沒有會話存儲。
 
 ---
 
@@ -124,6 +174,7 @@ B 端金鑰的設計要點：外部平台只會透傳 `Authorization: Bearer sk-
 - 租約過期自動清理、租約到期自動釋放
 - 候選過濾支援 `excludedSupplierIds`、**`excludedFailureDomains`**（失敗域隔離：某供應商連續失敗，不只它自己、整個失敗域都被暫時排除）
 - 能力表（`supplier_capability`）：供應商 × 模型 × 並發上限 × 健康狀態 × 契約版本，**在資料庫裡可查、可管理**
+- 門禁式健康探測（`adobe-health.ts`）：供應商帳號要被選中，必須同時滿足 token 來源（auto_refresh）、刷新狀態（healthy）、憑證未過期、近期觀測、成功率門檻——**不健康的供應商根本進不了候選**，而不是進了候選再失敗
 
 ### 4.2 失敗分類器：不是 try/catch
 
@@ -143,7 +194,7 @@ retryable / switchSupplier / quarantineSupplier / cooldownUntil
 
 - 對每一個當前可販售的（模型 × 種類 × 比例 × 解析度）組合，建立**真實的 `generation_job` 行**（來源標記 `canary`），走與真實流量完全相同的 job-repository 入口
 - 事後評估實際結局：可驗證解碼的影像 = 成功；被卡住沒人撿 = `stale_no_pickup`（誠實報告，不當成功）
-- 一旦真實 worker 上線，同一批 canary job 自動變成全鏈路金絲雀——**零改動升級**
+- 一旦真實 worker 上線，同一批 canary job 自動變成全鏈路金絲雀——**零改動升級**（`tools/run-canary.ts` 提供 CLI）
 
 ### 4.4 三階段計費帳本
 
@@ -169,6 +220,21 @@ retryable / switchSupplier / quarantineSupplier / cooldownUntil
 
 `crypto.ts`：prompt 以 **AES-256-GCM**（12-byte IV + auth tag）加密後落庫，金鑰強制 32-byte（64 hex 或 Base64）。資料庫被拖走，生成內容的隱私邊界還在。
 
+### 4.8 雙形態 worker：長駐容器與 serverless cron 同構
+
+`worker-service.ts` 是唯一的工作循環實現，兩種形態消費同一份：
+
+- **VPS 長駐容器**（`worker/generation-worker.ts`）：`unhandledRejection` 只記錄不退出（浮動 promise 的 rejection 不殺進程）；容器重啟時在飛任務由租約過期回收，`deadline_exceeded` 自動退款
+- **Vercel cron**（`/api/cron/generation-worker`）：每分鐘 `runGenerationWorkerOnce()`——沒有長駐基礎設施也能讓控制面轉起來
+
+### 4.9 批量與 SKU：一份聚合數學，三個消費者
+
+`batch-service.ts` 的 `computeBatchAggregate` 同時服務 `/v1/batches/{id}`（批聚合視圖）、`/v1/batches/{id}/reconciliation`（對賬 + 失敗分解）、`/v1/skus/runs/{id}`（SKU run 聚合）——同一份數學，不抄第二份。SKU run 不落新表：run_id 就是冪等鍵根，鏡頭任務以 `skurun:<run_id>:<index>` 冪等鍵落在既有 `generation_job` 上，提交全部走 `submitGenerationCommand`——**不自建第二套提交/計費/調度**。
+
+### 4.10 運維 CLI（tools/）
+
+控制面的部署與運維有專用工具鏈：`control-plane-bootstrap.ts`（遷移 → 播種 → 進 worker 循環的開機自舉——「一條部署時沒人跑的命令」導致的能用/不能用分裂，用自舉根治）、`seed-generation-suppliers.ts`（供應商能力播種）、`migrate-generation-db.ts`（DB 遷移）、`issue-biz-key.ts`（無需管理員密碼的密鑰簽發）、`provision-biz-account.ts`（上游專用計費賬戶開戶）、`agent-debug.ts`（不開瀏覽器對生產 agent 網關跑真實對話、錄完整 SSE 事件流、用生產同一份 reducer 回放）。
+
 ---
 
 ## 五、路由架構對稱差：一套事實來源
@@ -179,10 +245,11 @@ retryable / switchSupplier / quarantineSupplier / cooldownUntil
 
 現在：
 
-- **統一註冊表**：env 渠道、帳號池渠道、SensE nova 專用渠道、biz 管道、admin 探測，全部消費同一個 `channel-registry` 的輸出
+- **統一註冊表**：env 渠道、帳號池渠道、SensE nova 專用渠道、biz 管道、admin 探測，全部消費同一個 `channel-registry` 的輸出——`generate-images` 的隊列、熔斷、冷卻全部從這裡 import，路由測試把這個 import 釘死
 - **供應商譜系**：Adobe2API（web-session 直連）、Sub2API、PixAI 帳號池、SensE nova、New API 中轉——不同協議、不同認證、不同失敗語義，統一成同一份 endpoint 描述
 - **帳號池（admin-pools）**：每個帳號有健康狀態、並發上限、in-flight 租約；`active && schedulable` 才進候選
 - **Channel overrides**：渠道級覆寫優先級可調（`channel-overrides`）
+- **內部端面**（`/api/internal/*`）：biz-keys、callback-worker、generation-billing、proxy-pool——serverless 對 serverless 的內部收口，不暴露給外部路由
 
 ---
 
@@ -196,7 +263,10 @@ retryable / switchSupplier / quarantineSupplier / cooldownUntil
 | 分散式限流 | 配了 Postgres 就自動升級為**跨 serverless 實例的分散式限流**（`consumeDistributedRateLimit`）；沒配 DB 則退化本地視窗——同一份呼叫語義，兩種部署都正確 |
 | 追蹤 id | `X-Request-Id` 只接受 `[A-Za-z0-9._-]{8,128}` 白名單格式，**攻擊者無法把任意 header 內容注入日誌／回應** |
 | 憑證管理 | 供應商憑證全部經 `credentialRef` 從環境變數動態讀取，**原始碼與 repo 內零憑證** |
-| 密碼學資產 | prompt 加密 AES-256-GCM；callback 簽名 HMAC＋金鑰版本 |
+| 密碼學資產 | prompt 加密 AES-256-GCM；callback 簽名 HMAC＋金鑰版本；Emu OAuth 回環授權用 60 秒無狀態 HMAC code（不寫庫、不可重放） |
+| Agent 代理層 | 站點代理不透傳用戶 token 給網關——`resolveAgentCaller` 驗完人之後**換發服務端持有的 B 端 key**（方向與通用 proxy 相反，複用通用 proxy 等於讓任意 key 白嫖上游額度）；SSE ticket 回應欄位白名單化，長時效金鑰絕不出現在任何回應裡 |
+| 圖片代理 SSRF | `/api/canvas/image-proxy` 拒絕 IP 字面量與 localhost/*.local/*.internal，只認 https 公網主機、只回 image/*、上限 25MB |
+| 微信回調 | `verifyWechatSignature` 驗簽 + 公眾號 token 校驗，不信任未簽名消息 |
 | 管理後台誠實性 | `/admin` 顯示的帳號狀態、路由事件、失敗原因與生產實際同源（routing-telemetry 每筆生成請求寫一條事件）；有 `routing-honesty` 測試鎖住「admin 不撒謊」這個不變量 |
 
 ### 6.1 Telemetry 的兩個鐵律
@@ -210,54 +280,72 @@ retryable / switchSupplier / quarantineSupplier / cooldownUntil
 
 ## 七、測試紀律：誠實性的工程化
 
-40+ 個測試檔（`src/**/*.test.ts`），測試的不是「函式跑得動」，而是**不變量**：
+115 個測試檔（`src/**/*.test.ts`，node:test），測試的不是「函式跑得動」，而是**不變量**：
 
 - `routing-honesty.test`：admin 顯示 = 生產實際路由
 - `carousel-detent.test`：磁吸固定點、落點決策、flick 上限
-- `billing-ledger.test` / `billing-relay.test`：reserve/commit/refund 三態與對帳
+- `billing-ledger.test` / `billing-relay.test` / `batch-service.test`：reserve/commit/refund 三態、對帳與批聚合
 - `crypto.test`：AES-256-GCM 加解密往返
-- `canary` / `slo-service` 測試：成功率的統計語義
+- `canary` / `slo-service` / `adobe-health` 測試：成功率統計語義與供應商健康解析
 - `api-error-codes.test`：對外錯誤碼的穩定性（發佈過的碼不准消失）
+- `status-contract.test`：B 端狀態端點的契約
+- `canvas`（reducer / layout / semantic-nodes / project-store）：畫布排版與連線語義
+- `agent-batch-anchor` / `agent-param-reflect` / `agent-tool-params` / `agent-chat-reducer`：agent 交互的誠實不變量（參數只引用事件流真實出現過的值）
+- `workflow-png.test`：嵌入/提取往返與壞檔防禦
 - `workstation-mobile-stage` / `admin-ui` / `ui-copy`：UI 的品質與文案不變量
 
-**「不模擬成功」是整個程式庫的測試哲學**：canary 不造假成功、SLO 不算排隊中、admin 不隱瞞失敗——誠實是可以用測試鎖死的。
+**「不模擬成功」是整個程式庫的測試哲學**：canary 不造假成功、SLO 不算排隊中、admin 不隱瞞失敗、參數卡不把半截 JSON 編成完整表格——誠實是可以用測試鎖死的。
 
 ---
 
 ## 八、部署拓撲
 
 ```
-┌─────────────────────────────┐       ┌─────────────────────────────┐
-│  Vercel（邊緣）              │       │  VPS（43.172.85.76）         │
-│  Next.js App Router         │       │  Docker Compose             │
-│  /api/v1 · /api/generate-*  │       │  adobe2api upstream         │
-│  /admin（控制平面 UI）       │◄─────►│  PixAI 帳號池 daemon        │
-│  DB: Postgres（Supabase）    │  HTTPS│  nginx（網關＋健康檢查）      │
-└─────────────────────────────┘       └─────────────────────────────┘
+┌─────────────────────────────┐       ┌─────────────────────────────────────┐
+│  Vercel（邊緣，sfo1）        │       │  VPS（43.172.85.76）                 │
+│  Next.js App Router         │       │  nginx（store.tinchak0207.xyz）      │
+│  /api/v1 · /api/generate-*  │◄─────►│   /agent/ → agent-gateway（systemd   │
+│  /api/agent/*（代理層）      │ HTTPS │             :8081，許願 Agent 網關） │
+│  /api/cron/generation-worker│       │   /gatus-api（狀態頁數據源）          │
+│  /admin（控制平面 UI）       │       │  Docker Compose（控制面）             │
+│  DB: Postgres（Supabase）    │       │   generation-worker · adobe2api:6001 │
+│  Blob: 雙後端可切換           │       │   image-control-postgres              │
+└─────────────────────────────┘       │  PixAI 帳號池 daemon · 微信 QR worker │
+                                      │  （:8780，動態 QR 建 bot 實體）        │
+                                      └─────────────────────────────────────┘
 ```
 
-- **Vercel**：前端、對外 API、管理後台、控制平面（無狀態、靠 DB 租約協調）
-- **VPS**：需要長駐行程或帶狀態的上游適配（Adobe2API 會話、PixAI 池、瀏覽器 relay）
+- **Vercel**：前端、對外 API、agent 代理層、管理後台、控制平面（無狀態、靠 DB 租約協調；cron 每分鐘 tick 一次 worker 循環）
+- **VPS**：需要長駐行程或帶狀態的上游適配——Adobe2API 會話（容器內 /api/v1/health 健康端點）、PixAI 池、控制面 Docker（Postgres + generation-worker）、agent-harness 網關（systemd，session 存內存 Map——重啟即回收，站點 DELETE 對 not_found 冪等化）、微信掃碼 worker
+- **域名分工**：agent 網關只掛在 store 域名的 `/agent/` 路徑下（image 域名同路徑是 404）；B 端生成端點走 image 域名——代理層封裝（`agent-gateway.ts`）用 `AGENT_GATEWAY_*` 前綴與計費網關的 `GATEWAY_*` 環境變數嚴格區分，兩個「閘道」在 config 裡不互相污染
+- **Blob 雙後端**（`blob-backend.ts`）：配了 `IMAGE_DATA_BASE_URL` 就全量走 VPS `image-data-api`（postgres kv_store + 靜態檔），否則 Vercel Blob——對呼叫方是同一組 `list/get/put/del` 簽名，切換是一個 env 決策，擺脫 Hobby 額度/停用依賴
 - **Postgres**：`generation_job`、`supplier_lease`、`billing`、`callback_delivery`、`lora_user_state`——所有分散式正確性都建立在資料庫事務上，而不是 serverless 實例的記憶體
 
 ---
 
 ## 九、支援的模型譜系（2026-08 現況）
 
-**影像**：Adobe Firefly、Nano Banana 系列（2.5 / 3 / 3.1 Flash）、GPT Image（1.5 / 2）、Flux（1.1 Pro / Ultra、2 / 2 Pro、Kontext Pro / Max）、Runway Gen-4、PixAI 日系 premium 系（Moonbeam / Diamond / Neverland / Whimsical / Hassaku / Tsubaki / Haruka / Reference Pro / Hoshino）、SensE nova U1 Fast
+目錄（`generation-model-catalog/catalog.ts`）共 **46 個條目**，image / video / audio 三類：
 
-**影片**：Veo 3.1（＋Fast）、Kling（2.5 Turbo / 3.0 / 3.0 Omni）、Seedance 2.0（＋Fast）、Runway Gen-4 / 4.5、Adobe Firefly Video、Luma Ray 系列（2 / 3 / 3.14，含 HDR）
+**影像**：GPT Image（2 / 1.5 / 初代）、Nano Banana 系列（Nano Banana = Gemini 2.5 Flash Image、Nano Banana Pro = Gemini 3 Image、Nano Banana 2 = Gemini 3.1 Flash Image）、Dreamina 系列（Image 5 Pro / Image 5 Lite / Seedream 2.0）、Adobe Firefly Image 5、Flux（1.1 Pro / 1.1 Pro Ultra、2 / 2 Pro、Kontext Pro / Max）、Runway Gen-4 Image、SenseNova U1 Fast、PixAI 日系系（Tsubaki.2 / Tsubaki v1.1 / Haruka v2 / Hoshino v2 / Reference Pro）
 
-> 模型本身不是對稱差——**讓 40+ 個模型透過同一套計費、同一套失敗語義、同一套 SLO 可靠地賣出去**，才是。
+**影像工具型條目**：智能擴圖（Adobe Fill）、改圖（Image Edit）、圖像放大（2x Upscale）、模板生成（Template）
+
+**影片**：Veo 3.1（＋Fast）、Kling（2.5 Turbo / 3.0 / 3.0 Omni）、Seedance 2.0（＋Fast）、Runway Gen-4 / 4.5、Adobe Firefly Video、Luma Ray 系列（2 / 2 Flash / 3 / 3 HDR / 3.14 / 3.14 HDR）、Avatar 1（數字人）、Lipsync 1（對口型）
+
+**語音**：TTS 1
+
+> 模型本身不是對稱差——**讓 46 個模型透過同一套計費、同一套失敗語義、同一套 SLO 可靠地賣出去**，才是。
 
 ---
 
 ## 十、我們刻意不做的事
 
 - ❌ 不做「分享牆」社交功能——生成是生產行為，不是打卡
-- ❌ 不內建圖片編輯器——編輯是別人的主場，我們把「生成對」這件事做到極致
-- ❌ 不自建第二套計費系統——上游帳本可信，就複用它
+- ❌ 不重造 Photoshop 式全功能編輯器——畫布的像素編輯只做生成閉環所需（非破壞性裁剪／切分／摳圖／旋轉，結果作為新子節點落回），不做圖層、蒙版、筆刷體系；複雜修圖交給宿主 AI 重繪
+- ❌ 不自建第二套計費系統——上游帳本可信，就複用它；SKU run 不落新表、批量聚合只有一份數學
 - ❌ 不讓 admin 顯示與生產分家——誠實比美觀重要
+- ❌ 不給用戶「看起來能保證、實際不能保證」的控件——湊不出可複現參數就不給錨定按鈕，解析不了截斷的參數就顯示原文
 
 ---
 

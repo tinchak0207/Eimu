@@ -1,0 +1,1 @@
+key-ish env: ['ADOBE_API_KEY', 'GPG_KEY']

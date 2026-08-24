@@ -1,0 +1,44 @@
+會話已建立: 7ffab99b-64ee-4163-a484-a20a7ffa1d06
+消息已發送（114 字）
+  … +2478ms turn.done
+
+─── 1) Timeline ───────────────────────────────
+  +   158ms  connected              {"ok":true,"event_id":0}
+  +  2478ms  session.error          {"code":"UnknownError","message":"Model not found: opencode/ox-alpha.","event_id":1}
+  +  2478ms  turn.done              (本輪結束)
+  +  2479ms  session.error          {"code":"UnknownError","message":"ProviderModelNotFoundError: Model not found: opencode/ox
+
+─── 2) UX metrics ─────────────────────────────
+  首字延遲（首個 delta）: —
+  首工具延遲:            —
+  delta 總數:             0（message=0, reasoning=0）
+  delta 平均間隙:         —  最大間隙: —  >500ms 停頓: 0 次
+  本輪總時長:             2479ms
+  事件總數:               4
+
+─── 3) Transcript（生產 reducer 還原 = 用戶所見）──
+  👤 用戶: 生成一個秦始皇騎北極熊的電影。視覺風格：寫實史詩電影；規模：多鏡頭短片（4 個鏡頭各 8 秒，kling-3.0）。先用 gpt-image-2 生成角色參考圖與場景參考圖，再跑 4 個影片鏡頭。平台生成管線已修復，請直接執行。
+  ⚠️ 通知[error]: Model not found: opencode/ox-alpha.
+  ⚠️ 通知[error]: ProviderModelNotFoundError: Model not found: opencode/ox-alpha.
+    at <anonymous> (/$bunfs/root/chunk-gdqm2ycn.js:439:90032)
+    at SessionPrompt.getModel (/$bunfs/root/chunk-6d1chdmg.js:1085:11482)
+    at SessionPrompt.getModel (definition) (/$bunfs/root/chunk-6d1chdmg.js:1085:908)
+    at SessionPrompt.run (/$bunfs/root/chunk-6d1chdmg.js:1085:15298)
+    at SessionPrompt.run (definition) (/$bunfs/root/chunk-6d1chdmg.js:1085:10498)
+    at SessionRunState.ensureRunning (/$bunfs/root/chunk-6d1chdmg.js:1085:15267)
+    at SessionRunState.ensureRunning (definition) (/$bunfs/root/chunk-6d1chdmg.js:2:8179)
+    at SessionPrompt.loop (/$bunfs/root/chunk-6d1chdmg.js:1085:10220)
+    at SessionPrompt.loop (definition) (/$bunfs/root/chunk-6d1chdmg.js:1085:15203)
+    at SessionPrompt.prompt (/$bunfs/root/chunk-4yw10236.js:4:13492)
+    at SessionPrompt.prompt (definition) (/$bunfs/root/chunk-6d1chdmg.js:1085:9838)
+
+─── 4) Workflow ───────────────────────────────
+  （本輪無畫布/工作流事件）
+
+─── 5) Language（語言鏡像檢查）────────────────
+  用戶: 繁體
+  助手: 其他
+
+原始事件流已存: /tmp/qinsh-ox.json
+
+會話保留: 7ffab99b-64ee-4163-a484-a20a7ffa1d06（續聊: npx tsx tools/agent-debug.ts --resume 7ffab99b-64ee-4163-a484-a20a7ffa1d06 "下一句"）

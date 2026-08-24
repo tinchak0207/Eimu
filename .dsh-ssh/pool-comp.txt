@@ -1,0 +1,6 @@
+total nodes: 4
+cloudflare workers tunnels: 4
+  rot-9-104.20.2.87              port=24009 CF-workers fails=37 succ=36 bl=False last_err=read response: EOF
+  rot-5-66.42.106.100            port=24005 CF-workers fails=34 succ=44 bl=False last_err=read response: EOF
+  rot-1-188.166.52.52            port=24001 CF-workers fails=33 succ=46 bl=False last_err=read response: EOF
+  rot-8-217.60.39.139            port=24008 CF-workers fails=28 succ=46 bl=False last_err=read response: EOF

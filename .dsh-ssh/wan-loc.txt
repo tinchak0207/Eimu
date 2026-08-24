@@ -1,0 +1,1 @@
+/opt/agent-harness/gateway/workflow-service.ts:107:      return { error: "text 節點必須填 content（提示詞內容），請補上再呼叫 workflow_add_node" }

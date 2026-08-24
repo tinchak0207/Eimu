@@ -1,0 +1,3 @@
+32:from core.adobe_client import (
+34:    AdobeClient,
+129:client = AdobeClient()

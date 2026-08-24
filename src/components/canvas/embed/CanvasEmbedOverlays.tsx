@@ -182,7 +182,7 @@ export function CanvasEmbedOverlays({
                     <p className="flex items-center gap-1.5 truncate text-[12.5px] font-medium text-foreground">
                       <span className="truncate">{card.name}</span>
                       <span className="shrink-0 rounded-full bg-black/5 px-1.5 py-0.5 text-ios-caption2 text-muted-foreground">
-                        {card.kind === "scene" ? "场景" : "角色"}
+                        {card.kind === "scene" ? "场景" : card.kind === "style" ? "风格" : "角色"}
                       </span>
                     </p>
                     <p className="mt-0.5 truncate text-ios-caption2 text-foreground/45">

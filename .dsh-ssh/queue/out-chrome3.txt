@@ -1,0 +1,22 @@
+    PID    PPID     ELAPSED CMD
+3403206       1  3-22:14:08 ./venv/bin/python dreamina_pool.py --max-workers 2 --port 5101 --chrome /usr/bin/google-chrome --low-mem
+===ALL_DREAMINA_PY===
+ubuntu   3403206  0.0  0.1 241852  4060 ?        S    Aug17   0:28 ./venv/bin/python dreamina_pool.py --max-workers 2 --port 5101 --chrome /usr/bin/google-chrome --low-mem
+ubuntu   3403217  0.0  2.1 1646276 83808 ?       Sl   Aug17   0:28 /home/ubuntu/dreamina-pool/venv/lib/python3.12/site-packages/patchright/driver/node /home/ubuntu/dreamina-pool/venv/lib/python3.12/site-packages/patchright/driver/package/cli.js run-driver
+ubuntu   3403218  0.2  0.0 2371820 2844 ?        Sl   Aug17  12:14 /home/ubuntu/dreamina-pool/venv/lib/python3.12/site-packages/patchright/driver/node /home/ubuntu/dreamina-pool/venv/lib/python3.12/site-packages/patchright/driver/package/cli.js run-driver
+===POOL_DIR===
+dreamina_accounts.json
+dreamina_login.py
+dreamina_pool.py
+login_page.png
+pool_data
+pool.log
+__pycache__
+README_POOL.md
+venv
+webmssdk_cctbc.js
+webmssdk_ex_cctbc.js
+===LOGS===
+-rw-rw-r-- 1 ubuntu ubuntu 2430 Aug 17 10:02 /home/ubuntu/dreamina-pool/pool.log
+
+[exit 0]

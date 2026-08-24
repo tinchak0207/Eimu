@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": ["../src/index.ts"],
+  "sourcesContent": ["export { VercelCliError } from './errors';\nexport { execVercelCli } from './exec';\nexport { clearVercelCliLookupCache, findVercelCli } from './lookup';\nexport type {\n  ExecVercelCliOptions,\n  ExecVercelCliResult,\n  FindVercelCliOptions,\n  VercelCliErrorCode,\n  VercelCliInvocation,\n} from './types';\n"],
+  "mappings": ";;;;;;;;;;;;;;;;;;AAAA;AAAA;AAAA;AAAA;AAAA;AAAA;AAAA;AAAA;AAAA,oBAA+B;AAC/B,kBAA8B;AAC9B,oBAAyD;",
+  "names": []
+}

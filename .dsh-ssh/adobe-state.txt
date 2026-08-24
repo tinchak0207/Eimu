@@ -1,0 +1,5 @@
+{"status": "ok", "pool_size": 6, "account_count": 3, "active_account_count": 1, "profile_count": 3, "enabled_profile_count": 1, "lease": {"backend": "local", "configured": false, "distributed": false, "required": false, "healthy": true, "error": ""}}
+14c89226 active: 0 auto: 0 healthy: False cool: 0 auth_invalid
+5f1b8e1f active: 1 auto: 1 healthy: True cool: 0 upstream_temporary
+a02bd9bb active: 0 auto: 0 healthy: False cool: 0 
+===LOGS===

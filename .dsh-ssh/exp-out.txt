@@ -1,0 +1,5 @@
+proxy disabled for upstream requests
+generate_timeout: 600
+token ok: True
+video submit failed status=422 body={"error_code":"validation_error","message":"A validation error occured.","validation_errors":[{"loc":["body","modelId"],"msg":"Field required","type":"missing"}]}
+FAILED after 0.4 s: AdobeRequestError video submit failed: 422 {"error_code":"validation_error","message":"A validation error occured.","validation_errors":[{"loc":["body","modelId"],"msg":"Field required","type":"missing"}]}

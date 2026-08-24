@@ -1,0 +1,14 @@
+Aug 21 04:06:53 VM-0-2-ubuntu bun[2750139]: [workflow] node wf_mt1xo1z4_10-shot3_video-24 poll timeout
+Aug 21 04:11:57 VM-0-2-ubuntu bun[2750139]: [workflow] node wf_mt1xo1z4_10-shot4_video-25 poll timeout
+Aug 21 04:17:00 VM-0-2-ubuntu bun[2750139]: [workflow] node wf_mt1xo1z4_10-shot5_video-26 poll timeout
+Aug 21 04:22:03 VM-0-2-ubuntu bun[2750139]: [workflow] node wf_mt1xo1z4_10-shot6_video-27 poll timeout
+Aug 21 04:22:03 VM-0-2-ubuntu bun[2750139]: [workflow] wf_mt1xo1z4_10 finished: failed
+Aug 21 04:42:16 VM-0-2-ubuntu bun[2750139]: [workflow] node wf_mt1zhs9p_12-char_ref-0 poll timeout
+===WORKFLOW_SVC===
+/opt/agent-harness/gateway/index.ts
+/opt/agent-harness/gateway/pricing-and-validation.ts
+/opt/agent-harness/gateway/workflow-engine.ts
+/opt/agent-harness/gateway/workflow-service.ts
+/opt/agent-harness/gateway/workflow-templates.ts
+
+[exit 0]

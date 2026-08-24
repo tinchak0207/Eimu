@@ -1,0 +1,16 @@
+/opt/adobe2api/adobe_client.py:117:        self.proxy = ""
+/opt/adobe2api/adobe_client.py:123:        self.retry_on_error_types = {"timeout", "connection", "proxy"}
+/opt/adobe2api/adobe_client.py:136:        env_proxy = os.getenv("ADOBE_PROXY")
+/opt/adobe2api/adobe_client.py:145:        if env_proxy is not None:
+/opt/adobe2api/adobe_client.py:146:            self.proxy = env_proxy.strip()
+/opt/adobe2api/adobe_client.py:160:        proxy = str(cfg.get("proxy", "")).strip()
+/opt/adobe2api/adobe_client.py:161:        use_proxy = bool(cfg.get("use_proxy", False))
+/opt/adobe2api/adobe_client.py:168:        self.proxy = proxy if use_proxy and proxy else ""
+/opt/adobe2api/adobe_client.py:208:            "retry_on_error_types", ["timeout", "connection", "proxy"]
+/opt/adobe2api/adobe_client.py:219:            "proxy",
+/opt/adobe2api/adobe_client.py:230:        if self.proxy:
+/opt/adobe2api/adobe_client.py:231:            logger.warning("proxy enabled for upstream requests: %s", self.proxy)
+/opt/adobe2api/adobe_client.py:233:            logger.warning("proxy disabled for upstream requests")
+/opt/adobe2api/adobe_client.py:262:        if "proxy" in text:
+/opt/adobe2api/adobe_client.py:263:            return "proxy"
+===HTTPX===

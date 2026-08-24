@@ -1,0 +1,2 @@
+000
+head: cannot open '/tmp/img-out.json' for reading: No such file or directory

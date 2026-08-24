@@ -445,6 +445,43 @@ test("generate image route reports every upstream failure after fallback attempt
   assert.match(source, /status: 503/);
 });
 
+test("generate image route runs deterministic quality gates before dispatching providers", () => {
+  const source = read("src/app/api/generate-images/route.ts");
+  const gates = read("src/lib/generation-gates.ts");
+
+  // 门必须真的挂在主链路上：解析参数之后、扣费/派发之前。
+  assert.match(source, /runPreGenerationGates\(\{/);
+  assert.match(source, /gatesBlock\(gateChecks\)/);
+  assert.ok(
+    source.indexOf("const gateChecks = runPreGenerationGates") > source.indexOf("readGenerateImageRequest(req)"),
+    "gates must run after request parsing",
+  );
+  assert.ok(
+    source.indexOf("const gateChecks = runPreGenerationGates") < source.indexOf("await reserveImageQuota"),
+    "gates must run before quota is reserved",
+  );
+  assert.ok(
+    source.indexOf("const gateChecks = runPreGenerationGates") < source.indexOf("await requestImageGeneration"),
+    "gates must run before any provider dispatch",
+  );
+
+  // 422 + 结构化 gates 载荷，而不是笼统的 400/500。
+  assert.match(source, /quality_gate_failed/);
+  assert.match(source, /\{ success: false, code: "quality_gate_failed", gates: gateChecks \}/);
+  assert.match(source, /status: 422/);
+
+  // 门检查的是原始请求值——归一化产物恒合法，检查它门就退化成恒真。
+  assert.match(source, /aspectRatio: requestedAspectRatio \?\? workflow\?\.aspectRatio \?\? null/);
+
+  // 日志是观测面不是拦截面：appendGateLog 必须 catch 吞错，失败不影响主流程。
+  assert.match(source, /appendGateLog\(authenticatedUser\.id, gateLogEntry\)\.catch\(/);
+
+  // 门本身保持纯函数（零框架/网络依赖），skip 不是失败。
+  assert.match(gates, /export function gatesBlock/);
+  assert.match(gates, /status: "skip"/);
+  assert.match(gates, /checks\.some\(\(check\) => check\.status === "fail"\)/);
+});
+
 test("generate image route logs safe upstream failure details for replenishment", () => {
   const source = read("src/app/api/generate-images/route.ts");
 

@@ -1,0 +1,16 @@
+{
+  "projectId": "prj_YWuUtOdeoQxiMxUviBT9KTXwJuQ3",
+  "orgId": "team_tOdYoQMCy690bxXnXJZErAgm",
+  "projectName": "image_gen",
+  "settings": {
+    "createdAt": 1779974987553,
+    "framework": "nextjs",
+    "devCommand": null,
+    "installCommand": null,
+    "buildCommand": null,
+    "outputDirectory": ".next",
+    "rootDirectory": null,
+    "directoryListing": false,
+    "nodeVersion": "24.x"
+  }
+}

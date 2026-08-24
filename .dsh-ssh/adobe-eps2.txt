@@ -1,0 +1,7 @@
+START
+proxy disabled for upstream requests
+health: 404 <html>
+<head><title>404 Not Found</title></head>
+<body>
+<center><h1>404 Not F
+DONE

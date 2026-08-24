@@ -67,14 +67,13 @@ test("checkin calendar opens a calendar modal and awards random image credits", 
 });
 
 test("mobile pages reserve space for the single-row navbar", () => {
-  for (const relPath of [
-    "src/components/HistoryClient.tsx",
-    "src/components/PricingClient.tsx",
-  ]) {
-    const source = read(relPath);
-    assert.match(source, /pt-20/);
-    assert.doesNotMatch(source, /pt-32/);
-  }
+  // 2026-08-25：pricing 页改为聚焦弹窗化紧凑流（py-6 起，砍掉无意义大 Padding），
+  // 只有 History 页保留 pt-20 的页面节奏；两页都不允许回到两行 navbar 时代的 pt-32。
+  const history = read("src/components/HistoryClient.tsx");
+  assert.match(history, /pt-20/);
+  assert.doesNotMatch(history, /pt-32/);
+  const pricing = read("src/components/PricingClient.tsx");
+  assert.doesNotMatch(pricing, /pt-32/);
 });
 
 /**
@@ -102,40 +101,42 @@ test("pricing page removes the bottom external store link and uses zh-CN locale"
   assert.match(layout, /<html lang="zh-CN"/);
 });
 
-test("pricing copy uses simplified Chinese for the back button and redeem flow", () => {
+test("pricing copy uses simplified Chinese with a standard close affordance", () => {
   const pricing = read("src/components/PricingClient.tsx");
 
-  assert.match(pricing, /返回做图/);
+  // 2026-08-25 弹窗化重构：返回按钮换成右上角标准关闭 X（icon 库 X，非 emoji）。
+  assert.match(pricing, /aria-label="关闭"/);
+  assert.doesNotMatch(pricing, /返回做图/);
+  assert.doesNotMatch(pricing, /返回做圖/);
   assert.match(pricing, /兑换码/);
   assert.match(pricing, /兑换成功/);
-  assert.doesNotMatch(pricing, /返回做圖/);
   assert.doesNotMatch(pricing, /兌換碼/);
 });
 
-test("pricing page has a compact mobile-first recharge layout", () => {
+test("pricing page is a focused compact panel with in-card checkout", () => {
   const pricing = read("src/components/PricingClient.tsx");
 
-  assert.match(pricing, /mobile-pricing-compact/);
-  assert.match(pricing, /mobile-pricing-plans/);
-  assert.match(pricing, /mobile-pricing-tools/);
-  // 页首与 /history、/docs 统一为左对齐 iOS 大标题，不再单独居中。
+  // 2026-08-25 重构：聚焦卡片布局——首屏无滚动看全周期切换 + 三档卡片；
+  // 底部悬浮结账栏移除，收银台收进选中卡片内部。
+  assert.match(pricing, /max-w-6xl/);
+  assert.match(pricing, /sm:grid-cols-3/);
+  assert.doesNotMatch(pricing, /fixed inset-x-0 bottom-/);
+  assert.doesNotMatch(pricing, /mobile-pricing-/);
   assert.doesNotMatch(pricing, /sm:text-center/);
-  // 手机上方案卡是横向一行（名称 ←→ 价格），桌面才展开成竖排卡片。
-  assert.match(pricing, /items-center justify-between[\s\S]{0,220}sm:block/);
-  assert.match(pricing, /hidden sm:block/);
+  assert.doesNotMatch(pricing, /pt-20/);
 });
 
-test("pricing plans are selectable cards with one checkout bar, not six buttons", () => {
+test("pricing plans are selectable cards with in-card checkout closure", () => {
   const pricing = read("src/components/PricingClient.tsx");
 
-  // App Store 收银架构：先选方案（radio 卡），支付入口全页只有一个。
+  // App Store 收银架构（2026-08-25 收进卡片）：点卡即选，选中卡内展开
+  // 支付方式分段 + 唯一支付 CTA；未选中卡只有「选择此方案」。
   assert.match(pricing, /role="radiogroup" aria-label="充值方案"/);
   assert.match(pricing, /aria-checked=\{selected\}/);
   assert.match(pricing, /useState\("popular"\)/);
-  assert.match(pricing, /立即支付 ¥\{selectedPlan\.price\}/);
-  // 旧版每张卡塞两个支付按钮 —— 不允许回归。
+  assert.match(pricing, /立即支付 ¥\{plan\.price\}/);
   assert.doesNotMatch(pricing, /handleMapayBuy\(plan\.id/);
-  // 支付在新窗口完成，页内必须有「刷新余额」的闭环反馈。
+  // 支付在新窗口完成，卡内必须有「刷新余额」的闭环反馈。
   assert.match(pricing, /支付页已在新窗口打开/);
   assert.match(pricing, /已完成支付，刷新余额/);
 });

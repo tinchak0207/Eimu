@@ -1,0 +1,23 @@
+generation-worker:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+      target: generation-worker
+    container_name: image-control-worker
+    restart: always
+    env_file:
+      - ./.env.control-plane
+    environment:
+      NODE_ENV: production
+      PIXAI_BASE_URL: https://store.tinchak0207.xyz/pixai/v1
+      PIXAI_API_KEY: qe0urjs1al2fvchz5p4mkwoi36y8dngt
+    depends_on:
+      generation-postgres:
+        condition: service_healthy
+    networks:
+      - imagesite
+
+networks:
+  imagesite:
+    external: true
+    name: imagesite_imagesite

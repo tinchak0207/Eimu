@@ -131,6 +131,24 @@ test("applyCharacterCardsToPayload：無卡 / 空卡原樣返回（零行為漂�
   assert.equal("negative_prompt" in empty, false);
 });
 
+test("normalizeCharacterCard：style kind 原樣保留（風格卡清洗後不回落 character）", () => {
+  const ok = normalizeCharacterCard({
+    id: "card-style",
+    name: "水彩風格",
+    kind: "style",
+    prompt: "",
+    references: [{ url: "https://img.example/style.png", role: "style", name: "風格樣張" }],
+  });
+  assert.ok(ok);
+  assert.equal(ok?.kind, "style");
+  assert.equal(ok?.references[0].role, "style");
+  // applyCharacterCardsToPayload 對 style 卡照常注入參考圖（卡種類不影響鎖定語義）。
+  const payload = { prompt: "夜景", count: 1 };
+  const result = applyCharacterCardsToPayload(payload, [ok!]);
+  assert.equal(result.reference_images?.[0].url, "https://img.example/style.png");
+  assert.equal(result.reference_images?.[0].role, "style");
+});
+
 test("normalizeCharacterCard：清洗、上限與非法輸入", () => {
   const ok = normalizeCharacterCard({
     id: "card-1",
@@ -152,7 +170,12 @@ test("normalizeCharacterCard：清洗、上限與非法輸入", () => {
   assert.equal(normalizeCharacterCard({ id: "x", name: 123 }), null);
   assert.equal(normalizeCharacterCard(null), null);
   assert.equal(toCharacterCardKind("scene"), "scene");
+  assert.equal(toCharacterCardKind("style"), "style");
   assert.equal(toCharacterCardKind("nonsense"), "character");
+  // 擊穿收斂：大小寫與近似拼寫都不是合法 kind，必須回落 character（舊數據/agent 亂填不炸）。
+  assert.equal(toCharacterCardKind("Style"), "character");
+  assert.equal(toCharacterCardKind("styles"), "character");
+  assert.equal(toCharacterCardKind(123), "character");
 });
 
 // ─────────────────────────────────────────── 掛接契約（源碼級，倉庫既有模式）

@@ -1,0 +1,46 @@
+    },
+    {
+      id: "env:fallback",
+      label: "fallback",
+      configured: fallbackConfigured,
+      defaultEnabled: fallbackConfigured,
+      source: "IMAGE_API_BASE_URL_FALLBACK",
+      usesBillingGateway: false,
+      endpoint: fallbackConfigured
+        ? {
+            baseURL: fallbackBase,
+            apiKey: cleanEnvValue(env.IMAGE_API_KEY_FALLBACK ?? ""),
+            label: "fallback",
+            ...(env.IMAGE_API_MODEL_FALLBACK ? { modelId: cleanEnvValue(env.IMAGE_API_MODEL_FALLBACK) } : {}),
+          }
+        : null,
+    },
+    {
+      id: "env:pixai",
+      label: "pixai",
+      configured: pixaiConfigured,
+      defaultEnabled: pixaiConfigured,
+      source: "PIXAI_BASE_URL",
+      usesBillingGateway: false,
+      endpoint: pixaiConfigured
+        ? {
+            baseURL: pixaiBase,
+            apiKey: pixaiKey,
+            label: "pixai",
+            protocol: "pixai",
+            supportedModels: [...PIXAI_MODEL_IDS],
+          }
+        : null,
+    },
+  ];
+}
+
+export function buildGatewayEndpoints(env: EnvLike): GatewayEndpoint[] {
+  return describeEnvChannels(env)
+    .filter((channel) => channel.defaultEnabled && channel.endpoint)
+    .map((channel) => channel.endpoint as GatewayEndpoint);
+}
+
+export function shouldBypassAuthForLocalTest(env: EnvLike): boolean {
+  return env.NEXT_PUBLIC_LOCAL_TEST_MODE === "true";
+}

@@ -1,0 +1,5 @@
+column_name  
+--------------
+ result_json
+ callback_url
+(2 rows)

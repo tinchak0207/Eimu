@@ -1,0 +1,8 @@
+proxy disabled for upstream requests
+active tokens: 1
+active0[EE3C23B268] try1 (0.5s) UpstreamTemporaryError: video submit failed: 408 {"error_code":"timeout_error","message":"system under load"}
+video submit failed status=408 body={"error_code":"timeout_error","message":"system under load"}
+video submit failed status=408 body={"error_code":"timeout_error","message":"system under load"}
+active0[EE3C23B268] try2 (0.2s) UpstreamTemporaryError: video submit failed: 408 {"error_code":"timeout_error","message":"system under load"}
+video submit failed status=408 body={"error_code":"timeout_error","message":"system under load"}
+active0[EE3C23B268] try3 (0.2s) UpstreamTemporaryError: video submit failed: 408 {"error_code":"timeout_error","message":"system under load"}

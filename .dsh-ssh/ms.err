@@ -1,0 +1,79 @@
+* Host image.tinchak0207.xyz:443 was resolved.
+* IPv6: (none)
+* IPv4: 64.29.17.65, 216.198.79.65
+*   Trying 64.29.17.65:443...
+* ALPN: curl offers h2,http/1.1
+} [5 bytes data]
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+} [1576 bytes data]
+* SSL Trust Anchors:
+*   CAfile: /etc/ssl/certs/ca-certificates.crt
+{ [5 bytes data]
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+{ [1210 bytes data]
+* TLSv1.3 (IN), TLS change cipher, Change cipher spec (1):
+{ [1 bytes data]
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+{ [19 bytes data]
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+{ [4083 bytes data]
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+{ [264 bytes data]
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+{ [36 bytes data]
+* TLSv1.3 (OUT), TLS change cipher, Change cipher spec (1):
+} [1 bytes data]
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+} [36 bytes data]
+* SSL connection using TLSv1.3 / TLS_AES_128_GCM_SHA256 / X25519MLKEM768 / RSASSA-PSS
+* ALPN: server accepted h2
+* Server certificate:
+*   subject: CN=image.tinchak0207.xyz
+*   start date: Jul 28 21:12:48 2026 GMT
+*   expire date: Oct 26 21:12:47 2026 GMT
+*   issuer: C=US; O=Let's Encrypt; CN=YR2
+*   Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+*   Certificate level 1: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+*   Certificate level 2: Public key type RSA (4096/152 Bits/secBits), signed using sha256WithRSAEncryption
+*   Certificate level 3: Public key type RSA (4096/152 Bits/secBits), signed using sha256WithRSAEncryption
+*   subjectAltName: "image.tinchak0207.xyz" matches cert's "image.tinchak0207.xyz"
+* OpenSSL verify result: 0
+* SSL certificate verified via OpenSSL.
+* Established connection to image.tinchak0207.xyz (64.29.17.65 port 443) from 192.168.1.106 port 47354 
+* using HTTP/2
+* [HTTP/2] [1] OPENED stream for https://image.tinchak0207.xyz/v1/model-status
+* [HTTP/2] [1] [:method: GET]
+* [HTTP/2] [1] [:scheme: https]
+* [HTTP/2] [1] [:authority: image.tinchak0207.xyz]
+* [HTTP/2] [1] [:path: /v1/model-status]
+* [HTTP/2] [1] [user-agent: curl/8.21.0]
+* [HTTP/2] [1] [accept: */*]
+* [HTTP/2] [1] [authorization: Bearer sk-biz-e9220fc328f4a44f3c74b39e180b7617]
+} [5 bytes data]
+> GET /v1/model-status HTTP/2
+> Host: image.tinchak0207.xyz
+> User-Agent: curl/8.21.0
+> Accept: */*
+> Authorization: Bearer sk-biz-e9220fc328f4a44f3c74b39e180b7617
+> 
+* Request completely sent off
+{ [5 bytes data]
+* TLSv1.3 (IN), TLS handshake, Newsession Ticket (4):
+{ [122 bytes data]
+< HTTP/2 404 
+< cache-control: private, no-cache, no-store, max-age=0, must-revalidate
+< content-type: text/html; charset=utf-8
+< date: Fri, 21 Aug 2026 07:33:36 GMT
+< etag: "zooin6o5dmdqj"
+< server: Vercel
+< strict-transport-security: max-age=63072000
+< vary: rsc, next-router-state-tree, next-router-prefetch, next-router-segment-prefetch, Accept-Encoding
+< x-nextjs-cache: HIT
+< x-nextjs-prerender: 1
+< x-nextjs-prerender: 1
+< x-nextjs-stale-time: 300
+< x-vercel-cache: MISS
+< x-vercel-id: hkg1::66gfw-1787297615706-f3bbb4f65736
+< 
+{ [5 bytes data]
+* Connection #0 to host image.tinchak0207.xyz:443 left intact

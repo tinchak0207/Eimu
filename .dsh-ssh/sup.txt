@@ -1,0 +1,6 @@
+ERROR:  column "health" does not exist
+LINE 1: ...er_id, id, enabled, token_source, refresh_status, health, he...
+                                                             ^
+ERROR:  column "model_id" does not exist
+LINE 1: SELECT supplier_id, model_id, enabled FROM supplier_capabili...
+                            ^

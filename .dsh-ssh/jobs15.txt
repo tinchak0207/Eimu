@@ -1,0 +1,11 @@
+id                  |  model_id   |  status  | completed_count | age_s 
+--------------------------------------+-------------+----------+-----------------+-------
+ e5372ee4-4dbc-4675-bccb-358b6a01625b | kling-3.0   | queued   |               0 |   494
+ 6f73505f-c000-498a-9273-3fad5e074184 | gpt-image-2 | refunded |               0 |  1078
+ 122ef07a-2de7-4e07-bdf9-978de7114a7b | kling-3.0   | refunded |               0 |  1101
+(3 rows)
+
+  supplier_id  | status |                           det                            | latency_ms 
+---------------+--------+----------------------------------------------------------+------------
+ env:adobe2api | failed | Upstream is temporarily unavailable. Please retry later. |       3139
+(1 row)

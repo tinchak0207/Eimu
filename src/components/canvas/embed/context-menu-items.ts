@@ -161,6 +161,7 @@ export function buildCanvasEmbedMenuItems({
       children: [
         { id: "save-card-character", label: "存为角色卡", onSelect: () => void saveNodeAsCard(node, "character") },
         { id: "save-card-scene", label: "存为场景卡", onSelect: () => void saveNodeAsCard(node, "scene") },
+        { id: "save-card-style", label: "存为风格卡", onSelect: () => void saveNodeAsCard(node, "style") },
       ],
     });
   }

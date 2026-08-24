@@ -1,0 +1,34 @@
+video_prompt, entity_refs = _resolve_kling_entity_refs(
+                            token, prompt, kling_bound_refs
+                        )
+
+                    video_bytes, video_meta = client.generate_video(
+                        token=token,
+                        video_conf=video_conf or {},
+                        prompt=video_prompt,
+                        arp_session_id=arp_session_id,
+                        aspect_ratio=ratio,
+                        duration=duration,
+                        source_image_ids=source_image_ids,
+                        entity_refs=entity_refs,
+                        timeout=max(int(client.generate_timeout), 600),
+                        negative_prompt=negative_prompt,
+                        generate_audio=generate_audio,
+                        reference_mode=video_reference_mode,
+                        out_path=tmp_path,
+                        progress_cb=_video_progress_cb,
+                    )
+                    video_ext = video_ext_from_meta(video_meta)
+                    filename = f"{job_id}.{video_ext}"
+                    out_path = generated_dir / filename
+                    if video_bytes is not None:
+                        out_path.write_bytes(video_bytes)
+                    elif tmp_path.exists():
+                        tmp_path.replace(out_path)
+                    new_size = int(out_path.stat().st_size) if out_path.exists() else 0
+===WHO-USES-CHUNK===
+239:                        "message": "Use /v1/chat/completions for video generation",
+564:    @router.post("/v1/chat/completions")
+565:    def chat_completions(data: dict, request: Request):
+857:                operation_name="chat.completions",
+971:                "Unhandled error in /v1/chat/completions log_id=%s model=%s resolved_model=%s is_video_model=%s",

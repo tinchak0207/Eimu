@@ -495,7 +495,7 @@ export function useCanvasInteraction({ canvasStateRef, containerRef, visibleNode
       const now = new Date().toISOString();
       const card: CharacterCard = {
         id: `card-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-        name: node.title || (kind === "character" ? "角色卡" : "场景卡"),
+        name: node.title || (kind === "character" ? "角色卡" : kind === "scene" ? "场景卡" : "风格卡"),
         kind,
         // 純參考圖卡：locked 片段為空，鎖定的是參考圖與角色（可日後補描述）。
         prompt: "",
@@ -515,7 +515,7 @@ export function useCanvasInteraction({ canvasStateRef, containerRef, visibleNode
         return;
       }
       canvasStateRef.current.toggleCharacterCard(card.id); // 存為卡即鎖定（生成自動攜帶）
-      showError(`已存为${kind === "character" ? "角色" : "场景"}卡并锁定：${card.name}`);
+      showError(`已存为${kind === "character" ? "角色" : kind === "scene" ? "场景" : "风格"}卡并锁定：${card.name}`);
     },
     [showError, canvasStateRef],
   );

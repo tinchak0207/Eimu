@@ -10,6 +10,7 @@ import { fetchUsageStat } from "@/lib/new-api-client";
 import { buildHistoryStats } from "@/lib/history-types";
 import type { HistoryEntry, HistoryQuery } from "@/lib/history-types";
 import { exportHistoryCsv, exportHistoryJson, exportHistoryZip } from "@/lib/history-export";
+import { publishUserShowcaseCase } from "@/lib/showcase-user-cases";
 import { imageHelpers } from "@/lib/image-helpers";
 import { cn } from "@/lib/utils";
 import {
@@ -20,7 +21,10 @@ import {
   HistorySelectionBar,
   HistorySkeleton,
   HistoryStats,
+  RerunDialog,
+  SaveCardDialog,
 } from "@/components/history";
+import type { HistoryRerunMode } from "@/components/history";
 import "@/components/history/history.css";
 
 /**
@@ -81,6 +85,10 @@ export function HistoryClient() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
+  /** 「存为角色卡」目标记录：非 null 时弹出命名对话框。 */
+  const [saveCardEntry, setSaveCardEntry] = useState<HistoryEntry | null>(null);
+  /** 「再来 N 组 / 微调变体」目标记录 + 模式：非 null 时弹出重跑对话框。 */
+  const [rerunTarget, setRerunTarget] = useState<{ entry: HistoryEntry; mode: HistoryRerunMode } | null>(null);
   const exportMenuRef = useRef<HTMLDivElement>(null);
 
   // 导出菜单：点外面或按 Esc 关闭。
@@ -210,6 +218,28 @@ export function HistoryClient() {
     router.push(`/?agent=1&q=${encodeURIComponent(seed)}`);
   }, [router]);
 
+  // ── payload 级重跑（再来 N 组 / 微调变体）────────────────
+  // 与 handleOpenAgent 的会话级交接不同：这里把该条的配方 payload 原样
+  // （或按微调覆写）批量提交到 /api/generation-jobs，不经过助理重新猜参数。
+
+  const handleRerun = useCallback((entry: HistoryEntry) => {
+    setRerunTarget({ entry, mode: "rerun" });
+  }, []);
+
+  const handleRerunVariant = useCallback((entry: HistoryEntry) => {
+    setRerunTarget({ entry, mode: "variant" });
+  }, []);
+
+  const handleRerunDone = useCallback(
+    (message: string) => {
+      setRerunTarget(null);
+      setNotice(message);
+      // 重跑任务已入队，刷新让队列态任务立即出现在历史里（闭环：提交 → 可见）。
+      runSearch(urlQuery);
+    },
+    [runSearch, urlQuery],
+  );
+
   const handleDownload = useCallback(async (entry: HistoryEntry) => {
     const result = entry.results.find((item) => item.image || item.imageUrl);
     const src = result?.image ? result.image : result?.imageUrl;
@@ -263,6 +293,26 @@ export function HistoryClient() {
       setBusy(false);
     }
   }, [selectedEntries]);
+
+  // ── 存为角色卡（历史一锚定）─────────────────────────
+
+  /** 对话框完成回调：结果进页面通知条（成功/失败统一走这里）。 */
+  const handleSaveCardDone = useCallback((message: string) => {
+    setSaveCardEntry(null);
+    setNotice(message);
+  }, []);
+
+  // ── 发布为案例（配方资产总线对向动作）───────────────────
+  // 把这条历史的配方快照发布进首页案例环（showcase-user-cases 的 localStorage
+  // 数据层扩展点，幂等）。无审核流的最小可用路径：发布后回首页即出现在案例环。
+  const handlePublishCase = useCallback((entry: HistoryEntry) => {
+    const result = publishUserShowcaseCase(entry);
+    setNotice(result.ok
+      ? (result.alreadyPublished
+          ? "这条配方已发布过案例，首页案例环里可以直接找到它。"
+          : "已发布为案例：回到首页，它已进入案例环，可随时「用此工作流打开」。")
+      : result.reason);
+  }, []);
 
   const { toggleStar } = history;
 
@@ -488,6 +538,10 @@ export function HistoryClient() {
             onDownload={handleDownload}
             onDelete={handleDelete}
             onOpenAgent={handleOpenAgent}
+            onSaveCard={setSaveCardEntry}
+            onRerun={handleRerun}
+            onRerunVariant={handleRerunVariant}
+            onPublishCase={handlePublishCase}
           />
         )}
       </div>
@@ -509,7 +563,28 @@ export function HistoryClient() {
         onToggleStar={toggleStar}
         onDownload={handleDownload}
         onDelete={handleDelete}
+        onSaveCard={setSaveCardEntry}
+        onRerun={handleRerun}
+        onRerunVariant={handleRerunVariant}
+        onPublishCase={handlePublishCase}
       />
+
+      {rerunTarget && (
+        <RerunDialog
+          entry={rerunTarget.entry}
+          mode={rerunTarget.mode}
+          onClose={() => setRerunTarget(null)}
+          onDone={handleRerunDone}
+        />
+      )}
+
+      {saveCardEntry && (
+        <SaveCardDialog
+          entry={saveCardEntry}
+          onClose={() => setSaveCardEntry(null)}
+          onDone={handleSaveCardDone}
+        />
+      )}
     </div>
   );
 }

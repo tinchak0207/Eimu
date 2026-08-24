@@ -50,6 +50,8 @@ import {
   type OutputResolution,
 } from "@/lib/generation-model-catalog";
 import { normalizeControlNets, toPixaiControlNets, type PixaiControlNetEntry } from "@/lib/pixai-controlnets";
+import { gatesBlock, runPreGenerationGates } from "@/lib/generation-gates";
+import { appendGateLog } from "@/lib/generation-gate-log";
 import { syncModelPricing } from "@/lib/pricing-runtime";
 
 export const maxDuration = 300;
@@ -526,6 +528,38 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: authResult.message }, { status: authResult.status });
   }
   const authenticatedUser = authResult.user;
+
+  // ── 生成质量门（v1 确定性拦截）────────────────────────────────────────────
+  // 可判定的才拦：空提示词 / 超长 / 非法宽高比 / 负面词反噬所选风格。LoRA 多选
+  // 只记 skip（平台既有 slice(0,1) 归一化兜底）。检查原始请求值而非归一化后的
+  // 值——归一化产物恒合法，门会退化成恒真。日志写入失败绝不影响主流程。
+  const gateChecks = runPreGenerationGates({
+    prompt,
+    modelId,
+    aspectRatio: requestedAspectRatio ?? workflow?.aspectRatio ?? null,
+    referenceImageCount: referenceImages.length,
+    negativePrompt: workflow?.negativePrompt ?? null,
+    stylePresetId: workflow?.styleTemplate ?? null,
+    loraIds: loraModelVersionIds ?? [],
+  });
+  const gateLogEntry = {
+    id: `gate-${requestId}`,
+    at: new Date().toISOString(),
+    modelId,
+    blocked: gatesBlock(gateChecks),
+    checks: gateChecks,
+  };
+  after(() =>
+    appendGateLog(authenticatedUser.id, gateLogEntry).catch((error) => {
+      console.error(`Failed to append gate log [requestId=${requestId}]`, error);
+    }),
+  );
+  if (gatesBlock(gateChecks)) {
+    return NextResponse.json(
+      { success: false, code: "quality_gate_failed", gates: gateChecks },
+      { status: 422 },
+    );
+  }
 
   // ── Mock mode ──────────────────────────────────────────────────────────────
   if (MOCK_MODE) {

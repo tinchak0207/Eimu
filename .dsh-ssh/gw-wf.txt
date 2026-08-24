@@ -1,0 +1,121 @@
+if (depth > 4) return ""
+    const direct = graph?.connections.filter((c) => c.to === startId).map((c) => graph.nodes.find((n) => n.id === c.from)).filter(Boolean)
+    for (const n of direct ?? []) {
+      const content = typeof n.metadata.content === "string" ? n.metadata.content : typeof n.metadata.prompt === "string" ? n.metadata.prompt : ""
+      if (content.trim()) return content
+    }
+    for (const n of direct ?? []) {
+      const found = collectUpstreamPrompt(n.id, depth + 1)
+      if (found) return found
+    }
+    return ""
+  }
+  const prompt = meta.prompt || meta.content || collectUpstreamPrompt(nodeId) || ""
+
+  const model = typeof meta.model === "string" ? meta.model : node.kind === "video" ? "seedance-2.0" : "pixai-tsubaki2"
+  const size = typeof meta.size === "string" ? meta.size : "1024x1024"
+
+  // 參考圖：上游中已完成且有 content 的 image 節點（角色圖/場景圖 → 影片參考）
+  const refImages = graph
+    ? graph.connections
+        .filter((c) => c.to === nodeId)
+        .map((c) => graph.nodes.find((n) => n.id === c.from))
+        .filter((n): n is { id: string; kind: string; metadata: Record<string, unknown> } => Boolean(n) && n.kind === "image" && Boolean(upstream.get(n.id)))
+        .map((n) => upstream.get(n.id)!)
+    : []
+
+  const endpoint = node.kind === "video" ? "/videos/generations" : "/images/generations"
+  const payload: Record<string, unknown> = {
+    prompt,
+    model,
+    size,
+    n: 1,
+    response_format: "url",
+  }
+  if (node.kind === "video") {
+    payload.duration_seconds = typeof meta.duration_seconds === "number" ? meta.duration_seconds : 5
+    if (refImages.length) payload.reference = refImages[0]
+  } else if (refImages.length) {
+    payload.reference = refImages[0]
+  }
+
+  if (!prompt) {
+    console.error(`[workflow] node ${nodeId} (${node.kind}) has no prompt`)
+    return { nodeId: node.id, ok: false, error: "缺少提示词：上游文本节点未填写内容" }
+  }
+
+  // 模型可用性強制探測（2026-08-15）：工作流節點提交前確認模型可用，
+  // 避免把節點發給不可用渠道。探測失敗（unknown/網絡）不擋提交，
+  // 防止探測端本身故障卡死整個工作流；明確 unavailable 才攔截。
+  try {
+    const msRes = await fetch(`${PLATFORM_BASE}/v1/model-status`, {
+      headers: { Authorization: `Bearer ${session.apiKey}` },
+      signal: AbortSignal.timeout(10000),
+    })
+    const msData = await msRes.json().catch(() => null)
+    const msEntry = msData?.models?.find((m: { id?: string }) => m?.id === model)
+    if (msEntry && msEntry.availability === "unavailable") {
+      const msNote = typeof msEntry.note === "string" ? msEntry.note : "渠道故障"
+      console.error(`[workflow] node ${nodeId} model ${model} unavailable: ${msNote}`)
+      return { nodeId: node.id, ok: false, error: `模型 ${model} 目前不可用（${msNote}）。请在画布上更换模型后重试该节点` }
+    }
+  } catch {
+    // 探測端不可達時放行（unknown 語義），不阻擋工作流
+  }
+
+  let taskSubmitted = false
+  try {
+    const res = await fetch(`${PLATFORM_BASE}/v1${endpoint}`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${session.apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(30000),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (res.status === 202 || (res.ok && (data?.task_id || data?.id))) {
+      taskSubmitted = true
+      const taskId = data?.task_id ?? data?.id
+      const pollEndpoint = node.kind === "video" ? `/videos/${taskId}` : `/images/${taskId}`
+      // 輪詢：間隔 3s；圖最多 120s、影片最多 300s（seedance 5 秒片可能排隊較久）
+      const pollBudget = node.kind === "video" ? 100 : 40
+      for (let i = 0; i < pollBudget; i++) {
+        await new Promise((r) => setTimeout(r, 3000))
+        const poll = await fetch(`${PLATFORM_BASE}/v1${pollEndpoint}`, {
+          headers: { Authorization: `Bearer ${session.apiKey}` },
+          signal: AbortSignal.timeout(10000),
+        })
+        const pd = await poll.json().catch(() => ({}))
+        if (pd?.status === "succeeded") {
+          const rawUrl = pd?.data?.[0]?.url || pd?.result_url || pd?.url
+          // 結果可能是相對 /v1/images/{id}/result，轉成絕對公開 URL（沿用 resolveResultUrl 語義）
+          const url = rawUrl
+            ? /^https?:\/\//.test(rawUrl)
+              ? rawUrl
+              : `${PLATFORM_BASE}${rawUrl.startsWith("/") ? "" : "/"}${rawUrl}`
+            : ""
+          if (url) return { nodeId: node.id, ok: true, content: url, costCoins: pd?.cost_coins }
+          break
+        }
+        if (pd?.status === "failed") {
+          console.error(`[workflow] node ${nodeId} generation failed: ${pd?.error?.message}`)
+          return { nodeId: node.id, ok: false, error: pd?.error?.message || "generation failed" }
+        }
+        if (poll.status >= 400 && poll.status !== 404) {
+          console.error(`[workflow] node ${nodeId} poll ${poll.status}: ${(pd as { error?: { message?: string } })?.error?.message}`)
+          return { nodeId: node.id, ok: false, error: `poll ${poll.status}` }
+        }
+      }
+    }
+    // 同步回圖兜底
+    const url = data?.data?.[0]?.url || data?.result_url || data?.url
+    if (res.ok && url) return { nodeId: node.id, ok: true, content: url, costCoins: data?.cost_coins }
+    if (taskSubmitted) {
+      console.error(`[workflow] node ${nodeId} poll timeout`)
+      return { nodeId: node.id, ok: false, error: "生成超时：平台排队过久，可在画布上稍后重试该节点" }
+    }
+    console.error(`[workflow] node ${nodeId} submit failed: ${JSON.stringify(data)}`)
+    return { nodeId: node.id, ok: false, error: data?.error?.message || `submit ${res.status}` }
+  } catch (e) {
+    console.error(`[workflow] node ${nodeId} exception: ${(e as Error).message}`)
+    return { nodeId: node.id, ok: false, error: (e as Error).message }
+  }

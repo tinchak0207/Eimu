@@ -1,0 +1,5 @@
+proxy disabled for upstream requests
+proxy attr: http://172.19.0.1:24000
+use_proxy: n/a
+ADOBE_PROXY env: http://172.19.0.1:24000
+proxies(): {'http': 'http://172.19.0.1:24000', 'https': 'http://172.19.0.1:24000'}

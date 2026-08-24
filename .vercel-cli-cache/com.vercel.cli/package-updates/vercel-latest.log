@@ -1,0 +1,15 @@
+[2026-08-20T19:41:41.754Z] [debug] Notifying parent we're ready
+[2026-08-20T19:41:41.987Z] [debug] Received message from parent: {
+  cacheFile: '/home/lenovo/Desktop/image-app/.vercel-cli-cache/com.vercel.cli/package-updates/vercel-latest.json',
+  distTag: 'latest',
+  name: 'vercel',
+  updateCheckInterval: 86400000
+}
+[2026-08-20T19:41:41.987Z] [debug] Disconnecting from parent
+[2026-08-20T19:41:41.988Z] [debug] Checking lock file: /home/lenovo/Desktop/image-app/.vercel-cli-cache/com.vercel.cli/package-updates/vercel-latest.lock
+[2026-08-20T19:41:41.988Z] [debug] Initializing lock file with pid 148366
+[2026-08-20T19:41:41.989Z] [debug] Fetching dist-tags for vercel
+[2026-08-20T19:41:42.319Z] [debug] Found dist tag "latest" with version "59.3.0"
+[2026-08-20T19:41:42.319Z] [debug] Writing cache file: /home/lenovo/Desktop/image-app/.vercel-cli-cache/com.vercel.cli/package-updates/vercel-latest.json
+[2026-08-20T19:41:42.320Z] [debug] Releasing lock file: /home/lenovo/Desktop/image-app/.vercel-cli-cache/com.vercel.cli/package-updates/vercel-latest.lock
+[2026-08-20T19:41:42.320Z] [debug] Worker finished successfully!

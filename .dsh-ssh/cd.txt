@@ -1,0 +1,4 @@
+id       | health_status |      cooldown_until       | resume_in_s 
+---------------+---------------+---------------------------+-------------
+ env:adobe2api | cooldown      | 2026-08-21 09:00:32.11+00 |        -129
+(1 row)

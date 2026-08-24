@@ -1,0 +1,21 @@
+✔ applyCharacterCards：卡按 id 升序注入前綴（與傳入順序無關） (0.935328ms)
+✔ applyCharacterCards：冪等——同一卡兩次只注入一次；apply 兩次結果相同 (0.14393ms)
+✔ applyCharacterCards：正文已含的片段不重複注入 (0.09743ms)
+✔ applyCharacterCards：負面詞合併去重；無負面詞回 null (0.652338ms)
+✔ applyCharacterCards：參考圖角色保留、url 去重、非法 URL 丟棄 (0.187666ms)
+✔ applyCharacterCardsToPayload：請求體確實含卡內容（鎖定生效的真實能力鎖） (0.266199ms)
+✔ applyCharacterCardsToPayload：卡與手動引用同 URL 去重；負面詞與既有值合併 (0.110468ms)
+✔ applyCharacterCardsToPayload：無卡 / 空卡原樣返回（零行為漂移） (0.094755ms)
+✔ normalizeCharacterCard：清洗、上限與非法輸入 (0.869115ms)
+✔ 掛接契約：CanvasEmbed 生成唯一出口注入卡（手動+agent 同路） (0.616919ms)
+✔ 掛接契約：use-canvas-chat 持久化 cardIds 並暴露鎖定卡 (0.313594ms)
+✔ 掛接契約：/api/canvas/generate 把卡負面詞併進 workflow 鏈路 (0.123304ms)
+✔ 掛接契約：/api/character-cards 站內鑑權 + blob store (0.106441ms)
+ℹ tests 13
+ℹ suites 0
+ℹ pass 13
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 223.131941

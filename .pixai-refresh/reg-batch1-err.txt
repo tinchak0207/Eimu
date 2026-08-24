@@ -1,0 +1,64 @@
+[2026-08-20T17:59:33.036Z] registering 30 accounts (pool has 85)
+[2026-08-20T17:59:33.322Z] browser ready
+[2026-08-20T17:59:33.322Z] [1/30] 1ivkhkc@tinchak0207.xyz
+[2026-08-20T17:59:52.837Z]   ok verified=true
+[2026-08-20T18:00:03.250Z] [2/30] 1oacpyy5imt7@tinchak0207.xyz
+[2026-08-20T18:00:21.973Z]   ok verified=true
+[2026-08-20T18:00:33.153Z] [3/30] 21bzli4wz1h@tinchak0207.xyz
+[2026-08-20T18:00:39.580Z]   429 backoff 15s (attempt 2)
+[2026-08-20T18:01:07.188Z]   429 backoff 45s (attempt 3)
+[2026-08-20T18:02:00.512Z]   429 backoff 90s (attempt 4)
+[2026-08-20T18:03:40.033Z]   429 backoff 180s (attempt 5)
+[2026-08-20T18:06:56.037Z]   ok verified=true
+[2026-08-20T18:07:05.431Z] [4/30] 2496hpy@tinchak0207.xyz
+[2026-08-20T18:07:12.560Z]   429 backoff 15s (attempt 2)
+[2026-08-20T18:07:34.354Z]   429 backoff 45s (attempt 3)
+[2026-08-20T18:08:26.338Z]   429 backoff 90s (attempt 4)
+[2026-08-20T18:10:09.862Z]   ok verified=true
+[2026-08-20T18:10:20.673Z] [5/30] 2d8rbwz2wr4p@tinchak0207.xyz
+[2026-08-20T18:10:28.013Z]   429 backoff 15s (attempt 2)
+[2026-08-20T18:10:51.591Z]   429 backoff 45s (attempt 3)
+[2026-08-20T18:12:02.753Z] [6/30] 2g7kld@tinchak0207.xyz
+[2026-08-20T18:12:21.741Z]   429 backoff 15s (attempt 2)
+[2026-08-20T18:12:59.075Z]   429 backoff 45s (attempt 3)
+[2026-08-20T18:13:51.497Z]   429 backoff 90s (attempt 4)
+[2026-08-20T18:15:36.161Z]   ok verified=true
+[2026-08-20T18:15:45.060Z] [7/30] 2isiqmq@tinchak0207.xyz
+[2026-08-20T18:16:03.542Z]   429 backoff 15s (attempt 2)
+[2026-08-20T18:16:25.589Z]   429 backoff 45s (attempt 3)
+[2026-08-20T18:17:17.596Z]   429 backoff 90s (attempt 4)
+[2026-08-20T18:19:06.251Z] [8/30] 2lq9pkz@tinchak0207.xyz
+[2026-08-20T18:19:20.241Z]   429 backoff 15s (attempt 2)
+[2026-08-20T18:19:44.732Z]   429 backoff 45s (attempt 3)
+[2026-08-20T18:20:44.331Z]   ok verified=true
+[2026-08-20T18:20:50.756Z] [9/30] 2m82brhyprgo@tinchak0207.xyz
+[2026-08-20T18:20:57.037Z]   429 backoff 15s (attempt 2)
+[2026-08-20T18:21:24.856Z]   429 backoff 45s (attempt 3)
+[2026-08-20T18:22:17.780Z]   429 backoff 90s (attempt 4)
+[2026-08-20T18:24:06.735Z]   429 backoff 180s (attempt 5)
+[2026-08-20T18:27:20.552Z]   ok verified=true
+[2026-08-20T18:27:27.415Z] [10/30] 2mud3n0j2y@tinchak0207.xyz
+[2026-08-20T18:27:34.271Z]   429 backoff 15s (attempt 2)
+[2026-08-20T18:27:59.775Z] [11/30] 2oi033@tinchak0207.xyz
+[2026-08-20T18:28:14.982Z] [12/30] 2sgh25mn1qo7@tinchak0207.xyz
+[2026-08-20T18:28:27.525Z]   429 backoff 15s (attempt 2)
+[2026-08-20T18:28:50.031Z]   429 backoff 45s (attempt 3)
+[2026-08-20T18:29:40.062Z] [13/30] 2tk0feyrn@tinchak0207.xyz
+[2026-08-20T18:29:45.069Z] [14/30] 2uixv2p@tinchak0207.xyz
+[2026-08-20T18:29:50.075Z] [15/30] 2wy4lphk6kkh@tinchak0207.xyz
+[2026-08-20T18:29:55.080Z] [16/30] 33zpwg9k@tinchak0207.xyz
+[2026-08-20T18:30:00.086Z] [17/30] 384fes0s@tinchak0207.xyz
+[2026-08-20T18:30:05.091Z] [18/30] 397psr98x3v@tinchak0207.xyz
+[2026-08-20T18:30:10.097Z] [19/30] 3r1adm14e4@tinchak0207.xyz
+[2026-08-20T18:30:15.102Z] [20/30] 40r5jvw@tinchak0207.xyz
+[2026-08-20T18:30:20.108Z] [21/30] 43egqr@tinchak0207.xyz
+[2026-08-20T18:30:25.113Z] [22/30] 48mgezp@tinchak0207.xyz
+[2026-08-20T18:30:30.118Z] [23/30] 4h4lhppks@tinchak0207.xyz
+[2026-08-20T18:30:35.124Z] [24/30] 4p2g9d@tinchak0207.xyz
+[2026-08-20T18:30:40.129Z] [25/30] 5c17lk@tinchak0207.xyz
+[2026-08-20T18:30:45.135Z] [26/30] 5e7l0is@tinchak0207.xyz
+[2026-08-20T18:30:50.139Z] [27/30] 5hbthssul80@tinchak0207.xyz
+[2026-08-20T18:30:55.145Z] [28/30] 5m4c3ue3dbo@tinchak0207.xyz
+[2026-08-20T18:31:00.150Z] [29/30] 5nugiqls@tinchak0207.xyz
+[2026-08-20T18:31:05.155Z] [30/30] 5o8iugrp@tinchak0207.xyz
+[2026-08-20T18:31:10.162Z] done: 7/30 registered, 7 verified. report: /home/lenovo/Desktop/image-app/.pixai-refresh/register-result-1787250670161.json

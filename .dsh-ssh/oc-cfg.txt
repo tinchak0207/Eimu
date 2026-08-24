@@ -1,0 +1,13 @@
+/opt/agent-harness/.env:1:OPENCODE_SERVER_PASSWORD=harness-secret-2026
+/opt/agent-harness/.env:2:OPENCODE_URL=http://127.0.0.1:4096
+/opt/agent-harness/.env:9:OPENCODE_PASSWORD=harness-secret-2026
+===
+agent-jailbreak-test.mjs
+gateway
+ledger.jsonl
+poller
+smoke.mjs
+smoke.mjs.bak-20260807212320
+systemd
+workspace
+===

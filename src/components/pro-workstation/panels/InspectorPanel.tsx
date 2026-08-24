@@ -1,7 +1,7 @@
 "use client";
 
 import { memo } from "react";
-import { Bot, ChevronLeft, ChevronRight, Clipboard, FileJson, FolderOpen, Gauge, Images, RotateCcw } from "lucide-react";
+import { BookmarkPlus, Bot, ChevronLeft, ChevronRight, Clipboard, FileJson, FolderOpen, Gauge, Images, RotateCcw } from "lucide-react";
 import { HistoryInspectorPanel } from "@/components/pro-workstation/HistoryInspectorPanel";
 import { resultSrc } from "@/components/image-src";
 import { cn } from "@/lib/utils";
@@ -54,6 +54,8 @@ export interface InspectorPanelProps {
   openResultOnCanvas: (image: ImageResult) => void;
   copyProvenanceConfig: (image?: ImageResult) => void;
   saveResultToBoard: (image: ImageResult) => void;
+  /** 模板捕获器：把这张成片的配方存为我的模板（命名卡由工作台入口渲染）。 */
+  onSaveAsTemplate: (image: ImageResult) => void;
   /** 历史 tab。 */
   restoreHistoryEntry: (entry: PersistedGenerationEntry) => void;
   useHistoryEntryAsReference: (entry: { results?: ReadonlyArray<{ image?: string | null; imageUrl?: string | null }> }) => void;
@@ -105,6 +107,7 @@ export const InspectorPanel = memo(function InspectorPanel({
   openResultOnCanvas,
   copyProvenanceConfig,
   saveResultToBoard,
+  onSaveAsTemplate,
   restoreHistoryEntry,
   useHistoryEntryAsReference,
   recentWorkflows,
@@ -342,6 +345,16 @@ export const InspectorPanel = memo(function InspectorPanel({
                       >
                         <FolderOpen className="h-3 w-3" />
                         存入文件夹
+                      </button>
+                      {/* 模板捕获器入口：任何一次成功出图都可沉淀为具名模板（玻璃 icon button） */}
+                      <button
+                        type="button"
+                        onClick={() => onSaveAsTemplate(image)}
+                        title="把这张成片的完整配方存为我的模板"
+                        className="col-span-2 mt-1 inline-flex items-center justify-center gap-1 rounded-lg bg-white/45 px-2 py-1 text-ios-caption2 font-bold text-muted-foreground transition-colors hover:bg-white/70"
+                      >
+                        <BookmarkPlus className="h-3 w-3" />
+                        存为模板
                       </button>
                     </div>
                   </div>

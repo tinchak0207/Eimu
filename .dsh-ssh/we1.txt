@@ -1,0 +1,6 @@
+88:  const queue: string[] = []
+89:  for (const [id, deg] of inDegree) if (deg === 0) queue.push(id)
+91:  while (queue.length) {
+92:    const id = queue.shift()!
+97:      if (d === 0) queue.push(next)
+142:  status: "queued" | "running" | "success" | "partial" | "failed"

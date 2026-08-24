@@ -1,0 +1,2 @@
+bash: -c: line 9: syntax error near unexpected token `('
+bash: -c: line 9: `keys = re.findall(r"\"(\w*[Kk]ey\w*)\"\\s*:", s)'

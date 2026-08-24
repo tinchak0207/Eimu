@@ -1,0 +1,7 @@
+id                  |  model_id   |  status  |   failure_class   |                                       left                                       
+--------------------------------------+-------------+----------+-------------------+----------------------------------------------------------------------------------
+ 0bf6cf26-7de5-457b-bd26-cd50dae14e2a | kling-3.0   | refunded | deadline_exceeded | Generation deadline elapsed before all outputs completed.
+ 14bde457-f023-4d52-819e-1ee3140990d9 | kling-3.0   | queued   | overloaded        | accounts_unhealthy: Suppliers for kling-3.0 are enabled but none has a usable ac
+ 53a26a80-1f4f-4c71-a930-fec2bc49a4af | gpt-image-2 | queued   | overloaded        | capacity_saturated: All suppliers for gpt-image-2 are healthy but their concurre
+ 4b2f8a54-d027-4dd2-878a-588b127ebcda | kling-3.0   | queued   | overloaded        | accounts_unhealthy: Suppliers for kling-3.0 are enabled but none has a usable ac
+(4 rows)

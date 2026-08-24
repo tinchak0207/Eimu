@@ -1,0 +1,30 @@
+child.on("error", reject);
+    child.on("exit", (code) => {
+      if (code === 0) {
+        console.log(`[bootstrap] ${label} 完成。`);
+        resolve();
+        return;
+      }
+      reject(new Error(`${label} 退出码 ${code}。`));
+    });
+  });
+}
+
+async function main(): Promise<void> {
+  if (process.env.CONTROL_PLANE_BOOTSTRAP_SKIP === "1") {
+    console.log("[bootstrap] 已按 CONTROL_PLANE_BOOTSTRAP_SKIP=1 跳过迁移与播种。");
+  } else {
+    await run("数据库迁移", ["tools/migrate-generation-db.ts"]);
+    await run("supplier 播种", ["tools/seed-generation-suppliers.ts"]);
+  }
+
+  // 用 import 而不是再 spawn 一层：worker 需要成为容器的前台进程，
+  // 才能正确收到 compose 发来的 SIGTERM。
+  // 路径不带扩展名：tsconfig 未开 allowImportingTsExtensions，而 tsx 能解析。
+  await import("../worker/generation-worker");
+}
+
+main().catch((error) => {
+  console.error("[bootstrap] 自举失败，容器将退出以触发重启。", error);
+  process.exit(1);
+});

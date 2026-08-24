@@ -1,0 +1,5 @@
+START
+proxy disabled for upstream requests
+image-submit[home]: 408 (1.4s) {"error_code":"timeout_error","message":"system under load"}
+image-submit[direct]: 408 (0.3s) {"error_code":"timeout_error","message":"system under load"}
+DONE

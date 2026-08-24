@@ -1,9 +1,10 @@
 "use client";
 
 import { memo, useCallback, useState } from "react";
-import { AlertTriangle, Bot, Check, Coins, Download, FileQuestion, RotateCcw, Star, Trash2 } from "lucide-react";
+import { AlertTriangle, Bot, Check, Coins, CopyPlus, Download, FileQuestion, IdCard, Megaphone, RotateCcw, SlidersHorizontal, Star, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatCoins, formatModelLabel, formatRelativeTime, primaryModelId } from "@/lib/history-types";
+import { canHistoryEntryRerun } from "@/lib/history-rerun";
 import type { HistoryEntry } from "@/lib/history-types";
 
 export interface HistoryCardProps {
@@ -18,6 +19,14 @@ export interface HistoryCardProps {
   onDelete: (id: string) => void;
   /** 以这条记录的参数回到工作站继续做图。 */
   onReuse?: (entry: HistoryEntry) => void;
+  /** 把这张图锚定成角色/场景/风格卡（存到 /api/character-cards）。 */
+  onSaveCard?: (entry: HistoryEntry) => void;
+  /** 再来 N 组：按这条的原配方 payload 直接批量重跑（走 /api/generation-jobs）。 */
+  onRerun?: (entry: HistoryEntry) => void;
+  /** 微调变体：改提示词/模型/尺寸后再批量重跑。 */
+  onRerunVariant?: (entry: HistoryEntry) => void;
+  /** 把这条记录的配方发布为首页「用户投稿」案例（showcase-user-cases）。 */
+  onPublishCase?: (entry: HistoryEntry) => void;
   /**
    * D-18：交给 AI 助理继续做。只有「有可用内容」的卡才挂这颗按钮——
    * 纯信息卡不挂。这里的判据是这条记录得有 prompt 可以交接过去，
@@ -81,6 +90,10 @@ function HistoryCardComponent({
   onDelete,
   onReuse,
   onOpenAgent,
+  onSaveCard,
+  onRerun,
+  onRerunVariant,
+  onPublishCase,
 }: HistoryCardProps) {
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageFailed, setImageFailed] = useState(false);
@@ -89,6 +102,7 @@ function HistoryCardComponent({
   const src = result?.image ? `data:image/png;base64,${result.image}` : result?.imageUrl ?? null;
   const model = primaryModelId(entry);
   const promptText = entry.prompt.trim();
+  const rerunnable = canHistoryEntryRerun(entry);
 
   const handleActivate = useCallback(() => {
     if (selectionMode) onToggleSelect(entry.id);
@@ -195,6 +209,32 @@ function HistoryCardComponent({
         {onReuse && entry.workflow && (
           <CardAction label="用这套参数继续做图" onClick={() => onReuse(entry)}>
             <RotateCcw className="h-3.5 w-3.5" />
+          </CardAction>
+        )}
+        {/* payload 级重跑两连：原样再来 N 组 / 微调后再批量。配方不完整
+            （无 prompt 或非图像模型）时不可重跑——挂一颗按下去只会失败的
+            按钮比不挂更糟。 */}
+        {onRerun && rerunnable && (
+          <CardAction label="再来 N 组" onClick={() => onRerun(entry)}>
+            <CopyPlus className="h-3.5 w-3.5" />
+          </CardAction>
+        )}
+        {onRerunVariant && rerunnable && (
+          <CardAction label="微调变体" onClick={() => onRerunVariant(entry)}>
+            <SlidersHorizontal className="h-3.5 w-3.5" />
+          </CardAction>
+        )}
+        {/* 有图才有锚定成卡的意义；纯信息卡不挂这颗按钮。 */}
+        {onSaveCard && src && !imageFailed && (
+          <CardAction label="存为角色卡" onClick={() => onSaveCard(entry)}>
+            <IdCard className="h-3.5 w-3.5" />
+          </CardAction>
+        )}
+        {/* 配方双向总线对向动作：把这条配方发布成首页案例。有 prompt（或
+            workflow 配方）才可发布——与 publishUserShowcaseCase 的校验一致。 */}
+        {onPublishCase && (promptText.length > 0 || entry.workflow) && (
+          <CardAction label="发布为案例" onClick={() => onPublishCase(entry)}>
+            <Megaphone className="h-3.5 w-3.5" />
           </CardAction>
         )}
         {/* D-18：有 prompt 才有东西交接给助理；没有就不挂这颗按钮。 */}

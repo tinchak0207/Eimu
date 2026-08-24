@@ -40,6 +40,10 @@ export interface WorkstationRecallApi {
   restoreProvenanceConfig: () => void;
   restoreProvenanceConfigFromPng: (workflowJson: string) => void;
   restoreHistoryEntry: (entry: PersistedGenerationEntry) => void;
+  /** R 键复用：把这张成片的完整配方（六槽提示词/模型/尺寸/角色/区域提示词/seed）回填进表单。 */
+  applyResultRecipe: (image?: ImageResult) => boolean;
+  /** 模板=六槽具名 profile：把一份配方（内置模板/用户模板）摊开进表单，可撤销可改。 */
+  applyRecipeTemplate: (config: WorkflowRecallConfig & { modelId?: string }, label: string) => boolean;
 }
 
 /**
@@ -164,6 +168,58 @@ export function useWorkstationRecall(options: {
       })),
     };
   };
+
+  /**
+   * R 键「复用当前结果」的配方回填：除参考图外，把这张成片当时的完整配方
+   * （六槽提示词、negative、模型 id、尺寸、质量档、seed、区域提示词、参考图角色）
+   * 全量预填进工作台表单，让用户从套用者变成理解结构的创作者。
+   *
+   * 与复制配置 / PNG 嵌入共用同一个权威来源 buildProvenanceConfig，避免同一张图
+   * 的配方在两处各写一份；走 parseWorkflowRecallConfig 校验，与粘贴 / PNG 还原
+   * 完全同一条路径。整份覆盖前先存撤销快照，与其他还原动作同一套机制。
+   * 成片没有 workflow 元数据也没有模型信息时（如历史合成的裸图）返回 false，
+   * 复用动作退回「只放参考图」的旧行为。
+   */
+  const applyResultRecipe = useEventCallback((image?: ImageResult): boolean => {
+    if (!image) return false;
+    const recipeModelId = typeof image.modelId === "string" && image.modelId ? image.modelId : undefined;
+    if (!image.workflow && !recipeModelId) return false;
+    const config = buildProvenanceConfig(image);
+    const result = parseWorkflowRecallConfig(JSON.stringify(config));
+    if (!result.ok) return false;
+    setTemplateUndo({ label: "回填成片配方", snapshot: captureTemplateState() });
+    if (recipeModelId && recipeModelId !== modelId) onModelChange(recipeModelId);
+    applyWorkflowRecallConfig(result.config);
+    return true;
+  });
+
+  /**
+   * 模板套用（模板=六槽具名 profile）：与 R 键回填同一条解析路径
+   * （parseWorkflowRecallConfig），但语义是「整份替换」——
+   * 模板没有声明风格槽时显式清空当前风格，保证套用后六槽就是模板的六槽，
+   * 摊开在提示词页可改，而不是和旧表单残余混在一起。
+   * 用户模板带 modelId（契约加法式扩展）时一并切回当时的模型。
+   */
+  const applyRecipeTemplate = useEventCallback((
+    config: WorkflowRecallConfig & { modelId?: string },
+    label: string,
+  ): boolean => {
+    const result = parseWorkflowRecallConfig(JSON.stringify(config));
+    if (!result.ok) {
+      setCanvasNotice("这份模板的配方无法解析。", "warn");
+      return false;
+    }
+    setTemplateUndo({ label: `套用模板「${label}」`, snapshot: captureTemplateState() });
+    const templateModelId = config.modelId?.trim();
+    if (templateModelId && templateModelId !== modelId) onModelChange(templateModelId);
+    // 空字符串/缺省都算「模板声明风格槽为空」：显式清空，保证六槽=模板的六槽
+    // （空串经 parseWorkflowRecallConfig 会被剥成缺省，所以判据放在 parse 前的输入上）
+    if (!config.styleTemplate?.trim()) setStyleTemplateId(null);
+    applyWorkflowRecallConfig(result.config);
+    setLeftPanelTab("prompt");
+    setCanvasNotice(`已套用模板「${label}」，六槽已摊开可改，可撤销。`);
+    return true;
+  });
 
   /**
    * 复制「这张成片的」配置，而不是「编辑器现在的」配置。
@@ -308,5 +364,7 @@ export function useWorkstationRecall(options: {
     restoreProvenanceConfig,
     restoreProvenanceConfigFromPng,
     restoreHistoryEntry,
+    applyResultRecipe,
+    applyRecipeTemplate,
   };
 }

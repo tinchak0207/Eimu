@@ -1,0 +1,3 @@
+ERROR:  relation "generation_artifact" does not exist
+LINE 1: ..., j.status, a.url FROM generation_job j LEFT JOIN generation...
+                                                             ^

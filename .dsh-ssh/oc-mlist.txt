@@ -1,0 +1,44 @@
+x-preview-f-free | opencode | Ox Alpha Free
+nemotron-3.5-lightning-free | opencode | Nemotron 3.5 Lightning Free
+ling-3.0-tiny-free | opencode | Ling-3.0-tiny Free
+muse-spark-1.2-contributor-free | opencode | Muse Spark 1.2 Free
+deepseek-v4-flash-free | opencode | DeepSeek V4 Flash Free
+ling-3.0-flash-free | opencode | Ling-3.0-flash Free
+laguna-s-2.1-free | opencode | Laguna S 2.1 Free
+hy3-free | opencode | Hy3 Free
+longcat-2.0-free | opencode | LongCat-2.0 Free
+north-mini-code-free | opencode | North Mini Code Free
+nemotron-3-ultra-free | opencode | Nemotron 3 Ultra Free
+minimax-m3-free | opencode | MiniMax-M3 Free
+ring-2.6-1t-free | opencode | Ring 2.6 1T Free
+mimo-v2.5-free | opencode | MiMo V2.5 Free
+qwen/qwen3.6-27b | groq | Qwen3.6 27B
+ling-2.6-flash-free | opencode | Ling 2.6 Flash Free
+hy3-preview-free | opencode | Hy3 preview Free
+qwen3.6-plus-free | opencode | Qwen3.6 Plus Free
+mimo-v2-pro-free | opencode | MiMo V2 Pro Free
+mimo-v2-omni-free | opencode | MiMo V2 Omni Free
+nemotron-3-super-free | opencode | Nemotron 3 Super Free
+minimax-m2.5-free | opencode | MiniMax-M2.5 Free
+glm-5-free | opencode | GLM-5 Free
+kimi-k2.5-free | opencode | Kimi K2.5 Free
+trinity-large-preview-free | opencode | Trinity Large Preview
+minimax-m2.1-free | opencode | MiniMax-M2.1 Free
+glm-4.7-free | opencode | GLM-4.7 Free
+canopylabs/orpheus-v1-english | groq | Canopy Labs Orpheus V1 English
+mimo-v2-flash-free | opencode | MiMo V2 Flash Free
+canopylabs/orpheus-arabic-saudi | groq | Canopy Labs Orpheus Arabic Saudi
+openai/gpt-oss-safeguard-20b | groq | Safety GPT OSS 20B
+big-pickle | opencode | Big Pickle
+groq/compound-mini | groq | Compound Mini
+groq/compound | groq | Compound
+grok-code | opencode | Grok Code Fast 1
+openai/gpt-oss-120b | groq | GPT OSS 120B
+openai/gpt-oss-20b | groq | GPT OSS 20B
+meta-llama/llama-prompt-guard-2-86m | groq | Prompt Guard 2 86M
+meta-llama/llama-prompt-guard-2-22m | groq | Llama Prompt Guard 2 22M
+allam-2-7b | groq | ALLaM-2-7b
+llama-3.3-70b-versatile | groq | Llama 3.3 70B
+whisper-large-v3-turbo | groq | Whisper Large V3 Turbo
+llama-3.1-8b-instant | groq | Llama 3.1 8B
+whisper-large-v3 | groq | Whisper

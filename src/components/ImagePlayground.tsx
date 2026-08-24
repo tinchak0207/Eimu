@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import { ImageDisplay } from "@/components/ImageDisplay";
 import { PromptInput, type PromptInputMode } from "@/components/PromptInput";
 import { CaseShowcase } from "@/components/CaseShowcase";
+import type { ShowcaseCase } from "@/lib/showcase-cases";
 import { FaqSection } from "@/components/FaqSection";
 import { UseCaseLinks } from "@/components/UseCaseLinks";
 import { useCanvasChat, type UseCanvasChatReturn } from "@/hooks/use-canvas-chat";
@@ -94,6 +95,8 @@ export function ImagePlayground({ suggestions }: { suggestions: Suggestion[] }) 
   const [generateAudio, setGenerateAudio] = useState(() => defaultGenerateAudio(MODEL_CONFIGS.fast.image_tinchak));
   const [stylePreset, setStylePreset] = useState<StylePreset>("none");
   const [casePrompt, setCasePrompt] = useState("");
+  /** 案例卡「用此工作流打开」待灌入工作台的配方（nonce 保证同一案例可重复触发）。 */
+  const [showcaseRecipe, setShowcaseRecipe] = useState<{ json: string; nonce: number } | null>(null);
   const [referenceImages, setReferenceImages] = useState<ReferenceImage[]>([]);
 // PixAI edit/upscale results are delivered straight to the result canvas on
 // the right; they do not go through the normal generation queue.
@@ -296,6 +299,17 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
+  /**
+   * 案例卡「用此工作流打开」：把案例携带的完整配方交给专业工作台，
+   * 经 workflow-recall 通道（parseWorkflowRecallConfig → applyWorkflowRecallConfig）
+   * 灌入 —— 与 R 键 / PNG 内嵌工作流同一条配方载入管线，不另开入口。
+   */
+  const handleOpenShowcaseWorkflow = useCallback((item: ShowcaseCase) => {
+    if (!item.recipe) return;
+    setShowcaseRecipe({ json: JSON.stringify(item.recipe), nonce: Date.now() });
+    openProfessionalMode();
+  }, [openProfessionalMode]);
+
   const handlePromptSubmit = useCallback(async (rawPrompt: string) => {
     if (!LOCAL_TEST_MODE && (!isLoggedIn || !user)) {
       redirectToGithub();
@@ -491,6 +505,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
             capabilityNotice={capabilityNotice}
             externalResultUrl={pixaiResultUrl}
             onTemplateResult={setPixaiResultUrl}
+            externalRecipeJson={showcaseRecipe}
           />
         </div>
       )}
@@ -624,7 +639,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
 
           {/* 聊天区开在卡片里，不占屏，所以案例轮播照常留着：
               使用者一边跟助理聊，一边还能看到案例、点一下换个方向。 */}
-          <CaseShowcase onUsePrompt={handleUseCasePrompt} />
+          <CaseShowcase onUsePrompt={handleUseCasePrompt} onOpenWorkflow={handleOpenShowcaseWorkflow} />
           {/* 場景指南及以下为 SEO 内容：保留 DOM，但视觉隐藏。 */}
           <div className="hidden" aria-hidden="true">
             <UseCaseLinks />

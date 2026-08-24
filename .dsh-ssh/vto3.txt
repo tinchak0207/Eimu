@@ -1,0 +1,8 @@
+11:        timeout: int = 600,
+===CHATCALL===
+2:722:                    video_bytes, video_meta = client.generate_video(
+720-                        )
+721-
+722:                    video_bytes, video_meta = client.generate_video(
+723-                        token=token,
+724-                        video_conf=video_conf or {},

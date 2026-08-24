@@ -1,0 +1,1 @@
+/opt/adobe2api/app.py:1232:        raise HTTPException(status_code=401, detail="Invalid API key")

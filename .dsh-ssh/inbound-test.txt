@@ -1,0 +1,4 @@
+port 22: closed/filtered
+port 80: closed/filtered
+port 443: closed/filtered
+port 8080: closed/filtered

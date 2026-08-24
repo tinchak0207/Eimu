@@ -1,0 +1,26 @@
+public_model_id   |      id       | supply_tier  | health_status |       cooldown_until       
+---------------------+---------------+--------------+---------------+----------------------------
+ gemini-3-image      | env:fallback  | fallback     | degraded      | 
+ gemini-3-image      | env:fallback  | fallback     | degraded      | 
+ gemini-3-image      | env:adobe2api | first_party  | cooldown      | 2026-08-21 07:30:42.969+00
+ gemini-3-image      | env:adobe2api | first_party  | cooldown      | 2026-08-21 07:30:42.969+00
+ gemini-3-image      | env:sub2api   | managed_pool | degraded      | 
+ gemini-3-image      | env:sub2api   | managed_pool | degraded      | 
+ gemini-3-image      | env:primary   | relay        | disabled      | 
+ gemini-3-image      | env:primary   | relay        | disabled      | 
+ gpt-image-1.5       | env:fallback  | fallback     | degraded      | 
+ gpt-image-1.5       | env:fallback  | fallback     | degraded      | 
+ gpt-image-1.5       | env:adobe2api | first_party  | cooldown      | 2026-08-21 07:30:42.969+00
+ gpt-image-1.5       | env:adobe2api | first_party  | cooldown      | 2026-08-21 07:30:42.969+00
+ gpt-image-1.5       | env:sub2api   | managed_pool | degraded      | 
+ gpt-image-1.5       | env:sub2api   | managed_pool | degraded      | 
+ gpt-image-1.5       | env:primary   | relay        | disabled      | 
+ gpt-image-1.5       | env:primary   | relay        | disabled      | 
+ kling-2.5-turbo     | env:adobe2api | first_party  | cooldown      | 2026-08-21 07:30:42.969+00
+ pixai-reference-pro | env:pixai     | managed_pool | healthy       | 
+ pixai-reference-pro | env:pixai     | managed_pool | healthy       | 
+ pixai-tsubaki2      | env:pixai     | managed_pool | healthy       | 
+ pixai-tsubaki2      | env:pixai     | managed_pool | healthy       | 
+ seedance-2.0        | env:adobe2api | first_party  | cooldown      | 2026-08-21 07:30:42.969+00
+ veo-3.1             | env:adobe2api | first_party  | cooldown      | 2026-08-21 07:30:42.969+00
+(23 rows)

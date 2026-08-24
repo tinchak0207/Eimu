@@ -1,3 +1,21 @@
+---
+name: agent-lora
+version: 1.0.0
+description: AI 助理的 LoRA 选型技能——搜索、预览、筛选并装配 LoRA 参数，通过 generate_image 显式携带出图
+allowed-tools:
+  - lora_search
+  - lora_get
+  - lora_favorite
+  - generate_image
+triggers:
+  - 用户提到想叠风格 / 换画风 / 用某个 LoRA 出图
+  - 用户询问 LoRA 库、收藏的 LoRA 或最近使用的 LoRA
+requires:
+  - /api/lora-models（PixAI bridge 代理，LoRA catalog 唯一来源）
+  - /api/lora-preferences（收藏与最近使用，跨会话权威）
+optional: []
+---
+
 # agent-lora Skill —— AI 助理的 LoRA 选型技能
 
 > 迁移自专业模式 `LoraLibraryPanel`（2026-08-18，PRD §5）。功能零遗漏承接：搜索、排序、分页、收藏、最近使用、大图预览、单选铁律、PixAI-only 约束、生成参数装配。
@@ -10,7 +28,7 @@
 
 | 工具 | 入参 | 出参 | 后端 owner |
 |------|------|------|-----------|
-| `lora_search` | `query?`, `view?(all\|favorites\|recent)`, `sort?(popular\|newest\|liked)`, `page?`, `limit?` | `{ models: [{versionId,title,thumb,previewUrl?,tags?,author?,favorite}], total, page }` | 站内 `/api/lora-models`（PixAI bridge 代理）+ `/api/lora-preferences`（收藏/最近过滤与标注） |
+| `lora_search` | `query?`, `view?(all|favorites|recent)`, `sort?(popular|newest|liked)`, `page?`, `limit?` | `{ models: [{versionId,title,thumb,previewUrl?,tags?,author?,favorite}], total, page }` | 站内 `/api/lora-models`（PixAI bridge 代理）+ `/api/lora-preferences`（收藏/最近过滤与标注） |
 | `lora_get` | `versionId` | 单模型详情 + 大图预览 + `favorite` 态 | 站内搜索 `/api/lora-models` 后按 `versionId` 过滤 + `/api/lora-preferences` 合并（**不新增 bridge 面**） |
 | `lora_favorite` | `versionId, title, thumb, favorite` | 最新收藏态 | `/api/lora-preferences` PATCH（`lora_user_state` 表 / Blob） |
 

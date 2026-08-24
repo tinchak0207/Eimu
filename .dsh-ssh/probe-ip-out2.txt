@@ -1,0 +1,6 @@
+A. direct    (0.3s): video submit failed: 408 {"error_code":"timeout_error","message":"system under load"}
+B. pool:24000 (0.4s): video submit failed: 408 {"error_code":"timeout_error","message":"system under load"}
+C. pool:24001 (1.7s): video submit failed: 408 {"error_code":"timeout_error","message":"system under load"}
+C. pool:24005 (0.5s): video submit failed: 408 {"error_code":"timeout_error","message":"system under load"}
+C. pool:24010 (0.3s): video submit failed: 408 {"error_code":"timeout_error","message":"system under load"}
+C. pool:24015 (0.0s): upstream session error: Failed to perform, curl: (7) Failed to connect to 172.19.0.1 port 24015 after 0 ms: Could not co

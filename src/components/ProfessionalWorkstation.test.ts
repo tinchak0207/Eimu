@@ -946,3 +946,29 @@ test("downloaded PNG embeds the workflow and re-import restores it", () => {
   assert.match(source, /onModelChange\(embeddedModelId\)/);
   assert.match(source, /已还原 PNG 内嵌的工作流/);
 });
+
+test("R-key reuse backfills the full recipe, not just the reference image", () => {
+  const recall = read("src/components/pro-workstation/workstation-recall.ts");
+  const source = read("src/components/pro-workstation/InvokeInspiredWorkstation.tsx");
+  const commands = read("src/lib/workstation-commands.ts");
+
+  // 召回钩子拥有配方回填：与复制配置/PNG 嵌入共用 buildProvenanceConfig 权威来源，
+  // 走 parseWorkflowRecallConfig 校验，覆盖前存撤销快照，模型显式回切。
+  assert.match(recall, /applyResultRecipe: \(image\?: ImageResult\) => boolean/);
+  assert.match(recall, /const applyResultRecipe = useEventCallback/);
+  assert.match(recall, /buildProvenanceConfig\(image\)/);
+  assert.match(recall, /parseWorkflowRecallConfig\(JSON.stringify\(config\)\)/);
+  assert.match(recall, /setTemplateUndo\(\{ label: \"回填成片配方\"/);
+  assert.match(recall, /onModelChange\(recipeModelId\)/);
+  assert.match(recall, /applyWorkflowRecallConfig\(result.config\)/);
+
+  // 复用入口只有那一个：R 键与结果卡复用按钮都汇聚到 sendResultToAssets，
+  // 配方回填挂在它身上，零新入口。
+  assert.match(source, /const recipeApplied = applyResultRecipe\(image\)/);
+  assert.match(source, /setLeftPanelTab\(recipeApplied \? \"prompt\" : \"assets\"\)/);
+  assert.match(source, /已设为参考图，并回填这张成片的完整配方/);
+
+  // 快捷键面板的宣称与真实能力一致：描述写的是回填配方，不只是放参考图。
+  assert.match(commands, /description: \"回填这张成片的完整配方并设为参考图\"/);
+});
+

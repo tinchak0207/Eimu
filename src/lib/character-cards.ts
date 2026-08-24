@@ -13,10 +13,17 @@
 import { toReferenceImageRole } from "./image-types";
 import type { ReferenceImageRole } from "./image-types";
 
-/** 卡種類：角色卡（外觀鎖定）/ 場景卡（環境鎖定）。 */
-export type CharacterCardKind = "character" | "scene";
+/** 卡種類：角色卡（外觀鎖定）/ 場景卡（環境鎖定）/ 風格卡（畫風鎖定）。 */
+export type CharacterCardKind = "character" | "scene" | "style";
 
-export const CHARACTER_CARD_KIND_VALUES: readonly CharacterCardKind[] = ["character", "scene"];
+export const CHARACTER_CARD_KIND_VALUES: readonly CharacterCardKind[] = ["character", "scene", "style"];
+
+/** 卡種類的簡體中文標籤（UI 與 toast 共用，不散落三元表達式）。 */
+export const CHARACTER_CARD_KIND_LABEL: Record<CharacterCardKind, string> = {
+  character: "角色",
+  scene: "场景",
+  style: "风格",
+};
 
 /** 未知值收斂為 character（舊數據/agent 亂填不炸）。 */
 export function toCharacterCardKind(value: unknown): CharacterCardKind {

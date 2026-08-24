@@ -21,6 +21,13 @@ export interface HistoryGridProps {
   onReuse?: (entry: HistoryEntry) => void;
   /** D-18：把这条记录交给 AI 助理继续做。缺席时卡片不挂这颗按钮。 */
   onOpenAgent?: (entry: HistoryEntry) => void;
+  /** 把这张图锚定成角色/场景/风格卡。缺席时卡片不挂这颗按钮。 */
+  onSaveCard?: (entry: HistoryEntry) => void;
+  /** 再来 N 组 / 微调变体（payload 级批量重跑）。缺席时卡片不挂。 */
+  onRerun?: (entry: HistoryEntry) => void;
+  onRerunVariant?: (entry: HistoryEntry) => void;
+  /** 把这条记录的配方发布为首页「用户投稿」案例。缺席时卡片不挂。 */
+  onPublishCase?: (entry: HistoryEntry) => void;
 }
 
 export function HistoryGrid({
@@ -37,6 +44,10 @@ export function HistoryGrid({
   onDelete,
   onReuse,
   onOpenAgent,
+  onSaveCard,
+  onRerun,
+  onRerunVariant,
+  onPublishCase,
 }: HistoryGridProps) {
   const sentinelRef = useRef<HTMLDivElement>(null);
   /** 放在 ref 里，这样 observer 不必因为回调变化而反复重建。 */
@@ -88,6 +99,10 @@ export function HistoryGrid({
                 onDelete={onDelete}
                 {...(onReuse ? { onReuse } : {})}
                 {...(onOpenAgent ? { onOpenAgent } : {})}
+                {...(onSaveCard ? { onSaveCard } : {})}
+                {...(onRerun ? { onRerun } : {})}
+                {...(onRerunVariant ? { onRerunVariant } : {})}
+                {...(onPublishCase ? { onPublishCase } : {})}
               />
             ))}
           </div>

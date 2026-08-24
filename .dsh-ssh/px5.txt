@@ -1,0 +1,6 @@
+File "<string>", line 5
+    print('proxy=, repr(c.proxy))
+          ^
+SyntaxError: unterminated string literal (detected at line 5)
+===TESTGEN===
+curl_cffi          0.15.0

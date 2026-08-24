@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { BookOpen, CreditCard, History, KeyRound, LogOut, User } from "lucide-react";
+import { BookOpen, CreditCard, History, Images, KeyRound, LogOut, User } from "lucide-react";
 import { WalletBadge } from "@/components/WalletBadge";
 import {
   DropdownMenu,
@@ -137,6 +137,14 @@ export function Navbar({ className }: NavbarProps) {
                 >
                   <History className="h-3.5 w-3.5" aria-hidden="true" />
                   <span className="sr-only">历史</span>
+                </Link>
+                <Link
+                  href="/review"
+                  className="lg-float flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[rgba(0,0,0,0.78)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)]"
+                  aria-label="审查页"
+                >
+                  <Images className="h-3.5 w-3.5" aria-hidden="true" />
+                  <span className="sr-only">审查页</span>
                 </Link>
                 {/* 这里曾有一颗「助理」导航链接，指向 /agent 独立页。已移除：
                     AI 助理是首页卡片上的一个 toggle，不是一个去处。

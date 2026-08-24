@@ -79,6 +79,7 @@ import {
   modelBaseName,
   modelDurations,
   modelSupportsAudio,
+  type ModelUsageTipParams,
   type OutputResolution,
 } from "@/lib/generation-model-catalog";
 import { ModelPicker } from "@/components/ModelPicker";
@@ -137,6 +138,8 @@ import { usePanelResize } from "./use-panel-resize";
 import { useCanvasAnnotation } from "./use-canvas-annotation";
 import { useBoardsLibrary } from "./use-boards-library";
 import { useWorkstationRecall } from "./workstation-recall";
+import { useRecipeTemplates } from "./use-recipe-templates";
+import { RecipeTemplateSaveDialog } from "./RecipeTemplateSaveDialog";
 import { createWorkstationTours } from "./workstation-tours";
 export { INVOKE_AI_WORKSTATION_SOURCE, WORKFLOW_PRESETS, REFERENCE_IMAGE_ROLES } from "./workstation-constants";
 export type { ProfessionalRunConfig } from "./workstation-subcomponents";
@@ -158,6 +161,7 @@ export function InvokeInspiredWorkstation({
   active = true,
   externalResultUrl,
   onTemplateResult,
+  externalRecipeJson,
 }: InvokeInspiredWorkstationProps) {
   // 訂閱定價覆寫：管理員改價後本頁報價立即重算。
   usePricingRevision();
@@ -1060,6 +1064,8 @@ export function InvokeInspiredWorkstation({
     restoreProvenanceConfig,
     restoreProvenanceConfigFromPng,
     restoreHistoryEntry,
+    applyResultRecipe,
+    applyRecipeTemplate,
   } = useWorkstationRecall({
     modelId,
     prompt,
@@ -1101,6 +1107,52 @@ export function InvokeInspiredWorkstation({
       setRegionalPrompts,
     },
   });
+
+  // ── 配方模板（六槽具名 profile + 捕获器，2026-08-25 主线一第三件）────────
+  // 模板加载/保存走既有用户偏好存储面（/api/recipe-templates，登录用户）；
+  // 套用动作复用 useWorkstationRecall 的同一条解析路径，确认卡在 RecipeTemplateSection 内。
+
+  const recipeTemplates = useRecipeTemplates();
+  const [saveTemplateTarget, setSaveTemplateTarget] = useState<ImageResult | null>(null);
+
+  const handleSaveAsTemplate = useEventCallback((image: ImageResult) => {
+    setSaveTemplateTarget(image);
+  });
+
+  const handleSaveTemplate = useEventCallback(async (name: string) => {
+    if (!saveTemplateTarget) return { ok: false, message: "没有可捕获的成片。" };
+    // 捕获的就是「这张成片当时」的完整配方（buildProvenanceConfig 权威来源，
+    // 与复制配置 / PNG 嵌入 / R 键回填四方共用，不另造第二份结构）
+    const config = buildProvenanceConfig(saveTemplateTarget);
+    const result = await recipeTemplates.saveTemplate({ name, config });
+    return result.ok
+      ? { ok: true, message: "已存为模板「" + result.item.name + "」，可在左栏「配方模板」中载入。" }
+      : { ok: false, message: result.message };
+  });
+
+  const handleDeleteUserRecipeTemplate = useEventCallback(async (id: string) => {
+    const removed = await recipeTemplates.deleteTemplate(id);
+    setCanvasNotice(removed ? "已删除该模板。" : "模板删除失败，请稍后再试。", removed ? "info" : "warn");
+  });
+
+  // ── 外部配方注入（首页案例卡「用此工作流打开」）──────────────
+  // nonce 变化 = 用户刚在首页点了一次案例卡。走 applyRecipeTemplate 的同一条
+  // parseWorkflowRecallConfig → applyWorkflowRecallConfig 管线（与 R 键 / PNG
+  // 内嵌 / 配方模板一致）：可撤销、模型显式回切、六槽摊开在提示词页。
+  // recipe JSON 里带 modelId（ShowcaseRecipe 的加法式扩展字段）时由
+  // applyRecipeTemplate 一并切回当时的模型。
+  const injectedNonceRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!externalRecipeJson || externalRecipeJson.nonce === injectedNonceRef.current) return;
+    injectedNonceRef.current = externalRecipeJson.nonce;
+    try {
+      const recipe = JSON.parse(externalRecipeJson.json) as Parameters<typeof applyRecipeTemplate>[0];
+      applyRecipeTemplate(recipe, "案例配方");
+    } catch {
+      setCanvasNotice("这个案例的配方无法解析。", "warn");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- applyRecipeTemplate 是 useEventCallback，身份稳定
+  }, [externalRecipeJson]);
 
   /**
    * 下载成片。
@@ -1161,8 +1213,14 @@ export function InvokeInspiredWorkstation({
         resultId: image.resultId,
         taskId: image.taskId,
       }, replaceOldest);
-      setLeftPanelTab("assets");
-      setCanvasNotice("已设为参考图。");
+      // 复用从「回填图片」升维为「回填配方」：同一颗 R 键/同一个复用动作，
+      // 除参考图外把这张成片的完整配方预填进表单；带 workflow 元数据的成片
+      // 回填后六槽摊开在提示词页可改，模型显式参数化、可换模型重跑。
+      const recipeApplied = applyResultRecipe(image);
+      setLeftPanelTab(recipeApplied ? "prompt" : "assets");
+      setCanvasNotice(recipeApplied
+        ? "已设为参考图，并回填这张成片的完整配方，可撤销、可改可换模型重跑。"
+        : "已设为参考图。");
     } catch {
       setCanvasNotice("设置参考图失败，请先下载图片。");
     }
@@ -1587,6 +1645,18 @@ export function InvokeInspiredWorkstation({
               stripVendorPrefix
               menuOpen={modelMenuOpen}
               onMenuOpenChange={handleModelMenuOpenChange}
+              onApplyTipParams={(params: ModelUsageTipParams) => {
+                // 模型卡「一键带入」：建议参数走本工作站的既有表单填充路径——
+                // 比例→尺寸选择、画质→档位（1k=balanced，2k/4k=print）、时长/音轨直填。
+                if (params.aspectRatio) {
+                  setImageSizes(normalizeSizeSelection([imageSizeForAspectRatio(params.aspectRatio)]));
+                }
+                if (params.outputResolution) {
+                  setQualityProfile(params.outputResolution === "1k" ? "balanced" : "print");
+                }
+                if (params.durationSeconds != null) setDurationSeconds(params.durationSeconds);
+                if (params.generateAudio != null) setGenerateAudio(params.generateAudio);
+              }}
             />
           </div>
           {/*
@@ -1641,6 +1711,11 @@ export function InvokeInspiredWorkstation({
               toggleSection={toggleSection}
               onApplyResource={applyCreatorResource}
               onApplyScenario={applyScenario}
+              isLoggedIn={isLoggedIn}
+              userRecipeTemplates={recipeTemplates.items}
+              userRecipeTemplatesLoading={recipeTemplates.loading}
+              onApplyRecipeTemplate={applyRecipeTemplate}
+              onDeleteUserRecipeTemplate={handleDeleteUserRecipeTemplate}
               templateUndoLabel={templateUndo?.label}
               onUndo={undoTemplateApply}
               token={token}
@@ -1942,6 +2017,7 @@ export function InvokeInspiredWorkstation({
           openResultOnCanvas={openResultOnCanvas}
           copyProvenanceConfig={copyProvenanceConfig}
           saveResultToBoard={saveResultToBoard}
+          onSaveAsTemplate={handleSaveAsTemplate}
           restoreHistoryEntry={restoreHistoryEntry}
           useHistoryEntryAsReference={useHistoryEntryAsReference}
           recentWorkflows={recentWorkflows}
@@ -2055,6 +2131,21 @@ export function InvokeInspiredWorkstation({
           </div>
         </div>,
         document.body,
+      )}
+
+      {/* 模板捕获器命名卡：把一次成功出图的配方沉淀为用户具名模板 */}
+      {saveTemplateTarget && (
+        <RecipeTemplateSaveDialog
+          image={saveTemplateTarget}
+          config={buildProvenanceConfig(saveTemplateTarget)}
+          defaultName={saveTemplateTarget.workflow?.workflowPresetLabel ?? activePreset.label}
+          onClose={() => setSaveTemplateTarget(null)}
+          onSave={handleSaveTemplate}
+          onSaved={(message) => {
+            setCanvasNotice(message);
+            setSaveTemplateTarget(null);
+          }}
+        />
       )}
     </section>
   );

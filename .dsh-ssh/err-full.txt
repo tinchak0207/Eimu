@@ -1,0 +1,8 @@
+17:05 500 chat.completions FULL: video generation timed out
+19:43 451 chat.completions FULL: video poll failed: 451 {"error_code":"video_unsafe","message":"The generated video appears to be unsafe. Try modifying the prompts or the seeds."}
+19:43 503 chat.completions FULL: Upstream is temporarily unavailable. Please retry later.
+19:48 401 images.generations FULL: HTTP 401
+19:48 401 images.generations FULL: HTTP 401
+19:48 401 images.generations FULL: HTTP 401
+19:50 451 chat.completions FULL: video submit failed: 451 {"error_code":"legal_error","message":"{}"}
+19:50 503 chat.completions FULL: Upstream is temporarily unavailable. Please retry later.

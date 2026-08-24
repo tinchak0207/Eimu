@@ -14,6 +14,7 @@ import {
   modelSupportsAudio,
   resolutionLabel,
   type AspectRatio,
+  type ModelUsageTipParams,
   type OutputResolution,
 } from "@/lib/generation-model-catalog";
 import { cn } from "@/lib/utils";
@@ -113,6 +114,13 @@ export function GenerateControls({
                       durationSeconds={durationSeconds}
                       generateAudio={generateAudio}
                       onOpenProfessionalMode={onToggleProfessionalMode}
+                      onApplyTipParams={(params: ModelUsageTipParams) => {
+                        // 模型卡「一键带入」：建议参数回填本面板既有 setter。
+                        if (params.aspectRatio) onAspectRatioChange(params.aspectRatio);
+                        if (params.outputResolution) onOutputResolutionChange(params.outputResolution);
+                        if (params.durationSeconds != null) onDurationChange(params.durationSeconds);
+                        if (params.generateAudio != null) onGenerateAudioChange(params.generateAudio);
+                      }}
                     />
                   </div>
                 </div>

@@ -1,0 +1,13 @@
+Aug 21 03:48:01 VM-0-2-ubuntu bun[2750139]: [gateway] session.error code=tool_error message=PermissionDenied: FileSystem.stat (/opt/agent-harness/workspace/.opencode/skills/workflow-director/SKILL.md)
+Aug 21 03:56:45 VM-0-2-ubuntu bun[2750139]: [workflow] node feature_film-shot1_video-12 poll timeout
+Aug 21 04:01:49 VM-0-2-ubuntu bun[2750139]: [workflow] node wf_mt1xo1z4_10-shot2_video-23 poll timeout
+Aug 21 04:06:53 VM-0-2-ubuntu bun[2750139]: [workflow] node wf_mt1xo1z4_10-shot3_video-24 poll timeout
+Aug 21 04:11:57 VM-0-2-ubuntu bun[2750139]: [workflow] node wf_mt1xo1z4_10-shot4_video-25 poll timeout
+Aug 21 04:17:00 VM-0-2-ubuntu bun[2750139]: [workflow] node wf_mt1xo1z4_10-shot5_video-26 poll timeout
+Aug 21 04:22:03 VM-0-2-ubuntu bun[2750139]: [workflow] node wf_mt1xo1z4_10-shot6_video-27 poll timeout
+Aug 21 04:22:03 VM-0-2-ubuntu bun[2750139]: [workflow] wf_mt1xo1z4_10 finished: failed
+Aug 21 04:42:16 VM-0-2-ubuntu bun[2750139]: [workflow] node wf_mt1zhs9p_12-char_ref-0 poll timeout
+Aug 21 04:44:17 VM-0-2-ubuntu bun[2750139]: [workflow] node wf_mt1zhs9p_12-scene_ref-1 poll timeout
+===CURRENT_STATUS===
+{"error":{"message":"missing or invalid API key","type":"unauthorized","code":"unauthorized"}}
+[exit 0]

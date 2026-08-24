@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>一句话的重量 — Emu</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script>if(!window.mermaid){document.write('<scr'+'ipt src="https://unpkg.com/mermaid@11/dist/mermaid.min.js"></scr'+'ipt>');}</script>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { height:100%; overflow:hidden; background:#fff; color:#000; }
+  body { font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; }
+  .wrap { height:100vh; max-width:1800px; margin:0 auto; padding:10px 14px 8px; display:flex; flex-direction:column; }
+  header { flex:0 0 auto; text-align:center; border-bottom:2px solid #000; padding-bottom:6px; }
+  h1 { font-size:17px; font-weight:900; letter-spacing:.5px; }
+  .sub { font-size:12px; margin-top:2px; }
+  .stage { flex:1 1 auto; min-height:0; display:flex; gap:12px; margin-top:8px; }
+  .card { border:1.5px solid #000; display:flex; flex-direction:column; overflow:hidden; background:#fff; }
+  .card-head { flex:0 0 auto; padding:6px 12px; font-size:13px; font-weight:900; display:flex; align-items:center; gap:8px; border-bottom:1.5px solid #000; }
+  .tag { font-size:11px; font-weight:600; padding:1px 8px; border:1px solid #000; border-radius:99px; }
+  .count { font-size:11px; margin-left:auto; font-weight:500; }
+  .card-body { flex:1 1 auto; min-height:0; position:relative; display:flex; }
+  .half { flex:1 1 50%; min-width:0; position:relative; display:flex; flex-direction:column; }
+  .half + .half { border-left:1.5px solid #000; }
+  .half-label { flex:0 0 auto; font-size:11px; font-weight:700; text-align:center; padding:3px 0; border-bottom:1px solid #000; }
+  .half-body { flex:1 1 auto; min-height:0; position:relative; }
+  .half-body .mermaid { position:absolute; inset:0; }
+  .half-body svg { width:100% !important; height:100% !important; max-width:none !important; }
+  .card svg .cluster rect, .card svg .cluster path { fill:#ffffff !important; stroke:#000 !important; stroke-width:1.2px !important; }
+  .card svg .node rect, .card svg .node circle, .card svg .node polygon, .card svg .node path, .card svg .basic.label-container { fill:#ffffff !important; stroke:#000 !important; stroke-width:1.3px !important; }
+  .card svg .edgePath path, .card svg .flowchart-link { stroke:#000 !important; }
+  .card svg .marker { fill:#000 !important; stroke:#000 !important; }
+  .card svg text, .card svg span, .card svg p, .card svg .label, .card svg div { color:#000 !important; fill:#000 !important; }
+  .card svg .edgeLabel p, .card svg .edgeLabel rect { background:#fff !important; fill:#fff !important; opacity:1 !important; }
+  .card svg .cluster-label text, .card svg .cluster-label span, .card svg .cluster-label div { font-weight:800 !important; color:#000 !important; fill:#000 !important; }
+  .card svg { font-size:13px; }
+  .card svg .nodeLabel p { font-size:13px !important; line-height:1.38 !important; }
+  .card svg .cluster-label p { font-size:14.5px !important; }
+  .left { flex:0 0 210px; }
+  .right { flex:1 1 auto; }
+  .foot { flex:0 0 auto; text-align:center; font-size:11px; margin-top:5px; border-top:1px solid #000; padding-top:4px; line-height:1.65; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>用户只说了一句 「生成秦始皇骑北极熊的影片」</h1>
+    <div class="sub">左边是用户经历的全部 · 右边是这句话背后真实的军火库与坟场</div>
+  </header>
+  <div class="stage">
+    <div class="card left">
+      <div class="card-head">PM 视角 <span class="tag">用户的世界</span></div>
+      <div class="card-body">
+<pre class="mermaid">
+flowchart TD
+  A["许愿<br/>秦始皇骑北极熊"] --> B["Agent<br/>自己搞定"] --> C["影片到手"]
+</pre>
+      </div>
+    </div>
+
+    <div class="card right">
+      <div class="card-head">工程师视角 <span class="tag">机器的世界</span> <span class="count">产号工业 · 出口战场 · 侦探方法 · 钱的铁律</span></div>
+      <div class="card-body">
+        <div class="half">
+          <div class="half-label">上半场 · 语言、界面、身份、大脑</div>
+          <div class="half-body">
+<pre class="mermaid">
+flowchart TD
+  subgraph L1["① 一句人话，机器听不懂"]
+    direction LR
+    N1["随口说的话直接喂模型：<br/>要么撞内容审查的高墙<br/>要么出一张没人要的废图"] --> N2["系统先把话补写成完整拍摄脚本：<br/>谁、在哪、什么机位光线画风<br/>再拆成一镜一动作的镜头单"] --> N3["每家视频模型方言都不同<br/>有的吃结构化剧本有的要口令<br/>同一个故事译成各家母语"]
+  end
+  subgraph L2["② 你觉得简单，是有人把难藏好了"]
+    direction LR
+    A1["普通和专业两种模式本领一样<br/>差别只是露出几个旋钮<br/>没有任何功能被偷偷阉割"] --> A2["AI 动手前先递确认卡：<br/>把计划翻译成人话请你过目<br/>你只需点头或改两个字"] --> A3["说来五千张就真做五千张<br/>直到额度用完为止<br/>用户的承诺从来不是比喻"]
+  end
+  subgraph L3["③ 你的愿望认得出是你的"]
+    direction LR
+    B1["聊天软件里许的愿<br/>点开网站直接落回你的对话页<br/>历史随时可翻可续聊"] --> B2["插件和网页像拿着两把钥匙<br/>其实背后是同一个账号<br/>隔墙只是少写一行代码"] --> B3["问 AI 你是什么模型它只会软拒<br/>保密条款刻在大脑最深处<br/>且不许被任何对话覆盖"]
+  end
+  subgraph L4["④ 大脑关进笼子，笼子也要看守"]
+    direction LR
+    S1["真刀真枪攻击过自己的 AI：<br/>嘴上的防线迟早被骗穿<br/>真护栏是命令白名单加断网"] --> S2["技能文件夹权限错一个数字<br/>AI 就突然忘了自己会什么<br/>排查半天才知是门锁不是脑子"] --> S3["免费模型三成概率话说一半断气<br/>系统悄悄替你重问一遍<br/>画布改成搭一块亮一块不再憋大招"]
+  end
+
+  L1 --> L2
+  L2 --> L3
+  L3 --> L4
+</pre>
+          </div>
+        </div>
+        <div class="half">
+          <div class="half-label">下半场 · 产号工业、出口战场、侦探方法、钱</div>
+          <div class="half-body">
+<pre class="mermaid">
+flowchart TD
+  subgraph L5["⑤ 粮草：账号是造出来的"]
+    direction LR
+    Q1["探测三十多家平台：<br/>验证码防线已成行业标配<br/>能批量造号本身就是护城河"] --> Q2["Adobe 注册机全自动闭环：<br/>平台埋了假注册入口的陷阱<br/>也被逐帧识破绕开"] --> Q3["视频站换了验证码家族<br/>旧管道一夜全灭<br/>破译隐形规则后恢复日产十几个号"] --> Q4["七十六个号的粮仓每日自动领饭<br/>攒下一千五百万点白嫖额度"]
+  end
+  subgraph L6["⑥ 出口：每个请求都要换一张脸"]
+    direction LR
+    T1["十六个出口端口轮流换脸<br/>节点时好时坏是常态<br/>对策是秒换绝不傻等"] --> T2["家里的宽带都被拉去当机房：<br/>反向隧道三件套缺一不可<br/>少接一根管子就是数据黑洞"] --> T3["SSH 大门被整条路封死<br/>改走四四三通道伪装成网页流量<br/>从此永不掉线"]
+  end
+  subgraph L7["⑦ 侦探：结论也要拿来处决"]
+    direction LR
+    M1["八百任务全灭监控却报平安：<br/>看病和开药看的不是同一张化验单"] --> M2["上游偷换报告格式我们照旧读旧的<br/>于是永远读出不健康<br/>还曾改错同名文件白忙三轮"] --> M3["一度咬定是 IP 被封<br/>后来同一把钥匙只换说法做对照<br/>亲手推翻昨天的定论：是对方 capacity 满"]
+  end
+  subgraph L8["⑧ 钱：错误不许化妆，扣钱必须有下文"]
+    direction LR
+    V1["内容违规本该两秒拒绝<br/>却被当成临时故障罚账号闭门<br/>最后用户看到的竟是排队太慢"] --> V2["最坏的谎言是给错误化延迟的妆<br/>现在违规两秒直说<br/>绝不让你对着进度条傻等"] --> V3["上游说成功也可能交白纸<br/>从此每个成品验指纹<br/>扣过的钱必有下文败了必退款"]
+
+  end
+
+  L5 --> L6
+  L6 --> L7
+  L7 --> L8
+</pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="foot">六条血换的规矩：扣过的钱必须有下文 · 看病和开药看同一张化验单 · 错误怎么定性系统就怎么反应 · 没有证据先当好人 · 隔墙往往只是少一行代码 · 每轮从上一轮终点起跑（重新发明=复利归零） —— 附记：闲置的后台浏览器吃掉一半算力拖垮全网；SSH 封死后走加密通道伪装网页流量永通</div>
+</div>
+<script>
+  window.addEventListener("load", function(){
+    if(!window.mermaid){ document.querySelectorAll(".half-body").forEach(function(b){ b.innerHTML = "mermaid 加载失败"; }); return; }
+    mermaid.initialize({
+      startOnLoad:false,
+      theme:"base",
+      themeVariables:{
+        background:"#ffffff", primaryColor:"#ffffff", primaryTextColor:"#000",
+        primaryBorderColor:"#000", lineColor:"#000", textColor:"#000", fontSize:"13px",
+        clusterBkg:"#ffffff", clusterBorder:"#000", edgeLabelBackground:"#fff", titleColor:"#000"
+      },
+      flowchart:{ curve:"basis", nodeSpacing:9, rankSpacing:13, padding:4 },
+      securityLevel:"loose"
+    });
+    mermaid.run({ querySelector:".mermaid" }).catch(function(e){
+      document.querySelectorAll(".half-body").forEach(function(b){ b.innerHTML = "渲染失败: " + e.message; });
+    });
+  });
+</script>
+</body>
+</html>

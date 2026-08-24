@@ -1,0 +1,61 @@
+}
+  markDirty(state) // 防抖落盤：重啟後 replayBuffer 可供前端 Last-Event-ID 續傳
+  for (const client of state.clients) {
+    try {
+      client.controller.enqueue(frame)
+    } catch {
+      state.clients.delete(client)
+    }
+  }
+}
+
+function closeSessionStreams(state: SessionState): void {
+  for (const client of state.clients) {
+    try {
+      client.controller.close()
+    } catch {
+      // already closed
+    }
+  }
+  state.clients.clear()
+}
+
+// ─────────────────────────── 畫布工作流引擎（暴君策略 v2）
+//
+// Deepseek 透過 workflow_* 工具填內容（參數/提示詞），本服務展開節點流並執行。
+// 執行提交（image/video）由 submitWorkflowNode 完成（帶 session key）。
+
+const workflowService = new WorkflowService({
+  emit: (state, name, data) => {
+    const target = (state as SessionState | undefined) ?? stateForWorkflow
+    if (target) emitToSession(target, name, data)
+  },
+  runNode: async (node, upstream, graph) => {
+    const session = stateForWorkflow
+    if (!session) return { nodeId: node.id, ok: false, error: "no active session" }
+    return submitWorkflowNode(session, node, upstream, graph)
+  },
+})
+
+// runNode 需要目前的 session（key）。workflow 端點都是帶 session 呼叫的，執行前設入。
+let stateForWorkflow: SessionState | null = null
+
+/**
+ * 提交單一節點生成：image → /v1/images/generations；video → /v1/videos/generations。
+ * 非同步提交後輪詢（202 → task_id → GET {id} → succeeded → result url）。
+ * 回傳 OpenAI 相容結果 {ok, content(url), costCoins?}。
+ */
+async function submitWorkflowNode(
+  session: SessionState,
+  node: { kind: string; metadata: Record<string, unknown> },
+  upstream: Map<string, string>,
+  graph?: { nodes: { id: string; role: string; kind: string; metadata: Record<string, unknown> }[]; connections: { from: string; to: string }[] },
+): Promise<{ nodeId: string; ok: boolean; content?: string; costCoins?: number; error?: string }> {
+  const meta = node.metadata
+  const nodeId = (node as { id?: string }).id || ""
+
+  // 解析 prompt：優先 node.metadata，其次沿上游連線 BFS 找第一個有內容的 text 節點
+  // （大片模板：角色描述 text → 四視圖 config → 各視圖 image；image 的 prompt 繼承自角色描述）
+  function collectUpstreamPrompt(startId: string, depth = 0): string {
+    if (depth > 4) return ""
+    const direct = graph?.connections.filter((c) => c.to === startId).map((c) => graph.nodes.find((n) => n.id === c.from)).filter(Boolean)

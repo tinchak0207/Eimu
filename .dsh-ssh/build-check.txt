@@ -1,0 +1,3 @@
+WorkingDirectory=/opt/agent-harness/gateway
+ExecStart=/home/ubuntu/.bun/bin/bun run index.ts
+4:import { WorkflowService } from "./workflow-service"

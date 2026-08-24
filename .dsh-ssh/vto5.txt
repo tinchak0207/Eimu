@@ -1,0 +1,71 @@
+request, task_status="IN_PROGRESS", task_progress=0.0
+            )
+
+            def _run_once(token: str):
+                source_image_ids: list[str] = []
+                image_url = ""
+                response_content = ""
+                arp_session_id = _arp_session_id_for_token(token)
+                if is_video_model:
+                    if (
+                        video_engine == "veo31-standard"
+                        and video_reference_mode == "image"
+                    ):
+                        max_video_inputs = 3
+                    else:
+                        max_video_inputs = {
+                            "veo31-fast": 2,
+                            "veo31-standard": 2,
+                            "kling25": 2,
+                            "kling-o3": 2,
+                            "kling3": 2,
+                            "seedance": 2,
+                            "luma": 2,
+                            "firefly-video": 2,
+                            "runway": 1,
+                        }.get(video_engine, 1)
+                    if len(input_images) > max_video_inputs:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"video model supports at most {max_video_inputs} input image(s)",
+                        )
+                    for image_bytes, _image_mime in input_images[:max_video_inputs]:
+                        prepared_bytes, prepared_mime = prepare_video_source_image(
+                            image_bytes,
+                            ratio,
+                            video_resolution,
+                        )
+                        source_image_ids.append(
+                            client.upload_image(
+                                token,
+                                prepared_bytes,
+                                prepared_mime,
+                                arp_session_id=arp_session_id,
+                            )
+                        )
+
+                    def _video_progress_cb(update: dict):
+                        set_request_task_progress(
+                            request,
+                            task_status=str(update.get("task_status") or "IN_PROGRESS"),
+                            task_progress=update.get("task_progress"),
+                            upstream_job_id=update.get("upstream_job_id"),
+                            retry_after=update.get("retry_after"),
+                            error=update.get("error"),
+                        )
+
+                    job_id = uuid.uuid4().hex
+                    tmp_path = generated_dir / f"{job_id}.video.tmp"
+                    old_size = 0
+                    try:
+                        if tmp_path.exists():
+                            old_size = int(tmp_path.stat().st_size)
+                    except Exception:
+                        old_size = 0
+
+                    video_prompt = prompt
+                    entity_refs = None
+                    if video_engine == "kling-o3":
+                        video_prompt, entity_refs = _resolve_kling_entity_refs(
+                            token, prompt, kling_bound_refs
+                        )

@@ -1,0 +1,26 @@
+today total: 28
+15:30 503 chat.completions Upstream is temporarily unavailable. Please retry  1 1 auto_refresh
+15:45 500 chat.completions video generation timed out 1 1 auto_refresh
+15:45 500 chat.completions video generation timed out 1 1 auto_refresh
+16:00 503 chat.completions No active tokens available in the pool None None
+16:03 500 chat.completions video generation timed out 1 1 auto_refresh
+16:03 500 chat.completions video generation timed out 1 1 auto_refresh
+16:05 451 chat.completions video poll failed: 451 {"error_code":"prompt_unsaf 1 1 auto_refresh
+16:05 503 chat.completions Upstream is temporarily unavailable. Please retry  1 1 auto_refresh
+16:19 451 chat.completions video poll failed: 451 {"error_code":"prompt_unsaf 1 1 auto_refresh
+16:19 503 chat.completions Upstream is temporarily unavailable. Please retry  1 1 auto_refresh
+16:39 500 chat.completions video generation timed out 1 1 auto_refresh
+16:39 500 chat.completions video generation timed out 1 1 auto_refresh
+16:39 451 chat.completions video poll failed: 451 {"error_code":"prompt_unsaf 1 1 auto_refresh
+16:39 503 chat.completions Upstream is temporarily unavailable. Please retry  1 1 auto_refresh
+16:49 451 chat.completions video poll failed: 451 {"error_code":"prompt_unsaf 1 1 auto_refresh
+16:49 503 chat.completions Upstream is temporarily unavailable. Please retry  1 1 auto_refresh
+17:05 500 chat.completions video generation timed out 1 1 auto_refresh
+17:05 500 chat.completions video generation timed out 1 1 auto_refresh
+19:43 451 chat.completions video poll failed: 451 {"error_code":"video_unsafe 1 1 auto_refresh
+19:43 503 chat.completions Upstream is temporarily unavailable. Please retry  1 1 auto_refresh
+19:48 401 images.generations HTTP 401 None None
+19:48 401 images.generations HTTP 401 None None
+19:48 401 images.generations HTTP 401 None None
+19:50 451 chat.completions video submit failed: 451 {"error_code":"legal_erro 1 1 auto_refresh
+19:50 503 chat.completions Upstream is temporarily unavailable. Please retry  1 1 auto_refresh

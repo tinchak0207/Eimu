@@ -1,0 +1,9 @@
+[2026-08-20T16:23:57.257Z] registering 5 accounts (pool has 76)
+[2026-08-20T16:24:13.242Z] page ready
+[2026-08-20T16:24:13.242Z] [1/5] 0254x359a7@tinchak0207.xyz
+[2026-08-20T16:24:20.884Z]   ok verified=true
+[2026-08-20T16:24:22.625Z] [2/5] 0685x3qb8dm@tinchak0207.xyz
+[2026-08-20T16:24:29.153Z] [3/5] 07b38jbb0k4y@tinchak0207.xyz
+[2026-08-20T16:24:35.599Z] [4/5] 0egmw2h7lws4@tinchak0207.xyz
+[2026-08-20T16:24:42.120Z] [5/5] 0gh3vgdrp@tinchak0207.xyz
+[2026-08-20T16:24:48.628Z] done: 1/5 registered, 1 verified. report: /home/lenovo/Desktop/image-app/.pixai-refresh/register-result-1787243088628.json

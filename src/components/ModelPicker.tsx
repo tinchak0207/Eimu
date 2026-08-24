@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { Fragment, useRef, useState } from "react";
 import {
   modelBaseName,
   modelPromotionTag,
@@ -8,9 +8,11 @@ import {
 import {
   generationModel,
   modelPriceLabel,
+  type ModelKnowledge,
+  type ModelUsageTipParams,
   type OutputResolution,
 } from "@/lib/generation-model-catalog";
-import { Check, ImageIcon, Video } from "lucide-react";
+import { Check, ChevronDown, ImageIcon, Video } from "lucide-react";
 import { VendorIcon } from "./brand-icons";
 import { buildLoraTourDescription, LORA_TOUR_CONTENT, LORA_TOUR_STORAGE_KEY, PRO_LORA_TOUR_ARMED_KEY } from "@/lib/lora-tour-content";
 import { bindDesktopTourKeyboard, DESKTOP_TOUR_KEY_HINT } from "@/lib/tour-keyboard";
@@ -41,6 +43,12 @@ interface ModelPickerProps {
   /** 受控模式：由外部控制菜单的开合，供引导等场景使用 */
   menuOpen?: boolean;
   onMenuOpenChange?: (open: boolean) => void;
+  /**
+   * 模型卡「一键带入」：usageTips 建议参数回填生成表单的既有路径。
+   * 未传入时不渲染「带入」动作（能力卡只读），调用方负责把 params 映射到
+   * 自己表单的 setter（比例/画质/时长/音轨）。
+   */
+  onApplyTipParams?: (params: ModelUsageTipParams) => void;
 }
 
 interface VendorGroup {
@@ -58,17 +66,102 @@ const VENDOR_TAGS: Record<string, string> = {
 /** 匹配厂商前缀，例如 Google Veo 3.1 只显示 Veo 3.1 */
 const VENDOR_PREFIX_RE = /^(Google|Adobe|PixAI|Dreamina|Runway|Luma AI|OpenAI)\s+/;
 
+/** 能力卡区块的 eyebrow 标签：11px / 0.18em letter-spacing（DESIGN.md 规范）。 */
+const KNOWLEDGE_EYEBROW_CLASS =
+  "text-[11px] font-bold tracking-[0.18em] text-[rgba(0,0,0,0.44)]";
+/** 能力卡正文：不小于 13px，body-secondary 层级。 */
+const KNOWLEDGE_BODY_CLASS =
+  "text-[13px] leading-relaxed text-[rgba(0,0,0,0.62)]";
+
+interface ModelKnowledgeCardProps {
+  modelId: string;
+  knowledge: ModelKnowledge;
+  onApplyTipParams?: (params: ModelUsageTipParams) => void;
+  /** 带入参数时同时选中该模型——建议只对所属模型成立。 */
+  onSelectModel: () => void;
+}
+
+/**
+ * 模型能力卡（吞併決策清單主線四首件）：擅長/已知缺陷/建議三段，玻璃材质、
+ * iOS 圆角，全部字段可选——缺哪段就不渲染哪段。挂在模型选择器行内展开，
+ * 不开「百科」第二页。建议里的 params 经 onApplyTipParams 一键带入生成表单。
+ */
+function ModelKnowledgeCard({ modelId, knowledge, onApplyTipParams, onSelectModel }: ModelKnowledgeCardProps) {
+  const sections: Array<{
+    key: "strengths" | "knownDefects" | "usageTips";
+    label: string;
+  }> = [
+    { key: "strengths", label: "擅长" },
+    { key: "knownDefects", label: "已知缺陷" },
+    { key: "usageTips", label: "建议" },
+  ];
+  return (
+    <div
+      data-model-knowledge-card={modelId}
+      className="mx-1 mb-1.5 rounded-[1.2rem] border border-[rgba(0,0,0,0.06)] bg-[rgba(255,255,255,0.72)] p-3 shadow-[0_8px_28px_rgba(0,0,0,0.08)] backdrop-blur-[40px]"
+    >
+      {sections.map(({ key, label }, index) => {
+        if (key === "usageTips") {
+          const tips = knowledge.usageTips;
+          if (!tips?.length) return null;
+          return (
+            <section key={key} className={index > 0 ? "mt-2.5" : undefined}>
+              <p className={KNOWLEDGE_EYEBROW_CLASS}>{label}</p>
+              <ul className="mt-1 space-y-1.5">
+                {tips.map((tip) => (
+                  <li key={tip.text} className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
+                    <span className={`min-w-0 flex-1 basis-52 ${KNOWLEDGE_BODY_CLASS}`}>{tip.text}</span>
+                    {tip.params && onApplyTipParams ? (
+                      <button
+                        type="button"
+                        title="选用该模型并带入建议参数"
+                        onClick={() => {
+                          onSelectModel();
+                          onApplyTipParams(tip.params as ModelUsageTipParams);
+                        }}
+                        className="shrink-0 cursor-pointer rounded-full bg-[rgba(0,122,255,0.12)] px-2.5 py-1 text-[12px] font-semibold text-[rgba(0,122,255,0.9)] transition-colors hover:bg-[rgba(0,122,255,0.2)]"
+                      >
+                        一键带入
+                      </button>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          );
+        }
+        const lines = knowledge[key];
+        if (!lines?.length) return null;
+        return (
+          <section key={key} className={index > 0 ? "mt-2.5" : undefined}>
+            <p className={KNOWLEDGE_EYEBROW_CLASS}>{label}</p>
+            <ul className="mt-1 space-y-1">
+              {lines.map((line) => (
+                <li key={line} className={KNOWLEDGE_BODY_CLASS}>
+                  {line}
+                </li>
+              ))}
+            </ul>
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
 function modelPickerName(modelId: string, stripVendor: boolean): string {
   const name = modelBaseName(modelId);
   return stripVendor ? name.replace(VENDOR_PREFIX_RE, "") : name;
 }
 
 /** Desktop keeps the compact two-level chooser; mobile uses one bounded flat list. */
-export function ModelPicker({ models, value, onChange, resolution, durationSeconds, generateAudio, onOpenProfessionalMode, stripVendorPrefix, menuOpen, onMenuOpenChange }: ModelPickerProps) {
+export function ModelPicker({ models, value, onChange, resolution, durationSeconds, generateAudio, onOpenProfessionalMode, stripVendorPrefix, menuOpen, onMenuOpenChange, onApplyTipParams }: ModelPickerProps) {
   // 訂閱定價覆寫：管理員改價後本頁報價立即重算。
   usePricingRevision();
   const promotionTag = modelPromotionTag(value);
   const loraTourBusyRef = useRef(false);
+  // 能力卡展开态：同一时刻只展开一张卡（下拉空间有限，多卡同开会滚丢）。
+  const [expandedModel, setExpandedModel] = useState<string | null>(null);
 
   const maybeStartLoraTour = () => {
     if (typeof window === "undefined" || !onOpenProfessionalMode) return;
@@ -199,32 +292,70 @@ export function ModelPicker({ models, value, onChange, resolution, durationSecon
     const vendor = definition?.vendor ?? "";
     const priceOptions = model === value ? { resolution, durationSeconds, generateAudio } : {};
     const selected = model === value;
+    const knowledge = definition?.knowledge;
+    const expanded = expandedModel === model;
     return (
-      <DropdownMenuItem
-        key={model}
-        onSelect={() => onChange(model)}
-        data-model-picker-model
-        data-model-picker-model-vendor={vendor}
-        className={`${mobile ? "py-2 pl-2.5 pr-8" : "py-2 pl-3 pr-9"} min-w-0 max-w-full text-ios-footnote focus:bg-[rgba(0,122,255,0.10)]`}
-      >
-        <span className={`flex w-full min-w-0 max-w-full items-center gap-2 ${mobile ? "" : "lg:min-w-[17rem]"}`}>
-          <VendorIcon vendor={vendor} className="h-5 w-5 rounded-[0.4rem]" innerClassName="h-3.5 w-3.5" />
-          <span className={`min-w-0 flex-1 truncate font-medium ${selected ? "text-[rgba(0,122,255,0.9)]" : "text-[rgba(0,0,0,0.85)]"}`}>
-            {modelPickerName(model, stripVendorPrefix ?? false)}
-          </span>
-          {!stripVendorPrefix && tag ? (
-            <span className="rounded-full bg-[rgba(52,199,89,0.14)] px-1.5 py-0.5 text-ios-caption2 font-semibold text-[#248A3D]">
-              {tag}
+      <Fragment key={model}>
+        <DropdownMenuItem
+          onSelect={() => onChange(model)}
+          data-model-picker-model
+          data-model-picker-model-vendor={vendor}
+          className={`${mobile ? "py-2 pl-2.5 pr-8" : "py-2 pl-3 pr-9"} min-w-0 max-w-full gap-1 text-ios-footnote focus:bg-[rgba(0,122,255,0.10)]`}
+        >
+          <span className={`flex w-full min-w-0 max-w-full flex-1 items-center gap-2 ${mobile ? "" : "lg:min-w-[17rem]"}`}>
+            <VendorIcon vendor={vendor} className="h-5 w-5 rounded-[0.4rem]" innerClassName="h-3.5 w-3.5" />
+            <span className={`min-w-0 flex-1 truncate font-medium ${selected ? "text-[rgba(0,122,255,0.9)]" : "text-[rgba(0,0,0,0.85)]"}`}>
+              {modelPickerName(model, stripVendorPrefix ?? false)}
             </span>
-          ) : null}
-          <span className="shrink-0 pl-1 text-ios-caption1 tabular-nums text-[rgba(0,0,0,0.58)]">
-            {modelPriceLabel(model, priceOptions)}
+            {!stripVendorPrefix && tag ? (
+              <span className="rounded-full bg-[rgba(52,199,89,0.14)] px-1.5 py-0.5 text-ios-caption2 font-semibold text-[#248A3D]">
+                {tag}
+              </span>
+            ) : null}
+            <span className="shrink-0 pl-1 text-ios-caption1 tabular-nums text-[rgba(0,0,0,0.58)]">
+              {modelPriceLabel(model, priceOptions)}
+            </span>
+            {selected ? (
+              <Check className="absolute right-2 h-3.5 w-3.5 text-[rgba(0,122,255,0.9)]" />
+            ) : null}
           </span>
-          {selected ? (
-            <Check className="absolute right-2 h-3.5 w-3.5 text-[rgba(0,122,255,0.9)]" />
+          {knowledge ? (
+            <button
+              type="button"
+              tabIndex={-1}
+              aria-label={expanded ? `收起${modelPickerName(model, true)}能力卡` : `展开${modelPickerName(model, true)}能力卡`}
+              aria-expanded={expanded}
+              data-model-knowledge-toggle={model}
+              onClick={(event) => {
+                // 阻止事件冒泡到 DropdownMenuItem：展开卡片不等于选中模型，也不关菜单。
+                event.preventDefault();
+                event.stopPropagation();
+                setExpandedModel(expanded ? null : model);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setExpandedModel(expanded ? null : model);
+                }
+              }}
+              className="relative z-10 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-full text-[rgba(0,0,0,0.4)] transition-colors hover:bg-[rgba(0,0,0,0.06)] hover:text-[rgba(0,0,0,0.72)]"
+            >
+              <ChevronDown
+                className={`h-3.5 w-3.5 transition-transform duration-200 ${expanded ? "rotate-180" : ""}`}
+              />
+            </button>
           ) : null}
-        </span>
-      </DropdownMenuItem>
+        </DropdownMenuItem>
+        {knowledge && expanded ? (
+          <ModelKnowledgeCard
+            modelId={model}
+            knowledge={knowledge}
+            onApplyTipParams={onApplyTipParams}
+            onSelectModel={() => onChange(model)}
+          />
+        ) : null}
+      </Fragment>
     );
   };
 

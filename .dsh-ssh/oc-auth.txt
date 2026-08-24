@@ -1,0 +1,9 @@
+94:const OPENCODE_URL = (process.env.OPENCODE_URL || "http://127.0.0.1:4096").replace(/\/+$/, "")
+95:const OPENCODE_PASSWORD = process.env.OPENCODE_PASSWORD || ""
+258:    Authorization: "Basic " + btoa("opencode:" + OPENCODE_PASSWORD),
+1142:  const url = `${OPENCODE_URL}/event`
+1148:            Authorization: "Basic " + btoa("opencode:" + OPENCODE_PASSWORD),
+1208:    res = await fetch(`${OPENCODE_URL}/session`, {
+1321:    const res = await fetch(`${OPENCODE_URL}/session/${state.opencodeSessionId}/prompt_async`, {
+1408:    `${OPENCODE_URL}/api/session/${encodeURIComponent(state.opencodeSessionId)}/question`,
+===

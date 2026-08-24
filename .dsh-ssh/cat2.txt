@@ -1,0 +1,54 @@
+family_label="Veo 3.1",
+    durations=(4, 6, 8),
+    ratios=("16:9", "9:16"),
+    resolutions=("720p", "1080p"),
+    supports_audio=True,
+    default_audio=True,
+)
+_register_video_family(
+    "firefly-kling25",
+    engine="kling25",
+    upstream_model_id="kling",
+    upstream_model_version="kling_v2_5_turbo_pro_i2v",
+    family_label="Kling 2.5 Turbo",
+    durations=(5, 10),
+    ratios=VIDEO_RATIOS,
+    resolutions=("1080p",),
+)
+_register_video_family(
+    "firefly-kling3",
+    engine="kling3",
+    upstream_model_id="kling",
+    upstream_model_version="kling_v3",
+    family_label="Kling 3.0",
+    durations=(5, 10, 15),
+    ratios=VIDEO_RATIOS,
+    resolutions=("720p", "1080p"),
+    supports_audio=True,
+)
+_register_video_family(
+    "firefly-kling-o3",
+    engine="kling-o3",
+    upstream_model_id="kling",
+    upstream_model_version="kling_v3_omni",
+    family_label="Kling 3.0 Omni",
+    durations=(5, 10, 15),
+    ratios=VIDEO_RATIOS,
+    resolutions=("720p", "1080p"),
+    supports_audio=True,
+)
+_register_video_family(
+    "firefly-seedance2-fast",
+    engine="seedance",
+    upstream_model_id="seedance",
+    upstream_model_version="seedance_2.0_fast",
+    family_label="Seedance 2.0 Fast",
+    durations=tuple(range(4, 16)),
+    ratios=SEEDANCE_VIDEO_RATIOS,
+    resolutions=("480p", "720p"),
+    supports_audio=True,
+    channel="3p",
+    size_mode="landscape-resolution",
+===RESOLVE===
+35:    resolve_video_options: Callable[[dict], tuple[bool, str, str]],
+621:            resolved_video_options = resolve_video_options(data)

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ChevronLeft, ChevronRight, Coins, Download, RotateCcw, Star, Trash2, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Coins, Download, IdCard, Layers, Megaphone, RotateCcw, SlidersHorizontal, Star, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   formatAbsoluteTime,
@@ -10,6 +10,7 @@ import {
   formatModelLabel,
   primaryModelId,
 } from "@/lib/history-types";
+import { canHistoryEntryRerun } from "@/lib/history-rerun";
 import type { HistoryEntry } from "@/lib/history-types";
 
 export interface HistoryLightboxProps {
@@ -22,6 +23,13 @@ export interface HistoryLightboxProps {
   onDownload: (entry: HistoryEntry) => void;
   onDelete: (id: string) => void;
   onReuse?: (entry: HistoryEntry) => void;
+  /** 把这张图锚定成角色/场景/风格卡。缺席时工具栏不挂这颗按钮。 */
+  onSaveCard?: (entry: HistoryEntry) => void;
+  /** 再来 N 组 / 微调变体（payload 级批量重跑）。缺席时工具栏不挂。 */
+  onRerun?: (entry: HistoryEntry) => void;
+  onRerunVariant?: (entry: HistoryEntry) => void;
+  /** 把这条记录的配方发布为首页「用户投稿」案例。缺席时工具栏不挂。 */
+  onPublishCase?: (entry: HistoryEntry) => void;
 }
 
 function entrySrc(entry: HistoryEntry): string | null {
@@ -78,6 +86,10 @@ export function HistoryLightbox({
   onDownload,
   onDelete,
   onReuse,
+  onSaveCard,
+  onRerun,
+  onRerunVariant,
+  onPublishCase,
 }: HistoryLightboxProps) {
   const [mounted, setMounted] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -191,6 +203,7 @@ export function HistoryLightbox({
   const model = primaryModelId(entry);
   const promptText = entry.prompt.trim();
   const workflow = entry.workflow;
+  const rerunnable = canHistoryEntryRerun(entry);
 
   return createPortal(
     <div
@@ -237,9 +250,31 @@ export function HistoryLightbox({
                 <Download className="h-4 w-4" />
               </ToolbarButton>
             )}
+            {src && onSaveCard && (
+              <ToolbarButton label="存为角色卡" onClick={() => onSaveCard(entry)}>
+                <IdCard className="h-4 w-4" />
+              </ToolbarButton>
+            )}
             {onReuse && workflow && (
               <ToolbarButton label="用这套参数继续做图" onClick={() => onReuse(entry)}>
                 <RotateCcw className="h-4 w-4" />
+              </ToolbarButton>
+            )}
+            {/* payload 级重跑：配方完整才挂，按下去只会失败的按钮比不挂更糟。 */}
+            {onRerun && rerunnable && (
+              <ToolbarButton label="再来 N 组" onClick={() => onRerun(entry)}>
+                <Layers className="h-4 w-4" />
+              </ToolbarButton>
+            )}
+            {onRerunVariant && rerunnable && (
+              <ToolbarButton label="微调变体" onClick={() => onRerunVariant(entry)}>
+                <SlidersHorizontal className="h-4 w-4" />
+              </ToolbarButton>
+            )}
+            {/* 配方双向总线对向动作：发布成首页案例。有配方才挂。 */}
+            {onPublishCase && (promptText.length > 0 || workflow) && (
+              <ToolbarButton label="发布为案例" onClick={() => onPublishCase(entry)}>
+                <Megaphone className="h-4 w-4" />
               </ToolbarButton>
             )}
             <ToolbarButton label="删除" tone="danger" onClick={() => onDelete(entry.id)}>
@@ -298,29 +333,37 @@ export function HistoryLightbox({
           )}
         </div>
 
-        {/* 参数摘要 */}
-        {workflow && (
+        {/* 参数摘要 + 衍生关联（重跑任务经 retryOfTaskId 指回父任务） */}
+        {(workflow || entry.retryOfTaskId) && (
           <div className="shrink-0 px-4 pb-2 sm:px-6">
             <div className="flex flex-wrap gap-1.5">
-              {workflow.workflowPresetLabel && (
+              {workflow?.workflowPresetLabel && (
                 <span className="rounded-full bg-[rgba(255,255,255,0.12)] px-2.5 py-1 text-ios-caption1 text-[rgba(255,255,255,0.82)]">
                   {workflow.workflowPresetLabel}
                 </span>
               )}
-              {workflow.imageSize && (
+              {workflow?.imageSize && (
                 <span className="rounded-full bg-[rgba(255,255,255,0.12)] px-2.5 py-1 text-ios-caption1 text-[rgba(255,255,255,0.82)]">
                   {workflow.imageSize}
                 </span>
               )}
-              {workflow.qualityProfile && (
+              {workflow?.qualityProfile && (
                 <span className="rounded-full bg-[rgba(255,255,255,0.12)] px-2.5 py-1 text-ios-caption1 text-[rgba(255,255,255,0.82)]">
                   {workflow.qualityProfile}
                 </span>
               )}
-              {workflow.estimatedCredits !== undefined && (
+              {workflow?.estimatedCredits !== undefined && (
                 <span className="inline-flex items-center gap-1 rounded-full bg-[rgba(255,255,255,0.12)] px-2.5 py-1 text-ios-caption1 text-[rgba(255,255,255,0.82)]">
                   <Coins className="h-2.5 w-2.5" />
                   预估 {workflow.estimatedCredits}
+                </span>
+              )}
+              {entry.retryOfTaskId && (
+                <span
+                  className="rounded-full bg-[rgba(255,255,255,0.12)] px-2.5 py-1 text-ios-caption1 text-[rgba(255,255,255,0.82)]"
+                  title={`衍生自任务 ${entry.retryOfTaskId}`}
+                >
+                  衍生自任务 {entry.retryOfTaskId.slice(0, 8)}
                 </span>
               )}
             </div>

@@ -1,0 +1,2 @@
+Vercel CLI 59.3.0 (Node.js 24.18.1)
+Error: An unexpected error occurred in whoami: TypeError: Cannot read properties of undefined (reading 'date')

@@ -1,0 +1,5 @@
+proxy disabled for upstream requests
+A. IMAGE: UpstreamTemporaryError (0s): submit failed: 408 {"error_code":"timeout_error","message":"system under load"}
+submit failed status=408 body={"error_code":"timeout_error","message":"system under load"}
+video submit failed status=408 body={"error_code":"timeout_error","message":"system under load"}
+B. VIDEO: video submit failed: 408 {"error_code":"timeout_error","message":"system under load"}

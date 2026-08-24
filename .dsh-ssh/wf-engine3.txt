@@ -1,0 +1,3 @@
+Aug 21 18:52:25 VM-0-2-ubuntu bun[777213]: [gateway] session created: f9c26b9b-9247-437b-b3b4-f188c1e04693 (opencode ses_fdc0cab24ffejwjQGydmyhlvue)
+Aug 21 18:52:26 VM-0-2-ubuntu bun[777213]: [gateway] balance endpoint unavailable (https://image.tinchak0207.xyz/v1/quota -> 404); reporting balance as unknown
+Aug 21 18:59:24 VM-0-2-ubuntu bun[777213]: [gateway] session created: d6ca6574-6f08-4bda-9ad6-4a8d797a2775 (opencode ses_fdc06441cffedUYLOaIgH4k8hX)

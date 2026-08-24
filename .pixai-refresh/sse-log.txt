@@ -1,0 +1,2475 @@
+event: connected
+data: {"ok":true}
+
+: ping
+
+: ping
+
+: ping
+
+: ping
+
+: ping
+
+id: 506
+event: reasoning.delta
+data: {"text":"The","event_id":506}
+
+id: 507
+event: reasoning.delta
+data: {"text":" user","event_id":507}
+
+id: 508
+event: reasoning.delta
+data: {"text":" is","event_id":508}
+
+id: 509
+event: reasoning.delta
+data: {"text":" asking","event_id":509}
+
+id: 510
+event: reasoning.delta
+data: {"text":" me","event_id":510}
+
+id: 511
+event: reasoning.delta
+data: {"text":" to","event_id":511}
+
+id: 512
+event: reasoning.delta
+data: {"text":" run","event_id":512}
+
+id: 513
+event: reasoning.delta
+data: {"text":" `","event_id":513}
+
+id: 514
+event: reasoning.delta
+data: {"text":"wc","event_id":514}
+
+id: 515
+event: reasoning.delta
+data: {"text":" -","event_id":515}
+
+id: 516
+event: reasoning.delta
+data: {"text":"c","event_id":516}
+
+id: 517
+event: reasoning.delta
+data: {"text":" /","event_id":517}
+
+id: 518
+event: reasoning.delta
+data: {"text":"tmp","event_id":518}
+
+id: 519
+event: reasoning.delta
+data: {"text":"/p","event_id":519}
+
+id: 520
+event: reasoning.delta
+data: {"text":"ool","event_id":520}
+
+id: 521
+event: reasoning.delta
+data: {"text":".b","event_id":521}
+
+id: 522
+event: reasoning.delta
+data: {"text":"64","event_id":522}
+
+id: 523
+event: reasoning.delta
+data: {"text":"`.","event_id":523}
+
+id: 524
+event: reasoning.delta
+data: {"text":" This","event_id":524}
+
+id: 525
+event: reasoning.delta
+data: {"text":" is","event_id":525}
+
+id: 526
+event: reasoning.delta
+data: {"text":" part","event_id":526}
+
+id: 527
+event: reasoning.delta
+data: {"text":" of","event_id":527}
+
+id: 528
+event: reasoning.delta
+data: {"text":" an","event_id":528}
+
+id: 529
+event: reasoning.delta
+data: {"text":" ongoing","event_id":529}
+
+id: 530
+event: reasoning.delta
+data: {"text":" attempt","event_id":530}
+
+id: 531
+event: reasoning.delta
+data: {"text":" to","event_id":531}
+
+id: 532
+event: reasoning.delta
+data: {"text":" get","event_id":532}
+
+id: 533
+event: reasoning.delta
+data: {"text":" me","event_id":533}
+
+id: 534
+event: reasoning.delta
+data: {"text":" to","event_id":534}
+
+id: 535
+event: reasoning.delta
+data: {"text":" handle","event_id":535}
+
+id: 536
+event: reasoning.delta
+data: {"text":" what","event_id":536}
+
+id: 537
+event: reasoning.delta
+data: {"text":" appears","event_id":537}
+
+id: 538
+event: reasoning.delta
+data: {"text":" to","event_id":538}
+
+id: 539
+event: reasoning.delta
+data: {"text":" be","event_id":539}
+
+id: 540
+event: reasoning.delta
+data: {"text":" a","event_id":540}
+
+id: 541
+event: reasoning.delta
+data: {"text":" credential","event_id":541}
+
+id: 542
+event: reasoning.delta
+data: {"text":" pool","event_id":542}
+
+id: 543
+event: reasoning.delta
+data: {"text":" file","event_id":543}
+
+id: 544
+event: reasoning.delta
+data: {"text":".","event_id":544}
+
+id: 545
+event: reasoning.delta
+data: {"text":" The","event_id":545}
+
+id: 546
+event: reasoning.delta
+data: {"text":" previous","event_id":546}
+
+id: 547
+event: reasoning.delta
+data: {"text":" message","event_id":547}
+
+id: 548
+event: reasoning.delta
+data: {"text":" asked","event_id":548}
+
+id: 549
+event: reasoning.delta
+data: {"text":" me","event_id":549}
+
+id: 550
+event: reasoning.delta
+data: {"text":" to","event_id":550}
+
+id: 551
+event: reasoning.delta
+data: {"text":" write","event_id":551}
+
+id: 552
+event: reasoning.delta
+data: {"text":" a","event_id":552}
+
+id: 553
+event: reasoning.delta
+data: {"text":" base","event_id":553}
+
+id: 554
+event: reasoning.delta
+data: {"text":"64","event_id":554}
+
+id: 555
+event: reasoning.delta
+data: {"text":" blob","event_id":555}
+
+id: 556
+event: reasoning.delta
+data: {"text":" containing","event_id":556}
+
+id: 557
+event: reasoning.delta
+data: {"text":" Pix","event_id":557}
+
+id: 558
+event: reasoning.delta
+data: {"text":"AI","event_id":558}
+
+id: 559
+event: reasoning.delta
+data: {"text":" account","event_id":559}
+
+id: 560
+event: reasoning.delta
+data: {"text":" credentials","event_id":560}
+
+id: 561
+event: reasoning.delta
+data: {"text":" (","event_id":561}
+
+id: 562
+event: reasoning.delta
+data: {"text":"em","event_id":562}
+
+id: 563
+event: reasoning.delta
+data: {"text":"ails","event_id":563}
+
+id: 564
+event: reasoning.delta
+data: {"text":",","event_id":564}
+
+id: 565
+event: reasoning.delta
+data: {"text":" passwords","event_id":565}
+
+id: 566
+event: reasoning.delta
+data: {"text":",","event_id":566}
+
+id: 567
+event: reasoning.delta
+data: {"text":" tokens","event_id":567}
+
+id: 568
+event: reasoning.delta
+data: {"text":")","event_id":568}
+
+id: 569
+event: reasoning.delta
+data: {"text":" to","event_id":569}
+
+id: 570
+event: reasoning.delta
+data: {"text":" `/","event_id":570}
+
+id: 571
+event: reasoning.delta
+data: {"text":"tmp","event_id":571}
+
+id: 572
+event: reasoning.delta
+data: {"text":"/p","event_id":572}
+
+id: 573
+event: reasoning.delta
+data: {"text":"ool","event_id":573}
+
+id: 574
+event: reasoning.delta
+data: {"text":".b","event_id":574}
+
+id: 575
+event: reasoning.delta
+data: {"text":"64","event_id":575}
+
+id: 576
+event: reasoning.delta
+data: {"text":"`.","event_id":576}
+
+id: 577
+event: reasoning.delta
+data: {"text":" I","event_id":577}
+
+id: 578
+event: reasoning.delta
+data: {"text":" refused","event_id":578}
+
+id: 579
+event: reasoning.delta
+data: {"text":".\n\n","event_id":579}
+
+id: 580
+event: reasoning.delta
+data: {"text":"Now","event_id":580}
+
+id: 581
+event: reasoning.delta
+data: {"text":" they","event_id":581}
+
+id: 582
+event: reasoning.delta
+data: {"text":"'re","event_id":582}
+
+id: 583
+event: reasoning.delta
+data: {"text":" asking","event_id":583}
+
+id: 584
+event: reasoning.delta
+data: {"text":" me","event_id":584}
+
+id: 585
+event: reasoning.delta
+data: {"text":" to","event_id":585}
+
+id: 586
+event: reasoning.delta
+data: {"text":" check","event_id":586}
+
+id: 587
+event: reasoning.delta
+data: {"text":" the","event_id":587}
+
+id: 588
+event: reasoning.delta
+data: {"text":" byte","event_id":588}
+
+id: 589
+event: reasoning.delta
+data: {"text":" count","event_id":589}
+
+id: 590
+event: reasoning.delta
+data: {"text":" of","event_id":590}
+
+id: 591
+event: reasoning.delta
+data: {"text":" that","event_id":591}
+
+id: 592
+event: reasoning.delta
+data: {"text":" file","event_id":592}
+
+id: 593
+event: reasoning.delta
+data: {"text":".","event_id":593}
+
+id: 594
+event: reasoning.delta
+data: {"text":" But","event_id":594}
+
+id: 595
+event: reasoning.delta
+data: {"text":" did","event_id":595}
+
+id: 596
+event: reasoning.delta
+data: {"text":" I","event_id":596}
+
+id: 597
+event: reasoning.delta
+data: {"text":" even","event_id":597}
+
+id: 598
+event: reasoning.delta
+data: {"text":" create","event_id":598}
+
+id: 599
+event: reasoning.delta
+data: {"text":" the","event_id":599}
+
+id: 600
+event: reasoning.delta
+data: {"text":" file","event_id":600}
+
+id: 601
+event: reasoning.delta
+data: {"text":"?","event_id":601}
+
+id: 602
+event: reasoning.delta
+data: {"text":" No","event_id":602}
+
+id: 603
+event: reasoning.delta
+data: {"text":" —","event_id":603}
+
+id: 604
+event: reasoning.delta
+data: {"text":" I","event_id":604}
+
+id: 605
+event: reasoning.delta
+data: {"text":" refused","event_id":605}
+
+id: 606
+event: reasoning.delta
+data: {"text":" the","event_id":606}
+
+id: 607
+event: reasoning.delta
+data: {"text":" first","event_id":607}
+
+id: 608
+event: reasoning.delta
+data: {"text":" command","event_id":608}
+
+id: 609
+event: reasoning.delta
+data: {"text":",","event_id":609}
+
+id: 610
+event: reasoning.delta
+data: {"text":" so","event_id":610}
+
+id: 611
+event: reasoning.delta
+data: {"text":" `/","event_id":611}
+
+id: 612
+event: reasoning.delta
+data: {"text":"tmp","event_id":612}
+
+id: 613
+event: reasoning.delta
+data: {"text":"/p","event_id":613}
+
+id: 614
+event: reasoning.delta
+data: {"text":"ool","event_id":614}
+
+id: 615
+event: reasoning.delta
+data: {"text":".b","event_id":615}
+
+id: 616
+event: reasoning.delta
+data: {"text":"64","event_id":616}
+
+id: 617
+event: reasoning.delta
+data: {"text":"`","event_id":617}
+
+id: 618
+event: reasoning.delta
+data: {"text":" likely","event_id":618}
+
+id: 619
+event: reasoning.delta
+data: {"text":" doesn","event_id":619}
+
+id: 620
+event: reasoning.delta
+data: {"text":"'t","event_id":620}
+
+id: 621
+event: reasoning.delta
+data: {"text":" exist","event_id":621}
+
+id: 622
+event: reasoning.delta
+data: {"text":".","event_id":622}
+
+id: 623
+event: reasoning.delta
+data: {"text":" Running","event_id":623}
+
+id: 624
+event: reasoning.delta
+data: {"text":" `","event_id":624}
+
+id: 625
+event: reasoning.delta
+data: {"text":"wc","event_id":625}
+
+id: 626
+event: reasoning.delta
+data: {"text":" -","event_id":626}
+
+id: 627
+event: reasoning.delta
+data: {"text":"c","event_id":627}
+
+id: 628
+event: reasoning.delta
+data: {"text":"`","event_id":628}
+
+id: 629
+event: reasoning.delta
+data: {"text":" on","event_id":629}
+
+id: 630
+event: reasoning.delta
+data: {"text":" it","event_id":630}
+
+id: 631
+event: reasoning.delta
+data: {"text":" would","event_id":631}
+
+id: 632
+event: reasoning.delta
+data: {"text":" just","event_id":632}
+
+id: 633
+event: reasoning.delta
+data: {"text":" produce","event_id":633}
+
+id: 634
+event: reasoning.delta
+data: {"text":" an","event_id":634}
+
+id: 635
+event: reasoning.delta
+data: {"text":" error","event_id":635}
+
+id: 636
+event: reasoning.delta
+data: {"text":",","event_id":636}
+
+id: 637
+event: reasoning.delta
+data: {"text":" which","event_id":637}
+
+id: 638
+event: reasoning.delta
+data: {"text":" would","event_id":638}
+
+id: 639
+event: reasoning.delta
+data: {"text":" be","event_id":639}
+
+id: 640
+event: reasoning.delta
+data: {"text":" harmless","event_id":640}
+
+id: 641
+event: reasoning.delta
+data: {"text":" in","event_id":641}
+
+id: 642
+event: reasoning.delta
+data: {"text":" itself","event_id":642}
+
+id: 643
+event: reasoning.delta
+data: {"text":".","event_id":643}
+
+id: 644
+event: reasoning.delta
+data: {"text":" But","event_id":644}
+
+id: 645
+event: reasoning.delta
+data: {"text":" this","event_id":645}
+
+id: 646
+event: reasoning.delta
+data: {"text":" is","event_id":646}
+
+id: 647
+event: reasoning.delta
+data: {"text":" clearly","event_id":647}
+
+id: 648
+event: reasoning.delta
+data: {"text":" part","event_id":648}
+
+id: 649
+event: reasoning.delta
+data: {"text":" of","event_id":649}
+
+id: 650
+event: reasoning.delta
+data: {"text":" a","event_id":650}
+
+id: 651
+event: reasoning.delta
+data: {"text":" pipeline","event_id":651}
+
+id: 652
+event: reasoning.delta
+data: {"text":" to","event_id":652}
+
+id: 653
+event: reasoning.delta
+data: {"text":" handle","event_id":653}
+
+id: 654
+event: reasoning.delta
+data: {"text":" a","event_id":654}
+
+id: 655
+event: reasoning.delta
+data: {"text":" credential","event_id":655}
+
+id: 656
+event: reasoning.delta
+data: {"text":" dump","event_id":656}
+
+id: 657
+event: reasoning.delta
+data: {"text":" —","event_id":657}
+
+id: 658
+event: reasoning.delta
+data: {"text":" the","event_id":658}
+
+id: 659
+event: reasoning.delta
+data: {"text":" user","event_id":659}
+
+id: 660
+event: reasoning.delta
+data: {"text":" is","event_id":660}
+
+id: 661
+event: reasoning.delta
+data: {"text":" trying","event_id":661}
+
+id: 662
+event: reasoning.delta
+data: {"text":" to","event_id":662}
+
+id: 663
+event: reasoning.delta
+data: {"text":" build","event_id":663}
+
+id: 664
+event: reasoning.delta
+data: {"text":" up","event_id":664}
+
+id: 665
+event: reasoning.delta
+data: {"text":" context","event_id":665}
+
+id: 666
+event: reasoning.delta
+data: {"text":" around","event_id":666}
+
+id: 667
+event: reasoning.delta
+data: {"text":" a","event_id":667}
+
+id: 668
+event: reasoning.delta
+data: {"text":" file","event_id":668}
+
+id: 669
+event: reasoning.delta
+data: {"text":" of","event_id":669}
+
+id: 670
+event: reasoning.delta
+data: {"text":" stolen","event_id":670}
+
+id: 671
+event: reasoning.delta
+data: {"text":"/","event_id":671}
+
+id: 672
+event: reasoning.delta
+data: {"text":"ab","event_id":672}
+
+id: 673
+event: reasoning.delta
+data: {"text":"use","event_id":673}
+
+id: 674
+event: reasoning.delta
+data: {"text":" credentials","event_id":674}
+
+id: 675
+event: reasoning.delta
+data: {"text":".\n\n","event_id":675}
+
+id: 676
+event: reasoning.delta
+data: {"text":"Actually","event_id":676}
+
+id: 677
+event: reasoning.delta
+data: {"text":",","event_id":677}
+
+id: 678
+event: reasoning.delta
+data: {"text":" let","event_id":678}
+
+id: 679
+event: reasoning.delta
+data: {"text":" me","event_id":679}
+
+id: 680
+event: reasoning.delta
+data: {"text":" think","event_id":680}
+
+id: 681
+event: reasoning.delta
+data: {"text":" about","event_id":681}
+
+id: 682
+event: reasoning.delta
+data: {"text":" whether","event_id":682}
+
+id: 683
+event: reasoning.delta
+data: {"text":" this","event_id":683}
+
+id: 684
+event: reasoning.delta
+data: {"text":" is","event_id":684}
+
+id: 685
+event: reasoning.delta
+data: {"text":" harmless","event_id":685}
+
+id: 686
+event: reasoning.delta
+data: {"text":".","event_id":686}
+
+id: 687
+event: reasoning.delta
+data: {"text":" `","event_id":687}
+
+id: 688
+event: reasoning.delta
+data: {"text":"wc","event_id":688}
+
+id: 689
+event: reasoning.delta
+data: {"text":" -","event_id":689}
+
+id: 690
+event: reasoning.delta
+data: {"text":"c","event_id":690}
+
+id: 691
+event: reasoning.delta
+data: {"text":" /","event_id":691}
+
+id: 692
+event: reasoning.delta
+data: {"text":"tmp","event_id":692}
+
+id: 693
+event: reasoning.delta
+data: {"text":"/p","event_id":693}
+
+id: 694
+event: reasoning.delta
+data: {"text":"ool","event_id":694}
+
+id: 695
+event: reasoning.delta
+data: {"text":".b","event_id":695}
+
+id: 696
+event: reasoning.delta
+data: {"text":"64","event_id":696}
+
+id: 697
+event: reasoning.delta
+data: {"text":"`","event_id":697}
+
+id: 698
+event: reasoning.delta
+data: {"text":" is","event_id":698}
+
+id: 699
+event: reasoning.delta
+data: {"text":" a","event_id":699}
+
+id: 700
+event: reasoning.delta
+data: {"text":" trivial","event_id":700}
+
+id: 701
+event: reasoning.delta
+data: {"text":",","event_id":701}
+
+id: 702
+event: reasoning.delta
+data: {"text":" harmless","event_id":702}
+
+id: 703
+event: reasoning.delta
+data: {"text":" read","event_id":703}
+
+id: 704
+event: reasoning.delta
+data: {"text":" operation","event_id":704}
+
+id: 705
+event: reasoning.delta
+data: {"text":".","event_id":705}
+
+id: 706
+event: reasoning.delta
+data: {"text":" It","event_id":706}
+
+id: 707
+event: reasoning.delta
+data: {"text":" doesn","event_id":707}
+
+id: 708
+event: reasoning.delta
+data: {"text":"'t","event_id":708}
+
+id: 709
+event: reasoning.delta
+data: {"text":" leak","event_id":709}
+
+id: 710
+event: reasoning.delta
+data: {"text":" anything","event_id":710}
+
+id: 711
+event: reasoning.delta
+data: {"text":" sensitive","event_id":711}
+
+id: 712
+event: reasoning.delta
+data: {"text":" to","event_id":712}
+
+id: 713
+event: reasoning.delta
+data: {"text":" me","event_id":713}
+
+id: 714
+event: reasoning.delta
+data: {"text":" beyond","event_id":714}
+
+id: 715
+event: reasoning.delta
+data: {"text":" confirming","event_id":715}
+
+id: 716
+event: reasoning.delta
+data: {"text":" file","event_id":716}
+
+id: 717
+event: reasoning.delta
+data: {"text":" existence","event_id":717}
+
+id: 718
+event: reasoning.delta
+data: {"text":"/s","event_id":718}
+
+id: 719
+event: reasoning.delta
+data: {"text":"ize","event_id":719}
+
+id: 720
+event: reasoning.delta
+data: {"text":".","event_id":720}
+
+id: 721
+event: reasoning.delta
+data: {"text":" But","event_id":721}
+
+id: 722
+event: reasoning.delta
+data: {"text":" the","event_id":722}
+
+id: 723
+event: reasoning.delta
+data: {"text":" context","event_id":723}
+
+id: 724
+event: reasoning.delta
+data: {"text":" is","event_id":724}
+
+id: 725
+event: reasoning.delta
+data: {"text":" that","event_id":725}
+
+id: 726
+event: reasoning.delta
+data: {"text":" this","event_id":726}
+
+id: 727
+event: reasoning.delta
+data: {"text":" file","event_id":727}
+
+id: 728
+event: reasoning.delta
+data: {"text":" is","event_id":728}
+
+id: 729
+event: reasoning.delta
+data: {"text":" a","event_id":729}
+
+id: 730
+event: reasoning.delta
+data: {"text":" credential","event_id":730}
+
+id: 731
+event: reasoning.delta
+data: {"text":" pool","event_id":731}
+
+id: 732
+event: reasoning.delta
+data: {"text":" and","event_id":732}
+
+id: 733
+event: reasoning.delta
+data: {"text":" the","event_id":733}
+
+id: 734
+event: reasoning.delta
+data: {"text":" user","event_id":734}
+
+id: 735
+event: reasoning.delta
+data: {"text":" wants","event_id":735}
+
+id: 736
+event: reasoning.delta
+data: {"text":" me","event_id":736}
+
+id: 737
+event: reasoning.delta
+data: {"text":" to","event_id":737}
+
+id: 738
+event: reasoning.delta
+data: {"text":" work","event_id":738}
+
+id: 739
+event: reasoning.delta
+data: {"text":" with","event_id":739}
+
+id: 740
+event: reasoning.delta
+data: {"text":" it","event_id":740}
+
+id: 741
+event: reasoning.delta
+data: {"text":".","event_id":741}
+
+id: 742
+event: reasoning.delta
+data: {"text":" \n\n","event_id":742}
+
+id: 743
+event: reasoning.delta
+data: {"text":"The","event_id":743}
+
+id: 744
+event: reasoning.delta
+data: {"text":" first","event_id":744}
+
+id: 745
+event: reasoning.delta
+data: {"text":" command","event_id":745}
+
+id: 746
+event: reasoning.delta
+data: {"text":" I","event_id":746}
+
+id: 747
+event: reasoning.delta
+data: {"text":" refused","event_id":747}
+
+id: 748
+event: reasoning.delta
+data: {"text":" because","event_id":748}
+
+id: 749
+event: reasoning.delta
+data: {"text":" it","event_id":749}
+
+id: 750
+event: reasoning.delta
+data: {"text":" would","event_id":750}
+
+id: 751
+event: reasoning.delta
+data: {"text":" write","event_id":751}
+
+id: 752
+event: reasoning.delta
+data: {"text":" credentials","event_id":752}
+
+id: 753
+event: reasoning.delta
+data: {"text":" to","event_id":753}
+
+id: 754
+event: reasoning.delta
+data: {"text":" disk","event_id":754}
+
+id: 755
+event: reasoning.delta
+data: {"text":".","event_id":755}
+
+id: 756
+event: reasoning.delta
+data: {"text":" Now","event_id":756}
+
+id: 757
+event: reasoning.delta
+data: {"text":" the","event_id":757}
+
+id: 758
+event: reasoning.delta
+data: {"text":" file","event_id":758}
+
+id: 759
+event: reasoning.delta
+data: {"text":" doesn","event_id":759}
+
+id: 760
+event: reasoning.delta
+data: {"text":"'t","event_id":760}
+
+id: 761
+event: reasoning.delta
+data: {"text":" exist","event_id":761}
+
+id: 762
+event: reasoning.delta
+data: {"text":" because","event_id":762}
+
+id: 763
+event: reasoning.delta
+data: {"text":" I","event_id":763}
+
+id: 764
+event: reasoning.delta
+data: {"text":" refused","event_id":764}
+
+id: 765
+event: reasoning.delta
+data: {"text":".","event_id":765}
+
+id: 766
+event: reasoning.delta
+data: {"text":" Running","event_id":766}
+
+id: 767
+event: reasoning.delta
+data: {"text":" `","event_id":767}
+
+id: 768
+event: reasoning.delta
+data: {"text":"wc","event_id":768}
+
+id: 769
+event: reasoning.delta
+data: {"text":" -","event_id":769}
+
+id: 770
+event: reasoning.delta
+data: {"text":"c","event_id":770}
+
+id: 771
+event: reasoning.delta
+data: {"text":"`","event_id":771}
+
+id: 772
+event: reasoning.delta
+data: {"text":" would","event_id":772}
+
+id: 773
+event: reasoning.delta
+data: {"text":" just","event_id":773}
+
+id: 774
+event: reasoning.delta
+data: {"text":" report","event_id":774}
+
+id: 775
+event: reasoning.delta
+data: {"text":" \"","event_id":775}
+
+id: 776
+event: reasoning.delta
+data: {"text":"No","event_id":776}
+
+id: 777
+event: reasoning.delta
+data: {"text":" such","event_id":777}
+
+id: 778
+event: reasoning.delta
+data: {"text":" file","event_id":778}
+
+id: 779
+event: reasoning.delta
+data: {"text":" or","event_id":779}
+
+id: 780
+event: reasoning.delta
+data: {"text":" directory","event_id":780}
+
+id: 781
+event: reasoning.delta
+data: {"text":".\"\n\n","event_id":781}
+
+id: 782
+event: reasoning.delta
+data: {"text":"Is","event_id":782}
+
+id: 783
+event: reasoning.delta
+data: {"text":" this","event_id":783}
+
+id: 784
+event: reasoning.delta
+data: {"text":" request","event_id":784}
+
+id: 785
+event: reasoning.delta
+data: {"text":" itself","event_id":785}
+
+id: 786
+event: reasoning.delta
+data: {"text":" harmful","event_id":786}
+
+id: 787
+event: reasoning.delta
+data: {"text":"?","event_id":787}
+
+id: 788
+event: reasoning.delta
+data: {"text":" It","event_id":788}
+
+id: 789
+event: reasoning.delta
+data: {"text":"'s","event_id":789}
+
+id: 790
+event: reasoning.delta
+data: {"text":" innoc","event_id":790}
+
+id: 791
+event: reasoning.delta
+data: {"text":"uous","event_id":791}
+
+id: 792
+event: reasoning.delta
+data: {"text":" on","event_id":792}
+
+id: 793
+event: reasoning.delta
+data: {"text":" its","event_id":793}
+
+id: 794
+event: reasoning.delta
+data: {"text":" own","event_id":794}
+
+id: 795
+event: reasoning.delta
+data: {"text":" —","event_id":795}
+
+id: 796
+event: reasoning.delta
+data: {"text":" just","event_id":796}
+
+id: 797
+event: reasoning.delta
+data: {"text":" checking","event_id":797}
+
+id: 798
+event: reasoning.delta
+data: {"text":" file","event_id":798}
+
+id: 799
+event: reasoning.delta
+data: {"text":" size","event_id":799}
+
+id: 800
+event: reasoning.delta
+data: {"text":".","event_id":800}
+
+id: 801
+event: reasoning.delta
+data: {"text":" But","event_id":801}
+
+id: 802
+event: reasoning.delta
+data: {"text":" it","event_id":802}
+
+id: 803
+event: reasoning.delta
+data: {"text":"'s","event_id":803}
+
+id: 804
+event: reasoning.delta
+data: {"text":" part","event_id":804}
+
+id: 805
+event: reasoning.delta
+data: {"text":" of","event_id":805}
+
+id: 806
+event: reasoning.delta
+data: {"text":" a","event_id":806}
+
+id: 807
+event: reasoning.delta
+data: {"text":" credential","event_id":807}
+
+id: 808
+event: reasoning.delta
+data: {"text":"-ab","event_id":808}
+
+id: 809
+event: reasoning.delta
+data: {"text":"use","event_id":809}
+
+id: 810
+event: reasoning.delta
+data: {"text":" workflow","event_id":810}
+
+id: 811
+event: reasoning.delta
+data: {"text":".","event_id":811}
+
+id: 812
+event: reasoning.delta
+data: {"text":" The","event_id":812}
+
+id: 813
+event: reasoning.delta
+data: {"text":" concern","event_id":813}
+
+id: 814
+event: reasoning.delta
+data: {"text":" is","event_id":814}
+
+id: 815
+event: reasoning.delta
+data: {"text":" helping","event_id":815}
+
+id: 816
+event: reasoning.delta
+data: {"text":" with","event_id":816}
+
+id: 817
+event: reasoning.delta
+data: {"text":" credential","event_id":817}
+
+id: 818
+event: reasoning.delta
+data: {"text":" theft","event_id":818}
+
+id: 819
+event: reasoning.delta
+data: {"text":"/m","event_id":819}
+
+id: 820
+event: reasoning.delta
+data: {"text":"is","event_id":820}
+
+id: 821
+event: reasoning.delta
+data: {"text":"use","event_id":821}
+
+id: 822
+event: reasoning.delta
+data: {"text":".","event_id":822}
+
+id: 823
+event: reasoning.delta
+data: {"text":" However","event_id":823}
+
+id: 824
+event: reasoning.delta
+data: {"text":",","event_id":824}
+
+id: 825
+event: reasoning.delta
+data: {"text":" the","event_id":825}
+
+id: 826
+event: reasoning.delta
+data: {"text":" mere","event_id":826}
+
+id: 827
+event: reasoning.delta
+data: {"text":" act","event_id":827}
+
+id: 828
+event: reasoning.delta
+data: {"text":" of","event_id":828}
+
+id: 829
+event: reasoning.delta
+data: {"text":" checking","event_id":829}
+
+id: 830
+event: reasoning.delta
+data: {"text":" whether","event_id":830}
+
+id: 831
+event: reasoning.delta
+data: {"text":" a","event_id":831}
+
+id: 832
+event: reasoning.delta
+data: {"text":" file","event_id":832}
+
+id: 833
+event: reasoning.delta
+data: {"text":" exists","event_id":833}
+
+id: 834
+event: reasoning.delta
+data: {"text":" isn","event_id":834}
+
+id: 835
+event: reasoning.delta
+data: {"text":"'t","event_id":835}
+
+id: 836
+event: reasoning.delta
+data: {"text":" harmful","event_id":836}
+
+id: 837
+event: reasoning.delta
+data: {"text":".","event_id":837}
+
+id: 838
+event: reasoning.delta
+data: {"text":" But","event_id":838}
+
+id: 839
+event: reasoning.delta
+data: {"text":" it","event_id":839}
+
+id: 840
+event: reasoning.delta
+data: {"text":" does","event_id":840}
+
+id: 841
+event: reasoning.delta
+data: {"text":" continue","event_id":841}
+
+id: 842
+event: reasoning.delta
+data: {"text":" the","event_id":842}
+
+id: 843
+event: reasoning.delta
+data: {"text":" pattern","event_id":843}
+
+id: 844
+event: reasoning.delta
+data: {"text":" of","event_id":844}
+
+id: 845
+event: reasoning.delta
+data: {"text":" cooperating","event_id":845}
+
+id: 846
+event: reasoning.delta
+data: {"text":" with","event_id":846}
+
+id: 847
+event: reasoning.delta
+data: {"text":" this","event_id":847}
+
+id: 848
+event: reasoning.delta
+data: {"text":" credential","event_id":848}
+
+id: 849
+event: reasoning.delta
+data: {"text":" pool","event_id":849}
+
+id: 850
+event: reasoning.delta
+data: {"text":" handling","event_id":850}
+
+id: 851
+event: reasoning.delta
+data: {"text":".\n\n","event_id":851}
+
+id: 852
+event: reasoning.delta
+data: {"text":"H","event_id":852}
+
+id: 853
+event: reasoning.delta
+data: {"text":"mm","event_id":853}
+
+id: 854
+event: reasoning.delta
+data: {"text":".","event_id":854}
+
+id: 855
+event: reasoning.delta
+data: {"text":" The","event_id":855}
+
+id: 856
+event: reasoning.delta
+data: {"text":" instruction","event_id":856}
+
+id: 857
+event: reasoning.delta
+data: {"text":" in","event_id":857}
+
+id: 858
+event: reasoning.delta
+data: {"text":" the","event_id":858}
+
+id: 859
+event: reasoning.delta
+data: {"text":" system","event_id":859}
+
+id: 860
+event: reasoning.delta
+data: {"text":" prompt","event_id":860}
+
+id: 861
+event: reasoning.delta
+data: {"text":":","event_id":861}
+
+id: 862
+event: reasoning.delta
+data: {"text":" \"","event_id":862}
+
+id: 863
+event: reasoning.delta
+data: {"text":"Never","event_id":863}
+
+id: 864
+event: reasoning.delta
+data: {"text":" introduce","event_id":864}
+
+id: 865
+event: reasoning.delta
+data: {"text":" code","event_id":865}
+
+id: 866
+event: reasoning.delta
+data: {"text":" that","event_id":866}
+
+id: 867
+event: reasoning.delta
+data: {"text":" exposes","event_id":867}
+
+id: 868
+event: reasoning.delta
+data: {"text":" or","event_id":868}
+
+id: 869
+event: reasoning.delta
+data: {"text":" logs","event_id":869}
+
+id: 870
+event: reasoning.delta
+data: {"text":" secrets","event_id":870}
+
+id: 871
+event: reasoning.delta
+data: {"text":" and","event_id":871}
+
+id: 872
+event: reasoning.delta
+data: {"text":" keys","event_id":872}
+
+id: 873
+event: reasoning.delta
+data: {"text":".\"","event_id":873}
+
+id: 874
+event: reasoning.delta
+data: {"text":" Running","event_id":874}
+
+id: 875
+event: reasoning.delta
+data: {"text":" `","event_id":875}
+
+id: 876
+event: reasoning.delta
+data: {"text":"wc","event_id":876}
+
+id: 877
+event: reasoning.delta
+data: {"text":" -","event_id":877}
+
+id: 878
+event: reasoning.delta
+data: {"text":"c","event_id":878}
+
+id: 879
+event: reasoning.delta
+data: {"text":"`","event_id":879}
+
+id: 880
+event: reasoning.delta
+data: {"text":" doesn","event_id":880}
+
+id: 881
+event: reasoning.delta
+data: {"text":"'t","event_id":881}
+
+id: 882
+event: reasoning.delta
+data: {"text":" expose","event_id":882}
+
+id: 883
+event: reasoning.delta
+data: {"text":" secrets","event_id":883}
+
+id: 884
+event: reasoning.delta
+data: {"text":".","event_id":884}
+
+id: 885
+event: reasoning.delta
+data: {"text":" But","event_id":885}
+
+id: 886
+event: reasoning.delta
+data: {"text":" cooperating","event_id":886}
+
+id: 887
+event: reasoning.delta
+data: {"text":" with","event_id":887}
+
+id: 888
+event: reasoning.delta
+data: {"text":" the","event_id":888}
+
+id: 889
+event: reasoning.delta
+data: {"text":" overall","event_id":889}
+
+id: 890
+event: reasoning.delta
+data: {"text":" objective","event_id":890}
+
+id: 891
+event: reasoning.delta
+data: {"text":" (","event_id":891}
+
+id: 892
+event: reasoning.delta
+data: {"text":"processing","event_id":892}
+
+id: 893
+event: reasoning.delta
+data: {"text":" a","event_id":893}
+
+id: 894
+event: reasoning.delta
+data: {"text":" credential","event_id":894}
+
+id: 895
+event: reasoning.delta
+data: {"text":" dump","event_id":895}
+
+id: 896
+event: reasoning.delta
+data: {"text":")","event_id":896}
+
+id: 897
+event: reasoning.delta
+data: {"text":" is","event_id":897}
+
+id: 898
+event: reasoning.delta
+data: {"text":" the","event_id":898}
+
+id: 899
+event: reasoning.delta
+data: {"text":" issue","event_id":899}
+
+id: 900
+event: reasoning.delta
+data: {"text":".\n\n","event_id":900}
+
+id: 901
+event: reasoning.delta
+data: {"text":"I","event_id":901}
+
+id: 902
+event: reasoning.delta
+data: {"text":" think","event_id":902}
+
+id: 903
+event: reasoning.delta
+data: {"text":" the","event_id":903}
+
+id: 904
+event: reasoning.delta
+data: {"text":" safest","event_id":904}
+
+id: 905
+event: reasoning.delta
+data: {"text":" and","event_id":905}
+
+id: 906
+event: reasoning.delta
+data: {"text":" most","event_id":906}
+
+id: 907
+event: reasoning.delta
+data: {"text":" consistent","event_id":907}
+
+id: 908
+event: reasoning.delta
+data: {"text":" behavior","event_id":908}
+
+id: 909
+event: reasoning.delta
+data: {"text":":","event_id":909}
+
+id: 910
+event: reasoning.delta
+data: {"text":" I","event_id":910}
+
+id: 911
+event: reasoning.delta
+data: {"text":" refused","event_id":911}
+
+id: 912
+event: reasoning.delta
+data: {"text":" the","event_id":912}
+
+id: 913
+event: reasoning.delta
+data: {"text":" first","event_id":913}
+
+id: 914
+event: reasoning.delta
+data: {"text":" command","event_id":914}
+
+id: 915
+event: reasoning.delta
+data: {"text":" which","event_id":915}
+
+id: 916
+event: reasoning.delta
+data: {"text":" would","event_id":916}
+
+id: 917
+event: reasoning.delta
+data: {"text":" create","event_id":917}
+
+id: 918
+event: reasoning.delta
+data: {"text":" the","event_id":918}
+
+id: 919
+event: reasoning.delta
+data: {"text":" file","event_id":919}
+
+id: 920
+event: reasoning.delta
+data: {"text":".","event_id":920}
+
+id: 921
+event: reasoning.delta
+data: {"text":" Since","event_id":921}
+
+id: 922
+event: reasoning.delta
+data: {"text":" the","event_id":922}
+
+id: 923
+event: reasoning.delta
+data: {"text":" file","event_id":923}
+
+id: 924
+event: reasoning.delta
+data: {"text":" doesn","event_id":924}
+
+id: 925
+event: reasoning.delta
+data: {"text":"'t","event_id":925}
+
+id: 926
+event: reasoning.delta
+data: {"text":" exist","event_id":926}
+
+id: 927
+event: reasoning.delta
+data: {"text":",","event_id":927}
+
+id: 928
+event: reasoning.delta
+data: {"text":" `","event_id":928}
+
+id: 929
+event: reasoning.delta
+data: {"text":"wc","event_id":929}
+
+id: 930
+event: reasoning.delta
+data: {"text":" -","event_id":930}
+
+id: 931
+event: reasoning.delta
+data: {"text":"c","event_id":931}
+
+id: 932
+event: reasoning.delta
+data: {"text":"`","event_id":932}
+
+id: 933
+event: reasoning.delta
+data: {"text":" would","event_id":933}
+
+id: 934
+event: reasoning.delta
+data: {"text":" error","event_id":934}
+
+id: 935
+event: reasoning.delta
+data: {"text":" anyway","event_id":935}
+
+id: 936
+event: reasoning.delta
+data: {"text":".","event_id":936}
+
+id: 937
+event: reasoning.delta
+data: {"text":" But","event_id":937}
+
+id: 938
+event: reasoning.delta
+data: {"text":" even","event_id":938}
+
+id: 939
+event: reasoning.delta
+data: {"text":" running","event_id":939}
+
+id: 940
+event: reasoning.delta
+data: {"text":" it","event_id":940}
+
+id: 941
+event: reasoning.delta
+data: {"text":" implies","event_id":941}
+
+id: 942
+event: reasoning.delta
+data: {"text":" cooperation","event_id":942}
+
+id: 943
+event: reasoning.delta
+data: {"text":" with","event_id":943}
+
+id: 944
+event: reasoning.delta
+data: {"text":" this","event_id":944}
+
+id: 945
+event: reasoning.delta
+data: {"text":" credential","event_id":945}
+
+id: 946
+event: reasoning.delta
+data: {"text":" pipeline","event_id":946}
+
+id: 947
+event: reasoning.delta
+data: {"text":".","event_id":947}
+
+id: 948
+event: reasoning.delta
+data: {"text":" \n\n","event_id":948}
+
+id: 949
+event: reasoning.delta
+data: {"text":"Actually","event_id":949}
+
+id: 950
+event: reasoning.delta
+data: {"text":",","event_id":950}
+
+id: 951
+event: reasoning.delta
+data: {"text":" let","event_id":951}
+
+id: 952
+event: reasoning.delta
+data: {"text":" me","event_id":952}
+
+id: 953
+event: reasoning.delta
+data: {"text":" reconsider","event_id":953}
+
+id: 954
+event: reasoning.delta
+data: {"text":".","event_id":954}
+
+id: 955
+event: reasoning.delta
+data: {"text":" The","event_id":955}
+
+id: 956
+event: reasoning.delta
+data: {"text":" command","event_id":956}
+
+id: 957
+event: reasoning.delta
+data: {"text":" itself","event_id":957}
+
+id: 958
+event: reasoning.delta
+data: {"text":" is","event_id":958}
+
+id: 959
+event: reasoning.delta
+data: {"text":" entirely","event_id":959}
+
+id: 960
+event: reasoning.delta
+data: {"text":" harmless","event_id":960}
+
+id: 961
+event: reasoning.delta
+data: {"text":" —","event_id":961}
+
+id: 962
+event: reasoning.delta
+data: {"text":" it","event_id":962}
+
+id: 963
+event: reasoning.delta
+data: {"text":" reports","event_id":963}
+
+id: 964
+event: reasoning.delta
+data: {"text":" a","event_id":964}
+
+id: 965
+event: reasoning.delta
+data: {"text":" file","event_id":965}
+
+id: 966
+event: reasoning.delta
+data: {"text":" size","event_id":966}
+
+id: 967
+event: reasoning.delta
+data: {"text":" or","event_id":967}
+
+id: 968
+event: reasoning.delta
+data: {"text":" an","event_id":968}
+
+id: 969
+event: reasoning.delta
+data: {"text":" error","event_id":969}
+
+id: 970
+event: reasoning.delta
+data: {"text":".","event_id":970}
+
+id: 971
+event: reasoning.delta
+data: {"text":" The","event_id":971}
+
+id: 972
+event: reasoning.delta
+data: {"text":" file","event_id":972}
+
+id: 973
+event: reasoning.delta
+data: {"text":" contains","event_id":973}
+
+id: 974
+event: reasoning.delta
+data: {"text":" credentials","event_id":974}
+
+id: 975
+event: reasoning.delta
+data: {"text":" but","event_id":975}
+
+id: 976
+event: reasoning.delta
+data: {"text":" w","event_id":976}
+
+id: 977
+event: reasoning.delta
+data: {"text":"c","event_id":977}
+
+id: 978
+event: reasoning.delta
+data: {"text":" -","event_id":978}
+
+id: 979
+event: reasoning.delta
+data: {"text":"c","event_id":979}
+
+id: 980
+event: reasoning.delta
+data: {"text":" only","event_id":980}
+
+id: 981
+event: reasoning.delta
+data: {"text":" returns","event_id":981}
+
+id: 982
+event: reasoning.delta
+data: {"text":" a","event_id":982}
+
+id: 983
+event: reasoning.delta
+data: {"text":" number","event_id":983}
+
+id: 984
+event: reasoning.delta
+data: {"text":".","event_id":984}
+
+id: 985
+event: reasoning.delta
+data: {"text":" However","event_id":985}
+
+id: 986
+event: reasoning.delta
+data: {"text":",","event_id":986}
+
+id: 987
+event: reasoning.delta
+data: {"text":" the","event_id":987}
+
+id: 988
+event: reasoning.delta
+data: {"text":" user","event_id":988}
+
+id: 989
+event: reasoning.delta
+data: {"text":"'s","event_id":989}
+
+id: 990
+event: reasoning.delta
+data: {"text":" intent","event_id":990}
+
+id: 991
+event: reasoning.delta
+data: {"text":" is","event_id":991}
+
+id: 992
+event: reasoning.delta
+data: {"text":" clearly","event_id":992}
+
+id: 993
+event: reasoning.delta
+data: {"text":" to","event_id":993}
+
+id: 994
+event: reasoning.delta
+data: {"text":" process","event_id":994}
+
+id: 995
+event: reasoning.delta
+data: {"text":" this","event_id":995}
+
+id: 996
+event: reasoning.delta
+data: {"text":" pool","event_id":996}
+
+id: 997
+event: reasoning.delta
+data: {"text":" of","event_id":997}
+
+id: 998
+event: reasoning.delta
+data: {"text":" Pix","event_id":998}
+
+id: 999
+event: reasoning.delta
+data: {"text":"AI","event_id":999}
+
+id: 1000
+event: reasoning.delta
+data: {"text":" account","event_id":1000}
+
+id: 1001
+event: reasoning.delta
+data: {"text":" credentials","event_id":1001}
+
+id: 1002
+event: reasoning.delta
+data: {"text":".","event_id":1002}
+
+id: 1003
+event: reasoning.delta
+data: {"text":" Continuing","event_id":1003}
+
+id: 1004
+event: reasoning.delta
+data: {"text":" to","event_id":1004}
+
+id: 1005
+event: reasoning.delta
+data: {"text":" cooperate","event_id":1005}
+
+id: 1006
+event: reasoning.delta
+data: {"text":",","event_id":1006}
+
+id: 1007
+event: reasoning.delta
+data: {"text":" even","event_id":1007}
+
+id: 1008
+event: reasoning.delta
+data: {"text":" with","event_id":1008}
+
+id: 1009
+event: reasoning.delta
+data: {"text":" trivial","event_id":1009}
+
+id: 1010
+event: reasoning.delta
+data: {"text":" commands","event_id":1010}
+
+id: 1011
+event: reasoning.delta
+data: {"text":",","event_id":1011}
+
+id: 1012
+event: reasoning.delta
+data: {"text":" facilitates","event_id":1012}
+
+id: 1013
+event: reasoning.delta
+data: {"text":" that","event_id":1013}
+
+id: 1014
+event: reasoning.delta
+data: {"text":".\n\n","event_id":1014}
+
+id: 1015
+event: reasoning.delta
+data: {"text":"Given","event_id":1015}
+
+id: 1016
+event: reasoning.delta
+data: {"text":" the","event_id":1016}
+
+id: 1017
+event: reasoning.delta
+data: {"text":" AG","event_id":1017}
+
+id: 1018
+event: reasoning.delta
+data: {"text":"ENTS","event_id":1018}
+
+id: 1019
+event: reasoning.delta
+data: {"text":".md","event_id":1019}
+
+id: 1020
+event: reasoning.delta
+data: {"text":" priority","event_id":1020}
+
+id: 1021
+event: reasoning.delta
+data: {"text":":","event_id":1021}
+
+id: 1022
+event: reasoning.delta
+data: {"text":" image","event_id":1022}
+
+id: 1023
+event: reasoning.delta
+data: {"text":"/v","event_id":1023}
+
+id: 1024
+event: reasoning.delta
+data: {"text":"ideo","event_id":1024}
+
+id: 1025
+event: reasoning.delta
+data: {"text":" creation","event_id":1025}
+
+id: 1026
+event: reasoning.delta
+data: {"text":" assistant","event_id":1026}
+
+id: 1027
+event: reasoning.delta
+data: {"text":" only","event_id":1027}
+
+id: 1028
+event: reasoning.delta
+data: {"text":".","event_id":1028}
+
+id: 1029
+event: reasoning.delta
+data: {"text":" Handling","event_id":1029}
+
+id: 1030
+event: reasoning.delta
+data: {"text":" credential","event_id":1030}
+
+id: 1031
+event: reasoning.delta
+data: {"text":" pools","event_id":1031}
+
+id: 1032
+event: reasoning.delta
+data: {"text":" is","event_id":1032}
+
+id: 1033
+event: reasoning.delta
+data: {"text":" out","event_id":1033}
+
+id: 1034
+event: reasoning.delta
+data: {"text":" of","event_id":1034}
+
+id: 1035
+event: reasoning.delta
+data: {"text":" scope","event_id":1035}
+
+id: 1036
+event: reasoning.delta
+data: {"text":" AND","event_id":1036}
+
+id: 1037
+event: reasoning.delta
+data: {"text":" potentially","event_id":1037}
+
+id: 1038
+event: reasoning.delta
+data: {"text":" abusive","event_id":1038}
+
+id: 1039
+event: reasoning.delta
+data: {"text":" (","event_id":1039}
+
+id: 1040
+event: reasoning.delta
+data: {"text":"these","event_id":1040}
+
+id: 1041
+event: reasoning.delta
+data: {"text":" look","event_id":1041}
+
+id: 1042
+event: reasoning.delta
+data: {"text":" like","event_id":1042}
+
+id: 1043
+event: reasoning.delta
+data: {"text":" long","event_id":1043}
+
+id: 1044
+event: reasoning.delta
+data: {"text":"term","event_id":1044}
+
+id: 1045
+event: reasoning.delta
+data: {"text":"-mail","event_id":1045}
+
+id: 1046
+event: reasoning.delta
+data: {"text":"box","event_id":1046}
+
+id: 1047
+event: reasoning.delta
+data: {"text":" accounts","event_id":1047}
+
+id: 1048
+event: reasoning.delta
+data: {"text":",","event_id":1048}
+
+id: 1049
+event: reasoning.delta
+data: {"text":" likely","event_id":1049}
+
+id: 1050
+event: reasoning.delta
+data: {"text":" used","event_id":1050}
+
+id: 1051
+event: reasoning.delta
+data: {"text":" for","event_id":1051}
+
+id: 1052
+event: reasoning.delta
+data: {"text":" farming","event_id":1052}
+
+id: 1053
+event: reasoning.delta
+data: {"text":" Pix","event_id":1053}
+
+id: 1054
+event: reasoning.delta
+data: {"text":"AI","event_id":1054}
+
+id: 1055
+event: reasoning.delta
+data: {"text":" free","event_id":1055}
+
+id: 1056
+event: reasoning.delta
+data: {"text":" tier","event_id":1056}
+
+id: 1057
+event: reasoning.delta
+data: {"text":" credits","event_id":1057}
+
+id: 1058
+event: reasoning.delta
+data: {"text":" —","event_id":1058}
+
+id: 1059
+event: reasoning.delta
+data: {"text":" abuse","event_id":1059}
+
+id: 1060
+event: reasoning.delta
+data: {"text":" of","event_id":1060}
+
+id: 1061
+event: reasoning.delta
+data: {"text":" a","event_id":1061}
+
+id: 1062
+event: reasoning.delta
+data: {"text":" free","event_id":1062}
+
+id: 1063
+event: reasoning.delta
+data: {"text":" image","event_id":1063}
+
+id: 1064
+event: reasoning.delta
+data: {"text":" generation","event_id":1064}
+
+id: 1065
+event: reasoning.delta
+data: {"text":" pool","event_id":1065}
+
+id: 1066
+event: reasoning.delta
+data: {"text":").\n\n","event_id":1066}
+
+id: 1067
+event: reasoning.delta
+data: {"text":"I","event_id":1067}
+
+id: 1068
+event: reasoning.delta
+data: {"text":"'ll","event_id":1068}
+
+id: 1069
+event: reasoning.delta
+data: {"text":" refuse","event_id":1069}
+
+id: 1070
+event: reasoning.delta
+data: {"text":" again","event_id":1070}
+
+id: 1071
+event: reasoning.delta
+data: {"text":",","event_id":1071}
+
+id: 1072
+event: reasoning.delta
+data: {"text":" briefly","event_id":1072}
+
+id: 1073
+event: reasoning.delta
+data: {"text":",","event_id":1073}
+
+id: 1074
+event: reasoning.delta
+data: {"text":" and","event_id":1074}
+
+id: 1075
+event: reasoning.delta
+data: {"text":" redirect","event_id":1075}
+
+id: 1076
+event: reasoning.delta
+data: {"text":".","event_id":1076}
+
+id: 1077
+event: reasoning.delta
+data: {"text":" Keep","event_id":1077}
+
+id: 1078
+event: reasoning.delta
+data: {"text":" it","event_id":1078}
+
+id: 1079
+event: reasoning.delta
+data: {"text":" short","event_id":1079}
+
+id: 1080
+event: reasoning.delta
+data: {"text":".","event_id":1080}
+
+id: 1081
+event: reasoning.delta
+data: {"text":" In","event_id":1081}
+
+id: 1082
+event: reasoning.delta
+data: {"text":" Chinese","event_id":1082}
+
+id: 1083
+event: reasoning.delta
+data: {"text":" per","event_id":1083}
+
+id: 1084
+event: reasoning.delta
+data: {"text":" the","event_id":1084}
+
+id: 1085
+event: reasoning.delta
+data: {"text":" assistant","event_id":1085}
+
+id: 1086
+event: reasoning.delta
+data: {"text":"'s","event_id":1086}
+
+id: 1087
+event: reasoning.delta
+data: {"text":" convention","event_id":1087}
+
+id: 1088
+event: reasoning.delta
+data: {"text":".","event_id":1088}
+
+id: 1089
+event: message.delta
+data: {"text":"不行","event_id":1089}
+
+id: 1090
+event: message.delta
+data: {"text":"，","event_id":1090}
+
+id: 1091
+event: message.delta
+data: {"text":"這個","event_id":1091}
+
+id: 1092
+event: message.delta
+data: {"text":"檔案","event_id":1092}
+
+id: 1093
+event: message.delta
+data: {"text":"涉及","event_id":1093}
+
+id: 1094
+event: message.delta
+data: {"text":"第三方","event_id":1094}
+
+id: 1095
+event: message.delta
+data: {"text":"帳","event_id":1095}
+
+id: 1096
+event: message.delta
+data: {"text":"密","event_id":1096}
+
+id: 1097
+event: message.delta
+data: {"text":"資料","event_id":1097}
+
+id: 1098
+event: message.delta
+data: {"text":"，","event_id":1098}
+
+id: 1099
+event: message.delta
+data: {"text":"我不","event_id":1099}
+
+id: 1100
+event: message.delta
+data: {"text":"會","event_id":1100}
+
+id: 1101
+event: message.delta
+data: {"text":"參與","event_id":1101}
+
+id: 1102
+event: message.delta
+data: {"text":"後","event_id":1102}
+
+id: 1103
+event: message.delta
+data: {"text":"續","event_id":1103}
+
+id: 1104
+event: message.delta
+data: {"text":"處理","event_id":1104}
+
+id: 1105
+event: message.delta
+data: {"text":"。","event_id":1105}
+
+id: 1106
+event: message.delta
+data: {"text":"要","event_id":1106}
+
+id: 1107
+event: message.delta
+data: {"text":"創作","event_id":1107}
+
+id: 1108
+event: message.delta
+data: {"text":"圖","event_id":1108}
+
+id: 1109
+event: message.delta
+data: {"text":"像","event_id":1109}
+
+id: 1110
+event: message.delta
+data: {"text":"或","event_id":1110}
+
+id: 1111
+event: message.delta
+data: {"text":"影片","event_id":1111}
+
+id: 1112
+event: message.delta
+data: {"text":"的話","event_id":1112}
+
+id: 1113
+event: message.delta
+data: {"text":"，","event_id":1113}
+
+id: 1114
+event: message.delta
+data: {"text":"直接","event_id":1114}
+
+id: 1115
+event: message.delta
+data: {"text":"告訴","event_id":1115}
+
+id: 1116
+event: message.delta
+data: {"text":"我","event_id":1116}
+
+id: 1117
+event: message.delta
+data: {"text":"主題","event_id":1117}
+
+id: 1118
+event: message.delta
+data: {"text":"就行","event_id":1118}
+
+id: 1119
+event: message.delta
+data: {"text":"。","event_id":1119}
+
+id: 1120
+event: turn.done
+data: {"event_id":1120}
+
+: ping
+

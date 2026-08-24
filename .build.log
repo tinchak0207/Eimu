@@ -1,0 +1,234 @@
+
+> ai-sdk-image-generator@0.1.0 build
+> next build
+
+   ▲ Next.js 15.5.15
+   - Environments: .env.local
+
+   Creating an optimized production build ...
+ ✓ Compiled successfully in 5.0s
+   Linting and checking validity of types ...
+
+./src/app/wechat-login/page.tsx
+170:17  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` or a custom image loader to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+185:19  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` or a custom image loader to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+193:19  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` or a custom image loader to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+./src/components/agent-chat/AgentImageCard.tsx
+352:7  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` or a custom image loader to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+./src/components/canvas/CanvasEmbed.tsx
+1402:78  Warning: '_mode' is defined but never used.  @typescript-eslint/no-unused-vars
+1869:19  Warning: Elements with the ARIA role "option" must have the following attributes defined: aria-selected  jsx-a11y/role-has-required-aria-props
+
+./src/components/canvas/CanvasImageEditorDialog.tsx
+607:15  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` or a custom image loader to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+./src/components/canvas/CanvasNodeHoverToolbar.tsx
+38:15  Warning: '_isSelected' is defined but never used.  @typescript-eslint/no-unused-vars
+
+./src/components/canvas/CanvasNodeView.tsx
+514:9  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` or a custom image loader to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+538:13  Warning: Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` or a custom image loader to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+./src/components/canvas/InfiniteCanvas.tsx
+321:5  Warning: React Hook useCallback has a missing dependency: 'onBackgroundPointerDown'. Either include it or remove the dependency array. If 'onBackgroundPointerDown' changes too often, find the parent component that defines it and wrap that definition in useCallback.  react-hooks/exhaustive-deps
+
+./src/components/canvas/NodeEditPanel.tsx
+3:10  Warning: 'cn' is defined but never used.  @typescript-eslint/no-unused-vars
+
+./src/hooks/use-agent-chat.ts
+447:6  Warning: React Hook useCallback has missing dependencies: 'handleSseEvent' and 'nextBackoff'. Either include them or remove the dependency array.  react-hooks/exhaustive-deps
+
+./src/hooks/use-canvas-chat.ts
+660:40  Warning: The ref value 'progressTimerRef.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'progressTimerRef.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps
+662:26  Warning: The ref value 'progressPendingRef.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'progressPendingRef.current' to a variable inside the effect, and use that variable in the cleanup function.  react-hooks/exhaustive-deps
+
+./src/lib/agent-profile-store.ts
+18:10  Warning: 'del' is defined but never used.  @typescript-eslint/no-unused-vars
+18:20  Warning: 'list' is defined but never used.  @typescript-eslint/no-unused-vars
+
+./src/lib/canvas/batch-utils.ts
+103:3  Warning: 'totalCount' is defined but never used.  @typescript-eslint/no-unused-vars
+
+./src/lib/canvas/interaction.ts
+114:28  Warning: '_bc' is assigned a value but never used.  @typescript-eslint/no-unused-vars
+114:48  Warning: '_be' is assigned a value but never used.  @typescript-eslint/no-unused-vars
+114:74  Warning: '_bp' is assigned a value but never used.  @typescript-eslint/no-unused-vars
+117:28  Warning: '_task' is assigned a value but never used.  @typescript-eslint/no-unused-vars
+
+./src/lib/canvas/layout.test.ts
+251:9  Warning: 'size' is assigned a value but never used.  @typescript-eslint/no-unused-vars
+
+./src/lib/canvas/reducer.ts
+18:10  Warning: 'CanvasNodeType' is defined but never used.  @typescript-eslint/no-unused-vars
+
+./src/lib/server-history-store.ts
+316:10  Warning: 'ownedImageUrls' is defined but never used.  @typescript-eslint/no-unused-vars
+
+./src/lib/sku/expand.ts
+205:3  Warning: '_template' is defined but never used.  @typescript-eslint/no-unused-vars
+
+info  - Need to disable some ESLint rules? Learn more here: https://nextjs.org/docs/app/api-reference/config/eslint#disabling-rules
+   Collecting page data ...
+   Generating static pages (0/206) ...
+   Generating static pages (51/206) 
+   Generating static pages (102/206) 
+   Generating static pages (154/206) 
+ ✓ Generating static pages (206/206)
+   Finalizing page optimization ...
+   Collecting build traces ...
+
+Route (app)                                        Size  First Load JS
+┌ ○ /                                            154 kB         275 kB
+├ ○ /_not-found                                   996 B         104 kB
+├ ƒ /admin                                        22 kB         130 kB
+├ ○ /agent                                        633 B         104 kB
+├ ƒ /api/admin/account-pools                      408 B         103 kB
+├ ƒ /api/admin/account-pools/import               408 B         103 kB
+├ ƒ /api/admin/adobe2api/import                   408 B         103 kB
+├ ƒ /api/admin/billing-operations                 408 B         103 kB
+├ ƒ /api/admin/biz-keys                           408 B         103 kB
+├ ƒ /api/admin/biz-keys/[id]                      408 B         103 kB
+├ ƒ /api/admin/biz-keys/provision                 408 B         103 kB
+├ ƒ /api/admin/channels                           408 B         103 kB
+├ ƒ /api/admin/channels/audit                     408 B         103 kB
+├ ƒ /api/admin/channels/probe                     408 B         103 kB
+├ ƒ /api/admin/channels/rollback                  408 B         103 kB
+├ ƒ /api/admin/control-plane-diagnostics          408 B         103 kB
+├ ƒ /api/admin/external-channels                  408 B         103 kB
+├ ƒ /api/admin/image-upstream-probe               408 B         103 kB
+├ ƒ /api/admin/model-pricing                      408 B         103 kB
+├ ƒ /api/admin/pools                              408 B         103 kB
+├ ƒ /api/admin/pools/[id]                         408 B         103 kB
+├ ƒ /api/admin/pools/[id]/test                    408 B         103 kB
+├ ƒ /api/admin/routing-events                     408 B         103 kB
+├ ƒ /api/admin/session                            408 B         103 kB
+├ ƒ /api/admin/slo                                408 B         103 kB
+├ ƒ /api/admin/sub2api-fix-groups                 408 B         103 kB
+├ ƒ /api/admin/templates                          408 B         103 kB
+├ ƒ /api/admin/tier-pricing                       408 B         103 kB
+├ ƒ /api/adobe-token                              408 B         103 kB
+├ ƒ /api/adobe/callback                           408 B         103 kB
+├ ƒ /api/adobe/oauth                              408 B         103 kB
+├ ƒ /api/adobe/setup                              408 B         103 kB
+├ ƒ /api/agent/profile                            408 B         103 kB
+├ ƒ /api/agent/profile/lessons                    408 B         103 kB
+├ ƒ /api/agent/quota                              408 B         103 kB
+├ ƒ /api/agent/sessions                           408 B         103 kB
+├ ƒ /api/agent/sessions/[id]                      408 B         103 kB
+├ ƒ /api/agent/sessions/[id]/abort                408 B         103 kB
+├ ƒ /api/agent/sessions/[id]/attachments          408 B         103 kB
+├ ƒ /api/agent/sessions/[id]/canvas-ops-result    408 B         103 kB
+├ ƒ /api/agent/sessions/[id]/canvas-state         408 B         103 kB
+├ ƒ /api/agent/sessions/[id]/confirm              408 B         103 kB
+├ ƒ /api/agent/sessions/[id]/messages             408 B         103 kB
+├ ƒ /api/agent/sessions/[id]/question             408 B         103 kB
+├ ƒ /api/agent/sessions/[id]/sse-ticket           408 B         103 kB
+├ ƒ /api/auth/github/callback                     408 B         103 kB
+├ ƒ /api/auth/github/start                        408 B         103 kB
+├ ƒ /api/auth/login                               408 B         103 kB
+├ ƒ /api/auth/me                                  408 B         103 kB
+├ ƒ /api/auth/register                            408 B         103 kB
+├ ƒ /api/auth/wechat/callback                     408 B         103 kB
+├ ƒ /api/auth/wechat/msg                          408 B         103 kB
+├ ƒ /api/auth/wechat/poll                         408 B         103 kB
+├ ƒ /api/auth/wechat/qr                           408 B         103 kB
+├ ƒ /api/auth/wechat/start                        408 B         103 kB
+├ ƒ /api/canvas/assets                            408 B         103 kB
+├ ƒ /api/canvas/generate                          408 B         103 kB
+├ ƒ /api/canvas/image-proxy                       408 B         103 kB
+├ ƒ /api/canvas/projects                          408 B         103 kB
+├ ƒ /api/canvas/prompts                           408 B         103 kB
+├ ƒ /api/checkin                                  408 B         103 kB
+├ ƒ /api/cron/generation-worker                   408 B         103 kB
+├ ƒ /api/data/self                                408 B         103 kB
+├ ƒ /api/generate-images                          408 B         103 kB
+├ ƒ /api/generate-videos                          408 B         103 kB
+├ ƒ /api/generation-jobs                          408 B         103 kB
+├ ƒ /api/generation-jobs/[id]                     408 B         103 kB
+├ ƒ /api/healthz                                  408 B         103 kB
+├ ƒ /api/history                                  408 B         103 kB
+├ ƒ /api/history/[id]                             408 B         103 kB
+├ ƒ /api/history/stats                            408 B         103 kB
+├ ƒ /api/internal/biz-keys                        408 B         103 kB
+├ ƒ /api/internal/callback-worker                 408 B         103 kB
+├ ƒ /api/internal/generation-billing              408 B         103 kB
+├ ƒ /api/log/self                                 408 B         103 kB
+├ ƒ /api/log/self/search                          408 B         103 kB
+├ ƒ /api/log/self/stat                            408 B         103 kB
+├ ƒ /api/lora-models                              408 B         103 kB
+├ ƒ /api/lora-preferences                         408 B         103 kB
+├ ƒ /api/model-pricing                            408 B         103 kB
+├ ƒ /api/models                                   408 B         103 kB
+├ ƒ /api/payments/mapay/checkout                  408 B         103 kB
+├ ƒ /api/payments/mapay/notify                    408 B         103 kB
+├ ƒ /api/payments/mapay/return                    408 B         103 kB
+├ ƒ /api/payments/mapay/test-callback             408 B         103 kB
+├ ƒ /api/pixai/edit                               408 B         103 kB
+├ ƒ /api/pixai/template-generations               408 B         103 kB
+├ ƒ /api/pixai/upload                             408 B         103 kB
+├ ƒ /api/pixai/upscale                            408 B         103 kB
+├ ƒ /api/pricing                                  408 B         103 kB
+├ ƒ /api/token                                    408 B         103 kB
+├ ƒ /api/token/[id]                               408 B         103 kB
+├ ƒ /api/topup                                    408 B         103 kB
+├ ƒ /api/usage                                    408 B         103 kB
+├ ƒ /api/user/aff                                 408 B         103 kB
+├ ƒ /api/user/models                              408 B         103 kB
+├ ƒ /api/user/self                                408 B         103 kB
+├ ƒ /api/user/self/groups                         408 B         103 kB
+├ ƒ /api/user/topup/info                          408 B         103 kB
+├ ƒ /api/user/topup/self                          408 B         103 kB
+├ ƒ /api/v1/batches                               408 B         103 kB
+├ ƒ /api/v1/batches/[id]                          408 B         103 kB
+├ ƒ /api/v1/batches/[id]/reconciliation           408 B         103 kB
+├ ƒ /api/v1/history                               408 B         103 kB
+├ ƒ /api/v1/images/[id]                           408 B         103 kB
+├ ƒ /api/v1/images/[id]/result                    408 B         103 kB
+├ ƒ /api/v1/images/edits                          408 B         103 kB
+├ ƒ /api/v1/images/generations                    408 B         103 kB
+├ ƒ /api/v1/model-status                          408 B         103 kB
+├ ƒ /api/v1/models                                408 B         103 kB
+├ ƒ /api/v1/object_info                           408 B         103 kB
+├ ƒ /api/v1/openapi.json                          408 B         103 kB
+├ ƒ /api/v1/queue                                 408 B         103 kB
+├ ƒ /api/v1/system_stats                          408 B         103 kB
+├ ƒ /api/v1/template-generations                  408 B         103 kB
+├ ƒ /api/v1/templates                             408 B         103 kB
+├ ƒ /api/v1/uploads                               408 B         103 kB
+├ ƒ /api/v1/upscale                               408 B         103 kB
+├ ƒ /api/v1/videos/[id]                           408 B         103 kB
+├ ƒ /api/v1/videos/[id]/result                    408 B         103 kB
+├ ƒ /api/v1/videos/generations                    408 B         103 kB
+├ ○ /apple-icon.png                                 0 B            0 B
+├ ○ /auth/complete                                370 B         103 kB
+├ ○ /docs                                         175 B         107 kB
+├ ○ /docs/api                                   4.58 kB         108 kB
+├ ○ /docs/harness                                 175 B         107 kB
+├ ○ /docs/harness/deep                            408 B         103 kB
+├ ○ /docs/mcp                                     175 B         107 kB
+├ ○ /history                                    18.4 kB         134 kB
+├ ○ /icon.png                                       0 B            0 B
+├ ○ /manifest.webmanifest                         408 B         103 kB
+├ ○ /opengraph-image.png                            0 B            0 B
+├ ○ /pricing                                       7 kB         128 kB
+├ ○ /robots.txt                                   408 B         103 kB
+├ ○ /sitemap.xml                                  408 B         103 kB
+├ ƒ /status                                     4.68 kB         108 kB
+├ ● /use-cases/[slug]                             175 B         107 kB
+├   ├ /use-cases/ecommerce-1
+├   ├ /use-cases/ecommerce-2
+├   ├ /use-cases/ecommerce-3
+├   └ [+124 more paths]
+└ ○ /wechat-login                               4.22 kB         107 kB
++ First Load JS shared by all                    103 kB
+  ├ chunks/1255-5fe68596fe147850.js               46 kB
+  ├ chunks/4bd1b696-f785427dddbba9fb.js         54.2 kB
+  └ other shared chunks (total)                 2.78 kB
+
+
+○  (Static)   prerendered as static content
+●  (SSG)      prerendered as static HTML (uses generateStaticParams)
+ƒ  (Dynamic)  server-rendered on demand
+

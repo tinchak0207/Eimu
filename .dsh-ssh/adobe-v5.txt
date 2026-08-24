@@ -1,0 +1,2 @@
+retrying operation=chat.completions attempt=1 reason=upstream_temporary status=451 type=status delay=2.17s strategy=round_robin
+INFO:     172.19.0.4:37198 - "POST /v1/chat/completions HTTP/1.1" 503 Service Unavailable

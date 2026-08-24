@@ -1,0 +1,3 @@
+grep: /opt/image-control-plane/.env.control-plane: Permission denied
+grep: /opt/image-control-plane/.env.control-plane: Permission denied
+ Container image-control-worker  Started

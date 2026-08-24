@@ -1,0 +1,1 @@
+ADOBE2API_BASE_URL=http://adobe2api:6001/v1

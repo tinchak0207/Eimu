@@ -1,0 +1,24 @@
+231:            logger.warning("proxy enabled for upstream requests: %s", self.proxy)
+233:            logger.warning("proxy disabled for upstream requests")
+283:        signature = (self.impersonate, self.proxy)
+19:    from curl_cffi.requests import Session as CurlSession
+20-except Exception:
+21-    CurlSession = None
+22-
+23-
+24-logger = logging.getLogger("adobe2api")
+--
+117:        self.proxy = ""
+118-        self.generate_timeout = 300
+119-        self.retry_enabled = True
+===USAGE===
+275:    def _requests_proxies(self) -> Optional[dict]:
+299:            kwargs["proxies"] = {"http": self.proxy, "https": self.proxy}
+314:            session.proxies.update(self._requests_proxies() or {})
+411:                    proxies=self._requests_proxies(),
+443:                    proxies=self._requests_proxies(),
+476:                    proxies=self._requests_proxies(),
+512:                    proxies=self._requests_proxies(),
+547:                    proxies=self._requests_proxies(),
+582:                    proxies=self._requests_proxies(),
+643:                proxies=self._requests_proxies(),

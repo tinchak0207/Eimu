@@ -1,0 +1,16 @@
+[2026-08-20T16:26:39.806Z] registering 10 accounts (pool has 77)
+[2026-08-20T16:26:45.953Z] page ready
+[2026-08-20T16:26:45.954Z] [1/10] 0685x3qb8dm@tinchak0207.xyz
+[2026-08-20T16:26:53.460Z]   ok verified=true
+[2026-08-20T16:27:04.618Z] [2/10] 07b38jbb0k4y@tinchak0207.xyz
+[2026-08-20T16:27:05.295Z]   429 backoff 30s (attempt 2)
+[2026-08-20T16:27:39.045Z]   429 backoff 60s (attempt 3)
+[2026-08-20T16:28:39.625Z]   429 backoff 120s (attempt 4)
+[2026-08-20T16:30:47.416Z]   ok verified=true
+[2026-08-20T16:30:58.021Z] [3/10] 0egmw2h7lws4@tinchak0207.xyz
+[2026-08-20T16:30:58.671Z]   429 backoff 30s (attempt 2)
+[2026-08-20T16:31:29.200Z]   429 backoff 60s (attempt 3)
+[2026-08-20T16:32:29.895Z]   429 backoff 120s (attempt 4)
+[2026-08-20T16:34:30.427Z]   429 backoff 300s (attempt 5)
+[2026-08-20T16:38:06.645Z] FATAL page.waitForTimeout: Target page, context or browser has been closed
+    at main (/home/lenovo/Desktop/image-app/.pixai-refresh/register-pixai-accounts.js:180:20)

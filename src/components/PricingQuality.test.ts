@@ -3,6 +3,17 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
+import {
+  PLANS,
+  PLAN_REFERENCE_COINS_PER_IMAGE,
+  formatCoins,
+  gptImage2EquivalentImages,
+  modelPriceRows,
+  planDiscountPercent,
+  planUnitsForCoins,
+} from "../lib/plans.ts";
+import { generationCoins } from "../lib/generation-model-catalog.ts";
+
 function read(relPath: string) {
   return readFileSync(join(process.cwd(), relPath), "utf8");
 }
@@ -94,6 +105,98 @@ test("the image zoom overlay backdrop is a real arbitrary color", () => {
   const source = read("src/components/ImageDisplay.tsx");
   assert.match(source, /bg-\[rgba\(31,34,48,0\.74\)\]/);
   assert.doesNotMatch(source, /bg-\[#1f2230\]\/74/);
+});
+
+test("model price table is derived from the billing catalog, never hand-written", () => {
+  // 换算展示的护身符：表里每一个数字都必须等于计费配置（catalog + 运行时覆写）
+  // 计算值。手写静态表一旦与实收脱钩，比价页就变成虚假宣传。
+  const rows = modelPriceRows();
+  assert.ok(rows.length >= 35, "模型单价表应覆盖全部上架模型（图像+视频），当前只有 " + rows.length + " 行");
+
+  const ids = new Set(rows.map((row) => row.id));
+  assert.equal(ids.size, rows.length, "模型单价表不允许重复行");
+
+  for (const row of rows) {
+    assert.equal(row.kind === "video", row.unit === "秒", row.id + " 的计价单位应与模型类型一致");
+    assert.ok(row.cells.length > 0, row.id + " 至少要有一个分辨率档位");
+    for (const cell of row.cells) {
+      const expected = generationCoins(
+        row.id,
+        row.kind === "video"
+          ? { resolution: cell.resolution, durationSeconds: 1 }
+          : { resolution: cell.resolution },
+      );
+      assert.equal(
+        cell.coins,
+        expected,
+        row.id + " " + cell.resolution + " 的展示单价必须等于计费配置计算值",
+      );
+      assert.ok(cell.coins > 0, row.id + " " + cell.resolution + " 单价必须为正数");
+    }
+  }
+
+  // 套餐换算基准与表格口径必须同源：gpt-image-2 1K 行 = 模块基准价。
+  const gptRow = rows.find((row) => row.id === "gpt-image-2");
+  assert.ok(gptRow, "单价表应包含套餐基准模型 gpt-image-2");
+  assert.equal(
+    gptRow.cells.find((cell) => cell.resolution === "1k")?.coins,
+    PLAN_REFERENCE_COINS_PER_IMAGE,
+  );
+});
+
+test("plan equivalent-image conversion equals the config-computed value", () => {
+  // 每档套餐「X 金币 ≈ Y 张 1024px 标准图」必须可由配置复算：
+  // Y = floor(coins / generationCoins("gpt-image-2", 1k))，且基准价被覆写时跟随。
+  const perImage = generationCoins("gpt-image-2", { resolution: "1k" });
+  for (const plan of PLANS) {
+    assert.equal(gptImage2EquivalentImages(plan), Math.floor(plan.coins / perImage));
+    assert.equal(gptImage2EquivalentImages(plan, 2), Math.floor(plan.coins / 2));
+    assert.ok(gptImage2EquivalentImages(plan) >= 1);
+  }
+  assert.equal(formatCoins(1), "1");
+  assert.equal(formatCoins(0.5), "0.5");
+  assert.equal(formatCoins(2.5), "2.5");
+  assert.equal(formatCoins(0.1), "0.1");
+  assert.equal(formatCoins(100), "100");
+});
+
+test("pricing page renders the live model price table, not stale copy", () => {
+  const source = read("src/components/PricingClient.tsx");
+  // 单价表数据来自 modelPriceRows()（渲染期求值 = 活数据）。
+  assert.match(source, /modelPriceRows\(\)/);
+  // 套餐换算基准价在渲染期从有效 catalog 取值，admin 改价后立即跟随。
+  assert.match(source, /generationCoins\("gpt-image-2", \{ resolution: "1k" \}\)/);
+  // 金币数字使用 coin-gold，不与普通正文混色。
+  assert.match(source, /#c9a84c/);
+  // 每档套餐明示 1024px 标准图口径。
+  assert.match(source, /1024px 标准图/);
+  // 长表允许滚动，不硬塞一屏。
+  assert.match(source, /max-h-\[30rem\] overflow-y-auto/);
+  // 卡内第二换算口径（旗舰高清）同为 catalog 活数据。
+  assert.match(source, /张旗舰高清 · \{FLAGSHIP_MODEL_LABEL\}/);
+  // 对照表各套餐列 = planUnitsForCoins(plan, cell.coins)，不允许手写张数。
+  assert.match(source, /planUnitsForCoins\(plan, cell\.coins\)/);
+  // 活动位组件存在但无数据时不渲染（不放假倒计时）。
+  assert.match(source, /ACTIVE_PRICING_PROMO && <ActivityBanner/);
+});
+
+test("in-card conversions and table columns all trace back to catalog prices", () => {
+  // 卡内第二口径（旗舰高清）与对照表各套餐列的取值函数都必须可由计费配置复算。
+  const flagship = generationCoins("gemini-3-image", { resolution: "1k" });
+  assert.ok(flagship > PLAN_REFERENCE_COINS_PER_IMAGE, "旗舰档单价应高于标准档");
+  for (const plan of PLANS) {
+    assert.equal(gptImage2EquivalentImages(plan, flagship), Math.floor(plan.coins / flagship));
+    assert.equal(planUnitsForCoins(plan, flagship), Math.floor(plan.coins / flagship));
+    assert.equal(planUnitsForCoins(plan, 0), 0);
+  }
+  // 折扣标只挂真实 anchorPrice 差价，且幅度在合理区间。
+  for (const plan of PLANS) {
+    const pct = planDiscountPercent(plan);
+    if (pct !== null) {
+      assert.ok(plan.anchorPrice > plan.price, plan.id + " 的折扣标要求原价高于现价");
+      assert.ok(pct >= 5 && pct <= 95, plan.id + " 的折扣百分比超出合理区间: " + pct);
+    }
+  }
 });
 
 test("toasts speak the site's liquid-glass material, not stock shadcn", () => {

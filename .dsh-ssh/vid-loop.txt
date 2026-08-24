@@ -1,0 +1,42 @@
+===
+            )
+
+        submit_elapsed = time.perf_counter() - request_started
+        submit_data = submit_resp.json()
+        poll_url = self._extract_result_link(submit_resp, submit_data)
+        if not poll_url:
+            raise AdobeRequestError("video submit succeeded but no poll url returned")
+        poll_url = self._normalize_video_poll_url(str(poll_url))
+        upstream_job_id = self._extract_job_id(poll_url)
+        if progress_cb:
+            try:
+                progress_cb(
+                    {
+                        "task_status": "IN_PROGRESS",
+                        "task_progress": 0.0,
+                        "upstream_job_id": upstream_job_id,
+                        "retry_after": int(submit_resp.headers.get("retry-after") or 0)
+                        or None,
+                    }
+                )
+            except Exception:
+                pass
+
+        start = time.time()
+        poll_started = time.perf_counter()
+        poll_count = 0
+        while True:
+            poll_count += 1
+            poll_resp = self._get(
+                poll_url, headers=self._poll_headers(token), timeout=60
+            )
+            if poll_resp.status_code in (401, 403):
+                raise AuthError("Token invalid or expired")
+            if poll_resp.status_code != 200:
+                if poll_resp.status_code in (408, 429, 451) or poll_resp.status_code >= 500:
+                    raise UpstreamTemporaryError(
+                        f"video poll failed: {poll_resp.status_code} {poll_resp.text[:300]}",
+                        status_code=poll_resp.status_code,
+                        error_type="status",
+                    )
+                raise AdobeRequestError(

@@ -1,0 +1,32 @@
+[
+  {
+    "email": "0254x359a7@tinchak0207.xyz",
+    "password": "bz2g7dq272",
+    "token": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJsZ2EiOjE3ODcyNDMwNTQsImV4cCI6MTc4Nzg0Nzg1NCwiaWF0IjoxNzg3MjQzMDU0LCJpc3MiOiJwaXhhaSIsInN1YiI6IjIwNDcyMTMwOTY3MjQyMzYzNjQiLCJqdGkiOiIyMDQ3MjEzMDk3MTQ3ODYxMDkwIn0.941Ex-8Hj8xBWusr_IhkFZK71gLPPAn0j07YHDnwTcvU6FHWQmFfqicOu0LEyvOGe7omBAJahn8taMLkjWneBw",
+    "user_id": "2047213096724236364",
+    "verified": true,
+    "genCodeOk": true,
+    "gotCode": true,
+    "status": "ok"
+  },
+  {
+    "email": "0685x3qb8dm@tinchak0207.xyz",
+    "status": "sign_in_failed",
+    "err": "http 429 {\"defined\":false,\"code\":\"TOO_MANY_REQUESTS\",\"status\":429,\"message\":\"too many requests\"}"
+  },
+  {
+    "email": "07b38jbb0k4y@tinchak0207.xyz",
+    "status": "sign_in_failed",
+    "err": "http 429 {\"defined\":false,\"code\":\"TOO_MANY_REQUESTS\",\"status\":429,\"message\":\"too many requests\"}"
+  },
+  {
+    "email": "0egmw2h7lws4@tinchak0207.xyz",
+    "status": "sign_in_failed",
+    "err": "http 429 {\"defined\":false,\"code\":\"TOO_MANY_REQUESTS\",\"status\":429,\"message\":\"too many requests\"}"
+  },
+  {
+    "email": "0gh3vgdrp@tinchak0207.xyz",
+    "status": "sign_in_failed",
+    "err": "http 429 {\"defined\":false,\"code\":\"TOO_MANY_REQUESTS\",\"status\":429,\"message\":\"too many requests\"}"
+  }
+]

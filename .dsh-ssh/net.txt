@@ -1,0 +1,7 @@
+[{"Subnet":"172.19.0.0/16","IPRange":"","Gateway":"172.19.0.1"}]
+===UFW===
+18432/tcp                  ALLOW       172.16.0.0/12              # firefly-relay from docker bridges
+18433/tcp                  ALLOW       172.16.0.0/12              # firefly-relay@2 from docker bridges
+8081/tcp                   ALLOW       172.16.0.0/12              # agent-harness gateway from docker bridges
+18091/tcp                  ALLOW       172.16.0.0/12              # kotone-bridge from docker bridges
+8780/tcp                   ALLOW       172.16.0.0/12

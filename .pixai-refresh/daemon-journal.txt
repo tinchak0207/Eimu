@@ -1,0 +1,6 @@
+Aug 20 21:47:51 archlinux node[78876]: [2026-08-20T13:47:51.615Z] refresh: exit=0
+Aug 20 21:47:51 archlinux node[78876]: [2026-08-20T13:47:51.615Z] refresh tail: [2026-08-20T13:46:00.689Z] pool: 76 accounts, 76 active | [2026-08-20T13:46:22.668Z] page loaded, starting refresh loop | [2026-08-20T13:47:51.526Z] done: 76/76 refreshed, pool file updated (expires 2026-08-27T13:47:51Z) | {"total":76,"ok":76,"applied":76,"expires":"2026-08-27T13:47:51Z"}
+Aug 20 21:48:02 archlinux node[78876]: [2026-08-20T13:48:02.143Z] push attempt 1 failed: fetch failed
+Aug 20 21:48:33 archlinux node[78876]: [2026-08-20T13:48:33.027Z] push: ok accounts=76 active=76
+Aug 20 21:48:33 archlinux node[78876]: [2026-08-20T13:48:33.028Z] cycle COMPLETE
+Aug 20 21:48:33 archlinux node[78876]: [2026-08-20T13:48:33.028Z] next cycle in 4320 min

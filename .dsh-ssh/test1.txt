@@ -1,0 +1,9 @@
+status   | attempt_count | completed_count 
+------------+---------------+-----------------
+ submitting |             1 |               0
+(1 row)
+
+  supplier_id  |   status   | det 
+---------------+------------+-----
+ env:adobe2api | submitting | 
+(1 row)

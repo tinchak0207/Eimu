@@ -1,6 +1,6 @@
 import { GENERATION_MODEL_CATALOG } from "./catalog";
 import { currentEffectiveCatalog } from "./pricing-overrides";
-import type { AspectRatio, OutputResolution, GenerationModelDefinition, GenerationCapabilityProjection, GenerationConfigInput, GenerationConfigNormalization } from "./types";
+import type { AspectRatio, OutputResolution, GenerationModelDefinition, GenerationCapabilityProjection, GenerationConfigInput, GenerationConfigNormalization, ModelKnowledge } from "./types";
 
 /** 某模型的基準（未覆寫）定義，admin UI 要顯示基準價。 */
 export function baseGenerationModel(modelId: string): GenerationModelDefinition | null {
@@ -9,6 +9,15 @@ export function baseGenerationModel(modelId: string): GenerationModelDefinition 
 
 export function generationModel(modelId: string): GenerationModelDefinition | null {
   return currentEffectiveCatalog()[modelId] ?? GENERATION_MODEL_CATALOG[modelId] ?? null;
+}
+
+/**
+ * 模型卡三字段（擅长/已知缺陷/建议）。无数据的模型返回 null——UI 侧据此
+ * 优雅降级，不渲染能力卡入口。走 generationModel() 同一条解析路径，
+ * pricing 覆写后的条目同样带 knowledge。
+ */
+export function modelKnowledge(modelId: string): ModelKnowledge | null {
+  return generationModel(modelId)?.knowledge ?? null;
 }
 
 /**

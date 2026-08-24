@@ -1,0 +1,6 @@
+START
+proxy disabled for upstream requests
+https://firefly.adobe.io/generate/ -> 404 (1.6s)
+https://firefly.adobe.io/api/v1/user/me -> 404 (0.4s)
+https://firefly.adobe.io/api/v1/credits -> 404 (0.5s)
+DONE

@@ -25,7 +25,7 @@ export const WORKSTATION_COMMANDS: readonly WorkstationCommandDefinition[] = [
   { id: "open_lora", label: "打开 LoRA", shortcut: "L", description: "打开参数中的 LoRA 资源库" },
   { id: "open_queue", label: "查看任务", shortcut: "Q", description: "打开任务队列与错误状态" },
   { id: "open_gallery", label: "查看成片", shortcut: "G", description: "打开成片库" },
-  { id: "reuse_result", label: "复用当前结果", shortcut: "R", description: "把当前结果放入参考图" },
+  { id: "reuse_result", label: "复用当前结果", shortcut: "R", description: "回填这张成片的完整配方并设为参考图" },
   { id: "download_result", label: "下载当前成片", shortcut: "D", description: "把画布上这张存到本地" },
   { id: "prev_result", label: "上一张", shortcut: "←", description: "在成片之间向前切换" },
   { id: "next_result", label: "下一张", shortcut: "→", description: "在成片之间向后切换" },

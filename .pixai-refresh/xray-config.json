@@ -1,0 +1,821 @@
+{
+ "log": {
+  "loglevel": "warning"
+ },
+ "inbounds": [
+  {
+   "tag": "in0",
+   "port": 24000,
+   "listen": "127.0.0.1",
+   "protocol": "http",
+   "settings": {}
+  },
+  {
+   "tag": "in1",
+   "port": 24001,
+   "listen": "127.0.0.1",
+   "protocol": "http",
+   "settings": {}
+  },
+  {
+   "tag": "in2",
+   "port": 24002,
+   "listen": "127.0.0.1",
+   "protocol": "http",
+   "settings": {}
+  },
+  {
+   "tag": "in3",
+   "port": 24003,
+   "listen": "127.0.0.1",
+   "protocol": "http",
+   "settings": {}
+  },
+  {
+   "tag": "in4",
+   "port": 24004,
+   "listen": "127.0.0.1",
+   "protocol": "http",
+   "settings": {}
+  },
+  {
+   "tag": "in5",
+   "port": 24005,
+   "listen": "127.0.0.1",
+   "protocol": "http",
+   "settings": {}
+  },
+  {
+   "tag": "in6",
+   "port": 24006,
+   "listen": "127.0.0.1",
+   "protocol": "http",
+   "settings": {}
+  },
+  {
+   "tag": "in7",
+   "port": 24007,
+   "listen": "127.0.0.1",
+   "protocol": "http",
+   "settings": {}
+  },
+  {
+   "tag": "in8",
+   "port": 24008,
+   "listen": "127.0.0.1",
+   "protocol": "http",
+   "settings": {}
+  },
+  {
+   "tag": "in9",
+   "port": 24009,
+   "listen": "127.0.0.1",
+   "protocol": "http",
+   "settings": {}
+  },
+  {
+   "tag": "in10",
+   "port": 24010,
+   "listen": "127.0.0.1",
+   "protocol": "http",
+   "settings": {}
+  },
+  {
+   "tag": "in11",
+   "port": 24011,
+   "listen": "127.0.0.1",
+   "protocol": "http",
+   "settings": {}
+  },
+  {
+   "tag": "in12",
+   "port": 24012,
+   "listen": "127.0.0.1",
+   "protocol": "http",
+   "settings": {}
+  },
+  {
+   "tag": "in13",
+   "port": 24013,
+   "listen": "127.0.0.1",
+   "protocol": "http",
+   "settings": {}
+  },
+  {
+   "tag": "in14",
+   "port": 24014,
+   "listen": "127.0.0.1",
+   "protocol": "http",
+   "settings": {}
+  },
+  {
+   "tag": "in15",
+   "port": 24015,
+   "listen": "127.0.0.1",
+   "protocol": "http",
+   "settings": {}
+  }
+ ],
+ "outbounds": [
+  {
+   "tag": "proxy0",
+   "protocol": "vless",
+   "settings": {
+    "vnext": [
+     {
+      "address": "edgetunnel.20136045.workers.dev",
+      "port": 443,
+      "users": [
+       {
+        "id": "785e350f-1e49-4d91-8a0c-c9822ce98828",
+        "encryption": "none",
+        "flow": ""
+       }
+      ]
+     }
+    ]
+   },
+   "streamSettings": {
+    "network": "ws",
+    "security": "tls",
+    "tlsSettings": {
+     "serverName": "edgetunnel.20136045.workers.dev",
+     "fingerprint": "chrome"
+    },
+    "wsSettings": {
+     "path": "/785e350f-1e49-4d91-8a0c-c9822ce98828/",
+     "headers": {
+      "Host": "edgetunnel.20136045.workers.dev"
+     }
+    }
+   },
+   "mux": {
+    "enabled": false
+   }
+  },
+  {
+   "tag": "proxy1",
+   "protocol": "vless",
+   "settings": {
+    "vnext": [
+     {
+      "address": "edgetunnel.20136045.workers.dev",
+      "port": 443,
+      "users": [
+       {
+        "id": "785e350f-1e49-4d91-8a0c-c9822ce98828",
+        "encryption": "none",
+        "flow": ""
+       }
+      ]
+     }
+    ]
+   },
+   "streamSettings": {
+    "network": "ws",
+    "security": "tls",
+    "tlsSettings": {
+     "serverName": "edgetunnel.20136045.workers.dev",
+     "fingerprint": "chrome"
+    },
+    "wsSettings": {
+     "path": "/785e350f-1e49-4d91-8a0c-c9822ce98828/",
+     "headers": {
+      "Host": "edgetunnel.20136045.workers.dev"
+     }
+    }
+   },
+   "mux": {
+    "enabled": false
+   }
+  },
+  {
+   "tag": "proxy2",
+   "protocol": "vless",
+   "settings": {
+    "vnext": [
+     {
+      "address": "edgetunnel.20136045.workers.dev",
+      "port": 443,
+      "users": [
+       {
+        "id": "785e350f-1e49-4d91-8a0c-c9822ce98828",
+        "encryption": "none",
+        "flow": ""
+       }
+      ]
+     }
+    ]
+   },
+   "streamSettings": {
+    "network": "ws",
+    "security": "tls",
+    "tlsSettings": {
+     "serverName": "edgetunnel.20136045.workers.dev",
+     "fingerprint": "chrome"
+    },
+    "wsSettings": {
+     "path": "/785e350f-1e49-4d91-8a0c-c9822ce98828/",
+     "headers": {
+      "Host": "edgetunnel.20136045.workers.dev"
+     }
+    }
+   },
+   "mux": {
+    "enabled": false
+   }
+  },
+  {
+   "tag": "proxy3",
+   "protocol": "vless",
+   "settings": {
+    "vnext": [
+     {
+      "address": "edgetunnel.20136045.workers.dev",
+      "port": 443,
+      "users": [
+       {
+        "id": "785e350f-1e49-4d91-8a0c-c9822ce98828",
+        "encryption": "none",
+        "flow": ""
+       }
+      ]
+     }
+    ]
+   },
+   "streamSettings": {
+    "network": "ws",
+    "security": "tls",
+    "tlsSettings": {
+     "serverName": "edgetunnel.20136045.workers.dev",
+     "fingerprint": "chrome"
+    },
+    "wsSettings": {
+     "path": "/785e350f-1e49-4d91-8a0c-c9822ce98828/",
+     "headers": {
+      "Host": "edgetunnel.20136045.workers.dev"
+     }
+    }
+   },
+   "mux": {
+    "enabled": false
+   }
+  },
+  {
+   "tag": "proxy4",
+   "protocol": "vless",
+   "settings": {
+    "vnext": [
+     {
+      "address": "edgetunnel.20136045.workers.dev",
+      "port": 443,
+      "users": [
+       {
+        "id": "785e350f-1e49-4d91-8a0c-c9822ce98828",
+        "encryption": "none",
+        "flow": ""
+       }
+      ]
+     }
+    ]
+   },
+   "streamSettings": {
+    "network": "ws",
+    "security": "tls",
+    "tlsSettings": {
+     "serverName": "edgetunnel.20136045.workers.dev",
+     "fingerprint": "chrome"
+    },
+    "wsSettings": {
+     "path": "/785e350f-1e49-4d91-8a0c-c9822ce98828/",
+     "headers": {
+      "Host": "edgetunnel.20136045.workers.dev"
+     }
+    }
+   },
+   "mux": {
+    "enabled": false
+   }
+  },
+  {
+   "tag": "proxy5",
+   "protocol": "vless",
+   "settings": {
+    "vnext": [
+     {
+      "address": "edgetunnel.20136045.workers.dev",
+      "port": 443,
+      "users": [
+       {
+        "id": "785e350f-1e49-4d91-8a0c-c9822ce98828",
+        "encryption": "none",
+        "flow": ""
+       }
+      ]
+     }
+    ]
+   },
+   "streamSettings": {
+    "network": "ws",
+    "security": "tls",
+    "tlsSettings": {
+     "serverName": "edgetunnel.20136045.workers.dev",
+     "fingerprint": "chrome"
+    },
+    "wsSettings": {
+     "path": "/785e350f-1e49-4d91-8a0c-c9822ce98828/",
+     "headers": {
+      "Host": "edgetunnel.20136045.workers.dev"
+     }
+    }
+   },
+   "mux": {
+    "enabled": false
+   }
+  },
+  {
+   "tag": "proxy6",
+   "protocol": "vless",
+   "settings": {
+    "vnext": [
+     {
+      "address": "edgetunnel.20136045.workers.dev",
+      "port": 443,
+      "users": [
+       {
+        "id": "785e350f-1e49-4d91-8a0c-c9822ce98828",
+        "encryption": "none",
+        "flow": ""
+       }
+      ]
+     }
+    ]
+   },
+   "streamSettings": {
+    "network": "ws",
+    "security": "tls",
+    "tlsSettings": {
+     "serverName": "edgetunnel.20136045.workers.dev",
+     "fingerprint": "chrome"
+    },
+    "wsSettings": {
+     "path": "/785e350f-1e49-4d91-8a0c-c9822ce98828/",
+     "headers": {
+      "Host": "edgetunnel.20136045.workers.dev"
+     }
+    }
+   },
+   "mux": {
+    "enabled": false
+   }
+  },
+  {
+   "tag": "proxy7",
+   "protocol": "vless",
+   "settings": {
+    "vnext": [
+     {
+      "address": "edgetunnel.20136045.workers.dev",
+      "port": 443,
+      "users": [
+       {
+        "id": "785e350f-1e49-4d91-8a0c-c9822ce98828",
+        "encryption": "none",
+        "flow": ""
+       }
+      ]
+     }
+    ]
+   },
+   "streamSettings": {
+    "network": "ws",
+    "security": "tls",
+    "tlsSettings": {
+     "serverName": "edgetunnel.20136045.workers.dev",
+     "fingerprint": "chrome"
+    },
+    "wsSettings": {
+     "path": "/785e350f-1e49-4d91-8a0c-c9822ce98828/",
+     "headers": {
+      "Host": "edgetunnel.20136045.workers.dev"
+     }
+    }
+   },
+   "mux": {
+    "enabled": false
+   }
+  },
+  {
+   "tag": "proxy8",
+   "protocol": "vless",
+   "settings": {
+    "vnext": [
+     {
+      "address": "edgetunnel.20136045.workers.dev",
+      "port": 443,
+      "users": [
+       {
+        "id": "785e350f-1e49-4d91-8a0c-c9822ce98828",
+        "encryption": "none",
+        "flow": ""
+       }
+      ]
+     }
+    ]
+   },
+   "streamSettings": {
+    "network": "ws",
+    "security": "tls",
+    "tlsSettings": {
+     "serverName": "edgetunnel.20136045.workers.dev",
+     "fingerprint": "chrome"
+    },
+    "wsSettings": {
+     "path": "/785e350f-1e49-4d91-8a0c-c9822ce98828/",
+     "headers": {
+      "Host": "edgetunnel.20136045.workers.dev"
+     }
+    }
+   },
+   "mux": {
+    "enabled": false
+   }
+  },
+  {
+   "tag": "proxy9",
+   "protocol": "vless",
+   "settings": {
+    "vnext": [
+     {
+      "address": "edgetunnel.20136045.workers.dev",
+      "port": 443,
+      "users": [
+       {
+        "id": "785e350f-1e49-4d91-8a0c-c9822ce98828",
+        "encryption": "none",
+        "flow": ""
+       }
+      ]
+     }
+    ]
+   },
+   "streamSettings": {
+    "network": "ws",
+    "security": "tls",
+    "tlsSettings": {
+     "serverName": "edgetunnel.20136045.workers.dev",
+     "fingerprint": "chrome"
+    },
+    "wsSettings": {
+     "path": "/785e350f-1e49-4d91-8a0c-c9822ce98828/",
+     "headers": {
+      "Host": "edgetunnel.20136045.workers.dev"
+     }
+    }
+   },
+   "mux": {
+    "enabled": false
+   }
+  },
+  {
+   "tag": "proxy10",
+   "protocol": "vless",
+   "settings": {
+    "vnext": [
+     {
+      "address": "edgetunnel.20136045.workers.dev",
+      "port": 443,
+      "users": [
+       {
+        "id": "785e350f-1e49-4d91-8a0c-c9822ce98828",
+        "encryption": "none",
+        "flow": ""
+       }
+      ]
+     }
+    ]
+   },
+   "streamSettings": {
+    "network": "ws",
+    "security": "tls",
+    "tlsSettings": {
+     "serverName": "edgetunnel.20136045.workers.dev",
+     "fingerprint": "chrome"
+    },
+    "wsSettings": {
+     "path": "/785e350f-1e49-4d91-8a0c-c9822ce98828/",
+     "headers": {
+      "Host": "edgetunnel.20136045.workers.dev"
+     }
+    }
+   },
+   "mux": {
+    "enabled": false
+   }
+  },
+  {
+   "tag": "proxy11",
+   "protocol": "vless",
+   "settings": {
+    "vnext": [
+     {
+      "address": "edgetunnel.20136045.workers.dev",
+      "port": 443,
+      "users": [
+       {
+        "id": "785e350f-1e49-4d91-8a0c-c9822ce98828",
+        "encryption": "none",
+        "flow": ""
+       }
+      ]
+     }
+    ]
+   },
+   "streamSettings": {
+    "network": "ws",
+    "security": "tls",
+    "tlsSettings": {
+     "serverName": "edgetunnel.20136045.workers.dev",
+     "fingerprint": "chrome"
+    },
+    "wsSettings": {
+     "path": "/785e350f-1e49-4d91-8a0c-c9822ce98828/",
+     "headers": {
+      "Host": "edgetunnel.20136045.workers.dev"
+     }
+    }
+   },
+   "mux": {
+    "enabled": false
+   }
+  },
+  {
+   "tag": "proxy12",
+   "protocol": "vless",
+   "settings": {
+    "vnext": [
+     {
+      "address": "edgetunnel.20136045.workers.dev",
+      "port": 443,
+      "users": [
+       {
+        "id": "785e350f-1e49-4d91-8a0c-c9822ce98828",
+        "encryption": "none",
+        "flow": ""
+       }
+      ]
+     }
+    ]
+   },
+   "streamSettings": {
+    "network": "ws",
+    "security": "tls",
+    "tlsSettings": {
+     "serverName": "edgetunnel.20136045.workers.dev",
+     "fingerprint": "chrome"
+    },
+    "wsSettings": {
+     "path": "/785e350f-1e49-4d91-8a0c-c9822ce98828/",
+     "headers": {
+      "Host": "edgetunnel.20136045.workers.dev"
+     }
+    }
+   },
+   "mux": {
+    "enabled": false
+   }
+  },
+  {
+   "tag": "proxy13",
+   "protocol": "vless",
+   "settings": {
+    "vnext": [
+     {
+      "address": "edgetunnel.20136045.workers.dev",
+      "port": 443,
+      "users": [
+       {
+        "id": "785e350f-1e49-4d91-8a0c-c9822ce98828",
+        "encryption": "none",
+        "flow": ""
+       }
+      ]
+     }
+    ]
+   },
+   "streamSettings": {
+    "network": "ws",
+    "security": "tls",
+    "tlsSettings": {
+     "serverName": "edgetunnel.20136045.workers.dev",
+     "fingerprint": "chrome"
+    },
+    "wsSettings": {
+     "path": "/785e350f-1e49-4d91-8a0c-c9822ce98828/",
+     "headers": {
+      "Host": "edgetunnel.20136045.workers.dev"
+     }
+    }
+   },
+   "mux": {
+    "enabled": false
+   }
+  },
+  {
+   "tag": "proxy14",
+   "protocol": "vless",
+   "settings": {
+    "vnext": [
+     {
+      "address": "edgetunnel.20136045.workers.dev",
+      "port": 443,
+      "users": [
+       {
+        "id": "785e350f-1e49-4d91-8a0c-c9822ce98828",
+        "encryption": "none",
+        "flow": ""
+       }
+      ]
+     }
+    ]
+   },
+   "streamSettings": {
+    "network": "ws",
+    "security": "tls",
+    "tlsSettings": {
+     "serverName": "edgetunnel.20136045.workers.dev",
+     "fingerprint": "chrome"
+    },
+    "wsSettings": {
+     "path": "/785e350f-1e49-4d91-8a0c-c9822ce98828/",
+     "headers": {
+      "Host": "edgetunnel.20136045.workers.dev"
+     }
+    }
+   },
+   "mux": {
+    "enabled": false
+   }
+  },
+  {
+   "tag": "proxy15",
+   "protocol": "vless",
+   "settings": {
+    "vnext": [
+     {
+      "address": "edgetunnel.20136045.workers.dev",
+      "port": 443,
+      "users": [
+       {
+        "id": "785e350f-1e49-4d91-8a0c-c9822ce98828",
+        "encryption": "none",
+        "flow": ""
+       }
+      ]
+     }
+    ]
+   },
+   "streamSettings": {
+    "network": "ws",
+    "security": "tls",
+    "tlsSettings": {
+     "serverName": "edgetunnel.20136045.workers.dev",
+     "fingerprint": "chrome"
+    },
+    "wsSettings": {
+     "path": "/785e350f-1e49-4d91-8a0c-c9822ce98828/",
+     "headers": {
+      "Host": "edgetunnel.20136045.workers.dev"
+     }
+    }
+   },
+   "mux": {
+    "enabled": false
+   }
+  },
+  {
+   "tag": "direct",
+   "protocol": "freedom"
+  },
+  {
+   "tag": "block",
+   "protocol": "blackhole"
+  }
+ ],
+ "routing": {
+  "rules": [
+   {
+    "type": "field",
+    "inboundTag": [
+     "in0"
+    ],
+    "outboundTag": "proxy0"
+   },
+   {
+    "type": "field",
+    "inboundTag": [
+     "in1"
+    ],
+    "outboundTag": "proxy1"
+   },
+   {
+    "type": "field",
+    "inboundTag": [
+     "in2"
+    ],
+    "outboundTag": "proxy2"
+   },
+   {
+    "type": "field",
+    "inboundTag": [
+     "in3"
+    ],
+    "outboundTag": "proxy3"
+   },
+   {
+    "type": "field",
+    "inboundTag": [
+     "in4"
+    ],
+    "outboundTag": "proxy4"
+   },
+   {
+    "type": "field",
+    "inboundTag": [
+     "in5"
+    ],
+    "outboundTag": "proxy5"
+   },
+   {
+    "type": "field",
+    "inboundTag": [
+     "in6"
+    ],
+    "outboundTag": "proxy6"
+   },
+   {
+    "type": "field",
+    "inboundTag": [
+     "in7"
+    ],
+    "outboundTag": "proxy7"
+   },
+   {
+    "type": "field",
+    "inboundTag": [
+     "in8"
+    ],
+    "outboundTag": "proxy8"
+   },
+   {
+    "type": "field",
+    "inboundTag": [
+     "in9"
+    ],
+    "outboundTag": "proxy9"
+   },
+   {
+    "type": "field",
+    "inboundTag": [
+     "in10"
+    ],
+    "outboundTag": "proxy10"
+   },
+   {
+    "type": "field",
+    "inboundTag": [
+     "in11"
+    ],
+    "outboundTag": "proxy11"
+   },
+   {
+    "type": "field",
+    "inboundTag": [
+     "in12"
+    ],
+    "outboundTag": "proxy12"
+   },
+   {
+    "type": "field",
+    "inboundTag": [
+     "in13"
+    ],
+    "outboundTag": "proxy13"
+   },
+   {
+    "type": "field",
+    "inboundTag": [
+     "in14"
+    ],
+    "outboundTag": "proxy14"
+   },
+   {
+    "type": "field",
+    "inboundTag": [
+     "in15"
+    ],
+    "outboundTag": "proxy15"
+   }
+  ]
+ }
+}

@@ -1,10 +1,11 @@
 "use client";
 
 import Image from "next/image";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowUpRight, ChevronDown, ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ArrowUpRight, ChevronDown, ChevronLeft, ChevronRight, Copy, Sparkles } from "lucide-react";
 import { CaseGlassWebGL } from "@/components/CaseGlassWebGL";
-import { SHOWCASE_CASES } from "@/lib/showcase-cases";
+import { SHOWCASE_CASES, type ShowcaseCase } from "@/lib/showcase-cases";
+import { mergeShowcaseCases, readUserShowcaseCases } from "@/lib/showcase-user-cases";
 import { commitSteps, detent, undetent } from "@/lib/carousel-detent";
 import type { StylePreset } from "@/lib/prompt-enhancer";
 import { cn } from "@/lib/utils";
@@ -12,10 +13,12 @@ import "./case-showcase.css";
 
 interface CaseShowcaseProps {
   onUsePrompt: (prompt: string, style: StylePreset) => void;
+  /**
+   * 「用此工作流打开」：把案例携带的完整配方（ShowcaseRecipe）交给上层，
+   * 由上层走 workflow-recall 通道灌入专业工作台。案例没有配方时不渲染按钮。
+   */
+  onOpenWorkflow?: (item: ShowcaseCase) => void;
 }
-
-const COUNT = SHOWCASE_CASES.length;
-const STEP = 360 / COUNT;
 /** 卡面转角相对环角的压缩比。1 = 严格贴合圆周切线，但边卡会侧得几乎只剩一条线；
  *  0.82 是「还能看清是什么图」和「有空间纵深」之间的平衡（coverflow 的经典做法）。*/
 const TILT = 0.82;
@@ -68,9 +71,10 @@ function wrap(deg: number) {
   return ((((deg + 180) % 360) + 360) % 360) - 180;
 }
 
-/** 转到第 index 格时，选与当前值同侧最近的那个等价角 —— 永远走近路，不倒着绕一圈。 */
-function nearestAngleFor(index: number, current: number) {
-  const base = index * STEP;
+/** 转到第 index 格时，选与当前值同侧最近的那个等价角 —— 永远走近路，不倒着绕一圈。
+ *  step 作参数传入：案例环的格数会随「用户投稿」合入变化，STEP 只在组件内成立。 */
+function nearestAngleFor(index: number, current: number, step: number) {
+  const base = index * step;
   return base + Math.round((current - base) / 360) * 360;
 }
 
@@ -139,9 +143,10 @@ function computeFrame(phi: number) {
 }
 
 /** θ=0 时第 index 张卡的位姿，用于首帧和无 JS 状态。
- *  没有这一步，六张卡会先叠在正中央闪一帧，水合后才散开。 */
-function staticFrame(index: number) {
-  const f = computeFrame(wrap(index * STEP));
+ *  没有这一步，六张卡会先叠在正中央闪一帧，水合后才散开。
+ *  step 作参数传入：用户投稿案例合入后格数变化，STATIC_FRAMES 随 cases 重建。 */
+function staticFrame(index: number, step: number) {
+  const f = computeFrame(wrap(index * step));
   return {
     transform: `translate3d(calc(var(--case-radius) * ${f.xF.toFixed(4)}), ${f.lift.toFixed(2)}px, calc(var(--case-radius) * ${f.zF.toFixed(4)})) rotateY(${f.tilt.toFixed(2)}deg)`,
     opacity: f.opacity.toFixed(3),
@@ -158,9 +163,7 @@ function staticFrame(index: number) {
   } as React.CSSProperties;
 }
 
-/* 模块级常量：每次 render 都是同一个对象，React 的 style diff 直接跳过，
-   不会覆写 paint() 每帧写进 node.style 的那份值。 */
-const STATIC_FRAMES = SHOWCASE_CASES.map((_, index) => staticFrame(index));
+
 
 function rgbTriple(hex: string) {
   const value = Number.parseInt(hex.replace("#", ""), 16);
@@ -169,7 +172,47 @@ function rgbTriple(hex: string) {
 
 const useIsoLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
-export function CaseShowcase({ onUsePrompt }: CaseShowcaseProps) {
+/** 案例提示词明文（PromptHero 式可读可复制）。随 <details key> 每换案例重挂，复制态自动复位。 */
+function CasePromptReveal({ prompt }: { prompt: string }) {
+  const [copied, setCopied] = useState(false);
+  const onCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(prompt);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch {
+      // 剪贴板不可用（非安全上下文/权限拒绝）：保持按钮原样，不抛错。
+    }
+  };
+  return (
+    <div className="mt-2 flex items-start justify-between gap-3">
+      <p className="min-w-0 break-words text-[rgba(0,0,0,0.66)]">{prompt}</p>
+      <button
+        type="button"
+        onClick={onCopy}
+        aria-label={copied ? "已复制提示词" : "复制提示词"}
+        className="inline-flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-full bg-[rgba(0,122,255,0.10)] px-3 text-ios-footnote font-medium text-[#007AFF] transition-colors duration-200 hover:bg-[rgba(0,122,255,0.16)]"
+      >
+        <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+        {copied ? "已复制" : "复制"}
+      </button>
+    </div>
+  );
+}
+
+export function CaseShowcase({ onUsePrompt, onOpenWorkflow }: CaseShowcaseProps) {
+  /* 案例环数据：官方六例 + 本机发布的「用户投稿」案例（showcase-user-cases）。
+     用户案例合入后每格角度改变，由下方的 reset effect 把环拉回第一张。 */
+  const [cases, setCases] = useState<ShowcaseCase[]>(SHOWCASE_CASES);
+  const COUNT = cases.length;
+  const STEP = 360 / COUNT;
+  /* 静态帧（首帧/无 JS）：cases 不变时引用稳定，React 的 style diff 直接跳过，
+     不会覆写 paint() 每帧写进 node.style 的那份值。 */
+  const STATIC_FRAMES = useMemo(
+    () => cases.map((_, index) => staticFrame(index, STEP)),
+    [cases, STEP],
+  );
+
   const sectionRef = useRef<HTMLElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const glowRef = useRef<HTMLDivElement | null>(null);
@@ -262,7 +305,7 @@ export function CaseShowcase({ onUsePrompt }: CaseShowcaseProps) {
 
     const travel = (section?.offsetHeight ?? 640) + window.innerHeight;
     degPerPxRef.current = (compact ? SWEEP_COMPACT : SWEEP_WIDE) / Math.max(travel, 1);
-  }, []);
+  }, [STEP]);
 
   /** 每帧唯一的写 DOM 处。React 不参与：它只在「正面换人」时 render 一次。 */
   const paint = useCallback((angle: number) => {
@@ -322,12 +365,12 @@ export function CaseShowcase({ onUsePrompt }: CaseShowcaseProps) {
     if (frontIndex !== frontRef.current) {
       frontRef.current = frontIndex;
       setFront(frontIndex);
-      glowRef.current?.style.setProperty("--case-glow-rgb", rgbTriple(SHOWCASE_CASES[frontIndex].glow));
+      glowRef.current?.style.setProperty("--case-glow-rgb", rgbTriple(cases[frontIndex].glow));
       /* 面板文案比圆点晚一步落地：快速转两圈时不该把六个标题全闪一遍。 */
       if (panelTimerRef.current) clearTimeout(panelTimerRef.current);
       panelTimerRef.current = setTimeout(() => setPanel(frontIndex), PANEL_MS);
     }
-  }, []);
+  }, [cases]);
 
   /* ── 弹簧积分器 ──
      ẍ = −k(x−target) − c·ẋ，c = 2ζ√k。ζ<1 让末端有极轻的 overshoot，
@@ -389,7 +432,7 @@ export function CaseShowcase({ onUsePrompt }: CaseShowcaseProps) {
     targetRef.current = landing;
     springRef.current = SPRING_SETTLE;
     schedule();
-  }, [schedule]);
+  }, [schedule, STEP]);
 
   /** 连续输入（滚动 / 触控板横扫）：接收增量。
    *  原始角度累加进 rawRef，屏幕上呈现的是 detent() 拧过的版本 —— 环在卡位附近发黏、
@@ -408,7 +451,7 @@ export function CaseShowcase({ onUsePrompt }: CaseShowcaseProps) {
       settleTimerRef.current = null;
       commit(0); // 滚动的惯性已经体现在走过的距离里，不再额外外推
     }, SETTLE_MS);
-  }, [schedule, commit]);
+  }, [schedule, commit, STEP]);
 
   /** 离散跳转（箭头 / 圆点 / 键盘）：软弹簧，末端极轻回弹。 */
   const snap = useCallback((value: number) => {
@@ -421,7 +464,7 @@ export function CaseShowcase({ onUsePrompt }: CaseShowcaseProps) {
     targetRef.current = value;
     springRef.current = SPRING_SETTLE;
     schedule();
-  }, [schedule]);
+  }, [schedule, STEP]);
 
   /** 拖曳期间手指就是位置本身：不过弹簧、不排 rAF，直接写角度立刻画。
    *  这是「跟手延迟」的解 —— 原本拖曳也要过一遍插值，手和卡永远隔着 ~80ms。
@@ -437,19 +480,19 @@ export function CaseShowcase({ onUsePrompt }: CaseShowcaseProps) {
     angleRef.current = warped;
     targetRef.current = warped;
     paint(warped);
-  }, [paint]);
+  }, [paint, STEP]);
 
   const goTo = useCallback((index: number) => {
-    snap(nearestAngleFor(index, targetRef.current));
+    snap(nearestAngleFor(index, targetRef.current, STEP));
   }, [snap]);
 
   const step = useCallback((dir: number) => {
     snap(Math.round(targetRef.current / STEP) * STEP + dir * STEP);
-  }, [snap]);
+  }, [snap, STEP]);
 
   useIsoLayoutEffect(() => {
     measure();
-    glowRef.current?.style.setProperty("--case-glow-rgb", rgbTriple(SHOWCASE_CASES[0].glow));
+    glowRef.current?.style.setProperty("--case-glow-rgb", rgbTriple(cases[0].glow));
     paintedRef.current = Number.NaN;
     paint(angleRef.current);
 
@@ -476,6 +519,30 @@ export function CaseShowcase({ onUsePrompt }: CaseShowcaseProps) {
     query.addEventListener("change", sync);
     return () => query.removeEventListener("change", sync);
   }, []);
+
+  /* 用户投稿案例合入（仅本机 localStorage）：历史里「发布为案例」后，回到首页即进入案例环。 */
+  useEffect(() => {
+    const user = readUserShowcaseCases();
+    if (user.length) setCases(mergeShowcaseCases(SHOWCASE_CASES, user));
+  }, []);
+
+  /* 案例数量变化后每格角度改变：环回到第一张，避免旧角度在新格距下错位落格。 */
+  useEffect(() => {
+    if (cases === SHOWCASE_CASES) return;
+    targetRef.current = 0;
+    angleRef.current = 0;
+    rawRef.current = 0;
+    originRef.current = 0;
+    velRef.current = 0;
+    paintedRef.current = Number.NaN;
+    if (frontRef.current !== 0) {
+      frontRef.current = 0;
+      setFront(0);
+      setPanel(0);
+    }
+    glowRef.current?.style.setProperty("--case-glow-rgb", rgbTriple(cases[0].glow));
+    paint(0);
+  }, [cases, paint]);
 
   /* 只在这一段进入视野时累计滚动量；离开视野后滚动与它无关。 */
   useEffect(() => {
@@ -604,7 +671,7 @@ export function CaseShowcase({ onUsePrompt }: CaseShowcaseProps) {
     goTo(index);
   };
 
-  const active = SHOWCASE_CASES[panel];
+  const active = cases[panel];
 
   return (
     <section className="case-viewport page-shell pb-24" aria-labelledby="case-showcase-title" ref={sectionRef}>
@@ -635,7 +702,7 @@ export function CaseShowcase({ onUsePrompt }: CaseShowcaseProps) {
         onKeyDown={onKeyDown}
       >
         <div ref={glowRef} className="case-glow" aria-hidden="true" />
-        {SHOWCASE_CASES.map((item, index) => (
+        {cases.map((item, index) => (
           <div
             key={item.id}
             ref={(node) => {
@@ -659,7 +726,9 @@ export function CaseShowcase({ onUsePrompt }: CaseShowcaseProps) {
                 ② 元件靠 host.parentElement 讀卡片的版面尺寸與四角半徑。
                 就緒後它會給 .case-slab 掛上 data-glass="on"，把下面那一疊
                 矩形的 HTML 圖層收掉。 */}
-            {item.image && (
+            {/* 用户投稿的成片来自任意图床/历史 URL：跨域纹理会污染 WebGL 上下文，
+                只走 HTML 图层；官方精选才上 GL 折射。 */}
+            {item.image && item.source !== "community" && (
               <CaseGlassWebGL
                 enabled={index === front || glassAll}
                 imageSrc={item.image}
@@ -675,14 +744,26 @@ export function CaseShowcase({ onUsePrompt }: CaseShowcaseProps) {
               <div className="case-media">
                 <div className="case-photo">
                   {item.image ? (
-                    <Image
-                      src={item.image}
-                      alt={item.title}
-                      fill
-                      sizes="(min-width: 768px) 580px, 78vw"
-                      className="object-cover"
-                      priority={index === 0}
-                    />
+                    item.source === "community" ? (
+                      /* 投稿 URL 不受 next/image 域名配置约束，直出 <img>。 */
+                      /* eslint-disable-next-line @next/next/no-img-element */
+                      <img
+                        src={item.image}
+                        alt={item.title}
+                        className="absolute inset-0 h-full w-full object-cover"
+                        loading="lazy"
+                        decoding="async"
+                      />
+                    ) : (
+                      <Image
+                        src={item.image}
+                        alt={item.title}
+                        fill
+                        sizes="(min-width: 768px) 580px, 78vw"
+                        className="object-cover"
+                        priority={index === 0}
+                      />
+                    )
                   ) : (
                     <div className={cn("absolute inset-0 bg-gradient-to-br", item.gradient)} />
                   )}
@@ -714,6 +795,17 @@ export function CaseShowcase({ onUsePrompt }: CaseShowcaseProps) {
         <p className="sr-only" aria-live="polite">{`第 ${panel + 1} 张，共 ${COUNT} 张：${active.title}`}</p>
 
         <div className="mt-5 flex flex-col items-center gap-3">
+          {onOpenWorkflow && active.recipe && (
+            <button
+              type="button"
+              onClick={() => onOpenWorkflow(active)}
+              title="把这个案例的完整配方（提示词、模型、版位、参数）灌入专业工作台"
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[9999px] bg-[#2d3142] px-6 py-5 text-ios-footnote font-semibold text-white transition-colors duration-300 hover:bg-[#3a4152] focus:outline-none focus:ring-2 focus:ring-[rgba(45,49,66,0.32)]"
+            >
+              用此工作流打开
+              <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
+            </button>
+          )}
           <button
             type="button"
             onClick={() => onUsePrompt(active.prompt, active.style)}
@@ -727,7 +819,7 @@ export function CaseShowcase({ onUsePrompt }: CaseShowcaseProps) {
               <span>查看提示词</span>
               <ChevronDown className="h-4 w-4 transition group-open/details:rotate-180" aria-hidden="true" />
             </summary>
-            <p className="mt-2 text-[rgba(0,0,0,0.66)]">{active.prompt}</p>
+            <CasePromptReveal prompt={active.prompt} />
           </details>
         </div>
       </div>
@@ -737,7 +829,7 @@ export function CaseShowcase({ onUsePrompt }: CaseShowcaseProps) {
           <ChevronLeft className="h-5 w-5" aria-hidden="true" />
         </button>
         <div className="flex items-center gap-1">
-          {SHOWCASE_CASES.map((item, index) => (
+          {cases.map((item, index) => (
             <button
               key={item.id}
               type="button"

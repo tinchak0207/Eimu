@@ -1,0 +1,9 @@
+supplier_id  |           label           | enabled | health_status | cooldown_until |  token_source  | refresh_status | success_rate_5m |      health_observed_at       
+---------------+---------------------------+---------+---------------+----------------+----------------+----------------+-----------------+-------------------------------
+ env:adobe2api | adobe2api default account | t       | healthy       |                | auto_refresh   | healthy        |               0 | 2026-08-21 07:18:15.917196+00
+ env:dreamina  | default                   | t       | disabled      |                |                | healthy        |               0 | 2026-08-17 19:50:07.874761+00
+ env:fallback  | fallback default account  | t       | disabled      |                | not_applicable | healthy        |               0 | 2026-07-29 12:04:45.815606+00
+ env:pixai     | pixai default account     | t       | healthy       |                | not_applicable | healthy        |               1 | 2026-08-20 19:51:41.157178+00
+ env:primary   | primary default account   | t       | healthy       |                | not_applicable | healthy        |               1 | 2026-07-29 11:12:54.045+00
+ env:sub2api   | sub2api default account   | t       | healthy       |                | not_applicable | healthy        |               0 | 2026-08-21 07:07:08.93901+00
+(6 rows)

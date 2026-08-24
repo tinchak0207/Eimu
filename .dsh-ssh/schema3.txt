@@ -1,0 +1,60 @@
+//  2) ops 下發：工具 POST /internal/canvas/dispatch-ops → 經該 session 的 SSE 發
+//     canvas.ops 事件 { request_id, ops, label? }，掛起等前端回執；前端執行後
+//     POST /agent/v1/sessions/:id/canvas/ops-result（loopback 等價 /internal/canvas/ops-result）
+//     resolve 對應 pending。逾時（預設 30s）回 OPS_TIMEOUT。
+
+const CANVAS_STATE_MAX_BYTES = 512 * 1024
+const CANVAS_STATE_TTL_MS = 30 * 60 * 1000
+const CANVAS_OPS_TIMEOUT_MS = Number.parseInt(process.env.CANVAS_OPS_TIMEOUT_MS || "30000", 10) || 30_000
+const CANVAS_OPS_MAX = 100
+const CANVAS_OP_TYPES = new Set([
+  "add_node",
+  "update_node",
+  "delete_nodes",
+  "connect_nodes",
+  "delete_connections",
+  "select_nodes",
+  "set_viewport",
+  "run_generation",
+])
+
+interface CanvasSnapshotEntry {
+  state: unknown
+  updatedAt: number
+}
+
+// 畫布快照存放。key 統一收斂到 gateway sessionId（session 可解析時），
+// 讓 opencode session id / gateway session id 兩種呼叫方命中同一份。
+const canvasStates = new Map<string, CanvasSnapshotEntry>()
+
+function canvasKeyFor(sessionId: string): string {
+  const state = resolveSession(sessionId)
+  return state ? state.sessionId : sessionId
+}
+
+// 惰性 TTL 清理：每次讀寫順手掃（條目數 = 活躍畫布數，量級小）。
+function sweepCanvasStates(): void {
+  const now = Date.now()
+  for (const [k, v] of canvasStates) {
+    if (now - v.updatedAt > CANVAS_STATE_TTL_MS) canvasStates.delete(k)
+  }
+}
+
+function storeCanvasState(
+  sessionId: string,
+  stateValue: unknown,
+): { ok: true; bytes: number; updatedAt: number } | { ok: false; status: number; message: string } {
+  let bytes = 0
+  try {
+    bytes = Buffer.byteLength(JSON.stringify(stateValue), "utf-8")
+  } catch {
+    return { ok: false, status: 400, message: "state is not serializable" }
+  }
+  if (bytes > CANVAS_STATE_MAX_BYTES) {
+    return { ok: false, status: 413, message: `state exceeds ${CANVAS_STATE_MAX_BYTES} bytes` }
+  }
+  sweepCanvasStates()
+  const updatedAt = Date.now()
+  canvasStates.set(canvasKeyFor(sessionId), { state: stateValue, updatedAt })
+  return { ok: true, bytes, updatedAt }
+}

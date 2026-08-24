@@ -1,0 +1,71 @@
+raise HTTPException(status_code=status_code, detail=detail)
+        except HTTPException as exc:
+            err_code = report_error(
+                request,
+                error=str(exc.detail),
+                status_code=int(exc.status_code or 500),
+                error_type=(
+                    "invalid_request_error"
+                    if 400 <= int(exc.status_code or 500) < 500
+                    else "server_error"
+                ),
+                include_traceback=False,
+            )
+            _append_attempt_log(
+                request=request,
+                operation=operation_name,
+                token_meta=token_meta,
+                attempt=attempt,
+                attempt_started=attempt_started,
+                status_code=int(exc.status_code or 500),
+                error=str(exc.detail),
+                error_code=err_code,
+                task_status_override="FAILED",
+            )
+            raise
+        except Exception as exc:
+            err_code = report_error(
+                request,
+                error=exc,
+                status_code=500,
+                error_type="server_error",
+                include_traceback=True,
+            )
+            _append_attempt_log(
+                request=request,
+                operation=operation_name,
+                token_meta=token_meta,
+                attempt=attempt,
+                attempt_started=attempt_started,
+                status_code=500,
+                error="Unhandled runtime error",
+                error_code=err_code,
+                task_status_override="FAILED",
+            )
+            raise
+        finally:
+            if lease is not None:
+                lease.__exit__(None, None, None)
+
+        if retryable:
+            logger.warning(
+                "retrying operation=%s attempt=%s reason=%s delay=%.2fs strategy=%s",
+                operation_name,
+                attempt,
+                retry_reason,
+                delay,
+                client.token_rotation_strategy,
+            )
+            _set_request_task_progress(
+                request,
+                task_status="IN_PROGRESS",
+                error=retry_error_text or f"retry attempt {attempt}: {retry_reason}",
+            )
+            if delay > 0:
+                time.sleep(delay)
+            continue
+        break
+
+    if last_exc is not None:
+        if isinstance(last_exc, AuthError):
+            raise HTTPException(

@@ -1,0 +1,27 @@
+{"nodes":[{"tag":"rot-9-104-20-2-87","name":"rot-9-104.20.2.87","uri":"vless://785e350f-1e49-4d91-8a0c-c9822ce98828@104.20.2.87:443?encryption=none\u0026fp=chrome\u0026host=edgetunnel.20136045.workers.dev\u0026path=%2F\u0026security=tls\u0026sni=edgetunnel.20136045.workers.dev\u0026type=ws#104.20.2.87","mode":"multi-port","listen_address":"0.0.0.0","port":24009,"region":"other","country":"Unknown","failure_count":37,"success_count":36,"blacklisted":false,"blacklisted_until":"0001-01-01T00:00:00Z","active_connections":0,"last_error":"read response: EOF","last_failure":"2026-08-21T19:49:56.39526
+===PORTS===
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Easy Proxies</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<style>
+:root{
+  --bg:#f4f7f9;
+  --panel:#ffffff;
+  --panel-soft:#f7f9fb;
+  --line:#dce3e8;
+  --line-strong:#b9c7d0;
+  --text:#17242d;
+  --muted:#687783;
+  --blue:#2563eb;
+  --blue-deep:#1d4ed8;
+  --green:#0f9f6e;
+  --green-soft:#e8f8f2;
+  --red:#d64545;
+  --red-soft:#fff0ef;
+  --amber:#b7791f;
+  --amber-soft:#fff8e8;
+  --shadow:0 10px 30px rgba(20,30,4

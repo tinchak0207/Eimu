@@ -1,0 +1,57 @@
+345:    def _submit_headers(
+365:    def _submit_headers_minimal(self, token: str) -> dict:
+403:    def _post_json(self, url: str, headers: dict, payload: dict):
+468:    def _post_bytes(self, url: str, headers: dict, payload: bytes):
+540:    def _get(self, url: str, headers: dict, timeout: int = 60):
+610:    def _get_json(self, url: str, headers: dict, timeout: int = 60) -> Any:
+===
+540:    def _get(self, url: str, headers: dict, timeout: int = 60):
+541-        session = self._session()
+542-        if session is None:
+543-            try:
+544-                return self._requests_session().get(
+545-                    url,
+546-                    headers=headers,
+547-                    timeout=timeout,
+548-                    proxies=self._requests_proxies(),
+549-                )
+550-            except requests.Timeout as exc:
+551-                raise UpstreamTemporaryError(
+552-                    f"upstream timeout: {exc}", error_type="timeout"
+===VIDEO-SUBMIT===
+            reference_mode=reference_mode,
+        )
+        channel = str(video_conf.get("channel") or "3p").lower()
+        if channel == "ugs":
+            submit_url = self.ugs_video_submit_url
+        elif channel == "native":
+            submit_url = self.firefly_video_submit_url
+        else:
+            submit_url = self.video_submit_url
+        submit_resp = self._post_json(
+            submit_url,
+            headers=self._video_submit_headers(token, arp_session_id=arp_session_id),
+            payload=payload,
+        )
+
+        if submit_resp.status_code in (401, 403):
+            access_error = submit_resp.headers.get("x-access-error")
+            if access_error == "taste_exhausted":
+                raise QuotaExhaustedError("Adobe quota exhausted for this account")
+            raise AuthError("Token invalid or expired")
+
+        if submit_resp.status_code != 200:
+            logger.error(
+                "video submit failed status=%s body=%s",
+                submit_resp.status_code,
+                submit_resp.text[:500],
+            )
+            if submit_resp.status_code in (408, 429, 451) or submit_resp.status_code >= 500:
+                raise UpstreamTemporaryError(
+                    f"video submit failed: {submit_resp.status_code} {submit_resp.text[:300]}",
+                    status_code=submit_resp.status_code,
+                    error_type="status",
+                )
+            raise AdobeRequestError(
+                f"video submit failed: {submit_resp.status_code} {submit_resp.text[:300]}"
+            )

@@ -1,0 +1,13 @@
+/opt/image-control-plane/app/src/lib/routing-telemetry.ts:0
+/opt/image-control-plane/app/src/lib/generation-core/worker-service.ts:4
+---
+---
+/app/src/lib/routing-telemetry.ts:0
+/app/src/lib/generation-core/worker-service.ts:4
+---
+-rw-r--r--    1 root     root        260559 Aug 17 16:41 /app/node_modules/.package-lock.json
+{
+  "name": "ai-sdk-image-generator",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {

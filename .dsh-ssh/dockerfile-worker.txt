@@ -1,0 +1,23 @@
+13-# Durable generation work must not live in the Next.js HTTP container. This target
+14-# keeps the same source/dependencies but runs the Postgres-backed worker loop.
+15:FROM deps AS generation-worker
+16-WORKDIR /app
+17-ENV NODE_ENV=production
+18-COPY . .
+19-# 开机先迁移再播种，然后才进 worker 循环。缺了这一步，pixai 模型没有
+20-# supplier_capability，生图会一直回 overloaded —— 详见 tools/control-plane-bootstrap.ts。
+21-CMD ["npm", "run", "generation:bootstrap"]
+22-
+23-FROM node:22-alpine AS runner
+24-WORKDIR /app
+25-ENV NODE_ENV=production
+26-ENV PORT=3000
+27-ENV HOSTNAME=0.0.0.0
+28-
+29-RUN addgroup -S nodejs && adduser -S nextjs -G nodejs
+30-
+31-COPY --from=builder /app/public ./public
+32-COPY --from=builder /app/.next/standalone ./
+33-COPY --from=builder /app/.next/static ./.next/static
+34-
+35-USER nextjs

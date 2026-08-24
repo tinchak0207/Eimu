@@ -1,0 +1,14 @@
+id       |                  base_url                  | concurrency_limit 
+---------------+--------------------------------------------+-------------------
+ env:adobe2api | https://store.tinchak0207.xyz/adobe2api/v1 |                 1
+(1 row)
+
+===NGINX===
+/etc/nginx/conf.d/default.conf.bak-wechatqr-20260812031247:67:        proxy_read_timeout 3600s;
+/etc/nginx/conf.d/default.conf.bak-wechatqr-20260812031247:86:        proxy_read_timeout 600s;
+/etc/nginx/conf.d/default.conf.bak-wechatqr-20260812031247:106:        proxy_read_timeout 600s;
+/etc/nginx/conf.d/default.conf.bak-wechatqr-20260812031247:122:        proxy_read_timeout 600s;
+/etc/nginx/conf.d/default.conf.bak-wechatqr-20260812031247:138:        proxy_read_timeout 600s;
+/etc/nginx/conf.d/default.conf.bak-wechatqr-20260812031247:162:        proxy_read_timeout 45s;
+/etc/nginx/conf.d/default.conf.bak-wechatqr-20260812031247:183:        proxy_read_timeout 15s;
+/etc/nginx/conf.d/default.conf.bak-wechatqr-20260812031247:204:        proxy_read_timeout 600s;

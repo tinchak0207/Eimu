@@ -1,4 +1,22 @@
 import type { StylePreset } from "@/lib/prompt-enhancer";
+import type { WorkflowRecallConfig } from "@/lib/workflow-recall";
+
+/**
+ * 案例配方（契约扩展点，2026-08-25 配方资产总线）。
+ *
+ * 结构与工作站 buildProvenanceConfig 的输出同构：以 workflow-recall 的
+ * WorkflowRecallConfig（六槽 prompt / negative / 尺寸 / preset / 区域 prompt /
+ * seed 等既有字段）为基底，加法式补上快照里本来就有的模型与版本字段。
+ * 「用此工作流打开」直接 JSON.stringify 后走 parseWorkflowRecallConfig 的
+ * 同一条载入管线（与 PNG 内嵌工作流 / R 键一致），不另起 schema。
+ */
+export interface ShowcaseRecipe extends WorkflowRecallConfig {
+  schemaVersion?: number;
+  modelId?: string;
+  workflowPresetLabel?: string;
+  promptHint?: string;
+  negativeHint?: string;
+}
 
 export interface ShowcaseCase {
   id: string;
@@ -12,7 +30,13 @@ export interface ShowcaseCase {
   /** 该案例在转盘上居中时，舞台背后那层环境光的主色（hex）。取自 gradient 里
       最饱和的那一档 —— 转到谁，背景就被谁染一下，像 Apple TV 的海报底光。 */
   glow: string;
+  /** 案例来源：官方精选（缺省）或用户从历史发布（community）。 */
+  source?: "official" | "community";
+  /** 完整配方快照。缺失时案例优雅降级为纯展示（不出现「用此工作流打开」）。 */
+  recipe?: ShowcaseRecipe;
 }
+
+const GPT_IMAGE_MODEL = "gpt-image-2";
 
 export const SHOWCASE_CASES: ShowcaseCase[] = [
   {
@@ -25,6 +49,17 @@ export const SHOWCASE_CASES: ShowcaseCase[] = [
     gradient: "from-[#F5F5F5] via-[#E0E0E0] to-[#CFD8DC]",
     image: "/showcase/showcase1.webp",
     glow: "#8FA9B8",
+    recipe: {
+      schemaVersion: 2,
+      modelId: GPT_IMAGE_MODEL,
+      workflowPreset: "product-shot",
+      workflowPresetLabel: "商品主图",
+      productionIntent: "campaign",
+      imageSizes: ["1024x1024"],
+      qualityProfile: "balanced",
+      negativePrompt: "塑料质感，杂乱反光，配色过饱和，水印",
+      copies: 1,
+    },
   },
   {
     id: "readable-craft-beer-label",
@@ -36,6 +71,17 @@ export const SHOWCASE_CASES: ShowcaseCase[] = [
     gradient: "from-[#1B1B1B] via-[#3A3A3A] to-[#2E7D32]",
     image: "/showcase/showcase2.webp",
     glow: "#2E7D32",
+    recipe: {
+      schemaVersion: 2,
+      modelId: GPT_IMAGE_MODEL,
+      workflowPreset: "product-shot",
+      workflowPresetLabel: "商品主图",
+      productionIntent: "ecommerce",
+      imageSizes: ["1024x1024"],
+      qualityProfile: "print",
+      negativePrompt: "标签文字扭曲，拼写错误，水印，模糊",
+      copies: 1,
+    },
   },
   {
     id: "tech-event-poster-dual-lang",
@@ -47,6 +93,17 @@ export const SHOWCASE_CASES: ShowcaseCase[] = [
     gradient: "from-[#000428] via-[#004e92] to-[#00d2ff]",
     image: "/showcase/showcase3.webp",
     glow: "#0A84FF",
+    recipe: {
+      schemaVersion: 2,
+      modelId: GPT_IMAGE_MODEL,
+      workflowPreset: "poster-variants",
+      workflowPresetLabel: "版式参考",
+      productionIntent: "campaign",
+      imageSizes: ["1024x1536"],
+      qualityProfile: "balanced",
+      negativePrompt: "文字乱码，构图拥挤，层级混乱，低对比",
+      copies: 1,
+    },
   },
   {
     id: "cinematic-steampunk-train",
@@ -58,6 +115,17 @@ export const SHOWCASE_CASES: ShowcaseCase[] = [
     gradient: "from-[#1a1c23] via-[#8B7355] to-[#EEDC82]",
     image: "/showcase/showcase4.webp",
     glow: "#C68B3C",
+    recipe: {
+      schemaVersion: 2,
+      modelId: GPT_IMAGE_MODEL,
+      workflowPreset: "poster-variants",
+      workflowPresetLabel: "版式参考",
+      productionIntent: "general",
+      imageSizes: ["1536x1024"],
+      qualityProfile: "balanced",
+      negativePrompt: "透视错误，结构崩坏，光线方向矛盾",
+      copies: 1,
+    },
   },
   {
     id: "interior-trend-lookup",
@@ -69,6 +137,17 @@ export const SHOWCASE_CASES: ShowcaseCase[] = [
     gradient: "from-[#EADEDB] via-[#BC948B] to-[#8E5E53]",
     image: "/showcase/showcase5.webp",
     glow: "#B98A7C",
+    recipe: {
+      schemaVersion: 2,
+      modelId: GPT_IMAGE_MODEL,
+      workflowPreset: "product-shot",
+      workflowPresetLabel: "商品主图",
+      productionIntent: "general",
+      imageSizes: ["1536x1024"],
+      qualityProfile: "balanced",
+      negativePrompt: "比例失真，材质廉价，光线平淡",
+      copies: 1,
+    },
   },
   {
     id: "streetwear-drop-teaser",
@@ -80,5 +159,16 @@ export const SHOWCASE_CASES: ShowcaseCase[] = [
     gradient: "from-[#833ab4] via-[#fd1d1d] to-[#fcb045]",
     image: "/showcase/showcase6.webp",
     glow: "#C0399B",
+    recipe: {
+      schemaVersion: 2,
+      modelId: GPT_IMAGE_MODEL,
+      workflowPreset: "style-transfer",
+      workflowPresetLabel: "风格参考",
+      productionIntent: "social",
+      imageSizes: ["1024x1536"],
+      qualityProfile: "balanced",
+      negativePrompt: "数码平滑，过度锐化，色彩断层",
+      copies: 1,
+    },
   },
 ];

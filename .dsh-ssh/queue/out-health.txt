@@ -1,0 +1,8 @@
+active
+active
+active
+active
+GATEWAY_HEALTHZ=200
+ 03:04:41 up 31 days,  3:46,  8 users,  load average: 3.81, 12.40, 13.68
+
+[exit 0]

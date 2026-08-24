@@ -1,0 +1,6 @@
+11:        timeout: int = 600,
+30:        channel = str(video_conf.get("channel") or "3p").lower()
+92:                poll_url, headers=self._poll_headers(token), timeout=60
+148:                        timeout=60,
+152:                    video_resp = self._get(video_url, headers={"accept": "*/*"}, timeout=60)
+196:            if time.time() - start > timeout:

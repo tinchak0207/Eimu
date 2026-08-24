@@ -1,0 +1,6 @@
+agentsvc:agentsvc 2775 /opt/agent-harness/workspace/.opencode/skills
+ubuntu:agentsvc 700 /opt/agent-harness/workspace/.opencode/skills/workflow-director
+ubuntu:agentsvc 664 /opt/agent-harness/workspace/.opencode/skills/workflow-director/SKILL.md
+ubuntu:ubuntu 644 /opt/agent-harness/workspace/.opencode/skills/agent-pixai/SKILL.md
+===
+cat: /opt/agent-harness/workspace/.opencode/skills/workflow-director/SKILL.md: Permission denied

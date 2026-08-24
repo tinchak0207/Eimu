@@ -1,0 +1,35 @@
+def generate_video(
+        self,
+        token: str,
+        video_conf: dict,
+        prompt: str,
+        arp_session_id: Optional[str] = None,
+        aspect_ratio: str = "9:16",
+        duration: int = 12,
+        source_image_ids: Optional[list[str]] = None,
+        entity_refs: Optional[list[dict]] = None,
+        timeout: int = 600,
+        negative_prompt: str = "",
+        generate_audio: bool = True,
+        reference_mode: str = "frame",
+        out_path: Optional[Path] = None,
+        progress_cb: Optional[Callable[[dict], None]] = None,
+    ) -> tuple[Optional[bytes], dict]:
+        request_started = time.perf_counter()
+        payload = self._build_video_payload(
+            video_conf=video_conf,
+            prompt=prompt,
+            aspect_ratio=aspect_ratio,
+            duration=duration,
+            source_image_ids=source_image_ids,
+            entity_refs=entity_refs,
+            negative_prompt=negative_prompt,
+            generate_audio=generate_audio,
+            reference_mode=reference_mode,
+        )
+        channel = str(video_conf.get("channel") or "3p").lower()
+        if channel == "ugs":
+            submit_url = self.ugs_video_submit_url
+        elif channel == "native":
+            submit_url = self.firefly_video_submit_url
+        else:

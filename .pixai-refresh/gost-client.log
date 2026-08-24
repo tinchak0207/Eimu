@@ -1,0 +1,18 @@
+flag provided but not defined: -log-level
+Usage of ./gost:
+  -C string
+    	configuration file
+  -D	debug mode
+  -DD
+    	trace mode
+  -F value
+    	chain node list
+  -L value
+    	service list
+  -O string
+    	output format, one of yaml|json format
+  -V	print version
+  -api string
+    	api service address
+  -metrics string
+    	metrics service address

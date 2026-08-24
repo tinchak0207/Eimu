@@ -1,0 +1,54 @@
+proxy disabled for upstream requests
+proxy disabled for upstream requests
+===
+            or "unreachable" in text
+        ):
+            return "connection"
+        return "network"
+
+    def _requests_proxies(self) -> Optional[dict]:
+        if not self.proxy:
+            return None
+        return {"http": self.proxy, "https": self.proxy}
+
+    def _session(self):
+        if CurlSession is None:
+            return None
+        signature = (self.impersonate, self.proxy)
+        session = getattr(self._session_local, "curl", None)
+        session_closed = bool(getattr(session, "_closed", False)) if session is not None else False
+        if (
+            session is not None
+            and not session_closed
+            and getattr(self._session_local, "curl_signature", None) == signature
+        ):
+            return session
+        if session is not None:
+            try:
+                session.close()
+            except Exception:
+                logger.debug("failed to close stale curl session", exc_info=True)
+        kwargs = {"impersonate": self.impersonate, "timeout": 60}
+        if self.proxy:
+            kwargs["proxies"] = {"http": self.proxy, "https": self.proxy}
+        session = CurlSession(**kwargs)
+        self._session_local.curl = session
+        self._session_local.curl_signature = signature
+        return session
+
+    def _requests_session(self) -> requests.Session:
+        signature = self.proxy
+        session = getattr(self._session_local, "requests", None)
+        if session is not None and getattr(self._session_local, "requests_signature", None) == signature:
+            return session
+        if session is not None:
+            session.close()
+        session = requests.Session()
+        if self.proxy:
+            session.proxies.update(self._requests_proxies() or {})
+        self._session_local.requests = session
+        self._session_local.requests_signature = signature
+        return session
+
+    @staticmethod
+    def _poll_delay(elapsed_seconds: float) -> float:

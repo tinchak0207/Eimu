@@ -1,0 +1,21 @@
+# 自荐草稿：Emu Workbench（dsh-emu-workbench）
+
+定位：DSH 生态的影像生产层，不是单点生图工具。
+
+## 装完就能看到（不是纯工具）
+- 左侧边栏「Emu」标签 = 内嵌 Emu 完整界面（画布/图库/许愿 Agent），不离开 DSH
+- 对话内图卡：生成结果可复制/下载/一键在 Emu 画布中打开继续编辑
+- 设置 > 插件 > Emu Workbench：凭据状态与默认模型一目了然
+
+## 工具
+- emu_generate_image / emu_edit_image / emu_model_status：多供应商生图改图
+- emu_wish / emu_wish_reply：Emu 独家 opencode 许愿 Agent（自主拆解/迭代/批量 + 提问转述续答）
+
+## 背后
+- 在运营的影像 SaaS：多后端调度/失败切换/计费/批量队列（不是个人 vibe code 能复制的）
+- 仓库：github.com/tinchak0207/dsh-emu-workbench（挂 dsh-plugin topic）
+- 安装与凭据：README（发布时补链接）
+
+语尾用「麻烦收录喵~」贴 #1179 语境
+
+【发布前动作】前端构建确认 → 替换占位链接 → 挂 GitHub topic → npm 发布 → 回帖。

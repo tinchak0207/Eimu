@@ -1,0 +1,10 @@
+supplier_id  | attempts_5m | successes_5m | success_rate_5m |   credential_expires_at    |        last_refresh_at        |    last_refresh_failure_at    
+---------------+-------------+--------------+-----------------+----------------------------+-------------------------------+-------------------------------
+ env:sub2api   |           2 |            0 |               0 |                            |                               | 
+ env:adobe2api |           1 |            0 |               0 | 2026-08-22 07:19:46.275+00 | 2026-08-21 07:19:46.275392+00 | 2026-08-19 18:46:58.774558+00
+(2 rows)
+
+ supplier_id | failure_class |               det                | count 
+-------------+---------------+----------------------------------+-------
+ env:sub2api | overloaded    | No available compatible accounts |     4
+(1 row)

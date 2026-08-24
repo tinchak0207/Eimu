@@ -1,0 +1,4 @@
+supplier_id  | status |     det      | latency_ms |          created_at           
+---------------+--------+--------------+------------+-------------------------------
+ env:adobe2api | failed | fetch failed |     300727 | 2026-08-21 08:29:16.883506+00
+(1 row)

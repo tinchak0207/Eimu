@@ -1,0 +1,11 @@
+{
+  "lastCycleStartedAt": "2026-08-20T13:46:00.460Z",
+  "lastSuccessAt": "2026-08-20T13:48:33.028Z",
+  "lastSummary": {
+    "total": 76,
+    "ok": 76,
+    "applied": 76,
+    "expires": "2026-08-27T13:47:51Z"
+  },
+  "consecutiveFailures": 0
+}

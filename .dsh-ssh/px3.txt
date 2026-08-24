@@ -1,0 +1,29 @@
+proxy disabled for upstream requests
+proxy disabled for upstream requests
+===
+    def _requests_proxies(self) -> Optional[dict]:
+        if not self.proxy:
+            return None
+        return {"http": self.proxy, "https": self.proxy}
+
+    def _session(self):
+        if CurlSession is None:
+            return None
+        signature = (self.impersonate, self.proxy)
+        session = getattr(self._session_local, "curl", None)
+        session_closed = bool(getattr(session, "_closed", False)) if session is not None else False
+        if (
+            session is not None
+            and not session_closed
+            and getattr(self._session_local, "curl_signature", None) == signature
+        ):
+            return session
+        if session is not None:
+            try:
+                session.close()
+            except Exception:
+                logger.debug("failed to close stale curl session", exc_info=True)
+        kwargs = {"impersonate": self.impersonate, "timeout": 60}
+        if self.proxy:
+            kwargs["proxies"] = {"http": self.proxy, "https": self.proxy}
+        session = CurlSession(**kwargs)

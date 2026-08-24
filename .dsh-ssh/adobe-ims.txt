@@ -1,0 +1,5 @@
+START
+proxy disabled for upstream requests
+https://ims-na1.adobelogin.com/ims/profile/v1 -> 200 (0.7s) {"isFederatedGuest":false,"account_type":"type1","address":"
+https://firefly.adobe.io/v1/campaign/emojiLis -> 404 (0.9s) 
+DONE

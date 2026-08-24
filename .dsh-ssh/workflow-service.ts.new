@@ -1,0 +1,325 @@
+// 畫布工作流服務（Workflow Service）
+//
+// 暴君策略 v2：Deepseek 透過 workflow_* 工具填內容，本服務展開節點流並執行。
+// 本檔案獨立於 gateway index.ts（Bun 動態 import），接受注入的 emit 函數
+// （gateway 的 emitToSession）——保持 gateway 單檔乾淨、本模組可測。
+//
+// 執行流程：
+//   start(templateId, content) → 展開節點流（expandTemplate）→ 存 session
+//   addNode / connect → 修改節點流
+//   generate → topo 排序 → 逐節點執行（text/config 跳過，image/video 調平台）
+//             → emit canvas.* 事件 → 回填結果
+//
+// 流式搭建（2026-08-21）：canvas.plan / node.created / node.connected 不再等
+// workflow_generate 一次性爆發——start 成功即推送展開的節點流，addNode /
+// connect 各自即時推送增量。generate 只補發沒發過的漏網節點（emitGraph 為
+// 增量語義，emittedNodes/emittedConnections 去重），前端在 agent 逐步搭建的
+// 同步就能看到工作流「長」出來，與左側 tool 卡同步。
+//
+// 平台執行依賴注入（避免本檔耦合 fetch/認證）：
+//   runNode(node, upstreamResults) => Promise<{ok, content?, costCoins?, error?}>
+//   - image → 調 /v1/images/generations
+//   - video → 調 /v1/videos/generations
+
+import { expandTemplate, topologicalSort, type WorkflowGraph, type WorkflowNode, type WorkflowNodeResult } from "./workflow-engine"
+import { getWorkflowTemplate, listWorkflowTemplates, type TemplateContent } from "./workflow-templates"
+import { validateShotJson, parseShotCandidate, shotOutputParams } from "./video-prompt-schema"
+
+export interface EmitFn {
+  (state: unknown, name: string, data: unknown): void
+}
+
+export interface RunNodeFn {
+  /**
+   * 執行單一節點。upstream = 已完成的上游節點 id → content 映射。
+   * graph = 整個節點流（供 submit 解析上游 text/config 拿 prompt/參考）。
+   * node 本身 metadata 可能只有 config 的 model/size——prompt 常在上游。
+   */
+  (node: WorkflowNode, upstream: Map<string, string>, graph: WorkflowGraph): Promise<WorkflowNodeResult>
+}
+
+export interface WorkflowServiceOptions {
+  emit: EmitFn
+  runNode: RunNodeFn
+}
+
+export interface ActiveWorkflow {
+  workflowId: string
+  templateId: string
+  graph: WorkflowGraph
+  status: "building" | "running" | "success" | "partial" | "failed"
+  nodeStatus: Record<string, "pending" | "running" | "success" | "error">
+  nodeContent: Record<string, string>
+  nodeCost: Record<string, number>
+  owner: unknown // 建立時綁定的 session；emit 事件送回這個 session，後台執行不受 stateForWorkflow 影響
+  // 流式搭建去重：plan 只發一次；節點/連線按 id/邊去重，generate 再呼叫 emitGraph 只補增量。
+  planEmitted: boolean
+  emittedNodes: Set<string>
+  emittedConnections: Set<string>
+}
+
+let workflowCounter = 0
+
+/** 節點的結構化 shot JSON（metadata.shot），給 index.ts 的 submitWorkflowNode 編譯 prompt 用。沒有則 null。 */
+export function resolveNodeShot(node: { kind: string; metadata: Record<string, unknown> }): unknown {
+  return node.metadata.shot !== undefined ? node.metadata.shot : null
+}
+
+export class WorkflowService {
+  private workflows = new Map<string, ActiveWorkflow>()
+  constructor(private opts: WorkflowServiceOptions) {}
+
+  templates() {
+    return listWorkflowTemplates()
+  }
+
+  /** 建工作流（從模板或空）。回 workflowId 或 error（模板缺必需內容時）。 */
+  start(templateId: string | null, content: TemplateContent = {}, owner?: unknown): { workflowId: string } | { error: string } {
+    const template = templateId ? getWorkflowTemplate(templateId) : undefined
+    // 校驗：模板每個 text role 都必須填內容（content/prompt 非空字串，或帶有效 shot JSON），
+    // 不讓空白畫布產生（agent 收到 400 後補齊重試）。shot 存在但無效 → 明確報錯。
+    if (template) {
+      const missing: string[] = []
+      const invalidShots: string[] = []
+      for (const n of template.nodes) {
+        if (n.kind !== "text") continue
+        const c = content[n.role] as Record<string, unknown> | undefined
+        const text = typeof c?.content === "string" ? c.content : typeof c?.prompt === "string" ? c.prompt : ""
+        if (text.trim()) continue
+        if (c && c.shot !== undefined) {
+          const v = validateShotJson(c.shot)
+          if (v.ok) continue
+          invalidShots.push(`模板「${template.name}」角色 ${n.role} 的 shot JSON 無效：${v.error}`)
+          continue
+        }
+        missing.push(`${n.role}(${n.title})`)
+      }
+      if (missing.length || invalidShots.length) {
+        const parts: string[] = []
+        if (missing.length) parts.push(`模板「${template.name}」缺少必要內容：${missing.join("、")}。請重新呼叫 workflow_start 並在 content 中補齊：{ ${missing.map((m) => `${m.split("(")[0]}: { content: "..." }`).join(", ")} }`)
+        if (invalidShots.length) parts.push(invalidShots.join("\n"))
+        return { error: parts.join("\n") }
+      }
+    }
+    workflowCounter += 1
+    const workflowId = `wf_${Date.now().toString(36)}_${workflowCounter}`
+    const graph = template ? expandTemplate(templateId!, template, content) : { nodes: [], connections: [] }
+    // config 節點補默認參數（與 submitWorkflowNode 的默認一致），畫布上永遠顯示得出參數
+    for (const n of graph.nodes) {
+      if (n.kind === "config") {
+        const isVideo = n.metadata.kind === "video"
+        if (!n.metadata.model) n.metadata.model = isVideo ? "seedance-2.0" : "pixai-tsubaki2"
+        if (!n.metadata.size) n.metadata.size = isVideo ? "16:9" : "1024x1024"
+      }
+    }
+    // text 節點 shot JSON：content 本身是 shot JSON 字串時解析存回 metadata.shot（原 content 不動）；
+    // metadata.shot 存在則驗證（無效 → 400），有效時把 duration/aspect_ratio 回寫節點參數（僅當原本沒有）。
+    for (const n of graph.nodes) {
+      if (n.kind !== "text") continue
+      if (n.metadata.shot === undefined && typeof n.metadata.content === "string") {
+        const parsed = parseShotCandidate(n.metadata.content)
+        if (parsed) n.metadata.shot = parsed
+      }
+      if (n.metadata.shot !== undefined) {
+        const v = validateShotJson(n.metadata.shot)
+        if (!v.ok) {
+          return { error: `模板「${template?.name ?? templateId ?? "custom"}」節點 ${n.role}(${n.title}) 的 shot JSON 無效：${v.error}` }
+        }
+        const params = shotOutputParams(v.shot)
+        if (params.duration_seconds !== undefined && typeof n.metadata.duration_seconds !== "number") n.metadata.duration_seconds = params.duration_seconds
+        if (params.aspect_ratio && typeof n.metadata.size !== "string") n.metadata.size = params.aspect_ratio
+      }
+    }
+    const nodeStatus: ActiveWorkflow["nodeStatus"] = {}
+    const nodeContent: Record<string, string> = {}
+    const nodeCost: Record<string, number> = {}
+    for (const n of graph.nodes) {
+      nodeStatus[n.id] = n.kind === "text" || n.kind === "config" ? "success" : "pending"
+      if (typeof n.metadata.content === "string" && n.metadata.content) nodeContent[n.id] = n.metadata.content
+    }
+    const wf: ActiveWorkflow = {
+      workflowId,
+      templateId: templateId ?? "custom",
+      graph,
+      status: "building",
+      nodeStatus,
+      nodeContent,
+      nodeCost,
+      owner,
+      planEmitted: false,
+      emittedNodes: new Set(),
+      emittedConnections: new Set(),
+    }
+    this.workflows.set(workflowId, wf)
+    // 流式搭建：start 成功即把展開的節點流推上畫布（模板路徑一次可見整副骨架），
+    // 之後 agent 的 add_node / connect 逐顆增量長出來——不等 workflow_generate。
+    this.emitGraph(wf)
+    return { workflowId }
+  }
+
+  get(workflowId: string): ActiveWorkflow | undefined {
+    return this.workflows.get(workflowId)
+  }
+
+  addNode(workflowId: string, role: string, kind: string, title: string, metadata: Record<string, unknown> = {}): { nodeId: string } | { error: string } {
+    const wf = this.workflows.get(workflowId)
+    if (!wf) return { error: "workflow not found" }
+    if (kind === "text" && !metadata.content && !metadata.prompt && metadata.shot === undefined) {
+      return { error: "text 節點必須填 content（提示詞內容）或 shot（結構化 JSON），請補上再呼叫 workflow_add_node" }
+    }
+    // shot JSON：任何 kind 都可帶 metadata.shot；text 節點 content 是 shot JSON 字串時也解析存回。
+    if (metadata.shot === undefined && kind === "text" && typeof metadata.content === "string") {
+      const parsed = parseShotCandidate(metadata.content)
+      if (parsed) metadata.shot = parsed
+    }
+    if (metadata.shot !== undefined) {
+      const v = validateShotJson(metadata.shot)
+      if (!v.ok) {
+        return {
+          error:
+            `shot JSON 無效：${v.error}` +
+            "。schema：{ subject, action, appearance, camera:{shot_type,angle,movement,lens}, environment:{time_of_day,lighting,elements}, style:{look,mood,color_grading}, audio:{dialogue:[{character,tone,line}],ambience,sfx}, output:{duration_seconds,aspect_ratio} }",
+        }
+      }
+      const params = shotOutputParams(v.shot)
+      if (params.duration_seconds !== undefined && typeof metadata.duration_seconds !== "number") metadata.duration_seconds = params.duration_seconds
+      if (params.aspect_ratio && typeof metadata.size !== "string") metadata.size = params.aspect_ratio
+    }
+    const node: WorkflowNode = { id: `${workflowId}-${role}-${wf.graph.nodes.length}`, role, kind: kind as WorkflowNode["kind"], title, metadata }
+    wf.graph.nodes.push(node)
+    wf.nodeStatus[node.id] = node.kind === "text" || node.kind === "config" ? "success" : "pending"
+    if (typeof metadata.content === "string" && metadata.content) wf.nodeContent[node.id] = metadata.content
+    // 流式搭建：新節點即時上畫布（emitNodeDelta 按 id 去重，冪等）。
+    this.emitNodeDelta(wf, node)
+    return { nodeId: node.id }
+  }
+
+  connect(workflowId: string, from: string, to: string): { ok: boolean } | { error: string } {
+    const wf = this.workflows.get(workflowId)
+    if (!wf) return { error: "workflow not found" }
+    if (!wf.graph.nodes.some((n) => n.id === from) || !wf.graph.nodes.some((n) => n.id === to)) return { error: "node not found" }
+    if (!wf.graph.connections.some((c) => c.from === from && c.to === to)) {
+      wf.graph.connections.push({ from, to })
+      // 流式搭建：新連線即時上畫布。
+      this.emitConnectionDelta(wf, { from, to })
+    }
+    return { ok: true }
+  }
+
+  /** 執行工作流。emit canvas 事件；text/config 節點視為完成，image/video 調 runNode。 */
+  async generate(workflowId: string): Promise<{ ok: boolean; status: string }> {
+    const wf = this.workflows.get(workflowId)
+    if (!wf) return { ok: false, status: "workflow not found" }
+    wf.status = "running"
+
+    // topo 排序；有循環 → 報錯
+    const { order, cycle } = topologicalSort(wf.graph)
+    if (cycle.length) {
+      wf.status = "failed"
+      return { ok: false, status: `cycle: ${cycle.join(",")}` }
+    }
+
+    // 增量補發：start/add/connect 已即時推送過的不再重發（前端 upsert 冪等，
+    // 但重發會打亂節點序與進場動畫）；只補漏網（如事件丟失後的兜底）。
+    this.emitGraph(wf)
+
+    // 防假陽性（2026-08-21 測試輪實錄）：模型可能把生成節點建成 config 類型，
+    // 引擎逐節點跳過後仍回 success——前端顯示「跑完了」實際什麼都沒發生。
+    // 全工作流沒有任何可執行節點時必須顯式報錯，把正確的 kind 語義告訴模型。
+    const executableCount = order.filter((id) => {
+      const node = wf.graph.nodes.find((n) => n.id === id)
+      return node && node.kind !== "text" && node.kind !== "config"
+    }).length
+    if (executableCount === 0) {
+      wf.status = "failed"
+      return {
+        ok: false,
+        status:
+          "no executable nodes: every node is text/config, which the engine skips. " +
+          "Nodes that should produce an image or video must be created with kind='image' or kind='video' " +
+          "(config nodes are reference/data-only and never execute).",
+      }
+    }
+
+    // 逐節點執行
+    const upstreamContent = new Map<string, string>()
+    for (const nodeId of order) {
+      const node = wf.graph.nodes.find((n) => n.id === nodeId)
+      if (!node) continue
+      if (node.kind === "text" || node.kind === "config") continue
+
+      wf.nodeStatus[nodeId] = "running"
+      this.opts.emit(wf.owner, "canvas.node.generating", { unit_id: workflowId, node_id: nodeId, status: "running" })
+      const result = await this.opts.runNode(node, upstreamContent, wf.graph)
+      if (result.ok && result.content) {
+        wf.nodeStatus[nodeId] = "success"
+        wf.nodeContent[nodeId] = result.content
+        if (result.costCoins) wf.nodeCost[nodeId] = result.costCoins
+        upstreamContent.set(nodeId, result.content)
+        this.opts.emit(wf.owner, "canvas.node.updated", {
+          unit_id: workflowId,
+          node_id: nodeId,
+          patch: { status: "success", content: result.content, ...(result.costCoins ? { cost_coins: result.costCoins } : {}) },
+          url: result.content,
+          cost_coins: result.costCoins,
+        })
+      } else {
+        wf.nodeStatus[nodeId] = "error"
+        wf.status = "failed"
+        this.opts.emit(wf.owner, "canvas.node.updated", { unit_id: workflowId, node_id: nodeId, patch: { status: "error", errorDetails: result.error } })
+      }
+    }
+
+    const failed = Object.values(wf.nodeStatus).some((s) => s === "error")
+    wf.status = failed ? "failed" : "success"
+    return { ok: !failed, status: wf.status }
+  }
+
+  status(workflowId: string) {
+    const wf = this.workflows.get(workflowId)
+    if (!wf) return null
+    return {
+      workflowId: wf.workflowId,
+      templateId: wf.templateId,
+      status: wf.status,
+      nodes: wf.graph.nodes.map((n) => ({
+        id: n.id,
+        role: n.role,
+        kind: n.kind,
+        title: n.title,
+        status: wf.nodeStatus[n.id],
+        content: wf.nodeContent[n.id],
+        costCoins: wf.nodeCost[n.id],
+      })),
+      connections: wf.graph.connections,
+    }
+  }
+
+  /** 單節點增量上畫布：按 node id 去重，重複呼叫冪等（generate 兜底重發安全）。 */
+  private emitNodeDelta(wf: ActiveWorkflow, node: WorkflowNode): void {
+    if (wf.emittedNodes.has(node.id)) return
+    wf.emittedNodes.add(node.id)
+    this.opts.emit(wf.owner, "canvas.node.created", {
+      unit_id: wf.workflowId,
+      node: { id: node.id, type: node.kind, title: node.title, position: { x: 0, y: 0 }, width: node.kind === "config" ? 440 : 340, height: 240, metadata: node.metadata },
+    })
+  }
+
+  /** 單連線增量上畫布：按 from->to 邊去重（id 由 workflowId+邊派生，天然穩定）。 */
+  private emitConnectionDelta(wf: ActiveWorkflow, c: { from: string; to: string }): void {
+    const key = `${c.from}->${c.to}`
+    if (wf.emittedConnections.has(key)) return
+    wf.emittedConnections.add(key)
+    this.opts.emit(wf.owner, "canvas.node.connected", { unit_id: wf.workflowId, connection: { id: `wf-${wf.workflowId}-${c.from}-${c.to}`, fromNodeId: c.from, toNodeId: c.to } })
+  }
+
+  /** emit 節點流增量（plan 只發一次；節點/連線只補沒發過的）。start 即時調用＝流式搭建；generate 再調用＝漏網兜底。 */
+  private emitGraph(wf: ActiveWorkflow): void {
+    if (!wf.planEmitted) {
+      wf.planEmitted = true
+      this.opts.emit(wf.owner, "canvas.plan", { unit_id: wf.workflowId, tool: `workflow:${wf.templateId}`, label: `工作流 ${wf.templateId}`, prompt: "", model: "", size: "", count: 1, kind: "workflow", source_image: null, cost_hint: null })
+    }
+    for (const n of wf.graph.nodes) this.emitNodeDelta(wf, n)
+    for (const c of wf.graph.connections) this.emitConnectionDelta(wf, c)
+  }
+}

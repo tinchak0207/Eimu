@@ -1,0 +1,15 @@
+===STATUS_API===
+4:import { WorkflowService } from "./workflow-service"
+503:          console.error(`[workflow] node ${nodeId} poll ${poll.status}: ${(pd as { error?: { message?: string } })?.error?.message}`)
+547:  if (pathname.endsWith("/workflow/templates") && req.method === "GET") {
+550:  if (pathname.endsWith("/workflow/start") && req.method === "POST") {
+556:  if (pathname.endsWith("/workflow/node") && req.method === "POST") {
+566:  if (pathname.endsWith("/workflow/connect") && req.method === "POST") {
+570:  if (pathname.endsWith("/workflow/status") && req.method === "GET") {
+573:    return st ? Response.json({ ok: true, workflow: workflowService.status(wfid!) }) : jsonError(404, "workflow not found", "not_found", "not_found")
+575:  if (pathname.endsWith("/workflow/generate") && req.method === "POST") {
+580:      if (!r.ok) console.error(`[workflow] ${wfid} finished: ${r.status}`)
+===WF_STATE===
+Aug 21 04:42:16 VM-0-2-ubuntu bun[2750139]: [workflow] node wf_mt1zhs9p_12-char_ref-0 poll timeout
+
+[exit 0]

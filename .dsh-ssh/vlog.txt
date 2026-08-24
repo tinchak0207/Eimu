@@ -1,0 +1,1 @@
+retrying operation=chat.completions attempt=1 reason=upstream_temporary status=451 type=status delay=3.27s strategy=round_robin

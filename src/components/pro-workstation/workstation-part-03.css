@@ -659,6 +659,78 @@
   background: rgba(255, 149, 0, 0.17);
 }
 
+/* ── 配方模板区（模板=六槽具名 profile）：chips 复用 .pro-chip-row，
+   确认卡复用 .pro-template-confirm，这里只定义「我的模板」列表行。 ── */
+
+.pro-recipe-templates {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.pro-recipe-my-templates {
+  display: grid;
+  gap: 0.4rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.5);
+  padding-top: 0.6rem;
+}
+
+.pro-recipe-template-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.pro-recipe-template-row.is-active {
+  outline: 1px solid hsl(var(--accent) / 0.4);
+  border-radius: 0.7rem;
+}
+
+.pro-recipe-template-load {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 2rem;
+  border-radius: 0.7rem;
+  background: rgba(255, 255, 255, 0.72);
+  padding: 0 0.6rem;
+  color: hsl(var(--foreground) / 0.75);
+  font-size: 0.7rem;
+  font-weight: 720;
+  /* hover 只变背景不出新边框，零 layout shift */
+  transition: background 180ms ease;
+}
+
+.pro-recipe-template-load:hover {
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.pro-recipe-template-load small {
+  margin-left: auto;
+  color: hsl(var(--foreground) / 0.4);
+  font-size: 0.59rem;
+  font-weight: 640;
+}
+
+.pro-recipe-template-delete {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 1.8rem;
+  height: 1.8rem;
+  border-radius: 0.6rem;
+  background: rgba(255, 255, 255, 0.45);
+  color: hsl(var(--foreground) / 0.4);
+  transition: background 180ms ease, color 180ms ease;
+}
+
+.pro-recipe-template-delete:hover {
+  background: rgba(255, 59, 48, 0.12);
+  color: rgba(215, 45, 32, 0.9);
+}
+
 .pro-requirement-group {
   display: grid;
   gap: 0.5rem;

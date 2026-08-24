@@ -1,0 +1,3 @@
+"model": "opencode/x-preview-f-free",
+  "small_model": "opencode/x-preview-f-free",
+active

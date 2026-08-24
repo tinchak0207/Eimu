@@ -1,0 +1,5 @@
+START
+proxy disabled for upstream requests
+video submit empty-body: 406 {"error_code":"validation_error","message":"Unsupported Accept Type or not allowed."}
+image submit empty-body: 406 {"error_code":"validation_error","message":"Unsupported Accept Type or not allowed."}
+DONE

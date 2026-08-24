@@ -1,0 +1,33 @@
+id       | adapter_type  | supply_tier  | health_status |       cooldown_until       
+---------------+---------------+--------------+---------------+----------------------------
+ env:adobe2api | adobe2api     | first_party  | cooldown      | 2026-08-21 07:30:42.969+00
+ env:fallback  | openai_images | fallback     | degraded      | 
+ env:primary   | openai_images | relay        | disabled      | 
+ env:sub2api   | openai_images | managed_pool | degraded      | 
+(4 rows)
+
+INFO:     127.0.0.1:34518 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     172.19.0.9:49712 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     172.19.0.9:47052 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     172.19.0.9:38304 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     172.19.0.9:35364 - "GET /api/v1/health HTTP/1.1" 200 OK
+retrying operation=chat.completions attempt=1 reason=upstream_temporary status=451 type=status delay=2.35s strategy=round_robin
+INFO:     172.19.0.4:36474 - "POST /v1/chat/completions HTTP/1.1" 503 Service Unavailable
+INFO:     172.19.0.9:50520 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     172.19.0.9:33512 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     172.19.0.9:45950 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     172.19.0.9:33536 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     172.19.0.9:53468 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     172.19.0.9:43714 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     172.19.0.9:58730 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     172.19.0.9:56596 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     172.19.0.9:54298 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     172.19.0.9:51356 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     172.19.0.9:47434 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     172.19.0.9:34968 - "GET /api/v1/health HTTP/1.1" 200 OK
+retrying operation=chat.completions attempt=1 reason=upstream_temporary status=451 type=status delay=2.03s strategy=round_robin
+INFO:     172.19.0.4:57146 - "POST /v1/chat/completions HTTP/1.1" 503 Service Unavailable
+INFO:     172.19.0.9:45112 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     172.19.0.9:58614 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     172.19.0.9:54566 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     172.19.0.9:50874 - "GET /api/v1/health HTTP/1.1" 200 OK

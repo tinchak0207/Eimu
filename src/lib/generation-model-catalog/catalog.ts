@@ -54,6 +54,7 @@ import {
 } from "../image-model-ids.js";
 
 import { GenerationModelDefinition, COMMON_IMAGE_RATIOS, EXTENDED_GEMINI_RATIOS, FLUX_RATIOS, VIDEO_RATIOS, WIDE_VIDEO_RATIOS, RUNWAY_VIDEO_RATIOS, SEEDANCE_VIDEO_RATIOS, IMAGE_RESOLUTIONS, SEEDANCE_DURATIONS } from "./types";
+import { MODEL_KNOWLEDGE } from "./knowledge";
 
 export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition> = {
   [DEFAULT_IMAGE_MODEL_ID]: {
@@ -718,6 +719,14 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     referenceImages: true,
   },
 };
+
+// 模型卡三字段（吞併決策清單主線四首件）：知识数据独立成档（knowledge.ts，纯加法、
+// 可单测），这里在目录初始化时一次性挂到对应条目上。pricing 覆写走浅合并（{...base}），
+// knowledge 字段天然在覆写后存活，下游一律经 generationModel()/modelKnowledge() 读取。
+for (const [modelId, knowledge] of Object.entries(MODEL_KNOWLEDGE)) {
+  const entry = GENERATION_MODEL_CATALOG[modelId];
+  if (entry) entry.knowledge = knowledge;
+}
 
 export const IMAGE_MODEL_IDS = SUPPORTED_IMAGE_MODEL_IDS as readonly string[];
 export const VIDEO_MODEL_IDS = SUPPORTED_VIDEO_MODEL_IDS as readonly string[];

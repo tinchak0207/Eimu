@@ -1,0 +1,28 @@
+bb954ca7e5027be54d341c15d2c4ec98  /opt/adobe2api/core/adobe_client.py
+bb954ca7e5027be54d341c15d2c4ec98  /app/core/adobe_client.py
+                                if "progress_val" in locals()
+                                and progress_val is not None
+                                else 0.0,
+                                "upstream_job_id": upstream_job_id,
+                                "retry_after": None,
+                                "error": "video generation timed out",
+                            }
+                        )
+                    except Exception:
+                        pass
+                raise AdobeRequestError("video generation timed out")
+            time.sleep(self._poll_delay(time.time() - start))
+
+===POLLDELAY===
+321:    def _poll_delay(elapsed_seconds: float) -> float:
+322-        if elapsed_seconds < 10.0:
+323-            return 0.75
+324-        if elapsed_seconds < 30.0:
+325-            return 1.0
+326-        return 1.5
+327-
+--
+1611:            time.sleep(self._poll_delay(time.time() - start))
+1612-
+1613-    def generate(
+1614-        self,

@@ -1,0 +1,4 @@
+/opt/agent-harness/gateway/workflow-service.ts
+/opt/agent-harness/workspace/.opencode/tools/workflow_connect.ts
+/opt/agent-harness/workspace/.opencode/tools/workflow_add_node.ts
+/opt/agent-harness/workspace/.opencode/tools/image_generate.ts

@@ -1,7 +1,7 @@
 "use client";
 
 import { memo } from "react";
-import { Images, Library, Palette, Plus, SlidersHorizontal, Sparkles, Wand2 } from "lucide-react";
+import { Images, LayoutTemplate, Library, Palette, Plus, SlidersHorizontal, Sparkles, Wand2 } from "lucide-react";
 import { ReferenceImageUpload } from "@/components/ReferenceImageUpload";
 import { cn } from "@/lib/utils";
 import type { BrandKit } from "@/lib/brand-kit";
@@ -13,6 +13,9 @@ import type { ReferenceImage } from "@/lib/image-types";
 import type { RegionalPromptItem, NoticeLevel, LeftPanelTab } from "../workstation-constants";
 import { CREATIVE_TEMPLATE_COUNT } from "../workstation-constants";
 import { CreatorResourcePanel, TemplatePanel, StyleGrid } from "../workstation-subcomponents";
+import { RecipeTemplateSection } from "../RecipeTemplateSection";
+import type { UserRecipeTemplateItem } from "../use-recipe-templates";
+import type { WorkflowRecallConfig } from "@/lib/workflow-recall";
 
 export interface LeftPromptTabProps {
   prompt: string;
@@ -26,6 +29,12 @@ export interface LeftPromptTabProps {
   toggleSection: (key: string, open: boolean) => void;
   onApplyResource: (resource: CreatorResource) => void;
   onApplyScenario: (scenario: ScenarioTemplate) => void;
+  /** 配方模板（六槽具名 profile）：确认卡先行，套用后摊开可改。 */
+  isLoggedIn: boolean;
+  userRecipeTemplates: UserRecipeTemplateItem[];
+  userRecipeTemplatesLoading: boolean;
+  onApplyRecipeTemplate: (config: WorkflowRecallConfig & { modelId?: string }, label: string) => void;
+  onDeleteUserRecipeTemplate: (id: string) => void;
   templateUndoLabel: string | undefined;
   onUndo: () => void;
   token: string | null;
@@ -55,7 +64,7 @@ export interface LeftPromptTabProps {
 
 /**
  * 左栏「提示词」tab（2026-08-22 从 InvokeInspiredWorkstation 拆出）。
- * 画面描述 / 创作模板 / 模板出图 / 风格 / 更多要求五个手风琴；纯 props 驱动。
+ * 画面描述 / 创作模板 / 配方模板 / 模板出图 / 风格 / 更多要求六个手风琴；纯 props 驱动。
  */
 export const LeftPromptTab = memo(function LeftPromptTab({
   prompt,
@@ -69,6 +78,11 @@ export const LeftPromptTab = memo(function LeftPromptTab({
   toggleSection,
   onApplyResource,
   onApplyScenario,
+  isLoggedIn,
+  userRecipeTemplates,
+  userRecipeTemplatesLoading,
+  onApplyRecipeTemplate,
+  onDeleteUserRecipeTemplate,
   templateUndoLabel,
   onUndo,
   token,
@@ -161,6 +175,31 @@ export const LeftPromptTab = memo(function LeftPromptTab({
           onApplyScenario={onApplyScenario}
           undoLabel={templateUndoLabel}
           onUndo={onUndo}
+        />
+      </details>
+
+      {/*
+        配方模板（六槽具名 profile）：点击先出确认卡，套用后六槽摊开在
+        画面描述/更多要求里可改 —— 模板不是黑盒，是「填进表单的一组值」。
+      */}
+      <details
+        className="pro-accordion"
+        open={sectionOpen.recipeTemplates}
+        onToggle={(event) => toggleSection("recipeTemplates", event.currentTarget.open)}
+      >
+        <summary>
+          <span className="pro-panel-title">
+            <LayoutTemplate className="h-4 w-4" />
+            配方模板
+            {userRecipeTemplates.length > 0 && <em className="pro-title-count">{userRecipeTemplates.length}</em>}
+          </span>
+        </summary>
+        <RecipeTemplateSection
+          isLoggedIn={isLoggedIn}
+          userTemplates={userRecipeTemplates}
+          userTemplatesLoading={userRecipeTemplatesLoading}
+          onApplyTemplate={onApplyRecipeTemplate}
+          onDeleteUserTemplate={onDeleteUserRecipeTemplate}
         />
       </details>
 
