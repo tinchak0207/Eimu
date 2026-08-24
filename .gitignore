@@ -65,3 +65,4 @@ next-env.d.ts
 # 部署用的业务 key 脚本：内含凭证，永不入库
 tools/.deploy-bizkey.sh
 .env*.local
+workbuddy-linux/
