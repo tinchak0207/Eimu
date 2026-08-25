@@ -1,0 +1,96 @@
+/* ╁━ AgentTemplateCarousel ── 面板内嵌版案例环 ━━
+   几何/材质类全部复用 ../case-showcase.css（case-stage / case-glow / case-slab /
+   case-side / case-face），这里只做两件事：
+   ① 缩小卡片默认尺寸变量（首帧/无 JS 兜底，水合后 measure() 用实测值覆写）；
+   ② 卡面文字排版（模板卡没有照片，正面是一层磨砂底 + 文本）。 */
+
+.atc-stage {
+  --case-card-w: 300px;
+  --case-card-h: 324px;
+  --case-radius: 468px;
+  height: 389px; /* = card-h × 1.2，留出抬升与落影余量 */
+}
+
+/* 模板卡可整卡点击启动：正面卡给可点击语义（覆盖共享样式里舞台的 grab）。 */
+.atc-stage .case-slab[data-front="true"] {
+  cursor: pointer;
+}
+
+/* ── 卡面：磨砂底 + 文本 ──
+   case-face 自带 filter: blur(--case-blur)（景深模糊），文字随之发虚是刻意的，
+   与首页照片卡的景深感同源。 */
+.atc-media {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
+  padding: calc(var(--case-card-w, 300px) * 0.09);
+  /* 浅色磨砂底：侧卡叠在浅背景上时文字仍可读，同时保住玻璃的透感。 */
+  background:
+    linear-gradient(
+      155deg,
+      rgba(255, 255, 255, 0.9) 0%,
+      rgba(255, 255, 255, 0.72) 46%,
+      rgba(240, 246, 255, 0.66) 100%
+    );
+}
+
+.atc-chip {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: rgba(0, 122, 255, 0.1);
+  color: #007aff;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.atc-name {
+  margin: 0;
+  color: rgba(0, 0, 0, 0.88);
+  font-size: calc(var(--case-card-w, 300px) * 0.082);
+  font-weight: 700;
+  line-height: 1.22;
+  letter-spacing: -0.01em;
+  word-break: break-word;
+}
+
+.atc-pain {
+  margin: 0;
+  color: rgba(0, 0, 0, 0.6);
+  font-size: 13px;
+  line-height: 1.55;
+  word-break: break-word;
+}
+
+.atc-meta {
+  margin: 2px 0 0;
+  color: rgba(0, 122, 255, 0.78);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+/* ── 空态 ── */
+.atc-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 180px;
+  padding: 24px;
+}
+
+.atc-empty p {
+  margin: 0;
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 13px;
+  line-height: 1.6;
+}

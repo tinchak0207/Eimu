@@ -46,7 +46,7 @@ import { getInitialSuggestions, type Suggestion } from "@/lib/suggestions";
 import type { ReferenceImage } from "@/lib/image-types";
 import type { ProfessionalRunConfig } from "@/components/pro-workstation/InvokeInspiredWorkstation";
 import { CanvasChatWorkstation } from "@/components/canvas-workstation/CanvasChatWorkstation";
-import { AgentTemplateGallery } from "@/components/canvas-workstation/AgentTemplateGallery";
+import { AgentTemplateCarousel } from "@/components/canvas-workstation/AgentTemplateCarousel";
 import { applyTemplateToCanvas } from "@/components/canvas-workstation/agent-template-canvas";
 import { AGENT_TEMPLATES, type AgentTemplate } from "@/lib/agent-templates";
 import { useAgentParamReflect, AGENT_PARAM_LABELS } from "@/hooks/use-agent-param-reflect";
@@ -529,7 +529,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
                   inCanvasWorkstation={inCanvasWorkstation}
                   isLoading={isLoading}
                   canvasHost={canvasHost}
-                  {...(showAgentTemplateGallery ? { overlayContent: <AgentTemplateGallery templates={AGENT_TEMPLATES} onUseTemplate={handleUseAgentTemplate} /> } : {})}
+                  {...(showAgentTemplateGallery ? { overlayContent: <AgentTemplateCarousel templates={AGENT_TEMPLATES} onUseTemplate={handleUseAgentTemplate} /> } : {})}
                 >
                   {(chatHeaderExtra) => (
                     <>
