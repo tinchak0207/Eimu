@@ -140,7 +140,7 @@ function CarouselRing({ templates, onUseTemplate }: AgentTemplateCarouselProps) 
   const reduceRef = useRef(false);
 
   const radiusRef = useRef(468);
-  const cardWRef = useRef(300);
+  const cardWRef = useRef(400);
   const dragDegPerPxRef = useRef(0.14);
 
   const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -157,8 +157,8 @@ function CarouselRing({ templates, onUseTemplate }: AgentTemplateCarouselProps) 
     const stage = stageRef.current;
     if (!stage) return;
     const stageWidth = stage.clientWidth || 420;
-    const cardW = Math.min(Math.max(stageWidth * 0.66, 220), 320);
-    const cardH = Math.round(cardW * 1.08);
+    const cardW = Math.min(Math.max(stageWidth * 0.72, 260), 420);
+    const cardH = Math.round(cardW * 1.18);
     const radius = cardW * 0.78 * RADIUS_SCALE;
 
     radiusRef.current = radius;
@@ -477,10 +477,23 @@ function CarouselRing({ templates, onUseTemplate }: AgentTemplateCarouselProps) 
           <div className="case-side case-side-r" aria-hidden="true" />
           <div className="case-face">
             <div className="atc-media">
-              <span className="atc-chip">{AGENT_TEMPLATE_DOMAIN_LABELS[template.domain]}</span>
-              <h3 className="atc-name">{template.name}</h3>
-              <p className="atc-pain">{template.painPoint}</p>
-              <p className="atc-meta">{pipelineSummary(template)}</p>
+              {/* 上半海報區：領域漸變 + 大字水印 + 步驟鏈。視覺主體在這裡——
+                  純文字卡讀起來像沒載入完（2026-08-25 用戶驗收）。 */}
+              <div className={`atc-poster bg-gradient-to-br ${template.accent}`}>
+                <span className="atc-watermark" aria-hidden="true">
+                  {AGENT_TEMPLATE_DOMAIN_LABELS[template.domain]}
+                </span>
+                <span className="atc-flow" aria-hidden="true">
+                  {template.pipeline.steps.map((s) => s.name).join(" → ")}
+                </span>
+              </div>
+              {/* 下半文字區：垂直置中，不再頭重腳輕。 */}
+              <div className="atc-body">
+                <span className="atc-chip">{AGENT_TEMPLATE_DOMAIN_LABELS[template.domain]}</span>
+                <h3 className="atc-name">{template.name}</h3>
+                <p className="atc-pain">{template.painPoint}</p>
+                <p className="atc-meta">{pipelineSummary(template)}</p>
+              </div>
             </div>
             {/* 材質層棧照抄首頁（CaseShowcase L775-781）：掠射亮線 + 表面光層。
                 paint() 每幀寫的 --case-sheen/--case-sheen-x/--case-rim-l/--case-rim-r

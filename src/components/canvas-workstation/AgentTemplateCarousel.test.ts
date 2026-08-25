@@ -69,8 +69,8 @@ test("carousel reuses the homepage case-showcase CSS and physics", () => {
   assert.match(source, /"ArrowLeft"/);
   // 無 WebGL 依賴（無圖可餵）。
   assert.doesNotMatch(source, /CaseGlassWebGL/);
-  // 面板場景縮小卡片尺寸變數。
-  assert.match(css, /--case-card-w: 300px/);
+  // 面板場景縮小卡片尺寸變數（2026-08-25 放大：主卡佔面板 ≥50%）。
+  assert.match(css, /--case-card-w: 400px/);
 });
 
 test("card layer stack matches the homepage: edge + surface(sheen/rim) must exist", () => {
@@ -87,7 +87,13 @@ test("card layer stack matches the homepage: edge + surface(sheen/rim) must exis
   // 文字層不吞指針：點擊/拖拽由 slab 承接。
   assert.match(css, /\.atc-media \{[^}]*pointer-events: none/s);
   // 置中外殼：宿主 overlay 非 flex 容器，frame 負責鋪滿 + 垂直置中。
-  assert.match(css, /\.atc-frame \{[^}]*position: absolute[^}]*align-items: center[^}]*justify-content: center/s);
+  // 2026-08-25 改 relative：不依賴宿主定位上下文（absolute 在無 stacking
+  // context 的宿主裡會相對更外層定位，拖拽命中區也會錯位）。
+  assert.match(css, /\.atc-frame \{[^}]*position: relative[^}]*align-items: center[^}]*justify-content: center/s);
+  // 海報區：視覺主體層必須存在且不吞指針（atc-media 全層 pointer-events:none 已覆蓋）。
+  assert.match(source, /atc-poster/);
+  assert.match(source, /atc-watermark/);
+  assert.match(source, /atc-flow/);
 });
 
 test("playground wires the carousel in place of the old gallery", () => {

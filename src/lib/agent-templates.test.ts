@@ -63,6 +63,10 @@ test("card copy is present and within reasonable length", () => {
       template.initialPrompt.length >= 30 && template.initialPrompt.length <= 80,
       `${template.id} initialPrompt length ${template.initialPrompt.length}`,
     );
+    // 卡面海報區漸變（2026-08-25 視覺主體）：8 張都必須有 Tailwind 三色類。
+    assert.match(template.accent, /^from-\[#/, `${template.id} accent gradient class`);
+    assert.match(template.accent, /via-\[#/);
+    assert.match(template.accent, /to-\[#/);
   }
 });
 

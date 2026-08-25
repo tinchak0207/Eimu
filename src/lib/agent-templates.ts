@@ -46,6 +46,8 @@ export interface AgentTemplate extends RecipeTemplate {
   initialPrompt: string;
   /** 多步驟流水线蓝图。 */
   pipeline: AgentPipeline;
+  /** 卡面海報區漸變（Tailwind 三色類，格式同 showcase-cases 的 gradient）。 */
+  accent: string;
 }
 
 /**
@@ -72,6 +74,7 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
     name: "小说影视化",
     note: "小说到成片全链：拆剧本→角色圣经→美术圣经→锁构图分镜→关键帧，工业流水线跑法",
     domain: "novel",
+    accent: "from-[#1a1c23] via-[#3B2F4A] to-[#8B7355]",
     painPoint: "文本到分镜全靠人肉，断点在情绪连续性和角色漂移",
     initialPrompt:
       "把我的小说影视化：（贴章节或写题材与主角），先拆结构化剧本，再锁角色和场景资产，最后出分镜关键帧，一步步来。",
@@ -147,6 +150,7 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
     name: "IP视觉包",
     note: "网文 IP 全案视觉：世界观锚定→主角色卡→名场面组图→封面主视觉一条链出齐",
     domain: "novel",
+    accent: "from-[#0F1B2D] via-[#1F3A5F] to-[#4A7C9B]",
     painPoint: "IP 立项要整套视觉物料，约稿拼凑一周，风格还各说各话",
     initialPrompt:
       "我的网文要整套 IP 视觉包：（写世界观与主角），先锁世界观风格锚，再出主角设定卡、名场面组图和封面主视觉。",
@@ -220,6 +224,7 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
     name: "新品上市包",
     note: "新品素材流水线：产品锁→场景图→模特图→主视觉→多画幅批量，一次锁定全线一致",
     domain: "ecommerce",
+    accent: "from-[#3D2314] via-[#8C5A3B] to-[#E8A87C]",
     painPoint: "一套上市素材散做几十张，商品形变和风格漂移改到崩溃",
     initialPrompt:
       "我的新品要全套上市素材：（写商品与核心卖点），先锁产品资产，再依次出场景图、模特图、主视觉和多画幅批量。",
@@ -291,6 +296,7 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
     name: "模特种草线",
     note: "平铺图到种草图流水线：服装提取→虚拟试穿→一致性网格→详情页排版",
     domain: "ecommerce",
+    accent: "from-[#0E3B2E] via-[#2E7D64] to-[#9BD4B4]",
     painPoint: "模特档期贵难约，一套种草图等两周还接不上详情页",
     initialPrompt:
       "给（写商品，如针织开衫）做模特种草流水线：从平铺图提取服装，虚拟试穿出模特种草图，再拼一致性网格和详情页。",
@@ -343,6 +349,7 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
     name: "剧本视觉化",
     note: "剧本到视觉资产工业链：拆场→分镜→主演角色卡→CP剧照→竖屏海报，门禁层层放行",
     domain: "shortdrama",
+    accent: "from-[#2B0A12] via-[#7A1F3D] to-[#D46A6E]",
     painPoint: "剧本到开拍全靠嘴对齐，导演脑补的和你不是同一部片",
     initialPrompt:
       "把我的短剧剧本做成视觉资产包：（贴剧本或写剧情梗概与主演设定），按拆场→分镜→角色卡→CP剧照→竖屏海报走完。",
@@ -403,6 +410,7 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
     name: "投放海报线",
     note: "短剧投放物料流水线：剧设锚定→主演海报→CP对戏图→信息流切片封面批量",
     domain: "shortdrama",
+    accent: "from-[#0D1B3E] via-[#2E3A8C] to-[#7E6BD9]",
     painPoint: "投放封面靠从成片截图截到崩，一套物料跟不上日更投放",
     initialPrompt:
       "给我的短剧做投放物料流水线：（写剧设与主演形象），先锁视觉基调，再出主演海报、CP对戏图和信息流切片封面批量。",
@@ -455,6 +463,7 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
     name: "策展式创作",
     note: "主题到个展全链：情绪板→风格锚→成组作品→展陈主视觉，一致性当一等公民",
     domain: "art",
+    accent: "from-[#2A1E5C] via-[#5E5AA8] to-[#A8C6E8]",
     painPoint: "系列作品画到第八张风格散架，个展始终立不起来",
     initialPrompt:
       "以（写你的主题，如潮汐与遗忘）做策展式创作：先出情绪板和风格锚定，再出成组作品，最后出展览主视觉。",
@@ -507,6 +516,7 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
     name: "风格深研线",
     note: "艺术家风格深度内化流水线：解构→临摹对拍→变体矩阵→原创成组",
     domain: "art",
+    accent: "from-[#4A3728] via-[#9C7A5B] to-[#E3C9A8]",
     painPoint: "风格迁移只学到滤镜皮，学不到艺术家观察世界的方式",
     initialPrompt:
       "深度内化（写艺术家或流派，如莫奈）的风格：先解构其语言要素，再临摹对拍验证，然后变体矩阵测试，最后原创成组。",

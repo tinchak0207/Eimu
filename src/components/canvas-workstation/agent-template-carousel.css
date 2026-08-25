@@ -1,32 +1,32 @@
 /* ╁━ AgentTemplateCarousel ── 面板内嵌版案例环 ━━
    几何/材质类全部复用 ../case-showcase.css（case-stage / case-glow / case-slab /
-   case-side / case-face），这里只做两件事：
-   ① 缩小卡片默认尺寸变量（首帧/无 JS 兜底，水合后 measure() 用实测值覆写）；
-   ② 卡面文字排版（模板卡没有照片，正面是一层磨砂底 + 文本）。 */
+   case-side / case-face / case-edge / case-surface），这里只做三件事：
+   ① 卡面排版：上半海报区（领域渐变 + 水印 + 步骤链）+ 下半文字区；
+   ② 尺寸变量（首帧/无 JS 兜底，水合后 measure() 用实测值覆写）；
+   ③ 置中壳。 */
 
 /* ── 置中外殼：宿主 .canvas-ws-overlay 是 fixed + h-[100dvh] 的普通 div ──
-   （非 flex/grid 容器），case-stage 直接放進去 top 貼 0、垂直位置全錯。
-   atc-frame 鋪滿 overlay 並把 stage 居中；stage 保持自身 position:relative，
-   接觸影（.case-stage::after）跟著置中。 */
+   （非 flex/grid 容器）。atc-frame 用 relative 而非 absolute：不依賴宿主提供
+   定位上下文（宿主若無隱式 stacking context，absolute 會相對更外層定位出錯），
+   自身撐滿 + flex 置中最穩。 */
 .atc-frame {
-  position: absolute;
-  inset: 0;
+  position: relative;
+  width: 100%;
+  height: 100dvh;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .atc-frame .atc-stage {
-  /* 面板裡寬度收斂：首頁 stage 是 width:100%（.case-stage 自帶），
-     在 overlay 全寬下側卡會溢出到屏幕外，收進 640px。 */
-  width: min(100%, 640px);
+  width: min(100%, 760px);
 }
 
 .atc-stage {
-  --case-card-w: 300px;
-  --case-card-h: 324px;
-  --case-radius: 468px;
-  height: 389px; /* = card-h × 1.2，留出抬升与落影余量 */
+  --case-card-w: 400px;
+  --case-card-h: 472px;
+  --case-radius: 624px;
+  height: 566px; /* = card-h × 1.2，留出抬升与落影余量 */
 }
 
 /* 模板卡可整卡点击启动：正面卡给可点击语义（覆盖共享样式里舞台的 grab）。 */
@@ -34,9 +34,9 @@
   cursor: pointer;
 }
 
-/* ── 卡面：磨砂底 + 文本 ──
-   case-face 自带 filter: blur(--case-blur)（景深模糊），文字随之发虚是刻意的，
-   与首页照片卡的景深感同源。 */
+/* ── 卡面：上海报 + 下文字 ──
+   case-face 自带 filter: blur(--case-blur)（景深模糊），侧卡随之发虚是刻意的。
+   全层 pointer-events:none——点击/拖拽由 .case-slab 承接。 */
 .atc-media {
   position: absolute;
   inset: 0;
@@ -44,24 +44,63 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  gap: 10px;
-  padding: calc(var(--case-card-w, 300px) * 0.09);
-  /* 点击/拖拽由 .case-slab 的 pointer handlers 承接：文字层不吞指针。 */
   pointer-events: none;
-  /* 浅色磨砂底：侧卡叠在浅背景上时文字仍可读，同时保住玻璃的透感。 */
-  background:
-    linear-gradient(
-      155deg,
-      rgba(255, 255, 255, 0.9) 0%,
-      rgba(255, 255, 255, 0.72) 46%,
-      rgba(240, 246, 255, 0.66) 100%
-    );
-  /* 冷光内衬（同值照抄首页 .case-glass-webgl-fallback 的墙圈层次）：
-     文字卡不上 GL，这圈 inset 冷光补上厚玻璃边缘的折射暗示。 */
+  background: rgba(255, 255, 255, 0.94);
+  /* 冷光内衬（同值照抄首页 .case-glass-webgl-fallback 的墙圈层次）。 */
   box-shadow:
     inset 0 0 calc(var(--case-band-w, 20px) * 0.30) calc(var(--case-band-w, 20px) * 0.10) rgba(214, 236, 255, 0.13),
     inset 0 0 calc(var(--case-band-w, 20px) * 0.62) calc(var(--case-band-w, 20px) * 0.30) rgba(198, 226, 250, 0.06);
+}
+
+/* ── 上半海报区（~55%）：领域渐变底 + 大字水印 + 步骤链 ──
+   模板没有实拍图，海报区就是视觉主体——纯文字卡读起来像没加载完。 */
+.atc-poster {
+  position: relative;
+  flex: 0 0 55%;
+  min-height: 0;
+  display: flex;
+  align-items: flex-end;
+  padding: calc(var(--case-card-w, 400px) * 0.07);
+  overflow: hidden;
+  /* 深色渐变与下半白底形成卡内明暗对比，侧卡景深衰减也随accent变明显。 */
+  background-blend-mode: normal;
+}
+
+/* 领域大字水印：压在渐变上的浮雕感，非标题。 */
+.atc-watermark {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -58%);
+  font-size: calc(var(--case-card-w, 400px) * 0.30);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  color: rgba(255, 255, 255, 0.16);
+  text-shadow: 0 2px 24px rgba(0, 0, 0, 0.18);
+  user-select: none;
+}
+
+/* 步骤链：海报区底部的流水线一览，白色小字横排可换行。 */
+.atc-flow {
+  position: relative;
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.6;
+  word-break: break-word;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.35);
+}
+
+/* ── 下半文字区（~45%）：垂直置中，不再头重脚轻 ── */
+.atc-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  padding: calc(var(--case-card-w, 400px) * 0.07);
 }
 
 .atc-chip {
@@ -81,7 +120,7 @@
 .atc-name {
   margin: 0;
   color: rgba(0, 0, 0, 0.88);
-  font-size: calc(var(--case-card-w, 300px) * 0.082);
+  font-size: calc(var(--case-card-w, 400px) * 0.072);
   font-weight: 700;
   line-height: 1.22;
   letter-spacing: -0.01em;
