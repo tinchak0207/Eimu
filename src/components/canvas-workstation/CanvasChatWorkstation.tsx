@@ -12,13 +12,16 @@ import { useChatPanel } from "./use-chat-panel";
 const CanvasEmbed = dynamic(() => import("@/components/canvas/CanvasEmbed").then((m) => m.CanvasEmbed), { ssr: false });
 
 export interface CanvasChatWorkstationProps {
-  /** ImagePlayground 的派生值：displayMode === "agent" && resultMode === "canvas" && !showProfessionalMode。 */
+  /** ImagePlayground 的派生值：displayMode === "agent" && !showProfessionalMode。 */
   inCanvasWorkstation: boolean;
   isLoading: boolean;
   /** useCanvasChat 的回傳值（SSE 事件餵回畫布的 host）。 */
   canvasHost: UseCanvasChatReturn;
-  /** 結果面板 mode 的 setter——模式狀態機仍歸 ImagePlayground 所有。 */
-  setResultMode: (mode: "image" | "canvas") => void;
+  /**
+   * 畫布初始態內容（2026-08-25 助理模板庫）：canvas 空且無對話時，
+   * overlay 內容換成它（模板庫）而不是空畫布。有值時 CanvasEmbed 不渲染。
+   */
+  overlayContent?: ReactNode;
   /**
    * 面板內容（D-12 撤銷條 + PromptInput）。收合按鈕（chatHeaderExtra）由面板
    * 兩態決定，經 render prop 回傳給內容接線——面板狀態是本組件的私有域。
@@ -37,7 +40,7 @@ export function CanvasChatWorkstation({
   inCanvasWorkstation,
   isLoading,
   canvasHost,
-  setResultMode,
+  overlayContent,
   children,
 }: CanvasChatWorkstationProps) {
   const { chatPanelState, setChatPanelState, chatPanelWidth, setChatPanelWidth, chatPanelDragRef } = useChatPanel();
@@ -159,7 +162,9 @@ export function CanvasChatWorkstation({
       {/* 畫布工作站：畫布吃滿全場（遼闊是預設，不再塞右欄縫裡），聊天卡原地
           換裝成左側固定面板——DOM 不搬家，SSE 會話與輸入狀態零丟失。
           面板不能蓋住畫布左緣的節點：整個 overlay 向右 dock，left = 0.75rem
-          + 面板寬 + 12px 間隙（--ce-dock-left 跟隨面板寬度過渡，動畫同步）。 */}
+          + 面板寬 + 12px 間隙（--ce-dock-left 跟隨面板寬度過渡，動畫同步）。
+          2026-08-25 canvas 常駐化：agent 模式右側永遠是這個 overlay，
+          初始態（canvas 空）以 overlayContent（模板庫）代替空畫布。 */}
       {inCanvasWorkstation && (
         <div
           className="canvas-ws-overlay fixed right-0 top-0 z-50 h-[100dvh] bg-[#F2F2F7]"
@@ -170,7 +175,7 @@ export function CanvasChatWorkstation({
             } as CSSProperties
           }
         >
-          <CanvasEmbed canvas={canvasHost} expanded onClose={() => setResultMode("image")} />
+          {overlayContent ?? <CanvasEmbed canvas={canvasHost} expanded />}
         </div>
       )}
       {/* min-w-0 is load-bearing: an auto-sized grid column takes its

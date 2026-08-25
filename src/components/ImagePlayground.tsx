@@ -46,6 +46,9 @@ import { getInitialSuggestions, type Suggestion } from "@/lib/suggestions";
 import type { ReferenceImage } from "@/lib/image-types";
 import type { ProfessionalRunConfig } from "@/components/pro-workstation/InvokeInspiredWorkstation";
 import { CanvasChatWorkstation } from "@/components/canvas-workstation/CanvasChatWorkstation";
+import { AgentTemplateGallery } from "@/components/canvas-workstation/AgentTemplateGallery";
+import { applyTemplateToCanvas } from "@/components/canvas-workstation/agent-template-canvas";
+import { AGENT_TEMPLATES, type AgentTemplate } from "@/lib/agent-templates";
 import { useAgentParamReflect, AGENT_PARAM_LABELS } from "@/hooks/use-agent-param-reflect";
 
 // workstation.css 有意「不」在这里 import：它是 ~37KB 的专业模式专用样式，
@@ -80,6 +83,10 @@ export function ImagePlayground({ suggestions }: { suggestions: Suggestion[] }) 
   const [animState, setAnimState] = useState<"idle" | "exit" | "enter">("idle");
   // 别的页面（D-18 图库卡）用 ?agent=1&q= 交接过来的一句话。
   const [agentSeed, setAgentSeed] = useState("");
+  // 2026-08-25 模板庫：點卡注入 pending（nonce 讓「換一張卡」也是新注入）。
+  const [agentTemplateInjection, setAgentTemplateInjection] = useState<{ text: string; nonce: number } | null>(null);
+  // 模板庫退場旗標：發出第一條用戶消息（模板注入或手打）即收起，之後不再出現。
+  const [agentTemplateDismissed, setAgentTemplateDismissed] = useState(false);
   // wish 插件深链（?agent=1&session=<uuid>）：落地后直开该会话而非新开对话。
   const [initialAgentSessionId, setInitialAgentSessionId] = useState("");
   // 只有从普通模式 LoRA 引导末步「前往专业模式」进入时才为 true，触发专业模式 LoRA 教学
@@ -101,8 +108,9 @@ export function ImagePlayground({ suggestions }: { suggestions: Suggestion[] }) 
 // PixAI edit/upscale results are delivered straight to the result canvas on
 // the right; they do not go through the normal generation queue.
 const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
-  // v3 embed：右側結果面板 mode。agent 開始建畫布（收到 canvas.plan）→ 切 canvas。
-  const [resultMode, setResultMode] = useState<"image" | "canvas">("image");
+  // v3 embed：右側結果面板 mode。2026-08-25 canvas 常駐化：agent 模式右側
+  // 一進入就是 canvas（模板庫或畫布），不再有「AI 助理左邊、圖片結果右邊」
+  // 的中間態。非 agent 模式（generate/edit/upscale）維持 ImageDisplay。
   // 畫布工作站（2026-08-16，暴君裁定「擠」）：畫布模式 = 全場畫布，聊天卡
   // 變成左側浮動面板，expanded|rail 兩態 + 右緣拖寬，localStorage 記憶。
   // 遼闊是預設，不是獎勵——不再有「compact 嵌右欄」這種把畫布塞縫裡的狀態。
@@ -111,14 +119,9 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
   // 用 ref 解開循環依賴：onCanvasEvent 轉交 canvasHostRef；canvasHost 後建，餵回 ref。
   const canvasHostRef = useRef<UseCanvasChatReturn | null>(null);
   const handleCanvasEvent = useCallback((event: AgentSseEvent) => {
-    // 第一次 workflow_start 調用即切畫布：不等 canvas.plan/節點事件落地，agent 一發起
-    // 工作流右側面板就進 canvas 模式（黏性旗標照舊，畫布清空也不會被踢回圖片模式）。
+    // 畫布資料管線只吃 canvas 結構事件，tool.invoke 不入 reducer
+    // （模式切換已不需要：canvas 常駐化後 agent 模式右側恆為 canvas）。
     if (event.name === "tool.invoke") {
-      if (event.data.tool === "workflow_start") {
-        enteredCanvasRef.current = true;
-        setResultMode("canvas");
-      }
-      // 畫布資料管線只吃 canvas 結構事件，tool.invoke 不入 reducer。
       return;
     }
     canvasHostRef.current?.feedCanvasEvent(event);
@@ -127,8 +130,28 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const canvasHost = useCanvasChat(currentSessionId);
   canvasHostRef.current = canvasHost;
-  // canvas 黏性旗標：同一 agent session 內進過畫布就維持畫布，避免「新建画布」清空後被踢回圖片模式。
-  const enteredCanvasRef = useRef(false);
+
+  // 模板庫只在「畫布空且無對話」的初始態出現：有任何節點/計畫（模板鋪過、
+  // agent 建過、或歷史專案恢復）或已發過消息（agentTemplateDismissed）就讓位。
+  const showAgentTemplateGallery =
+    displayMode === "agent" &&
+    !agentTemplateDismissed &&
+    canvasHost.nodes.length === 0 &&
+    canvasHost.plans.length === 0;
+
+  /**
+   * 2026-08-25 模板卡點擊（卡即動作）：
+   * ① initialPrompt 經既有 useAgentChat 鏈路自動發出（PromptInput →
+   *    AgentChatSurface 的 agentInjection：等連線 open 才 send，會話未開先 autoStart）。
+   * ② 模板 slots 經 recipeTemplateToRecallConfig → templateToCanvasLayout
+   *    → useCanvasChat.addNodes 鋪成 workflow，等 agent 修改。
+   * ③ 首條消息落地即收起畫廊（onUserMessage）。
+   */
+  const handleUseAgentTemplate = useCallback((template: AgentTemplate) => {
+    setAgentTemplateInjection({ text: template.initialPrompt, nonce: Date.now() });
+    applyTemplateToCanvas(canvasHostRef.current?.addNodes, template);
+    setAgentTemplateDismissed(true);
+  }, []);
   const [progressStartedAt, setProgressStartedAt] = useState<number>();
   const [progressDurationMs, setProgressDurationMs] = useState(NORMAL_PROGRESS_DURATION_MS);
   const [showProgress, setShowProgress] = useState(false);
@@ -143,32 +166,11 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
     return () => document.body.classList.remove("pro-mode-active");
   }, [showProfessionalMode]);
 
-  // v3 embed：畫布只屬於 AI 助理模式。agent 開始建畫布（有節點/計畫）→ 右側面板切 CanvasEmbed。
-  // 畫布有節點時維持 canvas；畫布清空才回 ImageDisplay。
-  // 離開 agent 面（generate/edit/upscale）一律回到 ImageDisplay——畫布不會因為
-  // 之前助理會話的節點殘留或專案恢復而在非助理模式下冒出來。
-  useEffect(() => {
-    if (displayMode !== "agent") {
-      // 離開 agent 面：畫布不再屬於當前檢視，一律回圖片模式。
-      enteredCanvasRef.current = false;
-      setResultMode("image");
-      return;
-    }
-    // 同一 agent session 內只要進過畫布就維持畫布 —— 剛按「新建画布」時畫布是空的，
-    // 若只看 nodes/plans 就會把使用者踢回圖片模式，看不到畫布了。
-    if (enteredCanvasRef.current) {
-      setResultMode("canvas");
-      return;
-    }
-    if (canvasHost.nodes.length > 0 || canvasHost.plans.length > 0) {
-      enteredCanvasRef.current = true;
-      setResultMode("canvas");
-    } else {
-      setResultMode("image");
-    }
-  }, [displayMode, canvasHost.nodes.length, canvasHost.plans.length]);
-
-  const inCanvasWorkstation = displayMode === "agent" && resultMode === "canvas" && !showProfessionalMode;
+  // 2026-08-25 canvas 常駐化：右側面板 mode 由 displayMode 唯一決定——agent 模式
+  // 恆為 canvas（模板庫→畫布），非 agent 模式恆為 ImageDisplay。原黏性旗標/
+  // workflow_start 切換/節點數回退等中間態邏輯全部收斂刪除。
+  const resultMode: "image" | "canvas" = displayMode === "agent" ? "canvas" : "image";
+  const inCanvasWorkstation = displayMode === "agent" && !showProfessionalMode;
   // ─── 畫布工作站：畫布模式鎖頁面捲動（面板記憶載入/持久化在 use-chat-panel）───
   useEffect(() => {
     if (!inCanvasWorkstation) return;
@@ -178,11 +180,6 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
       document.body.style.overflow = prev;
     };
   }, [inCanvasWorkstation]);
-
-  // 換 agent 會話 = 畫布重來：黏性旗標也要重算，否則新會話的空畫布會沿用上一會話的 canvas 模式。
-  useEffect(() => {
-    enteredCanvasRef.current = false;
-  }, [currentSessionId]);
 
   const redirectToGithub = useCallback(() => {
     window.location.href = "/api/auth/github/start";
@@ -532,7 +529,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
                   inCanvasWorkstation={inCanvasWorkstation}
                   isLoading={isLoading}
                   canvasHost={canvasHost}
-                  setResultMode={setResultMode}
+                  {...(showAgentTemplateGallery ? { overlayContent: <AgentTemplateGallery templates={AGENT_TEMPLATES} onUseTemplate={handleUseAgentTemplate} /> } : {})}
                 >
                   {(chatHeaderExtra) => (
                     <>
@@ -612,6 +609,8 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
                     onCanvasEvent={handleCanvasEvent}
                     canvasStateProvider={handleCanvasSummary}
                     onSessionChange={setCurrentSessionId}
+                    agentInjection={agentTemplateInjection}
+                    onUserMessage={() => setAgentTemplateDismissed(true)}
                   />
                     </>
                   )}

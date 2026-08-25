@@ -108,6 +108,14 @@ export interface AgentChatSurfaceProps {
   canvasStateProvider?: () => unknown;
   /** 當 agent session 變化時通知父組件（用於同步清空畫布）。 */
   onSessionChange?: (sessionId: string | null) => void;
+  /**
+   * 2026-08-25 模板庫點卡：要自動發出的第一條用戶消息（模板 initialPrompt）。
+   * 與 initialPrompt（半句話藥丸，點了才送）不同：點模板卡本身就是發送動作，
+   * 這條直接送出，不讓用戶再點一次發送。nonce 變化即觸發一次。
+   */
+  agentInjection?: { text: string; nonce: number } | null;
+  /** 用戶發出消息時回調（上層收起右側模板庫）。 */
+  onUserMessage?: () => void;
 }
 
 export function AgentChatSurface({
@@ -121,6 +129,8 @@ export function AgentChatSurface({
   onCanvasEvent,
   canvasStateProvider,
   onSessionChange,
+  agentInjection,
+  onUserMessage,
   onExit,
   headerExtra,
 }: AgentChatSurfaceProps) {
@@ -364,6 +374,20 @@ export function AgentChatSurface({
     setHistorySnapshot({ itemCount: resumable.itemCount, savedAt: resumable.savedAt });
     void resume();
   }, [resumable, resume]);
+
+  /**
+   * 2026-08-25 模板注入：會話連上後自動發出。必須等 connection === "open"：
+   * autoStart/resume 建號是非同步的，沒連上就 send 等於把用戶的發送動作丟了。
+   * ref 記 nonce：只在拿到新的注入時發一次，connection 抖動不重發。
+   */
+  const injectedNonceRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!agentInjection || injectedNonceRef.current === agentInjection.nonce) return;
+    if (connection !== "open") return;
+    injectedNonceRef.current = agentInjection.nonce;
+    onUserMessage?.();
+    void send(agentInjection.text);
+  }, [agentInjection, connection, send, onUserMessage]);
 
   /**
    * D-26 首张锚定。第一张图 + 产出它的那次工具调用参数都在 transcript 里，
@@ -611,6 +635,7 @@ export function AgentChatSurface({
           onStopGeneration={state.turnActive ? onStopGeneration : undefined}
           prefill={prefill}
           onPrefillConsumed={clearPrefill}
+          onFirstUserMessage={onUserMessage}
         />
       </div>
     </div>

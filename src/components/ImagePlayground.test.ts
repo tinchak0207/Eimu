@@ -75,9 +75,12 @@ test("the result column is the canvas alone, with no duplicated chrome", () => {
   // 2026-08-16 暴君裁定「擠」：畫布模式 = 全場畫布工作站（canvas-ws-overlay），
   // 不再有 compact 嵌右欄；聊天卡變左側固定面板（canvas-chat-panel）。
   // 2026-08-21：overlay 向右 dock（right-0 + --ce-dock-left），面板不再蓋住畫布左緣節點。
-  assert.match(source, /inCanvasWorkstation = displayMode === "agent" && resultMode === "canvas" && !showProfessionalMode/);
+  // 2026-08-25 canvas 常駐化：agent 模式右側恆為 canvas（resultMode 由 displayMode
+  // 派生，不再有「助理左邊、圖片右邊」的中間態），CanvasEmbed 的關閉鈕退場。
+  assert.match(source, /const resultMode: "image" \| "canvas" = displayMode === "agent" \? "canvas" : "image"/);
+  assert.match(source, /inCanvasWorkstation = displayMode === "agent" && !showProfessionalMode/);
   assert.match(source, /canvas-ws-overlay fixed right-0 top-0 z-50 h-\[100dvh\] bg-\[#F2F2F7\]/);
-  assert.match(source, /<CanvasEmbed canvas=\{canvasHost\} expanded onClose=\{\(\) => setResultMode\("image"\)\}/);
+  assert.match(source, /\{overlayContent \?\? <CanvasEmbed canvas=\{canvasHost\} expanded \/>\}/);
   assert.match(source, /<ImageDisplay/);
   assert.match(source, /chatPanelState === "expanded" \? \{ width: chatPanelWidth \}/);
   assert.doesNotMatch(source, /ModelSelect/);

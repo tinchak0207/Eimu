@@ -385,7 +385,7 @@ export function ModelPicker({ models, value, onChange, resolution, durationSecon
           </span>
         </DropdownMenuSubTrigger>
         <DropdownMenuPortal>
-          <DropdownMenuSubContent>
+          <DropdownMenuSubContent className="lg:w-[24rem]">
             {imageModels.length > 0 && (
               <div className="flex items-center gap-1 px-2.5 pb-0.5 pt-1 text-ios-caption2 font-semibold text-[rgba(0,0,0,0.44)]">
                 <ImageIcon className="h-3 w-3" />

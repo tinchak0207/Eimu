@@ -44,6 +44,11 @@ export interface AgentChatPanelProps {
    * 这不是连接故障，状态行要说在等你选，而不是亮一颗「未连接」的灯。
    */
   awaitingChoice?: boolean;
+  /**
+   * 2026-08-25 模板庫：用户发出第一条消息时通知上層（收起右側模板庫）。
+   * 只在从空对话发出时触发——后续消息不再打扰。
+   */
+  onFirstUserMessage?: () => void;
 }
 
 const CONNECTION_META: Record<AgentChatPanelProps["connection"], { label: string; dotClass: string }> = {
@@ -73,6 +78,7 @@ function AgentChatPanelComponent({
   prefill,
   onPrefillConsumed,
   awaitingChoice = false,
+  onFirstUserMessage,
 }: AgentChatPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   // 输入区锚点：虚拟键盘弹起后，拿它判断「输入区是不是被键盘盖住了」。
@@ -315,7 +321,11 @@ function AgentChatPanelComponent({
         <div ref={composerAnchorRef} className="agent-composer-anchor">
           <AgentComposer
             disabled={composerDisabled}
-            onSend={onSend}
+            onSend={(text) => {
+              // 第一条用户消息 = 右侧模板库退场的时刻（首条消息落地即收起）。
+              if (items.length === 0) onFirstUserMessage?.();
+              onSend(text);
+            }}
             sessionId={sessionId}
             prefill={prefill}
             onPrefillConsumed={onPrefillConsumed}

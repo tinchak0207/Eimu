@@ -85,6 +85,13 @@ interface PromptInputProps {
    */
   onSessionChange?: (sessionId: string | null) => void;
   /**
+   * 2026-08-25 模板注入：要自動發出的第一條用戶消息（模板 initialPrompt）。
+   * 點模板卡本身就是發送動作，這條直送 agent，不預填讓用戶再點發送。
+   */
+  agentInjection?: { text: string; nonce: number } | null;
+  /** 用戶發出第一條消息時回調（上層收起右側模板庫）。 */
+  onUserMessage?: () => void;
+  /**
    * 畫布工作站浮動面板態：面板自己有確定高度（桌面全高 / 手機 46dvh 抽屜），
    * 聊天區改為填滿面板剩餘空間，由 transcript 內部滾動。仍然用
    * --agent-surface-height 固定高的話，60dvh 的聊天區塞進 46dvh 的抽屜，
@@ -174,6 +181,8 @@ export function PromptInput({
   onCanvasEvent,
   canvasStateProvider,
   onSessionChange,
+  agentInjection,
+  onUserMessage,
   fillAvailableHeight = false,
   chatHeaderExtra,
 }: PromptInputProps) {
@@ -572,6 +581,8 @@ export function PromptInput({
                 {...(onCanvasEvent ? { onCanvasEvent } : {})}
                 {...(canvasStateProvider ? { canvasStateProvider } : {})}
                 {...(onSessionChange ? { onSessionChange } : {})}
+                {...(agentInjection ? { agentInjection } : {})}
+                {...(onUserMessage ? { onUserMessage } : {})}
                 currentModelId={modelId}
               />
             </div>
