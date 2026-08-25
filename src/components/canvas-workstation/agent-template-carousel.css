@@ -1,78 +1,15 @@
-/* ╁━ AgentTemplateCarousel ── 面板内嵌版案例环 ━━
-   几何/材质类全部复用 ../case-showcase.css（case-stage / case-glow / case-slab /
-   case-side / case-face / case-edge / case-surface），这里只做三件事：
-   ① 卡面排版：上半海报区（领域渐变 + 水印 + 步骤链）+ 下半文字区；
-   ② 尺寸变量（首帧/无 JS 兜底，水合后 measure() 用实测值覆写）；
-   ③ 置中壳。 */
+/* ╁━ AgentTemplateCarousel ── 助理模板環 ╁━
+   本組件是 CaseShowcase.tsx 的逐行複製（2026-08-25 用戶裁定：複用 = 整複製改文字，
+   禁止造輪子），幾何/物理/材質/佈局全部由共享 ../case-showcase.css 提供。
+   這裡只有模板卡獨有的兩個卡面元素：領域大字水印 + 流水線步驟鏈。 */
 
-/* ── 置中外殼：宿主 .canvas-ws-overlay 是 fixed + h-[100dvh] 的普通 div ──
-   （非 flex/grid 容器）。atc-frame 用 relative 而非 absolute：不依賴宿主提供
-   定位上下文（宿主若無隱式 stacking context，absolute 會相對更外層定位出錯），
-   自身撐滿 + flex 置中最穩。 */
-.atc-frame {
-  position: relative;
-  width: 100%;
-  height: 100dvh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.atc-frame .atc-stage {
-  width: min(100%, 760px);
-}
-
-.atc-stage {
-  --case-card-w: 400px;
-  --case-card-h: 472px;
-  --case-radius: 624px;
-  height: 566px; /* = card-h × 1.2，留出抬升与落影余量 */
-}
-
-/* 模板卡可整卡点击启动：正面卡给可点击语义（覆盖共享样式里舞台的 grab）。 */
-.atc-stage .case-slab[data-front="true"] {
-  cursor: pointer;
-}
-
-/* ── 卡面：上海报 + 下文字 ──
-   case-face 自带 filter: blur(--case-blur)（景深模糊），侧卡随之发虚是刻意的。
-   全层 pointer-events:none——点击/拖拽由 .case-slab 承接。 */
-.atc-media {
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  pointer-events: none;
-  background: rgba(255, 255, 255, 0.94);
-  /* 冷光内衬（同值照抄首页 .case-glass-webgl-fallback 的墙圈层次）。 */
-  box-shadow:
-    inset 0 0 calc(var(--case-band-w, 20px) * 0.30) calc(var(--case-band-w, 20px) * 0.10) rgba(214, 236, 255, 0.13),
-    inset 0 0 calc(var(--case-band-w, 20px) * 0.62) calc(var(--case-band-w, 20px) * 0.30) rgba(198, 226, 250, 0.06);
-}
-
-/* ── 上半海报区（~55%）：领域渐变底 + 大字水印 + 步骤链 ──
-   模板没有实拍图，海报区就是视觉主体——纯文字卡读起来像没加载完。 */
-.atc-poster {
-  position: relative;
-  flex: 0 0 55%;
-  min-height: 0;
-  display: flex;
-  align-items: flex-end;
-  padding: calc(var(--case-card-w, 400px) * 0.07);
-  overflow: hidden;
-  /* 深色渐变与下半白底形成卡内明暗对比，侧卡景深衰减也随accent变明显。 */
-  background-blend-mode: normal;
-}
-
-/* 领域大字水印：压在渐变上的浮雕感，非标题。 */
+/* 领域大字水印：压在渐变上的浮雕感，非标题。尺寸跟随 --case-card-w 缩放。 */
 .atc-watermark {
   position: absolute;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -58%);
-  font-size: calc(var(--case-card-w, 400px) * 0.30);
+  font-size: calc(var(--case-card-w, 520px) * 0.24);
   font-weight: 800;
   letter-spacing: 0.08em;
   white-space: nowrap;
@@ -81,9 +18,13 @@
   user-select: none;
 }
 
-/* 步骤链：海报区底部的流水线一览，白色小字横排可换行。 */
+/* 步骤链：卡面底部的流水线一览，白色小字可换行。 */
 .atc-flow {
-  position: relative;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: calc(var(--case-card-w, 520px) * 0.06);
   color: rgba(255, 255, 255, 0.88);
   font-size: 13px;
   font-weight: 500;
@@ -92,69 +33,8 @@
   text-shadow: 0 1px 8px rgba(0, 0, 0, 0.35);
 }
 
-/* ── 下半文字区（~45%）：垂直置中，不再头重脚轻 ── */
-.atc-body {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 8px;
-  padding: calc(var(--case-card-w, 400px) * 0.07);
-}
-
-.atc-chip {
-  align-self: flex-start;
-  display: inline-flex;
-  align-items: center;
-  min-height: 22px;
-  padding: 0 10px;
-  border-radius: 999px;
-  background: rgba(0, 122, 255, 0.1);
-  color: #007aff;
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1.2;
-}
-
-.atc-name {
-  margin: 0;
-  color: rgba(0, 0, 0, 0.88);
-  font-size: calc(var(--case-card-w, 400px) * 0.072);
-  font-weight: 700;
-  line-height: 1.22;
-  letter-spacing: -0.01em;
-  word-break: break-word;
-}
-
-.atc-pain {
-  margin: 0;
-  color: rgba(0, 0, 0, 0.6);
-  font-size: 13px;
-  line-height: 1.55;
-  word-break: break-word;
-}
-
-.atc-meta {
-  margin: 2px 0 0;
-  color: rgba(0, 122, 255, 0.78);
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1.4;
-}
-
-/* ── 空态 ── */
-.atc-empty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 180px;
-  padding: 24px;
-}
-
-.atc-empty p {
-  margin: 0;
-  color: rgba(0, 0, 0, 0.45);
-  font-size: 13px;
-  line-height: 1.6;
+/* 面板内嵌场景：舞台宽度收敛（宿主 overlay 全宽下侧卡会溢出到屏幕外）。 */
+.agent-template-carousel .case-stage {
+  max-width: 76rem;
+  margin-inline: auto;
 }
