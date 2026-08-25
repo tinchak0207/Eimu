@@ -4,6 +4,24 @@
    ① 缩小卡片默认尺寸变量（首帧/无 JS 兜底，水合后 measure() 用实测值覆写）；
    ② 卡面文字排版（模板卡没有照片，正面是一层磨砂底 + 文本）。 */
 
+/* ── 置中外殼：宿主 .canvas-ws-overlay 是 fixed + h-[100dvh] 的普通 div ──
+   （非 flex/grid 容器），case-stage 直接放進去 top 貼 0、垂直位置全錯。
+   atc-frame 鋪滿 overlay 並把 stage 居中；stage 保持自身 position:relative，
+   接觸影（.case-stage::after）跟著置中。 */
+.atc-frame {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.atc-frame .atc-stage {
+  /* 面板裡寬度收斂：首頁 stage 是 width:100%（.case-stage 自帶），
+     在 overlay 全寬下側卡會溢出到屏幕外，收進 640px。 */
+  width: min(100%, 640px);
+}
+
 .atc-stage {
   --case-card-w: 300px;
   --case-card-h: 324px;
@@ -29,6 +47,8 @@
   justify-content: center;
   gap: 10px;
   padding: calc(var(--case-card-w, 300px) * 0.09);
+  /* 点击/拖拽由 .case-slab 的 pointer handlers 承接：文字层不吞指针。 */
+  pointer-events: none;
   /* 浅色磨砂底：侧卡叠在浅背景上时文字仍可读，同时保住玻璃的透感。 */
   background:
     linear-gradient(
@@ -37,6 +57,11 @@
       rgba(255, 255, 255, 0.72) 46%,
       rgba(240, 246, 255, 0.66) 100%
     );
+  /* 冷光内衬（同值照抄首页 .case-glass-webgl-fallback 的墙圈层次）：
+     文字卡不上 GL，这圈 inset 冷光补上厚玻璃边缘的折射暗示。 */
+  box-shadow:
+    inset 0 0 calc(var(--case-band-w, 20px) * 0.30) calc(var(--case-band-w, 20px) * 0.10) rgba(214, 236, 255, 0.13),
+    inset 0 0 calc(var(--case-band-w, 20px) * 0.62) calc(var(--case-band-w, 20px) * 0.30) rgba(198, 226, 250, 0.06);
 }
 
 .atc-chip {

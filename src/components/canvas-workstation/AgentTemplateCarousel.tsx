@@ -443,21 +443,26 @@ function CarouselRing({ templates, onUseTemplate }: AgentTemplateCarouselProps) 
   };
 
   return (
-    <div
-      ref={stageRef}
-      className="case-stage atc-stage"
-      role="group"
-      aria-roledescription="轮播"
-      aria-label={`助理模板，共 ${COUNT} 张`}
-      tabIndex={0}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={endDrag}
-      onPointerCancel={endDrag}
-      onKeyDown={onKeyDown}
-    >
-      <div className="case-glow" aria-hidden="true" />
-      {templates.map((template, index) => (
+    /* 宿主 .canvas-ws-overlay 是 fixed + h-[100dvh] 的普通 div（非 flex 容器），
+       case-stage 直接進去 top 會貼 0。atc-frame 負責在 overlay 裡鋪滿並垂直
+       置中，stage 保持自身 position:relative + width，接觸影（.case-stage::after）
+       跟著 stage 走，隨之置中。 */
+    <div className="atc-frame">
+      <div
+        ref={stageRef}
+        className="case-stage atc-stage"
+        role="group"
+        aria-roledescription="轮播"
+        aria-label={`助理模板，共 ${COUNT} 张`}
+        tabIndex={0}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        onKeyDown={onKeyDown}
+      >
+        <div className="case-glow" aria-hidden="true" />
+        {templates.map((template, index) => (
         <div
           key={template.id}
           ref={(node) => {
@@ -477,9 +482,19 @@ function CarouselRing({ templates, onUseTemplate }: AgentTemplateCarouselProps) 
               <p className="atc-pain">{template.painPoint}</p>
               <p className="atc-meta">{pipelineSummary(template)}</p>
             </div>
+            {/* 材質層棧照抄首頁（CaseShowcase L775-781）：掠射亮線 + 表面光層。
+                paint() 每幀寫的 --case-sheen/--case-sheen-x/--case-rim-l/--case-rim-r
+                由這兩層消費——沒有它們，光照四件套寫了等於白寫。 */}
+            <div className="case-edge" aria-hidden="true" />
+            <div className="case-surface" aria-hidden="true">
+              <div className="case-sheen" />
+              <div className="case-rim case-rim-l" />
+              <div className="case-rim case-rim-r" />
+            </div>
           </div>
-        </div>
-      ))}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

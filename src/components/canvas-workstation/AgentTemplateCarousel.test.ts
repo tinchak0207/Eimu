@@ -54,7 +54,8 @@ test("carousel reuses the homepage case-showcase CSS and physics", () => {
 
   // 共享類：不複製 537 行 CSS，直接 import 首頁樣式。
   assert.match(source, /import "\.\.\/case-showcase\.css"/);
-  // 類結構與首頁一致：stage > glow + slab(side-l/r + face)。
+  // 類結構與首頁一致：frame > stage > glow + slab(side-l/r + face(edge + surface))。
+  assert.match(source, /className="atc-frame"/);
   assert.match(source, /className="case-stage atc-stage"/);
   assert.match(source, /className="case-glow"/);
   assert.match(source, /case-side case-side-l/);
@@ -70,6 +71,23 @@ test("carousel reuses the homepage case-showcase CSS and physics", () => {
   assert.doesNotMatch(source, /CaseGlassWebGL/);
   // 面板場景縮小卡片尺寸變數。
   assert.match(css, /--case-card-w: 300px/);
+});
+
+test("card layer stack matches the homepage: edge + surface(sheen/rim) must exist", () => {
+  const source = read("src/components/canvas-workstation/AgentTemplateCarousel.tsx");
+  const css = read("src/components/canvas-workstation/agent-template-carousel.css");
+
+  // 質感層棧完整性鎖死：光照四件套（掠射亮線 + sheen 掃光 + 左右棱線）
+  // 全部由這幾層消費，砍層 = 手搓卡，直接紅。
+  assert.match(source, /<div className="case-edge" aria-hidden="true" \/>/);
+  assert.match(source, /<div className="case-surface" aria-hidden="true">/);
+  assert.match(source, /<div className="case-sheen" \/>/);
+  assert.match(source, /<div className="case-rim case-rim-l" \/>/);
+  assert.match(source, /<div className="case-rim case-rim-r" \/>/);
+  // 文字層不吞指針：點擊/拖拽由 slab 承接。
+  assert.match(css, /\.atc-media \{[^}]*pointer-events: none/s);
+  // 置中外殼：宿主 overlay 非 flex 容器，frame 負責鋪滿 + 垂直置中。
+  assert.match(css, /\.atc-frame \{[^}]*position: absolute[^}]*align-items: center[^}]*justify-content: center/s);
 });
 
 test("playground wires the carousel in place of the old gallery", () => {
