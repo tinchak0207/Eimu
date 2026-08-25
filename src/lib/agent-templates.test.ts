@@ -11,22 +11,46 @@ import { getStyleById } from "./style-library.ts";
 const DOMAINS: AgentTemplateDomain[] = ["novel", "ecommerce", "shortdrama", "art"];
 const QUALITY_PROFILES = ["draft", "balanced", "print"];
 
-test("agent templates cover four domains with three cards each", () => {
-  assert.equal(AGENT_TEMPLATES.length, 12);
+test("agent templates cover four domains with two pipeline blueprints each", () => {
+  assert.equal(AGENT_TEMPLATES.length, 8);
   for (const domain of DOMAINS) {
     assert.equal(
       AGENT_TEMPLATES.filter((t) => t.domain === domain).length,
-      3,
-      `domain ${domain} should have exactly 3 templates`,
+      2,
+      `domain ${domain} should have exactly 2 templates`,
     );
   }
 });
 
-test("ids are unique and follow agent-<domain>-<slug> naming", () => {
-  const ids = AGENT_TEMPLATES.map((t) => t.id);
-  assert.equal(new Set(ids).size, ids.length);
+test("pipeline structure is complete: >=4 steps, deliverable + inputFrom + notes, gates present", () => {
   for (const template of AGENT_TEMPLATES) {
-    assert.match(template.id, new RegExp(`^agent-${template.domain}-[a-z][a-z0-9-]*$`));
+    const { pipeline } = template;
+    assert.ok(pipeline.summary.length > 10, `${template.id} pipeline summary`);
+    assert.ok(
+      pipeline.steps.length >= 4,
+      `${template.id} pipeline steps ${pipeline.steps.length} < 4`,
+    );
+    let gatedSteps = 0;
+    for (const step of pipeline.steps) {
+      assert.ok(step.name.length > 2, `${template.id} step name`);
+      assert.ok(step.deliverable.length > 6, `${template.id} ${step.name} deliverable`);
+      assert.ok(step.inputFrom.length > 6, `${template.id} ${step.name} inputFrom`);
+      assert.ok(
+        step.promptNotes.length >= 2 && step.promptNotes.every((n) => n.length > 6),
+        `${template.id} ${step.name} promptNotes`,
+      );
+      if (step.gate !== undefined) {
+        assert.ok(step.gate.length > 6, `${template.id} ${step.name} gate`);
+        gatedSteps += 1;
+      }
+    }
+    assert.ok(gatedSteps >= 2, `${template.id} pipeline should have >=2 gated steps`);
+    // 衔接关系存在：至少一半步骤显式声明上一步产出如何喂入
+    const linked = pipeline.steps.filter((s) => /JSON|cref|sref|参考|注入|锚|门禁|批准|锁定|源图|对拍|seed/i.test(s.inputFrom));
+    assert.ok(
+      linked.length >= Math.ceil(pipeline.steps.length / 2),
+      `${template.id} pipeline inputFrom linkage too weak`,
+    );
   }
 });
 
@@ -39,6 +63,14 @@ test("card copy is present and within reasonable length", () => {
       template.initialPrompt.length >= 30 && template.initialPrompt.length <= 80,
       `${template.id} initialPrompt length ${template.initialPrompt.length}`,
     );
+  }
+});
+
+test("ids are unique and follow agent-<domain>-<slug> naming", () => {
+  const ids = AGENT_TEMPLATES.map((t) => t.id);
+  assert.equal(new Set(ids).size, ids.length);
+  for (const template of AGENT_TEMPLATES) {
+    assert.match(template.id, new RegExp(`^agent-${template.domain}-[a-z][a-z0-9-]*$`));
   }
 });
 
