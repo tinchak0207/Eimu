@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, createContext, useContext } from "rea
 import type { NewApiUser } from "@/lib/new-api-client";
 import { getStoredToken, getStoredUser, clearStoredToken, setStoredToken, syncStoredAuthFromCookie } from "@/lib/new-api-client";
 import { fetchMe, logout as doLogout } from "@/lib/auth-client";
-import { shouldBypassAuthForLocalTest } from "@/lib/sub2api";
+import { shouldBypassAuthForLocalTest } from "@/lib/local-test-mode";
 
 interface AuthState {
   user: NewApiUser | null;

@@ -14,7 +14,7 @@
 // agent 聊天区在两个模式下是同一套东西」——所以这里只有一套组件。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bot, ChevronDown, History, Loader2, MessageSquarePlus } from "lucide-react";
+import { Bot, History, Loader2, MessageSquarePlus, X } from "lucide-react";
 import {
   hasReflectedParams,
   reflectParams,
@@ -113,7 +113,7 @@ export interface AgentChatSurfaceProps {
    * 與 initialPrompt（半句話藥丸，點了才送）不同：點模板卡本身就是發送動作，
    * 這條直接送出，不讓用戶再點一次發送。nonce 變化即觸發一次。
    */
-  agentInjection?: { text: string; nonce: number } | null;
+  agentInjection?: { text: string; nonce: number; directive?: string } | null;
   /** 用戶發出消息時回調（上層收起右側模板庫）。 */
   onUserMessage?: () => void;
 }
@@ -386,7 +386,12 @@ export function AgentChatSurface({
     if (connection !== "open") return;
     injectedNonceRef.current = agentInjection.nonce;
     onUserMessage?.();
-    void send(agentInjection.text);
+    // directive（若有）随首条消息隐形上送：网关拼进 system，用户全程看不见。
+    // silent：注入的模板 prompt 同样不进 transcript——用户只看到 agent 的引导。
+    void send(agentInjection.text, {
+      ...(agentInjection.directive ? { sessionDirective: agentInjection.directive } : {}),
+      silent: true,
+    });
   }, [agentInjection, connection, send, onUserMessage]);
 
   /**
@@ -443,7 +448,7 @@ export function AgentChatSurface({
 
   return (
     <div
-      className={isInline ? cn("flex min-h-0 flex-1 flex-col overflow-hidden", embedded ? "pb-1" : "pb-2.5") : "page-shell flex flex-col pb-4 pt-3"}
+      className={isInline ? cn("flex min-h-0 flex-1 flex-col overflow-hidden pb-1") : "page-shell flex flex-col pb-4 pt-3"}
       style={isInline ? undefined : { minHeight: "calc(100dvh - 5rem)", height: "calc(100dvh - 5rem)" }}
     >
       {/*
@@ -453,9 +458,12 @@ export function AgentChatSurface({
         与常驻「已连接」状态行全部收编到这里——对话流里只剩对话。
         embedded（工作站面板態）：外層面板已有把手，這裡的把手省掉——單層。
       */}
-      <header className={cn("flex shrink-0 flex-col", embedded ? "mb-1" : "pb-3")}>
+      <header className={cn("flex shrink-0 flex-col", embedded ? "mb-1" : "pb-2")}>
         {/* 2026-08-22：拖拽把手已移除——黑色長條佔位搶文字空間，用戶裁定拿掉。 */}
         <div className="flex items-center gap-1.5">
+          <span className="lg-tint-blue flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-ios-blue">
+            <Bot className="h-4 w-4" aria-hidden="true" />
+          </span>
           <h2 className="text-[15px] font-semibold text-foreground">AI 助理</h2>
           <span
             className={cn(
@@ -571,7 +579,7 @@ export function AgentChatSurface({
                 title="收起助理，返回生成模式"
                 className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-foreground/45 transition-colors hover:bg-black/5 hover:text-foreground/75 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 touch-manipulation"
               >
-                <ChevronDown className="h-4 w-4" aria-hidden="true" />
+                <X className="h-4 w-4" aria-hidden="true" />
               </button>
             )}
           </div>
@@ -581,7 +589,7 @@ export function AgentChatSurface({
       {/* D-24：承接使用者已打的半句话，点一下搬进输入框接着写（不自动送出，
           半句话直接送可能立刻扣费）；右侧「放弃」直接丢掉。 */}
       {draft && (
-        <div className="agent-surface-draft mb-2.5 flex shrink-0 items-center gap-2 rounded-ios-2xl bg-ios-blue/[0.07] px-3 py-2 ring-1 ring-ios-blue/[0.16]">
+        <div className="agent-surface-draft mb-2 flex shrink-0 items-center gap-2 rounded-ios-2xl bg-ios-blue/[0.07] px-3 py-2 ring-1 ring-ios-blue/[0.16]">
           <Bot className="h-3.5 w-3.5 shrink-0 text-ios-blue" aria-hidden="true" />
           <button
             type="button"
@@ -603,7 +611,7 @@ export function AgentChatSurface({
       )}
 
       {error && !isActive && (
-        <div className="agent-surface-error mb-2.5 flex shrink-0 items-center justify-between gap-3 rounded-ios-2xl bg-destructive/[0.08] px-3.5 py-2.5">
+        <div className="agent-surface-error mb-2 flex shrink-0 items-center justify-between gap-3 rounded-ios-2xl bg-destructive/[0.08] px-3.5 py-2.5">
           <p className="min-w-0 flex-1 text-sm text-destructive sm:text-ios-footnote">{error}</p>
           <button
             type="button"

@@ -4,13 +4,16 @@ export interface GatewayEndpoint {
   label: string;
   modelId?: string;
   supportedModels?: string[];
-  protocol?: "adobe2api" | "pixai" | "sensenova";
+  protocol?: "adobe2api" | "pixai" | "sensenova" | "filmera";
   isFallback?: boolean;
 }
 
 export type EnvLike = Record<string, string | undefined>;
-export const LOCAL_TEST_MODE = process.env.NEXT_PUBLIC_LOCAL_TEST_MODE === "true";
+// 定义已抽到 local-test-mode.ts（客户端安全）；这里 re-export 维持旧 import 路径。
+export { shouldBypassAuthForLocalTest, LOCAL_TEST_MODE } from "./local-test-mode";
 import { ADOBE2API_MODEL_IDS } from "./image-model-ids.js";
+import { FILMERA_SUPPORTED_MODEL_IDS } from "./generation-core/filmera-upstream";
+import { REGISTRY_CHANNELS, type RegistryChannel } from "./supplier-channels.config";
 import {
   PIXAI_HARUKA_V2_MODEL_ID,
   PIXAI_HOSHINO_V2_MODEL_ID,
@@ -69,7 +72,9 @@ export async function probeSub2APIGateway(endpoint: GatewayEndpoint): Promise<bo
   }
 }
 
-export type EnvChannelLabel = "adobe2api" | "sub2api" | "primary" | "fallback" | "pixai";
+// 舊六個 label 保留智能提示；registry 渠道的 label 是任意字串（由
+// supplier-channels.config 登記），`(string & {})` 讓兩者同時成立。
+export type EnvChannelLabel = "adobe2api" | "sub2api" | "primary" | "fallback" | "pixai" | "filmera" | (string & {});
 
 export interface EnvChannelDescriptor {
   id: `env:${EnvChannelLabel}`;
@@ -102,6 +107,35 @@ function pickEnvSource(env: EnvLike, names: string[]): { value: string; source: 
 }
 
 /**
+ * registry 條目 → EnvChannelDescriptor 的純映射（export 供單測）。
+ * enabledEnv 有值時比照 sub2apiSwitchedOn 的清洗標準：只有清洗後的 "true"
+ * 才 defaultEnabled（"1"/"yes" 不猜語意）。
+ */
+export function registryChannelToDescriptor(channel: RegistryChannel, env: EnvLike): EnvChannelDescriptor {
+  const base = normalizeBaseURL(env[channel.baseUrlEnv] ?? "");
+  const apiKey = cleanEnvValue(env[channel.apiKeyEnv] ?? "");
+  const configured = Boolean(base && apiKey);
+  return {
+    id: `env:${channel.label}`,
+    label: channel.label,
+    configured,
+    defaultEnabled:
+      configured &&
+      (!channel.enabledEnv || cleanEnvValue(env[channel.enabledEnv] ?? "").toLowerCase() === "true"),
+    source: channel.baseUrlEnv,
+    usesBillingGateway: false,
+    endpoint: configured
+      ? {
+          baseURL: base,
+          apiKey,
+          label: channel.label,
+          supportedModels: channel.claims.map((claim) => claim.modelId),
+        }
+      : null,
+  };
+}
+
+/**
  * Single construction source for every env-derived channel, configured or not.
  * `buildGatewayEndpoints` (production default queue) and the admin channel registry
  * both derive from this — if they ever disagree about what an env channel is, the
@@ -128,6 +162,10 @@ export function describeEnvChannels(env: EnvLike): EnvChannelDescriptor[] {
   // filtered on the cleaned one in the primary branch, so a whitespace-only key produced
   // an endpoint in one branch and nothing in the other. Cleaned-check both ways.
   const fallbackConfigured = Boolean(fallbackBase && cleanEnvValue(env.IMAGE_API_KEY_FALLBACK ?? ""));
+
+  const filmeraBase = normalizeBaseURL(env.FILMERA_BASE_URL ?? "");
+  const filmeraKey = cleanEnvValue(env.FILMERA_AUTH_TOKEN ?? "");
+  const filmeraConfigured = Boolean(filmeraBase && filmeraKey);
 
   const pixaiBase = normalizeBaseURL(env.PIXAI_BASE_URL ?? "");
   const pixaiKey = cleanEnvValue(env.PIXAI_API_KEY ?? "");
@@ -160,6 +198,7 @@ export function describeEnvChannels(env: EnvLike): EnvChannelDescriptor[] {
       usesBillingGateway: false,
       endpoint: sub2apiConfigured ? { baseURL: sub2apiBase, apiKey: sub2apiKey, label: "sub2api" } : null,
     },
+    ...REGISTRY_CHANNELS.map((channel) => registryChannelToDescriptor(channel, env)),
     {
       id: "env:primary",
       label: "primary",
@@ -195,6 +234,23 @@ export function describeEnvChannels(env: EnvLike): EnvChannelDescriptor[] {
         : null,
     },
     {
+      id: "env:filmera",
+      label: "filmera",
+      configured: filmeraConfigured,
+      defaultEnabled: filmeraConfigured && cleanEnvValue(env.FILMERA_ENABLED ?? "").toLowerCase() === "true",
+      source: "FILMERA_BASE_URL",
+      usesBillingGateway: false,
+      endpoint: filmeraConfigured
+        ? {
+            baseURL: filmeraBase,
+            apiKey: filmeraKey,
+            label: "filmera",
+            protocol: "filmera",
+            supportedModels: [...FILMERA_SUPPORTED_MODEL_IDS],
+          }
+        : null,
+    },
+    {
       id: "env:pixai",
       label: "pixai",
       configured: pixaiConfigured,
@@ -218,8 +274,4 @@ export function buildGatewayEndpoints(env: EnvLike): GatewayEndpoint[] {
   return describeEnvChannels(env)
     .filter((channel) => channel.defaultEnabled && channel.endpoint)
     .map((channel) => channel.endpoint as GatewayEndpoint);
-}
-
-export function shouldBypassAuthForLocalTest(env: EnvLike): boolean {
-  return env.NEXT_PUBLIC_LOCAL_TEST_MODE === "true";
 }

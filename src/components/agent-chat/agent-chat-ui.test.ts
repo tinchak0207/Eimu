@@ -325,10 +325,12 @@ test("D-1 the agent face never grows a second send button or a second textarea",
   // 斷言語義不變：PromptInput 及其抽出 hooks 構成的同一組件表面。
   const code = readCode(promptInput) + "\n" + readCode(promptInputHeightLock) + "\n" + readCode(actionRow);
   // 送出归聊天区自己的输入区：卡片底部那颗 CTA 在 agent 面不存在。
-  // 2026-08-22：agent 面底行整排由三元換成返回條（工作站態同款），
-  // CTA/pro-toggle 只存在於非 agent 分支。
-  assert.match(code, /\{displayMode === "agent" \? \(/);
-  assert.match(code, /返回生成/);
+  // 2026-08-25 用户裁定：agent 面的「返回生成」底行是废层（聊天面 Header 的
+  // onExit 收起按钮做同一件事）——ActionRow 在 agent 面整组件不渲染（return null），
+  // 返回由 Header 承担，底行高度由聊天区 flex-1 吃掉。
+  assert.match(code, /if \(displayMode === "agent"\) return null;/);
+  // Header 收起按钮必须真的接着「回 generate」——底行删了之后它是唯一出口。
+  assert.match(code, /onExit=\{\(\) => onModeChange\("generate"\)\}/);
   // 键盘旁路也要堵掉，否则 Enter 还能从别处触发一次生成。
   assert.match(code, /if \(displayMode === "agent"\) return;/);
   // 两个输入框并排会有「我该往哪打字」的歧义。

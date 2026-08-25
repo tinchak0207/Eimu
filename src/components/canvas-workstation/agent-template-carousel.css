@@ -1,39 +1,67 @@
 /* ╁━ AgentTemplateCarousel ── 助理模板環 ╁━
    本組件是 CaseShowcase.tsx 的逐行複製（2026-08-25 用戶裁定：複用 = 整複製改文字，
    禁止造輪子），幾何/物理/材質/佈局全部由共享 ../case-showcase.css 提供。
-   這裡只有模板卡獨有的兩個卡面元素：領域大字水印 + 流水線步驟鏈。 */
+   這裡只有模板卡獨有的卡面元素：領域大字水印 + 標題與流水線鏈。 */
 
 /* 领域大字水印：压在渐变上的浮雕感，非标题。尺寸跟随 --case-card-w 缩放。 */
 .atc-watermark {
   position: absolute;
-  top: 50%;
+  top: 40%;
   left: 50%;
-  transform: translate(-50%, -58%);
-  font-size: calc(var(--case-card-w, 520px) * 0.24);
-  font-weight: 800;
-  letter-spacing: 0.08em;
+  transform: translate(-50%, -50%);
+  font-size: calc(var(--case-card-w, 520px) * 0.28);
+  font-weight: 900;
+  letter-spacing: 0.12em;
   white-space: nowrap;
-  color: rgba(255, 255, 255, 0.16);
-  text-shadow: 0 2px 24px rgba(0, 0, 0, 0.18);
+  color: rgba(255, 255, 255, 0.08);
+  text-shadow: 0 4px 32px rgba(0, 0, 0, 0.25);
   user-select: none;
 }
 
-/* 步骤链：卡面底部的流水线一览，白色小字可换行。 */
-.atc-flow {
+/* 卡面底部資訊排版：對齊 Vision Pro 磨砂卡面標準 */
+.atc-info {
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
-  padding: calc(var(--case-card-w, 520px) * 0.06);
-  color: rgba(255, 255, 255, 0.88);
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 1.6;
-  word-break: break-word;
-  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.35);
+  padding: calc(var(--case-card-w, 520px) * 0.07);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.45) 0%, rgba(0, 0, 0, 0.15) 60%, transparent 100%);
+  user-select: none;
 }
 
-/* 面板内嵌场景：舞台宽度收敛（宿主 overlay 全宽下侧卡会溢出到屏幕外）。 */
+.atc-title {
+  font-size: calc(var(--case-card-w, 520px) * 0.052);
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.96);
+  letter-spacing: -0.01em;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+}
+
+/* 步骤链：卡面底部的流水线一览 */
+.atc-flow {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+  word-break: break-word;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.35);
+}
+
+/* 面板内嵌场景：舞台上下左右完全置中展示 */
+.agent-template-carousel {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  width: 100%;
+  padding: 0;
+  box-sizing: border-box;
+}
+
 .agent-template-carousel .case-stage {
   max-width: 76rem;
   margin-inline: auto;

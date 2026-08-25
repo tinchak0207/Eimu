@@ -229,7 +229,7 @@ export async function POST(req: NextRequest) {
     cooling: isEndpointCoolingDown(endpoint),
   }));
   const attempts: RoutingAttempt[] = [];
-  const emitEvent = (outcome: "delivered" | "exhausted" | "budget-exhausted" | "no-endpoints", deliveredBy?: string, refunded = false) =>
+  const emitEvent = (outcome: "delivered" | "exhausted" | "budget-exhausted" | "no-endpoints", deliveredBy?: string, refunded = false, imageUrls?: string[]) =>
     recordRoutingEvent({
       id: `${Date.now()}-${requestId}`,
       ts: Date.now(),
@@ -242,6 +242,7 @@ export async function POST(req: NextRequest) {
       attempts,
       outcome,
       ...(deliveredBy ? { deliveredBy } : {}),
+      ...(imageUrls && imageUrls.length > 0 ? { imageUrls } : {}),
       totalMs: Date.now() - startedAt,
       coins: requiredCoins,
       refunded,
@@ -290,7 +291,7 @@ export async function POST(req: NextRequest) {
         recordEndpointSuccess(endpoint);
         attempts.push({ label: endpoint.label, host: safeEndpointHost(endpoint.baseURL), ok: true, ms: result.elapsedMs });
         delivered = true;
-        after(() => emitEvent("delivered", endpoint.label));
+        after(() => emitEvent("delivered", endpoint.label, false, result.videoUrl ? [result.videoUrl] : undefined));
         return NextResponse.json({
           provider: "image_tinchak",
           mediaType: "video",

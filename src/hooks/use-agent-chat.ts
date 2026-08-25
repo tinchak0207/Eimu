@@ -214,7 +214,7 @@ export interface UseAgentChatReturn {
   sessionId: string | null;
   error: string | null;
   start: () => Promise<void>;
-  send: (text: string) => Promise<void>;
+  send: (text: string, opts?: { sessionDirective?: string; silent?: boolean }) => Promise<void>;
   confirm: (requestId: string, approved: boolean) => Promise<void>;
   answerQuestion: (requestId: string, answers: string[][]) => Promise<void>;
   retry: () => Promise<void>;
@@ -534,13 +534,16 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
   }, [openConnection]);
 
   const send = useCallback(
-    async (text: string): Promise<void> => {
+    async (text: string, opts?: { sessionDirective?: string; silent?: boolean }): Promise<void> => {
       const trimmed = typeof text === "string" ? text.trim() : "";
       if (!trimmed) return;
       if (closedRef.current) return;
 
-      // 乐观插入使用者消息。
-      dispatch({ type: "user", text: trimmed });
+      // 乐观插入使用者消息。directive 是隐形上下文，只随请求上送，绝不进 transcript；
+      // silent=true（模板注入）同样不进 transcript——用户只看到 agent 的引导，看不到被注入的 prompt。
+      if (!opts?.silent) {
+        dispatch({ type: "user", text: trimmed });
+      }
 
       const sid = sessionIdRef.current;
       if (!sid) {
@@ -550,6 +553,7 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
       try {
         await sendAgentMessage(sid, trimmed, {
           canvasState: canvasStateProviderRef.current?.(),
+          ...(opts?.sessionDirective ? { sessionDirective: opts.sessionDirective } : {}),
         });
       } catch (err) {
         dispatchNotice("error", err instanceof Error ? err.message : "消息传送失败，请重试。");

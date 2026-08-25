@@ -60,7 +60,7 @@ function AgentBatchProgressComponent({ items, onStop, total }: AgentBatchProgres
   const pct = hasTotal ? Math.min(100, Math.round((images / totalCount) * 100)) : 0;
 
   return (
-    <div className="agent-rise lg-card rounded-ios-2xl px-3.5 py-3">
+    <div className="agent-rise rounded-[18px] bg-[rgba(120,120,128,0.06)] px-3.5 py-3">
       <div className="flex items-center gap-2.5">
         <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ios-blue/10 text-ios-blue">
           <Images className="h-4 w-4" aria-hidden="true" />

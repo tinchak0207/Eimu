@@ -202,7 +202,7 @@ export async function generateBizImage(options: {
   // control-plane 分支（generationCommand.resolution）用同一套映射，保证同一模型
   // 走两条路径时在 /admin 树状图里落进同一个分辨率桶，不会各说各话。
   const resolution = qualityMode === "quality" ? "2k" : "1k";
-  const emitEvent = (outcome: "delivered" | "exhausted" | "budget-exhausted" | "no-endpoints", deliveredBy?: string) =>
+  const emitEvent = (outcome: "delivered" | "exhausted" | "budget-exhausted" | "no-endpoints", deliveredBy?: string, imageUrls?: string[]) =>
     recordRoutingEvent({
       id: `${Date.now()}-${requestId}`,
       ts: Date.now(),
@@ -215,6 +215,7 @@ export async function generateBizImage(options: {
       attempts,
       outcome,
       ...(deliveredBy ? { deliveredBy } : {}),
+      ...(imageUrls && imageUrls.length > 0 ? { imageUrls } : {}),
       totalMs: Date.now() - startedAt,
       coins: 0,
       refunded: false,
@@ -256,7 +257,7 @@ export async function generateBizImage(options: {
       );
       recordEndpointSuccess(endpoint);
       attempts.push({ label: endpoint.label, host: safeEndpointName(endpoint.baseURL), ok: true, ms: result.upstreamElapsedMs });
-      await emitEvent("delivered", endpoint.label);
+      await emitEvent("delivered", endpoint.label, result.imageUrl ? [result.imageUrl] : undefined);
       return { ok: true, result, failures };
     } catch (error) {
       recordEndpointFailure(endpoint);

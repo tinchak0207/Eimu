@@ -8,10 +8,10 @@ import type { WorkflowRecallConfig } from "@/lib/workflow-recall";
  * 助理起手模板 → 畫布 workflow（2026-08-25 模板庫點卡）。
  *
  * 兩種鋪法：
- * 1. 帶 pipeline 藍圖（AgentTemplate）：每步一個泳道行——步驟節點（Prompt，
- *    產出+要點+門禁）+ 生成節點（Image，該步 promptNotes 精煉 prompt），
- *    步驟間按「上一步產出餵下一步」連線，打開即見 N 步流水線。
- *    slots 是流水線首步配方，仍進第一步生成節點的 metadata。
+ * 1. 帶 pipeline 藍圖（AgentTemplate）：工業級泳道——每步展開成
+ *    「規格卡（deliverable 拆項）→ 要點卡（promptNotes 逐條）→ 門禁卡 →
+ *    生成卡」一整排卡片，步驟間按「上一步產出餵下一步」串連。5 步流水線
+ *    鋪開就是 30-50 顆卡片的生產現場，不是兩顆孤節點。
  * 2. 無 pipeline（純 RecipeTemplate）：舊兩層兜底——槽位 Prompt 節點
  *    匯入單顆生成節點。
  */
@@ -20,14 +20,18 @@ import type { WorkflowRecallConfig } from "@/lib/workflow-recall";
 const SLOT_GAP_Y = 232;
 /** 槽位節點與生成節點的橫向間隙。 */
 const SLOT_GAP_X = 80;
-/** 流水線泳道行高：生成節點 240 + 呼吸空隙。 */
-const LANE_GAP_Y = 340;
-/** 步驟節點寬高。 */
-const STEP_W = 340;
-const STEP_H = 220;
-/** 生成節點寬高。 */
-const GEN_W = 340;
+
+// ── 工業級泳道幾何 ──
+/** 卡片統一寬度；高度按內容類型分檔。 */
+const CARD_W = 300;
+const SPEC_H = 170;
+const NOTE_H = 150;
+const GATE_H = 150;
 const GEN_H = 240;
+/** 泳道內卡片橫向間隙。 */
+const CARD_GAP_X = 60;
+/** 泳道行高：最高卡（生成 240）+ 呼吸空隙。 */
+const LANE_GAP_Y = 330;
 
 /** applyTemplateToCanvas 接受的模板：RecipeTemplate 為底，pipeline 可選。 */
 export type TemplateCanvasInput = RecipeTemplate & { pipeline?: AgentPipeline };
@@ -55,81 +59,106 @@ export interface TemplateCanvasLayout {
   connections: CanvasConnection[];
 }
 
-/** 步驟節點正文：產出 + 要點，帶門禁的步驟再附門禁。 */
-function stepContent(step: AgentPipelineStep): string {
-  const lines = [`产出：${step.deliverable}`, `要点：${step.promptNotes.join("；")}`];
-  if (step.gate) lines.push(`门禁：${step.gate}`);
-  return lines.join("\n");
+/** deliverable 字串拆成產出項清單：頓號/加號/逗號分隔的複合產出各成一卡。 */
+function splitDeliverable(deliverable: string): string[] {
+  return deliverable
+    .split(/[+＋、;；]/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 1);
 }
 
-/** 步驟 promptNotes 精煉成生成節點 prompt。 */
+/** 要點精煉成生成節點 prompt。 */
 function promptFromNotes(step: AgentPipelineStep): string {
   return step.promptNotes.join("，");
 }
 
 /**
- * pipeline 藍圖 → N 步流水線畫布（純函式，可測）。
+ * pipeline 藍圖 → 工業級泳道畫布（純函式，可測）。
  *
- * 每步一個泳道行：步驟節點（左，Prompt）+ 生成節點（右，Image）。
- * 連線兩種：步驟內 step→gen（該步要點注入生成），步驟間 gen_i→step_{i+1}
- * （上一步產出餵下一步）。slots 首步配方進第一顆生成節點 metadata。
+ * 每步一條泳道：規格卡（deliverable 拆項，每項一卡）→ 要點卡（promptNotes
+ * 逐條一卡）→ 門禁卡（有 gate 才有）→ 生成卡。泳道內卡片鏈式串連
+ * （規格₁→規格₂→…→要點₁→…→門禁→生成），泳道間生成卡 → 下一步第一張卡。
+ * slots 首步配方進第一顆生成節點 metadata。
  */
 function pipelineToCanvasLayout(template: TemplateCanvasInput, pipeline: AgentPipeline): TemplateCanvasLayout {
   const config = recipeTemplateToRecallConfig(template);
   const ts = Date.now().toString(36);
-  const stepX = 0;
-  const genX = STEP_W + SLOT_GAP_X;
 
   const nodes: CanvasNode[] = [];
   const connections: CanvasConnection[] = [];
 
+  let previousGenerationId: string | null = null;
+
   pipeline.steps.forEach((step, i) => {
-    const stepId = `tpl-${ts}-step-${i}`;
-    const genId = `tpl-${ts}-gen-${i}`;
-    const y = i * LANE_GAP_Y;
+    // 泳道卡片序列：規格 → 要點 → 門禁 → 生成。
+    const cards: Array<{ title: string; text: string; h: number; generation?: boolean }> = [];
 
-    nodes.push({
-      id: stepId,
-      type: CanvasNodeType.Prompt,
-      title: step.name,
-      position: { x: stepX, y },
-      width: STEP_W,
-      height: STEP_H,
-      metadata: { content: stepContent(step) },
-    });
-
-    // 首步生成節點攜帶 slots 配方（prompt/質量檔/張數）；其餘步驟攜帶要點精煉 prompt。
-    const genMetadata: CanvasNode["metadata"] =
-      i === 0
-        ? {
-            prompt: config.prompt || promptFromNotes(step),
-            ...(config.qualityProfile ? { quality: config.qualityProfile } : {}),
-            count: 1,
-          }
-        : { prompt: promptFromNotes(step), count: 1 };
-
-    nodes.push({
-      id: genId,
-      type: CanvasNodeType.Image,
-      title: step.name,
-      position: { x: genX, y },
-      width: GEN_W,
-      height: GEN_H,
-      metadata: genMetadata,
-    });
-
-    connections.push({ id: `conn-${stepId}-${genId}`, fromNodeId: stepId, toNodeId: genId });
-    if (i > 0) {
-      const prevGen = `tpl-${ts}-gen-${i - 1}`;
-      connections.push({ id: `conn-${prevGen}-${stepId}`, fromNodeId: prevGen, toNodeId: stepId });
+    for (const spec of splitDeliverable(step.deliverable)) {
+      cards.push({ title: "产出", text: spec, h: SPEC_H });
     }
+    step.promptNotes.forEach((note, ni) => {
+      cards.push({ title: `要点 ${ni + 1}`, text: note, h: NOTE_H });
+    });
+    if (step.gate) cards.push({ title: "门禁", text: step.gate, h: GATE_H });
+    if (step.name.trim()) {
+      cards.push({
+        title: step.name,
+        text: promptFromNotes(step),
+        h: GEN_H,
+        generation: true,
+      });
+    }
+
+    let previousId: string | null = null;
+    const laneTop = i * LANE_GAP_Y;
+
+    cards.forEach((card, ci) => {
+      const id = `tpl-${ts}-s${i}-c${ci}`;
+      const metadata = card.generation
+        ? ({
+            ...(i === 0
+              ? {
+                  prompt: config.prompt || card.text,
+                  ...(config.qualityProfile ? { quality: config.qualityProfile } : {}),
+                }
+              : { prompt: card.text }),
+            count: 1,
+            workflow_id: template.id,
+            stepIndex: i,
+            stepName: step.name,
+            inputFrom: step.inputFrom,
+          } as CanvasNode["metadata"] & Record<string, unknown>)
+        : { content: card.text };
+
+      nodes.push({
+        id,
+        type: card.generation ? CanvasNodeType.Image : CanvasNodeType.Prompt,
+        title: card.title,
+        position: { x: ci * (CARD_W + CARD_GAP_X), y: laneTop },
+        width: CARD_W,
+        height: card.h,
+        metadata,
+      });
+
+      if (!previousId && previousGenerationId) {
+        connections.push({
+          id: `conn-${previousGenerationId}-${id}`,
+          fromNodeId: previousGenerationId,
+          toNodeId: id,
+        });
+      } else if (previousId) {
+        connections.push({ id: `conn-${previousId}-${id}`, fromNodeId: previousId, toNodeId: id });
+      }
+      previousId = id;
+      if (card.generation) previousGenerationId = id;
+    });
   });
 
   return { nodes, connections };
 }
 
 /**
- * 模板 → 畫布節點佈局（純函式，可測）。帶 pipeline 走流水線布局；
+ * 模板 → 畫布節點佈局（純函式，可測）。帶 pipeline 走工業級泳道布局；
  * 無 pipeline 走舊兩層：每個非空槽一顆 Prompt 節點（連到生成節點時
  * 文本注入為 prompt 前綴——Prompt 節點既有語義），終點一顆空 Image
  * 節點（A4：空節點=生成落地位，原地回填）。

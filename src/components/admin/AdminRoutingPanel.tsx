@@ -523,6 +523,44 @@ export function AdminRoutingPanel({ onOpenRelays }: { onOpenRelays?: () => void 
                           ))}
                         </ul>
                       )}
+                      {event.imageUrls && event.imageUrls.length > 0 && (
+                        <div className="mt-3">
+                          <p className="mb-1.5 text-[11px] font-semibold text-black/45">产出</p>
+                          <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5">
+                            {event.imageUrls.map((url, index) => {
+                              const isVideo = /\.(mp4|webm|mov|m4v)(\?|$)/i.test(url);
+                              return (
+                                <a
+                                  key={`${event.id}-img-${index}`}
+                                  href={url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="group block overflow-hidden rounded-md border border-black/10 bg-white"
+                                >
+                                  {isVideo ? (
+                                    // eslint-disable-next-line jsx-a11y/media-has-caption
+                                    <video
+                                      src={url}
+                                      muted
+                                      playsInline
+                                      preload="metadata"
+                                      className="aspect-square w-full object-cover transition-opacity group-hover:opacity-90"
+                                    />
+                                  ) : (
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img
+                                      src={url}
+                                      alt={`产出图 ${index + 1}`}
+                                      loading="lazy"
+                                      className="aspect-square w-full object-cover transition-opacity group-hover:opacity-90"
+                                    />
+                                  )}
+                                </a>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

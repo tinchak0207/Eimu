@@ -43,9 +43,10 @@ function AgentConfirmCardComponent({ confirm, onConfirm, contextText, busy = fal
   const [pending, setPending] = useState<"approve" | "reject" | null>(null);
   const locked = busy || pending !== null;
 
-  // D-25：解读 = description（confirm.request 的事件本体）+ 这轮已流出的 assistant 文本。
-  // 没有解读可搬时退回纯花费确认，不让卡片空白。
-  const interpret = [description, contextText].filter((t): t is string => !!t && t.trim().length > 0).join(" ");
+  // D-25：解读 = 这轮已流出的 assistant 文本（agent 对许愿的复述）。
+  // description 是网关工具侧的费用明细（「生成 N 张图（模型），预估花费 X 币」），
+  // 归费用区块小字——它不是愿望解读，塞进解读标题下文不对题（2026-08-26 修正）。
+  const interpret = (contextText ?? "").trim();
 
   return (
     <div className="agent-rise lg-sheet rounded-ios-2xl p-3.5" aria-busy={locked}>
@@ -79,6 +80,8 @@ function AgentConfirmCardComponent({ confirm, onConfirm, contextText, busy = fal
             </span>
             <span className="text-ios-subhead font-semibold text-muted-foreground">金币</span>
           </p>
+          {/* 费用明细（description）：跟在金额下面当小字，只出现一次——
+              之前在解读区重复展示同一段，被用户点名。 */}
           {description && (
             <p className="mt-1.5 text-sm leading-[1.55] text-muted-foreground">
               {description}

@@ -283,7 +283,7 @@ test("every routing exit leaves an admin-visible telemetry event", () => {
   // All four exits emit: empty queue, delivered, and the merged failure exit
   // (exhausted / budget-exhausted / cancelled).
   assert.match(source, /await emitRoutingEvent\("no-endpoints"\)/);
-  assert.match(source, /after\(\(\) => emitRoutingEvent\("delivered", \{ deliveredBy: endpoint\.label \}\)\)/);
+  assert.match(source, /after\(\(\) => emitRoutingEvent\("delivered", \{ deliveredBy: endpoint\.label, imageUrls: responseImageUrl \? \[responseImageUrl\] : undefined \}\)\)/);
   assert.match(source, /await emitRoutingEvent\(failureOutcome/);
 
   // Failure events are written before the response: after() callbacks die with a

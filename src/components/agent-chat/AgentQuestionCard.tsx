@@ -24,6 +24,49 @@ function AgentQuestionCardComponent({ question, onAnswer }: AgentQuestionCardPro
   const item = questions[current];
   if (!item) return null;
 
+  // 2026-08-26 容错：模型偶尔不给 options（把用户修改需求整段塞进 question，
+  // 无选项可点）。此时渲染成「确认式」卡：一句「明白，按这个来」把原文回给
+  // agent（answers 传 [question] 让它拿到完整文本），不再是点无可点的空壳。
+  const noOptions = item.options.length === 0;
+  if (noOptions) {
+    return (
+      <div className="agent-rise lg-sheet rounded-ios-2xl p-3.5">
+        <div className="flex items-start gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-ios-blue/[0.12] text-ios-blue">
+            <HelpCircle className="h-4 w-4" aria-hidden="true" />
+          </span>
+          <div className="min-w-0 flex-1">
+            {item.header && (
+              <p className="text-sm font-medium text-foreground/45">{item.header}</p>
+            )}
+            <p className="text-ios-subhead leading-[1.5] font-semibold text-foreground">
+              {item.question}
+            </p>
+          </div>
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-2.5">
+          <button
+            type="button"
+            onClick={() => onAnswer(requestId, questions.map(() => []))}
+            disabled={busy}
+            className="flex min-h-12 items-center justify-center gap-1.5 rounded-full bg-black/[0.06] text-ios-subhead font-semibold text-muted-foreground transition-colors duration-150 active:bg-black/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-foreground/20 disabled:cursor-not-allowed disabled:opacity-50 [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
+          >
+            重新说明
+          </button>
+          <button
+            type="button"
+            onClick={() => onAnswer(requestId, questions.map((q) => [q.question]))}
+            disabled={busy}
+            className="flex min-h-12 items-center justify-center gap-1.5 rounded-full bg-ios-blue text-ios-subhead font-semibold text-white shadow-[0_4px_12px_rgba(0,122,255,0.32)] transition-all duration-200 active:scale-[0.98] active:bg-ios-blue/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/40 disabled:cursor-not-allowed disabled:bg-black/[0.12] disabled:shadow-none [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
+          >
+            {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+            明白，继续
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   const pick = (label: string): void => {
     if (busy) return;
     picksRef.current[current] = label;

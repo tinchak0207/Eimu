@@ -66,6 +66,8 @@ export interface RoutingEvent {
   coins: number;
   refunded: boolean;
   bypassBilling?: boolean;
+  /** 真實產出圖片的 public URL（來自 job.result.artifacts）。只有成功且帶 artifact 的事件才有；無則缺省。 */
+  imageUrls?: string[];
 }
 
 export interface ChannelAggregate {
@@ -328,6 +330,13 @@ export function buildJobRoutingEvent(
     totalMs: Date.now() - job.createdAt.getTime(),
     coins: job.billingAmount,
     refunded,
+    ...(job.result?.artifacts?.length
+      ? {
+          imageUrls: job.result.artifacts
+            .filter((a) => typeof a.url === "string" && a.url.length > 0)
+            .map((a) => a.url as string),
+        }
+      : {}),
   };
 }
 

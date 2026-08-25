@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { ChangeEvent } from "react";
-import { LOCAL_TEST_MODE } from "@/lib/sub2api";
+import { LOCAL_TEST_MODE } from "@/lib/local-test-mode";
 import {
   PixaiError,
   resolveToPayload,

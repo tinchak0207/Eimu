@@ -402,7 +402,7 @@ function AgentImageCardComponent({
   };
 
   return (
-    <figure className="agent-rise lg-card overflow-hidden rounded-ios-2xl">
+    <figure className="agent-rise overflow-hidden rounded-[18px] bg-[rgba(120,120,128,0.06)]">
       <div
         ref={triggerRef}
         role="button"

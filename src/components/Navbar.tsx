@@ -14,7 +14,7 @@ import { CheckinCalendar } from "@/components/CheckinCalendar";
 import { SplitLoginButton } from "@/components/SplitLoginButton";
 import { useAuth } from "@/hooks/use-auth";
 import { getStoredToken } from "@/lib/new-api-client";
-import { LOCAL_TEST_MODE } from "@/lib/sub2api";
+import { LOCAL_TEST_MODE } from "@/lib/local-test-mode";
 import { cn } from "@/lib/utils";
 
 interface NavbarProps {

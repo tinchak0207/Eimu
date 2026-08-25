@@ -153,3 +153,24 @@ test("buildJobRoutingEvent falls back quality mode and omits resolution when abs
   assert.equal(event.resolution, undefined);
   assert.ok(event.id.endsWith("-" + "job-route-1"));
 });
+
+test("buildJobRoutingEvent exposes imageUrls only for real artifact urls and omits the field when result is missing", () => {
+  const withImages: RoutingEvent = buildJobRoutingEvent(
+    job({
+      result: {
+        created: Date.now(),
+        artifacts: [
+          { id: "a1", outputIndex: 0, url: "https://cdn.example.com/1.png", mimeType: "image/png", sha256: "x", width: 1024, height: 1024, endpointLabel: "sensenova-1" },
+          { id: "a2", outputIndex: 1, url: null, mimeType: "image/png", sha256: "y", width: 1024, height: 1024, endpointLabel: "sensenova-1" },
+        ],
+      },
+    }),
+    [attempt({ supplierLabel: "sensenova-1" })],
+    "delivered",
+    false,
+  );
+  assert.deepEqual(withImages.imageUrls, ["https://cdn.example.com/1.png"]);
+
+  const withoutResult: RoutingEvent = buildJobRoutingEvent(job(), [], "exhausted", true);
+  assert.equal(withoutResult.imageUrls, undefined);
+});

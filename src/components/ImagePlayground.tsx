@@ -39,7 +39,7 @@ import {
 import { enhancePrompt, type StylePreset } from "@/lib/prompt-enhancer";
 import { Bot, ChevronDown, RotateCcw } from "lucide-react";
 import { hasEnoughQuota } from "@/lib/new-api-client";
-import { LOCAL_TEST_MODE } from "@/lib/sub2api";
+import { LOCAL_TEST_MODE } from "@/lib/local-test-mode";
 import { PRO_LORA_TOUR_ARMED_KEY } from "@/lib/lora-tour-content";
 import { cn } from "@/lib/utils";
 import { getInitialSuggestions, type Suggestion } from "@/lib/suggestions";
@@ -84,7 +84,8 @@ export function ImagePlayground({ suggestions }: { suggestions: Suggestion[] }) 
   // 别的页面（D-18 图库卡）用 ?agent=1&q= 交接过来的一句话。
   const [agentSeed, setAgentSeed] = useState("");
   // 2026-08-25 模板庫：點卡注入 pending（nonce 讓「換一張卡」也是新注入）。
-  const [agentTemplateInjection, setAgentTemplateInjection] = useState<{ text: string; nonce: number } | null>(null);
+  // directive 是隱形引導詞：隨首條訊息經網關 system 欄位注入，用戶全程不可見。
+  const [agentTemplateInjection, setAgentTemplateInjection] = useState<{ text: string; nonce: number; directive?: string } | null>(null);
   // 模板庫退場旗標：發出第一條用戶消息（模板注入或手打）即收起，之後不再出現。
   const [agentTemplateDismissed, setAgentTemplateDismissed] = useState(false);
   // wish 插件深链（?agent=1&session=<uuid>）：落地后直开该会话而非新开对话。
@@ -148,7 +149,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
    * ③ 首條消息落地即收起畫廊（onUserMessage）。
    */
   const handleUseAgentTemplate = useCallback((template: AgentTemplate) => {
-    setAgentTemplateInjection({ text: template.initialPrompt, nonce: Date.now() });
+    setAgentTemplateInjection({ text: template.initialPrompt, nonce: Date.now(), directive: template.directive });
     applyTemplateToCanvas(canvasHostRef.current?.addNodes, template);
     setAgentTemplateDismissed(true);
   }, []);
@@ -537,7 +538,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
                       不显示「原值 → 现值」的箭头对照：控件上已经是现值，
                       再画一遍只是噪音；使用者要的是「这项被动过」和「还我」。 */}
                   {agentBaseline && agentTouched.size > 0 && (
-                    <div className="lg-card flex shrink-0 flex-wrap items-center gap-2 rounded-ios-2xl px-3.5 py-2.5">
+                    <div className="lg-float flex shrink-0 flex-wrap items-center gap-2 rounded-[18px] px-3.5 py-2.5">
                       <Bot className="h-3.5 w-3.5 shrink-0 text-[#007AFF]" aria-hidden="true" />
                       <span className="text-ios-caption1 text-[rgba(0,0,0,0.52)]">
                         AI 助理改了 {agentTouched.size} 项设置

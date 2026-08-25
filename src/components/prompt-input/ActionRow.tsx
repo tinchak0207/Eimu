@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { ArrowUpRight, Bot, ChevronLeft, Pencil, X, ZoomIn } from "lucide-react";
+import { ArrowUpRight, Bot, Pencil, X, ZoomIn } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
 import { STYLE_PRESETS, type StylePreset } from "@/lib/prompt-enhancer";
 import { cn } from "@/lib/utils";
@@ -31,7 +31,8 @@ interface ActionRowProps {
 
 /**
  * 底部動作列（Task 9 自 PromptInput 抽出）：改图/放大/AI 助理三颗同语法 toggle、
- * 已套用风格 pill、专业控制 toggle、CTA。agent 面整排换成极简返回条。
+ * 已套用风格 pill、专业控制 toggle、CTA。agent 面无底行：收起/返回由聊天面
+ * Header 的 onExit 按钮承担。
  * 不参与模式切换动画，始终原地不动（高度差由控件区 flex-1 吸收）。
  */
 export function ActionRow({
@@ -57,27 +58,17 @@ export function ActionRow({
     [stylePreset],
   );
 
+  // 2026-08-25 用户裁定：agent 面的「返回生成」底行是废层——聊天面 Header 已有
+  // onExit 收起按钮做同一件事。这里直接不渲染，省下的高度由聊天区 flex-1 吃掉。
+  if (displayMode === "agent") return null;
+
   return (
-    <>
-        {displayMode === "agent" ? (
-          <div className="flex min-w-0 items-center gap-2">
-            <button
-              type="button"
-              onClick={() => onModeChange("generate")}
-              title="返回生成模式"
-              className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full bg-[rgba(0,0,0,0.04)] px-3.5 text-[13px] font-medium text-[rgba(0,0,0,0.55)] transition-all duration-200 hover:bg-[rgba(0,0,0,0.08)] hover:text-[rgba(0,0,0,0.75)]"
-            >
-              <ChevronLeft className="h-3.5 w-3.5" />返回生成
-            </button>
-            <span className="text-ios-caption1 text-foreground/45">改图 / 放大请先返回生成模式</span>
-          </div>
-        ) : (
-        <div
-          className={cn(
-            "flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:gap-4",
-            fillAvailableHeight && "border-t border-[rgba(0,0,0,0.06)] pt-3 pb-[env(safe-area-inset-bottom,12px)]",
-          )}
-        >
+    <div
+      className={cn(
+        "flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:gap-4",
+        fillAvailableHeight && "border-t border-[rgba(0,0,0,0.06)] pt-3 pb-[env(safe-area-inset-bottom,12px)]",
+      )}
+    >
           {/* 改图 / 放大 快捷入口 — 左侧，专业控制 toggle 左边 */}
           <div className="flex items-center gap-1.5 shrink-0 self-start">
             <button
@@ -140,8 +131,8 @@ export function ActionRow({
             </div>
           ) : null}
 
-          {/* 专业模式 toggle switch（agent 面不需要：工作站态已由 rails/面板承载切换，
-              摆在这里会和 composer 抢底部空间；agent 態整排已被上面的三元換成返回條） */}
+          {/* 专业模式 toggle switch（agent 面不渲染整个 ActionRow：工作站态已由
+              rails/面板承载切换，这里摆任何东西都会和 composer 抢底部空间） */}
           <button
             type="button"
             onClick={onToggleProfessionalMode}
@@ -189,7 +180,5 @@ export function ActionRow({
             )}
           </button>
         </div>
-        )}
-    </>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useEffect, useState } from "react";
+import { Brain, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AgentAssistantTextItem, AgentUserTurnItem } from "@/lib/agent-chat-types";
 
@@ -38,20 +39,28 @@ function AgentMessageBubbleComponent({ item }: AgentMessageBubbleProps) {
           "min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-[15px]",
           item.kind === "assistant" && item.reasoning ? "w-full" : "max-w-[85%]",
           isUser
-            ? "ml-auto rounded-[18px] rounded-br-[4px] bg-gradient-to-br from-ios-blue to-[#0055D4] px-3.5 py-2.5 text-white leading-[1.45] shadow-[0_4px_16px_rgba(0,122,255,0.32)]"
-            : "rounded-[18px] rounded-bl-[4px] bg-[rgba(120,120,128,0.12)] px-4 py-3 text-foreground leading-[1.55] ring-1 ring-black/[0.06] shadow-[0_2px_12px_rgba(0,0,0,0.06)] backdrop-blur-xl",
+            ? "ml-auto rounded-[20px] rounded-br-[6px] bg-ios-blue px-3.5 py-2.5 text-white leading-[1.45] shadow-[0_2px_10px_rgba(0,122,255,0.25)]"
+            : "rounded-[20px] rounded-bl-[6px] bg-[rgba(120,120,128,0.08)] px-4 py-3 text-foreground leading-[1.55]",
         )}
       >
-        {/* 思维链：灰色小字，串流时也实时追加，让「AI 在想什么」可见（不再黑盒） */}
+        {/* 思维链：默认收合（辅助层不摊开占屏，正文优先）；串流且还没有正文时
+            自动展开——真空期里「AI 在想什么」可见（不再黑盒）。
+            open 属性只在自动展开条件成立时渲染：undefined 时非受控，
+            用户点开/收起不会被重渲染冲掉。 */}
         {item.kind === "assistant" && item.reasoning ? (
-          <details className="mb-1.5 select-none" open>
+          <details
+            className="mb-1.5 select-none [&_.brain-chevron]:transition-transform [&[open]>.brain-summary_.brain-chevron]:rotate-180"
+            {...(item.streaming && !item.text ? { open: true } : {})}
+          >
             {/* 觸控目標 ≥44px：行動端沒有 hover，摘要行要按得到（詳情由內部 span 撐高）。 */}
-            <summary className="block min-h-11 cursor-pointer touch-manipulation [-webkit-tap-highlight-color:transparent]">
-              <span className="flex min-h-11 items-center text-ios-footnote font-medium text-muted-foreground">
+            <summary className="brain-summary block min-h-11 cursor-pointer touch-manipulation [-webkit-tap-highlight-color:transparent]">
+              <span className="flex min-h-11 items-center gap-1.5 text-ios-footnote font-medium text-muted-foreground">
+                <Brain className="h-3.5 w-3.5 shrink-0 text-foreground/40" aria-hidden="true" />
                 思考過程
+                <ChevronDown className="brain-chevron h-3.5 w-3.5 shrink-0 text-foreground/35" aria-hidden="true" />
               </span>
             </summary>
-            <div className="mt-1 whitespace-pre-wrap break-words border-l-2 border-black/10 pl-2.5 text-ios-footnote leading-[1.5] text-muted-foreground italic [overflow-wrap:anywhere]">
+            <div className="mt-1 whitespace-pre-wrap break-words rounded-[14px] bg-black/[0.035] px-3 py-2.5 text-ios-caption1 leading-[1.6] text-muted-foreground [overflow-wrap:anywhere]">
               {item.reasoning}
             </div>
           </details>

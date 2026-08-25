@@ -639,6 +639,19 @@ export function CaseShowcase({ onUsePrompt, onOpenWorkflow }: CaseShowcaseProps)
       stageRef.current.releasePointerCapture(event.pointerId);
     }
 
+    /* 2026-08-25：setPointerCapture 會把衍生 click 重定向到舞台，卡片的
+       onClick 多數瀏覽器收不到（與 AgentTemplateCarousel 同根因）。
+       pointerup 收口：沒動過 = 點擊，命中測試找卡，點邊卡 = 轉到正面。 */
+    if (!movedRef.current) {
+      const hit = document.elementFromPoint(event.clientX, event.clientY);
+      const slab = hit instanceof Element ? hit.closest(".case-slab") : null;
+      const index = slab ? cardRefs.current.indexOf(slab as HTMLDivElement) : -1;
+      if (index >= 0 && index !== front) {
+        movedRef.current = true;
+        goTo(index);
+      }
+    }
+
     /* 末速度换算成「格/秒」再乘增益 —— commit() 会把它夹在 1 格以内。
        甩动只表达「方向 + 我确实想翻」，翻几张由真实拖过的距离说话。 */
     const idle = event.timeStamp - lastMoveAtRef.current > 90;

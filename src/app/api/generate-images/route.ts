@@ -384,7 +384,7 @@ function extractAdobe2ApiImageUrl(payload: UpstreamSuccess | null): string | nul
 }
 
 async function requestImageGeneration(
-  endpoint: { apiKey: string; baseURL: string; label: string; modelId?: string; protocol?: "adobe2api" | "pixai" | "sensenova"; isFallback?: boolean },
+  endpoint: { apiKey: string; baseURL: string; label: string; modelId?: string; protocol?: "adobe2api" | "pixai" | "sensenova" | "filmera"; isFallback?: boolean },
   prompt: string,
   modelId: string,
   referenceImages: File[],
@@ -581,7 +581,7 @@ export async function POST(req: NextRequest) {
     cooling: isEndpointCoolingDown(endpoint),
   }));
   const attempts: RoutingAttempt[] = [];
-  const emitRoutingEvent = (outcome: RoutingOutcome, extra?: { deliveredBy?: string; refunded?: boolean }) =>
+  const emitRoutingEvent = (outcome: RoutingOutcome, extra?: { deliveredBy?: string; refunded?: boolean; imageUrls?: string[] }) =>
     recordRoutingEvent({
       id: `${Date.now()}-${requestId}`,
       ts: Date.now(),
@@ -594,6 +594,7 @@ export async function POST(req: NextRequest) {
       attempts,
       outcome,
       ...(extra?.deliveredBy ? { deliveredBy: extra.deliveredBy } : {}),
+      ...(extra?.imageUrls && extra.imageUrls.length > 0 ? { imageUrls: extra.imageUrls } : {}),
       totalMs: Date.now() - requestStartedAt,
       coins: requiredCoins,
       refunded: extra?.refunded ?? false,
@@ -719,7 +720,7 @@ export async function POST(req: NextRequest) {
         // Success events ride after(): the user should not wait on telemetry. Failure
         // paths below record synchronously instead — those are the runs the admin most
         // needs to see, and an error response can afford ~100ms.
-        after(() => emitRoutingEvent("delivered", { deliveredBy: endpoint.label }));
+        after(() => emitRoutingEvent("delivered", { deliveredBy: endpoint.label, imageUrls: responseImageUrl ? [responseImageUrl] : undefined }));
         if (authenticatedUser.id) {
           // after()：响应返回后再持久化历史，避免 serverless 函数实例提前冻结导致历史丢失。
           after(() =>

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { AgentPipeline } from "@/lib/agent-templates";
 import { templateToCanvasLayout, applyTemplateToCanvas } from "@/components/canvas-workstation/agent-template-canvas";
+import { AGENT_TEMPLATES } from "@/lib/agent-templates";
 
 /** 無 pipeline 模板 fixture（RecipeTemplate 形狀）。 */
 function plainFixture() {
@@ -23,7 +24,7 @@ const PIPELINE: AgentPipeline = {
   steps: [
     {
       name: "Character Bible",
-      deliverable: "角色设定卡",
+      deliverable: "角色设定卡 + DNA 签名",
       inputFrom: "初始需求",
       promptNotes: ["三视图", "服装锚点"],
     },
@@ -43,78 +44,132 @@ const PIPELINE: AgentPipeline = {
   ],
 };
 
-// ── pipeline → 多步驟 canvas workflow ──
+// ── pipeline → 工業級泳道 canvas workflow ──
 
-test("pipeline template lays N steps as chained lanes (step + gen per step)", () => {
+test("pipeline template expands each step into an industrial lane (specs/notes/gate/gen)", () => {
+  const { nodes } = templateToCanvasLayout({ ...plainFixture(), pipeline: PIPELINE });
+
+  // 步骤1：产出2卡 + 要点2卡 + 无门禁 + 生成1卡 = 5
+  // 步骤2：产出1卡 + 要点2卡 + 门禁1卡 + 生成1卡 = 5
+  // 步骤3：产出1卡 + 要点1卡 + 生成1卡 = 3
+  assert.equal(nodes.length, 13);
+
+  const imageNodes = nodes.filter((n) => n.type === "image");
+  const promptNodes = nodes.filter((n) => n.type === "prompt");
+  // 每步恰好一颗生成卡，其余全是提示词卡。
+  assert.equal(imageNodes.length, 3);
+  assert.equal(promptNodes.length, 10);
+});
+
+test("lane cards form one chain across lanes; endpoints and generation trace are valid", () => {
   const { nodes, connections } = templateToCanvasLayout({ ...plainFixture(), pipeline: PIPELINE });
 
-  // 3 步 × (步驟節點 + 生成節點) = 6 顆。
-  assert.equal(nodes.length, 6);
-  const [s0, g0, s1, g1, s2, g2] = nodes;
-  assert.equal(s0.type, "prompt");
-  assert.equal(g0.type, "image");
-  assert.equal(s1.type, "prompt");
-  assert.equal(g1.type, "image");
-  assert.equal(s2.type, "prompt");
-  assert.equal(g2.type, "image");
+  // 三步泳道全部有卡時，跨泳道邊補齊成單一鏈：13 顆卡 → 12 條連線。
+  assert.equal(connections.length, nodes.length - 1);
 
-  // 步驟節點 title = 步驟名（行業黑話），生成節點同名。
-  assert.equal(s0.title, "Character Bible");
-  assert.equal(s1.title, "Sketch-lock");
-  assert.equal(g1.title, "Sketch-lock");
-  assert.equal(s2.title, "Final Render");
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  assert.ok(connections.every((connection) => nodeIds.has(connection.fromNodeId)));
+  assert.ok(connections.every((connection) => nodeIds.has(connection.toNodeId)));
+  const incomingCounts = new Map<string, number>();
+  for (const connection of connections) {
+    incomingCounts.set(connection.toNodeId, (incomingCounts.get(connection.toNodeId) ?? 0) + 1);
+  }
+  assert.equal(incomingCounts.get(nodes[0].id) ?? 0, 0);
+  for (const node of nodes.slice(1)) assert.equal(incomingCounts.get(node.id), 1);
+
+  const lane0 = nodes.filter((n) => n.position.y === 0);
+  assert.equal(lane0.length, 5);
+  assert.ok(lane0[1].position.x > lane0[0].position.x);
+  assert.ok(lane0[4].position.x > lane0[3].position.x);
+
+  const lane1Y = nodes.find((n) => n.title === "门禁")!.position.y;
+  const lane1 = nodes.filter((n) => n.position.y === lane1Y);
+  assert.ok(lane1.length > 0);
+  assert.ok(lane1[0].position.y > 0);
+
+  const generationNodes = nodes.filter((node) => node.type === "image");
+  const crossLaneConnections = connections.filter((connection) => {
+    const from = nodes.find((node) => node.id === connection.fromNodeId)!;
+    const to = nodes.find((node) => node.id === connection.toNodeId)!;
+    return from.position.y !== to.position.y;
+  });
+  assert.equal(crossLaneConnections.length, PIPELINE.steps.length - 1);
+  assert.deepEqual(
+    crossLaneConnections.map((connection) => [connection.fromNodeId, connection.toNodeId]),
+    [
+      [generationNodes[0].id, nodes.find((node) => node.position.y === lane1Y)!.id],
+      [generationNodes[1].id, nodes.find((node) => node.position.y > lane1Y)!.id],
+    ],
+  );
+
+  const trace = generationNodes[1].metadata as Record<string, unknown>;
+  assert.equal(trace.workflow_id, plainFixture().id);
+  assert.equal(trace.stepIndex, 1);
+  assert.equal(trace.stepName, PIPELINE.steps[1].name);
 });
 
-test("pipeline nodes carry deliverable/promptNotes/gate text in content", () => {
+test("gen card carries recipe (step 1) / notes prompt (later steps)", () => {
   const { nodes } = templateToCanvasLayout({ ...plainFixture(), pipeline: PIPELINE });
-  const [s0, , s1] = nodes;
-
-  assert.match(s0.metadata?.content ?? "", /产出：角色设定卡/);
-  assert.match(s0.metadata?.content ?? "", /要点：三视图；服装锚点/);
-  // 無門禁步驟不出現門禁行。
-  assert.doesNotMatch(s0.metadata?.content ?? "", /门禁/);
-  // 有門禁步驟附門禁文字。
-  assert.match(s1.metadata?.content ?? "", /门禁：比例不过关则回炉/);
+  const gens = nodes.filter((n) => n.type === "image");
+  assert.equal(gens[0].metadata?.prompt, "国风水墨玄幻少年，负剑立于山巅");
+  assert.equal(gens[0].metadata?.quality, "balanced");
+  assert.equal(gens[1].metadata?.prompt, "黑白线稿，构图留白");
+  const trace = gens[0].metadata as Record<string, unknown>;
+  assert.equal(trace.workflow_id, plainFixture().id);
+  assert.equal(trace.stepIndex, 0);
+  assert.equal(trace.stepName, PIPELINE.steps[0].name);
 });
 
-test("pipeline connections chain step→gen within step and gen→next-step across steps", () => {
-  const { nodes, connections } = templateToCanvasLayout({ ...plainFixture(), pipeline: PIPELINE });
-  const [s0, g0, s1, g1, s2, g2] = nodes;
-
-  assert.equal(connections.length, 5); // 3 步內 + 2 步間
-  const pairs = connections.map((c) => `${c.fromNodeId}->${c.toNodeId}`);
-  assert.ok(pairs.includes(`${s0.id}->${g0.id}`), "步驟0 → 生成0");
-  assert.ok(pairs.includes(`${g0.id}->${s1.id}`), "生成0 產出餵步驟1");
-  assert.ok(pairs.includes(`${s1.id}->${g1.id}`), "步驟1 → 生成1");
-  assert.ok(pairs.includes(`${g1.id}->${s2.id}`), "生成1 產出餵步驟2");
-  assert.ok(pairs.includes(`${s2.id}->${g2.id}`), "步驟2 → 生成2");
+test("built-in templates all lay out to industrial scale (>= 20 cards)", () => {
+  for (const template of AGENT_TEMPLATES) {
+    const { nodes, connections } = templateToCanvasLayout(template);
+    assert.ok(
+      nodes.length >= 20,
+      `${template.id} 只有 ${nodes.length} 顆卡片，未達工業級（>=20）`,
+    );
+    const gens = nodes.filter((n) => n.type === "image");
+    assert.equal(gens.length, template.pipeline.steps.length, `${template.id} 生成卡數 = 步驟數`);
+    const nodeIds = new Set(nodes.map((node) => node.id));
+    const crossLaneConnections = connections.filter((connection) => {
+      const from = nodes.find((node) => node.id === connection.fromNodeId)!;
+      const to = nodes.find((node) => node.id === connection.toNodeId)!;
+      return from.position.y !== to.position.y;
+    });
+    assert.ok(crossLaneConnections.length >= 1, `${template.id} 缺少跨泳道連線`);
+    assert.ok(crossLaneConnections.every((connection) =>
+      nodeIds.has(connection.fromNodeId) && nodeIds.has(connection.toNodeId),
+    ));
+  }
 });
 
-test("pipeline layout: step nodes left, gen nodes right, lanes stack vertically", () => {
-  const { nodes } = templateToCanvasLayout({ ...plainFixture(), pipeline: PIPELINE });
-  const [s0, g0, s1, g1, s2, g2] = nodes;
-
-  assert.equal(s0.position.x, 0);
-  assert.equal(s1.position.x, 0);
-  assert.equal(s2.position.x, 0);
-  assert.ok(g0.position.x > s0.position.x);
-  assert.ok(g1.position.x > s1.position.x);
-  assert.ok(g2.position.x > s2.position.x);
-  assert.ok(s1.position.y > s0.position.y);
-  assert.ok(s2.position.y > s1.position.y);
-  assert.ok(g2.position.y > g0.position.y);
-});
-
-test("pipeline first gen node carries slots recipe; later gens carry notes-refined prompt", () => {
-  const { nodes } = templateToCanvasLayout({ ...plainFixture(), pipeline: PIPELINE });
-  const [, g0, , g1] = nodes;
-
-  // slots = 首步配方 → 第一步生成節點 metadata。
-  assert.equal(g0.metadata?.prompt, "国风水墨玄幻少年，负剑立于山巅");
-  assert.equal(g0.metadata?.quality, "balanced");
-  assert.equal(g0.metadata?.count, 1);
-  // 後續步驟生成節點攜帶 promptNotes 精煉 prompt。
-  assert.equal(g1.metadata?.prompt, "黑白线稿，构图留白");
+test("empty pipeline lane does not create a fabricated cross-lane connection", () => {
+  const sparsePipeline: AgentPipeline = {
+    summary: "含空泳道",
+    steps: [
+      PIPELINE.steps[0],
+      { name: "", deliverable: "", inputFrom: "", promptNotes: [] },
+      PIPELINE.steps[2],
+    ],
+  };
+  const { nodes, connections } = templateToCanvasLayout({ ...plainFixture(), pipeline: sparsePipeline });
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  assert.ok(connections.every((connection) =>
+    nodeIds.has(connection.fromNodeId) && nodeIds.has(connection.toNodeId),
+  ));
+  const crossLaneConnections = connections.filter((connection) => {
+    const from = nodes.find((node) => node.id === connection.fromNodeId)!;
+    const to = nodes.find((node) => node.id === connection.toNodeId)!;
+    return from.position.y !== to.position.y;
+  });
+  assert.equal(crossLaneConnections.length, 1);
+  const lastGeneration = nodes.find((node) => node.title === PIPELINE.steps[0].name)!;
+  const firstFinalCard = nodes.find((node) => node.title === "产出" && node.position.y === 2 * 330)!;
+  assert.ok(firstFinalCard);
+  assert.deepEqual(crossLaneConnections[0], {
+    id: `conn-${lastGeneration.id}-${firstFinalCard!.id}`,
+    fromNodeId: lastGeneration.id,
+    toNodeId: firstFinalCard!.id,
+  });
 });
 
 test("no-pipeline template falls back to legacy two-layer layout", () => {
@@ -141,8 +196,8 @@ test("pipeline layout with empty steps array falls back; applyTemplateToCanvas r
     { ...plainFixture(), pipeline: PIPELINE },
   );
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].nodes.length, 6);
-  assert.equal(calls[0].connections?.length, 5);
+  assert.equal(calls[0].nodes.length, 13);
+  assert.equal(calls[0].connections?.length, 12);
 
   // host 尚未就绪不拋錯、不鋪節點。
   applyTemplateToCanvas(undefined, { ...plainFixture(), pipeline: PIPELINE });

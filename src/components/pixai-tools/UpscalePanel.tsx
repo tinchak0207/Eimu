@@ -4,7 +4,7 @@ import { useCallback, useState } from "react";
 import { Download, Loader2, ZoomIn, X } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
-import { LOCAL_TEST_MODE } from "@/lib/sub2api";
+import { LOCAL_TEST_MODE } from "@/lib/local-test-mode";
 import {
   PixaiError,
   resolveToPayload,

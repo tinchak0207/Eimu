@@ -15,9 +15,14 @@
 //   npx tsx tools/agent-debug.ts --resume <sid> --answer "蓝色"     # 回答上一個 pending 的 question.request
 //   npx tsx tools/agent-debug.ts --resume <sid> --confirm yes      # 批准上一個 pending 的 confirm.request
 //   npx tsx tools/agent-debug.ts --json out.json "..."             # 原始事件流另存 JSON（離線複查）
+//   npx tsx tools/agent-debug.ts --template <id> "..."             # 先按模板鋪畫布（泳道快照上行，模擬生產前端）再發消息
+//   npx tsx tools/agent-debug.ts --canvas snap.json "..."          # 上傳自備畫布快照（agent 的 canvas_get_state 讀這份）
 //
 // 認證：B 端 key（Bearer sk-biz-*），預設從 .env.biz-key 讀；也可 --key 或環境變量 AGENT_DEBUG_KEY。
 // 注意：走的是網關直連路徑（與站點代理差一層 profile/lessons 注入），事件層與用戶所見完全同源。
+// 2026-08-25：--template/--canvas 補上生產前端的「點模板→畫布泳道快照上行」行為
+// （applyTemplateToCanvas 布局 + postCanvasSnapshot 上傳），否則 agent 的
+// canvas_get_state 看到空畫布，與用戶所見不同源。
 //
 // 報告結構：
 //   1) Timeline   —— 每個事件的時間軸（相對本輪起點的毫秒 + 事件名 + 摘要）
@@ -36,6 +41,8 @@ import {
   type AgentTranscriptItem,
 } from "../src/lib/agent-chat-types";
 import { agentChatReducer, appendUserTurn } from "../src/lib/agent-chat-reducer";
+import { AGENT_TEMPLATES } from "../src/lib/agent-templates";
+import { templateToCanvasLayout } from "../src/components/canvas-workstation/agent-template-canvas";
 
 // ─────────────────────────── 常數與參數
 
@@ -51,8 +58,33 @@ interface CliOptions {
   confirm?: boolean;
   watch?: boolean;
   jsonOut?: string;
+  directive?: string;
+  templateId?: string;
+  canvasFile?: string;
   base: string;
   key: string;
+}
+
+/** 生成某模板的畫布快照（與生產前端 applyTemplateToCanvas + postCanvasSnapshot 同源）。 */
+function snapshotForTemplate(templateId: string): unknown {
+  const tpl = AGENT_TEMPLATES.find((t) => t.id === templateId);
+  if (!tpl) throw new Error(`未知模板 id: ${templateId}`);
+  const { nodes, connections } = templateToCanvasLayout(tpl);
+  return {
+    nodes: nodes.map((n) => ({
+      id: n.id,
+      type: String(n.type),
+      title: n.title,
+      position: n.position,
+      width: n.width,
+      height: n.height,
+      metadata: n.metadata ?? {},
+    })),
+    connections,
+    selectedNodeIds: [],
+    viewport: { x: 0, y: 0, k: 1 },
+    character_cards: [],
+  };
 }
 
 function readBizKey(explicit?: string): string {
@@ -72,9 +104,15 @@ function parseArgs(argv: string[]): CliOptions {
     const a = argv[i];
     if (a === "--keep") opts.keepSession = true;
     else if (a === "--answer") opts.answer = argv[++i];
-    else if (a === "--confirm") opts.confirm = true;
+    else if (a === "--confirm") {
+      opts.confirm = true;
+      if (argv[i + 1] === "yes") i++; // "--confirm yes" 的 yes 是確認動作，不是聊天消息
+    }
     else if (a === "--watch") opts.watch = true;
     else if (a === "--json") opts.jsonOut = argv[++i];
+    else if (a === "--directive") opts.directive = argv[++i];
+    else if (a === "--template") opts.templateId = argv[++i];
+    else if (a === "--canvas") opts.canvasFile = argv[++i];
     else if (a === "--key") opts.key = argv[++i];
     else if (a === "--base") opts.base = argv[++i];
     else if (a === "--resume") opts.resumeSessionId = argv[++i];
@@ -82,6 +120,16 @@ function parseArgs(argv: string[]): CliOptions {
   }
   if (rest.length > 0) opts.message = rest.join(" ");
   opts.key = readBizKey(opts.key);
+  if (opts.templateId) {
+    const tpl = AGENT_TEMPLATES.find((t) => t.id === opts.templateId);
+    if (!tpl) {
+      console.error(`未知模板 id: ${opts.templateId}`);
+      process.exit(2);
+    }
+    if (!opts.message) opts.message = tpl.initialPrompt;
+    if (!opts.directive) opts.directive = tpl.directive;
+    console.log(`模板: ${tpl.name}（initialPrompt + directive 自動注入）`);
+  }
   if (!opts.message && !opts.answer && !opts.confirm && !opts.watch) {
     console.error('用法：npx tsx tools/agent-debug.ts [--keep] [--json out.json] "消息" 或 --resume <sid> (--answer X | --confirm yes | "續聊消息")');
     process.exit(2);
@@ -430,6 +478,31 @@ async function main(): Promise<void> {
     console.log(`續用會話: ${sessionId}`);
   }
 
+  // ── 畫布快照上行（模擬生產前端 postCanvasSnapshot：agent 的 canvas_get_state 讀這份）
+  let canvasSnapshot: unknown;
+  if (opts.templateId) {
+    canvasSnapshot = snapshotForTemplate(opts.templateId);
+    console.log(`模板畫布快照已生成（${opts.templateId}，節點 ${(canvasSnapshot as { nodes: unknown[] }).nodes.length} 顆）`);
+  } else if (opts.canvasFile) {
+    try {
+      canvasSnapshot = JSON.parse(readFileSync(opts.canvasFile, "utf8"));
+    } catch (err) {
+      console.error(`讀取畫布快照失敗 ${opts.canvasFile}: ${err instanceof Error ? err.message : err}`);
+      process.exit(1);
+    }
+  }
+  if (canvasSnapshot !== undefined) {
+    const up = await gw(base, opts.key, `/agent/v1/sessions/${sessionId}/canvas/state`, {
+      method: "POST",
+      body: { state: canvasSnapshot },
+    });
+    console.log(`畫布快照上行 HTTP ${up.status}${up.status >= 300 ? " " + JSON.stringify(up.json).slice(0, 200) : ""}`);
+    if (up.status >= 300) {
+      if (created) await gw(base, opts.key, `/agent/v1/sessions/${sessionId}`, { method: "DELETE" });
+      process.exit(1);
+    }
+  }
+
   // ── 錄製與驅動並行：先起 SSE（不 await），再發消息/答題，輪詢事件決定何時停。
   const start = performance.now();
   const events: RecordedEvent[] = [];
@@ -458,10 +531,37 @@ async function main(): Promise<void> {
   // 給 SSE 一點連接時間再發消息。
   await new Promise((r) => setTimeout(r, 1_500));
 
+  // ── resume 重放穩定等待：重放可能慢於 1.5s（實錄 201 事件 ~1.2s 仍在流），
+  //    基準線取太早會把重放的舊 turn.done 誤判為本輪終止（round-5 踩中：消息發了
+  //    但 0 新事件，錄到 1.2s 就結束）。等「連續 2s 無新事件」或 15s 兜底再取基準。
+  {
+    const settleDeadline = performance.now() + 15_000;
+    let idleSince = performance.now();
+    for (;;) {
+      const before = events.length;
+      await new Promise((r) => setTimeout(r, 200));
+      if (events.length > before) {
+        idleSince = performance.now();
+        continue;
+      }
+      if (performance.now() - idleSince >= 2_000) break;
+      if (performance.now() >= settleDeadline) break;
+    }
+  }
+
+  // resume 重放（last_event_id=0）會把歷史事件（含舊 turn.done）重新灌入；只有
+  // event_id 高於重放水位、且時間晚於消息發出時刻的新 turn.done 才是本輪真實終止信號。
+  const baselineEventId = events.reduce((max, e) => Math.max(max, e.eventId), 0);
+  let sentAtMs: number | undefined;
+
   if (opts.message) {
     const sent = await gw(base, opts.key, `/agent/v1/sessions/${sessionId}/messages`, {
       method: "POST",
-      body: { content: opts.message },
+      body: {
+        content: opts.message,
+        ...(opts.directive ? { session_directive: opts.directive } : {}),
+        ...(canvasSnapshot !== undefined ? { canvas_state: canvasSnapshot } : {}),
+      },
     });
     if (sent.status >= 300) {
       console.error(`發消息失敗 HTTP ${sent.status}: ${JSON.stringify(sent.json).slice(0, 300)}`);
@@ -470,20 +570,29 @@ async function main(): Promise<void> {
       if (created) await gw(base, opts.key, `/agent/v1/sessions/${sessionId}`, { method: "DELETE" });
       process.exit(1);
     }
+    sentAtMs = performance.now() - start;
     console.log(`消息已發送（${opts.message.length} 字）`);
   }
 
   // ── 輪詢：等 turn.done / session.closed / 超時；途中處理 --answer / --confirm。
-  const stopAt = performance.now() + (opts.message || opts.watch ? TURN_TIMEOUT_MS : 30_000);
+  let stopAt = performance.now() + (opts.message || opts.watch ? TURN_TIMEOUT_MS : 30_000);
   let answered = false;
   let confirmed = false;
+  const failedAnswerReqs = new Set<string>();
+  const failedConfirmReqs = new Set<string>();
   for (;;) {
     if (performance.now() >= stopAt) break;
-    const terminal = events.some((e) => e.name === "turn.done" || e.name === "session.closed");
+    const terminal = events.some(
+      (e) =>
+        (e.name === "turn.done" || e.name === "session.closed") &&
+        e.eventId > baselineEventId &&
+        (sentAtMs === undefined || e.tMs > sentAtMs - 100),
+    );
     if (terminal) break;
 
-    // question.request 出現且指定了 --answer：回答它（一輪只答最後一張卡）。
-    const pendingQ = [...events].reverse().find((e) => e.name === "question.request");
+    // question.request 出現且指定了 --answer：回答它（一輪只答最後一張卡；非 2xx 視為
+    // 卡已失效/重發，不標記已答，等新卡）。
+    const pendingQ = [...events].reverse().find((e) => e.name === "question.request" && !failedAnswerReqs.has((e.data as Record<string, unknown>).request_id as string));
     if (opts.answer && !answered && pendingQ && !events.some((e) => e.name === "question.replied" || e.name === "question.rejected")) {
       const reqId = (pendingQ.data as Record<string, unknown>).request_id;
       const r = await gw(base, opts.key, `/agent/v1/sessions/${sessionId}/question`, {
@@ -491,9 +600,14 @@ async function main(): Promise<void> {
         body: { request_id: reqId, answers: [[opts.answer]] },
       });
       console.log(`已回答問題 ${reqId} → "${opts.answer}"（HTTP ${r.status}）`);
-      answered = true;
+      if (r.status >= 200 && r.status < 300) {
+        answered = true;
+        stopAt = performance.now() + TURN_TIMEOUT_MS;
+      } else {
+        failedAnswerReqs.add(String(reqId));
+      }
     }
-    const pendingC = [...events].reverse().find((e) => e.name === "confirm.request");
+    const pendingC = [...events].reverse().find((e) => e.name === "confirm.request" && !failedConfirmReqs.has((e.data as Record<string, unknown>).request_id as string));
     if (opts.confirm && !confirmed && pendingC && !events.some((e) => e.name === "confirm.resolved")) {
       const reqId = (pendingC.data as Record<string, unknown>).request_id;
       const r = await gw(base, opts.key, `/agent/v1/sessions/${sessionId}/confirm`, {
@@ -501,7 +615,12 @@ async function main(): Promise<void> {
         body: { request_id: reqId, approved: true },
       });
       console.log(`已批准確認 ${reqId}（HTTP ${r.status}）`);
-      confirmed = true;
+      if (r.status >= 200 && r.status < 300) {
+        confirmed = true;
+        stopAt = performance.now() + TURN_TIMEOUT_MS;
+      } else {
+        failedConfirmReqs.add(String(reqId));
+      }
     }
 
     // 出現待答卡且沒有自動回答手段：停（該等人工輸入了，用 --resume --answer 續）。

@@ -8,6 +8,8 @@ import {
   pixaiBridgeModelId,
 } from "../src/lib/pixai-model-map";
 import { describeEnvChannels } from "../src/lib/sub2api";
+import { FILMERA_IMAGE_MODEL, FILMERA_VIDEO_MODEL } from "../src/lib/generation-core/filmera-upstream";
+import { REGISTRY_CHANNELS } from "../src/lib/supplier-channels.config";
 
 type Tier = "first_party" | "managed_pool" | "relay" | "fallback";
 type Capability = {
@@ -28,8 +30,16 @@ type Capability = {
  * 新增渠道時忘記加映射會在 seed 階段炸掉，而不是靜默配一把錯的 key，
  * 等到 supplier 調度時才以 401 的形式暴露。
  */
+function registryChannel(label: string) {
+  return REGISTRY_CHANNELS.find((channel) => channel.label === label) ?? null;
+}
+
 function credentialRef(label: string): string {
+  // registry 渠道：apiKeyEnv 同時就是 credentialRef（add-supplier-channel 腳本落檔）。
+  const registry = registryChannel(label);
+  if (registry) return registry.apiKeyEnv;
   if (label === "adobe2api") return "ADOBE2API_API_KEY";
+  if (label === "filmera") return "FILMERA_AUTH_TOKEN";
   if (label === "sub2api") return "SUB2API_API_KEY";
   if (label === "fallback") return "IMAGE_API_KEY_FALLBACK";
   if (label === "pixai") return "PIXAI_API_KEY";
@@ -40,7 +50,10 @@ function credentialRef(label: string): string {
 }
 
 function tier(label: string): Tier {
+  const registry = registryChannel(label);
+  if (registry) return registry.tier;
   if (label === "adobe2api") return "first_party";
+  if (label === "filmera") return "managed_pool";
   if (label === "sub2api") return "managed_pool";
   if (label === "fallback") return "fallback";
   // pixai 是自營賬號池，與 sub2api 同性質：受管池，優於通用中轉。
@@ -66,6 +79,46 @@ function origin(value: string): string {
  * 全部不可用」能被區分開的前提。
  */
 function channelCapabilities(label: string): Capability[] {
+  // registry 渠道：認領範圍 = config 檔裡登記的 claims，逐 claim 逐 kind 產出
+  // capability；ratios/resolutions 照抄平台 catalog，不在 catalog 的模型跳過並
+  // 提醒（不擋 seed——寧可少認領也不虛報能力）。
+  const registry = registryChannel(label);
+  if (registry) {
+    const result: Capability[] = [];
+    for (const claim of registry.claims) {
+      const model = GENERATION_MODEL_CATALOG[claim.modelId];
+      if (!model) {
+        console.warn(`[generation-seed] registry channel "${label}": model "${claim.modelId}" not in GENERATION_MODEL_CATALOG, skipped.`);
+        continue;
+      }
+      for (const kind of claim.kinds) {
+        result.push({
+          modelId: claim.modelId,
+          kind,
+          supplierModelId: claim.supplierModelId,
+          ratios: [...model.aspectRatios],
+          resolutions: [...model.resolutions],
+          editSupport: claim.kinds.includes("image_edit"),
+          videoSupport: claim.kinds.includes("video_generate"),
+        });
+      }
+    }
+    return result;
+  }
+  if (label === "filmera") {
+    const result: Capability[] = [];
+    for (const [platformId, filmeraModel] of Object.entries(FILMERA_IMAGE_MODEL)) {
+      const model = GENERATION_MODEL_CATALOG[platformId];
+      if (!model) continue;
+      result.push({ modelId: platformId, kind: "image_generate", supplierModelId: filmeraModel, ratios: [...model.aspectRatios], resolutions: [...model.resolutions], editSupport: false, videoSupport: false });
+    }
+    for (const [platformId, filmeraModel] of Object.entries(FILMERA_VIDEO_MODEL)) {
+      const model = GENERATION_MODEL_CATALOG[platformId];
+      if (!model) continue;
+      result.push({ modelId: platformId, kind: "video_generate", supplierModelId: filmeraModel, ratios: [...model.aspectRatios], resolutions: [...model.resolutions], editSupport: false, videoSupport: true });
+    }
+    return result;
+  }
   const allowed = label === "adobe2api"
     ? new Set<string>(ADOBE2API_MODEL_IDS)
     : label === "pixai"
@@ -195,16 +248,30 @@ async function main() {
     const id = channel.id;
     const accountId = `${id}:default`;
     const isAdobe = endpoint.protocol === "adobe2api";
+    const isFilmera = endpoint.protocol === "filmera";
+    const registry = registryChannel(channel.label);
+    const channelConfig: Record<string, unknown> = { channelId: channel.id, source: channel.source };
+    if (registry) {
+      // adapter 據此把 chatImageModels 的上游模型改走 /chat/completions 生圖。
+      channelConfig.chatImageModels = registry.chatImageModels;
+    }
+    if (isFilmera) {
+      channelConfig.supabaseUrl = process.env.FILMERA_SUPABASE_URL ?? "";
+      channelConfig.anonKey = process.env.FILMERA_ANON_KEY ?? "";
+      channelConfig.projectId = process.env.FILMERA_PROJECT_ID ?? "";
+      channelConfig.nodeId = process.env.FILMERA_NODE_ID ?? "";
+      channelConfig.videoNodeId = process.env.FILMERA_VIDEO_NODE_ID ?? "";
+    }
     await sql`
       INSERT INTO supplier (
         id, label, adapter_type, supply_tier, failure_domain, base_url, credential_ref,
         enabled, priority, concurrency_limit, quality_score, unit_cost, configuration_json, config_version
       ) VALUES (
-        ${id}, ${channel.label}, ${isAdobe ? "adobe2api" : "openai_images"}, ${tier(channel.label)},
+        ${id}, ${channel.label}, ${isAdobe ? "adobe2api" : isFilmera ? "filmera" : "openai_images"}, ${tier(channel.label)},
         ${origin(endpoint.baseURL)}, ${endpoint.baseURL}, ${credentialRef(channel.label)}, ${channel.defaultEnabled},
-        ${channel.label === "adobe2api" ? 10 : channel.label === "sub2api" ? 20 : channel.label === "primary" ? 30 : 40},
+        ${registry ? registry.seedPriority : channel.label === "adobe2api" ? 10 : channel.label === "filmera" ? 15 : channel.label === "sub2api" ? 20 : channel.label === "primary" ? 30 : 40},
         ${Math.max(1, Number(process.env.GENERATION_SUPPLIER_CONCURRENCY ?? 1))}, 1, 0,
-        ${sql.json({ channelId: channel.id, source: channel.source } as never)}, 1
+        ${sql.json(channelConfig as never)}, 1
       )
       ON CONFLICT (id) DO UPDATE SET
         label = EXCLUDED.label, adapter_type = EXCLUDED.adapter_type, supply_tier = EXCLUDED.supply_tier,
@@ -222,7 +289,7 @@ async function main() {
         ${accountId}, ${id}, ${`${channel.label} default account`}, ${credentialRef(channel.label)}, true,
         ${Math.max(1, Number(process.env.GENERATION_ACCOUNT_CONCURRENCY ?? 1))},
         ${isAdobe ? "degraded" : "healthy"}, ${isAdobe ? null : "not_applicable"},
-        ${isAdobe ? "unknown" : "healthy"}, ${isAdobe ? null : new Date()},
+        ${isAdobe ? "unknown" : isFilmera ? "unknown" : "healthy"}, ${isAdobe || isFilmera ? null : new Date()},
         ${sql.json({ healthPath: process.env.ADOBE2API_HEALTH_PATH ?? "health", minimumSuccessRate5m: 0.8 } as never)}
       )
       ON CONFLICT (id) DO UPDATE SET

@@ -73,12 +73,27 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     canvasState = rawCanvasState;
   }
 
+  // 隱形引導詞（2026-08-25 模板卡）：點模板卡時前端隨首條訊息上送，
+  // 閘道拼進 system 注入模型。同樣只做形狀/長度校驗後透傳——不吞不渲染。
+  const rawDirective = (body as { session_directive?: unknown })?.session_directive;
+  let sessionDirective: string | undefined;
+  if (typeof rawDirective === "string" && rawDirective.trim().length > 0) {
+    if (rawDirective.length > 4_000) {
+      return fail(400, "引导指令过长。", "directive_too_long");
+    }
+    sessionDirective = rawDirective;
+  }
+
   let resp: AgentGatewayResponse;
   try {
     resp = await callAgentGateway(`/agent/v1/sessions/${id}/messages`, {
       method: "POST",
       key: caller.key,
-      body: { content, ...(canvasState !== undefined ? { canvas_state: canvasState } : {}) },
+      body: {
+        content,
+        ...(canvasState !== undefined ? { canvas_state: canvasState } : {}),
+        ...(sessionDirective !== undefined ? { session_directive: sessionDirective } : {}),
+      },
     });
   } catch {
     return fail(502, "Agent 网关连接失败，请稍后重试。", "agent_gateway_unreachable");

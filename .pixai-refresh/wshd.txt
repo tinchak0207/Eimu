@@ -1,7 +1,0 @@
-HTTP/1.1 101 Switching Protocols
-Server: nginx/1.27.5
-Date: Thu, 20 Aug 2026 18:28:30 GMT
-Connection: upgrade
-Upgrade: websocket
-Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=
-

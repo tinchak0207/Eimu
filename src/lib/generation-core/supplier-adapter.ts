@@ -1,5 +1,6 @@
 import { aspectRatioFromImageSize } from "@/lib/generation-model-catalog";
 import { resolveAdobe2ApiImageModelId, resolveAdobe2ApiVideoModelId } from "@/lib/generation-core/adobe2api-upstream";
+import { generateWithFilmera } from "@/lib/generation-core/filmera-upstream";
 import { SupplierRequestError } from "./failure-classifier";
 import type { SupplierGenerationInput, SupplierGenerationOutput, SupplierRecord } from "./types";
 
@@ -39,6 +40,21 @@ function adobeOutputUrl(payload: ProviderPayload | null): string | null {
   return text.match(/!\[[^\]]*\]\((https?:\/\/[^\s)]+)\)/)?.[1] ?? null;
 }
 
+/**
+ * 從 /chat/completions 的 message.content 抽出生圖成品。
+ *
+ * 上游實測事實：gemini 系生圖模型掛在 chat/completions，圖以
+ * `![image](data:image/jpeg;base64,...)` 內嵌 content，有時是 http URL 的
+ * markdown。先抓 base64 data URL（取第一個），抓不到再抓 http URL；兩種都
+ * 抓不到回 { null, null }，由呼叫端報 empty result。
+ */
+export function chatImageOutput(content: string): { base64: string | null; url: string | null } {
+  const base64 = content.match(/data:image\/[a-zA-Z+]+;base64,([A-Za-z0-9+/=]+)/)?.[1] ?? null;
+  if (base64) return { base64, url: null };
+  const url = content.match(/!\[[^\]]*\]\((https?:\/\/[^\s)]+)\)/)?.[1] ?? null;
+  return { base64: null, url };
+}
+
 async function referencesAsFormData(references: SupplierGenerationInput["workflow"]["references"]): Promise<FormData> {
   const body = new FormData();
   for (const reference of references ?? []) {
@@ -66,14 +82,38 @@ function adobeModel(input: SupplierGenerationInput): string {
 
 async function requestSupplier(supplier: SupplierRecord, input: SupplierGenerationInput): Promise<SupplierGenerationOutput> {
   const upstreamModel = supplier.supplierModelId ?? (supplier.adapterType === "adobe2api" ? adobeModel(input) : input.modelId);
+  if (supplier.adapterType === "filmera") {
+    return generateWithFilmera(supplier, input);
+  }
   const references = input.workflow.references ?? [];
   const headers: Record<string, string> = {
     Authorization: `Bearer ${readCredential(supplier)}`,
   };
   let path = input.kind === "video_generate" ? "/videos/generations" : "/images/generations";
   let body: BodyInit;
+  // registry 渠道的 chat 生圖路由：chatImageModels 裡的上游模型只掛在
+  // /chat/completions（gemini 系實測），對照 adobe2api chat 分支的形狀。
+  const chatImageModels = Array.isArray(supplier.configuration?.chatImageModels)
+    ? (supplier.configuration.chatImageModels as unknown[]).filter((x): x is string => typeof x === "string")
+    : [];
+  const viaChatImage = chatImageModels.includes(upstreamModel) && input.kind !== "video_generate";
 
-  if (supplier.adapterType === "adobe2api" && (references.length || input.kind === "video_generate")) {
+  if (viaChatImage) {
+    path = "/chat/completions";
+    headers["Content-Type"] = "application/json";
+    body = JSON.stringify({
+      model: upstreamModel,
+      messages: [{
+        role: "user",
+        content: references.length
+          ? [
+              { type: "text", text: input.prompt },
+              ...references.map((reference) => ({ type: "image_url", image_url: { url: reference.url } })),
+            ]
+          : input.prompt,
+      }],
+    });
+  } else if (supplier.adapterType === "adobe2api" && (references.length || input.kind === "video_generate")) {
     path = "/chat/completions";
     headers["Content-Type"] = "application/json";
     body = JSON.stringify({
@@ -145,6 +185,27 @@ async function requestSupplier(supplier: SupplierRecord, input: SupplierGenerati
     );
   }
   const first = payload?.data?.[0];
+  if (viaChatImage) {
+    // chat 生圖：成品內嵌在 message.content，data URL 優先、http URL 次之。
+    // content 形狀跨上游渠道不穩定（字串 markdown / OpenAI 多模態 parts 陣列），
+    // 非字串先 JSON 化再抽；抽不到時把預覽帶進錯誤訊息，排障不用盲猜。
+    const rawContent = payload?.choices?.[0]?.message?.content;
+    const contentText = typeof rawContent === "string" ? rawContent : JSON.stringify(rawContent ?? "");
+    const chatImage = chatImageOutput(contentText);
+    if (!chatImage.base64 && !chatImage.url) {
+      throw new SupplierRequestError(`Supplier chat image result was empty. Content preview: ${contentText.slice(0, 200)}`, response.status);
+    }
+    return {
+      base64: chatImage.base64,
+      url: chatImage.url,
+      providerRequestId: payload?.id,
+      providerTaskId: payload?.task_id,
+      httpStatus: response.status,
+      endpointLabel: supplier.label,
+      supplierModelId: upstreamModel,
+      evidence: { adapter: supplier.adapterType, supplierId: supplier.id, failureDomain: supplier.failureDomain },
+    };
+  }
   const url = supplier.adapterType === "adobe2api" ? adobeOutputUrl(payload) : first?.url ?? null;
   if (!first?.b64_json && !url) throw new SupplierRequestError("Supplier result was empty.", response.status);
   return {

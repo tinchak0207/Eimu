@@ -2,7 +2,7 @@
 
 import { type CSSProperties, type ReactNode } from "react";
 import dynamic from "next/dynamic";
-import { ChevronUp, MessageCircle, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { MessageCircle, X } from "lucide-react";
 import type { UseCanvasChatReturn } from "@/hooks/use-canvas-chat";
 import { cn } from "@/lib/utils";
 import { useChatPanel } from "./use-chat-panel";
@@ -59,7 +59,27 @@ export function CanvasChatWorkstation({
               from { opacity: 0; transform: translateX(-18px) scale(0.985); }
               to { opacity: 1; transform: none; }
             }
-            .canvas-ws-overlay { animation: canvas-ws-fade 0.32s ease-out; transition: left 0.32s cubic-bezier(0.2, 0.8, 0.2, 1); }
+            .canvas-ws-backdrop {
+              position: fixed;
+              inset: 0;
+              z-index: 40;
+              background: #F2F2F7;
+              animation: canvas-ws-fade 0.32s ease-out;
+            }
+            .canvas-ws-overlay {
+              position: fixed;
+              top: 0;
+              bottom: 0;
+              right: 0;
+              z-index: 50;
+              height: 100dvh;
+              background: transparent;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              overflow: hidden;
+              transition: left 0.32s cubic-bezier(0.2, 0.8, 0.2, 1);
+            }
             .canvas-chat-panel {
               position: fixed;
               z-index: 60;
@@ -71,32 +91,44 @@ export function CanvasChatWorkstation({
               min-height: 0;
               max-height: calc(100dvh - 1.5rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
               max-width: calc(100vw - 1.5rem);
-              /* 2026-08-22 統一裁定：面板只是定位殼，零自帶 chrome——
-                 內層 lg-card 以主頁原皮（白底/圓角/陰影）浮在畫布上，
-                 觸發前後是同一張卡（寬度除外）。 */
-              overflow: visible;
+              /* 面板為實心卡片（純白 100% 不透底），徹底阻斷背景透光 */
+              background: #ffffff !important;
+              border: 1px solid rgba(0, 0, 0, 0.08);
+              border-radius: 28px;
+              box-shadow: 0 20px 48px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(0, 0, 0, 0.04);
+              overflow: hidden;
               transition: width 0.32s cubic-bezier(0.2, 0.8, 0.2, 1);
               animation: canvas-ws-panel-in 0.36s cubic-bezier(0.2, 0.8, 0.2, 1);
             }
             .canvas-chat-rail {
-              width: 3.25rem !important;
-              /* 面板殼已零 chrome，細欄自己帶最小可見度（否則按鈕浮在點陣上看不清）。 */
-              background: rgba(255, 255, 255, 0.86);
-              backdrop-filter: blur(20px) saturate(160%);
-              -webkit-backdrop-filter: blur(20px) saturate(160%);
-              border: 1px solid rgba(255, 255, 255, 0.55);
-              border-radius: 18px;
-              box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+              /* 收起態不再是長條 rail，而是一顆聊天气泡 FAB（2026-08-25 暴君裁定）：
+                 桌面停在面板原位的左上角，手機停在頂欄下方左上角。 */
+              top: calc(0.75rem + env(safe-area-inset-top, 0px));
+              bottom: auto;
+              left: 0.75rem;
+              width: auto !important;
+              height: auto !important;
+              max-width: calc(100vw - 1.5rem);
+              background: #ffffff !important;
+              border: 1px solid rgba(0, 0, 0, 0.08);
+              border-radius: 999px;
+              box-shadow: 0 8px 32px rgba(0, 0, 0, 0.10);
               overflow: hidden;
+              animation: canvas-ws-fab-in 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) both;
             }
+            @keyframes canvas-ws-fab-in {
+              from { opacity: 0; transform: scale(0.6); }
+              to { opacity: 1; transform: scale(1); }
+            }
+            .canvas-chat-rail .canvas-chat-scroll { display: none; }
             .canvas-chat-scroll {
               flex: 1;
               min-height: 0;
               overflow-y: auto;
               padding: 0;
               overscroll-behavior: contain;
+              background: #ffffff !important;
             }
-            .canvas-chat-rail .canvas-chat-scroll { display: none; }
             /* 面板態聊天區填滿面板：scroll 容器變縱向 flex、不再自己滾，
                滾動收進 transcript 內部（agent 面的固定高在 46dvh 抽屜裡會溢出被裁）。 */
             .canvas-chat-scroll.canvas-chat-scroll-fill {
@@ -108,10 +140,14 @@ export function CanvasChatWorkstation({
             .canvas-chat-scroll-fill > * { min-height: 0; }
             .canvas-chat-scroll-fill > section.lg-card {
               flex: 1 1 0%;
-              /* 防御：卡片内部（agent 面）超高时也不许把 section 撑高，
-                 滚动一律收进 transcript；否则 composer 会被推出面板外。 */
               min-height: 0;
               overflow: hidden;
+              background: #ffffff !important;
+              box-shadow: none !important;
+              border: none !important;
+            }
+            .canvas-chat-scroll-fill section {
+              background: #ffffff !important;
             }
             .canvas-chat-scroll-fill > :not(section.lg-card) { flex-shrink: 0; }
             .agent-composer-anchor { flex-shrink: 0; }
@@ -154,7 +190,8 @@ export function CanvasChatWorkstation({
                 border-radius: 999px;
                 background: rgba(0, 0, 0, 0.16);
               }
-              .canvas-chat-rail { top: auto; height: 3.25rem; width: auto !important; }
+              /* FAB 態手機位置：與抽屜同款 top（5rem）靠左上角。 */
+              .canvas-chat-rail { top: calc(5rem + env(safe-area-inset-top, 0px)); left: 0.5rem; }
               .canvas-chat-rail::before { display: none; }
               .canvas-chat-resize { display: none; }
             }
@@ -166,17 +203,20 @@ export function CanvasChatWorkstation({
           2026-08-25 canvas 常駐化：agent 模式右側永遠是這個 overlay，
           初始態（canvas 空）以 overlayContent（模板庫）代替空畫布。 */}
       {inCanvasWorkstation && (
-        <div
-          className="canvas-ws-overlay fixed right-0 top-0 z-50 h-[100dvh] bg-[#F2F2F7]"
-          style={
-            {
-              "--ce-dock-left": `${chatPanelState === "expanded" ? chatPanelWidth + 12 : 64}px`,
-              left: "calc(0.75rem + var(--ce-dock-left, 0px))",
-            } as CSSProperties
-          }
-        >
-          {overlayContent ?? <CanvasEmbed canvas={canvasHost} expanded />}
-        </div>
+        <>
+          <div className="canvas-ws-backdrop" aria-hidden="true" />
+          <div
+            className="canvas-ws-overlay"
+            style={
+              {
+                "--ce-dock-left": `${chatPanelState === "expanded" ? chatPanelWidth + 12 : 64}px`,
+                left: "calc(0.75rem + var(--ce-dock-left, 0px))",
+              } as CSSProperties
+            }
+          >
+            {overlayContent ?? <CanvasEmbed canvas={canvasHost} expanded />}
+          </div>
+        </>
       )}
       {/* min-w-0 is load-bearing: an auto-sized grid column takes its
           minimum from the item's min-content, so a single nowrap
@@ -189,27 +229,27 @@ export function CanvasChatWorkstation({
         )}
         style={inCanvasWorkstation && chatPanelState === "expanded" ? { width: chatPanelWidth } : undefined}
       >
-        {/* 面板頂欄（2026-08-22 統一裁定）：只在 rail 細欄態存在——
-            細欄需要一顆展開按鈕。expanded 態不渲染頂欄：收合按鈕
+        {/* FAB 態（2026-08-25 暴君裁定：收起形態 = 左上角聊天气泡，不是長條 rail）：
+            一顆 44px 圓形聊天气泡按鈕，圖標即語義（MessageCircle=打開對話）。
+            載入中藍色 pulse 提示「助理在跑」。expanded 態不渲染：收合按鈕
             併入聊天 header（chatHeaderExtra），觸發前後同一個 UI。 */}
         {inCanvasWorkstation && chatPanelState === "rail" && (
-          <div className="flex h-full flex-col justify-start gap-2 py-2.5 max-md:h-auto max-md:flex-row">
-            <button
-              type="button"
-              onClick={() => setChatPanelState("expanded")}
-              title="展开对话面板"
-              aria-label="展开对话面板"
-              className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-[#007AFF] transition-colors hover:bg-[rgba(0,122,255,0.1)]"
-            >
-              <PanelLeftOpen className="h-4 w-4 max-md:hidden" aria-hidden="true" />
-              <ChevronUp className="hidden h-4 w-4 max-md:block" aria-hidden="true" />
-            </button>
-            <MessageCircle
-              className={cn("h-4 w-4 shrink-0 text-[rgba(0,0,0,0.35)]", isLoading && "animate-pulse text-[#007AFF]")}
-              aria-hidden="true"
-            />
-            <span className="hidden text-[12px] font-medium text-[rgba(0,0,0,0.45)] max-md:inline">AI 助理</span>
-          </div>
+          <button
+            type="button"
+            onClick={() => setChatPanelState("expanded")}
+            title="展开对话面板"
+            aria-label="展开对话面板"
+            className={cn(
+              "flex h-11 w-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full",
+              "bg-[rgba(0,122,255,0.10)] text-[#007AFF] transition-all duration-200",
+              "hover:bg-[rgba(0,122,255,0.16)] active:scale-[0.94]",
+              "focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)]",
+              "[-webkit-tap-highlight-color:transparent]",
+              isLoading && "animate-pulse",
+            )}
+          >
+            <MessageCircle className="h-5 w-5" aria-hidden="true" />
+          </button>
         )}
         <div className={inCanvasWorkstation ? cn("canvas-chat-scroll min-w-0 flex-1 space-y-3", chatPanelState === "expanded" && "canvas-chat-scroll-fill") : "min-w-0 space-y-3"}>
           {children(
@@ -221,7 +261,7 @@ export function CanvasChatWorkstation({
                 aria-label="收起对话面板"
                 className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-[rgba(0,0,0,0.45)] transition-colors hover:bg-[rgba(0,0,0,0.06)] hover:text-[rgba(0,0,0,0.75)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)]"
               >
-                <PanelLeftClose className="h-4 w-4" aria-hidden="true" />
+                <MessageCircle className="h-4 w-4" aria-hidden="true" />
               </button>
             ) : undefined,
           )}

@@ -38,12 +38,11 @@ test("carousel is a verbatim copy of CaseShowcase interaction machinery", () => 
   assert.match(source, /SPRING_SETTLE/);
   assert.match(source, /MAX_DT/);
 
-  // 鍵盤導航 + 圓點 + 箭頭 + 提示詞明細。
+  // 鍵盤導航 + 圓點 + 箭頭。
   assert.match(source, /"ArrowRight"/);
   assert.match(source, /"ArrowLeft"/);
   assert.match(source, /case-dot/);
   assert.match(source, /case-arrow/);
-  assert.match(source, /CasePromptReveal/);
 
   // 材質層棧：光照四件套的消費層一個不少。
   assert.match(source, /<div className="case-edge" aria-hidden="true" \/>/);
@@ -53,7 +52,7 @@ test("carousel is a verbatim copy of CaseShowcase interaction machinery", () => 
   assert.match(source, /<div className="case-rim case-rim-r" \/>/);
 
   // 共享 CSS（禁止另起爐灶）。
-  assert.match(source, /import "\.\/case-showcase\.css"/);
+  assert.match(source, /import "\.\.\/case-showcase\.css"/);
   // 共享物理庫。
   assert.match(source, /from "@\/lib\/carousel-detent"/);
 });
@@ -70,10 +69,6 @@ test("carousel renders template cards with poster watermark and pipeline flow", 
   assert.match(source, /atc-watermark/);
   assert.match(source, /AGENT_TEMPLATE_DOMAIN_LABELS\[item\.domain\]/);
   assert.match(source, /item\.pipeline\.steps\.map\(\(s\) => s\.name\)\.join\(" → "\)/);
-  // 底部面板：name / painPoint / 初始提示詞明細。
-  assert.match(source, /\{active\.name\}/);
-  assert.match(source, /\{active\.painPoint\}/);
-  assert.match(source, /prompt=\{active\.initialPrompt\}/);
   // 8 張卡全部進入輪播數據源（props 直傳）。
   assert.ok(AGENT_TEMPLATES.length >= 8, `内置模板应不少于 8 张，实际 ${AGENT_TEMPLATES.length}`);
 });

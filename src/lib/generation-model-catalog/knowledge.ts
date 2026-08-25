@@ -23,6 +23,8 @@ import {
   IMAGE_5_PRO_MODEL_ID,
   IMAGE_5_LITE_MODEL_ID,
   SEEDREAM_20_MODEL_ID,
+  SEEDREAM_50_PRO_MODEL_ID,
+  SEEDREAM_50_LITE_MODEL_ID,
   SENSENOVA_U1_FAST_MODEL_ID,
   ADOBE_FIREFLY_MODEL_ID,
   FLUX_2_MODEL_ID,
@@ -129,6 +131,16 @@ export const MODEL_KNOWLEDGE: Record<string, ModelKnowledge> = {
     strengths: ["中文提示词理解好，构图与排版一次到位", "4K 出图价格低于同级"],
     knownDefects: ["风格化极强的画面色彩偶发过饱和，建议在提示词里限定色板"],
     usageTips: [{ text: "中文海报与社媒配图用 2K 起步，需要放大展示再切 4K", params: { outputResolution: "2k" } }],
+  },
+  [SEEDREAM_50_PRO_MODEL_ID]: {
+    strengths: ["构图与文字渲染比 2.0 更稳，1K/2K 双档", "参考图最多 10 张，风格迁移强"],
+    knownDefects: ["暂无 4K 档，需要超大分辨率时用 Seedream 2.0 或 Lite"],
+    usageTips: [{ text: "带参考图的风格任务首选 Pro，1K 草稿确认构图再切 2K", params: { outputResolution: "2k" } }],
+  },
+  [SEEDREAM_50_LITE_MODEL_ID]: {
+    strengths: ["2K/4K 同价，大批量出图成本最低", "4K 直出，放大展示不用二次处理"],
+    knownDefects: ["细节上限低于 Pro 档，复杂人物手部偶发瑕疵"],
+    usageTips: [{ text: "批量草稿与社媒配图用 Lite 4K 直出，商用精修再切 Pro", params: { outputResolution: "4k" } }],
   },
   [SENSENOVA_U1_FAST_MODEL_ID]: {
     strengths: ["全图像目录最低价（0.1 币/张），出图快"],

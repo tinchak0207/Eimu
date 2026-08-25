@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ArrowUpRight, ChevronDown, ChevronLeft, ChevronRight, Copy, Sparkles } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { AGENT_TEMPLATE_DOMAIN_LABELS, type AgentTemplate } from "@/lib/agent-templates";
 import { commitSteps, detent, undetent } from "@/lib/carousel-detent";
 import { cn } from "@/lib/utils";
@@ -15,8 +15,9 @@ interface AgentTemplateCarouselProps {
 /** 卡面转角相对环角的压缩比。1 = 严格贴合圆周切线，但边卡会侧得几乎只剩一条线；
  *  0.82 是「还能看清是什么图」和「有空间纵深」之间的平衡（coverflow 的经典做法）。*/
 const TILT = 0.82;
-/** 環半徑放大，不改任何卡片寬高；遠景的留白與中心卡的視覺重量因此更乾淨。 */
-const RADIUS_SCALE = 2;
+/** 環半徑放大（2026-08-25 暴君裁定：在 CaseShowcase 的 ×2 基礎上再翻倍 = ×4），
+    不改任何卡片寬高；遠景的留白與中心卡的視覺重量因此更乾淨。 */
+const RADIUS_SCALE = 4;
 /** 转角上限。夹住之后没有一张卡面会翻过 90°，所以永远不会出现背面。 */
 const TILT_MAX = 80;
 /** z 位移的软化系数。纯几何的 R(cosφ−1) 会让后排缩得太小，0.78 收一收。 */
@@ -165,34 +166,6 @@ function rgbTriple(hex: string) {
 
 const useIsoLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
-/** 案例提示词明文（PromptHero 式可读可复制）。随 <details key> 每换案例重挂，复制态自动复位。 */
-function CasePromptReveal({ prompt }: { prompt: string }) {
-  const [copied, setCopied] = useState(false);
-  const onCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(prompt);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1600);
-    } catch {
-      // 剪贴板不可用（非安全上下文/权限拒绝）：保持按钮原样，不抛错。
-    }
-  };
-  return (
-    <div className="mt-2 flex items-start justify-between gap-3">
-      <p className="min-w-0 break-words text-[rgba(0,0,0,0.66)]">{prompt}</p>
-      <button
-        type="button"
-        onClick={onCopy}
-        aria-label={copied ? "已复制提示词" : "复制提示词"}
-        className="inline-flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-full bg-[rgba(0,122,255,0.10)] px-3 text-ios-footnote font-medium text-[#007AFF] transition-colors duration-200 hover:bg-[rgba(0,122,255,0.16)]"
-      >
-        <Copy className="h-3.5 w-3.5" aria-hidden="true" />
-        {copied ? "已复制" : "复制"}
-      </button>
-    </div>
-  );
-}
-
 export function AgentTemplateCarousel({ templates, onUseTemplate }: AgentTemplateCarouselProps) {
   /* 案例环数据：官方六例 + 本机发布的「用户投稿」案例（showcase-user-cases）。
      用户案例合入后每格角度改变，由下方的 reset effect 把环拉回第一张。 */
@@ -266,9 +239,12 @@ export function AgentTemplateCarousel({ templates, onUseTemplate }: AgentTemplat
 
     const stageWidth = stage.clientWidth || 1024;
     const compact = window.matchMedia("(max-width: 767px)").matches;
+    /* 2026-08-25 暴君裁定：卡片放大 75%。公式同 CaseShowcase，三個係數同步 ×1.75，
+       等比放大後拖曳手感（dragDegPerPx 以 cardW 推導）自動跟著正確。 */
+    const SIZE_GAIN = 1.75;
     const cardW = compact
-      ? Math.min(stageWidth * 0.78, 340)
-      : Math.min(Math.max(stageWidth * 0.42, 300), 580);
+      ? Math.min(stageWidth * 0.78, 340) * SIZE_GAIN
+      : Math.min(Math.max(stageWidth * 0.42, 300), 580) * SIZE_GAIN;
     const cardH = Math.round(cardW * 0.75);
     const radius = cardW * (compact ? 0.84 : 0.78) * RADIUS_SCALE;
 
@@ -613,6 +589,25 @@ export function AgentTemplateCarousel({ templates, onUseTemplate }: AgentTemplat
       stageRef.current.releasePointerCapture(event.pointerId);
     }
 
+    /* 2026-08-25 點擊根因修復：setPointerCapture 會把後續 pointer 事件（含衍生
+       click）重定向到舞台——卡片的 onClick 在多數瀏覽器根本收不到，這就是
+       「點卡進不去」反覆修不掉的原因。改成 pointerup 收口：手指沒動過 =
+       一次點擊，對釋放點做命中測試找到卡，激活邏輯原地執行。
+       movedRef 先置 true：若瀏覽器仍補發 click，onCardClick 會直接閉嘴。 */
+    if (!movedRef.current) {
+      const hit = document.elementFromPoint(event.clientX, event.clientY);
+      const slab = hit instanceof Element ? hit.closest(".case-slab") : null;
+      const index = slab ? cardRefs.current.indexOf(slab as HTMLDivElement) : -1;
+      if (index >= 0) {
+        movedRef.current = true;
+        if (index === front) {
+          onUseTemplate(cases[front]);
+        } else {
+          goTo(index);
+        }
+      }
+    }
+
     /* 末速度换算成「格/秒」再乘增益 —— commit() 会把它夹在 1 格以内。
        甩动只表达「方向 + 我确实想翻」，翻几张由真实拖过的距离说话。 */
     const idle = event.timeStamp - lastMoveAtRef.current > 90;
@@ -638,8 +633,7 @@ export function AgentTemplateCarousel({ templates, onUseTemplate }: AgentTemplat
     }
   };
 
-  /* 点边卡 = 把它转到正面（coverflow 的通用预期）。模板環的正面卡接管点击 =
-     啟動這條流水線（卡即動作）；movedRef 擋住拖拽誤觸。下方「啟動」按鈕同源。 */
+  /* 点边卡 = 把它转到正面；正面卡点击 = 启动这条流水线。 */
   const onCardClick = (index: number) => {
     if (movedRef.current) return;
     if (index === front) {
@@ -649,19 +643,10 @@ export function AgentTemplateCarousel({ templates, onUseTemplate }: AgentTemplat
     goTo(index);
   };
 
-  const active = cases[panel];
-
   return (
-    <section className="case-viewport agent-template-carousel pb-24" aria-label="助理模板" ref={sectionRef}>
-      <div className="mx-auto mb-6 max-w-[40rem] text-center sm:mb-8">
-        <div className="mb-3 inline-flex min-h-8 items-center gap-1.5 rounded-full bg-[rgba(0,122,255,0.09)] px-3.5 text-ios-caption1 font-semibold text-[#007AFF]">
-          <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
-          流水线模板
-        </div>
-        <h2 className="mx-auto max-w-[32rem] text-ios-title2 font-semibold text-[rgba(0,0,0,0.88)]">
-          选一条流水线，点卡即启动。
-        </h2>
-      </div>
+    <section className="case-viewport agent-template-carousel pb-12" aria-label="助理模板" ref={sectionRef}>
+      {/* 2026-08-25 用户裁定：零文案。页头标题/胶囊、底部标题+痛点+启动按钮+
+          「查看初始提示词」全部删除——卡面已带全部信息，正面卡点击即启动。 */}
 
       <div
         ref={stageRef}
@@ -701,19 +686,45 @@ export function AgentTemplateCarousel({ templates, onUseTemplate }: AgentTemplat
                 ② 元件靠 host.parentElement 讀卡片的版面尺寸與四角半徑。
                 就緒後它會給 .case-slab 掛上 data-glass="on"，把下面那一疊
                 矩形的 HTML 圖層收掉。 */}
-            {/* 模板卡：海報區 = 領域漸變 + 大字水印 + 流水線步驟鏈（無實拍圖，
-                CaseGlassWebGL 無貼圖可餵不掛；層棧其餘部分與首頁完全一致）。 */}
+            {/* 模板卡：海報區 = 模範級 AI 成片封面照 + 領域漸變疊底（保證文字可讀）
+                + 大字水印 + 模板名稱與流水線步驟鏈。2026-08-26：純漸變 placeholder
+                換成真實 AI 成片素材（八卡各一條模範作品封面帧）。 */}
             <div className="case-face">
               <div className="case-media">
                 <div className="case-photo">
+                  {item.showcaseImage ? (
+                    <div className={cn("absolute inset-0 bg-gradient-to-br", item.accent)}>
+                      {/* 素材照：object-cover 鋪滿；atc-info 自帶底部黑漸變承接文字 */}
+                      {/* eslint-disable-next-line @next/next/no-img-element -- 靜態 public 資產，case-photo 是背景層不走 next/image */}
+                      <img
+                        src={item.showcaseImage}
+                        alt=""
+                        aria-hidden="true"
+                        className="absolute inset-0 h-full w-full object-cover"
+                      />
+                      <span className="atc-watermark" aria-hidden="true">
+                        {AGENT_TEMPLATE_DOMAIN_LABELS[item.domain]}
+                      </span>
+                      <div className="atc-info" aria-hidden="true">
+                        <div className="atc-title">{item.name}</div>
+                        <div className="atc-flow">
+                          {item.pipeline.steps.map((s) => s.name).join(" → ")}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
                   <div className={cn("absolute inset-0 bg-gradient-to-br", item.accent)}>
                     <span className="atc-watermark" aria-hidden="true">
                       {AGENT_TEMPLATE_DOMAIN_LABELS[item.domain]}
                     </span>
-                    <span className="atc-flow" aria-hidden="true">
-                      {item.pipeline.steps.map((s) => s.name).join(" → ")}
-                    </span>
+                    <div className="atc-info" aria-hidden="true">
+                      <div className="atc-title">{item.name}</div>
+                      <div className="atc-flow">
+                        {item.pipeline.steps.map((s) => s.name).join(" → ")}
+                      </div>
+                    </div>
                   </div>
+                  )}
                 </div>
               </div>
               {/* 最外緣那條掠射亮線。厚玻璃正對鏡頭時唯一「白」的地方就是這裡
@@ -730,35 +741,11 @@ export function AgentTemplateCarousel({ templates, onUseTemplate }: AgentTemplat
         ))}
       </div>
 
-      <div className="case-panel mt-9 sm:mt-11">
-        <div key={active.id} className="case-panel-swap">
-          <h3 className="text-ios-title3 font-semibold text-[rgba(0,0,0,0.88)]">{active.name}</h3>
-          <p className="mx-auto mt-2 max-w-[36rem] text-ios-footnote text-[rgba(0,0,0,0.58)]">
-            {active.painPoint}
-          </p>
-        </div>
-        <p className="sr-only" aria-live="polite">{`第 ${panel + 1} 张，共 ${COUNT} 张：${active.name}`}</p>
+      {/* 2026-08-25 用户裁定：底部文案区全删（标题/痛点/启动按钮/查看初始提示词）。
+          sr-only 播报保留（无障碍不牺牲），交互入口 = 正面卡点击 + 箭头/圆点。 */}
+      <p className="sr-only" aria-live="polite">{`第 ${panel + 1} 张，共 ${COUNT} 张：${cases[panel].name}`}</p>
 
-        <div className="mt-5 flex flex-col items-center gap-3">
-          <button
-            type="button"
-            onClick={() => onUseTemplate(active)}
-            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[9999px] bg-[#2d3142] px-6 py-5 text-ios-footnote font-semibold text-white transition-colors duration-300 hover:bg-[#3a4152] focus:outline-none focus:ring-2 focus:ring-[rgba(45,49,66,0.32)]"
-          >
-            启动这条流水线
-            <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
-          </button>
-          <details key={`prompt-${active.id}`} className="group/details w-full max-w-[36rem] rounded-ios-2xl bg-[rgba(255,255,255,0.42)] px-3 py-2.5 text-left text-ios-footnote text-[rgba(0,0,0,0.64)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.70)]">
-            <summary className="flex min-h-8 cursor-pointer list-none items-center justify-between gap-3 text-[rgba(0,0,0,0.58)]">
-              <span>查看初始提示词</span>
-              <ChevronDown className="h-4 w-4 transition group-open/details:rotate-180" aria-hidden="true" />
-            </summary>
-            <CasePromptReveal prompt={active.initialPrompt} />
-          </details>
-        </div>
-      </div>
-
-      <div className="mt-7 flex items-center justify-center gap-2">
+      <div className="mt-5 flex items-center justify-center gap-2">
         <button type="button" className="case-arrow lg-float" onClick={() => step(-1)} aria-label="上一个模板">
           <ChevronLeft className="h-5 w-5" aria-hidden="true" />
         </button>

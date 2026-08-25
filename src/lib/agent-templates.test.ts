@@ -123,3 +123,91 @@ test("domain labels cover all domains used by templates", () => {
     new Set(DOMAINS),
   );
 });
+
+// ———— 2026-08-25 工具鏈綁定：requiredTools 必須指向真實 registry，不許假裝能力 ————
+
+import { AGENT_TOOL_DEFINITIONS } from "./agent-tool-contract.ts";
+import { ECOMMERCE_TOOL_IDS } from "./ecommerce-product-adapter.ts";
+import { FASHION_TOOL_IDS } from "./fashion-tryon-tools.ts";
+import { NOVEL_IP_VISUAL_TOOL_IDS } from "./novel-ip-visual-tools.ts";
+import { SHORTDRAMA_TOOL_IDS } from "./shortdrama-domain/index.ts";
+import { ART_TOOL_DEFINITIONS } from "./art-workflows/tool-registry.ts";
+
+const REGISTRY_IDS = new Set<string>([
+  ...AGENT_TOOL_DEFINITIONS.map((tool) => tool.id),
+  ...ECOMMERCE_TOOL_IDS,
+  ...FASHION_TOOL_IDS,
+  ...NOVEL_IP_VISUAL_TOOL_IDS,
+  ...SHORTDRAMA_TOOL_IDS,
+  ...ART_TOOL_DEFINITIONS.map((tool) => tool.id),
+]);
+
+test("toolchain binding: every step declares >=1 requiredTools (工业级可执行工具链)", () => {
+  for (const template of AGENT_TEMPLATES) {
+    assert.ok(
+      template.pipeline.steps.length >= 7,
+      `${template.id} 應為 >=7 步的 SOTA 流水線（實際 ${template.pipeline.steps.length}）`,
+    );
+    for (const step of template.pipeline.steps) {
+      assert.ok(
+        Array.isArray(step.requiredTools) && step.requiredTools.length >= 1,
+        `${template.id} / ${step.name} 缺少 requiredTools`,
+      );
+    }
+  }
+});
+
+test("toolchain binding: available tool ids must exist in some registry", () => {
+  for (const template of AGENT_TEMPLATES) {
+    for (const step of template.pipeline.steps) {
+      for (const tool of step.requiredTools ?? []) {
+        if (!tool.unsupported) {
+          assert.ok(
+            REGISTRY_IDS.has(tool.id),
+            `${template.id} / ${step.name} 引用未註冊工具 ${tool.id} 且未標 unsupported`,
+          );
+        }
+      }
+    }
+  }
+});
+
+test("toolchain binding: unsupported tools must not fake availability", () => {
+  for (const template of AGENT_TEMPLATES) {
+    for (const step of template.pipeline.steps) {
+      for (const tool of step.requiredTools ?? []) {
+        if (tool.unsupported) {
+          // 未接上游的意圖工具必須給出 requiredCapability，讓 harness 知道缺什麼
+          assert.ok(
+            tool.requiredCapability !== undefined,
+            `${template.id} / ${step.name} 工具 ${tool.id} 標 unsupported 但沒說明 requiredCapability`,
+          );
+        }
+      }
+    }
+  }
+});
+
+test("toolchain binding: every template has >=3 gates (门禁是工業級 workflow 的硬性要求)", () => {
+  for (const template of AGENT_TEMPLATES) {
+    const gated = template.pipeline.steps.filter((step) => Boolean(step.gate)).length;
+    assert.ok(gated >= 3, `${template.id} 門禁數 ${gated} < 3`);
+  }
+});
+
+test("toolchain binding: expanded canvas cards reach industrial density (>=35)", () => {
+  for (const template of AGENT_TEMPLATES) {
+    let cards = 0;
+    for (const step of template.pipeline.steps) {
+      const deliverables = step.deliverable.split(/[+＋、;；]/).filter((part) => part.trim().length > 1);
+      cards += Math.max(1, deliverables.length);
+      cards += step.promptNotes.length;
+      if (step.gate) cards += 1;
+      cards += 1; // 每步至少一張生成卡
+    }
+    assert.ok(
+      cards >= 35,
+      `${template.id} 展開後約 ${cards} 張卡，未達工業級密度（>=35）`,
+    );
+  }
+});

@@ -66,3 +66,12 @@ next-env.d.ts
 tools/.deploy-bizkey.sh
 .env*.local
 workbuddy-linux/
+
+# 敏感/運行時雜訊（勿入庫）
+.pixai-refresh/
+pixai-pool/
+.vercel-cli-data/
+.agent-runs/
+.tools/
+.env*
+!deploy/vps/control-plane.env.example

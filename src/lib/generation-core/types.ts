@@ -154,7 +154,7 @@ export interface CreateGenerationReferenceArtifactInput {
 export interface SupplierRecord {
   id: string;
   label: string;
-  adapterType: "adobe2api" | "openai_images" | "minimax" | "did";
+  adapterType: "adobe2api" | "openai_images" | "minimax" | "did" | "filmera";
   supplyTier: "first_party" | "managed_pool" | "relay" | "fallback";
   failureDomain: string;
   baseUrl: string;

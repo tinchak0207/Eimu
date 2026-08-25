@@ -31,7 +31,7 @@ import {
   buildWorkflowPrompt,
   createGenerationWorkflow,
 } from "@/lib/generation-workflow";
-import { LOCAL_TEST_MODE } from "@/lib/sub2api";
+import { LOCAL_TEST_MODE } from "@/lib/local-test-mode";
 import {
   mergeGenerationTaskProjections,
   type GenerationTaskProjection,

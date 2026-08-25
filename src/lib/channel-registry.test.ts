@@ -13,6 +13,7 @@ import {
 } from "./channel-registry.ts";
 import { buildGatewayEndpoints } from "./sub2api.ts";
 import { buildGatewayEndpointsWithPools, type AdminPool } from "./admin-pools.ts";
+import { REGISTRY_CHANNELS } from "./supplier-channels.config.ts";
 
 const FULL_ENV = {
   SUB2API_ENABLED: "true",
@@ -206,7 +207,8 @@ test("overrides 白名單只含 env 渠道與 sensenova——池由自己的 CRU
   const ids = overridableChannelIds();
   assert.deepEqual(
     [...ids].sort(),
-    ["env:adobe2api", "env:fallback", "env:pixai", "env:primary", "env:sub2api", "sensenova"].sort(),
+    [...["env:adobe2api", "env:fallback", "env:pixai", "env:primary", "env:sub2api", "sensenova"],
+      ...REGISTRY_CHANNELS.map((channel) => `env:${channel.label}`)].sort(),
   );
   assert.ok(!ids.some((id) => id.startsWith("pool:")));
 });

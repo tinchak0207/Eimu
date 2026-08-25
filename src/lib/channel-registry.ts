@@ -23,6 +23,7 @@ import {
 import { buildGatewayEndpointsWithPools, inferSupportedModels, type AdminPool } from "./admin-pools";
 import type { ChannelOverrides } from "./channel-overrides";
 import { resolveSenseNovaApiKeys, SENSENOVA_U1_FAST_MODEL_ID } from "./provider-config";
+import { REGISTRY_CHANNELS } from "./supplier-channels.config";
 
 export const SENSENOVA_CHANNEL_ID = "sensenova";
 const SENSENOVA_BASE_URL = "https://token.sensenova.cn/v1";
@@ -49,6 +50,8 @@ export const ENV_CHANNEL_PRIORITIES: Record<string, number> = {
   pixai: 30,
   primary: 51,
   fallback: 90,
+  // registry 渠道（supplier-channels.config.ts）的站點隊列優先級。
+  ...Object.fromEntries(REGISTRY_CHANNELS.map((channel) => [channel.label, channel.sitePriority])),
 };
 
 export interface ChannelDescriptor {
@@ -277,5 +280,13 @@ export function describeChannels(
 
 /** admin overrides 允許出現的渠道 id 白名單（池不在內——池有自己的 CRUD）。 */
 export function overridableChannelIds(): string[] {
-  return ["env:sub2api", "env:adobe2api", "env:pixai", "env:primary", "env:fallback", SENSENOVA_CHANNEL_ID];
+  return [
+    "env:sub2api",
+    "env:adobe2api",
+    "env:pixai",
+    "env:primary",
+    "env:fallback",
+    SENSENOVA_CHANNEL_ID,
+    ...REGISTRY_CHANNELS.map((channel) => `env:${channel.label}`),
+  ];
 }

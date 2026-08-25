@@ -34,9 +34,9 @@ function AgentToolCardComponent({ item }: AgentToolCardProps) {
   const running = item.status === "running";
 
   return (
-    <div className="agent-rise lg-card flex flex-col gap-2 rounded-ios-2xl px-3.5 py-3">
+    <div className="agent-rise flex flex-col gap-2 rounded-[18px] bg-[rgba(120,120,128,0.06)] px-3.5 py-3">
       <div className="flex items-center gap-2.5">
-        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-black/[0.04] text-muted-foreground">
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white text-muted-foreground">
           <status.Icon className={cn("h-4 w-4", running && "animate-spin")} aria-hidden="true" />
         </span>
         <div className="min-w-0 flex-1">

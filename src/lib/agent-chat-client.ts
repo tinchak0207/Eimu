@@ -218,6 +218,11 @@ export interface SendAgentMessageOptions {
    * 画布上下文靠这个字段随每次 send 上送。
    */
   canvasState?: unknown;
+  /**
+   * 隐形引导词（2026-08-25 模板卡）：随消息上送，网关把它拼进 system 注入
+   * 给模型。不进 transcript、不渲染在聊天流里，用户全程不可见。
+   */
+  sessionDirective?: string;
 }
 
 /** 送一条对话消息。网道回 202 即算已收。 */
@@ -229,6 +234,9 @@ export async function sendAgentMessage(
   const body: Record<string, unknown> = { content };
   if (options?.canvasState !== undefined && options.canvasState !== null) {
     body.canvas_state = options.canvasState;
+  }
+  if (typeof options?.sessionDirective === "string" && options.sessionDirective.trim().length > 0) {
+    body.session_directive = options.sessionDirective;
   }
   await agentFetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}/messages`, {
     method: "POST",

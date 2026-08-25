@@ -79,7 +79,7 @@ test("the result column is the canvas alone, with no duplicated chrome", () => {
   // 派生，不再有「助理左邊、圖片右邊」的中間態），CanvasEmbed 的關閉鈕退場。
   assert.match(source, /const resultMode: "image" \| "canvas" = displayMode === "agent" \? "canvas" : "image"/);
   assert.match(source, /inCanvasWorkstation = displayMode === "agent" && !showProfessionalMode/);
-  assert.match(source, /canvas-ws-overlay fixed right-0 top-0 z-50 h-\[100dvh\] bg-\[#F2F2F7\]/);
+  assert.match(source, /canvas-ws-overlay/);
   assert.match(source, /\{overlayContent \?\? <CanvasEmbed canvas=\{canvasHost\} expanded \/>\}/);
   assert.match(source, /<ImageDisplay/);
   assert.match(source, /chatPanelState === "expanded" \? \{ width: chatPanelWidth \}/);

@@ -1,7 +1,0 @@
-{
-  "version": 3,
-  "sources": ["../src/diagnostics.ts"],
-  "sourcesContent": ["/**\n * Full diagnostic payload produced during CLI resolution.\n */\nexport interface ResolutionDiagnostics {\n  localBinSearch: LocalBinSearchDiagnostics;\n  skippedLocalBins: SkippedLocalBin[];\n}\n\n/**\n * Diagnostics from walking ancestor `node_modules/.bin` directories.\n */\nexport interface LocalBinSearchDiagnostics {\n  searchRoot: string;\n  stoppedAt: string;\n  stopReason: 'project-root-marker' | 'filesystem-root';\n  markerPath?: string;\n  skippedNodeModules: SkippedNodeModules[];\n}\n\n/**\n * A skipped `node_modules` directory and the reason it was rejected.\n */\nexport interface SkippedNodeModules {\n  directory: string;\n  reason: string;\n}\n\n/**\n * A skipped local bin candidate and the reason it was rejected.\n */\nexport interface SkippedLocalBin {\n  candidate: string;\n  reason: string;\n}\n"],
-  "mappings": ";;;;;;;;;;;;;;AAAA;AAAA;",
-  "names": []
-}

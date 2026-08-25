@@ -430,7 +430,7 @@ function AgentComposerComponent({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
       className={cn(
-        "agent-composer lg-float relative flex items-end gap-2 rounded-[22px] px-3 py-2 touch-manipulation [-webkit-tap-highlight-color:transparent] focus-within:ring-2 focus-within:ring-ios-blue/30",
+        "agent-composer relative flex items-end gap-2 rounded-[20px] bg-[rgba(120,120,128,0.07)] px-3 py-1.5 touch-manipulation [-webkit-tap-highlight-color:transparent] focus-within:ring-2 focus-within:ring-ios-blue/30",
         dragActive && "!ring-2 !ring-ios-blue/45 !bg-ios-blue/[0.04]",
       )}
     >
@@ -555,9 +555,8 @@ function AgentComposerComponent({
           输入消息
         </label>
         {/* 移动端虚拟键盘把回车键显示成「发送」，回车即送出（Shift+Enter 换行不变）。
-            2026-08-22 完美主義審視：默認高度從 1 行加到 ~3 行（min-h）——
-            聊天面上半屏大量留白時，輸入框太矮是最高頻摩擦點；寫長願望
-            第一眼就能看見三四行。autoGrow 長高、max-h 到頂自滾。 */}
+            2026-08-25 空间压实：min-h 从 ~3 行收到 ~2 行半——autoGrow 长高、
+            max-h 到顶自滚，min-h 只兜空框下限，不再是常驻留白。 */}
         <textarea
           id="agent-composer-input"
           ref={textareaRef}
@@ -573,7 +572,7 @@ function AgentComposerComponent({
           placeholder={placeholder}
           rows={3}
           className={cn(
-            "min-h-[72px] max-h-52 w-full resize-none bg-transparent py-2 text-base text-foreground sm:min-h-[84px] sm:text-[15px]",
+            "min-h-[60px] max-h-52 w-full resize-none bg-transparent py-1.5 text-base text-foreground sm:min-h-[72px] sm:text-[15px]",
             "placeholder:text-muted-foreground/70 focus:outline-none",
             "touch-manipulation [-webkit-tap-highlight-color:transparent]",
             "disabled:cursor-not-allowed disabled:opacity-50",
@@ -592,7 +591,7 @@ function AgentComposerComponent({
           "bg-ios-blue text-white shadow-[0_2px_8px_rgba(0,122,255,0.32)]",
           "hover:opacity-90 active:scale-[0.94]",
           "focus:outline-none focus:ring-2 focus:ring-ios-blue/40",
-          "disabled:cursor-not-allowed disabled:bg-ios-blue/30 disabled:text-white/70 disabled:shadow-none",
+          "disabled:cursor-not-allowed disabled:bg-[rgba(120,120,128,0.18)] disabled:text-white/80 disabled:shadow-none",
         )}
       >
         <Send className="h-5 w-5" aria-hidden="true" />

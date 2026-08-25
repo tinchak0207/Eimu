@@ -22,6 +22,9 @@ import { acquireSupplierLease, diagnoseSupplierUnavailability, heartbeatSupplier
 import { generateWithSupplier } from "./supplier-adapter";
 import type { GenerationArtifactResult, GenerationJob } from "./types";
 import { refreshAdobeSupplierHealth } from "./adobe-health";
+import { onFilmeraTokenRotated } from "./filmera-upstream";
+import { refreshFilmeraSupplierHealth } from "./filmera-health";
+import { readFile, writeFile } from "node:fs/promises";
 import { emitJobRoutingEvent } from "../routing-telemetry";
 
 export interface GenerationWorkerOptions {
@@ -220,6 +223,24 @@ export async function runGenerationWorker(options: GenerationWorkerOptions = {})
   process.once("SIGTERM", stop);
   let lastMaintenance = 0;
   const billingExecutorId = `billing:${process.env.HOSTNAME ?? "local"}:${process.pid}`;
+  // filmera token 輪換持久化：內存換新後原子寫回 env 文件，
+  // worker 重啟不丟失 refresh_token 鏈（否則每次重啟都退回舊 token → 401 死鎖）。
+  const envPath = process.env.FILMERA_ENV_PATH ?? "/opt/image-control-plane/.env.control-plane";
+  onFilmeraTokenRotated(async (next) => {
+    try {
+      const text = await readFile(envPath, "utf8");
+      const lines = text.split("\n").filter((l) => !l.startsWith("FILMERA_AUTH_TOKEN=") && !l.startsWith("FILMERA_REFRESH_TOKEN="));
+      lines.push(`FILMERA_AUTH_TOKEN=${next.accessToken}`);
+      lines.push(`FILMERA_REFRESH_TOKEN=${next.refreshToken}`);
+      // bind-mount 單文件掛載不支援 rename 覆蓋（EBUSY），直接原地寫入。
+      // 寫入期間理論上有瞬間不完整窗口，但 env 只在容器啟動時讀取，可接受。
+      await writeFile(envPath, lines.join("\n"), "utf8");
+      process.env.FILMERA_AUTH_TOKEN = next.accessToken;
+      process.env.FILMERA_REFRESH_TOKEN = next.refreshToken;
+    } catch (error) {
+      console.warn("[generation-worker] filmera token 持久化失敗（僅內存生效）", error instanceof Error ? error.message : String(error));
+    }
+  });
   while (!stopping) {
     try {
       const now = Date.now();
@@ -227,6 +248,7 @@ export async function runGenerationWorker(options: GenerationWorkerOptions = {})
         await recoverExpiredGenerationLeases(sql);
         await reconcileGenerationBilling({ executorId: billingExecutorId, sql });
         await refreshAdobeSupplierHealth(sql);
+        await refreshFilmeraSupplierHealth(sql);
         lastMaintenance = now;
       }
       const processed = await runGenerationWorkerOnce({ ...options, sql });
