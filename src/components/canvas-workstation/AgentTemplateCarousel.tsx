@@ -5,7 +5,7 @@ import { ArrowUpRight, ChevronDown, ChevronLeft, ChevronRight, Copy, Sparkles } 
 import { AGENT_TEMPLATE_DOMAIN_LABELS, type AgentTemplate } from "@/lib/agent-templates";
 import { commitSteps, detent, undetent } from "@/lib/carousel-detent";
 import { cn } from "@/lib/utils";
-import "./case-showcase.css";
+import "../case-showcase.css";
 import "./agent-template-carousel.css";
 
 interface AgentTemplateCarouselProps {
