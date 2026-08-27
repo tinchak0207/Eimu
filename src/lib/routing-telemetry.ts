@@ -274,6 +274,55 @@ export function summarizeModelBreakdown(events: RoutingEvent[]): ModelBreakdown[
     .sort((a, b) => b.total - a.total);
 }
 
+export interface ModelRecentStats {
+  modelId: string;
+  /** 窗口内该模型的总请求数（含失败）。样本量由消費者自行判斷。 */
+  jobs: number;
+  delivered: number;
+  failed: number;
+  /** delivered / jobs；jobs 為 0 時為 0。 */
+  success_rate: number;
+  /** 窗口内发生退款的事件数（独立于 delivered/failed 计数，單列不併桶）。 */
+  refunded: number;
+}
+
+const DEFAULT_RECENT_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * 按模型統計最近時間窗口（默認 24h）的真實生圖表現——供 /v1/model-status 的
+ * last_24h 字段使用，讓 agent 選模型前能看到歷史成功率，而不是只有可用性布爾值。
+ * 與 summarizeModelBreakdown 同源同風格的純函數：delivered 視為成功，其餘
+ * outcome（exhausted/cancelled/budget-exhausted/no-endpoints）一律歸 failed；
+ * refunded 單列。窗口取 events 的 ts >= nowMs - windowMs；事件樣本只覆蓋
+ * listRoutingEvents 取回的條數，窗口不足時 jobs 如實反映樣本量。
+ */
+export function summarizeRecentModelStats(
+  events: RoutingEvent[],
+  nowMs: number,
+  windowMs: number = DEFAULT_RECENT_WINDOW_MS,
+): ModelRecentStats[] {
+  const byModel = new Map<string, ModelRecentStats>();
+  const cutoff = nowMs - windowMs;
+  for (const event of events) {
+    if (event.ts < cutoff) continue;
+    let stats = byModel.get(event.modelId);
+    if (!stats) {
+      stats = { modelId: event.modelId, jobs: 0, delivered: 0, failed: 0, success_rate: 0, refunded: 0 };
+      byModel.set(event.modelId, stats);
+    }
+    stats.jobs += 1;
+    if (event.outcome === "delivered") {
+      stats.delivered += 1;
+    } else {
+      stats.failed += 1;
+    }
+    if (event.refunded) stats.refunded += 1;
+  }
+  return [...byModel.values()]
+    .map((stats) => ({ ...stats, success_rate: stats.jobs > 0 ? stats.delivered / stats.jobs : 0 }))
+    .sort((a, b) => b.jobs - a.jobs);
+}
+
 /**
  * URL 解析失敗時退回原始字串：壞 base_url 只會讓 host 顯示成原文，
  * 絕不讓遙測建構崩潰。
