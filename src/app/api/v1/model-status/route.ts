@@ -40,7 +40,10 @@ async function getRecentModelStats(): Promise<ModelRecentStats[]> {
   if (recentStatsCache && recentStatsCache.expiresAt > now) return recentStatsCache.stats;
   const stats = await listRoutingEvents(RECENT_STATS_EVENT_LIMIT)
     .then((events) => summarizeRecentModelStats(events, now))
-    .catch(() => []);
+    .catch((error) => {
+      console.error("[model-status] last_24h stats unavailable:", error);
+      return [] as ModelRecentStats[];
+    });
   recentStatsCache = { expiresAt: now + RECENT_STATS_TTL_MS, stats };
   return stats;
 }
