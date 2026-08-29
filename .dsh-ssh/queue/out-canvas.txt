@@ -1,9 +1,0 @@
-===FRONTEND===
-/opt/agent-harness/gateway/workflow-service.ts
-/opt/agent-harness/workspace/.opencode/tools/workflow_rerun_node.ts
-/opt/agent-harness/workspace/.opencode/tools/workflow_add_node.ts
-/opt/agent-harness/workspace/.opencode/tools/workflow_update_node.ts
-/opt/agent-harness/workspace/.opencode/tools/workflow_start.ts
-/opt/agent-harness/workspace/.opencode/tools/image_generate.ts
-
-[exit 0]

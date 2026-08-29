@@ -1,6 +1,0 @@
-supplier_id  |        model_id        | failure_class |                                  det                                  | provider_http_status |          created_at           
----------------+------------------------+---------------+-----------------------------------------------------------------------+----------------------+-------------------------------
- env:adobe2api | kling-3.0              | overloaded    | Upstream is temporarily unavailable. Please retry later.              |                  503 | 2026-08-21 07:30:09.033184+00
- env:adobe2api | kling-3.0              | overloaded    | Upstream is temporarily unavailable. Please retry later.              |                  503 | 2026-08-21 07:24:46.476135+00
- env:sub2api   | gemini-3.1-flash-image | user_input    | images endpoint requires an image model, got "gemini-3.1-flash-image" |                  400 | 2026-08-21 07:21:22.950687+00
-(3 rows)

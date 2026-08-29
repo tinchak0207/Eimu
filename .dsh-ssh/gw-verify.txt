@@ -1,7 +1,0 @@
-active
-Aug 21 16:11:20 VM-0-2-ubuntu systemd[1]: Stopped agent-gateway.service - agent-gateway (frontend entry point).
-Aug 21 16:11:20 VM-0-2-ubuntu systemd[1]: agent-gateway.service: Consumed 3min 1.349s CPU time, 70.4M memory peak, 27.1M memory swap peak.
-Aug 21 16:11:20 VM-0-2-ubuntu systemd[1]: Started agent-gateway.service - agent-gateway (frontend entry point).
-Aug 21 16:11:20 VM-0-2-ubuntu bun[660783]: [gateway] listening on :8081, opencode=http://127.0.0.1:4096
-Aug 21 16:11:20 VM-0-2-ubuntu bun[660783]: [gateway] opencode SSE connected: http://127.0.0.1:4096/event
-200

@@ -1,8 +1,0 @@
-== 6 tokens listed
-proxy disabled for upstream requests
-acct0(?): AuthError (0.2s) Token invalid or expired
-acct1(?): AuthError (0.1s) Token invalid or expired
-acct2(?): AuthError (0.0s) Token invalid or expired
-acct3(?): AuthError (0.0s) Token invalid or expired
-acct4(?): AuthError (0.0s) Token invalid or expired
-acct5(?): AuthError (0.0s) Token invalid or expired

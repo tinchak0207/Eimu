@@ -1,3 +1,0 @@
-158:                    video_bytes, video_meta = client.generate_video(
-===ALL-CALLS-IN-FILE===
-722:                    video_bytes, video_meta = client.generate_video(

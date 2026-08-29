@@ -1,4 +1,0 @@
-Traceback (most recent call last):
-  File "/tmp/video-exp.py", line 7, in <module>
-    from core.models.catalog import video_model_catalog
-ImportError: cannot import name 'video_model_catalog' from 'core.models.catalog' (/app/core/models/catalog.py)

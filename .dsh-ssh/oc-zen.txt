@@ -1,3 +1,0 @@
-===
-GROQ_API_KEY=***
-KOTONE_BRIDGE_API_KEY=***

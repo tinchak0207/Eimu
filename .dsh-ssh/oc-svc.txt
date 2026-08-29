@@ -1,6 +1,0 @@
-===
-User=agentsvc
-WorkingDirectory=/opt/agent-harness/workspace
-EnvironmentFile=/opt/agent-harness/.env.opencode
-Environment=OPENCODE_SERVER_PASSWORD=harness-secret-2026
-ExecStart=/usr/local/bin/opencode serve --hostname 127.0.0.1 --port 4096

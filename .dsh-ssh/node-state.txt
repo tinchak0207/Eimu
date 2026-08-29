@@ -1,9 +1,0 @@
-replay event counts: {"connected":1,"tool.invoke":7,"tool.result":7,"reasoning.delta":72,"message.delta":98,"canvas.plan":1,"canvas.node.created":7,"canvas.node.connected":7,"turn.done":1}
-node last state:
-  wf_mt2ub53y_1-char_threerview-0 :: status=? lastEvt=canvas.node.created err=
-  wf_mt2ub53y_1-scene_interior-1 :: status=? lastEvt=canvas.node.created err=
-  wf_mt2ub53y_1-shot1_gen-2 :: status=? lastEvt=canvas.node.created err=
-  wf_mt2ub53y_1-shot2_gen-3 :: status=? lastEvt=canvas.node.created err=
-  wf_mt2ub53y_1-shot3_gen-4 :: status=? lastEvt=canvas.node.created err=
-  wf_mt2ub53y_1-shot4_gen-5 :: status=? lastEvt=canvas.node.created err=
-  wf_mt2ub53y_1-scene_exterior-6 :: status=? lastEvt=canvas.node.created err=

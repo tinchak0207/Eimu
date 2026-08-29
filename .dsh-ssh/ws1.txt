@@ -1,6 +1,0 @@
-10://   generate → topo 排序 → 逐節點執行（text/config 跳過，image/video 調平台）
-14://   runNode(node, upstreamResults) => Promise<{ok, content?, costCoins?, error?}>
-36:  runNode: RunNodeFn
-124:  /** 執行工作流。emit canvas 事件；text/config 節點視為完成，image/video 調 runNode。 */
-125:  async generate(workflowId: string): Promise<{ ok: boolean; status: string }> {
-149:      const result = await this.opts.runNode(node, upstreamContent, wf.graph)

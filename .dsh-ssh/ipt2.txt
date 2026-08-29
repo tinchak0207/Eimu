@@ -1,6 +1,0 @@
-Chain PREROUTING (policy ACCEPT)
-num  target     prot opt source               destination         
-1    DOCKER     0    --  0.0.0.0/0            0.0.0.0/0            ADDRTYPE match dst-type LOCAL
-2    DNAT       6    --  0.0.0.0/0            172.20.0.1           tcp dpt:18443 to:127.0.0.1:18443
-===
-TCP connect: timed out

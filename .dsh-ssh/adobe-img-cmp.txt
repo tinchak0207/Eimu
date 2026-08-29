@@ -1,5 +1,0 @@
-START
-proxy disabled for upstream requests
-image-submit[home]: 422 (1.4s) {"error_code":"validation_error","message":"A validation error occured.","validation_errors":[{"loc":["body","
-image-submit[direct]: 422 (0.2s) {"error_code":"validation_error","message":"A validation error occured.","validation_errors":[{"loc":["body","
-DONE

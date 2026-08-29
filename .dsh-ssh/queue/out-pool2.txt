@@ -1,7 +1,0 @@
-4004458 bash -c pgrep -af dreamina_pool.py | cat; echo ===; ps -o pid,ppid,etime,rss,cmd -p $(pgrep -f dreamina_pool.py | tr '\n' ',' | sed 's/,$//') 2>/dev/null | cat
-===
-    PID    PPID     ELAPSED   RSS CMD
-4004458 3978161       00:00  3720 bash -c pgrep -af dreamina_pool.py | cat; echo ===; ps -o pid,ppid,etime,rss,cmd -p $(pgrep -f dreamina_pool.py | tr '\n' ',' | sed 's/,$//') 2>/dev/null | cat
-4004461 4004458       00:00  4376 ps -o pid,ppid,etime,rss,cmd -p 4004458,4004461,4004462
-
-[exit 0]

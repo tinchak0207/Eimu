@@ -1,7 +1,0 @@
-proxy disabled for upstream requests
-proxy disabled for upstream requests
-INFO:     Started server process [1]
-===HEALTH===
-Traceback (most recent call last):
-  File "<string>", line 1, in <module>
-NameError: name 'status' is not defined

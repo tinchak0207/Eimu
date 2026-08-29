@@ -1,8 +1,0 @@
-===CONN_COUNT===
-0
-===POOL_LOG_TAIL===
-/home/ubuntu/dreamina-pool/pool_data/tiberiusblaine9582_outlook_com/Default/GCM Store/000003.log
-/home/ubuntu/dreamina-pool/pool_data/tiberiusblaine9582_outlook_com/Default/shared_proto_db/000003.log
-/home/ubuntu/dreamina-pool/pool_data/keylafaust1943_outlook_com/Default/Session Storage/000008.log
-
-[exit 0]

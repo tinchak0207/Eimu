@@ -52,11 +52,18 @@ node_modules/@swc/*
 /.dsh-vision-router/
 /.tsdeps/
 /.pixai-refresh/
+/.xdg-cache/
+/.gateway-work/
+/.vercel.bak-link/
+/.vercel-home/
+/.dsh-adobe-pool/
 /browser-probe/
 /browser-screenshots/
 /pixai-pool-new.json
 /dreamina_output.webp
 /deploy_out.log
+/marketing-battle-pack/
+/eval-daming-film/
 
 # documentation & design assets (build-time only; no runtime code reads these)
 /docs/
@@ -72,3 +79,6 @@ node_modules/@swc/*
 .gitignore
 *.tsbuildinfo
 .env*
+
+# kunpeng 鋪片工作區（未追蹤半成品；主應用零引用，上傳會炸 Vercel lint/type 門禁）
+/src/vendor-bridges/

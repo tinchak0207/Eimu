@@ -1,2 +1,0 @@
-https://api.ipify.org ERR <urlopen error EOF occurred in violation of protocol (_ssl.c:1017)>
-https://firefly-api.adobe.io/ ERR HTTP Error 404: Not Found

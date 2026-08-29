@@ -1,1 +1,0 @@
-Aug 21 18:52:26 VM-0-2-ubuntu bun[777213]: [gateway] balance endpoint unavailable (https://image.tinchak0207.xyz/v1/quota -> 404); reporting balance as unknown

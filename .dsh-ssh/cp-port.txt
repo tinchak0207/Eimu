@@ -1,4 +1,0 @@
-image-control-worker 
-image-control-postgres 5432/tcp
-image-control-api 3000/tcp
-template parsing error: template: :1:23: executing "" at <.NetworkSettings.IPAddress>: map has no entry for key "IPAddress"

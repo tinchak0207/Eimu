@@ -1,3 +1,0 @@
-proxy disabled for upstream requests
-proxy: 'http://172.19.0.1:24000'
-timeout: 600

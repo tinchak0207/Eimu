@@ -1,7 +1,0 @@
-retrying operation=chat.completions attempt=1 reason=upstream_temporary status=451 type=status delay=3.27s strategy=round_robin
-INFO:     172.19.0.9:45932 - "POST /v1/chat/completions HTTP/1.1" 503 Service Unavailable
-===ATTEMPT===
-  supplier_id  | status |                           det                            | latency_ms |          created_at           
----------------+--------+----------------------------------------------------------+------------+-------------------------------
- env:adobe2api | failed | Upstream is temporarily unavailable. Please retry later. |       3139 | 2026-08-21 08:39:26.539654+00
-(1 row)

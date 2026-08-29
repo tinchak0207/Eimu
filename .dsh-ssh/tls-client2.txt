@@ -1,4 +1,0 @@
-proxy disabled for upstream requests
-session: curl_cffi.requests.session.Session
-impersonate: chrome145
-proxies fn exists

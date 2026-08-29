@@ -1,4 +1,0 @@
-/opt/adobe2api/adobe_client.py:1604:                                "error": "video generation timed out",
-/opt/adobe2api/adobe_client.py:1609:                raise AdobeRequestError("video generation timed out")
-/opt/adobe2api/core/adobe_client.py:1605:                                "error": "video generation timed out",
-/opt/adobe2api/core/adobe_client.py:1610:                raise AdobeRequestError("video generation timed out")

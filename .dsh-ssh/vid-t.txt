@@ -1,8 +1,0 @@
-INFO:     172.19.0.4:56066 - "POST /v1/images/generations HTTP/1.1" 200 OK
-INFO:     172.19.0.4:37196 - "GET /generated/acd0b02db2f14eac93df1b414e8f6527.png HTTP/1.1" 200 OK
-retrying operation=chat.completions attempt=1 reason=upstream_temporary status=451 type=status delay=2.17s strategy=round_robin
-INFO:     172.19.0.4:37198 - "POST /v1/chat/completions HTTP/1.1" 503 Service Unavailable
-===VIDTIMEOUT===
-295:                    timeout=client.generate_timeout,
-731:                        timeout=max(int(client.generate_timeout), 600),
-810:                        timeout=client.generate_timeout,

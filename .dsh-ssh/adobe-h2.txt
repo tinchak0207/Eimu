@@ -1,9 +1,0 @@
-{'status': 'ok', 'pool_size': 6, 'account_count': 3, 'active_account_count': 1, 'profile_count': 3, 'enabled_profile_count': 1, 'lease': {'backend': 'redis', 'configured': True, 'distributed': True, 'required': True, 'healthy': True, 'error': ''}}
- supplier_account_id | outcome | observed_at 
----------------------+---------+-------------
-(0 rows)
-
-  supplier_id  | attempts_5m | successes_5m | success_rate_5m |      health_observed_at       
----------------+-------------+--------------+-----------------+-------------------------------
- env:adobe2api |           1 |            0 |               0 | 2026-08-21 07:22:18.967144+00
-(1 row)

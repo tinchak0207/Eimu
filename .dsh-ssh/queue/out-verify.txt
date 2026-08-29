@@ -1,7 +1,0 @@
-CHROME=0 0
-POOL=2
- 03:03:56 up 31 days,  3:45,  8 users,  load average: 6.68, 14.21, 14.29
-               total        used        free      shared  buff/cache   available
-Mem:            3723        1682        1496          59         851        2041
-
-[exit 0]

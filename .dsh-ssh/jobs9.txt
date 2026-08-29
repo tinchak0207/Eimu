@@ -1,5 +1,0 @@
-model_id   |   status   | count | max 
--------------+------------+-------+-----
- gpt-image-2 | succeeded  |     3 |   1
- kling-3.0   | submitting |     1 |   0
-(2 rows)

@@ -1,4 +1,0 @@
-model_id   |  status   | count 
--------------+-----------+-------
- gpt-image-2 | succeeded |     9
-(1 row)

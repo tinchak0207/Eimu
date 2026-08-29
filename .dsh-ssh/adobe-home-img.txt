@@ -1,3 +1,0 @@
-proxy disabled for upstream requests
-IMAGE via home IP (1.7s): submit failed: 408 {"error_code":"timeout_error","message":"system under load"}
-submit failed status=408 body={"error_code":"timeout_error","message":"system under load"}

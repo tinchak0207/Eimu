@@ -75,3 +75,20 @@ pixai-pool/
 .tools/
 .env*
 !deploy/vps/control-plane.env.example
+
+# 本地工具 HOME / 快取 / 快照（曾整包入庫 160MB+，禁止再入）
+/.tmp-home/
+/.vercel.bak-link/
+/.dsh-ssh/
+/.dsh-adobe-pool/
+/.tsdeps/
+/.xdg-cache/
+/.gateway-work/
+/.vercel-home/
+/.vercel-cli-cache/
+/.tmp-vercel-cache/
+/.dsh-mem/
+/.agents-fix/
+/sudo.conf.backup
+/marketing-battle-pack/
+/eval-daming-film/

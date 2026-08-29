@@ -1,7 +1,0 @@
-p = "src/components/agent-chat/AgentChatSurface.tsx"
-s = open(p).read()
-anchor = '  const [showHistory, setShowHistory] = useState(false);'
-assert s.count(anchor) == 1, "showHistory state not found"
-s = s.replace(anchor, "  const [showHistory, setShowHistory] = useState(false);\n  // 会话目录（对话历史 dropdown 的数据）：null = 未加载，[] = 已加载但为空。\n  const [historyList, setHistoryList] = useState<AgentSessionSummary[] | null>(null);\n  const [switchingTo, setSwitchingTo] = useState<string | null>(null);\n\n  /** dropdown 开关：第一次打开时拉取目录（之后直接切换显示，不重复请求）。 */\n  const toggleHistory = useCallback(async (): Promise<void> => {\n    setShowHistory((prev) => {\n      const next = !prev;\n      if (next && historyList === null) {\n        void listAgentSessions()\n          .then(setHistoryList)\n          .catch(() => setHistoryList([]));\n      }\n      return next;\n    });\n  }, [historyList]);\n\n  /** 点选某个历史会话：切过去（SSE 续传 agent 端上下文），成功后收起 dropdown。 */\n  const onPickSession = useCallback(async (targetSessionId: string): Promise<void> => {\n    if (switchingTo !== null) return;\n    setSwitchingTo(targetSessionId);\n    try {\n      const ok = await switchSession(targetSessionId);\n      if (ok) {\n        setShowHistory(false);\n        setHistorySnapshot(null);\n      }\n    } finally {\n      setSwitchingTo(null);\n    }\n  }, [switchingTo, switchSession]);")
-open(p, "w").write(s)
-print("STATE OK")

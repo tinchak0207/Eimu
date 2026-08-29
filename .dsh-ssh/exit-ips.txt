@@ -1,9 +1,0 @@
-== VPS direct IP:
-43.172.85.76
-== pool exits:
-port 24000: 2403:18c0:3:d3:be24:11ff:fe25:faef
-port 24001: FAIL
-
-port 24005: FAIL
-
-port 24010: FAIL

@@ -1,7 +1,0 @@
-id       |         base_url         
----------------+--------------------------
- env:adobe2api | http://adobe2api:6001/v1
-(1 row)
-
-UPDATE 1
-{"status":"ok","pool_size":6,"account_count":3,"active_account_count":0,"profile

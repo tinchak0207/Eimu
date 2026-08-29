@@ -1,5 +1,0 @@
-no-socat
-Chain PREROUTING (policy ACCEPT)
-target     prot opt source               destination         
-DOCKER     0    --  0.0.0.0/0            0.0.0.0/0            ADDRTYPE match dst-type LOCAL
-    inet 172.20.0.1/16 brd 172.20.255.255 scope global br-1f5c01459af1

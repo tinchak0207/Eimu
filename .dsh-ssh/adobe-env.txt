@@ -1,7 +1,0 @@
-ADOBE_PROXY=http://172.19.0.1:24000
-===
-proxy disabled for upstream requests
-proxy disabled for upstream requests
-===
-231:            logger.warning("proxy enabled for upstream requests: %s", self.proxy)
-233:            logger.warning("proxy disabled for upstream requests")

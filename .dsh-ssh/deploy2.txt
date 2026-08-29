@@ -1,7 +1,0 @@
-1
-ADOBE_GENERATE_TIMEOUT=600
- Container adobe2api  Started
-#12 DONE 0.0s
- generation-worker  Built
- Container image-control-worker  Started
-ALL_DEPLOYED

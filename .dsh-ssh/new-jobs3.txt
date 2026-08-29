@@ -1,3 +1,0 @@
-id | status | model_id | completed_count | created_at 
-----+--------+----------+-----------------+------------
-(0 rows)

@@ -1,5 +1,0 @@
-731:                        timeout=max(int(client.generate_timeout), 600),
-731:                        timeout=max(int(client.generate_timeout), 600),
-===CONTAINER-TIMEOUT-ENV===
-proxy disabled for upstream requests
-600

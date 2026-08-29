@@ -1,5 +1,0 @@
-INFO:     172.19.0.4:53612 - "POST /v1/images/generations HTTP/1.1" 200 OK
-INFO:     172.19.0.4:56658 - "GET /generated/531587a3ecd84c0483719f899dc3300f.png HTTP/1.1" 200 OK
-INFO:     172.19.0.4:56668 - "POST /v1/images/generations HTTP/1.1" 200 OK
-INFO:     172.19.0.4:35720 - "GET /generated/e2b18594aca84aa4b410e730beda3a6c.png HTTP/1.1" 200 OK
-INFO:     172.19.0.4:37732 - "POST /v1/chat/completions HTTP/1.1" 503 Service Unavailable

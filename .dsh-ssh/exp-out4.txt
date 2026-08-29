@@ -1,6 +1,0 @@
-using catalog key: firefly-kling3-5s-16x9-720p
-generate_timeout: 600
-token ok: True
-proxy disabled for upstream requests
-video submit failed status=408 body={"error_code":"timeout_error","message":"system under load"}
-FAILED after 0.3 s: UpstreamTemporaryError video submit failed: 408 {"error_code":"timeout_error","message":"system under load"}

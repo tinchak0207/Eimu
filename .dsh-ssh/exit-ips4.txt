@@ -1,9 +1,0 @@
-port 24000 v4: 2400:c620:29:b8::a
-port 24002 v4: 2407:cdc0:f008:f9::
-port 24003 v4: FAIL
-
-port 24005 v4: 2407:cdc0:f008:141::
-port 24008 v4: 23.140.244.128
-port 24010 v4: FAIL
-
-port 24012 v4: FAIL

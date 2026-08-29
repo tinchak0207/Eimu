@@ -1,8 +1,0 @@
-104:    submit_url = "https://firefly-3p.ff.adobe.io/v2/3p-images/generate-async"
-105:    firefly_image5_submit_url = "https://image-v5.ff.adobe.io/v1/images/generate-async"
-106:    video_submit_url = "https://firefly-3p.ff.adobe.io/v2/3p-videos/generate-async"
-107:    ugs_video_submit_url = "https://firefly-3p.ff.adobe.io/v2/videos/generate"
-108:    firefly_video_submit_url = "https://video-v1.ff.adobe.io/v2/videos/generate"
-990:    def _image_submit_url(self, channel: str) -> str:
-992:            return self.firefly_image5_submit_url
-993:        return self.submit_url

@@ -1,5 +1,0 @@
-id                  |  model_id   | status | completed_count | age_s | left 
---------------------------------------+-------------+--------+-----------------+-------+------
- 122ef07a-2de7-4e07-bdf9-978de7114a7b | kling-3.0   | queued |               0 |   448 | 
- 6f73505f-c000-498a-9273-3fad5e074184 | gpt-image-2 | queued |               0 |   425 | 
-(2 rows)

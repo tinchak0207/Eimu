@@ -1,8 +1,0 @@
-multi_port:
-    address: 0.0.0.0
-    base_port: 24000
-    username: ""
-    password: ""
-
-Rule added
-UFW_OK

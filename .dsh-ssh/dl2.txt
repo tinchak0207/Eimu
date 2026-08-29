@@ -1,8 +1,0 @@
-2026-08-21 08:03:28.1971+00  +
- 2026-08-21 08:18:28.196+00   +
- 2026-08-21 08:19:09.129433+00
-
-  supplier_id  | status |                           left                           | latency_ms 
----------------+--------+----------------------------------------------------------+------------
- env:adobe2api | failed | Upstream is temporarily unavailable. Please retry later. |       4023
-(1 row)

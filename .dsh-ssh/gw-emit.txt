@@ -1,6 +1,0 @@
-130:  "canvas.node.updated",
-728:    emitCanvasResult(state, task_id, publicUrl, cost_coins)
-893:function emitCanvasResult(
-901:  emitToSession(state, "canvas.node.updated", {
-===
-578:    // 後台執行：立即回 running，每個節點結果以 canvas.* 事件推送到畫布（agent 不阻塞等待）。

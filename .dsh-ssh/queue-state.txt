@@ -1,3 +1,0 @@
-id | model_id | status | attempt_count | failure_class 
-----+----------+--------+---------------+---------------
-(0 rows)

@@ -1,5 +1,0 @@
-supplier_id | outcome |          observed_at          
--------------+---------+-------------------------------
- env:sub2api | failure | 2026-08-21 07:07:08.93901+00
- env:sub2api | failure | 2026-08-21 07:05:07.526394+00
-(2 rows)

@@ -1,4 +1,0 @@
-generated
-request_errors.jsonl
-request_logs.jsonl
-/opt/adobe2api/data/request_logs.jsonl

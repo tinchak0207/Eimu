@@ -1,5 +1,0 @@
-START
-proxy disabled for upstream requests
-badmodel[home]: 422 {"error_code":"validation_error","message":"A validation error occured.","validation_error
-badmodel[direct]: 422 {"error_code":"validation_error","message":"A validation error occured.","validation_error
-DONE

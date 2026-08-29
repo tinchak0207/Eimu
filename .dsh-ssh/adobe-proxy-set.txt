@@ -1,4 +1,0 @@
-ADOBE_PROXY=http://172.19.0.1:24000
-ADOBE_PROXY=http://172.19.0.1:24000
- Container adobe2api  Starting
- Container adobe2api  Started

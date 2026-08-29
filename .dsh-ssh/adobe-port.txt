@@ -1,3 +1,0 @@
-adobe2api Up 4 hours
-adobe2api-adobe2api-redis-1 Up 3 weeks (healthy)
-{}

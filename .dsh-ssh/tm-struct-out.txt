@@ -1,8 +1,0 @@
-<class 'list'>
-count: 6
-0 {'value': 'eyJhbGciOiJSUzI1NiIs...', 'status': 'invalid'}
-1 {'value': 'eyJhbGciOiJSUzI1NiIs...', 'status': 'invalid'}
-2 {'value': 'eyJhbGciOiJSUzI1NiIs...', 'status': 'disabled'}
-3 {'value': 'eyJhbGciOiJSUzI1NiIs...', 'status': 'disabled'}
-4 {'value': 'eyJhbGciOiJSUzI1NiIs...', 'status': 'active', 'source': 'auto_refresh'}
-5 {'value': 'eyJhbGciOiJSUzI1NiIs...', 'status': 'invalid', 'source': 'browser_sync'}

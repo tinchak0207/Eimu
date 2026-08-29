@@ -1,5 +1,0 @@
-model_id   | status | count 
--------------+--------+-------
- gpt-image-2 | queued |     1
- kling-3.0   | queued |     1
-(2 rows)
