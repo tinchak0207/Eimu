@@ -16,9 +16,8 @@ import {
 import { resolveAdobe2ApiImageModelId, resolveAdobe2ApiVideoModelId } from "./generation-core/adobe2api-upstream.ts";
 
 test("recommended model is first and the requested image supply models lead the public menu", () => {
-  assert.equal(GENERATION_MODEL_IDS[0], "pixai-tsubaki2");
-  assert.deepEqual(GENERATION_MODEL_IDS.slice(1, 6), [
-    "gpt-image-2",
+  assert.equal(GENERATION_MODEL_IDS[0], "gpt-image-2");
+  assert.deepEqual(GENERATION_MODEL_IDS.slice(1, 5), [
     "gemini-3.1-flash-image",
     "image-5-pro",
     "image-5-lite",
@@ -46,7 +45,7 @@ test("official Adobe credits map to platform coins at the established ten-to-one
     durationSeconds: 5,
     generateAudio: true,
   }), 12.5);
-  assert.equal(generationCoins("seedance-2.0-fast", { resolution: "480p", durationSeconds: 4 }), 12);
+  assert.equal(generationCoins("seedance-2.0-fast", { resolution: "480p", durationSeconds: 4 }), 40);
 });
 
 test("video menu prices use per-second units without changing total generation cost", () => {

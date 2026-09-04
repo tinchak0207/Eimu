@@ -11,6 +11,7 @@ import {
 } from "@/lib/generation-model-catalog";
 import { generationControlPlaneEnabled } from "@/lib/generation-core/database";
 import { submitGenerationCommand } from "@/lib/generation-core/command-service";
+import { enforceQuotaGate } from "@/lib/generation-core/quota-precheck";
 import { IdempotencyConflictError } from "@/lib/generation-core/job-repository";
 import { generationTaskResponse } from "@/lib/generation-core/task-response";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
@@ -162,7 +163,32 @@ export async function POST(req: NextRequest) {
   await syncModelPricing();
 
   // Durable control plane 是影片唯一路徑：影片任务无同步回退分支。
+  // 本地无 DB 直连时（Vercel 站点常态），转发到控制面的同一路由执行——
+  // 认证/计费/提交都在控制面完成，站点只透传请求与响应。
   if (!generationControlPlaneEnabled()) {
+    const origin = process.env.GENERATION_CONTROL_PLANE_PROXY_ORIGIN?.trim().replace(/\/$/, "");
+    if (origin) {
+      const upstream = await fetch(`${origin}/api/v1/videos/generations`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: req.headers.get("authorization") ?? "",
+          ...(req.headers.get("idempotency-key")
+            ? { "Idempotency-Key": req.headers.get("idempotency-key")! }
+            : {}),
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(30_000),
+      });
+      const payload = await upstream.text();
+      return new NextResponse(payload, {
+        status: upstream.status,
+        headers: {
+          "Content-Type": upstream.headers.get("content-type") ?? "application/json",
+          ...(upstream.headers.get("location") ? { Location: upstream.headers.get("location")! } : {}),
+        },
+      });
+    }
     return errorResponse(
       503,
       "Video generation only supports the durable control plane, which is currently unavailable.",
@@ -182,6 +208,24 @@ export async function POST(req: NextRequest) {
   const callbackUrl = typeof body.callback_url === "string" && body.callback_url.trim()
     ? body.callback_url.trim()
     : null;
+
+  // 手術 P1 計費閘（詳見 quota-precheck.ts）：SURGERY_QUOTA_PRECHECK=1 時先做
+  // 無狀態配額預檢——通過 → 以 0 額提交，job 直接進 queued，阻塞式 reserve 整段
+  // 跳過（計費交事後投影）；額度不足 → 按現契約 402；上游不可達 → 原樣回落
+  // 下方 reserve 路徑。env 未設 = 金額原樣，路徑一字不變。
+  const baseBillingAmount = generationCoins(modelId, {
+    resolution: normalized.config.outputResolution,
+    durationSeconds: normalized.config.durationSeconds,
+    generateAudio: normalized.config.generateAudio,
+  }) * QUOTA_PER_COIN * rawN;
+  const gate = await enforceQuotaGate({
+    bizKeyId: apiKey.id,
+    billingUserId: apiKey.userId,
+    baseBillingAmount,
+  });
+  if (!gate.ok) {
+    return errorResponse(gate.status, gate.message, gate.type, gate.code, traceId);
+  }
 
   try {
     const submitted = await submitGenerationCommand({
@@ -203,11 +247,7 @@ export async function POST(req: NextRequest) {
       responseFormat,
       callbackUrl,
       requestedCount: rawN,
-      billingAmount: generationCoins(modelId, {
-        resolution: normalized.config.outputResolution,
-        durationSeconds: normalized.config.durationSeconds,
-        generateAudio: normalized.config.generateAudio,
-      }) * QUOTA_PER_COIN * rawN,
+      billingAmount: gate.billingAmount,
     });
     return withTraceId(
       NextResponse.json(generationTaskResponse(submitted.job), {

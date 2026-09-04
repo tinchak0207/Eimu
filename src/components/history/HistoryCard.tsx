@@ -1,10 +1,11 @@
 "use client";
 
-import { memo, useCallback, useState } from "react";
-import { AlertTriangle, Bot, Check, Coins, CopyPlus, Download, FileQuestion, IdCard, Megaphone, RotateCcw, SlidersHorizontal, Star, Trash2 } from "lucide-react";
+import { memo, useCallback, useMemo, useState } from "react";
+import { AlertTriangle, Bot, Boxes, Check, Coins, CopyPlus, Download, FileQuestion, IdCard, Megaphone, RotateCcw, SlidersHorizontal, Star, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatCoins, formatModelLabel, formatRelativeTime, primaryModelId } from "@/lib/history-types";
 import { canHistoryEntryRerun } from "@/lib/history-rerun";
+import { assetPackPayloadFromHistoryEntry } from "@/lib/history-card-anchor";
 import type { HistoryEntry } from "@/lib/history-types";
 
 export interface HistoryCardProps {
@@ -40,12 +41,14 @@ function CardAction({
   label,
   active,
   tone = "neutral",
+  disabled = false,
   onClick,
   children,
 }: {
   label: string;
   active?: boolean;
   tone?: "neutral" | "danger" | "gold";
+  disabled?: boolean;
   onClick: () => void;
   children: React.ReactNode;
 }) {
@@ -54,11 +57,12 @@ function CardAction({
       type="button"
       aria-label={label}
       aria-pressed={active}
+      disabled={disabled}
       title={label}
       onClick={(event) => {
         // 卡片本身可点击（打开灯箱），操作按钮不能把点击冒泡上去。
         event.stopPropagation();
-        onClick();
+        if (!disabled) onClick();
       }}
       className={cn(
         "flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full",
@@ -69,6 +73,7 @@ function CardAction({
         "bg-[rgba(255,255,255,0.72)] backdrop-blur-[22px] transition-all duration-200",
         "hover:bg-[rgba(255,255,255,0.92)] hover:-translate-y-[1px] active:scale-[0.94]",
         "focus:outline-none focus:ring-2 focus:ring-[rgba(0,122,255,0.20)]",
+        disabled && "cursor-default opacity-60 hover:translate-y-0 hover:bg-[rgba(255,255,255,0.72)] active:scale-100",
         tone === "danger" && "text-[#FF3B30]",
         tone === "gold" && active && "text-[#FFB300]",
         tone === "neutral" && "text-[rgba(0,0,0,0.55)]",
@@ -97,12 +102,41 @@ function HistoryCardComponent({
 }: HistoryCardProps) {
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageFailed, setImageFailed] = useState(false);
+  /** 「存为资产」状态：saved = 已存入 /api/assets（幂等，按钮打勾不可再点）。 */
+  const [assetSaved, setAssetSaved] = useState(false);
+  const [assetSaving, setAssetSaving] = useState(false);
 
   const result = entry.results.find((item) => item.image || item.imageUrl);
   const src = result?.image ? `data:image/png;base64,${result.image}` : result?.imageUrl ?? null;
   const model = primaryModelId(entry);
   const promptText = entry.prompt.trim();
   const rerunnable = canHistoryEntryRerun(entry);
+
+  /** 构造资产包 payload；无 id / 无内容（无 prompt 也无图）时为 null，按钮不出现。 */
+  const assetPayload = useMemo(() => assetPackPayloadFromHistoryEntry(entry), [entry]);
+
+  /** 存为资产：PUT /api/assets（upsert by 确定性 id `history-${entry.id}`），幂等。 */
+  const handleSaveAsset = useCallback(async (): Promise<void> => {
+    if (assetSaved || assetSaving || !assetPayload) return;
+    setAssetSaving(true);
+    try {
+      const res = await fetch("/api/assets", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: `history-${entry.id}`,
+          title: assetPayload.title,
+          items: assetPayload.items,
+          tags: [],
+        }),
+      });
+      if (res.ok) setAssetSaved(true);
+    } catch {
+      // 静默失败：不打断页面，按钮可重试。
+    } finally {
+      setAssetSaving(false);
+    }
+  }, [assetSaved, assetSaving, assetPayload, entry.id]);
 
   const handleActivate = useCallback(() => {
     if (selectionMode) onToggleSelect(entry.id);
@@ -114,9 +148,6 @@ function HistoryCardComponent({
       className={cn("hist-card hist-masonry-item group", selected && "is-selected")}
       aria-label={promptText || model || "生成记录"}
     >
-      {/* 玻璃卡片顶部的高光细线，与站内其他卡片保持一致 */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-px bg-gradient-to-r from-transparent via-white to-transparent opacity-70" />
-
       <div
         role="button"
         tabIndex={0}
@@ -148,7 +179,7 @@ function HistoryCardComponent({
             />
           </div>
         ) : (
-          <div className="flex aspect-[4/3] w-full flex-col items-center justify-center gap-2 bg-[rgba(0,0,0,0.03)]">
+          <div className="flex aspect-[4/3] w-full flex-col items-center justify-center gap-2 border-b border-dashed border-[rgba(0,0,0,0.08)] bg-[rgba(0,0,0,0.015)]">
             {/*
               两种状态语义不同，图标必须区分开，否则「本地记录本来就没存图」看起来
               和「图片真的坏了」一样像故障——一整屏历史记录里前者数量往往远多于
@@ -167,6 +198,36 @@ function HistoryCardComponent({
             </span>
           </div>
         )}
+      </div>
+
+      {/* 悬停淡入的信息浮层（Civitai/Pinterest 式纯画廊卡片）：prompt/模型/时间
+          默认隐藏，hover 或键盘 focus 时淡入；触摸设备上元数据由灯箱承担。 */}
+      <div className="hist-card-info">
+        <p className="line-clamp-2 text-ios-caption1 leading-[1.35] text-white/90">
+          {promptText || <span className="text-white/60">没有提示词</span>}
+        </p>
+        <div className="mt-1 flex items-center gap-1.5 text-ios-caption1 text-white/70">
+          <span className="truncate">{model ? formatModelLabel(model) : "未知模型"}</span>
+          <span aria-hidden="true">·</span>
+          <time dateTime={new Date(entry.generatedAt).toISOString()} className="shrink-0">
+            {formatRelativeTime(entry.generatedAt)}
+          </time>
+          {entry.quota !== undefined && entry.quota > 0 && (
+            <>
+              <span aria-hidden="true">·</span>
+              <span className="inline-flex shrink-0 items-center gap-0.5 text-[#FFCE73]">
+                <Coins className="h-2.5 w-2.5" />
+                {formatCoins(entry.quota)}
+              </span>
+            </>
+          )}
+          {entry.source === "local" && (
+            <>
+              <span aria-hidden="true">·</span>
+              <span className="shrink-0 text-white/60">本地缓存</span>
+            </>
+          )}
+        </div>
       </div>
 
       {/* 多选勾选框 */}
@@ -230,6 +291,17 @@ function HistoryCardComponent({
             <IdCard className="h-3.5 w-3.5" />
           </CardAction>
         )}
+        {/* 存为资产：有可提取内容（prompt 或图）才出现；存成功置 disabled + 打勾（幂等）。 */}
+        {assetPayload && (
+          <CardAction
+            label={assetSaved ? "已存为资产" : "存为资产"}
+            active={assetSaved}
+            disabled={assetSaved || assetSaving}
+            onClick={() => void handleSaveAsset()}
+          >
+            {assetSaved ? <Check className="h-3.5 w-3.5" /> : <Boxes className="h-3.5 w-3.5" />}
+          </CardAction>
+        )}
         {/* 配方双向总线对向动作：把这条配方发布成首页案例。有 prompt（或
             workflow 配方）才可发布——与 publishUserShowcaseCase 的校验一致。 */}
         {onPublishCase && (promptText.length > 0 || entry.workflow) && (
@@ -246,37 +318,6 @@ function HistoryCardComponent({
         <CardAction label="删除" tone="danger" onClick={() => onDelete(entry.id)}>
           <Trash2 className="h-3.5 w-3.5" />
         </CardAction>
-      </div>
-
-      {/* 信息区 */}
-      <div className="px-3.5 pb-3 pt-2.5">
-        <p className="line-clamp-2 text-ios-caption1 leading-[1.35] text-[rgba(0,0,0,0.72)]">
-          {promptText || <span className="text-[rgba(0,0,0,0.58)]">没有提示词</span>}
-        </p>
-        {/* 模型、时间、消耗是每张卡都要扫一眼的元信息，11px 低于本站可读下限，用 12px。 */}
-        <div className="mt-1.5 flex items-center gap-1.5 text-ios-caption1 text-[rgba(0,0,0,0.58)]">
-          <span className="truncate">{model ? formatModelLabel(model) : "未知模型"}</span>
-          <span aria-hidden="true">·</span>
-          <time dateTime={new Date(entry.generatedAt).toISOString()} className="shrink-0">
-            {formatRelativeTime(entry.generatedAt)}
-          </time>
-          {/* 消耗只在能确定时才显示 —— 猜出来的数字比不显示更糟 */}
-          {entry.quota !== undefined && entry.quota > 0 && (
-            <>
-              <span aria-hidden="true">·</span>
-              <span className="inline-flex shrink-0 items-center gap-0.5 text-[rgba(120,90,20,0.85)]">
-                <Coins className="h-2.5 w-2.5" />
-                {formatCoins(entry.quota)}
-              </span>
-            </>
-          )}
-          {entry.source === "local" && (
-            <>
-              <span aria-hidden="true">·</span>
-              <span className="shrink-0 text-[rgba(0,0,0,0.58)]">本地缓存</span>
-            </>
-          )}
-        </div>
       </div>
     </article>
   );

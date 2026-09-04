@@ -40,6 +40,12 @@ export interface CanvasGenerateRequest {
    * （generate-images 的 buildWorkflowPrompt 會寫成 "Avoid:" 段）。
    */
   negative_prompt?: string;
+  /**
+   * LoRA（2026-08-27 自專業工作站遷入）：選中的 LoRA 模型版本 id，
+   * 單選；轉發 generate-images 的 loraModelVersionIds（JSON 陣列字串）。
+   * 模型不支援時由 generate-images 的能力歸一裁掉。
+   */
+  loraModelVersionIds?: string[];
 }
 
 export interface CanvasImageResult {
@@ -129,6 +135,10 @@ export async function POST(req: NextRequest) {
   // P2：卡鎖定的負面詞（可選；空字串 = 未帶，行為與舊路徑一致）。
   const negativePrompt =
     typeof body.negative_prompt === "string" ? body.negative_prompt.trim().slice(0, 1000) : "";
+  // LoRA（2026-08-27）：最多 1 個（單選鐵律，與專業工作站/generation-jobs 同款）。
+  const loraModelVersionIds = Array.isArray(body.loraModelVersionIds)
+    ? body.loraModelVersionIds.map(String).map((value) => value.trim()).filter(Boolean).slice(0, 1)
+    : [];
 
   // 參考圖：source_image 排首位，語義參考圖（帶角色）與 @引用其後；
   // 只收 https/data:image，最多 5 張。角色走 workflow.referenceImages 既有鏈路
@@ -220,6 +230,8 @@ export async function POST(req: NextRequest) {
       // 參考圖角色（reference 節點語義）：交給 generate-images 的既有
       // workflow.referenceImages 鏈路 → buildWorkflowPrompt 寫進最終 prompt。
       if (workflowField) form.append("workflow", workflowField);
+      // LoRA 走 generate-images 的既有 form 欄位（JSON 陣列字串）。
+      if (loraModelVersionIds.length > 0) form.append("loraModelVersionIds", JSON.stringify(loraModelVersionIds));
       referenceBuffers.forEach((ref, i) => {
         form.append(
           "referenceImages",
@@ -244,6 +256,7 @@ export async function POST(req: NextRequest) {
           // JSON body 的 workflow 欄位 generate-images 同样接收（字串會被
           // readWorkflowMetadata 解析）；無卡負面詞時不帶，位元組不變。
           ...(workflowField ? { workflow: workflowField } : {}),
+          ...(loraModelVersionIds.length > 0 ? { loraModelVersionIds } : {}),
         }),
       });
     }

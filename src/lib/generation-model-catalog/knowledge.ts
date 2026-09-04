@@ -25,7 +25,6 @@ import {
   SEEDREAM_20_MODEL_ID,
   SEEDREAM_50_PRO_MODEL_ID,
   SEEDREAM_50_LITE_MODEL_ID,
-  SENSENOVA_U1_FAST_MODEL_ID,
   ADOBE_FIREFLY_MODEL_ID,
   FLUX_2_MODEL_ID,
   FLUX_2_PRO_MODEL_ID,
@@ -46,6 +45,9 @@ import {
   KLING_25_TURBO_MODEL_ID,
   SEEDANCE_20_MODEL_ID,
   SEEDANCE_20_FAST_MODEL_ID,
+  SEEDANCE_20_MINI_MODEL_ID,
+  SEEDANCE_25_480P_MODEL_ID,
+  SEEDANCE_25_720P_MODEL_ID,
   RUNWAY_GEN4_VIDEO_MODEL_ID,
   RUNWAY_GEN45_VIDEO_MODEL_ID,
   ADOBE_FIREFLY_VIDEO_MODEL_ID,
@@ -141,11 +143,6 @@ export const MODEL_KNOWLEDGE: Record<string, ModelKnowledge> = {
     strengths: ["2K/4K 同价，大批量出图成本最低", "4K 直出，放大展示不用二次处理"],
     knownDefects: ["细节上限低于 Pro 档，复杂人物手部偶发瑕疵"],
     usageTips: [{ text: "批量草稿与社媒配图用 Lite 4K 直出，商用精修再切 Pro", params: { outputResolution: "4k" } }],
-  },
-  [SENSENOVA_U1_FAST_MODEL_ID]: {
-    strengths: ["全图像目录最低价（0.1 币/张），出图快"],
-    knownDefects: ["只有 1:1 / 3:2 / 2:3 三种比例", "不支持参考图，无法做图生图"],
-    usageTips: [{ text: "适合大批量草稿、占位图与风格试验，别用于需要参考图或特殊比例的任务" }],
   },
 
   // ── Adobe 图像 ──
@@ -267,6 +264,21 @@ export const MODEL_KNOWLEDGE: Record<string, ModelKnowledge> = {
     strengths: ["Seedance 2.0 的高速档，分镜草稿省币"],
     knownDefects: ["细节上限低于标准版，最高 720p"],
     usageTips: [{ text: "先用 Fast 定分镜与运镜，成片镜头用标准版 1080p 重跑", params: { outputResolution: "480p" } }],
+  },
+  [SEEDANCE_20_MINI_MODEL_ID]: {
+    strengths: ["Seedance 2.0 的轻量档，单价最低"],
+    knownDefects: ["细节上限低于标准版与 Fast，最高 720p"],
+    usageTips: [{ text: "批量动态试验与低成本出片选它", params: { outputResolution: "480p" } }],
+  },
+  [SEEDANCE_25_480P_MODEL_ID]: {
+    strengths: ["Seedance 2.5 新一代，动态与物理更自然", "支持 4–30 秒（全平台最长档位）"],
+    knownDefects: ["固定 480p，无更高清晰度档"],
+    usageTips: [{ text: "2.5 系动态升级明显，长镜头叙事给足秒数", params: { durationSeconds: 10 } }],
+  },
+  [SEEDANCE_25_720P_MODEL_ID]: {
+    strengths: ["Seedance 2.5 新一代 HD 档，720p 成片清晰度足"],
+    knownDefects: ["固定 720p，时长上限 29 秒"],
+    usageTips: [{ text: "成片镜头用 2.5-720p 重跑，动态与细节双赢", params: { outputResolution: "720p" } }],
   },
 
   // ── Runway 视频 ──

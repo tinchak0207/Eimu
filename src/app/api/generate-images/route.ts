@@ -32,10 +32,8 @@ import {
 import type { GenerationWorkflowMetadata } from "@/lib/image-types";
 import {
   NANO_BANANA_PRO_MODEL_ID,
-  SENSENOVA_U1_FAST_MODEL_ID,
   imageGenerationCoins,
   isSupportedImageModel,
-  resolveSenseNovaImageSize,
   resolveUpstreamModelId,
   type ModelMode,
 } from "@/lib/provider-config";
@@ -320,23 +318,6 @@ async function buildPixaiEditRequestBody(
   };
 }
 
-function buildSenseNovaImageRequestBody(
-  prompt: string,
-  imageSize: string,
-): { path: string; body: BodyInit; headers: Record<string, string>; upstreamModelId: string } {
-  return {
-    path: IMAGE_GENERATIONS_PATH,
-    body: JSON.stringify({
-      model: SENSENOVA_U1_FAST_MODEL_ID,
-      prompt,
-      n: 1,
-      size: resolveSenseNovaImageSize(imageSize),
-    }),
-    headers: { "Content-Type": "application/json" },
-    upstreamModelId: SENSENOVA_U1_FAST_MODEL_ID,
-  };
-}
-
 async function buildAdobe2ApiImageRequestBody(
   prompt: string,
   modelId: string,
@@ -384,7 +365,7 @@ function extractAdobe2ApiImageUrl(payload: UpstreamSuccess | null): string | nul
 }
 
 async function requestImageGeneration(
-  endpoint: { apiKey: string; baseURL: string; label: string; modelId?: string; protocol?: "adobe2api" | "pixai" | "sensenova" | "filmera"; isFallback?: boolean },
+  endpoint: { apiKey: string; baseURL: string; label: string; modelId?: string; protocol?: "adobe2api" | "pixai" | "filmera"; isFallback?: boolean },
   prompt: string,
   modelId: string,
   referenceImages: File[],
@@ -399,11 +380,9 @@ async function requestImageGeneration(
   const startedAt = Date.now();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  const directRequest = endpoint.protocol === "sensenova"
-    ? buildSenseNovaImageRequestBody(prompt, imageSize)
-    : endpoint.protocol === "adobe2api"
-      ? await buildAdobe2ApiImageRequestBody(prompt, modelId, referenceImages, aspectRatio, outputResolution)
-      : null;
+  const directRequest = endpoint.protocol === "adobe2api"
+    ? await buildAdobe2ApiImageRequestBody(prompt, modelId, referenceImages, aspectRatio, outputResolution)
+    : null;
   // pixai-bridge 的 img2img 要 mediaId 而非 multipart——有參考圖時先上傳換 id。
   // 非 pixai 渠道維持原 multipart edits 契約（sub2api 等 OpenAI 相容吃 multipart）。
   const pixaiRequest = !directRequest && endpoint.protocol === "pixai" && referenceImages.length > 0

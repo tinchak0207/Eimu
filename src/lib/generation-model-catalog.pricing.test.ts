@@ -70,9 +70,9 @@ test("table-based models keep resolution pricing even with a stale fixedCoins ov
 });
 
 test("fixedCoins still prices models without a rate table", () => {
-  withPricing({ "sensenova-u1-fast": { fixedCoins: 5 } }, () => {
-    assert.equal(generationCoins("sensenova-u1-fast", { resolution: "2k" }), 5);
-    assert.equal(modelPriceLabel("sensenova-u1-fast", { resolution: "2k" }), "5 币/张");
+  withPricing({ "tts-1": { fixedCoins: 5 } }, () => {
+    assert.equal(generationCoins("tts-1", { resolution: "2k" }), 5);
+    assert.equal(modelPriceLabel("tts-1", { resolution: "2k" }), "5 币/张");
   });
 });
 
@@ -119,7 +119,7 @@ test("unknown model ids, mismatched fields, and invalid values are dropped", () 
 test("fixedCoins 0 and negative are rejected; valid values are kept and rounded", () => {
   assert.deepEqual(
     normalizeModelPricingOverrides({
-      "sensenova-u1-fast": { fixedCoins: 0 },
+      "tts-1": { fixedCoins: 0 },
       "veo-3.1": { fixedCoins: -2 },
       "gpt-image-2": { fixedCoins: 100_001 },
       "kling-3.0": { fixedCoins: Number.NaN },
@@ -127,25 +127,25 @@ test("fixedCoins 0 and negative are rejected; valid values are kept and rounded"
     {},
   );
   // 四捨五入到 PRICING_DECIMALS 位小數
-  assert.deepEqual(normalizeModelPricingOverrides({ "sensenova-u1-fast": { fixedCoins: 3.1415926 } }), {
-    "sensenova-u1-fast": { fixedCoins: 3.14159 },
+  assert.deepEqual(normalizeModelPricingOverrides({ "tts-1": { fixedCoins: 3.1415926 } }), {
+    "tts-1": { fixedCoins: 3.14159 },
   });
   // 下界 0.1 合法
-  assert.deepEqual(normalizeModelPricingOverrides({ "sensenova-u1-fast": { fixedCoins: 0.1 } }), {
-    "sensenova-u1-fast": { fixedCoins: 0.1 },
+  assert.deepEqual(normalizeModelPricingOverrides({ "tts-1": { fixedCoins: 0.1 } }), {
+    "tts-1": { fixedCoins: 0.1 },
   });
 });
 
 test("限免級小數定價：1e-5 幣的 fixedCoins 與 credit 都按精度保留，generationCoins 走 0.01+ 粒度", () => {
   // fixedCoins 直接保留到 PRICING_DECIMALS 位（1e-5 幣）
-  assert.deepEqual(normalizeModelPricingOverrides({ "sensenova-u1-fast": { fixedCoins: 0.00001 } }), {
-    "sensenova-u1-fast": { fixedCoins: 0.00001 },
+  assert.deepEqual(normalizeModelPricingOverrides({ "tts-1": { fixedCoins: 0.00001 } }), {
+    "tts-1": { fixedCoins: 0.00001 },
   });
   // 小於最小步長的值視為無效（設 0 幣的變體），靜默丟棄
-  assert.deepEqual(normalizeModelPricingOverrides({ "sensenova-u1-fast": { fixedCoins: 0.000001 } }), {});
+  assert.deepEqual(normalizeModelPricingOverrides({ "tts-1": { fixedCoins: 0.000001 } }), {});
 
-  withPricing({ "sensenova-u1-fast": { fixedCoins: 0.00001 } }, () => {
-    assert.equal(generationCoins("sensenova-u1-fast"), 0.00001);
+  withPricing({ "tts-1": { fixedCoins: 0.00001 } }, () => {
+    assert.equal(generationCoins("tts-1"), 0.00001);
   });
 
   // credit 小數：0.1 credit = 0.01 幣、0.0001 credit = 1e-5 幣

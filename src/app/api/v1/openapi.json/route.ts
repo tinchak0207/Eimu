@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 import { getSiteUrlFromEnv } from "@/lib/site-url";
 
@@ -1180,8 +1180,20 @@ const SPEC = {
   },
 } as const;
 
-export function GET() {
+/** 允許跨域讀取的自家域名（docs 頁同源讀取不受影響；擋瀏覽器側跨站抓 spec）。 */
+const ALLOWED_ORIGINS = [
+  "https://eimu.dev",
+  "https://www.eimu.dev",
+  "https://image.tinchak0207.xyz",
+  "https://www.image.tinchak0207.xyz",
+];
+
+export function GET(req: NextRequest) {
+  const origin = req.headers.get("origin");
+  const allowOrigin = origin && ALLOWED_ORIGINS.includes(origin) ? origin : "";
   return NextResponse.json(SPEC, {
-    headers: { "Access-Control-Allow-Origin": "*" },
+    headers: {
+      ...(allowOrigin ? { "Access-Control-Allow-Origin": allowOrigin } : {}),
+    },
   });
 }

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronLeft, ChevronRight, Clock3, Heart, Maximize2, Search, X } from "lucide-react";
 import { getStoredToken, getStoredUser } from "@/lib/new-api-client";
 import { cn } from "@/lib/utils";
+import type { AssetPack, AssetPackItem } from "@/lib/asset-pack-store";
 
 export interface SelectedLora {
   versionId: string;
@@ -62,6 +63,32 @@ function asCatalogItem(item: LoraPreferenceItem): LoraItem {
   };
 }
 
+/** 收藏 LoRA 资产包确定性 id：重复打包 = upsert 覆盖。 */
+export const LORA_FAVORITES_PACK_ID = "lora-favorites";
+
+/**
+ * 把收藏清单组装成「我的 LoRA 收藏」资产包（纯函数）。
+ * 白名单栏位（见 asset-pack-store.ts）：kind/loraVersionId/title/createdAt。
+ * 注：source 的 type 白名单（history/canvas/chat/workflow/manual）不含「lora」，
+ * 故不传 source（normalizeItem 会丢弃），item 本身仍有效。
+ */
+export function buildLoraFavoritesPack(favorites: LoraPreferenceItem[], now: string): AssetPack {
+  const items: AssetPackItem[] = favorites.map((item) => ({
+    kind: "lora",
+    title: item.title,
+    loraVersionId: item.versionId,
+    createdAt: now,
+  }));
+  return {
+    id: LORA_FAVORITES_PACK_ID,
+    title: "我的 LoRA 收藏",
+    items,
+    tags: [],
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
 export function LoraLibraryPanel({ value, onChange }: LoraLibraryPanelProps) {
   const [keywordInput, setKeywordInput] = useState("");
   const [query, setQuery] = useState({ keyword: "", category: "", sort: "popular" });
@@ -74,6 +101,8 @@ export function LoraLibraryPanel({ value, onChange }: LoraLibraryPanelProps) {
   const [view, setView] = useState<LoraView>("all");
   const [preferences, setPreferences] = useState<LoraPreferenceItem[]>([]);
   const [previewItem, setPreviewItem] = useState<LoraItem | null>(null);
+  const [packing, setPacking] = useState(false);
+  const [packNotice, setPackNotice] = useState<string | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
   const firstItemRef = useRef<HTMLButtonElement>(null);
   const focusFirstItemAfterLoadRef = useRef(false);
@@ -220,6 +249,37 @@ export function LoraLibraryPanel({ value, onChange }: LoraLibraryPanelProps) {
     focusFirstItemAfterLoadRef.current = true;
   };
 
+  const favorites = useMemo(
+    () => preferences.filter((item) => item.favorite),
+    [preferences],
+  );
+
+  /** 把当前收藏清单打包成「我的 LoRA 收藏」资产包（id=lora-favorites，upsert 覆盖）。 */
+  const packFavorites = useCallback(async (): Promise<void> => {
+    if (packing || favorites.length === 0) return;
+    const headers = authHeaders();
+    if (!headers) {
+      setPackNotice("请先登录后再打包 LoRA 收藏。");
+      return;
+    }
+    setPacking(true);
+    setPackNotice(null);
+    const pack = buildLoraFavoritesPack(favorites, new Date().toISOString());
+    try {
+      const res = await fetch("/api/assets", {
+        method: "PUT",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify(pack),
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      setPackNotice(`已打包 ${pack.items.length} 个 LoRA 到资产包「我的 LoRA 收藏」。`);
+    } catch {
+      setPackNotice("打包失败，请稍后重试。");
+    } finally {
+      setPacking(false);
+    }
+  }, [packing, favorites, authHeaders]);
+
   return (
     <div id="pro-tour-lora" className="box-border w-full min-w-0 max-w-full space-y-3 overflow-hidden [contain:inline-size]">
       <div className="flex w-full min-w-0 max-w-full items-center gap-2 overflow-hidden">
@@ -261,6 +321,22 @@ export function LoraLibraryPanel({ value, onChange }: LoraLibraryPanelProps) {
           <Clock3 className="h-3.5 w-3.5" />最近使用
         </button>
       </div>
+
+      {view === "favorites" && (
+        <div className="flex w-full min-w-0 max-w-full flex-wrap items-center gap-2 overflow-hidden">
+          <button
+            type="button"
+            onClick={() => void packFavorites()}
+            disabled={packing || favorites.length === 0}
+            className="min-h-10 shrink-0 rounded-full bg-ios-blue/15 px-4 py-2 text-ios-caption1 font-bold text-ios-blue transition-colors hover:bg-ios-blue/25 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {packing ? "打包中…" : "打包成资产包"}
+          </button>
+          {packNotice ? (
+            <span className="min-w-0 flex-1 truncate text-ios-caption2 font-medium text-muted-foreground">{packNotice}</span>
+          ) : null}
+        </div>
+      )}
 
       {view === "all" && (
         <div className="flex w-full min-w-0 max-w-full flex-wrap items-center gap-1.5 overflow-hidden">

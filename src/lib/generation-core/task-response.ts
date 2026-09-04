@@ -1,4 +1,5 @@
 import type { GenerationJob } from "./types";
+import { generationDatabaseConfigured, getGenerationSql } from "./database";
 
 export function taskStatus(job: GenerationJob): "queued" | "running" | "succeeded" | "failed" | "cancelled" | "refunded" | "unknown" {
   if (job.status === "queued" || job.status === "pending_billing") return "queued";
@@ -20,7 +21,12 @@ export function taskResourcePath(kind: GenerationJob["kind"]): "images" | "video
   return "images";
 }
 
-export function generationTaskResponse(job: GenerationJob) {
+export interface GenerationTaskResponseOptions {
+  /** succeeded 任務的真實花費（幣）。null/undefined = 查無，欄位省略。 */
+  costCoins?: number | null;
+}
+
+export function generationTaskResponse(job: GenerationJob, options: GenerationTaskResponseOptions = {}) {
   const status = taskStatus(job);
   return {
     object: "image_generation.task",
@@ -45,9 +51,43 @@ export function generationTaskResponse(job: GenerationJob) {
         ? { prompt: ((job.workflow as { prompt?: string }).prompt ?? "").slice(0, 500) }
         : {}),
     },
-    ...(status === "succeeded" ? { result_url: `/v1/${taskResourcePath(job.kind)}/${job.id}/result`, data: job.result?.artifacts ?? [] } : {}),
+    ...(status === "succeeded"
+      ? {
+          result_url: `/v1/${taskResourcePath(job.kind)}/${job.id}/result`,
+          data: job.result?.artifacts ?? [],
+          ...(typeof options.costCoins === "number" ? { cost_coins: options.costCoins } : {}),
+        }
+      : {}),
     ...(job.failureClass ? { error: failureError(job) } : {}),
   };
+}
+
+/**
+ * succeeded 任務的真實花費（幣）= billing_operation 該 job 最新一筆
+ * operation='commit' 且 status='applied' 的 amount / 500000
+ * （例如 amount=485 → 0.00097 幣，與 gateway ledger 的 cost_coins 同源）。
+ * 查無行、控制面 DB 未配置或查詢失敗時返回 null，回應省略 cost_coins
+ * 欄位（客戶端有「費用以平台账单为准」兜底）。只讀查詢，不參與任何計費寫入。
+ */
+export async function resolveTaskCostCoins(jobId: string): Promise<number | null> {
+  if (!generationDatabaseConfigured()) return null;
+  try {
+    const sql = getGenerationSql();
+    const rows = await sql<{ amount: string | number }[]>`
+      SELECT operation.amount
+      FROM billing_operation operation
+      WHERE operation.job_id = ${jobId}
+        AND operation.operation = 'commit'
+        AND operation.status = 'applied'
+      ORDER BY operation.updated_at DESC
+      LIMIT 1
+    `;
+    if (rows.length === 0) return null;
+    return Math.round((Number(rows[0].amount) / 500000) * 1e6) / 1e6;
+  } catch (error) {
+    console.error("[task-response] cost_coins lookup failed", { jobId, error: String(error) });
+    return null;
+  }
 }
 
 /**

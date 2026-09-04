@@ -10,7 +10,7 @@ ui:
   default-sort-by: group
 
 endpoints:
-  - name: GPT Image 2 - 1K generation
+  - name: Gemini 3.1 Flash Image - 1K generation
     group: Production
     url: https://image.tinchak0207.xyz/v1/images/generations
     method: POST
@@ -19,7 +19,7 @@ endpoints:
       Authorization: "Bearer ${IMAGE_API_KEY}"
       Content-Type: application/json
     body: |
-      {"model":"gpt-image-2","prompt":"Uptime monitor probe. Create a single minimal blue square on a white background.","size":"1024x1024","n":1}
+      {"model":"gemini-3.1-flash-image","prompt":"Uptime monitor probe. Create a single minimal blue square on a white background.","size":"1024x1024","n":1}
     client:
       timeout: 10m
     conditions:

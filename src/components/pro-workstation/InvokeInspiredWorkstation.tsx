@@ -56,6 +56,9 @@ import {
 // 不会进入专业模式入场 chunk，而是跟着下面 dynamic() 的面板 chunk 走。
 import type { ScenarioTemplate } from "@/lib/scenario-templates";
 import type { CreatorResource } from "@/lib/creator-resource-library";
+import type { KunpengStyleAsset } from "@/lib/kunpeng-style-assets";
+import type { KunpengPromptTemplate } from "@/lib/kunpeng-prompt-templates";
+import { buildKunpengStylePrompt } from "@/lib/kunpeng-style-assets";
 // 风格库刻意保持静态 import：getStyleById / applyStyleToPrompt / mergeStyleNegative
 // 与 STYLE_LIBRARY 同在一个模块里且互相引用，tree shaking 无法把数据摘掉；
 // 而这三个函数在生成提交、场景套用、工作流回填三条同步路径上都要立刻可用。
@@ -161,7 +164,6 @@ export function InvokeInspiredWorkstation({
   active = true,
   externalResultUrl,
   onTemplateResult,
-  externalRecipeJson,
 }: InvokeInspiredWorkstationProps) {
   // 訂閱定價覆寫：管理員改價後本頁報價立即重算。
   usePricingRevision();
@@ -903,6 +905,26 @@ export function InvokeInspiredWorkstation({
       : `已套用「${resource.title}」。替换花括号中的内容即可生成。`);
   });
 
+  /** 鲲鹏风格（161 条）：把 promptSuffix + visualDNA + cameraLanguage 追加到画面描述末尾。 */
+  const applyKunpengStyle = useEventCallback((style: KunpengStyleAsset) => {
+    setTemplateUndo({ label: style.name, snapshot: captureTemplateState() });
+    const styleBlock = buildKunpengStylePrompt(style);
+    setPrompt((current) => (current.trim() ? `${current.trim()}\n\n${styleBlock}` : styleBlock));
+    setScenarioId(null);
+    setLeftPanelTab("prompt");
+    setMobilePanel("create");
+    setCanvasNotice(`已套用风格「${style.name}」。风格块已追加到画面描述末尾。`);
+  });
+
+  /** 鲲鹏提示词模板：注入模板骨架（正文逐字），用户替换花括号占位即可。 */
+  const applyKunpengPromptTemplate = useEventCallback((template: KunpengPromptTemplate) => {
+    setTemplateUndo({ label: template.title, snapshot: captureTemplateState() });
+    setPrompt((current) => (current.trim() ? `${current.trim()}\n\n${template.body}` : template.body));
+    setLeftPanelTab("prompt");
+    setMobilePanel("create");
+    setCanvasNotice(`已注入模板「${template.title}」。替换花括号中的占位内容即可。`);
+  });
+
   const undoTemplateApply = useEventCallback(() => {
     if (!templateUndo) return;
     const { label, snapshot } = templateUndo;
@@ -1134,25 +1156,6 @@ export function InvokeInspiredWorkstation({
     const removed = await recipeTemplates.deleteTemplate(id);
     setCanvasNotice(removed ? "已删除该模板。" : "模板删除失败，请稍后再试。", removed ? "info" : "warn");
   });
-
-  // ── 外部配方注入（首页案例卡「用此工作流打开」）──────────────
-  // nonce 变化 = 用户刚在首页点了一次案例卡。走 applyRecipeTemplate 的同一条
-  // parseWorkflowRecallConfig → applyWorkflowRecallConfig 管线（与 R 键 / PNG
-  // 内嵌 / 配方模板一致）：可撤销、模型显式回切、六槽摊开在提示词页。
-  // recipe JSON 里带 modelId（ShowcaseRecipe 的加法式扩展字段）时由
-  // applyRecipeTemplate 一并切回当时的模型。
-  const injectedNonceRef = useRef<number | null>(null);
-  useEffect(() => {
-    if (!externalRecipeJson || externalRecipeJson.nonce === injectedNonceRef.current) return;
-    injectedNonceRef.current = externalRecipeJson.nonce;
-    try {
-      const recipe = JSON.parse(externalRecipeJson.json) as Parameters<typeof applyRecipeTemplate>[0];
-      applyRecipeTemplate(recipe, "案例配方");
-    } catch {
-      setCanvasNotice("这个案例的配方无法解析。", "warn");
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- applyRecipeTemplate 是 useEventCallback，身份稳定
-  }, [externalRecipeJson]);
 
   /**
    * 下载成片。
@@ -1711,6 +1714,8 @@ export function InvokeInspiredWorkstation({
               toggleSection={toggleSection}
               onApplyResource={applyCreatorResource}
               onApplyScenario={applyScenario}
+              onApplyKunpengStyle={applyKunpengStyle}
+              onApplyKunpengPromptTemplate={applyKunpengPromptTemplate}
               isLoggedIn={isLoggedIn}
               userRecipeTemplates={recipeTemplates.items}
               userRecipeTemplatesLoading={recipeTemplates.loading}

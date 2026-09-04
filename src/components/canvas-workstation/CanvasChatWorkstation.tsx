@@ -12,7 +12,7 @@ import { useChatPanel } from "./use-chat-panel";
 const CanvasEmbed = dynamic(() => import("@/components/canvas/CanvasEmbed").then((m) => m.CanvasEmbed), { ssr: false });
 
 export interface CanvasChatWorkstationProps {
-  /** ImagePlayground 的派生值：displayMode === "agent" && !showProfessionalMode。 */
+  /** ImagePlayground 的派生值：displayMode === "agent"。 */
   inCanvasWorkstation: boolean;
   isLoading: boolean;
   /** useCanvasChat 的回傳值（SSE 事件餵回畫布的 host）。 */
@@ -101,14 +101,17 @@ export function CanvasChatWorkstation({
               animation: canvas-ws-panel-in 0.36s cubic-bezier(0.2, 0.8, 0.2, 1);
             }
             .canvas-chat-rail {
-              /* 收起態不再是長條 rail，而是一顆聊天气泡 FAB（2026-08-25 暴君裁定）：
-                 桌面停在面板原位的左上角，手機停在頂欄下方左上角。 */
+              /* 收起態 = 聊天气泡 FAB（2026-08-25 暴君裁定；2026-08-27 尺寸鎖死修復：
+                 面板基礎規則的 top/bottom/right 拉伸定位 + width/height:auto 會讓
+                 FAB 在移動端撐滿整屏成一個大白橢圓，完全不可用——四邊與尺寸全部顯式固定）。 */
               top: calc(0.75rem + env(safe-area-inset-top, 0px));
-              bottom: auto;
+              bottom: auto !important;
+              right: auto !important;
               left: 0.75rem;
-              width: auto !important;
-              height: auto !important;
-              max-width: calc(100vw - 1.5rem);
+              width: 44px !important;
+              height: 44px !important;
+              min-width: 0 !important;
+              max-width: none !important;
               background: #ffffff !important;
               border: 1px solid rgba(0, 0, 0, 0.08);
               border-radius: 999px;

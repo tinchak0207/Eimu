@@ -15,6 +15,7 @@ import { aspectRatioFromImageSize, resolveGenerationModelId } from "@/lib/genera
 import { normalizeControlNets, toPixaiControlNets, MAX_CONTROL_NETS } from "@/lib/pixai-controlnets";
 import { generationControlPlaneEnabled } from "@/lib/generation-core/database";
 import { submitGenerationCommand } from "@/lib/generation-core/command-service";
+import { enforceQuotaGate } from "@/lib/generation-core/quota-precheck";
 import { IdempotencyConflictError } from "@/lib/generation-core/job-repository";
 import { generationTaskResponse } from "@/lib/generation-core/task-response";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
@@ -38,8 +39,8 @@ export const preferredRegion = "sfo1";
  * 计费落在密钥绑定的 New API 用户上，复用已有的预留/退款逻辑。
  */
 
-/** 上游只接受这三种尺寸。 */
-const SUPPORTED_SIZES = new Set(["1024x1024", "1536x1024", "1024x1536"]);
+/** 上游只接受这三种尺寸；seedream 系额外支持 2048x2048。 */
+const SUPPORTED_SIZES = new Set(["1024x1024", "1536x1024", "1024x1536", "2048x2048"]);
 const DEFAULT_SIZE = "1024x1024";
 const MAX_PROMPT_LENGTH = 4_000;
 /** 一次请求最多出几张。再多会顶到 maxDuration。 */
@@ -204,6 +205,21 @@ export async function POST(req: NextRequest) {
     const callbackUrl = typeof body.callback_url === "string" && body.callback_url.trim()
       ? body.callback_url.trim()
       : null;
+
+    // 手術 P1 計費閘（詳見 quota-precheck.ts）：SURGERY_QUOTA_PRECHECK=1 時先做
+    // 無狀態配額預檢——通過 → 以 0 額提交，job 直接進 queued，阻塞式 reserve 整段
+    // 跳過（計費交事後投影）；額度不足 → 按現契約 402；上游不可達 → 原樣回落
+    // 下方 reserve 路徑。env 未設 = 金額原樣，路徑一字不變。
+    const baseBillingAmount = imageGenerationCoins(modelId, qualityMode) * QUOTA_PER_COIN * rawN;
+    const gate = await enforceQuotaGate({
+      bizKeyId: apiKey.id,
+      billingUserId: apiKey.userId,
+      baseBillingAmount,
+    });
+    if (!gate.ok) {
+      return errorResponse(gate.status, gate.message, gate.type, gate.code, traceId);
+    }
+
     try {
       const submitted = await submitGenerationCommand({
         tenantId: `biz:${apiKey.id}`,
@@ -222,7 +238,7 @@ export async function POST(req: NextRequest) {
         responseFormat,
         callbackUrl,
         requestedCount: rawN,
-        billingAmount: imageGenerationCoins(modelId, qualityMode) * QUOTA_PER_COIN * rawN,
+        billingAmount: gate.billingAmount,
         ...(pixaiControlNets
           ? { workflow: { metadata: { controlNets: pixaiControlNets } } }
           : {}),

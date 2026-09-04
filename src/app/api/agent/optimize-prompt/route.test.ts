@@ -45,9 +45,9 @@ test("校验分支：空 prompt / 非 string / 超长", () => {
   assert.match(c, /400/);
 });
 
-test("限流：每 IP 每 10 分钟 20 次，内存 Map 尽力而为", () => {
+test("限流：每 IP 每 10 分钟 10 次，内存 Map 尽力而为", () => {
   const c = code();
-  assert.match(c, /RATE_LIMIT\s*=\s*20/);
+  assert.match(c, /RATE_LIMIT\s*=\s*10/);
   assert.match(c, /RATE_WINDOW_MS\s*=\s*10 \* 60 \* 1000/);
   assert.match(c, /new Map<string, number\[\]>\(\)/);
   assert.match(c, /x-forwarded-for/);
@@ -85,7 +85,10 @@ test("media_type=image：Agent 请求前置静帧指令，fallback 走 directIma
   assert.match(c, /Treat this as a STILL IMAGE prompt/);
   assert.match(c, /mediaType === "image" \? `\$\{STILL_IMAGE_AGENT_DIRECTIVE\}\\n\$\{prompt\}` : prompt/);
   assert.match(c, /mediaType === "video" \? directVideoPrompt\(prompt\) : directImagePrompt\(prompt\)/);
-  assert.match(c, /import \{ directImagePrompt, directVideoPrompt, extractSixSlots \}/);
+  assert.match(c, /import \{ directImagePrompt, directVideoPrompt \}/);
+  // 2026-09-02 收緊：響應不再帶 slots，避免把六槽公式結構指紋交出去。
+  assert.doesNotMatch(c, /extractSixSlots/);
+  assert.doesNotMatch(c, /slots:/);
 });
 
 test("image fallback（directImagePrompt）产物不含视频词汇", () => {

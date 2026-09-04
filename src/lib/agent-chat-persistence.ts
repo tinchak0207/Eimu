@@ -3,10 +3,10 @@
 // 为什么存 localStorage：
 //   - 网关没有 session GET / list 端点，前端手上唯一能跨刷新持有的会话凭据
 //     就是 sessionId（DELETE 之外没有任何读路径）。
-//   - 网关闲置 30 分钟就回收会话；超过这个时限的存档即使留着，
-//     重开 SSE 时铸票也必然 4xx（找不到会话）。所以这里给存档设 30 分钟存活线，
-//     过期就当「没有存档」，理由写清楚：与其点开恢复再被网关打回，不如直接让
-//     UI 开新会话。
+//   - 存活线 24 小时（2026-08-29 起）：网关闲置 30 分钟只回收内存态，DB row
+//     （sessions.db）保留 7 天、opencode 会话不再被 idle reaper 删除——空闲会话
+//     重开 SSE 时经 DB 懒恢复照常铸票、回放历史。因此存档给满 24h 保存线，
+//     覆盖暴君要求的「至少保存 24 小时」。
 //
 // 防御纪律（隐私模式 / 坏数据一律当「没有存档」，绝不 throw）：
 //   - localStorage 在隐私模式或禁用环境下 getItem/setItem 会抛异常 → 吞掉。
@@ -24,11 +24,11 @@ export const AGENT_CHAT_STORAGE_KEY = "agent-chat-session-v1";
 export const AGENT_CHAT_STORAGE_VERSION = 1;
 
 /**
- * 存活时限 = 网关闲置回收线 30 分钟。超过这个时限的存档被视为过期，
- * load 直接返回 null —— 否则 UI 会提示「继续上次对话」，而网关早在后台把
- * 那个会话回收了，恢复必然失败。静默过期比给用户一次注定失败的点击更诚实。
+ * 存活时限 24 小时（2026-08-29）：网关侧 DB 懒恢复 + opencode 历史保留后，
+ * 超过 30 分钟的存档也能恢复，没必要再跟着内存回收线走。过期存档直接当
+ * 「没有存档」，不提示恢复。
  */
-export const AGENT_CHAT_RECLAIM_MS = 30 * 60 * 1000;
+export const AGENT_CHAT_RECLAIM_MS = 24 * 60 * 60 * 1000;
 
 /** 最多保留最近多少条 transcript 条目，防止 localStorage 5MB 被撑爆。 */
 export const MAX_PERSISTED_ITEMS = 80;
@@ -51,7 +51,7 @@ export interface AgentStorageLike {
 
 // ─────────────────────────── 数据清洗
 
-const ITEM_KINDS = new Set(["user", "assistant", "tool", "image", "notice"]);
+const ITEM_KINDS = new Set(["user", "assistant", "tool", "image", "video", "notice"]);
 
 /**
  * 从 transcript 里挑出可持久化的条目，并对 image 条目做「瘦身」：
@@ -71,6 +71,25 @@ export function sanitizeItemsForStorage(items: AgentTranscriptItem[]): AgentTran
         url: it.url,
         costCoins: it.costCoins,
       });
+      continue;
+    }
+    if (it.kind === "video") {
+      // 与 image 同法瘦身：留小字段，不复制 taskId。
+      out.push({
+        kind: "video",
+        id: it.id,
+        seq: it.seq,
+        url: it.url,
+        costCoins: it.costCoins,
+        mediaKind: it.mediaKind,
+      });
+      continue;
+    }
+    if (it.kind === "director") {
+      // 導演卡不入存檔（2026-09-02 片5）：兩張 base64 SVG 可達近百 KB 會撐爆
+      // localStorage 配額，且 ITEM_KINDS 白名單不含 director——落存檔會讓
+      // isValidItemsArray 判整份快照無效、回放全滅。卡片隨會話存活（spec §5
+      // 片5「別過度工程」條款），刷新後由 agent 重新規劃即可。
       continue;
     }
     out.push(it);

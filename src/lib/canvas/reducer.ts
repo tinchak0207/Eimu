@@ -177,7 +177,7 @@ function upsertUnit(state: CanvasReducerState, unit: CanvasUnit): CanvasReducerS
   return { ...state, units };
 }
 
-/** canvas.plan — 記錄計畫（不建節點）。 */
+/** canvas.plan — 記錄計畫（不建節點）；cost_hint 為數字時掛到 unit（C-FE）。 */
 export function reduceCanvasPlan(state: CanvasReducerState, data: CanvasPlanEvent): CanvasReducerState {
   const existing = findUnit(state, data.unit_id);
   if (existing) return state;
@@ -186,6 +186,7 @@ export function reduceCanvasPlan(state: CanvasReducerState, data: CanvasPlanEven
     tool: data.tool,
     nodes: [],
     connections: [],
+    ...(typeof data.cost_hint === "number" ? { costHint: data.cost_hint } : {}),
   };
   return upsertUnit(state, unit);
 }
@@ -198,12 +199,24 @@ export function reduceCanvasNodeCreated(state: CanvasReducerState, data: CanvasN
     nodes: [],
     connections: [],
   };
-  const existingInUnit = unit.nodes.some((n) => n.id === data.node.id);
+  // C-FE：plan 的 cost_hint 蓋章到本單元的生成卡（image/video）——
+  // 節點卡以它顯示「預估 N 幣」角標，實際 cost_coins 落地後由實際角標接班。
+  // workflow 計畫例外（tool 以 "workflow:" 開頭）：它的 cost_hint 是整張工作流
+  // 的總估價（estimateGraphCoins），逐卡蓋章會把全圖總額貼到每張卡上
+  //（2026-08-29 事故：5 張 pixai 圖 + 1 段 5 秒影片 → 全場卡片顯示 25.005 幣）。
+  // 總額只在側欄「预计 N 币」展示。
+  const stamped: CanvasNode =
+    unit.costHint !== undefined &&
+    !unit.tool.startsWith("workflow:") &&
+    (data.node.type === CanvasNodeType.Image || data.node.type === CanvasNodeType.Video)
+      ? { ...data.node, metadata: { ...data.node.metadata, cost_hint: unit.costHint } }
+      : data.node;
+  const existingInUnit = unit.nodes.some((n) => n.id === stamped.id);
   const nextUnit: CanvasUnit = {
     ...unit,
-    nodes: existingInUnit ? unit.nodes.map((n) => (n.id === data.node.id ? data.node : n)) : [...unit.nodes, data.node],
+    nodes: existingInUnit ? unit.nodes.map((n) => (n.id === stamped.id ? stamped : n)) : [...unit.nodes, stamped],
   };
-  return upsertNode(upsertUnit(state, nextUnit), data.node);
+  return upsertNode(upsertUnit(state, nextUnit), stamped);
 }
 
 /** canvas.node.connected — 建連線（跨 unit 也可）。 */
@@ -274,6 +287,20 @@ export function reduceCanvasNodeDeleted(
   return { nodes, connections, units };
 }
 
+/** canvas.node.disconnected — 移除 from->to 連線（不斷節點）。 */
+export function reduceCanvasNodeDisconnected(
+  state: CanvasReducerState,
+  data: { unit_id: string; from: string; to: string },
+): CanvasReducerState {
+  const connections = state.connections.filter((c) => !(c.fromNodeId === data.from && c.toNodeId === data.to));
+  const units = state.units.map((u) =>
+    u.unitId === data.unit_id
+      ? { ...u, connections: u.connections.filter((c) => !(c.fromNodeId === data.from && c.toNodeId === data.to)) }
+      : u,
+  );
+  return { ...state, connections, units };
+}
+
 /** 主入口：把一個 canvas.* 事件套用到畫布狀態。未知事件原樣返回。 */
 export function reduceCanvasEvent(state: CanvasReducerState, event: CanvasSseEvent): CanvasReducerState {
   let next = state;
@@ -295,6 +322,9 @@ export function reduceCanvasEvent(state: CanvasReducerState, event: CanvasSseEve
       break;
     case "canvas.node.deleted":
       next = reduceCanvasNodeDeleted(state, event.data);
+      break;
+    case "canvas.node.disconnected":
+      next = reduceCanvasNodeDisconnected(state, event.data);
       break;
     default:
       return state;

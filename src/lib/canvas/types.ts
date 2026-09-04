@@ -30,9 +30,33 @@ export enum CanvasNodeType {
   Prompt = "prompt",
   /** 帶角色的參考圖節點：復用 ReferenceImageRole，連到生成節點時自動帶圖+角色。 */
   Reference = "reference",
+  /**
+   * 3D 導演台節點（2026-09-02 spec §5 片5）：gateway director.done 攔截同步，
+   * metadata 帶服務端預渲染 SVG 示意（topViewSvg/cameraViewSvg）與分鏡摘要。
+   */
+  Director = "director",
 }
 
 export type CanvasNodeStatus = "idle" | "success" | "loading" | "error";
+
+/**
+ * 錯誤詳情物件形（2026-08-27 G-FE 合同）：gateway 對失敗幀下發
+ * `{ message, human_message }`——human_message 是給人看的中文短句，
+ * message 是原文。舊載荷仍是純字串，兩形並存。
+ */
+export interface CanvasErrorDetails {
+  message?: string;
+  human_message?: string;
+}
+
+/** 錯誤詳情 → 展示文字：帶 human_message（中文短句）優先，缺省回落原文；空值回 undefined。 */
+export function errorDetailsText(details: string | CanvasErrorDetails | undefined): string | undefined {
+  if (typeof details === "string") return details.length > 0 ? details : undefined;
+  if (!details) return undefined;
+  const human = typeof details.human_message === "string" && details.human_message.length > 0 ? details.human_message : undefined;
+  if (human !== undefined) return human;
+  return typeof details.message === "string" && details.message.length > 0 ? details.message : undefined;
+}
 
 /** 節點元資料：承載 prompt/模型/尺寸/任務/結果。與 gateway autoCreateCanvasUnit 產出對齊。 */
 export interface CanvasNodeMetadata {
@@ -46,10 +70,12 @@ export interface CanvasNodeMetadata {
   kind?: string; // "image" | "video"
   source_image?: string | null; // edit/upscale 的來源 mediaId/URL
   status?: CanvasNodeStatus;
-  errorDetails?: string;
+  errorDetails?: string | CanvasErrorDetails;
   naturalWidth?: number;
   naturalHeight?: number;
   cost_coins?: number;
+  /** canvas.plan 的預估花費（單位幣；C-FE）：實際 cost_coins 落地前，節點卡顯示「預估 N 幣」。 */
+  cost_hint?: number;
   imageTaskId?: string;
   startedAt?: number;
   progress?: number;
@@ -75,6 +101,46 @@ export interface CanvasNodeMetadata {
   fontSize?: number;
   /** reference 節點的參考圖角色（復用 ReferenceImageRole，不另立枚舉）。 */
   referenceRole?: ReferenceImageRole;
+  /**
+   * 流水線結構卡標記（agent-template-canvas 鋪的泳道卡）：step_head = 步驟頭卡、
+   * tool = 工具卡、gate = 門禁卡、director = 導演台卡（gateway director.done 同步）。
+   * 渲染層（NodeBody/CanvasNodeView）據此走結構化分層正文；與既有 kind（image/video）分開，不混用。
+   */
+  pipelineCard?: "step_head" | "tool" | "gate" | "director";
+  /** 工具卡：工具 id（等寬字體渲染）。 */
+  toolId?: string;
+  /** 工具卡：輸入/輸出契約。 */
+  toolInput?: string;
+  toolOutput?: string;
+  /** 工具卡：harness 未接 upstream（紅色警示行，不冒充可用）。 */
+  unsupported?: boolean;
+  /** 工具卡：缺失的上游能力標識。 */
+  requiredCapability?: string;
+  /** 步驟頭卡：本步產出合同全文。 */
+  deliverable?: string;
+  /** 步驟頭卡：本步輸入來源。 */
+  inputFrom?: string;
+  /** 步驟序號（生成卡頂欄 stepName 條）。 */
+  stepIndex?: number;
+  /** 步驟全名（生成卡頂欄）。 */
+  stepName?: string;
+  /** 生成卡：本步 requiredTools 的 id 清單（agent 執行軌跡）。 */
+  toolIds?: string[];
+  // ── director 節點（pipelineCard: "director"，gateway director.done 攔截同步）──
+  /** 導演工程所屬的 gateway 會話 id。 */
+  directorSessionId?: string;
+  /** 當前活躍方案名（無方案 / reset 後為 null）。 */
+  planName?: string | null;
+  /** 活躍方案的鏡頭數。 */
+  shotCount?: number;
+  /** 分鏡健康：true 綠徽章，false 琥珀。 */
+  healthOk?: boolean;
+  /** 服務端預渲染俯視圖（<svg> 原文；合計 >48KB 時省略）。 */
+  topViewSvg?: string;
+  /** 服務端預渲染鏡頭框圖（<svg> 原文；合計 >48KB 時省略）。 */
+  cameraViewSvg?: string;
+  /** 導演工程 revision（gateway doc.revision 透傳）：已掛載視口比對變化重拉 state。 */
+  revision?: number;
 }
 
 export interface CanvasNode {
@@ -107,6 +173,8 @@ export interface CanvasUnit {
   tool: string;
   nodes: CanvasNode[];
   connections: CanvasConnection[];
+  /** canvas.plan 帶的預估花費（單位幣）；node.created 時蓋章到該單元的生成卡 metadata.cost_hint。workflow 計畫（tool 以 "workflow:" 開頭）例外——它是整圖總額，只進側欄不逐卡蓋章。 */
+  costHint?: number;
 }
 
 // ─────────────────────────────────────────── SSE 事件契約（gateway → 前端）
@@ -148,12 +216,20 @@ export interface CanvasNodeConnectedEvent {
   target_kind?: "result";
 }
 
+/** canvas.node.disconnected — 斷一條連線。 */
+export interface CanvasNodeDisconnectedEvent {
+  unit_id: string;
+  from: string;
+  to: string;
+}
+
 /** gateway 自動製畫布可能送出的全部 canvas 事件。 */
 export type CanvasSseEvent =
   | { name: "canvas.plan"; data: CanvasPlanEvent }
   | { name: "canvas.node.created"; data: CanvasNodeCreatedEvent }
   | { name: "canvas.node.updated"; data: CanvasNodeUpdatedEvent }
   | { name: "canvas.node.connected"; data: CanvasNodeConnectedEvent }
+  | { name: "canvas.node.disconnected"; data: CanvasNodeDisconnectedEvent }
   | { name: "canvas.node.generating"; data: { unit_id: string; node_id: string; status: string; progress?: number } }
   | { name: "canvas.node.deleted"; data: { unit_id: string; node_id?: string } }
   | { name: "canvas.derive.started"; data: { unit_id: string; source_node_id: string; instruction: string; interpretation?: string } }
@@ -165,6 +241,7 @@ export const CANVAS_EVENT_NAMES = [
   "canvas.node.created",
   "canvas.node.updated",
   "canvas.node.connected",
+  "canvas.node.disconnected",
   "canvas.node.generating",
   "canvas.node.deleted",
   "canvas.derive.started",
@@ -225,6 +302,7 @@ export const CANVAS_NODE_DEFAULT_SIZE: Record<CanvasNodeType, { width: number; h
   [CanvasNodeType.Audio]: { width: 340, height: 240, title: "音频" },
   [CanvasNodeType.Prompt]: { width: 340, height: 200, title: "提示词" },
   [CanvasNodeType.Reference]: { width: 300, height: 260, title: "参考图" },
+  [CanvasNodeType.Director]: { width: 420, height: 300, title: "导演台" },
 };
 
 // ─────────────────────────────────────────── 批次 & 資源參考

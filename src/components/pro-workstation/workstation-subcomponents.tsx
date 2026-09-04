@@ -169,10 +169,6 @@ export interface InvokeInspiredWorkstationProps {
   externalResultUrl?: string | null;
   /** 模板生成完成回调（结果 URL 已由 externalResultUrl 驱动画布，这里用于历史/提示）。 */
   onTemplateResult?: (url: string) => void;
-  /** 外部配方注入（nonce 驱动）：首页案例卡「用此工作流打开」携带的完整配方 JSON。
-   *  走 workstation-recall 同一条 parseWorkflowRecallConfig → applyWorkflowRecallConfig
-   *  管线（与 R 键 / PNG 内嵌一致），不另开入口。 */
-  externalRecipeJson?: { json: string; nonce: number } | null;
 }
 
 export const DraggableReferenceTile = memo(function DraggableReferenceTile({

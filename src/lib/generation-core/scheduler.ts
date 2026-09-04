@@ -116,7 +116,8 @@ export type SupplierUnavailabilityReason =
   | "accounts_unhealthy"
   | "capacity_saturated"
   | "routing_class_unmet"
-  | "variant_unsupported";
+  | "variant_unsupported"
+  | "supplier_excluded";
 
 export type SupplierUnavailability = {
   reason: SupplierUnavailabilityReason;
@@ -134,10 +135,18 @@ export type SupplierUnavailability = {
  *
  * 這個函數按「從最外層條件往內收」的順序逐段放寬 acquireSupplierLease 的
  * WHERE，第一個能查到行的層級就是真正的卡點。只在租約失敗後跑，不在熱路徑上。
+ *
+ * 排障記錄（2026-08-29）：舊版從不考慮 acquire 時的 attempt 排除鏈
+ * （excludedSupplierIds / excludedFailureDomains），單供應商渠道在第一次 attempt
+ * 失敗後必然被自己排除，診斷卻謊報「healthy but their concurrency limits are
+ * full」（實錄 env:metaso 0/6 也敢說滿）。`excluded` 參數把排除鏈帶進來：若唯一
+ * 的合格供應商都被排除，如實回報 supplier_excluded 並附最近一次上游失敗原文，
+ * 讓 worker 快速失敗而不是空轉到 deadline。
  */
 export async function diagnoseSupplierUnavailability(
   job: Pick<GenerationJob, "modelId" | "kind" | "ratio" | "resolution" | "routingClass">,
   sql: GenerationSql = getGenerationSql(),
+  excluded?: { supplierIds: string[]; failureDomains: string[]; lastFailureDetail?: string | null },
 ): Promise<SupplierUnavailability> {
   const anyContract = await sql<Row[]>`
     SELECT supplier_id, is_current, enabled FROM supplier_capability
@@ -222,7 +231,7 @@ export async function diagnoseSupplierUnavailability(
   }
 
   const withHealthyAccount = await sql<Row[]>`
-    SELECT supplier.id FROM supplier
+    SELECT supplier.id, supplier.failure_domain FROM supplier
     JOIN supplier_capability capability ON capability.supplier_id = supplier.id
     JOIN supplier_account account ON account.supplier_id = supplier.id
     WHERE capability.public_model_id = ${job.modelId} AND capability.kind = ${job.kind}
@@ -240,7 +249,6 @@ export async function diagnoseSupplierUnavailability(
           AND account.success_rate_5m >= COALESCE((account.configuration_json->>'minimumSuccessRate5m')::float, 0.8)
         )
       )
-    LIMIT 1
   `;
   if (!withHealthyAccount.length) {
     return {
@@ -250,10 +258,31 @@ export async function diagnoseSupplierUnavailability(
     };
   }
 
+  // 排除鏈檢查（2026-08-29）：acquire 會排除本 job 已失敗過的 supplier / failure
+  // domain，這裡必須用同一把尺，否則單供應商渠道永遠謊報 capacity_saturated。
+  // 一個 supplier 可能掛多個賬號（查詢按賬號展開行），先按 supplier id 去重。
+  const supplierDomainById = new Map<string, string | null>();
+  for (const row of withHealthyAccount) {
+    supplierDomainById.set(String(row.id), row.failure_domain === null ? null : String(row.failure_domain));
+  }
+  const excludedIds = new Set((excluded?.supplierIds ?? []).map((id) => String(id)));
+  const excludedDomains = new Set((excluded?.failureDomains ?? []).map((domain) => String(domain)));
+  const leaseable = [...supplierDomainById.entries()].filter(([id, failureDomain]) =>
+    !excludedIds.has(id) && !(failureDomain !== null && excludedDomains.has(failureDomain)));
+  if (!leaseable.length) {
+    const lastFailure = excluded?.lastFailureDetail?.trim();
+    return {
+      reason: "supplier_excluded",
+      detail: `All eligible suppliers for ${job.modelId} were excluded after earlier failed attempts on this job`
+        + (lastFailure ? ` — last upstream failure: ${lastFailure}` : "")
+        + ". The job cannot reuse the same supplier; it will fail fast instead of spinning.",
+    };
+  }
+
   return {
     reason: "capacity_saturated",
-    detail: `All suppliers for ${job.modelId} are healthy but their concurrency limits are full `
-      + `(${notCooling.map((row) => `${String(row.id)} ${Number(row.active_leases)}/${Number(row.concurrency_limit)}`).join(", ")}). `
+    detail: `No eligible supplier could be leased for ${job.modelId} `
+      + `(active leases vs limits: ${notCooling.map((row) => `${String(row.id)} ${Number(row.active_leases)}/${Number(row.concurrency_limit)}`).join(", ")}). `
       + "The job stays queued and will retry.",
   };
 }
@@ -327,6 +356,15 @@ export async function reportSupplierFailure(
   failure: ClassifiedFailure,
   sql: GenerationSql = getGenerationSql(),
 ): Promise<void> {
+  // INC-0830-VIDEO：upstream_protocol = 「上游成功但我们解析不出输出」——我们的
+  // 解析 bug，不是上游的错。不记 health event（不拉低 success_rate_5m）、不动
+  // supplier/account/capability 健康状态，渠道继续接单；只留一行日志待查。
+  if (failure.failureClass === "upstream_protocol") {
+    console.warn(
+      `[scheduler] upstream_protocol failure (no cooldown, no health penalty) supplier=${supplier.supplierId} account=${supplier.accountId}: ${failure.detail.slice(0, 300)}`,
+    );
+    return;
+  }
   await sql.begin(async (tx) => {
     const accountFailure = failure.failureClass === "authentication" || failure.failureClass === "quota_exhausted" || failure.failureClass === "rate_limited";
     const capabilityFailure = failure.failureClass === "model_unsupported" || failure.failureClass === "malformed_output" || failure.failureClass === "empty_result" || failure.failureClass === "artifact_download";
@@ -381,6 +419,41 @@ export async function reportSupplierFailure(
       WHERE account.id = ${supplier.accountId}
     `;
   });
+}
+
+/**
+ * 通用 cooldown 到期自動恢復（病灶 C，2026-08-30）。
+ *
+ * reportSupplierFailure 把 supplier/account 設成 'cooldown' 後，只有成功路徑
+ * （reportSupplierSuccess）能把健康狀態撿回來；一條渠道一旦長期無單，cooldown
+ * 到期後永遠不會被恢復，等於一冷到底（實錄：cangyuansuanli 已充值仍被 cooldown/
+ * disabled 擋住 4 筆 fast；adobe2api cooldown 到 09-08 全冷著）。
+ *
+ * 這個定時掃描把「cooldown 已到期」的 supplier/account 保守恢復成 healthy。
+ * supplier 保留歷史 health_score（LEAST(1, score*0.5+0.5)，不滿血），避免反覆
+ * 熔斷後立刻滿血；supplier_account 無 health_score 列，只清狀態與 cooldown。
+ *
+ * disabled 是「隔離待人工 / 憑證（賬號）吊銷」語義（quarantineSupplier 設成
+ * disabled），一律不自動恢復，只能靠後台人工放行 —— 恢復條件 WHERE
+ * health_status = 'cooldown' 天然排除 disabled。
+ */
+export async function recoverExpiredCooldowns(sql: GenerationSql = getGenerationSql()): Promise<{ recovered: number }> {
+  const accounts = await sql<{ id: string }[]>`
+    UPDATE supplier_account
+    SET health_status = 'healthy', cooldown_until = NULL, updated_at = now()
+    WHERE health_status = 'cooldown'
+      AND cooldown_until IS NOT NULL AND cooldown_until <= now()
+    RETURNING id
+  `;
+  const suppliers = await sql<{ id: string }[]>`
+    UPDATE supplier
+    SET health_status = 'healthy', cooldown_until = NULL,
+        health_score = LEAST(1, health_score * 0.5 + 0.5), updated_at = now()
+    WHERE health_status = 'cooldown'
+      AND cooldown_until IS NOT NULL AND cooldown_until <= now()
+    RETURNING id
+  `;
+  return { recovered: accounts.length + suppliers.length };
 }
 
 export async function consumeDistributedRateLimit(input: {

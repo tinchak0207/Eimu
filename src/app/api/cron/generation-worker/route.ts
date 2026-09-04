@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { runGenerationWorkerOnce } from "@/lib/generation-core/worker-service";
+import { runGenerationMaintenanceOnce, runGenerationWorkerOnce } from "@/lib/generation-core/worker-service";
 import { generationControlPlaneEnabled } from "@/lib/generation-core/database";
 
 export const runtime = "nodejs";
@@ -41,10 +41,23 @@ export async function GET(req: NextRequest) {
       supplierLeaseMs: 2 * 60 * 1000, // 2 分鐘 supplier 租約
     });
 
+    // 維護閉環（租約回收/計費結算/INC-0831 provider 對帳/健康巡檢）：
+    // 長駐 worker 關停期間由 cron 每分鐘補位，對帳不能只有一條心跳。
+    let maintenance: { ok: true } | { ok: false; error: string };
+    try {
+      await runGenerationMaintenanceOnce({ workerId: `cron-${cronId ?? "local"}` });
+      maintenance = { ok: true };
+    } catch (maintenanceError) {
+      // 維護失敗不影響本輪派單結果；對帳下一分鐘再試。
+      console.error("[generation-worker-cron] maintenance failed（下一輪重試）", maintenanceError);
+      maintenance = { ok: false, error: maintenanceError instanceof Error ? maintenanceError.message : String(maintenanceError) };
+    }
+
     return NextResponse.json({
       ok: true,
       worker_enabled: true,
       processed,
+      maintenance,
       cron_id: cronId ?? "local",
       timestamp: new Date().toISOString(),
     });

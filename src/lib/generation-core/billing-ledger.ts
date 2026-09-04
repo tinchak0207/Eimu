@@ -9,6 +9,7 @@ import {
 } from "./billing-relay";
 import { getGenerationSql, type GenerationSql } from "./database";
 import { getGenerationJob, mapGenerationJob } from "./job-repository";
+import { JOB_EVENT, emitJobEvent } from "./job-events";
 import type { FailureClass, GenerationJob } from "./types";
 
 type Row = Record<string, unknown>;
@@ -16,6 +17,12 @@ type BillingOperation = "reserve" | "commit" | "refund";
 
 const EXECUTION_LEASE_MS = 45_000;
 const DEFAULT_RECONCILE_BATCH = 50;
+
+// P0 止血（2026-08-28 域 E）：殭屍回收門檻。非終態卡在計費狀態超過此時長的任務，
+// 由 reconcile 強制對帳（該 refund 的 refund、確定性失敗的終結），不再無限重試。
+// P1 拆除 reserve 阻塞閘門後本段整體退役。
+const ZOMBIE_RECLAIM_MIN_AGE_MS_DEFAULT = 6 * 60 * 60 * 1000;
+const ZOMBIE_RECLAIM_BATCH = 100;
 
 export type BillingFailureDisposition = "rejected" | "retry" | "unknown";
 export type BillingRefundResult = "applied" | "pending" | "unknown" | "failed";
@@ -179,6 +186,7 @@ export async function reserveGenerationBilling(input: {
 }, sql: GenerationSql = getGenerationSql()): Promise<GenerationJob> {
   if (input.job.billingAmount === 0) {
     await moveJobToQueued(input.job.id, sql);
+    emitJobEvent({ jobId: input.job.id, event: JOB_EVENT.jobRequeued, actor: input.executorId, detail: { reason: "zero_amount" } }, sql);
     return freshJob(input.job.id, sql);
   }
   if (!input.job.billingUserId) {
@@ -201,21 +209,22 @@ export async function reserveGenerationBilling(input: {
       userId: input.job.billingUserId,
       amount: input.job.billingAmount,
     });
-    await sql.begin(async (tx) => {
-      const applied = await tx<Row[]>`
-        UPDATE billing_operation
-        SET status = 'applied', applied_at = now(), execution_expires_at = NULL,
-            last_error = NULL, updated_at = now()
-        WHERE id = ${String(claimed.id)} AND status = 'executing'
-        RETURNING id
-      `;
-      if (!applied[0]) return;
-      await tx`
-        UPDATE generation_job
-        SET status = 'queued', available_at = now(), failure_class = NULL, failure_detail = NULL, updated_at = now()
-        WHERE id = ${input.job.id} AND status = 'pending_billing'
-      `;
-    });
+      await sql.begin(async (tx) => {
+        const applied = await tx<Row[]>`
+          UPDATE billing_operation
+          SET status = 'applied', applied_at = now(), execution_expires_at = NULL,
+              last_error = NULL, updated_at = now()
+          WHERE id = ${String(claimed.id)} AND status = 'executing'
+          RETURNING id
+        `;
+        if (!applied[0]) return;
+        await tx`
+          UPDATE generation_job
+          SET status = 'queued', available_at = now(), failure_class = NULL, failure_detail = NULL, updated_at = now()
+          WHERE id = ${input.job.id} AND status = 'pending_billing'
+        `;
+        emitJobEvent({ jobId: input.job.id, event: JOB_EVENT.billingReserved, actor: input.executorId, detail: { amount: input.job.billingAmount, operation: "reserve" } }, sql);
+      });
   } catch (error) {
     const detail = detailOf(error);
     const disposition = classifyBillingFailure(error);
@@ -226,6 +235,7 @@ export async function reserveGenerationBilling(input: {
         nextAttemptAt: billingRetryAt(error, operationAttempts(claimed)),
         sql,
       });
+      emitJobEvent({ jobId: input.job.id, event: JOB_EVENT.billingRetryScheduled, actor: input.executorId, upstreamRaw: detail, detail: { operation: "reserve", nextAttemptAt: billingRetryAt(error, operationAttempts(claimed)).toISOString() } }, sql);
     } else if (disposition === "rejected") {
       await markReservationRejected({
         id: String(claimed.id),
@@ -234,6 +244,7 @@ export async function reserveGenerationBilling(input: {
         failureClass: rejectedFailureClass(error),
         sql,
       });
+      emitJobEvent({ jobId: input.job.id, event: JOB_EVENT.jobFailed, actor: input.executorId, upstreamRaw: detail, detail: { reason: "billing_rejected", failureClass: rejectedFailureClass(error), operation: "reserve" } }, sql);
     } else {
       await markOperationUnknown({
         id: String(claimed.id),
@@ -242,6 +253,7 @@ export async function reserveGenerationBilling(input: {
         detail,
         sql,
       });
+      emitJobEvent({ jobId: input.job.id, event: JOB_EVENT.billingUnknown, actor: input.executorId, upstreamRaw: detail, detail: { operation: "reserve", jobStatus: "billing_unknown" } }, sql);
     }
   }
 
@@ -262,7 +274,9 @@ export async function commitGenerationBilling(
     throw new Error(`Invalid committed amount for generation job ${job.id}.`);
   }
 
-  await sql`
+  // 埋點需要知道 INSERT 是否真正落地（重複 reconcile 會命中 ON CONFLICT 無聲跳過），
+  // 故追加 RETURNING id——不改變寫入語義，只讓「帳已結」事件不撒謊、不重複。
+  const applied = await sql<Row[]>`
     INSERT INTO billing_operation (
       id, job_id, operation, amount, status, idempotency_ref, applied_at,
       next_attempt_at
@@ -277,7 +291,11 @@ export async function commitGenerationBilling(
       AND reserve.status = 'applied'
     WHERE job.id = ${job.id}
     ON CONFLICT (job_id, operation, sequence) DO NOTHING
+    RETURNING id
   `;
+  if (applied[0]) {
+    emitJobEvent({ jobId: job.id, event: JOB_EVENT.billingCommitted, actor: "system", detail: { amount, operation: "commit" } }, sql);
+  }
 }
 
 async function ensureRefundOperation(job: GenerationJob, amount: number, sql: GenerationSql): Promise<Row> {
@@ -360,7 +378,9 @@ export async function refundGenerationBilling(input: {
         WHERE id = ${String(claimed.id)} AND status = 'executing'
         RETURNING id
       `;
-      if (!applied[0] || amount !== input.job.billingAmount) return;
+      if (!applied[0]) return;
+      emitJobEvent({ jobId: input.job.id, event: JOB_EVENT.billingRefunded, actor: input.executorId, detail: { amount, operation: "refund", full: amount === input.job.billingAmount } }, sql);
+      if (amount !== input.job.billingAmount) return;
       await tx`
         UPDATE generation_job
         SET status = 'refunded', finished_at = COALESCE(finished_at, now()), updated_at = now()
@@ -378,6 +398,7 @@ export async function refundGenerationBilling(input: {
         nextAttemptAt: billingRetryAt(error, operationAttempts(claimed)),
         sql,
       });
+      emitJobEvent({ jobId: input.job.id, event: JOB_EVENT.billingRetryScheduled, actor: input.executorId, upstreamRaw: detail, detail: { operation: "refund", nextAttemptAt: billingRetryAt(error, operationAttempts(claimed)).toISOString() } }, sql);
       return "pending";
     }
     if (disposition === "rejected") {
@@ -386,6 +407,7 @@ export async function refundGenerationBilling(input: {
         SET status = 'failed', execution_expires_at = NULL, last_error = ${detail}, updated_at = now()
         WHERE id = ${String(claimed.id)} AND status = 'executing'
       `;
+      emitJobEvent({ jobId: input.job.id, event: JOB_EVENT.billingRefundFailed, actor: input.executorId, upstreamRaw: detail, detail: { amount, operation: "refund" } }, sql);
       return "failed";
     }
     await markOperationUnknown({
@@ -395,6 +417,7 @@ export async function refundGenerationBilling(input: {
       detail,
       sql,
     });
+    emitJobEvent({ jobId: input.job.id, event: JOB_EVENT.billingUnknown, actor: input.executorId, upstreamRaw: detail, detail: { operation: "refund" } }, sql);
     return "unknown";
   }
 }
@@ -414,6 +437,7 @@ async function markExpiredBillingOperationsUnknown(sql: GenerationSql): Promise<
     RETURNING job_id, operation
   `;
   for (const operation of expired) {
+    emitJobEvent({ jobId: String(operation.job_id), event: JOB_EVENT.billingUnknown, actor: "system", upstreamRaw: "Billing worker lease expired after external adjustment began; reconciliation required.", detail: { operation: String(operation.operation), reason: "lease_expired" } }, sql);
     if (String(operation.operation) !== "reserve") continue;
     await sql`
       UPDATE generation_job
@@ -463,6 +487,8 @@ export interface BillingReconciliationSummary {
   expiredUnknown: number;
   reservationAttempts: number;
   settlementAttempts: number;
+  zombieReclaims: number;
+  strandedRefundRetries: number;
 }
 
 /**
@@ -481,7 +507,12 @@ export async function reconcileGenerationBilling(input: {
     expiredUnknown: await markExpiredBillingOperationsUnknown(sql),
     reservationAttempts: 0,
     settlementAttempts: 0,
+    zombieReclaims: 0,
+    strandedRefundRetries: 0,
   };
+
+  summary.zombieReclaims = await reclaimStaleBillingZombies({ executorId: input.executorId, adapter: input.adapter, sql });
+  summary.strandedRefundRetries = await retryStrandedRefundOperations({ executorId: input.executorId, adapter: input.adapter, sql });
 
   for (const job of await dueReservationJobs(limit, sql)) {
     await reserveGenerationBilling({ job, executorId: input.executorId, adapter: input.adapter }, sql);
@@ -510,6 +541,233 @@ export async function reconcileGenerationBilling(input: {
   }
 
   return summary;
+}
+
+function zombieReclaimAgeMs(): number {
+  const raw = Number(process.env.GENERATION_BILLING_ZOMBIE_AGE_MS ?? "");
+  return Number.isFinite(raw) && raw > 0 ? raw : ZOMBIE_RECLAIM_MIN_AGE_MS_DEFAULT;
+}
+
+function zombieFailureClass(reserveError: string): FailureClass {
+  return /余额不足|quota/i.test(reserveError) ? "quota_exhausted" : "unknown";
+}
+
+type ZombieDisposition =
+  | { action: "skip" }
+  | { action: "requeued" }
+  | { action: "failed"; refundFull: boolean; job: GenerationJob };
+
+/**
+ * P0 止血（2026-08-28 域 E）：回收卡死在 pending_billing / billing_unknown 的殭屍。
+ *
+ * 判據（保守原則：用戶虧 1 幣重於平台黑 1 幣）：
+ * - reserve op = applied：扣款已確認但任務未入隊（原子更新失敗的殘留）→
+ *   任務重回 queued 繼續生成，由正常路徑 commit 結帳。
+ * - reserve op = pending 且最近一次錯誤含 "reversed"：ImageBillingRevertedError
+ *   只在「subtract 成功→複核失敗→add 回滾成功」後拋出，淨額為零由代碼路徑保證；
+ *   這是確定性失敗（典型：用戶餘額買不起該模型，每次重試都扣成負數再回滾），
+ *   無限重試毫無意義 → CAS 將 op 鎖成 failed，任務終結為 failed，不退款。
+ * - reserve op = failed：reserve 已被確定性拒絕（4xx），無外部扣款 → 任務 failed，不退款。
+ * - 其餘（op = unknown，或 pending 但無 reversed 憑據）：扣款狀態不明 →
+ *   任務 failed 後全額退款（寧可平台承擔可能的風贈，也不讓用戶承擔不確定）。
+ *
+ * op 為 pending 時必須先 CAS（帶 status='pending' 條件的原子更新）再改任務，
+ * 避免與另一個 worker 正在執行的外部扣款賽跑；CAS 影響 0 行 = 本輪有併發 claim，跳過。
+ * unknown op 不可再被 claim（claim 只認 pending），無賽跑風險。
+ */
+async function reclaimStaleBillingZombies(input: {
+  executorId: string;
+  adapter?: GenerationBillingAdapter;
+  sql: GenerationSql;
+}): Promise<number> {
+  const ageMs = zombieReclaimAgeMs();
+  const candidates = await input.sql<Row[]>`
+    SELECT job.id
+    FROM generation_job job
+    JOIN billing_operation reserve
+      ON reserve.job_id = job.id
+      AND reserve.operation = 'reserve'
+      AND reserve.sequence = 1
+    WHERE job.status IN ('pending_billing', 'billing_unknown')
+      AND reserve.status IN ('pending', 'unknown', 'failed', 'applied')
+      AND job.created_at < now() - (${String(ageMs)}::text || ' milliseconds')::interval
+    ORDER BY job.created_at
+    LIMIT ${ZOMBIE_RECLAIM_BATCH}
+  `;
+  let reclaimed = 0;
+  for (const candidate of candidates) {
+    const jobId = String(candidate.id);
+    try {
+      reclaimed += await reclaimOneZombie({ jobId, executorId: input.executorId, adapter: input.adapter }, input.sql);
+    } catch (error) {
+      console.error(`[billing-reconcile] zombie reclaim failed for job ${jobId}`, error);
+    }
+  }
+  return reclaimed;
+}
+
+async function reclaimOneZombie(input: {
+  jobId: string;
+  executorId: string;
+  adapter?: GenerationBillingAdapter;
+}, sql: GenerationSql): Promise<number> {
+  const disposition = await sql.begin<ZombieDisposition>(async (tx): Promise<ZombieDisposition> => {
+    const rows = await tx<Row[]>`
+      SELECT job.*, reserve.status AS reserve_status, reserve.last_error AS reserve_error
+      FROM generation_job job
+      JOIN billing_operation reserve
+        ON reserve.job_id = job.id
+        AND reserve.operation = 'reserve'
+        AND reserve.sequence = 1
+      WHERE job.id = ${input.jobId}
+      FOR UPDATE OF job, reserve
+    `;
+    const row = rows[0];
+    if (!row) return { action: "skip" };
+    const job = mapGenerationJob(row);
+    if (job.status !== "pending_billing" && job.status !== "billing_unknown") return { action: "skip" };
+    const reserveStatus = String(row.reserve_status ?? "");
+    const reserveError = row.reserve_error === null || row.reserve_error === undefined ? "" : String(row.reserve_error);
+    const detail = `Billing zombie auto-reclaim (stuck as ${job.status}; reserve ${reserveStatus}${reserveError ? `: ${reserveError}` : ""})`.slice(0, 2000);
+
+    if (reserveStatus === "applied") {
+      await tx`
+        UPDATE generation_job
+        SET status = 'queued', available_at = now(), failure_class = NULL, failure_detail = NULL, updated_at = now()
+        WHERE id = ${input.jobId} AND status IN ('pending_billing', 'billing_unknown')
+      `;
+      emitJobEvent({ jobId: input.jobId, event: JOB_EVENT.zombieRequeued, actor: input.executorId, upstreamRaw: reserveError || null, detail: { reserveStatus, stuckAs: job.status } }, sql);
+      return { action: "requeued" };
+    }
+
+    if (reserveStatus === "pending" && /reversed/i.test(reserveError)) {
+      const claimed = await tx<Row[]>`
+        UPDATE billing_operation
+        SET status = 'failed', execution_expires_at = NULL, last_error = ${detail}, updated_at = now()
+        WHERE job_id = ${input.jobId} AND operation = 'reserve' AND sequence = 1 AND status = 'pending'
+        RETURNING id
+      `;
+      if (!claimed[0]) return { action: "skip" };
+      await tx`
+        UPDATE generation_job
+        SET status = 'failed', failure_class = ${zombieFailureClass(reserveError)},
+            failure_detail = ${detail}, finished_at = now(), updated_at = now()
+        WHERE id = ${input.jobId} AND status IN ('pending_billing', 'billing_unknown')
+      `;
+      emitJobEvent({ jobId: input.jobId, event: JOB_EVENT.zombieReclaimed, actor: input.executorId, upstreamRaw: reserveError || null, detail: { reserveStatus, refund: "none", stuckAs: job.status, failureClass: zombieFailureClass(reserveError) } }, sql);
+      return { action: "failed", refundFull: false, job };
+    }
+
+    if (reserveStatus === "failed") {
+      await tx`
+        UPDATE generation_job
+        SET status = 'failed', failure_class = 'unknown',
+            failure_detail = ${detail}, finished_at = now(), updated_at = now()
+        WHERE id = ${input.jobId} AND status IN ('pending_billing', 'billing_unknown')
+      `;
+      emitJobEvent({ jobId: input.jobId, event: JOB_EVENT.zombieReclaimed, actor: input.executorId, upstreamRaw: reserveError || null, detail: { reserveStatus, refund: "none", stuckAs: job.status } }, sql);
+      return { action: "failed", refundFull: false, job };
+    }
+
+    if (reserveStatus === "pending") {
+      const claimed = await tx<Row[]>`
+        UPDATE billing_operation
+        SET status = 'failed', execution_expires_at = NULL, last_error = ${detail}, updated_at = now()
+        WHERE job_id = ${input.jobId} AND operation = 'reserve' AND sequence = 1 AND status = 'pending'
+        RETURNING id
+      `;
+      if (!claimed[0]) return { action: "skip" };
+    }
+    await tx`
+      UPDATE generation_job
+      SET status = 'failed', failure_class = 'unknown',
+          failure_detail = ${detail}, finished_at = now(), updated_at = now()
+      WHERE id = ${input.jobId} AND status IN ('pending_billing', 'billing_unknown')
+    `;
+    emitJobEvent({ jobId: input.jobId, event: JOB_EVENT.zombieReclaimed, actor: input.executorId, upstreamRaw: reserveError || null, detail: { reserveStatus, refund: "full", stuckAs: job.status } }, sql);
+    return { action: "failed", refundFull: true, job };
+  });
+
+  if (disposition.action === "requeued") {
+    console.log(`[billing-reconcile] zombie ${input.jobId}: requeued (reserve applied)`);
+    return 1;
+  }
+  if (disposition.action !== "failed") return 0;
+  if (!disposition.refundFull) {
+    console.log(`[billing-reconcile] zombie ${input.jobId}: failed without refund (net-zero evidenced)`);
+    return 1;
+  }
+  let refundResult: BillingRefundResult;
+  try {
+    refundResult = await refundGenerationBilling({
+      job: disposition.job,
+      executorId: input.executorId,
+      adapter: input.adapter,
+    }, sql);
+  } catch (error) {
+    console.error(`[billing-reconcile] zombie ${input.jobId}: refund threw after terminal fail`, error);
+    return 1;
+  }
+  console.log(`[billing-reconcile] zombie ${input.jobId}: failed with full refund attempt -> ${refundResult}`);
+  return 1;
+}
+
+/**
+ * P0 止血（2026-08-28 域 E）：重跑擱淺的 refund operation。
+ * terminalReservedJobs 只覆蓋 reserve=applied 的終態任務；reserve 非 applied 的
+ * 終態任務，其 refund op 一旦落入 pending 就沒有任何循環會再碰它——
+ * 用戶該退的錢永遠退不出去。這裡按同樣的 claim 門禁補一條重試通道。
+ * unknown 的 refund 仍保留人工對帳（盲目重放可能已落地的 credit 會雙倍退款）。
+ *
+ * 2026-08-30 整改：failed refund 是確定性拒絕（refundGenerationBilling 對 failed op
+ * 直接短路返回 "failed"，永遠進不了 claim/執行），把 failed 撈進來只會每 30s 重複
+ * 「撈起→短路→返回 failed」刷日誌（實證：job 2bc5aefd-… Billing relay refund failed
+ * HTTP 404，500000 quota 永遠退不掉）。故只重試 status='pending'；failed op 由
+ * probe terminal_unsettled(refund_failed) 如實可見、需人工對帳，不再自動重試。
+ * 過期的 executing op 已由 markExpiredBillingOperationsUnknown 在同輪凍結為 unknown，
+ * 走人工對帳通道，這裡不再重掃。
+ */
+export async function retryStrandedRefundOperations(input: {
+  executorId: string;
+  adapter?: GenerationBillingAdapter;
+  sql: GenerationSql;
+}): Promise<number> {
+  const ageMs = zombieReclaimAgeMs();
+  const candidates = await input.sql<Row[]>`
+    SELECT job.id, refund_op.amount AS refund_amount
+    FROM generation_job job
+    JOIN billing_operation refund_op
+      ON refund_op.job_id = job.id
+      AND refund_op.operation = 'refund'
+      AND refund_op.sequence = 1
+    WHERE refund_op.status = 'pending'
+      AND refund_op.next_attempt_at <= now()
+      AND refund_op.amount > 0
+      AND job.status IN ('succeeded', 'failed', 'cancelled')
+      AND job.finished_at < now() - (${String(ageMs)}::text || ' milliseconds')::interval
+    ORDER BY job.finished_at NULLS LAST
+    LIMIT ${ZOMBIE_RECLAIM_BATCH}
+  `;
+  let retried = 0;
+  for (const candidate of candidates) {
+    const jobId = String(candidate.id);
+    const job = await getGenerationJob(jobId, input.sql);
+    if (!job) continue;
+    try {
+      const result = await refundGenerationBilling({
+        job,
+        amount: Number(candidate.refund_amount),
+        executorId: input.executorId,
+        adapter: input.adapter,
+      }, input.sql);
+      emitJobEvent({ jobId, event: JOB_EVENT.strandedRefundRetried, actor: input.executorId, detail: { amount: Number(candidate.refund_amount), result } }, input.sql);
+      if (result === "applied") retried += 1;
+      console.log(`[billing-reconcile] stranded refund retry ${jobId} (amount ${String(candidate.refund_amount)}) -> ${result}`);
+    } catch (error) {
+      console.error(`[billing-reconcile] stranded refund retry failed for job ${jobId}`, error);
+    }
+  }
+  return retried;
 }
 
 export interface BillingOperationView {
@@ -588,7 +846,7 @@ export async function reconcileBillingOperationManually(input: {
   const note = input.note.trim().slice(0, 1_500);
   if (!note) throw new Error("A reconciliation note is required.");
 
-  return sql.begin(async (tx) => {
+  const view = await sql.begin(async (tx) => {
     const rows = await tx<Row[]>`
       SELECT operation.*, job.tenant_id, job.model_id, job.status AS job_status, job.billing_amount
       FROM billing_operation operation
@@ -670,4 +928,6 @@ export async function reconcileBillingOperationManually(input: {
     if (!updated[0]) throw new Error("Billing operation disappeared during reconciliation.");
     return mapBillingOperationView(updated[0]);
   });
+  emitJobEvent({ jobId: view.jobId, event: JOB_EVENT.billingManuallyReconciled, actor: input.actor, upstreamRaw: note, detail: { action: input.action, operation: view.operation, status: view.status, jobStatus: view.jobStatus, amount: view.amount, manual: true, note } }, sql);
+  return view;
 }

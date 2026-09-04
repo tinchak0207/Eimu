@@ -2,6 +2,54 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import * as React from "react";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+
+// tsconfig 的 jsx=preserve 让 tsx 对 .tsx 退回 classic runtime（React.createElement），
+// 而组件源码不 import React（Next 构建走 automatic）。测试里做 SSR 渲染前补一个
+// 全局 React 桩，否则组件一渲染就 ReferenceError: React is not defined。
+(globalThis as unknown as Record<string, unknown>).React ??= React;
+
+// 罪状 1/4 行为断言用的纯函数（解析与 reducer 都不碰 DOM，node --test 直测）。
+import {
+  VideoBubble,
+  groupAttachmentRefs,
+  groupsNeedTicket,
+  parseUserAttachmentBlock,
+} from "./AgentAttachmentCards";
+import { pickVisibleSubagents } from "./AgentSubagentBar";
+import { AgentToolCard } from "./AgentToolCard";
+import { submitConfirmDecision } from "./AgentConfirmCard";
+import { submitQuestionAnswer } from "./AgentQuestionCard";
+import { computeCanSend, hasPendingAttachments } from "./AgentComposer";
+import Module, { createRequire } from "node:module";
+
+// AgentChatPanel.tsx 唯一带副作用 `import "./agent-chat.css"` 的组件文件——
+// node --test 走 CJS require 装载 .tsx，没有 css loader，静态 import 会在模块
+// 图加载阶段就炸掉（比测试文件自己的顶层代码更早执行）。这里用同步 require（走
+// createRequire，避免顶层 await——tsx 编译输出是 CJS，不支持顶层 await）之前
+// 把 .css 扩展名注册成空模块，规避掉，不影响其余文件的正常断言方式（读源码字符串）。
+(Module as unknown as { _extensions: Record<string, (m: unknown, filename: string) => void> })._extensions[
+  ".css"
+] = (m) => {
+  (m as { exports: unknown }).exports = {};
+};
+const requireHere = createRequire(import.meta.url);
+const { resolveConfirmGroup } = requireHere("./AgentChatPanel.tsx") as {
+  resolveConfirmGroup: (
+    requestIds: string[],
+    approved: boolean,
+    onConfirm: (requestId: string, approved: boolean) => Promise<boolean | void>,
+  ) => Promise<boolean>;
+};
+import { agentChatReducer, appendUserTurn, lastNonEmptyLine } from "../../lib/agent-chat-reducer";
+import {
+  EMPTY_AGENT_CHAT_STATE,
+  type AgentAttachmentRef,
+  type AgentSseEvent,
+  type AgentSubagentItem,
+} from "../../lib/agent-chat-types";
 
 const root = process.cwd();
 
@@ -15,6 +63,7 @@ const transcript = read("src/components/agent-chat/AgentTranscript.tsx");
 const bubble = read("src/components/agent-chat/AgentMessageBubble.tsx");
 const toolCard = read("src/components/agent-chat/AgentToolCard.tsx");
 const imageCard = read("src/components/agent-chat/AgentImageCard.tsx");
+const videoCard = read("src/components/agent-chat/AgentVideoCard.tsx");
 const confirmCard = read("src/components/agent-chat/AgentConfirmCard.tsx");
 const questionCard = read("src/components/agent-chat/AgentQuestionCard.tsx");
 const noticeRow = read("src/components/agent-chat/AgentNoticeRow.tsx");
@@ -46,6 +95,7 @@ const AGENT_COMPONENTS: Array<[string, string]> = [
   ["AgentMessageBubble", bubble],
   ["AgentToolCard", toolCard],
   ["AgentImageCard", imageCard],
+  ["AgentVideoCard", videoCard],
   ["AgentConfirmCard", confirmCard],
   ["AgentQuestionCard", questionCard],
   ["AgentNoticeRow", noticeRow],
@@ -73,11 +123,17 @@ function hasNestedButtons(source: string): boolean {
 
 test("composer is disabled when session closed, and trims before sending", () => {
   // 面板把「disabled 属性或会话已关闭」折叠成一个布尔传下去。
-  assert.match(panel, /composerDisabled = disabled \|\| closed/);
+  // R9-3：question/confirm 掛起時輸入框保留但禁用（優先級用 disabled 表達，
+  // 不再用隱藏騰位），並換「等待卡片選擇…」占位提示。
+  assert.match(panel, /composerDisabled = disabled \|\| closed \|\| pendingQuestions\.length > 0 \|\| pendingConfirms\.length > 0/);
   assert.match(panel, /disabled=\{composerDisabled\}/);
+  assert.match(panel, /等待卡片選擇/);
   // textarea 与发送按钮都必须跟随禁用。
   assert.match(composer, /disabled=\{disabled\}/);
-  assert.match(composer, /disabled=\{disabled \|\| !trimmed\}/);
+  assert.match(composer, /disabled=\{disabled \|\| !canSend\}/);
+  // 罪状 2a：只附文件不打字也发得出去——canSend = 有文本 || 有已传成功的附件，
+  // 且没有仍在 uploading/extracting 的附件（computeCanSend 抽成纯函数，见下方回归测试）。
+  assert.match(composer, /const canSend = computeCanSend\(trimmed, readyRefs\.length, attachments\);/);
   // 空消息必须被拒绝：发送前 trim。
   assert.match(composer, /\.trim\(\)/);
 });
@@ -105,6 +161,23 @@ test("image action buttons are disabled when no callback is wired", () => {
   assert.doesNotMatch(imageCard, /fetch\(/);
   // 回调以可选 props 形式接收，供后续步骤直接接上。
   assert.match(imageCard, /onSaveToLibrary\?: \(item: AgentImageItem\) => void/);
+});
+
+test("video action buttons are disabled when no callback is wired", () => {
+  // 与图片卡同惯例：回调缺席就 disabled，绝不伪造 handler。
+  assert.match(videoCard, /disabled=\{!onSaveToLibrary\}/);
+  assert.match(videoCard, /disabled=\{!onDownload\}/);
+  assert.doesNotMatch(videoCard, /fetch\(/);
+  assert.match(videoCard, /onSaveToLibrary\?: \(item: AgentVideoItem\) => void/);
+  // 影片查看器不得抄图片的捏合/滚轮缩放手势（对播放中的影片无语义）。
+  assert.doesNotMatch(videoCard, /pinch|wheel|clampPan/);
+  // 查看器仍走图片 Lightbox 的关闭三件套：Esc + history 弹层 + 背景点击。
+  assert.match(videoCard, /pushState\(\{ agentVideoLightbox: true \}, ""\)/);
+  assert.match(videoCard, /event\.key === "Escape"/);
+  assert.match(videoCard, /addEventListener\("popstate"/);
+  // transcript 把 video 条目渲染成 AgentVideoCard，动作走 videoActions。
+  assert.match(transcript, /case "video":/);
+  assert.match(transcript, /<AgentVideoCard item=\{item\} \{\.\.\.videoActions\} \/>/);
 });
 
 test("reconnecting shows an unobtrusive retry affordance", () => {
@@ -153,18 +226,19 @@ test("D-24 half sentence is carried into the composer, never auto-sent", () => {
 test("D-17 有存档时默认开新对话，不拦人做选择题", () => {
   /*
    * hook 在有存档时故意不自动建号（use-agent-chat.ts: `if (existing && !forceNewRef.current) return`），
-   * 所以外壳必须替使用者把决定做掉——开新的。不做就是一个永远「未连接」的死面板。
-   *
-   * 旧版是摆一张「继续上次 / 结束它开新的」的卡并禁用输入区。那张卡在教用户
-   * 管理会话：每次刷新拦一次，还要读懂「开新的会删掉上面这段对话」才敢按。
+   * 所以外壳必须替使用者把决定做掉。进页默认新聊天（暴君裁定 2026-09-01）：
+   * 不静默续旧——旧对话留在网关历史下拉，随时切回。同一次访问 toggle 往返
+   * 仍静默续上（sessionTouchedInThisVisit 时 resumable 根本不会被设置）。
    */
   assert.match(surface, /resumable,/);
   assert.match(surface, /discardAndStartNew,/);
-  // mount 后发现存档 → 存快照 → 静默续上，不问（2026-08-21 会话持久化后
-  // 由删旧开新改为 resume；discardAndStartNew 保留在 hook 里但已无 UI 调用方）。
-  assert.match(surface, /didAutoDiscardRef/);
-  assert.match(surface, /setHistorySnapshot\(\{ itemCount: resumable\.itemCount, savedAt: resumable\.savedAt \}\)/);
-  assert.match(surface, /void resume\(\)/);
+  // mount 后发现存档 → 直接开新会话；深链（initialSessionId）让路给
+  // switchSession，避免建号赛跑。discardAndStartNew 保留在 hook 里但已无 UI 调用方。
+  assert.match(surface, /didAutoFreshStartRef/);
+  assert.doesNotMatch(surface, /setHistorySnapshot\(\{ itemCount: resumable\.itemCount, savedAt: resumable\.savedAt \}\)/);
+  assert.doesNotMatch(surface, /void resume\(\)/);
+  assert.match(surface, /void startNewSession\(\)/);
+  assert.match(surface, /if \(initialSessionId\) return;/);
   // 存档信息收进一颗默认折起来的按钮，想看的人自己点。
   assert.match(surface, /对话历史/);
   assert.match(surface, /aria-expanded=\{showHistory\}/);
@@ -468,8 +542,16 @@ test("a 401 says which kind of 401 it is", () => {
   const client = readCode(read("src/lib/agent-chat-client.ts"));
   assert.match(client, /if \(code === "agent_not_signed_in"\) return "not_authenticated";/);
   assert.match(client, /mapErrorCode\(data, res\.status\)/);
+  // 裸 401/403（token 过期但网关没回专门 body code）会被 mapHttpStatus 映成
+  // "unauthorized"，不是 "not_authenticated"——hook 必须用同时认两者的
+  // isTerminalAuthError 判断，只认 not_authenticated 会漏掉这种情况，
+  // 造成过期登录态无限重连（而不是终止并提示重新登录）。
+  assert.match(
+    client,
+    /export function isTerminalAuthError\(err: unknown\): boolean \{\s*return err instanceof AgentChatError && \(err\.code === "not_authenticated" \|\| err\.code === "unauthorized"\);/,
+  );
   const hook = readCode(read("src/hooks/use-agent-chat.ts"));
-  assert.match(hook, /err\.code === "not_authenticated"[\s\S]{0,80}closedRef\.current = true;/);
+  assert.match(hook, /isTerminalAuthError\(err\)[\s\S]{0,80}closedRef\.current = true;/);
 });
 
 /**
@@ -545,4 +627,146 @@ test("PromptInput accepts reference images by drag & paste, and hides upload whe
   assert.match(code, /displayMode === "generate" && referenceImagesSupported &&/);
   // 能力开关与容器拖拽/粘贴 handler 串起来：不支持时不挂。
   assert.match(code, /if \(!referenceImagesSupported \|\| displayMode !== "generate"\) return;/);
+});
+
+// ─────────────────────────── 罪状 1/4/5 行为断言（纯函数直测）
+
+/** 建一帧被 TypeScript 检过型别的 SSE 事件。 */
+function evt(event: AgentSseEvent): AgentSseEvent {
+  return event;
+}
+
+test("attachment block is stripped from user text and parsed into refs", () => {
+  const text = [
+    "帮我把这张图改成夜景",
+    "[ATTACHMENTS_BLOCK]",
+    "[附件]",
+    "1. uploads/s1/IMG%20one.png | image/png | 204800",
+    "2. uploads/s1/notes.txt | text/plain | 1024",
+    "[/ATTACHMENTS_BLOCK]",
+  ].join("\n");
+  const { cleanText, refs } = parseUserAttachmentBlock(text);
+  // 正文摘干净：区块连同前后多余空白不留在气泡里。
+  assert.equal(cleanText, "帮我把这张图改成夜景");
+  assert.equal(refs.length, 2);
+  // mime 推 kind、name 解 URL 编码噪音、size 落数字。
+  assert.equal(refs[0].kind, "image");
+  assert.equal(refs[0].name, "IMG one.png");
+  assert.equal(refs[0].size, 204800);
+  assert.equal(refs[1].kind, "document");
+  // 没有区块的正文原样放行，一字不动。
+  assert.deepEqual(parseUserAttachmentBlock("纯文本消息"), { cleanText: "纯文本消息", refs: [] });
+});
+
+test("subagent delta keeps only the last non-empty line", () => {
+  // 多行增量并入后只留末行：条目永不囤全文（防溢出硬要求）。
+  assert.equal(lastNonEmptyLine("a\n\nb\n"), "b");
+  let state = appendUserTurn(EMPTY_AGENT_CHAT_STATE, "你好");
+  state = agentChatReducer(state, evt({ name: "subagent.started", event_id: 1, data: { id: "sa1", label: "搜索素材" } }));
+  state = agentChatReducer(state, evt({ name: "subagent.delta", event_id: 2, data: { id: "sa1", text: "第一行\n第二行" } }));
+  const sub = state.items.find((it): it is AgentSubagentItem => it.kind === "subagent");
+  assert.ok(sub);
+  assert.equal(sub.lastLine, "第二行");
+});
+
+test("subagent started→done settles the card, turn.done clears the bar", () => {
+  let state = agentChatReducer(EMPTY_AGENT_CHAT_STATE, evt({ name: "subagent.started", event_id: 1, data: { id: "sa1", label: "搜索素材" } }));
+  let sub = state.items.find((it): it is AgentSubagentItem => it.kind === "subagent");
+  assert.ok(sub);
+  assert.equal(sub.status, "running");
+  assert.equal(sub.label, "搜索素材");
+  state = agentChatReducer(state, evt({ name: "subagent.done", event_id: 2, data: { id: "sa1", status: "ok", summary: "找到 3 张候选图" } }));
+  sub = state.items.find((it): it is AgentSubagentItem => it.kind === "subagent");
+  assert.ok(sub);
+  assert.equal(sub.status, "ok");
+  assert.equal(sub.summary, "找到 3 张候选图");
+  // 回合收尾：状态栏整批清空。
+  state = agentChatReducer(state, evt({ name: "turn.done", event_id: 3, data: {} }));
+  assert.ok(!state.items.some((it) => it.kind === "subagent"));
+  // 名额裁剪：3 张之外的新 running 挤掉最旧的已完成项。
+  const mk = (i: number, status: AgentSubagentItem["status"]): AgentSubagentItem => ({
+    kind: "subagent",
+    id: `subagent-${i}`,
+    seq: i,
+    subagentId: `sa${i}`,
+    label: `任务${i}`,
+    lastLine: "",
+    status,
+  });
+  const picked = pickVisibleSubagents([mk(1, "ok"), mk(2, "ok"), mk(3, "ok"), mk(4, "running")]);
+  assert.deepEqual(picked.map((it) => it.subagentId), ["sa2", "sa3", "sa4"]);
+});
+
+test("subagent bar：卡可展开详情、面板可管理全部（R10 选单合同）", () => {
+  const src = read("src/components/agent-chat/AgentSubagentBar.tsx");
+  // 卡片是 button + aria-expanded（可点开），详情区用 grid-rows 过渡。
+  assert.match(src, /aria-expanded=\{expanded\}/, "卡片必须暴露展开语义");
+  assert.match(src, /grid-rows-\[0fr\][^]*?data-\[open=true\]:grid-rows-\[1fr\]/, "详情展开走 grid-rows 过渡");
+  // 空输出诚实文案，不假造内容。
+  assert.match(src, /尚无输出/);
+  // 「查看全部」入口恒在（items>0 即渲染），面板 lg-sheet 材质 + 关闭钮 + Esc。
+  assert.match(src, /查看全部 \{items\.length\} 个子任务/);
+  assert.match(src, /lg-sheet agent-rise rounded-ios-2xl/);
+  assert.match(src, /aria-label="关闭子任务面板"/);
+  assert.match(src, /e\.key === "Escape"/, "面板必须留键盘出路");
+  // 面板列表不裁名额（items 全量传入），每项可展开（面板内也有 aria-expanded）。
+  assert.match(src, /<SubagentMenu items=\{items\}/);
+  assert.match(src, /aria-expanded=\{open\}/);
+});
+
+// ───────────────────── 资产入库：recipe 分支（E1 白名单） ────────────────
+
+import { buildChatSaveItem } from "../../lib/agent-chat-asset-builders";
+import type { AgentImageItem } from "../../lib/agent-chat-types";
+
+function imageItem(overrides: Partial<AgentImageItem>): AgentImageItem {
+  return {
+    kind: "image",
+    id: "img-1",
+    seq: 1,
+    url: "https://cdn.example.com/out/1.png",
+    costCoins: 1,
+    recipe: undefined,
+    ...overrides,
+  } as AgentImageItem;
+}
+
+test("onSaveToLibrary with a real recipe saves a kind:recipe asset", () => {
+  const item = imageItem({
+    recipe: {
+      prompt: "赛博朋克都市夜景，霓虹灯反射在雨后街道上",
+      model: "sdxl-1.0",
+      size: "1024x1024",
+      lora: "lora-cyberpunk-v3",
+    },
+  });
+  const saved = buildChatSaveItem(item, "session-9", "2026-08-30T00:00:00.000Z");
+  assert.equal(saved.kind, "recipe");
+  // recipe 的 prompt 落到 content，模型/尺寸/lora 各自进白名单栏位。
+  assert.equal(saved.title, "第 1 张");
+  assert.equal(saved.content, "赛博朋克都市夜景，霓虹灯反射在雨后街道上");
+  assert.equal(saved.modelId, "sdxl-1.0");
+  assert.equal(saved.size, "1024x1024");
+  assert.deepEqual(saved.loraModelVersionIds, ["lora-cyberpunk-v3"]);
+  assert.equal(saved.imageUrl, item.url);
+  assert.deepEqual(saved.source, { type: "chat", id: "img-1", sessionId: "session-9" });
+  assert.equal(saved.createdAt, "2026-08-30T00:00:00.000Z");
+});
+
+test("onSaveToLibrary without recipe keeps the original reference behavior", () => {
+  const saved = buildChatSaveItem(imageItem({}), "session-9", "2026-08-30T00:00:00.000Z");
+  assert.equal(saved.kind, "reference");
+  assert.equal(saved.imageUrl, "https://cdn.example.com/out/1.png");
+  // 参考资产不携带配方栏位。
+  assert.equal(saved.content, undefined);
+  assert.equal(saved.modelId, undefined);
+  assert.equal(saved.size, undefined);
+  assert.equal(saved.loraModelVersionIds, undefined);
+});
+
+test("recipe with an empty prompt falls back to reference (no phantom recipe)", () => {
+  const saved = buildChatSaveItem(imageItem({ recipe: { prompt: "", model: "sdxl-1.0" } }), null, "2026-08-30T00:00:00.000Z");
+  assert.equal(saved.kind, "reference");
+  // 无会话 id 时 source 不带 sessionId。
+  assert.deepEqual(saved.source, { type: "chat", id: "img-1" });
 });

@@ -355,6 +355,10 @@
   .coin-badge:hover {
     transform: scale(1.02) translateY(-1px);
   }
+} /* @layer utilities 到此闭合——tour 弹层等后续规则必须留在顶层：
+     放进 layer 会把优先级压到 driver.css（无 layer）之下，弹层样式全部失效
+     （2026-08-27 生产事故根因：此闭合大括号缺失，utilities 层吞掉后面
+     500+ 行，lora/atc 弹层在 prod 裸奔）。 */
 
 /* LoRA 首次引导（普通模式 ModelPicker 触发）：大 popover，容纳例图与要点。
    driver.css 在普通模式是动态 import 的，样式必须全站可用，不能放 workstation.css。 */
@@ -421,6 +425,147 @@
   border-bottom-color: rgba(255, 255, 255, 0.96);
 }
 
+/* 模板卡圆环首次教学（AgentTemplateCarousel 触发）：深色玻璃弹层，贴卡面暗底体系。
+   与 lora-tour-popover 同理由动态 import 的 driver.css 配合，样式须全站可用。 */
+.driver-popover.atc-tour-popover {
+  max-width: 340px;
+  border-radius: 1.35rem;
+  /* 2026-08-27 用户裁定：与 DESIGN.md 对齐改浅色系玻璃（lg-sheet 语言：
+     白 92% 底、四边玻璃描边、深色前景）。原本深底白字是临时贴卡面产物。 */
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow:
+    0 24px 70px rgba(0, 0, 0, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  color: hsl(222 18% 22%); /* --foreground */
+  font-family: Geist, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+  backdrop-filter: blur(28px) saturate(1.8) brightness(1.05);
+  padding: 1rem 1.1rem;
+  /* DESIGN.md §7：进入用 lg-appear 同款 spring；driver 自身定位用 transform，
+     只对内层容器做 appear，避免干扰弹层锚点跟随。 */
+  animation: atc-tour-pop 380ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@keyframes atc-tour-pop {
+  from {
+    opacity: 0;
+    translate: 0 6px;
+    scale: 0.94;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+    scale: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .driver-popover.atc-tour-popover {
+    animation: none;
+  }
+}
+
+/* 移动端（2026-08-27 生产实测返工）：popover 钳在视口内、不盖模板卡核心区。 */
+/* 2026-08-27 毒舌终审：footer 行垂直不齐——进度文字/按钮/跳过链接各行其是。
+   统一：footer 改 flex 单行、交叉轴居中、统一行高。 */
+.driver-popover.atc-tour-popover .driver-popover-footer {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.6rem;
+}
+.driver-popover.atc-tour-popover .driver-popover-progress-text {
+  line-height: 1.2;
+  align-self: center;
+}
+.driver-popover.atc-tour-popover .atc-tour-skip {
+  align-self: center;
+  line-height: 1.2;
+}
+
+@media (max-width: 767.98px) {
+  .driver-popover.atc-tour-popover {
+    max-width: min(340px, calc(100vw - 1.5rem));
+    padding: 0.85rem 1rem;
+  }
+  .driver-popover.atc-tour-popover .driver-popover-description p {
+    font-size: 12.5px !important;
+    line-height: 1.5 !important;
+  }
+}
+
+/* DESIGN.md §5：頂緣 specular 亮線（玻璃折射三要素之一）。 */
+.driver-popover.atc-tour-popover::before {
+  content: "";
+  position: absolute;
+  inset-inline: 10px;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(to right, transparent, rgba(255, 255, 255, 0.92), transparent);
+  opacity: 0.8;
+  pointer-events: none;
+}
+
+.driver-popover.atc-tour-popover .driver-popover-title {
+  color: hsl(222 18% 22%);
+  font-size: 0.9375rem; /* 15px = DESIGN.md 標題層級下限 */
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.driver-popover.atc-tour-popover .driver-popover-description {
+  color: hsl(220 10% 40%);
+  font-size: 0.8125rem; /* 13px：正文不小於 13px（DESIGN.md §4 硬規則） */
+  line-height: 1.6;
+}
+
+.driver-popover.atc-tour-popover .driver-popover-description p {
+  margin: 0 0 6px 0;
+}
+
+.driver-popover.atc-tour-popover .driver-popover-progress-text {
+  color: hsl(220 10% 49%);
+  font-size: 0.68rem;
+  font-weight: 720;
+}
+
+.driver-popover.atc-tour-popover .driver-popover-close-btn {
+  color: hsl(220 10% 40%);
+}
+
+.driver-popover.atc-tour-popover .driver-popover-footer button.driver-popover-next-btn {
+  background: #2d3142; /* --primary */
+  color: #fff;
+}
+.driver-popover.atc-tour-popover .driver-popover-footer button {
+  border: 0;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.05);
+  padding: 0.38rem 0.9rem;
+  color: hsl(222 18% 22%);
+  font-size: 0.8125rem; /* 与正文同级 ≥13px */
+  font-weight: 600;
+  text-shadow: none;
+  transition: background 220ms var(--lg-spring, ease), transform 200ms var(--lg-spring, ease);
+}
+
+.driver-popover.atc-tour-popover .driver-popover-footer button:hover {
+  background: rgba(0, 0, 0, 0.09);
+  transform: translateY(-1px); /* DESIGN.md hover-lift，无 layout shift */
+}
+
+.driver-popover.atc-tour-popover .driver-popover-footer button:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.driver-popover.atc-tour-popover .driver-popover-arrow-side-top {
+  border-top-color: rgba(18, 18, 24, 0.92);
+}
+
+.driver-popover.atc-tour-popover .driver-popover-arrow-side-bottom {
+  border-bottom-color: rgba(18, 18, 24, 0.92);
+}
+
 
 .driver-active [role="menu"] * {
   pointer-events: auto !important;
@@ -467,74 +612,6 @@
     background: rgba(0, 122, 255, 0.17);
   }
 
-  /* ── Professional mode toggle switch ── */
-  .pro-mode-toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.5rem;
-    flex-shrink: 0;
-    white-space: nowrap;
-    height: 2.25rem;
-    padding: 0 0.5rem 0 0.375rem;
-    border-radius: 9999px;
-    font-size: 0.875rem;
-    line-height: 1.25rem;
-    font-weight: 500;
-    letter-spacing: -0.01em;
-    color: rgba(0, 0, 0, 0.55);
-    background: none;
-    border: none;
-    cursor: pointer;
-  }
-
-  .pro-mode-toggle:hover:not(.active) {
-    color: rgba(0, 0, 0, 0.75);
-  }
-
-  /* Track: inactive → transition defined，下次啟動會動畫 */
-  .pro-mode-toggle-track {
-    position: relative;
-    display: inline-flex;
-    align-items: center;
-    width: 2rem;
-    height: 1.125rem;
-    border-radius: 9999px;
-    background: rgba(0, 0, 0, 0.15);
-    flex-shrink: 0;
-    transition: background-color 0.3s ease;
-  }
-
-  .pro-mode-toggle:hover:not(.active) .pro-mode-toggle-track {
-    background: rgba(0, 0, 0, 0.22);
-  }
-
-  /* Thumb: inactive → transition defined，下次啟動會動畫 */
-  .pro-mode-toggle-thumb {
-    position: absolute;
-    left: 2px;
-    width: 14px;
-    height: 14px;
-    border-radius: 9999px;
-    background: white;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-    transition: transform 0.3s ease;
-  }
-
-  /* Active state: transition: none →離開時立即回位，無動畫 */
-  .pro-mode-toggle.active .pro-mode-toggle-track {
-    background: #007aff;
-    transition: none;
-  }
-
-  .pro-mode-toggle.active .pro-mode-toggle-thumb {
-    transform: translateX(14px);
-    transition: none;
-  }
-
-  .pro-mode-toggle.active .pro-mode-toggle-label {
-    color: #007aff;
-  }
-
   /* ── Skeleton shimmer ── */
   @keyframes lg-shimmer {
     0% { background-position: -200% 0; }
@@ -579,8 +656,8 @@
   .liquid-stage { @apply lg-ambient; }
   .auth-surface { @apply lg-sheet; }
   .nav-surface  { @apply lg-bar; }
-}
 
+/* ── Force body background outside any layer — highest specificity ── */
 /* ── Force body background outside any layer — highest specificity ── */
 body {
   background:
@@ -723,17 +800,6 @@ body {
   52% { opacity: 0.58; transform: translateX(62%); }
 }
 
-.pro-app-shell {
-  height: 100svh;
-  overflow: hidden;
-  padding: 0.75rem 0.75rem 0.6rem;
-}
-
-/* 专业模式：全局导航让位给工作站顶栏，页面上只保留一条 header。 */
-body.pro-mode-active #global-navbar {
-  display: none;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .generation-progress-fill,
   .generation-progress-shine {
@@ -746,14 +812,7 @@ body.pro-mode-active #global-navbar {
   .lg-spring,
   .lg-transition,
   .coin-badge,
-  .style-chip,
-  .pro-mode-toggle-track,
-  .pro-mode-toggle-thumb {
-    transition-duration: 1ms !important;
-  }
-
-  .pro-mode-toggle-track,
-  .pro-mode-toggle-thumb {
+  .style-chip {
     transition-duration: 1ms !important;
   }
 
@@ -804,6 +863,16 @@ body.pro-mode-active #global-navbar {
 
 .tour-fake-cursor.is-pressing {
   scale: 0.85;
+}
+
+/* 按住拖拽演示态：iOS 蓝高亮光圈，松手（up 步骤）即恢复。
+ * 2026-08-27 atc 拖拽教学返工：去掉 scale: 0.88——独立 scale 属性会与
+ * translate 组合成「先平移再以 origin 缩放整条平移量」，指针在 holding 期间
+ * 向 spawn 点回弹 (1-0.88)×|translate| ≈ 83px（拖到站2 却显示在站3 右侧）。
+ * 按压缩小视觉改由 filter 光圈承担，不再动几何。 */
+.tour-fake-cursor.is-holding {
+  filter: drop-shadow(0 1.5px 3.5px rgba(0, 122, 255, 0.55))
+    drop-shadow(0 0 10px rgba(0, 122, 255, 0.35));
 }
 
 /*

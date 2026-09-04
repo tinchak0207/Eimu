@@ -67,3 +67,33 @@ test("503 wrapping a legal_error body is still classified as content rejection",
   assert.equal(result.retryable, false);
 });
 
+test("502 wrapping Chinese quota-exhausted copy (hailuo 1008) fails fast as quota exhaustion", () => {
+  // 2026-08-29 事故原文：metaso 渠道 H3 欠費，上游回 502 + 中文文案。
+  const result = classifySupplierFailure(
+    new SupplierRequestError("hailuo api error: metaso create failed: H3 积分余额不足 (1008)", 502),
+    NOW,
+  );
+  assert.equal(result.failureClass, "quota_exhausted");
+  assert.equal(result.retryable, false);
+  assert.equal(result.switchSupplier, true);
+  assert.equal(result.quarantineSupplier, true);
+  assert.equal(result.cooldownUntil, null);
+});
+
+test("402 English insufficient quota fails fast as quota exhaustion", () => {
+  const result = classifySupplierFailure(new SupplierRequestError("insufficient quota", 402), NOW);
+  assert.equal(result.failureClass, "quota_exhausted");
+  assert.equal(result.retryable, false);
+  assert.equal(result.switchSupplier, true);
+  assert.equal(result.quarantineSupplier, true);
+  assert.equal(result.cooldownUntil, null);
+});
+
+test("bare 502 without quota copy is still a retryable overload (regression)", () => {
+  const result = classifySupplierFailure(new SupplierRequestError("bad gateway", 502), NOW);
+  assert.equal(result.failureClass, "overloaded");
+  assert.equal(result.retryable, true);
+  assert.equal(result.switchSupplier, true);
+  assert.equal(result.quarantineSupplier, false);
+});
+

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { readBearerToken, type BizApiKey } from "@/lib/biz-api-keys";
 import { authenticateBizApiKey } from "@/lib/biz-api-key-store";
 import { getGenerationJobForTenant } from "@/lib/generation-core/job-repository";
-import { generationTaskResponse } from "@/lib/generation-core/task-response";
+import { generationTaskResponse, resolveTaskCostCoins, taskStatus } from "@/lib/generation-core/task-response";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
 import { addRateLimitHeaders } from "@/lib/biz-rate-limit-response-headers";
 
@@ -25,8 +25,9 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
   const { id } = await context.params;
   const job = await getGenerationJobForTenant(id, `biz:${auth.key.id}`);
   if (!job) return error(404, "Generation task was not found.", "task_not_found", traceId, auth.key);
+  const costCoins = taskStatus(job) === "succeeded" ? await resolveTaskCostCoins(job.id) : null;
   const response = addRateLimitHeaders(
-    NextResponse.json(generationTaskResponse(job), { headers: { "Cache-Control": "no-store" } }),
+    NextResponse.json(generationTaskResponse(job, { costCoins }), { headers: { "Cache-Control": "no-store" } }),
     auth.key,
     { consumed: false },
   );

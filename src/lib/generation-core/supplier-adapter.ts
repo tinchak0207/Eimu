@@ -1,7 +1,11 @@
 import { aspectRatioFromImageSize } from "@/lib/generation-model-catalog";
 import { resolveAdobe2ApiImageModelId, resolveAdobe2ApiVideoModelId } from "@/lib/generation-core/adobe2api-upstream";
 import { generateWithFilmera } from "@/lib/generation-core/filmera-upstream";
+import { generateWithMetaso, isMetasoModel } from "@/lib/generation-core/metaso-upstream";
+import { generateWithNewApiVideo, isNewApiVideoKernelEnabled } from "@/lib/generation-core/newapi-video-upstream";
+import { generateWithOpenaiVideo } from "@/lib/generation-core/openai-video-upstream";
 import { SupplierRequestError } from "./failure-classifier";
+import { generateWithNewApi, isNewApiSupplier } from "./newapi-adapter";
 import type { SupplierGenerationInput, SupplierGenerationOutput, SupplierRecord } from "./types";
 
 type ProviderPayload = {
@@ -80,16 +84,48 @@ function adobeModel(input: SupplierGenerationInput): string {
   return result;
 }
 
+/**
+ * sub2api（store.tinchak0207.xyz/sub2api）的 images endpoint 只認它自己
+ * 字典裡的上游模型名。實測（generation_attempt 2026-08-23~27 多筆 400）：
+ * 平台 id「gemini-3-image」直傳會被拒 `images endpoint requires an image
+ * model`；sub2api 對 Nano Banana Pro 的命名是「gemini-3-pro-image」。
+ * 其餘平台 id（gemini-2.5-flash-image / gemini-3.1-flash-image / gpt-image*
+ * / flux* / seedream-2.0 等）與 sub2api 字典一致，直傳即可。
+ */
+const SUB2API_MODEL_ALIASES: Record<string, string> = {
+  "gemini-3-image": "gemini-3-pro-image",
+};
+
+function sub2apiModel(supplier: SupplierRecord, input: SupplierGenerationInput): string {
+  if (supplier.supplierModelId) return supplier.supplierModelId;
+  return SUB2API_MODEL_ALIASES[input.modelId] ?? input.modelId;
+}
+
 async function requestSupplier(supplier: SupplierRecord, input: SupplierGenerationInput): Promise<SupplierGenerationOutput> {
-  const upstreamModel = supplier.supplierModelId ?? (supplier.adapterType === "adobe2api" ? adobeModel(input) : input.modelId);
+  // new-api 换血分流：base_url 指向 new-api 的供应商（DB 路由表已切换的已迁移
+  // 渠道）直接走 new-api 适配层，跳过旧 openai_images 请求构造与模型映射。
+  if (isNewApiSupplier(supplier)) {
+    return generateWithNewApi(supplier, input);
+  }
+  const upstreamModel = supplier.supplierModelId
+    ?? (supplier.adapterType === "adobe2api" ? adobeModel(input)
+      : supplier.adapterType === "openai_images" && supplier.id === "env:sub2api" ? sub2apiModel(supplier, input)
+      : input.modelId);
   if (supplier.adapterType === "filmera") {
     return generateWithFilmera(supplier, input);
+  }
+  if (supplier.adapterType === "metaso") {
+    return generateWithMetaso(supplier, input);
+  }
+  if (supplier.adapterType === "openai_video") {
+    return generateWithOpenaiVideo(supplier, input);
   }
   const references = input.workflow.references ?? [];
   const headers: Record<string, string> = {
     Authorization: `Bearer ${readCredential(supplier)}`,
   };
-  let path = input.kind === "video_generate" ? "/videos/generations" : "/images/generations";
+  // rc.21 原生視頻路由是 /v1/video/generations（無 "s" 目錄層）；/videos/generations 實測 404。
+  let path = input.kind === "video_generate" ? "/video/generations" : "/images/generations";
   let body: BodyInit;
   // registry 渠道的 chat 生圖路由：chatImageModels 裡的上游模型只掛在
   // /chat/completions（gemini 系實測），對照 adobe2api chat 分支的形狀。
@@ -162,7 +198,9 @@ async function requestSupplier(supplier: SupplierRecord, input: SupplierGenerati
       headers,
       body,
       // 影片生成實測遠長於圖片（kling 8s 片 2-6 分鐘）；單一 100s 預設會讓影片永遠超時。
-      signal: AbortSignal.timeout(Number(process.env.GENERATION_SUPPLIER_TIMEOUT_MS ?? (input.kind === "video_generate" ? 600_000 : 100_000))),
+      // 圖片 180s（2026-08-27 實測：hub.linux.do gpt-image-2 59s、gemini-3.1-flash-image
+      // chat 生圖 73s，100s 預設把這兩條路全部掐死在「Supplier request timed out」）。
+      signal: AbortSignal.timeout(Number(process.env.GENERATION_SUPPLIER_TIMEOUT_MS ?? (input.kind === "video_generate" ? 600_000 : 180_000))),
     });
   } catch (error) {
     if (error instanceof Error && error.name === "TimeoutError") throw new SupplierRequestError("Supplier request timed out.", 408);
@@ -221,5 +259,15 @@ async function requestSupplier(supplier: SupplierRecord, input: SupplierGenerati
 }
 
 export async function generateWithSupplier(supplier: SupplierRecord, input: SupplierGenerationInput): Promise<SupplierGenerationOutput> {
+  // P1 影子期開關：NEWAPI_VIDEO_KERNEL=1 時 video 任務改走 new-api 原生任務內核
+  //（提交 POST {NEWAPI_BASE_URL}/video/generations + 輪詢 task 查詢端點，見
+  // newapi-video-upstream.ts）；未設/0 維持現行 supplier 表路由（metaso 直調橋）。
+  // 攔截範圍限 minimax-h3（現行生產唯一 video 路徑，渠道 8 已驗證出真片）——其他
+  // video 供應商（filmera/adobe2api）在 new-api 無對應視頻渠道，誤灌會全量失敗。
+  // 擴大歸一範圍時改這個謂詞（P1 收口點）。內核路徑不依賴 supplier 表（渠道選擇
+  // 由 new-api Distribute 承擔）；worker 側供應商租約/路由歸 orchestrator 收口。
+  if (input.kind === "video_generate" && isMetasoModel(input.modelId) && isNewApiVideoKernelEnabled()) {
+    return generateWithNewApiVideo(input);
+  }
   return requestSupplier(supplier, input);
 }

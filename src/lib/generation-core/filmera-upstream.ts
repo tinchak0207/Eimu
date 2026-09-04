@@ -9,7 +9,7 @@ import {
 import { appendFileSync, mkdirSync } from "node:fs";
 import { SupplierRequestError } from "./failure-classifier";
 import { cleanFilmeraWatermark, isFilmeraMediaUrl } from "./filmera-cleaner";
-import type { SupplierGenerationInput, SupplierGenerationOutput, SupplierRecord } from "./types";
+import type { ProviderTaskPollResult, SupplierGenerationInput, SupplierGenerationOutput, SupplierRecord } from "./types";
 
 // filmera.ai 上游封装（2026-08-24 实测打通）。
 //
@@ -462,6 +462,8 @@ async function pollJob(
   token: string,
   timeoutMs: number,
   signal?: AbortSignal,
+  /** INC-0831：首次見到 job 行即回調（filmera 的 task id 只能從輪詢行取得），讓 worker 盡早 durably 落對帳錨點。 */
+  onTaskId?: (jobId: string) => void,
 ): Promise<{ jobId: string; takeId: string }> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -474,6 +476,7 @@ async function pollJob(
     );
     const job = jobs[0];
     if (job) {
+      if (onTaskId && job.id != null) onTaskId(String(job.id));
       const status = String(job.status ?? "");
       if (status === "done") {
         const takeId = job.result_take_id ? String(job.result_take_id) : null;
@@ -506,6 +509,48 @@ async function resolveTakeMedia(
   const url = take ? String(take.image_url ?? take.video_url ?? "") : "";
   if (!url) throw new SupplierRequestError("Filmera take has no media URL.", 502);
   return url;
+}
+
+/**
+ * INC-0831 對帳輪詢：按 filmera job id 直查 studio_generation_jobs 行拿真相
+ * （provider-reconciliation 用，只讀不改任何任務狀態）。狀態映射與 pollJob 同源：
+ * done→succeeded（經 result_take_id 解析媒體 URL）、failed/error→failed、
+ * 其餘（含查無此行）→running 保守等下輪。網絡類錯誤拋出由調用端按退避重排。
+ */
+export async function pollFilmeraTask(providerTaskId: string): Promise<ProviderTaskPollResult> {
+  const config: FilmeraConfig = {
+    supabaseUrl: process.env.FILMERA_SUPABASE_URL ?? "",
+    anonKey: process.env.FILMERA_ANON_KEY ?? "",
+    ...(process.env.FILMERA_PROJECT_ID ? { projectId: process.env.FILMERA_PROJECT_ID } : {}),
+    ...(process.env.FILMERA_NODE_ID ? { nodeId: process.env.FILMERA_NODE_ID } : {}),
+  };
+  if (!config.supabaseUrl || !config.anonKey) {
+    throw new SupplierRequestError("Filmera reconciliation is missing FILMERA_SUPABASE_URL / FILMERA_ANON_KEY.", 500);
+  }
+  const { token } = await getFilmeraAccessToken(config);
+  const jobs = await supabaseSelect(
+    config,
+    token,
+    "studio_generation_jobs",
+    `select=id,status,result_take_id,error&id=eq.${providerTaskId}`,
+  );
+  const job = jobs[0];
+  if (!job) return { state: "running" };
+  const status = String(job.status ?? "");
+  if (status === "done") {
+    const takeId = job.result_take_id ? String(job.result_take_id) : null;
+    if (!takeId) return { state: "failed", reason: "Filmera job finished without a result take." };
+    try {
+      const url = await resolveTakeMedia(config, token, takeId);
+      return { state: "succeeded", url, base64: null };
+    } catch (error) {
+      return { state: "failed", reason: error instanceof Error ? error.message : String(error) };
+    }
+  }
+  if (status === "failed" || status === "error") {
+    return { state: "failed", reason: String(job.error ?? "Filmera generation failed.") };
+  }
+  return { state: "running" };
 }
 
 export async function generateWithFilmera(
@@ -580,7 +625,9 @@ export async function generateWithFilmera(
     }
 
     // 3) 轮询 job（concurrency_limit=1 保证同一项目同一时刻只有一个 job，取最新即本次）
-    const { jobId, takeId } = await pollJob(config, token, timeoutMs, internalSignal);
+    const { jobId, takeId } = await pollJob(config, token, timeoutMs, internalSignal, (id) => {
+      input.onProviderTaskSubmitted?.(id, "filmera");
+    });
 
     // 4) 拿媒体 URL
     const url = await resolveTakeMedia(config, token, takeId, internalSignal);

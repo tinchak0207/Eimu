@@ -90,7 +90,10 @@ export async function submitGenerationCommand(
     referenceArtifacts: command.referenceArtifacts ?? [],
     requestedCount,
     billingAmount: command.billingAmount ?? 0,
-    deadlineAt: new Date(Date.now() + (command.deadlineMs ?? 15 * 60_000)),
+    // R7-D（2026-08-29）：預設 deadline 只覆蓋排隊等容量的階段（3 分鐘）。
+    // 供應商飽和的死單不再佔用 15 分鐘；真正開工後由 worker 依 started_at
+    // 展期到 15 分鐘總生成預算（extendGenerationDeadlineJob，GREATEST 防縮短）。
+    deadlineAt: new Date(Date.now() + (command.deadlineMs ?? 3 * 60_000)),
   };
   const created = await createGenerationJob(input, sql);
   if (!created.created) {

@@ -219,7 +219,7 @@ test("B 端管线的预算常量与 /api/generate-images 保持一致，冷却�
 
 test("B 端管线与主链路同源取队列，而不是自己另写一套", () => {
   const pipeline = code("src/lib/biz-image-pipeline.ts");
-  // buildModelQueue 是唯一队列入口（含 /admin overrides 与 sensenova 专线）；
+  // buildModelQueue 是唯一队列入口（含 /admin overrides）；
   // 直接调 buildGatewayEndpointsWithPools 会绕过 admin 的启停与优先级覆写。
   assert.match(pipeline, /buildModelQueue/, "必须与 /admin 路由调度面板同源");
   assert.match(pipeline, /getRuntimeChannelOverrides/, "必须尊重 admin 的渠道覆写");

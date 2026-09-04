@@ -102,3 +102,21 @@ export function buildAnchorMessage(anchor: BatchAnchor): string {
 export function buildReanchorMessage(anchor: BatchAnchor): string {
   return `第 ${anchor.seq} 张不是我想要的风格。先只出 1 张换个方向给我看，满意了我再让你出整批。`;
 }
+
+/** 批量意图的措辞：明确说了要多张，才配得上一张锚定卡。 */
+const BATCH_INTENT_PATTERN = /(\d+\s*张|再来|一批|批量|多张|整批|每张|batch)/i;
+
+/**
+ * 锚定卡资格：用户表达过批量意图才出现——会话里已有 ≥2 张图，
+ * 或用户自己的消息带批量措辞。只生一张的人不该被追问「要不要出完整批」。
+ */
+export function shouldOfferBatchAnchor(items: readonly AgentTranscriptItem[]): boolean {
+  let imageCount = 0;
+  for (const item of items) {
+    if (item.kind === "image") {
+      imageCount += 1;
+      if (imageCount >= 2) return true;
+    }
+  }
+  return items.some((item) => item.kind === "user" && BATCH_INTENT_PATTERN.test(item.text));
+}

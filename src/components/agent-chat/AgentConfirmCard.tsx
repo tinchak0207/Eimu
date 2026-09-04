@@ -8,7 +8,7 @@ import type { AgentPendingConfirm } from "@/lib/agent-chat-types";
 export interface AgentConfirmCardProps {
   confirm: AgentPendingConfirm;
   /** 传入 requestId 与批准与否；由 wiring 阶段连到 reducer 的 confirm 分发。 */
-  onConfirm: (requestId: string, approved: boolean) => void;
+  onConfirm: (requestId: string, approved: boolean) => Promise<boolean | void>;
   /**
    * 这一轮已收到的 message.delta 文本（最新一条 assistant 条目的累计文本）。
    * D-25 魔法时刻：先把 Agent 对许愿的「解读」端上来，用户先确认愿望被听懂，
@@ -36,6 +36,27 @@ function formatCoins(n: number): string {
   return String(Math.max(0, Math.floor(n * 1e5) / 1e5));
 }
 
+/**
+ * 点击后的裁决提交：先落 pending，await onConfirm，失败（reject）或明确返回
+ * false 时解锁 pending；成功（返回 true/undefined）时保持锁定，交给父层
+ * 随后经 confirm.resolved 把卡片整个移除——单独抽成纯函数，供 node --test
+ * 直接灌 deferred promise 断言解锁行为，不依赖 DOM 事件模拟。
+ */
+export async function submitConfirmDecision(
+  onConfirm: (requestId: string, approved: boolean) => Promise<boolean | void>,
+  requestId: string,
+  approved: boolean,
+  setPending: (value: "approve" | "reject" | null) => void,
+): Promise<void> {
+  setPending(approved ? "approve" : "reject");
+  try {
+    const ok = await onConfirm(requestId, approved);
+    if (ok === false) setPending(null);
+  } catch {
+    setPending(null);
+  }
+}
+
 function AgentConfirmCardComponent({ confirm, onConfirm, contextText, busy = false }: AgentConfirmCardProps) {
   const { requestId, amountCoins, description } = confirm;
   // 点下去的瞬间锁住两颗按钮：同一笔花费不该被连点两次裁决。
@@ -59,7 +80,7 @@ function AgentConfirmCardComponent({ confirm, onConfirm, contextText, busy = fal
             <p className="text-ios-subhead font-semibold text-foreground">
               我这么理解你的愿望
             </p>
-            <p className="mt-0.5 text-sm leading-[1.55] text-muted-foreground">
+            <p className="mt-0.5 break-words text-sm leading-[1.55] text-muted-foreground">
               {interpret}
             </p>
           </div>
@@ -83,7 +104,7 @@ function AgentConfirmCardComponent({ confirm, onConfirm, contextText, busy = fal
           {/* 费用明细（description）：跟在金额下面当小字，只出现一次——
               之前在解读区重复展示同一段，被用户点名。 */}
           {description && (
-            <p className="mt-1.5 text-sm leading-[1.55] text-muted-foreground">
+            <p className="mt-1.5 break-words text-sm leading-[1.55] text-muted-foreground">
               {description}
             </p>
           )}
@@ -95,7 +116,14 @@ function AgentConfirmCardComponent({ confirm, onConfirm, contextText, busy = fal
           type="button"
           onClick={() => {
             setPending("reject");
-            onConfirm(requestId, false);
+            void (async () => {
+              try {
+                const ok = await onConfirm(requestId, false);
+                if (ok === false) setPending(null);
+              } catch {
+                setPending(null);
+              }
+            })();
           }}
           disabled={locked}
           className={cn(
@@ -113,7 +141,14 @@ function AgentConfirmCardComponent({ confirm, onConfirm, contextText, busy = fal
           type="button"
           onClick={() => {
             setPending("approve");
-            onConfirm(requestId, true);
+            void (async () => {
+              try {
+                const ok = await onConfirm(requestId, true);
+                if (ok === false) setPending(null);
+              } catch {
+                setPending(null);
+              }
+            })();
           }}
           disabled={locked}
           className={cn(

@@ -42,17 +42,10 @@
   position: relative;
   overflow: hidden;
   border-radius: 1.5rem;
-  background: rgba(255, 255, 255, 0.56);
-  border-top: 1px solid rgba(255, 255, 255, 0.82);
-  border-left: 1px solid rgba(255, 255, 255, 0.38);
-  border-right: 1px solid rgba(255, 255, 255, 0.38);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+  background: rgba(0, 0, 0, 0.028);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-  -webkit-backdrop-filter: blur(28px) saturate(160%) brightness(1.06);
-  backdrop-filter: blur(28px) saturate(160%) brightness(1.06);
   transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1),
-              box-shadow 0.25s cubic-bezier(0.4, 0, 0.2, 1),
-              border-color 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+              box-shadow 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .hist-card:hover {
@@ -103,6 +96,28 @@
   .hist-card:focus-within .hist-card-actions {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+/* 悬停信息浮层：底部暗色渐变+轻毛玻璃，元数据默认不可见。 */
+.hist-card-info {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  z-index: 10;
+  padding: 2.5rem 0.875rem 0.75rem;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.62), rgba(0, 0, 0, 0));
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .hist-card:hover .hist-card-info,
+  .hist-card:focus-within .hist-card-info {
+    opacity: 1;
   }
 }
 

@@ -34,6 +34,7 @@ export const TYPE_LABEL: Record<CanvasNodeType, string> = {
   [CanvasNodeType.Audio]: "音频",
   [CanvasNodeType.Prompt]: "提示词",
   [CanvasNodeType.Reference]: "参考图",
+  [CanvasNodeType.Director]: "3D 导演",
 };
 
 export interface ResizeCfg {

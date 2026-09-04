@@ -39,6 +39,13 @@ test("successful task returns stable query and result URLs with durable artifact
   assert.equal(response.data?.[0]?.url, "https://blob.example/output.png");
 });
 
+test("succeeded task exposes cost_coins only when a real billing amount is provided", () => {
+  const response = generationTaskResponse(job("succeeded"), { costCoins: 0.00097 });
+  assert.equal(response.cost_coins, 0.00097);
+  const withoutCost = generationTaskResponse(job("succeeded"));
+  assert.equal("cost_coins" in withoutCost, false);
+});
+
 /**
  * overloaded 曾经只回一句「没有可用容量」，客户分不清是模型没开通、
  * 供应商全下线，还是额度打满 —— 三种情况的处置完全不同

@@ -37,9 +37,14 @@ export const AGENT_EVENT_NAMES = [
   "message.delta",
   "reasoning.delta",
   "tool.invoke",
+  "tool.progress",
   "tool.result",
   "image.done",
+  "image.failed",
+  "video.done",
+  "director.done",
   "turn.done",
+  "turn.status",
   "confirm.request",
   "confirm.resolved",
   "quota.changed",
@@ -51,9 +56,13 @@ export const AGENT_EVENT_NAMES = [
   "canvas.node.connected",
   "canvas.node.generating",
   "canvas.node.deleted",
+  "canvas.node.disconnected",
   "canvas.derive.started",
   "canvas.budget.updated",
   "canvas.ops",
+  "subagent.started",
+  "subagent.delta",
+  "subagent.done",
   "question.request",
   "question.replied",
   "question.rejected",
@@ -92,6 +101,20 @@ export interface AgentToolResult {
   tool: string;
   ok: boolean;
   cost_coins?: number;
+  /** gateway 附带的人类可读错误（G-FE 合同：中文短句优先渲染）。 */
+  error?: { code?: string; message?: string; human_message?: string };
+}
+
+/**
+ * gateway —— 长耗时工具执行中进度（逐镜/逐项）。由工具每完成一个单元旁路上报，
+ * 注入到该 session 的 SSE 流。只回填「同名且仍 running」的工具卡，不改终态。
+ * done/total 为真实计数（total 必 >0），label 是给人看的一句话（如「渲染关键帧」）。
+ */
+export interface AgentToolProgress {
+  tool: string;
+  done: number;
+  total: number;
+  label?: string;
 }
 
 /** gateway:377 —— 出图完成。网关已按 url 在 session 内去重。 */
@@ -99,10 +122,71 @@ export interface AgentImageDone {
   url: string;
   cost_coins?: number;
   task_id?: string;
+  /** 真实生成参数（VPS gateway image.done 附加），可用于存为配方资产。 */
+  recipe?: { prompt?: string; model?: string; size?: string; lora?: string };
+}
+
+/**
+ * gateway —— 出片完成（影片生成 / 成片剪接匯出）。與 image.done 同構，
+ * 網關按 url 在 session 內去重。media_kind："film"=成片（剪接匯出）、
+ * "video"=單段影片生成；缺當 "video"。
+ */
+export interface AgentVideoDone {
+  url: string;
+  cost_coins?: number;
+  task_id?: string;
+  media_kind?: "video" | "film";
+}
+
+/**
+ * gateway director.done —— 導演台工程變更快照（2026-09-02 spec §4 釘死，
+ * 與 src/vendor-bridges/gateway/director.ts emitDirectorDone 對齊）。
+ * 同一會話反復觸發：revision 單調遞增，前端只保留 revision 最大的一張活卡。
+ * schematic 兩欄是服務端預渲染的 <svg> 字串（≤32KB/張）；reset 時 plan/active_shot
+ * 為 null、SVG 為空串。
+ */
+export interface AgentDirectorDone {
+  session_id: string;
+  /** project.json 版本號，單調遞增（reset 後歸 0）。 */
+  revision: number;
+  /** 觸發本次變更的操作名（director_upsert_action 等 / "reset"）。 */
+  action: string;
+  /** 當前活躍方案；未初始化 / reset 時為 null。 */
+  plan: { id: string; name: string; summary: string; shot_count: number } | null;
+  /** 當前活躍鏡頭摘要；無方案或無鏡頭時為 null。 */
+  active_shot: {
+    no: number;
+    name: string;
+    duration_frames: number;
+    camera_move: string;
+    shot_scale: string | null;
+  } | null;
+  /** 服務端預渲染示意圖（俯視圖 + 鏡頭框圖），<svg …> 原文字串。 */
+  schematic: { top_view_svg: string; camera_view_svg: string };
+  /** 分鏡健康檢查：ok=綠徽章；issues 非空=琥珀徽章帶數量。 */
+  health: { ok: boolean; issues: Array<{ code: string; message: string; shot_id?: string }> };
+  counts: { shots: number; elements: number; actions: number };
+}
+
+/**
+ * gateway（poller 经 /internal/emit）—— 出图失败（refunded / failed / 超时）。
+ * 与 image.done 对称：reason 是给人看的一句话，refunded 标记费用是否已退回。
+ * human_message（2026-08-27 G-FE 合同）：后端英文黑话→中文短句，渲染层优先取它。
+ */
+export interface AgentImageFailed {
+  task_id?: string;
+  reason?: string;
+  refunded?: boolean;
+  human_message?: string;
 }
 
 /** gateway:552 —— 这一轮对话结束（网关发的是空对象）。 */
 export type AgentTurnDone = Record<string, never>;
+
+/** 网关系统状态（静默通知/心跳/重投告警）。暂态单行：新状态替换旧状态，真实正文/turn.done 即清，绝不并入正文。 */
+export interface AgentTurnStatus {
+  text: string;
+}
 
 /** gateway:945 —— 要求使用者确认一笔花费。90 秒不回会过期（D-20 要改成 15 分钟）。 */
 export interface AgentConfirmRequest {
@@ -129,10 +213,11 @@ export interface AgentQuotaChanged {
   reason?: string;
 }
 
-/** gateway:859 —— 会话层错误。不必然终结会话。 */
+/** gateway:859 —— 会话层错误。不必然终结会话。human_message（G-FE 合同）：中文短句优先渲染。 */
 export interface AgentSessionError {
   code: string;
   message: string;
+  human_message?: string;
 }
 
 /** gateway:776 —— 会话已关闭。终结事件，之后不会再有任何事件。 */
@@ -195,6 +280,12 @@ export interface AgentCanvasNodeDeleted {
   node_id?: string;
 }
 
+export interface AgentCanvasNodeDisconnected {
+  unit_id: string;
+  from: string;
+  to: string;
+}
+
 export interface AgentCanvasDeriveStarted {
   unit_id: string;
   source_node_id: string;
@@ -206,6 +297,29 @@ export interface AgentCanvasBudgetUpdated {
   unit_id?: string;
   used_coins: number;
   remaining_coins: number;
+}
+
+// ─────────────────────────── 子代理（subagent）事件 payload
+// 2026-08-29 合同（网关已上线实弹验证）：shape 定死，网关多送的栏位忽略、
+// 少送的当 undefined。三帧用 id 关联同一次子代理运行；delta.text 是增量不是全文。
+
+/** 子代理开始运行。label 是给人看的短标签（如「搜索素材」）。 */
+export interface AgentSubagentStarted {
+  id: string;
+  label: string;
+}
+
+/** 子代理输出增量。只保留末行渲染，原文不囤在前端。 */
+export interface AgentSubagentDelta {
+  id: string;
+  text: string;
+}
+
+/** 子代理收尾。summary ≤600 字，只在卡内截断显示。 */
+export interface AgentSubagentDone {
+  id: string;
+  status: "ok" | "error";
+  summary?: string;
 }
 
 // ─────────────────────────── 判别联合
@@ -220,9 +334,14 @@ export type AgentSseEvent = WithEventId &
     | { name: "message.delta"; data: AgentMessageDelta }
     | { name: "reasoning.delta"; data: AgentReasoningDelta }
     | { name: "tool.invoke"; data: AgentToolInvoke }
+    | { name: "tool.progress"; data: AgentToolProgress }
     | { name: "tool.result"; data: AgentToolResult }
     | { name: "image.done"; data: AgentImageDone }
+    | { name: "image.failed"; data: AgentImageFailed }
+    | { name: "video.done"; data: AgentVideoDone }
+    | { name: "director.done"; data: AgentDirectorDone }
     | { name: "turn.done"; data: AgentTurnDone }
+    | { name: "turn.status"; data: AgentTurnStatus }
     | { name: "confirm.request"; data: AgentConfirmRequest }
     | { name: "confirm.resolved"; data: AgentConfirmResolved }
     | { name: "quota.changed"; data: AgentQuotaChanged }
@@ -234,9 +353,13 @@ export type AgentSseEvent = WithEventId &
     | { name: "canvas.node.connected"; data: AgentCanvasNodeConnected }
     | { name: "canvas.node.generating"; data: AgentCanvasNodeGenerating }
     | { name: "canvas.node.deleted"; data: AgentCanvasNodeDeleted }
+    | { name: "canvas.node.disconnected"; data: AgentCanvasNodeDisconnected }
     | { name: "canvas.derive.started"; data: AgentCanvasDeriveStarted }
     | { name: "canvas.budget.updated"; data: AgentCanvasBudgetUpdated }
     | { name: "canvas.ops"; data: CanvasAgentOpsEvent }
+    | { name: "subagent.started"; data: AgentSubagentStarted }
+    | { name: "subagent.delta"; data: AgentSubagentDelta }
+    | { name: "subagent.done"; data: AgentSubagentDone }
     | { name: "question.request"; data: AgentQuestionRequest }
     | { name: "question.replied"; data: AgentQuestionReplied }
     | { name: "question.rejected"; data: AgentQuestionRejected }
@@ -249,6 +372,75 @@ function str(v: unknown): string | undefined {
 }
 function num(v: unknown): number | undefined {
   return typeof v === "number" && Number.isFinite(v) ? v : undefined;
+}
+
+/**
+ * 宽松解析 image.done 附带的 recipe（VPS gateway 附加的真实生成参数）。
+ * 白名单只收四个字符串栏位；非物件 / 非字符串一律忽略，绝不 throw。
+ */
+function recipe(v: unknown): AgentImageDone["recipe"] | undefined {
+  if (!v || typeof v !== "object") return undefined;
+  const rec = v as Record<string, unknown>;
+  const prompt = str(rec.prompt);
+  const model = str(rec.model);
+  const size = str(rec.size);
+  const lora = str(rec.lora);
+  if (prompt === undefined && model === undefined && size === undefined && lora === undefined) return undefined;
+  return {
+    ...(prompt !== undefined ? { prompt } : {}),
+    ...(model !== undefined ? { model } : {}),
+    ...(size !== undefined ? { size } : {}),
+    ...(lora !== undefined ? { lora } : {}),
+  };
+}
+
+/**
+ * 寬鬆解析 director.done 的 plan 欄（白名單四欄位；非物件 / 缺核心欄位一律 null，
+ * 絕不 throw —— reset/未初始化時本來就是 null）。
+ */
+function directorPlan(v: unknown): AgentDirectorDone["plan"] {
+  if (!v || typeof v !== "object") return null;
+  const p = v as Record<string, unknown>;
+  const id = str(p.id);
+  const name = str(p.name);
+  const shotCount = num(p.shot_count);
+  if (!id || !name || shotCount === undefined) return null;
+  return { id, name, summary: str(p.summary) ?? "", shot_count: shotCount };
+}
+
+/** 寬鬆解析 director.done 的 active_shot 欄。缺核心欄位回 null。 */
+function directorActiveShot(v: unknown): AgentDirectorDone["active_shot"] {
+  if (!v || typeof v !== "object") return null;
+  const s = v as Record<string, unknown>;
+  const no = num(s.no);
+  const name = str(s.name);
+  if (no === undefined || !name) return null;
+  return {
+    no,
+    name,
+    duration_frames: num(s.duration_frames) ?? 0,
+    camera_move: str(s.camera_move) ?? "",
+    shot_scale: str(s.shot_scale) ?? null,
+  };
+}
+
+/** 寬鬆解析 director.done 的 health.issues（白名單欄位逐項收斂，壞項跳過）。 */
+function directorIssues(v: unknown): AgentDirectorDone["health"]["issues"] {
+  if (!Array.isArray(v)) return [];
+  const out: AgentDirectorDone["health"]["issues"] = [];
+  for (const it of v) {
+    if (!it || typeof it !== "object") continue;
+    const rec = it as Record<string, unknown>;
+    const code = str(rec.code);
+    const message = str(rec.message);
+    const shotId = str(rec.shot_id);
+    out.push({
+      code: code ?? "",
+      message: message ?? "",
+      ...(shotId ? { shot_id: shotId } : {}),
+    });
+  }
+  return out;
 }
 
 /**
@@ -290,18 +482,87 @@ export function parseAgentSseEvent(name: string, rawData: string): AgentSseEvent
       if (!tool) return null;
       return { name, event_id: eventId, data: { tool, args_summary: str(d.args_summary) } };
     }
+    case "tool.progress": {
+      const tool = str(d.tool);
+      const done = num(d.done);
+      const total = num(d.total);
+      // 进度帧必须自洽：有工具名、done/total 为有限数、total>0、done 非负。
+      // 任一不满足直接丢弃（宁可不显示进度，也不显示假的 X/N）。
+      if (!tool || done === undefined || total === undefined || total <= 0 || done < 0) return null;
+      const label = str(d.label);
+      return { name, event_id: eventId, data: { tool, done, total, ...(label ? { label } : {}) } };
+    }
     case "tool.result": {
       const tool = str(d.tool);
       if (!tool) return null;
-      return { name, event_id: eventId, data: { tool, ok: d.ok === true, cost_coins: num(d.cost_coins) } };
+      const rawErr = d.error as { human_message?: unknown; message?: unknown } | undefined;
+      const error =
+        rawErr && typeof rawErr === "object"
+          ? { code: str((rawErr as { code?: unknown }).code), message: str(rawErr.message), human_message: str(rawErr.human_message) }
+          : undefined;
+      return { name, event_id: eventId, data: { tool, ok: d.ok === true, cost_coins: num(d.cost_coins), error } };
     }
     case "image.done": {
       const url = str(d.url);
       if (!url) return null;
-      return { name, event_id: eventId, data: { url, cost_coins: num(d.cost_coins), task_id: str(d.task_id) } };
+      return { name, event_id: eventId, data: { url, cost_coins: num(d.cost_coins), task_id: str(d.task_id), recipe: recipe(d.recipe) } };
+    }
+    case "video.done": {
+      const url = str(d.url);
+      if (!url) return null;
+      const mk = d.media_kind === "film" ? "film" : d.media_kind === "video" ? "video" : undefined;
+      return { name, event_id: eventId, data: { url, cost_coins: num(d.cost_coins), task_id: str(d.task_id), ...(mk ? { media_kind: mk } : {}) } };
+    }
+    case "image.failed": {
+      // task_id 可能缺（防御性）：帧仍要送达，settler 按序兜底配对。
+      return {
+        name,
+        event_id: eventId,
+        data: { task_id: str(d.task_id), reason: str(d.reason), refunded: d.refunded === true, human_message: str(d.human_message) },
+      };
+    }
+    case "director.done": {
+      // 契約核心欄位 = session_id + revision（revision 是活卡替換的依據，缺失整幀丟棄）。
+      // schematic/health/counts/plan/active_shot 全部走寬鬆解析：網關少送一律當
+      // undefined/null 處理，壞幀不該讓整條對話白屏。
+      const sid = str(d.session_id);
+      const revision = num(d.revision);
+      if (!sid || revision === undefined) return null;
+      const rawSchematic = d.schematic as Record<string, unknown> | undefined;
+      const rawHealth = d.health as Record<string, unknown> | undefined;
+      const rawCounts = d.counts as Record<string, unknown> | undefined;
+      return {
+        name,
+        event_id: eventId,
+        data: {
+          session_id: sid,
+          revision,
+          action: str(d.action) ?? "",
+          plan: directorPlan(d.plan),
+          active_shot: directorActiveShot(d.active_shot),
+          schematic: {
+            top_view_svg: str(rawSchematic?.top_view_svg) ?? "",
+            camera_view_svg: str(rawSchematic?.camera_view_svg) ?? "",
+          },
+          health: {
+            ok: rawHealth?.ok === true,
+            issues: directorIssues(rawHealth?.issues),
+          },
+          counts: {
+            shots: num(rawCounts?.shots) ?? 0,
+            elements: num(rawCounts?.elements) ?? 0,
+            actions: num(rawCounts?.actions) ?? 0,
+          },
+        },
+      };
     }
     case "turn.done":
       return { name, event_id: eventId, data: {} as AgentTurnDone };
+    case "turn.status": {
+      const text = str(d.text);
+      if (text === undefined) return null;
+      return { name, event_id: eventId, data: { text } };
+    }
     case "confirm.request": {
       const requestId = str(d.request_id);
       const amount = num(d.amount_coins);
@@ -330,7 +591,11 @@ export function parseAgentSseEvent(name: string, rawData: string): AgentSseEvent
       return {
         name,
         event_id: eventId,
-        data: { code: str(d.code) ?? "backend_error", message: str(d.message) ?? "会话发生未知错误。" },
+        data: {
+          code: str(d.code) ?? "backend_error",
+          message: str(d.message) ?? "会话发生未知错误。",
+          human_message: str(d.human_message),
+        },
       };
     }
     case "session.closed":
@@ -397,6 +662,8 @@ export function parseAgentSseEvent(name: string, rawData: string): AgentSseEvent
       };
     case "canvas.node.deleted":
       return { name, event_id: eventId, data: { unit_id: str(d.unit_id) ?? "", ...(str(d.node_id) ? { node_id: str(d.node_id) } : {}) } };
+    case "canvas.node.disconnected":
+      return { name, event_id: eventId, data: { unit_id: str(d.unit_id) ?? "", from: str(d.from) ?? "", to: str(d.to) ?? "" } };
     case "canvas.derive.started":
       return {
         name,
@@ -431,6 +698,23 @@ export function parseAgentSseEvent(name: string, rawData: string): AgentSseEvent
           ...(str(d.label) ? { label: str(d.label) } : {}),
         },
       };
+    }
+    case "subagent.started": {
+      const id = str(d.id);
+      if (!id) return null;
+      return { name, event_id: eventId, data: { id, label: str(d.label) ?? "子任务" } };
+    }
+    case "subagent.delta": {
+      const id = str(d.id);
+      if (!id) return null;
+      return { name, event_id: eventId, data: { id, text: str(d.text) ?? "" } };
+    }
+    case "subagent.done": {
+      const id = str(d.id);
+      // status 是核心栏位：既不是 ok 也不是 error 的帧不合合同，整帧丢弃。
+      const status = d.status === "ok" ? ("ok" as const) : d.status === "error" ? ("error" as const) : undefined;
+      if (!id || !status) return null;
+      return { name, event_id: eventId, data: { id, status, summary: str(d.summary) } };
     }
     case "question.request": {
       const requestId = str(d.request_id);
@@ -487,7 +771,10 @@ export type AgentTranscriptItem =
   | AgentAssistantTextItem
   | AgentToolCallItem
   | AgentImageItem
-  | AgentNoticeItem;
+  | AgentVideoItem
+  | AgentDirectorItem
+  | AgentNoticeItem
+  | AgentSubagentItem;
 
 interface TranscriptItemBase {
   /** React key。同一条目的多次更新必须沿用同一个 id。 */
@@ -532,6 +819,10 @@ export interface AgentToolCallItem extends TranscriptItemBase {
   argsSummary?: string;
   status: "running" | "ok" | "failed";
   costCoins?: number;
+  /** 失败时的人类可读错误（gateway tool.result error.human_message 优先）。 */
+  error?: string;
+  /** 执行中进度（tool.progress 回填）。仅 running 期有意义，终态后忽略。 */
+  progress?: { done: number; total: number; label?: string };
 }
 
 /** 出图结果。step 6 会在这张卡上挂「存图库／改图／放大／下载」。 */
@@ -540,6 +831,36 @@ export interface AgentImageItem extends TranscriptItemBase {
   url: string;
   costCoins?: number;
   taskId?: string;
+  /** 真实生成参数（来自 image.done 的 recipe），存为配方资产时用。 */
+  recipe?: { prompt?: string; model?: string; size?: string; lora?: string };
+}
+
+/** 出片结果（影片 / 成片）。卡上挂「存图库／下载」。 */
+export interface AgentVideoItem extends TranscriptItemBase {
+  kind: "video";
+  url: string;
+  costCoins?: number;
+  taskId?: string;
+  /** "film"=成片（剪接匯出）、"video"=單段影片生成。缺當 "video" 展示。 */
+  mediaKind?: "video" | "film";
+}
+
+/**
+ * 導演台分鏡卡（director.done → 前端唯一活卡）。會話內同槽替換不堆積：
+ * 新事件 revision 大者勝，小於等於現有 revision 的遲到幀丟棄。
+ * SVG 是服務端預渲染的 <svg> 字串，渲染層轉 data:image/svg+xml;base64 img。
+ */
+export interface AgentDirectorItem extends TranscriptItemBase {
+  kind: "director";
+  /** 導演工程所屬的會話 id（director.done.session_id）。 */
+  directorSessionId: string;
+  revision: number;
+  action: string;
+  plan: AgentDirectorDone["plan"];
+  activeShot: AgentDirectorDone["active_shot"];
+  schematic: AgentDirectorDone["schematic"];
+  health: AgentDirectorDone["health"];
+  counts: AgentDirectorDone["counts"];
 }
 
 /** 系统告知：错误、会话关闭、确认被裁决等需要留痕的事。 */
@@ -547,6 +868,22 @@ export interface AgentNoticeItem extends TranscriptItemBase {
   kind: "notice";
   tone: "info" | "error";
   text: string;
+}
+
+/**
+ * 一次子代理运行（started → delta… → done 是同一条目）。不进消息流：
+ * 由 AgentSubagentBar 在转录区上方渲染成状态栏（至多 3 张），
+ * turn.done 时 reducer 整批清掉。
+ */
+export interface AgentSubagentItem extends TranscriptItemBase {
+  kind: "subagent";
+  /** 网关侧子代理 id（三帧用它关联；与条目本身的 id 分名，避免撞 React key）。 */
+  subagentId: string;
+  label: string;
+  /** 流式最后一行：delta 并入后只留非空末行（防长输出撑爆条目，硬要求）。 */
+  lastLine: string;
+  status: "running" | "ok" | "error";
+  summary?: string;
 }
 
 /** 待裁决的花费确认。不进 transcript，单独浮在输入区上方（随时只有 0..n 张）。 */
@@ -581,6 +918,8 @@ export interface AgentChatState {
   lastEventId: number;
   /** true = 助手正在产出（收到过 delta / tool 事件，还没 turn.done）。 */
   turnActive: boolean;
+  /** 网关暂态状态行（turn.status 事件）。真实正文/图片结果/turn.done 会清掉它。 */
+  turnStatus?: string;
   /** 会话已终结（session.closed）。之后所有输入都该被禁掉。 */
   closed: boolean;
   closedReason?: string;

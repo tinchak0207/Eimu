@@ -57,8 +57,8 @@ function attempt(overrides: Partial<GenerationAttemptSummary> = {}): GenerationA
     providerHttpStatus: 200,
     latencyMs: 5000,
     failureClass: null,
-    supplierLabel: "sensenova-1",
-    supplierBaseUrl: "https://token.sensenova.cn",
+    supplierLabel: "sub2api-1",
+    supplierBaseUrl: "https://sub2api.example",
     ...overrides,
   };
 }
@@ -82,8 +82,8 @@ test("buildJobRoutingEvent maps a delivered job (fail then succeed) into a user 
         providerHttpStatus: 200,
         latencyMs: 5000,
         failureClass: null,
-        supplierLabel: "sensenova-1",
-        supplierBaseUrl: "https://token.sensenova.cn",
+        supplierLabel: "sub2api-1",
+        supplierBaseUrl: "https://sub2api.example",
       }),
     ],
     "delivered",
@@ -91,14 +91,14 @@ test("buildJobRoutingEvent maps a delivered job (fail then succeed) into a user 
   );
 
   assert.equal(event.outcome, "delivered");
-  assert.equal(event.deliveredBy, "sensenova-1");
+  assert.equal(event.deliveredBy, "sub2api-1");
   assert.equal(event.attempts.length, 2);
   assert.equal(event.attempts[1].ok, true);
   assert.equal(event.attempts[0].ok, false);
   assert.equal(event.attempts[0].status, 429);
   assert.equal(event.attempts[0].reason, "rate_limited");
-  assert.deepEqual(event.queue.map((entry) => entry.label), ["pixai", "sensenova-1"]);
-  assert.deepEqual(event.queue.map((entry) => entry.host), ["store.tinchak0207.xyz", "token.sensenova.cn"]);
+  assert.deepEqual(event.queue.map((entry) => entry.label), ["pixai", "sub2api-1"]);
+  assert.deepEqual(event.queue.map((entry) => entry.host), ["store.tinchak0207.xyz", "sub2api.example"]);
   assert.equal(event.pipeline, "user");
   assert.equal(event.requestId, "job-route-1");
   assert.equal(event.modelId, "gpt-image-2");
@@ -160,12 +160,12 @@ test("buildJobRoutingEvent exposes imageUrls only for real artifact urls and omi
       result: {
         created: Date.now(),
         artifacts: [
-          { id: "a1", outputIndex: 0, url: "https://cdn.example.com/1.png", mimeType: "image/png", sha256: "x", width: 1024, height: 1024, endpointLabel: "sensenova-1" },
-          { id: "a2", outputIndex: 1, url: null, mimeType: "image/png", sha256: "y", width: 1024, height: 1024, endpointLabel: "sensenova-1" },
+          { id: "a1", outputIndex: 0, url: "https://cdn.example.com/1.png", mimeType: "image/png", sha256: "x", width: 1024, height: 1024, endpointLabel: "sub2api-1" },
+          { id: "a2", outputIndex: 1, url: null, mimeType: "image/png", sha256: "y", width: 1024, height: 1024, endpointLabel: "sub2api-1" },
         ],
       },
     }),
-    [attempt({ supplierLabel: "sensenova-1" })],
+    [attempt({ supplierLabel: "sub2api-1" })],
     "delivered",
     false,
   );

@@ -23,15 +23,12 @@ test("history filter chips speak the same style-chip language as the rest of the
 
 test("history empty state matches the 40px card radius used elsewhere on this page", () => {
   const source = read("src/components/history/HistoryEmptyState.tsx");
-  const stats = read("src/components/history/HistoryStats.tsx");
   const selectionBar = read("src/components/history/HistorySelectionBar.tsx");
 
-  // 48px was the one outlier corner on /history — HistoryStats and the
-  // selection bar are both 40px, so the empty state should match them,
-  // not stand out as its own radius.
+  // 48px was the one outlier corner on /history — the selection bar is 40px,
+  // so the empty state should match it, not stand out as its own radius.
   assert.match(source, /rounded-ios-3xl/);
   assert.doesNotMatch(source, /rounded-ios-4xl/);
-  assert.match(stats, /rounded-ios-3xl/);
   assert.match(selectionBar, /rounded-ios-3xl/);
 });
 
@@ -67,11 +64,12 @@ test("history quota/coin text uses a gold tone that actually passes contrast", (
   const card = read("src/components/history/HistoryCard.tsx");
 
   // rgba(120,90,20,0.55) measured ~2.4:1 — a pale tan easy to miss entirely.
-  // 0.85 on the same hue measures ~4.5:1.
+  // 0.85 on the same hue measures ~4.5:1. Card overlay coins sit on a dark
+  // hover scrim, so they use a lighter gold (#FFCE73) that reads on black.
   assert.doesNotMatch(stats, /rgba\(120,90,20,0\.55\)/);
   assert.doesNotMatch(card, /rgba\(120,90,20,0\.55\)/);
   assert.match(stats, /rgba\(120,90,20,0\.85\)/);
-  assert.match(card, /rgba\(120,90,20,0\.85\)/);
+  assert.match(card, /#FFCE73/);
 });
 
 test("a benign missing-image card never uses the same icon as a real failure", () => {
@@ -125,15 +123,13 @@ test("the lightbox backdrop is a real arbitrary color, not a dead scale lookup",
   assert.match(className, /bg-\[rgba\(31,34,48,0\.74\)\]/);
 });
 
-test("the filter bar count matches what the grid actually renders below it", () => {
+test("the header count matches what the grid actually renders below it", () => {
   const client = read("src/components/HistoryClient.tsx");
 
   // history.total is the server's count for the current query and excludes
   // locally-merged cache-only entries; history.entries is what HistoryGrid
-  // actually renders. Passing history.total here produced a page where
-  // "共 3 条" sat directly above a "今天 20" group — two true numbers that
-  // looked like a data-corruption bug because nothing on screen explains they
-  // count different populations. The line must describe what's on screen.
-  assert.match(client, /total=\{history\.entries\.length\}/);
+  // actually renders. The header count must describe what's on screen.
+  assert.match(client, /筛选出 \$\{history\.entries\.length\} 条/);
+  assert.match(client, /共 \$\{history\.entries\.length\} 条/);
   assert.doesNotMatch(client, /total=\{history\.total\}/);
 });

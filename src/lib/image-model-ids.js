@@ -17,7 +17,6 @@ export const IMAGE_5_LITE_MODEL_ID = /** @type {const} */ ("image-5-lite");
 export const SEEDREAM_20_MODEL_ID = /** @type {const} */ ("seedream-2.0");
 export const SEEDREAM_50_PRO_MODEL_ID = /** @type {const} */ ("seedream-5.0-pro");
 export const SEEDREAM_50_LITE_MODEL_ID = /** @type {const} */ ("seedream-5.0-lite");
-export const SENSENOVA_U1_FAST_MODEL_ID = /** @type {const} */ ("sensenova-u1-fast");
 
 // 服務類定價條目（非生成模型）：不加入 SUPPORTED_* 列表，因此不會出現在用戶端
 // 模型選單 /v1/models；只作為 admin 定價面板與對應計費 route 的定價鍵。
@@ -43,6 +42,11 @@ export const KLING_30_MODEL_ID = /** @type {const} */ ("kling-3.0");
 export const KLING_30_OMNI_MODEL_ID = /** @type {const} */ ("kling-3.0-omni");
 export const SEEDANCE_20_FAST_MODEL_ID = /** @type {const} */ ("seedance-2.0-fast");
 export const SEEDANCE_20_MODEL_ID = /** @type {const} */ ("seedance-2.0");
+export const SEEDANCE_20_MINI_MODEL_ID = /** @type {const} */ ("seedance-2.0-mini");
+export const SEEDANCE_25_480P_MODEL_ID = /** @type {const} */ ("seedance-2.5-480p");
+export const SEEDANCE_25_720P_MODEL_ID = /** @type {const} */ ("seedance-2.5-720p");
+// drama 渠道专属：30 秒固定档 seedance 2.5（720p，按条计价），上游模型 sd25-30s
+export const SEEDANCE_25_30S_MODEL_ID = /** @type {const} */ ("seedance-2.5-30s");
 export const VEO_31_MODEL_ID = /** @type {const} */ ("veo-3.1");
 export const RUNWAY_GEN45_VIDEO_MODEL_ID = /** @type {const} */ ("runway-gen-4.5");
 export const ADOBE_FIREFLY_VIDEO_MODEL_ID = /** @type {const} */ ("adobe-firefly-video");
@@ -54,17 +58,15 @@ export const LUMA_RAY2_FLASH_MODEL_ID = /** @type {const} */ ("luma-ray-2-flash"
 export const LUMA_RAY2_MODEL_ID = /** @type {const} */ ("luma-ray-2");
 export const LUMA_RAY3_HDR_MODEL_ID = /** @type {const} */ ("luma-ray-3-hdr");
 export const KLING_25_TURBO_MODEL_ID = /** @type {const} */ ("kling-2.5-turbo");
+export const MINIMAX_H3_MODEL_ID = /** @type {const} */ ("minimax-h3");
 
 export const SUPPORTED_IMAGE_MODEL_IDS = [
-  PIXAI_TSUBAKI2_MODEL_ID,
   DEFAULT_IMAGE_MODEL_ID,
   NANO_BANANA_2_MODEL_ID,
   IMAGE_5_PRO_MODEL_ID,
   IMAGE_5_LITE_MODEL_ID,
   SEEDREAM_20_MODEL_ID,
-  SEEDREAM_50_PRO_MODEL_ID,
   SEEDREAM_50_LITE_MODEL_ID,
-  SENSENOVA_U1_FAST_MODEL_ID,
   ADOBE_FIREFLY_MODEL_ID,
   NANO_BANANA_PRO_MODEL_ID,
   GPT_IMAGE_15_MODEL_ID,
@@ -90,6 +92,10 @@ export const SUPPORTED_VIDEO_MODEL_IDS = [
   KLING_30_OMNI_MODEL_ID,
   SEEDANCE_20_FAST_MODEL_ID,
   SEEDANCE_20_MODEL_ID,
+  SEEDANCE_20_MINI_MODEL_ID,
+  SEEDANCE_25_480P_MODEL_ID,
+  SEEDANCE_25_720P_MODEL_ID,
+  SEEDANCE_25_30S_MODEL_ID,
   VEO_31_MODEL_ID,
   RUNWAY_GEN45_VIDEO_MODEL_ID,
   ADOBE_FIREFLY_VIDEO_MODEL_ID,
@@ -101,6 +107,7 @@ export const SUPPORTED_VIDEO_MODEL_IDS = [
   LUMA_RAY2_MODEL_ID,
   LUMA_RAY3_HDR_MODEL_ID,
   KLING_25_TURBO_MODEL_ID,
+  MINIMAX_H3_MODEL_ID,
 ];
 
 export const SUPPORTED_GENERATION_MODEL_IDS = [

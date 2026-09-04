@@ -5,6 +5,8 @@ import type { AgentChatState } from "@/lib/agent-chat-types";
 import { AgentMessageBubble } from "./AgentMessageBubble";
 import { AgentToolCard } from "./AgentToolCard";
 import { AgentImageCard, type AgentImageCardProps } from "./AgentImageCard";
+import { AgentVideoCard, type AgentVideoCardProps } from "./AgentVideoCard";
+import { AgentDirectorCard } from "./AgentDirectorCard";
 import { AgentNoticeRow } from "./AgentNoticeRow";
 
 export interface AgentTranscriptProps {
@@ -14,6 +16,12 @@ export interface AgentTranscriptProps {
     AgentImageCardProps,
     "onSaveToLibrary" | "onEdit" | "onUpscale" | "onDownload"
   >;
+  /** 出片卡动作回调的预留通道：接线前缺省传入，按钮会保持 disabled。 */
+  videoActions?: Pick<AgentVideoCardProps, "onSaveToLibrary" | "onDownload">;
+  /** 网关暂态状态行（turn.status 事件）：新状态替换旧行，真实内容/turn.done 即清。 */
+  turnStatus?: string;
+  /** 当前会话 id：透传给用户气泡的附件卡铸读取票。 */
+  sessionId?: string | null;
 }
 
 /** 從某元素往上找最近的滾動容器（overflow-y 可滾且內容超出）。 */
@@ -31,7 +39,7 @@ function findScrollParent(el: HTMLElement): HTMLElement | null {
   return null;
 }
 
-function AgentTranscriptComponent({ items, imageActions }: AgentTranscriptProps) {
+function AgentTranscriptComponent({ items, imageActions, videoActions, sessionId, turnStatus }: AgentTranscriptProps) {
   const listRef = useRef<HTMLOListElement>(null);
   // 滾動容器緩存：找到後不再每次 getComputedStyle 向上找。
   const scrollerRef = useRef<HTMLElement | null>(null);
@@ -61,7 +69,7 @@ function AgentTranscriptComponent({ items, imageActions }: AgentTranscriptProps)
           case "assistant":
             return (
               <li key={item.id}>
-                <AgentMessageBubble item={item} />
+                <AgentMessageBubble item={item} sessionId={sessionId} />
               </li>
             );
           case "tool":
@@ -76,14 +84,37 @@ function AgentTranscriptComponent({ items, imageActions }: AgentTranscriptProps)
                 <AgentImageCard item={item} {...imageActions} />
               </li>
             );
+          case "video":
+            return (
+              <li key={item.id}>
+                <AgentVideoCard item={item} {...videoActions} />
+              </li>
+            );
+          case "director":
+            return (
+              <li key={item.id}>
+                <AgentDirectorCard item={item} />
+              </li>
+            );
           case "notice":
             return (
               <li key={item.id}>
                 <AgentNoticeRow item={item} />
               </li>
             );
+          case "subagent":
+            // 子代理条目不进消息流：AgentChatPanel 顶部的 AgentSubagentBar 负责。
+            return null;
         }
       })}
+      {turnStatus ? (
+        <li>
+          <div className="agent-turn-status text-ios-caption1 text-muted-foreground" role="status" aria-live="polite">
+            <span className="agent-turn-status-dot" aria-hidden />
+            <span>{turnStatus}</span>
+          </div>
+        </li>
+      ) : null}
     </ol>
   );
 }

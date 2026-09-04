@@ -8,6 +8,8 @@ import type { BrandKit } from "@/lib/brand-kit";
 import { hasBrandKit } from "@/lib/brand-kit";
 import type { ScenarioTemplate } from "@/lib/scenario-templates";
 import type { CreatorResource } from "@/lib/creator-resource-library";
+import type { KunpengStyleAsset } from "@/lib/kunpeng-style-assets";
+import type { KunpengPromptTemplate } from "@/lib/kunpeng-prompt-templates";
 import type { StyleTemplate } from "@/lib/style-library";
 import type { ReferenceImage } from "@/lib/image-types";
 import type { RegionalPromptItem, NoticeLevel, LeftPanelTab } from "../workstation-constants";
@@ -29,6 +31,10 @@ export interface LeftPromptTabProps {
   toggleSection: (key: string, open: boolean) => void;
   onApplyResource: (resource: CreatorResource) => void;
   onApplyScenario: (scenario: ScenarioTemplate) => void;
+  /** 鲲鹏风格（161 条）：追加 promptSuffix/visualDNA/cameraLanguage 到画面描述。 */
+  onApplyKunpengStyle: (style: KunpengStyleAsset) => void;
+  /** 鲲鹏提示词模板：注入模板骨架到画面描述。 */
+  onApplyKunpengPromptTemplate: (template: KunpengPromptTemplate) => void;
   /** 配方模板（六槽具名 profile）：确认卡先行，套用后摊开可改。 */
   isLoggedIn: boolean;
   userRecipeTemplates: UserRecipeTemplateItem[];
@@ -78,6 +84,8 @@ export const LeftPromptTab = memo(function LeftPromptTab({
   toggleSection,
   onApplyResource,
   onApplyScenario,
+  onApplyKunpengStyle,
+  onApplyKunpengPromptTemplate,
   isLoggedIn,
   userRecipeTemplates,
   userRecipeTemplatesLoading,
@@ -173,6 +181,8 @@ export const LeftPromptTab = memo(function LeftPromptTab({
         <CreatorResourcePanel
           onApplyResource={onApplyResource}
           onApplyScenario={onApplyScenario}
+          onApplyKunpengStyle={onApplyKunpengStyle}
+          onApplyKunpengPromptTemplate={onApplyKunpengPromptTemplate}
           undoLabel={templateUndoLabel}
           onUndo={onUndo}
         />

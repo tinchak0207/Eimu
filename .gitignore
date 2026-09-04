@@ -92,3 +92,15 @@ pixai-pool/
 /sudo.conf.backup
 /marketing-battle-pack/
 /eval-daming-film/
+
+# 本機憑證備份（.env 同源，永不入庫）
+.credentials.bak.yaml
+
+# ── 一次性診斷/評測/暫存（2026-09-04 commit 瘦身）──
+.zcode/
+.tmp-*/
+eval-*/
+surgery/
+/*.mp4
+/*.mjs
+chapters.tsv

@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { readBearerToken } from "@/lib/biz-api-keys";
 import { authenticateBizApiKey } from "@/lib/biz-api-key-store";
-import { getGenerationJobForTenant } from "@/lib/generation-core/job-repository";
-import { generationTaskResponse } from "@/lib/generation-core/task-response";
+import { getGenerationJobForTenant, listVideoAttemptSummariesForJob } from "@/lib/generation-core/job-repository";
+import { generationTaskResponse, resolveTaskCostCoins, taskStatus } from "@/lib/generation-core/task-response";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
 
 export const runtime = "nodejs";
@@ -22,8 +22,17 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
   const { id } = await context.params;
   const job = await getGenerationJobForTenant(id, `biz:${auth.key.id}`);
   if (!job) return error(404, "Video generation task was not found.", "task_not_found", traceId);
+  // INC-0830-VIDEO：響應帶 attempts 摘要（plain array，禁 Map 序列化），供網關
+  // rerun 防重消費——同一上游 task 不重複提交。
+  // contract-lock 鐵律③：cost_coins 必須是 `=== "succeeded" ? await resolveTaskCostCoins(...) : null`
+  // 字面形狀（與 images/tts 狀態路由同構），不得改寫為 Promise.all。
+  const costCoins = taskStatus(job) === "succeeded" ? await resolveTaskCostCoins(job.id) : null;
+  const attempts = await listVideoAttemptSummariesForJob(job.id);
   return withTraceId(
-    NextResponse.json(generationTaskResponse(job), { headers: { "Cache-Control": "no-store" } }),
+    NextResponse.json(
+      { ...generationTaskResponse(job, { costCoins }), attempts },
+      { headers: { "Cache-Control": "no-store" } },
+    ),
     traceId,
   );
 }

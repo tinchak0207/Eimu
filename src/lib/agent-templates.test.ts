@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   AGENT_TEMPLATES,
   AGENT_TEMPLATE_DOMAIN_LABELS,
+  cropTemplate,
   type AgentTemplateDomain,
 } from "./agent-templates.ts";
 import { recipeTemplateToRecallConfig } from "./recipe-templates.ts";
@@ -125,22 +126,11 @@ test("domain labels cover all domains used by templates", () => {
 });
 
 // ———— 2026-08-25 工具鏈綁定：requiredTools 必須指向真實 registry，不許假裝能力 ————
+// ———— 2026-08-31 產品誠實稽核：判定集真源從「站內 domain registry 自我認證」
+//      換血為「harness 真實工具面」（harness-tool-registry.ts，
+//      源 = VPS /opt/agent-harness/workspace/.opencode/tools/）。————
 
-import { AGENT_TOOL_DEFINITIONS } from "./agent-tool-contract.ts";
-import { ECOMMERCE_TOOL_IDS } from "./ecommerce-product-adapter.ts";
-import { FASHION_TOOL_IDS } from "./fashion-tryon-tools.ts";
-import { NOVEL_IP_VISUAL_TOOL_IDS } from "./novel-ip-visual-tools.ts";
-import { SHORTDRAMA_TOOL_IDS } from "./shortdrama-domain/index.ts";
-import { ART_TOOL_DEFINITIONS } from "./art-workflows/tool-registry.ts";
-
-const REGISTRY_IDS = new Set<string>([
-  ...AGENT_TOOL_DEFINITIONS.map((tool) => tool.id),
-  ...ECOMMERCE_TOOL_IDS,
-  ...FASHION_TOOL_IDS,
-  ...NOVEL_IP_VISUAL_TOOL_IDS,
-  ...SHORTDRAMA_TOOL_IDS,
-  ...ART_TOOL_DEFINITIONS.map((tool) => tool.id),
-]);
+import { HARNESS_TOOL_IDS } from "./harness-tool-registry.ts";
 
 test("toolchain binding: every step declares >=1 requiredTools (工业级可执行工具链)", () => {
   for (const template of AGENT_TEMPLATES) {
@@ -157,14 +147,29 @@ test("toolchain binding: every step declares >=1 requiredTools (工业级可执�
   }
 });
 
-test("toolchain binding: available tool ids must exist in some registry", () => {
+test("toolchain binding: available tool ids must exist in the harness tool surface", () => {
   for (const template of AGENT_TEMPLATES) {
     for (const step of template.pipeline.steps) {
       for (const tool of step.requiredTools ?? []) {
         if (!tool.unsupported) {
           assert.ok(
-            REGISTRY_IDS.has(tool.id),
-            `${template.id} / ${step.name} 引用未註冊工具 ${tool.id} 且未標 unsupported`,
+            HARNESS_TOOL_IDS.has(tool.id),
+            `${template.id} / ${step.name} 引用 harness 未注册工具 ${tool.id} 且未标 unsupported`,
+          );
+        }
+      }
+    }
+  }
+});
+
+test("toolchain binding: unsupported marks must be stale-free (harness 已实装的不许继续装死)", () => {
+  for (const template of AGENT_TEMPLATES) {
+    for (const step of template.pipeline.steps) {
+      for (const tool of step.requiredTools ?? []) {
+        if (tool.unsupported) {
+          assert.ok(
+            !HARNESS_TOOL_IDS.has(tool.id),
+            `${template.id} / ${step.name} 工具 ${tool.id} 标 unsupported 但 harness 真源已实装，标记过期须移除`,
           );
         }
       }
@@ -209,5 +214,177 @@ test("toolchain binding: expanded canvas cards reach industrial density (>=35)",
       cards >= 35,
       `${template.id} 展開後約 ${cards} 張卡，未達工業級密度（>=35）`,
     );
+  }
+});
+
+// ———— 2026-08-26 環節選擇：shortName 鎖表 + cropTemplate ————
+
+/** 环节短名表（产品裁定，照抄禁止自创）：步骤原名 → 圆环显示短名。 */
+const SHORT_NAME_TABLE: Record<string, string> = {
+  // 小说影视化
+  拆解剧本: "剧本", 建角色圣经: "角色卡", 定美术圣经: "美术卡", 锁定分镜: "分镜",
+  渲染关键帧: "关键帧", 合成镜头视频: "视频", 配音配乐: "配音", 组装成片: "成片",
+  // IP视觉包
+  拆解世界观: "世界观", 炼情绪板: "情绪板", 铸风格锚: "风格锚", 建主角资产: "主角卡",
+  绘名场面组图: "名场面", 造封面主视觉: "封面", 出多画幅: "多画幅", 铺衍生物料: "物料",
+  // 新品上市包
+  锁产品: "产品卡", 铺场景包: "场景包", 出模特图: "模特图", 出主视觉: "主视觉",
+  排详情页: "详情页", 批量出画幅: "画幅", 放大精修: "精修", 审终交付: "交付",
+  // 模特种草线
+  抠取服装资产: "服装", 选定模特人设: "模特卡", 上身虚拟试穿: "试穿", 精修试穿质感: "质感",
+  拍齐九宫格: "九宫格", 排版详情页: "详情页", 适配分发尺寸: "分发",
+  // 剧本视觉化
+  铸造主演资产: "主演卡", 合成配音: "配音", 生成镜头视频: "视频", 剪辑成片: "成片",
+  产出投放物料: "物料",
+  // 3D 白模预演（小说影视化 + 剧本视觉化共用，2026-09-03 导演台接入）
+  "3D 白模预演": "预演",
+  // 投放海报线
+  锚定视觉基调: "基调", 提炼主演海报: "海报", 排布CP对戏图: "对戏",
+  切片封面批量: "切片", 生成变体测试包: "变体", 回流迭代风格: "迭代", 锁定交付参数: "参数",
+  // 策展式创作
+  立意结构化: "立意", 发散收情绪板: "情绪板", 锁定构图稿: "构图稿", 成组渲染: "渲染",
+  审计一致性: "审计", 布置展陈主视觉: "展陈", 交付多规格: "多规格",
+  // 风格深研线
+  采代表作: "代表作", 拆DNA: "DNA", 签解构表: "解构表", 拍临摹对照: "临摹",
+  跑变体矩阵: "变体", 试LoRA: "LoRA", 做原创成组: "原创", 归档证物链: "证物链",
+};
+
+test("every step carries a shortName matching the locked table, unique within its template", () => {
+  for (const template of AGENT_TEMPLATES) {
+    const seen = new Set<string>();
+    for (const step of template.pipeline.steps) {
+      assert.equal(
+        step.shortName,
+        SHORT_NAME_TABLE[step.name],
+        `${template.id} / ${step.name} shortName 偏离锁表`,
+      );
+      // 圆环短名统一 2-3 字（2026-08-26 视觉模型三审：治排版节奏不均）；LoRA 为 4 字符拉丁特例。
+      assert.ok(
+        step.shortName.length >= 2 && step.shortName.length <= 5,
+        `${template.id} / ${step.name} shortName「${step.shortName}」长度 ${step.shortName.length}`,
+      );
+      assert.ok(!seen.has(step.shortName), `${template.id} shortName 重复：${step.shortName}`);
+      seen.add(step.shortName);
+    }
+  }
+});
+
+test("cropTemplate: empty or full selection returns the original template (zero copy)", () => {
+  const template = AGENT_TEMPLATES[0];
+  const all = template.pipeline.steps.map((_, i) => i);
+  assert.equal(cropTemplate(template, []), template);
+  assert.equal(cropTemplate(template, all), template);
+  // 去重后的全选（含重复 index）同样命中零拷贝短路，不产生新对象。
+  assert.equal(cropTemplate(template, [...all, ...all]), template);
+});
+
+test("cropTemplate: subset keeps only selected steps and appends scope notes", () => {
+  const template = AGENT_TEMPLATES[0];
+  // 2026-09-03 插入「3D 白模预演」（index 4）後，「成片」由 7 移到 8；採樣語義不變（首/中/末步）。
+  const cropped = cropTemplate(template, [0, 3, 8]);
+  assert.notEqual(cropped, template);
+  assert.deepEqual(cropped.pipeline.steps, [
+    template.pipeline.steps[0],
+    template.pipeline.steps[3],
+    template.pipeline.steps[8],
+  ]);
+  assert.equal(cropped.pipeline.summary, template.pipeline.summary);
+  const shortNames = ["剧本", "分镜", "成片"];
+  assert.equal(
+    cropped.initialPrompt,
+    `${template.initialPrompt}\n本次只执行这些环节：${shortNames.join("、")}。`,
+  );
+  assert.equal(
+    cropped.directive,
+    `${template.directive}\n本次执行范围已裁剪：只做 ${shortNames.join("、")}，不要碰未选中的环节。`,
+  );
+  // 其余字段原样继承。
+  assert.equal(cropped.id, template.id);
+  assert.equal(cropped.slots, template.slots);
+  assert.equal(cropped.accent, template.accent);
+  assert.equal(cropped.glow, template.glow);
+});
+
+test("cropTemplate: dedupes, sorts ascending, and drops out-of-range indices", () => {
+  const template = AGENT_TEMPLATES[0];
+  const cropped = cropTemplate(template, [8, 3, 3, 99, 0, -1]);
+  assert.deepEqual(cropped.pipeline.steps, [
+    template.pipeline.steps[0],
+    template.pipeline.steps[3],
+    template.pipeline.steps[8],
+  ]);
+  // 追加文案按去重排序后的 shortName 生成，与保留的 steps 一一对应。
+  assert.ok(cropped.initialPrompt.endsWith("本次只执行这些环节：剧本、分镜、成片。"));
+  assert.ok(cropped.directive.endsWith("本次执行范围已裁剪：只做 剧本、分镜、成片，不要碰未选中的环节。"));
+});
+
+test("cropTemplate: every template appends scope notes listing exactly the selected shortNames", () => {
+  for (const template of AGENT_TEMPLATES) {
+    const selected = [1, 3, 5];
+    const cropped = cropTemplate(template, selected);
+    const names = selected.map((i) => template.pipeline.steps[i].shortName).join("、");
+    // 追加的是 shortName（圆环名字）不是步骤原名黑话；且只追加在原文之后。
+    assert.equal(
+      cropped.initialPrompt.slice(template.initialPrompt.length),
+      `\n本次只执行这些环节：${names}。`,
+      `${template.id} initialPrompt 范围说明`,
+    );
+    assert.equal(
+      cropped.directive.slice(template.directive.length),
+      `\n本次执行范围已裁剪：只做 ${names}，不要碰未选中的环节。`,
+      `${template.id} directive 范围说明`,
+    );
+  }
+});
+
+test("cropTemplate: every built-in template crops to a valid pipeline for the canvas", () => {
+  for (const template of AGENT_TEMPLATES) {
+    const selected = template.pipeline.steps.map((_, i) => i).filter((i) => i % 2 === 0);
+    const cropped = cropTemplate(template, selected);
+    assert.equal(cropped.pipeline.steps.length, selected.length, template.id);
+    for (const step of cropped.pipeline.steps) {
+      assert.ok(step.shortName.length > 0, template.id);
+    }
+  }
+});
+
+// ———— 2026-09-03 3D 白模预演接入：兩大影視模板在「锁定分镜」后进导演台预演 ————
+
+test("director preview step: novel/shortdrama insert 3D 白模预演 between 锁定分镜 and 渲染关键帧 with director toolchain", () => {
+  const EXPECTED_TOOLS = [
+    "director_get_state",
+    "director_propose_plans",
+    "director_apply_proposal",
+    "director_manage_shot",
+    "director_upsert_action",
+  ];
+  for (const templateId of ["agent-novel-film-pipeline", "agent-shortdrama-visual-assets"]) {
+    const template = AGENT_TEMPLATES.find((t) => t.id === templateId);
+    assert.ok(template, `${templateId} 存在`);
+    const steps = template!.pipeline.steps;
+    const prevIdx = steps.findIndex((s) => s.name === "锁定分镜");
+    const stepIdx = steps.findIndex((s) => s.name === "3D 白模预演");
+    const nextIdx = steps.findIndex((s) => s.name === "渲染关键帧");
+    assert.ok(prevIdx >= 0, `${templateId} 有「锁定分镜」步`);
+    assert.ok(nextIdx >= 0, `${templateId} 有「渲染关键帧」步`);
+    assert.ok(
+      prevIdx < stepIdx && stepIdx < nextIdx,
+      `${templateId} 预演步须夹在锁定分镜与渲染关键帧之间（实际 ${prevIdx}/${stepIdx}/${nextIdx}）`,
+    );
+    const step = steps[stepIdx];
+    assert.equal(step.outputKind, "director", `${templateId} 预演步 outputKind=director`);
+    assert.equal(step.shortName, "预演", `${templateId} 预演步 shortName`);
+    assert.ok(step.deliverable.includes("白模预演"), `${templateId} 预演步 deliverable`);
+    assert.ok(step.promptNotes.length >= 2, `${templateId} 预演步 promptNotes`);
+    assert.deepEqual(
+      (step.requiredTools ?? []).map((t) => t.id),
+      EXPECTED_TOOLS,
+      `${templateId} 预演步 requiredTools 逐字對齊 harness 工具面`,
+    );
+    for (const id of EXPECTED_TOOLS) {
+      assert.ok(HARNESS_TOOL_IDS.has(id), `${templateId} 工具 ${id} 须在 harness 真源`);
+    }
+    assert.ok(template!.directive.includes("3D 白模预演"), `${templateId} directive 应含预演环节指导`);
+    assert.ok(template!.directive.includes("director_propose_plans"), `${templateId} directive 应点名导演台工具`);
   }
 });

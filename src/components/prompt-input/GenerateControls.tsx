@@ -38,7 +38,6 @@ interface GenerateControlsProps {
   onGenerateAudioChange: (enabled: boolean) => void;
   stylePreset: StylePreset;
   handleStyleChange: (preset: StylePreset) => void;
-  onToggleProfessionalMode: () => void;
 }
 
 /**
@@ -63,7 +62,6 @@ export function GenerateControls({
   onGenerateAudioChange,
   stylePreset,
   handleStyleChange,
-  onToggleProfessionalMode,
 }: GenerateControlsProps) {
   const aspectRatios = modelAspectRatios(modelId);
   const resolutions = modelResolutions(modelId);
@@ -113,7 +111,6 @@ export function GenerateControls({
                       resolution={outputResolution}
                       durationSeconds={durationSeconds}
                       generateAudio={generateAudio}
-                      onOpenProfessionalMode={onToggleProfessionalMode}
                       onApplyTipParams={(params: ModelUsageTipParams) => {
                         // 模型卡「一键带入」：建议参数回填本面板既有 setter。
                         if (params.aspectRatio) onAspectRatioChange(params.aspectRatio);

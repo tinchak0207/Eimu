@@ -11,13 +11,14 @@ import {
   type DragEvent,
   type KeyboardEvent,
 } from "react";
-import { ImagePlus, Loader2, Send, X } from "lucide-react";
+import { ImagePlus, Loader2, Send, Square, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   toAgentAttachmentRef,
   uploadAgentAttachments,
   type AgentAttachment,
 } from "@/lib/agent-chat-client";
+import { MAX_VIDEO_BYTES, uploadVideoDirect } from "@/lib/agent-uploads";
 import type { AgentAttachmentRef } from "@/lib/agent-chat-types";
 import {
   FRAME_COUNT,
@@ -42,6 +43,13 @@ export interface AgentComposerProps {
    */
   prefill?: { text: string; nonce: number } | null;
   onPrefillConsumed?: () => void;
+  /**
+   * D-26「随时可停」补全：语义 = 现在这一轮正在生成，可停。
+   * 存在且输入框为空时，送出钮位置渲染停止钮；用户一旦打字（canSend）
+   * 立即回到送出钮——生成中按送出走既有 steer 路径（先 abort 再发），
+   * 两条语义不打架。缺省 = 没有可停的回合，渲染完全不变。
+   */
+  onStop?: () => void;
 }
 
 /** 允许选择的文件类型；列表与网关约定一致，避免上传后无法解析的格式。 */
@@ -69,6 +77,20 @@ const ACCEPTED_TYPES = [
 
 type PendingAttachmentStatus = "extracting" | "uploading" | "ready" | "error";
 
+/**
+ * 罪状 2b：上传 413 无声标红。单请求体上限 = Vercel 平台硬顶 4.5MB
+ * （attachments 路由只是透传代理，代码层无法调高平台限制），留出 multipart
+ * 边界等开销后按 4MB 预检。超限文件在上传前就地给出人话错误，不再等 413。
+ * 影片豁免此闸：原片走网关直传（uploadVideoDirect，绕开 Vercel），
+ * 上限改用网关的 100MB（MAX_VIDEO_BYTES）。
+ */
+const MAX_FILE_BYTES = 4 * 1024 * 1024;
+
+/** 字节数 → 展示 MB（一位小数，四舍五入）。 */
+function formatMb(bytes: number): string {
+  return (Math.round((bytes / (1024 * 1024)) * 10) / 10).toFixed(1);
+}
+
 interface PendingAttachment {
   id: string;
   fileName: string;
@@ -76,7 +98,8 @@ interface PendingAttachment {
   errorMessage?: string;
   /**
    * 上传成功后的 ref，送出时写进 [附件] 区块。
-   * 影片一条 chip 对应 4 个 ref（4 张抽出的帧），所以这里是数组。
+   * 直传成功：影片一条 chip 对应 1 个 video ref（原片）；
+   * 降级抽帧：对应 4 个 ref（4 张抽出的帧）。所以这里是数组。
    */
   refs?: AgentAttachmentRef[];
   /** 影片专用：原片的 Object URL（预览可播，D-16）。移除／送出时必须 revoke。 */
@@ -116,6 +139,20 @@ function buildAttachmentBlock(attachments: AgentAttachmentRef[]): string {
   return `\n[ATTACHMENTS_BLOCK]\n[附件]\n${lines}\n[/ATTACHMENTS_BLOCK]`;
 }
 
+/** 是否存在仍在 uploading/extracting 的附件——存在时禁止送出。纯函数，可直测。 */
+export function hasPendingAttachments(attachments: Pick<PendingAttachment, "status">[]): boolean {
+  return attachments.some((a) => a.status === "uploading" || a.status === "extracting");
+}
+
+/** 送出资格：有文字或有已就绪附件，且没有仍在途的附件。纯函数，可直测。 */
+export function computeCanSend(
+  trimmedText: string,
+  readyRefCount: number,
+  attachments: Pick<PendingAttachment, "status">[],
+): boolean {
+  return (Boolean(trimmedText) || readyRefCount > 0) && !hasPendingAttachments(attachments);
+}
+
 let attachmentSeq = 0;
 
 function AgentComposerComponent({
@@ -125,6 +162,7 @@ function AgentComposerComponent({
   sessionId,
   prefill,
   onPrefillConsumed,
+  onStop,
 }: AgentComposerProps) {
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
@@ -155,17 +193,28 @@ function AgentComposerComponent({
   );
 
   /**
-   * 影片（D-16）：先抽 4 帧再上传这 4 张 JPEG，原片本身不上传。
-   * 视觉模型看不了影片，抽帧是唯一能让它"看到"内容的路径；原片留在本地供预览播放。
+   * 影片（D-16 + 原片直传网关）：优先把原片直传网关（绕开 Vercel 4.5MB 体上限），
+   * 成功后一条 chip 只有一个 video ref，聊天框渲染成一个可播影片气泡，agent 也能
+   * 按 path 取回原片剪辑。直传失败（无票 / 401 / 413 / 415 / 网络）静默降级为
+   * 旧抽帧路径：抽 4 张 JPEG 上传，行为与今天一致；原片 Object URL 留在本地供预览。
    * 超限（60 秒 / 100 MB）由 extractFramesFromFile 抛错，原因直接显示在 chip 上。
    */
   const uploadVideoFile = useCallback(
     async (session: string, id: string, file: File) => {
       const videoUrl = URL.createObjectURL(file);
-      patchAttachment(id, { status: "extracting", framesDone: 0, videoUrl });
+      // 直传期间就是普通「上传中」态；「抽帧 x/4」只在降级态有意义。
+      patchAttachment(id, { status: "uploading", videoUrl });
+      try {
+        const ref = await uploadVideoDirect(session, file);
+        patchAttachment(id, { status: "ready", refs: [ref], videoUrl });
+        return;
+      } catch {
+        // 直传失败：静默落抽帧降级路径，不把直传错误抛给用户。
+      }
 
       let extracted: { files: File[]; timestamps: FrameTimestamp[] };
       try {
+        patchAttachment(id, { status: "extracting", framesDone: 0 });
         extracted = await extractFramesFromFile(file, videoUrl, (done) =>
           patchAttachment(id, { framesDone: done }),
         );
@@ -203,6 +252,21 @@ function AgentComposerComponent({
       // 每个文件独立处理，各自的失败不拖累其他文件。
       Array.from(files).forEach((file) => {
         const id = `att-${++attachmentSeq}`;
+        // 罪状 2b：超限文件不上传，直接落一颗带人话文案的错误 chip。
+        // 影片豁免 4MB 站内代理闸（原片走网关直传），改用网关的 100MB 上限。
+        const maxBytes = isVideoFile(file) ? MAX_VIDEO_BYTES : MAX_FILE_BYTES;
+        if (file.size > maxBytes) {
+          setAttachments((prev) => [
+            ...prev,
+            {
+              id,
+              fileName: file.name,
+              status: "error",
+              errorMessage: `文件 ${formatMb(file.size)} MB 超过上限 ${formatMb(maxBytes)} MB，请压缩或拆分后再上传`,
+            },
+          ]);
+          return;
+        }
         setAttachments((prev) => [...prev, { id, fileName: file.name, status: "uploading" }]);
 
         const job = isVideoFile(file)
@@ -235,24 +299,42 @@ function AgentComposerComponent({
     });
   }, []);
 
+  // 罪状 2a：只附文件不打字，发送链路也要通——有已传成功的附件即具备发送资格。
+  const readyRefs = attachments
+    .filter((a) => a.status === "ready")
+    .flatMap((a) => a.refs ?? []);
+  // 有附件仍在 uploading/extracting（未决出成功或失败）时禁止送出：
+  // 这些文件还没到 ready，既进不了本次的附件区块，也不该被随后的清空动作
+  // 连带清掉（否则它们上传中的 promise 落地时会打在已从 state 里消失的 id 上，
+  // patchAttachment 静默 no-op，等同于用户数据丢失）。
+  const canSend = computeCanSend(trimmed, readyRefs.length, attachments);
+
   // 组装最终文本：附加 [附件] 区块（只纳入已传成功的），然后交给 onSend。
   // 影片一条 chip 展开成 4 行（4 张帧各自一个 path），编号连续。
+  // 纯附件发送（空文本）：只发附件区块，不带前导换行。
   const handleSend = useCallback(() => {
-    if (!trimmed) return;
-    const readyRefs = attachments
-      .filter((a) => a.status === "ready")
-      .flatMap((a) => a.refs ?? []);
-    const finalText = readyRefs.length > 0 ? `${trimmed}\n${buildAttachmentBlock(readyRefs)}` : trimmed;
+    if (!canSend) return;
+    // 快照「本次实际发出去」的附件：canSend 已挡掉 uploading/extracting，
+    // 正常情况下这就等于当前 attachments 全量；仍按 id 过滤只清掉这些，
+    // 防御 state 更新与点击之间的竞态（React 批处理导致 attachments 快照
+    // 与本次渲染看到的不完全一致时，不误清尚在途的项）。
+    const sentAttachments = attachments.filter((a) => a.status === "ready");
+    const finalText = trimmed
+      ? readyRefs.length > 0
+        ? `${trimmed}\n${buildAttachmentBlock(readyRefs)}`
+        : trimmed
+      : buildAttachmentBlock(readyRefs).replace(/^\n+/, "");
     onSend(finalText);
     setText("");
     // 清空文字后高度要跟着收回来，否则空框还占着刚才那几行。
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
-    // 送出后 chip 清空：这些 Object URL 已经没有可见引用，必须一起释放。
-    attachments.forEach(releaseUrls);
-    setAttachments([]);
-  }, [trimmed, onSend, attachments]);
+    // 只释放并移除本次实际发出去的附件，不连带清掉仍在途的项。
+    const sentIds = new Set(sentAttachments.map((a) => a.id));
+    sentAttachments.forEach(releaseUrls);
+    setAttachments((prev) => prev.filter((a) => !sentIds.has(a.id)));
+  }, [canSend, trimmed, readyRefs, onSend, attachments]);
 
   /**
    * D-24：把半句话接进输入框并把光标放到末尾——用户下一个动作就是继续打字。
@@ -348,11 +430,11 @@ function AgentComposerComponent({
       // Enter 发送，Shift+Enter 换行。
       if (event.key === "Enter" && !event.shiftKey) {
         event.preventDefault();
-        if (!trimmed) return;
+        if (!canSend) return;
         handleSend();
       }
     },
-    [trimmed, handleSend],
+    [canSend, handleSend],
   );
 
   /** Ctrl+V 粘贴：有文件时走附件管道，纯文本/HTML 放行。 */
@@ -416,10 +498,9 @@ function AgentComposerComponent({
   );
 
   const canAttach = !disabled && Boolean(sessionId);
-  // 已经抽出帧的影片才进预览区（extracting 期间没有缩图可显示）。
+  // 有原片 Object URL 的影片就进预览区：直传成功（无 frames）与降级抽帧都适用。
   const videoPreviews = attachments.filter(
-    (a): a is PendingAttachment & { videoUrl: string } =>
-      Boolean(a.videoUrl) && (a.frames?.length ?? 0) > 0,
+    (a): a is PendingAttachment & { videoUrl: string } => Boolean(a.videoUrl),
   );
 
   return (
@@ -495,7 +576,9 @@ function AgentComposerComponent({
                   <Loader2 className="h-3 w-3 shrink-0 animate-spin" aria-hidden="true" />
                 )}
                 <span className="truncate" title={att.errorMessage ?? att.fileName}>
-                  {att.fileName}
+                  {att.status === "error" && att.errorMessage
+                    ? `${att.fileName}：${att.errorMessage}`
+                    : att.fileName}
                 </span>
                 {/* 抽帧进度用文字给，不另起进度条：一行 chip 装不下也没必要。 */}
                 {att.status === "extracting" && (
@@ -517,7 +600,7 @@ function AgentComposerComponent({
         )}
 
         {/*
-          影片预览（D-16）：4 张缩图一列显示，原片可播。
+          影片预览（D-16）：原片可播；4 张缩图列仅在降级抽帧态出现（直传态无 frames）。
           放在 chip 行下方而不是塞进 chip 里 —— chip 是一行文字的量级，
           缩图列需要自己的高度，挤进去两者都会变形。
         */}
@@ -534,18 +617,20 @@ function AgentComposerComponent({
                   aria-label={`原片：${att.fileName}`}
                   className="h-16 w-24 shrink-0 rounded-ios-md bg-black object-cover"
                 />
-                <div className="flex min-w-0 gap-1.5 overflow-x-auto">
-                  {att.frames?.map((frame, i) => (
-                    // eslint-disable-next-line @next/next/no-img-element -- Object URL 不能走 next/image
-                    <img
-                      key={frame.url}
-                      src={frame.url}
-                      alt={`第 ${i + 1} 帧，${frame.label}`}
-                      title={frame.label}
-                      className="h-16 w-16 shrink-0 rounded-ios-md object-cover"
-                    />
-                  ))}
-                </div>
+                {att.frames && att.frames.length > 0 && (
+                  <div className="flex min-w-0 gap-1.5 overflow-x-auto">
+                    {att.frames.map((frame, i) => (
+                      // eslint-disable-next-line @next/next/no-img-element -- Object URL 不能走 next/image
+                      <img
+                        key={frame.url}
+                        src={frame.url}
+                        alt={`第 ${i + 1} 帧，${frame.label}`}
+                        title={frame.label}
+                        className="h-16 w-16 shrink-0 rounded-ios-md object-cover"
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -580,22 +665,43 @@ function AgentComposerComponent({
         />
       </div>
 
-      <button
-        type="button"
-        onClick={handleSend}
-        disabled={disabled || !trimmed}
-        aria-label="发送"
-        className={cn(
-          "flex h-11 w-11 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-full transition-all duration-200",
-          "touch-manipulation [-webkit-tap-highlight-color:transparent]",
-          "bg-ios-blue text-white shadow-[0_2px_8px_rgba(0,122,255,0.32)]",
-          "hover:opacity-90 active:scale-[0.94]",
-          "focus:outline-none focus:ring-2 focus:ring-ios-blue/40",
-          "disabled:cursor-not-allowed disabled:bg-[rgba(120,120,128,0.18)] disabled:text-white/80 disabled:shadow-none",
-        )}
-      >
-        <Send className="h-5 w-5" aria-hidden="true" />
-      </button>
+      {onStop && !canSend ? (
+        /*
+          D-26 补全：生成中且输入框为空 → 送出钮位置渲染停止钮。
+          样式逐行复用 AgentBatchProgress 的「停下」钮（Square 图标 +
+          bg-destructive/[0.09] text-destructive + transition-colors +
+          focus-visible:ring-destructive/30 + [touch-action:manipulation]），
+          只改两处：外框换成与送出钮完全同尺寸的圆钮（h-11 w-11
+          sm:h-8 sm:w-8 rounded-full，切换零跳动）；去掉文字（圆钮放不下），
+          aria-label 与 title 原样保留。
+        */
+        <button
+          type="button"
+          onClick={onStop}
+          aria-label="中止助理生成"
+          title="立即中止当前这轮生成"
+          className="flex h-11 w-11 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-full bg-destructive/[0.09] text-destructive transition-colors duration-150 active:bg-destructive/[0.16] focus:outline-none focus-visible:ring-2 focus-visible:ring-destructive/30 [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
+        >
+          <Square className="h-3.5 w-3.5" aria-hidden="true" />
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={handleSend}
+          disabled={disabled || !canSend}
+          aria-label="发送"
+          className={cn(
+            "flex h-11 w-11 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-full transition-all duration-200",
+            "touch-manipulation [-webkit-tap-highlight-color:transparent]",
+            "bg-ios-blue text-white shadow-[0_2px_8px_rgba(0,122,255,0.32)]",
+            "hover:opacity-90 active:scale-[0.94]",
+            "focus:outline-none focus:ring-2 focus:ring-ios-blue/40",
+            "disabled:cursor-not-allowed disabled:bg-[rgba(120,120,128,0.18)] disabled:text-white/80 disabled:shadow-none",
+          )}
+        >
+          <Send className="h-5 w-5" aria-hidden="true" />
+        </button>
+      )}
     </div>
   );
 }

@@ -16,15 +16,18 @@
 import {
   type AgentAttachmentRef,
   type AgentChatState,
+  type AgentDirectorItem,
   type AgentImageItem,
   type AgentNoticeItem,
   type AgentPendingConfirm,
   type AgentPendingQuestion,
   type AgentQuotaState,
   type AgentSseEvent,
+  type AgentSubagentItem,
   type AgentToolCallItem,
   type AgentTranscriptItem,
   type AgentUserTurnItem,
+  type AgentVideoItem,
 } from "./agent-chat-types";
 
 // ─────────────────────────── 条目 id 生成
@@ -64,7 +67,7 @@ function reduceMessageDelta(state: AgentChatState, event: AgentSseEvent & { name
       streaming: true,
     });
   }
-  return { ...state, items, turnActive: true };
+  return { ...state, items, turnActive: true, turnStatus: undefined };
 }
 
 function reduceReasoningDelta(state: AgentChatState, event: AgentSseEvent & { name: "reasoning.delta" }): AgentChatState {
@@ -100,8 +103,24 @@ function reduceToolInvoke(state: AgentChatState, event: AgentSseEvent & { name: 
   return { ...state, items: [...state.items, item], turnActive: true };
 }
 
+function reduceToolProgress(state: AgentChatState, event: AgentSseEvent & { name: "tool.progress" }): AgentChatState {
+  const { tool, done, total, label } = event.data;
+  const items = state.items.slice();
+  // 回填「最近一个同名且仍 running」的工具卡（与 reduceToolResult 同定位逻辑）。
+  // 找不到 running 卡 = invoke 丢了或已结算，进度帧无意义，直接丢弃不新建条目。
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    const it = items[i];
+    if (it.kind === "tool" && it.tool === tool && it.status === "running") {
+      items[i] = { ...it, progress: { done, total, ...(label ? { label } : {}) } };
+      return { ...state, items, turnActive: true };
+    }
+  }
+  return state;
+}
+
 function reduceToolResult(state: AgentChatState, event: AgentSseEvent & { name: "tool.result" }): AgentChatState {
-  const { tool, ok, cost_coins } = event.data;
+  const { tool, ok, cost_coins, error } = event.data;
+  const errText = !ok ? error?.human_message ?? error?.message ?? undefined : undefined;
   const items = state.items.slice();
   // 找「最近一个同名且还在 running 的工具条目」回填。没有就补一笔
   // 已定案的条目 —— 网关可能因为去重或断线把 invoke 弄丢了。
@@ -116,7 +135,7 @@ function reduceToolResult(state: AgentChatState, event: AgentSseEvent & { name: 
   if (target >= 0) {
     const existing = items[target];
     if (existing.kind === "tool") {
-      items[target] = { ...existing, status: ok ? "ok" : "failed", costCoins: cost_coins };
+      items[target] = { ...existing, status: ok ? "ok" : "failed", costCoins: cost_coins, error: errText };
     }
   } else {
     items.push({
@@ -127,27 +146,220 @@ function reduceToolResult(state: AgentChatState, event: AgentSseEvent & { name: 
       argsSummary: undefined,
       status: ok ? "ok" : "failed",
       costCoins: cost_coins,
+      error: errText,
     });
   }
   return { ...state, items, turnActive: true };
 }
 
 function reduceImageDone(state: AgentChatState, event: AgentSseEvent & { name: "image.done" }): AgentChatState {
-  const { url, cost_coins, task_id } = event.data;
+  const { url, cost_coins, task_id, recipe } = event.data;
   const exists = state.items.some((it) => it.kind === "image" && it.url === url);
   if (!exists) {
+    // seq 是展示序号（锚定文案里的「第 N 张」）：必须是会话内第几张图，
+    // 不是网关全局 event_id——后者是几百上千的流水号，念出来像胡话。
+    const imageSeq = state.items.filter((it) => it.kind === "image").length + 1;
     const item: AgentImageItem = {
       kind: "image",
       id: eventItemId("image", event.event_id),
-      seq: event.event_id,
+      seq: imageSeq,
       url,
       costCoins: cost_coins,
       taskId: task_id,
+      recipe,
     };
-    return { ...state, items: [...state.items, item], turnActive: true };
+    return { ...state, items: [...state.items, item], turnActive: true, turnStatus: undefined };
   }
   // 同 url 已存在：忽略内容，但仍是「助手在产出」的讯号，turnActive 照设。
-  return { ...state, turnActive: true };
+  return { ...state, turnActive: true, turnStatus: undefined };
+}
+
+function reduceVideoDone(state: AgentChatState, event: AgentSseEvent & { name: "video.done" }): AgentChatState {
+  const { url, cost_coins, task_id, media_kind } = event.data;
+  const exists = state.items.some((it) => it.kind === "video" && it.url === url);
+  if (!exists) {
+    // seq 是展示序号：会话内第几条影片，不是网关全局 event_id（同 image.done 的理由）。
+    const videoSeq = state.items.filter((it) => it.kind === "video").length + 1;
+    const item: AgentVideoItem = {
+      kind: "video",
+      id: eventItemId("video", event.event_id),
+      seq: videoSeq,
+      url,
+      costCoins: cost_coins,
+      taskId: task_id,
+      mediaKind: media_kind,
+    };
+    return { ...state, items: [...state.items, item], turnActive: true, turnStatus: undefined };
+  }
+  // 同 url 已存在：忽略内容，但仍是「助手在产出」的讯号，turnActive 照设。
+  return { ...state, turnActive: true, turnStatus: undefined };
+}
+
+/**
+ * 導演台：會話內唯一活卡。同槽（同一張 director 卡）按 revision 替換，
+ * 不堆積歷史卡——director.done 是工程狀態廣播不是成果事件，堆積會把
+ * 轉錄刷成版本流水帳。遲到幀（revision <= 現有）原樣 bail out。
+ * reset（action="reset"）發 revision 0：小於任何現有 revision，活卡照替換
+ * ——工程已被清空，舊卡留著就是謊報。
+ */
+function reduceDirectorDone(state: AgentChatState, event: AgentSseEvent & { name: "director.done" }): AgentChatState {
+  const { session_id, revision, action, plan, active_shot, schematic, health, counts } = event.data;
+  const items = state.items.slice();
+  let existing = -1;
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    const it = items[i];
+    if (it.kind === "director" && it.directorSessionId === session_id) {
+      existing = i;
+      break;
+    }
+  }
+  if (existing >= 0) {
+    const prev = items[existing];
+    if (prev.kind === "director") {
+      if (revision > prev.revision || action === "reset") {
+        items[existing] = {
+          ...prev,
+          seq: event.event_id,
+          revision,
+          action,
+          plan,
+          activeShot: active_shot,
+          schematic,
+          health,
+          counts,
+        };
+        return { ...state, items, turnActive: true, turnStatus: undefined };
+      }
+      return state;
+    }
+  }
+  const item: AgentDirectorItem = {
+    kind: "director",
+    id: eventItemId("director", event.event_id),
+    seq: event.event_id,
+    directorSessionId: session_id,
+    revision,
+    action,
+    plan,
+    activeShot: active_shot,
+    schematic,
+    health,
+    counts,
+  };
+  return { ...state, items: [...items, item], turnActive: true, turnStatus: undefined };
+}
+
+function reduceImageFailed(state: AgentChatState, event: AgentSseEvent & { name: "image.failed" }): AgentChatState {  // 失败也进对话流（与 image.done 对称）：用户在聊天里直接看到「没排上队，
+  // 费用已退回」，不依赖画布节点才知道发生了什么。
+  const { reason, refunded } = event.data;
+  const text = refunded ? `这张图没排上队，费用已退回${reason ? `（${reason}）` : ""}。` : `这张图生成失败${reason ? `（${reason}）` : ""}。`;
+  const notice: AgentNoticeItem = {
+    kind: "notice",
+    id: eventItemId("notice", event.event_id),
+    seq: event.event_id,
+    tone: "error",
+    text,
+  };
+  return { ...state, items: [...state.items, notice], turnActive: true, turnStatus: undefined };
+}
+
+/**
+ * 多行文本的最后一个非空行。subagent.delta 并入后只保留它——子代理输出可能
+ * 上千行，条目里永远只存一行，这是防溢出的硬要求，不是优化。
+ */
+export function lastNonEmptyLine(text: string): string {
+  const lines = text.split("\n");
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    if (lines[i].trim().length > 0) return lines[i];
+  }
+  return "";
+}
+
+function reduceSubagentStarted(
+  state: AgentChatState,
+  event: AgentSseEvent & { name: "subagent.started" },
+): AgentChatState {
+  const { id, label } = event.data;
+  const items = state.items.slice();
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    const it = items[i];
+    if (it.kind === "subagent" && it.subagentId === id) {
+      // 同 id 重复 started（重连补发等）：标签没变就 bail out，变了才替换。
+      if (it.label === label) return state;
+      items[i] = { ...it, label };
+      return { ...state, items, turnActive: true };
+    }
+  }
+  const item: AgentSubagentItem = {
+    kind: "subagent",
+    id: eventItemId("subagent", event.event_id),
+    seq: event.event_id,
+    subagentId: id,
+    label,
+    lastLine: "",
+    status: "running",
+  };
+  return { ...state, items: [...items, item], turnActive: true };
+}
+
+function reduceSubagentDelta(
+  state: AgentChatState,
+  event: AgentSseEvent & { name: "subagent.delta" },
+): AgentChatState {
+  const { id, text } = event.data;
+  const items = state.items.slice();
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    const it = items[i];
+    if (it.kind === "subagent" && it.subagentId === id) {
+      // done 之后的迟到 delta 不再改写已定案的卡。
+      if (it.status !== "running") return state;
+      items[i] = { ...it, lastLine: lastNonEmptyLine(it.lastLine + text) };
+      return { ...state, items, turnActive: true };
+    }
+  }
+  // started 丢失（坏帧/断线）：补一条 running 条目，别让 delta 落空。
+  const item: AgentSubagentItem = {
+    kind: "subagent",
+    id: eventItemId("subagent", event.event_id),
+    seq: event.event_id,
+    subagentId: id,
+    label: "子任务",
+    lastLine: lastNonEmptyLine(text),
+    status: "running",
+  };
+  return { ...state, items: [...items, item], turnActive: true };
+}
+
+function reduceSubagentDone(
+  state: AgentChatState,
+  event: AgentSseEvent & { name: "subagent.done" },
+): AgentChatState {
+  const { id, status, summary } = event.data;
+  const items = state.items.slice();
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    const it = items[i];
+    if (it.kind === "subagent" && it.subagentId === id) {
+      items[i] = { ...it, status, ...(summary !== undefined ? { summary } : {}) };
+      return { ...state, items };
+    }
+  }
+  // started/delta 全丢：补一条已定案条目（lastLine 留空，摘要进卡）。
+  const item: AgentSubagentItem = {
+    kind: "subagent",
+    id: eventItemId("subagent", event.event_id),
+    seq: event.event_id,
+    subagentId: id,
+    label: "子任务",
+    lastLine: "",
+    status,
+    ...(summary !== undefined ? { summary } : {}),
+  };
+  return { ...state, items: [...items, item] };
+}
+
+/** 回合收尾时把 subagent 条目整批清掉：状态栏只在回合进行中有意义。 */
+function clearSubagentItems(items: AgentTranscriptItem[]): AgentTranscriptItem[] {
+  return items.filter((it) => it.kind !== "subagent");
 }
 
 /**
@@ -174,8 +386,13 @@ function settleItems(items: AgentTranscriptItem[]): AgentTranscriptItem[] {
 // turn.done 只结算当前条目，事件本体不参与；参数保留以符合 reducer 统一签名。
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 function reduceTurnDone(state: AgentChatState, _event: AgentSseEvent & { name: "turn.done" }): AgentChatState {
-  const items = settleItems(state.items);
-  return { ...state, items, turnActive: false };
+  const items = clearSubagentItems(settleItems(state.items));
+  return { ...state, items, turnActive: false, turnStatus: undefined };
+}
+
+function reduceTurnStatus(state: AgentChatState, event: AgentSseEvent & { name: "turn.status" }): AgentChatState {
+  // 暂态单行：替换不累加。展示由 Transcript 专用状态行承担，绝不进 items 正文。
+  return { ...state, turnStatus: event.data.text, turnActive: true };
 }
 
 function reduceConfirmRequest(state: AgentChatState, event: AgentSseEvent & { name: "confirm.request" }): AgentChatState {
@@ -187,7 +404,7 @@ function reduceConfirmRequest(state: AgentChatState, event: AgentSseEvent & { na
     description,
     seq: event.event_id,
   };
-  return { ...state, pendingConfirms: [...state.pendingConfirms, confirm] };
+  return { ...state, pendingConfirms: [...state.pendingConfirms, confirm], turnStatus: undefined };
 }
 
 function reduceQuestionRequest(state: AgentChatState, event: AgentSseEvent & { name: "question.request" }): AgentChatState {
@@ -198,7 +415,7 @@ function reduceQuestionRequest(state: AgentChatState, event: AgentSseEvent & { n
     questions,
     seq: event.event_id,
   };
-  return { ...state, pendingQuestions: [...state.pendingQuestions, question], turnActive: true };
+  return { ...state, pendingQuestions: [...state.pendingQuestions, question], turnActive: true, turnStatus: undefined };
 }
 
 function reduceQuestionReplied(state: AgentChatState, event: AgentSseEvent & { name: "question.replied" }): AgentChatState {
@@ -264,15 +481,16 @@ function reduceSessionError(state: AgentChatState, event: AgentSseEvent & { name
     id: eventItemId("notice", event.event_id),
     seq: event.event_id,
     tone: "error",
-    text: event.data.message,
+    // G-FE 合同：human_message（中文短句）优先，缺省回落原 message。
+    text: event.data.human_message || event.data.message,
   };
   // 错误不终结会话。
   return { ...state, items: [...state.items, notice] };
 }
 
-/** 收尾：停掉 streaming、把还在转的工具判死、清掉待确认、推一条 notice。 */
+/** 收尾：停掉 streaming、把还在转的工具判死、清掉子代理栏与待确认、推一条 notice。 */
 function settleClosedTurn(state: AgentChatState, eventId: number, reason?: string): AgentChatState {
-  const items = settleItems(state.items);
+  const items = clearSubagentItems(settleItems(state.items));
   const notice: AgentNoticeItem = {
     kind: "notice",
     id: eventItemId("notice", eventId),
@@ -292,6 +510,12 @@ function settleClosedTurn(state: AgentChatState, eventId: number, reason?: strin
 }
 
 function reduceSessionClosed(state: AgentChatState, event: AgentSseEvent & { name: "session.closed" }): AgentChatState {
+  // 幂等：已经关过一次的会话再收到 session.closed（本端 end() 合成的
+  // event_id:0 收尾帧，紧跟在网关自己那一帧后面）——不能再跑一次
+  // settleClosedTurn，否则会在已经结算过的 items 上重复推一条
+  // 「会话已结束。」notice。只把 lastEventId 记账推进（走到这里时
+  // base 已经算过 nextLastEventId），原样放行。
+  if (state.closed) return state;
   return settleClosedTurn(state, event.event_id, event.data.reason);
 }
 
@@ -306,6 +530,18 @@ export function agentChatReducer(state: AgentChatState, event: AgentSseEvent): A
     return state;
   }
 
+  // 会话已终结（session.closed 已经被归约过）：只放行 session.closed 自己
+  // （reduceSessionClosed/settleClosedTurn 已改成幂等——见下方实现，本端
+  // end() 会再合成一个 event_id:0 的 session.closed 做本地收尾，必须原地
+  // 无害地过一次，不能重复推一条「会话已结束。」notice）。除此之外任何
+  // 事件都是「死会话上的迟到帧」——继续跑各自的分支会诈尸（迟到的
+  // message.delta 让已收尾的回合重新 turnActive，迟到的 confirm.request
+  // 在死会话上重新长出待确认卡）。只推进 lastEventId 记账，不跑正常分支。
+  if (state.closed && event.name !== "session.closed") {
+    const nextLastEventId = Math.max(state.lastEventId, eventId);
+    return nextLastEventId === state.lastEventId ? state : { ...state, lastEventId: nextLastEventId };
+  }
+
   const nextLastEventId = Math.max(state.lastEventId, eventId);
   const base: AgentChatState = nextLastEventId === state.lastEventId ? state : { ...state, lastEventId: nextLastEventId };
 
@@ -316,12 +552,22 @@ export function agentChatReducer(state: AgentChatState, event: AgentSseEvent): A
       return reduceReasoningDelta(base, event);
     case "tool.invoke":
       return reduceToolInvoke(base, event);
+    case "tool.progress":
+      return reduceToolProgress(base, event);
     case "tool.result":
       return reduceToolResult(base, event);
     case "image.done":
       return reduceImageDone(base, event);
+    case "video.done":
+      return reduceVideoDone(base, event);
+    case "director.done":
+      return reduceDirectorDone(base, event);
+    case "image.failed":
+      return reduceImageFailed(base, event);
     case "turn.done":
       return reduceTurnDone(base, event);
+    case "turn.status":
+      return reduceTurnStatus(base, event);
     case "confirm.request":
       return reduceConfirmRequest(base, event);
     case "confirm.resolved":
@@ -338,7 +584,14 @@ export function agentChatReducer(state: AgentChatState, event: AgentSseEvent): A
       return reduceSessionError(base, event);
     case "session.closed":
       return reduceSessionClosed(base, event);
+    case "subagent.started":
+      return reduceSubagentStarted(base, event);
+    case "subagent.delta":
+      return reduceSubagentDelta(base, event);
+    case "subagent.done":
+      return reduceSubagentDone(base, event);
     default:
+      // canvas.* 等由别处（useCanvasChat）消费的事件，reducer 只推 lastEventId。
       return base;
   }
 }
@@ -356,10 +609,22 @@ export function appendUserTurn(state: AgentChatState, text: string, attachments?
   if (attachments && attachments.length > 0) {
     item.attachments = attachments;
   }
-  return { ...state, items: [...state.items, item], turnActive: true };
+  return { ...state, items: [...state.items, item], turnActive: true, turnStatus: undefined };
 }
 
 /** 用 GET /quota 的结果（已对齐 AgentQuotaState 形状）填入初始余额。 */
 export function applyQuotaSnapshot(state: AgentChatState, quota: AgentQuotaState): AgentChatState {
   return { ...state, quota };
+}
+
+/**
+ * 殭屍还魂自愈：turn.done 已宣告回合收尾，同一条连线却仍有内容帧到达
+ * （watchdog 误判后 retry 的输出继续灌进来）。把回合拉回流式中——发送钮
+ * 翻回「中止助理生成」，不再停留在「系统说死亡但内容还在冒」的断点假象。
+ * 已终结会话的迟到帧由 agentChatReducer 的 closed 门卫丢弃，但本端合成的
+ * action 不走那道门，这里自己再守一道；已在流式中则原样返回（bail out）。
+ */
+export function resumeZombieTurn(state: AgentChatState): AgentChatState {
+  if (state.closed || state.turnActive) return state;
+  return { ...state, turnActive: true };
 }

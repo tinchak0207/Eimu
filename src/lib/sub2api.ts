@@ -4,7 +4,7 @@ export interface GatewayEndpoint {
   label: string;
   modelId?: string;
   supportedModels?: string[];
-  protocol?: "adobe2api" | "pixai" | "sensenova" | "filmera";
+  protocol?: "adobe2api" | "pixai" | "filmera";
   isFallback?: boolean;
 }
 

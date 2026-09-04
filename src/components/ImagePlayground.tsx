@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
-import dynamic from "next/dynamic";
 import { ImageDisplay } from "@/components/ImageDisplay";
 import { PromptInput, type PromptInputMode } from "@/components/PromptInput";
 import { CaseShowcase } from "@/components/CaseShowcase";
@@ -22,10 +21,8 @@ import {
   MODEL_CONFIGS,
   PROVIDERS,
   ProviderKey,
-  type ModelMode,
 } from "@/lib/provider-config";
 import {
-  aspectRatioFromImageSize,
   defaultGenerateAudio,
   defaultAspectRatio,
   defaultDuration,
@@ -37,32 +34,24 @@ import {
   type OutputResolution,
 } from "@/lib/generation-model-catalog";
 import { enhancePrompt, type StylePreset } from "@/lib/prompt-enhancer";
-import { Bot, ChevronDown, RotateCcw } from "lucide-react";
 import { hasEnoughQuota } from "@/lib/new-api-client";
 import { LOCAL_TEST_MODE } from "@/lib/local-test-mode";
-import { PRO_LORA_TOUR_ARMED_KEY } from "@/lib/lora-tour-content";
 import { cn } from "@/lib/utils";
 import { getInitialSuggestions, type Suggestion } from "@/lib/suggestions";
 import type { ReferenceImage } from "@/lib/image-types";
-import type { ProfessionalRunConfig } from "@/components/pro-workstation/InvokeInspiredWorkstation";
 import { CanvasChatWorkstation } from "@/components/canvas-workstation/CanvasChatWorkstation";
 import { AgentTemplateCarousel } from "@/components/canvas-workstation/AgentTemplateCarousel";
-import { applyTemplateToCanvas } from "@/components/canvas-workstation/agent-template-canvas";
-import { AGENT_TEMPLATES, type AgentTemplate } from "@/lib/agent-templates";
-import { useAgentParamReflect, AGENT_PARAM_LABELS } from "@/hooks/use-agent-param-reflect";
+import { templateToCanvasLayout } from "@/components/canvas-workstation/agent-template-canvas";
+import { DIRECTOR_RENDER_REQUEST_EVENT } from "@/components/director-mini/DirectorMiniViewport";
+import { AGENT_TEMPLATES, cropTemplate, type AgentTemplate } from "@/lib/agent-templates";
+import { fetchAgentCanvasSnapshot } from "@/lib/canvas/client";
+import { useAgentParamReflect } from "@/hooks/use-agent-param-reflect";
 
-// workstation.css 有意「不」在这里 import：它是 ~37KB 的专业模式专用样式，
-// 从这里静态 import 会让它进入首页的 render-blocking <link rel=stylesheet>。
-// 它跟着 InvokeInspiredWorkstation 自己的 import 走懒加载 chunk（同文件里的
-// driver.js/dist/driver.css 已经证明这条路径可行）。占位需要的 .pro-app-shell
-// 基块留在 globals.css 里。
-const InvokeInspiredWorkstation = dynamic(() => import("@/components/pro-workstation/InvokeInspiredWorkstation").then((mod) => mod.InvokeInspiredWorkstation), {
-  ssr: false,
-  loading: () => <div className="lg-card rounded-ios-4xl p-5 text-ios-footnote text-[rgba(0,0,0,0.46)]">加载专业工作站...</div>,
-});
+// 2026-08-27 專業工作站入口移除：AI 工作站（agent 模式）已吸收其獨有機制
+// （LoRA 庫 / 配方模板 / kunpeng 風格库），舊工作站不再被動態 import。
 
-// AGENT_PARAM_LABELS（D-12 撤销条项目名）随三态復原一起抽到
-// hooks/use-agent-param-reflect.ts，从这里 import。
+// AGENT_PARAM_LABELS（D-12 撤销条项目名）留在 hooks/use-agent-param-reflect.ts；
+// 撤销条 UI 已随罪状 7 删除，钩子里的三态标记仍服务参数回流。
 
 // 聊天区的懒加载 import 在 PromptInput 里：聊天区是那张卡片的一个面，
 // 由持有 toggle 的组件自己按需拉 chunk，这里不再需要它。
@@ -76,8 +65,6 @@ export function ImagePlayground({ suggestions }: { suggestions: Suggestion[] }) 
   // D-1 + D-24 状态B：agent 是卡片的第四个面，和 edit / upscale 同一层级的 toggle。
   // 按下去只换卡片中间那块控件区（共用 generate/edit/upscale 那套 dust 转场），
   // 卡片底板、右边结果画布、底下案例区全部原地不动，也不跳 /agent 独立页。
-  const [showProfessionalMode, setShowProfessionalMode] = useState(false);
-  const [hasOpenedProfessionalMode, setHasOpenedProfessionalMode] = useState(false);
   const [mode, setMode] = useState<PlaygroundMode>("generate");
   const [displayMode, setDisplayMode] = useState<PlaygroundMode>("generate");
   const [animState, setAnimState] = useState<"idle" | "exit" | "enter">("idle");
@@ -86,13 +73,23 @@ export function ImagePlayground({ suggestions }: { suggestions: Suggestion[] }) 
   // 2026-08-25 模板庫：點卡注入 pending（nonce 讓「換一張卡」也是新注入）。
   // directive 是隱形引導詞：隨首條訊息經網關 system 欄位注入，用戶全程不可見。
   const [agentTemplateInjection, setAgentTemplateInjection] = useState<{ text: string; nonce: number; directive?: string } | null>(null);
+  // C4 生成閉環事件橋：導演台視口「生成真实画面」完成 capture+上傳後 dispatch
+  // director-render-request → 與模板庫共用同一注入 setter（AgentChatSurface 的
+  // injection effect 會等 connection open 後靜默發送）。卸載時移除監聽。
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ text?: unknown }>).detail;
+      if (!detail || typeof detail.text !== "string" || !detail.text.trim()) return;
+      setAgentTemplateInjection({ text: detail.text, nonce: Date.now() });
+    };
+    window.addEventListener(DIRECTOR_RENDER_REQUEST_EVENT, handler);
+    return () => window.removeEventListener(DIRECTOR_RENDER_REQUEST_EVENT, handler);
+  }, []);
   // 模板庫退場旗標：發出第一條用戶消息（模板注入或手打）即收起，之後不再出現。
   const [agentTemplateDismissed, setAgentTemplateDismissed] = useState(false);
   // wish 插件深链（?agent=1&session=<uuid>）：落地后直开该会话而非新开对话。
   const [initialAgentSessionId, setInitialAgentSessionId] = useState("");
-  // 只有从普通模式 LoRA 引导末步「前往专业模式」进入时才为 true，触发专业模式 LoRA 教学
-  const [loraTourFromGuide, setLoraTourFromGuide] = useState(false);
-  const { images, timings, failedProviders, isLoading, recentWorkflows, tasks, startGeneration } = useImageGeneration({ enableServerHistory: showProfessionalMode });
+  const { images, timings, failedProviders, isLoading, startGeneration, cancelTask, tasks } = useImageGeneration();
   const { user, isLoggedIn, refresh } = useAuth();
   const { toast } = useToast();
   const initialSuggestions = useMemo(() => getInitialSuggestions(suggestions), [suggestions]);
@@ -102,9 +99,6 @@ export function ImagePlayground({ suggestions }: { suggestions: Suggestion[] }) 
   const [durationSeconds, setDurationSeconds] = useState<number | undefined>(() => defaultDuration(MODEL_CONFIGS.fast.image_tinchak));
   const [generateAudio, setGenerateAudio] = useState(() => defaultGenerateAudio(MODEL_CONFIGS.fast.image_tinchak));
   const [stylePreset, setStylePreset] = useState<StylePreset>("none");
-  const [casePrompt, setCasePrompt] = useState("");
-  /** 案例卡「用此工作流打开」待灌入工作台的配方（nonce 保证同一案例可重复触发）。 */
-  const [showcaseRecipe, setShowcaseRecipe] = useState<{ json: string; nonce: number } | null>(null);
   const [referenceImages, setReferenceImages] = useState<ReferenceImage[]>([]);
 // PixAI edit/upscale results are delivered straight to the result canvas on
 // the right; they do not go through the normal generation queue.
@@ -129,8 +123,46 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
   }, []);
   const handleCanvasSummary = useCallback(() => canvasHostRef.current?.summarize(), []);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  // Bug1a：模板庫退場旗標隨「進入新對話」復位。session id 變了 = 開新聊天 =
+  // 畫布已被清空，模板庫必須再次出現（「開啟新聊天就代表 Canvas 進入模板展示態」）；
+  // 續上同一會話（toggle 往返 / 刷新 resume）不復位 —— 那是繼續對話，不是新開始。
+  // ref 記住上一個非空 id：卸載-重掛時的 onSessionChange(null) 中間態不許把
+  // 錨點洗掉，否則同會話 resume 也會被誤判成「新對話」而重播模板庫。
+  const prevAgentSessionRef = useRef<string | null>(null);
+  const handleAgentSessionChange = useCallback((nextSessionId: string | null) => {
+    if (nextSessionId === null) {
+      setCurrentSessionId(null);
+      return;
+    }
+    if (nextSessionId !== prevAgentSessionRef.current) {
+      prevAgentSessionRef.current = nextSessionId;
+      setAgentTemplateDismissed(false);
+    }
+    setCurrentSessionId(nextSessionId);
+  }, []);
   const canvasHost = useCanvasChat(currentSessionId);
   canvasHostRef.current = canvasHost;
+
+  // 雙向同步方向A：畫布選中 workflow 節點 → chat 切到該節點所屬會話。
+  // switchSessionRef 由 AgentChatSurface 上拋（畫布 → chat 方向唯一入口）；
+  // 節點不帶 session_id（普通生成/提示卡）不切，避免誤切。
+  // 反饋閉環靠 currentSessionId 兜底：切完後 selectedNodeId 對應節點的
+  // session_id === currentSessionId，相等判斷擋住死循環。
+  const switchSessionRef = useRef<((sessionId: string) => Promise<boolean>) | null>(null);
+  // 暴君裁定 2026-09-01：套模板「留舊開新」——AgentChatSurface 上拋 startNewSession。
+  const startNewSessionRef = useRef<(() => Promise<boolean>) | null>(null);
+  const lastLinkedSelectionRef = useRef<string | null>(null);
+  useEffect(() => {
+    const nodeId = canvasHost.selectedNodeId;
+    if (!nodeId) return;
+    const node = canvasHost.nodes.find((n) => n.id === nodeId);
+    const targetSessionId = node?.metadata?.session_id;
+    if (!targetSessionId) return;
+    if (targetSessionId === currentSessionId) return;
+    if (lastLinkedSelectionRef.current === nodeId) return;
+    lastLinkedSelectionRef.current = nodeId;
+    void switchSessionRef.current?.(targetSessionId);
+  }, [canvasHost.selectedNodeId, canvasHost.nodes, currentSessionId]);
 
   // 模板庫只在「畫布空且無對話」的初始態出現：有任何節點/計畫（模板鋪過、
   // agent 建過、或歷史專案恢復）或已發過消息（agentTemplateDismissed）就讓位。
@@ -145,33 +177,117 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
    * ① initialPrompt 經既有 useAgentChat 鏈路自動發出（PromptInput →
    *    AgentChatSurface 的 agentInjection：等連線 open 才 send，會話未開先 autoStart）。
    * ② 模板 slots 經 recipeTemplateToRecallConfig → templateToCanvasLayout
-   *    → useCanvasChat.addNodes 鋪成 workflow，等 agent 修改。
+   *    → useCanvasChat.replaceWorkflowNodes 鋪成 workflow，等 agent 修改。
    * ③ 首條消息落地即收起畫廊（onUserMessage）。
+   * 2026-08-26 環節選擇：第二參 selectedIndices 來自卡面圓環，先 cropTemplate
+   *    裁剪（全選 = 原對象零開銷），注入與鋪畫布都用裁剪後的模板。
+   * 09-01 裁定：套模板先 startNewSession 留舊開新，鋪設與注入延遲到新 session 落地（見 pendingTemplateRef effect）。
    */
-  const handleUseAgentTemplate = useCallback((template: AgentTemplate) => {
-    setAgentTemplateInjection({ text: template.initialPrompt, nonce: Date.now(), directive: template.directive });
-    applyTemplateToCanvas(canvasHostRef.current?.addNodes, template);
+  const pendingTemplateRef = useRef<AgentTemplate | null>(null);
+  // 復用路徑判斷用：start() 的 .then 結算時 React state 尚未提交，
+  // state 讀到的是閉包舊值，鏡像 ref 才能拿到此刻真實 sessionId。
+  const currentSessionIdRef = useRef<string | null>(null);
+  currentSessionIdRef.current = currentSessionId;
+  // Bug3：同一 workflow 重點 = 替換不是疊加。cropTemplate 裁剪後 template.id 不變，
+  // 重選環節再點同一張卡 = 同 id 替換：舊節點及其連線一次清掉，history 一格可整體 undo。
+  const applyPendingTemplate = useCallback((cropped: AgentTemplate) => {
+    const layout = templateToCanvasLayout(cropped);
+    canvasHostRef.current?.replaceWorkflowNodes(cropped.id, layout.nodes, layout.connections);
+    setAgentTemplateInjection({ text: cropped.initialPrompt, nonce: Date.now(), directive: cropped.directive });
     setAgentTemplateDismissed(true);
   }, []);
+  // 暴君裁定 09-01：套模板鋪進新會話。session 切換（含 newCanvasSession 清場）
+  // 落地後才鋪節點+注入——本 effect 註冊在 useCanvasChat 之後，清場先跑、鋪設後跑；
+  // 也晚於 AgentChatSurface 的 onSessionChange（子 effect 先行），dismissed 復位不會蓋掉。
+  useEffect(() => {
+    const pending = pendingTemplateRef.current;
+    if (!pending || !currentSessionId) return;
+    pendingTemplateRef.current = null;
+    applyPendingTemplate(pending);
+  }, [currentSessionId]);
+  const handleUseAgentTemplate = useCallback((template: AgentTemplate, selectedIndices: number[]) => {
+    const cropped = cropTemplate(template, selectedIndices);
+    setAgentTemplateDismissed(true);
+    const start = startNewSessionRef.current;
+    if (!start) {
+      // ref 未接上（極端時序）：退回舊行為直接鋪在當前會話，模板不能憑空消失。
+      applyPendingTemplate(cropped);
+      return;
+    }
+    pendingTemplateRef.current = cropped;
+    void Promise.resolve(start()).then((ok) => {
+      if (!ok) {
+        // 開新失敗（closed/網路）：沒有 session 變化 effect 會啞火，退回當前會話直接鋪。
+        if (pendingTemplateRef.current === cropped) {
+          pendingTemplateRef.current = null;
+          applyPendingTemplate(cropped);
+        }
+        return;
+      }
+      // 復用路徑（競態治本）：startNewSession 復用了在途管線剛建的新鮮會話，
+      // sessionId 沒有發生 transition → pending effect 永不觸發。就地結算：
+      // 若此刻 state 已指向該會話（effect 也會跑，pending 已清，冪等），直接鋪。
+      if (pendingTemplateRef.current === cropped && currentSessionIdRef.current) {
+        pendingTemplateRef.current = null;
+        applyPendingTemplate(cropped);
+      }
+    });
+  }, [applyPendingTemplate]);
+
+  // Bug1b：會話恢復回填。refresh/重進後左聊天續上（本地存檔 resume），但右畫布
+  // 空白 —— 快照此前只有上行沒有下行。監聽 currentSessionId：每個新拿到的 sid 拉
+  // 一次閘道存檔（GET 同上行端點），僅當 nodes>0 才回填；拉取異步到達時 sessionId
+  // 變化 effect（newCanvasSession 清場）已跑完，load 直接覆蓋即可。用戶搶先鋪過
+  // 模板（或有計畫卡）就不覆蓋，避免快照把剛做好的東西沖掉。
+  const restoredSnapshotForRef = useRef<string | null>(null);
+  useEffect(() => {
+    const sid = currentSessionId;
+    if (!sid || restoredSnapshotForRef.current === sid) return;
+    restoredSnapshotForRef.current = sid;
+    let cancelled = false;
+    void (async () => {
+      const snapshot = await fetchAgentCanvasSnapshot(sid);
+      if (cancelled || !snapshot) return;
+      const host = canvasHostRef.current;
+      if (!host || host.nodes.length > 0 || host.plans.length > 0) return;
+      host.restoreAgentSnapshot(snapshot);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentSessionId]);
   const [progressStartedAt, setProgressStartedAt] = useState<number>();
   const [progressDurationMs, setProgressDurationMs] = useState(NORMAL_PROGRESS_DURATION_MS);
   const [showProgress, setShowProgress] = useState(false);
-  const [capabilityNotice, setCapabilityNotice] = useState("");
 
+  // 進度條 ETA：服務端已按模型統計成功生成的耗時 p80（/api/user/model-eta，
+  // 數據源 = generation_attempt.latency_ms 遙測）。掛載時拉一次；讀不到
+  // （遙測不可用/樣本不足）就沿用固定 duration。ETA 不顯示，只調進度流逝。
+  const [modelEtaMs, setModelEtaMs] = useState<Record<string, number>>({});
   useEffect(() => {
-    if (showProfessionalMode) {
-      document.body.classList.add("pro-mode-active");
-    } else {
-      document.body.classList.remove("pro-mode-active");
-    }
-    return () => document.body.classList.remove("pro-mode-active");
-  }, [showProfessionalMode]);
+    let cancelled = false;
+    fetch("/api/user/model-eta")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload: { models?: Record<string, number> } | null) => {
+        if (!cancelled && payload?.models) setModelEtaMs(payload.models);
+      })
+      .catch(() => {
+        // ETA 是加分項：拉不到就靜默用固定 duration。
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const etaDurationForModel = useCallback(
+    (modelId: string): number => modelEtaMs[modelId] ?? NORMAL_PROGRESS_DURATION_MS,
+    [modelEtaMs],
+  );
 
   // 2026-08-25 canvas 常駐化：右側面板 mode 由 displayMode 唯一決定——agent 模式
   // 恆為 canvas（模板庫→畫布），非 agent 模式恆為 ImageDisplay。原黏性旗標/
   // workflow_start 切換/節點數回退等中間態邏輯全部收斂刪除。
   const resultMode: "image" | "canvas" = displayMode === "agent" ? "canvas" : "image";
-  const inCanvasWorkstation = displayMode === "agent" && !showProfessionalMode;
+  const inCanvasWorkstation = displayMode === "agent";
   // ─── 畫布工作站：畫布模式鎖頁面捲動（面板記憶載入/持久化在 use-chat-panel）───
   useEffect(() => {
     if (!inCanvasWorkstation) return;
@@ -228,18 +344,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
     if (mode !== "agent" && agentSeed) setAgentSeed("");
   }, [mode, agentSeed]);
 
-  const handleExitProfessionalMode = useCallback(() => setShowProfessionalMode(false), []);
-  const openProfessionalMode = useCallback(() => {
-    // 只有普通模式 LoRA 引导末步按过「前往专业模式」才播放专业模式 LoRA 教学
-    const armed = typeof window !== "undefined" && window.localStorage.getItem(PRO_LORA_TOUR_ARMED_KEY) === "1";
-    if (armed) window.localStorage.removeItem(PRO_LORA_TOUR_ARMED_KEY);
-    setLoraTourFromGuide(armed);
-    setHasOpenedProfessionalMode(true);
-    setShowProfessionalMode(true);
-  }, []);
-
   /**
-   * 普通模式和专业模式共用同一个稳定引用，绝不要在 JSX 里写成行内箭头函数：
    * 工作站的 applyCreatorResource 依赖 [onModelChange]，一旦这个 prop 每次
    * render 都换身份，<CreatorResourcePanel> 的 memo 就完全失效，
    * 32 张资源卡（含 32 个 next/image）会跟着生成期间的每一次 render 重渲染。
@@ -260,11 +365,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
   // PromptInput 那側沒有 memo 依賴，但工作站 onModelChange 的穩定引用設計
   // 不允許這裡換身分。
   const {
-    agentBaseline,
-    agentTouched,
     handleParamsReflected,
-    undoAgentParam,
-    restoreMyParams,
     userSetAspectRatio,
     userSetOutputResolution,
     userSetModel,
@@ -279,34 +380,12 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
 
   /**
    * 模型不支持参考图时清空并说明原因。
-   *
-   * 旧版把 setCapabilityNotice 写在 setReferenceImages 的 updater 内部 —— updater 必须
-   * 是纯函数，StrictMode 会调用两次，并发渲染下 React 还可能重放它，
-   * 于是这条提示什么时候出现取决于运气。移到 effect 里，清空与提示同时发生。
    */
   useEffect(() => {
     if (generationModel(selectedModels.image_tinchak)?.referenceImages) return;
     if (referenceImages.length === 0) return;
     setReferenceImages([]);
-    setCapabilityNotice("已移除参考图：所选模型不支持参考图输入。");
   }, [selectedModels.image_tinchak, referenceImages.length]);
-
-  const handleUseCasePrompt = (prompt: string, style: StylePreset) => {
-    setCasePrompt(prompt);
-    setStylePreset(style);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  };
-
-  /**
-   * 案例卡「用此工作流打开」：把案例携带的完整配方交给专业工作台，
-   * 经 workflow-recall 通道（parseWorkflowRecallConfig → applyWorkflowRecallConfig）
-   * 灌入 —— 与 R 键 / PNG 内嵌工作流同一条配方载入管线，不另开入口。
-   */
-  const handleOpenShowcaseWorkflow = useCallback((item: ShowcaseCase) => {
-    if (!item.recipe) return;
-    setShowcaseRecipe({ json: JSON.stringify(item.recipe), nonce: Date.now() });
-    openProfessionalMode();
-  }, [openProfessionalMode]);
 
   const handlePromptSubmit = useCallback(async (rawPrompt: string) => {
     if (!LOCAL_TEST_MODE && (!isLoggedIn || !user)) {
@@ -324,7 +403,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
     }
     const finalPrompt = enhancePrompt(rawPrompt, stylePreset);
     setProgressStartedAt(Date.now());
-    setProgressDurationMs(NORMAL_PROGRESS_DURATION_MS);
+    setProgressDurationMs(etaDurationForModel(selectedModels.image_tinchak));
     setShowProgress(true);
     await startGeneration(finalPrompt, ["image_tinchak"], { image_tinchak: selectedModels.image_tinchak }, {
       referenceImages,
@@ -339,95 +418,6 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
     }
   }, [isLoggedIn, user, stylePreset, selectedModels, outputResolution, durationSeconds, generateAudio, aspectRatio, startGeneration, toast, refresh, referenceImages, redirectToGithub]);
 
-  const handleProfessionalRun = useCallback(async (config: ProfessionalRunConfig) => {
-    if (!LOCAL_TEST_MODE && (!isLoggedIn || !user)) {
-      redirectToGithub();
-      return;
-    }
-    const requestedQuality: ModelMode = config.qualityProfile === "print" ? "quality" : "fast";
-    const normalized = normalizeGenerationConfig(selectedModels.image_tinchak, {
-      aspectRatio: aspectRatioFromImageSize(config.imageSize),
-      outputResolution: requestedQuality === "quality" ? "2k" : "1k",
-      durationSeconds: config.durationSeconds,
-      generateAudio: config.generateAudio,
-      qualityMode: requestedQuality,
-      referenceCount: referenceImages.length,
-      loraModelVersionIds: config.loraModelVersionIds,
-    });
-    const qualityMode: ModelMode = normalized.config.qualityMode;
-    /**
-     * 余额校验必须按「单张价 × 张数」算。
-     *
-     * 旧版是 generationCoins(modelId, normalized.config)：generationCoins 读的键是
-     * resolution，而 normalized.config 里叫 outputResolution —— 传进去等于没传，2K
-     * 一律按 1K 计价；再加上完全没乘 copies，界面写着「16 币」时这里只校验 1 币。
-     * 结果是余额不足的用户能提交，扣费在服务端才失败，8 张里可能只有前几张成功。
-     */
-    const copies = Math.max(1, config.copies ?? 1);
-    const coinsPerImage = generationCoins(selectedModels.image_tinchak, {
-      resolution: normalized.config.outputResolution,
-      durationSeconds: normalized.config.durationSeconds,
-      generateAudio: normalized.config.generateAudio,
-    });
-    const requiredCoins = Math.round(coinsPerImage * copies * 10) / 10;
-    // 能力调整提示是一次性的：这一轮没有被裁掉的字段就要清掉上一轮留下的横幅，
-    // 否则「已移除参考图」会一直挂在画布标题栏，直到用户刷新页面。
-    setCapabilityNotice(
-      normalized.clearedFields.length
-        ? `已按模型能力调整：${normalized.clearedFields.join("、")}。`
-        : "",
-    );
-    if (!LOCAL_TEST_MODE && user && !hasEnoughQuota(user, requiredCoins)) {
-      toast({
-        title: "余额不足",
-        description: `这次需要 ${requiredCoins} 币（${coinsPerImage} 币 × ${copies} 张），请先充值再继续`,
-        variant: "destructive",
-      });
-      return;
-    }
-    /**
-     * 专业模式不再套用普通模式的 stylePreset。
-     *
-     * 工作站有自己的风格系统（106 张风格卡 + applyStyleToPrompt），提示词交到这里时
-     * 已经是最终稿。旧版又叠一层 enhancePrompt(prompt, stylePreset)，会把用户在普通
-     * 模式随手点过的「电影感」偷偷混进专业模式的每一次生成，且界面上完全看不出来。
-     */
-    const finalPrompt = config.prompt;
-    setProgressStartedAt(Date.now());
-    setProgressDurationMs(NORMAL_PROGRESS_DURATION_MS);
-    setShowProgress(true);
-    await startGeneration(finalPrompt, ["image_tinchak"], { image_tinchak: selectedModels.image_tinchak }, {
-      referenceImages,
-      qualityMode,
-      contextPrompt: config.contextPrompt,
-      negativePrompt: config.negativePrompt,
-      negativeHint: config.negativeHint,
-      workflowPreset: config.workflowPreset,
-      workflowPresetLabel: config.workflowPresetLabel,
-      promptHint: config.promptHint,
-      productionIntent: config.productionIntent,
-      imageSize: config.imageSize,
-      imageSizes: config.imageSizes,
-      aspectRatio: normalized.config.aspectRatio,
-      outputResolution: normalized.config.outputResolution,
-      durationSeconds: normalized.config.durationSeconds,
-      generateAudio: normalized.config.generateAudio,
-      loraModelVersionIds: normalized.config.loraModelVersionIds,
-      styleTemplate: config.styleTemplate,
-      qualityProfile: config.qualityProfile,
-      seedHint: config.seedHint,
-      regionalPrompts: config.regionalPrompts,
-      estimatedCredits: config.estimatedCredits,
-      referenceImageRoles: config.referenceImageRoles,
-      copies: config.copies,
-      concurrency: config.concurrency,
-      retryOfTaskId: config.retryOfTaskId,
-    });
-    if (!LOCAL_TEST_MODE) {
-      refresh().catch(() => {});
-    }
-  }, [isLoggedIn, user, selectedModels, startGeneration, toast, refresh, referenceImages, redirectToGithub]);
-
   const usedFallback = images.some((image) =>
     image.endpointLabel === "fallback" && (image.image || image.imageUrl),
   );
@@ -436,6 +426,15 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
   useEffect(() => {
     if (usedFallback) setProgressDurationMs(FALLBACK_PROGRESS_DURATION_MS);
   }, [usedFallback]);
+
+  // 離頁再回來時本地沒有進度條狀態，但 hook 恢復了 server 端還在跑的任務（isLoading=true）：
+  // 補喚進度條，避免「回來進度消失」；完成時由上方 effect 依 isLoading=false 收起並揭曉結果。
+  useEffect(() => {
+    if (!isLoading || showProgress || failedProviders.length > 0) return;
+    if (hasGeneratedImage) return;
+    setShowProgress(true);
+    setProgressStartedAt(Date.now());
+  }, [failedProviders.length, hasGeneratedImage, isLoading, showProgress]);
 
   useEffect(() => {
     if (failedProviders.length > 0 || hasGeneratedImage) {
@@ -482,38 +481,19 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
         ? "已完成"
         : "当前可用";
 
+  // 人工终止：取最新一个未完成任务作为取消目标（hook 的 tasks 按
+  // createdAt 降序，mergeGenerationTaskProjections 已排序）。
+  const activeTask = tasks.find((task) => task.status === "queued" || task.status === "running") ?? null;
+  const handleCancelGenerate = activeTask
+    ? () => { void cancelTask(activeTask.taskId); }
+    : undefined;
+
   return (
     <>
-      {hasOpenedProfessionalMode && (
-        <div className={cn("pro-app-shell", !showProfessionalMode && "hidden")} aria-hidden={!showProfessionalMode}>
-          <InvokeInspiredWorkstation
-            active={showProfessionalMode}
-            suggestions={initialSuggestions}
-            referenceImages={referenceImages}
-            onReferenceImagesChange={setReferenceImages}
-            images={images}
-            isLoading={isLoading}
-            recentWorkflows={recentWorkflows}
-            tasks={tasks}
-            onRun={handleProfessionalRun}
-            modelId={selectedModels.image_tinchak}
-            onModelChange={handleModelChange}
-            onExitProfessionalMode={handleExitProfessionalMode}
-            loraTourFromGuide={loraTourFromGuide}
-            capabilityNotice={capabilityNotice}
-            externalResultUrl={pixaiResultUrl}
-            onTemplateResult={setPixaiResultUrl}
-            externalRecipeJson={showcaseRecipe}
-          />
-        </div>
-      )}
-
-      {!showProfessionalMode && (
-        <>
-          {/* 這一層不參與模式轉場：dust 動畫的範圍只有卡片中間那塊控制區
-              （在 PromptInput 裡）。上一版讓整頁跟著翻面，等於為了開個聊天區
-              把首頁整塊換掉——使用者要的是卡片換一面，不是換個網站。 */}
-          <div className="min-h-screen bg-transparent pb-28 pt-10 sm:pb-32">
+      {/* 這一層不參與模式轉場：dust 動畫的範圍只有卡片中間那塊控制區
+          （在 PromptInput 裡）。上一版讓整頁跟著翻面，等於為了開個聊天區
+          把首頁整塊換掉——使用者要的是卡片換一面，不是換個網站。 */}
+      <div className="min-h-screen bg-transparent pb-28 pt-10 sm:pb-32">
             <div className="page-shell">
               <div className={inCanvasWorkstation ? "block" : "grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(380px,460px)]"}>
                 {/* min-w-0 is load-bearing: an auto-sized grid column takes its
@@ -534,43 +514,14 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
                 >
                   {(chatHeaderExtra) => (
                     <>
-                  {/* D-12：助理改过的项在这里显形，可逐项撤销，也可一键恢复原设定。
-                      不显示「原值 → 现值」的箭头对照：控件上已经是现值，
-                      再画一遍只是噪音；使用者要的是「这项被动过」和「还我」。 */}
-                  {agentBaseline && agentTouched.size > 0 && (
-                    <div className="lg-float flex shrink-0 flex-wrap items-center gap-2 rounded-[18px] px-3.5 py-2.5">
-                      <Bot className="h-3.5 w-3.5 shrink-0 text-[#007AFF]" aria-hidden="true" />
-                      <span className="text-ios-caption1 text-[rgba(0,0,0,0.52)]">
-                        AI 助理改了 {agentTouched.size} 项设置
-                      </span>
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        {AGENT_PARAM_LABELS.filter(({ key }) => agentTouched.has(key)).map(
-                          ({ key, label }) => (
-                            <button
-                              key={key}
-                              type="button"
-                              onClick={() => undoAgentParam(key)}
-                              className="inline-flex h-7 cursor-pointer items-center gap-1 rounded-full bg-[rgba(0,0,0,0.05)] px-2.5 text-ios-caption1 font-medium text-[rgba(0,0,0,0.62)] transition-colors duration-200 hover:bg-[rgba(0,0,0,0.09)] hover:text-[rgba(0,0,0,0.85)]"
-                              title={`撤销「${label}」，还原成你原来的设定`}
-                            >
-                              <RotateCcw className="h-3 w-3" aria-hidden="true" />
-                              {label}
-                            </button>
-                          ),
-                        )}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={restoreMyParams}
-                        className="ml-auto shrink-0 cursor-pointer rounded-full bg-[rgba(0,122,255,0.10)] px-3 py-1 text-ios-caption1 font-semibold text-[#007AFF] transition-colors duration-200 hover:bg-[rgba(0,122,255,0.16)]"
-                      >
-                        恢复我的设定
-                      </button>
-                    </div>
-                  )}
+                  {/* 罪状 7（暴君人肉评测）：聊天框顶栏的「AI 助理改了 N 项设置 /
+                      模型 / 恢复我的设定」撤销条整块删除（非隐藏）——控件上已是现值，
+                      再画一遍被动过什么只是噪音；D-12 的参数回流本身（模型/比例/
+                      解析度真正被改掉）仍然生效，撤的只是这条提示栏。 */}
                   <PromptInput
                     onSubmit={handlePromptSubmit}
                     isLoading={isLoading}
+                    onCancelGenerate={handleCancelGenerate}
                     isLoggedIn={LOCAL_TEST_MODE ? true : isLoggedIn}
                     suggestions={initialSuggestions}
                     stylePreset={stylePreset}
@@ -583,14 +534,11 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
                     onDurationChange={setDurationSeconds}
                     generateAudio={generateAudio}
                     onGenerateAudioChange={setGenerateAudio}
-                    externalPrompt={casePrompt}
                     referenceImages={referenceImages}
                     onReferenceImagesChange={setReferenceImages}
                     models={PROVIDERS.image_tinchak.models}
                     modelId={selectedModels.image_tinchak}
                     onModelChange={userSetModel}
-                    isProfessionalMode={showProfessionalMode}
-                    onToggleProfessionalMode={openProfessionalMode}
                     mode={mode}
                     onModeChange={handleModeChange}
                     animState={animState}
@@ -609,7 +557,9 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
                     initialAgentSessionId={initialAgentSessionId}
                     onCanvasEvent={handleCanvasEvent}
                     canvasStateProvider={handleCanvasSummary}
-                    onSessionChange={setCurrentSessionId}
+                    onSessionChange={handleAgentSessionChange}
+                    switchSessionRef={switchSessionRef}
+                    startNewSessionRef={startNewSessionRef}
                     agentInjection={agentTemplateInjection}
                     onUserMessage={() => setAgentTemplateDismissed(true)}
                   />
@@ -637,16 +587,11 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
             </div>
           </div>
 
-          {/* 聊天区开在卡片里，不占屏，所以案例轮播照常留着：
-              使用者一边跟助理聊，一边还能看到案例、点一下换个方向。 */}
-          <CaseShowcase onUsePrompt={handleUseCasePrompt} onOpenWorkflow={handleOpenShowcaseWorkflow} />
           {/* 場景指南及以下为 SEO 内容：保留 DOM，但视觉隐藏。 */}
           <div className="hidden" aria-hidden="true">
             <UseCaseLinks />
             <FaqSection />
           </div>
-        </>
-      )}
 
       {(!showProgress && (isLoading || failedProviders.length > 0)) && (
         <div className="pointer-events-none fixed inset-x-0 bottom-4 z-30 flex justify-center px-4 sm:bottom-6">

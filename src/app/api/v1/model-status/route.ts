@@ -20,7 +20,9 @@ import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
 import { readAdminPools } from "@/lib/admin-pool-store";
 import { getRuntimeChannelOverrides } from "@/lib/channel-overrides";
 import { probeAllModelsStatus } from "@/lib/model-status-probe";
+import { readSupplierHealthSignal } from "@/lib/supplier-health-signal";
 import { listRoutingEvents, summarizeRecentModelStats, type ModelRecentStats } from "@/lib/routing-telemetry";
+import { summarizeChannelBalance } from "@/lib/routing-balance-signal";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,16 +31,29 @@ export const dynamic = "force-dynamic";
 const RECENT_STATS_TTL_MS = 60_000;
 const RECENT_STATS_EVENT_LIMIT = 200;
 let recentStatsCache: { expiresAt: number; stats: ModelRecentStats[] } | null = null;
+let recentEventsCache: { expiresAt: number; events: Awaited<ReturnType<typeof listRoutingEvents>> } | null = null;
 
 /**
  * 每模型的 last_24h 統計（jobs/delivered/failed/success_rate/refunded）。
  * 數據源與 /admin 模型使用分布同輪（listRoutingEvents + 純函數統計），遙測讀取
  * 失敗時回空列表——統計是加分項，絕不讓它把 model-status 打掛。
  */
+/** 最近 routing events（60 秒緩存）：last_24h 統計與渠道餘額信號共用一次讀取。 */
+async function getRecentRoutingEvents() {
+  const now = Date.now();
+  if (recentEventsCache && recentEventsCache.expiresAt > now) return recentEventsCache.events;
+  const events = await listRoutingEvents(RECENT_STATS_EVENT_LIMIT).catch((error) => {
+    console.error("[model-status] routing events unavailable:", error);
+    return [] as Awaited<ReturnType<typeof listRoutingEvents>>;
+  });
+  recentEventsCache = { expiresAt: now + RECENT_STATS_TTL_MS, events };
+  return events;
+}
+
 async function getRecentModelStats(): Promise<ModelRecentStats[]> {
   const now = Date.now();
   if (recentStatsCache && recentStatsCache.expiresAt > now) return recentStatsCache.stats;
-  const stats = await listRoutingEvents(RECENT_STATS_EVENT_LIMIT)
+  const stats = await getRecentRoutingEvents()
     .then((events) => summarizeRecentModelStats(events, now))
     .catch((error) => {
       console.error("[model-status] last_24h stats unavailable:", error);
@@ -70,14 +85,51 @@ export async function GET(req: NextRequest) {
     getRuntimeChannelOverrides(),
     getRecentModelStats(),
   ]);
-  const snapshot = await probeAllModelsStatus({ env: process.env, pools, overrides });
+  const snapshot = await probeAllModelsStatus({ env: process.env, pools, overrides, recentStats });
 
   // 每模型追加 last_24h（最近 24h 真實表現統計）。窗口内無樣本的模型不帶該字段——
-  // 沒數據就誠實地不裝有數據，agent 憑 availability 判斷。
+  // 沒數據就誠實地不裝有數據。availability 已由 probe 層用同一份統計裁決：
+  // 近 24h 有真實交付 → available（真實産物是最高證據，GET /models 探測的
+  // 404 假陰性不推翻它）；非 OpenAI 兼容渠道（metaso/filmera/adobe2api）探測
+  // 無意義，一律 unknown，絕不允許假陰性標 unavailable。
   const statsByModel = new Map(recentStats.map((stats) => [stats.modelId, stats]));
+  // R7-E：渠道餘額信號——連續 quota_exhausted 斷流的模型覆寫 availability=unavailable
+  // + note「渠道欠費」，agent 提交前就換道，不把任務燒進死隊列。探測/遙測故障 →
+  // 空 events → 無信號，不攔任何人。
+  const balanceSignals = summarizeChannelBalance(await getRecentRoutingEvents());
+  // 执行侧同源裁决（2026-08-30）：worker 调度看 supplier_capability + supplier/account
+  // health_status + cooldown，而旧探测只看「渠道 GET /models 可达」——两套判据错位：
+  // 渠道 /models 200 但账户 cooldown/disabled 时，探测报 available、执行直接死
+  // （08-30 事故：AI 依探测 rerun，worker 无可用供应商，任务全 deadline_exceeded）。
+  // 这里把 scheduler 的同一把尺（readSupplierHealthSignal）作为最终裁决层：执行侧
+  // 没有可用供应商 → 无论探测/余额信号说什么都压成 unavailable（真实产物是历史，
+  // 当前能否执行只认控制面健康）。DB 不可达 → 空信号，维持原裁决（fail-open）。
+  const supplierSignal = await readSupplierHealthSignal().catch(() => ({
+    availableByModel: {} as Record<string, boolean>,
+    reasonByModel: {} as Record<string, string>,
+  }));
+  // probe 的 media_type 是 "image"/"video"；signal 的 kind 是 "image_generate"/"video_generate"。
+  const signalKindByMedia = (media: string): string => (media === "video" ? "video_generate" : "image_generate");
   const models = snapshot.models.map((model) => {
     const last24h = statsByModel.get(model.id);
-    return last24h ? { ...model, last_24h: last24h } : model;
+    const base = last24h ? { ...model, last_24h: last24h } : model;
+    const balance = balanceSignals.get(model.id);
+    const withBalance = balance
+      ? {
+          ...base,
+          availability: "unavailable" as const,
+          note: `渠道欠费：最近连续 ${balance.consecutiveQuotaFailures} 笔上游拒单（余额不足），充值前请换其他模型`,
+          channel_balance: balance,
+        }
+      : base;
+    // 执行侧最终裁决：无可用供应商则不可用（覆盖探测/余额的一切乐观结论）。
+    const key = `${model.id}:${signalKindByMedia(model.media_type)}`;
+    const executionAvailable = supplierSignal.availableByModel[key];
+    if (executionAvailable === false) {
+      const reason = supplierSignal.reasonByModel[key] ?? "执行侧无可用供应商";
+      return { ...withBalance, availability: "unavailable" as const, note: `${reason}，请稍后重试或换其他模型` };
+    }
+    return withBalance;
   });
 
   const response = addRateLimitHeaders(

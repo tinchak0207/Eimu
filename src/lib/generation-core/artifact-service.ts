@@ -56,6 +56,8 @@ export interface PersistedOutputArtifact {
   deliveryUrl: string;
   validated: ValidatedImage;
   byteSize: number;
+  /** false = canonical 行早已存在（重放/晚到），呼叫端不得重複遞增 completed_count。 */
+  inserted: boolean;
 }
 
 export interface PersistedReferenceInput {
@@ -279,17 +281,27 @@ export function validateAndDescribeBase64Image(base64: string, maxBytes: number)
   return { ...validated, buffer, byteSize: buffer.length };
 }
 
+export interface RecordedArtifact {
+  id: string;
+  /**
+   * false = 該 (job_id, output_index) 已有 canonical 行（晚到/重放的同一輸出）。
+   * 呼叫端據此決定是否遞增 completed_count（INC-0831 對帳閉環的冪等閘）。
+   */
+  inserted: boolean;
+}
+
 /**
- * 把校验结果写进 `artifact` 表。目前没有生产路由调用它 —— 现有的图片生成路由
- * 还没有 job_id 可挂（control plane 尚未接入实际生成流程），先保证函数本身可用、
- * 有测试覆盖，供未来接入时直接调用。
+ * 把校驗结果写进 `artifact` 表。輸出 artifact 以 (job_id, output_index) 為冪等鍵
+ * （016_provider_reconciliation.sql 的 partial unique index）：同一輸出無論 worker
+ * 先到還是 provider reconciliation 晚到，永遠只有一行 canonical，重放一律
+ * DO NOTHING 並返回既有行 id。
  */
 export async function recordArtifact(
   input: RecordArtifactInput,
   sql: GenerationSql = getGenerationSql(),
-): Promise<string> {
+): Promise<RecordedArtifact> {
   const id = randomUUID();
-  await sql`
+  const inserted = await sql<{ id: string }[]>`
     INSERT INTO artifact (
       id, job_id, attempt_id, role, object_key, delivery_url, sha256, mime_type,
       byte_size, width, height, output_index, retention_expires_at, metadata_json
@@ -300,8 +312,19 @@ export async function recordArtifact(
       ${input.outputIndex ?? null}, ${input.retentionExpiresAt ?? null},
       ${sql.json(JSON.parse(JSON.stringify(input.metadata ?? {})) as never)}
     )
+    ON CONFLICT (job_id, output_index) WHERE role = 'output' AND output_index IS NOT NULL
+    DO NOTHING
+    RETURNING id
   `;
-  return id;
+  if (inserted[0]) return { id: String(inserted[0].id), inserted: true };
+  const existing = await sql<{ id: string }[]>`
+    SELECT id FROM artifact
+    WHERE job_id = ${input.jobId} AND role = 'output' AND output_index = ${input.outputIndex ?? null}
+    ORDER BY created_at ASC, id ASC
+    LIMIT 1
+  `;
+  if (!existing[0]) throw new Error(`Artifact upsert lost its canonical row for job ${input.jobId} output ${input.outputIndex}.`);
+  return { id: String(existing[0].id), inserted: false };
 }
 
 function extensionForMimeType(mimeType: string): string {
@@ -354,7 +377,7 @@ export async function persistOutputArtifact(input: {
     addRandomSuffix: false,
     cacheControlMaxAge: 31_536_000,
   });
-  const id = await recordArtifact({
+  const recorded = await recordArtifact({
     jobId: input.jobId,
     attemptId: input.attemptId,
     role: "output",
@@ -366,7 +389,7 @@ export async function persistOutputArtifact(input: {
     retentionExpiresAt: input.retentionExpiresAt ?? null,
     metadata: { endpointLabel: input.endpointLabel },
   }, sql);
-  return { id, objectKey, deliveryUrl: blob.url, validated, byteSize: buffer.length };
+  return { id: recorded.id, objectKey, deliveryUrl: blob.url, validated, byteSize: buffer.length, inserted: recorded.inserted };
 }
 
 /** Reference inputs are immutable Blob objects before task creation; the task then stores their public URLs. */

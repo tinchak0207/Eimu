@@ -3,6 +3,7 @@ import { readBearerToken, type BizApiKey } from "@/lib/biz-api-keys";
 import { authenticateBizApiKey } from "@/lib/biz-api-key-store";
 import { addRateLimitHeaders } from "@/lib/biz-rate-limit-response-headers";
 import { submitGenerationCommand } from "@/lib/generation-core/command-service";
+import { enforceQuotaGate } from "@/lib/generation-core/quota-precheck";
 import { IdempotencyConflictError } from "@/lib/generation-core/job-repository";
 import { generationTaskResponse } from "@/lib/generation-core/task-response";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
@@ -61,6 +62,18 @@ export async function POST(req: NextRequest) {
   const voice = typeof body.voice === "string" && body.voice ? body.voice : "default";
   const callbackUrl = typeof body.callback_url === "string" ? body.callback_url : null;
 
+  // 手術 P1 計費閘（詳見 quota-precheck.ts）：TTS 今日為 0 額提交（無 reserve 可
+  // 跳），閘門對 0 額直通、兩種模式下行為一致、不產生任何新 I/O；日後 TTS 定價
+  // 接入後把 baseBillingAmount 改為實際金額，即自動獲得配額預檢與 reserve 跳過。
+  const gate = await enforceQuotaGate({
+    bizKeyId: apiKey.id,
+    billingUserId: apiKey.userId,
+    baseBillingAmount: 0,
+  });
+  if (!gate.ok) {
+    return errorResponse(gate.status, gate.message, gate.type, gate.code, traceId);
+  }
+
   try {
     const submitted = await submitGenerationCommand({
       tenantId: `biz:${apiKey.id}`,
@@ -74,6 +87,7 @@ export async function POST(req: NextRequest) {
       workflow: { voice, inputLength: input.length },
       responseFormat: "b64_json",
       callbackUrl,
+      billingAmount: gate.billingAmount,
     });
     const response = addRateLimitHeaders(
       NextResponse.json(generationTaskResponse(submitted.job), {

@@ -16,10 +16,10 @@ interface ActionRowProps {
   stylePreset: StylePreset;
   /** 父层 handleStyleChange 原名下發：清除已套用风格走同一条写入路径。 */
   handleStyleChange: (preset: StylePreset) => void;
-  isProfessionalMode: boolean;
-  onToggleProfessionalMode: () => void;
   /** 父层 handlePrimaryAction 原名下發：generate/edit/upscale 三模式共用一颗 CTA。 */
   handlePrimaryAction: () => void;
+  /** 生成中的人工终止回调（generate 模式 isLoading 时显示「停止」次级按钮）。 */
+  onCancelGenerate?: () => void;
   primaryDisabled: boolean | undefined;
   isLoading?: boolean;
   isVideo: boolean;
@@ -31,7 +31,7 @@ interface ActionRowProps {
 
 /**
  * 底部動作列（Task 9 自 PromptInput 抽出）：改图/放大/AI 助理三颗同语法 toggle、
- * 已套用风格 pill、专业控制 toggle、CTA。agent 面无底行：收起/返回由聊天面
+ * 已套用风格 pill、CTA。agent 面无底行：收起/返回由聊天面
  * Header 的 onExit 按钮承担。
  * 不参与模式切换动画，始终原地不动（高度差由控件区 flex-1 吸收）。
  */
@@ -42,9 +42,8 @@ export function ActionRow({
   fillAvailableHeight,
   stylePreset,
   handleStyleChange,
-  isProfessionalMode,
-  onToggleProfessionalMode,
   handlePrimaryAction,
+  onCancelGenerate,
   primaryDisabled,
   isLoading,
   isVideo,
@@ -69,7 +68,7 @@ export function ActionRow({
         fillAvailableHeight && "border-t border-[rgba(0,0,0,0.06)] pt-3 pb-[env(safe-area-inset-bottom,12px)]",
       )}
     >
-          {/* 改图 / 放大 快捷入口 — 左侧，专业控制 toggle 左边 */}
+          {/* 改图 / 放大 快捷入口 — 左侧 */}
           <div className="flex items-center gap-1.5 shrink-0 self-start">
             <button
               type="button"
@@ -131,24 +130,6 @@ export function ActionRow({
             </div>
           ) : null}
 
-          {/* 专业模式 toggle switch（agent 面不渲染整个 ActionRow：工作站态已由
-              rails/面板承载切换，这里摆任何东西都会和 composer 抢底部空间） */}
-          <button
-            type="button"
-            onClick={onToggleProfessionalMode}
-            aria-pressed={isProfessionalMode}
-            title="打开专业工作站：多图队列、局部要求、项目信息"
-            className={cn(
-              "pro-mode-toggle self-start sm:ml-auto",
-              isProfessionalMode && "active",
-            )}
-          >
-            <span className="pro-mode-toggle-track" aria-hidden="true">
-              <span className="pro-mode-toggle-thumb" />
-            </span>
-            <span className="pro-mode-toggle-label">专业控制</span>
-          </button>
-
           {/* Single CTA — elevated blue, strong shadow, scale on hover。
               改图／放大模式下，同一颗按钮承担对应动作。
               agent 模式下这颗按钮**不存在**：送出由聊天区自己的输入区负责，
@@ -179,6 +160,17 @@ export function ActionRow({
               )
             )}
           </button>
+          {/* 人工终止：生成中在 CTA 旁提供可点的「停止」次级按钮
+              （样式照抄本文件改图/放大入口的次级 pill class）。 */}
+          {displayMode === "generate" && isLoading && onCancelGenerate ? (
+            <button
+              type="button"
+              onClick={onCancelGenerate}
+              className="inline-flex h-11 cursor-pointer shrink-0 items-center justify-center rounded-full px-5 text-[13px] font-medium transition-all duration-200 bg-[rgba(0,0,0,0.05)] text-[rgba(0,0,0,0.65)] hover:bg-[rgba(0,0,0,0.09)]"
+            >
+              停止
+            </button>
+          ) : null}
         </div>
   );
 }

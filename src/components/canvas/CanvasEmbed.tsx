@@ -25,6 +25,7 @@
 // 未登入誠實報錯，不假裝能生成。
 
 import { useRef, useEffect, useState, useCallback, useMemo } from "react";
+import { X } from "lucide-react";
 import type { UseCanvasChatReturn } from "@/hooks/use-canvas-chat";
 import { CanvasNodeType, type CanvasConnection, type CanvasNode } from "@/lib/canvas/types";
 import type { CanvasGenerationReference } from "@/lib/canvas/semantic-nodes";
@@ -39,6 +40,8 @@ import { CanvasZoomControls } from "./CanvasZoomControls";
 import { CanvasShortcutsHelp } from "./CanvasShortcutsHelp";
 import { CanvasNodeCreateMenu } from "./CanvasNodeCreateMenu";
 import { CanvasLibraryPanel } from "./CanvasLibraryPanel";
+import { LoraLibraryPanel, type SelectedLora } from "@/components/canvas-workstation/panels/LoraLibraryPanel";
+import "@/components/canvas-workstation/panels/panels.css";
 import { cn } from "@/lib/utils";
 import { AGENT_AUTO_APPROVE_KEY, CULL_MARGIN_PX, ENTER_STAGGER_MS, buildAuthHeaders, imageUrlOf } from "./embed/embed-helpers";
 import { useCanvasInteraction } from "./embed/use-canvas-interaction";
@@ -90,6 +93,9 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
   const [promptPanelNodeId, setPromptPanelNodeId] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  // LoRA 庫（2026-08-27 自專業工作站遷入）：同款滑入面板，選中結果注入生成鏈路。
+  const [loraPanelOpen, setLoraPanelOpen] = useState(false);
+  const [selectedLora, setSelectedLora] = useState<SelectedLora | null>(null);
   const [elementListOpen, setElementListOpen] = useState(false);
   // P2：角色/場景卡面板（左側彈出，與歷史畫布/節點清單同模式）。
   const [cardsOpen, setCardsOpen] = useState(false);
@@ -279,6 +285,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
     setPromptPanelNodeId,
     setPanelRefIds,
     setSelectedIds,
+    selectedLora,
   });
 
   // ── 鍵盤快捷鍵 + 系統剪貼簿（A8）
@@ -321,16 +328,17 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
     return set;
   }, [canvas.connections, highlightNodeId]);
 
-  // ── 舊 workflow 節點動作
+  // ── 舊 workflow 節點動作（站點代理 → 網關 /workflow/node/rerun|update；
+  // 舊 /api/internal/workflow/* 路徑在站點從不存在，生產 404，已廢棄）
   const handleRerun = useCallback(async (nodeId: string) => {
     const node = canvasStateRef.current.nodes.find((n) => n.id === nodeId);
     const workflowId = node?.metadata?.workflow_id;
     const sessionId = node?.metadata?.session_id;
     if (!workflowId || !sessionId) return;
     try {
-      const response = await fetch(`/api/internal/workflow/node/rerun`, {
+      const response = await fetch(`/api/agent/sessions/${sessionId}/workflow-node-rerun`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...(buildAuthHeaders() ?? {}) },
         body: JSON.stringify({ session_id: sessionId, workflow_id: workflowId, node_id: nodeId, request_id: crypto.randomUUID() }),
       });
       if (!response.ok) showError(`重跑失败：${await response.text().then((t) => t.slice(0, 120))}`);
@@ -345,9 +353,9 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
     const sessionId = node?.metadata?.session_id;
     if (!workflowId || !sessionId) return;
     try {
-      const response = await fetch(`/api/internal/workflow/node/update`, {
+      const response = await fetch(`/api/agent/sessions/${sessionId}/workflow-node-update`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...(buildAuthHeaders() ?? {}) },
         body: JSON.stringify({ session_id: sessionId, workflow_id: workflowId, node_id: nodeId, patch, request_id: crypto.randomUUID() }),
       });
       if (!response.ok) showError(`更新失败：${await response.text().then((t) => t.slice(0, 120))}`);
@@ -673,7 +681,17 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
                 onRename={canvas.renameNode}
                 onUpdateText={(nid, text) => canvas.patchNodeMetadata(nid, { content: text })}
                 onUpdateReferenceRole={(nid, role) => canvas.patchNodeMetadata(nid, { referenceRole: role })}
-                onRetry={node.metadata?.status === "error" ? retryNode : undefined}
+                onRetry={
+                  node.metadata?.status === "error"
+                    ? isWorkflowNode
+                      ? node.type !== CanvasNodeType.Text && node.type !== CanvasNodeType.Prompt
+                        ? (id) => void handleRerun(id) // workflow 節點（含配音/視頻卡）走網關真重跑；text/config 網關本就拒跑不給按鈕
+                        : undefined
+                      : node.metadata?.prompt
+                        ? retryNode // A12 圖片重試：僅當參數確實存過
+                        : undefined // 沒參數就不渲染按鈕，不出「必定失敗」的死按鈕
+                    : undefined
+                }
               />
             );
           })}
@@ -762,6 +780,15 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
             className="ce-embed-bar-btn lg-float pointer-events-auto cursor-pointer rounded-full font-medium text-ios-blue hover:bg-white active:bg-white"
           >
             资源库
+          </button>
+          {/* LoRA 庫（2026-08-27 自專業工作站遷入）：與资源库同層入口 */}
+          <button
+            type="button"
+            onClick={() => setLoraPanelOpen(true)}
+            aria-label="LoRA 模型库"
+            className="ce-embed-bar-btn lg-float pointer-events-auto cursor-pointer rounded-full font-medium text-ios-blue hover:bg-white active:bg-white"
+          >
+            LoRA{selectedLora ? " · 1" : ""}
           </button>
           {/* P2：角色/場景卡——badge 數字 = 當前鎖定生效的卡數 */}
           <button
@@ -886,7 +913,52 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
               }
             : undefined
         }
+        onApplyRecipeTemplate={
+          promptPanelNodeId
+            ? (config, label) => {
+                // 配方模板（2026-08-27 自專業工作站遷入）：六槽裡的 prompt 填進當前
+                // 節點面板（與 onUsePrompt 同一寫入路徑）；模型槽在 agent 模式由
+                // agent 依參數回流處理，這裡不越權切模型。
+                const nid = promptPanelNodeId;
+                if (typeof config.prompt === "string" && config.prompt.trim()) {
+                  canvasStateRef.current.patchNodeMetadata(nid, { prompt: config.prompt }, { history: false });
+                }
+                setPromptPanelNodeId(null);
+                window.setTimeout(() => setPromptPanelNodeId(nid), 0);
+                setLibraryOpen(false);
+                showError(`已套用配方「${label}」`);
+              }
+            : undefined
+        }
+        isLoggedIn={(() => {
+          const headers = buildAuthHeaders();
+          return Boolean(headers);
+        })()}
       />
+      {/* LoRA 庫（2026-08-27 自專業工作站遷入）：同款右側滑入面板，選中即注入生成 */}
+      {loraPanelOpen && (
+        <div
+          data-canvas-interactive
+          role="dialog"
+          aria-label="LoRA 模型库"
+          className="fixed bottom-0 right-0 top-0 z-[90] flex w-[min(400px,94vw)] flex-col lg-sheet overflow-y-auto"
+        >
+          <div className="sticky top-0 z-10 flex items-center justify-between border-b bg-white/80 px-4 py-3 backdrop-blur">
+            <h2 className="text-sm font-semibold text-foreground">LoRA 模型库</h2>
+            <button
+              type="button"
+              onClick={() => setLoraPanelOpen(false)}
+              title="关闭"
+              className="flex h-7 w-7 items-center justify-center rounded-md text-foreground/45 hover:bg-black/5"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="flex-1 p-4">
+            <LoraLibraryPanel value={selectedLora} onChange={setSelectedLora} />
+          </div>
+        </div>
+      )}
       {editor && editorUrl && editorNode && (
         <CanvasImageEditorDialog
           open

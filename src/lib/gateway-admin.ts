@@ -111,6 +111,26 @@ export async function setGatewayUserImageQuota(
 }
 
 /**
+ * 按原始 quota 單位精確調整用戶額度（記帳投影用，不做張數取整）。
+ * deltaQuota 負數=扣減。上游 /api/user/manage 的 value 以 1 quota 為單位。
+ */
+export async function adjustGatewayUserQuotaExact(userId: number, deltaQuota: number): Promise<void> {
+  if (!Number.isFinite(deltaQuota) || deltaQuota === 0) return;
+  const adjusted = await callGateway(`/api/user/manage`, {
+    method: "POST",
+    body: JSON.stringify({
+      id: userId,
+      action: "add_quota",
+      mode: deltaQuota > 0 ? "add" : "subtract",
+      value: Math.abs(Math.round(deltaQuota)),
+    }),
+  });
+  if (!adjusted.success) {
+    throw new Error(adjusted.message ?? "精确额度调整失败。");
+  }
+}
+
+/**
  * 上游 New API 对用户字段的长度限制，来自 model/user.go：
  *   Username    `validate:"max=20"`
  *   Password    `validate:"min=8,max=20"`

@@ -16,6 +16,8 @@ import {
   listAgentLessons,
   loadAgentProfile,
 } from "@/lib/agent-profile-store";
+import { getActiveAssetPack } from "@/lib/asset-pack-store";
+import { buildAssetPackInjection } from "@/lib/agent-assets";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -59,6 +61,15 @@ export async function POST(req: NextRequest) {
     memoryInjection = null; // 画像存储失败不阻塞开新会话
   }
 
+  // 资产包激活注入（静默，缺省不阻塞）。
+  let activeAssets: ReturnType<typeof buildAssetPackInjection> = null;
+  try {
+    const active = await getActiveAssetPack(caller.userId);
+    activeAssets = buildAssetPackInjection(active);
+  } catch {
+    activeAssets = null;
+  }
+
   const payload: Record<string, unknown> =
     typeof body === "object" && body !== null ? { ...(body as Record<string, unknown>) } : {};
   if (memoryInjection) {
@@ -67,6 +78,9 @@ export async function POST(req: NextRequest) {
   } else {
     // 账户还没有画像：告知网关，首条消息时引导 agent 用选择题做 onboarding。
     payload.memory_empty = true;
+  }
+  if (activeAssets) {
+    payload.active_assets = activeAssets.active_assets;
   }
 
   let resp: AgentGatewayResponse;

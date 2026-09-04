@@ -1,15 +1,17 @@
 "use client";
 
-import { memo, useEffect, useRef } from "react";
+import { memo, useEffect, useMemo, useRef } from "react";
 import { RotateCcw, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AgentAssistantTextItem, AgentChatState } from "@/lib/agent-chat-types";
 import type { BatchAnchor } from "@/lib/agent-batch-anchor";
+import { describeGroup, groupPendingConfirms } from "@/lib/agent-confirm-groups";
 import { AgentTranscript, type AgentTranscriptProps } from "./AgentTranscript";
 import { AgentComposer, type AgentComposerProps } from "./AgentComposer";
 import { AgentConfirmCard } from "./AgentConfirmCard";
 import { AgentQuestionCard } from "./AgentQuestionCard";
 import { AgentBatchProgress } from "./AgentBatchProgress";
+import { AgentSubagentBar } from "./AgentSubagentBar";
 import { AgentAnchorCard } from "./AgentAnchorCard";
 import "./agent-chat.css";
 
@@ -18,13 +20,15 @@ export interface AgentChatPanelProps {
   connection: "idle" | "connecting" | "open" | "reconnecting" | "closed";
   disabled?: boolean;
   onSend: (text: string) => void;
-  onConfirm: (requestId: string, approved: boolean) => void;
-  onAnswerQuestion: (requestId: string, answers: string[][]) => void;
+  onConfirm: (requestId: string, approved: boolean) => Promise<boolean | void>;
+  onAnswerQuestion: (requestId: string, answers: string[][]) => Promise<boolean | void>;
   onRetryConnection: () => void;
   /** 当前会话 id，传给输入区做附件上传。未传时附件按钮禁用。 */
   sessionId?: string | null;
   /** 出图卡动作回调：接线前省略，按钮保持 disabled。 */
   imageActions?: AgentTranscriptProps["imageActions"];
+  /** 出片卡动作回调：接线前省略，按钮保持 disabled。 */
+  videoActions?: AgentTranscriptProps["videoActions"];
   /** 批量生成的中止信号。存在时批量进度卡带上「停止」按钮。 */
   onStopGeneration?: () => void;
   /**
@@ -51,6 +55,21 @@ export interface AgentChatPanelProps {
   onFirstUserMessage?: () => void;
 }
 
+/**
+ * 合併確認組的裁決聚合：逐個 id 平行送出，Promise.allSettled 收攏結果——
+ * 任一子項 reject 或明確回 false 都算整組失敗（回 false），讓卡片解鎖可
+ * 整組重試；全部成功（fulfilled 且非 false）才回 true。抽成純函數，
+ * node --test 可直接灌 deferred promise 斷言，不必模擬 DOM 點擊。
+ */
+export async function resolveConfirmGroup(
+  requestIds: string[],
+  approved: boolean,
+  onConfirm: (requestId: string, approved: boolean) => Promise<boolean | void>,
+): Promise<boolean> {
+  const results = await Promise.allSettled(requestIds.map((id) => onConfirm(id, approved)));
+  return results.every((r) => r.status === "fulfilled" && r.value !== false);
+}
+
 const CONNECTION_META: Record<AgentChatPanelProps["connection"], { label: string; dotClass: string }> = {
   idle: { label: "未连接", dotClass: "bg-black/25" },
   connecting: { label: "连接中…", dotClass: "bg-ios-orange" },
@@ -69,6 +88,7 @@ function AgentChatPanelComponent({
   onRetryConnection,
   sessionId,
   imageActions,
+  videoActions,
   onStopGeneration,
   anchor,
   onAnchor,
@@ -93,7 +113,16 @@ function AgentChatPanelComponent({
   // 用户是否停在列表底部附近。串流/新条目只在「本来就在底部」时自动贴底，
   // 往上翻历史时不许把滚动条强拉回底部（「往上翻不強拉」）。
   const isNearBottomRef = useRef(true);
-  const { items, pendingConfirms, pendingQuestions, closed, closedReason, turnActive, lastEventId } = state;
+  const { items, pendingConfirms, pendingQuestions, closed, closedReason, turnActive, lastEventId, turnStatus } = state;
+
+  // 罪状 4：子代理条目不进消息流，聚到转录区上方的状态栏（组件内部裁到至多 3 张）。
+  const subagentItems = useMemo(() => {
+    const out: Extract<AgentChatState["items"][number], { kind: "subagent" }>[] = [];
+    for (const it of items) {
+      if (it.kind === "subagent") out.push(it);
+    }
+    return out;
+  }, [items]);
 
   // D-25：解读上下文 = 该轮已收到的 message.delta 文本（最新一条 assistant 条目的累计文本）。
   // 只取 transcript 里已有的东西，不造契约没有的字段；没有助手文本时确认卡退回纯花费确认。
@@ -111,6 +140,10 @@ function AgentChatPanelComponent({
     const el = scrollRef.current;
     if (el && isNearBottomRef.current) el.scrollTop = el.scrollHeight;
   }, [items.length, lastEventId, turnActive]);
+
+  // 罪状 5：同批同模型的确认卡合并成一张「model ×N 共 N 币」；
+  // 不同模型（或金额不同）各自成组逐张出。裁决时逐笔 resolve。
+  const confirmGroups = useMemo(() => groupPendingConfirms(pendingConfirms), [pendingConfirms]);
 
   // 滚动时实时记录「在不在底部附近」。128px 阈值 = 翻看最后几条时也算「在底部」，
   // 新内容会温柔地贴上来；翻到历史深处就不再自动滚。
@@ -159,7 +192,12 @@ function AgentChatPanelComponent({
   const meta = awaitingChoice
     ? { label: "等你选择上面的对话", dotClass: "bg-ios-blue" }
     : CONNECTION_META[connection];
-  const composerDisabled = disabled || closed;
+  const composerDisabled = disabled || closed || pendingQuestions.length > 0 || pendingConfirms.length > 0;
+
+  // 等待卡片選擇期間的 placeholder 提示（R9-3 死線 4）。
+  const composerPlaceholder = pendingQuestions.length > 0 || pendingConfirms.length > 0
+    ? "等待卡片选择…"
+    : undefined;
 
   return (
     <section className="agent-panel" aria-label="智能体对话">
@@ -191,6 +229,11 @@ function AgentChatPanelComponent({
       {/* D-26：批量愿望的燃烧进度常驻在顶部，不用点开才知道烧到哪。 */}
       <div className="pb-1">
         <AgentBatchProgress items={items} onStop={onStopGeneration} />
+      </div>
+
+      {/* 罪状 4：子代理状态栏，置顶于转录区之上、从上到下堆叠（至多 3 张）。 */}
+      <div className="pb-1">
+        <AgentSubagentBar items={subagentItems} />
       </div>
 
       {/* 转录区：aria-live 的 polite live region；空态给开场提示，不显示一片空白。 */}
@@ -227,7 +270,7 @@ function AgentChatPanelComponent({
             </div>
           </div>
         ) : (
-          <AgentTranscript items={items} imageActions={imageActions} />
+          <AgentTranscript items={items} imageActions={imageActions} videoActions={videoActions} sessionId={sessionId} turnStatus={turnStatus} />
         )}
 
         {/*
@@ -280,19 +323,35 @@ function AgentChatPanelComponent({
           D-25：解读 = 该轮已收到的 message.delta 文本（lastAssistantText），
           与 confirm 事件的 description 一起由确认卡拼装成「我这么理解你的愿望」；
           缺省时确认卡退回纯花费确认。
-          2026-08-16：卡片区有界 + 内部滚动（最高 min(60dvh, 28rem)）——高卡片
-          不会再被面板高度裁掉底部选项，也不会把 transcript 挤到零高度。 */}
-      {pendingConfirms.length > 0 && (
+          2026-08-16：卡片区有界 + 内部滚动（最高 min(45dvh, 22rem)）——高卡片
+          不会再被面板高度裁掉底部选项，也不会把 transcript 挤到零高度。
+          罪状 5/6：同批同模型合并成一张卡（model ×N 共 N 币），一键裁决逐笔
+          resolve；确认卡容器限高 + 内部滚动，禁止整页溢出。 */}
+      {confirmGroups.length > 0 && (
         <div className="min-h-0 max-h-[min(45dvh,22rem)] shrink-0 overflow-y-auto overscroll-contain px-0.5 pb-1.5">
           <div className="flex flex-col gap-2">
-            {pendingConfirms.map((confirm) => (
-              <AgentConfirmCard
-                key={confirm.requestId}
-                confirm={confirm}
-                onConfirm={onConfirm}
-                contextText={lastAssistantText}
-              />
-            ))}
+            {confirmGroups.map((group) => {
+              const merged = group.count > 1;
+              return (
+                <AgentConfirmCard
+                  key={group.requestIds[0]}
+                  confirm={{
+                    requestId: group.requestIds[0],
+                    amountCoins: group.amountCoins,
+                    ...(merged
+                      ? { description: describeGroup(group) }
+                      : group.description !== undefined
+                        ? { description: group.description }
+                        : {}),
+                    seq: 0,
+                  }}
+                  onConfirm={(_requestId, approved) =>
+                    resolveConfirmGroup(group.requestIds, approved, onConfirm)
+                  }
+                  contextText={lastAssistantText}
+                />
+              );
+            })}
           </div>
         </div>
       )}
@@ -314,24 +373,27 @@ function AgentChatPanelComponent({
       )}
 
       {/* 输入区锚点：键盘弹起时以此为基准判断可见性，滚回可视区。
-          2026-08-22 完美主義審視：有待回答的問題/確認卡時輸入區**讓位消失**——
-          決策卡與輸入框兩個操作層級重疊會打架（「必須選一個」vs「可以直接打字」
-          沒有主次，輸入框還視覺上壓住最後一個選項）。答完卡，輸入區自動回來。 */}
-      {pendingQuestions.length === 0 && pendingConfirms.length === 0 && (
-        <div ref={composerAnchorRef} className="agent-composer-anchor">
-          <AgentComposer
-            disabled={composerDisabled}
-            onSend={(text) => {
-              // 第一条用户消息 = 右侧模板库退场的时刻（首条消息落地即收起）。
-              if (items.length === 0) onFirstUserMessage?.();
-              onSend(text);
-            }}
-            sessionId={sessionId}
-            prefill={prefill}
-            onPrefillConsumed={onPrefillConsumed}
-          />
-        </div>
-      )}
+          2026-08-22 完美主義審視曾讓輸入區在有待回答的問題/確認卡時「讓位消失」——
+          R9-3 死線 4 推翻：輸入框直接消失 = 用戶失去操作空間（想補充/換句話都沒門），
+          決策卡與輸入框的優先級靠 disabled + placeholder 表達，不靠讓位。
+          卡片在等選擇 → 輸入框禁用並提示「等待卡片选择…」；答完卡自動恢復。 */}
+      <div ref={composerAnchorRef} className="agent-composer-anchor">
+        <AgentComposer
+          disabled={composerDisabled}
+          placeholder={composerPlaceholder}
+          onSend={(text) => {
+            // 第一条用户消息 = 右侧模板库退场的时刻（首条消息落地即收起）。
+            if (items.length === 0) onFirstUserMessage?.();
+            onSend(text);
+          }}
+          sessionId={sessionId}
+          prefill={prefill}
+          onPrefillConsumed={onPrefillConsumed}
+          /* D-26 补全：生成中（turnActive）把中止信号送进输入区——
+             输入框为空时送出钮位置变停止钮，不再只能乾等。 */
+          onStop={turnActive ? onStopGeneration : undefined}
+        />
+      </div>
     </section>
   );
 }

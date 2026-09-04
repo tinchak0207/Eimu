@@ -51,8 +51,17 @@ interface UseImageGenerationReturn {
     providerToModel: Record<ProviderKey, string>,
     options?: GenerationOptions,
   ) => Promise<ImageResult[]>;
+  cancelTask: (taskId: string) => Promise<CancelTaskResult>;
   resetState: () => void;
   activePrompt: string;
+}
+
+export interface CancelTaskResult {
+  cancelled: boolean;
+  previousStatus?: string;
+  /** 全额退款信息；null = 无退款（零金额/未扣款/未到账，差额退款走 reconcile 兜底）。 */
+  refund: { amount: number; full: boolean } | null;
+  error?: string;
 }
 
 type GenerationResponse = {
@@ -170,13 +179,44 @@ async function waitForGenerationTask(
   onProjection: (task: GenerationTaskProjection) => void,
 ): Promise<GenerationResponse> {
   const deadline = Date.now() + 15 * 60_000;
+  // 网关瞬时故障（控制面容器重建窗口的 502、Vercel 边缘抖动）返回 HTML 错误页：
+  // 解析失败/5xx 一律重试轮询而不是把任务误杀——server 端生成还在跑，客户端死了=钱花图丢。
+  let consecutiveGatewayErrors = 0;
   while (Date.now() < deadline) {
-    const response = await fetch(`/api/generation-jobs/${encodeURIComponent(taskId)}`, {
-      headers,
-      cache: "no-store",
-    });
-    const task = await response.json() as GenerationTaskProjection & { error?: string };
-    if (!response.ok) throw new Error(task.error || `Task query failed: ${response.status}`);
+    let task: (GenerationTaskProjection & { error?: string }) | null = null;
+    let fetchFailed = false;
+    try {
+      const response = await fetch(`/api/generation-jobs/${encodeURIComponent(taskId)}`, {
+        headers,
+        cache: "no-store",
+      });
+      if (response.ok) {
+        task = await response.json() as GenerationTaskProjection & { error?: string };
+        if (!task || typeof task.taskId !== "string") {
+          // JSON 但形状不对（上游代理层截断等）——按网关错误处理
+          task = null;
+          fetchFailed = true;
+        }
+      } else if (response.status >= 500 || response.status === 429) {
+        fetchFailed = true; // 瞬时网关/限流：重试
+      } else {
+        // 4xx 是真实拒绝（鉴权/任务不存在），解析错误信息后终止
+        const errBody = await response.json().catch(() => ({} as GenerationTaskProjection & { error?: string }));
+        throw new Error(errBody.error || `Task query failed: ${response.status}`);
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith("Task query failed")) throw err;
+      fetchFailed = true; // fetch 本身抛错（网络断开/abort）——重试
+    }
+    if (fetchFailed || !task) {
+      consecutiveGatewayErrors += 1;
+      if (consecutiveGatewayErrors > 20) {
+        throw new Error("生成任务查询持续失败（网关异常），请稍后重开工作台恢复轮询。");
+      }
+      await new Promise((resolve) => setTimeout(resolve, 3_000));
+      continue;
+    }
+    consecutiveGatewayErrors = 0;
     onProjection(task);
     if (task.status === "succeeded") {
       const first = task.results[0];
@@ -189,7 +229,8 @@ async function waitForGenerationTask(
       };
     }
     if (task.status === "failed" || task.status === "cancelled" || task.status === "refunded" || task.status === "unknown") {
-      throw new Error(task.error || `Generation task ended with status ${task.status}.`);
+      // API 回 errorCode/errorMessage；旧字段名 task.error 仅为兼容保留。
+      throw new Error(task.errorMessage || task.error || `Generation task ended with status ${task.status}.`);
     }
     await new Promise((resolve) => setTimeout(resolve, 1_000));
   }
@@ -220,6 +261,60 @@ export function useImageGeneration(options?: UseImageGenerationOptions): UseImag
     setTasks((current) => mergeGenerationTaskProjections(current, [task]));
   }, []);
 
+  // 離頁再回來的恢復：server 端 durable task 還在跑，重掛載後重新輪詢並把結果接回畫布。
+  // resumePollersRef 去重（3s 同步會反覆發現同一個 live task）；計數驅動對外的 isLoading。
+  const resumePollersRef = useRef<Set<string>>(new Set());
+  const [resumedLoadingCount, setResumedLoadingCount] = useState(0);
+  const resumeLiveTasks = useCallback((liveTasks: GenerationTaskProjection[]) => {
+    if (!liveTasks.length) return;
+    const token = getStoredToken();
+    const user = getStoredUser();
+    if (!token || !user) return;
+    const authHeaders: Record<string, string> = {
+      Authorization: `Bearer ${token}`,
+      "x-user-id": String(user.id),
+    };
+    for (const task of liveTasks) {
+      if (resumePollersRef.current.has(task.taskId)) continue;
+      resumePollersRef.current.add(task.taskId);
+      setResumedLoadingCount((count) => count + 1);
+      if (task.prompt) setActivePrompt((prev) => prev || task.prompt!);
+      void (async () => {
+        try {
+          const data = await waitForGenerationTask(task.taskId, authHeaders, upsertTask);
+          taskCanvasHydratedRef.current = true;
+          setImages((prev) => [
+            ...prev,
+            {
+              provider: "image_tinchak" as ProviderKey,
+              slotId: `${task.taskId}:resumed`,
+              image: null,
+              imageUrl: data.imageUrl ?? null,
+              videoUrl: data.videoUrl ?? null,
+              mediaType: data.mediaType ?? "image",
+              modelId: task.modelId,
+              workflow: task.submittedConfig?.workflow,
+              taskId: task.taskId,
+              resultId: data.resultId,
+            },
+          ]);
+        } catch (err) {
+          setFailedProviders((prev) => [...prev, "image_tinchak"]);
+          setErrors((prev) => [
+            ...prev,
+            {
+              provider: "image_tinchak" as ProviderKey,
+              message: err instanceof Error ? err.message : "生成任务失败",
+            },
+          ]);
+        } finally {
+          resumePollersRef.current.delete(task.taskId);
+          setResumedLoadingCount((count) => Math.max(0, count - 1));
+        }
+      })();
+    }
+  }, [upsertTask]);
+
   const syncServerTasks = useCallback(async () => {
     if (!enableServerHistory) return;
     const token = getStoredToken();
@@ -230,9 +325,14 @@ export function useImageGeneration(options?: UseImageGenerationOptions): UseImag
       cache: "no-store",
     });
     if (!response.ok) return;
-    const payload = await response.json() as { success?: boolean; enabled?: boolean; data?: GenerationTaskProjection[] };
-    if (!payload.success || !payload.enabled || !Array.isArray(payload.data)) return;
+    const payload = await response.json().catch(() => null) as { success?: boolean; enabled?: boolean; data?: GenerationTaskProjection[] } | null;
+    if (!payload?.success || !payload.enabled || !Array.isArray(payload.data)) return;
     setTasks((current) => mergeGenerationTaskProjections(current, payload.data ?? []));
+    // 掛著未完成的任務（含離頁期間提交的）→ 恢復輪詢，結果直接落畫布
+    resumeLiveTasks((payload.data ?? []).filter((task) =>
+      (task.status === "queued" || task.status === "running")
+      && (task.kind === "image_generate" || task.kind === "image_edit" || task.kind === "video_generate")
+      && Date.now() - Date.parse(task.createdAt) < 15 * 60_000));
 
     const taskEntries: PersistedGenerationEntry[] = payload.data.map((task) => ({
       id: task.taskId,
@@ -273,7 +373,7 @@ export function useImageGeneration(options?: UseImageGenerationOptions): UseImag
         })));
       }
     }
-  }, [enableServerHistory]);
+  }, [enableServerHistory, resumeLiveTasks]);
 
   useEffect(() => {
     const cache = readGenerationCache();
@@ -344,6 +444,49 @@ export function useImageGeneration(options?: UseImageGenerationOptions): UseImag
     setFailedProviders([]);
     setIsLoading(false);
   };
+
+  // 人工终止：DELETE /api/generation-jobs/{taskId}。乐观置 cancelled（带新
+  // updatedAt，防 3s 同步用旧的 running 快照盖掉；服务端 cancelled 投影 updatedAt
+  // 更新，会自然接管）。轮询中的 waitForGenerationTask 读到 cancelled 即抛错收尾。
+  const cancelTask = useCallback(async (taskId: string): Promise<CancelTaskResult> => {
+    const token = getStoredToken();
+    const user = getStoredUser();
+    const headers: Record<string, string> = {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(user?.id ? { "x-user-id": String(user.id) } : {}),
+    };
+    let payload: {
+      success?: boolean;
+      cancelled?: boolean;
+      previous_status?: string;
+      refund?: { amount: number; full: boolean } | null;
+      error?: { code?: string; message?: string } | string;
+    } | null = null;
+    try {
+      const response = await fetch(`/api/generation-jobs/${encodeURIComponent(taskId)}`, {
+        method: "DELETE",
+        headers,
+        cache: "no-store",
+      });
+      payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        const message = typeof payload?.error === "object" && payload.error?.message
+          ? payload.error.message
+          : typeof payload?.error === "string"
+            ? payload.error
+            : `取消失败（${response.status}）`;
+        return { cancelled: false, refund: null, error: message };
+      }
+    } catch {
+      return { cancelled: false, refund: null, error: "网络异常，取消请求未送达" };
+    }
+    setTasks((current) => current.map((task) =>
+      task.taskId === taskId
+        ? { ...task, status: "cancelled" as const, updatedAt: new Date().toISOString() }
+        : task,
+    ));
+    return { cancelled: true, previousStatus: payload?.previous_status, refund: payload?.refund ?? null };
+  }, []);
 
   const startGeneration = async (
     prompt: string,
@@ -630,10 +773,12 @@ export function useImageGeneration(options?: UseImageGenerationOptions): UseImag
     errors,
     timings,
     failedProviders,
-    isLoading,
+    // 恢復中的離頁任務也佔用生成通道：對外呈現為載入中（畫布渲染態/狀態條/提交按鈕共用）
+    isLoading: isLoading || resumedLoadingCount > 0,
     recentWorkflows,
     tasks,
     startGeneration,
+    cancelTask,
     resetState,
     activePrompt,
   };

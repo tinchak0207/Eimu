@@ -7,8 +7,10 @@
 // （不引入 context，避免 memo 失效）。
 
 import { useCallback, useEffect, useState } from "react";
-import { RefreshCw, Image as ImageIcon } from "lucide-react";
-import { CanvasNodeType, type CanvasNode, type CanvasNodeStatus } from "@/lib/canvas/types";
+import { RefreshCw, Image as ImageIcon, ArrowRight, CornerDownRight, Wrench, ShieldCheck, Package, AlertTriangle, Clapperboard } from "lucide-react";
+import { CanvasNodeType, errorDetailsText, type CanvasNode, type CanvasNodeStatus } from "@/lib/canvas/types";
+import { svgToDataUrl } from "@/lib/svg-data-url";
+import { DirectorMiniViewport } from "@/components/director-mini/DirectorMiniViewport";
 import { STATUS_LABEL } from "./constants";
 
 function isUrl(value: string): boolean {
@@ -135,12 +137,14 @@ export function NodeBody({
       );
     }
     if (statusValue === "error") {
+      // G-FE 合同：errorDetails 带 human_message（中文短句）时优先渲染，缺省回落原文。
+      const errorText = errorDetailsText(metadata?.errorDetails);
       return (
         <div className="flex flex-1 flex-col items-center justify-center gap-1.5 p-3">
           <span className="text-ios-subhead font-medium text-destructive">失败</span>
-          {metadata?.errorDetails ? (
+          {errorText ? (
             <span className="max-sm:text-ios-footnote break-words text-center text-ios-caption1 leading-snug text-destructive">
-              {metadata.errorDetails}
+              {errorText}
             </span>
           ) : null}
           {onRetry && (
@@ -225,28 +229,54 @@ export function NodeBody({
       case CanvasNodeType.Image:
       case CanvasNodeType.Reference:
       case CanvasNodeType.Video: {
-        const content = metadata?.content;
-        if (content && isUrl(content)) {
-          if (node.type === CanvasNodeType.Video) {
-            return <video src={content} controls className="h-full w-full object-cover" data-canvas-interactive />;
+        const media = (() => {
+          const content = metadata?.content;
+          if (content && isUrl(content)) {
+            if (node.type === CanvasNodeType.Video) {
+              return <video src={content} controls className="h-full w-full object-cover" data-canvas-interactive />;
+            }
+            if (imgError) {
+              return renderBrokenImage(handleRetryImage);
+            }
+            const rawContent = content.startsWith("data:") ? content : thumbUrl(content, node.width * scale);
+            return (
+              <img
+                src={useProxy && content.startsWith("http") ? proxySrc(content) : rawContent}
+                alt={node.title}
+                loading="lazy"
+                decoding="async"
+                draggable={false}
+                className="h-full w-full object-cover"
+                onError={handleImgError}
+              />
+            );
           }
-          if (imgError) {
-            return renderBrokenImage(handleRetryImage);
-          }
-          const rawContent = content.startsWith("data:") ? content : thumbUrl(content, node.width * scale);
-          return (
-            <img
-              src={useProxy && content.startsWith("http") ? proxySrc(content) : rawContent}
-              alt={node.title}
-              loading="lazy"
-              decoding="async"
-              draggable={false}
-              className="h-full w-full object-cover"
-              onError={handleImgError}
-            />
-          );
-        }
-        return renderPlaceholder(status, metadata);
+          return renderPlaceholder(status, metadata);
+        })();
+        // 模板生成卡（agent-template-canvas 铺的流水线）：标题是 shortName，
+        // 卡身顶部补完整步骤名，画布上任何缩放级别都不丢上下文。
+        // 2026-08-27 美化：步骤序号用小圆徽章（与 carousel 卡面珠链呼应），
+        // 非纯文字前缀。
+        // Reference 早退（無步驟語義）；Image 與 Video 生成卡都鋪步驟名橫條
+        // （2026-08-30 起視頻步生成卡為 Video 類型，同樣帶 stepName trace）。
+        if (node.type === CanvasNodeType.Reference) return media;
+        const trace = metadata as unknown as Record<string, unknown> | undefined;
+        const stepName = trace?.stepName;
+        if (typeof stepName !== "string" || stepName.length === 0) return media;
+        const stepIndex = typeof trace?.stepIndex === "number" ? (trace.stepIndex as number) : Number.NaN;
+        return (
+          <div className="flex h-full flex-col">
+            <div className="flex shrink-0 items-center gap-1.5 border-b border-black/5 bg-black/[0.03] px-3 py-1.5 text-ios-caption1 font-medium text-foreground/60">
+              {!Number.isNaN(stepIndex) && (
+                <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[rgba(0,122,255,0.12)] text-[10.5px] font-semibold leading-none text-ios-blue">
+                  {stepIndex + 1}
+                </span>
+              )}
+              <span className="min-w-0 truncate">{stepName}</span>
+            </div>
+            <div className="min-h-0 flex-1">{media}</div>
+          </div>
+        );
       }
       case CanvasNodeType.Audio: {
         const content = metadata?.content;
@@ -298,7 +328,15 @@ export function NodeBody({
         const text = metadata?.content ?? metadata?.prompt;
         const fontSize = typeof metadata?.fontSize === "number" ? metadata.fontSize : 14.5;
         // prompt 節點 = 提示詞備忘：雙擊直編（與文本節點同款交互），文案不同。
-        const emptyHint = node.type === CanvasNodeType.Prompt ? "（未填写提示词，双击编辑）" : "（未填写内容，双击编辑）";
+        // 流水線文本生成卡（2026-08-30）：空態不再是「未填寫」而是等 agent 回填。
+        const metaRecord = metadata as Record<string, unknown> | undefined;
+        const isPipelineGenCard = typeof metaRecord?.stepIndex === "number";
+        const emptyHint =
+          node.type === CanvasNodeType.Prompt
+            ? "（未填写提示词，双击编辑）"
+            : isPipelineGenCard && node.type === CanvasNodeType.Text
+              ? "等待 agent 回填产出"
+              : "（未填写内容，双击编辑）";
         // A11：雙擊直編。textarea 蓋滿正文區，blur/Ctrl+Enter 提交、Esc 取消。
         if (editingText !== null) {
           return (
@@ -325,6 +363,63 @@ export function NodeBody({
               style={{ fontSize }}
               aria-label="编辑文本内容"
             />
+          );
+        }
+        // 流水線結構卡（agent-template-canvas 鋪的）：走 Liquid Glass 分層正文
+        // （eyebrow 小标 + 正文 + 语义色胶囊 + Lucide 图标），不再纯文本堆行。
+        const pipelineCard = metadata?.pipelineCard;
+        if (pipelineCard === "tool" || pipelineCard === "gate") {
+          return (
+            <div
+              onPointerDown={onScrollAreaPointerDown}
+              onPointerMove={onScrollAreaPointerMove}
+              onPointerUp={onScrollAreaPointerEnd}
+              onPointerCancel={onScrollAreaPointerEnd}
+              className="canvas-node-scroll touch-pan-y overscroll-contain flex-1 space-y-2.5 overflow-auto p-3"
+            >
+              {pipelineCard === "tool" ? (
+                <>
+                  <div className="flex items-center gap-1.5">
+                    <Wrench className="h-3 w-3 shrink-0 text-ios-blue" aria-hidden="true" />
+                    <span className="text-[11px] font-medium uppercase leading-none tracking-[0.18em] text-muted-foreground/70">工具</span>
+                  </div>
+                  <p className="break-all font-mono text-[13px] font-semibold leading-snug text-foreground">{metadata?.toolId}</p>
+                  {metadata?.toolInput && (
+                    <div className="flex items-start gap-1.5">
+                      <CornerDownRight className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground/60" aria-hidden="true" />
+                      <p className="min-w-0 break-words text-[13px] leading-snug text-muted-foreground">{metadata.toolInput}</p>
+                    </div>
+                  )}
+                  {metadata?.toolOutput && (
+                    <div className="flex items-start gap-1.5">
+                      <ArrowRight className="mt-0.5 h-3 w-3 shrink-0 text-ios-green" aria-hidden="true" />
+                      <p className="min-w-0 break-words text-[13px] leading-snug text-muted-foreground">{metadata.toolOutput}</p>
+                    </div>
+                  )}
+                  {!metadata?.toolInput && !metadata?.toolOutput && (
+                    <span className="inline-flex items-center rounded-full bg-black/5 px-2 py-0.5 text-[11.5px] font-medium leading-none text-muted-foreground">
+                      平台原生工具
+                    </span>
+                  )}
+                  {metadata?.unsupported && (
+                    <div className="flex items-start gap-1.5 rounded-lg bg-[rgba(255,59,48,0.08)] px-2 py-1.5">
+                      <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-ios-red" aria-hidden="true" />
+                      <p className="min-w-0 break-words text-[13px] leading-snug text-ios-red">
+                        harness 未接上游（{metadata.requiredCapability ?? metadata.toolId ?? "未知能力"}）——agent 须明说不可用，禁止用 prompt 冒充
+                      </p>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center gap-1.5">
+                    <ShieldCheck className="h-3 w-3 shrink-0 text-ios-orange" aria-hidden="true" />
+                    <span className="text-[11px] font-medium uppercase leading-none tracking-[0.18em] text-muted-foreground/70">验收条件</span>
+                  </div>
+                  <p className="break-words text-[13px] leading-relaxed text-foreground">{text}</p>
+                </>
+              )}
+            </div>
           );
         }
         return (
@@ -358,7 +453,43 @@ export function NodeBody({
         if (typeof metadata?.count === "number") rows.push({ label: "数量", value: String(metadata.count) });
         if (metadata?.kind) rows.push({ label: "类型", value: metadata.kind });
         if (metadata?.source_image) rows.push({ label: "参考图", value: metadata.source_image });
-        if (rows.length === 0) {
+        // content 文本（模板步骤头卡的「产出：」合同）与结构化行可并存；
+        // 只有 content 也照常渲染——空配置才落骨架。
+        const content = metadata?.content?.trim() ?? "";
+        // 流水線步驟頭卡（agent-template-canvas 鋪的）：Liquid Glass 分層正文
+        // ——「产出」green tint 胶囊（Package 图标）+ deliverable 全文 + 输入来源行。
+        if (metadata?.pipelineCard === "step_head") {
+          const deliverable = metadata.deliverable?.trim() || content.replace(/^产出：/, "");
+          return (
+            <div
+              onPointerDown={onScrollAreaPointerDown}
+              onPointerMove={onScrollAreaPointerMove}
+              onPointerUp={onScrollAreaPointerEnd}
+              onPointerCancel={onScrollAreaPointerEnd}
+              className="canvas-node-scroll touch-pan-y overscroll-contain flex-1 space-y-2.5 overflow-auto p-3"
+            >
+              <span className="inline-flex items-center gap-1 rounded-full bg-[rgba(52,199,89,0.12)] px-2 py-0.5 text-[11.5px] font-medium leading-none text-[#248A3D]">
+                <Package className="h-3 w-3" aria-hidden="true" />
+                产出
+              </span>
+              {deliverable ? (
+                <p className="break-words text-[13px] leading-relaxed text-foreground">{deliverable}</p>
+              ) : (
+                <span className="text-ios-caption1 text-muted-foreground">（未定义产出合同）</span>
+              )}
+              {metadata.inputFrom && (
+                <div className="flex items-start gap-1.5">
+                  <CornerDownRight className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground/60" aria-hidden="true" />
+                  <p className="min-w-0 break-words text-[13px] leading-snug text-muted-foreground">
+                    <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground/70">输入</span>
+                    <span className="ml-1.5">{metadata.inputFrom}</span>
+                  </p>
+                </div>
+              )}
+            </div>
+          );
+        }
+        if (rows.length === 0 && !content) {
           // 配置未到齊 = 讀取中的骨架，不是死掉的「（未配置）」。
           return renderPlaceholder(status, metadata);
         }
@@ -368,7 +499,7 @@ export function NodeBody({
             onPointerMove={onScrollAreaPointerMove}
             onPointerUp={onScrollAreaPointerEnd}
             onPointerCancel={onScrollAreaPointerEnd}
-            className="canvas-node-scroll touch-pan-y overscroll-contain flex-1 space-y-1 overflow-auto p-3"
+            className="canvas-node-scroll touch-pan-y overscroll-contain flex-1 space-y-1.5 overflow-auto p-3"
           >
             {rows.map((row) => (
               <div key={row.label} className="flex items-baseline justify-between gap-2">
@@ -378,6 +509,102 @@ export function NodeBody({
                 </span>
               </div>
             ))}
+            {content && (
+              <p className="whitespace-pre-wrap break-words text-[13.5px] leading-relaxed text-foreground">{content}</p>
+            )}
+          </div>
+        );
+      }
+      case CanvasNodeType.Director: {
+        // 導演台節點（gateway director.done 攔截同步）：主區為 three.js 即時 3D 白模
+        // 視口（片B，WebGL 失敗降級 SVG 示意）；缺 directorSessionId 的舊節點保底走
+        // 原 SVG img 形狀。徽章區/方案名現狀保留。長文捲動手勢與角色/場景卡同款
+        //（canvas-node-scroll + scrollDrag 三件套；viewport 自帶 data-canvas-interactive 隔離）。
+        const topView = svgToDataUrl(metadata?.topViewSvg);
+        const cameraView = svgToDataUrl(metadata?.cameraViewSvg);
+        const schematic = topView ?? cameraView;
+        const planName = metadata?.planName ?? null;
+        const directorSessionId = metadata?.directorSessionId;
+        return (
+          <div
+            onPointerDown={onScrollAreaPointerDown}
+            onPointerMove={onScrollAreaPointerMove}
+            onPointerUp={onScrollAreaPointerEnd}
+            onPointerCancel={onScrollAreaPointerEnd}
+            className="canvas-node-scroll touch-pan-y overscroll-contain flex-1 space-y-2 overflow-auto p-3"
+          >
+            <div className="flex items-center gap-1.5">
+              <Clapperboard className="h-3 w-3 shrink-0 text-[#0E7FA8]" aria-hidden="true" />
+              <span className="text-[11px] font-medium uppercase leading-none tracking-[0.18em] text-muted-foreground/70">
+                {planName ? planName : "导演台"}
+              </span>
+            </div>
+            {directorSessionId ? (
+              <DirectorMiniViewport
+                sessionId={directorSessionId}
+                revision={metadata?.revision}
+                topViewSvg={topView}
+                cameraViewSvg={cameraView}
+                className="h-[200px]"
+              />
+            ) : topView && cameraView ? (
+              <div className="grid grid-cols-2 gap-1.5">
+                <div className="overflow-hidden rounded bg-[#0b0f14]">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={topView}
+                    alt="导演台俯视示意图"
+                    loading="lazy"
+                    decoding="async"
+                    draggable={false}
+                    className="h-[110px] w-full object-contain"
+                  />
+                </div>
+                <div className="overflow-hidden rounded bg-[#0b0f14]">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={cameraView}
+                    alt="导演台镜头框图"
+                    loading="lazy"
+                    decoding="async"
+                    draggable={false}
+                    className="h-[110px] w-full object-contain"
+                  />
+                </div>
+              </div>
+            ) : schematic ? (
+              <div className="overflow-hidden rounded-[12px] bg-[#0b0f14]">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={schematic}
+                  alt={topView ? "导演台俯视示意图" : "导演台镜头框图"}
+                  loading="lazy"
+                  decoding="async"
+                  draggable={false}
+                  className="h-[130px] w-full object-contain"
+                />
+              </div>
+            ) : (
+              <div className="flex h-[92px] items-center justify-center rounded-[12px] bg-black/[0.04]">
+                <span className="text-ios-caption1 text-muted-foreground">示意图未同步 · 让 agent 重新规划</span>
+              </div>
+            )}
+            <div className="flex flex-wrap items-center gap-1">
+              {typeof metadata?.shotCount === "number" && (
+                <span className="rounded-full bg-[rgba(90,200,250,0.14)] px-2 py-0.5 text-[11.5px] font-medium leading-none text-[#0E7FA8]">
+                  {metadata.shotCount} 镜头
+                </span>
+              )}
+              {metadata?.healthOk === true ? (
+                <span className="rounded-full bg-[rgba(52,199,89,0.12)] px-2 py-0.5 text-[11.5px] font-medium leading-none text-[#248A3D]">
+                  分镜健康
+                </span>
+              ) : metadata?.healthOk === false ? (
+                <span className="rounded-full bg-[rgba(255,149,0,0.14)] px-2 py-0.5 text-[11.5px] font-medium leading-none text-[#B96A00]">
+                  待修正
+                </span>
+              ) : null}
+            </div>
           </div>
         );
       }

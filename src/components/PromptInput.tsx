@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
 import dynamic from "next/dynamic";
 import { Bot, X } from "lucide-react";
 import type { AgentSseEvent } from "@/lib/agent-chat-types";
@@ -31,6 +31,8 @@ export type PromptInputMode = "generate" | "edit" | "upscale" | "agent";
 interface PromptInputProps {
   onSubmit: (prompt: string) => void;
   isLoading?: boolean;
+  /** 生成中的人工终止回调；传入时「正在生成」旁显示「停止」次级按钮。 */
+  onCancelGenerate?: () => void;
   isLoggedIn?: boolean;
   suggestions: Suggestion[];
   stylePreset: StylePreset;
@@ -43,14 +45,11 @@ interface PromptInputProps {
   onDurationChange: (duration: number) => void;
   generateAudio: boolean;
   onGenerateAudioChange: (enabled: boolean) => void;
-  externalPrompt?: string;
   referenceImages: ReferenceImage[];
   onReferenceImagesChange: (images: ReferenceImage[]) => void;
   models: string[];
   modelId: string;
   onModelChange: (modelId: string) => void;
-  isProfessionalMode: boolean;
-  onToggleProfessionalMode: () => void;
   mode: PromptInputMode;
   onModeChange: (mode: PromptInputMode) => void;
   animState: "idle" | "exit" | "enter";
@@ -103,6 +102,10 @@ interface PromptInputProps {
    * 面板不再自長頂欄）。主頁態不傳。
    */
   chatHeaderExtra?: import("react").ReactNode;
+  /** 雙向同步：把 AgentChatSurface 的 switchSession 能力上拋（畫布選中節點 → 切會話）。 */
+  switchSessionRef?: MutableRefObject<((sessionId: string) => Promise<boolean>) | null>;
+  /** 暴君裁定 2026-09-01：套模板「留舊開新」，同款上拋 startNewSession。 */
+  startNewSessionRef?: MutableRefObject<(() => Promise<boolean>) | null>;
 }
 
 /**
@@ -148,6 +151,7 @@ const AGENT_SURFACE_HEIGHT = "var(--agent-surface-height)";
 export function PromptInput({
   suggestions: initialSuggestions,
   isLoading,
+  onCancelGenerate,
   isLoggedIn,
   onSubmit,
   stylePreset,
@@ -160,14 +164,11 @@ export function PromptInput({
   onDurationChange,
   generateAudio,
   onGenerateAudioChange,
-  externalPrompt,
   referenceImages,
   onReferenceImagesChange,
   models,
   modelId,
   onModelChange,
-  isProfessionalMode,
-  onToggleProfessionalMode,
   mode,
   onModeChange,
   animState,
@@ -181,6 +182,8 @@ export function PromptInput({
   onCanvasEvent,
   canvasStateProvider,
   onSessionChange,
+  switchSessionRef,
+  startNewSessionRef,
   agentInjection,
   onUserMessage,
   fillAvailableHeight = false,
@@ -210,12 +213,6 @@ export function PromptInput({
     MODES_WITHOUT_TEXTAREA.has(prevDisplayModeRef.current) &&
     !MODES_WITHOUT_TEXTAREA.has(displayMode) &&
     animState === "enter";
-
-  useEffect(() => {
-    if (externalPrompt) {
-      setInput((current) => insertPromptSnippet(current, externalPrompt));
-    }
-  }, [externalPrompt]);
 
   // ── D-24 状态A：渐进披露第一层（Task 3 抽成 use-agent-hint.ts）──
   // 提示开关 / sessionStorage 记号 / 5 秒计时 / 送出抑制全在 hook 里；
@@ -519,7 +516,6 @@ export function PromptInput({
               onGenerateAudioChange={onGenerateAudioChange}
               stylePreset={stylePreset}
               handleStyleChange={handleStyleChange}
-              onToggleProfessionalMode={onToggleProfessionalMode}
             />
           )}
 
@@ -560,7 +556,7 @@ export function PromptInput({
               外层不给定高度的话 transcript 会把卡片撑到无限长，输入区被推出屏幕。
               例外：工作站浮動面板態（fillAvailableHeight）外層已有確定高度，
               改為 flex-1 填滿——固定 60dvh 塞進窄手機抽屜會裁掉輸入區。
-              agent 面的「改图/放大/专业控制/开始创作」列本来就不需要：
+              agent 面的「改图/放大/开始创作」列本来就不需要：
               agent 面只有输入区自己送出，摆一排模式切换会跟 composer 抢底部空间。 */}
           {displayMode === "agent" && (
             <div
@@ -581,6 +577,8 @@ export function PromptInput({
                 {...(onCanvasEvent ? { onCanvasEvent } : {})}
                 {...(canvasStateProvider ? { canvasStateProvider } : {})}
                 {...(onSessionChange ? { onSessionChange } : {})}
+                {...(switchSessionRef ? { switchSessionRef } : {})}
+                {...(startNewSessionRef ? { startNewSessionRef } : {})}
                 {...(agentInjection ? { agentInjection } : {})}
                 {...(onUserMessage ? { onUserMessage } : {})}
                 currentModelId={modelId}
@@ -589,7 +587,7 @@ export function PromptInput({
           )}
         </div>
 
-        {/* ── 已套用状态 + 专业模式 + 出图按钮（Task 9 抽成 ActionRow）──
+        {/* ── 已套用状态 + 出图按钮（Task 9 抽成 ActionRow）──
             agent 面整排换返回条；不参与模式动画，底行 shrink-0 原地不动。 */}
         <ActionRow
           displayMode={displayMode}
@@ -598,8 +596,6 @@ export function PromptInput({
           fillAvailableHeight={fillAvailableHeight}
           stylePreset={stylePreset}
           handleStyleChange={handleStyleChange}
-          isProfessionalMode={isProfessionalMode}
-          onToggleProfessionalMode={onToggleProfessionalMode}
           handlePrimaryAction={handlePrimaryAction}
           primaryDisabled={primaryDisabled}
           editBusy={editBusy}
@@ -608,6 +604,7 @@ export function PromptInput({
           upscaleStage={upscaleStage}
           isLoading={isLoading}
           isVideo={isVideo}
+          onCancelGenerate={onCancelGenerate}
         />
       </div>
     </section>

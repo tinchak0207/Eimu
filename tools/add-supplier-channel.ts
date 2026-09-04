@@ -32,6 +32,7 @@ const USAGE = `用法：
   --models <list>            平台模型清單，逗號分隔；條目語法 platformId 或 platformId=upstreamId
   --kinds <list>             認領的 kind（預設 image_generate；可選 image_generate,image_edit,video_generate）
   --chat-models <list>       走 /chat/completions 生圖的上游模型名（逗號分隔，預設空）
+  --adapter <a>              openai_images（預設）| metaso（自訂協議，見 metaso-upstream.ts）
   --tier <t>                 first_party | managed_pool | relay | fallback（預設 relay）
   --seed-priority <n>        seed 進 supplier 表的 priority（預設 25）
   --site-priority <n>        站點隊列 ENV_CHANNEL_PRIORITIES 用（預設 25）
@@ -48,6 +49,7 @@ interface Args {
   kinds: RegistryClaimKind[];
   chatModels: string[];
   tier: RegistryChannel["tier"];
+  adapter: RegistryChannel["adapterType"];
   seedPriority: number;
   sitePriority: number;
   enabledEnv: string | null;
@@ -116,6 +118,11 @@ function parseArgs(argv: string[]): Args {
     console.error(`錯誤：未知 tier "${tier}"。`);
     process.exit(1);
   }
+  const adapterRaw = String(flags["adapter"] ?? "openai_images");
+  if (adapterRaw !== "openai_images" && adapterRaw !== "metaso") {
+    console.error(`錯誤：未知 adapter "${adapterRaw}"（可選 openai_images / metaso）。`);
+    process.exit(1);
+  }
   return {
     label,
     baseUrl: baseUrl.replace(/\/+$/, ""),
@@ -124,6 +131,7 @@ function parseArgs(argv: string[]): Args {
     kinds: kindsRaw as RegistryClaimKind[],
     chatModels: String(flags["chat-models"] ?? "").split(",").map((x) => x.trim()).filter(Boolean),
     tier,
+    adapter: adapterRaw as RegistryChannel["adapterType"],
     seedPriority: Number(flags["seed-priority"] ?? 25),
     sitePriority: Number(flags["site-priority"] ?? 25),
     enabledEnv: flags["enabled-env"] ? String(flags["enabled-env"]) : null,
@@ -153,6 +161,9 @@ function renderEntry(channel: RegistryChannel): string {
   lines.push(`    seedPriority: ${channel.seedPriority},`);
   lines.push(`    sitePriority: ${channel.sitePriority},`);
   lines.push(`    chatImageModels: [${channel.chatImageModels.map((m) => JSON.stringify(m)).join(", ")}],`);
+  if (channel.adapterType && channel.adapterType !== "openai_images") {
+    lines.push(`    adapterType: ${JSON.stringify(channel.adapterType)},`);
+  }
   if (channel.claims.length === 0) {
     lines.push(`    claims: [],`);
   } else {
@@ -251,6 +262,7 @@ async function main() {
     seedPriority: args.seedPriority,
     sitePriority: args.sitePriority,
     chatImageModels: args.chatModels,
+    adapterType: args.adapter,
     claims,
   };
 

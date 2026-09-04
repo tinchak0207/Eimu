@@ -14,7 +14,7 @@
 //   - undo/redo：節點/連線/視口的快照棧
 //
 // 外圍域已拆（2026-08-22 Task 5，符號名不變、本檔仍為唯一匯出點）：
-//   - canvas/canvas-chat-types.ts        展示型事件類型 + UseCanvasChatReturn（37 成員）
+//   - canvas/canvas-chat-types.ts        展示型事件類型 + UseCanvasChatReturn（39 成員）
 //   - canvas/canvas-reducer-adapter.ts   CanvasAction + canvasReducer（19 種 action）
 //   - canvas/canvas-project-sync.ts      三個持久化 effect + 專案身份 refs
 //   - canvas/use-canvas-cards.ts         角色/場景卡域
@@ -40,7 +40,6 @@ import {
 import { listCanvasProjects, postCanvasOpsResult } from "@/lib/canvas/client";
 import type {
   CanvasAgentOp,
-  CanvasAgentOpsEvent,
   CanvasConnection,
   CanvasNode,
   CanvasNodeMetadata,
@@ -61,6 +60,14 @@ import {
   type CanvasProjectSummary,
   type UseCanvasChatReturn,
 } from "./canvas/canvas-chat-types";
+import {
+  createAgentOpsQueue,
+  dequeueAgentOps,
+  enqueueAgentOps,
+  getQueueHead,
+  getQueueHeadEvent,
+  type AgentOpsQueue,
+} from "./canvas/canvas-agent-ops-queue";
 import { useCanvasProjectSync } from "./canvas/canvas-project-sync";
 import { useCanvasCards } from "./canvas/use-canvas-cards";
 import { useCanvasEventSettler } from "./canvas/canvas-event-settler";
@@ -91,7 +98,17 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
   const [saveState, setSaveState] = useState<UseCanvasChatReturn["saveState"]>("idle");
   const [savedProjects, setSavedProjects] = useState<CanvasProjectSummary[]>([]);
   // Wave C：agent 下發、待確認/執行的批量畫布操作。
-  const [pendingAgentOps, setPendingAgentOps] = useState<CanvasAgentOpsEvent | null>(null);
+  //
+  // 內部用佇列存（見 canvas-agent-ops-queue.ts）：CanvasAgentOpsEvent 沒有
+  // session_id，原先單一 nullable slot 在第二個 canvas.ops 事件於第一個尚未
+  // resolve 時抵達會直接覆蓋掉它，該 request_id 就再也等不到 postCanvasOpsResult
+  // （gateway 端工具調用卡到超時）。修法：Map<request_id, entry> 保序佇列，
+  // 每筆各自捕獲「事件抵達當下」的 session id（resolve 時用這個，不用
+  // sessionIdRef.current，否則使用者在確認前切 session 會報錯 sid）。
+  // 對外仍只暴露佇列頭給 UI（Option A：確認閘 UI 一次顯示一批，resolve 後
+  // 自動前進到下一筆）——CanvasEmbed.tsx/CanvasEmbedOverlays.tsx 零改動。
+  const [agentOpsQueue, setAgentOpsQueue] = useState<AgentOpsQueue>(createAgentOpsQueue);
+  const pendingAgentOps = getQueueHeadEvent(agentOpsQueue);
 
   // ── 角色/場景卡域（P2 跨鏡頭一致性）：卡列表 + 項目級鎖定
   const {
@@ -120,8 +137,8 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
   budgetRef.current = budget;
   const selectedNodeIdRef = useRef(selectedNodeId);
   selectedNodeIdRef.current = selectedNodeId;
-  const pendingAgentOpsRef = useRef(pendingAgentOps);
-  pendingAgentOpsRef.current = pendingAgentOps;
+  const agentOpsQueueRef = useRef(agentOpsQueue);
+  agentOpsQueueRef.current = agentOpsQueue;
   const sessionIdRef = useRef(sessionId);
   sessionIdRef.current = sessionId;
   /** flyTo 動畫的 rAF 句柄（新動畫/卸載時取消）。 */
@@ -204,6 +221,40 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     setDerives([]);
   }, []);
 
+  /**
+   * Agent 快照下行回填（2026-08-26 Bug1b）：resume 到已有歷史的 session 時，左聊天
+   * 續上但右畫布空白 —— 快照此前只有上行沒有下行。gateway 存的是上行壓縮快照
+   * （content/prompt 已截斷），fromCanvasProject 負責形狀校驗與降級。
+   * 與 openSavedCanvas 同語義：換載入內容 = 全新時間線，不進撤銷棧、選取歸零、
+   * plans/derives 不動。恢復結果在 sessionId 變化 effect（newCanvasSession 清場）
+   * 之後異步到達，load 直接覆蓋空畫布即可；呼叫端保證僅在 nodes>0 且畫布仍空時調用。
+   */
+  const restoreAgentSnapshot = useCallback(
+    (snapshot: { nodes?: unknown; connections?: unknown; viewport?: CanvasViewport }): boolean => {
+      if (!snapshot || typeof snapshot !== "object") return false;
+      const restored = fromCanvasProject(snapshot);
+      if (restored.nodes.length === 0) return false;
+      everHadNodesRef.current = true;
+      dispatchCanvas({ type: "load", nodes: restored.nodes, connections: restored.connections });
+      if (
+        typeof snapshot.viewport?.x === "number" &&
+        typeof snapshot.viewport?.y === "number" &&
+        typeof snapshot.viewport?.k === "number"
+      ) {
+        setViewportState({
+          x: snapshot.viewport.x,
+          y: snapshot.viewport.y,
+          k: clampScale(snapshot.viewport.k),
+        });
+      }
+      // 雙向同步方向B：chat 切 session → 畫布選中對應節點
+      const linked = restored.nodes.find((n) => n.metadata?.session_id === sessionIdRef.current);
+      setSelectedNodeId(linked ? linked.id : null);
+      return true;
+    },
+    [],
+  );
+
   // 監聽 sessionId 變化：換 agent 會話 = 換一張畫布，避免舊畫布跑進新會話。
   useEffect(() => {
     if (!sessionId) return;
@@ -246,7 +297,7 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
   // ─────────────────────── SSE 畫布事件入口
 
   // 最終一致性收斂（image.done 對賬）：settle 函數與 URL 佇列由 settler 域提供。
-  const { imageDoneQueueRef, settleCandidateNode, settleStaleNodes } = useCanvasEventSettler({
+  const { imageDoneQueueRef, settleCandidateNode, settleStaleNodes, settleFailedNode } = useCanvasEventSettler({
     canvasRef,
     progressTimerRef,
     progressPendingRef,
@@ -255,10 +306,13 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
 
   const handleCanvasEvent = useCallback(
     (event: AgentSseEvent) => {
-      // Wave C：agent 批量操作先落確認閘（不直接進 reducer）。
+      // Wave C：agent 批量操作先落確認閘（不直接進 reducer）。入隊而非覆蓋——
+      // 不同 request_id 各自排隊，同 request_id 重入視為合法重放（見 queue 模組註解）。
+      // 捕獲當下 session id：事件本身沒有 session_id 欄位，resolve 時要用「抵達
+      // 當下」而非「resolve 當下」的 session，否則使用者切 session 後回報會錯 sid。
       if (event.name === "canvas.ops") {
         if (event.data?.request_id && Array.isArray(event.data?.ops)) {
-          setPendingAgentOps(event.data);
+          setAgentOpsQueue((prev) => enqueueAgentOps(prev, event.data, sessionIdRef.current ?? null));
         }
         return;
       }
@@ -269,7 +323,9 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
             const next = [...prev, { ...event.data, receivedAt: Date.now() }];
             return next.slice(Math.max(0, next.length - PLAN_CARD_LIMIT));
           });
-          return;
+          // C-FE：計劃幀繼續進 reducer——unit 記下 cost_hint，
+          // node.created 時蓋章到生成卡（「預估 N 幣」角標）。側欄卡片照舊由 plans 渲染。
+          break;
         case "canvas.derive.started":
           setDerives((prev) => {
             const next = [
@@ -300,6 +356,12 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
           settleCandidateNode(event.data);
           return;
         }
+        case "image.failed": {
+          // 圖失敗訊號（refunded/failed/超時）：與 image.done 對稱。優先 task_id
+          // 配對，沒配上的在 turn.done 收斂時按序兜底——絕不能讓節點永遠轉圈。
+          settleFailedNode(event.data);
+          return;
+        }
         case "turn.done":
         case "session.closed":
           // 回合/會話結束：最後收斂，把仍卡 loading 的節點按序配對落地。
@@ -309,7 +371,7 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
           break;
       }
       // 結構性事件：進 reducer。節點增刪是可撤銷的動作，所以先存一格。
-      if (event.name === "canvas.node.created" || event.name === "canvas.node.deleted" || event.name === "canvas.node.connected") {
+      if (event.name === "canvas.node.created" || event.name === "canvas.node.deleted" || event.name === "canvas.node.connected" || event.name === "canvas.node.disconnected") {
         pushHistory();
       }
 
@@ -350,7 +412,7 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
 
       dispatchCanvas({ type: "event", event });
     },
-    [pushHistory, imageDoneQueueRef, settleCandidateNode, settleStaleNodes],
+    [pushHistory, imageDoneQueueRef, settleCandidateNode, settleFailedNode, settleStaleNodes],
   );
 
   // 對外事件入口：外部 chat（AgentChatSurface 的 onCanvasEvent）呼叫。
@@ -479,6 +541,27 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     [pushHistory],
   );
 
+  /**
+   * 同一 workflow 的重複套用 = 替換不是疊加（2026-08-26 Bug3）：addNodes 是追加語義，
+   * 同一張模板卡點兩次會平鋪兩份 30+ 節點。這裡先刪掉 metadata.workflow_id 相同的
+   * 全部舊節點（delete_many 連帶清掉懸空連線），再 add_nodes 新的一批；兩個 dispatch
+   * 在同一輪批次裡落地，history 只推一格 —— undo 一鍵回到替換前。
+   */
+  const replaceWorkflowNodes = useCallback(
+    (workflowId: string, nodes: CanvasNode[], connections?: CanvasConnection[]) => {
+      if (!workflowId) return;
+      pushHistory();
+      const staleIds = canvasRef.current.nodes
+        .filter((n) => n.metadata?.workflow_id === workflowId)
+        .map((n) => n.id);
+      if (staleIds.length > 0) dispatchCanvas({ type: "delete_many", nodeIds: staleIds });
+      if (nodes.length > 0 || connections?.length) {
+        dispatchCanvas({ type: "add_nodes", nodes, ...(connections ? { connections } : {}) });
+      }
+    },
+    [pushHistory],
+  );
+
   const deleteNodes = useCallback(
     (nodeIds: string[]) => {
       if (nodeIds.length === 0) return;
@@ -549,11 +632,18 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
 
   // ─────────────────────── Wave C：agent 操作的確認/執行/拒絕
 
-  /** 批准並執行 agent 待審操作。回傳 run_generation 清單交宿主觸發生成。 */
+  /**
+   * 批准並執行 agent 待審操作。回傳 run_generation 清單交宿主觸發生成。
+   * 用佇列頭自己捕獲的 session id 回報結果（不是 sessionIdRef.current 當下值）——
+   * 這是本次修的 bug 本體：舊版讀當下 session，使用者切過 session 就報錯 sid。
+   * resolve 後從佇列摘除該筆，UI 綁的 pendingAgentOps（佇列頭）自動前進到下一筆。
+   */
   const applyAgentOps = useCallback((): { runGeneration: { nodeId: string; prompt?: string; model?: string; size?: string; count?: number }[] } => {
-    const pending = pendingAgentOpsRef.current;
+    const head = getQueueHead(agentOpsQueueRef.current);
     const result = { runGeneration: [] as { nodeId: string; prompt?: string; model?: string; size?: string; count?: number }[] };
-    if (!pending) return result;
+    if (!head) return result;
+    const { requestId, entry } = head;
+    const pending = entry.event;
     pushHistory();
     dispatchCanvas({ type: "agent_ops", ops: pending.ops });
     for (const op of pending.ops) {
@@ -565,22 +655,27 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
         result.runGeneration.push({ nodeId: op.node_id, prompt: op.prompt, model: op.model, size: op.size, count: op.count });
       }
     }
-    setPendingAgentOps(null);
-    const sid = sessionIdRef.current;
+    setAgentOpsQueue((prev) => dequeueAgentOps(prev, requestId));
+    const sid = entry.capturedSessionId;
     if (sid) {
       const createdIds = pending.ops.filter((o): o is Extract<CanvasAgentOp, { type: "add_node" }> => o.type === "add_node").map((o) => o.node.id);
-      void postCanvasOpsResult(sid, pending.request_id, { ok: true, ...(createdIds.length ? { created_node_ids: createdIds } : {}) });
+      void postCanvasOpsResult(sid, requestId, { ok: true, ...(createdIds.length ? { created_node_ids: createdIds } : {}) });
     }
     return result;
   }, [pushHistory]);
 
-  /** 拒絕 agent 待審操作（結果回報 gateway，讓工具調用拿到明確拒絕而非超時）。 */
+  /**
+   * 拒絕 agent 待審操作（結果回報 gateway，讓工具調用拿到明確拒絕而非超時）。
+   * 同樣用該筆捕獲的 session id，不用 sessionIdRef.current。
+   */
   const dismissAgentOps = useCallback((reason?: string) => {
-    const pending = pendingAgentOpsRef.current;
-    setPendingAgentOps(null);
-    const sid = sessionIdRef.current;
-    if (pending && sid) {
-      void postCanvasOpsResult(sid, pending.request_id, { ok: false, error: reason ?? "用户拒绝了此次画布操作" });
+    const head = getQueueHead(agentOpsQueueRef.current);
+    if (!head) return;
+    const { requestId, entry } = head;
+    setAgentOpsQueue((prev) => dequeueAgentOps(prev, requestId));
+    const sid = entry.capturedSessionId;
+    if (sid) {
+      void postCanvasOpsResult(sid, requestId, { ok: false, error: reason ?? "用户拒绝了此次画布操作" });
     }
   }, []);
 
@@ -748,9 +843,11 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     savedProjects,
     refreshSavedProjects,
     openSavedCanvas,
+    restoreAgentSnapshot,
     pathFor,
     moveNodes,
     addNodes,
+    replaceWorkflowNodes,
     deleteNodes,
     addConnection,
     removeConnection,

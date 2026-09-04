@@ -7,13 +7,10 @@ import {
   NANO_BANANA_2_MODEL_ID,
   NANO_BANANA_PRO_MODEL_ID,
   PIXAI_TSUBAKI2_MODEL_ID,
-  SENSENOVA_U1_FAST_MODEL_ID,
   PROVIDERS,
   imageGenerationCoins,
   modelPromotionTag,
   modelDisplayName,
-  resolveSenseNovaApiKeys,
-  resolveSenseNovaImageSize,
   resolveUpstreamModelId,
 } from "./provider-config.ts";
 
@@ -38,31 +35,10 @@ test("GPT Image 2 follows the Adobe credit table at ten credits per coin", () =>
   assert.equal(imageGenerationCoins("gpt-image-2", "quality"), 2);
 });
 
-test("SenseNova U1 Fast is a fixed-price welfare model", () => {
-  assert.equal(SENSENOVA_U1_FAST_MODEL_ID, "sensenova-u1-fast");
-  assert.ok(PROVIDERS.image_tinchak.models.includes(SENSENOVA_U1_FAST_MODEL_ID));
-  assert.equal(imageGenerationCoins(SENSENOVA_U1_FAST_MODEL_ID, "fast"), 0.1);
-  assert.equal(imageGenerationCoins(SENSENOVA_U1_FAST_MODEL_ID, "quality"), 0.1);
-});
-
 test("PixAI Tsubaki.2 inherits the recommendation tag and is the default engine", () => {
   assert.equal(modelPromotionTag(PIXAI_TSUBAKI2_MODEL_ID), "推荐");
-  assert.equal(modelPromotionTag(SENSENOVA_U1_FAST_MODEL_ID), undefined);
   assert.equal(MODEL_CONFIGS.fast.image_tinchak, PIXAI_TSUBAKI2_MODEL_ID);
   assert.equal(MODEL_CONFIGS.quality.image_tinchak, PIXAI_TSUBAKI2_MODEL_ID);
-});
-
-test("SenseNova U1 Fast maps shared canvas sizes to supported upstream dimensions", () => {
-  assert.equal(resolveSenseNovaImageSize("1024x1024"), "2048x2048");
-  assert.equal(resolveSenseNovaImageSize("1536x1024"), "2496x1664");
-  assert.equal(resolveSenseNovaImageSize("1024x1536"), "1664x2496");
-});
-
-test("SenseNova pools merge the primary key with newline or comma separated pool keys", () => {
-  assert.deepEqual(
-    resolveSenseNovaApiKeys("sk-primary", "sk-one\nsk-two,sk-one"),
-    ["sk-primary", "sk-one", "sk-two"],
-  );
 });
 
 test("endpoint overrides do not replace nano-banana-pro with the legacy default model", () => {

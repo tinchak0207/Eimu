@@ -6,6 +6,7 @@ import {
   classifyBillingFailure,
   commitGenerationBilling,
   refundGenerationBilling,
+  retryStrandedRefundOperations,
 } from "./billing-ledger.ts";
 import { ImageBillingGatewayError, ImageBillingRevertedError } from "@/lib/image-billing";
 import type { GenerationSql } from "./database.ts";
@@ -159,5 +160,32 @@ test("commit is recorded only against an applied reserve operation", async () =>
   assert.equal(calls.length, 1);
   assert.match(calls[0].sql, /reserve\.status = 'applied'/);
   assert.match(calls[0].sql, /ON CONFLICT \(job_id, operation, sequence\) DO NOTHING/);
+});
+
+test("2026-08-30: stranded refund retry scans only pending ops, never failed (dead loop killed)", async () => {
+  // failed refund op 是確定性拒絕（refundGenerationBilling 直接短路），再撈起來只會
+  // 30s 死循環刷日誌。回歸針：掃描查詢只能選 status='pending'，且 failed op 不觸發 refund。
+  const calls: Call[] = [];
+  const sql = (async (strings: TemplateStringsArray, ...values: unknown[]) => {
+    calls.push({ sql: strings.join(" "), values });
+    return [];
+  }) as unknown as GenerationSql;
+
+  let refundCalled = 0;
+  const count = await retryStrandedRefundOperations({
+    executorId: "worker-a",
+    adapter: {
+      reserve: async () => {},
+      refund: async () => { refundCalled += 1; },
+    },
+    sql,
+  });
+
+  const scan = calls.find((call) => call.sql.includes("refund_op.amount AS refund_amount"));
+  assert.ok(scan, "stranded refund scan query should run");
+  assert.ok(scan.sql.includes("refund_op.status = 'pending'"), "scan must select only pending refund ops");
+  assert.ok(!scan.sql.includes("'pending', 'failed'"), "scan must not include failed refund ops");
+  assert.equal(count, 0, "no candidates -> no retries");
+  assert.equal(refundCalled, 0, "failed refund op must never reach the external refund adapter");
 });
 

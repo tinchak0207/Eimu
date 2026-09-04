@@ -337,23 +337,6 @@ test("admin pool store caches pools and pages through every stored config", () =
   assert.match(source, /del\(stale\.map/);
 });
 
-test("generate image route sends SenseNova U1 Fast to its direct image endpoint", () => {
-  const source = read("src/app/api/generate-images/route.ts");
-  const registry = read("src/lib/channel-registry.ts");
-
-  // Queue construction (key rotation, base URL) moved into the channel registry so the
-  // admin panel can see and disable the sensenova lane; the request-body shape (n:1,
-  // size mapping) stays in the route, which owns upstream protocols.
-  assert.match(registry, /SENSENOVA_API_KEY/);
-  assert.match(registry, /SENSENOVA_API_KEYS/);
-  assert.match(registry, /https:\/\/token\.sensenova\.cn\/v1/);
-  assert.match(registry, /sensenova-\$\{keyIndex \+ 1\}/);
-
-  assert.match(source, /SENSENOVA_U1_FAST_MODEL_ID/);
-  assert.match(source, /n:\s*1/);
-  assert.match(source, /resolveSenseNovaImageSize\(imageSize\)/);
-});
-
 test("generate image route supports reference image edits without breaking text-only generation", () => {
   const source = read("src/app/api/generate-images/route.ts");
   const apiTypes = read("src/lib/api-types.ts");

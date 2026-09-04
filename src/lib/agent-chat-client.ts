@@ -12,6 +12,7 @@
 
 import { getStoredToken, getStoredUser } from "./new-api-client";
 import type { AgentAttachmentRef, AgentQuotaState } from "./agent-chat-types";
+import { LOCAL_TEST_MODE } from "./local-test-mode";
 
 /** 网道附件清单：download/attachment 解析后可转成 AgentAttachmentRef。 */
 export interface AgentAttachment {
@@ -48,6 +49,15 @@ export class AgentChatError extends Error {
     this.code = code;
     this.status = status;
   }
+}
+
+/**
+ * 终端认证错误：not_authenticated（body 明说没登录）与 unauthorized（裸
+ * 401/403，例如 token 过期但网关没回专门的 code）都该让 hook 停止重连，
+ * 而不是继续无限重试——两者本质都是「重连也换不回登录态」。
+ */
+export function isTerminalAuthError(err: unknown): boolean {
+  return err instanceof AgentChatError && (err.code === "not_authenticated" || err.code === "unauthorized");
 }
 
 // ─────────────────────────── 回传型别
@@ -98,6 +108,8 @@ function mapErrorCode(data: unknown, status: number): AgentChatErrorCode {
 function fallbackMessage(status: number): string {
   if (status === 401 || status === 403) return "登录已失效，请重新登录。";
   if (status === 404) return "找不到该会话或资源。";
+  // 罪状 2b：上传超限不能只让 chip 标红——人话说清楚为什么、该怎么办。
+  if (status === 413) return "文件过大，超过单次上传上限（约 4.5MB）。请压缩或拆分后再试。";
   if (status >= 500) return "服务器暂时无法处理，请稍后再试。";
   return "请求失败，请稍后再试。";
 }
@@ -133,11 +145,30 @@ function extractMessage(data: unknown, status: number): string {
  * 显示「请先登录」却不知道该怎么办。
  */
 function authHeaders(reason: string): Record<string, string> {
+  // LOCAL_TEST_MODE：本機視覺重放/截圖用，送假憑證即可——站內代理的
+  // resolveAgentCaller 在該模式下直接換 B 端 key，不驗證這組頭。
+  if (LOCAL_TEST_MODE) {
+    return { Authorization: "Bearer local-test-token", "x-user-id": "0" };
+  }
   const token = getStoredToken();
   const userId = getStoredUser()?.id;
   if (!token || !userId) {
     throw new AgentChatError("not_authenticated", reason);
   }
+  return { Authorization: `Bearer ${token}`, "x-user-id": String(userId) };
+}
+
+/** 非抛错版身份头：给 fire-and-forget（静默教训提炼等）用。
+ *  未登录返回 null（调用方静默跳过），不 throw —— 与 authHeaders 的
+ *  「只有一半凭证就报错」语义区分开：无 UI 的旁生请求不该因登录态
+ *  缺失而制造噪音。 */
+export function tryAuthHeaders(): Record<string, string> | null {
+  if (LOCAL_TEST_MODE) {
+    return { Authorization: "Bearer local-test-token", "x-user-id": "0" };
+  }
+  const token = getStoredToken();
+  const userId = getStoredUser()?.id;
+  if (!token || !userId) return null;
   return { Authorization: `Bearer ${token}`, "x-user-id": String(userId) };
 }
 
@@ -176,6 +207,11 @@ export interface AgentSessionSummary {
   created_at: number;
   updated_at: number;
   last_activity_at: number;
+  /**
+   * 網關 2026-08-31 契約新增的會話運轉狀態。選填——舊網關/快取沒這欄位時
+   * 不得崩潰，渲染端按 idle 處理。
+   */
+  status?: "running" | "waiting" | "idle";
 }
 
 /** 會話記憶補注：resume/switch 的老會話補上帳戶畫像（best-effort，失敗不打擾）。 */
@@ -345,6 +381,110 @@ export async function fetchAgentQuota(): Promise<AgentQuotaState> {
   };
 }
 
+// ─────────────────────────── 用户级设定（罪状 6）
+
+/** 中途输入：turn 中发消息是打断当前轮（steer）还是排队等本轮结束（queue）。 */
+export type AgentInterruptMode = "steer" | "queue";
+/** 模型性格：高效（先出结果）或沉稳（先充分思考）。 */
+export type AgentPersonaMode = "efficient" | "thoughtful";
+/** 成本需求：经济 / 均衡 / 高质 三档。 */
+export type AgentCostMode = "economy" | "balanced" | "premium";
+/** 互动模式：协作 / 预设 / 自动 三档。 */
+export type AgentInteractionMode = "collaborate" | "preset" | "auto";
+
+/** 网关 GET/POST /agent/v1/settings 的 shape（默认 steer/efficient/balanced/preset，非法值网关回 400）。 */
+export interface AgentSettings {
+  interrupt_mode: AgentInterruptMode;
+  persona: AgentPersonaMode;
+  cost_mode: AgentCostMode;
+  interaction_mode: AgentInteractionMode;
+}
+
+export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
+  interrupt_mode: "steer",
+  persona: "efficient",
+  cost_mode: "balanced",
+  interaction_mode: "preset",
+};
+
+const AGENT_SETTINGS_STORAGE_KEY = "agent-settings-v1";
+
+const INTERRUPT_MODES: readonly AgentInterruptMode[] = ["steer", "queue"];
+const PERSONA_MODES: readonly AgentPersonaMode[] = ["efficient", "thoughtful"];
+const COST_MODES: readonly AgentCostMode[] = ["economy", "balanced", "premium"];
+const INTERACTION_MODES: readonly AgentInteractionMode[] = ["collaborate", "preset", "auto"];
+
+/** 逐字段白名单校验：localStorage 与网关的脏数据一律落回默认值。 */
+function sanitizeAgentSettings(raw: unknown): AgentSettings {
+  const d = (raw ?? {}) as Record<string, unknown>;
+  return {
+    interrupt_mode: INTERRUPT_MODES.includes(d.interrupt_mode as AgentInterruptMode)
+      ? (d.interrupt_mode as AgentInterruptMode)
+      : DEFAULT_AGENT_SETTINGS.interrupt_mode,
+    persona: PERSONA_MODES.includes(d.persona as AgentPersonaMode)
+      ? (d.persona as AgentPersonaMode)
+      : DEFAULT_AGENT_SETTINGS.persona,
+    cost_mode: COST_MODES.includes(d.cost_mode as AgentCostMode)
+      ? (d.cost_mode as AgentCostMode)
+      : DEFAULT_AGENT_SETTINGS.cost_mode,
+    interaction_mode: INTERACTION_MODES.includes(d.interaction_mode as AgentInteractionMode)
+      ? (d.interaction_mode as AgentInteractionMode)
+      : DEFAULT_AGENT_SETTINGS.interaction_mode,
+  };
+}
+
+/**
+ * 同步读本地缓存（无窗口环境 / 脏数据 / 缺项都回默认值）。
+ * send() 发送前即时读它拿 interrupt_mode —— 零网络，不阻塞发送。
+ */
+export function readCachedAgentSettings(): AgentSettings {
+  if (typeof window === "undefined") return { ...DEFAULT_AGENT_SETTINGS };
+  try {
+    const raw = window.localStorage.getItem(AGENT_SETTINGS_STORAGE_KEY);
+    if (!raw) return { ...DEFAULT_AGENT_SETTINGS };
+    return sanitizeAgentSettings(JSON.parse(raw));
+  } catch {
+    return { ...DEFAULT_AGENT_SETTINGS };
+  }
+}
+
+/** 只写本地缓存（不触网）。设定弹层改值与挂载回读合并共用这条落盘路径。 */
+export function writeCachedAgentSettings(settings: AgentSettings): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(AGENT_SETTINGS_STORAGE_KEY, JSON.stringify(sanitizeAgentSettings(settings)));
+  } catch {
+    // 隐私模式等写入失败：只影响下次冷启动的初值，不挡聊天。
+  }
+}
+
+/**
+ * 挂载时回读网关设定：网关为准，缺项用默认。任何失败（未登录 / 网关不可达 /
+ * 响应形状不对）静默回默认值 —— 设定不可用不能挡聊天。永不 reject。
+ */
+export async function getAgentSettings(): Promise<AgentSettings> {
+  try {
+    const data = await agentFetch("/api/agent/settings", { method: "GET" });
+    return sanitizeAgentSettings(data);
+  } catch {
+    return { ...DEFAULT_AGENT_SETTINGS };
+  }
+}
+
+/**
+ * 保存设定：先把合并结果写进本地缓存（立即生效，send 下一拍就能读到），
+ * 再异步持久化到网关；网络失败静默 —— 本地已经生效，不打扰对话。
+ */
+export async function saveAgentSettings(patch: Partial<AgentSettings>): Promise<void> {
+  const merged = sanitizeAgentSettings({ ...readCachedAgentSettings(), ...patch });
+  writeCachedAgentSettings(merged);
+  try {
+    await agentFetch("/api/agent/settings", { method: "POST", body: JSON.stringify(merged) });
+  } catch {
+    // 持久化失败不上抛：设定是体验增强，不是对话的前置条件。
+  }
+}
+
 /** 取 SSE 只读票。 */
 export async function requestSseTicket(sessionId: string): Promise<AgentSseTicket> {
   const data = await agentFetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}/sse-ticket`, {
@@ -366,7 +506,10 @@ export async function requestSseTicket(sessionId: string): Promise<AgentSseTicke
 export function buildEventsUrl(eventsUrl: string, ticket: string, lastEventId?: number): string {
   const url = new URL(eventsUrl);
   url.searchParams.set("ticket", ticket);
-  if (typeof lastEventId === "number" && Number.isFinite(lastEventId) && lastEventId > 0) {
+  // 0 也要带上：网关靠它区分「从头回放」（历史切换 reset 后重建 transcript）
+  // 和「不回放」。省掉 0 会让历史会话载入后永远空白——浏览器 EventSource
+  // 首连不带 Last-Event-ID header，query 参数是唯一的游标通道。
+  if (typeof lastEventId === "number" && Number.isFinite(lastEventId)) {
     url.searchParams.set("last_event_id", String(lastEventId));
   }
   return url.toString();

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, CheckSquare, ChevronDown, Download, FileJson, Sheet } from "lucide-react";
+import { ArrowLeft, CheckSquare } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useHistoryStore } from "@/hooks/use-history";
 import { fetchUsageStat } from "@/lib/new-api-client";
@@ -84,29 +84,10 @@ export function HistoryClient() {
   const [accountQuota, setAccountQuota] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  const [exportOpen, setExportOpen] = useState(false);
   /** 「存为角色卡」目标记录：非 null 时弹出命名对话框。 */
   const [saveCardEntry, setSaveCardEntry] = useState<HistoryEntry | null>(null);
   /** 「再来 N 组 / 微调变体」目标记录 + 模式：非 null 时弹出重跑对话框。 */
   const [rerunTarget, setRerunTarget] = useState<{ entry: HistoryEntry; mode: HistoryRerunMode } | null>(null);
-  const exportMenuRef = useRef<HTMLDivElement>(null);
-
-  // 导出菜单：点外面或按 Esc 关闭。
-  useEffect(() => {
-    if (!exportOpen) return;
-    const handlePointerDown = (event: PointerEvent) => {
-      if (!exportMenuRef.current?.contains(event.target as Node)) setExportOpen(false);
-    };
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setExportOpen(false);
-    };
-    document.addEventListener("pointerdown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [exportOpen]);
 
   // ── 查询与 URL 同步 ───────────────────────────────────────
 
@@ -207,14 +188,25 @@ export function HistoryClient() {
   /**
    * D-18：把这条记录交给 AI 助理继续做。
    *
-   * 只带 prompt 过去，不带图。理由：助理的 image_edit / image_upscale 吃的是
-   * 它自己上传拿到的 mediaId，不吃我们图库里的公开 URL；硬塞 URL 只会让它
-   * 重新下载再上传一次。带一句话过去让它重新构图，是这里唯一诚实可行的交接。
+   * 只带 prompt + 文字配方（模型/尺寸）过去，不带图。理由：助理的 image_edit /
+   * image_upscale 吃的是它自己上传拿到的 mediaId，不吃我们图库里的公开 URL；
+   * 硬塞 URL 只会让它重新下载再上传一次。带一句话 + 原参数（文字配方）过去让
+   * 它重新构图，是这里唯一诚实可行的交接。lora 在 history 中不存在，禁止编造。
    */
   const handleOpenAgent = useCallback((entry: HistoryEntry) => {
-    const seed = `照这个想法再做一版：${entry.prompt.trim()}`;
+    const prompt = entry.prompt.trim();
+    // history 里的 modelId（可能缺）与 workflow.imageSize（可能缺）都是可选，
+    // 只把存在的补进「原参数」括号里，避免编造 lora 之类不存在的字段。
+    const modelId = entry.modelId ?? "";
+    const imageSize = entry.workflow?.imageSize ?? "";
+    const recipeText =
+      modelId || imageSize
+        ? `（原参数：${modelId ? `模型 ${modelId}` : ""}${modelId && imageSize ? "，" : ""}${imageSize ? `尺寸 ${imageSize}` : ""}）`
+        : "";
+    const seed = `照这个想法再做一版：${prompt}${recipeText}`;
     // 回首页并直接开在卡片的 agent 面（?agent=1），不是去 /agent 独立页——
     // 助理是那张卡片上的一个 toggle，落地就该看见工作台还在旁边。
+    // ?q= 照旧（seed 已含配方文字，agent 自然能读）。
     router.push(`/?agent=1&q=${encodeURIComponent(seed)}`);
   }, [router]);
 
@@ -367,128 +359,98 @@ export function HistoryClient() {
 
   return (
     <div className="min-h-screen bg-transparent px-4 pb-28 pt-20 sm:px-6 lg:px-8">
-      <div className="mx-auto w-full max-w-6xl">
-        {/* 返回胶囊 — 与 /pricing、/docs 同一颗玻璃胶囊，全站一套返回语法 */}
-        <Link
-          href="/"
-          className="lg-float mb-5 inline-flex cursor-pointer items-center gap-2 rounded-full px-3.5 py-2 text-ios-footnote font-medium text-[rgba(0,0,0,0.56)] lg-transition hover:text-[rgba(0,0,0,0.82)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:mb-8 sm:px-4 sm:py-2.5"
-        >
-          <ArrowLeft className="h-3.5 w-3.5" />
-          返回做图
-        </Link>
-
-        {/* 页首 — 全站统一的 iOS 大标题版式：纯文字，左对齐，无装饰图标盒 */}
-        <header className="mb-6 flex flex-wrap items-end justify-between gap-4 sm:mb-8">
-          <div>
-            <h1 className="text-ios-title1 font-bold tracking-tight text-[rgba(0,0,0,0.85)] sm:text-ios-largetitle">
+      <div className="mx-auto w-full max-w-[1440px]">
+        <div className="mb-4 lg:mb-5 lg:flex lg:items-center lg:gap-4">
+          {/* 移动端：标题左、计数+多选右同一行；桌面端 lg:contents 拆散进同一条水平工具栏。
+              两份计数/多选各在对方断点 display:none，无障碍树里只暴露一份。 */}
+          <div className="flex items-center justify-between gap-3 lg:contents">
+            <Link
+              href="/"
+              className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 text-ios-body font-semibold text-[rgba(0,0,0,0.85)] lg-transition hover:text-[rgba(0,0,0,0.62)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)]"
+            >
+              <ArrowLeft className="h-4 w-4" />
               生成历史
-            </h1>
-            <p className="mt-2 text-ios-footnote text-[rgba(0,0,0,0.58)] sm:text-ios-body">
-              所有作品与参数都在这里，随时找回、复用、导出
-            </p>
+            </Link>
+
+            <div className="flex items-center gap-3 lg:hidden">
+              {isLoggedIn && (history.entries.length > 0 || hasFilters) && (
+                <>
+                  {/* history.total 是服务端针对当前查询的计数，不包含合并进来的本地缓存记录；
+                      网格里实际渲染的是 history.entries。两者在有本地专属记录时会不一致
+                      （例如这条计数显示「共 3 条」，网格里「今天」分组却有 20 条），
+                      用户会把它读成页面数据矛盾。这里改用真正渲染出来的条数，保证这一行
+                      和它正下方的网格永远指向同一个数字。 */}
+                  <span aria-live="polite" className="text-ios-footnote tabular-nums text-[rgba(0,0,0,0.58)]">
+                    {hasFilters ? `筛选出 ${history.entries.length} 条` : `共 ${history.entries.length} 条`}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => (selectionMode ? exitSelection() : setSelectionMode(true))}
+                    aria-pressed={selectionMode}
+                    className={cn(
+                      "inline-flex cursor-pointer items-center gap-1.5 rounded-full px-2 py-1.5",
+                      "text-ios-footnote font-medium transition-colors duration-200",
+                      "focus:outline-none focus:ring-2 focus:ring-[rgba(0,122,255,0.20)]",
+                      selectionMode ? "text-[#007AFF]" : "text-[rgba(0,0,0,0.58)] hover:text-[rgba(0,0,0,0.85)]",
+                    )}
+                  >
+                    <CheckSquare className="h-3.5 w-3.5" />
+                    多选
+                  </button>
+                </>
+              )}
+            </div>
           </div>
 
-          {isLoggedIn && history.entries.length > 0 && (
-            <div className="flex flex-wrap items-center gap-1.5">
+          {isLoggedIn && (history.entries.length > 0 || hasFilters) && (
+            <HistoryFilterBar
+              className="mt-3 lg:order-2 lg:mt-0 lg:flex-1 lg:justify-end"
+              query={urlQuery}
+              facets={history.facets}
+              stats={isLoggedIn ? (
+                <HistoryStats
+                  entries={localStats.entries}
+                  images={localStats.images}
+                  starred={localStats.starred}
+                  accountQuota={accountQuota}
+                  loading={showSkeleton}
+                />
+              ) : undefined}
+            onExportCsv={() => exportHistoryCsv(history.entries)}
+            onExportJson={() => exportHistoryJson(history.entries)}
+            onChange={handleQueryChange}
+          />
+        )}
+
+        <div className="hidden lg:order-3 lg:flex lg:shrink-0 lg:items-center lg:gap-3">
+          {isLoggedIn && (history.entries.length > 0 || hasFilters) && (
+            <>
+              {/* history.total 是服务端针对当前查询的计数，不包含合并进来的本地缓存记录；
+                  网格里实际渲染的是 history.entries。两者在有本地专属记录时会不一致
+                  （例如这条计数显示「共 3 条」，网格里「今天」分组却有 20 条），
+                  用户会把它读成页面数据矛盾。这里改用真正渲染出来的条数，保证这一行
+                  和它正下方的网格永远指向同一个数字。 */}
+              <span aria-live="polite" className="text-ios-footnote tabular-nums text-[rgba(0,0,0,0.58)]">
+                {hasFilters ? `筛选出 ${history.entries.length} 条` : `共 ${history.entries.length} 条`}
+              </span>
               <button
                 type="button"
                 onClick={() => (selectionMode ? exitSelection() : setSelectionMode(true))}
                 aria-pressed={selectionMode}
                 className={cn(
-                  "inline-flex cursor-pointer items-center gap-1.5 rounded-ios-xl px-3 py-2",
-                  "text-ios-footnote font-medium transition-all duration-200",
+                  "inline-flex cursor-pointer items-center gap-1.5 rounded-full px-2 py-1.5",
+                  "text-ios-footnote font-medium transition-colors duration-200",
                   "focus:outline-none focus:ring-2 focus:ring-[rgba(0,122,255,0.20)]",
-                  selectionMode
-                    ? "bg-[rgba(0,122,255,0.12)] text-[#007AFF]"
-                    : "bg-[rgba(0,0,0,0.05)] text-[rgba(0,0,0,0.62)] hover:bg-[rgba(0,0,0,0.09)]",
+                  selectionMode ? "text-[#007AFF]" : "text-[rgba(0,0,0,0.58)] hover:text-[rgba(0,0,0,0.85)]",
                 )}
               >
                 <CheckSquare className="h-3.5 w-3.5" />
                 多选
               </button>
-
-              {/* 导出收进一个菜单：主界面只说「导出」这个用户动作，
-                  JSON/CSV 这类格式名是次级信息，不配占据页首两个按钮位。 */}
-              <div ref={exportMenuRef} className="relative">
-                <button
-                  type="button"
-                  onClick={() => setExportOpen((value) => !value)}
-                  aria-haspopup="menu"
-                  aria-expanded={exportOpen}
-                  className={cn(
-                    "inline-flex cursor-pointer items-center gap-1.5 rounded-ios-xl px-3 py-2",
-                    "text-ios-footnote font-medium transition-all duration-200",
-                    "focus:outline-none focus:ring-2 focus:ring-[rgba(0,122,255,0.20)]",
-                    exportOpen
-                      ? "bg-[rgba(0,122,255,0.12)] text-[#007AFF]"
-                      : "bg-[rgba(0,0,0,0.05)] text-[rgba(0,0,0,0.62)] hover:bg-[rgba(0,0,0,0.09)]",
-                  )}
-                >
-                  <Download className="h-3.5 w-3.5" />
-                  导出
-                  <ChevronDown className={cn("h-3 w-3 transition-transform duration-200", exportOpen && "rotate-180")} />
-                </button>
-
-                {exportOpen && (
-                  <div
-                    role="menu"
-                    aria-label="导出格式"
-                    className="lg-sheet absolute right-0 top-full z-30 mt-2 w-48 overflow-hidden rounded-ios-2xl p-1.5"
-                  >
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        exportHistoryCsv(history.entries);
-                        setExportOpen(false);
-                      }}
-                      className="flex w-full cursor-pointer items-center gap-2 rounded-ios-lg px-3 py-2 text-left text-ios-footnote text-[rgba(0,0,0,0.72)] transition-colors hover:bg-[rgba(0,0,0,0.05)] focus:outline-none focus:ring-2 focus:ring-[rgba(0,122,255,0.20)]"
-                    >
-                      <Sheet className="h-3.5 w-3.5 text-[rgba(0,0,0,0.44)]" />
-                      导出为表格（CSV）
-                    </button>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        exportHistoryJson(history.entries);
-                        setExportOpen(false);
-                      }}
-                      className="flex w-full cursor-pointer items-center gap-2 rounded-ios-lg px-3 py-2 text-left text-ios-footnote text-[rgba(0,0,0,0.72)] transition-colors hover:bg-[rgba(0,0,0,0.05)] focus:outline-none focus:ring-2 focus:ring-[rgba(0,122,255,0.20)]"
-                    >
-                      <FileJson className="h-3.5 w-3.5 text-[rgba(0,0,0,0.44)]" />
-                      导出为数据（JSON）
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
+            </>
           )}
-        </header>
-
-        {isLoggedIn && (
-          <HistoryStats
-            entries={localStats.entries}
-            images={localStats.images}
-            starred={localStats.starred}
-            accountQuota={accountQuota}
-            loading={showSkeleton}
-          />
-        )}
-
-        {isLoggedIn && (history.entries.length > 0 || hasFilters) && (
-          <HistoryFilterBar
-            query={urlQuery}
-            facets={history.facets}
-            // history.total 是服务端针对当前查询的计数，不包含合并进来的本地缓存记录；
-            // 网格下面实际渲染的是 history.entries。两者在有本地专属记录时会不一致
-            // （例如这条计数显示「共 3 条」，网格里「今天」分组却有 20 条），
-            // 用户会把它读成页面数据矛盾。这里改用真正渲染出来的条数，保证这一行
-            // 和它正下方的网格永远指向同一个数字。
-            total={history.entries.length}
-            onChange={handleQueryChange}
-          />
-        )}
+        </div>
+        </div>
 
         {/* 非致命错误：数据还在，只是某次操作失败了 */}
         {history.error && history.entries.length > 0 && (

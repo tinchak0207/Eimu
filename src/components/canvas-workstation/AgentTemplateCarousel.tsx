@@ -1,8 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
-import { AGENT_TEMPLATE_DOMAIN_LABELS, type AgentTemplate } from "@/lib/agent-templates";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { ArrowRight, Check, ChevronLeft, ChevronRight, X } from "lucide-react";
+import { AGENT_TEMPLATE_DOMAIN_LABELS, type AgentPipelineStep, type AgentTemplate } from "@/lib/agent-templates";
+import { forceStartAtcTour, maybeStartAtcTour } from "@/lib/atc-tour-content";
 import { commitSteps, detent, undetent } from "@/lib/carousel-detent";
 import { cn } from "@/lib/utils";
 import "../case-showcase.css";
@@ -10,7 +12,8 @@ import "./agent-template-carousel.css";
 
 interface AgentTemplateCarouselProps {
   templates: AgentTemplate[];
-  onUseTemplate: (template: AgentTemplate) => void;
+  /** 第二参 = 卡面圆环选中的环节 indices（升序；全选 = 全部 index，上层 cropTemplate 零开销）。 */
+  onUseTemplate: (template: AgentTemplate, selectedSteps: number[]) => void;
 }
 /** 卡面转角相对环角的压缩比。1 = 严格贴合圆周切线，但边卡会侧得几乎只剩一条线；
  *  0.82 是「还能看清是什么图」和「有空间纵深」之间的平衡（coverflow 的经典做法）。*/
@@ -166,6 +169,292 @@ function rgbTriple(hex: string) {
 
 const useIsoLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
+/* ── 圆形环节选择器（2026-08-26；2026-08-29 增送出钮/全选框）──
+   卡面底部的流水线步骤从「黑话文字链」换成可拖拽多选的圆环：
+   每个圆 = 一个环节（shortName），默认一个都没选；单击圆切换该圆；
+   按住拖过 = 只跑扫过的（「选择部分为正」）；左侧勾选框 = 全选，
+   右侧箭头 = 送出（预设不可用，不可用态点击播假鼠标引导）。
+
+   监听器规范（项目有血的教训，不许砍）：
+   - pointer 事件完整四件套（down/move/up/cancel）+ setPointerCapture，
+     否则触控板/触摸扫过无反应；
+   - 圆上 touch-action: none（touch-none），防止浏览器把手势抢走触发 pointercancel；
+   - 拖拽手势期间吞掉收尾的杂散 click（suppressClickRef），不触发卡片套模板。 */
+interface PipelineStepSelectorProps {
+  steps: AgentPipelineStep[];
+  /** 已选中的步骤 indices；undefined = 一个都没选（默认态，送出钮不可用）。 */
+  selected: number[] | undefined;
+  onToggle: (index: number, select: boolean) => void;
+  /** 拖拽手势的整集提交：以传入集合为新的执行正集（全量 = 全选态，等价勾选框）。 */
+  onSelectOnly: (indices: number[]) => void;
+  /** 送出（右侧箭头）：仅在至少选了一个环节时可用；不可用态点击 = 播假鼠标引导。 */
+  onSubmit: () => void;
+}
+
+function PipelineStepSelector({ steps, selected, onToggle, onSelectOnly, onSubmit }: PipelineStepSelectorProps) {
+  /**
+   * 进行中的拖拽手势。2026-08-27 裁定：拖拽语义为**恒正向选取**——一旦按住
+   * 某站开始拖，执行正集立即重置为「已扫过的路径」，此后扫到的站逐个并入，
+   * 松手后只跑扫出来的子集（「选择部分为正」）。取消单个环节仍用单击 toggle。
+   * 2026-08-29 改版：默认一个都没选（送出钮不可用）；「全选」收归左侧勾选框。
+   *
+   * pointerup 分流：
+   * - 按在站上没动过 → 单击 toggle；
+   * - 没按在站上且没动过（点了 Dock 空白）→ 全选（等价勾选框）；
+   * - 拖拽动过 → 全部由 move 提交，这里只收尾徽章。
+   *
+   * 监听器规范（项目有血的教训，不许砍）：
+   * - pointer 事件完整四件套（down/move/up/cancel）挂 window **capture 阶段**
+   *   （轮播壳 stage 的转卡 move 不许拦）；
+   * - 圆上 touch-action: none（touch-none），防浏览器抢手势触发 pointercancel；
+   * - 拖拽手势期间吞掉收尾的杂散 click，不触发卡片套模板。
+   */
+  const gestureRef = useRef<{
+    started: boolean;
+    chosen: Set<number>;
+    pressMoved: boolean;
+    startX: number;
+    startY: number;
+    pressedIndex: number | null;
+  } | null>(null);
+
+  /* 拖拽徽章计数：拖选手势进行中 >0，松手即归零。单击不闪。 */
+  const [dragCount, setDragCount] = useState<number | null>(null);
+
+  /* 送出钮可用性：至少选了一个环节。默认一个都没选 → 不可用态。 */
+  const selectedCount = selected?.length ?? 0;
+  const canSubmit = selectedCount > 0;
+  /* 勾选框 = 全选开关：所有环节都在正集里 = 勾上。 */
+  const allSelected = steps.length > 0 && selectedCount === steps.length;
+
+  const selectFromPoint = (clientX: number, clientY: number): void => {
+    const gesture = gestureRef.current;
+    if (!gesture) return;
+    const hit = document.elementFromPoint(clientX, clientY)?.closest("[data-step-index]");
+    if (!hit) return;
+    const index = Number(hit.getAttribute("data-step-index"));
+    if (Number.isNaN(index)) return;
+    if (!gesture.started) {
+      // 正集重置为路径起点——预设全选此刻让位给「你拖出的正集」。
+      gesture.started = true;
+      gesture.chosen.add(index);
+      setDragCount(gesture.chosen.size);
+      onSelectOnly([...gesture.chosen]);
+      return;
+    }
+    if (gesture.chosen.has(index)) return;
+    gesture.chosen.add(index);
+    setDragCount(gesture.chosen.size);
+    onSelectOnly([...gesture.chosen]);
+  };
+
+  const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    /* 全选框/送出钮是独立控件：不进步骤拖选手势，只拦 stage 转卡；
+       它们自己的 onClick 负责切换/送出（不可用送出 → 假鼠标引导）。 */
+    if ((event.target as Element).closest("[data-atc-control]")) {
+      event.stopPropagation();
+      return;
+    }
+    const hit = (event.target as Element).closest("[data-step-index]");
+    gestureRef.current = {
+      started: false,
+      chosen: new Set(),
+      pressMoved: false,
+      startX: event.clientX,
+      startY: event.clientY,
+      pressedIndex: hit ? Number(hit.getAttribute("data-step-index")) : null,
+    };
+    event.stopPropagation(); // 不交给 stage：不进卡片拖拽、不触发套模板
+    /* 触控板修复：监听必须挂 **capture 阶段**（第三参 true）。
+       冒泡阶段会被轮播壳 stage 的 pointermove（转卡逻辑）截断——capture 在
+       捕获顶端先于任何 React handler 执行，任何层都拦不住。 */
+    window.addEventListener("pointermove", handleWindowMove, true);
+    window.addEventListener("pointerup", handleWindowUp, true);
+    window.addEventListener("pointercancel", handleWindowUp, true);
+  };
+
+  const handleWindowMove = (event: PointerEvent): void => {
+    const gesture = gestureRef.current;
+    if (!gesture) return;
+    if (
+      !gesture.pressMoved &&
+      Math.hypot(event.clientX - gesture.startX, event.clientY - gesture.startY) > 8
+    ) {
+      gesture.pressMoved = true;
+    }
+    selectFromPoint(event.clientX, event.clientY);
+  };
+
+  const handleWindowUp = (): void => {
+    const gesture = gestureRef.current;
+    if (gesture && !gesture.pressMoved) {
+      if (gesture.pressedIndex !== null) {
+        // 单击：切换按下的圆（默认一个没选 → 首次单击 = 选中）
+        const index = gesture.pressedIndex;
+        const isSelected = selected?.includes(index) ?? false;
+        onToggle(index, !isSelected);
+      } else {
+        // Dock 空白单击：全选（等价勾选框）
+        onSelectOnly(Array.from({ length: steps.length }, (_, i) => i));
+      }
+    }
+    gestureRef.current = null;
+    setDragCount(null); // 徽章只在拖拽手势存活期间显示
+    window.removeEventListener("pointermove", handleWindowMove, true);
+    window.removeEventListener("pointerup", handleWindowUp, true);
+    window.removeEventListener("pointercancel", handleWindowUp, true);
+  };
+
+  /* 三步 driver.js 教学（与专业模式 LoRA 引导同款基建）：圆环首次出现播一次，
+     localStorage「看过」永不打扰。8 张卡各有一颗 selector 同帧挂载，模块级
+     单飞闸（maybeStartAtcTour 内）保证整页只起一场；延迟到轮播 paint 完成后再启动，
+     卸载（gallery 收起/换卡面）即取消，不打断正在生成里的用户。 */
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void maybeStartAtcTour();
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  return (
+    <div className="relative w-full">
+      {/* Bug2 拖拽徽章：白玻璃小胶囊，悬浮 Dock 上方；手势结束即消失。 */}
+      
+      {/* 引导文案：一行讲清「勾选全选 + 单击开关 + 拖拽=选正集」三种动线。 */}
+      <p
+        data-atc-hint
+        className="mb-1.5 select-none text-center text-[11px] leading-[1.4] text-white/85 [text-shadow:0_1px_3px_rgba(0,0,0,0.75)]"
+      >
+        {dragCount !== null
+          ? `已选 ${dragCount}/${steps.length} · 松开完成`
+          : "勾选 = 全部执行 · 单击环节开/关 · 按住拖过 = 只跑扫过的"}
+      </p>
+      <div
+        role="group"
+        aria-label="选择要套用的环节，右侧箭头送出开工"
+        data-atc-dock
+        /* 玻璃 Dock（视觉模型复审参数）：全宽等分——左侧全选勾选框、中间环节
+           轨道（窄卡独立横向滚动）、右侧送出钮常驻不随轨道滚走；
+           深色半透明 + blur + 1px 白 12% 边。 */
+        className="atc-step-selector atc-step-dock flex h-8 w-full max-w-full items-center rounded-full border border-white/[0.12] bg-black/[0.35] px-1.5 backdrop-blur-md"
+        onPointerDown={handlePointerDown}
+        /* 触控板按住拖动在某些环境触发原生 drag（文本/元素拖拽）→ pointercancel
+           提前杀手势。整条 Dock 禁 drag。 */
+        onDragStart={(event) => event.preventDefault()}
+        draggable={false}
+        onClick={(event) => {
+          /* 鼠标/触摸的 click 是 pointerup 的兼容补发，单击已在 up 里切换过——
+             这里一律吞掉，防双切换与冒泡套模板。键盘（detail=0）不走 pointerdown，
+             照常放行让圆 onClick 切换。 */
+          if ((event as React.MouseEvent).detail !== 0) {
+            event.stopPropagation();
+          }
+        }}
+      >
+        {/* 全选勾选框（2026-08-29 替换六点把手）：照顾「全选」这个高频动作，
+            勾上 = 所有环节进正集 + 送出钮转可用；再点 = 清空回不可用态。 */}
+        <button
+          type="button"
+          role="checkbox"
+          aria-checked={allSelected}
+          aria-label="全部执行"
+          title={allSelected ? "取消全选" : "勾选 = 全部执行"}
+          data-atc-control
+          onClick={(event) => {
+            event.stopPropagation(); // click 一律不冒泡成卡片套模板（含键盘 detail=0）
+            onSelectOnly(allSelected ? [] : Array.from({ length: steps.length }, (_, i) => i));
+          }}
+          className={cn(
+            "ml-0.5 mr-1 flex h-4 w-4 shrink-0 items-center justify-center rounded-[5px] border transition-colors duration-150 motion-reduce:transition-none",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50",
+            allSelected
+              ? "border-white bg-white"
+              : "border-white/40 bg-white/[0.06] hover:border-white/70",
+          )}
+        >
+          {allSelected && <Check className="h-3 w-3 text-black" strokeWidth={3.5} aria-hidden="true" />}
+        </button>
+        {/* 环节轨道：独立横向滚动（滚动条隐藏），两侧控件常驻不随滚走。 */}
+        <div className="flex min-w-0 flex-1 items-center overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden snap-x">
+        {steps.map((step, index) => {
+        const isSelected = selected?.includes(index) ?? false;
+        return (
+          <div key={step.name} className="flex min-w-0 flex-1 items-center">
+            <button
+              type="button"
+              data-step-index={index}
+              aria-pressed={isSelected}
+              aria-label={`环节：${step.name}${isSelected ? "，已选中" : "，未选中"}`}
+              title={step.name}
+              onClick={(event) => {
+                event.stopPropagation(); // 站上的点击永不触发套模板
+                /* 键盘合成 click（detail=0）才在这里切换；鼠标/触摸的 click
+                   是兼容补发，切换已在 pointerup 完成。 */
+                if ((event as React.MouseEvent).detail !== 0) return;
+                onToggle(index, !isSelected);
+              }}
+              onKeyDown={(event) => {
+                /* 站是独立焦点目标：方向键/Home/End 不冒泡给 stage 的轮播键盘导航。 */
+                if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) {
+                  event.stopPropagation();
+                }
+              }}
+              /* 2026-08-26 终审（8.8→PASS）：删掉选中态小药丸底（视觉模型：
+                 2 字词有底 3 字词裸奔 =「长斑」），统一纯文字等宽分布，
+                 状态只用透明度梯度（选中 100% 白 + 字影，未选中 45%）；
+                 字影保右侧亮云背景上的识别度。 */
+              className={cn(
+                "atc-step-chip inline-flex h-10 w-full touch-none select-none items-center justify-center rounded-full px-1",
+                "text-[10px] leading-none tracking-[-0.2px] transition-colors duration-150 motion-reduce:transition-none",
+                "[text-shadow:0_1px_2px_rgba(0,0,0,0.5)]",
+                /* 按压反馈：按下即提亮（触控板用户需要立刻看到「收到了」）。 */
+                "cursor-pointer active:brightness-150",
+                isSelected
+                  ? "font-semibold text-white"
+                  : "font-medium text-white/80 hover:text-white/95",
+              )}
+            >
+              {step.shortName}
+            </button>
+            {/* 三审裁定：拔掉贯穿线——透明度梯度（选中 100% / 未选中 45%）+
+                白玻璃高亮胶囊已足以表达流程关系，物理连线是画蛇添足。 */}
+          </div>
+        );
+      })}
+        </div>
+        {/* 送出钮（2026-08-29）：链最右端的明确 CTA。预设不可用（一个环节都没选），
+            不可用态点击 = 播一次假鼠标引导教选取；可用 = 白色实心圆，Dock 上唯一的
+            高对比点。aria-disabled 而非 disabled：按钮保持可点，点击本身就是帮助。 */}
+        <button
+          type="button"
+          aria-label={canSubmit ? "送出，按所选环节开工" : "送出（先选环节）"}
+          aria-disabled={!canSubmit}
+          title={canSubmit ? "按所选环节开工" : "先选环节，或勾选全部"}
+          data-atc-control
+          onClick={(event) => {
+            event.stopPropagation();
+            if (!canSubmit) {
+              forceStartAtcTour();
+              return;
+            }
+            onSubmit();
+          }}
+          className={cn(
+            "ml-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-all duration-200 motion-reduce:transition-none active:scale-90",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/50",
+            canSubmit
+              ? "cursor-pointer bg-white text-black shadow-[0_2px_12px_rgba(0,0,0,0.4)] hover:bg-white/90"
+              : "cursor-pointer border border-white/15 bg-white/[0.08] text-white/70",
+          )}
+        >
+          <ArrowRight className="h-3.5 w-3.5" strokeWidth={2.5} aria-hidden="true" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function AgentTemplateCarousel({ templates, onUseTemplate }: AgentTemplateCarouselProps) {
   /* 案例环数据：官方六例 + 本机发布的「用户投稿」案例（showcase-user-cases）。
      用户案例合入后每格角度改变，由下方的 reset effect 把环拉回第一张。 */
@@ -231,6 +520,47 @@ export function AgentTemplateCarousel({ templates, onUseTemplate }: AgentTemplat
   const [front, setFront] = useState(0);
   const [panel, setPanel] = useState(0);
 
+  /* ── 环节选择（2026-08-29 语义改版）：每张卡独立记忆选中的环节 indices ──
+     key 缺失 = 一个都没选（默认态，送出钮不可用）；全选 = 存满量数组
+     （上层 cropTemplate 对全量短路返回原对象，零开销）。空集一律删 key
+     归默认态。送出永远不会带空数组：不可用态挡在按钮上。 */
+  const [selectedStepsByTemplate, setSelectedStepsByTemplate] = useState<Record<string, number[]>>({});
+  const handleStepToggle = useCallback(
+    (templateId: string, count: number) => (index: number, select: boolean) => {
+      setSelectedStepsByTemplate((prev) => {
+        const next = new Set(prev[templateId] ?? []);
+        if (select) next.add(index);
+        else next.delete(index);
+        const sorted = [...next].sort((a, b) => a - b);
+        if (sorted.length === 0) {
+          const rest = { ...prev };
+          delete rest[templateId];
+          return rest;
+        }
+        return { ...prev, [templateId]: sorted };
+      });
+    },
+    [],
+  );
+  /** 拖拽正集/勾选框整集提交（2026-08-27）：传入集合即新的执行环节；空集 = 清空回默认态。 */
+  const handleSelectOnly = useCallback(
+    (templateId: string, count: number) => (indices: number[]) => {
+      setSelectedStepsByTemplate((prev) => {
+        const sorted = [...new Set(indices)].filter((i) => i >= 0 && i < count).sort((a, b) => a - b);
+        if (sorted.length === 0) {
+          const rest = { ...prev };
+          delete rest[templateId];
+          return rest;
+        }
+        return { ...prev, [templateId]: sorted };
+      });
+    },
+    [],
+  );
+
+  /* ── 完整模板确认弹窗（2026-08-29）：旧入口「点卡片」保留，但先问一句 ── */
+  const [confirmTemplate, setConfirmTemplate] = useState<AgentTemplate | null>(null);
+
   /** 卡片尺寸、环半径、滚动灵敏度全从舞台实测宽度推出来，写成 CSS 变量。 */
   const measure = useCallback(() => {
     const stage = stageRef.current;
@@ -239,11 +569,12 @@ export function AgentTemplateCarousel({ templates, onUseTemplate }: AgentTemplat
 
     const stageWidth = stage.clientWidth || 1024;
     const compact = window.matchMedia("(max-width: 767px)").matches;
-    /* 2026-08-25 暴君裁定：卡片放大 75%。公式同 CaseShowcase，三個係數同步 ×1.75，
-       等比放大後拖曳手感（dragDegPerPx 以 cardW 推導）自動跟著正確。 */
-    const SIZE_GAIN = 1.75;
+    /* 2026-08-25 暴君裁定：卡片放大 75%（桌面）。2026-08-27 手机端返工：
+       SIZE_GAIN 只给桌面——compact 下 340×1.75=595px 塞 390px 视口，
+       内容左右截断装不下。手机端用紧凑尺寸（0.78 系数 + 340 上限原样）。 */
+    const SIZE_GAIN = compact ? 1 : 1.75;
     const cardW = compact
-      ? Math.min(stageWidth * 0.78, 340) * SIZE_GAIN
+      ? Math.min(stageWidth * 0.78, 340)
       : Math.min(Math.max(stageWidth * 0.42, 300), 580) * SIZE_GAIN;
     const cardH = Math.round(cardW * 0.75);
     const radius = cardW * (compact ? 0.84 : 0.78) * RADIUS_SCALE;
@@ -510,9 +841,13 @@ export function AgentTemplateCarousel({ templates, onUseTemplate }: AgentTemplat
   }, []);
 
   /* 滚动驱动旋转 —— 注意是 passive 监听、纯读取 scrollY 的增量。
-     全程不 preventDefault 纵向滚动：页面永远滚得动，环只是顺带转起来。 */
+     全程不 preventDefault 纵向滚动：页面永远滚得动，环只是顺带转起来。
+     教学拖拽演示期间（atc-tour-locking，2026-08-27 轨迹瞬移返工）短路：
+     driver.js 高亮/平滑滚动会顶起 scroll 事件 → drive() 转卡 → data-front
+     换卡 → 演示目标漂移。只锁转卡手势，页面滚动本身照常。 */
   useEffect(() => {
     const onScroll = () => {
+      if (sectionRef.current?.classList.contains("atc-tour-locking")) return;
       const y = window.scrollY;
       const delta = y - lastScrollRef.current;
       lastScrollRef.current = y;
@@ -525,11 +860,12 @@ export function AgentTemplateCarousel({ templates, onUseTemplate }: AgentTemplat
 
   /* 触控板横扫 / Shift+滚轮。React 的 onWheel 是 passive 注册，preventDefault
      会被忽略，所以必须手动挂 { passive: false }。且只有横向分量占优时才接管，
-     纵向一律放行。 */
+     纵向一律放行。教学演示期间（atc-tour-locking）同样短路转卡。 */
   useEffect(() => {
     const stage = stageRef.current;
     if (!stage) return;
     const onWheel = (event: WheelEvent) => {
+      if (stage.classList.contains("atc-tour-locking")) return;
       if (Math.abs(event.deltaX) <= Math.abs(event.deltaY)) return;
       event.preventDefault();
       drive(event.deltaX * dragDegPerPxRef.current);
@@ -601,7 +937,7 @@ export function AgentTemplateCarousel({ templates, onUseTemplate }: AgentTemplat
       if (index >= 0) {
         movedRef.current = true;
         if (index === front) {
-          onUseTemplate(cases[front]);
+          setConfirmTemplate(cases[front]);
         } else {
           goTo(index);
         }
@@ -633,11 +969,11 @@ export function AgentTemplateCarousel({ templates, onUseTemplate }: AgentTemplat
     }
   };
 
-  /* 点边卡 = 把它转到正面；正面卡点击 = 启动这条流水线。 */
+  /* 点边卡 = 把它转到正面；正面卡点击 = 弹「完整模板」确认（旧入口保留，多一步确认）。 */
   const onCardClick = (index: number) => {
     if (movedRef.current) return;
     if (index === front) {
-      onUseTemplate(cases[front]);
+      setConfirmTemplate(cases[front]);
       return;
     }
     goTo(index);
@@ -694,37 +1030,62 @@ export function AgentTemplateCarousel({ templates, onUseTemplate }: AgentTemplat
                 <div className="case-photo">
                   {item.showcaseImage ? (
                     <div className={cn("absolute inset-0 bg-gradient-to-br", item.accent)}>
-                      {/* 素材照：object-cover 鋪滿；atc-info 自帶底部黑漸變承接文字 */}
-                      {/* eslint-disable-next-line @next/next/no-img-element -- 靜態 public 資產，case-photo 是背景層不走 next/image */}
-                      <img
-                        src={item.showcaseImage}
-                        alt=""
-                        aria-hidden="true"
-                        className="absolute inset-0 h-full w-full object-cover"
-                      />
-                      <span className="atc-watermark" aria-hidden="true">
-                        {AGENT_TEMPLATE_DOMAIN_LABELS[item.domain]}
-                      </span>
-                      <div className="atc-info" aria-hidden="true">
-                        <div className="atc-title">{item.name}</div>
-                        <div className="atc-flow">
-                          {item.pipeline.steps.map((s) => s.name).join(" → ")}
-                        </div>
-                      </div>
+                      {/* 素材影片（2026-08-26 用戶裁定：卡面必須是真影片）：8 秒靜音循環。
+                          poster = 封面帧 webp（影片未載入/還在緩衝時不空白）；
+                          muted+playsInline+preload=metadata 才允許自動播放，
+                          aria-hidden（純視覺層）。 */}
+                      {item.showcaseVideo && (
+                        /* eslint-disable-next-line jsx-a11y/media-has-caption, @next/next/no-img-element -- 靜態 public 資產背景層 */
+                        <video
+                          src={item.showcaseVideo}
+                          poster={item.showcaseImage}
+                          autoPlay
+                          loop
+                          muted
+                          playsInline
+                          preload="metadata"
+                          aria-hidden="true"
+                          className="absolute inset-0 h-full w-full object-cover"
+                        />
+                      )}
+                      {/* 無影片時的靜態兜底：封面帧照。object-cover 鋪滿。 */}
+                      {!item.showcaseVideo && (
+                        /* eslint-disable-next-line @next/next/no-img-element -- 靜態 public 資產，case-photo 是背景層不走 next/image */
+                        <img
+                          src={item.showcaseImage}
+                          alt=""
+                          aria-hidden="true"
+                          className="absolute inset-0 h-full w-full object-cover"
+                        />
+                      )}
+                      {/* 2026-08-26 用戶裁定：真影片素材上不再疊領域大字水印——
+                          那是無素材時代的 placeholder 裝飾，疊在真成片上就是噪音。 */}
                     </div>
                   ) : (
                   <div className={cn("absolute inset-0 bg-gradient-to-br", item.accent)}>
                     <span className="atc-watermark" aria-hidden="true">
                       {AGENT_TEMPLATE_DOMAIN_LABELS[item.domain]}
                     </span>
-                    <div className="atc-info" aria-hidden="true">
-                      <div className="atc-title">{item.name}</div>
-                      <div className="atc-flow">
-                        {item.pipeline.steps.map((s) => s.name).join(" → ")}
-                      </div>
-                    </div>
                   </div>
                   )}
+                  {/* 卡面底部資訊區：標題 + 可交互選擇器 Dock。
+                      （2026-08-27 回滾：eyebrow/tagline/珠鏈是錯誤 scope 的改動，
+                      用戶指定的是畫布節點卡，不是 carousel 卡面。） */}
+                  <div className="atc-info">
+                    <div className="atc-title">{item.name}</div>
+                    <PipelineStepSelector
+                      steps={item.pipeline.steps}
+                      selected={selectedStepsByTemplate[item.id]}
+                      onToggle={handleStepToggle(item.id, item.pipeline.steps.length)}
+                      onSelectOnly={handleSelectOnly(item.id, item.pipeline.steps.length)}
+                      onSubmit={() => {
+                        /* 送出 = 只跑勾选的环节。canSubmit 已在 selector 里挡住空集，
+                           这里再护一层：cropTemplate 对空数组同样返回原模板。 */
+                        const picked = selectedStepsByTemplate[item.id] ?? [];
+                        if (picked.length > 0) onUseTemplate(item, picked);
+                      }}
+                    />
+                  </div>
                 </div>
               </div>
               {/* 最外緣那條掠射亮線。厚玻璃正對鏡頭時唯一「白」的地方就是這裡
@@ -745,23 +1106,31 @@ export function AgentTemplateCarousel({ templates, onUseTemplate }: AgentTemplat
           sr-only 播报保留（无障碍不牺牲），交互入口 = 正面卡点击 + 箭头/圆点。 */}
       <p className="sr-only" aria-live="polite">{`第 ${panel + 1} 张，共 ${COUNT} 张：${cases[panel].name}`}</p>
 
-      <div className="mt-5 flex items-center justify-center gap-2">
-        <button type="button" className="case-arrow lg-float" onClick={() => step(-1)} aria-label="上一个模板">
+      <div className="mt-4 flex items-center justify-center gap-3 max-md:gap-1.5">
+        {/* 桌面保留箭头；移动端 swipe 转卡即可，箭头只占黄金区（毒舌一审裁定）。 */}
+        <button type="button" className="case-arrow lg-float max-md:hidden" onClick={() => step(-1)} aria-label="上一个模板">
           <ChevronLeft className="h-5 w-5" aria-hidden="true" />
         </button>
-        <div className="flex items-center gap-1">
+        {/* 移动端：N/M 紧凑指示（9 个圆点在手机上是噪点）；桌面保留圆点。 */}
+        <div
+          role="tablist"
+          aria-label={`模板进度：第 ${front + 1} 张，共 ${COUNT} 张`}
+          className="max-md:rounded-full max-md:bg-black/[0.35] max-md:px-3 max-md:py-1.5 max-md:text-[11px] max-md:font-semibold max-md:text-white/85 max-md:[text-shadow:0_1px_2px_rgba(0,0,0,0.6)] flex items-center gap-1"
+        >
           {cases.map((item, index) => (
             <button
               key={item.id}
               type="button"
-              className="case-dot"
+              className={`case-dot ${index !== front ? "max-md:hidden" : ""}`}
               aria-current={index === front}
               aria-label={`第 ${index + 1} 个模板：${item.name}`}
               onClick={() => goTo(index)}
-            />
+            >
+              {index === front && <span className="max-md:inline hidden">{front + 1}/{COUNT}</span>}
+            </button>
           ))}
         </div>
-        <button type="button" className="case-arrow lg-float" onClick={() => step(1)} aria-label="下一个模板">
+        <button type="button" className="case-arrow lg-float max-md:hidden" onClick={() => step(1)} aria-label="下一个模板">
           <ChevronRight className="h-5 w-5" aria-hidden="true" />
         </button>
       </div>
@@ -772,6 +1141,112 @@ export function AgentTemplateCarousel({ templates, onUseTemplate }: AgentTemplat
           位移過的副本上，兩者的交界就是畫面裡那個硬邊直角框。stdDeviation="3"
           遠不足以糊掉它。邊緣折射現在由 CaseGlassWebGL 用真 Snell 折射計算，
           幾何厚度由 .case-side 撐出輪廓 —— 兩者都不需要拿矩形核去切圓角。 */}
+
+      {/* 完整模板确认弹窗：旧入口「点卡片」的确认步（2026-08-29）。 */}
+      {confirmTemplate && (
+        <UseTemplateConfirmDialog
+          template={confirmTemplate}
+          onCancel={() => setConfirmTemplate(null)}
+          onConfirm={() => {
+            onUseTemplate(
+              confirmTemplate,
+              Array.from({ length: confirmTemplate.pipeline.steps.length }, (_, i) => i),
+            );
+            setConfirmTemplate(null);
+          }}
+        />
+      )}
     </section>
+  );
+}
+
+/* ── 完整模板确认弹窗（2026-08-29）──
+   面板壳逐行复制 history/RerunDialog.tsx 的玻璃弹窗轮子（lg-sheet 玻璃面板 +
+   iOS 字級 + portal + Esc/遮罩關閉），白名單改動 = 文案與確認回調，交互殼一行不動。 */
+function UseTemplateConfirmDialog({
+  template,
+  onCancel,
+  onConfirm,
+}: {
+  template: AgentTemplate;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const [mounted, setMounted] = useState(false);
+  const titleId = useId();
+
+  useEffect(() => setMounted(true), []);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onCancel();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onCancel]);
+
+  if (!mounted) return null;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(31,34,48,0.45)] p-4 backdrop-blur-md"
+      onClick={onCancel}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        onClick={(event) => event.stopPropagation()}
+        className="lg-sheet w-full max-w-sm rounded-ios-2xl p-5"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p id={titleId} className="text-ios-subhead font-semibold text-foreground">
+              使用完整模板
+            </p>
+            <p className="mt-1 text-ios-footnote text-[rgba(0,0,0,0.55)]">
+              是否使用完整模板开始创作？「{template.name}」的全部 {template.pipeline.steps.length}{" "}
+              个环节都会执行。
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onCancel}
+            aria-label="关闭"
+            className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-[rgba(0,0,0,0.44)] transition-colors hover:bg-black/5 hover:text-[rgba(0,0,0,0.72)] focus:outline-none focus:ring-2 focus:ring-[rgba(0,122,255,0.20)]"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* 环节链摘要：确认前看清楚「完整」包含什么（分隔符与 cropTemplate 同款） */}
+        <p className="mt-3 text-ios-caption1 text-[rgba(0,0,0,0.62)]">
+          {template.pipeline.steps.map((step) => step.shortName).join("、")}
+        </p>
+
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="cursor-pointer rounded-ios-xl bg-[rgba(0,0,0,0.05)] px-4 py-2.5 text-ios-footnote font-medium text-[rgba(0,0,0,0.62)] transition-colors hover:bg-[rgba(0,0,0,0.09)] focus:outline-none focus:ring-2 focus:ring-[rgba(0,122,255,0.20)]"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className={cn(
+              "rounded-ios-xl bg-[#007AFF] px-4 py-2.5 text-ios-footnote font-medium text-white",
+              "shadow-[0_4px_12px_rgba(0,122,255,0.32)] transition-all duration-200",
+              "hover:bg-[#0066D6] active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-[rgba(0,122,255,0.30)]",
+              "cursor-pointer",
+            )}
+          >
+            开始创作
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }

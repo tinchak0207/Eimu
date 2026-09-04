@@ -12,10 +12,6 @@ export function HistorySkeleton({ count = 8 }: { count?: number }) {
             className="hist-skeleton w-full"
             style={{ aspectRatio: PLACEHOLDER_RATIOS[index % PLACEHOLDER_RATIOS.length] }}
           />
-          <div className="space-y-1.5 px-3.5 pb-3 pt-2.5">
-            <div className="hist-skeleton h-2.5 w-full rounded-full" />
-            <div className="hist-skeleton h-2.5 w-3/5 rounded-full" />
-          </div>
         </div>
       ))}
     </>

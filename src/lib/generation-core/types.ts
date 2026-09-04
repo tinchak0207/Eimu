@@ -26,6 +26,7 @@ export type FailureClass =
   | "malformed_output"
   | "empty_result"
   | "artifact_download"
+  | "upstream_protocol"
   | "deadline_exceeded"
   | "cancelled"
   | "unknown";
@@ -154,7 +155,7 @@ export interface CreateGenerationReferenceArtifactInput {
 export interface SupplierRecord {
   id: string;
   label: string;
-  adapterType: "adobe2api" | "openai_images" | "minimax" | "did" | "filmera";
+  adapterType: "adobe2api" | "openai_images" | "minimax" | "did" | "filmera" | "metaso" | "openai_video";
   supplyTier: "first_party" | "managed_pool" | "relay" | "fallback";
   failureDomain: string;
   baseUrl: string;
@@ -197,6 +198,12 @@ export interface SupplierLease {
   supplier: SupplierRecord;
 }
 
+/**
+ * 異步任務適配器的對帳協議標記（INC-0831）：provider task id 落庫後，由
+ * provider-reconciliation 按協議向上游查詢真相。新增異步適配器時同步擴充。
+ */
+export type ProviderProtocol = "openai_video" | "newapi_video" | "metaso" | "filmera";
+
 export interface SupplierGenerationInput {
   jobId: string;
   attemptId: string;
@@ -209,6 +216,13 @@ export interface SupplierGenerationInput {
   resolution: string | null;
   quality: string | null;
   workflow: GenerationWorkflow;
+  /**
+   * 異步任務適配器（openai-video/newapi-video/metaso/filmera 等）在上游提交完成、
+   * 取得 provider task id 的瞬間回調（INC-0830-VIDEO）。worker 用它把 task id +
+   * 對帳排程 durably 落進 attempt 行（只發事件不落行 = 事故重演）。同步適配器
+   * 不需要實現。
+   */
+  onProviderTaskSubmitted?: (providerTaskId: string, protocol: ProviderProtocol) => void;
 }
 
 export interface SupplierGenerationOutput {
@@ -221,3 +235,14 @@ export interface SupplierGenerationOutput {
   supplierModelId: string;
   evidence?: Record<string, unknown>;
 }
+
+/**
+ * INC-0831 對帳輪詢結果：按 provider task id 問上游拿真相。
+ * - running：仍在排隊/處理中（或上游暫時查不到，保守視為仍在跑，等下輪）。
+ * - succeeded：上游確認成功（url 直用；base64 供需要鑑欄下載的渠道）。
+ * - failed：上游確認失敗/取消（reason = 上游原文，退款只認這裡）。
+ */
+export type ProviderTaskPollResult =
+  | { state: "running" }
+  | { state: "succeeded"; url: string | null; base64: string | null }
+  | { state: "failed"; reason: string };

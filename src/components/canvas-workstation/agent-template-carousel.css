@@ -1,7 +1,9 @@
 /* ╁━ AgentTemplateCarousel ── 助理模板環 ╁━
    本組件是 CaseShowcase.tsx 的逐行複製（2026-08-25 用戶裁定：複用 = 整複製改文字，
    禁止造輪子），幾何/物理/材質/佈局全部由共享 ../case-showcase.css 提供。
-   這裡只有模板卡獨有的卡面元素：領域大字水印 + 標題與流水線鏈。 */
+   這裡只有模板卡獨有的卡面元素：領域大字水印 + 標題與流水線鏈。
+   （2026-08-27 回滾：eyebrow/tagline/珠鏈是錯誤 scope 的改動——用戶指定的
+   是畫布節點卡；卡面信息層維持「標題 + 選擇器 Dock」原樣。） */
 
 /* 领域大字水印：压在渐变上的浮雕感，非标题。尺寸跟随 --case-card-w 缩放。 */
 .atc-watermark {
@@ -27,7 +29,7 @@
   padding: calc(var(--case-card-w, 520px) * 0.07);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
   background: linear-gradient(to top, rgba(0, 0, 0, 0.45) 0%, rgba(0, 0, 0, 0.15) 60%, transparent 100%);
   user-select: none;
 }
@@ -40,14 +42,12 @@
   text-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
 }
 
-/* 步骤链：卡面底部的流水线一览 */
-.atc-flow {
-  color: rgba(255, 255, 255, 0.72);
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 1.5;
-  word-break: break-word;
-  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.35);
+/* 环节选择器（2026-08-26）：圆形 chip 由 Tailwind 类实现（atc-step-chip，
+   见 AgentTemplateCarousel.tsx 的 PipelineStepSelector），这里只留容器文档位。
+   布局 = flex flex-wrap gap-2：8 个圆在 420px 卡面内排得下，放不下自动换行不横向溢出。
+   拖拽手势的 pointer 四件套 + setPointerCapture + touch-none 都在组件内实现。 */
+.atc-step-selector {
+  /* 无额外样式：全部由 Tailwind 工具类承载，不引入 lg/ios 体系外的颜色。 */
 }
 
 /* 面板内嵌场景：舞台上下左右完全置中展示 */
@@ -65,4 +65,21 @@
 .agent-template-carousel .case-stage {
   max-width: 76rem;
   margin-inline: auto;
+}
+
+/* R9-4：driver.js 弹层 z-index 硬顶在页面浮层之上——教学弹窗盖住交互按钮时，
+   用户点不到「下一步」会以为是引导坏了。overlay 挖槽/背板由 driver.js 自带
+   CSS 提供，这里只保证弹窗本体不被其他高 z 元素压住。 */
+.atc-tour-popover {
+  z-index: 9999 !important;
+}
+
+/* 教学拖拽演示期间的轮播冻结标记（2026-08-27 轨迹瞬移返工）：
+   atc-tour-content.ts 在第②步假鼠标演示期间给 .agent-template-carousel
+   挂上 atc-tour-locking，AgentTemplateCarousel 的 stage wheel/scroll 转卡
+   handler 入口看到该 class 直接 return（锁转卡手势；不锁 driver.js 弹窗
+   按钮、不锁整页滚动），演示结束（onDone）或教学销毁（onDestroyed）移除。
+   样式本身无视觉变化——它是一个纯行为开关，规则留在这里做文档锚点。 */
+.agent-template-carousel.atc-tour-locking {
+  /* 无样式副作用：转卡冻结逻辑在组件的 wheel/scroll handler 里判断。 */
 }

@@ -14,7 +14,7 @@ import {
 } from "@/lib/generation-model-catalog";
 import { Check, ChevronDown, ImageIcon, Video } from "lucide-react";
 import { VendorIcon } from "./brand-icons";
-import { buildLoraTourDescription, LORA_TOUR_CONTENT, LORA_TOUR_STORAGE_KEY, PRO_LORA_TOUR_ARMED_KEY } from "@/lib/lora-tour-content";
+import { buildLoraTourDescription, LORA_TOUR_CONTENT, LORA_TOUR_STORAGE_KEY } from "@/lib/lora-tour-content";
 import { bindDesktopTourKeyboard, DESKTOP_TOUR_KEY_HINT } from "@/lib/tour-keyboard";
 import { bindTourViewportSync, firstVisibleAnchor } from "@/lib/tour-mobile";
 import {
@@ -28,6 +28,10 @@ import {
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
 import { usePricingRevision } from "@/hooks/use-pricing-revision";
+import {
+  isModelAlive,
+  useModelAvailability,
+} from "@/hooks/use-model-availability";
 
 interface ModelPickerProps {
   models: string[];
@@ -36,8 +40,6 @@ interface ModelPickerProps {
   resolution?: OutputResolution;
   durationSeconds?: number;
   generateAudio?: boolean;
-  /** 传入时，模型菜单会额外渲染一个「进入专业模式」的入口 */
-  onOpenProfessionalMode?: () => void;
   /** 去掉厂商前缀显示，例如将 Google Veo 3.1 显示为 Veo 3.1 */
   stripVendorPrefix?: boolean;
   /** 受控模式：由外部控制菜单的开合，供引导等场景使用 */
@@ -98,18 +100,19 @@ function ModelKnowledgeCard({ modelId, knowledge, onApplyTipParams, onSelectMode
   return (
     <div
       data-model-knowledge-card={modelId}
-      className="mx-1 mb-1.5 rounded-[1.2rem] border border-[rgba(0,0,0,0.06)] bg-[rgba(255,255,255,0.72)] p-3 shadow-[0_8px_28px_rgba(0,0,0,0.08)] backdrop-blur-[40px]"
+      className="relative mx-1 mb-2 overflow-hidden rounded-[1.35rem] border border-[rgba(255,255,255,0.8)] bg-[rgba(255,255,255,0.78)] p-3.5 shadow-[0_8px_24px_rgba(0,0,0,0.06),inset_0_1px_0_rgba(255,255,255,0.92)] backdrop-blur-[32px]"
     >
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white to-transparent opacity-90" />
       {sections.map(({ key, label }, index) => {
         if (key === "usageTips") {
           const tips = knowledge.usageTips;
           if (!tips?.length) return null;
           return (
-            <section key={key} className={index > 0 ? "mt-2.5" : undefined}>
+            <section key={key} className={index > 0 ? "mt-3" : undefined}>
               <p className={KNOWLEDGE_EYEBROW_CLASS}>{label}</p>
-              <ul className="mt-1 space-y-1.5">
+              <ul className="mt-1.5 space-y-2">
                 {tips.map((tip) => (
-                  <li key={tip.text} className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
+                  <li key={tip.text} className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1.5">
                     <span className={`min-w-0 flex-1 basis-52 ${KNOWLEDGE_BODY_CLASS}`}>{tip.text}</span>
                     {tip.params && onApplyTipParams ? (
                       <button
@@ -119,7 +122,7 @@ function ModelKnowledgeCard({ modelId, knowledge, onApplyTipParams, onSelectMode
                           onSelectModel();
                           onApplyTipParams(tip.params as ModelUsageTipParams);
                         }}
-                        className="shrink-0 cursor-pointer rounded-full bg-[rgba(0,122,255,0.12)] px-2.5 py-1 text-[12px] font-semibold text-[rgba(0,122,255,0.9)] transition-colors hover:bg-[rgba(0,122,255,0.2)]"
+                        className="shrink-0 cursor-pointer rounded-full bg-[rgba(0,122,255,0.12)] px-2.5 py-1 text-[12px] font-semibold text-[#007AFF] transition-all duration-200 hover:bg-[rgba(0,122,255,0.22)] active:scale-95"
                       >
                         一键带入
                       </button>
@@ -133,7 +136,7 @@ function ModelKnowledgeCard({ modelId, knowledge, onApplyTipParams, onSelectMode
         const lines = knowledge[key];
         if (!lines?.length) return null;
         return (
-          <section key={key} className={index > 0 ? "mt-2.5" : undefined}>
+          <section key={key} className={index > 0 ? "mt-3" : undefined}>
             <p className={KNOWLEDGE_EYEBROW_CLASS}>{label}</p>
             <ul className="mt-1 space-y-1">
               {lines.map((line) => (
@@ -155,16 +158,24 @@ function modelPickerName(modelId: string, stripVendor: boolean): string {
 }
 
 /** Desktop keeps the compact two-level chooser; mobile uses one bounded flat list. */
-export function ModelPicker({ models, value, onChange, resolution, durationSeconds, generateAudio, onOpenProfessionalMode, stripVendorPrefix, menuOpen, onMenuOpenChange, onApplyTipParams }: ModelPickerProps) {
+export function ModelPicker({ models, value, onChange, resolution, durationSeconds, generateAudio, stripVendorPrefix, menuOpen, onMenuOpenChange, onApplyTipParams }: ModelPickerProps) {
   // 訂閱定價覆寫：管理員改價後本頁報價立即重算。
   usePricingRevision();
+  // 活性字典（與 AI 助理 /v1/model-status 執行側同源）：unavailable 才算死，
+  // available/unknown/缺省一律當活。載入中/拉取失敗=全活（fail-open）。
+  const availability = useModelAvailability();
+  const modelAlive = (modelId: string) => isModelAlive(modelId, availability);
   const promotionTag = modelPromotionTag(value);
   const loraTourBusyRef = useRef(false);
   // 能力卡展开态：同一时刻只展开一张卡（下拉空间有限，多卡同开会滚丢）。
   const [expandedModel, setExpandedModel] = useState<string | null>(null);
+  // 手機端二級目錄：點擊廠商行才展開該組模型；默認展開當前選中模型所在廠商。
+  const [expandedMobileVendor, setExpandedMobileVendor] = useState<string | null>(
+    () => generationModel(value)?.vendor ?? null,
+  );
 
   const maybeStartLoraTour = () => {
-    if (typeof window === "undefined" || !onOpenProfessionalMode) return;
+    if (typeof window === "undefined") return;
     if (window.localStorage.getItem(LORA_TOUR_STORAGE_KEY)) return;
     if (loraTourBusyRef.current) return;
     loraTourBusyRef.current = true;
@@ -245,13 +256,9 @@ export function ModelPicker({ models, value, onChange, resolution, durationSecon
                 stay.style.cssText = "border:0;border-radius:999px;background:rgba(0,0,0,0.06);padding:0.4rem 0.9rem;color:rgba(0,0,0,0.6);font-size:0.72rem;font-weight:700;cursor:pointer;";
                 stay.onclick = finish;
                 const go = document.createElement("button");
-                go.textContent = "前往专业控制";
+                go.textContent = "知道了";
                 go.style.cssText = "border:0;border-radius:999px;background:rgba(0,122,255,0.14);padding:0.4rem 0.9rem;color:#0066dd;font-size:0.72rem;font-weight:700;cursor:pointer;";
-                go.onclick = () => {
-                  finish();
-                  window.localStorage.setItem(PRO_LORA_TOUR_ARMED_KEY, "1");
-                  onOpenProfessionalMode();
-                };
+                go.onclick = finish;
                 footer.appendChild(stay);
                 footer.appendChild(go);
               },
@@ -275,7 +282,17 @@ export function ModelPicker({ models, value, onChange, resolution, durationSecon
     if (group) group.models.push(model);
     else vendorGroups.push({ vendor, models: [model] });
   }
+  // 活性優先（穩定性排序）：每個廠商內「活的模型在前、死的在後」，各自保持原相對順序。
+  // 廠商活性 = 任一模組活，或包含當前選中值（當前選擇的廠商永遠可達，不能被排到死區）。
+  const vendorAlive = (group: VendorGroup) =>
+    group.models.some(modelAlive) || group.models.includes(value);
+  for (const group of vendorGroups) {
+    group.models.sort((a, b) => Number(modelAlive(b)) - Number(modelAlive(a)));
+  }
   vendorGroups.sort((a, b) => {
+    const aAlive = vendorAlive(a);
+    const bAlive = vendorAlive(b);
+    if (aAlive !== bAlive) return aAlive ? -1 : 1;
     const aOrder = VENDOR_ORDER.indexOf(a.vendor);
     const bOrder = VENDOR_ORDER.indexOf(b.vendor);
     const aRank = aOrder === -1 ? VENDOR_ORDER.length : aOrder;
@@ -294,17 +311,29 @@ export function ModelPicker({ models, value, onChange, resolution, durationSecon
     const selected = model === value;
     const knowledge = definition?.knowledge;
     const expanded = expandedModel === model;
+    const dead = !modelAlive(model) && model !== value;
     return (
       <Fragment key={model}>
         <DropdownMenuItem
-          onSelect={() => onChange(model)}
+          disabled={dead}
+          onSelect={() => {
+            // 手機端：選中之後保持該廠商為展開組，下次打開菜單直接落在同一層級。
+            if (mobile && vendor) setExpandedMobileVendor(vendor);
+            onChange(model);
+          }}
           data-model-picker-model
           data-model-picker-model-vendor={vendor}
-          className={`${mobile ? "py-2 pl-2.5 pr-8" : "py-2 pl-3 pr-9"} min-w-0 max-w-full gap-1 text-ios-footnote focus:bg-[rgba(0,122,255,0.10)]`}
+          className={`${
+            mobile ? "py-2.5 pl-3 pr-8 rounded-[0.95rem]" : "py-2 pl-3 pr-9 rounded-[0.8rem]"
+          } min-w-0 max-w-full gap-1.5 text-ios-footnote transition-colors duration-150 ${
+            selected
+              ? "bg-[rgba(0,122,255,0.10)] font-medium text-[rgba(0,122,255,0.95)]"
+              : "text-foreground/[0.88] focus:bg-[rgba(0,122,255,0.08)]"
+          }`}
         >
           <span className={`flex w-full min-w-0 max-w-full flex-1 items-center gap-2 ${mobile ? "" : "lg:min-w-[17rem]"}`}>
             <VendorIcon vendor={vendor} className="h-5 w-5 rounded-[0.4rem]" innerClassName="h-3.5 w-3.5" />
-            <span className={`min-w-0 flex-1 truncate font-medium ${selected ? "text-[rgba(0,122,255,0.9)]" : "text-[rgba(0,0,0,0.85)]"}`}>
+            <span className={`min-w-0 flex-1 truncate font-medium ${selected ? "text-[rgba(0,122,255,0.95)] font-semibold" : "text-foreground/[0.88]"}`}>
               {modelPickerName(model, stripVendorPrefix ?? false)}
             </span>
             {!stripVendorPrefix && tag ? (
@@ -312,11 +341,16 @@ export function ModelPicker({ models, value, onChange, resolution, durationSecon
                 {tag}
               </span>
             ) : null}
-            <span className="shrink-0 pl-1 text-ios-caption1 tabular-nums text-[rgba(0,0,0,0.58)]">
+            {dead ? (
+              <span className="shrink-0 rounded-full bg-[rgba(0,0,0,0.06)] px-1.5 py-0.5 text-ios-caption2 font-medium text-[rgba(0,0,0,0.44)]">
+                暂不可用
+              </span>
+            ) : null}
+            <span className={`shrink-0 pl-1 text-ios-caption1 tabular-nums ${selected ? "text-[rgba(0,122,255,0.75)]" : "text-[rgba(0,0,0,0.52)]"}`}>
               {modelPriceLabel(model, priceOptions)}
             </span>
             {selected ? (
-              <Check className="absolute right-2 h-3.5 w-3.5 text-[rgba(0,122,255,0.9)]" />
+              <Check className="absolute right-2.5 h-3.5 w-3.5 text-[#007AFF]" />
             ) : null}
           </span>
           {knowledge ? (
@@ -339,7 +373,11 @@ export function ModelPicker({ models, value, onChange, resolution, durationSecon
                   setExpandedModel(expanded ? null : model);
                 }
               }}
-              className="relative z-10 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-full text-[rgba(0,0,0,0.4)] transition-colors hover:bg-[rgba(0,0,0,0.06)] hover:text-[rgba(0,0,0,0.72)]"
+              className={`relative z-10 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors ${
+                expanded
+                  ? "bg-[rgba(0,122,255,0.14)] text-[#007AFF]"
+                  : "text-[rgba(0,0,0,0.4)] hover:bg-[rgba(0,0,0,0.06)] hover:text-[rgba(0,0,0,0.72)]"
+              }`}
             >
               <ChevronDown
                 className={`h-3.5 w-3.5 transition-transform duration-200 ${expanded ? "rotate-180" : ""}`}
@@ -362,9 +400,11 @@ export function ModelPicker({ models, value, onChange, resolution, durationSecon
   const renderVendor = (group: VendorGroup) => {
     const imageModels = group.models.filter((model) => generationModel(model)?.kind !== "video");
     const videoModels = group.models.filter((model) => generationModel(model)?.kind === "video");
+    const dead = !vendorAlive(group);
     return (
       <DropdownMenuSub key={group.vendor}>
         <DropdownMenuSubTrigger
+          disabled={dead}
           className="text-ios-footnote"
           data-model-picker-vendor={group.vendor}
           onPointerEnter={group.vendor === "PixAI" ? () => {
@@ -379,9 +419,15 @@ export function ModelPicker({ models, value, onChange, resolution, durationSecon
                 {VENDOR_TAGS[group.vendor]}
               </span>
             ) : null}
-            <span className="ml-auto shrink-0 pl-3 text-ios-caption1 tabular-nums text-[rgba(0,0,0,0.48)]">
-              {group.models.length}
-            </span>
+            {dead ? (
+              <span className="shrink-0 rounded-full bg-[rgba(0,0,0,0.05)] px-1.5 py-0.5 text-ios-caption2 font-medium text-[rgba(0,0,0,0.44)]">
+                暂不可用
+              </span>
+            ) : (
+              <span className="ml-auto shrink-0 pl-3 text-ios-caption1 tabular-nums text-[rgba(0,0,0,0.48)]">
+                {group.models.length}
+              </span>
+            )}
           </span>
         </DropdownMenuSubTrigger>
         <DropdownMenuPortal>
@@ -410,32 +456,69 @@ export function ModelPicker({ models, value, onChange, resolution, durationSecon
     const imageModels = group.models.filter((model) => generationModel(model)?.kind !== "video");
     const videoModels = group.models.filter((model) => generationModel(model)?.kind === "video");
     const maybeStartPixaiTour = group.vendor === "PixAI" ? maybeStartLoraTour : undefined;
+    const expanded = expandedMobileVendor === group.vendor;
+    const hasSelectedModel = group.models.includes(value);
+    const dead = !vendorAlive(group);
+
     return (
-      <section key={group.vendor} className="min-w-0 max-w-full py-1 first:pt-0 last:pb-0">
-        <div
-          className="sticky top-0 z-10 flex min-w-0 items-center gap-2 bg-[rgba(255,255,255,0.92)] px-2.5 py-1.5 text-ios-caption1 font-semibold text-[rgba(0,0,0,0.54)] backdrop-blur-xl"
-          data-model-picker-mobile-vendor={group.vendor}
+      <section key={group.vendor} className="min-w-0 max-w-full py-0.5 first:pt-0 last:pb-0">
+        <button
+          type="button"
+          aria-expanded={expanded}
+          disabled={dead}
+          onClick={() => setExpandedMobileVendor(expanded ? null : group.vendor)}
           onPointerEnter={maybeStartPixaiTour}
           onPointerDown={maybeStartPixaiTour}
+          className={`flex min-w-0 w-full items-center gap-2.5 rounded-[1.05rem] px-3 py-2.5 text-ios-subhead font-semibold transition-all duration-200 ${
+            dead
+              ? "cursor-default text-[rgba(0,0,0,0.3)]"
+              : "cursor-pointer " +
+                (expanded
+                  ? "bg-[rgba(0,0,0,0.05)] text-foreground shadow-[inset_0_1px_1px_rgba(0,0,0,0.03)]"
+                  : hasSelectedModel
+                  ? "bg-[rgba(0,122,255,0.06)] text-[rgba(0,122,255,0.95)]"
+                  : "text-foreground/[0.88] hover:bg-[rgba(0,0,0,0.03)] active:bg-[rgba(0,0,0,0.06)]")
+          }`}
+          data-model-picker-mobile-vendor={group.vendor}
         >
-          <VendorIcon vendor={group.vendor} className="h-5 w-5 rounded-[0.4rem]" innerClassName="h-3.5 w-3.5" />
-          <span className="min-w-0 flex-1 truncate">{group.vendor}</span>
-          <span className="shrink-0 tabular-nums text-[rgba(0,0,0,0.48)]">{group.models.length}</span>
-        </div>
-        {imageModels.length > 0 && (
-          <div className="flex items-center gap-1 px-2.5 pb-0.5 pt-1 text-ios-caption2 font-semibold text-[rgba(0,0,0,0.48)]">
-            <ImageIcon className="h-3 w-3" />
-            图片
+          <VendorIcon vendor={group.vendor} className="h-6 w-6 rounded-[0.45rem]" innerClassName="h-4 w-4" />
+          <span className="min-w-0 flex-1 truncate text-left">{group.vendor}</span>
+          {!stripVendorPrefix && VENDOR_TAGS[group.vendor] ? (
+            <span className="shrink-0 rounded-full bg-[rgba(52,199,89,0.14)] px-1.5 py-0.5 text-ios-caption2 font-semibold text-[#248A3D]">
+              {VENDOR_TAGS[group.vendor]}
+            </span>
+          ) : null}
+          {dead ? (
+            <span className="shrink-0 rounded-full bg-[rgba(0,0,0,0.05)] px-2 py-0.5 text-[11px] font-medium text-[rgba(0,0,0,0.44)]">
+              暂不可用
+            </span>
+          ) : (
+            <span className="shrink-0 rounded-full bg-[rgba(0,0,0,0.05)] px-2 py-0.5 text-[11px] font-semibold tabular-nums text-[rgba(0,0,0,0.48)]">
+              {group.models.length}
+            </span>
+          )}
+          <ChevronDown
+            className={`h-4 w-4 shrink-0 opacity-40 transition-transform duration-200 ${expanded ? "rotate-180 opacity-70" : ""} ${dead ? "hidden" : ""}`}
+          />
+        </button>
+        {expanded ? (
+          <div className="mt-1 space-y-0.5 pl-1 pr-0.5">
+            {imageModels.length > 0 && (
+              <div className="flex items-center gap-1.5 px-3 pb-1 pt-1.5 text-[11px] font-bold tracking-[0.14em] uppercase text-[rgba(0,0,0,0.42)]">
+                <ImageIcon className="h-3 w-3 opacity-70" />
+                图片模型
+              </div>
+            )}
+            {imageModels.map((model) => renderModel(model, true))}
+            {videoModels.length > 0 && (
+              <div className="flex items-center gap-1.5 px-3 pb-1 pt-2 text-[11px] font-bold tracking-[0.14em] uppercase text-[rgba(0,0,0,0.42)]">
+                <Video className="h-3 w-3 opacity-70" />
+                视频模型
+              </div>
+            )}
+            {videoModels.map((model) => renderModel(model, true))}
           </div>
-        )}
-        {imageModels.map((model) => renderModel(model, true))}
-        {videoModels.length > 0 && (
-          <div className="flex items-center gap-1 px-2.5 pb-0.5 pt-1.5 text-ios-caption2 font-semibold text-[rgba(0,0,0,0.48)]">
-            <Video className="h-3 w-3" />
-            视频
-          </div>
-        )}
-        {videoModels.map((model) => renderModel(model, true))}
+        ) : null}
       </section>
     );
   };
@@ -461,13 +544,14 @@ export function ModelPicker({ models, value, onChange, resolution, durationSecon
 
       <DropdownMenuContent
         align="start"
-        className="w-[calc(100vw-1.5rem)] max-w-[22rem] overflow-x-hidden rounded-ios-2xl border-0 lg-sheet p-1.5 lg:w-auto lg:max-w-none"
+        className="w-[calc(100vw-1.5rem)] max-w-[22rem] overflow-x-hidden rounded-ios-2xl border border-[rgba(255,255,255,0.85)] lg-sheet p-2 shadow-[0_16px_48px_rgba(0,0,0,0.12),inset_0_1px_0_rgba(255,255,255,0.95)] lg:w-auto lg:max-w-none"
         onInteractOutside={(event) => {
           // 引导进行中拦截菜单关闭，避免 PixAI 菜单 portal 遮罩干扰引导
           // 进入专业模式经由 onMenuOpenChange 回到受控状态
           if (loraTourBusyRef.current) event.preventDefault();
         }}
       >
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white to-transparent opacity-90" />
         <div data-model-picker-mobile className="min-w-0 max-w-full lg:hidden">
           {vendorGroups.map(renderMobileVendor)}
         </div>

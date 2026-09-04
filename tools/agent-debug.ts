@@ -23,6 +23,10 @@
 // 2026-08-25：--template/--canvas 補上生產前端的「點模板→畫布泳道快照上行」行為
 // （applyTemplateToCanvas 布局 + postCanvasSnapshot 上傳），否則 agent 的
 // canvas_get_state 看到空畫布，與用戶所見不同源。
+// 2026-09-03：P2-13 修復——多輪會話重放（last_event_id=0）把歷史的 question.replied /
+// confirm.resolved / 舊 turn.done 全灌進 events，「是否有待答卡／是否落定」若用全量
+// 歷史 some 判定會被永久遮蔽（--answer 永假、停機判定永不到達）。改為游標語義：只看
+// 「最後一個 request 事件之後」有沒有對應 resolution／turn.done。CLI 介面與輸出不變。
 //
 // 報告結構：
 //   1) Timeline   —— 每個事件的時間軸（相對本輪起點的毫秒 + 事件名 + 摘要）
@@ -459,6 +463,25 @@ function renderLanguage(userText: string, assistantText: string): void {
 
 // ─────────────────────────── 主流程
 
+/** 最後一個指定名稱事件的索引（-1 = 沒有）。events 按到達順序 append，索引即游標。 */
+function lastEventIndex(events: RecordedEvent[], name: string): number {
+  for (let i = events.length - 1; i >= 0; i--) if (events[i].name === name) return i;
+  return -1;
+}
+
+/** 游標語義（P2-13）：request 事件「之後」是否出現過任一 resolution 事件。
+ *  禁止用全量歷史 some——上一輪已答的卡會遮蔽本輪判定。 */
+function resolvedAfter(events: RecordedEvent[], requestIndex: number, resolutionNames: string[]): boolean {
+  for (let i = requestIndex + 1; i < events.length; i++) {
+    if (resolutionNames.includes(events[i].name)) return true;
+  }
+  return false;
+}
+
+function requestIdOf(e: RecordedEvent): string {
+  return String((e.data as Record<string, unknown> | null)?.request_id ?? "");
+}
+
 async function main(): Promise<void> {
   const opts = parseArgs(process.argv.slice(2));
   const base = opts.base.replace(/\/+$/, "");
@@ -592,8 +615,12 @@ async function main(): Promise<void> {
 
     // question.request 出現且指定了 --answer：回答它（一輪只答最後一張卡；非 2xx 視為
     // 卡已失效/重發，不標記已答，等新卡）。
-    const pendingQ = [...events].reverse().find((e) => e.name === "question.request" && !failedAnswerReqs.has((e.data as Record<string, unknown>).request_id as string));
-    if (opts.answer && !answered && pendingQ && !events.some((e) => e.name === "question.replied" || e.name === "question.rejected")) {
+    // P2-13：待答判定採游標語義——只看最後一個 question.request「之後」有沒有
+    // question.replied/rejected；全量歷史 some 會被上一輪已答過的卡永久遮蔽。
+    const qIdx = lastEventIndex(events, "question.request");
+    const qOpen = qIdx >= 0 && !resolvedAfter(events, qIdx, ["question.replied", "question.rejected"]);
+    const pendingQ = qOpen && !failedAnswerReqs.has(requestIdOf(events[qIdx])) ? events[qIdx] : undefined;
+    if (opts.answer && !answered && pendingQ) {
       const reqId = (pendingQ.data as Record<string, unknown>).request_id;
       const r = await gw(base, opts.key, `/agent/v1/sessions/${sessionId}/question`, {
         method: "POST",
@@ -607,8 +634,11 @@ async function main(): Promise<void> {
         failedAnswerReqs.add(String(reqId));
       }
     }
-    const pendingC = [...events].reverse().find((e) => e.name === "confirm.request" && !failedConfirmReqs.has((e.data as Record<string, unknown>).request_id as string));
-    if (opts.confirm && !confirmed && pendingC && !events.some((e) => e.name === "confirm.resolved")) {
+    // confirm.request 同理採游標語義（P2-13）：只看最後一個 confirm.request 之後有無 confirm.resolved。
+    const cIdx = lastEventIndex(events, "confirm.request");
+    const cOpen = cIdx >= 0 && !resolvedAfter(events, cIdx, ["confirm.resolved"]);
+    const pendingC = cOpen && !failedConfirmReqs.has(requestIdOf(events[cIdx])) ? events[cIdx] : undefined;
+    if (opts.confirm && !confirmed && pendingC) {
       const reqId = (pendingC.data as Record<string, unknown>).request_id;
       const r = await gw(base, opts.key, `/agent/v1/sessions/${sessionId}/confirm`, {
         method: "POST",
@@ -624,11 +654,11 @@ async function main(): Promise<void> {
     }
 
     // 出現待答卡且沒有自動回答手段：停（該等人工輸入了，用 --resume --answer 續）。
+    // P2-13：turn.done 同理取游標——只有「最新待答卡之後」的 turn.done 才算本輪落定；
+    // 歷史重放進來的舊 turn.done 不得參與 hasPendingCard/pendingUnresolved 的全量判定。
     const lastT = events[events.length - 1]?.tMs ?? 0;
-    const hasPendingCard = events.some((e) => e.name === "question.request" || e.name === "confirm.request");
-    const pendingUnresolved =
-      hasPendingCard &&
-      !events.some((e) => e.name === "turn.done" || e.name === "question.replied" || e.name === "confirm.resolved");
+    const newestCardIdx = Math.max(qOpen ? qIdx : -1, cOpen ? cIdx : -1);
+    const pendingUnresolved = newestCardIdx >= 0 && lastEventIndex(events, "turn.done") < newestCardIdx;
     if (pendingUnresolved && performance.now() - start - lastT > 8_000) {
       console.log("（出現待答卡且無自動回答，停止錄製——用 --resume <sid> --answer \"…\" 續）");
       break;

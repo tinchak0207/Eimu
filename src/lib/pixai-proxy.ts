@@ -19,7 +19,11 @@ import { withTraceId } from "@/lib/request-trace";
  * 配置，都會拿到過期值 —— 而症狀是「配置明明對的但 503」。
  */
 function bridgeConfig(): { base: string; key: string } | null {
-  const base = process.env.PIXAI_BASE_URL?.trim().replace(/\/+$/, "") ?? "";
+  // 歸一到不含 /v1 的根，拼接處統一 `${base}/v1/${action}`。控制面 env 的
+  // PIXAI_BASE_URL 帶 /v1 後綴（lora 路由 `${base}/lora-models` 的慣例），
+  // 這裡曾直接再拼 /v1/ 造成 /v1/v1/ 雙字首 404 —— 改圖/放大/模板/上傳
+  // 全鏈死。strip 後綴讓兩種 env 寫法都正確。
+  const base = process.env.PIXAI_BASE_URL?.trim().replace(/\/+$/, "").replace(/\/v1$/, "") ?? "";
   const key = process.env.PIXAI_API_KEY?.trim() ?? "";
   return base && key ? { base, key } : null;
 }

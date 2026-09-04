@@ -18,7 +18,7 @@ import {
   type BizApiKey,
 } from "./biz-api-keys.ts";
 
-const MODELS = ["gpt-image-2", "gemini-3.1-flash-image", "sensenova-u1-fast", "adobe-firefly"];
+const MODELS = ["gpt-image-2", "gemini-3.1-flash-image", "seedream-2.0", "adobe-firefly"];
 
 // ─────────────────────────────────────────── 生成与哈希
 

@@ -15,6 +15,7 @@ import {
   CANVAS_NODE_DEFAULT_SIZE,
   CanvasNodeType,
   type CanvasConnection,
+  type CanvasErrorDetails,
   type CanvasNode,
   type CanvasNodeMetadata,
   type CanvasNodeStatus,
@@ -42,6 +43,7 @@ const REDUCIBLE = new Set([
   "canvas.node.created",
   "canvas.node.updated",
   "canvas.node.connected",
+  "canvas.node.disconnected",
   "canvas.node.generating",
   "canvas.node.deleted",
 ]);
@@ -82,11 +84,24 @@ function str(v: unknown): string | undefined {
   return typeof v === "string" ? v : undefined;
 }
 
+/** errorDetails 收斂：字串原樣；物件只留 message/human_message 兩個字串欄位（G-FE 合同），空形丟棄。 */
+function toErrorDetails(v: unknown): string | CanvasErrorDetails | undefined {
+  const s = str(v);
+  if (s !== undefined) return s.length > 0 ? s : undefined;
+  if (!v || typeof v !== "object") return undefined;
+  const o = v as Record<string, unknown>;
+  const message = str(o.message);
+  const human = str(o.human_message);
+  if (message === undefined && human === undefined) return undefined;
+  return { ...(message !== undefined ? { message } : {}), ...(human !== undefined ? { human_message: human } : {}) };
+}
+
 /** 把寬鬆 metadata 收斂成 CanvasNodeMetadata（丟掉不認得的欄位，status 走映射）。 */
 export function toNodeMetadata(raw: unknown): CanvasNodeMetadata {
   if (!raw || typeof raw !== "object") return {};
   const m = raw as Record<string, unknown>;
   const status = toNodeStatus(m.status);
+  const errorDetails = toErrorDetails(m.errorDetails);
   return {
     ...(str(m.content) !== undefined ? { content: str(m.content) } : {}),
     ...(str(m.prompt) !== undefined ? { prompt: str(m.prompt) } : {}),
@@ -100,15 +115,27 @@ export function toNodeMetadata(raw: unknown): CanvasNodeMetadata {
       ? { source_image: (str(m.source_image) ?? null) as string | null }
       : {}),
     ...(status ? { status } : {}),
-    ...(str(m.errorDetails) !== undefined ? { errorDetails: str(m.errorDetails) } : {}),
+    ...(errorDetails !== undefined ? { errorDetails } : {}),
     ...(num(m.naturalWidth) !== undefined ? { naturalWidth: num(m.naturalWidth) } : {}),
     ...(num(m.naturalHeight) !== undefined ? { naturalHeight: num(m.naturalHeight) } : {}),
     ...(num(m.cost_coins) !== undefined ? { cost_coins: num(m.cost_coins) } : {}),
+    ...(num(m.cost_hint) !== undefined ? { cost_hint: num(m.cost_hint) } : {}),
     ...(str(m.imageTaskId) !== undefined ? { imageTaskId: str(m.imageTaskId) } : {}),
     ...(num(m.startedAt) !== undefined ? { startedAt: num(m.startedAt) } : {}),
     ...(num(m.progress) !== undefined ? { progress: num(m.progress) } : {}),
     // reference 節點角色：只收合法 ReferenceImageRole，未知值丟棄（收斂在讀取端做）。
     ...(isReferenceImageRole(m.referenceRole) ? { referenceRole: m.referenceRole } : {}),
+    // director 節點（gateway director.done 攔截同步，spec §5 片5）：SVG 可達 48KB，
+    // 原樣收字串欄位；planName 明確 null 時保留 null（活卡語義=「目前無方案」）。
+    ...(m.pipelineCard === "director" ? { pipelineCard: "director" as const } : {}),
+    ...(str(m.directorSessionId) !== undefined ? { directorSessionId: str(m.directorSessionId) } : {}),
+    ...(str(m.planName) !== undefined ? { planName: str(m.planName) } : {}),
+    ...(m.planName === null ? { planName: null } : {}),
+    ...(num(m.shotCount) !== undefined ? { shotCount: num(m.shotCount) } : {}),
+    ...(m.healthOk === true || m.healthOk === false ? { healthOk: m.healthOk } : {}),
+    ...(str(m.topViewSvg) !== undefined ? { topViewSvg: str(m.topViewSvg) } : {}),
+    ...(str(m.cameraViewSvg) !== undefined ? { cameraViewSvg: str(m.cameraViewSvg) } : {}),
+    ...(num(m.revision) !== undefined ? { revision: num(m.revision) } : {}),
   };
 }
 
@@ -203,6 +230,11 @@ export function normalizeCanvasEvent(event: AgentSseEvent): CanvasSseEvent | nul
       return {
         name: "canvas.node.deleted",
         data: { unit_id: event.data.unit_id, ...(event.data.node_id ? { node_id: event.data.node_id } : {}) },
+      };
+    case "canvas.node.disconnected":
+      return {
+        name: "canvas.node.disconnected",
+        data: { unit_id: event.data.unit_id, from: event.data.from, to: event.data.to },
       };
     default:
       return null;

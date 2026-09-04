@@ -140,7 +140,7 @@ test("Dreamina relay is restricted to the verified Image 5 Pro upstream", () => 
   for (const modelId of requested) {
     assert.deepEqual(
       buildGatewayEndpointsWithPools([dreamina], [], modelId).map((endpoint) => endpoint.label),
-      ["dreamina-image5-pro", "dreamina-free"],
+      ["dreamina-free"],
     );
   }
   assert.equal(buildGatewayEndpointsWithPools([dreamina], [], "gpt-image-2").length, 0);

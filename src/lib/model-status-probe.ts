@@ -79,6 +79,8 @@ export interface ModelStatusProbeOptions {
   env?: EnvLike;
   pools?: AdminPool[];
   overrides?: ChannelOverrides;
+  /** 最近 24h 真實表現統計（route 層裁決 availability 用；probe 本體不消費）。 */
+  recentStats?: unknown[];
   probeFn?: (endpoint: ProbeEndpointInput) => Promise<ProbeEndpointResult>;
   now?: () => Date;
 }

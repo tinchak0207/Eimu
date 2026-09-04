@@ -27,6 +27,35 @@ function gatewayResponse(resp: AgentGatewayResponse): NextResponse {
     : new NextResponse(resp.text || "", { status: resp.status, headers: { "Content-Type": "text/plain; charset=utf-8" } });
 }
 
+// GET /api/agent/sessions/[id]/canvas-state —— 畫布快照下行（resume 回填）。
+//
+// 2026-08-26：此前快照只有上行（POST）沒有下行——刷新/重進後左聊天續上，
+// 右畫布卻永遠空白。閘道本就存有最新上行快照，這裡原樣代理 GET 讓前端
+// 恢復畫布。新會話/從未上行時閘道回 404，原樣透傳由前端按 null 處理。
+
+export async function GET(req: NextRequest, context: { params: Promise<{ id: string }> }) {
+  const caller = await resolveAgentCaller(req);
+  if (!caller.ok) {
+    return fail(caller.status, caller.message, agentCallerFailureCode(caller));
+  }
+
+  const { id } = await context.params;
+  if (!SESSION_ID_PATTERN.test(id)) {
+    return fail(400, "会话 id 无效。", "invalid_session_id");
+  }
+
+  let resp: AgentGatewayResponse;
+  try {
+    resp = await callAgentGateway(`/agent/v1/sessions/${id}/canvas/state`, {
+      method: "GET",
+      key: caller.key,
+    });
+  } catch {
+    return fail(502, "Agent 网关连接失败，请稍后重试。", "agent_gateway_unreachable");
+  }
+  return gatewayResponse(resp);
+}
+
 export async function POST(req: NextRequest, context: { params: Promise<{ id: string }> }) {
   const caller = await resolveAgentCaller(req);
   if (!caller.ok) {

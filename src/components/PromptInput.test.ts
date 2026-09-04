@@ -23,7 +23,6 @@ const PROMPT_INPUT_SURFACE = [
 test("prompt input inserts example snippets instead of replacing typed text", () => {
   const source = PROMPT_INPUT_SURFACE;
   assert.match(source, /insertPromptSnippet/);
-  assert.match(source, /externalPrompt/);
   assert.match(source, /handleSuggestionSelect/);
   assert.match(source, /setInput\(\(current\) => insertPromptSnippet\(current, prompt\)\)/);
   assert.doesNotMatch(source, /setInput\(prompt\);\s*onSubmit\(prompt\)/);
@@ -182,21 +181,20 @@ test("the action row stacks on phones and right-aligns from sm up", () => {
   // correctly once it wraps; stacking removes that dependency entirely.
   assert.match(source, /flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center/);
   assert.doesNotMatch(source, /flex flex-wrap items-center gap-2 sm:gap-3/);
-  // ml-auto only applies once the row is horizontal.
-  assert.match(source, /"pro-mode-toggle self-start sm:ml-auto"/);
   assert.match(source, /h-11 w-full[^"]*sm:w-auto/);
   // The CTA never shares a row with the example chips.
   assert.doesNotMatch(source, /justify-between[\s\S]{0,200}suggestions\.map/);
 });
 
-test("professional mode reads as a toggle rather than a navigation link", () => {
+test("professional workstation entry is fully removed from the prompt card (2026-08-27)", () => {
   const source = PROMPT_INPUT_SURFACE;
 
-  assert.match(source, /aria-pressed=\{isProfessionalMode\}/);
-  assert.match(source, /onClick=\{onToggleProfessionalMode\}/);
-  // Same 36px chip language as 风格/示例, so it does not read as a third button style.
-  assert.match(source, /"pro-mode-toggle self-start sm:ml-auto"/);
-  assert.match(source, /isProfessionalMode && "active"/);
+  // 专业工作站入口移除：AI 工作站（agent 模式）已吸收其独有机制，
+  // toggle switch、props 链与「专业控制」文案不再存在。
+  assert.doesNotMatch(source, /isProfessionalMode/);
+  assert.doesNotMatch(source, /onToggleProfessionalMode/);
+  assert.doesNotMatch(source, /pro-mode-toggle/);
+  assert.doesNotMatch(source, /专业控制|专业工作站/);
 });
 
 test("the result canvas sizes to its content instead of a blank square", () => {

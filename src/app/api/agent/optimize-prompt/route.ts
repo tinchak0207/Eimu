@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { optimizeVideoPromptWithAgent } from "@/lib/agent-prompt-optimizer";
-import { directImagePrompt, directVideoPrompt, extractSixSlots } from "@/lib/invisible-prompt-director";
+import { directImagePrompt, directVideoPrompt } from "@/lib/invisible-prompt-director";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,9 +16,9 @@ type MediaType = (typeof MEDIA_TYPES)[number];
 const STILL_IMAGE_AGENT_DIRECTIVE =
   "Treat this as a STILL IMAGE prompt. No camera movement, no SFX, no cuts, no temporal language.";
 
-/** 免费层限流：每 IP 每 10 分钟最多 20 次。 */
+/** 免费层限流：每 IP 每 10 分钟最多 10 次（2026-09-02 收緊，降低規則層可蒸餾面）。 */
 const RATE_WINDOW_MS = 10 * 60 * 1000;
-const RATE_LIMIT = 20;
+const RATE_LIMIT = 10;
 
 /**
  * 进程内时间戳桶。Vercel serverless 下多实例各记一份，放行量可能略高于限额 ——
@@ -81,7 +81,6 @@ export async function POST(req: NextRequest) {
       success: true,
       data: {
         prompt: agent.prompt,
-        slots: extractSixSlots(agent.prompt, mediaType),
         media_type: mediaType,
         usedAgent: true,
         ...(agent.model !== undefined ? { model: agent.model } : {}),
@@ -95,7 +94,7 @@ export async function POST(req: NextRequest) {
   if (ruled !== prompt) {
     return NextResponse.json({
       success: true,
-      data: { prompt: ruled, slots: extractSixSlots(ruled, mediaType), media_type: mediaType, usedAgent: false },
+      data: { prompt: ruled, media_type: mediaType, usedAgent: false },
     });
   }
 

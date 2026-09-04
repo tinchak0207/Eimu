@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { Coins, Gift, CheckCircle2, CreditCard } from "lucide-react";
-import { formatCheckinRewardText, quotaToRewardCount } from "@/lib/checkin-copy";
+import { Coins, CreditCard, Gift, CheckCircle2, Plus } from "lucide-react";
+import { quotaToRewardCount } from "@/lib/checkin-copy";
 import { useAuth } from "@/hooks/use-auth";
 import { quotaToCoins, fetchCheckinStatus, doCheckin } from "@/lib/new-api-client";
 import { cn } from "@/lib/utils";
@@ -14,8 +14,15 @@ interface WalletBadgeProps {
   showCheckin?: boolean;
 }
 
+/**
+ * 余额胶囊（2026-08-27 暴君裁定）：余额 + 「+」合成一颗胶囊。
+ * 「+」点开两项菜单（充值 / 每日签到）：充值跳 /pricing，签到就地完成。
+ * 已签到后：菜单里该项不可选并标注冷却；「+」本体亮绿勾表示今日已签，
+ * header 不再另放签到奖励横幅文字。
+ */
 export function WalletBadge({ className, showTopUp = true, showCheckin = true }: WalletBadgeProps) {
   const { user, token, isLoggedIn, refresh } = useAuth();
+  const [plusOpen, setPlusOpen] = useState(false);
   const [canCheckin, setCanCheckin] = useState(false);
   const [checkinLoading, setCheckinLoading] = useState(false);
   const [checkinDone, setCheckinDone] = useState(false);
@@ -29,6 +36,7 @@ export function WalletBadge({ className, showTopUp = true, showCheckin = true }:
       .then((res) => {
         if (res.success && res.data) {
           setCanCheckin(res.data.can_checkin);
+          if (!res.data.can_checkin) setCheckinDone(true);
           if (res.data.quota) setCheckinRewardCount(quotaToRewardCount(res.data.quota));
         }
       })
@@ -56,53 +64,93 @@ export function WalletBadge({ className, showTopUp = true, showCheckin = true }:
   };
 
   return (
-    <div className={cn("flex min-w-0 items-center gap-1.5", className)}>
-      {/* Coin balance — muted amber, no harsh yellow */}
+    <div className={cn("relative flex min-w-0 items-center gap-1.5", className)}>
+      {/* 余额 + 「+」合体胶囊：币值一段、加号一段，同一颗圆角外壳。
+          签到完成后「+」换成绿勾——完成态长在入口上，不再另起横幅。 */}
       <div
-        className="inline-flex max-w-full shrink items-center gap-1 whitespace-nowrap rounded-full bg-[rgba(0,0,0,0.05)] px-3 py-1.5 text-ios-footnote font-semibold text-[rgba(120,90,20,0.85)] cursor-default select-none"
+        className="inline-flex max-w-full shrink items-stretch overflow-hidden rounded-full bg-[rgba(0,0,0,0.05)] select-none"
         aria-label={`余额 ${coins} 币`}
       >
-        <Coins className="h-3.5 w-3.5 text-[rgba(160,120,30,0.80)]" aria-hidden="true" />
-        <span className="min-w-0 truncate tabular-nums">{coins.toLocaleString()}</span>
-      </div>
-
-      {/* Daily checkin button */}
-      {showCheckin && canCheckin && !checkinDone && (
-        <div className="inline-flex items-center gap-2">
+        <div className="flex min-w-0 items-center gap-1 whitespace-nowrap px-3 py-1.5 text-ios-footnote font-semibold text-[rgba(120,90,20,0.85)] cursor-default">
+          <Coins className="h-3.5 w-3.5 text-[rgba(160,120,30,0.80)]" aria-hidden="true" />
+          <span className="min-w-0 truncate tabular-nums">{coins.toLocaleString()}</span>
+        </div>
+        {(showTopUp || showCheckin) && (
           <button
             type="button"
-            onClick={handleCheckin}
-            disabled={checkinLoading}
-            className="lg-tint-green inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-ios-caption1 font-semibold text-[#248A3D] lg-transition hover:opacity-80 cursor-pointer disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(52,199,89,0.35)]"
-            aria-label="每日签到领取额度"
-            title={formatCheckinRewardText()}
+            onClick={() => setPlusOpen((v) => !v)}
+            aria-expanded={plusOpen}
+            aria-haspopup="menu"
+            aria-label="余额操作"
+            className={cn(
+              "flex w-7 shrink-0 cursor-pointer items-center justify-center transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)]",
+              checkinDone && showCheckin
+                ? // 完成态：绿勾挂在「+」上（#34C759 在近白底只有 ~2.2:1，用深一档绿）。
+                  "text-[#248A3D] hover:bg-[rgba(52,199,89,0.12)]"
+                : "text-[rgba(120,90,20,0.85)] hover:bg-[rgba(0,0,0,0.06)]",
+            )}
           >
-            <Gift className="h-3 w-3" aria-hidden="true" />
-            签到
+            {checkinDone && showCheckin ? (
+              <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+            ) : (
+              <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+            )}
           </button>
-          <span className="hidden text-ios-caption1 text-[rgba(0,0,0,0.58)] sm:inline">{formatCheckinRewardText()}</span>
-        </div>
-      )}
+        )}
+      </div>
 
-      {/* Checkin done indicator (fades after 3s) */}
-      {showCheckin && checkinDone && (
-        // #34C759 在近白底上只有 ~2.2:1，签到成功的确认文字得用深一档的绿。
-        <span className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-ios-caption1 text-[#248A3D]">
-          <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
-          {formatCheckinRewardText(checkinRewardCount ?? undefined)}
-        </span>
-      )}
-
-      {/* Top-up button in the same iOS pill language as the navbar */}
-      {showTopUp && (
-        <Link
-          href="/pricing"
-          className="lg-float inline-flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-1.5 text-ios-footnote font-medium text-[rgba(0,0,0,0.52)] lg-transition hover:text-[rgba(0,0,0,0.78)] no-underline"
-          aria-label="前往充值页面"
-        >
-          <CreditCard className="h-3.5 w-3.5" aria-hidden="true" />
-          充值
-        </Link>
+      {/* 「+」菜单：数量为 2（充值 / 签到），lg-sheet 玻璃 + specular 顶线。 */}
+      {plusOpen && (showTopUp || showCheckin) && (
+        <>
+          {/* 点外收起：透明层只承接点击，不遮视觉。 */}
+          <div className="fixed inset-0 z-30" aria-hidden="true" onClick={() => setPlusOpen(false)} />
+          <div
+            role="menu"
+            aria-label="余额操作"
+            className="lg-sheet animate-lg-appear absolute right-0 top-full z-40 mt-2 w-48 overflow-hidden rounded-ios-2xl p-1.5"
+          >
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white to-transparent opacity-80" />
+            {showTopUp && (
+              <Link
+                href="/pricing"
+                role="menuitem"
+                onClick={() => setPlusOpen(false)}
+                className="flex w-full items-center gap-2.5 rounded-[0.95rem] px-3 py-2.5 text-ios-footnote font-medium text-foreground/[0.88] transition-colors duration-150 hover:bg-[rgba(0,122,255,0.08)] no-underline"
+              >
+                <CreditCard className="h-4 w-4 text-[rgba(0,0,0,0.44)]" aria-hidden="true" />
+                充值
+              </Link>
+            )}
+            {showCheckin && (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => void handleCheckin()}
+                disabled={!canCheckin || checkinLoading}
+                className={cn(
+                  "flex w-full items-center gap-2.5 rounded-[0.95rem] px-3 py-2.5 text-left text-ios-footnote font-medium transition-colors duration-150",
+                  canCheckin && !checkinLoading
+                    ? "cursor-pointer text-foreground/[0.88] hover:bg-[rgba(52,199,89,0.10)]"
+                    : "cursor-not-allowed text-[rgba(0,0,0,0.44)]",
+                )}
+                aria-disabled={!canCheckin || checkinLoading}
+              >
+                {checkinLoading ? (
+                  <Gift className="h-4 w-4 text-[rgba(0,0,0,0.44)]" aria-hidden="true" />
+                ) : canCheckin ? (
+                  <Gift className="h-4 w-4 text-[rgba(0,0,0,0.44)]" aria-hidden="true" />
+                ) : (
+                  <CheckCircle2 className="h-4 w-4 text-[#248A3D]" aria-hidden="true" />
+                )}
+                {checkinLoading
+                  ? "签到中…"
+                  : canCheckin
+                    ? `签到（今日可得 ${checkinRewardCount ?? "1-3"} 张）`
+                    : "已签到 · 明日再来"}
+              </button>
+            )}
+          </div>
+        </>
       )}
     </div>
   );

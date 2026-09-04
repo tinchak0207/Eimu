@@ -11,6 +11,7 @@ import {
   CANVAS_EXPORT_KIND,
   CANVAS_EXPORT_VERSION,
   normalizeCanvasEvent,
+  toNodeMetadata,
   toNodeStatus,
   summarizeCanvasState,
   clampScale,
@@ -34,6 +35,7 @@ import { CANVAS_INITIAL_STATE, reduceCanvasEvent, type CanvasReducerState } from
 import {
   CANVAS_NODE_DEFAULT_SIZE,
   CanvasNodeType,
+  errorDetailsText,
   type CanvasConnection,
   type CanvasNode,
   type CanvasViewport,
@@ -131,6 +133,26 @@ test("toNodeStatus 映射 gateway 寬詞彙到四態", () => {
   assert.equal(toNodeStatus(123), undefined);
   assert.equal(toNodeStatus(undefined), undefined);
   assert.equal(toNodeStatus(""), undefined);
+});
+
+test("toNodeMetadata：errorDetails 物件形收斂（human_message 優先）、cost_hint 保留（G-FE/C-FE 合同）", () => {
+  const meta = toNodeMetadata({
+    errorDetails: { message: "No enabled supplier capability", human_message: "当前没有可用通道，稍后再试或换个模型" },
+    cost_hint: 6,
+  });
+  assert.deepEqual(meta.errorDetails, {
+    message: "No enabled supplier capability",
+    human_message: "当前没有可用通道，稍后再试或换个模型",
+  });
+  assert.equal(errorDetailsText(meta.errorDetails), "当前没有可用通道，稍后再试或换个模型");
+  assert.equal(meta.cost_hint, 6);
+  // 舊載荷純字串原樣；物件只留兩個字串欄位，雜形丟棄；缺 human_message 回落 message。
+  assert.equal(toNodeMetadata({ errorDetails: "纯文本旧载荷" }).errorDetails, "纯文本旧载荷");
+  assert.equal(errorDetailsText("纯文本旧载荷"), "纯文本旧载荷");
+  assert.equal(toNodeMetadata({ errorDetails: { code: 1 } }).errorDetails, undefined);
+  assert.equal(errorDetailsText({ message: "只有原文" }), "只有原文");
+  assert.equal(errorDetailsText(undefined), undefined);
+  assert.equal(toNodeMetadata({ cost_hint: "6" }).cost_hint, undefined);
 });
 
 // ─────────────────────────── canvas_state 摘要（安全）

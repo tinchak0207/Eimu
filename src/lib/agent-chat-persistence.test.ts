@@ -202,6 +202,49 @@ test("瘦身后的 image 条目往返一致", () => {
   assert.equal(back.costCoins, 0.5);
 });
 
+// ─────────────────────────── video 条目瘦身（与 image 同法）
+
+test("video 条目只留 id/seq/url/costCoins/mediaKind，taskId 不落盘", () => {
+  const vid: AgentTranscriptItem = {
+    kind: "video",
+    id: "video-3",
+    seq: 3,
+    url: "https://example.invalid/video/3.mp4",
+    costCoins: 12,
+    taskId: "非常长的 task id，可能携带大串内容",
+    mediaKind: "film",
+  };
+  const slim = sanitizeItemsForStorage([vid]);
+  assert.equal(slim.length, 1);
+  const s = slim[0] as { kind: string; url: string; costCoins?: number; mediaKind?: string };
+  assert.equal(s.kind, "video");
+  assert.equal(s.url, vid.url);
+  assert.equal(s.costCoins, 12);
+  assert.equal(s.mediaKind, "film");
+  assert.equal(Object.prototype.hasOwnProperty.call(s, "taskId"), false);
+});
+
+test("瘦身后的 video 条目往返一致", () => {
+  const storage = new MemoryStorage();
+  const vid: AgentTranscriptItem = {
+    kind: "video",
+    id: "video-3",
+    seq: 3,
+    url: "https://example.invalid/video/3.mp4",
+    costCoins: 12,
+    mediaKind: "video",
+  };
+  savePersistedSnapshot(storage, { sessionId: "s", lastEventId: 3, savedAt: NOW, items: [vid] }, NOW);
+
+  const loaded = loadPersistedSnapshot(storage, NOW);
+  assert.ok(loaded);
+  assert.equal(loaded.items.length, 1);
+  const back = loaded.items[0] as { url: string; costCoins?: number; mediaKind?: string };
+  assert.equal(back.url, vid.url);
+  assert.equal(back.costCoins, 12);
+  assert.equal(back.mediaKind, "video");
+});
+
 // ─────────────────────────── 清除
 
 test("clearPersistedSnapshot 删除存档，且对不存在的 key 幂等", () => {

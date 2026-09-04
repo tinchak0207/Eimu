@@ -320,12 +320,12 @@ test("professional workstation is based on open-source workstation patterns", ()
   assert.match(source, /CreatorResourcePanel/);
   assert.match(source, /concurrency/);
   assert.match(source, /contextPrompt/);
-  assert.match(playground, /dynamic\(\(\) => import\("@\/components\/pro-workstation\/InvokeInspiredWorkstation"\)/);
-  assert.match(playground, /showProfessionalMode/);
-  assert.match(playground, /recentWorkflows=\{recentWorkflows\}/);
-  // Entry point now lives in the prompt card's action row as a toggle.
-  assert.match(playground, /onToggleProfessionalMode=\{openProfessionalMode\}/);
-  assert.match(playground, /regionalPrompts: config\.regionalPrompts/);
+  // 2026-08-27 專業工作站入口移除：playground 不再動態 import 工作站，
+  // 也不再持有 showProfessionalMode / onToggleProfessionalMode / recentWorkflows 接線。
+  assert.doesNotMatch(playground, /pro-workstation/);
+  assert.doesNotMatch(playground, /showProfessionalMode/);
+  assert.doesNotMatch(playground, /onToggleProfessionalMode/);
+  assert.doesNotMatch(playground, /regionalPrompts: config\.regionalPrompts/);
 });
 
 test("professional workstation guides beginners with a three-step layered flow", () => {
@@ -522,8 +522,9 @@ test("professional workstation stays fast on low-end hardware", () => {
   assert.match(source, /await import\("driver\.js"\)/);
   assert.match(source, /import type \{ Driver \} from "driver\.js"/);
 
-  // 工作站专用 CSS 随懒加载 chunk 下发，不阻塞首页首屏
-  assert.match(playground, /dynamic\(\(\) => import\("@\/components\/pro-workstation\/InvokeInspiredWorkstation"\)/);
+  // 2026-08-27 專業工作站入口移除：workstation.css 不再被首頁任何路徑拉起
+  // （playground 零引用），原「懶載入 chunk」契約由「無引用」取代。
+  assert.doesNotMatch(playground, /pro-workstation/);
   assert.doesNotMatch(playground, /import "\.\/pro-workstation\/workstation\.css"/);
 
   // 提示词数据只跟着面板 chunk 走，不进专业模式入场 chunk：
@@ -557,8 +558,10 @@ test("professional workstation keeps a compact single-screen liquid glass layout
   const globals = read("src/app/globals.css");
   const styles = read("src/components/pro-workstation/workstation.css");
 
-  assert.match(globals, /\.pro-app-shell \{[^}]*height: 100svh/);
-  assert.match(globals, /\.pro-app-shell \{[^}]*overflow: hidden/);
+  // 2026-08-27 專業工作站入口移除：globals.css 的 .pro-app-shell / pro-mode-active
+  // 基块隨入口清除（workstation.css 內部的樣式保留，僅供無入口的舊檔自洽）。
+  assert.doesNotMatch(globals, /\.pro-app-shell/);
+  assert.doesNotMatch(globals, /\.pro-mode-active/);
   assert.doesNotMatch(globals, /\.pro-studio-shell/);
   assert.match(styles, /\.pro-app-shell \.pro-canvas-stage \{[^}]*grid-template-rows: auto minmax\(0, 1fr\) auto/);
   assert.match(styles, /--pro-spring: cubic-bezier\(0\.34, 1\.56, 0\.64, 1\)/);

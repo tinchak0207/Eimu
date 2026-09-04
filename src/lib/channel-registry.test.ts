@@ -23,7 +23,6 @@ const FULL_ENV = {
   IMAGE_API_KEY: "primary-key",
   IMAGE_API_BASE_URL_FALLBACK: "https://fallback.example/v1",
   IMAGE_API_KEY_FALLBACK: "fallback-key",
-  SENSENOVA_API_KEYS: "sn-key-1, sn-key-2",
 };
 
 function pool(overrides: Partial<AdminPool>): AdminPool {
@@ -122,20 +121,6 @@ test("優先級 override 能把 env 渠道排到池後面", () => {
   assert.ok(labels.indexOf("relay-pool") < labels.indexOf("sub2api"));
 });
 
-test("sensenova：專用隊列、可被 override 停用、且其停用不影響其他模型", () => {
-  __resetChannelHealthForTests();
-  const queue = buildModelQueue("sensenova-u1-fast", FULL_ENV, [], {});
-  assert.equal(queue.length, 2);
-  assert.ok(queue.every((endpoint) => endpoint.baseURL === "https://token.sensenova.cn/v1"));
-  assert.ok(queue.every((endpoint) => /^sensenova-\d+$/.test(endpoint.label)));
-
-  const disabled = buildModelQueue("sensenova-u1-fast", FULL_ENV, [], { sensenova: { enabled: false } });
-  assert.deepEqual(disabled, []);
-
-  const other = buildModelQueue("gpt-image-2", FULL_ENV, [], { sensenova: { enabled: false } });
-  assert.ok(other.length > 0);
-});
-
 test("describeChannels 枚舉未配置渠道並如實標注 override 狀態", () => {
   __resetChannelHealthForTests();
   const bareEnv = { SUB2API_ENABLED: "true" };
@@ -143,7 +128,7 @@ test("describeChannels 枚舉未配置渠道並如實標注 override 狀態", ()
 
   const byId = new Map(channels.map((channel) => [channel.id, channel]));
   // 未配置的渠道必須出現且標明未配置——不是隱形。
-  for (const id of ["env:sub2api", "env:adobe2api", "env:pixai", "env:primary", "env:fallback", "sensenova"]) {
+  for (const id of ["env:sub2api", "env:adobe2api", "env:pixai", "env:primary", "env:fallback"]) {
     const channel = byId.get(id);
     assert.ok(channel, `${id} 必須被枚舉`);
     assert.equal(channel.configured, false);
@@ -203,11 +188,11 @@ test("共享 circuit breaker：兩次失敗觸發冷卻、降級到隊尾而非�
   __resetChannelHealthForTests();
 });
 
-test("overrides 白名單只含 env 渠道與 sensenova——池由自己的 CRUD 管轄", () => {
+test("overrides 白名單只含 env 渠道——池由自己的 CRUD 管轄", () => {
   const ids = overridableChannelIds();
   assert.deepEqual(
     [...ids].sort(),
-    [...["env:adobe2api", "env:fallback", "env:pixai", "env:primary", "env:sub2api", "sensenova"],
+    [...["env:adobe2api", "env:fallback", "env:pixai", "env:primary", "env:sub2api"],
       ...REGISTRY_CHANNELS.map((channel) => `env:${channel.label}`)].sort(),
   );
   assert.ok(!ids.some((id) => id.startsWith("pool:")));

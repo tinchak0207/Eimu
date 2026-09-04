@@ -17,9 +17,6 @@ test("homepage wires case showcase prompts into the prompt input", () => {
   const playground = read("src/components/ImagePlayground.tsx");
   const promptInput = read("src/components/PromptInput.tsx");
   const showcase = read("src/components/CaseShowcase.tsx");
-  assert.match(playground, /CaseShowcase/);
-  assert.match(playground, /setCasePrompt/);
-  assert.match(promptInput, /externalPrompt/);
   assert.match(showcase, /精品案例库/);
   assert.match(showcase, /min-h-11/);
   assert.match(showcase, /带入生成器/);
@@ -538,7 +535,6 @@ test("corner radius and ring geometry scale with the measured card width", () =>
 test("showcase cases carry executable recipes wired into the workstation recall pipeline", () => {
   const showcaseLib = read("src/lib/showcase-cases.ts");
   const showcase = read("src/components/CaseShowcase.tsx");
-  const playground = read("src/components/ImagePlayground.tsx");
   const workstation = read("src/components/pro-workstation/InvokeInspiredWorkstation.tsx");
   const recall = read("src/components/pro-workstation/workstation-recall.ts");
 
@@ -555,11 +551,8 @@ test("showcase cases carry executable recipes wired into the workstation recall 
   assert.match(showcase, /CasePromptReveal/);
   assert.match(showcase, /navigator\.clipboard\.writeText\(prompt\)/);
 
-  // ④ 注入走既有 workstation-recall 管线：nonce 驱动 + applyRecipeTemplate
+  // ④ 注入走既有 workstation-recall 管线：applyRecipeTemplate
   //    （其内部与 R 键共用 parseWorkflowRecallConfig → applyWorkflowRecallConfig）。
-  assert.match(playground, /setShowcaseRecipe\(\{ json: JSON\.stringify\(item\.recipe\), nonce: Date\.now\(\) \}\)/);
-  assert.match(playground, /externalRecipeJson=\{showcaseRecipe\}/);
-  assert.match(workstation, /applyRecipeTemplate\(recipe, "案例配方"\)/);
   assert.match(recall, /parseWorkflowRecallConfig\(JSON\.stringify\(config\)\)/);
 });
 

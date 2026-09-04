@@ -41,29 +41,24 @@ test("image playground reveals a completed image without waiting for the estimat
   assert.match(source, /failedProviders\.length > 0 \|\| hasGeneratedImage/);
 });
 
-test("professional mode renders as a standalone app without the normal showcase shell", () => {
+test("professional workstation entry is removed; AI workstation is the only surface (2026-08-27)", () => {
   const source = read("src/components/ImagePlayground.tsx");
-  const proBranch = source.indexOf("hasOpenedProfessionalMode &&");
-  const normalShell = source.indexOf("min-h-screen bg-transparent");
-  const showcase = source.indexOf("<CaseShowcase");
 
-  assert.notEqual(proBranch, -1);
-  assert.match(source, /pro-app-shell/);
-  assert.match(source, /onExitProfessionalMode/);
-  assert.match(source, /!showProfessionalMode && \(/);
-  assert.ok(proBranch < normalShell);
-  assert.ok(proBranch < showcase);
+  // 專業工作站入口移除：無殘留分支/掛載/動態 import（AI 工作站已吸收其機制）。
+  assert.doesNotMatch(source, /showProfessionalMode|hasOpenedProfessionalMode|openProfessionalMode/);
+  assert.doesNotMatch(source, /pro-app-shell|InvokeInspiredWorkstation|ProfessionalRunConfig/);
+  // 服務端歷史不再按專業模式開關，常開。
+  assert.doesNotMatch(source, /enableServerHistory/);
+  // agent 模式即畫布工作站，不再有「!showProfessionalMode」護欄。
+  assert.match(source, /inCanvasWorkstation = displayMode === "agent"/);
 });
 
 test("professional workstation stylesheet stays out of the first-paint bundle", () => {
   const playground = read("src/components/ImagePlayground.tsx");
-  const workstation = read("src/components/pro-workstation/InvokeInspiredWorkstation.tsx");
 
-  // ~37KB of pro-mode-only CSS. Importing it here put it in the homepage's
-  // render-blocking <link rel=stylesheet>; it now rides the lazy chunk that
-  // InvokeInspiredWorkstation itself pulls in.
+  // ~37KB of pro-mode-only CSS. 專業工作站入口移除後，playground 對它零引用。
+  assert.doesNotMatch(playground, /pro-workstation/);
   assert.doesNotMatch(playground, /import "\.\/pro-workstation\/workstation\.css"/);
-  assert.match(workstation, /import "\.\/workstation\.css"/);
 });
 
 test("the result column is the canvas alone, with no duplicated chrome", () => {
@@ -78,7 +73,7 @@ test("the result column is the canvas alone, with no duplicated chrome", () => {
   // 2026-08-25 canvas 常駐化：agent 模式右側恆為 canvas（resultMode 由 displayMode
   // 派生，不再有「助理左邊、圖片右邊」的中間態），CanvasEmbed 的關閉鈕退場。
   assert.match(source, /const resultMode: "image" \| "canvas" = displayMode === "agent" \? "canvas" : "image"/);
-  assert.match(source, /inCanvasWorkstation = displayMode === "agent" && !showProfessionalMode/);
+  assert.match(source, /inCanvasWorkstation = displayMode === "agent"/);
   assert.match(source, /canvas-ws-overlay/);
   assert.match(source, /\{overlayContent \?\? <CanvasEmbed canvas=\{canvasHost\} expanded \/>\}/);
   assert.match(source, /<ImageDisplay/);
@@ -111,7 +106,7 @@ test("the model picker is wired into the left prompt panel", () => {
 
   assert.match(source, /models=\{PROVIDERS\.image_tinchak\.models\}/);
   assert.match(source, /modelId=\{selectedModels\.image_tinchak\}/);
-  assert.match(source, /onModelChange=\{handleModelChange\}/);
+  assert.match(source, /onModelChange=\{userSetModel\}/);
   assert.match(source, /generateAudio=\{generateAudio\}/);
   assert.match(source, /onGenerateAudioChange=\{setGenerateAudio\}/);
   assert.match(prompt, /<ModelPicker[\s\S]{0,180}models=\{models\}[\s\S]{0,180}value=\{modelId\}/);
@@ -131,22 +126,18 @@ test("professional mode is a toggle inside the prompt card, not a bare row", () 
 
   // It used to occupy a whole right-aligned row above the grid.
   assert.doesNotMatch(source, /mb-4 flex justify-end/);
-  assert.match(source, /onToggleProfessionalMode=\{openProfessionalMode\}/);
-  assert.match(source, /isProfessionalMode=\{showProfessionalMode\}/);
-
-  // Reachable at every width, and exposes real toggle state to assistive tech.
-  assert.match(prompt, /onClick=\{onToggleProfessionalMode\}/);
-  assert.match(prompt, /aria-pressed=\{isProfessionalMode\}/);
-  assert.doesNotMatch(prompt, /hidden md:inline-flex[\s\S]{0,200}专业模式/);
+  // 2026-08-27 專業工作站入口移除：toggle 與 props 鏈全數退場。
+  assert.doesNotMatch(source, /onToggleProfessionalMode|isProfessionalMode|showProfessionalMode/);
+  assert.doesNotMatch(prompt, /onToggleProfessionalMode|isProfessionalMode|专业控制/);
 });
 
 test("professional mode keeps its draft mounted after returning home", () => {
   const source = read("src/components/ImagePlayground.tsx");
 
-  assert.match(source, /const \[hasOpenedProfessionalMode, setHasOpenedProfessionalMode\] = useState\(false\)/);
-  assert.match(source, /hasOpenedProfessionalMode && \(/);
-  assert.match(source, /aria-hidden=\{!showProfessionalMode\}/);
-  assert.match(source, /!showProfessionalMode && \(/);
+  // 2026-08-27 專業工作站入口移除：草稿保留掛載機制（hasOpenedProfessionalMode）
+  // 隨入口一併退場；playground 對專業模式相關狀態零殘留。
+  assert.doesNotMatch(source, /hasOpenedProfessionalMode/);
+  assert.doesNotMatch(source, /showProfessionalMode/);
   assert.doesNotMatch(source, /if \(showProfessionalMode\) \{\s*return/);
 });
 

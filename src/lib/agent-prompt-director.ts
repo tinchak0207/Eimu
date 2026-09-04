@@ -12,7 +12,28 @@
  *
  * ⚠️ 這份必須與 VPS gateway `/agent/v1/optimize-prompt` 的 `OPTIMIZE_DIRECTOR_PREFIX`
  * （/opt/agent-harness/gateway/index.ts）保持一致。改一份就要同步另一份。
+ *
+ * 2026-08-27 補充段落：kunpeng Seedance 規則（pengfeiqiao/kunpeng @ 872a58b，MIT）
+ * 作為補充引入——與上方 Higgsfield 規則逐條對賬後只補差異（VO 行/多主体定义/
+ * 三视图禁用/音频音色引用/realPersonMode/中文分镜格式），不刪不改任何現有規則。
+ * 完整對賬結論見 kunpeng-knowledge.ts 的 KUNPENG_SEEDANCE_RECONCILIATION。
  */
+
+/**
+ * kunpeng Seedance 補充規則（逐字取自 aigc-memory/prompt-templates/seedance/ 的
+ * 規則段；白名單改寫僅一處：接口名 multimodal-video/text-to-video → 多图参考模式/
+ * 纯文本模式，因為我們後端沒有 bytedance 直連端點）。
+ */
+export const KUNPENG_SEEDANCE_SUPPLEMENT = `
+SEEDANCE SUPPLEMENTARY RULES (from kunpeng, MIT — additive only; when they conflict with the rules above, the rules above win):
+- Chinese storyboard format is valid for Seedance-native (multi-reference) submissions: 分镜场景设定在：{地点} @图片一 / 分镜具体动作描述：/ 镜头{编号} {时长}s 时间: {时间}。 [{景别}/{运镜}] {画面描述} {人物/物体@图片N}. Use it when the user submits Chinese storyboard-style input or reference images; otherwise keep the English six-slot formula.
+- Reference-image citation: use @图片一/@图片二… Chinese positional numbers only (never filenames, never @人一/@物一). The first uploaded image is always the scene reference. Every uploaded image MUST have a matching @图片N citation.
+- VO lines ({人物}@图片N（VO）：content) are ONLY for narration or inner voice-over. On-screen dialogue/singing goes into the shot line with the line wrapped in {}. SFX use <>, music uses （）, subtitles use 【】.
+- Multi-subject scenes must define unique labels and use them throughout: 将@图片N中的[2-3个稳定静态特征]定义为<主体N>; end with 禁止出现外形着装完全一致的人物，禁止同款分身/双胞胎.
+- Character reference images: single-person standalone photos only — never three-view/multi-view sheets (they cause twin/ID-drift).
+- Audio does not occupy image numbers; reference voice by text only: 用@音频一的音色用{方言}唱/说：{内容}.
+- realPersonMode=true must be set when real-person reference assets are used.
+- Official tail constraints (verbatim): 保持无字幕，不要生成Logo和水印。人物面部稳定不变形，动作自然流畅。表演克制真实，情绪有层次递进，无瞪眼嘶吼等夸张程式化表情。`;
 
 /**
  * System prompt：deepseek 優化 agent 的導演指令。
@@ -50,4 +71,4 @@ WHEN THE USER IS VAGUE (they will be — they are a non-expert):
 - If they named a copyrighted hero, rewrite per rule 7 — never paste the IP name.
 - If they described a shot type (battle, chase, dialogue, horror, product), use the strongest expected structure for that type.
 
-Translate any Chinese user input to English in the output prompt.`;
+Translate any Chinese user input to English in the output prompt.${KUNPENG_SEEDANCE_SUPPLEMENT}`;

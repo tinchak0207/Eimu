@@ -9,50 +9,101 @@ import {
   type CreatorResourceModelId,
 } from "@/lib/creator-resource-library";
 import { SCENARIO_TEMPLATES, type ScenarioTemplate } from "@/lib/scenario-templates";
+import {
+  KUNPENG_STYLE_ASSETS,
+  KUNPENG_STYLE_CATEGORY_LABELS,
+  KUNPENG_SOURCE,
+  buildKunpengStylePrompt,
+  kunpengStyleSummary,
+  type KunpengStyleAsset,
+} from "@/lib/kunpeng-style-assets";
+import {
+  KUNPENG_PROMPT_TEMPLATES,
+  type KunpengPromptTemplate,
+} from "@/lib/kunpeng-prompt-templates";
 import { cn } from "@/lib/utils";
 
-type TemplateFilter = "all" | "scenario" | CreatorResourceModelId;
+type TemplateFilter = "all" | "scenario" | CreatorResourceModelId | "kunpeng-style" | "kunpeng-prompt";
 type CreativeTemplate =
   | { kind: "scenario"; key: string; scenario: ScenarioTemplate }
-  | { kind: "resource"; key: string; resource: CreatorResource };
+  | { kind: "resource"; key: string; resource: CreatorResource }
+  | { kind: "kunpeng-style"; key: string; style: KunpengStyleAsset }
+  | { kind: "kunpeng-prompt"; key: string; template: KunpengPromptTemplate };
 
 const TEMPLATE_FILTERS: Array<{ id: TemplateFilter; label: string }> = [
   { id: "all", label: "全部" },
   { id: "scenario", label: "场景" },
   { id: "gpt-image-2", label: "GPT Image 2" },
   { id: "gemini-3.1-flash-image", label: "Nano Banana Pro" },
+  { id: "kunpeng-style", label: "风格库" },
+  { id: "kunpeng-prompt", label: "提示词模板" },
 ];
 
 function templateTitle(template: CreativeTemplate) {
-  return template.kind === "scenario" ? template.scenario.name : template.resource.title;
+  switch (template.kind) {
+    case "scenario":
+      return template.scenario.name;
+    case "resource":
+      return template.resource.title;
+    case "kunpeng-style":
+      return template.style.name;
+    case "kunpeng-prompt":
+      return template.template.title;
+  }
 }
 
 function templateDescription(template: CreativeTemplate) {
-  return template.kind === "scenario" ? template.scenario.description : template.resource.description;
+  switch (template.kind) {
+    case "scenario":
+      return template.scenario.description;
+    case "resource":
+      return template.resource.description;
+    case "kunpeng-style":
+      return kunpengStyleSummary(template.style);
+    case "kunpeng-prompt":
+      return template.template.description;
+  }
 }
 
 function templateSearchText(template: CreativeTemplate) {
-  if (template.kind === "scenario") {
-    return `${template.scenario.name} ${template.scenario.description} 场景`;
+  switch (template.kind) {
+    case "scenario":
+      return `${template.scenario.name} ${template.scenario.description} 场景`;
+    case "resource":
+      return `${template.resource.title} ${template.resource.category} ${template.resource.description} ${template.resource.useWhen}`;
+    case "kunpeng-style":
+      return `${template.style.name} ${KUNPENG_STYLE_CATEGORY_LABELS[template.style.category] ?? template.style.category} ${template.style.promptSuffix} ${template.style.visualDNA}`;
+    case "kunpeng-prompt":
+      return `${template.template.title} ${template.template.description} ${template.template.body}`;
   }
-  return `${template.resource.title} ${template.resource.category} ${template.resource.description} ${template.resource.useWhen}`;
 }
 
 function templateChanges(template: CreativeTemplate) {
-  return template.kind === "scenario"
-    ? ["项目上下文", "避免内容", "风格", "尺寸", "质量", "数量"]
-    : ["模型", "画面描述", "避免内容", "尺寸", "数量"];
+  switch (template.kind) {
+    case "scenario":
+      return ["项目上下文", "避免内容", "风格", "尺寸", "质量", "数量"];
+    case "resource":
+      return ["模型", "画面描述", "避免内容", "尺寸", "数量"];
+    case "kunpeng-style":
+      return ["画面描述（追加风格块）"];
+    case "kunpeng-prompt":
+      return ["画面描述（注入模板骨架）"];
+  }
 }
 
-/** 场景与模型配方共享一个入口，套用动作仍由父组件统一修改工作站状态。 */
+/** 场景、模型配方与鲲鹏资产共享一个入口，套用动作仍由父组件统一修改工作站状态。 */
 const CreatorResourcePanel = memo(function CreatorResourcePanel({
   onApplyResource,
   onApplyScenario,
+  onApplyKunpengStyle,
+  onApplyKunpengPromptTemplate,
   undoLabel,
   onUndo,
 }: {
   onApplyResource: (resource: CreatorResource) => void;
   onApplyScenario: (scenario: ScenarioTemplate) => void;
+  onApplyKunpengStyle: (style: KunpengStyleAsset) => void;
+  onApplyKunpengPromptTemplate: (template: KunpengPromptTemplate) => void;
   undoLabel?: string;
   onUndo: () => void;
 }) {
@@ -91,11 +142,23 @@ const CreatorResourcePanel = memo(function CreatorResourcePanel({
       key: `resource:${resource.id}`,
       resource,
     }));
-    return [...scenarios, ...resources]
+    const kunpengStyles: CreativeTemplate[] = KUNPENG_STYLE_ASSETS.map((style) => ({
+      kind: "kunpeng-style",
+      key: `kunpeng-style:${style.id}`,
+      style,
+    }));
+    const kunpengPrompts: CreativeTemplate[] = KUNPENG_PROMPT_TEMPLATES.map((template) => ({
+      kind: "kunpeng-prompt",
+      key: `kunpeng-prompt:${template.id}`,
+      template,
+    }));
+    return [...scenarios, ...resources, ...kunpengStyles, ...kunpengPrompts]
       .filter((template) => {
         const matchesFilter = filter === "all"
           || (filter === "scenario" && template.kind === "scenario")
-          || (template.kind === "resource" && template.resource.modelId === filter);
+          || (template.kind === "resource" && template.resource.modelId === filter)
+          || (filter === "kunpeng-style" && template.kind === "kunpeng-style")
+          || (filter === "kunpeng-prompt" && template.kind === "kunpeng-prompt");
         return matchesFilter && (!normalizedQuery || templateSearchText(template).toLowerCase().includes(normalizedQuery));
       })
       .sort((left, right) => Number(favorites.includes(right.key)) - Number(favorites.includes(left.key)));
@@ -103,8 +166,20 @@ const CreatorResourcePanel = memo(function CreatorResourcePanel({
 
   const confirmApply = () => {
     if (!pending) return;
-    if (pending.kind === "scenario") onApplyScenario(pending.scenario);
-    else onApplyResource(pending.resource);
+    switch (pending.kind) {
+      case "scenario":
+        onApplyScenario(pending.scenario);
+        break;
+      case "resource":
+        onApplyResource(pending.resource);
+        break;
+      case "kunpeng-style":
+        onApplyKunpengStyle(pending.style);
+        break;
+      case "kunpeng-prompt":
+        onApplyKunpengPromptTemplate(pending.template);
+        break;
+    }
     setPending(null);
   };
 
@@ -151,21 +226,26 @@ const CreatorResourcePanel = memo(function CreatorResourcePanel({
       <div className="pro-resource-list">
         {templates.map((template) => {
           const isScenario = template.kind === "scenario";
+          const isKunpeng = template.kind === "kunpeng-style" || template.kind === "kunpeng-prompt";
           const title = templateTitle(template);
           const description = templateDescription(template);
           const resource = template.kind === "resource" ? template.resource : null;
+          const kunpengCategory = template.kind === "kunpeng-style"
+            ? (KUNPENG_STYLE_CATEGORY_LABELS[template.style.category] ?? template.style.category)
+            : template.kind === "kunpeng-prompt" ? "提示词骨架" : null;
           return (
             <article key={template.key} className="pro-resource-card">
               <div className="pro-resource-card-head">
                 <span className={cn(
                   "pro-resource-model",
                   isScenario && "is-scenario",
+                  isKunpeng && "is-scenario",
                   resource?.modelId === "gemini-3.1-flash-image" && "is-nano",
                 )}>
-                  {isScenario ? "场景模板" : resource?.modelLabel}
+                  {isScenario ? "场景模板" : isKunpeng ? "鲲鹏资产" : resource?.modelLabel}
                 </span>
                 <div className="pro-resource-card-actions">
-                  <span className="pro-resource-category">{isScenario ? "完整配置" : resource?.category}</span>
+                  <span className="pro-resource-category">{isScenario ? "完整配置" : kunpengCategory ?? resource?.category}</span>
                   <button
                     type="button"
                     className={cn("pro-resource-favorite", favorites.includes(template.key) && "is-active")}
@@ -189,11 +269,23 @@ const CreatorResourcePanel = memo(function CreatorResourcePanel({
               )}
               <h4>{title}</h4>
               <p>{description}</p>
-              <small>{isScenario ? "自动配置风格、尺寸、质量与避免内容" : resource?.useWhen}</small>
+              <small>
+                {isScenario
+                  ? "自动配置风格、尺寸、质量与避免内容"
+                  : template.kind === "kunpeng-style"
+                    ? `${kunpengCategory} · 套用后追加到画面描述末尾`
+                    : template.kind === "kunpeng-prompt"
+                      ? "套用后注入模板骨架，替换花括号内容即可"
+                      : resource?.useWhen}
+              </small>
               <div className="pro-resource-card-footer">
                 {resource ? (
                   <a href={resource.sourceUrl} target="_blank" rel="noreferrer" title={`${resource.sourceName} · ${resource.license}`}>
                     GitHub · {resource.license}<ArrowUpRight className="h-3 w-3" />
+                  </a>
+                ) : isKunpeng ? (
+                  <a href={KUNPENG_SOURCE.sourceUrl} target="_blank" rel="noreferrer" title={`${KUNPENG_SOURCE.sourceName} · ${KUNPENG_SOURCE.license}`}>
+                    GitHub · {KUNPENG_SOURCE.license}<ArrowUpRight className="h-3 w-3" />
                   </a>
                 ) : <span className="pro-template-source">内置场景</span>}
                 <button type="button" onClick={() => setPending(template)}>套用</button>

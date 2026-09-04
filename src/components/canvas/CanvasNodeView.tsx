@@ -16,7 +16,7 @@
 // props 顯式轉發給 NodeBody（46 個 props 介面債就地償還，不引入 context——避免 memo 失效）。
 
 import { useEffect, useState } from "react";
-import { X, RefreshCw, Edit2, ChevronDown, ChevronUp, Image as ImageIcon, Download } from "lucide-react";
+import { X, RefreshCw, Edit2, ChevronDown, ChevronUp, Image as ImageIcon, Download, Wrench, ShieldCheck, FileText, Type, User, Mountain, Boxes, Paperclip, AudioLines, Video as VideoIcon, SlidersHorizontal, Clapperboard } from "lucide-react";
 import { CanvasNodeHoverToolbar } from "./CanvasNodeHoverToolbar";
 import { CanvasNodePromptPanel } from "./CanvasNodePromptPanel";
 import { cn } from "@/lib/utils";
@@ -24,7 +24,7 @@ import { CanvasNodeType, type CanvasNode, type CanvasNodeStatus } from "@/lib/ca
 import { REFERENCE_IMAGE_ROLES } from "../pro-workstation/workstation-constants";
 import { toReferenceImageRole } from "@/lib/image-types";
 import type { ReferenceImageRole } from "@/lib/image-types";
-import { STATUS_COLOR, STATUS_LABEL, TYPE_LABEL, RESIZE_HANDLES } from "./node-view/constants";
+import { STATUS_LABEL, TYPE_LABEL, RESIZE_HANDLES } from "./node-view/constants";
 import { useNodeGestures } from "./node-view/use-node-gestures";
 import { NodeBody } from "./node-view/NodeBody";
 
@@ -162,9 +162,48 @@ export function CanvasNodeView({
   }, []);
 
   const status: CanvasNodeStatus = node.metadata?.status ?? "idle";
-  const statusColor = STATUS_COLOR[status];
   const statusLabel = STATUS_LABEL[status];
-  const typeLabel = TYPE_LABEL[node.type];
+
+  /**
+   * 类型徽章（2026-08-26 用户裁定：不同类型节点 UI 必须有区分）。
+   * 每个类型一个语义色 + 图标 + 名称；text 类型按 pipelineCard metadata 再细分：
+   * tool = 工具卡（蓝）、gate = 门禁卡（琥珀）、其余 = 文本（灰）。
+   * （2026-08-27 起 🔧 emoji 前缀已废，识别走结构化 metadata。）
+   * 着色克制（bg 12% + 文字色），不喧宾夺主。
+   */
+  const typeBadge = (() => {
+    const base = "shrink-0 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10.5px] font-medium leading-none";
+    switch (node.type) {
+      case CanvasNodeType.Image:
+        return { label: "生成", Icon: ImageIcon, cls: "bg-[rgba(52,199,89,0.12)] text-[#248A3D]", bar: "bg-[#248A3D]" };
+      case CanvasNodeType.Video:
+        return { label: "视频", Icon: VideoIcon, cls: "bg-[rgba(90,200,250,0.14)] text-[#0E7FA8]", bar: "bg-[#0E7FA8]" };
+      case CanvasNodeType.Audio:
+        return { label: "音频", Icon: AudioLines, cls: "bg-[rgba(255,149,0,0.12)] text-ios-orange", bar: "bg-ios-orange" };
+      case CanvasNodeType.CharacterCard:
+        return { label: "角色", Icon: User, cls: "bg-[rgba(255,45,85,0.12)] text-[#D92E5E]", bar: "bg-[#D92E5E]" };
+      case CanvasNodeType.SceneCard:
+        return { label: "场景", Icon: Mountain, cls: "bg-[rgba(90,200,250,0.14)] text-[#0E7FA8]", bar: "bg-[#0E7FA8]" };
+      case CanvasNodeType.Config:
+        return { label: "产出", Icon: FileText, cls: "bg-[rgba(88,86,214,0.12)] text-[#5856D6]", bar: "bg-[#5856D6]" };
+      case CanvasNodeType.Text:
+        if (node.metadata?.pipelineCard === "tool") return { label: "工具", Icon: Wrench, cls: "bg-[rgba(0,122,255,0.12)] text-ios-blue", bar: "bg-ios-blue" };
+        if (node.metadata?.pipelineCard === "gate") return { label: "门禁", Icon: ShieldCheck, cls: "bg-[rgba(255,149,0,0.14)] text-[#B96A00]", bar: "bg-[#B96A00]" };
+        return { label: "文本", Icon: Type, cls: "bg-black/5 text-muted-foreground", bar: "bg-black/30" };
+      case CanvasNodeType.Prompt:
+        return { label: "提示词", Icon: Type, cls: "bg-ios-blue/10 text-ios-blue", bar: "bg-ios-blue" };
+      case CanvasNodeType.Reference:
+        return { label: "参考", Icon: Paperclip, cls: "bg-ios-blue/10 text-ios-blue", bar: "bg-ios-blue" };
+      case CanvasNodeType.Director:
+        // 導演台：Video 色系（#0E7FA8），圖標換 Clapperboard 區分身份，不新發色。
+        return { label: "3D 导演", Icon: Clapperboard, cls: "bg-[rgba(90,200,250,0.14)] text-[#0E7FA8]", bar: "bg-[#0E7FA8]" };
+      case CanvasNodeType.Group:
+        return { label: "组", Icon: Boxes, cls: "bg-black/5 text-muted-foreground", bar: "bg-black/30" };
+      default:
+        return { label: TYPE_LABEL[node.type] ?? node.type, Icon: SlidersHorizontal, cls: "bg-black/5 text-muted-foreground", bar: "bg-black/30" };
+    }
+  })();
+  const TypeBadgeIcon = typeBadge.Icon;
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.key === "Enter" || e.key === " ") {
@@ -176,6 +215,13 @@ export function CanvasNodeView({
   const showCostBadge =
     (node.type === CanvasNodeType.Image || node.type === CanvasNodeType.Video) &&
     typeof node.metadata?.cost_coins === "number";
+
+  // C-FE：canvas.plan 的 cost_hint（预估花费）——实际 cost_coins 落地前显示
+  // 「预估 N 币」角标（与实际角标同位同款、互斥接班），无值不显示（行为同现状）。
+  const showCostHintBadge =
+    !showCostBadge &&
+    (node.type === CanvasNodeType.Image || node.type === CanvasNodeType.Video) &&
+    typeof node.metadata?.cost_hint === "number";
 
   return (
     <div
@@ -230,7 +276,9 @@ export function CanvasNodeView({
           !selected && adjacent && "ring-2 ring-ios-blue/20",
         )}
       >
-        <div className={cn("h-[3px] w-full shrink-0", statusColor)} />
+        {/* 卡片上沿横线（2026-08-26 用户裁定）：类型色，与徽章同源——
+            状态语义已由标题栏右侧状态徽章承担，顶线只表达节点身份。 */}
+        <div className={cn("h-[3px] w-full shrink-0", typeBadge.bar)} />
         <div className="flex items-center gap-2 px-3 py-2">
           {editingTitle !== null ? (
             <input
@@ -275,18 +323,25 @@ export function CanvasNodeView({
               )}
             </span>
           )}
-          <span className="shrink-0 text-ios-caption1 text-muted-foreground">{typeLabel}</span>
-          <span
-            className={cn(
-              "shrink-0 rounded-full px-2 py-0.5 text-[11.5px] font-medium",
-              status === "idle" && "bg-black/5 text-muted-foreground",
-              status === "success" && "bg-ios-green/15 text-[#248A3D]",
-              status === "loading" && "bg-ios-blue/10 text-ios-blue",
-              status === "error" && "bg-destructive/10 text-destructive",
-            )}
-          >
-            {statusLabel}
+          <span className={cn(typeBadge.cls, "shrink-0 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10.5px] font-medium leading-none")}>
+            <TypeBadgeIcon className="h-3 w-3" aria-hidden="true" />
+            {typeBadge.label}
           </span>
+          {/* Director 節點無生成生命週期（metadata.status 恒 idle），
+              「待处理」徽章語義錯誤，故不渲染；其他節點維持現狀。 */}
+          {node.type !== CanvasNodeType.Director && (
+            <span
+              className={cn(
+                "shrink-0 rounded-full px-2 py-0.5 text-[11.5px] font-medium",
+                status === "idle" && "bg-black/5 text-muted-foreground",
+                status === "success" && "bg-ios-green/15 text-[#248A3D]",
+                status === "loading" && "bg-ios-blue/10 text-ios-blue",
+                status === "error" && "bg-destructive/10 text-destructive",
+              )}
+            >
+              {statusLabel}
+            </span>
+          )}
           {/* P1-1: 重新生成按鈕 */}
           {onRerun && (node.type === "image" || node.type === "video") && (status === "success" || status === "error") && (
             <button
@@ -425,6 +480,11 @@ export function CanvasNodeView({
         {showCostBadge && (
           <span className="pointer-events-none absolute right-2 bottom-2 rounded-full bg-black/60 px-2 py-0.5 text-[12.5px] font-medium text-white">
             {node.metadata?.cost_coins} 币
+          </span>
+        )}
+        {showCostHintBadge && (
+          <span className="pointer-events-none absolute right-2 bottom-2 rounded-full bg-black/60 px-2 py-0.5 text-[12.5px] font-medium text-white tabular-nums">
+            预估 {node.metadata?.cost_hint} 币
           </span>
         )}
       </div>

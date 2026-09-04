@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { normalizeChannelOverrides } from "../../../../lib/channel-overrides.ts";
-import { overridableChannelIds, SENSENOVA_CHANNEL_ID } from "../../../../lib/channel-registry.ts";
+import { overridableChannelIds } from "../../../../lib/channel-registry.ts";
 
 const root = process.cwd();
 
@@ -80,7 +80,7 @@ test("PATCH whitelist drops pool ids, junk keys, and malformed entries", () => {
 
   const filtered = filterToOverridable({
     "env:sub2api": { enabled: false },
-    [SENSENOVA_CHANNEL_ID]: { priority: 12 },
+    "env:adobe2api": { priority: 12 },
     "pool:abc123": { enabled: false }, // pools have their own CRUD — must be dropped
     garbage: { enabled: true }, // unknown id — dropped
     "env:not-a-channel": { priority: 5 }, // unknown env id — dropped
@@ -90,13 +90,13 @@ test("PATCH whitelist drops pool ids, junk keys, and malformed entries", () => {
 
   assert.deepEqual(filtered, {
     "env:sub2api": { enabled: false },
-    [SENSENOVA_CHANNEL_ID]: { priority: 12 },
+    "env:adobe2api": { priority: 12 },
   });
 
-  // The whitelist itself must never contain pool ids, and must cover sensenova.
+  // The whitelist itself must never contain pool ids, and must cover every env channel.
   const allowed = overridableChannelIds();
   assert.ok(allowed.every((id) => !id.startsWith("pool:")));
-  assert.ok(allowed.includes(SENSENOVA_CHANNEL_ID));
+  assert.ok(allowed.includes("env:pixai"));
 });
 
 test("probe route probes /models only and is honest about unprobeable channels", () => {
@@ -105,8 +105,8 @@ test("probe route probes /models only and is honest about unprobeable channels",
   assert.match(code, /requireAdminSession\(\)/);
   assert.match(code, /\/models/);
   assert.match(code, /AbortSignal\.timeout\(10_000\)/);
-  // Browser relay and sensenova have no /models — the route must say "unsupported"
-  // instead of faking an always-red probe.
+  // Channels without a /models endpoint (e.g. the browser relay) must be labeled
+  // "unsupported" instead of faking an always-red probe.
   assert.match(read(PROBE_ROUTE), /此渠道不支持 \/models 探测/);
   assert.match(code, /supported:\s*false/);
   // A probe must never trigger a real (billable) generation.

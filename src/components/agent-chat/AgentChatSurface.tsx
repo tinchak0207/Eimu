@@ -13,8 +13,8 @@
 // D-2 说各模式各自进、各自进入各自的聊天区，但 D-3 已修正为「功能完全平等，
 // agent 聊天区在两个模式下是同一套东西」——所以这里只有一套组件。
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bot, History, Loader2, MessageSquarePlus, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { Bot, Boxes, History, Loader2, LogIn, MessageSquarePlus, Search, X } from "lucide-react";
 import {
   hasReflectedParams,
   reflectParams,
@@ -27,10 +27,40 @@ import {
   buildAnchorMessage,
   buildReanchorMessage,
   deriveBatchAnchor,
+  shouldOfferBatchAnchor,
 } from "@/lib/agent-batch-anchor";
 import { AgentChatPanel } from "@/components/agent-chat/AgentChatPanel";
-import type { AgentImageItem } from "@/lib/agent-chat-types";
+import { AgentSettingsPopover } from "@/components/agent-chat/AgentSettingsPopover";
+import type { AgentImageItem, AgentVideoItem } from "@/lib/agent-chat-types";
+import type { AssetPack, AssetPackItem } from "@/lib/asset-pack-store";
 import type { AgentTranscriptProps } from "@/components/agent-chat/AgentTranscript";
+import { buildChatSaveItem, CHAT_ASSETS_PACK_ID } from "@/lib/agent-chat-asset-builders";
+
+/** 登录类错误判定：错误文案含「尚未登录」即需要登录，不是重试能解决的。 */
+function isAuthError(error: string): boolean {
+  return error.includes("尚未登录") || error.includes("无法使用 Agent 助手");
+}
+
+/**
+ * GitHub OAuth 弹窗（与 Navbar 同一条链路：/api/auth/github/start popup）；
+ * 弹窗关闭（授权完成）后触发 onDone——此时 token 已写入 localStorage，
+ * 重试才有效（用户裁定：登录错误时「重试」是假的，要给登录按钮）。
+ */
+async function startLoginThenRetry(onDone: () => Promise<void>): Promise<void> {
+  const popup = window.open("/api/auth/github/start", "github_oauth", "popup,width=760,height=640");
+  if (!popup) {
+    // popup 被挡：退回整页跳转（用户登录完回来，会话经本地存档 resume 续上）。
+    window.location.href = "/api/auth/github/start";
+    return;
+  }
+  // 轮询弹窗关闭；弹窗关闭即视为登录流程结束（成功/取消都算），重试让 authHeaders 重新读 token。
+  const timer = window.setInterval(() => {
+    if (popup.closed) {
+      window.clearInterval(timer);
+      void onDone();
+    }
+  }, 400);
+}
 
 function formatSavedAt(savedAt: number): string {
   const diff = Date.now() - savedAt;
@@ -51,6 +81,20 @@ function formatSessionLabel(it: AgentSessionSummary): string {
   return `${date} ${time} 的对话`;
 }
 
+/**
+ * 历史会话状态点（网关 sessions.status 契约：running | waiting | idle）。
+ * 三态都渲染圆点（含 idle 淡灰），行首宽度恒定不抖动；缺字段按 idle 处理。
+ * 颜色只用 DESIGN.md 的 iOS 系统色 token，状态文案与站内 agent 文案一致走简体。
+ */
+const SESSION_STATUS_META: Record<
+  NonNullable<AgentSessionSummary["status"]>,
+  { dotClass: string; label: string }
+> = {
+  running: { dotClass: "bg-ios-blue animate-pulse", label: "运转中" },
+  waiting: { dotClass: "bg-ios-orange", label: "等待回答" },
+  idle: { dotClass: "bg-foreground/15", label: "已静置" },
+};
+
 async function triggerDownload(url: string, filename: string): Promise<void> {
   try {
     const res = await fetch(url);
@@ -64,6 +108,16 @@ async function triggerDownload(url: string, filename: string): Promise<void> {
   } catch {
     window.open(url, "_blank", "noopener,noreferrer");
   }
+}
+
+/** 300ms debounce 的字串值。 */
+function useDebouncedValue(value: string, delayMs = 300): string {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delayMs);
+    return () => clearTimeout(timer);
+  }, [value, delayMs]);
+  return debounced;
 }
 
 
@@ -109,6 +163,14 @@ export interface AgentChatSurfaceProps {
   /** 當 agent session 變化時通知父組件（用於同步清空畫布）。 */
   onSessionChange?: (sessionId: string | null) => void;
   /**
+   * 雙向同步：把 switchSession 能力上拋給父層。畫布選中某個帶
+   * session_id 的 workflow 節點時，父層要能切到該節點所屬的會話——
+   * 這條通道就是那根把手（畫布 → chat 方向唯一入口）。
+   */
+  switchSessionRef?: MutableRefObject<((sessionId: string) => Promise<boolean>) | null>;
+  /** 暴君裁定 2026-09-01：套模板需要「留舊開新」；父層傳 ref 上抛 startNewSession。 */
+  startNewSessionRef?: MutableRefObject<(() => Promise<boolean>) | null>;
+  /**
    * 2026-08-25 模板庫點卡：要自動發出的第一條用戶消息（模板 initialPrompt）。
    * 與 initialPrompt（半句話藥丸，點了才送）不同：點模板卡本身就是發送動作，
    * 這條直接送出，不讓用戶再點一次發送。nonce 變化即觸發一次。
@@ -129,12 +191,22 @@ export function AgentChatSurface({
   onCanvasEvent,
   canvasStateProvider,
   onSessionChange,
+  switchSessionRef,
+  startNewSessionRef,
   agentInjection,
   onUserMessage,
   onExit,
   headerExtra,
 }: AgentChatSurfaceProps) {
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
+  // 「我的资产」面板：null = 未加载，[] = 已加载但为空。
+  const [showAssets, setShowAssets] = useState(false);
+  const [assetPacks, setAssetPacks] = useState<AssetPack[] | null>(null);
+  const [activatingPackId, setActivatingPackId] = useState<string | null>(null);
+  // 搜索：300ms debounce 后按 ?q= 重新拉取（空字串还原为全量）。
+  const [assetQuery, setAssetQuery] = useState("");
+  const debouncedAssetQuery = useDebouncedValue(assetQuery);
+  const assetPanelRef = useRef<HTMLDivElement | null>(null);
   // 承接进来的半句话；续写或手动放弃后就不再显示。
   const [draft, setDraft] = useState(initialPrompt.trim());
   // 交给输入区的续写信号（D-24）。输入区吃掉后回调清空，避免重复注入。
@@ -151,7 +223,6 @@ export function AgentChatSurface({
     resumable,
     abort,
     discardAndStartNew,
-    resume,
     switchSession,
     startNewSession,
   } = useAgentChat({
@@ -195,6 +266,75 @@ export function AgentChatSurface({
     return () => document.removeEventListener("pointerdown", onDocPointerDown);
   }, [showHistory]);
 
+  // 「我的资产」面板同样点外即收。
+  useEffect(() => {
+    if (!showAssets) return;
+    const onDocPointerDown = (ev: PointerEvent): void => {
+      if (assetPanelRef.current && !assetPanelRef.current.contains(ev.target as Node)) {
+        setShowAssets(false);
+      }
+    };
+    document.addEventListener("pointerdown", onDocPointerDown);
+    return () => document.removeEventListener("pointerdown", onDocPointerDown);
+  }, [showAssets]);
+
+  const lastAssetQueryRef = useRef<string | null>(null);
+
+  /** 拉取资产包列表；q 非空时走 ?q= 服务端搜索，空字串还原为全量。同 query 去重。 */
+  const loadAssets = useCallback(async (q: string): Promise<void> => {
+    const query = q.trim();
+    if (query === lastAssetQueryRef.current) return;
+    lastAssetQueryRef.current = query;
+    try {
+      const url = query ? `/api/assets?q=${encodeURIComponent(query)}` : "/api/assets";
+      const res = await fetch(url);
+      if (!res.ok) return;
+      const data = (await res.json()) as { packs?: AssetPack[] };
+      if (Array.isArray(data?.packs)) setAssetPacks(data.packs);
+    } catch {
+      // 静默失败：面板保持原状，可重试。
+    }
+  }, []);
+
+  /** 我的资产：开关。首次打开拉全量；搜索词变化由下方 effect 重新拉取。 */
+  const toggleAssets = useCallback(async (): Promise<void> => {
+    setShowAssets((prev) => {
+      const next = !prev;
+      if (next && assetPacks === null) {
+        lastAssetQueryRef.current = "";
+        void loadAssets("");
+      }
+      return next;
+    });
+  }, [assetPacks, loadAssets]);
+
+  // 搜索词（300ms debounce）变化 → 重新拉取（空字串还原为全量）。
+  useEffect(() => {
+    if (!showAssets) return;
+    void loadAssets(debouncedAssetQuery);
+  }, [showAssets, debouncedAssetQuery, loadAssets]);
+
+  /** 使用此包：把该包 active:true 写回（store 自动清其它包 active），成功后收面板。 */
+  const onActivatePack = useCallback(
+    async (pack: AssetPack): Promise<void> => {
+      if (activatingPackId !== null) return;
+      setActivatingPackId(pack.id);
+      try {
+        const res = await fetch("/api/assets", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...pack, active: true }),
+        });
+        if (res.ok) setShowAssets(false);
+      } catch {
+        // 静默失败：面板留在原地，用户可重试。
+      } finally {
+        setActivatingPackId(null);
+      }
+    },
+    [activatingPackId],
+  );
+
   /** dropdown 开关：第一次打开时拉取目录（之后直接切换显示，不重复请求）。 */
   const toggleHistory = useCallback(async (): Promise<void> => {
     setShowHistory((prev) => {
@@ -222,7 +362,7 @@ export function AgentChatSurface({
       setSwitchingTo(null);
     }
   }, [switchingTo, switchSession]);
-  const didAutoDiscardRef = useRef(false);
+  const didAutoFreshStartRef = useRef(false);
 
   // 深链落地：mount 时切到 URL 指定的会话（wish 插件 ?agent=1&session=<uuid>）。
   // 只试一次；失败（会话不存在/已被回收/网关重启丢会话）静默退回开新会话——
@@ -261,20 +401,36 @@ export function AgentChatSurface({
   const isInline = variant === "inline";
 
   const onSaveToLibrary = useCallback(async (item: AgentImageItem): Promise<void> => {
-    // 客户端幂等：连点两下不该在图库里躺两条一样的记录。
+    // 客户端幂等：连点两下不该在资产包里躺两条一样的记录。
     if (savedIds.has(item.id)) return;
     try {
-      const body = {
-        id: crypto.randomUUID(),
-        prompt: `AI 助理生成 · 第 ${item.seq} 张`,
-        generatedAt: Date.now(),
-        results: [{ provider: "agent", modelId: "agent", imageUrl: item.url, image: null }],
-        source: "server",
-      };
-      const res = await fetch("/api/history", {
-        method: "POST",
+      const now = new Date().toISOString();
+      // 1. 拉取现有资产包，找「聊天素材」确定性包（不存在则构造空包）。
+      const listRes = await fetch("/api/assets");
+      const data = listRes.ok ? ((await listRes.json()) as { packs?: AssetPack[] }) : null;
+      const packs = Array.isArray(data?.packs) ? data.packs : [];
+      const existing = packs.find((p) => p.id === CHAT_ASSETS_PACK_ID);
+      // 2. 同 imageUrl 已存在 → 去重，直接标记已存（不重复写）。
+      if (existing?.items.some((it) => it.imageUrl === item.url)) {
+        setSavedIds((prev) => new Set([...prev, item.id]));
+        return;
+      }
+      const newItem: AssetPackItem = buildChatSaveItem(item, sessionId, now);
+      const pack: AssetPack = existing
+        ? { ...existing, items: [...existing.items, newItem], updatedAt: now }
+        : {
+            id: CHAT_ASSETS_PACK_ID,
+            title: "聊天素材",
+            items: [newItem],
+            tags: [],
+            createdAt: now,
+            updatedAt: now,
+          };
+      // 3. PUT 整包 upsert（store 按 id 覆写，单用户写入串行）。
+      const res = await fetch("/api/assets", {
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify(pack),
       });
       if (res.ok) {
         setSavedIds((prev) => new Set([...prev, item.id]));
@@ -282,7 +438,7 @@ export function AgentChatSurface({
     } catch {
       // 静默失败：图还在，用户仍可下载。不弹错打断对话流。
     }
-  }, [savedIds]);
+  }, [savedIds, sessionId]);
 
   // D-9：往聊天注入一句话的捷径，不是离开聊天的逃生门。
   // image_generate 是异步的，tool.result 里只有 task_id 没有 URL；
@@ -300,6 +456,13 @@ export function AgentChatSurface({
     await triggerDownload(item.url, `agent-${Date.now()}.png`);
   }, []);
 
+  // 影片下载：与图片同一条 triggerDownload 路径，副档名换 mp4。
+  const onVideoDownload = useCallback(async (item: AgentVideoItem): Promise<void> => {
+    await triggerDownload(item.url, `agent-${Date.now()}.mp4`);
+  }, []);
+  // 影片「存图库」刻意不接：资产包 store 的 kind 联合（prompt/reference/lora/recipe/image）
+  // 没有 video，接了也只会静默丢条目——按钮保持 disabled，不伪造行为。
+
   // D-12：盯住最新一条工具调用，把助理实际用的参数回流给工作台控件。
   // 用 ref 记住处理过的条目 id——重渲染不该把同一次调用回流两次，
   // 那会把使用者刚手动改回去的值又冲掉。
@@ -312,6 +475,16 @@ export function AgentChatSurface({
     }
   }, [sessionId, onSessionChange]);
 
+  // 雙向同步：把 switchSession 能力上拋給父層（畫布選中 workflow 節點時切會話）。
+  useEffect(() => {
+    if (switchSessionRef) switchSessionRef.current = switchSession;
+  }, [switchSession, switchSessionRef]);
+
+  // 暴君裁定 2026-09-01：把 startNewSession 能力同模式上拋（套模板 = 留舊開新）。
+  useEffect(() => {
+    if (startNewSessionRef) startNewSessionRef.current = startNewSession;
+  }, [startNewSession, startNewSessionRef]);
+
   useEffect(() => {
     if (!onParamsReflected) return;
     // 从后往前找最新一条带参数的工具条目
@@ -319,9 +492,13 @@ export function AgentChatSurface({
       const item = state.items[i];
       if (item.kind !== "tool") continue;
       if (item.argsSummary === undefined) continue;
-      if (reflectedRef.current === item.id) return; // 这条已经回流过
-      reflectedRef.current = item.id;
-      const params = reflectParams(item.argsSummary, currentModelId ?? "");
+      // 守卫键带上当前模型 id：同一条工具调用若在不同模型下被重新处理
+      // （例如模型切换后重新回流参数），不应被「已回流过」误挡。
+      const effectiveModelId = currentModelId ?? "";
+      const guardKey = `${item.id}:${effectiveModelId}`;
+      if (reflectedRef.current === guardKey) return; // 这条（在这个模型下）已经回流过
+      reflectedRef.current = guardKey;
+      const params = reflectParams(item.argsSummary, effectiveModelId);
       if (hasReflectedParams(params)) onParamsReflected(params);
       return;
     }
@@ -357,23 +534,22 @@ export function AgentChatSurface({
   const clearPrefill = useCallback((): void => setPrefill(null), []);
 
   /*
-   * D-17：hook 在有存档时故意不自动建号（use-agent-chat.ts 里 start() 会被存档挡住）。
-   * 这里替用户做掉那个决定——开新的。
+   * 暴君裁定 2026-09-01：進頁默認起新聊天，不靜默續舊——舊對話留在網關
+   * 歷史下拉，隨時切回。同一次訪問 toggle 往返不走這裡（sessionTouchedInThisVisit
+   * 時 resumable 根本不會被設置，autoStart 直接靜默 resume）。
+   * 深鏈（initialSessionId）另有 switchSession 接管，這裡讓路避免建號賽跑。
    *
-   * ref 守门是必须的：resumable 会在 discardAndStartNew() 里被清成 null，
-   * effect 因此至少跑两次；没有守门，任何让 resumable 再次非空的路径都会
-   * 重开一个会话。每次 mount 只自动开一次。
+   * hook 在有存档时故意不自动建号（use-agent-chat.ts 里 start() 会被存档挡住），
+   * 这里替用户做掉那个决定。ref 守门是必须的：resumable 会在相关路径里被清成
+   * null，effect 因此至少跑两次；没有守门，任何让 resumable 再次非空的路径
+   * 都会重开一个会话。每次 mount 只自动开一次。
    */
   useEffect(() => {
-    if (!resumable || didAutoDiscardRef.current) return;
-    didAutoDiscardRef.current = true;
-    // 2026-08-21：网关会话已持久化（bun:sqlite + lazy reload），刷新/重开
-    // 不再等于会话消亡。D-17 的「进来先删旧开新」把可恢复的上下文直接
-    // 丢掉了。现在改为静默续上：transcript 原样回来（含 workflow/canvas
-    // 事件流）。会话真被回收时 resume() 自己会清档开新并提示。
-    setHistorySnapshot({ itemCount: resumable.itemCount, savedAt: resumable.savedAt });
-    void resume();
-  }, [resumable, resume]);
+    if (!resumable || didAutoFreshStartRef.current) return;
+    didAutoFreshStartRef.current = true;
+    if (initialSessionId) return;
+    void startNewSession();
+  }, [resumable, startNewSession, initialSessionId]);
 
   /**
    * 2026-08-25 模板注入：會話連上後自動發出。必須等 connection === "open"：
@@ -399,7 +575,12 @@ export function AgentChatSurface({
    * 推不出可复现参数时 deriveBatchAnchor 回 null，卡片自然不出现。
    */
   const derivedAnchor = useMemo(() => deriveBatchAnchor(state.items), [state.items]);
-  const anchor = derivedAnchor && derivedAnchor.imageId !== anchorAskedFor ? derivedAnchor : null;
+  // 只有用户表达过批量意图（≥2 张图或消息里带批量措辞）才弹锚定卡：
+  // 只要了一张图的人不该被追问「要不要出完整批」。
+  const anchor =
+    derivedAnchor && derivedAnchor.imageId !== anchorAskedFor && shouldOfferBatchAnchor(state.items)
+      ? derivedAnchor
+      : null;
 
   /** 「就按这张」：把第一张实际用过的参数念回给 agent，让它照抄而不是重猜。 */
   const onAnchor = useCallback(async (): Promise<void> => {
@@ -444,6 +625,10 @@ export function AgentChatSurface({
     onEdit,
     onUpscale,
     onDownload,
+  };
+
+  const videoActions: AgentTranscriptProps["videoActions"] = {
+    onDownload: onVideoDownload,
   };
 
   return (
@@ -521,6 +706,7 @@ export function AgentChatSurface({
               <div className="max-h-64 overflow-y-auto overscroll-contain">
                 {historyList.map((it) => {
                   const active = it.session_id === sessionId;
+                  const statusMeta = SESSION_STATUS_META[it.status ?? "idle"];
                   return (
                     <button
                       key={it.session_id}
@@ -535,6 +721,13 @@ export function AgentChatSurface({
                         switchingTo === it.session_id && "opacity-50",
                       )}
                     >
+                      {/* 行首状态点：aria-hidden 的视觉点 + sr-only 状态文字。 */}
+                      <span
+                        aria-hidden="true"
+                        title={statusMeta.label}
+                        className={cn("h-2 w-2 shrink-0 rounded-full", statusMeta.dotClass)}
+                      />
+                      <span className="sr-only">{statusMeta.label}</span>
                       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                         <span className="block truncate text-ios-caption1 font-medium text-muted-foreground">
                           {formatSessionLabel(it)}
@@ -556,6 +749,74 @@ export function AgentChatSurface({
           </div>
         )}
             </div>
+            <div ref={assetPanelRef} className="relative">
+              <button
+                type="button"
+                onClick={() => void toggleAssets()}
+                aria-expanded={showAssets}
+                aria-label="我的资产"
+                title="我的资产"
+                className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-foreground/45 transition-colors hover:bg-black/5 hover:text-foreground/75 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 touch-manipulation"
+              >
+                <Boxes className="h-4 w-4" aria-hidden="true" />
+              </button>
+              {showAssets && (
+                <div className="lg-sheet absolute top-full right-0 z-50 mt-0.5 w-64 rounded-ios-2xl p-1">
+                  <p className="px-2.5 pt-2 pb-1 text-ios-caption1 font-medium text-foreground/60">我的资产</p>
+                  <div className="relative px-2.5 pb-1">
+                    <Search className="pointer-events-none absolute left-[13px] top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-foreground/45" />
+                    <input
+                      value={assetQuery}
+                      onChange={(e) => setAssetQuery(e.target.value)}
+                      placeholder="搜索资产…"
+                      className="w-full rounded-lg border border-input bg-black/5 py-1.5 pl-7 pr-3 text-ios-caption1 outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-ios-blue"
+                    />
+                  </div>
+                  {assetPacks === null ? (
+                    <p className="px-2.5 py-3 text-center text-ios-caption1 text-foreground/45">
+                      正在加载资产…
+                    </p>
+                  ) : assetPacks.length === 0 ? (
+                    <p className="px-2.5 py-3 text-center text-ios-caption1 text-foreground/45">
+                      还没有保存过资产
+                    </p>
+                  ) : (
+                    <div className="max-h-64 overflow-y-auto overscroll-contain">
+                      {assetPacks.map((pack) => {
+                        const activating = activatingPackId === pack.id;
+                        return (
+                          <div
+                            key={pack.id}
+                            className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 transition-colors hover:bg-black/5"
+                          >
+                            <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                              <span className="block truncate text-ios-caption1 font-medium text-muted-foreground">
+                                {pack.title}
+                              </span>
+                              <span className="block truncate text-ios-caption2 text-foreground/45">
+                                {pack.items.length} 项
+                                {pack.digest ? ` · ${pack.digest.slice(0, 48)}${pack.digest.length > 48 ? "…" : ""}` : ""}
+                              </span>
+                            </span>
+                            <button
+                              type="button"
+                              disabled={activating}
+                              onClick={() => void onActivatePack(pack)}
+                              className="shrink-0 cursor-pointer rounded-full px-2 py-0.5 text-ios-caption1 font-medium text-ios-blue transition-colors hover:bg-ios-blue/10 disabled:cursor-wait disabled:opacity-60"
+                            >
+                              {activating ? "使用中…" : "使用此包"}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <p className="px-2.5 pt-1 pb-1.5 text-ios-caption2 text-foreground/35">
+                    新会话将携带此资产包
+                  </p>
+                </div>
+              )}
+            </div>
             <button
               type="button"
               onClick={() => void onStartNewSession()}
@@ -570,6 +831,8 @@ export function AgentChatSurface({
                 <MessageSquarePlus className="h-4 w-4" aria-hidden="true" />
               )}
             </button>
+            {/* 助理设定：中途输入（打断/排队）/ 模型性格 / 成本需求——自带触发钮与弹层。 */}
+            <AgentSettingsPopover />
             {headerExtra}
             {onExit && (
               <button
@@ -613,13 +876,27 @@ export function AgentChatSurface({
       {error && !isActive && (
         <div className="agent-surface-error mb-2 flex shrink-0 items-center justify-between gap-3 rounded-ios-2xl bg-destructive/[0.08] px-3.5 py-2.5">
           <p className="min-w-0 flex-1 text-sm text-destructive sm:text-ios-footnote">{error}</p>
-          <button
-            type="button"
-            onClick={() => void retry()}
-            className="agent-surface-retry shrink-0 cursor-pointer rounded-full bg-destructive/[0.14] px-3 py-1 text-ios-caption1 font-semibold text-destructive lg-transition hover:bg-destructive/[0.22]"
-          >
-            重试
-          </button>
+          {/* 登录错误：重试无意义（token 不存在怎么重试都失败），
+              给登录按钮（GitHub OAuth 弹窗，与 Navbar 同一条链路）；
+              弹窗结束后 retry()——此时 token 已写入 localStorage，重试才真有效。 */}
+          {isAuthError(error) ? (
+            <button
+              type="button"
+              onClick={() => void startLoginThenRetry(retry)}
+              className="shrink-0 inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-ios-blue px-3 py-1 text-ios-caption1 font-semibold text-white shadow-[0_2px_8px_rgba(0,122,255,0.30)] transition-all duration-150 hover:bg-ios-blue/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/40"
+            >
+              <LogIn className="h-3 w-3" aria-hidden="true" />
+              登录
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => void retry()}
+              className="agent-surface-retry shrink-0 cursor-pointer rounded-full bg-destructive/[0.14] px-3 py-1 text-ios-caption1 font-semibold text-destructive lg-transition hover:bg-destructive/[0.22]"
+            >
+              重试
+            </button>
+          )}
         </div>
       )}
 
@@ -629,10 +906,11 @@ export function AgentChatSurface({
           connection={connection}
           sessionId={sessionId}
           onSend={(text) => void send(text)}
-          onConfirm={(requestId, approved) => void confirm(requestId, approved)}
-          onAnswerQuestion={(requestId, answers) => void answerQuestion(requestId, answers)}
+          onConfirm={(requestId, approved) => confirm(requestId, approved)}
+          onAnswerQuestion={(requestId, answers) => answerQuestion(requestId, answers)}
           onRetryConnection={() => void retry()}
           imageActions={imageActions}
+          videoActions={videoActions}
           anchor={anchor}
           onAnchor={() => void onAnchor()}
           onReanchor={() => void onReanchor()}

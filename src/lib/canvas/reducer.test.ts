@@ -98,6 +98,36 @@ test("generating 更新進度", () => {
   assert.equal(node?.metadata?.progress, 50);
 });
 
+test("plan 的 cost_hint 蓋章到生成卡（image/video），實際 cost 落地後並存接班（C-FE）", () => {
+  let s = reduceCanvasEvent(CANVAS_INITIAL_STATE, { name: "canvas.plan", data: { ...plan("cu_1").data, cost_hint: 7 } });
+  assert.equal(s.units[0].costHint, 7);
+  s = reduceCanvasEvent(s, created("cu_1", "cu_1-text", "text", "提示詞"));
+  s = reduceCanvasEvent(s, created("cu_1", "cu_1-image", "image", "結果", "result"));
+  assert.equal(s.nodes.find((n) => n.id === "cu_1-image")?.metadata?.cost_hint, 7);
+  assert.equal(s.nodes.find((n) => n.id === "cu_1-text")?.metadata?.cost_hint, undefined);
+  // 實際花費落地：cost_coins 進場（顯示層實際角標接班），cost_hint 事實保留不刪。
+  s = reduceCanvasEvent(s, updated("cu_1", "cu_1-image", {}, undefined, 6));
+  assert.equal(s.nodes.find((n) => n.id === "cu_1-image")?.metadata?.cost_coins, 6);
+  assert.equal(s.nodes.find((n) => n.id === "cu_1-image")?.metadata?.cost_hint, 7);
+  // cost_hint null（缺值）＝ 現狀行為：unit 不掛、節點不蓋章。
+  let s2 = reduceCanvasEvent(CANVAS_INITIAL_STATE, plan("cu_2"));
+  s2 = reduceCanvasEvent(s2, created("cu_2", "cu_2-image", "image", "結果", "result"));
+  assert.equal(s2.units[0].costHint, undefined);
+  assert.equal(s2.nodes.find((n) => n.id === "cu_2-image")?.metadata?.cost_hint, undefined);
+});
+
+test("workflow plan 的全圖總額 cost_hint 不逐卡蓋章（2026-08-29 25.005 事故）", () => {
+  // workflow 計畫：cost_hint = estimateGraphCoins 整圖總額，側欄展示；
+  // 逐卡蓋章會把總額貼到每張生成卡上。
+  let s = reduceCanvasEvent(CANVAS_INITIAL_STATE, { name: "canvas.plan", data: { ...plan("wf_1", "workflow:novel_film").data, cost_hint: 25.005 } });
+  s = reduceCanvasEvent(s, created("wf_1", "wf_1-image", "image", "分鏡", "result"));
+  s = reduceCanvasEvent(s, created("wf_1", "wf_1-video", "video", "片段", "result"));
+  assert.equal(s.units[0].costHint, 25.005);
+  assert.equal(s.nodes.find((n) => n.id === "wf_1-image")?.metadata?.cost_hint, undefined);
+  assert.equal(s.nodes.find((n) => n.id === "wf_1-video")?.metadata?.cost_hint, undefined);
+  // 工具層單生成 unit 的蓋章行為不受影響（見上一測試）。
+});
+
 test("deleted 移除節點與關聯連線", () => {
   let s = reduceCanvasEvent(CANVAS_INITIAL_STATE, plan("cu_1"));
   s = reduceCanvasEvent(s, created("cu_1", "a", "text", "A"));
@@ -106,6 +136,17 @@ test("deleted 移除節點與關聯連線", () => {
   s = reduceCanvasEvent(s, { name: "canvas.node.deleted", data: { unit_id: "cu_1", node_id: "a" } });
   assert.equal(s.nodes.length, 1);
   assert.equal(s.connections.length, 0);
+});
+
+test("disconnected 移除 from->to 連線，節點保留", () => {
+  let s = reduceCanvasEvent(CANVAS_INITIAL_STATE, plan("cu_1"));
+  s = reduceCanvasEvent(s, created("cu_1", "a", "text", "A"));
+  s = reduceCanvasEvent(s, created("cu_1", "b", "config", "B"));
+  s = reduceCanvasEvent(s, connected("cu_1", "c", "a", "b"));
+  s = reduceCanvasEvent(s, { name: "canvas.node.disconnected", data: { unit_id: "cu_1", from: "a", to: "b" } });
+  assert.equal(s.connections.length, 0);
+  assert.equal(s.nodes.length, 2);
+  assert.equal(s.units[0].connections.length, 0);
 });
 
 test("未知事件原樣返回", () => {

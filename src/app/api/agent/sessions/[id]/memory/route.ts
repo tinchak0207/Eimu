@@ -7,6 +7,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { callAgentGateway, type AgentGatewayResponse } from "@/lib/agent-gateway";
 import { agentCallerFailureCode, resolveAgentCaller } from "@/lib/agent-session-guard";
 import { buildAgentMemoryInjection, listAgentLessons, loadAgentProfile } from "@/lib/agent-profile-store";
+import { getActiveAssetPack } from "@/lib/asset-pack-store";
+import { buildAssetPackInjection } from "@/lib/agent-assets";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -48,7 +50,15 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
   } catch {
     memoryInjection = null;
   }
-  if (!memoryInjection) {
+  // 資產包激活注入（與記憶平行，缺省不阻塞）。
+  let activeAssets: ReturnType<typeof buildAssetPackInjection> = null;
+  try {
+    activeAssets = buildAssetPackInjection(await getActiveAssetPack(caller.userId));
+  } catch {
+    activeAssets = null;
+  }
+
+  if (!memoryInjection && !activeAssets) {
     return NextResponse.json({ patched: false, has_profile: false });
   }
 
@@ -57,7 +67,12 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     resp = await callAgentGateway("/agent/v1/sessions/memory-patch", {
       method: "POST",
       key: caller.key,
-      body: { session_id: id, user_profile: memoryInjection.user_profile, lessons: memoryInjection.lessons },
+      body: {
+        session_id: id,
+        user_profile: memoryInjection?.user_profile,
+        lessons: memoryInjection?.lessons,
+        ...(activeAssets ? { active_assets: activeAssets.active_assets } : {}),
+      },
     });
   } catch {
     return fail(502, "Agent 网关连接失败，请稍后重试。", "agent_gateway_unreachable");

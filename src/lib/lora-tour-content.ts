@@ -1,6 +1,6 @@
 export const LORA_TOUR_STORAGE_KEY = "lora-tour-v1";
 
-/** 普通模式引導末步按下「前往专业模式」時先寫入；進入專業模式後立即消費。 */
+/** 已废弃（2026-08-27 专业工作站入口移除）：保留常量避免旧 localStorage 语义漂移。 */
 export const PRO_LORA_TOUR_ARMED_KEY = "pro-lora-tour-armed";
 
 export interface LoraTourStepContent {
@@ -31,9 +31,9 @@ export const LORA_TOUR_CONTENT: LoraTourStepContent[] = [
   {
     title: "去哪里选",
     lines: [
-      "LoRA 库在专业控制里：选 PixAI 模型后展开「LoRA 风格」面板。",
+      "AI 助理的画布顶栏有「LoRA」按钮，点开就是 LoRA 库。",
       "搜索、按分类浏览，点卡片即选中，一次选一个。",
-      "现在就可以去专业控制试一下。",
+      "选中的 LoRA 会自动带入画布的每一次生成。",
     ],
     image: false,
   },

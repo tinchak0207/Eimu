@@ -12,6 +12,7 @@ import { NextRequest } from "next/server";
 import { agentGatewayEnabled } from "./agent-gateway";
 import { requireVerifiedUser } from "./server-user";
 import { AgentKeyConfigError, getOrCreateAgentKeyForUser } from "./agent-user-key";
+import { shouldBypassAuthForLocalTest } from "./local-test-mode";
 
 export type AgentCaller =
   | { ok: true; userId: number; key: string }
@@ -32,6 +33,21 @@ export function agentCallerFailureCode(caller: Extract<AgentCaller, { ok: false 
 export async function resolveAgentCaller(req: NextRequest): Promise<AgentCaller> {
   if (!agentGatewayEnabled()) {
     return { ok: false, status: 503, message: "Agent 对话未启用。" };
+  }
+
+  // LOCAL_TEST_MODE：本機視覺重放/截圖用，直接拿 B 端 key 打真實 gateway。
+  // 跳過 per-user 派生（隨機 key 沒登記到 gateway 會被拒），且只影響本地開發。
+  if (shouldBypassAuthForLocalTest(process.env)) {
+    const bizKey = process.env.IMAGE_STUDIO_BIZ_KEY?.trim();
+    if (!bizKey) {
+      return {
+        ok: false,
+        status: 503,
+        message: "local-test 需要 IMAGE_STUDIO_BIZ_KEY 環境變數。",
+        code: "agent_key_not_configured",
+      };
+    }
+    return { ok: true, userId: 0, key: bizKey };
   }
 
   // 「没送凭证」和「凭证被上游拒绝」必须分得开。

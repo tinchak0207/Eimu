@@ -19,6 +19,8 @@ import type { ReferenceImageRole } from "@/lib/image-types";
 import { applyCharacterCardsToPayload } from "@/lib/character-cards";
 import type { CardAwareGeneratePayload, CharacterCard } from "@/lib/character-cards";
 import { createBatchChildNode } from "@/lib/canvas/batch-utils";
+import { generationCapabilities } from "@/lib/generation-model-catalog";
+import type { SelectedLora } from "@/components/canvas-workstation/panels/LoraLibraryPanel";
 import { buildAuthHeaders, imageUrlOf } from "./embed-helpers";
 
 export interface UseCanvasGenerationInput {
@@ -33,6 +35,8 @@ export interface UseCanvasGenerationInput {
   setPromptPanelNodeId: Dispatch<SetStateAction<string | null>>;
   setPanelRefIds: Dispatch<SetStateAction<string[]>>;
   setSelectedIds: Dispatch<SetStateAction<Set<string>>>;
+  /** 當前選中的 LoRA（2026-08-27 自專業工作站遷入；null = 不帶）。 */
+  selectedLora?: SelectedLora | null;
 }
 
 /** 生成編排域回傳：狀態 + handlers（消費端：組件殼 / menuItems 工廠 / 節點掛載）。 */
@@ -44,19 +48,32 @@ export function useCanvasGeneration({
   setPromptPanelNodeId,
   setPanelRefIds,
   setSelectedIds,
+  selectedLora = null,
 }: UseCanvasGenerationInput) {
   const [isGenerating, setIsGenerating] = useState(false);
   const [upscalingIds, setUpscalingIds] = useState<Set<string>>(new Set());
   const abortRef = useRef<AbortController | null>(null);
+  // 最新 LoRA 鏡像 ref：callCanvasGenerate 的 useCallback 不因 LoRA 選擇換身份。
+  const selectedLoraRef = useRef(selectedLora);
+  selectedLoraRef.current = selectedLora;
 
   const callCanvasGenerate = useCallback(
     async (payload: Record<string, unknown>, signal: AbortSignal) => {
       const headers = buildAuthHeaders();
       if (!headers) throw new Error("请先登录再生成图片");
       const lockedCards = canvasStateRef.current.activeCharacterCards ?? [];
-      const finalPayload: Record<string, unknown> = lockedCards.length
+      let finalPayload: Record<string, unknown> = lockedCards.length
         ? applyCharacterCardsToPayload(payload as CardAwareGeneratePayload, lockedCards as CharacterCard[])
         : payload;
+      // 2026-08-27 LoRA 注入（自專業工作站等價接線）：模型支援才帶，單選鐵律一個 id。
+      const lora = selectedLoraRef.current;
+      if (lora) {
+        const modelId = typeof finalPayload.model === "string" && finalPayload.model ? finalPayload.model : undefined;
+        const supportsLora = modelId ? generationCapabilities(modelId)?.lora === true : true;
+        if (supportsLora) {
+          finalPayload = { ...finalPayload, loraModelVersionIds: [lora.versionId] };
+        }
+      }
       const res = await fetch(`/api/canvas/generate`, {
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },

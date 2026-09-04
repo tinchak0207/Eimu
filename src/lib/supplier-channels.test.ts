@@ -84,9 +84,9 @@ test("純映射函數的優先級/白名單推導：sitePriority 進 ENV_CHANNEL
   // 這裡驗證的是「條目存在時一定會被登記」的推導規則。
   const prioritiesFromRegistry = Object.fromEntries([[CHANNEL.label, CHANNEL.sitePriority]]);
   assert.equal(prioritiesFromRegistry[CHANNEL.label], 25);
-  // 真實 config 為空：現有六渠道 + sensenova 不受影響。
+  // 真實 config 為空：現有渠道不受影響。
   assert.ok(!Object.prototype.hasOwnProperty.call(ENV_CHANNEL_PRIORITIES, "testchannel"));
-  for (const id of ["env:sub2api", "env:adobe2api", "env:pixai", "env:primary", "env:fallback", "sensenova"]) {
+  for (const id of ["env:sub2api", "env:adobe2api", "env:pixai", "env:primary", "env:fallback"]) {
     assert.ok(overridableChannelIds().includes(id), `${id} 應保留在 overridableChannelIds`);
   }
 });

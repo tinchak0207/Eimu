@@ -58,6 +58,10 @@ export function failureClassToApiErrorCode(cls: FailureClass): ApiErrorCode {
     case "empty_result":
     case "artifact_download":
       return "generation_failed";
+    // INC-0830-VIDEO：上游成功但我們解析不出輸出（我方協議解析 bug）。對客戶
+    // 語義同「試了但沒產出可用結果」，復用 generation_failed，不新增對外代碼。
+    case "upstream_protocol":
+      return "generation_failed";
     case "deadline_exceeded":
       return "deadline_exceeded";
     case "cancelled":

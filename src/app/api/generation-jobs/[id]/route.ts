@@ -19,7 +19,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { readBearerToken, looksLikeBizApiKey } from "@/lib/biz-api-keys";
 import { authenticateBizApiKey } from "@/lib/biz-api-key-store";
 import { authenticateImageUser } from "@/lib/image-billing";
-import { getGenerationJobForTenant } from "@/lib/generation-core/job-repository";
+import { cancelGenerationJob, getGenerationJobForTenant } from "@/lib/generation-core/job-repository";
+import { refundGenerationBilling } from "@/lib/generation-core/billing-ledger";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
 import { generationTaskProjection } from "@/lib/generation-core/task-projection";
 
@@ -58,4 +59,70 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
   const body = generationTaskProjection(job, { includePrompt: true });
 
   return withTraceId(NextResponse.json(body, { headers: { "Cache-Control": "no-store" } }), traceId);
+}
+
+// DELETE — 人工终止生成任务，按取消前状态决定退款语义：
+//   - pending_billing：未扣款（reserve 尚未落地），无需退款，静默成功；
+//   - queued / leased：reserve 已落地（已扣款）→ 全额退款；
+//   - submitting / running：允许取消，在飞 attempt 产出由 worker 丢弃；
+//     计费按已完成张数 commit、未完成退差额——由 reconcileGenerationBilling 兜底，
+//     取消接口本身不直接算钱。
+//   - 终态（succeeded/failed/refunded/cancelled/billing_unknown）：409 already_terminal。
+const CANCELLABLE_TERMINAL_STATUSES = new Set([
+  "succeeded", "failed", "refunded", "cancelled", "billing_unknown",
+]);
+
+export async function DELETE(req: NextRequest, context: { params: Promise<{ id: string }> }) {
+  const traceId = getOrCreateTraceId(req);
+  const tenant = await resolveTenant(req);
+  if (!tenant.ok) {
+    return withTraceId(NextResponse.json({ error: tenant.message }, { status: tenant.status }), traceId);
+  }
+
+  const { id } = await context.params;
+  const existing = await getGenerationJobForTenant(id, tenant.tenantId);
+  if (!existing) {
+    return withTraceId(NextResponse.json({ error: "Generation task was not found." }, { status: 404 }), traceId);
+  }
+  if (CANCELLABLE_TERMINAL_STATUSES.has(existing.status)) {
+    return withTraceId(
+      NextResponse.json(
+        { error: { code: "already_terminal", message: "任务已结束，无法取消" } },
+        { status: 409 },
+      ),
+      traceId,
+    );
+  }
+
+  const result = await cancelGenerationJob(id, tenant.tenantId);
+  if (!result.cancelled) {
+    // 读取后与 CAS 更新之间的竞态：job 已被并发终结（worker 完成/失败/退款）。
+    return withTraceId(
+      NextResponse.json(
+        { error: { code: "already_terminal", message: "任务已结束，无法取消" } },
+        { status: 409 },
+      ),
+      traceId,
+    );
+  }
+
+  let refund: { amount: number; full: boolean } | null = null;
+  if ((result.previousStatus === "queued" || result.previousStatus === "leased") && existing.billingAmount > 0) {
+    const outcome = await refundGenerationBilling({ job: existing, executorId: `cancel:${tenant.tenantId}` });
+    if (outcome === "applied") {
+      refund = { amount: existing.billingAmount, full: true };
+    } else {
+      // pending/unknown/failed：退款 op 已落地（或冻结），由 reconcile 周期性
+      // 重试兜底；不向客户端谎报退款已完成。
+      console.error(`[generation-jobs] cancel refund not applied yet job=${id} state=${outcome}`);
+    }
+  }
+
+  return withTraceId(
+    NextResponse.json(
+      { success: true, cancelled: true, previous_status: result.previousStatus, refund },
+      { headers: { "Cache-Control": "no-store" } },
+    ),
+    traceId,
+  );
 }

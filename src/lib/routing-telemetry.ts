@@ -284,6 +284,13 @@ export interface ModelRecentStats {
   success_rate: number;
   /** 窗口内发生退款的事件数（独立于 delivered/failed 计数，單列不併桶）。 */
   refunded: number;
+  /**
+   * 成功交付事件的耗時 p80（毫秒）——「只有 20% 記錄比它慢」的那條。
+   * 樣本取每次 delivered 事件最後一個成功 attempt 的 ms（生成耗时本身，
+   * 不含排隊與失敗重試的時間）。成功樣本不足 3 條時為 null。
+   * 供進度條 ETA 消費：讓流逝貼近該模型的真實節奏。
+   */
+  p80_latency_ms: number | null;
 }
 
 const DEFAULT_RECENT_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -301,26 +308,54 @@ export function summarizeRecentModelStats(
   nowMs: number,
   windowMs: number = DEFAULT_RECENT_WINDOW_MS,
 ): ModelRecentStats[] {
-  const byModel = new Map<string, ModelRecentStats>();
+  const byModel = new Map<string, ModelRecentStats & { deliveredLatencies: number[] }>();
   const cutoff = nowMs - windowMs;
   for (const event of events) {
     if (event.ts < cutoff) continue;
     let stats = byModel.get(event.modelId);
     if (!stats) {
-      stats = { modelId: event.modelId, jobs: 0, delivered: 0, failed: 0, success_rate: 0, refunded: 0 };
+      stats = {
+        modelId: event.modelId,
+        jobs: 0,
+        delivered: 0,
+        failed: 0,
+        success_rate: 0,
+        refunded: 0,
+        p80_latency_ms: null,
+        deliveredLatencies: [],
+      };
       byModel.set(event.modelId, stats);
     }
     stats.jobs += 1;
     if (event.outcome === "delivered") {
       stats.delivered += 1;
+      // attempts 按 attempt_no 升冪；最後一個成功的 = 實際交付那次的上游耗時。
+      const lastOk = [...event.attempts].reverse().find((attempt) => attempt.ok);
+      if (lastOk && lastOk.ms > 0) stats.deliveredLatencies.push(lastOk.ms);
     } else {
       stats.failed += 1;
     }
     if (event.refunded) stats.refunded += 1;
   }
   return [...byModel.values()]
-    .map((stats) => ({ ...stats, success_rate: stats.jobs > 0 ? stats.delivered / stats.jobs : 0 }))
+    .map(({ deliveredLatencies, ...stats }) => ({
+      ...stats,
+      success_rate: stats.jobs > 0 ? stats.delivered / stats.jobs : 0,
+      p80_latency_ms: latencyP80(deliveredLatencies),
+    }))
     .sort((a, b) => b.jobs - a.jobs);
+}
+
+/**
+ * 耗時 p80 分位：排序後取 ceil(n*0.8)-1 位置——即「只有 20% 記錄比它慢」的
+ * 那條真實記錄。樣本不足 3 條回 null：1-2 條的分位數不穩定，一次偶然慢
+ * 會讓 ETA 整體偏慢。
+ */
+function latencyP80(samples: number[]): number | null {
+  if (samples.length < 3) return null;
+  const sorted = [...samples].sort((a, b) => a - b);
+  const index = Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.8) - 1);
+  return sorted[index] ?? null;
 }
 
 /**

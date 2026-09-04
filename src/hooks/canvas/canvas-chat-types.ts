@@ -82,6 +82,19 @@ export function compactMetadataForAgent(metadata: CanvasNodeMetadata | undefined
   if (metadata.referenceRole) out.referenceRole = metadata.referenceRole;
   if (typeof metadata.count === "number") out.count = metadata.count;
   if (typeof metadata.cost_coins === "number") out.cost_coins = metadata.cost_coins;
+  // director 節點：只回傳指針欄位，SVG（可達 48KB×2）維持排除——agent 用 director 工具
+  // 讀工程真值、不讀 SVG；回傳會吃 512KB 快照額度。缺指針的後果（2026-09-03 事故）：
+  // 刷新/恢復後下行還原出空殼 director 節點，NodeBody 落到「示意图未同步」兜底。
+  // 有 directorSessionId + revision 即可：小視口經 /director/state 拉 gateway 持久化的
+  // 工程重渲染 3D 白模，SVG 僅在 WebGL 失敗時才需要（屆時顯示降級佔位，可接受）。
+  if (metadata.pipelineCard === "director") {
+    out.pipelineCard = "director";
+    if (metadata.directorSessionId) out.directorSessionId = metadata.directorSessionId;
+    if (metadata.planName !== undefined) out.planName = metadata.planName;
+    if (typeof metadata.shotCount === "number") out.shotCount = metadata.shotCount;
+    if (typeof metadata.healthOk === "boolean") out.healthOk = metadata.healthOk;
+    if (typeof metadata.revision === "number") out.revision = metadata.revision;
+  }
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
@@ -122,6 +135,8 @@ export interface UseCanvasChatReturn {
   // ── Phase 3 畫布交互（群組拖動 / 貼上 / 多刪 / 手動連線）
   moveNodes: (moves: { nodeId: string; position: CanvasPosition }[]) => void;
   addNodes: (nodes: CanvasNode[], connections?: CanvasConnection[]) => void;
+  /** 同 workflow 重鋪（2026-08-26 模板卡重點=替換）：先刪同 workflow_id 舊節點及其連線，再 add_nodes；一格歷史。 */
+  replaceWorkflowNodes: (workflowId: string, nodes: CanvasNode[], connections?: CanvasConnection[]) => void;
   deleteNodes: (nodeIds: string[]) => void;
   addConnection: (fromNodeId: string, toNodeId: string) => void;
   removeConnection: (connectionId: string) => void;
@@ -160,6 +175,8 @@ export interface UseCanvasChatReturn {
   savedProjects: CanvasProjectSummary[];
   refreshSavedProjects: () => Promise<void>;
   openSavedCanvas: (id: string) => Promise<void>;
+  /** Agent 快照下行回填（resume 到已有歷史的會話）：nodes>0 才落地；不進撤銷棧、清選取。 */
+  restoreAgentSnapshot: (snapshot: { nodes?: unknown; connections?: unknown; viewport?: CanvasViewport }) => boolean;
   // ── 角色/場景卡（P2 跨鏡頭一致性）：卡列表 + 項目級鎖定
   characterCards: CharacterCard[];
   /** 鎖定到當前畫布項目的卡 id（持久化在 CanvasProject.cardIds）。 */

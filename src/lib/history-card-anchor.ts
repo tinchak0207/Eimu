@@ -3,10 +3,15 @@
 // 只做增量：卡的最終清洗仍走 normalizeCharacterCard（character-cards.ts 是唯一
 // 資產 owner，這裡不建第二套資產系統，只負責從 HistoryEntry 構造 payload）。
 // 消費端：src/components/history/SaveCardDialog.tsx（歷史頁「存为角色卡」動作）。
+//
+// 同檔另提供 assetPackPayloadFromHistoryEntry：歷史 → 資產包 payload（存为资产），
+// 消費端：src/components/history/HistoryCard.tsx（PUT /api/assets，upsert by
+// 確定性 id `history-${entry.id}`）。
 import { toReferenceImageRole } from "./image-types";
 import type { ReferenceImageRole } from "./image-types";
 import { CHARACTER_CARD_KIND_LABEL, toCharacterCardKind } from "./character-cards";
 import type { CharacterCard, CharacterCardKind } from "./character-cards";
+import type { AssetPackItem } from "./asset-pack-store";
 import type { HistoryEntry } from "./history-types";
 
 const MAX_ANCHOR_NAME_LENGTH = 100;
@@ -69,4 +74,80 @@ export function cardFromHistoryEntry(
 /** 統一的結果文案（對話框與 toast 共用）。 */
 export function anchorSuccessMessage(card: CharacterCard): string {
   return `已存为${CHARACTER_CARD_KIND_LABEL[card.kind]}卡：${card.name}`;
+}
+
+// ─────────────────────────────── 歷史 → 資產包（存为资产）───────────────────────────
+
+/** 資產包標題後綴的日期格式：YYYY-MM-DD（本地時區，供「历史资产 ${日期}」兜底）。 */
+function assetTitleDateLabel(generatedAt: number): string {
+  const d = new Date(generatedAt);
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${month}-${day}`;
+}
+
+/** 歷史條目頂層可能帶的 lora 欄位（HistoryEntry 型別未宣告，採防禦讀取）。 */
+interface HistoryEntryLoraCarrier extends HistoryEntry {
+  loraModelVersionIds?: unknown;
+  lora?: unknown;
+}
+
+/** 從歷史條目取 loraVersionId：loraModelVersionIds 陣列取第一個字串，或 lora 物件的 versionId。 */
+function loraVersionIdOf(entry: HistoryEntry): string | null {
+  const carrier = entry as HistoryEntryLoraCarrier;
+  if (Array.isArray(carrier.loraModelVersionIds)) {
+    const first = carrier.loraModelVersionIds.find((v): v is string => typeof v === "string" && Boolean(v.trim()));
+    if (first) return first.trim();
+  }
+  if (carrier.lora && typeof carrier.lora === "object") {
+    const lora = carrier.lora as { versionId?: unknown; modelVersionId?: unknown };
+    const v = lora.versionId ?? lora.modelVersionId;
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return null;
+}
+
+/**
+ * 從歷史記錄構造「資產包 payload」（存为资产）：歷史 → /api/assets 的 upsert 主體。
+ * 與 cardFromHistoryEntry 用同一套歷史取數（第一張圖 URL / modelId / workflow size）。
+ *  - 有 prompt → 存 prompt item（帶 modelId/size/首圖 URL）；無 prompt 但圖 → 只存 reference
+ *  - 條目頂層帶 loraModelVersionIds/lora → 加 lora item（無則省略）
+ *  - 無 id 或不構成任何 item（無 prompt 也無圖）→ 回 null（不建空包）
+ * 消費端：HistoryCard「存为资产」按鈕，upsert by 確定性 id `history-${entry.id}`。
+ */
+export function assetPackPayloadFromHistoryEntry(
+  entry: HistoryEntry,
+): { title: string; items: AssetPackItem[] } | null {
+  if (!entry || typeof entry.id !== "string" || !entry.id.trim()) return null;
+
+  const imageUrl = anchorImageUrlOf(entry);
+  const prompt = typeof entry.prompt === "string" ? entry.prompt.trim() : "";
+  const modelId = entry.results?.[0]?.modelId;
+  const size = entry.workflow?.imageSize;
+  const loraVersionId = loraVersionIdOf(entry);
+  const source = { type: "history" as const, id: entry.id };
+
+  const items: AssetPackItem[] = [];
+  if (prompt) {
+    items.push({
+      kind: "prompt",
+      title: "生成提示词",
+      content: prompt,
+      ...(modelId ? { modelId } : {}),
+      ...(size ? { size } : {}),
+      ...(imageUrl ? { imageUrl } : {}),
+      source,
+    });
+  } else if (imageUrl) {
+    items.push({ kind: "reference", title: "生成图片", imageUrl, source });
+  }
+  if (loraVersionId) {
+    items.push({ kind: "lora", title: "LoRA", loraVersionId, source });
+  }
+  if (!items.length) return null;
+
+  return {
+    title: `历史资产 ${assetTitleDateLabel(entry.generatedAt)}`,
+    items,
+  };
 }

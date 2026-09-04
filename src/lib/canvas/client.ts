@@ -6,6 +6,7 @@
 // 沒登入時安靜降級成純本端畫布，而不是在畫布上彈一張擋路的錯誤卡。
 
 import { getStoredToken, getStoredUser } from "@/lib/new-api-client";
+import { LOCAL_TEST_MODE } from "../local-test-mode";
 import type { CanvasProject } from "./types";
 
 export type CanvasClientFailure = "not_authenticated" | "network" | "server" | "parse";
@@ -18,6 +19,12 @@ export interface CanvasClientResult<T> {
 }
 
 export function authHeaders(): Record<string, string> | null {
+  // LOCAL_TEST_MODE：與 agent-chat-client 同款假頭——站內代理的
+  // resolveAgentCaller 在該模式下直接換 B 端 key，不驗證這組頭。
+  // 缺這支 canvas 快照上行在本地測試會永遠靜默啞火。
+  if (LOCAL_TEST_MODE) {
+    return { Authorization: "Bearer local-test-token", "x-user-id": "0" };
+  }
   const token = getStoredToken();
   const userId = getStoredUser()?.id;
   if (!token || !userId) return null;
@@ -111,21 +118,62 @@ export function downloadJson(filename: string, payload: unknown): void {
 
 // ─────────────────────────────────────────── Wave C：agent 操作畫布的上行通道
 
+/**
+ * canvas-state 404 静默降级（罪状 2c）：会话已被网关回收后，画布每动一下
+ * 快照上行/下行仍会打向同一个端点，产生一串 404（console 噪音）。
+ * 这里用进程内 Set 记住「已确认死亡」的会话：一旦某次快照请求吃到 404，
+ * 该会话的后续快照请求直接跳过——清空本地态语义、停轮询，不弹任何提示。
+ * （进程内 Set：刷新归零，与快照「尽力而为」同生命周期。）
+ */
+const deadSnapshotSessions = new Set<string>();
+
 /** 壓縮畫布快照 → gateway（agent 的 canvas_get_state 讀這份）。失敗靜默：快照是盡力而為。 */
 export async function postCanvasSnapshot(sessionId: string, state: unknown): Promise<void> {
+  if (deadSnapshotSessions.has(sessionId)) return; // 会话已死：不再上行，不产生 404 噪音。
   const headers = authHeaders();
   if (!headers) return; // 未登入安靜降級，不送 401 請求。
   headers["Content-Type"] = "application/json";
   try {
-    await fetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}/canvas-state`, {
+    const res = await fetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}/canvas-state`, {
       method: "POST",
       headers,
       body: JSON.stringify({ state }),
       cache: "no-store",
       keepalive: true,
     });
+    // 会话已被网关回收：静默降级，之后不再打这个端点。
+    if (res.status === 404) deadSnapshotSessions.add(sessionId);
   } catch {
     /* 盡力而為：斷網不打擾創作 */
+  }
+}
+
+/** 會話畫布快照下行（resume 回填，2026-08-26）：GET 同一上行端點的閘道存檔。
+ *  無快照（新會話/從未上行）或任何失敗回 null —— 與上行同哲學：盡力而為，不擋路。
+ *  注意與上行刻意不同：不因「本端無 token」提前放棄 —— 權限判定是站內路由的職責
+ *  （resolveAgentCaller），本端攔截會讓 LOCAL_TEST 與 token 恢復中的窗口永遠拿不到回填。 */
+export async function fetchAgentCanvasSnapshot(sessionId: string): Promise<Record<string, unknown> | null> {
+  if (deadSnapshotSessions.has(sessionId)) return null; // 会话已死：静默降级，不重复 404。
+  const headers = authHeaders();
+  try {
+    const res = await fetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}/canvas-state`, {
+      method: "GET",
+      headers: { ...headers, Accept: "application/json" },
+      cache: "no-store",
+    });
+    // 会话已被回收：记入死亡名单（上行也会跳过），本地快照态当空处理。
+    if (res.status === 404) deadSnapshotSessions.add(sessionId);
+    if (!res.ok) return null;
+    const json: unknown = await res.json();
+    if (!json || typeof json !== "object") return null;
+    // 閘道把 POST 的 {state} 原樣存取：下行可能是 {state:{nodes…}} 或扁平 {nodes…}。
+    const body = json as Record<string, unknown>;
+    const state =
+      body.state && typeof body.state === "object" ? (body.state as Record<string, unknown>) : body;
+    if (!Array.isArray(state.nodes) || state.nodes.length === 0) return null;
+    return state;
+  } catch {
+    return null;
   }
 }
 

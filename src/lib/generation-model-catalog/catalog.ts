@@ -41,21 +41,25 @@ import {
   RUNWAY_GEN45_VIDEO_MODEL_ID,
   SEEDANCE_20_FAST_MODEL_ID,
   SEEDANCE_20_MODEL_ID,
+  SEEDANCE_20_MINI_MODEL_ID,
+  SEEDANCE_25_480P_MODEL_ID,
+  SEEDANCE_25_720P_MODEL_ID,
+  SEEDANCE_25_30S_MODEL_ID,
   SEEDREAM_20_MODEL_ID,
   SEEDREAM_50_PRO_MODEL_ID,
   SEEDREAM_50_LITE_MODEL_ID,
-  SENSENOVA_U1_FAST_MODEL_ID,
   SUPPORTED_GENERATION_MODEL_IDS,
   SUPPORTED_IMAGE_MODEL_IDS,
   SUPPORTED_VIDEO_MODEL_IDS,
   TTS_1_MODEL_ID,
   AVATAR_1_MODEL_ID,
   LIPSYNC_1_MODEL_ID,
+  MINIMAX_H3_MODEL_ID,
   VEO_31_FAST_MODEL_ID,
   VEO_31_MODEL_ID,
 } from "../image-model-ids.js";
 
-import { GenerationModelDefinition, COMMON_IMAGE_RATIOS, EXTENDED_GEMINI_RATIOS, FLUX_RATIOS, VIDEO_RATIOS, WIDE_VIDEO_RATIOS, RUNWAY_VIDEO_RATIOS, SEEDANCE_VIDEO_RATIOS, IMAGE_RESOLUTIONS, SEEDANCE_DURATIONS } from "./types";
+import { GenerationModelDefinition, COMMON_IMAGE_RATIOS, EXTENDED_GEMINI_RATIOS, FLUX_RATIOS, VIDEO_RATIOS, WIDE_VIDEO_RATIOS, RUNWAY_VIDEO_RATIOS, SEEDANCE_VIDEO_RATIOS, IMAGE_RESOLUTIONS, SEEDANCE_DURATIONS, SEEDANCE_25_480P_DURATIONS, SEEDANCE_25_720P_DURATIONS, SEEDANCE_25_30S_DURATIONS } from "./types";
 import { MODEL_KNOWLEDGE } from "./knowledge";
 
 export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition> = {
@@ -144,24 +148,11 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     popularity: 93,
     vendor: "Dreamina",
     aspectRatios: COMMON_IMAGE_RATIOS,
-    resolutions: ["2k", "4k"],
+    resolutions: ["1k", "2k", "4k"],
     defaultAspectRatio: "1:1",
     defaultResolution: "2k",
-    imageCredits: { "2k": 8, "4k": 8 },
+    imageCredits: { "1k": 8, "2k": 8, "4k": 8 },
     referenceImages: true,
-  },
-  [SENSENOVA_U1_FAST_MODEL_ID]: {
-    id: SENSENOVA_U1_FAST_MODEL_ID,
-    displayName: "SenseNova U1 Fast",
-    kind: "image",
-    popularity: 95,
-    vendor: "SenseNova",
-    aspectRatios: ["1:1", "3:2", "2:3"],
-    resolutions: ["2k"],
-    defaultAspectRatio: "1:1",
-    defaultResolution: "2k",
-    fixedCoins: 0.1,
-    referenceImages: false,
   },
   [ADOBE_FIREFLY_MODEL_ID]: {
     id: ADOBE_FIREFLY_MODEL_ID,
@@ -186,7 +177,8 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     resolutions: ["1k"],
     defaultAspectRatio: "1:1",
     defaultResolution: "1k",
-    imageCredits: { "1k": 10 },
+    // 价目表同源：一口价 0.001 币（admin 覆写层 fixedCoins 原值折入）。
+    fixedCoins: 0.001,
     referenceImages: true,
   },
   [PIXAI_EDIT_MODEL_ID]: {
@@ -199,7 +191,9 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     resolutions: ["1k", "2k", "4k"],
     defaultAspectRatio: "1:1",
     defaultResolution: "1k",
-    imageCredits: { "1k": 30, "2k": 60, "4k": 120 },
+    // 2026-08-29 价目表同源（暴君钦定）：PixAI 全系图片 0.001 币/张 → 0.01 credit。
+    // 旧值 0.001 credit=0.0001 币，是折算时把「币」当「credit」的 10 倍错价。
+    imageCredits: { "1k": 0.01, "2k": 0.01, "4k": 0.01 },
     referenceImages: true,
   },
   [PIXAI_UPSCALE_MODEL_ID]: {
@@ -212,12 +206,13 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     resolutions: ["1k", "2k", "4k"],
     defaultAspectRatio: "1:1",
     defaultResolution: "1k",
-    imageCredits: { "1k": 10, "2k": 20, "4k": 40 },
+    // 价目表同源：一口价 0.001 币（admin 覆写层 fixedCoins 原值折入，与覆写层同值）。
+    fixedCoins: 0.001,
     referenceImages: true,
   },
-  // 模板生成的定價鍵。2026-08-05 之前 /v1/template-generations 用路由內硬編碼的
-  // 5/8 幣且從未扣費；建鍵後定價與 admin 覆寫層同源，與 edit/upscale 一致。
-  // 費率沿用原硬編碼比例（5/8 幣 → 50/80 credits），4k 按 2k 翻倍。
+  // 模板生成的定價鍵。2026-08-29 价目表同源（暴君钦定）：模板 0.001 币/张 → 0.01 credit，
+  // 与 gateway workflow 估价的 unit_price_coins=0.001 对接；/v1/template-generations 扣费走
+  // generationCoins(pixai-template) 同源。舊值 50/80/160 credits（5/8/16 幣）為錯價。
   [PIXAI_TEMPLATE_MODEL_ID]: {
     id: PIXAI_TEMPLATE_MODEL_ID,
     displayName: "模板生成 (Template)",
@@ -228,7 +223,7 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     resolutions: ["1k", "2k", "4k"],
     defaultAspectRatio: "1:1",
     defaultResolution: "1k",
-    imageCredits: { "1k": 50, "2k": 80, "4k": 160 },
+    imageCredits: { "1k": 0.01, "2k": 0.01, "4k": 0.01 },
     referenceImages: true,
   },
   [NANO_BANANA_PRO_MODEL_ID]: {
@@ -386,7 +381,7 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     resolutions: ["1k"],
     defaultAspectRatio: "1:1",
     defaultResolution: "1k",
-    imageCredits: { "1k": 30 },
+    imageCredits: { "1k": 0.01 },
     referenceImages: false,
   },
   [PIXAI_HARUKA_V2_MODEL_ID]: {
@@ -400,7 +395,7 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     resolutions: ["1k"],
     defaultAspectRatio: "1:1",
     defaultResolution: "1k",
-    imageCredits: { "1k": 20 },
+    imageCredits: { "1k": 0.01 },
     referenceImages: false,
   },
   [PIXAI_REFERENCE_PRO_MODEL_ID]: {
@@ -414,7 +409,7 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     resolutions: ["1k"],
     defaultAspectRatio: "1:1",
     defaultResolution: "1k",
-    imageCredits: { "1k": 40 },
+    imageCredits: { "1k": 0.01 },
     referenceImages: true,
   },
   [PIXAI_TSUBAKI_V11_MODEL_ID]: {
@@ -428,7 +423,7 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     resolutions: ["1k"],
     defaultAspectRatio: "1:1",
     defaultResolution: "1k",
-    imageCredits: { "1k": 25 },
+    imageCredits: { "1k": 0.01 },
     referenceImages: false,
   },
   [PIXAI_HOSHINO_V2_MODEL_ID]: {
@@ -442,7 +437,7 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     resolutions: ["1k"],
     defaultAspectRatio: "1:1",
     defaultResolution: "1k",
-    imageCredits: { "1k": 20 },
+    imageCredits: { "1k": 0.01 },
     referenceImages: false,
   },
 
@@ -511,7 +506,24 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     defaultResolution: "720p",
     durations: SEEDANCE_DURATIONS,
     defaultDuration: 5,
-    videoCreditsPerSecond: { "480p": 30, "720p": 50 },
+    videoCreditsPerSecond: { "480p": 100, "720p": 100 },
+    referenceImages: true,
+    supportsAudio: true,
+    defaultAudio: false,
+  },
+  [SEEDANCE_20_MINI_MODEL_ID]: {
+    id: SEEDANCE_20_MINI_MODEL_ID,
+    displayName: "Dreamina Seedance 2.0 Mini",
+    kind: "video",
+    popularity: 95,
+    vendor: "Dreamina",
+    aspectRatios: SEEDANCE_VIDEO_RATIOS,
+    resolutions: ["480p", "720p"],
+    defaultAspectRatio: "16:9",
+    defaultResolution: "720p",
+    durations: SEEDANCE_DURATIONS,
+    defaultDuration: 5,
+    videoCreditsPerSecond: { "480p": 80, "720p": 80 },
     referenceImages: true,
     supportsAudio: true,
     defaultAudio: false,
@@ -528,9 +540,62 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     defaultResolution: "720p",
     durations: SEEDANCE_DURATIONS,
     defaultDuration: 5,
-    videoCreditsPerSecond: { "480p": 40, "720p": 90, "1080p": 180 },
+    videoCreditsPerSecond: { "480p": 130, "720p": 130, "1080p": 160 },
     referenceImages: true,
     supportsAudio: true,
+    defaultAudio: false,
+  },
+  [SEEDANCE_25_480P_MODEL_ID]: {
+    id: SEEDANCE_25_480P_MODEL_ID,
+    displayName: "Dreamina Seedance 2.5 480p",
+    kind: "video",
+    popularity: 94,
+    vendor: "Dreamina",
+    aspectRatios: SEEDANCE_VIDEO_RATIOS,
+    resolutions: ["480p"],
+    defaultAspectRatio: "16:9",
+    defaultResolution: "480p",
+    durations: SEEDANCE_25_480P_DURATIONS,
+    defaultDuration: 5,
+    videoCreditsPerSecond: { "480p": 230 },
+    referenceImages: true,
+    supportsAudio: true,
+    defaultAudio: true,
+  },
+  [SEEDANCE_25_720P_MODEL_ID]: {
+    id: SEEDANCE_25_720P_MODEL_ID,
+    displayName: "Dreamina Seedance 2.5 720p",
+    kind: "video",
+    popularity: 93,
+    vendor: "Dreamina",
+    aspectRatios: SEEDANCE_VIDEO_RATIOS,
+    resolutions: ["720p"],
+    defaultAspectRatio: "16:9",
+    defaultResolution: "720p",
+    durations: SEEDANCE_25_720P_DURATIONS,
+    defaultDuration: 5,
+    videoCreditsPerSecond: { "720p": 280 },
+    referenceImages: true,
+    supportsAudio: true,
+    defaultAudio: true,
+  },
+  // drama 渠道专属 30 秒固定档（上游 sd25-30s，按条 6 RMB；94 = 9.4 币/秒 × 10，
+  // 30s 整条 282 币 = 成本 6 RMB × 2.35 利润率）。上游不支持音频生成，勿开 supportsAudio。
+  [SEEDANCE_25_30S_MODEL_ID]: {
+    id: SEEDANCE_25_30S_MODEL_ID,
+    displayName: "Seedance 2.5 30s（固定 30 秒）",
+    kind: "video",
+    popularity: 92,
+    vendor: "Dreamina",
+    aspectRatios: SEEDANCE_VIDEO_RATIOS,
+    resolutions: ["720p"],
+    defaultAspectRatio: "16:9",
+    defaultResolution: "720p",
+    durations: SEEDANCE_25_30S_DURATIONS,
+    defaultDuration: 30,
+    videoCreditsPerSecond: { "720p": 94 },
+    referenceImages: true,
+    supportsAudio: false,
     defaultAudio: false,
   },
   [VEO_31_MODEL_ID]: {
@@ -578,6 +643,23 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     durations: [5],
     defaultDuration: 5,
     videoCreditsPerSecond: { "540p": 20, "720p": 50, "1080p": 100 },
+    referenceImages: true,
+  },
+  [MINIMAX_H3_MODEL_ID]: {
+    id: MINIMAX_H3_MODEL_ID,
+    displayName: "MiniMax H3",
+    kind: "video",
+    popularity: 90,
+    vendor: "MiniMax",
+    aspectRatios: RUNWAY_VIDEO_RATIOS,
+    resolutions: ["720p", "1080p"],
+    defaultAspectRatio: "16:9",
+    defaultResolution: "720p",
+    durations: SEEDANCE_DURATIONS,
+    defaultDuration: 5,
+    // 2026-08-28 价目表同源：720P=5 币/秒、1080P=10 币/秒（admin 覆写层原值折入，
+    // 旧值 25/40 credits=2.5/4 币/秒为错价）。
+    videoCreditsPerSecond: { "720p": 50, "1080p": 100 },
     referenceImages: true,
   },
   [LUMA_RAY314_MODEL_ID]: {

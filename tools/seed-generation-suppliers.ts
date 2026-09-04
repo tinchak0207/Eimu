@@ -11,6 +11,9 @@ import { describeEnvChannels } from "../src/lib/sub2api";
 import { FILMERA_IMAGE_MODEL, FILMERA_VIDEO_MODEL } from "../src/lib/generation-core/filmera-upstream";
 import { REGISTRY_CHANNELS } from "../src/lib/supplier-channels.config";
 
+// reblood：这些渠道的调度已整体切到 new-api，supplier 表路由指向 NEWAPI_BASE_URL。
+const NEWAPI_MIGRATED_LABELS = new Set(["hublinuxdo", "pixai", "sub2api", "dreamina", "fallback", "tokenmix"]);
+
 type Tier = "first_party" | "managed_pool" | "relay" | "fallback";
 type Capability = {
   modelId: string;
@@ -35,6 +38,9 @@ function registryChannel(label: string) {
 }
 
 function credentialRef(label: string): string {
+  // reblood（2026-08-27）：已迁移 new-api 的渠道 credential 一律指向 NEWAPI_API_KEY，
+  // seed 重跑不再把 credential_ref 拉回旧上游 env。
+  if (NEWAPI_MIGRATED_LABELS.has(label)) return "NEWAPI_API_KEY";
   // registry 渠道：apiKeyEnv 同時就是 credentialRef（add-supplier-channel 腳本落檔）。
   const registry = registryChannel(label);
   if (registry) return registry.apiKeyEnv;
@@ -124,12 +130,21 @@ function channelCapabilities(label: string): Capability[] {
     : label === "pixai"
       ? new Set<string>(PIXAI_ALL_MODEL_IDS)
       : null;
+  // gemini 系圖像模型只由 hublinuxdo(chat)/adobe2api(firefly 映射)/filmera/pixai
+  // 實測服務。通用渠道上游直接拒絕（"images endpoint requires an image model"），
+  // 認領必敗且燒掉 job 的嘗試預算（2026-08-27 生產實錄：nano-banana 兩單被
+  // sub2api 必敗嘗試吃光重試次數後退款）。
+  const GENERIC_CHANNEL_REJECTED_IMAGE_MODEL_IDS = new Set([
+    "gemini-3-image",
+    "gemini-3.1-flash-image",
+    "gemini-2.5-flash-image",
+  ]);
   const result: Capability[] = [];
   for (const model of Object.values(GENERATION_MODEL_CATALOG)) {
     if (allowed && !allowed.has(model.id)) continue;
-    // 通用渠道（primary/sub2api/fallback）不得認領 pixai 專屬模型。
     if (!allowed && isPixaiModelId(model.id)) continue;
     if (!allowed && model.kind !== "image") continue;
+    if (!allowed && GENERIC_CHANNEL_REJECTED_IMAGE_MODEL_IDS.has(model.id)) continue;
     if (model.kind === "video") {
       result.push({
         modelId: model.id,
@@ -179,22 +194,30 @@ function sameArray(left: unknown, right: string[]): boolean {
 
 async function upsertCapability(sql: ReturnType<typeof getGenerationSql>, supplierId: string, capability: Capability) {
   await sql.begin(async (tx) => {
-    const current = await tx<Record<string, unknown>[]>`
+    // 不篩 is_current：渠道可能曾認領後被 retireUnclaimed 收回（is_current=false
+    // 留檔）。只查在役行會讓復活場景的 nextVersion 從 1 重算，撞歷史行唯一約束。
+    const existing = await tx<Record<string, unknown>[]>`
       SELECT * FROM supplier_capability
       WHERE supplier_id = ${supplierId} AND public_model_id = ${capability.modelId}
-        AND kind = ${capability.kind} AND is_current
+        AND kind = ${capability.kind}
+      ORDER BY contract_version DESC
+      LIMIT 1
       FOR UPDATE
     `;
-    const row = current[0];
+    const row = existing[0];
     const unchanged = row &&
       (row.supplier_model_id ?? null) === capability.supplierModelId &&
       sameArray(row.ratios, capability.ratios) &&
       sameArray(row.resolutions, capability.resolutions) &&
       Boolean(row.edit_support) === capability.editSupport &&
       Boolean(row.video_support) === capability.videoSupport;
-    if (unchanged) return;
+    if (row && unchanged && row.is_current) return;
+    if (row && unchanged) {
+      await tx`UPDATE supplier_capability SET is_current = true, enabled = true, updated_at = now() WHERE id = ${Number(row.id)}`;
+      return;
+    }
     const nextVersion = row ? Number(row.contract_version) + 1 : 1;
-    if (row) {
+    if (row?.is_current) {
       await tx`UPDATE supplier_capability SET is_current = false, updated_at = now() WHERE id = ${Number(row.id)}`;
     }
     await tx`
@@ -239,13 +262,38 @@ async function retireUnclaimedCapabilities(
   return rows.length;
 }
 
+/**
+ * 渠道級併發上限（supplier 與 default account 共用）。
+ *
+ * seed 在每次 worker 重啟都會把 DB 里的 supplier/account.concurrency_limit
+ * 重置成這裡的返回值（ON CONFLICT DO UPDATE concurrency_limit = EXCLUDED...）
+ * —— 2026-08-29 實錄：直接 UPDATE DB 放開 metaso 到 6，worker 一重啟就被沖回 1，
+ * 突發視頻單全部卡在 capacity_saturated 0/1。要調併發先改這張表再部署。
+ *
+ * metaso（第三方 metaso API，穩定）暴君裁定放 6；pixai（自營賬號池）上限 2；
+ * 其餘渠道維持 env 默認（1）。capability 層的 concurrency_limit 是粘性列
+ * （seed 只在新建 capability 時寫），不受此重置影響。
+ */
+function channelConcurrency(label: string): number {
+  if (label === "metaso") return 6;
+  if (label === "pixai") return 2;
+  return Math.max(1, Number(process.env.GENERATION_SUPPLIER_CONCURRENCY ?? 1));
+}
+
 async function main() {
   const sql = getGenerationSql();
   const channels = describeEnvChannels(process.env).filter((channel) => channel.configured && channel.endpoint);
   if (!channels.length) throw new Error("No configured Image Studio channels were found to seed.");
+  const newApiBase = (process.env.NEWAPI_BASE_URL ?? "").trim().replace(/\/+$/, "");
+  const newApiEnabled = (process.env.NEWAPI_ENABLED ?? "").trim().toLowerCase() === "true" && Boolean(newApiBase);
   for (const channel of channels) {
     const endpoint = channel.endpoint!;
     const id = channel.id;
+    // reblood：已迁移渠道的 endpoint.baseURL 改指 new-api（adapter 按 base_url 分流），
+    // 原上游 URL 由 new-api 内部的 channel/model_mapping 负责。
+    if (newApiEnabled && NEWAPI_MIGRATED_LABELS.has(channel.label)) {
+      endpoint.baseURL = newApiBase;
+    }
     const accountId = `${id}:default`;
     const isAdobe = endpoint.protocol === "adobe2api";
     const isFilmera = endpoint.protocol === "filmera";
@@ -267,10 +315,10 @@ async function main() {
         id, label, adapter_type, supply_tier, failure_domain, base_url, credential_ref,
         enabled, priority, concurrency_limit, quality_score, unit_cost, configuration_json, config_version
       ) VALUES (
-        ${id}, ${channel.label}, ${isAdobe ? "adobe2api" : isFilmera ? "filmera" : "openai_images"}, ${tier(channel.label)},
+        ${id}, ${channel.label}, ${isAdobe ? "adobe2api" : isFilmera ? "filmera" : registry?.adapterType ?? "openai_images"}, ${tier(channel.label)},
         ${origin(endpoint.baseURL)}, ${endpoint.baseURL}, ${credentialRef(channel.label)}, ${channel.defaultEnabled},
         ${registry ? registry.seedPriority : channel.label === "adobe2api" ? 10 : channel.label === "filmera" ? 15 : channel.label === "sub2api" ? 20 : channel.label === "primary" ? 30 : 40},
-        ${Math.max(1, Number(process.env.GENERATION_SUPPLIER_CONCURRENCY ?? 1))}, 1, 0,
+        ${channelConcurrency(channel.label)}, 1, 0,
         ${sql.json(channelConfig as never)}, 1
       )
       ON CONFLICT (id) DO UPDATE SET
@@ -287,7 +335,7 @@ async function main() {
         token_source, refresh_status, health_observed_at, configuration_json
       ) VALUES (
         ${accountId}, ${id}, ${`${channel.label} default account`}, ${credentialRef(channel.label)}, true,
-        ${Math.max(1, Number(process.env.GENERATION_ACCOUNT_CONCURRENCY ?? 1))},
+        ${channelConcurrency(channel.label)},
         ${isAdobe ? "degraded" : "healthy"}, ${isAdobe ? null : "not_applicable"},
         ${isAdobe ? "unknown" : isFilmera ? "unknown" : "healthy"}, ${isAdobe || isFilmera ? null : new Date()},
         ${sql.json({ healthPath: process.env.ADOBE2API_HEALTH_PATH ?? "health", minimumSuccessRate5m: 0.8 } as never)}

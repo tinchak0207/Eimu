@@ -11,31 +11,56 @@ function read(relPath: string) {
 
 test("navbar exposes wallet, history and top-up controls on mobile", () => {
   const source = read("src/components/Navbar.tsx");
-  assert.match(source, /href="\/pricing"/);
   assert.match(source, /href="\/history"/);
-  assert.match(source, /href="\/docs"/);
   assert.match(source, /SplitLoginButton/);
   assert.doesNotMatch(source, /openAuth|openLogin|openRegister/);
   assert.match(source, /mobile-nav-actions/);
   assert.match(source, /mobile-wallet-balance/);
-  assert.match(source, /<CheckinCalendar className="shrink-0" \/>/);
-  assert.match(source, /<WalletBadge\s+showTopUp=\{false\}\s+showCheckin=\{false\}\s+className="mobile-wallet-balance min-w-0 flex-1 sm:flex-none"\s*\/>/);
+  // 2026-08-27 暴君裁定：余额 + 「+」合体胶囊——充值/签到收进「+」浮层，
+  // 导航栏不再有独立充值按钮与 CheckinCalendar 图标。
+  assert.match(source, /<WalletBadge showTopUp showCheckin className="mobile-wallet-balance min-w-0 flex-1 sm:flex-none" \/>/);
+  assert.doesNotMatch(source, /CheckinCalendar/);
   assert.match(source, /mobile-nav-actions flex min-w-0 flex-1 items-center justify-end gap-1\.5/);
-  // 极简 header：所有动作（历史/文档/充值/签到）只显图标，文字恒 sr-only。
+  // 极简 header：所有动作（历史/文档）只显图标，文字恒 sr-only。
   assert.match(source, /sr-only/);
   assert.doesNotMatch(source, /sr-only sm:not-sr-only/, "动作文字不得在桌面恢复显示");
   assert.doesNotMatch(source, /flex-col gap-2/);
   assert.doesNotMatch(source, /grid-cols-\[minmax/);
   assert.doesNotMatch(source, /mobile-nav-actions[\s\S]{0,180}overflow-x-auto/);
   assert.doesNotMatch(source, /href="\/history"[\s\S]{0,220}hidden sm:flex/);
-  assert.doesNotMatch(source, /href="\/pricing"[\s\S]{0,220}hidden sm:flex/);
+  // 「文档」「审查页」手机端隐藏（≥sm 才显示）；历史与余额保持手机端可见。
+  assert.match(source, /hidden[\s\S]{0,320}?sm:flex[\s\S]{0,200}?aria-label="审查页"/);
+  assert.match(source, /hidden[\s\S]{0,320}?sm:flex[\s\S]{0,200}?aria-label="文档"/);
+  // 钥匙独立按钮 + 专属 key 菜单（复制/管理，无退出）；名字右侧是退出按钮。
+  assert.match(source, /aria-label="API 密钥"/);
+  assert.match(source, /copyApiKey/);
+  assert.match(source, /密钥管理/);
+  assert.match(source, /aria-label="退出登录"/);
+  assert.match(source, /onClick=\{\(\) => logout\(\)\}/);
+  assert.doesNotMatch(source, /<Ellipsis/);
 });
 
 test("wallet badge can be compacted for mobile navigation", () => {
   const source = read("src/components/WalletBadge.tsx");
   assert.match(source, /showCheckin = true/);
-  assert.match(source, /showCheckin && canCheckin/);
   assert.match(source, /max-w-full/);
+  // 2026-08-27 暴君裁定：余额 + 「+」合体胶囊；「+」菜单有两项（充值/签到），
+  // 签到后不可选并标注冷却；完成态绿勾挂在「+」入口上（header 无签到横幅文字）。
+  assert.match(source, /aria-label="余额操作"/);
+  assert.match(source, /aria-expanded=\{plusOpen\}/);
+  assert.match(source, /role="menu"/);
+  assert.match(source, /已签到 · 明日再来/);
+  assert.match(source, /disabled=\{!canCheckin \|\| checkinLoading\}/);
+  assert.match(source, /aria-disabled=\{!canCheckin \|\| checkinLoading\}/);
+  // 完成态长在「+」入口上：签到后加号位换成绿勾，不再渲染「今日签到已获得 X 张」。
+  assert.match(source, /checkinDone && showCheckin \? \(/);
+  assert.match(source, /<CheckCircle2/);
+  assert.doesNotMatch(source, /formatCheckinRewardText/);
+  assert.doesNotMatch(source, /今日签到已获得/);
+  // 菜单是全站玻璃语言（lg-sheet + specular 顶线 + spring 出场）。
+  assert.match(source, /lg-sheet/);
+  assert.match(source, /animate-lg-appear/);
+  assert.match(source, /from-transparent via-white to-transparent/);
 });
 
 test("checkin calendar opens a calendar modal and awards random image credits", () => {

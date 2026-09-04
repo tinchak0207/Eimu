@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, createContext, useContext } from "rea
 import type { NewApiUser } from "@/lib/new-api-client";
 import { getStoredToken, getStoredUser, clearStoredToken, setStoredToken, syncStoredAuthFromCookie } from "@/lib/new-api-client";
 import { fetchMe, logout as doLogout } from "@/lib/auth-client";
-import { shouldBypassAuthForLocalTest } from "@/lib/local-test-mode";
+import { LOCAL_TEST_MODE } from "@/lib/local-test-mode";
 
 interface AuthState {
   user: NewApiUser | null;
@@ -28,7 +28,7 @@ const LOCAL_TEST_AUTH_USER: NewApiUser = {
 };
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const localTestMode = shouldBypassAuthForLocalTest(process.env);
+  const localTestMode = LOCAL_TEST_MODE;
   const [user, setUser] = useState<NewApiUser | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(!localTestMode);
