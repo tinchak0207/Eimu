@@ -126,3 +126,15 @@ redteam-*
 /deploy-staging/blender-director-persona/__pycache__/
 # 帳號池數據（含明文帳密+token，永不入庫）
 /pixai-pool-new.json
+/IMG_*.jpg
+/dreamina_output.webp
+/chat-history-export-*.zip
+/gh_repo.json
+/reddit-miner-output.md
+/rt4b-log.md
+/batch-*.json
+/.batch-*.json
+/.probe-write-test.txt
+/fix-system.sh
+.av-implementation-spec.md
+.tmp-*
