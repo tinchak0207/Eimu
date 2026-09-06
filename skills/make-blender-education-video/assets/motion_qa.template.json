@@ -1,0 +1,45 @@
+{
+  "project": "detailed Blender education video",
+  "policy": {
+    "approval_frame_scope": "Visual system only; it does not approve motion design or animation quality.",
+    "camera_motion_counts_as_process_animation": false,
+    "static_process_substitutes_allowed": false,
+    "brief_context_or_emphasis_holds_allowed": true
+  },
+  "shots": [
+    {
+      "id": "shot_001",
+      "narrated_process": "<process being explained>",
+      "teaching_action": "<what the viewer must see happen>",
+      "start_state": {
+        "time_seconds": 0.0,
+        "frame": 0,
+        "evidence_image": "qa/motion/shot_001_start.png",
+        "description": "<initial subject or system state>"
+      },
+      "animation_driver": {
+        "type": "<keyframes, rig, simulation, particles, Geometry Nodes, deformation, material state, or other>",
+        "description": "<physical, biological, chemical, informational, or conceptual cause>"
+      },
+      "intermediate_state": {
+        "time_seconds": 0.0,
+        "frame": 0,
+        "evidence_image": "qa/motion/shot_001_middle.png",
+        "description": "<visible evidence that the process is occurring>"
+      },
+      "end_state": {
+        "time_seconds": 0.0,
+        "frame": 0,
+        "evidence_image": "qa/motion/shot_001_end.png",
+        "description": "<visibly changed state that prepares the next shot>"
+      },
+      "supporting_camera_action": "<camera action or none>",
+      "subject_change_visible_without_camera_motion": false,
+      "cause_precedes_effect": false,
+      "static_substitute_detected": false,
+      "static_substitute_types": [],
+      "review_status": "pending",
+      "review_notes": ""
+    }
+  ]
+}

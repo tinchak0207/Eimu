@@ -1,0 +1,19 @@
+[Script Info]
+Title: Blender Education Teaching Overlay
+ScriptType: v4.00+
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+PlayResX: 3840
+PlayResY: 2160
+YCbCr Matrix: TV.709
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Section,Arial,62,&H00F8FAFC,&H000000FF,&H00202A36,&H520A0F16,-1,0,0,0,100,100,0,0,3,6,0,7,150,150,140,1
+Style: Data,Arial,50,&H00F8FAFC,&H000000FF,&H00202A36,&H5A0A0F16,0,0,0,0,100,100,0,0,3,6,0,7,150,150,140,1
+Style: Accent,Arial Unicode MS,54,&H00DDF66A,&H000000FF,&H00202A36,&H5A0A0F16,-1,0,0,0,100,100,1,0,3,6,0,7,150,150,140,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 10,0:00:00.30,0:00:03.00,Section,,0,0,0,,{\fad(220,240)\pos(170,150)}<ENGLISH SECTION TITLE>
+Dialogue: 9,0:00:00.80,0:00:03.00,Data,,0,0,0,,{\fad(150,220)\pos(170,400)}<ENGLISH TEACHING LABEL>

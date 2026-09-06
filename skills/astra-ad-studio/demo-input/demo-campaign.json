@@ -1,0 +1,75 @@
+{
+  "campaign": "Signal Launch Campaign",
+  "product": "Signal",
+  "url": "signal.example",
+  "audience": "Indie founders launching their first product",
+  "objective": "Get founders to start a launch audit",
+  "format": "portrait",
+  "recommended": "Product Proof",
+  "brand": {
+    "primary": "#6d28d9",
+    "secondary": "#080a12",
+    "accent": "#b7ff4a",
+    "text": "#ffffff"
+  },
+  "creatives": [
+    {
+      "id": "pain-interrupt",
+      "label": "Pain Interrupt",
+      "hook": "Your launch is not the problem.",
+      "body": "The message people cannot repeat is.",
+      "cta": "Fix the signal",
+      "proof": "A clearer launch starts here."
+    },
+    {
+      "id": "product-proof",
+      "label": "Product Proof",
+      "hook": "One screen. Every launch risk.",
+      "body": "See what blocks understanding before you publish.",
+      "cta": "Run the audit",
+      "proof": "Built for early-stage products."
+    },
+    {
+      "id": "identity-signal",
+      "label": "Identity Signal",
+      "hook": "Launch like people are busy.",
+      "body": "Make the value obvious before asking for attention.",
+      "cta": "Get launch-ready",
+      "proof": "Clarity beats louder marketing."
+    }
+  ],
+  "motion": {
+    "duration": 15,
+    "frames": [
+      {
+        "start": 0,
+        "end": 3,
+        "kicker": "Most launches",
+        "hook": "Disappear in the scroll.",
+        "body": "Not because the product is bad."
+      },
+      {
+        "start": 3,
+        "end": 8,
+        "kicker": "The real problem",
+        "hook": "Nobody gets it fast enough.",
+        "body": "Signal finds the message and proof gaps."
+      },
+      {
+        "start": 8,
+        "end": 12,
+        "kicker": "Before launch",
+        "hook": "See every risk on one screen.",
+        "body": "Then fix what actually matters."
+      },
+      {
+        "start": 12,
+        "end": 15,
+        "kicker": "Signal",
+        "hook": "Launch with clarity.",
+        "cta": "Run the audit"
+      }
+    ]
+  },
+  "notes": "Synthetic demo content. Product, URL, claims, and audience are fictional."
+}

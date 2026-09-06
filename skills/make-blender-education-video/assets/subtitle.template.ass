@@ -1,0 +1,16 @@
+[Script Info]
+Title: Blender Education Burned-In English Subtitles
+ScriptType: v4.00+
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+PlayResX: 3840
+PlayResY: 2160
+YCbCr Matrix: TV.709
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Caption,Arial,92,&H00F5F5F5,&H000000FF,&H00140F0C,&H80000000,0,0,0,0,100,100,0,0,1,5,2,2,120,120,90,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 20,0:00:00.00,0:00:04.00,Caption,,0,0,0,,<ENGLISH SUBTITLE>
