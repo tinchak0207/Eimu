@@ -31,9 +31,13 @@ WHEEL DIFF 白名單（官方範例 → 本檔）：
        - Cycles 後備：官方同構（compute_device_type + get_devices + 全開 +
          device 列印 debugging snippet 原樣），CUDA→OPTIX（L4/T4 均支援，
          三方橋同款），samples 128→16（POC 成本紀律，白名單）。
-  6. 新增 _ensure_gpu_init()：gpu.init() EGL platform init——本機橋片A實證
-     「GPUOffScreen 前必 gpu.init() 否則誤標 cpu」。容器內冪等（全局旗標）。
-     此調用失敗 = Eevee 路線死刑判決輸出（設計意圖：一次 smoke 判生死）。
+  6. 新增 _ensure_gpu_init()：gpu.init() EGL platform init——**片 AD 真雲
+     判決推翻其主路徑地位**：預建 EGL context 是 Eevee 渲染崩潰源非加速器
+     （三容器對照：無預建 rain 渲染成功 21s；預建×2 同場景 ~6s SIGSEGV；
+     本機橋片F 同構互證；速度零貢獻且冷容器上 gpu.init 本身耗 18.5s）。
+     默認關閉（Eevee 自建 context），BLENDER_MODAL_GPU_INIT=1 僅作診斷開關。
+     另 AD 雷區 #6b：`import gpu` 必須在 `import bpy` 之後（bpy wheel 的
+     gpu 模組由 bpy 導入路徑供給，裸導 No module named 'gpu' 真雲實錘）。
   7. 回應形狀：官方回裸 PNG bytes → bridge_envelope（{ok, artifacts:
      [{path,bytes,kind,b64}], scene_summary, stdout_tail, duration_ms,
      queued, queue_position}，與本機橋 POST /v1/execute 200 同構；b64/
@@ -53,9 +57,10 @@ WHEEL DIFF 白名單（官方範例 → 本檔）：
      @modal.fastapi_endpoint()」）+ live wheel 1.5.5 認證（cls.pyi：cls() 吃
      function 同款參數含 scaledown_window；partial_function.pyi：enter()/
      method()）。同類雙修=同一暖容器池服務兩通道，暖身實現只有一份。
-       - `@modal.enter()` warm：gpu.init + 320x180 暖身渲染一次，把 bpy
-         import / EGL context / Eevee 核心著色器編譯攤到容器生命週期；
-         暖身失敗不殺容器（首個真實請求會再暴露，結構化可觀測）；
+       - `@modal.enter()` warm：只做 gpu.init()（毫秒級）。**不做暖身渲染**
+         （AD 兩實錘：①暖身渲染原樣重付首幀編譯成本 27s 純浪費；②同進程
+         跨場景切換渲染觸發 SIGSEGV n=1，片 X 同場景 10 連渲零崩）——冷啟
+         編譯由容器首幀付一次，之後同場景幀全部命中暖狀態；
        - scaledown_window=60（鏈間請求間隔 ~1-3s 足夠保溫；空窗帳單上限
          60s×T4≈$0.01/容器，成本紀律明示）；web 方法經 HMAC 才能觸發，
          SDK 方法由 Modal 平台鑑權，secret 掛類級無外洩面。
@@ -112,17 +117,23 @@ _GPU_STATE = {"ready": False, "state": "unknown"}
 
 
 def _ensure_gpu_init() -> str:
-    """白名單 #6：gpu.init() EGL platform init（容器內冪等）。
+    """gpu.init() EGL platform init（默認關閉，BLENDER_MODAL_GPU_INIT=1 才啟用）。
 
-    回 "egl"（成功）/ "cpu:<err>"（失敗）。失敗時 Eevee 渲染預期死——
-    這是 smoke 第 1 步要的判決輸出，不是可吞的軟錯。
-
-    片 AD 新雷區 #6b：`import gpu` 必須在 `import bpy` 之後——bpy wheel 的
-    gpu 模組由 bpy 導入路徑供給，裸導 `No module named 'gpu'`（真雲實錘：
-    warm() 先跑本函數時回 cpu:No module named 'gpu'，片 X 未踩中是因為
-    其調用點恰在 import bpy 之後）。
+    片 AD 真雲判決（2026-09-06，三容器對照）：**預建 EGL context 是 Eevee
+    渲染的崩潰源，不是加速器**——
+      - 容器1 gpu.init 失敗（無預建）→ rain_chase 1280x720 渲染成功 21s；
+      - 容器2/3 gpu.init 成功（預建）→ 同場景渲染 ~6s 處 SIGSEGV ×2；
+      - 本機橋片F 同構互證：橋（gpu.init 預建）負載下崩、直連 CLI（Eevee
+        自建 context）無事；
+      - 速度零貢獻：piece X（gpu.init 版）與容器1（無）每幀同為 ~20s，
+        且 gpu.init 本身在冷容器上耗 18.5s（純浪費）。
+    保留本函數僅為診斷開關（env 顯式開啟）；主路徑 Eevee 自建 context。
     """
     if _GPU_STATE["ready"]:
+        return _GPU_STATE["state"]
+    if os.environ.get("BLENDER_MODAL_GPU_INIT", "") != "1":
+        _GPU_STATE["state"] = "self-init(deferred)"
+        _GPU_STATE["ready"] = True
         return _GPU_STATE["state"]
     try:
         import bpy  # noqa: F401 — 必須先於 gpu（雷區 #6b）
@@ -197,58 +208,31 @@ hmac_secret = modal.Secret.from_name("blender-modal-hmac")
     scaledown_window=SCALEDOWN_WINDOW,  # 白名單 #11
 )
 class Renderer:
-    """暖復用渲染容器：@modal.enter() 一次付清 bpy import/EGL/核心著色器編譯，
-    之後每幀只付 frame_set + 渲染本身（場景快取命中時）。
+    """暖復用渲染容器：容器進程內 bpy import/EGL context/著色器編譯天然驻留
+    （模組級+GPU 進程級狀態），本類把它顯式化：
+      - @modal.enter() 只做 GPU 狀態記錄（gpu.init 默認關閉，見 #6）——
+        **不做暖身渲染**，兩個實錘：
+        ①暖身渲染把首幀本要付的編譯成本原樣重付（320x180 cube 實測 27s，
+        純浪費）；②同進程跨場景切換渲染（小暖身場景→重 blend）觸發
+        SIGSEGV（AD 真雲 n=1；片 X 同場景 10 連渲零崩）——場景切換面
+        只留給場景快取 miss（必要路徑），絕不無故多製造一次。
+      - 場景快取（_scene_key）讓同場景後續幀跳過重建+重編譯；
+      - scaledown_window 讓 HTTP 鏈的逐幀請求落在同一暖容器上。
+    片 X 實證基線：同場景容器上逐幀 0.5-2.5s（smoke4 web 鏈 10/10 零崩）。"""
 
-    同類雙修（白名單 #11）：render_frame=@modal.method()（SDK .remote/.map）、
-    render_frame_web=@modal.fastapi_endpoint()（HMAC web）。
-    """
-
-    def __init__(self):
-        # 場景快槽（白名單 #12）；@modal.enter() 會再填 warm 指標
-        self._scene = None
-        self._scene_key: str | None = None
-        self.warm_ms = 0
-        self.warm_state = "not-run"
+    # 類屬性槽（Modal 對自訂 __init__ 發 DeprecationError——改類屬性，實例首次賦值即遮蔽）
+    _scene = None
+    _scene_key: str | None = None
+    warm_ms = 0
+    warm_state = "not-run"
 
     @modal.enter()
     def warm(self) -> None:
-        """容器啟動一次：gpu.init + 暖身渲染（把冷啟大頭攤到整個容器生命週期）。"""
-        import math
-
+        """容器啟動一次：GPU 狀態記錄（gpu.init 默認關閉=延遲自建，見
+        _ensure_gpu_init 判決；渲染冷啟大頭由首個真實請求付一次，之後
+        同場景幀全部命中暖狀態）。"""
         t0 = time.monotonic()
         self.warm_state = _ensure_gpu_init()
-        if not self.warm_state.startswith("egl"):
-            # 判決輸出，不硬崩：留給首個真實請求回結構化錯（Modal 面上可觀測）
-            print(f"[warm] gpu init failed: {self.warm_state}")
-            self.warm_ms = int((time.monotonic() - t0) * 1000)
-            return
-        try:
-            import bpy
-
-            bpy.ops.wm.read_factory_settings(use_empty=True)
-            scene = bpy.context.scene
-            bpy.ops.mesh.primitive_cube_add(location=(0.0, 0.0, 0.0))
-            bpy.ops.object.light_add(type="SUN", location=(3.0, -3.0, 6.0))
-            bpy.ops.object.camera_add(
-                location=(0.0, -5.0, 1.5), rotation=(math.radians(80.0), 0.0, 0.0)
-            )
-            scene.camera = bpy.context.active_object
-            scene.render.resolution_x = 320
-            scene.render.resolution_y = 180
-            scene.render.resolution_percentage = 100
-            try:
-                scene.render.engine = EEVEE_ENGINE
-            except TypeError:
-                scene.render.engine = "BLENDER_EEVEE_NEXT"
-            configure_eevee(scene)
-            scene.render.image_settings.file_format = "PNG"
-            scene.render.filepath = "/tmp/warmup.png"
-            bpy.ops.render.render(write_still=True)
-            png_ok = looks_like_png(Path("/tmp/warmup.png").read_bytes())
-            self.warm_state = f"egl+warm-render ok={png_ok}"
-        except Exception as exc:  # noqa: BLE001 — 暖身失敗不殺容器，首請求會再暴露
-            self.warm_state = f"warm-error:{type(exc).__name__}:{exc}"
         self.warm_ms = int((time.monotonic() - t0) * 1000)
         print(f"[warm] state={self.warm_state} warm_ms={self.warm_ms}")
 
