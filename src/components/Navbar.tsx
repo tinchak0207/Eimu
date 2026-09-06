@@ -16,9 +16,21 @@ import { useAuth } from "@/hooks/use-auth";
 import { getStoredToken } from "@/lib/new-api-client";
 import { LOCAL_TEST_MODE } from "@/lib/local-test-mode";
 import { cn } from "@/lib/utils";
+import { isStandalonePwa, createHandoffLogin } from "@/lib/github-login";
+import { PwaHandoffPanel } from "@/components/PwaHandoffPanel";
 
 interface NavbarProps {
   className?: string;
+}
+
+/** auth_error 代碼 → 人話（callback 失敗原因碼見 /api/auth/github/callback）。 */
+function describeAuthError(code: string): string {
+  if (code === "github_state") return "登录窗口状态过期或同时开了多个登录窗，请重新点登录。";
+  if (code === "github_config") return "GitHub 登录未配置，请联系管理员。";
+  if (code.startsWith("github_login")) return "网关拒绝了本次登录，请重试；持续失败请联系管理员。";
+  if (code.startsWith("github_register")) return "自动开户失败，请稍后重试。";
+  if (code.startsWith("github_exchange")) return "GitHub 授权码交换失败，请重新点登录。";
+  return "登录流程被打断，请重新点登录。";
 }
 
 export function Navbar({ className }: NavbarProps) {
@@ -26,6 +38,7 @@ export function Navbar({ className }: NavbarProps) {
   const { toast } = useToast();
   const [loginPhase, setLoginPhase] = useState<"idle" | "drawing">("idle");
   const [copyingKey, setCopyingKey] = useState(false);
+  const [pwaHandoffUrl, setPwaHandoffUrl] = useState<string | null>(null);
   const popupRef = useRef<Window | null>(null);
 
   /**
@@ -86,16 +99,23 @@ export function Navbar({ className }: NavbarProps) {
   // 登入完成後主頁只做 refresh（重新同步 localStorage/cookie），不整頁 reload，
   // 因此 UI 平滑轉到登入態，不受 reload 的脆弱依賴影響。
   const startGithubLogin = () => {
-    if (loginPhase === "drawing" && popupRef.current && !popupRef.current.closed) return;
-    const popup = window.open("/api/auth/github/start", "github_oauth", "popup,width=760,height=640");
-    if (!popup) {
-      // popup 被擋：退回整頁跳轉。
-      window.location.href = "/api/auth/github/start";
+    // PWA standalone：GitHub 登录态带不进来，改走跨浏览器交接面板（popup 逻辑不动）。
+    if (isStandalonePwa()) {
+      void createHandoffLogin().then((handoff) => {
+        if (handoff) {
+          setPwaHandoffUrl(handoff.loginUrl);
+          return;
+        }
+        window.location.href = "/api/auth/github/start";
+      });
       return;
     }
-    popupRef.current = popup;
-    setLoginPhase("drawing");
-    pollForAuthComplete();
+    if (loginPhase === "drawing" && popupRef.current && !popupRef.current.closed) return;
+    // 登录一律同窗口跳转：popup 在套壳/内嵌 webview 上会出现「窗口对象存在但
+    // 内容停在 about:blank」的死窗（三個完成信号全部不來，永久卡死），且无法
+    // 与正常跨域授权页区分。同窗口跳转全浏览器兼容，callback 落 /auth/complete
+    // 后 replace("/") 回主页，由 AuthProvider mount 自愈登录态。
+    window.location.href = "/api/auth/github/start";
   };
 
   const startWechatLogin = () => {
@@ -132,15 +152,56 @@ export function Navbar({ className }: NavbarProps) {
         setLoginPhase("idle");
         void refresh();
       }
+      if (event.data?.type === "github-auth-error") {
+        // 弹窗里的 callback 失敗由弹窗自己转发过来（見下方 auth_error 處理）。
+        popupRef.current = null;
+        setLoginPhase("idle");
+        toast({ title: "GitHub 登录未完成", description: describeAuthError(String(event.data?.code ?? "")) });
+      }
       if (event.data?.type === "wechat-auth-complete") {
         void refresh();
       }
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [refresh]);
+  }, [refresh, toast]);
+
+  /**
+   * OAuth 回調失敗的收口（2026-09-05 修「点了登录按钮回调没被接收」）：
+   * callback 路由把一切失敗重定向到 /?auth_error=<原因>，但前端從沒人讀這個參數——
+   * 弹窗靜默停在首頁、主頁輪詢 popup.closed 永不到來，用戶看不到任何報錯。
+   * 弹窗內（有 opener）：把失敗轉發給 opener 並自我關閉；
+   * 主頁：toast 出人話並抹掉 URL 參數。
+   */
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const authError = params.get("auth_error");
+    if (!authError) return;
+    params.delete("auth_error");
+    const qs = params.toString();
+    window.history.replaceState({}, "", `${window.location.pathname}${qs ? `?${qs}` : ""}${window.location.hash}`);
+    if (window.opener && !window.opener.closed) {
+      try {
+        window.opener.postMessage({ type: "github-auth-error", code: authError }, window.location.origin);
+      } catch { /* opener 不可達：降級為本頁 toast */ }
+      window.close();
+      return;
+    }
+    toast({ title: "GitHub 登录未完成", description: describeAuthError(authError) });
+  }, [toast]);
   return (
     <>
+      {pwaHandoffUrl && (
+        <PwaHandoffPanel
+          loginUrl={pwaHandoffUrl}
+          onSuccess={() => {
+            // 等效 popup 完成信號處理器：抹掉面板 + refresh 刷新登入態。
+            setPwaHandoffUrl(null);
+            void refresh();
+          }}
+          onClose={() => setPwaHandoffUrl(null)}
+        />
+      )}
       <header
         id="global-navbar"
         className={cn(

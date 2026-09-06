@@ -37,6 +37,8 @@ import { enhancePrompt, type StylePreset } from "@/lib/prompt-enhancer";
 import { hasEnoughQuota } from "@/lib/new-api-client";
 import { LOCAL_TEST_MODE } from "@/lib/local-test-mode";
 import { cn } from "@/lib/utils";
+import { isStandalonePwa, createHandoffLogin } from "@/lib/github-login";
+import { PwaHandoffPanel } from "@/components/PwaHandoffPanel";
 import { getInitialSuggestions, type Suggestion } from "@/lib/suggestions";
 import type { ReferenceImage } from "@/lib/image-types";
 import { CanvasChatWorkstation } from "@/components/canvas-workstation/CanvasChatWorkstation";
@@ -87,6 +89,8 @@ export function ImagePlayground({ suggestions }: { suggestions: Suggestion[] }) 
   }, []);
   // 模板庫退場旗標：發出第一條用戶消息（模板注入或手打）即收起，之後不再出現。
   const [agentTemplateDismissed, setAgentTemplateDismissed] = useState(false);
+  // PWA 登录交接面板（standalone 内 GitHub 授权走跨浏览器 handoff）。
+  const [pwaHandoffUrl, setPwaHandoffUrl] = useState<string | null>(null);
   // wish 插件深链（?agent=1&session=<uuid>）：落地后直开该会话而非新开对话。
   const [initialAgentSessionId, setInitialAgentSessionId] = useState("");
   const { images, timings, failedProviders, isLoading, startGeneration, cancelTask, tasks } = useImageGeneration();
@@ -299,6 +303,18 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
   }, [inCanvasWorkstation]);
 
   const redirectToGithub = useCallback(() => {
+    // PWA standalone：GitHub 登录态带不进来，改走跨浏览器交接面板。
+    if (isStandalonePwa()) {
+      void (async () => {
+        const handoff = await createHandoffLogin();
+        if (handoff) {
+          setPwaHandoffUrl(handoff.loginUrl);
+          return;
+        }
+        window.location.href = "/api/auth/github/start";
+      })();
+      return;
+    }
     window.location.href = "/api/auth/github/start";
   }, []);
 
@@ -413,6 +429,9 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
       durationSeconds,
       generateAudio,
     });
+    // 送出即下滚到生图结果栏：手机端结果在卡片下方，不滚就等于「按了没反应」。
+    // 桌面 xl 双栏结果本就在视野内，scrollIntoView 对已可见元素是 no-op。
+    document.getElementById("generation-result")?.scrollIntoView({ behavior: "smooth", block: "start" });
     if (!LOCAL_TEST_MODE) {
       refresh().catch(() => {});
     }
@@ -571,7 +590,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
                     this column no longer needs an identity header or a status
                     badge duplicating the one ImageDisplay already draws.
                     畫布工作站態：整欄隱藏（畫布已是全場主角）。 */}
-                <div className={cn("flex min-w-0 flex-col", inCanvasWorkstation && "hidden")}>
+                <div id="generation-result" className={cn("flex min-w-0 flex-col", inCanvasWorkstation && "hidden")}>
                   <ImageDisplay
                     modelId={resultView.modelId}
                     provider="image_tinchak"
@@ -592,6 +611,17 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
             <UseCaseLinks />
             <FaqSection />
           </div>
+
+      {pwaHandoffUrl && (
+        <PwaHandoffPanel
+          loginUrl={pwaHandoffUrl}
+          onSuccess={() => {
+            setPwaHandoffUrl(null);
+            refresh().catch(() => {});
+          }}
+          onClose={() => setPwaHandoffUrl(null)}
+        />
+      )}
 
       {(!showProgress && (isLoading || failedProviders.length > 0)) && (
         <div className="pointer-events-none fixed inset-x-0 bottom-4 z-30 flex justify-center px-4 sm:bottom-6">

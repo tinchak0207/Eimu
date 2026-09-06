@@ -129,7 +129,7 @@ export function AgentSettingsPopover() {
         <Settings className="h-4 w-4" aria-hidden="true" />
       </button>
       {open && (
-        <div className="lg-sheet absolute top-full right-0 z-50 mt-0.5 w-64 rounded-ios-2xl p-1">
+        <div className="lg-sheet fixed left-1/2 top-[var(--agent-pop-top,5rem)] z-50 w-64 -translate-x-1/2 rounded-ios-2xl p-1">
           {/* MASTER.md：每张 sheet 都要有一条顶缘高光线。 */}
           <div className="pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-[inherit] bg-gradient-to-r from-transparent via-white to-transparent opacity-80" />
           <div className="divide-y divide-black/[0.06]">

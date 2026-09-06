@@ -82,3 +82,11 @@ node_modules/@swc/*
 
 # kunpeng 鋪片工作區（未追蹤半成品；主應用零引用，上傳會炸 Vercel lint/type 門禁）
 /src/vendor-bridges/
+
+# Blender headless bridge runtime (live socket breaks CLI file collection)
+/.blender-work/
+
+# kunpeng 片R 預驗收補漏（968K 噪音目錄，主應用零引用）
+/bridge/
+/skills/
+/deploy-staging/

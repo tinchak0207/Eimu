@@ -28,8 +28,10 @@
 
 ## Subagent 派遣（2+ 檔或單檔 diff >50 行必派；單檔 <5 行可內聯）
 
+- **並發槽鐵律（2026-09-06 暴君糾正）**：完工一路立刻驗收並補派一路，**常態保持 ≥3 路並發**；禁止等整批完工再派下一批——等最慢 subagent = 垃圾時間。收完工通知的當下動作順序：驗收 → 補派新片 → 再回報。
 - orchestrator 只做：定位目標、寫 spec、派發、收結果、驗收。
-- spec 必含「必讀記憶」節（2026-09-02 暴君糾正「恶性引导」）：① `/home/lenovo/.codex/memories/extensions/ad_hoc/notes/memory_summary.md` 路徑 ② 2-5 個與任務直接相關的 note 檔名＋一句話為何相關 ③ 指令「記憶與現場證據衝突時以現場為準並回報衝突」。沒有記憶節＝orchestrator 失職，等同 spec 沒配方，禁止派發。
+- **上層決策/下層執行分離（2026-09-06 暴君糾正）**：orchestrator 禁止內聯執行動手環節（smoke/驗證跑批/寫碼/批量操作），全部派 subagent；orchestrator 上下文只裝決策、spec、驗收結論。驗收＝讀回報+抽查證據，不是自己重跑。
+- spec 必含「必讀記憶」節（2026-09-02 暴君糾正「恶性引导」）：① `/home/lenovo/.codex/memories/extensions/ad_hoc/notes/memory_summary.md` 路徑 ② 2-5 個與任務直接相關的 note 檔名＋一句話為何相關 ③ 指令「記憶與現場證據衝突時以現場為準並回報衝突」。沒有記憶節＝orchestrator 失職，等同 spec 沒配方，禁止派發。**spec 引用的 note 必須先驗實際路徑再寫進 spec（記憶有兩庫：notes 目錄＋`/home/lenovo/.zcode/cli/memories/projects/image-app-63c110217f682752/memory/`，spec 只寫檔名不定庫 = subagent 報幻影檔，2026-09-06 實錘）**。
 - spec 帶配方不是目標：標準操作（new-api 渠道接入/env 變更/seed/rebuild/VPS 傳檔）的 copy-paste 命令直接貼進 spec（配方在 new-supplier-integration skill「new-api 渠道 5 分鐘配方」節），不許現場考古；spec 沒配方 = orchestrator 失職，不許派發。
 - spec 開頭寫「預期 N 分鐘」，超 2x orchestrator 主動 TaskStop、內聯接管或重派；主動巡檢，不被動等。
 - subagent 同一錯誤重試 2 次未過 → 停止並回報事實（寫進 spec），禁止無限試錯。

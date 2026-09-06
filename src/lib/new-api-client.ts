@@ -53,10 +53,9 @@ function setCookieValue(name: string, value: string, maxAgeSec: number): void {
 
 export function getStoredToken(): string | null {
   if (typeof window === "undefined") return null;
-  const local = localStorage.getItem(TOKEN_KEY);
-  if (local) return local;
-  // localStorage 被清 / 换浏览器仍带着 cookie → 从 cookie 恢复（固化）。
-  return getCookieValue(TOKEN_KEY);
+  // Cookie 是跨设备交接后的权威值；localStorage 可能残留已失效的旧 token。
+  const cookie = getCookieValue(TOKEN_KEY);
+  return cookie || localStorage.getItem(TOKEN_KEY);
 }
 
 export function setStoredToken(token: string, user: NewApiUser): void {
@@ -104,10 +103,26 @@ export function clearStoredToken(): void {
 
 export function getStoredUser(): NewApiUser | null {
   if (typeof window === "undefined") return null;
-  let raw = localStorage.getItem(USER_KEY);
-  if (!raw) raw = getCookieValue(USER_KEY); // cookie 固化兜底
-  if (!raw) return null;
-  try { return JSON.parse(raw) as NewApiUser; } catch { return null; }
+  // cookie 與 localStorage 都可能是歷史事故的殘留壞值：逐個候選解析，
+  // 第一個成功的自愈回寫兩層存儲（覆蓋損壞殘留），解析全敗才放棄。
+  const candidates: string[] = [];
+  const cookie = getCookieValue(USER_KEY);
+  if (cookie) candidates.push(cookie);
+  const local = localStorage.getItem(USER_KEY);
+  if (local && local !== cookie) candidates.push(local);
+  for (const raw of candidates) {
+    try {
+      const user = JSON.parse(raw) as NewApiUser;
+      if (user && typeof user.id === "number") {
+        localStorage.setItem(USER_KEY, JSON.stringify(user));
+        setCookieValue(USER_KEY, JSON.stringify(user), AUTH_COOKIE_MAX_AGE_SEC);
+        return user;
+      }
+    } catch {
+      // 壞候選，試下一個。
+    }
+  }
+  return null;
 }
 
 // ─── Quota helpers ───────────────────────────────────────────────────────────

@@ -112,6 +112,34 @@ export default function RootLayout({
     <html lang="zh-CN" className={`${geistSans.variable} ${geistMono.variable}`}>
       <body className="font-sans antialiased text-[15px] text-foreground">
         <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){
+try{
+window.__bootErrors=[];
+window.addEventListener("error",function(e){window.__bootErrors.push(String(e.message).slice(0,300));try{localStorage.setItem("eimu_boot_err",JSON.stringify({t:Date.now(),m:String(e.message).slice(0,300),src:(e.filename||"").slice(-60)}))}catch(_){}});
+
+window.addEventListener("unhandledrejection",function(e){window.__bootErrors.push("rej:"+String(e.reason).slice(0,200));});
+setTimeout(function(){
+  var w=window;
+  if(w.__eimuHydrated)return;
+  if(sessionStorage.getItem("eimu_selfheal"))return;
+  sessionStorage.setItem("eimu_selfheal","1");
+  (async function(){
+    try{
+      var regs=await navigator.serviceWorker.getRegistrations();
+      for(var i=0;i<regs.length;i++)regs[i].unregister();
+      var keys=await caches.keys();
+      for(var j=0;j<keys.length;j++)await caches.delete(keys[j]);
+      localStorage.setItem("eimu_boot_err",JSON.stringify({t:Date.now(),m:"self-heal: no hydration, cleared SW+caches"}));
+      location.reload();
+    }catch(_){}
+  })();
+},6000);
+}catch(_){}
+})();`,
+          }}
+        />
+        <script
           type="application/ld+json"
           // eslint-disable-next-line react/no-danger
           dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}

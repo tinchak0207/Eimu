@@ -55,11 +55,13 @@ import {
   AVATAR_1_MODEL_ID,
   LIPSYNC_1_MODEL_ID,
   MINIMAX_H3_MODEL_ID,
+  BLENDER_RENDER_EEVEE_MODEL_ID,
+  BLENDER_RENDER_CYCLES_MODEL_ID,
   VEO_31_FAST_MODEL_ID,
   VEO_31_MODEL_ID,
 } from "../image-model-ids.js";
 
-import { GenerationModelDefinition, COMMON_IMAGE_RATIOS, EXTENDED_GEMINI_RATIOS, FLUX_RATIOS, VIDEO_RATIOS, WIDE_VIDEO_RATIOS, RUNWAY_VIDEO_RATIOS, SEEDANCE_VIDEO_RATIOS, IMAGE_RESOLUTIONS, SEEDANCE_DURATIONS, SEEDANCE_25_480P_DURATIONS, SEEDANCE_25_720P_DURATIONS, SEEDANCE_25_30S_DURATIONS } from "./types";
+import { GenerationModelDefinition, COMMON_IMAGE_RATIOS, EXTENDED_GEMINI_RATIOS, FLUX_RATIOS, VIDEO_RATIOS, WIDE_VIDEO_RATIOS, RUNWAY_VIDEO_RATIOS, SEEDANCE_VIDEO_RATIOS, IMAGE_RESOLUTIONS, SEEDANCE_DURATIONS, SEEDANCE_20_DURATIONS, SEEDANCE_25_480P_DURATIONS, SEEDANCE_25_720P_DURATIONS, SEEDANCE_25_30S_DURATIONS } from "./types";
 import { MODEL_KNOWLEDGE } from "./knowledge";
 
 export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition> = {
@@ -441,6 +443,40 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     referenceImages: false,
   },
 
+  // ── blender 節點能力標籤（2026-09-06 片AA，照 deploy-staging/blender-nodes 稿 §C）。
+  // blender_bridge 供應商（blender-local 本機橋）認領的 capability model_id——模型名
+  // 即引擎標籤（eevee=previz 存活配方 samples=1+RT off、cycles=品質檔）。不入
+  // SUPPORTED_* 列表 → C 端選單不可見（同 TTS/AV 服務條目先例）；ratios/resolutions
+  // 取 square 檔：bridge 實際渲染分辨率由腳本內 blender 相機決定，catalog 欄位僅供
+  // 平台側契約顯示（seed capability 契約與 /v1 入參校驗用）。
+  [BLENDER_RENDER_EEVEE_MODEL_ID]: {
+    id: BLENDER_RENDER_EEVEE_MODEL_ID,
+    displayName: "Blender Eevee Render",
+    kind: "image",
+    popularity: 30,
+    vendor: "Blender",
+    aspectRatios: ["1:1"],
+    resolutions: ["1k"],
+    defaultAspectRatio: "1:1",
+    defaultResolution: "1k",
+    // 本機節點零邊際成本（first_party 電費邊際≈0）；對外計費前由 admin 定價覆寫。
+    imageCredits: { "1k": 0 },
+    referenceImages: false,
+  },
+  [BLENDER_RENDER_CYCLES_MODEL_ID]: {
+    id: BLENDER_RENDER_CYCLES_MODEL_ID,
+    displayName: "Blender Cycles Render",
+    kind: "image",
+    popularity: 29,
+    vendor: "Blender",
+    aspectRatios: ["1:1"],
+    resolutions: ["1k"],
+    defaultAspectRatio: "1:1",
+    defaultResolution: "1k",
+    imageCredits: { "1k": 0 },
+    referenceImages: false,
+  },
+
   [VEO_31_FAST_MODEL_ID]: {
     id: VEO_31_FAST_MODEL_ID,
     displayName: "Google Veo 3.1 Fast",
@@ -504,8 +540,8 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     resolutions: ["480p", "720p"],
     defaultAspectRatio: "16:9",
     defaultResolution: "720p",
-    durations: SEEDANCE_DURATIONS,
-    defaultDuration: 5,
+    durations: SEEDANCE_20_DURATIONS,
+    defaultDuration: 10,
     videoCreditsPerSecond: { "480p": 100, "720p": 100 },
     referenceImages: true,
     supportsAudio: true,
@@ -521,8 +557,8 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     resolutions: ["480p", "720p"],
     defaultAspectRatio: "16:9",
     defaultResolution: "720p",
-    durations: SEEDANCE_DURATIONS,
-    defaultDuration: 5,
+    durations: SEEDANCE_20_DURATIONS,
+    defaultDuration: 10,
     videoCreditsPerSecond: { "480p": 80, "720p": 80 },
     referenceImages: true,
     supportsAudio: true,
@@ -538,8 +574,8 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     resolutions: ["480p", "720p", "1080p"],
     defaultAspectRatio: "16:9",
     defaultResolution: "720p",
-    durations: SEEDANCE_DURATIONS,
-    defaultDuration: 5,
+    durations: SEEDANCE_20_DURATIONS,
+    defaultDuration: 10,
     videoCreditsPerSecond: { "480p": 130, "720p": 130, "1080p": 160 },
     referenceImages: true,
     supportsAudio: true,
@@ -556,7 +592,7 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     defaultAspectRatio: "16:9",
     defaultResolution: "480p",
     durations: SEEDANCE_25_480P_DURATIONS,
-    defaultDuration: 5,
+    defaultDuration: 10,
     videoCreditsPerSecond: { "480p": 230 },
     referenceImages: true,
     supportsAudio: true,
@@ -573,7 +609,7 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     defaultAspectRatio: "16:9",
     defaultResolution: "720p",
     durations: SEEDANCE_25_720P_DURATIONS,
-    defaultDuration: 5,
+    defaultDuration: 10,
     videoCreditsPerSecond: { "720p": 280 },
     referenceImages: true,
     supportsAudio: true,

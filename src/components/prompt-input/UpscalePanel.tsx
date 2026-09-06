@@ -1,7 +1,7 @@
 "use client";
 
-import type { Dispatch, SetStateAction } from "react";
-import { ImagePlus, X } from "lucide-react";
+import { useState, type Dispatch, type SetStateAction } from "react";
+import { ImagePlus, Loader2, X } from "lucide-react";
 import { generationCoins, resolutionFromImageSize } from "@/lib/generation-model-catalog";
 import { PIXAI_UPSCALE_MODEL_ID } from "@/lib/image-model-ids.js";
 import { imageHelpers } from "@/lib/image-helpers";
@@ -38,6 +38,8 @@ export function UpscalePanel({
   upscaleResultUrl,
   setUpscaleResultUrl,
 }: UpscalePanelProps) {
+  // 下载要等整图 fetch 成 blob，转圈期间按钮禁点（瞬态 UI 态，不进父层）。
+  const [downloadBusy, setDownloadBusy] = useState(false);
   return (
             <div className="space-y-2.5 pt-1">
               <div className={ROW_CLASS}>
@@ -118,9 +120,18 @@ export function UpscalePanel({
                   <span className="min-w-0 flex-1 truncate text-ios-footnote text-[rgba(0,0,0,0.55)]">放大完成</span>
                   <button
                     type="button"
-                    onClick={() => imageHelpers.download(upscaleResultUrl, "upscale")}
-                    className="inline-flex h-8 shrink-0 cursor-pointer items-center gap-1 rounded-full bg-[rgba(0,0,0,0.05)] px-3 text-ios-footnote font-medium text-[rgba(0,0,0,0.65)] hover:bg-[rgba(0,0,0,0.09)]"
+                    disabled={downloadBusy}
+                    onClick={() => {
+                      if (downloadBusy) return;
+                      setDownloadBusy(true);
+                      imageHelpers
+                        .download(upscaleResultUrl, "upscale")
+                        .catch((error) => console.error("Failed to download image:", error))
+                        .finally(() => setDownloadBusy(false));
+                    }}
+                    className="inline-flex h-8 shrink-0 cursor-pointer items-center gap-1 rounded-full bg-[rgba(0,0,0,0.05)] px-3 text-ios-footnote font-medium text-[rgba(0,0,0,0.65)] hover:bg-[rgba(0,0,0,0.09)] disabled:cursor-not-allowed disabled:opacity-60"
                   >
+                    {downloadBusy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                     下载
                   </button>
                 </div>

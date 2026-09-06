@@ -23,7 +23,7 @@ export interface RegistryChannel {
   seedPriority: number;          // seed 進 supplier 表的 priority
   sitePriority: number;          // 站點隊列 ENV_CHANNEL_PRIORITIES 用
   chatImageModels: string[];     // 上游模型名走 /chat/completions 生圖（空 = 全走 images/generations）
-  adapterType?: "openai_images" | "metaso" | "openai_video"; // 缺省 openai_images；metaso 走自訂協議（見 metaso-upstream.ts），openai_video 走 /v1/videos 異步（見 openai-video-upstream.ts）
+  adapterType?: "openai_images" | "metaso" | "openai_video" | "blender_bridge"; // 缺省 openai_images；metaso 走自訂協議（見 metaso-upstream.ts），openai_video 走 /v1/videos 異步（見 openai-video-upstream.ts），blender_bridge 走橋 /v1/execute 同步單幀渲染（見 blender-node-upstream.ts）
   claims: RegistryChannelClaim[];
 }
 
@@ -189,5 +189,33 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
       },
     ],
   },
+  {
+    // ⚠ 本條目位於 add-supplier-channel.ts 的 marker 維護區內（片Y 稿 §A 拍板：手寫
+    // 落位、不再跑該工具）；若日後重跑工具，須把本條目重新貼回。
+    // 本機 RTX 5070 Laptop＋Blender 5.2.1 EGL（blender-bridge，127.0.0.1:8765）。
+    // first_party＝自營最快（與 adobe2api 同檔）：scheduler 第一排序鍵 supply_tier
+    // CASE → 0，本機 lease 空閒時必勝；橋併發 1（BLENDER_BRIDGE_CONCURRENCY 鐵律），
+    // 佔線時 scheduler 走 lease 過濾自然落下一節點，零新邏輯（片Y staging 稿 §A）。
+    // 能力標籤＝capability model_id：blender-render-eevee / blender-render-cycles
+    // 單幀渲染（多幀不進節點派發——片L 實錘單幀才是安全單位）。
+    label: "blender-local",
+    baseUrlEnv: "BLENDER_NODE_LOCAL_URL",   // VPS 側值固定 http://127.0.0.1:8765（片W 反向隧道裁定一字不改）
+    apiKeyEnv: "BLENDER_NODE_LOCAL_TOKEN",  // 橋側 Bearer 共享 token（同時作為 credentialRef）
+    enabledEnv: "BLENDER_NODE_LOCAL_ENABLED",
+    tier: "first_party",
+    seedPriority: 10,                       // 同 adobe2api 檔位
+    sitePriority: 10,
+    chatImageModels: [],                    // blender 節點無 chat 生圖概念，恆空
+    adapterType: "blender_bridge",
+    claims: [
+      // kinds 沿用 image_generate（單幀 PNG 產出語義同圖像生成，零枚舉擴散）；
+      // supplierModelId: null＝模型名即引擎標籤，adapter 腳本構造器按 modelId 選 engine。
+      { modelId: "blender-render-eevee", supplierModelId: null, kinds: ["image_generate"] },
+      { modelId: "blender-render-cycles", supplierModelId: null, kinds: ["image_generate"] },
+    ],
+  },
+  // blender-modal（managed_pool，片X Modal L4）與 blender-cnb（relay）只埋樁不註冊：
+  // 片X 未落盤（deploy-staging/blender-modal/ 不存在）、CNB 無實體節點——註冊即虛報能力。
+  // NODES-PLAN §5：節點 ≥3 且異構＋需要場景檔分發時才評估 Flamenco 3。
   // REGISTRY-ENTRIES-END
 ];

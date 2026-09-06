@@ -358,7 +358,7 @@ export function HistoryClient() {
         : ("empty" as const);
 
   return (
-    <div className="min-h-screen bg-transparent px-4 pb-28 pt-20 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-transparent px-4 pb-28 pt-8 sm:px-6 lg:px-8">
       <div className="mx-auto w-full max-w-[1440px]">
         <div className="mb-4 lg:mb-5 lg:flex lg:items-center lg:gap-4">
           {/* 移动端：标题左、计数+多选右同一行；桌面端 lg:contents 拆散进同一条水平工具栏。

@@ -11,6 +11,7 @@ import { RefreshCw, Image as ImageIcon, ArrowRight, CornerDownRight, Wrench, Shi
 import { CanvasNodeType, errorDetailsText, type CanvasNode, type CanvasNodeStatus } from "@/lib/canvas/types";
 import { svgToDataUrl } from "@/lib/svg-data-url";
 import { DirectorMiniViewport } from "@/components/director-mini/DirectorMiniViewport";
+import { Scene3dCardBody } from "./Scene3dCardBody";
 import { STATUS_LABEL } from "./constants";
 
 function isUrl(value: string): boolean {
@@ -607,6 +608,11 @@ export function NodeBody({
             </div>
           </div>
         );
+      }
+      case CanvasNodeType.Scene3d: {
+        // 3D 場景卡（Astra PRD P1-3）：主體=turntable 視頻+stills 網格+資產下載，
+        // 全部封裝在 Scene3dCardBody（複製 Video 分支輪子），此處只做型別分發。
+        return <Scene3dCardBody node={node} />;
       }
       case CanvasNodeType.Group:
         return (

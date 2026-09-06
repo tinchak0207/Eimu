@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ChevronLeft, ChevronRight, Coins, Download, IdCard, Layers, Megaphone, RotateCcw, SlidersHorizontal, Star, Trash2, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Coins, Download, IdCard, Layers, Loader2, Megaphone, RotateCcw, SlidersHorizontal, Star, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   formatAbsoluteTime,
@@ -20,7 +20,7 @@ export interface HistoryLightboxProps {
   onClose: () => void;
   onNavigate: (index: number) => void;
   onToggleStar: (id: string) => void;
-  onDownload: (entry: HistoryEntry) => void;
+  onDownload: (entry: HistoryEntry) => void | Promise<void>;
   onDelete: (id: string) => void;
   onReuse?: (entry: HistoryEntry) => void;
   /** 把这张图锚定成角色/场景/风格卡。缺席时工具栏不挂这颗按钮。 */
@@ -44,18 +44,21 @@ function ToolbarButton({
   onClick,
   active,
   tone = "neutral",
+  disabled = false,
   children,
 }: {
   label: string;
   onClick: () => void;
   active?: boolean;
   tone?: "neutral" | "danger" | "gold";
+  disabled?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       aria-label={label}
       aria-pressed={active}
       title={label}
@@ -92,6 +95,8 @@ export function HistoryLightbox({
   onPublishCase,
 }: HistoryLightboxProps) {
   const [mounted, setMounted] = useState(false);
+  /** 下载要等整图 fetch 成 blob，期间工具栏下载钮转圈防重复点击。 */
+  const [downloadBusy, setDownloadBusy] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   /** 打开前的焦点，关闭时要还回去，否则键盘用户会被扔回页面顶部。 */
@@ -246,8 +251,16 @@ export function HistoryLightbox({
               <Star className="h-4 w-4" fill={entry.starred ? "currentColor" : "none"} />
             </ToolbarButton>
             {src && (
-              <ToolbarButton label="下载" onClick={() => onDownload(entry)}>
-                <Download className="h-4 w-4" />
+              <ToolbarButton
+                label="下载"
+                disabled={downloadBusy}
+                onClick={() => {
+                  if (downloadBusy) return;
+                  setDownloadBusy(true);
+                  Promise.resolve(onDownload(entry)).finally(() => setDownloadBusy(false));
+                }}
+              >
+                {downloadBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
               </ToolbarButton>
             )}
             {src && onSaveCard && (

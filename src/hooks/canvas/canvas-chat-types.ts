@@ -95,6 +95,12 @@ export function compactMetadataForAgent(metadata: CanvasNodeMetadata | undefined
     if (typeof metadata.healthOk === "boolean") out.healthOk = metadata.healthOk;
     if (typeof metadata.revision === "number") out.revision = metadata.revision;
   }
+  // 3D 場景卡節點（Astra PRD P1-3）：sceneCard 欄位族整族透傳——六欄全是小指針
+  // （URL/路徑/一句摘要/時長），無 SVG 級重料；漏傳 = 刷新後 3D 場景卡變空殼
+  //（2026-09-03 快照壓縮器 director 事故同構）。往復合同測試釘死。
+  if (metadata.sceneCard) {
+    out.sceneCard = metadata.sceneCard;
+  }
   return Object.keys(out).length > 0 ? out : undefined;
 }
 

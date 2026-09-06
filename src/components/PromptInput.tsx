@@ -2,13 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
 import dynamic from "next/dynamic";
-import { Bot, X } from "lucide-react";
+import { Bot, Sparkles, Square, X } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 import type { AgentSseEvent } from "@/lib/agent-chat-types";
 import { Textarea } from "@/components/ui/textarea";
 import { getRandomSuggestions, Suggestion } from "@/lib/suggestions";
 import { STYLE_PRESETS, type StylePreset } from "@/lib/prompt-enhancer";
 import { generationCoins, generationModel, type AspectRatio, type OutputResolution } from "@/lib/generation-model-catalog";
-import { insertPromptSnippet, replacePromptStyleSuffix } from "@/lib/prompt-compose";
+import { replacePromptSnippet, replacePromptStyleSuffix } from "@/lib/prompt-compose";
 import type { ReferenceImage } from "@/lib/image-types";
 import { usePricingRevision } from "@/hooks/use-pricing-revision";
 import type { ReflectedParams } from "@/lib/agent-param-reflect";
@@ -254,8 +255,11 @@ export function PromptInput({
   // 当前模型是否支持参考图：不支持时隐藏上传入口，而不是让用户上传完被清空。
   const referenceImagesSupported = Boolean(selectedModel?.referenceImages);
 
+  /** 上一次点入的示例模板：再点别的模板时先剔除它，只保留最新一个。 */
+  const lastSuggestionRef = useRef<string | null>(null);
   const handleSuggestionSelect = (prompt: string) => {
-    setInput((current) => insertPromptSnippet(current, prompt));
+    setInput((current) => replacePromptSnippet(current, lastSuggestionRef.current, prompt));
+    lastSuggestionRef.current = prompt;
   };
 
   const handleStyleChange = (preset: StylePreset) => {
@@ -270,11 +274,20 @@ export function PromptInput({
 
   const updateSuggestions = () => setSuggestions(getRandomSuggestions());
 
+  const { toast } = useToast();
+  const emptyHint = () =>
+    toast({ title: "先描述你的想法", description: "在输入框写下画面描述再开始创作" });
+
   const handleSubmit = () => {
     // Not logged in: always allow click → parent will open auth modal
     if (!isLoggedIn) {
       suppress();
       onSubmit(input);
+      return;
+    }
+    // 空输入：按钮保持可点，点击给人话提示——死寂的 disabled 是「点了没反应」的元凶。
+    if (displayMode === "generate" && !input.trim()) {
+      emptyHint();
       return;
     }
     if (!isLoading && input.trim()) {
@@ -433,9 +446,31 @@ export function PromptInput({
               ref={refUploadRef}
             />
           )}
-          <p className="pointer-events-none absolute bottom-3 right-4 hidden select-none text-ios-caption1 text-[rgba(0,0,0,0.46)] sm:block">
+          <p className="pointer-events-none absolute bottom-[19px] right-[64px] hidden select-none text-ios-caption1 text-[rgba(0,0,0,0.46)] sm:block">
             按 Enter 生成 · Shift + Enter 换行
           </p>
+          {displayMode === "generate" && (
+            isLoading && onCancelGenerate ? (
+              <button
+                type="button"
+                onClick={onCancelGenerate}
+                aria-label="停止生成"
+                className="absolute bottom-2.5 right-4 z-30 flex h-9 w-9 cursor-pointer items-center justify-center rounded-full bg-ios-red text-white shadow-[0_4px_16px_rgba(255,59,48,0.45)] transition-all duration-150 hover:bg-[#e0342c] hover:scale-105 active:scale-90"
+              >
+                <Square className="h-3.5 w-3.5 fill-current" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handlePrimaryAction}
+                disabled={isLoading}
+                aria-label="开始创作"
+                className="absolute bottom-2.5 right-4 z-30 flex h-9 w-9 cursor-pointer items-center justify-center rounded-full bg-[#007AFF] text-white shadow-[0_4px_18px_rgba(0,122,255,0.55),0_0_0_1px_rgba(0,122,255,0.35)] transition-all duration-150 hover:bg-[#0066DD] hover:scale-105 hover:shadow-[0_6px_22px_rgba(0,122,255,0.70)] active:scale-90 disabled:cursor-not-allowed disabled:bg-[rgba(0,0,0,0.16)] disabled:shadow-none disabled:scale-100"
+              >
+                <Sparkles className="h-4 w-4" />
+              </button>
+            )
+          )}
         </div>
 
         {/* ── D-24 状态A：停顿 >5 秒才浮现的「Agent 帮你完成」 ──

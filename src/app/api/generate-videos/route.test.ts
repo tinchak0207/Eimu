@@ -45,3 +45,19 @@ test("video generation accepts text, image references, aspect ratio, resolution,
   assert.match(source, /data:\$\{image\.type \|\| "image\/png"\};base64,/);
   assert.match(source, /generate_audio: generateAudio/);
 });
+
+// ── 3D 場景卡嵌合（片AC，2026-09-06）─────────────────────────────────────
+
+test("video generation threads optional scene_card and camera_trajectory into DirectorOptions (missing fields = zero change)", () => {
+  // JSON body 可選欄（snake_case 讀取）
+  assert.match(source, /optionalObject\(body\.scene_card\)/);
+  assert.match(source, /optionalObject\(body\.camera_trajectory\)/);
+  // 融合層短路：fuseSceneVideo 回 null（缺欄/髒欄）時不展開任何 DirectorOptions 欄
+  assert.match(source, /fuseSceneVideo\(parsed\.sceneCard, parsed\.cameraTrajectory\)/);
+  assert.match(source, /sceneCard: sceneVideoFusion\.sceneCard, cameraTrajectory: sceneVideoFusion\.cameraTrajectory/);
+  // 帶欄生效：data URL 參考幀轉 File 進 multipart 圖位（cap 2、不頂用戶上傳位）
+  assert.match(source, /2 - referenceFiles\.length/);
+  assert.match(source, /referenceFiles\.push\(\.\.\.files\)/);
+  // 上游調用吃融合後的參考檔（缺欄時 = 原 parsed.referenceImages 逐字同）
+  assert.match(source, /referenceFiles,/);
+});

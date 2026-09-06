@@ -68,8 +68,8 @@ export function ActionRow({
         fillAvailableHeight && "border-t border-[rgba(0,0,0,0.06)] pt-3 pb-[env(safe-area-inset-bottom,12px)]",
       )}
     >
-          {/* 改图 / 放大 快捷入口 — 左侧 */}
-          <div className="flex items-center gap-1.5 shrink-0 self-start">
+          {/* 改图 / 放大 快捷入口 — 手机端（flex-col）整组水平居中，桌面靠左 */}
+          <div className="flex items-center gap-1.5 shrink-0 self-center sm:self-start">
             <button
               type="button"
               onClick={() => onModeChange(mode === "edit" ? "generate" : "edit")}
@@ -130,15 +130,14 @@ export function ActionRow({
             </div>
           ) : null}
 
-          {/* Single CTA — elevated blue, strong shadow, scale on hover。
-              改图／放大模式下，同一颗按钮承担对应动作。
-              agent 模式下这颗按钮**不存在**：送出由聊天区自己的输入区负责，
-              这里再摆一颗「开始创作」会有两个送出口，按哪个都说不清。 */}
+          {/* Single CTA — generate 模式的「开始创作」已上移为输入框右下角的
+              圆形火花按钮；这里只剩改图／放大模式的模式动作按钮。 */}
+          {displayMode !== "generate" ? (
           <button
             type="button"
             onClick={handlePrimaryAction}
             disabled={primaryDisabled}
-            className="inline-flex h-11 w-full shrink-0 items-center justify-center gap-2 rounded-ios-xl bg-[#007AFF] px-6 text-ios-body font-semibold text-white shadow-[0_6px_24px_rgba(0,122,255,0.40),0_2px_8px_rgba(0,122,255,0.24)] transition-all duration-200 hover:bg-[#0066DD] hover:shadow-[0_10px_32px_rgba(0,122,255,0.52),0_4px_12px_rgba(0,122,255,0.30)] hover:scale-[1.025] active:scale-[0.97] disabled:cursor-not-allowed disabled:bg-[rgba(0,0,0,0.16)] disabled:shadow-none disabled:scale-100 cursor-pointer sm:w-auto"
+            className="inline-flex h-11 w-full shrink-0 items-center justify-center gap-2 rounded-ios-xl bg-[#007AFF] px-6 text-ios-body font-semibold text-white shadow-[0_6px_24px_rgba(0,122,255,0.40),0_2px_8px_rgba(0,122,255,0.24)] transition-colors duration-200 hover:bg-[#0066DD] hover:shadow-[0_10px_32px_rgba(0,122,255,0.52),0_4px_12px_rgba(0,122,255,0.30)] disabled:cursor-not-allowed disabled:bg-[rgba(0,0,0,0.16)] disabled:shadow-none cursor-pointer sm:ml-auto sm:w-auto"
           >
             {displayMode === "edit" ? (
               editBusy ? (
@@ -160,16 +159,6 @@ export function ActionRow({
               )
             )}
           </button>
-          {/* 人工终止：生成中在 CTA 旁提供可点的「停止」次级按钮
-              （样式照抄本文件改图/放大入口的次级 pill class）。 */}
-          {displayMode === "generate" && isLoading && onCancelGenerate ? (
-            <button
-              type="button"
-              onClick={onCancelGenerate}
-              className="inline-flex h-11 cursor-pointer shrink-0 items-center justify-center rounded-full px-5 text-[13px] font-medium transition-all duration-200 bg-[rgba(0,0,0,0.05)] text-[rgba(0,0,0,0.65)] hover:bg-[rgba(0,0,0,0.09)]"
-            >
-              停止
-            </button>
           ) : null}
         </div>
   );

@@ -55,3 +55,36 @@ test("非 director 節點不受影響：SVG 欄位從不外傳", () => {
   const compacted = compactMetadataForAgent({ content: "hello", topViewSvg: BIG_SVG });
   assert.deepEqual(compacted, { content: "hello" });
 });
+
+// ── 3D 場景卡（2026-09-06 Astra PRD P1-3）：sceneCard 欄位族往復合同 ──
+
+const SCENE_CARD = {
+  turntable_url: "https://cdn.example.com/turntable.mp4",
+  stills_urls: ["https://cdn.example.com/s1.png", "https://cdn.example.com/s2.png", "https://cdn.example.com/s3.png"],
+  blend_path: "/api/scene-assets/scene_01.blend",
+  glb_path: "/api/scene-assets/scene_01.glb",
+  scene_summary: "废弃灯塔主场景 · 白模已上材质",
+  duration_ms: 8000,
+};
+
+test("scene_3d 節點壓縮保留 sceneCard 六欄", () => {
+  const compacted = compactMetadataForAgent({ sceneCard: SCENE_CARD });
+  assert.ok(compacted);
+  assert.deepEqual(compacted.sceneCard, SCENE_CARD);
+});
+
+test("壓縮輸出經還原端 toNodeMetadata 後 sceneCard 不丟（往復合同）", () => {
+  const meta: CanvasNodeMetadata = { sceneCard: SCENE_CARD };
+  const restored = toNodeMetadata(compactMetadataForAgent(meta));
+  assert.deepEqual(restored.sceneCard, SCENE_CARD);
+});
+
+test("sceneCard 非契約形狀在還原端整包丟棄（缺 turntable_url）", () => {
+  const restored = toNodeMetadata({ sceneCard: { stills_urls: ["x.png"], scene_summary: "殘形" } });
+  assert.equal(restored.sceneCard, undefined);
+});
+
+test("非 scene_3d 節點不受影響：無 sceneCard 不外傳空欄位", () => {
+  const compacted = compactMetadataForAgent({ content: "hello" });
+  assert.deepEqual(compacted, { content: "hello" });
+});

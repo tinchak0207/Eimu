@@ -60,6 +60,13 @@ export const LUMA_RAY3_HDR_MODEL_ID = /** @type {const} */ ("luma-ray-3-hdr");
 export const KLING_25_TURBO_MODEL_ID = /** @type {const} */ ("kling-2.5-turbo");
 export const MINIMAX_H3_MODEL_ID = /** @type {const} */ ("minimax-h3");
 
+// blender 節點能力標籤（片Y/片AA，2026-09-06）：capability model_id 即能力標籤
+// （NODES-PLAN §3.1，零路由欄位擴散）。不入 SUPPORTED_* 列表（同 TTS/AV 先例）：
+// C 端選單不可見，僅 supplier capability/adapter/定價鍵承載。
+export const BLENDER_RENDER_EEVEE_MODEL_ID = /** @type {const} */ ("blender-render-eevee");
+export const BLENDER_RENDER_CYCLES_MODEL_ID = /** @type {const} */ ("blender-render-cycles");
+export const BLENDER_NODE_MODEL_IDS = [BLENDER_RENDER_EEVEE_MODEL_ID, BLENDER_RENDER_CYCLES_MODEL_ID];
+
 export const SUPPORTED_IMAGE_MODEL_IDS = [
   DEFAULT_IMAGE_MODEL_ID,
   NANO_BANANA_2_MODEL_ID,

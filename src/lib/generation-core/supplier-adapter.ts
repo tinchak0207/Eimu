@@ -1,5 +1,6 @@
 import { aspectRatioFromImageSize } from "@/lib/generation-model-catalog";
 import { resolveAdobe2ApiImageModelId, resolveAdobe2ApiVideoModelId } from "@/lib/generation-core/adobe2api-upstream";
+import { generateWithBlenderNode } from "@/lib/generation-core/blender-node-upstream";
 import { generateWithFilmera } from "@/lib/generation-core/filmera-upstream";
 import { generateWithMetaso, isMetasoModel } from "@/lib/generation-core/metaso-upstream";
 import { generateWithNewApiVideo, isNewApiVideoKernelEnabled } from "@/lib/generation-core/newapi-video-upstream";
@@ -119,6 +120,11 @@ async function requestSupplier(supplier: SupplierRecord, input: SupplierGenerati
   }
   if (supplier.adapterType === "openai_video") {
     return generateWithOpenaiVideo(supplier, input);
+  }
+  // blender 節點（片Y/片AA）：同步單幀渲染——bridge /v1/execute 契約，見
+  // blender-node-upstream.ts。同步 adapter：無 provider task id，不進異步對帳。
+  if (supplier.adapterType === "blender_bridge") {
+    return generateWithBlenderNode(supplier, input);
   }
   const references = input.workflow.references ?? [];
   const headers: Record<string, string> = {

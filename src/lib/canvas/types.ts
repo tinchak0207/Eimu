@@ -35,6 +35,13 @@ export enum CanvasNodeType {
    * metadata 帶服務端預渲染 SVG 示意（topViewSvg/cameraViewSvg）與分鏡摘要。
    */
   Director = "director",
+  /**
+   * 3D 場景卡（2026-09-06 Astra PRD P1-3）：3D 導演 subagent 出片落地位——
+   * turntable 視頻主體 + stills 縮圖網格 + 資產下載（.blend/.glb），P1 只讀+播放。
+   * metadata 走 sceneCard 欄位族（Scene3dCardMetadata），雙白名單鐵律見
+   * canvas-snapshot-compressor 記憶。
+   */
+  Scene3d = "scene_3d",
 }
 
 export type CanvasNodeStatus = "idle" | "success" | "loading" | "error";
@@ -141,6 +148,30 @@ export interface CanvasNodeMetadata {
   cameraViewSvg?: string;
   /** 導演工程 revision（gateway doc.revision 透傳）：已掛載視口比對變化重拉 state。 */
   revision?: number;
+  // ── 3D 場景卡節點（type: scene_3d，2026-09-06 Astra PRD P1-3；3D 導演 subagent 回傳寫入）──
+  /** 3D 場景卡欄位族（單一物件欄位，內部形狀 = Scene3dCardMetadata）。 */
+  sceneCard?: Scene3dCardMetadata;
+}
+
+/**
+ * 3D 場景卡 metadata 形狀（契約：3D 導演 subagent 回傳寫入）。
+ * 鐵律（canvas-snapshot-compressor 事故教訓）：本欄位族必須同步兩處白名單——
+ * 讀取端 toNodeMetadata（layout.ts）與上行壓縮端 compactMetadataForAgent
+ * （canvas-chat-types.ts），漏一端 = 刷新後欄位憑空消失；往復合同測試釘死。
+ */
+export interface Scene3dCardMetadata {
+  /** turntable 旋轉展示視頻（mp4/webm 可播放 URL）。 */
+  turntable_url: string;
+  /** 渲染静帧縮圖（3-6 張，卡內網格展示）。 */
+  stills_urls: string[];
+  /** .blend 源檔下載路徑。 */
+  blend_path: string;
+  /** .glb 交換格式下載路徑。 */
+  glb_path: string;
+  /** 場景摘要（一句話，副標題展示）。 */
+  scene_summary: string;
+  /** turntable 時長（ms；無值時播放器自帶 duration 顯示）。 */
+  duration_ms: number;
 }
 
 export interface CanvasNode {
@@ -303,6 +334,7 @@ export const CANVAS_NODE_DEFAULT_SIZE: Record<CanvasNodeType, { width: number; h
   [CanvasNodeType.Prompt]: { width: 340, height: 200, title: "提示词" },
   [CanvasNodeType.Reference]: { width: 300, height: 260, title: "参考图" },
   [CanvasNodeType.Director]: { width: 420, height: 300, title: "导演台" },
+  [CanvasNodeType.Scene3d]: { width: 420, height: 360, title: "3D 场景卡" },
 };
 
 // ─────────────────────────────────────────── 批次 & 資源參考

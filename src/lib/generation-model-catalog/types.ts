@@ -158,8 +158,11 @@ export const RUNWAY_VIDEO_RATIOS = ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"]
 export const SEEDANCE_VIDEO_RATIOS = ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"] as const;
 export const IMAGE_RESOLUTIONS = ["1k", "2k", "4k"] as const;
 export const SEEDANCE_DURATIONS = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] as const;
-// seedance 2.5 时长档位（上游 sd4-seedance-2.5-480p 4–30s / sd4-seedance-2.5-720p 4–29s）
-export const SEEDANCE_25_480P_DURATIONS = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30] as const;
-export const SEEDANCE_25_720P_DURATIONS = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29] as const;
+// 2026-09-05 暴君裁定：Seedance 全系只卖 ≥10 秒（10 秒以下亏本）。
+// SEEDANCE_DURATIONS 保留给非 Seedance 模型（MiniMax H3）沿用。
+export const SEEDANCE_20_DURATIONS = [10, 11, 12, 13, 14, 15] as const;
+// seedance 2.5 时长档位（上游 sd4-seedance-2.5-480p / 720p，售卖下限 10s）
+export const SEEDANCE_25_480P_DURATIONS = [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30] as const;
+export const SEEDANCE_25_720P_DURATIONS = [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29] as const;
 // drama 渠道 sd25-30s：30 秒固定档，唯一时长
 export const SEEDANCE_25_30S_DURATIONS = [30] as const;

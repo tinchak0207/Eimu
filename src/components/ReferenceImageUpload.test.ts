@@ -28,14 +28,18 @@ test("reference image previews are not revoked when upload widget remounts", () 
   assert.match(source, /const removeImage[\s\S]*?URL\.revokeObjectURL\(target\.previewUrl\)/);
 });
 
-test("prompt variant uses a plus upload button and expandable preview", () => {
+test("prompt variant uses an AI-assistant-styled upload button and hover-revealed preview", () => {
+  // 2026-09-05 暴君裁定：上傳鈕對齊 AI 助理 composer（藍底圓鈕 ImagePlus）；
+  // 參考圖面板只在 hover（或手動展開）時顯示，移除只能按縮略圖上的 X。
   const upload = read("src/components/ReferenceImageUpload.tsx");
   const prompt = read("src/components/PromptInput.tsx");
   const playground = read("src/components/ImagePlayground.tsx");
 
   assert.match(upload, /variant\?:\s*"panel"\s*\|\s*"prompt"/);
   assert.match(upload, /aria-label="上传参考图"/);
-  assert.match(upload, /<Plus/);
+  assert.match(upload, /<ImagePlus/);
+  assert.match(upload, /onMouseEnter=\{\(\) => setHoverOpen\(true\)\}/);
+  assert.match(upload, /onMouseLeave=\{\(\) => setHoverOpen\(false\)\}/);
   assert.match(upload, /展开参考图预览/);
   assert.match(upload, /role="dialog"/);
   assert.match(prompt, /variant="prompt"/);
@@ -52,8 +56,9 @@ test("prompt reference preview fills a single image and scrolls instead of overf
   assert.match(source, /previewCount === 1 \? "grid-cols-1"/);
   assert.match(source, /max-h-\[min\(46dvh,16rem\)\] overflow-y-auto/);
   assert.match(source, /inset-x-0 w-auto max-w-\[22rem\]/);
-  assert.match(source, /onClick=\{\(\) => setIsExpanded\(false\)\}/);
-  assert.match(source, /<X className="h-3\.5 w-3\.5" \/>/);
+  // 面板 header 的 X 已刪（按了會被誤會成「移除參考圖」）；移除只走縮略圖 X。
+  assert.doesNotMatch(source, /onClick=\{\(\) => setIsExpanded\(false\)\}/);
+  assert.match(source, /aria-label="移除参考图"/);
 });
 
 test("prompt reference controls expose 44px mobile hit targets", () => {
@@ -65,20 +70,23 @@ test("prompt reference controls expose 44px mobile hit targets", () => {
   assert.match(source, /title="关闭预览"[\s\S]*?h-11 w-11/);
 });
 
-test("prompt upload keeps a 44px hit target with a half-size visible control", () => {
+test("prompt upload button mirrors the AI-assistant composer pill with a 44px mobile target", () => {
   const source = read("src/components/ReferenceImageUpload.tsx");
 
-  assert.match(source, /className="flex min-h-11 min-w-11 items-center justify-center text-black\/55/);
-  assert.match(source, /h-\[22px\] w-\[22px\]/);
-  assert.match(source, /<Plus className="h-2 w-2" \/>/);
+  // 手機 44px（h-11 w-11）、桌面收小（sm:h-8 sm:w-8）；配色語法與 AgentComposer 附件鈕同源。
+  assert.match(source, /flex h-11 w-11 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-full/);
+  assert.match(source, /bg-ios-blue\/10 text-ios-blue/);
+  assert.match(source, /<ImagePlus className="h-5 w-5"/);
 });
 
 test("prompt reference preview opens a skeleton immediately and keeps a polished scroll container", () => {
   const source = read("src/components/ReferenceImageUpload.tsx");
 
   assert.match(source, /const \[pendingCount, setPendingCount\] = useState\(0\)/);
-  assert.match(source, /setPendingCount\(referenceCandidates\.length\);[\s\S]*?setIsExpanded\(true\);/);
-  assert.match(source, /isExpanded && \(value\.length > 0 \|\| pendingCount > 0\)/);
+  // 拖入即出骨架（pendingCount + processing），不再自動彈面板——面板 hover 才現。
+  assert.match(source, /setPendingCount\(referenceCandidates\.length\);[\s\S]*?setIsProcessing\(true\);/);
+  assert.match(source, /\(isExpanded \|\| hoverOpen\) && \(value\.length > 0 \|\| pendingCount > 0\)/);
+  assert.doesNotMatch(source, /setPendingCount\(referenceCandidates\.length\);[\s\S]{0,80}setIsExpanded\(true\);/);
   assert.match(source, /Array\.from\(\{ length: pendingCount \}\)/);
   assert.match(source, /\[scrollbar-width:none\] \[&::\-webkit-scrollbar\]:hidden/);
   assert.match(source, /sticky top-0 z-10/);

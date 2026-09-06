@@ -16,7 +16,7 @@ export interface HistoryGridProps {
   onOpen: (entry: HistoryEntry) => void;
   onToggleSelect: (id: string) => void;
   onToggleStar: (id: string) => void;
-  onDownload: (entry: HistoryEntry) => void;
+  onDownload: (entry: HistoryEntry) => void | Promise<void>;
   onDelete: (id: string) => void;
   onReuse?: (entry: HistoryEntry) => void;
   /** D-18：把这条记录交给 AI 助理继续做。缺席时卡片不挂这颗按钮。 */

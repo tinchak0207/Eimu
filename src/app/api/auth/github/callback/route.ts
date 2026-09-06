@@ -5,8 +5,10 @@ import {
   buildGitHubEmail,
   buildGitHubPassword,
   buildGitHubUsername,
+  extractTicketFromState,
   type GitHubProfile,
 } from "@/lib/github-auth";
+import { deliverHandoff } from "@/lib/pwa-handoff";
 
 export const preferredRegion = "sfo1";
 
@@ -74,7 +76,17 @@ export async function GET(req: NextRequest) {
   const state = req.nextUrl.searchParams.get("state");
   const stateCookie = req.cookies.get("github_oauth_state")?.value;
 
-  if (!code || !state || !stateCookie || state !== stateCookie) {
+  // PWA 跨浏览器交接分支：state 内嵌 handoff ticket（常用浏览器打开授权链
+  // 接，无本站 state cookie）。ticket 是 128-bit 随机 hex + 一次性消费，足以
+  // 替代 state cookie 的 CSRF 防護；其余（exchange/注册/login）全走原路径。
+  const handoffTicket = state ? extractTicketFromState(state) : null;
+  if (handoffTicket) {
+    // 落进下方共享流程；仅在 state 校验与最终 redirect 两处分叉。
+    // handoff 链路同样必须有 code：GitHub 只在成功授权时回跳。
+    if (!code) {
+      return NextResponse.redirect(`${getBaseUrl(req)}/?auth_error=github_state`);
+    }
+  } else if (!code || !state || !stateCookie || state !== stateCookie) {
     return NextResponse.redirect(`${getBaseUrl(req)}/?auth_error=github_state`);
   }
 
@@ -106,6 +118,31 @@ export async function GET(req: NextRequest) {
       throw new Error(`github_login:${loginResult.message || "unknown"}`);
     }
 
+    // PWA 交接分支：把会话投递到 ticket（PWA 侧轮询 claim 领回）；投递失败
+    // 不挡主流程——浏览器侧照常拿到 cookie。
+    if (handoffTicket) {
+      try {
+        await deliverHandoff(handoffTicket, loginResult.token, loginResult.user);
+      } catch (error) {
+        console.error("[auth/github/handoff-deliver]", error);
+      }
+      const handoffRedirect = NextResponse.redirect(`${getBaseUrl(req)}/auth/complete?handoff=1`);
+      handoffRedirect.cookies.set("github_oauth_state", "", { path: "/", maxAge: 0 });
+      handoffRedirect.cookies.set("napi_token", loginResult.token, {
+        path: "/",
+        maxAge: 60 * 60 * 24 * 30,
+        sameSite: "lax",
+        secure: true,
+      });
+      handoffRedirect.cookies.set("napi_user", encodeURIComponent(JSON.stringify(loginResult.user)), {
+        path: "/",
+        maxAge: 60 * 60 * 24 * 30,
+        sameSite: "lax",
+        secure: true,
+      });
+      return handoffRedirect;
+    }
+
     const redirect = NextResponse.redirect(`${getBaseUrl(req)}/auth/complete`);
     redirect.cookies.set("github_oauth_state", "", { path: "/", maxAge: 0 });
     redirect.cookies.set("napi_token", loginResult.token, {
@@ -114,7 +151,11 @@ export async function GET(req: NextRequest) {
       sameSite: "lax",
       secure: true,
     });
-    redirect.cookies.set("napi_user", JSON.stringify(loginResult.user), {
+    // 值必須 encodeURIComponent：客戶端 setCookieValue/getCookieValue 按
+    // encode/decode 對稱寫死，裸 JSON 含 `"` `,` 屬 RFC 6265 非法字節，
+    // 嚴格的瀏覽器會整顆丟棄 → localStorage 被清後 cookie 兜底失效，
+    // 表現就是「明明登過錄卻偶爾跳未登录」（2026-09-05）。
+    redirect.cookies.set("napi_user", encodeURIComponent(JSON.stringify(loginResult.user)), {
       path: "/",
       maxAge: 60 * 60 * 24 * 30,
       sameSite: "lax",

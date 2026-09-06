@@ -197,6 +197,10 @@ export function CanvasNodeView({
       case CanvasNodeType.Director:
         // 導演台：Video 色系（#0E7FA8），圖標換 Clapperboard 區分身份，不新發色。
         return { label: "3D 导演", Icon: Clapperboard, cls: "bg-[rgba(90,200,250,0.14)] text-[#0E7FA8]", bar: "bg-[#0E7FA8]" };
+      case CanvasNodeType.Scene3d:
+        // 3D 場景卡（Astra PRD P1-3）：場景=青色系（與 SceneCard 同色源不新發色），
+        // 圖標換 Mountain 與 2D 場景同源、靠「3D 场景」標籤區分身份。
+        return { label: "3D 场景", Icon: Mountain, cls: "bg-[rgba(90,200,250,0.14)] text-[#0E7FA8]", bar: "bg-[#0E7FA8]" };
       case CanvasNodeType.Group:
         return { label: "组", Icon: Boxes, cls: "bg-black/5 text-muted-foreground", bar: "bg-black/30" };
       default:

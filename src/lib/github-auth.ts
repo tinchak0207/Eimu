@@ -42,3 +42,18 @@ export function buildGitHubDisplayName(profile: GitHubProfile) {
 export function buildGitHubEmail(profile: GitHubProfile) {
   return `github-${profile.id}-gh4@users.noreply.github.com`;
 }
+
+// PWA handoff：跨浏览器交接时 state 里额外携带一次性 ticket。
+// state 与 ticket 都是不含 "." 的字符串（state = randomUUID，ticket = hex），
+// 用 "." 分隔可逆；无 ticket 的 state 保持原样，老链路零影响。
+export function embedTicketInState(baseState: string, ticket: string): string {
+  return `${baseState}.${ticket}`;
+}
+
+export function extractTicketFromState(state: string): string | null {
+  const parts = state.split(".");
+  if (parts.length !== 2) return null;
+  const [base, ticket] = parts;
+  if (!base || !ticket) return null;
+  return ticket;
+}

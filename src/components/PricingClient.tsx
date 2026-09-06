@@ -35,6 +35,8 @@ import { usePricingRevision } from "@/hooks/use-pricing-revision";
 import { fetchAffCode, quotaToCoins, redeemTopupCode } from "@/lib/new-api-client";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import { isStandalonePwa, createHandoffLogin } from "@/lib/github-login";
+import { PwaHandoffPanel } from "@/components/PwaHandoffPanel";
 
 /**
  * 2026-08-25 聚焦弹窗化重构：首屏无滚动看全（周期切换 + 三档卡片核心价），
@@ -289,6 +291,23 @@ export function PricingClient() {
   const [affLoading, setAffLoading] = useState(false);
   const [redeemCode, setRedeemCode] = useState("");
   const [redeemLoading, setRedeemLoading] = useState(false);
+  // PWA 登录交接面板（standalone 内 GitHub 授权走跨浏览器 handoff）。
+  const [pwaHandoffUrl, setPwaHandoffUrl] = useState<string | null>(null);
+
+  // PWA standalone：GitHub 登录态带不进来，改走跨浏览器交接面板。
+  const startGithubLogin = () => {
+    if (isStandalonePwa()) {
+      void createHandoffLogin().then((handoff) => {
+        if (handoff) {
+          setPwaHandoffUrl(handoff.loginUrl);
+          return;
+        }
+        window.location.href = "/api/auth/github/start";
+      });
+      return;
+    }
+    window.location.href = "/api/auth/github/start";
+  };
   const [redeemedCoins, setRedeemedCoins] = useState<number | null>(null);
   // 默认选中主力方案：想买默认档的人仍然只需一次点击。
   const [selectedPlanId, setSelectedPlanId] = useState("popular");
@@ -340,7 +359,7 @@ export function PricingClient() {
   };
 
   const handleFetchAff = async () => {
-    if (!token) { window.location.href = "/api/auth/github/start"; return; }
+    if (!token) { startGithubLogin(); return; }
     setAffLoading(true);
     try {
       const res = await fetchAffCode(token);
@@ -362,7 +381,7 @@ export function PricingClient() {
   };
 
   const handleRedeem = async () => {
-    if (!token) { window.location.href = "/api/auth/github/start"; return; }
+    if (!token) { startGithubLogin(); return; }
     if (!redeemCode.trim()) return;
     setRedeemLoading(true);
     setRedeemedCoins(null);
@@ -601,6 +620,17 @@ export function PricingClient() {
         </div>
 
       </div>
+
+      {pwaHandoffUrl && (
+        <PwaHandoffPanel
+          loginUrl={pwaHandoffUrl}
+          onSuccess={() => {
+            setPwaHandoffUrl(null);
+            refresh().catch(() => {});
+          }}
+          onClose={() => setPwaHandoffUrl(null)}
+        />
+      )}
     </div>
   );
 }

@@ -254,7 +254,10 @@ test("D-17 有存档时默认开新对话，不拦人做选择题", () => {
   assert.match(surface, /aria-label="历史记录"/);
   assert.match(surface, /aria-label="开新对话"/);
   assert.match(surface, /aria-label="收起"/);
-  assert.match(surface, /top-full right-0/);
+  // 2026-09-05 暴君裁定：多功能欄彈窗水平置中（fixed left-1/2 + -translate-x-1/2），
+  // 不再掛在按鈕右下角（舊 absolute top-full right-0 作廢）。
+  assert.match(surface, /fixed left-1\/2 .*-translate-x-1\/2/);
+  assert.doesNotMatch(surface, /top-full right-0/);
 
   /*
    * 下面查的是「界面上没有这些字」，所以要剥掉注释再查——

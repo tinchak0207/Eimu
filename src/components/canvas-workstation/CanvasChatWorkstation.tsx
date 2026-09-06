@@ -2,7 +2,7 @@
 
 import { type CSSProperties, type ReactNode } from "react";
 import dynamic from "next/dynamic";
-import { MessageCircle, X } from "lucide-react";
+import { MessageCircle } from "lucide-react";
 import type { UseCanvasChatReturn } from "@/hooks/use-canvas-chat";
 import { cn } from "@/lib/utils";
 import { useChatPanel } from "./use-chat-panel";
@@ -99,6 +99,8 @@ export function CanvasChatWorkstation({
               overflow: hidden;
               transition: width 0.32s cubic-bezier(0.2, 0.8, 0.2, 1);
               animation: canvas-ws-panel-in 0.36s cubic-bezier(0.2, 0.8, 0.2, 1);
+              /* header 彈窗（歷史/資產/設定）水平置中用的頂部偏移。 */
+              --agent-pop-top: calc(0.75rem + env(safe-area-inset-top, 0px) + 3.25rem);
             }
             .canvas-chat-rail {
               /* 收起態 = 聊天气泡 FAB（2026-08-25 暴君裁定；2026-08-27 尺寸鎖死修復：
@@ -171,30 +173,36 @@ export function CanvasChatWorkstation({
               .canvas-ws-overlay { transition: none; }
             }
             @media (max-width: 767px) {
-              /* 行動端面板變底部抽屜，畫布恢復全屏。 */
-              .canvas-ws-overlay { left: 0 !important; }
+              /* 2026-09-05 暴君裁定：手機端 agent 態 = 全螢幕聊天，
+                 手機用戶沒有操作畫布的需求——畫布 overlay/模板庫直接不渲染。 */
+              .canvas-ws-overlay { display: none; }
+              .canvas-ws-backdrop { display: none; }
               .canvas-chat-panel {
-                left: 0.5rem;
-                right: 0.5rem;
-                top: calc(5rem + env(safe-area-inset-top, 0px));
-                bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px));
+                left: 0;
+                right: 0;
+                top: 0;
+                bottom: 0;
                 height: auto;
                 width: auto !important;
-                transition: top 0.32s cubic-bezier(0.2, 0.8, 0.2, 1);
+                max-width: none;
+                max-height: none;
+                border-radius: 0;
+                border: none;
+                box-shadow: none;
+                padding-top: env(safe-area-inset-top, 0px);
+                padding-bottom: env(safe-area-inset-bottom, 0px);
+                --agent-pop-top: calc(env(safe-area-inset-top, 0px) + 3.25rem);
               }
-              .canvas-chat-panel::before {
-                content: "";
-                position: absolute;
-                top: 6px;
-                left: 50%;
-                transform: translateX(-50%);
-                width: 36px;
-                height: 4px;
+              /* FAB 態手機位置：靠左上角（導航欄下方）；還原圓形膠囊外觀
+                 （全螢幕面板規則把圓角/邊框/陰影拍平了，rail 要蓋回來）。 */
+              .canvas-chat-rail {
+                top: calc(5rem + env(safe-area-inset-top, 0px));
+                left: 0.5rem;
                 border-radius: 999px;
-                background: rgba(0, 0, 0, 0.16);
+                border: 1px solid rgba(0, 0, 0, 0.08);
+                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.10);
+                padding: 0;
               }
-              /* FAB 態手機位置：與抽屜同款 top（5rem）靠左上角。 */
-              .canvas-chat-rail { top: calc(5rem + env(safe-area-inset-top, 0px)); left: 0.5rem; }
               .canvas-chat-rail::before { display: none; }
               .canvas-chat-resize { display: none; }
             }
@@ -255,19 +263,9 @@ export function CanvasChatWorkstation({
           </button>
         )}
         <div className={inCanvasWorkstation ? cn("canvas-chat-scroll min-w-0 flex-1 space-y-3", chatPanelState === "expanded" && "canvas-chat-scroll-fill") : "min-w-0 space-y-3"}>
-          {children(
-            inCanvasWorkstation && chatPanelState === "expanded" ? (
-              <button
-                type="button"
-                onClick={() => setChatPanelState("rail")}
-                title="收起对话面板"
-                aria-label="收起对话面板"
-                className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-[rgba(0,0,0,0.45)] transition-colors hover:bg-[rgba(0,0,0,0.06)] hover:text-[rgba(0,0,0,0.75)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)]"
-              >
-                <MessageCircle className="h-4 w-4" aria-hidden="true" />
-              </button>
-            ) : undefined,
-          )}
+          {/* 2026-09-05 暴君裁定：header 的「收起對話面板」鈕刪掉，退出只走右邊 X；
+              chatHeaderExtra 不再產出（render prop 簽名保留，傳 undefined）。 */}
+          {children(undefined)}
         </div>
         {/* 面板右緣拖寬手柄（320–560px） */}
         <div

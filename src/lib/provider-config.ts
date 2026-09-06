@@ -77,10 +77,10 @@ export const PROVIDERS = {
 
 export const MODEL_CONFIGS: Record<ModelMode, Record<ProviderKey, string>> = {
   fast: {
-    image_tinchak: PIXAI_TSUBAKI2_MODEL_ID,
+    image_tinchak: DEFAULT_IMAGE_MODEL_ID,
   },
   quality: {
-    image_tinchak: PIXAI_TSUBAKI2_MODEL_ID,
+    image_tinchak: DEFAULT_IMAGE_MODEL_ID,
   },
 };
 

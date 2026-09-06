@@ -18,6 +18,8 @@
  * API_BASE = https://image.tinchak0207.xyz/v1（harness lib/client.ts L6）。
  */
 
+import { BLENDER_HARNESS_TOOL_IDS } from "./blender-tools"
+
 export const HARNESS_TOOL_ID_LIST = [
   "asset_activate",
   "asset_get",
@@ -25,6 +27,12 @@ export const HARNESS_TOOL_ID_LIST = [
   //   bun 直調 execute 真實/邊界樣例全綠 + /experimental/tool/ids 活體註冊確認）
   "asset_provenance_archive",
   "asset_search",
+  // ↓ 2026-09-06 Astra 3D 導演工作站 P0-4（片C）：blender 工具族三件。定義+handler 真源 =
+  //   src/lib/blender-tools.ts（橋 HTTP 契約 GET /v1/health + POST /v1/execute，
+  //   env BLENDER_BRIDGE_URL 默認 http://127.0.0.1:8765；橋由 P0-1/P0-2 施工）。
+  //   誠實標注：本檔登記=定義已定形；VPS .opencode/tools/ 落位與活體註冊確認待橋就緒後補
+  //   （註冊≠harness 能跑）；deny 例外暫存與橋接說明見 docs/blender-bridge-notes.md。
+  ...BLENDER_HARNESS_TOOL_IDS,
   "canvas_apply_ops",
   "canvas_create_generation_flow",
   "canvas_generate_image",

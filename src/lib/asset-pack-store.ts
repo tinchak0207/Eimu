@@ -21,8 +21,17 @@ const MAX_TITLE_LENGTH = 200;
 const MAX_TAGS_PER_PACK = 20;
 const MAX_TAG_LENGTH = 50;
 const MAX_NOTE_LENGTH = 200;
+const MAX_SCENE_SUMMARY_LENGTH = 500;
 
-export type AssetPackItemKind = "prompt" | "reference" | "lora" | "recipe" | "image";
+export type AssetPackItemKind =
+  | "prompt"
+  | "reference"
+  | "lora"
+  | "recipe"
+  | "image"
+  // 3D 資產（Astra P1-5）：scene_3d=.blend/.glb 產物；bpy_script=bpy 腳本模板。
+  | "scene_3d"
+  | "bpy_script";
 
 export interface AssetPackItem {
   kind: AssetPackItemKind;
@@ -38,6 +47,11 @@ export interface AssetPackItem {
   modelId?: string;
   size?: string;
   loraModelVersionIds?: string[];
+  /** scene_3d / bpy_script 用（Astra P1-5）：bridge 產物路徑 / 檔案大小 / 腳本指紋 / 場景摘要。 */
+  artifactPath?: string;
+  bytes?: number;
+  fingerprint?: string;
+  sceneSummary?: string;
   /** 來源標記。 */
   source?: { type: "history" | "canvas" | "chat" | "workflow" | "manual"; id: string; sessionId?: string };
   note?: string;
@@ -103,7 +117,16 @@ async function listIndexBlobs(userId: number): Promise<BlobRef[]> {
   return blobs.sort((a, b) => b.uploadedAt.getTime() - a.uploadedAt.getTime());
 }
 
-const ITEM_KINDS: readonly AssetPackItemKind[] = ["prompt", "reference", "lora", "recipe", "image"];
+const ITEM_KINDS: readonly AssetPackItemKind[] = [
+  "prompt",
+  "reference",
+  "lora",
+  "recipe",
+  "image",
+  // 3D 資產（Astra P1-5）：同構追加，既有五類行為不動。
+  "scene_3d",
+  "bpy_script",
+];
 
 /**
  * 純函式：把不可信 item payload 正規化為 AssetPackItem。
@@ -139,6 +162,25 @@ function normalizeItem(payload: unknown): AssetPackItem | null {
     if (Array.isArray(p.loraModelVersionIds)) {
       const ids = p.loraModelVersionIds.filter((v): v is string => typeof v === "string");
       if (ids.length) item.loraModelVersionIds = ids;
+    }
+  }
+  // 3D 資產（Astra P1-5）：scene_3d 收 bridge 產物欄（artifactPath/bytes/sceneSummary），
+  // bpy_script 收腳本模板欄（content=腳本全文 + fingerprint 指紋）。與 recipe/lora 分支同構。
+  if (kind === "scene_3d") {
+    if (typeof p.artifactPath === "string" && p.artifactPath.trim()) item.artifactPath = p.artifactPath.trim();
+    if (typeof p.bytes === "number" && Number.isFinite(p.bytes) && p.bytes >= 0) item.bytes = p.bytes;
+    if (typeof p.sceneSummary === "string" && p.sceneSummary.trim()) {
+      item.sceneSummary = p.sceneSummary.trim().slice(0, MAX_SCENE_SUMMARY_LENGTH);
+    }
+    if (typeof p.fingerprint === "string" && p.fingerprint.trim()) item.fingerprint = p.fingerprint.trim();
+  }
+  if (kind === "bpy_script") {
+    if (typeof p.content === "string") item.content = p.content;
+    if (typeof p.artifactPath === "string" && p.artifactPath.trim()) item.artifactPath = p.artifactPath.trim();
+    if (typeof p.bytes === "number" && Number.isFinite(p.bytes) && p.bytes >= 0) item.bytes = p.bytes;
+    if (typeof p.fingerprint === "string" && p.fingerprint.trim()) item.fingerprint = p.fingerprint.trim();
+    if (typeof p.sceneSummary === "string" && p.sceneSummary.trim()) {
+      item.sceneSummary = p.sceneSummary.trim().slice(0, MAX_SCENE_SUMMARY_LENGTH);
     }
   }
   if (p.source && typeof p.source === "object") {

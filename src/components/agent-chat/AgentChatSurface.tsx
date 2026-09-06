@@ -31,35 +31,37 @@ import {
 } from "@/lib/agent-batch-anchor";
 import { AgentChatPanel } from "@/components/agent-chat/AgentChatPanel";
 import { AgentSettingsPopover } from "@/components/agent-chat/AgentSettingsPopover";
+import { PwaHandoffPanel } from "@/components/PwaHandoffPanel";
+import { createHandoffLogin, isStandalonePwa } from "@/lib/github-login";
 import type { AgentImageItem, AgentVideoItem } from "@/lib/agent-chat-types";
 import type { AssetPack, AssetPackItem } from "@/lib/asset-pack-store";
 import type { AgentTranscriptProps } from "@/components/agent-chat/AgentTranscript";
 import { buildChatSaveItem, CHAT_ASSETS_PACK_ID } from "@/lib/agent-chat-asset-builders";
 
-/** 登录类错误判定：错误文案含「尚未登录」即需要登录，不是重试能解决的。 */
+/** 登录类错误判定：客户端缺憑證（「尚未登录」）與服務端否定登入態的文案都算，
+ *  這些不是重試能解決的，必須給登錄按鈕（2026-09-05：agent-session-guard 的
+ *  「请先登录后再使用 AI 助理。」「登录状态已失效…」此前漏在判定外，彈窗只給假「重试」）。 */
 function isAuthError(error: string): boolean {
-  return error.includes("尚未登录") || error.includes("无法使用 Agent 助手");
+  return error.includes("尚未登录")
+    || error.includes("无法使用 Agent 助手")
+    || error.includes("请先登录")
+    || error.includes("登录状态已失效");
 }
 
 /**
- * GitHub OAuth 弹窗（与 Navbar 同一条链路：/api/auth/github/start popup）；
- * 弹窗关闭（授权完成）后触发 onDone——此时 token 已写入 localStorage，
- * 重试才有效（用户裁定：登录错误时「重试」是假的，要给登录按钮）。
+ * GitHub OAuth 弹窗（与 Navbar 同一条链路：/api/auth/github/start popup）。
+ * 完成信号三選一（2026-09-05 修「点了登录按钮回调没被接收」）：
+ * ① /auth/complete 的 postMessage（成功）或首页 Navbar 转发的 github-auth-error（失败）；
+ * ② storage 事件（napi_token 被弹窗写入，跨标签页可见）；
+ * ③ popup.closed 轮询兜底（用户手动关窗/取消）。
+ * 旧实现只认 ③——手机把弹窗开成新标签、或 window.close() 被拦时，
+ * 登录早已完成却永远等不到「关闭」，重试不触发，看起来就是回调丢了。
  */
 async function startLoginThenRetry(onDone: () => Promise<void>): Promise<void> {
-  const popup = window.open("/api/auth/github/start", "github_oauth", "popup,width=760,height=640");
-  if (!popup) {
-    // popup 被挡：退回整页跳转（用户登录完回来，会话经本地存档 resume 续上）。
-    window.location.href = "/api/auth/github/start";
-    return;
-  }
-  // 轮询弹窗关闭；弹窗关闭即视为登录流程结束（成功/取消都算），重试让 authHeaders 重新读 token。
-  const timer = window.setInterval(() => {
-    if (popup.closed) {
-      window.clearInterval(timer);
-      void onDone();
-    }
-  }, 400);
+  // 登录一律同窗口跳转：popup 在套壳/内嵌 webview 上会出现死窗（三個完成
+  // 信号全部不來）。同窗口跳转全浏览器兼容；用户登录完回来，会话经本地
+  // 存档 resume 续上，再补一次 onDone 刷新。
+  window.location.href = "/api/auth/github/start";
 }
 
 function formatSavedAt(savedAt: number): string {
@@ -253,6 +255,25 @@ export function AgentChatSurface({
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
   const [startingNew, setStartingNew] = useState(false);
   const historyRef = useRef<HTMLDivElement | null>(null);
+  // PWA standalone 登录交接面板（null = 未开启）。storage 与常用浏览器隔离，
+  // popup 链路在 standalone 视窗里拿不回登录态，必须走 handoff。
+  const [handoffLogin, setHandoffLogin] = useState<{ ticket: string; loginUrl: string } | null>(null);
+
+  // 登录入口：standalone PWA 先申请 handoff ticket 弹交接面板；申请失败或普通
+  // 浏览器走原 popup 链路（startLoginThenRetry 交互逻辑不动）。
+  const beginLogin = useCallback(() => {
+    if (isStandalonePwa()) {
+      void createHandoffLogin().then((handoff) => {
+        if (handoff) {
+          setHandoffLogin(handoff);
+          return;
+        }
+        void startLoginThenRetry(retry);
+      });
+      return;
+    }
+    void startLoginThenRetry(retry);
+  }, [retry]);
 
   // 開著的 dropdown：點外面就收——浮層不該把人鎖在原地。
   useEffect(() => {
@@ -676,7 +697,7 @@ export function AgentChatSurface({
                 )}
               </button>
         {showHistory && (
-          <div className="lg-sheet absolute top-full right-0 z-50 mt-0.5 w-56 rounded-ios-2xl p-1">
+          <div className="lg-sheet fixed left-1/2 top-[var(--agent-pop-top,5rem)] z-50 w-56 -translate-x-1/2 rounded-ios-2xl p-1">
             {historyList === null ? (
               <p className="px-2.5 py-3 text-center text-ios-caption1 text-foreground/45">
                 正在加载历史会话…
@@ -761,7 +782,7 @@ export function AgentChatSurface({
                 <Boxes className="h-4 w-4" aria-hidden="true" />
               </button>
               {showAssets && (
-                <div className="lg-sheet absolute top-full right-0 z-50 mt-0.5 w-64 rounded-ios-2xl p-1">
+                <div className="lg-sheet fixed left-1/2 top-[var(--agent-pop-top,5rem)] z-50 w-64 -translate-x-1/2 rounded-ios-2xl p-1">
                   <p className="px-2.5 pt-2 pb-1 text-ios-caption1 font-medium text-foreground/60">我的资产</p>
                   <div className="relative px-2.5 pb-1">
                     <Search className="pointer-events-none absolute left-[13px] top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-foreground/45" />
@@ -882,7 +903,7 @@ export function AgentChatSurface({
           {isAuthError(error) ? (
             <button
               type="button"
-              onClick={() => void startLoginThenRetry(retry)}
+              onClick={beginLogin}
               className="shrink-0 inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-ios-blue px-3 py-1 text-ios-caption1 font-semibold text-white shadow-[0_2px_8px_rgba(0,122,255,0.30)] transition-all duration-150 hover:bg-ios-blue/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/40"
             >
               <LogIn className="h-3 w-3" aria-hidden="true" />
@@ -898,6 +919,19 @@ export function AgentChatSurface({
             </button>
           )}
         </div>
+      )}
+
+      {/* PWA standalone 登录交接：面板轮询 claim 领回会话，完成后 retry()
+          等效 onDone（登录态已写入，重试即刷新连接）；不走 popup 链路。 */}
+      {handoffLogin && (
+        <PwaHandoffPanel
+          loginUrl={handoffLogin.loginUrl}
+          onSuccess={() => {
+            setHandoffLogin(null);
+            void retry();
+          }}
+          onClose={() => setHandoffLogin(null)}
+        />
       )}
 
       <div className="flex min-h-0 flex-1 flex-col">
