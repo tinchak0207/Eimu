@@ -12,6 +12,9 @@
  * 每個規則對應一項「某種鏡頭為什麼會掛」的生產事實。
  */
 
+import type { Scene3dCardMetadata } from "./canvas/types";
+import { resolveSceneCameraRule, type CameraTrajectory } from "./camera-trajectory-to-prompt";
+
 export interface DirectorOptions {
   /** 上游模型 id。不同模型家族有不同語法偏好。 */
   modelId?: string;
@@ -19,6 +22,10 @@ export interface DirectorOptions {
   durationSeconds?: number;
   /** 是否生成音軌：true 時不強制 SFX-only 尾巴。 */
   generateAudio?: boolean;
+  /** 會話存在 3D 場景卡（scene_3d 節點）時啟用 sceneCard 感知規則；缺省 = 零行為變化。 */
+  sceneCard?: Scene3dCardMetadata;
+  /** 相機軌跡種子（L1 move ids 或 bpy keyframes），與 sceneCard 同時在場才生效。 */
+  cameraTrajectory?: CameraTrajectory;
 }
 
 /** 六槽公式偵測用正則。槽位存在時保留用戶原話，缺漏時才補中性指令。 */
@@ -369,6 +376,14 @@ export function directVideoPrompt(rawPrompt: string, options: DirectorOptions = 
   const stylePresent = SLOT_PATTERNS.style.test(user);
   const lightingPresent = SLOT_PATTERNS.lighting.test(user);
 
+  // sceneCard 感知規則（camera-trajectory-to-prompt）：會話存在 3D 場景卡＋軌跡時，
+  // Camera 槽優先用軌跡翻譯詞覆蓋用戶模糊描述（只動 camera 槽；用戶明示運鏡則不干預）。
+  // 無 sceneCard/cameraTrajectory → cameraRule 為 null → 以下全部分支與舊行為逐字一致。
+  const cameraRule =
+    options.sceneCard && options.cameraTrajectory
+      ? resolveSceneCameraRule(options.cameraTrajectory, user, cameraPresent)
+      : null;
+
   let enhanced = user;
   enhanced = replaceAll(enhanced, SLOP_WORDS);
   enhanced = replaceAll(enhanced, HOMOGRAPH_FIXES);
@@ -377,7 +392,8 @@ export function directVideoPrompt(rawPrompt: string, options: DirectorOptions = 
   enhanced = enforcePositivePhrasing(enhanced);
 
   const parts: string[] = [enhanced];
-  parts.push(...fillMissingSlots(enhanced, cameraPresent, stylePresent, lightingPresent, options));
+  parts.push(...fillMissingSlots(enhanced, cameraPresent || Boolean(cameraRule), stylePresent, lightingPresent, options));
+  if (cameraRule) parts.push(cameraRule.directive);
 
   // 開場 1 秒鎖位（Hell Grind）：只有影片才需要，且只在長片語義下注入。
   const hasPacing = options.durationSeconds && options.durationSeconds >= 4;

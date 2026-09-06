@@ -70,7 +70,7 @@ export function GenerateControls({
   const supportsAudio = modelSupportsAudio(modelId);
 
   return (
-    <>
+    <div className="space-y-2.5">
               {/* ── 示例：紧跟描述框，因为它填的就是上面这个框 ── */}
               <div className={ROW_CLASS}>
                 <span className={LABEL_CLASS}>示例</span>
@@ -99,8 +99,7 @@ export function GenerateControls({
               </div>
 
               {/* ── 生成设置：模型 + 比例 + 清晰度 + 时长 + 风格，同一套胶囊语言。
-                  与上方「写什么」的分组靠留白完成，不画分隔线——线只会加重分割感。 ── */}
-              <div className="space-y-2.5 pt-1">
+                  与「示例」同一 space-y 容器，行距全部一致。 ── */}
                 <div className={ROW_CLASS}>
                   <span className={LABEL_CLASS}>模型</span>
                   <div className={RAIL_CLASS}>
@@ -216,7 +215,6 @@ export function GenerateControls({
                     <StylePresets value={stylePreset} onChange={handleStyleChange} inline />
                   </div>
                 </div>
-              </div>
-    </>
+    </div>
   );
 }

@@ -138,6 +138,10 @@ function channelCapabilities(label: string): Capability[] {
     "gemini-3-image",
     "gemini-3.1-flash-image",
     "gemini-2.5-flash-image",
+    // blender 節點能力標籤（片AA）只由 blender_bridge 供應商認領——generic 渠道
+    // 上游必拒（認領必敗且燒 job 嘗試預算，同上方 gemini 系收緊語義）。
+    "blender-render-eevee",
+    "blender-render-cycles",
   ]);
   const result: Capability[] = [];
   for (const model of Object.values(GENERATION_MODEL_CATALOG)) {
@@ -338,7 +342,21 @@ async function main() {
         ${channelConcurrency(channel.label)},
         ${isAdobe ? "degraded" : "healthy"}, ${isAdobe ? null : "not_applicable"},
         ${isAdobe ? "unknown" : isFilmera ? "unknown" : "healthy"}, ${isAdobe || isFilmera ? null : new Date()},
-        ${sql.json({ healthPath: process.env.ADOBE2API_HEALTH_PATH ?? "health", minimumSuccessRate5m: 0.8 } as never)}
+        ${sql.json({
+          // healthPath 按 adapter 分派（片Y 稿 §D）：blender_bridge 節點走橋
+          // /v1/health（README 契約：帶 gpu/queue_depth），非 LOCAL（blender-modal，
+          // 片X 對齊 pending）暫寫 "health"；其餘渠道維持 ADOBE2API_HEALTH_PATH
+          // 寫死點原行為。注意用 registry.adapterType 判定——registry 渠道的
+          // endpoint 無 protocol 欄（registryChannelToDescriptor 不設），稿中
+          // endpoint.protocol 條件對 registry 渠道恆 false，現場核實後改用 registry。
+          healthPath:
+            registry?.adapterType === "blender_bridge"
+              ? registry.baseUrlEnv.includes("LOCAL")
+                ? "v1/health"
+                : "health"
+              : process.env.ADOBE2API_HEALTH_PATH ?? "health",
+          minimumSuccessRate5m: 0.8,
+        } as never)}
       )
       ON CONFLICT (id) DO UPDATE SET
         label = EXCLUDED.label, credential_ref = EXCLUDED.credential_ref, enabled = EXCLUDED.enabled,

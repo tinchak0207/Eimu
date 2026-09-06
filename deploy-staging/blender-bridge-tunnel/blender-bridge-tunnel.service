@@ -1,0 +1,20 @@
+[Unit]
+Description=Blender Bridge reverse tunnel (VPS 127.0.0.1:8765 -> laptop 127.0.0.1:8765 via SSH-over-443)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# 登入後手動啟動 ws-tunnel(22222) 會隨會話丟失，腳本內 ensureWsTunnel 自愈（dsh-groq 先例）；
+# 不在 ExecStartPre 拉 start-ssh443.sh 是避免與 dsh-groq-tunnel 的自愈路徑雙寫競態。
+ExecStart=/home/lenovo/.nvm/versions/node/v24.19.0/bin/node /home/lenovo/Desktop/image-app/deploy-staging/blender-bridge-tunnel/bridge-reverse-tunnel.js
+Environment=HOME=/home/lenovo
+Restart=on-failure
+RestartSec=10
+# ws-tunnel(22222) 崩潰自愈 + ssh 退避重連都在腳本內；此上限兜底防級聯（08-24 OOM 教訓形態）
+MemoryMax=512M
+StandardOutput=append:/home/lenovo/.local/share/blender-bridge-tunnel.log
+StandardError=append:/home/lenovo/.local/share/blender-bridge-tunnel.log
+
+[Install]
+WantedBy=default.target

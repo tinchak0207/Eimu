@@ -45,6 +45,7 @@ const NODE_TYPE_LABEL: Record<CanvasNodeType, string> = {
   [CanvasNodeType.Prompt]: "提示词",
   [CanvasNodeType.Reference]: "参考图",
   [CanvasNodeType.Director]: "3D 导演",
+  [CanvasNodeType.Scene3d]: "3D 场景卡",
 };
 
 const SECTION_HEADING = "px-1 pb-1.5 text-ios-caption2 font-semibold tracking-wide text-foreground/45 uppercase";

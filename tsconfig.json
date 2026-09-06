@@ -41,6 +41,7 @@
     "mcp-server",
     "plugins",
     "eval-*", "src/vendor-bridges",
+    "deploy-staging",
     "**/*.test.ts",
     "**/*.test.tsx"
   ]

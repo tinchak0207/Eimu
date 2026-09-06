@@ -22,7 +22,7 @@ export const metadata = {
 /** 首屏骨架。HistoryClient 用了 useSearchParams，静态渲染阶段必须有 Suspense 边界。 */
 function HistoryPageFallback() {
   return (
-    <div className="min-h-screen bg-transparent px-4 pb-28 pt-20 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-transparent px-4 pb-28 pt-8 sm:px-6 lg:px-8">
       <div className="mx-auto w-full max-w-[1440px]">
         <div className="flex items-center justify-center py-20">
           <div className="h-6 w-6 animate-spin rounded-full border-2 border-[rgba(0,122,255,0.20)] border-t-[#007AFF]" />

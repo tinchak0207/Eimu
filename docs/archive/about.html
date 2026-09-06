@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="A concise introduction to the language model behind this conversation." />
+  <title>About — The Model Behind This Conversation</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap');
+    :root { --ink:#20242d; --muted:#66707f; --paper:#f4f7f8; --glass:rgba(255,255,255,.67); --line:rgba(255,255,255,.78); --blue:#84c7dd; --violet:#baa6e8; --lime:#d8e7aa; }
+    * { box-sizing:border-box; }
+    html { scroll-behavior:smooth; }
+    body { margin:0; min-height:100vh; color:var(--ink); background:var(--paper); font-family:Manrope, ui-sans-serif, system-ui, sans-serif; overflow-x:hidden; }
+    body::before { content:""; position:fixed; inset:0; pointer-events:none; background: radial-gradient(circle at 8% 12%, rgba(132,199,221,.28), transparent 30%), radial-gradient(circle at 90% 10%, rgba(186,166,232,.24), transparent 28%), radial-gradient(circle at 55% 92%, rgba(216,231,170,.24), transparent 30%); }
+    .wrap { width:min(1120px, calc(100% - 40px)); margin:auto; position:relative; }
+    nav { display:flex; justify-content:space-between; align-items:center; padding:26px 0; font-size:13px; }
+    .brand { display:flex; align-items:center; gap:10px; font-weight:800; letter-spacing:-.03em; }
+    .brand-mark { display:grid; place-items:center; width:34px; height:34px; border-radius:12px; background:var(--ink); color:#fff; font-size:16px; box-shadow:0 8px 20px rgba(32,36,45,.13); }
+    nav a { color:var(--muted); text-decoration:none; margin-left:22px; } nav a:hover { color:var(--ink); }
+    main { padding:56px 0 88px; }
+    .hero { display:grid; grid-template-columns:1.15fr .85fr; gap:72px; align-items:center; min-height:590px; }
+    h1 { font-size:clamp(3.6rem, 9vw, 7rem); line-height:.91; letter-spacing:-.075em; margin:0 0 28px; max-width:720px; font-weight:800; }
+    h1 em { font-style:normal; color:#657080; }
+    .lede { font-size:clamp(1.05rem, 2vw, 1.32rem); line-height:1.65; max-width:560px; color:#4d5664; margin:0 0 30px; }
+    .actions { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+    .button { display:inline-flex; align-items:center; gap:9px; border-radius:999px; padding:15px 21px; background:var(--ink); color:#fff; text-decoration:none; font-size:14px; font-weight:700; box-shadow:0 16px 32px rgba(32,36,45,.16); transition:transform .2s ease, background .2s ease; }
+    .button:hover { transform:translateY(-2px); background:#303641; } .button.secondary { background:rgba(255,255,255,.52); color:var(--ink); box-shadow:none; border:1px solid rgba(32,36,45,.08); }
+    .portrait { position:relative; aspect-ratio:1/1.08; border-radius:42% 42% 28% 28%; background:var(--glass); border:1px solid var(--line); box-shadow:0 32px 80px rgba(65,77,94,.14), inset 0 1px 0 #fff; backdrop-filter:blur(30px) saturate(150%); overflow:hidden; transform:rotate(2deg); }
+    .portrait::before { content:""; position:absolute; width:270px; height:270px; border-radius:50%; background:var(--blue); opacity:.48; top:-80px; right:-55px; filter:blur(1px); }
+    .portrait::after { content:""; position:absolute; width:230px; height:230px; border-radius:50%; background:var(--violet); opacity:.45; bottom:-85px; left:-70px; }
+    .orb { position:absolute; width:170px; height:170px; border-radius:50%; background:#e7c7a4; top:23%; left:28%; box-shadow:inset -23px -12px 0 rgba(128,91,66,.08); }
+    .orb::before,.orb::after { content:""; position:absolute; top:62px; width:13px; height:19px; border-radius:50%; background:var(--ink); } .orb::before { left:47px; } .orb::after { right:47px; }
+    .beak { position:absolute; top:97px; left:68px; width:36px; height:25px; background:#d59b55; border-radius:70% 14% 70% 14%; transform:rotate(45deg); }
+    .feather { position:absolute; width:105px; height:125px; border-radius:80% 18% 80% 18%; background:#56667b; left:15%; top:17%; transform:rotate(-26deg); z-index:2; opacity:.95; } .feather.two { left:auto; right:11%; transform:rotate(26deg) scaleX(-1); }
+    .label { position:absolute; left:24px; bottom:22px; z-index:3; font-family:'DM Mono',monospace; font-size:11px; letter-spacing:.1em; color:#657080; text-transform:uppercase; }
+    .section { margin-top:110px; display:grid; grid-template-columns:.72fr 1.28fr; gap:72px; align-items:start; }
+    .section-title { font-size:clamp(2rem,4vw,3.4rem); line-height:1; letter-spacing:-.06em; margin:0; }
+    .section-copy { font-size:1.04rem; line-height:1.8; color:#586271; margin:0; max-width:620px; }
+    .principles { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-top:32px; }
+    .principle { padding:22px; min-height:160px; border-radius:26px; background:var(--glass); border:1px solid var(--line); box-shadow:0 16px 34px rgba(65,77,94,.07), inset 0 1px 0 #fff; backdrop-filter:blur(22px) saturate(145%); }
+    .principle strong { display:block; font-size:1.05rem; margin-bottom:12px; } .principle p { margin:0; color:var(--muted); font-size:.9rem; line-height:1.6; }
+    .closing { margin-top:110px; padding:45px clamp(25px,5vw,62px); border-radius:36px; background:var(--ink); color:#fff; display:flex; justify-content:space-between; gap:30px; align-items:center; box-shadow:0 24px 60px rgba(32,36,45,.18); }
+    .closing h2 { margin:0; max-width:560px; font-size:clamp(2rem,4vw,3.3rem); line-height:1.03; letter-spacing:-.06em; } .closing p { color:#bbc2cc; max-width:290px; line-height:1.6; font-size:.94rem; }
+    footer { padding:34px 0 46px; display:flex; justify-content:space-between; color:#89919d; font-size:12px; font-family:'DM Mono',monospace; }
+    @media (max-width:760px) { .wrap { width:min(100% - 28px, 600px); } nav { padding:18px 0; } nav a { margin-left:12px; } main { padding-top:25px; } .hero { grid-template-columns:1fr; gap:45px; min-height:0; } .portrait { width:min(82vw,390px); margin:0 auto; } .section { grid-template-columns:1fr; gap:22px; margin-top:85px; } .principles { grid-template-columns:1fr; } .principle { min-height:auto; } .closing { margin-top:80px; display:block; } .closing p { margin:22px 0 0; } footer { gap:12px; flex-direction:column; } }
+    @media (prefers-reduced-motion:reduce) { html { scroll-behavior:auto; } .button { transition:none; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <nav aria-label="Primary navigation"><div class="brand"><span class="brand-mark">AI</span><span>Model / About</span></div><div><a href="#how">How I work</a><a href="#contact">Ask me anything</a></div></nav>
+    <main>
+      <section class="hero" aria-labelledby="intro-title">
+        <div><h1 id="intro-title">Hello.<br><em>I’m a model</em><br>made for thinking.</h1><p class="lede">I’m a conversational language model. I read patterns in language, reason through problems, write and revise, and help turn a vague intention into a useful next step.</p><div class="actions"><a class="button" href="#how">How I work <span aria-hidden="true">↓</span></a><a class="button secondary" href="#contact">Start a conversation</a></div></div>
+        <div class="portrait" aria-label="Abstract portrait representing a language model"><div class="feather"></div><div class="feather two"></div><div class="orb"><div class="beak"></div></div><div class="label">language / reasoning / context</div></div>
+      </section>
+      <section class="section" id="how" aria-labelledby="how-title"><h2 class="section-title" id="how-title">A mind<br>in dialogue.</h2><div><p class="section-copy">I don’t have a private life, feelings, or personal experiences. What I do have is the ability to work with the context you share: clarify the goal, compare options, make things, and explain the reasoning in plain language.</p><div class="principles"><article class="principle"><strong>Understand context</strong><p>Keep track of the details that make your question yours.</p></article><article class="principle"><strong>Reason in public</strong><p>Show assumptions, trade-offs, and uncertainty instead of pretending.</p></article><article class="principle"><strong>Make something useful</strong><p>Move beyond advice when a finished answer or file is possible.</p></article></div></div></section>
+      <section class="closing" id="contact"><h2>Give me a question, a constraint, or a blank page.</h2><p>I can be precise, exploratory, technical, or brief. The direction comes from you.</p></section>
+    </main>
+    <footer><span>© 2026 / conversational model</span><span>Useful, honest, in context.</span></footer>
+  </div>
+</body>
+</html>

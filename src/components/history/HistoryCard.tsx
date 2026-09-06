@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useCallback, useMemo, useState } from "react";
-import { AlertTriangle, Bot, Boxes, Check, Coins, CopyPlus, Download, FileQuestion, IdCard, Megaphone, RotateCcw, SlidersHorizontal, Star, Trash2 } from "lucide-react";
+import { AlertTriangle, Bot, Boxes, Check, Coins, CopyPlus, Download, FileQuestion, IdCard, Loader2, Megaphone, RotateCcw, SlidersHorizontal, Star, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatCoins, formatModelLabel, formatRelativeTime, primaryModelId } from "@/lib/history-types";
 import { canHistoryEntryRerun } from "@/lib/history-rerun";
@@ -16,7 +16,7 @@ export interface HistoryCardProps {
   onOpen: (entry: HistoryEntry) => void;
   onToggleSelect: (id: string) => void;
   onToggleStar: (id: string) => void;
-  onDownload: (entry: HistoryEntry) => void;
+  onDownload: (entry: HistoryEntry) => void | Promise<void>;
   onDelete: (id: string) => void;
   /** 以这条记录的参数回到工作站继续做图。 */
   onReuse?: (entry: HistoryEntry) => void;
@@ -105,6 +105,18 @@ function HistoryCardComponent({
   /** 「存为资产」状态：saved = 已存入 /api/assets（幂等，按钮打勾不可再点）。 */
   const [assetSaved, setAssetSaved] = useState(false);
   const [assetSaving, setAssetSaving] = useState(false);
+  /** 下载要等整图 fetch 成 blob，期间下载钮转圈防重复点击。 */
+  const [downloadBusy, setDownloadBusy] = useState(false);
+
+  const handleDownload = useCallback(async () => {
+    if (downloadBusy) return;
+    setDownloadBusy(true);
+    try {
+      await onDownload(entry);
+    } finally {
+      setDownloadBusy(false);
+    }
+  }, [downloadBusy, onDownload, entry]);
 
   const result = entry.results.find((item) => item.image || item.imageUrl);
   const src = result?.image ? `data:image/png;base64,${result.image}` : result?.imageUrl ?? null;
@@ -263,8 +275,8 @@ function HistoryCardComponent({
           <Star className="h-3.5 w-3.5" fill={entry.starred ? "currentColor" : "none"} />
         </CardAction>
         {src && !imageFailed && (
-          <CardAction label="下载" onClick={() => onDownload(entry)}>
-            <Download className="h-3.5 w-3.5" />
+          <CardAction label="下载" disabled={downloadBusy} onClick={handleDownload}>
+            {downloadBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
           </CardAction>
         )}
         {onReuse && entry.workflow && (

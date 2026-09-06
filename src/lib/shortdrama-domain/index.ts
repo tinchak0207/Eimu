@@ -1,3 +1,5 @@
+import { fuseSceneVideo } from "../scene3d-video-fusion";
+
 export const SHORTDRAMA_TOOL_IDS = [
   "script_scene_parse",
   "cast_asset_lock",
@@ -134,6 +136,21 @@ export interface VideoChainOutput {
     nextShotId?: string;
     durationSeconds: number;
   }>;
+  /**
+   * 3D 場景卡嵌合（片AC，2026-09-06）：輸入帶 scene_card_ref + camera_trajectory
+   * 兩可選欄且同時合法才出現；缺欄零行為變化（本欄缺席 = 既有行為逐字同）。
+   * references/referenceDirective 真源 = blender-to-video-bridge（previz 檔 compositionOnly）；
+   * cameraDirective 真源 = camera-trajectory-to-prompt（六槽 Camera 槽描述詞）。
+   * VPS handler 消費：cameraDirective 併進視頻生成請求 prompt；references 交通道
+   * （站點 B 端 /v1/videos/generations 無幀欄位——registry 已錘，直調站點 /api/generate-videos
+   * 的 scene_card/camera_trajectory 欄可全生效，見 deploy-staging/blender-gateway/ac-video-scene-stitch.md）。
+   */
+  sceneDirector?: {
+    referenceDirective: string;
+    cameraDirective: string;
+    references: Array<{ url: string; mimeType: string; referenceRole: string }>;
+    notes: string[];
+  };
 }
 
 export interface EditingManifestOutput {
@@ -496,7 +513,8 @@ function audioTimeline(input: unknown, capabilities: ShortDramaCapabilities): Sh
 }
 
 function videoChain(input: unknown, capabilities: ShortDramaCapabilities): ShortDramaToolResult<VideoChainOutput> {
-  const shots = arrayOfRecords(asRecord(input).shots).map((item) => ({
+  const record = asRecord(input);
+  const shots = arrayOfRecords(record.shots).map((item) => ({
     shotId: text(item.shotId),
     keyframeId: text(item.keyframeId),
     lastFrameId: text(item.lastFrameId),
@@ -508,6 +526,21 @@ function videoChain(input: unknown, capabilities: ShortDramaCapabilities): Short
     ...(shots[index + 1]?.shotId ? { nextShotId: shots[index + 1]?.shotId } : {}),
     durationSeconds: shot.durationSeconds,
   }));
+  // 3D 場景卡嵌合（片AC）：scene_card_ref + camera_trajectory 兩可選欄，同時合法才出
+  // sceneDirector；缺欄/髒欄 = null = 既有行為逐字同（下遊鏈路對該欄不可見）。
+  const fusion = fuseSceneVideo(record.scene_card_ref, record.camera_trajectory);
+  const sceneDirector = fusion
+    ? {
+        referenceDirective: fusion.frameCard.referenceDirective,
+        cameraDirective: fusion.cameraDirective,
+        references: fusion.frameCard.references.map((reference) => ({
+          url: reference.url,
+          mimeType: reference.mimeType,
+          referenceRole: reference.referenceRole ?? "general",
+        })),
+        notes: fusion.frameCard.notes,
+      }
+    : undefined;
   const gates = [
     gate("shots_ordered", shots.length > 0 && shots.every((shot) => Boolean(shot.shotId)), "shots have stable order"),
     gate("last_frame_reference_present", shots.every((shot, index) => Boolean(index === 0 ? shot.keyframeId : shot.lastFrameId)), "each shot has an input frame reference"),
@@ -517,7 +550,7 @@ function videoChain(input: unknown, capabilities: ShortDramaCapabilities): Short
   if (!capabilities.videoGeneration?.provider) {
     return unsupported("last_frame_video_chain", input, { chains }, gates, "last-frame-video-chain", "video_generation_upstream_missing", "影片生成上游未接入，未宣稱已生成影片。", "videoGeneration.provider", shots.map((shot) => shot.shotId));
   }
-  return result("last_frame_video_chain", input, { chains }, gates, gates.every((item) => item.passed) ? "succeeded" : "blocked", "last-frame-video-chain", {
+  return result("last_frame_video_chain", input, { chains, ...(sceneDirector ? { sceneDirector } : {}) }, gates, gates.every((item) => item.passed) ? "succeeded" : "blocked", "last-frame-video-chain", {
     input: shots.map((shot) => shot.keyframeId),
     output: chains.map((chain) => chain.shotId),
   });

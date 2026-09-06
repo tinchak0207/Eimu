@@ -980,6 +980,99 @@ body {
   }
 }
 
+/* ── 生成中继态粒子海（ImageDisplay → ParticleSeaWaiting）── */
+.sea-waiting-aurora {
+  position: absolute;
+  inset: -30%;
+  filter: blur(30px);
+  opacity: 0.42;
+  transform: rotate(-18deg);
+  background: conic-gradient(
+    from 210deg at 42% 46%,
+    transparent 0 20%,
+    #557aff66 28%,
+    #ff9ec466 40%,
+    transparent 51% 69%,
+    #ffb0cf55 79%,
+    transparent 90%
+  );
+  animation: sea-aurora 10s ease-in-out infinite alternate;
+}
+
+@keyframes sea-aurora {
+  from {
+    transform: rotate(-18deg) translate(-7%, -3%) scale(0.94);
+  }
+  to {
+    transform: rotate(-8deg) translate(8%, 5%) scale(1.08);
+  }
+}
+
+.sea-waiting-veil {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse at 50% 44%, #799dff1f, transparent 40%),
+    linear-gradient(145deg, #819bff0a, transparent 48%, #ff9ec40d);
+  animation: sea-veil 4s ease-in-out infinite alternate;
+}
+
+@keyframes sea-veil {
+  to {
+    opacity: 0.32;
+    transform: scale(1.08);
+  }
+}
+
+/* 卡片內文字呼吸：光暈/色彩/明度緩慢脈動，與粒子海同頻不同相 */
+.sea-waiting-value {
+  animation: sea-value-breathe 4.2s ease-in-out infinite alternate;
+}
+
+@keyframes sea-value-breathe {
+  from {
+    filter: drop-shadow(0 2px 14px rgba(102, 170, 255, 0.28));
+  }
+  to {
+    filter: drop-shadow(0 4px 30px rgba(102, 170, 255, 0.62));
+  }
+}
+
+.sea-waiting-sub {
+  color: rgba(45, 49, 66, 0.68);
+  animation: sea-sub-breathe 5.6s ease-in-out infinite alternate;
+}
+
+@keyframes sea-sub-breathe {
+  from {
+    color: rgba(45, 49, 66, 0.68);
+  }
+  to {
+    color: rgba(0, 122, 255, 0.72);
+  }
+}
+
+.sea-waiting-hint {
+  animation: sea-hint-breathe 4.8s ease-in-out infinite alternate;
+}
+
+@keyframes sea-hint-breathe {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sea-waiting-value,
+  .sea-waiting-sub,
+  .sea-waiting-hint {
+    animation: none;
+  }
+}
+
 
 
 

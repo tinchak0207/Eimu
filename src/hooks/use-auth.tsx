@@ -47,10 +47,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const result = await fetchMe(t);
     if (result.ok && result.user) {
-      setStoredToken(t, result.user);
+      const validToken = result.token ?? t;
+      setStoredToken(validToken, result.user);
       setUser(result.user);
-      setToken(t);
-    } else {
+      setToken(validToken);
+    } else if (!result.transient) {
+      // 只有被明確否定（401/憑證壞）才登出；5xx/網路抖動保留登入態，
+      // 否則閘道一次打嗝就把用戶踢下線（2026-09-05「偶爾跳未登录」根因）。
       clearStoredToken();
       setUser(null);
       setToken(null);
@@ -74,6 +77,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (localTestMode) return;
+    // 水合成功标记：启动自愈脚本据此判断「页面是否真的活了」。
+    (window as unknown as { __eimuHydrated?: boolean }).__eimuHydrated = true;
     syncStoredAuthFromCookie();
     // Hydrate from localStorage on mount
     const storedUser = getStoredUser();
@@ -84,8 +89,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setIsLoading(false);
       // Refresh in background to get latest quota
       fetchMe(storedToken).then((result) => {
-        if (result.ok && result.user) { setStoredToken(storedToken, result.user); setUser(result.user); }
-        else { clearStoredToken(); setUser(null); setToken(null); }
+        if (result.ok && result.user) {
+          const validToken = result.token ?? storedToken;
+          setStoredToken(validToken, result.user);
+          setUser(result.user);
+          setToken(validToken);
+        }
+        else if (!result.transient) { clearStoredToken(); setUser(null); setToken(null); }
+        // transient：維持 optimistic 登入態，等下一次 refresh/操作再校驗。
       });
     } else {
       setIsLoading(false);

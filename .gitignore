@@ -104,3 +104,37 @@ surgery/
 /*.mp4
 /*.mjs
 chapters.tsv
+
+# Blender headless sandbox workdir (bridge/blender-bridge)
+.blender-work/
+
+# ── 根目錄暴露面清理（2026-09-06）：log/測試/redteam/內部資料永不入庫 ──
+*.log
+*.err
+.redteam-*
+redteam-*
+.browser-screenshots/
+/browser-probe/
+/browser-screenshots/
+/verification/
+/.agent-notes/
+/.dsh-vision-router/
+/.tmp-vercel-data/
+/.tmp-vercel-config/
+/.vercel.bak-owner/
+/deploy-staging/blender-modal/out/
+/deploy-staging/blender-director-persona/__pycache__/
+# 帳號池數據（含明文帳密+token，永不入庫）
+/pixai-pool-new.json
+/IMG_*.jpg
+/dreamina_output.webp
+/chat-history-export-*.zip
+/gh_repo.json
+/reddit-miner-output.md
+/rt4b-log.md
+/batch-*.json
+/.batch-*.json
+/.probe-write-test.txt
+/fix-system.sh
+.av-implementation-spec.md
+.tmp-*

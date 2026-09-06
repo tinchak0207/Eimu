@@ -29,6 +29,7 @@ import {
 import { resolveAdobe2ApiVideoModelId } from "@/lib/generation-core/adobe2api-upstream";
 import { syncModelPricing } from "@/lib/pricing-runtime";
 import { optimizeVideoPrompt } from "@/lib/agent-prompt-optimizer";
+import { fuseSceneVideo, type SceneVideoFusion } from "@/lib/scene3d-video-fusion";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -46,6 +47,14 @@ interface ParsedVideoRequest {
   durationSeconds?: number;
   generateAudio?: boolean;
   referenceImages: File[];
+  // 3D 場景卡嵌合（片AC，2026-09-06，可選；缺欄零行為變化）。
+  sceneCard?: unknown;
+  cameraTrajectory?: unknown;
+}
+
+/** JSON body 的 scene_card/camera_trajectory 欄位（object 檢查即可，融合層做深解析）。 */
+function optionalObject(value: unknown): unknown {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : undefined;
 }
 
 interface AdobeChatPayload {
@@ -80,6 +89,8 @@ async function readVideoRequest(req: NextRequest): Promise<ParsedVideoRequest> {
       outputResolution: typeof body.outputResolution === "string" ? body.outputResolution : undefined,
       durationSeconds: Number(body.durationSeconds) || undefined,
       generateAudio: optionalBoolean(body.generateAudio ?? body.generate_audio),
+      sceneCard: optionalObject(body.scene_card),
+      cameraTrajectory: optionalObject(body.camera_trajectory),
       referenceImages: [],
     };
   }
@@ -196,10 +207,16 @@ export async function POST(req: NextRequest) {
 
   // 隱形提示詞導演：Agent 層（deepseek）優化 → 失敗規則層兜底 → 原樣。
   // 用戶無感；優化失敗絕不阻塞生成（回原始 prompt）。
+  // 3D 場景卡嵌合（片AC）：scene_card + camera_trajectory 同時在場且形狀合法才生效，
+  // 缺欄/髒欄 = null = 零行為變化。
+  const sceneVideoFusion = fuseSceneVideo(parsed.sceneCard, parsed.cameraTrajectory);
   const optimized = await optimizeVideoPrompt(prompt, {
     modelId,
     durationSeconds,
     generateAudio,
+    ...(sceneVideoFusion
+      ? { sceneCard: sceneVideoFusion.sceneCard, cameraTrajectory: sceneVideoFusion.cameraTrajectory }
+      : {}),
   });
   const finalPrompt = optimized.prompt;
   if (optimized.ok && optimized.usedAgent) {
@@ -279,12 +296,29 @@ export async function POST(req: NextRequest) {
       }
       const attemptStartedAt = Date.now();
       try {
-        const result = await requestVideo(
-          endpoint,
-          upstreamModelId,
-          finalPrompt,
-          parsed.referenceImages,
-          generateAudio,
+  // 上游只吃 files（multipart 圖位）——非 File 的 JSON 參考卡不進上游（版位契約不動）。
+  const referenceFiles = [...parsed.referenceImages];
+  if (sceneVideoFusion) {
+    const upstreamFiles = sceneVideoFusion.frameCard.references
+      .filter((reference) => reference.url.startsWith("data:"))
+      .slice(0, Math.max(0, 2 - referenceFiles.length));
+    if (upstreamFiles.length > 0) {
+      const files = await Promise.all(
+        upstreamFiles.map(async (reference) => new File(
+          [Buffer.from(reference.url.slice(reference.url.indexOf(",") + 1), "base64")],
+          `${reference.name || "scene3d-ref"}.png`,
+          { type: reference.mimeType },
+        )),
+      );
+      referenceFiles.push(...files);
+    }
+  }
+  const result = await requestVideo(
+    endpoint,
+    upstreamModelId,
+    finalPrompt,
+    referenceFiles,
+    generateAudio,
           Math.min(VIDEO_UPSTREAM_TIMEOUT_MS, remainingMs),
           req.signal,
         );

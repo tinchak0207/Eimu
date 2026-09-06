@@ -21,8 +21,17 @@ export const imageHelpers = {
     provider: string
   ): Promise<void> => {
     const fileName = imageHelpers.generateImageFileName(provider);
-    const blob = imageSource.startsWith("data:") || imageSource.startsWith("http") || imageSource.startsWith("blob:")
-      ? await fetch(imageSource).then((response) => response.blob())
+    // http(s) sources are first rendered by <img> in no-cors mode and cached
+    // immutable for a year; a same-URL cors fetch can then be served that
+    // cached copy without Access-Control-Allow-Origin (Chromium's simple cache
+    // ignores Vary: Origin) and gets blocked. Bust the cache key and skip the
+    // HTTP cache so the download always takes a fresh CORS-eligible response.
+    const isHttpSource = imageSource.startsWith("http");
+    const fetchUrl = isHttpSource
+      ? `${imageSource}${imageSource.includes("?") ? "&" : "?"}dl=1`
+      : imageSource;
+    const blob = isHttpSource || imageSource.startsWith("data:") || imageSource.startsWith("blob:")
+      ? await fetch(fetchUrl, { cache: "no-store" }).then((response) => response.blob())
       : imageHelpers.base64ToBlob(imageSource);
     const blobUrl = URL.createObjectURL(blob);
     const link = document.createElement("a");

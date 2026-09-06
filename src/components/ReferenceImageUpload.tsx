@@ -1,7 +1,7 @@
 "use client";
 
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
-import { ImagePlus, Images, Loader2, Plus, X } from "lucide-react";
+import { ImagePlus, Images, Loader2, X } from "lucide-react";
 import { useDropzone } from "react-dropzone";
 import type { ReferenceImage } from "@/lib/image-types";
 import { cn } from "@/lib/utils";
@@ -40,6 +40,8 @@ export const ReferenceImageUpload = memo(
   ) {
     const [isProcessing, setIsProcessing] = useState(false);
     const [isExpanded, setIsExpanded] = useState(false);
+    /** 桌面端 hover 才浮现参考图面板（2026-09-05 暴君裁定：不常驻、不自动弹）。 */
+    const [hoverOpen, setHoverOpen] = useState(false);
     const [activePreview, setActivePreview] = useState<ReferenceImage | null>(null);
     const [pendingCount, setPendingCount] = useState(0);
     const valueRef = useRef(value);
@@ -87,7 +89,6 @@ export const ReferenceImageUpload = memo(
     }
 
     setPendingCount(referenceCandidates.length);
-    setIsExpanded(true);
     setIsProcessing(true);
     try {
       const { default: imageCompression } = await import("browser-image-compression");
@@ -141,12 +142,15 @@ export const ReferenceImageUpload = memo(
 
   if (variant === "prompt") {
     return (
-      <div className="absolute inset-x-3 bottom-3 z-20 flex min-w-0 max-w-full items-center gap-2 overflow-visible">
-        {isExpanded && (value.length > 0 || pendingCount > 0) && (
+      <div
+        className="absolute bottom-3 left-3 z-20 flex min-w-0 max-w-[calc(100%-64px)] items-center gap-2 overflow-visible"
+        onMouseEnter={() => setHoverOpen(true)}
+        onMouseLeave={() => setHoverOpen(false)}
+      >
+        {(isExpanded || hoverOpen) && (value.length > 0 || pendingCount > 0) && (
           <div className="absolute -bottom-3 inset-x-0 w-auto max-w-[22rem] max-h-[min(46dvh,16rem)] overflow-y-auto overscroll-contain rounded-ios-2xl bg-white/95 p-3 shadow-[0_18px_50px_rgba(31,35,48,0.18)] backdrop-blur-xl [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            <div className="sticky top-0 z-10 -mx-3 -mt-3 mb-2 flex items-center justify-between bg-[rgba(255,255,255,0.92)] px-4 py-3 backdrop-blur-xl">
+            <div className="sticky top-0 z-10 -mx-3 -mt-3 mb-2 flex items-center bg-[rgba(255,255,255,0.92)] px-4 py-3 backdrop-blur-xl">
               <span className="text-ios-caption1 font-semibold text-black/60">参考图 {previewCount}/{MAX_REFERENCE_IMAGES}</span>
-              <button type="button" onClick={() => setIsExpanded(false)} title="收起预览" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-black/[0.04] text-black/45 transition-colors hover:bg-black/[0.08] hover:text-black/70"><X className="h-3.5 w-3.5" /></button>
             </div>
             <div className={cn("grid gap-2", promptGridColumns)}>
               {value.map((image) => (
@@ -168,18 +172,23 @@ export const ReferenceImageUpload = memo(
           </div>
         )}
 
-        <div {...getRootProps()} className="flex h-11 w-11 shrink-0 items-center justify-center">
+        <div {...getRootProps()} className="flex shrink-0 items-center justify-center">
           <input {...getInputProps()} />
+          {/* 樣式對齊 AI 助理 composer 的附件鈕（AgentComposer）：同一顆藍底圓鈕語法。 */}
           <button
             type="button"
             disabled={isProcessing || value.length >= MAX_REFERENCE_IMAGES}
             aria-label="上传参考图"
             title="上传参考图"
-            className="flex min-h-11 min-w-11 items-center justify-center text-black/55 transition-colors hover:text-black disabled:opacity-40"
+            className={cn(
+              "flex h-11 w-11 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-full",
+              "bg-ios-blue/10 text-ios-blue transition-colors",
+              "touch-manipulation [-webkit-tap-highlight-color:transparent]",
+              "hover:bg-ios-blue/[0.16] active:bg-ios-blue/[0.22] focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30",
+              "disabled:cursor-not-allowed disabled:bg-transparent disabled:text-foreground/45",
+            )}
           >
-            <span className="flex h-[22px] w-[22px] items-center justify-center rounded-full bg-white/85 shadow-[0_2px_10px_rgba(0,0,0,0.10)] transition-colors hover:bg-white">
-              {isProcessing ? <Loader2 className="h-2 w-2 animate-spin" /> : <Plus className="h-2 w-2" />}
-            </span>
+            {isProcessing ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" /> : <ImagePlus className="h-5 w-5" aria-hidden="true" />}
           </button>
         </div>
 

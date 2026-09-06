@@ -164,7 +164,8 @@ export function useCanvasInteraction({ canvasStateRef, containerRef, visibleNode
       node.type === CanvasNodeType.Group ||
       node.type === CanvasNodeType.Video ||
       node.type === CanvasNodeType.Audio ||
-      node.type === CanvasNodeType.Prompt
+      node.type === CanvasNodeType.Prompt ||
+      node.type === CanvasNodeType.Scene3d // 3D 場景卡 P1 只讀+播放，無生成面板語義
     ) return;
     setPromptPanelNodeId(nodeId);
   }, [canvasStateRef, setPromptPanelNodeId]);

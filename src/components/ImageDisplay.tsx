@@ -4,11 +4,12 @@ import {
   AlertCircle,
   Download,
   ImageIcon,
+  Loader2,
   Video,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useResolvedImageSrc } from "@/components/image-src";
-import { GenerationProgressBar } from "@/components/GenerationProgressBar";
+import { ParticleSeaWaiting } from "@/components/ParticleSeaWaiting";
 import { ProviderTiming } from "@/lib/image-types";
 import { imageHelpers } from "@/lib/image-helpers";
 import { cn } from "@/lib/utils";
@@ -38,6 +39,9 @@ export function ImageDisplay({
   // modelId kept in interface for API compatibility
 }: ImageDisplayProps) {
   const [isZoomed, setIsZoomed] = useState(false);
+  // 下载要先整图 fetch 成 blob 才触发浏览器保存，这几秒按钮必须给出中间态，
+  // 否则用户感知就是「按了没反应」。
+  const [isDownloading, setIsDownloading] = useState(false);
   const hasVideo = mediaType === "video" && Boolean(videoUrl) && !failed;
   const hasImage = mediaType !== "video" && (Boolean(image) || Boolean(imageUrl)) && !failed;
   const hasMedia = hasImage || hasVideo;
@@ -81,15 +85,21 @@ export function ImageDisplay({
     }
   };
 
-  const handleActionClick = (
+  const handleActionClick = async (
     event: React.MouseEvent,
     imageSource: string,
     providerName: string,
   ) => {
     event.stopPropagation();
-    imageHelpers.download(imageSource, providerName).catch((error) => {
+    if (isDownloading) return;
+    setIsDownloading(true);
+    try {
+      await imageHelpers.download(imageSource, providerName);
+    } catch (error) {
       console.error("Failed to download image:", error);
-    });
+    } finally {
+      setIsDownloading(false);
+    }
   };
 
   return (
@@ -148,8 +158,9 @@ export function ImageDisplay({
               className="absolute bottom-4 left-4 h-11 w-11 rounded-full border-[rgba(255,255,255,0.52)] bg-[rgba(255,255,255,0.64)] shadow-[0_14px_30px_rgba(45,49,66,0.08)]"
               onClick={(event) => handleActionClick(event, videoUrl, provider)}
               aria-label="下载视频"
+              disabled={isDownloading}
             >
-              <Download className="h-4 w-4" />
+              {isDownloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
             </Button>
           </>
         ) : hasImage && resolvedImageSrc ? (
@@ -171,8 +182,9 @@ export function ImageDisplay({
               className="absolute bottom-4 left-4 h-11 w-11 rounded-full border-[rgba(255,255,255,0.52)] bg-[rgba(255,255,255,0.64)] shadow-[0_14px_30px_rgba(45,49,66,0.08)] transition-all duration-200 sm:translate-y-1 sm:opacity-0 sm:group-hover:translate-y-0 sm:group-hover:opacity-100"
               onClick={(event) => handleActionClick(event, resolvedImageSrc, provider)}
               aria-label="下载图片"
+              disabled={isDownloading}
             >
-              <Download className="h-4 w-4" />
+              {isDownloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
             </Button>
 
             <div className="absolute bottom-4 right-4 rounded-full bg-[rgba(255,255,255,0.18)] px-3 py-2 text-xs font-medium text-white/90 backdrop-blur-xl">
@@ -180,13 +192,11 @@ export function ImageDisplay({
             </div>
           </>
         ) : isRendering ? (
-          <div className="absolute inset-0 flex items-center justify-center p-8">
-            <GenerationProgressBar
-              visible={isRendering}
-              startedAt={timing?.startTime}
-              durationMs={timing?.durationMs}
-            />
-          </div>
+          <ParticleSeaWaiting
+            visible={isRendering}
+            startedAt={timing?.startTime}
+            durationMs={timing?.durationMs}
+          />
         ) : (
           <div className="absolute inset-0 flex items-center justify-center p-8">
             <div className="flex max-w-[20rem] flex-col items-center text-center">

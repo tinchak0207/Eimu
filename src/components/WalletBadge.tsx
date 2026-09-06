@@ -17,8 +17,8 @@ interface WalletBadgeProps {
 /**
  * 余额胶囊（2026-08-27 暴君裁定）：余额 + 「+」合成一颗胶囊。
  * 「+」点开两项菜单（充值 / 每日签到）：充值跳 /pricing，签到就地完成。
- * 已签到后：菜单里该项不可选并标注冷却；「+」本体亮绿勾表示今日已签，
- * header 不再另放签到奖励横幅文字。
+ * 2026-09-05 修正：「+」入口图标恒定不变——已签到状态只体现在菜单项里
+ * （不可选 + 「已签到 · 明日再来」），不再把「+」换成绿勾。
  */
 export function WalletBadge({ className, showTopUp = true, showCheckin = true }: WalletBadgeProps) {
   const { user, token, isLoggedIn, refresh } = useAuth();
@@ -66,7 +66,7 @@ export function WalletBadge({ className, showTopUp = true, showCheckin = true }:
   return (
     <div className={cn("relative flex min-w-0 items-center gap-1.5", className)}>
       {/* 余额 + 「+」合体胶囊：币值一段、加号一段，同一颗圆角外壳。
-          签到完成后「+」换成绿勾——完成态长在入口上，不再另起横幅。 */}
+          「+」恆為加號入口；已簽態只在菜單項裡表達。 */}
       <div
         className="inline-flex max-w-full shrink items-stretch overflow-hidden rounded-full bg-[rgba(0,0,0,0.05)] select-none"
         aria-label={`余额 ${coins} 币`}
@@ -82,19 +82,11 @@ export function WalletBadge({ className, showTopUp = true, showCheckin = true }:
             aria-expanded={plusOpen}
             aria-haspopup="menu"
             aria-label="余额操作"
-            className={cn(
-              "flex w-7 shrink-0 cursor-pointer items-center justify-center transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)]",
-              checkinDone && showCheckin
-                ? // 完成态：绿勾挂在「+」上（#34C759 在近白底只有 ~2.2:1，用深一档绿）。
-                  "text-[#248A3D] hover:bg-[rgba(52,199,89,0.12)]"
-                : "text-[rgba(120,90,20,0.85)] hover:bg-[rgba(0,0,0,0.06)]",
-            )}
+            className="flex w-7 shrink-0 cursor-pointer items-center justify-center text-[rgba(120,90,20,0.85)] transition-colors duration-200 hover:bg-[rgba(0,0,0,0.06)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)]"
           >
-            {checkinDone && showCheckin ? (
-              <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
-            ) : (
-              <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-            )}
+            {/* 2026-09-05 暴君裁定：「+」是充值/签到入口，恆為加號——
+                簽到完成態只反映在菜單項裡，不侵占入口圖標。 */}
+            <Plus className="h-3.5 w-3.5" aria-hidden="true" />
           </button>
         )}
       </div>

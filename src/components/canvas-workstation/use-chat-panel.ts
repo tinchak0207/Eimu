@@ -15,11 +15,9 @@ export function useChatPanel() {
   // ─── 畫布工作站：面板記憶載入/持久化 ───
   useEffect(() => {
     const s = window.localStorage.getItem("canvas-chat-panel-state");
-    if (s === "rail") {
-      setChatPanelState("rail");
-    } else if (!s && window.matchMedia("(max-width: 767px)").matches) {
-      // 手機首次進工作站：抽屜預設收成 rail。展開態是 46dvh 的底部抽屜，
-      // 一進場就蓋掉半屏畫布（節點卡只剩標題列可見）——要看畫布再收、要聊再開。
+    // 2026-09-05 暴君裁定：手機端 agent 態 = 全螢幕聊天，沒有操作畫布的需求——
+    // rail（FAB 收起態）只在桌面有意義，手機舊持久值一律忽略、保持 expanded。
+    if (s === "rail" && !window.matchMedia("(max-width: 767px)").matches) {
       setChatPanelState("rail");
     }
     const w = Number(window.localStorage.getItem("canvas-chat-panel-width"));

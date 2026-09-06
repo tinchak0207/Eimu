@@ -86,7 +86,9 @@ test("catalog resolves image and video selections to real Adobe2API model ids", 
   assert.equal(resolveAdobe2ApiImageModelId("adobe-firefly", "16:9", "2k"), "firefly-image5-2k-16x9");
   assert.equal(resolveAdobe2ApiVideoModelId("veo-3.1-fast", "9:16", "1080p", 8), "firefly-veo31-fast-8s-9x16-1080p");
   assert.equal(resolveAdobe2ApiVideoModelId("kling-3.0", "16:9", "720p", 10), "firefly-kling3-10s-16x9-720p");
-  assert.equal(resolveAdobe2ApiVideoModelId("seedance-2.0-fast", "16:9", "480p", 4), "firefly-seedance2-fast-4s-16x9-480p");
+  // 2026-09-05 暴君裁定：Seedance 全系時長地板 10s（虧錢線以下禁賣），4s 已從目錄移除。
+  assert.equal(resolveAdobe2ApiVideoModelId("seedance-2.0-fast", "16:9", "480p", 4), null);
+  assert.equal(resolveAdobe2ApiVideoModelId("seedance-2.0-fast", "16:9", "480p", 10), "firefly-seedance2-fast-10s-16x9-480p");
 });
 
 test("one capability projection normalizes UI, request, LoRA, reference, and pricing fields", () => {

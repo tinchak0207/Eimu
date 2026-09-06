@@ -23,6 +23,7 @@ import {
   type CanvasProject,
   type CanvasSseEvent,
   type CanvasViewport,
+  type Scene3dCardMetadata,
 } from "./types";
 
 // ─────────────────────────────────────────── 事件分流
@@ -136,6 +137,32 @@ export function toNodeMetadata(raw: unknown): CanvasNodeMetadata {
     ...(str(m.topViewSvg) !== undefined ? { topViewSvg: str(m.topViewSvg) } : {}),
     ...(str(m.cameraViewSvg) !== undefined ? { cameraViewSvg: str(m.cameraViewSvg) } : {}),
     ...(num(m.revision) !== undefined ? { revision: num(m.revision) } : {}),
+    // 3D 場景卡節點（Astra PRD P1-3）：sceneCard 欄位族收斂（Scene3dCardMetadata）。
+    // 契約全形六欄；非契約形狀（任一必填欄缺失/型別不符）整包丟棄，不製造半形數據。
+    ...(toScene3dCard(m.sceneCard) ? { sceneCard: toScene3dCard(m.sceneCard) } : {}),
+  };
+}
+
+/** sceneCard 欄位族收斂：六欄逐一驗型，任一必填欄不符契約即整包丟棄。 */
+function toScene3dCard(v: unknown): Scene3dCardMetadata | undefined {
+  if (!v || typeof v !== "object") return undefined;
+  const s = v as Record<string, unknown>;
+  const turntableUrl = str(s.turntable_url);
+  const blendPath = str(s.blend_path);
+  const glbPath = str(s.glb_path);
+  const summary = str(s.scene_summary);
+  const durationMs = num(s.duration_ms);
+  const stills = Array.isArray(s.stills_urls)
+    ? s.stills_urls.filter((u): u is string => typeof u === "string")
+    : undefined;
+  if (!turntableUrl || !blendPath || !glbPath || !summary || durationMs === undefined || !stills) return undefined;
+  return {
+    turntable_url: turntableUrl,
+    stills_urls: stills,
+    blend_path: blendPath,
+    glb_path: glbPath,
+    scene_summary: summary,
+    duration_ms: durationMs,
   };
 }
 

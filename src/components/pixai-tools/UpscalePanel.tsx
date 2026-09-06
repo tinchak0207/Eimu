@@ -16,6 +16,8 @@ import { PixaiModal } from "./PixaiModal";
 import { imageHelpers } from "@/lib/image-helpers";
 import { usePricingRevision } from "@/hooks/use-pricing-revision";
 import { generationCoins, resolutionFromImageSize } from "@/lib/generation-model-catalog";
+import { isStandalonePwa, createHandoffLogin } from "@/lib/github-login";
+import { PwaHandoffPanel } from "@/components/PwaHandoffPanel";
 import { PIXAI_UPSCALE_MODEL_ID } from "@/lib/image-model-ids.js";
 
 type Stage = "idle" | "uploading" | "generating" | "done" | "error";
@@ -27,13 +29,17 @@ interface UpscalePanelProps {
 }
 
 export function UpscalePanel({ open = true, onClose, inline }: UpscalePanelProps) {
-  const { token, isLoggedIn, user } = useAuth();
+  const { token, isLoggedIn, user, refresh } = useAuth();
   const { toast } = useToast();
   const [source, setSource] = useState<PickedImage | null>(null);
   const [sourceSize, setSourceSize] = useState<{ width: number; height: number } | null>(null);
   const [stage, setStage] = useState<Stage>("idle");
   const [error, setError] = useState("");
   const [resultUrl, setResultUrl] = useState("");
+  // 下载要等整图 fetch 成 blob，转圈期间按钮禁点。
+  const [downloadBusy, setDownloadBusy] = useState(false);
+  // PWA 登录交接面板（standalone 内 GitHub 授权走跨浏览器 handoff）。
+  const [pwaHandoffUrl, setPwaHandoffUrl] = useState<string | null>(null);
   usePricingRevision();
 
   const sizeLabel = sourceSize ? `${sourceSize.width}x${sourceSize.height}` : undefined;
@@ -42,6 +48,17 @@ export function UpscalePanel({ open = true, onClose, inline }: UpscalePanelProps
   });
 
   const redirectToGithub = useCallback(() => {
+    // PWA standalone：GitHub 登录态带不进来，改走跨浏览器交接面板。
+    if (isStandalonePwa()) {
+      void createHandoffLogin().then((handoff) => {
+        if (handoff) {
+          setPwaHandoffUrl(handoff.loginUrl);
+          return;
+        }
+        window.location.href = "/api/auth/github/start";
+      });
+      return;
+    }
     window.location.href = "/api/auth/github/start";
   }, []);
 
@@ -106,10 +123,18 @@ export function UpscalePanel({ open = true, onClose, inline }: UpscalePanelProps
           <div className="flex gap-2">
             <button
               type="button"
-              onClick={() => imageHelpers.download(resultUrl, "upscale")}
-              className="inline-flex h-11 flex-1 cursor-pointer items-center justify-center gap-2 rounded-ios-xl bg-[#007AFF] px-5 text-ios-body font-semibold text-white transition-all hover:bg-[#0066DD] active:scale-[0.97]"
+              disabled={downloadBusy}
+              onClick={() => {
+                if (downloadBusy) return;
+                setDownloadBusy(true);
+                imageHelpers
+                  .download(resultUrl, "upscale")
+                  .catch((error) => console.error("Failed to download image:", error))
+                  .finally(() => setDownloadBusy(false));
+              }}
+              className="inline-flex h-11 flex-1 cursor-pointer items-center justify-center gap-2 rounded-ios-xl bg-[#007AFF] px-5 text-ios-body font-semibold text-white transition-all hover:bg-[#0066DD] active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-70 disabled:scale-100"
             >
-              <Download className="h-4 w-4" />下载图片
+              {downloadBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}下载图片
             </button>
             <button
               type="button"
@@ -171,6 +196,22 @@ export function UpscalePanel({ open = true, onClose, inline }: UpscalePanelProps
     </>
   );
 
+  const panel = (
+    <>
+      {pwaHandoffUrl && (
+        <PwaHandoffPanel
+          loginUrl={pwaHandoffUrl}
+          onSuccess={() => {
+            setPwaHandoffUrl(null);
+            refresh().catch(() => {});
+          }}
+          onClose={() => setPwaHandoffUrl(null)}
+        />
+      )}
+      {content}
+    </>
+  );
+
   if (inline) {
     return (
       <section className="lg-card relative overflow-x-clip rounded-ios-3xl p-5 pb-6 sm:p-6 sm:pb-7">
@@ -186,14 +227,14 @@ export function UpscalePanel({ open = true, onClose, inline }: UpscalePanelProps
             <X className="h-4 w-4" />
           </button>
         </div>
-        {content}
+        {panel}
       </section>
     );
   }
 
   return (
     <PixaiModal title="高清放大" onClose={handleClose}>
-      {content}
+      {panel}
     </PixaiModal>
   );
 }

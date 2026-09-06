@@ -52,8 +52,10 @@ test("wallet badge can be compacted for mobile navigation", () => {
   assert.match(source, /已签到 · 明日再来/);
   assert.match(source, /disabled=\{!canCheckin \|\| checkinLoading\}/);
   assert.match(source, /aria-disabled=\{!canCheckin \|\| checkinLoading\}/);
-  // 完成态长在「+」入口上：签到后加号位换成绿勾，不再渲染「今日签到已获得 X 张」。
-  assert.match(source, /checkinDone && showCheckin \? \(/);
+  // 2026-09-05 修正：「+」入口图标恒为加号——已签到状态只体现在菜单项里，
+  // 不再把「+」换成绿勾（入口被完成态侵占 = 用户以为参考图/功能被移除）。
+  assert.match(source, /<Plus className="h-3.5 w-3.5"/);
+  assert.doesNotMatch(source, /checkinDone && showCheckin \?/);
   assert.match(source, /<CheckCircle2/);
   assert.doesNotMatch(source, /formatCheckinRewardText/);
   assert.doesNotMatch(source, /今日签到已获得/);
@@ -92,11 +94,11 @@ test("checkin calendar opens a calendar modal and awards random image credits", 
 });
 
 test("mobile pages reserve space for the single-row navbar", () => {
-  // 2026-08-25：pricing 页改为聚焦弹窗化紧凑流（py-6 起，砍掉无意义大 Padding），
-  // 只有 History 页保留 pt-20 的页面节奏；两页都不允许回到两行 navbar 时代的 pt-32。
+  // 2026-09-05：History 页 navbar 与「生成历史」栏之间 80px 空隙过大，裁定减 60%（pt-20 → pt-8）；
+  // pricing 页维持弹窗化紧凑流（py-6）；两页都不允许回到两行 navbar 时代的 pt-32。
   const history = read("src/components/HistoryClient.tsx");
-  assert.match(history, /pt-20/);
-  assert.doesNotMatch(history, /pt-32/);
+  assert.match(history, /pt-8/);
+  assert.doesNotMatch(history, /pt-20|pt-32/);
   const pricing = read("src/components/PricingClient.tsx");
   assert.doesNotMatch(pricing, /pt-32/);
 });
@@ -205,6 +207,6 @@ test("pricing redeem refreshes the displayed quota after successful cdk redempti
 test("auth refresh persists the latest quota returned by new-api", () => {
   const auth = read("src/hooks/use-auth.tsx");
 
-  assert.match(auth, /setStoredToken\(t, result\.user\)/);
-  assert.match(auth, /setStoredToken\(storedToken, result\.user\)/);
+  assert.match(auth, /setStoredToken\(validToken, result\.user\)/);
+  assert.match(auth, /const validToken = result\.token \?\? storedToken/);
 });

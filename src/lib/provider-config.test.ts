@@ -35,10 +35,11 @@ test("GPT Image 2 follows the Adobe credit table at ten credits per coin", () =>
   assert.equal(imageGenerationCoins("gpt-image-2", "quality"), 2);
 });
 
-test("PixAI Tsubaki.2 inherits the recommendation tag and is the default engine", () => {
+test("PixAI Tsubaki.2 keeps the recommendation tag; default engine is GPT Image 2", () => {
+  // 2026-09-05 暴君裁定：預設模型改 GPT Image 2；Tsubaki.2 保留「推荐」標籤。
   assert.equal(modelPromotionTag(PIXAI_TSUBAKI2_MODEL_ID), "推荐");
-  assert.equal(MODEL_CONFIGS.fast.image_tinchak, PIXAI_TSUBAKI2_MODEL_ID);
-  assert.equal(MODEL_CONFIGS.quality.image_tinchak, PIXAI_TSUBAKI2_MODEL_ID);
+  assert.equal(MODEL_CONFIGS.fast.image_tinchak, "gpt-image-2");
+  assert.equal(MODEL_CONFIGS.quality.image_tinchak, "gpt-image-2");
 });
 
 test("endpoint overrides do not replace nano-banana-pro with the legacy default model", () => {

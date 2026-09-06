@@ -1,3 +1,5 @@
+import { ensureNewApiSessionTokenViaRelay } from "@/lib/newapi-session-token";
+
 type NewApiUserData = {
   id: number;
   username: string;
@@ -101,11 +103,7 @@ export async function loginViaNewApi(baseUrl: string, username: string, password
 
   const userId = loginData.data.id;
 
-  const [{ response: selfResponse, data: selfData }, { response: tokenResponse, data: tokenData }] =
-    await Promise.all([
-      fetchSelf(baseUrl, cookieHeader, userId),
-      fetchAccessToken(baseUrl, cookieHeader, userId),
-    ]);
+  const { response: selfResponse, data: selfData } = await fetchSelf(baseUrl, cookieHeader, userId);
 
   if (!selfResponse.ok || !selfData.success || !selfData.data) {
     return {
@@ -114,6 +112,20 @@ export async function loginViaNewApi(baseUrl: string, username: string, password
       message: selfData.message ?? "获取用户信息失败。",
     } as const;
   }
+
+  // 优先走控制面的稳定会话令牌（/api/user/token 每次调用都会重置该用户的
+  // 唯一 access_token，任何一次新登录会杀掉所有旧会话；稳定通道查表验活
+  // 复用同一 token）。通道未配置或失败 → 回退原重置型端点（本地开发/降级）。
+  const ensured = await ensureNewApiSessionTokenViaRelay(userId, cookieHeader);
+  if (ensured) {
+    return {
+      ok: true,
+      token: ensured.token,
+      user: selfData.data,
+    } as const;
+  }
+
+  const { response: tokenResponse, data: tokenData } = await fetchAccessToken(baseUrl, cookieHeader, userId);
 
   if (!tokenResponse.ok || !tokenData.success || !tokenData.data) {
     return {

@@ -20,11 +20,14 @@ const PROMPT_INPUT_SURFACE = [
   "src/components/prompt-input/ActionRow.tsx",
 ].map(read).join("\n\n");
 
-test("prompt input inserts example snippets instead of replacing typed text", () => {
+test("prompt input appends example snippets and replaces the previous one on repeat clicks", () => {
+  // 2026-09-05 暴君裁定：連點模板不疊加——新模板替換上一次插入的模板，
+  // 用戶手打文字照舊保留（replacePromptSnippet 內部先摘掉舊模板再插入新模板）。
   const source = PROMPT_INPUT_SURFACE;
-  assert.match(source, /insertPromptSnippet/);
+  assert.match(source, /replacePromptSnippet/);
   assert.match(source, /handleSuggestionSelect/);
-  assert.match(source, /setInput\(\(current\) => insertPromptSnippet\(current, prompt\)\)/);
+  assert.match(source, /setInput\(\(current\) => replacePromptSnippet\(current, lastSuggestionRef\.current, prompt\)\)/);
+  assert.match(source, /lastSuggestionRef\.current = prompt/);
   assert.doesNotMatch(source, /setInput\(prompt\);\s*onSubmit\(prompt\)/);
   assert.doesNotMatch(source, /handleSuggestionSelect[\s\S]{0,160}onSubmit/);
 });

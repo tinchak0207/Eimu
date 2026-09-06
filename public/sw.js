@@ -1,4 +1,4 @@
-const CACHE = "image-studio-v1";
+const CACHE = "image-studio-v2";
 
 self.addEventListener("install", () => {
   self.skipWaiting();
@@ -36,16 +36,7 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // 文件導航：network-first，離線回退首頁 shell。
-  if (request.mode === "navigate") {
-    event.respondWith(
-      fetch(request)
-        .then((response) => {
-          const copy = response.clone();
-          caches.open(CACHE).then((cache) => cache.put("/", copy));
-          return response;
-        })
-        .catch(() => caches.match("/")),
-    );
-  }
+  // 文件導航一律放行網絡：緩存頁面殼會讓部署後的瀏覽器拿到舊 HTML/舊
+  // chunk 引用（2026-09-05 登錄修復多輪「改了沒生效」的根因），登錄站離線
+  // 無意義，不緩存導航。
 });
