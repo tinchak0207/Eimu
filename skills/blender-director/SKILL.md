@@ -4,6 +4,10 @@
 > https://github.com/arjun988/blender-skills — 94 个专业 Blender skill 的生产管线，
 > 本目录取其中 11 个 + 共享 references（共 12 份配方）逐份复制，白名单改动见各档头部注释。
 
+## 3D 任务路由硬规则（先于一切，T4 评测实锤）
+
+**委托单含 previz / 3D / 模型 / 场景 / 机位 / 运镜 / 骨架 / turntable / 分镜预演 关键词时，必须走本 SKILL 的 blender_* 三工具（blender_exec / blender_render / blender_export_gltf），禁止以 gpt-image-2、seedream 等二维生成顶替 3D previz。** 报价前先核对工具清单：3D 任务预算单只允许 blender_* 工具链（或 asset_search/asset_get 复用），出现二维图像模型 = 路由错误，重读本节。
+
 ## 执行环境契约（先读）
 
 1. **执行通道**：所有 bpy 脚本通过 bridge HTTP 执行 —— `POST /v1/execute`（blender-mcp 同构协议，Blender headless）。禁止在回复里口述 UI 操作步骤。
@@ -24,6 +28,7 @@
 ### 阶段 ①：Blockout（灰盒布局）
 
 - **何时做**：接到委托单/分镜表后的第一件事。只关心比例、位置、导航路径，不碰材质细节。
+- **先查资产库**：动手前先 `asset_search` 查 blender-3d-assets 包与用户资产包（免费），同形/同构场景或可复用道具直接 `asset_activate` 取出，查空才自造。（生效条件：agent.director 条目併入 VPS opencode.json 且 persona 白名单放行 asset_search/asset_get 后可用；主指令 AGENTS.md §1 路由行已先上线。）
 - **配方档**：
   - `recipes/scene-assembly/SKILL.md` — 集合结构（COL_Layout/COL_Blockout/…）、灰盒规则、性能卫生
   - `recipes/set-dressing/SKILL.md` — 布局锁定后的叙事道具簇与密度规则
@@ -87,6 +92,9 @@
 2. **诊断纪律**：错误诊断信息落 artifact 文件（写 `$BLENDER_WORK/out/` 下 .json/.txt），不依赖 print——stdout_tail 可能被引擎日志挤占（桥已预算制修复，artifact 仍更可靠）。
 3. **5.2 API 雷区**：fcurves 走 `action.layers[*].strips[*].channelbags[*].fcurves`（5.2 slotted action 无 `action.fcurves`）；视频输出勿用 `file_format="FFMPEG"`（enum 已死，走 `image_settings.media_type="VIDEO"` 或 PNG 序列 + host ffmpeg）；Eevee enum 只有 `BLENDER_EEVEE`（EEVEE_NEXT 在 5.2 已死）。
 4. **产物落盘**：所有输出写 `$BLENDER_WORK/out/`，文件名带语义前缀（`分镜号_内容`，如 `sh02_turntable_f0001.png`），禁止写 /tmp 或依赖 cwd。
+5. **共享实例互踩**（T3 实锤）：桥的 Blender 实例是共享的，并发任务的脚本会重置你的场景。长链任务每帧渲染前 `bpy.ops.wm.open_mainfile(filepath=...)` 重开自己的 mainfile，或开工前 `save_as` 快照、每阶段先重开再续做；发现「场景里多了/少了东西」= 被互踩，重开 mainfile 自愈。
+6. **桥主机 ≠ 沙箱**（T1 实锤）：产物落在桥主机 `out/`，agent 沙箱（VPS）看不到这些文件——**沙箱不自持文件，禁止在沙箱 ls/find 等产物文件**。blender_exec/blender_render 成功 result 带 `artifact_base_url`，用 `${artifact_base_url}?path=${encodeURIComponent(artifact.path)}` 逐文件取回字节（artifact.path 是 result.artifacts 里的相对路径）。
+7. **动画写入两坑**（T3 实锤，均为 bpy 语义雷）：① pose 逐骨刷新——写 `pose_bone.matrix`/`rotation_euler` 后必须立刻 `bpy.context.view_layer.update()` 再写下一根父骨受影响的子骨，否则父骨陈旧求值污染子骨；② 装配修正矩阵乘序是 `basis @ w⁻¹ @ target`（basis 修正 × 逆世界 × 目标），写反顺序装配 dev_max 永不为 0。关键帧写完用帧采样探针（frame_set + 读 matrix_world）验证动作真的发生，fcurves 存在 ≠ 动画生效（5.2 slotted action 133 条恒值 fcurves 实锤）。
 
 ---
 

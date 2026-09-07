@@ -10,7 +10,9 @@
         "blender_exec": true,
         "blender_render": true,
         "blender_export_gltf": true,
-        "image_quote": true
+        "image_quote": true,
+        "asset_search": true,
+        "asset_get": true
       }
     }
   }

@@ -27,6 +27,22 @@ Before each script the bridge ensures blender's CWD is $BLENDER_WORK (the
 process is spawned with that CWD and the bootstrap chdirs to it, so every
 script inherits it).
 
+    GET  /v1/artifact?path=<relative-path-under-out/>
+         → 200 binary body (Content-Type by extension; whitelist below)
+         → 400 bad path (traversal / outside out/ / extension not whitelisted)
+         → 404 not found
+
+         Artifact retrieval channel: files land on the bridge host's
+         $BLENDER_WORK/out/, which the agent sandbox cannot see (bridge host
+         and sandbox are different machines). The tool layer therefore
+         returns an artifact_base_url with every success result and the agent
+         fetches bytes through this endpoint. path is a single relative path
+         under out/ (subdirectories allowed, no ".." segments, no absolute
+         paths, no backslashes); only render artifact extensions are served —
+         never .py/.log/.json sidecars beyond meta-style data. No auth by
+         design (mirrors /v1/execute): the bridge must stay loopback/tunnel
+         bound, never exposed publicly.
+
 Queue semantics: execute requests run through a FIFO queue in front of the
 blender supervisor (same semantics as the generation-worker concurrency
 pool: env-tunable concurrency, FIFO order, bounded depth, failure
@@ -46,6 +62,7 @@ Run:  python3 bridge/blender-bridge/server.py
 """
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -83,6 +100,27 @@ _KIND_BY_EXT = {
     ".mp4": "mp4",
     ".glb": "glb",
 }
+
+# /v1/artifact 副檔名 → Content-Type（只出渲染產物；.py/.log 一律 400）。
+_ARTIFACT_CONTENT_TYPES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".mp4": "video/mp4",
+    ".webm": "video/webm",
+    ".blend": "application/x-blender",
+    ".glb": "model/gltf-binary",
+    ".gltf": "model/gltf+json",
+    ".json": "application/json",
+}
+
+# path 白名單：單段相對路徑（out/ 內允許一層子目錄檔案，如 render_frames/frame_0001.png）。
+# 禁 traversal：無 ".."、無絕對路徑、無反斜線、不以點開頭（同構
+# src/app/api/blender-artifact/route.ts 的 isSafeArtifactName，多允許一段子目錄）。
+_ARTIFACT_PATH_RE = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9._-]{0,120}(/[A-Za-z0-9][A-Za-z0-9._-]{0,120})?$"
+)
 
 _GPU_PROBE = r'''
 import json
@@ -426,6 +464,45 @@ def handle_health():
         return 500, {"ok": False, "error": "health check failed: %s" % e}
 
 
+def handle_artifact(raw_path):
+    """GET /v1/artifact?path=<relpath under out/>：產物取回通路（片AJ）。
+
+    只讀 `$BLENDER_WORK/out/`：先 regex 白名單（單段或一段子目錄、禁 traversal），
+    再 realpath 收容檢查（防 symlink 逃逸），雙重保險。回 binary + 按副檔名的
+    Content-Type。回傳 (status, bytes|dict)——dict 走 _json，bytes 走 binary。
+    """
+    rel = (raw_path or "").strip()
+    if not rel:
+        return 400, None, "缺少 path 参数"
+    if not _ARTIFACT_PATH_RE.match(rel) or ".." in rel:
+        return 400, None, "path 不合法（僅允許 out/ 內單段相對路徑）"
+    ext = os.path.splitext(rel)[1].lower()
+    content_type = _ARTIFACT_CONTENT_TYPES.get(ext)
+    if not content_type:
+        return 400, None, "不支持的产物类型（%s）" % (ext or "无扩展名")
+
+    sup = supervisor()
+    out_root = os.path.join(sup.workdir, "out")
+    candidate = os.path.join(out_root, rel)
+    try:
+        real_root = os.path.realpath(out_root)
+        real_file = os.path.realpath(candidate)
+    except OSError:
+        return 404, None, "产物不存在"
+    if not (real_file == real_root or real_file.startswith(real_root + os.sep)) \
+            or not os.path.isfile(real_file):
+        return 404, None, "产物不存在（桥可能还没生成该文件）"
+    try:
+        size = os.path.getsize(real_file)
+        if size > 512 * 1024 * 1024:
+            return 400, None, "产物过大（>512MB），拒绝经 HTTP 取回"
+        with open(real_file, "rb") as fh:
+            body = fh.read()
+    except OSError as e:
+        return 404, None, "产物读取失败: %s" % e
+    return 200, body, content_type
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "image-studio-blender-bridge/1.0"
     protocol_version = "HTTP/1.1"
@@ -438,10 +515,30 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _binary(self, code, body, content_type):
+        self.send_response(code)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self):
         if self.path == "/v1/health":
             code, obj = handle_health()
             self._json(code, obj)
+        elif self.path.startswith("/v1/artifact"):
+            from urllib.parse import urlsplit, parse_qs
+            query = parse_qs(urlsplit(self.path).query).get("path", [""])[0]
+            try:
+                code, body, info = handle_artifact(query)
+            except Exception as e:  # never let the bridge hang or crash
+                code, body, info = 500, None, "artifact error: %s" % e
+            if body is None:
+                self._json(code, {"ok": False, "error": info})
+            else:
+                self._binary(code, body, info)
         else:
             self._json(404, {"ok": False, "error": "not found: %s" % self.path})
 

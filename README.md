@@ -22,67 +22,26 @@ Emu（eimu.dev）是一個**以「生產力」為設計目標的專業影像生�
 
 ## 二、前端／UI 對稱差
 
-### 2.1 CaseShowcase：3D 環形案例輪播（首創級）
+UI 細節不上 README——它們活在 `design-system/MASTER.md`（唯一權威：`lg-*` 類體系、色板、字級、間距、反模式）裡。整個產品——首頁案例環、專業工作台、無限畫布、AI 助理、管理後台——共用一套 iOS 26 啟發的 **Liquid Glass 液態玻璃**語言；行動端保持「單面工作台」，生成等待狀態是 canvas 粒子海而非轉圈。只留三個跨 UI 的產品事實：
 
-首頁的招牌。不是卡片橫向滑動，而是一圈**空間縱深拱起的 3D 環**，每一張案例卡以真實的圓週分佈懸浮在軌道上：
+- **案例環即對稱差**：首頁 3D 環上每個案例都是 `showcase-cases.ts` 的真實生成結果（附 prompt、風格、生成後記），點卡直接注入工作台復刻；磁吸數學是純函式（`carousel-detent.ts`）、固定點性質被測試鎖死
+- **模型名去廠商化**：`stripVendorPrefix`——用戶選的是「這個模型適不適合我的活」，不是「我在跟哪家公司打交道」
+- **鍵盤優先**：`workstation-commands.ts` 13+ 條可發現指令——專業工作台的滑鼠不是必要條件
 
-- **TILT = 0.82**：卡片傾角嚴格貼合圓週切線，而非固定角度——側邊卡會傾到幾乎只剩邊線，製造真實的 coverflow 空間感
-- **TILT_MAX = 80°**：任何卡片最多傾斜 80°，卡在環上永遠不會出現「翻面」破綻
-- **DEPTH = 0.78**：z 位移用軟化曲線，純數學 `R·cos(θ)` 會讓背側縮太小，軟化後整個環保有可讀性
-- **LIFT = 26px**：越遠的卡越往上抬，環拱起來、而不是平躺的圓
-- **SWEEP_WIDE = 360°**：一次可橫滑的總轉角，兼顧單張細看與整環預覽
-
-背後的 `carousel-detent.ts` 是**純函式的「磁吸數學」**，與組件完全解耦、可以單獨被測試鎖住：
-
-- `detent()`：輸入連續角度，往最近的卡位「擰」——`DETENT_EXP = 1.35` 刻意保守，卡得穩但不搶手指
-- `commitSteps()`：滑動慣性結束時，從起點走整格決定落點。`COMMIT_MIN = 0.18`——用戶只要拖過 18% 的卡寬就進位，拖了一大截卻彈回原位的「白拖感」不存在
-- `FLICK_MAX_STEPS = 0.9`：快甩最多帶走一格多一點。物理上，甩動表達的是「方向＋想翻」，不是「連翻三張」
-- **固定點性質**：`detent(n·step) === n·step`——磁吸數學保證卡位永不累積漂移，滑十圈還是準確停在卡片中心
-
-### 2.2 專業模式：三欄可拖動工作台
-
-不是「進階設定頁」，而是一個真正的**工作站佈局**：
-
-- 左（資源庫）／中（畫布）／右（生成隊列＋歷史檢視）三欄，邊界把手可拖動，實時重排（`pointer capture` + CSS 變數 `minmax(200px, var(--pro-left-w))`，不碰 DOM 重排）
-- 下界硬約束 200/220/320px，左欄上限依容器動態計算；行動裝置自動隱藏把手、塌縮為單面工作台
-
-### 2.3 鍵盤優先的命令系統
-
-13+ 條可發現指令（`workstation-commands.ts`）：執行生成、聚焦 prompt、開 LoRA 庫、開隊列、開圖庫、重用結果、下載、前後翻結果、復原標註、關閉浮層。**專業工作台的滑鼠不是必要條件。**
-
-### 2.4 去廠商化的模型心智
-
-`stripVendorPrefix`（`ModelPicker.tsx`）：`Google Veo 3.1` 在 UI 上就是 **Veo 3.1**，`Gemini Nano Banana Pro` 就是 **Nano Banana Pro**。用戶選的是「這個模型適不適合我的活」，不是「我在跟哪家公司打交道」。
-
-### 2.5 Liquid Glass 設計語言
-
-- iOS 26 啟發的液態玻璃質感、微漸變、情境光暈；規範唯一權威落在 `design-system/MASTER.md`（`lg-*` 類體系、色板、字級、間距、反模式）
-- 每個案例卡帶 `glow` 色值——環轉到誰，背景光就被誰暈染（案例卡的沉浸式「環境色」設計）
-- 行動端保持「單面工作台」：畫布為核心，一切工具可呼出可收回
-
-### 2.6 LoRA 生態：首訪引導＋庫內選卡
-
-- 普通模式 hover 首訪引導、專業模式的教學引導（`driver.js` 動態載入，普通模式不載入任何多餘 CSS）
-- 專業模式內建 **LoRA 庫**：搜索、排序、選卡一氣呵成；用戶偏好持久化（`lora-user-state`）
-
-### 2.7 Prompt 增強器與創作者資源庫
+### 2.1 Prompt 增強器與創作者資源庫
 
 - 六種風格預設（realistic / anime / street / product / poster / watercolor），自動追加品質後綴——小白寫短 prompt 也出好圖
 - **創作者資源庫**：每個資源帶 `sourceName / sourceUrl / sourceCommit` 的完整來源追溯，不是抄來的 prompt 大雜燴
 - 場景模板（`scenario-templates`）＋風格庫（`style-library`）
 - **Invisible Prompt Director**（`invisible-prompt-director.ts`）：規則層影片提示詞導演——偵測六槽公式（Camera + Subject + Action + Setting + Style + Lighting）缺漏並補齊、替換 anti-slop 空形容詞、把負面句改成正向聲明、執行引擎規則（age-blind、≤3 tracked characters）、附加品質鎖。全程後端發生，用戶無感
 
-### 2.8 Workflow Recall：工作流記憶
+### 2.2 Workflow Recall：工作流記憶
 
 `workflow-recall.ts`：prompt、負向 prompt、尺寸、風格模板、參考圖角色、區域 prompt 的完整工作流狀態，一鍵復原。**換個活，不重頭搭。**
 
 配套還有 **Workflow PNG**（`workflow-png.ts`）：把工作流配置以 trailing-data 格式（JSON payload + 8-byte `WFSTUDIO` magic + version + 長度）嵌入 PNG 檔尾——提取只需讀最後 13 個位元組，magic + PNG 簽名 + JSON 合法性三重校驗擋壞檔誤判，零依賴。**圖片本身就是工作流的載體。**
 
-### 2.9 案例庫 → 工作台的閉環
-
-首頁 3D 環上的每個案例，都來自 `showcase-cases.ts` 的**真實生成結果**（附 prompt、風格、生成後記）。點一下案例卡，prompt + 風格預設直接注入工作台——「看到好圖 → 復刻它」的路徑是一步，不是三步。
-
-### 2.10 無限畫布工作站：生成閉環的畫布協作
+### 2.3 無限畫布工作站：生成閉環的畫布協作
 
 `src/components/canvas` + `src/lib/canvas` + `/api/canvas/*` 構成的無限畫布，定位是「生成工作流的組織層」，不是畫圖軟體：
 
@@ -92,8 +51,10 @@ Emu（eimu.dev）是一個**以「生產力」為設計目標的專業影像生�
 - **雲端持久化**：畫布專案（`project-store`，每用戶上限 50 個）與素材庫（`asset-store`，上限 500 個）走 Blob 世代寫入模式，單用戶寫入串行
 - **提示詞庫聚合**（`/api/canvas/prompts`）：並行抓多個遠端 prompt 源、每源 8s timeout、失敗跳過、模組級快取 1 小時 stale-while-revalidate
 - **同源圖片代理**（`/api/canvas/image-proxy`）：只為把公網圖片變同源（供像素編輯讀入 `<canvas>`），只服務登入用戶、只認 https 公網主機、拒絕 IP 字面量與 localhost——不提供內網探測面
+- **AI 筆 = Workflow DSL**（`workflow-dsl/`）：agent 對畫布的多步編排寫整份宣告式 DSL，站點純編譯器全圖校驗（教學式報錯：缺漏給提示、相近 id 給建議）後原子套用上畫布；圖是唯一運行時真相，DSL 只是筆，round-trip 冪等。同款編譯器開放為 B 端 `/v1/workflow/compile`
+- **scene_3d 場景卡**：3D 導演 subagent 回傳的結構化節點（turntable / stills / blend / glb / 場景摘要 / 時長六欄合同），前端雙白名單（`toNodeMetadata` 收斂器 + `compactMetadataForAgent` 透傳）合同測試釘死
 
-### 2.11 AI 助理：對話驅動的許願工作流
+### 2.4 AI 助理：對話驅動的許願工作流
 
 `src/components/agent-chat` + `src/lib/agent-*` 構成的許願 Agent 面板，交互原則是「確認卡先行、批量願望、自癒透明化」：
 
@@ -101,15 +62,17 @@ Emu（eimu.dev）是一個**以「生產力」為設計目標的專業影像生�
 - **確認卡（`AgentConfirmCard`）**：工具調用先出確認卡，用戶批准才執行——agent 花的是用戶的錢，用戶要有否決權
 - **批量錨定（`agent-batch-anchor`）**：第一張滿意後顯式錨定，把第一張**實際用過的參數原樣念回給 agent 照抄**，整批不漂移。只引用事件流裡真實出現過的參數；湊不出可複現參數時寧可不給錨定按鈕——一顆按下去不保證同風格的按鈕，比沒有按鈕更糟
 - **參數卡（`agent-tool-params`）**：常用層（模型/尺寸/張數/花費）默認展開、進階層（LoRA/權重/sampler/steps/seed）默認收起；參數唯一來源是 `tool.invoke` 的 `args_summary`，被截斷就退化顯示原文，**絕不把半截 JSON 編成看起來完整的參數表**
+- **自主後期全包**：8 個 `timeline_*` 工具（查詢／剪輯操作／節奏／風格／混音／母帶／lint／回滾）——素材到成片的剪接鏈 agent 自己跑；**成片硬閘門**：未過交付驗收的片子不出卡、不結帳（確認卡金額與工作流報價逐級比對）
+- **模板工作流**：`workflow_start` 從模板鋪出頭卡/工具卡/門禁卡/生成卡的多鏡頭工作流；斷點續跑、跨渠道 failover、伺服器重啟後 workflow 喚醒掃描——**中斷的 turn 是工程問題，不是用戶的損失**
 - **賬戶記憶**：`/api/agent/profile`（用戶確認過的「我是誰、怎麼合作」）與 `/api/agent/profile/lessons`（回合收官後靜默提煉的教訓，只提議、用戶確認後才注入）分開存儲；resume 老會話時走 `/memory` 補針
 - **額度與附件**：`/api/agent/quota` 查額度（閘道權威、無本地副本）、`/attachments` multipart 原樣透傳（不重組 boundary）
 - **Prompt 優化**：`/api/agent/optimize-prompt`——Agent 層（deepseek）優先，失敗 fallback 規則層（invisible-prompt-director），再失敗返回原 prompt，全程服務端、免登入免金鑰
 
-### 2.12 PWA：可安裝的工作台
+### 2.5 PWA：可安裝的工作台
 
 `manifest.ts`（standalone、主題色、雙尺寸圖標）+ `PwaInstaller`（HTTPS 下靜默註冊 `/sw.js`，註冊失敗靜默忽略、不阻塞任何功能）。
 
-### 2.13 歷史與導出
+### 2.6 歷史與導出
 
 歷史頁（`src/components/history`）支援篩選、統計、Lightbox；導出三格式（`history-export.ts`）：ZIP（圖片＋清單，`export-zip.ts` 做檔名清洗擋目錄穿越）、JSON（完整檔案）、CSV（表格）。取不到的圖跳過並計數，**不讓整個導出失敗**。
 
@@ -154,6 +117,7 @@ OpenAI 相容端面（`/api/v1/*`），全部走 biz key 鑑權、限流頭、tr
 - **工具端點**：`/v1/uploads`（上傳參考圖換 mediaId）、`/v1/upscale`（高清放大）、`/v1/templates` + `/v1/template-generations`（PixAI 場景模板）
 - **觀測端點**：`/v1/models`、`/v1/model-status`（每個生成模型的可用性 + 能力 + 功能標註；探測只發 GET {baseURL}/models，不觸發真實生成不扣費，結果快取 60 秒；不支持 /models 的渠道回報 unknown + note 而不是假裝探測失敗）、`/v1/queue`（租戶活躍任務）、`/v1/history`（歷史分頁）、`/v1/system_stats`（平台統計）、`/v1/object_info`（能力描述，ComfyUI 風格）、`/v1/openapi.json`（OpenAPI 3.1 spec，**從代碼派生不手寫漂移**）
 - **冪等**：`Idempotency-Key`，重複提交直接回同一個 job（衝突時 `IdempotencyConflictError` 拒絕，而不是默默覆寫）
+- **視頻 DSL**：`/v1/workflow/compile`（畫布工作流 DSL 的純編譯端點，422 帶教學式校驗報告）
 - **穩定錯誤碼分類學**（`api-error-codes.ts`）：外部客戶會程式化解析 `error.code`，所以對外碼一旦發佈永不改變語義；內部分類（FailureClass、HTTP 狀態、供應商錯誤字串）自由演進——內部可以拆得更細，外部只看到承諾過的碼
 - 多個客戶端不可區分的內部失敗（如 malformed_output / empty_result / artifact_download）**刻意收斂成同一個碼**，不逼客戶去分支處理只有我們運維才需要知道的區別
 - 請求追蹤：`X-Request-Id`（客戶自帶的 id 若通過白名單格式則原樣回顯，失敗時有東西可以報給客服）
@@ -196,13 +160,12 @@ retryable / switchSupplier / quarantineSupplier / cooldownUntil
 - 事後評估實際結局：可驗證解碼的影像 = 成功；被卡住沒人撿 = `stale_no_pickup`（誠實報告，不當成功）
 - 一旦真實 worker 上線，同一批 canary job 自動變成全鏈路金絲雀——**零改動升級**（`tools/run-canary.ts` 提供 CLI）
 
-### 4.4 三階段計費帳本
+### 4.4 計費：預檢閘門 + 三階段帳本 + 異步投影
 
-`billing-ledger.ts`：`reserve → commit → refund`：
-
-- 執行前預扣（`reserve`）、成功提交（`commit`）、失敗退回（`refund`）
-- 帳本層分類：429 → retry、4xx 確定性錯誤 → rejected、未知 → 對帳批次處理
-- 與外部帳本（New API / image-billing）雙向 reconcile——**兩個系統打架時，帳本層知道誰是對的**
+- **零額快車道預檢**（`quota-precheck.ts`）：提交時只讀上游餘額（無狀態無鎖）——通過則走 0 額 reserve 直進隊列，不足立即 402，映射缺失 fail-closed 503，上游不可達自動回落原 reserve 路徑。**用戶在排隊前就知道錢夠不夠**
+- `billing-ledger.ts`：`reserve → commit → refund`——執行前預扣、成功提交、失敗退回；殭屍帳（進程死在半路）到期自愈回收；與外部帳本（New API / image-billing）雙向 reconcile——**兩個系統打架時，帳本層知道誰是對的**
+- **異步投影記賬**（`billing-projection.ts`）：worker 維護循環每 30s 對閘門快車道的終態 job 確定性重算定價、冪等扣減（`idempotency_ref` claim pending→applied 防雙扣）——記帳不佔生成關鍵路徑
+- **job_events 賬本三鐵律**：append-only 只 INSERT；寫狀態必寫事件、上游錯誤原文入庫不改寫；話術只存在於展示層。配套 probe 端點（`/api/probe/jobs/{id}/timeline`、`/api/probe/stuck`）——排障從一小時考古變一條命令
 
 ### 4.5 Callback Outbox：可靠交付
 
@@ -231,7 +194,17 @@ retryable / switchSupplier / quarantineSupplier / cooldownUntil
 
 `batch-service.ts` 的 `computeBatchAggregate` 同時服務 `/v1/batches/{id}`（批聚合視圖）、`/v1/batches/{id}/reconciliation`（對賬 + 失敗分解）、`/v1/skus/runs/{id}`（SKU run 聚合）——同一份數學，不抄第二份。SKU run 不落新表：run_id 就是冪等鍵根，鏡頭任務以 `skurun:<run_id>:<index>` 冪等鍵落在既有 `generation_job` 上，提交全部走 `submitGenerationCommand`——**不自建第二套提交/計費/調度**。
 
-### 4.10 運維 CLI（tools/）
+### 4.10 3D 導演工作站：Blender 是生成管線的一等公民
+
+Astra——對話驅動的 3D previz→渲染管線。**Blender headless 不是外掛腳本，而是註冊進供應商租約排程的一條供應商渠道**（`blender-local`，adapter `blender_bridge`），渲染模型 `blender-render-eevee / blender-render-cycles` 進入統一模型目錄吃同一套幣制與失敗語義：
+
+- **橋**（`bridge/blender-bridge/`）：Blender 5.2.1 + blender-mcp addon 整份複製改造成 HTTP 橋（`/v1/health` + `/v1/execute`，FIFO 佇列、超時雙層、失敗自愈）；本機 RTX 5070 EGL headless 實證 gpu=egl；netns 內 unix socket 轉發器做網路隔離
+- **工具**：`blender_exec / blender_render / blender_export_gltf` 三工具 + 17 個 `director_*` 工具（機位/運動 keyframe、shot 計劃、提案流）——agent 用 L1 機位/運動語言描述鏡頭，bpy 腳本由配方庫（`skills/blender-director/`）落地
+- **委託單**（`blender-delegate.ts`）：內容指紋冪等——同樣的渲染意圖不重複花錢
+- **渲染節點**：本地橋之外，Modal（serverless GPU，bpy 5.2.1 同版本 wheel、單幀獨立容器）作雲端節點接入同一註冊表——`supplier-channels.config.ts` 一份十字段真源，四接入點（env 描述符/播種/scheduler 過濾/adapter 分派）
+- **嵌合**：sceneCard 灰盒渲染幀可作為 Seedance 視頻生成的構圖參考卡；L1 機位軌跡反向映射進六槽提示詞公式的 Camera 槽——**3D 不替換視頻生成，是給它上導演軌道**
+
+### 4.11 運維 CLI（tools/）
 
 控制面的部署與運維有專用工具鏈：`control-plane-bootstrap.ts`（遷移 → 播種 → 進 worker 循環的開機自舉——「一條部署時沒人跑的命令」導致的能用/不能用分裂，用自舉根治）、`seed-generation-suppliers.ts`（供應商能力播種）、`migrate-generation-db.ts`（DB 遷移）、`issue-biz-key.ts`（無需管理員密碼的密鑰簽發）、`provision-biz-account.ts`（上游專用計費賬戶開戶）、`agent-debug.ts`（不開瀏覽器對生產 agent 網關跑真實對話、錄完整 SSE 事件流、用生產同一份 reducer 回放）。
 
@@ -245,8 +218,8 @@ retryable / switchSupplier / quarantineSupplier / cooldownUntil
 
 現在：
 
-- **統一註冊表**：env 渠道、帳號池渠道、SensE nova 專用渠道、biz 管道、admin 探測，全部消費同一個 `channel-registry` 的輸出——`generate-images` 的隊列、熔斷、冷卻全部從這裡 import，路由測試把這個 import 釘死
-- **供應商譜系**：Adobe2API（web-session 直連）、Sub2API、PixAI 帳號池、SensE nova、New API 中轉——不同協議、不同認證、不同失敗語義，統一成同一份 endpoint 描述
+- **統一註冊表**：env 渠道、帳號池渠道、biz 管道、admin 探測、Blender 渲染節點，全部消費同一個 `channel-registry` 的輸出——`generate-images` 的隊列、熔斷、冷卻全部從這裡 import，路由測試把這個 import 釘死
+- **供應商譜系**：Adobe2API（web-session 直連）、Sub2API、PixAI 帳號池、New API 中轉（openai_images / openai_video / metaso / blender_bridge 四種 adapter 語義）——不同協議、不同認證、不同失敗語義，統一成同一份 endpoint 描述
 - **帳號池（admin-pools）**：每個帳號有健康狀態、並發上限、in-flight 租約；`active && schedulable` 才進候選
 - **Channel overrides**：渠道級覆寫優先級可調（`channel-overrides`）
 - **內部端面**（`/api/internal/*`）：biz-keys、callback-worker、generation-billing、proxy-pool——serverless 對 serverless 的內部收口，不暴露給外部路由
@@ -280,7 +253,7 @@ retryable / switchSupplier / quarantineSupplier / cooldownUntil
 
 ## 七、測試紀律：誠實性的工程化
 
-115 個測試檔（`src/**/*.test.ts`，node:test），測試的不是「函式跑得動」，而是**不變量**：
+184 個測試檔（`src/**/*.test.ts`，node:test），測試的不是「函式跑得動」，而是**不變量**：
 
 - `routing-honesty.test`：admin 顯示 = 生產實際路由
 - `carousel-detent.test`：磁吸固定點、落點決策、flick 上限
@@ -290,6 +263,8 @@ retryable / switchSupplier / quarantineSupplier / cooldownUntil
 - `api-error-codes.test`：對外錯誤碼的穩定性（發佈過的碼不准消失）
 - `status-contract.test`：B 端狀態端點的契約
 - `canvas`（reducer / layout / semantic-nodes / project-store）：畫布排版與連線語義
+- `workflow-dsl`：DSL 編譯 round-trip 冪等、教學式報錯、patch 白名單
+- `blender-e2e` / `director-wheel`：3D 工具鏈契約
 - `agent-batch-anchor` / `agent-param-reflect` / `agent-tool-params` / `agent-chat-reducer`：agent 交互的誠實不變量（參數只引用事件流真實出現過的值）
 - `workflow-png.test`：嵌入/提取往返與壞檔防禦
 - `workstation-mobile-stage` / `admin-ui` / `ui-copy`：UI 的品質與文案不變量
@@ -316,26 +291,27 @@ retryable / switchSupplier / quarantineSupplier / cooldownUntil
 ```
 
 - **Vercel**：前端、對外 API、agent 代理層、管理後台、控制平面（無狀態、靠 DB 租約協調；cron 每分鐘 tick 一次 worker 循環）
-- **VPS**：需要長駐行程或帶狀態的上游適配——Adobe2API 會話（容器內 /api/v1/health 健康端點）、PixAI 池、控制面 Docker（Postgres + generation-worker）、agent-harness 網關（systemd，session 存內存 Map——重啟即回收，站點 DELETE 對 not_found 冪等化）、微信掃碼 worker
+- **VPS**：需要長駐行程或帶狀態的上游適配——Adobe2API 會話（容器內 /api/v1/health 健康端點）、PixAI 池、控制面 Docker（Postgres + generation-worker + nginx 反代生產 API 路徑）、agent-harness 網關（systemd，session 存內存 Map——重啟即回收，站點 DELETE 對 not_found 冪等化）、微信掃碼 worker
+- **渲染節點**：Blender 橋跑在本地 GPU 工作站（RTX 5070 EGL headless），經 ssh 反向隧道以 `blender-local` 渠道註冊進控制面；Modal serverless GPU（bpy 5.2.1 同版本 wheel、單幀獨立容器）作雲端渲染節點——3D 渲染與其他供應商共享同一套租約調度
 - **域名分工**：agent 網關只掛在 store 域名的 `/agent/` 路徑下（image 域名同路徑是 404）；B 端生成端點走 image 域名——代理層封裝（`agent-gateway.ts`）用 `AGENT_GATEWAY_*` 前綴與計費網關的 `GATEWAY_*` 環境變數嚴格區分，兩個「閘道」在 config 裡不互相污染
 - **Blob 雙後端**（`blob-backend.ts`）：配了 `IMAGE_DATA_BASE_URL` 就全量走 VPS `image-data-api`（postgres kv_store + 靜態檔），否則 Vercel Blob——對呼叫方是同一組 `list/get/put/del` 簽名，切換是一個 env 決策，擺脫 Hobby 額度/停用依賴
 - **Postgres**：`generation_job`、`supplier_lease`、`billing`、`callback_delivery`、`lora_user_state`——所有分散式正確性都建立在資料庫事務上，而不是 serverless 實例的記憶體
 
 ---
 
-## 九、支援的模型譜系（2026-08 現況）
+## 九、支援的模型譜系（2026-09 現況）
 
-目錄（`generation-model-catalog/catalog.ts`）共 **46 個條目**，image / video / audio 三類：
+目錄（`generation-model-catalog/catalog.ts`）共 **54 個條目**，image / video / audio 三類：
 
-**影像**：GPT Image（2 / 1.5 / 初代）、Nano Banana 系列（Nano Banana = Gemini 2.5 Flash Image、Nano Banana Pro = Gemini 3 Image、Nano Banana 2 = Gemini 3.1 Flash Image）、Dreamina 系列（Image 5 Pro / Image 5 Lite / Seedream 2.0）、Adobe Firefly Image 5、Flux（1.1 Pro / 1.1 Pro Ultra、2 / 2 Pro、Kontext Pro / Max）、Runway Gen-4 Image、SenseNova U1 Fast、PixAI 日系系（Tsubaki.2 / Tsubaki v1.1 / Haruka v2 / Hoshino v2 / Reference Pro）
+**影像**：GPT Image（2 / 1.5 / 初代）、Nano Banana 系列（Nano Banana = Gemini 2.5 Flash Image、Nano Banana Pro = Gemini 3 Image、Nano Banana 2 = Gemini 3.1 Flash Image）、Dreamina 系列（Image 5 Pro / Image 5 Lite、Seedream 2.0、Seedream 5.0 Pro / Lite）、Adobe Firefly Image 5、Flux（1.1 Pro / 1.1 Pro Ultra、2 / 2 Pro、Kontext Pro / Max）、Runway Gen-4 Image、PixAI 日系系（Tsubaki.2 / Tsubaki v1.1 / Haruka v2 / Hoshino v2 / Reference Pro）、Blender 渲染（EEVEE / Cycles——3D 場景走同一套模型目錄）
 
 **影像工具型條目**：智能擴圖（Adobe Fill）、改圖（Image Edit）、圖像放大（2x Upscale）、模板生成（Template）
 
-**影片**：Veo 3.1（＋Fast）、Kling（2.5 Turbo / 3.0 / 3.0 Omni）、Seedance 2.0（＋Fast）、Runway Gen-4 / 4.5、Adobe Firefly Video、Luma Ray 系列（2 / 2 Flash / 3 / 3 HDR / 3.14 / 3.14 HDR）、Avatar 1（數字人）、Lipsync 1（對口型）
+**影片**：Veo 3.1（＋Fast）、Kling（2.5 Turbo / 3.0 / 3.0 Omni）、Seedance 2.0（＋Fast / Mini）、Seedance 2.5（480p / 720p / 30s）、Runway Gen-4 / 4.5、Adobe Firefly Video、MiniMax H3、Luma Ray 系列（2 / 2 Flash / 3 / 3 HDR / 3.14 / 3.14 HDR）、Avatar 1（數字人）、Lipsync 1（對口型）
 
 **語音**：TTS 1
 
-> 模型本身不是對稱差——**讓 46 個模型透過同一套計費、同一套失敗語義、同一套 SLO 可靠地賣出去**，才是。
+> 模型本身不是對稱差——**讓 54 個模型透過同一套計費、同一套失敗語義、同一套 SLO 可靠地賣出去**，才是。
 
 ---
 

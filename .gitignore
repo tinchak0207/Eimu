@@ -138,3 +138,8 @@ redteam-*
 /fix-system.sh
 .av-implementation-spec.md
 .tmp-*
+
+# asset cache (mocap/shake 數據快取，不入庫)
+.asset-cache/
+
+# 評測證據大檔留本地（22MB PNG/mp4），只入 REPORT.md

@@ -8,32 +8,36 @@
 
 | # | staging 檔 / 內容來源 | VPS 落位路徑 | 動作 | 屬主/權限 |
 |---|---|---|---|---|
-| 1 | `blender_tools.ts`（整份） | `/opt/agent-harness/workspace/.opencode/lib/blender-tools-impl.ts` | 新增 | root 644 |
+| 1 | `blender_tools.ts`（整份，片 AJ 起由 tools/export-blender-tools-staging.ts 機械導出） | `/opt/agent-harness/workspace/.opencode/lib/blender-tools-impl.ts` | 新增 | root 644 |
+| 1b | `blender_tools_adapter.ts`（整份，wrapBlenderTool 機械包裝） | `/opt/agent-harness/workspace/.opencode/lib/blender-tools-adapter.ts` | 新增 | root 644 |
 | 2 | adapter blender_exec | `/opt/agent-harness/workspace/.opencode/tools/blender_exec.ts` | 新增 | root 644 |
 | 3 | adapter blender_render | `/opt/agent-harness/workspace/.opencode/tools/blender_render.ts` | 新增 | root 644 |
 | 4 | adapter blender_export_gltf | `/opt/agent-harness/workspace/.opencode/tools/blender_export_gltf.ts` | 新增 | root 644 |
 | 5 | `bridge/blender-bridge/`（4 檔：blender_addon.py / launcher.py / server.py / README.md） | `/opt/blender-bridge/`（建議；見 §5 待拍板） | 新增 | root 644 |
 | 6 | env 兩鍵 | `/opt/agent-harness/.env` 追加 `BLENDER_BRIDGE_URL=http://127.0.0.1:8765`（`BLENDER_BIN` 見 §5） | 追加 | — |
+| 7 | 產物回傳（片 AJ，2026-09-06） | 橋 `server.py` 增 `GET /v1/artifact?path=`（out/ 白名單+binary 回傳）；真源 `blender-tools.ts` 成功 result 增 `artifact_base_url`（隨 §1 導出稿自動在 impl 內）；agent 以 `${artifact_base_url}?path=<rel>` 經反向隧道取回，沙箱不自持檔案 | 隨橋/impl 更新 | — |
 
 - **註冊表不需要加 id**：opencode 工具註冊是目錄掃描制（`.opencode/tools/*.ts` 落檔即註冊），無 id 清單檔要改。本地 `src/lib/harness-tool-registry.ts` 已含 `blender_exec/blender_export_gltf/blender_render`（P0-4 片C 已登記，VPS 同步屬 repo deploy 流程，不在本片）。
 - `.opencode/` 目錄 sftp 直接寫會 Permission denied——一律先落 `/tmp` 再 `sudo cp`（記憶 director R1）。
 
-三個 adapter 檔內容（各 2 行，形狀同構 director_*.ts 的靜態 import + export default；交互邏輯零新增）：
+三個 adapter 檔內容（各 3 行，片 AJ 改制：impl 為 BlenderToolDef 描述符形狀（機械導出），由
+lib/blender-tools-adapter.ts 的 wrapBlenderTool 機械包裝成 opencode tool()；args schema 從
+工具自帶定義讀取，零手寫=零漂移；交互邏輯零新增）：
 
 ```ts
 // blender_exec.ts
-import { blenderExecTool } from "../lib/blender-tools-impl"
-export default blenderExecTool
+import { wrapBlenderTool, blenderExecTool } from "../lib/blender-tools-adapter"
+export default wrapBlenderTool(blenderExecTool)
 ```
 ```ts
 // blender_render.ts
-import { blenderRenderTool } from "../lib/blender-tools-impl"
-export default blenderRenderTool
+import { wrapBlenderTool, blenderRenderTool } from "../lib/blender-tools-adapter"
+export default wrapBlenderTool(blenderRenderTool)
 ```
 ```ts
 // blender_export_gltf.ts
-import { blenderExportGltfTool } from "../lib/blender-tools-impl"
-export default blenderExportGltfTool
+import { wrapBlenderTool, blenderExportGltfTool } from "../lib/blender-tools-adapter"
+export default wrapBlenderTool(blenderExportGltfTool)
 ```
 
 ## 1. 本地預檢（上 VPS 前做完）
@@ -57,10 +61,11 @@ vps.py run "sudo cp /opt/agent-harness/.env /tmp/env.bak-MMDD-blender"
 
 # 2.2 上傳到 /tmp（.opencode 下 sftp 直寫會 Permission denied，必經 /tmp 中轉）
 vps.py put deploy-staging/blender-gateway/blender_tools.ts /tmp/blender-tools-impl.ts
+vps.py put deploy-staging/blender-gateway/blender_tools_adapter.ts /tmp/blender-tools-adapter.ts
 # （三個 adapter 內容極短，用 base64 單命令寫入 /tmp；SSH-443 管道會卡死，禁 scp）
-vps.py run "printf 'import { blenderExecTool } from \"../lib/blender-tools-impl\"\nexport default blenderExecTool\n' > /tmp/bl_adapter_exec.ts"
-vps.py run "printf 'import { blenderRenderTool } from \"../lib/blender-tools-impl\"\nexport default blenderRenderTool\n' > /tmp/bl_adapter_render.ts"
-vps.py run "printf 'import { blenderExportGltfTool } from \"../lib/blender-tools-impl\"\nexport default blenderExportGltfTool\n' > /tmp/bl_adapter_gltf.ts"
+vps.py run "printf 'import { wrapBlenderTool, blenderExecTool } from \"../lib/blender-tools-adapter\"\nexport default wrapBlenderTool(blenderExecTool)\n' > /tmp/bl_adapter_exec.ts"
+vps.py run "printf 'import { wrapBlenderTool, blenderRenderTool } from \"../lib/blender-tools-adapter\"\nexport default wrapBlenderTool(blenderRenderTool)\n' > /tmp/bl_adapter_render.ts"
+vps.py run "printf 'import { wrapBlenderTool, blenderExportGltfTool } from \"../lib/blender-tools-adapter\"\nexport default wrapBlenderTool(blenderExportGltfTool)\n' > /tmp/bl_adapter_gltf.ts"
 # （橋 4 檔由片A 交付物同法 put 到 /tmp，命令從略——server.py/blender_addon.py/launcher.py/README.md）
 
 # 2.3 編譯驗證先於落位重啟（bun 不在 sudo PATH；--target=bun 鐵律，記憶 director 片3 坑）
@@ -68,6 +73,7 @@ vps.py run "export PATH=\$PATH:/home/ubuntu/.bun/bin && bun build /tmp/blender-t
 
 # 2.4 落位（install 644 照 director 片4 範式；sudo cp 勿用 sudo cat > 重定向——會 Permission denied）
 vps.py run "sudo install -m 644 /tmp/blender-tools-impl.ts /opt/agent-harness/workspace/.opencode/lib/blender-tools-impl.ts"
+vps.py run "sudo install -m 644 /tmp/blender-tools-adapter.ts /opt/agent-harness/workspace/.opencode/lib/blender-tools-adapter.ts"
 vps.py run "sudo install -m 644 /tmp/bl_adapter_exec.ts /opt/agent-harness/workspace/.opencode/tools/blender_exec.ts"
 vps.py run "sudo install -m 644 /tmp/bl_adapter_render.ts /opt/agent-harness/workspace/.opencode/tools/blender_render.ts"
 vps.py run "sudo install -m 644 /tmp/bl_adapter_gltf.ts /opt/agent-harness/workspace/.opencode/tools/blender_export_gltf.ts"

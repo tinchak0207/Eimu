@@ -9,12 +9,20 @@
  * 同構結構承載同名欄位，VPS .opencode/tools/ 落位時逐條譯成 tool.schema 調用、
  * execute 體原樣搬運即可。
  *
- * 傳輸契約（與片 A 逐字共享，橋由片 A 施工）：
+ * 傳輸契約（與片 A 逐字共享，橋由片 A 施工；artifact 端點為片 AJ 追加）：
  *   GET  /v1/health → 200 {ok:true, blender_version, gpu:"egl"|"cpu", workdir}
  *   POST /v1/execute body {script:string, timeout_ms?:number} →
  *     200 {ok:true, artifacts:[{path,bytes,kind}], scene_summary:string, stdout_tail:string, duration_ms:number}
  *     500 {ok:false, error:string, stdout_tail:string}
+ *   GET  /v1/artifact?path=<out/ 內相對路徑> → 200 binary（Content-Type 按副檔名白名單）
  * 橋位址 = env BLENDER_BRIDGE_URL（默認 http://127.0.0.1:8765）。
+ *
+ * 產物取回（片 AJ，T1 斷點修復）：產物落在橋主機 out/，agent 沙箱（VPS）與橋主機
+ * 異構、沙箱不自持檔案 → exec/render 成功 result 帶 artifact_base_url（=
+ * ${bridgeUrl()}/v1/artifact，bridgeUrl 即 env BLENDER_BRIDGE_URL——VPS 側經
+ * blender-bridge-tunnel 反向隧道指向橋主機，同一 base 即取回入口），agent 用
+ * `${artifact_base_url}?path=${encodeURIComponent(artifact.path)}` 逐檔取回字節。
+ * 禁止在沙箱 ls/find 等本機檔案。
  *
  * 錯誤鐵律：橋未就緒/超時/非 200 一律返回結構化 fail()（含「桥未启动，请先启动
  * blender-bridge」指引），絕不 throw 原始 fetch 錯誤。
@@ -39,6 +47,7 @@
 import { spawn } from "node:child_process"
 import * as fsp from "node:fs/promises"
 import * as nodePath from "node:path"
+import { findTemplateByFingerprint, fingerprintScript, saveSceneAssets } from "./blender-asset-store"
 
 const EXEC_DEFAULT_TIMEOUT_MS = 120_000
 const RENDER_DEFAULT_TIMEOUT_MS = 1_800_000
@@ -55,6 +64,16 @@ export const BLENDER_BRIDGE_URL_DEFAULT = "http://127.0.0.1:8765"
 
 export function bridgeUrl(): string {
   return process.env.BLENDER_BRIDGE_URL || BLENDER_BRIDGE_URL_DEFAULT
+}
+
+/**
+ * 產物取回入口（片 AJ）：橋主機與 agent 沙箱異構、沙箱不自持檔案，產物一律經
+ * 橋 GET /v1/artifact 取回。取回 base = 橋地址（env BLENDER_BRIDGE_URL 已含
+ * 隧道語義：VPS 側 127.0.0.1:8765 經 blender-bridge-tunnel 反向隧道達橋主機）。
+ * 完整 URL = `${artifactBaseUrl()}?path=${encodeURIComponent(artifact.path)}`。
+ */
+export function artifactBaseUrl(): string {
+  return `${bridgeUrl()}/v1/artifact`
 }
 
 export interface BlenderArtifact {
@@ -75,6 +94,12 @@ export type BlenderToolResult = { title: string; output: string }
 
 export interface BlenderToolContext {
   abort?: AbortSignal
+  /**
+   * 呼叫者 userId（資產包 per-user 持久化；片 AG2 指紋接線）。
+   * 提供時 blender_exec 成功路徑自動 saveSceneAssets 入庫 + 執行前腳本指紋預查；
+   * 缺省維持舊契約（不入庫、不預查）。
+   */
+  userId?: number
 }
 
 export interface BlenderToolArgSpec {
@@ -497,14 +522,60 @@ export const blenderExecTool: BlenderToolDef = {
         return fail("invalid_args", "缺少必填参数 script：需要完整 bpy 脚本文本（import bpy 开头）。")
       }
       const timeoutMs = asInt(rawArgs.timeout_ms, EXEC_DEFAULT_TIMEOUT_MS, 1_000, 3_600_000)
+
+      // 執行前腳本指紋預查（片 AG2）：命中既有 bpy_script 資產只在 result 加提示欄，
+      // 不阻斷、不跳過執行；無 userId / 資產庫異常時靜默跳過（best-effort）。
+      let templateHit: { pack_id: string; title: string; fingerprint: string; scene_summary?: string } | undefined
+      if (context?.userId) {
+        try {
+          const hit = await findTemplateByFingerprint(context.userId, fingerprintScript(script))
+          if (hit.ok) {
+            templateHit = {
+              pack_id: hit.template.packId,
+              title: hit.template.itemTitle,
+              fingerprint: hit.template.fingerprint,
+              ...(hit.template.sceneSummary ? { scene_summary: hit.template.sceneSummary } : {}),
+            }
+          }
+        } catch {
+          // 資產庫讀取失敗不影響 blender 執行主鏈
+        }
+      }
+
       const data = await bridgeExecute(script, timeoutMs, context)
+
+      // 成功路徑自動入庫（片 AG2）：blend/glb 產物 + 腳本全文（指紋去重）進用戶
+      // blender-3d-assets 包；best-effort，入庫失敗不回滾執行結果。
+      let assetsSaved: { added: number; deduped: number } | undefined
+      if (context?.userId) {
+        try {
+          const saved = await saveSceneAssets(context.userId, data.artifacts, {
+            script,
+            scene_summary: data.scene_summary,
+          })
+          if (saved.ok) {
+            assetsSaved = { added: saved.items.length, deduped: saved.deduped }
+          }
+        } catch {
+          // 資產庫寫入失敗不影響執行結果（產物仍在橋工作目錄）
+        }
+      }
+
       return ok({
         title: "执行完成",
         artifacts: data.artifacts,
         artifact_count: data.artifacts.length,
+        artifact_base_url: artifactBaseUrl(),
         scene_summary: data.scene_summary,
         stdout_tail: data.stdout_tail,
         duration_ms: data.duration_ms,
+        ...(templateHit
+          ? {
+              template_hit: templateHit,
+              template_hint: `该脚本（规范化后）已存于资产包 ${templateHit.pack_id}「${templateHit.title}」，可用 asset_get 取出复用，勿重复造轮子。`,
+            }
+          : {}),
+        ...(assetsSaved ? { assets_saved: assetsSaved } : {}),
       })
     } catch (e) {
       return toFail(e)
@@ -677,6 +748,7 @@ export const blenderRenderTool: BlenderToolDef = {
               // PNG 序列仍在（out/<名>_frames/），供排查或手工合成。
               artifacts,
               artifact_count: artifacts.length,
+              artifact_base_url: artifactBaseUrl(),
               scene_summary: sceneSummary,
               stdout_tail: stdoutTail,
               duration_ms: durationMs,
@@ -690,7 +762,7 @@ export const blenderRenderTool: BlenderToolDef = {
             "ffmpeg_failed",
             `合成 mp4 产物异常（${stat ? `${stat.size} 字节，疑似 stub` : "文件缺失"}，正常应 >1KB）。` +
               `ffmpeg 命令：${FFMPEG_BIN} -framerate ${fps} ... ${mp4Abs}`,
-            { title: "Turntable 渲染完成", artifacts, artifact_count: artifacts.length, scene_summary: sceneSummary, stdout_tail: stdoutTail, duration_ms: durationMs, ...basePayload },
+            { title: "Turntable 渲染完成", artifacts, artifact_count: artifacts.length, artifact_base_url: artifactBaseUrl(), scene_summary: sceneSummary, stdout_tail: stdoutTail, duration_ms: durationMs, ...basePayload },
           )
         }
         // 成功：清理中间 PNG 目录，artifacts 收敛为 mp4（与旧 turntable 返回形状一致）。
@@ -703,6 +775,7 @@ export const blenderRenderTool: BlenderToolDef = {
         title: turntable ? "Turntable 渲染完成" : "渲染完成",
         artifacts,
         artifact_count: artifacts.length,
+        artifact_base_url: artifactBaseUrl(),
         scene_summary: sceneSummary,
         stdout_tail: stdoutTail,
         duration_ms: durationMs,
