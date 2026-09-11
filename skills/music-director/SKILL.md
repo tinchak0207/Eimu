@@ -35,9 +35,18 @@ description: 音樂 Expert 配方庫。觸發時機：配樂／主題曲／MV �
 
 平台事實（模型版本、欄位、政策）半年度全爛光，prompting 規則零爛——所以規則沉澱在 CORE、時效事實隔離在 DATA。**更新本庫時只換 DATA 檔（檔名帶日期後綴，換血即重命名），CORE 檔一字不動。** 每個 DATA 檔 frontmatter 帶 `valid_as_of` 與過期警示，使用前先核對。
 
-## Lyria 3.5 優先原則
+## 通路判定先於配方（2026-09-11 實測校正）
 
-Eimu 音樂主線走 Lyria 路線。寫 Lyria prompt 時以 `DATA_GOOGLE_2026-07.md` 為權威：**時間戳結構 `[0:00-0:10]` 與 `[Verse]` 等段落標籤是 Lyria 官方真實控件**（有廠商文檔背書），與 Suno 社群偽標籤（`[BPM:120]`、`[Reverb:30%]` 等所有平台都不解析的神話構造）嚴格區分。Lyria 3.5 另支援 image-to-music（≤10 圖）與 BPM/調性自然語言控制；30s 片段走 `lyria-3-clip-preview`。平台行為以該 DATA 檔快照為準，衝突時以官方文檔實測為準。
+**先確認這條 prompt 走哪條通路，再決定讀哪個 DATA 檔**——`music_gen` 回執的 `channel` 欄就是答案：
+
+| 通路 | 觸發條件 | 權威檔 | `[0:00 - 0:10]` 時間戳 |
+|---|---|---|---|
+| FlowMusic2API | env `FLOWMUSIC2API_URL` 已配置（**現行生產主通路**） | `DATA_FLOWMUSIC_2026-09.md` | **無效**：上游把 `:` 換成空格、無任何結構控制、成品長度不受約束 |
+| Gemini Lyria 直連 | 未配置時回落 | `DATA_GOOGLE_2026-07.md` | 有效（官方控件） |
+
+FlowMusic2API 通路的硬約束（實測，詳見該 DATA 檔）：**無歌詞標籤時 style prompt 被壓成單行、上限 220 runes**；帶 `[Verse]/[Chorus]` 標籤的歌詞走保版面分支（標籤保留，但上游會自行加寫段落、產出 A/B 兩版，不是你寫什麼就唱什麼）；BPM／調性／`Instrumental only, no vocals.` 實測有效。`duration_hint=clip30` 不是真短檔（上游 `lyria-fast` 與 `lyria` 規格全等，整歌實測 162–182s）。
+
+與 Suno 社群偽標籤（`[BPM:120]`、`[Reverb:30%]` 等所有平台都不解析的神話構造）的區分照舊：**凡該通路 DATA 檔沒實測到的控件一律不寫**。
 
 ## 使用規則
 
