@@ -4,7 +4,8 @@
  * 上游事實（已查證，2026-09-09 實彈探測 + genz27/FlowMusic2API README）：
  *   端點  POST {FLOWMUSIC2API_URL}/v1/chat/completions（OpenAI 兼容，非流式）
  *   鑑權  header `Authorization: Bearer $FLOWMUSIC2API_KEY`
- *   模型  lyria（Lyria 3.5 旗艦，整歌 ~150s）/ lyria-fast（同模型快速別名）
+ *   模型  lyria（Lyria 3.5 旗艦，整歌實測 162–182s）/ lyria-fast（與 lyria 規格全等，
+ *         無短檔模式，僅是快速別名）
  *   歌詞  無專用欄位——style prompt 與歌詞全部內嵌在 message content（README 範式）；
  *         歌詞段落標籤 [Verse]/[Chorus] 隨 content 傳遞，器樂在 prompt 註明 no vocals
  *   響應  頂級 clips 陣列（機器可讀：clip_id/audio_url/audio.format/duration）；
@@ -25,7 +26,7 @@
 /** FlowMusic2API 服務地址 env 名（VPS 上為 http://127.0.0.1:8000，容器僅綁本機）。 */
 const FLOWMUSIC2API_URL_ENV = "FLOWMUSIC2API_URL"
 
-/** duration_hint → FlowMusic2API 模型映射（full=旗艦整歌；clip30=快速別名，上游無 30s 片段模式）。 */
+/** duration_hint → FlowMusic2API 模型映射（full=旗艦整歌；clip30=僅快速別名：上游 lyria-fast 與 lyria 規格全等、無短檔模式）。 */
 export const FLOWMUSIC_MODELS = {
   full: "lyria",
   clip30: "lyria-fast",
@@ -33,7 +34,7 @@ export const FLOWMUSIC_MODELS = {
 
 export type FlowMusicModelId = (typeof FLOWMUSIC_MODELS)[keyof typeof FLOWMUSIC_MODELS]
 
-/** 非流式生成超時（上游整歌實測 ~150s 內，300s 硬頂含下載餘量）。 */
+/** 非流式生成超時（上游整歌實測 162–182s，300s 硬頂含下載餘量）。 */
 export const FLOWMUSIC_TIMEOUT_MS = 300_000
 
 /** 音頻檔下載超時。 */

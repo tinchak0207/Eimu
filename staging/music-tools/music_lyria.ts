@@ -6,7 +6,7 @@
  * 零依賴、無 import，除本注釋頭外與真源逐行等價。
  * 禁止手改本檔——改真源後跑 `npx tsx tools/export-music-tools-staging.ts` 重導出。
  *
- * 落位：/opt/agent-harness/workspace/.opencode/lib/music-lyria-impl.ts
+ * 落位：/opt/agent-harness/workspace/.opencode/lib/music_lyria.ts
  * env：GEMINI_API_KEY（x-goog-api-key 鑑權，付費額度）。
  */
 

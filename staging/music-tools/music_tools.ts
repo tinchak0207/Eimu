@@ -4,8 +4,9 @@
  * 本檔由 tools/export-music-tools-staging.ts 從行為真源 src/lib/music-tools.ts
  * 機械導出：真源全文逐行保留（工具定義/ok-fail/resolveKey/ffprobe 時長/上傳通路
  * 全在），除「環境適配」外與真源逐行等價。
- * 白名單 diff 僅三處：① 本注釋頭；②③ 真源 `from "./music-lyria"` → `from "./music_lyria"`
- * 與 `from "./music-flowmusic"` → `from "./music_flowmusic"`（同目錄落位檔名慣例）。
+ * 白名單 diff 僅四處：① 本注釋頭；②③④ 真源 `from "./music-lyria"` → `from "./music_lyria"`、
+ * `from "./music-flowmusic"` → `from "./music_flowmusic"` 與
+ * `from "./music-prompt-director"` → `from "./music_prompt_director"`（同目錄落位檔名慣例）。
  * 禁止手改本檔——改真源後跑 `npx tsx tools/export-music-tools-staging.ts` 重導出。
  *
  * 落位：/opt/agent-harness/workspace/.opencode/lib/music-tools-impl.ts
@@ -26,6 +27,11 @@
  * env GEMINI_API_KEY）。duration_hint=full → lyria-3.5（整歌 ~3 分鐘）；
  * clip30 → lyria-3-clip-preview（固定 30 秒）。無歌詞默認按純器樂處理
  * （官方寫法 "Instrumental only, no vocals."），需要人声必须提供歌词。
+ *
+ * prompt 規則層：buildToolPrompt 組出完整文本（含器樂聲明）後，最後一關過
+ * src/lib/music-prompt-director.ts 的 directMusicPrompt（偽標籤/時間戳剝除、
+ * 六層補齊、通路長度上限），回執 prompt_director 如實回報改寫/警告/截斷。
+ * 順序不可顛倒：220 runes 上限要算進器樂聲明等所有字元。
  *
  * 音頻資產通路（復用既有 gateway 平台存儲，與影片/TTS 同域）：生成成功的音頻經
  * gateway 素材入庫端點 POST {GATEWAY}/internal/media/upload?session_id=<id> 落盤
@@ -58,6 +64,7 @@ import {
   generateFlowMusicTrack,
   isFlowMusic2ApiEnabled,
 } from "./music_flowmusic"
+import { directMusicPrompt } from "./music_prompt_director"
 
 // ── plumbing（ok/fail/resolveKey 同構 director-common.ts） ───────────────────
 
@@ -336,14 +343,26 @@ export const musicGenTool: MusicToolDef = {
       const lyriaModel = durationHintRaw === "clip30" ? LYRIA_MODELS.clip30 : LYRIA_MODELS.full
       const model: string = flowMusicEnabled ? flowMusicModel : lyriaModel
 
+      // 確定性規則層（Music Prompt Director）必須是送上游前的最後一關：
+      // 先讓 buildToolPrompt 組出含器樂聲明的完整文本，再過 director 做偽標籤/時間戳
+      // 剝除、六層補齊與長度上限——220 runes 上限必須把器樂聲明等所有字元算進去，
+      // 提前過 director 會讓後加的聲明把長度頂爆（且 strip-timestamps 只認 flowmusic）。
+      const directorChannel = flowMusicEnabled ? "flowmusic" : "lyria"
+      const directed = directMusicPrompt(toolPrompt, {
+        channel: directorChannel,
+        hasLyrics: Boolean(lyrics),
+        durationSeconds: durationHintRaw === "clip30" ? 30 : undefined,
+      })
+      const finalPrompt = directed.prompt
+
       const imagesBase64 = (asString(rawArgs.reference_images) ?? "")
         .split(",")
         .map((s) => s.trim())
         .filter((s) => s !== "")
 
       const generated = flowMusicEnabled
-        ? await generateFlowMusicTrack({ prompt: toolPrompt, lyrics, model: flowMusicModel })
-        : await generateLyriaTrack({ prompt: toolPrompt, lyrics, model: lyriaModel, imagesBase64 })
+        ? await generateFlowMusicTrack({ prompt: finalPrompt, lyrics, model: flowMusicModel })
+        : await generateLyriaTrack({ prompt: finalPrompt, lyrics, model: lyriaModel, imagesBase64 })
       const upstreamUrl = flowMusicEnabled ? (generated as unknown as { upstreamUrl: string }).upstreamUrl : null
 
       // 音頻落盤：復用 gateway 會話上傳存儲（與 TTS/附件同域）。無 sessionId 時
@@ -371,9 +390,11 @@ export const musicGenTool: MusicToolDef = {
 
       // 時長：ffprobe 實測優先；不可用回退通路提示值並如實標注
       // （FlowMusic2API 帶上游 Duration 提示，Gemini 通路按 model_hint）。
+      // 170 = 整歌實測區間 162–182s 的中位，僅為模型提示值非實測
+      // （duration_source=model_hint 如實標注，不冒充 ffprobe）。
       const measured = await measureAudioDuration(generated.audioBase64)
       const hintSeconds = flowMusicEnabled
-        ? ((generated as { upstreamDurationHint?: number }).upstreamDurationHint ?? 150)
+        ? ((generated as { upstreamDurationHint?: number }).upstreamDurationHint ?? 170)
         : durationHintRaw === "clip30"
           ? 30
           : 180
@@ -392,7 +413,15 @@ export const musicGenTool: MusicToolDef = {
         mime_type: generated.mimeType,
         audio_bytes: bytes.length,
         lyrics_echo: generated.lyricsEcho ?? null,
-        prompt_used: toolPrompt,
+        prompt_used: finalPrompt,
+        // 規則層如實回報：改了什麼/發現什麼/丟了什麼層，不粉飾（prompt_used 才是實送上游文本）。
+        prompt_director: {
+          channel: directorChannel,
+          applied: directed.applied,
+          warnings: directed.warnings,
+          truncated: directed.truncated,
+          layers: directed.layers,
+        },
         reference_image_count: flowMusicEnabled ? 0 : imagesBase64.filter((i) => i !== "").length,
         ...(flowMusicEnabled && imagesBase64.some((i) => i !== "")
           ? { reference_images_note: "FlowMusic2API 通路暂不支持参考图（图生乐），本次已忽略" }

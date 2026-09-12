@@ -6,12 +6,15 @@
 // 讀真源全文 → 拼接環境適配（注釋頭 + 白名單 import 改寫）→ 寫 staging 目標檔。
 // 正文與真源逐行等價，白名單 diff 只有注釋頭與 import 行兩類。
 //
-// 為什麼導出兩檔：src/lib/music-tools.ts import src/lib/music-lyria.ts（Lyria client），
-// 兩檔都是零依賴（僅 node 內建 + fetch），VPS .opencode/lib 同目錄落位即閉包完整。
+// 為什麼導出多檔：src/lib/music-tools.ts import src/lib/music-lyria.ts（Lyria client）、
+// src/lib/music-flowmusic.ts（FlowMusic2API client）與 src/lib/music-prompt-director.ts
+// （確定性規則層），全部零依賴（僅 node 內建 + fetch），VPS .opencode/lib 同目錄落位即閉包完整。
 //
 // staging 目標目錄：deploy-staging/ 本片禁碰（另一 agent 在改）→ 落 staging/music-tools/，
 // VPS 同步落位（後續接線片執行，完整命令屆時補進 deploy 計劃）：
-//   staging/music-tools/music_lyria.ts → /opt/agent-harness/workspace/.opencode/lib/music-lyria-impl.ts
+//   staging/music-tools/music_lyria.ts → /opt/agent-harness/workspace/.opencode/lib/music_lyria.ts
+//   staging/music-tools/music_flowmusic.ts → /opt/agent-harness/workspace/.opencode/lib/music_flowmusic.ts
+//   staging/music-tools/music_prompt_director.ts → /opt/agent-harness/workspace/.opencode/lib/music_prompt_director.ts
 //   staging/music-tools/music_tools.ts → /opt/agent-harness/workspace/.opencode/lib/music-tools-impl.ts
 //
 // 用法（真源改動後必跑）：
@@ -24,10 +27,12 @@ import { join } from "node:path";
 const root = process.cwd();
 const FLOWMUSIC_SOURCE = join(root, "src/lib/music-flowmusic.ts");
 const LYRIA_SOURCE = join(root, "src/lib/music-lyria.ts");
+const DIRECTOR_SOURCE = join(root, "src/lib/music-prompt-director.ts");
 const TOOLS_SOURCE = join(root, "src/lib/music-tools.ts");
 const TARGET_DIR = join(root, "staging/music-tools");
 const FLOWMUSIC_TARGET = join(TARGET_DIR, "music_flowmusic.ts");
 const LYRIA_TARGET = join(TARGET_DIR, "music_lyria.ts");
+const DIRECTOR_TARGET = join(TARGET_DIR, "music_prompt_director.ts");
 const TOOLS_TARGET = join(TARGET_DIR, "music_tools.ts");
 const CHECK = process.argv.includes("--check");
 
@@ -39,6 +44,10 @@ const TOOLS_IMPORT_REPLACEMENT = 'from "./music_lyria"';
 const FLOWMUSIC_IMPORT_LINE = 'from "./music-flowmusic"';
 const FLOWMUSIC_IMPORT_REPLACEMENT = 'from "./music_flowmusic"';
 
+// ── 白名單 diff ①c：tools 真源 import "./music-prompt-director" → "./music_prompt_director"（同慣例，2026-09-12）──
+const DIRECTOR_IMPORT_LINE = 'from "./music-prompt-director"';
+const DIRECTOR_IMPORT_REPLACEMENT = 'from "./music_prompt_director"';
+
 // ── 白名單 diff ②：注釋頭（落位說明 + 禁手改宣言）────────────────────────────
 
 const LYRIA_HEADER = `/**
@@ -49,7 +58,7 @@ const LYRIA_HEADER = `/**
  * 零依賴、無 import，除本注釋頭外與真源逐行等價。
  * 禁止手改本檔——改真源後跑 \`npx tsx tools/export-music-tools-staging.ts\` 重導出。
  *
- * 落位：/opt/agent-harness/workspace/.opencode/lib/music-lyria-impl.ts
+ * 落位：/opt/agent-harness/workspace/.opencode/lib/music_lyria.ts
  * env：GEMINI_API_KEY（x-goog-api-key 鑑權，付費額度）。
  */
 
@@ -61,8 +70,9 @@ const TOOLS_HEADER = `/**
  * 本檔由 tools/export-music-tools-staging.ts 從行為真源 src/lib/music-tools.ts
  * 機械導出：真源全文逐行保留（工具定義/ok-fail/resolveKey/ffprobe 時長/上傳通路
  * 全在），除「環境適配」外與真源逐行等價。
- * 白名單 diff 僅三處：① 本注釋頭；②③ 真源 \`from "./music-lyria"\` → \`from "./music_lyria"\`
- * 與 \`from "./music-flowmusic"\` → \`from "./music_flowmusic"\`（同目錄落位檔名慣例）。
+ * 白名單 diff 僅四處：① 本注釋頭；②③④ 真源 \`from "./music-lyria"\` → \`from "./music_lyria"\`、
+ * \`from "./music-flowmusic"\` → \`from "./music_flowmusic"\` 與
+ * \`from "./music-prompt-director"\` → \`from "./music_prompt_director"\`（同目錄落位檔名慣例）。
  * 禁止手改本檔——改真源後跑 \`npx tsx tools/export-music-tools-staging.ts\` 重導出。
  *
  * 落位：/opt/agent-harness/workspace/.opencode/lib/music-tools-impl.ts
@@ -104,6 +114,20 @@ const FLOWMUSIC_HEADER = `/**
 
 `;
 
+const DIRECTOR_HEADER = `/**
+ * Music Prompt Director VPS staging 稿（確定性規則層，2026-09-12 機械導出）。
+ *
+ * 本檔由 tools/export-music-tools-staging.ts 從行為真源 src/lib/music-prompt-director.ts
+ * 機械導出：真源全文逐行保留（六層偵測/anti-slop/偽標籤剝除/mood 修剪/通路硬規則/
+ * 補層/長度上限全在），零依賴、無 import，除本注釋頭外與真源逐行等價。
+ * 禁止手改本檔——改真源後跑 \`npx tsx tools/export-music-tools-staging.ts\` 重導出。
+ *
+ * 落位：/opt/agent-harness/workspace/.opencode/lib/music_prompt_director.ts
+ * env：無（純函數，零依賴零副作用）。
+ */
+
+`;
+
 mkdirSync(TARGET_DIR, { recursive: true });
 
 // music-flowmusic.ts：零 import，verbatim（僅加注釋頭）。
@@ -112,11 +136,15 @@ exportFile(FLOWMUSIC_SOURCE, FLOWMUSIC_TARGET, FLOWMUSIC_HEADER, (src) => src);
 // music-lyria.ts：零 import，verbatim（僅加注釋頭）。
 exportFile(LYRIA_SOURCE, LYRIA_TARGET, LYRIA_HEADER, (src) => src);
 
-// music-tools.ts：白名單正文 diff = 兩條 import 行改寫（逐字替換，其餘原樣）。
+// music-prompt-director.ts：零 import，verbatim（僅加注釋頭）；tools 的規則層依賴。
+exportFile(DIRECTOR_SOURCE, DIRECTOR_TARGET, DIRECTOR_HEADER, (src) => src);
+
+// music-tools.ts：白名單正文 diff = 三條 import 行改寫（逐字替換，其餘原樣）。
 exportFile(TOOLS_SOURCE, TOOLS_TARGET, TOOLS_HEADER, (src) => {
   for (const [line, replacement] of [
     [TOOLS_IMPORT_LINE, TOOLS_IMPORT_REPLACEMENT],
     [FLOWMUSIC_IMPORT_LINE, FLOWMUSIC_IMPORT_REPLACEMENT],
+    [DIRECTOR_IMPORT_LINE, DIRECTOR_IMPORT_REPLACEMENT],
   ] as const) {
     if (!src.includes(line)) {
       console.error(`EXPORT_FAIL：tools 真源未找到預期 import（真源結構變了，先改本腳本白名單再導出）：\n  ${line}`);
