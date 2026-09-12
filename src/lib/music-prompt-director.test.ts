@@ -111,6 +111,42 @@ test("flowmusic 丟無可丟仍超 220：子句邊界硬截並記 applied", () =
   assert.equal(out.truncated.length, 5);
 });
 
+test("flowmusic 硬截用滿預算：首個 `.` 之後是無逗號長串時不再退到 15 runes（回歸 2026-09-12 缺陷）", () => {
+  const bad =
+    "[0:00 - 0:10] Intro: soft pad. [BPM:120] [Key:D minor] [Reverb:30%] a beautiful epic amazing cinematic orchestral track that builds and builds with strings and brass and drums and choir and synth pads and piano and guitar and flute and erhu and guzheng and taiko and cello and violin with a very dramatic emotional climax and a gentle outro that fades away slowly into silence";
+  const out = directMusicPrompt(bad, { channel: "flowmusic" });
+  assert.ok(runes(out.prompt) >= 0.6 * 220);
+  // 保語義：mood（intense／dramatic 家族）與 instrumentation 都還在，不是只剩 "Intro: soft pad"。
+  assert.match(out.prompt, /cinematic orchestral track that builds/);
+  assert.match(out.prompt, /strings and brass/);
+  assert.match(out.prompt, /\bintense\b/);
+  assert.ok(out.applied.includes("truncate-220-hard"));
+});
+
+test("flowmusic 硬截：純 CJK 長串無標點無空白 → 就在 cap 處切（不為找邊界大幅退讓）", () => {
+  const cjk = "溫暖的民謠吉他撥奏夜色微光".repeat(30);
+  const out = directMusicPrompt(cjk, { channel: "flowmusic" });
+  assert.equal(runes(out.prompt), 220);
+  assert.equal(out.prompt, Array.from(cjk).slice(0, 220).join(""));
+  assert.ok(out.applied.includes("truncate-220-hard"));
+});
+
+test("flowmusic 硬截：199 runes 處有逗號（≥60% cap）→ 退到該逗號保語義完整", () => {
+  const core = `${"a".repeat(199)},${"b".repeat(300)}`;
+  const out = directMusicPrompt(core, { channel: "flowmusic" });
+  assert.equal(runes(out.prompt), 199);
+  assert.equal(out.prompt, "a".repeat(199));
+  assert.ok(out.applied.includes("truncate-220-hard"));
+});
+
+test("flowmusic 硬截：30 runes 處有逗號但之後無邊界 → 不退到 30（回歸本次缺陷）", () => {
+  const core = `${"a".repeat(30)},${"b".repeat(300)}`;
+  const out = directMusicPrompt(core, { channel: "flowmusic" });
+  assert.ok(runes(out.prompt) >= 0.6 * 220);
+  assert.equal(runes(out.prompt), 220);
+  assert.match(out.prompt, /b/);
+});
+
 test("flowmusic 有歌詞標籤：換行保留、上限 3000 runes", () => {
   const lyrics =
     "[Verse]\nindie folk, warm and nostalgic, acoustic guitar and brushed drums, male tenor vocal, verse and chorus, 90 BPM, key of G major\n" +

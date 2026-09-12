@@ -18,7 +18,8 @@
  * 並補齊中性指令、把 `[BPM: 120]` 這類所有平台都不解析的偽裝參數改寫成散文、
  * 把空泛／缺陷詞換成庫內有依據的具體語彙、修剪超過兩個的 MOOD，最後依目標
  * 通路執行硬規則：flowmusic 剝除死掉的時間戳、無歌詞標籤時壓成單行並壓進
- * 220 runes（超限依 CORE_01 權重由低到高整層丟棄，仍超才在子句邊界硬截）；
+ * 220 runes（超限依 CORE_01 權重由低到高整層丟棄，仍超才硬截——硬截盡量用滿預算：
+ * 先取前 cap runes，≥60% cap 有子句邊界才退、否則退到最後空白或就地切）；
  * lyria 保留官方時間戳、不設 220 上限。全程在後端發生，用戶無感。
  *
  * 知識來源：SunoForge v3.0 配方庫（repo `skills/music-director/files/`，MIT，
@@ -386,19 +387,52 @@ function countDistinctInstruments(prompt: string): number {
   return new Set(distinct).size;
 }
 
-/** 在子句邊界硬截（找不到邊界才退化成字元截斷）。 */
+/**
+ * 硬截的預算下限：退讓後至少留 60% cap（用滿預算的硬性下限，防「一路退到首個
+ * 邊界」把 mood／樂器／結構整段丟掉——2026-09-12 實錘：`Intro: soft pad.` 之後
+ * 是無逗號長串時舊邏輯只留 15 runes＝7% 預算）。
+ */
+const MIN_KEEP_RATIO = 0.6;
+
+/** 子句邊界（硬截退讓點）＝中西文逗號／分號／句號／中文列舉頓號。 */
+const CLAUSE_BOUNDARIES: readonly string[] = [",", ";", ".", "，", "；", "。", "、"];
+
+/** 保版面分支多認一個換行邊界。 */
+const LAYOUT_BOUNDARIES: readonly string[] = [...CLAUSE_BOUNDARIES, "\n"];
+
+/** 去掉硬截尾端的殘留分隔（只動標點空白，不動文字）。 */
+function trimBoundaryTail(text: string): string {
+  return text.replace(/[\s,;.，；。、]+$/, "");
+}
+
+/**
+ * 硬截：盡量用滿預算。
+ * ① 取前 cap runes；② 若 ≥60% cap 處存在子句邊界 → 退到該邊界（保語義完整）；
+ * ③ 否則退到最後一個空白（拉丁文避免切斷單詞）；④ 無空白或空白退讓會低於
+ * 60% cap 時就地在 cap 處切（CJK 長串不為找邊界大幅退讓）。
+ */
 function truncateAtBoundary(text: string, limit: number, allowNewline: boolean): string {
-  const head = Array.from(text).slice(0, limit).join("");
-  const boundaries = allowNewline
-    ? [", ", "; ", ". ", "，", "；", "。", "\n"]
-    : [", ", "; ", ". ", "，", "；", "。"];
+  const chars = Array.from(text);
+  const head = chars.slice(0, limit).join("");
+  if (chars.length <= limit) return trimBoundaryTail(head);
+  const floor = Math.ceil(limit * MIN_KEEP_RATIO);
+  const boundaries = allowNewline ? LAYOUT_BOUNDARIES : CLAUSE_BOUNDARIES;
   let cut = -1;
   for (const boundary of boundaries) {
     const at = head.lastIndexOf(boundary);
     if (at > cut) cut = at;
   }
-  const kept = cut > 0 ? head.slice(0, cut) : head;
-  return kept.replace(/[\s,;.，；。]+$/, "");
+  if (cut < floor) {
+    let space = -1;
+    for (let index = head.length - 1; index >= floor; index -= 1) {
+      if (/\s/.test(head[index])) {
+        space = index;
+        break;
+      }
+    }
+    cut = space >= floor ? space : head.length;
+  }
+  return trimBoundaryTail(head.slice(0, cut));
 }
 
 interface AssembledPrompt {
