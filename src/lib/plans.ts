@@ -94,6 +94,81 @@ export const PLANS: PricingPlan[] = [
   },
 ];
 
+/* ── 自定义方案（2026-09-07 暴君钦定）──
+   单价常量单点定义：0.045 RMB/金币。价格只允许由 customPlanPrice() 推导，
+   页面展示与 checkout/notify 服务端计价共用同一函数，禁止在路由/组件里手写单价。
+   支付链路上自定义档以 `custom:<coins>` 作为 plan 参数传递（mapay 的 param 字段
+   原样回传 notify），服务端从 coins 重算价格，客户端传价一律不信任。 */
+export const CUSTOM_PLAN_PRICE_PER_COIN = 0.045;
+export const CUSTOM_PLAN_MIN_COINS = 2_000;
+export const CUSTOM_PLAN_MAX_COINS = 1_000_000;
+export const CUSTOM_PLAN_ID_PREFIX = "custom";
+export const CUSTOM_PLAN_NAME = "自定义 · 自由额度";
+
+/** 自定义档的合法档位（对数刻度上的美观刻度，滑杆吸附用）。 */
+export const CUSTOM_PLAN_TIERS = [2_000, 5_000, 10_000, 20_000, 50_000, 100_000, 200_000, 500_000, 1_000_000] as const;
+
+export function clampCustomPlanCoins(coins: number): number {
+  if (!Number.isFinite(coins)) return CUSTOM_PLAN_MIN_COINS;
+  return Math.min(CUSTOM_PLAN_MAX_COINS, Math.max(CUSTOM_PLAN_MIN_COINS, Math.round(coins)));
+}
+
+/** 自定义档价格（RMB，保留两位）：coins × 0.045，先乘 100 取整避免浮点尾差。 */
+export function customPlanPrice(coins: number): number {
+  return Math.round(clampCustomPlanCoins(coins) * CUSTOM_PLAN_PRICE_PER_COIN * 100) / 100;
+}
+
+export function customPlanId(coins: number): string {
+  return `${CUSTOM_PLAN_ID_PREFIX}:${clampCustomPlanCoins(coins)}`;
+}
+
+/** 把任意额度吸附到最近的美观档位（对数空间比距离）。 */
+export function snapCustomCoins(coins: number): number {
+  const lg = Math.log10(Math.max(1, coins));
+  let best: number = CUSTOM_PLAN_TIERS[0];
+  let bestDist = Number.POSITIVE_INFINITY;
+  for (const tier of CUSTOM_PLAN_TIERS) {
+    const dist = Math.abs(Math.log10(tier) - lg);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = tier;
+    }
+  }
+  return best;
+}
+
+/** 动态构建自定义档套餐对象（id 带 coins，供 checkout URL 与 notify 解析）。 */
+export function customPlanFor(coins: number): PricingPlan {
+  const coinsAmount = clampCustomPlanCoins(coins);
+  const price = customPlanPrice(coinsAmount);
+  return {
+    id: customPlanId(coinsAmount),
+    name: CUSTOM_PLAN_NAME,
+    tagline: `按需选择 ${coinsAmount} 金币额度，全模型通用。`,
+    price,
+    anchorPrice: price,
+    coins: coinsAmount,
+    validDays: 30,
+    purchaseUrl: "",
+    features: [
+      `${coinsAmount} 金币通用额度`,
+      `约 ${Math.floor(coinsAmount / PLAN_REFERENCE_COINS_PER_IMAGE)} 张 GPT Image 2（1K）`,
+      "按 0.045 元/金币计价",
+      "适合有明确预算的按需充值",
+    ],
+  };
+}
+
+/** 套餐参数统一解析：静态 PLANS 档 + `custom:<coins>` 动态档。
+ *  checkout（收单）与 notify（回调验价）必须走同一个解析器，价格口径才不会分叉。 */
+export function resolvePricingPlan(planParam: string): PricingPlan | null {
+  const staticPlan = PLANS.find((plan) => plan.id === planParam);
+  if (staticPlan) return staticPlan;
+  const match = /^custom:(\d+)$/.exec(planParam);
+  if (!match) return null;
+  return customPlanFor(Number(match[1]));
+}
+
 export function pricePerCoin(plan: PricingPlan): string {
   return (Math.floor((plan.price / plan.coins) * 1000) / 1000).toFixed(3);
 }

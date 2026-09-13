@@ -48,6 +48,7 @@ export async function acquireSupplierLease(input: {
         AND (${input.job.ratio}::text IS NULL OR cardinality(capability.ratios) = 0 OR ${input.job.ratio} = ANY(capability.ratios))
         AND (${input.job.resolution}::text IS NULL OR cardinality(capability.resolutions) = 0 OR ${input.job.resolution} = ANY(capability.resolutions))
         AND (${input.job.routingClass} <> 'firefly_only' OR supplier.adapter_type = 'adobe2api')
+        AND (${input.job.routingClass} <> 'hub_only' OR supplier.id = 'env:hublinuxdo')
         AND NOT (supplier.id = ANY(${excluded}::text[]))
         AND NOT (supplier.failure_domain = ANY(${excludedDomains}::text[]))
         AND (
@@ -208,6 +209,12 @@ export async function diagnoseSupplierUnavailability(
     return {
       reason: "routing_class_unmet",
       detail: `Job requires the Adobe supplier (routing class firefly_only) but no adobe2api supplier serves ${job.modelId}.`,
+    };
+  }
+  if (job.routingClass === "hub_only" && !routable.some((row) => row.id === "env:hublinuxdo")) {
+    return {
+      reason: "routing_class_unmet",
+      detail: `Job requires the hub supplier (routing class hub_only) but no hublinuxdo supplier serves ${job.modelId}.`,
     };
   }
   const enabled = routable.filter((row) => Boolean(row.enabled) && row.health_status !== "disabled");

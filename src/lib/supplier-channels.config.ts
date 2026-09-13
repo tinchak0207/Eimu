@@ -23,7 +23,7 @@ export interface RegistryChannel {
   seedPriority: number;          // seed 進 supplier 表的 priority
   sitePriority: number;          // 站點隊列 ENV_CHANNEL_PRIORITIES 用
   chatImageModels: string[];     // 上游模型名走 /chat/completions 生圖（空 = 全走 images/generations）
-  adapterType?: "openai_images" | "metaso" | "openai_video" | "blender_bridge"; // 缺省 openai_images；metaso 走自訂協議（見 metaso-upstream.ts），openai_video 走 /v1/videos 異步（見 openai-video-upstream.ts），blender_bridge 走橋 /v1/execute 同步單幀渲染（見 blender-node-upstream.ts）
+  adapterType?: "openai_images" | "metaso" | "openai_video" | "blender_bridge" | "adobe2api"; // 缺省 openai_images；metaso 走自訂協議（見 metaso-upstream.ts），openai_video 走 /v1/videos 異步（見 openai-video-upstream.ts），blender_bridge 走橋 /v1/execute 同步單幀渲染（見 blender-node-upstream.ts），adobe2api 走 firefly-* 映射（見 adobe2api-upstream.ts，含視頻走 /v1/chat/completions）
   claims: RegistryChannelClaim[];
 }
 
@@ -47,6 +47,19 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
     claims: [
       {
         modelId: "gpt-image-2",
+        supplierModelId: null,
+        kinds: ["image_generate"],
+      },
+      // 2026-09-11 實測：hub 上游 /v1/images/generations 對 gpt-image-2.5-flare 與
+      // gpt-image-2.5-sunburst 均 200 真出圖（b64），上游名與平台名同名直傳，
+      // 故由 hub 認領（adobe2api 路徑 408 未通）。kinds 只認 image_generate。
+      {
+        modelId: "gpt-image-2.5-flare",
+        supplierModelId: null,
+        kinds: ["image_generate"],
+      },
+      {
+        modelId: "gpt-image-2.5-sunburst",
         supplierModelId: null,
         kinds: ["image_generate"],
       },
@@ -107,7 +120,7 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
     ],
   },
 
-  {
+{
     label: "yyds",
     baseUrlEnv: "YYDS_BASE_URL",
     apiKeyEnv: "YYDS_API_KEY",
@@ -167,7 +180,8 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
       },
     ],
   },
-  {
+
+{
     // drama 渠道（drama.dafeiyangapi.top，2026-08-30 接入）：只供应 30 秒固定档
     // seedance 2.5（上游模型 sd25-30s，720p，按条 6 RMB）。唯一认领 seedance-2.5-30s，
     // 短时长 seedance 任务不会被路由到这里；上游账号当前欠费（暴君裁定无视，充值前
@@ -189,7 +203,8 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
       },
     ],
   },
-  {
+
+{
     // ⚠ 本條目位於 add-supplier-channel.ts 的 marker 維護區內（片Y 稿 §A 拍板：手寫
     // 落位、不再跑該工具）；若日後重跑工具，須把本條目重新貼回。
     // 本機 RTX 5070 Laptop＋Blender 5.2.1 EGL（blender-bridge，127.0.0.1:8765）。
@@ -217,5 +232,36 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
   // blender-modal（managed_pool，片X Modal L4）與 blender-cnb（relay）只埋樁不註冊：
   // 片X 未落盤（deploy-staging/blender-modal/ 不存在）、CNB 無實體節點——註冊即虛報能力。
   // NODES-PLAN §5：節點 ≥3 且異構＋需要場景檔分發時才評估 Flamenco 3。
+
+  {
+    label: "adobe2api-plus",
+    baseUrlEnv: "ADOBE2API_PLUS_BASE_URL",
+    apiKeyEnv: "ADOBE2API_PLUS_API_KEY",
+    enabledEnv: null,
+    tier: "first_party",
+    seedPriority: 12,
+    sitePriority: 12,
+    chatImageModels: [],
+    adapterType: "adobe2api",
+    // claims kinds 依域拆分：圖像模型（gpt-image-2/gemini 系/gpt-image）只認領
+    // image_generate+image_edit；視頻模型（seedance/veo/kling/sora/omni）只認領
+    // video_generate。上游 adobe2api-plus 歸一化層（media-response.ts）從模型名
+    // 自解析 duration/ratio/resolution，supplierModelId=null 同名直傳即可。
+    claims: [
+      { modelId: "gpt-image-2", supplierModelId: null, kinds: ["image_generate", "image_edit"] },
+      { modelId: "gemini-3.1-flash-image", supplierModelId: null, kinds: ["image_generate", "image_edit"] },
+      { modelId: "gemini-3-image", supplierModelId: null, kinds: ["image_generate", "image_edit"] },
+      { modelId: "gemini-2.5-flash-image", supplierModelId: null, kinds: ["image_generate", "image_edit"] },
+      { modelId: "gpt-image", supplierModelId: null, kinds: ["image_generate", "image_edit"] },
+      { modelId: "seedance-2.0", supplierModelId: null, kinds: ["video_generate"] },
+      { modelId: "seedance-2.0-fast", supplierModelId: null, kinds: ["video_generate"] },
+      { modelId: "veo-3.1", supplierModelId: null, kinds: ["video_generate"] },
+      { modelId: "veo-3.1-fast", supplierModelId: null, kinds: ["video_generate"] },
+      { modelId: "kling-3.0", supplierModelId: null, kinds: ["video_generate"] },
+      { modelId: "kling-3.0-omni", supplierModelId: null, kinds: ["video_generate"] },
+      { modelId: "sora-2", supplierModelId: null, kinds: ["video_generate"] },
+      { modelId: "gemini-omni", supplierModelId: null, kinds: ["video_generate"] },
+    ],
+  },
   // REGISTRY-ENTRIES-END
 ];

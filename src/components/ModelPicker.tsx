@@ -16,7 +16,7 @@ import { Check, ChevronDown, ImageIcon, Video } from "lucide-react";
 import { VendorIcon } from "./brand-icons";
 import { buildLoraTourDescription, LORA_TOUR_CONTENT, LORA_TOUR_STORAGE_KEY } from "@/lib/lora-tour-content";
 import { bindDesktopTourKeyboard, DESKTOP_TOUR_KEY_HINT } from "@/lib/tour-keyboard";
-import { bindTourViewportSync, firstVisibleAnchor } from "@/lib/tour-mobile";
+import { bindTourViewportSync, firstVisibleAnchor, skipStepOnMissingAnchor } from "@/lib/tour-mobile";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -201,8 +201,10 @@ export function ModelPicker({ models, value, onChange, resolution, durationSecon
         stagePadding: 8,
         stageRadius: 16,
         smoothScroll: false,
-        // 引导过程中不允许按 ESC / X 关闭，避免用户中途退出引导
-        allowClose: false,
+        /* F1-4：Esc 必须能退出。旧版 allowClose:false 的动机是「避免用户中途
+           退出引导」，但代价是引导变成抓住用户不放的模态——任何盖住界面的
+           浮层都必须能用 Esc 关掉（atc/pro tour 同一裁定）。 */
+        allowClose: true,
         // 复用 loraTourBusyRef 防抖：菜单刚打开的一瞬间不会重复触发引导。
         overlayClickBehavior: (element, step, opts) => {
           const total = opts.config.steps?.length ?? 0;
@@ -212,6 +214,11 @@ export function ModelPicker({ models, value, onChange, resolution, durationSecon
         },
         allowKeyboardControl: true,
         popoverClass: "lora-tour-popover",
+        // F1-2 零锚点防退化门禁：锚点 rect 为零时 driver.js 会退化成「stage
+        // 罩满全屏 + 弹层失效」——这里直接跳下一步（末步整场收尾）。
+        onHighlighted: (element, _step, opts) => {
+          skipStepOnMissingAnchor(element, opts);
+        },
         onDestroyed: () => {
           unbindKeyboard();
           unbindViewport();

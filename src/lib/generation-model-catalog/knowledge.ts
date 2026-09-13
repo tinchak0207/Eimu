@@ -17,6 +17,8 @@ import {
   DEFAULT_IMAGE_MODEL_ID,
   GPT_IMAGE_MODEL_ID,
   GPT_IMAGE_15_MODEL_ID,
+  GPT_IMAGE_25_FLARE_MODEL_ID,
+  GPT_IMAGE_25_SUNBURST_MODEL_ID,
   NANO_BANANA_MODEL_ID,
   NANO_BANANA_2_MODEL_ID,
   NANO_BANANA_PRO_MODEL_ID,
@@ -87,6 +89,22 @@ export const MODEL_KNOWLEDGE: Record<string, ModelKnowledge> = {
   [GPT_IMAGE_MODEL_ID]: {
     strengths: ["老牌旗舰，提示词理解与复杂指令执行全面"],
     knownDefects: ["全目录最高单价，速度慢", "大部分任务已被 GPT Image 2 / 1.5 覆盖"],
+  },
+  [GPT_IMAGE_25_FLARE_MODEL_ID]: {
+    strengths: [
+      "GPT Image 2.5 快檔：延遲約為 GPT Image 2 的一半，文字渲染與指令遵循延續家族水準",
+      "性價比與速度平衡，批量出圖與多輪迭代首選",
+    ],
+    knownDefects: ["極致細節與精修弱於 Sunburst 檔", "4K 放大細節仍需後期確認"],
+    usageTips: [{ text: "批量與迭代用 Flare，最終交付圖再上 Sunburst 的 2K/4K" }],
+  },
+  [GPT_IMAGE_25_SUNBURST_MODEL_ID]: {
+    strengths: [
+      "GPT Image 2.5 旗艦檔：細節、風格遵循與編輯精準度全家族最強",
+      "多輪編輯不易糊化，參考主體保持強",
+    ],
+    knownDefects: ["單價為 GPT Image 2 的三倍，批量任務改用 Flare"],
+    usageTips: [{ text: "成品精修、帶字交付圖、主題一致的多圖用 Sunburst" }],
   },
 
   // ── Google 图像（Nano Banana 系） ──

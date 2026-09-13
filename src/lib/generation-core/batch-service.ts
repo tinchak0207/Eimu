@@ -59,7 +59,7 @@ export interface BatchItemErrorBody {
 export interface BatchItemPlan {
   index: number;
   kind: "image_generate" | "video_generate";
-  routingClass: "generic" | "firefly_only";
+  routingClass: "generic" | "firefly_only" | "hub_only";
   modelId: string;
   prompt: string;
   size: string | null;

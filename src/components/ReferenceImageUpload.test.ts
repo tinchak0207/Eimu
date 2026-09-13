@@ -28,9 +28,9 @@ test("reference image previews are not revoked when upload widget remounts", () 
   assert.match(source, /const removeImage[\s\S]*?URL\.revokeObjectURL\(target\.previewUrl\)/);
 });
 
-test("prompt variant uses an AI-assistant-styled upload button and hover-revealed preview", () => {
-  // 2026-09-05 暴君裁定：上傳鈕對齊 AI 助理 composer（藍底圓鈕 ImagePlus）；
-  // 參考圖面板只在 hover（或手動展開）時顯示，移除只能按縮略圖上的 X。
+test("prompt variant uses an AI-assistant-styled upload button with a single thumbnail-row mental model", () => {
+  // 2026-09-10 暴君裁定：上傳區語義統一為「上傳鈕＋內聯縮圖列」單一心智模型；
+  // hover 大面板與數字膠囊刪除，點縮圖開全屏燈箱（與生成圖放大同一組件）。
   const upload = read("src/components/ReferenceImageUpload.tsx");
   const prompt = read("src/components/PromptInput.tsx");
   const playground = read("src/components/ImagePlayground.tsx");
@@ -38,10 +38,11 @@ test("prompt variant uses an AI-assistant-styled upload button and hover-reveale
   assert.match(upload, /variant\?:\s*"panel"\s*\|\s*"prompt"/);
   assert.match(upload, /aria-label="上传参考图"/);
   assert.match(upload, /<ImagePlus/);
-  assert.match(upload, /onMouseEnter=\{\(\) => setHoverOpen\(true\)\}/);
-  assert.match(upload, /onMouseLeave=\{\(\) => setHoverOpen\(false\)\}/);
-  assert.match(upload, /展开参考图预览/);
-  assert.match(upload, /role="dialog"/);
+  // hover 大面板與數字膠囊已連根拔除。
+  assert.doesNotMatch(upload, /onMouseEnter|onMouseLeave/);
+  assert.doesNotMatch(upload, /hoverOpen|isExpanded/);
+  assert.doesNotMatch(upload, /展开参考图预览/);
+  assert.doesNotMatch(upload, /<Images\b/);
   assert.match(prompt, /variant="prompt"/);
   assert.match(prompt, /referenceImages/);
   assert.match(prompt, /onReferenceImagesChange/);
@@ -50,24 +51,30 @@ test("prompt variant uses an AI-assistant-styled upload button and hover-reveale
   assert.doesNotMatch(playground, /<section[^>]*>[\s\S]{0,180}<ReferenceImageUpload value=\{referenceImages\}/);
 });
 
-test("prompt reference preview fills a single image and scrolls instead of overflowing for many images", () => {
+test("prompt reference thumbnails open the shared ImageLightbox fullscreen viewer", () => {
   const source = read("src/components/ReferenceImageUpload.tsx");
+  const lightbox = read("src/components/ImageLightbox.tsx");
 
-  assert.match(source, /previewCount === 1 \? "grid-cols-1"/);
-  assert.match(source, /max-h-\[min\(46dvh,16rem\)\] overflow-y-auto/);
-  assert.match(source, /inset-x-0 w-auto max-w-\[22rem\]/);
-  // 面板 header 的 X 已刪（按了會被誤會成「移除參考圖」）；移除只走縮略圖 X。
-  assert.doesNotMatch(source, /onClick=\{\(\) => setIsExpanded\(false\)\}/);
-  assert.match(source, /aria-label="移除参考图"/);
+  // 縮圖點擊 → ImageLightbox（與 ImageDisplay「点一下放大」同一組件、同一視覺）。
+  assert.match(source, /import \{ ImageLightbox \} from "@\/components\/ImageLightbox"/);
+  assert.match(source, /setLightboxImage\(image\)/);
+  assert.match(source, /<ImageLightbox\s*\n\s*src=\{lightboxImage\.previewUrl\}/);
+  assert.doesNotMatch(source, /setActivePreview/);
+  assert.doesNotMatch(source, /role="dialog"/);
+  // 舊自製放大層（黑 70 遮罩＋右上關閉鈕）不得殘留。
+  assert.doesNotMatch(source, /bg-black\/70/);
+  // 燈箱組件承載 Esc / 後退 / 點背板三關閉路徑。
+  assert.match(lightbox, /event\.key === "Escape"/);
+  assert.match(lightbox, /addEventListener\("popstate"/);
+  // 單張 object-contain＋淺底保留原比例認知；多張（≥2）object-cover 方格。
+  assert.match(source, /value\.length >= 2 \? "object-cover" : "object-contain"/);
 });
 
 test("prompt reference controls expose 44px mobile hit targets", () => {
   const source = read("src/components/ReferenceImageUpload.tsx");
 
   assert.match(source, /aria-label="上传参考图"[\s\S]*?min-h-11 min-w-11/);
-  assert.match(source, /aria-label="展开参考图预览"[\s\S]*?min-h-11/);
   assert.match(source, /aria-label="移除参考图"[\s\S]*?min-h-11 min-w-11/);
-  assert.match(source, /title="关闭预览"[\s\S]*?h-11 w-11/);
 });
 
 test("prompt upload button mirrors the AI-assistant composer pill with a 44px mobile target", () => {
@@ -83,21 +90,19 @@ test("prompt reference preview opens a skeleton immediately and keeps a polished
   const source = read("src/components/ReferenceImageUpload.tsx");
 
   assert.match(source, /const \[pendingCount, setPendingCount\] = useState\(0\)/);
-  // 拖入即出骨架（pendingCount + processing），不再自動彈面板——面板 hover 才現。
+  // 拖入即出骨架（pendingCount + processing），上傳區不自动弹任何面板。
   assert.match(source, /setPendingCount\(referenceCandidates\.length\);[\s\S]*?setIsProcessing\(true\);/);
-  assert.match(source, /\(isExpanded \|\| hoverOpen\) && \(value\.length > 0 \|\| pendingCount > 0\)/);
-  assert.doesNotMatch(source, /setPendingCount\(referenceCandidates\.length\);[\s\S]{0,80}setIsExpanded\(true\);/);
   assert.match(source, /Array\.from\(\{ length: pendingCount \}\)/);
   assert.match(source, /\[scrollbar-width:none\] \[&::\-webkit-scrollbar\]:hidden/);
-  assert.match(source, /sticky top-0 z-10/);
 });
 
 test("reference image preview closes on Escape and when its active image is removed", () => {
   const source = read("src/components/ReferenceImageUpload.tsx");
 
-  assert.match(source, /window\.addEventListener\("keydown", closeOnEscape\)/);
-  assert.match(source, /event\.key === "Escape"\) setActivePreview\(null\)/);
-  assert.match(source, /if \(activePreview\?\.id === id\) setActivePreview\(null\)/);
+  // Esc / 後退關閉由 ImageLightbox 內部生命周期承擔；本檔負責刪圖時聯動收燈箱。
+  assert.match(source, /lightboxImage && \(\s*\n\s*<ImageLightbox/);
+  assert.match(source, /onClose=\{\(\) => setLightboxImage\(null\)\}/);
+  assert.match(source, /if \(lightboxImage\?\.id === id\) setLightboxImage\(null\)/);
 });
 
 test("compact upload mode leaves preview rendering to its parent panel", () => {

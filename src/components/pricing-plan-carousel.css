@@ -1,0 +1,222 @@
+/* ╁━ PricingPlanCarousel ── 充值方案環 ╁━
+   本組件是 canvas-workstation/AgentTemplateCarousel.tsx 的逐行複製（2026-09-07
+   暴君裁定：/pricing 方案選擇器 carousel 化 = 模板廊同款輪子），幾何/物理/材質/
+   佈局全部由共享 ../case-showcase.css 提供。這裡只有充值卡獨有的卡面材質與排版。
+
+   2026-09-11 卡面重做（視覺驗收不通過：四檔卡面全數不合 DESIGN.md）：
+   ① 材料改走 .lg-card（白玻璃 0.72 + blur 40 + 頂緣亮邊），方案色只做低透明度
+      暈染——原本的滿版粉彩漸變（#FFF6E5→#FFE7C2 之類）是舊 paper 時代的語言，
+      不是 Liquid Glass，也讓四張卡看起來像另一套設計系統；
+   ② 字級全部回到 Dynamic Type 尺度（title3 / largetitle，見 JSX），不再用
+      calc(卡寬 × 0.068) 把價格推到 44px——那個尺寸超出全站字級表，渲染出來就是
+      「瀏覽器預設大黑字」的觀感（截圖實測：卡名 28px、額度 44px、weight 800）；
+   ③ 滑桿自己畫：原生 accent-color 的系統藍滑桿是全頁最像「沒做完」的控件；
+   ④ 未選中 CTA 改白玻璃膠囊：原本的 rgba(0,0,0,0.05) 灰底讀起來像禁用態；
+   ⑤ 內容分三帶（頭/中/尾），中帶吃下多餘高度，卡面中間不再留一塊空洞；
+   ⑥ 卡面還原成不縮放、不視差（見 .case-photo，原本被外擴 3.75% 後裁掉內距）。 */
+
+/* 容器：頁面內嵌流式佈局（不做模板廊的 min-height:100vh 滿屏態）。 */
+.pricing-plan-carousel {
+  width: 100%;
+}
+
+.pricing-plan-carousel .case-stage {
+  max-width: 76rem;
+  margin-inline: auto;
+}
+
+/* ── 環光跟著卡高走 ──
+   模板廊的 .case-glow 是「卡寬 × 1.05 高」，因為模板卡是 4:3 橫的、卡寬就是最長邊；
+   充值卡是豎的（卡高 > 卡寬），沿用它會讓光暈變成卡腰上的一條橫帶。這裡改成
+   跟著 --case-card-h 走，四周才均勻透出方案色。 */
+.pricing-plan-carousel .case-glow {
+  height: calc(var(--case-card-h, 390px) * 1.16);
+}
+
+/* ── 卡面是 UI，不是照片 ──
+   .case-photo 的 scale(1.075) + 視差位移是給「照片沉在玻璃背面」用的：套在充值卡上
+   會把卡面內容外擴 3.75%/側、被 .case-media 的圓角裁掉（可見內距被吃掉一大截，
+   控件貼著卡緣），文字還要被重採樣。卡面是控件不是照片，站位必須是靜的。 */
+.pricing-plan-carousel .case-photo {
+  transform: none;
+}
+
+/* ── 方案色：一一對應設計系統色板（DESIGN.md §3）──
+   coin-gold #c9a84c / ios-blue #007AFF / ios-purple #AF52DE / ios-green #34C759。
+   只做角落暈染、滑桿著色與環光；不引入設計系統外的色（舊值 #8A6D3B/#1F3A5F/
+   #5E2E7D/#2E7D64 都不在色板裡）。
+   真源在 PricingPlanCarousel.tsx 的 PLAN_TINTS（與 PLAN_GLOWS 同一張表），
+   由 STATIC_FRAMES 以 inline style 寫到 .case-slab 上；這裡只消費。 */
+
+/* ── 卡面材料：本體是 .lg-card（Tailwind 類掛在 JSX 上）──
+   這裡只補它沒有的兩層：方案色暈染、選中環。 */
+.ppc-face {
+  position: absolute;
+  inset: 0;
+}
+
+/* 方案色從左上角取樣、右下角補一口（Liquid Glass 的 color sampling）。 */
+.ppc-face::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      120% 92% at 12% 0%,
+      rgba(var(--ppc-tint, 0 122 255), 0.20) 0%,
+      rgba(var(--ppc-tint, 0 122 255), 0) 62%
+    ),
+    radial-gradient(
+      120% 92% at 100% 100%,
+      rgba(var(--ppc-tint, 0 122 255), 0.10) 0%,
+      rgba(var(--ppc-tint, 0 122 255), 0) 55%
+    );
+}
+
+/* 選中態：2px 藍環。與 .lg-fill-active（選中填充的語言）、卡內「已選」膠囊、
+   卡內主 CTA 三處同一句話——正面卡 ≠ 已選卡，兩個狀態都必須看得出來。 */
+.ppc-face::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 2px rgba(0, 122, 255, 0.42);
+  opacity: 0;
+  transition: opacity 200ms var(--lg-ease, ease);
+}
+
+.case-slab[aria-checked="true"] .ppc-face::after {
+  opacity: 1;
+}
+
+/* ── 卡面排版：三帶構圖（頭 / 中 / 尾）──
+   中帶 flex:1 並垂直居中，把「卡高於內容」的餘量吸收成對稱留白，而不是在說明盒
+   與收銀台之間留一塊空洞（截圖實測那個空洞有 140–200px）。內距跟卡寬縮放但有
+   上下限：手機 340px 卡不會貼邊，桌面 620px 卡也不會鬆散。 */
+.ppc-card {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  padding: clamp(18px, calc(var(--case-card-w, 520px) * 0.058), 32px);
+  user-select: none;
+}
+
+.ppc-band-top {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+}
+
+.ppc-band-mid {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  /* 內容比剩餘高度高時（320px 手機 + 自訂檔 + 支付後狀態行）讓這一段先讓位，
+     而不是把尾帶的支付鈕頂出卡外被圓角裁掉 —— 支付控件永遠優先於說明盒。
+     safe center：正常情況垂直居中（吃下多餘高度），溢出時退化成頂端對齊。 */
+  justify-content: center;
+  justify-content: safe center;
+  min-height: 0;
+  overflow: hidden;
+  padding-block: 12px;
+}
+
+.ppc-band-bot {
+  flex: none;
+}
+
+/* 換算盒：白玻璃內襯（資訊井，不是第二張卡——無外陰影，只有內描邊 + 內頂高光）。 */
+.ppc-convert {
+  border-radius: 1rem;
+  padding: clamp(10px, calc(var(--case-card-w, 520px) * 0.026), 16px)
+    clamp(12px, calc(var(--case-card-w, 520px) * 0.03), 18px);
+  background: rgba(255, 255, 255, 0.62);
+  box-shadow:
+    inset 0 0 0 1px rgba(0, 0, 0, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.90);
+}
+
+/* ── Log Scale 滑桿（自訂檔）──
+   保留原生 input[type=range]（鍵盤走訪、aria-valuetext、步進全部免費），但軌道與
+   滑塊自己畫：系統預設的藍色滑桿是瀏覽器的長相，不是本站的長相。
+   手勢規範不變：縱向滾動歸 case-stage 的 touch-action: pan-y，滑桿不另設 touch-none，
+   按下時由 data-pricing-control 阻止把滑桿手勢交給轉卡。 */
+.ppc-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  /* 22px 觸控高度 = 6px 軌道 + 上下各 8px padding（站內 box-sizing 是 border-box）。
+     軌道因此正好等於內容盒，垂直位置不依賴各引擎「軌道是否居中」的實作差異；
+     滑塊比軌道高、溢出內容盒，range 的滑塊本來就不被裁。 */
+  height: 22px;
+  padding: 8px 0;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+  --ppc-fill: 0%;
+}
+
+.ppc-slider::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    rgb(var(--ppc-tint, 0 122 255)) 0%,
+    rgb(var(--ppc-tint, 0 122 255)) var(--ppc-fill),
+    rgba(0, 0, 0, 0.10) var(--ppc-fill),
+    rgba(0, 0, 0, 0.10) 100%
+  );
+}
+
+.ppc-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  /* (軌道 6px − 滑塊 18px) / 2：把滑塊對準軌道中線。 */
+  margin-top: -6px;
+  border: 3px solid rgb(var(--ppc-tint, 0 122 255));
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.22);
+  transition: transform 160ms var(--lg-spring, ease-out);
+}
+
+.ppc-slider:active::-webkit-slider-thumb {
+  transform: scale(1.12);
+}
+
+.ppc-slider::-moz-range-track {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.10);
+}
+
+.ppc-slider::-moz-range-progress {
+  height: 6px;
+  border-radius: 999px;
+  background: rgb(var(--ppc-tint, 0 122 255));
+}
+
+.ppc-slider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border: 3px solid rgb(var(--ppc-tint, 0 122 255));
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.22);
+}
+
+.ppc-slider:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 4px;
+  border-radius: 999px;
+}
+
+/* 刻度行：兩端標記（2,000 / 100 萬）。字級/字色由 Tailwind 掛在 JSX 上。 */
+.ppc-ticks {
+  display: flex;
+  justify-content: space-between;
+}

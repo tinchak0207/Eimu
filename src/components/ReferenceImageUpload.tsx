@@ -1,8 +1,9 @@
 "use client";
 
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
-import { ImagePlus, Images, Loader2, X } from "lucide-react";
+import { ImagePlus, Loader2, X } from "lucide-react";
 import { useDropzone } from "react-dropzone";
+import { ImageLightbox } from "@/components/ImageLightbox";
 import type { ReferenceImage } from "@/lib/image-types";
 import { cn } from "@/lib/utils";
 import { extractWorkflowFromPng } from "@/lib/workflow-png";
@@ -27,6 +28,16 @@ function createReferenceId(file: File) {
   return `${file.name}-${file.size}-${file.lastModified}-${Math.random().toString(36).slice(2)}`;
 }
 
+/** 讀取 blob URL 的自然尺寸（為「跟隨參考圖比例」鋪樁）；載入失敗回 null 不阻塞入列。 */
+function measureNaturalSize(url: string): Promise<{ naturalWidth: number; naturalHeight: number } | null> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve({ naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight });
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+}
+
 /**
  * memo 是必需的，不是优化余量：专业工作站在同一棵树里同时挂了两份
  * （画面描述区的 variant="prompt" 与素材面板的 compact），父组件每次 render
@@ -39,25 +50,14 @@ export const ReferenceImageUpload = memo(
     ref,
   ) {
     const [isProcessing, setIsProcessing] = useState(false);
-    const [isExpanded, setIsExpanded] = useState(false);
-    /** 桌面端 hover 才浮现参考图面板（2026-09-05 暴君裁定：不常驻、不自动弹）。 */
-    const [hoverOpen, setHoverOpen] = useState(false);
-    const [activePreview, setActivePreview] = useState<ReferenceImage | null>(null);
+    /** 缩图点击 → ImageLightbox 全屏灯箱（与生成图「点一下放大」同一组件）。 */
+    const [lightboxImage, setLightboxImage] = useState<ReferenceImage | null>(null);
     const [pendingCount, setPendingCount] = useState(0);
     const valueRef = useRef(value);
 
   useEffect(() => {
     valueRef.current = value;
   }, [value]);
-
-  useEffect(() => {
-    if (!activePreview) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setActivePreview(null);
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [activePreview]);
 
   const onDrop = useCallback(async (files: File[]) => {
     if (!files.length) return;
@@ -102,12 +102,16 @@ export const ReferenceImageUpload = memo(
           const imageFile = compressed instanceof File
             ? compressed
             : new File([compressed], file.name, { type: file.type || "image/png" });
+          // 先建 blob URL 再異步測量自然尺寸；測量在 pending 骨架期間進行，不阻塞入列。
+          const previewUrl = URL.createObjectURL(imageFile);
+          const naturalSize = await measureNaturalSize(previewUrl);
           return {
             id: createReferenceId(imageFile),
             name: file.name,
             file: imageFile,
-            previewUrl: URL.createObjectURL(imageFile),
+            previewUrl,
             size: imageFile.size,
+            ...(naturalSize ?? {}),
           };
         }),
       );
@@ -133,45 +137,13 @@ export const ReferenceImageUpload = memo(
   const removeImage = (id: string) => {
     const target = value.find((image) => image.id === id);
     if (target) URL.revokeObjectURL(target.previewUrl);
-    if (activePreview?.id === id) setActivePreview(null);
+    if (lightboxImage?.id === id) setLightboxImage(null);
     onChange(value.filter((image) => image.id !== id));
   };
 
-  const previewCount = value.length + pendingCount;
-  const promptGridColumns = previewCount === 1 ? "grid-cols-1" : previewCount === 2 ? "grid-cols-2" : "grid-cols-3";
-
   if (variant === "prompt") {
     return (
-      <div
-        className="absolute bottom-3 left-3 z-20 flex min-w-0 max-w-[calc(100%-64px)] items-center gap-2 overflow-visible"
-        onMouseEnter={() => setHoverOpen(true)}
-        onMouseLeave={() => setHoverOpen(false)}
-      >
-        {(isExpanded || hoverOpen) && (value.length > 0 || pendingCount > 0) && (
-          <div className="absolute -bottom-3 inset-x-0 w-auto max-w-[22rem] max-h-[min(46dvh,16rem)] overflow-y-auto overscroll-contain rounded-ios-2xl bg-white/95 p-3 shadow-[0_18px_50px_rgba(31,35,48,0.18)] backdrop-blur-xl [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            <div className="sticky top-0 z-10 -mx-3 -mt-3 mb-2 flex items-center bg-[rgba(255,255,255,0.92)] px-4 py-3 backdrop-blur-xl">
-              <span className="text-ios-caption1 font-semibold text-black/60">参考图 {previewCount}/{MAX_REFERENCE_IMAGES}</span>
-            </div>
-            <div className={cn("grid gap-2", promptGridColumns)}>
-              {value.map((image) => (
-                <div key={image.id} className={cn("group relative overflow-hidden rounded-ios-xl bg-black/5", previewCount === 1 ? "aspect-video" : "aspect-square")}>
-                  <button type="button" onClick={() => setActivePreview(image)} className="h-full w-full" title={`预览 ${image.name}`}>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={image.previewUrl} alt={image.name} className="h-full w-full object-cover" />
-                  </button>
-                  <button type="button" onClick={() => removeImage(image.id)} aria-label="移除参考图" className="absolute -right-1 -top-1 flex min-h-11 min-w-11 items-start justify-end p-1.5 text-white opacity-100 sm:opacity-0 sm:group-hover:opacity-100"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-black/60"><X className="h-3 w-3" /></span></button>
-                </div>
-              ))}
-              {Array.from({ length: pendingCount }).map((_, index) => (
-                <div key={`pending-${index}`} role="status" className={cn("relative overflow-hidden rounded-ios-xl bg-black/[0.045]", previewCount === 1 ? "aspect-video" : "aspect-square")}>
-                  <div className="absolute inset-0 animate-pulse bg-black/[0.045]" />
-                  <Loader2 className="absolute left-1/2 top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 animate-spin text-black/30" />
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
+      <div className="absolute bottom-3 left-3 z-20 flex min-w-0 max-w-[calc(100%-64px)] items-center gap-2 overflow-visible">
         <div {...getRootProps()} className="flex shrink-0 items-center justify-center">
           <input {...getInputProps()} />
           {/* 樣式對齊 AI 助理 composer 的附件鈕（AgentComposer）：同一顆藍底圓鈕語法。 */}
@@ -192,24 +164,38 @@ export const ReferenceImageUpload = memo(
           </button>
         </div>
 
-        {value.length > 0 && (
-          <button
-            type="button"
-            onClick={() => setIsExpanded((current) => !current)}
-            aria-label="展开参考图预览"
-            title="展开参考图预览"
-            className="inline-flex min-h-11 items-center gap-1.5 rounded-full bg-white/85 px-3 text-ios-caption1 font-semibold text-black/55 shadow-[0_2px_10px_rgba(0,0,0,0.10)] hover:bg-white hover:text-black"
-          >
-            <Images className="h-3.5 w-3.5" />{value.length}
-          </button>
+        {/* 內聯縮圖（Gemini 式）：上傳鈕＋縮圖列是唯一語義，點縮圖開全屏燈箱。 */}
+        {(value.length > 0 || pendingCount > 0) && (
+          <div className="flex min-w-0 items-center gap-1.5 overflow-x-auto overscroll-x-contain [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {/* rounded-ios-md 圓角方＝內容語言（對齊 AgentComposer 附件縮圖
+                h-16 rounded-ios-md），不竄用動作鈕的圓形語言。 */}
+            {value.map((image) => (
+              <div key={image.id} className="group relative h-12 w-12 shrink-0 overflow-hidden rounded-ios-md bg-black/5">
+                <button type="button" onClick={() => setLightboxImage(image)} className="h-full w-full" title={`预览 ${image.name}`}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  {/* 單張 object-contain＋淺底保留原比例認知；多張（≥2）object-cover 方格。 */}
+                  <img src={image.previewUrl} alt={image.name} className={cn("h-full w-full", value.length >= 2 ? "object-cover" : "object-contain")} />
+                </button>
+                <button type="button" onClick={() => removeImage(image.id)} aria-label="移除参考图" className="absolute right-0.5 top-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-white opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            ))}
+            {Array.from({ length: pendingCount }).map((_, index) => (
+              <div key={`pending-inline-${index}`} role="status" className="relative h-12 w-12 shrink-0 overflow-hidden rounded-ios-md bg-black/[0.045]">
+                <div className="absolute inset-0 animate-pulse bg-black/[0.045]" />
+                <Loader2 className="absolute left-1/2 top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 animate-spin text-black/30" />
+              </div>
+            ))}
+          </div>
         )}
 
-        {activePreview && (
-          <div role="dialog" aria-modal="true" aria-label="参考图大图预览" className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-5" onClick={() => setActivePreview(null)}>
-            <button type="button" title="关闭预览" className="absolute right-5 top-5 flex h-11 w-11 items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25"><X className="h-5 w-5" /></button>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={activePreview.previewUrl} alt={activePreview.name} className="max-h-[88vh] max-w-[92vw] object-contain" onClick={(event) => event.stopPropagation()} />
-          </div>
+        {lightboxImage && (
+          <ImageLightbox
+            src={lightboxImage.previewUrl}
+            alt={lightboxImage.name}
+            onClose={() => setLightboxImage(null)}
+          />
         )}
       </div>
     );

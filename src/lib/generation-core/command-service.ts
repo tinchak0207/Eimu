@@ -20,7 +20,7 @@ export interface GenerationCommand {
   source: "web" | "biz" | "canary";
   idempotencyKey?: string | null;
   kind: "image_generate" | "image_edit" | "video_generate" | "tts" | "avatar" | "lipsync";
-  routingClass?: "generic" | "firefly_only";
+  routingClass?: "generic" | "firefly_only" | "hub_only";
   modelId: string;
   prompt: string;
   size?: string | null;

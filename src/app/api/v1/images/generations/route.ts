@@ -85,6 +85,7 @@ interface ImageRequestBody {
   async?: unknown;
   callback_url?: unknown;
   control_nets?: unknown;
+  routing_hint?: unknown;
 }
 
 export async function POST(req: NextRequest) {
@@ -228,7 +229,10 @@ export async function POST(req: NextRequest) {
         source: "biz",
         idempotencyKey: req.headers.get("idempotency-key"),
         kind: "image_generate",
-        routingClass: modelId === ADOBE_FIREFLY_MODEL_ID ? "firefly_only" : "generic",
+        // routing_hint:"hub" 僅影響調度偏好（probe 探針用），不改變計費與能力校驗。
+        routingClass: modelId === ADOBE_FIREFLY_MODEL_ID
+          ? "firefly_only"
+          : body.routing_hint === "hub" ? "hub_only" : "generic",
         modelId,
         prompt,
         size,
@@ -269,12 +273,19 @@ export async function POST(req: NextRequest) {
   // 先查队列再动钱（与 C 端主链路同序）：admin 在路由调度分页停用全部渠道后，
   // 每个请求若先扣全额再走 no-endpoints → 502 → 异步退款，就是纯粹的网关空转，
   // 退款失败还会静默丢钱。空队列直接 502，不碰余额。
-  const availableEndpoints = await resolveBizEndpoints(modelId);
+  //
+  // 兩項讀取互不依賴（內部隊列查詢 vs 外部 channel blob 文件；後者永不拋錯、
+  // reserveImageQuota 只用 apiKey.userId），冷啟動無快取時各吃一個往返，
+  // Promise.all 省一次串行 RTT；「先查隊列再動錢」順序由 reserveImageQuota
+  // 保持在匯合點之後不變。
+  const [availableEndpoints, externalDoc] = await Promise.all([
+    resolveBizEndpoints(modelId),
+    getRuntimeExternalChannelDocument(),
+  ]);
 
   // 外部自定義上游：該金鑰綁定外部 channel 時，即使內部隊列為空也允許轉售（客戶
   // 自帶上游不依賴內部渠道）。resolveExternalChannelForKey 只認 enabled + 白名單命中；
   // 未命中回 null → 走既有內部隊列，行為不變。
-  const externalDoc = await getRuntimeExternalChannelDocument();
   const externalChannel = resolveExternalChannelForKey(externalDoc, apiKey.id);
 
   if (!availableEndpoints.length && !externalChannel) {

@@ -1,13 +1,15 @@
-import { useEffect, useState } from "react";
-import { createPortal } from "react-dom";
+import { useState } from "react";
 import {
   AlertCircle,
+  Check,
+  Copy,
   Download,
   ImageIcon,
   Loader2,
   Video,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ImageLightbox } from "@/components/ImageLightbox";
 import { useResolvedImageSrc } from "@/components/image-src";
 import { ParticleSeaWaiting } from "@/components/ParticleSeaWaiting";
 import { ProviderTiming } from "@/lib/image-types";
@@ -42,6 +44,11 @@ export function ImageDisplay({
   // 下载要先整图 fetch 成 blob 才触发浏览器保存，这几秒按钮必须给出中间态，
   // 否则用户感知就是「按了没反应」。
   const [isDownloading, setIsDownloading] = useState(false);
+  // 复制同样要先 fetch 整图成 blob（还可能转码 PNG），照抄 isDownloading 的
+  // 中间态模式，否则用户感知就是「按了没反应」。
+  const [isCopying, setIsCopying] = useState(false);
+  const [isCopied, setIsCopied] = useState(false);
+  const [copyFallbackNotice, setCopyFallbackNotice] = useState(false);
   const hasVideo = mediaType === "video" && Boolean(videoUrl) && !failed;
   const hasImage = mediaType !== "video" && (Boolean(image) || Boolean(imageUrl)) && !failed;
   const hasMedia = hasImage || hasVideo;
@@ -49,34 +56,6 @@ export function ImageDisplay({
   // 专业模式早就用 WeakMap 解决了同一个问题（见 image-src.ts）；标准模式这里
   // 拿到的是裸 base64 字符串，改用按值 memo，避免每次 render 重做多 MB 拼接。
   const resolvedImageSrc = useResolvedImageSrc(image, imageUrl);
-
-  useEffect(() => {
-    if (isZoomed) {
-      window.history.pushState({ zoomed: true }, "");
-    }
-
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && isZoomed) {
-        setIsZoomed(false);
-      }
-    };
-
-    const handlePopState = () => {
-      if (isZoomed) {
-        setIsZoomed(false);
-      }
-    };
-
-    if (isZoomed) {
-      document.addEventListener("keydown", handleEscape);
-      window.addEventListener("popstate", handlePopState);
-    }
-
-    return () => {
-      document.removeEventListener("keydown", handleEscape);
-      window.removeEventListener("popstate", handlePopState);
-    };
-  }, [isZoomed]);
 
   const handleImageClick = (event: React.MouseEvent) => {
     if (hasImage) {
@@ -99,6 +78,33 @@ export function ImageDisplay({
       console.error("Failed to download image:", error);
     } finally {
       setIsDownloading(false);
+    }
+  };
+
+  const handleCopyClick = async (
+    event: React.MouseEvent,
+    imageSource: string,
+    providerName: string,
+  ) => {
+    event.stopPropagation();
+    if (isCopying) return;
+    setIsCopying(true);
+    try {
+      await imageHelpers.copyToClipboard(imageSource);
+      setIsCopied(true);
+      setTimeout(() => setIsCopied(false), 1500);
+    } catch (error) {
+      console.error("Failed to copy image:", error);
+      // 浏览器不支持/拒绝剪贴板写图片 → 自动退回下载，不让用户空手。
+      try {
+        await imageHelpers.download(imageSource, providerName);
+        setCopyFallbackNotice(true);
+        setTimeout(() => setCopyFallbackNotice(false), 2500);
+      } catch (downloadError) {
+        console.error("Failed to download image:", downloadError);
+      }
+    } finally {
+      setIsCopying(false);
     }
   };
 
@@ -169,23 +175,45 @@ export function ImageDisplay({
             <img
               src={resolvedImageSrc ?? undefined}
               alt={`${provider} 生成的图片`}
-              className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.018]"
+              // object-contain: 展示实际比例，横图/竖图都不裁切（用户反馈
+              // 「图片被压缩」）。留边区域不另铺底色——img 盒子撑满整个容器，
+              // 任何填充都会盖掉整张卡的 lg-card 玻璃材质；透出卡片本身的
+              // rgba(255,255,255,0.72) 玻璃就是最协调的底色，零新色值。
+              className="h-full w-full object-contain transition-transform duration-500 group-hover:scale-[1.018]"
             />
             <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.16)_0%,transparent_28%,transparent_72%,rgba(45,49,66,0.12)_100%)]" />
 
-            <Button
-              size="icon"
-              variant="outline"
-              // /52 and /64 aren't on Tailwind's default opacity scale
-              // (multiples of 5), so these silently compiled to nothing —
-              // the download button had no border or fill at all.
-              className="absolute bottom-4 left-4 h-11 w-11 rounded-full border-[rgba(255,255,255,0.52)] bg-[rgba(255,255,255,0.64)] shadow-[0_14px_30px_rgba(45,49,66,0.08)] transition-all duration-200 sm:translate-y-1 sm:opacity-0 sm:group-hover:translate-y-0 sm:group-hover:opacity-100"
-              onClick={(event) => handleActionClick(event, resolvedImageSrc, provider)}
-              aria-label="下载图片"
-              disabled={isDownloading}
-            >
-              {isDownloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-            </Button>
+            <div className="absolute bottom-4 left-4 flex items-center gap-2">
+              <Button
+                size="icon"
+                variant="outline"
+                // /52 and /64 aren't on Tailwind's default opacity scale
+                // (multiples of 5), so these silently compiled to nothing —
+                // the download button had no border or fill at all.
+                className="h-11 w-11 rounded-full border-[rgba(255,255,255,0.52)] bg-[rgba(255,255,255,0.64)] shadow-[0_14px_30px_rgba(45,49,66,0.08)] transition-all duration-200 sm:translate-y-1 sm:opacity-0 sm:group-hover:translate-y-0 sm:group-hover:opacity-100"
+                onClick={(event) => handleActionClick(event, resolvedImageSrc, provider)}
+                aria-label="下载图片"
+                disabled={isDownloading}
+              >
+                {isDownloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              </Button>
+              <Button
+                size="icon"
+                variant="outline"
+                className="h-11 w-11 rounded-full border-[rgba(255,255,255,0.52)] bg-[rgba(255,255,255,0.64)] shadow-[0_14px_30px_rgba(45,49,66,0.08)] transition-all duration-200 sm:translate-y-1 sm:opacity-0 sm:group-hover:translate-y-0 sm:group-hover:opacity-100"
+                onClick={(event) => handleCopyClick(event, resolvedImageSrc, provider)}
+                aria-label="复制图片"
+                disabled={isCopying}
+              >
+                {isCopying ? <Loader2 className="h-4 w-4 animate-spin" /> : isCopied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+              </Button>
+            </div>
+
+            {copyFallbackNotice && (
+              <div className="pointer-events-none absolute bottom-20 left-4 rounded-full bg-[rgba(0,0,0,0.52)] px-3 py-1.5 text-[13px] font-medium text-white">
+                当前浏览器不支持复制，已为你下载
+              </div>
+            )}
 
             <div className="absolute bottom-4 right-4 rounded-full bg-[rgba(255,255,255,0.18)] px-3 py-2 text-xs font-medium text-white/90 backdrop-blur-xl">
               点一下放大
@@ -224,28 +252,30 @@ export function ImageDisplay({
       </div>
 
       {isZoomed &&
-        resolvedImageSrc &&
-        createPortal(
-          <div
-            // /74 不在 Tailwind 默认透明度刻度上，整个类静默编译成空——放大层的深色
-            // 底其实是全透明的。写成 rgba() 任意值才真正生效（与历史灯箱同一修法）。
-            className="fixed inset-0 z-50 flex min-h-[100dvh] w-screen cursor-pointer items-center justify-center bg-[rgba(31,34,48,0.74)] p-6 backdrop-blur-md"
-            onClick={() => setIsZoomed(false)}
-          >
-            <div className="absolute inset-x-0 top-6 flex justify-center">
-              <div className="paper-float rounded-full px-4 py-2 text-sm text-[#6f7987]">
-                按 Esc 关闭
-              </div>
-            </div>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={resolvedImageSrc}
-              alt={`${provider} 生成的图片`}
-              className="max-h-[88dvh] max-w-[92vw] rounded-[1.7rem] object-contain shadow-[0_30px_80px_rgba(0,0,0,0.22)]"
-              onClick={(event) => event.stopPropagation()}
-            />
-          </div>,
-          document.body,
+        resolvedImageSrc && (
+          <ImageLightbox
+            src={resolvedImageSrc}
+            alt={`${provider} 生成的图片`}
+            onClose={() => setIsZoomed(false)}
+            footer={
+              <button
+                type="button"
+                className="paper-float inline-flex cursor-pointer items-center gap-1.5 rounded-full px-4 py-2 text-[13px] font-medium text-[#6f7987] disabled:cursor-not-allowed disabled:opacity-60"
+                onClick={(event) => handleCopyClick(event, resolvedImageSrc, provider)}
+                aria-label="复制图片"
+                disabled={isCopying}
+              >
+                {isCopying ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : isCopied ? (
+                  <Check className="h-4 w-4" />
+                ) : (
+                  <Copy className="h-4 w-4" />
+                )}
+                {isCopied ? "已复制" : "复制"}
+              </button>
+            }
+          />
         )}
     </>
   );

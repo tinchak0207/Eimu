@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type Dispatch, type SetStateAction } from "react";
-import { ImagePlus, Loader2, X } from "lucide-react";
+import { Check, Copy, ImagePlus, Loader2, X } from "lucide-react";
 import { generationCoins } from "@/lib/generation-model-catalog";
 import { PIXAI_EDIT_MODEL_ID } from "@/lib/image-model-ids.js";
 import { imageHelpers } from "@/lib/image-helpers";
@@ -41,6 +41,33 @@ export function EditPanel({
 }: EditPanelProps) {
   // 下载要等整图 fetch 成 blob，转圈期间按钮禁点（瞬态 UI 态，不进父层）。
   const [downloadBusy, setDownloadBusy] = useState(false);
+  // 复制同链路 fetch 整图，照抄 downloadBusy 的中间态模式。
+  const [copyBusy, setCopyBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [copyFallbackNotice, setCopyFallbackNotice] = useState(false);
+
+  const handleCopy = () => {
+    if (copyBusy) return;
+    setCopyBusy(true);
+    imageHelpers
+      .copyToClipboard(editResultUrl)
+      .then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      })
+      .catch((error) => {
+        console.error("Failed to copy image:", error);
+        // 浏览器不支持/拒绝剪贴板写图片 → 自动退回下载，不让用户空手。
+        return imageHelpers
+          .download(editResultUrl, "edit")
+          .then(() => {
+            setCopyFallbackNotice(true);
+            setTimeout(() => setCopyFallbackNotice(false), 2500);
+          })
+          .catch((downloadError) => console.error("Failed to download image:", downloadError));
+      })
+      .finally(() => setCopyBusy(false));
+  };
   return (
             <div className="space-y-2.5 pt-1">
               {/* 原图：胶囊即上传入口，选中后变为缩略图胶囊，可移除 */}
@@ -112,7 +139,19 @@ export function EditPanel({
                 <div className="flex items-center gap-2 rounded-ios-2xl border border-[rgba(0,0,0,0.08)] p-2">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={editResultUrl} alt="改图结果" className="h-10 w-10 shrink-0 rounded-ios-md object-cover" />
-                  <span className="min-w-0 flex-1 truncate text-ios-footnote text-[rgba(0,0,0,0.55)]">改图完成</span>
+                  <span className="min-w-0 flex-1 truncate text-ios-footnote text-[rgba(0,0,0,0.55)]">
+                    {copyFallbackNotice ? "当前浏览器不支持复制，已为你下载" : "改图完成"}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={copyBusy}
+                    onClick={handleCopy}
+                    className="inline-flex h-8 shrink-0 cursor-pointer items-center gap-1 rounded-full bg-[rgba(0,0,0,0.05)] px-3 text-ios-footnote font-medium text-[rgba(0,0,0,0.65)] hover:bg-[rgba(0,0,0,0.09)] disabled:cursor-not-allowed disabled:opacity-60"
+                    aria-label="复制图片"
+                  >
+                    {copyBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                    复制
+                  </button>
                   <button
                     type="button"
                     disabled={downloadBusy}

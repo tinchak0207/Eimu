@@ -193,3 +193,23 @@ test("subscribers are notified on apply and the revision bumps; unsubscribe stop
     applyModelPricingOverrides({});
   }
 });
+
+test("GPT Image 2.5 Flare/Sunburst price at three times GPT Image 2 per resolution", () => {
+  // 暴君裁定（2026-09-09）：2.5 兩檔 = gpt-image-2 × 3（10/20/80 -> 30/60/240 credit）
+  for (const modelId of ["gpt-image-2.5-flare", "gpt-image-2.5-sunburst"]) {
+    assert.equal(generationCredits(modelId, { resolution: "1k" }), 30);
+    assert.equal(generationCredits(modelId, { resolution: "2k" }), 60);
+    assert.equal(generationCredits(modelId, { resolution: "4k" }), 240);
+    assert.equal(generationCoins(modelId, { resolution: "1k" }), 3);
+    assert.equal(generationCoins(modelId, { resolution: "2k" }), 6);
+    assert.equal(generationCoins(modelId, { resolution: "4k" }), 24);
+    assert.equal(modelPriceLabel(modelId, { resolution: "1k" }), "3 币/张");
+  }
+  for (const resolution of ["1k", "2k", "4k"] as const) {
+    assert.equal(
+      generationCredits("gpt-image-2.5-sunburst", { resolution }),
+      generationCredits("gpt-image-2", { resolution }) * 3,
+      `sunburst ${resolution} must be 3x gpt-image-2`,
+    );
+  }
+});

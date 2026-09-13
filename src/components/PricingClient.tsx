@@ -1,32 +1,25 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   BadgeCheck,
   BookOpen,
-  Check,
   Copy,
-  MessageCircle,
   Sparkles,
-  WalletCards,
   X,
 } from "lucide-react";
 import type { MapayPaymentType } from "@/lib/mapay";
 import {
   ACTIVE_PRICING_PROMO,
-  FLAGSHIP_COINS_PER_IMAGE,
-  FLAGSHIP_MODEL_LABEL,
-  PLAN_REFERENCE_MODEL_LABEL,
-  PLANS,
   REFERRAL_REWARD_COINS,
   REFEREE_REWARD_COINS,
+  customPlanFor,
   formatCoins,
-  gptImage2EquivalentImages,
   modelPriceRows,
-  planDiscountPercent,
+  PLANS,
+  resolvePricingPlan,
   planUnitsForCoins,
-  pricePerGptImage2Image,
 } from "@/lib/plans";
 import type { ModelPriceRow, PricingPlan, PricingPromo } from "@/lib/plans";
 import { IMAGE_MODEL_IDS, VIDEO_MODEL_IDS, generationCoins } from "@/lib/generation-model-catalog";
@@ -37,17 +30,15 @@ import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { isStandalonePwa, createHandoffLogin } from "@/lib/github-login";
 import { PwaHandoffPanel } from "@/components/PwaHandoffPanel";
+import { PricingPlanCarousel } from "@/components/PricingPlanCarousel";
 
 /**
- * 2026-08-25 聚焦弹窗化重构：首屏无滚动看全（周期切换 + 三档卡片核心价），
- * 收银台收进卡片内部，底部悬浮结账栏移除。全部换算数字由计费 catalog 驱动
- * （活数据）：admin 改价 → usePricingRevision 触发重渲 → 展示跟随，永不脱钩。
+ * 2026-09-07 方案选择器 carousel 化：三列并排 → AI 助理模板同款环形轮播
+ * （PricingPlanCarousel = AgentTemplateCarousel 逐行复制）。新增「自定义」档：
+ * Log Scale 滑杆 2,000 → 100 万金币，按 0.045 RMB/金币实时计价。
+ * 全部换算数字由计费 catalog 驱动（活数据）：admin 改价 → usePricingRevision
+ * 触发重渲 → 展示跟随，永不脱钩。
  */
-
-const PAY_METHODS: { id: MapayPaymentType; label: string; short: string; icon: typeof MessageCircle; tint: string }[] = [
-  { id: "wxpay", label: "微信支付", short: "微信", icon: MessageCircle, tint: "text-[#16a05d]" },
-  { id: "alipay", label: "支付宝支付", short: "支付宝", icon: WalletCards, tint: "text-[#1677ff]" },
-];
 
 const CYCLES = [
   { id: "all", label: "全部" },
@@ -96,192 +87,6 @@ function resolutionShortLabel(resolution: string): string {
   return resolution.toUpperCase();
 }
 
-interface PlanCardProps {
-  plan: PricingPlan;
-  selected: boolean;
-  referenceCoinsPerImage: number;
-  payMethod: MapayPaymentType;
-  payOpened: boolean;
-  refreshingBalance: boolean;
-  onSelect: (planId: string) => void;
-  onMethodChange: (method: MapayPaymentType) => void;
-  onPay: () => void;
-  onRefreshBalance: () => void;
-}
-
-function PlanCard({
-  plan,
-  selected,
-  referenceCoinsPerImage,
-  payMethod,
-  payOpened,
-  refreshingBalance,
-  onSelect,
-  onMethodChange,
-  onPay,
-  onRefreshBalance,
-}: PlanCardProps) {
-  const referenceImages = gptImage2EquivalentImages(plan, referenceCoinsPerImage);
-  const flagshipImages = gptImage2EquivalentImages(plan, FLAGSHIP_COINS_PER_IMAGE);
-  const discount = planDiscountPercent(plan);
-  return (
-    <div
-      role="radio"
-      aria-checked={selected}
-      tabIndex={0}
-      onClick={() => onSelect(plan.id)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onSelect(plan.id);
-        }
-      }}
-      className={cn(
-        "lg-card relative flex cursor-pointer flex-col rounded-ios-3xl p-4 pt-5 outline-none transition-all duration-200 sm:p-5 sm:pt-6",
-        "focus-visible:ring-2 focus-visible:ring-ring",
-        selected
-          ? "ring-2 ring-ring shadow-[0_20px_60px_rgba(0,122,255,0.16),0_4px_16px_rgba(0,0,0,0.06)]"
-          : "ring-1 ring-transparent hover:ring-[rgba(0,122,255,0.22)]",
-      )}
-    >
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white to-transparent opacity-80" />
-
-      {/* 主推档徽章 — 只挂真实 highlight 配置 */}
-      {plan.highlight && (
-        <span className="absolute -top-2.5 left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded-full bg-[#2d3142] px-3 py-1 text-ios-caption1 font-semibold text-white shadow-[0_4px_12px_rgba(45,49,66,0.35)]">
-          最受欢迎
-        </span>
-      )}
-
-      <div className="flex items-center gap-2">
-        {plan.badge && (
-          <span
-            className={cn(
-              "inline-flex w-fit items-center rounded-full px-2.5 py-0.5 text-ios-caption1 font-semibold",
-              plan.highlight ? "bg-[rgba(0,122,255,0.10)] text-[#0066DD]" : "bg-[rgba(0,0,0,0.05)] text-[rgba(0,0,0,0.58)]",
-            )}
-          >
-            {plan.badge}
-          </span>
-        )}
-        {selected && (
-          <span className="inline-flex items-center gap-1 text-ios-caption1 font-semibold text-[#0066DD]">
-            <Check className="h-3.5 w-3.5" strokeWidth={3} aria-hidden="true" />
-            已选
-          </span>
-        )}
-      </div>
-
-      <h2 className="mt-1.5 text-ios-headline font-bold text-[rgba(0,0,0,0.85)]">{plan.name}</h2>
-
-      <div className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-        <span className="text-[1.6rem] font-bold leading-none tracking-tight text-[rgba(0,0,0,0.85)] sm:text-[1.75rem]">
-          ¥{plan.price}
-        </span>
-        <span className="text-ios-caption1 text-[rgba(0,0,0,0.44)] line-through">¥{plan.anchorPrice}</span>
-        {discount !== null && (
-          <span className="rounded-full bg-[rgba(201,168,76,0.14)] px-2 py-0.5 text-ios-caption1 font-semibold text-[#c9a84c]">
-            省 {discount}%
-          </span>
-        )}
-      </div>
-
-      <p className="mt-1.5 text-ios-footnote text-[rgba(0,0,0,0.58)]">
-        <span className="font-semibold text-[#c9a84c]">{plan.coins}</span> 金币 · {plan.validDays} 天有效
-      </p>
-
-      {/* 算力具象化：金币 → 张数，两个口径都是 catalog 活数据 */}
-      <div className="mt-2.5 rounded-ios-2xl bg-[rgba(255,255,255,0.55)] p-3 ring-1 ring-inset ring-[rgba(0,0,0,0.06)]">
-        <p className="text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.72)]">
-          约 <span className="font-semibold">{referenceImages}</span> 张 1024px 标准图 · {PLAN_REFERENCE_MODEL_LABEL}
-        </p>
-        <p className="mt-1 text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.72)]">
-          约 <span className="font-semibold">{flagshipImages}</span> 张旗舰高清 · {FLAGSHIP_MODEL_LABEL}
-        </p>
-        <p className="mt-1 text-ios-caption1 text-[rgba(0,0,0,0.58)]">
-          折合 ¥{pricePerGptImage2Image(plan, referenceCoinsPerImage)}/张（1K）
-        </p>
-      </div>
-
-      {/* 收银台闭环：选中卡片内部展开支付方式 + 唯一支付 CTA */}
-      <div className="mt-auto pt-3">
-        {selected ? (
-          <div className="space-y-2.5">
-            <div role="radiogroup" aria-label="支付方式" className="flex items-center gap-0.5 rounded-full bg-[rgba(0,0,0,0.05)] p-1">
-              {PAY_METHODS.map((method) => {
-                const active = payMethod === method.id;
-                const Icon = method.icon;
-                return (
-                  <button
-                    key={method.id}
-                    type="button"
-                    role="radio"
-                    aria-checked={active}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onMethodChange(method.id);
-                    }}
-                    className={cn(
-                      "flex flex-1 cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1.5 text-ios-caption1 font-medium transition-all duration-200",
-                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                      active
-                        ? "bg-white text-[rgba(0,0,0,0.85)] shadow-[0_1px_4px_rgba(0,0,0,0.10)]"
-                        : "text-[rgba(0,0,0,0.56)] hover:text-[rgba(0,0,0,0.85)]",
-                    )}
-                  >
-                    <Icon className={cn("h-3.5 w-3.5", active && method.tint)} aria-hidden="true" />
-                    <span className="min-[420px]:hidden">{method.short}</span>
-                    <span className="hidden min-[420px]:inline">{method.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onPay();
-              }}
-              className="w-full cursor-pointer rounded-full bg-[#2d3142] px-5 py-2.5 text-ios-footnote font-semibold text-white shadow-[0_4px_16px_rgba(45,49,66,0.30)] transition-all duration-200 hover:bg-[#272b39] active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-            >
-              立即支付 ¥{plan.price}
-            </button>
-            {payOpened && (
-              <div className="flex items-center justify-between gap-2">
-                <p className="min-w-0 flex-1 truncate text-ios-caption1 text-[rgba(0,0,0,0.58)]" role="status" aria-live="polite">
-                  支付页已在新窗口打开，完成后回来刷新余额
-                </p>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onRefreshBalance();
-                  }}
-                  disabled={refreshingBalance}
-                  className="shrink-0 cursor-pointer rounded-full bg-[rgba(0,122,255,0.10)] px-3 py-1.5 text-ios-caption1 font-semibold text-[#0066DD] transition-colors hover:bg-[rgba(0,122,255,0.16)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  {refreshingBalance ? "刷新中…" : "已完成支付，刷新余额"}
-                </button>
-              </div>
-            )}
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onSelect(plan.id);
-            }}
-            className="w-full cursor-pointer rounded-full bg-[rgba(0,0,0,0.05)] py-2.5 text-ios-footnote font-medium text-[rgba(0,0,0,0.62)] transition-all duration-200 hover:bg-[rgba(0,0,0,0.08)] hover:text-[rgba(0,0,0,0.85)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            选择此方案
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
-
 export function PricingClient() {
   // 訂閱定價覆寫：管理員改價後本頁報價立即重算。
   usePricingRevision();
@@ -315,8 +120,10 @@ export function PricingClient() {
   const [payOpened, setPayOpened] = useState(false);
   const [refreshingBalance, setRefreshingBalance] = useState(false);
   const [cycle, setCycle] = useState<CycleId>("all");
+  // 自定义档额度（金币）。滑杆拖动只更新这个值；checkout 走 custom:<coins> id。
+  const [customCoins, setCustomCoins] = useState<number>(20_000);
 
-  const selectedPlan = PLANS.find((plan) => plan.id === selectedPlanId) ?? PLANS[0];
+  const selectedPlan = resolvePricingPlan(selectedPlanId) ?? PLANS[0];
 
   // 基准单价每次渲染都从有效 catalog（含 admin 覆写）取值——改价后
   // usePricingRevision 触发重渲，套餐换算与单价表全部跟随，无需重新部署。
@@ -325,6 +132,11 @@ export function PricingClient() {
   const imageRows = priceRows.filter((row) => row.kind === "image");
   const videoRows = priceRows.filter((row) => row.kind === "video");
   const visiblePlans = PLANS.filter((plan) => planMatchesCycle(plan, cycle));
+  // 自定义档 = 30 天有效 → 只进「全部/月度」视图。
+  const includeCustom = cycle !== "quarterly";
+  // items 引用必须稳定（滑杆拖动不得重建套餐数组，否则环回位）。
+  const plansForCarousel = useMemo(() => visiblePlans, [visiblePlans]);
+  const customPlan = useMemo(() => customPlanFor(customCoins), [customCoins]);
 
   useEffect(() => {
     const cdk = new URLSearchParams(window.location.search).get("cdk");
@@ -344,6 +156,13 @@ export function PricingClient() {
   const handleSelectPlan = (planId: string) => {
     setSelectedPlanId(planId);
     // 换了方案，上一次「支付页已打开」的状态行就不再成立。
+    setPayOpened(false);
+  };
+
+  const handleCustomCoinsChange = (coins: number) => {
+    setCustomCoins(coins);
+    // 滑杆拖动即视为选中自定义档：价格实时跟随，支付动作立即可用。
+    setSelectedPlanId((prev) => (prev === "custom" ? prev : "custom"));
     setPayOpened(false);
   };
 
@@ -457,23 +276,24 @@ export function PricingClient() {
           })}
         </div>
 
-        {/* 套餐卡矩阵 — 首屏无需滚动看全三档核心价；点卡即选，收银台在卡内 */}
-        <div role="radiogroup" aria-label="充值方案" className="mt-4 grid gap-3 sm:mt-5 sm:grid-cols-3 sm:gap-4">
-          {visiblePlans.map((plan) => (
-            <PlanCard
-              key={plan.id}
-              plan={plan}
-              selected={plan.id === selectedPlanId}
-              referenceCoinsPerImage={referenceCoinsPerImage}
-              payMethod={payMethod}
-              payOpened={payOpened}
-              refreshingBalance={refreshingBalance}
-              onSelect={handleSelectPlan}
-              onMethodChange={setPayMethod}
-              onPay={handlePay}
-              onRefreshBalance={handleRefreshBalance}
-            />
-          ))}
+        {/* 套餐环（carousel）— AI 助理模板同款轮子：点前卡即选，收银台在卡内；
+            末位自定义档带 Log Scale 滑杆（2,000 → 100 万金币，0.045 元/金币）。 */}
+        <div className="mt-4 sm:mt-5">
+          <PricingPlanCarousel
+            plans={plansForCarousel}
+            includeCustom={includeCustom}
+            customPlan={customPlan}
+            selectedPlanId={selectedPlanId}
+            referenceCoinsPerImage={referenceCoinsPerImage}
+            payMethod={payMethod}
+            payOpened={payOpened}
+            refreshingBalance={refreshingBalance}
+            onSelect={handleSelectPlan}
+            onCustomCoinsChange={handleCustomCoinsChange}
+            onMethodChange={setPayMethod}
+            onPay={handlePay}
+            onRefreshBalance={handleRefreshBalance}
+          />
         </div>
 
         {/* 附加赠送 — 真实配置（邀请奖励口径）才渲染的浅玻璃条 */}

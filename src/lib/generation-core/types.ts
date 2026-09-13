@@ -1,6 +1,6 @@
 export type GenerationSource = "web" | "biz" | "canary";
 export type GenerationKind = "image_generate" | "image_edit" | "video_generate" | "tts" | "avatar" | "lipsync";
-export type RoutingClass = "generic" | "firefly_only";
+export type RoutingClass = "generic" | "firefly_only" | "hub_only";
 export type GenerationJobStatus =
   | "pending_billing"
   | "billing_unknown"

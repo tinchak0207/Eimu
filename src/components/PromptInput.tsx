@@ -8,7 +8,8 @@ import type { AgentSseEvent } from "@/lib/agent-chat-types";
 import { Textarea } from "@/components/ui/textarea";
 import { getRandomSuggestions, Suggestion } from "@/lib/suggestions";
 import { STYLE_PRESETS, type StylePreset } from "@/lib/prompt-enhancer";
-import { generationCoins, generationModel, type AspectRatio, type OutputResolution } from "@/lib/generation-model-catalog";
+import { generationCoins, generationModel, modelAspectRatios, type AspectRatio, type OutputResolution } from "@/lib/generation-model-catalog";
+import { aspectRatioDeviation, nearestAspectRatio } from "@/lib/generation-model-catalog/resolution";
 import { replacePromptSnippet, replacePromptStyleSuffix } from "@/lib/prompt-compose";
 import type { ReferenceImage } from "@/lib/image-types";
 import { usePricingRevision } from "@/hooks/use-pricing-revision";
@@ -149,6 +150,14 @@ const AgentChatSurface = dynamic(
 /** 聊天区在卡片里的高度（CSS 变量，globals.css 定义；占位与实体同高防跳动）。 */
 const AGENT_SURFACE_HEIGHT = "var(--agent-surface-height)";
 
+/**
+ * 首頁掛載即預載聊天面 chunk：點「AI 助理」時 dynamic() 直接命中瀏覽器快取，
+ * 零網路等待。generate 模式也會拉——這是刻意的（首頁預載換點擊零等待）。
+ */
+export function preloadAgentChatSurface(): void {
+  void import("@/components/agent-chat/AgentChatSurface");
+}
+
 export function PromptInput({
   suggestions: initialSuggestions,
   isLoading,
@@ -192,6 +201,13 @@ export function PromptInput({
 }: PromptInputProps) {
   // 订阅定价覆写：管理员改价后本页报价立即重算。
   usePricingRevision();
+  // 聊天面 chunk 预载：挂载即拉（见 preloadAgentChatSurface 注释），点按钮时零等待。
+  // 09-12 撤销第二轮刀B「预建会话」：预建把每次首页访问变成一条网关会话
+  // （多数从不进助理），正是零消息会话堆积、清单垃圾的元凶。建号权收归
+  // 发送按钮——首条消息 send() 时才 lazy 建号（见 use-agent-chat.ts send()）。
+  useEffect(() => {
+    preloadAgentChatSurface();
+  }, []);
   const [input, setInput] = useState("");
   const [suggestions, setSuggestions] = useState<Suggestion[]>(initialSuggestions);
 
@@ -254,6 +270,68 @@ export function PromptInput({
   const isVideo = selectedModel?.kind === "video";
   // 当前模型是否支持参考图：不支持时隐藏上传入口，而不是让用户上传完被清空。
   const referenceImagesSupported = Boolean(selectedModel?.referenceImages);
+
+  // ── 「跟随参考图」比例档（2026-09-10 用户反馈：横向奖状被锁 1:1 明显压缩）──
+  // 纯 PromptInput 本地 UI 态：选中后把第一张参考图的原比例映射到当前模型
+  // 支持清单的最近一档，经 onAspectRatioChange 落回上层状态——状态里存的
+  // 永远是合法 AspectRatio，送出参数流（onSubmit 契约）零改动。
+  const [followReferenceRatio, setFollowReferenceRatio] = useState(false);
+  // 最近一次映射结果（供 chip 诚实显示「跟随参考图 · 3:4」与差距提示）。
+  const [followRatioInfo, setFollowRatioInfo] = useState<{ ratio: AspectRatio; deviation: number } | null>(null);
+  // chip 出现条件：generate 面有参考图且模型支持。参考图清空 / 换不支持模型 →
+  // chip 消失，比例保持当前已选值（不强制重置）。
+  const followReferenceAvailable = referenceImagesSupported && referenceImages.length > 0;
+
+  // 参考图变化（更换/增删）或模型支持清单变化时，若 chip 仍选中 → 重测重映射。
+  // 测量用 new Image() 读 previewUrl 的 naturalWidth/Height（不依赖其他并发
+  // 任务可能补的元数据字段）；图片解码是异步的，竞态用序号守卫——旧图晚回不覆盖新结果。
+  const firstReferencePreviewUrl = referenceImages[0]?.previewUrl;
+  useEffect(() => {
+    if (!followReferenceRatio) return;
+    if (!firstReferencePreviewUrl) return;
+    let cancelled = false;
+    const image = new Image();
+    image.onload = () => {
+      if (cancelled) return;
+      const width = image.naturalWidth;
+      const height = image.naturalHeight;
+      if (!width || !height) return;
+      const target = width / height;
+      const supported = modelAspectRatios(modelId);
+      const ratio = nearestAspectRatio(target, supported);
+      setFollowRatioInfo({ ratio, deviation: aspectRatioDeviation(target, ratio) });
+      onAspectRatioChange(ratio);
+    };
+    image.src = firstReferencePreviewUrl;
+    return () => {
+      cancelled = true;
+    };
+    // onAspectRatioChange 是上层 setState（稳定引用），不纳入依赖。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [followReferenceRatio, firstReferencePreviewUrl, modelId]);
+
+  // chip 消失（参考图清空或模型不再支持）时同步熄灭本地态，比例保持现值不重置。
+  useEffect(() => {
+    if (!followReferenceAvailable && followReferenceRatio) {
+      setFollowReferenceRatio(false);
+      setFollowRatioInfo(null);
+    }
+  }, [followReferenceAvailable, followReferenceRatio]);
+
+  const handleFollowReferenceSelect = () => {
+    if (!followReferenceAvailable) return;
+    // 只翻本地态：置位后上方 effect 立即跑「测 previewUrl → 映射最近档 →
+    // onAspectRatioChange」同一管线，与参考图更换时的重映射共用一条路。
+    setFollowReferenceRatio(true);
+  };
+
+  const handleAspectRatioSelect = (ratio: AspectRatio) => {
+    // 点了普通比例档 = 退出「跟随参考图」，映射结果不再有效。
+    setFollowReferenceRatio(false);
+    setFollowRatioInfo(null);
+    onAspectRatioChange(ratio);
+  };
+
 
   /** 上一次点入的示例模板：再点别的模板时先剔除它，只保留最新一个。 */
   const lastSuggestionRef = useRef<string | null>(null);
@@ -542,7 +620,7 @@ export function PromptInput({
               modelId={modelId}
               onModelChange={onModelChange}
               aspectRatio={aspectRatio}
-              onAspectRatioChange={onAspectRatioChange}
+              onAspectRatioChange={handleAspectRatioSelect}
               outputResolution={outputResolution}
               onOutputResolutionChange={onOutputResolutionChange}
               durationSeconds={durationSeconds}
@@ -551,6 +629,10 @@ export function PromptInput({
               onGenerateAudioChange={onGenerateAudioChange}
               stylePreset={stylePreset}
               handleStyleChange={handleStyleChange}
+              followReferenceAvailable={followReferenceAvailable}
+              followReferenceRatio={followReferenceRatio}
+              followRatioInfo={followRatioInfo}
+              onFollowReferenceSelect={handleFollowReferenceSelect}
             />
           )}
 

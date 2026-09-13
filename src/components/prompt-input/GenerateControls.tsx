@@ -38,6 +38,14 @@ interface GenerateControlsProps {
   onGenerateAudioChange: (enabled: boolean) => void;
   stylePreset: StylePreset;
   handleStyleChange: (preset: StylePreset) => void;
+  /** 「跟随参考图」档是否可出现（generate 面且有参考图且模型支持）。 */
+  followReferenceAvailable?: boolean;
+  /** 「跟随参考图」是否选中（PromptInput 本地 UI 态，非 AspectRatio）。 */
+  followReferenceRatio?: boolean;
+  /** 最近一次映射结果：ratio=实际输出比例，deviation=与原图比例的相对差（0–1）。 */
+  followRatioInfo?: { ratio: AspectRatio; deviation: number } | null;
+  /** 选中「跟随参考图」。 */
+  onFollowReferenceSelect?: () => void;
 }
 
 /**
@@ -62,6 +70,10 @@ export function GenerateControls({
   onGenerateAudioChange,
   stylePreset,
   handleStyleChange,
+  followReferenceAvailable = false,
+  followReferenceRatio = false,
+  followRatioInfo = null,
+  onFollowReferenceSelect,
 }: GenerateControlsProps) {
   const aspectRatios = modelAspectRatios(modelId);
   const resolutions = modelResolutions(modelId);
@@ -124,6 +136,31 @@ export function GenerateControls({
                 <div className={ROW_CLASS}>
                   <span className={LABEL_CLASS}>比例</span>
                   <div className={RAIL_CLASS}>
+                    {/* 「跟随参考图」动态首档（2026-09-10）：仅在 generate 面有参考图
+                        且模型支持时出现；选中后映射到下方最近支持档并高亮。 */}
+                    {followReferenceAvailable && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!followReferenceRatio) onFollowReferenceSelect?.();
+                        }}
+                        className={cn("style-chip gap-1.5", followReferenceRatio && "active")}
+                        title={
+                          followReferenceRatio && followRatioInfo
+                            ? followRatioInfo.deviation > 0.15
+                              ? `跟随参考图 · 实际输出 ${followRatioInfo.ratio}（最接近的支持比例，与原图有差距）`
+                              : `跟随参考图 · 实际输出 ${followRatioInfo.ratio}`
+                            : "按第一张参考图的原比例出图"
+                        }
+                      >
+                        跟随参考图
+                        {followReferenceRatio && followRatioInfo && (
+                          <span className="tabular-nums text-[rgba(0,0,0,0.52)]">
+                            · {followRatioInfo.ratio}
+                          </span>
+                        )}
+                      </button>
+                    )}
                     {aspectRatios.map((ratio) => (
                       <button
                         key={ratio}

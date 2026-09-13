@@ -47,6 +47,70 @@ export function ParticleSeaWaiting({
     let H = 0;
     let particles: { x: number; row: number; r: number; p: number; ox: number; oy: number; ex: number }[] = [];
 
+    /*
+     * 預渲染 glow/core sprite：把 per-particle shadowBlur（canvas2d 最貴的高斯模糊，
+     * 每幀 ~800 次）離屏烘焙成可縮放圖層，每幀只做 drawImage blit。
+     * - 光暈恆為藍（沿用現行 shadowColor rgba(0,122,255,.2/.5)），以徑向漸層取代高斯模糊，
+     *   外緣半徑 = HALO_MULT × 核心半徑，調至現行 shadowBlur(5~17) 對 size 的平均比例 → 逐像素等級等價。
+     * - 本體按三色相分桶（亮藍浪尖 / 粉點綴 / 藍灰霧體），fill alpha 係數沿用現行 rgba(…,alpha*mult)。
+     * sprite 與版面無關，僅建一次；背景漸層圖層依賴 W/H，於 build() 內重建。
+     */
+    const CORE_R = 4; // sprite 內烘焙的參考核心半徑（px）
+    const HALO_MULT = 4.5; // 光暈外緣 = HALO_MULT × 核心半徑
+    const CORE_PAD = 1;
+    const coreSpriteSide = CORE_R * 2 + CORE_PAD * 2;
+    const haloOuterR = CORE_R * HALO_MULT;
+    const glowSpriteSide = Math.ceil(haloOuterR) * 2 + 2;
+
+    const makeCore = (rgb: string) => {
+      const c = document.createElement("canvas");
+      c.width = c.height = coreSpriteSide;
+      const g = c.getContext("2d");
+      if (g) {
+        g.fillStyle = rgb;
+        g.beginPath();
+        g.arc(coreSpriteSide / 2, coreSpriteSide / 2, CORE_R, 0, TAU);
+        g.fill();
+      }
+      return c;
+    };
+    const makeGlow = (intensity: number) => {
+      const c = document.createElement("canvas");
+      c.width = c.height = glowSpriteSide;
+      const g = c.getContext("2d");
+      if (g) {
+        const grad = g.createRadialGradient(glowSpriteSide / 2, glowSpriteSide / 2, 0, glowSpriteSide / 2, glowSpriteSide / 2, haloOuterR);
+        grad.addColorStop(0, `rgba(0,122,255,${intensity})`);
+        grad.addColorStop(0.4, `rgba(0,122,255,${intensity * 0.55})`);
+        grad.addColorStop(1, "rgba(0,122,255,0)");
+        g.fillStyle = grad;
+        g.fillRect(0, 0, glowSpriteSide, glowSpriteSide);
+      }
+      return c;
+    };
+    const coreSprites = [makeCore("#007aff"), makeCore("#ff8aa8"), makeCore("#7a94ba")];
+    const coreMult = [0.65, 0.5, 0.42];
+    const splashCore = makeCore("#5aaaff");
+    const glowLo = makeGlow(0.2);
+    const glowHi = makeGlow(0.5);
+
+    let bgLayer: HTMLCanvasElement | null = null;
+    const makeBgLayer = () => {
+      const c = document.createElement("canvas");
+      c.width = Math.max(1, Math.round(W));
+      c.height = Math.max(1, Math.round(H));
+      const g = c.getContext("2d");
+      if (g) {
+        const glow = g.createRadialGradient(W / 2, 35, 10, W / 2, H * 0.5, Math.max(W, H) * 0.7);
+        glow.addColorStop(0, "rgba(0,122,255,.09)");
+        glow.addColorStop(0.5, "rgba(92,143,180,.06)");
+        glow.addColorStop(1, "rgba(255,255,255,0)");
+        g.fillStyle = glow;
+        g.fillRect(0, 0, W, H);
+      }
+      bgLayer = c;
+    };
+
     const build = () => {
       const box = canvas.parentElement;
       W = box?.clientWidth ?? 420;
@@ -71,6 +135,7 @@ export function ParticleSeaWaiting({
           });
         }
       }
+      makeBgLayer();
     };
     build();
     const observer = new ResizeObserver(build);
@@ -137,13 +202,9 @@ export function ParticleSeaWaiting({
     const t0 = performance.now();
     const draw = (n: number) => {
       const t = (n - t0) / 1000;
+      ctx.globalAlpha = 1;
       ctx.clearRect(0, 0, W, H);
-      const glow = ctx.createRadialGradient(W / 2, 35, 10, W / 2, H * 0.5, Math.max(W, H) * 0.7);
-      glow.addColorStop(0, "rgba(0,122,255,.09)");
-      glow.addColorStop(0.5, "rgba(92,143,180,.06)");
-      glow.addColorStop(1, "rgba(255,255,255,0)");
-      ctx.fillStyle = glow;
-      ctx.fillRect(0, 0, W, H);
+      if (bgLayer) ctx.drawImage(bgLayer, 0, 0, W, H);
       const span = W + 100;
       const R = 90;
       const R2 = R * R;
@@ -177,18 +238,13 @@ export function ParticleSeaWaiting({
         // 擾動發亮：被攪動的粒子短暫更亮更大、光暈更強
         alpha = Math.min(1, alpha * (1 + q.ex * 0.9));
         size *= 1 + q.ex * 0.35;
-        ctx.beginPath();
-        ctx.arc(drawX, drawY, size, 0, TAU);
-        ctx.fillStyle =
-          q.row % 7 === 0
-            ? `rgba(0,122,255,${alpha * 0.65})`
-            : q.row % 7 === 3
-              ? `rgba(255,138,168,${alpha * 0.5})`
-              : `rgba(122,148,186,${alpha * 0.42})`;
-        ctx.shadowBlur = 5 + 6 * breathe + q.ex * 12;
-        ctx.shadowColor = q.ex > 0.25 ? "rgba(0,122,255,.5)" : "rgba(0,122,255,.2)";
-        ctx.fill();
-        ctx.shadowBlur = 0;
+        ctx.globalAlpha = 1;
+        const gs = glowSpriteSide * (size / CORE_R);
+        ctx.drawImage(q.ex > 0.25 ? glowHi : glowLo, drawX - gs / 2, drawY - gs / 2, gs, gs);
+        const ci = q.row % 7 === 0 ? 0 : q.row % 7 === 3 ? 1 : 2;
+        ctx.globalAlpha = alpha * coreMult[ci];
+        const cs = coreSpriteSide * (size / CORE_R);
+        ctx.drawImage(coreSprites[ci], drawX - cs / 2, drawY - cs / 2, cs, cs);
       }
       // 輕水花：上拋微粒受重力落回浪裡，0.5s 內消散
       for (let i = splashes.length - 1; i >= 0; i--) {
@@ -201,14 +257,14 @@ export function ParticleSeaWaiting({
           splashes.splice(i, 1);
           continue;
         }
-        ctx.beginPath();
-        ctx.arc(s.x, s.y, 1.4, 0, TAU);
-        ctx.fillStyle = `rgba(90,170,255,${s.life * 0.8})`;
-        ctx.shadowBlur = 6;
-        ctx.shadowColor = "rgba(0,122,255,.5)";
-        ctx.fill();
-        ctx.shadowBlur = 0;
+        ctx.globalAlpha = Math.min(1, s.life);
+        const sg = glowSpriteSide * (1.4 / CORE_R);
+        ctx.drawImage(glowHi, s.x - sg / 2, s.y - sg / 2, sg, sg);
+        ctx.globalAlpha = s.life * 0.8;
+        const sc = coreSpriteSide * (1.4 / CORE_R);
+        ctx.drawImage(splashCore, s.x - sc / 2, s.y - sc / 2, sc, sc);
       }
+      ctx.globalAlpha = 1;
       pointer.speed *= 0.85;
       if (!reduced) raf = requestAnimationFrame(draw);
     };

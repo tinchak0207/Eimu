@@ -114,9 +114,30 @@ test("mobile pages reserve space for the single-row navbar", () => {
 test("首页工作台与出图框离 header 的距离是其他页的一半", () => {
   const source = read("src/components/ImagePlayground.tsx");
   // 左侧工作台与右侧出图框在同一个 wrapper 里，一个值同时管两边。
-  assert.match(source, /min-h-screen bg-transparent pb-28 pt-10 sm:pb-32/);
+  // 2026-09-10 F6：≥xl 改应用式满屏（flex-1 链），底部 padding 收敛到 pb-16
+  // （只为 fixed bottom-4 浮动 toast 条留安全空间）；<xl 仍 min-h-screen 文档流。
+  assert.match(source, /min-h-screen bg-transparent pb-16 pt-10 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col/);
   assert.doesNotMatch(source, /pt-20/);
   assert.doesNotMatch(source, /pt-32/);
+  assert.doesNotMatch(source, /pb-28 pt-10|sm:pb-32/);
+});
+
+/** 2026-09-10 F6 首页满屏高度链（≥xl 两栏态）：body(flex/min-h-dvh) → main
+ *  (flex-1) → 外层 flex-1 → page-shell flex-1 → grid flex-1+grid-rows-1 →
+ *  左栏 wrapper min-h-0+overflow / 右栏 #generation-result min-h-0 →
+ *  ImageDisplay xl:h-full 吃满。断言锁链路，防回退成文档流下方大空白。 */
+test("首页 xl 满屏高度链完整（body/main/page-shell/grid/左右栏）", () => {
+  const layout = read("src/app/layout.tsx");
+  const source = read("src/components/ImagePlayground.tsx");
+  assert.match(layout, /<body className="[^"]*flex min-h-dvh flex-col/);
+  assert.match(layout, /<main className="flex min-h-0 flex-1 flex-col">/);
+  assert.match(source, /page-shell xl:flex xl:min-h-0 xl:flex-1 xl:flex-col/);
+  assert.match(source, /grid gap-6 xl:min-h-0 xl:flex-1 xl:grid-rows-1 xl:grid-cols-\[minmax\(0,1fr\)_minmax\(380px,460px\)\]/);
+  // 09-11 高度自適應戰役：該 div 改走 cn()（兩欄態附加 playground-column-fill），斷言跟隨現狀。
+  assert.match(source, /cn\("min-w-0 xl:min-h-0 xl:overflow-y-auto"/);
+  assert.match(source, /"flex min-w-0 flex-col xl:min-h-0", inCanvasWorkstation && "hidden"/);
+  // 工作站态零回归：grid 在工作站态仍是 block（高度链类只在两栏分支）。
+  assert.match(source, /inCanvasWorkstation \? "block" : "grid/);
 });
 
 test("pricing page removes the bottom external store link and uses zh-CN locale", () => {
@@ -140,32 +161,55 @@ test("pricing copy uses simplified Chinese with a standard close affordance", ()
   assert.doesNotMatch(pricing, /兌換碼/);
 });
 
-test("pricing page is a focused compact panel with in-card checkout", () => {
+test("pricing page is a focused compact panel with plan carousel", () => {
   const pricing = read("src/components/PricingClient.tsx");
 
-  // 2026-08-25 重构：聚焦卡片布局——首屏无滚动看全周期切换 + 三档卡片；
-  // 底部悬浮结账栏移除，收银台收进选中卡片内部。
+  // 2026-09-07 carousel 化：三列并排 → AI 助理模板同款环形轮播（PricingPlanCarousel）。
   assert.match(pricing, /max-w-6xl/);
-  assert.match(pricing, /sm:grid-cols-3/);
+  assert.match(pricing, /<PricingPlanCarousel/);
   assert.doesNotMatch(pricing, /fixed inset-x-0 bottom-/);
   assert.doesNotMatch(pricing, /mobile-pricing-/);
   assert.doesNotMatch(pricing, /sm:text-center/);
   assert.doesNotMatch(pricing, /pt-20/);
 });
 
-test("pricing plans are selectable cards with in-card checkout closure", () => {
+test("pricing plans are selectable carousel cards with in-card checkout closure", () => {
   const pricing = read("src/components/PricingClient.tsx");
+  const carousel = read("src/components/PricingPlanCarousel.tsx");
 
-  // App Store 收银架构（2026-08-25 收进卡片）：点卡即选，选中卡内展开
-  // 支付方式分段 + 唯一支付 CTA；未选中卡只有「选择此方案」。
-  assert.match(pricing, /role="radiogroup" aria-label="充值方案"/);
-  assert.match(pricing, /aria-checked=\{selected\}/);
+  // App Store 收银架构：点前卡即选，选中卡内展开支付方式分段 + 唯一支付 CTA；
+  // 未选中卡只有「选择此方案」。
+  assert.match(carousel, /role="radio"/);
+  assert.match(carousel, /aria-checked=\{isSelected\(item\)\}/);
   assert.match(pricing, /useState\("popular"\)/);
-  assert.match(pricing, /立即支付 ¥\{plan\.price\}/);
-  assert.doesNotMatch(pricing, /handleMapayBuy\(plan\.id/);
+  assert.match(carousel, /立即支付 ¥\{plan\.price\}/);
+  assert.doesNotMatch(carousel, /handleMapayBuy\(plan\.id/);
   // 支付在新窗口完成，卡内必须有「刷新余额」的闭环反馈。
-  assert.match(pricing, /支付页已在新窗口打开/);
-  assert.match(pricing, /已完成支付，刷新余额/);
+  assert.match(carousel, /支付页已在新窗口打开/);
+  assert.match(carousel, /已完成支付，刷新余额/);
+});
+
+test("pricing custom plan prices by the single-source 0.045 RMB per coin constant", () => {
+  // 2026-09-07 暴君钦定：自定义档 0.045 RMB/金币，价格常量单点定义在 plans.ts，
+  // 页面展示与 checkout/notify 服务端计价共用同一解析器，客户端传价不参与计价。
+  const plans = read("src/lib/plans.ts");
+  const carousel = read("src/components/PricingPlanCarousel.tsx");
+  const checkout = read("src/app/api/payments/mapay/checkout/route.ts");
+  const notify = read("src/app/api/payments/mapay/notify/route.ts");
+
+  assert.match(plans, /CUSTOM_PLAN_PRICE_PER_COIN = 0\.045/);
+  assert.match(plans, /export function customPlanPrice\(/);
+  assert.match(plans, /export function resolvePricingPlan\(/);
+  assert.match(carousel, /CustomAmountSlider/);
+  assert.match(carousel, /aria-label="自定义额度"/);
+  assert.match(carousel, /aria-valuetext=/);
+  // Log Scale：value = 10^(lerp(log10(2000), log10(1000000), t))。
+  assert.match(carousel, /10 \*\* \(LOG_MIN \+ t \* LOG_SPAN\)/);
+  // 两个路由都必须走统一解析器（不许出现 PLANS.find 直查）。
+  assert.match(checkout, /resolvePricingPlan\(/);
+  assert.match(notify, /resolvePricingPlan\(/);
+  assert.doesNotMatch(checkout, /PLANS\.find/);
+  assert.doesNotMatch(notify, /PLANS\.find/);
 });
 
 test("pricing page exposes docs link and redeem anchor for cdk delivery", () => {
@@ -177,15 +221,17 @@ test("pricing page exposes docs link and redeem anchor for cdk delivery", () => 
 
 test("pricing checkout keeps WeChat first and still routes through mapay", () => {
   const pricing = read("src/components/PricingClient.tsx");
+  // 2026-09-07 carousel 化：收银台（支付方式分段）随卡面迁入 PricingPlanCarousel。
+  const carousel = read("src/components/PricingPlanCarousel.tsx");
 
-  assert.match(pricing, /微信支付/);
-  assert.match(pricing, /支付宝支付/);
-  // 支付方式在结账栏的分段控件里选，支付动作只有一处。
-  assert.match(pricing, /role="radiogroup" aria-label="支付方式"/);
+  assert.match(carousel, /微信支付/);
+  assert.match(carousel, /支付宝支付/);
+  // 支付方式在卡内结账的分段控件里选，支付动作只有一处。
+  assert.match(carousel, /role="radiogroup" aria-label="支付方式"/);
   assert.match(pricing, /handleMapayBuy\(selectedPlan\.id, payMethod\)/);
   assert.match(pricing, /\/api\/payments\/mapay\/checkout\?plan=/);
   assert.match(pricing, /type=\$\{encodeURIComponent\(type\)\}/);
-  assert.ok(pricing.indexOf("微信支付") < pricing.indexOf("支付宝支付"));
+  assert.ok(carousel.indexOf("微信支付") < carousel.indexOf("支付宝支付"));
   assert.doesNotMatch(pricing, /淘宝购买/);
 });
 

@@ -38,6 +38,8 @@ test("pricing/docs/shared-ui text never drops below the AA contrast floor", () =
   // 0.44 以下的黑字在近白底上连 3:1 都不到——与 /history 已锁定的下限一致。
   const files = [
     "src/components/PricingClient.tsx",
+    // 2026-09-07 carousel 化：方案卡面迁入 PricingPlanCarousel，下限同样盯住。
+    "src/components/PricingPlanCarousel.tsx",
     "src/app/docs/page.tsx",
     "src/components/Navbar.tsx",
     "src/components/WalletBadge.tsx",
@@ -80,6 +82,8 @@ test("no user-facing surface uses a dead non-multiple-of-5 opacity modifier", ()
   // 空规则——签到弹窗和图片放大层的深色遮罩都曾因此完全透明。
   const files = [
     "src/components/PricingClient.tsx",
+    // 2026-09-07 carousel 化：卡面与收银台迁入 PricingPlanCarousel。
+    "src/components/PricingPlanCarousel.tsx",
     "src/app/docs/page.tsx",
     "src/components/Navbar.tsx",
     "src/components/WalletBadge.tsx",
@@ -102,7 +106,8 @@ test("no user-facing surface uses a dead non-multiple-of-5 opacity modifier", ()
 });
 
 test("the image zoom overlay backdrop is a real arbitrary color", () => {
-  const source = read("src/components/ImageDisplay.tsx");
+  // 2026-09-10 燈箱抽成共用組件後，背板色真源在 ImageLightbox（成圖與參考圖共用）。
+  const source = read("src/components/ImageLightbox.tsx");
   assert.match(source, /bg-\[rgba\(31,34,48,0\.74\)\]/);
   assert.doesNotMatch(source, /bg-\[#1f2230\]\/74/);
 });
@@ -168,16 +173,22 @@ test("pricing page renders the live model price table, not stale copy", () => {
   assert.match(source, /generationCoins\("gpt-image-2", \{ resolution: "1k" \}\)/);
   // 金币数字使用 coin-gold，不与普通正文混色。
   assert.match(source, /#c9a84c/);
-  // 每档套餐明示 1024px 标准图口径。
-  assert.match(source, /1024px 标准图/);
   // 长表允许滚动，不硬塞一屏。
   assert.match(source, /max-h-\[30rem\] overflow-y-auto/);
-  // 卡内第二换算口径（旗舰高清）同为 catalog 活数据。
-  assert.match(source, /张旗舰高清 · \{FLAGSHIP_MODEL_LABEL\}/);
   // 对照表各套餐列 = planUnitsForCoins(plan, cell.coins)，不允许手写张数。
   assert.match(source, /planUnitsForCoins\(plan, cell\.coins\)/);
   // 活动位组件存在但无数据时不渲染（不放假倒计时）。
   assert.match(source, /ACTIVE_PRICING_PROMO && <ActivityBanner/);
+
+  // 卡内换算文案（2026-09-07 迁入 PricingPlanCarousel）：同样钉住口径与活数据。
+  const carousel = read("src/components/PricingPlanCarousel.tsx");
+  // 每档套餐明示 1024px 标准图口径。
+  assert.match(carousel, /1024px 标准图/);
+  // 卡内第二换算口径（旗舰高清）同为 catalog 活数据。
+  assert.match(carousel, /张旗舰高清 · \{FLAGSHIP_MODEL_LABEL\}/);
+  // 自定义档滑杆：Log Scale 端点与档位吸附来自 plans.ts 单点定义。
+  assert.match(carousel, /snapCustomCoins/);
+  assert.match(carousel, /onCustomCoinsChange/);
 });
 
 test("in-card conversions and table columns all trace back to catalog prices", () => {

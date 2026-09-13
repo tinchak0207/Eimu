@@ -5,6 +5,7 @@ import {
   defaultGenerateAudio,
   generationCoins,
   generationCredits,
+  generationModel,
   modelAspectRatios,
   modelPriceLabel,
   modelResolutions,
@@ -17,12 +18,25 @@ import { resolveAdobe2ApiImageModelId, resolveAdobe2ApiVideoModelId } from "./ge
 
 test("recommended model is first and the requested image supply models lead the public menu", () => {
   assert.equal(GENERATION_MODEL_IDS[0], "gpt-image-2");
-  assert.deepEqual(GENERATION_MODEL_IDS.slice(1, 5), [
+  // 2026-09-09：GPT Image 2.5 兩檔緊隨 GPT Image 2 之後插入菜單
+  assert.deepEqual(GENERATION_MODEL_IDS.slice(1, 6), [
+    "gpt-image-2.5-flare",
+    "gpt-image-2.5-sunburst",
     "gemini-3.1-flash-image",
     "image-5-pro",
     "image-5-lite",
-    "seedream-2.0",
   ]);
+});
+
+test("GPT Image 2.5 Flare and Sunburst ship as image models in the catalog", () => {
+  for (const modelId of ["gpt-image-2.5-flare", "gpt-image-2.5-sunburst"]) {
+    const model = generationModel(modelId);
+    assert.ok(model, `${modelId} must exist in the catalog`);
+    assert.equal(model.kind, "image");
+    assert.deepEqual(model.resolutions, ["1k", "2k", "4k"]);
+    assert.ok(model.aspectRatios.includes("1:1"));
+    assert.ok(model.aspectRatios.includes("9:16"));
+  }
 });
 
 test("Dreamina image aliases expose only the requested Seedream generations", () => {

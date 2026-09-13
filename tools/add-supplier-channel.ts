@@ -119,8 +119,9 @@ function parseArgs(argv: string[]): Args {
     process.exit(1);
   }
   const adapterRaw = String(flags["adapter"] ?? "openai_images");
-  if (adapterRaw !== "openai_images" && adapterRaw !== "metaso") {
-    console.error(`錯誤：未知 adapter "${adapterRaw}"（可選 openai_images / metaso）。`);
+  const ADAPTERS = ["openai_images", "metaso", "openai_video", "blender_bridge", "adobe2api"] as const;
+  if (!(ADAPTERS as readonly string[]).includes(adapterRaw)) {
+    console.error(`錯誤：未知 adapter "${adapterRaw}"（可選 ${ADAPTERS.join(" / ")}）。`);
     process.exit(1);
   }
   return {

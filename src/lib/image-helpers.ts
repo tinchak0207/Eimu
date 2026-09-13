@@ -16,23 +16,81 @@ export const imageHelpers = {
     return `${provider}-${uniqueId}`.replace(/[^a-z0-9-]/gi, "");
   },
 
+  // Blob 获取链（download 与 copy 共用，自 download 原内联逻辑逐行抽出，语义零变动）。
+  // http(s) sources are first rendered by <img> in no-cors mode and cached
+  // immutable for a year; a same-URL cors fetch can then be served that
+  // cached copy without Access-Control-Allow-Origin (Chromium's simple cache
+  // ignores Vary: Origin) and gets blocked. Bust the cache key and skip the
+  // HTTP cache so the fetch always takes a fresh CORS-eligible response.
+  fetchImageBlob: async (imageSource: string): Promise<Blob> => {
+    const isHttpSource = imageSource.startsWith("http");
+    const fetchUrl = isHttpSource
+      ? `${imageSource}${imageSource.includes("?") ? "&" : "?"}dl=1`
+      : imageSource;
+    return isHttpSource || imageSource.startsWith("data:") || imageSource.startsWith("blob:")
+      ? await fetch(fetchUrl, { cache: "no-store" }).then((response) => response.blob())
+      : imageHelpers.base64ToBlob(imageSource);
+  },
+
+  // ClipboardItem 的最大兼容 MIME 是 image/png：Safari 只收 PNG，Chrome 也仅
+  // 支持少数几种。非 PNG blob 先经 canvas 重绘转 PNG 再进剪贴板。
+  reencodeAsPng: (blob: Blob): Promise<Blob> => {
+    return new Promise((resolve, reject) => {
+      const objectUrl = URL.createObjectURL(blob);
+      const image = new Image();
+      image.onload = () => {
+        try {
+          const canvas = document.createElement("canvas");
+          canvas.width = image.naturalWidth;
+          canvas.height = image.naturalHeight;
+          const context = canvas.getContext("2d");
+          if (!context) {
+            reject(new Error("Canvas 2D context unavailable"));
+            return;
+          }
+          context.drawImage(image, 0, 0);
+          canvas.toBlob((pngBlob) => {
+            if (pngBlob) resolve(pngBlob);
+            else reject(new Error("PNG re-encode failed"));
+          }, "image/png");
+        } finally {
+          // drawImage 是同步的，画完即可释放，不留泄漏窗口。
+          URL.revokeObjectURL(objectUrl);
+        }
+      };
+      image.onerror = () => {
+        URL.revokeObjectURL(objectUrl);
+        reject(new Error("Image decode failed during PNG re-encode"));
+      };
+      image.src = objectUrl;
+    });
+  },
+
+  copyToClipboard: async (imageSource: string): Promise<void> => {
+    if (
+      typeof navigator === "undefined" ||
+      !navigator.clipboard?.write ||
+      typeof ClipboardItem === "undefined"
+    ) {
+      // 专用错误：调用方据此 fallback 到下载。
+      throw new Error("当前浏览器不支持复制图片");
+    }
+    // 直接传 Promise 形式给 ClipboardItem（Chrome/Safari 都兼容）：剪贴板
+    // 锁定在 write() 调用时立即建立，blob fetch / PNG 转码可以慢慢完成，
+    // 避免 Safari 等待用户确认剪贴板授权时超时。
+    const pngBlobPromise = (async () => {
+      const blob = await imageHelpers.fetchImageBlob(imageSource);
+      return blob.type === "image/png" ? blob : await imageHelpers.reencodeAsPng(blob);
+    })();
+    await navigator.clipboard.write([new ClipboardItem({ "image/png": pngBlobPromise })]);
+  },
+
   download: async (
     imageSource: string,
     provider: string
   ): Promise<void> => {
     const fileName = imageHelpers.generateImageFileName(provider);
-    // http(s) sources are first rendered by <img> in no-cors mode and cached
-    // immutable for a year; a same-URL cors fetch can then be served that
-    // cached copy without Access-Control-Allow-Origin (Chromium's simple cache
-    // ignores Vary: Origin) and gets blocked. Bust the cache key and skip the
-    // HTTP cache so the download always takes a fresh CORS-eligible response.
-    const isHttpSource = imageSource.startsWith("http");
-    const fetchUrl = isHttpSource
-      ? `${imageSource}${imageSource.includes("?") ? "&" : "?"}dl=1`
-      : imageSource;
-    const blob = isHttpSource || imageSource.startsWith("data:") || imageSource.startsWith("blob:")
-      ? await fetch(fetchUrl, { cache: "no-store" }).then((response) => response.blob())
-      : imageHelpers.base64ToBlob(imageSource);
+    const blob = await imageHelpers.fetchImageBlob(imageSource);
     const blobUrl = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = blobUrl;

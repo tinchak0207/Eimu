@@ -5,6 +5,9 @@ export const NANO_BANANA_PRO_MODEL_ID = /** @type {const} */ ("gemini-3-image");
 export const NANO_BANANA_2_MODEL_ID = /** @type {const} */ ("gemini-3.1-flash-image");
 export const GPT_IMAGE_MODEL_ID = /** @type {const} */ ("gpt-image");
 export const GPT_IMAGE_15_MODEL_ID = /** @type {const} */ ("gpt-image-1.5");
+// GPT Image 2.5（2026-09-08 發佈）：走 adobe2api Firefly 家族映射（flare=快檔，sunburst=旗艦，上游代號 prism）
+export const GPT_IMAGE_25_FLARE_MODEL_ID = /** @type {const} */ ("gpt-image-2.5-flare");
+export const GPT_IMAGE_25_SUNBURST_MODEL_ID = /** @type {const} */ ("gpt-image-2.5-sunburst");
 export const FLUX_2_MODEL_ID = /** @type {const} */ ("flux-2");
 export const FLUX_2_PRO_MODEL_ID = /** @type {const} */ ("flux-2-pro");
 export const FLUX_11_PRO_MODEL_ID = /** @type {const} */ ("flux-1.1-pro");
@@ -69,6 +72,8 @@ export const BLENDER_NODE_MODEL_IDS = [BLENDER_RENDER_EEVEE_MODEL_ID, BLENDER_RE
 
 export const SUPPORTED_IMAGE_MODEL_IDS = [
   DEFAULT_IMAGE_MODEL_ID,
+  GPT_IMAGE_25_FLARE_MODEL_ID,
+  GPT_IMAGE_25_SUNBURST_MODEL_ID,
   NANO_BANANA_2_MODEL_ID,
   IMAGE_5_PRO_MODEL_ID,
   IMAGE_5_LITE_MODEL_ID,
@@ -135,6 +140,8 @@ export const ADOBE2API_MODEL_IDS = [
   ADOBE_FIREFLY_MODEL_ID,
   NANO_BANANA_PRO_MODEL_ID,
   GPT_IMAGE_15_MODEL_ID,
+  GPT_IMAGE_25_FLARE_MODEL_ID,
+  GPT_IMAGE_25_SUNBURST_MODEL_ID,
   NANO_BANANA_MODEL_ID,
   FLUX_2_PRO_MODEL_ID,
   FLUX_2_MODEL_ID,

@@ -7,6 +7,10 @@ export interface ReferenceImage {
   file: File;
   previewUrl: string;
   size: number;
+  /** 原圖自然尺寸（新上傳由 ReferenceImageUpload 測量填入；舊資料可能缺）。
+   *  為後續「跟隨參考圖比例」功能鋪樁。 */
+  naturalWidth?: number;
+  naturalHeight?: number;
   role?: ReferenceImageRole;
   strength?: number;
   sourceResultId?: string;

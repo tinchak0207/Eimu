@@ -3,8 +3,6 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { ImageDisplay } from "@/components/ImageDisplay";
 import { PromptInput, type PromptInputMode } from "@/components/PromptInput";
-import { CaseShowcase } from "@/components/CaseShowcase";
-import type { ShowcaseCase } from "@/lib/showcase-cases";
 import { FaqSection } from "@/components/FaqSection";
 import { UseCaseLinks } from "@/components/UseCaseLinks";
 import { useCanvasChat, type UseCanvasChatReturn } from "@/hooks/use-canvas-chat";
@@ -17,6 +15,7 @@ import { useImageGeneration } from "@/hooks/use-image-generation";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { usePricingRevision } from "@/hooks/use-pricing-revision";
+import { useIsNarrow } from "@/hooks/use-is-narrow";
 import {
   MODEL_CONFIGS,
   PROVIDERS,
@@ -45,7 +44,12 @@ import { CanvasChatWorkstation } from "@/components/canvas-workstation/CanvasCha
 import { AgentTemplateCarousel } from "@/components/canvas-workstation/AgentTemplateCarousel";
 import { templateToCanvasLayout } from "@/components/canvas-workstation/agent-template-canvas";
 import { DIRECTOR_RENDER_REQUEST_EVENT } from "@/components/director-mini/DirectorMiniViewport";
-import { AGENT_TEMPLATES, cropTemplate, type AgentTemplate } from "@/lib/agent-templates";
+// 2026-09-12 首屏減重拆分：AGENT_TEMPLATES 只含卡面顯示 metadata；
+// 執行 payload（initialPrompt/directive/slots/步驟文案）在 agent-templates-payload.ts，
+// 由 handleUseAgentTemplate 在使用處 await import() 動態載入（見下方回調）。
+// AgentTemplateFull 為純型別 import（編譯期擦除，不拉 payload 進 bundle）。
+import { AGENT_TEMPLATES, type AgentTemplate } from "@/lib/agent-templates";
+import type { AgentTemplateFull } from "@/lib/agent-templates-payload";
 import { fetchAgentCanvasSnapshot } from "@/lib/canvas/client";
 import { useAgentParamReflect } from "@/hooks/use-agent-param-reflect";
 
@@ -77,7 +81,7 @@ export function ImagePlayground({ suggestions }: { suggestions: Suggestion[] }) 
   const [agentTemplateInjection, setAgentTemplateInjection] = useState<{ text: string; nonce: number; directive?: string } | null>(null);
   // C4 生成閉環事件橋：導演台視口「生成真实画面」完成 capture+上傳後 dispatch
   // director-render-request → 與模板庫共用同一注入 setter（AgentChatSurface 的
-  // injection effect 會等 connection open 後靜默發送）。卸載時移除監聽。
+  // injection effect 收到即靜默發送，send() 無會話時 lazy 建號＋連線）。卸載時移除監聽。
   useEffect(() => {
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<{ text?: unknown }>).detail;
@@ -179,62 +183,45 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
   /**
    * 2026-08-25 模板卡點擊（卡即動作）：
    * ① initialPrompt 經既有 useAgentChat 鏈路自動發出（PromptInput →
-   *    AgentChatSurface 的 agentInjection：等連線 open 才 send，會話未開先 autoStart）。
+   *    AgentChatSurface 的 agentInjection：09-12 起注入到了就 send，
+   *    send() 無會話時 lazy 建號＋連線，不再等 autoStart/連線 open）。
    * ② 模板 slots 經 recipeTemplateToRecallConfig → templateToCanvasLayout
    *    → useCanvasChat.replaceWorkflowNodes 鋪成 workflow，等 agent 修改。
    * ③ 首條消息落地即收起畫廊（onUserMessage）。
    * 2026-08-26 環節選擇：第二參 selectedIndices 來自卡面圓環，先 cropTemplate
    *    裁剪（全選 = 原對象零開銷），注入與鋪畫布都用裁剪後的模板。
-   * 09-01 裁定：套模板先 startNewSession 留舊開新，鋪設與注入延遲到新 session 落地（見 pendingTemplateRef effect）。
+   * 09-01 裁定「留舊開新」+ 09-12 建號權收歸發送按鈕：startNewSession 只清空
+   *    回空態（不建號、無 session transition），結算即鋪即注入；注入的首條
+   *    消息 lazy 建新會話承接，畫布摘要隨該消息上行。
    */
-  const pendingTemplateRef = useRef<AgentTemplate | null>(null);
-  // 復用路徑判斷用：start() 的 .then 結算時 React state 尚未提交，
-  // state 讀到的是閉包舊值，鏡像 ref 才能拿到此刻真實 sessionId。
-  const currentSessionIdRef = useRef<string | null>(null);
-  currentSessionIdRef.current = currentSessionId;
   // Bug3：同一 workflow 重點 = 替換不是疊加。cropTemplate 裁剪後 template.id 不變，
   // 重選環節再點同一張卡 = 同 id 替換：舊節點及其連線一次清掉，history 一格可整體 undo。
-  const applyPendingTemplate = useCallback((cropped: AgentTemplate) => {
+  const applyPendingTemplate = useCallback((cropped: AgentTemplateFull) => {
     const layout = templateToCanvasLayout(cropped);
     canvasHostRef.current?.replaceWorkflowNodes(cropped.id, layout.nodes, layout.connections);
     setAgentTemplateInjection({ text: cropped.initialPrompt, nonce: Date.now(), directive: cropped.directive });
     setAgentTemplateDismissed(true);
   }, []);
-  // 暴君裁定 09-01：套模板鋪進新會話。session 切換（含 newCanvasSession 清場）
-  // 落地後才鋪節點+注入——本 effect 註冊在 useCanvasChat 之後，清場先跑、鋪設後跑；
-  // 也晚於 AgentChatSurface 的 onSessionChange（子 effect 先行），dismissed 復位不會蓋掉。
-  useEffect(() => {
-    const pending = pendingTemplateRef.current;
-    if (!pending || !currentSessionId) return;
-    pendingTemplateRef.current = null;
-    applyPendingTemplate(pending);
-  }, [currentSessionId]);
-  const handleUseAgentTemplate = useCallback((template: AgentTemplate, selectedIndices: number[]) => {
-    const cropped = cropTemplate(template, selectedIndices);
-    setAgentTemplateDismissed(true);
-    const start = startNewSessionRef.current;
-    if (!start) {
-      // ref 未接上（極端時序）：退回舊行為直接鋪在當前會話，模板不能憑空消失。
-      applyPendingTemplate(cropped);
-      return;
-    }
-    pendingTemplateRef.current = cropped;
-    void Promise.resolve(start()).then((ok) => {
-      if (!ok) {
-        // 開新失敗（closed/網路）：沒有 session 變化 effect 會啞火，退回當前會話直接鋪。
-        if (pendingTemplateRef.current === cropped) {
-          pendingTemplateRef.current = null;
-          applyPendingTemplate(cropped);
-        }
+  const handleUseAgentTemplate = useCallback((card: AgentTemplate, selectedIndices: number[]) => {
+    // 2026-09-12 首屏減重：執行 payload 點卡才動態載入（chunk 進快取，之後零開銷）；
+    // 載入失敗（離線等）不收起畫廊，模板不會憑空消失，可重試。
+    void (async () => {
+      const { hydrateAgentTemplate, cropTemplate } = await import("@/lib/agent-templates-payload");
+      const template = hydrateAgentTemplate(card);
+      const cropped = cropTemplate(template, selectedIndices);
+      setAgentTemplateDismissed(true);
+      const start = startNewSessionRef.current;
+      if (!start) {
+        // ref 未接上（極端時序）：退回舊行為直接鋪在當前會話，模板不能憑空消失。
+        applyPendingTemplate(cropped);
         return;
       }
-      // 復用路徑（競態治本）：startNewSession 復用了在途管線剛建的新鮮會話，
-      // sessionId 沒有發生 transition → pending effect 永不觸發。就地結算：
-      // 若此刻 state 已指向該會話（effect 也會跑，pending 已清，冪等），直接鋪。
-      if (pendingTemplateRef.current === cropped && currentSessionIdRef.current) {
-        pendingTemplateRef.current = null;
-        applyPendingTemplate(cropped);
-      }
+      // 開新＝清空回空態是同步語義（僅在建號管線在飛時等一下），結算即鋪；
+      // ok=false（auth/closed 封鎖開新）同樣直接鋪在當前會話——模板不能憑空消失。
+      void Promise.resolve(start()).then(() => applyPendingTemplate(cropped));
+    })().catch((error) => {
+      console.error("[agent-templates] 執行 payload 載入失敗", error);
+      setAgentTemplateDismissed(false);
     });
   }, [applyPendingTemplate]);
 
@@ -292,6 +279,12 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
   // workflow_start 切換/節點數回退等中間態邏輯全部收斂刪除。
   const resultMode: "image" | "canvas" = displayMode === "agent" ? "canvas" : "image";
   const inCanvasWorkstation = displayMode === "agent";
+  // 首頁輸入欄高度自適應（2026-09-11）：結果欄 ImageDisplay 一直吃滿欄高，輸入卡
+  // 過去由內容高決定、下方留一片空白。≥xl（Tailwind xl = 1280px，與 globals.css 的
+  // .playground-column-fill 同一斷點）把卡片交給 flex 鏈吃滿欄高，跟隨結果欄；
+  // <xl 維持文檔流自然高（useIsNarrow 首幀回 false＝寬屏，與 CSS 的 mobile-first
+  // 方向一致，不會出現 CSS/JS 斷點錯位）。
+  const isBelowXl = useIsNarrow("(max-width: 1279.98px)");
   // ─── 畫布工作站：畫布模式鎖頁面捲動（面板記憶載入/持久化在 use-chat-panel）───
   useEffect(() => {
     if (!inCanvasWorkstation) return;
@@ -321,11 +314,11 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
   const triggerTransition = useCallback((next: PlaygroundMode) => {
     setAnimState("exit");
     setMode(next); // 按钮选中状态立即更新
-    setTimeout(() => {
-      setDisplayMode(next);
-      setAnimState("enter");
-      setTimeout(() => setAnimState("idle"), 320);
-    }, 260);
+    // 立即 mount：聊天面 chunk 渲染与建号管线即刻启动，翻面动画纯视觉层
+    // （animState enter/idle 保留驱动过渡，不再用 260ms setTimeout 挡 displayMode）。
+    setDisplayMode(next);
+    setAnimState("enter");
+    setTimeout(() => setAnimState("idle"), 320);
   }, []);
 
   const handleModeChange = useCallback((next: PlaygroundMode) => {
@@ -512,9 +505,14 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
       {/* 這一層不參與模式轉場：dust 動畫的範圍只有卡片中間那塊控制區
           （在 PromptInput 裡）。上一版讓整頁跟著翻面，等於為了開個聊天區
           把首頁整塊換掉——使用者要的是卡片換一面，不是換個網站。 */}
-      <div className="min-h-screen bg-transparent pb-28 pt-10 sm:pb-32">
-            <div className="page-shell">
-              <div className={inCanvasWorkstation ? "block" : "grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(380px,460px)]"}>
+      {/* F6 應用式滿屏（2026-09-10）：≥xl 兩欄態走「Navbar 自然高 → main flex-1 →
+          本層 flex-1 → page-shell flex-1 → grid flex-1 → 結果欄吃滿」的高度鏈，
+          視口高於內容時右欄結果卡撐滿到視口底，不再出現下方大面積空白。
+          <xl（含手機）維持文檔流：min-h-screen + 自然高滾動。
+          pb 收斂 28/32→16：底部只需為 fixed bottom-4 的浮動 toast 條留安全空間。 */}
+      <div className="min-h-screen bg-transparent pb-16 pt-10 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col">
+            <div className="page-shell xl:flex xl:min-h-0 xl:flex-1 xl:flex-col">
+              <div className={inCanvasWorkstation ? "block" : "grid gap-6 xl:min-h-0 xl:flex-1 xl:grid-rows-1 xl:grid-cols-[minmax(0,1fr)_minmax(380px,460px)]"}>
                 {/* min-w-0 is load-bearing: an auto-sized grid column takes its
                     minimum from the item's min-content, so a single nowrap
                     control inside the card would widen the column past the
@@ -524,7 +522,11 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
                     Workstation 仍在這裡派生並經 props 下發。面板內容（D-12 撤銷條
                     + PromptInput）經 children 原地注入——聊天卡 DOM 不搬家，SSE
                     會話與輸入狀態零丟失；chatHeaderExtra（收合按鈕）由面板兩態
-                    決定，經 render prop 回傳接線。 */}
+                    決定，經 render prop 回傳接線。
+                    F6（2026-09-10）：這層 wrapper 是左欄真正的 grid item——≥xl 撐滿
+                    row 高（stretch）且內容超出時自身滾動，不撐破視口；內容不足時
+                    內部卡保持自然高不拉伸。工作站態面板是 fixed 定位，不吃此層。 */}
+                <div className={cn("min-w-0 xl:min-h-0 xl:overflow-y-auto", !inCanvasWorkstation && "playground-column-fill")}>
                 <CanvasChatWorkstation
                   inCanvasWorkstation={inCanvasWorkstation}
                   isLoading={isLoading}
@@ -562,7 +564,8 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
                     onModeChange={handleModeChange}
                     animState={animState}
                     displayMode={displayMode}
-                    fillAvailableHeight={inCanvasWorkstation}
+                    /* 工作站面板態本來就吃滿；首頁 ≥xl 也吃滿（跟隨右側結果欄） */
+                    fillAvailableHeight={inCanvasWorkstation || !isBelowXl}
                     /* 收合面板按鈕併入聊天 header——面板頂欄已刪，觸發前後
                        同一個 header 同一套操作（2026-08-22 統一裁定）。按鈕本體
                        在 CanvasChatWorkstation（面板兩態是它的私有狀態），經
@@ -585,12 +588,15 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
                     </>
                   )}
                 </CanvasChatWorkstation>
+                </div>
 
                 {/* Result canvas only — the picker moved onto the left rail, so
                     this column no longer needs an identity header or a status
                     badge duplicating the one ImageDisplay already draws.
-                    畫布工作站態：整欄隱藏（畫布已是全場主角）。 */}
-                <div id="generation-result" className={cn("flex min-w-0 flex-col", inCanvasWorkstation && "hidden")}>
+                    畫布工作站態：整欄隱藏（畫布已是全場主角）。
+                    F6：xl:min-h-0 打通 grid row → #generation-result → ImageDisplay
+                    的 xl:h-full 高度鏈（ImageDisplay 自帶 xl:min-h-[30rem] 地板）。 */}
+                <div id="generation-result" className={cn("flex min-w-0 flex-col xl:min-h-0", inCanvasWorkstation && "hidden")}>
                   <ImageDisplay
                     modelId={resultView.modelId}
                     provider="image_tinchak"

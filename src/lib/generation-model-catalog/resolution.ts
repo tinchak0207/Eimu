@@ -42,6 +42,40 @@ export function aspectRatioFromImageSize(size?: string): AspectRatio {
   return `${width / divisor}:${height / divisor}` as AspectRatio;
 }
 
+/** "W:H" 比例字串的数值宽高比（W/H）；解析失败回 1。 */
+export function aspectRatioValue(ratio: AspectRatio): number {
+  const [width, height] = String(ratio).split(":").map(Number);
+  return width > 0 && height > 0 ? width / height : 1;
+}
+
+/**
+ * 目标宽高比（width/height）映射到支持清单中最接近的一档。
+ * 相对差 = |候选比值 − 目标比值| / 目标比值，取最小者；目标非法或清单为空回 "1:1"。
+ * 「跟随参考图」比例档的唯一映射真源：状态里落的永远是清单内的合法 AspectRatio。
+ */
+export function nearestAspectRatio(target: number, supported: readonly AspectRatio[]): AspectRatio {
+  if (!Number.isFinite(target) || target <= 0) return supported[0] ?? "1:1";
+  let best: AspectRatio = supported[0] ?? "1:1";
+  let bestDiff = Number.POSITIVE_INFINITY;
+  for (const ratio of supported) {
+    const diff = Math.abs(aspectRatioValue(ratio) - target) / target;
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      best = ratio;
+    }
+  }
+  return best;
+}
+
+/**
+ * 最近档与目标宽高比的相对差（0–1）。UI 据此诚实提示：差距 >15% 时在 chip
+ * title 说明「最接近的支持比例」，不静默吞掉比例失真。
+ */
+export function aspectRatioDeviation(target: number, ratio: AspectRatio): number {
+  if (!Number.isFinite(target) || target <= 0) return 0;
+  return Math.abs(aspectRatioValue(ratio) - target) / target;
+}
+
 /**
  * 把 "WxH" 尺寸歸類到 1k/2k/4k（改圖/放大等按解析度浮動定價用，前後端共用）：
  * 最大邊 ≤ 1536 → 1k（含 1024x1024、1536x1024、768x1365 等 1K 級輸出），
