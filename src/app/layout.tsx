@@ -110,7 +110,7 @@ export default function RootLayout({
 
   return (
     <html lang="zh-CN" className={`${geistSans.variable} ${geistMono.variable}`}>
-      <body className="font-sans antialiased text-[15px] text-foreground">
+      <body className="font-sans antialiased text-[15px] text-foreground flex min-h-dvh flex-col">
         <script
           dangerouslySetInnerHTML={{
             __html: `(function(){
@@ -147,7 +147,12 @@ setTimeout(function(){
         <AuthProvider>
           <PricingSync />
           <Navbar />
-          <main>{children}</main>
+          {/* 首頁應用式滿屏（2026-09-10 F6）：body 是 flex 縱向殼（Navbar 自然高
+              ＋ main 吃滿剩餘視口）。min-h-dvh 而非 h-dvh——視口過矮時 body 可
+              長高、整頁滾動。其他頁面是文檔流根節點，作為 flex item 只是全寬
+              自然高，行為等價 block。Toaster/PwaInstaller/Analytics 渲染 fixed
+              或 null，不參與 flex 佈局。 */}
+          <main className="flex min-h-0 flex-1 flex-col">{children}</main>
           <Toaster />
           <PwaInstaller />
         </AuthProvider>

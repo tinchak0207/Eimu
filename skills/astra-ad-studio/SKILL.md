@@ -13,6 +13,8 @@ description: "Create finished advertising campaigns directly inside Codex with G
 
 # Astra Ad Studio
 
+**Asset reuse first:** 接到任务先 `asset_search` 查 video-gen-prompts/seedance-prompts/nano-banana-prompts 包（免费），命中先复用原文再创作，查空才自编 prompt。
+
 Turn a product, URL, repository, screenshot, or short brief into finished advertising assets inside the current workspace. Use GPT-6 Astra as the creative and production lead, then use Codex's native image generation and local file tools to build reviewable outputs.
 
 This skill is designed for GPT-6 Astra but cannot switch the active model. If the current model is visible and is not Astra, mention that once and continue unless the user explicitly requires Astra.

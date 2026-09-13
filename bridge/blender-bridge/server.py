@@ -32,6 +32,11 @@ script inherits it).
          → 400 bad path (traversal / outside out/ / extension not whitelisted)
          → 404 not found
 
+    GET  /v1/artifact?path=<.asset-cache/<relative-path>>
+         → 200 binary body (asset whitelist: glb/gltf/fbx/bvh/json/blend/png/hdr/jpg)
+         → 400 bad path (traversal / outside .asset-cache/ / extension not whitelisted)
+         → 404 not found
+
          Artifact retrieval channel: files land on the bridge host's
          $BLENDER_WORK/out/, which the agent sandbox cannot see (bridge host
          and sandbox are different machines). The tool layer therefore
@@ -42,6 +47,18 @@ script inherits it).
          never .py/.log/.json sidecars beyond meta-style data. No auth by
          design (mirrors /v1/execute): the bridge must stay loopback/tunnel
          bound, never exposed publicly.
+
+         Asset byte channel (piece AN, eval REPORT S2 dead-line 2): GLB/BVH
+         pack bodies live in the bridge host's .asset-cache/ (multi-GB, never
+         on the VPS, never in git). path may instead be the pack item's
+         artifactPath verbatim (".asset-cache/<relpath>"); those paths route
+         to <repo-root>/.asset-cache/ under a separate whitelist (>=2 path
+         segments, first segment exactly ".asset-cache", no "..", no absolute
+         paths, no backslashes; extensions limited to
+         glb/gltf/fbx/bvh/json/blend/png/hdr/jpg). Same 512MB cap and
+         realpath-containment double check as the out/ branch. Registry/
+         api-url pack items whose artifactPath is a remote URL are not served
+         here — the agent fetches those URLs directly.
 
 Queue semantics: execute requests run through a FIFO queue in front of the
 blender supervisor (same semantics as the generation-worker concurrency
@@ -121,6 +138,26 @@ _ARTIFACT_CONTENT_TYPES = {
 _ARTIFACT_PATH_RE = re.compile(
     r"^[A-Za-z0-9][A-Za-z0-9._-]{0,120}(/[A-Za-z0-9][A-Za-z0-9._-]{0,120})?$"
 )
+
+# 死線②（片AN）：.asset-cache 資產字節通路白名單。repo 根 = server.py 上兩級
+# （bridge/blender-bridge/server.py → image-app/），.asset-cache 就在 repo 根下。
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# path 形狀：首段必為 ".asset-cache"，其後 1-7 段普通路徑段（cmu 4 段
+# .asset-cache/cmu-mocap/data/001/01_01.bvh 也在界內）；段內禁 ".."/空白/反斜線，
+# traversal 由 regex + realpath 收容雙檔。out/ 白名單禁首段以點開頭，兩分支零交疊。
+_ASSET_CACHE_PATH_RE = re.compile(
+    r"^\.asset-cache(/[A-Za-z0-9][A-Za-z0-9._-]{0,120}){1,7}$"
+)
+
+# 資產副檔名白名單（評測規格死線②指定）：glb/gltf/fbx/bvh/json/blend/png/hdr/jpg。
+# 在 out/ 白名單基礎上追加 .fbx/.bvh/.hdr（.jpg/.jpeg 同族）。
+_ASSET_CACHE_CONTENT_TYPES = dict(_ARTIFACT_CONTENT_TYPES)
+_ASSET_CACHE_CONTENT_TYPES.update({
+    ".fbx": "application/octet-stream",
+    ".bvh": "text/plain",
+    ".hdr": "image/vnd.radiance",
+})
 
 _GPU_PROBE = r'''
 import json
@@ -464,16 +501,52 @@ def handle_health():
         return 500, {"ok": False, "error": "health check failed: %s" % e}
 
 
-def handle_artifact(raw_path):
-    """GET /v1/artifact?path=<relpath under out/>：產物取回通路（片AJ）。
+def handle_asset_cache_artifact(rel):
+    """死線②（片AN）：.asset-cache 資產字節分支。
 
-    只讀 `$BLENDER_WORK/out/`：先 regex 白名單（單段或一段子目錄、禁 traversal），
-    再 realpath 收容檢查（防 symlink 逃逸），雙重保險。回 binary + 按副檔名的
-    Content-Type。回傳 (status, bytes|dict)——dict 走 _json，bytes 走 binary。
+    path 必為 ".asset-cache/<relpath>"（regex 白名單 + realpath 收容雙檔），
+    根 = REPO_ROOT/.asset-cache/。副檔名限資產白名單。回傳形狀同 handle_artifact。
+    """
+    if not _ASSET_CACHE_PATH_RE.match(rel) or ".." in rel:
+        return 400, None, "path 不合法（僅允許 .asset-cache/ 內相對路徑）"
+    ext = os.path.splitext(rel)[1].lower()
+    content_type = _ASSET_CACHE_CONTENT_TYPES.get(ext)
+    if not content_type:
+        return 400, None, "不支持的资产类型（%s）" % (ext or "无扩展名")
+
+    root = os.path.join(REPO_ROOT, ".asset-cache")
+    candidate = os.path.join(root, rel[len(".asset-cache/"):])
+    try:
+        real_root = os.path.realpath(root)
+        real_file = os.path.realpath(candidate)
+    except OSError:
+        return 404, None, "资产不存在"
+    if not real_file.startswith(real_root + os.sep) or not os.path.isfile(real_file):
+        return 404, None, "资产不存在（.asset-cache 内无此文件）"
+    try:
+        size = os.path.getsize(real_file)
+        if size > 512 * 1024 * 1024:
+            return 400, None, "资产过大（>512MB），拒绝经 HTTP 取回"
+        with open(real_file, "rb") as fh:
+            body = fh.read()
+    except OSError as e:
+        return 404, None, "资产读取失败: %s" % e
+    return 200, body, content_type
+
+
+def handle_artifact(raw_path):
+    """GET /v1/artifact?path=<relpath under out/> 或 .asset-cache/<relpath>。
+
+    兩分支（片 AJ out/ 產物 + 片 AN .asset-cache 資產字節）：各走各的 regex
+    白名單（禁 traversal）＋ realpath 收容檢查（防 symlink 逃逸），雙重保險。
+    回 binary + 按副檔名的 Content-Type。回傳 (status, bytes|dict)——
+    dict 走 _json，bytes 走 binary。
     """
     rel = (raw_path or "").strip()
     if not rel:
         return 400, None, "缺少 path 参数"
+    if rel.startswith(".asset-cache/"):
+        return handle_asset_cache_artifact(rel)
     if not _ARTIFACT_PATH_RE.match(rel) or ".." in rel:
         return 400, None, "path 不合法（僅允許 out/ 內單段相對路徑）"
     ext = os.path.splitext(rel)[1].lower()

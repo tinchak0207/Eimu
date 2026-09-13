@@ -13,6 +13,8 @@ description: Create high-detail, fact-checked English cinematic educational anim
 
 # Make Blender Education Video
 
+**先查库**：接到任务先 `asset_search` 查 blender-3d-assets（场景/模型）、cmu-mocap/mhr（人物动作）包（免费），命中先复用再搭景，查空才自造。
+
 Create an English cinematic explainer that teaches a correct mental model and meets an explicit visual-quality reference.
 
 ## Prerequisite: Blender must be installed

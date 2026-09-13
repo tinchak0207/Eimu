@@ -79,26 +79,10 @@
       "Hiragino Sans GB", "Microsoft YaHei", var(--font-geist-sans), system-ui, sans-serif;
     font-feature-settings: "kern" 1, "liga" 1, "calt" 1;
     min-height: 100vh;
-    /* Trans flag ambient gradient — #55CDFC blue / #F7A8B8 pink, very subtle */
-    background:
-      radial-gradient(ellipse 130% 90% at 15% 5%,
-        rgba(85, 205, 252, 0.12) 0%,
-        transparent 60%
-      ),
-      radial-gradient(ellipse 110% 75% at 85% 95%,
-        rgba(247, 168, 184, 0.12) 0%,
-        transparent 60%
-      ),
-      radial-gradient(ellipse 90% 65% at 80% 10%,
-        rgba(85, 205, 252, 0.08) 0%,
-        transparent 55%
-      ),
-      linear-gradient(160deg,
-        #f4fbff 0%,
-        #fdf4f7 50%,
-        #f4fbff 100%
-      );
-    background-attachment: fixed;
+    /* 底色只留純色：環境光漸層已移到 body::after 的固定定位實體層
+       （原因見該處註釋——body 的 background-attachment: fixed 會讓
+       玻璃卡的 backdrop-filter 取樣座標系位移，卡片圓角旁出現色差）。 */
+    background: #f5fbff;
     overflow-x: clip;
     max-width: 100%;
   }
@@ -658,8 +642,22 @@
   .nav-surface  { @apply lg-bar; }
 
 /* ── Force body background outside any layer — highest specificity ── */
-/* ── Force body background outside any layer — highest specificity ── */
+/* ── 環境光漸層（Trans flag ambient：#55CDFC 蓝 / #F7A8B8 粉，极淡）──
+   2026-09-11：由 body 的 background-attachment: fixed 改为「固定定位的实体层」。
+   原因：Chromium 在 backdrop-filter 的元素上取樣 fixed 背景時座標系會位移，
+   .lg-card（blur(40px) saturate(1.8)）四周因此出現與卡片外接矩形對齊的色差，
+   四個圓角旁最明顯（圓角外仍是外接矩形，色差露在最外面）。
+   改成 position: fixed 的实体层后，backdrop 取樣回到正常座標系、色差消失，
+   而「光晕不隨滾動移動」的視覺完全不變。 */
 body {
+  background: #f5fbff;
+}
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
   background:
     radial-gradient(ellipse 130% 90% at 15% 5%,
       rgba(85, 205, 252, 0.10) 0%,
@@ -677,8 +675,35 @@ body {
       #f5fbff 0%,
       #fef5f7 50%,
       #f5fbff 100%
-    ) !important;
-  background-attachment: fixed !important;
+    );
+}
+
+/* ── 首頁輸入欄（≥xl）：跟隨右側結果卡的高度鏈 ──
+   結果欄（ImageDisplay）一直吃滿欄高，輸入卡過去由內容高決定，下方留一片空白。
+   這裡讓輸入卡在 ≥xl 吃滿所在欄位高度；內容超出時收進卡片內部滾動
+   （<xl 不受影響，仍是文檔流自然高 + 整頁滾動）。 */
+@media (min-width: 1280px) {
+  .playground-column-fill {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+  }
+  /* 中間兩層（欄 wrapper > CanvasChatWorkstation 的 div > 卡片直屬父層）都要是
+     縱向 flex 鏈，卡片自身的 flex-1 才咬得住。第二條用 :has 精準指名「卡片的
+     直屬父層」，避免用 `div div` 之類會誤傷卡片內部版面的選擇器。 */
+  .playground-column-fill > div,
+  .playground-column-fill div:has(> section.lg-card) {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+  .playground-column-fill section.lg-card {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+  }
 }
 
 .generation-progress-glass {
@@ -1072,7 +1097,3 @@ body {
     animation: none;
   }
 }
-
-
-
-

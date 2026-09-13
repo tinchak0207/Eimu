@@ -90,3 +90,8 @@ node_modules/@swc/*
 /bridge/
 /skills/
 /deploy-staging/
+/.asset-cache/
+/eval-asset-packs/
+/eval-blender-director/
+/eval-anime-mv-0911/
+/eval-visual-replay/
