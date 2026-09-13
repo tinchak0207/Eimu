@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { PLANS } from "@/lib/plans";
+import { resolvePricingPlan } from "@/lib/plans";
 import {
   buildMapayCheckoutFields,
   createMapayOrderId,
@@ -13,7 +13,7 @@ export const runtime = "nodejs";
 
 export async function GET(req: NextRequest) {
   const planId = req.nextUrl.searchParams.get("plan") ?? "";
-  const plan = PLANS.find((item) => item.id === planId);
+  const plan = resolvePricingPlan(planId);
 
   if (!plan) {
     return NextResponse.json({ success: false, message: "套餐不存在" }, { status: 400 });

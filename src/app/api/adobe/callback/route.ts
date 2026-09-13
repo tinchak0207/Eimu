@@ -6,6 +6,10 @@ function redirectUri() {
   return process.env.ADOBE_OAUTH_REDIRECT_URI ?? `${getSiteUrlFromEnv()}/api/adobe/callback`;
 }
 
+// 外呼硬超時：IMS token 交換與 blob 刪除 hang 死時會一路佔滿函數時限；
+// 兩類請求正常應答遠低於 5s，超時走既有 catch → 502/靜默跳過。
+const ADOBE_CALLBACK_TIMEOUT_MS = 5_000;
+
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const code = searchParams.get("code");
@@ -44,6 +48,7 @@ export async function GET(req: NextRequest) {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body,
+      signal: AbortSignal.timeout(ADOBE_CALLBACK_TIMEOUT_MS),
     });
 
     const data = await res.json();
@@ -91,7 +96,7 @@ export async function GET(req: NextRequest) {
     const existing = await list({ prefix: "adobe_oauth_" });
     await Promise.all(
       existing.blobs.map((b) =>
-        fetch(b.url, { method: "DELETE" }).catch(() => {}),
+        fetch(b.url, { method: "DELETE", signal: AbortSignal.timeout(ADOBE_CALLBACK_TIMEOUT_MS) }).catch(() => {}),
       ),
     );
 

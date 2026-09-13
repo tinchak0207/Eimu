@@ -51,12 +51,13 @@ export async function GET(req: NextRequest) {
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,
     cache: "no-store",
+    signal: AbortSignal.timeout(5000),
   });
   const notifyText = await notify.text();
 
   const returnUrl = new URL("/api/payments/mapay/return", config.siteUrl);
   for (const [key, value] of body.entries()) returnUrl.searchParams.set(key, value);
-  const returned = await fetch(returnUrl, { redirect: "manual", cache: "no-store" });
+  const returned = await fetch(returnUrl, { redirect: "manual", cache: "no-store", signal: AbortSignal.timeout(5000) });
   const location = returned.headers.get("location") ?? "";
   const cdk = location ? (new URL(location).searchParams.get("cdk") ?? "") : "";
 

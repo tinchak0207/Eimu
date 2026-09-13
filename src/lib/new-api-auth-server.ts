@@ -56,6 +56,7 @@ async function fetchSelf(baseUrl: string, cookieHeader: string, userId: number) 
       "New-Api-User": String(userId),
     },
     cache: "no-store",
+    signal: AbortSignal.timeout(8000),
   });
 
   const data = await parseJson<SelfResult>(response);
@@ -69,6 +70,7 @@ async function fetchAccessToken(baseUrl: string, cookieHeader: string, userId: n
       "New-Api-User": String(userId),
     },
     cache: "no-store",
+    signal: AbortSignal.timeout(8000),
   });
 
   const data = await parseJson<TokenResult>(response);
@@ -81,6 +83,7 @@ export async function loginViaNewApi(baseUrl: string, username: string, password
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username, password }),
     cache: "no-store",
+    signal: AbortSignal.timeout(8000),
   });
 
   const loginData = await parseJson<LoginResult>(loginResponse);

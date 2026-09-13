@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { PLANS } from "@/lib/plans";
+import { resolvePricingPlan } from "@/lib/plans";
 import {
   getMapayConfig,
   isMapayPaymentSuccessful,
@@ -42,7 +42,9 @@ async function handleNotify(req: NextRequest) {
       return response("success");
     }
 
-    const plan = PLANS.find((item) => item.id === params.param);
+    // 自定义档（custom:<coins>）与静态档共用一个解析器：价格一律服务端重算，
+    // 回调里的 money 只用于比对，客户端传价不参与任何计价。
+    const plan = resolvePricingPlan(params.param);
     if (!plan || !mapayMoneyMatches(params.money, plan.price)) {
       return response("fail", 400);
     }

@@ -12,6 +12,10 @@ import { deliverHandoff } from "@/lib/pwa-handoff";
 
 export const preferredRegion = "sfo1";
 
+// 外呼硬超時：本路由在回調請求內串行打 GitHub 與控面，任何一跳 hang 死都會
+// 佔滿函數時限；GitHub/控面正常應答遠低於 5s，超時即快速失敗走既有 catch。
+const GITHUB_UPSTREAM_TIMEOUT_MS = 5_000;
+
 function getBaseUrl(req: NextRequest) {
   return process.env.NEXT_PUBLIC_APP_URL
     ?? `${req.nextUrl.protocol}//${req.nextUrl.host}`;
@@ -31,6 +35,7 @@ async function exchangeGithubCode(input: { code: string; redirectUri: string }) 
       redirect_uri: input.redirectUri,
     }),
     cache: "no-store",
+    signal: AbortSignal.timeout(GITHUB_UPSTREAM_TIMEOUT_MS),
   });
   return response.json() as Promise<{ access_token?: string; error?: string; error_description?: string }>;
 }
@@ -43,6 +48,7 @@ async function fetchGithubProfile(accessToken: string) {
       "User-Agent": "eimu.dev",
     },
     cache: "no-store",
+    signal: AbortSignal.timeout(GITHUB_UPSTREAM_TIMEOUT_MS),
   });
   if (!response.ok) throw new Error("获取 GitHub 用户信息失败");
   return response.json() as Promise<GitHubProfile>;
@@ -61,6 +67,7 @@ async function registerGithubUser(profile: GitHubProfile, password: string) {
       email,
     }),
     cache: "no-store",
+    signal: AbortSignal.timeout(GITHUB_UPSTREAM_TIMEOUT_MS),
   });
 
   const data = await response.json().catch(() => null) as { success?: boolean; message?: string } | null;
