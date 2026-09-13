@@ -2,5 +2,13 @@
   "framework": "nextjs",
   "buildCommand": "NODE_OPTIONS='--max-old-space-size=8192' npm run build",
   "installCommand": "npm install",
-  "outputDirectory": ".next"
+  "outputDirectory": ".next",
+  "headers": [
+    {
+      "source": "/docs/eimu-competition-report.pdf",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=3600" }
+      ]
+    }
+  ]
 }

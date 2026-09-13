@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { BookOpen, Bot, Plug, ArrowUpRight } from "lucide-react";
+import { BookOpen, Bot, FileText, Plug, ArrowUpRight } from "lucide-react";
 
 const DOCS_TITLE = "文档中心 | Eimu";
 const DOCS_DESCRIPTION =
@@ -41,6 +41,13 @@ const SECTIONS = [
     label: "DeepSeek Harness",
     description: "零基础教程：下载、安装、使用 DeepSeek 官方开源智能体框架，照着做 10 分钟跑起来。",
     tags: ["Node.js", "npx", "AI Agent", "教程"],
+  },
+  {
+    href: "/docs/report",
+    icon: FileText,
+    label: "Eimu 作品報告",
+    description: "多智能体高审美影音设计平台完整作品报告：产品定位、总体架构、核心技术、创新点与工程验证，在线预览或下载 PDF。",
+    tags: ["作品报告", "多智能体", "PDF"],
   },
 ];
 
