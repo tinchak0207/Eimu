@@ -143,3 +143,9 @@ redteam-*
 .asset-cache/
 
 # 評測證據大檔留本地（22MB PNG/mp4），只入 REPORT.md
+
+# 憑證與 VPS 同步工作目錄（含 key，嚴禁入庫）
+/.flowmusic-creds.json
+/staging/
+/deploy-staging/
+*.bak-*

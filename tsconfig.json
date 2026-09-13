@@ -42,6 +42,7 @@
     "plugins",
     "eval-*", "src/vendor-bridges",
     "deploy-staging",
+    "staging",
     "**/*.test.ts",
     "**/*.test.tsx"
   ]
