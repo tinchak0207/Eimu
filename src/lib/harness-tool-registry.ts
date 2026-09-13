@@ -19,6 +19,7 @@
  */
 
 import { BLENDER_HARNESS_TOOL_IDS } from "./blender-tools"
+import { MUSIC_HARNESS_TOOL_IDS } from "./music-tools"
 
 export const HARNESS_TOOL_ID_LIST = [
   "asset_activate",
@@ -131,6 +132,12 @@ export const HARNESS_TOOL_ID_LIST = [
   "garment_dna_lock",
   "garment_extract",
   "model_identity_lock",
+  // ↓ 2026-09-08 MOE Wave1 片B：music_gen 工具（音樂 Expert Lyria 通路）。定義+handler 真源 =
+  //   src/lib/music-tools.ts（Lyria client = src/lib/music-lyria.ts，Gemini API
+  //   v1beta/interactions，env GEMINI_API_KEY；音頻落盤復用 gateway 會話上傳存儲）。
+  //   誠實標注：本檔登記=定義已定形；VPS .opencode/tools/ 落位與活體註冊確認待接線片補
+  //   （staging 稿已由 tools/export-music-tools-staging.ts 機械導出至 staging/music-tools/）。
+  ...MUSIC_HARNESS_TOOL_IDS,
   "outlier_audit_regenerate",
   "style_dna_extract",
   "upscale_audit",

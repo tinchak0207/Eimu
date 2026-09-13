@@ -45,7 +45,7 @@ import {
   type AgentTranscriptItem,
 } from "../src/lib/agent-chat-types";
 import { agentChatReducer, appendUserTurn } from "../src/lib/agent-chat-reducer";
-import { AGENT_TEMPLATES } from "../src/lib/agent-templates";
+import { AGENT_TEMPLATES_FULL } from "../src/lib/agent-templates-payload";
 import { templateToCanvasLayout } from "../src/components/canvas-workstation/agent-template-canvas";
 
 // ─────────────────────────── 常數與參數
@@ -71,7 +71,7 @@ interface CliOptions {
 
 /** 生成某模板的畫布快照（與生產前端 applyTemplateToCanvas + postCanvasSnapshot 同源）。 */
 function snapshotForTemplate(templateId: string): unknown {
-  const tpl = AGENT_TEMPLATES.find((t) => t.id === templateId);
+  const tpl = AGENT_TEMPLATES_FULL.find((t) => t.id === templateId);
   if (!tpl) throw new Error(`未知模板 id: ${templateId}`);
   const { nodes, connections } = templateToCanvasLayout(tpl);
   return {
@@ -125,7 +125,7 @@ function parseArgs(argv: string[]): CliOptions {
   if (rest.length > 0) opts.message = rest.join(" ");
   opts.key = readBizKey(opts.key);
   if (opts.templateId) {
-    const tpl = AGENT_TEMPLATES.find((t) => t.id === opts.templateId);
+    const tpl = AGENT_TEMPLATES_FULL.find((t) => t.id === opts.templateId);
     if (!tpl) {
       console.error(`未知模板 id: ${opts.templateId}`);
       process.exit(2);
