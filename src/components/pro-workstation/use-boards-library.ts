@@ -18,6 +18,7 @@ import {
   toggleShotStar,
 } from "@/lib/boards-store";
 import { exportShotsZip } from "@/lib/export-zip";
+import { measureNaturalSize } from "@/lib/reference-image-size";
 import {
   type NoticeLevel,
   type WorkstationPreset,
@@ -125,15 +126,18 @@ export function useBoardsLibrary(options: {
       const blob = await getShotBlob(shot.id);
       if (!blob) throw new Error("missing shot blob");
       const file = new File([blob], shot.name, { type: blob.type || "image/png" });
+      const previewUrl = URL.createObjectURL(file);
+      const naturalSize = await measureNaturalSize(previewUrl);
       onReferenceImagesChange([
         ...referenceImages,
         {
           id: referenceId,
           name: shot.name,
           file,
-          previewUrl: URL.createObjectURL(file),
+          previewUrl,
           size: file.size,
           role: activePreset.defaultRole,
+          ...(naturalSize ?? {}),
         },
       ]);
       setReferenceImportMessage(`已从文件夹导入「${shot.name}」。`);

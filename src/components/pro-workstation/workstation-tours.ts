@@ -6,6 +6,7 @@ import {
   isMobileTourViewport,
   refreshTourAfterLayout,
   scrollAnchorIntoView,
+  skipStepOnMissingAnchor,
   tourSide,
 } from "@/lib/tour-mobile";
 import { bindDesktopTourKeyboard, DESKTOP_TOUR_KEY_HINT } from "@/lib/tour-keyboard";
@@ -82,7 +83,15 @@ export function createWorkstationTours({
       stageRadius: 16,
       // 手机端锚点大多在 .pro-studio-body 这个内部滚动容器里，必须滚进视口
       smoothScroll: true,
+      // Esc 必须能退出：任何盖住界面的浮层都要留键盘出路（同 LoRA 教学的裁定）。
+      allowClose: true,
       popoverClass: "pro-tour-popover",
+      // F1-2 零锚点防退化门禁：高亮后锚点 rect 仍为零（步骤声明的工作面没渲染
+      // 出来）时，driver.js 会退化成「stage 罩满全屏 + 弹层贴底无箭头」——
+      // 这里直接跳到下一步（末步整场收尾），绝不留在无弹层的灰屏上。
+      onHighlighted: (element, _step, opts) => {
+        skipStepOnMissingAnchor(element, opts);
+      },
       onDestroyed: () => {
         unbindKeyboard();
         unbindViewport();
@@ -302,6 +311,10 @@ export function createWorkstationTours({
       allowKeyboardControl: true,
       popoverClass: "pro-tour-popover",
       showButtons: ["next", "previous"],
+      // F1-2 零锚点防退化门禁（同上面 startTour 的说明）。
+      onHighlighted: (element, _step, opts) => {
+        skipStepOnMissingAnchor(element, opts);
+      },
       onNextClick: (element, step, opts) => {
         const index = opts.driver.getActiveIndex();
         if (index === LORA_TOUR_STEP_COUNT - 2 && !document.querySelector("#pro-tour-lora-grid")) {

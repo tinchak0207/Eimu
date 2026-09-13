@@ -8,13 +8,15 @@
 // 8 颗同帧 mount 会抢跑，模块级 atcTourStarted 单飞闸保证整页只起一场；
 // 送出钮不可用态点击时 forceStartAtcTour() 无视「看过」标记再播一场。
 
-import type { Driver } from "driver.js";
+import type { Driver, DriverHook } from "driver.js";
 import { bindDesktopTourKeyboard, DESKTOP_TOUR_KEY_HINT } from "@/lib/tour-keyboard";
 import {
+  anchorHasRect,
   bindTourViewportSync,
   firstVisibleAnchor,
   isMobileTourViewport,
   prefersTouchTour,
+  skipStepOnMissingAnchor,
   tourSide,
 } from "@/lib/tour-mobile";
 import { runCursorDemo } from "@/components/pro-workstation/workstation-cursor-demo";
@@ -88,6 +90,15 @@ function frontSelector(suffix: string): string {
   return `.agent-template-carousel .case-slab[data-front="true"]${suffix}`;
 }
 
+/* ── F1-1：AI 助理面板的 DOM 判定 ──
+   面板真身是 AgentChatPanel 渲染的 <section class="agent-panel">，而
+   AgentChatSurface 只在 PromptInput 的 displayMode === "agent" 分支下条件
+   渲染——面板没打开时 DOM 里根本没有这个节点。所以「存在且有可见 rect」
+   即「面板打开」，无需读 React state。 */
+function agentPanelVisible(): boolean {
+  return anchorHasRect(document.querySelector(".agent-panel"));
+}
+
 /**
  * 圆环首次实际可见时播一次三步教学；看过（localStorage）永远不再打扰。
  *
@@ -108,6 +119,9 @@ export function forceStartAtcTour(): void {
 async function startAtcTour(force: boolean): Promise<void> {
   if (typeof window === "undefined" || atcTourStarted) return;
   if (!force && window.localStorage.getItem(ATC_TOUR_STORAGE_KEY)) return;
+  // F1-1：AI 助理已在用（面板已打开）→ 教学让位：不播、不写「看过」标记，
+  // 下次挂载还能再教。此时播教学只会拿遮罩罩住正在进行的对话。
+  if (!force && agentPanelVisible()) return;
   // R9-4：輪播可能尚未 paint（.atc-step-selector 是 mount 後才掛的），
   // 立即 return 會讓「圓環首次可見」的教學整場缺席。先短輪詢等它出現
   // （最多 1s），等不到再放掉——不設單飛閘，讓下次掛載再試。
@@ -142,6 +156,7 @@ async function startAtcTour(force: boolean): Promise<void> {
     const showKeyboardHint = !isMobile;
     let unbindKeyboard = () => {};
     let unbindViewport = () => {};
+    let stopYieldWatch = () => {};
     let tour: Driver | null = null;
     const finish = () => tour?.destroy();
 
@@ -160,19 +175,17 @@ async function startAtcTour(force: boolean): Promise<void> {
       off: () => document.querySelector(".agent-template-carousel")?.classList.remove("atc-tour-locking"),
     };
 
-    const dragDemo = !isMobile && !prefersTouchTour()
+    const dragDemo: { onHighlightStarted?: DriverHook } = !isMobile && !prefersTouchTour()
       ? {
           onHighlightStarted: () => {
-            tourLock.on();
+            // F1-3：tourLock 已在 drive() 前全程挂上，这里不再单独开关——
+            // 锁的生命周期归引导本体（onDestroyed 统一解锁）。
             // 一次性快照三个站的 DOM 引用——正面卡的元素此刻是稳定的。
             const snap = [0, 1, 2].map((index) =>
               document.querySelector(frontSelector(` .atc-step-selector [data-step-index="${index}"]`)),
             );
             // 站0 缺席（数据异常）或站0/站1 都不在就没法演示拖过：不硬演，直接收尾。
-            if (!snap[0] || !snap[1]) {
-              tourLock.off();
-              return;
-            }
+            if (!snap[0] || !snap[1]) return;
             // down 落点校验锚：站0 快照时的中心坐标。
             const rect0 = snap[0]!.getBoundingClientRect();
             const anchor0 = { x: rect0.left + rect0.width / 2, y: rect0.top + rect0.height / 2 };
@@ -207,13 +220,24 @@ async function startAtcTour(force: boolean): Promise<void> {
                 { kind: "pause", ms: 240 },
                 { kind: "leave" },
               ],
-              () => tourLock.off(),
+              undefined,
               { abortOnMissingTarget: true },
             );
           },
         }
       : {};
 
+    /* F1-2：零锚点防退化门禁。每步 onHighlightStarted 先验锚点：rect 为零
+       （轮播转卡空档 / 布局未稳定）时 driver.js 会退化成「stage 罩满全屏 +
+       弹层失效」= 整页灰且没有弹层——这里直接跳到下一步（末步则整场收尾），
+       保证任何时刻不会卡在无弹层的灰屏上。与第②步的 dragDemo hook 串联：
+       门禁过了才轮到演示。 */
+    const anchorGate = {
+      onHighlightStarted: (element: Element | undefined, step: Parameters<DriverHook>[1], opts: Parameters<DriverHook>[2]) => {
+        if (skipStepOnMissingAnchor(element, opts)) return;
+        if (opts.state.activeIndex === 1) dragDemo.onHighlightStarted?.(element, step, opts);
+      },
+    };
     tour = driver({
       showProgress: true,
       progressText: "{{current}} / {{total}}",
@@ -233,6 +257,7 @@ async function startAtcTour(force: boolean): Promise<void> {
       onDestroyed: () => {
         unbindKeyboard();
         unbindViewport();
+        stopYieldWatch(); // 让位观察器随引导一起退场，不留泄漏
         tourLock.off(); // 教学销毁（走完/跳过/Esc）必解锁轮播
         window.localStorage.setItem(ATC_TOUR_STORAGE_KEY, "1");
         atcTourStarted = false;
@@ -270,31 +295,36 @@ async function startAtcTour(force: boolean): Promise<void> {
             popover.footerButtons.appendChild(skip);
           },
         },
-        ...(index === 1 ? dragDemo : {}),
+        /* F1-2 门禁挂在每一步（含第②步——门禁过了才由 anchorGate 串联
+           dragDemo 的演示），dragDemo 不再直接挂步骤上以免覆盖门禁。 */
+        ...anchorGate,
       })),
     });
 
     const activeTour = tour;
     unbindKeyboard = bindDesktopTourKeyboard(activeTour);
     unbindViewport = bindTourViewportSync(activeTour);
+    // F1-3：引导全程冻结轮播转卡手势（原只在第②步演示期间挂）——步骤①→②
+    // 的空档里滚轮/触控板仍能转卡，data-front 换卡会让步骤②锚点漂移。
+    // 演示逻辑本身（快照/冻结/落点校验）一行不动，onDestroyed 里的
+    // tourLock.off() 统一解锁照旧。
+    tourLock.on();
     activeTour.drive();
 
-    /* R10-2：任务开始即让位。新手引导只该出现在「还没开始用」时——用户一旦
-       在 agent 面板发出第一条消息（transcript 里出现工具卡/message），tour
-       就该干净退场，不再罩住正在进行的任务。MutationObserver 观察 .agent-panel
-       的 transcript 区域，出现子节点即 destroy（走 onDestroyed 统一收尾）。 */
-    const agentPanel = document.querySelector(".agent-panel");
-    if (agentPanel) {
-      const transcript = agentPanel.querySelector("[class*='transcript'], [class*='items'], [class*='list']");
-      const root = transcript ?? agentPanel;
-      const yieldTour = new MutationObserver(() => {
-        if (root.children.length > 0) {
-          yieldTour.disconnect();
-          finish();
-        }
-      });
-      yieldTour.observe(root, { childList: true, subtree: true });
-    }
+    /* F1-1 / R10-2 合併：AI 助理面板一打开就让位。旧版只观察已存在的
+       .agent-panel 的 transcript 子节点——但面板没打开时 DOM 里根本没有
+       .agent-panel（AgentChatSurface 是 displayMode==="agent" 条件渲染），
+       引导遮罩又拦住一切点击 → 面板永远打不开 → transcript 永远空 → 死锁。
+       现在观察整个 body：.agent-panel 出现（挂载）即可见即 destroy（走
+       onDestroyed 统一收尾），不必等到 transcript 里长出消息。 */
+    const yieldTour = new MutationObserver(() => {
+      if (agentPanelVisible()) {
+        yieldTour.disconnect();
+        finish();
+      }
+    });
+    yieldTour.observe(document.body, { childList: true, subtree: true });
+    stopYieldWatch = () => yieldTour.disconnect();
   } catch {
     // 动态加载失败属环境问题：放掉单飞闸，不影响任何主流程。
     atcTourStarted = false;

@@ -1,4 +1,4 @@
-import type { Driver } from "driver.js";
+import type { Config, Driver, State } from "driver.js";
 
 /**
  * 引导的移动端适配工具。
@@ -60,6 +60,41 @@ export function firstVisibleAnchor(...selectors: string[]): () => Element {
     }
     return document.body;
   };
+}
+
+/* ── F1-2 零锚点防退化门禁 ──────────────────────────────────────────────
+   锚点 rect 为零时 driver.js 会退化成「stage 罩满全屏 + 弹层定位失效」，
+   用户看到的就是「整页变灰、没有弹层、按钮点不到」。三个引导实例
+   （atc 教学 / 工作站两场 / ModelPicker LoRA）每步都要过这道门。 */
+
+/** 锚点是否真的可用：存在 + 宽高 > 0 + 与视口有交集。 */
+export function anchorHasRect(element: Element | null | undefined): element is Element {
+  if (!element) return false;
+  if (typeof window === "undefined") return false;
+  const rect = element.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return false;
+  return rect.bottom > 0 && rect.right > 0 && rect.top < window.innerHeight && rect.left < window.innerWidth;
+}
+
+type AnchorGateOpts = {
+  config: Pick<Config, "steps">;
+  state: Pick<State, "activeIndex">;
+  driver: Driver;
+};
+
+/** 锚点失效时跳到下一步（末步则整场收尾），绝不留在「全屏灰且无弹层」状态。 */
+function skipOrFinishFrom(tour: Driver, index: number): void {
+  const total = tour.getConfig().steps?.length ?? 0;
+  if (index >= total - 1) tour.destroy();
+  else tour.moveTo(index + 1);
+}
+
+/** onHighlightStarted 即时门禁：锚点此刻没有真实 rect → 跳步/收场。
+ *  适用于锚点在 highlight 时就已解析定型的引导（atc 教学 / ModelPicker）。 */
+export function skipStepOnMissingAnchor(element: Element | undefined, opts: AnchorGateOpts): boolean {
+  if (anchorHasRect(element)) return false;
+  skipOrFinishFrom(opts.driver, opts.state.activeIndex ?? 0);
+  return true;
 }
 
 /**

@@ -32,6 +32,7 @@ import {
   type WorkstationTaskStage,
 } from "@/lib/workstation-mobile-stage";
 import { embedWorkflowIntoPng } from "@/lib/workflow-png";
+import { measureNaturalSize } from "@/lib/reference-image-size";
 import {
   WORKSTATION_COMMANDS,
   isWorkstationEditableTarget,
@@ -1030,7 +1031,7 @@ export function InvokeInspiredWorkstation({
     retryTask(task);
   });
 
-  const appendReferenceImage = (
+  const appendReferenceImage = async (
     file: File,
     role: ReferenceImageRole,
     strength?: number,
@@ -1038,18 +1039,22 @@ export function InvokeInspiredWorkstation({
     replaceOldest = false,
   ) => {
     const base = replaceOldest ? referenceImages.slice(1) : referenceImages;
+    const previewUrl = URL.createObjectURL(file);
+    // 量完自然尺寸再入列（blob URL 解碼是毫秒級）；失敗不阻塞入列。
+    const naturalSize = await measureNaturalSize(previewUrl);
     onReferenceImagesChange([
       ...base,
       {
         id: `result-${Date.now()}`,
         name: file.name,
         file,
-        previewUrl: URL.createObjectURL(file),
+        previewUrl,
         size: file.size,
         role,
         ...(strength !== undefined ? { strength } : {}),
         ...(source?.resultId ? { sourceResultId: source.resultId } : {}),
         ...(source?.taskId ? { sourceGenerationId: source.taskId } : {}),
+        ...(naturalSize ?? {}),
       },
     ]);
   };
@@ -1212,7 +1217,7 @@ export function InvokeInspiredWorkstation({
       const blob = await resultToBlob(image);
       const name = `成片-${(image.slotId ?? `${images.indexOf(image) + 1}`).slice(-6)}.png`;
       const file = new File([blob], name, { type: blob.type || "image/png" });
-      appendReferenceImage(file, activePreset.defaultRole, undefined, {
+      await appendReferenceImage(file, activePreset.defaultRole, undefined, {
         resultId: image.resultId,
         taskId: image.taskId,
       }, replaceOldest);
