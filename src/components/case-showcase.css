@@ -23,6 +23,10 @@
   /* 略高于中线的消失点：视线像微微仰看这排玻璃，和参考图一致。 */
   perspective-origin: 50% 42%;
   touch-action: pan-y; /* 横向手势归我，纵向滚动永远归用户 */
+  /* 模板廊（ATC）的 wheel 监听为 passive、不 preventDefault，横扫时页面横向
+     漂移／滑动导航（back/forward）由 overscroll-behavior-x 在合成器层兜底。
+     充值环（PPC）wheel 走 preventDefault 老路，此规则对它是无害冗余。 */
+  overscroll-behavior-x: contain;
   cursor: grab;
   outline: none;
 
