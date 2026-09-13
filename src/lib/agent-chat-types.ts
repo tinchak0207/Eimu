@@ -42,6 +42,7 @@ export const AGENT_EVENT_NAMES = [
   "image.done",
   "image.failed",
   "video.done",
+  "audio.done",
   "director.done",
   "turn.done",
   "turn.status",
@@ -136,6 +137,18 @@ export interface AgentVideoDone {
   cost_coins?: number;
   task_id?: string;
   media_kind?: "video" | "film";
+}
+
+/**
+ * gateway —— 出音頻完成（音樂生成 / 語音等音頻產物）。與 video.done 同構，
+ * 網關按 url 在 session 內去重。media_kind："music"=成曲（音樂產物）、
+ * "audio"=單段音頻；缺當 "audio"。
+ */
+export interface AgentAudioDone {
+  url: string;
+  cost_coins?: number;
+  task_id?: string;
+  media_kind?: "audio" | "music";
 }
 
 /**
@@ -309,10 +322,17 @@ export interface AgentSubagentStarted {
   label: string;
 }
 
-/** 子代理输出增量。只保留末行渲染，原文不囤在前端。 */
+/**
+ * 子代理输出增量。只保留末行渲染，原文不囤在前端。
+ *
+ * kind（2026-09-11 跨片契约，网关侧同批上线）：缺省 = 正文（交付物）；
+ * "reasoning" = 思维链（只是「子代理在工作」的活动信号）。reasoning 只喂子任务卡
+ * 的**活动流**，绝不并入 text —— text 会被产出卡当全文带走，混入思考就是谎报交付物。
+ */
 export interface AgentSubagentDelta {
   id: string;
   text: string;
+  kind?: "reasoning";
 }
 
 /** 子代理收尾。summary ≤600 字，只在卡内截断显示。 */
@@ -339,6 +359,7 @@ export type AgentSseEvent = WithEventId &
     | { name: "image.done"; data: AgentImageDone }
     | { name: "image.failed"; data: AgentImageFailed }
     | { name: "video.done"; data: AgentVideoDone }
+    | { name: "audio.done"; data: AgentAudioDone }
     | { name: "director.done"; data: AgentDirectorDone }
     | { name: "turn.done"; data: AgentTurnDone }
     | { name: "turn.status"; data: AgentTurnStatus }
@@ -511,6 +532,12 @@ export function parseAgentSseEvent(name: string, rawData: string): AgentSseEvent
       const url = str(d.url);
       if (!url) return null;
       const mk = d.media_kind === "film" ? "film" : d.media_kind === "video" ? "video" : undefined;
+      return { name, event_id: eventId, data: { url, cost_coins: num(d.cost_coins), task_id: str(d.task_id), ...(mk ? { media_kind: mk } : {}) } };
+    }
+    case "audio.done": {
+      const url = str(d.url);
+      if (!url) return null;
+      const mk = d.media_kind === "music" ? "music" : d.media_kind === "audio" ? "audio" : undefined;
       return { name, event_id: eventId, data: { url, cost_coins: num(d.cost_coins), task_id: str(d.task_id), ...(mk ? { media_kind: mk } : {}) } };
     }
     case "image.failed": {
@@ -707,7 +734,10 @@ export function parseAgentSseEvent(name: string, rawData: string): AgentSseEvent
     case "subagent.delta": {
       const id = str(d.id);
       if (!id) return null;
-      return { name, event_id: eventId, data: { id, text: str(d.text) ?? "" } };
+      // kind 白名單單值：只認 "reasoning"（思維鏈）；其餘（含缺省）一律當正文。
+      // 認不得的值折成 undefined 而不是整幀丟棄——寧可少一個活動字，不少一段交付物。
+      const kind = d.kind === "reasoning" ? ("reasoning" as const) : undefined;
+      return { name, event_id: eventId, data: { id, text: str(d.text) ?? "", ...(kind ? { kind } : {}) } };
     }
     case "subagent.done": {
       const id = str(d.id);
@@ -772,9 +802,11 @@ export type AgentTranscriptItem =
   | AgentToolCallItem
   | AgentImageItem
   | AgentVideoItem
+  | AgentAudioItem
   | AgentDirectorItem
   | AgentNoticeItem
-  | AgentSubagentItem;
+  | AgentSubagentItem
+  | AgentSubagentReportItem;
 
 interface TranscriptItemBase {
   /** React key。同一条目的多次更新必须沿用同一个 id。 */
@@ -816,6 +848,8 @@ export interface AgentAssistantTextItem extends TranscriptItemBase {
 export interface AgentToolCallItem extends TranscriptItemBase {
   kind: "tool";
   tool: string;
+  /** 派遣子代理时，綁定的子代理 id（subagent.started 回填）：狀態與子代理卡同源。 */
+  subagentId?: string;
   argsSummary?: string;
   status: "running" | "ok" | "failed";
   costCoins?: number;
@@ -843,6 +877,16 @@ export interface AgentVideoItem extends TranscriptItemBase {
   taskId?: string;
   /** "film"=成片（剪接匯出）、"video"=單段影片生成。缺當 "video" 展示。 */
   mediaKind?: "video" | "film";
+}
+
+/** 出音頻結果（音樂 / 語音）。卡上掛「存圖庫／下載」。 */
+export interface AgentAudioItem extends TranscriptItemBase {
+  kind: "audio";
+  url: string;
+  costCoins?: number;
+  taskId?: string;
+  /** "music"=成曲（音樂產物）、"audio"=單段音頻。缺當 "audio" 展示。 */
+  mediaKind?: "audio" | "music";
 }
 
 /**
@@ -880,10 +924,34 @@ export interface AgentSubagentItem extends TranscriptItemBase {
   /** 网关侧子代理 id（三帧用它关联；与条目本身的 id 分名，避免撞 React key）。 */
   subagentId: string;
   label: string;
-  /** 流式最后一行：delta 并入后只留非空末行（防长输出撑爆条目，硬要求）。 */
+  /** 流式最后一行：delta 并入后只留非空末行（置顶跑马灯用，F4 的预览层）。 */
   lastLine: string;
+  /**
+   * 活动流（2026-09-11 S2）：所有 delta（含 reasoning）append 累积，跑马灯专读它。
+   * 与 text 的关系是 activity ⊇ text —— reasoning 只进这里。跑马灯的目的只是让
+   * 用户感知「子代理在工作」，所以思考同样算活动，不必是交付物。
+   */
+  activity?: string;
+  /** 全文（delta 增量累积，模型层不截断——F4：渲染层才截断 + 可展开）。 */
+  text?: string;
   status: "running" | "ok" | "error";
   summary?: string;
+}
+
+/**
+ * 回合收尾后的子代理产出卡（F3）。subagent 条目退场时，有 summary/全文的
+ * 转存成这条持久条目留在 transcript 里：中止不再把 1082 字产出一起删掉。
+ * text 是全文，渲染层截断预览 + 整行点击展开（F4）。
+ */
+export interface AgentSubagentReportItem extends TranscriptItemBase {
+  kind: "subagent_result";
+  /** 原 subagent id（同一子代理的产出与它的状态欄可對照）。 */
+  subagentId: string;
+  label: string;
+  /** running 中就被收尾（中止）= interrupted，誠實標「未完成」不留假 running。 */
+  status: "ok" | "error" | "interrupted";
+  /** 全文（summary 或串流全文，取較完整者），模型層不截斷。 */
+  text: string;
 }
 
 /** 待裁决的花费确认。不进 transcript，单独浮在输入区上方（随时只有 0..n 张）。 */
@@ -934,3 +1002,41 @@ export const EMPTY_AGENT_CHAT_STATE: AgentChatState = {
   turnActive: false,
   closed: false,
 };
+
+// ─────────────────────────── 會話全量歷史（GET /api/agent/sessions/[id]）
+//
+// 網關契約（2026-09-12，另一端並行施工中，本端按此寫代碼）：
+//   { "messages": [<opencode 原始訊息陣列>], "event_counter": <int>,
+//     "replay_first_id": <int|null>, "fallback"?: "replay_only" }
+//
+// opencode 訊息 shape 為 [{info:{id,role,time,tokens},parts:[...]}]，parts
+// 是異質陣列（text/reasoning/tool/file，新舊版本還有 step-start 等內部片段），
+// 欄位不保證存在——傳輸層只守「messages 是陣列、event_counter 是有限數」，
+// 逐 part 的防呆全部交給 normalizeOpenCodeMessages（跳過不炸、丟棄計數）。
+
+/** opencode 單則訊息的 info。只聲明歸一化要用、且語義確定的欄位，其餘容錯。 */
+export interface OpenCodeMessageInfo {
+  id?: string;
+  /** "user" | "assistant"；髒資料可能缺，型別放寬為 string。 */
+  role?: string;
+  /** epoch 毫秒；time.completed=null 表示這輪還在跑。 */
+  time?: { created?: number; completed?: number | null };
+  tokens?: Record<string, unknown>;
+}
+
+/** opencode 單則訊息：parts 元素形態不一，交由歸一化逐個判型。 */
+export interface OpenCodeMessage {
+  info?: OpenCodeMessageInfo;
+  parts?: unknown[];
+}
+
+/** 全量歷史端點的響應契約（client 已做最小校驗後的形狀）。 */
+export interface AgentSessionHistoryResponse {
+  messages: OpenCodeMessage[];
+  /** 網關當前事件計數，等價於 SSE 續傳游標：重建已涵蓋 ≤ counter 的一切。 */
+  event_counter: number;
+  /** ring buffer 首幀 id；null = 緩衝空。僅供排障參考，重建路徑不依賴它。 */
+  replay_first_id: number | null;
+  /** 網關取不到全量歷史、降級為僅 ring 回放時的標記：客戶端應放棄重建走全量回放。 */
+  fallback?: "replay_only";
+}

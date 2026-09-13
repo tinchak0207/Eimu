@@ -29,19 +29,178 @@ function formatCoins(n: number): string {
   return Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
 }
 
-/** 参数摘要的一行预览：JSON 对象取首个字段值，否则取首行（都截断到一行）。 */
-function argPreview(args: string): string {
+/**
+ * 工具名 → 人话标题（F2）。画面上不许出现 `subagent_dispatch` 这种函数名：
+ * 那是 debug 视图的语言，不是给用户的。未知工具原样回落工具名 —— 不假造名字。
+ * 原始函数名不消失，只是收进展开抽屉（AgentParamDisclosure 的 toolName）。
+ */
+const TOOL_TITLES: Record<string, string> = {
+  // ── 內建 ──
+  bash: "终端命令",
+  read: "读取文件",
+  write: "写入文件",
+  edit: "修改文件",
+  glob: "查找文件",
+  grep: "搜索内容",
+  ls: "列出目录",
+  webfetch: "抓取网页",
+  fetch: "抓取网页",
+  todowrite: "更新任务清单",
+  todoread: "查看任务清单",
+  question: "向你提问",
+  skill: "载入技能",
+  task: "派发子任务",
+  patch: "应用补丁",
+  invalid: "invalid",
+  // ── 子代理 ──
+  subagent_dispatch: "派遣子代理",
+  subagent_status: "查看子代理状态",
+  // ── 研究與理解 ──
+  search_web: "搜索网络",
+  vision_analyze: "分析图片",
+  doc_struct: "解析文档结构",
+  world_bible_extract: "提取世界观设定",
+  script_scene_parse: "解析剧本分场",
+  storyboard_qc_17: "分镜 17 项体检",
+  story_sequence_consistency: "故事连贯性检查",
+  // ── 生圖與圖片處理 ──
+  image_generate: "生成图片",
+  image_edit: "编辑图片",
+  image_upscale: "放大图片",
+  image_upload: "上传图片",
+  image_get_result: "取回图片结果",
+  image_quote: "查询图片单价",
+  quote_bundle: "整包报价",
+  background_remove: "抠图去背",
+  upscale_audit: "放大质量审查",
+  canvas_generate_image: "画布生图",
+  canvas_get_state: "读取画布",
+  canvas_apply_ops: "套用画布操作",
+  canvas_create_generation_flow: "建立生成流程",
+  product_conditioned_generation: "商品条件生图",
+  product_lock: "锁定商品",
+  virtual_tryon: "虚拟试穿",
+  garment_extract: "提取服装",
+  garment_dna_lock: "锁定服装特征",
+  model_identity_lock: "锁定模特形象",
+  hand_contact_repair: "手部接触修复",
+  scene_pack_batch: "场景批量生成",
+  shot_grid_batch: "分镜格批量生成",
+  style_aligned_batch: "风格对齐批量生成",
+  style_dna_extract: "提取风格特征",
+  style_anchor_sref: "风格锚定（sref）",
+  sketch_lock: "锁定线稿",
+  cast_asset_lock: "锁定角色资产",
+  canonical_key_art_lock: "锁定主视觉",
+  character_dna_turnaround: "角色四视图",
+  moodboard_diverge_converge: "情绪板发散收敛",
+  emotion_board_matrix: "情绪板矩阵",
+  outlier_audit_regenerate: "离群图筛查与重生",
+  aspect_reflow: "多画幅矩阵重排",
+  multi_aspect_reflow: "多画幅重排",
+  platform_reflow: "平台规格适配",
+  // ── 影片 ──
+  video_quote: "查询视频单价",
+  video_upload: "上传视频",
+  last_frame_video_chain: "首尾帧续接视频",
+  keyframe_render: "生成关键帧",
+  // ── 音樂與語音 ──
+  music_gen: "生成音乐",
+  tts_speak: "语音合成",
+  audio_first_timeline: "音频优先时间线",
+  // ── 剪輯與時間線 ──
+  timeline_query: "读取时间线",
+  timeline_ops: "时间线操作",
+  timeline_rhythm: "时间线节奏分析",
+  timeline_style: "时间线风格与字幕",
+  timeline_mix: "时间线混音",
+  timeline_master: "导出时间线母版",
+  timeline_lint: "时间线体检",
+  timeline_restore: "还原时间线版本",
+  editing_manifest: "生成剪辑清单",
+  // ── 工作流 ──
+  workflow_start: "启动工作流",
+  workflow_add_node: "新增节点",
+  workflow_connect: "连接节点",
+  workflow_disconnect: "断开连接",
+  workflow_update_node: "更新节点",
+  workflow_rerun_node: "重跑节点",
+  workflow_generate: "执行节点生成",
+  workflow_status: "查看工作流状态",
+  // ── 3D／Blender／導演台 ──
+  blender_exec: "执行 Blender 脚本",
+  blender_render: "Blender 渲染",
+  blender_export_gltf: "导出 glTF 模型",
+  director_get_state: "读取导演台",
+  director_propose_plans: "提出布景方案",
+  director_apply_proposal: "套用方案",
+  director_manage_plan: "管理方案",
+  director_manage_shot: "管理镜头",
+  director_manage_group: "管理群组",
+  director_create_element: "新增元素",
+  director_update_element: "更新元素",
+  director_delete: "删除元素",
+  director_select: "选中元素",
+  director_transport: "播放控制",
+  director_set_lock: "锁定设置",
+  director_set_camera_keyframe: "设镜头关键帧",
+  director_set_motion_keyframe: "设动态关键帧",
+  director_upsert_action: "更新分镜动作",
+  director_project_control: "项目控制",
+  director_prepare_export: "准备导出",
+  // ── 資產與交付 ──
+  asset_search: "搜索资产",
+  asset_get: "读取资产",
+  asset_activate: "启用资产",
+  asset_provenance_archive: "资产溯源归档",
+  delivery_assets: "聚合成交付包",
+  detail_page_manifest: "生成详情页排版",
+  detail_page_evidence_map: "卖点找图内证据",
+  exhibition_delivery_manifest: "展陈交付清单",
+  run_py: "运行 Python 脚本",
+};
+
+export function toolDisplayName(tool: string): string {
+  return TOOL_TITLES[tool] ?? tool;
+}
+
+/**
+ * 参数摘要的人话预览（F2）：只挑「人能读懂」的白名单栏位（子任务标签、
+ * 命令、路径、关键词…），挑不到就回 undefined —— 默认渲染绝不把 raw JSON
+ * 或半截 `{"async":false…` 端到用户面前。完整 JSON 收进展开抽屉。
+ */
+export function toolArgPreview(args: string): string | undefined {
   const t = args.trim();
-  if (t.startsWith("{")) {
-    try {
-      const obj = JSON.parse(t) as Record<string, unknown>;
-      const first = Object.values(obj)[0];
-      if (typeof first === "string" && first.length > 0) return first.replace(/\s+/g, " ").trim();
-    } catch {
-      /* 非严格 JSON 走首行兜底 */
-    }
+  if (t.length === 0) return undefined;
+  const humanize = (v: string): string | undefined => {
+    const s = v.replace(/\\n/g, " ").replace(/\\"/g, '"').replace(/\s+/g, " ").trim();
+    return s.length > 0 ? s : undefined;
+  };
+  let obj: Record<string, unknown> | undefined;
+  try {
+    const parsed: unknown = JSON.parse(t);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) obj = parsed as Record<string, unknown>;
+  } catch {
+    // 被网关截断的半截 JSON（补了省略号）：下面用白名单栏位做宽松提取。
   }
-  return t.split("\n")[0].replace(/\s+/g, " ").trim();
+  if (obj) {
+    for (const key of ["label", "command", "filePath", "file_path", "pattern", "query", "url", "prompt", "description"]) {
+      const v = obj[key];
+      if (typeof v === "string") {
+        const s = humanize(v);
+        if (s !== undefined) return s;
+      }
+    }
+    return undefined; // 只有布林/数字/巢状等没人话的栏位：不显示 raw JSON。
+  }
+  if (t.startsWith("{")) {
+    // 半截 JSON：只从白名单栏位里摘一段人能读的值，绝不显示 JSON 片段本身。
+    // 收尾引号可缺（网关截断可能正好切在字符串中间）。
+    const m = /"(label|command|filePath|file_path|pattern|query|url|prompt|description)"\s*:\s*"((?:[^"\\]|\\.)*)/.exec(t);
+    if (m) return humanize(m[2]);
+    return undefined;
+  }
+  return humanize(t.split("\n")[0]);
 }
 
 function AgentToolCardComponent({ item }: AgentToolCardProps) {
@@ -52,6 +211,9 @@ function AgentToolCardComponent({ item }: AgentToolCardProps) {
   const pct = progress ? Math.min(100, Math.round((progress.done / progress.total) * 100)) : 0;
   // 有真实分母时徽章直接报计数「3/8」，比「运行中…」信息量大且不虚报。
   const badgeLabel = progress ? `${progress.done}/${progress.total}` : status.label;
+  // F2：默认渲染只有人话——人话标题 + 人话摘要；函数名与完整参数进展开抽屉。
+  const displayName = toolDisplayName(item.tool);
+  const preview = item.argsSummary !== undefined ? toolArgPreview(item.argsSummary) : undefined;
 
   return (
     <div className="agent-rise flex flex-col gap-2 rounded-[18px] bg-[rgba(120,120,128,0.06)] px-3.5 py-3">
@@ -61,11 +223,11 @@ function AgentToolCardComponent({ item }: AgentToolCardProps) {
         </span>
         <div className="min-w-0 flex-1">
           <p className="truncate text-ios-subhead font-semibold text-foreground">
-            {item.tool}
+            {displayName}
           </p>
-          {item.argsSummary !== undefined && (
-            <p className="mt-0.5 truncate text-ios-caption1 text-muted-foreground" title={item.argsSummary}>
-              {argPreview(item.argsSummary)}
+          {preview !== undefined && (
+            <p className="mt-0.5 truncate text-ios-caption1 text-muted-foreground" title={preview}>
+              {preview}
             </p>
           )}
           {item.costCoins !== undefined && (

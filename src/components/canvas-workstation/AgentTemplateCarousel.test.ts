@@ -11,17 +11,20 @@ function read(relPath: string) {
 /**
  * AgentTemplateCarousel 是 CaseShowcase.tsx 的逐行複製（2026-08-25 用戶裁定：
  * 複用 = 整複製改文字，禁止造輪子）。測試鎖死兩件事：
- * ① 與首頁的交互能力逐項等價（wheel passive:false / scroll drive / detent /
+ * ① 與首頁的交互能力逐項等價（scroll drive / detent /
  *    commitSteps / 彈簧 / 鍵盤 / 圓點 / 箭頭 / CasePromptReveal / 層棧）；
+ *    （wheel 被動性除外：09-12 起本元件刻意 passive:true，見下方錨點註解。）
  * ② 模板化改動（數據源 / 卡面文字 / 正面卡啟動）接線正確。
  */
 
 test("carousel is a verbatim copy of CaseShowcase interaction machinery", () => {
   const source = read("src/components/canvas-workstation/AgentTemplateCarousel.tsx");
 
-  // 觸控板兩指橫掃：{ passive: false } 手動掛載（React onWheel 是 passive，
-  // preventDefault 會被忽略）——2026-08-25 事故的直接雷點，鎖死。
-  assert.match(source, /addEventListener\("wheel", onWheel, \{ passive: false \}\)/);
+  // 觸控板兩指橫掃：2026-09-12 性能審計落地（09-11 OOM note）——本元件 wheel
+  // 改掛 { passive: true } 並移除 preventDefault（非 passive wheel 阻塞合成器
+  // 滾動），與 CaseShowcase 的 passive:false 是**刻意分歧**，橫向漂移的 CSS
+  // 兜底（overscroll-behavior-x）在共用樣式檔，另片處理。deltaX 占優守衛保留。
+  assert.match(source, /addEventListener\("wheel", onWheel, \{ passive: true \}\)/);
   assert.match(source, /Math\.abs\(event\.deltaX\) <= Math\.abs\(event\.deltaY\)/);
 
   // 滾動驅動 + IntersectionObserver 只在段內累計。

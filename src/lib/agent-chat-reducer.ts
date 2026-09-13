@@ -15,6 +15,7 @@
 
 import {
   type AgentAttachmentRef,
+  type AgentAudioItem,
   type AgentChatState,
   type AgentDirectorItem,
   type AgentImageItem,
@@ -24,6 +25,7 @@ import {
   type AgentQuotaState,
   type AgentSseEvent,
   type AgentSubagentItem,
+  type AgentSubagentReportItem,
   type AgentToolCallItem,
   type AgentTranscriptItem,
   type AgentUserTurnItem,
@@ -195,6 +197,27 @@ function reduceVideoDone(state: AgentChatState, event: AgentSseEvent & { name: "
   return { ...state, turnActive: true, turnStatus: undefined };
 }
 
+function reduceAudioDone(state: AgentChatState, event: AgentSseEvent & { name: "audio.done" }): AgentChatState {
+  const { url, cost_coins, task_id, media_kind } = event.data;
+  const exists = state.items.some((it) => it.kind === "audio" && it.url === url);
+  if (!exists) {
+    // seq 是展示序号：会话内第几条音频，不是网关全局 event_id（同 image.done 的理由）。
+    const audioSeq = state.items.filter((it) => it.kind === "audio").length + 1;
+    const item: AgentAudioItem = {
+      kind: "audio",
+      id: eventItemId("audio", event.event_id),
+      seq: audioSeq,
+      url,
+      costCoins: cost_coins,
+      taskId: task_id,
+      mediaKind: media_kind,
+    };
+    return { ...state, items: [...state.items, item], turnActive: true, turnStatus: undefined };
+  }
+  // 同 url 已存在：忽略内容，但仍是「助手在产出」的讯号，turnActive 照设。
+  return { ...state, turnActive: true, turnStatus: undefined };
+}
+
 /**
  * 導演台：會話內唯一活卡。同槽（同一張 director 卡）按 revision 替換，
  * 不堆積歷史卡——director.done 是工程狀態廣播不是成果事件，堆積會把
@@ -264,8 +287,8 @@ function reduceImageFailed(state: AgentChatState, event: AgentSseEvent & { name:
 }
 
 /**
- * 多行文本的最后一个非空行。subagent.delta 并入后只保留它——子代理输出可能
- * 上千行，条目里永远只存一行，这是防溢出的硬要求，不是优化。
+ * 多行文本的最后一个非空行。subagent 卡片的预览行只取它——置顶跑马灯
+ * 永远只滚一行（全文另存在 text 欄，F4：渲染层才截断 + 可展开，模型不丢）。
  */
 export function lastNonEmptyLine(text: string): string {
   const lines = text.split("\n");
@@ -275,17 +298,66 @@ export function lastNonEmptyLine(text: string): string {
   return "";
 }
 
+/** 派遣子代理的工具名（工具卡與子代理欄的狀態必須同源，F1）。 */
+const SUBAGENT_DISPATCH_TOOL = "subagent_dispatch";
+
+/**
+ * 把刚 started 的子代理绑到「最近一个还 running 且未绑定」的 subagent_dispatch
+ * 工具卡上。这不是展示层的事：不绑就会出现同一批子代理两个状态源——工具卡
+ * 按 tool.result 停在「运行中」，子代理栏按 subagent.done 显示「已完成」，
+ * 同屏互相打脸（F1）。绑定后 done 一次结两处，两端不可能矛盾。
+ * 就地改写传入的 items（呼叫方保证那是新 slice，不动输入 state）。
+ */
+function linkDispatchToolItem(items: AgentTranscriptItem[], subagentId: string): boolean {
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    const it = items[i];
+    if (
+      it.kind === "tool" &&
+      it.tool === SUBAGENT_DISPATCH_TOOL &&
+      it.status === "running" &&
+      it.subagentId === undefined
+    ) {
+      items[i] = { ...it, subagentId };
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * 子代理定案时同步结算它绑定的派遣工具卡（F1）。
+ *   - 子代理 ok：只把还在 running 的卡升成 ok —— 派遣工具自己失败（tool.result
+ *     ok:false）的事实比子代理成功更具体，不覆写。
+ *   - 子代理 error：把已 ok 的卡也拉回 failed —— async 派遣时工具早就回了 ok，
+ *     子代理随后失败；若卡片还留「已完成」就是同一批任务两处状态互相打脸。
+ */
+function settleLinkedDispatchTool(items: AgentTranscriptItem[], subagentId: string, ok: boolean): void {
+  for (let i = items.length - 1; i >= 0; i -= 1) {
+    const it = items[i];
+    if (it.kind !== "tool" || it.subagentId !== subagentId) continue;
+    if (ok) {
+      if (it.status !== "running") return;
+      items[i] = { ...it, status: "ok" };
+      return;
+    }
+    if (it.status === "failed") return;
+    items[i] = { ...it, status: "failed" };
+    return;
+  }
+}
+
 function reduceSubagentStarted(
   state: AgentChatState,
   event: AgentSseEvent & { name: "subagent.started" },
 ): AgentChatState {
   const { id, label } = event.data;
   const items = state.items.slice();
+  const linked = linkDispatchToolItem(items, id);
   for (let i = items.length - 1; i >= 0; i -= 1) {
     const it = items[i];
     if (it.kind === "subagent" && it.subagentId === id) {
       // 同 id 重复 started（重连补发等）：标签没变就 bail out，变了才替换。
-      if (it.label === label) return state;
+      if (it.label === label) return linked ? { ...state, items } : state;
       items[i] = { ...it, label };
       return { ...state, items, turnActive: true };
     }
@@ -306,25 +378,39 @@ function reduceSubagentDelta(
   state: AgentChatState,
   event: AgentSseEvent & { name: "subagent.delta" },
 ): AgentChatState {
-  const { id, text } = event.data;
+  const { id, text, kind } = event.data;
+  // 2026-09-11 跨片契约（S2）：kind === "reasoning" 是思考，不是交付物。
+  // 两种增量都算「子代理在工作」→ 都 append 进 activity（跑马灯专读它）；
+  // 只有正文进 text/lastLine —— text 会被产出卡当全文带走，混入思考就是谎报交付物。
+  const isReasoning = kind === "reasoning";
   const items = state.items.slice();
   for (let i = items.length - 1; i >= 0; i -= 1) {
     const it = items[i];
     if (it.kind === "subagent" && it.subagentId === id) {
       // done 之后的迟到 delta 不再改写已定案的卡。
       if (it.status !== "running") return state;
-      items[i] = { ...it, lastLine: lastNonEmptyLine(it.lastLine + text) };
+      const activity = (it.activity ?? "") + text;
+      if (isReasoning) {
+        items[i] = { ...it, activity };
+        return { ...state, items, turnActive: true };
+      }
+      // F4：模型层累积全文（text），lastLine 只是渲染预览（末行）；不再硬切到只剩末行。
+      const full = (it.text ?? "") + text;
+      items[i] = { ...it, text: full, lastLine: lastNonEmptyLine(full), activity };
       return { ...state, items, turnActive: true };
     }
   }
   // started 丢失（坏帧/断线）：补一条 running 条目，别让 delta 落空。
+  // 首帧就是 reasoning 时不造 text（思考不是交付物）。
   const item: AgentSubagentItem = {
     kind: "subagent",
     id: eventItemId("subagent", event.event_id),
     seq: event.event_id,
     subagentId: id,
     label: "子任务",
-    lastLine: lastNonEmptyLine(text),
+    lastLine: isReasoning ? "" : lastNonEmptyLine(text),
+    ...(isReasoning ? {} : { text }),
+    activity: text,
     status: "running",
   };
   return { ...state, items: [...items, item], turnActive: true };
@@ -340,6 +426,7 @@ function reduceSubagentDone(
     const it = items[i];
     if (it.kind === "subagent" && it.subagentId === id) {
       items[i] = { ...it, status, ...(summary !== undefined ? { summary } : {}) };
+      settleLinkedDispatchTool(items, id, status === "ok");
       return { ...state, items };
     }
   }
@@ -354,12 +441,41 @@ function reduceSubagentDone(
     status,
     ...(summary !== undefined ? { summary } : {}),
   };
+  settleLinkedDispatchTool(items, id, status === "ok");
   return { ...state, items: [...items, item] };
 }
 
-/** 回合收尾时把 subagent 条目整批清掉：状态栏只在回合进行中有意义。 */
-function clearSubagentItems(items: AgentTranscriptItem[]): AgentTranscriptItem[] {
-  return items.filter((it) => it.kind !== "subagent");
+/**
+ * 回合收尾：子代理条目退场，但产出必须留下（F3）。带 summary / 串流全文的
+ * 转存成一张可展开的产出卡（subagent_result）；中止（未 done）的标 interrupted
+ * ——绝不把 1082 字产出随卡片一起删掉，用户中止后画面只会更丰富。
+ * 零输出的空转卡（没 done 也没吐过字）没有产出可留，才真正丢弃。
+ * 条目位置原地保留，产出卡就落在原子代理卡所在的转录位置。
+ */
+function retireSubagentItems(items: AgentTranscriptItem[]): AgentTranscriptItem[] {
+  const out: AgentTranscriptItem[] = [];
+  for (const it of items) {
+    if (it.kind !== "subagent") {
+      out.push(it);
+      continue;
+    }
+    const full = (it.text ?? "").trim();
+    const summary = it.summary?.trim() ?? "";
+    // 取較完整者：SSE 的 summary 可能被帧长截斷，delta 串流才是全文。
+    const text = summary.length > full.length ? summary : full;
+    if (it.status === "running" && text.length === 0) continue;
+    const report: AgentSubagentReportItem = {
+      kind: "subagent_result",
+      id: `${it.id}-result`,
+      seq: it.seq,
+      subagentId: it.subagentId,
+      label: it.label,
+      status: it.status === "running" ? "interrupted" : it.status,
+      text,
+    };
+    out.push(report);
+  }
+  return out;
 }
 
 /**
@@ -386,7 +502,7 @@ function settleItems(items: AgentTranscriptItem[]): AgentTranscriptItem[] {
 // turn.done 只结算当前条目，事件本体不参与；参数保留以符合 reducer 统一签名。
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 function reduceTurnDone(state: AgentChatState, _event: AgentSseEvent & { name: "turn.done" }): AgentChatState {
-  const items = clearSubagentItems(settleItems(state.items));
+  const items = retireSubagentItems(settleItems(state.items));
   return { ...state, items, turnActive: false, turnStatus: undefined };
 }
 
@@ -484,13 +600,15 @@ function reduceSessionError(state: AgentChatState, event: AgentSseEvent & { name
     // G-FE 合同：human_message（中文短句）优先，缺省回落原 message。
     text: event.data.human_message || event.data.message,
   };
-  // 错误不终结会话。
-  return { ...state, items: [...state.items, notice] };
+  // 错误不终结会话；但中止类错误（Tool execution aborted）到的这一刻，
+  // 子代理产出必须落成产出卡（F3）——本端可能等不到 turn.done，
+  // 不能让「画面比中止前更空」的路径再出现一次。
+  return { ...state, items: [...retireSubagentItems(state.items), notice] };
 }
 
-/** 收尾：停掉 streaming、把还在转的工具判死、清掉子代理栏与待确认、推一条 notice。 */
+/** 收尾：停掉 streaming、把还在转的工具判死、子代理条目转存产出卡、清待确认、推一条 notice。 */
 function settleClosedTurn(state: AgentChatState, eventId: number, reason?: string): AgentChatState {
-  const items = clearSubagentItems(settleItems(state.items));
+  const items = retireSubagentItems(settleItems(state.items));
   const notice: AgentNoticeItem = {
     kind: "notice",
     id: eventItemId("notice", eventId),
@@ -560,6 +678,8 @@ export function agentChatReducer(state: AgentChatState, event: AgentSseEvent): A
       return reduceImageDone(base, event);
     case "video.done":
       return reduceVideoDone(base, event);
+    case "audio.done":
+      return reduceAudioDone(base, event);
     case "director.done":
       return reduceDirectorDone(base, event);
     case "image.failed":

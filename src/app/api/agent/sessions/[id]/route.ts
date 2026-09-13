@@ -60,3 +60,26 @@ export async function DELETE(req: NextRequest, context: { params: Promise<{ id: 
   }
   return gatewayResponse(resp);
 }
+
+// GET /api/agent/sessions/[id] - 中繼閘道 GET /agent/v1/sessions/:id/messages，
+// 取回該會話的全量聊天歷史。純代理：opencode messages 陣列原樣透傳，
+// 本層不改形不落地；陣列/包裝物件與欄位映射的歸一化由前端負責。
+export async function GET(req: NextRequest, context: { params: Promise<{ id: string }> }) {
+  const caller = await resolveAgentCaller(req);
+  if (!caller.ok) {
+    return fail(caller.status, caller.message, agentCallerFailureCode(caller));
+  }
+
+  const { id } = await context.params;
+  if (!SESSION_ID_PATTERN.test(id)) {
+    return fail(400, "会话 id 无效。", "invalid_session_id");
+  }
+
+  let resp: AgentGatewayResponse;
+  try {
+    resp = await callAgentGateway(`/agent/v1/sessions/${id}/messages`, { method: "GET", key: caller.key });
+  } catch {
+    return fail(502, "Agent 网关连接失败，请稍后重试。", "agent_gateway_unreachable");
+  }
+  return gatewayResponse(resp);
+}

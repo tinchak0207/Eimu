@@ -257,12 +257,21 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
 
   // 監聽 sessionId 變化：換 agent 會話 = 換一張畫布，避免舊畫布跑進新會話。
   useEffect(() => {
-    if (!sessionId) return;
+    if (!sessionId) {
+      // 09-12 建號權收歸發送按鈕：null = 「無會話空態」（開新/套模板都經這裡）。
+      // 放手舊會話錨點——之後 lazy 建出的新會話按「首次會話」處理（走下面
+      // isFirst 跳過清場），套模板先鋪好的節點才不會被新會話落地瞬間清掉
+      // （08-29 空快照/09-01 畫布全空血淚路徑）。null 本身不清場：此時畫布
+      // 上可能是用戶正打算隨首條消息帶進新會話的內容。
+      prevSessionIdRef.current = null;
+      return;
+    }
     if (sessionId === prevSessionIdRef.current) return;
     const isFirst = prevSessionIdRef.current == null;
     prevSessionIdRef.current = sessionId;
     // 首次拿到 session：畫布本來就是空的（已不再自動還原），不必重置，
-    // 否則會白白丟掉 mount 時 mint 的 projectId。
+    // 否則會白白丟掉 mount 時 mint 的 projectId。空態鋪好內容後首發建號
+    // 落地也算「首次」——那份内容是用户带来接新会话的，同样不清。
     if (isFirst) return;
     newCanvasSession();
   }, [sessionId, newCanvasSession]);

@@ -3,10 +3,14 @@
 // 纯代理：身份由 resolveAgentCaller 统一解决，设定的权威数据在网关
 // /agent/v1/settings（默认 steer/efficient/balanced，非法值网关自己回 400），
 // 本站不存副本，GET 原样透传；POST 把 JSON body 原样转交，字段校验归网关。
+//
+// 唯一例外：beast_mode（野兽模式 / MOE 改革波 1）在转交前做布尔把关——
+// 带该键时非 true 一律强制为 false（缺键 = 网关默认 OFF，零迁移零破坏）。
 
 import { NextRequest, NextResponse } from "next/server";
 import { callAgentGateway, type AgentGatewayResponse } from "@/lib/agent-gateway";
 import { agentCallerFailureCode, resolveAgentCaller } from "@/lib/agent-session-guard";
+import { BEAST_MODE_SETTINGS_KEY } from "@/lib/expert-registry";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -51,6 +55,12 @@ export async function POST(req: NextRequest) {
     body = await req.json();
   } catch {
     return fail(400, "请求体格式无效。", "invalid_request");
+  }
+
+  // 野兽模式布尔把关（仅当请求带该键时规整；其他字段原样透传给网关）。
+  if (typeof body === "object" && body !== null && BEAST_MODE_SETTINGS_KEY in body) {
+    (body as Record<string, unknown>)[BEAST_MODE_SETTINGS_KEY] =
+      (body as Record<string, unknown>)[BEAST_MODE_SETTINGS_KEY] === true;
   }
 
   let resp: AgentGatewayResponse;

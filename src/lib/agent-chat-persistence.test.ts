@@ -245,6 +245,49 @@ test("瘦身后的 video 条目往返一致", () => {
   assert.equal(back.mediaKind, "video");
 });
 
+// ─────────────────────────── audio 条目瘦身（与 video 同法）
+
+test("audio 条目只留 id/seq/url/costCoins/mediaKind，taskId 不落盘", () => {
+  const aud: AgentTranscriptItem = {
+    kind: "audio",
+    id: "audio-4",
+    seq: 4,
+    url: "https://example.invalid/audio/4.m4a",
+    costCoins: 6,
+    taskId: "非常长的 task id，可能携带大串内容",
+    mediaKind: "music",
+  };
+  const slim = sanitizeItemsForStorage([aud]);
+  assert.equal(slim.length, 1);
+  const s = slim[0] as { kind: string; url: string; costCoins?: number; mediaKind?: string };
+  assert.equal(s.kind, "audio");
+  assert.equal(s.url, aud.url);
+  assert.equal(s.costCoins, 6);
+  assert.equal(s.mediaKind, "music");
+  assert.equal(Object.prototype.hasOwnProperty.call(s, "taskId"), false);
+});
+
+test("瘦身后的 audio 条目往返一致", () => {
+  const storage = new MemoryStorage();
+  const aud: AgentTranscriptItem = {
+    kind: "audio",
+    id: "audio-4",
+    seq: 4,
+    url: "https://example.invalid/audio/4.m4a",
+    costCoins: 6,
+    mediaKind: "audio",
+  };
+  savePersistedSnapshot(storage, { sessionId: "s", lastEventId: 4, savedAt: NOW, items: [aud] }, NOW);
+
+  const loaded = loadPersistedSnapshot(storage, NOW);
+  assert.ok(loaded);
+  assert.equal(loaded.items.length, 1);
+  const back = loaded.items[0] as { url: string; costCoins?: number; mediaKind?: string };
+  assert.equal(back.url, aud.url);
+  assert.equal(back.costCoins, 6);
+  assert.equal(back.mediaKind, "audio");
+});
+
 // ─────────────────────────── 清除
 
 test("clearPersistedSnapshot 删除存档，且对不存在的 key 幂等", () => {

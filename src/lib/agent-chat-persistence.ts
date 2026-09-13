@@ -51,7 +51,7 @@ export interface AgentStorageLike {
 
 // ─────────────────────────── 数据清洗
 
-const ITEM_KINDS = new Set(["user", "assistant", "tool", "image", "video", "notice"]);
+const ITEM_KINDS = new Set(["user", "assistant", "tool", "image", "video", "audio", "notice", "subagent_result"]);
 
 /**
  * 从 transcript 里挑出可持久化的条目，并对 image 条目做「瘦身」：
@@ -85,11 +85,29 @@ export function sanitizeItemsForStorage(items: AgentTranscriptItem[]): AgentTran
       });
       continue;
     }
+    if (it.kind === "audio") {
+      // 与 image/video 同法瘦身：留小字段，不复制 taskId。
+      out.push({
+        kind: "audio",
+        id: it.id,
+        seq: it.seq,
+        url: it.url,
+        costCoins: it.costCoins,
+        mediaKind: it.mediaKind,
+      });
+      continue;
+    }
     if (it.kind === "director") {
       // 導演卡不入存檔（2026-09-02 片5）：兩張 base64 SVG 可達近百 KB 會撐爆
       // localStorage 配額，且 ITEM_KINDS 白名單不含 director——落存檔會讓
       // isValidItemsArray 判整份快照無效、回放全滅。卡片隨會話存活（spec §5
       // 片5「別過度工程」條款），刷新後由 agent 重新規劃即可。
+      continue;
+    }
+    if (it.kind === "subagent") {
+      // 子代理运行卡不入存檔：它只在回合进行中有意义（turn.done 时 reducer
+      // 已转存成 subagent_result 产出卡），刷新后重放一张「运行中」的僵尸卡
+      // 就是谎报；且它不在 ITEM_KINDS 白名单里，落存檔会让整份快照判无效。
       continue;
     }
     out.push(it);

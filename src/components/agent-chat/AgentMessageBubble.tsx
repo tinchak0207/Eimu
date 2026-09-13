@@ -59,12 +59,12 @@ function AgentMessageBubbleComponent({ item, sessionId }: AgentMessageBubbleProp
       <div
         className={cn(
           // min-w-0 + overflow-wrap:anywhere：長 URL／程式碼／JSON 在氣泡內換行，不橫向溢出。
-          // 含思維鏈（reasoning）的 assistant 訊息占滿整行：思維鏈是過程性內容，
-          // 窄氣泡會讓它「卡在一小塊」難受；純正文維持 85% 上限。
+          // 助理條目（正文與思維鏈）一律占滿整行，與工具卡／出圖卡同寬：85% 上限會讓
+          // 長文提早折行、右側空出一條，畫面像卡片沒排滿。用戶氣泡維持 85%——右對齊的
+          // 短氣泡才是對話的視覺語言。
           // 助理正文走 Markdown 渲染，版式由塊級元素接管，不用 pre-wrap。
           "min-w-0 break-words [overflow-wrap:anywhere] text-[15px]",
-          item.kind === "user" ? "whitespace-pre-wrap" : "",
-          item.kind === "assistant" && item.reasoning ? "w-full" : "max-w-[85%]",
+          item.kind === "user" ? "whitespace-pre-wrap max-w-[85%]" : "w-full",
           isUser
             ? "ml-auto rounded-[20px] rounded-br-[6px] bg-ios-blue px-3.5 py-2.5 text-white leading-[1.45] shadow-[0_2px_10px_rgba(0,122,255,0.25)]"
             : "rounded-[20px] rounded-bl-[6px] bg-[rgba(120,120,128,0.08)] px-4 py-3 text-foreground leading-[1.55]",

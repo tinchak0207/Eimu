@@ -1,7 +1,10 @@
 import { CanvasNodeType, type CanvasConnection, type CanvasNode } from "@/lib/canvas/types";
 import { recipeTemplateToRecallConfig } from "@/lib/recipe-templates";
 import type { RecipeTemplate } from "@/lib/recipe-templates";
-import type { AgentPipeline, AgentPipelineStep } from "@/lib/agent-templates";
+// 2026-09-12 首屏減重拆分：本檔是執行側鋪法，需要帶 promptNotes/deliverable/
+// requiredTools 的完整步驟；顯示檔的 AgentPipelineStep 只剩卡面環節字段。
+// 純 type import（編譯期擦除），不把 payload 的 11 萬字文案拉進 bundle。
+import type { AgentPipelineFull, AgentPipelineStepFull } from "@/lib/agent-templates-payload";
 import type { WorkflowRecallConfig } from "@/lib/workflow-recall";
 
 /**
@@ -36,9 +39,9 @@ const CARD_GAP_X = 60;
 /** 泳道行高：最高卡（生成 240）+ 呼吸空隙。 */
 const LANE_GAP_Y = 330;
 
-/** applyTemplateToCanvas 接受的模板：RecipeTemplate 為底，pipeline 可選。 */
+/** applyTemplateToCanvas 接受的模板：RecipeTemplate 為底，pipeline 可選（執行完整形態）。 */
 export type TemplateCanvasInput = RecipeTemplate & {
-  pipeline?: AgentPipeline;
+  pipeline?: AgentPipelineFull;
   /** VPS agent-harness 已註冊的 workflow 模板 id（如 novel_film；2026-08-27）。 */
   harnessTemplateId?: string;
 };
@@ -67,14 +70,14 @@ export interface TemplateCanvasLayout {
 }
 
 /** 要點精煉成生成節點 prompt（進 metadata，不鋪湊數卡）。 */
-function promptFromNotes(step: AgentPipelineStep): string {
+function promptFromNotes(step: AgentPipelineStepFull): string {
   return step.promptNotes.join("，");
 }
 
 /** 步驟產出類型 → 畫布節點類型（生成卡按此鋪，不再一律 Image）。
  *  director（2026-09-03）= 3D 白模预演步，生成卡鋪成導演台節點；其餘 metadata
  *  （stepIndex/stepName/toolIds/promptNotes…）走與其它步驟同一條生成卡路徑，不分支。 */
-const GEN_NODE_TYPE: Record<NonNullable<AgentPipelineStep["outputKind"]>, CanvasNodeType> = {
+const GEN_NODE_TYPE: Record<NonNullable<AgentPipelineStepFull["outputKind"]>, CanvasNodeType> = {
   image: CanvasNodeType.Image,
   text: CanvasNodeType.Text,
   video: CanvasNodeType.Video,
@@ -92,7 +95,7 @@ const GEN_NODE_TYPE: Record<NonNullable<AgentPipelineStep["outputKind"]>, Canvas
  * 舊的 deliverable 拆項卡與 promptNotes 逐條卡（提示詞湊數）已刪——
  * 它們歸入生成卡 metadata，畫布上只留「用戶一眼看懂流水線」的結構卡。
  */
-function pipelineToCanvasLayout(template: TemplateCanvasInput, pipeline: AgentPipeline): TemplateCanvasLayout {
+function pipelineToCanvasLayout(template: TemplateCanvasInput, pipeline: AgentPipelineFull): TemplateCanvasLayout {
   const config = recipeTemplateToRecallConfig(template);
   const ts = Date.now().toString(36);
 

@@ -18,8 +18,16 @@ import {
   groupsNeedTicket,
   parseUserAttachmentBlock,
 } from "./AgentAttachmentCards";
-import { pickVisibleSubagents } from "./AgentSubagentBar";
-import { AgentToolCard } from "./AgentToolCard";
+import {
+  AgentSubagentBar,
+  MARQUEE_HARD_CAP,
+  MARQUEE_KEEP,
+  marqueeText,
+  pickVisibleSubagents,
+} from "./AgentSubagentBar";
+import { AgentToolCard, toolArgPreview, toolDisplayName } from "./AgentToolCard";
+import { AgentAudioCard } from "./AgentAudioCard";
+import { reportPreview } from "./AgentSubagentReportCard";
 import { submitConfirmDecision } from "./AgentConfirmCard";
 import { submitQuestionAnswer } from "./AgentQuestionCard";
 import { computeCanSend, hasPendingAttachments } from "./AgentComposer";
@@ -47,8 +55,10 @@ import { agentChatReducer, appendUserTurn, lastNonEmptyLine } from "../../lib/ag
 import {
   EMPTY_AGENT_CHAT_STATE,
   type AgentAttachmentRef,
+  type AgentAudioItem,
   type AgentSseEvent,
   type AgentSubagentItem,
+  type AgentSubagentReportItem,
 } from "../../lib/agent-chat-types";
 
 const root = process.cwd();
@@ -64,9 +74,11 @@ const bubble = read("src/components/agent-chat/AgentMessageBubble.tsx");
 const toolCard = read("src/components/agent-chat/AgentToolCard.tsx");
 const imageCard = read("src/components/agent-chat/AgentImageCard.tsx");
 const videoCard = read("src/components/agent-chat/AgentVideoCard.tsx");
+const audioCard = read("src/components/agent-chat/AgentAudioCard.tsx");
 const confirmCard = read("src/components/agent-chat/AgentConfirmCard.tsx");
 const questionCard = read("src/components/agent-chat/AgentQuestionCard.tsx");
 const noticeRow = read("src/components/agent-chat/AgentNoticeRow.tsx");
+const subagentReportCard = read("src/components/agent-chat/AgentSubagentReportCard.tsx");
 const surface = read("src/components/agent-chat/AgentChatSurface.tsx");
 const anchorCard = read("src/components/agent-chat/AgentAnchorCard.tsx");
 const batchProgress = read("src/components/agent-chat/AgentBatchProgress.tsx");
@@ -96,11 +108,13 @@ const AGENT_COMPONENTS: Array<[string, string]> = [
   ["AgentToolCard", toolCard],
   ["AgentImageCard", imageCard],
   ["AgentVideoCard", videoCard],
+  ["AgentAudioCard", audioCard],
   ["AgentConfirmCard", confirmCard],
   ["AgentQuestionCard", questionCard],
   ["AgentNoticeRow", noticeRow],
   ["AgentAnchorCard", anchorCard],
   ["AgentBatchProgress", batchProgress],
+  ["AgentSubagentReportCard", subagentReportCard],
   ["AgentParamDisclosure", disclosure],
 ];
 
@@ -180,6 +194,37 @@ test("video action buttons are disabled when no callback is wired", () => {
   assert.match(transcript, /<AgentVideoCard item=\{item\} \{\.\.\.videoActions\} \/>/);
 });
 
+test("audio card plays via native <audio> and keeps the disabled action contract", () => {
+  // 与图片/影片卡同惯例：回调缺席就 disabled，绝不伪造 handler。
+  assert.match(audioCard, /disabled=\{!onSaveToLibrary\}/);
+  assert.match(audioCard, /disabled=\{!onDownload\}/);
+  assert.doesNotMatch(audioCard, /fetch\(/);
+  assert.match(audioCard, /onSaveToLibrary\?: \(item: AgentAudioItem\) => void/);
+  // 播放面：原生 <audio controls preload="metadata">，src 照旧绑 item.url。
+  assert.match(audioCard, /<audio/);
+  assert.match(audioCard, /controls/);
+  assert.match(audioCard, /preload="metadata"/);
+  assert.match(audioCard, /src=\{item\.url\}/);
+  // 音频卡不得残留影片专属资产（全屏灯箱 / history 弹层 / 捏合缩放）。
+  assert.doesNotMatch(audioCard, /createPortal|pushState|pinch|wheel|clampPan/);
+  // transcript 把 audio 条目渲染成 AgentAudioCard，动作走 audioActions。
+  assert.match(transcript, /case "audio":/);
+  assert.match(transcript, /<AgentAudioCard item=\{item\} \{\.\.\.audioActions\} \/>/);
+  // 实渲染断言的输入：src 与文案逐字来自条目本身（不假造 URL）。
+  const rendered: AgentAudioItem = {
+    kind: "audio",
+    id: "audio-1",
+    seq: 1,
+    url: "https://example.invalid/audio/1.m4a",
+    costCoins: 3,
+    mediaKind: "music",
+  };
+  const markup = renderToStaticMarkup(createElement(AgentAudioCard, { item: rendered }));
+  assert.match(markup, /<audio/, "SSR 渲染必须真的产出 <audio> 元素");
+  assert.match(markup, /src="https:\/\/example\.invalid\/audio\/1\.m4a"/, "播放源绑定条目 url");
+  assert.match(markup, /音乐/, "mediaKind=music 徽章显示成曲语义");
+});
+
 test("reconnecting shows an unobtrusive retry affordance", () => {
   assert.match(panel, /connection === "reconnecting"/);
   assert.match(panel, /onRetryConnection/);
@@ -194,7 +239,9 @@ test("closed session surfaces its reason", () => {
 });
 
 test("empty open session shows a prompt to start, not a blank void", () => {
-  assert.match(panel, /items\.length === 0 && connection === "open"/);
+  // 第二輪就緒優化刀A：空態不等 SSE open——idle/connecting/open 都顯示，
+  // 只排除 reconnecting/closed（沒壞就先給歡迎語）。
+  assert.match(panel, /items\.length === 0 && connection !== "reconnecting" && connection !== "closed"/);
   assert.match(panel, /和智能体聊聊/);
 });
 
@@ -453,22 +500,44 @@ test("nothing routes users to a standalone /agent page", () => {
 // 所以不再需要「标题等级」的回归锁。
 
 /**
- * toggle 变便宜之后带出来的两个后果，各锁一条。
+ * 09-12 建号权收归发送按钮（回归锁重铸）。
+ *
+ * 旧锁钉的是「toggle 往返静默 resume」（autoStart 时代行为）。autoStart 与
+ * 预建整链已拆除——进助理/开新/套模板一律不建号，首条消息 send() 才 lazy
+ * 建号；toggle 重开＝空态，旧会话去历史 dropdown 切回。sessionTouchedInThisVisit
+ * 仍存活，职责收窄：压住重开面板时的存档快照提示。
  */
-test("toggling the agent shut and open again resumes silently, no D-17 prompt", () => {
+test("entering the agent never creates a session: send() owns the lazy create", () => {
   const hook = readCode(read("src/hooks/use-agent-chat.ts"));
-  // 标记必须是模块级的：组件卸载时所有 ref 一起死，ref 存不住这件事。
+  // 自动建号的三个源头全部拆干净：autoStart、预建取用、过期自动开新。
+  assert.doesNotMatch(hook, /autoStart/);
+  assert.doesNotMatch(hook, /precreated|PrecreatedSession/);
+  assert.doesNotMatch(hook, /上次对话已过期[\s\S]{0,80}void start\(\)/);
+  // 开新＝清空回空态，不再跑建号核心。
+  assert.doesNotMatch(hook, /const startNewSession[\s\S]*?runStartCore\(\)/);
+  // send() 的 ensure 必须钉在乐观插入之前，且判空在 ensure 之后（防幽灵回声）。
+  assert.match(
+    hook,
+    /if \(!sessionIdRef\.current\) \{\s*forceNewRef\.current = true;\s*await start\(\);\s*\}[\s\S]*?const sid = sessionIdRef\.current;[\s\S]*?dispatch\(\{ type: "user"/,
+  );
+  // 标记仍是模块级（组件卸载 ref 一起死，ref 存不住这件事）。
   assert.match(hook, /^let sessionTouchedInThisVisit = false;/m);
-  // 开过会话、续过会话都算「本次访问碰过」。
-  assert.match(hook, /sessionTouchedInThisVisit = true;/);
-  // 同一次访问 + 有存档 → 直接 resume，不走二选一。
-  assert.match(hook, /if \(sessionTouchedInThisVisit && loadPersisted\(\)\) \{\s*void resume\(\);/);
-  // 二选一卡不能闪一帧：mount 那次读档就要先判断。
-  assert.match(hook, /if \(!sessionTouchedInThisVisit\) \{\s*setResumable\(/);
-  // 刷新后归零 → D-17 的「继续上次 / 开新的」照旧。这条靠模块级变量天然成立，
-  // 但不许有人把它挪进 sessionStorage 之类跨刷新的地方。
+  // 不许有人把它挪进跨刷新的存储。
   assert.doesNotMatch(hook, /sessionStorage[\s\S]{0,40}sessionTouchedInThisVisit/);
   assert.doesNotMatch(hook, /localStorage[\s\S]{0,40}sessionTouchedInThisVisit/);
+  // 首页挂载不再预建会话（PromptInput）；助理挂载不再传 autoStart（Surface）。
+  const input = readCode(promptInput);
+  assert.doesNotMatch(input, /stashPrecreatedSession|createAgentSession/);
+  assert.doesNotMatch(readCode(surface), /autoStart/);
+  // 模板注入不再等 connection open——等它就饿死（空态永不连线）。
+  assert.match(
+    readCode(surface),
+    /injectedNonceRef\.current = agentInjection\.nonce;[\s\S]{0,120}void send\(agentInjection\.text/,
+  );
+  assert.doesNotMatch(
+    readCode(surface),
+    /injectedNonceRef\.current = agentInjection\.nonce;[\s\S]{0,200}if \(connection !== "open"\)/,
+  );
 });
 
 test("a handoff sentence from /history expires when the agent face is left", () => {
@@ -661,8 +730,8 @@ test("attachment block is stripped from user text and parsed into refs", () => {
   assert.deepEqual(parseUserAttachmentBlock("纯文本消息"), { cleanText: "纯文本消息", refs: [] });
 });
 
-test("subagent delta keeps only the last non-empty line", () => {
-  // 多行增量并入后只留末行：条目永不囤全文（防溢出硬要求）。
+test("subagent delta 保留全文（模型層不截斷），lastLine 只當渲染預覽", () => {
+  // 末行仍是預覽（置頂跑馬燈只滾一行）。
   assert.equal(lastNonEmptyLine("a\n\nb\n"), "b");
   let state = appendUserTurn(EMPTY_AGENT_CHAT_STATE, "你好");
   state = agentChatReducer(state, evt({ name: "subagent.started", event_id: 1, data: { id: "sa1", label: "搜索素材" } }));
@@ -670,9 +739,12 @@ test("subagent delta keeps only the last non-empty line", () => {
   const sub = state.items.find((it): it is AgentSubagentItem => it.kind === "subagent");
   assert.ok(sub);
   assert.equal(sub.lastLine, "第二行");
+  // 舊斷言測的是「模型裡永遠只存一行（防溢出）」；F4 新契約把截斷下移到渲染層
+  // （truncate + 整行展開），模型必須留全文，否則展開無從展開。
+  assert.equal(sub.text, "第一行\n第二行");
 });
 
-test("subagent started→done settles the card, turn.done clears the bar", () => {
+test("subagent started→done settles the card, turn.done retires it into an expandable report", () => {
   let state = agentChatReducer(EMPTY_AGENT_CHAT_STATE, evt({ name: "subagent.started", event_id: 1, data: { id: "sa1", label: "搜索素材" } }));
   let sub = state.items.find((it): it is AgentSubagentItem => it.kind === "subagent");
   assert.ok(sub);
@@ -683,9 +755,14 @@ test("subagent started→done settles the card, turn.done clears the bar", () =>
   assert.ok(sub);
   assert.equal(sub.status, "ok");
   assert.equal(sub.summary, "找到 3 张候选图");
-  // 回合收尾：状态栏整批清空。
+  // 回合收尾：状态栏退场（旧断言的意图保留），但 summary 必须转存成产出卡（F3），
+  // 不再随状态栏一起消失——「中止后画面比中止前更空」就是不修这条的产物。
   state = agentChatReducer(state, evt({ name: "turn.done", event_id: 3, data: {} }));
   assert.ok(!state.items.some((it) => it.kind === "subagent"));
+  const report = state.items.find((it): it is AgentSubagentReportItem => it.kind === "subagent_result");
+  assert.ok(report);
+  assert.equal(report.text, "找到 3 张候选图");
+  assert.equal(report.status, "ok");
   // 名额裁剪：3 张之外的新 running 挤掉最旧的已完成项。
   const mk = (i: number, status: AgentSubagentItem["status"]): AgentSubagentItem => ({
     kind: "subagent",
@@ -700,11 +777,194 @@ test("subagent started→done settles the card, turn.done clears the bar", () =>
   assert.deepEqual(picked.map((it) => it.subagentId), ["sa2", "sa3", "sa4"]);
 });
 
-test("subagent bar：卡可展开详情、面板可管理全部（R10 选单合同）", () => {
+test("F2 工具卡人話化：默認渲染只有人話，函數名與 raw JSON 收進展開抽屜", () => {
+  // 純函數：工具名 → 人話標題；未知工具原樣回落（不假造名字）。
+  assert.equal(toolDisplayName("subagent_dispatch"), "派遣子代理");
+  // 2026-09-11 T1 全量表落地：bash 的顯示名由舊「执行命令」改名為「终端命令」
+  // （語義收斂到「这是一次终端命令」，不再暗示是人工執行命令）。
+  assert.equal(toolDisplayName("bash"), "终端命令");
+  assert.equal(toolDisplayName("never_seen_tool"), "never_seen_tool");
+  // 參數預覽只認白名單欄位；挑不到就不顯示（默認渲染沒有 raw JSON 片段）。
+  assert.equal(toolArgPreview('{"async":false,"label":"视频牌价预检","prompt":"..."}'), "视频牌价预检");
+  assert.equal(toolArgPreview('{"async":false,"count":4}'), undefined, "沒人話欄位就不端 JSON");
+  assert.equal(toolArgPreview('{"label":"被网关截断的半截 JSON…'), "被网关截断的半截 JSON…", "半截 JSON 只摘白名單值");
+  assert.equal(toolArgPreview("ls -la /opt/agent-harness"), "ls -la /opt/agent-harness");
+  assert.equal(toolArgPreview("{broken"), undefined);
+
+  // SSR 默認渲染：卡片頭是人話標題 + 人話摘要，看不見函數名與 JSON。
+  const markup = renderToStaticMarkup(
+    createElement(AgentToolCard, {
+      item: {
+        kind: "tool",
+        id: "tool-1",
+        seq: 1,
+        tool: "subagent_dispatch",
+        argsSummary: '{"async":false,"label":"视频牌价预检","prompt":"查牌价"}',
+        status: "running",
+      },
+    }),
+  );
+  assert.match(markup, /派遣子代理/, "標題必須是人話");
+  assert.match(markup, /视频牌价预检/, "摘要取人話欄位");
+  assert.doesNotMatch(markup, /subagent_dispatch/, "默認渲染不得出現原始函數名");
+  assert.doesNotMatch(markup, /async/, "默認渲染不得出現 raw JSON 欄位");
+  assert.doesNotMatch(markup, /\{/, "默認渲染不含 JSON 片段");
+  // 展開抽屜仍然帶著完整參數與原始函數名（收起來不等於刪掉）。
+  const card = readCode(read("src/components/agent-chat/AgentToolCard.tsx"));
+  assert.match(card, /argsSummary=\{item\.argsSummary\}/);
+  assert.match(card, /toolName=\{item\.tool\}/);
+  const src = read("src/components/agent-chat/AgentParamDisclosure.tsx");
+  assert.match(src, /\{toolName !== undefined &&/, "展開區顯示原始函數名");
+  assert.match(src, /\{everOpened && \(/, "展開內容首次展開才掛載（默認 DOM 不含 raw JSON）");
+});
+
+test("T1 工具名映射全量表：關鍵映射逐字正確、未知工具回落原名、video_gen 空指針已刪", () => {
+  // 暴君逐條核準的顯示名（簡體）：抽 8 條關鍵映射逐字斷言，防止後續被潤色改字。
+  const expected: Array<[string, string]> = [
+    ["bash", "终端命令"],
+    ["quote_bundle", "整包报价"],
+    ["subagent_dispatch", "派遣子代理"],
+    ["timeline_ops", "时间线操作"],
+    ["workflow_start", "启动工作流"],
+    ["blender_exec", "执行 Blender 脚本"],
+    ["run_py", "运行 Python 脚本"],
+    ["image_quote", "查询图片单价"],
+  ];
+  for (const [tool, title] of expected) {
+    assert.equal(toolDisplayName(tool), title, `${tool} 的显示名必须是核準值`);
+  }
+  // 兜底不變：未知工具原樣回落原名（不假造名字）。
+  assert.equal(toolDisplayName("不存在的工具"), "不存在的工具");
+  // video_gen 是空指針（網關無此工具）：表裡不得有鍵，行為上也只能回原名。
+  const table = /const TOOL_TITLES: Record<string, string> = \{([\s\S]*?)\n\};/.exec(toolCard)?.[1] ?? "";
+  assert.ok(table.length > 0, "必須能取到 TOOL_TITLES 表體");
+  assert.ok(!/\bvideo_gen\b/.test(table), "video_gen 空指針不得留在表裡");
+  assert.equal(toolDisplayName("video_gen"), "video_gen");
+  // 覆蓋率下限：97 個網關工具 + 內建，防止整表被誤縮（重複鍵會靜默吃掉前一條）。
+  const keys = [...table.matchAll(/^ {2}([A-Za-z_][A-Za-z0-9_]*):/gm)].map((m) => m[1]);
+  assert.ok(keys.length >= 100, `TOOL_TITLES 至少 100 條，實際 ${keys.length}`);
+  assert.equal(new Set(keys).size, keys.length, "鍵不得重複");
+});
+
+test("F3/F4 產出卡：截斷預覽 + 整行展開全文（渲染層才截斷）", () => {
+  const report = read("src/components/agent-chat/AgentSubagentReportCard.tsx");
+  // 一行預覽 + 整行可點展開（沿用工具卡家族的展開語言）。
+  assert.match(report, /aria-expanded=\{open\}/);
+  assert.match(report, /aria-controls=\{bodyId\}/);
+  assert.match(report, /truncate/, "預覽層才截斷");
+  assert.match(report, /whitespace-pre-wrap/, "展開區顯示全文（保換行）");
+  assert.match(report, /\{item\.text \|\| "（无输出）"\}/, "展開區放全文");
+  assert.match(report, /已中止/, "中止態誠實標示");
+  // 產出卡進轉錄（不在置頂狀態欄渲染）。
+  assert.match(transcript, /case "subagent_result":/);
+  assert.match(transcript, /<AgentSubagentReportCard item=\{item\} \/>/);
+  // 預覽純函數：第一個非空行，空文本誠實回空字串。
+  assert.equal(reportPreview(""), "");
+  assert.equal(reportPreview("\n\n第二行\n第三行"), "第二行");
+});
+
+test("subagent bar：running 逐字滑窗（append-only + 立即釘右緣）、置顶卡无展开、面板可管理全部（2026-09-11 逐字滑窗合同）", () => {
   const src = read("src/components/agent-chat/AgentSubagentBar.tsx");
-  // 卡片是 button + aria-expanded（可点开），详情区用 grid-rows 过渡。
-  assert.match(src, /aria-expanded=\{expanded\}/, "卡片必须暴露展开语义");
-  assert.match(src, /grid-rows-\[0fr\][^]*?data-\[open=true\]:grid-rows-\[1fr\]/, "详情展开走 grid-rows 过渡");
+  // 2026-09-10 暴君裁定：置顶卡移除展开按钮（aria-expanded 卡片级语义下线）。
+  assert.ok(!/aria-expanded=\{expanded\}/.test(src), "置顶卡不再有展开语义");
+  // 兩套被否決的做法都不得回魂：循環跑馬燈（9s linear infinite + translateX(-50%)）
+  // 語義相反；「尾部跟隨 + 逐幀插值」與文字增長兩套運動打架＝使用者看到的
+  // 「滿了就整行清掉」。
+  assert.ok(!/subagent-marquee/.test(src), "循环跑马灯动画类名已下线（语义与尾部跟隨相反）");
+  assert.ok(!/translateX\(-50%\)/.test(src), "不再以 transform 循环平移文本");
+
+  // 切出 MarqueeLine 函数体做源码层行为断言（避免命中同文件其他区块的写法）。
+  const body = src.slice(src.indexOf("function MarqueeLine"), src.indexOf("interface SubagentCardProps"));
+  assert.ok(body.length > 100, "MarqueeLine 函数体切片命中");
+
+  // ① 舊做法在 MarqueeLine 裡一個都不准留：rAF 逐幀插值、reduced-motion 分支
+  //    （沒有動畫可關就不需要出口）、truncate（結尾省略號）、slice(-N)（尾段窗
+  //    ＝每次更新整串替換＝清空重填的觀感來源）。否定式一律走 readCode：
+  //    註解裡引用舊做法當反例是常態，拿原文斷言會把註解當違規。
+  const code = readCode(body);
+  assert.ok(!/requestAnimationFrame/.test(code), "不得再有 rAF 逐幀插值（與文字增長打架）");
+  assert.ok(!/prefers-reduced-motion/.test(code), "不得再有 reduced-motion 分支（已無動畫）");
+  assert.ok(!/truncate/.test(code), "running 跑马灯行不得出现 truncate（結尾省略號）");
+  assert.ok(!/slice\(-/.test(code), "不得再有尾段截取（整串替換＝清空重填）");
+  assert.ok(!/transition/.test(code), "不得用 transition（平滑滾動＝另一套運動）");
+
+  // ② 逐字滑窗的實作契約：內容一進 DOM 就**直接賦值**把視窗釘到最右，
+  //    用 useLayoutEffect 在 layout 前釘位（不得留一幀舊位置，那看起來就是頓）。
+  assert.match(
+    body,
+    /scroller\.scrollLeft = scroller\.scrollWidth - scroller\.clientWidth;/,
+    "每次更新把 scrollLeft 立即釘到最右（scrollWidth - clientWidth，無插值）",
+  );
+  assert.match(body, /useLayoutEffect\(/, "用 useLayoutEffect 在 paint 前釘位");
+  // 內容是單一 nowrap 文字節點：只有追加才會有「最左邊被擠出去」的自然滑窗。
+  assert.match(body, /whitespace-nowrap/, "內容節點 nowrap（滑窗靠排版自然溢出）");
+  assert.ok(!/\{content\}\{content\}/.test(code), "不得雙份文本（那是循環跑馬燈的寫法）");
+
+  // ③ 量測 ref 恆常掛載：scroller/track 兩個 ref 都掛在無條件渲染的節點上，
+  //    且函數只有一條 return 路徑（不再「未溢出分支不渲染量測節點」而死鎖）。
+  assert.match(body, /ref=\{scrollerRef\}/, "scroller ref 掛在恆常渲染的容器上");
+  assert.match(body, /ref=\{trackRef\}/, "track ref 掛在恆常渲染的內容節點上");
+  assert.ok(!/if \(!overflowing\)/.test(code), "不得再有依 overflowing 分支的提早 return");
+  // 頂格 2 空格的 `return (` 是函數體 JSX 出口（effect 清理函數縮排更深，不計）。
+  assert.equal((body.match(/^ {2}return \($/gm) ?? []).length, 1, "MarqueeLine 只有一條 JSX 渲染路徑");
+  assert.ok(!/\{!overflowing \?/.test(code), "不得再各分支渲染一套 DOM");
+  // 左緣漸隱遮罩保留：它負責暗示「左邊還有」（不再靠省略號佔位）。
+  assert.match(body, /left-0 z-10 w-6 bg-gradient-to-r/, "左緣漸隱遮罩保留");
+
+  // ④ marqueeText 純函數：壓空白 + 去前後空白 + 只有跨門檻才整塊裁，且不補省略號。
+  const fn = src.slice(src.indexOf("export function marqueeText"), src.indexOf("function MarqueeLine"));
+  assert.ok(fn.length > 50, "marqueeText 函数体切片命中");
+  assert.ok(!/…/.test(readCode(fn)), "不補省略號佔位（左緣遮罩負責暗示左邊還有）");
+  // 常數 export 給測試用，值不得漂移。
+  assert.equal(MARQUEE_HARD_CAP, 6000);
+  assert.equal(MARQUEE_KEEP, 3000);
+  // 換行/連續空白壓成單一空格（「一直在吐」不因換行整行跳掉）。
+  assert.equal(marqueeText("第一行\n第二行  第三行"), "第一行 第二行 第三行");
+  // 前後空白去掉，免得開頭空一格、滑窗看起來像抖了一下。
+  assert.equal(marqueeText("  前後空白  "), "前後空白");
+  assert.equal(marqueeText("\n\t  \n"), "", "只有空白＝空字串（不得變成空格）");
+  assert.equal(marqueeText(""), "");
+  assert.equal(marqueeText("短"), "短", "短文本原樣，一字不動");
+  // 剛好 HARD_CAP：不裁（等號那一格不算跨門檻）。
+  assert.equal(marqueeText("甲".repeat(MARQUEE_HARD_CAP)), "甲".repeat(MARQUEE_HARD_CAP), "6000 字不裁");
+  // 超過 HARD_CAP 一字：一次裁到 KEEP，且必須是原文尾段（最新吐出的那一段）。
+  const over = "甲".repeat(5000) + "乙".repeat(1001);
+  assert.equal(over.length, MARQUEE_HARD_CAP + 1, "構造 6001 字");
+  const cut = marqueeText(over);
+  assert.equal(cut.length, MARQUEE_KEEP, "6001 字 → 一次裁到 3000 字");
+  assert.equal(cut, over.slice(-MARQUEE_KEEP), "取的是原文尾段（最新的字）");
+  assert.ok(!cut.includes("…"), "裁完也不補省略號（佔位不是內容）");
+  // append-only：未跨門檻時，後一次輸出是前一次的前綴——這是「只追加不替換」的
+  // 可測形式，也是連續滑窗不跳動的前提。
+  const grow1 = marqueeText("字".repeat(100));
+  const grow2 = marqueeText("字".repeat(100) + "新");
+  assert.ok(grow2.startsWith(grow1) && grow2.length === grow1.length + 1, "未跨門檻時只追加不替換");
+
+  // ⑤ 資料源：running 態餵「活動流」——reasoning 也算在工作（跑馬燈的目的只是
+  //    讓使用者感知子代理在跑），再依序回落 text / lastLine / 誠實空文案。
+  assert.match(src, /<MarqueeLine text=\{item\.activity \|\| item\.text \|\| item\.lastLine \|\| "正在输出…"\} \/>/, "running 态餵活動流（含 reasoning）");
+  // SSR 行為層（真渲染，非源碼猜測）：activity 優先於 text；換行壓成空格；
+  // 短文字也照渲染（量測節點恆常掛載＝不再有量測死鎖）。
+  const runningItem: AgentSubagentItem = {
+    kind: "subagent",
+    id: "subagent-9",
+    seq: 9,
+    subagentId: "sa9",
+    label: "任务9",
+    lastLine: "旧行摘要",
+    text: "第一段\n第二段 收尾",
+    activity: "先想一下\n再核價",
+    status: "running",
+  };
+  const markup = renderToStaticMarkup(createElement(AgentSubagentBar, { items: [runningItem] }));
+  assert.match(markup, /先想一下 再核價/, "running 行渲染活動流（reasoning 也在內）");
+  assert.doesNotMatch(markup, /第一段 第二段 收尾/, "有 activity 時不再餵 text");
+  assert.doesNotMatch(markup, /truncate/, "running 行不得再走 truncate");
+  // 沒有 activity 的舊資料（或只有正文的舊幀）回落 text，不留空白行。
+  const noActivityMarkup = renderToStaticMarkup(
+    createElement(AgentSubagentBar, { items: [{ ...runningItem, activity: undefined }] }),
+  );
+  assert.match(noActivityMarkup, /第一段 第二段 收尾/, "沒有 activity 時回落 text");
   // 空输出诚实文案，不假造内容。
   assert.match(src, /尚无输出/);
   // 「查看全部」入口恒在（items>0 即渲染），面板 lg-sheet 材质 + 关闭钮 + Esc。
@@ -772,4 +1032,35 @@ test("recipe with an empty prompt falls back to reference (no phantom recipe)", 
   assert.equal(saved.kind, "reference");
   // 无会话 id 时 source 不带 sessionId。
   assert.deepEqual(saved.source, { type: "chat", id: "img-1" });
+});
+
+// 歷史會話下拉標題（網關 09-12 title 契約）：優先顯示摘要標題，無標題降級時間標籤。
+// formatSessionLabel 身在 client 組件、模組鏈含 CSS import，tsx 測試進程無法直接
+// import 該檔，故以同等邏輯做行為斷言，並用源碼錨點保證生產碼與鏡像邏輯不漂移。
+function formatSessionLabelMirror(it: { created_at: number; title?: string | null }): string {
+  const t = typeof it.title === 'string' ? it.title.trim() : '';
+  if (t) return t;
+  const d = new Date(it.created_at);
+  const date = d.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' });
+  const time = d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+  return `${date} ${time} 的对话`;
+}
+
+test("history session dropdown prefers gateway title, falls back to time label", () => {
+  // 源碼錨點：渲染點確為「標題優先＋時間兜底」雙軌（與上方鏡像邏輯同形）。
+  const surfaceCode = readCode(surface);
+  assert.match(surfaceCode, /typeof it\.title === 'string' \? it\.title\.trim\(\) : ''/);
+  assert.match(surfaceCode, /if \(t\) return t;/);
+
+  const created = new Date("2026-09-12T03:04:00Z").getTime();
+  const timeLabel = formatSessionLabelMirror({ created_at: created });
+  // title 有值 → 原樣顯示（含 trim 後內容）。
+  assert.equal(formatSessionLabelMirror({ created_at: created, title: "海报构图三轮修" }), "海报构图三轮修");
+  assert.equal(formatSessionLabelMirror({ created_at: created, title: "  trimmed title  " }), "trimmed title");
+  // title null/空串/全空格/缺欄 → 降級時間標籤（原兜底文案不動）。
+  assert.match(timeLabel, /^\d+\/\d+ \d{1,2}:\d{2} 的对话$/);
+  assert.equal(formatSessionLabelMirror({ created_at: created, title: null }), timeLabel);
+  assert.equal(formatSessionLabelMirror({ created_at: created, title: "" }), timeLabel);
+  assert.equal(formatSessionLabelMirror({ created_at: created, title: "   " }), timeLabel);
+  assert.equal(formatSessionLabelMirror({ created_at: created }), timeLabel);
 });

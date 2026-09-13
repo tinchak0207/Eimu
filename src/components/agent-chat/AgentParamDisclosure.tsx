@@ -27,12 +27,20 @@ export interface AgentParamDisclosureProps {
 
 export function AgentParamDisclosure({ argsSummary, idPrefix, toolName }: AgentParamDisclosureProps) {
   const [open, setOpen] = useState(false);
+  // F2：展开区在「首次展开」之前不挂载——默认渲染（DOM）里不许有 raw JSON /
+  // 原始函数名，只有展开过一次才留在树上（关回去仍有收起动画，不闪断）。
+  const [everOpened, setEverOpened] = useState(false);
   const narrow = useIsNarrow();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const titleId = useId();
 
   const drawerOpen = open && narrow;
+
+  const toggle = (): void => {
+    setOpen((v) => !v);
+    setEverOpened(true);
+  };
 
   const close = useCallback((): void => {
     setOpen(false);
@@ -69,7 +77,7 @@ export function AgentParamDisclosure({ argsSummary, idPrefix, toolName }: AgentP
       <button
         ref={triggerRef}
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={toggle}
         aria-expanded={open}
         aria-controls={`${idPrefix}-params`}
         className="inline-flex min-h-11 w-fit cursor-pointer touch-manipulation items-center gap-1.5 self-start rounded-full px-2.5 text-ios-subhead font-medium text-ios-blue/[0.92] transition-colors duration-200 hover:text-ios-blue active:bg-ios-blue/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 motion-reduce:transition-none [-webkit-tap-highlight-color:transparent]"
@@ -129,9 +137,17 @@ export function AgentParamDisclosure({ argsSummary, idPrefix, toolName }: AgentP
           {/* 展开后的长参数在卡内滚动，不把整张卡撑出视野：60dvh 封顶。
               overflow-y 用内联样式盖过 .agent-args-inner 的 overflow:hidden。 */}
           <div className="agent-args-inner max-h-[60dvh] overscroll-contain" style={{ overflowY: "auto" }}>
-            {/* D-19：参数分常用层／进阶层两段，不再是一坨 JSON 原文。
-                花费不往下传：卡片头已经常驻显示，展开后再来一次是噪音。 */}
-            <AgentParamCard argsSummary={argsSummary} idPrefix={idPrefix} />
+            {/* F2：原始函数名与完整参数只在展开后挂载（默认渲染不含 raw JSON）。 */}
+            {everOpened && (
+              <>
+                {toolName !== undefined && (
+                  <p className="px-0.5 pb-1.5 font-mono text-ios-caption1 text-foreground/45">{toolName}</p>
+                )}
+                {/* D-19：参数分常用层／进阶层两段，不再是一坨 JSON 原文。
+                    花费不往下传：卡片头已经常驻显示，展开后再来一次是噪音。 */}
+                <AgentParamCard argsSummary={argsSummary} idPrefix={idPrefix} />
+              </>
+            )}
           </div>
         </div>
       )}

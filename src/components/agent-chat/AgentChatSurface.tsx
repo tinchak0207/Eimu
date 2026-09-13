@@ -33,7 +33,7 @@ import { AgentChatPanel } from "@/components/agent-chat/AgentChatPanel";
 import { AgentSettingsPopover } from "@/components/agent-chat/AgentSettingsPopover";
 import { PwaHandoffPanel } from "@/components/PwaHandoffPanel";
 import { createHandoffLogin, isStandalonePwa } from "@/lib/github-login";
-import type { AgentImageItem, AgentVideoItem } from "@/lib/agent-chat-types";
+import type { AgentAudioItem, AgentImageItem, AgentVideoItem } from "@/lib/agent-chat-types";
 import type { AssetPack, AssetPackItem } from "@/lib/asset-pack-store";
 import type { AgentTranscriptProps } from "@/components/agent-chat/AgentTranscript";
 import { buildChatSaveItem, CHAT_ASSETS_PACK_ID } from "@/lib/agent-chat-asset-builders";
@@ -75,8 +75,12 @@ function formatSavedAt(savedAt: number): string {
   return new Date(savedAt).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" });
 }
 
-/** 会话目录条目标题：无标题数据源，用创建时间 + 相对新近度组合一个可读标签。 */
+/** 会话目录条目标题（双轨）：优先显示网关摘要标题（09-12 契约，opencode 首轮
+ *  生成的 title，有值即用）；无标题（null/缺栏/全空白）时降级为创建时间合成的
+ *  可读时间标签兜底。 */
 function formatSessionLabel(it: AgentSessionSummary): string {
+  const t = typeof it.title === 'string' ? it.title.trim() : '';
+  if (t) return t;
   const d = new Date(it.created_at);
   const date = d.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' });
   const time = d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
@@ -137,8 +141,9 @@ export interface AgentChatSurfaceProps {
   initialPrompt?: string;
   /**
    * 会话深链（wish 插件 ?agent=1&session=<uuid>）：挂载时直开该会话。
-   * 提供时跳过 autoStart 的自动开场，改为 switchSession 到目标会话；
-   * 目标不存在/已被回收则静默退回「开新会话」，不弹错打断落地体验。
+   * 09-12：autoStart 已撤（建号权在发送按钮），挂载本来即空态不建号——这里
+   * 只是把落点从「空态」换成 switchSession 目标会话；
+   * 目标不存在/已被回收则静默退回空态（开新＝清空，不再预建），不弹错打断落地体验。
    */
   initialSessionId?: string;
   /** inline 变体的退出去向（回工作台）。page 变体不用。 */
@@ -227,10 +232,11 @@ export function AgentChatSurface({
     discardAndStartNew,
     switchSession,
     startNewSession,
+    ensureSession,
   } = useAgentChat({
-    // 深链接管开场：有 initialSessionId 时不自动开新会话（否则会先建一个
-    // 空会话再切走，网关历史里多一条垃圾），由下面的 mount effect 切目标。
-    autoStart: !initialSessionId,
+    // 09-12 建号权收归发送按钮：hook 的 autoStart 已撤——进助理挂载即空态，
+    // 不预建会话；首条消息 send() 内部才 lazy 建号（深链的 switchSession
+    // 是恢复旧会话，不是建号，不受影响）。
     ...(onCanvasEvent ? { onCanvasEvent } : {}),
     ...(canvasStateProvider ? { canvasStateProvider } : {}),
   });
@@ -375,10 +381,12 @@ export function AgentChatSurface({
     setSwitchingTo(targetSessionId);
     try {
       const ok = await switchSession(targetSessionId);
-      if (ok) {
-        setShowHistory(false);
-        setHistorySnapshot(null);
-      }
+      // 成功：收起 dropdown 并清快照。失败：也收起——switchSession 已在失败分支
+      // 经既有 dispatchNotice（transcript notice）/ setError（非活跃时横幅）链路把原因
+      // 说清楚，surface 本身无自有 toast/notice seam，留著遮罩只会挡住那条反馈，
+      // 于是「静默失败」变成「看得见的人话」（不自造轮子）。
+      setShowHistory(false);
+      if (ok) setHistorySnapshot(null);
     } finally {
       setSwitchingTo(null);
     }
@@ -483,6 +491,13 @@ export function AgentChatSurface({
   }, []);
   // 影片「存图库」刻意不接：资产包 store 的 kind 联合（prompt/reference/lora/recipe/image）
   // 没有 video，接了也只会静默丢条目——按钮保持 disabled，不伪造行为。
+  // 音頻下載：与影片同一条 triggerDownload 路径；副档名优先取 URL 自带者
+  // （FlowMusic/lyria 出 m4a，TTS 出 mp3），取不到時回落 m4a。
+  const onAudioDownload = useCallback(async (item: AgentAudioItem): Promise<void> => {
+    const ext = /\.(m4a|mp3|wav|ogg|opus|aac|flac)(?:$|\?)/i.exec(item.url)?.[1] ?? "m4a";
+    await triggerDownload(item.url, `agent-${Date.now()}.${ext}`);
+  }, []);
+  // 音頻「存图库」同影片：資產包 store kind 联合没有 audio，按钮保持 disabled。
 
   // D-12：盯住最新一条工具调用，把助理实际用的参数回流给工作台控件。
   // 用 ref 记住处理过的条目 id——重渲染不该把同一次调用回流两次，
@@ -557,13 +572,13 @@ export function AgentChatSurface({
   /*
    * 暴君裁定 2026-09-01：進頁默認起新聊天，不靜默續舊——舊對話留在網關
    * 歷史下拉，隨時切回。同一次訪問 toggle 往返不走這裡（sessionTouchedInThisVisit
-   * 時 resumable 根本不會被設置，autoStart 直接靜默 resume）。
-   * 深鏈（initialSessionId）另有 switchSession 接管，這裡讓路避免建號賽跑。
+   * 時 resumable 根本不會被設置）。09-12 建号权收归发送按钮后，这里的
+   * startNewSession 只把界面清回空态、不建号——预建的旧存档收下后不再驱动任何开场。
+   * 深鏈（initialSessionId）另有 switchSession 接管，這裡讓路避免落點賽跑。
    *
-   * hook 在有存档时故意不自动建号（use-agent-chat.ts 里 start() 会被存档挡住），
-   * 这里替用户做掉那个决定。ref 守门是必须的：resumable 会在相关路径里被清成
+   * ref 守门是必须的：resumable 会在相关路径里被清成
    * null，effect 因此至少跑两次；没有守门，任何让 resumable 再次非空的路径
-   * 都会重开一个会话。每次 mount 只自动开一次。
+   * 都会重跑一次清空。每次 mount 只自动开一次。
    */
   useEffect(() => {
     if (!resumable || didAutoFreshStartRef.current) return;
@@ -573,14 +588,15 @@ export function AgentChatSurface({
   }, [resumable, startNewSession, initialSessionId]);
 
   /**
-   * 2026-08-25 模板注入：會話連上後自動發出。必須等 connection === "open"：
-   * autoStart/resume 建號是非同步的，沒連上就 send 等於把用戶的發送動作丟了。
-   * ref 記 nonce：只在拿到新的注入時發一次，connection 抖動不重發。
+   * 2026-08-25 模板注入；2026-09-12 改「nonce 到即发」：
+   * 旧实现等 connection === "open" 才 send——那是 autoStart/预建年代的时序
+   * （连线总在注入前开好了）。现在进助理不建号不连线，等 open 等于把注入饿死。
+   * send() 内部自带 lazy 建号＋连线（ensure 在乐观插入之前），这里不再需要闸门。
+   * ref 記 nonce：只在拿到新的注入时发一次，重渲染不重发。
    */
   const injectedNonceRef = useRef<number | null>(null);
   useEffect(() => {
     if (!agentInjection || injectedNonceRef.current === agentInjection.nonce) return;
-    if (connection !== "open") return;
     injectedNonceRef.current = agentInjection.nonce;
     onUserMessage?.();
     // directive（若有）随首条消息隐形上送：网关拼进 system，用户全程看不见。
@@ -589,7 +605,7 @@ export function AgentChatSurface({
       ...(agentInjection.directive ? { sessionDirective: agentInjection.directive } : {}),
       silent: true,
     });
-  }, [agentInjection, connection, send, onUserMessage]);
+  }, [agentInjection, send, onUserMessage]);
 
   /**
    * D-26 首张锚定。第一张图 + 产出它的那次工具调用参数都在 transcript 里，
@@ -650,6 +666,10 @@ export function AgentChatSurface({
 
   const videoActions: AgentTranscriptProps["videoActions"] = {
     onDownload: onVideoDownload,
+  };
+
+  const audioActions: AgentTranscriptProps["audioActions"] = {
+    onDownload: onAudioDownload,
   };
 
   return (
@@ -939,12 +959,14 @@ export function AgentChatSurface({
           state={state}
           connection={connection}
           sessionId={sessionId}
+          onEnsureSession={ensureSession}
           onSend={(text) => void send(text)}
           onConfirm={(requestId, approved) => confirm(requestId, approved)}
           onAnswerQuestion={(requestId, answers) => answerQuestion(requestId, answers)}
           onRetryConnection={() => void retry()}
           imageActions={imageActions}
           videoActions={videoActions}
+          audioActions={audioActions}
           anchor={anchor}
           onAnchor={() => void onAnchor()}
           onReanchor={() => void onReanchor()}

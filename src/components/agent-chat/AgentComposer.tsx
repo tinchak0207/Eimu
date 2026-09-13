@@ -32,8 +32,10 @@ export interface AgentComposerProps {
   disabled: boolean;
   onSend: (text: string) => void;
   placeholder?: string;
-  /** 上传附件所需的目标会话 id。没传时附件按钮禁用。 */
+  /** 上传附件所需的目标会话 id；空态未建号时由 onEnsureSession lazy 建号。 */
   sessionId?: string | null;
+  /** 空态（无 sessionId）选档时的 lazy 建号入口；回传可用 sid 或 null。 */
+  onEnsureSession?: () => Promise<string | null>;
   /**
    * D-24 无缝续写：把外面接进来的半句话填进输入框，光标落到末尾，不自动送出。
    * 直接送出会立刻触发扣费，与 D-5「花钱前必定交用户确认」冲突。
@@ -160,6 +162,7 @@ function AgentComposerComponent({
   onSend,
   placeholder = "描述新需求，或要求修改上一轮的图…",
   sessionId,
+  onEnsureSession,
   prefill,
   onPrefillConsumed,
   onStop,
@@ -243,11 +246,26 @@ function AgentComposerComponent({
    * 拖拽、Ctrl+V 粘贴、隐式文件选择三条入口共用这一条管道。
    */
   const enqueueFiles = useCallback(
-    (files: File[]) => {
+    async (files: File[]) => {
       if (disabled) return;
-      if (!sessionId) return;
       if (files.length === 0) return;
-      const session = sessionId;
+      // 09-13 附件 lazy 建号：空态（还没发过消息）选档＝用户明确动作，与 send()
+      // 同源走 ensureSession（复用 start() 串行化管线，不并发第二条 POST）。
+      const session = sessionId ?? (await onEnsureSession?.());
+      if (!session) {
+        Array.from(files).forEach((file) => {
+          setAttachments((prev) => [
+            ...prev,
+            {
+              id: `att-${++attachmentSeq}`,
+              fileName: file.name,
+              status: "error",
+              errorMessage: "未能建立會話，請先登入或稍後重試。",
+            },
+          ]);
+        });
+        return;
+      }
 
       // 每个文件独立处理，各自的失败不拖累其他文件。
       Array.from(files).forEach((file) => {
@@ -279,12 +297,12 @@ function AgentComposerComponent({
         });
       });
     },
-    [disabled, sessionId, uploadPlainFile, uploadVideoFile, patchAttachment],
+    [disabled, sessionId, onEnsureSession, uploadPlainFile, uploadVideoFile, patchAttachment],
   );
 
   const handleFileInput = useCallback(
     (event: ChangeEvent<HTMLInputElement>) => {
-      enqueueFiles(Array.from(event.target.files ?? []));
+      void enqueueFiles(Array.from(event.target.files ?? []));
       // 清空 input.value，好让同一文件能再次选择。
       event.target.value = "";
     },
@@ -444,7 +462,7 @@ function AgentComposerComponent({
       const files = event.clipboardData?.files;
       if (!files || files.length === 0) return;
       event.preventDefault();
-      enqueueFiles(Array.from(files));
+      void enqueueFiles(Array.from(files));
     },
     [disabled, enqueueFiles],
   );
@@ -492,12 +510,12 @@ function AgentComposerComponent({
       // 再判断 disabled —— 禁用的输入区拖文件进来同样不能触发打开。
       event.preventDefault();
       if (disabled) return;
-      enqueueFiles(Array.from(files));
+      void enqueueFiles(Array.from(files));
     },
     [disabled, enqueueFiles],
   );
 
-  const canAttach = !disabled && Boolean(sessionId);
+  const canAttach = !disabled;
   // 有原片 Object URL 的影片就进预览区：直传成功（无 frames）与降级抽帧都适用。
   const videoPreviews = attachments.filter(
     (a): a is PendingAttachment & { videoUrl: string } => Boolean(a.videoUrl),

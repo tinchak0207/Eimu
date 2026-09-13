@@ -11,7 +11,12 @@
 // 安全：本模组永不 log token、ticket 或任何可能攜带它们的 response body。
 
 import { getStoredToken, getStoredUser } from "./new-api-client";
-import type { AgentAttachmentRef, AgentQuotaState } from "./agent-chat-types";
+import type {
+  AgentAttachmentRef,
+  AgentQuotaState,
+  AgentSessionHistoryResponse,
+  OpenCodeMessage,
+} from "./agent-chat-types";
 import { LOCAL_TEST_MODE } from "./local-test-mode";
 
 /** 网道附件清单：download/attachment 解析后可转成 AgentAttachmentRef。 */
@@ -212,6 +217,11 @@ export interface AgentSessionSummary {
    * 不得崩潰，渲染端按 idle 處理。
    */
   status?: "running" | "waiting" | "idle";
+  /**
+   * 網關 2026-09-12 契約新增的會話摘要標題（opencode 首輪生成）。選填——
+   * null/缺欄（佔位名已在網關側歸一化為 null）時不得崩潰，渲染端降級為時間標籤。
+   */
+  title?: string | null;
 }
 
 /** 會話記憶補注：resume/switch 的老會話補上帳戶畫像（best-effort，失敗不打擾）。 */
@@ -261,18 +271,195 @@ export interface SendAgentMessageOptions {
   sessionDirective?: string;
 }
 
-/** 送一条对话消息。网道回 202 即算已收。 */
+/**
+ * 直連網關發送腿（09-12）：砍掉首字關鍵路徑上的中繼 RTT。
+ *
+ * 為什麼：消息 POST 一直繞 Vercel 中繼，多付一整個跨境往返 ≈370–494ms
+ * （審計實錘）；SSE token 流本就是瀏覽器→網關公網直連，發送腿走同一條路
+ * 是對稱性修復。
+ *
+ * 憑證：復用 requestSseTicket 已釀的同一張票，不另造第二套憑證——票綁定單一
+ * session、短時效（10 分鐘）、不含 sk-biz/owner key，外洩半徑只有這一路會話
+ * 與這一時窗。票放 Authorization 頭而非 query：query 會被 nginx access log
+ * 原樣記錄，POST 我們控制得了頭。
+ *
+ * 條件化（本補丁先於網關補丁上線，行為必須零迴歸）：網關今天不接受帶票的
+ * POST /messages（票按「只讀」設計——sse-ticket 路由註釋與 tools/* 的票用法
+ * 全部是 GET）。所以直連腿是「探測」不是「保證」：
+ * - 401/403（票被拒——含「老網關不認票」）→ 本票代閂鎖，後續發送全走中繼，
+ *   每代最多只付一次學費 RTT。
+ * - 網路/CORS preflight/超時錯誤在 fetch 層不可分辨（都是 TypeError）：
+ *   連續 2 次失手才閂鎖，成功一次即歸零——防「補丁沒上時反覆流血」，
+ *   也防「使用者真網路抖一下就永久縮回中繼」。
+ * - 5xx → 這次落回中繼（降級不斷），但不閂鎖：5xx 是服務端瞬態，
+ *   不是「票沒有權限」的證據。
+ * - 4xx 且帶 JSON body：網關看過 payload 並拒絕——中繼轉發的是同一個 body，
+ *   重發一次只会把同一个错再走一遍，直接抛出（與中繼路徑既有語義一致）。
+ *
+ * 永不重放：直連失手後中繼只發一次；中繼也失敗就照擲錯讓使用者看到真實
+ * 原因。成功之後絕不出現第二次 POST。
+ *
+ * 冪等：檔內（client/hook/gateway 封裝）無任何 idempotency-key 慣例
+ * （grep 核實：request_id 僅存在於 confirm/question 的業務迴執），與中繼路徑
+ * 維持同一等級——依賴「每用戶動作至多一次 POST」而非重試語義。
+ */
+
+/** 直連硬超時：與服務端 callAgentGateway 的 10 秒同一把尺。 */
+export const DIRECT_SEND_TIMEOUT_MS = 10_000;
+
+/** 預檢上限：鏡像中繼 messages/route.ts 的欄位校驗，確保兩路徑 400 語義等價。 */
+const DIRECT_MAX_CONTENT_LEN = 8_000;
+const DIRECT_MAX_CANVAS_STATE_BYTES = 128 * 1024;
+const DIRECT_MAX_DIRECTIVE_LEN = 4_000;
+
+/** 直連能力探測的閂鎖狀態（生命週期＝一張票代，重新鑄票即重設）。 */
+export interface DirectSendCapability {
+  /** true = 本票代停止直連嘗試（401/403，或連續 ≥2 次網路類失手）。 */
+  rejected: boolean;
+  /** 連續網路類失手計數；任何一次直連成功即歸零。 */
+  networkStrikes: number;
+}
+
+export function createDirectSendCapability(): DirectSendCapability {
+  return { rejected: false, networkStrikes: 0 };
+}
+
+/** 發送直連上下文：現任連線的 SSE 票 + 該票代的能力閂鎖。 */
+export interface DirectSendContext {
+  ticket: AgentSseTicket;
+  capability: DirectSendCapability;
+}
+
+/**
+ * events_url → 同會話消息端點的公網 URL。
+ *
+ * 構造契約的源頭是中繼 sse-ticket 路由：events_url 恆為
+ * `${AGENT_GATEWAY_ORIGIN}/agent/v1/sessions/<id>/events`。只認這個形狀，
+ *  pathname 不符（網關換路由/中繼換拼法）就回 null 老實走中繼，不做猜測式
+ * 字串裁剪。
+ */
+export function deriveMessagesUrl(eventsUrl: string): string | null {
+  try {
+    const url = new URL(eventsUrl);
+    if (!/^\/agent\/v1\/sessions\/[^/]+\/events$/.test(url.pathname)) return null;
+    url.pathname = url.pathname.replace(/\/events$/, "/messages");
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+/** 預檢：與中繼同款形狀/體積校驗。不合格 → 不走直連，讓中繼出 canon 400。 */
+function directSendEligible(trimmedContent: string, options?: SendAgentMessageOptions): boolean {
+  if (trimmedContent.length === 0 || trimmedContent.length > DIRECT_MAX_CONTENT_LEN) return false;
+  const canvas = options?.canvasState;
+  if (canvas !== undefined && canvas !== null) {
+    if (typeof canvas !== "object") return false;
+    try {
+      if (JSON.stringify(canvas).length > DIRECT_MAX_CANVAS_STATE_BYTES) return false;
+    } catch {
+      return false;
+    }
+  }
+  const directive = options?.sessionDirective;
+  if (typeof directive === "string" && directive.trim().length > 0 && directive.length > DIRECT_MAX_DIRECTIVE_LEN) {
+    return false;
+  }
+  return true;
+}
+
+/** 網路/CORS/超時類失手記一筆；湊滿兩筆升級為票代閂鎖。 */
+function noteNetworkStrike(capability: DirectSendCapability): void {
+  capability.networkStrikes += 1;
+  if (capability.networkStrikes >= 2) capability.rejected = true;
+}
+
+/**
+ * 打一次直連。回 "sent" 即完成；回 "fallback" 交調用方落回中繼（每票代
+ * 閂鎖規則見上）。確定性 4xx（帶可解析 JSON 錯誤體）直接擲 AgentChatError，
+ * 不允許落回——那是重放同一個必敗請求。
+ */
+async function attemptDirectSend(
+  messagesUrl: string,
+  body: Record<string, unknown>,
+  ticketValue: string,
+  capability: DirectSendCapability,
+): Promise<"sent" | "fallback"> {
+  let res: Response;
+  try {
+    res = await fetch(messagesUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${ticketValue}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(body),
+      cache: "no-store",
+      signal: AbortSignal.timeout(DIRECT_SEND_TIMEOUT_MS),
+    });
+  } catch {
+    // fetch 拋錯＝連不上／pre-flight 被拒／超時。請求未獲伺服器裁決，落回安全。
+    noteNetworkStrike(capability);
+    return "fallback";
+  }
+  if (res.ok) {
+    capability.networkStrikes = 0;
+    return "sent";
+  }
+  if (res.status === 401 || res.status === 403) {
+    // 票被拒（過期/綁定不符/老網關不認票）：本票代不再試，避免每次發送付學費。
+    capability.rejected = true;
+    return "fallback";
+  }
+  if (res.status >= 500) {
+    // 服務端瞬態：這次走中繼，保留下輪直連資格。
+    return "fallback";
+  }
+  // 其餘 4xx：嘗試還原網關錯誤體。能還原 → 確定性拒絕，照中繼語義拋錯；
+  // 還原不了（nginx 兜底頁等）→ 屬基建異常而非網關裁決，記一筆後落回。
+  let data: unknown = null;
+  try {
+    data = await res.json();
+  } catch {
+    data = null;
+  }
+  if (data !== null && typeof data === "object") {
+    throw new AgentChatError(mapErrorCode(data, res.status), extractMessage(data, res.status), res.status);
+  }
+  noteNetworkStrike(capability);
+  return "fallback";
+}
+
+/**
+ * 送一条对话消息。网道回 202 即算已收。
+ *
+ * 09-12 起帶可選第 4 參數 direct：有現任 SSE 票且未閂鎖 → 先直連網關；
+ * 票不可用/401/網路錯/5xx → 落回原有 Vercel 中繼路徑（用戶零感知）。
+ * 不帶 direct 時與舊行為逐字元等價（老呼叫點不用改）。
+ */
 export async function sendAgentMessage(
   sessionId: string,
   content: string,
   options?: SendAgentMessageOptions,
+  direct?: DirectSendContext | null,
 ): Promise<void> {
-  const body: Record<string, unknown> = { content };
+  // 中繼路由會 trim 後才轉發；直連自己先 trim，兩條路徑送到網關的 content 等價。
+  const trimmed = content.trim();
+  const body: Record<string, unknown> = { content: trimmed };
   if (options?.canvasState !== undefined && options.canvasState !== null) {
     body.canvas_state = options.canvasState;
   }
   if (typeof options?.sessionDirective === "string" && options.sessionDirective.trim().length > 0) {
     body.session_directive = options.sessionDirective;
+  }
+  if (direct && !direct.capability.rejected) {
+    const messagesUrl = deriveMessagesUrl(direct.ticket.events_url);
+    if (messagesUrl && directSendEligible(trimmed, options)) {
+      const outcome = await attemptDirectSend(messagesUrl, body, direct.ticket.ticket, direct.capability);
+      if (outcome === "sent") return;
+      // fallback：繼續往下走中繼，僅此一次。
+    }
   }
   await agentFetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}/messages`, {
     method: "POST",
@@ -361,6 +548,38 @@ export async function deleteAgentSession(sessionId: string): Promise<void> {
 }
 
 /**
+ * 拉一個會話的全量聊天歷史（opencode 原始訊息 + 游標元數據）。
+ *
+ * 站內中繼 GET /api/agent/sessions/[id] 轉發網關 /agent/v1/sessions/:id/messages，
+ * 契約：{ messages, event_counter, replay_first_id, fallback?:"replay_only" }。
+ * 「回到歷史會話」由這個端點重建 transcript，SSE 只接 event_counter 之後的增量，
+ * 不再依賴 1000 幀 ring buffer 回放（長會話會被截斷）。
+ *
+ * 錯誤沿 agentFetch 既有語義：404 → not_found、非 JSON → parse_error。
+ * 這裡只補契約級校驗（messages 必為陣列、event_counter 必為有限非負數），
+ * 校驗失敗丟 parse_error 讓調用方走降級路徑；逐 part 防呆歸歸一化層。
+ */
+export async function fetchAgentSessionMessages(sessionId: string): Promise<AgentSessionHistoryResponse> {
+  const data = await agentFetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}`, { method: "GET" });
+  const d = (data ?? {}) as Record<string, unknown>;
+  if (!Array.isArray(d.messages)) {
+    throw new AgentChatError("parse_error", "服务器未返回有效的历史消息列表。");
+  }
+  const counter = d.event_counter;
+  if (typeof counter !== "number" || !Number.isFinite(counter) || counter < 0) {
+    throw new AgentChatError("parse_error", "服务器未返回有效的事件游标。");
+  }
+  const replayFirst = d.replay_first_id;
+  const fallback = d.fallback === "replay_only" ? ("replay_only" as const) : undefined;
+  return {
+    messages: d.messages as OpenCodeMessage[],
+    event_counter: counter,
+    replay_first_id: typeof replayFirst === "number" && Number.isFinite(replayFirst) ? replayFirst : null,
+    ...(fallback ? { fallback } : {}),
+  };
+}
+
+/**
  * 強制中止當下這輪生成（系统层取消，不是发 prompt 软停）。
  * 网道转发到 opencode 的 /session/:id/abort，正在跑的 assistant turn 立刻终止。
  */
@@ -392,12 +611,14 @@ export type AgentCostMode = "economy" | "balanced" | "premium";
 /** 互动模式：协作 / 预设 / 自动 三档。 */
 export type AgentInteractionMode = "collaborate" | "preset" | "auto";
 
-/** 网关 GET/POST /agent/v1/settings 的 shape（默认 steer/efficient/balanced/preset，非法值网关回 400）。 */
+/** 网关 GET/POST /agent/v1/settings 的 shape（默认 steer/efficient/balanced/preset，非法值网关回 400）。
+ *  beast_mode：MOE 改革（Wave1-C）转正进白名单——缺字段/脏数据 sanitize 落回 false（默认 OFF）。 */
 export interface AgentSettings {
   interrupt_mode: AgentInterruptMode;
   persona: AgentPersonaMode;
   cost_mode: AgentCostMode;
   interaction_mode: AgentInteractionMode;
+  beast_mode: boolean;
 }
 
 export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
@@ -405,6 +626,7 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   persona: "efficient",
   cost_mode: "balanced",
   interaction_mode: "preset",
+  beast_mode: false,
 };
 
 const AGENT_SETTINGS_STORAGE_KEY = "agent-settings-v1";
@@ -430,6 +652,8 @@ function sanitizeAgentSettings(raw: unknown): AgentSettings {
     interaction_mode: INTERACTION_MODES.includes(d.interaction_mode as AgentInteractionMode)
       ? (d.interaction_mode as AgentInteractionMode)
       : DEFAULT_AGENT_SETTINGS.interaction_mode,
+    // beast_mode：布尔白名单（=== true 才为 ON，其余脏数据一律默认 OFF）。
+    beast_mode: d.beast_mode === true,
   };
 }
 

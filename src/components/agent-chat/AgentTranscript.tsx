@@ -6,8 +6,10 @@ import { AgentMessageBubble } from "./AgentMessageBubble";
 import { AgentToolCard } from "./AgentToolCard";
 import { AgentImageCard, type AgentImageCardProps } from "./AgentImageCard";
 import { AgentVideoCard, type AgentVideoCardProps } from "./AgentVideoCard";
+import { AgentAudioCard, type AgentAudioCardProps } from "./AgentAudioCard";
 import { AgentDirectorCard } from "./AgentDirectorCard";
 import { AgentNoticeRow } from "./AgentNoticeRow";
+import { AgentSubagentReportCard } from "./AgentSubagentReportCard";
 
 export interface AgentTranscriptProps {
   items: AgentChatState["items"];
@@ -18,6 +20,8 @@ export interface AgentTranscriptProps {
   >;
   /** 出片卡动作回调的预留通道：接线前缺省传入，按钮会保持 disabled。 */
   videoActions?: Pick<AgentVideoCardProps, "onSaveToLibrary" | "onDownload">;
+  /** 出音频卡动作回调的预留通道：接线前缺省传入，按钮会保持 disabled。 */
+  audioActions?: Pick<AgentAudioCardProps, "onSaveToLibrary" | "onDownload">;
   /** 网关暂态状态行（turn.status 事件）：新状态替换旧行，真实内容/turn.done 即清。 */
   turnStatus?: string;
   /** 当前会话 id：透传给用户气泡的附件卡铸读取票。 */
@@ -39,7 +43,7 @@ function findScrollParent(el: HTMLElement): HTMLElement | null {
   return null;
 }
 
-function AgentTranscriptComponent({ items, imageActions, videoActions, sessionId, turnStatus }: AgentTranscriptProps) {
+function AgentTranscriptComponent({ items, imageActions, videoActions, audioActions, sessionId, turnStatus }: AgentTranscriptProps) {
   const listRef = useRef<HTMLOListElement>(null);
   // 滾動容器緩存：找到後不再每次 getComputedStyle 向上找。
   const scrollerRef = useRef<HTMLElement | null>(null);
@@ -90,6 +94,12 @@ function AgentTranscriptComponent({ items, imageActions, videoActions, sessionId
                 <AgentVideoCard item={item} {...videoActions} />
               </li>
             );
+          case "audio":
+            return (
+              <li key={item.id}>
+                <AgentAudioCard item={item} {...audioActions} />
+              </li>
+            );
           case "director":
             return (
               <li key={item.id}>
@@ -105,6 +115,13 @@ function AgentTranscriptComponent({ items, imageActions, videoActions, sessionId
           case "subagent":
             // 子代理条目不进消息流：AgentChatPanel 顶部的 AgentSubagentBar 负责。
             return null;
+          case "subagent_result":
+            // 回合收尾后的产出卡（F3）：summary/全文留在转录里，可整行展开（F4）。
+            return (
+              <li key={item.id}>
+                <AgentSubagentReportCard item={item} />
+              </li>
+            );
         }
       })}
       {turnStatus ? (

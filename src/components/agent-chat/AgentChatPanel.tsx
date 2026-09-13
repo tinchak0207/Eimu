@@ -23,12 +23,16 @@ export interface AgentChatPanelProps {
   onConfirm: (requestId: string, approved: boolean) => Promise<boolean | void>;
   onAnswerQuestion: (requestId: string, answers: string[][]) => Promise<boolean | void>;
   onRetryConnection: () => void;
-  /** 当前会话 id，传给输入区做附件上传。未传时附件按钮禁用。 */
+  /** 当前会话 id，传给输入区做附件上传；空态未建号时由 onEnsureSession lazy 建号。 */
   sessionId?: string | null;
+  /** 空态选档时透传给输入区的 lazy 建号入口（附件＝用户明确动作）。 */
+  onEnsureSession?: AgentComposerProps["onEnsureSession"];
   /** 出图卡动作回调：接线前省略，按钮保持 disabled。 */
   imageActions?: AgentTranscriptProps["imageActions"];
   /** 出片卡动作回调：接线前省略，按钮保持 disabled。 */
   videoActions?: AgentTranscriptProps["videoActions"];
+  /** 出音频卡动作回调：接线前省略，按钮保持 disabled。 */
+  audioActions?: AgentTranscriptProps["audioActions"];
   /** 批量生成的中止信号。存在时批量进度卡带上「停止」按钮。 */
   onStopGeneration?: () => void;
   /**
@@ -87,8 +91,10 @@ function AgentChatPanelComponent({
   onAnswerQuestion,
   onRetryConnection,
   sessionId,
+  onEnsureSession,
   imageActions,
   videoActions,
+  audioActions,
   onStopGeneration,
   anchor,
   onAnchor,
@@ -243,7 +249,10 @@ function AgentChatPanelComponent({
         onScroll={handleTranscriptScroll}
         className="agent-transcript min-h-0 flex-1 overflow-y-auto overscroll-contain px-0.5 pb-2 pt-0"
       >
-        {items.length === 0 && connection === "open" ? (
+        {/* 第二輪就緒優化刀A：空態（歡迎語）不再等 SSE open —— idle/connecting/open
+            都顯示（「沒內容且沒壞」）。建號+ticket+SSE 握手在背後接，error 態仍由
+            connection meta 條目單獨呈現，此處只排除 reconnecting/closed。 */}
+        {items.length === 0 && connection !== "reconnecting" && connection !== "closed" ? (
           <div className="agent-empty flex h-full min-h-40 flex-col items-center justify-center gap-4 px-6 text-center">
             <span className="lg-tint-blue flex h-12 w-12 items-center justify-center rounded-full text-ios-blue">
               <Sparkles className="h-5 w-5" aria-hidden="true" />
@@ -270,7 +279,7 @@ function AgentChatPanelComponent({
             </div>
           </div>
         ) : (
-          <AgentTranscript items={items} imageActions={imageActions} videoActions={videoActions} sessionId={sessionId} turnStatus={turnStatus} />
+          <AgentTranscript items={items} imageActions={imageActions} videoActions={videoActions} audioActions={audioActions} sessionId={sessionId} turnStatus={turnStatus} />
         )}
 
         {/*
@@ -387,6 +396,7 @@ function AgentChatPanelComponent({
             onSend(text);
           }}
           sessionId={sessionId}
+          onEnsureSession={onEnsureSession}
           prefill={prefill}
           onPrefillConsumed={onPrefillConsumed}
           /* D-26 补全：生成中（turnActive）把中止信号送进输入区——

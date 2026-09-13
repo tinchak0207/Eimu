@@ -858,19 +858,21 @@ export function AgentTemplateCarousel({ templates, onUseTemplate }: AgentTemplat
     return () => window.removeEventListener("scroll", onScroll);
   }, [drive]);
 
-  /* 触控板横扫 / Shift+滚轮。React 的 onWheel 是 passive 注册，preventDefault
-     会被忽略，所以必须手动挂 { passive: false }。且只有横向分量占优时才接管，
-     纵向一律放行。教学演示期间（atc-tour-locking）同样短路转卡。 */
+  /* 触控板横扫 / Shift+滚轮。2026-09-12 性能審計（09-11 OOM note）：改
+     { passive: true } 並移除 preventDefault——非 passive 的 wheel 監聽會把
+     stage 上的滾輪事件卡在主線程，拖累合成器滾動。仍只在橫向分量占優時
+     drive() 轉卡，縱向一律放行。已知缺口：橫掃時防頁面橫向漂移/滑動導航
+     需要 stage 上的 overscroll-behavior-x CSS，那在共用樣式檔（本片禁改），
+     待後續片補。教学演示期间（atc-tour-locking）同样短路转卡。 */
   useEffect(() => {
     const stage = stageRef.current;
     if (!stage) return;
     const onWheel = (event: WheelEvent) => {
       if (stage.classList.contains("atc-tour-locking")) return;
       if (Math.abs(event.deltaX) <= Math.abs(event.deltaY)) return;
-      event.preventDefault();
       drive(event.deltaX * dragDegPerPxRef.current);
     };
-    stage.addEventListener("wheel", onWheel, { passive: false });
+    stage.addEventListener("wheel", onWheel, { passive: true });
     return () => stage.removeEventListener("wheel", onWheel);
   }, [drive]);
 
@@ -1034,7 +1036,12 @@ export function AgentTemplateCarousel({ templates, onUseTemplate }: AgentTemplat
                           poster = 封面帧 webp（影片未載入/還在緩衝時不空白）；
                           muted+playsInline+preload=metadata 才允許自動播放，
                           aria-hidden（純視覺層）。 */}
-                      {item.showcaseVideo && (
+                      {/* 2026-09-12 性能審計落地（09-11 OOM note 待修①）：只有正面卡掛
+                          <video>——換卡由 paint() 的 setFront 觸發本圖層重渲染，新正面卡
+                          挂载即 autoPlay（play），離去卡卸載整個元素（等價 pause+卸 src
+                          還解碼器），8 路軟解 → 1 路。啟停完全鉤進既有 data-front 變更點，
+                          不新增事件監聽。非正面卡走下面現成的封面帧兜底路徑。 */}
+                      {item.showcaseVideo && index === front && (
                         /* eslint-disable-next-line jsx-a11y/media-has-caption, @next/next/no-img-element -- 靜態 public 資產背景層 */
                         <video
                           src={item.showcaseVideo}
@@ -1048,8 +1055,9 @@ export function AgentTemplateCarousel({ templates, onUseTemplate }: AgentTemplat
                           className="absolute inset-0 h-full w-full object-cover"
                         />
                       )}
-                      {/* 無影片時的靜態兜底：封面帧照。object-cover 鋪滿。 */}
-                      {!item.showcaseVideo && (
+                      {/* 靜態兜底：封面帧 webp。原為「無影片時的兜底」，2026-09-12 起
+                          兼作「非正面卡」的常態渲染路徑。object-cover 鋪滿。 */}
+                      {(!item.showcaseVideo || index !== front) && (
                         /* eslint-disable-next-line @next/next/no-img-element -- 靜態 public 資產，case-photo 是背景層不走 next/image */
                         <img
                           src={item.showcaseImage}

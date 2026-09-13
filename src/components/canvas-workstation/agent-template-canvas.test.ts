@@ -1,11 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import type { AgentPipeline, AgentPipelineStep } from "@/lib/agent-templates";
+// 2026-09-12 首屏減重拆分：畫布鋪法是執行側，完整步驟型別與內建模板都在 payload 檔。
+import type { AgentPipelineFull, AgentPipelineStepFull } from "@/lib/agent-templates-payload";
 import { templateToCanvasLayout, applyTemplateToCanvas } from "@/components/canvas-workstation/agent-template-canvas";
-import { AGENT_TEMPLATES } from "@/lib/agent-templates";
+import { AGENT_TEMPLATES_FULL } from "@/lib/agent-templates-payload";
 
 /** 步驟 outputKind → 生成卡節點類型字串（CanvasNodeType 值即小寫名；缺省 image）。 */
-const GEN_NODE_TYPE: Record<NonNullable<AgentPipelineStep["outputKind"]>, string> = {
+const GEN_NODE_TYPE: Record<NonNullable<AgentPipelineStepFull["outputKind"]>, string> = {
   image: "image",
   text: "text",
   video: "video",
@@ -28,7 +29,7 @@ function plainFixture() {
   };
 }
 
-const PIPELINE: AgentPipeline = {
+const PIPELINE: AgentPipelineFull = {
   summary: "结构化 → 资产先行 → 门禁 → 组装",
   steps: [
     {
@@ -193,7 +194,7 @@ test("steps without requiredTools produce no tool cards and gen toolIds = []", (
 });
 
 test("built-in templates all lay out with visible tool chain (>= 1 tool card, gens = steps)", () => {
-  for (const template of AGENT_TEMPLATES) {
+  for (const template of AGENT_TEMPLATES_FULL) {
     const { nodes, connections } = templateToCanvasLayout(template);
     const gens = nodes.filter((n) => n.id.endsWith("-gen"));
     assert.equal(gens.length, template.pipeline.steps.length, `${template.id} 生成卡數 = 步驟數`);
@@ -212,7 +213,7 @@ test("built-in templates all lay out with visible tool chain (>= 1 tool card, ge
 });
 
 test("built-in templates: every gen card carries toolIds/deliverable/inputFrom + shortName title; every tool card shows 输入/输出", () => {
-  for (const template of AGENT_TEMPLATES) {
+  for (const template of AGENT_TEMPLATES_FULL) {
     const { nodes } = templateToCanvasLayout(template);
     const gens = nodes
       .filter((n) => n.id.endsWith("-gen"))
@@ -241,7 +242,7 @@ test("built-in templates: every gen card carries toolIds/deliverable/inputFrom +
 });
 
 test("empty pipeline lane does not create a fabricated cross-lane connection", () => {
-  const sparsePipeline: AgentPipeline = {
+  const sparsePipeline: AgentPipelineFull = {
     summary: "含空泳道",
     steps: [
       PIPELINE.steps[0],

@@ -129,7 +129,11 @@ export function useCanvasProjectSync(params: UseCanvasProjectSyncParams) {
   }, [canvas, viewport, backgroundMode, projectTitle, activeCardIds, buildProject]);
 
   // ─────────────────────── Wave C1：壓縮快照上行（agent 的眼睛）
-  // 300ms 尾隨防抖：持續平移/拖動期間不上報，停手才推最新一幀。失敗靜默。
+  // 3s 尾隨防抖（第二輪就緒優化刀C，原 300ms）：sessionId 落地（AI 助理開場）
+  // 觸發的第一幀快照會與空態渲染爭搶瀏覽器連接/網路，實測拖過 emptyAt
+  // （s=1086, e=1740 vs emptyAt=1411）。快照是盡力而為——agent 只在用戶發
+  // 第一條消息時才讀 canvas_state（send 隨 message 上送 canvasState），晚
+  // 3 秒上送零影響；持續平移/拖動期間同樣不上報，停手才推最新一幀。失敗靜默。
   useEffect(() => {
     if (!sessionId) return;
     const t = window.setTimeout(() => {
@@ -157,7 +161,7 @@ export function useCanvasProjectSync(params: UseCanvasProjectSyncParams) {
           ...(c.loraIds?.length ? { lora_ids: c.loraIds } : {}),
         })),
       });
-    }, 300);
+    }, 3000);
     return () => window.clearTimeout(t);
   }, [sessionId, canvas.nodes, canvas.connections, selectedNodeId, viewport, activeCharacterCards]);
 
