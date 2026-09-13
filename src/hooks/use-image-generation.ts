@@ -756,7 +756,7 @@ export function useImageGeneration(options?: UseImageGenerationOptions): UseImag
           results: completedResults,
           workflow,
         });
-        writeGenerationCache(updatedCache);
+        scheduleGenerationCacheWrite(updatedCache);
         setRecentWorkflows(selectRecentWorkflowEntries(selectPersistedHistoryForUser(updatedCache, user.id)));
       }
       return completedResults;
@@ -782,4 +782,46 @@ export function useImageGeneration(options?: UseImageGenerationOptions): UseImag
     resetState,
     activePrompt,
   };
+}
+
+/**
+ * 生成完成尾端的 localStorage 寫入挪出關鍵路徑。
+ * recordGenerationResult 已在寫入前把 image(dataURL) 置 null（檔內既有 strip 前移），
+ * 殘留的同步 setItem 仍可能在生成結束瞬間與其它主線程工作搶佔；这里延後到 idle 執行，
+ * 并節流 ≥500ms：連續多次生成只保留最新快照、至多每 500ms 落盤一次。
+ * Safari 無 requestIdleCallback → 降級 setTimeout。
+ */
+const CACHE_WRITE_MIN_GAP_MS = 500;
+let cacheWritePending: Parameters<typeof writeGenerationCache>[0] | null = null;
+let cacheWriteScheduled = false;
+let cacheWriteLastAt = 0;
+
+function flushGenerationCacheWrite(): void {
+  cacheWriteScheduled = false;
+  const cache = cacheWritePending;
+  cacheWritePending = null;
+  if (!cache) return;
+  const gap = Date.now() - cacheWriteLastAt;
+  if (gap < CACHE_WRITE_MIN_GAP_MS) {
+    cacheWritePending = cache;
+    cacheWriteScheduled = true;
+    setTimeout(flushGenerationCacheWrite, CACHE_WRITE_MIN_GAP_MS - gap);
+    return;
+  }
+  cacheWriteLastAt = Date.now();
+  writeGenerationCache(cache);
+}
+
+function scheduleGenerationCacheWrite(cache: Parameters<typeof writeGenerationCache>[0]): void {
+  cacheWritePending = cache;
+  if (cacheWriteScheduled) return;
+  cacheWriteScheduled = true;
+  const host = window as unknown as {
+    requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+  };
+  if (typeof host.requestIdleCallback === "function") {
+    host.requestIdleCallback(() => flushGenerationCacheWrite(), { timeout: 1000 });
+  } else {
+    setTimeout(flushGenerationCacheWrite, 200);
+  }
 }
