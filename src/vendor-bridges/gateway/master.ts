@@ -2,6 +2,9 @@
 // check = 時長/解析度/畫幅 + B4 lint must + B5 mix sync_errors 聚合；blockers 非空拒導。
 // 導出 = concat（trim→變速→scale/pad 畫幅→clip.filter 調色）+ mix.wav 音軌 + 字幕 ASS 燒錄（失敗自動降級重試）
 //   + 封面幀 + probeRenderedVideo 強校驗（輪子：composeEngine probeRenderedVideo；解析度口徑 EXPORT_RESOLUTIONS）。
+// 2026-09-15 補三項（AID 產品層對稱差，見 ./material-fingerprint.ts 檔頭）：
+//   check 加素材 URL 結構守衛（blocker source="url"）；export 回填素材集合 fingerprint。
+//   複用邏輯待接持久層（本片只算指紋，不跨次調用複用）。
 // 妥協（誠實 notes）：xfade 轉場 v1 不燒錄（transitionAfter 留給前端 composeEngine 渲染）；mix 響度不達標不是 blocker（POST /timeline/mix loudnorm 可矯正）。
 import { mkdir, rm, writeFile, access } from "node:fs/promises"
 import path from "node:path"
@@ -13,6 +16,7 @@ import { probeRenderedVideo } from "./editor/composeEngine"
 import { filterToFfmpeg } from "./editor/presets/filterPresets"
 import { invoke } from "./editor/adapter/tauri-adapter"
 import { subtitlesAss } from "./style"
+import { computeExportFingerprint, isForbiddenMaterialUrl } from "./material-fingerprint"
 
 interface CommandResult { stdout: string; stderr: string; exit_code: number }
 
@@ -34,7 +38,7 @@ export const MASTER_PRESETS = {
 } as const
 export type MasterPresetId = keyof typeof MASTER_PRESETS
 
-export interface MasterBlocker { source: "lint" | "mix" | "timeline"; detail: string }
+export interface MasterBlocker { source: "lint" | "mix" | "timeline" | "url"; detail: string }
 
 export interface MasterCheck {
   ok: boolean
@@ -81,6 +85,19 @@ export async function masterCheck(sessionId: string): Promise<MasterCheck> {
   if (!tl.clips.length) blockers.push({ source: "timeline", detail: "時間線無視頻 clip，無母帶可導出" })
   if (total <= 0) blockers.push({ source: "timeline", detail: "時間線總長為 0" })
 
+  // 素材 URL 結構守衛（AID MaterialUrlGuard 口徑）：blob:/data:/嵌套協議/非 http(s) 一律拒導。
+  // 零 I/O 快檢，不觸網；本地相對路徑合法（可達性由導出級 resolveSource 決定）。
+  const urlTargets: { label: string; url: string | undefined | null }[] = [
+    ...tl.clips.map((c) => ({ label: `clip ${c.id}`, url: c.path })),
+    ...tl.audioClips.map((a) => ({ label: `audioClip ${a.id}`, url: a.path })),
+    ...(tl.bgm ? [{ label: "bgm", url: tl.bgm.path }] : []),
+  ]
+  for (const t of urlTargets) {
+    if (isForbiddenMaterialUrl(t.url ?? "")) {
+      blockers.push({ source: "url", detail: `${t.label} 素材地址結構非法：${String(t.url).slice(0, 160)}（blob:/data:/嵌套協議/非 http(s) 服務端無法訪問，請改用已上傳的素材地址）` })
+    }
+  }
+
   // 首個可達視頻源解析度（檢查級不強制下載；http 素材在導出級才解析）
   let video_resolution: { width: number; height: number } | null = null
   const ffmpeg = await detectFfmpeg()
@@ -123,6 +140,10 @@ export interface MasterExportResult {
   expected_duration_sec: number
   probe_error: string | null
   notes: string[]
+  /** 素材集合指紋（sha256 hex）：素材沒變則指紋不變。複用判定待接持久層，見 masterExport 檔頭。 */
+  fingerprint?: string
+  /** 跨次調用複用標記：本片恆 undefined（無持久層，只算指紋不回填）。 */
+  reused?: boolean
 }
 
 function clipChain(c: TimelineClip, idx: number, w: number, h: number): string {
@@ -137,7 +158,14 @@ function clipChain(c: TimelineClip, idx: number, w: number, h: number): string {
   return parts.join(",") + "[v" + idx + "]"
 }
 
-/** POST /agent/v1/timeline/master：導出閘（blockers 非空拋 TimelineValidationError → 400）。 */
+/**
+ * POST /agent/v1/timeline/master：導出閘（blockers 非空拋 TimelineValidationError → 400）。
+ *
+ * 導出指紋（2026-09-15，AID `computeExportFingerprint` 口徑）：本函式計算並回填 `fingerprint`。
+ * **複用邏輯待接持久層**——跨次調用「指紋相同且上次成功 → 直接複用不再合成不再扣費」需要一個
+ * 持久化的 fingerprint→成功產物 映射（AID 落在 `aid_episode_editor.export_fingerprint`），
+ * 本片不實作；`reused` 恆為 undefined。
+ */
 export async function masterExport(sessionId: string, presetId: MasterPresetId = "landscape_169", withCover = true): Promise<MasterExportResult> {
   const check = await masterCheck(sessionId)
   if (!check.ok) {
@@ -148,6 +176,17 @@ export async function masterExport(sessionId: string, presetId: MasterPresetId =
   const preset = MASTER_PRESETS[presetId]
   const ffmpeg = await detectFfmpeg()
   if (!ffmpeg) throw new TimelineValidationError("ffmpeg 不可用，無法導出")
+
+  // 素材集合指紋（純計算，零 I/O）：clips 保序（拼接順序即語義）；durationSec 取時間線有效時長
+  // clipLength（含 trim/變速），比源檔總長更貼近實際入片素材。
+  const fingerprint = computeExportFingerprint({
+    clips: tl.clips.map((c) => ({ path: c.path, durationSec: clipLength(c) })),
+    audioClips: (tl.audioClips ?? []).map((a) => ({ path: a.path, durationSec: a.duration, startSec: a.startSec })),
+    subtitles: (tl.subtitles ?? []).map((s) => ({ startSec: s.startSec, endSec: s.endSec, text: s.text })),
+    bgm: tl.bgm ? { path: tl.bgm.path, volume: tl.bgm.volume } : null,
+    aspect: preset.aspect,
+    presetId,
+  })
 
   // 素材解析（複用 mix.resolveSource：本地直用、http 下載到 tmp），失敗=誠實拒導
   const workDir = path.join(TMP_DIR, `master-${Date.now()}`)
@@ -254,6 +293,7 @@ export async function masterExport(sessionId: string, presetId: MasterPresetId =
       expected_duration_sec: r3(expectedDur),
       probe_error,
       notes,
+      fingerprint,
     }
   } finally {
     await rm(workDir, { recursive: true, force: true }).catch(() => {})
