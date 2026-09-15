@@ -7,8 +7,10 @@
  * 结构化报错铁律 / DI 缺省范式全部同构。白名单差异仅三处：
  *   ① prompt 组装：情绪契约（genre/BPM/key/mood/结构）经
  *      buildLyriaStylePrompt（music-lyria.ts 真源）拼 Lyria 风格 prompt；
- *   ② 交付物栏位：emotion_contract / lyrics / audio_url / duration_source / qc
- *      （MUSIC_DELIVERABLES 五栏，expert-registry music 行 requiredFields 同源）；
+ *   ② 交付物栏位：emotion_contract / lyrics / melody_notation / audio_url /
+ *      duration_source / qc（MUSIC_DELIVERABLES 六栏，expert-registry music 行
+ *      requiredFields 同源；melody_notation=人声主旋律音高序列，刀 I
+ *      2026-09-15 补，round1/round3b 判词「能唱的词有，被唱出来的曲无」根因栏）；
  *   ③ 宪法注入：beastMode === true 时把 deploy-staging/expert-gateway/
  *      expert-constitution.md 原文注入 prompt 头；OFF 时一个字不多、档案不触碰。
  *      beastMode 由调用方经 expert-registry.readBeastMode(settings) 计算后传入——
@@ -47,7 +49,7 @@ import type { MusicToolResult } from "./music-tools";
 export const EXPERT_CONSTITUTION_PATH = "deploy-staging/expert-gateway/expert-constitution.md" as const;
 
 /** 交付字段白名单：与 expert-registry music 行 requiredFields 一一对应。 */
-export const MUSIC_DELIVERABLES = ["emotion_contract", "lyrics", "audio_url", "duration_source", "qc"] as const;
+export const MUSIC_DELIVERABLES = ["emotion_contract", "lyrics", "melody_notation", "audio_url", "duration_source", "qc"] as const;
 export type MusicDeliverable = (typeof MUSIC_DELIVERABLES)[number];
 
 /** 交付物种类（expert-contract.ts 契约示例钉死的 music 域 kind）。 */
@@ -244,6 +246,13 @@ export function assembleMusicDirectorPrompt(
     `歌词：${delegation.lyrics?.trim() ? delegation.lyrics.trim() : "（纯器乐，无歌词；需要人声必须提供歌词）"}`,
     `时长：${delegation.duration_hint ?? "full"}（full=整歌约 3 分钟 / clip30=30 秒片段）`,
     `交付字段：${delegation.deliverables.join("、")}`,
+    // 刀 I（2026-09-15）：melody_notation 可判形态指引——措辞对齐上方「时长：」行的
+    // 「字段：值（判据）」格式；机器判据口径 = 栏位名逐字出现＋紧跟实质内容（缺整栏＝未交付）。
+    ...(delegation.deliverables.includes("melody_notation")
+      ? [
+          `交付字段格式：melody_notation 需含调性＋节拍＋至少一段人声主旋律以音名字符序列标注（例：A4–C5–B4–A4，含时值），交付正文须逐字出现栏位名 melody_notation 并紧跟上述实质内容（缺整栏＝未交付）。`,
+        ]
+      : []),
     `参考素材：${delegation.reference_refs && delegation.reference_refs.length > 0 ? delegation.reference_refs.join("、") : "无"}`,
   ].join("\n");
 
@@ -286,11 +295,13 @@ export type MusicDeliverableCollectResult =
     };
 
 /**
- * music_gen 工具回执 → 五栏交付 payload → QC 签名 → 组装闸门自检。
+ * music_gen 工具回执 → 交付 payload → QC 签名 → 组装闸门自检。
  *
- * 契约（registry music 行 requiredFields，钉死）：payload 五栏全形
- * （emotion_contract/lyrics/audio_url/duration_source/qc），缺关键栏位返回
- * 结构化错误，不产半形数据（对齐 blender-delegate collect 铁律）：
+ * 契约（registry music 行 requiredFields，钉死）：六栏（含 melody_notation，
+ * 人声主旋律音高序列——导演文案交付栏，VPS 闸门按正文逐字判定）；工具回执
+ * 路径只产 audio_url/duration_source 等五栏，melody_notation 不经 music_gen
+ * 回执回填、collect 不伪造。缺关键栏位返回结构化错误，不产半形数据
+ * （对齐 blender-delegate collect 铁律）：
  *   - 工具回执 ok:false 或非 JSON = 未交付（no_output），禁止拿失败回执组装。
  *   - 无 audio_url（音频未上传 gateway）= missing_deliverables。
  *   - 组装后 validateExpertDeliverable 不过 = deliverable_invalid（不外流）。
@@ -334,7 +345,7 @@ export function collectMusicDeliverableFromToolResult(
     return {
       ok: false,
       code: "missing_deliverables",
-      hint: `交付物分拣缺关键栏位：${missing.join("、")}。payload 五栏必须全形（${MUSIC_DELIVERABLES.join("、")}，缺栏组装闸门不过）。回执实际字段：${seen}。`,
+      hint: `交付物分拣缺关键栏位：${missing.join("、")}。payload ${MUSIC_DELIVERABLES.length} 栏必须全形（${MUSIC_DELIVERABLES.join("、")}，缺栏组装闸门不过；melody_notation 由导演文案侧交付回填，工具回执只产其余五栏）。回执实际字段：${seen}。`,
       missing,
     };
   }

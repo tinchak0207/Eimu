@@ -95,6 +95,16 @@ test("ON：注册表摘要含 director3d 与 music 两行，行内容来自 EXPE
   const videoDirectorLine = lines.find((l) => l.includes("video-director"));
   assert.ok(videoDirectorLine, "video-director 激活行必须在摘要中");
   assert.ok(!videoDirectorLine!.includes("未启用"), "激活行不得标注未启用（Wave2 收口翻正）");
+  // 09-15 翻正部署片：critic 行去「（未启用）」——round3b 實錄（observations.md 观测 2）
+  // 實錘這四個字在 digest 裡就是 orchestrator 拒派 critic 的直接病源。
+  const criticLine = lines.find((l) => l.startsWith("- critic（"));
+  assert.ok(criticLine, "critic 激活行必须在摘要中（playbook 第 18 条强制派遣的路由前提）");
+  assert.ok(!criticLine!.includes("未启用"), "critic 行翻正后不得再标注未启用（在场即路由解禁）");
+  assert.ok(
+    criticLine!.includes("任务类型 review / audit / critique / quality_gate"),
+    `critic 可路由语义必须在場：${criticLine}`,
+  );
+  assert.ok(!digest.includes("未启用"), "翻正后整个摘要零「未启用」标注（注册表无 provisioned 行）");
 });
 
 test("provisioned 行标注机制：buildExpertLine 对 provisioned:true 行标「未启用」", () => {
@@ -239,6 +249,116 @@ test("ON：幀以狀態聲明行開頭，gate 元數據絕跡", async () => {
   assert.ok(result.frame.startsWith(BEAST_MODE_STATE_LINE), "幀首必須是野獸模式狀態聲明");
   assert.ok(!result.frame.includes("BEAST_MODE=OFF 本檔完全不生效"), "gate 元數據不得進幀");
   assert.ok(result.frame.endsWith(base), "原 basePrompt 仍在幀尾");
+});
+
+// ── 09-15 驗收制度片B：驗收可算式化斷言（純增量，既有斷言一字未刪） ──
+
+test("09-15：第二節含「驗收的執行標準（可算式優先）」四條，且必帶算式範例", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { join, dirname } = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+  const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+  const raw = readFileSync(join(root, ORCHESTRATOR_DISPATCH_PLAYBOOK_PATH), "utf8");
+  const playbook = stripProvenanceHeader(raw);
+
+  // 新節標題與四條編號（11-15；11-14 為四條驗收標準，15 為救濟條款）。
+  assert.ok(playbook.includes("驗收的執行標準（可算式優先"), "新節標題必須在");
+  for (const clause of [
+    "凡交付物含數字，驗收必須算，不能讀",
+    "spec 必帶可驗收斷言",
+    "交付契約對表",
+    "跨檔一致性抽查",
+    "驗收手段救濟：你可以自己核算",
+  ]) {
+    assert.ok(playbook.includes(clause), `驗收條款必須在：${clause}`);
+  }
+  // 算式範例必須可執行（教具算式逐字在場）。
+  assert.ok(playbook.includes("60/146×4"), "拍點算式範例必須在場（可被直接照抄計算）");
+  assert.ok(playbook.includes("沒一段在拍上"), "算術錯教具必須在場（禁止看起來對齊放行）");
+  // 契約清單真源路徑與 digest 兜底句（片A 未落地時的退路）。
+  assert.ok(playbook.includes("expert-delivery-contracts.json"), "契約清單真源路徑必須在場");
+  assert.ok(playbook.includes("若該檔尚未存在"), "digest 兜底條款必須在場");
+  // 署名與 critic 指引（第一節末）。
+  assert.ok(playbook.includes("验收由你本人署名负责"), "驗收署名條款必須在場");
+  assert.ok(playbook.includes("critic Expert"), "critic 獨立審核指引必須在場");
+});
+
+test("09-15：既有第二節條款零刪改（純增量錨）", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { join, dirname } = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+  const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+  const raw = readFileSync(join(root, ORCHESTRATOR_DISPATCH_PLAYBOOK_PATH), "utf8");
+  const playbook = stripProvenanceHeader(raw);
+
+  for (const legacy of [
+    "**常態保持 ≥3 路並發**",
+    "**async 派遣 = 常態**",
+    "收到完工通知（喚醒/同步返回）的動作順序：驗收 → 補派新片 → 再回報。",
+    "**上層決策/下層執行分離**",
+    "驗收 = 讀回報 + 抽查證據，不是自己重跑。",
+    "**驗屍先於重派**",
+    "清場三驗",
+    "**派遣簡報鐵律（R2-0911）**",
+    "**可用性事實鐵律（R2-0911）**",
+    "**存貨復用條款（R2-0911）**",
+  ]) {
+    assert.ok(playbook.includes(legacy), `既有條款不得被刪改：${legacy}`);
+  }
+  // 「不許內聯動手」原句必須保留（救濟條款是對它的解釋，不是刪除）。
+  assert.ok(playbook.includes("你不許內聯動手"), "第 4 條原句必須保留");
+});
+
+// ── 09-15 驗收制度片E：16-19 硬條款＋L152 強制升級（純增量錨） ──
+
+test("09-15 片E：16-19 硬條款關鍵詞在場，11-15 與 L152 原文錨點零刪", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { join, dirname } = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+  const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+  const raw = readFileSync(join(root, ORCHESTRATOR_DISPATCH_PLAYBOOK_PATH), "utf8");
+  const playbook = stripProvenanceHeader(raw);
+
+  // 新條 16-19 判據關鍵詞（按落筆實際字串，缺一即軟條款復辟）。
+  for (const kw of [
+    "【交付閘門",
+    "全部跑通",
+    'expert="critic"',
+    "逐字抄",
+    "重派後仍未達標",
+    "違此條＝對用戶說謊",
+    "verdict/issues/evidence/qc",
+    "未經獨立審核",
+    "首派即齊欄",
+    "交付契约",
+  ]) {
+    assert.ok(playbook.includes(kw), `16-19 硬條款關鍵詞必須在場：${kw}`);
+  }
+  // 條目編號 16-19 各自成條（行首匹配）。
+  for (const no of ["16.", "17.", "18.", "19."]) {
+    assert.ok(new RegExp(`^${no} `, "m").test(playbook), `必須存在編號條目 ${no}`);
+  }
+  // 既有条款 11-15 錨點零刪（純增，禁删任何既有条款）。
+  for (const legacy of [
+    "凡交付物含數字，驗收必須算，不能讀",
+    "spec 必帶可驗收斷言",
+    "交付契約對表",
+    "跨檔一致性抽查",
+    "驗收手段救濟：你可以自己核算",
+  ]) {
+    assert.ok(playbook.includes(legacy), `既有條款 11-15 錨點不得被刪：${legacy}`);
+  }
+  // L152 軟條款原文結構保留（強制句只能就地增補，不能替換原文）。
+  for (const anchor of [
+    "验收署名与独立审核（09-15）",
+    "验收由你本人署名负责",
+    "只审不产",
+    "若 digest 无 critic 行则退回你自己署名验收",
+    "critic 的判决仍由你署名采纳或驳回，独立审核不转移署名责任",
+  ]) {
+    assert.ok(playbook.includes(anchor), `L152 原文/升級錨點不得被刪：${anchor}`);
+  }
+  assert.ok(playbook.includes("由「可派」升級為「**必須派**」"), "軟條款升級句必須在場");
 });
 
 // ── sanitize 白名单：beast_mode 往返 ────────────────────────

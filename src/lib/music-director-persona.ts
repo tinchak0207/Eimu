@@ -7,7 +7,7 @@
  *   ① 域常量换音乐版（MUSIC_DIRECTOR_PERSONA_ID="music-director"、
  *      工具白名单 import music-tools.ts 的 MUSIC_HARNESS_TOOL_IDS）；
  *   ② 委托单/回传契约 import 自 music-delegate.ts（音乐版委派组装，
- *      交付物五栏 emotion_contract/lyrics/audio_url/duration_source/qc）；
+ *      交付物六栏 emotion_contract/lyrics/melody_notation/audio_url/duration_source/qc）；
  *   ③ 交付物契约 expertId 钉死 "music"（expert-contract.ts ExpertId 联合成员）。
  * 交互/组装逻辑一行不动：assembleDirectorReply 同构（唯一出口、不新增校验、
  * composeDirectorDelegation 直接透传）。
@@ -17,7 +17,7 @@
  * 都在 VPS /opt/agent-harness，本地 repo 无 gateway 真源可改。本档钉死契约
  * 四要素并被委托单/回传两端 import。
  *
- * 隔离铁律：音乐导演回传只含交付物契约 + 交付摘要（五栏 payload + music_summary
+ * 隔离铁律：音乐导演回传只含交付物契约 + 交付摘要（契约 payload + music_summary
  * ≤500 token），过程（生成日志/试听中间态/多轮痕迹）不出 subagent——对应
  * gateway subagent.ts 既有隔离语义（subagent.delta 只透 text、summary 截
  * 600 字、子会话用后即删），本档不新增通道。
@@ -96,7 +96,7 @@ export type { MusicToolResult };
 export type MusicDirectorDelegationReply =
   | {
       ok: true;
-      /** 交付物契约（expert-contract.ts 契约形：五栏 payload + QC 签名）。 */
+      /** 交付物契约（expert-contract.ts 契约形：契约 payload + QC 签名）。 */
       deliverable: ExpertDeliverable;
       /** 交付摘要（≤500 token，隔离铁律：过程不出 subagent）。 */
       music_summary: string;

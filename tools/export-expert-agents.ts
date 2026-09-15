@@ -1,6 +1,7 @@
 #!/usr/bin/env -S npx tsx
 //
-// Expert Gateway 三產物機械導出器（R8 審計修復片 1，2026-09-10）。
+// Expert Gateway 四產物機械導出器（R8 審計修復片 1，2026-09-10；
+// contracts 第四產物 = 09-15 評測补课片 critic 裁定新增）。
 //
 // 為什麼需要它：R8 架構審計實錘（記憶 beast-harness-architecture-audit-r8-0910）——
 // 能力斷路只落地 4/25（orchestrator 只關 blender×3+music_gen，21 個域工具仍開），
@@ -15,6 +16,10 @@
 //   registry-digest.txt   HTML 註釋頭（R7 provenance 規範，注入端剝離）+
 //                         buildExpertRegistryDigest() 逐字輸出
 //   expert-ids.json       {"experts":[...registry 鍵序...]}（gateway 校驗 expert 欄用）
+//   expert-delivery-contracts.json（09-15 評測补课片新增）
+//                         {"<id>":{"requiredFields":[…],"qcSignatureRequired":bool},…}
+//                         逐個從 EXPERT_REGISTRY 生成、零手抄——playbook 驗收
+//                         對表與 critic 審核官的交付契約清單真源。
 //
 // 兩條 tools map 規則的差異與理由（2026-09-11 修補，片4 實彈暴露補集寫窄）：
 //   orchestrator = 只斷「Expert 域工具」（registry toolIds 聯集，固定 25 個）。
@@ -50,6 +55,7 @@ const TARGETS = {
   agents: join(OUT_DIR, "opencode-agents.json"),
   digest: join(OUT_DIR, "registry-digest.txt"),
   ids: join(OUT_DIR, "expert-ids.json"),
+  contracts: join(OUT_DIR, "expert-delivery-contracts.json"),
 } as const;
 const CHECK = process.argv.includes("--check");
 
@@ -159,12 +165,30 @@ function buildExpertIdsJson(): string {
   return `${JSON.stringify({ experts: Object.keys(EXPERT_REGISTRY) }, null, 2)}\n`;
 }
 
+/**
+ * 交付契約清單（09-15 評測补课片新增）：{"<id>":{"requiredFields":[…],
+ * "qcSignatureRequired":bool},…}，逐個從 EXPERT_REGISTRY 生成、零手抄，
+ * 鍵序 = registry 插入序（確定性輸出）。playbook 第二節驗收對表與
+ * critic 審核官逐欄核驗的清單真源。
+ */
+function buildDeliveryContractsJson(): string {
+  const contracts: Record<string, { requiredFields: string[]; qcSignatureRequired: boolean }> = {};
+  for (const expert of Object.values(EXPERT_REGISTRY)) {
+    contracts[expert.id] = {
+      requiredFields: [...expert.deliverableContract.requiredFields],
+      qcSignatureRequired: expert.deliverableContract.qcSignatureRequired,
+    };
+  }
+  return `${JSON.stringify(contracts, null, 2)}\n`;
+}
+
 // ── 主流程 ──────────────────────────────────────────────────────────────────
 
 const PRODUCTS: Array<[string, (universeTools: readonly string[]) => string]> = [
   [TARGETS.agents, buildAgentsJson],
   [(TARGETS.digest), () => buildDigestTxt()],
   [(TARGETS.ids), () => buildExpertIdsJson()],
+  [(TARGETS.contracts), () => buildDeliveryContractsJson()],
 ];
 
 function main(): void {
@@ -203,9 +227,9 @@ function main(): void {
       );
       process.exit(1);
     }
-    console.log(
-      `EXPORT_CHECK_OK：三產物與機械導出 byte 等價（域工具 ${DOMAIN_TOOLS.length} / 全集 ${universe.tools.length}，未歸屬 Expert 的全集工具 ${unowned} 個保持默認開）`,
-    );
+      console.log(
+        `EXPORT_CHECK_OK：四產物與機械導出 byte 等價（域工具 ${DOMAIN_TOOLS.length} / 全集 ${universe.tools.length}，未歸屬 Expert 的全集工具 ${unowned} 個保持默認開）`,
+      );
     process.exit(0);
   }
 

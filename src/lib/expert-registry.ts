@@ -14,7 +14,8 @@
  *
  * 野獸模式：BEAST_MODE_SETTINGS_KEY 默認 OFF（readBeastMode 缺欄位/非布林
  * 一律 false = 現狀零變化）；ON 才允許下游按 routeExpert 啟用 Expert 路由。
- * Wave2 收口（2026-09-08）：註冊表七行全部啟用（無 provisioned 佔位行），
+ * Wave2 收口（2026-09-08）：註冊表七行全部啟用；09-15 critic 行翻正啟用
+ * （部署片刪 provisioned，同兄弟行不設該鍵），註冊表八行全激活、無佔位行，
  * routeExpert 的佔位排除分支保留為防回歸門禁。
  */
 
@@ -75,6 +76,14 @@ import {
   WEB3D_DIRECTOR_REPLY_SUMMARY_TOKEN_CAP,
 } from "./web3d-director-persona";
 import { WEB3D_DELIVERABLES } from "./web3d-delegate";
+import {
+  CRITIC_PERSONA_LABEL,
+  CRITIC_PERSONA_DESCRIPTION,
+  CRITIC_PERSONA_TOOL_IDS,
+  CRITIC_PERSONA_SKILL_PATHS,
+  CRITIC_REPLY_SUMMARY_TOKEN_CAP,
+} from "./critic-persona";
+import { CRITIC_DELIVERABLES } from "./critic-delegate";
 
 // ─────────────────────────────────────────── 野獸模式 toggle
 
@@ -226,6 +235,31 @@ export const EXPERT_REGISTRY: Readonly<Record<string, ExpertDef>> = {
       qcSignatureRequired: true,
     },
     replyTokenCap: WEB3D_DIRECTOR_REPLY_SUMMARY_TOKEN_CAP,
+  },
+
+  // ─────────────────────────────────────── 09-15 评测补课片 → 翻正：critic 激活行
+  //
+  // 独立审核 Expert（质量闸）：裁定背景 = 评测实案 Orchestrator 自产自验
+  // 0 次 QC / 0 次驳回（REPORT 见 eval-2026-op-theme/）。原 provisioned: true
+  // 占位（routeExpert 跳过、digest 标「未启用」挡死路由）已于 09-15 翻正部署片
+  // 删除该键，与七个可路由兄弟行逐栏同构（不設 provisioned = 激活可路由）。契约四栏
+  // critic-delegate 常量（09-15 翻正接线片换挂）：CRITIC_DELIVERABLES 为该清单
+  // 唯一真源，registry 行 / persona re-export / contracts 产物三处引用同一数组，
+  // 零手抄第二份（同 director3d…web3d 各行 import 各 delegate 常量先例）。
+  critic: {
+    id: "critic",
+    label: CRITIC_PERSONA_LABEL,
+    description: CRITIC_PERSONA_DESCRIPTION,
+    // 能力断路：只给 search_web web 查证，不给任何生成工具（persona 常量真源）。
+    toolIds: CRITIC_PERSONA_TOOL_IDS,
+    // skills/ 无审核域配方库 → persona 常量置空（skill 待补，照实现「未配置」惯例）。
+    skillPaths: CRITIC_PERSONA_SKILL_PATHS,
+    taskTypes: ["review", "audit", "critique", "quality_gate"],
+    deliverableContract: {
+      requiredFields: CRITIC_DELIVERABLES,
+      qcSignatureRequired: true,
+    },
+    replyTokenCap: CRITIC_REPLY_SUMMARY_TOKEN_CAP,
   },
 };
 

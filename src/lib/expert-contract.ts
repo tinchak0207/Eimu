@@ -40,7 +40,9 @@ export type ExpertId =
   | "editor"
   | "screenwriter"
   | "motion-director"
-  | "web3d-director";
+  | "web3d-director"
+  // ↓ 09-15 評測補課片：獨立審核 Expert（critic-delegate 換掛翻正追加）
+  | "critic";
 
 /** ExpertId 的運行時白名單（校驗與 registry 接線共用，勿在別處散抄）。 */
 export const EXPERT_IDS = [
@@ -51,6 +53,7 @@ export const EXPERT_IDS = [
   "screenwriter",
   "motion-director",
   "web3d-director",
+  "critic",
 ] as const satisfies readonly ExpertId[];
 
 /** Orchestrator → Expert 派工契約。 */
@@ -188,13 +191,15 @@ export type Director3dDeliverablePayload = {
 
 /**
  * music 域的 payload 詞彙表（從 music-lyria.ts import 情緒契約形擴展，
- * 禁重複定義同構類型）：五欄與 registry music 行 requiredFields 同源
+ * 禁重複定義同構類型）：六欄與 registry music 行 requiredFields 同源
  * （MUSIC_DELIVERABLES，src/lib/music-delegate.ts）。波 1「音樂 Expert 掛
- * registry」按此填 payload。
+ * registry」按此填 payload；melody_notation（人聲主旋律音高序列）為導演文案
+ * 側交付欄，music_gen 工具回執路徑不產、由導演正文回填。
  */
 export type MusicDeliverablePayload = {
   emotion_contract?: LyriaMusicContract;
   lyrics?: string;
+  melody_notation?: string;
   audio_url?: string;
   duration_source?: string;
   qc?: string;

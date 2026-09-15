@@ -84,7 +84,8 @@ test("簽名確定性：同輸入兩次同值，key 插入序不影響", () => {
 });
 
 test("expertId 白名單與契約回指：非法值拒、缺 evidence 拒", () => {
-  // Wave2a 五域佔位（provisioned 不可路由）與兩個啟用行同列入運行時白名單。
+  // Wave2a 五域佔位（provisioned 不可路由）與兩個啟用行同列入運行時白名單；
+  // 09-15 評測補課片追加獨立審核 Expert "critic"（critic-delegate 換掛翻正）。
   assert.deepEqual([...EXPERT_IDS], [
     "director3d",
     "music",
@@ -93,6 +94,7 @@ test("expertId 白名單與契約回指：非法值拒、缺 evidence 拒", () =
     "screenwriter",
     "motion-director",
     "web3d-director",
+    "critic",
   ]);
 
   const bad = validDeliverable();

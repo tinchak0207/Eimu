@@ -41,7 +41,7 @@ const VALID_INPUT = {
     structure: "[0:00-0:10] Intro, [0:10-0:40] Verse, [0:40-1:10] Chorus",
   },
   lyrics: "[Verse]\n夜色压低了呼吸\n[Chorus]\n把名字喊进风里",
-  deliverables: ["emotion_contract", "lyrics", "audio_url", "duration_source", "qc"],
+  deliverables: ["emotion_contract", "lyrics", "melody_notation", "audio_url", "duration_source", "qc"],
 } as const;
 
 const TASK_CONTRACT: ExpertTaskContract = {
@@ -115,6 +115,30 @@ test("composeMusicDelegation：emotion_contract 白名单收敛（style 必填�
 
 // ── 2. 宪法注入：OFF 一个字不多 / ON 头部注入 / 失败结构化报错 ────────────────
 
+test("委派 prompt：deliverables 含 melody_notation 时给出可判形态指引（刀 I 契约栏）", () => {
+  const composed = composeMusicDelegation(VALID_INPUT);
+  assert.ok(composed.ok);
+  if (!composed.ok) return;
+  const r = assembleMusicDirectorPrompt(composed.delegation, { beastMode: false });
+  assert.ok(r.ok);
+  if (!r.ok) return;
+  assert.ok(r.prompt.includes("交付字段：emotion_contract、lyrics、melody_notation、audio_url、duration_source、qc"));
+  // 机器判据口径：栏位名逐字出现 + 实质内容形态（调性/节拍/音名字符序列示例）。
+  assert.ok(r.prompt.includes("melody_notation 需含调性＋节拍＋至少一段人声主旋律以音名字符序列标注"));
+  assert.ok(r.prompt.includes("A4–C5–B4–A4"));
+  assert.ok(r.prompt.includes("缺整栏＝未交付"));
+});
+
+test("委派 prompt：deliverables 不含 melody_notation 时形态指引零出现（零多余注入）", () => {
+  const composed = composeMusicDelegation({ ...VALID_INPUT, deliverables: ["emotion_contract", "audio_url"] });
+  assert.ok(composed.ok);
+  if (!composed.ok) return;
+  const r = assembleMusicDirectorPrompt(composed.delegation, { beastMode: false });
+  assert.ok(r.ok);
+  if (!r.ok) return;
+  assert.equal(r.prompt.includes("melody_notation"), false);
+});
+
 test("OFF：readBeastMode({})=false，委派 prompt 不含宪法文本", () => {
   const composed = composeMusicDelegation(VALID_INPUT);
   assert.ok(composed.ok);
@@ -178,9 +202,9 @@ test("ON：宪法载入失败结构化报错（constitution_unavailable，不静
   assert.ok(r.hint.includes("ENOENT"));
 });
 
-// ── 3. 交付物：五栏全形 + QC 签名 + 组装闸门 ─────────────────────────────────
+// ── 3. 交付物：六栏契约（工具回执五栏全形 + melody_notation 导演文案栏）+ QC 签名 + 组装闸门 ─
 
-test("collectMusicDeliverableFromToolResult：五栏 payload 全形且过 validateExpertDeliverable", () => {
+test("collectMusicDeliverableFromToolResult：契约六栏，工具回执路径产五栏 payload 全形且过 validateExpertDeliverable", () => {
   const composed = composeMusicDelegation(VALID_INPUT);
   assert.ok(composed.ok);
   if (!composed.ok) return;
@@ -193,8 +217,15 @@ test("collectMusicDeliverableFromToolResult：五栏 payload 全形且过 valida
   assert.equal(r.deliverable.expertId, "music");
   assert.equal(r.deliverable.kind, "music_track");
   for (const field of MUSIC_DELIVERABLES) {
+    if (field === "melody_notation") {
+      // melody_notation 是导演文案交付栏（VPS 闸门按正文「栏位名逐字出现＋实质内容」判定），
+      // music_gen 工具回执不产音高序列，collect 不伪造回填（诚实铁律）。
+      assert.equal(field in r.deliverable.payload, false, `工具回执路径不应回填 ${field}`);
+      continue;
+    }
     assert.ok(field in r.deliverable.payload, `payload 缺栏 ${field}`);
   }
+  assert.deepEqual([...MUSIC_DELIVERABLES], ["emotion_contract", "lyrics", "melody_notation", "audio_url", "duration_source", "qc"]);
   assert.equal(r.deliverable.payload.duration_source, "ffprobe");
   assert.equal(r.deliverable.evidence.url, "https://gw.example.test/agent/v1/audio/music-gen-1.mp3");
   assert.equal(r.deliverable.evidence.durationSec, 182.4);

@@ -144,6 +144,7 @@ test("music 交付契約：requiredFields = MUSIC_DELIVERABLES（import 不手�
   assert.deepEqual(def.deliverableContract.requiredFields, [
     "emotion_contract",
     "lyrics",
+    "melody_notation",
     "audio_url",
     "duration_source",
     "qc",
@@ -158,7 +159,9 @@ test("music 路由鍵覆蓋 music/song/bgm/mv_theme/theme_song", () => {
 test("註冊表整體守衛：鍵=id、taskTypes 跨行不撞（首個非佔位命中必須無歧義）", () => {
   // Wave2 收口後三域配方庫待落庫（persona 檔頭考古聲明置空）：skillPaths 允許
   // 空陣列，但必須與 persona 常量同構（防漂移見下方激活行對帳測試）。
-  const SKILL_PENDING_IDS = new Set(["video-director", "editor", "screenwriter"]);
+  // 09-15 翻正部署片：critic 激活後同慣例留空（skills/ 無審核域配方庫，
+  // digest 照實標「未配置」，與編劇/剪輯域先例同聲）。
+  const SKILL_PENDING_IDS = new Set(["video-director", "editor", "screenwriter", "critic"]);
   const seenTaskTypes = new Map<string, string>();
   for (const [key, def] of Object.entries(EXPERT_REGISTRY)) {
     assert.equal(key, def.id, `註冊表鍵 ${key} 必須與 id 一致`);
