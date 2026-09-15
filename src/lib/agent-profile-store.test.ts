@@ -59,14 +59,13 @@ test("lesson digest endpoint extracts lessons silently and fails closed", () => 
   assert.match(route, /return null; \/\/ 静默失败/);
 });
 
-test("frontend digests lessons on turn end, silently and throttled", () => {
+test("frontend lesson-digest chain is offline (PRD D5): hook never calls /profile/lessons", () => {
   const hook = read("src/hooks/use-agent-chat.ts");
-  assert.match(hook, /fireAndForgetLessonDigest/);
+  // 同步提炼链已下线（由每日批次取代）：前端不得再引用端點或殘留節流常量。
+  assert.doesNotMatch(hook, /fireAndForgetLessonDigest|LESSON_DIGEST|\/api\/agent\/profile\/lessons/);
+  // turn.done 的殭屍自愈時間錨點保留，刪提煉鏈不得誤傷。
   assert.match(hook, /evt\.name === "turn\.done"/);
-  assert.match(hook, /LESSON_DIGEST_THROTTLE_MS/);
-  assert.match(hook, /keepalive: true/);
-  assert.match(hook, /\/api\/agent\/profile\/lessons/);
-  // 静默纪律：不 await、不 catch 上抛
-  assert.match(hook, /void fetch\("\/api\/agent\/profile\/lessons"/);
-  assert.match(hook, /\.catch\(\(\) => undefined\)/);
+  assert.match(hook, /lastTurnDoneAtRef\.current = Date\.now\(\);/);
+  // 端點本身保留（B 端與向後兼容），只斷前端觸發鏈路。
+  assert.match(read("src/app/api/agent/profile/lessons/route.ts"), /export async function POST/);
 });

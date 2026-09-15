@@ -16,6 +16,10 @@ import {
   listAgentLessons,
   loadAgentProfile,
 } from "@/lib/agent-profile-store";
+import {
+  buildMemoryInjectionPayload,
+  deriveMemoryOwnerKey,
+} from "@/lib/agent-memory-injection";
 import { getActiveAssetPack } from "@/lib/asset-pack-store";
 import { buildAssetPackInjection } from "@/lib/agent-assets";
 
@@ -70,6 +74,12 @@ export async function POST(req: NextRequest) {
     activeAssets = null;
   }
 
+  // 記憶庫注入（契約 §4）：私有 active docs（≤8，含 body）＋共享索引行，
+  // 與 user_profile/lessons 同載併入 payload。ownerKey 與 gateway 同演算法且
+  // 同正典化（B key 先收斂到屬主派生 key 再 hash；非 B key 恆等 raw）；
+  // blob 不可達時兩欄給空值，不阻塞開新會話。
+  const memoryLibrary = await buildMemoryInjectionPayload(await deriveMemoryOwnerKey(caller.key));
+
   const payload: Record<string, unknown> =
     typeof body === "object" && body !== null ? { ...(body as Record<string, unknown>) } : {};
   if (memoryInjection) {
@@ -79,6 +89,8 @@ export async function POST(req: NextRequest) {
     // 账户还没有画像：告知网关，首条消息时引导 agent 用选择题做 onboarding。
     payload.memory_empty = true;
   }
+  payload.memory_docs = memoryLibrary.memory_docs;
+  payload.memory_index_md = memoryLibrary.memory_index_md;
   if (activeAssets) {
     payload.active_assets = activeAssets.active_assets;
   }

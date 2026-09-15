@@ -7,6 +7,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { callAgentGateway, type AgentGatewayResponse } from "@/lib/agent-gateway";
 import { agentCallerFailureCode, resolveAgentCaller } from "@/lib/agent-session-guard";
 import { buildAgentMemoryInjection, listAgentLessons, loadAgentProfile } from "@/lib/agent-profile-store";
+import {
+  buildMemoryInjectionPayload,
+  deriveMemoryOwnerKey,
+} from "@/lib/agent-memory-injection";
 import { getActiveAssetPack } from "@/lib/asset-pack-store";
 import { buildAssetPackInjection } from "@/lib/agent-assets";
 
@@ -58,6 +62,11 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     activeAssets = null;
   }
 
+  // 記憶庫注入（契約 §4）：私有 active docs（≤8，含 body）＋共享索引行，
+  // 與建新會話同一套讀取與組裝；ownerKey = hashKey(resolveCanonicalKey(key))
+  // （B key 正典化為屬主派生 key 後再 hash，與 gateway 注入/批次同空间）。
+  const memoryLibrary = await buildMemoryInjectionPayload(await deriveMemoryOwnerKey(caller.key));
+
   if (!memoryInjection && !activeAssets) {
     return NextResponse.json({ patched: false, has_profile: false });
   }
@@ -71,6 +80,8 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
         session_id: id,
         user_profile: memoryInjection?.user_profile,
         lessons: memoryInjection?.lessons,
+        memory_docs: memoryLibrary.memory_docs,
+        memory_index_md: memoryLibrary.memory_index_md,
         ...(activeAssets ? { active_assets: activeAssets.active_assets } : {}),
       },
     });
