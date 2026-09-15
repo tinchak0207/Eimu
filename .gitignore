@@ -147,5 +147,7 @@ redteam-*
 # 憑證與 VPS 同步工作目錄（含 key，嚴禁入庫）
 /.flowmusic-creds.json
 /staging/
-/deploy-staging/
+/deploy-staging/*
+# 例外：gateway/ 子目錄是純程式碼真源（生產 index.ts 快照＋記憶模組，PRD D7），不含憑證
+!/deploy-staging/gateway/
 *.bak-*

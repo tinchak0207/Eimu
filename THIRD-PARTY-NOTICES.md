@@ -34,3 +34,43 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## AID (aid-server)
+
+- 来源：https://github.com/gzxx-2025/aid-server
+- 版本：`main` @ 2026-09-15 取证（v2.1.4，2026-09-14 发布）
+- 许可证：MIT License，Copyright (c) 2026 光子讯息(杭州)科技有限公司（另含 RuoYi-Vue 部分，MIT）
+- 引入方式：数据逐字复制（原 `sql/aid-init.sql` 的 `aid_prompt_lib` 初始资料，142 条词条），
+  白名单改写见副本档头注释；副本位于 `src/lib/lens-language-library.ts`。
+- 改动记录：副本档头「白名单改写」段（仅三处：剔除 `cover_url`、同型同名去重一笔、新增展示层分组 label）。
+- 追加引入（2026-09-15，刀 1 作品/剧集实体链）：流程步骤枚举与剧集表语义，
+  来源 `CreationStepEnum.java`（`aid-interface/.../enums/`）、`createFlowStepMeta.ts`、
+  `sql/aid-init.sql` 的 `aid_comic_episode` / `aid_comic_script`；
+  改写见 `src/lib/creation-flow-steps.ts` 与 `src/lib/canvas/types.ts` 的 `CanvasEpisode` 档头
+  （砍 AID 审核三态与 `pending_*` 字段，本站无审核队列）。
+- 完整许可证文本：
+
+```
+MIT License
+
+Copyright (c) 2026 光子讯息(杭州)科技有限公司
+Portions Copyright (c) 2018 RuoYi
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
