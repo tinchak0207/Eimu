@@ -107,9 +107,9 @@ function AgentParamCardComponent({ argsSummary, costCoins, idPrefix }: AgentPara
             />
           </button>
           <div id={`${idPrefix}-advanced`} className={cn("agent-args", advancedOpen && "is-open")}>
-            {/* 长参数表在卡内滚动而不是把卡片撑到看不见底：50dvh 封顶。
-                overflow-y 用内联样式盖过 .agent-args-inner 的 overflow:hidden。 */}
-            <div className="agent-args-inner max-h-[50dvh] overscroll-contain" style={{ overflowY: "auto" }}>
+            {/* 不設第二層捲軸：進階表就地展開，高度由外層（參數手風琴的 60dvh
+                截斷區／抽屜 body）統一處理，滾動手勢只驅動最外層。 */}
+            <div className="agent-args-inner" style={{ overflow: "clip" }}>
               <dl className="grid grid-cols-2 gap-x-4 gap-y-2 border-t border-[rgba(0,0,0,0.06)] pt-2 sm:grid-cols-3">
                 {advanced.map((param) => (
                   <ParamRow key={param.key} param={param} />

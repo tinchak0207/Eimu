@@ -134,9 +134,10 @@ export function AgentParamDisclosure({ argsSummary, idPrefix, toolName }: AgentP
         )
       ) : (
         <div id={`${idPrefix}-params`} className={cn("agent-args", open && "is-open")}>
-          {/* 展开后的长参数在卡内滚动，不把整张卡撑出视野：60dvh 封顶。
-              overflow-y 用内联样式盖过 .agent-args-inner 的 overflow:hidden。 */}
-          <div className="agent-args-inner max-h-[60dvh] overscroll-contain" style={{ overflowY: "auto" }}>
+          {/* 全聊天流只許有一層滾動（最外側訊息流）。展開內容超過 60dvh
+              直接截斷（.agent-args-inner 的 overflow:hidden），不設內部捲軸——
+              卡內滾動手勢一律冒泡給外層，否則巨型參數卡會吞掉整屏滾動。 */}
+          <div className="agent-args-inner max-h-[60dvh]" style={{ overflow: "clip" }}>
             {/* F2：原始函数名与完整参数只在展开后挂载（默认渲染不含 raw JSON）。 */}
             {everOpened && (
               <>

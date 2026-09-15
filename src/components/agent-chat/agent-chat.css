@@ -76,6 +76,11 @@
 }
 .agent-args-inner {
   min-height: 0;
+  /* 舊瀏覽器回退值。真正生效的是元件上的行內 overflow:clip——
+     hidden 仍是滾動容器，Chrome 滾輪會先滾這個無捲軸的隱形容器
+     （使用者看到「滾不動、也不滾聊天流」）；clip 不建立滾動容器，
+     手勢直接冒泡給最外側訊息流。行內樣式可躲過 Lightning CSS 把
+     hidden;clip 雙宣告精簡掉 clip 的行為（2026-09-14 建置產物實錘）。 */
   overflow: hidden;
 }
 
