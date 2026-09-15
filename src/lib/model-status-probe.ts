@@ -19,6 +19,7 @@ import {
 } from "./generation-model-catalog";
 import { PIXAI_EDIT_MODEL_ID, PIXAI_UPSCALE_MODEL_ID } from "./image-model-ids.js";
 import { buildModelQueue, ENV_CHANNEL_PRIORITIES } from "./channel-registry";
+import { REGISTRY_CHANNELS } from "./supplier-channels.config";
 import type { AdminPool } from "./admin-pools";
 import type { ChannelOverrides } from "./channel-overrides";
 import type { EnvLike } from "./sub2api";
@@ -104,14 +105,22 @@ export function __resetModelStatusCacheForTests(): void {
 /**
  * 功能標註（數據驅動，不硬編假能力）：
  * - generate 恒有。
- * - edit：只有平台真實的改圖鏈路模型（PIXAI_EDIT_MODEL_ID，走 /v1/images/edits）才標。
+ * - edit：registry claims 宣稱 image_edit 的模型（2026-09-13 起 B 端
+ *   /v1/images/edits 已接 durable 改圖管線）＋平台改圖鏈路 PIXAI_EDIT_MODEL_ID。
+ *   與調度事實源同源：標了 edit 的模型，capability 預檢才有行可查。
  * - upscale：只有平台真實的放大鏈路模型（PIXAI_UPSCALE_MODEL_ID，走 /v1/upscale）才標。
  * - video 模型一律不含 edit/upscale（除非真有）。
  */
+const EDIT_CLAIM_MODEL_IDS = new Set(
+  REGISTRY_CHANNELS.flatMap((channel) => channel.claims)
+    .filter((claim) => claim.kinds.includes("image_edit"))
+    .map((claim) => claim.modelId),
+);
+
 export function annotateModelFunctions(modelId: string, mediaType: MediaKind): ModelFunction[] {
   const functions: ModelFunction[] = ["generate"];
   if (mediaType !== "image") return functions;
-  if (modelId === PIXAI_EDIT_MODEL_ID) functions.push("edit");
+  if (modelId === PIXAI_EDIT_MODEL_ID || EDIT_CLAIM_MODEL_IDS.has(modelId)) functions.push("edit");
   if (modelId === PIXAI_UPSCALE_MODEL_ID) functions.push("upscale");
   return functions;
 }

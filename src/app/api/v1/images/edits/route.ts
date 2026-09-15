@@ -5,13 +5,28 @@
 // 與 admin /admin 的覆寫層同源，不再用路由內硬編碼的 COINS_BY_SIZE。
 //
 // 錯誤體與 trace id 與 /v1/images/generations 對齊：客戶不必按端點分兩套解析。
+//
+// 2026-09-13（暴君裁定「gpt-image-2 就應該支援改圖，後端要跟上了」）：
+// 本路由原先只認 pixai bridge 域模型（resolveBridgeModel），非 pixai 一律 400。
+// 現在非 pixai 模型改走 durable 控制面改圖管線：kind:"image_edit" 提交任務、
+// 202 + Location（與 generations 的任務合同一致）。渠道由 registry claims 決定
+// （supplier_capability 表現成實有 gpt-image-2/gemini/flux 系 image_edit enabled 行），
+// worker 端 supplier-adapter 已有 references→edits/chat 分支，核心層原生支援
+// ——本刀只補 B 端路由這個入口。
 
+import { createHash, randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
 import { after } from "next/server";
 import { authenticateBizApiKey, flushBizApiKeyUsage, recordBizApiKeyUsage } from "@/lib/biz-api-key-store";
-import { readBearerToken } from "@/lib/biz-api-keys";
-import { generationCoins } from "@/lib/generation-model-catalog";
+import { readBearerToken, isModelAllowedForKey } from "@/lib/biz-api-keys";
+import {
+  generationCoins,
+  aspectRatioFromImageSize,
+  resolveGenerationModelId,
+} from "@/lib/generation-model-catalog";
+import { imageGenerationCoins, isSupportedImageModel, type ModelMode } from "@/lib/provider-config";
 import { PIXAI_EDIT_MODEL_ID } from "@/lib/image-model-ids.js";
+import { put } from "@/lib/blob-backend";
 import {
   chargeBizRequest,
   jsonWithTrace,
@@ -32,6 +47,14 @@ import {
   computeRequestHash,
   SyncIdempotencyConflictError,
 } from "@/lib/generation-core/sync-idempotency";
+import { generationControlPlaneEnabled } from "@/lib/generation-core/database";
+import { submitGenerationCommand } from "@/lib/generation-core/command-service";
+import { hasGenerationCapability, IdempotencyConflictError } from "@/lib/generation-core/job-repository";
+import { enforceQuotaGate } from "@/lib/generation-core/quota-precheck";
+import { generationTaskResponse } from "@/lib/generation-core/task-response";
+import { validateImageBuffer } from "@/lib/generation-core/artifact-service";
+import type { GenerationReference } from "@/lib/generation-core/types";
+import type { BizApiKey } from "@/lib/biz-api-keys";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -72,17 +95,19 @@ export async function POST(req: NextRequest) {
     return respond(pixaiRequestError("prompt too long.", "prompt_too_long", traceId), 400);
   }
 
-  // 模型名歸一：認現行 ID、歷史別名與 bridge 名。傳了但不認識的直接 400。
+  // 模型名歸一：pixai bridge 域（現行 ID、歷史別名與 bridge 名）走原同步鏈；
+  // 其餘模型進 durable 控制面改圖分支（2026-09-13，見檔頭）。
   const bridgeModel = resolveBridgeModel(body.model);
   if (bridgeModel === null) {
-    return respond(
-      pixaiRequestError(
-        `Unsupported model ${String(body.model)}. Call GET /v1/models for the available list.`,
-        "model_not_found",
-        traceId,
-      ),
-      400,
-    );
+    return await durableEditBranch({
+      body,
+      key: auth.key,
+      image,
+      prompt,
+      traceId,
+      idempotencyKeyHeader: req.headers.get("idempotency-key"),
+      respond,
+    });
   }
 
   const size = body.size === "2k" ? "2k" : "1k";
@@ -171,4 +196,214 @@ export async function POST(req: NextRequest) {
     pixaiError(data, "Image edit failed.", traceId),
     status >= 400 ? status : 502,
   );
+}
+
+// ── durable 改圖分支（非 pixai 域，2026-09-13）───────────────────
+//
+// 合同：與 /v1/images/generations 的 durable 分支完全同形——提交任務回 202 +
+// Location，客戶輪詢 /v1/images/<task_id> 取成品；計費走 enforceQuotaGate +
+// submitGenerationCommand 的事後投影。image 參數收 http(s) URL 或 data:image
+// base64（≤4MB，Vercel 請求體限制留餘裕）；渠道可用性以 supplier_capability
+// 為準做誠實預檢，杜絕「probe 說可用、結算才死」。
+
+/** 與 generations 同口的上游尺寸白名單；另兼容舊 edits 合同的 "1k"/"2k"。 */
+const DURABLE_EDIT_SIZES = new Set(["1024x1024", "1536x1024", "1024x1536", "2048x2048"]);
+const MAX_DATA_IMAGE_BYTES = 4 * 1024 * 1024;
+
+class EditInputError extends Error {
+  constructor(readonly status: number, readonly code: string, message: string) {
+    super(message);
+  }
+}
+
+function mimeFromUrl(rawUrl: string): string {
+  const pathname = rawUrl.split("?")[0].toLowerCase();
+  if (pathname.endsWith(".jpg") || pathname.endsWith(".jpeg")) return "image/jpeg";
+  if (pathname.endsWith(".webp")) return "image/webp";
+  return "image/png";
+}
+
+function extensionFor(mimeType: string): string {
+  if (mimeType === "image/jpeg") return "jpg";
+  if (mimeType === "image/webp") return "webp";
+  return "png";
+}
+
+/** image 參數 → 工作流參考圖。URL 直接引用；data URI 落地 blob 後轉平台公網 URL。 */
+async function resolveEditReference(image: string, tenantId: string, idempotencyKey: string): Promise<GenerationReference> {
+  if (/^https?:\/\//i.test(image)) {
+    return { url: image, mimeType: mimeFromUrl(image), referenceRole: "general" };
+  }
+  const match = /^data:(image\/[a-z0-9.+-]+);base64,([\s\S]+)$/i.exec(image);
+  if (match) {
+    const buffer = Buffer.from(match[2], "base64");
+    if (buffer.length === 0) throw new EditInputError(400, "invalid_image", "image data URI is empty.");
+    if (buffer.length > MAX_DATA_IMAGE_BYTES) {
+      throw new EditInputError(413, "image_too_large", "image data URI exceeds 4MB. Upload the file first and pass a public URL.");
+    }
+    const validated = validateImageBuffer(buffer);
+    if ("error" in validated) throw new EditInputError(400, "invalid_image", `image decode failed: ${validated.error}`);
+    const stable = createHash("sha256")
+      .update(`${tenantId}|${idempotencyKey}|${validated.sha256}`)
+      .digest("hex");
+    const objectKey = `generation/references/${stable}.${extensionFor(validated.mimeType)}`;
+    const blob = await put(objectKey, buffer, {
+      access: "public",
+      contentType: validated.mimeType,
+      allowOverwrite: true,
+      cacheControlMaxAge: 31_536_000,
+    });
+    return {
+      artifactId: `ref-${stable}`,
+      url: blob.url,
+      mimeType: validated.mimeType,
+      name: "reference-1",
+      referenceRole: "general",
+    };
+  }
+  throw new EditInputError(
+    400,
+    "invalid_image",
+    "image must be a public http(s) URL or a data:image base64 URI（pixai media id 僅適用於 pixai 系模型）.",
+  );
+}
+
+async function durableEditBranch(input: {
+  body: Record<string, unknown>;
+  key: BizApiKey;
+  image: string;
+  prompt: string;
+  traceId: string;
+  idempotencyKeyHeader: string | null;
+  respond: (data: unknown, status: number, headers?: Record<string, string>) => Response;
+}): Promise<Response> {
+  const { body, key, image, prompt, traceId, idempotencyKeyHeader, respond } = input;
+  const rawModel = typeof body.model === "string" ? body.model.trim() : "";
+  const modelId = resolveGenerationModelId(rawModel) ?? rawModel;
+
+  if (!generationControlPlaneEnabled() || !modelId || !isSupportedImageModel(modelId)) {
+    return respond(
+      pixaiRequestError(
+        `Unsupported model ${rawModel || "(none)"}. Call GET /v1/models for the available list.`,
+        "model_not_found",
+        traceId,
+      ),
+      400,
+    );
+  }
+  if (!isModelAllowedForKey(key, modelId)) {
+    return respond(
+      {
+        error: {
+          message: `当前密钥无权调用模型 ${modelId}。`,
+          type: "permission_error",
+          code: "model_not_permitted",
+          param: "model",
+          trace_id: traceId,
+        },
+      },
+      403,
+    );
+  }
+
+  const rawSize = typeof body.size === "string" && body.size ? body.size : "1024x1024";
+  const size = rawSize === "1k" ? "1024x1024" : rawSize === "2k" ? "2048x2048" : rawSize;
+  if (!DURABLE_EDIT_SIZES.has(size)) {
+    return respond(
+      pixaiRequestError(
+        `不支持的 size ${size}。可选：${[...DURABLE_EDIT_SIZES].join("、")}。`,
+        "unsupported_size",
+        traceId,
+      ),
+      400,
+    );
+  }
+  const rawN = body.n === undefined ? 1 : Number(body.n);
+  if (!Number.isInteger(rawN) || rawN < 1 || rawN > 4) {
+    return respond(pixaiRequestError("n 需为 1 到 4 之间的整数。", "invalid_n", traceId), 400);
+  }
+  // OpenAI 用 hd/standard，本站內部用 quality/fast（與 generations 同譯法）。
+  const qualityMode: ModelMode = body.quality === "hd" || body.quality === "high" ? "quality" : "fast";
+  const ratio = aspectRatioFromImageSize(size);
+  const resolution = qualityMode === "quality" ? "2k" : "1k";
+
+  const tenantId = `biz:${key.id}`;
+  const localIdempotencyKey = idempotencyKeyHeader?.trim() || `biz-edit-${randomUUID()}`;
+  let reference: GenerationReference;
+  try {
+    reference = await resolveEditReference(image, tenantId, localIdempotencyKey);
+  } catch (error) {
+    if (error instanceof EditInputError) {
+      return respond(pixaiRequestError(error.message, error.code, traceId), error.status);
+    }
+    throw error;
+  }
+
+  // 誠實預檢（碰額度之前）：capability 表是調度器的唯一事實源，預檢與提交同參數，
+  // 不在這裡攔就會變成「先佔額度、job 進場才 model_unsupported 退款」的殭屍往返。
+  const capable = await hasGenerationCapability({
+    modelId,
+    kind: "image_edit",
+    ratio,
+    resolution,
+    routingClass: "generic",
+  });
+  if (!capable) {
+    return respond(
+      pixaiRequestError(
+        `模型 ${modelId} 当前没有可用的改圖渠道（image_edit capability 不存在或已停用）。请改用 GET /v1/models 中 edit=true 的模型。`,
+        "model_edit_unsupported",
+        traceId,
+      ),
+      400,
+    );
+  }
+
+  // 管理員改價立即生效：算價前同步最新覆寫（與 generations 同序）。
+  await syncModelPricing();
+  const baseBillingAmount = imageGenerationCoins(modelId, qualityMode) * QUOTA_PER_COIN * rawN;
+  const gate = await enforceQuotaGate({
+    bizKeyId: key.id,
+    billingUserId: key.userId,
+    baseBillingAmount,
+  });
+  if (!gate.ok) {
+    return respond(
+      { error: { message: gate.message, type: gate.type, code: gate.code, param: null, trace_id: traceId } },
+      gate.status,
+    );
+  }
+
+  try {
+    const submitted = await submitGenerationCommand({
+      tenantId,
+      apiKeyId: key.id,
+      billingUserId: key.userId,
+      source: "biz",
+      idempotencyKey: idempotencyKeyHeader,
+      kind: "image_edit",
+      modelId,
+      prompt,
+      size,
+      ratio,
+      resolution,
+      quality: qualityMode,
+      responseFormat: "url",
+      requestedCount: rawN,
+      billingAmount: gate.billingAmount,
+      workflow: { references: [reference] },
+    });
+    return respond(generationTaskResponse(submitted.job), 202, {
+      Location: `/v1/images/${submitted.job.id}`,
+    });
+  } catch (error) {
+    if (error instanceof IdempotencyConflictError) {
+      return respond(pixaiRequestError(error.message, "idempotency_key_reused", traceId), 409);
+    }
+    console.error("[images/edits] durable submission failed", error);
+    return respond(
+      pixaiRequestError("Generation control plane is temporarily unavailable.", "control_plane_unavailable", traceId),
+      503,
+    );
+  }
 }

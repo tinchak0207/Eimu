@@ -133,7 +133,11 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
       {
         modelId: "gpt-image-2",
         supplierModelId: null,
-        kinds: ["image_generate"],
+        // 2026-09-14 實測：yyds /v1/images/edits 收 gpt-image-2 多模態改圖
+        // （HTTP 200 / 24.9s / 1.85MB PNG，b64_json 直回）。此前只宣告
+        // image_generate，使 gpt-image-2 的 edit 能力表只剩死渠道
+        // （adobe2api 403 額度枯竭、sub2api 524），改圖全軍覆沒。
+        kinds: ["image_generate", "image_edit"],
       },
     ],
   },
