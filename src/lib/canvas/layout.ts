@@ -9,12 +9,14 @@
 // reducer 外再寫一套排版）。這裡只補「尺寸」與「型別」這種契約缺口。
 
 import type { AgentSseEvent } from "@/lib/agent-chat-types";
+import { isValidCreationStep } from "@/lib/creation-flow-steps";
 import { isReferenceImageRole } from "@/lib/image-types";
 import type { CanvasReducerState } from "./reducer";
 import {
   CANVAS_NODE_DEFAULT_SIZE,
   CanvasNodeType,
   type CanvasConnection,
+  type CanvasEpisode,
   type CanvasErrorDetails,
   type CanvasNode,
   type CanvasNodeMetadata,
@@ -515,6 +517,12 @@ export function toCanvasProject(
   backgroundMode: "dots" | "lines" | "blank",
   budget?: { totalCoins: number; usedCoins: number },
   cardIds?: string[],
+  // 作品/劇集三級狀態機（2026-09-15 刀 1 前端接線）：照 cardIds 的既有條件展開範式。
+  // 刻意「不清洗」——清洗單一真源在 project-store 的 normalizeProject，
+  // 這裡只決定「要不要帶這個欄位」，否則兩處白名單會漂移（見 PRD §3）。
+  projectType?: "movie" | "series",
+  currentStep?: number,
+  episodes?: CanvasEpisode[],
 ): CanvasProject {
   const now = new Date().toISOString();
   return {
@@ -528,6 +536,9 @@ export function toCanvasProject(
     backgroundMode,
     ...(budget ? { budget } : {}),
     ...(cardIds && cardIds.length > 0 ? { cardIds } : {}),
+    ...(projectType ? { projectType } : {}),
+    ...(isValidCreationStep(currentStep) ? { currentStep } : {}),
+    ...(episodes && episodes.length > 0 ? { episodes } : {}),
   };
 }
 
@@ -572,6 +583,57 @@ export function fromCanvasProject(project: {
   return { units: [], nodes, connections };
 }
 
+/**
+ * 讀取側防炸校驗：只確認「型別不會讓下游炸」，不重複 project-store 的完整清洗。
+ *
+ * 分工（勿混）：store `normalizeProject` 是落盤白名單（截斷字串、補時間戳、
+ * episodeNo 去重、上限 200）；這裡是從任意 JSON（快照/匯入檔/舊 Blob）取用時的
+ * 最小防護——非法項一律丟棄，絕不捏造欄位。兩者刻意不共用，避免讀取路徑反向
+ * 影響落盤語義。
+ */
+function readEpisode(payload: unknown): CanvasEpisode | null {
+  if (!payload || typeof payload !== "object") return null;
+  const e = payload as Record<string, unknown>;
+  if (typeof e.id !== "string" || e.id.length === 0) return null;
+  if (typeof e.title !== "string" || e.title.length === 0) return null;
+  if (typeof e.episodeNo !== "number" || !Number.isInteger(e.episodeNo) || e.episodeNo < 1) return null;
+  if (e.status !== "draft" && e.status !== "processing" && e.status !== "finished") return null;
+  return {
+    id: e.id,
+    episodeNo: e.episodeNo,
+    title: e.title,
+    status: e.status,
+    ...(typeof e.script === "string" ? { script: e.script } : {}),
+    createdAt: typeof e.createdAt === "string" ? e.createdAt : "",
+    updatedAt: typeof e.updatedAt === "string" ? e.updatedAt : "",
+  };
+}
+
+/**
+ * 從 CanvasProject 取出三級狀態機欄位（給 hook 還原用；缺欄位/非法值一律省略）。
+ *
+ * 刻意獨立於 `fromCanvasProject`：後者回 `CanvasReducerState`（只有 nodes/connections/
+ * units），改它的回傳型別會炸一票消費端；三欄是「專案級」狀態，不是 reducer 狀態。
+ */
+export function canvasProjectMeta(project: {
+  projectType?: unknown;
+  currentStep?: unknown;
+  episodes?: unknown;
+}): { projectType?: "movie" | "series"; currentStep?: number; episodes?: CanvasEpisode[] } {
+  if (!project || typeof project !== "object") return {};
+  const episodes = Array.isArray(project.episodes)
+    ? project.episodes.flatMap((item) => {
+        const episode = readEpisode(item);
+        return episode ? [episode] : [];
+      })
+    : [];
+  return {
+    ...(project.projectType === "movie" || project.projectType === "series" ? { projectType: project.projectType } : {}),
+    ...(isValidCreationStep(project.currentStep) ? { currentStep: project.currentStep } : {}),
+    ...(episodes.length > 0 ? { episodes } : {}),
+  };
+}
+
 /** 匯出檔的信封（帶 kind/version，匯入時才能認出這不是別的 JSON）。 */
 export const CANVAS_EXPORT_KIND = "image-studio.canvas";
 export const CANVAS_EXPORT_VERSION = 1;
@@ -593,7 +655,16 @@ export function buildExportFile(project: CanvasProject): CanvasExportFile {
 }
 
 /** 匯入：認信封也認裸 project（別人手改過的檔案不該直接失敗）。回 null = 不是畫布檔。 */
-export function parseImportFile(raw: unknown): { nodes: CanvasNode[]; connections: CanvasConnection[]; viewport?: CanvasViewport; backgroundMode?: "dots" | "lines" | "blank"; title?: string } | null {
+export function parseImportFile(raw: unknown): {
+  nodes: CanvasNode[];
+  connections: CanvasConnection[];
+  viewport?: CanvasViewport;
+  backgroundMode?: "dots" | "lines" | "blank";
+  title?: string;
+  projectType?: "movie" | "series";
+  currentStep?: number;
+  episodes?: CanvasEpisode[];
+} | null {
   if (!raw || typeof raw !== "object") return null;
   const env = raw as Record<string, unknown>;
   const project = (env.kind === CANVAS_EXPORT_KIND && env.project && typeof env.project === "object"
@@ -603,6 +674,8 @@ export function parseImportFile(raw: unknown): { nodes: CanvasNode[]; connection
   const state = fromCanvasProject(project as { nodes?: unknown; connections?: unknown });
   const vp = project.viewport as CanvasViewport | undefined;
   const bg = project.backgroundMode;
+  // 作品/劇集三欄：匯出檔帶著走（否則「匯出→匯入」會靜默丟掉劇集清單）。
+  const meta = canvasProjectMeta(project);
   return {
     nodes: state.nodes,
     connections: state.connections,
@@ -611,5 +684,6 @@ export function parseImportFile(raw: unknown): { nodes: CanvasNode[]; connection
       : {}),
     ...(bg === "dots" || bg === "lines" || bg === "blank" ? { backgroundMode: bg } : {}),
     ...(typeof project.title === "string" ? { title: project.title } : {}),
+    ...meta,
   };
 }

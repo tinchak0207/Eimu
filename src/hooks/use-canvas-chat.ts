@@ -22,11 +22,12 @@
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { AgentSseEvent } from "@/lib/agent-chat-types";
-import { CANVAS_INITIAL_STATE } from "@/lib/canvas/reducer";
+import { CANVAS_INITIAL_STATE, layoutGraph } from "@/lib/canvas/reducer";
 import {
   CANVAS_EMPTY_HISTORY,
   CANVAS_READABLE_MIN_SCALE,
   bezierPath,
+  canvasProjectMeta,
   clampScale,
   fitToNodes,
   fromCanvasProject,
@@ -38,9 +39,11 @@ import {
   type CanvasSnapshot,
 } from "@/lib/canvas/layout";
 import { listCanvasProjects, postCanvasOpsResult } from "@/lib/canvas/client";
+import { isValidCreationStep } from "@/lib/creation-flow-steps";
 import type {
   CanvasAgentOp,
   CanvasConnection,
+  CanvasEpisode,
   CanvasNode,
   CanvasNodeMetadata,
   CanvasPosition,
@@ -94,6 +97,11 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [history, setHistory] = useState<CanvasHistory>(CANVAS_EMPTY_HISTORY);
   const [projectTitle, setProjectTitle] = useState("未命名画布");
+  // 作品/劇集三級狀態機（2026-09-15 刀 1 前端接線）：專案級狀態，持久化在 CanvasProject 頂層三欄。
+  // 寫入口＝setProjectMeta（UI 面板與 agent 驅動的畫布操作共用），讀回＝三處還原點 + canvasProjectMeta。
+  const [projectType, setProjectType] = useState<"movie" | "series" | undefined>(undefined);
+  const [currentStep, setCurrentStep] = useState<number | undefined>(undefined);
+  const [episodes, setEpisodes] = useState<CanvasEpisode[]>([]);
   const [loading, setLoading] = useState(true);
   const [saveState, setSaveState] = useState<UseCanvasChatReturn["saveState"]>("idle");
   const [savedProjects, setSavedProjects] = useState<CanvasProjectSummary[]>([]);
@@ -135,6 +143,12 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
   titleRef.current = projectTitle;
   const budgetRef = useRef(budget);
   budgetRef.current = budget;
+  const projectTypeRef = useRef(projectType);
+  projectTypeRef.current = projectType;
+  const currentStepRef = useRef(currentStep);
+  currentStepRef.current = currentStep;
+  const episodesRef = useRef(episodes);
+  episodesRef.current = episodes;
   const selectedNodeIdRef = useRef(selectedNodeId);
   selectedNodeIdRef.current = selectedNodeId;
   const agentOpsQueueRef = useRef(agentOpsQueue);
@@ -171,6 +185,10 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     setHistory(CANVAS_EMPTY_HISTORY);
     setProjectTitle("未命名画布");
     setViewportState({ x: 0, y: 0, k: 1 });
+    // 新畫布 = 新作品：作品類型/流程步/劇集清單都隨舊項目留在歷史裡。
+    setProjectType(undefined);
+    setCurrentStep(undefined);
+    setEpisodes([]);
     // 新畫布 = 新項目：卡鎖定是項目級配置，隨舊項目留在歷史裡。
     setActiveCardIds([]);
     // 新畫布要有新身份：後續存檔才會寫進新的一份，而不是覆寫上一張。
@@ -205,6 +223,11 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     setBackgroundMode(target.backgroundMode ?? "dots");
     setProjectTitle(target.title || "未命名画布");
     setActiveCardIds(Array.isArray(target.cardIds) ? target.cardIds.filter(Boolean) : []);
+    // 作品/劇集三欄：與 cardIds 同層還原（缺欄位＝回到未設定，不殘留上一張畫布的值）。
+    const meta = canvasProjectMeta(target);
+    setProjectType(meta.projectType);
+    setCurrentStep(meta.currentStep);
+    setEpisodes(meta.episodes ?? []);
     if (target.budget) {
       setBudget({
         usedCoins: target.budget.usedCoins,
@@ -230,12 +253,27 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
    * 之後異步到達，load 直接覆蓋空畫布即可；呼叫端保證僅在 nodes>0 且畫布仍空時調用。
    */
   const restoreAgentSnapshot = useCallback(
-    (snapshot: { nodes?: unknown; connections?: unknown; viewport?: CanvasViewport }): boolean => {
+    (snapshot: {
+      nodes?: unknown;
+      connections?: unknown;
+      viewport?: CanvasViewport;
+      projectType?: unknown;
+      currentStep?: unknown;
+      episodes?: unknown;
+    }): boolean => {
       if (!snapshot || typeof snapshot !== "object") return false;
       const restored = fromCanvasProject(snapshot);
       if (restored.nodes.length === 0) return false;
       everHadNodesRef.current = true;
-      dispatchCanvas({ type: "load", nodes: restored.nodes, connections: restored.connections });
+      // 上行摘要刻意不帶座標（版面權在前端 reducer，layout.ts 檔頭）：
+      // fromCanvasProject 把缺座標補成 (0,0)，直接 load 會讓所有卡疊在原點
+      // （2026-09-14 回舊會話堆疊事故）。無座標快照跑與 live 同款的 DAG 分層
+      // 排版；快照真帶座標（如 blob 專案形狀）則原樣還原，不重排。
+      const unpositioned = restored.nodes.every((n) => n.position.x === 0 && n.position.y === 0);
+      const nodes = unpositioned
+        ? layoutGraph({ ...CANVAS_INITIAL_STATE, nodes: restored.nodes, connections: restored.connections }).nodes
+        : restored.nodes;
+      dispatchCanvas({ type: "load", nodes, connections: restored.connections });
       if (
         typeof snapshot.viewport?.x === "number" &&
         typeof snapshot.viewport?.y === "number" &&
@@ -250,6 +288,11 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
       // 雙向同步方向B：chat 切 session → 畫布選中對應節點
       const linked = restored.nodes.find((n) => n.metadata?.session_id === sessionIdRef.current);
       setSelectedNodeId(linked ? linked.id : null);
+      // 作品/劇集三欄：快照有帶才覆蓋；沒帶＝保留現值（不可把已存在的作品資訊清成空白）。
+      const meta = canvasProjectMeta(snapshot);
+      if (meta.projectType !== undefined) setProjectType(meta.projectType);
+      if (meta.currentStep !== undefined) setCurrentStep(meta.currentStep);
+      if (meta.episodes !== undefined) setEpisodes(meta.episodes);
       return true;
     },
     [],
@@ -458,12 +501,18 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     titleRef,
     budgetRef,
     activeCardIdsRef,
+    projectTypeRef,
+    currentStepRef,
+    episodesRef,
     mountedRef,
     canvas,
     viewport,
     backgroundMode,
     projectTitle,
     activeCardIds,
+    projectType,
+    currentStep,
+    episodes,
     saveState,
     sessionId,
     selectedNodeId,
@@ -724,6 +773,9 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
       viewport?: CanvasViewport;
       backgroundMode?: CanvasBackgroundMode;
       title?: string;
+      projectType?: unknown;
+      currentStep?: unknown;
+      episodes?: unknown;
     }) => {
       pushHistory();
       const restored = fromCanvasProject(project);
@@ -731,12 +783,35 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
       if (project.viewport) setViewportState(project.viewport);
       if (project.backgroundMode) setBackgroundMode(project.backgroundMode);
       if (project.title) setProjectTitle(project.title);
+      // 與 openSavedCanvas 同語義但「不覆蓋沒帶的欄位」：匯入檔可能只含 nodes。
+      const meta = canvasProjectMeta(project);
+      if (meta.projectType !== undefined) setProjectType(meta.projectType);
+      if (meta.currentStep !== undefined) setCurrentStep(meta.currentStep);
+      if (meta.episodes !== undefined) setEpisodes(meta.episodes);
       setSelectedNodeId(null);
     },
     [pushHistory],
   );
 
   const exportProject = useCallback((): CanvasProject => buildProject(), [buildProject]);
+
+  /**
+   * 作品/劇集三欄寫入口（刀 1 前端接線）。UI 面板與 agent 驅動路徑共用這一個出口；
+   * 傳入 `undefined` = 清除該欄（例：電影改回未設定）。只做型別守門（非法值不進 state，
+   * 免得存檔時被 store 靜默丟掉），完整清洗仍只在 project-store。
+   */
+  const setProjectMeta = useCallback(
+    (patch: { projectType?: "movie" | "series"; currentStep?: number; episodes?: CanvasEpisode[] }) => {
+      if ("projectType" in patch && (patch.projectType === undefined || patch.projectType === "movie" || patch.projectType === "series")) {
+        setProjectType(patch.projectType);
+      }
+      if ("currentStep" in patch && (patch.currentStep === undefined || isValidCreationStep(patch.currentStep))) {
+        setCurrentStep(patch.currentStep);
+      }
+      if ("episodes" in patch) setEpisodes(patch.episodes ?? []);
+    },
+    [],
+  );
 
   const clearCanvas = useCallback(() => {
     pushHistory();
@@ -875,6 +950,10 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     characterCards,
     activeCardIds,
     activeCharacterCards,
+    projectType,
+    currentStep,
+    episodes,
+    setProjectMeta,
     upsertCharacterCard,
     removeCharacterCard,
     toggleCharacterCard,

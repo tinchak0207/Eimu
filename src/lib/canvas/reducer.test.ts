@@ -5,8 +5,9 @@ import {
   CANVAS_INITIAL_STATE,
   reduceCanvasEvent,
   getUnitGraph,
+  layoutGraph,
 } from "./reducer";
-import type { CanvasSseEvent } from "./types";
+import { CanvasNodeType, type CanvasNode, type CanvasSseEvent } from "./types";
 
 function plan(unitId: string, tool = "image_generate"): CanvasSseEvent {
   return {
@@ -162,4 +163,43 @@ test("getUnitGraph 回單元完整圖", () => {
   const g = getUnitGraph(s, "cu_1");
   assert.equal(g.nodes.length, 1);
   assert.equal(g.connections.length, 1);
+});
+
+test("layoutGraph：座標全 (0,0) 的回放快照分層展開且互不重疊（2026-09-14 回舊會話堆疊回歸）", () => {
+  // restoreAgentSnapshot 的輸入形狀：gateway 摘要不帶座標，fromCanvasProject 補 (0,0)。
+  const mk = (id: string): CanvasNode => ({
+    id,
+    type: CanvasNodeType.Text,
+    title: id,
+    position: { x: 0, y: 0 },
+    width: 340,
+    height: 240,
+    metadata: {},
+  });
+  const nodes = [mk("a"), mk("b"), mk("c"), mk("d")];
+  const connections = [
+    { id: "c1", fromNodeId: "a", toNodeId: "b" },
+    { id: "c2", fromNodeId: "b", toNodeId: "c" },
+    { id: "c3", fromNodeId: "b", toNodeId: "d" },
+  ];
+  const out = layoutGraph({ ...CANVAS_INITIAL_STATE, nodes, connections });
+  const byId = new Map(out.nodes.map((n) => [n.id, n]));
+  // DAG 分層：鏈上 x 嚴格遞增，分叉的 c/d 不同 y。
+  assert.ok(byId.get("a")!.position.x < byId.get("b")!.position.x);
+  assert.ok(byId.get("b")!.position.x < byId.get("c")!.position.x);
+  assert.ok(byId.get("b")!.position.x < byId.get("d")!.position.x);
+  assert.notEqual(byId.get("c")!.position.y, byId.get("d")!.position.y);
+  // 任意兩卡矩形不得重疊——堆疊事故的直接判據。
+  for (let i = 0; i < out.nodes.length; i++) {
+    for (let j = i + 1; j < out.nodes.length; j++) {
+      const p = out.nodes[i];
+      const q = out.nodes[j];
+      const overlap =
+        p.position.x < q.position.x + q.width &&
+        q.position.x < p.position.x + p.width &&
+        p.position.y < q.position.y + q.height &&
+        q.position.y < p.position.y + p.height;
+      assert.ok(!overlap, `${p.id} 與 ${q.id} 重疊`);
+    }
+  }
 });

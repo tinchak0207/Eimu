@@ -318,6 +318,39 @@ export interface CanvasProject {
   budget?: { totalCoins: number; usedCoins: number };
   /** P2 跨鏡頭一致性：鎖定到本畫布的角色/場景卡 id（CharacterCard.id）。 */
   cardIds?: string[];
+  // ── 作品/劇集三級狀態機（2026-09-15 吞 AID 產品層刀 1；全部 optional，向後相容）──
+  /** 作品類型：movie=電影（劇本用 episode 0）/ series=劇集。 */
+  projectType?: "movie" | "series";
+  /** 7 步流程當前步驟（1..7）；未開始則 undefined。 */
+  currentStep?: number;
+  /** 劇集分集清單（電影留空）。 */
+  episodes?: CanvasEpisode[];
+}
+
+/**
+ * 劇集分集（作品 → 劇集 → 分鏡的第二層）。
+ *
+ * 輪子來源：gzxx-2025/aid-server（MIT License，Copyright (c) 2026 光子讯息(杭州)科技有限公司）
+ * 源檔：sql/aid-init.sql 的 `aid_comic_episode` 表 + `aid_comic_script.original_text`
+ * 取得日：2026-09-15
+ * 逐字保留：episode_no（→ episodeNo）/ comic_title（→ title）/ original_text（→ script）
+ * 白名單改寫（僅兩處）：
+ *   1. 砍掉 AID 的審核三態 —— EpisodeStatusEnum 六態（0草稿/1制作中/2完成未审核/3审核中/
+ *      4审核通过/5审核失败）在本站收斂為 `draft | processing | finished`（本站無審核隊列）。
+ *   2. 剔除 pending_*（待審欄位）/ comic_desc / comic_cover_url / gen_mode / creation_mode /
+ *      del_flag / create_by / update_by / remark。
+ */
+export interface CanvasEpisode {
+  id: string;
+  /** 集號，1 起整數。 */
+  episodeNo: number;
+  title: string;
+  /** 完成狀態（砍 AID 審核三態）。 */
+  status: "draft" | "processing" | "finished";
+  /** 該集劇本原文（對應 aid_comic_script.original_text）。 */
+  script?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 // ─────────────────────────────────────────── 節點預設尺寸

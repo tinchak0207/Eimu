@@ -58,6 +58,11 @@ export async function PUT(req: NextRequest) {
       backgroundMode: body.backgroundMode === "blank" || body.backgroundMode === "lines" ? body.backgroundMode : "dots",
       ...(body.budget ? { budget: body.budget } : {}),
       ...(Array.isArray(body.cardIds) ? { cardIds: body.cardIds } : {}),
+      // 作品/劇集（2026-09-15 刀 1）：原樣透傳。清洗一律交給 project-store 的逐欄白名單，
+      // 本路由不重複實作洗欄邏輯（避免兩處白名單漂移）。不在此靜默丟欄。
+      ...(body.projectType !== undefined ? { projectType: body.projectType } : {}),
+      ...(body.currentStep !== undefined ? { currentStep: body.currentStep } : {}),
+      ...(body.episodes !== undefined ? { episodes: body.episodes } : {}),
     });
     return NextResponse.json({ success: true }, { status: 200 });
   } catch (error) {

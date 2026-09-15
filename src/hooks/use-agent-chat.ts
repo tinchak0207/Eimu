@@ -35,7 +35,6 @@ import {
   sendAgentMessage,
   abortAgentSession,
   readCachedAgentSettings,
-  tryAuthHeaders,
   isTerminalAuthError,
   type DirectSendCapability,
 } from "@/lib/agent-chat-client";
@@ -61,69 +60,6 @@ const SAVE_THROTTLE_MS = 1_000;
  * 不触发自愈（watchdog 发完 turn.done 紧跟的补发帧不属于「还魂」证据）。
  */
 const ZOMBIE_HEAL_GAP_MS = 800;
-
-// ─────────────────────────── 静默教训提炼（L0）
-
-const LESSON_DIGEST_THROTTLE_MS = 3 * 60 * 1000; // 同会话 3 分钟只提炼一次
-const LESSON_DIGEST_MIN_USER_TURNS = 2; // 至少 2 轮用户消息才值得提炼
-const lastLessonDigestAt = new Map<string, number>();
-
-/**
- * 回合收官的静默教训提炼：fire-and-forget，无 UI、不 await、不打断主流程。
- * 像送礼不提前告知——用户只该看到「回复」，不该看到「我在记你的习惯」。
- *
- * - 节流：同会话 3 分钟内最多一次（每轮都打 LLM 是浪费）
- * - 短会话跳过：少于一问一答的回合没有教训可提炼
- * - 失败静默：fetch 异常 / 无会话 / 语料不足都直接忽略，绝不上抛
- */
-function fireAndForgetLessonDigest(
-  sessionId: string | null,
-  getItems: () => AgentTranscriptItem[],
-): void {
-  if (!sessionId) return;
-  const now = Date.now();
-  const last = lastLessonDigestAt.get(sessionId) ?? 0;
-  if (now - last < LESSON_DIGEST_THROTTLE_MS) return;
-
-  const items = getItems();
-  const userTurns = items.filter((i) => i.kind === "user").length;
-  if (userTurns < LESSON_DIGEST_MIN_USER_TURNS) return;
-
-  lastLessonDigestAt.set(sessionId, now);
-
-  const payload = {
-    session_id: sessionId,
-    items: items.map((item) => {
-      // 只带提炼需要的字段：文本 / 工具名 / 状态；图片只留参考信息，绝不带 base64。
-      if (item.kind === "user" || item.kind === "assistant") {
-        return { kind: item.kind, text: typeof item.text === "string" ? item.text.slice(0, 4000) : "" };
-      }
-      if (item.kind === "tool") {
-        return {
-          kind: "tool" as const,
-          status: item.status,
-          tool: item.tool,
-          argsSummary: item.argsSummary ? String(item.argsSummary).slice(0, 2000) : undefined,
-        };
-      }
-      return { kind: item.kind as string };
-    }),
-  };
-
-  // fire-and-forget：不 await、不 catch 上抛，浏览器自己吞掉网络失败。
-  // 認證頭必須帶：/api/agent/profile/lessons 走 resolveAgentCaller，缺
-  // Authorization/x-user-id 會被當成「未登入」回 401，記錄從沒送達過。
-  // 未登入（null）時直接靜默跳過——旁生請求不值得換一個 console 錯誤。
-  const headers = tryAuthHeaders();
-  if (!headers) return;
-  headers["Content-Type"] = "application/json";
-  void fetch("/api/agent/profile/lessons", {
-    method: "POST",
-    headers,
-    body: JSON.stringify(payload),
-    keepalive: true, // 页面关掉时仍在途的请求也让它尽量送达
-  }).catch(() => undefined);
-}
 
 // ─────────────────────────── 本 hook 专用的非 SSE action
 // agentChatReducer 只吃 AgentSseEvent；乐观插入使用者消息、GET /quota 种子
@@ -569,13 +505,9 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
       ) {
         onCanvasEventRef.current?.(evt);
       }
-      // 静默教训提炼（L0）：每轮 turn.done 后，旁生一个后台请求从本轮回合
-      // 提炼账户级教训。全程无 UI、不 await、不打断主流程——像送礼不提前告知。
-      // 节流：同会话 3 分钟内只提炼一次，避免每轮都打 LLM。
       if (evt.name === "turn.done") {
         // 殭屍自愈的时间锚点：回合在此刻被宣告收尾。
         lastTurnDoneAtRef.current = Date.now();
-        fireAndForgetLessonDigest(sessionIdRef.current, () => stateRef.current?.items ?? []);
       }
       if (evt.name === "session.closed") {
         // 终结事件：马上关 ES、清计时器，剩下的交给 state.closed effect。

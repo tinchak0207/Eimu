@@ -9,7 +9,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { listCanvasProjects, postCanvasSnapshot, saveCanvasProject } from "@/lib/canvas/client";
 import type { CanvasReducerState } from "@/lib/canvas/reducer";
 import { toCanvasProject } from "@/lib/canvas/layout";
-import type { CanvasProject, CanvasViewport } from "@/lib/canvas/types";
+import type { CanvasEpisode, CanvasProject, CanvasViewport } from "@/lib/canvas/types";
 import type { CharacterCard } from "@/lib/character-cards";
 import {
   SAVE_DEBOUNCE_MS,
@@ -29,6 +29,10 @@ export interface UseCanvasProjectSyncParams {
   titleRef: { current: string };
   budgetRef: { current: CanvasBudget | null };
   activeCardIdsRef: { current: string[] };
+  // 作品/劇集三級狀態機（2026-09-15 刀 1 前端接線）：照 activeCardIdsRef 同款「最新值鏈像 ref」。
+  projectTypeRef: { current: "movie" | "series" | undefined };
+  currentStepRef: { current: number | undefined };
+  episodesRef: { current: CanvasEpisode[] };
   mountedRef: { current: boolean };
   // ── 當前 render 的值（effect 依賴）
   canvas: CanvasReducerState;
@@ -36,6 +40,9 @@ export interface UseCanvasProjectSyncParams {
   backgroundMode: CanvasBackgroundMode;
   projectTitle: string;
   activeCardIds: string[];
+  projectType: "movie" | "series" | undefined;
+  currentStep: number | undefined;
+  episodes: CanvasEpisode[];
   saveState: "idle" | "saving" | "saved" | "error" | "offline";
   sessionId?: string | null;
   selectedNodeId: string | null;
@@ -54,7 +61,9 @@ export interface UseCanvasProjectSyncParams {
 export function useCanvasProjectSync(params: UseCanvasProjectSyncParams) {
   const {
     canvasRef, viewportRef, backgroundRef, titleRef, budgetRef, activeCardIdsRef, mountedRef,
+    projectTypeRef, currentStepRef, episodesRef,
     canvas, viewport, backgroundMode, projectTitle, activeCardIds, saveState,
+    projectType, currentStep, episodes,
     sessionId, selectedNodeId, activeCharacterCards,
     setSavedProjects, setSaveState, setLoading,
   } = params;
@@ -103,6 +112,9 @@ export function useCanvasProjectSync(params: UseCanvasProjectSyncParams) {
       backgroundRef.current,
       b ? { totalCoins: b.usedCoins + b.remainingCoins, usedCoins: b.usedCoins } : undefined,
       activeCardIdsRef.current,
+      projectTypeRef.current,
+      currentStepRef.current,
+      episodesRef.current,
     );
   }, []);
 
@@ -123,10 +135,10 @@ export function useCanvasProjectSync(params: UseCanvasProjectSyncParams) {
         else setSaveState(res.reason === "not_authenticated" ? "offline" : "error");
       });
     }, SAVE_DEBOUNCE_MS);
-    // 依賴畫布本體與視口/背景/標題：任何一項變化都該落盤。
+    // 依賴畫布本體與視口/背景/標題/卡鎖定/作品劇集欄位：任何一項變化都該落盤。
     // saveState 刻意不進依賴 —— 它由這個 effect 自己寫，進去會變成自觸發循環。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canvas, viewport, backgroundMode, projectTitle, activeCardIds, buildProject]);
+  }, [canvas, viewport, backgroundMode, projectTitle, activeCardIds, projectType, currentStep, episodes, buildProject]);
 
   // ─────────────────────── Wave C1：壓縮快照上行（agent 的眼睛）
   // 3s 尾隨防抖（第二輪就緒優化刀C，原 300ms）：sessionId 落地（AI 助理開場）
@@ -150,6 +162,15 @@ export function useCanvasProjectSync(params: UseCanvasProjectSyncParams) {
         connections: canvas.connections,
         selectedNodeIds: selectedNodeId ? [selectedNodeId] : [],
         viewport,
+        // 作品/劇集三欄的上行（2026-09-15 刀 1）：這是 restoreAgentSnapshot 唯一資料源，
+        // 不帶則「回舊會話」時三欄恆為空（= 白名單漏一處 → 刷新後空殼的同型病灶）。
+        // 刻意只帶 projectType/currentStep 兩個純量指針，**不帶 episodes**：
+        //   1. 劇集數上限 200、script 是長文，會頂爆快照 512KB 上限（route 回 413）；
+        //   2. 快照上行是壓縮態（見 director SVG 前例），若帶去頭去尾的 episodes，
+        //      還原後 debounce 存檔會把截斷版寫回 Blob —— 靜默吃掉劇本原文。
+        //   episodes 的持久化走 Blob 正規路徑（saveCanvasProject / openSavedCanvas）。
+        ...(projectType ? { projectType } : {}),
+        ...(currentStep !== undefined ? { currentStep } : {}),
         // P2：鎖定卡進快照（agent 的 canvas_get_state 讀這份）。
         character_cards: activeCharacterCards.map((c) => ({
           id: c.id,
@@ -163,7 +184,7 @@ export function useCanvasProjectSync(params: UseCanvasProjectSyncParams) {
       });
     }, 3000);
     return () => window.clearTimeout(t);
-  }, [sessionId, canvas.nodes, canvas.connections, selectedNodeId, viewport, activeCharacterCards]);
+  }, [sessionId, canvas.nodes, canvas.connections, selectedNodeId, viewport, activeCharacterCards, projectType, currentStep]);
 
   return { projectIdRef, createdAtRef, saveTimerRef, everHadNodesRef, buildProject };
 }

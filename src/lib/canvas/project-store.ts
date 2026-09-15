@@ -5,12 +5,15 @@
 import { randomBytes } from "node:crypto";
 import { del, get, list, put } from "@/lib/blob-backend";
 import { sanitizeBlobSegment } from "@/lib/history-types";
-import type { CanvasProject } from "./types";
+import { isValidCreationStep } from "@/lib/creation-flow-steps";
+import type { CanvasEpisode, CanvasProject } from "./types";
 
 const PROJECT_SCHEMA_VERSION = 1;
 const INDEX_GENERATIONS_KEPT = 2;
 const MAX_PROJECTS_PER_USER = 50;
 const INDEX_CACHE_TTL_MS = 3_000;
+/** 單一作品的劇集上限（2026-09-15 刀 1；與 50 作品上限同哲學：防單筆 Blob 無界膨脹）。 */
+const MAX_EPISODES_PER_PROJECT = 200;
 
 const memoryStore = new Map<number, CanvasProject[]>();
 const indexCache = new Map<number, { projects: CanvasProject[]; expiresAt: number }>();
@@ -50,10 +53,50 @@ async function listIndexBlobs(userId: number): Promise<BlobRef[]> {
   return blobs.sort((a, b) => b.uploadedAt.getTime() - a.uploadedAt.getTime());
 }
 
-function normalizeProject(payload: unknown): CanvasProject | null {
+/**
+ * 劇集逐項清洗（照 `normalizeProject` 的逐欄白名單範式）。
+ * 非法項回 null（由呼叫端 flatMap 丟棄），不整份作廢。
+ */
+function normalizeEpisode(payload: unknown): CanvasEpisode | null {
+  if (!payload || typeof payload !== "object") return null;
+  const e = payload as Partial<CanvasEpisode>;
+  if (typeof e.id !== "string" || e.id.length === 0) return null;
+  if (typeof e.title !== "string" || e.title.length === 0) return null;
+  if (typeof e.episodeNo !== "number" || !Number.isInteger(e.episodeNo) || e.episodeNo < 1) return null;
+  const now = new Date().toISOString();
+  return {
+    id: e.id,
+    episodeNo: e.episodeNo,
+    title: e.title.slice(0, 200),
+    status: e.status === "draft" || e.status === "processing" || e.status === "finished" ? e.status : "draft",
+    ...(typeof e.script === "string" ? { script: e.script } : {}),
+    createdAt: typeof e.createdAt === "string" ? e.createdAt : now,
+    updatedAt: typeof e.updatedAt === "string" ? e.updatedAt : now,
+  };
+}
+
+/** 劇集清單清洗：逐項白名單 → episodeNo 去重（保留首見）→ 上限 200 集。 */
+function normalizeEpisodes(payload: unknown): CanvasEpisode[] | undefined {
+  if (!Array.isArray(payload)) return undefined;
+  const seen = new Set<number>();
+  const out: CanvasEpisode[] = [];
+  for (const item of payload) {
+    const episode = normalizeEpisode(item);
+    if (!episode) continue;
+    if (seen.has(episode.episodeNo)) continue; // episodeNo 去重，保留首見
+    seen.add(episode.episodeNo);
+    out.push(episode);
+    if (out.length >= MAX_EPISODES_PER_PROJECT) break;
+  }
+  return out;
+}
+
+/** 逐欄白名單清洗畫布專案（外部 payload 一律走此函數才落盤）。 */
+export function normalizeProject(payload: unknown): CanvasProject | null {
   if (!payload || typeof payload !== "object") return null;
   const p = payload as Partial<CanvasProject>;
   if (typeof p.id !== "string" || typeof p.title !== "string" || !Array.isArray(p.nodes)) return null;
+  const episodes = normalizeEpisodes(p.episodes);
   return {
     id: p.id,
     title: p.title.slice(0, 200),
@@ -68,8 +111,13 @@ function normalizeProject(payload: unknown): CanvasProject | null {
     ...(Array.isArray(p.cardIds)
       ? { cardIds: [...new Set(p.cardIds.filter((id): id is string => typeof id === "string" && id.length > 0))].slice(0, 100) }
       : {}),
+    // 作品/劇集（2026-09-15 刀 1）：非法值一律省略欄位，不寫預設值冒充用戶設定。
+    ...(p.projectType === "movie" || p.projectType === "series" ? { projectType: p.projectType } : {}),
+    ...(isValidCreationStep(p.currentStep) ? { currentStep: p.currentStep } : {}),
+    ...(episodes ? { episodes } : {}),
   };
 }
+
 
 function parseDocument(payload: unknown): CanvasProject[] {
   const raw = Array.isArray(payload)

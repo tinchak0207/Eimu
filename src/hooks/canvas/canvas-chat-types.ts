@@ -6,6 +6,7 @@ import type {
   CanvasAgentOp,
   CanvasAgentOpsEvent,
   CanvasConnection,
+  CanvasEpisode,
   CanvasNode,
   CanvasNodeMetadata,
   CanvasPlanEvent,
@@ -173,7 +174,7 @@ export interface UseCanvasChatReturn {
   setProjectTitle: (title: string) => void;
   loading: boolean;
   saveState: "idle" | "saving" | "saved" | "error" | "offline";
-  loadProject: (project: { nodes?: unknown; connections?: unknown; viewport?: CanvasViewport; backgroundMode?: CanvasBackgroundMode; title?: string }) => void;
+  loadProject: (project: { nodes?: unknown; connections?: unknown; viewport?: CanvasViewport; backgroundMode?: CanvasBackgroundMode; title?: string; projectType?: unknown; currentStep?: unknown; episodes?: unknown }) => void;
   exportProject: () => CanvasProject;
   clearCanvas: () => void;
   newCanvasSession: () => void;
@@ -182,7 +183,23 @@ export interface UseCanvasChatReturn {
   refreshSavedProjects: () => Promise<void>;
   openSavedCanvas: (id: string) => Promise<void>;
   /** Agent 快照下行回填（resume 到已有歷史的會話）：nodes>0 才落地；不進撤銷棧、清選取。 */
-  restoreAgentSnapshot: (snapshot: { nodes?: unknown; connections?: unknown; viewport?: CanvasViewport }) => boolean;
+  restoreAgentSnapshot: (snapshot: {
+    nodes?: unknown;
+    connections?: unknown;
+    viewport?: CanvasViewport;
+    projectType?: unknown;
+    currentStep?: unknown;
+    episodes?: unknown;
+  }) => boolean;
+  // ── 作品/劇集三級狀態機（刀 1 前端接線；持久化在 CanvasProject 頂層三欄）
+  /** 作品類型：undefined = 未設定。 */
+  projectType: "movie" | "series" | undefined;
+  /** 7 步流程當前步驟（1..7）；undefined = 未開始。 */
+  currentStep: number | undefined;
+  /** 劇集分集清單（電影為空陣列）。 */
+  episodes: CanvasEpisode[];
+  /** 三欄的唯一寫入口（UI 面板與 agent 驅動路徑共用）；欄位傳 undefined 即清除。 */
+  setProjectMeta: (patch: { projectType?: "movie" | "series"; currentStep?: number; episodes?: CanvasEpisode[] }) => void;
   // ── 角色/場景卡（P2 跨鏡頭一致性）：卡列表 + 項目級鎖定
   characterCards: CharacterCard[];
   /** 鎖定到當前畫布項目的卡 id（持久化在 CanvasProject.cardIds）。 */

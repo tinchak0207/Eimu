@@ -46,8 +46,11 @@ const LAYOUT_START = { x: 40, y: 40 };
  *      垂直置中 —— 邊永遠短距離左進右出，bezierPath 的水平切線剛好貼合。
  *
  * 手動拖動過的節點（moved）不重排，但仍佔用層內排序位（鄰居的邊不亂）。
+ *
+ * 匯出給舊會話回放（use-canvas-chat restoreAgentSnapshot）：gateway 上行的
+ * canvas_state 摘要刻意不帶座標，回填時必須跑同一套排版，否則全部疊在原點。
  */
-function layoutGraph(state: CanvasReducerState): CanvasReducerState {
+export function layoutGraph(state: CanvasReducerState): CanvasReducerState {
   const { nodes, connections } = state;
   if (nodes.length === 0) return state;
   if (connections.length === 0) {
