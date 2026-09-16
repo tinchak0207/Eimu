@@ -10,7 +10,6 @@ import {
 import { describeEnvChannels } from "../src/lib/sub2api";
 import { FILMERA_IMAGE_MODEL, FILMERA_VIDEO_MODEL } from "../src/lib/generation-core/filmera-upstream";
 import { REGISTRY_CHANNELS } from "../src/lib/supplier-channels.config";
-import type { RegistryClaimKind } from "../src/lib/supplier-channels.config";
 
 // reblood：这些渠道的调度已整体切到 new-api，supplier 表路由指向 NEWAPI_BASE_URL。
 const NEWAPI_MIGRATED_LABELS = new Set(["hublinuxdo", "pixai", "sub2api", "dreamina", "fallback", "tokenmix"]);
@@ -18,8 +17,7 @@ const NEWAPI_MIGRATED_LABELS = new Set(["hublinuxdo", "pixai", "sub2api", "dream
 type Tier = "first_party" | "managed_pool" | "relay" | "fallback";
 type Capability = {
   modelId: string;
-  // 刀 3：registry 渠道可認領 tts（AV 成片鏈路，見 supplier-channels.config 的 RegistryClaimKind）。
-  kind: RegistryClaimKind;
+  kind: "image_generate" | "image_edit" | "video_generate";
   supplierModelId: string | null;
   ratios: string[];
   resolutions: string[];

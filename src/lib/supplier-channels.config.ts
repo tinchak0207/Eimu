@@ -6,7 +6,7 @@
 // 檔案必須是 .ts（而非 JSON）：Next 打包（Vercel lambda bundle）與 tsx 跑 tools
 // 都要能直接 import。
 
-export type RegistryClaimKind = "image_generate" | "image_edit" | "video_generate" | "tts";
+export type RegistryClaimKind = "image_generate" | "image_edit" | "video_generate";
 
 export interface RegistryChannelClaim {
   modelId: string;                // 平台 catalog 模型 id
@@ -23,7 +23,7 @@ export interface RegistryChannel {
   seedPriority: number;          // seed 進 supplier 表的 priority
   sitePriority: number;          // 站點隊列 ENV_CHANNEL_PRIORITIES 用
   chatImageModels: string[];     // 上游模型名走 /chat/completions 生圖（空 = 全走 images/generations）
-  adapterType?: "openai_images" | "metaso" | "openai_video" | "blender_bridge" | "adobe2api" | "tts_speech"; // 缺省 openai_images；metaso 走自訂協議（見 metaso-upstream.ts），openai_video 走 /v1/videos 異步（見 openai-video-upstream.ts），blender_bridge 走橋 /v1/execute 同步單幀渲染（見 blender-node-upstream.ts），adobe2api 走 firefly-* 映射（見 adobe2api-upstream.ts，含視頻走 /v1/chat/completions），tts_speech 走 OpenAI 兼容 /audio/speech 同步合成（見 tts-upstream.ts，刀 3 配音音色）
+  adapterType?: "openai_images" | "metaso" | "openai_video" | "blender_bridge" | "adobe2api"; // 缺省 openai_images；metaso 走自訂協議（見 metaso-upstream.ts），openai_video 走 /v1/videos 異步（見 openai-video-upstream.ts），blender_bridge 走橋 /v1/execute 同步單幀渲染（見 blender-node-upstream.ts），adobe2api 走 firefly-* 映射（見 adobe2api-upstream.ts，含視頻走 /v1/chat/completions）
   claims: RegistryChannelClaim[];
 }
 

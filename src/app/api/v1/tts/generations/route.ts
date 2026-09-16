@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
   }
   const apiKey = auth.key;
 
-  let body: { input?: unknown; voice?: unknown; model?: unknown; callback_url?: unknown; speed?: unknown; pitch?: unknown; emotion?: unknown };
+  let body: { input?: unknown; voice?: unknown; model?: unknown; callback_url?: unknown };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -61,11 +61,6 @@ export async function POST(req: NextRequest) {
   const modelId = typeof body.model === "string" && body.model ? body.model : "tts-default";
   const voice = typeof body.voice === "string" && body.voice ? body.voice : "default";
   const callbackUrl = typeof body.callback_url === "string" ? body.callback_url : null;
-  // 刀 3：音色參數（可選）。只做型別收斂，範圍/支援判定統一在 voice-library 的
-  // ttsVoiceRequestParams（不支援的維度不落參數，不假裝支援）。
-  const speed = typeof body.speed === "number" && Number.isFinite(body.speed) ? body.speed : undefined;
-  const pitch = typeof body.pitch === "number" && Number.isFinite(body.pitch) ? body.pitch : undefined;
-  const emotion = typeof body.emotion === "string" && body.emotion.trim() ? body.emotion.trim() : undefined;
 
   // 手術 P1 計費閘（詳見 quota-precheck.ts）：TTS 今日為 0 額提交（無 reserve 可
   // 跳），閘門對 0 額直通、兩種模式下行為一致、不產生任何新 I/O；日後 TTS 定價
@@ -88,16 +83,8 @@ export async function POST(req: NextRequest) {
       kind: "tts",
       modelId,
       // 供應商適配以 workflow 攜帶 voice；prompt 承載文本本體。
-      // 刀 3：voice 可為音色庫 voiceCode（見 voice-library.ts）；speed/pitch/emotion
-      // 由 tts_speech adapter 依「庫內支援旗標 or 顯式」決定是否真的送出。
       prompt: input,
-      workflow: {
-        voice,
-        inputLength: input.length,
-        ...(speed !== undefined ? { speed } : {}),
-        ...(pitch !== undefined ? { pitch } : {}),
-        ...(emotion !== undefined ? { emotion } : {}),
-      },
+      workflow: { voice, inputLength: input.length },
       responseFormat: "b64_json",
       callbackUrl,
       billingAmount: gate.billingAmount,

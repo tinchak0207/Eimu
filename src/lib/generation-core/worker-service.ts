@@ -276,8 +276,6 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
           url: output.url,
           endpointLabel: output.endpointLabel,
           mediaKind: job.kind === "tts" ? "audio" : (job.kind === "video_generate" || job.kind === "avatar" || job.kind === "lipsync") ? "video" : "image",
-          // 刀 3：適配器級 artifact metadata（TTS 的 voice_code/voice_source/…）。
-          ...(output.artifactMetadata ? { metadata: output.artifactMetadata } : {}),
         }, sql);
         const latencyMs = Date.now() - startedAt;
         await completeGenerationAttempt({

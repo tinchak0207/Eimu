@@ -365,11 +365,6 @@ export async function persistOutputArtifact(input: {
   endpointLabel: string;
   mediaKind?: "image" | "video" | "audio";
   retentionExpiresAt?: Date | null;
-  /**
-   * 額外 artifact metadata（刀 3）：TTS 適配器的 voice_code/voice_source 等可查證欄位。
-   * 與 endpointLabel 合併；endpointLabel 以本函式為準（不被 input.metadata 覆寫）。
-   */
-  metadata?: Record<string, unknown>;
 }, sql: GenerationSql = getGenerationSql()): Promise<PersistedOutputArtifact> {
   if (!process.env.BLOB_READ_WRITE_TOKEN) throw new Error("BLOB_READ_WRITE_TOKEN is required to persist generation outputs.");
   const buffer = await outputBuffer(input);
@@ -392,7 +387,7 @@ export async function persistOutputArtifact(input: {
     validated,
     byteSize: buffer.length,
     retentionExpiresAt: input.retentionExpiresAt ?? null,
-    metadata: { ...(input.metadata ?? {}), endpointLabel: input.endpointLabel },
+    metadata: { endpointLabel: input.endpointLabel },
   }, sql);
   return { id: recorded.id, objectKey, deliveryUrl: blob.url, validated, byteSize: buffer.length, inserted: recorded.inserted };
 }

@@ -51,11 +51,6 @@ export interface CharacterCard {
   negativePrompt?: string;
   /** LoRA 關聯（可選）：引用既有 lora versionId，不建新體系。 */
   loraIds?: string[];
-  /**
-   * 綁定的配音音色編碼（可選，刀 3）：引用 voice-library.ts 的 voiceCode，不建新體系。
-   * 只有角色卡（kind "character"）的音色會被 TTS 取用（見 voiceCodeFromCards）。
-   */
-  voiceCode?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -69,8 +64,6 @@ const MAX_CARD_NEGATIVE_LENGTH = 1000;
 const MAX_CARD_REFERENCES = 8;
 const MAX_CARD_LORA_IDS = 8;
 const MAX_REFERENCE_NAME_LENGTH = 60;
-/** 音色編碼上限（對齊 voice-library.ts 的 MAX_VOICE_CODE_LENGTH / AID voice_code 欄寬）。 */
-const MAX_CARD_VOICE_CODE_LENGTH = 128;
 
 /** 圖片 URL 判定：與 semantic-nodes 的收口一致（http(s) 與 data:image）。 */
 function isUsableCardImageUrl(url: string | undefined | null): url is string {
@@ -110,8 +103,6 @@ export function normalizeCharacterCard(payload: unknown): CharacterCard | null {
   const loraIds = (Array.isArray(c.loraIds) ? c.loraIds : [])
     .filter((v): v is string => typeof v === "string" && v.trim().length > 0)
     .slice(0, MAX_CARD_LORA_IDS);
-  // 音色綁定（刀 3）：白名單單一字串欄，空字串收斂為未綁定（不寫 undefined 以外的值）。
-  const voiceCode = boundedString(c.voiceCode, MAX_CARD_VOICE_CODE_LENGTH);
   return {
     id,
     name,
@@ -120,7 +111,6 @@ export function normalizeCharacterCard(payload: unknown): CharacterCard | null {
     references,
     ...(negativePrompt ? { negativePrompt } : {}),
     ...(loraIds.length ? { loraIds } : {}),
-    ...(voiceCode ? { voiceCode } : {}),
     createdAt: typeof c.createdAt === "string" ? c.createdAt : now,
     updatedAt: typeof c.updatedAt === "string" ? c.updatedAt : now,
   };

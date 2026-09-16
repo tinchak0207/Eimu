@@ -232,9 +232,6 @@ export async function listCompletedGenerationArtifacts(
   `;
   return rows.map((row) => {
     const metadata = jsonValue<Record<string, unknown>>(row.metadata_json, {});
-    // 刀 3：metadata_json 除 endpointLabel 外的欄位（TTS 的 voice_code/voice_source 等）
-    // 對外透出供查證；只有 endpointLabel 時省略（既有任務回應零漂移）。
-    const extra = Object.entries(metadata).filter(([key]) => key !== "endpointLabel");
     return {
       id: String(row.id),
       outputIndex: Number(row.output_index),
@@ -244,7 +241,6 @@ export async function listCompletedGenerationArtifacts(
       width: Number(row.width),
       height: Number(row.height),
       endpointLabel: typeof metadata.endpointLabel === "string" ? metadata.endpointLabel : "unknown",
-      ...(extra.length ? { metadata: Object.fromEntries(extra) } : {}),
     };
   });
 }
