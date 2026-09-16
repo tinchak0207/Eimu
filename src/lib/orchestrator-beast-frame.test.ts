@@ -361,6 +361,66 @@ test("09-15 片E：16-19 硬條款關鍵詞在場，11-15 與 L152 原文錨點�
   assert.ok(playbook.includes("由「可派」升級為「**必須派**」"), "軟條款升級句必須在場");
 });
 
+// ── 09-15 研究隔離片F（刀1）：第 20 條＋11-19/L152 原文錨點零刪 ──
+
+test("09-15 片F：第 20 條「研究是决策输入，不是创作素材」在場，11-19 與 L152 錨點零刪", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { join, dirname } = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+  const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+  const raw = readFileSync(join(root, ORCHESTRATOR_DISPATCH_PLAYBOOK_PATH), "utf8");
+  const playbook = stripProvenanceHeader(raw);
+
+  // 第 20 條判據關鍵詞（按落筆實際字串，缺一即條款被弱化）。
+  for (const kw of [
+    "研究是决策输入，不是创作素材",
+    "只准用於你自己的取捨判斷",
+    "以「你必須吸收的真實研究結論」",
+    "以下是研究發現",
+    "禁止跨 Expert 的字面同源",
+    "規格參數",
+    "即視為本條違反",
+    "重寫 spec 並重派受影響 Expert",
+    "錯位互補信息翻倍",
+  ]) {
+    assert.ok(playbook.includes(kw), `第 20 條關鍵詞必須在場：${kw}`);
+  }
+  // 條目編號 20 自成條（行首匹配，接續 19 的最大號）。
+  assert.ok(/^20\. /m.test(playbook), "必須存在編號條目 20.");
+  // 編號連續性：19 之後即 20，中間不得插入其他序號。
+  const no20 = playbook.indexOf("\n20. ");
+  const no19 = playbook.indexOf("\n19. ");
+  assert.ok(no19 > 0 && no20 > no19, "第 20 條必須在第 19 條之後");
+  assert.ok(!/\n(2[1-9]|[3-9]\d)\. /m.test(playbook.slice(no19)), "19 之後不得跳號");
+
+  // 既有 11-19 條錨點零刪（純增，禁删任何既有条款）。
+  for (const legacy of [
+    "凡交付物含數字，驗收必須算，不能讀",
+    "spec 必帶可驗收斷言",
+    "交付契約對表",
+    "跨檔一致性抽查",
+    "驗收手段救濟：你可以自己核算",
+    "交付閘門標記禁止覆蓋",
+    "重派後仍未達標不得計入成品",
+    "critic 獨立審核＝成品前提",
+    "契約欄逐字進 spec",
+    "違此條＝對用戶說謊",
+  ]) {
+    assert.ok(playbook.includes(legacy), `既有條款 11-19 錨點不得被刪：${legacy}`);
+  }
+  // L152 軟條款原文結構與升級句零刪（本次為純增，不得動它）。
+  for (const anchor of [
+    "验收署名与独立审核（09-15）",
+    "验收由你本人署名负责",
+    "只审不产",
+    "若 digest 无 critic 行则退回你自己署名验收",
+    "critic 的判决仍由你署名采纳或驳回，独立审核不转移署名责任",
+    "由「可派」升級為「**必須派**」",
+  ]) {
+    assert.ok(playbook.includes(anchor), `L152 原文/升級錨點不得被刪：${anchor}`);
+  }
+});
+
 // ── sanitize 白名单：beast_mode 往返 ────────────────────────
 
 /** node 环境没有 window：临时挂一个最小 localStorage 桩驱动缓存路径（同 agent-chat-client.test.ts）。 */
