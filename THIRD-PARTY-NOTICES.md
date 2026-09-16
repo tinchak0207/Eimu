@@ -48,6 +48,25 @@ SOFTWARE.
   `sql/aid-init.sql` 的 `aid_comic_episode` / `aid_comic_script`；
   改写见 `src/lib/creation-flow-steps.ts` 与 `src/lib/canvas/types.ts` 的 `CanvasEpisode` 档头
   （砍 AID 审核三态与 `pending_*` 字段，本站无审核队列）。
+- 追加引入（2026-09-15，刀 2 分镜实体 + 21 栏位契约）：分镜 21 栏位契约（栏名与顺序逐字保留）
+  与 `aid_storyboard` 表栏位语义，来源 `doc/提示词开发指南.md` §「分鏡脚本与画师链路」输出栏位表、
+  `sql/aid-init.sql` 的 `aid_storyboard`（21 栏 + `final_image_id`/`final_video_id`/`final_audio_id`）；
+  改写见 `src/lib/storyboard-contract.ts` 档头（**剔除已废的第 22 栏 `sceneCode`**——AID v2.1.4
+  同档 §开发要点 5 已明令禁输出 sceneCode，场景归属只认外层 sceneName；本站不建 shot 表，
+  改挂 `CanvasNode.metadata`，即 `CanvasNodeMetadata.storyboardShot` / `.storyboardScene`）。
+- 追加引入（2026-09-15，刀 3 配音音色库）：音色库初始资料 63 笔（`voice_code` / `voice_name` /
+  `character_types` / `voice_styles` / `tone_tags` / `emotion_tags` 逐字保留），来源
+  `sql/aid-init.sql` 的 `aid_ai_voice_library`（行 426-428 起）；另借 `aid_role_voice_binding` /
+  `aid_audio_asset` 的栏位语义（本站**不建表**：音色 metadata 挂资产包 `AssetPackItem
+  kind:"voice"`，角色绑定用 `CharacterCard.voiceCode`）。
+  改写见 `src/lib/voice-library.ts` 档头与 `src/lib/generation-core/tts-upstream.ts`。
+  **剔除项**：AID 的 `sample_url` / `avatar_url` 指向 AID 自建 OSS（`/aid/voice/sample/...`），
+  本站不可达，仅以 `sourceSampleUrl` 原值保留供溯源，**不宣称可直连播放**。
+  **实测边界（2026-09-15 探针）**：AID 的 63 个火山 bigtts 音色码在本站网关上被
+  `tts-proxy.js` 的 `if (!voice.includes(':')) voice = \`${model}:alex\`` 改写成同一音色
+  （63 笔全部塌缩），故本仓库另立实测白名单 `GATEWAY_VERIFIED_VOICES`（8 条
+  SiliconFlow preset，实弹验证走 SF 主路 32kHz）作为可试听集合；AID 63 笔仅作
+  策展元资料（标签/试听文案/排序）。
 - 完整许可证文本：
 
 ```
