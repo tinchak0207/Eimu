@@ -11,6 +11,7 @@
 // 本檔案 = 前端與後端共用的契約。任何改動必須同步兩端。
 
 import type { ReferenceImageRole } from "../image-types";
+import type { StoryboardSceneRef, StoryboardScriptShot } from "../storyboard-contract";
 
 export type CanvasPosition = { x: number; y: number };
 
@@ -151,6 +152,18 @@ export interface CanvasNodeMetadata {
   // ── 3D 場景卡節點（type: scene_3d，2026-09-06 Astra PRD P1-3；3D 導演 subagent 回傳寫入）──
   /** 3D 場景卡欄位族（單一物件欄位，內部形狀 = Scene3dCardMetadata）。 */
   sceneCard?: Scene3dCardMetadata;
+  // ── 分鏡實體（2026-09-15 刀 2；AID 21 欄契約，MIT）──
+  /**
+   * 一鏡（AID 21 欄契約，`src/lib/storyboard-contract.ts`）：掛在 Group 節點的子節點。
+   * 形狀 = `StoryboardScriptShot`（21 個字串欄，空值 = ""）。讀取端以
+   * `normalizeStoryboardShot` 收斂——`shotNumber` 為空則整包丟棄（不製造半形分鏡）。
+   */
+  storyboardShot?: StoryboardScriptShot;
+  /**
+   * 場景外殼：掛在 **Group 節點**，`sceneName` 是場景歸屬唯一權威
+   *（AID v2.1.4 已廢 `sceneCode`）。真值 = 子節點的 `storyboardShot`，此處只存指針。
+   */
+  storyboardScene?: StoryboardSceneRef;
 }
 
 /**

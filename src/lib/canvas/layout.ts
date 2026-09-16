@@ -11,6 +11,7 @@
 import type { AgentSseEvent } from "@/lib/agent-chat-types";
 import { isValidCreationStep } from "@/lib/creation-flow-steps";
 import { isReferenceImageRole } from "@/lib/image-types";
+import { normalizeStoryboardSceneRef, normalizeStoryboardShot } from "@/lib/storyboard-contract";
 import type { CanvasReducerState } from "./reducer";
 import {
   CANVAS_NODE_DEFAULT_SIZE,
@@ -142,6 +143,12 @@ export function toNodeMetadata(raw: unknown): CanvasNodeMetadata {
     // 3D 場景卡節點（Astra PRD P1-3）：sceneCard 欄位族收斂（Scene3dCardMetadata）。
     // 契約全形六欄；非契約形狀（任一必填欄缺失/型別不符）整包丟棄，不製造半形數據。
     ...(toScene3dCard(m.sceneCard) ? { sceneCard: toScene3dCard(m.sceneCard) } : {}),
+    // 分鏡實體（2026-09-15 刀 2）：AID 21 欄契約。shotNumber 為空即整包丟棄
+    //（分鏡無鏡號 = 無法與門禁 storyboard_qc_17 的 shot_identity 對齊）。
+    ...(normalizeStoryboardShot(m.storyboardShot) ? { storyboardShot: normalizeStoryboardShot(m.storyboardShot)! } : {}),
+    ...(normalizeStoryboardSceneRef(m.storyboardScene)
+      ? { storyboardScene: normalizeStoryboardSceneRef(m.storyboardScene)! }
+      : {}),
   };
 }
 

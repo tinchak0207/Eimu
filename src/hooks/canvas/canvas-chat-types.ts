@@ -2,6 +2,7 @@
 // use-canvas-chat.ts 仍是唯一匯出點（barrel），消費端 import 路徑零改動。
 import type { AgentSseEvent } from "@/lib/agent-chat-types";
 import type { CharacterCard } from "@/lib/character-cards";
+import { compactStoryboardShot } from "@/lib/storyboard-contract";
 import type {
   CanvasAgentOp,
   CanvasAgentOpsEvent,
@@ -101,6 +102,18 @@ export function compactMetadataForAgent(metadata: CanvasNodeMetadata | undefined
   //（2026-09-03 快照壓縮器 director 事故同構）。往復合同測試釘死。
   if (metadata.sceneCard) {
     out.sceneCard = metadata.sceneCard;
+  }
+  // 分鏡實體（2026-09-15 刀 2）：AID 21 欄整族透傳（逐欄截 STORYBOARD_SNAPSHOT_FIELD_CHARS）。
+  // 同屬「漏傳 = 刷新/換裝置後空殼」病灶（2026-09-03 director 事故同構）：agent 產的
+  // 21 欄分鏡經 canvas_apply_ops 寫進節點後，這份快照是回舊會話時
+  // restoreAgentSnapshot 的唯一資料源。
+  // 為何不在這裡寫 21 個 if：欄位清單只准一份（storyboard-contract.ts），壓縮下放純函數
+  //（compactStoryboardShot），未來加欄自動跟上、不製造第二個漂移點。
+  if (metadata.storyboardShot) {
+    out.storyboardShot = compactStoryboardShot(metadata.storyboardShot);
+  }
+  if (metadata.storyboardScene) {
+    out.storyboardScene = metadata.storyboardScene;
   }
   return Object.keys(out).length > 0 ? out : undefined;
 }
