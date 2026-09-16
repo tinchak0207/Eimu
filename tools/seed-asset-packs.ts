@@ -8,6 +8,7 @@
  *      已在源檔頭註明）+ skills/blender-director/verify/ 兩支實跑驗證過的 bpy 5.2 腳本。
  *   ② 寫入接入點：supplier_capability SQL → saveAssetPack / saveSceneAssets
  *      （asset-pack-store 真源寫路徑，與生產 /api/assets 同一條 merge/upsert 鏈）。
+ *      進貨單③（刀 3 配音音色庫）同構追加：voice-library 的包 payload → saveAssetPack。
  *   ③ 幂等語義：saveAssetPack 按 pack id upsert、saveSceneAssets 指紋去重，
  *      重跑零新增（同構 seed 的 ON CONFLICT 語義）。
  * 交互邏輯/儲存層/上限鐵律一行不動（MAX_ITEMS_PER_PACK=50 由 store normalize 截斷，
@@ -35,6 +36,7 @@ import {
   kunpengStyleSummary,
 } from "../src/lib/kunpeng-style-assets";
 import { KUNPENG_PROMPT_TEMPLATES } from "../src/lib/kunpeng-prompt-templates";
+import { voiceLibraryPackPayload } from "../src/lib/voice-library";
 
 // ─────────────────────────────────────────── 參數
 
@@ -167,6 +169,19 @@ async function seedBlenderTemplates(userId: number): Promise<void> {
   }
 }
 
+// ─────────────────────────────────────────── 進貨單③：配音音色庫（刀 3）
+
+/**
+ * 音色庫包（voice-library）進貨：資料源 = src/lib/voice-library.ts 的
+ * ALL_VOICE_ENTRIES（AID 策展種子 ∪ 本站實測可播集），映射走 voiceLibraryPackPayload
+ * （本檔只負責入庫，不重複映射邏輯）。幂等語義與其他進貨單相同（saveAssetPack upsert by id）。
+ */
+async function seedVoiceLibrary(userId: number): Promise<void> {
+  const pack = voiceLibraryPackPayload();
+  await saveAssetPack(userId, pack);
+  console.log(`[asset-pack-seed] user ${userId}: ${pack.id}「${pack.title}」 items=${pack.items.length}`);
+}
+
 // ─────────────────────────────────────────── main（幂等 upsert，重跑零新增）
 
 async function seedUser(userId: number): Promise<void> {
@@ -179,6 +194,7 @@ async function seedUser(userId: number): Promise<void> {
     console.log(`[asset-pack-seed] user ${userId}: ${pack.id}「${pack.title}」 items=${pack.items.length}`);
   }
   await seedBlenderTemplates(userId);
+  await seedVoiceLibrary(userId);
 
   const after = await listAssetPacks(userId);
   const total = after.reduce((n, p) => n + p.items.length, 0);

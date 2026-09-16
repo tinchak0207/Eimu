@@ -108,8 +108,8 @@ function parseArgs(argv: string[]): Args {
     .map((x) => x.trim())
     .filter(Boolean);
   for (const kind of kindsRaw) {
-    if (kind !== "image_generate" && kind !== "image_edit" && kind !== "video_generate") {
-      console.error(`錯誤：未知 kind "${kind}"（可選 image_generate / image_edit / video_generate）。`);
+    if (kind !== "image_generate" && kind !== "image_edit" && kind !== "video_generate" && kind !== "tts") {
+      console.error(`錯誤：未知 kind "${kind}"（可選 image_generate / image_edit / video_generate / tts）。`);
       process.exit(1);
     }
   }
@@ -119,7 +119,7 @@ function parseArgs(argv: string[]): Args {
     process.exit(1);
   }
   const adapterRaw = String(flags["adapter"] ?? "openai_images");
-  const ADAPTERS = ["openai_images", "metaso", "openai_video", "blender_bridge", "adobe2api"] as const;
+  const ADAPTERS = ["openai_images", "metaso", "openai_video", "blender_bridge", "adobe2api", "tts_speech"] as const;
   if (!(ADAPTERS as readonly string[]).includes(adapterRaw)) {
     console.error(`錯誤：未知 adapter "${adapterRaw}"（可選 ${ADAPTERS.join(" / ")}）。`);
     process.exit(1);

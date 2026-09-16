@@ -100,6 +100,11 @@ export interface GenerationArtifactResult {
   width: number;
   height: number;
   endpointLabel: string;
+  /**
+   * artifact.metadata_json（刀 3）：TTS 成品的 `voice_code` / `voice_source` /
+   * `voice_library_known` 等可查證欄位由此對外；無 metadata 時省略。
+   */
+  metadata?: Record<string, unknown>;
 }
 
 export interface GenerationJobResult {
@@ -155,7 +160,7 @@ export interface CreateGenerationReferenceArtifactInput {
 export interface SupplierRecord {
   id: string;
   label: string;
-  adapterType: "adobe2api" | "openai_images" | "minimax" | "did" | "filmera" | "metaso" | "openai_video" | "blender_bridge";
+  adapterType: "adobe2api" | "openai_images" | "minimax" | "did" | "filmera" | "metaso" | "openai_video" | "blender_bridge" | "tts_speech";
   supplyTier: "first_party" | "managed_pool" | "relay" | "fallback";
   failureDomain: string;
   baseUrl: string;
@@ -234,6 +239,11 @@ export interface SupplierGenerationOutput {
   endpointLabel: string;
   supplierModelId: string;
   evidence?: Record<string, unknown>;
+  /**
+   * 落 artifact.metadata_json 的適配器級欄位（刀 3：TTS 的 voice_code/voice_source 等）。
+   * 由 worker/reconciliation 傳進 persistOutputArtifact，不覆蓋既有的 endpointLabel。
+   */
+  artifactMetadata?: Record<string, unknown>;
 }
 
 /**

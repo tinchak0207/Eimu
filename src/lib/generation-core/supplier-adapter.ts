@@ -5,6 +5,7 @@ import { generateWithFilmera } from "@/lib/generation-core/filmera-upstream";
 import { generateWithMetaso, isMetasoModel } from "@/lib/generation-core/metaso-upstream";
 import { generateWithNewApiVideo, isNewApiVideoKernelEnabled } from "@/lib/generation-core/newapi-video-upstream";
 import { generateWithOpenaiVideo } from "@/lib/generation-core/openai-video-upstream";
+import { generateWithTtsSpeech } from "@/lib/generation-core/tts-upstream";
 import { SupplierRequestError } from "./failure-classifier";
 import { generateWithNewApi, isNewApiSupplier } from "./newapi-adapter";
 import type { SupplierGenerationInput, SupplierGenerationOutput, SupplierRecord } from "./types";
@@ -125,6 +126,12 @@ async function requestSupplier(supplier: SupplierRecord, input: SupplierGenerati
   // blender-node-upstream.ts。同步 adapter：無 provider task id，不進異步對帳。
   if (supplier.adapterType === "blender_bridge") {
     return generateWithBlenderNode(supplier, input);
+  }
+  // 配音（刀 3）：同步 OpenAI 兼容 /audio/speech——見 tts-upstream.ts（音色解析
+  // 走 voice-library，voice_code 落 artifact metadata）。同步 adapter：無 provider
+  // task id，不進異步對帳、不進 protocolOfAdapter。
+  if (supplier.adapterType === "tts_speech") {
+    return generateWithTtsSpeech(supplier, input);
   }
   const references = input.workflow.references ?? [];
   const headers: Record<string, string> = {

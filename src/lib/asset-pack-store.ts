@@ -22,6 +22,13 @@ const MAX_TAGS_PER_PACK = 20;
 const MAX_TAG_LENGTH = 50;
 const MAX_NOTE_LENGTH = 200;
 const MAX_SCENE_SUMMARY_LENGTH = 500;
+/** voice（刀 3）：音色編碼/展示名/樣本路徑/試聽文案上限（對齊 AID 欄寬）。 */
+const MAX_VOICE_CODE_LENGTH = 128;
+const MAX_VOICE_NAME_LENGTH = 100;
+const MAX_VOICE_SAMPLE_URL_LENGTH = 500;
+const MAX_VOICE_SAMPLE_TEXT_LENGTH = 500;
+const MAX_VOICE_TAG_LENGTH = 32;
+const MAX_VOICE_TAGS_PER_DIMENSION = 8;
 
 export type AssetPackItemKind =
   | "prompt"
@@ -31,7 +38,17 @@ export type AssetPackItemKind =
   | "image"
   // 3D 資產（Astra P1-5）：scene_3d=.blend/.glb 產物；bpy_script=bpy 腳本模板。
   | "scene_3d"
-  | "bpy_script";
+  | "bpy_script"
+  // 配音音色（刀 3）：voice=音色 metadata 條目（見 voice-library.ts，走 Blob 不建表）。
+  | "voice";
+
+/** 音色四維標籤（語義對齊 AID character_types/voice_styles/tone_tags/emotion_tags）。 */
+export interface VoiceTagSet {
+  characterTypes: string[];
+  voiceStyles: string[];
+  toneTags: string[];
+  emotionTags: string[];
+}
 
 export interface AssetPackItem {
   kind: AssetPackItemKind;
@@ -52,6 +69,18 @@ export interface AssetPackItem {
   bytes?: number;
   fingerprint?: string;
   sceneSummary?: string;
+  /** voice 用（刀 3）：音色編碼（庫內唯一鍵）與展示名。 */
+  voiceCode?: string;
+  voiceName?: string;
+  /** voice 用：四維標籤（逐字承接 AID JSON 陣列）。 */
+  voiceTags?: VoiceTagSet;
+  /** voice 用：試聽文案（AID sample_text）。 */
+  sampleText?: string;
+  /**
+   * voice 用：AID 原始樣本路徑（`/aid/voice/sample/...`）。
+   * **僅溯源，不可直連播放**——AID OSS 資產不在本站可達範圍；試聽走本站 TTS adapter。
+   */
+  sourceSampleUrl?: string;
   /** 來源標記。 */
   source?: { type: "history" | "canvas" | "chat" | "workflow" | "manual"; id: string; sessionId?: string };
   note?: string;
@@ -126,6 +155,8 @@ const ITEM_KINDS: readonly AssetPackItemKind[] = [
   // 3D 資產（Astra P1-5）：同構追加，既有五類行為不動。
   "scene_3d",
   "bpy_script",
+  // 配音音色（刀 3）：同構追加，既有七類行為不動。
+  "voice",
 ];
 
 /**
@@ -162,6 +193,40 @@ function normalizeItem(payload: unknown): AssetPackItem | null {
     if (Array.isArray(p.loraModelVersionIds)) {
       const ids = p.loraModelVersionIds.filter((v): v is string => typeof v === "string");
       if (ids.length) item.loraModelVersionIds = ids;
+    }
+  }
+  // 音色（刀 3）：voice 收 voiceCode/voiceName/四維標籤/試聽文案/來源樣本路徑。
+  // voiceCode 是庫內唯一鍵，缺失即視為壞條目（無編碼的音色不可用於 TTS）。
+  if (kind === "voice") {
+    const code = typeof p.voiceCode === "string" ? p.voiceCode.trim().slice(0, MAX_VOICE_CODE_LENGTH) : "";
+    if (!code) return null;
+    item.voiceCode = code;
+    const name = typeof p.voiceName === "string" ? p.voiceName.trim().slice(0, MAX_VOICE_NAME_LENGTH) : "";
+    if (name) item.voiceName = name;
+    const tags = p.voiceTags;
+    if (tags && typeof tags === "object") {
+      const dims: (keyof VoiceTagSet)[] = ["characterTypes", "voiceStyles", "toneTags", "emotionTags"];
+      const clean: VoiceTagSet = { characterTypes: [], voiceStyles: [], toneTags: [], emotionTags: [] };
+      let any = false;
+      for (const dim of dims) {
+        const raw = (tags as Partial<VoiceTagSet>)[dim];
+        if (!Array.isArray(raw)) continue;
+        for (const tag of raw) {
+          if (typeof tag !== "string") continue;
+          const cleanTag = tag.trim().slice(0, MAX_VOICE_TAG_LENGTH);
+          if (!cleanTag || clean[dim].includes(cleanTag)) continue;
+          clean[dim].push(cleanTag);
+          if (clean[dim].length >= MAX_VOICE_TAGS_PER_DIMENSION) break;
+        }
+        if (clean[dim].length) any = true;
+      }
+      if (any) item.voiceTags = clean;
+    }
+    if (typeof p.sampleText === "string" && p.sampleText.trim()) {
+      item.sampleText = p.sampleText.trim().slice(0, MAX_VOICE_SAMPLE_TEXT_LENGTH);
+    }
+    if (typeof p.sourceSampleUrl === "string" && p.sourceSampleUrl.trim()) {
+      item.sourceSampleUrl = p.sourceSampleUrl.trim().slice(0, MAX_VOICE_SAMPLE_URL_LENGTH);
     }
   }
   // 3D 資產（Astra P1-5）：scene_3d 收 bridge 產物欄（artifactPath/bytes/sceneSummary），
