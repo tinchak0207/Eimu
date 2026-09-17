@@ -31,6 +31,7 @@ import {
   clampScale,
   fitToNodes,
   fromCanvasProject,
+  normalizeProjectMetaPatch,
   pushSnapshot,
   redoSnapshot,
   summarizeCanvasState,
@@ -711,6 +712,15 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
         setViewportState((prev) => ({ ...prev, ...op.viewport, k: clampScale(op.viewport.k ?? prev.k) }));
       } else if (op.type === "run_generation") {
         result.runGeneration.push({ nodeId: op.node_id, prompt: op.prompt, model: op.model, size: op.size, count: op.count });
+      } else if (op.type === "set_project_meta") {
+        // 2026-09-16 G1：專案級欄位（作品類型/流程步/劇集清單）的唯一寫入口。
+        // reducer 只認 nodes/connections，這三欄在 CanvasProject 頂層，故在此執行。
+        // 載荷不可信（agent 產出經 SSE 反序列化，型別不保證）：一律先過
+        // normalizeProjectMetaPatch 逐欄白名單 —— 非法欄位被省略＝不動該欄，
+        // 不讓模型的一個錯 enum 清掉用戶已填的劇集清單。空 patch 直接跳過，
+        // 免得多推一次 state 造成無謂的存檔 debounce 與快照上行。
+        const patch = normalizeProjectMetaPatch(op.patch);
+        if (Object.keys(patch).length > 0) setProjectMeta(patch);
       }
     }
     setAgentOpsQueue((prev) => dequeueAgentOps(prev, requestId));
@@ -720,6 +730,8 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
       void postCanvasOpsResult(sid, requestId, { ok: true, ...(createdIds.length ? { created_node_ids: createdIds } : {}) });
     }
     return result;
+    // setProjectMeta 不在依賴陣列：它是 useCallback(..., [])（身分恆定，無過期閉包問題），
+    // 且本 useCallback 宣告在它之前 —— 寫進陣列會在 render 期讀到 TDZ 的 const 而直接炸。
   }, [pushHistory]);
 
   /**

@@ -6438,6 +6438,9 @@ const CANVAS_OP_TYPES = new Set([
   "select_nodes",
   "set_viewport",
   "run_generation",
+  // 2026-09-16 G1：專案級 op（CanvasProject.projectType/currentStep/episodes）。
+  // 本 Set 是 op 型別的門禁：不在這裡 = gateway 400 直接擋掉，到不了前端。
+  "set_project_meta",
 ])
 
 interface CanvasSnapshotEntry {

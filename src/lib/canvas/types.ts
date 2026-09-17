@@ -296,9 +296,25 @@ export const CANVAS_EVENT_NAMES = [
 // ─────────────────────────────────────────── Agent 操作畫布（Wave C）
 
 /**
+ * 專案級欄位補丁（作品類型 / 流程步 / 劇集清單）。
+ *
+ * 形狀刻意與 `useCanvasChat().setProjectMeta` 的參數同構——那是這三欄的**唯一寫入口**
+ * （`projectType`/`currentStep`/`episodes` 在 `CanvasProject` 頂層，不在 reducer state）。
+ * 載荷一律不可信：執行前必須過 `normalizeProjectMetaPatch`（layout.ts）逐欄白名單。
+ */
+export interface CanvasProjectMetaPatch {
+  projectType?: "movie" | "series";
+  currentStep?: number;
+  episodes?: CanvasEpisode[];
+}
+
+/**
  * Agent 批量畫布操作：gateway 的 canvas_apply_ops 工具經 SSE 下發，
  * 前端執行（可先過確認閘）後把結果 POST 回 gateway resolve 該工具調用。
  * 與 infinite-canvas 的 8-op DSL 對齊，執行語義全在前端 reducer。
+ *
+ * 唯一例外：`set_project_meta`（2026-09-16 G1）改的是**專案級**欄位，不是畫布結構，
+ * 由 hook 層的 `setProjectMeta` 執行（同 select_nodes / set_viewport / run_generation 的分工）。
  */
 export type CanvasAgentOp =
   | { type: "add_node"; node: Partial<CanvasNode> & { id: string; type: CanvasNodeType | string } }
@@ -308,7 +324,14 @@ export type CanvasAgentOp =
   | { type: "delete_connections"; ids: string[] }
   | { type: "select_nodes"; ids: string[] }
   | { type: "set_viewport"; viewport: Partial<CanvasViewport> }
-  | { type: "run_generation"; node_id: string; prompt?: string; model?: string; size?: string; count?: number };
+  | { type: "run_generation"; node_id: string; prompt?: string; model?: string; size?: string; count?: number }
+  /**
+   * 專案級欄位補丁（2026-09-16 G1，刀 1 全鏈最後一環）：
+   * `CanvasProject.currentStep/episodes/projectType` 在專案頂層，先前 8 個 op 無一可達
+   * （PRD 全鏈定義「agent 調用 canvas_apply_ops 寫入 episode 節點成功」的缺口）。
+   * 執行端 = hook 層 `setProjectMeta`；載荷清洗 = `normalizeProjectMetaPatch`。
+   */
+  | { type: "set_project_meta"; patch: CanvasProjectMetaPatch };
 
 export interface CanvasAgentOpsEvent {
   request_id: string;

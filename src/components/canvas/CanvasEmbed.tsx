@@ -99,6 +99,8 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
   const [elementListOpen, setElementListOpen] = useState(false);
   // P2：角色/場景卡面板（左側彈出，與歷史畫布/節點清單同模式）。
   const [cardsOpen, setCardsOpen] = useState(false);
+  // G2（2026-09-16）：作品/劇集面板（同款左側彈層；資料取自 hook 三欄出口 + nodes）。
+  const [creationFlowOpen, setCreationFlowOpen] = useState(false);
   const [agentAutoApprove, setAgentAutoApprove] = useState(false);
 
   // ── 最新值 refs（組件殼域）
@@ -800,6 +802,16 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
           >
             角色卡{canvas.activeCardIds.length > 0 ? ` · ${canvas.activeCardIds.length}` : ""}
           </button>
+          {/* G2（2026-09-16）：作品/劇集——badge 數字 = 劇集數，當前步驟顯示在面板內 */}
+          <button
+            type="button"
+            onClick={() => setCreationFlowOpen((v) => !v)}
+            aria-pressed={creationFlowOpen}
+            aria-label="作品与剧集"
+            className="ce-embed-bar-btn lg-float pointer-events-auto cursor-pointer rounded-full font-medium text-ios-blue hover:bg-white active:bg-white"
+          >
+            作品{canvas.episodes.length > 0 ? ` · ${canvas.episodes.length} 集` : ""}
+          </button>
           {expanded && (
             <button
               type="button"
@@ -839,6 +851,8 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
           onToggleAgentAutoApprove={handleToggleAgentAutoApprove}
           onApproveAgentOps={approveAgentOps}
           cardsOpen={cardsOpen}
+          creationFlowOpen={creationFlowOpen}
+          onCloseCreationFlow={() => setCreationFlowOpen(false)}
           historyOpen={historyOpen}
           onCloseHistory={() => setHistoryOpen(false)}
           elementListOpen={elementListOpen}

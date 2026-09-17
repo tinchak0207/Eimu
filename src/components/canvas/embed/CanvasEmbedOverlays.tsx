@@ -5,7 +5,9 @@
  */
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import type { UseCanvasChatReturn } from "@/hooks/use-canvas-chat";
+import { summarizeCreationFlow } from "@/lib/canvas/creation-flow-panel";
 import { cn } from "@/lib/utils";
+import { CreationFlowPanel } from "./CreationFlowPanel";
 import { formatRelative, toDvh } from "./embed-helpers";
 
 interface CanvasEmbedOverlaysProps {
@@ -19,6 +21,9 @@ interface CanvasEmbedOverlaysProps {
   onApproveAgentOps: () => void;
   /** P2：角色/場景卡面板。 */
   cardsOpen: boolean;
+  /** G2（2026-09-16）：作品/劇集面板。 */
+  creationFlowOpen: boolean;
+  onCloseCreationFlow: () => void;
   /** 歷史畫布下拉。 */
   historyOpen: boolean;
   onCloseHistory: () => void;
@@ -37,6 +42,8 @@ export function CanvasEmbedOverlays({
   onToggleAgentAutoApprove,
   onApproveAgentOps,
   cardsOpen,
+  creationFlowOpen,
+  onCloseCreationFlow,
   historyOpen,
   onCloseHistory,
   elementListOpen,
@@ -219,6 +226,20 @@ export function CanvasEmbedOverlays({
             })
           )}
         </div>
+      )}
+
+      {/* G2（2026-09-16）：作品/劇集面板——與角色卡同款左側彈層；資料全部取自
+          hook 既有出口（projectType/currentStep/episodes/nodes），本層零新增狀態。 */}
+      {creationFlowOpen && (
+        <CreationFlowPanel
+          summary={summarizeCreationFlow({
+            projectType: canvas.projectType,
+            currentStep: canvas.currentStep,
+            episodes: canvas.episodes,
+            nodes: canvas.nodes,
+          })}
+          onClose={onCloseCreationFlow}
+        />
       )}
 
       {/* 歷史畫布下拉 */}

@@ -50,6 +50,18 @@ export function creationStepMeta(value: unknown): CreationStep | undefined {
   return isValidCreationStep(value) ? CREATION_STEPS[value - 1] : undefined;
 }
 
+/**
+ * 單一作品的劇集上限。
+ *
+ * 用途（兩端同值，2026-09-16 收斂為單一常數）：
+ *   1. 落盤清洗 `project-store.normalizeEpisodes`（Blob 體積守門）；
+ *   2. agent op 載荷清洗 `layout.normalizeProjectMetaPatch`（`set_project_meta`）。
+ * 這裡是**唯一宣告處**：兩處各寫一個 200 = 兩個漂移點（前者原本就是本地 const）。
+ * 為何放本檔：本檔是純常數 + 純函數模組（零 import、客戶端安全），
+ * `project-store` 有 `node:crypto`/blob 依賴、不可能被客戶端載荷清洗端引用。
+ */
+export const MAX_EPISODES_PER_PROJECT = 200;
+
 /** 本站劇集三態（砍 AID 審核三態）。 */
 export type CanvasEpisodeStatus = "draft" | "processing" | "finished";
 

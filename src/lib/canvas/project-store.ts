@@ -5,15 +5,13 @@
 import { randomBytes } from "node:crypto";
 import { del, get, list, put } from "@/lib/blob-backend";
 import { sanitizeBlobSegment } from "@/lib/history-types";
-import { isValidCreationStep } from "@/lib/creation-flow-steps";
+import { isValidCreationStep, MAX_EPISODES_PER_PROJECT } from "@/lib/creation-flow-steps";
 import type { CanvasEpisode, CanvasProject } from "./types";
 
 const PROJECT_SCHEMA_VERSION = 1;
 const INDEX_GENERATIONS_KEPT = 2;
 const MAX_PROJECTS_PER_USER = 50;
 const INDEX_CACHE_TTL_MS = 3_000;
-/** 單一作品的劇集上限（2026-09-15 刀 1；與 50 作品上限同哲學：防單筆 Blob 無界膨脹）。 */
-const MAX_EPISODES_PER_PROJECT = 200;
 
 const memoryStore = new Map<number, CanvasProject[]>();
 const indexCache = new Map<number, { projects: CanvasProject[]; expiresAt: number }>();

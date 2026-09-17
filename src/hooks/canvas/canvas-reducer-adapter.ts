@@ -302,6 +302,12 @@ export function canvasReducer(state: CanvasReducerState, action: CanvasAction): 
           case "delete_connections":
             next = { ...next, connections: next.connections.filter((c) => !op.ids.includes(c.id)) };
             break;
+          case "set_project_meta":
+            // 專案級欄位（projectType/currentStep/episodes）在 CanvasProject 頂層，
+            // 不在 reducer state 裡，且不進撤銷棧（CanvasSnapshot 只有 nodes/connections/
+            // viewport）——由 hook 層 applyAgentOps 呼叫 setProjectMeta 執行。
+            // 這裡顯式列出而非落 default：新增 op 時若誤以為 reducer 會處理，行為會靜默消失。
+            break;
           default:
             // select_nodes / set_viewport / run_generation 不是畫布結構，hook 層處理。
             break;

@@ -9,7 +9,7 @@
 // reducer 外再寫一套排版）。這裡只補「尺寸」與「型別」這種契約缺口。
 
 import type { AgentSseEvent } from "@/lib/agent-chat-types";
-import { isValidCreationStep } from "@/lib/creation-flow-steps";
+import { isValidCreationStep, MAX_EPISODES_PER_PROJECT } from "@/lib/creation-flow-steps";
 import { isReferenceImageRole } from "@/lib/image-types";
 import { normalizeStoryboardSceneRef, normalizeStoryboardShot } from "@/lib/storyboard-contract";
 import type { CanvasReducerState } from "./reducer";
@@ -24,6 +24,7 @@ import {
   type CanvasNodeStatus,
   type CanvasPosition,
   type CanvasProject,
+  type CanvasProjectMetaPatch,
   type CanvasSseEvent,
   type CanvasViewport,
   type Scene3dCardMetadata,
@@ -639,6 +640,46 @@ export function canvasProjectMeta(project: {
     ...(isValidCreationStep(project.currentStep) ? { currentStep: project.currentStep } : {}),
     ...(episodes.length > 0 ? { episodes } : {}),
   };
+}
+
+/**
+ * agent op 載荷清洗：`set_project_meta` 的 patch（2026-09-16 G1）。
+ *
+ * 為何需要第三個清洗層：agent 送進來的 patch 與 UI 的 `setProjectMeta` 走同一個寫入口，
+ * 但來源不可信（模型輸出，可能帶 AID 審核態、超長 script、非 1..7 的 step）。這裡只做
+ * 「能不能進 state」的守門；完整落盤白名單仍在 `project-store.normalizeProject`（兩層互不取代）。
+ *
+ * 語義（與 store/讀取端既有範式一致 + 一處刻意不同）：
+ *   - 逐欄獨立：某欄非法只丟該欄，不整包作廢（同 `normalizeEpisodes` 逐項丟棄）。
+ *   - 非法值**省略該鍵**，不是寫 `undefined` —— 省略 = `setProjectMeta` 不動該欄。
+ *     刻意不同於 UI 路徑的「`undefined` = 清除」：agent 打錯一個 enum 值不該清掉
+ *     用戶已填的劇集清單。**代價（誠實標記）**：agent 無法藉此 op 清空欄位。
+ *   - `episodes` 逐項走 `readEpisode`（缺 id/title、episodeNo 非正整數、status 非三態 → 丟該項）
+ *     → `episodeNo` 去重（保留首見）→ 上限 `MAX_EPISODES_PER_PROJECT`。
+ *     去重/截斷刻意在此就做（不只靠落盤端）：否則 UI 顯示的集數與 Blob 存下的不一致
+ *     （`normalizeProject` 也會去重截斷），即「介面顯示 ≠ 實際資料」。
+ *   - `episodes: []` 與非法值同義（省略）：不製造「空殼已設定」的假象；要清空留下次機會。
+ */
+export function normalizeProjectMetaPatch(payload: unknown): CanvasProjectMetaPatch {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return {};
+  const p = payload as Record<string, unknown>;
+  const out: CanvasProjectMetaPatch = {};
+  if (p.projectType === "movie" || p.projectType === "series") out.projectType = p.projectType;
+  if (isValidCreationStep(p.currentStep)) out.currentStep = p.currentStep;
+  if (Array.isArray(p.episodes)) {
+    const seen = new Set<number>();
+    const episodes: CanvasEpisode[] = [];
+    for (const item of p.episodes) {
+      const episode = readEpisode(item);
+      if (!episode) continue;
+      if (seen.has(episode.episodeNo)) continue; // episodeNo 去重，保留首見
+      seen.add(episode.episodeNo);
+      episodes.push(episode);
+      if (episodes.length >= MAX_EPISODES_PER_PROJECT) break;
+    }
+    if (episodes.length > 0) out.episodes = episodes;
+  }
+  return out;
 }
 
 /** 匯出檔的信封（帶 kind/version，匯入時才能認出這不是別的 JSON）。 */
