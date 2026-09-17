@@ -12,6 +12,7 @@ import { CanvasNodeType, errorDetailsText, type CanvasNode, type CanvasNodeStatu
 import { svgToDataUrl } from "@/lib/svg-data-url";
 import { DirectorMiniViewport } from "@/components/director-mini/DirectorMiniViewport";
 import { Scene3dCardBody } from "./Scene3dCardBody";
+import { StoryboardSceneBody, StoryboardShotBody } from "./StoryboardShotBody";
 import { STATUS_LABEL } from "./constants";
 
 function isUrl(value: string): boolean {
@@ -223,6 +224,23 @@ export function NodeBody({
           draggable={false}
           className="h-full w-full object-cover"
           onError={handleImgError}
+        />
+      );
+    }
+    // 分鏡實體（2026-09-16 G3 消費端）：`storyboardShot` 是欄位族專用標記（同 sceneCard/
+    // director 的處置）。**位置在批次收起封面之後、type 分發之前**，兩個理由：
+    //   ①資料形狀由 metadata 決定，不由節點型別決定——契約檔（storyboard-contract.ts:13）只說
+    //     「子節點 = 一鏡」，未約束其 type；agent 經 canvas_apply_ops 寫入時 type 可以是
+    //     text/image/group 任一，綁 type 分支必漏渲染。
+    //   ②放在批次封面早退之後 → 既有批次節點（batchPrimaryImageUrl + 收起）行為零改動。
+    // 快照壓縮與讀取白名單已在刀 2 同步，本處只補渲染端（禁動雙白名單）。
+    if (metadata?.storyboardShot) {
+      return (
+        <StoryboardShotBody
+          node={node}
+          onScrollAreaPointerDown={onScrollAreaPointerDown}
+          onScrollAreaPointerMove={onScrollAreaPointerMove}
+          onScrollAreaPointerEnd={onScrollAreaPointerEnd}
         />
       );
     }
@@ -614,12 +632,26 @@ export function NodeBody({
         // 全部封裝在 Scene3dCardBody（複製 Video 分支輪子），此處只做型別分發。
         return <Scene3dCardBody node={node} />;
       }
-      case CanvasNodeType.Group:
+      case CanvasNodeType.Group: {
+        // 分鏡場景外殼（G3，2026-09-16）：Group 節點帶 metadata.storyboardScene 時，
+        // 正文顯示場景名 + 鏡數（真值在子節點的 storyboardShot，此處只是指針）；
+        // 無此欄位的既有 Group 節點維持原虛線框佔位（行為零改動）。
+        if (metadata?.storyboardScene) {
+          return (
+            <StoryboardSceneBody
+              node={node}
+              onScrollAreaPointerDown={onScrollAreaPointerDown}
+              onScrollAreaPointerMove={onScrollAreaPointerMove}
+              onScrollAreaPointerEnd={onScrollAreaPointerEnd}
+            />
+          );
+        }
         return (
           <div className="m-3 flex flex-1 items-center justify-center rounded-xl border-2 border-dashed border-black/10">
             <span className="px-3 text-center text-ios-footnote font-medium text-muted-foreground">{node.title}</span>
           </div>
         );
+      }
     }
   };
 
