@@ -987,7 +987,10 @@ async function registerMasterExport(key: string, sid: string, presetId: MasterPr
       return
     }
     // sha256/byte_size 取導出檔實值（artifact 表 NOT NULL 欄，禁止拿 probe 缺值充數）
-    const buf = await file.arrayBuffer()
+    // 必須包成 Uint8Array：Bun 的 node:crypto `Hash.update` 只吃 string/Buffer/TypedArray/
+    // DataView，直接餵 `ArrayBuffer` 會拋 TypeError（「The "data" argument must be of type
+    // string or an instance of Buffer, TypedArray, or DataView」）——曾讓索引登記整條靜默失敗。
+    const buf = new Uint8Array(await file.arrayBuffer())
     const sha256 = createHash("sha256").update(buf).digest("hex")
     const byteSize = buf.byteLength
     const publicUrl = `${MASTERS_PUBLIC_BASE}/agent/v1/masters/${sid}/master_${presetId}.mp4`
