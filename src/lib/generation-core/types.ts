@@ -97,8 +97,9 @@ export interface GenerationArtifactResult {
   b64Json?: string;
   mimeType: string;
   sha256: string;
-  width: number;
-  height: number;
+  /** 實測尺寸；成片（G4）probe 缺失時為 null——禁止 0 冒充。 */
+  width: number | null;
+  height: number | null;
   endpointLabel: string;
 }
 
@@ -144,8 +145,9 @@ export interface CreateGenerationReferenceArtifactInput {
   mimeType: string;
   sha256: string;
   byteSize: number;
-  width: number;
-  height: number;
+  /** 實測尺寸；圖片上傳驗證路徑恆有值，放寬是配合 ValidatedImage（G4 成片 probe 可缺）。 */
+  width: number | null;
+  height: number | null;
   sourceResultId?: string | null;
   sourceGenerationId?: string | null;
   referenceRole?: "general" | "character" | "product" | "style" | "composition";

@@ -133,7 +133,11 @@ export interface MasterExportResult {
   exported: boolean
   out_path: string | null
   cover_path: string | null
-  public_url: null
+  /** G4（2026-09-17）：導出檔的公網 URL（/agent/v1/masters/<sid>/master_<preset>.mp4）。
+   *  由 index.ts 的 registerMasterExport 回填——檔案落盤即存在，與索引登記成敗無關。 */
+  public_url: string | null
+  /** G4：控制面索引行 id（/v1/internal/masters/ingest 回傳 artifact_id）；登記失敗/重放命中時 null。 */
+  master_artifact_id: string | null
   preset: { id: string; label: string; aspect: string; width: number; height: number }
   probe: { codec: string; width: number; height: number; duration_sec: number; size: number } | null
   timeline_version: number
@@ -287,6 +291,7 @@ export async function masterExport(sessionId: string, presetId: MasterPresetId =
       out_path: outPath,
       cover_path: coverPath,
       public_url: null,
+      master_artifact_id: null,
       preset: { id: presetId, label: preset.label, aspect: preset.aspect, width: preset.w, height: preset.h },
       probe,
       timeline_version: tl.version,

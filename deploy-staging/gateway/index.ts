@@ -1,6 +1,7 @@
 // 生產 gateway 唯一真源快照（2026-09-15 拉回，8306 行）。勿以 .gateway-work/ 下舊目錄為準（PRD D7）。
 import { appendFile, mkdir, rm } from "node:fs/promises"
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
+import { createHash } from "node:crypto"
 import { gzipSync } from "node:zlib"
 import path from "node:path"
 import { resolveVideoPerSecond, WorkflowService } from "./workflow-service"
@@ -23,7 +24,8 @@ import { lintTimeline } from "./lint"
 import { handleDirectorRoutes, setDirectorEmitter, setDirectorSessionResolver } from "./director"
 import { analyzeMix, applyMix } from "./mix"
 import { styleCatalog, subtitlesAss, findStylePreset, findTransitionPreset, STYLE_PRESETS } from "./style"
-import { masterCheck, masterExport, MASTER_PRESETS, type MasterPresetId } from "./master"
+import { masterCheck, masterExport, MASTER_PRESETS, type MasterExportResult, type MasterPresetId } from "./master"
+import { EXPORT_FINGERPRINT_VERSION } from "./material-fingerprint"
 import { compileShotPrompt, parseShotCandidate, shotOutputParams, type ShotJson } from "./video-prompt-schema"
 import {
   initPersistence,
@@ -910,13 +912,18 @@ async function validateApiKey(key: string): Promise<boolean> {
 // 任何失败（超时/非 200/形状不符）一律 fallback 回 rawKey。
 const CANON_KEY_TTL_MS = 10 * 60 * 1000
 const CANON_KEY_NEG_TTL_MS = 60 * 1000
-const canonKeyCache = new Map<string, { key: string | null; expiresAt: number }>()
+// G4（2026-09-17）：缓存值加 userId（resolve-owner 回应的属主数字 id，非密——密钥
+// 字面值照旧不出现在任何日志/响应）。agent 触发的成片导出要向控制面报
+// `web:<userId>` tenant，控制面不持有 agent key 明文（单向哈希）反解不了 owner，
+// 属主身份只能在这次既有正典化调用里顺带拿到。
+const canonKeyCache = new Map<string, { key: string | null; userId: number | null; expiresAt: number }>()
 
-async function resolveCanonicalKey(rawKey: string): Promise<string> {
+async function resolveCanonicalIdentity(rawKey: string): Promise<{ key: string; userId: number | null }> {
   const now = Date.now()
   const cached = canonKeyCache.get(rawKey)
-  if (cached && cached.expiresAt > now) return cached.key ?? rawKey
+  if (cached && cached.expiresAt > now) return { key: cached.key ?? rawKey, userId: cached.userId }
   let canonical: string | null = null
+  let userId: number | null = null
   try {
     const res = await fetch(`${PLATFORM_BASE}/api/agent/biz/resolve-owner`, {
       method: "POST",
@@ -924,9 +931,12 @@ async function resolveCanonicalKey(rawKey: string): Promise<string> {
       signal: AbortSignal.timeout(2000), // 2026-09-12 刀2：miss RTT 實測 95–533ms，負緩存 60s 防風暴下 2s 足夠
     })
     if (res.ok) {
-      const data = (await res.json()) as { canonical_key?: unknown }
+      const data = (await res.json()) as { canonical_key?: unknown; user_id?: unknown }
       if (typeof data.canonical_key === "string" && data.canonical_key.startsWith("sk-biz-")) {
         canonical = data.canonical_key
+      }
+      if (typeof data.user_id === "number" && Number.isInteger(data.user_id) && data.user_id > 0) {
+        userId = data.user_id
       }
     }
   } catch {
@@ -934,9 +944,15 @@ async function resolveCanonicalKey(rawKey: string): Promise<string> {
   }
   canonKeyCache.set(rawKey, {
     key: canonical,
+    userId,
     expiresAt: now + (canonical ? CANON_KEY_TTL_MS : CANON_KEY_NEG_TTL_MS),
   })
-  return canonical ?? rawKey
+  return { key: canonical ?? rawKey, userId }
+}
+
+/** 既有呼叫端（R6 正典化）只吃 key；身份擴充（成片索引 tenant 歸屬）走 resolveCanonicalIdentity。 */
+async function resolveCanonicalKey(rawKey: string): Promise<string> {
+  return (await resolveCanonicalIdentity(rawKey)).key
 }
 
 async function hashKey(key: string): Promise<string> {
@@ -945,6 +961,62 @@ async function hashKey(key: string): Promise<string> {
     .slice(0, 12)
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("")
+}
+
+// ---- 成片索引登記（G4，2026-09-17）----------------------------------------
+// 成片導出成功後回呼控制面（/v1/internal/masters/ingest，同一 HMAC 簽名通道）落
+// generation_job(kind='film_export', status='succeeded') + artifact(metadata_json.masterExport)。
+// 讀取端＝控制面 /v1/masters（B 端按屬主 userId 列舉）。
+
+const MASTERS_PUBLIC_BASE = (process.env.MASTERS_PUBLIC_BASE || "https://store.tinchak0207.xyz").replace(/\/+$/, "")
+
+/** 導出成功（probe 過檔）才有資格調用：索引是「驗過的成片」清單，probe 未過檔不進。
+ *  登記失敗**不**反悔導出——檔案已在盤上、靜態路由已可服務，只誠實記 note：
+ *  缺索引的後果是 /v1/masters 查不到這條成片，不是成片不存在。 */
+async function registerMasterExport(key: string, sid: string, presetId: MasterPresetId, result: MasterExportResult): Promise<void> {
+  try {
+    if (!result.exported || !result.out_path) return
+    const identity = await resolveCanonicalIdentity(key)
+    if (identity.userId == null) {
+      result.notes.push("成片索引登記跳過：屬主 user_id 解析失敗（無法歸屬 tenant）")
+      return
+    }
+    const file = Bun.file(result.out_path)
+    if (!(await file.exists())) {
+      result.notes.push("成片索引登記跳過：導出檔案不在預期路徑")
+      return
+    }
+    // sha256/byte_size 取導出檔實值（artifact 表 NOT NULL 欄，禁止拿 probe 缺值充數）
+    const buf = await file.arrayBuffer()
+    const sha256 = createHash("sha256").update(buf).digest("hex")
+    const byteSize = buf.byteLength
+    const publicUrl = `${MASTERS_PUBLIC_BASE}/agent/v1/masters/${sid}/master_${presetId}.mp4`
+    const coverUrl = result.cover_path ? `${MASTERS_PUBLIC_BASE}/agent/v1/masters/${sid}/master_${presetId}_cover.jpg` : null
+    const body = JSON.stringify({
+      session_id: sid,
+      tenant_id: `web:${identity.userId}`,
+      owner_key: await hashKey(identity.key),
+      preset: presetId,
+      aspect: result.preset?.aspect ?? null,
+      fingerprint: result.fingerprint ?? null,
+      fingerprint_version: EXPORT_FINGERPRINT_VERSION,
+      timeline_version: result.timeline_version ?? null,
+      delivery_url: publicUrl,
+      cover_url: coverUrl,
+      sha256,
+      mime_type: "video/mp4",
+      byte_size: byteSize,
+      probe: result.probe ?? null,
+      project_id: null,
+    })
+    const res = await memoryPostIngest("/v1/internal/masters/ingest", body, {})
+    const json = (res.json ?? {}) as { artifact_id?: unknown; job_deduped?: unknown }
+    result.public_url = publicUrl
+    result.master_artifact_id = typeof json.artifact_id === "string" ? json.artifact_id : null
+    if (json.job_deduped === true) result.notes.push("成片索引：同會話同素材指紋已有索引行（冪等命中，未重複登記）")
+  } catch (e) {
+    result.notes.push(`成片索引登記失敗：${e instanceof Error ? e.message : String(e)}（導出本身不受影響）`)
+  }
 }
 
 // ---- opencode client helpers ----
@@ -7162,7 +7234,11 @@ async function handleTimelineRoutes(key: string, req: Request, pathname: string)
       const body = (await req.json().catch(() => null)) as { preset?: string; with_cover?: boolean } | null
       const presetId = (body?.preset ?? "landscape_169") as MasterPresetId
       if (!(presetId in MASTER_PRESETS)) return jsonError(400, `unknown preset: ${body?.preset}（可選：${Object.keys(MASTER_PRESETS).join("/")}）`, "bad_request", "bad_request")
-      return Response.json(await masterExport(sid, presetId, body?.with_cover !== false))
+      const result = await masterExport(sid, presetId, body?.with_cover !== false)
+      // G4（2026-09-17）：導出成功 → 回填公網 URL + 控制面索引登記（冪等）。
+      // 登記失敗不反悔導出（檔案已在盤上、靜態路由已可服務），只誠實記 note。
+      await registerMasterExport(key, sid, presetId, result)
+      return Response.json(result)
     }
     return jsonError(404, "unknown timeline route", "not_found", "not_found")
   } catch (e) {
@@ -8329,6 +8405,29 @@ async function handleRequest(req: Request, srv: { requestIP: (r: Request) => { a
         return new Response(file, {
           headers: {
             "Content-Type": "audio/wav",
+            "Cache-Control": "public, max-age=86400",
+          },
+        })
+      }
+    }
+
+    // G4 成片靜態服務（2026-09-17）：導出檔與封面幀公開直鏈（delivery_url 進成片索引，
+    // B 端 /v1/masters 直接下載）。無鑑權鏡像 mix.wav／TTS 公開 blob 模型；放 Bearer 閘門之前。
+    {
+      const m = pathname.match(/^\/agent\/v1\/masters\/([A-Za-z0-9_-]+)\/(master_[a-z0-9_]+\.mp4|master_[a-z0-9_]+_cover\.jpg)$/)
+      if (req.method === "GET" && m) {
+        const mastersBase = path.resolve(path.join(WORKSPACE_DIR, "timelines"))
+        const mastersFile = path.resolve(path.join(mastersBase, m[1], m[2]))
+        if (!mastersFile.startsWith(mastersBase + path.sep)) {
+          return jsonError(400, "invalid path", "bad_request", "bad_request")
+        }
+        const file = Bun.file(mastersFile)
+        if (!(await file.exists())) {
+          return jsonError(404, "master not found", "not_found", "not_found")
+        }
+        return new Response(file, {
+          headers: {
+            "Content-Type": m[2].endsWith(".mp4") ? "video/mp4" : "image/jpeg",
             "Cache-Control": "public, max-age=86400",
           },
         })

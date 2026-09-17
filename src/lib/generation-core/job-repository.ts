@@ -238,8 +238,9 @@ export async function listCompletedGenerationArtifacts(
       url: row.delivery_url === null ? null : String(row.delivery_url),
       mimeType: String(row.mime_type),
       sha256: String(row.sha256),
-      width: Number(row.width),
-      height: Number(row.height),
+      // NULL 直譯為 null：Number(null) 是 0，會把「未實測」偽造成「0×0」（G4 成片可缺尺寸）。
+      width: row.width === null ? null : Number(row.width),
+      height: row.height === null ? null : Number(row.height),
       endpointLabel: typeof metadata.endpointLabel === "string" ? metadata.endpointLabel : "unknown",
     };
   });

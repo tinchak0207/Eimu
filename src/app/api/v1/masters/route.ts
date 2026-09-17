@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { readBearerToken } from "@/lib/biz-api-keys";
 import { authenticateBizApiKey } from "@/lib/biz-api-key-store";
-import { bizTenantId, clampPagination } from "@/lib/generation-core/status-query";
+import { clampPagination } from "@/lib/generation-core/status-query";
 import {
   countMasterArtifacts,
   listMasterArtifacts,
@@ -66,7 +66,11 @@ export async function GET(req: NextRequest) {
   const projectId = url.searchParams.get("project_id")?.trim() || null;
   const { limit, offset } = clampPagination(url.searchParams.get("limit"), url.searchParams.get("offset"));
 
-  const filter = { tenantId: bizTenantId(auth.key.id), sessionId, projectId, limit, offset };
+  // tenant＝`web:<userId>`（屬主維度，非金鑰維度）。生產端（/v1/internal/masters/ingest）
+  // 的 tenant 由 gateway 帶 `web:<userId>`（resolve-owner 的屬主），與這裡同一推導、兩端對稱。
+  // 刻意不用 `bizTenantId(auth.key.id)`：成片產於 agent 會話，同一用戶的 B key id 與
+  // agent 會話屬主不是同一個鍵——按金鑰查永遠查空。
+  const filter = { tenantId: `web:${auth.key.userId}`, sessionId, projectId, limit, offset };
   const [records, total] = await Promise.all([
     listMasterArtifacts(filter),
     countMasterArtifacts(filter),
