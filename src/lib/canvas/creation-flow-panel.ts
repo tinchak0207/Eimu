@@ -13,7 +13,7 @@
 // 本檔零副作用、純函數、無 IO。
 
 import { creationStepMeta, type CreationStep } from "../creation-flow-steps";
-import type { CanvasEpisode, CanvasNode } from "./types";
+import type { CanvasEpisode, CanvasNode, CanvasProjectType } from "./types";
 
 /** 劇集三態的中文標籤（本站三態；AID 審核三態不進本站型別）。 */
 export const EPISODE_STATUS_LABELS: Record<CanvasEpisode["status"], string> = {
@@ -85,7 +85,7 @@ export interface CreationFlowSummary {
  * 缺欄位就回空值——不補預設、不捏造。
  */
 export function summarizeCreationFlow(input: {
-  projectType?: "movie" | "series";
+  projectType?: CanvasProjectType;
   currentStep?: number;
   episodes?: readonly CanvasEpisode[];
   nodes?: readonly CanvasNode[];

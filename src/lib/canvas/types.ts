@@ -12,6 +12,35 @@
 
 import type { ReferenceImageRole } from "../image-types";
 import type { StoryboardSceneRef, StoryboardScriptShot } from "../storyboard-contract";
+import { AID_PROJECT_TYPE_ENUM, type AidProjectTypeEnumValue } from "../aid-enums/creation";
+
+// ─────────────────────────────────────────── 作品形態值域
+
+/**
+ * 作品形態值域：`movie`（電影）/ `series`（劇集）。
+ *
+ * 值域來源＝AID `ProjectTypeEnum`（`src/lib/aid-enums/creation.ts`，MIT 逐字入庫）。
+ * 本站的作品/劇集實體本身就是吞 AID 產品層刀 1 的產物，形態詞彙不另立第二套——
+ * 兩處各寫一份 `"movie" | "series"` 就是兩個漂移點（AID 改值時本站默默不收）。
+ *
+ * 消費點：`CanvasProject.projectType`（落盤形狀）與 `CanvasProjectMetaPatch.projectType`
+ * （agent op 載荷）必須同值域，故共用本型別。
+ */
+export const CANVAS_PROJECT_TYPES = [
+  AID_PROJECT_TYPE_ENUM.MOVIE.value,
+  AID_PROJECT_TYPE_ENUM.SERIES.value,
+] as const;
+
+/** 作品形態（＝AID `ProjectTypeEnum` 的值集合）。 */
+export type CanvasProjectType = AidProjectTypeEnumValue;
+
+/**
+ * 執行期判據。agent 載荷（SSE 反序列化）與 Blob 讀回的值都不可信，一律過此；
+ * 直接寫 `v === "movie" || v === "series"` 則值域改動時必漏改一處。
+ */
+export function isCanvasProjectType(value: unknown): value is CanvasProjectType {
+  return typeof value === "string" && (CANVAS_PROJECT_TYPES as readonly string[]).includes(value);
+}
 
 export type CanvasPosition = { x: number; y: number };
 
@@ -303,7 +332,7 @@ export const CANVAS_EVENT_NAMES = [
  * 載荷一律不可信：執行前必須過 `normalizeProjectMetaPatch`（layout.ts）逐欄白名單。
  */
 export interface CanvasProjectMetaPatch {
-  projectType?: "movie" | "series";
+  projectType?: CanvasProjectType;
   currentStep?: number;
   episodes?: CanvasEpisode[];
 }
@@ -356,7 +385,7 @@ export interface CanvasProject {
   cardIds?: string[];
   // ── 作品/劇集三級狀態機（2026-09-15 吞 AID 產品層刀 1；全部 optional，向後相容）──
   /** 作品類型：movie=電影（劇本用 episode 0）/ series=劇集。 */
-  projectType?: "movie" | "series";
+  projectType?: CanvasProjectType;
   /** 7 步流程當前步驟（1..7）；未開始則 undefined。 */
   currentStep?: number;
   /** 劇集分集清單（電影留空）。 */

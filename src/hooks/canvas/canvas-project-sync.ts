@@ -9,7 +9,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { listCanvasProjects, postCanvasSnapshot, saveCanvasProject } from "@/lib/canvas/client";
 import type { CanvasReducerState } from "@/lib/canvas/reducer";
 import { toCanvasProject } from "@/lib/canvas/layout";
-import type { CanvasEpisode, CanvasProject, CanvasViewport } from "@/lib/canvas/types";
+import type { CanvasEpisode, CanvasProject, CanvasProjectType, CanvasViewport } from "@/lib/canvas/types";
 import type { CharacterCard } from "@/lib/character-cards";
 import {
   SAVE_DEBOUNCE_MS,
@@ -30,7 +30,7 @@ export interface UseCanvasProjectSyncParams {
   budgetRef: { current: CanvasBudget | null };
   activeCardIdsRef: { current: string[] };
   // 作品/劇集三級狀態機（2026-09-15 刀 1 前端接線）：照 activeCardIdsRef 同款「最新值鏈像 ref」。
-  projectTypeRef: { current: "movie" | "series" | undefined };
+  projectTypeRef: { current: CanvasProjectType | undefined };
   currentStepRef: { current: number | undefined };
   episodesRef: { current: CanvasEpisode[] };
   mountedRef: { current: boolean };
@@ -40,7 +40,7 @@ export interface UseCanvasProjectSyncParams {
   backgroundMode: CanvasBackgroundMode;
   projectTitle: string;
   activeCardIds: string[];
-  projectType: "movie" | "series" | undefined;
+  projectType: CanvasProjectType | undefined;
   currentStep: number | undefined;
   episodes: CanvasEpisode[];
   saveState: "idle" | "saving" | "saved" | "error" | "offline";

@@ -13,6 +13,7 @@ import type {
   CanvasPlanEvent,
   CanvasPosition,
   CanvasProject,
+  CanvasProjectType,
   CanvasUnit,
   CanvasViewport,
 } from "@/lib/canvas/types";
@@ -206,13 +207,13 @@ export interface UseCanvasChatReturn {
   }) => boolean;
   // ── 作品/劇集三級狀態機（刀 1 前端接線；持久化在 CanvasProject 頂層三欄）
   /** 作品類型：undefined = 未設定。 */
-  projectType: "movie" | "series" | undefined;
+  projectType: CanvasProjectType | undefined;
   /** 7 步流程當前步驟（1..7）；undefined = 未開始。 */
   currentStep: number | undefined;
   /** 劇集分集清單（電影為空陣列）。 */
   episodes: CanvasEpisode[];
   /** 三欄的唯一寫入口（UI 面板與 agent 驅動路徑共用）；欄位傳 undefined 即清除。 */
-  setProjectMeta: (patch: { projectType?: "movie" | "series"; currentStep?: number; episodes?: CanvasEpisode[] }) => void;
+  setProjectMeta: (patch: { projectType?: CanvasProjectType; currentStep?: number; episodes?: CanvasEpisode[] }) => void;
   // ── 角色/場景卡（P2 跨鏡頭一致性）：卡列表 + 項目級鎖定
   characterCards: CharacterCard[];
   /** 鎖定到當前畫布項目的卡 id（持久化在 CanvasProject.cardIds）。 */

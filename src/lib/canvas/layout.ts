@@ -16,6 +16,7 @@ import type { CanvasReducerState } from "./reducer";
 import {
   CANVAS_NODE_DEFAULT_SIZE,
   CanvasNodeType,
+  isCanvasProjectType,
   type CanvasConnection,
   type CanvasEpisode,
   type CanvasErrorDetails,
@@ -25,6 +26,7 @@ import {
   type CanvasPosition,
   type CanvasProject,
   type CanvasProjectMetaPatch,
+  type CanvasProjectType,
   type CanvasSseEvent,
   type CanvasViewport,
   type Scene3dCardMetadata,
@@ -528,7 +530,7 @@ export function toCanvasProject(
   // 作品/劇集三級狀態機（2026-09-15 刀 1 前端接線）：照 cardIds 的既有條件展開範式。
   // 刻意「不清洗」——清洗單一真源在 project-store 的 normalizeProject，
   // 這裡只決定「要不要帶這個欄位」，否則兩處白名單會漂移（見 PRD §3）。
-  projectType?: "movie" | "series",
+  projectType?: CanvasProjectType,
   currentStep?: number,
   episodes?: CanvasEpisode[],
 ): CanvasProject {
@@ -627,7 +629,7 @@ export function canvasProjectMeta(project: {
   projectType?: unknown;
   currentStep?: unknown;
   episodes?: unknown;
-}): { projectType?: "movie" | "series"; currentStep?: number; episodes?: CanvasEpisode[] } {
+}): { projectType?: CanvasProjectType; currentStep?: number; episodes?: CanvasEpisode[] } {
   if (!project || typeof project !== "object") return {};
   const episodes = Array.isArray(project.episodes)
     ? project.episodes.flatMap((item) => {
@@ -636,7 +638,7 @@ export function canvasProjectMeta(project: {
       })
     : [];
   return {
-    ...(project.projectType === "movie" || project.projectType === "series" ? { projectType: project.projectType } : {}),
+    ...(isCanvasProjectType(project.projectType) ? { projectType: project.projectType } : {}),
     ...(isValidCreationStep(project.currentStep) ? { currentStep: project.currentStep } : {}),
     ...(episodes.length > 0 ? { episodes } : {}),
   };
@@ -664,7 +666,7 @@ export function normalizeProjectMetaPatch(payload: unknown): CanvasProjectMetaPa
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return {};
   const p = payload as Record<string, unknown>;
   const out: CanvasProjectMetaPatch = {};
-  if (p.projectType === "movie" || p.projectType === "series") out.projectType = p.projectType;
+  if (isCanvasProjectType(p.projectType)) out.projectType = p.projectType;
   if (isValidCreationStep(p.currentStep)) out.currentStep = p.currentStep;
   if (Array.isArray(p.episodes)) {
     const seen = new Set<number>();
@@ -709,7 +711,7 @@ export function parseImportFile(raw: unknown): {
   viewport?: CanvasViewport;
   backgroundMode?: "dots" | "lines" | "blank";
   title?: string;
-  projectType?: "movie" | "series";
+  projectType?: CanvasProjectType;
   currentStep?: number;
   episodes?: CanvasEpisode[];
 } | null {

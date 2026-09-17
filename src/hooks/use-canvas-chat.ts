@@ -40,6 +40,7 @@ import {
   type CanvasSnapshot,
 } from "@/lib/canvas/layout";
 import { listCanvasProjects, postCanvasOpsResult } from "@/lib/canvas/client";
+import { isCanvasProjectType } from "@/lib/canvas/types";
 import { isValidCreationStep } from "@/lib/creation-flow-steps";
 import type {
   CanvasAgentOp,
@@ -49,6 +50,7 @@ import type {
   CanvasNodeMetadata,
   CanvasPosition,
   CanvasProject,
+  CanvasProjectType,
   CanvasViewport,
 } from "@/lib/canvas/types";
 import { canvasReducer } from "./canvas/canvas-reducer-adapter";
@@ -100,7 +102,7 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
   const [projectTitle, setProjectTitle] = useState("未命名画布");
   // 作品/劇集三級狀態機（2026-09-15 刀 1 前端接線）：專案級狀態，持久化在 CanvasProject 頂層三欄。
   // 寫入口＝setProjectMeta（UI 面板與 agent 驅動的畫布操作共用），讀回＝三處還原點 + canvasProjectMeta。
-  const [projectType, setProjectType] = useState<"movie" | "series" | undefined>(undefined);
+  const [projectType, setProjectType] = useState<CanvasProjectType | undefined>(undefined);
   const [currentStep, setCurrentStep] = useState<number | undefined>(undefined);
   const [episodes, setEpisodes] = useState<CanvasEpisode[]>([]);
   const [loading, setLoading] = useState(true);
@@ -813,8 +815,8 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
    * 免得存檔時被 store 靜默丟掉），完整清洗仍只在 project-store。
    */
   const setProjectMeta = useCallback(
-    (patch: { projectType?: "movie" | "series"; currentStep?: number; episodes?: CanvasEpisode[] }) => {
-      if ("projectType" in patch && (patch.projectType === undefined || patch.projectType === "movie" || patch.projectType === "series")) {
+    (patch: { projectType?: CanvasProjectType; currentStep?: number; episodes?: CanvasEpisode[] }) => {
+      if ("projectType" in patch && (patch.projectType === undefined || isCanvasProjectType(patch.projectType))) {
         setProjectType(patch.projectType);
       }
       if ("currentStep" in patch && (patch.currentStep === undefined || isValidCreationStep(patch.currentStep))) {

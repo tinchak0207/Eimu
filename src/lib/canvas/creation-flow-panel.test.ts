@@ -356,7 +356,9 @@ test("掛接契約：面板不吃新資料源（不碰 metadata 欄位族、不�
   const hookTypes = read("src/hooks/canvas/canvas-chat-types.ts");
   const panel = read("src/components/canvas/embed/CreationFlowPanel.tsx");
   // 三欄出口在刀 1 就存在，本片不新增：值出口三個 + 寫入口一個（唯一）
-  assert.match(hookTypes, /projectType: "movie" \| "series" \| undefined;/);
+  // 型別走單一來源 CanvasProjectType（G6，值域來自 AID ProjectTypeEnum）——
+  // 此處刻意釘「引用型別名」而非字面值域：硬編 `"movie" | "series"` 正是 G6 消滅的漂移點。
+  assert.match(hookTypes, /projectType: CanvasProjectType \| undefined;/);
   assert.match(hookTypes, /currentStep: number \| undefined;/);
   assert.match(hookTypes, /episodes: CanvasEpisode\[\];/);
   assert.equal(hookTypes.match(/setProjectMeta: /g)?.length, 1, "寫入口恆為一個（UI 與 agent 共用同一出口）");
