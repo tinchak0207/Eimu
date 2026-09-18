@@ -72,7 +72,7 @@
   sudo -n systemctl restart opencode-server agent-gateway          # ⑤ 生效
   ```
 - **failover 語義**：turn 零正文抖動重試時，attempt 2 起換 fallback 鏈上的模型（跨 provider，防「主/備同源全死」復發）；registry 異常 = 鏈只剩主模型（行為退回現狀，不會更壞）。N1 redrive 路徑始終用主模型。
-- **坑位**：改 registry 後 `gen-opencode.ts --check` 有漂移屬正常（你剛改的），生成後重啟即收斂；opencode.json 手改會被下次生成沖掉——deny 表調整要改 gen-opencode.ts 的保留邏輯之外那份現檔（生成器不碰 permission 鍵，手改 permission 安全）。
+- **坑位**：改 registry 後 `gen-opencode.ts --check` 有漂移屬正常（你剛改的），生成後重啟即收斂；opencode.json 手改會被下次生成沖掉——deny 表調整要改 gen-opencode.ts 的保留邏輯之外那份現檔（生成器不碰 permission 鍵，手改 permission 安全）。**特別提醒：必須同時重啟 `opencode-server` 與 `agent-gateway` 雙服務（步驟 ⑤）**——若只重啟 opencode-server，gateway 的 `/event` SSE 連線會死鎖/懸掛長達 4 分鐘（直到底層 fetch 逾時前收不到任何 delta 幀），導致前端完全看不到思考與正文、誤判「過程被隱藏/卡在正在思考」、watchdog 誤判零文本引發重複重發。
 
 ## Adobe2API 定向排障附加规则
 
