@@ -39,6 +39,7 @@ import {
   type DirectSendCapability,
 } from "@/lib/agent-chat-client";
 import { normalizeOpenCodeMessages } from "@/lib/agent-chat-history-normalize";
+import { createFrameBatcher, type FrameBatcher } from "@/lib/agent-chat-frame-batch";
 import {
   clearPersisted,
   loadPersisted,
@@ -183,6 +184,12 @@ export interface UseAgentChatReturn {
   abort: () => Promise<void>;
   /** 是否有一个 abort 请求正在飞行中（供 UI 禁用「停止」按钮，避免重复点击双发）。 */
   aborting: boolean;
+  /**
+   * true = 空态首发正在 lazy 建号（建号 + 铸 SSE 票两段跨境往返）。
+   * 这段真空期 UI 本来零变化，消费者据此渲染「正在建立对话」忙碌态 ——
+   * 不能用合成 turn.status 代替：那会让 turnActive 提前为真，制造假回合。
+   */
+  startingSession: boolean;
   // D-17：上次会话存档。非空时 Surface 把存档收进「对话历史」并清空回空态
   //（09-12：建号权收归发送按钮，挂载不再自动开场，存档不再驱动任何自动建号）。
   resumable: ResumableAgentChat | null;
@@ -207,6 +214,8 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
   const [resumable, setResumable] = useState<ResumableAgentChat | null>(null);
   // 供 UI 判断「停止」按钮是否该禁用——ref 本身不触发渲染，需要这份 state 镜像。
   const [aborting, setAborting] = useState(false);
+  // 空态首发 lazy 建号的真空期旗标（见 UseAgentChatReturn.startingSession）。
+  const [startingSession, setStartingSession] = useState(false);
 
   // ── refs：给稳定的 callback 阅最新值，避免闭包抓到旧 state。
   const stateRef = useRef(state);
@@ -214,6 +223,10 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
   const esRef = useRef<EventSource | null>(null);
   const retryTimerRef = useRef<number | null>(null);
   const connectSeqRef = useRef(0);
+  // SSE 帧併批器（A3）：串流期每个 delta 一次 dispatch = 每个 token 一次整棵
+  // 面板重渲染，按鈕 onClick 要排在这些渲染后面。併批器只把「纯文字追加」帧
+  // 折进同一个渲染窗口，其余帧语义不变。每个连线世代重建一个（见 openConnection）。
+  const frameBatcherRef = useRef<FrameBatcher | null>(null);
   // 操作身份代：switchSession/startNewSession/resume/start 建立新的活跃会话时
   // 一并递增（与 connectSeqRef 分开维护，虽然目前总是同步递增——保留独立
   // 计数器是为了不动 openConnection 既有的 seq 守卫行为）。send() 在入口
@@ -379,6 +392,10 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
       mountedRef.current = false;
       closedRef.current = true;
       closedReasonRef.current = 'manual';
+      // 卸载＝这条生命彻底结束：併批器的缓冲与计时器一并清掉，不给已卸载的
+      // 组件留任何迟到的 setState（React 会警告，且渲染结果无人消费）。
+      frameBatcherRef.current?.drop();
+      frameBatcherRef.current = null;
       if (esRef.current) {
         esRef.current.close();
         esRef.current = null;
@@ -416,6 +433,11 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
       if (!sid) return;
 
       const seq = ++connectSeqRef.current;
+      // 舊連線的緩衝殘幀屬於上一條生命，換世代即丟——丟掉不會漏內容：還沒
+      // apply 的幀必然沒推進 lastEventId，而下面的 resumeFrom 取自
+      // stateRef.current.lastEventId，網關續傳會把它們原樣回放。
+      frameBatcherRef.current?.drop();
+      frameBatcherRef.current = createFrameBatcher({ apply: (evt) => dispatch(evt) });
       if (esRef.current) {
         esRef.current.close();
         esRef.current = null;
@@ -481,7 +503,9 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
         void openConnection();
       }, nextBackoff());
     }
-  }, []);
+    // dispatch 来自 useReducer，恒稳定；列进依赖只为让併批器的 apply 闭包
+    // 有据可依（行为与原来的空依赖等价）。
+  }, [dispatch]);
 
   // 一帧 SSE 的统一入口：parse → 丢掉不合契约的 → dispatch。
   const handleSseEvent = useCallback(
@@ -560,7 +584,11 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
           dispatch({ type: "zombie-resurrect" });
         }
       }
-      dispatch(evt);
+      // 併批出口：文字帧进缓冲（同窗口折成一次渲染），其余帧在 batcher 内部
+      // 先 flush 缓冲再自己落地。上面所有副作用都在本行之前同步跑完，顺序不变。
+      const batcher = frameBatcherRef.current;
+      if (batcher) batcher.push(evt);
+      else dispatch(evt);
     },
     [dispatch],
   );
@@ -674,7 +702,16 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
       // 失败不抛错（内部已走 setError 路）。
       if (!sessionIdRef.current) {
         forceNewRef.current = true;
-        await start();
+        // 空態首發＝建號（+SSE 票）兩段跨境往返的真空期：UI 必須立刻有回應，
+        // 不能等 start() 回來才動——那段時間輸入框已清空而畫面全真空，
+        // 使用者只看到「按了沒反應」。旗標只涵蓋自己觸發的這條建號路徑，
+        // ensureSession（附件上傳）不動。
+        setStartingSession(true);
+        try {
+          await start();
+        } finally {
+          if (mountedRef.current) setStartingSession(false);
+        }
       }
       // sessionId 判空必须留在乐观插入之前（铁律）：建号失败（未登录/网络/已
       // 关闭）时 sid 仍 null——不能把使用者的话回声进 transcript，否则留下一句
@@ -812,10 +849,22 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
       // 靜默窗開啟：server 端 abort 落地後，opencode 的殘響幀（遲到
       // delta/前綴補發）不再渲染，直到下一次 send()。
       mutedUntilNextSendRef.current = true;
+      // 網關對用戶中止刻意不發幀（收尾由 turn.done 表達），而 turn.done 要等
+      // opencode 真正 idle 才到——中間 turnActive 一直是真，停止鈕赖著不走、
+      // 送出鈕回不來，使用者只看到「按了終止像沒反應」，連按就是反覆打網關。
+      // 這裡本端立刻合成一幀終態收尾：event_id 用 0（reducer 的續傳去重守衛是
+      // eventId > 0 && eventId <= lastEventId，0 一律放行，Math.max 也不推進
+      // lastEventId，不污染游標記帳）；data 是空物件（AgentTurnDone =
+      // Record<string, never>）。順序鐵律：先 flush 待渲染的 pre-abort 正文幀，
+      // 再放終態幀——否則是「已收尾才長字」，turnActive 會被那批幀翻回真（假活）。
+      frameBatcherRef.current?.flush();
+      dispatch({ name: "turn.done", event_id: 0, data: {} });
     } catch (err) {
+      // 失敗時不合成終態幀：真回合還在跑，翻成收尾就是說謊；後續 delta 本就會
+      // 自癒（reducer 收到內容幀會把 turnActive 設回真）。
       dispatchNotice("error", err instanceof Error ? err.message : "中止失败，请重试。");
     }
-  }, [dispatchNotice, requestAbort]);
+  }, [dispatch, dispatchNotice, requestAbort]);
 
   const end = useCallback(async (): Promise<void> => {
     closedRef.current = true;
@@ -834,7 +883,11 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
     }
     setConnection("closed");
     // 本端直接收尾：让 reducer 走一次 session.closed，UI 才看到「已结束」。
+    // 先 flush 缓冲：待渲染的正文幀必须落在终结帧之前，否则终结后还在长字。
+    frameBatcherRef.current?.flush();
     dispatch({ name: "session.closed", event_id: 0, data: { reason: "user_ended" } });
+    // 这条连线已经终局，併批器连同时间锚一起作废（下一条连线在 openConnection 重建）。
+    frameBatcherRef.current?.drop();
 
     const sid = sessionIdRef.current;
     if (sid) {
@@ -848,7 +901,7 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
     clearPersisted();
     persistedRef.current = null;
     setResumable(null);
-  }, []);
+  }, [dispatch]);
 
   /**
    * D-17：继续上次会话。用存档里的 sessionId 铸票重开 SSE，带 last_event_id 续传；
@@ -878,6 +931,8 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
       sessionIdRef.current = sid;
       setSessionId(sid);
       sessionEpochRef.current += 1; // 续接成功=建立新的活跃会话身份，飞行中的旧 send() 该放弃。
+      // 新身份＝新生命：旧连线的待渲染缓冲作废（续传游标会用存档 cursor 重放覆盖）。
+      frameBatcherRef.current?.drop();
       // 09-12：新的会话身份解除「用户中止静默窗」——否则 abort 过一次后，
       // 续档回放的 message/reasoning 帧会被 L567 整批丢弃，重建出来一片空白。
       mutedUntilNextSendRef.current = false;
@@ -946,6 +1001,9 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
         esRef.current.close();
         esRef.current = null;
       }
+      // 换轨＝换生命：旧连线的待渲染缓冲属于上一轨，连同计时器一起作废
+      //（丢弃不漏内容——未 apply 的帧没推进 lastEventId，续传会回放）。
+      frameBatcherRef.current?.drop();
       // 换轨前也要清掉可能已排定的重连计时器：上一条连线的 onerror 若恰好
       // 在使用者点切换的前一拍排了 scheduleReconnect，这个陈旧计时器之后
       // 触发时会读到 sessionIdRef.current（此时已经指向新会话）去重新开线，
@@ -1079,6 +1137,8 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
       esRef.current.close();
       esRef.current = null;
     }
+    // 换生命：旧连线的待渲染缓冲作废（同 switchSession 的理由）。
+    frameBatcherRef.current?.drop();
     // 同 switchSession：清掉可能已排定的重连计时器，避免旧连线的 onerror
     // 排的 scheduleReconnect 之后拿新 sessionIdRef 去重开一条多余的连线。
     if (retryTimerRef.current !== null) {
@@ -1151,6 +1211,7 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
     ensureSession,
     abort,
     aborting,
+    startingSession,
     discardAndStartNew,
   };
 }

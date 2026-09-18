@@ -102,6 +102,17 @@ export interface AgentToolResult {
   tool: string;
   ok: boolean;
   cost_coins?: number;
+  /**
+   * gateway（2026-09-18 契约）—— 提交型工具的任務 id。任务已交给上游，
+   * 成品稍后由 image/video/audio.done（或 image.failed）带同一个 id 回来。
+   */
+  task_id?: string;
+  /**
+   * gateway（2026-09-18 契约）—— true = 任務已提交成功、成品還沒到（**中继态**）。
+   * 网關只在 `ok && task_id 有值 && 回包没有成品 url` 时带它；缺席一律当 false
+   * 处理，行为与旧格式逐位元一致（不带 = 照旧直接结算 ok，不是生成中）。
+   */
+  artifact_pending?: boolean;
   /** gateway 附带的人类可读错误（G-FE 合同：中文短句优先渲染）。 */
   error?: { code?: string; message?: string; human_message?: string };
 }
@@ -521,7 +532,18 @@ export function parseAgentSseEvent(name: string, rawData: string): AgentSseEvent
         rawErr && typeof rawErr === "object"
           ? { code: str((rawErr as { code?: unknown }).code), message: str(rawErr.message), human_message: str(rawErr.human_message) }
           : undefined;
-      return { name, event_id: eventId, data: { tool, ok: d.ok === true, cost_coins: num(d.cost_coins), error } };
+      return {
+        name,
+        event_id: eventId,
+        data: {
+          tool,
+          ok: d.ok === true,
+          cost_coins: num(d.cost_coins),
+          task_id: str(d.task_id),
+          artifact_pending: d.artifact_pending === true,
+          error,
+        },
+      };
     }
     case "image.done": {
       const url = str(d.url);
@@ -851,7 +873,14 @@ export interface AgentToolCallItem extends TranscriptItemBase {
   /** 派遣子代理时，綁定的子代理 id（subagent.started 回填）：狀態與子代理卡同源。 */
   subagentId?: string;
   argsSummary?: string;
-  status: "running" | "ok" | "failed";
+  /**
+   * 卡片状态。`pending` 是**中继態：已提交、成品未到**（tool.result.artifact_pending）
+   * —— 提交型生圖/生片工具在任務交出去的那一刻不再假報「已完成」，等
+   * image/video/audio.done 或 image.failed 到了才转终态。
+   */
+  status: "running" | "pending" | "ok" | "failed";
+  /** 提交型工具的任務 id（tool.result.task_id 回填）：成品/失敗事件用它精確配對 pending 卡。 */
+  taskId?: string;
   costCoins?: number;
   /** 失败时的人类可读错误（gateway tool.result error.human_message 优先）。 */
   error?: string;

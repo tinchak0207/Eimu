@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useEffect, useState, type MouseEvent } from "react";
+import { memo, useEffect, useState, type MouseEvent, type SyntheticEvent } from "react";
 import { Brain, Check, ChevronDown, Copy } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AgentAssistantTextItem, AgentUserTurnItem } from "@/lib/agent-chat-types";
@@ -36,6 +36,15 @@ function AgentMessageBubbleComponent({ item, sessionId }: AgentMessageBubbleProp
   const hasAttachments = userParsed !== null && userParsed.refs.length > 0;
   const displayText = hasAttachments ? userParsed.cleanText : item.text;
 
+  // 思維鏈預設展開（2026-09-18 暴君裁定，推翻 08-25「預設收合、正文優先」）：思維鏈是
+  // 使用者判斷這段答案可不可信的證據，藏起來只讓模型看起來像黑盒；占屏的抱怨遠少於
+  // 「找不到思考過程」。要收的人自己收一次就夠——手動收合優先於一切自動行為，所以舊的
+  // 「串流中且還沒有正文就自動展開」條件已拆掉，不再有任何自動展開／自動收合路徑。
+  // open 受控於 state：初值 true 讓首幀（含歷史回放重建出來的條目）就是展開；
+  // 使用者點 summary 造成的 toggle 由下面 handler 回寫，之後串流 delta 更新或父層
+  // re-render 只會照著這個值渲染，不會把它打回展開。
+  const [reasoningOpen, setReasoningOpen] = useState(true);
+
   // 思維鏈一鍵複製：summary 上的按鈕要 preventDefault，否則點擊會順帶收合 details。
   const [reasoningCopied, setReasoningCopied] = useState(false);
   const copyReasoning = async (e: MouseEvent) => {
@@ -49,6 +58,12 @@ function AgentMessageBubbleComponent({ item, sessionId }: AgentMessageBubbleProp
     } catch {
       // clipboard 不可用（非安全上下文）時靜默失敗，用戶仍可手動選取複製。
     }
+  };
+
+  // details 的 toggle 是唯一寫入口：使用者按 summary 造成的開／關在這裡被記下來。
+  const onReasoningToggle = (e: SyntheticEvent<HTMLDetailsElement>) => {
+    const next = e.currentTarget.open;
+    setReasoningOpen((prev) => (prev === next ? prev : next));
   };
 
   return (
@@ -70,14 +85,14 @@ function AgentMessageBubbleComponent({ item, sessionId }: AgentMessageBubbleProp
             : "rounded-[20px] rounded-bl-[6px] bg-[rgba(120,120,128,0.08)] px-4 py-3 text-foreground leading-[1.55]",
         )}
       >
-        {/* 思维链：默认收合（辅助层不摊开占屏，正文优先）；串流且还没有正文时
-            自动展开——真空期里「AI 在想什么」可见（不再黑盒）。
-            open 属性只在自动展开条件成立时渲染：undefined 时非受控，
-            用户点开/收起不会被重渲染冲掉。 */}
+        {/* 思維鏈預設展開，手動收合優先於任何自動行為（裁定理由見上方 reasoningOpen）。
+            open 一律由 state 給值，不再條件式渲染屬性——條件式會讓「串流結束」這類
+            prop 變化重新決定開關，把使用者收起來的區塊又攤回去。 */}
         {item.kind === "assistant" && item.reasoning ? (
           <details
             className="mb-1.5 [&_.brain-chevron]:transition-transform [&[open]>.brain-summary_.brain-chevron]:rotate-180"
-            {...(item.streaming && !item.text ? { open: true } : {})}
+            open={reasoningOpen}
+            onToggle={onReasoningToggle}
           >
             {/* 觸控目標 ≥44px：行動端沒有 hover，摘要行要按得到（詳情由內部 span 撐高）。
                 select-none 只鎖摘要行（避免拖選時把「思考過程」標籤一起圈走），

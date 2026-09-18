@@ -801,3 +801,136 @@ test("S2 活動流：started 丟失且首幀是 reasoning 時，補的卡只有 
   assert.equal(sub.text, undefined, "思考不冒充交付物");
   assert.equal(sub.lastLine, "");
 });
+
+// ── 提交型工具的中继態（2026-09-18 契約：artifact_pending / task_id）──────────
+//
+// 语义：tool.result 带 artifact_pending=true = 任務已提交成功、成品还没到，
+// 卡片停在中继態 pending（绝不显示「已完成」）；等成品事件（image/video/audio.done）
+// 或失敗事件（image.failed）到了才转终态。旧格式（不带新栏位）逐位元照旧。
+
+test("tool.result artifact_pending=true → 卡片是中继態 pending，不是 ok，且回填 taskId", () => {
+  let s = agentChatReducer(EMPTY, evt({ name: "tool.invoke", event_id: 1, data: { tool: "image_generate" } }));
+  s = agentChatReducer(
+    s,
+    evt({
+      name: "tool.result",
+      event_id: 2,
+      data: { tool: "image_generate", ok: true, cost_coins: 3, task_id: "t-1", artifact_pending: true },
+    }),
+  );
+
+  const it = s.items[0] as AgentToolCallItem;
+  assert.equal(it.status, "pending", "已提交 ≠ 已完成");
+  assert.notEqual(it.status, "ok");
+  assert.equal(it.taskId, "t-1", "task_id 必須寫進卡片，成品事件才配得回來");
+  assert.equal(it.costCoins, 3, "計費欄位照舊透傳（錢確實花了）");
+  assert.equal(s.turnActive, true);
+});
+
+test("image.done 帶 task_id → 只結算對應那張 pending 卡（同批其他任務照舊等）", () => {
+  let s = agentChatReducer(EMPTY, evt({ name: "tool.invoke", event_id: 1, data: { tool: "image_generate" } }));
+  s = agentChatReducer(
+    s,
+    evt({ name: "tool.result", event_id: 2, data: { tool: "image_generate", ok: true, task_id: "t-a", artifact_pending: true } }),
+  );
+  s = agentChatReducer(s, evt({ name: "tool.invoke", event_id: 3, data: { tool: "image_generate" } }));
+  s = agentChatReducer(
+    s,
+    evt({ name: "tool.result", event_id: 4, data: { tool: "image_generate", ok: true, task_id: "t-b", artifact_pending: true } }),
+  );
+
+  s = agentChatReducer(s, evt({ name: "image.done", event_id: 5, data: { url: "https://x/a.png", task_id: "t-b" } }));
+
+  const tools = s.items.filter((it): it is AgentToolCallItem => it.kind === "tool");
+  assert.equal(tools[0]?.status, "pending", "任務號不匹配的卡不得被誤結算");
+  assert.equal(tools[1]?.status, "ok", "成品到了，對應的 pending 卡結算成 ok");
+  assert.equal(s.items.filter((it) => it.kind === "image").length, 1, "出圖卡照舊建立（去重行為不變）");
+});
+
+test("image.failed 帶 task_id → 對應的 pending 卡判失敗、帶上 human_message，notice 照舊留痕", () => {
+  let s = agentChatReducer(EMPTY, evt({ name: "tool.invoke", event_id: 1, data: { tool: "image_generate" } }));
+  s = agentChatReducer(
+    s,
+    evt({ name: "tool.result", event_id: 2, data: { tool: "image_generate", ok: true, task_id: "t-9", artifact_pending: true } }),
+  );
+  s = agentChatReducer(
+    s,
+    evt({ name: "image.failed", event_id: 3, data: { task_id: "t-9", reason: "deadline exceeded", refunded: true, human_message: "上游超时，费用已退回" } }),
+  );
+
+  const it = s.items[0] as AgentToolCallItem;
+  assert.equal(it.status, "failed", "失敗事件必須把還在轉的卡判死，不留假「生成中…」");
+  assert.equal(it.error, "上游超时，费用已退回", "human_message 順手填進卡片");
+  const notice = s.items.find((n): n is AgentNoticeItem => n.kind === "notice");
+  assert.ok(notice, "原本的 notice 行為保留");
+  assert.match(notice.text, /费用已退回/);
+});
+
+test("turn.done 不判死 pending 卡（running 照舊判死，pending 留著等成品/失敗事件）", () => {
+  let s = agentChatReducer(EMPTY, evt({ name: "tool.invoke", event_id: 1, data: { tool: "bash" } }));
+  s = agentChatReducer(s, evt({ name: "tool.invoke", event_id: 2, data: { tool: "image_generate" } }));
+  s = agentChatReducer(
+    s,
+    evt({ name: "tool.result", event_id: 3, data: { tool: "image_generate", ok: true, task_id: "t-1", artifact_pending: true } }),
+  );
+
+  s = agentChatReducer(s, evt({ name: "turn.done", event_id: 4, data: {} }));
+
+  const tools = s.items as AgentToolCallItem[];
+  assert.equal(tools[0]?.status, "failed", "沒交出去的 running 卡照舊判死");
+  assert.equal(tools[1]?.status, "pending", "回合結束 ≠ 成品到了：pending 必須留著，不能被 settleItems 判死");
+  assert.equal(s.turnActive, false);
+});
+
+test("無 task_id 的 image.done → FIFO 結算最舊的一張 pending 卡", () => {
+  let s = agentChatReducer(EMPTY, evt({ name: "tool.invoke", event_id: 1, data: { tool: "image_generate" } }));
+  s = agentChatReducer(
+    s,
+    evt({ name: "tool.result", event_id: 2, data: { tool: "image_generate", ok: true, task_id: "t-1", artifact_pending: true } }),
+  );
+  s = agentChatReducer(s, evt({ name: "tool.invoke", event_id: 3, data: { tool: "image_generate" } }));
+  s = agentChatReducer(
+    s,
+    evt({ name: "tool.result", event_id: 4, data: { tool: "image_generate", ok: true, task_id: "t-2", artifact_pending: true } }),
+  );
+
+  // 成品事件沒帶 task_id：配不到精確的，回退結算最舊那張（防成品到了卡還在轉）。
+  s = agentChatReducer(s, evt({ name: "image.done", event_id: 5, data: { url: "https://x/a.png" } }));
+
+  const tools = s.items.filter((it): it is AgentToolCallItem => it.kind === "tool");
+  assert.equal(tools[0]?.status, "ok", "FIFO：最舊的 pending 先結算");
+  assert.equal(tools[1]?.status, "pending", "較新的 pending 留著，繼續等自己的成品事件");
+});
+
+test("video.done / audio.done 同樣結算 pending 卡（成品事件不只有圖）", () => {
+  let s = agentChatReducer(EMPTY, evt({ name: "tool.invoke", event_id: 1, data: { tool: "video_generate" } }));
+  s = agentChatReducer(
+    s,
+    evt({ name: "tool.result", event_id: 2, data: { tool: "video_generate", ok: true, task_id: "v-1", artifact_pending: true } }),
+  );
+  s = agentChatReducer(s, evt({ name: "video.done", event_id: 3, data: { url: "https://x/a.mp4", task_id: "v-1" } }));
+  assert.equal((s.items[0] as AgentToolCallItem).status, "ok");
+
+  let a = agentChatReducer(EMPTY, evt({ name: "tool.invoke", event_id: 1, data: { tool: "music_gen" } }));
+  a = agentChatReducer(
+    a,
+    evt({ name: "tool.result", event_id: 2, data: { tool: "music_gen", ok: true, task_id: "m-1", artifact_pending: true } }),
+  );
+  a = agentChatReducer(a, evt({ name: "audio.done", event_id: 3, data: { url: "https://x/a.m4a", task_id: "m-1" } }));
+  assert.equal((a.items[0] as AgentToolCallItem).status, "ok");
+});
+
+test("缺席新欄位的舊格式 tool.result → 行為與現狀逐位元一致（直接 ok，不長 taskId）", () => {
+  let s = agentChatReducer(EMPTY, evt({ name: "tool.invoke", event_id: 1, data: { tool: "gen" } }));
+  s = agentChatReducer(s, evt({ name: "tool.result", event_id: 2, data: { tool: "gen", ok: true, cost_coins: 2 } }));
+
+  const it = s.items[0] as AgentToolCallItem;
+  assert.equal(it.status, "ok", "舊格式不得被當成中继態");
+  assert.equal(it.taskId, undefined);
+  assert.equal(it.costCoins, 2);
+
+  // ok:false 的舊格式照舊 failed。
+  let f = agentChatReducer(EMPTY, evt({ name: "tool.invoke", event_id: 1, data: { tool: "gen" } }));
+  f = agentChatReducer(f, evt({ name: "tool.result", event_id: 2, data: { tool: "gen", ok: false } }));
+  assert.equal((f.items[0] as AgentToolCallItem).status, "failed");
+});

@@ -27,10 +27,11 @@ import {
 } from "./AgentSubagentBar";
 import { AgentToolCard, toolArgPreview, toolDisplayName } from "./AgentToolCard";
 import { AgentAudioCard } from "./AgentAudioCard";
+import { AgentMessageBubble } from "./AgentMessageBubble";
 import { reportPreview } from "./AgentSubagentReportCard";
 import { submitConfirmDecision } from "./AgentConfirmCard";
 import { submitQuestionAnswer } from "./AgentQuestionCard";
-import { computeCanSend, hasPendingAttachments } from "./AgentComposer";
+import { computeCanSend, hasPendingAttachments, nextSendBusy, AgentComposer } from "./AgentComposer";
 import Module, { createRequire } from "node:module";
 
 // AgentChatPanel.tsx 唯一带副作用 `import "./agent-chat.css"` 的组件文件——
@@ -44,16 +45,22 @@ import Module, { createRequire } from "node:module";
   (m as { exports: unknown }).exports = {};
 };
 const requireHere = createRequire(import.meta.url);
-const { resolveConfirmGroup } = requireHere("./AgentChatPanel.tsx") as {
+const { resolveConfirmGroup, exampleChipState } = requireHere("./AgentChatPanel.tsx") as {
   resolveConfirmGroup: (
     requestIds: string[],
     approved: boolean,
     onConfirm: (requestId: string, approved: boolean) => Promise<boolean | void>,
   ) => Promise<boolean>;
+  exampleChipState: (
+    example: string,
+    pendingExample: string | null,
+    sendPending: boolean,
+  ) => "pending" | "disabled" | "idle";
 };
 import { agentChatReducer, appendUserTurn, lastNonEmptyLine } from "../../lib/agent-chat-reducer";
 import {
   EMPTY_AGENT_CHAT_STATE,
+  type AgentAssistantTextItem,
   type AgentAttachmentRef,
   type AgentAudioItem,
   type AgentSseEvent,
@@ -225,6 +232,53 @@ test("audio card plays via native <audio> and keeps the disabled action contract
   assert.match(markup, /音乐/, "mediaKind=music 徽章显示成曲语义");
 });
 
+test("思維鏈預設展開：首次渲染即 open，沒有 reasoning 就不渲染 details", () => {
+  /*
+   * 2026-09-18 暴君裁定，推翻 08-25「預設收合、正文優先」的舊契約：思考過程是
+   * 使用者判斷答案可不可信的證據，預設就攤開；要收的人自己收一次。
+   * 靜態 markup 就是「首次渲染」（含歷史回放重建出來的條目）的字面證據——
+   * React 把布林屬性 open 序列化成 open=""（現場輸出的格式，不是猜的）。
+   */
+  const assistant = (overrides: Partial<AgentAssistantTextItem>) =>
+    createElement(AgentMessageBubble, {
+      item: {
+        kind: "assistant",
+        id: "asst-1",
+        seq: 1,
+        text: "",
+        reasoning: "先算 336 的立方根，n(n+1)(n+2)=336…",
+        streaming: true,
+        ...overrides,
+      } as AgentAssistantTextItem,
+    });
+
+  // ① 串流中（還沒有正文）＝ 首幀就展開。
+  const streaming = renderToStaticMarkup(assistant({}));
+  assert.match(streaming, /<details[^>]*\sopen=""/, "串流中的思維鏈首幀就要展開");
+  assert.match(streaming, /思考過程/, "折疊殼仍是原生 summary，文案不動");
+
+  // ② 已完成（streaming:false、正文已到）＝ 同樣展開。展開不得只在串流期成立。
+  const settled = renderToStaticMarkup(assistant({ streaming: false, text: "答案是 6, 7, 8" }));
+  assert.match(settled, /<details[^>]*\sopen=""/, "已完成條目同樣預設展開");
+
+  // ③ 沒有 reasoning 的助理條目：連 details 都不渲染，不留空殼。
+  const noReasoning = renderToStaticMarkup(assistant({ reasoning: undefined, text: "只有正文" }));
+  assert.doesNotMatch(noReasoning, /<details/, "沒有思維鏈就沒有折疊殼");
+  assert.match(noReasoning, /只有正文/, "正文不受影響");
+
+  /*
+   * ④ 手動收合不被重渲染打回：open 受控於 state，而 state 只有 toggle 一個寫入口；
+   * 舊的「streaming && !item.text 才給 open」條件式屬性必須絕跡——它會在串流
+   * 結束那一幀重新決定開關，正是「收起又被攤回去」的成因。
+   */
+  const code = readCode(bubble);
+  assert.match(code, /open=\{reasoningOpen\}/, "open 一律由 state 給值");
+  assert.match(code, /onToggle=\{onReasoningToggle\}/, "toggle 是使用者手動開關的寫入口");
+  const stateWrites = code.match(/setReasoningOpen\(/g) ?? [];
+  assert.equal(stateWrites.length, 1, "setReasoningOpen 只准有 toggle 這一個寫入口");
+  assert.doesNotMatch(code, /item\.streaming && !item\.text/, "自動展開條件已拆掉");
+});
+
 test("reconnecting shows an unobtrusive retry affordance", () => {
   assert.match(panel, /connection === "reconnecting"/);
   assert.match(panel, /onRetryConnection/);
@@ -347,6 +401,133 @@ test("composer textarea grows with content and collapses after send", () => {
   assert.match(composer, /max-h-32/);
   // 送出后清空文字，高度要一起收回来。
   assert.match(composer, /textareaRef\.current\.style\.height = "auto"/);
+});
+
+/**
+ * 2026-09-18 送出在途（暴君原話：「发送按钮要有一个loading态，用于点击模板/发送文字/
+ * 点击这些按钮时的等待态」）。
+ *
+ * 「本輪尚未开始」的真相源在 AgentChatPanel（它同时知道 turnActive 与 onSend 的
+ * promise），面板把它当成一个可选 prop 餵进输入区。这里用真渲染的静态 markup 钉三件事：
+ * ①在途＝空輸入也转圈（不是 disabled 灰钮，否则看不出「正在送」）；
+ * ②非在途不常转圈；③在途压过「輸入框空 → 停止钮」的替换语义，两者不得互相盖掉。
+ */
+test("09-18 送出在途：空輸入也必須是轉圈送出鈕（aria-busy + spinner，不是灰鈕）", () => {
+  const markup = renderToStaticMarkup(
+    createElement(AgentComposer, { disabled: false, onSend: () => {}, externalSendPending: true }),
+  );
+  // 屏读器也要知道这条正在送。
+  assert.match(markup, /aria-busy="true"/, "在途时 aria-busy 必须为 true");
+  // 转圈是序列化出来的真图标（lucide loader + animate-spin），不是靠 class 猜。
+  assert.match(markup, /class="lucide lucide-loader-circle[^"]*animate-spin"/, "在途必须渲染转圈图标");
+  // 两颗图标互斥：同屏出现等于两套语义。
+  assert.doesNotMatch(markup, /lucide-send/, "在途不得同时渲染送图标");
+  // 連點在属性层就挡死（邏輯层还有 sendingRef / externalSendPending 两道）。
+  assert.match(markup, /disabled="" aria-label="发送"/, "在途时送出钮必须 disabled（防连点）");
+  // 样式沿用既有词汇：蓝底 + cursor-wait——在途是「正在送」不是「不可用」。
+  assert.match(markup, /bg-ios-blue/, "在途仍是既有蓝底钮，不退回灰钮");
+  assert.match(markup, /cursor-wait/, "在途带既有 cursor-wait");
+  assert.doesNotMatch(
+    markup,
+    /disabled:bg-\[rgba\(120,120,128,0\.18\)\]/,
+    "在途期间不上灰阶 disabled 样式（白轉圈压在灰底上等于没有回馈）",
+  );
+});
+
+test("09-18 非在途：送出鈕回到送圖示，不得常轉圈", () => {
+  const markup = renderToStaticMarkup(
+    createElement(AgentComposer, { disabled: false, onSend: () => {} }),
+  );
+  assert.doesNotMatch(markup, /aria-busy="true"/, "常態不得宣稱在途");
+  assert.match(markup, /class="lucide lucide-send[^"]*"/, "常態渲染送图标");
+  assert.doesNotMatch(markup, /lucide-loader-circle/, "常態不得有转圈图标");
+  // 常態且輸入框空：既有 disabled 灰阶样式逐字保留（这时候「不可用」才是对的语义）。
+  assert.match(
+    markup,
+    /disabled:bg-\[rgba\(120,120,128,0\.18\)\]/,
+    "非在途的 disabled 样式原样保留",
+  );
+});
+
+test("09-18 在途壓過停止鈕：有 onStop、輸入框空、在途 → 仍是轉圈送出鈕（回歸鎖）", () => {
+  const inFlight = renderToStaticMarkup(
+    createElement(AgentComposer, {
+      disabled: false,
+      onSend: () => {},
+      onStop: () => {},
+      externalSendPending: true,
+    }),
+  );
+  assert.match(inFlight, /aria-label="发送"/, "真空期送出钮位置必须是送出钮");
+  assert.match(inFlight, /aria-busy="true"/, "在途时 aria-busy 为真");
+  assert.match(inFlight, /lucide-loader-circle/, "真空期是转圈，不是停止钮");
+  assert.doesNotMatch(inFlight, /aria-label="中止助理生成"/, "本輪还没开始，不许被停止钮盖掉");
+  assert.doesNotMatch(inFlight, /lucide-square/, "停止图标也不得出现");
+
+  // 对照：不在途、有 onStop、輸入框空 → 停止钮语义逐位元保留（没被本次改动削弱）。
+  const stopped = renderToStaticMarkup(
+    createElement(AgentComposer, { disabled: false, onSend: () => {}, onStop: () => {} }),
+  );
+  assert.match(stopped, /aria-label="中止助理生成"/, "本輪已开始、輸入框空 → 停止钮");
+  assert.match(stopped, /lucide-square/, "停止图标仍在");
+  assert.doesNotMatch(stopped, /lucide-loader-circle/, "停了就该是停止钮，不是转圈");
+  assert.doesNotMatch(stopped, /aria-busy="true"/, "停止钮不是送出钮的在途態");
+});
+
+test("nextSendBusy：兩邊都放下才真的放下，否則維持在途", () => {
+  assert.equal(nextSendBusy(false, false, false), null, "本來就不在途、沒有新信号 → 不动");
+  assert.equal(nextSendBusy(false, true, false), true, "输入区自己的投递在飞 → 在途");
+  assert.equal(nextSendBusy(false, false, true), true, "面板餵進來的在途 → 在途");
+  assert.equal(nextSendBusy(true, true, false), null, "已在途、内部仍在飞 → 维持");
+  assert.equal(
+    nextSendBusy(true, false, true),
+    null,
+    "内部结算了但面板还在途 → 维持（不许提前把锁放掉）",
+  );
+  assert.equal(nextSendBusy(true, false, false), false, "两边都放下 → 真的放下");
+});
+
+test("exampleChipState：被點的那一顆優先進行中態，其餘在途期間禁用", () => {
+  assert.equal(exampleChipState("画一只橘猫", null, false), "idle", "不在途＝可以按");
+  assert.equal(exampleChipState("画一只橘猫", "画一只橘猫", true), "pending", "被点的那一颗自己转圈");
+  assert.equal(exampleChipState("画一只狼", "画一只橘猫", true), "disabled", "在途期间其余一律禁用");
+  assert.equal(
+    exampleChipState("画一只橘猫", null, true),
+    "disabled",
+    "面板在途但没有指定那一颗（文字送出路径）也要全禁用",
+  );
+});
+
+test("09-18 面板掌握「本輪尚未開始」：模板 chip 與輸入區兩條路徑共用同一個在途態", () => {
+  const code = readCode(panel);
+  // 模板路徑：点击那一刻进在途態并标记被点的那一颗。
+  assert.match(code, /const handleExampleSend = \(ex: string\) => \{/);
+  assert.match(code, /beginSendPending\(\);\s*\n\s*setPendingExample\(ex\);/);
+  // 既有同幀连点锁必须留着（空態併發 send 是已记录的竞态，两条消息两次计费）。
+  assert.match(code, /if \(exampleSendRef\.current\) return;/);
+  assert.match(code, /exampleSendRef\.current = true;/);
+  assert.match(code, /exampleSendRef\.current = false;/);
+  // chip 三态：被点的那一颗转圈（aria-busy），在途期间全部禁用（带 aria-busy 与既有禁用视觉）。
+  assert.match(code, /const chipState = exampleChipState\(ex, pendingExample, sendPending\);/);
+  assert.match(code, /disabled=\{chipState !== "idle"\}/);
+  assert.match(code, /aria-busy=\{chipState === "pending" \? true : undefined\}/);
+  assert.match(code, /chipState === "disabled" && "opacity-50"/);
+  assert.match(code, /chipState === "pending" && "inline-flex items-center gap-1\.5"/);
+  assert.match(code, /text-ios-footnote/, "chip 既有排版与字级不动");
+  // 輸入區路徑：同一个 promise 结算时解除；面板把在途態餵给 composer（单一真相源，
+  // composer 不自己猜），模板 chip 在途期间点不动。
+  assert.match(code, /externalSendPending=\{sendPending\}/);
+  assert.match(code, /Promise\.resolve\(result\)\.catch\(\(\) => \{\}\)\.finally\(endSendPending\)/);
+  // 三条解除路径，全在面板侧：turnActive/closed、promise 结算、20s 硬保险（同一个常量）。
+  assert.match(code, /if \(turnActive \|\| closed\) endSendPending\(\);/);
+  assert.match(
+    code,
+    /sendPendingTimerRef\.current = window\.setTimeout\(endSendPending, SEND_HARD_TIMEOUT_MS\)/,
+  );
+  // 硬保险只能沿用既有值（防锁死的安全阀），不许被改长。
+  assert.match(composer, /const SEND_HARD_TIMEOUT_MS = 20_000;/);
+  // 立起在途態的入口只有两个：模板 chip 与輸入區送出。
+  assert.equal((code.match(/beginSendPending\(\);/g) ?? []).length, 2, "只准这两条入口");
 });
 
 test("D-26 first-image anchor is offered, and never offered when it cannot hold", () => {

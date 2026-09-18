@@ -20,6 +20,9 @@ interface ToolStatusMeta {
 
 const STATUS_META: Record<AgentToolCallItem["status"], ToolStatusMeta> = {
   running: { label: "运行中…", Icon: Loader2, tone: "text-ios-blue", badge: "lg-tint-blue" },
+  // 中继態：任務已提交、成品未到（artifact_pending）。金色＝钱花出去了、东西
+  // 还在路上；等 image/video/audio.done 或 image.failed 才转 ok/failed。
+  pending: { label: "生成中…", Icon: Loader2, tone: "text-[rgba(120,90,20,0.85)]", badge: "lg-tint-gold" },
   ok: { label: "已完成", Icon: Check, tone: "text-[#248A3D]", badge: "lg-tint-green" },
   failed: { label: "失败", Icon: X, tone: "text-destructive", badge: "lg-tint-red" },
 };
@@ -206,7 +209,11 @@ export function toolArgPreview(args: string): string | undefined {
 function AgentToolCardComponent({ item }: AgentToolCardProps) {
   const status = STATUS_META[item.status];
   const running = item.status === "running";
+  // 图标转圈：running（工具自身在执行）与 pending（任务已提交、成品在路上）
+  // 都是「还在跑」，都转 —— 停在静止图标上等于谎报已结束。
+  const spinning = running || item.status === "pending";
   // 执行中进度：只有 running 且网关回了 tool.progress 才有。终态后忽略（不冒充还在跑）。
+  // pending 没有进度帧（进度是工具内部的计数，提交出去后由成品事件定案），不得假造。
   const progress = running ? item.progress : undefined;
   const pct = progress ? Math.min(100, Math.round((progress.done / progress.total) * 100)) : 0;
   // 有真实分母时徽章直接报计数「3/8」，比「运行中…」信息量大且不虚报。
@@ -219,7 +226,7 @@ function AgentToolCardComponent({ item }: AgentToolCardProps) {
     <div className="agent-rise flex flex-col gap-2 rounded-[18px] bg-[rgba(120,120,128,0.06)] px-3.5 py-3">
       <div className="flex items-center gap-2.5">
         <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white text-muted-foreground">
-          <status.Icon className={cn("h-4 w-4", running && "animate-spin")} aria-hidden="true" />
+          <status.Icon className={cn("h-4 w-4", spinning && "animate-spin")} aria-hidden="true" />
         </span>
         <div className="min-w-0 flex-1">
           <p className="truncate text-ios-subhead font-semibold text-foreground">

@@ -1,13 +1,13 @@
 "use client";
 
-import { memo, useEffect, useMemo, useRef } from "react";
-import { RotateCcw, Sparkles } from "lucide-react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Loader2, RotateCcw, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AgentAssistantTextItem, AgentChatState } from "@/lib/agent-chat-types";
 import type { BatchAnchor } from "@/lib/agent-batch-anchor";
 import { describeGroup, groupPendingConfirms } from "@/lib/agent-confirm-groups";
 import { AgentTranscript, type AgentTranscriptProps } from "./AgentTranscript";
-import { AgentComposer, type AgentComposerProps } from "./AgentComposer";
+import { AgentComposer, SEND_HARD_TIMEOUT_MS, type AgentComposerProps } from "./AgentComposer";
 import { AgentConfirmCard } from "./AgentConfirmCard";
 import { AgentQuestionCard } from "./AgentQuestionCard";
 import { AgentBatchProgress } from "./AgentBatchProgress";
@@ -19,7 +19,18 @@ export interface AgentChatPanelProps {
   state: AgentChatState;
   connection: "idle" | "connecting" | "open" | "reconnecting" | "closed";
   disabled?: boolean;
-  onSend: (text: string) => void;
+  /** 回传 promise，输入区才能等到「投递完成」再收在途态（09-18 跨线契约放宽）。 */
+  onSend: (text: string) => void | Promise<void>;
+  /**
+   * 中止请求在飞（hook 的 aborting 镜像）。为真时「停下」钮变成「正在中止」态，
+   * 避免连点双发；缺席（undefined）时行为与接线前逐位元一致。
+   */
+  stopPending?: boolean;
+  /**
+   * 空态 lazy 建号在飞（hook 的 startingSession）。为真时空态显式说「正在建立会话…」，
+   * 推荐语不再渲染——不然用户以为没发出去而重复点（两条消息、两次计费）。
+   */
+  sessionStarting?: boolean;
   onConfirm: (requestId: string, approved: boolean) => Promise<boolean | void>;
   onAnswerQuestion: (requestId: string, answers: string[][]) => Promise<boolean | void>;
   onRetryConnection: () => void;
@@ -74,6 +85,24 @@ export async function resolveConfirmGroup(
   return results.every((r) => r.status === "fulfilled" && r.value !== false);
 }
 
+/**
+ * 空态模板 chip 的三态（纯函数，可直测）：
+ * - "pending"：这一颗刚被按下、本輪还没开始 → 转圈（进行中态）；
+ * - "disabled"：面板正在途，其余 chip 一律禁用（空態併發 send 是已记录的竞态，
+ *   两条消息、两次计费）；
+ * - "idle"：可以按。
+ *
+ * 被点的那一颗优先于「全部禁用」——否则使用者看不出自己按的是哪一颗。
+ */
+export function exampleChipState(
+  example: string,
+  pendingExample: string | null,
+  sendPending: boolean,
+): "pending" | "disabled" | "idle" {
+  if (pendingExample === example) return "pending";
+  return sendPending ? "disabled" : "idle";
+}
+
 const CONNECTION_META: Record<AgentChatPanelProps["connection"], { label: string; dotClass: string }> = {
   idle: { label: "未连接", dotClass: "bg-black/25" },
   connecting: { label: "连接中…", dotClass: "bg-ios-orange" },
@@ -87,6 +116,8 @@ function AgentChatPanelComponent({
   connection,
   disabled = false,
   onSend,
+  stopPending = false,
+  sessionStarting = false,
   onConfirm,
   onAnswerQuestion,
   onRetryConnection,
@@ -119,7 +150,90 @@ function AgentChatPanelComponent({
   // 用户是否停在列表底部附近。串流/新条目只在「本来就在底部」时自动贴底，
   // 往上翻历史时不许把滚动条强拉回底部（「往上翻不強拉」）。
   const isNearBottomRef = useRef(true);
+
+  // 推荐语连点保险：同一 frame 内两次点击时 re-render 还没到，靠 ref 同步上锁。
+  // 不锁＝两条消息、两次计费（空态并发 send 是已记录的竞态）。
+  const exampleSendRef = useRef(false);
+  /** 被按下的那一颗模板 chip（进行中态）；sendPending 期间三颗一起禁用。 */
+  const [pendingExample, setPendingExample] = useState<string | null>(null);
+  /**
+   * 09-18「送出在途」单一真相源（面板层）。
+   *
+   * 病灶：按下送出 / 模板 chip 到「本輪真的开始」之间有一段真空——空態首发要先
+   * 建號鑄票，網關還要把 prompt 送進 opencode 才回 ack（实測 10–15s）。这段
+   * 时间里输入框已空、画面没有回馈，人会以为没送出去而重复点（两条消息、
+   * 两次计费）。这里由上層掌握「本輪尚未开始」这个状态（面板同时知道 turnActive
+   * 与 onSend 的 promise），再餵给 AgentComposer 决定送出钮的忙碌態。
+   *
+   * 解除只有三条，全部在面板侧：①turnActive 由 false 变 true（reducer 在使用者
+   * 訊息落地那一刻就翻，等价「本輪已开始」）②onSend 的 promise 结算
+   * ③硬保险 SEND_HARD_TIMEOUT_MS 到点（沿用输入区同一个常量，防锁死）。
+   */
+  const [sendPending, setSendPending] = useState(false);
+  /** 硬保险计时器句柄；解锁时清掉，别留悬空的 setTimeout 攥着 setState。 */
+  const sendPendingTimerRef = useRef<number | null>(null);
+
+  /** 幂等解除：清计时器 + 落 state。promise 结算与硬保险到点都会调它。 */
+  const endSendPending = useCallback(() => {
+    if (sendPendingTimerRef.current !== null) {
+      window.clearTimeout(sendPendingTimerRef.current);
+      sendPendingTimerRef.current = null;
+    }
+    setSendPending(false);
+  }, []);
+
+  /** 立起在途態并重新计时硬保险（重复调用不会叠出两个计时器）。 */
+  const beginSendPending = useCallback(() => {
+    if (sendPendingTimerRef.current !== null) {
+      window.clearTimeout(sendPendingTimerRef.current);
+    }
+    setSendPending(true);
+    sendPendingTimerRef.current = window.setTimeout(endSendPending, SEND_HARD_TIMEOUT_MS);
+  }, [endSendPending]);
+
+  const handleExampleSend = (ex: string) => {
+    if (exampleSendRef.current) return;
+    exampleSendRef.current = true;
+    // 点击这一刻立刻进在途態：送出钮位置转圈、三颗 chip 全部禁用、
+    // 被点的那一颗自己转圈。
+    beginSendPending();
+    setPendingExample(ex);
+    // 硬保险 20s（20_000ms ＝ 输入区导出的 SEND_HARD_TIMEOUT_MS，两边同源）：
+    // 请求卡死也不能把推荐语永久锁死。
+    const unlockTimer = window.setTimeout(() => { exampleSendRef.current = false; }, SEND_HARD_TIMEOUT_MS);
+    Promise.resolve(onSend(ex)).catch(() => {}).finally(() => {
+      window.clearTimeout(unlockTimer);
+      exampleSendRef.current = false;
+      setPendingExample(null);
+      // 模板路徑：promise 结算（网关已收下这条 prompt＝本輪真的开始了）→ 解除。
+      endSendPending();
+    });
+  };
   const { items, pendingConfirms, pendingQuestions, closed, closedReason, turnActive, lastEventId, turnStatus } = state;
+
+  /*
+   * 本輪真的开始（turnActive 由 false 变 true）或会话已结束 → 在途態解除。
+   * 另外两条平行的解除在 beginSendPending 的两端：promise 结算与 20s 硬保险。
+   *
+   * 故意不拿 lastEventId（第一个 SSE 幀）当解除信号：连线期间任何一幀（含
+   * session / canvas 类的记账幀）都会推进它，用它等于在真空期把锁提前放掉、
+   * 把这次的修复原地抵消；turnActive 已经涵盖「第一个内容幀到达」这条语义
+   * （reducer 收到内容幀必翻 turnActive）。
+   */
+  useEffect(() => {
+    if (turnActive || closed) endSendPending();
+  }, [turnActive, closed, endSendPending]);
+
+  // 卸载：面板关掉之后不该还有 setTimeout 攥着 setState。
+  useEffect(
+    () => () => {
+      if (sendPendingTimerRef.current !== null) {
+        window.clearTimeout(sendPendingTimerRef.current);
+        sendPendingTimerRef.current = null;
+      }
+    },
+    [],
+  );
 
   // 罪状 4：子代理条目不进消息流，聚到转录区上方的状态栏（组件内部裁到至多 3 张）。
   const subagentItems = useMemo(() => {
@@ -234,7 +348,7 @@ function AgentChatPanelComponent({
 
       {/* D-26：批量愿望的燃烧进度常驻在顶部，不用点开才知道烧到哪。 */}
       <div className="pb-1">
-        <AgentBatchProgress items={items} onStop={onStopGeneration} />
+        <AgentBatchProgress items={items} onStop={onStopGeneration} stopPending={stopPending} />
       </div>
 
       {/* 罪状 4：子代理状态栏，置顶于转录区之上、从上到下堆叠（至多 3 张）。 */}
@@ -253,31 +367,60 @@ function AgentChatPanelComponent({
             都顯示（「沒內容且沒壞」）。建號+ticket+SSE 握手在背後接，error 態仍由
             connection meta 條目單獨呈現，此處只排除 reconnecting/closed。 */}
         {items.length === 0 && connection !== "reconnecting" && connection !== "closed" ? (
-          <div className="agent-empty flex h-full min-h-40 flex-col items-center justify-center gap-4 px-6 text-center">
-            <span className="lg-tint-blue flex h-12 w-12 items-center justify-center rounded-full text-ios-blue">
-              <Sparkles className="h-5 w-5" aria-hidden="true" />
-            </span>
-            <div>
-              <p className="text-ios-subhead font-semibold text-foreground">
-                和智能体聊聊，让它帮你生成图片
-              </p>
-              <p className="agent-empty-hint mx-auto mt-1.5 max-w-[30rem] text-sm leading-[1.5] text-foreground/45 sm:text-ios-footnote">
-                说一句话，它自动选好模型、风格和比例
-              </p>
+          sessionStarting || turnActive ? (
+            /* 空态首发的真空期（09-18）：建号 + ticket 两段跨境往返在飞时 items 仍是 0，
+               画面若不吭声，人以为自己没送出去而重复点发送。这里只留一行忙碌提示
+               （沿用空态块既有置中排版与灰阶色），推荐语在此时不渲染＝点不到就不会重发。 */
+            <div className="agent-empty flex h-full min-h-40 flex-col items-center justify-center gap-4 px-6 text-center">
+              <span className="flex items-center gap-2 text-ios-caption1 text-foreground/45">
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                正在建立会话…
+              </span>
             </div>
-            <div className="flex max-w-[28rem] flex-wrap items-center justify-center gap-2">
-              {EXAMPLES.map((ex) => (
-                <button
-                  key={ex}
-                  type="button"
-                  onClick={() => onSend(ex)}
-                  className="lg-float cursor-pointer rounded-full px-3.5 py-2 text-ios-footnote font-medium text-muted-foreground transition-all duration-200 hover:-translate-y-0.5 hover:text-ios-blue hover:shadow-[0_6px_18px_rgba(0,0,0,0.10)] active:translate-y-0 active:scale-[0.97]"
-                >
-                  {ex}
-                </button>
-              ))}
+          ) : (
+            <div className="agent-empty flex h-full min-h-40 flex-col items-center justify-center gap-4 px-6 text-center">
+              <span className="lg-tint-blue flex h-12 w-12 items-center justify-center rounded-full text-ios-blue">
+                <Sparkles className="h-5 w-5" aria-hidden="true" />
+              </span>
+              <div>
+                <p className="text-ios-subhead font-semibold text-foreground">
+                  和智能体聊聊，让它帮你生成图片
+                </p>
+                <p className="agent-empty-hint mx-auto mt-1.5 max-w-[30rem] text-sm leading-[1.5] text-foreground/45 sm:text-ios-footnote">
+                  说一句话，它自动选好模型、风格和比例
+                </p>
+              </div>
+              <div className="flex max-w-[28rem] flex-wrap items-center justify-center gap-2">
+                {EXAMPLES.map((ex) => {
+                  // 三态：被点的那一颗转圈，其余在途期间禁用（防重复点＝重复计费）。
+                  const chipState = exampleChipState(ex, pendingExample, sendPending);
+                  return (
+                    <button
+                      key={ex}
+                      type="button"
+                      onClick={() => handleExampleSend(ex)}
+                      disabled={chipState !== "idle"}
+                      aria-busy={chipState === "pending" ? true : undefined}
+                      className={cn(
+                        "lg-float rounded-full px-3.5 py-2 text-ios-footnote font-medium text-muted-foreground",
+                        chipState === "idle"
+                          ? "cursor-pointer transition-all duration-200 hover:-translate-y-0.5 hover:text-ios-blue hover:shadow-[0_6px_18px_rgba(0,0,0,0.10)] active:translate-y-0 active:scale-[0.97]"
+                          : "cursor-not-allowed",
+                        chipState === "disabled" && "opacity-50",
+                        // 进行中那一颗：转圈与文字同排（沿用 chip 既有排版与字级）。
+                        chipState === "pending" && "inline-flex items-center gap-1.5",
+                      )}
+                    >
+                      {chipState === "pending" && (
+                        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" />
+                      )}
+                      {ex}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          )
         ) : (
           <AgentTranscript items={items} imageActions={imageActions} videoActions={videoActions} audioActions={audioActions} sessionId={sessionId} turnStatus={turnStatus} />
         )}
@@ -393,7 +536,21 @@ function AgentChatPanelComponent({
           onSend={(text) => {
             // 第一条用户消息 = 右侧模板库退场的时刻（首条消息落地即收起）。
             if (items.length === 0) onFirstUserMessage?.();
-            onSend(text);
+            // 09-18 送出在途（面板＝单一真相源）：按下这一刻就立起来，送出钮位置
+            // 立刻转圈，直到本輪真的开始 / promise 结算 / 20s 硬保险（见 sendPending）。
+            beginSendPending();
+            let result: void | Promise<void>;
+            try {
+              result = onSend(text);
+            } catch (err) {
+              // 同步 throw＝这条根本没送出去，立刻解锁（不留假死按钮）。
+              endSendPending();
+              throw err;
+            }
+            // 回传 promise：输入区据此把送出钮钉在在途態直到投递落地；
+            // 面板自己也挂在同一个 promise 上（结算即解除在途）。
+            Promise.resolve(result).catch(() => {}).finally(endSendPending);
+            return result;
           }}
           sessionId={sessionId}
           onEnsureSession={onEnsureSession}
@@ -402,6 +559,10 @@ function AgentChatPanelComponent({
           /* D-26 补全：生成中（turnActive）把中止信号送进输入区——
              输入框为空时送出钮位置变停止钮，不再只能乾等。 */
           onStop={turnActive ? onStopGeneration : undefined}
+          stopPending={stopPending}
+          /* 09-18：面板的在途態餵下去——送出钮位置立刻转圈（输入框空白也一样是
+             转圈送出钮，不退回 disabled 灰钮），本輪真的开始前不被停止钮分支盖掉。 */
+          externalSendPending={sendPending}
         />
       </div>
     </section>

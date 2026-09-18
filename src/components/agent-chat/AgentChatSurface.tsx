@@ -218,6 +218,13 @@ export function AgentChatSurface({
   const [draft, setDraft] = useState(initialPrompt.trim());
   // 交给输入区的续写信号（D-24）。输入区吃掉后回调清空，避免重复注入。
   const [prefill, setPrefill] = useState<{ text: string; nonce: number } | null>(null);
+  const chat = useAgentChat({
+    // 09-12 建号权收归发送按钮：hook 的 autoStart 已撤——进助理挂载即空态，
+    // 不预建会话；首条消息 send() 内部才 lazy 建号（深链的 switchSession
+    // 是恢复旧会话，不是建号，不受影响）。
+    ...(onCanvasEvent ? { onCanvasEvent } : {}),
+    ...(canvasStateProvider ? { canvasStateProvider } : {}),
+  });
   const {
     state,
     connection,
@@ -229,17 +236,13 @@ export function AgentChatSurface({
     retry,
     resumable,
     abort,
+    aborting,
+    startingSession,
     discardAndStartNew,
     switchSession,
     startNewSession,
     ensureSession,
-  } = useAgentChat({
-    // 09-12 建号权收归发送按钮：hook 的 autoStart 已撤——进助理挂载即空态，
-    // 不预建会话；首条消息 send() 内部才 lazy 建号（深链的 switchSession
-    // 是恢复旧会话，不是建号，不受影响）。
-    ...(onCanvasEvent ? { onCanvasEvent } : {}),
-    ...(canvasStateProvider ? { canvasStateProvider } : {}),
-  });
+  } = chat;
   // D-26：已经问过锚定的那张图。问过就不再问——同一张图反复弹卡是骚扰。
   const [anchorAskedFor, setAnchorAskedFor] = useState<string | null>(null);
   const [anchorBusy, setAnchorBusy] = useState(false);
@@ -960,7 +963,7 @@ export function AgentChatSurface({
           connection={connection}
           sessionId={sessionId}
           onEnsureSession={ensureSession}
-          onSend={(text) => void send(text)}
+          onSend={(text) => send(text)}
           onConfirm={(requestId, approved) => confirm(requestId, approved)}
           onAnswerQuestion={(requestId, answers) => answerQuestion(requestId, answers)}
           onRetryConnection={() => void retry()}
@@ -975,6 +978,10 @@ export function AgentChatSurface({
           /* D-26：只在助手还在产出时给「停止」——回合已结束时没有东西可停，
              摆一颗停不了任何东西的按钮是假承诺。 */
           onStopGeneration={state.turnActive ? onStopGeneration : undefined}
+          /* 09-18：把 hook 的两个在途镜像接下去——aborting 让停止钮显「正在中止」，
+             startingSession 让空态显「正在建立会话…」并撤掉推荐语。 */
+          stopPending={aborting}
+          sessionStarting={startingSession}
           prefill={prefill}
           onPrefillConsumed={clearPrefill}
           onFirstUserMessage={onUserMessage}

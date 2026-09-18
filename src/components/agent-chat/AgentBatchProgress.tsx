@@ -1,7 +1,7 @@
 "use client";
 
 import { memo } from "react";
-import { Coins, Images, Square } from "lucide-react";
+import { Coins, Images, Loader2, Square } from "lucide-react";
 import type { AgentChatState } from "@/lib/agent-chat-types";
 
 export interface AgentBatchProgressProps {
@@ -18,6 +18,11 @@ export interface AgentBatchProgressProps {
    * 系统层中止：网关 /session/:id/abort 打到 opencode，正在跑的这一轮直接终止。
    */
   onStop?: () => void;
+  /**
+   * 中止请求在飞（hook 的 aborting 镜像）：按钮锁住并明说「正在中止」，
+   * 避免重复点击双发中止。缺席（undefined）时行为与接线前逐位元一致。
+   */
+  stopPending?: boolean;
 }
 
 /**
@@ -40,7 +45,7 @@ function formatCoins(n: number): string {
  * 总数 Y 无法从事件推出时的诚实呈现：只显示「已出 X 张 · 已花 Z 币」，
  * 不假装知道分母，也绝不把未知数显示成 0。
  */
-function AgentBatchProgressComponent({ items, onStop, total }: AgentBatchProgressProps) {
+function AgentBatchProgressComponent({ items, onStop, stopPending = false, total }: AgentBatchProgressProps) {
   let images = 0;
   let coins = 0;
 
@@ -91,11 +96,16 @@ function AgentBatchProgressComponent({ items, onStop, total }: AgentBatchProgres
           <button
             type="button"
             onClick={onStop}
+            disabled={stopPending}
             aria-label="中止助理生成"
-            title="立即中止当前这轮生成"
-            className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-full bg-destructive/[0.09] px-4 text-sm font-semibold text-destructive transition-colors duration-150 active:bg-destructive/[0.16] focus:outline-none focus-visible:ring-2 focus-visible:ring-destructive/30 [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
+            title={stopPending ? "正在中止，请稍候…" : "立即中止当前这轮生成"}
+            className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-full bg-destructive/[0.09] px-4 text-sm font-semibold text-destructive transition-colors duration-150 active:bg-destructive/[0.16] focus:outline-none focus-visible:ring-2 focus-visible:ring-destructive/30 disabled:cursor-wait disabled:opacity-60 [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
           >
-            <Square className="h-3.5 w-3.5" aria-hidden="true" />
+            {stopPending ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+            ) : (
+              <Square className="h-3.5 w-3.5" aria-hidden="true" />
+            )}
             停下
           </button>
         )}

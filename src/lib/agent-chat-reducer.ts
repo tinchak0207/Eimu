@@ -121,8 +121,14 @@ function reduceToolProgress(state: AgentChatState, event: AgentSseEvent & { name
 }
 
 function reduceToolResult(state: AgentChatState, event: AgentSseEvent & { name: "tool.result" }): AgentChatState {
-  const { tool, ok, cost_coins, error } = event.data;
+  const { tool, ok, cost_coins, task_id, artifact_pending, error } = event.data;
   const errText = !ok ? error?.human_message ?? error?.message ?? undefined : undefined;
+  // 终态映射（2026-09-18 契约）：ok + artifact_pending = 任務已提交、成品未到 →
+  // 中继态 pending，绝不报「已完成」；成品/失敗事件到达时由 settlePendingToolItems
+  // 结算成 ok/failed。缺 artifact_pending 的旧格式逐位元照旧走 ok。
+  const status: AgentToolCallItem["status"] = !ok ? "failed" : artifact_pending ? "pending" : "ok";
+  // 卡片上只有 task_id 有值时才写：旧格式不凭空长出 taskId 栏位。
+  const taskPatch = task_id !== undefined ? { taskId: task_id } : {};
   const items = state.items.slice();
   // 找「最近一个同名且还在 running 的工具条目」回填。没有就补一笔
   // 已定案的条目 —— 网关可能因为去重或断线把 invoke 弄丢了。
@@ -137,7 +143,7 @@ function reduceToolResult(state: AgentChatState, event: AgentSseEvent & { name: 
   if (target >= 0) {
     const existing = items[target];
     if (existing.kind === "tool") {
-      items[target] = { ...existing, status: ok ? "ok" : "failed", costCoins: cost_coins, error: errText };
+      items[target] = { ...existing, status, costCoins: cost_coins, error: errText, ...taskPatch };
     }
   } else {
     items.push({
@@ -146,16 +152,57 @@ function reduceToolResult(state: AgentChatState, event: AgentSseEvent & { name: 
       seq: event.event_id,
       tool,
       argsSummary: undefined,
-      status: ok ? "ok" : "failed",
+      status,
       costCoins: cost_coins,
       error: errText,
+      ...taskPatch,
     });
   }
   return { ...state, items, turnActive: true };
 }
 
+/**
+ * 成品／失敗事件到來 → 把對應的 pending 工具卡結算掉（2026-09-18 契約）。
+ *
+ * 匹配優先序：
+ *   1. `taskId === 事件的 task_id` 的精確匹配 —— 同一次提交的任務號對號入座；
+ *   2. 事件沒帶 task_id、或帶了卻找不到對應卡 → 回退結算**最舊的一張** pending 卡
+ *      （FIFO 兜底：寧可早一張結算，也不讓成品已經到了、卡片還在轉）。
+ *
+ * 只碰 status === "pending" 的卡：running 由 tool.result / turn.done 負責，
+ * 已定案的卡絕不被翻案。找不到任何 pending 卡時回傳原陣列（reference 不變，
+ * 呼叫端行為與現狀逐位元一致）。就地不 mutate：變更時回新 slice。
+ */
+function settlePendingToolItems(
+  items: AgentTranscriptItem[],
+  taskId: string | undefined,
+  status: "ok" | "failed",
+  errorText?: string,
+): AgentTranscriptItem[] {
+  let fallback = -1;
+  for (let i = 0; i < items.length; i += 1) {
+    const it = items[i];
+    if (it.kind !== "tool" || it.status !== "pending") continue;
+    if (taskId !== undefined && it.taskId === taskId) {
+      const next = items.slice();
+      next[i] = { ...it, status, ...(errorText !== undefined ? { error: errorText } : {}) };
+      return next;
+    }
+    if (fallback < 0) fallback = i;
+  }
+  if (fallback < 0) return items;
+  const it = items[fallback];
+  if (it.kind !== "tool") return items;
+  const next = items.slice();
+  next[fallback] = { ...it, status, ...(errorText !== undefined ? { error: errorText } : {}) };
+  return next;
+}
+
 function reduceImageDone(state: AgentChatState, event: AgentSseEvent & { name: "image.done" }): AgentChatState {
   const { url, cost_coins, task_id, recipe } = event.data;
+  // 成品到了 = 對應的 pending 工具卡可以結算成 ok。先結算再建出圖卡：
+  // 兩件事互不干擾，出圖卡照舊建／照舊按 url 去重。
+  const items = settlePendingToolItems(state.items, task_id, "ok");
   const exists = state.items.some((it) => it.kind === "image" && it.url === url);
   if (!exists) {
     // seq 是展示序号（锚定文案里的「第 N 张」）：必须是会话内第几张图，
@@ -170,14 +217,16 @@ function reduceImageDone(state: AgentChatState, event: AgentSseEvent & { name: "
       taskId: task_id,
       recipe,
     };
-    return { ...state, items: [...state.items, item], turnActive: true, turnStatus: undefined };
+    return { ...state, items: [...items, item], turnActive: true, turnStatus: undefined };
   }
   // 同 url 已存在：忽略内容，但仍是「助手在产出」的讯号，turnActive 照设。
-  return { ...state, turnActive: true, turnStatus: undefined };
+  return { ...state, items, turnActive: true, turnStatus: undefined };
 }
 
 function reduceVideoDone(state: AgentChatState, event: AgentSseEvent & { name: "video.done" }): AgentChatState {
   const { url, cost_coins, task_id, media_kind } = event.data;
+  // 同 image.done：成品到了先結算對應 pending 卡，出片卡照舊建／照舊去重。
+  const items = settlePendingToolItems(state.items, task_id, "ok");
   const exists = state.items.some((it) => it.kind === "video" && it.url === url);
   if (!exists) {
     // seq 是展示序号：会话内第几条影片，不是网关全局 event_id（同 image.done 的理由）。
@@ -191,14 +240,16 @@ function reduceVideoDone(state: AgentChatState, event: AgentSseEvent & { name: "
       taskId: task_id,
       mediaKind: media_kind,
     };
-    return { ...state, items: [...state.items, item], turnActive: true, turnStatus: undefined };
+    return { ...state, items: [...items, item], turnActive: true, turnStatus: undefined };
   }
   // 同 url 已存在：忽略内容，但仍是「助手在产出」的讯号，turnActive 照设。
-  return { ...state, turnActive: true, turnStatus: undefined };
+  return { ...state, items, turnActive: true, turnStatus: undefined };
 }
 
 function reduceAudioDone(state: AgentChatState, event: AgentSseEvent & { name: "audio.done" }): AgentChatState {
   const { url, cost_coins, task_id, media_kind } = event.data;
+  // 同 image.done：成品到了先結算對應 pending 卡，出音頻卡照舊建／照舊去重。
+  const items = settlePendingToolItems(state.items, task_id, "ok");
   const exists = state.items.some((it) => it.kind === "audio" && it.url === url);
   if (!exists) {
     // seq 是展示序号：会话内第几条音频，不是网关全局 event_id（同 image.done 的理由）。
@@ -212,10 +263,10 @@ function reduceAudioDone(state: AgentChatState, event: AgentSseEvent & { name: "
       taskId: task_id,
       mediaKind: media_kind,
     };
-    return { ...state, items: [...state.items, item], turnActive: true, turnStatus: undefined };
+    return { ...state, items: [...items, item], turnActive: true, turnStatus: undefined };
   }
   // 同 url 已存在：忽略内容，但仍是「助手在产出」的讯号，turnActive 照设。
-  return { ...state, turnActive: true, turnStatus: undefined };
+  return { ...state, items, turnActive: true, turnStatus: undefined };
 }
 
 /**
@@ -274,7 +325,11 @@ function reduceDirectorDone(state: AgentChatState, event: AgentSseEvent & { name
 
 function reduceImageFailed(state: AgentChatState, event: AgentSseEvent & { name: "image.failed" }): AgentChatState {  // 失败也进对话流（与 image.done 对称）：用户在聊天里直接看到「没排上队，
   // 费用已退回」，不依赖画布节点才知道发生了什么。
-  const { reason, refunded } = event.data;
+  const { task_id, reason, refunded, human_message } = event.data;
+  // 失败事件 = 提交出去的那张卡可以判死了（原本只会留一条 notice，卡片会
+  // 一直停在「生成中…」）。精确配不到 task_id 时由 settler 按序兜底配对。
+  // human_message 有值就顺手填进卡片的 error（G-FE 合同：中文短句优先）。
+  const items = settlePendingToolItems(state.items, task_id, "failed", human_message);
   const text = refunded ? `这张图没排上队，费用已退回${reason ? `（${reason}）` : ""}。` : `这张图生成失败${reason ? `（${reason}）` : ""}。`;
   const notice: AgentNoticeItem = {
     kind: "notice",
@@ -283,7 +338,7 @@ function reduceImageFailed(state: AgentChatState, event: AgentSseEvent & { name:
     tone: "error",
     text,
   };
-  return { ...state, items: [...state.items, notice], turnActive: true, turnStatus: undefined };
+  return { ...state, items: [...items, notice], turnActive: true, turnStatus: undefined };
 }
 
 /**
@@ -483,6 +538,11 @@ function retireSubagentItems(items: AgentTranscriptItem[]): AgentTranscriptItem[
  * 用 for 循环而非 map，是为了让每个分支都有确定性别（map 的回传类型会被
  * 宽化成 status: string），assignment 到 AgentTranscriptItem[] 也能给字面类型
  * 正确的 context。
+ *
+ * `pending`（2026-09-18 中继态）**不在这里判死**：turn 结束只代表这一轮助手文本
+ * 说完了，不代表成品到了 —— 提交型生图/生片工具的任務此刻仍在上游跑，成品
+ * （image/video/audio.done）或失敗（image.failed）事件可能落在下一轮里。判死它
+ * 就是谎报失败，所以 pending 必须留着等那两类事件结算。
  */
 function settleItems(items: AgentTranscriptItem[]): AgentTranscriptItem[] {
   const next: AgentTranscriptItem[] = new Array(items.length);

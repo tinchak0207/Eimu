@@ -30,7 +30,12 @@ import {
 export interface AgentComposerProps {
   /** 为 true 时（disabled 属性或会话已关闭）整个输入区禁用。 */
   disabled: boolean;
-  onSend: (text: string) => void;
+  /**
+   * 送出回调。允许返回 promise：真正的投递（跨网关往返，空态还要先建号+铸票）
+   * 耗时可见，composer 靠它把「已按下」的进行中态维持到投递落地，
+   * 期间送出钮换 spinner 并用 ref 挡连点。返回 void 时按立即完成处理。
+   */
+  onSend: (text: string) => void | Promise<void>;
   placeholder?: string;
   /** 上传附件所需的目标会话 id；空态未建号时由 onEnsureSession lazy 建号。 */
   sessionId?: string | null;
@@ -52,6 +57,22 @@ export interface AgentComposerProps {
    * 两条语义不打架。缺省 = 没有可停的回合，渲染完全不变。
    */
   onStop?: () => void;
+  /**
+   * 中止请求在飞（网络往返未回来的镜像）。为真时停止钮禁用 + 换 spinner，
+   * 用户得到「按下了」的反馈且不能连按。缺省 false = 行为与不传时逐位元一致。
+   */
+  stopPending?: boolean;
+  /**
+   * 外部（面板）在途：这条送出还没落地，或本輪还没真正开始——空態首發要先建號
+   * 鑄票，網關還要把 prompt 送進 opencode 才回 ack（实測 10–15s）。
+   *
+   * 为真时送出钮位置立刻进入在途态：转圈、不可再点，输入框空白时也一样是转圈
+   * 送出钮（不是 disabled 灰钮），并且压过「输入框空 → 停止钮」那条替换语义。
+   * 「本輪尚未开始」的单一真相源在 AgentChatPanel（它同时知道 turnActive 与
+   * onSend 的 promise），这里只负责渲染，不自己猜。缺省 false = 行为与不传时
+   * 逐位元一致。
+   */
+  externalSendPending?: boolean;
 }
 
 /** 允许选择的文件类型；列表与网关约定一致，避免上传后无法解析的格式。 */
@@ -92,6 +113,15 @@ const MAX_FILE_BYTES = 4 * 1024 * 1024;
 function formatMb(bytes: number): string {
   return (Math.round((bytes / (1024 * 1024)) * 10) / 10).toFixed(1);
 }
+
+/**
+ * 送出锁的硬保险上限（20s）。relay 路径的 fetch 没有 timeout，请求卡死时
+ * 不能把送出钮永久锁死——到点无条件解锁，宁可让用户重试也不做假死按钮。
+ *
+ * 2026-09-18 起面板层（AgentChatPanel 的「本輪還沒开始」在途态）沿用同一个值，
+ * 两处寿命一致：这里锁的是输入区自己的投递，那边锁的是面板在等的本輪开始。
+ */
+export const SEND_HARD_TIMEOUT_MS = 20_000;
 
 interface PendingAttachment {
   id: string;
@@ -155,6 +185,21 @@ export function computeCanSend(
   return (Boolean(trimmedText) || readyRefCount > 0) && !hasPendingAttachments(attachments);
 }
 
+/**
+ * 「在途」的下一个值（纯函数，可直测）。内部送出锁或面板餵進來的在途任一为真
+ * 就是在途；两边都放下才真的放下（面板收了在途、但输入区自己的投递还在飞，
+ * 仍然是在途）。回传 null ＝与当前值相同、不必动——render 期收敛靠这个 bail out，
+ * 不然每次渲染都要多跑一轮。
+ */
+export function nextSendBusy(
+  current: boolean,
+  internalSendInFlight: boolean,
+  externalSendPending: boolean,
+): boolean | null {
+  const next = internalSendInFlight || externalSendPending;
+  return next === current ? null : next;
+}
+
 let attachmentSeq = 0;
 
 function AgentComposerComponent({
@@ -166,9 +211,20 @@ function AgentComposerComponent({
   prefill,
   onPrefillConsumed,
   onStop,
+  stopPending = false,
+  externalSendPending = false,
 }: AgentComposerProps) {
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  // 送出进行中：钉住 spinner 到投递落地（onSend 的 promise 结算或硬保险到点）。
+  const [sending, setSending] = useState(false);
+  /**
+   * 送出锁的同步镜像。连点发生在两次 re-render 之间时 state 还是旧值，
+   * 只有 ref 能在同一帧里挡住第二次送出（否则 = 两条消息 + 两次计费）。
+   */
+  const sendingRef = useRef(false);
+  /** 硬保险计时器句柄；解锁时清掉，避免悬空 setTimeout 反复 setState。 */
+  const sendUnlockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // 键盘规避：composer 根元素需要被抬升/复位，所以给它一个 ref。
@@ -327,10 +383,41 @@ function AgentComposerComponent({
   // patchAttachment 静默 no-op，等同于用户数据丢失）。
   const canSend = computeCanSend(trimmed, readyRefs.length, attachments);
 
+  /*
+   * 09-18「在途」的单一收敛点：输入区自己的送出锁（sendingRef）与面板餵進來的
+   * 在途（externalSendPending）合成同一个 sending——aria-busy={sending} 与
+   * 「在途就转圈」这组既有契约（另一条测试线钉着字面）在面板在途期间也必须为真。
+   *
+   * 为什么是 render 期调整而不是 useEffect：effect 在静态渲染（SSR）里根本不跑，
+   * 靠它会让「面板在途」的第一帧 aria-busy 缺位。这是 React 官方「prop 变了就
+   * 把 state 收敛」的模式（render 期 setState 会被立刻合并进同一帧，不闪中间态）。
+   */
+  const nextBusy = nextSendBusy(sending, sendingRef.current, externalSendPending);
+  if (nextBusy !== null) setSending(nextBusy);
+
+  /**
+   * 幂等解锁：ref 与 state 一起清，并清掉硬保险计时器。
+   * 三条路径都会调它（promise 结算 / 硬保险到点 / onSend 同步 throw），
+   * 所以必须能重复调用而不出错。
+   */
+  const unlockSend = useCallback(() => {
+    if (sendUnlockTimerRef.current !== null) {
+      clearTimeout(sendUnlockTimerRef.current);
+      sendUnlockTimerRef.current = null;
+    }
+    sendingRef.current = false;
+    setSending(false);
+  }, []);
+
   // 组装最终文本：附加 [附件] 区块（只纳入已传成功的），然后交给 onSend。
   // 影片一条 chip 展开成 4 行（4 张帧各自一个 path），编号连续。
   // 纯附件发送（空文本）：只发附件区块，不带前导换行。
   const handleSend = useCallback(() => {
+    // 同步连点守卫：同一帧内第二次点击时 sending 还是旧值，只有 ref 挡得住。
+    if (sendingRef.current) return;
+    // 09-18：面板餵進來的在途同样要挡——Enter 这条入口不吃 disabled 属性，
+    // 空態併發 send 是已记录的竞态（两条消息、两次计费）。
+    if (externalSendPending) return;
     if (!canSend) return;
     // 快照「本次实际发出去」的附件：canSend 已挡掉 uploading/extracting，
     // 正常情况下这就等于当前 attachments 全量；仍按 id 过滤只清掉这些，
@@ -342,7 +429,24 @@ function AgentComposerComponent({
         ? `${trimmed}\n${buildAttachmentBlock(readyRefs)}`
         : trimmed
       : buildAttachmentBlock(readyRefs).replace(/^\n+/, "");
-    onSend(finalText);
+    // 通过资格检查后立刻上锁，不等 re-render。
+    sendingRef.current = true;
+    setSending(true);
+    sendUnlockTimerRef.current = setTimeout(unlockSend, SEND_HARD_TIMEOUT_MS);
+    try {
+      // 统一成 promise：void 回调走 resolved 分支，finally 立刻解锁。
+      // catch 吞掉错误——用户可见的错误提示由 hook 的 notice 负责，
+      // 这里只负责别留 unhandled rejection，并把锁放掉。
+      Promise.resolve(onSend(finalText))
+        .catch(() => {})
+        .finally(unlockSend);
+    } catch {
+      // onSend 同步 throw（不是返回 rejected promise）＝ 这条消息根本没送出去：
+      // 解锁后直接返回，不清输入框、不释放附件——吃掉使用者的话且没人接手
+      // 比留一个可重试的框更糟。
+      unlockSend();
+      return;
+    }
     setText("");
     // 清空文字后高度要跟着收回来，否则空框还占着刚才那几行。
     if (textareaRef.current) {
@@ -352,7 +456,7 @@ function AgentComposerComponent({
     const sentIds = new Set(sentAttachments.map((a) => a.id));
     sentAttachments.forEach(releaseUrls);
     setAttachments((prev) => prev.filter((a) => !sentIds.has(a.id)));
-  }, [canSend, trimmed, readyRefs, onSend, attachments]);
+  }, [canSend, trimmed, readyRefs, onSend, attachments, unlockSend, externalSendPending]);
 
   /**
    * D-24：把半句话接进输入框并把光标放到末尾——用户下一个动作就是继续打字。
@@ -391,6 +495,16 @@ function AgentComposerComponent({
   useEffect(() => {
     return () => {
       attachmentsRef.current.forEach(releaseUrls);
+    };
+  }, []);
+
+  // 卸载时清掉硬保险计时器：面板关掉后不该还有 setTimeout 攥着 setState。
+  useEffect(() => {
+    return () => {
+      if (sendUnlockTimerRef.current !== null) {
+        clearTimeout(sendUnlockTimerRef.current);
+        sendUnlockTimerRef.current = null;
+      }
     };
   }, []);
 
@@ -447,6 +561,11 @@ function AgentComposerComponent({
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
       // Enter 发送，Shift+Enter 换行。
       if (event.key === "Enter" && !event.shiftKey) {
+        // 输入法组字中的 Enter 属于输入法（确认候选词），不是送出指令。
+        // 必须在 preventDefault 之前返回：对组字中的 Enter 调用 preventDefault
+        // 会让部分浏览器吃不到候选词确认，变成「按了 Enter 字不见」。
+        // keyCode 229 是旧式 IME 的残留判定（Android/部分输入法不补 isComposing）。
+        if (event.nativeEvent.isComposing || event.keyCode === 229) return;
         event.preventDefault();
         if (!canSend) return;
         handleSend();
@@ -683,7 +802,7 @@ function AgentComposerComponent({
         />
       </div>
 
-      {onStop && !canSend ? (
+      {onStop && !canSend && !sending ? (
         /*
           D-26 补全：生成中且输入框为空 → 送出钮位置渲染停止钮。
           样式逐行复用 AgentBatchProgress 的「停下」钮（Square 图标 +
@@ -692,15 +811,27 @@ function AgentComposerComponent({
           只改两处：外框换成与送出钮完全同尺寸的圆钮（h-11 w-11
           sm:h-8 sm:w-8 rounded-full，切换零跳动）；去掉文字（圆钮放不下），
           aria-label 与 title 原样保留。
+
+          09-18：再补一个条件 !sending —— 本輪還沒开始（含面板餵進來的在途，
+          sending 已收敛成「内部或面板在途」）时不许被停止钮盖掉：那一段真空期
+          使用者需要的是「正在送」的转圈钮，不是一颗按下去可能没东西可停的停止钮。
         */
         <button
           type="button"
           onClick={onStop}
+          disabled={stopPending}
           aria-label="中止助理生成"
-          title="立即中止当前这轮生成"
-          className="flex h-11 w-11 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-full bg-destructive/[0.09] text-destructive transition-colors duration-150 active:bg-destructive/[0.16] focus:outline-none focus-visible:ring-2 focus-visible:ring-destructive/30 [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
+          title={stopPending ? "正在中止，请稍候…" : "立即中止当前这轮生成"}
+          className={cn(
+            "flex h-11 w-11 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-full bg-destructive/[0.09] text-destructive transition-colors duration-150 active:bg-destructive/[0.16] focus:outline-none focus-visible:ring-2 focus-visible:ring-destructive/30 [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]",
+            stopPending && "disabled:cursor-wait disabled:opacity-60",
+          )}
         >
-          <Square className="h-3.5 w-3.5" aria-hidden="true" />
+          {stopPending ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+          ) : (
+            <Square className="h-3.5 w-3.5" aria-hidden="true" />
+          )}
         </button>
       ) : (
         <button
@@ -708,16 +839,27 @@ function AgentComposerComponent({
           onClick={handleSend}
           disabled={disabled || !canSend}
           aria-label="发送"
+          aria-busy={sending}
           className={cn(
             "flex h-11 w-11 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-full transition-all duration-200",
             "touch-manipulation [-webkit-tap-highlight-color:transparent]",
             "bg-ios-blue text-white shadow-[0_2px_8px_rgba(0,122,255,0.32)]",
             "hover:opacity-90 active:scale-[0.94]",
             "focus:outline-none focus:ring-2 focus:ring-ios-blue/40",
-            "disabled:cursor-not-allowed disabled:bg-[rgba(120,120,128,0.18)] disabled:text-white/80 disabled:shadow-none",
+            // 在途期间不上 disabled 的灰階：在途是「正在送」不是「不可用」，
+            // 白转圈压在浅灰底上等于没有回馈（蓝底＋白转圈才看得见）。
+            // 非在途时 disabled 样式逐位元照旧（会话关闭 / 输入框空）。
+            !sending &&
+              "disabled:cursor-not-allowed disabled:bg-[rgba(120,120,128,0.18)] disabled:text-white/80 disabled:shadow-none",
+            // 送出进行中：光标与缩放反馈都收掉，连点由 sendingRef 在逻辑层挡。
+            sending && "cursor-wait active:scale-100",
           )}
         >
-          <Send className="h-5 w-5" aria-hidden="true" />
+          {sending ? (
+            <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
+          ) : (
+            <Send className="h-5 w-5" aria-hidden="true" />
+          )}
         </button>
       )}
     </div>
