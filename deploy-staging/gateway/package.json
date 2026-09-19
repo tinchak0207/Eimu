@@ -1,0 +1,13 @@
+{
+  "name": "agent-gateway",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "bun run index.ts"
+  },
+  "dependencies": {
+    "nanoid": "^3"
+  },
+  "devDependencies": {
+    "bun-types": "^1.4.2"
+  }
+}

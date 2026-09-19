@@ -73,6 +73,14 @@ import {
   renderRecallPrefix,
   type RecallableDoc,
 } from "./memory-recall"
+import { sleep, jsonError, getBearer } from "./gw-lib.ts"
+import type { MemoryDocLite, PendingQuestion, SessionState, SSEClient, TurnMetricsEnd, TurnMetricsSnapshot } from "./types-gateway.ts"
+import { ACK_DELAY_MS, ALLOWED_UPLOAD_EXTS, CONFIRM_RESOLVED_TTL_MS, CONFIRM_THRESHOLD_COINS, CONFIRM_TIMEOUT_MS, HEARTBEAT_DELAY_AFTER_ACK_MS, HEARTBEAT_DELAY_MS, HEARTBEAT_INTERVAL_MS, IDLE_STEP_ABORT_THRESHOLD, IDLE_STEP_NUDGE, IMAGE_URL_DEDUP_CAP, KEY_CACHE_TTL_MS, LEDGER_PATH, MEMORY_BATCH_ENABLED, MEMORY_BATCH_HOUR_UTC, MEMORY_INGEST_BASE_URL, MEMORY_INGEST_SECRET, MEMORY_ORACLE_MODEL, MEMORY_RECALL_ENABLED, MEMORY_RECALL_MIN_SCORE, MEMORY_SHARED_ENABLED, MEMORY_VERIFIER_MODEL, MESSAGE_ROLE_CAP, MIDTURN_STALL_MS, OPENCODE_PASSWORD, OPENCODE_URL, PART_TEXT_TRACK_CAP, PLATFORM_BASE, PORT, QUESTION_ASSUME_MS, QUESTION_HEARTBEAT_MS, QUIET_NOTICE_MS, QUOTA_URL, REPLAY_BUFFER_SIZE, SESSION_IDLE_TTL_MS, SESSION_REAP_INTERVAL_MS, SESSION_SWEEP_DAYS, STEP_COST_LOG_CAP, SUPPRESSED_PART_CAP, SYSTEM_PAYLOAD_TAIL_DEDUPE, TOOL_STATUS_DEDUP_CAP, TTS_AUDIO_DIR, TTS_PUBLIC_BASE, TURN_ERROR_WATCHDOG_MS, TURN_MAX_RETRIES, TURN_PLAN_DISABLE_THINKING, TURN_PLAN_ENABLED, TURN_PLAN_MAX_CANDIDATES, TURN_PLAN_MAX_CHARS, TURN_PLAN_MAX_TOKENS, TURN_PLAN_SYSTEM_HEAD, TURN_PLAN_TIMEOUT_MS, TURN_RETRY_DELAY_MS, TURN_WATCHDOG_MS, UPLOAD_MAX_BYTES, UPLOADS_DIR, VIDEO_UPLOAD_EXTS, VIDEO_UPLOAD_MAX_BYTES, WORKSPACE_DIR } from "./constants-gateway.ts"
+import { catalogUnitCoins, estimateNodeCoins, priceCatalogCache, resolveNodeModel, videoTierPerSecondSync } from "./pricing-gateway.ts"
+import { handleGetSession, handleGetSessionMessages, normalizeUserSettings, personaPatienceMul, PROFILE_ONBOARDING_DIRECTIVE, USER_SETTINGS_ENUMS } from "./sessions-http.ts"
+import type { UserSettingsShape } from "./sessions-http.ts"
+import { applyCanvasNodeConnected, applyCanvasNodeCreated, applyCanvasNodeUpdated, canvasStates, handleCanvasSnapshotRead, handleCanvasStateWrite } from "./canvas-cascade-state.ts"
+import { handleCanvasDispatchOps, handleCanvasOpsResultInternal, handleCanvasOpsResultPublic, handleCanvasStatePublic, handleCanvasStatePublicGet, handleConfirmRequest, handleInternalEmit, handleMediaUpload, handleTts, probeTtsUpstream, settleConfirm, TTS_UPSTREAM } from "./media-internal-routes.ts"
 
 /**
  * agent-gateway — Bun TypeScript gateway between frontend clients and opencode serve.
@@ -92,687 +100,7 @@ import {
 // not match the wire format and is now dead. Translation uses `any`-shaped
 // objects with safe optional access instead.
 
-interface PendingConfirm {
-  timer: ReturnType<typeof setTimeout>
-  ledger?: { amount_coins: number; task_id?: string; model?: string }
-}
 
-interface PendingQuestion {
-  requestId: string
-  callId: string
-  questions: Array<{
-    question: string
-    header?: string
-    options: Array<{ label: string; description?: string }>
-  }>
-}
-
-// Outcome of a confirm that is no longer pending. Kept around deliberately:
-// the tool polls for the answer, so if a resolved request vanished from memory
-// the poller's next tick would see "unknown" and read it as a denial —
-// silently cancelling work the user had already approved.
-type ConfirmOutcome = "approved" | "denied" | "expired"
-
-interface ResolvedConfirm {
-  outcome: ConfirmOutcome
-  resolvedAt: number
-}
-
-interface SSEClient {
-  controller: ReadableStreamDefaultController<Uint8Array>
-}
-
-/** 契約 §4 memory_docs 元素：AgentMemoryDoc 駝峰原樣的注入必需子集（repo 直送，欄位防呆讀取）。 */
-interface MemoryDocLite {
-  id?: string
-  domain?: string
-  slug?: string
-  description?: string
-  body?: string
-  [k: string]: unknown
-}
-
-interface SessionState {
-  sessionId: string
-  apiKey: string
-  opencodeSessionId: string
-  clients: Set<SSEClient>
-  pendingConfirms: Map<string, PendingConfirm>
-  pendingQuestions: Map<string, PendingQuestion>
-  resolvedConfirms: Map<string, ResolvedConfirm>
-  eventCounter: number
-  replayBuffer: { id: number; frame: Uint8Array }[]
-  // Touched by every lookup and every emitted event; drives the idle reaper.
-  lastActivityAt: number
-  // Per-session translation state for the /event fan-out. All bounded below.
-  partTextEmitted: Map<string, { emittedLen: number }>
-  // S2b（2026-08-27）：出站文本內部框架段剝離器的逐 part 狀態
-  //（pending = 扣住的未完成行；suppress = 正處於內部段中）。生命週期同
-  // partTextEmitted：session.idle 時 flush 並清空。
-  partStripState: Map<string, { pending: string; suppress: boolean }>
-  announcedUrls: Set<string>
-  toolStatusSeen: Set<string>
-  toolInvokeSeen: Set<string>
-  stepCostLogged: Set<string>
-  messageRole: Map<string, string>
-  suppressedParts: Set<string>
-  // 畫布摘要：前端每次發訊息時上送的最新畫布狀態（節點/連線/預算），
-  // 供前端接續畫布/稽核用。deepseek 不讀這個——它完全不知道畫布存在。
-  canvasSummary?: unknown
-  canvasSummaryAt?: number
-  // 畫布持久快照（2026-08-27）：canvas.node.* 事件套用後的完整節點/連線狀態。
-  // 隨 session 防抖落盤；重啟懶加載時回灌 canvasStates，支撐 /internal/canvas/snapshot。
-  canvasSnapshot?: { nodes?: unknown[]; connections?: unknown[]; [k: string]: unknown }
-  // 工作流持久快照（2026-08-27，與 canvasSnapshot 同構）：workflow 狀態變更時
-  // 由 WorkflowService.onDirty 鏡像進 session（防抖落盤）；重啟懶加載時回灌
-  // workflowService 的 workflows Map——畫布能恢復、工作流也能，行為一致。
-  workflowSnapshot?: Record<string, unknown>
-  // 自動製畫布：opencode image_* 工具的活躍單元追蹤。
-  // deepseek 只提交生圖/改圖請求，gateway 攔截其參數自動建畫布：
-  //   工具 callID → 畫布單元 id（running 階段建立）
-  //   task_id    → 畫布單元 id（submit 完成後掛取，供完成事件關聯）
-  canvasUnitByCall: Map<string, string>
-  canvasUnitByTask: Map<string, string>
-  // 0831：本輪生成任務登記（權威 task_id 來源，供 /internal/session-tasks 讀）。
-  sessionTasks: Map<string, { task_id: string; label?: string; status: string; url?: string; submitted_at: number }>
-  // 意圖審查政策只在 session 首次 send 時注入（system 欄位），之後不再重複，
-  // 避免每次訊息都帶同一段 system 造成 token 膨脹。
-  // D1 修復（2026-09-15 PRD P0-4）：本旗標同時是 L0/L1 記憶塊的注入閘——
-  // memory-patch 到達時重置為 false，下一回合按最新記憶重建 system。
-  // 原 memoryInjected「死旗標」（只寫不讀、真閘是這裡）已從型別與全部寫入點移除。
-  vettingInjected: boolean
-  // L0 账户级记忆：本站会话创建时上送的 user_profile + lessons，加上 2026-09-15
-  // 契約 §4 擴充的 memory_docs（私有 active docs ≤8）與 memory_index_md（共享索引行）。
-  // 首条消息时拼进 system 注入，之后不再重复，避免 token 膨胀。
-  // 兩個新欄位是 userMemory 物件內的額外鍵：persistence 白名單整包透傳 userMemory，
-  // 重啟 revive 不丟（memoryInjected 欄位刪除對 persistence 亦無感）。
-  userMemory?: {
-    user_profile: Record<string, unknown>
-    lessons: string[]
-    /** 契約 §1 AgentMemoryDoc 的駝峰原樣子集（repo payload 直送）。 */
-    memory_docs?: MemoryDocLite[]
-    /** 契約 §4 L1 共享索引行（≤800 字元）。 */
-    memory_index_md?: string
-  }
-  /** 賬戶無畫像：開場用選擇題採集（question 工具）。 */
-  profileOnboardingPending: boolean
-  // 2026-08-25 模板隱形注入：站點點模板卡時上送的引導指示，隨首條訊息 system 注入。
-  // 不進 transcript、用戶不可見；注入一次即棄（directiveInjected），換模板可覆蓋重注。
-  sessionDirective?: string
-  directiveInjected?: boolean
-  // ── 0918 前綴快取修復：尾端注入 payload 的去重指紋（volatile，不持久化）──
-  /** 上一次注入到「該輪 user 訊息尾端」的 gateway payload 的 sha256（見
-   *  handleSendMessage 的「野獸幀改附尾端」段與 appendSystemPayloadToTurnTail）。
-   *  同 byte 不重貼（內容已在歷史中，資訊量不變）→ context 不再每輪固定長
-   *  17.2k 字元。volatile：重啟後首輪必重貼一次；壓縮成功後清空（摘要會改寫
-   *  歷史，尾端 payload 可能被排除出上下文）。 */
-  lastTailPayloadHash?: string
-  // 滾動摘要壓縮水位：上次 opencode summarize 後的訊息數與時間（持久化）。
-  // 觸發條件 = 訊息數 ≥ SESSION_COMPACT_THRESHOLD 且自上次壓縮新增 ≥ 半個閾值。
-  compact?: { lastCount: number; at: number }
-  // ── PRD P0-4（2026-09-15）記憶 trace 與召回輔助（皆 volatile，不入持久化白名單）──
-  /** §3.6 形狀：注入trace，供 GET /agent/v1/sessions/:id/memory-trace（R2 尺觀測點）。
-   *  重啟即丟屬已知限制（持久化白名單在 persistence.ts，非本片工作對象）。 */
-  memoryTrace?: {
-    private_docs: string[]
-    shared_recalled: string[]
-    shared_index_chars: number
-    injected_at: string
-  }
-  /** §7 召回 query 的「上一輪 assistant 文本」：只留前 200 字元，turn 起點重置。 */
-  turnAssistantHead?: string
-  // ── 刀 2（2026-09-15）：機器 critic pass 的逃生閥掃描（皆 volatile，不持久化）──
-  /** 本輪 assistant 正文的尾巴（32 字元滾動窗）：跨 chunk 邊界偵測「未經獨立審核」聲明。 */
-  criticEscapeTail?: string
-  /** 本輪正文已出現「未經獨立審核」自簽聲明 → 機器 critic pass 讓位（逃生閥）。 */
-  criticUnreviewedDeclared?: boolean
-  // 抖動重試（2026-08-22）：turn 結束但零文本輸出 = 上游模型抖動死亡的特徵，
-  // gateway 自動重發同一條 prompt（上限 TURN_MAX_RETRIES）。volatile，不持久化；
-  // revive 後為 undefined，讀取處一律帶 ?? 預設值。
-  lastPromptBody?: { parts: { type: string; text: string }[]; system?: string; model?: { providerID: string; modelID: string } } | null
-  // 修復1（2026-09-19 cn:deepseek-v4.1-flash 死鏈事故）：本輪「實際 dispatch 出去」
-  // 的模型（prompt 首投與 failover/jitter 重投都更新）。volatile。降權判定必須用它——
-  // lastPromptBody.model 是 turn 起點模型，failover 換模後不回寫，用舊值會把死帳戶
-  // 的錯誤記到無辜 provider 頭上（事故實錘：chaozhiyuan 403 五次誤標 hublinuxdo）。
-  lastDispatchedModel?: { providerID: string; modelID: string } | null
-  turnGen?: number
-  turnTextChars?: number
-  // 罪狀2 根因修復（2026-08-29）：思維鏈字數。模型推理期間 reasoning.delta
-  // 持續到達，此前不計入任何活動判定 → ack/心跳/看門狗/停滯哨在思考期誤判死寂。
-  // 與 turnTextChars 同點重置；只進 turnHasActivity，不進零文本抖動重試判定。
-  turnReasoningChars?: number
-  // 刀 1（2026-09-19）：Jev 測謊閘餵料（volatile，與 criticEscapeTail 同款生命週期）。
-  // jevBriefTail＝本輪 message.delta 累積尾段（測謊題的 brief）；jevGateSummaries＝
-  // 本輪子代理喚醒摘要頭（含【交付閘門·未達標】標記的事實面）。session.idle 收盤
-  // 消費後清空。
-  jevBriefTail?: string
-  jevGateSummaries?: string[]
-  turnRetries?: number
-  turnAborted?: boolean
-  retryQueued?: boolean
-  // ── P2b（2026-09-11）：空轉止損（全部 volatile，不持久化）──
-  /** 本 turn 連續空 step 計數。 */
-  idleSteps?: number
-  /** 當前是否處於一個未收尾的 step（step-start 置位 / step-finish 清位）。 */
-  stepOpen?: boolean
-  /** 當前 step 是否出現過 tool part。 */
-  stepHasTool?: boolean
-  /** 當前 step 是否出現過非空正文 text part。 */
-  stepHasText?: boolean
-  /** 當前 step 是否出現過非空（trim 後）reasoning 文字。 */
-  stepHasReasoning?: boolean
-  /** 本 turn 是否已因空轉中止並補發動作導向提示（同 turn 僅一次）。 */
-  idleNudgeSent?: boolean
-  // 2026-08-31 failover：本轮上游模型错误原文（非 tool_error/非 Aborted）。
-  // emitSessionError 记入，turn 起点清空；idle 收尾时非空即接管换模重试
-  //（jitter 只管零正文轮，mid-turn 断线此前无人接手）。volatile，不持久化。
-  turnUpstreamError?: string | null
-  // ── N1（2026-08-27）：死寂窗口補口 ─────────────────────────────
-  // 規格1：30s 心跳提示（「模型在憋大招」，與 S6 ack 的「收到」錯峰）。
-  // 每 turn 最多 1 條，volatile。
-  heartbeatSent?: boolean
-  heartbeatTimer?: ReturnType<typeof setTimeout> | null
-  // 規格3：重啟斬 turn 重投——turn 開始時打點（持久化，重啟後判斷
-  // 「重啟前是否有 in-flight turn」的唯一依據；turn 正常結束（idle 正常路徑
-  // 發出 turn.done）時清零）。持久化欄位 → persistence.ts 需同步。
-  lastTurnActiveAt?: number
-  // ── S6（2026-08-27）：異步心跳匯報制 ─────────────────────────────
-  // 規格2：用戶消息 30s ack。prompt_async 送達後啟動 timer；30s 內 turn
-  // 沒產出任何文本 delta（turnTextChars 停 0）就先發一條短 ack。volatile。
-  ackTimer?: ReturnType<typeof setTimeout> | null
-  ackSent?: boolean
-  // ── R2-A（2026-08-27）：turn 啟動看門狗 ──────────────────────────
-  // 用戶消息送達後 turn 必須「動起來」（tool.invoke 或 message.delta 二選一）。
-  // 評測實錘：壓縮後的長會話 prompt_async 202 但 turn 永不啟動，上游連
-  // session.idle 都不發——抖動重試（只掛在 idle 上）永遠等不到。看門狗以
-  // 「turn 有無動靜」為準，覆蓋 idle 永不到達的死亡路徑。volatile。
-  watchdogTimer?: ReturnType<typeof setTimeout> | null
-  /** 本輪 turn 是否出現過 tool.invoke（handleToolPartUpdate 置位）。volatile。 */
-  turnToolStarted?: boolean
-  /** 看門狗是否已重投過一次（只重投一次，防風暴）。volatile。 */
-  watchdogRetried?: boolean
-  /** 修 1（2026-09-01）：watchdog 已宣告死亡（道歉 + turn.done）。volatile。
-   *  置位後若內容幀仍到達（重投 retry 開始產出 = 殭屍还魂），emitToSession
-   *  統一通道會先發一條一次性撤回幀（「後端無響應是誤判」）再放行內容幀，
-   *  用戶不再看到「宣告死亡 + 靜默还魂」並存。新 turn 起點（發消息/resume）
-   *  與撤回發出時清位。 */
-  deathDeclared?: boolean
-  // ── R5-C（2026-08-28）：中段停滯哨 + 恢復輪標記（全部 volatile）──
-  /** turn 內最後一次任意幀打點（emitToSession 全量刷新），中段凍結判定依據。 */
-  turnLastFrameAt?: number
-  /** 中段停滯哨 timer。volatile。 */
-  midturnStallTimer?: ReturnType<typeof setTimeout> | null
-  /** 中段停滯哨是否已重投過一次（防風暴，每 turn 一次）。volatile。 */
-  midturnStallRetried?: boolean
-  /** 本輪是否為恢復輪（watchdog 重投/redrive/中段哨重投）——收尾兜底結語用。 */
-  recoveryRound?: boolean
-  // ── R4-A（2026-08-28）：三死線修復的新增狀態（全部 volatile，不進持久化白名單）──
-  // S3①：上游錯誤後停滯看門狗。emitSessionError 布哨、session.idle 撤哨。
-  errorStallTimer?: ReturnType<typeof setTimeout> | null
-  /** S3①：錯誤後告警幀是否已發（每 turn 一條，防刷屏）。 */
-  errorStallAlerted?: boolean
-  /** 修復2（2026-09-19）：S3① 誠實收尾冪等——記「已收尾的 turnGen」。連續兩個
-   *  session.idle 都過終局門時只收尾一次（journal 成對 warn 實錘：message.delta＋
-   *  turn.done 各發兩次）。存 gen 而非 boolean：跨 turn（含 resume/wake 輪）自然
-   *  失效，不需各 turn 起點重置，也不會誤吞下一輪收尾。volatile。 */
-  turnExhaustedClosedGen?: number
-  /** 修復3a（2026-09-19）：本 turn 已發出的錯誤幀文案（humanize 後）清單——
-   *  emitSessionError 同文去重用；turn 起點清空。volatile，有界＝TURN_MAX_RETRIES
-   *  ＋少數非重試錯誤，設上限 32 防呆。 */
-  turnEmittedErrors?: string[]
-  /** S3①：turn 內最後一次進度打點（message.delta / tool 幀刷新），停滯判定依據。 */
-  turnProgressAt?: number
-  /** S1：本 turn 是否已發過「英文內部思考已略去」提示（每 turn 一條）。 */
-  englishNoticeSent?: boolean
-  /** S8：本 turn 內到達終態的節點清單（id+status 去重，上限 64）。 */
-  turnTerminalNodes?: { id: string; status: string }[]
-  /** S8：本 turn 是否已發過任何主動匯報幀（emitAgentNotice 置位）。 */
-  turnNoticeSent?: boolean
-  /** S3②：重啟恢復時暫存的中斷告知——恢復瞬間常無 SSE 客戶端，等接入時補投。 */
-  pendingRestoreNotice?: { text: string; at: number }
-  // 規格3：質詢期間凍結大額自動開跑。最後一條用戶消息命中質詢樣式且
-  // assistant 尚未回覆（turn 未結束）期間，視頻類 workflow generate 掛起。
-  // volatile；pendingVideoWorkflows 記錄被凍結的 workflowId（回覆完成後放行）。
-  lastUserMessage?: string
-  lastUserAt?: number
-  pendingVideoWorkflows?: string[]
-  // 規格1：節點終態匯報去重（同一節點同一終態只匯報一次，rerun 後會再觸發）。
-  nodeTerminalReported?: Set<string>
-  // ── R8-B（2026-08-29）工單 #2/#3/#4/#5 新增狀態（全部 volatile）──
-  /** 工單 #3：question pending 心跳 timer（每 30s 一幀用戶可見心跳）。 */
-  questionHeartbeatTimer?: ReturnType<typeof setTimeout> | null
-  /** 片AJ：question 3 分鐘超時代答 timer（手動答覆/跳過/會話拆除時清）。 */
-  questionAssumeTimer?: ReturnType<typeof setTimeout> | null
-  /** 工單 #5：中段靜默通知 timer（>45s 無 message.delta 補進度幀，此後每 45s 續發）。 */
-  quietNoticeTimer?: ReturnType<typeof setTimeout> | null
-  /** 工單 #5：turn 內最後一次模型正文（message.delta）打點——靜默通知判定依據。 */
-  lastUserVisibleAt?: number
-  /** 工單 #9：session.idle 在 question pending 期間到達 → 凍結旗標（答覆後復位）。 */
-  turnFrozenByQuestion?: boolean
-  /** 工單 #4：本 turn 是否答覆過 question（恢復輪結語讓位，防「要繼續跑嗎」自我推翻）。 */
-  questionAnsweredThisTurn?: boolean
-  // ── 會話摘要標題（2026-09-12）──
-  /** opencode 在首條用戶消息後異步生成的會話標題；null/undef=尚未生成。
-   *  session.idle 鉤子經 fetchOpencodeTitle 抓取，佔位標題（"New session - …"）
-   *  不落入此欄。隨防抖落盤（persistence.serialize → data.title）。 */
-  sessionTitle?: string | null
-  /** idle 標題抓取的一次性重試計時器（2s/8s/20s，拿到即全部 clear）。 */
-  titleFetchTimers?: ReturnType<typeof setTimeout>[]
-  /** Phase 0 觀測（2026-09-18）：本輪分段延遲計時檔。volatile，不進持久化
-   *  白名單（persistence.serialize 是顯式子集，此欄不落盤）。turn.done 收檔；
-   *  未收尾的檔案由 handleAbortSession 或下一輪 beginTurnMetrics 補收。 */
-  turnMetrics?: TurnMetricsRecord | null
-  /** 兩段式首字（2026-09-18）：本輪 turn.plan 的去重/讓位狀態。volatile，不進
-   *  持久化白名單（persistence.serialize 是顯式子集，此欄不落盤）。gen = 已發起
-   *  計畫的 turnGen；emittedAt = 幀實際發出的時刻（null = 還在途/已放棄）。 */
-  planState?: { gen: number; emittedAt: number | null }
-}
-
-// 抖動重試參數：免費上游模型約三至四成 turn 異常早死（finish=unknown、零文本）。
-const TURN_MAX_RETRIES = Number.parseInt(process.env.TURN_MAX_RETRIES || "4", 10) || 4
-const TURN_RETRY_DELAY_MS = Number.parseInt(process.env.TURN_RETRY_DELAY_MS || "1500", 10) || 1500
-// ── P2b（2026-09-11）刀2：空轉止損 ────────────────────────────────
-// 連續 N 個「空 step」（該 step 期間無 tool part、無非空正文 text part、
-// reasoning 文字空/全空白）視為模型空轉：中止本 turn 並同一輪補一次動作
-// 導向重發（僅一次，不循環）。出現 tool/非空正文/非空 reasoning/turn 結束
-// → 計數歸零。
-const IDLE_STEP_ABORT_THRESHOLD = 3
-const IDLE_STEP_NUDGE =
-  "\n\n（系统提示：上一次生成空转被中止。请立刻发出工具调用开始动作，不要再展开推理。）"
-// S6 規格2：用戶消息 ack 上限。R4 實測 30s 檔 ack 落地 33-40s+（timer 30s 起
-// 算於 prompt_async 投遞後，再疊加投遞/事件轉譯延遲）——壓到 15s，保證含
-// 鏈路延遲也在 30s 線內。環境變量可覆蓋。
-const ACK_DELAY_MS = Number.parseInt(process.env.ACK_DELAY_MS || "15000", 10) || 15_000
-// ── 兩段式首字（2026-09-18）：turn.plan 幀 ──────────────────────────────
-// 病灶（實測）：重型 turn 首行「可見正文」在 +108.8s，小 session d_first_text_ms
-// 3,596–19,388ms——使用者開場乾等。實測可行：從 gateway 直連 provider 打
-// /chat/completions，帶 registry digest（1,943 字），首個 content token
-// 1,304–1,420ms、完整一行計畫 1,620–1,950ms，併發 4 路無退化。
-// 契約取捨：純文字「一行」契約（實測 reasoning_chars=0、首 content 1.3s）；
-// 不要用 JSON 契約（會先出 reasoning，首 content 落到 1,865–2,547ms，慢 0.8–1.1s）。
-// 路徑取捨：opencode/* 路徑多 ~3s 固定開銷 → 走直連 provider，不經 opencode。
-// 計費紅線：ledger 只在 emitImageDone / emitVideoDone / emitAudioDone /
-// recordWorkflowRefund / emitImageFailed / confirm-approved 六處寫入，文字回合
-// 零 ledger 寫入 → 本調用不重複扣費。**若未來新增「按 token 對用戶計費」，
-// 該機制必須顯式排除 turn.plan**（此處是一次不進模型上下文的旁路 LLM 調用）。
-const TURN_PLAN_ENABLED = process.env.TURN_PLAN_ENABLED !== "0"
-// 逾時預算（2026-09-18 在 VPS 上以 Bun fetch 實測定案）：關閉思考後
-// first_content 1,271ms／total 1,589ms，但**冷連線的 headers 單獨就要 3,197ms**，
-// 故給 4s 餘裕而非貼著 1.6s 卡死。舊值 2500 的後果實錘：三名候選全部 timeout
-// （hublinuxdo/a6api timeout、chaozhiyuan 403），計畫段整天零輸出。
-const TURN_PLAN_TIMEOUT_MS = Number.parseInt(process.env.TURN_PLAN_TIMEOUT_MS || "4000", 10) || 4_000
-// 輸出上限（同日實測定案）：舊值 160 會被 reasoning 吃光 → 串流跑完 chars=0、
-// 整個計畫段靜默失效（實錘 `chars=0`）。600 留足 reasoning 殘量。
-const TURN_PLAN_MAX_TOKENS = Number.parseInt(process.env.TURN_PLAN_MAX_TOKENS || "600", 10) || 600
-// 關閉思考（同日實測定案）：同一模型、同一 prompt、同樣 max_tokens=600 下
-//   reasoning_effort:"none"   → first_content 1,271ms、reasoning 0 字   ← 採用
-//   不加參數                  → first_content 2,186ms、reasoning 0 字
-//   enable_thinking:false     → first_content 4,195ms、reasoning 354 字
-//   /no_think 前綴            → first_content 9,355ms
-//   thinking:{type:disabled}  → first_content 7,749ms、reasoning 1,749 字（更慢，勿用）
-// 即「關掉思考」不是為了省 token，是為了把首字從 2.2s 拉到 1.3s。上游多為 OpenAI
-// 相容 relay，未知欄位一律忽略；設 0 可關（給嚴格校驗的上游當退路）。
-const TURN_PLAN_DISABLE_THINKING = process.env.TURN_PLAN_DISABLE_THINKING !== "0"
-const TURN_PLAN_MAX_CHARS = 160
-// 候選鏈上限（2026-09-18）：這一跳是全鏈最延遲敏感的一段，而上游任一渠道
-// 403/422/超時都會讓整個計畫段靜默失效。實錘：當日 persona 主模型多次 403、
-// registry fallbacks 內兩家 422/503，計畫段整天零輸出而日誌只有一句 skipped。
-// 併發打 N 條取最快成功者＝把上游 churn 由後端吸收，且延遲取候選中的最小值。
-// 候選來源＝plan_model → persona → default，續以 plan_fallbacks（選配）→ 該
-// persona 的 fallbacks。env 可覆寫。
-const TURN_PLAN_MAX_CANDIDATES = Number.parseInt(process.env.TURN_PLAN_MAX_CANDIDATES || "3", 10) || 3
-// 實測出來的最優契約，逐字照用（勿改寫：加欄位/換格式都會讓首 content 變慢）。
-const TURN_PLAN_SYSTEM_HEAD =
-  "你是执行规划器。根据下列 Expert 注册表，为用户请求写一段给用户看的中文计划。\n" +
-  "只输出一行，格式：打算这么做：<做什么>（先派 <expert id>）。\n" +
-  "禁止输出任何思考、分析过程、前言或 markdown 围栏。总长不超过 60 字。\n\n"
-// R2-A 看門狗：prompt_async 送達後 TURN_WATCHDOG_MS 內無 tool.invoke 且無
-// message.delta = turn 沒啟動（評測：295s 零幀）。先誠實告警再自動重投一次；
-// 再等一輪仍無動靜則判會話損壞，建議新開。環境變量可覆蓋（CI 可調短）。
-const TURN_WATCHDOG_MS = Number.parseInt(process.env.TURN_WATCHDOG_MS || "90000", 10) || 90_000
-// R4-A S3①：上游錯誤（session.error 非 tool_error）後的停滯看門狗。R4 實錘：
-// compaction+APIError "Input token exceed" 後 turn 空轉 5 分鐘零告警——啟動
-// 看門狗因 turn 已有動靜（turnHasActivity）靜默退出，覆蓋不到「中途死亡」。
-// 錯誤發生 90s 內 turn 未收尾且無進度 → 告警 + 依抖動重試兜底；再 90s 仍停滯
-// → 明確收尾話術 + turn.done。環境變量可覆蓋。
-const TURN_ERROR_WATCHDOG_MS = Number.parseInt(process.env.TURN_ERROR_WATCHDOG_MS || "90000", 10) || 90_000
-// N1 規格1：心跳提示延遲——turn 開始後 HEARTBEAT_DELAY_MS 仍無任何
-// message.delta 也無 tool.invoke（模型連字都沒吐）時補一條「仍在等待模型响应」。
-// 與 S6 ack（30s「收到，正在处理」）錯峰：ack 已發則心跳順延到 45s；每 turn
-// 最多 1 條，不刷屏。watchdog（90s）之前的中段窗口由這條填補。
-const HEARTBEAT_DELAY_MS = Number.parseInt(process.env.HEARTBEAT_DELAY_MS || "30000", 10) || 30_000
-const HEARTBEAT_DELAY_AFTER_ACK_MS = Number.parseInt(process.env.HEARTBEAT_DELAY_AFTER_ACK_MS || "45000", 10) || 45_000
-// R5-C（2026-08-28）中段停滯哨：turn 已啟動（有過 tool/正文活動）之後，
-// MIDTURN_STALL_MS 內零任何新幀（連進度幀都沒有）= 中段凍結。誠實告警 +
-// 防風暴單次重投（復用 watchdogRetried 模式）；重投後仍零幀 → 如實收尾 +
-// turn.done。時間戳 turnLastFrameAt 由 emitToSession 全量刷新——長工具執行
-// 只要有任何幀（tool.result/canvas/文本）就不誤殺，只咬連幀都沒有的凍結。
-const MIDTURN_STALL_MS = Number.parseInt(process.env.MIDTURN_STALL_MS || "90000", 10) || 90_000
-// R8-B 工單 #3（2026-08-29）：question pending 心跳週期——pending 期間每 30s
-// 一幀用戶可見心跳（R8 實錘：question 卡後 129s 零幀死寂）。
-const QUESTION_HEARTBEAT_MS = Number.parseInt(process.env.QUESTION_HEARTBEAT_MS || "30000", 10) || 30_000
-// 片AJ（2026-09-07）：question 卡 3 分鐘無人回覆 → 按推薦方案（各題第一選項）代答繼續，
-// 答覆文案標注 assumed——無人值守跑批不再掛死（T4 實錘 question 卡挂死 15+ 分鐘）。
-const QUESTION_ASSUME_MS = Number.parseInt(process.env.QUESTION_ASSUME_MS || "180000", 10) || 180_000
-// R8-B 工單 #5：中段靜默通知閾值——turn 進行中 >45s 無正文（message.delta）
-// 補一幀用戶可見進度，此後每 45s 續發。與 R5-C 中段停滯哨（90s 零「任何」幀）
-// 並存：停滯哨管「全幀死亡」，本通知管「模型活著但用戶看不見」（長推理段）。
-const QUIET_NOTICE_MS = Number.parseInt(process.env.QUIET_NOTICE_MS || "45000", 10) || 45_000
-
-const OPENCODE_URL = (process.env.OPENCODE_URL || "http://127.0.0.1:4096").replace(/\/+$/, "")
-const OPENCODE_PASSWORD = process.env.OPENCODE_PASSWORD || ""
-const PORT = Number.parseInt(process.env.GATEWAY_PORT || "8081", 10) || 8081
-const PLATFORM_BASE = (process.env.PLATFORM_BASE || "https://image.tinchak0207.xyz").replace(/\/+$/, "")
-const QUOTA_URL = process.env.QUOTA_URL || `${PLATFORM_BASE}/v1/quota`
-// ── 全局記憶 env（契約 §8 八條，默認值照表）──────────────────────────────
-// 語義解析（envBool/envInt）與 memory-batch.ts 內部保持一致，避免兩側漂移。
-function memoryEnvBool(raw: string | undefined, fallback: boolean): boolean {
-  const v = String(raw ?? "").trim().toLowerCase()
-  if (v === "") return fallback
-  return v === "1" || v === "true" || v === "yes" || v === "on"
-}
-// HMAC 密鑰（§8 必填側 VPS；缺失時批次拒絕送出、召回拉取 fail-fast，誠實報錯不裸奔）。
-const MEMORY_INGEST_SECRET = process.env.MEMORY_INGEST_SECRET || ""
-// 批次總開關（§8 默認 false：先驗通再接；false 時 ticker 不觸發，手動跑只准 dry_run）。
-const MEMORY_BATCH_ENABLED = memoryEnvBool(process.env.MEMORY_BATCH_ENABLED, false)
-// 批次觸發時（UTC 小時；§8 默認 20 = UTC+8 04:00）。
-const MEMORY_BATCH_HOUR_UTC = (() => {
-  const n = Number.parseInt(process.env.MEMORY_BATCH_HOUR_UTC ?? "20", 10)
-  return Number.isFinite(n) && n >= 0 && n <= 23 ? n : 20
-})()
-// 共享庫總開關（§8 默認 true；false → 共享目錄零注入、召回零讀、召回路由零命中）。
-const MEMORY_SHARED_ENABLED = memoryEnvBool(process.env.MEMORY_SHARED_ENABLED, true)
-// 召回門檻與開關（§7/§8）。
-const MEMORY_RECALL_MIN_SCORE = (() => {
-  const n = Number.parseFloat(process.env.MEMORY_RECALL_MIN_SCORE ?? "1.0")
-  return Number.isFinite(n) ? n : 1.0
-})()
-const MEMORY_RECALL_ENABLED = memoryEnvBool(process.env.MEMORY_RECALL_ENABLED, true)
-// 0918 前綴快取修復：尾端注入 payload 的同 byte 去重開關。默認 ON（不重貼）；
-// SYSTEM_PAYLOAD_TAIL_DEDUPE=0 時每輪照舊重貼（回退鈕，行為回到「每輪都在」）。
-const SYSTEM_PAYLOAD_TAIL_DEDUPE = process.env.SYSTEM_PAYLOAD_TAIL_DEDUPE !== "0"
-// G8 verifier 與 PRD §5.6 oracle 抽檢模型（`provider/model`，契約 §5「換模型」；
-// §8 之外的 P1-1 新增 env）。未配置＝該閘跳過，批次報告誠實記 g8_skipped／sampling.skipped。
-const MEMORY_VERIFIER_MODEL = (process.env.MEMORY_VERIFIER_MODEL || "").trim()
-const MEMORY_ORACLE_MODEL = (process.env.MEMORY_ORACLE_MODEL || "").trim()
-// 【契約外新增】批次/召回打 Vercel repo 端點（/api/agent/memory/*）的前綴。契約 §8 沒有
-// 這條（§3 端點只在 repo 側定義）；默認值與 PLATFORM_BASE 同構，屬本片新增接線參數。
-const MEMORY_INGEST_BASE_URL = (process.env.MEMORY_INGEST_BASE_URL || "https://image.tinchak0207.xyz").replace(/\/+$/, "")
-// How long a spend confirmation stays answerable. 15 minutes, not 90 seconds:
-// the user may be reading the parameter card, checking their balance, or simply
-// away from the tab, and a spend prompt that silently expires under them is
-// worse than one that waits. This is NO LONGER bounded by the HTTP layer —
-// /internal/confirm-request returns immediately and the tool polls, precisely
-// because a request cannot block this long (Bun's idleTimeout maxes at 255s
-// and the caller aborts at 150s).
-const CONFIRM_TIMEOUT_MS = Number.parseInt(process.env.CONFIRM_TIMEOUT_MS || "900000", 10) || 900_000
-// Keep answered confirmations addressable well past the poll interval so a
-// poller that ticks right after resolution still reads the real outcome.
-const CONFIRM_RESOLVED_TTL_MS = 5 * 60 * 1000
-const CONFIRM_RESOLVED_CAP = 200
-// S4（2026-08-27）計費確認門檻改金額維度：估算總價 ≥ 此幣數的批量執行
-//（workflow generate）必須先過 confirm.request 批准；低於門檻免擾自動跑。
-// 舊門檻「單筆工具 >0.1 幣就彈卡」由工具層自帶（image_* 工具），門檻倒掛
-//（6.25 幣批量零確認、1 幣重試反而彈卡）正是兩套門檻各管一段造成——
-// 統一基準：估算金額。env CONFIRM_THRESHOLD_COINS 可覆蓋。
-const CONFIRM_THRESHOLD_COINS = Number.parseFloat(process.env.CONFIRM_THRESHOLD_COINS || "5") || 5
-// R5-C（2026-08-28）影片估價改價目表檔位（暴君欽定：價目表 100% 權威，代碼與
-// 價目表衝突 = 代碼錯）：MiniMax H3 720P = 5 幣/秒、1080P = 10 幣/秒。舊 S4
-// 0.05 幣/秒估算口徑廢除；目錄 /v1/models 的視頻價是 0.25 RMB 混幣髒價，
-// 禁止回落目錄。
-// 2026-08-30 双账本收敛：檔位單價不再在此另立常量——統一由 workflow-service 的
-// resolveVideoPerSecond（锚点 unit_price_per_second 优先、档位价 5/10 兜底）提供，
-// 與 service 側 preflightBudget/midBatchBudgetGate/cost_hint 同一把尺。
-// S4 cost_hint 目錄快取：GET /v1/models 的 x_coins_per_image，TTL 10 分鐘
-//（與工具層 loadCatalog 同口徑）。估不出單價的模型回 null（不許編數）。
-const PRICE_CATALOG_TTL_MS = 10 * 60 * 1000
-let priceCatalogCache: { at: number; prices: Record<string, number> } | null = null
-
-/**
- * S4：查平台目錄單價（幣/張）。權威來源 = GET /v1/models 的 x_coins_per_image，
- * 與工具層 loadCatalog / quote_bundle 完全同一數據源（不許第二個價格宇宙）。
- * 取不到回 null——cost_hint 與門檻估算都寧缺勿編。
- */
-async function catalogUnitCoins(model: string, apiKey: string): Promise<number | null> {
-  const now = Date.now()
-  if (!priceCatalogCache || now - priceCatalogCache.at > PRICE_CATALOG_TTL_MS) {
-    try {
-      const res = await fetch(`${PLATFORM_BASE}/v1/models`, {
-        headers: { Authorization: `Bearer ${apiKey}` },
-        signal: AbortSignal.timeout(10_000),
-      })
-      if (res.ok) {
-        const body = (await res.json()) as { data?: Array<Record<string, unknown>> }
-        const prices: Record<string, number> = {}
-        for (const m of body.data ?? []) {
-          const id = typeof m.id === "string" ? m.id : null
-          if (!id) continue
-          const raw = m.x_coins_per_image
-          if (typeof raw === "number") prices[id] = raw
-          else if (raw && typeof raw === "object") {
-            const o = raw as Record<string, unknown>
-            const v = typeof o.standard === "number" ? o.standard : typeof o.hd === "number" ? o.hd : null
-            if (v !== null) prices[id] = v
-          }
-        }
-        if (Object.keys(prices).length > 0) priceCatalogCache = { at: now, prices }
-      }
-    } catch {
-      // 目錄不可達：沿用舊快取；完全沒有 → 呼叫方拿到 null（不編數）
-    }
-  }
-  const v = priceCatalogCache?.prices[model]
-  return typeof v === "number" ? v : null
-}
-
-// S4 姊妹快取：查平台目錄視頻秒價（幣/秒）。權威來源 = GET /v1/models 的
-// x_coins_per_second，與 catalogUnitCoins（x_coins_per_image）同一份目錄回應、
-// 同一 10 分鐘 TTL——本次事故修復：seedance-2.0 等無 MiniMax 硬編碼檔位的模型，
-// 從目錄同源取（與扣費同一函式 generationCoins），不再落錯誤兜底檔位。
-let priceCatalogPerSecondCache: { at: number; table: Record<string, Record<string, number>> } | null = null
-async function catalogVideoPerSecondCoins(model: string, apiKey: string): Promise<Record<string, number> | null> {
-  const now = Date.now()
-  if (!priceCatalogPerSecondCache || now - priceCatalogPerSecondCache.at > PRICE_CATALOG_TTL_MS) {
-    try {
-      const res = await fetch(`${PLATFORM_BASE}/v1/models`, {
-        headers: { Authorization: `Bearer ${apiKey}` },
-        signal: AbortSignal.timeout(10_000),
-      })
-      if (res.ok) {
-        const body = (await res.json()) as { data?: Array<Record<string, unknown>> }
-        const table: Record<string, Record<string, number>> = {}
-        for (const m of body.data ?? []) {
-          const id = typeof m.id === "string" ? m.id : null
-          if (!id) continue
-          const raw = m.x_coins_per_second
-          if (raw && typeof raw === "object") {
-            const entry: Record<string, number> = {}
-            for (const [res_, v] of Object.entries(raw as Record<string, unknown>)) {
-              if (typeof v === "number") entry[res_] = v
-            }
-            if (Object.keys(entry).length) table[id] = entry
-          }
-        }
-        if (Object.keys(table).length > 0) priceCatalogPerSecondCache = { at: now, table }
-      }
-    } catch {
-      // 目錄不可達：沿用舊快取
-    }
-  }
-  return priceCatalogPerSecondCache?.table[model] ?? null
-}
-
-// 同步變體：estimateGraphCoins（canvas.plan 熱路徑，同步簽名不可 await）專用。
-// 只讀已warm的目錄快取（不發網路請求）；快取未warm時等同舊行為（純錨點/檔位兜底）。
-function videoTierPerSecondSync(
-  node: { id?: string; kind: string; metadata: Record<string, unknown> },
-  graph?: { nodes: { id: string; kind: string; metadata: Record<string, unknown> }[]; connections: { from: string; to: string }[] },
-): number {
-  const model =
-    typeof node.metadata.model === "string" && node.metadata.model
-      ? node.metadata.model
-      : graph
-        ? resolveNodeModel((node as { id?: string }).id ?? "", node, graph)
-        : "minimax-h3"
-  const catalogTable = priceCatalogPerSecondCache?.table[model] ?? null
-  return resolveVideoPerSecond(
-    node as never,
-    graph as never,
-    catalogTable ? (tier: "720p" | "1080p") => catalogTable[tier] ?? null : undefined,
-  )
-}
-
-/**
- * S4：沿連線向上游 config 節點解析 image 節點的實際執行參數（model）。
- * 模板結構：text → config(帶 model/size/count) → image*（image 節點
- * metadata 通常為空，model 在上游 config 上——submitWorkflowNode 也是
- * 這樣預設的：image 缺 model 時用 pixai-tsubaki2）。最多回看 2 層。
- */
-function resolveNodeModel(
-  nodeId: string,
-  node: { kind: string; metadata: Record<string, unknown> },
-  graph: { nodes: { id: string; kind: string; metadata: Record<string, unknown> }[]; connections: { from: string; to: string }[] },
-): string {
-  if (typeof node.metadata.model === "string" && node.metadata.model) return node.metadata.model
-  const upstreamIds = graph.connections.filter((c) => c.to === nodeId).map((c) => c.from)
-  // 2026-08-30 事故修复：多 config 时模型跟随最新 cfg，旧 cfg 不再抢先——
-  // 旧逻辑按 connections 数组顺序取第一个带 model 的 config，先连的旧 cfg
-  //（minimax-h3）永远压住后接的 seedance cfg，rerun 永远解析回旧模型。
-  // 改为：遍历入边所有 config 节点，剔除无 model 的，取 graph.nodes 里 index
-  // 最大的那个（= 最后创建/最新接的 config）。递归兜底与 pixai-tsubaki2
-  // 默认不变，只改这一处选择逻辑。
-  let bestConfig: { node: (typeof graph.nodes)[number]; idx: number } | null = null
-  for (const uid of upstreamIds) {
-    const un = graph.nodes.find((n) => n.id === uid)
-    if (un && un.kind === "config" && typeof un.metadata.model === "string" && un.metadata.model) {
-      const idx = graph.nodes.findIndex((n) => n.id === un.id)
-      if (!bestConfig || idx > bestConfig.idx) bestConfig = { node: un, idx }
-    }
-  }
-  if (bestConfig) return bestConfig.node.metadata.model as string
-  for (const uid of upstreamIds) {
-    const un = graph.nodes.find((n) => n.id === uid)
-    if (un) {
-      const m = resolveNodeModel(uid, un, graph)
-      if (m !== "pixai-tsubaki2") return m
-    }
-  }
-  return "pixai-tsubaki2"
-}
-
-/**
- * R5-C：影片檔位單價（幣/秒）——2026-08-30 双账本收敛：改由 workflow-service 的
- * 共享 resolveVideoPerSecond 提供（锚点 unit_price_per_second 优先、档位价 5/10
- * 兜底），与 service 侧 preflightBudget/midBatchBudgetGate/cost_hint 同一把尺。
- * 此處保留薄封装以不改動既有调用点签名。
- */
-async function videoTierPerSecond(
-  node: { id?: string; kind: string; metadata: Record<string, unknown> },
-  graph: { nodes: { id: string; kind: string; metadata: Record<string, unknown> }[]; connections: { from: string; to: string }[] } | undefined,
-  apiKey: string,
-): Promise<number> {
-  const model =
-    typeof node.metadata.model === "string" && node.metadata.model
-      ? node.metadata.model
-      : graph
-        ? resolveNodeModel((node as { id?: string }).id ?? "", node, graph)
-        : "minimax-h3"
-  // catalog 快取：先查一次目錄（同一 apiKey 10 分鐘快取，見 catalogVideoPerSecondCoins）——
-  // 本次事故修復：seedance-2.0 等無 MiniMax 硬編碼檔位的模型，從 /v1/models 的
-  // x_coins_per_second 同源取（與扣費同一函式 generationCoins），不再被錯誤套用
-  // MiniMax 5/10 幣/秒檔位價。resolveVideoPerSecond 優先序：錨點價 → catalogLookup → 檔位 5/10 兜底。
-  const catalogTable = await catalogVideoPerSecondCoins(model, apiKey)
-  return resolveVideoPerSecond(
-    node as never,
-    graph as never,
-    catalogTable ? (tier: "720p" | "1080p") => catalogTable[tier] ?? null : undefined,
-  )
-}
-
-/**
- * S4：估算單一可執行節點的幣耗。優先級：節點自帶價 → 平台目錄單價 → null。
- * video 按價目表檔位價（R5-C：720P=5 / 1080P=10 幣/秒）；image 按目錄單價 × 1
- *（submitWorkflowNode 對 workflow 節點固定 n:1，count 在 config 上只是參考標注，
- * 不放大節點張數）。回 null 表示估不出（目錄不可達且模型不在目錄）——上層保持
- * null / 保守策略。
- */
-async function estimateNodeCoins(
-  node: { kind: string; metadata: Record<string, unknown> },
-  apiKey: string,
-  graph?: { nodes: { id: string; kind: string; metadata: Record<string, unknown> }[]; connections: { from: string; to: string }[] },
-): Promise<number | null> {
-  if (node.kind === "video") {
-    const nodeId = (node as { id?: string }).id ?? ""
-    const cfgDuration = graph ? resolveConnectedVideoDuration(nodeId, graph) : undefined
-    const secs =
-      typeof node.metadata.duration_seconds === "number" && node.metadata.duration_seconds > 0
-        ? node.metadata.duration_seconds
-        : cfgDuration
-    if (typeof secs !== "number" || !(secs > 0)) return null // 拒絕編數：與 submitWorkflowNode 的「缺時長拒絕提交」同口徑
-    const perSec = await videoTierPerSecond(node, graph, apiKey)
-    return Math.round(secs * perSec * 100) / 100
-  }
-  if (node.kind !== "image") return 0 // audio/film 現行 0 幣（TTS 定價 0）
-  const nodeId = (node as { id?: string }).id ?? ""
-  const model =
-    typeof node.metadata.model === "string" && node.metadata.model
-      ? node.metadata.model
-      : graph
-        ? resolveNodeModel(nodeId, node, graph)
-        : "pixai-tsubaki2"
-  const unit = await catalogUnitCoins(model, apiKey)
-  if (unit === null) return null
-  return Math.round(unit * 1e6) / 1e6
-}
-const KEY_CACHE_TTL_MS = 5 * 60 * 1000
-const HEARTBEAT_INTERVAL_MS = 20_000
-const REPLAY_BUFFER_SIZE = 1000
-const IMAGE_URL_DEDUP_CAP = 100
-const PART_TEXT_TRACK_CAP = 200
-const TOOL_STATUS_DEDUP_CAP = 500
-const STEP_COST_LOG_CAP = 1000
-const MESSAGE_ROLE_CAP = 400
-const SUPPRESSED_PART_CAP = 500
-// Reaper thresholds. A session with no SSE clients and no activity for this
-// long is assumed abandoned (closed tab / lost network) and freed.
-// 2026-09-12 永久保留改造：默認 TTL 從 30 分鐘放寬到 30 天。reap（keepRow=true）只清內存、
-// 不刪數據也不再發 session.closed（見 teardownSession）；正常使用週期內會話基本不會被 reap，
-// 內存熱度回收能力保留。env 為逃生口（毫秒）。
-const SESSION_IDLE_TTL_MS = Number.parseInt(process.env.SESSION_IDLE_TTL_MS || "2592000000", 10) || 2_592_000_000
-// 2026-09-12 永久保留：7 天 stale sweep（刪 DB row + opencode 會話 + uploads）默認關閉。
-// 未設/0 = 永不刪；>0 恢復舊的「N 天未更新即連根刪」能力（env 逃生口）。
-const SESSION_SWEEP_DAYS = Number.parseInt(process.env.SESSION_SWEEP_DAYS || "0", 10) || 0
-const SESSION_REAP_INTERVAL_MS = 60_000
-const LEDGER_PATH = process.env.LEDGER_PATH || "/opt/agent-harness/ledger.jsonl"
-// 畫布事件白名單：opencode canvas_* 工具透過 emitEvent 推送的畫布動作/成果事件。
-// 這組事件由前端 reducer 接住，驅動畫布渲染（建節點/連線/顯示圖片/預算）。
-const CANVAS_EMIT_ALLOWED = new Set([
-  "canvas.plan",
-  "canvas.node.created",
-  "canvas.node.updated",
-  "canvas.node.connected",
-  "canvas.node.deleted",
-  "canvas.node.generating",
-  "canvas.derive.started",
-  "canvas.budget.updated",
-])
-
-const INTERNAL_EMIT_ALLOWED = new Set(["image.done", "video.done", "image.failed", "session.error", "quota.changed", "tool.result", "tool.progress"])
-
-const WORKSPACE_DIR = "/opt/agent-harness/workspace"
-const UPLOADS_DIR = path.join(WORKSPACE_DIR, "uploads")
-// TTS 音頻落盤與對外 URL 基址：文件存 gateway 本地靜態目錄，
-// 公網走 nginx 已有的 /agent/ 反代（store.tinchak0207.xyz/agent/* → 本網關）。
-const TTS_AUDIO_DIR = path.join(WORKSPACE_DIR, "tts-audio")
-const TTS_PUBLIC_BASE = (process.env.TTS_PUBLIC_BASE || "https://store.tinchak0207.xyz/agent/v1/audio").replace(/\/+$/, "")
-const UPLOAD_MAX_BYTES = 4 * 1024 * 1024 // 4MB per file
-const VIDEO_UPLOAD_MAX_BYTES = 100 * 1024 * 1024 // 100MB per file（瀏覽器原片直傳）
-const VIDEO_UPLOAD_EXTS = new Set([".mp4", ".mov", ".webm", ".m4v"])
-const ALLOWED_UPLOAD_EXTS = new Set([
-  ".pdf", ".docx", ".xlsx", ".pptx", ".txt", ".md", ".json",
-  ".csv", ".xml", ".yaml", ".yml", ".png", ".jpg", ".jpeg",
-  ".webp", ".gif", ".mp4", ".mov", ".m4v", ".webm", ".zip",
-])
 
 function sanitizeUploadName(raw: string): string | null {
   const base = path.basename(raw).normalize("NFC")
@@ -783,7 +111,7 @@ function sanitizeUploadName(raw: string): string | null {
 }
 
 /** 附件靜態讀路由的 Content-Type 映射（按擴展名；未收錄一律 octet-stream）。 */
-function contentTypeForExt(ext: string): string {
+export function contentTypeForExt(ext: string): string {
   const map: Record<string, string> = {
     ".png": "image/png",
     ".jpg": "image/jpeg",
@@ -966,20 +294,6 @@ const keyCache = new Map<string, { ok: boolean; expiresAt: number }>()
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
-function jsonError(status: number, message: string, type: string, code: string): Response {
-  return Response.json({ error: { message, type, code } }, { status })
-}
-
-function getBearer(req: Request): string | null {
-  const auth = req.headers.get("authorization")
-  if (!auth) return null
-  const m = auth.match(/^Bearer\s+(.+)$/i)
-  return m ? m[1].trim() : null
-}
 
 // ---- auth validation (cached 5 minutes) ----
 
@@ -1116,7 +430,7 @@ async function registerMasterExport(key: string, sid: string, presetId: MasterPr
 
 // ---- opencode client helpers ----
 
-function opencodeHeaders(): Record<string, string> {
+export function opencodeHeaders(): Record<string, string> {
   return {
     Authorization: "Basic " + btoa("opencode:" + OPENCODE_PASSWORD),
     "Content-Type": "application/json",
@@ -1349,7 +663,7 @@ function hydrateFromDb(id: string): SessionState | null {  const row = loadSessi
   return state
 }
 
-function getOwnedSession(key: string, id: string): SessionState | null {
+export function getOwnedSession(key: string, id: string): SessionState | null {
   const state = sessions.get(id) ?? hydrateFromDb(id)
   if (!state || state.apiKey !== key) return null
   state.lastActivityAt = Date.now()
@@ -1409,7 +723,7 @@ function findSessionByOpenCodeId(opencodeSessionId: string): SessionState | unde
   return state
 }
 
-function resolveSession(id: string): SessionState | undefined {
+export function resolveSession(id: string): SessionState | undefined {
   // 三段解析：內存 → opencode id（fan-out 路徑）→ gateway id（DB 懶加載）。
   // 第三段是 2026-08-27 畫布快照修復的一部分：重啟後用 gateway session id
   // 查 /internal/canvas/snapshot 也要能觸發 DB 恢復（含 canvasStates 回灌），
@@ -1901,7 +1215,7 @@ function humanizeSupplierError(message: string): string {
 
 /** 必得中文短句：映射命中 → 映射文；本身就是中文 → 原文；否則帶真實上游
  *  原因原文（截斷）——R5-C：兜底禁止只剩「执行失败，请重试或换一种方式」空話。 */
-function humanMessageFor(message: string, code?: string): string {
+export function humanMessageFor(message: string, code?: string): string {
   // 0831 誠實歸因：本站自己的 404 曾被兜底包成「上游原因」，誤導用戶與模型連環重試。
   if (code === "task_not_found") {
     return "这个任务 ID 在平台查不到（ID 不完整或已过期）。不要凭记忆猜 ID：调用 image_get_result 不带参数即可取回本轮全部真实任务 ID 与 URL。"
@@ -1954,7 +1268,7 @@ function isRevivalFrame(name: string): boolean {
   )
 }
 
-function emitToSession(state: SessionState, name: string, data: unknown): void {
+export function emitToSession(state: SessionState, name: string, data: unknown): void {
   // 修 1（2026-09-01）：死亡宣告可撤回。deathDeclared 期間第一條內容幀到達
   // → 先發一次性撤回幀（turn.status，與 watchdog 告警同通道，前端零改動），
   // 立即清位（防重複撤回/防遞歸），再放行原內容幀。
@@ -2212,7 +1526,7 @@ interface WorkflowBillingTruth {
   refunded_coins: number
   billing_status: "confirmed" | "refunded" | "settled"
 }
-const workflowBilling = new Map<string, WorkflowBillingTruth>()
+export const workflowBilling = new Map<string, WorkflowBillingTruth>()
 
 /** 修 2：節點失敗 → 該工作流退款留痕（每工作流只記一次）+ 餘額刷新。 */
 function recordWorkflowRefund(state: SessionState, wfid: string): void {
@@ -2586,7 +1900,7 @@ async function assembleFilmNode(
  */
 // INC-0830：沿連線找視頻節點上游連接的視頻 config 節點（kind=config 且 metadata.kind==="video"），
 // 取其 duration_seconds——模板把時長配在 config 節點上，submit 時與 meta/shot 同為時長真源。
-function resolveConnectedVideoDuration(
+export function resolveConnectedVideoDuration(
   nodeId: string,
   graph?: { nodes: { id: string; kind: string; metadata: Record<string, unknown> }[]; connections: { from: string; to: string }[] },
 ): number | undefined {
@@ -2895,7 +2209,7 @@ function workflowServiceTemplates(): Response {
 // 不再重彈 confirm（預算單是事前告知，不取代逐筆扣費確認——但批量 confirm
 // 已經是逐筆扣費確認的總閘門，雙重彈卡反而是打擾）。workflow 刪除/重跑
 // 不清此記錄：同批重跑金額通常下降，重彈只會造成倒掛復辟。
-const workflowGenerateApproved = new Map<string, { amount: number; nodes: number }>()
+export const workflowGenerateApproved = new Map<string, { amount: number; nodes: number }>()
 
 // 2026-08-29 整改（session 00c583ed 事故）：批量執行 confirm 的批准續跑註冊表。
 // 舊版 /workflow/generate 在 handler 內聯 while 輪詢等用戶批准（最長
@@ -2903,12 +2217,12 @@ const workflowGenerateApproved = new Map<string, { amount: number; nodes: number
 // 用戶批准慢於 10s 是常態，工具必報 workflow_unreachable，agent 誤判「後端
 // 不可達」棄模板轉手動逐鏡。改為非阻塞：彈卡 → 註冊回調 → 立即回
 // confirm_pending；settleConfirm(approved) 觸發 runWfGenerate。
-const wfGenerateContinuations = new Map<string, { state: SessionState; wfid: string; nodes: number; amount: number }>()
+export const wfGenerateContinuations = new Map<string, { state: SessionState; wfid: string; nodes: number; amount: number }>()
 
 // 批量執行啟動器（含 S6 質詢凍結檢查）。兩個入口：/workflow/generate 免
 // confirm 直呼路徑，與 wfGenerateContinuations 批准回調——凍結語義收攏在此，
 // 兩個入口行為一致。
-function runWfGenerate(state: SessionState, wfid: string): void {
+export function runWfGenerate(state: SessionState, wfid: string): void {
   const wf = workflowService.get(wfid)
   if (!wf) return
   const hasVideoNode = wf.graph.nodes.some((n) => n.kind === "video")
@@ -3485,7 +2799,7 @@ async function resolveResultUrl(rawUrl: string, key: string): Promise<string> {
   }
 }
 
-async function emitImageDone(
+export async function emitImageDone(
   state: SessionState,
   url: string,
   cost_coins?: number,
@@ -4925,56 +4239,6 @@ async function handleCreateSession(key: string, req: Request): Promise<Response>
   return Response.json({ session_id: sessionId, user_id })
 }
 
-// L0 畫像 onboarding：賬戶還沒有任何確認過的畫像時，引導 agent 用 question 工具
-// 以選擇題採集畫像（PM 原則：別讓用戶動腦寫表單）。答案存 pendingProfile，
-// 下次建會話時作為臨時畫像注入（站點 DB 落庫前的過渡方案）。
-const PROFILE_ONBOARDING_DIRECTIVE = [
-  "這個賬戶還沒有畫像記錄。開場簡短歡迎一句，先問用戶今天想做什麼。",
-  "畫像信息（行業/常做素材/風格偏好）在對話中自然了解即可，不要用 question 工具刻意採集，更不要一次問多道題。",
-  "若用戶直接說出任務，直接開工，別問畫像。",
-].join("\n")
-
-// ── S7（2026-08-29）：用戶級 Settings（罪狀6 網關側真實 Adapt）─────────────
-// 存 sessions.db user_settings 表（key 維度，owner_key 與 sessions 表同一 key、
-// 同一歸一化方式），重啟不丟。GET 無記錄回默認值；POST 部分更新、非法值 400。
-// Adapt 兩條腿：
-//   1. system 指令：persona/cost_mode 每輪注入 promptBody.system（不是只首輪；
-//      balanced 不注入成本線）。
-//   2. 等待容忍窗：persona=thoughtful 時 ack/心跳延遲 ×1.5（思考本來就久，
-//      30s 就說「收到」是騷擾）；實現為投遞時按 settings 計算延遲，不改全局常量。
-// 模型思考強度（cost_mode → 真實模型切換）本期不落地，如實原因見任務報告：
-// opencode.jsonc 無第二個可用模型、有效配置 small_model 與主模型相同
-// （b-ai/glm-5.3-flash），PATCH /session/:id 200 但 model 無落地證據。
-const DEFAULT_USER_SETTINGS: UserSettingsShape = { interrupt_mode: "steer", persona: "efficient", cost_mode: "balanced", interaction_mode: "preset" }
-type UserSettingsShape = { interrupt_mode: string; persona: string; cost_mode: string; interaction_mode: string }
-// 野獸模式開關（MOE 改革，2026-09-08）：settings 布林欄，缺省=false（零回歸）。
-// 不入 USER_SETTINGS_ENUMS（那是枚舉字串欄白名單）；POST 專門放行本欄（僅接受
-// 真布林），sanitize 顯式列出欄位、缺欄=保持現值。
-type UserSettingsShape = { interrupt_mode: string; persona: string; cost_mode: string; interaction_mode: string; beast_mode?: boolean }
-const USER_SETTINGS_ENUMS: Record<Exclude<keyof UserSettingsShape, "beast_mode">, readonly string[]> = {
-  interrupt_mode: ["steer", "queue"],
-  persona: ["efficient", "thoughtful"],
-  cost_mode: ["economy", "balanced", "premium"],
-  interaction_mode: ["collaborate", "preset", "auto"],
-}
-
-/** 任意輸入 → 合法 settings（非法欄位值一律回落默認，寫入路徑另有 400 校驗）。 */
-function normalizeUserSettings(raw: unknown): UserSettingsShape {
-  const s: UserSettingsShape = { ...DEFAULT_USER_SETTINGS }
-  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
-    const r = raw as Record<string, unknown>
-    for (const k of Object.keys(USER_SETTINGS_ENUMS) as (keyof UserSettingsShape)[]) {
-      const v = r[k]
-      if (typeof v === "string" && USER_SETTINGS_ENUMS[k].includes(v)) s[k] = v
-    }
-  }
-  return s
-}
-
-/** 性格 → 等待容忍倍率：thoughtful ×1.5，efficient（及未知值）默認 1。 */
-function personaPatienceMul(state: SessionState): number {
-  return loadUserSettings(state.apiKey)?.persona === "thoughtful" ? 1.5 : 1
-}
 
 // Persona 綁模型（2026-08-29）：高效 → deepseek-v4-flash-vision-exp（零思考直答，快），
 // 沉穩 → glm-5.3-flash（reasoningEffort=high 在 opencode.json 模型級 options 配置）。
@@ -5122,58 +4386,6 @@ function personaModelForAttempt(state: SessionState, attempt: number): AgentMode
 // turn.done 收檔、用戶中止由 handleAbortSession 收檔、被下一輪取代由
 // beginTurnMetrics 以 superseded 補收——不掛任何計時器、不持有跨 turn 引用，
 // 故無計時器洩漏；全部打點函數對「檔不存在」直接靜默返回，永不拋錯。
-type TurnMetricsEnd = "done" | "aborted" | "superseded"
-
-/** 在途計時檔（volatile）。 */
-type TurnMetricsRecord = {
-  sessionId: string
-  gen: number
-  attempt: number
-  t_accept: number
-  t_prompt_sent: number | null
-  t_last_prompt_sent: number | null
-  t_first_reasoning: number | null
-  t_first_text: number | null
-  t_first_tool: number | null
-  /** 兩段式首字（2026-09-18）：turn.plan 幀發出時刻；null = 本輪沒發計畫。 */
-  t_first_plan: number | null
-  /** compaction 閘擋住本輪 prompt 的時刻；null = 沒被擋（prompt_deferred_ms=0）。 */
-  deferredAt: number | null
-  providerID: string | null
-  modelID: string | null
-  contextTokens: number | null
-  cacheRead: number | null
-  cacheWrite: number | null
-}
-
-/** 收檔後的快照（journal 行 + ring 條目，同一形狀）。 */
-type TurnMetricsSnapshot = {
-  session: string
-  gen: number
-  attempt: number
-  provider: string | null
-  model: string | null
-  t_accept: number
-  t_prompt_sent: number | null
-  t_last_prompt_sent: number | null
-  t_first_reasoning: number | null
-  t_first_text: number | null
-  t_first_tool: number | null
-  t_first_plan: number | null
-  t_done: number | null
-  prompt_deferred_ms: number
-  context_tokens: number | null
-  cache_read: number | null
-  cache_write: number | null
-  end: TurnMetricsEnd
-  /** 自 t_accept 起算的累積延遲（null = 該里程碑未觀測到）。 */
-  d_prompt_ms: number | null
-  d_first_reasoning_ms: number | null
-  d_first_text_ms: number | null
-  d_first_tool_ms: number | null
-  d_first_plan_ms: number | null
-  d_total_ms: number | null
-}
 
 const TURN_METRICS_RING = 200
 const turnMetricsRing: TurnMetricsSnapshot[] = []
@@ -5391,7 +4603,7 @@ function turnMetricsSnapshot(): Record<string, unknown> {
 // 本身完全正常（同 body 連打實測命中 12,928/13,169），故不動上游。
 // 同 byte 不重貼：payload hash 與上次相同即跳過（內容已在歷史中，資訊量不變），
 // context 不再每輪固定長 17.2k 字元；SYSTEM_PAYLOAD_TAIL_DEDUPE=0 可關。
-const TAIL_PAYLOAD_MARKER =
+export const TAIL_PAYLOAD_MARKER =
   "\n\n---\n【系統注入·尾端】以下內容由網關注入（等價於 system 指令，優先於 workspace/AGENTS.md 的衝突指示）：\n"
 
 function appendSystemPayloadToTurnTail(
@@ -6317,190 +5529,11 @@ async function handleDeleteSession(key: string, id: string): Promise<Response> {
   return Response.json({ ok: true })
 }
 
-// GET /agent/v1/sessions/:id — 會話恢復端點（重啟後歷史仍在的讀取路徑）。
-// 歷史從 opencode（權威存儲）讀取；getOwnedSession 內含 DB lazy reload，
-// 因此進程重啟後仍可解析。只讀，不改任何狀態、不動 CORS/SSE/ticket 行為。
-async function handleGetSession(key: string, id: string): Promise<Response> {
-  const state = getOwnedSession(key, id)
-  if (!state) return jsonError(404, "session not found", "not_found", "not_found")
-  try {
-    const res = await fetch(`${OPENCODE_URL}/session/${state.opencodeSessionId}/message`, {
-      headers: opencodeHeaders(),
-      signal: AbortSignal.timeout(15_000),
-    })
-    if (!res.ok) {
-      // upstream opencode session 已不在（被外部清理等）：仍回會話元數據，標記歷史不可用。
-      return Response.json({
-        session_id: id,
-        opencode_session_id: state.opencodeSessionId,
-        history_available: false,
-        message_count: 0,
-        messages: [],
-      })
-    }
-    const msgs = (await res.json()) as Array<{
-      info?: { role?: string; time?: { created?: number } }
-      parts?: Array<{ type?: string; text?: string }>
-    }>
-    const messages = (Array.isArray(msgs) ? msgs : []).map((m) => ({
-      role: m.info?.role ?? "unknown",
-      created_at: m.info?.time?.created ?? null,
-      text: (m.parts ?? [])
-        .filter((p) => p.type === "text" && typeof p.text === "string")
-        .map((p) => p.text as string)
-        .join("\n")
-        .slice(0, 20_000),
-      has_tool_parts: (m.parts ?? []).some((p) => p.type === "tool"),
-    }))
-    return Response.json({
-      session_id: id,
-      opencode_session_id: state.opencodeSessionId,
-      history_available: true,
-      message_count: messages.length,
-      messages,
-    })
-  } catch {
-    return jsonError(502, "opencode backend unreachable", "backend_unreachable", "backend_error")
-  }
-}
 
 // Force-stop the in-flight assistant turn on the opencode side. This is a real
 // system-level cancel (not a soft "please stop" prompt): the running turn is
 // terminated immediately, no further tools run, no more money is spent.
 
-// P1-E1：對話 transcript 端點。真源是 opencode（gateway 不另存 messages，
-// 見 L3496 註釋——那是第二份會漂移的歷史副本）。返回輕量結構：每條 message
-// 只保留 role + text/tool parts，tool part 帶完整 input（prompt/lora/model/
-// size 在此），供前端「存為資產」提取真配方。輸出/圖片等重 payload 一律不帶。
-// GET /agent/v1/sessions/:id/messages — 全量歷史端點（2026-09-12 永久保留改造）。
-// 鑑權與 GET /agent/v1/sessions/:id 完全同構：Bearer 閘門 + getOwnedSession（owner 校驗 +
-// DB lazy hydrate，reaped/重啟後的 row 可讀）。返回帶游標的物件（前端契約）：
-//   { messages: <opencode 消息瘦身陣列（同構 [{info,parts}]，欄位白名單）>, event_counter: <當前計數器>,
-//     replay_first_id: <replayBuffer 最舊幀 id，無緩衝則 null> }
-// event_counter 給前端做 SSE 續傳游標：restore 全史後 openConnection(counter) 只接增量。
-// 上游不可達/非 2xx/會話無 messages → 200 且附 fallback:"replay_only"（前端退回回放兜底）。
-// 瘦身：前端唯一消費者 normalizeOpenCodeMessages 只讀 info.role + text/reasoning/tool/file
-// 四类 part 的少數欄位（實測 tool.state.output/metadata 與 info 冗餘欄位佔 payload ~80%），
-// 白名單外欄位一率刪除；輸出保持 [{info,parts}] 同構契約，未知 part 型別整塊丟棄。
-// 防呆：讀路徑寧跳不炸——任何單則/單 part 處理異常只丟棄該項，函數永不拋錯。
-/** 0918：剝掉網關注入的 user 訊息尾端 payload（野獸幀等，見
- *  appendSystemPayloadToTurnTail）。只用在顯示讀路徑（slimHistoryMessages）；
- *  模型上下文由 opencode 持有、不經此函式，故不影響模型看到的內容。
- *  找不到標記＝原樣返回（零回歸）。 */
-function stripTailInjectedPayload(text: string): string {
-  const marker = TAIL_PAYLOAD_MARKER.trim()
-  const i = text.indexOf(marker)
-  return i >= 0 ? text.slice(0, i).trimEnd() : text
-}
-
-function slimHistoryMessages(msgs: unknown[]): unknown[] {
-  const out: unknown[] = []
-  for (const rawMsg of msgs) {
-    try {
-      if (rawMsg === null || typeof rawMsg !== "object" || Array.isArray(rawMsg)) continue
-      const msg = rawMsg as Record<string, unknown>
-      const infoSrc = msg.info !== null && typeof msg.info === "object" && !Array.isArray(msg.info)
-        ? (msg.info as Record<string, unknown>)
-        : null
-      const info: Record<string, unknown> = {}
-      if (infoSrc) {
-        if (typeof infoSrc.id === "string") info.id = infoSrc.id
-        if (typeof infoSrc.role === "string") info.role = infoSrc.role
-      }
-      const partsSrc = Array.isArray(msg.parts) ? (msg.parts as unknown[]) : []
-      const parts: unknown[] = []
-      for (const rawPart of partsSrc) {
-        try {
-          if (rawPart === null || typeof rawPart !== "object" || Array.isArray(rawPart)) continue
-          const part = rawPart as Record<string, unknown>
-          const type = part.type
-          if (type === "text" || type === "reasoning") {
-            // 0918：歷史端點是「顯示」通道——剝掉網關附在 user 訊息尾端的注入
-            // payload（野獸幀等，見 appendSystemPayloadToTurnTail），否則用戶
-            // 氣泡會被 17.2k 字的派遣協議正文灌爆。模型上下文由 opencode 持有、
-            // 不經本函式，故剝除不改變模型看到的內容（純顯示層過濾）。
-            if (type === "text" && info.role === "user" && typeof part.text === "string") {
-              parts.push({ ...part, text: stripTailInjectedPayload(part.text) })
-              continue
-            }
-            parts.push(part)
-            continue
-          }
-          if (type === "file") {
-            const f: Record<string, unknown> = { type: "file" }
-            for (const k of ["url", "mime", "filename", "size"] as const) {
-              if (part[k] !== undefined) f[k] = part[k]
-            }
-            parts.push(f)
-            continue
-          }
-          if (type === "tool") {
-            const stSrc = part.state !== null && typeof part.state === "object" && !Array.isArray(part.state)
-              ? (part.state as Record<string, unknown>)
-              : null
-            const st: Record<string, unknown> = {}
-            if (stSrc) {
-              if (stSrc.status !== undefined) st.status = stSrc.status
-              if (stSrc.input !== undefined) {
-                let s: string
-                try {
-                  s = typeof stSrc.input === "string" ? stSrc.input : JSON.stringify(stSrc.input)
-                } catch {
-                  s = ""
-                }
-                if (s.length > 500) s = s.slice(0, 500)
-                st.input = s
-              }
-              if (typeof stSrc.error === "string") {
-                if (stSrc.error.length > 0) st.error = stSrc.error
-              } else if (stSrc.error !== null && typeof stSrc.error === "object" && !Array.isArray(stSrc.error)) {
-                const em = (stSrc.error as Record<string, unknown>).message
-                if (typeof em === "string") st.error = { message: em }
-              }
-            }
-            const tool: Record<string, unknown> = { type: "tool", state: st }
-            const name = typeof part.tool === "string" ? part.tool : typeof part.name === "string" ? part.name : undefined
-            if (name !== undefined) tool.tool = name
-            parts.push(tool)
-            continue
-          }
-          // step-start / step-finish / compaction / patch / snapshot / 未知型別：丟棄。
-        } catch { /* 單 part 壞數據：跳過 */ }
-      }
-      out.push({ info, parts })
-    } catch { /* 單則壞數據：跳過 */ }
-  }
-  return out
-}
-
-async function handleGetSessionMessages(key: string, id: string): Promise<Response> {
-  const state = getOwnedSession(key, id)
-  if (!state) return jsonError(404, "session not found", "not_found", "not_found")
-  const cursor = {
-    event_counter: state.eventCounter,
-    replay_first_id: state.replayBuffer.length > 0 ? state.replayBuffer[0].id : null,
-  }
-  try {
-    const res = await fetch(`${OPENCODE_URL}/session/${state.opencodeSessionId}/message`, {
-      headers: opencodeHeaders(),
-      signal: AbortSignal.timeout(30_000),
-    })
-    if (!res.ok) {
-      return Response.json({ messages: [], ...cursor, fallback: "replay_only" })
-    }
-    const msgs: unknown = await res.json()
-    if (!Array.isArray(msgs) || msgs.length === 0) {
-      return Response.json({ messages: [], ...cursor, fallback: "replay_only" })
-    }
-    // 成功路徑體積大（實測單會話 452KB），瘦身後再 gzip 傳輸；降級路徑體積小維持原樣。
-    const payload = { messages: slimHistoryMessages(msgs), ...cursor }
-    return new Response(gzipSync(Buffer.from(JSON.stringify(payload))), {
-      headers: { "Content-Type": "application/json", "Content-Encoding": "gzip" },
-    })
-  } catch {
-    return Response.json({ messages: [], ...cursor, fallback: "replay_only" })
-  }
-}
 
 async function handleTranscript(key: string, id: string, req: Request): Promise<Response> {
   const state = getOwnedSession(key, id)
@@ -6623,7 +5656,7 @@ async function handleQuota(key: string): Promise<Response> {
   return Response.json(quotaPayload(await fetchBalance(key)))
 }
 
-async function emitQuotaChanged(state: SessionState): Promise<void> {
+export async function emitQuotaChanged(state: SessionState): Promise<void> {
   try {
     const balance = await fetchBalance(state.apiKey)
     // Don't fire a quota.changed carrying "unknown" — a frontend that renders it
@@ -6663,7 +5696,7 @@ function opencodeErrorCode(err: unknown): string {
   return "backend_error"
 }
 
-function emitSessionError(state: SessionState, code: string, message: string): void {
+export function emitSessionError(state: SessionState, code: string, message: string): void {
   // Always log: a session.error that only exists in the browser costs a VPS dig
   // to diagnose. Codes/messages here are model-provider text, never credentials.
   console.error(`[gateway] session.error code=${code} message=${message}`)
@@ -7357,7 +6390,7 @@ async function appendLedger(entry: LedgerEntry): Promise<void> {
   }
 }
 
-async function appendLedgerFor(state: SessionState, overrides: Partial<LedgerEntry>): Promise<void> {
+export async function appendLedgerFor(state: SessionState, overrides: Partial<LedgerEntry>): Promise<void> {
   try {
     await appendLedger({
       ts: new Date().toISOString(),
@@ -7394,646 +6427,7 @@ async function handleCanvasStateRead(req: Request): Promise<Response> {
   })
 }
 
-// ─────────────────────────── Wave C：Agent 操作畫布（canvas.ops 下發/回執）
-//
-// 兩條通道，核心共用：
-//  1) 快照上行：前端（經站點代理）POST /agent/v1/sessions/:id/canvas/state 存壓縮
-//     快照；loopback 等價端點 POST /internal/canvas/state（body 帶 session_id）。
-//     opencode 的 canvas_get_state 工具經 GET /internal/canvas/snapshot 讀取。
-//     注意：既有 GET /internal/canvas/state（讀隨訊息上送的 canvasSummary）語義不動。
-//  2) ops 下發：工具 POST /internal/canvas/dispatch-ops → 經該 session 的 SSE 發
-//     canvas.ops 事件 { request_id, ops, label? }，掛起等前端回執；前端執行後
-//     POST /agent/v1/sessions/:id/canvas/ops-result（loopback 等價 /internal/canvas/ops-result）
-//     resolve 對應 pending。逾時（預設 30s）回 OPS_TIMEOUT。
 
-const CANVAS_STATE_MAX_BYTES = 512 * 1024
-const CANVAS_STATE_TTL_MS = 24 * 60 * 60 * 1000 // 2026-08-29：30min → 24h（保存線對齊「至少 24h」；重啟另有 DB 鏡像回灌）
-const CANVAS_OPS_TIMEOUT_MS = Number.parseInt(process.env.CANVAS_OPS_TIMEOUT_MS || "30000", 10) || 30_000
-const CANVAS_OPS_MAX = 100
-const CANVAS_OP_TYPES = new Set([
-  "add_node",
-  "update_node",
-  "delete_nodes",
-  "connect_nodes",
-  "delete_connections",
-  "select_nodes",
-  "set_viewport",
-  "run_generation",
-  "set_project_meta",
-])
-
-interface CanvasSnapshotEntry {
-  state: unknown
-  updatedAt: number
-}
-
-// 畫布快照存放。key 統一收斂到 gateway sessionId（session 可解析時），
-// 讓 opencode session id / gateway session id 兩種呼叫方命中同一份。
-// 前置聲明：markDirty（早於本行定義）引用 canvasStates，const 提升安全
-// （markDirty 只在請求處理時執行，遠晚於模組頂層求值）。
-const canvasStates = new Map<string, CanvasSnapshotEntry>()
-
-function canvasKeyFor(sessionId: string): string {
-  const state = resolveSession(sessionId)
-  return state ? state.sessionId : sessionId
-}
-
-// 惰性 TTL 清理：每次讀寫順手掃（條目數 = 活躍畫布數，量級小）。
-function sweepCanvasStates(): void {
-  const now = Date.now()
-  for (const [k, v] of canvasStates) {
-    if (now - v.updatedAt > CANVAS_STATE_TTL_MS) canvasStates.delete(k)
-  }
-}
-
-function storeCanvasState(
-  sessionId: string,
-  stateValue: unknown,
-): { ok: true; bytes: number; updatedAt: number } | { ok: false; status: number; message: string } {
-  let bytes = 0
-  try {
-    bytes = Buffer.byteLength(JSON.stringify(stateValue), "utf-8")
-  } catch {
-    return { ok: false, status: 400, message: "state is not serializable" }
-  }
-  if (bytes > CANVAS_STATE_MAX_BYTES) {
-    return { ok: false, status: 413, message: `state exceeds ${CANVAS_STATE_MAX_BYTES} bytes` }
-  }
-  sweepCanvasStates()
-  const updatedAt = Date.now()
-  canvasStates.set(canvasKeyFor(sessionId), { state: stateValue, updatedAt })
-  return { ok: true, bytes, updatedAt }
-}
-
-// 工具/內部讀取最新快照；無快照回 null。
-function getCanvasState(sessionId: string): CanvasSnapshotEntry | null {
-  sweepCanvasStates()
-  return canvasStates.get(canvasKeyFor(sessionId)) ?? null
-}
-
-// ---- 畫布事件持久化（2026-08-27 修復）----
-// 斷鏈根因：autoCreateCanvasUnit / emitCanvasResult 只對 SSE 發 canvas.node.* 事件，
-// 從不寫 canvasStates，導致 GET /internal/canvas/snapshot 永遠 has_state:false，
-// 前端刷新後畫布全丟。修復：事件發生的同一瞬間，把它套用到該 session 的快照
-// state（節點 upsert / 連線 upsert），並隨 session 防抖落盤（canvasSnapshot
-// 欄位），gateway 重啟後懶加載時回灌 canvasStates。
-// 前端若已上行過自己的完整 state（storeCanvasState），之後的事件疊加其上——
-// 同一 data 語義，不衝突。
-
-interface PersistableCanvasState {
-  nodes?: Record<string, unknown>
-  connections?: Record<string, unknown>
-  [k: string]: unknown
-}
-
-// 讀（無則建）該 session 的可變快照形狀；盡量沿用前端上行 state 的既有欄位
-// （如 nodes/connections 陣列），缺什麼補什麼，不覆蓋前端已有資料。
-function mutableCanvasStateOf(sessionId: string): PersistableCanvasState {
-  const key = canvasKeyFor(sessionId)
-  const snap = canvasStates.get(key)
-  if (snap && snap.state && typeof snap.state === "object") {
-    return snap.state as PersistableCanvasState
-  }
-  const fresh: PersistableCanvasState = { nodes: {}, connections: {} }
-  canvasStates.set(key, { state: fresh, updatedAt: Date.now() })
-  return fresh
-}
-
-function nodesArray(cs: PersistableCanvasState): Record<string, unknown>[] {
-  if (!Array.isArray(cs.nodes)) cs.nodes = []
-  return cs.nodes as Record<string, unknown>[]
-}
-
-function connectionsArray(cs: PersistableCanvasState): Record<string, unknown>[] {
-  if (!Array.isArray(cs.connections)) cs.connections = []
-  return cs.connections as Record<string, unknown>[]
-}
-
-function touchCanvasSnapshot(sessionId: string, cs: PersistableCanvasState): void {
-  canvasStates.set(canvasKeyFor(sessionId), { state: cs, updatedAt: Date.now() })
-}
-
-// canvas.node.created → 節點 upsert（以 node.id 為鍵，重放安全）。
-function applyCanvasNodeCreated(sessionId: string, payload: unknown): void {
-  const node = (payload as { node?: unknown })?.node
-  if (!node || typeof node !== "object") return
-  const id = (node as { id?: unknown }).id
-  if (typeof id !== "string" || !id) return
-  const cs = mutableCanvasStateOf(sessionId)
-  const arr = nodesArray(cs)
-  const idx = arr.findIndex((n) => n && n.id === id)
-  if (idx >= 0) arr[idx] = node as Record<string, unknown>
-  else arr.push(node as Record<string, unknown>)
-  touchCanvasSnapshot(sessionId, cs)
-}
-
-// canvas.node.connected → 連線 upsert（以 connection.id 為鍵，重放安全）。
-function applyCanvasNodeConnected(sessionId: string, payload: unknown): void {
-  const conn = (payload as { connection?: unknown })?.connection
-  if (!conn || typeof conn !== "object") return
-  const id = (conn as { id?: unknown }).id
-  if (typeof id !== "string" || !id) return
-  const cs = mutableCanvasStateOf(sessionId)
-  const arr = connectionsArray(cs)
-  const idx = arr.findIndex((c) => c && c.id === id)
-  if (idx >= 0) arr[idx] = conn as Record<string, unknown>
-  else arr.push(conn as Record<string, unknown>)
-  touchCanvasSnapshot(sessionId, cs)
-}
-
-// canvas.node.updated → 對目標節點做 metadata 淺合併（patch 套用到 metadata）。
-// 淺合併即可：現有 patch 欄位（status/content/cost_coins/progress）皆為純量或
-// 獨立小物件，覆寫語義正確。
-function applyCanvasNodeUpdated(sessionId: string, payload: unknown): void {
-  const p = (payload ?? {}) as { node_id?: unknown; patch?: unknown }
-  if (typeof p.node_id !== "string" || !p.node_id) return
-  if (!p.patch || typeof p.patch !== "object") return
-  const key = canvasKeyFor(sessionId)
-  const snap = canvasStates.get(key)
-  if (!snap || !snap.state || typeof snap.state !== "object") return
-  const cs = snap.state as PersistableCanvasState
-  const arr = Array.isArray(cs.nodes) ? (cs.nodes as Record<string, unknown>[]) : []
-  const node = arr.find((n) => n && n.id === p.node_id)
-  if (!node) return
-  const md = node.metadata && typeof node.metadata === "object" ? (node.metadata as Record<string, unknown>) : (node.metadata = {})
-  Object.assign(md, p.patch)
-  touchCanvasSnapshot(sessionId, cs)
-}
-
-// canvas.node.deleted → 從快照移除節點（若有）。
-function applyCanvasNodeDeleted(sessionId: string, payload: unknown): void {
-  const p = (payload ?? {}) as { node_id?: unknown; node_ids?: unknown }
-  const ids = new Set<string>()
-  if (typeof p.node_id === "string") ids.add(p.node_id)
-  if (Array.isArray(p.node_ids)) for (const x of p.node_ids) if (typeof x === "string") ids.add(x)
-  if (ids.size === 0) return
-  const key = canvasKeyFor(sessionId)
-  const snap = canvasStates.get(key)
-  if (!snap || !snap.state || typeof snap.state !== "object") return
-  const cs = snap.state as PersistableCanvasState
-  if (Array.isArray(cs.nodes)) {
-    cs.nodes = (cs.nodes as Record<string, unknown>[]).filter((n) => !(n && typeof n.id === "string" && ids.has(n.id)))
-  }
-  if (Array.isArray(cs.connections)) {
-    cs.connections = (cs.connections as Record<string, unknown>[]).filter(
-      (c) => !(c && ((typeof c.fromNodeId === "string" && ids.has(c.fromNodeId)) || (typeof c.toNodeId === "string" && ids.has(c.toNodeId)))),
-    )
-  }
-  touchCanvasSnapshot(sessionId, cs)
-}
-
-interface CanvasOpsResult {
-  ok: boolean
-  error?: string
-  created_node_ids?: string[]
-}
-
-interface PendingCanvasOps {
-  sessionKey: string
-  settle: (result: CanvasOpsResult) => void
-}
-
-const pendingCanvasOps = new Map<string, PendingCanvasOps>()
-
-function validateCanvasOps(ops: unknown): { ok: true; ops: unknown[] } | { ok: false; message: string } {
-  if (!Array.isArray(ops) || ops.length === 0) return { ok: false, message: "ops must be a non-empty array" }
-  if (ops.length > CANVAS_OPS_MAX) return { ok: false, message: `too many ops (max ${CANVAS_OPS_MAX})` }
-  for (const op of ops) {
-    const type = op && typeof op === "object" ? (op as { type?: unknown }).type : undefined
-    if (typeof type !== "string" || !CANVAS_OP_TYPES.has(type)) {
-      return { ok: false, message: `invalid op type: ${String(type)}` }
-    }
-  }
-  return { ok: true, ops }
-}
-
-// 下發一批畫布操作：經 SSE 對該 session 發 canvas.ops，掛起等前端回執。
-// 前端暫時斷線也照發（事件進 replay buffer，重連即補），靠逾時兜底。
-function dispatchCanvasOps(
-  state: SessionState,
-  ops: unknown[],
-  label?: string,
-  timeoutMs: number = CANVAS_OPS_TIMEOUT_MS,
-): Promise<{ request_id: string; result: CanvasOpsResult }> {
-  const request_id = `cop_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      pendingCanvasOps.delete(request_id)
-      reject(Object.assign(new Error("canvas ops timeout"), { code: "OPS_TIMEOUT", request_id }))
-    }, timeoutMs)
-    pendingCanvasOps.set(request_id, {
-      sessionKey: state.sessionId,
-      settle: (result) => {
-        clearTimeout(timer)
-        pendingCanvasOps.delete(request_id)
-        resolve({ request_id, result })
-      },
-    })
-    emitToSession(state, "canvas.ops", { request_id, ops, ...(label ? { label } : {}) })
-  })
-}
-
-function resolveCanvasOps(sessionId: string, requestId: string, result: CanvasOpsResult): boolean {
-  const pending = pendingCanvasOps.get(requestId)
-  if (!pending) return false
-  if (pending.sessionKey !== canvasKeyFor(sessionId)) return false
-  pending.settle(result)
-  return true
-}
-
-function sanitizeOpsResult(body: Record<string, unknown>): CanvasOpsResult {
-  const created = Array.isArray(body.created_node_ids)
-    ? (body.created_node_ids.filter((v) => typeof v === "string") as string[]).slice(0, 100)
-    : undefined
-  return {
-    ok: body.ok === true,
-    ...(typeof body.error === "string" && body.error ? { error: body.error.slice(0, 400) } : {}),
-    ...(created && created.length > 0 ? { created_node_ids: created } : {}),
-  }
-}
-
-// POST /internal/canvas/state — loopback 快照寫入（body 帶 session_id）。
-async function handleCanvasStateWrite(req: Request): Promise<Response> {
-  let body: { session_id?: unknown; state?: unknown }
-  try {
-    body = (await req.json()) as { session_id?: unknown; state?: unknown }
-  } catch {
-    return jsonError(400, "invalid json body", "bad_request", "bad_request")
-  }
-  if (typeof body.session_id !== "string" || !body.session_id) {
-    return jsonError(400, "session_id is required", "bad_request", "bad_request")
-  }
-  if (body.state === null || body.state === undefined || typeof body.state !== "object") {
-    return jsonError(400, "state (object) is required", "bad_request", "bad_request")
-  }
-  const stored = storeCanvasState(body.session_id, body.state)
-  if (!stored.ok) {
-    const code = stored.status === 413 ? "payload_too_large" : "bad_request"
-    return jsonError(stored.status, stored.message, code, code)
-  }
-  return Response.json({ ok: true, bytes: stored.bytes, updated_at: stored.updatedAt })
-}
-
-// GET /internal/canvas/snapshot — 工具讀最新快照（與既有 GET /internal/canvas/state 分開）。
-async function handleCanvasSnapshotRead(req: Request): Promise<Response> {
-  const url = new URL(req.url)
-  const sessionId = url.searchParams.get("session_id")
-  if (!sessionId) return jsonError(400, "session_id is required", "bad_request", "bad_request")
-  const snap = getCanvasState(sessionId)
-  return Response.json({
-    ok: true,
-    has_state: snap !== null,
-    state: snap?.state ?? null,
-    updated_at: snap?.updatedAt ?? null,
-  })
-}
-
-// POST /internal/media/upload — agent 素材入庫：服務端下載外部影片/音頻 URL →
-// 平台存儲（image-data uploads 目錄，公網面 store.tinchak0207.xyz/image-data/files/）。
-// 外部 URL 直連常被 Cloudflare 403 挑戰攔截、/v1/uploads 拒收 video——
-// 影片/音頻素材一律先經此端點入庫取得平台 URL，再注入工作流節點。
-// 鑑權同其他 session 類 internal 路由：分發層 loopback 門 + session_id 解析。
-async function handleMediaUpload(req: Request): Promise<Response> {
-  const url = new URL(req.url)
-  const sessionId = url.searchParams.get("session_id")
-  if (!sessionId) return Response.json({ ok: false, error: "session_id is required" }, { status: 400 })
-  // 死线③同构（2026-09-19 片头曲 404 实锤）：子代理 opencode session 只在
-  // byChildOc 注册表里，resolveSession 三段解析查无记录 → music_gen 的
-  // uploadAudio 在 Expert 子会话内一律 404 "session not found"（生成成功、
-  // 上传全挂）。最小修：命中活跃子会话时落盘归属父会话（同一用户，存储口径
-  // 不变）；父会话已被逐出/收尾则维持 404 原语义。
-  const session = resolveSession(sessionId) ?? subagentParentState(sessionId)
-  if (!session) return Response.json({ ok: false, error: "session not found" }, { status: 404 })
-  let body: { url?: unknown; path_b64?: unknown; filename?: unknown }
-  try {
-    body = (await req.json()) as { url?: unknown; path_b64?: unknown; filename?: unknown }
-  } catch {
-    return Response.json({ ok: false, error: "invalid json body" }, { status: 400 })
-  }
-  const MAX_BYTES = 200 * 1024 * 1024
-  let buf: Buffer
-  let total = 0
-  let contentType = ""
-  let outExt: string
-  // 本地成片以 base64 位元組上傳：video_upload 工具跑在 opencode-server 沙箱（PrivateTmp=yes）內，
-  // 讀得到 agent 寫進私有 /tmp 的成片；網關進程（PrivateTmp=no）讀不到該私有 /tmp，故由工具讀檔傳
-  // 位元組、網關不碰 agent FS。仍校驗大小/視頻音頻圖片擴展名，保持「僅媒體」契約。
-  if (typeof body.path_b64 === "string" && body.path_b64.trim()) {
-    buf = Buffer.from(body.path_b64, "base64")
-    total = buf.length
-    if (total === 0) return Response.json({ ok: false, error: "上传内容为空" }, { status: 400 })
-    if (total > MAX_BYTES) {
-      return Response.json({ ok: false, error: `file too large (${total} bytes, limit 200MB)` }, { status: 413 })
-    }
-    const fname = typeof body.filename === "string" ? body.filename : ""
-    const srcExt = path.extname(fname).toLowerCase() || ".mp4"
-    contentType = contentTypeForExt(srcExt)
-    if (!contentType.startsWith("video/") && !contentType.startsWith("audio/") && !contentType.startsWith("image/")) {
-      return Response.json({ ok: false, error: `不支持的文件类型 "${srcExt}"（仅接受视频/音频/图片）` }, { status: 415 })
-    }
-    outExt = srcExt.replace(/^\./, "")
-  } else if (typeof body.url === "string" && body.url.trim()) {
-    const src = body.url.trim()
-    let upstream: Response
-    try {
-      upstream = await fetch(src, { signal: AbortSignal.timeout(120_000), redirect: "follow" })
-    } catch (e) {
-      return Response.json({ ok: false, error: `download failed: ${(e as Error).message}` }, { status: 502 })
-    }
-    if (!upstream.ok) {
-      return Response.json({ ok: false, error: `upstream responded http ${upstream.status}` }, { status: 502 })
-    }
-    contentType = (upstream.headers.get("content-type") || "").split(";")[0].trim().toLowerCase()
-    if (!contentType.startsWith("video/") && !contentType.startsWith("audio/") && !contentType.startsWith("image/")) {
-      return Response.json({ ok: false, error: `unsupported content-type "${contentType || "none"}"（仅接受 video/*、audio/* 或 image/*）` }, { status: 415 })
-    }
-    const contentLength = Number(upstream.headers.get("content-length") || "0")
-    if (Number.isFinite(contentLength) && contentLength > MAX_BYTES) {
-      return Response.json({ ok: false, error: `file too large (${contentLength} bytes, limit 200MB)` }, { status: 413 })
-    }
-    const reader = upstream.body?.getReader()
-    if (!reader) return Response.json({ ok: false, error: "upstream returned empty body" }, { status: 502 })
-    const chunks: Buffer[] = []
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      total += value.byteLength
-      if (total > MAX_BYTES) {
-        await reader.cancel().catch(() => {})
-        return Response.json({ ok: false, error: "file too large (limit 200MB)" }, { status: 413 })
-      }
-      chunks.push(Buffer.from(value))
-    }
-    if (total === 0) return Response.json({ ok: false, error: "upstream returned empty body" }, { status: 502 })
-    outExt = contentType.startsWith("video/")
-      ? "mp4"
-      : contentType.startsWith("audio/")
-        ? "mp3"
-        : contentType.includes("jpeg")
-          ? "jpg"
-          : contentType.includes("webp")
-            ? "webp"
-            : contentType.includes("gif")
-              ? "gif"
-              : "png"
-    buf = Buffer.concat(chunks)
-  } else {
-    return Response.json({ ok: false, error: "url or path_b64 (string) is required" }, { status: 400 })
-  }
-  const name = `media-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${outExt}`
-  const outDir = "/opt/image-data-api/data/uploads"
-  try {
-    const { writeFile } = await import("node:fs/promises")
-    await mkdir(outDir, { recursive: true })
-    await writeFile(path.join(outDir, name), buf)
-  } catch (e) {
-    console.error("[gateway] media upload persist failed:", e)
-    return Response.json({ ok: false, error: "failed to persist media file" }, { status: 500 })
-  }
-  const publicUrl = `https://store.tinchak0207.xyz/image-data/files/uploads/${name}`
-  console.log(`[gateway] media upload: session=${sessionId} bytes=${total} type=${contentType} -> ${publicUrl}`)
-  return Response.json({ ok: true, url: publicUrl, bytes: total, content_type: contentType })
-}
-
-// POST /internal/canvas/dispatch-ops — opencode canvas_* 工具的下發入口。
-// 阻塞至前端回執或逾時；timeout_ms 僅供測試縮短，上限即預設值。
-async function handleCanvasDispatchOps(req: Request): Promise<Response> {
-  let body: { session_id?: unknown; ops?: unknown; label?: unknown; timeout_ms?: unknown }
-  try {
-    body = (await req.json()) as { session_id?: unknown; ops?: unknown; label?: unknown; timeout_ms?: unknown }
-  } catch {
-    return jsonError(400, "invalid json body", "bad_request", "bad_request")
-  }
-  if (typeof body.session_id !== "string" || !body.session_id) {
-    return jsonError(400, "session_id is required", "bad_request", "bad_request")
-  }
-  const state = resolveSession(body.session_id)
-  if (!state) return jsonError(404, "session not found", "not_found", "not_found")
-  const v = validateCanvasOps(body.ops)
-  if (!v.ok) return jsonError(400, v.message, "bad_request", "bad_request")
-  const label = typeof body.label === "string" && body.label ? body.label.slice(0, 200) : undefined
-  const rawTimeout = typeof body.timeout_ms === "number" && Number.isFinite(body.timeout_ms) ? body.timeout_ms : CANVAS_OPS_TIMEOUT_MS
-  const timeoutMs = Math.max(1_000, Math.min(CANVAS_OPS_TIMEOUT_MS, rawTimeout))
-  try {
-    const { request_id, result } = await dispatchCanvasOps(state, v.ops, label, timeoutMs)
-    return Response.json({ ok: true, request_id, result })
-  } catch (e) {
-    const err = e as { code?: string; request_id?: string }
-    if (err?.code === "OPS_TIMEOUT") {
-      return Response.json(
-        { ok: false, code: "OPS_TIMEOUT", request_id: err.request_id ?? null, error: "前端未在時限內回執畫布操作結果" },
-        { status: 504 },
-      )
-    }
-    console.error("[gateway] canvas dispatch-ops error:", e)
-    return jsonError(500, "canvas ops dispatch failed", "server_error", "server_error")
-  }
-}
-
-// POST /internal/canvas/ops-result — loopback 回執（body 帶 session_id）。
-async function handleCanvasOpsResultInternal(req: Request): Promise<Response> {
-  let body: Record<string, unknown>
-  try {
-    body = (await req.json()) as Record<string, unknown>
-  } catch {
-    return jsonError(400, "invalid json body", "bad_request", "bad_request")
-  }
-  const sessionId = typeof body.session_id === "string" ? body.session_id : ""
-  const requestId = typeof body.request_id === "string" ? body.request_id : ""
-  if (!sessionId || !requestId) {
-    return jsonError(400, "session_id and request_id are required", "bad_request", "bad_request")
-  }
-  if (typeof body.ok !== "boolean") {
-    return jsonError(400, "ok (boolean) is required", "bad_request", "bad_request")
-  }
-  const matched = resolveCanvasOps(sessionId, requestId, sanitizeOpsResult(body))
-  return Response.json({ ok: true, matched })
-}
-
-// POST /agent/v1/sessions/:id/canvas/state — 前端（經站點代理）快照上行。
-async function handleCanvasStatePublic(key: string, id: string, req: Request): Promise<Response> {
-  const state = getOwnedSession(key, id)
-  if (!state) return jsonError(404, "session not found", "not_found", "not_found")
-  let body: { state?: unknown }
-  try {
-    body = (await req.json()) as { state?: unknown }
-  } catch {
-    return jsonError(400, "invalid json body", "bad_request", "bad_request")
-  }
-  if (body.state === null || body.state === undefined || typeof body.state !== "object") {
-    return jsonError(400, "state (object) is required", "bad_request", "bad_request")
-  }
-  const stored = storeCanvasState(state.sessionId, body.state)
-  if (!stored.ok) {
-    const code = stored.status === 413 ? "payload_too_large" : "bad_request"
-    return jsonError(stored.status, stored.message, code, code)
-  }
-  return Response.json({ ok: true, bytes: stored.bytes, updated_at: stored.updatedAt })
-}
-
-// GET /agent/v1/sessions/:id/canvas/state — 前端（經站點代理）快照下行。
-// 2026-08-29 修復：站點路由 GET /api/agent/sessions/:id/canvas-state 代理到這裡，
-// 但本網關此前只有 POST 沒有 GET → 刷新/恢復會話必然 404。語義對齊
-// GET /internal/canvas/snapshot；getOwnedSession 內含 DB 懶恢復（canvasStates 回灌），
-// 進程重啟/閒置回收後照樣讀得到。
-async function handleCanvasStatePublicGet(key: string, id: string): Promise<Response> {
-  const state = getOwnedSession(key, id)
-  if (!state) return jsonError(404, "session not found", "not_found", "not_found")
-  const snap = getCanvasState(state.sessionId)
-  return Response.json({
-    ok: true,
-    has_state: snap !== null,
-    state: snap?.state ?? null,
-    updated_at: snap?.updatedAt ?? null,
-  })
-}
-
-// POST /agent/v1/sessions/:id/canvas/ops-result — 前端（經站點代理）回執。
-async function handleCanvasOpsResultPublic(key: string, id: string, req: Request): Promise<Response> {
-  const state = getOwnedSession(key, id)
-  if (!state) return jsonError(404, "session not found", "not_found", "not_found")
-  let body: Record<string, unknown>
-  try {
-    body = (await req.json()) as Record<string, unknown>
-  } catch {
-    return jsonError(400, "invalid json body", "bad_request", "bad_request")
-  }
-  const requestId = typeof body.request_id === "string" ? body.request_id : ""
-  if (!requestId) return jsonError(400, "request_id is required", "bad_request", "bad_request")
-  if (typeof body.ok !== "boolean") {
-    return jsonError(400, "ok (boolean) is required", "bad_request", "bad_request")
-  }
-  const matched = resolveCanvasOps(state.sessionId, requestId, sanitizeOpsResult(body))
-  return Response.json({ ok: true, matched })
-}
-
-// ─────────────────────────── TTS（配音）工具支持
-//
-// 背景：novel_film 8 環承諾裡的「配音」環此前是牆上菜單——劇本表按 4.5 字/秒
-// 折算了秒數但整條鏈路沒有任何 TTS 消費方。此端點把配音變成真實可調用的
-// 最小閉環：同步快速調用（不走 poller），輸入台詞文本，產出音頻 URL。
-//
-// 誠實原則（honest-error）：2026-08-30 起 TTS_UPSTREAM 指向本機 edge-tts-proxy(127.0.0.1:8893，
-// /opt/edge-tts/，Microsoft edge-tts 免 key 中文音色)；此前 Groq playai-tts 已下架、orpheus 被 org 條款鎖死：
-// - Groq playai-tts 已 decommissioned；canopylabs/orpheus-* 需 org 條款接受
-//   且只有英文/阿拉伯文音色，無中文；
-// - 平台 image.tinchak0207.xyz /v1/models 無任何 TTS 條目（seed_audio、
-//   qwen_audio_tts、text2speech_v2 只存在於 higgsfield 快照文檔，未上線）；
-// - new-api 渠道表只有 gpt-image-2 / nano-banana-pro，無 TTS 渠道。
-// 所以本端點的上游調用路徑是「探測 → 上游不存在 → 誠實報錯」，不接任何
-// 不穩定的外部免費 API 湊數。上游接入後只需改 TTS_UPSTREAM 一處。
-
-const TTS_UPSTREAM = {
-  // Groq audio proxy（VPS 本機 8892，透傳 api.groq.com，KEY 在 .env）
-  base: process.env.TTS_UPSTREAM_BASE || "http://127.0.0.1:8892",
-  speechPath: "/openai/v1/audio/speech",
-  model: process.env.TTS_UPSTREAM_MODEL || "canopylabs/orpheus-v1-english",
-  voice: process.env.TTS_UPSTREAM_VOICE || "tara",
-}
-
-interface TtsProbeResult {
-  available: boolean
-  note: string
-}
-
-/** 探測 TTS 上游是否真的能產中文音頻（帶 60s 負緩存避免反覆打壞渠道）。 */
-let ttsProbeCache: { at: number; result: TtsProbeResult } | null = null
-async function probeTtsUpstream(signal?: AbortSignal): Promise<TtsProbeResult> {
-  if (ttsProbeCache && Date.now() - ttsProbeCache.at < 60_000) return ttsProbeCache.result
-  let result: TtsProbeResult
-  try {
-    const res = await fetch(`${TTS_UPSTREAM.base}${TTS_UPSTREAM.speechPath}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: TTS_UPSTREAM.model,
-        input: "测",
-        voice: TTS_UPSTREAM.voice,
-        response_format: "mp3",
-      }),
-      signal: signal ?? AbortSignal.timeout(20_000),
-    })
-    if (res.ok) {
-      const buf = await res.arrayBuffer()
-      const head = new Uint8Array(buf.slice(0, 3))
-      const looksLikeAudio = buf.byteLength > 64 && (head[0] === 0x49 || head[0] === 0x52 || head[0] === 0xff)
-      result = looksLikeAudio
-        ? { available: true, note: "上游可用" }
-        : { available: false, note: "上游返回 200 但載荷不是音頻" }
-    } else {
-      const bodyText = await res.text().catch(() => "")
-      let msg = bodyText.slice(0, 200)
-      try {
-        const j = JSON.parse(bodyText)
-        msg = (j?.error?.message || msg).slice(0, 200)
-      } catch { /* keep raw */ }
-      result = { available: false, note: `上游 HTTP ${res.status}: ${msg}` }
-    }
-  } catch (e) {
-    result = { available: false, note: `上游不可達: ${e instanceof Error ? e.message : String(e)}` }
-  }
-  ttsProbeCache = { at: Date.now(), result }
-  return result
-}
-
-/**
- * POST /agent/v1/tts { text, voice?, session 帶 Bearer key }
- * 同步調用：成功 → { ok, url, cost_coins, chars }；上游不可用 → 503 誠實錯誤。
- * 定價一律走 pricing-and-validation.ts 的 estimateTtsCoins（工具側不硬編碼）。
- */
-async function handleTts(key: string, req: Request): Promise<Response> {
-  let body: { text?: string; voice?: string }
-  try {
-    body = (await req.json()) as { text?: string; voice?: string }
-  } catch {
-    return jsonError(400, "invalid json body", "bad_request", "bad_request")
-  }
-  const text = typeof body.text === "string" ? body.text.trim() : ""
-  if (!text) return jsonError(400, "text is required", "bad_request", "bad_request")
-  if (text.length > 2000) return jsonError(400, "text too long (max 2000 chars)", "bad_request", "bad_request")
-
-  const probe = await probeTtsUpstream()
-  if (!probe.available) {
-    return jsonError(
-      503,
-      `配音（TTS）上游暂不可用：${probe.note}。台词已收到，但当前无法真实生成音轨；请如实告知用户，勿编造音频链接。`,
-      "tts_unavailable",
-      "tts_unavailable",
-    )
-  }
-
-  // 上游可用路徑（目前現實中走不到，保留完整閉環以便上游接入後即刻生效）
-  try {
-    const res = await fetch(`${TTS_UPSTREAM.base}${TTS_UPSTREAM.speechPath}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: TTS_UPSTREAM.model,
-        input: text,
-        voice: body.voice || TTS_UPSTREAM.voice,
-        response_format: "mp3",
-      }),
-      signal: AbortSignal.timeout(60_000),
-    })
-    if (!res.ok) {
-      const msg = (await res.text().catch(() => "")).slice(0, 200)
-      return jsonError(502, `TTS upstream error: ${msg}`, "tts_upstream_error", "tts_upstream_error")
-    }
-    const buf = await res.arrayBuffer()
-    if (buf.byteLength < 64) {
-      return jsonError(502, "TTS upstream returned empty audio", "tts_empty_audio", "tts_empty_audio")
-    }
-    const id = `tts_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`
-    const fileName = `${id}.mp3`
-    await mkdir(TTS_AUDIO_DIR, { recursive: true })
-    await Bun.write(path.join(TTS_AUDIO_DIR, fileName), buf)
-    const cost_coins = estimateTtsCoins("tts-zh", text)
-    const url = `${TTS_PUBLIC_BASE}/${fileName}`
-    return Response.json({ ok: true, url, chars: text.length, cost_coins, format: "mp3" })
-  } catch (e) {
-    return jsonError(502, `TTS upstream error: ${e instanceof Error ? e.message : String(e)}`, "tts_upstream_error", "tts_upstream_error")
-  }
-}
 
 /**
  * 時間線端點族（B1，2026-08-31）：REQ-EDIT-01 可計算時間線 + REQ-EDIT-05 版本/決策日誌。
@@ -8162,127 +6556,6 @@ async function handleTimelineRoutes(key: string, req: Request, pathname: string)
     return jsonError(500, e instanceof Error ? e.message : String(e), "server_error", "timeline_error")
   }
 }
-async function handleConfirmRequest(req: Request): Promise<Response> {  let body: {
-    session_id?: string
-    request_id?: string
-    amount_coins?: number
-    description?: string
-    model?: string
-    task_id?: string
-  }
-  try {
-    body = (await req.json()) as {
-      session_id?: string
-      request_id?: string
-      amount_coins?: number
-      description?: string
-      model?: string
-      task_id?: string
-    }
-  } catch {
-    return jsonError(400, "invalid json body", "bad_request", "bad_request")
-  }
-  const { session_id, request_id } = body
-  if (!session_id || !request_id) {
-    return jsonError(400, "session_id and request_id are required", "bad_request", "bad_request")
-  }
-  const state = resolveSession(session_id)
-  if (!state) return jsonError(404, "session not found", "not_found", "not_found")
-
-  // Idempotent by request_id. A re-post of a live request must NOT supersede it:
-  // superseding used to resolve the earlier waiter to false, which with a polling
-  // caller would read as "user denied" even though nobody had answered yet.
-  const settled = state.resolvedConfirms.get(request_id)
-  if (settled) return Response.json({ status: settled.outcome, request_id })
-  if (state.pendingConfirms.has(request_id)) {
-    return Response.json({ status: "pending", request_id }, { status: 202 })
-  }
-
-  const amount = typeof body.amount_coins === "number" ? body.amount_coins : 0
-  const description = typeof body.description === "string" ? body.description : ""
-
-  // 互动模式=auto：扣费确认不经用户，注册即批准（settleConfirm 内部落账+emit
-  // confirm.resolved；工具下一次轮询 /internal/confirm-status 直接拿到 approved）。
-  // 不 emit confirm.request（用户不看确认卡）。余额不足仍会被预检/结算拒掉，
-  // 402 预算闸与批间 midBatchBudgetGate 不受影响（系统级安全，不是提问）。
-  if (normalizeUserSettings(loadUserSettings(state.apiKey)).interaction_mode === "auto") {
-    state.pendingConfirms.set(request_id, {
-      timer: setTimeout(() => {}, 0),
-      ledger: { amount_coins: amount, task_id: body.task_id, model: body.model },
-    })
-    settleConfirm(state, request_id, "approved")
-    return Response.json({ status: "approved", request_id })
-  }
-
-  const timer = setTimeout(() => {
-    // Expiry is a real outcome and must be announced. The old code only deleted
-    // the entry, so the frontend's confirm card stayed on screen forever with no
-    // way to tell it had already been decided against.
-    settleConfirm(state, request_id, "expired")
-  }, CONFIRM_TIMEOUT_MS)
-  state.pendingConfirms.set(request_id, {
-    timer,
-    ledger: { amount_coins: amount, task_id: body.task_id, model: body.model },
-  })
-
-  // Surface the billing request to the frontend, then return immediately.
-  // This request does NOT block for the answer: CONFIRM_TIMEOUT_MS (15 min)
-  // exceeds both Bun's idleTimeout ceiling (255s) and the caller's abort, so
-  // the tool polls /internal/confirm-status instead.
-  emitToSession(state, "confirm.request", { request_id, amount_coins: amount, description })
-
-  return Response.json({ status: "pending", request_id }, { status: 202 })
-}
-
-/**
- * Move a confirm from pending to resolved, announce it, and bill it.
- * Single path for all three ways a confirm can end (user answer, expiry,
- * session teardown) so none of them can forget to emit confirm.resolved.
- */
-function settleConfirm(state: SessionState, requestId: string, outcome: ConfirmOutcome): boolean {
-  const pending = state.pendingConfirms.get(requestId)
-  if (!pending) return false
-  clearTimeout(pending.timer)
-  state.pendingConfirms.delete(requestId)
-
-  state.resolvedConfirms.set(requestId, { outcome, resolvedAt: Date.now() })
-  if (state.resolvedConfirms.size > CONFIRM_RESOLVED_CAP) {
-    const oldest = state.resolvedConfirms.keys().next()
-    if (!oldest.done) state.resolvedConfirms.delete(oldest.value)
-  }
-
-  const approved = outcome === "approved"
-  emitToSession(state, "confirm.resolved", { request_id: requestId, approved })
-
-  if (approved) {
-    if (pending.ledger) {
-      void appendLedgerFor(state, {
-        kind: "confirm",
-        event: "approved",
-        cost_coins: pending.ledger.amount_coins,
-        task_id: pending.ledger.task_id,
-        model: pending.ledger.model,
-      })
-    }
-    void emitQuotaChanged(state)
-    // 2026-08-29 整改：批量執行 confirm 批准 → 觸發續跑（非阻塞設計的另一半）。
-    // 未註冊回調的 confirm（image_* 單筆等）不受影響。
-    const wfCont = wfGenerateContinuations.get(requestId)
-    if (wfCont) {
-      wfGenerateContinuations.delete(requestId)
-      workflowGenerateApproved.set(wfCont.wfid, { amount: wfCont.amount, nodes: wfCont.nodes }) // 本批（節點數）已批；擴計畫須重批
-      // 修 2：批量批准額記入 billing 真值——節點失敗時據此寫 refund 終態行，
-      // workflow_status 據此回真值對象。
-      workflowBilling.set(wfCont.wfid, {
-        confirmed_coins: wfCont.amount,
-        refunded_coins: 0,
-        billing_status: "confirmed",
-      })
-      runWfGenerate(wfCont.state, wfCont.wfid)
-    }
-  }
-  return true
-}
 
 /** Poll target for the tool: has the user answered this confirm yet? */
 async function handleConfirmStatus(req: Request): Promise<Response> {
@@ -8405,82 +6678,6 @@ async function handleSessionTasks(req: Request): Promise<Response> {
   return Response.json({ ok: true, tasks: [...state.sessionTasks.values()] })
 }
 
-// ---- 任务失败 fan-out（poller 经 /internal/emit 调）----
-// 与 emitImageDone 对称：SSE 帧 + 畫布節點 error 態 + ledger。前端 Settler
-// 用 task_id（或按序）把 loading 節點置 error，resume 的 agent 文案講人話。
-function emitImageFailed(
-  state: SessionState,
-  task_id: string,
-  reason: string,
-  refunded: boolean,
-): void {
-  // 0831：任務終態登記（失敗）。task 可能不在登記表（重啟丟內存態），不可假設存在。
-  const t = state.sessionTasks.get(task_id)
-  if (t) {
-    t.status = "failed"
-  }
-  // S5a：失敗原因人話化（原文保留），SSE 幀與畫布 errorDetails 補 human_message。
-  const human = humanMessageFor(reason, undefined)
-  emitToSession(state, "image.failed", { task_id, reason, refunded, human_message: human })
-  const unitId = task_id ? state.canvasUnitByTask.get(task_id) : undefined
-  if (unitId) {
-    emitToSession(state, "canvas.node.updated", {
-      unit_id: unitId,
-      node_id: `${unitId}-image`,
-      patch: { status: "error", errorDetails: reason, human_message: human },
-    })
-  }
-  void appendLedgerFor(state, {
-    kind: "image",
-    event: refunded ? "refunded" : "failed",
-    task_id,
-  })
-}
-
-async function handleInternalEmit(req: Request): Promise<Response> {
-  let body: { session_id?: string; event?: string; data?: unknown }
-  try {
-    body = (await req.json()) as { session_id?: string; event?: string; data?: unknown }
-  } catch {
-    return jsonError(400, "invalid json body", "bad_request", "bad_request")
-  }
-  const { session_id, event, data } = body
-  if (!session_id || typeof event !== "string") {
-    return jsonError(400, "session_id and event are required", "bad_request", "bad_request")
-  }
-  if (!INTERNAL_EMIT_ALLOWED.has(event) && !CANVAS_EMIT_ALLOWED.has(event)) {
-    return jsonError(400, `event not allowed: ${event}`, "bad_request", "bad_request")
-  }
-  const state = resolveSession(session_id)
-  if (!state) return jsonError(404, "session not found", "not_found", "not_found")
-
-  if (event === "image.done") {
-    const d = (data ?? {}) as { url?: string; cost_coins?: number; task_id?: string }
-    // Shared deduped path so /internal/emit and the opencode translation can
-    // never announce the same url twice in one session. Awaited so the redirect
-    // resolution completes before the poller gets its 200 and resumes the
-    // session — otherwise the agent could describe an image the UI lacks.
-    await emitImageDone(state, d.url ?? "", d.cost_coins, d.task_id)
-  } else if (event === "image.failed") {
-    const d = (data ?? {}) as { task_id?: string; reason?: string; refunded?: boolean }
-    if (d.task_id) emitImageFailed(state, d.task_id, d.reason ?? "生成失敗", d.refunded === true)
-  } else if (event === "session.error") {
-    const d = (data ?? {}) as { code?: string; message?: string }
-    emitSessionError(state, d.code ?? "backend_error", d.message ?? "session error")
-  } else if (event === "quota.changed") {
-    void emitQuotaChanged(state)
-  } else if (event === "tool.result") {
-    emitToSession(state, "tool.result", data ?? {})
-  } else if (event === "tool.progress") {
-    emitToSession(state, "tool.progress", data ?? {})
-  } else if (CANVAS_EMIT_ALLOWED.has(event)) {
-    // 畫布事件：純透傳，Frontend reducer 決定如何渲染。不做任何加工，
-    // 保留 data 原樣。這讓 opencode 的 canvas_* 工具可以直接 speak 畫布
-    // 指令給前端，而不需要透過 message.delta 繞一圈。
-    emitToSession(state, event, data ?? {})
-  }
-  return Response.json({ ok: true })
-}
 
 /**
  * POST /agent/v1/optimize-prompt — 同步影片 prompt 優化。
