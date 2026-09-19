@@ -1,0 +1,494 @@
+// gateway 第二階段重構 Wave2（2026-09-19）：opencode-event-handler.ts
+// 機械抽取自 index.ts 3620–4085（handleOpencodeEvent 全函數：session.idle 收盤、
+// failover/jitter 兩台重試機、critic pass、Jev gate、question freeze、video release、
+// compaction 觸發）。除檔頭註釋/import/declare 佔位/export 前綴外與源逐行等價（diff 驗 identical）。
+// 依賴解析：Wave1/已建模組真 import；仍住 index.ts 未 export 的符號 declare 佔位（stage1 記憶 subagent 佔位符法）。
+import { sessions, markDirty, findSessionByOpenCodeId } from "./sessions-core.ts"
+import { emitToSession, stripStaleTurnTextFromReplay } from "./sse-core.ts"
+import { emitSanitizedDelta, stripOutboundFlush } from "./outbound-sanitize.ts"
+import { opencodeHeaders, scheduleTitleFetch } from "./opencode-client.ts"
+import { MESSAGE_ROLE_CAP, OPENCODE_URL, PART_TEXT_TRACK_CAP, STEP_COST_LOG_CAP, SUPPRESSED_PART_CAP, TURN_MAX_RETRIES, TURN_RETRY_DELAY_MS } from "./constants-gateway.ts"
+import type { SessionState } from "./types-gateway.ts"
+import { subagentHandlesSession, handleSubagentEvent, maybeRunMachineCriticPass, snapshotPendingCriticTargets } from "./subagent"
+import { runJevShadowGate } from "./jev-gate"
+import { emitSessionError } from "./emit-helpers.ts"
+import { eventSessionId, handleToolPartUpdate, finalizeIdleStep, isAssistantMessage, boundMap, boundSet } from "./events-translate.ts"
+import { noteTurnUsage, noteTurnPromptDispatch } from "./metrics-gw.ts"
+import { noteAssistantHeadForRecall, scheduleMemoryRecallPrefetch } from "./memory-wiring.ts"
+import { clearWatchdogTimer, clearHeartbeatTimer, clearAckTimer, clearErrorStallTimer, clearMidturnStallTimer, clearQuietNoticeTimer, armWatchdogTimer, emitTurnEndSummaryIfSilent, emitRecoveryClosingIfSilent, releasePendingVideoWorkflows } from "./timers-gw.ts"
+import { markProviderDegraded, isDeadAccountError, isDeadModelError, personaModelForAttempt } from "./model-registry.ts"
+import { maybeCompactSession } from "./messages-gw.ts"
+import { opencodeErrorCode, opencodeErrorMessage } from "./emit-helpers.ts"
+
+// TODO(來自 events-translate.ts): eventSessionId(index.ts 2715)/handleToolPartUpdate(index.ts 3309)
+//   —— W7 並行在建 events-translate.ts，建成後改真 import。
+
+// TODO(整合 Wave2): 以下為仍住 index.ts 且尚未 export 的符號 declare 佔位
+// （bun build 只轉譯不查名，建得過；index.ts 補 export 或符號遷出後替換為真 import）。
+
+export function handleOpencodeEvent(event: any): void {
+  try {
+    const opencodeSessionId = eventSessionId(event)
+    if (!opencodeSessionId) return
+    // 子代理运行时：子 opencode 会话的事件翻译成 subagent.* 帧发到父会话，
+    // 不进入常规翻译（常规路径按 opencode id 查 sessions，子会话查不到会直接丢）。
+    if (subagentHandlesSession(opencodeSessionId)) {
+      handleSubagentEvent(event, opencodeSessionId)
+      return
+    }
+    const state = findSessionByOpenCodeId(opencodeSessionId)
+    if (!state) return
+
+    // session.error (if it ever appears) or any event carrying properties.error.
+    const err = event?.properties?.error
+    if (event?.type === "session.error" || err != null) {
+      emitSessionError(state, opencodeErrorCode(err), opencodeErrorMessage(err))
+      return
+    }
+
+    switch (event?.type) {
+      case "message.updated": {
+        // The ONLY place a role appears. message.part.updated carries no role at
+        // all (verified: part keys are id/messageID/sessionID/text/type), so
+        // without this map the user's own prompt — which arrives as a text part
+        // on a user-role message — gets echoed back as assistant output.
+        const info = event?.properties?.info
+        const mid = typeof info?.id === "string" ? info.id : undefined
+        const role = typeof info?.role === "string" ? info.role : undefined
+        if (mid && role) {
+          state.messageRole.set(mid, role)
+          boundMap(state.messageRole, MESSAGE_ROLE_CAP)
+        }
+        // Phase 0 觀測：assistant message 自帶的 tokens/cache 用量（事件本來就送到，
+        // 零額外往返）；事件不含此欄位時保持 null，不補請求、不加延遲。
+        noteTurnUsage(state, info)
+        break
+      }
+      case "message.part.delta": {
+        // 中止殘響（2026-09-02）：用戶中止後 opencode 排隊中的遲到 delta 全丟，
+        // 直到下一輪 prompt 起點重置（turnAborted L4165）。
+        if (state.turnAborted) break
+        const p = event.properties ?? {}
+        // A delta says nothing about its part's type, and reasoning parts also
+        // append to a "text" field — so field==="text" alone would stream chain
+        // of thought to the UI. suppressedParts is populated from the
+        // message.part.updated that always precedes a part's deltas (verified by
+        // raw capture: part.updated -> delta -> delta).
+        // NOTE 2026-08-11: 產品要顯示思維鏈，reasoning part 不再丟棄 —— 改發
+        // reasoning.delta 事件（同 shape，前端 reducer 累積到 assistant.reasoning）。
+        if (p.field === "text" && typeof p.delta === "string" && p.delta.length > 0 && isAssistantMessage(state, p.messageID)) {
+          if (typeof p.partID === "string" && state.suppressedParts.has(p.partID)) {
+            emitToSession(state, "reasoning.delta", { text: p.delta })
+            // 罪狀2 根因修復（2026-08-29）：思維鏈字數計入 turn 活動——
+            // 讓 ack/心跳/看門狗/停滯哨（turnHasActivity）知道模型活著。
+            state.turnReasoningChars = (state.turnReasoningChars ?? 0) + p.delta.length
+            // P2b 刀2：非空 reasoning 文字 = 本 step 不空（trim 後才算）。
+            if (p.delta.trim().length > 0) state.stepHasReasoning = true
+            break
+          }
+          // S2b：出站文本先過內部框架段剝離器（## Objective 等四段）。
+          // turnTextChars 仍按原文計——剝到零輸出代表模型確實說過話，不觸發抖動重試。
+          emitSanitizedDelta(state, p.partID, p.delta)
+          state.turnTextChars = (state.turnTextChars ?? 0) + p.delta.length
+          // §7 召回輔助：留本輪正文頭部（buildRecallQuery 只需前 200 字元）。
+          noteAssistantHeadForRecall(state, p.delta)
+          // P2b 刀2：非空正文 delta = 本 step 不空。
+          if (p.delta.trim().length > 0) state.stepHasText = true
+          if (typeof p.partID === "string") {
+            const rec = state.partTextEmitted.get(p.partID)
+            if (rec) {
+              rec.emittedLen += p.delta.length
+            } else {
+              state.partTextEmitted.set(p.partID, { emittedLen: p.delta.length })
+              boundMap(state.partTextEmitted, PART_TEXT_TRACK_CAP)
+            }
+          }
+        }
+        break
+      }
+      case "message.part.updated": {
+        const part = event?.properties?.part
+        if (!part || typeof part !== "object") break
+        switch (part.type) {
+          case "text": {
+            // 中止殘響（2026-09-02）：part.text 是累積全文，partTextEmitted 在 idle
+            // 已清——中止輪的補發會整段當「新後綴」重發（N2 同場景根因），丟棄。
+            if (state.turnAborted) break
+            const full = typeof part.text === "string" ? part.text : ""
+            const id = typeof part.id === "string" ? part.id : ""
+            if (full.length === 0 || !id) break
+            // Drop unless we know this belongs to an assistant message. Losing a
+            // frame is recoverable; echoing the user's own prompt back as AI
+            // output is not.
+            if (!isAssistantMessage(state, part.messageID)) break
+            // P2b 刀2：非空正文 text part = 本 step 不空。
+            if (full.trim().length > 0) state.stepHasText = true
+            const rec = state.partTextEmitted.get(id) ?? { emittedLen: 0 }
+            // part.text is the cumulative full text; deltas already covered the
+            // prefix, so only emit the un-emitted suffix. A part that never
+            // produced deltas has emittedLen 0 and emits its full text once.
+            if (full.length > rec.emittedLen) {
+              // S2b：part.updated 補發的後綴同樣過剝離器（與 delta 路徑共用逐 part 狀態）。
+              emitSanitizedDelta(state, id, full.slice(rec.emittedLen))
+              state.turnTextChars = (state.turnTextChars ?? 0) + (full.length - rec.emittedLen)
+              // §7 召回輔助：補發後綴同樣入正文頭部（無 delta 的單幀 part 靠這條）。
+              noteAssistantHeadForRecall(state, full.slice(rec.emittedLen))
+              rec.emittedLen = full.length
+              state.partTextEmitted.set(id, rec)
+              boundMap(state.partTextEmitted, PART_TEXT_TRACK_CAP)
+            }
+            break
+          }
+          case "tool":
+            handleToolPartUpdate(state, part)
+            // P2b 刀2：出現 tool = 本 step 不空。
+            state.stepHasTool = true
+            break
+          case "step-finish": {
+            const cost = typeof part.cost === "number" ? part.cost : 0
+            const msgId = typeof part.messageID === "string" ? part.messageID : undefined
+            if (cost > 0 && msgId && !state.stepCostLogged.has(msgId)) {
+              state.stepCostLogged.add(msgId)
+              boundSet(state.stepCostLogged, STEP_COST_LOG_CAP)
+              // Agent-model cost — never surfaced to the user as a charge.
+              console.debug(`[gateway] step-finish: agent cost ${cost} (message ${msgId})`)
+            }
+            // P2b 刀2：step 收尾結算——空 step 累計，任一活動歸零；達閾值即止損。
+            finalizeIdleStep(state)
+            state.stepOpen = false
+            break
+          }
+          case "reasoning":
+          default: {
+            // reasoning/step-start and unknown part types never reach the
+            // frontend. Record the partID so its deltas are dropped too — the
+            // delta event carries no type of its own.
+            const pid = typeof part.id === "string" ? part.id : ""
+            // P2b 刀2：step-start = 新 step 起點（上一 step 若無 step-finish 先結算）。
+            if (part.type === "step-start") {
+              if (state.stepOpen) finalizeIdleStep(state)
+              state.stepOpen = true
+              state.stepHasTool = false
+              state.stepHasText = false
+              state.stepHasReasoning = false
+            } else if (
+              part.type === "reasoning" &&
+              typeof part.text === "string" &&
+              part.text.trim().length > 0
+            ) {
+              state.stepHasReasoning = true
+            }
+            if (pid) {
+              state.suppressedParts.add(pid)
+              boundSet(state.suppressedParts, SUPPRESSED_PART_CAP)
+            }
+            break
+          }
+        }
+        break
+      }
+      case "session.idle": {
+        // R8-B 工單 #3/#9（2026-08-29）：question pending 期間 turn 凍結——
+        // 不發 turn.done、不觸發抖動重試/壓縮/視頻放行。R8 實錘：turn.done
+        // 4604.8 早於 question.replied 4634.5（死而復生型狀態）。等待期用戶
+        // 可見性由 question 心跳（armQuestionHeartbeat，30s/幀）接管。
+        if (state.pendingQuestions.size > 0) {
+          console.log(
+            `[gateway] R8-B turn frozen: question pending (x${state.pendingQuestions.size}) — skip turn.done — session=${state.sessionId}`,
+          )
+          state.turnFrozenByQuestion = true
+          clearWatchdogTimer(state)
+          clearHeartbeatTimer(state)
+          clearAckTimer(state)
+          clearErrorStallTimer(state)
+          clearMidturnStallTimer(state)
+          clearQuietNoticeTimer(state)
+          break
+        }
+        // 會話摘要標題（2026-09-12）：正常收尾路徑（非 question 凍結分支）掛
+        // 一次性抓取鏈——首條消息後 opencode 異步生成標題，idle 即回合結束，
+        // 2s/8s/20s 重試覆蓋生成滯後；已有標題則空轉返回（冪等）。
+        scheduleTitleFetch(state)
+        // End-of-turn signal: stop the frontend typing indicator and drop the
+        // per-partID delta tracking for this turn to bound memory.
+        // messageRole and toolInvokeSeen are deliberately NOT cleared: a late
+        // part or duplicate status for this turn would otherwise be treated as
+        // unknown-role (dropped) or as a fresh call (re-emitted). Both are
+        // capped, so they stay bounded without clearing.
+        // S2b：回合結束——把各 part 剝離器扣住的最後一行安全文本吐出
+        //（在 turn.done 之前，前端收幀順序不亂），再清狀態。
+        // 中止窗口不吐剝離器尾巴（2026-09-02）：用戶叫停後再冒一句=沒停乾淨。
+        if (!state.turnAborted) {
+          for (const [, stripSt] of state.partStripState) {
+            const tail = stripOutboundFlush(stripSt)
+            if (tail) emitToSession(state, "message.delta", { text: tail })
+          }
+        }
+        // S1 補口（2026-08-29，smoke agent_text 根因）：一次性「英文已略去」提示
+        // 此前只在流式路徑（emitSanitizedDelta）發——單行英文回覆（無尾換行）
+        // 整段扣在 pending、idle 時被 flush 壓掉 → 零 message.delta 靜默 turn.done
+        // （實錘：同英文 prompt 四輪，模型三輪回英文，md-count 全為 0）。
+        // flush 後補發同一條提示，避免整段回覆無聲消失。
+        if (!state.englishNoticeSent) {
+          for (const [, stripSt] of state.partStripState) {
+            if (stripSt.sawEnglish) {
+              state.englishNoticeSent = true
+              emitToSession(state, "turn.status", { text: "已自动略去一段英文内部思考，中文回复不受影响" })
+              break
+            }
+          }
+        }
+        // P2b 刀2：turn 結束——未收尾的 step 先結算，再清空轉止損狀態
+        //（idleNudgeSent 刻意不清：同 turn 週期只補一次，下一輪起點才重置）。
+        if (state.stepOpen) finalizeIdleStep(state)
+        state.stepOpen = false
+        state.idleSteps = 0
+        state.stepHasTool = false
+        state.stepHasText = false
+        state.stepHasReasoning = false
+        state.partStripState.clear()
+        state.partTextEmitted.clear()
+        state.stepCostLogged.clear()
+        // R2-A 看門狗：turn 正常結束（idle 到達），撤哨。
+        clearWatchdogTimer(state)
+        // N1 規格1：心跳 timer 撤銷（turn 已結束，不再補心跳）。
+        clearHeartbeatTimer(state)
+        // R4-A S3①：錯誤停滯看門狗同撤（turn 已收尾，不再追錯誤後的停滯）。
+        clearErrorStallTimer(state)
+        // R5-C：中段停滯哨同撤（turn 已收尾）。
+        clearMidturnStallTimer(state)
+        // R8-B 工單 #5：中段靜默通知同撤（turn 已收尾）。
+        clearQuietNoticeTimer(state)
+        // N1 規格3：turn 正常結束（turn.done 即將發出）——清 in-flight 打點。
+        state.lastTurnActiveAt = 0
+        markDirty(state)
+        // §7 prefetch（2026-09-15 PRD P0-4）：回合收尾後台預算下一回合的召回候選
+        //（用戶路徑零新增延遲；query = 本回合用戶消息 + 本輪 assistant 頭部）。
+        void scheduleMemoryRecallPrefetch(state)
+        // 抖動重試：本輪零文本輸出 = 上游模型抖動早死（finish=unknown）。
+        // 不發 turn.done（前端維持輸入中狀態），延遲後重放同一條 prompt。
+        // 注意（2026-08-29 罪狀2 修復時明確保留）：這裡及下面兩處重試判定刻意
+        // 只看 turnTextChars、不含 turnReasoningChars——思維鏈是「活著」的證據
+        // （歸 turnHasActivity 管），但「零正文」仍是抖動死亡的唯一特徵；
+        // 把 reasoning 算進來會讓「只思考不說話」的 turn 免於重投，禁止改回。
+        // 2026-08-31：上游模型错误 failover（每轮断线事故：shuai TLS 抖动 mid-turn 断）。
+        // jitter 重试刻意只覆盖「零正文」轮——正文/工具已流动的中途断线此前无人接手，
+        // turn 直接死。这里接管：零输出→重投原任务书；已有输出→注入续读指令
+        //（opencode 历史里有 partial assistant 消息，模型从中断点继续，不重复已完成步骤）。
+        // 取模与 jitter 同源：personaModelForAttempt 走 [persona 主模型, ...fallbacks]。
+        if (
+          state.turnUpstreamError &&
+          !state.turnAborted &&
+          (state.turnRetries ?? 0) < TURN_MAX_RETRIES
+        ) {
+          if (state.retryQueued) break // 重试已排队（jitter/failover），等它接手
+          state.retryQueued = true
+          const upstreamErr = state.turnUpstreamError
+          state.turnUpstreamError = null
+          const gen = state.turnGen ?? 0
+          const attempt = (state.turnRetries ?? 0) + 1
+          const hadOutput = (state.turnTextChars ?? 0) > 0 || Boolean(state.turnToolStarted)
+          const baseBody = state.lastPromptBody
+          // 2026-09-13 刀1（b-ai 餘額歸零事故教訓）：確定性「賬戶死」類錯誤（credit/balance/
+          // quota 耗盡）不是瞬態抖動——backoff＋整 turn 重投只會白等並繼續鞭打死賬戶。
+          // 命中即：給該 provider 打 60s 降權＋零退避＋直接進鏈上下一个活 provider
+          //（personaModelForAttempt 已過濾降權者，取鏈首即第一个活家）。429/過載/TLS
+          // 斷線等瞬態一律不動，仍走原 backoff 鏈。
+          const deadAccount = isDeadAccountError(upstreamErr)
+          // 修復4：死模型與死帳戶共享「零退避立即換下一個」的待遇（deadFast），
+          // 但只死帳戶參與降權標記——死模型降權整個 provider 會誤傷同家活模型
+          //（見 isDeadModelError 處註釋），故死模型只跳 backoff、不 markProviderDegraded。
+          const deadFast = deadAccount || isDeadModelError(upstreamErr)
+          // 修復1：降權對象＝實際 dispatch 的 provider（lastDispatchedModel），
+          // 缺席才回退 turn 起點模型（保守兼容）。baseBody.model 在 failover 換模後
+          // 不回寫，是事故裡張冠李戴的源頭，僅作 fallback 不再當主依據。
+          const degradedTarget = state.lastDispatchedModel?.providerID ?? baseBody?.model?.providerID
+          if (deadAccount && degradedTarget) {
+            markProviderDegraded(degradedTarget, upstreamErr.slice(0, 120))
+          }
+          const retryBody: NonNullable<SessionState["lastPromptBody"]> =
+            hadOutput || !baseBody
+              ? { parts: [{ type: "text", text: "（系统提示：上一轮回复因上游模型错误中断，请从中断处继续完成任务，不要重复已完成的步骤或工具调用）" }] }
+              : { ...baseBody, parts: baseBody.parts.map((pt) => ({ ...pt })) }
+          console.log(
+            `[gateway] turn failover: upstream error, schedule retry #${attempt} (hadOutput=${hadOutput} deadAccount=${deadAccount}) — session=${state.sessionId} error=${upstreamErr.slice(0, 160)}`,
+          )
+          setTimeout(async () => {
+            const cur = sessions.get(state.sessionId)
+            // 不看 turnTextChars（旧轮文本已计入，作让位条件会自杀）：
+            // 只看会话拆除/进入下一轮/用户打断三种让位。
+            if (!cur || (cur.turnGen ?? 0) !== gen || cur.turnAborted) return
+            try {
+              // 刀1：死賬戶取「降權過濾後鏈首」＝下一個活 provider（attempt=1 → pool[0]，
+              // 剛被打死的一家已不在 pool）；一般錯誤（含修復4死模型——不降權，鏈未變）
+              // 維持原取模輪轉。
+              const attemptModel = deadAccount
+                ? personaModelForAttempt(cur, 1)
+                : personaModelForAttempt(cur, attempt)
+              retryBody.model = attemptModel
+              // 修復1：重投後實際 dispatch 的模型同步記檔（降權判定用，見 failover 塊上方）。
+              cur.lastDispatchedModel = { providerID: attemptModel.providerID, modelID: attemptModel.modelID }
+              const res = await fetch(`${OPENCODE_URL}/session/${cur.opencodeSessionId}/prompt_async`, {
+                method: "POST",
+                headers: opencodeHeaders(),
+                body: JSON.stringify(retryBody),
+                signal: AbortSignal.timeout(10000),
+              })
+              if (!res.ok) throw new Error(`status ${res.status}`)
+              cur.turnRetries = attempt
+              cur.retryQueued = false
+              console.log(
+                `[gateway] turn failover #${attempt} dispatched model=${attemptModel.providerID}/${attemptModel.modelID} — session=${cur.sessionId}`,
+              )
+              // Phase 0 觀測：重投成功 = 同一 turn 的下一次嘗試（attempt+1）。
+              noteTurnPromptDispatch(cur, attemptModel.providerID, attemptModel.modelID)
+              // N2 同款：剥掉旧轮文本帧，断线重连不整段重放旧文案。
+              stripStaleTurnTextFromReplay(cur)
+              cur.turnToolStarted = false
+              armWatchdogTimer(cur)
+            } catch (e) {
+              console.error(`[gateway] turn failover #${attempt} failed:`, e)
+              cur.retryQueued = false
+              emitToSession(cur, "turn.done", {}) // 重试发不出去：放弃，别留前端挂着
+            }
+          }, deadFast ? 0 : TURN_RETRY_DELAY_MS)
+          break // 不发 turn.done：重试轮结束自然会发
+        }
+        if (
+          (state.turnTextChars ?? 0) === 0 &&
+          !state.turnAborted &&
+          state.lastPromptBody &&
+          (state.turnRetries ?? 0) < TURN_MAX_RETRIES
+        ) {
+          if (state.retryQueued) break // 重試已排隊，等它接手
+          state.retryQueued = true
+          const gen = state.turnGen ?? 0
+          const attempt = (state.turnRetries ?? 0) + 1
+          const body = state.lastPromptBody
+          console.log(`[gateway] turn jitter: schedule retry #${attempt} for ${state.sessionId}`)
+          setTimeout(async () => {
+            const cur = sessions.get(state.sessionId)
+            // 只看 turnTextChars（語義保留見上方注釋）：重投窗口內模型開口說正文才讓位。
+            if (!cur || (cur.turnGen ?? 0) !== gen || cur.turnAborted || (cur.turnTextChars ?? 0) > 0) return
+            try {
+              // 跨渠道 failover（2026-08-29）：重投前按 attempt 從鏈
+              // [persona 主模型, ...registry.bindings.fallbacks[persona]] 取模換模型，
+              // 根治「主/備模同源全死」事故。registry 異常時鏈只有主模型（行為=現狀）。
+              const attemptModel = personaModelForAttempt(cur, attempt)
+              const prevModel = body.model
+              if (
+                !prevModel ||
+                attemptModel.providerID !== prevModel.providerID ||
+                attemptModel.modelID !== prevModel.modelID
+              ) {
+                console.log(
+                  `[gateway] turn retry #${attempt} failover model=${attemptModel.providerID}/${attemptModel.modelID} — session=${cur.sessionId}`,
+                )
+              }
+              body.model = attemptModel
+              // 修復1：jitter 重投同樣記實際 dispatch 模型（與 failover 重投對稱）。
+              cur.lastDispatchedModel = { providerID: attemptModel.providerID, modelID: attemptModel.modelID }
+              const res = await fetch(`${OPENCODE_URL}/session/${cur.opencodeSessionId}/prompt_async`, {
+                method: "POST",
+                headers: opencodeHeaders(),
+                body: JSON.stringify(body),
+                signal: AbortSignal.timeout(10000),
+              })
+              if (!res.ok) throw new Error(`status ${res.status}`)
+              cur.turnRetries = attempt
+              cur.retryQueued = false
+              console.log(`[gateway] turn retry #${attempt} dispatched for ${cur.sessionId}`)
+              // Phase 0 觀測：jitter 重投成功 = 同一 turn 的下一次嘗試（attempt+1）。
+              noteTurnPromptDispatch(cur, attemptModel.providerID, attemptModel.modelID)
+              // N2：重試輪開始——把舊 turn 累積的文本幀從 replayBuffer 剝掉，
+              // 斷線重連不再整段重放舊文案（canvas/confirm 等狀態幀保留）。
+              stripStaleTurnTextFromReplay(cur)
+              // R2-A：重投輪同樣可能 turn 不啟動——重置標記並重新布哨。
+              cur.turnToolStarted = false
+              armWatchdogTimer(cur)
+            } catch (e) {
+              console.error(`[gateway] turn retry #${attempt} failed:`, e)
+              cur.retryQueued = false
+              emitToSession(cur, "turn.done", {}) // 重試發不出去：放棄，別讓前端掛著
+            }
+          }, TURN_RETRY_DELAY_MS)
+          break // 不發 turn.done：重試輪結束時自然會發
+        }
+        state.retryQueued = false
+        // R4-A S3①：抖動重試已耗盡且本輪全程零文本零工具 = 上游連續報錯/空轉，
+        // 舊路徑直接靜默 turn.done（R4 實錘：APIError 後 turn 空轉 5 分鐘無一句
+        // 中文解釋）——補誠實收尾話術再交棒。
+        // （下方判定同樣只看 turnTextChars——語義保留理由見抖動重試處注釋。）
+        if (
+          (state.turnTextChars ?? 0) === 0 &&
+          !state.turnToolStarted &&
+          !state.turnAborted &&
+          (state.turnRetries ?? 0) >= TURN_MAX_RETRIES
+        ) {
+          // 修復2：冪等收尾——連續第二個 idle 過同一終局門時，本輪已收過尾就直接
+          // 跳過（含下方 turn.done，不重發；09-19 事故 journal 成對 warn 實錘）。
+          // 旗標記「已收尾的 turnGen」，跨 turn 自然失效。
+          if (state.turnExhaustedClosedGen === (state.turnGen ?? 0)) break
+          state.turnExhaustedClosedGen = state.turnGen ?? 0
+          // 0919 誠實歸因（video-director 試產事故）：收尾幀不得一律「上游持续报错」
+          // ——真因是欠費時明說欠費（未提交/未扣費/充值前重試無效），是死模型時明說
+          // 渠道缺模型。turnUpstreamError 在 failover 塊被消費後置 null，但同輪
+          // 最後一次 session.error 會再記（6670 行），此時非空 = 重試鏈死因仍在。
+          const lastErr = state.turnUpstreamError ?? ""
+          const exhaustedText = isDeadAccountError(lastErr)
+            ? "连续几次自动重试都没能完成回复（上游渠道账户欠费：未提交、未扣费、无产物，充值前重试不会成功，请联系维护方）。\n"
+            : isDeadModelError(lastErr)
+              ? "连续几次自动重试都没能完成回复（上游渠道缺少该模型，已尝试自动换线仍未成功）。\n"
+              : "连续几次自动重试都没能完成回复（上游持续报错）。你上一条消息可能没有处理成功，请重新发送一次即可继续；若内容较长，建议让我分章/分段处理。\n"
+          emitToSession(state, "message.delta", { text: exhaustedText })
+          console.warn(`[gateway] S3① jitter retries exhausted with zero output, closing turn honestly — session=${state.sessionId} lastError=${lastErr.slice(0, 120) || "none"}`)
+        }
+        // R4-A S8：turn 收尾兜底匯報——本輪有節點落終態但零主動匯報時，
+        // 發一幀環名制中文總結（成功清單/失敗清單/下一步），杜絕悄悄收工。
+        emitTurnEndSummaryIfSilent(state)
+        // R5-C：恢復輪零小結零匯報時補強制結語（S8 讓位條件見函數註釋）。
+        emitRecoveryClosingIfSilent(state)
+        emitToSession(state, "turn.done", {})
+        // 刀 2（2026-09-15）：機器 critic pass —— 收盤判定點。
+        // 四輪實錄證明「叫 orchestrator 派 critic」無效（playbook 第 18 條四輪在場、四輪零派遣），
+        // 改由 gateway 在此直接派。判據門檻與有界性全在 maybeRunMachineCriticPass 內：
+        // beast + 有 Expert 交付 + 本輪零 critic 派遣 + 未聲明未經審核 + 每會話 ≤1 次。
+        // 非 beast / 無 Expert 交付 / 通用子代理路徑完全不受影響（待審清單為空即零動作）。
+        // 派遣非阻塞（內部 async），失敗只留一行 log，不影響 turn.done 已發的事實。
+        maybeRunMachineCriticPass(state, state.criticUnreviewedDeclared === true)
+        // 刀 1（2026-09-19）：Jev 測謊閘＋空殼欄初篩 — shadow 模式收盤消費點。
+        // fire-and-forget（內部 2s 超時、永不 throw、失敗只留一行 log）；
+        // 快照在本輪數據（brief 尾段/喚醒摘要/待審交付）後即刻清空 volatile。
+        // JEV_ENABLED ≠ true 時 runJevShadowGate 零動作（行為與部署前逐位等價）。
+        {
+          const briefTail = state.jevBriefTail ?? ""
+          const gateSummaries = state.jevGateSummaries ?? []
+          state.jevBriefTail = ""
+          state.jevGateSummaries = []
+          if (briefTail || gateSummaries.length > 0) {
+            void runJevShadowGate({
+              briefTail,
+              gateSummaries,
+              deliveries: snapshotPendingCriticTargets(state.sessionId),
+            })
+          }
+        }
+        // S6 規格2：turn 正常結束，ack timer 不再需要。
+        clearAckTimer(state)
+        // S6 規格3：質詢回覆完成 → 放行被凍結的視頻工作流（先釋放再壓縮）。
+        releasePendingVideoWorkflows(state)
+        // 回合結束是滾動摘要壓縮的觸發點：此刻無在途生成、訊息數穩定。
+        void maybeCompactSession(state)
+        break
+      }
+      default:
+        // session.updated / session.status / session.diff / session.created /
+        // server.heartbeat / server.connected -> no frontend event
+        break
+    }
+  } catch (e) {
+    // Never let one malformed event kill the SSE reader loop. Log the event type
+    // only — never the payload (tool inputs may contain user prompts).
+    console.error(`[gateway] opencode event translation failed: type=${event?.type}`)
+  }
+}

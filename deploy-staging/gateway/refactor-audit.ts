@@ -35,6 +35,8 @@ function semanticLines(path: string): { lines: string[]; count: number } {
       if (/\{\s*$/.test(trimmed) && !/from\s+["'][^"']+["']/.test(trimmed)) inImport = true;
       continue;
     }
+    // 再導出行（組合根橋接）：export { X } from "./y.ts" / export * from ...
+    if (/^export\s+(type\s*)?(\{[^}]*\}|\*)\s+from\s+["']/.test(trimmed)) continue;
     // 剝離 export 前綴（函數/常量/型別搬到模組後補的關鍵字）
     if (trimmed.startsWith("export ")) {
       line = trimmed.replace(/^export\s+(?=(const|let|var|function|async function|class|type|interface|enum|declare)\b)/, "");
