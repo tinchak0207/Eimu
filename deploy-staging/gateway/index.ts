@@ -44,10 +44,19 @@ import {
   initSubagent,
   subagentHandlesSession,
   subagentParentApiKey,
+  subagentParentState,
   handleSubagentEvent,
   handleSubagentDispatch,
   handleSubagentStatus,
+  recoverReworkRunsOnStartup,
+  maybeRunMachineCriticPass,
+  forgetCriticPassState,
+  snapshotPendingCriticTargets,
 } from "./subagent"
+// 刀 2（2026-09-15）：逃逸閥字樣純函數（機器 critic pass 的觸發判據之一）。
+import { declaresUnreviewed } from "./delivery-gate"
+// 刀 1（2026-09-19）：Jev 測謊閘＋空殼欄初篩（shadow 模式，只記 log）。
+import { runJevShadowGate, gateUserInput } from "./jev-gate"
 // ── PRD P0-4 全局記憶接線（2026-09-15，契約 MEMORY-INTERFACES.md §3.5/§4/§7/§8）──
 // memory-gate/memory-batch/memory-recall 三模組已落位且邏輯凍結（單測 50 綠），本檔只 import 接線。
 import {
@@ -191,6 +200,13 @@ interface SessionState {
   // 不進 transcript、用戶不可見；注入一次即棄（directiveInjected），換模板可覆蓋重注。
   sessionDirective?: string
   directiveInjected?: boolean
+  // ── 0918 前綴快取修復：尾端注入 payload 的去重指紋（volatile，不持久化）──
+  /** 上一次注入到「該輪 user 訊息尾端」的 gateway payload 的 sha256（見
+   *  handleSendMessage 的「野獸幀改附尾端」段與 appendSystemPayloadToTurnTail）。
+   *  同 byte 不重貼（內容已在歷史中，資訊量不變）→ context 不再每輪固定長
+   *  17.2k 字元。volatile：重啟後首輪必重貼一次；壓縮成功後清空（摘要會改寫
+   *  歷史，尾端 payload 可能被排除出上下文）。 */
+  lastTailPayloadHash?: string
   // 滾動摘要壓縮水位：上次 opencode summarize 後的訊息數與時間（持久化）。
   // 觸發條件 = 訊息數 ≥ SESSION_COMPACT_THRESHOLD 且自上次壓縮新增 ≥ 半個閾值。
   compact?: { lastCount: number; at: number }
@@ -205,16 +221,32 @@ interface SessionState {
   }
   /** §7 召回 query 的「上一輪 assistant 文本」：只留前 200 字元，turn 起點重置。 */
   turnAssistantHead?: string
+  // ── 刀 2（2026-09-15）：機器 critic pass 的逃生閥掃描（皆 volatile，不持久化）──
+  /** 本輪 assistant 正文的尾巴（32 字元滾動窗）：跨 chunk 邊界偵測「未經獨立審核」聲明。 */
+  criticEscapeTail?: string
+  /** 本輪正文已出現「未經獨立審核」自簽聲明 → 機器 critic pass 讓位（逃生閥）。 */
+  criticUnreviewedDeclared?: boolean
   // 抖動重試（2026-08-22）：turn 結束但零文本輸出 = 上游模型抖動死亡的特徵，
   // gateway 自動重發同一條 prompt（上限 TURN_MAX_RETRIES）。volatile，不持久化；
   // revive 後為 undefined，讀取處一律帶 ?? 預設值。
   lastPromptBody?: { parts: { type: string; text: string }[]; system?: string; model?: { providerID: string; modelID: string } } | null
+  // 修復1（2026-09-19 cn:deepseek-v4.1-flash 死鏈事故）：本輪「實際 dispatch 出去」
+  // 的模型（prompt 首投與 failover/jitter 重投都更新）。volatile。降權判定必須用它——
+  // lastPromptBody.model 是 turn 起點模型，failover 換模後不回寫，用舊值會把死帳戶
+  // 的錯誤記到無辜 provider 頭上（事故實錘：chaozhiyuan 403 五次誤標 hublinuxdo）。
+  lastDispatchedModel?: { providerID: string; modelID: string } | null
   turnGen?: number
   turnTextChars?: number
   // 罪狀2 根因修復（2026-08-29）：思維鏈字數。模型推理期間 reasoning.delta
   // 持續到達，此前不計入任何活動判定 → ack/心跳/看門狗/停滯哨在思考期誤判死寂。
   // 與 turnTextChars 同點重置；只進 turnHasActivity，不進零文本抖動重試判定。
   turnReasoningChars?: number
+  // 刀 1（2026-09-19）：Jev 測謊閘餵料（volatile，與 criticEscapeTail 同款生命週期）。
+  // jevBriefTail＝本輪 message.delta 累積尾段（測謊題的 brief）；jevGateSummaries＝
+  // 本輪子代理喚醒摘要頭（含【交付閘門·未達標】標記的事實面）。session.idle 收盤
+  // 消費後清空。
+  jevBriefTail?: string
+  jevGateSummaries?: string[]
   turnRetries?: number
   turnAborted?: boolean
   retryQueued?: boolean
@@ -279,6 +311,15 @@ interface SessionState {
   errorStallTimer?: ReturnType<typeof setTimeout> | null
   /** S3①：錯誤後告警幀是否已發（每 turn 一條，防刷屏）。 */
   errorStallAlerted?: boolean
+  /** 修復2（2026-09-19）：S3① 誠實收尾冪等——記「已收尾的 turnGen」。連續兩個
+   *  session.idle 都過終局門時只收尾一次（journal 成對 warn 實錘：message.delta＋
+   *  turn.done 各發兩次）。存 gen 而非 boolean：跨 turn（含 resume/wake 輪）自然
+   *  失效，不需各 turn 起點重置，也不會誤吞下一輪收尾。volatile。 */
+  turnExhaustedClosedGen?: number
+  /** 修復3a（2026-09-19）：本 turn 已發出的錯誤幀文案（humanize 後）清單——
+   *  emitSessionError 同文去重用；turn 起點清空。volatile，有界＝TURN_MAX_RETRIES
+   *  ＋少數非重試錯誤，設上限 32 防呆。 */
+  turnEmittedErrors?: string[]
   /** S3①：turn 內最後一次進度打點（message.delta / tool 幀刷新），停滯判定依據。 */
   turnProgressAt?: number
   /** S1：本 turn 是否已發過「英文內部思考已略去」提示（每 turn 一條）。 */
@@ -317,6 +358,14 @@ interface SessionState {
   sessionTitle?: string | null
   /** idle 標題抓取的一次性重試計時器（2s/8s/20s，拿到即全部 clear）。 */
   titleFetchTimers?: ReturnType<typeof setTimeout>[]
+  /** Phase 0 觀測（2026-09-18）：本輪分段延遲計時檔。volatile，不進持久化
+   *  白名單（persistence.serialize 是顯式子集，此欄不落盤）。turn.done 收檔；
+   *  未收尾的檔案由 handleAbortSession 或下一輪 beginTurnMetrics 補收。 */
+  turnMetrics?: TurnMetricsRecord | null
+  /** 兩段式首字（2026-09-18）：本輪 turn.plan 的去重/讓位狀態。volatile，不進
+   *  持久化白名單（persistence.serialize 是顯式子集，此欄不落盤）。gen = 已發起
+   *  計畫的 turnGen；emittedAt = 幀實際發出的時刻（null = 還在途/已放棄）。 */
+  planState?: { gen: number; emittedAt: number | null }
 }
 
 // 抖動重試參數：免費上游模型約三至四成 turn 異常早死（finish=unknown、零文本）。
@@ -334,6 +383,49 @@ const IDLE_STEP_NUDGE =
 // 算於 prompt_async 投遞後，再疊加投遞/事件轉譯延遲）——壓到 15s，保證含
 // 鏈路延遲也在 30s 線內。環境變量可覆蓋。
 const ACK_DELAY_MS = Number.parseInt(process.env.ACK_DELAY_MS || "15000", 10) || 15_000
+// ── 兩段式首字（2026-09-18）：turn.plan 幀 ──────────────────────────────
+// 病灶（實測）：重型 turn 首行「可見正文」在 +108.8s，小 session d_first_text_ms
+// 3,596–19,388ms——使用者開場乾等。實測可行：從 gateway 直連 provider 打
+// /chat/completions，帶 registry digest（1,943 字），首個 content token
+// 1,304–1,420ms、完整一行計畫 1,620–1,950ms，併發 4 路無退化。
+// 契約取捨：純文字「一行」契約（實測 reasoning_chars=0、首 content 1.3s）；
+// 不要用 JSON 契約（會先出 reasoning，首 content 落到 1,865–2,547ms，慢 0.8–1.1s）。
+// 路徑取捨：opencode/* 路徑多 ~3s 固定開銷 → 走直連 provider，不經 opencode。
+// 計費紅線：ledger 只在 emitImageDone / emitVideoDone / emitAudioDone /
+// recordWorkflowRefund / emitImageFailed / confirm-approved 六處寫入，文字回合
+// 零 ledger 寫入 → 本調用不重複扣費。**若未來新增「按 token 對用戶計費」，
+// 該機制必須顯式排除 turn.plan**（此處是一次不進模型上下文的旁路 LLM 調用）。
+const TURN_PLAN_ENABLED = process.env.TURN_PLAN_ENABLED !== "0"
+// 逾時預算（2026-09-18 在 VPS 上以 Bun fetch 實測定案）：關閉思考後
+// first_content 1,271ms／total 1,589ms，但**冷連線的 headers 單獨就要 3,197ms**，
+// 故給 4s 餘裕而非貼著 1.6s 卡死。舊值 2500 的後果實錘：三名候選全部 timeout
+// （hublinuxdo/a6api timeout、chaozhiyuan 403），計畫段整天零輸出。
+const TURN_PLAN_TIMEOUT_MS = Number.parseInt(process.env.TURN_PLAN_TIMEOUT_MS || "4000", 10) || 4_000
+// 輸出上限（同日實測定案）：舊值 160 會被 reasoning 吃光 → 串流跑完 chars=0、
+// 整個計畫段靜默失效（實錘 `chars=0`）。600 留足 reasoning 殘量。
+const TURN_PLAN_MAX_TOKENS = Number.parseInt(process.env.TURN_PLAN_MAX_TOKENS || "600", 10) || 600
+// 關閉思考（同日實測定案）：同一模型、同一 prompt、同樣 max_tokens=600 下
+//   reasoning_effort:"none"   → first_content 1,271ms、reasoning 0 字   ← 採用
+//   不加參數                  → first_content 2,186ms、reasoning 0 字
+//   enable_thinking:false     → first_content 4,195ms、reasoning 354 字
+//   /no_think 前綴            → first_content 9,355ms
+//   thinking:{type:disabled}  → first_content 7,749ms、reasoning 1,749 字（更慢，勿用）
+// 即「關掉思考」不是為了省 token，是為了把首字從 2.2s 拉到 1.3s。上游多為 OpenAI
+// 相容 relay，未知欄位一律忽略；設 0 可關（給嚴格校驗的上游當退路）。
+const TURN_PLAN_DISABLE_THINKING = process.env.TURN_PLAN_DISABLE_THINKING !== "0"
+const TURN_PLAN_MAX_CHARS = 160
+// 候選鏈上限（2026-09-18）：這一跳是全鏈最延遲敏感的一段，而上游任一渠道
+// 403/422/超時都會讓整個計畫段靜默失效。實錘：當日 persona 主模型多次 403、
+// registry fallbacks 內兩家 422/503，計畫段整天零輸出而日誌只有一句 skipped。
+// 併發打 N 條取最快成功者＝把上游 churn 由後端吸收，且延遲取候選中的最小值。
+// 候選來源＝plan_model → persona → default，續以 plan_fallbacks（選配）→ 該
+// persona 的 fallbacks。env 可覆寫。
+const TURN_PLAN_MAX_CANDIDATES = Number.parseInt(process.env.TURN_PLAN_MAX_CANDIDATES || "3", 10) || 3
+// 實測出來的最優契約，逐字照用（勿改寫：加欄位/換格式都會讓首 content 變慢）。
+const TURN_PLAN_SYSTEM_HEAD =
+  "你是执行规划器。根据下列 Expert 注册表，为用户请求写一段给用户看的中文计划。\n" +
+  "只输出一行，格式：打算这么做：<做什么>（先派 <expert id>）。\n" +
+  "禁止输出任何思考、分析过程、前言或 markdown 围栏。总长不超过 60 字。\n\n"
 // R2-A 看門狗：prompt_async 送達後 TURN_WATCHDOG_MS 內無 tool.invoke 且無
 // message.delta = turn 沒啟動（評測：295s 零幀）。先誠實告警再自動重投一次；
 // 再等一輪仍無動靜則判會話損壞，建議新開。環境變量可覆蓋（CI 可調短）。
@@ -396,6 +488,9 @@ const MEMORY_RECALL_MIN_SCORE = (() => {
   return Number.isFinite(n) ? n : 1.0
 })()
 const MEMORY_RECALL_ENABLED = memoryEnvBool(process.env.MEMORY_RECALL_ENABLED, true)
+// 0918 前綴快取修復：尾端注入 payload 的同 byte 去重開關。默認 ON（不重貼）；
+// SYSTEM_PAYLOAD_TAIL_DEDUPE=0 時每輪照舊重貼（回退鈕，行為回到「每輪都在」）。
+const SYSTEM_PAYLOAD_TAIL_DEDUPE = process.env.SYSTEM_PAYLOAD_TAIL_DEDUPE !== "0"
 // G8 verifier 與 PRD §5.6 oracle 抽檢模型（`provider/model`，契約 §5「換模型」；
 // §8 之外的 P1-1 新增 env）。未配置＝該閘跳過，批次報告誠實記 g8_skipped／sampling.skipped。
 const MEMORY_VERIFIER_MODEL = (process.env.MEMORY_VERIFIER_MODEL || "").trim()
@@ -987,9 +1082,6 @@ async function registerMasterExport(key: string, sid: string, presetId: MasterPr
       return
     }
     // sha256/byte_size 取導出檔實值（artifact 表 NOT NULL 欄，禁止拿 probe 缺值充數）
-    // 必須包成 Uint8Array：Bun 的 node:crypto `Hash.update` 只吃 string/Buffer/TypedArray/
-    // DataView，直接餵 `ArrayBuffer` 會拋 TypeError（「The "data" argument must be of type
-    // string or an instance of Buffer, TypedArray, or DataView」）——曾讓索引登記整條靜默失敗。
     const buf = new Uint8Array(await file.arrayBuffer())
     const sha256 = createHash("sha256").update(buf).digest("hex")
     const byteSize = buf.byteLength
@@ -1458,6 +1550,9 @@ function stripOutboundFlush(st: PartStripState): string {
 
 /** 統一出口：經剝離器後發 message.delta（無安全文本時靜默）。 */
 function emitSanitizedDelta(state: SessionState, partId: string | undefined, chunk: string): void {
+  // Phase 0 觀測：模型正文 delta 抵達 = t_first_text（本輪只記第一次；此函數是
+  // 兩條正文路徑（delta / part.updated 補發後綴）的唯一交匯點）。
+  markTurnFirst(state, "text")
   const pid = typeof partId === "string" && partId ? partId : "_turn"
   let st = state.partStripState.get(pid)
   if (!st) {
@@ -1476,6 +1571,248 @@ function emitSanitizedDelta(state: SessionState, partId: string | undefined, chu
     // R8-B 工單 #5：模型正文到達 = 用戶可見輸出刷新（靜默通知判定依據）。
     state.lastUserVisibleAt = Date.now()
   }
+}
+
+// ─── 兩段式首字（2026-09-18）：turn.plan ────────────────────────────────
+// 契約見檔頭常數區註釋。此處只做一件事：在回合受理後立刻 fire-and-forget 打一次
+// 直連 provider 的輕量調用，把「打算怎麼做」的一行計畫當成最早的用戶可見輸出。
+// 全程不可阻塞主線、不可影響 promptBody、不可冒充正文、失敗一律靜默。
+
+/** turn.plan 用的模型：bindings.plan_model（新增選配）→ bindings.persona[persona]
+ *  → bindings.default；形狀不合格一律 null（寧可不發計畫，絕不猜）。
+ *  刻意不走 personaModel()——它帶硬編碼回退，違反「不猜」原則。 */
+function planModel(state: SessionState): AgentModelRef | null {
+  const reg = loadAgentModelRegistry()
+  const b = reg?.bindings
+  if (!b) return null
+  const persona =
+    normalizeUserSettings(loadUserSettings(state.apiKey)).persona === "thoughtful" ? "thoughtful" : "efficient"
+  return bindingRef(b.plan_model) ?? bindingRef(b.persona?.[persona]) ?? bindingRef(b.default)
+}
+
+/** turn.plan 的候選鏈：主候選（plan_model → persona → default）＋ plan_fallbacks
+ *  （選配，供本段獨立策展：計畫要的是「快」，主鏈要的是「強」，判準不同）
+ *  ＋ 該 persona 的 fallbacks。去重、剔除缺 provider options 者，上限
+ *  TURN_PLAN_MAX_CANDIDATES。為什麼要鏈見該常數註釋。 */
+function planCandidates(state: SessionState): AgentModelRef[] {
+  const primary = planModel(state)
+  if (!primary) return []
+  const b = loadAgentModelRegistry()?.bindings
+  const persona =
+    normalizeUserSettings(loadUserSettings(state.apiKey)).persona === "thoughtful" ? "thoughtful" : "efficient"
+  const refs: Array<AgentModelRef | null> = [
+    primary,
+    ...(b?.plan_fallbacks ?? []).map((r) => bindingRef(r)),
+    ...(b?.fallbacks?.[persona] ?? []).map((r) => bindingRef(r)),
+  ]
+  const out: AgentModelRef[] = []
+  for (const ref of refs) {
+    if (!ref) continue
+    if (out.length >= TURN_PLAN_MAX_CANDIDATES) break
+    if (out.some((x) => x.providerID === ref.providerID && x.modelID === ref.modelID)) continue
+    if (!planProviderConn(ref.providerID)) continue
+    out.push(ref)
+  }
+  return out
+}
+
+/** 從 agent-models.json 的 providers.<id>.options.{baseURL,apiKey} 取連線資訊。
+ *  gateway 首例讀 providers[].options（此前只讀 bindings）→ 形狀嚴格防呆：
+ *  非字串/空值/非 http(s) 一律回 null（該回 null 就靜默跳過，絕不猜端點）。
+ *  apiKey 只在本函數回傳值內存活，永不落 log、永不進幀。 */
+function planProviderConn(providerID: string): { baseURL: string; apiKey: string } | null {
+  const prov = loadAgentModelRegistry()?.providers?.[providerID]
+  if (!prov || typeof prov !== "object") return null
+  const opts = (prov as { options?: unknown }).options
+  if (!opts || typeof opts !== "object") return null
+  const o = opts as { baseURL?: unknown; apiKey?: unknown }
+  if (typeof o.baseURL !== "string") return null
+  const base = o.baseURL.replace(/\/+$/, "")
+  if (!/^https?:\/\/[^\s]+$/i.test(base)) return null
+  return { baseURL: base, apiKey: typeof o.apiKey === "string" ? o.apiKey : "" }
+}
+
+/** 讀 OpenAI 相容 SSE 串流，只取 choices[0].delta.content——reasoning_content
+ *  一律丟棄（這是「首 content 1.3s」契約的前提）。攢夠 maxChars 即主動取消
+ *  上游串流（不為計畫多燒 token）。 */
+async function readSseContent(stream: ReadableStream<Uint8Array>, maxChars: number): Promise<string> {
+  const reader = stream.getReader()
+  const dec = new TextDecoder()
+  let buf = ""
+  let out = ""
+  try {
+    while (out.length < maxChars) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += dec.decode(value, { stream: true })
+      let nl = buf.indexOf("\n")
+      while (nl >= 0) {
+        const line = buf.slice(0, nl).trim()
+        buf = buf.slice(nl + 1)
+        if (line.startsWith("data:")) {
+          const payload = line.slice(5).trim()
+          if (payload && payload !== "[DONE]") {
+            try {
+              const j = JSON.parse(payload) as { choices?: Array<{ delta?: { content?: unknown } }> }
+              const c = j?.choices?.[0]?.delta?.content
+              if (typeof c === "string" && c) out += c
+            } catch {
+              // 非 JSON 行（上游註解/心跳）忽略：不影響其餘行解析。
+            }
+          }
+        }
+        nl = buf.indexOf("\n")
+      }
+    }
+  } finally {
+    try {
+      await reader.cancel()
+    } catch {
+      // 串流已結束/已取消：無需處理。
+    }
+  }
+  return out
+}
+
+/** 計畫文字正規化：去 markdown 圍欄、取「打算这么做」那行（模型有時仍會先鋪一句），
+ *  再截到 TURN_PLAN_MAX_CHARS。空字串 = 不可用（呼叫方據此靜默跳過）。 */
+function planLineFromText(raw: string): string {
+  const cleaned = raw.replace(/```[a-zA-Z]*\n?/g, "\n").trim()
+  if (!cleaned) return ""
+  const lines = cleaned
+    .split("\n")
+    .map((l) => l.replace(/^[\s>*#\-]+/, "").trim())
+    .filter(Boolean)
+  const hit = lines.find((l) => l.startsWith("打算这么做")) ?? lines[0] ?? ""
+  return hit.slice(0, TURN_PLAN_MAX_CHARS)
+}
+
+/** 從計畫文字抽出「確實出現在 digest 白名單」的 expert id。**命不中就不回，絕不編**：
+ *  白名單由 `/^- ([a-z0-9-]+)（/gm` 從 digest 現場抽取（digest 是 id 真源，不另存表）；
+ *  比對要求 id 前後不是 [a-z0-9-]（防 `image` 之類短 id 誤命中 `image_generate`）。
+ *  回傳順序 = digest 順序（決定性）。 */
+function extractPlanExperts(plan: string, digest: string): string[] {
+  const found: string[] = []
+  for (const m of digest.matchAll(/^- ([a-z0-9-]+)（/gm)) {
+    const id = m[1]
+    if (found.includes(id)) continue
+    const esc = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    if (new RegExp(`(^|[^a-z0-9-])${esc}([^a-z0-9-]|$)`).test(plan)) found.push(id)
+  }
+  return found
+}
+
+/** 單一候選的一次嘗試：成功回計畫文字，失敗一律 throw（原因字串供 AggregateError
+ *  匯總）。**刻意不在此處印 log**——N 條候選各印一行會把日誌淹掉，失敗雜訊一律由
+ *  startTurnPlan 匯總成一行。 */
+async function planAttempt(model: AgentModelRef, userText: string, digest: string): Promise<string> {
+  const conn = planProviderConn(model.providerID)
+  if (!conn) throw new Error(`${model.providerID}: no provider options`)
+  const ac = new AbortController()
+  const killer = setTimeout(() => ac.abort(), TURN_PLAN_TIMEOUT_MS)
+  try {
+    const res = await fetch(`${conn.baseURL}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        // 完全不帶 User-Agent 會被上游 403（Bun fetch 實測）——顯式給一個。
+        "user-agent": "image-studio-gateway/turn-plan",
+        ...(conn.apiKey ? { authorization: `Bearer ${conn.apiKey}` } : {}),
+      },
+      body: JSON.stringify({
+        model: model.modelID,
+        stream: true,
+        max_tokens: TURN_PLAN_MAX_TOKENS,
+        // 見 TURN_PLAN_DISABLE_THINKING 註釋：這一行是把首字從 2.2s 拉到 1.3s 的關鍵。
+        ...(TURN_PLAN_DISABLE_THINKING ? { reasoning_effort: "none" } : {}),
+        messages: [
+          { role: "system", content: TURN_PLAN_SYSTEM_HEAD + (digest ? `Expert 注册表：\n${digest}` : "") },
+          { role: "user", content: userText.slice(0, 2000) },
+        ],
+      }),
+      signal: ac.signal,
+    })
+    if (!res.ok || !res.body) throw new Error(`http ${res.status}`)
+    const plan = planLineFromText(await readSseContent(res.body, TURN_PLAN_MAX_CHARS * 2))
+    if (!plan) throw new Error("empty plan")
+    return plan
+  } catch (e) {
+    const why = e instanceof Error ? (e.name === "AbortError" ? "timeout" : e.message) : String(e)
+    throw new Error(`${model.providerID}/${model.modelID}: ${why}`)
+  } finally {
+    clearTimeout(killer)
+  }
+}
+
+/** 兩段式首字主體：fire-and-forget（void async IIFE），絕不 await、絕不擋主線。
+ *  候選鏈併發競速（Promise.any），取最快成功者；全數失敗才印一行可 grep 的
+ *  `[gateway] turn.plan skipped (<reason>)`——絕不影響主回合、絕不用罐頭計畫冒充。 */
+function startTurnPlan(state: SessionState, userText: string, gen: number, tAccept: number): void {
+  if (!TURN_PLAN_ENABLED) return
+  if (state.planState && state.planState.gen === gen) return // 本輪已發起過
+  state.planState = { gen, emittedAt: null }
+  void (async () => {
+    try {
+      const cands = planCandidates(state)
+      if (cands.length === 0) {
+        console.log("[gateway] turn.plan skipped (no plan model)")
+        return
+      }
+      // digest 來源與 beast 段同一行讀法（讀不到仍可產計畫：只是少了白名單）。
+      let digest = ""
+      try {
+        digest = readFileSync(`${import.meta.dir}/expert/registry-digest.txt`, "utf8")
+      } catch {
+        digest = ""
+      }
+      let plan = ""
+      let model = cands[0]
+      try {
+        const won = await Promise.any(
+          cands.map(async (m) => ({ plan: await planAttempt(m, userText, digest), model: m })),
+        )
+        plan = won.plan
+        model = won.model
+      } catch (e) {
+        // AggregateError：逐條列出「誰因為什麼失敗」。只印一個 http 403 正是
+        // 「安靜地壞掉」的來源——2026-09-18 實錘：persona 主模型當日多次 403，
+        // 計畫段整天零輸出而日誌只有一句 skipped，沒人看得出是渠道死了。
+        const why =
+          e instanceof AggregateError
+            ? e.errors.map((x) => (x instanceof Error ? x.message : String(x))).join(" | ")
+            : String(e)
+        console.log(`[gateway] turn.plan skipped (all ${cands.length} candidates failed: ${why})`)
+        return
+      }
+      // 讓位三條件（一個都不能少）：會話已不存在 / 已進入下一輪 / 本輪已被中止。
+      const cur = sessions.get(state.sessionId)
+      if (!cur || (cur.turnGen ?? 0) !== gen || cur.turnAborted) return
+      // 附加安全網（本輪加註）：本輪已收尾（turnMetrics 已收檔）→ 不補發過期計畫。
+      // 為什麼需要：逾時預算 4s（見 TURN_PLAN_TIMEOUT_MS）＋冷連線 headers 實測
+      // 可達 3.2s，短 turn（實測最短 3.8s）理論上可能先收尾、計畫後到，屆時計畫
+      // 會落在答案之後。turnMetrics 在受理當下建立、turn.done/abort/superseded 收檔，故
+      // 「null」＝本輪已收尾。此條只會少發一個已無意義的過期計畫，不會誤殺在途輪。
+      if (!cur.turnMetrics) return
+      const experts = digest ? extractPlanExperts(plan, digest) : []
+      emitToSession(cur, "turn.plan", {
+        plan,
+        ...(experts.length ? { experts } : {}),
+        provisional: true,
+        source: "model",
+        model: `${model.providerID}/${model.modelID}`,
+      })
+      if (cur.planState && cur.planState.gen === gen) cur.planState.emittedAt = Date.now()
+      // 讓位罐頭 ack：否則使用者先讀到真計畫、15 秒後又冒一句罐頭蓋掉它。
+      cur.ackSent = true
+      clearAckTimer(cur)
+      markTurnFirst(cur, "plan")
+      console.log(
+        `[gateway] turn.plan emitted d=${Date.now() - tAccept}ms model=${model.providerID}/${model.modelID} chars=${plan.length}`,
+      )
+    } catch (e) {
+      console.log(`[gateway] turn.plan skipped (${e instanceof Error ? e.name : String(e)})`)
+    }
+  })()
 }
 
 // ─── S5a（2026-08-27）：供應商/上游錯誤人話化 ───
@@ -1535,12 +1872,24 @@ const SUPPLIER_ERROR_HUMANIZERS: Array<{ test: RegExp; human: string }> = [
     test: /\b(overload|overloaded|capacity[_ -]?saturated|rate[ -]?limit|too many requests|http_?429|429)\b/i,
     human: "上游过载或限流，请稍后重试",
   },
-  { test: /\b(insufficient[ _-]?(account[ _-]?)?(balance|credit)|quota exceeded|余额不足|欠费)\b/i, human: "上游余额或配额不足，请联系维护方" },
+  // 0919 誠實歸因（video-director 試產事故）：shuai(new-api) 預扣費閘的方言是
+  // 「预扣费额度失败, 用户剩余额度: ¥X, 需要预扣费额度: ¥Y」——不含「余额不足/
+  // 欠费」字面，舊詞表不命中 → session.error 無 human_message、原文直出，底模在
+  // model-not-found 噪音裡把欠費誤讀成「模型不可用」。補方言 + 話術釘死因果：
+  // 未提交、未扣費、無產物，充值前重試無效。
+  {
+    test: /\b(insufficient[ _-]?(account[ _-]?)?(balance|credit)|quota exceeded|余额不足|欠费|预扣费额度失败|额度不足)\b/i,
+    human: "上游渠道账户余额不足（欠费）：本次调用未提交、未扣费、无产物。这不是模型不可用——充值前重试不会成功，请联系维护方",
+  },
   { test: /\b(unauthorized|forbidden|invalid api key|authentication failed|http_?401|http_?403)\b/i, human: "上游供给认证失败，请联系维护方" },
   // R8-C（2026-08-29）：用戶主動中止（opencode 回 "Tool execution aborted" /
   // "Aborted"）不是失敗，此前漏映射 → 原樣包成「执行失败（上游原因：…）」英文
   // 黑話甩給用戶。補專屬人話：中止 ≠ 失敗。
   { test: /\b(aborted|cancel(?:led|ed) by user|interrupted by user)\b/i, human: "已按你的要求中止本轮" },
+  // 修復3b（2026-09-19）：確定性死模型（渠道清單裡沒有該模型）不是瞬態故障——
+  // new-api 的巨長 trace 原文直出瀏覽器刷屏（事故實錘）。人話化為切線提示，
+  // 與 failover 零退避（DEAD_MODEL_ERROR_RE）配套。
+  { test: /no channel candidates remain|model not found/i, human: "上游渠道暂无此模型，正在自动切换线路重试" },
 ]
 
 /** 英文供應商錯誤 → 中文短句；未命中回空串。 */
@@ -1625,6 +1974,25 @@ function emitToSession(state: SessionState, name: string, data: unknown): void {
   // R5-C 中段停滯哨：任何幀都算「還活著」的證據（canvas/confirm 狀態幀也算
   // ——只對連幀都沒有的凍結告警，長工具執行有進度幀就不誤殺）。
   state.turnLastFrameAt = Date.now()
+  // 刀 2（2026-09-15）：機器 critic pass 逃生閥掃描。本輪正文出現「未經獨立審核」自簽聲明
+  // （playbook 第一節末：critic 派遣失敗時允許自簽兜底且須註明）→ 本輪不觸發機器 pass。
+  // 成本 O(增量)：只在未命中時拼 32 字滾動尾巴，命中即置位不再算。
+  if (name === "message.delta" && state.criticUnreviewedDeclared !== true) {
+    const dtxt = (data as { text?: unknown })?.text
+    if (typeof dtxt === "string" && dtxt) {
+      const tail = (state.criticEscapeTail ?? "") + dtxt
+      if (declaresUnreviewed(tail)) state.criticUnreviewedDeclared = true
+      else state.criticEscapeTail = tail.slice(-32)
+    }
+  }
+  // 刀 1（2026-09-19）：Jev 測謊閘餵料——本輪正文尾段累積（有界 4k，與
+  // criticEscapeTail 同款 O(增量)；session.idle 收盤消費後清空）。
+  if (name === "message.delta") {
+    const dtxt = (data as { text?: unknown })?.text
+    if (typeof dtxt === "string" && dtxt) {
+      state.jevBriefTail = ((state.jevBriefTail ?? "") + dtxt).slice(-4000)
+    }
+  }
   // R4-A S8：本 turn 內到達終態的節點採集——中央出口掛鉤，service.emit 與
   // 直接 emit 兩條 canvas.node.updated 路徑（成功+失敗）全收，兼容兩種載荷形狀。
   if (name === "canvas.node.updated") trackTurnNodeTerminal(state, data)
@@ -1641,6 +2009,15 @@ function emitToSession(state: SessionState, name: string, data: unknown): void {
     } catch {
       state.clients.delete(client)
     }
+  }
+  // ── Phase 0 觀測（2026-09-18）：首幀打點 + 收檔 ──────────────────────
+  // 幀名唯一性：reasoning.delta / tool.invoke 只有模型路徑會發；message.delta
+  // 另有非模型出口（「文件已找到」提示等），故正文首幀改在 emitSanitizedDelta
+  // 內打點，不在此處。放在幀入列之後＝t_done 為 turn.done 實際送出時刻。
+  if (state.turnMetrics) {
+    if (name === "reasoning.delta") markTurnFirst(state, "reasoning")
+    else if (name === "tool.invoke") markTurnFirst(state, "tool")
+    else if (name === "turn.done") finishTurnMetrics(state, "done")
   }
 }
 
@@ -1855,7 +2232,7 @@ function recordWorkflowRefund(state: SessionState, wfid: string): void {
   console.log(`[gateway] workflow refund recorded: wf=${wfid} coins=${billing.confirmed_coins} session=${state.sessionId}`)
 }
 
-// ── 修 3（2026-09-01）長任務交接：喚醒登記表 + 掃描器 ──────────────────
+// ── 修 3（2026-09-01）長任務交接：喚醒登記表 + 掃描器 ────��─────────��───
 // workflow_generate 提交後 turn 誠實結束；工作流到終態或停滯（15 分鐘無節點
 // 進度）時向原會話投 resume 喚醒（輪子 = handleResumeSession 的 prompt_async
 // 投遞 + turn 狀態重置）。掃描器是進程內唯一的 workflow 狀態觀察點——
@@ -3683,6 +4060,9 @@ if (status === "pending" || status === "running") {
     // 舊代碼非 image_ 工具無條件回 ok:true，導致 workflow_rerun_node 等失敗工具
     // 在 SSE 上偽成功（評測 event 687-690 實錘）。
     const toolErr = !ok ? toolErrorPayload(parsed, "tool failed") : null
+    // artifact_pending：已提交、成品未到——回包给了 task_id 但还没有成品 url。
+    const artifactPending =
+      ok && typeof parsed?.task_id === "string" && !!parsed.task_id && !(typeof parsed?.url === "string" && parsed.url.length > 0)
     if (toolName.startsWith("image_")) {
       // 自動製畫布：submit 完成後把 task_id 掛回 unit，完成事件才夠關聯。
       if (ok && typeof parsed?.task_id === "string" && parsed.task_id) {
@@ -3693,6 +4073,7 @@ if (status === "pending" || status === "running") {
         ok,
         ...(toolErr ? { error: toolErr } : {}),
         cost_coins: typeof parsed?.cost_coins === "number" ? parsed.cost_coins : undefined,
+        ...(artifactPending ? { task_id: parsed.task_id, artifact_pending: true } : {}),
       })
       if (ok && typeof parsed?.url === "string" && parsed.url.length > 0) {
         // P1-E1：image.done 附帶真實配方（prompt/model/size/lora），前端
@@ -3738,6 +4119,7 @@ if (status === "pending" || status === "running") {
         ...(typeof costCoins === "number" ? { cost_coins: costCoins } : {}),
         ...(quoteSummary ? { summary: quoteSummary } : {}),
         ...(subagentTimeout ? { partial: true, reason: "timeout" } : {}),
+        ...(artifactPending ? { task_id: parsed.task_id, artifact_pending: true } : {}),
       })
       // 原生工具（bash 等）可能回傳的是「含圖片 URL 的 JSON」——例如引擎用
       // bash 呼叫 kotone-bridge 生圖，輸出 {text, images:[{url,...}]}。這類
@@ -3789,6 +4171,15 @@ if (status === "pending" || status === "running") {
         : err && typeof err === "object" && typeof (err as { message?: unknown }).message === "string"
           ? (err as { message: string }).message
           : "tool failed"
+    // 0919 斷點②修復：question 工具以 aborted 收尾≠用戶中止——是 orchestrator
+    // 調 question 凍結 turn 時殺掉在途輪的內部中止（實錘 13:00:21 兩條
+    // 「已按你的要求中止本轮」冒充用戶話術）。此處換中性話術；用戶真中止
+    // 走 /abort 端點（6516），不經此分支。
+    let isQuestionFreezeAbort = false
+    if (toolName === "question" && /\baborted?\b/i.test(message)) {
+      isQuestionFreezeAbort = true
+      message = "本回合已暂停，等待你在问题卡上选择后继续"
+    }
     // 修 4：workflow_start 的裸「tool failed」→ 帶期望 schema 的可照抄報錯。
     // 工具層不透傳 gateway 400 body，模型此前只能盲猜載荷形狀；命中條件 =
     // workflow_start + 報錯無任何中文（真實中文報錯如「缺少必要內容」不覆蓋）。
@@ -3817,12 +4208,18 @@ if (status === "pending" || status === "running") {
       tool: toolName,
       ok: false,
       error: {
-        code: "tool_error",
+        code: isQuestionFreezeAbort ? "question_freeze" : "tool_error",
         message,
-        human_message: humanMessageFor(message, undefined),
+        human_message: isQuestionFreezeAbort ? message : humanMessageFor(message, undefined),
         ...(denyInfo ? { matched_pattern: denyInfo.pattern, hint: denyInfo.hint } : {}),
       },
     })
+    // question 凍結中止不是錯誤：不進 session.error 幀（避免 UI 紅卡）、
+    // 不記上游錯（不是渠道故障，別誤觸 failover 重投）。
+    if (isQuestionFreezeAbort) {
+      console.log(`[gateway] question freeze abort: callId=${callId} — turn paused pending answer (no error frame)`)
+      return
+    }
     emitSessionError(state, "tool_error", message)
   }
 }
@@ -3939,6 +4336,9 @@ function handleOpencodeEvent(event: any): void {
           state.messageRole.set(mid, role)
           boundMap(state.messageRole, MESSAGE_ROLE_CAP)
         }
+        // Phase 0 觀測：assistant message 自帶的 tokens/cache 用量（事件本來就送到，
+        // 零額外往返）；事件不含此欄位時保持 null，不補請求、不加延遲。
+        noteTurnUsage(state, info)
         break
       }
       case "message.part.delta": {
@@ -4172,8 +4572,16 @@ function handleOpencodeEvent(event: any): void {
           //（personaModelForAttempt 已過濾降權者，取鏈首即第一个活家）。429/過載/TLS
           // 斷線等瞬態一律不動，仍走原 backoff 鏈。
           const deadAccount = isDeadAccountError(upstreamErr)
-          if (deadAccount && baseBody?.model?.providerID) {
-            markProviderDegraded(baseBody.model.providerID, upstreamErr.slice(0, 120))
+          // 修復4：死模型與死帳戶共享「零退避立即換下一個」的待遇（deadFast），
+          // 但只死帳戶參與降權標記——死模型降權整個 provider 會誤傷同家活模型
+          //（見 isDeadModelError 處註釋），故死模型只跳 backoff、不 markProviderDegraded。
+          const deadFast = deadAccount || isDeadModelError(upstreamErr)
+          // 修復1：降權對象＝實際 dispatch 的 provider（lastDispatchedModel），
+          // 缺席才回退 turn 起點模型（保守兼容）。baseBody.model 在 failover 換模後
+          // 不回寫，是事故裡張冠李戴的源頭，僅作 fallback 不再當主依據。
+          const degradedTarget = state.lastDispatchedModel?.providerID ?? baseBody?.model?.providerID
+          if (deadAccount && degradedTarget) {
+            markProviderDegraded(degradedTarget, upstreamErr.slice(0, 120))
           }
           const retryBody: NonNullable<SessionState["lastPromptBody"]> =
             hadOutput || !baseBody
@@ -4189,11 +4597,14 @@ function handleOpencodeEvent(event: any): void {
             if (!cur || (cur.turnGen ?? 0) !== gen || cur.turnAborted) return
             try {
               // 刀1：死賬戶取「降權過濾後鏈首」＝下一個活 provider（attempt=1 → pool[0]，
-              // 剛被打死的一家已不在 pool）；一般錯誤維持原取模輪轉。
+              // 剛被打死的一家已不在 pool）；一般錯誤（含修復4死模型——不降權，鏈未變）
+              // 維持原取模輪轉。
               const attemptModel = deadAccount
                 ? personaModelForAttempt(cur, 1)
                 : personaModelForAttempt(cur, attempt)
               retryBody.model = attemptModel
+              // 修復1：重投後實際 dispatch 的模型同步記檔（降權判定用，見 failover 塊上方）。
+              cur.lastDispatchedModel = { providerID: attemptModel.providerID, modelID: attemptModel.modelID }
               const res = await fetch(`${OPENCODE_URL}/session/${cur.opencodeSessionId}/prompt_async`, {
                 method: "POST",
                 headers: opencodeHeaders(),
@@ -4206,6 +4617,8 @@ function handleOpencodeEvent(event: any): void {
               console.log(
                 `[gateway] turn failover #${attempt} dispatched model=${attemptModel.providerID}/${attemptModel.modelID} — session=${cur.sessionId}`,
               )
+              // Phase 0 觀測：重投成功 = 同一 turn 的下一次嘗試（attempt+1）。
+              noteTurnPromptDispatch(cur, attemptModel.providerID, attemptModel.modelID)
               // N2 同款：剥掉旧轮文本帧，断线重连不整段重放旧文案。
               stripStaleTurnTextFromReplay(cur)
               cur.turnToolStarted = false
@@ -4215,7 +4628,7 @@ function handleOpencodeEvent(event: any): void {
               cur.retryQueued = false
               emitToSession(cur, "turn.done", {}) // 重试发不出去：放弃，别留前端挂着
             }
-          }, deadAccount ? 0 : TURN_RETRY_DELAY_MS)
+          }, deadFast ? 0 : TURN_RETRY_DELAY_MS)
           break // 不发 turn.done：重试轮结束自然会发
         }
         if (
@@ -4250,6 +4663,8 @@ function handleOpencodeEvent(event: any): void {
                 )
               }
               body.model = attemptModel
+              // 修復1：jitter 重投同樣記實際 dispatch 模型（與 failover 重投對稱）。
+              cur.lastDispatchedModel = { providerID: attemptModel.providerID, modelID: attemptModel.modelID }
               const res = await fetch(`${OPENCODE_URL}/session/${cur.opencodeSessionId}/prompt_async`, {
                 method: "POST",
                 headers: opencodeHeaders(),
@@ -4260,6 +4675,8 @@ function handleOpencodeEvent(event: any): void {
               cur.turnRetries = attempt
               cur.retryQueued = false
               console.log(`[gateway] turn retry #${attempt} dispatched for ${cur.sessionId}`)
+              // Phase 0 觀測：jitter 重投成功 = 同一 turn 的下一次嘗試（attempt+1）。
+              noteTurnPromptDispatch(cur, attemptModel.providerID, attemptModel.modelID)
               // N2：重試輪開始——把舊 turn 累積的文本幀從 replayBuffer 剝掉，
               // 斷線重連不再整段重放舊文案（canvas/confirm 等狀態幀保留）。
               stripStaleTurnTextFromReplay(cur)
@@ -4285,10 +4702,23 @@ function handleOpencodeEvent(event: any): void {
           !state.turnAborted &&
           (state.turnRetries ?? 0) >= TURN_MAX_RETRIES
         ) {
-          emitToSession(state, "message.delta", {
-            text: "连续几次自动重试都没能完成回复（上游持续报错）。你上一条消息可能没有处理成功，请重新发送一次即可继续；若内容较长，建议让我分章/分段处理。\n",
-          })
-          console.warn(`[gateway] S3① jitter retries exhausted with zero output, closing turn honestly — session=${state.sessionId}`)
+          // 修復2：冪等收尾——連續第二個 idle 過同一終局門時，本輪已收過尾就直接
+          // 跳過（含下方 turn.done，不重發；09-19 事故 journal 成對 warn 實錘）。
+          // 旗標記「已收尾的 turnGen」，跨 turn 自然失效。
+          if (state.turnExhaustedClosedGen === (state.turnGen ?? 0)) break
+          state.turnExhaustedClosedGen = state.turnGen ?? 0
+          // 0919 誠實歸因（video-director 試產事故）：收尾幀不得一律「上游持续报错」
+          // ——真因是欠費時明說欠費（未提交/未扣費/充值前重試無效），是死模型時明說
+          // 渠道缺模型。turnUpstreamError 在 failover 塊被消費後置 null，但同輪
+          // 最後一次 session.error 會再記（6670 行），此時非空 = 重試鏈死因仍在。
+          const lastErr = state.turnUpstreamError ?? ""
+          const exhaustedText = isDeadAccountError(lastErr)
+            ? "连续几次自动重试都没能完成回复（上游渠道账户欠费：未提交、未扣费、无产物，充值前重试不会成功，请联系维护方）。\n"
+            : isDeadModelError(lastErr)
+              ? "连续几次自动重试都没能完成回复（上游渠道缺少该模型，已尝试自动换线仍未成功）。\n"
+              : "连续几次自动重试都没能完成回复（上游持续报错）。你上一条消息可能没有处理成功，请重新发送一次即可继续；若内容较长，建议让我分章/分段处理。\n"
+          emitToSession(state, "message.delta", { text: exhaustedText })
+          console.warn(`[gateway] S3① jitter retries exhausted with zero output, closing turn honestly — session=${state.sessionId} lastError=${lastErr.slice(0, 120) || "none"}`)
         }
         // R4-A S8：turn 收尾兜底匯報——本輪有節點落終態但零主動匯報時，
         // 發一幀環名制中文總結（成功清單/失敗清單/下一步），杜絕悄悄收工。
@@ -4296,6 +4726,30 @@ function handleOpencodeEvent(event: any): void {
         // R5-C：恢復輪零小結零匯報時補強制結語（S8 讓位條件見函數註釋）。
         emitRecoveryClosingIfSilent(state)
         emitToSession(state, "turn.done", {})
+        // 刀 2（2026-09-15）：機器 critic pass —— 收盤判定點。
+        // 四輪實錄證明「叫 orchestrator 派 critic」無效（playbook 第 18 條四輪在場、四輪零派遣），
+        // 改由 gateway 在此直接派。判據門檻與有界性全在 maybeRunMachineCriticPass 內：
+        // beast + 有 Expert 交付 + 本輪零 critic 派遣 + 未聲明未經審核 + 每會話 ≤1 次。
+        // 非 beast / 無 Expert 交付 / 通用子代理路徑完全不受影響（待審清單為空即零動作）。
+        // 派遣非阻塞（內部 async），失敗只留一行 log，不影響 turn.done 已發的事實。
+        maybeRunMachineCriticPass(state, state.criticUnreviewedDeclared === true)
+        // 刀 1（2026-09-19）：Jev 測謊閘＋空殼欄初篩 — shadow 模式收盤消費點。
+        // fire-and-forget（內部 2s 超時、永不 throw、失敗只留一行 log）；
+        // 快照在本輪數據（brief 尾段/喚醒摘要/待審交付）後即刻清空 volatile。
+        // JEV_ENABLED ≠ true 時 runJevShadowGate 零動作（行為與部署前逐位等價）。
+        {
+          const briefTail = state.jevBriefTail ?? ""
+          const gateSummaries = state.jevGateSummaries ?? []
+          state.jevBriefTail = ""
+          state.jevGateSummaries = []
+          if (briefTail || gateSummaries.length > 0) {
+            void runJevShadowGate({
+              briefTail,
+              gateSummaries,
+              deliveries: snapshotPendingCriticTargets(state.sessionId),
+            })
+          }
+        }
         // S6 規格2：turn 正常結束，ack timer 不再需要。
         clearAckTimer(state)
         // S6 規格3：質詢回覆完成 → 放行被凍結的視頻工作流（先釋放再壓縮）。
@@ -4537,6 +4991,11 @@ type AgentModelRegistry = {
   bindings: {
     default?: string
     small_model?: string
+    /** 兩段式首字（2026-09-18）：turn.plan 專用模型（選配，缺則退回 persona/default）。 */
+    plan_model?: string
+    /** 兩段式首字（2026-09-18）：turn.plan 候選鏈（選配）。計畫段的判準是「快」，
+     *  與主鏈的「強」不同，故允許獨立策展；缺則退回該 persona 的 fallbacks。 */
+    plan_fallbacks?: string[]
     persona?: Record<string, string>
     fallbacks?: Record<string, string[]>
   }
@@ -4613,11 +5072,25 @@ function isProviderDegraded(providerID: string): boolean {
 // （credit insufficient|balance=0|quota 類）。與 429/限流/過載嚴格區分——那些瞬態、
 // 仍走 backoff 重投。寬匹配 `quota` 的誤傷代價只是跳過退避換一家（60s 後放開），
 // 遠低於漏判真賬戶死導致整 turn backoff 重投 2–3 次（09-13 b-ai 事故實錘）。
+// 0919：補 shuai 預扣費閘方言「预扣费额度失败」（video-director 試產事故實錘：
+// 該錯誤此前不命中 → deadAccount=false → 欠費渠道被退避重投繼續鞭死）。
 const DEAD_ACCOUNT_ERROR_RE =
-  /credit[ _-]?insufficient|insufficient[ _-]?(account[ _-]?)?(balance|credit|quota)|balance\s*[=:]\s*0\b|\bquota\b|余额不足|欠费/i
+  /credit[ _-]?insufficient|insufficient[ _-]?(account[ _-]?)?(balance|credit|quota)|balance\s*[=:]\s*0\b|\bquota\b|余额不足|欠费|预扣费额度失败/i
 
 function isDeadAccountError(msg: string | null | undefined): boolean {
   return DEAD_ACCOUNT_ERROR_RE.test(msg ?? "")
+}
+
+// 修復4（2026-09-19）：確定性「死模型」指紋（渠道清單裡沒有該模型）。與死帳戶
+// 的語義區分【刻意只做零退避、不降權 provider】：死帳戶死的是 provider 整體
+//（欠費，同 provider 所有模型都死）→ markProviderDegraded 正確；死模型死的是
+// 單一 modelID（事故實錘：hublinuxdo 上 cn:deepseek-v4.1-flash 死而同 provider
+// 的 deepseek 活）→ 降權整個 provider 會誤傷同家活模型，禁止接到降權路徑。
+const DEAD_MODEL_ERROR_RE = /model not found|no channel candidates remain/i
+
+/** 死模型：跳過 1500ms backoff 立即換鏈下一個（重試仍受 TURN_MAX_RETRIES 約束）。 */
+function isDeadModelError(msg: string | null | undefined): boolean {
+  return DEAD_MODEL_ERROR_RE.test(msg ?? "")
 }
 
 /** 抖動重試第 attempt 次應用的模型：鏈 = [主模型, ...registry fallbacks（跨渠道）]，
@@ -4638,7 +5111,317 @@ function personaModelForAttempt(state: SessionState, attempt: number): AgentMode
   return pool[(attempt - 1) % pool.length] ?? pool[0] ?? primary
 }
 
+// ── Phase 0 觀測（2026-09-18）：per-turn 分段延遲打點 ────────────────────
+// 純觀測、行為中性：不新增/改寫任何 SSE 幀（前端 reducer 契約零改動），不動
+// prompt 內容/重試邏輯/逾時常數。目的＝把「一個 turn 的 109 秒花在哪」由推斷
+// 變成量測：
+//   ① journal 單行 `[gateway] turn.metrics {json}`（journalctl | grep 可用）
+//   ② 記憶體 ring（最近 200 筆）→ GET /agent/v1/metrics 出各階段 p50/p95/p99
+//   ③ event-loop lag 每秒取樣 → 檢驗「記憶體壓力造成 event loop 抖動」假設
+// 生命週期安全：每 session 至多一份在途檔（掛在 SessionState 的 volatile 欄位）；
+// turn.done 收檔、用戶中止由 handleAbortSession 收檔、被下一輪取代由
+// beginTurnMetrics 以 superseded 補收——不掛任何計時器、不持有跨 turn 引用，
+// 故無計時器洩漏；全部打點函數對「檔不存在」直接靜默返回，永不拋錯。
+type TurnMetricsEnd = "done" | "aborted" | "superseded"
+
+/** 在途計時檔（volatile）。 */
+type TurnMetricsRecord = {
+  sessionId: string
+  gen: number
+  attempt: number
+  t_accept: number
+  t_prompt_sent: number | null
+  t_last_prompt_sent: number | null
+  t_first_reasoning: number | null
+  t_first_text: number | null
+  t_first_tool: number | null
+  /** 兩段式首字（2026-09-18）：turn.plan 幀發出時刻；null = 本輪沒發計畫。 */
+  t_first_plan: number | null
+  /** compaction 閘擋住本輪 prompt 的時刻；null = 沒被擋（prompt_deferred_ms=0）。 */
+  deferredAt: number | null
+  providerID: string | null
+  modelID: string | null
+  contextTokens: number | null
+  cacheRead: number | null
+  cacheWrite: number | null
+}
+
+/** 收檔後的快照（journal 行 + ring 條目，同一形狀）。 */
+type TurnMetricsSnapshot = {
+  session: string
+  gen: number
+  attempt: number
+  provider: string | null
+  model: string | null
+  t_accept: number
+  t_prompt_sent: number | null
+  t_last_prompt_sent: number | null
+  t_first_reasoning: number | null
+  t_first_text: number | null
+  t_first_tool: number | null
+  t_first_plan: number | null
+  t_done: number | null
+  prompt_deferred_ms: number
+  context_tokens: number | null
+  cache_read: number | null
+  cache_write: number | null
+  end: TurnMetricsEnd
+  /** 自 t_accept 起算的累積延遲（null = 該里程碑未觀測到）。 */
+  d_prompt_ms: number | null
+  d_first_reasoning_ms: number | null
+  d_first_text_ms: number | null
+  d_first_tool_ms: number | null
+  d_first_plan_ms: number | null
+  d_total_ms: number | null
+}
+
+const TURN_METRICS_RING = 200
+const turnMetricsRing: TurnMetricsSnapshot[] = []
+
+/** 本輪計時檔起點；t_accept = handleSendMessage 進入時刻（呼叫方帶入）。
+ *  既有在途檔（上一輪未收尾）先以 superseded 收檔，保證每 session 至多一份。 */
+function beginTurnMetrics(state: SessionState, tAccept: number): void {
+  try {
+    if (state.turnMetrics) finishTurnMetrics(state, "superseded")
+    state.turnMetrics = {
+      sessionId: state.sessionId,
+      gen: state.turnGen ?? 0,
+      attempt: 1,
+      t_accept: tAccept,
+      t_prompt_sent: null,
+      t_last_prompt_sent: null,
+      t_first_reasoning: null,
+      t_first_text: null,
+      t_first_tool: null,
+      t_first_plan: null,
+      deferredAt: null,
+      providerID: null,
+      modelID: null,
+      contextTokens: null,
+      cacheRead: null,
+      cacheWrite: null,
+    }
+  } catch (e) {
+    console.error(`[gateway] turn.metrics begin failed: session=${state.sessionId}`, e)
+  }
+}
+
+/** prompt_async 投遞成功打點（呼叫方只在 res.ok 後呼叫）。首次=attempt 1，
+ *  同一 turn 的 failover/jitter 重投每次遞增 attempt 並刷新實際使用的模型。 */
+function noteTurnPromptDispatch(state: SessionState, providerID?: string | null, modelID?: string | null): void {
+  const m = state.turnMetrics
+  if (!m) return
+  const now = Date.now()
+  if (m.t_prompt_sent === null) m.t_prompt_sent = now
+  else m.attempt += 1
+  m.t_last_prompt_sent = now
+  if (providerID) m.providerID = providerID
+  if (modelID) m.modelID = modelID
+}
+
+/** compaction 閘擋住本輪 prompt 的時刻（prompt_deferred_ms 起算點）。 */
+function noteTurnDeferred(state: SessionState): void {
+  const m = state.turnMetrics
+  if (m && m.deferredAt === null) m.deferredAt = Date.now()
+}
+
+/** 本輪首個里程碑（reasoning/text/tool/plan）——只記第一次，之後靜默。 */
+function markTurnFirst(state: SessionState, kind: "reasoning" | "text" | "tool" | "plan"): void {
+  const m = state.turnMetrics
+  if (!m) return
+  const now = Date.now()
+  if (kind === "reasoning") {
+    if (m.t_first_reasoning === null) m.t_first_reasoning = now
+  } else if (kind === "text") {
+    if (m.t_first_text === null) m.t_first_text = now
+  } else if (kind === "tool") {
+    if (m.t_first_tool === null) m.t_first_tool = now
+  } else if (m.t_first_plan === null) {
+    // turn.plan（兩段式首字第一段）：與 d_first_text_ms 分開記——**禁止拿計畫
+    // 冒充正文**，兩欄各自獨立、互不寫入。
+    m.t_first_plan = now
+  }
+}
+
+/** context tokens / cache 讀寫：取自 message.updated 事件自帶的 info.tokens（零額外
+ *  往返、零延遲）。opencode 未帶此欄位時一律保持 null——不為拿它加額外請求。 */
+function noteTurnUsage(state: SessionState, info: unknown): void {
+  const m = state.turnMetrics
+  if (!m || !info || typeof info !== "object") return
+  const o = info as { role?: unknown; tokens?: unknown }
+  if (o.role !== "assistant") return
+  const tk = o.tokens
+  if (!tk || typeof tk !== "object") return
+  const t = tk as { input?: unknown; cache?: unknown }
+  if (typeof t.input === "number" && Number.isFinite(t.input)) m.contextTokens = t.input
+  if (t.cache && typeof t.cache === "object") {
+    const c = t.cache as { read?: unknown; write?: unknown }
+    if (typeof c.read === "number" && Number.isFinite(c.read)) m.cacheRead = c.read
+    if (typeof c.write === "number" && Number.isFinite(c.write)) m.cacheWrite = c.write
+  }
+}
+
+/** 收檔：算衍生階段差、入 ring、印 journal 單行。end=superseded（被下一輪取代、
+ *  從未收尾）時 t_done 留 null——不謊報結束時間。 */
+function finishTurnMetrics(state: SessionState, end: TurnMetricsEnd): void {
+  const m = state.turnMetrics
+  if (!m) return
+  state.turnMetrics = null
+  try {
+    const now = Date.now()
+    const tDone = end === "superseded" ? null : now
+    const promptDeferredMs =
+      m.deferredAt === null ? 0 : Math.max(0, (m.t_last_prompt_sent ?? now) - m.deferredAt)
+    const snap: TurnMetricsSnapshot = {
+      session: m.sessionId.length > 8 ? m.sessionId.slice(0, 8) : m.sessionId,
+      gen: m.gen,
+      attempt: m.attempt,
+      provider: m.providerID,
+      model: m.modelID,
+      t_accept: m.t_accept,
+      t_prompt_sent: m.t_prompt_sent,
+      t_last_prompt_sent: m.t_last_prompt_sent,
+      t_first_reasoning: m.t_first_reasoning,
+      t_first_text: m.t_first_text,
+      t_first_tool: m.t_first_tool,
+      t_first_plan: m.t_first_plan,
+      t_done: tDone,
+      prompt_deferred_ms: promptDeferredMs,
+      context_tokens: m.contextTokens,
+      cache_read: m.cacheRead,
+      cache_write: m.cacheWrite,
+      end,
+      d_prompt_ms: m.t_prompt_sent === null ? null : m.t_prompt_sent - m.t_accept,
+      d_first_reasoning_ms: m.t_first_reasoning === null ? null : m.t_first_reasoning - m.t_accept,
+      d_first_text_ms: m.t_first_text === null ? null : m.t_first_text - m.t_accept,
+      d_first_tool_ms: m.t_first_tool === null ? null : m.t_first_tool - m.t_accept,
+      d_first_plan_ms: m.t_first_plan === null ? null : m.t_first_plan - m.t_accept,
+      d_total_ms: tDone === null ? null : tDone - m.t_accept,
+    }
+    turnMetricsRing.push(snap)
+    if (turnMetricsRing.length > TURN_METRICS_RING) {
+      turnMetricsRing.splice(0, turnMetricsRing.length - TURN_METRICS_RING)
+    }
+    console.log(`[gateway] turn.metrics ${JSON.stringify(snap)}`)
+  } catch (e) {
+    console.error(`[gateway] turn.metrics finish failed: session=${state.sessionId}`, e)
+  }
+}
+
+// ── event-loop lag 取樣（Phase 0 ③）────────────────────────────────────
+// 每秒量一次 timer drift（performance.now() 對比預期到點時間）：drift 大 =
+// event loop 被同步工作/記憶體壓力卡住。performance.now() 是 Bun/Node 共有
+// 的單調毫秒時鐘。取樣只進 ring，不影響任何請求路徑。
+const EVENT_LOOP_LAG_INTERVAL_MS = 1000
+const EVENT_LOOP_LAG_RING = 300
+const eventLoopLagSamples: number[] = []
+
+function startEventLoopLagSampler(): void {
+  let expected = performance.now() + EVENT_LOOP_LAG_INTERVAL_MS
+  setInterval(() => {
+    try {
+      const at = performance.now()
+      eventLoopLagSamples.push(Math.max(0, at - expected))
+      if (eventLoopLagSamples.length > EVENT_LOOP_LAG_RING) {
+        eventLoopLagSamples.splice(0, eventLoopLagSamples.length - EVENT_LOOP_LAG_RING)
+      }
+      expected = at + EVENT_LOOP_LAG_INTERVAL_MS
+    } catch {
+      // 取樣失敗不影響 gateway：本次跳過。
+    }
+  }, EVENT_LOOP_LAG_INTERVAL_MS)
+}
+
+startEventLoopLagSampler()
+
+// ── 聚合視圖（GET /agent/v1/metrics）────────────────────────────────────
+function percentile(sorted: number[], p: number): number | null {
+  if (sorted.length === 0) return null
+  const idx = Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1))
+  return Number(sorted[idx].toFixed(2))
+}
+
+function stageStats(values: number[]): { n: number; p50: number | null; p95: number | null; p99: number | null } {
+  const sorted = values.slice().sort((a, b) => a - b)
+  return { n: sorted.length, p50: percentile(sorted, 50), p95: percentile(sorted, 95), p99: percentile(sorted, 99) }
+}
+
+/** 每階段統計：d_* = 自 t_accept 起算的累積延遲；prompt_deferred_ms = compaction
+ *  閘等待（0 = 本輪沒被擋）。n = 有觀測到該里程碑的樣本數。 */
+function turnMetricsSnapshot(): Record<string, unknown> {
+  const stages: Record<string, { n: number; p50: number | null; p95: number | null; p99: number | null }> = {}
+  const fields = [
+    "d_prompt_ms",
+    "d_first_reasoning_ms",
+    "d_first_text_ms",
+    "d_first_tool_ms",
+    "d_first_plan_ms",
+    "d_total_ms",
+    "prompt_deferred_ms",
+  ] as const
+  for (const f of fields) {
+    stages[f] = stageStats(
+      turnMetricsRing.map((r) => r[f]).filter((v): v is number => typeof v === "number"),
+    )
+  }
+  const lag = eventLoopLagSamples.slice().sort((a, b) => a - b)
+  return {
+    turns: { ring_size: TURN_METRICS_RING, sampled: turnMetricsRing.length, stages },
+    event_loop_lag_ms: {
+      sample_interval_ms: EVENT_LOOP_LAG_INTERVAL_MS,
+      samples: lag.length,
+      window_s: Math.round((lag.length * EVENT_LOOP_LAG_INTERVAL_MS) / 1000),
+      p50: percentile(lag, 50),
+      p95: percentile(lag, 95),
+      max: lag.length > 0 ? Number(lag[lag.length - 1].toFixed(2)) : null,
+    },
+    last_turn: turnMetricsRing.length > 0 ? turnMetricsRing[turnMetricsRing.length - 1] : null,
+  }
+}
+
+// ── 0918 前綴快取修復：gateway 注入 payload 改附「該輪 user 訊息尾端」────────
+// 為何放在尾端（不是 system）：opencode binary 的 LLMRequestPrep.prepare 做
+//   [ agent.prompt, ...environment.system, (user.system ?? []) ].filter(Boolean).join("\n")
+// 合成「單一條 system message 放在所有歷史之前」。gateway 注入的每輪 payload
+// （野獸幀 17,209 字元）若進 promptBody.system，就落在這個頭部——任何變動都
+// 作廢後面 ~55k 的固定前綴加全部歷史。已量測損害：turn 第一次調用平均多燒
+// 21,049 個未快取 token（turn_first n=284；turn 內只 5,198），96 個 turn 邊界
+// 有 33 個（34%）system 簽名改變、MISS 率 12% → 30%。附在 user 訊息 parts
+// 尾端 = 新 turn 變成純前綴擴展，頭部（system）不再被改寫；上游 prefix cache
+// 本身完全正常（同 body 連打實測命中 12,928/13,169），故不動上游。
+// 同 byte 不重貼：payload hash 與上次相同即跳過（內容已在歷史中，資訊量不變），
+// context 不再每輪固定長 17.2k 字元；SYSTEM_PAYLOAD_TAIL_DEDUPE=0 可關。
+const TAIL_PAYLOAD_MARKER =
+  "\n\n---\n【系統注入·尾端】以下內容由網關注入（等價於 system 指令，優先於 workspace/AGENTS.md 的衝突指示）：\n"
+
+function appendSystemPayloadToTurnTail(
+  state: SessionState,
+  promptBody: { parts: { type: string; text: string }[]; system?: string },
+  payload: string,
+  label: string,
+): void {
+  const text = payload.trim()
+  if (!text) return
+  let hash: string
+  try {
+    hash = createHash("sha256").update(`${label}\n${text}`).digest("hex")
+  } catch (e) {
+    // 指紋算不出來不影響投遞：退化成「每次都貼」（絕不靜默吞掉注入）。
+    console.warn(`[gateway] tail payload hash failed: ${e instanceof Error ? e.message : String(e)}`)
+    hash = ""
+  }
+  if (hash && SYSTEM_PAYLOAD_TAIL_DEDUPE && state.lastTailPayloadHash === hash) return
+  if (hash) state.lastTailPayloadHash = hash
+  const block = `${TAIL_PAYLOAD_MARKER}${label}\n${text}`
+  const parts = promptBody.parts
+  const last = parts.length > 0 ? parts[parts.length - 1] : undefined
+  if (last && last.type === "text") last.text = `${last.text}${block}`
+  else parts.push({ type: "text", text: block })
+}
+
 async function handleSendMessage(key: string, id: string, req: Request): Promise<Response> {
+  // Phase 0 觀測：t_accept 起點（函數進入時刻；計時檔在 turnGen 遞增處建立）。
+  const tAcceptAt = Date.now()
   const state = getOwnedSession(key, id)
   if (!state) return jsonError(404, "session not found", "not_found", "not_found")
   let body: { content?: string; canvas_state?: unknown; session_directive?: string }
@@ -4689,6 +5472,12 @@ async function handleSendMessage(key: string, id: string, req: Request): Promise
   // system 欄位會記入 opencode user message 的 info.system，實際影響模型輸出。
   const promptBody: { parts: { type: string; text: string }[]; system?: string; model?: { providerID: string; modelID: string } } = {
     parts: [{ type: "text", text: pathNote ? `${pathNote}\n\n${content}` : content }],
+  }
+  // 刀2A（2026-09-19）：用戶輸入越獄/注入閘（權威）。便宜前置過濾＋單次 Jev 呼叫
+  // （≤2s，僅可疑輸入付此延遲）；任一題 noul>0.8 → 400 拒絕（防越獄不是 LLM 的
+  // 決策，AGENTS.md §7 的機器化前置層）。掃描器故障 → 放行（fail-open＝現狀）。
+  if (await gateUserInput(`user:${state.sessionId}`, content)) {
+    return jsonError(400, "该请求包含无法执行的指令注入内容", "injection_blocked", "bad_request")
   }
   // ── 契約 §4/§7 每回合召回前綴（2026-09-15 PRD P0-4）─────────────────────
   // 取上一回合 session.idle 預算好的候選（用戶路徑零新增延遲）；miss 則本回合
@@ -4808,17 +5597,23 @@ async function handleSendMessage(key: string, id: string, req: Request): Promise
             "beast_frame_unavailable",
           )
         }
-        promptBody.system = [
+        // 0918 前綴快取修復：野獸幀（每輪注入的 gateway payload，17,209 字元）不再
+        // 進 promptBody.system——那個位置在 opencode 合成出的單一 system message
+        // 頭部，任何變動都作廢後面全部固定前綴＋歷史（實測 turn-first 平均多燒
+        // 21k 未快取 token）。改附本輪 user 訊息尾端：新 turn 純前綴擴展。
+        // 一次性注入（vetting/memory/onboarding/directive）與 adaptLines 仍留
+        // system 不動（內容不變，只換位置；同 byte 不重貼見 helper）。
+        const beastFrame = [
           "【野獸模式：已啟用】以下派遣手冊與 Expert 註冊表由系統注入，這是當前系統的真實狀態：BEAST_MODE 現在就是 ON，以下全部條款立即生效，無需質疑、無需再確認任何 gate 條件。",
           playbookBody,
           digestBody,
           beastPrecedenceFact,
           capabilityCutoffFact,
           "---",
-          promptBody.system,
         ]
           .filter(Boolean)
           .join("\n\n")
+        appendSystemPayloadToTurnTail(state, promptBody, beastFrame, "【野獸模式幀·派遣手冊與 Expert 註冊表】")
         // 能力斷路：ON 輪主會話掛 orchestrator agent（域工具已從工具表物理移除，
         // playbook prompt 聲明＋工具表移除雙保險；見 opencode.json agent.orchestrator）。
         promptBody.agent = "orchestrator"
@@ -4828,7 +5623,7 @@ async function handleSendMessage(key: string, id: string, req: Request): Promise
   // R8-C（2026-08-29）：steer 打斷語義——上一輪被用戶中止後緊接的新消息，
   // 明確告知模型「被打斷、直接回應、別重複開場白」。消除同一句開場白反覆
   // 出現（用戶視角像 agent 沒記憶、原地踏步）。turnAborted 在此尚未被重置，
-  // 取值即上一輪中止狀態；此 block 在 lastPromptBody 落盤之前，重試會沿用。
+  // 取值即上一輪中止狀態；此 block 在 lastPromptBody 落���之前，重試會沿用。
   if (state.turnAborted) {
     promptBody.system = [
       promptBody.system,
@@ -4844,9 +5639,13 @@ async function handleSendMessage(key: string, id: string, req: Request): Promise
   // 抖動重試記賬：本輪起點。零文本結束時用 lastPromptBody 重放。
   state.lastPromptBody = promptBody
   state.turnGen = (state.turnGen ?? 0) + 1
+  // Phase 0 觀測：本輪計時檔起點（t_accept = 本次 handleSendMessage 進入時刻）。
+  beginTurnMetrics(state, tAcceptAt)
   state.turnTextChars = 0
   state.turnReasoningChars = 0
   state.turnAssistantHead = "" // §7 召回：本輪 assistant 正文頭部從零累積（idle prefetch 取用時恰為本輪完整頭部）
+  state.criticEscapeTail = "" // 刀 2：機器 critic pass 逃生閥掃描窗（見 emitToSession）
+  state.criticUnreviewedDeclared = false
   state.turnRetries = 0
   state.turnAborted = false
   state.retryQueued = false
@@ -4861,6 +5660,8 @@ async function handleSendMessage(key: string, id: string, req: Request): Promise
   state.turnNoticeSent = false
   state.turnTerminalNodes = []
   state.errorStallAlerted = false
+  // 修復3a：新輪起點清空本輪錯誤幀去重清單（同點重置，模式同 errorStallAlerted）。
+  state.turnEmittedErrors = []
   state.turnProgressAt = Date.now()
   // R5-C：中段停滯哨起點重置 + 任意幀時間戳起點。
   state.midturnStallRetried = false
@@ -4882,6 +5683,11 @@ async function handleSendMessage(key: string, id: string, req: Request): Promise
   // R1（2026-09-11）刀2：回合起始 ack。評測 P0：發送後 45 秒才出現第一個事件、
   // 651 秒死寂期正文 0 字。turn 起點即應一聲，用戶 5 秒內有反饋。
   emitToSession(state, "turn.status", { text: "已收到，正在解析任務…" })
+  // 兩段式首字（2026-09-18）：受理當下即 fire-and-forget 打一行計畫。位置刻意在此
+  // ——① 在 `if (compactionJob)` 判斷之前（被壓縮閘擋住的回合也拿得到計畫，那正是
+  // 最需要它的場景）；② 在 prompt_async 之前且非阻塞（d_prompt_ms 維持 20–156ms）；
+  // ③ 計畫絕不寫進 promptBody（不進模型上下文、不改 prefix cache、不影響重投）。
+  startTurnPlan(state, content, state.turnGen ?? 0, tAcceptAt)
   // S6 規格3：記錄最後一條用戶消息文本與時間（質詢判定 + turn 結束時放行視頻）。
   state.lastUserMessage = content
   state.lastUserAt = Date.now()
@@ -4895,34 +5701,63 @@ async function handleSendMessage(key: string, id: string, req: Request): Promise
     emitToSession(state, "message.delta", { text: "（文件已找到，正在分析…）\n" })
   }
   if (compactionJob) {
+    // Phase 0 觀測：在被閘擋住的這一刻起算 prompt_deferred_ms。
+    noteTurnDeferred(state)
     console.log(`[gateway] prompt deferred behind compaction: session=${state.sessionId} gen=${state.turnGen}`)
     const gen = state.turnGen
-    void compactionJob
-      .catch(() => {}) // 壓縮失敗也要投遞：壓縮是優化，消息是主線
-      .then(async () => {
-        const cur = sessions.get(state.sessionId)
-        if (!cur || (cur.turnGen ?? 0) !== gen) return // 用戶已發下一條，本條讓位
-        try {
-          const res = await fetch(`${OPENCODE_URL}/session/${cur.opencodeSessionId}/prompt_async`, {
-            method: "POST",
-            headers: opencodeHeaders(),
-            body: JSON.stringify(promptBody),
-            signal: AbortSignal.timeout(10000),
-          })
-          if (!res.ok) throw new Error(`status ${res.status}`)
-          console.log(`[gateway] deferred prompt dispatched: session=${cur.sessionId} gen=${gen}`)
-          armWatchdogTimer(cur)
-          // S6 規格2：30s ack——實際投遞後才起算。
-          armAckTimer(cur)
-          // N1 規格1：心跳提示同起點布防。
-          armHeartbeatTimer(cur)
-        } catch (e) {
-          console.error(`[gateway] deferred prompt dispatch failed: session=${cur.sessionId}:`, e)
-          emitToSession(cur, "message.delta", { text: "消息投递失败（后端正忙），请稍后重发。\n" })
-          // R9-4：deferred 失敗路徑同樣尊重 question 凍結，pending 期間不發 turn.done。
-          if (cur.pendingQuestions.size === 0) emitToSession(cur, "turn.done", {})
-        }
-      })
+    // 有界等待（2026-09-18）：舊行為是無界等 compactionJob 落地——壓縮可能 30s+
+    // 才回來、甚至失敗（實測 02:28:43 擋住 → 02:29:16 該次壓縮最終 403 失敗 →
+    // 使用者訊息被閘擋了 33 秒才投遞）。改為與 COMPACTION_MAX_DEFER_MS 賽跑：
+    // 壓縮先落地 → 正常路徑（與原本逐字同義）；超時先到 → 逕行投遞並印可 grep 的
+    // 「defer 超時，強制投遞」。超時投遞後若 opencode 靜默丟棄 prompt（壓縮競態
+    // 病灶），既有的 15s ack / 90s watchdog / 零文本抖動重試兜底——**不新增重試機制**。
+    const dispatchDeferred = async (forced: boolean): Promise<void> => {
+      const cur = sessions.get(state.sessionId)
+      if (!cur || (cur.turnGen ?? 0) !== gen) return // 用戶已發下一條，本條讓位
+      if (forced) {
+        console.log(
+          `[gateway] compaction defer timeout (>${COMPACTION_MAX_DEFER_MS}ms), forcing prompt dispatch: session=${cur.sessionId} gen=${gen}`,
+        )
+      }
+      try {
+        const res = await fetch(`${OPENCODE_URL}/session/${cur.opencodeSessionId}/prompt_async`, {
+          method: "POST",
+          headers: opencodeHeaders(),
+          body: JSON.stringify(promptBody),
+          signal: AbortSignal.timeout(10000),
+        })
+        if (!res.ok) throw new Error(`status ${res.status}`)
+        console.log(`[gateway] deferred prompt dispatched: session=${cur.sessionId} gen=${gen}`)
+        // Phase 0 觀測：閘後投遞成功 = t_prompt_sent（模型同本輪 promptBody）。
+        noteTurnPromptDispatch(cur, promptBody.model?.providerID, promptBody.model?.modelID)
+        // 修復1：turn 起點首投同樣記實際 dispatch 模型（含閘後 deferred 路徑）。
+        if (promptBody.model) cur.lastDispatchedModel = { ...promptBody.model }
+        armWatchdogTimer(cur)
+        // S6 規格2：30s ack——實際投遞後才起算。
+        armAckTimer(cur)
+        // N1 規格1：心跳提示同起點布防。
+        armHeartbeatTimer(cur)
+      } catch (e) {
+        console.error(`[gateway] deferred prompt dispatch failed: session=${cur.sessionId}:`, e)
+        emitToSession(cur, "message.delta", { text: "消息投递失败（后端正忙），请稍后重发。\n" })
+        // R9-4：deferred 失敗路徑同樣尊重 question 凍結，pending 期間不發 turn.done。
+        if (cur.pendingQuestions.size === 0) emitToSession(cur, "turn.done", {})
+      }
+    }
+    let deferTimer: ReturnType<typeof setTimeout> | null = null
+    void Promise.race([
+      // 壓縮落地（成功或失敗都算落地）→ timedOut=false。
+      compactionJob.then(
+        () => false,
+        () => false,
+      ),
+      new Promise<boolean>((resolve) => {
+        deferTimer = setTimeout(() => resolve(true), COMPACTION_MAX_DEFER_MS)
+      }),
+    ]).then((timedOut) => {
+      if (deferTimer) clearTimeout(deferTimer)
+      return dispatchDeferred(timedOut === true)
+    })
     return Response.json({ session_id: id }, { status: 202 })
   }
   try {
@@ -4943,6 +5778,10 @@ async function handleSendMessage(key: string, id: string, req: Request): Promise
   armAckTimer(state)
   // N1 規格1：30s 心跳提示（與 ack 內部錯峰：ack 已發則順延到 45s）。
   armHeartbeatTimer(state)
+  // Phase 0 觀測：prompt_async 回 202 = 投遞成功（provider/model 記本輪實際值）。
+  noteTurnPromptDispatch(state, promptBody.model?.providerID, promptBody.model?.modelID)
+  // 修復1：turn 起點首投同樣記實際 dispatch 模型（正常直投路徑）。
+  if (promptBody.model) state.lastDispatchedModel = { ...promptBody.model }
   return Response.json({ session_id: id }, { status: 202 })
 }
 
@@ -4956,6 +5795,10 @@ async function handleSendMessage(key: string, id: string, req: Request): Promise
 const SESSION_COMPACT_THRESHOLD = Number.parseInt(process.env.SESSION_COMPACT_THRESHOLD || "40", 10) || 40
 const SESSION_COMPACT_MIN_NEW = Math.max(4, Math.floor(SESSION_COMPACT_THRESHOLD / 2))
 const SESSION_COMPACT_TIMEOUT_MS = 180_000
+// 壓縮閘的有界等待上限（2026-09-18）：壓縮在途時 prompt 最多被擋這麼久，超時即
+// 逕行投遞（見 handleSendMessage 的 compactionJob 分支）。env 可覆寫。
+const COMPACTION_MAX_DEFER_MS =
+  Number.parseInt(process.env.COMPACTION_MAX_DEFER_MS || "4000", 10) || 4_000
 // R2-A 根因修復：in-flight 從 Set 升級為可等待的 Map——handleSendMessage
 // 能感知「壓縮在途」並把 prompt 投遞推遲到壓縮落地之後，消除
 // 「summarize 寫盤中途收到新 turn → turn 靜默死亡」的時序競態。
@@ -4984,6 +5827,17 @@ async function maybeCompactSession(state: SessionState): Promise<void> {
     )
     if (inflight.length > 0) {
       console.log(`[gateway] compact deferred: ${state.sessionId} has ${inflight.length} in-flight task(s)`)
+      return
+    }
+    // 2026-09-18：從源頭減少觸發——本 session 有在途 turn 或「已受理尚未投遞」的
+    // prompt 時不排壓縮，留待下一個 idle 再試。判據用 turnMetrics：它在
+    // handleSendMessage 受理當下建立（beginTurnMetrics，早於壓縮閘判定），
+    // turn.done / abort / 被下一輪取代三條路徑收檔——故「非空」精確等於
+    // 「有已受理但未收尾的 turn」，同時涵蓋被壓縮閘擋住的未投遞 prompt。
+    // 理由：summarize 寫盤中途收到新 turn 會讓 opencode 靜默丟棄 prompt_async
+    //（歷史實錘「turn 永不啟動」），這正是閘存在的理由；在此跳過＝不製造該競態。
+    if (state.turnMetrics !== null && state.turnMetrics !== undefined) {
+      console.log(`[gateway] compact deferred: ${state.sessionId} has an in-flight turn or undelivered prompt`)
       return
     }
     const lastCount = state.compact?.lastCount ?? 0
@@ -5040,9 +5894,16 @@ async function maybeCompactSession(state: SessionState): Promise<void> {
           console.warn(`[gateway] session compact UNVERIFIED (fetch error: ${e}), 水位不推進: ${state.sessionId}`)
           return
         }
-        const badSummary = verifyMsgs.find(
-          (m) => (m?.info?.summary === true || m?.info?.mode === "compaction") && m?.info?.error,
-        )
+        // 0918 修復：只驗「本次 summarize 新增」的訊息（.slice(count)，count =
+        // 呼叫 summarize 前的訊息數，見上方 `const count = msgs.length`）。
+        // 原本對整份歷史從頭 find，會撈出會話歷史上任意一條帶 error 的舊
+        // summary/compaction 訊息——該會話只要失敗過一次，那條陳年訊息就永久
+        // 毒化驗證：水位永不推進 → 每輪重壓縮 → 日誌永遠重印同一條舊錯誤。
+        //（09-18 實錘：7 條 FAILED 的 cf-ray 全同 a3c9f9d55f8b06fc，其中 5 條
+        // 時間戳與真實成功的壓縮逐秒吻合 = 假失敗，毒化會話 f4abcc5d。）
+        const badSummary = verifyMsgs
+          .slice(count)
+          .find((m) => (m?.info?.summary === true || m?.info?.mode === "compaction") && m?.info?.error)
         if (badSummary) {
           console.warn(
             `[gateway] session compact FAILED (summary errored, 水位不推進): ${state.sessionId} err=${JSON.stringify(badSummary.info?.error)}`,
@@ -5050,6 +5911,9 @@ async function maybeCompactSession(state: SessionState): Promise<void> {
           return
         }
         state.compact = { lastCount: count, at: Date.now() }
+        // 0918：壓縮改寫歷史（摘要不見得保留尾端注入的 payload 正文）→ 作廢尾端
+        // 去重指紋，下一輪必重貼一次 payload，避免野獸幀在壓縮後從上下文消失。
+        state.lastTailPayloadHash = undefined
         markDirty(state)
         console.log(
           `[gateway] session compacted: ${state.sessionId} (${count} messages -> summary, now ${verifyMsgs.length} msgs)`,
@@ -5406,6 +6270,10 @@ function teardownSession(id: string, state: SessionState, reason: string, keepRo
   if (!keepRow) deleteSessionRow(id) // 持久化鏡像：teardown（DELETE / idle reap）同步刪 row
   revokeSseTicketsFor(id) // a ticket must not outlive the session it names
   repromptedSessions.delete(id) // N1：重投去重集合隨會話拆除回收，防記憶體緩漲
+  // 刀 2：機器 critic pass 內存狀態（待審清單/派遣登記/已用旗標）隨會話回收。
+  // idle reap（keepRow=true）只是內存回收、DB row 保留可 revive —— 不清持久旗標
+  //（revive 後仍受「每會話 ≤1 次」約束），但內存鏡像要清防緩漲。
+  if (!keepRow) forgetCriticPassState(id)
   memoryRecallPrefetch.delete(id) // §7 召回預取緩存隨會話銷毀清理（2026-09-15 PRD P0-4）
   memoryRecallInflight.delete(id)
   // A pending spend must never auto-approve on teardown. Record the denial
@@ -5515,6 +6383,16 @@ async function handleGetSession(key: string, id: string): Promise<Response> {
 // 四类 part 的少數欄位（實測 tool.state.output/metadata 與 info 冗餘欄位佔 payload ~80%），
 // 白名單外欄位一率刪除；輸出保持 [{info,parts}] 同構契約，未知 part 型別整塊丟棄。
 // 防呆：讀路徑寧跳不炸——任何單則/單 part 處理異常只丟棄該項，函數永不拋錯。
+/** 0918：剝掉網關注入的 user 訊息尾端 payload（野獸幀等，見
+ *  appendSystemPayloadToTurnTail）。只用在顯示讀路徑（slimHistoryMessages）；
+ *  模型上下文由 opencode 持有、不經此函式，故不影響模型看到的內容。
+ *  找不到標記＝原樣返回（零回歸）。 */
+function stripTailInjectedPayload(text: string): string {
+  const marker = TAIL_PAYLOAD_MARKER.trim()
+  const i = text.indexOf(marker)
+  return i >= 0 ? text.slice(0, i).trimEnd() : text
+}
+
 function slimHistoryMessages(msgs: unknown[]): unknown[] {
   const out: unknown[] = []
   for (const rawMsg of msgs) {
@@ -5537,6 +6415,14 @@ function slimHistoryMessages(msgs: unknown[]): unknown[] {
           const part = rawPart as Record<string, unknown>
           const type = part.type
           if (type === "text" || type === "reasoning") {
+            // 0918：歷史端點是「顯示」通道——剝掉網關附在 user 訊息尾端的注入
+            // payload（野獸幀等，見 appendSystemPayloadToTurnTail），否則用戶
+            // 氣泡會被 17.2k 字的派遣協議正文灌爆。模型上下文由 opencode 持有、
+            // 不經本函式，故剝除不改變模型看到的內容（純顯示層過濾）。
+            if (type === "text" && info.role === "user" && typeof part.text === "string") {
+              parts.push({ ...part, text: stripTailInjectedPayload(part.text) })
+              continue
+            }
             parts.push(part)
             continue
           }
@@ -5672,6 +6558,8 @@ async function handleAbortSession(key: string, id: string): Promise<Response> {
     return jsonError(502, "opencode backend unreachable", "backend_unreachable", "backend_error")
   }
   state.turnAborted = true // 用戶主動中止：不觸發抖動重試
+  // Phase 0 觀測：中止輪同樣收檔（t_done = 中止時刻，end=aborted），不留懸空檔。
+  finishTurnMetrics(state, "aborted")
   // N2 同款（2026-09-02）：用戶中止即剝掉本輪文本幀——SSE 斷線重連不再整段
   // 重放被中止輪的舊文案（stale delta 閃回根治）。
   stripStaleTurnTextFromReplay(state)
@@ -5787,6 +6675,8 @@ function emitSessionError(state: SessionState, code: string, message: string): v
   // 2026-08-31：上游模型错误（TLS 断链/输出审核 400/欠费 403 等）记入 flag，
   // idle 收尾走 failover 换模重投；tool_error 是工具拒绝、Aborted 是用户打断，
   // 都不是渠道问题，不记。
+  // 0919 語義補充：failover 消費該 flag 後置 null，但重試輪再犯時這裡會再記——
+  // 重試耗盡的誠實收尾（isDeadAccountError 分流）依賴「最後一次」的留存。
   if (code !== "tool_error" && code !== "MessageAbortedError") state.turnUpstreamError = message
   // S5a：供應商/上游錯誤人話化——原文 message 保留，映射命中時加 human_message。
   const human = humanizeSupplierError(message)
@@ -5798,7 +6688,19 @@ function emitSessionError(state: SessionState, code: string, message: string): v
       state.turnTextChars = 0 // 保持零文本，抖动重试会接手
     }
   }
-  emitToSession(state, "session.error", { code, message, ...(human ? { human_message: human } : {}) })
+  // 修復3a（2026-09-19）：per-turn 同文去重——一個 turn 的 failover 鏈每跳一次
+  // 就有一條 session.error，同文（humanize 後的 human_message，無則 message）
+  // 重複直發曾讓用戶一輪收 5-6 條紅幀（事故實錘）。本 turn 已發過同文 → 只記
+  // log 不發幀；turnUpstreamError 已在上面照常記（failover 邏輯依賴它，不受影響）。
+  // 去重僅作用幀發送；abort 路徑在函數開頭已早退，此處天然不觸及。
+  const dedupKey = human || message
+  const emitted = state.turnEmittedErrors ?? []
+  if (emitted.includes(dedupKey)) {
+    console.error(`[gateway] session.error [coalesced] duplicate this turn, frame suppressed code=${code}`)
+  } else {
+    state.turnEmittedErrors = [...emitted, dedupKey].slice(-32)
+    emitToSession(state, "session.error", { code, message, ...(human ? { human_message: human } : {}) })
+  }
   // R4-A S3①：上游/LLM 錯誤（非工具拒絕）後布停滯哨——R4 實錘 APIError 後
   // turn 空轉 5 分鐘零告警。tool_error 是工具被拒，turn 照常走，不布哨。
   if (code !== "tool_error") armErrorStallTimer(state)
@@ -6088,7 +6990,11 @@ async function autoAssumeQuestions(state: SessionState): Promise<void> {
       if (label) labels.push(label)
     }
   }
-  const answerText = `（用户 3 分钟未回复，系统按推荐方案继续：${labels.length ? labels.join("；") : "采用默认方案"}。后续结果请标注 assumed）`
+  // 0919 斷點③修復：話術不得冒充「推荐方案」——gateway 沒有任何管道知道哪個
+  // 選項是模型推薦的（options 無推薦標記欄位），盲取 options[0] 標成推薦＝
+  // 撒謊。改為如實標「代答了首項」；agent 側 prompt 契約本就要求預設答案
+  // 放第一項（AGENTS.md §3.6），首項是事實上的預設，但稱呼必須誠實。
+  const answerText = `（用户 3 分钟未回复，已代答第一项继续：${labels.length ? labels.join("；") : "无选项，按默认方案"}。后续结果请标注 assumed）`
   const count = state.pendingQuestions.size
   for (const requestId of [...state.pendingQuestions.keys()]) {
     try {
@@ -6513,8 +7419,6 @@ const CANVAS_OP_TYPES = new Set([
   "select_nodes",
   "set_viewport",
   "run_generation",
-  // 2026-09-16 G1：專案級 op（CanvasProject.projectType/currentStep/episodes）。
-  // 本 Set 是 op 型別的門禁：不在這裡 = gateway 400 直接擋掉，到不了前端。
   "set_project_meta",
 ])
 
@@ -6793,7 +7697,12 @@ async function handleMediaUpload(req: Request): Promise<Response> {
   const url = new URL(req.url)
   const sessionId = url.searchParams.get("session_id")
   if (!sessionId) return Response.json({ ok: false, error: "session_id is required" }, { status: 400 })
-  const session = resolveSession(sessionId)
+  // 死线③同构（2026-09-19 片头曲 404 实锤）：子代理 opencode session 只在
+  // byChildOc 注册表里，resolveSession 三段解析查无记录 → music_gen 的
+  // uploadAudio 在 Expert 子会话内一律 404 "session not found"（生成成功、
+  // 上传全挂）。最小修：命中活跃子会话时落盘归属父会话（同一用户，存储口径
+  // 不变）；父会话已被逐出/收尾则维持 404 原语义。
+  const session = resolveSession(sessionId) ?? subagentParentState(sessionId)
   if (!session) return Response.json({ ok: false, error: "session not found" }, { status: 404 })
   let body: { url?: unknown; path_b64?: unknown; filename?: unknown }
   try {
@@ -8677,6 +9586,13 @@ async function handleRequest(req: Request, srv: { requestIP: (r: Request) => { a
       return handleQuota(key)
     }
 
+    // Phase 0 觀測（2026-09-18）：per-turn 分段延遲與 event-loop lag 的記憶體
+    // 聚合視圖（p50/p95/p99 + 樣本數）。鑑權沿用本區塊既有慣例（Bearer
+    // sk-biz-* 閘門 + 上游驗證），純讀記憶體、無狀態、無副作用。
+    if (req.method === "GET" && pathname === "/agent/v1/metrics") {
+      return Response.json(turnMetricsSnapshot())
+    }
+
     // 畫布 workflow 節點操作（rerun/update）：站點 /api/agent/sessions/:id/workflow-node-*
     // 代理進來。/internal/workflow/* 是 loopback-only，Vercel 站點打不進——這裡掛
     // Bearer 家族等價入口（同一 handleWorkflowInternal，endsWith 匹配前綴無關）。
@@ -9034,6 +9950,8 @@ async function wakeSessionForSubagent(
       `【子代理${verdict}·系统自动唤醒】subagent ${shortId}（label="${run.label}"）已${verdict}。` +
       (run.status === "ok" ? `结果摘要：${payload}` : `失败原因：${payload}`) +
       `\n请基于以上真实结果继续推进（汇总/补派/返工），并向用户简报。若尚有其他子代理在跑，等其余唤醒到齐再汇总（可用 subagent_status 工具查询，禁止 bash sleep 轮询）。`
+    // 刀 1（2026-09-19）：喚醒摘要收集（Jev 測謊題的事實面；有界 16 條，session.idle 消費）。
+    state.jevGateSummaries = [...(state.jevGateSummaries ?? [] as string[]), content.slice(0, 300)].slice(-16)
     const body = { ...beastAgentField(state), parts: [{ type: "text", text: content }] }
     const res = await fetch(`${OPENCODE_URL}/session/${state.opencodeSessionId}/prompt_async`, {
       method: "POST",
@@ -9101,5 +10019,10 @@ initSubagent({
 // Single global connection to opencode's event stream, fanned out per session.
 connectOpencode()
 
-console.log(`[gateway] listening on :${server.port}, opencode=${OPENCODE_URL}`)
+// 刀 F（2026-09-15）：啟動掃描 in-flight rework 孤兒（延後一拍讓 opencode /event 先連上、
+// 父會話可 lazy 恢復；探針與 wake 都帶超時，失敗留記錄交下次重啟，不卡啟動）。
+setTimeout(() => {
+  void recoverReworkRunsOnStartup().catch((e) => console.error("[gateway] rework recovery scan failed:", e))
+}, 3000)
 
+console.log(`[gateway] listening on :${server.port}, opencode=${OPENCODE_URL}`)
