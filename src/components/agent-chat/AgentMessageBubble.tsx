@@ -81,8 +81,8 @@ function AgentMessageBubbleComponent({ item, sessionId }: AgentMessageBubbleProp
           "min-w-0 break-words [overflow-wrap:anywhere] text-[15px]",
           item.kind === "user" ? "whitespace-pre-wrap max-w-[85%]" : "w-full",
           isUser
-            ? "ml-auto rounded-[20px] rounded-br-[6px] bg-ios-blue px-3.5 py-2.5 text-white leading-[1.45] shadow-[0_2px_10px_rgba(0,122,255,0.25)]"
-            : "rounded-[20px] rounded-bl-[6px] bg-[rgba(120,120,128,0.08)] px-4 py-3 text-foreground leading-[1.55]",
+            ? "ml-auto rounded-[20px] rounded-br-[6px] bg-[rgba(120,120,128,0.08)] px-3.5 py-2.5 text-foreground leading-[1.45]"
+            : "rounded-[20px] rounded-bl-[6px] px-4 py-3 text-foreground leading-[1.55]",
         )}
       >
         {/* 思維鏈預設展開，手動收合優先於任何自動行為（裁定理由見上方 reasoningOpen）。
