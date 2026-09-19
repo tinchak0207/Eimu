@@ -23,7 +23,6 @@ import {
   MARQUEE_HARD_CAP,
   MARQUEE_KEEP,
   marqueeText,
-  pickVisibleSubagents,
 } from "./AgentSubagentBar";
 import { AgentToolCard, toolArgPreview, toolDisplayName } from "./AgentToolCard";
 import { AgentAudioCard } from "./AgentAudioCard";
@@ -944,7 +943,8 @@ test("subagent started→done settles the card, turn.done retires it into an exp
   assert.ok(report);
   assert.equal(report.text, "找到 3 张候选图");
   assert.equal(report.status, "ok");
-  // 名额裁剪：3 张之外的新 running 挤掉最旧的已完成项。
+  // 2026-09-19 暴君裁定：置顶三卡 + 弹出面板两套重复 UI 合并为一份内联列表，
+  // pickVisibleSubagents 名额裁剪随置顶卡一起下线。
   const mk = (i: number, status: AgentSubagentItem["status"]): AgentSubagentItem => ({
     kind: "subagent",
     id: `subagent-${i}`,
@@ -954,8 +954,12 @@ test("subagent started→done settles the card, turn.done retires it into an exp
     lastLine: "",
     status,
   });
-  const picked = pickVisibleSubagents([mk(1, "ok"), mk(2, "ok"), mk(3, "ok"), mk(4, "running")]);
-  assert.deepEqual(picked.map((it) => it.subagentId), ["sa2", "sa3", "sa4"]);
+  const all = [mk(1, "ok"), mk(2, "ok"), mk(3, "ok"), mk(4, "running")];
+  const markupAll = renderToStaticMarkup(createElement(AgentSubagentBar, { items: all }));
+  for (const it of all) {
+    assert.match(markupAll, new RegExp(it.label), "内联列表全量渲染，不再有名额裁剪");
+  }
+  assert.match(markupAll, /查看全部 4 个子任务/, "折叠头计数与列表同源");
 });
 
 test("F2 工具卡人話化：默認渲染只有人話，函數名與 raw JSON 收進展開抽屜", () => {
@@ -1044,10 +1048,10 @@ test("F3/F4 產出卡：截斷預覽 + 整行展開全文（渲染層才截斷�
   assert.equal(reportPreview("\n\n第二行\n第三行"), "第二行");
 });
 
-test("subagent bar：running 逐字滑窗（append-only + 立即釘右緣）、置顶卡无展开、面板可管理全部（2026-09-11 逐字滑窗合同）", () => {
+test("subagent bar：running 逐字滑窗（append-only + 立即釘右緣）、折叠头默认展开可收合（2026-09-11 逐字滑窗合同；09-19 去重裁定）", () => {
   const src = read("src/components/agent-chat/AgentSubagentBar.tsx");
-  // 2026-09-10 暴君裁定：置顶卡移除展开按钮（aria-expanded 卡片级语义下线）。
-  assert.ok(!/aria-expanded=\{expanded\}/.test(src), "置顶卡不再有展开语义");
+  // 2026-09-10 暴君裁定：卡片级展开语义下线（单行卡无展开按钮）。
+  assert.ok(!/aria-expanded=\{expanded\}/.test(src), "单行卡不再有展开语义");
   // 兩套被否決的做法都不得回魂：循環跑馬燈（9s linear infinite + translateX(-50%)）
   // 語義相反；「尾部跟隨 + 逐幀插值」與文字增長兩套運動打架＝使用者看到的
   // 「滿了就整行清掉」。
@@ -1146,16 +1150,16 @@ test("subagent bar：running 逐字滑窗（append-only + 立即釘右緣）、�
     createElement(AgentSubagentBar, { items: [{ ...runningItem, activity: undefined }] }),
   );
   assert.match(noActivityMarkup, /第一段 第二段 收尾/, "沒有 activity 時回落 text");
-  // 空输出诚实文案，不假造内容。
-  assert.match(src, /尚无输出/);
-  // 「查看全部」入口恒在（items>0 即渲染），面板 lg-sheet 材质 + 关闭钮 + Esc。
+  // 空输出诚实文案，不假造内容（running 卡的 fallback「正在输出…」）。
+  assert.match(src, /正在输出…/);
+  // 2026-09-19 暴君裁定：「查看全部 N 个子任务」折叠头放列表上方，默认展开可收合；
+  // 弹出面板（lg-sheet/关闭钮/Esc）与置顶名额裁剪两套重复 UI 下线。
   assert.match(src, /查看全部 \{items\.length\} 个子任务/);
-  assert.match(src, /lg-sheet agent-rise rounded-ios-2xl/);
-  assert.match(src, /aria-label="关闭子任务面板"/);
-  assert.match(src, /e\.key === "Escape"/, "面板必须留键盘出路");
-  // 面板列表不裁名额（items 全量传入），每项可展开（面板内也有 aria-expanded）。
-  assert.match(src, /<SubagentMenu items=\{items\}/);
-  assert.match(src, /aria-expanded=\{open\}/);
+  assert.match(src, /useState\(true\)/, "折叠头默认展开");
+  assert.match(src, /aria-expanded=\{open\}/, "折叠头带展开语义（可收合）");
+  assert.ok(!/SubagentMenu/.test(readCode(src)), "弹出面板已下线（只有一份内联列表）");
+  assert.ok(!/lg-sheet/.test(readCode(src)), "弹层材质随面板一起下线");
+  assert.ok(!/pickVisibleSubagents/.test(readCode(src)), "置顶名额裁剪已下线（列表全量渲染）");
 });
 
 // ───────────────────── 资产入库：recipe 分支（E1 白名单） ────────────────

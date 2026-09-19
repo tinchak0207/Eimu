@@ -8,7 +8,7 @@
  *      - 身分映射：gateway sessionId ↔ opencode session id ↔ owner key
  *      - SSE replayBuffer（最近 REPLAY_BUFFER_SIZE 幀，斷線/重啟後前端 Last-Event-ID 續傳用）
  *      - 事件翻譯去重狀態（messageRole / suppressedParts 等有界集合）
- *      - 一次性注入標記（vettingInjected / memoryInjected / userMemory）
+ *      - 一次性注入標記（vettingInjected / userMemory）
  *      - 畫布摘要（canvasSummary）
  *      - 摘要壓縮水位（compact.lastCount）
  * 2. 存儲選 bun:sqlite（bun 內建）：單文件 /opt/agent-harness/gateway/sessions.db、
@@ -49,7 +49,6 @@ export interface PersistableState {
   vettingInjected: boolean
   userMemory?: { user_profile: Record<string, unknown>; lessons: string[] }
   profileOnboardingPending?: boolean
-  memoryInjected: boolean
   compact?: { lastCount: number; at: number }
   /** N1（2026-08-27）：in-flight turn 打點——turn 開始時寫入、正常結束清零；
    *  gateway 重啟後恢復會話時據此判斷是否要自動重投 lastPromptBody。 */
@@ -78,7 +77,6 @@ interface PersistedData {
   vettingInjected: boolean
   userMemory?: { user_profile: Record<string, unknown>; lessons: string[] }
   profileOnboardingPending?: boolean
-  memoryInjected: boolean
   compact?: { lastCount: number; at: number }
   lastTurnActiveAt?: number
   /** 會話摘要標題鏡像（2026-09-12）：null=尚未生成（佔位標題已在抓取側歸一化掉）。 */
@@ -190,7 +188,6 @@ function serialize(state: PersistableState): PersistedData {
     vettingInjected: state.vettingInjected,
     userMemory: state.userMemory,
     profileOnboardingPending: state.profileOnboardingPending,
-    memoryInjected: state.memoryInjected,
     compact: state.compact,
     lastTurnActiveAt: state.lastTurnActiveAt,
     title: state.sessionTitle ?? null,
@@ -232,7 +229,6 @@ export function hydrateRow(row: PersistedRow): Record<string, unknown> {
     vettingInjected: d.vettingInjected === true,
     userMemory: d.userMemory,
     profileOnboardingPending: d.profileOnboardingPending === true,
-    memoryInjected: d.memoryInjected === true,
     compact: d.compact,
     lastTurnActiveAt: typeof d.lastTurnActiveAt === "number" ? d.lastTurnActiveAt : 0,
     sessionTitle: typeof d.title === "string" && d.title ? d.title : null,
@@ -385,6 +381,8 @@ export interface UserSettings {
   interrupt_mode: string
   persona: string
   cost_mode: string
+  /** 野獸模式（MOE 改革，2026-09-08）：settings 布林，dispatch 時快照進 subagent run。 */
+  beast_mode?: boolean
 }
 
 /** 讀取 key 維度 settings；無記錄回 null（呼叫端套默認值）。fail-open 同全局策略。 */

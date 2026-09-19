@@ -10,6 +10,7 @@ import { AgentAudioCard, type AgentAudioCardProps } from "./AgentAudioCard";
 import { AgentDirectorCard } from "./AgentDirectorCard";
 import { AgentNoticeRow } from "./AgentNoticeRow";
 import { AgentSubagentReportCard } from "./AgentSubagentReportCard";
+import { AgentPlanCard } from "./AgentPlanCard";
 
 export interface AgentTranscriptProps {
   items: AgentChatState["items"];
@@ -110,6 +111,14 @@ function AgentTranscriptComponent({ items, imageActions, videoActions, audioActi
             return (
               <li key={item.id}>
                 <AgentNoticeRow item={item} />
+              </li>
+            );
+          case "plan":
+            // 本輪計畫（turn.plan）的獨立區塊：與工具卡同寬、獨立成條，
+            // 絕不併進任何 assistant 氣泡（計畫不是交付物，答案才是）。
+            return (
+              <li key={item.id}>
+                <AgentPlanCard item={item} />
               </li>
             );
           case "subagent":

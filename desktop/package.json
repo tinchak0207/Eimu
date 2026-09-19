@@ -1,0 +1,56 @@
+{
+  "name": "eimu-desktop",
+  "productName": "Eimu",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Eimu 桌面客户端",
+  "author": "Eimu",
+  "license": "UNLICENSED",
+  "desktopName": "eimu.desktop",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist:linux": "electron-builder --linux",
+    "dist:win": "electron-builder --win"
+  },
+  "devDependencies": {
+    "electron": "^38.2.2",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "dev.eimu.desktop",
+    "productName": "Eimu",
+    "copyright": "Copyright © 2026 Eimu",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "build/icon.png"
+    ],
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Graphics",
+      "icon": "build/icon.png",
+      "synopsis": "AI 创作工作台",
+      "description": "Eimu 桌面客户端",
+      "syncDesktopName": true
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "shortcutName": "Eimu"
+    }
+  }
+}

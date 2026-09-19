@@ -8,7 +8,9 @@
  * 通路執行硬規則：flowmusic 剝除死掉的時間戳、無歌詞標籤時壓成單行並壓進
  * 220 runes（超限依 CORE_01 權重由低到高整層丟棄，仍超才硬截——硬截盡量用滿預算：
  * 先取前 cap runes，≥60% cap 有子句邊界才退、否則退到最後空白或就地切）；
- * lyria 保留官方時間戳、不設 220 上限。全程在後端發生，用戶無感。
+ * lyria 保留官方時間戳、不設 220 上限；yue2 剝除時間戳（YuE2 不認時間戳結構控制）但
+ * **保留 [Verse]/[Chorus] 段落標籤**（那是歌詞欄必需語法）、允許換行、上限 3000 runes。
+ * 全程在後端發生，用戶無感。
  *
  * 知識來源：SunoForge v3.0 配方庫（repo `skills/music-director/files/`，MIT，
  * 上游 sanic732/SunoForge）＋本專案對生產通路 FlowMusic2API 的實測
@@ -25,8 +27,8 @@
  * 零依賴（同 `music-lyria.ts` 慣例）：VPS 落位檔必須自足，本檔不 import 任何模組。
  */
 
-/** 目標通路。`flowmusic` = 生產 FlowMusic2API（對話式 agent）；`lyria` = Google Lyria。 */
-export type MusicChannel = "flowmusic" | "lyria";
+/** 目標通路。`flowmusic` = 生產 FlowMusic2API；`lyria` = Google Lyria；`yue2` = YuE2（Modal，白盒樂譜）。 */
+export type MusicChannel = "flowmusic" | "lyria" | "yue2";
 
 /** 六層風格公式的槽位 id。 */
 export type MusicLayerId = "genre" | "mood" | "instrumentation" | "vocal" | "structure" | "production";
@@ -73,6 +75,13 @@ export interface MusicDirectorResult {
 const CHANNEL_LIMITS = {
   flowmusicFlat: 220,
   flowmusicLayout: 3000,
+  /**
+   * YuE2 style 欄上限。依據（誠實標注，非上游記載）：YuE2 凍結合約**沒有** style 字數上限
+   * 條款，庫內（CORE_01／CORE_03／DATA_*）也無 YuE2 條目 → 沿用本檔既有的版面預算 3000 runes
+   * （CORE_01_STYLE §13 LENGTH DISCIPLINE 的「front-loading／版面」預算），
+   * 只做防爆，不把散文壓成 flowmusic 的 220 平面。
+   */
+  yue2Style: 3000,
 } as const;
 
 /** 整曲門檻（秒）：≥ 此值時結構補層講「整曲」。來源：DATA_FLOWMUSIC_2026-09.md:148-159 §4（成品 162–182s）。 */
@@ -534,6 +543,18 @@ export function directMusicPrompt(rawPrompt: string, options: MusicDirectorOptio
       allowNewline = false;
       limit = CHANNEL_LIMITS.flowmusicFlat;
     }
+  } else if (channel === "yue2") {
+    // YuE2 硬規則（依凍結合約的能力邊界，2026-09-18）：
+    //  ① 時間戳剝除：`[0:00 - 0:10]` 只有 Lyria 認，YuE2 不支援時間戳結構控制 → 剝掉
+    //     （用同一個 stripTimestamps，只吃數字時間碼與舊式 (0-15s)）。
+    //  ② [Verse]/[Chorus] 段落標籤**保留**：那是 YuE2 歌詞欄的必需語法，不是偽標籤，
+    //     stripTimestamps 不動它（它只認數字時間碼），標籤原樣穿過。
+    //  ③ style 是散文描述：允許換行，不做 collapse-single-line、不套 220 平面分支。
+    //  ④ 上限 yue2Style＝庫內版面預算 3000 runes（依據見 CHANNEL_LIMITS 註釋）。
+    const stripped = stripTimestamps(core);
+    if (stripped !== core) applied.push("strip-timestamps");
+    core = stripped;
+    limit = CHANNEL_LIMITS.yue2Style;
   }
 
   // 5. 缺層補中性指令（不替用戶決定流派／樂器／唱的人），再依上限組裝。

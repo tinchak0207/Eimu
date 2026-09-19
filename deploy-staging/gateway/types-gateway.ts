@@ -56,9 +56,10 @@ export interface SessionState {
   // Per-session translation state for the /event fan-out. All bounded below.
   partTextEmitted: Map<string, { emittedLen: number }>
   // S2b（2026-08-27）：出站文本內部框架段剝離器的逐 part 狀態
-  //（pending = 扣住的未完成行；suppress = 正處於內部段中）。生命週期同
-  // partTextEmitted：session.idle 時 flush 並清空。
-  partStripState: Map<string, { pending: string; suppress: boolean }>
+  //（pending = 扣住的未完成行；suppress = 正處於內部段中；fence/sawEnglish =
+  // 程式碼柵欄狀態與英文壓制旗標，形狀同 outbound-sanitize 的 PartStripState）。
+  // 生命週期同 partTextEmitted：session.idle 時 flush 並清空。
+  partStripState: Map<string, { pending: string; suppress: boolean; fence: boolean; sawEnglish: boolean }>
   announcedUrls: Set<string>
   toolStatusSeen: Set<string>
   toolInvokeSeen: Set<string>

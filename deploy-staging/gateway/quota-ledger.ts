@@ -88,8 +88,8 @@ export interface LedgerEntry {
   model?: string
   cost_coins?: number
   result_url?: string
-  kind: string
-  event: string
+  kind?: string
+  event?: string
 }
 
 export async function appendLedger(entry: LedgerEntry): Promise<void> {

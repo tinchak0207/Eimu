@@ -33,6 +33,17 @@ const CRITIC = getContract("critic");
 if (!CRITIC) throw new Error("契约夹具缺失：critic（contracts 目錄被改壞）");
 const DIRECTOR3D = getContract("director3d");
 if (!DIRECTOR3D) throw new Error("契约夹具缺失：director3d（contracts 目錄被改壞）");
+const MUSIC = getContract("music");
+if (!MUSIC) throw new Error("契约夹具缺失：music（contracts 目錄被改壞）");
+
+/** 合法純 JSON：music 工具回執全形（YuE2 通路，frozenConstants 全在 + 必填全在 + score_abc 帶實體）。 */
+const VALID_MUSIC_YUE2_JSON = JSON.stringify({
+  ok: true,
+  url: "https://gateway/agent/v1/sessions/ses_x/uploads/u1.flac",
+  duration_source: "upstream_reported",
+  channel: "yue2_modal",
+  score_abc: "X:1\nK:D\nQ:4/4\nV:Vocal\nA4 B4 c4 A4",
+});
 
 /** 合法純 JSON：screenwriter 回執頂層契約全形（frozenConstants 全在 + 必填全在）。 */
 const VALID_SCREENWRITER_JSON = JSON.stringify({
@@ -120,6 +131,132 @@ test("critic 契約：issues／evidence 必填且型別為數組（鍵須在場�
   const evidence = CRITIC.fields.find((f) => f.name === "evidence");
   assert.ok(issues && issues.required && issues.type === "string[]");
   assert.ok(evidence && evidence.required && evidence.type === "string[]");
+});
+
+// ── 2026-09-19 YuE2 白盒接線：music 回執契約收 score_abc／channel（additive 同步） ──
+
+test("music 契約：topLevelKeys 收錄 score_abc（YuE2 白盒樂譜，melody_notation 真源）且為非必填", () => {
+  assert.ok(MUSIC.topLevelKeys.includes("score_abc"), `music topLevelKeys 應含 score_abc，實際：${MUSIC.topLevelKeys.join("、")}`);
+  assert.ok(MUSIC.topLevelKeys.includes("channel"), `music topLevelKeys 應含 channel，實際：${MUSIC.topLevelKeys.join("、")}`);
+  const score = MUSIC.fields.find((f) => f.name === "score_abc");
+  assert.ok(score, "music fields 應含 score_abc 欄位表項");
+  assert.equal(score.required, false, "score_abc 是回執層 additive 鍵（其餘通路 null），非 collect 必查鍵，必填=false");
+  // 設計不變量：frozenConstants ⊆ 必填欄位集（極簡樣本零誤報自檢的前提），
+  // score_abc 選填故不入 frozenConstants——「欄位一律在場」的回執層錨在 music-tools.ts，非本契約。
+  assert.equal(MUSIC.frozenConstants.includes("score_abc"), false, "score_abc 是選填鍵，不得入 frozenConstants（否則極簡樣本自檢誤報）");
+});
+
+test("正樣本：music 回執（YuE2，score_abc 帶 ABC 記譜實體）→ 0 violation", () => {
+  const vs = checkJsonOutput(VALID_MUSIC_YUE2_JSON, MUSIC);
+  assert.deepEqual(vs, [], `合法 music 回執不得報 violation，實際：${JSON.stringify(vs)}`);
+});
+
+test("正樣本：music 回執（非 YuE2 通路，score_abc=null）→ 0 violation（欄位在場即合契約）", () => {
+  const text = JSON.stringify({
+    ok: true,
+    url: "https://gateway/uploads/u2.mp3",
+    duration_source: "ffprobe",
+    channel: "flowmusic2api",
+    score_abc: null,
+  });
+  assert.deepEqual(checkJsonOutput(text, MUSIC), []);
+});
+
+test("正樣本：music 回執缺 score_abc 鍵（選填鍵缺席不誤報——與必填欄位口徑不同）", () => {
+  const text = JSON.stringify({
+    ok: true,
+    url: "https://gateway/uploads/u3.mp3",
+    duration_source: "ffprobe",
+    channel: "lyria_gemini",
+  });
+  const vs = checkJsonOutput(text, MUSIC);
+  assert.deepEqual(vs, [], `score_abc 選填：缺席不得報 violation，實際：${JSON.stringify(vs)}`);
+});
+
+// ── 2026-09-19 片 K 樂譜編輯：music 回執契約收 cot_mode／abc_sha256（additive 同步） ──
+
+test("music 契約：topLevelKeys 收錄 cot_mode／abc_sha256（樂譜編輯回執鍵）且為非必填", () => {
+  assert.ok(MUSIC.topLevelKeys.includes("cot_mode"), `music topLevelKeys 應含 cot_mode，實際：${MUSIC.topLevelKeys.join("、")}`);
+  assert.ok(MUSIC.topLevelKeys.includes("abc_sha256"), `music topLevelKeys 應含 abc_sha256，實際：${MUSIC.topLevelKeys.join("、")}`);
+  const cotMode = MUSIC.fields.find((f) => f.name === "cot_mode");
+  assert.ok(cotMode, "music fields 應含 cot_mode 欄位表項");
+  assert.equal(cotMode.required, false, "cot_mode 是回執層 additive 鍵（僅 YuE2 通路在場），非 collect 必查鍵，必填=false");
+  const abcSha = MUSIC.fields.find((f) => f.name === "abc_sha256");
+  assert.ok(abcSha, "music fields 應含 abc_sha256 欄位表項");
+  assert.equal(abcSha.required, false, "abc_sha256 是回執層 additive 鍵（有傳 abc 時在場），非 collect 必查鍵，必填=false");
+  // 同 score_abc 設計不變量：選填鍵不入 frozenConstants（極簡樣本零誤報自檢的前提）。
+  assert.equal(MUSIC.frozenConstants.includes("cot_mode"), false, "cot_mode 選填，不得入 frozenConstants");
+  assert.equal(MUSIC.frozenConstants.includes("abc_sha256"), false, "abc_sha256 選填，不得入 frozenConstants");
+});
+
+test("正樣本：music 回執（YuE2 帶譜重渲染，cot_mode=melody＋abc_sha256）→ 0 violation", () => {
+  const text = JSON.stringify({
+    ok: true,
+    url: "https://gateway/uploads/u4.flac",
+    duration_source: "upstream_reported",
+    channel: "yue2_modal",
+    score_abc: "X:1\nK:G\nQ:4/4\nV:Vocal\nG4 A4 B4 c4",
+    cot_mode: "melody",
+    abc_sha256: "b".repeat(64),
+  });
+  assert.deepEqual(checkJsonOutput(text, MUSIC), []);
+});
+
+test("正樣本：music 回執（YuE2 常規生成，cot_mode 在場而 abc_sha256 缺席）→ 0 violation（各自獨立選填）", () => {
+  const text = JSON.stringify({
+    ok: true,
+    url: "https://gateway/uploads/u5.flac",
+    duration_source: "ffprobe",
+    channel: "yue2_modal",
+    score_abc: null,
+    cot_mode: "full",
+  });
+  const vs = checkJsonOutput(text, MUSIC);
+  assert.deepEqual(vs, [], `abc_sha256 缺席（未帶譜委託）不得報 violation，實際：${JSON.stringify(vs)}`);
+});
+
+// ── 2026-09-19 片 O 翻唱工作流：music 回執契約收 transcribed_abc_sha256／transcribe_warnings ──
+
+test("music 契約：topLevelKeys 收錄 transcribed_abc_sha256／transcribe_warnings（翻唱回執鍵）且為非必填", () => {
+  assert.ok(MUSIC.topLevelKeys.includes("transcribed_abc_sha256"), `music topLevelKeys 應含 transcribed_abc_sha256，實際：${MUSIC.topLevelKeys.join("、")}`);
+  assert.ok(MUSIC.topLevelKeys.includes("transcribe_warnings"), `music topLevelKeys 應含 transcribe_warnings，實際：${MUSIC.topLevelKeys.join("、")}`);
+  const transcribedSha = MUSIC.fields.find((f) => f.name === "transcribed_abc_sha256");
+  assert.ok(transcribedSha, "music fields 應含 transcribed_abc_sha256 欄位表項");
+  assert.equal(transcribedSha.required, false, "transcribed_abc_sha256 是回執層 additive 鍵（帶 source_audio 時在場），非 collect 必查鍵，必填=false");
+  const transWarnings = MUSIC.fields.find((f) => f.name === "transcribe_warnings");
+  assert.ok(transWarnings, "music fields 應含 transcribe_warnings 欄位表項");
+  assert.equal(transWarnings.required, false, "transcribe_warnings 是回執層 additive 鍵（帶 source_audio 時在場），非 collect 必查鍵，必填=false");
+  // 同 score_abc 設計不變量：選填鍵不入 frozenConstants（極簡樣本零誤報自檢的前提）。
+  assert.equal(MUSIC.frozenConstants.includes("transcribed_abc_sha256"), false, "transcribed_abc_sha256 選填，不得入 frozenConstants");
+  assert.equal(MUSIC.frozenConstants.includes("transcribe_warnings"), false, "transcribe_warnings 選填，不得入 frozenConstants");
+});
+
+test("正樣本：music 回執（YuE2 翻唱，transcribed_abc_sha256＋transcribe_warnings）→ 0 violation", () => {
+  const text = JSON.stringify({
+    ok: true,
+    url: "https://gateway/uploads/u6.flac",
+    duration_source: "upstream_reported",
+    channel: "yue2_modal",
+    score_abc: null,
+    cot_mode: "melody",
+    transcribed_abc_sha256: "d".repeat(64),
+    transcribe_warnings: ["audio trimmed to 60s"],
+  });
+  assert.deepEqual(checkJsonOutput(text, MUSIC), []);
+});
+
+test("正樣本：music 回執（非翻唱委託，transcribed_* 缺席）→ 0 violation（與 abc_sha256 各自獨立選填）", () => {
+  const text = JSON.stringify({
+    ok: true,
+    url: "https://gateway/uploads/u7.flac",
+    duration_source: "ffprobe",
+    channel: "yue2_modal",
+    score_abc: "X:1\nK:C\nC D E F|",
+    cot_mode: "full",
+    abc_sha256: "e".repeat(64),
+  });
+  const vs = checkJsonOutput(text, MUSIC);
+  assert.deepEqual(vs, [], `transcribed_* 缺席（非翻唱委託）不得報 violation，實際：${JSON.stringify(vs)}`);
 });
 
 // ── 2. checkJsonOutput：正樣本 ────────────────────────────────────────────────

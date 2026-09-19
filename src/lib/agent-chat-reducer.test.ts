@@ -6,6 +6,7 @@ import {
   type AgentAssistantTextItem,
   type AgentAudioItem,
   type AgentNoticeItem,
+  type AgentPlanItem,
   type AgentSseEvent,
   type AgentSubagentItem,
   type AgentSubagentReportItem,
@@ -933,4 +934,94 @@ test("缺席新欄位的舊格式 tool.result → 行為與現狀逐位元一致
   let f = agentChatReducer(EMPTY, evt({ name: "tool.invoke", event_id: 1, data: { tool: "gen" } }));
   f = agentChatReducer(f, evt({ name: "tool.result", event_id: 2, data: { tool: "gen", ok: false } }));
   assert.equal((f.items[0] as AgentToolCallItem).status, "failed");
+});
+
+// ─────────────────────────── turn.plan（本輪計畫，2026-09-18 契約）
+
+test("turn.plan 落成獨立的 plan 條目，不併進 assistant 條目", () => {
+  const s = agentChatReducer(
+    EMPTY,
+    evt({
+      name: "turn.plan",
+      event_id: 1,
+      data: { plan: "打算这么做：先拆解分镜脚本，再生成配乐。", experts: ["screenwriter"], provisional: true, source: "model" },
+    }),
+  );
+
+  assert.equal(s.items.length, 1, "計畫自成條目，不寄生在任何既有條目上");
+  const plan = s.items[0] as AgentPlanItem;
+  assert.equal(plan.kind, "plan");
+  assert.equal(plan.text, "打算这么做：先拆解分镜脚本，再生成配乐。");
+  assert.deepEqual(plan.experts, ["screenwriter"]);
+  assert.equal(plan.provisional, true);
+  assert.equal(plan.collapsed, false, "剛到的計畫預設展開（此刻它是畫面上唯一的資訊）");
+  assert.equal(s.turnActive, true, "計畫幀到達 = 回合確實開始了");
+});
+
+test("turn.plan 清掉罐頭狀態行（turnStatus），與 message.delta 同款", () => {
+  let s = agentChatReducer(EMPTY, evt({ name: "turn.status", event_id: 1, data: { text: "正在思考…" } }));
+  assert.equal(s.turnStatus, "正在思考…");
+  s = agentChatReducer(s, evt({ name: "turn.plan", event_id: 2, data: { plan: "先出分镜再出片。" } }));
+  assert.equal(s.turnStatus, undefined, "真實計畫到了，暫態罐頭行必須退場");
+  assert.equal((s.items[0] as AgentPlanItem).kind, "plan");
+});
+
+test("首條 message.delta 開新 assistant 條目時，計畫被收合成一行", () => {
+  let s = agentChatReducer(EMPTY, evt({ name: "turn.plan", event_id: 1, data: { plan: "先拆解剧情节拍，再逐镜生成。" } }));
+  s = agentChatReducer(s, evt({ name: "message.delta", event_id: 2, data: { text: "好的" } }));
+
+  assert.equal(s.items.length, 2, "計畫與正文是兩條獨立條目");
+  const plan = s.items[0] as AgentPlanItem;
+  const assistant = s.items[1] as AgentAssistantTextItem;
+  assert.equal(plan.collapsed, true, "真實正文開新條目 = 計畫讓位，自動收合");
+  assert.equal(plan.text, "先拆解剧情节拍，再逐镜生成。", "收合只翻 collapsed，計畫文字一字不動");
+  assert.equal(assistant.kind, "assistant");
+  assert.equal(assistant.text, "好的", "正文不得把計畫文字吃進同一條氣泡");
+});
+
+test("追加到既有 streaming assistant 條目的 delta 不動計畫卡（不誤觸另一條分支）", () => {
+  // reasoning 先開條目（思維鏈通常先於正文），之後的 message.delta 走「追加既有
+  // streaming 條目」分支 —— 那條分支與工具卡 pending 契約的測試語義掛在一起，
+  // 計畫收合只在「開新條目」分支發生，這裡不得被波及。
+  let s = agentChatReducer(EMPTY, evt({ name: "turn.plan", event_id: 1, data: { plan: "先出分镜。" } }));
+  s = agentChatReducer(s, evt({ name: "reasoning.delta", event_id: 2, data: { text: "先想一下" } }));
+  s = agentChatReducer(s, evt({ name: "message.delta", event_id: 3, data: { text: "開始" } }));
+
+  assert.equal((s.items[0] as AgentPlanItem).collapsed, false, "同一條交付物的續寫不觸發計畫收合");
+  assert.equal((s.items[1] as AgentAssistantTextItem).text, "開始");
+});
+
+test("turn.done 後計畫仍在，且不影響 settleItems 對 running 工具卡的結算", () => {
+  let s = agentChatReducer(EMPTY, evt({ name: "turn.plan", event_id: 1, data: { plan: "先出分镜，再逐镜生成视频。" } }));
+  s = agentChatReducer(s, evt({ name: "tool.invoke", event_id: 2, data: { tool: "bash" } }));
+  s = agentChatReducer(s, evt({ name: "message.delta", event_id: 3, data: { text: "開始處理" } }));
+  s = agentChatReducer(s, evt({ name: "turn.done", event_id: 4, data: {} }));
+
+  const plan = s.items.find((it): it is AgentPlanItem => it.kind === "plan");
+  assert.ok(plan, "回合收尾不刪計畫卡（它是這一輪做過什麼的痕跡）");
+  assert.equal(plan.collapsed, true);
+  const tool = s.items.find((it): it is AgentToolCallItem => it.kind === "tool");
+  assert.equal(tool?.status, "failed", "running 工具卡照舊由 settleItems 判死");
+  assert.equal(s.turnActive, false);
+});
+
+test("superseded 幀就地換掉既有計畫文字（同一 id），不新增第二張卡", () => {
+  let s = agentChatReducer(
+    EMPTY,
+    evt({ name: "turn.plan", event_id: 1, data: { plan: "舊計畫：先出分镜。", source: "rule" } }),
+  );
+  const firstId = s.items[0].id;
+  s = agentChatReducer(s, evt({ name: "message.delta", event_id: 2, data: { text: "正文" } }));
+  assert.equal((s.items[0] as AgentPlanItem).collapsed, true);
+
+  s = agentChatReducer(
+    s,
+    evt({ name: "turn.plan", event_id: 3, data: { plan: "新計畫：先拆解剧情节拍，再逐镜生成并剪辑。", superseded: true, source: "model" } }),
+  );
+
+  const plans = s.items.filter((it): it is AgentPlanItem => it.kind === "plan");
+  assert.equal(plans.length, 1, "同一輪只有一份計畫：就地換文字，不堆成版本流水帳");
+  assert.equal(plans[0].id, firstId, "id 不變，React 不重掛卡片");
+  assert.equal(plans[0].text, "新計畫：先拆解剧情节拍，再逐镜生成并剪辑。");
+  assert.equal(plans[0].collapsed, true, "換文字不動使用者在看／收合狀態");
 });

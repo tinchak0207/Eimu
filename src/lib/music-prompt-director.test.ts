@@ -178,6 +178,43 @@ test("flowmusic hasLyrics 明示時走保版面分支，不壓單行", () => {
   assert.ok(!out.applied.includes("collapse-single-line"));
 });
 
+// ─────────────────────────────────────────────── yue2 通路（2026-09-18 加第三通路）
+
+test("yue2：剝除時間戳（上游不認時間戳結構控制），段落標籤與換行保留", () => {
+  const prompt = "city pop, 105 BPM\n[Verse]\n[0:00 - 0:10] sparse synth intro";
+  const out = directMusicPrompt(prompt, { channel: "yue2" });
+  assert.doesNotMatch(out.prompt, /0:00|0:10/);
+  assert.match(out.prompt, /\[Verse\]/);
+  assert.match(out.prompt, /\n/);
+  assert.ok(out.applied.includes("strip-timestamps"));
+  assert.ok(!out.applied.includes("collapse-single-line"));
+});
+
+test("yue2：六層齊備且帶 [Verse]/[Chorus] → 原文逐字不動（段落標籤不是偽標籤）", () => {
+  const prompt =
+    "city pop, bittersweet and nostalgic, synth pads with slap bass, female alto, [Verse] verse and chorus, warm analog tape, 105 BPM";
+  const out = directMusicPrompt(prompt, { channel: "yue2" });
+  assert.equal(out.prompt, prompt);
+  assert.deepEqual(out.applied, []);
+  assert.deepEqual(out.truncated, []);
+});
+
+test("yue2：style 是散文 → 不套 flowmusic 的 220 平面，長散文原樣保留", () => {
+  const long = `city pop, bittersweet and nostalgic, synth pads with slap bass, female alto, [Verse] verse and chorus, warm analog tape, 105 BPM, ${"patiently unfolding without hurry ".repeat(20).trim()}`;
+  const out = directMusicPrompt(long, { channel: "yue2" });
+  assert.ok(runes(long) > 220);
+  assert.equal(out.prompt, long);
+  assert.ok(!out.applied.includes("truncate-220-hard"));
+  assert.ok(!out.applied.includes("collapse-single-line"));
+});
+
+test("yue2：超 3000 runes 走版面硬截（truncate-3000-hard）", () => {
+  const huge = `city pop, 105 BPM, ${"warm analog synth pad with tape saturation, ".repeat(120)}`;
+  const out = directMusicPrompt(huge, { channel: "yue2" });
+  assert.ok(runes(out.prompt) <= 3000);
+  assert.ok(out.applied.includes("truncate-3000-hard"));
+});
+
 // ─────────────────────────────────────────────── lyria 通路
 
 test("lyria：保留官方時間戳，不套 220 上限", () => {

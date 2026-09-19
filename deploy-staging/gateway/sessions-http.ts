@@ -15,7 +15,9 @@ import { loadUserSettings } from "./persistence"
 import { jsonError } from "./gw-lib.ts"
 import type { SessionState } from "./types-gateway.ts"
 import { OPENCODE_URL } from "./constants-gateway.ts"
-import { TAIL_PAYLOAD_MARKER, getOwnedSession, opencodeHeaders } from "./index.ts"
+import { getOwnedSession } from "./sessions-core.ts"
+import { TAIL_PAYLOAD_MARKER } from "./messages-gw.ts"
+import { opencodeHeaders } from "./opencode-client.ts"
 
 // L0 畫像 onboarding：賬戶還沒有任何確認過的畫像時，引導 agent 用 question 工具
 // 以選擇題採集畫像（PM 原則：別讓用戶動腦寫表單）。答案存 pendingProfile，
@@ -38,7 +40,6 @@ export const PROFILE_ONBOARDING_DIRECTIVE = [
 // opencode.jsonc 無第二個可用模型、有效配置 small_model 與主模型相同
 // （b-ai/glm-5.3-flash），PATCH /session/:id 200 但 model 無落地證據。
 const DEFAULT_USER_SETTINGS: UserSettingsShape = { interrupt_mode: "steer", persona: "efficient", cost_mode: "balanced", interaction_mode: "preset" }
-type UserSettingsShape = { interrupt_mode: string; persona: string; cost_mode: string; interaction_mode: string }
 // 野獸模式開關（MOE 改革，2026-09-08）：settings 布林欄，缺省=false（零回歸）。
 // 不入 USER_SETTINGS_ENUMS（那是枚舉字串欄白名單）；POST 專門放行本欄（僅接受
 // 真布林），sanitize 顯式列出欄位、缺欄=保持現值。
@@ -55,7 +56,7 @@ export function normalizeUserSettings(raw: unknown): UserSettingsShape {
   const s: UserSettingsShape = { ...DEFAULT_USER_SETTINGS }
   if (raw && typeof raw === "object" && !Array.isArray(raw)) {
     const r = raw as Record<string, unknown>
-    for (const k of Object.keys(USER_SETTINGS_ENUMS) as (keyof UserSettingsShape)[]) {
+    for (const k of Object.keys(USER_SETTINGS_ENUMS) as Exclude<keyof UserSettingsShape, "beast_mode">[]) {
       const v = r[k]
       if (typeof v === "string" && USER_SETTINGS_ENUMS[k].includes(v)) s[k] = v
     }

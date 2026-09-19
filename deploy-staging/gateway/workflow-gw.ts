@@ -204,10 +204,20 @@ export const workflowWake = new Map<string, { sessionId: string; lastProgressAt:
 export const WORKFLOW_STALL_MS = Number.parseInt(process.env.WORKFLOW_STALL_MS || "900000", 10) || 900_000
 export const WORKFLOW_WAKE_SCAN_MS = 60_000
 
+/** execute_command 工具回應形狀（waveform.ts/master.ts 同款；stage2 整合時改共用匯出）。 */
+interface CommandResult { stdout: string; stderr: string; exit_code: number }
+
+/** 畫布節點的寬鬆形狀（graph.nodes 是 unknown[]，消費端逐點收窄）。 */
+type CanvasNode = { id?: unknown; kind?: unknown; metadata?: Record<string, unknown> }
+/** 謂詞收窄形狀：graph.nodes 元素（id/role/kind/metadata）去除 undefined 的真子類型。 */
+type VideoUpstream = { id: string; role: string; kind: string; metadata: Record<string, unknown> }
+type AudioUpstream = VideoUpstream
+type ImageUpstream = VideoUpstream
+
 export type PersistableWorkflow = {
   workflowId: string
   templateId: string
-  graph: { nodes: unknown[]; connections: unknown[] }
+  graph: { nodes: CanvasNode[]; connections: unknown[] }
   status: string
   nodeStatus: Record<string, string>
   nodeContent: Record<string, string>
@@ -218,7 +228,7 @@ export type PersistableWorkflow = {
 export function workflowSnapshotOf(wf: {
   workflowId: string
   templateId: string
-  graph: { nodes: unknown[]; connections: unknown[] }
+  graph: { nodes: CanvasNode[]; connections: unknown[] }
   status: string
   nodeStatus: Record<string, string>
   nodeContent: Record<string, string>
@@ -379,14 +389,14 @@ export async function assembleFilmNode(
   const incoming = (graph?.connections ?? []).filter((c) => c.to === nodeId).map((c) => c.from)
   const allVideoUpstream = incoming
     .map((from) => graph?.nodes.find((n) => n.id === from))
-    .filter((n): n is { id: string; kind: string; metadata: Record<string, unknown> } => Boolean(n) && n.kind === "video")
+    .filter((n): n is VideoUpstream => Boolean(n) && typeof n.id === "string" && n.kind === "video")
   const sources = allVideoUpstream
     .map((n) => ({ id: n.id, url: upstream.get(n.id) }))
     .filter((s): s is { id: string; url: string } => Boolean(s.url))
   // 配音混流素材：上游 audio 節點（TTS mp3）的內容 URL，成片後自動混入音軌。
   const audioList = incoming
     .map((from) => graph?.nodes.find((n) => n.id === from))
-    .filter((n): n is { id: string; kind: string; metadata: Record<string, unknown> } => Boolean(n) && n.kind === "audio")
+    .filter((n): n is AudioUpstream => Boolean(n) && typeof n.id === "string" && n.kind === "audio")
     .map((n) => upstream.get(n.id))
     .filter((u): u is string => Boolean(u))
   if (!sources.length) {
@@ -600,7 +610,7 @@ export async function resolveActiveModel(
   model: string,
   kind: "image" | "video",
   apiKey: string,
-  node: { metadata: Record<string, unknown> },
+  node: CanvasNode,
 ): Promise<{ model: string; switched: boolean; note?: string; exhausted?: boolean; error?: string }> {
   const models = await fetchModelStatusCached(apiKey)
   if (!models) return { model, switched: false } // 探測端不可達：fail-open，行為與舊版一致
@@ -636,7 +646,7 @@ export async function resolveActiveModel(
 
 export async function submitWorkflowNode(
   session: SessionState,
-  node: { kind: string; metadata: Record<string, unknown> },
+  node: CanvasNode & { id?: string },
   upstream: Map<string, string>,
   graph?: { nodes: { id: string; role: string; kind: string; metadata: Record<string, unknown> }[]; connections: { from: string; to: string }[] },
 ): Promise<{ nodeId: string; ok: boolean; content?: string; costCoins?: number; error?: string; lastAttempt?: Record<string, unknown> }> {
@@ -694,7 +704,7 @@ export async function submitWorkflowNode(
     ? graph.connections
         .filter((c) => c.to === nodeId)
         .map((c) => graph.nodes.find((n) => n.id === c.from))
-        .filter((n): n is { id: string; kind: string; metadata: Record<string, unknown> } => Boolean(n) && n.kind === "image" && Boolean(upstream.get(n.id)))
+        .filter((n): n is ImageUpstream => Boolean(n) && typeof n.id === "string" && n.kind === "image" && Boolean(upstream.get(n.id)))
         .map((n) => upstream.get(n.id)!)
     : []
 
@@ -748,7 +758,7 @@ export async function submitWorkflowNode(
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(30000),
     })
-    const data = await res.json().catch(() => ({}))
+    const data = (await res.json().catch(() => ({}))) as Record<string, any>
     if (res.status === 202 || (res.ok && (data?.task_id || data?.id))) {
       taskSubmitted = true
       const taskId = data?.task_id ?? data?.id
@@ -783,7 +793,7 @@ export async function submitWorkflowNode(
           headers: { Authorization: `Bearer ${session.apiKey}` },
           signal: AbortSignal.timeout(10000),
         })
-        const pd = await poll.json().catch(() => ({}))
+        const pd = (await poll.json().catch(() => ({}))) as Record<string, any>
         const pdAttempts = (pd as { attempts?: unknown })?.attempts
         if (Array.isArray(pdAttempts) && pdAttempts.length > 0) lastAttempt = pdAttempts[pdAttempts.length - 1] as Record<string, unknown>
         if (pd?.status === "succeeded") {
@@ -925,7 +935,8 @@ setInterval(() => {
       workflowWake.delete(wfid)
       continue
     }
-    const terminal = wf.status !== "running" && wf.status !== "building" && wf.status !== "pending"
+    const wfStatus = wf.status as string
+    const terminal = wfStatus !== "running" && wfStatus !== "building" && wfStatus !== "pending"
     const stalled = !terminal && Date.now() - w.lastProgressAt > WORKFLOW_STALL_MS
     if (!terminal && !stalled) continue
     if (state.ackTimer != null) continue // turn 在途讓位，下一輪掃描再喚

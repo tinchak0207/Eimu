@@ -172,7 +172,7 @@ async function resolveLocal(src: string): Promise<string> {
     const dir = path.join(WORKSPACE_DIR, "tmp")
     await mkdir(dir, { recursive: true })
     const local = path.join(dir, `lint-clip-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}${ext}`)
-    await writeFile(local, buf)
+    await writeFile(local, new Uint8Array(buf))
     return local
   }
   await access(src)

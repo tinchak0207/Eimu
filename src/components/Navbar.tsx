@@ -23,13 +23,19 @@ interface NavbarProps {
   className?: string;
 }
 
-/** auth_error 代碼 → 人話（callback 失敗原因碼見 /api/auth/github/callback）。 */
+/** auth_error 代碼 → 人話（callback 失敗原因碼見 /api/auth/github|google/callback）。 */
 function describeAuthError(code: string): string {
   if (code === "github_state") return "登录窗口状态过期或同时开了多个登录窗，请重新点登录。";
   if (code === "github_config") return "GitHub 登录未配置，请联系管理员。";
   if (code.startsWith("github_login")) return "网关拒绝了本次登录，请重试；持续失败请联系管理员。";
   if (code.startsWith("github_register")) return "自动开户失败，请稍后重试。";
   if (code.startsWith("github_exchange")) return "GitHub 授权码交换失败，请重新点登录。";
+  if (code === "google_state") return "登录窗口状态过期或同时开了多个登录窗，请重新点登录。";
+  if (code === "google_config") return "Google 登录暂未开放，请改用 GitHub 或微信登录。";
+  if (code.startsWith("google_login")) return "网关拒绝了本次登录，请重试；持续失败请联系管理员。";
+  if (code.startsWith("google_register")) return "自动开户失败，请稍后重试。";
+  if (code.startsWith("google_exchange")) return "Google 授权码交换失败，请重新点登录。";
+  if (code.startsWith("google_")) return "登录流程被打断，请重新点登录。";
   return "登录流程被打断，请重新点登录。";
 }
 
@@ -116,6 +122,28 @@ export function Navbar({ className }: NavbarProps) {
     // 与正常跨域授权页区分。同窗口跳转全浏览器兼容，callback 落 /auth/complete
     // 后 replace("/") 回主页，由 AuthProvider mount 自愈登录态。
     window.location.href = "/api/auth/github/start";
+  };
+
+  // Google 登入與 GitHub 逐行同構（provider 不同），兩條鏈路行為必須一致：
+  // standalone 走跨瀏覽器交接，其餘同窗口跳轉由 callback 落 /auth/complete 自愈。
+  const startGoogleLogin = () => {
+    // PWA standalone：Google 登录态带不进来，改走跨浏览器交接面板（popup 逻辑不动）。
+    if (isStandalonePwa()) {
+      void createHandoffLogin("google").then((handoff) => {
+        if (handoff) {
+          setPwaHandoffUrl(handoff.loginUrl);
+          return;
+        }
+        window.location.href = "/api/auth/google/start";
+      });
+      return;
+    }
+    if (loginPhase === "drawing" && popupRef.current && !popupRef.current.closed) return;
+    // 登录一律同窗口跳转：popup 在套壳/内嵌 webview 上会出现「窗口对象存在但
+    // 内容停在 about:blank」的死窗（三個完成信号全部不來，永久卡死），且无法
+    // 与正常跨域授权页区分。同窗口跳转全浏览器兼容，callback 落 /auth/complete
+    // 后 replace("/") 回主页，由 AuthProvider mount 自愈登录态。
+    window.location.href = "/api/auth/google/start";
   };
 
   const startWechatLogin = () => {
@@ -326,6 +354,7 @@ export function Navbar({ className }: NavbarProps) {
               </>
             ) : (
               <SplitLoginButton
+                onGoogle={startGoogleLogin}
                 onGithub={startGithubLogin}
                 onWechat={startWechatLogin}
                 githubBusy={loginPhase === "drawing" ? "正在连接 GitHub…" : null}

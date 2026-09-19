@@ -26,6 +26,7 @@ const IMAGE_VENDORS: Record<string, string> = {
   Luma: "/brands/luma.png",
   Runway: "/brands/runway.png",
   MiniMax: "/brands/minimax.png",
+  Agnes: "/brands/agnes.svg",
 };
 
 const BRAND_BG: Record<string, string> = {
@@ -39,6 +40,7 @@ const BRAND_BG: Record<string, string> = {
   FLUX: "#FFFFFF",
   Luma: "#FFFFFF",
   MiniMax: "#FFFFFF",
+  Agnes: "#0A0A0A",
 };
 
 export function VendorIcon({ vendor, className = "h-7 w-7", innerClassName }: VendorIconProps) {

@@ -46,6 +46,7 @@ export const AGENT_EVENT_NAMES = [
   "director.done",
   "turn.done",
   "turn.status",
+  "turn.plan",
   "confirm.request",
   "confirm.resolved",
   "quota.changed",
@@ -212,6 +213,34 @@ export interface AgentTurnStatus {
   text: string;
 }
 
+/**
+ * gateway（2026-09-18 契約，同事在網關端施工）—— 送訊後 ~1.4–2.0s 先到的
+ * 「本輪計畫」幀：由模型現算的真實計畫（不是罐頭），讓使用者在重型回合
+ * 首行正文（可能 +100s）之前就知道助手打算做什麼。
+ *
+ * 為什麼獨立幀型別而**不**併進 message.delta：借用 message.delta 會讓 reducer
+ * 把計畫塞進同一條 streaming:true 的 assistant 條目，100 秒後重模型正文會物理
+ * 接在計畫後面，變成一條分不清「計畫 vs 答案」的長氣泡——把非交付物混進交付物。
+ * 所以計畫有自己的條目型別（AgentPlanItem）與自己的區塊。
+ *
+ * `plan` 是**唯一必需欄位**：缺它整幀丟棄（見 parseAgentSseEvent）。
+ * 其餘欄位缺席一律當 undefined/false 處理，行為與沒有這幀時逐位元一致。
+ */
+export interface AgentTurnPlan {
+  /** 由模型現算的計畫一句話（≤160 字）。唯一的必需欄位。 */
+  plan: string;
+  /** 命中的專家白名單（≤4）：只在 digest 命中時出現，缺就不畫晶片。 */
+  experts?: string[];
+  /** 預設 true：計畫還在進行中，據此顯示「（进行中）」。 */
+  provisional?: boolean;
+  /** 誠實來源標記：模型現算 / 規則兜底。 */
+  source?: "model" | "rule";
+  /** 產生計畫的模型名。只進 console，不進 UI。 */
+  model?: string;
+  /** 保留欄位：true = 就地換掉既有計畫文字（同一 id），預設不出現。 */
+  superseded?: boolean;
+}
+
 /** gateway:945 —— 要求使用者确认一笔花费。90 秒不回会过期（D-20 要改成 15 分钟）。 */
 export interface AgentConfirmRequest {
   request_id: string;
@@ -374,6 +403,7 @@ export type AgentSseEvent = WithEventId &
     | { name: "director.done"; data: AgentDirectorDone }
     | { name: "turn.done"; data: AgentTurnDone }
     | { name: "turn.status"; data: AgentTurnStatus }
+    | { name: "turn.plan"; data: AgentTurnPlan }
     | { name: "confirm.request"; data: AgentConfirmRequest }
     | { name: "confirm.resolved"; data: AgentConfirmResolved }
     | { name: "quota.changed"; data: AgentQuotaChanged }
@@ -404,6 +434,16 @@ function str(v: unknown): string | undefined {
 }
 function num(v: unknown): number | undefined {
   return typeof v === "number" && Number.isFinite(v) ? v : undefined;
+}
+
+/**
+ * 寬鬆解析 string[]（turn.plan.experts）。非陣列 / 過濾後為空 → undefined
+ * （呼叫方據此決定「不畫晶片」）；逐項非字串或空字串一律剔除，絕不 throw。
+ */
+function strArray(v: unknown): string[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const out = v.filter((x): x is string => typeof x === "string" && x.length > 0);
+  return out.length > 0 ? out : undefined;
 }
 
 /**
@@ -611,6 +651,29 @@ export function parseAgentSseEvent(name: string, rawData: string): AgentSseEvent
       const text = str(d.text);
       if (text === undefined) return null;
       return { name, event_id: eventId, data: { text } };
+    }
+    case "turn.plan": {
+      // plan 是唯一必需欄位：空字串／缺欄位／非字串一律整幀丟棄（丟半張計畫卡
+      // 等於畫一張空話卡）。其餘欄位走白名單寬鬆解析，壞值折成 undefined 不 throw。
+      const plan = str(d.plan);
+      if (!plan || plan.trim().length === 0) return null;
+      const experts = strArray(d.experts);
+      // provisional 預設 true：只有明確 === false 才是 false（缺欄位當「還在進行中」，
+      // 這是保守誠實的一側——計畫剛到時本來就還沒定案）。
+      const sup = d.superseded === true;
+      const src = d.source === "model" || d.source === "rule" ? (d.source as "model" | "rule") : undefined;
+      return {
+        name,
+        event_id: eventId,
+        data: {
+          plan,
+          ...(experts ? { experts } : {}),
+          provisional: d.provisional !== false,
+          ...(src ? { source: src } : {}),
+          ...(str(d.model) ? { model: str(d.model) } : {}),
+          ...(sup ? { superseded: true } : {}),
+        },
+      };
     }
     case "confirm.request": {
       const requestId = str(d.request_id);
@@ -828,7 +891,8 @@ export type AgentTranscriptItem =
   | AgentDirectorItem
   | AgentNoticeItem
   | AgentSubagentItem
-  | AgentSubagentReportItem;
+  | AgentSubagentReportItem
+  | AgentPlanItem;
 
 interface TranscriptItemBase {
   /** React key。同一条目的多次更新必须沿用同一个 id。 */
@@ -981,6 +1045,26 @@ export interface AgentSubagentReportItem extends TranscriptItemBase {
   status: "ok" | "error" | "interrupted";
   /** 全文（summary 或串流全文，取較完整者），模型層不截斷。 */
   text: string;
+}
+
+/**
+ * 本輪計畫卡（turn.plan → 獨立的「計划」區塊）。
+ *
+ * 刻意不併進 assistant 條目：計畫不是交付物，答案才是。混進同一條 streaming
+ * 氣泡後，100 秒後才到的正文會物理接在計畫後面，使用者無從分辨哪段是答案。
+ * 第一條 message.delta 到達時本卡自動收合成一行（reducer 負責，見 reduceTurnPlan /
+ * reduceMessageDelta），但使用者手動展開過就永不再自動收起（渲染層負責）。
+ */
+export interface AgentPlanItem extends TranscriptItemBase {
+  kind: "plan";
+  /** 計畫全文（模型現算，≤160 字）。 */
+  text: string;
+  /** 命中的專家白名單（≤4）。缺席 = 不畫晶片。 */
+  experts?: string[];
+  /** true = 計畫還在進行中（顯示「（进行中）」）。 */
+  provisional?: boolean;
+  /** true = 收合成一行（正文截 40 字）。初始 false。 */
+  collapsed?: boolean;
 }
 
 /** 待裁决的花费确认。不进 transcript，单独浮在输入区上方（随时只有 0..n 张）。 */

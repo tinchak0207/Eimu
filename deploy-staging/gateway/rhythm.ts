@@ -192,7 +192,7 @@ async function resolveBgmLocal(bgm: string): Promise<string> {
     const dir = path.join(WORKSPACE_DIR, "tmp")
     await mkdir(dir, { recursive: true })
     const local = path.join(dir, `rhythm-bgm-${Date.now().toString(36)}${ext}`)
-    await writeFile(local, buf)
+    await writeFile(local, new Uint8Array(buf))
     return local
   }
   await access(bgm)

@@ -5,7 +5,7 @@
 //    本檔以 declare 佔位（bun build 只轉譯不查名，建得過）；整合階段接線時替換為正式 import。
 import { resolveVideoPerSecond } from "./workflow-service"
 import { PLATFORM_BASE } from "./constants-gateway.ts"
-import { resolveConnectedVideoDuration } from "./index.ts"
+import { resolveConnectedVideoDuration } from "./workflow-gw.ts"
 
 // R5-C（2026-08-28）影片估價改價目表檔位（暴君欽定：價目表 100% 權威，代碼與
 // 價目表衝突 = 代碼錯）：MiniMax H3 720P = 5 幣/秒、1080P = 10 幣/秒。舊 S4
@@ -121,8 +121,8 @@ export function videoTierPerSecondSync(
  */
 export function resolveNodeModel(
   nodeId: string,
-  node: { kind: string; metadata: Record<string, unknown> },
-  graph: { nodes: { id: string; kind: string; metadata: Record<string, unknown> }[]; connections: { from: string; to: string }[] },
+  node: { id?: unknown; kind?: unknown; metadata?: Record<string, unknown> },
+  graph: { nodes: { id?: unknown; kind?: unknown; metadata?: Record<string, unknown> }[]; connections: { from: string; to: string }[] },
 ): string {
   if (typeof node.metadata.model === "string" && node.metadata.model) return node.metadata.model
   const upstreamIds = graph.connections.filter((c) => c.to === nodeId).map((c) => c.from)

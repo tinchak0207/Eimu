@@ -22,6 +22,7 @@ import {
   type AgentNoticeItem,
   type AgentPendingConfirm,
   type AgentPendingQuestion,
+  type AgentPlanItem,
   type AgentQuotaState,
   type AgentSseEvent,
   type AgentSubagentItem,
@@ -61,6 +62,19 @@ function reduceMessageDelta(state: AgentChatState, event: AgentSseEvent & { name
     // 只对「正在 streaming 的最后一个助手条目」追加；否则开新条目。
     items[items.length - 1] = { ...last, text: last.text + text };
   } else {
+    // 計畫退場（2026-09-18 turn.plan 契約）：真實正文開「新」條目的這一刻，
+    // 代表計畫已經讓位——把還開著的計畫卡收合成一行，讓答案佔住版面。
+    // 只在開新條目這條分支做：追加到既有 streaming 條目的分支是同一條交付物的
+    // 續寫（工具卡 pending 契約的既有測試語義也掛在那裡），一行都不動。
+    // 判定用嚴格 === false（reducer 自己建的計畫卡才會有這個值），缺席的
+    // **不**收合——「手動收合優先於任何自動行為」的對偶：沒被自動展開過的
+    // 不該被自動收掉。
+    for (let i = 0; i < items.length; i += 1) {
+      const it = items[i];
+      if (it.kind === "plan" && it.collapsed === false) {
+        items[i] = { ...it, collapsed: true };
+      }
+    }
     items.push({
       kind: "assistant",
       id: eventItemId("assistant", event.event_id),
@@ -571,6 +585,51 @@ function reduceTurnStatus(state: AgentChatState, event: AgentSseEvent & { name: 
   return { ...state, turnStatus: event.data.text, turnActive: true };
 }
 
+/**
+ * 本輪計畫（turn.plan，2026-09-18 契約）：建立一張獨立的 `kind:"plan"` 條目。
+ *
+ * 為什麼不併進 assistant 條目：計畫是**導航**不是交付物。併進去會讓 100 秒後
+ * 才到的重模型正文物理接在計畫後面（同一條 streaming:true 條目），使用者分不清
+ * 「計畫 vs 答案」，agent-debug 的「首字延遲」語義也會被污染。所以這裡開新條目。
+ *
+ * 與 message.delta 同款清掉罐頭狀態行（turnStatus: undefined）並設 turnActive:true
+ * ——計畫幀到的這一刻回合確實已經開始了（送訊後 ~1.4–2.0s），狀態行/停止鈕
+ * 必須立刻反映，不能等到 100 秒後首行正文。
+ *
+ * `superseded === true`：就地換掉既有計畫條目的文字（同一 id，React 不重掛），
+ * 不新增第二張卡——同一輪只有一份計畫。找不到既有卡時照樣建立（寧可多一張卡，
+ * 也不讓網關送來的計畫文字消失）。
+ */
+function reduceTurnPlan(state: AgentChatState, event: AgentSseEvent & { name: "turn.plan" }): AgentChatState {
+  const { plan, experts, provisional, superseded } = event.data;
+  const items = state.items.slice();
+  if (superseded === true) {
+    for (let i = items.length - 1; i >= 0; i -= 1) {
+      const it = items[i];
+      if (it.kind === "plan") {
+        items[i] = {
+          ...it,
+          text: plan,
+          ...(experts !== undefined ? { experts } : {}),
+          ...(provisional !== undefined ? { provisional } : {}),
+        };
+        return { ...state, items, turnActive: true, turnStatus: undefined };
+      }
+    }
+  }
+  const item: AgentPlanItem = {
+    kind: "plan",
+    id: eventItemId("plan", event.event_id),
+    seq: event.event_id,
+    text: plan,
+    ...(experts !== undefined ? { experts } : {}),
+    ...(provisional !== undefined ? { provisional } : {}),
+    // 初始展開：計畫剛到、正文還沒來，這張卡此刻是畫面上唯一的資訊。
+    collapsed: false,
+  };
+  return { ...state, items: [...items, item], turnActive: true, turnStatus: undefined };
+}
+
 function reduceConfirmRequest(state: AgentChatState, event: AgentSseEvent & { name: "confirm.request" }): AgentChatState {
   const { request_id, amount_coins, description } = event.data;
   if (state.pendingConfirms.some((c) => c.requestId === request_id)) return state;
@@ -748,6 +807,8 @@ export function agentChatReducer(state: AgentChatState, event: AgentSseEvent): A
       return reduceTurnDone(base, event);
     case "turn.status":
       return reduceTurnStatus(base, event);
+    case "turn.plan":
+      return reduceTurnPlan(base, event);
     case "confirm.request":
       return reduceConfirmRequest(base, event);
     case "confirm.resolved":

@@ -198,7 +198,8 @@ export async function handleRequest(req: Request, srv: { requestIP: (r: Request)
       }
       if (pathname.startsWith("/internal/workflow/")) {
         const m = new URL(req.url)
-        const sessionId = m.searchParams.get("session_id") || (await req.json().catch(() => ({})))?.session_id || ""
+        const jsonBody = (await req.json().catch(() => ({}))) as { session_id?: string }
+        const sessionId = m.searchParams.get("session_id") || jsonBody.session_id || ""
         const session = sessionId ? resolveSession(sessionId) : undefined
         if (!session) return jsonError(404, "session not found", "not_found", "not_found")
         return handleWorkflowInternal(req, session)

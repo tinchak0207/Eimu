@@ -21,8 +21,8 @@
 //   - image → 调 /v1/images/generations
 //   - video → 调 /v1/videos/generations
 
-import { expandTemplate, topologicalSort, type WorkflowGraph, type WorkflowNode, type WorkflowNodeResult } from "./workflow-engine"
-import { getWorkflowTemplate, listWorkflowTemplates, type TemplateContent } from "./workflow-templates"
+import { expandTemplate, topologicalSort, type WorkflowGraph, type WorkflowNode, type WorkflowNodeResult, type TemplateContent } from "./workflow-engine"
+import { getWorkflowTemplate, listWorkflowTemplates } from "./workflow-templates"
 import { validateShotJson, parseShotCandidate, shotOutputParams } from "./video-prompt-schema"
 
 export interface EmitFn {
@@ -73,7 +73,7 @@ export interface ActiveWorkflow {
   workflowId: string
   templateId: string
   graph: WorkflowGraph
-  status: "building" | "running" | "success" | "partial" | "failed"
+  status: "building" | "running" | "success" | "partial" | "failed" | "paused_insufficient_quota"
   nodeStatus: Record<string, "pending" | "running" | "success" | "error">
   nodeContent: Record<string, string>
   nodeCost: Record<string, number>
@@ -478,7 +478,7 @@ export class WorkflowService {
         if (c && c.shot !== undefined) {
           const v = validateShotJson(c.shot)
           if (v.ok) continue
-          invalidShots.push(`模板「${template.name}」角色 ${n.role} 的 shot JSON 无效：${v.error}`)
+          invalidShots.push(`模板「${template.name}」角色 ${n.role} 的 shot JSON 无效：${"error" in v ? v.error : "unknown"}`)
           continue
         }
         missing.push(`${n.role}(${n.title})`)
@@ -512,7 +512,7 @@ export class WorkflowService {
       if (n.metadata.shot !== undefined) {
         const v = validateShotJson(n.metadata.shot)
         if (!v.ok) {
-          return { error: `模板「${template?.name ?? templateId ?? "custom"}」节点 ${n.role}(${n.title}) 的 shot JSON 无效：${v.error}` }
+          return { error: `模板「${template?.name ?? templateId ?? "custom"}」节点 ${n.role}(${n.title}) 的 shot JSON 无效：${"error" in v ? v.error : "unknown"}` }
         }
         const params = shotOutputParams(v.shot)
         if (params.duration_seconds !== undefined && typeof n.metadata.duration_seconds !== "number") n.metadata.duration_seconds = params.duration_seconds
@@ -581,7 +581,7 @@ export class WorkflowService {
       if (!v.ok) {
         return {
           error:
-            `shot JSON 无效：${v.error}` +
+            `shot JSON 无效：${"error" in v ? v.error : "unknown"}` +
             "。schema：{ subject, action, appearance, camera:{shot_type,angle,movement,lens}, environment:{time_of_day,lighting,elements}, style:{look,mood,color_grading}, audio:{dialogue:[{character,tone,line}],ambience,sfx}, output:{duration_seconds,aspect_ratio} }",
         }
       }
@@ -619,7 +619,7 @@ export class WorkflowService {
     if (!node) return { error: "node not found" }
 
     // 允许更新的字段
-    if (patch.title !== undefined) node.title = patch.title
+    if (patch.title !== undefined) node.title = String(patch.title)
     // metadata 合并
     Object.assign(node.metadata, patch)
 

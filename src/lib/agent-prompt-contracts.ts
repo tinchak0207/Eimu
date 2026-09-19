@@ -156,11 +156,29 @@ export const AGENT_PROMPT_CONTRACTS: readonly AgentPromptContract[] = [
       { name: "reference_refs", meaning: "參考素材引用（選填 ≤8 條）。", source: "畫布節點／附件／URL" },
     ],
     outputMode: "json",
-    topLevelKeys: ["ok", "url", "duration_source"],
+    // score_abc（2026-09-19 收錄）：工具回執層 additive 鍵，YuE2 通路帶白盒 ABC 樂譜，
+    // 其餘通路固定 null（欄位一律在場）——是 melody_notation 的真源，故列為回執頂層契約；
+    // 它非 collect 必查鍵（缺而不誤判），required: false 如實標，亦不入 frozenConstants
+    // （frozenConstants ⊆ 必填欄位集是「極簡樣本零誤報」自檢的設計不變量）。
+    // cot_mode／abc_sha256（2026-09-19 片 K 收錄）：樂譜編輯工作流的回執 additive 鍵——
+    // cot_mode=實際生效的 YuE2 樂譜約束模式（full/melody，僅 YuE2 通路在場）；
+    // abc_sha256=帶譜委託的樂譜指紋（有傳 abc 時在場，長樂譜不重複回傳）。
+    // transcribed_abc_sha256／transcribe_warnings（2026-09-19 片 O 收錄）：翻唱工作流
+    //（source_audio 扒譜）的回執 additive 鍵——前者＝扒譜產物的樂譜指紋（＝送入生成
+    // 的旋律骨幹），後者＝扒譜警告如實透傳（可為空數組）。
+    topLevelKeys: ["ok", "url", "duration_source", "score_abc", "channel", "fallback_from", "fallback_reason", "cot_mode", "abc_sha256", "transcribed_abc_sha256", "transcribe_warnings"],
     fields: [
       FIELD_OK,
       { name: "url", type: "string", required: true, meaning: "音頻公網 URL（music-delegate.ts:338；上游未上傳 gateway 即 missing_deliverables）→ payload.audio_url。" },
-      { name: "duration_source", type: "string", required: true, meaning: "時長來源（ffprobe 實測／上游自報；music-delegate.ts:339）。" },
+      { name: "duration_source", type: "string", required: true, meaning: "時長來源（ffprobe 實測／upstream_reported（YuE2 上游端真量測）／model_hint；music-delegate.ts:339）。" },
+      { name: "score_abc", type: "string", required: false, meaning: "白盒 ABC 樂譜（music-tools.ts 回執層，欄位一律在場）：YuE2 通路帶可編輯 ABC 記譜（K: 調號＋Q: 節拍＋V: Vocal 聲部），其餘通路固定 null——melody_notation 的真源，導演可直接引用其 Vocal 聲部組裝交付。" },
+      { name: "channel", type: "string", required: false, meaning: "生成通路標識（music-tools.ts 回執層：yue2_modal／flowmusic2api／lyria_gemini）；技能庫按回執 channel 欄選 DATA 檔，不預判通路。" },
+      { name: "fallback_from", type: "string", required: false, meaning: "回落來源通路（music-tools.ts 回執層，僅 YuE2 拋錯且 FlowMusic 接手時出場，值 \"yue2_modal\"）；正常生成缺席，缺而不誤判。" },
+      { name: "fallback_reason", type: "string", required: false, meaning: "回落原因摘要（YuE2 原錯誤壓平＋500 字截斷＋secret 遮蔽）；診斷用，導演可引用如實說明。" },
+      { name: "cot_mode", type: "string", required: false, meaning: "實際生效的 YuE2 樂譜約束模式（music-tools.ts 回執層，僅 YuE2 通路在場）：full=旋律與和弦都被樂譜約束；melody=只約束旋律、伴奏自由適配（翻唱模式）。帶 abc 委託時導演可引用核對編輯語義是否生效。" },
+      { name: "abc_sha256", type: "string", required: false, meaning: "帶譜委託的 ABC 樂譜指紋（music-tools.ts 回執層，有傳 abc 時在場；hex sha256）：長樂譜不重複回傳，比對指紋即知送入重渲染的樂譜版本。" },
+      { name: "transcribed_abc_sha256", type: "string", required: false, meaning: "翻唱工作流（source_audio）的扒譜產物指紋（music-tools.ts 回執層，帶 source_audio 時在場；hex sha256）：＝送入生成的旋律骨幹 ABC——比對指紋即知本次翻唱沿用的旋律骨幹；與 abc_sha256（委託自備譜）互斥不同時在場。" },
+      { name: "transcribe_warnings", type: "string[]", required: false, meaning: "扒譜警告（music-tools.ts 回執層，帶 source_audio 時在場，可為空數組）：SheetSage2 對源音頻的如實警告（如截斷提示），導演可引用說明扒譜品質；不粉飾不吞掉。" },
       { name: "duration_seconds", type: "number", required: false, meaning: "時長秒（music-delegate.ts:354-357，>0 才取用）→ evidence.durationSec。" },
       { name: "audio_bytes", type: "number", required: false, meaning: "音頻字節數（music-delegate.ts:353）→ evidence.bytes。" },
       { name: "mime_type", type: "string", required: false, meaning: "音頻 MIME（music-delegate.ts:366，進 qc 欄）。" },
@@ -174,9 +192,12 @@ export const AGENT_PROMPT_CONTRACTS: readonly AgentPromptContract[] = [
     ],
     frozenConstants: ["ok", "url", "duration_source"],
     pitfalls: [
-      "melody_notation 不存在於工具回執：它由導演正文交付，缺整欄 = 未交付；委託單 deliverables 含它時組裝 prompt 會附「欄位名逐字＋實質內容」形態指引（music-delegate.ts assembleMusicDirectorPrompt）。",
+      "melody_notation 不存在於工具回執：它由導演正文交付，缺整欄 = 未交付；委託單 deliverables 含它時組裝 prompt 會附「欄位名逐字＋實質內容」形態指引（music-delegate.ts assembleMusicDirectorPrompt）；YuE2 通路回執的 score_abc（ABC 記譜，K: 調號＋Q: 節拍＋V: Vocal 聲部）是其真源，可直接引用組裝，勿另行編造音名序列。",
       "duration_source 缺失即 missing_deliverables——時長不可自報口徑（上游自報與 ffprobe 實測必須標明來源）。",
       "melody_notation 之外的六欄裡，emotion_contract/lyrics/audio_url/qc 由 collect 組裝，勿在回執裡手拼。",
+      "score_abc 是回執層欄非導演義務欄：非 YuE2 通路固定 null，勿手拼 ABC 樂譜回填（閘門只認導演正文的 melody_notation 欄）。",
+      "樂譜編輯工作流（帶 abc 重渲染）僅 YuE2 通路有效：cot_mode／abc_sha256 只在 YuE2 回執在場；帶 abc 委託在 YuE2 拋錯時直接失敗不回落（FlowMusic 不認樂譜，回落會靜默丟失編輯語義）——導演引用時如實說明，勿把回落版本當編輯結果。",
+      "翻唱工作流（source_audio 扒譜＋重演繹）僅 YuE2 通路有效：transcribed_abc_sha256／transcribe_warnings 只在帶 source_audio 的回執在場；source_audio 與 abc 互斥（同傳即 invalid_args）；扒譜 422 abc_missing 是確定性失敗（源音頻無可提取旋律）勿重試同一份音頻；扒譜/生成失敗直接報錯不回落——翻唱語義不可被無譜通路頂替。",
     ],
   },
   {

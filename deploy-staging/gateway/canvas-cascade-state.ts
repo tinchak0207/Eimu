@@ -10,7 +10,8 @@
 //  - 區內無 markDirty 實際呼叫（僅 7432–7433 註釋提及；呼叫點 3745/5464 等在區外），故未做 markDirty 注入。
 import { jsonError } from "./gw-lib.ts"
 import type { SessionState } from "./types-gateway.ts"
-import { resolveSession, emitToSession } from "./index.ts"
+import { resolveSession } from "./sessions-core.ts"
+import { emitToSession } from "./sse-core.ts"
 
 // ─────────────────────────── Wave C：Agent 操作畫布（canvas.ops 下發/回執）
 //
@@ -99,8 +100,8 @@ export function getCanvasState(sessionId: string): CanvasSnapshotEntry | null {
 // 同一 data 語義，不衝突。
 
 export interface PersistableCanvasState {
-  nodes?: Record<string, unknown>
-  connections?: Record<string, unknown>
+  nodes?: Record<string, unknown> | Record<string, unknown>[]
+  connections?: Record<string, unknown> | Record<string, unknown>[]
   [k: string]: unknown
 }
 
@@ -285,7 +286,7 @@ export async function handleCanvasStateWrite(req: Request): Promise<Response> {
     return jsonError(400, "state (object) is required", "bad_request", "bad_request")
   }
   const stored = storeCanvasState(body.session_id, body.state)
-  if (!stored.ok) {
+  if ("status" in stored) {
     const code = stored.status === 413 ? "payload_too_large" : "bad_request"
     return jsonError(stored.status, stored.message, code, code)
   }

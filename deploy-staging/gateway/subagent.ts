@@ -24,7 +24,7 @@
  * 工具原样转给主代理。
  */
 
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync } from "node:fs"
 import { join } from "node:path"
 // 刀 2B/刀 3（2026-09-19）：Jev 權威閘——spec 注入隔離＋expert 路由＋sync 資格。
 // 量級瘦身 A：spec 模板機器注入（playbook 2.0 起模板不進 orchestrator 上下文）。
@@ -353,7 +353,7 @@ function finishRun(run: SubagentRun, status: "ok" | "error", fullText: string, e
       )
     } else if (run.reworkCount > 0) {
       // 重派後復檢 PASS：done 帶 reworked 旗標（正常 summary，無前綴）；既有欄不動。
-      deliveryGate = { ok: true, reworked: true }
+      deliveryGate = { ok: true, missing: [], reworked: true }
       console.log(`[gateway] delivery gate: id=${run.id} agent=${run.agent} status=PASS (reworked)`)
     } else {
       // PASS 也留一行：證明閘門確實在跑（否則「零命中」無法與「未接線」區分）。
@@ -1309,7 +1309,47 @@ export async function handleSubagentStatus(req: Request): Promise<Response> {
       })
     }
   }
+  // 刀1（2026-09-20 百合番OP寶藏 PRD）：not_found ≠ 沒跑過——run 記錄會過期（completed
+  // 清理/gateway 重啟），但 E 片落盤檔是持久的。按 run id 前 8 碼掃 outputs/subagent，
+  // 命中即在 404 回應帶 artifact_path，orchestrator 直接驗收盤上檔案，不重派不空等
+  // （實錘案例：裝配方案 23:19 落盤、喚醒丟失、用戶空等近 1 小時）。
+  const artifact = findPersistedArtifact(body.subagent_id)
+  if (artifact) {
+    return Response.json({
+      ok: true,
+      done: true,
+      status: artifact.status,
+      label: artifact.label,
+      artifact_path: artifact.relPath,
+      artifact_bytes: artifact.bytes,
+      artifact_mtime: artifact.mtimeMs,
+      note: "run 記錄已過期但產物已落盤：直接 read 上述路徑驗收，勿重派。",
+    })
+  }
   return Response.json({ ok: false, error: "subagent_id 不存在或已过期" }, { status: 404 })
+}
+
+/** 刀1：掃 outputs/subagent/<runId前8碼>-*.md，取最新一筆（同前綴理論唯一，兜底取 mtime 最大）。 */
+function findPersistedArtifact(subagentId: string): { relPath: string; bytes: number; mtimeMs: number; status: string; label: string } | null {
+  const prefix = subagentId.replace(/-/g, "").slice(0, 8)
+  if (!/^[0-9a-f]{8}$/i.test(prefix)) return null
+  try {
+    const hits = readdirSync(SUBAGENT_OUTPUT_DIR)
+      .filter((f) => f.startsWith(prefix))
+      .map((f) => {
+        const abs = join(SUBAGENT_OUTPUT_DIR, f)
+        const st = statSync(abs)
+        // 檔頭 meta 行是機器寫的（persistRunOutput），status/label 直接抽，不讀全文。
+        const head = readFileSync(abs, "utf8").slice(0, 400)
+        const status = /^- 状态: (.+)$/m.exec(head)?.[1]?.trim() ?? "unknown"
+        const label = /^# (.+)$/m.exec(head)?.[1]?.trim() ?? ""
+        return { relPath: `${SUBAGENT_OUTPUT_REL}/${f}`, bytes: st.size, mtimeMs: st.mtimeMs, status, label }
+      })
+      .sort((a, b) => b.mtimeMs - a.mtimeMs)
+    return hits[0] ?? null
+  } catch {
+    return null // 目錄不可讀/不存在 → 維持原 404 行為（fail-open）
+  }
 }
 
 // ── 刀 F（2026-09-15）：rework 鏈重啟存活——啟動掃描治理 in-flight rework 孤兒 ──────────

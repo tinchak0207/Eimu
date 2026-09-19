@@ -127,7 +127,7 @@ export async function handleSendMessage(key: string, id: string, req: Request): 
   // 首次訊息時夾帶 system 欄位注入「意圖審查」政策：要求 agent 對用戶意圖
   // 信度不足時先反覆驗證、主動用 question 工具澄清，不可擅自揣測意圖產出。
   // system 欄位會記入 opencode user message 的 info.system，實際影響模型輸出。
-  const promptBody: { parts: { type: string; text: string }[]; system?: string; model?: { providerID: string; modelID: string } } = {
+  const promptBody: { parts: { type: string; text: string }[]; system?: string; model?: { providerID: string; modelID: string }; agent?: string } = {
     parts: [{ type: "text", text: pathNote ? `${pathNote}\n\n${content}` : content }],
   }
   // 刀2A（2026-09-19）：用戶輸入越獄/注入閘（權威）。便宜前置過濾＋單次 Jev 呼叫

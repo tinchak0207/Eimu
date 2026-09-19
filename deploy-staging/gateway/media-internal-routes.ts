@@ -12,7 +12,14 @@ import { normalizeUserSettings } from "./sessions-http.ts"
 import type { SessionState, ConfirmOutcome } from "./types-gateway.ts"
 import { INTERNAL_EMIT_ALLOWED, CANVAS_EMIT_ALLOWED, CONFIRM_TIMEOUT_MS, CONFIRM_RESOLVED_CAP, TTS_AUDIO_DIR, TTS_PUBLIC_BASE } from "./constants-gateway.ts"
 import { resolveCanvasOps, sanitizeOpsResult, storeCanvasState, getCanvasState, validateCanvasOps, dispatchCanvasOps, CANVAS_OPS_TIMEOUT_MS } from "./canvas-cascade-state.ts"
-import { resolveSession, emitToSession, getOwnedSession, emitImageDone, emitSessionError, emitQuotaChanged, appendLedgerFor, humanMessageFor, wfGenerateContinuations, workflowGenerateApproved, workflowBilling, runWfGenerate, contentTypeForExt } from "./index.ts"
+import { resolveSession, getOwnedSession } from "./sessions-core.ts"
+import { emitToSession } from "./sse-core.ts"
+import { emitImageDone } from "./events-translate.ts"
+import { emitSessionError } from "./emit-helpers.ts"
+import { emitQuotaChanged, appendLedgerFor } from "./quota-ledger.ts"
+import { humanMessageFor } from "./humanize-gw.ts"
+import { wfGenerateContinuations, workflowGenerateApproved, workflowBilling, runWfGenerate } from "./workflow-gw.ts"
+import { contentTypeForExt } from "./uploads-media.ts"
 
 // POST /internal/media/upload — agent 素材入庫：服務端下載外部影片/音頻 URL →
 // 平台存儲（image-data uploads 目錄，公網面 store.tinchak0207.xyz/image-data/files/）。
@@ -136,7 +143,7 @@ export async function handleCanvasDispatchOps(req: Request): Promise<Response> {
   const state = resolveSession(body.session_id)
   if (!state) return jsonError(404, "session not found", "not_found", "not_found")
   const v = validateCanvasOps(body.ops)
-  if (!v.ok) return jsonError(400, v.message, "bad_request", "bad_request")
+  if ("message" in v) return jsonError(400, v.message, "bad_request", "bad_request")
   const label = typeof body.label === "string" && body.label ? body.label.slice(0, 200) : undefined
   const rawTimeout = typeof body.timeout_ms === "number" && Number.isFinite(body.timeout_ms) ? body.timeout_ms : CANVAS_OPS_TIMEOUT_MS
   const timeoutMs = Math.max(1_000, Math.min(CANVAS_OPS_TIMEOUT_MS, rawTimeout))
@@ -190,7 +197,7 @@ export async function handleCanvasStatePublic(key: string, id: string, req: Requ
     return jsonError(400, "state (object) is required", "bad_request", "bad_request")
   }
   const stored = storeCanvasState(state.sessionId, body.state)
-  if (!stored.ok) {
+  if ("status" in stored) {
     const code = stored.status === 413 ? "payload_too_large" : "bad_request"
     return jsonError(stored.status, stored.message, code, code)
   }

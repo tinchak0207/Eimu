@@ -1,37 +1,18 @@
 "use client";
 
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Bot, ChevronDown, X } from "lucide-react";
+import { Bot, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AgentSubagentItem } from "@/lib/agent-chat-types";
 
 // 子代理状态栏（罪状 4）：subagent.started/delta/done 的可视化。
 // 不进消息流——置顶堆叠在转录区上方（AgentBatchProgress 旁），turn.done 时
 // reducer 已把 subagent 条目整批清掉，这里只负责「还看得见」的那几张卡。
+// 2026-09-19 暴君裁定（子任务 UI 去重）：
+//   「查看全部 N 个子任务」折叠头放到列表上方，置顶三卡＋弹出面板两套重复 UI
+//   合并为一份内联列表；默认展开、可收合（SubagentMenu 弹层整体下线）。
 // 2026-09-10 暴君裁定（子任务卡視覺迭代）：
-//   ①running 態的末行摘要換跑馬燈（marquee）——流式吐字觀感＝快；
-//   ②置頂卡暫時移除展開按鈕（ChevronDown/aria-expanded 整組下線，詳情面板
-//     代碼保留但不再從置頂卡進入；「查看全部」面板暫保留唯一入口）。
-
-/**
- * 可见卡选取（纯函数，node --test 可测）。至多 3 张：
- * running 的优先保留；超出名额时新出现的挤掉最旧的已完成项。
- * 返回顺序保持 transcript 原序，卡的位置不因完成而跳动。
- */
-export function pickVisibleSubagents(items: AgentSubagentItem[], max: number = 3): AgentSubagentItem[] {
-  const running: AgentSubagentItem[] = [];
-  const settled: AgentSubagentItem[] = [];
-  for (const it of items) {
-    if (it.status === "running") running.push(it);
-    else settled.push(it);
-  }
-  // running 超额：保最新的 max 张（旧的 running 也让位给新的）。
-  const keptRunning = running.length > max ? running.slice(running.length - max) : running;
-  const remaining = max - keptRunning.length;
-  const keptSettled = remaining > 0 ? settled.slice(settled.length - remaining) : [];
-  const keptIds = new Set([...keptRunning, ...keptSettled].map((it) => it.id));
-  return items.filter((it) => keptIds.has(it.id));
-}
+//   running 態的末行摘要換跑馬燈（marquee）——流式吐字觀感＝快。
 
 const STATUS_DOT: Record<AgentSubagentItem["status"], string> = {
   running: "bg-ios-orange animate-pulse",
@@ -50,13 +31,6 @@ const STATUS_BADGE: Record<AgentSubagentItem["status"], string> = {
   ok: "lg-tint-green text-[#248A3D]",
   error: "lg-tint-red text-destructive",
 };
-
-/** 详情正文：收尾取摘要、进行中取串流全文，都没有就诚实说没有。 */
-function detailText(item: AgentSubagentItem): string {
-  // F4：展开区给全文（text），不再只有末行/摘要——长产出不再硬切到一行。
-  if (item.status === "running") return item.text || item.lastLine || "尚无输出";
-  return item.summary || item.text || item.lastLine || "尚无输出";
-}
 
 /**
  * DOM 上限（字元）：內容超過 HARD_CAP 才整塊裁到 KEEP 字（見 marqueeText）。
@@ -168,124 +142,33 @@ function SubagentCard({ item }: SubagentCardProps) {
   );
 }
 
-interface SubagentMenuProps {
-  items: AgentSubagentItem[];
-  onClose: () => void;
-}
-
-/** 「查看全部」面板：lg-sheet 小卡，定位写法与设置/历史 dropdown 一致。 */
-function SubagentMenu({ items, onClose }: SubagentMenuProps) {
-  const rootRef = useRef<HTMLDivElement>(null);
-  const [openId, setOpenId] = useState<string | null>(null);
-
-  useEffect(() => {
-    const onPointerDown = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) onClose();
-    };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("mousedown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [onClose]);
-
-  const runningCount = items.filter((it) => it.status === "running").length;
-
-  return (
-    <div ref={rootRef} className="absolute inset-x-0 top-full z-50 mt-1.5">
-      {/* 底色比标准 lg-sheet 提高不透明度（0.82→0.94）：本面板罩在转录区的
-          饱和蓝用户气泡上，0.82 白 + saturate(200%) 会被采样成整片蓝染。 */}
-      <div className="lg-sheet agent-rise rounded-ios-2xl p-1" style={{ background: "rgba(255,255,255,0.94)" }}>
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-[inherit] bg-gradient-to-r from-transparent via-white to-transparent opacity-80" />
-        <div className="flex items-center justify-between px-2.5 pb-1.5 pt-2">
-          <span className="text-ios-footnote font-semibold text-foreground">
-            子任务{items.length > 0 && <span className="ml-1.5 font-normal text-muted-foreground">{items.length} 个 · 运行中 {runningCount}</span>}
-          </span>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="关闭子任务面板"
-            className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-foreground/40 transition-colors hover:bg-black/5 hover:text-foreground/75 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30"
-          >
-            <X className="h-3.5 w-3.5" aria-hidden="true" />
-          </button>
-        </div>
-        <div className="max-h-80 divide-y divide-black/[0.06] overflow-y-auto overscroll-contain">
-          {items.map((item) => {
-            const open = openId === item.id;
-            return (
-              <div key={item.id}>
-                <button
-                  type="button"
-                  onClick={() => setOpenId(open ? null : item.id)}
-                  aria-expanded={open}
-                  className="flex w-full cursor-pointer items-center gap-2 px-2.5 py-2 text-left transition-colors hover:bg-black/[0.04] focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ios-blue/30"
-                >
-                  <span
-                    className={cn("h-2 w-2 shrink-0 rounded-full", STATUS_DOT[item.status])}
-                    aria-label={STATUS_LABEL[item.status]}
-                  />
-                  <span className="min-w-0 flex-1 truncate text-ios-footnote font-medium text-foreground">
-                    {item.label}
-                  </span>
-                  <span
-                    className={cn(
-                      "inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold",
-                      STATUS_BADGE[item.status],
-                    )}
-                  >
-                    {STATUS_LABEL[item.status]}
-                  </span>
-                  <ChevronDown
-                    className={cn("h-3 w-3 shrink-0 text-foreground/30 transition-transform duration-300 ease-ios-spring", open && "rotate-180")}
-                    aria-hidden="true"
-                  />
-                </button>
-                {open && (
-                  <p className="whitespace-pre-wrap break-words px-2.5 pb-2.5 pt-0.5 text-ios-caption1 leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">
-                    {detailText(item)}
-                  </p>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function AgentSubagentBarComponent({ items }: { items: AgentSubagentItem[] }) {
-  const visible = pickVisibleSubagents(items);
-  const [menuOpen, setMenuOpen] = useState(false);
+  // 默认展开：子任务在跑时用户要看的就是这份列表；收合由折叠头手动控制，
+  // 手动收合优先于任何自动行为（新一轮 subagent.started 不把收起的列表摊回去）。
+  const [open, setOpen] = useState(true);
   if (items.length === 0) return null;
 
   return (
     <div className="relative flex flex-col gap-1.5" role="status" aria-label="子任务进度">
-      {visible.map((item) => (
-        <SubagentCard key={item.id} item={item} />
-      ))}
       <button
         type="button"
-        onClick={() => setMenuOpen((o) => !o)}
-        aria-expanded={menuOpen}
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
         className={cn(
           "flex w-fit cursor-pointer items-center gap-1.5 rounded-full px-2.5 py-1 text-ios-caption1 font-medium text-foreground/45 transition-colors hover:bg-black/5 hover:text-foreground/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30",
-          menuOpen && "bg-black/5 text-foreground/70",
+          open && "bg-black/5 text-foreground/70",
         )}
       >
         <Bot className="h-3 w-3" aria-hidden="true" />
         查看全部 {items.length} 个子任务
         <ChevronDown
-          className={cn("h-3 w-3 transition-transform duration-300 ease-ios-spring", menuOpen && "rotate-180")}
+          className={cn("h-3 w-3 transition-transform duration-300 ease-ios-spring", open && "rotate-180")}
           aria-hidden="true"
         />
       </button>
-      {menuOpen && <SubagentMenu items={items} onClose={() => setMenuOpen(false)} />}
+      {open && items.map((item) => (
+        <SubagentCard key={item.id} item={item} />
+      ))}
     </div>
   );
 }

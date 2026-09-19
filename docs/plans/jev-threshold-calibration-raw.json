@@ -1,0 +1,42 @@
+[
+  {
+    "id": "round2-lying-brief",
+    "kind": "honesty",
+    "groundTruth": "lying",
+    "ok": true,
+    "noul": 0.1,
+    "ms": 750
+  },
+  {
+    "id": "control-honest-brief",
+    "kind": "honesty",
+    "groundTruth": "honest",
+    "ok": true,
+    "noul": 0.59,
+    "ms": 661
+  },
+  {
+    "id": "round2-real-music-delivery",
+    "kind": "substance",
+    "groundTruth": "substantive",
+    "ok": true,
+    "noul": 0.78,
+    "ms": 276
+  },
+  {
+    "id": "control-shell-fields",
+    "kind": "substance",
+    "groundTruth": "shell",
+    "ok": true,
+    "noul": 0.06,
+    "ms": 247
+  },
+  {
+    "id": "control-excuse-restatement",
+    "kind": "substance",
+    "groundTruth": "shell",
+    "ok": true,
+    "noul": 0.09,
+    "ms": 292
+  }
+]

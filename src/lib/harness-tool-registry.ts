@@ -132,7 +132,7 @@ export const HARNESS_TOOL_ID_LIST = [
   "garment_dna_lock",
   "garment_extract",
   "model_identity_lock",
-  // ↓ 2026-09-08 MOE Wave1 片B：music_gen 工具（音樂 Expert Lyria 通路）。定義+handler 真源 =
+  // ↓ 2026-09-08 MOE Wave1 片B：music_gen 工具（音樂 Expert，三通路優先序 YuE2 > FlowMusic2API > Lyria，2026-09-19 起）。定義+handler 真源 =
   //   src/lib/music-tools.ts（Lyria client = src/lib/music-lyria.ts，Gemini API
   //   v1beta/interactions，env GEMINI_API_KEY；音頻落盤復用 gateway 會話上傳存儲）。
   //   誠實標注：本檔登記=定義已定形；VPS .opencode/tools/ 落位與活體註冊確認待接線片補

@@ -79,7 +79,7 @@ test("storyboard qc reports all 17 deterministic gates", () => {
         prompt: "雨夜门口，小雨回头",
         characterCardIds: ["C01"],
         sceneCardIds: ["P01"],
-        durationSeconds: 4,
+        durationSeconds: 30,
         keyframeId: "kf-01",
         lastFrameId: "lf-01",
         audioAnchorId: "a-01",
@@ -88,12 +88,38 @@ test("storyboard qc reports all 17 deterministic gates", () => {
     ],
     lockedCharacterCardIds: ["C01"],
     lockedSceneCardIds: ["P01"],
-    segmentDurationSeconds: 4,
+    segmentDurationSeconds: 80,
   });
 
   assert.equal(result.status, "succeeded");
   assert.equal(result.output.gates.length, 17);
   assert.equal(result.output.gates.every((gate) => gate.passed), true);
+});
+
+test("storyboard qc duration bounds allow full 30s clips and reject beyond 30s", () => {
+  const base = {
+    sceneId: "S01",
+    prompt: "长镜头",
+    characterCardIds: ["C01"],
+    sceneCardIds: ["P01"],
+    keyframeId: "kf-01",
+    lastFrameId: "lf-01",
+    audioAnchorId: "a-01",
+    aspectRatio: "9:16",
+  };
+  const run = (durationSeconds: number) =>
+    runShortDramaTool("storyboard_qc_17", {
+      shots: [{ shotId: "S01-01", order: 1, ...base, durationSeconds }],
+      lockedCharacterCardIds: ["C01"],
+      lockedSceneCardIds: ["P01"],
+      segmentDurationSeconds: 30,
+    });
+
+  const over = run(31);
+  const bounds = over.output.gates.find((gate) => gate.id === "duration_bounds");
+  assert.equal(bounds?.passed, false);
+  const segment = over.output.gates.find((gate) => gate.id === "segment_duration");
+  assert.equal(segment?.passed, true);
 });
 
 test("video, audio, editing, and delivery tools preserve upstream boundaries", () => {

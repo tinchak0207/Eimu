@@ -39,6 +39,8 @@ export const PIXAI_HARUKA_V2_MODEL_ID = /** @type {const} */ ("pixai-haruka-v2")
 export const PIXAI_REFERENCE_PRO_MODEL_ID = /** @type {const} */ ("pixai-reference-pro");
 export const PIXAI_TSUBAKI_V11_MODEL_ID = /** @type {const} */ ("pixai-tsubaki-11");
 export const PIXAI_HOSHINO_V2_MODEL_ID = /** @type {const} */ ("pixai-hoshino-v2");
+// agnes 渠道（apihub.agnes-ai.com，2026-09-19 接入）
+export const AGNES_IMAGE_25_FLASH_MODEL_ID = /** @type {const} */ ("agnes-image-2.5-flash");
 
 export const VEO_31_FAST_MODEL_ID = /** @type {const} */ ("veo-3.1-fast");
 export const KLING_30_MODEL_ID = /** @type {const} */ ("kling-3.0");
@@ -96,6 +98,7 @@ export const SUPPORTED_IMAGE_MODEL_IDS = [
   PIXAI_REFERENCE_PRO_MODEL_ID,
   PIXAI_TSUBAKI_V11_MODEL_ID,
   PIXAI_HOSHINO_V2_MODEL_ID,
+  AGNES_IMAGE_25_FLASH_MODEL_ID,
 ];
 
 export const SUPPORTED_VIDEO_MODEL_IDS = [

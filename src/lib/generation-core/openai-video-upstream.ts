@@ -58,6 +58,14 @@ const SD7_MODEL_NAMES = new Set([
 // 完成后无公网 URL 时走 /videos/{id}/content 鉴权下载）
 const DRAMA_30S_MODEL_NAMES = new Set(["sd25-30s"]);
 
+// napi（napi.wanzij.cn，2026-09-19）族：上游模型 seed-2.0 / seed-2.5，$1/次不按秒
+// 计费，覆盖 15s/30s 档。协议骨架与 sd4 同形（POST /videos + GET /videos/{id}，
+// completed 后顶层 video_url），字段差异：比例是 ratio（非 aspect_ratio）、时长是
+// seconds（duration 兼容字段同值透传）、参考图走 images、无 resolution/
+// generate_audio 概念。渠道级模型映射经 capability supplierModelId 短路（registry
+// claims 显式携带），不走 UPSTREAM_MODEL_BY_RESOLUTION 静态分辨率表。
+const NAPI_MODEL_NAMES = new Set(["seed-2.0", "seed-2.5"]);
+
 // 每个平台模型允许的 duration 范围（秒）
 const DURATION_RANGES: Record<string, [number, number]> = {
   "seedance-2.0":      [4, 15],
@@ -109,46 +117,67 @@ export async function generateWithOpenaiVideo(
     );
   }
 
-  const upstreamModel = resolveUpstreamModel(platformModelId, resolution);
+  // 上游模型名：capability 行显式携带 supplierModelId（napi/drama 渠道级映射）时
+  // 直接短路，否则按平台模型 + resolution 查静态表（cangyuansuanli sd4/sd7 族）。
+  const upstreamModel = supplier.supplierModelId ?? resolveUpstreamModel(platformModelId, resolution);
   const isSd7 = SD7_MODEL_NAMES.has(upstreamModel);
   const isDrama30s = DRAMA_30S_MODEL_NAMES.has(upstreamModel);
+  const isNapi = NAPI_MODEL_NAMES.has(upstreamModel);
 
   // 构建请求体
-  const body: Record<string, unknown> = {
-    model: upstreamModel,
-    prompt,
-    aspect_ratio: ratio,
-    duration,
-  };
-
-  if (isDrama30s) {
-    // drama sd25-30s 协议（官方 docs/drama，2026-08-30）：
-    // seconds 必填整数 30（duration 兼容字段，同提交必须一致）；分辨率只认 720p；
-    // 禁止 generate_audio（上游校验直接报错）；参考素材走 reference_image_urls 兼容字段。
-    body.seconds = 30;
-    body.resolution = "720p";
-  } else if (!isSd7) {
-    // sd4 族：透传 resolution + generate_audio
-    body.resolution = resolution;
-    body.generate_audio = input.workflow.generateAudio === true;
+  let body: Record<string, unknown>;
+  if (isNapi) {
+    // napi 上游 Go struct 的 seconds 欄位是 string（實彈 502 實錘：數字會被
+    // cannot unmarshal number 拒收；官方文檔 "seconds":"5" 亦帶引號）。
+    body = {
+      model: upstreamModel,
+      prompt,
+      ratio,
+      seconds: String(duration),
+      duration,
+    };
   } else {
-    // sd7 族：固定清晰度、也支持音频
-    body.generate_audio = input.workflow.generateAudio === true;
+    body = {
+      model: upstreamModel,
+      prompt,
+      aspect_ratio: ratio,
+      duration,
+    };
+
+    if (isDrama30s) {
+      // drama sd25-30s 协议（官方 docs/drama，2026-08-30）：
+      // seconds 必填整数 30（duration 兼容字段，同提交必须一致）；分辨率只认 720p；
+      // 禁止 generate_audio（上游校验直接报错）；参考素材走 reference_image_urls 兼容字段。
+      body.seconds = 30;
+      body.resolution = "720p";
+    } else if (!isSd7) {
+      // sd4 族：透传 resolution + generate_audio
+      body.resolution = resolution;
+      body.generate_audio = input.workflow.generateAudio === true;
+    } else {
+      // sd7 族：固定清晰度、也支持音频
+      body.generate_audio = input.workflow.generateAudio === true;
+    }
   }
 
   // 参考图（多模态参考）
   const references = input.workflow.references ?? [];
   if (references.length > 0) {
-    if (isDrama30s && references.length > 30) {
-      throw new SupplierRequestError("drama sd25-30s accepts at most 30 reference images.", 400);
+    if (isNapi) {
+      // napi：参考图 URL 数组走 images 字段（官方文档图生视频形状）
+      body.images = references.map((ref) => ref.url);
+    } else {
+      if (isDrama30s && references.length > 30) {
+        throw new SupplierRequestError("drama sd25-30s accepts at most 30 reference images.", 400);
+      }
+      if (isSd7 && references.length > 5) {
+        throw new SupplierRequestError("sd7 family accepts at most 5 reference images.", 400);
+      }
+      if (!isSd7 && !isDrama30s && references.length > 4) {
+        throw new SupplierRequestError("sd4 family accepts at most 4 reference images.", 400);
+      }
+      body.reference_image_urls = references.map((ref) => ref.url);
     }
-    if (isSd7 && references.length > 5) {
-      throw new SupplierRequestError("sd7 family accepts at most 5 reference images.", 400);
-    }
-    if (!isSd7 && !isDrama30s && references.length > 4) {
-      throw new SupplierRequestError("sd4 family accepts at most 4 reference images.", 400);
-    }
-    body.reference_image_urls = references.map((ref) => ref.url);
   }
 
   const apiKey = readOpenaiVideoCredential(supplier);
@@ -194,10 +223,10 @@ export async function generateWithOpenaiVideo(
           evidence: { adapter: "openai_video", supplierId: supplier.id, failureDomain: supplier.failureDomain },
         };
       }
-      // drama sd25-30s：官方文档查询响应不保证携带成品 URL，下载统一走
+      // drama sd25-30s／napi 族：官方文档查询响应不保证携带成品 URL，下载统一走
       // /videos/{id}/content 且需 Bearer 鉴权——artifact 下载是裸 fetch，无法带
       // 鉴权头，所以必须在这里下载成 base64 交给 persistOutputArtifact。
-      if (isDrama30s) {
+      if (isDrama30s || isNapi) {
         const base64 = await downloadDramaContent(baseUrl, taskId, apiKey);
         return {
           base64,

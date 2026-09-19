@@ -25,6 +25,9 @@ import type {
 } from "./editor/adapter/editorStore"
 import { EDITOR_ASPECTS } from "./editor/aspect"
 
+// mix.ts 消費的音訊輪子型別重出口（import type 不夠 downstream re-import，需顯式匯出）。
+export type { AudioClip, AudioTrack }
+
 // 與 gateway/index.ts L433 同值；env 可覆蓋（測試用）。
 const WORKSPACE_DIR = process.env.WORKSPACE_DIR || "/opt/agent-harness/workspace"
 const TIMELINES_DIR = path.join(WORKSPACE_DIR, "timelines")
@@ -521,7 +524,7 @@ function applyOp(tl: Timeline, op: TimelineOp, diff: DiffEntry[], affected: Set<
         const v = op.meta[k]
         if (v !== undefined && c[k] !== v) {
           diff.push({ clip_id: c.id, field: k, before: c[k] ?? null, after: v })
-          ;(c as Record<string, unknown>)[k] = v
+          ;(c as unknown as Record<string, unknown>)[k] = v
         }
       }
       touch(c.id)
