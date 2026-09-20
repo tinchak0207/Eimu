@@ -4,6 +4,7 @@ import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Bot, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AgentSubagentItem } from "@/lib/agent-chat-types";
+import { AGENT_TASK_STATUS_TABLE } from "@/lib/agent-task-status";
 
 // 子代理状态栏（罪状 4）：subagent.started/delta/done 的可视化。
 // 不进消息流——置顶堆叠在转录区上方（AgentBatchProgress 旁），turn.done 时
@@ -14,6 +15,8 @@ import type { AgentSubagentItem } from "@/lib/agent-chat-types";
 // 2026-09-10 暴君裁定（子任务卡視覺迭代）：
 //   running 態的末行摘要換跑馬燈（marquee）——流式吐字觀感＝快。
 
+// 状态标签查 agent-task-status.ts 单一语义表（ok=已完成、error=失败，都是
+// 语义表的权威值，不再本地字面维护）；点色/徽章着色是本卡的展示层，留在这里。
 const STATUS_DOT: Record<AgentSubagentItem["status"], string> = {
   running: "bg-ios-orange animate-pulse",
   ok: "bg-ios-green",
@@ -21,9 +24,9 @@ const STATUS_DOT: Record<AgentSubagentItem["status"], string> = {
 };
 
 const STATUS_LABEL: Record<AgentSubagentItem["status"], string> = {
-  running: "运行中",
-  ok: "已完成",
-  error: "失败",
+  running: AGENT_TASK_STATUS_TABLE.running.label,
+  ok: AGENT_TASK_STATUS_TABLE.ok.label,
+  error: AGENT_TASK_STATUS_TABLE.error.label,
 };
 
 const STATUS_BADGE: Record<AgentSubagentItem["status"], string> = {

@@ -4,6 +4,7 @@ import { memo, type ComponentType } from "react";
 import { Check, Coins, Loader2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AgentToolCallItem } from "@/lib/agent-chat-types";
+import { AGENT_TASK_STATUS_TABLE, taskStatusTone } from "@/lib/agent-task-status";
 import { AgentParamDisclosure } from "./AgentParamDisclosure";
 
 export interface AgentToolCardProps {
@@ -18,13 +19,15 @@ interface ToolStatusMeta {
   badge: string;
 }
 
+// 状态语义（标签/是否失败/进行中）查 agent-task-status.ts 单一语义表；图标与
+// 徽章着色是本卡的展示层，留在这里。running/pending 标签尾缀「…」是展示装饰。
 const STATUS_META: Record<AgentToolCallItem["status"], ToolStatusMeta> = {
-  running: { label: "运行中…", Icon: Loader2, tone: "text-ios-blue", badge: "lg-tint-blue" },
+  running: { label: `${AGENT_TASK_STATUS_TABLE.running.label}…`, Icon: Loader2, tone: "text-ios-blue", badge: "lg-tint-blue" },
   // 中继態：任務已提交、成品未到（artifact_pending）。金色＝钱花出去了、东西
   // 还在路上；等 image/video/audio.done 或 image.failed 才转 ok/failed。
-  pending: { label: "生成中…", Icon: Loader2, tone: "text-[rgba(120,90,20,0.85)]", badge: "lg-tint-gold" },
-  ok: { label: "已完成", Icon: Check, tone: "text-[#248A3D]", badge: "lg-tint-green" },
-  failed: { label: "失败", Icon: X, tone: "text-destructive", badge: "lg-tint-red" },
+  pending: { label: `${AGENT_TASK_STATUS_TABLE.pending.label}…`, Icon: Loader2, tone: "text-[rgba(120,90,20,0.85)]", badge: "lg-tint-gold" },
+  ok: { label: AGENT_TASK_STATUS_TABLE.ok.label, Icon: Check, tone: "text-[#248A3D]", badge: "lg-tint-green" },
+  failed: { label: AGENT_TASK_STATUS_TABLE.failed.label, Icon: X, tone: "text-destructive", badge: "lg-tint-red" },
 };
 
 /** 展示用的金币数：整数原样，浮点去掉多余尾巴。 */
@@ -210,8 +213,9 @@ function AgentToolCardComponent({ item }: AgentToolCardProps) {
   const status = STATUS_META[item.status];
   const running = item.status === "running";
   // 图标转圈：running（工具自身在执行）与 pending（任务已提交、成品在路上）
-  // 都是「还在跑」，都转 —— 停在静止图标上等于谎报已结束。
-  const spinning = running || item.status === "pending";
+  // 都是「还在跑」，都转 —— 停在静止图标上等于谎报已结束。转不转由语义表的
+  // pending 色调（进行中）裁决，不再各自字面比较。
+  const spinning = taskStatusTone(item.status).tone === "pending";
   // 执行中进度：只有 running 且网关回了 tool.progress 才有。终态后忽略（不冒充还在跑）。
   // pending 没有进度帧（进度是工具内部的计数，提交出去后由成品事件定案），不得假造。
   const progress = running ? item.progress : undefined;
@@ -279,7 +283,7 @@ function AgentToolCardComponent({ item }: AgentToolCardProps) {
 
       {/* 失败时的人类可读错误（R10-1）：gateway 的 tool.result error.human_message，
           让「红卡刷屏」不再是无声死循环——用户看得到它在修正什么。 */}
-      {item.status === "failed" && item.error && (
+      {taskStatusTone(item.status).isFailure && item.error && (
         <p className="rounded-xl bg-destructive/10 px-2.5 py-1.5 text-ios-caption1 leading-relaxed text-destructive">
           {item.error}
         </p>

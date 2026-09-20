@@ -32,6 +32,8 @@ import {
   type AgentUserTurnItem,
   type AgentVideoItem,
 } from "./agent-chat-types";
+// 状态值域的唯一权威（0920 收口）：reducer 只在类型层引用该 union，分支逻辑不变。
+import type { AgentTaskStatus } from "./agent-task-status";
 
 // ─────────────────────────── 条目 id 生成
 
@@ -190,7 +192,7 @@ function reduceToolResult(state: AgentChatState, event: AgentSseEvent & { name: 
 function settlePendingToolItems(
   items: AgentTranscriptItem[],
   taskId: string | undefined,
-  status: "ok" | "failed",
+  status: Extract<AgentTaskStatus, "ok" | "failed">,
   errorText?: string,
 ): AgentTranscriptItem[] {
   let fallback = -1;
