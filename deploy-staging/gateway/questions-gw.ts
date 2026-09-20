@@ -2,8 +2,7 @@
 import type { PendingQuestion, SessionState } from "./types-gateway.ts"
 import { getOwnedSession } from "./sessions-core.ts"
 import { emitToSession } from "./sse-core.ts"
-import { opencodeHeaders } from "./opencode-client.ts"
-import { OPENCODE_URL } from "./constants-gateway.ts"
+import { opencodeFetch } from "./opencode-client.ts"
 import { jsonError } from "./gw-lib.ts"
 import { armQuestionHeartbeat, armQuestionAssumeTimer, clearQuestionHeartbeat, armMidturnStallTimer, armQuietNoticeTimer } from "./timers-gw.ts"
 // TODO(整合 Wave3): timers 同波 W13 在建 timers-gw.ts（armAckTimer/armHeartbeatTimer/... ），落地後換成真 import（bun build 硬查 named import）。
@@ -43,14 +42,13 @@ export function isQuestionAnswers(value: unknown): value is string[][] {
 
 export async function lookupOpencodeQuestion(state: SessionState, callId: string): Promise<{ id: string; questions: PendingQuestion["questions"] } | null> {
   const urls = [
-    `${OPENCODE_URL}/api/session/${encodeURIComponent(state.opencodeSessionId)}/question`,
-    `${OPENCODE_URL}/question`,
+    `/api/session/${encodeURIComponent(state.opencodeSessionId)}/question`,
+    `/question`,
   ]
   for (const url of urls) {
     try {
-      const res = await fetch(url, {
-        headers: opencodeHeaders(),
-        signal: AbortSignal.timeout(5000),
+      const res = await opencodeFetch(url, {
+        timeoutMs: 5000,
       })
       if (!res.ok) continue
       const payload = await res.json()
@@ -107,14 +105,13 @@ export async function emitQuestionRequest(state: SessionState, callId: string, i
 
 export async function hydratePendingQuestions(state: SessionState): Promise<void> {
   const urls = [
-    `${OPENCODE_URL}/api/session/${encodeURIComponent(state.opencodeSessionId)}/question`,
-    `${OPENCODE_URL}/question`,
+    `/api/session/${encodeURIComponent(state.opencodeSessionId)}/question`,
+    `/question`,
   ]
   for (const url of urls) {
     try {
-      const res = await fetch(url, {
-        headers: opencodeHeaders(),
-        signal: AbortSignal.timeout(5000),
+      const res = await opencodeFetch(url, {
+        timeoutMs: 5000,
       })
       if (!res.ok) continue
       const payload = await res.json()
@@ -147,16 +144,15 @@ export async function hydratePendingQuestions(state: SessionState): Promise<void
 
 export async function rejectOpencodeQuestion(requestId: string, sessionId: string): Promise<void> {
   const urls = [
-    `${OPENCODE_URL}/api/session/${encodeURIComponent(sessionId)}/question/${encodeURIComponent(requestId)}/reject`,
-    `${OPENCODE_URL}/question/${encodeURIComponent(requestId)}/reject`,
+    `/api/session/${encodeURIComponent(sessionId)}/question/${encodeURIComponent(requestId)}/reject`,
+    `/question/${encodeURIComponent(requestId)}/reject`,
   ]
   for (const url of urls) {
     try {
-      const res = await fetch(url, {
+      const res = await opencodeFetch(url, {
         method: "POST",
-        headers: opencodeHeaders(),
         body: "{}",
-        signal: AbortSignal.timeout(5000),
+        timeoutMs: 5000,
       })
       if (res.ok || res.status === 404) return
     } catch {
@@ -185,18 +181,17 @@ export async function handleQuestion(key: string, id: string, req: Request): Pro
     return jsonError(404, "question request unknown or already resolved", "not_found", "question_expired")
   }
   const urls = [
-    `${OPENCODE_URL}/api/session/${encodeURIComponent(state.opencodeSessionId)}/question/${encodeURIComponent(requestId)}/reply`,
-    `${OPENCODE_URL}/question/${encodeURIComponent(requestId)}/reply`,
+    `/api/session/${encodeURIComponent(state.opencodeSessionId)}/question/${encodeURIComponent(requestId)}/reply`,
+    `/question/${encodeURIComponent(requestId)}/reply`,
   ]
   let lastStatus = 0
   let lastText = ""
   for (const url of urls) {
     try {
-      const res = await fetch(url, {
+      const res = await opencodeFetch(url, {
         method: "POST",
-        headers: opencodeHeaders(),
         body: JSON.stringify({ answers: body.answers }),
-        signal: AbortSignal.timeout(8000),
+        timeoutMs: 8000,
       })
       if (res.ok) {
         state.pendingQuestions.delete(requestId)
@@ -239,17 +234,16 @@ export async function settleQuestion(state: SessionState, requestId: string, ans
   const pending = state.pendingQuestions.get(requestId)
   const answers = Array.from({ length: Math.max(pending?.questions.length ?? 1, 1) }, () => [answerText])
   const urls = [
-    `${OPENCODE_URL}/api/session/${encodeURIComponent(state.opencodeSessionId)}/question/${encodeURIComponent(requestId)}/reply`,
-    `${OPENCODE_URL}/question/${encodeURIComponent(requestId)}/reply`,
+    `/api/session/${encodeURIComponent(state.opencodeSessionId)}/question/${encodeURIComponent(requestId)}/reply`,
+    `/question/${encodeURIComponent(requestId)}/reply`,
   ]
   let replied = false
   for (const url of urls) {
     try {
-      const res = await fetch(url, {
+      const res = await opencodeFetch(url, {
         method: "POST",
-        headers: opencodeHeaders(),
         body: JSON.stringify({ answers }),
-        signal: AbortSignal.timeout(8000),
+        timeoutMs: 8000,
       })
       if (res.ok) {
         replied = true

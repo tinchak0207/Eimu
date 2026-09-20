@@ -24,6 +24,7 @@
 import { expandTemplate, topologicalSort, type WorkflowGraph, type WorkflowNode, type WorkflowNodeResult, type TemplateContent } from "./workflow-engine"
 import { getWorkflowTemplate, listWorkflowTemplates } from "./workflow-templates"
 import { validateShotJson, parseShotCandidate, shotOutputParams } from "./video-prompt-schema"
+import { isRetryableNodeError } from "./error-classify"
 
 export interface EmitFn {
   (state: unknown, name: string, data: unknown): void
@@ -109,8 +110,9 @@ function splitIntoBatches(order: string[], graph: WorkflowGraph): string[][] {
 /**
  * R5-B（2026-08-28）：可重試錯誤識別——poll timeout / 上游 5xx / 網絡抖動類
  * 自動退避重試；語義性失敗（缺提示詞、模型不可用、submit 4xx）不浪費重試。
+ * 0920 收口：原單條正則 RETRYABLE_NODE_ERROR 併入 error-classify.ts 的單一
+ * 有序表 ERROR_RULES（與人話翻譯同源同序），判定改走 isRetryableNodeError。
  */
-const RETRYABLE_NODE_ERROR = /timeout|timed out|超时|poll 5\d\d|submit 5\d\d|fetch failed|network|econn|socket hang up|aborted|http_5\d\d/i
 
 /**
  * R5-B/R5-D2（2026-08-29 價目表糾偏）：節點單價解析——沿連線向上游 config（≤2 層）
@@ -298,7 +300,7 @@ export class WorkflowService {
       }
       last = result
       const msg = String(result.error ?? "")
-      if (!RETRYABLE_NODE_ERROR.test(msg)) {
+      if (!isRetryableNodeError(msg)) {
         console.log(`[workflow-retry] ${node.id} non-retryable (attempt ${attempt}): ${msg.slice(0, 160)}`)
         return result
       }

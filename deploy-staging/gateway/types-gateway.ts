@@ -329,3 +329,27 @@ export type TurnMetricsSnapshot = {
   d_first_plan_ms: number | null
   d_total_ms: number | null
 }
+
+/**
+ * 任務狀態單一枚舉真源（0920 收口）。
+ * 現場值域（grep 實證）：subagent.ts SubagentRun/SubagentResult 與 subagent.done
+ * 事件只出 running/ok/error/stopped；workflow-gw 的節點 patch 終態只出 error/
+ * running（pending/success 是畫布節點域、building/partial/failed 是工作流級域、
+ * succeeded/cancelled 是上游域，均不屬本枚舉）。
+ * 血淚：停止曾複用 error 一行省事 → 使用者看到紅字「失败」的假判定
+ * （見 memory stopped-status-not-failure-0920）。
+ */
+export type TaskStatus = "running" | "ok" | "error" | "stopped"
+
+/** 任務狀態語義表：UI 標籤、是否失敗、如何結算工具卡。 */
+export const TASK_STATUS_SEMANTICS: Record<TaskStatus, { uiLabel: string; isFailure: boolean; settlesToolCard: "ok" | "fail" | "none" }> = {
+  ok: { uiLabel: "成功", isFailure: false, settlesToolCard: "ok" },
+  error: { uiLabel: "失敗", isFailure: true, settlesToolCard: "fail" },
+  stopped: { uiLabel: "已停止", isFailure: false, settlesToolCard: "none" },
+  running: { uiLabel: "進行中", isFailure: false, settlesToolCard: "none" },
+}
+
+/** 型別守衛：unknown 收窄到 TaskStatus。 */
+export function isTaskStatus(v: unknown): v is TaskStatus {
+  return v === "running" || v === "ok" || v === "error" || v === "stopped"
+}

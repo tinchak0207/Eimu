@@ -1,9 +1,8 @@
 // session-read.ts —— 自 index.ts 第二階段 Wave3 無損抽取（2026-09-19）：會話讀取與中止——
 // handleTranscript/handleAbortSession＋前導註釋（原 index.ts 5531–5600 行，逐行原樣搬運）。
-import { OPENCODE_URL } from "./constants-gateway.ts"
 import { jsonError } from "./gw-lib.ts"
 import { getOwnedSession } from "./sessions-core.ts"
-import { opencodeHeaders } from "./opencode-client.ts"
+import { opencodeFetch, opencodeJson } from "./opencode-client.ts"
 import { stripStaleTurnTextFromReplay } from "./sse-core.ts"
 import { finishTurnMetrics } from "./metrics-gw.ts"
 // 0920 停止閘：用戶終止連子代理一起停（subagent.ts 不 import 本檔，無循環）。
@@ -25,12 +24,9 @@ export async function handleTranscript(key: string, id: string, req: Request): P
   } catch { /* 預設 200 */ }
   let msgs: unknown = null
   try {
-    const res = await fetch(`${OPENCODE_URL}/session/${state.opencodeSessionId}/message`, {
-      headers: opencodeHeaders(),
-      signal: AbortSignal.timeout(10000),
+    msgs = await opencodeJson<unknown>(`/session/${state.opencodeSessionId}/message`, {
+      timeoutMs: 10000,
     })
-    if (!res.ok) return jsonError(502, "upstream unavailable", "upstream_error", "upstream_error")
-    msgs = await res.json()
   } catch {
     return jsonError(502, "upstream unavailable", "upstream_error", "upstream_error")
   }
@@ -59,10 +55,9 @@ export async function handleAbortSession(key: string, id: string): Promise<Respo
   const state = getOwnedSession(key, id)
   if (!state) return jsonError(404, "session not found", "not_found", "not_found")
   try {
-    const res = await fetch(`${OPENCODE_URL}/session/${state.opencodeSessionId}/abort`, {
+    const res = await opencodeFetch(`/session/${state.opencodeSessionId}/abort`, {
       method: "POST",
-      headers: opencodeHeaders(),
-      signal: AbortSignal.timeout(5000),
+      timeoutMs: 5000,
     })
     if (!res.ok) {
       return jsonError(502, `opencode abort failed: ${res.status}`, "backend_error", "backend_error")

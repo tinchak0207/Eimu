@@ -11,8 +11,7 @@ import { registerMasterExport } from "./masters-index"
 import { subagentParentApiKey, subagentParentState } from "./subagent"
 import { beastAgentField } from "./session-lifecycle"
 import { resolveSession } from "./sessions-core"
-import { opencodeHeaders } from "./opencode-client"
-import { OPENCODE_URL } from "./constants-gateway"
+import { opencodeFetch } from "./opencode-client"
 import { jsonError } from "./gw-lib"
 import { hashKey } from "./auth-gw"
 import { armWatchdogTimer } from "./timers-gw.ts"
@@ -210,11 +209,10 @@ export async function handleResumeSession(req: Request): Promise<Response> {
   // Async, same reason as handleSendMessage: the poller must not be held open
   // for the length of an LLM turn.
   try {
-    const res = await fetch(`${OPENCODE_URL}/session/${state.opencodeSessionId}/prompt_async`, {
+    const res = await opencodeFetch(`/session/${state.opencodeSessionId}/prompt_async`, {
       method: "POST",
-      headers: opencodeHeaders(),
       body: JSON.stringify({ ...beastAgentField(state), parts: [{ type: "text", text: content }] }),
-      signal: AbortSignal.timeout(10000),
+      timeoutMs: 10000,
     })
     if (!res.ok) {
       return jsonError(502, `opencode resume failed: ${res.status}`, "backend_error", "backend_error")
@@ -354,11 +352,10 @@ export async function handleOptimizePrompt(key: string, req: Request): Promise<R
   // 開一個一次性 opencode session（與對話 pool 無關）。
   let session: { id?: string }
   try {
-    const res = await fetch(`${OPENCODE_URL}/session`, {
+    const res = await opencodeFetch(`/session`, {
       method: "POST",
-      headers: opencodeHeaders(),
       body: "{}",
-      signal: AbortSignal.timeout(10000),
+      timeoutMs: 10000,
     })
     if (!res.ok) return jsonError(502, `opencode create session failed: ${res.status}`, "backend_error", "backend_error")
     session = (await res.json()) as { id?: string }
@@ -371,11 +368,10 @@ export async function handleOptimizePrompt(key: string, req: Request): Promise<R
   try {
     const content = `${OPTIMIZE_DIRECTOR_PREFIX}\n\n${prompt}`
 
-    const res = await fetch(`${OPENCODE_URL}/session/${sessionId}/message`, {
+    const res = await opencodeFetch(`/session/${sessionId}/message`, {
       method: "POST",
-      headers: opencodeHeaders(),
       body: JSON.stringify({ parts: [{ type: "text", text: content }] }),
-      signal: AbortSignal.timeout(120000),
+      timeoutMs: 120000,
     })
     if (!res.ok) {
       return jsonError(502, `opencode optimize failed: ${res.status}`, "backend_error", "backend_error")
@@ -394,10 +390,9 @@ export async function handleOptimizePrompt(key: string, req: Request): Promise<R
     return jsonError(502, "opencode backend unreachable", "backend_unreachable", "backend_error")
   } finally {
     // 一次性 session，事後必刪。
-    await fetch(`${OPENCODE_URL}/session/${sessionId}`, {
+    await opencodeFetch(`/session/${sessionId}`, {
       method: "DELETE",
-      headers: opencodeHeaders(),
-      signal: AbortSignal.timeout(10000),
+      timeoutMs: 10000,
     }).catch(() => {})
   }
 }
@@ -427,11 +422,10 @@ export async function handleExtractLessons(key: string, req: Request): Promise<R
   // 一次性 opencode session（与对话 pool 无关），同步取结果后即删。
   let session: { id?: string }
   try {
-    const res = await fetch(`${OPENCODE_URL}/session`, {
+    const res = await opencodeFetch(`/session`, {
       method: "POST",
-      headers: opencodeHeaders(),
       body: "{}",
-      signal: AbortSignal.timeout(10000),
+      timeoutMs: 10000,
     })
     if (!res.ok) return jsonError(502, `opencode create session failed: ${res.status}`, "backend_error", "backend_error")
     session = (await res.json()) as { id?: string }
@@ -443,11 +437,10 @@ export async function handleExtractLessons(key: string, req: Request): Promise<R
   const sessionId = session.id
   try {
     const content = `${EXTRACT_LESSONS_PREFIX}\n\n<transcript>\n${transcript}\n</transcript>\n\n提取该用户的教训,每行一条。`
-    const res = await fetch(`${OPENCODE_URL}/session/${sessionId}/message`, {
+    const res = await opencodeFetch(`/session/${sessionId}/message`, {
       method: "POST",
-      headers: opencodeHeaders(),
       body: JSON.stringify({ parts: [{ type: "text", text: content }] }),
-      signal: AbortSignal.timeout(120000),
+      timeoutMs: 120000,
     })
     if (!res.ok) {
       return jsonError(502, `opencode extract failed: ${res.status}`, "backend_error", "backend_error")
@@ -469,10 +462,9 @@ export async function handleExtractLessons(key: string, req: Request): Promise<R
   } catch {
     return jsonError(502, "opencode backend unreachable", "backend_unreachable", "backend_error")
   } finally {
-    await fetch(`${OPENCODE_URL}/session/${sessionId}`, {
+    await opencodeFetch(`/session/${sessionId}`, {
       method: "DELETE",
-      headers: opencodeHeaders(),
-      signal: AbortSignal.timeout(10000),
+      timeoutMs: 10000,
     }).catch(() => {})
   }
 }

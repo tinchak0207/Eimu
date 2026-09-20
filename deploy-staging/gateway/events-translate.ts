@@ -3,9 +3,9 @@
 import { readFileSync, readdirSync, statSync } from "node:fs"
 import path from "node:path"
 import type { SessionState } from "./types-gateway.ts"
-import { PLATFORM_BASE, WORKSPACE_DIR, UPLOADS_DIR, OPENCODE_URL, TURN_RETRY_DELAY_MS, IDLE_STEP_ABORT_THRESHOLD, IDLE_STEP_NUDGE, IMAGE_URL_DEDUP_CAP, TOOL_STATUS_DEDUP_CAP } from "./constants-gateway.ts"
+import { PLATFORM_BASE, WORKSPACE_DIR, UPLOADS_DIR, TURN_RETRY_DELAY_MS, IDLE_STEP_ABORT_THRESHOLD, IDLE_STEP_NUDGE, IMAGE_URL_DEDUP_CAP, TOOL_STATUS_DEDUP_CAP } from "./constants-gateway.ts"
 import { sessions, markDirty } from "./sessions-core.ts"
-import { opencodeHeaders } from "./opencode-client.ts"
+import { opencodeFetch } from "./opencode-client.ts"
 import { emitToSession, stripStaleTurnTextFromReplay } from "./sse-core.ts"
 import { estimateNodeCoins } from "./pricing-gateway.ts"
 import { applyCanvasNodeCreated, applyCanvasNodeConnected, applyCanvasNodeUpdated } from "./canvas-cascade-state.ts"
@@ -897,10 +897,9 @@ export function triggerIdleStepBreaker(state: SessionState): void {
     `[gateway] idle-step breaker: ${IDLE_STEP_ABORT_THRESHOLD} empty steps, abort+nudge — session=${state.sessionId} gen=${gen}`,
   )
   // ① 中止當前 turn（與用戶中止同一後端路徑）。
-  void fetch(`${OPENCODE_URL}/session/${state.opencodeSessionId}/abort`, {
+  void opencodeFetch(`/session/${state.opencodeSessionId}/abort`, {
     method: "POST",
-    headers: opencodeHeaders(),
-    signal: AbortSignal.timeout(5000),
+    timeoutMs: 5000,
   }).catch(() => {})
   state.turnAborted = true
   stripStaleTurnTextFromReplay(state)
@@ -912,11 +911,10 @@ export function triggerIdleStepBreaker(state: SessionState): void {
     const cur = sessions.get(state.sessionId)
     if (!cur || (cur.turnGen ?? 0) !== gen) return
     try {
-      const res = await fetch(`${OPENCODE_URL}/session/${cur.opencodeSessionId}/prompt_async`, {
+      const res = await opencodeFetch(`/session/${cur.opencodeSessionId}/prompt_async`, {
         method: "POST",
-        headers: opencodeHeaders(),
         body: JSON.stringify(nudgeBody),
-        signal: AbortSignal.timeout(10000),
+        timeoutMs: 10000,
       })
       if (!res.ok) throw new Error(`status ${res.status}`)
       cur.turnAborted = false

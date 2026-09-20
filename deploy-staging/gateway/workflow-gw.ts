@@ -18,6 +18,7 @@ import { normalizeUserSettings } from "./sessions-http.ts"
 import { applyCanvasNodeCreated, applyCanvasNodeUpdated } from "./canvas-cascade-state.ts"
 import { humanMessageFor } from "./humanize-gw.ts"
 import type { SessionState } from "./types-gateway.ts"
+import type { TaskStatus } from "./types-gateway.ts"
 import { appendLedgerFor, emitQuotaChanged } from "./quota-ledger.ts"
 import { armWatchdogTimer, isInterrogativeMessage } from "./timers-gw.ts"
 import { beastAgentField } from "./session-lifecycle.ts"
@@ -452,7 +453,7 @@ export function restoreWorkflowsFromSnapshot(state: SessionState): void {
         node_id: nodeId,
         workflow_id: restored.workflowId,
         patch: {
-          status: "error",
+          status: "error" satisfies TaskStatus,
           errorDetails: "服务重启导致任务中断",
           human_message: "服务重启导致任务中断，中断节点未产生成功扣款；如已扣款以平台账单为准，可在画布上重试该节点。",
         },
@@ -921,7 +922,7 @@ export async function submitWorkflowNode(
         if (i % 5 === 4) {
           const elapsedSec = Math.round((Date.now() - startedAtMs) / 1000)
           const percent = Math.min(95, Math.round((elapsedSec / etaSeconds) * 100))
-          const patch = { status: "running", progress: { elapsed_seconds: elapsedSec, eta_seconds: etaSeconds, percent } }
+          const patch = { status: "running" satisfies TaskStatus, progress: { elapsed_seconds: elapsedSec, eta_seconds: etaSeconds, percent } }
           emitToSession(session, "canvas.node.updated", {
             node_id: nodeId,
             ...(wfIdMatch ? { workflow_id: wfIdMatch[1] } : {}),
@@ -1095,7 +1096,7 @@ setInterval(() => {
           unit_id: wfid,
           node_id: n.id,
           patch: {
-            status: "error",
+            status: "error" satisfies TaskStatus,
             errorDetails: "停滞超时：超过 15 分钟无任何进度推进，系统已按失败处理",
             human_message: "渲染停滞超过 15 分钟无推进，系统已将卡住的节点判死并按失败处理",
           },

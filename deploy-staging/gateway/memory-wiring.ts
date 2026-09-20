@@ -8,8 +8,7 @@ import { MEMORY_INGEST_SECRET, MEMORY_INGEST_BASE_URL, MEMORY_BATCH_ENABLED, MEM
 import { bindingRef } from "./model-registry"
 import { getOwnedSession } from "./sessions-core"
 import { loadSessionByOpencodeId } from "./persistence"
-import { opencodeHeaders } from "./opencode-client"
-import { OPENCODE_URL } from "./constants-gateway"
+import { opencodeFetch } from "./opencode-client"
 import { jsonError } from "./gw-lib"
 import { hashKey } from "./auth-gw"
 import type { SessionState } from "./types-gateway"
@@ -222,9 +221,8 @@ export const KNOWLEDGE_TOOL_NAMES = new Set(["search_web", "vision_analyze", "as
 
 /** transcriptOf：複用 handleTranscript 的 fetch 形狀（opencode GET /session/:id/message），渲染成純文本。 */
 export async function memoryTranscriptOf(opencodeSessionId: string): Promise<string> {
-  const res = await fetch(`${OPENCODE_URL}/session/${encodeURIComponent(opencodeSessionId)}/message`, {
-    headers: opencodeHeaders(),
-    signal: AbortSignal.timeout(10_000),
+  const res = await opencodeFetch(`/session/${encodeURIComponent(opencodeSessionId)}/message`, {
+    timeoutMs: 10_000,
   })
   if (!res.ok) throw new Error(`memory transcript fetch HTTP ${res.status}`)
   const msgs = (await res.json()) as Array<Record<string, any>>
@@ -253,9 +251,8 @@ export async function memorySessionCounts(
   let successfulToolCalls = 0
   let knowledgeToolCalls = 0
   try {
-    const res = await fetch(`${OPENCODE_URL}/session/${encodeURIComponent(opencodeSessionId)}/message`, {
-      headers: opencodeHeaders(),
-      signal: AbortSignal.timeout(10_000),
+    const res = await opencodeFetch(`/session/${encodeURIComponent(opencodeSessionId)}/message`, {
+      timeoutMs: 10_000,
     })
     if (!res.ok) return { userMessages: 0, successfulToolCalls: 0, knowledgeToolCalls: 0 }
     const msgs = (await res.json()) as Array<Record<string, any>>
@@ -276,9 +273,8 @@ export async function memorySessionCounts(
 
 /** listSessions：loopback GET /session（opencode 目錄）＋ sessions.db 反查 ownerKey（hashKey 同算法）。 */
 export async function memoryListSessions(): Promise<MemorySessionRecord[]> {
-  const res = await fetch(`${OPENCODE_URL}/session`, {
-    headers: opencodeHeaders(),
-    signal: AbortSignal.timeout(10_000),
+  const res = await opencodeFetch(`/session`, {
+    timeoutMs: 10_000,
   })
   if (!res.ok) throw new Error(`memory listSessions HTTP ${res.status}`)
   const dir = (await res.json()) as Array<Record<string, any>>
@@ -325,11 +321,10 @@ export async function memoryCallLlm(prompt: string): Promise<string> {
   // 一次性 opencode session（與對話 pool 無關），同步取結果後即刪。
   let session: { id?: string }
   try {
-    const res = await fetch(`${OPENCODE_URL}/session`, {
+    const res = await opencodeFetch(`/session`, {
       method: "POST",
-      headers: opencodeHeaders(),
       body: "{}",
-      signal: AbortSignal.timeout(10000),
+      timeoutMs: 10000,
     })
     if (!res.ok) throw new Error(`opencode create session failed: ${res.status}`)
     session = (await res.json()) as { id?: string }
@@ -339,11 +334,10 @@ export async function memoryCallLlm(prompt: string): Promise<string> {
   if (!session.id) throw new Error("opencode did not return a session id")
   const opencodeSessionId = session.id
   try {
-    const res = await fetch(`${OPENCODE_URL}/session/${opencodeSessionId}/message`, {
+    const res = await opencodeFetch(`/session/${opencodeSessionId}/message`, {
       method: "POST",
-      headers: opencodeHeaders(),
       body: JSON.stringify({ parts: [{ type: "text", text: prompt }] }),
-      signal: AbortSignal.timeout(180000), // 白名單改動：curator 全文輸入，窗口放寬到 180s
+      timeoutMs: 180000, // 白名單改動：curator 全文輸入，窗口放寬到 180s
     })
     if (!res.ok) throw new Error(`opencode curator call failed: ${res.status}`)
     const payload = (await res.json()) as { parts?: Array<{ type?: string; text?: string }> }
@@ -352,10 +346,9 @@ export async function memoryCallLlm(prompt: string): Promise<string> {
       .map((p) => p.text ?? "")
     return texts.length > 0 ? texts[texts.length - 1] : ""
   } finally {
-    await fetch(`${OPENCODE_URL}/session/${opencodeSessionId}`, {
+    await opencodeFetch(`/session/${opencodeSessionId}`, {
       method: "DELETE",
-      headers: opencodeHeaders(),
-      signal: AbortSignal.timeout(10000),
+      timeoutMs: 10000,
     }).catch(() => {})
   }
 }
@@ -400,11 +393,10 @@ export async function memoryCallLlmWithModel(prompt: string, model: string, labe
   // 一次性 opencode session（與對話 pool 無關），同步取結果後即刪。
   let session: { id?: string }
   try {
-    const res = await fetch(`${OPENCODE_URL}/session`, {
+    const res = await opencodeFetch(`/session`, {
       method: "POST",
-      headers: opencodeHeaders(),
       body: "{}",
-      signal: AbortSignal.timeout(10000),
+      timeoutMs: 10000,
     })
     if (!res.ok) throw new Error(`opencode create session failed: ${res.status}`)
     session = (await res.json()) as { id?: string }
@@ -414,14 +406,13 @@ export async function memoryCallLlmWithModel(prompt: string, model: string, labe
   if (!session.id) throw new Error("opencode did not return a session id")
   const opencodeSessionId = session.id
   try {
-    const res = await fetch(`${OPENCODE_URL}/session/${opencodeSessionId}/message`, {
+    const res = await opencodeFetch(`/session/${opencodeSessionId}/message`, {
       method: "POST",
-      headers: opencodeHeaders(),
       body: JSON.stringify({
         parts: [{ type: "text", text: prompt }],
         model: { providerID: ref.providerID, modelID: ref.modelID },
       }),
-      signal: AbortSignal.timeout(180000), // 白名單改動：curator 全文輸入，窗口放寬到 180s
+      timeoutMs: 180000, // 白名單改動：curator 全文輸入，窗口放寬到 180s
     })
     if (!res.ok) throw new Error(`opencode ${label} call failed: ${res.status}`)
     const payload = (await res.json()) as { parts?: Array<{ type?: string; text?: string }> }
@@ -430,10 +421,9 @@ export async function memoryCallLlmWithModel(prompt: string, model: string, labe
       .map((p) => p.text ?? "")
     return texts.length > 0 ? texts[texts.length - 1] : ""
   } finally {
-    await fetch(`${OPENCODE_URL}/session/${opencodeSessionId}`, {
+    await opencodeFetch(`/session/${opencodeSessionId}`, {
       method: "DELETE",
-      headers: opencodeHeaders(),
-      signal: AbortSignal.timeout(10000),
+      timeoutMs: 10000,
     }).catch(() => {})
   }
 }

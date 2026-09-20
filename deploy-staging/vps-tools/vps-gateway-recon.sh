@@ -25,23 +25,21 @@ trap 'rm -rf "$TMP_DIR" "$WORKTREE"' EXIT
 git -C "$GIT_DIR" worktree add --quiet --detach "$WORKTREE" HEAD
 
 drift=0
-# 3. 逐檔比對（略過僅註釋/空白差異的等價檔）
-for f in "$TMP_DIR"/*.ts; do
-  b=$(basename "$f")
-  head_f="$WORKTREE/deploy-staging/gateway/$b"
-  if [ ! -f "$head_f" ]; then
-    echo "ONLY_VPS $b"; drift=1; continue
+# 3. 相對路徑全量比對（含子目錄——0920 教訓：workflow-templates/ 拆分目錄曾被頂層比對漏掉）
+cd "$WORKTREE/deploy-staging/gateway" || exit 2
+find . -name '*.ts' ! -name '*.test.ts' ! -path './node_modules/*' ! -name '*.bak*' ! -name 'index.r?.ts' ! -name 'refactor-audit.ts' | sort > "$TMP_DIR/head-files.txt"
+cd "$TMP_DIR" || exit 2
+find . -name '*.ts' ! -name '*.test.ts' ! -path './node_modules/*' ! -name '*.bak*' ! -name 'index.r?.ts' | sort > "$TMP_DIR/vps-files.txt"
+strip() { sed '/^[[:space:]]*\/\//d; /^[[:space:]]*$/d' "$1"; }
+while read -r f; do echo "ONLY_LOCAL ${f#./}（VPS 缺，確認是否該部署）"; done < <(comm -23 "$TMP_DIR/head-files.txt" "$TMP_DIR/vps-files.txt")
+comm -13 "$TMP_DIR/head-files.txt" "$TMP_DIR/vps-files.txt" | while read -r f; do echo "ONLY_VPS ${f#./}"; done
+if [ -n "$(comm -13 "$TMP_DIR/head-files.txt" "$TMP_DIR/vps-files.txt")" ]; then drift=1; fi
+while read -r f; do
+  [ -f "$TMP_DIR/$f" ] || continue
+  if ! diff -q <(strip "$WORKTREE/deploy-staging/gateway/$f") <(strip "$TMP_DIR/$f") >/dev/null; then
+    echo "DIFF ${f#./}"; drift=1
   fi
-  if ! diff -q <(sed '/^[[:space:]]*\/\//d; /^[[:space:]]*$/d' "$head_f") \
-                <(sed '/^[[:space:]]*\/\//d; /^[[:space:]]*$/d' "$f") >/dev/null; then
-    echo "DIFF $b"; drift=1
-  fi
-done
-for f in "$WORKTREE/deploy-staging/gateway"/*.ts; do
-  b=$(basename "$f")
-  case "$b" in *.test.ts|refactor-audit.ts) continue;; esac  # 本地測試/審計工具，不部署
-  [ -f "$TMP_DIR/$b" ] || echo "ONLY_LOCAL $b（VPS 缺，確認是否該部署）"
-done
+done < "$TMP_DIR/head-files.txt"
 
 git -C "$GIT_DIR" worktree remove --force "$WORKTREE" 2>/dev/null || true
 

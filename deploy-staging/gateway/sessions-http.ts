@@ -14,10 +14,9 @@ import { gzipSync } from "node:zlib"
 import { loadUserSettings } from "./persistence"
 import { jsonError } from "./gw-lib.ts"
 import type { SessionState } from "./types-gateway.ts"
-import { OPENCODE_URL } from "./constants-gateway.ts"
 import { getOwnedSession } from "./sessions-core.ts"
 import { TAIL_PAYLOAD_MARKER } from "./messages-gw.ts"
-import { opencodeHeaders } from "./opencode-client.ts"
+import { opencodeFetch } from "./opencode-client.ts"
 
 // L0 畫像 onboarding：賬戶還沒有任何確認過的畫像時，引導 agent 用 question 工具
 // 以選擇題採集畫像（PM 原則：別讓用戶動腦寫表單）。答案存 pendingProfile，
@@ -76,9 +75,8 @@ export async function handleGetSession(key: string, id: string): Promise<Respons
   const state = getOwnedSession(key, id)
   if (!state) return jsonError(404, "session not found", "not_found", "not_found")
   try {
-    const res = await fetch(`${OPENCODE_URL}/session/${state.opencodeSessionId}/message`, {
-      headers: opencodeHeaders(),
-      signal: AbortSignal.timeout(15_000),
+    const res = await opencodeFetch(`/session/${state.opencodeSessionId}/message`, {
+      timeoutMs: 15_000,
     })
     if (!res.ok) {
       // upstream opencode session 已不在（被外部清理等）：仍回會話元數據，標記歷史不可用。
@@ -229,9 +227,8 @@ export async function handleGetSessionMessages(key: string, id: string): Promise
     replay_first_id: state.replayBuffer.length > 0 ? state.replayBuffer[0].id : null,
   }
   try {
-    const res = await fetch(`${OPENCODE_URL}/session/${state.opencodeSessionId}/message`, {
-      headers: opencodeHeaders(),
-      signal: AbortSignal.timeout(30_000),
+    const res = await opencodeFetch(`/session/${state.opencodeSessionId}/message`, {
+      timeoutMs: 30_000,
     })
     if (!res.ok) {
       return Response.json({ messages: [], ...cursor, fallback: "replay_only" })

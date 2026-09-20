@@ -15,6 +15,31 @@ export function opencodeHeaders(): Record<string, string> {
   }
 }
 
+// 呼叫層統一入口（2026-09-20 接縫收口）：拼 OPENCODE_URL + opencodeHeaders + 預設
+// 30s timeout（timeoutMs 可逐點覆蓋，各呼叫點原 timeout 值逐點保留）。僅替代
+// 拼URL/headers/timeout 三件事；res.ok 判定與錯誤處理結構仍由呼叫端持有。
+export async function opencodeFetch(path: string, init?: RequestInit & { timeoutMs?: number }): Promise<Response> {
+  const { timeoutMs = 30000, ...rest } = init ?? {}
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    return await fetch(`${OPENCODE_URL}${path}`, {
+      ...rest,
+      headers: opencodeHeaders(),
+      signal: controller.signal,
+    })
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+// opencodeFetch + res.ok 檢查（!ok 拋錯，訊息帶 status 與 path）+ res.json()。
+export async function opencodeJson<T>(path: string, init?: RequestInit & { timeoutMs?: number }): Promise<T> {
+  const res = await opencodeFetch(path, init)
+  if (!res.ok) throw new Error(`opencode ${path} failed: HTTP ${res.status}`)
+  return (await res.json()) as T
+}
+
 // ── 會話摘要標題（2026-09-12）────────────────────────────────────
 // opencode 在首條用戶消息後異步生成 session.title（真會話實測「戴帽橘猫水彩插画」
 // 級別；零消息會話是 "New session - <時間戳>" 佔位）。網關讀輪子不造輪子：

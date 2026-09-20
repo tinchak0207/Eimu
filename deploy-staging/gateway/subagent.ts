@@ -29,6 +29,8 @@ import { join } from "node:path"
 // 刀 2B/刀 3（2026-09-19）：Jev 權威閘——spec 注入隔離＋expert 路由＋sync 資格。
 // 量級瘦身 A：spec 模板機器注入（playbook 2.0 起模板不進 orchestrator 上下文）。
 import { quarantineSpec, routeExpertAuthoritative, syncDispatchEligible, classifyDispatchMeta, workflowTemplateDirective } from "./jev-gate"
+// 任務狀態枚舉真源（0920 收口）：running/ok/error/stopped 以此為準，禁散布裸字串。
+import type { TaskStatus } from "./types-gateway.ts"
 // 0920：模板判定即建骨架（不等 Expert）——workflowService 是純 service 模組，
 // workflow-gw 不 import subagent，無循環風險。
 import { workflowService, workflowOwnerBySession } from "./workflow-gw"
@@ -114,7 +116,7 @@ interface SubagentRun {
   startedAt: number
   // 0920 停止閘：新增 "stopped"——用戶／orchestrator 主動停止**不是失敗**，
   // 此前複用 error 導致卡片顯示「失败」（實錘：停止成功卻被假判定為失敗）。
-  status: "running" | "ok" | "error" | "stopped"
+  status: TaskStatus
   summary?: string
   error?: string
   // 任务书与模型链：上游错误时换新子会话、下一模型重投。
@@ -171,7 +173,7 @@ interface SubagentRun {
 
 interface SubagentResult {
   // 0920 停止閘：新增 "stopped"——人工取消不是失敗（停止成功卻顯示「失败」＝假判定）。
-  status: "ok" | "error" | "stopped"
+  status: Exclude<TaskStatus, "running">
   summary: string
   error?: string
   finishedAt: number
@@ -294,16 +296,16 @@ export function stopSubagentRun(run: SubagentRun, by: "user" | "orchestrator", r
   const text = reason || `已停止子代理「${run.label}」`
   // 先落一條 done（不經 finishRun——那條路會走交付閘門/喚醒，停止語義不適用）。
   // 0920 停止閘：人工／orchestrator 停止不是失敗，標 "stopped"，前端的 "已中止"。
-  run.status = "stopped"
+  run.status = "stopped" satisfies TaskStatus
   run.error = text
   run.summary = text
   removeFromRegistries(run)
   deleteReworkRecord(run.id)
-  completed.set(run.id, { status: "stopped", summary: text, error: text, finishedAt: Date.now(), label: run.label })
+  completed.set(run.id, { status: "stopped" satisfies TaskStatus, summary: text, error: text, finishedAt: Date.now(), label: run.label })
   const state = parentStateOf(run)
   if (state && deps) {
     try {
-      deps.emitToSession(state, "subagent.done", { id: run.id, status: "stopped", summary: text, stopped: true, stopped_by: by })
+      deps.emitToSession(state, "subagent.done", { id: run.id, status: "stopped" satisfies TaskStatus, summary: text, stopped: true, stopped_by: by })
     } catch (e) {
       console.error(`[gateway] subagent stop emit failed: id=${run.id}`, e)
     }

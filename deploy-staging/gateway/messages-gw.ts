@@ -8,13 +8,13 @@ import { loadUserSettings } from "./persistence"
 import { gateUserInput, classifyDispatchMeta } from "./jev-gate"
 // 0920：首條訊息即建模板骨架（不等模型思考/不等 Expert）——見下方 PROMPT_SKELETON。
 import { workflowService, workflowOwnerBySession } from "./workflow-gw.ts"
-import { templatePlaceholderContent } from "./workflow-templates.ts"
+import { templatePlaceholderContent } from "./workflow-templates"
 import { jsonError } from "./gw-lib.ts"
-import { OPENCODE_URL, SYSTEM_PAYLOAD_TAIL_DEDUPE, MEMORY_SHARED_ENABLED } from "./constants-gateway.ts"
+import { SYSTEM_PAYLOAD_TAIL_DEDUPE, MEMORY_SHARED_ENABLED } from "./constants-gateway.ts"
 import { sessions, markDirty, getOwnedSession } from "./sessions-core.ts"
 import { emitToSession } from "./sse-core.ts"
 import { normalizeUserSettings, PROFILE_ONBOARDING_DIRECTIVE } from "./sessions-http.ts"
-import { opencodeHeaders } from "./opencode-client.ts"
+import { opencodeFetch } from "./opencode-client.ts"
 import { startTurnPlan } from "./plan-gw.ts"
 import { beginTurnMetrics, noteTurnDeferred, noteTurnPromptDispatch } from "./metrics-gw.ts"
 import type { SessionState } from "./types-gateway.ts"
@@ -428,11 +428,10 @@ export async function handleSendMessage(key: string, id: string, req: Request): 
         )
       }
       try {
-        const res = await fetch(`${OPENCODE_URL}/session/${cur.opencodeSessionId}/prompt_async`, {
+        const res = await opencodeFetch(`/session/${cur.opencodeSessionId}/prompt_async`, {
           method: "POST",
-          headers: opencodeHeaders(),
           body: JSON.stringify(promptBody),
-          signal: AbortSignal.timeout(10000),
+          timeoutMs: 10000,
         })
         if (!res.ok) throw new Error(`status ${res.status}`)
         console.log(`[gateway] deferred prompt dispatched: session=${cur.sessionId} gen=${gen}`)
@@ -469,11 +468,10 @@ export async function handleSendMessage(key: string, id: string, req: Request): 
     return Response.json({ session_id: id }, { status: 202 })
   }
   try {
-    const res = await fetch(`${OPENCODE_URL}/session/${state.opencodeSessionId}/prompt_async`, {
+    const res = await opencodeFetch(`/session/${state.opencodeSessionId}/prompt_async`, {
       method: "POST",
-      headers: opencodeHeaders(),
       body: JSON.stringify(promptBody),
-      signal: AbortSignal.timeout(10000),
+      timeoutMs: 10000,
     })
     if (!res.ok) {
       return jsonError(502, `opencode send message failed: ${res.status}`, "backend_error", "backend_error")
@@ -515,9 +513,8 @@ export const compactionJobs = new Map<string, Promise<void>>()
 export async function maybeCompactSession(state: SessionState): Promise<void> {
   if (compactionJobs.has(state.sessionId)) return
   try {
-    const res = await fetch(`${OPENCODE_URL}/session/${state.opencodeSessionId}/message`, {
-      headers: opencodeHeaders(),
-      signal: AbortSignal.timeout(10_000),
+    const res = await opencodeFetch(`/session/${state.opencodeSessionId}/message`, {
+      timeoutMs: 10_000,
     })
     if (!res.ok) return
     const msgs = (await res.json()) as Array<{
@@ -568,11 +565,10 @@ export async function maybeCompactSession(state: SessionState): Promise<void> {
     compactionJobs.set(
       state.sessionId,
       (async () => {
-        const r = await fetch(`${OPENCODE_URL}/session/${state.opencodeSessionId}/summarize`, {
+        const r = await opencodeFetch(`/session/${state.opencodeSessionId}/summarize`, {
           method: "POST",
-          headers: opencodeHeaders(),
           body: JSON.stringify({ providerID, modelID }),
-          signal: AbortSignal.timeout(SESSION_COMPACT_TIMEOUT_MS),
+          timeoutMs: SESSION_COMPACT_TIMEOUT_MS,
         })
         if (!r.ok) {
           console.warn(`[gateway] session compact failed: ${state.sessionId} status=${r.status}`)
@@ -584,9 +580,8 @@ export async function maybeCompactSession(state: SessionState): Promise<void> {
         // 故 200 後再取一次訊息列表，若 summary/compaction 訊息自帶 error 即判失敗、不推進水位。
         let verifyMsgs: Array<{ info?: { summary?: boolean; mode?: string; error?: unknown } }>
         try {
-          const vr = await fetch(`${OPENCODE_URL}/session/${state.opencodeSessionId}/message`, {
-            headers: opencodeHeaders(),
-            signal: AbortSignal.timeout(10_000),
+          const vr = await opencodeFetch(`/session/${state.opencodeSessionId}/message`, {
+            timeoutMs: 10_000,
           })
           if (!vr.ok) {
             console.warn(`[gateway] session compact UNVERIFIED (status=${vr.status}), 水位不推進: ${state.sessionId}`)

@@ -4,10 +4,9 @@
 // 5145–5179（handleEventStream＋handleConfirm）。逐行機械抽取（python），僅加 export
 // 前綴＋本檔頭＋單行 import，其餘一字未動。
 import type { MemoryDocLite, SessionState } from "./types-gateway.ts"
-import { OPENCODE_URL } from "./constants-gateway.ts"
 import { jsonError } from "./gw-lib.ts"
 import { getOwnedSession, sessions } from "./sessions-core.ts"
-import { opencodeHeaders } from "./opencode-client.ts"
+import { opencodeFetch } from "./opencode-client.ts"
 import { hashKey } from "./auth-gw.ts"
 import { loadUserSettings, saveSession } from "./persistence.ts"
 import { openEventStream } from "./sse-core.ts"
@@ -64,11 +63,10 @@ export async function handleCreateSession(key: string, req: Request): Promise<Re
 
   let res: Response
   try {
-    res = await fetch(`${OPENCODE_URL}/session`, {
+    res = await opencodeFetch(`/session`, {
       method: "POST",
-      headers: opencodeHeaders(),
       body: "{}",
-      signal: AbortSignal.timeout(10000),
+      timeoutMs: 10000,
     })
   } catch {
     return jsonError(502, "opencode backend unreachable", "backend_unreachable", "backend_error")
