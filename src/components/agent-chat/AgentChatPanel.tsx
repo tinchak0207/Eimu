@@ -450,9 +450,9 @@ function AgentChatPanelComponent({
               className="pointer-events-none absolute inset-0"
               style={{
                 background: [
-                  "radial-gradient(130% 55% at 16% 4%, rgba(85,205,252,0.15) 0%, rgba(85,205,252,0.07) 40%, transparent 68%)",
-                  "radial-gradient(120% 50% at 88% 96%, rgba(247,168,184,0.13) 0%, rgba(247,168,184,0.055) 42%, transparent 70%)",
-                  "radial-gradient(100% 45% at 78% 10%, rgba(88,86,214,0.08) 0%, transparent 62%)",
+                  "radial-gradient(130% 55% at 16% 4%, rgba(85,205,252,0.22) 0%, rgba(85,205,252,0.10) 40%, transparent 68%)",
+                  "radial-gradient(120% 50% at 88% 96%, rgba(247,168,184,0.20) 0%, rgba(247,168,184,0.08) 42%, transparent 70%)",
+                  "radial-gradient(100% 45% at 78% 10%, rgba(88,86,214,0.12) 0%, transparent 62%)",
                 ].join(", "),
               }}
             />

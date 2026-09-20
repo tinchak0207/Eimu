@@ -65,27 +65,35 @@ export function CanvasChatWorkstation({
               position: fixed;
               inset: 0;
               z-index: 40;
-              /* 環境光漸層與 body::after 同一配方（Trans 藍/粉光暈＋160deg 底色）。
-                 此層的職責是遮蓋首頁文檔流內容；舊版 #F2F2F7 實底把首頁的彩色
-                 環境光一併抹平（暴君裁定 09-20：進助理应看見同款漸層），
-                 改鋪同款漸層後遮蓋不變、底色不再消失。 */
+              /* 環境光漸層同 body::after 的世界（Trans 藍/粉），但色度加濃一档、
+                 并把光斑推向左侧卡片带（09-20 深夜暴君二报：卡「没有玻璃感、
+                 中间变成背景颜色」＝近白玻璃压在近白底上零对比，玻璃无物可折射）。
+                 玻璃感＝卡片对环境的提亮＋色偏：底色压深（#e9f5ff/#fdeef3）、
+                 四团光晕 alpha 提到 0.13–0.22，卡片 blur(40)+saturate(1.8)
+                 透过去才有得折。此层职责仍是遮蓋首页文檔流。 */
               background:
-                radial-gradient(ellipse 130% 90% at 15% 5%,
-                  rgba(85, 205, 252, 0.10) 0%,
-                  transparent 60%
+                radial-gradient(ellipse 150% 105% at 12% 6%,
+                  rgba(85, 205, 252, 0.22) 0%,
+                  rgba(85, 205, 252, 0.10) 45%,
+                  transparent 68%
                 ),
-                radial-gradient(ellipse 110% 75% at 85% 95%,
-                  rgba(247, 168, 184, 0.10) 0%,
-                  transparent 60%
+                radial-gradient(ellipse 120% 90% at 88% 96%,
+                  rgba(247, 168, 184, 0.20) 0%,
+                  rgba(247, 168, 184, 0.09) 45%,
+                  transparent 68%
                 ),
-                radial-gradient(ellipse 90% 65% at 80% 10%,
-                  rgba(85, 205, 252, 0.07) 0%,
-                  transparent 55%
+                radial-gradient(ellipse 85% 70% at 20% 58%,
+                  rgba(85, 205, 252, 0.13) 0%,
+                  transparent 62%
+                ),
+                radial-gradient(ellipse 70% 60% at 78% 12%,
+                  rgba(88, 86, 214, 0.09) 0%,
+                  transparent 62%
                 ),
                 linear-gradient(160deg,
-                  #f5fbff 0%,
-                  #fef5f7 50%,
-                  #f5fbff 100%
+                  #e9f5ff 0%,
+                  #fdeef3 50%,
+                  #e9f5ff 100%
                 );
               animation: canvas-ws-fade 0.32s ease-out;
             }
