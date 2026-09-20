@@ -442,8 +442,8 @@ function AgentChatPanelComponent({
                改為面板垂直居中（約 30vh）放大主角，上方邀問、下方三個幽靈文字鏈。
                exampleChipState 三態鎖（pending 轉圈 / 在途全禁用）行為原樣保留；
                有訊息後 composer 回落底部 sticky（見下方 composerNode 擺位）。 */
-            <div className="flex min-h-full flex-col items-center px-5">
-              <div className="flex w-full flex-col items-center pb-12" style={{ paddingTop: "30vh" }}>
+            <div className="flex min-h-full flex-col items-center justify-center px-5">
+              <div className="flex w-full flex-col items-center pb-[8vh]">
                 <h2 className="text-2xl font-semibold tracking-tight text-foreground">想做点什么？</h2>
                 <div className="mt-8 w-full">{composerNode}</div>
                 <div className="mt-5 flex flex-col items-center gap-1">
