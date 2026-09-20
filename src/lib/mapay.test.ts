@@ -6,6 +6,7 @@ import {
   buildMapayCheckoutFields,
   createMapayOrderId,
   getMapaySubmitUrl,
+  mapayMoneyAcceptable,
   signMapayParams,
   verifyMapaySignature,
 } from "./mapay.ts";
@@ -68,4 +69,23 @@ test("getMapaySubmitUrl accepts base or submit.php gateway urls", () => {
     getMapaySubmitUrl("https://mzf.mapay.cc/xpay/epay/submit.php"),
     "https://mzf.mapay.cc/xpay/epay/submit.php",
   );
+});
+
+test("mapayMoneyAcceptable tolerates channel fees above the expected amount", () => {
+  // 2026-09-19 漏單實案：下單 9.90、渠道回調 9.93。
+  assert.equal(mapayMoneyAcceptable("9.93", 9.9), true);
+  assert.equal(mapayMoneyAcceptable("9.90", 9.9), true);
+});
+
+test("mapayMoneyAcceptable rejects underpayment and over-tolerance amounts", () => {
+  assert.equal(mapayMoneyAcceptable("9.89", 9.9), false);
+  assert.equal(mapayMoneyAcceptable("10.41", 9.9), false);
+  assert.equal(mapayMoneyAcceptable("905", 900), true);
+  assert.equal(mapayMoneyAcceptable("899.99", 900), false);
+});
+
+test("mapayMoneyAcceptable rejects missing or non-numeric money", () => {
+  assert.equal(mapayMoneyAcceptable(undefined, 9.9), false);
+  assert.equal(mapayMoneyAcceptable("", 9.9), false);
+  assert.equal(mapayMoneyAcceptable("abc", 9.9), false);
 });
