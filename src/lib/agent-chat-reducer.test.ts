@@ -634,6 +634,28 @@ test("F1 async 派遣：工具卡先回 ok，子代理後失敗 → 卡片同步
   assert.equal((s.items[1] as AgentSubagentItem).status, "error");
 });
 
+test("F1 停止≠失败：subagent.done status=stopped → 派遣卡走 ok 同款中性結算、子代理標已停止（0920 gateway 契约）", () => {
+  let s = agentChatReducer(
+    EMPTY,
+    evt({
+      name: "tool.invoke",
+      event_id: 1,
+      data: { tool: "subagent_dispatch", args_summary: '{"label":"视频全量模型普查"}' },
+    }),
+  );
+  s = agentChatReducer(s, evt({ name: "subagent.started", event_id: 2, data: { id: "sa4", label: "视频全量模型普查" } }));
+  // 人工停止成功：gateway 送 stopped（不再是复用的 error），此时派遣卡还在 running。
+  s = agentChatReducer(s, evt({ name: "subagent.done", event_id: 3, data: { id: "sa4", status: "stopped", summary: "用户终止了本轮，子代理一并停止" } }));
+
+  const tool = s.items.find((it): it is AgentToolCallItem => it.kind === "tool" && it.subagentId === "sa4");
+  const sub = s.items.find((it): it is AgentSubagentItem => it.kind === "subagent");
+  assert.ok(tool && sub);
+  assert.equal(sub.status, "stopped", "人工停止成功＝中性 stopped，不判 error");
+  assert.equal(tool.status, "ok", "派遣卡走 ok 同款中性結算，不打红成 failed");
+  assert.equal(tool.error, undefined, "不產生錯誤文案");
+  assert.ok(!s.items.some((it) => it.kind === "tool" && (it as AgentToolCallItem).status === "failed"), "没有任何卡片被打成失败");
+});
+
 test("F1 子代理狀態單一真源：started 綁定 dispatch 工具卡，done 一次結兩處", () => {
   let s = agentChatReducer(
     EMPTY,

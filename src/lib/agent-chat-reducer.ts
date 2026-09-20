@@ -401,12 +401,18 @@ function linkDispatchToolItem(items: AgentTranscriptItem[], subagentId: string):
  *     ok:false）的事实比子代理成功更具体，不覆写。
  *   - 子代理 error：把已 ok 的卡也拉回 failed —— async 派遣时工具早就回了 ok，
  *     子代理随后失败；若卡片还留「已完成」就是同一批任务两处状态互相打脸。
+ *   - 子代理 stopped（2026-09-20）：人工停止成功＝中性收尾，走 **ok 同款分支**
+ *     —— 派遣动作本身成功执行过，工具卡不许被打脸成 failed，也不显 abort 文案。
  */
-function settleLinkedDispatchTool(items: AgentTranscriptItem[], subagentId: string, ok: boolean): void {
+function settleLinkedDispatchTool(
+  items: AgentTranscriptItem[],
+  subagentId: string,
+  outcome: "ok" | "error" | "stopped",
+): void {
   for (let i = items.length - 1; i >= 0; i -= 1) {
     const it = items[i];
     if (it.kind !== "tool" || it.subagentId !== subagentId) continue;
-    if (ok) {
+    if (outcome !== "error") {
       if (it.status !== "running") return;
       items[i] = { ...it, status: "ok" };
       return;
@@ -497,7 +503,7 @@ function reduceSubagentDone(
     const it = items[i];
     if (it.kind === "subagent" && it.subagentId === id) {
       items[i] = { ...it, status, ...(summary !== undefined ? { summary } : {}) };
-      settleLinkedDispatchTool(items, id, status === "ok");
+      settleLinkedDispatchTool(items, id, status);
       return { ...state, items };
     }
   }
@@ -512,7 +518,7 @@ function reduceSubagentDone(
     status,
     ...(summary !== undefined ? { summary } : {}),
   };
-  settleLinkedDispatchTool(items, id, status === "ok");
+  settleLinkedDispatchTool(items, id, status);
   return { ...state, items: [...items, item] };
 }
 

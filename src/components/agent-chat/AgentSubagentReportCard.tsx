@@ -20,6 +20,8 @@ const STATUS_META: Record<AgentSubagentReportItem["status"], { label: string; ba
   error: { label: "失败", badge: "lg-tint-red text-destructive" },
   // 中止：诚实标「已中止」，不留 running 假状态，也不谎报失败。
   interrupted: { label: "已中止", badge: "bg-black/[0.05] text-muted-foreground" },
+  // 人工停止成功（2026-09-20 gateway 契约）：中性灰「已停止」，同样不是失败。
+  stopped: { label: "已停止", badge: "bg-black/[0.05] text-muted-foreground" },
 };
 
 /** 预览行：全文的第一个非空行（渲染层截断，模型层保留全文）。 */

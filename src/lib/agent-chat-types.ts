@@ -378,7 +378,8 @@ export interface AgentSubagentDelta {
 /** 子代理收尾。summary ≤600 字，只在卡内截断显示。 */
 export interface AgentSubagentDone {
   id: string;
-  status: "ok" | "error";
+  /** stopped＝人工停止成功（gateway stop 閘送出），中性收尾，不是失败。 */
+  status: "ok" | "error" | "stopped";
   summary?: string;
 }
 
@@ -826,8 +827,16 @@ export function parseAgentSseEvent(name: string, rawData: string): AgentSseEvent
     }
     case "subagent.done": {
       const id = str(d.id);
-      // status 是核心栏位：既不是 ok 也不是 error 的帧不合合同，整帧丢弃。
-      const status = d.status === "ok" ? ("ok" as const) : d.status === "error" ? ("error" as const) : undefined;
+      // status 是核心栏位：不属于合同值域的帧不合合同，整帧丢弃。
+      // stopped＝人工停止成功（2026-09-20 gateway 契约），同为合法核心栏位。
+      const status =
+        d.status === "ok"
+          ? ("ok" as const)
+          : d.status === "error"
+            ? ("error" as const)
+            : d.status === "stopped"
+              ? ("stopped" as const)
+              : undefined;
       if (!id || !status) return null;
       return { name, event_id: eventId, data: { id, status, summary: str(d.summary) } };
     }
@@ -1027,7 +1036,7 @@ export interface AgentSubagentItem extends TranscriptItemBase {
   activity?: string;
   /** 全文（delta 增量累积，模型层不截断——F4：渲染层才截断 + 可展开）。 */
   text?: string;
-  status: "running" | "ok" | "error";
+  status: "running" | "ok" | "error" | "stopped";
   summary?: string;
 }
 
@@ -1041,8 +1050,8 @@ export interface AgentSubagentReportItem extends TranscriptItemBase {
   /** 原 subagent id（同一子代理的产出与它的状态欄可對照）。 */
   subagentId: string;
   label: string;
-  /** running 中就被收尾（中止）= interrupted，誠實標「未完成」不留假 running。 */
-  status: "ok" | "error" | "interrupted";
+  /** running 中就被收尾（中止）= interrupted；人工停止成功 = stopped，均非失败。 */
+  status: "ok" | "error" | "interrupted" | "stopped";
   /** 全文（summary 或串流全文，取較完整者），模型層不截斷。 */
   text: string;
 }

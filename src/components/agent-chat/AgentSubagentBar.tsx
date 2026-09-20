@@ -21,18 +21,23 @@ const STATUS_DOT: Record<AgentSubagentItem["status"], string> = {
   running: "bg-ios-orange animate-pulse",
   ok: "bg-ios-green",
   error: "bg-destructive",
+  // 人工停止成功＝中性灰，不是失败（0920 款定）。
+  stopped: "bg-muted-foreground",
 };
 
 const STATUS_LABEL: Record<AgentSubagentItem["status"], string> = {
   running: AGENT_TASK_STATUS_TABLE.running.label,
   ok: AGENT_TASK_STATUS_TABLE.ok.label,
   error: AGENT_TASK_STATUS_TABLE.error.label,
+  stopped: AGENT_TASK_STATUS_TABLE.stopped.label,
 };
 
 const STATUS_BADGE: Record<AgentSubagentItem["status"], string> = {
   running: "lg-tint-blue text-ios-blue",
   ok: "lg-tint-green text-[#248A3D]",
   error: "lg-tint-red text-destructive",
+  // 中性：与产出卡 interrupted 同款灰，不打红。
+  stopped: "bg-black/[0.05] text-muted-foreground",
 };
 
 /**
