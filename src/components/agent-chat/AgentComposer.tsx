@@ -143,7 +143,7 @@ interface PendingAttachment {
 }
 
 /**
- * 输入框跟着内容长高，上限交给 CSS 的 max-h-[140px]（到顶后自己滚）。
+ * 输入框跟着内容长高，上限交给 CSS 的 max-h-[240px]（到顶后自己滚）。
  * rows=1 的固定高度下，续写一段长愿望只能看见最后一行，看不到自己写了什么。
  */
 function autoGrow(el: HTMLTextAreaElement) {
@@ -648,7 +648,7 @@ function AgentComposerComponent({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
       className={cn(
-        "agent-composer lg-float relative flex items-end gap-1 rounded-[22px] p-1.5 touch-manipulation [-webkit-tap-highlight-color:transparent] outline-none focus-within:ring-[1.5px] focus-within:ring-ring/60",
+        "agent-composer lg-float relative flex flex-col gap-1 rounded-[22px] p-1.5 touch-manipulation [-webkit-tap-highlight-color:transparent] outline-none focus-within:ring-[1.5px] focus-within:ring-ring/60",
         dragActive && "!ring-2 !ring-ios-blue/45 !bg-ios-blue/[0.04]",
       )}
     >
@@ -668,28 +668,7 @@ function AgentComposerComponent({
           松开以添加附件
         </div>
       )}
-      {/*
-        附件按钮：点击打开隐式文件选择，一次可选多个文件，选完即逐个上传。
-        上传中的 chip 显示 spinner，失败显示错误态（可移除重传或删除）。
-      */}
-      <button
-        type="button"
-        onClick={handlePick}
-        disabled={!canAttach}
-        aria-label="添加附件"
-        title="添加附件（图片 / 视频 / 文档）"
-        className={cn(
-          // 2026-09-20 暴君裁定：与送出钮同尺寸同風格（44px 圓鈕、主色 #2d3142
-          // 實底＋signature 陰影＋hover 微抬升），不再幽靈灰；disabled 同淺灰。
-          "flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#2d3142] text-white shadow-[0_8px_20px_rgba(45,49,66,0.22)]",
-          "touch-manipulation [-webkit-tap-highlight-color:transparent]",
-          "transition-all duration-200 hover:-translate-y-[1px] hover:bg-[#272b39] active:scale-[0.94] focus:outline-none focus:ring-2 focus:ring-ring/40",
-          "disabled:cursor-not-allowed disabled:bg-[#bcc2ca] disabled:text-white/80 disabled:shadow-none disabled:hover:translate-y-0",
-        )}
-      >
-        <ImagePlus className="h-[18px] w-[18px]" aria-hidden="true" />
-      </button>
-
+      {/* 隐式文件选择：附件鈕在下方按鈕行（見 textarea 之後），這裡只留 input 本體。 */}
       <input
         ref={fileInputRef}
         type="file"
@@ -785,8 +764,9 @@ function AgentComposerComponent({
           输入消息
         </label>
         {/* 移动端虚拟键盘把回车键显示成「发送」，回车即送出（Shift+Enter 换行不变）。
-            2026-08-25 空间压实：min-h 从 ~3 行收到 ~2 行半——autoGrow 长高、
-            max-h 到顶自滚，min-h 只兜空框下限，不再是常驻留白。 */}
+            2026-09-20 长文重排（暴君「长文本视觉效果非常差」）：按钮退出文字行改住
+            下方按鈕行，文字全幅不夹缝；max-h 124→240px（≈10 行才滚，不再三行就
+            出滚动条），min-h 收到一行半。 */}
         <textarea
           id="agent-composer-input"
           ref={textareaRef}
@@ -802,75 +782,98 @@ function AgentComposerComponent({
           placeholder={placeholder}
           rows={1}
           className={cn(
-            "min-h-[44px] max-h-[124px] w-full resize-none bg-transparent py-[10px] text-[15px] leading-[22px] text-foreground",
+            "min-h-[40px] max-h-[240px] w-full resize-none bg-transparent px-1 py-1.5 text-[15px] leading-[22px] text-foreground",
             "placeholder:text-foreground/35 focus:outline-none",
             "touch-manipulation [-webkit-tap-highlight-color:transparent]",
             "disabled:cursor-not-allowed disabled:opacity-50",
           )}
         />
+        {/* 底部按鈕行：附件左、送出/停止右（同 36px 圆钮家族）。 */}
+        <div className="flex items-center justify-between pb-0.5">
+          {/*
+            附件按钮：点击打开隐式文件选择，一次可选多个文件，选完即逐个上传。
+            上传中的 chip 显示 spinner，失败显示错误态（可移除重传或删除）。
+          */}
+          <button
+            type="button"
+            onClick={handlePick}
+            disabled={!canAttach}
+            aria-label="添加附件"
+            title="添加附件（图片 / 视频 / 文档）"
+            className={cn(
+              "flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-black/[0.06] text-foreground/65",
+              "touch-manipulation [-webkit-tap-highlight-color:transparent]",
+              "transition-colors hover:bg-black/[0.10] hover:text-foreground active:bg-black/[0.14] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+              "disabled:cursor-not-allowed disabled:bg-transparent disabled:text-foreground/35",
+            )}
+          >
+            <ImagePlus className="h-4 w-4" aria-hidden="true" />
+          </button>
+          {onStop && !canSend && !sending ? (
+            /*
+              D-26 补全：生成中且输入框为空 → 送出钮位置渲染停止钮。
+              2026-09-20 视觉改版（预览验收语汇）：红底方块 → 幽灵红文字钮
+              （text-ios-red + hover 淡红底），与送出钮同尺寸圆钮（h-9 w-9
+              rounded-full，切换零跳动）；aria-label / title / 图标
+              （Square + Loader2 stopPending spinner）原样保留。
+
+              09-18：再补一个条件 !sending —— 本輪還沒开始（含面板餵進來的在途，
+              sending 已收敛成「内部或面板在途」）时不许被停止钮盖掉：那一段真空期
+              使用者需要的是「正在送」的转圈钮，不是一颗按下去可能没东西可停的停止钮。
+            */
+            <button
+              type="button"
+              onClick={onStop}
+              disabled={stopPending}
+              aria-label="中止助理生成"
+              title={stopPending ? "正在中止，请稍候…" : "立即中止当前这轮生成"}
+              className={cn(
+                "flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-ios-red transition-colors duration-150 [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]",
+                "hover:bg-ios-red/[0.07] active:bg-ios-red/[0.12] focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-red/30",
+                stopPending && "disabled:cursor-wait disabled:opacity-60",
+              )}
+            >
+              {stopPending ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+              ) : (
+                <Square className="h-3.5 w-3.5" aria-hidden="true" />
+              )}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={handleSend}
+              disabled={disabled || !canSend}
+              aria-label="发送"
+              aria-busy={sending}
+              className={cn(
+                // 2026-09-20 暴君細化：36px 圓鈕、主色實底保留（全畫面唯一的重音），
+                // signature 陰影減半（0_8px_20px 在 36px 圓上壓得過深）。
+                "flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-all duration-200",
+                "touch-manipulation [-webkit-tap-highlight-color:transparent]",
+                // 2026-09-20 視覺改版（預覽驗收語彙）：主色 #2d3142 + signature
+                // 陰影 + hover 微抬升；disabled 換淺灰 #bcc2ca。
+                "bg-[#2d3142] text-white shadow-[0_3px_10px_rgba(45,49,66,0.18)]",
+                "hover:-translate-y-[1px] hover:bg-[#272b39] active:scale-[0.94]",
+                "focus:outline-none focus:ring-2 focus:ring-ring/40",
+                // 在途期間不上 disabled 的灰階：在途是「正在送」不是「不可用」，
+                // 白轉圈壓在淺灰底上等於沒有回饋（深底＋白轉圈才看得見）。
+                // 非在途時 disabled 樣式逐字元照舊（會話關閉 / 輸入框空）。
+                !sending &&
+                  "disabled:cursor-not-allowed disabled:bg-[#bcc2ca] disabled:text-white/80 disabled:shadow-none",
+                // 送出進行中：游標與縮放回饋都收掉，連點由 sendingRef 在邏輯層擋。
+                sending && "cursor-wait active:scale-100",
+              )}
+            >
+              {sending ? (
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              ) : (
+                <ArrowUp className="h-4 w-4" aria-hidden="true" />
+              )}
+            </button>
+          )}
+        </div>
       </div>
-
-      {onStop && !canSend && !sending ? (
-        /*
-          D-26 补全：生成中且输入框为空 → 送出钮位置渲染停止钮。
-          2026-09-20 视觉改版（预览验收语汇）：红底方块 → 幽灵红文字钮
-          （text-ios-red + hover 淡红底），44px 触控区，与送出钮同尺寸圆钮
-          （h-11 w-11 rounded-full，切换零跳动）；aria-label / title / 图标
-          （Square + Loader2 stopPending spinner）原样保留。
-
-          09-18：再补一个条件 !sending —— 本輪還沒开始（含面板餵進來的在途，
-          sending 已收敛成「内部或面板在途」）时不许被停止钮盖掉：那一段真空期
-          使用者需要的是「正在送」的转圈钮，不是一颗按下去可能没东西可停的停止钮。
-        */
-        <button
-          type="button"
-          onClick={onStop}
-          disabled={stopPending}
-          aria-label="中止助理生成"
-          title={stopPending ? "正在中止，请稍候…" : "立即中止当前这轮生成"}
-          className={cn(
-            "flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ios-red transition-colors duration-150 [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]",
-            "hover:bg-ios-red/[0.07] active:bg-ios-red/[0.12] focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-red/30",
-            stopPending && "disabled:cursor-wait disabled:opacity-60",
-          )}
-        >
-          {stopPending ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-          ) : (
-            <Square className="h-3.5 w-3.5" aria-hidden="true" />
-          )}
-        </button>
-      ) : (
-        <button
-          type="button"
-          onClick={handleSend}
-          disabled={disabled || !canSend}
-          aria-label="发送"
-          aria-busy={sending}
-          className={cn(
-            "flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-all duration-200",
-            "touch-manipulation [-webkit-tap-highlight-color:transparent]",
-            // 2026-09-20 视觉改版（预览验收语汇）：主色 #2d3142 + signature
-            // 阴影 + hover 微抬升；disabled 换浅灰 #bcc2ca。
-            "bg-[#2d3142] text-white shadow-[0_8px_20px_rgba(45,49,66,0.22)]",
-            "hover:-translate-y-[1px] hover:bg-[#272b39] active:scale-[0.94]",
-            "focus:outline-none focus:ring-2 focus:ring-ring/40",
-            // 在途期间不上 disabled 的灰階：在途是「正在送」不是「不可用」，
-            // 白转圈压在浅灰底上等于没有回馈（深底＋白转圈才看得见）。
-            // 非在途时 disabled 样式逐位元照旧（会话关闭 / 输入框空）。
-            !sending &&
-              "disabled:cursor-not-allowed disabled:bg-[#bcc2ca] disabled:text-white/80 disabled:shadow-none",
-            // 送出进行中：光标与缩放反馈都收掉，连点由 sendingRef 在逻辑层挡。
-            sending && "cursor-wait active:scale-100",
-          )}
-        >
-          {sending ? (
-            <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
-          ) : (
-            <ArrowUp className="h-[18px] w-[18px]" aria-hidden="true" />
-          )}
-        </button>
-      )}
     </div>
   );
 }

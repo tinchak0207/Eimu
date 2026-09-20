@@ -110,8 +110,8 @@ test("送出钮：字面契约不回归，sending 时只换图标与 aria-busy",
   // 锁连点靠 ref，不许把 sending 塞进 disabled 属性（会弄红既有断言）。
   assert.doesNotMatch(sendRegion, /disabled=\{disabled \|\| !canSend \|\| sending\}/);
   assert.match(sendRegion, /aria-busy=\{sending\}/);
-  assert.match(sendRegion, /<Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" \/>/);
-  assert.match(sendRegion, /<ArrowUp className="h-\[18px\] w-\[18px\]" aria-hidden="true" \/>/);
+  assert.match(sendRegion, /<Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" \/>/);
+  assert.match(sendRegion, /<ArrowUp className="h-4 w-4" aria-hidden="true" \/>/);
 });
 
 test("输入区其余契约不动：disabled / canSend / autoGrow", () => {

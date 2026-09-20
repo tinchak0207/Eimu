@@ -420,7 +420,7 @@ test("composer textarea grows with content and collapses after send", () => {
   assert.match(composer, /autoGrow\(event\.currentTarget\)/);
   assert.match(composer, /autoGrow\(el\)/);
   // 上限交给 CSS，不在 JS 里另写一个数字。
-  assert.match(composer, /max-h-\[140px\]/);
+  assert.match(composer, /max-h-\[240px\]/);
   // 送出后清空文字，高度要一起收回来。
   assert.match(composer, /textareaRef\.current\.style\.height = "auto"/);
 });
