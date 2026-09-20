@@ -27,6 +27,14 @@ export const preferredRegion = "sfo1";
 /** 一次批量删除最多接受的条数，避免有人拿这个端点做放大攻击。 */
 const MAX_DELETE_IDS = 200;
 
+/**
+ * 从控制面取历史时一次要多少条。本地仍会按 cursor 重新分页，所以这里不传
+ * cursor，只把控制面最新的一批一次拉回来参与归并——拉少了会让较旧的队列任务
+ * 落在本地分页的第二页之外。100 是 paginateHistoryEntries 的上限，再多也会被夹回来。
+ */
+const CONTROL_PLANE_HISTORY_PAGE_SIZE = 100;
+const CONTROL_PLANE_TIMEOUT_MS = 15_000;
+
 function fail(status: number, message: string) {
   return NextResponse.json({ success: false, message }, { status });
 }
@@ -61,6 +69,65 @@ function readQuery(searchParams: URLSearchParams): HistoryQuery {
 }
 
 /**
+ * Vercel 按设计不持有控制面 Postgres（GENERATION_DATABASE_URL 只在 VPS 控制面那一侧），
+ * 生成任务（含「再来 N 组」「微调变体」提交的、以及还在队列里的任务）全都落在那边。
+ * 本地控制面没启用时，必须经 GENERATION_CONTROL_PLANE_PROXY_ORIGIN 把同一份历史
+ * 取回来归并——否则这些任务在 Vercel 上永远投影不出来：任务跑在 VPS、历史读在
+ * Vercel，两边不相见，用户看到的就是「明明生成了、历史里没有这张卡」。
+ *
+ * 身份用调用者自己的 Bearer / x-user-id 转发（与 next.config 对 /api/generation-jobs
+ * 的代理同一信任关系，控制面同样会自己校验一次），不新建内部签名通道 —— 控制面的
+ * /image-control/api/history 就是本文件的同一份代码，不必再造一个只服务本文件的端点。
+ *
+ * 失败语义 fail-soft：控制面不可达时只记日志返回空数组，页面照旧显示本地那部分记录。
+ */
+async function fetchControlPlaneHistory(
+  req: NextRequest,
+  searchParams: URLSearchParams,
+): Promise<HistoryEntry[]> {
+  const origin = process.env.GENERATION_CONTROL_PLANE_PROXY_ORIGIN?.trim().replace(/\/+$/, "");
+  if (!origin) return [];
+
+  const forwarded: Record<string, string> = {};
+  const authorization = req.headers.get("authorization");
+  if (authorization) forwarded.authorization = authorization;
+  const userId = req.headers.get("x-user-id");
+  if (userId) forwarded["x-user-id"] = userId;
+
+  const params = new URLSearchParams(searchParams);
+  params.delete("cursor");
+  params.delete("facets");
+  params.set("pageSize", String(CONTROL_PLANE_HISTORY_PAGE_SIZE));
+
+  let res: Response;
+  try {
+    res = await fetch(`${origin}/image-control/api/history?${params.toString()}`, {
+      headers: forwarded,
+      cache: "no-store",
+      signal: AbortSignal.timeout(CONTROL_PLANE_TIMEOUT_MS),
+    });
+  } catch (error) {
+    console.error("[history] 控制面代理请求失败，本次只返回本地记录", error);
+    return [];
+  }
+  if (!res.ok) {
+    console.error(`[history] 控制面代理返回 status=${res.status}，本次只返回本地记录`);
+    return [];
+  }
+
+  const payload = (await res.json().catch(() => null)) as
+    | { data?: { entries?: unknown } }
+    | null;
+  const raw = payload?.data?.entries;
+  if (!Array.isArray(raw)) return [];
+
+  return raw.flatMap((item) => {
+    const normalized = normalizeHistoryEntry(item, "server");
+    return normalized ? [normalized] : [];
+  });
+}
+
+/**
  * GET /api/history
  *
  * 查询参数：cursor、pageSize、keyword、modelId、imageSize、starred、withImage、since、until、facets。
@@ -83,6 +150,8 @@ export async function GET(req: NextRequest) {
     } catch (error) {
       console.error("[history] generation task projection unavailable", error);
     }
+  } else {
+    taskEntries = await fetchControlPlaneHistory(req, searchParams);
   }
   const merged = mergeHistoryEntries(storedEntries, taskEntries);
   const data = paginateHistoryEntries(filterHistoryEntries(merged, readQuery(searchParams)), cursor, pageSize);
