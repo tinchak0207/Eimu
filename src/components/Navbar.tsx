@@ -267,41 +267,45 @@ export function Navbar({ className }: NavbarProps) {
           className="lg-bar pointer-events-auto flex w-full items-center justify-between gap-2 rounded-ios-3xl px-2.5 py-2 sm:px-5 sm:py-2.5"
           aria-label="主导航"
         >
-          <Link
-            href="/"
-            className="flex min-w-0 shrink-0 items-center gap-2.5 rounded-full lg-transition hover:opacity-70 focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)]"
-            aria-label="回到首页"
-          >
-            {/* Eimu app icon */}
-            <div className="lg-float flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-ios-lg sm:h-8 sm:w-8">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/icon.png" alt="Eimu" width={44} height={44} className="h-full w-full object-cover" />
-            </div>
-            <span className="hidden text-ios-body font-bold tracking-tight text-[rgba(0,0,0,0.85)] sm:inline">
-              Eimu
-            </span>
-          </Link>
+          {/* 左组：Eimu Logo + QQ 群入口。justify-between 下子元素多于两个会把
+              中间的孩子顶到正中——Logo 与 QQ 钮必须包进同一个左组容器。 */}
+          <div className="flex min-w-0 shrink-0 items-center gap-2 sm:gap-2.5">
+            <Link
+              href="/"
+              className="flex min-w-0 shrink-0 items-center gap-2.5 rounded-full lg-transition hover:opacity-70 focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)]"
+              aria-label="回到首页"
+            >
+              {/* Eimu app icon */}
+              <div className="lg-float flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-ios-lg sm:h-8 sm:w-8">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/icon.png" alt="Eimu" width={44} height={44} className="h-full w-full object-cover" />
+              </div>
+              <span className="hidden text-ios-body font-bold tracking-tight text-[rgba(0,0,0,0.85)] sm:inline">
+                Eimu
+              </span>
+            </Link>
 
-          {/* QQ 群入口（2026-09-21 暴君特许，紧贴 Logo 左组）：
-              手机端（<sm）直达 QQ 加群分享页；桌面端（≥sm）像余额胶囊一样
-              带文字「售后/交流群组」，点击弹出群二维码扫码入群。 */}
-          <a
-            href={QQ_GROUP_SHARE_URL}
-            aria-label="售后/交流群组"
-            className="lg-float flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[rgba(0,0,0,0.78)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:hidden"
-          >
-            <QqLogo className="h-4 w-4" />
-          </a>
-          <button
-            type="button"
-            onClick={() => setQqOpen(true)}
-            aria-label="售后/交流群组"
-            title="售后/交流群组"
-            className="lg-float hidden shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full bg-[rgba(0,0,0,0.05)] px-3 py-1.5 text-ios-footnote font-semibold text-[rgba(0,0,0,0.60)] select-none lg-transition hover:bg-[rgba(0,0,0,0.08)] hover:text-[rgba(0,0,0,0.85)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:inline-flex"
-          >
-            <QqLogo className="h-3.5 w-3.5" />
-            <span>售后/交流群组</span>
-          </button>
+            {/* QQ 群入口（2026-09-21 暴君特许，紧贴 Logo）：
+                手机端（<sm）直达 QQ 加群分享页；桌面端（≥sm）像余额胶囊一样
+                带文字「售后/交流群组」，点击弹出群二维码扫码入群。 */}
+            <a
+              href={QQ_GROUP_SHARE_URL}
+              aria-label="售后/交流群组"
+              className="lg-float flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[rgba(0,0,0,0.78)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:hidden"
+            >
+              <QqLogo className="h-4 w-4" />
+            </a>
+            <button
+              type="button"
+              onClick={() => setQqOpen(true)}
+              aria-label="售后/交流群组"
+              title="售后/交流群组"
+              className="lg-float hidden shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full bg-[rgba(0,0,0,0.05)] px-3 py-1.5 text-ios-footnote font-semibold text-[rgba(0,0,0,0.60)] select-none lg-transition hover:bg-[rgba(0,0,0,0.08)] hover:text-[rgba(0,0,0,0.85)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:inline-flex"
+            >
+              <QqLogo className="h-3.5 w-3.5" />
+              <span>售后/交流群组</span>
+            </button>
+          </div>
 
           {/* Right side */}
           <div

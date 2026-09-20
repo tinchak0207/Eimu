@@ -11,6 +11,7 @@ interface QqGroupDialogProps {
 
 const QQ_GROUP_NUMBER = "980122175";
 
+/** QQ 群二维码弹窗：一张码 + 一行群号，再无其他语义（入口按钮已说明语境）。 */
 export function QqGroupDialog({ open, onClose }: QqGroupDialogProps) {
   const [mounted, setMounted] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -48,45 +49,36 @@ export function QqGroupDialog({ open, onClose }: QqGroupDialogProps) {
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="售后/交流群组"
+        aria-label="QQ 交流群二维码"
         onClick={(e) => e.stopPropagation()}
-        className="lg-sheet relative w-full max-w-[420px] overflow-hidden rounded-ios-3xl p-5 shadow-2xl"
+        className="lg-sheet relative w-full max-w-[460px] overflow-hidden rounded-ios-3xl p-4 shadow-2xl"
       >
         {/* Specular 顶光线 */}
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white to-transparent opacity-90" />
 
-        {/* 标题与关闭 */}
-        <div className="flex items-center justify-between gap-3">
-          <h3 className="text-ios-subhead font-bold tracking-tight text-[rgba(0,0,0,0.85)]">
-            售后/交流群组
-          </h3>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="关闭"
-            className="flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-full text-[rgba(0,0,0,0.44)] transition-colors hover:bg-black/5 hover:text-[rgba(0,0,0,0.72)] focus:outline-none focus:ring-2 focus:ring-[rgba(0,122,255,0.20)]"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
+        {/* 关闭：浮在二维码右上角，不占内容行 */}
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="关闭"
+          className="absolute right-3 top-3 z-10 flex h-8 w-8 cursor-pointer items-center justify-center rounded-full bg-[rgba(255,255,255,0.70)] text-[rgba(0,0,0,0.55)] shadow-sm backdrop-blur transition-colors hover:bg-white hover:text-[rgba(0,0,0,0.80)] focus:outline-none focus:ring-2 focus:ring-[rgba(0,122,255,0.30)]"
+        >
+          <X className="h-4 w-4" />
+        </button>
 
-        {/* 二维码：白卡衬底正方形 */}
-        <div className="mt-3 flex justify-center rounded-ios-2xl bg-white p-3.5 shadow-[0_2px_12px_rgba(0,0,0,0.06)] ring-1 ring-black/5">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src="/qq-group-qrcode.jpg"
-            alt="QQ 群二维码"
-            width={280}
-            height={280}
-            className="h-auto w-full max-w-[280px] select-none rounded-ios-md object-contain"
-            draggable={false}
-          />
-        </div>
+        {/* 二维码：直接铺满面板宽度，无内嵌卡 */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/qq-group-qrcode.jpg"
+          alt="QQ 群二维码"
+          className="block h-auto w-full select-none rounded-ios-2xl"
+          draggable={false}
+        />
 
-        {/* 群号 + 一句扫码提示 */}
-        <div className="mt-4 flex items-center justify-center gap-2">
+        {/* 群号一行：数字 + 复制 */}
+        <div className="mt-3.5 flex items-center justify-center gap-2.5">
           <span className="text-ios-footnote text-[rgba(0,0,0,0.60)]">
-            群号 <strong className="font-semibold tabular-nums text-[rgba(0,0,0,0.88)]">{QQ_GROUP_NUMBER}</strong>
+            QQ 群 <strong className="font-semibold tabular-nums text-[rgba(0,0,0,0.88)]">{QQ_GROUP_NUMBER}</strong>
           </span>
           <button
             type="button"
@@ -106,9 +98,6 @@ export function QqGroupDialog({ open, onClose }: QqGroupDialogProps) {
             )}
           </button>
         </div>
-        <p className="mt-1.5 text-center text-ios-caption1 text-[rgba(0,0,0,0.45)]">
-          手机 QQ 扫一扫，加入群聊
-        </p>
       </div>
     </div>,
     document.body,
