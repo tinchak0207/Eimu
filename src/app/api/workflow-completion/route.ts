@@ -57,7 +57,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { timingSafeEqual } from "node:crypto";
-import { renderWorkflowDagPng } from "@/lib/workflow-png";
+import { renderWorkflowDagPng } from "@/lib/dag-png-server";
 import { put } from "@/lib/blob-backend";
 import { saveGeneratedHistoryEntry } from "@/lib/server-history-store";
 import { sanitizeBlobSegment } from "@/lib/history-types";

@@ -26,11 +26,20 @@ node_modules/@swc/*
 # Prebuilt deployments need the traced .next runtime files referenced by
 # .vercel/output/functions/*/.vc-config.json. Keep only stale snapshots ignored.
 /.next.bak-*/
+# 本地 build 快取：remote build 會自己重建，帶上只是把 410MB 上傳量灌爆
+# （實錘：整包 410.7MB 超過 Vercel 100MB 單檔上限而失敗）。
+/.next/
 /out/
 /build
 
 # local tooling binaries (tools/bin/cloudflared.exe alone is ~52 MB)
 /tools/
+
+# Electron 桌面打包產物（AppImage 112MB + nsis 90MB）。它們是發行物不是站點
+# 資產，且單檔超 Vercel 100MB 上限會讓整個部署失敗——desktop/.gitignore 早有
+# dist/，但 .vercelignore 存在時 Vercel 不讀 .gitignore，必須在這裡再列一次。
+/desktop/dist/
+/desktop/**/release/
 
 # local scratch, diagnostics and captures
 /tmp/

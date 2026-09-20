@@ -9,7 +9,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { embedWorkflowIntoPng, extractWorkflowFromPng } from "./workflow-png";
-import { renderWorkflowDagPng } from "./workflow-png";
+import { renderWorkflowDagPng } from "./dag-png-server";
 import type { DagConnectionInput, DagNodeInput } from "./dag-renderer";
 
 const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47];

@@ -11,8 +11,14 @@
 //   也要能被 server route / 前端透過 svgToDataUrl（src/lib/svg-data-url.ts）餵給 <img>。
 // - 因此本檔「不」import 任何 `@/` alias 或 app 層模組，只用相對路徑＋純 npm 依賴（dagre）。
 //
-// 渲染規格：圓角矩形節點，主標題 = title、次要小字 = kind；依 kind 上色（柔和淺色系）；
-// status === "failed" 加紅色外框；costCoins 有值時右下角顯示幣數；連線帶箭頭 marker。
+// ─────────────────────── 視覺規格（對齊站內畫布，2026-09-20 重寫）───────────────────────
+// 前一版是「三個光禿小方塊」——150×58、13px 標題、無標籤無 I/O 描述，縮圖後不可讀。
+// 本版改成與用戶在畫布上實際看到的節點卡同構（暴君實證：「渲染出来几乎不可用」）：
+//   - 卡片 220px 寬、內容自適應高（頂部色條 3px + 標題列 + 標籤列 + I/O 內文）
+//   - 頂部 3px 色條＝kind 色相（一眼認出圖/影片/文字/配置）
+//   - 標籤徽章：工具 / 產出 / 文本 / 配置（底色+文字色成對，同站內 badge 規範）
+//   - 節點內文：role 與連線關係（↳ 輸入來源 / → 產出目標），讓縮圖能看出這步在做什麼
+//   - 背景網格點陣（#D0D5DD），與畫布同視覺語言
 import dagre from "dagre";
 
 export interface DagNodeInput {
@@ -44,10 +50,14 @@ export interface DagRenderOptions {
 
 interface Palette {
   bg: string;
-  nodeExtra: string;
+  /** 背景網格點（畫布視覺語言）。 */
+  gridDot: string;
+  cardBg: string;
+  cardStroke: string;
   title: string;
   subtitle: string;
   edge: string;
+  edgeArrow: string;
   muted: string;
   costBg: string;
   costText: string;
@@ -55,54 +65,87 @@ interface Palette {
 }
 
 const LIGHT: Palette = {
-  bg: "#ffffff",
-  nodeExtra: "#eef2f7",
-  title: "#1f2937",
-  subtitle: "#6b7280",
-  edge: "#94a3b8",
-  muted: "#cbd5e1",
-  costBg: "#f1f5f9",
-  costText: "#475569",
-  failedStroke: "#dc2626",
+  bg: "#f4f5f7",
+  gridDot: "#d0d5dd",
+  cardBg: "#ffffff",
+  cardStroke: "#eaecf0",
+  title: "#1d2129",
+  subtitle: "#4e5969",
+  edge: "#c9cdd4",
+  edgeArrow: "#86909c",
+  muted: "#86909c",
+  costBg: "#f2f3f5",
+  costText: "#4e5969",
+  failedStroke: "#f53f3f",
 };
 
 const DARK: Palette = {
   bg: "#0f172a",
-  nodeExtra: "#1e293b",
+  gridDot: "#1e293b",
+  cardBg: "#1e293b",
+  cardStroke: "#334155",
   title: "#e2e8f0",
   subtitle: "#94a3b8",
-  edge: "#64748b",
-  muted: "#334155",
-  costBg: "#1e293b",
+  edge: "#475569",
+  edgeArrow: "#64748b",
+  muted: "#64748b",
+  costBg: "#334155",
   costText: "#cbd5e1",
   failedStroke: "#ef4444",
 };
 
 /**
- * kind → 節點填色（柔和淺色系，同一家族跨 kind 仍可辨識）。
- * text/config 是「設定類」，image/video/audio/film 是「產出類」，色相刻意分開。
+ * kind → 卡片視覺：頂部色條 + 標籤（文字色／底色成對）。
+ * 色相與站內畫布一致：工具藍、產出紫/綠/橙、文本灰。
  */
-const KIND_FILL: Record<string, string> = {
-  text: "#e0e7ff", // 靛藍
-  config: "#e2e8f0", // 灰藍
-  image: "#d1fae5", // 綠
-  video: "#fef3c7", // 琥珀
-  audio: "#fce7f3", // 粉
-  film: "#ede9fe", // 紫
-};
-const KIND_FILL_FALLBACK = "#e5e7eb";
+interface KindStyle {
+  /** 頂部 3px 色條（焦點色）。 */
+  accent: string;
+  /** 標籤文字色。 */
+  tagText: string;
+  /** 標籤底色。 */
+  tagBg: string;
+  /** 標籤文字（中文，讓縮圖看得懂這是什麼）。 */
+  tagLabel: string;
+}
 
-const NODE_W = 150;
-const NODE_H = 58;
+const KIND_STYLE: Record<string, KindStyle> = {
+  text: { accent: "#86909c", tagText: "#4e5969", tagBg: "#f2f3f5", tagLabel: "文本" },
+  config: { accent: "#1677ff", tagText: "#1677ff", tagBg: "#e6f4ff", tagLabel: "配置" },
+  image: { accent: "#00b578", tagText: "#00b578", tagBg: "#e6fffb", tagLabel: "產出" },
+  video: { accent: "#722ed1", tagText: "#722ed1", tagBg: "#f9f0ff", tagLabel: "產出" },
+  audio: { accent: "#fa8c16", tagText: "#fa8c16", tagBg: "#fff7e6", tagLabel: "產出" },
+  film: { accent: "#f53f3f", tagText: "#f53f3f", tagBg: "#ffece8", tagLabel: "成片" },
+};
+const KIND_STYLE_FALLBACK: KindStyle = {
+  accent: "#86909c",
+  tagText: "#4e5969",
+  tagBg: "#f2f3f5",
+  tagLabel: "節點",
+};
+
+// 卡片尺寸對齊站內畫布節點卡（220px 寬 / 內容自適應高）。
+const CARD_W = 220;
+const CARD_MIN_H = 78;
+const ACCENT_H = 3;
+const PAD_X = 10;
+const TITLE_SIZE = 12.5;
+const SUB_SIZE = 10.5;
+const IO_SIZE = 10.5;
+const TAG_SIZE = 10;
+
 const NODE_RADIUS = 8;
+
 // 系統 sans-serif 堆疊。內層字型名一律用單引號：這個字串會被整段塞進
-// SVG 的 font-family="…" 雙引號屬性，若用 \" 轉義會讓 libvips/瀏覽器
-// 的 XML 解析器在屬性中途斷開（sharp 實測 "Couldn't find end of Start Tag svg"）。
+// SVG 的 font-family="…" 雙引號屬性，若用 \" 轉義會讓 libvips/瀏覽器的
+// XML 解析器在屬性中途斷開（sharp 實測 "Couldn't find end of Start Tag svg"）。
 const FONT_STACK =
   "system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', sans-serif";
 
 /** 邊界留白（像素）：箭頭／cost 徽章不貼邊。 */
-const MARGIN = 16;
+const MARGIN = 24;
+/** 網格點間距。 */
+const GRID = 20;
 
 // ───────────────────────── 工具函式 ─────────────────────────
 
@@ -127,7 +170,7 @@ function textWidth(text: string, fontSize: number): number {
   return units * fontSize;
 }
 
-/** 依可用寬度截斷，超出時尾端加省略號（節點寬度固定，過長標題會溢出）。 */
+/** 依可用寬度截斷，超出時尾端加省略號（卡片寬度固定，過長標題會溢出）。 */
 function truncate(text: string, fontSize: number, maxWidth: number): string {
   if (textWidth(text, fontSize) <= maxWidth) return text;
   let out = "";
@@ -146,12 +189,23 @@ function fmtCoins(coins: number): string {
   return Number.isInteger(coins) ? String(coins) : coins.toFixed(1);
 }
 
+/** role 可讀化：把 snake_case 轉成空格分隔，讓縮圖不必逐字讀底線。 */
+function humanizeRole(role: string): string {
+  return role.replace(/[_-]+/g, " ").trim() || role;
+}
+
+/** 節點卡片的高度：標題 + 標籤 +（有 I/O 時）內文行。 */
+function cardHeight(ioLines: number): number {
+  const base = ACCENT_H + 8 + 15 + 16 + 10; // 色條 + 上距 + 標題行 + 標籤行 + 下距
+  return Math.max(CARD_MIN_H, base + ioLines * 13);
+}
+
 // ───────────────────────── 主函式 ─────────────────────────
 
 /**
  * dagre 分層布局 + SVG 字串輸出。回傳完整 `<svg>` 字串（開頭必須是 `<svg`）。
  *
- * 空節點陣列 → 回傳一個最小合法 SVG（白／深底 + 一句提示），不拋錯。
+ * 空節點陣列 → 回傳一個最小合法 SVG（底 + 一句提示），不拋錯。
  * 連線指向不存在的節點 id → 該條連線略過（gateway 資料可能有孤兒邊）。
  */
 export function renderDagSvg(
@@ -161,8 +215,8 @@ export function renderDagSvg(
 ): string {
   const theme = options?.theme === "dark" ? "dark" : "light";
   const palette = theme === "dark" ? DARK : LIGHT;
-  const requestedW = options?.width ?? 640;
-  const requestedH = options?.height ?? 400;
+  const requestedW = options?.width ?? 960;
+  const requestedH = options?.height ?? 540;
 
   // 空圖：dagre 對無節點圖回 width/height = null，不能進佈局流程，直接短路。
   if (!nodes || nodes.length === 0) {
@@ -177,21 +231,10 @@ export function renderDagSvg(
     );
   }
 
-  const graph = new dagre.graphlib.Graph();
-  graph.setGraph({
-    rankdir: "LR",
-    nodesep: 30,
-    ranksep: 64,
-    marginx: MARGIN,
-    marginy: MARGIN,
-  });
-  graph.setDefaultEdgeLabel(() => ({}));
-
   const byId = new Map<string, DagNodeInput>();
   for (const node of nodes) {
     if (byId.has(node.id)) continue; // 重複 id 只認首見：dagre 同 id 重設會覆蓋座標
     byId.set(node.id, node);
-    graph.setNode(node.id, { width: NODE_W, height: NODE_H });
   }
 
   // 連線只收兩端都存在、且非自環的邊（自環在 LR 分層圖畫出來是零長度箭頭，只會污染版面）。
@@ -204,13 +247,43 @@ export function renderDagSvg(
     if (seenEdge.has(key)) continue; // 重複邊會讓 dagre 疊線，去重
     seenEdge.add(key);
     edges.push(conn);
-    graph.setEdge(conn.from, conn.to);
   }
+
+  // 每個節點的 I/O 描述行：連線關係是「這步吃什麼、吐什麼」的唯一線索，
+  // 縮圖上一眼看出流程走向靠它（前一版沒有這行，節點全是孤立方塊）。
+  const ioLinesFor = new Map<string, string[]>();
+  for (const node of byId.values()) {
+    const lines: string[] = [];
+    const incoming = edges.filter((e) => e.to === node.id).map((e) => byId.get(e.from));
+    const outgoing = edges.filter((e) => e.from === node.id).map((e) => byId.get(e.to));
+    if (incoming.length) {
+      lines.push(`↳ ${incoming.slice(0, 2).map((n) => humanizeRole(n?.role ?? n?.id ?? "")).join(", ")}`);
+    }
+    if (outgoing.length) {
+      lines.push(`→ ${outgoing.slice(0, 2).map((n) => humanizeRole(n?.role ?? n?.id ?? "")).join(", ")}`);
+    }
+    ioLinesFor.set(node.id, lines);
+  }
+
+  const graph = new dagre.graphlib.Graph();
+  graph.setGraph({
+    rankdir: "LR",
+    nodesep: 36,
+    ranksep: 80,
+    marginx: MARGIN,
+    marginy: MARGIN,
+  });
+  graph.setDefaultEdgeLabel(() => ({}));
+
+  for (const node of byId.values()) {
+    graph.setNode(node.id, { width: CARD_W, height: cardHeight(ioLinesFor.get(node.id)?.length ?? 0) });
+  }
+  for (const edge of edges) graph.setEdge(edge.from, edge.to);
 
   dagre.layout(graph);
 
   // dagre 座標是節點中心；記下包圍盒後決定最終 viewBox。
-  const placed: Array<{ node: DagNodeInput; x: number; y: number }> = [];
+  const placed: Array<{ node: DagNodeInput; x: number; y: number; h: number }> = [];
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
@@ -218,11 +291,12 @@ export function renderDagSvg(
   for (const node of byId.values()) {
     const pos = graph.node(node.id) as { x: number; y: number } | undefined;
     if (!pos || typeof pos.x !== "number" || typeof pos.y !== "number") continue;
-    placed.push({ node, x: pos.x, y: pos.y });
-    minX = Math.min(minX, pos.x - NODE_W / 2);
-    maxX = Math.max(maxX, pos.x + NODE_W / 2);
-    minY = Math.min(minY, pos.y - NODE_H / 2);
-    maxY = Math.max(maxY, pos.y + NODE_H / 2);
+    const h = cardHeight(ioLinesFor.get(node.id)?.length ?? 0);
+    placed.push({ node, x: pos.x, y: pos.y, h });
+    minX = Math.min(minX, pos.x - CARD_W / 2);
+    maxX = Math.max(maxX, pos.x + CARD_W / 2);
+    minY = Math.min(minY, pos.y - h / 2);
+    maxY = Math.max(maxY, pos.y + h / 2);
   }
 
   // 實測範圍（含留白）比要求尺寸小 → 以要求尺寸為畫布、內容置中；
@@ -236,6 +310,7 @@ export function renderDagSvg(
 
   const body: string[] = [];
   body.push(`<rect width="${canvasW}" height="${canvasH}" fill="${palette.bg}"/>`);
+  body.push(gridPattern(canvasW, canvasH, palette));
 
   // 先畫邊（在節點下層，箭頭自然被節點蓋住末端）。
   for (const edge of edges) {
@@ -245,45 +320,104 @@ export function renderDagSvg(
     const d = points
       .map((p, i) => `${i === 0 ? "M" : "L"}${fmt(p.x + offsetX)},${fmt(p.y + offsetY)}`)
       .join(" ");
-    body.push(`<path d="${d}" fill="none" stroke="${palette.edge}" stroke-width="1.5" marker-end="url(#dag-arrow)"/>`);
+    body.push(
+      `<path d="${d}" fill="none" stroke="${palette.edge}" stroke-width="1.5" marker-end="url(#dag-arrow)"/>`,
+    );
   }
 
-  // 再畫節點。
-  for (const { node, x, y } of placed) {
-    const left = x - NODE_W / 2 + offsetX;
-    const top = y - NODE_H / 2 + offsetY;
+  // 再畫節點卡片。
+  for (const { node, x, y, h } of placed) {
+    const left = x - CARD_W / 2 + offsetX;
+    const top = y - h / 2 + offsetY;
+    const style = KIND_STYLE[node.kind] ?? KIND_STYLE_FALLBACK;
     const failed = node.status === "failed";
-    const fill = KIND_FILL[node.kind] ?? KIND_FILL_FALLBACK;
-    const stroke = failed ? palette.failedStroke : theme === "dark" ? "#334155" : "#cbd5e1";
-    const strokeWidth = failed ? 2.5 : 1;
+    const stroke = failed ? palette.failedStroke : palette.cardStroke;
 
+    // 卡片本體 + 頂部色條（頂部兩角同卡片圓角，故用 clip 語義的 path 疊一張圓角矩形）。
     body.push(
-      `<rect x="${fmt(left)}" y="${fmt(top)}" width="${NODE_W}" height="${NODE_H}" rx="${NODE_RADIUS}" ry="${NODE_RADIUS}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}"/>`,
+      `<rect x="${fmt(left)}" y="${fmt(top)}" width="${CARD_W}" height="${fmt(h)}" rx="${NODE_RADIUS}" ry="${NODE_RADIUS}" fill="${palette.cardBg}" stroke="${stroke}" stroke-width="${failed ? 2 : 1}"/>`,
+    );
+    body.push(
+      `<path d="${accentPath(left, top, CARD_W)}" fill="${style.accent}"/>`,
     );
 
-    // 標題（置中，超寬截斷）與 kind 小字（置中偏下）。
-    const title = truncate(node.title || node.role || node.id, 13, NODE_W - 20);
+    // 標題（左對齊，超寬截斷）＝節點中文名；下方小字＝role（snake_case 轉空白）。
+    let cursorY = top + ACCENT_H + 8;
+    const title = truncate(node.title || node.role || node.id, TITLE_SIZE, CARD_W - PAD_X * 2);
     body.push(
-      `<text x="${fmt(x + offsetX)}" y="${fmt(top + 24)}" font-size="13" font-weight="600" fill="${palette.title}" text-anchor="middle">${esc(title)}</text>`,
+      `<text x="${fmt(left + PAD_X)}" y="${fmt(cursorY + 11)}" font-size="${TITLE_SIZE}" font-weight="600" fill="${palette.title}">${esc(title)}</text>`,
+    );
+    cursorY += 15;
+
+    // 標籤列：kind 標籤徽章（左）＋ role 小字（右）。
+    const tagW = textWidth(style.tagLabel, TAG_SIZE) + 12;
+    body.push(
+      `<rect x="${fmt(left + PAD_X)}" y="${fmt(cursorY)}" width="${fmt(tagW)}" height="14" rx="4" ry="4" fill="${style.tagBg}"/>`,
     );
     body.push(
-      `<text x="${fmt(x + offsetX)}" y="${fmt(top + 42)}" font-size="10" fill="${palette.subtitle}" text-anchor="middle">${esc(node.kind)}</text>`,
+      `<text x="${fmt(left + PAD_X + tagW / 2)}" y="${fmt(cursorY + 10.5)}" font-size="${TAG_SIZE}" fill="${style.tagText}" text-anchor="middle">${esc(style.tagLabel)}</text>`,
     );
+    const roleText = truncate(humanizeRole(node.role || ""), SUB_SIZE, CARD_W - PAD_X * 2 - tagW - 8);
+    if (roleText) {
+      body.push(
+        `<text x="${fmt(left + PAD_X + tagW + 6)}" y="${fmt(cursorY + 10.5)}" font-size="${SUB_SIZE}" fill="${palette.muted}">${esc(roleText)}</text>`,
+      );
+    }
+    cursorY += 16 + 4;
+
+    // I/O 內文行（↳ 輸入來源 / → 產出目標）。
+    for (const line of ioLinesFor.get(node.id) ?? []) {
+      const text = truncate(line, IO_SIZE, CARD_W - PAD_X * 2);
+      body.push(
+        `<text x="${fmt(left + PAD_X)}" y="${fmt(cursorY + 9)}" font-size="${IO_SIZE}" fill="${palette.subtitle}">${esc(text)}</text>`,
+      );
+      cursorY += 13;
+    }
 
     // costCoins 有值（含 0）→ 右下角幣數徽章。0 也要顯示：0 幣是事實，不是缺值。
     if (typeof node.costCoins === "number" && Number.isFinite(node.costCoins)) {
       const label = esc(`${fmtCoins(node.costCoins)} 幣`);
-      const badgeW = Math.max(34, textWidth(label, 10) + 10);
+      const badgeW = Math.max(40, textWidth(label, TAG_SIZE) + 12);
       body.push(
-        `<rect x="${fmt(left + NODE_W - badgeW)}" y="${fmt(top + NODE_H - 16)}" width="${fmt(badgeW)}" height="15" rx="7" ry="7" fill="${palette.costBg}"/>`,
+        `<rect x="${fmt(left + CARD_W - badgeW - PAD_X)}" y="${fmt(top + h - 19)}" width="${fmt(badgeW)}" height="14" rx="4" ry="4" fill="${palette.costBg}"/>`,
       );
       body.push(
-        `<text x="${fmt(left + NODE_W - badgeW / 2)}" y="${fmt(top + NODE_H - 5)}" font-size="10" fill="${palette.costText}" text-anchor="middle">${label}</text>`,
+        `<text x="${fmt(left + CARD_W - badgeW / 2 - PAD_X)}" y="${fmt(top + h - 8.5)}" font-size="${TAG_SIZE}" fill="${palette.costText}" text-anchor="middle">${label}</text>`,
       );
     }
   }
 
   return wrapSvg(canvasW, canvasH, canvasW, canvasH, palette, body.join(""));
+}
+
+/** 頂部色條：只有上方兩角跟隨卡片圓角，下緣平直。 */
+function accentPath(left: number, top: number, w: number): string {
+  const r = NODE_RADIUS;
+  return (
+    `M${fmt(left)},${fmt(top + r)}` +
+    `a${r},${r} 0 0 1 ${r},${-r}` +
+    `h${fmt(w - r * 2)}` +
+    `a${r},${r} 0 0 1 ${r},${r}` +
+    `v${fmt(ACCENT_H - r)}` +
+    `h${fmt(-w)}` +
+    `z`
+  );
+}
+
+/** 背景網格點陣（與站內畫布同視覺語言；純裝飾，不影響節點可讀性）。 */
+function gridPattern(w: number, h: number, palette: Palette): string {
+  const id = "dag-grid";
+  const dots: string[] = [];
+  for (let y = GRID; y < h; y += GRID) {
+    for (let x = GRID; x < w; x += GRID) {
+      dots.push(`<circle cx="${x}" cy="${y}" r="0.9"/>`);
+    }
+  }
+  return (
+    `<defs><pattern id="${id}" width="${GRID}" height="${GRID}" patternUnits="userSpaceOnUse">` +
+    `<circle cx="1" cy="1" r="0.9" fill="${palette.gridDot}"/></pattern></defs>` +
+    `<rect width="${w}" height="${h}" fill="url(#${id})" opacity="0.85"/>`
+  );
 }
 
 /** 統一的 <svg> 外殼：箭頭 marker 與字型堆疊在此宣告一次。 */
@@ -296,7 +430,7 @@ function wrapSvg(
   body: string,
 ): string {
   const defs =
-    `<defs><marker id="dag-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">` +
-    `<path d="M0,0 L10,5 L0,10 z" fill="${palette.edge}"/></marker></defs>`;
+    `<defs><marker id="dag-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">` +
+    `<path d="M0,0 L10,5 L0,10 z" fill="${palette.edgeArrow}"/></marker></defs>`;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${fmt(outW)}" height="${fmt(outH)}" viewBox="0 0 ${fmt(viewW)} ${fmt(viewH)}" font-family="${FONT_STACK}">${defs}${body}</svg>`;
 }

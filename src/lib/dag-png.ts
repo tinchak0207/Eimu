@@ -18,12 +18,14 @@ import sharp from "sharp";
 /**
  * SVG 字串 → PNG buffer（走 sharp）。
  *
- * density 144 = 2 倍基準解析度（SVG 預設 72 DPI），讓文字在小尺寸節點內仍清晰；
- * 不做 resize，輸出尺寸 = SVG 自身 width/height × 2，呼叫端需要固定尺寸請自行 resize。
+ * density 216 = 3 倍基準解析度（SVG 預設 72 DPI）。前一版用 144（2 倍）在
+ * 220px 卡片上仍偏糊——縮圖要能在歷史卡的小尺寸與燈箱的大尺寸下都可讀，
+ * 3 倍是文字筆畫不糊的下限（實測：12.5px 標題在 216 DPI 下筆畫完整）。
+ * 不做 resize，輸出尺寸 = SVG 自身 width/height × 3，呼叫端需要固定尺寸請自行 resize。
  */
 export async function renderDagPng(svg: string): Promise<Buffer> {
   if (typeof svg !== "string" || !svg.trim().startsWith("<svg")) {
     throw new Error("renderDagPng: 輸入必須是 <svg> 開頭的字串");
   }
-  return sharp(Buffer.from(svg, "utf8"), { density: 144 }).png().toBuffer();
+  return sharp(Buffer.from(svg, "utf8"), { density: 216 }).png({ compressionLevel: 9 }).toBuffer();
 }
