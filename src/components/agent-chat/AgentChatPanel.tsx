@@ -439,23 +439,7 @@ function AgentChatPanelComponent({
              → 輸入框位置照樣跳。正解＝不分流：歡迎態 DOM 從頭到尾一套，建號/首發在飛時
              推薦語照常渲染（佔位不動）但強制 disabled＝點不到就不會重複送出（防二次
              計費）；在途回饋交給送出鈕轉圈（AgentComposer sending 態）。 */
-          <div className="relative flex min-h-full flex-col items-center justify-center px-5">
-            {/* 空態專屬 Liquid Glass 氛圍（09-20 暴君裁定：底色別像水泥牆，僅空態）：
-                純裝飾層——藍/粉/紫三團彩色光斑烘進多檔徑向漸層（lg-ambient 同法，
-                零合成層、不用 filter blur），玻璃卡因此有折射深度而非平灰。
-                absolute + pointer-events-none + 內容層相對提位＝佔位零位移，
-                「空態單一 DOM」契約不破。 */}
-            <div
-              aria-hidden="true"
-              className="pointer-events-none absolute inset-0"
-              style={{
-                background: [
-                  "radial-gradient(130% 55% at 16% 4%, rgba(85,205,252,0.22) 0%, rgba(85,205,252,0.10) 40%, transparent 68%)",
-                  "radial-gradient(120% 50% at 88% 96%, rgba(247,168,184,0.20) 0%, rgba(247,168,184,0.08) 42%, transparent 70%)",
-                  "radial-gradient(100% 45% at 78% 10%, rgba(88,86,214,0.12) 0%, transparent 62%)",
-                ].join(", "),
-              }}
-            />
+          <div className="agent-welcome-glass relative flex min-h-full flex-col items-center justify-center overflow-hidden px-5">
             <div className="relative flex w-full flex-col items-center pb-[8vh]">
               <h2 className="text-2xl font-semibold tracking-tight text-foreground">想做点什么？</h2>
               <div className="mt-8 w-full [&_.agent-composer]:py-2 [&_.agent-composer]:shadow-[0_16px_48px_rgba(0,0,0,0.10)]">

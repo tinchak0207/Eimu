@@ -46,6 +46,36 @@
   overflow-x: hidden;
 }
 
+/* ── 空態 Liquid Glass（09-20 深夜三刀，暴君否決前兩版）──
+   一版卡內近白無物可折＝水泥牆；二版 inset-0 滿版漸層方塊＝硬邊色條，更糟。
+   正解＝把環境光直接鋪在「卡本身」：section.lg-card 偵測到空態標記
+   （:has，globals.css 已有同法先例）就換上彩色底＋乳白面紗，滿版無縫、
+   圓角自裁；composer 的 lg-float 玻璃因此真的「被卡片背景照到」——
+   玻璃上摺玻璃，這才是 Liquid Glass。僅空態：有訊息時規則自動脫鉤。 */
+section.lg-card:has(.agent-welcome-glass) {
+  background:
+    radial-gradient(120% 70% at 12% 0%,
+      rgba(85, 205, 252, 0.28) 0%,
+      rgba(85, 205, 252, 0.10) 42%,
+      transparent 68%
+    ),
+    radial-gradient(110% 65% at 92% 100%,
+      rgba(247, 168, 184, 0.26) 0%,
+      rgba(247, 168, 184, 0.09) 44%,
+      transparent 70%
+    ),
+    radial-gradient(70% 50% at 88% 6%,
+      rgba(88, 86, 214, 0.10) 0%,
+      transparent 62%
+    ),
+    linear-gradient(180deg,
+      rgba(255, 255, 255, 0.44) 0%,
+      rgba(255, 255, 255, 0.16) 45%,
+      rgba(255, 255, 255, 0.30) 100%
+    ),
+    linear-gradient(165deg, #eaf6ff 0%, #f8eef4 55%, #eaf6ff 100%);
+}
+
 /* 新条目入场 */
 @keyframes agent-rise {
   from {
