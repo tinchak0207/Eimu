@@ -116,7 +116,7 @@ function SubagentCard({ item }: SubagentCardProps) {
   return (
     <div className="agent-rise flex min-h-11 w-full items-center gap-2 rounded-[12px] px-2 -mx-2 transition-colors hover:bg-white/55">
       <Bot className="h-4 w-4 shrink-0 text-foreground/40" aria-hidden="true" />
-      <span className="shrink-0 text-ios-footnote font-medium text-foreground/75">
+      <span className="shrink-0 text-ios-footnote font-medium text-foreground/80">
         {item.label}
       </span>
       {/* running：跑馬燈末行（活動流＝含 reasoning 的所有增量，尾巴跟隨快吐字觀感）；
@@ -154,7 +154,7 @@ function AgentSubagentBarComponent({ items }: { items: AgentSubagentItem[] }) {
         <Bot className="h-3.5 w-3.5 shrink-0 text-foreground/40" aria-hidden="true" />
         派出 {items.length} 个子代理
         <ChevronDown
-          className={cn("lg-transition h-3.5 w-3.5 shrink-0 text-foreground/35", open && "rotate-180")}
+          className={cn("lg-transition h-3.5 w-3.5 shrink-0 text-foreground/45", open && "rotate-180")}
           aria-hidden="true"
         />
       </button>

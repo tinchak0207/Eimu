@@ -535,12 +535,14 @@ function AgentChatPanelComponent({
           D-25：解读 = 该轮已收到的 message.delta 文本（lastAssistantText），
           与 confirm 事件的 description 一起由确认卡拼装成「我这么理解你的愿望」；
           缺省时确认卡退回纯花费确认。
-          2026-08-16：卡片区有界 + 内部滚动（最高 min(45dvh, 22rem)）——高卡片
-          不会再被面板高度裁掉底部选项，也不会把 transcript 挤到零高度。
+          2026-08-16：卡片区有界 + 内部滚动——高卡片不会被面板高度裁掉底部
+          选项，也不会把 transcript 挤到零高度。2026-09-20 限高放寬 45dvh→
+          62dvh：四選項的問答卡在 45dvh 下第三個選項被攔腰截斷（「看起來像
+          頁面崩了」），62dvh 常見卡完整可見、極端長卡仍走內部滾動。
           罪状 5/6：同批同模型合并成一张卡（model ×N 共 N 币），一键裁决逐笔
           resolve；确认卡容器限高 + 内部滚动，禁止整页溢出。 */}
       {confirmGroups.length > 0 && (
-        <div className="min-h-0 max-h-[min(45dvh,22rem)] shrink-0 overflow-y-auto overscroll-contain px-0.5 pb-1.5">
+        <div className="min-h-0 max-h-[min(62dvh,30rem)] shrink-0 overflow-y-auto overscroll-contain px-0.5 pb-1.5">
           <div className="flex flex-col gap-2">
             {confirmGroups.map((group) => {
               const merged = group.count > 1;
@@ -569,7 +571,7 @@ function AgentChatPanelComponent({
       )}
 
       {pendingConfirms.length === 0 && pendingQuestions.length > 0 && (
-        <div className="min-h-0 max-h-[min(45dvh,22rem)] shrink-0 overflow-y-auto overscroll-contain px-0.5 pb-1.5">
+        <div className="min-h-0 max-h-[min(62dvh,30rem)] shrink-0 overflow-y-auto overscroll-contain px-0.5 pb-1.5">
           {/* 問題卡串行：一次只出一張，答完（reducer 移除該 requestId）再浮出下一張，
               不讓多張疊在一起同時逼用戶做決定。 */}
           <div className="flex flex-col gap-2">

@@ -12,8 +12,13 @@
   flex: 1;
 }
 
-/* 滚动区：细滚动条，与站内 iOS 风格一致 */
+/* 滚动区：细滚动条，与站内 iOS 风格一致。
+   2026-09-20 修：overflow-x hidden —— 單列對話流裡任何超寬內容（長英文串/
+   超長 URL）都不該撐出「帶箭頭的原生橫向滾動條」（視覺破損感第一元凶：
+   overflow-y:auto 時 overflow-x:visible 會被規範計算成 auto）；超寬內容的
+   裁切由各內容塊自己負責（行內 code=break-all、表格=自滾、氣泡=break-words）。 */
 .agent-transcript {
+  overflow-x: hidden;
   scrollbar-width: thin;
   scrollbar-color: rgba(0, 0, 0, 0.18) transparent;
 }

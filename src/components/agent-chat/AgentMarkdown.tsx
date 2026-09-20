@@ -86,7 +86,7 @@ function BlockNode({ block, onOpenImage }: { block: MdBlock; onOpenImage: (src: 
   switch (block.type) {
     case "p":
       return (
-        <p className="my-1 first:mt-0 last:mb-0">
+        <p className="my-1 break-words [overflow-wrap:anywhere] first:mt-0 last:mb-0">
           {block.children.map((c, i) => <InlineSpan key={i} span={c} onOpenImage={onOpenImage} />)}
         </p>
       );

@@ -63,7 +63,7 @@ function AgentPlanCardComponent({ item }: AgentPlanCardProps) {
       >
         <Brain className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
         <span className="min-w-0 flex-1 truncate text-ios-subhead font-semibold text-foreground">
-          計划
+          计划
           {/* 進行中的標記（新語彙）：灰字「临时」＋ ios-blue 小點，不再是金底膠囊。 */}
           {provisional && (
             <span className="ml-1.5 inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-ios-footnote font-medium text-muted-foreground">

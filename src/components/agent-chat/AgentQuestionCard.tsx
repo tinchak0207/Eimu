@@ -68,7 +68,7 @@ function AgentQuestionCardComponent({ question, onAnswer }: AgentQuestionCardPro
             {item.header && (
               <p className="text-sm font-medium text-foreground/45">{item.header}</p>
             )}
-            <p className="text-ios-subhead leading-[1.5] font-semibold text-foreground">
+            <p className="text-ios-subhead font-semibold leading-[1.5] break-words text-foreground [overflow-wrap:anywhere]">
               {item.question}
             </p>
           </div>
@@ -144,7 +144,9 @@ function AgentQuestionCardComponent({ question, onAnswer }: AgentQuestionCardPro
             {item.header && (
               <p className="text-sm font-medium text-foreground/45">{item.header}</p>
             )}
-            <p className="text-ios-subhead font-semibold text-foreground">{item.question}</p>
+            <p className="text-ios-subhead font-semibold leading-[1.5] break-words text-foreground [overflow-wrap:anywhere]">
+              {item.question}
+            </p>
             {questions.length > 1 && (
               <p className="mt-0.5 text-ios-caption1 text-foreground/45">
                 {current + 1} / {questions.length}
@@ -152,7 +154,9 @@ function AgentQuestionCardComponent({ question, onAnswer }: AgentQuestionCardPro
             )}
           </div>
         </div>
-        {/* 选项是整行可点的清单项，不是一排无声的小胶囊：点下去有高亮 + 转圈回馈。 */}
+        {/* 选项是整行可点的清单项，不是一排无声的小胶囊：点下去有高亮 + 转圈回馈。
+            2026-09-20 截斷修復：label/description 都要 break-words——模型吐出的
+            選項文字可能是長英文串，白名單式 truncate 在問答卡語義裡是「藏答案」。 */}
         <div className="mt-3 flex flex-col gap-2">
           {item.options.map((opt) => {
             const isPicked = pickedLabel === opt.label;
@@ -172,9 +176,9 @@ function AgentQuestionCardComponent({ question, onAnswer }: AgentQuestionCardPro
                 )}
               >
                 <span className="min-w-0 flex-1">
-                  <span className="block text-ios-subhead font-semibold text-foreground">{opt.label}</span>
+                  <span className="block break-words text-ios-subhead font-semibold text-foreground [overflow-wrap:anywhere]">{opt.label}</span>
                   {opt.description && (
-                    <span className="mt-0.5 block text-sm leading-[1.5] text-muted-foreground">
+                    <span className="mt-0.5 block break-words text-sm leading-[1.5] text-foreground/60 [overflow-wrap:anywhere]">
                       {opt.description}
                     </span>
                   )}
