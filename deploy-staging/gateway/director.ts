@@ -36,6 +36,7 @@ import { POSE_PRESETS } from "./director-engine/poses"
 import { planDuration, inspectDirectorPlan, evaluateDirectorFrame } from "./director-engine/playback"
 import { renderTopViewSvg, renderCameraViewSvg } from "./director-engine/svgSchematic"
 import { fallbackPlans } from "./director-engine/planning-core"
+import { applyCanvasNodeCreated, applyCanvasNodeUpdated } from "./canvas-cascade-state.ts"
 
 // 與 gateway/index.ts 同值；env 可覆蓋（測試用）。timeline.ts L29 同款。
 const WORKSPACE_DIR = process.env.WORKSPACE_DIR || "/opt/agent-harness/workspace"
@@ -484,11 +485,26 @@ function emitDirectorDone(sid: string, doc: DirectorDoc, action: string, svg?: {
         metadata,
       },
     })
+    // 2026-09-20 寫穿：SSE 幀發出即落 canvasStates（同一 node 物件，冪等 upsert）。
+    applyCanvasNodeCreated(sid, {
+      unit_id: nodeId,
+      node: {
+        id: nodeId,
+        type: "director",
+        title: activePlan ? `导演台 · ${activePlan.name}` : "导演台",
+        position: { x: 0, y: 0 },
+        width: 380,
+        height: 300,
+        metadata,
+      },
+    })
   } else {
     // 事件形狀照 index.ts emitCanvasResult 的 canvas.node.updated：{unit_id, node_id, patch}
     // 前端 reducer（canvas/reducer.ts reduceCanvasNodeUpdated）把 patch 攤平進 node.metadata，
     // 故 patch = metadata 欄位本身（不包 metadata 鍵）。
     emitToSessionBySid(sid, "canvas.node.updated", { unit_id: nodeId, node_id: nodeId, patch: metadata })
+    // 2026-09-20 寫穿：同一 patch 淺合併進快照節點 metadata（冪等 last-write-wins）。
+    applyCanvasNodeUpdated(sid, { unit_id: nodeId, node_id: nodeId, patch: metadata })
   }
 }
 

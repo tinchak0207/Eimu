@@ -11,7 +11,7 @@ import { loadUserSettings } from "./persistence"
 import { normalizeUserSettings } from "./sessions-http.ts"
 import type { SessionState, ConfirmOutcome } from "./types-gateway.ts"
 import { INTERNAL_EMIT_ALLOWED, CANVAS_EMIT_ALLOWED, CONFIRM_TIMEOUT_MS, CONFIRM_RESOLVED_CAP, TTS_AUDIO_DIR, TTS_PUBLIC_BASE } from "./constants-gateway.ts"
-import { resolveCanvasOps, sanitizeOpsResult, storeCanvasState, getCanvasState, validateCanvasOps, dispatchCanvasOps, CANVAS_OPS_TIMEOUT_MS } from "./canvas-cascade-state.ts"
+import { resolveCanvasOps, sanitizeOpsResult, storeCanvasState, getCanvasState, validateCanvasOps, dispatchCanvasOps, applyCanvasNodeUpdated, CANVAS_OPS_TIMEOUT_MS } from "./canvas-cascade-state.ts"
 import { resolveSession, getOwnedSession } from "./sessions-core.ts"
 import { emitToSession } from "./sse-core.ts"
 import { emitImageDone } from "./events-translate.ts"
@@ -507,11 +507,14 @@ function emitImageFailed(
   emitToSession(state, "image.failed", { task_id, reason, refunded, human_message: human })
   const unitId = task_id ? state.canvasUnitByTask.get(task_id) : undefined
   if (unitId) {
+    const failPatch = { status: "error", errorDetails: reason, human_message: human }
     emitToSession(state, "canvas.node.updated", {
       unit_id: unitId,
       node_id: `${unitId}-image`,
-      patch: { status: "error", errorDetails: reason, human_message: human },
+      patch: failPatch,
     })
+    // 2026-09-20 寫穿：失敗 patch 同步落 canvasStates（快照無該節點時靜默跳過）。
+    applyCanvasNodeUpdated(state.sessionId, { unit_id: unitId, node_id: `${unitId}-image`, patch: failPatch })
   }
   void appendLedgerFor(state, {
     kind: "image",

@@ -15,7 +15,7 @@ import { TTS_UPSTREAM, probeTtsUpstream, settleConfirm } from "./media-internal-
 import { CONFIRM_THRESHOLD_COINS, CONFIRM_TIMEOUT_MS, OPENCODE_URL, PLATFORM_BASE, TTS_AUDIO_DIR, TTS_PUBLIC_BASE } from "./constants-gateway.ts"
 import { jsonError } from "./gw-lib.ts"
 import { normalizeUserSettings } from "./sessions-http.ts"
-import { applyCanvasNodeCreated, applyCanvasNodeUpdated } from "./canvas-cascade-state.ts"
+import { applyCanvasNodeCreated, applyCanvasNodeConnected, applyCanvasNodeDisconnected, applyCanvasNodeUpdated } from "./canvas-cascade-state.ts"
 import { humanMessageFor } from "./humanize-gw.ts"
 import type { SessionState } from "./types-gateway.ts"
 import type { TaskStatus } from "./types-gateway.ts"
@@ -39,10 +39,23 @@ export const workflowService = new WorkflowService({
     // 前端刷新／重連後骨架全丟（GET /internal/canvas/snapshot 永遠 has_state:false，
     // 實錘：模板判定即建骨架後快照仍空）。events-translate 的工具路徑早有此寫入，
     // workflow 路徑漏了——同一寫入函式，不另造輪子。
+    // 2026-09-20 寫穿收口：擴到 connected/disconnected/generating，全部 canvas.node.*
+    // 幀發出即寫穿（updated/generating 在快照無節點時靜默跳過＝懶加載回灌兜底）。
     if (target) {
       try {
         if (name === "canvas.node.created") applyCanvasNodeCreated(target.sessionId, data)
         else if (name === "canvas.node.updated") applyCanvasNodeUpdated(target.sessionId, data)
+        else if (name === "canvas.node.connected") applyCanvasNodeConnected(target.sessionId, data)
+        else if (name === "canvas.node.disconnected") applyCanvasNodeDisconnected(target.sessionId, data)
+        else if (name === "canvas.node.generating") {
+          const g = (data ?? {}) as { node_id?: unknown; status?: unknown }
+          if (typeof g.node_id === "string" && g.node_id) {
+            applyCanvasNodeUpdated(target.sessionId, {
+              node_id: g.node_id,
+              patch: { status: typeof g.status === "string" ? g.status : "running" },
+            })
+          }
+        }
       } catch (e) {
         console.error(`[gateway] canvas snapshot write failed on ${name}:`, e)
       }
@@ -449,15 +462,19 @@ export function restoreWorkflowsFromSnapshot(state: SessionState): void {
   // 也能收到；不依賴任何人在線。
   if (interrupted.length > 0) {
     for (const nodeId of interrupted) {
+      const interruptPatch = {
+        status: "error" satisfies TaskStatus,
+        errorDetails: "服务重启导致任务中断",
+        human_message: "服务重启导致任务中断，中断节点未产生成功扣款；如已扣款以平台账单为准，可在画布上重试该节点。",
+      }
       emitToSession(state, "canvas.node.updated", {
         node_id: nodeId,
         workflow_id: restored.workflowId,
-        patch: {
-          status: "error" satisfies TaskStatus,
-          errorDetails: "服务重启导致任务中断",
-          human_message: "服务重启导致任务中断，中断节点未产生成功扣款；如已扣款以平台账单为准，可在画布上重试该节点。",
-        },
+        patch: interruptPatch,
       })
+      // 2026-09-20 寫穿：此處直發 emitToSession 繞過 workflowService emit hook，
+      // 快照同步在此補上（同一 patch 物件，冪等 last-write-wins）。
+      applyCanvasNodeUpdated(state.sessionId, { node_id: nodeId, patch: interruptPatch })
     }
     // 孤兒產物撈回：快照裡 success 的 image/video 節點，產物 URL 聚合交付。
     const nodesById = new Map(
@@ -1092,15 +1109,18 @@ setInterval(() => {
       console.warn(`[gateway] workflow stall: wf=${wfid} no progress for ${(WORKFLOW_STALL_MS / 60000) | 0}min, declaring stuck nodes dead`)
       for (const n of wf.graph.nodes) {
         if (wf.nodeStatus[n.id] !== "running") continue
+        const stallPatch = {
+          status: "error" satisfies TaskStatus,
+          errorDetails: "停滞超时：超过 15 分钟无任何进度推进，系统已按失败处理",
+          human_message: "渲染停滞超过 15 分钟无推进，系统已将卡住的节点判死并按失败处理",
+        }
         emitToSession(state, "canvas.node.updated", {
           unit_id: wfid,
           node_id: n.id,
-          patch: {
-            status: "error" satisfies TaskStatus,
-            errorDetails: "停滞超时：超过 15 分钟无任何进度推进，系统已按失败处理",
-            human_message: "渲染停滞超过 15 分钟无推进，系统已将卡住的节点判死并按失败处理",
-          },
+          patch: stallPatch,
         })
+        // 2026-09-20 寫穿：直發路徑繞過 emit hook，快照同步在此補上（冪等）。
+        applyCanvasNodeUpdated(state.sessionId, { node_id: n.id, patch: stallPatch })
       }
       recordWorkflowRefund(state, wfid)
     }

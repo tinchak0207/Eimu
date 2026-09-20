@@ -94,7 +94,7 @@ export function getCanvasState(sessionId: string): CanvasSnapshotEntry | null {
   return canvasStates.get(canvasKeyFor(sessionId)) ?? null
 }
 
-// ---- 畫布事件持久化（2026-08-27 修復）----
+// ---- 畫布事件持久化（2026-08-27 修復；2026-09-20 寫穿收口）----
 // 斷鏈根因：autoCreateCanvasUnit / emitCanvasResult 只對 SSE 發 canvas.node.* 事件，
 // 從不寫 canvasStates，導致 GET /internal/canvas/snapshot 永遠 has_state:false，
 // 前端刷新後畫布全丟。修復：事件發生的同一瞬間，把它套用到該 session 的快照
@@ -102,6 +102,15 @@ export function getCanvasState(sessionId: string): CanvasSnapshotEntry | null {
 // 欄位），gateway 重啟後懶加載時回灌 canvasStates。
 // 前端若已上行過自己的完整 state（storeCanvasState），之後的事件疊加其上——
 // 同一 data 語義，不衝突。
+// 2026-09-20 寫穿：上述「懶加載回灌」與「SSE 事件流」雙軌收口為「SSE 事件即寫穿」
+// ——workflow 出口（workflow-gw.ts 的 workflowService emit hook 與兩處直發
+// emitToSession）在每個 canvas.node.created/updated/connected/disconnected/generating
+// 發出的同一瞬間呼叫本檔的 applyCanvasNode*（created/connected upsert、updated/generating
+// metadata 淺合併、disconnected 移除連線），冪等（按 id upsert、last-write-wins）。
+// 寫穿只合併進既有快照：updated/generating 在快照不存在或節點不在時靜默跳過
+// （不強造空殼，留給懶加載回灌兜底）；created/connected 沿用 mutableCanvasStateOf
+// 既有語義建快照。prompt-time skeleton 推送路徑（同樣落到 applyCanvasNodeCreated）
+// 不動。
 
 export interface PersistableCanvasState {
   nodes?: Record<string, unknown> | Record<string, unknown>[]
@@ -200,6 +209,25 @@ export function applyCanvasNodeDeleted(sessionId: string, payload: unknown): voi
   if (Array.isArray(cs.connections)) {
     cs.connections = (cs.connections as Record<string, unknown>[]).filter(
       (c) => !(c && ((typeof c.fromNodeId === "string" && ids.has(c.fromNodeId)) || (typeof c.toNodeId === "string" && ids.has(c.toNodeId)))),
+    )
+  }
+  touchCanvasSnapshot(sessionId, cs)
+}
+
+// canvas.node.disconnected → 從快照移除對應連線（wire 載荷只有 from/to，無 id；
+// 對照 canvas.node.connected 的 connection 形狀 fromNodeId/toNodeId 過濾）。冪等：
+// 連線不在快照時 no-op。快照不存在時同樣 no-op（不強造空殼）。
+export function applyCanvasNodeDisconnected(sessionId: string, payload: unknown): void {
+  const p = (payload ?? {}) as { from?: unknown; to?: unknown }
+  if (typeof p.from !== "string" || !p.from) return
+  if (typeof p.to !== "string" || !p.to) return
+  const key = canvasKeyFor(sessionId)
+  const snap = canvasStates.get(key)
+  if (!snap || !snap.state || typeof snap.state !== "object") return
+  const cs = snap.state as PersistableCanvasState
+  if (Array.isArray(cs.connections)) {
+    cs.connections = (cs.connections as Record<string, unknown>[]).filter(
+      (c) => !(c && c.fromNodeId === p.from && c.toNodeId === p.to),
     )
   }
   touchCanvasSnapshot(sessionId, cs)
