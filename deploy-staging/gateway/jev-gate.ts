@@ -11,7 +11,14 @@
  * - fire-and-forget：呼叫端一律 void，內部永不 throw，2s 超時。
  * - JEV_ENABLED ≠ "true" 或無 TYPESAFE_API_KEY → 零動作（gateway 現狀行為逐位等價）。
  * - Jev 是輔助判定層：任何失敗只留一行 log，不影響 critic pass / turn.done 主鏈路。
+ *
+ * 兜底（2026-09-20）：Jev 閉源按量計費，額度耗盡＝本檔所有閘同時斷路。已接
+ * 開源同範式模型 Laya 兜底（`laya-client.ts`，Apache-2.0）；**Jev 通時 Laya
+ * 完全不碰**，僅在 Jev 不可用時接手，並打 `laya_fallback` 標記供事後歸因。
+ * Laya 預設關閉（`LAYA_ENABLED≠true` 即零動作），灰度開啟。
  */
+
+import { layaSystemOne, layaEnabled } from "./laya-client"
 
 /** Jev 端點契約（jev-1.13.0 實測 2026-09-19：三型混合 731ms、兩題 770ms）。 */
 const JEV_ENDPOINT = "https://api.typesafe.ai/v1/systemone"
@@ -50,7 +57,7 @@ interface JevHttpPayload {
   usage?: unknown
 }
 
-async function jevSystemOne(
+async function jevUpstream(
   state: string,
   questions: Record<string, unknown>,
 ): Promise<Record<string, { noul?: unknown }> | null> {
@@ -77,6 +84,34 @@ async function jevSystemOne(
     console.log("[gateway] jev_gate: skipped (network/timeout)")
     return null
   }
+}
+
+/**
+ * 判定層單一出口：Jev 優先，Laya 兜底。
+ *
+ * 為何要兜底：Jev（TypeSafe System One）閉源且按量計費，額度耗盡＝注入閘／
+ * expert 路由／模板判定／記憶入庫閘**同時斷路**。Laya 為同範式開源模型
+ * （Apache-2.0、非自回歸決策頭），契約逐位同構，故可無損接手。
+ *
+ * 分工與可觀測性：
+ * - Jev 通 → 一律用 Jev，Laya 連碰都不碰（**行為與部署前逐位等價**）。
+ * - Jev 掛 → 打一行 `laya_fallback` 標記再試 Laya；Laya 也掛 → 回 null
+ *   （呼叫端既有 fail-open 原樣生效）。
+ * - 標記帶來源，避免「靜默換供應商」讓判據來源在事後無法歸因
+ *   （教訓：失敗日誌不帶 provider 名會讓整天零輸出無人察覺）。
+ */
+async function jevSystemOne(
+  state: string,
+  questions: Record<string, unknown>,
+): Promise<Record<string, { noul?: unknown }> | null> {
+  const primary = await jevUpstream(state, questions)
+  if (primary) return primary
+  if (!layaEnabled()) return null
+
+  const fallback = await layaSystemOne(state, questions)
+  if (!fallback) return null
+  console.log(`[gateway] jev_gate: laya_fallback used (jev unavailable, questions=${Object.keys(questions).length})`)
+  return fallback as Record<string, { noul?: unknown }>
 }
 
 /**
@@ -304,6 +339,79 @@ const TEMPLATE_QUESTIONS = {
 /** 三模板 key。 */
 export type JevSpecTemplateKey = "research" | "creation" | "critique"
 
+// ── 0920 暴君裁定：模板選擇接 System One（機器判定，不交模型自由心證）─────────
+// 事故：野獸模式下 orchestrator 無 workflow_*（能力斷路），8 個 Expert 有卻沒人
+// 負責「選模板」→ 60s 百合 OP MV 裸跑（無角色設定卡/美術卡等約束環節）＝業餘。
+// 裁定：模板選擇＝機器判定（System One choice），隨派遣任務書硬注入 Expert，
+// 模型可跳過確實不適用的環節，但必須明說跳過哪環與原因。
+const TEMPLATE_CRITERIA: Record<string, string> = {
+  single_image: "只要一張靜態圖（無鏡頭序列、無角色一致性要求）",
+  character_sheet: "角色設定卡：人物設計、多視角、跨鏡一致性鎖定",
+  scene_setup: "場景/美術設定：環境、光線、場地美術",
+  single_video: "單鏡頭短片：一段連續鏡頭成片",
+  feature_film: "多鏡頭成片：分鏡腳本→角色→場景→逐鏡生成→成片剪輯（MV/預告/短片/故事片/OP）",
+  novel_film: "長文本改編成片：小說/長篇→劇本→角色→美術→分鏡→關鍵幀→影片→配音→成片",
+  none: "非製作類：研究/問答/分析/評審/單次查詢，不需要工作流骨架",
+}
+
+export interface JevDispatchMeta {
+  /** spec 模板 key（三軍模板：研究/創作/毒蛇評審）；Jev 掛＝null。 */
+  specKey: JevSpecTemplateKey | null
+  /** 工作流模板判定（System One choice）；非製作類/低信心/Jev 掛＝null。 */
+  template: { templateId: string; confidence: number } | null
+}
+
+/** 模板注入門檻（未達＝不注入，fail-open 回現狀）。 */
+export const JEV_TEMPLATE_CONFIDENCE_MIN = 0.8
+
+/**
+ * 單次 Jev 呼叫批次取回派遣元資訊（spec 模板分類＋工作流模板選擇）——
+ * Jev 範式：平行隔離、加題不加延遲。Jev 掛/格式異常 → 全 null（fail-open）。
+ */
+export async function classifyDispatchMeta(prompt: string): Promise<JevDispatchMeta> {
+  const task = (prompt ?? "").slice(0, 3000)
+  const empty: JevDispatchMeta = { specKey: null, template: null }
+  if (!task) return empty
+  const answers = await jevSystemOne(JSON.stringify({ task }), {
+    ...TEMPLATE_QUESTIONS,
+    workflow_template: {
+      type: "choice",
+      instructions:
+        "Which workflow template should be the production skeleton for the task described in `task`? Choose by deliverable: single still image→single_image; character design/cast consistency sheet→character_sheet; environment/art setting→scene_setup; one continuous clip→single_video; multi-shot film/MV/trailer/OP assembled from shots→feature_film; adaptation of a novel or long text into a film pipeline→novel_film; research/Q&A/analysis/review/plain lookup (no production)→none.",
+      criteria: TEMPLATE_CRITERIA,
+    },
+  })
+  if (!answers) return empty
+  const r = answers.research
+  const c = answers.critique
+  let specKey: JevSpecTemplateKey | null = null
+  if (typeof r?.noul === "number" && typeof c?.noul === "number") {
+    if (r.noul > 0.6 && r.noul >= c.noul) specKey = "research"
+    else if (c.noul > 0.6) specKey = "critique"
+    else specKey = "creation"
+  }
+  const t = answers.workflow_template as { choice?: unknown; confidence?: unknown } | undefined
+  let template: JevDispatchMeta["template"] = null
+  if (t && typeof t.choice === "string" && typeof t.confidence === "number" && t.choice !== "none") {
+    if (t.confidence >= JEV_TEMPLATE_CONFIDENCE_MIN && TEMPLATE_CRITERIA[t.choice]) {
+      template = { templateId: t.choice, confidence: t.confidence }
+    }
+  }
+  return { specKey, template }
+}
+
+/** 模板骨架注入聲明（機器閘）：跳過環節必須明說，靜默跳過＝違規。 */
+export function workflowTemplateDirective(templateId: string, confidence: number): string {
+  return (
+    `【機器·模板骨架】System One 判定本任務屬製作類，生產骨架＝workflow 模板 \`${templateId}\`（信心 ${confidence.toFixed(2)}）。硬規則：\n` +
+    `1. 第一個動作＝呼叫 workflow_start（template_id=${templateId}），模板要求的每個 text 角色內容一次傳齊（缺角色後端會 400 並列出缺哪幾個，補齊後重呼）；後端自動展開節點與連線。\n` +
+    `2. 禁止用 workflow_add_node 自建骨架代替模板；模板是產品的真實生產線，自建流程產品看不見。\n` +
+    `3. 模板裡的約束環節（角色設定卡／美術卡／分鏡門禁等）就是防業餘化的欄位，預設必須保留。\n` +
+    `4. 若你判定某環節確實不適用，可以跳過，但必須在同一段回報裡明說「跳過 X 環，原因 Y」——靜默跳過＝違規。\n` +
+    `5. 若上級任務書已點名模板，以點名者為準（本判定僅在未點名時生效）；不一致時在回報中說明。`
+  )
+}
+
 /**
  * 分類任務→模板 key（research/critique 由 Jev 判，皆否＝creation 默認）。
  * Jev 掛 → 回 null（呼叫端不注入模板，子代理照原 spec 跑＝fail-open）。
@@ -320,3 +428,68 @@ export async function classifySpecTemplate(prompt: string): Promise<JevSpecTempl
   if (c.noul > 0.6) return "critique"
   return "creation"
 }
+
+// ── 記憶庫第五類型 `workflow`（2026-09-20）：入庫閘 ────────────────────────
+// 分工鐵律：**內容由機器抽取**（repo `src/lib/workflow-memory.ts`
+// `extractWorkflowMemoryBody`：六槽 config JSON 序列化），**Jev 只當閘門**
+// ——判「這條跑批值不值得進記憶庫」，不生成一個字的內容。
+//
+// 【fail-open，理由】沿用本檔既有慣例（`classifyDispatchMeta` 全 null、
+// `routeExpertAuthoritative` 回 null、刀2A/2B 掃描器故障放行）：
+// ①Jev 是新增的單一上游，掛掉不該讓「記憶庫新增類型」這條能力斷路；
+// ②本閘門是**品質加分**而非安全防線——真正的硬防線（G1 結構 / G2 證據 /
+//   G3 敏感 / G4 身份泄漏 / G6 分數）在 `memory-gate.ts`，與 Jev 無關，
+//   fail-open 不會讓敏感/無證據內容溜進庫；
+// ③相反地 fail-closed 會把「Jev 未配置的 dev/本地環境」整條 workflow 記憶
+//   靜默歸零，症狀是「doc 直接消失不報錯」，與 G1 靜默丟文檔同一類事故。
+// 機器可判的部分（`shouldPersistWorkflow`：prompt 非空且 ≥2 非空槽位）在
+// 呼叫端先過，故 Jev 掛掉時仍有底線把關。
+
+/** workflow 記憶入庫門檻（noul ≥ 此值＝值得存；低於＝丟棄）。 */
+export const JEV_WORKFLOW_VALUE_MIN = 0.5
+
+const WORKFLOW_VALUE_QUESTION = {
+  worth_remembering: {
+    type: "noul",
+    instructions:
+      "`workflow` 是一個使用者工作站跑批的配置（name 與 config 槽位）。判斷這條配置是否值得存進可跨會話複用的記憶庫：具體可複用的生產配置（明確的提示詞、風格、尺寸、品質檔、複製數等實質規格）＝高；空殼、預設值堆疊、一次性的無意義跑批（無提示詞或只有佔位內容）＝低。",
+  },
+} as const
+
+export interface WorkflowMemoryDoc {
+  domain: string
+  name: string
+  config: Record<string, unknown>
+}
+
+/**
+ * workflow 記憶入庫閘（權威判定，Jev 只回值不值得）。
+ * 回 `true`＝值得入庫；`false`＝不值得。
+ * Jev 掛／超時／`JEV_ENABLED` 非 true／key 未配置 → 回 `true`（**fail-open**，
+ * 理由見上方區塊：本閘是品質加分，硬防線在 memory-gate.ts）。
+ */
+export async function gateWorkflowMemory(doc: WorkflowMemoryDoc): Promise<boolean> {
+  const name = (doc?.name ?? "").slice(0, 300)
+  const config = doc?.config && typeof doc.config === "object" ? doc.config : {}
+  let configText: string
+  try {
+    configText = JSON.stringify(config) ?? "{}"
+  } catch {
+    configText = "{}"
+  }
+  const state = JSON.stringify({ workflow: { domain: doc?.domain ?? "", name, config: configText.slice(0, 3000) } })
+  const answers = await jevSystemOne(state, { ...WORKFLOW_VALUE_QUESTION })
+  if (!answers) {
+    console.log("[gateway] jev_gate: workflow_memory gate unavailable (jev down, fail-open) name=" + name.slice(0, 60))
+    return true
+  }
+  const a = answers.worth_remembering
+  if (!a || typeof a.noul !== "number") {
+    console.log("[gateway] jev_gate: workflow_memory gate malformed answer (fail-open)")
+    return true
+  }
+  const keep = a.noul >= JEV_WORKFLOW_VALUE_MIN
+  console.log(`[gateway] jev_gate: workflow_memory name="${name.slice(0, 60)}" noul=${a.noul.toFixed(2)} verdict=${keep ? "keep" : "DROP"}`)
+  return keep
+}
+
