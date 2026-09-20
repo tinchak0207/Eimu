@@ -36,14 +36,12 @@ function AgentMessageBubbleComponent({ item, sessionId }: AgentMessageBubbleProp
   const hasAttachments = userParsed !== null && userParsed.refs.length > 0;
   const displayText = hasAttachments ? userParsed.cleanText : item.text;
 
-  // 思維鏈預設展開（2026-09-18 暴君裁定，推翻 08-25「預設收合、正文優先」）：思維鏈是
-  // 使用者判斷這段答案可不可信的證據，藏起來只讓模型看起來像黑盒；占屏的抱怨遠少於
-  // 「找不到思考過程」。要收的人自己收一次就夠——手動收合優先於一切自動行為，所以舊的
-  // 「串流中且還沒有正文就自動展開」條件已拆掉，不再有任何自動展開／自動收合路徑。
-  // open 受控於 state：初值 true 讓首幀（含歷史回放重建出來的條目）就是展開；
-  // 使用者點 summary 造成的 toggle 由下面 handler 回寫，之後串流 delta 更新或父層
-  // re-render 只會照著這個值渲染，不會把它打回展開。
-  const [reasoningOpen, setReasoningOpen] = useState(true);
+  // 思維鏈默認收合（2026-09-20 暴君批准 Grok 極簡骨架預覽版，supersede 09-18
+  // 「預設展開」裁定）：收合態＝一行「已思考」灰字＋Brain＋ChevronDown，正文至上。
+  // 單一 write path 語義不變：open 受控於 state（初值 false），使用者點 summary
+  // 造成的 toggle 由下面 handler 回寫，之後串流 delta 更新或父層 re-render 只會
+  // 照著這個值渲染，不會把它打回收合——手動展開／收合優先於任何自動行為。
+  const [reasoningOpen, setReasoningOpen] = useState(false);
 
   // 思維鏈一鍵複製：summary 上的按鈕要 preventDefault，否則點擊會順帶收合 details。
   const [reasoningCopied, setReasoningCopied] = useState(false);
@@ -81,13 +79,14 @@ function AgentMessageBubbleComponent({ item, sessionId }: AgentMessageBubbleProp
           "min-w-0 break-words [overflow-wrap:anywhere] text-[15px]",
           item.kind === "user" ? "whitespace-pre-wrap max-w-[85%]" : "w-full",
           isUser
-            ? "ml-auto rounded-[20px] rounded-br-[6px] bg-[rgba(120,120,128,0.08)] px-3.5 py-2.5 text-foreground leading-[1.45]"
-            : "rounded-[20px] rounded-bl-[6px] px-4 py-3 text-foreground leading-[1.55]",
+            ? "ml-auto rounded-[20px] rounded-br-[6px] lg-float px-3.5 py-2.5 text-foreground leading-[1.45]"
+            : "text-foreground leading-[1.55]",
         )}
       >
-        {/* 思維鏈預設展開，手動收合優先於任何自動行為（裁定理由見上方 reasoningOpen）。
-            open 一律由 state 給值，不再條件式渲染屬性——條件式會讓「串流結束」這類
-            prop 變化重新決定開關，把使用者收起來的區塊又攤回去。 */}
+        {/* 思維鏈默認收合（09-20 Grok 骨架落地），手動 toggle 優先於任何自動行為
+            （write path 語義見上方 reasoningOpen）。open 一律由 state 給值——
+            條件式會讓「串流結束」這類 prop 變化重新決定開關，把使用者展開的
+            區塊又收回去。 */}
         {item.kind === "assistant" && item.reasoning ? (
           <details
             className="mb-1.5 [&_.brain-chevron]:transition-transform [&[open]>.brain-summary_.brain-chevron]:rotate-180"
@@ -100,7 +99,7 @@ function AgentMessageBubbleComponent({ item, sessionId }: AgentMessageBubbleProp
             <summary className="brain-summary block min-h-11 cursor-pointer touch-manipulation select-none [-webkit-tap-highlight-color:transparent]">
               <span className="flex min-h-11 items-center gap-1.5 text-ios-footnote font-medium text-muted-foreground">
                 <Brain className="h-3.5 w-3.5 shrink-0 text-foreground/40" aria-hidden="true" />
-                思考過程
+                已思考
                 <ChevronDown className="brain-chevron h-3.5 w-3.5 shrink-0 text-foreground/35" aria-hidden="true" />
                 <button
                   type="button"
@@ -117,7 +116,7 @@ function AgentMessageBubbleComponent({ item, sessionId }: AgentMessageBubbleProp
                 </button>
               </span>
             </summary>
-            <div className="mt-1 whitespace-pre-wrap break-words rounded-[14px] bg-black/[0.035] px-3 py-2.5 text-ios-caption1 leading-[1.6] text-muted-foreground [overflow-wrap:anywhere]">
+            <div className="lg-float mt-1 whitespace-pre-wrap break-words rounded-[14px] px-3 py-2.5 text-ios-footnote leading-[1.6] text-muted-foreground [overflow-wrap:anywhere]">
               {item.reasoning}
             </div>
           </details>

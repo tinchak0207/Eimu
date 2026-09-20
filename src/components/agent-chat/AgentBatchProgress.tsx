@@ -1,7 +1,7 @@
 "use client";
 
 import { memo } from "react";
-import { Coins, Images, Loader2, Square } from "lucide-react";
+import { Loader2, Square } from "lucide-react";
 import type { AgentChatState } from "@/lib/agent-chat-types";
 
 export interface AgentBatchProgressProps {
@@ -65,33 +65,35 @@ function AgentBatchProgressComponent({ items, onStop, stopPending = false, total
   const pct = hasTotal ? Math.min(100, Math.round((images / totalCount) * 100)) : 0;
 
   return (
-    <div className="agent-rise rounded-[18px] bg-[rgba(120,120,128,0.06)] px-3.5 py-3">
-      <div className="flex items-center gap-2.5">
-        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ios-blue/10 text-ios-blue">
-          <Images className="h-4 w-4" aria-hidden="true" />
-        </span>
-        {/*
-          刻意不用 role="progressbar"：ARIA 里 aria-valuemax 缺省是 100，
-          给了 aria-valuenow={images} 就等于宣告「5 / 100」——而总数 Y 根本推不出来
-          （事件流没有这个字段）。屏读器会念出一个我们没有的分母，那是虚报。
-          总数未知的进度只能是文字状态区，等后端真的给出分母再升级成 progressbar。
-        */}
-        <div role="status" aria-live="polite" className="min-w-0 flex-1">
-          <p className="text-ios-subhead font-semibold leading-[1.4] text-foreground">
-            已出 {images} 张{hasTotal ? " / 共 " + totalCount + " 张" : ""}
-          </p>
-          {hasTotal && (
-            <p className="mt-0.5 text-sm font-semibold tabular-nums leading-[1.4] text-ios-blue">
-              已完成 {pct}%
-            </p>
-          )}
-          {coins !== 0 && (
-            <p className="mt-0.5 flex items-center gap-1 text-sm leading-[1.5] text-[rgba(120,90,20,0.85)]">
-              <Coins className="h-3.5 w-3.5" aria-hidden="true" />
-              已花 {formatCoins(coins)} 币
-            </p>
-          )}
+    <div className="agent-rise flex flex-col">
+      {/* 3px 圆角细进度条（2026-09-20 卡→细条）：
+        - 有真实分母 → 填充按比例走（bg-ios-blue）。
+        - 没给 total → 流动光带只表示「还在跑」，不冒充百分比。 */}
+      {hasTotal ? (
+        <div
+          className="h-[3px] w-full overflow-hidden rounded-full bg-black/[0.06]"
+          role="presentation"
+          aria-hidden="true"
+        >
+          <div
+            className="lg-transition h-full rounded-full bg-ios-blue"
+            style={{ width: pct + "%" }}
+          />
         </div>
+      ) : (
+        <div className="agent-batch-indeterminate" role="presentation" aria-hidden="true" />
+      )}
+      {/*
+        刻意不用 role="progressbar"：ARIA 里 aria-valuemax 缺省是 100，
+        给了 aria-valuenow={images} 就等于宣告「5 / 100」——而总数 Y 根本推不出来
+        （事件流没有这个字段）。屏读器会念出一个我们没有的分母，那是虚报。
+        总数未知的进度只能是文字状态区，等后端真的给出分母再升级成 progressbar。
+      */}
+      <div role="status" aria-live="polite" className="mt-1.5 flex min-h-11 items-center justify-between gap-2">
+        <p className="min-w-0 flex-1 truncate text-ios-footnote leading-[1.4] text-muted-foreground">
+          正在生成 {images} 张{hasTotal ? " / 共 " + totalCount + " 张 · 已完成 " + pct + "%" : ""}
+          {coins !== 0 ? " · 已用 " + formatCoins(coins) + " 币" : ""}
+        </p>
         {onStop && (
           <button
             type="button"
@@ -99,30 +101,17 @@ function AgentBatchProgressComponent({ items, onStop, stopPending = false, total
             disabled={stopPending}
             aria-label="中止助理生成"
             title={stopPending ? "正在中止，请稍候…" : "立即中止当前这轮生成"}
-            className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-full bg-destructive/[0.09] px-4 text-sm font-semibold text-destructive transition-colors duration-150 active:bg-destructive/[0.16] focus:outline-none focus-visible:ring-2 focus-visible:ring-destructive/30 disabled:cursor-wait disabled:opacity-60 [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
+            className="flex min-h-11 shrink-0 cursor-pointer touch-manipulation items-center rounded-lg px-2.5 text-ios-footnote font-medium text-ios-red/85 transition-colors hover:bg-ios-red/[0.07] focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-red/30 active:scale-95 disabled:cursor-wait disabled:opacity-60 disabled:active:scale-100 [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
           >
             {stopPending ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
             ) : (
               <Square className="h-3.5 w-3.5" aria-hidden="true" />
             )}
-            停下
+            停止
           </button>
         )}
       </div>
-      {/*
-        进度条：
-        - 宿主给了 total → 真实百分比，fill 按比例走（reuse 全局 generation-progress-*
-          样式，reduced-motion 已被 globals.css 兜住）。
-        - 没给 total → 流动光带只表示「还在跑」，不占宽度，不冒充百分比。
-      */}
-      {hasTotal ? (
-        <div className="generation-progress-track mt-2.5" role="presentation" aria-hidden="true">
-          <div className="generation-progress-fill" style={{ width: pct + "%" }} />
-        </div>
-      ) : (
-        <div className="agent-batch-indeterminate mt-2.5" role="presentation" aria-hidden="true" />
-      )}
       <style>{INDETERMINATE_CSS}</style>
     </div>
   );
@@ -130,8 +119,9 @@ function AgentBatchProgressComponent({ items, onStop, stopPending = false, total
 
 // 分母未知时的「进行中」指示条：流动光带不占宽度、不冒充百分比；
 // prefers-reduced-motion 下退成静止的淡蓝条，只有状态没有运动。
+// （3px 版：高度与圆角跟真实百分比细条同款，避免两种形态粗细不一。）
 const INDETERMINATE_CSS = [
-  ".agent-batch-indeterminate{position:relative;height:6px;overflow:hidden;border-radius:999px;background:rgba(0,0,0,0.07);box-shadow:inset 0 1px 2px rgba(0,0,0,0.10);}",
+  ".agent-batch-indeterminate{position:relative;height:3px;overflow:hidden;border-radius:999px;background:rgba(0,0,0,0.06);}",
   ".agent-batch-indeterminate::after{content:'';position:absolute;top:0;bottom:0;left:-45%;width:45%;border-radius:inherit;background:linear-gradient(90deg,rgba(0,122,255,0.30),rgba(0,122,255,0.75),rgba(0,122,255,0.30));animation:agent-batch-indeterminate 1.3s ease-in-out infinite;}",
   "@keyframes agent-batch-indeterminate{0%{left:-45%;}100%{left:100%;}}",
   "@media (prefers-reduced-motion: reduce){.agent-batch-indeterminate::after{animation:none;left:0;width:100%;opacity:0.25;}}",

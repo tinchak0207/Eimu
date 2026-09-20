@@ -70,7 +70,9 @@ function AgentParamCardComponent({ argsSummary, costCoins, idPrefix }: AgentPara
   }
 
   return (
-    <div className="flex flex-col gap-2 rounded-ios-md bg-black/[0.025] px-3 py-2.5">
+    // 2026-09-20：展開塊外層已是 lg-float（寬屏）／lg-sheet 抽屉（窄屏），
+    // 內層不再自帶底色——玻璃只浮一層，參數直接排在玻璃面上。
+    <div className="flex flex-col gap-2 px-0.5 py-0.5">
       {common.length > 0 && (
         <dl className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3">
           {common.map((param) => (

@@ -116,9 +116,15 @@ test("既有字面未回退", () => {
   // 停止仍然接到 abort 端点，不是往对话里塞一句停止指令。
   assert.match(surface, /const onStopGeneration = useCallback/);
   assert.match(surface, /void abort\(\)/);
-  // 卡片在等选择时输入框仍然禁用。
-  assert.match(panel, /composerDisabled = disabled \|\| closed \|\| pendingQuestions\.length > 0 \|\| pendingConfirms\.length > 0/);
+  // 2026-09-20 Route C 重设计裁定：决策卡（question/confirm）在場不再锁
+  // composerDisabled（改由 composer 上缘 2px 蓝提示条提示「有卡待选」）。
+  // 这里锁收窄后的字面，且不许 pending 条件悄悄吃回来。
+  assert.match(panel, /composerDisabled = disabled \|\| closed/);
   assert.match(panel, /disabled=\{composerDisabled\}/);
-  // 推荐语区块的既有呈现语仍在（欢迎态没被忙碌态替换掉）。
-  assert.match(panel, /和智能体聊聊/);
+  assert.doesNotMatch(
+    panel.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1"),
+    /composerDisabled = disabled \|\| closed \|\| pending/,
+  );
+  // 空态邀问语（2026-09-20 改版值）仍在——欢迎态没被忙碌态替换掉。
+  assert.match(panel, /想做点什么？/);
 });

@@ -141,13 +141,21 @@ function hasNestedButtons(source: string): boolean {
   return false;
 }
 
-test("composer is disabled when session closed, and trims before sending", () => {
+test("composer is disabled only when the panel says so, and trims before sending", () => {
   // 面板把「disabled 属性或会话已关闭」折叠成一个布尔传下去。
-  // R9-3：question/confirm 掛起時輸入框保留但禁用（優先級用 disabled 表達，
-  // 不再用隱藏騰位），並換「等待卡片選擇…」占位提示。
-  assert.match(panel, /composerDisabled = disabled \|\| closed \|\| pendingQuestions\.length > 0 \|\| pendingConfirms\.length > 0/);
+  // 2026-09-20（Route C 重设计裁定）：决策卡（question/confirm）在場**不再锁
+  // 输入框**——旧契约（R9-3 死线 4）用 disabled + 「等待卡片选择…」表达
+  // 「在等你选择」，新契约改由 composer 上缘 2px 蓝提示条（见 decisionPending
+  // 正向断言）承担「有卡待选」的提示，发送照常走 onSend。composerDisabled
+  // 因此收窄为 disabled || closed，这条锁死它不许再悄悄吃回 pending 条件。
+  assert.match(panel, /composerDisabled = disabled \|\| closed/);
+  assert.doesNotMatch(
+    readCode(panel),
+    /composerDisabled = disabled \|\| closed \|\| pending/,
+    "决策卡不得再回魂锁 composer（2px 提示条才是新契约）",
+  );
   assert.match(panel, /disabled=\{composerDisabled\}/);
-  assert.match(panel, /等待卡片選擇/);
+  assert.match(panel, /先选上方方案，或直接补充要求/);
   // textarea 与发送按钮都必须跟随禁用。
   assert.match(composer, /disabled=\{disabled\}/);
   assert.match(composer, /disabled=\{disabled \|\| !canSend\}/);
@@ -156,6 +164,9 @@ test("composer is disabled when session closed, and trims before sending", () =>
   assert.match(composer, /const canSend = computeCanSend\(trimmed, readyRefs\.length, attachments\);/);
   // 空消息必须被拒绝：发送前 trim。
   assert.match(composer, /\.trim\(\)/);
+  // 决策卡在場的新提示：composer 上缘 2px 蓝提示条（不锁输入的替代回馈）。
+  assert.match(panel, /decisionPending \? \(/);
+  assert.match(panel, /h-\[2px\] rounded-full bg-ios-blue\/70/);
 });
 
 test("transcript is a polite live region and streaming is announced", () => {
@@ -231,12 +242,13 @@ test("audio card plays via native <audio> and keeps the disabled action contract
   assert.match(markup, /音乐/, "mediaKind=music 徽章显示成曲语义");
 });
 
-test("思維鏈預設展開：首次渲染即 open，沒有 reasoning 就不渲染 details", () => {
+test("思維鏈預設收合：首次渲染不展開，沒有 reasoning 就不渲染 details", () => {
   /*
-   * 2026-09-18 暴君裁定，推翻 08-25「預設收合、正文優先」的舊契約：思考過程是
-   * 使用者判斷答案可不可信的證據，預設就攤開；要收的人自己收一次。
-   * 靜態 markup 就是「首次渲染」（含歷史回放重建出來的條目）的字面證據——
-   * React 把布林屬性 open 序列化成 open=""（現場輸出的格式，不是猜的）。
+   * 2026-09-20 暴君批准（Route A，agent-chat-preview 驗收語彙）：推翻 09-18
+   * 「預設展開」的舊契約，回到正文至上——思考過程折疊殼改成一行「已思考」，
+   * 默認收合；要看的人自己點開。靜態 markup 就是「首次渲染」（含歷史回放
+   * 重建出來的條目）的字面證據——React 把布林屬性 open 序列化成 open=""，
+   * 默認收合＝序列化結果裡 open 屬性缺席。
    */
   const assistant = (overrides: Partial<AgentAssistantTextItem>) =>
     createElement(AgentMessageBubble, {
@@ -251,14 +263,14 @@ test("思維鏈預設展開：首次渲染即 open，沒有 reasoning 就不渲�
       } as AgentAssistantTextItem,
     });
 
-  // ① 串流中（還沒有正文）＝ 首幀就展開。
+  // ① 串流中（還沒有正文）＝ 首幀就是收合的「已思考」一行。
   const streaming = renderToStaticMarkup(assistant({}));
-  assert.match(streaming, /<details[^>]*\sopen=""/, "串流中的思維鏈首幀就要展開");
-  assert.match(streaming, /思考過程/, "折疊殼仍是原生 summary，文案不動");
+  assert.doesNotMatch(streaming, /<details[^>]*\sopen=""/, "串流中的思維鏈默認收合（正文至上）");
+  assert.match(streaming, /已思考/, "折疊殼仍是原生 summary，文案＝已思考");
 
-  // ② 已完成（streaming:false、正文已到）＝ 同樣展開。展開不得只在串流期成立。
+  // ② 已完成（streaming:false、正文已到）＝ 同樣收合。收合不得只在串流期成立。
   const settled = renderToStaticMarkup(assistant({ streaming: false, text: "答案是 6, 7, 8" }));
-  assert.match(settled, /<details[^>]*\sopen=""/, "已完成條目同樣預設展開");
+  assert.doesNotMatch(settled, /<details[^>]*\sopen=""/, "已完成條目同樣默認收合");
 
   // ③ 沒有 reasoning 的助理條目：連 details 都不渲染，不留空殼。
   const noReasoning = renderToStaticMarkup(assistant({ reasoning: undefined, text: "只有正文" }));
@@ -266,7 +278,7 @@ test("思維鏈預設展開：首次渲染即 open，沒有 reasoning 就不渲�
   assert.match(noReasoning, /只有正文/, "正文不受影響");
 
   /*
-   * ④ 手動收合不被重渲染打回：open 受控於 state，而 state 只有 toggle 一個寫入口；
+   * ④ 手動展開不被重渲染打回：open 受控於 state，而 state 只有 toggle 一個寫入口；
    * 舊的「streaming && !item.text 才給 open」條件式屬性必須絕跡——它會在串流
    * 結束那一幀重新決定開關，正是「收起又被攤回去」的成因。
    */
@@ -276,6 +288,7 @@ test("思維鏈預設展開：首次渲染即 open，沒有 reasoning 就不渲�
   const stateWrites = code.match(/setReasoningOpen\(/g) ?? [];
   assert.equal(stateWrites.length, 1, "setReasoningOpen 只准有 toggle 這一個寫入口");
   assert.doesNotMatch(code, /item\.streaming && !item\.text/, "自動展開條件已拆掉");
+  assert.match(code, /useState\(false\)/, "seed 必須是 false（默認收合）");
 });
 
 test("reconnecting shows an unobtrusive retry affordance", () => {
@@ -295,7 +308,10 @@ test("empty open session shows a prompt to start, not a blank void", () => {
   // 第二輪就緒優化刀A：空態不等 SSE open——idle/connecting/open 都顯示，
   // 只排除 reconnecting/closed（沒壞就先給歡迎語）。
   assert.match(panel, /items\.length === 0 && connection !== "reconnecting" && connection !== "closed"/);
-  assert.match(panel, /和智能体聊聊/);
+  // 2026-09-20 空態重構：邀問語「想做点什么？」，舊「和智能体聊聊」連同 hint
+  // （说一句话，它自动选好模型、风格和比例）一起下線。
+  assert.match(panel, /想做点什么？/);
+  assert.doesNotMatch(readCode(panel), /和智能体聊聊/, "舊空態歡迎語不得回魂");
 });
 
 test("D-24 half sentence is carried into the composer, never auto-sent", () => {
@@ -349,9 +365,17 @@ test("D-17 有存档时默认开新对话，不拦人做选择题", () => {
   assert.match(hook, /startNewSession/);
   assert.match(surface, /onStartNewSession/);
   assert.match(surface, /AI 助理<\/h2>/);
-  assert.match(surface, /bg-emerald-500 animate-pulse/);
-  assert.match(surface, /bg-slate-300/);
-  assert.match(surface, /aria-label="历史记录"/);
+  /*
+   * 2026-09-20 Route D 頭部重構：常駐呼吸绿点（bg-emerald-500 animate-pulse）與
+   * bg-slate-300 已移除——新頭部＝lg-tint-blue 圆标 + SquarePen（开新对话）/X
+   * （收起）/MoreHorizontal（⋯）三顆幽靈鈕；「历史记录」触发鈕收进 ⋯ 選單，
+   * aria-label 换成 title="对话历史" 文字行。
+   */
+  const surfaceCode = readCode(surface);
+  assert.match(surface, /lg-tint-blue/);
+  assert.doesNotMatch(surfaceCode, /bg-emerald-500 animate-pulse/, "常駐呼吸绿点已移除");
+  assert.doesNotMatch(surfaceCode, /bg-slate-300/, "bg-slate-300 已移除");
+  assert.match(surface, /title="对话历史"/);
   assert.match(surface, /aria-label="开新对话"/);
   assert.match(surface, /aria-label="收起"/);
   // 2026-09-05 暴君裁定：多功能欄彈窗水平置中（fixed left-1/2 + -translate-x-1/2），
@@ -423,13 +447,14 @@ test("09-18 送出在途：空輸入也必須是轉圈送出鈕（aria-busy + sp
   assert.doesNotMatch(markup, /lucide-send/, "在途不得同时渲染送图标");
   // 連點在属性层就挡死（邏輯层还有 sendingRef / externalSendPending 两道）。
   assert.match(markup, /disabled="" aria-label="发送"/, "在途时送出钮必须 disabled（防连点）");
-  // 样式沿用既有词汇：蓝底 + cursor-wait——在途是「正在送」不是「不可用」。
-  assert.match(markup, /bg-ios-blue/, "在途仍是既有蓝底钮，不退回灰钮");
+  // 样式沿用 2026-09-20 改版词汇：主色深底 #2d3142 + cursor-wait——
+  // 在途是「正在送」不是「不可用」。
+  assert.match(markup, /bg-\[#2d3142\]/, "在途仍是既有主色深底钮，不退回灰钮");
   assert.match(markup, /cursor-wait/, "在途带既有 cursor-wait");
   assert.doesNotMatch(
     markup,
-    /disabled:bg-\[rgba\(120,120,128,0\.18\)\]/,
-    "在途期间不上灰阶 disabled 样式（白轉圈压在灰底上等于没有回馈）",
+    /disabled:bg-\[#bcc2ca\]/,
+    "在途期间不上浅灰 disabled 样式（白轉圈压在灰底上等于没有回馈）",
   );
 });
 
@@ -440,10 +465,11 @@ test("09-18 非在途：送出鈕回到送圖示，不得常轉圈", () => {
   assert.doesNotMatch(markup, /aria-busy="true"/, "常態不得宣稱在途");
   assert.match(markup, /class="lucide lucide-send[^"]*"/, "常態渲染送图标");
   assert.doesNotMatch(markup, /lucide-loader-circle/, "常態不得有转圈图标");
-  // 常態且輸入框空：既有 disabled 灰阶样式逐字保留（这时候「不可用」才是对的语义）。
+  // 常態且輸入框空：disabled 样式逐字保留（#bcc2ca 浅灰，2026-09-20 改版值；
+  // 这时候「不可用」才是对的语义）。
   assert.match(
     markup,
-    /disabled:bg-\[rgba\(120,120,128,0\.18\)\]/,
+    /disabled:bg-\[#bcc2ca\]/,
     "非在途的 disabled 样式原样保留",
   );
 });
@@ -549,7 +575,8 @@ test("D-26 stop button promises only what the gateway can deliver", () => {
   // 网关现在有 abort 端点：/session/:id/abort 打到 opencode，正在跑的一轮直接终止。
   // 按钮文案「立即中止」是准确描述，不再要求「当前这张跑完就停」。
   assert.match(batchProgress, /立即中止当前这轮生成/);
-  assert.match(batchProgress, /停下/);
+  assert.match(batchProgress, /停止/);
+  assert.doesNotMatch(readCode(batchProgress), /停下/, "旧「停下」文案不得回魂");
   // 回合结束时没有东西可停，按钮就不该在。
   assert.match(surface, /onStopGeneration=\{state\.turnActive \? onStopGeneration : undefined\}/);
   // 停止按钮接到 abort 端点（hook 的 abort），不是往对话里送一句停止指令。
@@ -564,7 +591,10 @@ test("batch progress does not announce a denominator it does not have", () => {
   assert.doesNotMatch(readCode(batchProgress), /aria-valuenow/);
   assert.match(batchProgress, /role="status"/);
   // 已出张数与已花币都是从 transcript 真实条目数出来的，不是估的。
-  assert.match(batchProgress, /已出 \{images\} 张/);
+  // 2026-09-20 Route B：无总数时的诚实呈现文案由「已出 X 张」改为
+  // 「正在生成 X 张」（进行中的动态语义，不是完成时的静态计数）。
+  assert.match(batchProgress, /正在生成 \{images\} 张/);
+  assert.doesNotMatch(readCode(batchProgress), /已出 \{images\} 张/, "旧「已出」文案不得回魂");
 });
 
 test("D-23 params are a bottom drawer on narrow screens, an accordion on wide", () => {
@@ -959,7 +989,8 @@ test("subagent started→done settles the card, turn.done retires it into an exp
   for (const it of all) {
     assert.match(markupAll, new RegExp(it.label), "内联列表全量渲染，不再有名额裁剪");
   }
-  assert.match(markupAll, /查看全部 4 个子任务/, "折叠头计数与列表同源");
+  // 2026-09-20 Route B：折叠头文案改「派出 N 个子代理」（Grok 级细行语言）。
+  assert.match(markupAll, /派出 4 个子代理/, "折叠头计数与列表同源");
 });
 
 test("F2 工具卡人話化：默認渲染只有人話，函數名與 raw JSON 收進展開抽屜", () => {
@@ -1152,9 +1183,10 @@ test("subagent bar：running 逐字滑窗（append-only + 立即釘右緣）、�
   assert.match(noActivityMarkup, /第一段 第二段 收尾/, "沒有 activity 時回落 text");
   // 空输出诚实文案，不假造内容（running 卡的 fallback「正在输出…」）。
   assert.match(src, /正在输出…/);
-  // 2026-09-19 暴君裁定：「查看全部 N 个子任务」折叠头放列表上方，默认展开可收合；
+  // 2026-09-19 暴君裁定：「折叠头放列表上方，默认展开可收合；
   // 弹出面板（lg-sheet/关闭钮/Esc）与置顶名额裁剪两套重复 UI 下线。
-  assert.match(src, /查看全部 \{items\.length\} 个子任务/);
+  // 2026-09-20 Route B：折叠头文案改「派出 N 个子代理」（无底色细行语言）。
+  assert.match(src, /派出 \{items\.length\} 个子代理/);
   assert.match(src, /useState\(true\)/, "折叠头默认展开");
   assert.match(src, /aria-expanded=\{open\}/, "折叠头带展开语义（可收合）");
   assert.ok(!/SubagentMenu/.test(readCode(src)), "弹出面板已下线（只有一份内联列表）");

@@ -11,6 +11,7 @@ import { AgentDirectorCard } from "./AgentDirectorCard";
 import { AgentNoticeRow } from "./AgentNoticeRow";
 import { AgentSubagentReportCard } from "./AgentSubagentReportCard";
 import { AgentPlanCard } from "./AgentPlanCard";
+import { NEAR_BOTTOM_PX } from "./scroll-threshold";
 
 export interface AgentTranscriptProps {
   items: AgentChatState["items"];
@@ -59,7 +60,8 @@ function AgentTranscriptComponent({ items, imageActions, videoActions, audioActi
       if (!scrollerRef.current) scrollerRef.current = findScrollParent(list);
       const scroller = scrollerRef.current;
       if (!scroller) return;
-      const nearBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 48;
+      const nearBottom =
+        scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < NEAR_BOTTOM_PX;
       if (nearBottom) scroller.scrollTop = scroller.scrollHeight;
     });
     ro.observe(list);

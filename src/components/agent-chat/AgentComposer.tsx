@@ -648,10 +648,17 @@ function AgentComposerComponent({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
       className={cn(
-        "agent-composer relative flex items-end gap-2 rounded-[20px] bg-[rgba(120,120,128,0.07)] px-3 py-1.5 touch-manipulation [-webkit-tap-highlight-color:transparent] focus-within:ring-2 focus-within:ring-ios-blue/30",
+        "agent-composer lg-float relative flex items-end gap-2 rounded-[22px] px-3 py-1.5 touch-manipulation [-webkit-tap-highlight-color:transparent] outline-none focus-within:ring-[1.5px] focus-within:ring-ring/60",
         dragActive && "!ring-2 !ring-ios-blue/45 !bg-ios-blue/[0.04]",
       )}
     >
+      {/* 顶缘 specular 亮线（MASTER.md §5 / DESIGN.md §5 权威配方，2026-09-20
+          预览验收语汇）：lg-float 玻璃材质要有「上缘受光」的质感；纯装饰，
+          不吃鼠标事件。 */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-[inherit] bg-gradient-to-r from-transparent via-white to-transparent opacity-80"
+      />
       {/* 拖拽悬停提示：只是视觉反馈，不吃鼠标事件（pointer-events-none）。 */}
       {dragActive && (
         <div
@@ -672,10 +679,10 @@ function AgentComposerComponent({
         aria-label="添加附件"
         title="添加附件（图片 / 视频 / 文档）"
         className={cn(
-          "flex h-11 w-11 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-full",
-          "bg-ios-blue/10 text-ios-blue transition-colors",
+          "flex h-11 w-11 shrink-0 items-center justify-center rounded-full",
+          "text-muted-foreground transition-colors",
           "touch-manipulation [-webkit-tap-highlight-color:transparent]",
-          "hover:bg-ios-blue/[0.16] active:bg-ios-blue/[0.22] focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30",
+          "hover:text-foreground hover:bg-white/55 active:bg-white/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
           "disabled:cursor-not-allowed disabled:bg-transparent disabled:text-foreground/45",
         )}
       >
@@ -805,12 +812,10 @@ function AgentComposerComponent({
       {onStop && !canSend && !sending ? (
         /*
           D-26 补全：生成中且输入框为空 → 送出钮位置渲染停止钮。
-          样式逐行复用 AgentBatchProgress 的「停下」钮（Square 图标 +
-          bg-destructive/[0.09] text-destructive + transition-colors +
-          focus-visible:ring-destructive/30 + [touch-action:manipulation]），
-          只改两处：外框换成与送出钮完全同尺寸的圆钮（h-11 w-11
-          sm:h-8 sm:w-8 rounded-full，切换零跳动）；去掉文字（圆钮放不下），
-          aria-label 与 title 原样保留。
+          2026-09-20 视觉改版（预览验收语汇）：红底方块 → 幽灵红文字钮
+          （text-ios-red + hover 淡红底），44px 触控区，与送出钮同尺寸圆钮
+          （h-11 w-11 rounded-full，切换零跳动）；aria-label / title / 图标
+          （Square + Loader2 stopPending spinner）原样保留。
 
           09-18：再补一个条件 !sending —— 本輪還沒开始（含面板餵進來的在途，
           sending 已收敛成「内部或面板在途」）时不许被停止钮盖掉：那一段真空期
@@ -823,7 +828,8 @@ function AgentComposerComponent({
           aria-label="中止助理生成"
           title={stopPending ? "正在中止，请稍候…" : "立即中止当前这轮生成"}
           className={cn(
-            "flex h-11 w-11 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-full bg-destructive/[0.09] text-destructive transition-colors duration-150 active:bg-destructive/[0.16] focus:outline-none focus-visible:ring-2 focus-visible:ring-destructive/30 [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]",
+            "flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ios-red transition-colors duration-150 [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]",
+            "hover:bg-ios-red/[0.07] active:bg-ios-red/[0.12] focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-red/30",
             stopPending && "disabled:cursor-wait disabled:opacity-60",
           )}
         >
@@ -841,16 +847,18 @@ function AgentComposerComponent({
           aria-label="发送"
           aria-busy={sending}
           className={cn(
-            "flex h-11 w-11 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-full transition-all duration-200",
+            "flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-all duration-200",
             "touch-manipulation [-webkit-tap-highlight-color:transparent]",
-            "bg-ios-blue text-white shadow-[0_2px_8px_rgba(0,122,255,0.32)]",
-            "hover:opacity-90 active:scale-[0.94]",
-            "focus:outline-none focus:ring-2 focus:ring-ios-blue/40",
+            // 2026-09-20 视觉改版（预览验收语汇）：主色 #2d3142 + signature
+            // 阴影 + hover 微抬升；disabled 换浅灰 #bcc2ca。
+            "bg-[#2d3142] text-white shadow-[0_8px_20px_rgba(45,49,66,0.22)]",
+            "hover:-translate-y-[1px] hover:bg-[#272b39] active:scale-[0.94]",
+            "focus:outline-none focus:ring-2 focus:ring-ring/40",
             // 在途期间不上 disabled 的灰階：在途是「正在送」不是「不可用」，
-            // 白转圈压在浅灰底上等于没有回馈（蓝底＋白转圈才看得见）。
+            // 白转圈压在浅灰底上等于没有回馈（深底＋白转圈才看得见）。
             // 非在途时 disabled 样式逐位元照旧（会话关闭 / 输入框空）。
             !sending &&
-              "disabled:cursor-not-allowed disabled:bg-[rgba(120,120,128,0.18)] disabled:text-white/80 disabled:shadow-none",
+              "disabled:cursor-not-allowed disabled:bg-[#bcc2ca] disabled:text-white/80 disabled:shadow-none",
             // 送出进行中：光标与缩放反馈都收掉，连点由 sendingRef 在逻辑层挡。
             sending && "cursor-wait active:scale-100",
           )}

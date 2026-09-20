@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, type ComponentType } from "react";
+import { memo, type ComponentType, type ReactNode } from "react";
 import { Check, Coins, Loader2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AgentToolCallItem } from "@/lib/agent-chat-types";
@@ -14,20 +14,22 @@ export interface AgentToolCardProps {
 interface ToolStatusMeta {
   label: string;
   Icon: ComponentType<{ className?: string; "aria-hidden"?: boolean | "true" | "false" }>;
-  tone: string;
-  /** 徽章底色：液态玻璃着色层（lg-tint-*），窄屏上比纯文字更可读。 */
-  badge: string;
+  /** 行首状态图标色（16px 小图标，无壳无底）。 */
+  iconTone: string;
+  /** 行尾状态词颜色：运行＝ios-blue、完成＝灰（绿只做 Check 点缀）、失败＝唯一红。 */
+  wordTone: string;
 }
 
 // 状态语义（标签/是否失败/进行中）查 agent-task-status.ts 单一语义表；图标与
-// 徽章着色是本卡的展示层，留在这里。running/pending 标签尾缀「…」是展示装饰。
+// 状态词着色是本行的展示层，留在这里。running/pending 标签尾缀「…」是展示装饰。
 const STATUS_META: Record<AgentToolCallItem["status"], ToolStatusMeta> = {
-  running: { label: `${AGENT_TASK_STATUS_TABLE.running.label}…`, Icon: Loader2, tone: "text-ios-blue", badge: "lg-tint-blue" },
-  // 中继態：任務已提交、成品未到（artifact_pending）。金色＝钱花出去了、东西
-  // 还在路上；等 image/video/audio.done 或 image.failed 才转 ok/failed。
-  pending: { label: `${AGENT_TASK_STATUS_TABLE.pending.label}…`, Icon: Loader2, tone: "text-[rgba(120,90,20,0.85)]", badge: "lg-tint-gold" },
-  ok: { label: AGENT_TASK_STATUS_TABLE.ok.label, Icon: Check, tone: "text-[#248A3D]", badge: "lg-tint-green" },
-  failed: { label: AGENT_TASK_STATUS_TABLE.failed.label, Icon: X, tone: "text-destructive", badge: "lg-tint-red" },
+  running: { label: `${AGENT_TASK_STATUS_TABLE.running.label}…`, Icon: Loader2, iconTone: "text-ios-blue/70", wordTone: "text-ios-blue" },
+  // 中继態：任務已提交、成品未到（artifact_pending）。金色胶囊已下线（0920 裁定），
+  // pending 与 running 同为「还在跑」：ios-blue 转圈，等 image/video/audio.done
+  // 或 image.failed 才转 ok/failed。
+  pending: { label: `${AGENT_TASK_STATUS_TABLE.pending.label}…`, Icon: Loader2, iconTone: "text-ios-blue/70", wordTone: "text-ios-blue" },
+  ok: { label: AGENT_TASK_STATUS_TABLE.ok.label, Icon: Check, iconTone: "text-ios-green", wordTone: "text-foreground/45" },
+  failed: { label: AGENT_TASK_STATUS_TABLE.failed.label, Icon: X, iconTone: "text-ios-red", wordTone: "text-ios-red" },
 };
 
 /** 展示用的金币数：整数原样，浮点去掉多余尾巴。 */
@@ -220,51 +222,88 @@ function AgentToolCardComponent({ item }: AgentToolCardProps) {
   // pending 没有进度帧（进度是工具内部的计数，提交出去后由成品事件定案），不得假造。
   const progress = running ? item.progress : undefined;
   const pct = progress ? Math.min(100, Math.round((progress.done / progress.total) * 100)) : 0;
-  // 有真实分母时徽章直接报计数「3/8」，比「运行中…」信息量大且不虚报。
+  // 有真实分母时状态词直接报计数「3/8」，比「运行中…」信息量大且不虚报。
   const badgeLabel = progress ? `${progress.done}/${progress.total}` : status.label;
   // F2：默认渲染只有人话——人话标题 + 人话摘要；函数名与完整参数进展开抽屉。
   const displayName = toolDisplayName(item.tool);
   const preview = item.argsSummary !== undefined ? toolArgPreview(item.argsSummary) : undefined;
 
-  return (
-    <div className="agent-rise flex flex-col gap-2 rounded-[18px] bg-[rgba(120,120,128,0.06)] px-3.5 py-3">
-      <div className="flex items-center gap-2.5">
-        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white text-muted-foreground">
-          <status.Icon className={cn("h-4 w-4", spinning && "animate-spin")} aria-hidden="true" />
+  // 工具行（2026-09-20 Grok 级无底色细行）：16px 状态图标 + 人话标题 + 摘要暗字
+  // 截断吃满剩余宽度 + 右端金币（现场币色）与状态词。无参数可展开时行不当按钮
+  // （render div）；有参数时整行是 AgentParamDisclosure 的触发器（点行展开）。
+  const renderRow = (api: { open: boolean; toggle?: () => void }): ReactNode => {
+    const content = (
+      <>
+        <status.Icon
+          className={cn("h-4 w-4 shrink-0", spinning && "animate-spin", status.iconTone)}
+          aria-hidden="true"
+        />
+        <span className="shrink-0 text-ios-footnote font-medium text-foreground/75">{displayName}</span>
+        <span
+          className="min-w-0 flex-1 truncate text-ios-footnote text-foreground/45"
+          title={preview}
+        >
+          {preview}
         </span>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-ios-subhead font-semibold text-foreground">
-            {displayName}
-          </p>
-          {preview !== undefined && (
-            <p className="mt-0.5 truncate text-ios-caption1 text-muted-foreground" title={preview}>
-              {preview}
-            </p>
-          )}
-          {item.costCoins !== undefined && (
-            <p className="mt-0.5 flex items-center gap-1 text-ios-caption1 text-[rgba(120,90,20,0.85)]">
-              <Coins className="h-3 w-3" aria-hidden="true" />
-              消耗 {formatCoins(item.costCoins)} 金币
-            </p>
-          )}
-        </div>
-        {/* 状态徽章：着色胶囊比纯文字在窄屏更可读；whitespace-nowrap 保证不被
-            长工具名挤出卡片（工具名那一侧自己 truncate 让位）。 */}
+        {item.costCoins !== undefined && (
+          <span className="flex shrink-0 items-center gap-1 text-ios-footnote tabular-nums text-[rgba(120,90,20,0.85)]">
+            <Coins className="h-3 w-3" aria-hidden="true" />
+            {formatCoins(item.costCoins)} 金币
+          </span>
+        )}
+        {/* 状态词（无胶囊）：whitespace-nowrap 保证不被长工具名挤出行
+            （工具名那一侧自己 truncate 让位）。 */}
         <span
           className={cn(
-            "inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2.5 py-1 text-ios-footnote font-semibold tabular-nums",
-            status.badge,
-            status.tone,
+            "shrink-0 whitespace-nowrap text-ios-footnote font-medium tabular-nums",
+            status.wordTone,
           )}
         >
           {badgeLabel}
         </span>
-      </div>
+      </>
+    );
+    if (api.toggle === undefined) {
+      return (
+        <div className="flex min-h-11 w-full items-center gap-2 rounded-[12px] px-2 -mx-2">
+          {content}
+        </div>
+      );
+    }
+    return (
+      <button
+        type="button"
+        onClick={api.toggle}
+        aria-expanded={api.open}
+        aria-controls={`agent-args-${item.id}-params`}
+        className="flex min-h-11 w-full cursor-pointer touch-manipulation items-center gap-2 rounded-[12px] px-2 -mx-2 text-left transition-colors hover:bg-white/55 select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 [-webkit-tap-highlight-color:transparent]"
+      >
+        {content}
+      </button>
+    );
+  };
+
+  return (
+    <div className="agent-rise flex flex-col gap-1">
+      {/* D-19 分层参数 + D-23 窄屏底部抽屉。展开与布局切换都归 AgentParamDisclosure，
+          这一行只负责说「这次调了什么工具、花了多少」。整行触发：点行展开参数。
+          花费不往下传：行内已经常驻显示，展开后再来一次是噪音。
+          （AgentParamCard 保留 costCoins 是给没有行头的挂载点用的。） */}
+      {item.argsSummary !== undefined ? (
+        <AgentParamDisclosure
+          argsSummary={item.argsSummary}
+          idPrefix={`agent-args-${item.id}`}
+          toolName={item.tool}
+          trigger={(api) => renderRow(api)}
+        />
+      ) : (
+        renderRow({ open: false })
+      )}
 
       {/* 逐镜/逐项进度：真实分母才画条（generation-progress-* 全局样式，reduced-motion
           已被 globals.css 兜住）。role=progressbar 带真实 valuenow/valuemax，不虚报。 */}
       {progress && (
-        <div className="flex flex-col gap-1.5">
+        <div className="ml-[22px] flex flex-col gap-1">
           <p className="text-ios-caption1 leading-[1.4] text-muted-foreground">
             {progress.label ?? "处理中"} · 已完成 {progress.done}/{progress.total}
           </p>
@@ -284,21 +323,9 @@ function AgentToolCardComponent({ item }: AgentToolCardProps) {
       {/* 失败时的人类可读错误（R10-1）：gateway 的 tool.result error.human_message，
           让「红卡刷屏」不再是无声死循环——用户看得到它在修正什么。 */}
       {taskStatusTone(item.status).isFailure && item.error && (
-        <p className="rounded-xl bg-destructive/10 px-2.5 py-1.5 text-ios-caption1 leading-relaxed text-destructive">
+        <p className="ml-[22px] rounded-xl bg-destructive/10 px-2.5 py-1.5 text-ios-caption1 leading-relaxed text-destructive">
           {item.error}
         </p>
-      )}
-
-      {/* D-19 分层参数 + D-23 窄屏底部抽屉。展开与布局切换都归 AgentParamDisclosure，
-          这张卡只负责说「这次调了什么工具、花了多少」。
-          花费不往下传：卡片头已经常驻显示，展开后再来一次是噪音。
-          （AgentParamCard 保留 costCoins 是给没有卡头的挂载点用的。） */}
-      {item.argsSummary !== undefined && (
-        <AgentParamDisclosure
-          argsSummary={item.argsSummary}
-          idPrefix={`agent-args-${item.id}`}
-          toolName={item.tool}
-        />
       )}
     </div>
   );

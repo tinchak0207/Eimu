@@ -48,8 +48,10 @@ export function CanvasChatWorkstation({
   return (
     <>
       {/* 畫布工作站樣式：面板 fixed 浮於畫布上、兩態寬度過渡、行動端改底部抽屜。
-          Liquid glass 紀律：面板是唯一一層玻璃卡——內層 PromptInput 的 lg-card
-          在工作站態拍扁（透明、無影、無圓角），不許卡中卡堆疊。 */}
+          2026-09-20 拆覆蓋層（暴君批准的 agent-chat-preview 視覺）：面板殼不再
+          壓純白實底——殼退為形狀宿主（圓角＋陰影），讓內層 PromptInput 的
+          section.lg-card 自己的玻璃材質（0.72 白玻璃＋blur＋頂緣 specular 亮線）
+          透出來，畫布在背後可折射。08-25「白殼唯一卡」裁定由 09-20 預覽裁定取代。 */}
       <style>{`
             @keyframes canvas-ws-fade {
               from { opacity: 0; }
@@ -91,14 +93,12 @@ export function CanvasChatWorkstation({
               min-height: 0;
               max-height: calc(100dvh - 1.5rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
               max-width: calc(100vw - 1.5rem);
-              /* 面板為實心卡片（純白 100% 不透底），徹底阻斷背景透光 */
-              background: #ffffff !important;
-              border: 1px solid rgba(0, 0, 0, 0.08);
-              border-radius: 28px;
-              box-shadow: 0 20px 48px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(0, 0, 0, 0.04);
+              /* 殼退為形狀宿主：底色/邊框交給內層 section.lg-card 的玻璃材質
+                 （0.72 白玻璃＋blur＋specular 亮線），畫布在背後可折射。 */
+              background: transparent;
+              border-radius: 30px;
               overflow: hidden;
               transition: width 0.32s cubic-bezier(0.2, 0.8, 0.2, 1);
-              animation: canvas-ws-panel-in 0.36s cubic-bezier(0.2, 0.8, 0.2, 1);
               /* header 彈窗（歷史/資產/設定）水平置中用的頂部偏移。 */
               --agent-pop-top: calc(0.75rem + env(safe-area-inset-top, 0px) + 3.25rem);
             }
@@ -114,12 +114,15 @@ export function CanvasChatWorkstation({
               height: 44px !important;
               min-width: 0 !important;
               max-width: none !important;
-              background: #ffffff !important;
+              overflow: hidden;
+              animation: canvas-ws-fab-in 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+              /* FAB 態殼自身給玻璃外觀（此態無 lg-card 內層可依賴）。 */
+              background: rgba(255, 255, 255, 0.72);
               border: 1px solid rgba(0, 0, 0, 0.08);
               border-radius: 999px;
               box-shadow: 0 8px 32px rgba(0, 0, 0, 0.10);
-              overflow: hidden;
-              animation: canvas-ws-fab-in 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+              backdrop-filter: blur(40px) saturate(180%);
+              -webkit-backdrop-filter: blur(40px) saturate(180%);
             }
             @keyframes canvas-ws-fab-in {
               from { opacity: 0; transform: scale(0.6); }
@@ -132,7 +135,7 @@ export function CanvasChatWorkstation({
               overflow-y: auto;
               padding: 0;
               overscroll-behavior: contain;
-              background: #ffffff !important;
+              background: transparent;
             }
             /* 面板態聊天區填滿面板：scroll 容器變縱向 flex、不再自己滾，
                滾動收進 transcript 內部（agent 面的固定高在 46dvh 抽屜裡會溢出被裁）。 */
@@ -141,18 +144,15 @@ export function CanvasChatWorkstation({
               flex-direction: column;
               overflow: hidden;
               overflow-y: hidden;
+              padding: 0;
             }
             .canvas-chat-scroll-fill > * { min-height: 0; }
             .canvas-chat-scroll-fill > section.lg-card {
               flex: 1 1 0%;
               min-height: 0;
               overflow: hidden;
-              background: #ffffff !important;
-              box-shadow: none !important;
-              border: none !important;
-            }
-            .canvas-chat-scroll-fill section {
-              background: #ffffff !important;
+              margin: 0;
+              border-radius: 30px;
             }
             .canvas-chat-scroll-fill > :not(section.lg-card) { flex-shrink: 0; }
             .agent-composer-anchor { flex-shrink: 0; }
@@ -168,9 +168,8 @@ export function CanvasChatWorkstation({
             }
             .canvas-chat-resize:hover { background: linear-gradient(to right, transparent, rgba(0, 122, 255, 0.25)); }
             @media (prefers-reduced-motion: reduce) {
-              .canvas-ws-overlay, .canvas-chat-panel { animation: none; }
-              .canvas-chat-panel { transition: none; }
-              .canvas-ws-overlay { transition: none; }
+              .canvas-ws-overlay { animation: none; transition: none; }
+              .canvas-chat-rail { animation: none; }
             }
             @media (max-width: 767px) {
               /* 2026-09-05 暴君裁定：手機端 agent 態 = 全螢幕聊天，
@@ -187,21 +186,16 @@ export function CanvasChatWorkstation({
                 max-width: none;
                 max-height: none;
                 border-radius: 0;
-                border: none;
-                box-shadow: none;
+                background: transparent;
                 padding-top: env(safe-area-inset-top, 0px);
                 padding-bottom: env(safe-area-inset-bottom, 0px);
                 --agent-pop-top: calc(env(safe-area-inset-top, 0px) + 3.25rem);
               }
-              /* FAB 態手機位置：靠左上角（導航欄下方）；還原圓形膠囊外觀
-                 （全螢幕面板規則把圓角/邊框/陰影拍平了，rail 要蓋回來）。 */
+              /* FAB 態手機位置：靠左上角（導航欄下方）。 */
               .canvas-chat-rail {
                 top: calc(5rem + env(safe-area-inset-top, 0px));
                 left: 0.5rem;
-                border-radius: 999px;
-                border: 1px solid rgba(0, 0, 0, 0.08);
-                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.10);
-                padding: 0;
+                border-radius: 0;
               }
               .canvas-chat-rail::before { display: none; }
               .canvas-chat-resize { display: none; }

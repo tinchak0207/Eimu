@@ -11,7 +11,7 @@
 // 展开的东西继续展开，不会因为换布局就莫名收起来，也不会留一层
 // 关不掉的遮罩在屏幕上。
 
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
 import { ChevronDown, SlidersHorizontal, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useIsNarrow } from "@/hooks/use-is-narrow";
@@ -23,9 +23,19 @@ export interface AgentParamDisclosureProps {
   idPrefix: string;
   /** 抽屉标题里的工具名，让人知道这张参数属于哪次调用。 */
   toolName?: string;
+  /**
+   * 整行触发器（2026-09-20 工具行化）：宿主把整行（通常是无底色细行）交给
+   * 这里渲染，点行即展开；ref 必须挂到那个按钮上（抽屉关闭后焦点还原用）。
+   * 缺席时回落默认「查看参数」按钮，其他挂载点行为不变。
+   */
+  trigger?: (api: {
+    open: boolean;
+    toggle: () => void;
+    ref: RefObject<HTMLButtonElement | null>;
+  }) => ReactNode;
 }
 
-export function AgentParamDisclosure({ argsSummary, idPrefix, toolName }: AgentParamDisclosureProps) {
+export function AgentParamDisclosure({ argsSummary, idPrefix, toolName, trigger }: AgentParamDisclosureProps) {
   const [open, setOpen] = useState(false);
   // F2：展开区在「首次展开」之前不挂载——默认渲染（DOM）里不许有 raw JSON /
   // 原始函数名，只有展开过一次才留在树上（关回去仍有收起动画，不闪断）。
@@ -74,25 +84,29 @@ export function AgentParamDisclosure({ argsSummary, idPrefix, toolName }: AgentP
 
   return (
     <>
-      <button
-        ref={triggerRef}
-        type="button"
-        onClick={toggle}
-        aria-expanded={open}
-        aria-controls={`${idPrefix}-params`}
-        className="inline-flex min-h-11 w-fit cursor-pointer touch-manipulation items-center gap-1.5 self-start rounded-full px-2.5 text-ios-subhead font-medium text-ios-blue/[0.92] transition-colors duration-200 hover:text-ios-blue active:bg-ios-blue/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 motion-reduce:transition-none [-webkit-tap-highlight-color:transparent]"
-      >
-        {/* 窄屏点开的是抽屉，图标跟着语义换：手风琴才有「转箭头」这回事。 */}
-        {narrow ? (
-          <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
-        ) : (
-          <ChevronDown
-            className={cn("h-4 w-4 transition-transform duration-200 motion-reduce:transition-none", open && "rotate-180")}
-            aria-hidden="true"
-          />
-        )}
-        {open && !narrow ? "收起参数" : "查看参数"}
-      </button>
+      {trigger ? (
+        trigger({ open, toggle, ref: triggerRef })
+      ) : (
+        <button
+          ref={triggerRef}
+          type="button"
+          onClick={toggle}
+          aria-expanded={open}
+          aria-controls={`${idPrefix}-params`}
+          className="inline-flex min-h-11 w-fit cursor-pointer touch-manipulation items-center gap-1.5 self-start rounded-full px-2.5 text-ios-subhead font-medium text-ios-blue/[0.92] transition-colors duration-200 hover:text-ios-blue active:bg-ios-blue/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 motion-reduce:transition-none [-webkit-tap-highlight-color:transparent]"
+        >
+          {/* 窄屏点开的是抽屉，图标跟着语义换：手风琴才有「转箭头」这回事。 */}
+          {narrow ? (
+            <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
+          ) : (
+            <ChevronDown
+              className={cn("h-4 w-4 transition-transform duration-200 motion-reduce:transition-none", open && "rotate-180")}
+              aria-hidden="true"
+            />
+          )}
+          {open && !narrow ? "收起参数" : "查看参数"}
+        </button>
+      )}
 
       {narrow ? (
         drawerOpen && (
@@ -138,16 +152,19 @@ export function AgentParamDisclosure({ argsSummary, idPrefix, toolName }: AgentP
               直接截斷（.agent-args-inner 的 overflow:hidden），不設內部捲軸——
               卡內滾動手勢一律冒泡給外層，否則巨型參數卡會吞掉整屏滾動。 */}
           <div className="agent-args-inner max-h-[60dvh]" style={{ overflow: "clip" }}>
-            {/* F2：原始函数名与完整参数只在展开后挂载（默认渲染不含 raw JSON）。 */}
+            {/* 展開塊＝lg-float（Emu Liquid Glass 保留在展開態，2026-09-20 裁定：
+                收起時是無底色細行，展開才浮出玻璃面）。縮排 ml-[22px] 對齊行內
+                標題起始，收合動畫（agent-args 網格）照舊。 */}
             {everOpened && (
-              <>
+              <div className="lg-float ml-[22px] rounded-[10px] px-2.5 py-2">
+                {/* F2：原始函数名与完整参数只在展开后挂载（默认渲染不含 raw JSON）。 */}
                 {toolName !== undefined && (
                   <p className="px-0.5 pb-1.5 font-mono text-ios-caption1 text-foreground/45">{toolName}</p>
                 )}
                 {/* D-19：参数分常用层／进阶层两段，不再是一坨 JSON 原文。
-                    花费不往下传：卡片头已经常驻显示，展开后再来一次是噪音。 */}
+                    花费不往下传：行内已经常驻显示，展开后再来一次是噪音。 */}
                 <AgentParamCard argsSummary={argsSummary} idPrefix={idPrefix} />
-              </>
+              </div>
             )}
           </div>
         </div>

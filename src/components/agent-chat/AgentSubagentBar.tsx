@@ -8,19 +8,22 @@ import { AGENT_TASK_STATUS_TABLE } from "@/lib/agent-task-status";
 
 // 子代理状态栏（罪状 4）：subagent.started/delta/done 的可视化。
 // 不进消息流——置顶堆叠在转录区上方（AgentBatchProgress 旁），turn.done 时
-// reducer 已把 subagent 条目整批清掉，这里只负责「还看得见」的那几张卡。
+// reducer 已把 subagent 条目整批清掉，这里只负责「还看得见」的那几行。
+// 2026-09-20 暴君裁定（Grok 级无底色细行）：「查看全部 N 个子任务」折叠头改
+//   「派出 N 个子代理」，展开后每行同工具行风格（无卡壳）＋右端 6px 圆点状态。
 // 2026-09-19 暴君裁定（子任务 UI 去重）：
-//   「查看全部 N 个子任务」折叠头放到列表上方，置顶三卡＋弹出面板两套重复 UI
-//   合并为一份内联列表；默认展开、可收合（SubagentMenu 弹层整体下线）。
+//   折叠头放到列表上方，置顶三卡＋弹出面板两套重复 UI 合并为一份内联列表；
+//   默认展开、可收合（SubagentMenu 弹层整体下线）。
 // 2026-09-10 暴君裁定（子任务卡視覺迭代）：
 //   running 態的末行摘要換跑馬燈（marquee）——流式吐字觀感＝快。
 
 // 状态标签查 agent-task-status.ts 单一语义表（ok=已完成、error=失败，都是
-// 语义表的权威值，不再本地字面维护）；点色/徽章着色是本卡的展示层，留在这里。
+// 语义表的权威值，不再本地字面维护）；圆点着色是本行的展示层，留在这里。
+// 色彩纪律（0920）：ios-blue＝运行、深灰＝完成、灰＝停止/等待、红＝失败。
 const STATUS_DOT: Record<AgentSubagentItem["status"], string> = {
-  running: "bg-ios-orange animate-pulse",
-  ok: "bg-ios-green",
-  error: "bg-destructive",
+  running: "bg-ios-blue",
+  ok: "bg-foreground/60",
+  error: "bg-ios-red",
   // 人工停止成功＝中性灰，不是失败（0920 款定）。
   stopped: "bg-muted-foreground",
 };
@@ -30,14 +33,6 @@ const STATUS_LABEL: Record<AgentSubagentItem["status"], string> = {
   ok: AGENT_TASK_STATUS_TABLE.ok.label,
   error: AGENT_TASK_STATUS_TABLE.error.label,
   stopped: AGENT_TASK_STATUS_TABLE.stopped.label,
-};
-
-const STATUS_BADGE: Record<AgentSubagentItem["status"], string> = {
-  running: "lg-tint-blue text-ios-blue",
-  ok: "lg-tint-green text-[#248A3D]",
-  error: "lg-tint-red text-destructive",
-  // 中性：与产出卡 interrupted 同款灰，不打红。
-  stopped: "bg-black/[0.05] text-muted-foreground",
 };
 
 /**
@@ -119,14 +114,9 @@ interface SubagentCardProps {
 
 function SubagentCard({ item }: SubagentCardProps) {
   return (
-    <div className="agent-rise flex w-full items-center gap-2 rounded-[16px] bg-[rgba(120,120,128,0.06)] px-3 py-2">
-      <Bot className="h-3.5 w-3.5 shrink-0 text-foreground/40" aria-hidden="true" />
-      {/* 状态点即语义：颜色 + aria-label，不靠颜色单独传达。 */}
-      <span
-        className={cn("h-2 w-2 shrink-0 rounded-full", STATUS_DOT[item.status])}
-        aria-label={STATUS_LABEL[item.status]}
-      />
-      <span className="shrink-0 text-ios-footnote font-semibold text-foreground">
+    <div className="agent-rise flex min-h-11 w-full items-center gap-2 rounded-[12px] px-2 -mx-2 transition-colors hover:bg-white/55">
+      <Bot className="h-4 w-4 shrink-0 text-foreground/40" aria-hidden="true" />
+      <span className="shrink-0 text-ios-footnote font-medium text-foreground/75">
         {item.label}
       </span>
       {/* running：跑馬燈末行（活動流＝含 reasoning 的所有增量，尾巴跟隨快吐字觀感）；
@@ -138,14 +128,11 @@ function SubagentCard({ item }: SubagentCardProps) {
           {item.summary ?? item.lastLine}
         </span>
       )}
+      {/* 状态点即语义（6px 圆点）：颜色 + aria-label，不靠颜色单独传达。 */}
       <span
-        className={cn(
-          "inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold",
-          STATUS_BADGE[item.status],
-        )}
-      >
-        {STATUS_LABEL[item.status]}
-      </span>
+        className={cn("h-1.5 w-1.5 shrink-0 rounded-full", STATUS_DOT[item.status])}
+        aria-label={STATUS_LABEL[item.status]}
+      />
     </div>
   );
 }
@@ -157,20 +144,17 @@ function AgentSubagentBarComponent({ items }: { items: AgentSubagentItem[] }) {
   if (items.length === 0) return null;
 
   return (
-    <div className="relative flex flex-col gap-1.5" role="status" aria-label="子任务进度">
+    <div className="relative flex flex-col gap-0.5" role="status" aria-label="子任务进度">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className={cn(
-          "flex w-fit cursor-pointer items-center gap-1.5 rounded-full px-2.5 py-1 text-ios-caption1 font-medium text-foreground/45 transition-colors hover:bg-black/5 hover:text-foreground/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30",
-          open && "bg-black/5 text-foreground/70",
-        )}
+        className="flex min-h-11 w-fit cursor-pointer touch-manipulation items-center gap-1.5 rounded-[12px] px-2 -mx-2 text-left text-ios-footnote font-medium text-muted-foreground transition-colors hover:bg-white/55 hover:text-foreground/70 select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 [-webkit-tap-highlight-color:transparent]"
       >
-        <Bot className="h-3 w-3" aria-hidden="true" />
-        查看全部 {items.length} 个子任务
+        <Bot className="h-3.5 w-3.5 shrink-0 text-foreground/40" aria-hidden="true" />
+        派出 {items.length} 个子代理
         <ChevronDown
-          className={cn("h-3 w-3 transition-transform duration-300 ease-ios-spring", open && "rotate-180")}
+          className={cn("lg-transition h-3.5 w-3.5 shrink-0 text-foreground/35", open && "rotate-180")}
           aria-hidden="true"
         />
       </button>
