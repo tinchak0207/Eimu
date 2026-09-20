@@ -344,13 +344,26 @@ export type JevSpecTemplateKey = "research" | "creation" | "critique"
 // 負責「選模板」→ 60s 百合 OP MV 裸跑（無角色設定卡/美術卡等約束環節）＝業餘。
 // 裁定：模板選擇＝機器判定（System One choice），隨派遣任務書硬注入 Expert，
 // 模型可跳過確實不適用的環節，但必須明說跳過哪環與原因。
+// 0920 晚（暴君裁定）：7 個領域重模板入池。分區閘＝beast mode——兩個調用點
+// （messages-gw prompt 骨架路徑 `beastOn ?` 分支、subagent Expert 派遣路徑）
+// 都只在 beast ON 才走到這裡；輕請求在 beast OFF 時根本不會問這題。重模板
+// 判準寫「領域關鍵詞＋交付物形態」，與泛用骨架（single/feature/novel）互斥：
+// 提到動漫/番劇/短劇/二次元/上市素材/試穿/IP 視覺/策展/風格內化 → 領域模板；
+// 泛用影片不帶領域詞 → feature_film 兜底。
 const TEMPLATE_CRITERIA: Record<string, string> = {
   single_image: "只要一張靜態圖（無鏡頭序列、無角色一致性要求）",
   character_sheet: "角色設定卡：人物設計、多視角、跨鏡一致性鎖定",
   scene_setup: "場景/美術設定：環境、光線、場地美術",
   single_video: "單鏡頭短片：一段連續鏡頭成片",
-  feature_film: "多鏡頭成片：分鏡腳本→角色→場景→逐鏡生成→成片剪輯（MV/預告/短片/故事片/OP）",
+  feature_film: "多鏡頭成片（泛用兜底）：分鏡→角色→場景→逐鏡生成→拼接；不帶領域關鍵詞的普通多鏡頭影片",
   novel_film: "長文本改編成片：小說/長篇→劇本→角色→美術→分鏡→關鍵幀→影片→配音→成片",
+  shortdrama_visual: "番劇/短劇/動漫/MV/預告片/OP 全工業鏈（9 環）：主演 DNA 資產→17 道分鏡 QC→3D 白模預演→關鍵幀→配音→鏡頭視頻→成片→投放物料；提到動漫/二次元/番劇/短劇/百合/角色歌 MV/預告片製作選此（feature_film 的工業級超集；泛用商品短片不帶動漫/影視詞 → feature_film）",
+  novel_ip: "網文 IP 全案視覺包（不出片）：世界觀→情緒板→風格錨→主角卡→名場面組圖→封面→多畫幅→衍生物料；提到 IP 視覺/小說封面/人設全套選此",
+  ecom_launch: "新品上市素材包（要完整上市行銷物料：主圖/詳情頁/畫幅矩陣/精修歸檔，8 環）：僅當用戶明確要新品上市/電商詳情/全套行銷素材時選此；只拍商品展示短片（鏡頭拼接、無詳情頁/畫幅交付）→ feature_film",
+  ecom_model: "AI 試穿種草線：服裝摳圖→模特人設→虛擬試穿→精修→九宮格→詳情頁→分發尺寸；提到試穿/種草/模特圖/平铺變上身選此",
+  shortdrama_poster: "投放海報線：視覺基調→主演海報→CP 對戲→切片封面批量→變體測試→參數鎖定；提到投放封面/海報批量/劇照物料（不出片）選此",
+  art_curation: "策展式創作：立意→情緒板→風格錨→構圖稿→成組渲染→一致性審計→展陳主視覺→多規格交付；提到個展/系列作品/成組創作選此",
+  art_style: "風格深研線：採代表作→拆 DNA→臨摹對拍→變體矩陣→原創成組→證物鏈歸檔；提到學某藝術家風格/風格內化/臨摹解構選此",
   none: "非製作類：研究/問答/分析/評審/單次查詢，不需要工作流骨架",
 }
 
@@ -377,7 +390,7 @@ export async function classifyDispatchMeta(prompt: string): Promise<JevDispatchM
     workflow_template: {
       type: "choice",
       instructions:
-        "Which workflow template should be the production skeleton for the task described in `task`? Choose by deliverable: single still image→single_image; character design/cast consistency sheet→character_sheet; environment/art setting→scene_setup; one continuous clip→single_video; multi-shot film/MV/trailer/OP assembled from shots→feature_film; adaptation of a novel or long text into a film pipeline→novel_film; research/Q&A/analysis/review/plain lookup (no production)→none.",
+        "Which workflow template should be the production skeleton for the task described in `task`? Choose by deliverable, domain keywords first: anime/二次元/番剧/短剧/MV/trailer/OP production with full industrial chain (cast DNA, storyboard QC, previz, voiceover, promo)→shortdrama_visual; web-novel IP visual package (covers, character set, no film)→novel_ip; new product launch marketing suite→ecom_launch; AI try-on/model content→ecom_model; poster/cover batch for promotion→shortdrama_poster; art series/curation→art_curation; artist style immersion→art_style; adaptation of a novel or long text into a film pipeline→novel_film; generic multi-shot film without domain keywords→feature_film; single still image→single_image; character design sheet→character_sheet; environment/art setting→scene_setup; one continuous clip→single_video; research/Q&A/analysis/review/plain lookup (no production)→none. Prefer the domain-specific template over the generic one when domain keywords are present.",
       criteria: TEMPLATE_CRITERIA,
     },
   })
