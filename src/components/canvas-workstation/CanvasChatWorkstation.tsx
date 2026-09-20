@@ -65,7 +65,28 @@ export function CanvasChatWorkstation({
               position: fixed;
               inset: 0;
               z-index: 40;
-              background: #F2F2F7;
+              /* 環境光漸層與 body::after 同一配方（Trans 藍/粉光暈＋160deg 底色）。
+                 此層的職責是遮蓋首頁文檔流內容；舊版 #F2F2F7 實底把首頁的彩色
+                 環境光一併抹平（暴君裁定 09-20：進助理应看見同款漸層），
+                 改鋪同款漸層後遮蓋不變、底色不再消失。 */
+              background:
+                radial-gradient(ellipse 130% 90% at 15% 5%,
+                  rgba(85, 205, 252, 0.10) 0%,
+                  transparent 60%
+                ),
+                radial-gradient(ellipse 110% 75% at 85% 95%,
+                  rgba(247, 168, 184, 0.10) 0%,
+                  transparent 60%
+                ),
+                radial-gradient(ellipse 90% 65% at 80% 10%,
+                  rgba(85, 205, 252, 0.07) 0%,
+                  transparent 55%
+                ),
+                linear-gradient(160deg,
+                  #f5fbff 0%,
+                  #fef5f7 50%,
+                  #f5fbff 100%
+                );
               animation: canvas-ws-fade 0.32s ease-out;
             }
             .canvas-ws-overlay {
