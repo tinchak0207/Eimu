@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, Check, ChevronLeft, ChevronRight, Coins, Download, IdCard, Layers, Loader2, Megaphone, RotateCcw, SlidersHorizontal, Star, Trash2, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronLeft, ChevronRight, Coins, Download, Layers, Loader2, RotateCcw, SlidersHorizontal, Star, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   formatAbsoluteTime,
@@ -25,13 +25,9 @@ export interface HistoryLightboxProps {
   onDownload: (entry: HistoryEntry) => void | Promise<void>;
   onDelete: (id: string) => void;
   onReuse?: (entry: HistoryEntry) => void;
-  /** 把这张图锚定成角色/场景/风格卡。缺席时工具栏不挂这颗按钮。 */
-  onSaveCard?: (entry: HistoryEntry) => void;
   /** 再来 N 组 / 微调变体（payload 级批量重跑）。缺席时工具栏不挂。 */
   onRerun?: (entry: HistoryEntry) => void;
   onRerunVariant?: (entry: HistoryEntry) => void;
-  /** 把这条记录的配方发布为首页「用户投稿」案例。缺席时工具栏不挂。 */
-  onPublishCase?: (entry: HistoryEntry) => void;
 }
 
 /**
@@ -98,10 +94,8 @@ export function HistoryLightbox({
   onDownload,
   onDelete,
   onReuse,
-  onSaveCard,
   onRerun,
   onRerunVariant,
-  onPublishCase,
 }: HistoryLightboxProps) {
   const [mounted, setMounted] = useState(false);
   /** 下载要等整图 fetch 成 blob，期间工具栏下载钮转圈防重复点击。 */
@@ -280,11 +274,6 @@ export function HistoryLightbox({
                 {downloadBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
               </ToolbarButton>
             )}
-            {src && onSaveCard && (
-              <ToolbarButton label="存为角色卡" onClick={() => onSaveCard(entry)}>
-                <IdCard className="h-4 w-4" />
-              </ToolbarButton>
-            )}
             {onReuse && workflow && (
               <ToolbarButton label="用这套参数继续做图" onClick={() => onReuse(entry)}>
                 <RotateCcw className="h-4 w-4" />
@@ -299,12 +288,6 @@ export function HistoryLightbox({
             {onRerunVariant && rerunnable && (
               <ToolbarButton label="微调变体" onClick={() => onRerunVariant(entry)}>
                 <SlidersHorizontal className="h-4 w-4" />
-              </ToolbarButton>
-            )}
-            {/* 配方双向总线对向动作：发布成首页案例。有配方才挂。 */}
-            {onPublishCase && (promptText.length > 0 || workflow) && (
-              <ToolbarButton label="发布为案例" onClick={() => onPublishCase(entry)}>
-                <Megaphone className="h-4 w-4" />
               </ToolbarButton>
             )}
             <ToolbarButton label="删除" tone="danger" onClick={() => onDelete(entry.id)}>

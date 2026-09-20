@@ -133,3 +133,20 @@ test("the header count matches what the grid actually renders below it", () => {
   assert.match(client, /共 \$\{history\.entries\.length\} 条/);
   assert.doesNotMatch(client, /total=\{history\.total\}/);
 });
+
+/**
+ * 生成中的 job（queued/running）会经 /api/history 进历史；卡片必须显式说
+ * 「还在生成」——粒子海进度动画铺满媒体区、不渲染操作条——而不是渲染成
+ * 「没有留存图片」占位加一排按下去只会失败的按钮。
+ */
+test("生成中卡片渲染粒子海动画且无操作条", () => {
+  const card = read("src/components/history/HistoryCard.tsx");
+  assert.match(card, /ParticleSeaWaiting/);
+  assert.match(card, /taskStatus === "queued"/);
+  assert.match(card, /!inProgress/);
+
+  // 历史页轮询：有生成中卡片时每 5 秒刷新，落地即停。
+  const client = read("src/components/HistoryClient.tsx");
+  assert.match(client, /setInterval/);
+  assert.match(client, /hasInProgress/);
+});

@@ -99,16 +99,14 @@
   }
 }
 
-/* 悬停信息浮层：底部暗色渐变+轻毛玻璃，元数据默认不可见。 */
+/* 悬停信息浮层：底部纯暗色渐变（无毛玻璃），元数据默认不可见。 */
 .hist-card-info {
   position: absolute;
   inset-inline: 0;
   bottom: 0;
   z-index: 10;
   padding: 2.5rem 0.875rem 0.75rem;
-  background: linear-gradient(to top, rgba(0, 0, 0, 0.62), rgba(0, 0, 0, 0));
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.72) 0%, rgba(0, 0, 0, 0.42) 45%, rgba(0, 0, 0, 0) 100%);
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1);
