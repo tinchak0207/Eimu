@@ -433,63 +433,53 @@ function AgentChatPanelComponent({
             都顯示（「沒內容且沒壞」）。建號+ticket+SSE 握手在背後接，error 態仍由
             connection meta 條目單獨呈現，此處只排除 reconnecting/closed。 */}
         {items.length === 0 && connection !== "reconnecting" && connection !== "closed" ? (
-          sessionStarting || turnActive ? (
-            /* 空态首发真空期（09-20 细化，取代 09-18 的忙碌文字行版）：建号 +
-               ticket 两段跨境往返在飞时 items 仍是 0。旧写法这里另起一行忙碌提示 +
-               裸 composerNode，与欢迎态的 composer 容器（w-full + py-2 + shadow）不同构
-               → 建号瞬间输入框缩小、上移＝视觉劣化。修法＝删掉忙碌文字行，composer
-               套回与欢迎态逐字相同的容器＝「建立中与建立前始终如一」；在途回馈交给
-               送出钮的转圈（AgentComposer sending 态），不再靠额外文字。推荐语此时不
-               渲染＝点不到就不会重复送出（防二次计费）。 */
-            <div className="flex min-h-full flex-col items-center justify-center px-5">
-              <div className="w-full [&_.agent-composer]:py-2 [&_.agent-composer]:shadow-[0_16px_48px_rgba(0,0,0,0.10)]">
+          /* 空態單一 DOM（09-20 零位移定案，取代 09-18 忙碌分流＋09-20 同構容器版）：
+             前两版都在忙碌態換了一套佈局——第一版裸 composer＋忙碌行，第二版同構容器
+             但置中群體不同（歡迎態置中「標題+輸入框+推薦語」整組，忙碌態只置中輸入框）
+             → 輸入框位置照樣跳。正解＝不分流：歡迎態 DOM 從頭到尾一套，建號/首發在飛時
+             推薦語照常渲染（佔位不動）但強制 disabled＝點不到就不會重複送出（防二次
+             計費）；在途回饋交給送出鈕轉圈（AgentComposer sending 態）。 */
+          <div className="flex min-h-full flex-col items-center justify-center px-5">
+            <div className="flex w-full flex-col items-center pb-[8vh]">
+              <h2 className="text-2xl font-semibold tracking-tight text-foreground">想做点什么？</h2>
+              <div className="mt-8 w-full [&_.agent-composer]:py-2 [&_.agent-composer]:shadow-[0_16px_48px_rgba(0,0,0,0.10)]">
                 {composerNode}
               </div>
-            </div>
-          ) : (
-            /* 2026-09-20 空態重構（agent-chat-preview 已驗收）：輸入框從底部 sticky
-               改為面板垂直居中（約 30vh）放大主角，上方邀問、下方三個幽靈文字鏈。
-               exampleChipState 三態鎖（pending 轉圈 / 在途全禁用）行為原樣保留；
-               有訊息後 composer 回落底部 sticky（見下方 composerNode 擺位）。 */
-            <div className="flex min-h-full flex-col items-center justify-center px-5">
-              <div className="flex w-full flex-col items-center pb-[8vh]">
-                <h2 className="text-2xl font-semibold tracking-tight text-foreground">想做点什么？</h2>
-                <div className="mt-8 w-full [&_.agent-composer]:py-2 [&_.agent-composer]:shadow-[0_16px_48px_rgba(0,0,0,0.10)]">
-                  {composerNode}
-                </div>
-                <div className="mt-5 flex flex-col items-center gap-1">
-                  {EXAMPLES.map((ex) => {
-                    // 三态：被点的那一颗转圈，其余在途期间禁用（防重复点＝重复计费）。
-                    const chipState = exampleChipState(ex, pendingExample, sendPending);
-                    return (
-                      <button
-                        key={ex}
-                        type="button"
-                        onClick={() => handleExampleSend(ex)}
-                        disabled={chipState !== "idle"}
-                        aria-busy={chipState === "pending" ? true : undefined}
-                        className={cn(
-                          "min-h-11 rounded-lg px-3 text-ios-footnote font-medium text-foreground/55",
-                          "underline-offset-4 transition-colors",
-                          chipState === "idle"
-                            ? "cursor-pointer hover:text-foreground/80 hover:underline hover:decoration-foreground/30"
-                            : "cursor-not-allowed",
-                          chipState === "disabled" && "opacity-50",
-                          // 进行中那一颗：转圈与文字同排（幽灵文字链的既有排版与字级）。
-                          chipState === "pending" && "inline-flex items-center gap-1.5",
-                        )}
-                      >
-                        {chipState === "pending" && (
-                          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" />
-                        )}
-                        {ex}
-                      </button>
-                    );
-                  })}
-                </div>
+              <div className="mt-5 flex flex-col items-center gap-1">
+                {EXAMPLES.map((ex) => {
+                  // 三态：被点的那一颗转圈，其余在途期间禁用（防重复点＝重复计费）。
+                  // 建号/首發在飛（sessionStarting/turnActive）＝全部強制禁用，
+                  // 但 DOM 與佔位不動＝輸入框零位移（09-20 暴君「移位也是劣化」）。
+                  const chipState =
+                    sessionStarting || turnActive ? "disabled" : exampleChipState(ex, pendingExample, sendPending);
+                  return (
+                    <button
+                      key={ex}
+                      type="button"
+                      onClick={() => handleExampleSend(ex)}
+                      disabled={chipState !== "idle"}
+                      aria-busy={chipState === "pending" ? true : undefined}
+                      className={cn(
+                        "min-h-11 rounded-lg px-3 text-ios-footnote font-medium text-foreground/55",
+                        "underline-offset-4 transition-colors",
+                        chipState === "idle"
+                          ? "cursor-pointer hover:text-foreground/80 hover:underline hover:decoration-foreground/30"
+                          : "cursor-not-allowed",
+                        chipState === "disabled" && "opacity-50",
+                        // 进行中那一颗：转圈与文字同排（幽灵文字链的既有排版与字级）。
+                        chipState === "pending" && "inline-flex items-center gap-1.5",
+                      )}
+                    >
+                      {chipState === "pending" && (
+                        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" />
+                      )}
+                      {ex}
+                    </button>
+                  );
+                })}
               </div>
             </div>
-          )
+          </div>
         ) : (
           <AgentTranscript items={items} imageActions={imageActions} videoActions={videoActions} audioActions={audioActions} sessionId={sessionId} turnStatus={turnStatus} />
         )}

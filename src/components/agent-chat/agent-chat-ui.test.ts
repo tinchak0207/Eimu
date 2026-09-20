@@ -536,7 +536,12 @@ test("09-18 面板掌握「本輪尚未開始」：模板 chip 與輸入區兩�
   assert.match(code, /exampleSendRef\.current = true;/);
   assert.match(code, /exampleSendRef\.current = false;/);
   // chip 三态：被点的那一颗转圈（aria-busy），在途期间全部禁用（带 aria-busy 与既有禁用视觉）。
-  assert.match(code, /const chipState = exampleChipState\(ex, pendingExample, sendPending\);/);
+  // 09-20 零位移定案：建号/首發在飛（sessionStarting/turnActive）時多一層強制 disabled，
+  // exampleChipState 本體呼叫不變（單一真相源仍在）。
+  assert.match(
+    code,
+    /const chipState =\s*sessionStarting \|\| turnActive \? "disabled" : exampleChipState\(ex, pendingExample, sendPending\);/,
+  );
   assert.match(code, /disabled=\{chipState !== "idle"\}/);
   assert.match(code, /aria-busy=\{chipState === "pending" \? true : undefined\}/);
   assert.match(code, /chipState === "disabled" && "opacity-50"/);

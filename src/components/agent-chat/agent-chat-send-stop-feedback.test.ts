@@ -55,8 +55,8 @@ test("panel 的 onSend 型别放宽，composer 接线回传 promise", () => {
   assert.match(panel, /return result;/);
 });
 
-test("空态忙碌分流存在：建号在飞输入框与欢迎态同构，忙碌文字行已删", () => {
-  // 既有空态条件逐字保留（另一条测试也钉着它，这里再确认分流挂在它之内）。
+test("空态单一 DOM：忙碌不再分流，建号在飞推荐语渲染但强制禁用（零位移）", () => {
+  // 既有空态条件逐字保留（另一条测试也钉着它）。
   assert.match(panel, /items\.length === 0 && connection !== "reconnecting" && connection !== "closed"/);
 
   const emptyStart = panel.indexOf('items.length === 0 && connection !== "reconnecting"');
@@ -65,27 +65,20 @@ test("空态忙碌分流存在：建号在飞输入框与欢迎态同构，忙�
   assert.ok(emptyEnd > emptyStart, "空态三元表达式边界找不到");
   const emptyBlock = panel.slice(emptyStart, emptyEnd);
 
-  const busyAt = emptyBlock.indexOf("sessionStarting || turnActive ? (");
-  assert.ok(busyAt > -1, "忙碌分流分支不存在（sessionStarting || turnActive ? ...）");
-  const welcomeAt = emptyBlock.indexOf(") : (", busyAt);
-  assert.ok(welcomeAt > busyAt, "忙碌分支与欢迎分支的分界找不到");
-
-  const busyBranch = emptyBlock.slice(busyAt, welcomeAt);
-  // 2026-09-20 暴君裁定：「正在建立会话…」文字行删掉（建号瞬间画面劣化源之一），
-  // 在途回馈只交给送出钮转圈（AgentComposer sending 态）。
-  assert.doesNotMatch(busyBranch, /正在建立会话/, "忙碌文字行必须已删");
-  // 输入框始终如一：忙碌分支的 composer 容器与欢迎态逐字同构（同 py-2 + shadow），
-  // 否则建号瞬间输入框跳变（旧版裸 composerNode 就是这条劣化的实锤）。
+  // 09-20 零位移定案：忙碌分流分支必须绝迹——分流＝换一套 DOM＝输入框跳位，
+  // 前两版（裸 composer 忙碌行 / 同構容器但置中群体不同）都被暴君打回。
+  assert.doesNotMatch(emptyBlock, /sessionStarting \|\| turnActive \? \(/, "忙碌分流分支必须已拆");
+  assert.doesNotMatch(emptyBlock, /正在建立会话/, "忙碌文字行必须已删");
+  // 防重复送出的锁改由「渲染但禁用」承担：建号/首發在飛時 chipState 强制 disabled。
   assert.match(
-    busyBranch,
-    /\[&_\.agent-composer\]:py-2 \[&_\.agent-composer\]:shadow-\[0_16px_48px_rgba\(0,0,0,0\.10\)\]/,
-    "忙碌态 composer 容器必须与欢迎态同构",
+    emptyBlock,
+    /sessionStarting \|\| turnActive \? "disabled" : exampleChipState\(/,
+    "推荐语忙碌强制禁用锁不存在（点不到＝不会二次计费）",
   );
-  // 忙碌时推荐语一颗都不渲染＝点不到就不会重复送出（第二条消息、第二次计费）。
-  assert.doesNotMatch(busyBranch, /EXAMPLES/);
-
-  const welcomeBranch = emptyBlock.slice(welcomeAt);
-  assert.match(welcomeBranch, /EXAMPLES\.map/);
+  // 单一欢迎 DOM：标题、composer 容器、推荐语各一份。
+  assert.match(emptyBlock, /想做点什么？/);
+  assert.match(emptyBlock, /\[&_\.agent-composer\]:py-2 \[&_\.agent-composer\]:shadow-\[0_16px_48px_rgba\(0,0,0,0\.10\)\]/);
+  assert.match(emptyBlock, /EXAMPLES\.map/);
 });
 
 test("推荐语走 handleExampleSend，且带 ref 连点守门", () => {

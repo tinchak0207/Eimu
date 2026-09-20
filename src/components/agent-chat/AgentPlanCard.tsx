@@ -67,28 +67,29 @@ function AgentPlanCardComponent({ item }: AgentPlanCardProps) {
         className="flex min-h-11 w-full items-start gap-2.5 rounded-[18px] px-3 py-2.5 text-left transition-colors hover:bg-black/[0.05] focus:outline-none focus-visible:ring-2 focus-visible:ring-foreground/20 [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
       >
         <Brain className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-        {/* 右側欄（2026-09-20 第二版修正）：舊 flex-wrap 讓正文換行回到標籤
-            底下（懸空難看）＋專家晶片插進句子中間。改懸掛縮排：「计划」絕對
-            定位在左，正文 pl 讓位——首行從標籤緊鄰右邊開始，換行與首行左對齊；
-            專家晶片自成一排不再插正文。 */}
-        <span className="relative block min-w-0 flex-1 pl-[38px]">
+        {/* 右側欄＝兩列柵格（09-20 對齊根治，取代 absolute+pl 手調魔法數字）：
+            col1 標籤 auto、col2 正文 minmax(0,1fr)，`items-baseline` 讓「计划」與
+            正文首行共用基線（13px 對 15px 不再各自為政）；正文換行與首行嚴格同 x
+            （柵格列邊界天然對齊，舊 absolute 版換行會竄到標籤底下的錯覺來自行高差）。
+            專家晶片放 col2 第二列，與正文左緣對齊。 */}
+        <span className="grid min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-2.5">
           {/* 標籤：字級/字重/色對齊子代理卡（ios-footnote font-medium foreground/80）。 */}
-          <span className="absolute left-0 top-[3px] text-ios-footnote font-medium text-foreground/80">
-            计划
-          </span>
+          <span className="text-ios-footnote font-medium text-foreground/80">计划</span>
+          {/* 收合預覽與展開正文同字級同行高（ios-subhead/1.55）——切換時只有文字
+              長短變化、零字體跳變（舊版 13px 灰預覽↔15px 黑正文＝每次收合都重排）。 */}
           {open ? (
-            <span className="block break-words whitespace-pre-wrap text-ios-subhead leading-[1.55] text-foreground [overflow-wrap:anywhere]">
+            <span className="break-words whitespace-pre-wrap text-ios-subhead leading-[1.55] text-foreground [overflow-wrap:anywhere]">
               {item.text}
             </span>
           ) : (
-            <span className="block truncate text-ios-footnote leading-5 text-muted-foreground/70">
+            <span className="truncate text-ios-subhead leading-[1.55] text-foreground/50">
               {collapsedPreview}
             </span>
           )}
           {/* 專家晶片：唯讀，缺席就不畫（網關只在 digest 白名單命中時才帶 experts）。
               刻意不是按鈕——這不是可點的操作，只是「這輪會派誰」的事實陳列。 */}
           {open && experts.length > 0 && (
-            <span className="mt-1.5 flex flex-wrap gap-1.5">
+            <span className="col-start-2 mt-1.5 flex flex-wrap gap-1.5">
               {experts.map((expert) => (
                 <span
                   key={expert}
