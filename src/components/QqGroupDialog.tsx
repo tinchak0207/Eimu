@@ -48,27 +48,18 @@ export function QqGroupDialog({ open, onClose }: QqGroupDialogProps) {
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="售后 / 交流群组"
+        aria-label="售后/交流群组"
         onClick={(e) => e.stopPropagation()}
-        className="lg-sheet relative w-full max-w-[360px] overflow-hidden rounded-ios-3xl p-6 shadow-2xl"
+        className="lg-sheet relative w-full max-w-[420px] overflow-hidden rounded-ios-3xl p-5 shadow-2xl"
       >
         {/* Specular 顶光线 */}
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white to-transparent opacity-90" />
 
-        {/* 顶部标题与关闭按钮 */}
-        <div className="flex items-center justify-between gap-3 pb-4">
-          <div className="flex items-center gap-2.5">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/icon.png" alt="Eimu" width={32} height={32} className="h-8 w-8 rounded-ios-md object-cover shadow-sm" />
-            <div>
-              <h3 className="text-ios-subhead font-bold tracking-tight text-[rgba(0,0,0,0.85)]">
-                Eimu 官方交流群
-              </h3>
-              <p className="text-ios-caption1 text-[rgba(0,0,0,0.48)]">
-                售后支持 · 问题反馈 · 灵感交流
-              </p>
-            </div>
-          </div>
+        {/* 标题与关闭 */}
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-ios-subhead font-bold tracking-tight text-[rgba(0,0,0,0.85)]">
+            售后/交流群组
+          </h3>
           <button
             type="button"
             onClick={onClose}
@@ -79,44 +70,45 @@ export function QqGroupDialog({ open, onClose }: QqGroupDialogProps) {
           </button>
         </div>
 
-        {/* 二维码卡片 */}
-        <div className="relative mx-auto my-1 flex w-full flex-col items-center justify-center overflow-hidden rounded-ios-2xl bg-white p-3.5 shadow-[0_2px_12px_rgba(0,0,0,0.06)] ring-1 ring-black/5">
+        {/* 二维码：白卡衬底正方形 */}
+        <div className="mt-3 flex justify-center rounded-ios-2xl bg-white p-3.5 shadow-[0_2px_12px_rgba(0,0,0,0.06)] ring-1 ring-black/5">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src="/qq-group-qrcode.jpg"
-            alt="QQ群二维码"
-            className="h-auto w-full max-w-[280px] rounded-ios-xl object-contain select-none"
+            alt="QQ 群二维码"
+            width={280}
+            height={280}
+            className="h-auto w-full max-w-[280px] select-none rounded-ios-md object-contain"
+            draggable={false}
           />
         </div>
 
-        {/* 底部群号与操作提示 */}
-        <div className="mt-4 flex flex-col items-center gap-2.5 text-center">
-          <div className="flex items-center gap-2">
-            <span className="text-ios-footnote text-[rgba(0,0,0,0.60)]">
-              QQ 群号: <strong className="font-semibold text-[rgba(0,0,0,0.88)]">{QQ_GROUP_NUMBER}</strong>
-            </span>
-            <button
-              type="button"
-              onClick={handleCopyGroupNumber}
-              className="inline-flex items-center gap-1 rounded-full bg-[rgba(0,0,0,0.05)] px-2.5 py-1 text-ios-caption1 font-medium text-[rgba(0,0,0,0.75)] transition-colors hover:bg-[rgba(0,0,0,0.08)] active:scale-95"
-            >
-              {copied ? (
-                <>
-                  <Check className="h-3 w-3 text-ios-green" />
-                  <span>已复制</span>
-                </>
-              ) : (
-                <>
-                  <Copy className="h-3 w-3" />
-                  <span>复制</span>
-                </>
-              )}
-            </button>
-          </div>
-          <p className="text-ios-caption1 text-[rgba(0,0,0,0.45)]">
-            使用手机 QQ 扫一扫二维码，即可加入群聊
-          </p>
+        {/* 群号 + 一句扫码提示 */}
+        <div className="mt-4 flex items-center justify-center gap-2">
+          <span className="text-ios-footnote text-[rgba(0,0,0,0.60)]">
+            群号 <strong className="font-semibold tabular-nums text-[rgba(0,0,0,0.88)]">{QQ_GROUP_NUMBER}</strong>
+          </span>
+          <button
+            type="button"
+            onClick={handleCopyGroupNumber}
+            className="inline-flex items-center gap-1 rounded-full bg-[rgba(0,0,0,0.05)] px-2.5 py-1 text-ios-caption1 font-medium text-[rgba(0,0,0,0.75)] transition-colors hover:bg-[rgba(0,0,0,0.08)] active:scale-95"
+          >
+            {copied ? (
+              <>
+                <Check className="h-3 w-3 text-ios-green" />
+                <span>已复制</span>
+              </>
+            ) : (
+              <>
+                <Copy className="h-3 w-3" />
+                <span>复制</span>
+              </>
+            )}
+          </button>
         </div>
+        <p className="mt-1.5 text-center text-ios-caption1 text-[rgba(0,0,0,0.45)]">
+          手机 QQ 扫一扫，加入群聊
+        </p>
       </div>
     </div>,
     document.body,

@@ -28,24 +28,19 @@ interface NavbarProps {
 const QQ_GROUP_SHARE_URL =
   "https://qun.qq.com/universal-share/share?ac=1&authKey=9xurH8dNqoFL3AWNrbML8MG1zuxUY%2Blh2FnXaFJfMefKeuWvLYDkPmxvM%2BF%2FxMn8&busi_data=eyJncm91cENvZGUiOiI5ODAxMjIxNzUiLCJ0b2tlbiI6IldYSHVmYXZzU0NmK05IMFVnNXM5cDE2amM0YzBjUGxhUHhvTUx5VDAwcmpXQUtKMWtNSk9HMnA1QmFXVTVHdlMiLCJ1aW4iOiIxNDY1Njg3MDc5In0%3D&data=NUunOBhKAsWIJULcoBA6QFyTGfPWRPd0kWwWxRnxURNQs18QrZFUb2LLJOLhQlOdOveuWXfmT64NqyzIiFtqLA&svctype=4&tempid=h5_group_info";
 
-/** QQ 企鹅徽标（内嵌 SVG，QQ 蓝 + 白眼底），与 SplitLoginButton 内嵌品牌 logo 同一做法。 */
+/** QQ 企鹅徽标：官方 Simple Icons 剪影（品牌蓝 #12B7F5），内嵌无外部依赖。 */
 function QqLogo({ className }: { className?: string }) {
   return (
     <svg
       className={className}
       viewBox="0 0 24 24"
-      fill="none"
       xmlns="http://www.w3.org/2000/svg"
       aria-hidden="true"
     >
       <path
-        d="M12 2.2c-4.1 0-7.2 3.4-7.2 7.9 0 2.1.7 4 1.9 5.4-.3 1.1-.9 2.3-1.8 3.3-.34.38-.1.98.4.95 1.5-.09 3-.6 4.1-1.3.42.05.88.08 1.3.08h.6c.42 0 .88-.03 1.3-.08 1.1.7 2.6 1.21 4.1 1.3.5.03.74-.57.4-.95-.9-1-1.5-2.2-1.8-3.3 1.2-1.4 1.9-3.3 1.9-5.4 0-4.5-3.1-7.9-7.2-7.9Z"
         fill="#12B7F5"
+        d="M21.395 15.035a40 40 0 0 0-.803-2.264l-1.079-2.695c.001-.032.014-.562.014-.836C19.526 4.632 17.351 0 12 0S4.474 4.632 4.474 9.241c0 .274.013.804.014.836l-1.08 2.695a39 39 0 0 0-.802 2.264c-1.021 3.283-.69 4.643-.438 4.673.54.065 2.103-2.472 2.103-2.472 0 1.469.756 3.387 2.394 4.771-.612.188-1.363.479-1.845.835-.434.32-.379.646-.301.778.343.578 5.883.369 7.482.189 1.6.18 7.14.389 7.483-.189.078-.132.132-.458-.301-.778-.483-.356-1.233-.646-1.846-.836 1.637-1.384 2.393-3.302 2.393-4.771 0 0 1.563 2.537 2.103 2.472.251-.03.581-1.39-.438-4.673"
       />
-      <circle cx="9.2" cy="9.6" r="1.25" fill="#ffffff" />
-      <circle cx="14.8" cy="9.6" r="1.25" fill="#ffffff" />
-      <circle cx="9.45" cy="9.75" r=".6" fill="#231F20" />
-      <circle cx="15.05" cy="9.75" r=".6" fill="#231F20" />
     </svg>
   );
 }
@@ -287,6 +282,27 @@ export function Navbar({ className }: NavbarProps) {
             </span>
           </Link>
 
+          {/* QQ 群入口（2026-09-21 暴君特许，紧贴 Logo 左组）：
+              手机端（<sm）直达 QQ 加群分享页；桌面端（≥sm）像余额胶囊一样
+              带文字「售后/交流群组」，点击弹出群二维码扫码入群。 */}
+          <a
+            href={QQ_GROUP_SHARE_URL}
+            aria-label="售后/交流群组"
+            className="lg-float flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[rgba(0,0,0,0.78)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:hidden"
+          >
+            <QqLogo className="h-4 w-4" />
+          </a>
+          <button
+            type="button"
+            onClick={() => setQqOpen(true)}
+            aria-label="售后/交流群组"
+            title="售后/交流群组"
+            className="lg-float hidden shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full bg-[rgba(0,0,0,0.05)] px-3 py-1.5 text-ios-footnote font-semibold text-[rgba(0,0,0,0.60)] select-none lg-transition hover:bg-[rgba(0,0,0,0.08)] hover:text-[rgba(0,0,0,0.85)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:inline-flex"
+          >
+            <QqLogo className="h-3.5 w-3.5" />
+            <span>售后/交流群组</span>
+          </button>
+
           {/* Right side */}
           <div
             className={cn(
@@ -296,27 +312,6 @@ export function Navbar({ className }: NavbarProps) {
                 : "flex-none gap-2",
             )}
           >
-            {/* QQ 群入口（2026-09-21 暴君特许）：
-                手机端（<sm）直达 QQ 加群分享页；桌面端（≥sm）像余额胶囊一样
-                带文字「售后/交流群组」，点击弹出群二维码扫码入群。 */}
-            <a
-              href={QQ_GROUP_SHARE_URL}
-              aria-label="售后/交流群组"
-              className="lg-float flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[rgba(0,0,0,0.78)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:hidden"
-            >
-              <QqLogo className="h-4 w-4" />
-            </a>
-            <button
-              type="button"
-              onClick={() => setQqOpen(true)}
-              aria-label="售后/交流群组"
-              title="售后/交流群组"
-              className="lg-float hidden shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full bg-[rgba(0,0,0,0.05)] px-3 py-1.5 text-ios-footnote font-semibold text-[rgba(0,0,0,0.60)] select-none lg-transition hover:bg-[rgba(0,0,0,0.08)] hover:text-[rgba(0,0,0,0.85)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:inline-flex"
-            >
-              <QqLogo className="h-3.5 w-3.5" />
-              <span>售后/交流群组</span>
-            </button>
-
             {LOCAL_TEST_MODE ? (
               <div className="rounded-full bg-[rgba(255,255,255,0.28)] px-3 py-1.5 text-ios-caption1 font-medium text-[rgba(0,0,0,0.52)]">
                 本地测试
