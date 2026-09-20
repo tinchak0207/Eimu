@@ -55,7 +55,7 @@ test("panel 的 onSend 型别放宽，composer 接线回传 promise", () => {
   assert.match(panel, /return result;/);
 });
 
-test("空态忙碌分流存在：建号在飞时改渲染忙碌行，推荐语不渲染", () => {
+test("空态忙碌分流存在：建号在飞输入框与欢迎态同构，忙碌文字行已删", () => {
   // 既有空态条件逐字保留（另一条测试也钉着它，这里再确认分流挂在它之内）。
   assert.match(panel, /items\.length === 0 && connection !== "reconnecting" && connection !== "closed"/);
 
@@ -71,10 +71,16 @@ test("空态忙碌分流存在：建号在飞时改渲染忙碌行，推荐语�
   assert.ok(welcomeAt > busyAt, "忙碌分支与欢迎分支的分界找不到");
 
   const busyBranch = emptyBlock.slice(busyAt, welcomeAt);
-  // 一行忙碌提示：Loader2 转圈 + 简体体例文案。
-  assert.match(busyBranch, /正在建立会话…/);
-  assert.match(busyBranch, /Loader2/);
-  assert.match(busyBranch, /animate-spin/);
+  // 2026-09-20 暴君裁定：「正在建立会话…」文字行删掉（建号瞬间画面劣化源之一），
+  // 在途回馈只交给送出钮转圈（AgentComposer sending 态）。
+  assert.doesNotMatch(busyBranch, /正在建立会话/, "忙碌文字行必须已删");
+  // 输入框始终如一：忙碌分支的 composer 容器与欢迎态逐字同构（同 py-2 + shadow），
+  // 否则建号瞬间输入框跳变（旧版裸 composerNode 就是这条劣化的实锤）。
+  assert.match(
+    busyBranch,
+    /\[&_\.agent-composer\]:py-2 \[&_\.agent-composer\]:shadow-\[0_16px_48px_rgba\(0,0,0,0\.10\)\]/,
+    "忙碌态 composer 容器必须与欢迎态同构",
+  );
   // 忙碌时推荐语一颗都不渲染＝点不到就不会重复送出（第二条消息、第二次计费）。
   assert.doesNotMatch(busyBranch, /EXAMPLES/);
 

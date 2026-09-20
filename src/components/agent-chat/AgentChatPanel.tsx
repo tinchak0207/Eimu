@@ -434,16 +434,17 @@ function AgentChatPanelComponent({
             connection meta 條目單獨呈現，此處只排除 reconnecting/closed。 */}
         {items.length === 0 && connection !== "reconnecting" && connection !== "closed" ? (
           sessionStarting || turnActive ? (
-            /* 空态首发的真空期（09-18）：建号 + ticket 两段跨境往返在飞时 items 仍是 0，
-               画面若不吭声，人以为自己没送出去而重复点发送。这里只留一行忙碌提示
-               （沿用空态块既有置中排版与灰阶色），推荐语在此时不渲染＝点不到就不会重发；
-               输入框保留（送出钮位置在途转圈本身就是回馈）。 */
-            <div className="flex h-full min-h-40 flex-col items-center justify-center gap-4 px-6 text-center">
-              <span className="flex items-center gap-2 text-ios-caption1 text-foreground/45">
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                正在建立会话…
-              </span>
-              {composerNode}
+            /* 空态首发真空期（09-20 细化，取代 09-18 的忙碌文字行版）：建号 +
+               ticket 两段跨境往返在飞时 items 仍是 0。旧写法这里另起一行忙碌提示 +
+               裸 composerNode，与欢迎态的 composer 容器（w-full + py-2 + shadow）不同构
+               → 建号瞬间输入框缩小、上移＝视觉劣化。修法＝删掉忙碌文字行，composer
+               套回与欢迎态逐字相同的容器＝「建立中与建立前始终如一」；在途回馈交给
+               送出钮的转圈（AgentComposer sending 态），不再靠额外文字。推荐语此时不
+               渲染＝点不到就不会重复送出（防二次计费）。 */
+            <div className="flex min-h-full flex-col items-center justify-center px-5">
+              <div className="w-full [&_.agent-composer]:py-2 [&_.agent-composer]:shadow-[0_16px_48px_rgba(0,0,0,0.10)]">
+                {composerNode}
+              </div>
             </div>
           ) : (
             /* 2026-09-20 空態重構（agent-chat-preview 已驗收）：輸入框從底部 sticky
