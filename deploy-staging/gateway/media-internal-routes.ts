@@ -140,7 +140,7 @@ export async function handleCanvasDispatchOps(req: Request): Promise<Response> {
   if (typeof body.session_id !== "string" || !body.session_id) {
     return jsonError(400, "session_id is required", "bad_request", "bad_request")
   }
-  const state = resolveSession(body.session_id)
+  const state = resolveSession(body.session_id) ?? subagentParentState(body.session_id)
   if (!state) return jsonError(404, "session not found", "not_found", "not_found")
   const v = validateCanvasOps(body.ops)
   if ("message" in v) return jsonError(400, v.message, "bad_request", "bad_request")
@@ -392,7 +392,7 @@ export async function handleConfirmRequest(req: Request): Promise<Response> {  l
   if (!session_id || !request_id) {
     return jsonError(400, "session_id and request_id are required", "bad_request", "bad_request")
   }
-  const state = resolveSession(session_id)
+  const state = resolveSession(session_id) ?? subagentParentState(session_id)
   if (!state) return jsonError(404, "session not found", "not_found", "not_found")
 
   // Idempotent by request_id. A re-post of a live request must NOT supersede it:
@@ -534,7 +534,7 @@ export async function handleInternalEmit(req: Request): Promise<Response> {
   if (!INTERNAL_EMIT_ALLOWED.has(event) && !CANVAS_EMIT_ALLOWED.has(event)) {
     return jsonError(400, `event not allowed: ${event}`, "bad_request", "bad_request")
   }
-  const state = resolveSession(session_id)
+  const state = resolveSession(session_id) ?? subagentParentState(session_id)
   if (!state) return jsonError(404, "session not found", "not_found", "not_found")
 
   if (event === "image.done") {

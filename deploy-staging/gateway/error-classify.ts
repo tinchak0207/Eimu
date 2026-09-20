@@ -111,7 +111,8 @@ const RULES: Rule[] = [
     test: /\b(aborted|cancel(?:led|ed) by user|interrupted by user)\b/i,
     class: "aborted",
     retryable: false,
-    human: "已按你的要求中止本轮",
+    // 0920 改中性：abort 不歸因用戶（系統自殺輪也走此類），且 UI 不再發卡。
+    human: "本轮已中止",
   },
 ]
 

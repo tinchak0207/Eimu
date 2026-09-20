@@ -6,6 +6,8 @@ import { getOwnedSession } from "./sessions-core.ts"
 import { opencodeHeaders } from "./opencode-client.ts"
 import { stripStaleTurnTextFromReplay } from "./sse-core.ts"
 import { finishTurnMetrics } from "./metrics-gw.ts"
+// 0920 停止閘：用戶終止連子代理一起停（subagent.ts 不 import 本檔，無循環）。
+import { stopSubagentsForParent } from "./subagent"
 
 
 // Force-stop the in-flight assistant turn on the opencode side. This is a real
@@ -69,6 +71,14 @@ export async function handleAbortSession(key: string, id: string): Promise<Respo
     return jsonError(502, "opencode backend unreachable", "backend_unreachable", "backend_error")
   }
   state.turnAborted = true // 用戶主動中止：不觸發抖動重試
+  // 0920 暴君裁定（停止閘）：用戶終止＝連子代理一起停。此前 abort 只殺主會話
+  // 在途 turn，子代理各自獨立子會話照跑，跑完 wakeParent 又把父會話喚起來——
+  // 用戶視角「按了終止它又自己活了，刹不住車」。此處一併停掉本會話名下全部
+  // 在跑子代理（不再喚醒、不再換模重投、不再交付閘門重派）。
+  const stoppedCount = stopSubagentsForParent(state.sessionId, "user", "用户终止了本轮，子代理一并停止")
+  if (stoppedCount > 0) {
+    console.log(`[gateway] user abort: stopped ${stoppedCount} running subagent(s) session=${state.sessionId}`)
+  }
   // Phase 0 觀測：中止輪同樣收檔（t_done = 中止時刻，end=aborted），不留懸空檔。
   finishTurnMetrics(state, "aborted")
   // N2 同款（2026-09-02）：用戶中止即剝掉本輪文本幀——SSE 斷線重連不再整段

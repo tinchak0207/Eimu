@@ -11,6 +11,7 @@
 import { jsonError } from "./gw-lib.ts"
 import type { SessionState } from "./types-gateway.ts"
 import { resolveSession } from "./sessions-core.ts"
+import { subagentParentState } from "./subagent.ts"
 import { emitToSession } from "./sse-core.ts"
 
 // ─────────────────────────── Wave C：Agent 操作畫布（canvas.ops 下發/回執）
@@ -53,7 +54,10 @@ export interface CanvasSnapshotEntry {
 export const canvasStates = new Map<string, CanvasSnapshotEntry>()
 
 function canvasKeyFor(sessionId: string): string {
-  const state = resolveSession(sessionId)
+  // 0920：子代理（Expert）的畫布工具帶自己的 opencode session id——舊版 fallback
+  // 直接回原文 id，Expert 的節點會寫進一個用戶看不見的「子會話畫布桶」（靜默分裂，
+  // 比 404 更陰）。兜底回父會話＝模板節點（角色卡/美術卡）落在用戶畫布上。
+  const state = resolveSession(sessionId) ?? subagentParentState(sessionId)
   return state ? state.sessionId : sessionId
 }
 

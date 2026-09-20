@@ -8,7 +8,7 @@ import { analyzeMix, applyMix } from "./mix"
 import { styleCatalog, subtitlesAss, findStylePreset, findTransitionPreset, STYLE_PRESETS } from "./style"
 import { masterCheck, masterExport, MASTER_PRESETS, type MasterPresetId } from "./master"
 import { registerMasterExport } from "./masters-index"
-import { subagentParentApiKey } from "./subagent"
+import { subagentParentApiKey, subagentParentState } from "./subagent"
 import { beastAgentField } from "./session-lifecycle"
 import { resolveSession } from "./sessions-core"
 import { opencodeHeaders } from "./opencode-client"
@@ -26,7 +26,7 @@ export async function handleCanvasStateRead(req: Request): Promise<Response> {
   const url = new URL(req.url)
   const sessionId = url.searchParams.get("session_id")
   if (!sessionId) return jsonError(400, "session_id is required", "bad_request", "bad_request")
-  const state = resolveSession(sessionId)
+  const state = resolveSession(sessionId) ?? subagentParentState(sessionId)
   if (!state) return jsonError(404, "session not found", "not_found", "not_found")
   return Response.json({
     ok: true,
@@ -177,7 +177,8 @@ export async function handleConfirmStatus(req: Request): Promise<Response> {
   if (!session_id || !request_id) {
     return jsonError(400, "session_id and request_id are required", "bad_request", "bad_request")
   }
-  const state = resolveSession(session_id)
+  // 0920：Expert 子會話兜底（見 canvas 讀取同款註釋）——扣費確認卡必須落在用戶會話。
+  const state = resolveSession(session_id) ?? subagentParentState(session_id)
   // A vanished session means the session was deleted or reaped out from under
   // the tool. That is a denial, not an unknown: nothing may be spent for a
   // session that no longer exists.
@@ -252,7 +253,7 @@ export async function handleSessionKey(req: Request): Promise<Response> {
   if (!session_id) {
     return jsonError(400, "session_id is required", "bad_request", "bad_request")
   }
-  const state = resolveSession(session_id)
+  const state = resolveSession(session_id) ?? subagentParentState(session_id)
   if (state) {
     const user_id = await hashKey(state.apiKey)
     return Response.json({ ok: true, api_key: state.apiKey, user_id })
@@ -281,7 +282,7 @@ export async function handleSessionTasks(req: Request): Promise<Response> {
   if (!session_id) {
     return jsonError(400, "session_id is required", "bad_request", "bad_request")
   }
-  const state = resolveSession(session_id)
+  const state = resolveSession(session_id) ?? subagentParentState(session_id)
   if (!state) return Response.json({ ok: false, error: "session not found", tasks: [] }, { status: 404 })
   return Response.json({ ok: true, tasks: [...state.sessionTasks.values()] })
 }

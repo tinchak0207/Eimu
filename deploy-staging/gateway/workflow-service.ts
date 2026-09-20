@@ -462,6 +462,17 @@ export class WorkflowService {
     return this.startSync(templateId, content, owner, videoModel)
   }
 
+  /**
+   * 0920 暴君裁定（壓縮垃圾時間）：骨架上畫布路徑**禁**走視頻模型探測——
+   * start() 對 multiShot 模板會 await pickDefaultVideoModel（上限 5s fail-open），
+   * 而那 5 秒對「讓用戶看見骨架」零貢獻（節點 metadata.model 由 config 節點
+   * defaults 或 workflow_generate 時的動態選型接手，startSync 的 videoModel 只是
+   * 建構期預填）。Jev 判定是毫秒級，骨架也該是毫秒級。
+   */
+  startFast(templateId: string | null, content: TemplateContent = {}, owner?: unknown): { workflowId: string } | { error: string } {
+    return this.startSync(templateId, content, owner, null)
+  }
+
   /** 建工作流（从模板或空）。回 workflowId 或 error（模板缺必需内容时）。 */
   startSync(templateId: string | null, content: TemplateContent = {}, owner?: unknown, defaultVideoModel?: string | null): { workflowId: string } | { error: string } {
     const template = templateId ? getWorkflowTemplate(templateId) : undefined

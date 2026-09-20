@@ -1,7 +1,9 @@
 // workflow-gw.ts —— 自 index.ts 第二階段 Wave2 抽取：畫布工作流引擎（workflowService 單例＋5 hooks、stateForWorkflow、持久化鏡像 maps、recordWorkflowRefund、workflowWake 掃描器、workflowSnapshotOf/For、restoreWorkflowsFromSnapshot、F1 自動恢復 timer、assembleFilmNode、MODEL_STATUS_TTL/modelStatusCache/fetchModelStatusCached、resolveActiveModel、submitWorkflowNode、workflowServiceTemplates、生成管線、喚醒掃描 setInterval、handleWorkflowInternal），原 index.ts 1378–2666 行，逐行機械搬運。
 import { mkdir } from "node:fs/promises"
+import { createHash } from "node:crypto"
 import path from "node:path"
 import { WorkflowService } from "./workflow-service"
+import { gateWorkflowMemory } from "./jev-gate"
 import { estimateTtsCoins } from "./pricing-and-validation"
 import { compileShotPrompt, parseShotCandidate, shotOutputParams, type ShotJson } from "./video-prompt-schema"
 import { loadUserSettings } from "./persistence"
@@ -13,7 +15,7 @@ import { TTS_UPSTREAM, probeTtsUpstream, settleConfirm } from "./media-internal-
 import { CONFIRM_THRESHOLD_COINS, CONFIRM_TIMEOUT_MS, OPENCODE_URL, PLATFORM_BASE, TTS_AUDIO_DIR, TTS_PUBLIC_BASE } from "./constants-gateway.ts"
 import { jsonError } from "./gw-lib.ts"
 import { normalizeUserSettings } from "./sessions-http.ts"
-import { applyCanvasNodeUpdated } from "./canvas-cascade-state.ts"
+import { applyCanvasNodeCreated, applyCanvasNodeUpdated } from "./canvas-cascade-state.ts"
 import { humanMessageFor } from "./humanize-gw.ts"
 import type { SessionState } from "./types-gateway.ts"
 import { appendLedgerFor, emitQuotaChanged } from "./quota-ledger.ts"
@@ -32,6 +34,18 @@ export const workflowService = new WorkflowService({
   emit: (state, name, data) => {
     const target = (state as SessionState | undefined) ?? stateForWorkflow
     if (target) emitToSession(target, name, data)
+    // 0920：畫布事件同步落快照。此前這條出口只發 SSE 不寫 canvasStates，
+    // 前端刷新／重連後骨架全丟（GET /internal/canvas/snapshot 永遠 has_state:false，
+    // 實錘：模板判定即建骨架後快照仍空）。events-translate 的工具路徑早有此寫入，
+    // workflow 路徑漏了——同一寫入函式，不另造輪子。
+    if (target) {
+      try {
+        if (name === "canvas.node.created") applyCanvasNodeCreated(target.sessionId, data)
+        else if (name === "canvas.node.updated") applyCanvasNodeUpdated(target.sessionId, data)
+      } catch (e) {
+        console.error(`[gateway] canvas snapshot write failed on ${name}:`, e)
+      }
+    }
     // S6 規格1：節點終態（success/error）幀 → 60s 內面向用戶的主動匯報。
     // 掛在 emit 轉發處：generate/rerun 兩條執行路徑共用此出口，一鉤全收。
     if (target && name === "canvas.node.updated") {
@@ -145,6 +159,132 @@ export const workflowService = new WorkflowService({
     return r
   },
 })
+
+// ── 跑批完成推送（2026-09-20 Phase 1）────────────────────────────────────
+//
+// 站點側需要知道「這條 workflow 跑完了」才能把結果接回交付視角；此前完成只
+// 活在 gateway 進程記憶體（WorkflowRunState 從不落盤），站點永遠無從得知。
+// 本函式是 gateway → 站點的單向推送出口。
+//
+// 設計取捨：
+//   - 觸發點掛 runWfGenerate 的 .then（generate 的終判出口），不掛
+//     workflow-service 內——那會逼 engine 反向依賴 gateway 的 fetch/env；
+//     service 已有 emit/onDirty 兩個掛點，第三個純為推送而設＝造輪子。
+//   - 失敗絕不阻塞主流程：整段 try/catch，catch 只記 log。推送是旁路，
+//     站點掛掉不能讓工作流收尾陪葬。
+//   - 5s AbortSignal.timeout：站點慢時 gateway 不等。
+//   - 只推 success/partial：未完成的狀態推過去只會讓站點把半成品當成品。
+//   - 去重集合 workflowCompletionPushed：同一 workflowId 只推一次
+//     （gateway 重啟清空＝可接受，重啟後狀態已丟，本來就沒得推）。
+//   - 認證走 HARNESS_API_KEY（既有慣例：工具層打站點 /agent/v1/* 的 Bearer
+//     閘門，見 music-tools-impl / memory_recall_impl）；未配置時記 log 不推，
+//     不偽造請求。
+export const SITE_COMPLETION_URL = (
+  process.env.SITE_COMPLETION_URL || "https://image.tinchak0207.xyz/api/workflow-completion"
+).trim()
+/** 已推送過的 workflowId（含推送失敗——不重試，避免站點掛掉時反覆打）。 */
+export const workflowCompletionPushed = new Set<string>()
+
+/**
+ * 把工作流跑批完成投影並推送到站點。失敗只記 log，永不拋。
+ * state 必須是 workflow 的 owner session（要 sessionId 做關聯鍵）。
+ */
+export async function pushWorkflowCompletion(state: SessionState): Promise<void> {
+  try {
+    const wfid = workflowOwnerBySession.get(state.sessionId)
+    if (!wfid) return
+    if (workflowCompletionPushed.has(wfid)) return
+    const wf = workflowService.get(wfid)
+    if (!wf) return
+    const status = wf.status
+    // 未完成（building/running/failed/paused）不推送——只推真交付出去的結果。
+    if (status !== "success" && status !== "partial") return
+    workflowCompletionPushed.add(wfid)
+    // 投影：節點狀態/產物/單節點幣耗從 ActiveWorkflow 的三張旁表組回節點上
+    //（WorkflowRunState 是 graph + nodeStatus/nodeContent/nodeCost 的組合視圖）。
+    const nodes = wf.graph.nodes.map((n) => ({
+      id: n.id,
+      role: n.role,
+      kind: n.kind,
+      title: n.title,
+      status: wf.nodeStatus[n.id] ?? "pending",
+      ...(wf.nodeContent[n.id] ? { content: wf.nodeContent[n.id] } : {}),
+      ...(typeof wf.nodeCost[n.id] === "number" ? { costCoins: wf.nodeCost[n.id] } : {}),
+      metadata: n.metadata,
+    }))
+    let totalCostCoins = 0
+    for (const v of Object.values(wf.nodeCost)) if (typeof v === "number") totalCostCoins += v
+    // Jev 閘門（`gateWorkflowMemory`）：判「這條跑批值不值得進記憶庫」。
+    // 為什麼在 gateway 判而不是站點判：閘門分工（契約 §5）把判斷層放在 gateway，
+    // 且 `gateWorkflowMemory` 本來就住在 jev-gate.ts；站點只該收結論、不該持有
+    // Jev 憑據。判完把結論放進 payload，站點據此決定要不要沉澱記憶（見站點
+    // route 的 persistWorkflowMemory）。fail-open：Jev 掛掉回 true，不擋記憶。
+    const memoryWorthPersisting = await gateWorkflowMemory({
+      domain: "workflow",
+      name: wf.templateId,
+      // 判值只看「跑批的實質參數」：text 節點的提示詞 + config 節點的參數。
+      // 與站點側 extractWorkflowRunConfig 同語義（兩邊都得從節點攤平裡取，
+      // 因為 gateway 沒有單一 config 物件——參數是 expandTemplate 攤在節點上的）。
+      config: (() => {
+        const out: Record<string, unknown> = {}
+        for (const n of wf.graph.nodes) {
+          if (n.kind === "text" && typeof n.metadata?.content === "string" && !out.prompt) {
+            out.prompt = n.metadata.content
+          }
+          if (n.kind === "config" && n.metadata) {
+            for (const [k, v] of Object.entries(n.metadata)) {
+              if (!(k in out)) out[k] = v
+            }
+          }
+        }
+        return out
+      })(),
+    })
+    const payload = {
+      workflowId: wfid,
+      templateId: wf.templateId,
+      sessionId: state.sessionId,
+      status,
+      nodes,
+      connections: wf.graph.connections,
+      totalCostCoins: Math.round(totalCostCoins * 1e6) / 1e6,
+      completedAt: new Date().toISOString(),
+      memoryWorthPersisting,
+      // 記憶庫 ownerKey：**必須是這位用戶的**，否則寫進去的記憶 agent 召不回來。
+      //
+      // 為什麼要 gateway 算而不是站點自己推：站點只握有推送用的通用
+      // HARNESS_API_KEY（平台級），hash 它得到的 ownerKey 與 agent 注入記憶時
+      // 用的 per-user B key hash 不同 → 記憶落進一個誰都召不到的角落。
+      // 而 `state.apiKey` 正是這位用戶的派生 B key（站點
+      // getOrCreateAgentKeyForUser 簽發後帶進建號請求），agent 側
+      // deriveMemoryOwnerKey 對同一把 key 做同一套 hash → 兩端收斂。
+      //
+      // 送 hash 而非原 key：站點不需要（也不該拿到）明文憑據，ownerKey 本身
+      // 就是公開可見的索引鍵（契約 §1）。算法與站點 hashMemoryOwnerKey 逐字
+      // 相同：UTF-8 → SHA-256 → 前 12 bytes → 小寫 hex（24 字元）。
+      memoryOwnerKeyHash: createHash("sha256").update(state.apiKey, "utf8").digest().subarray(0, 12).toString("hex"),
+    }
+    const key = (process.env.HARNESS_API_KEY || "").trim()
+    if (!key) {
+      console.error("[gateway] workflow completion push skipped: HARNESS_API_KEY 未配置")
+      return
+    }
+    const res = await fetch(SITE_COMPLETION_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(5000),
+    })
+    if (!res.ok) {
+      const text = await res.text().catch(() => "")
+      console.error(`[gateway] workflow completion push failed: HTTP ${res.status} ${text.slice(0, 200)} wf=${wfid}`)
+      return
+    }
+    console.log(`[gateway] workflow completion pushed: wf=${wfid} status=${status} nodes=${nodes.length} cost=${payload.totalCostCoins}`)
+  } catch (e) {
+    console.error(`[gateway] workflow completion push failed: ${e instanceof Error ? e.message : String(e)}`)
+  }
+}
 
 // runNode 需要目前的 session（key）。workflow 端點都是帶 session 呼叫的，執行前設入。
 export let stateForWorkflow: SessionState | null = null
@@ -914,6 +1054,11 @@ export function runWfGenerate(state: SessionState, wfid: string): void {
       if (billing) billing.billing_status = "settled"
     }
     console.log(`[gateway] workflow ${wfid} finished ok`)
+    // 2026-09-20 Phase 1：跑批完成推送站點。**這是 generate 的單一完成出口**
+    //（success/partial/failed 三分支全在此），且 rerun 不走此路徑（rerun 是
+    // 局部重跑，非整批完成）。fire-and-forget：pushWorkflowCompletion 自帶
+    // try/catch 不拋，此處不 await，工作流收尾不受站點延遲影響。
+    void pushWorkflowCompletion(state)
   })
 }
 

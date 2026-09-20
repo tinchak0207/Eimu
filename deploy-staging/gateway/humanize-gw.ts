@@ -68,8 +68,10 @@ export const SUPPLIER_ERROR_HUMANIZERS: Array<{ test: RegExp; human: string }> =
   { test: /\b(unauthorized|forbidden|invalid api key|authentication failed|http_?401|http_?403)\b/i, human: "上游供给认证失败，请联系维护方" },
   // R8-C（2026-08-29）：用戶主動中止（opencode 回 "Tool execution aborted" /
   // "Aborted"）不是失敗，此前漏映射 → 原樣包成「执行失败（上游原因：…）」英文
-  // 黑話甩給用戶。補專屬人話：中止 ≠ 失敗。
-  { test: /\b(aborted|cancel(?:led|ed) by user|interrupted by user)\b/i, human: "已按你的要求中止本轮" },
+  // 黑話甩給用戶。0920 改中性話術：events-translate 的 abort 分支已攔截不發卡，
+  // 此條僅作殘餘防線（其他呼叫方如 toolErrorPayload/媒體路由）——絕不歸因於
+  // 用戶（系統自殺輪也曾命中此條彈「已按你的要求中止」＝栽贓）。
+  { test: /\b(aborted|cancel(?:led|ed) by user|interrupted by user)\b/i, human: "本轮已中止" },
   // 修復3b（2026-09-19）：確定性死模型（渠道清單裡沒有該模型）不是瞬態故障——
   // new-api 的巨長 trace 原文直出瀏覽器刷屏（事故實錘）。人話化為切線提示，
   // 與 failover 零退避（DEAD_MODEL_ERROR_RE）配套。

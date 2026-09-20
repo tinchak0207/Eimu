@@ -220,6 +220,26 @@ export function getWorkflowTemplate(id: string): WorkflowTemplate | undefined {
   return WORKFLOW_TEMPLATES.find((t) => t.id === id)
 }
 
+/**
+ * 0920 暴君裁定（第二版）：模板判定完成即建骨架彈上畫布——不等 Expert 去調
+ * workflow_start（實錘：Expert 根本沒調，右邊永遠空白，「太慢了」）。
+ *
+ * 後端 startSync 要求每個 text role 非空，故建構時用「佔位內容」先滿足驗證；
+ * Expert 之後同模板呼叫 workflow_start 走 P0 冪等守衛復用同一支 wf，再用
+ * workflow_update_node 回填真內容。config/image/video/audio/film role 無需 content。
+ */
+export function templatePlaceholderContent(templateId: string): Record<string, unknown> {
+  const t = getWorkflowTemplate(templateId)
+  if (!t) return {}
+  const content: Record<string, unknown> = {}
+  for (const n of t.nodes) {
+    // 契約形狀：{ role: { content: "..." } }（startSync 逐 role 讀 c.content）；
+    // 傳純字串會被判「缺少必要内容」而 400（實錘 2026-09-20）。
+    if (n.kind === "text") content[n.role] = { content: `（待填：${n.title}）` }
+  }
+  return content
+}
+
 export function listWorkflowTemplates(): { id: string; name: string; description: string; multiShot?: boolean }[] {
   return WORKFLOW_TEMPLATES.map(({ id, name, description, multiShot }) => ({ id, name, description, multiShot }))
 }

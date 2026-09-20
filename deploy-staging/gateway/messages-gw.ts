@@ -5,7 +5,10 @@
 import { createHash } from "node:crypto"
 import { readFileSync } from "node:fs"
 import { loadUserSettings } from "./persistence"
-import { gateUserInput } from "./jev-gate"
+import { gateUserInput, classifyDispatchMeta } from "./jev-gate"
+// 0920：首條訊息即建模板骨架（不等模型思考/不等 Expert）——見下方 PROMPT_SKELETON。
+import { workflowService, workflowOwnerBySession } from "./workflow-gw.ts"
+import { templatePlaceholderContent } from "./workflow-templates.ts"
 import { jsonError } from "./gw-lib.ts"
 import { OPENCODE_URL, SYSTEM_PAYLOAD_TAIL_DEDUPE, MEMORY_SHARED_ENABLED } from "./constants-gateway.ts"
 import { sessions, markDirty, getOwnedSession } from "./sessions-core.ts"
@@ -76,6 +79,42 @@ export function appendSystemPayloadToTurnTail(
   else parts.push({ type: "text", text: block })
 }
 
+/**
+ * 0920 暴君裁定（第三版＋壓縮垃圾時間）：模板骨架必須在「用戶發第一條訊息」後
+ * 毫秒級彈上右邊畫布。Jev 判定本身是毫秒級（實測 203ms 全程），瓶頸在別處：
+ *   ① 舊路徑等模型思考完整輪才派遣 → 骨架延後 10-20s；
+ *   ② 等 Expert 去調 workflow_start → 實錘 Expert 根本沒調，右邊永遠空白；
+ *   ③ start() 對 multiShot 模板 await pickDefaultVideoModel（上限 5s）→ 骨架白等。
+ * 本函式：用戶 prompt 直送 Jev 判模板 → 命中即 startFast（同步純淨、零探測）建骨架
+ * → emit 落快照＋SSE。與注入閘並行發起，不佔送訊延遲。fire-and-forget。
+ */
+async function buildTemplateSkeletonForPrompt(state: SessionState, content: string): Promise<void> {
+  try {
+    const meta = await classifyDispatchMeta(content)
+    if (!meta.template) return
+    const owned = workflowOwnerBySession.get(state.sessionId)
+    if (owned && workflowService.get(owned)) {
+      console.log(`[gateway] prompt skeleton skip (workflow exists): wf=${owned} session=${state.sessionId}`)
+      return
+    }
+    const r = workflowService.startFast(
+      meta.template.templateId,
+      templatePlaceholderContent(meta.template.templateId) as never,
+      state,
+    )
+    if ("workflowId" in r && typeof r.workflowId === "string") {
+      workflowOwnerBySession.set(state.sessionId, r.workflowId)
+      console.log(
+        `[gateway] jev_gate: PROMPT_SKELETON built template=${meta.template.templateId} confidence=${meta.template.confidence.toFixed(2)} wf=${r.workflowId} session=${state.sessionId} (首條訊息即彈)`,
+      )
+    } else {
+      console.log(`[gateway] prompt skeleton skipped: ${"error" in r ? r.error : "unknown"}`)
+    }
+  } catch (e) {
+    console.log(`[gateway] prompt skeleton build failed: ${e instanceof Error ? e.message : String(e)}`)
+  }
+}
+
 export async function handleSendMessage(key: string, id: string, req: Request): Promise<Response> {
   // Phase 0 觀測：t_accept 起點（函數進入時刻；計時檔在 turnGen 遞增處建立）。
   const tAcceptAt = Date.now()
@@ -133,9 +172,14 @@ export async function handleSendMessage(key: string, id: string, req: Request): 
   // 刀2A（2026-09-19）：用戶輸入越獄/注入閘（權威）。便宜前置過濾＋單次 Jev 呼叫
   // （≤2s，僅可疑輸入付此延遲）；任一題 noul>0.8 → 400 拒絕（防越獄不是 LLM 的
   // 決策，AGENTS.md §7 的機器化前置層）。掃描器故障 → 放行（fail-open＝現狀）。
+  // 0920 壓縮垃圾時間：模板骨架判定與注入閘**並行**發起（兩者都是對同一條用戶
+  // prompt 的獨立 Jev 呼叫，加題不加延遲；串行會讓骨架白等閘門的 2s 預算）。
+  const beastOn = loadUserSettings(key)?.beast_mode === true
+  const skeletonTask = beastOn ? buildTemplateSkeletonForPrompt(state, content) : Promise.resolve()
   if (await gateUserInput(`user:${state.sessionId}`, content)) {
     return jsonError(400, "该请求包含无法执行的指令注入内容", "injection_blocked", "bad_request")
   }
+  void skeletonTask
   // ── 契約 §4/§7 每回合召回前綴（2026-09-15 PRD P0-4）─────────────────────
   // 取上一回合 session.idle 預算好的候選（用戶路徑零新增延遲）；miss 則本回合
   // 不注入、順手排一次異步補算（此刻 lastUserMessage/turnAssistantHead 仍是
@@ -246,6 +290,12 @@ export async function handleSendMessage(key: string, id: string, req: Request): 
         // （派遣手冊第〇節）的語義分歧（R8 審計 E7；1204 秒零工具調用病灶實證）。
         const beastPrecedenceFact =
           "【優先序·野獸模式】本幀與《派遣手冊》優先於 workspace/AGENTS.md。AGENTS.md 中「你負責擴寫／你親自寫 prompt／你親自操作 workflow_* 工具」等指示，在野獸模式下由你派遣的 Expert 執行；內容生產（寫分鏡 prompt、生成圖片影片）你一律不親手做。你的動作只有：拆解任務 → subagent_dispatch（必帶 expert 欄，async:true 為常態）→ 派出後立刻用一句正文向用戶簡報 → 收完工通知後匯總回報。AGENTS.md 的安全紅線與文案規範繼續有效。"
+        // 0920 暴君裁定：模板優先·機器判。事故＝60s 百合 OP MV 裸跑（無角色設定卡/
+        // 美術卡等約束環節）＝業餘；根因＝模板選擇無人負責（orchestrator 無 workflow_*）。
+        // 修法＝模板選擇接 System One 機器判定並在派遣時硬注入 Expert 任務書；
+        // 本幀只聲明職責：你在簡報裡要交代用了哪個模板、跳過了哪些環節與原因。
+        const beastTemplateFact =
+          "【模板優先·機器判】製作類任務（MV／影片／多鏡／成片／長片／角色／場景／OP）禁止無模板裸跑——模板是產品的真實生產線，角色設定卡／美術卡／分鏡門禁等約束環節是防業餘化的欄位（沒有它們＝業餘水平）。模板選擇由系統（System One）機器判定，派遣時網關會把「生產骨架＝模板 X」自動寫進 Expert 任務書；你沒有 workflow_* 工具（能力斷路），模板骨架由 Expert 用 workflow_start 建立。你的職責：①在派遣簡報裡明說用哪個模板；②Expert 若跳過某環節，交付裡必須有「跳過 X 環，原因 Y」，你要在匯總裡照抄如實呈現，不得靜默略過。"
         if (!playbookBody || !digestBody) {
           return jsonError(
             503,
@@ -266,6 +316,7 @@ export async function handleSendMessage(key: string, id: string, req: Request): 
           digestBody,
           beastPrecedenceFact,
           capabilityCutoffFact,
+          beastTemplateFact,
           "---",
         ]
           .filter(Boolean)

@@ -28,7 +28,11 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSyn
 import { join } from "node:path"
 // 刀 2B/刀 3（2026-09-19）：Jev 權威閘——spec 注入隔離＋expert 路由＋sync 資格。
 // 量級瘦身 A：spec 模板機器注入（playbook 2.0 起模板不進 orchestrator 上下文）。
-import { quarantineSpec, routeExpertAuthoritative, syncDispatchEligible, classifySpecTemplate } from "./jev-gate"
+import { quarantineSpec, routeExpertAuthoritative, syncDispatchEligible, classifyDispatchMeta, workflowTemplateDirective } from "./jev-gate"
+// 0920：模板判定即建骨架（不等 Expert）——workflowService 是純 service 模組，
+// workflow-gw 不 import subagent，無循環風險。
+import { workflowService, workflowOwnerBySession } from "./workflow-gw"
+import { templatePlaceholderContent } from "./workflow-templates"
 // 片 C（2026-09-15）：Expert 交付契約的機器強制點。純函數模組，零 gateway 內部依賴。
 // 片 D（2026-09-15）：追加 REWORK_FAIL_MARK/buildReworkDirective——FAIL 時機器化重派一次。
 import {
@@ -108,7 +112,9 @@ interface SubagentRun {
   opencodeSessionId: string
   label: string
   startedAt: number
-  status: "running" | "ok" | "error"
+  // 0920 停止閘：新增 "stopped"——用戶／orchestrator 主動停止**不是失敗**，
+  // 此前複用 error 導致卡片顯示「失败」（實錘：停止成功卻被假判定為失敗）。
+  status: "running" | "ok" | "error" | "stopped"
   summary?: string
   error?: string
   // 任务书与模型链：上游错误时换新子会话、下一模型重投。
@@ -154,10 +160,18 @@ interface SubagentRun {
   machineCriticPass?: boolean
   // 刀 2：機器 pass 的 critic run 專用——其終態 verdict 判讀結果（false=通過）。
   machineCriticRejected?: boolean
+  // 0920 暴君裁定（停止閘）：用戶／orchestrator 主動停止。置位後：
+  //   ① killSwitch 已 abort+DELETE 子會話；② 所有事件與重投路徑一律早退
+  //   （stopCheck 見 stopped 即 return），含換模重試與交付閘門重派；
+  //   ③ finishRun 歸屬 "stopped"，**不做 wakeParent**（停止不該把父會話再喚起來）。
+  stopped?: boolean
+  stoppedBy?: "user" | "orchestrator"
+  stoppedAt?: number
 }
 
 interface SubagentResult {
-  status: "ok" | "error"
+  // 0920 停止閘：新增 "stopped"——人工取消不是失敗（停止成功卻顯示「失败」＝假判定）。
+  status: "ok" | "error" | "stopped"
   summary: string
   error?: string
   finishedAt: number
@@ -253,11 +267,81 @@ export function subagentParentState(opencodeSessionId: string): any | undefined 
 }
 
 function parentStateOf(run: SubagentRun): any {
-  if (!deps) return undefined
   return (
     deps.resolveSession(run.parentGatewaySessionId) ??
     deps.findSessionByOpenCodeId(run.parentOpencodeSessionId)
   )
+}
+
+// ── 0920 暴君裁定：子代理停止閘（此前「一出就刹不住車」）─────────────────────
+// 病灶（三處結構性缺失，全在本次修復）：
+//   ① 用戶終止按鈕打 /agent/v1/sessions/:id/abort → 只殺**主會話**在途 turn，
+//      子代理（各自獨立子會話）完全不受影響，跑完照樣 wakeParent 把父會話**重新
+//      喚起來**——用戶視角＝「按了終止，它又自己活了」。
+//   ② orchestrator 沒有任何停止子代理的工具（只有 dispatch/status）。
+//   ③ 換模重試（retryWithNextModel）與交付閘門重派（startRework）都會另建子會話，
+//      沒有「已停止」這道閘，停止後仍會被重投路徑復活。
+// 本閘：stopped 一置，所有事件處理與重投路徑早退，finishRun 歸屬 "stopped" 且不喚醒。
+
+/** 停止單一 run：標記 + abort/DELETE 子會話 + 摘註冊表 + 記 completed（工具輪詢可解鎖）。 */
+export function stopSubagentRun(run: SubagentRun, by: "user" | "orchestrator", reason: string): void {
+  if (run.status !== "running") return
+  run.stopped = true
+  run.stoppedBy = by
+  run.stoppedAt = Date.now()
+  if (run.timeoutTimer) clearTimeout(run.timeoutTimer)
+  if (run.deadlineTimer) clearTimeout(run.deadlineTimer)
+  const text = reason || `已停止子代理「${run.label}」`
+  // 先落一條 done（不經 finishRun——那條路會走交付閘門/喚醒，停止語義不適用）。
+  // 0920 停止閘：人工／orchestrator 停止不是失敗，標 "stopped"，前端的 "已中止"。
+  run.status = "stopped"
+  run.error = text
+  run.summary = text
+  removeFromRegistries(run)
+  deleteReworkRecord(run.id)
+  completed.set(run.id, { status: "stopped", summary: text, error: text, finishedAt: Date.now(), label: run.label })
+  const state = parentStateOf(run)
+  if (state && deps) {
+    try {
+      deps.emitToSession(state, "subagent.done", { id: run.id, status: "stopped", summary: text, stopped: true, stopped_by: by })
+    } catch (e) {
+      console.error(`[gateway] subagent stop emit failed: id=${run.id}`, e)
+    }
+    // 刻意**不喚醒**父會話：停止＝結束，不是新任務。喚醒會讓 orchestrator 又起一輪
+    // （並可能再派新 subagent），正是用戶抱怨的「刹不住」。
+  }
+  if (isOpenCodeSessionId(run.opencodeSessionId) && deps) {
+    void fetch(`${deps.openCodeUrl}/session/${run.opencodeSessionId}/abort`, {
+      method: "POST",
+      headers: deps.openCodeHeaders(),
+      signal: AbortSignal.timeout(5000),
+    }).catch(() => {})
+    void fetch(`${deps.openCodeUrl}/session/${run.opencodeSessionId}`, {
+      method: "DELETE",
+      headers: deps.openCodeHeaders(),
+      signal: AbortSignal.timeout(5000),
+    }).catch(() => {})
+  }
+  console.log(
+    `[gateway] subagent stopped: id=${run.id} label="${run.label}" by=${by} parent=${run.parentGatewaySessionId} reason=${text}`,
+  )
+}
+
+/** 停止一個父會話名下全部在跑子代理（用戶終止按鈕 / orchestrator 一鍵清場）。回停掉幾個。 */
+export function stopSubagentsForParent(parentGatewaySessionId: string, by: "user" | "orchestrator", reason = ""): number {
+  const list = byParent.get(parentGatewaySessionId) ?? []
+  const running = list.filter((r) => r.status === "running" && !r.stopped)
+  for (const r of running) stopSubagentRun(r, by, reason)
+  return running.length
+}
+
+/** 停止或恢復單一 run（orchestrator 工具用；id 可為 gateway run id 或 label 前綴）。回 run 或 undefined。 */
+export function findRunningRun(parentGatewaySessionId: string, idOrLabel: string): SubagentRun | undefined {
+  const list = (byParent.get(parentGatewaySessionId) ?? []).filter((r) => r.status === "running" && !r.stopped)
+  const exact = list.find((r) => r.id === idOrLabel)
+  if (exact) return exact
+  const byLabel = list.filter((r) => r.label.startsWith(idOrLabel))
+  return byLabel[0]
 }
 
 function boundMap<T>(map: Map<string, T>, max: number): void {
@@ -288,6 +372,9 @@ function removeFromRegistries(run: SubagentRun): void {
 /** 收尾：登记结果、摘除注册表、向父会话发 done、DELETE 子会话防堆积。 */
 function finishRun(run: SubagentRun, status: "ok" | "error", fullText: string, error?: string): void {
   if (run.status !== "running") return // 幂等：idle 与超时硬顶可能竞态
+  // 0920 停止閘：停止已由 stopSubagentRun 收尾（已 done/已摘表）；此處不得再走
+  // 交付閘門或 wakeParent——否則停止後仍會把父會話喚醒重跑（「刹不住」病灶①）。
+  if (run.stopped) return
   run.status = status
   // E 片（2026-09-12）缺陷一：**先落盤完整全文/死因全文，再走摘要與 DELETE**。行內
   // 摘要仍只給 600 字（semantics 不變），但前綴掛落盤指針 → 父會話可 read 全文。
@@ -324,7 +411,7 @@ function finishRun(run: SubagentRun, status: "ok" | "error", fullText: string, e
     // 非 Expert/已失敗收場零污染；status==="ok" 是必要條件——上游 error/超時不進重派鏈。
     // 提前 return：本輪**不終態**（回退 status、不發 done/不 completed.set/不 wake），
     // run 留在註冊表由 startRework 接棒；終態只屬重派鏈的最後一次 finishRun（spec 6 冪等）。
-    if (!verdict.ok && run.reworkCount === 0 && !run.reworkFailure) {
+    if (!verdict.ok && run.reworkCount === 0 && !run.reworkFailure && !run.stopped) {
       run.reworkCount = 1
       run.reworking = true
       run.status = "running"
@@ -752,6 +839,11 @@ async function dispatchAttempt(run: SubagentRun): Promise<string | undefined> {
 
 /** 上游錯誤後的換模重試：新子會話 + 鏈上下一個模型重投任務書。 */
 async function retryWithNextModel(run: SubagentRun, lastError: string): Promise<void> {
+  // 0920 停止閘：已停止的 run 不得被換模重投復活（病灶③）。
+  if (run.stopped || run.status !== "running") {
+    console.log(`[gateway] subagent retry skipped (stopped): id=${run.id} label="${run.label}"`)
+    return
+  }
   const failure = await dispatchAttempt(run)
   if (!failure) return // 重投成功：事件流繼續，等 idle/error 收尾
   console.error(`[gateway] subagent retry dispatch failed: id=${run.id} ${failure}`)
@@ -763,6 +855,9 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
   if (!deps) return
   const run = byChildOc.get(opencodeSessionId)
   if (!run) return
+  // 0920 停止閘：停止後子會話已 DELETE，殘影事件一律丟棄（否則又推進卡片狀態、
+  // 甚至觸發換模重投把 run 復活）。
+  if (run.stopped) return
   try {
     // 上游错误（session.error 或任意带 properties.error 的事件）→ 換模重試或 done error。
     const err = event?.properties?.error
@@ -1149,13 +1244,40 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
   // playbook 1.8 逐字遷出至 spec-templates.json）按 Jev 任務分類自動追加到任務書
   // 頭部——orchestrator 只寫任務意圖，配方由機器持有。Jev 掛 → 不注入（fail-open，
   // 子代理照原 spec 跑；模板缺檔同理跳過，只留 log）。
+  // 0920 暴君裁定：模板選擇接 System One——同一請求批次取回工作流模板判定，
+  // 命中製作類（confidence≥0.8）即把骨架硬注入任務書頭（先於軍團模板），
+  // 讓「沒人負責選模板」不再可能（事故：60s 百合 OP MV 裸跑＝無角色卡約束）。
   {
     let templateInjected = false
     try {
       const tpl = JSON.parse(readFileSync(`${import.meta.dir}/spec-templates.json`, "utf8")) as Record<string, string>
-      const key = await classifySpecTemplate(prompt)
-      if (key && typeof tpl[key] === "string" && tpl[key]) {
-        prompt = `【系統注入·軍團模板】以下模板骨架由網關按任務類型自動注入，與你的任務書同效；〔括號〕欄由你填。\n\n${tpl[key]}\n\n---\n\n【任務書原文】\n${prompt}`
+      const meta = await classifyDispatchMeta(prompt)
+      if (meta.template) {
+        prompt = `${workflowTemplateDirective(meta.template.templateId, meta.template.confidence)}\n\n---\n\n${prompt}`
+        console.log(
+          `[gateway] jev_gate: WORKFLOW_TEMPLATE injected template=${meta.template.templateId} confidence=${meta.template.confidence.toFixed(2)} label="${label}" expert=${expertId || "-"}`,
+        )
+        // 0920 暴君裁定（第二版）：模板判定完成即建骨架彈上畫布——不等 Expert
+        // 去調 workflow_start（實錘：Expert 根本沒調，右邊永遠空白，「太慢了」）。
+        // 建構用佔位內容滿足後端「每個 text role 非空」的驗證；Expert 之後同模板
+        // 呼叫 workflow_start 走 P0 冪等守衛復用同一支 wf，再用 workflow_update_node
+        // 回填真內容。失敗一律 fail-open（Expert 仍可自行建立，行為＝部署前）。
+        try {
+          const r = workflowService.startFast(meta.template.templateId, templatePlaceholderContent(meta.template.templateId) as never, parent)
+          if ("workflowId" in r && typeof r.workflowId === "string") {
+            workflowOwnerBySession.set(parent.sessionId, r.workflowId)
+            console.log(
+              `[gateway] jev_gate: WORKFLOW_SKELETON built template=${meta.template.templateId} wf=${r.workflowId} session=${parent.sessionId} (判定即彈，不等 Expert)`,
+            )
+          } else {
+            console.log(`[gateway] workflow skeleton skipped (start error): ${"error" in r ? r.error : "unknown"}`)
+          }
+        } catch (e) {
+          console.log(`[gateway] workflow skeleton build failed: ${e instanceof Error ? e.message : String(e)}`)
+        }
+      }
+      if (meta.specKey && typeof tpl[meta.specKey] === "string" && tpl[meta.specKey]) {
+        prompt = `【系統注入·軍團模板】以下模板骨架由網關按任務類型自動注入，與你的任務書同效；〔括號〕欄由你填。\n\n${tpl[meta.specKey]}\n\n---\n\n【任務書原文】\n${prompt}`
         templateInjected = true
       }
     } catch (e) {
@@ -1327,6 +1449,39 @@ export async function handleSubagentStatus(req: Request): Promise<Response> {
     })
   }
   return Response.json({ ok: false, error: "subagent_id 不存在或已过期" }, { status: 404 })
+}
+
+/**
+ * 0920 停止閘：orchestrator 的停止入口（/internal/subagent/stop）。
+ * body { session_id, subagent_id?, all? }：
+ *   - subagent_id 有值 → 停那一個（gateway run id 或 label 前綴）
+ *   - 否則（或 all:true）→ 停該會話名下全部在跑子代理
+ * 停止語義：標記 stopped → abort+DELETE 子會話 → 摘註冊表 → 不喚醒父會話。
+ * 為何不喚醒：停止＝結束，喚醒會讓 orchestrator 又起一輪（可能再派新 subagent），
+ * 正是用戶抱怨的「一出就刹不住車」。
+ */
+export async function handleSubagentStop(req: Request): Promise<Response> {
+  pruneCompleted()
+  const body = (await req.json().catch(() => ({}))) as { session_id?: string; subagent_id?: string; all?: boolean }
+  const sid = body.session_id?.trim()
+  if (!sid) return Response.json({ ok: false, error: "session_id 必填" }, { status: 400 })
+  // session_id 接受 gateway id 或父 opencode id——與 status/dispatch 同語義。
+  const parent = deps?.resolveSession(sid) ?? deps?.findSessionByOpenCodeId(sid)
+  const parentKey = parent?.sessionId ?? sid
+  if (body.subagent_id && body.all !== true) {
+    const run = findRunningRun(parentKey, body.subagent_id.trim())
+    if (!run) {
+      return Response.json({ ok: false, error: `找不到在跑的子代理：${body.subagent_id}` }, { status: 404 })
+    }
+    const label = run.label
+    const id = run.id
+    stopSubagentRun(run, "orchestrator", `已按你的要求停止子代理「${label}」`)
+    return Response.json({ ok: true, stopped: 1, subagent_ids: [id] })
+  }
+  const list = (byParent.get(parentKey) ?? []).filter((r) => r.status === "running" && !r.stopped)
+  const ids = list.map((r) => r.id)
+  const n = stopSubagentsForParent(parentKey, "orchestrator", "已按你的要求停止全部在跑子代理")
+  return Response.json({ ok: true, stopped: n, subagent_ids: ids })
 }
 
 /** 刀1：掃 outputs/subagent/<runId前8碼>-*.md，取最新一筆（同前綴理論唯一，兜底取 mtime 最大）。 */

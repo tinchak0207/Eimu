@@ -808,6 +808,14 @@ if (status === "pending" || status === "running") {
       isQuestionFreezeAbort = true
       message = "本回合已暂停，等待你在问题卡上选择后继续"
     }
+    // 0920 暴君欽點：abort 類工具錯誤一律不發卡——①真用戶按停：UI 收尾由
+    // turn.done 表達（與 emitSessionError 的 MessageAbortedError 早退同構，09-18）；
+    // ②系統自殺輪（failover 換線/idle 止損/子代理換模殺在途工具）此前經此分支
+    // 彈「已按你的要求中止本轮」錯誤卡＝栽贓用戶＋欺君。兩種情況都只留日誌。
+    if (!isQuestionFreezeAbort && /\b(aborted?|cancel(?:led|ed) by user|interrupted by user)\b/i.test(message)) {
+      console.log(`[gateway] tool abort, card suppressed (UI 收尾走 turn.done): callId=${callId} tool=${toolName} message=${message}`)
+      return
+    }
     // 修 4：workflow_start 的裸「tool failed」→ 帶期望 schema 的可照抄報錯。
     // 工具層不透傳 gateway 400 body，模型此前只能盲猜載荷形狀；命中條件 =
     // workflow_start + 報錯無任何中文（真實中文報錯如「缺少必要內容」不覆蓋）。

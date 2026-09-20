@@ -19,8 +19,8 @@ import { openEventStream } from "./sse-core.ts"
 import { handleAttachmentUpload, sanitizeUploadName, contentTypeForExt } from "./uploads-media.ts"
 import { handleConfirmRequest, handleInternalEmit, handleTts, handleCanvasDispatchOps, handleCanvasOpsResultInternal, handleMediaUpload, handleCanvasStatePublic, handleCanvasStatePublicGet, handleCanvasOpsResultPublic } from "./media-internal-routes.ts"
 import { handleCanvasStateWrite, handleCanvasSnapshotRead } from "./canvas-cascade-state.ts"
-import { handleSubagentDispatch, handleSubagentStatus } from "./subagent.ts"
-import { workflowServiceTemplates, handleWorkflowInternal } from "./workflow-gw.ts"
+import { handleSubagentDispatch, handleSubagentStatus, handleSubagentStop, subagentParentState } from "./subagent.ts"
+import { workflowServiceTemplates, handleWorkflowInternal, pushWorkflowCompletion } from "./workflow-gw.ts"
 import { handleDirectorRoutes } from "./director.ts"
 import { handleCreateSession, handleEventStream, handleConfirm } from "./session-lifecycle.ts"
 import { handleSendMessage } from "./messages-gw.ts"
@@ -185,6 +185,13 @@ export async function handleRequest(req: Request, srv: { requestIP: (r: Request)
       if (req.method === "POST" && pathname === "/internal/subagent/status") {
         return handleSubagentStatus(req)
       }
+      // 0920 停止閘：orchestrator 的主動停止入口（此前只有 dispatch/status，
+      // orchestrator 眼睜睜看著子代理跑飛卻無權剎車）。body: { session_id, subagent_id?, all? }
+      //   - 帶 subagent_id：停那一個（id 或 label 前綴）
+      //   - all:true 或缺 subagent_id：停該會話名下全部在跑子代理
+      if (req.method === "POST" && pathname === "/internal/subagent/stop") {
+        return handleSubagentStop(req)
+      }
       // ── 契約 §3.5：記憶批次手動觸發（每日 ticker 之外的運維入口）。──
       // 鑑權＝與現狀同構的 loopback-only 門（本 /internal/ 區塊上層已裁定：既有
       // /internal/* 全部只驗 isLoopback、無 HARNESS key；契約 §3.5 寫的
@@ -198,10 +205,27 @@ export async function handleRequest(req: Request, srv: { requestIP: (r: Request)
       }
       if (pathname.startsWith("/internal/workflow/")) {
         const m = new URL(req.url)
-        const jsonBody = (await req.json().catch(() => ({}))) as { session_id?: string }
-        const sessionId = m.searchParams.get("session_id") || jsonBody.session_id || ""
-        const session = sessionId ? resolveSession(sessionId) : undefined
+        // 0920 回歸修復（重構引入）：原版是 `searchParams.get(...) || (await req.json())`
+        // ——短路，query 帶 session_id（工具一律帶）時 body 不被讀。重構拆檔時改成
+        // 無條件先讀 body，下游 handleWorkflowInternal 再讀同一條已消費的 body →
+        // 一律 400「invalid json body」。實錘：任何 template/workflow_start POST
+        // 都建不起骨架（野獸模式因此只能裸跑）。還原短路＝body 只在必要時才讀。
+        const qsid = m.searchParams.get("session_id")
+        const sessionId = qsid || ((await req.json().catch(() => ({}))) as { session_id?: string }).session_id || ""
+        // 0920：Expert（子代理）的工具呼叫帶自己的 opencode session id——三段解析
+        // 全 miss（子會話不進 sessions map）→ 此前一律 404，模板骨架永遠建不起來
+        // （事故：野獸模式裸跑無角色卡）。兜底回父會話＝工作流落在用戶看得見的畫布。
+        const session = sessionId ? resolveSession(sessionId) ?? subagentParentState(sessionId) : undefined
         if (!session) return jsonError(404, "session not found", "not_found", "not_found")
+        // 2026-09-20 Phase 1：跑批完成推送的手動觸發入口（自動觸發在
+        // runWfGenerate 的 generate .then）。語義＝「現在就把本會話當前
+        // 工作流的完成態推給站點」，冪等（pushWorkflowCompletion 內
+        // workflowCompletionPushed 去重）。放此處而非 handleWorkflowInternal：
+        // 不需 body，且避免動到 /workflow/* 的 body 讀取契約（0920 血淚短路）。
+        if (pathname === "/internal/workflow/complete" && req.method === "POST") {
+          await pushWorkflowCompletion(session)
+          return Response.json({ ok: true })
+        }
         return handleWorkflowInternal(req, session)
       }
       return jsonError(404, "not found", "not_found", "not_found")
