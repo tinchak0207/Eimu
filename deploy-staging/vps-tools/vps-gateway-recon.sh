@@ -29,7 +29,7 @@ drift=0
 cd "$WORKTREE/deploy-staging/gateway" || exit 2
 find . -name '*.ts' ! -name '*.test.ts' ! -path './node_modules/*' ! -name '*.bak*' ! -name 'index.r?.ts' ! -name 'refactor-audit.ts' | sort > "$TMP_DIR/head-files.txt"
 cd "$TMP_DIR" || exit 2
-find . -name '*.ts' ! -name '*.test.ts' ! -path './node_modules/*' ! -name '*.bak*' ! -name 'index.r?.ts' | sort > "$TMP_DIR/vps-files.txt"
+find . -name '*.ts' ! -name '*.test.ts' ! -path './node_modules/*' ! -name '*.bak*' ! -name 'index.r?.ts' ! -name 'refactor-audit.ts' | sort > "$TMP_DIR/vps-files.txt"
 strip() { sed '/^[[:space:]]*\/\//d; /^[[:space:]]*$/d' "$1"; }
 while read -r f; do echo "ONLY_LOCAL ${f#./}（VPS 缺，確認是否該部署）"; done < <(comm -23 "$TMP_DIR/head-files.txt" "$TMP_DIR/vps-files.txt")
 comm -13 "$TMP_DIR/head-files.txt" "$TMP_DIR/vps-files.txt" | while read -r f; do echo "ONLY_VPS ${f#./}"; done
