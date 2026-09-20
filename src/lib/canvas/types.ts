@@ -157,9 +157,11 @@ export interface CanvasNodeMetadata {
   deliverable?: string;
   /**
    * 骨架節點：本步驗收門禁一行（後端 workflow 骨架經 SSE canvas.node.created/updated
-   * 帶入；與 pipelineCard 的 "gate" 卡型別是兩回事，勿混）。
+   * 帶入；與 pipelineCard 的 "gate" 卡型別是兩回事，勿混）。boolean 形態是
+   * workflow-dsl 的既有契約（compile.ts md.gate = true——「需人工批准」旗標），
+   * 兩種寫入者共用本欄位，string = 全文門禁、true = 僅標記需批准。
    */
-  gate?: string;
+  gate?: string | boolean;
   /** 步驟頭卡：本步輸入來源。 */
   inputFrom?: string;
   /** 步驟序號（生成卡頂欄 stepName 條）。 */

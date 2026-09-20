@@ -137,7 +137,9 @@ export function toNodeMetadata(raw: unknown): CanvasNodeMetadata {
     ...(m.pipelineCard === "director" ? { pipelineCard: "director" as const } : {}),
     // 後端 workflow 骨架節點的產出合同/驗收門禁（各一行，SSE canvas.node.created/updated 帶入）。
     ...(str(m.deliverable) !== undefined ? { deliverable: str(m.deliverable) } : {}),
-    ...(str(m.gate) !== undefined ? { gate: str(m.gate) } : {}),
+    // gate 兩形態（types.ts 註解）：string 門禁全文照走；boolean（workflow-dsl
+    // 的「需人工批准」旗標）原樣保留，不能只過 str() 否則旗標會被剝掉。
+    ...(str(m.gate) !== undefined ? { gate: str(m.gate) } : m.gate === true ? { gate: true } : {}),
     ...(str(m.directorSessionId) !== undefined ? { directorSessionId: str(m.directorSessionId) } : {}),
     ...(str(m.planName) !== undefined ? { planName: str(m.planName) } : {}),
     ...(m.planName === null ? { planName: null } : {}),

@@ -493,7 +493,10 @@ export function NodeBody({
         // 後端 workflow 骨架節點的產出合同/驗收門禁（SSE 放行，2026-09-20）：
         // 複用步驟頭卡的膠囊樣式（Package 綠膠囊 + 全文），門禁走灰小字行。
         const deliverableText = metadata?.deliverable?.trim();
-        const gateText = metadata?.gate?.trim();
+        // gate 兩種形態（types.ts 註解）：string = 後端骨架門禁全文；boolean true =
+        // workflow-dsl 的「需人工批准」旗標（compile.ts md.gate = true），顯示通用文案。
+        const gateText =
+          typeof metadata?.gate === "string" ? metadata.gate.trim() : metadata?.gate === true ? "此步骤需要人工批准后才继续" : undefined;
         // 流水線步驟頭卡（agent-template-canvas 鋪的）：Liquid Glass 分層正文
         // ——「产出」green tint 胶囊（Package 图标）+ deliverable 全文 + 输入来源行。
         // 後端骨架 Config 節點帶 metadata.deliverable/gate（2026-09-20 SSE 放行）時
