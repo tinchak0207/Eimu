@@ -128,10 +128,12 @@ function splitIntoBatches(order: string[], graph: WorkflowGraph): string[][] {
 export function resolveNodeUnitPrice(node: WorkflowNode, graph: WorkflowGraph, field = "unit_price_coins"): number | null {
   const self = node.metadata[field]
   if (typeof self === "number" && self > 0) return self
+  const connections = Array.isArray(graph?.connections) ? graph.connections : []
+  const nodes = Array.isArray(graph?.nodes) ? graph.nodes : []
   const upstreamOf = (id: string) =>
-    graph.connections
+    connections
       .filter((c) => c.to === id)
-      .map((c) => graph.nodes.find((n) => n.id === c.from))
+      .map((c) => nodes.find((n) => n.id === c.from))
       .filter((n): n is WorkflowNode => Boolean(n))
   let frontier = upstreamOf(node.id)
   for (let depth = 0; depth < 2 && frontier.length; depth++) {
@@ -202,10 +204,12 @@ function videoQualityTier(node: WorkflowNode, graph: WorkflowGraph): "720p" | "1
   const selfQ = scan(node.metadata)
   if (selfQ?.includes("1080")) return "1080p"
   if (selfQ?.includes("720")) return "720p"
+  const connections = Array.isArray(graph?.connections) ? graph.connections : []
+  const nodes = Array.isArray(graph?.nodes) ? graph.nodes : []
   const upstreamOf = (id: string) =>
-    graph.connections
+    connections
       .filter((c) => c.to === id)
-      .map((c) => graph.nodes.find((n) => n.id === c.from))
+      .map((c) => nodes.find((n) => n.id === c.from))
       .filter((n): n is WorkflowNode => Boolean(n))
   let frontier = upstreamOf(node.id)
   for (let depth = 0; depth < 2 && frontier.length; depth++) {
@@ -245,9 +249,11 @@ export function resolveNodeShot(node: { kind: string; metadata: Record<string, u
  */
 function resolveImageModelName(node: WorkflowNode, graph: WorkflowGraph): string | null {
   if (typeof node.metadata.model === "string" && node.metadata.model) return node.metadata.model
-  for (const c of graph.connections) {
+  const connections = Array.isArray(graph?.connections) ? graph.connections : []
+  const nodes = Array.isArray(graph?.nodes) ? graph.nodes : []
+  for (const c of connections) {
     if (c.to !== node.id) continue
-    const up = graph.nodes.find((n) => n.id === c.from)
+    const up = nodes.find((n) => n.id === c.from)
     if (up && up.kind === "config" && typeof up.metadata.model === "string" && up.metadata.model) return up.metadata.model
   }
   return null
@@ -879,12 +885,12 @@ export class WorkflowService {
     if (wf.emittedNodes.has(node.id)) return
     wf.emittedNodes.add(node.id)
     // 泳道座標：81 节点重算是微秒级，幂等安全（也可在 emitGraph 算一次传入，取简单）。
-    const pos = computeSwimlanePositions(wf.graph.nodes).get(node.id) ?? { x: 0, y: 0 }
-    // 衍生卡（pipelineCard tool/note/gate 或 role 含 __）用卡片尺寸；主节点维持现状。
+    const pos = computeSwimlanePositions(wf.graph.nodes, wf.graph.connections).get(node.id) ?? { x: 0, y: 0 }
+    // 衍生卡（pipelineCard tool/note/gate 或 role 含 __）用小尺寸；主節點尺寸對齊 SWIM_CARD_W=300，徹底防止第 0 列與第 1 列卡片水平重疊（440 擠佔 360）。
     const isDerived =
       (typeof node.metadata.pipelineCard === "string" && ["tool", "note", "gate"].includes(node.metadata.pipelineCard as string)) ||
       node.role.includes("__")
-    const size = isDerived ? { width: 300, height: 150 } : { width: node.kind === "config" ? 440 : 340, height: 240 }
+    const size = isDerived ? { width: 300, height: 150 } : { width: 300, height: 220 }
     this.opts.emit(wf.owner, "canvas.node.created", {
       unit_id: wf.workflowId,
       node: { id: node.id, type: node.kind, title: node.title, position: pos, moved: true, ...size, metadata: node.metadata },
@@ -1033,35 +1039,103 @@ export class WorkflowService {
   }
 }
 
-// ── 泳道座標（2026-09-20 Route A）───────────────────────────────────────────
-// 主节点各占一条泳道（lane），同族衍生卡向右排栏。
-// 规则照前端 pipelineToCanvasLayout（agent-template-canvas.ts）——gateway 发
-// moved:true 后 layoutGraph 不再重排，座標即权威，必须与点卡片路径同构。
+// ── 泳道座標（2026-09-21 分層重排）─────────────────────────────────────────
+// 舊版「每主節點獨佔一行、衍生卡向右排」會讓主鏈長距離跳線（feature_film 的
+// script→shot1 跨 10 行、char_view1→shot1_gen 跨 8 行）縱貫切穿整列卡片。
+// 新版改 DAG 分層：主鏈按最長路徑深度分欄（欄間距＝一跳），欄內 barycenter
+// 排序壓交叉；每個工序的衍生卡（工具/配方/門禁）垂直掛在該工序正下方，
+// 行內串聯線走乾淨垂直脊柱。所有主鏈連線＝相鄰欄位短跳線，零長距離貫穿。
 const SWIM_CARD_W = 300 // 与前端 CARD_W 同值
-const SWIM_GAP_X = 60 // 与前端 CARD_GAP_X 同值
-const SWIM_LANE_GAP_Y = 330 // 与前端 LANE_GAP_Y 同值
+const SWIM_MAIN_H = 220 // 主節點高
+const SWIM_GAP_X = 80 // 欄間距（一跳連線的呼吸空間）
+const SWIM_DERIVED_H = 150 // 衍生卡高
+const SWIM_DERIVED_GAP = 24 // 衍生卡間距
+const SWIM_BLOCK_GAP_Y = 60 // 同欄相鄰工序塊的間距
 
-// 导出供 E2E 断言用（2026-09-20 Route A 验收）。
-export function computeSwimlanePositions(nodes: { id: string; role: string }[]): Map<string, { x: number; y: number }> {
+const isDerivedRole = (role: string) => /__tool_\d+$/.test(role) || /__note_\d+$/.test(role) || /__gate$/.test(role)
+
+// 导出供 E2E 断言用（2026-09-20 Route A 验收；09-21 簽名加 connections 參數）。
+export function computeSwimlanePositions(
+  nodes: { id: string; role: string }[],
+  connections: { from: string; to: string }[] = [],
+): Map<string, { x: number; y: number }> {
   const positions = new Map<string, { x: number; y: number }>()
-  let lane = -1
-  // 主节点 lane 编号（role → lane，衍生卡 parent 按 role 查），衍生卡查 parent 的 lane
-  const mainLane = new Map<string, number>()
-  // 每个 parent 已铺的衍生卡数（按 nodes 数组序计数：tools 在前、notes 次之、gate 最后）
-  const derivedCount = new Map<string, number>()
+  const byId = new Map(nodes.map((n) => [n.id, n]))
+  const conns = (Array.isArray(connections) ? connections : []).filter(
+    (c) => byId.has(c.from) && byId.has(c.to),
+  )
+
+  const mains = nodes.filter((n) => !isDerivedRole(n.role))
+
+  // 衍生卡按 role 前綴歸到父工序（nodes 陣列序＝tools→notes→gate 的鋪卡序）
+  const derivedByParent = new Map<string, { id: string }[]>()
+  const mainByRole = new Map(mains.map((n) => [n.role, n]))
   for (const n of nodes) {
-    // 衍生卡判定：role 以 __tool_<n> / __note_<n> 结尾或等于 <parent>__gate
-    const isDerived = /__tool_\d+$/.test(n.role) || /__note_\d+$/.test(n.role) || /__gate$/.test(n.role)
-    if (isDerived) {
-      const parent = n.role.slice(0, n.role.lastIndexOf("__"))
-      const col = 1 + (derivedCount.get(parent) ?? 0)
-      derivedCount.set(parent, col)
-      const y = (mainLane.get(parent) ?? 0) * SWIM_LANE_GAP_Y
-      positions.set(n.id, { x: col * (SWIM_CARD_W + SWIM_GAP_X), y })
-    } else {
-      lane += 1
-      mainLane.set(n.role, lane)
-      positions.set(n.id, { x: 0, y: lane * SWIM_LANE_GAP_Y })
+    if (!isDerivedRole(n.role)) continue
+    const parentRole = n.role.slice(0, n.role.lastIndexOf("__"))
+    if (!mainByRole.has(parentRole)) continue
+    const list = derivedByParent.get(parentRole) ?? []
+    list.push(n)
+    derivedByParent.set(parentRole, list)
+  }
+
+  // 最長路徑分層（只看主鏈連線；衍生卡不在 depth 表裡，自動被排除）
+  const depth = new Map<string, number>()
+  for (const n of mains) depth.set(n.id, 0)
+  for (let iter = 0; iter < mains.length; iter++) {
+    let changed = false
+    for (const c of conns) {
+      const fd = depth.get(c.from)
+      if (fd === undefined) continue
+      const nd = fd + 1
+      if (nd > (depth.get(c.to) ?? 0)) {
+        depth.set(c.to, nd)
+        changed = true
+      }
+    }
+    if (!changed) break
+  }
+
+  const maxDepth = Math.max(0, ...mains.map((n) => depth.get(n.id) ?? 0))
+  const columns: { id: string; role: string }[][] = Array.from({ length: maxDepth + 1 }, () => [])
+  for (const n of mains) columns[depth.get(n.id) ?? 0].push(n)
+
+  // barycenter：向左欄看齊排序，壓低跨欄連線交叉（無上游者保持原序）
+  const upstreamOf = new Map<string, string[]>()
+  for (const c of conns) {
+    if (depth.has(c.from) && depth.has(c.to)) {
+      upstreamOf.set(c.to, [...(upstreamOf.get(c.to) ?? []), c.from])
+    }
+  }
+  for (let d = 1; d < columns.length; d++) {
+    const refIndex = new Map(columns[d - 1].map((n, i) => [n.id, i]))
+    const scored = columns[d].map((n, i) => {
+      const ups = (upstreamOf.get(n.id) ?? [])
+        .map((id) => refIndex.get(id))
+        .filter((v): v is number => v !== undefined)
+      return { n, i, bary: ups.length ? ups.reduce((a, b) => a + b, 0) / ups.length : i }
+    })
+    scored.sort((a, b) => a.bary - b.bary || a.i - b.i)
+    columns[d] = scored.map((s) => s.n)
+  }
+
+  // 座標：欄 x 按深度推進；欄內工序塊（主節點＋下方衍生脊柱）垂直堆疊
+  const blockH = (role: string) => {
+    const derived = derivedByParent.get(role) ?? []
+    return derived.length
+      ? SWIM_MAIN_H + SWIM_DERIVED_GAP + derived.length * (SWIM_DERIVED_H + SWIM_DERIVED_GAP)
+      : SWIM_MAIN_H
+  }
+  for (let d = 0; d < columns.length; d++) {
+    let y = 0
+    for (const n of columns[d]) {
+      positions.set(n.id, { x: d * (SWIM_CARD_W + SWIM_GAP_X), y })
+      let cy = y + SWIM_MAIN_H + SWIM_DERIVED_GAP
+      for (const dc of derivedByParent.get(n.role) ?? []) {
+        positions.set(dc.id, { x: d * (SWIM_CARD_W + SWIM_GAP_X), y: cy })
+        cy += SWIM_DERIVED_H + SWIM_DERIVED_GAP
+      }
+      y += blockH(n.role) + SWIM_BLOCK_GAP_Y
     }
   }
   return positions

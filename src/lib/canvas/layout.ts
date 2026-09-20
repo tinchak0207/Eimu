@@ -449,15 +449,44 @@ export function fitToNodes(
   };
 }
 
-/** 貝茲連線：方向自適應（from 中心在左 → 出右側進左側；反之出左側進右側，
-    反向連線不再繞一大圈回來）。curvature = clamp(|dx|*0.5, 50, 200)——上限讓
-    長距離連線不會無限平緩成「僵硬直線」。 */
+/** 貝茲連線：方向自適應（水平鄰居走側出側入、垂直重疊鄰居走底出頂入、
+    長距離前向跳線走頂部拱橋，消除垂直節點反折大耳朵與長線攔腰穿透中間卡片；
+    反向連線不再繞一大圈回來）。 */
 export function bezierPath(from: CanvasNode, to: CanvasNode): string {
   const fromRight = from.position.x + from.width;
   const toRight = to.position.x + to.width;
+  const fromBottom = from.position.y + from.height;
+  const toBottom = to.position.y + to.height;
+
+  // 垂直相鄰/重疊判斷：兩節點水平範圍有交集（例如同列堆疊），且垂直有間隔
+  const horizontalOverlap = !(fromRight <= to.position.x || toRight <= from.position.x);
+  if (horizontalOverlap && (fromBottom <= to.position.y || toBottom <= from.position.y)) {
+    const downward = fromBottom <= to.position.y;
+    const x1 = from.position.x + from.width / 2;
+    const y1 = downward ? fromBottom : from.position.y;
+    const x2 = to.position.x + to.width / 2;
+    const y2 = downward ? to.position.y : toBottom;
+    const c = Math.min(Math.max(Math.abs(y2 - y1) * 0.5, 30), 120);
+    const dir = downward ? 1 : -1;
+    return `M ${x1} ${y1} C ${x1} ${y1 + dir * c}, ${x2} ${y2 - dir * c}, ${x2} ${y2}`;
+  }
+
+  // 長距離前向跳線（邊緣淨距塞得下一整張卡）：水平中線直連會攔腰穿透中間
+  // 欄位的卡片——改走頂部拱橋（頂心出、拱頂跨越、頂心入），上方淨空零穿透。
+  const forward = from.position.x + from.width / 2 <= to.position.x + to.width / 2;
+  const xExit = forward ? fromRight : from.position.x;
+  const xEnter = forward ? to.position.x : toRight;
+  if (forward && xEnter - xExit > 340) {
+    const x1 = from.position.x + from.width / 2;
+    const y1 = from.position.y;
+    const x2 = to.position.x + to.width / 2;
+    const y2 = to.position.y;
+    const peak = Math.min(y1, y2) - Math.min(200, 80 + Math.abs(x2 - x1) * 0.08);
+    return `M ${x1} ${y1} C ${x1} ${peak}, ${x2} ${peak}, ${x2} ${y2}`;
+  }
+
   const y1 = from.position.y + from.height / 2;
   const y2 = to.position.y + to.height / 2;
-  const forward = from.position.x + from.width / 2 <= to.position.x + to.width / 2;
   const x1 = forward ? fromRight : from.position.x;
   const x2 = forward ? to.position.x : toRight;
   const c = Math.min(Math.max(Math.abs(x2 - x1) * 0.5, 50), 200);

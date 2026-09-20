@@ -268,6 +268,47 @@ test("bezierPath 出右側中點、進左側中點，curvature 有 50 地板", (
   assert.equal(bezierPath(a, b), "M 100 50 C 200 50, 200 50, 300 50");
 });
 
+test("bezierPath 對垂直堆疊（水平交集）節點走底出頂入，消除迴旋大耳朵", () => {
+  const from = imageNode("f", 0, 0);
+  const to = imageNode("t", 0, 300);
+  from.width = 200;
+  from.height = 100;
+  to.width = 200;
+  to.height = 100;
+  // fromBottom = 100, to.position.y = 300, dy = 200, c = min(max(100, 30), 120) = 100
+  assert.equal(bezierPath(from, to), "M 100 100 C 100 200, 100 200, 100 300");
+});
+
+test("bezierPath 長距離前向跳線走頂部拱橋（頂心出頂心入），不攔腰穿透中間卡片", () => {
+  // 兩節點同高、水平淨距 1600（塞得下多張卡）→ 拱橋
+  const from = imageNode("f", 0, 0);
+  const to = imageNode("t", 1900, 0);
+  from.width = 300;
+  from.height = 220;
+  to.width = 300;
+  to.height = 220;
+  // xExit=300, xEnter=1900, 淨距 1600 > 340；peak = 0 - min(200, 80+1900*0.08=232) = -200
+  assert.equal(bezierPath(from, to), "M 150 0 C 150 -200, 2050 -200, 2050 0");
+
+  // 相鄰欄（淨距 80 < 340）仍走側出側入水平 S 曲線
+  const a = imageNode("a", 0, 0);
+  const b = imageNode("b", 380, 0);
+  a.width = 300;
+  a.height = 220;
+  b.width = 300;
+  b.height = 220;
+  assert.match(bezierPath(a, b), /^M 300 110 C/);
+
+  // 反向長距離連線（目標在左側）不走拱橋，仍走側出側入（保護泳道回折線外觀）
+  const c = imageNode("c", 1900, 0);
+  const d = imageNode("d", 0, 0);
+  c.width = 300;
+  c.height = 220;
+  d.width = 300;
+  d.height = 220;
+  assert.match(bezierPath(c, d), /^M 1900 110 C/);
+});
+
 test("gridBackground blank 空物件、太密回空、dots/lines 各自漸層、負視口取正模", () => {
   assert.deepEqual(gridBackground({ x: 0, y: 0, k: 1 }, "blank"), {});
   const size = CANVAS_GRID_BASE * 0.1; // 4.8 < 6 → 直接不畫

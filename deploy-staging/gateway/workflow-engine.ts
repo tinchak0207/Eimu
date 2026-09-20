@@ -177,11 +177,16 @@ export function expandTemplate(
   // 顺序铁律：必须跑在 R8 克隆之后（克隆节点经 spread 继承原型的 tools/notes/gate，
   // 也要展开）、连线解析之前（衍生连线直接按节点 id 生成，不走 fromRole 解析）。
   // 衍生卡 id 用 nodes.length 递增保唯一（主节点/克隆节点/衍生卡三源不撞）。
+  //
+  // 09-21 消除穿透連線（暴君「线也很乱」修復）：
+  // 每一行按工序從左向右相鄰單向串聯（主節點 → 工具卡1 → 工具卡2 → 配方卡 → 門禁卡），
+  // 徹底消除所有卡片背後反覆橫穿、互相重疊的「千層餅穿透線」。
   const derivedConns: WorkflowConnection[] = []
   for (const n of [...nodes]) {
     const spec = specByNodeId.get(n.id)
     if (!spec) continue
-    // 工具卡：每个 tool 一颗，连线 tool 卡 → 主节点（工具产出喂给主节点）。
+    let prevId = n.id
+    // 工具卡：主節點/前序卡 → 工具卡（順序流水線，不反折回連）
     if (spec.tools) {
       spec.tools.forEach((tool, ti) => {
         const id = `${templateId}-${n.role}__tool_${ti}-${nodes.length}`
@@ -199,10 +204,11 @@ export function expandTemplate(
             requiredCapability: tool.requiredCapability,
           },
         })
-        derivedConns.push({ from: id, to: n.id })
+        derivedConns.push({ from: prevId, to: id })
+        prevId = id
       })
     }
-    // 配方笔记卡：每条一张，连线 note 卡 → 主节点。
+    // 配方筆記卡：緊隨工具卡後順序串聯
     if (spec.notes) {
       spec.notes.forEach((note, ni) => {
         const id = `${templateId}-${n.role}__note_${ni}-${nodes.length}`
@@ -213,11 +219,11 @@ export function expandTemplate(
           title: "配方",
           metadata: { pipelineCard: "note", content: note },
         })
-        derivedConns.push({ from: id, to: n.id })
+        derivedConns.push({ from: prevId, to: id })
+        prevId = id
       })
     }
-    // 门禁卡：主节点 → 门禁卡（在主节点下游，验收语义）。文案优先用 content
-    // 合并后的最终值（Deepseek 可覆盖模板预设），非字符串（DSL boolean 旗标）时回退 spec。
+    // 門禁卡：位於本行流水線末端驗收
     const gateText = typeof n.metadata.gate === "string" ? n.metadata.gate : spec.gate
     if (gateText !== undefined) {
       const id = `${templateId}-${n.role}__gate-${nodes.length}`
@@ -228,7 +234,8 @@ export function expandTemplate(
         title: "门禁",
         metadata: { pipelineCard: "gate", content: gateText },
       })
-      derivedConns.push({ from: n.id, to: id })
+      derivedConns.push({ from: prevId, to: id })
+      prevId = id
     }
   }
 
