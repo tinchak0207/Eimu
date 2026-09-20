@@ -27,6 +27,12 @@ const COLLAPSED_PREVIEW_CHARS = 40;
  * 結構上刻意不使用 <summary> 內嵌按鈕的 details 方案（複製鈕那種），改用單一
  * <button> 當唯一開關：全站已有一條「元件內禁止 <button> 嵌 <button>」的硬斷言
  * （agent-chat-ui.test.ts 的 hasNestedButtons），這張卡不製造第二顆。
+ *
+ * 2026-09-20 暴君細化裁定：
+ *   ①「临时」進行中標記拔掉（provisional 旗標不再渲染，資料層原樣保留）；
+ *   ②正文不再另起寬塊（舊版视觉上从中间开始），改與「计划」標籤同行排——
+ *     正文從標籤緊鄰右邊開始，多行時在剩餘寬度內折行；
+ *   ③「计划」字級對齊子代理卡標籤（ios-footnote / font-medium / foreground-80）。
  */
 function AgentPlanCardComponent({ item }: AgentPlanCardProps) {
   // open 受控：初值由 item.collapsed 給（新卡＝展開）；之後自動收合／使用者 toggle
@@ -44,14 +50,13 @@ function AgentPlanCardComponent({ item }: AgentPlanCardProps) {
     if (was !== true && item.collapsed === true) setOpen(false);
   }, [item.collapsed]);
 
-  const provisional = item.provisional === true;
   const experts = item.experts ?? [];
   const collapsedPreview = `${item.text.slice(0, COLLAPSED_PREVIEW_CHARS)}…`;
 
   return (
     <div className="agent-rise flex w-full flex-col">
-      {/* 工具行式折疊頭（agent-chat-preview 已批准語彙）：無底色 header 行 +
-          Brain icon + 標題 + provisional 灰字 + ios-blue 小點；ChevronDown 指示開合。 */}
+      {/* 工具行式折疊頭（agent-chat-preview 已批准語彙）：無底色 header 行；
+          正文與標籤同行排（2026-09-20 細化裁定），ChevronDown 指示開合。 */}
       <button
         type="button"
         onClick={() => {
@@ -59,62 +64,43 @@ function AgentPlanCardComponent({ item }: AgentPlanCardProps) {
           setOpen((prev) => !prev);
         }}
         aria-expanded={open}
-        className="flex min-h-11 w-full items-center gap-2.5 rounded-full px-3 text-left transition-colors hover:bg-black/[0.05] focus:outline-none focus-visible:ring-2 focus-visible:ring-foreground/20 [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
+        className="flex min-h-11 w-full items-start gap-2.5 rounded-[18px] px-3 py-2.5 text-left transition-colors hover:bg-black/[0.05] focus:outline-none focus-visible:ring-2 focus-visible:ring-foreground/20 [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
       >
-        <Brain className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-        <span className="min-w-0 flex-1 truncate text-ios-subhead font-semibold text-foreground">
-          计划
-          {/* 進行中的標記（新語彙）：灰字「临时」＋ ios-blue 小點，不再是金底膠囊。 */}
-          {provisional && (
-            <span className="ml-1.5 inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-ios-footnote font-medium text-muted-foreground">
-              <span className="h-1.5 w-1.5 rounded-full bg-ios-blue" aria-hidden="true" />
-              临时
+        <Brain className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+        {/* 右側欄（標籤＋正文＋專家晶片同列流排）：正文起點＝「计划」緊鄰右邊。
+            flex-wrap＋min-w-0：長文在剩餘寬度內折行、專家晶片溢出時整顆換行，
+            永不撐破面板（2026-09-20 根因清剿：收合預覽的 truncate 必須有寬度約束）。 */}
+        <span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 gap-y-1.5">
+          {/* 標籤：字級/字重/色對齊子代理卡（ios-footnote font-medium foreground/80）。 */}
+          <span className="shrink-0 text-ios-footnote font-medium text-foreground/80">
+            计划
+          </span>
+          {open ? (
+            <span className="min-w-0 flex-1 break-words text-ios-subhead leading-[1.55] text-foreground [overflow-wrap:anywhere] whitespace-pre-wrap">
+              {item.text}
+            </span>
+          ) : (
+            <span className="min-w-0 flex-1 truncate text-ios-footnote text-muted-foreground/70">
+              {collapsedPreview}
             </span>
           )}
+          {/* 專家晶片：唯讀，缺席就不畫（網關只在 digest 白名單命中時才帶 experts）。
+              刻意不是按鈕——這不是可點的操作，只是「這輪會派誰」的事實陳列。 */}
+          {open &&
+            experts.map((expert) => (
+              <span
+                key={expert}
+                className="inline-flex min-w-0 max-w-full items-center rounded-full bg-black/[0.05] px-2 py-0.5 text-ios-footnote text-muted-foreground [overflow-wrap:anywhere]"
+              >
+                {expert}
+              </span>
+            ))}
         </span>
-        {/* 收合態預覽：**必須能被寬度約束**。
-            2026-09-20 根因清剿（生產實錘）：舊寫法 `shrink-0 truncate` 是
-            自相矛盾的組合——truncate 只在「盒子有寬度約束」時才生效，
-            shrink-0 又禁止 flex 把它縮小；於是長計畫文字既不縮也不截，
-            整行被撐到容器外 → 轉錄區橫向溢出 → 面板底部那條帶箭頭的原生
-            橫向滾動條（＝破損感第一元凶）。修法＝允許縮（去掉 shrink-0）
-            + 給上限（max-w-[45%] → truncate 有寬度約束）＋ min-w-0（解除
-            flex item 的 min-content 地板），極窄屏時它會繼續讓位給標題。 */}
-        {!open && (
-          <span className="min-w-0 max-w-[45%] truncate text-ios-footnote text-muted-foreground/70">
-            {collapsedPreview}
-          </span>
-        )}
         <ChevronDown
-          className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200", open && "rotate-180")}
+          className={cn("mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200", open && "rotate-180")}
           aria-hidden="true"
         />
       </button>
-
-      {/* 展開塊：lg-float 內嵌面。展開才掛載（默認 DOM 不含正文全文）。 */}
-      {open && (
-        <div className="mt-1.5 flex flex-col gap-2 rounded-[18px] bg-[rgba(120,120,128,0.06)] px-3.5 py-3 lg-float">
-          {/* 正文：≥13px（design-system/MASTER.md 硬規則），用 ios-subhead（15px）。 */}
-          <p className="break-words text-ios-subhead leading-[1.55] text-foreground [overflow-wrap:anywhere]">
-            {item.text}
-          </p>
-
-          {/* 專家晶片：唯讀，缺席就不畫（網關只在 digest 白名單命中時才帶 experts）。
-              刻意不是按鈕——這不是可點的操作，只是「這輪會派誰」的事實陳列。 */}
-          {experts.length > 0 && (
-            <div className="flex flex-wrap gap-1.5">
-              {experts.map((expert) => (
-                <span
-                  key={expert}
-                  className="inline-flex min-w-0 max-w-full items-center rounded-full bg-black/[0.05] px-2 py-0.5 text-ios-footnote text-muted-foreground [overflow-wrap:anywhere]"
-                >
-                  {expert}
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }

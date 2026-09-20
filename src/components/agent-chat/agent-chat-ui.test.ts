@@ -242,13 +242,12 @@ test("audio card plays via native <audio> and keeps the disabled action contract
   assert.match(markup, /音乐/, "mediaKind=music 徽章显示成曲语义");
 });
 
-test("思維鏈預設收合：首次渲染不展開，沒有 reasoning 就不渲染 details", () => {
+test("思維鏈預設展開：首次渲染即打開，沒有 reasoning 就不渲染 details", () => {
   /*
-   * 2026-09-20 暴君批准（Route A，agent-chat-preview 驗收語彙）：推翻 09-18
-   * 「預設展開」的舊契約，回到正文至上——思考過程折疊殼改成一行「已思考」，
-   * 默認收合；要看的人自己點開。靜態 markup 就是「首次渲染」（含歷史回放
-   * 重建出來的條目）的字面證據——React 把布林屬性 open 序列化成 open=""，
-   * 默認收合＝序列化結果裡 open 屬性缺席。
+   * 2026-09-20 暴君同日再裁定：把「預設收合」（當日上午隨 Grok 極簡骨架預覽
+   * 批准）再推翻回「預設展開」——思考過程開門見山，不要人再點一次。靜態 markup
+   * 就是「首次渲染」的字面證據：React 把 open 布林屬性序列化成 open=""，
+   * 預設展開＝序列化結果裡 details 帶 open=""。
    */
   const assistant = (overrides: Partial<AgentAssistantTextItem>) =>
     createElement(AgentMessageBubble, {
@@ -263,15 +262,14 @@ test("思維鏈預設收合：首次渲染不展開，沒有 reasoning 就不渲
       } as AgentAssistantTextItem,
     });
 
-  // ① 串流中（還沒有正文）＝ 首幀就是收合的「正在思考…」一行（2026-09-20
-  //    R1：reasoningMs 未結算＝思考仍在進行，文案跟著語義走）。
+  // ① 串流中（還沒有正文）＝ 思維鏈已展開＋折疊殼文案「正在思考…」。
   const streaming = renderToStaticMarkup(assistant({}));
-  assert.doesNotMatch(streaming, /<details[^>]*\sopen=""/, "串流中的思維鏈默認收合（正文至上）");
+  assert.match(streaming, /<details[^>]*\sopen=""/, "串流中的思維鏈默認展開");
   assert.match(streaming, /正在思考…/, "串流中的折疊殼文案＝正在思考…");
 
-  // ② 已完成（streaming:false、正文已到）＝ 同樣收合。收合不得只在串流期成立。
+  // ② 已完成（streaming:false、正文已到）＝ 同樣展開。展開不得只在串流期成立。
   const settled = renderToStaticMarkup(assistant({ streaming: false, text: "答案是 6, 7, 8" }));
-  assert.doesNotMatch(settled, /<details[^>]*\sopen=""/, "已完成條目同樣默認收合");
+  assert.match(settled, /<details[^>]*\sopen=""/, "已完成條目同樣默認展開");
 
   // ③ 沒有 reasoning 的助理條目：連 details 都不渲染，不留空殼。
   const noReasoning = renderToStaticMarkup(assistant({ reasoning: undefined, text: "只有正文" }));
@@ -289,7 +287,7 @@ test("思維鏈預設收合：首次渲染不展開，沒有 reasoning 就不渲
   const stateWrites = code.match(/setReasoningOpen\(/g) ?? [];
   assert.equal(stateWrites.length, 1, "setReasoningOpen 只准有 toggle 這一個寫入口");
   assert.doesNotMatch(code, /item\.streaming && !item\.text/, "自動展開條件已拆掉");
-  assert.match(code, /useState\(false\)/, "seed 必須是 false（默認收合）");
+  assert.match(code, /reasoningOpen, setReasoningOpen\] = useState\(true\)/, "seed 必須是 true（默認展開）");
 });
 
 test("reconnecting shows an unobtrusive retry affordance", () => {
@@ -452,10 +450,14 @@ test("09-18 送出在途：空輸入也必須是轉圈送出鈕（aria-busy + sp
   // 在途是「正在送」不是「不可用」。
   assert.match(markup, /bg-\[#2d3142\]/, "在途仍是既有主色深底钮，不退回灰钮");
   assert.match(markup, /cursor-wait/, "在途带既有 cursor-wait");
+  // 縮到只查送出鈕：2026-09-20 暴君裁定附件鈕與送出鈕同風格，`disabled:bg-[#bcc2ca]`
+  // 合法出現在附件鈕 class 裡；本斷言原意是「送出鈕在途時不上灰底」，故只釘送出鈕那一段。
+  const sendBtn = markup.match(/<button[^>]*aria-label="发送"[^>]*class="([^"]*)"/)?.[1] ?? "";
+  assert.ok(sendBtn.length > 0, "必须能定位到送出钮的 class");
   assert.doesNotMatch(
-    markup,
+    sendBtn,
     /disabled:bg-\[#bcc2ca\]/,
-    "在途期间不上浅灰 disabled 样式（白轉圈压在灰底上等于没有回馈）",
+    "送出钮在途期间不上浅灰 disabled 样式（白轉圈压在灰底上等于没有回馈）",
   );
 });
 

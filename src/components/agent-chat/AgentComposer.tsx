@@ -679,11 +679,12 @@ function AgentComposerComponent({
         aria-label="添加附件"
         title="添加附件（图片 / 视频 / 文档）"
         className={cn(
-          "flex h-11 w-11 shrink-0 items-center justify-center rounded-full",
-          "text-muted-foreground transition-colors",
+          // 2026-09-20 暴君裁定：与送出钮同尺寸同風格（44px 圓鈕、主色 #2d3142
+          // 實底＋signature 陰影＋hover 微抬升），不再幽靈灰；disabled 同淺灰。
+          "flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#2d3142] text-white shadow-[0_8px_20px_rgba(45,49,66,0.22)]",
           "touch-manipulation [-webkit-tap-highlight-color:transparent]",
-          "hover:text-foreground hover:bg-white/55 active:bg-white/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
-          "disabled:cursor-not-allowed disabled:bg-transparent disabled:text-foreground/45",
+          "transition-all duration-200 hover:-translate-y-[1px] hover:bg-[#272b39] active:scale-[0.94] focus:outline-none focus:ring-2 focus:ring-ring/40",
+          "disabled:cursor-not-allowed disabled:bg-[#bcc2ca] disabled:text-white/80 disabled:shadow-none disabled:hover:translate-y-0",
         )}
       >
         <ImagePlus className="h-[18px] w-[18px]" aria-hidden="true" />
@@ -801,7 +802,7 @@ function AgentComposerComponent({
           placeholder={placeholder}
           rows={1}
           className={cn(
-            "min-h-[52px] max-h-[140px] w-full resize-none bg-transparent py-[15px] text-[15px] leading-[22px] text-foreground",
+            "min-h-[44px] max-h-[124px] w-full resize-none bg-transparent py-[10px] text-[15px] leading-[22px] text-foreground",
             "placeholder:text-foreground/35 focus:outline-none",
             "touch-manipulation [-webkit-tap-highlight-color:transparent]",
             "disabled:cursor-not-allowed disabled:opacity-50",
