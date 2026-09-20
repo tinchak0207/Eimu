@@ -16,7 +16,7 @@
 // props 顯式轉發給 NodeBody（46 個 props 介面債就地償還，不引入 context——避免 memo 失效）。
 
 import { useEffect, useState } from "react";
-import { X, RefreshCw, Edit2, ChevronDown, ChevronUp, Image as ImageIcon, Download, Wrench, ShieldCheck, FileText, Type, User, Mountain, Boxes, Paperclip, AudioLines, Video as VideoIcon, SlidersHorizontal, Clapperboard } from "lucide-react";
+import { X, RefreshCw, Edit2, ChevronDown, ChevronUp, Image as ImageIcon, Download, Wrench, ShieldCheck, Lightbulb, FileText, Type, User, Mountain, Boxes, Paperclip, AudioLines, Video as VideoIcon, SlidersHorizontal, Clapperboard } from "lucide-react";
 import { CanvasNodeHoverToolbar } from "./CanvasNodeHoverToolbar";
 import { CanvasNodePromptPanel } from "./CanvasNodePromptPanel";
 import { cn } from "@/lib/utils";
@@ -189,6 +189,7 @@ export function CanvasNodeView({
       case CanvasNodeType.Text:
         if (node.metadata?.pipelineCard === "tool") return { label: "工具", Icon: Wrench, cls: "bg-[rgba(0,122,255,0.12)] text-ios-blue", bar: "bg-ios-blue" };
         if (node.metadata?.pipelineCard === "gate") return { label: "门禁", Icon: ShieldCheck, cls: "bg-[rgba(255,149,0,0.14)] text-[#B96A00]", bar: "bg-[#B96A00]" };
+        if (node.metadata?.pipelineCard === "note") return { label: "配方", Icon: Lightbulb, cls: "bg-[rgba(255,204,0,0.16)] text-[#8A6D00]", bar: "bg-[#C79A00]" };
         return { label: "文本", Icon: Type, cls: "bg-black/5 text-muted-foreground", bar: "bg-black/30" };
       case CanvasNodeType.Prompt:
         return { label: "提示词", Icon: Type, cls: "bg-ios-blue/10 text-ios-blue", bar: "bg-ios-blue" };

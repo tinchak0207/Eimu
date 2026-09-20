@@ -878,9 +878,16 @@ export class WorkflowService {
   private emitNodeDelta(wf: ActiveWorkflow, node: WorkflowNode): void {
     if (wf.emittedNodes.has(node.id)) return
     wf.emittedNodes.add(node.id)
+    // 泳道座標：81 节点重算是微秒级，幂等安全（也可在 emitGraph 算一次传入，取简单）。
+    const pos = computeSwimlanePositions(wf.graph.nodes).get(node.id) ?? { x: 0, y: 0 }
+    // 衍生卡（pipelineCard tool/note/gate 或 role 含 __）用卡片尺寸；主节点维持现状。
+    const isDerived =
+      (typeof node.metadata.pipelineCard === "string" && ["tool", "note", "gate"].includes(node.metadata.pipelineCard as string)) ||
+      node.role.includes("__")
+    const size = isDerived ? { width: 300, height: 150 } : { width: node.kind === "config" ? 440 : 340, height: 240 }
     this.opts.emit(wf.owner, "canvas.node.created", {
       unit_id: wf.workflowId,
-      node: { id: node.id, type: node.kind, title: node.title, position: { x: 0, y: 0 }, width: node.kind === "config" ? 440 : 340, height: 240, metadata: node.metadata },
+      node: { id: node.id, type: node.kind, title: node.title, position: pos, moved: true, ...size, metadata: node.metadata },
     })
   }
 
@@ -1024,4 +1031,38 @@ export class WorkflowService {
     this.dirty(wf)
     return { ok: wf.status !== "failed", status: wf.status }
   }
+}
+
+// ── 泳道座標（2026-09-20 Route A）───────────────────────────────────────────
+// 主节点各占一条泳道（lane），同族衍生卡向右排栏。
+// 规则照前端 pipelineToCanvasLayout（agent-template-canvas.ts）——gateway 发
+// moved:true 后 layoutGraph 不再重排，座標即权威，必须与点卡片路径同构。
+const SWIM_CARD_W = 300 // 与前端 CARD_W 同值
+const SWIM_GAP_X = 60 // 与前端 CARD_GAP_X 同值
+const SWIM_LANE_GAP_Y = 330 // 与前端 LANE_GAP_Y 同值
+
+// 导出供 E2E 断言用（2026-09-20 Route A 验收）。
+export function computeSwimlanePositions(nodes: { id: string; role: string }[]): Map<string, { x: number; y: number }> {
+  const positions = new Map<string, { x: number; y: number }>()
+  let lane = -1
+  // 主节点 lane 编号（role → lane，衍生卡 parent 按 role 查），衍生卡查 parent 的 lane
+  const mainLane = new Map<string, number>()
+  // 每个 parent 已铺的衍生卡数（按 nodes 数组序计数：tools 在前、notes 次之、gate 最后）
+  const derivedCount = new Map<string, number>()
+  for (const n of nodes) {
+    // 衍生卡判定：role 以 __tool_<n> / __note_<n> 结尾或等于 <parent>__gate
+    const isDerived = /__tool_\d+$/.test(n.role) || /__note_\d+$/.test(n.role) || /__gate$/.test(n.role)
+    if (isDerived) {
+      const parent = n.role.slice(0, n.role.lastIndexOf("__"))
+      const col = 1 + (derivedCount.get(parent) ?? 0)
+      derivedCount.set(parent, col)
+      const y = (mainLane.get(parent) ?? 0) * SWIM_LANE_GAP_Y
+      positions.set(n.id, { x: col * (SWIM_CARD_W + SWIM_GAP_X), y })
+    } else {
+      lane += 1
+      mainLane.set(n.role, lane)
+      positions.set(n.id, { x: 0, y: lane * SWIM_LANE_GAP_Y })
+    }
+  }
+  return positions
 }

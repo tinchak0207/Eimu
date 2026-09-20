@@ -7,7 +7,7 @@
 // （不引入 context，避免 memo 失效）。
 
 import { useCallback, useEffect, useState } from "react";
-import { RefreshCw, Image as ImageIcon, ArrowRight, CornerDownRight, Wrench, ShieldCheck, Package, AlertTriangle, Clapperboard } from "lucide-react";
+import { RefreshCw, Image as ImageIcon, ArrowRight, CornerDownRight, Wrench, ShieldCheck, Lightbulb, Package, AlertTriangle, Clapperboard } from "lucide-react";
 import { CanvasNodeType, errorDetailsText, type CanvasNode, type CanvasNodeStatus } from "@/lib/canvas/types";
 import { svgToDataUrl } from "@/lib/svg-data-url";
 import { DirectorMiniViewport } from "@/components/director-mini/DirectorMiniViewport";
@@ -388,8 +388,10 @@ export function NodeBody({
         }
         // 流水線結構卡（agent-template-canvas 鋪的）：走 Liquid Glass 分層正文
         // （eyebrow 小标 + 正文 + 语义色胶囊 + Lucide 图标），不再纯文本堆行。
+        // note（配方卡，後端 derived notes）：正文 = content 多行配方文本，
+        // 無 toolId/IO 行——與 tool/gate 卡同族分層樣式。
         const pipelineCard = metadata?.pipelineCard;
-        if (pipelineCard === "tool" || pipelineCard === "gate") {
+        if (pipelineCard === "tool" || pipelineCard === "gate" || pipelineCard === "note") {
           return (
             <div
               onPointerDown={onScrollAreaPointerDown}
@@ -431,13 +433,25 @@ export function NodeBody({
                     </div>
                   )}
                 </>
-              ) : (
+              ) : pipelineCard === "gate" ? (
                 <>
                   <div className="flex items-center gap-1.5">
                     <ShieldCheck className="h-3 w-3 shrink-0 text-ios-orange" aria-hidden="true" />
                     <span className="text-[11px] font-medium uppercase leading-none tracking-[0.18em] text-muted-foreground/70">验收条件</span>
                   </div>
                   <p className="break-words text-[13px] leading-relaxed text-foreground">{text}</p>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center gap-1.5">
+                    <Lightbulb className="h-3 w-3 shrink-0 text-[#B96A00]" aria-hidden="true" />
+                    <span className="text-[11px] font-medium uppercase leading-none tracking-[0.18em] text-muted-foreground/70">配方</span>
+                  </div>
+                  {text?.trim() ? (
+                    <p className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-foreground">{text}</p>
+                  ) : (
+                    <span className="text-ios-caption1 text-muted-foreground">（未填写配方）</span>
+                  )}
                 </>
               )}
             </div>

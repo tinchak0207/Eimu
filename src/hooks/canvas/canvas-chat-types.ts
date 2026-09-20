@@ -89,10 +89,12 @@ export function compactMetadataForAgent(metadata: CanvasNodeMetadata | undefined
   if (metadata.gate) out.gate = metadata.gate;
   if (typeof metadata.count === "number") out.count = metadata.count;
   if (typeof metadata.cost_coins === "number") out.cost_coins = metadata.cost_coins;
-  // derived 工具卡/門禁卡（後端 pipelineCard:"tool"|"gate"，kind=text）：五欄透傳
-  // ——agent 讀畫布狀態時也該看到工具調用與「harness 未接上游」標記
+  // derived 工具卡/門禁卡/配方卡（後端 pipelineCard:"tool"|"gate"|"note"，kind=text）：
+  // 六欄透傳——agent 讀畫布狀態時也該看到工具調用與「harness 未接上游」標記
   //（漏傳 = 下行還原後工具卡失語義，2026-09-03 director 空殼事故同構）。
-  if (metadata.pipelineCard === "tool" || metadata.pipelineCard === "gate") {
+  // note（配方卡）只有 content 一欄（上方 content 截斷已帶），pipelineCard 標記本身
+  // 透傳才知下行還原時該鋪成配方卡。
+  if (metadata.pipelineCard === "tool" || metadata.pipelineCard === "gate" || metadata.pipelineCard === "note") {
     out.pipelineCard = metadata.pipelineCard;
     if (metadata.toolId) out.toolId = metadata.toolId;
     if (metadata.toolInput) out.toolInput = metadata.toolInput;

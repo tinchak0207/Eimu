@@ -211,7 +211,7 @@ export function expandTemplate(
           role: `${n.role}__note_${ni}`,
           kind: "text",
           title: "配方",
-          metadata: { content: note },
+          metadata: { pipelineCard: "note", content: note },
         })
         derivedConns.push({ from: id, to: n.id })
       })

@@ -36,14 +36,14 @@ function AgentMessageBubbleComponent({ item, sessionId }: AgentMessageBubbleProp
   const hasAttachments = userParsed !== null && userParsed.refs.length > 0;
   const displayText = hasAttachments ? userParsed.cleanText : item.text;
 
-  // 思維鏈默認收合（2026-09-20 暴君批准 Grok 極簡骨架預覽版，supersede 09-18
-  // 「預設展開」裁定）：收合態＝一行灰字＋Brain＋ChevronDown，正文至上。
+  // 思維鏈預設展開（2026-09-20 暴君同日再裁定，supersede 本日稍早「Grok 極簡
+  // 預設收合」）：正文至上不再是默認姿態，思考過程開門見山。
   // 文案（2026-09-20）：已結算＝「已思考 · N 秒」，還在想＝「正在思考…」，
   // 無計時資料＝「已思考」——見下方 reasoningLabel。
-  // 單一 write path 語義不變：open 受控於 state（初值 false），使用者點 summary
+  // 單一 write path 語義不變：open 受控於 state（初值 true），使用者點 summary
   // 造成的 toggle 由下面 handler 回寫，之後串流 delta 更新或父層 re-render 只會
   // 照著這個值渲染，不會把它打回收合——手動展開／收合優先於任何自動行為。
-  const [reasoningOpen, setReasoningOpen] = useState(false);
+  const [reasoningOpen, setReasoningOpen] = useState(true);
 
   // 思維鏈一鍵複製：summary 上的按鈕要 preventDefault，否則點擊會順帶收合 details。
   const [reasoningCopied, setReasoningCopied] = useState(false);

@@ -140,10 +140,11 @@ export interface CanvasNodeMetadata {
   referenceRole?: ReferenceImageRole;
   /**
    * 流水線結構卡標記（agent-template-canvas 鋪的泳道卡）：step_head = 步驟頭卡、
-   * tool = 工具卡、gate = 門禁卡、director = 導演台卡（gateway director.done 同步）。
+   * tool = 工具卡、gate = 門禁卡、note = 配方卡（後端 derived notes，正文=content）、
+   * director = 導演台卡（gateway director.done 同步）。
    * 渲染層（NodeBody/CanvasNodeView）據此走結構化分層正文；與既有 kind（image/video）分開，不混用。
    */
-  pipelineCard?: "step_head" | "tool" | "gate" | "director";
+  pipelineCard?: "step_head" | "tool" | "gate" | "note" | "director";
   /** 工具卡：工具 id（等寬字體渲染）。 */
   toolId?: string;
   /** 工具卡：輸入/輸出契約。 */

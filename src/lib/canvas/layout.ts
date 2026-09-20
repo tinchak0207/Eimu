@@ -132,11 +132,11 @@ export function toNodeMetadata(raw: unknown): CanvasNodeMetadata {
     ...(num(m.progress) !== undefined ? { progress: num(m.progress) } : {}),
     // reference 節點角色：只收合法 ReferenceImageRole，未知值丟棄（收斂在讀取端做）。
     ...(isReferenceImageRole(m.referenceRole) ? { referenceRole: m.referenceRole } : {}),
-    // pipeline 卡型白名單：director（導演台）＋ tool/gate（後端 derived 工具卡/門禁卡，
-    // kind=text，NodeBody 工具/門禁分支渲染）。未列舉值（含 step_head——前端模板
-    // 路徑直産、後端不送）照舊丟棄。
-    ...(m.pipelineCard === "tool" || m.pipelineCard === "gate" || m.pipelineCard === "director"
-      ? { pipelineCard: m.pipelineCard as "tool" | "gate" | "director" }
+    // pipeline 卡型白名單：director（導演台）＋ tool/gate/note（後端 derived 工具卡/
+    // 門禁卡/配方卡，kind=text，NodeBody 工具/門禁/配方分支渲染）。未列舉值（含
+    // step_head——前端模板路徑直産、後端不送）照舊丟棄。
+    ...(m.pipelineCard === "tool" || m.pipelineCard === "gate" || m.pipelineCard === "note" || m.pipelineCard === "director"
+      ? { pipelineCard: m.pipelineCard as "tool" | "gate" | "note" | "director" }
       : {}),
     // derived 工具卡欄位族（pipelineCard:"tool"）：四字串欄走 str() 收斂；
     // unsupported 是 boolean 旗標——truthy 判斷保留 boolean，只過 str() 會剝掉
@@ -210,6 +210,8 @@ export function normalizeCanvasNode(raw: {
   width?: number;
   height?: number;
   metadata?: Record<string, unknown>;
+  /** gateway 泳道座標已定局（moved:true）＝ reducer layoutGraph 不得重排。只透傳 true。 */
+  moved?: boolean;
 }): CanvasNode {
   const type = toNodeType(raw.type);
   const size = CANVAS_NODE_DEFAULT_SIZE[type];
@@ -221,6 +223,8 @@ export function normalizeCanvasNode(raw: {
     width: num(raw.width) ?? size.width,
     height: num(raw.height) ?? size.height,
     metadata: toNodeMetadata(raw.metadata),
+    // moved 是 boolean 旗標——只透傳 true（false/缺省不帶），同 gate/unsupported 形態教訓。
+    ...(raw.moved === true ? { moved: true } : {}),
   };
 }
 
