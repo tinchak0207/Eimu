@@ -72,8 +72,16 @@ function AgentPlanCardComponent({ item }: AgentPlanCardProps) {
             </span>
           )}
         </span>
+        {/* 收合態預覽：**必須能被寬度約束**。
+            2026-09-20 根因清剿（生產實錘）：舊寫法 `shrink-0 truncate` 是
+            自相矛盾的組合——truncate 只在「盒子有寬度約束」時才生效，
+            shrink-0 又禁止 flex 把它縮小；於是長計畫文字既不縮也不截，
+            整行被撐到容器外 → 轉錄區橫向溢出 → 面板底部那條帶箭頭的原生
+            橫向滾動條（＝破損感第一元凶）。修法＝允許縮（去掉 shrink-0）
+            + 給上限（max-w-[45%] → truncate 有寬度約束）＋ min-w-0（解除
+            flex item 的 min-content 地板），極窄屏時它會繼續讓位給標題。 */}
         {!open && (
-          <span className="shrink-0 truncate text-ios-footnote text-muted-foreground/70">
+          <span className="min-w-0 max-w-[45%] truncate text-ios-footnote text-muted-foreground/70">
             {collapsedPreview}
           </span>
         )}
@@ -98,7 +106,7 @@ function AgentPlanCardComponent({ item }: AgentPlanCardProps) {
               {experts.map((expert) => (
                 <span
                   key={expert}
-                  className="inline-flex items-center rounded-full bg-black/[0.05] px-2 py-0.5 text-ios-footnote text-muted-foreground"
+                  className="inline-flex min-w-0 max-w-full items-center rounded-full bg-black/[0.05] px-2 py-0.5 text-ios-footnote text-muted-foreground [overflow-wrap:anywhere]"
                 >
                   {expert}
                 </span>

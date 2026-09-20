@@ -1,35 +1,113 @@
 "use client";
 
 import { memo, type ComponentType, type ReactNode } from "react";
-import { Check, Coins, Loader2, X } from "lucide-react";
+import {
+  Bot,
+  Check,
+  Clapperboard,
+  Coins,
+  Image as ImageIcon,
+  LayoutGrid,
+  Loader2,
+  Search,
+  Wrench,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AgentToolCallItem } from "@/lib/agent-chat-types";
-import { AGENT_TASK_STATUS_TABLE, taskStatusTone } from "@/lib/agent-task-status";
+import { taskStatusTone } from "@/lib/agent-task-status";
 import { AgentParamDisclosure } from "./AgentParamDisclosure";
 
 export interface AgentToolCardProps {
   item: AgentToolCallItem;
 }
 
-interface ToolStatusMeta {
-  label: string;
-  Icon: ComponentType<{ className?: string; "aria-hidden"?: boolean | "true" | "false" }>;
-  /** 行首状态图标色（16px 小图标，无壳无底）。 */
-  iconTone: string;
-  /** 行尾状态词颜色：运行＝ios-blue、完成＝灰（绿只做 Check 点缀）、失败＝唯一红。 */
-  wordTone: string;
+type RowIcon = ComponentType<{ className?: string; "aria-hidden"?: boolean | "true" | "false" }>;
+
+/* ─────────────────── 工具类型图标（2026-09-20 對版預覽） ───────────────────
+ *
+ * 行首那個圖標說「這是哪一類動作」（工具類型），不再兼職說狀態：
+ * 狀態只由行尾的 Loader2/Check + 狀態詞承擔（見 STATUS_META）。
+ * 兩件事擠進同一個圖標＝使用者分不出「跑完了」和「這是搜尋工具」。
+ *
+ * 判定順序＝優先序，第一個命中者勝出；全表挑不到就 Wrench（不假造類型）。
+ */
+
+/**
+ * 內建工具的精確映射：這些 id 太短，片段規則會互相誤吃
+ * （todoread 含 read、image_edit 含 edit），所以精確點名。
+ */
+const TOOL_ROW_EXACT: Record<string, RowIcon> = {
+  bash: Wrench, // 终端命令
+  read: Search, // 读取文件：检索既有内容
+  write: LayoutGrid, // 写入文件：落到画布/文件面
+  edit: LayoutGrid,
+  glob: Search,
+  grep: Search,
+  ls: Search,
+  webfetch: Search,
+  fetch: Search,
+  patch: LayoutGrid,
+  todowrite: LayoutGrid,
+  todoread: LayoutGrid,
+  task: Bot, // 派发子任务＝子代理族
+};
+
+/** 片段规则（依 TOOL_TITLES 表里的工具族命名）。 */
+const TOOL_ROW_RULES: Array<{ match: RegExp; Icon: RowIcon }> = [
+  { match: /subagent/, Icon: Bot }, // 子代理派遣/状态
+  { match: /quote|price|coin|cost|billing/, Icon: Coins }, // 报价/单价/计费
+  // 影片/剪辑/时间线：keyframe_render 这类「渲染」也归影片族判在前面。
+  { match: /video|film|trailer|keyframe|last_frame|timeline|editing|movie|clip/, Icon: Clapperboard },
+  // 音乐/语音/3D 脚本：也是「生成」，但生成的不是图，先判掉免得被图像族吃掉。
+  { match: /music|audio|tts|speak|voice|sound|blender|gltf/, Icon: Wrench },
+  // 研究/理解/检索/审查：找既有信息，不产出新资产。
+  { match: /search|grep|glob|read|fetch|web|doc|vision|bible|script|story|asset|provenance|evidence|audit|qc|consistency|analyze|inspect|lint|find/, Icon: Search },
+  // 画布/工作流/导演台：节点式操作面。判在图像族前面，因为
+  // canvas_create_generation_flow、workflow_generate 这类 id 也含「生成」。
+  { match: /canvas|workflow|director/, Icon: LayoutGrid },
+  // 生图/图片处理。
+  { match: /image|img|photo|picture|generat|render|repair|upscale|remove|tryon|garment|product|aspect|reflow|moodboard|emotion|sketch|style|character|cast|canonical|scene|shot|cover/, Icon: ImageIcon },
+  // 写回面：写在图像族后面，让 image_edit 先被判成生图。
+  { match: /node|layout|draw|write|edit|patch|apply|connect|rerun/, Icon: LayoutGrid },
+];
+
+/**
+ * 工具 id → 行首类型图标（纯函数，可测）。
+ * 认不出来的一律 Wrench：图标准确性比「看起来有个性」重要。
+ */
+export function toolRowIcon(tool: string): RowIcon {
+  const id = tool.trim().toLowerCase();
+  const exact = TOOL_ROW_EXACT[id];
+  if (exact !== undefined) return exact;
+  for (const rule of TOOL_ROW_RULES) {
+    if (rule.match.test(id)) return rule.Icon;
+  }
+  return Wrench;
 }
 
-// 状态语义（标签/是否失败/进行中）查 agent-task-status.ts 单一语义表；图标与
-// 状态词着色是本行的展示层，留在这里。running/pending 标签尾缀「…」是展示装饰。
-const STATUS_META: Record<AgentToolCallItem["status"], ToolStatusMeta> = {
-  running: { label: `${AGENT_TASK_STATUS_TABLE.running.label}…`, Icon: Loader2, iconTone: "text-ios-blue/70", wordTone: "text-ios-blue" },
+interface ToolRowStatusMeta {
+  /** 行尾状态词（對版預覽語彙：运行中… / 完成 / 失败）。 */
+  word: string;
+  /** 状态词着色：运行＝ios-blue、完成＝灰、失败＝唯一红。 */
+  wordTone: string;
+  /** 状态图标（缺席＝纯状态词，例如失败）。 */
+  Icon?: RowIcon;
+  iconTone?: string;
+}
+
+// 状态语义（进行中/失败/是否终态）仍查 agent-task-status.ts 单一语义表；
+// 这里的字面词与着色是行尾的展示层。
+// 「已完成」不再上车：工具行说的是这一刻在不在跑/跑完没有，不是工单状态。
+const STATUS_META: Record<AgentToolCallItem["status"], ToolRowStatusMeta> = {
+  running: { word: "运行中…", wordTone: "text-ios-blue", Icon: Loader2, iconTone: "text-ios-blue/70" },
   // 中继態：任務已提交、成品未到（artifact_pending）。金色胶囊已下线（0920 裁定），
   // pending 与 running 同为「还在跑」：ios-blue 转圈，等 image/video/audio.done
   // 或 image.failed 才转 ok/failed。
-  pending: { label: `${AGENT_TASK_STATUS_TABLE.pending.label}…`, Icon: Loader2, iconTone: "text-ios-blue/70", wordTone: "text-ios-blue" },
-  ok: { label: AGENT_TASK_STATUS_TABLE.ok.label, Icon: Check, iconTone: "text-ios-green", wordTone: "text-foreground/45" },
-  failed: { label: AGENT_TASK_STATUS_TABLE.failed.label, Icon: X, iconTone: "text-ios-red", wordTone: "text-ios-red" },
+  pending: { word: "运行中…", wordTone: "text-ios-blue", Icon: Loader2, iconTone: "text-ios-blue/70" },
+  ok: { word: "完成", wordTone: "text-foreground/45", Icon: Check, iconTone: "text-ios-green" },
+  // 失败没有状态图标：红色状态词 + 行下的错误原文（error）已经说清楚，
+  // 再来一个红叉是同一句话说三遍。
+  failed: { word: "失败", wordTone: "text-ios-red" },
 };
 
 /** 展示用的金币数：整数原样，浮点去掉多余尾巴。 */
@@ -222,44 +300,48 @@ function AgentToolCardComponent({ item }: AgentToolCardProps) {
   // pending 没有进度帧（进度是工具内部的计数，提交出去后由成品事件定案），不得假造。
   const progress = running ? item.progress : undefined;
   const pct = progress ? Math.min(100, Math.round((progress.done / progress.total) * 100)) : 0;
-  // 有真实分母时状态词直接报计数「3/8」，比「运行中…」信息量大且不虚报。
-  const badgeLabel = progress ? `${progress.done}/${progress.total}` : status.label;
-  // F2：默认渲染只有人话——人话标题 + 人话摘要；函数名与完整参数进展开抽屉。
+  // F2：默认渲染只有人话——人话标题；函数名与完整参数进展开抽屉。
+  // 参数摘要与币数都不在行内：行只说「哪个动作、什么状态」，细节点行进抽屉
+  // （2026-09-20 對版預覽，币数与 key-value 细目同住展开面板）。
   const displayName = toolDisplayName(item.tool);
-  const preview = item.argsSummary !== undefined ? toolArgPreview(item.argsSummary) : undefined;
+  const ToolIcon = toolRowIcon(item.tool);
+  const StatusIcon = status.Icon;
+  // 没有参数 = 没有抽屉。这时候已结算的币数仍然要看得见：网关可能把
+  // tool.invoke 弄丢（只补发 tool.result），花出去的钱不许凭空消失。
+  const panelMounted = item.argsSummary !== undefined;
+  const nakedCost = !panelMounted && item.costCoins !== undefined ? item.costCoins : undefined;
 
-  // 工具行（2026-09-20 Grok 级无底色细行）：16px 状态图标 + 人话标题 + 摘要暗字
-  // 截断吃满剩余宽度 + 右端金币（现场币色）与状态词。无参数可展开时行不当按钮
+  // 工具行（2026-09-20 Grok 级无底色细行）：类型图标 + 人话标题（截断吃满剩余
+  // 宽度）+ 右端状态（Loader2/Check + 状态词）。无参数可展开时行不当按钮
   // （render div）；有参数时整行是 AgentParamDisclosure 的触发器（点行展开）。
   const renderRow = (api: { open: boolean; toggle?: () => void }): ReactNode => {
     const content = (
       <>
-        <status.Icon
-          className={cn("h-4 w-4 shrink-0", spinning && "animate-spin", status.iconTone)}
-          aria-hidden="true"
-        />
-        <span className="shrink-0 text-ios-footnote font-medium text-foreground/75">{displayName}</span>
-        <span
-          className="min-w-0 flex-1 truncate text-ios-footnote text-foreground/45"
-          title={preview}
-        >
-          {preview}
+        <ToolIcon className="h-3.5 w-3.5 shrink-0 text-foreground/40" aria-hidden="true" />
+        <span className="min-w-0 flex-1 truncate text-ios-footnote text-foreground/60">
+          {displayName}
         </span>
-        {item.costCoins !== undefined && (
-          <span className="flex shrink-0 items-center gap-1 text-ios-footnote tabular-nums text-[rgba(120,90,20,0.85)]">
+        {nakedCost !== undefined && (
+          <span className="flex shrink-0 items-center gap-1 text-ios-footnote tabular-nums text-muted-foreground">
             <Coins className="h-3 w-3" aria-hidden="true" />
-            {formatCoins(item.costCoins)} 金币
+            {formatCoins(nakedCost)} 币
           </span>
+        )}
+        {StatusIcon !== undefined && (
+          <StatusIcon
+            className={cn("h-3.5 w-3.5 shrink-0", spinning && "animate-spin", status.iconTone)}
+            aria-hidden="true"
+          />
         )}
         {/* 状态词（无胶囊）：whitespace-nowrap 保证不被长工具名挤出行
             （工具名那一侧自己 truncate 让位）。 */}
         <span
           className={cn(
-            "shrink-0 whitespace-nowrap text-ios-footnote font-medium tabular-nums",
+            "shrink-0 whitespace-nowrap text-ios-footnote tabular-nums",
             status.wordTone,
           )}
         >
-          {badgeLabel}
+          {status.word}
         </span>
       </>
     );
@@ -286,44 +368,54 @@ function AgentToolCardComponent({ item }: AgentToolCardProps) {
   return (
     <div className="agent-rise flex flex-col gap-1">
       {/* D-19 分层参数 + D-23 窄屏底部抽屉。展开与布局切换都归 AgentParamDisclosure，
-          这一行只负责说「这次调了什么工具、花了多少」。整行触发：点行展开参数。
-          花费不往下传：行内已经常驻显示，展开后再来一次是噪音。
-          （AgentParamCard 保留 costCoins 是给没有行头的挂载点用的。） */}
+          这一行只负责说「这次调了什么工具、跑到哪一步」；参数与花费都在抽屉里，
+          整行触发：点行展开。 */}
       {item.argsSummary !== undefined ? (
         <AgentParamDisclosure
           argsSummary={item.argsSummary}
           idPrefix={`agent-args-${item.id}`}
           toolName={item.tool}
+          costCoins={item.costCoins}
           trigger={(api) => renderRow(api)}
         />
       ) : (
         renderRow({ open: false })
       )}
 
-      {/* 逐镜/逐项进度：真实分母才画条（generation-progress-* 全局样式，reduced-motion
-          已被 globals.css 兜住）。role=progressbar 带真实 valuenow/valuemax，不虚报。 */}
+      {/* 逐镜/逐项进度：真实分母才画条，细 3px 灰轨 + 蓝色填充（與預覽同款，
+          reduced-motion 由 globals.css 兜住）。role=progressbar 带真实
+          valuenow/valuemax，不虚报。计数只在这里说，行尾状态词只说「运行中…」。 */}
       {progress && (
         <div className="ml-[22px] flex flex-col gap-1">
-          <p className="text-ios-caption1 leading-[1.4] text-muted-foreground">
+          {/* 進度標籤是閘道文字（可能是模型名／長英文串）：無換行策略時
+              一個長 token 就把這一區撐出面板寬度（2026-09-20 根因清剿）。 */}
+          <p className="break-words text-ios-caption1 leading-[1.4] text-muted-foreground [overflow-wrap:anywhere]">
             {progress.label ?? "处理中"} · 已完成 {progress.done}/{progress.total}
           </p>
           <div
-            className="generation-progress-track"
+            className="h-[3px] w-full overflow-hidden rounded-full bg-black/[0.06]"
             role="progressbar"
             aria-valuemin={0}
             aria-valuemax={progress.total}
             aria-valuenow={progress.done}
             aria-label={`${progress.label ?? "处理中"} ${progress.done}/${progress.total}`}
           >
-            <div className="generation-progress-fill" style={{ width: pct + "%" }} />
+            <div
+              className="lg-transition h-full rounded-full bg-ios-blue"
+              style={{ width: pct + "%" }}
+            />
           </div>
         </div>
       )}
 
       {/* 失败时的人类可读错误（R10-1）：gateway 的 tool.result error.human_message，
           让「红卡刷屏」不再是无声死循环——用户看得到它在修正什么。 */}
+      {/* 失败时的人类可读错误（R10-1）：gateway 的 tool.result error.human_message，
+          让「红卡刷屏」不再是无声死循环——用户看得到它在修正什么。
+          錯誤原文是上游字串（常含 URL／JSON 鍵值）：必須能任意換行，
+          否則一個長 token 直接撐破行寬（2026-09-20 根因清剿）。 */}
       {taskStatusTone(item.status).isFailure && item.error && (
-        <p className="ml-[22px] rounded-xl bg-destructive/10 px-2.5 py-1.5 text-ios-caption1 leading-relaxed text-destructive">
+        <p className="ml-[22px] break-words rounded-xl bg-destructive/10 px-2.5 py-1.5 text-ios-caption1 leading-relaxed text-destructive [overflow-wrap:anywhere]">
           {item.error}
         </p>
       )}

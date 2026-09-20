@@ -402,13 +402,16 @@ function AgentImageCardComponent({
   };
 
   return (
-    <figure className="agent-rise overflow-hidden rounded-[18px] bg-black/[0.03]">
+    <figure className="agent-rise">
+      {/* 灰底只刷在媒体面这一层（预览 ImageResultCard：媒体 `overflow-hidden
+          rounded-[18px] bg-black/[0.03]`，动作条落在页面白底上）。之前 figure 与
+          媒体层各刷一层同款灰，圆角内被叠成两层色；灰底收回媒体层。 */}
       <div
         ref={triggerRef}
         role="button"
         tabIndex={0}
         aria-label="查看大图"
-        className="group relative aspect-square max-h-[min(420px,52dvh)] w-full cursor-zoom-in select-none bg-black/[0.03] [touch-action:manipulation] [-webkit-tap-highlight-color:transparent] focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30"
+        className="group relative aspect-square max-h-[min(420px,52dvh)] w-full cursor-zoom-in select-none overflow-hidden rounded-[18px] bg-black/[0.03] [touch-action:manipulation] [-webkit-tap-highlight-color:transparent] focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30"
         onPointerDown={() => {
           pressRef.current = { dt: 0, t: Date.now() };
         }}
@@ -438,7 +441,7 @@ function AgentImageCardComponent({
           <div className="skeleton absolute inset-0" aria-hidden="true" />
         )}
         {failed ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/[0.03] p-4">
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-4">
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10 text-destructive">
               <AlertTriangle className="h-6 w-6" aria-hidden="true" />
             </div>

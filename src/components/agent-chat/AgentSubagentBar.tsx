@@ -10,7 +10,7 @@ import { AGENT_TASK_STATUS_TABLE } from "@/lib/agent-task-status";
 // 不进消息流——置顶堆叠在转录区上方（AgentBatchProgress 旁），turn.done 时
 // reducer 已把 subagent 条目整批清掉，这里只负责「还看得见」的那几行。
 // 2026-09-20 暴君裁定（Grok 级无底色细行）：「查看全部 N 个子任务」折叠头改
-//   「派出 N 个子代理」，展开后每行同工具行风格（无卡壳）＋右端 6px 圆点状态。
+//   「派出 N 个子代理」，展开后每行同工具行风格（无卡壳）＋右端状态词与 7px 圆点。
 // 2026-09-19 暴君裁定（子任务 UI 去重）：
 //   折叠头放到列表上方，置顶三卡＋弹出面板两套重复 UI 合并为一份内联列表；
 //   默认展开、可收合（SubagentMenu 弹层整体下线）。
@@ -33,6 +33,23 @@ const STATUS_LABEL: Record<AgentSubagentItem["status"], string> = {
   ok: AGENT_TASK_STATUS_TABLE.ok.label,
   error: AGENT_TASK_STATUS_TABLE.error.label,
   stopped: AGENT_TASK_STATUS_TABLE.stopped.label,
+};
+
+// 行尾状态词（2026-09-20 對版預覽）：与工具行同一套字面——用户看到的
+// 是「运行中／完成／失败」，不是工单状态「已完成」。
+const STATUS_WORD: Record<AgentSubagentItem["status"], string> = {
+  running: "运行中",
+  ok: "完成",
+  error: "失败",
+  stopped: "已停止",
+};
+
+// 状态词着色：运行＝ios-blue，其余灰；只有失败用红（色彩纪律：红仅失败）。
+const STATUS_WORD_TONE: Record<AgentSubagentItem["status"], string> = {
+  running: "text-ios-blue",
+  ok: "text-foreground/45",
+  error: "text-ios-red",
+  stopped: "text-foreground/45",
 };
 
 /**
@@ -114,9 +131,15 @@ interface SubagentCardProps {
 
 function SubagentCard({ item }: SubagentCardProps) {
   return (
-    <div className="agent-rise flex min-h-11 w-full items-center gap-2 rounded-[12px] px-2 -mx-2 transition-colors hover:bg-white/55">
+    <div className="agent-rise flex min-h-11 min-w-0 w-full items-center gap-2 rounded-[12px] px-2 -mx-2 transition-colors hover:bg-white/55">
       <Bot className="h-4 w-4 shrink-0 text-foreground/40" aria-hidden="true" />
-      <span className="shrink-0 text-ios-footnote font-medium text-foreground/80">
+      {/* 標籤（閘道給的短標籤）：舊寫法 shrink-0 沒有任何寬度上限＝長標籤
+         既不縮也不截，直接把整行撐出面板寬度（2026-09-20 根因清剿）。
+          這裡刻意用「讓位 + 換行」而不是省略號：running 行的活動流必須是
+          完整逐字滑窗（測試釘著 running 標記不得出現省略號截斷），標籤若也走
+          截斷語彙會與活動流的「全文可見」語義打架；max-w-[45%] + min-w-0 +
+          overflow-wrap:anywhere 保證它永遠不會撐破寬度。 */}
+      <span className="min-w-0 max-w-[45%] text-ios-footnote font-medium text-foreground/80 [overflow-wrap:anywhere]">
         {item.label}
       </span>
       {/* running：跑馬燈末行（活動流＝含 reasoning 的所有增量，尾巴跟隨快吐字觀感）；

@@ -105,8 +105,8 @@ test("batchProgress 的 pending 态与既有 abort 文案并存", () => {
   // 非 pending 时的 title 与既有字面逐字保留（旧测试钉着它）。
   assert.match(batchProgress, /立即中止当前这轮生成/);
   assert.match(batchProgress, /title=\{stopPending \? "正在中止，请稍候…" : "立即中止当前这轮生成"\}/);
-  // pending 时图标换转圈。
-  assert.match(batchProgress, /Loader2 className="h-3\.5 w-3\.5 animate-spin"/);
+  // pending 时图标换转圈（2026-09-20 對版預覽：幽靈紅字鈕，spinner 前置 mr-1）。
+  assert.match(batchProgress, /Loader2 className="mr-1 h-3\.5 w-3\.5 animate-spin"/);
   assert.match(batchProgress, /disabled:cursor-wait disabled:opacity-60/);
 });
 

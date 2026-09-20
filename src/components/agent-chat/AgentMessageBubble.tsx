@@ -37,7 +37,9 @@ function AgentMessageBubbleComponent({ item, sessionId }: AgentMessageBubbleProp
   const displayText = hasAttachments ? userParsed.cleanText : item.text;
 
   // 思維鏈默認收合（2026-09-20 暴君批准 Grok 極簡骨架預覽版，supersede 09-18
-  // 「預設展開」裁定）：收合態＝一行「已思考」灰字＋Brain＋ChevronDown，正文至上。
+  // 「預設展開」裁定）：收合態＝一行灰字＋Brain＋ChevronDown，正文至上。
+  // 文案（2026-09-20）：已結算＝「已思考 · N 秒」，還在想＝「正在思考…」，
+  // 無計時資料＝「已思考」——見下方 reasoningLabel。
   // 單一 write path 語義不變：open 受控於 state（初值 false），使用者點 summary
   // 造成的 toggle 由下面 handler 回寫，之後串流 delta 更新或父層 re-render 只會
   // 照著這個值渲染，不會把它打回收合——手動展開／收合優先於任何自動行為。
@@ -63,6 +65,20 @@ function AgentMessageBubbleComponent({ item, sessionId }: AgentMessageBubbleProp
     const next = e.currentTarget.open;
     setReasoningOpen((prev) => (prev === next ? prev : next));
   };
+
+  // 思維鏈收合行文案（2026-09-20 真功能，對齊預覽承諾的「已思考 · N 秒」）：
+  //   已結算（reasoningMs 有值）→ N 秒，至少 1 秒（瞬時完成也說「1 秒」，
+  //     不吐「0 秒」這種像壞掉的數字）；
+  //   還在想（streaming 且未結算）→ 正在思考…；
+  //   其餘（已完成但沒有計時資料，例如歷史回放重建的條目）→ 已思考，不編秒數。
+  // 只是一個字串，渲染在同一顆 span 裡，觸控區／chevron／copy 按鈕都不動。
+  const reasoningMs = item.kind === "assistant" ? item.reasoningMs : undefined;
+  const reasoningLabel =
+    reasoningMs !== undefined
+      ? `已思考 · ${Math.max(1, Math.round(reasoningMs / 1000))} 秒`
+      : item.kind === "assistant" && item.streaming
+        ? "正在思考…"
+        : "已思考";
 
   return (
     <div
@@ -99,7 +115,7 @@ function AgentMessageBubbleComponent({ item, sessionId }: AgentMessageBubbleProp
             <summary className="brain-summary block min-h-11 cursor-pointer touch-manipulation select-none [-webkit-tap-highlight-color:transparent]">
               <span className="flex min-h-11 items-center gap-1.5 text-ios-footnote font-medium text-muted-foreground">
                 <Brain className="h-3.5 w-3.5 shrink-0 text-foreground/40" aria-hidden="true" />
-                已思考
+                {reasoningLabel}
                 <ChevronDown className="brain-chevron h-3.5 w-3.5 shrink-0 text-foreground/35" aria-hidden="true" />
                 <button
                   type="button"
@@ -137,10 +153,10 @@ function AgentMessageBubbleComponent({ item, sessionId }: AgentMessageBubbleProp
         {hasAttachments && <AgentAttachmentCards refs={userParsed.refs} sessionId={sessionId} />}
         {/* 串流中的打字光标。纯视觉提示，屏读器宣告由 AgentChatPanel 的
             role="status" 区域负责。
-            2026-09-20 修：僅在有正文時渲染——reasoning 先到、text 還是空的
-            純思考期，條目已佔位（"已思考"收合行＋零寬空格），若 caret 也渲染，
-            就是一個孤零零的游標在奇怪的位置閃到正文出現為止。 */}
-        {item.kind === "assistant" && item.streaming && displayText.length > 0 && (
+            2026-09-20 修：僅在有「可讀正文」時渲染——模型首個 delta 常常只是
+            "\n" 或空白，舊條件（length > 0）照樣放行，畫面上就是一個孤零零的
+            游標在奇怪的位置閃；改看 trim() 後長度，白字元撐不出游標。 */}
+        {item.kind === "assistant" && item.streaming && displayText.trim().length > 0 && (
           <span
             className="agent-caret"
             aria-hidden="true"

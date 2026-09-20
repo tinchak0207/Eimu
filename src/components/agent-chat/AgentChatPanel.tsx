@@ -397,7 +397,10 @@ function AgentChatPanelComponent({
             </button>
           )}
           {closed && closedReason && !awaitingChoice && (
-            <span className="ml-auto truncate text-ios-caption1 text-foreground/45">
+            // min-w-0：truncate 需要寬度約束才生效——flex item 的自動最小尺寸
+            // 是 min-content，沒有它時一條長 reason（含 URL/路徑）不縮不截，
+            // 直接把狀態行撐出面板寬度。
+            <span className="ml-auto min-w-0 truncate text-ios-caption1 text-foreground/45">
               原因：{closedReason}
             </span>
           )}
@@ -414,12 +417,17 @@ function AgentChatPanelComponent({
         <AgentSubagentBar items={subagentItems} />
       </div>
 
-      {/* 转录区：aria-live 的 polite live region；空态给开场提示，不显示一片空白。 */}
+      {/* 转录区：aria-live 的 polite live region；空态给开场提示，不显示一片空白。
+          溢出防護層（2026-09-20 根因清剿）：min-w-0 + overflow-x-hidden 保證
+          「未來任何超寬內容」都撐不出橫向滾動條——overflow-y:auto 時
+          overflow-x:visible 會被規範計算成 auto，一條超寬子項就是一條帶箭頭的
+          原生橫向滾動條。內容側仍各自負責換行/截斷（氣泡=break-words、
+          行內 code=break-all、表格/pre=自滾），防護層只是最後一道。 */}
       <div
         ref={scrollRef}
         aria-live="polite"
         onScroll={handleTranscriptScroll}
-        className="agent-transcript min-h-0 flex-1 overflow-y-auto overscroll-contain px-0.5 pb-2 pt-0"
+        className="agent-transcript min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-0.5 pb-2 pt-0"
       >
         {/* 第二輪就緒優化刀A：空態（歡迎語）不再等 SSE open —— idle/connecting/open
             都顯示（「沒內容且沒壞」）。建號+ticket+SSE 握手在背後接，error 態仍由
@@ -542,7 +550,10 @@ function AgentChatPanelComponent({
           罪状 5/6：同批同模型合并成一张卡（model ×N 共 N 币），一键裁决逐笔
           resolve；确认卡容器限高 + 内部滚动，禁止整页溢出。 */}
       {confirmGroups.length > 0 && (
-        <div className="min-h-0 max-h-[min(62dvh,30rem)] shrink-0 overflow-y-auto overscroll-contain px-0.5 pb-1.5">
+        // 溢出防護層 + 細滾動條（可見性）：overflow-x-hidden 讓超寬卡片永遠
+        // 撐不出橫向滾動條；agent-scroll-thin 是 agent-chat.css 抽出的共用配方
+        // （與轉錄區同一份），讓「這裡可以滾」看得出來。
+        <div className="agent-scroll-thin min-h-0 min-w-0 max-h-[min(62dvh,30rem)] shrink-0 overflow-x-hidden overflow-y-auto overscroll-contain px-0.5 pb-1.5">
           <div className="flex flex-col gap-2">
             {confirmGroups.map((group) => {
               const merged = group.count > 1;
@@ -571,7 +582,8 @@ function AgentChatPanelComponent({
       )}
 
       {pendingConfirms.length === 0 && pendingQuestions.length > 0 && (
-        <div className="min-h-0 max-h-[min(62dvh,30rem)] shrink-0 overflow-y-auto overscroll-contain px-0.5 pb-1.5">
+        // 問答卡容器：與確認卡容器同一套溢出防護 + 細滾動條配方（見上）。
+        <div className="agent-scroll-thin min-h-0 min-w-0 max-h-[min(62dvh,30rem)] shrink-0 overflow-x-hidden overflow-y-auto overscroll-contain px-0.5 pb-1.5">
           {/* 問題卡串行：一次只出一張，答完（reducer 移除該 requestId）再浮出下一張，
               不讓多張疊在一起同時逼用戶做決定。 */}
           <div className="flex flex-col gap-2">

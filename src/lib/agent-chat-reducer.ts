@@ -1,8 +1,11 @@
 // Agent 聊天的纯逻辑核心：SSE 事件 → 可渲染 transcript 的 reducer。
 //
 // 规则：
-//   - 纯函数，不碰 React、不碰 DOM、不碰 Math.random / Date.now —— 同样输入
+//   - 纯函数，不碰 React、不碰 DOM、不碰 Math.random —— 同样输入
 //     永远产出同样输出，node --test 可直接测。
+//     唯一例外（2026-09-20 思維鏈計時）：reasoning.delta / 收尾結算會讀 Date.now()
+//     寫入 reasoningStartedAt / reasoningMs 兩個時間欄位——網關不送時間戳，秒數
+//     只能由本端時鐘得出。除這兩個欄位外，其餘轉換仍與輸入一一對應。
 //   - 永不 mutate 输入 state 或其阵列；每个分支都回新物件（重放的帧除外，
 //     直接回同一个 reference，让 React 可以 bail out）。
 //   - 条目 id 一律从 seq + kind 推出：`<kind>-<event_id>`（event_id 由网关
@@ -14,6 +17,7 @@
 // 前端合成的边角）永远处理，也不影响续传游标。
 
 import {
+  type AgentAssistantTextItem,
   type AgentAttachmentRef,
   type AgentAudioItem,
   type AgentChatState,
@@ -56,13 +60,36 @@ function userItemId(state: AgentChatState): string {
 
 // ─────────────────────────── 事件对应分支
 
+/**
+ * 思維鏈計時結算（2026-09-20 真功能：把預覽承諾的「已思考 · N 秒」做成真數據）。
+ *
+ * 只對「有起點（reasoningStartedAt）且還沒結算（reasoningMs === undefined）」的
+ * 條目生效；回 undefined 代表本次一個欄位都不寫——呼叫方據此保持原本的物件形狀，
+ * 沒有思維鏈的條目逐位元與舊行為一致（不長出 undefined 鍵）。
+ *
+ * 為什麼讀 Date.now()：時長無從由事件推得（網關不送時間戳），唯一誠實的來源是
+ * 本端拿到 reasoning 的那一刻與思考結束的那一刻之差。reducer 因此在這兩處
+ * 破例碰時鐘——除時間欄位外，其餘狀態轉換仍與輸入一一對應。
+ */
+function settleReasoningMs(item: AgentAssistantTextItem, now: number): number | undefined {
+  if (item.reasoningStartedAt === undefined || item.reasoningMs !== undefined) return undefined;
+  return Math.max(0, now - item.reasoningStartedAt);
+}
+
 function reduceMessageDelta(state: AgentChatState, event: AgentSseEvent & { name: "message.delta" }): AgentChatState {
   const text = event.data.text;
   const items = state.items.slice();
   const last = items[items.length - 1];
   if (last && last.kind === "assistant" && last.streaming) {
     // 只对「正在 streaming 的最后一个助手条目」追加；否则开新条目。
-    items[items.length - 1] = { ...last, text: last.text + text };
+    // 思維鏈結算時機 a（2026-09-20）：想完開始說話——正文首次落到「已經想過」
+    // 的既有 streaming 條目。結算只發生一次（reasoningMs 已定就不再寫），
+    // 純正文條目（沒有 reasoningStartedAt）不長任何時間欄位。
+    const reasoningMs = settleReasoningMs(last, Date.now());
+    items[items.length - 1] =
+      reasoningMs === undefined
+        ? { ...last, text: last.text + text }
+        : { ...last, text: last.text + text, reasoningMs };
   } else {
     // 計畫退場（2026-09-18 turn.plan 契約）：真實正文開「新」條目的這一刻，
     // 代表計畫已經讓位——把還開著的計畫卡收合成一行，讓答案佔住版面。
@@ -94,7 +121,13 @@ function reduceReasoningDelta(state: AgentChatState, event: AgentSseEvent & { na
   const last = items[items.length - 1];
   if (last && last.kind === "assistant" && last.streaming) {
     // 思維鏈通常先於最終文字到來；若已開 assistant 條目就直接累加。
-    items[items.length - 1] = { ...last, reasoning: (last.reasoning ?? "") + text };
+    // 計時起點只在條目「首次」拿到 reasoning 時寫（已有值不覆蓋）：後續 frame
+    // 累加文字的行為一字不動，形狀也一字不改（已有起點時不多長任何鍵）。
+    items[items.length - 1] = {
+      ...last,
+      reasoning: (last.reasoning ?? "") + text,
+      ...(last.reasoningStartedAt === undefined ? { reasoningStartedAt: Date.now() } : {}),
+    };
   } else {
     // reasoning 先到、text 還沒來：開 streaming 條目，只填 reasoning。
     items.push({
@@ -103,6 +136,7 @@ function reduceReasoningDelta(state: AgentChatState, event: AgentSseEvent & { na
       seq: event.event_id,
       text: "",
       reasoning: text,
+      reasoningStartedAt: Date.now(),
       streaming: true,
     });
   }
@@ -571,7 +605,11 @@ function settleItems(items: AgentTranscriptItem[]): AgentTranscriptItem[] {
   for (let i = 0; i < items.length; i += 1) {
     const it = items[i];
     if (it.kind === "assistant" && it.streaming) {
-      next[i] = { ...it, streaming: false };
+      // 思維鏈結算時機 b（2026-09-20）：想完就直接結束、沒有正文可等——收尾這一刻
+      // 就是思考的終點。已在時機 a 結算過的條目（reasoningMs 已定）不再覆寫，
+      // 沒有計時起點的條目維持原本形狀。
+      const reasoningMs = settleReasoningMs(it, Date.now());
+      next[i] = reasoningMs === undefined ? { ...it, streaming: false } : { ...it, streaming: false, reasoningMs };
     } else if (it.kind === "tool" && it.status === "running") {
       next[i] = { ...it, status: "failed" };
     } else {

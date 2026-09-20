@@ -11,11 +11,11 @@
 // 展开的东西继续展开，不会因为换布局就莫名收起来，也不会留一层
 // 关不掉的遮罩在屏幕上。
 
-import { useCallback, useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { ChevronDown, SlidersHorizontal, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useIsNarrow } from "@/hooks/use-is-narrow";
-import { AgentParamCard } from "./AgentParamCard";
+import { parseToolParams } from "@/lib/agent-tool-params";
 
 export interface AgentParamDisclosureProps {
   argsSummary: string;
@@ -23,6 +23,11 @@ export interface AgentParamDisclosureProps {
   idPrefix: string;
   /** 抽屉标题里的工具名，让人知道这张参数属于哪次调用。 */
   toolName?: string;
+  /**
+   * 该工具已结算的花费（2026-09-20 對版預覽：币数从行内移进展开面板）。
+   * 未结算时不显示，绝不猜；缺席时面板少这最后一行。
+   */
+  costCoins?: number;
   /**
    * 整行触发器（2026-09-20 工具行化）：宿主把整行（通常是无底色细行）交给
    * 这里渲染，点行即展开；ref 必须挂到那个按钮上（抽屉关闭后焦点还原用）。
@@ -35,7 +40,58 @@ export interface AgentParamDisclosureProps {
   }) => ReactNode;
 }
 
-export function AgentParamDisclosure({ argsSummary, idPrefix, toolName, trigger }: AgentParamDisclosureProps) {
+/** 展示用的币数：整数原样，浮点去掉多余尾巴（与各卡同款）。 */
+function formatCoins(n: number): string {
+  return Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+/**
+ * 展开块的内容（宽屏手风琴与窄屏抽屉共用一份，转屏不换语言）：
+ * 一行一个 key：value，key 用 `text-foreground/45`，value 退到灰字——
+ * 与预览的展开块逐字同形（key：value 行，不是两列参数表）。
+ * 币数是这一块的最后一个 key（消耗：N 币），行内不再重复。
+ *
+ * 参数本身仍走 agent-tool-params 的解析器（唯一权威）：完整 JSON → 逐栏位；
+ * 被网关截断 / 不是 JSON → 捞出 key: value；一个都捞不到就退回原文，
+ * 不把半截 JSON 编成看起来完整的参数表。
+ */
+function ParamLines({ argsSummary, costCoins }: { argsSummary: string; costCoins?: number }) {
+  const parsed = useMemo(() => parseToolParams(argsSummary), [argsSummary]);
+  const params = parsed?.params ?? [];
+  const raw = params.length === 0 ? parsed?.raw : undefined;
+  return (
+    <>
+      {params.map((param) => (
+        <p
+          key={param.key}
+          className="text-ios-footnote leading-[1.5] text-muted-foreground [overflow-wrap:anywhere]"
+        >
+          <span className="text-foreground/45">{param.label}：</span>
+          {param.value}
+        </p>
+      ))}
+      {raw !== undefined && (
+        <p className="whitespace-pre-wrap font-mono text-ios-caption1 leading-[1.5] text-muted-foreground [overflow-wrap:anywhere]">
+          {raw}
+        </p>
+      )}
+      {costCoins !== undefined && (
+        <p className="text-ios-footnote leading-[1.5] text-muted-foreground tabular-nums">
+          <span className="text-foreground/45">消耗：</span>
+          {formatCoins(costCoins)} 币
+        </p>
+      )}
+      {/* 上游截断过就说出来，不让人以为这就是全部参数。 */}
+      {parsed?.truncated && (
+        <p className="text-ios-caption1 leading-[1.5] text-foreground/45">
+          上游只回传了参数摘要，可能不完整
+        </p>
+      )}
+    </>
+  );
+}
+
+export function AgentParamDisclosure({ argsSummary, idPrefix, toolName, costCoins, trigger }: AgentParamDisclosureProps) {
   const [open, setOpen] = useState(false);
   // F2：展开区在「首次展开」之前不挂载——默认渲染（DOM）里不许有 raw JSON /
   // 原始函数名，只有展开过一次才留在树上（关回去仍有收起动画，不闪断）。
@@ -140,8 +196,8 @@ export function AgentParamDisclosure({ argsSummary, idPrefix, toolName, trigger 
                   <X className="h-5 w-5" aria-hidden="true" />
                 </button>
               </div>
-              <div className="agent-param-drawer-body">
-                <AgentParamCard argsSummary={argsSummary} idPrefix={`${idPrefix}-drawer`} />
+              <div className="agent-param-drawer-body space-y-1">
+                <ParamLines argsSummary={argsSummary} costCoins={costCoins} />
               </div>
             </div>
           </div>
@@ -152,18 +208,16 @@ export function AgentParamDisclosure({ argsSummary, idPrefix, toolName, trigger 
               直接截斷（.agent-args-inner 的 overflow:hidden），不設內部捲軸——
               卡內滾動手勢一律冒泡給外層，否則巨型參數卡會吞掉整屏滾動。 */}
           <div className="agent-args-inner max-h-[60dvh]" style={{ overflow: "clip" }}>
-            {/* 展開塊＝lg-float（Emu Liquid Glass 保留在展開態，2026-09-20 裁定：
-                收起時是無底色細行，展開才浮出玻璃面）。縮排 ml-[22px] 對齊行內
-                標題起始，收合動畫（agent-args 網格）照舊。 */}
+            {/* 展开块＝lg-float（Emu Liquid Glass 保留在展开态，2026-09-20 裁定：
+                收起时是无底色细行，展开才浮出玻璃面）。缩排 ml-[22px] 对齐行内
+                标题起始，收合動畫（agent-args 網格）照旧。 */}
             {everOpened && (
-              <div className="lg-float ml-[22px] rounded-[10px] px-2.5 py-2">
+              <div className="lg-float mb-1 ml-[22px] space-y-1 rounded-[10px] px-2.5 py-2">
                 {/* F2：原始函数名与完整参数只在展开后挂载（默认渲染不含 raw JSON）。 */}
                 {toolName !== undefined && (
                   <p className="px-0.5 pb-1.5 font-mono text-ios-caption1 text-foreground/45">{toolName}</p>
                 )}
-                {/* D-19：参数分常用层／进阶层两段，不再是一坨 JSON 原文。
-                    花费不往下传：行内已经常驻显示，展开后再来一次是噪音。 */}
-                <AgentParamCard argsSummary={argsSummary} idPrefix={idPrefix} />
+                <ParamLines argsSummary={argsSummary} costCoins={costCoins} />
               </div>
             )}
           </div>

@@ -1,7 +1,7 @@
 "use client";
 
 import { memo } from "react";
-import { Loader2, Square } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import type { AgentChatState } from "@/lib/agent-chat-types";
 
 export interface AgentBatchProgressProps {
@@ -94,6 +94,8 @@ function AgentBatchProgressComponent({ items, onStop, stopPending = false, total
           正在生成 {images} 张{hasTotal ? " / 共 " + totalCount + " 张 · 已完成 " + pct + "%" : ""}
           {coins !== 0 ? " · 已用 " + formatCoins(coins) + " 币" : ""}
         </p>
+        {/* 预览停止钮＝纯幽灵红字（agent-chat-preview BatchProgressRow，无图标）；
+            只在中止在途时补一颗 spinner，明说「正在中止」——stopPending 锁定契约照旧。 */}
         {onStop && (
           <button
             type="button"
@@ -104,10 +106,8 @@ function AgentBatchProgressComponent({ items, onStop, stopPending = false, total
             className="flex min-h-11 shrink-0 cursor-pointer touch-manipulation items-center rounded-lg px-2.5 text-ios-footnote font-medium text-ios-red/85 transition-colors hover:bg-ios-red/[0.07] focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-red/30 active:scale-95 disabled:cursor-wait disabled:opacity-60 disabled:active:scale-100 [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
           >
             {stopPending ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-            ) : (
-              <Square className="h-3.5 w-3.5" aria-hidden="true" />
-            )}
+              <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+            ) : null}
             停止
           </button>
         )}

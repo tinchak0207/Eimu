@@ -263,10 +263,11 @@ test("思維鏈預設收合：首次渲染不展開，沒有 reasoning 就不渲
       } as AgentAssistantTextItem,
     });
 
-  // ① 串流中（還沒有正文）＝ 首幀就是收合的「已思考」一行。
+  // ① 串流中（還沒有正文）＝ 首幀就是收合的「正在思考…」一行（2026-09-20
+  //    R1：reasoningMs 未結算＝思考仍在進行，文案跟著語義走）。
   const streaming = renderToStaticMarkup(assistant({}));
   assert.doesNotMatch(streaming, /<details[^>]*\sopen=""/, "串流中的思維鏈默認收合（正文至上）");
-  assert.match(streaming, /已思考/, "折疊殼仍是原生 summary，文案＝已思考");
+  assert.match(streaming, /正在思考…/, "串流中的折疊殼文案＝正在思考…");
 
   // ② 已完成（streaming:false、正文已到）＝ 同樣收合。收合不得只在串流期成立。
   const settled = renderToStaticMarkup(assistant({ streaming: false, text: "答案是 6, 7, 8" }));
@@ -1007,7 +1008,8 @@ test("F2 工具卡人話化：默認渲染只有人話，函數名與 raw JSON �
   assert.equal(toolArgPreview("ls -la /opt/agent-harness"), "ls -la /opt/agent-harness");
   assert.equal(toolArgPreview("{broken"), undefined);
 
-  // SSR 默認渲染：卡片頭是人話標題 + 人話摘要，看不見函數名與 JSON。
+  // SSR 默認渲染（2026-09-20 R2 對版預覽）：行＝類型圖標 + 人話標題 + 狀態詞，
+  // 摘要與幣數收進展開面板（預設不掛載）——默認 DOM 更乾淨，看不見函數名與 JSON。
   const markup = renderToStaticMarkup(
     createElement(AgentToolCard, {
       item: {
@@ -1021,10 +1023,11 @@ test("F2 工具卡人話化：默認渲染只有人話，函數名與 raw JSON �
     }),
   );
   assert.match(markup, /派遣子代理/, "標題必須是人話");
-  assert.match(markup, /视频牌价预检/, "摘要取人話欄位");
+  assert.match(markup, /运行中/, "行尾狀態詞（對版預覽語彙）");
   assert.doesNotMatch(markup, /subagent_dispatch/, "默認渲染不得出現原始函數名");
   assert.doesNotMatch(markup, /async/, "默認渲染不得出現 raw JSON 欄位");
   assert.doesNotMatch(markup, /\{/, "默認渲染不含 JSON 片段");
+  // 摘要的人話欄位仍要被提取（入展開面板用）：toolArgPreview 純函數已在上面斷言。
   // 展開抽屜仍然帶著完整參數與原始函數名（收起來不等於刪掉）。
   const card = readCode(read("src/components/agent-chat/AgentToolCard.tsx"));
   assert.match(card, /argsSummary=\{item\.argsSummary\}/);

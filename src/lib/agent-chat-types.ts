@@ -935,6 +935,17 @@ export interface AgentAssistantTextItem extends TranscriptItemBase {
   text: string;
   /** 思维链（reasoning.delta 累积）。streaming 期间可能还在长。UI 可折叠显示。 */
   reasoning?: string;
+  /**
+   * 思維鏈起點（epoch ms）：reasoning.delta 首次落到本條目時由 reducer 寫入，
+   * 已有值不覆蓋。只當結算 reasoningMs 的基準，寫完保留、不再參與顯示。
+   */
+  reasoningStartedAt?: number;
+  /**
+   * 思維鏈總時長（ms）：思考結束時結算一次（正文首個 delta 到達、或串流收尾），
+   * 之後不再變。收合行據此顯示「已思考 · N 秒」；缺席＝沒有可誠實顯示的秒數
+   * （歷史回放重建的條目就沒有計時資料，顯示「已思考」不編秒數）。
+   */
+  reasoningMs?: number;
   /** true = 还在收 delta。turn.done 后转 false。 */
   streaming: boolean;
 }
