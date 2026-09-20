@@ -30,9 +30,14 @@ function AgentAnchorCardComponent({ anchor, onAnchor, onReanchor, onDismiss, bus
   const rest = anchor.params.length - preview.length;
 
   return (
-    <div className="agent-rise lg-sheet rounded-ios-2xl p-3.5">
+    <div className="agent-rise lg-sheet relative overflow-hidden rounded-ios-2xl p-3.5">
+      {/* 顶缘 specular 亮线：玻璃面板上缘的一线高光，纯装饰不吃事件。 */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-[inherit] bg-gradient-to-r from-transparent via-white to-transparent opacity-80"
+      />
       <div className="flex items-start gap-3">
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-ios-blue/[0.12] text-ios-blue">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-black/[0.05] text-muted-foreground">
           <Anchor className="h-4 w-4" aria-hidden="true" />
         </span>
         <div className="min-w-0 flex-1">

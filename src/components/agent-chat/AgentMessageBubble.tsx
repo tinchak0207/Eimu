@@ -136,8 +136,11 @@ function AgentMessageBubbleComponent({ item, sessionId }: AgentMessageBubbleProp
         {/* 附件卡（罪状 1）：只在解析出附件时渲染，纯文本消息零开销。 */}
         {hasAttachments && <AgentAttachmentCards refs={userParsed.refs} sessionId={sessionId} />}
         {/* 串流中的打字光标。纯视觉提示，屏读器宣告由 AgentChatPanel 的
-            role="status" 区域负责。 */}
-        {item.kind === "assistant" && item.streaming && (
+            role="status" 区域负责。
+            2026-09-20 修：僅在有正文時渲染——reasoning 先到、text 還是空的
+            純思考期，條目已佔位（"已思考"收合行＋零寬空格），若 caret 也渲染，
+            就是一個孤零零的游標在奇怪的位置閃到正文出現為止。 */}
+        {item.kind === "assistant" && item.streaming && displayText.length > 0 && (
           <span
             className="agent-caret"
             aria-hidden="true"

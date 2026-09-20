@@ -36,14 +36,14 @@ function AgentNoticeRowComponent({ item }: AgentNoticeRowProps) {
       role="status"
       className={cn(
         "agent-rise flex items-start gap-1.5 rounded-ios-2xl py-1 pl-3.5 pr-1.5 text-ios-footnote leading-[1.5]",
-        isError ? "lg-tint-red text-destructive" : "bg-black/[0.03] text-muted-foreground",
+        isError ? "text-ios-red" : "text-muted-foreground",
       )}
       style={reducedMotion ? { animation: "none" } : undefined}
     >
       <Icon
         className={cn(
           "mt-3 h-4 w-4 shrink-0",
-          isError ? "text-destructive" : "text-foreground/45",
+          isError ? "text-ios-red" : "text-foreground/45",
         )}
         aria-hidden="true"
       />

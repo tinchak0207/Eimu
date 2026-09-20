@@ -7,7 +7,7 @@
 // 展开区放全文（whitespace-pre-wrap，不在模型层硬切）。不新造第二套展开交互。
 
 import { memo, useId, useState } from "react";
-import { Bot, ChevronDown } from "lucide-react";
+import { Bot, Check, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AgentSubagentReportItem } from "@/lib/agent-chat-types";
 
@@ -16,8 +16,10 @@ export interface AgentSubagentReportCardProps {
 }
 
 const STATUS_META: Record<AgentSubagentReportItem["status"], { label: string; badge: string }> = {
-  ok: { label: "已完成", badge: "lg-tint-green text-[#248A3D]" },
-  error: { label: "失败", badge: "lg-tint-red text-destructive" },
+  // 2026-09-20 色彩纪律：状态徽章一律灰阶文字，ios-green 只作为完成 ✓ 的点缀，
+  // 红色只留给失败（ios-red 僅錯誤），其余状态不再有第二套彩色标签。
+  ok: { label: "已完成", badge: "bg-black/[0.05] text-muted-foreground" },
+  error: { label: "失败", badge: "bg-ios-red/10 text-ios-red" },
   // 中止：诚实标「已中止」，不留 running 假状态，也不谎报失败。
   interrupted: { label: "已中止", badge: "bg-black/[0.05] text-muted-foreground" },
   // 人工停止成功（2026-09-20 gateway 契约）：中性灰「已停止」，同样不是失败。
@@ -39,7 +41,12 @@ function AgentSubagentReportCardComponent({ item }: AgentSubagentReportCardProps
   const preview = reportPreview(item.text);
 
   return (
-    <div className="agent-rise flex w-full flex-col gap-1 rounded-[16px] bg-[rgba(120,120,128,0.06)] px-3 py-2">
+    <div className="agent-rise relative flex w-full flex-col gap-1 overflow-hidden rounded-[16px] bg-black/[0.03] px-3 py-2">
+      {/* 顶缘 specular 亮线：面板上缘的一线高光，纯装饰不吃事件。 */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-[inherit] bg-gradient-to-r from-transparent via-white to-transparent opacity-80"
+      />
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -59,6 +66,10 @@ function AgentSubagentReportCardComponent({ item }: AgentSubagentReportCardProps
             meta.badge,
           )}
         >
+          {/* 完成 ✓ 点缀：唯一存活的彩色，标记「跑完了」这个事实。 */}
+          {item.status === "ok" && (
+            <Check className="mr-0.5 h-3 w-3 text-ios-green" aria-hidden="true" />
+          )}
           {meta.label}
         </span>
         <ChevronDown

@@ -38,10 +38,10 @@ function AudioAction({
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        "flex h-11 items-center gap-1.5 rounded-full px-3.5 text-ios-subhead font-medium transition-all duration-200",
-        "lg-float text-muted-foreground",
-        "enabled:hover:bg-white/[0.94] active:scale-[0.97] focus:outline-none focus:ring-2 focus:ring-ios-blue/30",
+        "flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-ios-footnote text-muted-foreground transition-colors",
+        "enabled:hover:bg-white/60 enabled:hover:text-foreground/70",
         "disabled:cursor-not-allowed disabled:text-foreground/45",
+        "focus:outline-none focus:ring-2 focus:ring-ios-blue/30",
         "[touch-action:manipulation] [-webkit-tap-highlight-color:transparent]",
       )}
     >
@@ -66,10 +66,10 @@ function AgentAudioCardComponent({ item, onSaveToLibrary, onDownload }: AgentAud
   };
 
   return (
-    <figure className="agent-rise overflow-hidden rounded-[18px] bg-[rgba(120,120,128,0.06)]">
+    <figure className="agent-rise">
       {/* media_kind 徽章：music=成曲、其余（含缺省）=音频。 */}
       <div className="flex items-center gap-2 px-3.5 pt-3">
-        <span className="rounded-full bg-ios-blue/10 px-2 py-0.5 text-ios-caption1 font-medium text-ios-blue">
+        <span className="rounded-full bg-black/[0.05] px-2 py-0.5 text-ios-caption1 font-medium text-muted-foreground">
           {item.mediaKind === "music" ? "音乐" : "音频"}
         </span>
       </div>
@@ -105,17 +105,17 @@ function AgentAudioCardComponent({ item, onSaveToLibrary, onDownload }: AgentAud
         )}
       </div>
       {item.costCoins !== undefined && (
-        <figcaption className="flex items-center gap-1 px-3.5 pt-2.5 text-ios-footnote text-[rgba(120,90,20,0.85)]">
+        <figcaption className="flex items-center gap-1 px-3.5 pt-2.5 text-ios-footnote text-muted-foreground">
           <Coins className="h-3.5 w-3.5" aria-hidden="true" />
           消耗 {formatCoins(item.costCoins)} 金币
         </figcaption>
       )}
-      <div className="flex flex-wrap gap-2 px-3.5 pb-3 pt-2.5">
+      <div className="mt-1 flex flex-wrap gap-1 px-3.5 pb-3">
         <AudioAction label="存图库" disabled={!onSaveToLibrary} onClick={() => onSaveToLibrary?.(item)}>
-          <Library className="h-4 w-4" aria-hidden="true" />
+          <Library className="h-3.5 w-3.5" aria-hidden="true" />
         </AudioAction>
         <AudioAction label="下载" disabled={!onDownload} onClick={() => onDownload?.(item)}>
-          <Download className="h-4 w-4" aria-hidden="true" />
+          <Download className="h-3.5 w-3.5" aria-hidden="true" />
         </AudioAction>
       </div>
     </figure>

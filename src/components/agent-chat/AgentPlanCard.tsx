@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useEffect, useRef, useState } from "react";
-import { ClipboardList } from "lucide-react";
+import { Brain, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AgentPlanItem } from "@/lib/agent-chat-types";
 
@@ -49,57 +49,62 @@ function AgentPlanCardComponent({ item }: AgentPlanCardProps) {
   const collapsedPreview = `${item.text.slice(0, COLLAPSED_PREVIEW_CHARS)}…`;
 
   return (
-    <div className="agent-rise flex w-full flex-col gap-2 rounded-[18px] bg-[rgba(120,120,128,0.06)] px-3.5 py-3">
-      <div className="flex items-center gap-2.5">
-        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white text-muted-foreground">
-          <ClipboardList className="h-4 w-4" aria-hidden="true" />
-        </span>
-        <div className="flex min-w-0 flex-1 items-center gap-1.5">
-          <p className="text-ios-subhead font-semibold text-foreground">計划</p>
-          {/* 進行中的標記：與工具卡 pending（生成中…）同源的金色 tint ——「任務已經
-              開始、還沒定案」在全站是同一種顏色語言。 */}
+    <div className="agent-rise flex w-full flex-col">
+      {/* 工具行式折疊頭（agent-chat-preview 已批准語彙）：無底色 header 行 +
+          Brain icon + 標題 + provisional 灰字 + ios-blue 小點；ChevronDown 指示開合。 */}
+      <button
+        type="button"
+        onClick={() => {
+          manualRef.current = true;
+          setOpen((prev) => !prev);
+        }}
+        aria-expanded={open}
+        className="flex min-h-11 w-full items-center gap-2.5 rounded-full px-3 text-left transition-colors hover:bg-black/[0.05] focus:outline-none focus-visible:ring-2 focus-visible:ring-foreground/20 [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
+      >
+        <Brain className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+        <span className="min-w-0 flex-1 truncate text-ios-subhead font-semibold text-foreground">
+          計划
+          {/* 進行中的標記（新語彙）：灰字「临时」＋ ios-blue 小點，不再是金底膠囊。 */}
           {provisional && (
-            <span className="lg-tint-gold inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-ios-footnote font-semibold text-[rgba(120,90,20,0.85)]">
-              （进行中）
+            <span className="ml-1.5 inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-ios-footnote font-medium text-muted-foreground">
+              <span className="h-1.5 w-1.5 rounded-full bg-ios-blue" aria-hidden="true" />
+              临时
             </span>
           )}
-        </div>
-        <button
-          type="button"
-          onClick={() => {
-            manualRef.current = true;
-            setOpen((prev) => !prev);
-          }}
-          aria-expanded={open}
-          className="shrink-0 rounded-full px-2.5 py-1 text-ios-footnote font-medium text-ios-blue transition-colors hover:bg-black/[0.06] active:scale-95"
-        >
-          {open ? "收起" : "展开"}
-        </button>
-      </div>
-
-      {/* 正文：≥13px（design-system/MASTER.md 硬規則），用 ios-subhead（15px）。
-          收合時只給 40 字預覽 + 省略號——一行就要能掃完，展開才有全文。 */}
-      <p
-        className={cn(
-          "break-words text-ios-subhead leading-[1.55] text-foreground [overflow-wrap:anywhere]",
-          open ? undefined : "truncate text-muted-foreground",
+        </span>
+        {!open && (
+          <span className="shrink-0 truncate text-ios-footnote text-muted-foreground/70">
+            {collapsedPreview}
+          </span>
         )}
-      >
-        {open ? item.text : collapsedPreview}
-      </p>
+        <ChevronDown
+          className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200", open && "rotate-180")}
+          aria-hidden="true"
+        />
+      </button>
 
-      {/* 專家晶片：唯讀，缺席就不畫（網關只在 digest 白名單命中時才帶 experts）。
-          刻意不是按鈕——這不是可點的操作，只是「這輪會派誰」的事實陳列。 */}
-      {experts.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {experts.map((expert) => (
-            <span
-              key={expert}
-              className="inline-flex items-center rounded-full bg-black/[0.05] px-2 py-0.5 text-ios-footnote text-muted-foreground"
-            >
-              {expert}
-            </span>
-          ))}
+      {/* 展開塊：lg-float 內嵌面。展開才掛載（默認 DOM 不含正文全文）。 */}
+      {open && (
+        <div className="mt-1.5 flex flex-col gap-2 rounded-[18px] bg-[rgba(120,120,128,0.06)] px-3.5 py-3 lg-float">
+          {/* 正文：≥13px（design-system/MASTER.md 硬規則），用 ios-subhead（15px）。 */}
+          <p className="break-words text-ios-subhead leading-[1.55] text-foreground [overflow-wrap:anywhere]">
+            {item.text}
+          </p>
+
+          {/* 專家晶片：唯讀，缺席就不畫（網關只在 digest 白名單命中時才帶 experts）。
+              刻意不是按鈕——這不是可點的操作，只是「這輪會派誰」的事實陳列。 */}
+          {experts.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {experts.map((expert) => (
+                <span
+                  key={expert}
+                  className="inline-flex items-center rounded-full bg-black/[0.05] px-2 py-0.5 text-ios-footnote text-muted-foreground"
+                >
+                  {expert}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

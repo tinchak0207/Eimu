@@ -70,7 +70,12 @@ function AgentConfirmCardComponent({ confirm, onConfirm, contextText, busy = fal
   const interpret = (contextText ?? "").trim();
 
   return (
-    <div className="agent-rise lg-sheet rounded-ios-2xl p-3.5" aria-busy={locked}>
+    <div className="agent-rise lg-sheet relative overflow-hidden rounded-[20px] p-3.5" aria-busy={locked}>
+      {/* 顶缘 specular 亮线（agent-chat-preview 决策卡已批准语汇）：玻璃上缘受光。 */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-[inherit] bg-gradient-to-r from-transparent via-white to-transparent opacity-80"
+      />
       {interpret && (
         <div className="flex items-start gap-3">
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[rgba(122,73,255,0.14)] text-[#7C4DFF]">
@@ -86,9 +91,9 @@ function AgentConfirmCardComponent({ confirm, onConfirm, contextText, busy = fal
           </div>
         </div>
       )}
-      {/* 扣费数字是这张卡的主角：金额单独成行放大加粗，金币单位跟行尾，一眼看清要扣多少。 */}
+      {/* 扣费数字是这张卡的主角：金额单独成行放大，币金文字色（去金底胶囊/badge）。 */}
       <div className="mt-3 flex items-start gap-3">
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[rgba(255,179,0,0.16)] text-[#B8860B]">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-black/[0.05] text-muted-foreground">
           <Coins className="h-4 w-4" aria-hidden="true" />
         </span>
         <div className="min-w-0 flex-1">
@@ -96,10 +101,10 @@ function AgentConfirmCardComponent({ confirm, onConfirm, contextText, busy = fal
             将花费
           </p>
           <p className="mt-0.5 flex items-baseline gap-1.5">
-            <span className="text-ios-title2 font-bold leading-none tabular-nums text-[#B8860B]">
+            <span className="text-ios-title2 font-bold leading-none tabular-nums text-[#b8860b]">
               {formatCoins(amountCoins)}
             </span>
-            <span className="text-ios-subhead font-semibold text-muted-foreground">金币</span>
+            <span className="text-ios-subhead font-semibold text-muted-foreground">币</span>
           </p>
           {/* 费用明细（description）：跟在金额下面当小字，只出现一次——
               之前在解读区重复展示同一段，被用户点名。 */}
@@ -110,7 +115,7 @@ function AgentConfirmCardComponent({ confirm, onConfirm, contextText, busy = fal
           )}
         </div>
       </div>
-      {/* 两颗大按钮并排各占一半，拇指直接盖住；取消是中性灰，确认是实心蓝，视觉绝不混淆。 */}
+      {/* 预览主 CTA 语汇：确认＝#2d3142 深底实心 + 悬浮微升；取消＝幽灵灰字 + 白色 hover 底。 */}
       <div className="mt-3.5 grid grid-cols-2 gap-2.5">
         <button
           type="button"
@@ -128,7 +133,7 @@ function AgentConfirmCardComponent({ confirm, onConfirm, contextText, busy = fal
           disabled={locked}
           className={cn(
             "flex min-h-12 items-center justify-center gap-1.5 rounded-full text-ios-subhead font-semibold",
-            "bg-black/[0.06] text-muted-foreground transition-colors duration-150 active:bg-black/10",
+            "text-muted-foreground transition-all duration-200 hover:bg-white/55 hover:text-foreground/75 active:scale-95",
             "focus:outline-none focus-visible:ring-2 focus-visible:ring-foreground/20",
             "disabled:cursor-not-allowed disabled:opacity-50",
             "[touch-action:manipulation] [-webkit-tap-highlight-color:transparent]",
@@ -153,9 +158,9 @@ function AgentConfirmCardComponent({ confirm, onConfirm, contextText, busy = fal
           disabled={locked}
           className={cn(
             "flex min-h-12 items-center justify-center gap-1.5 rounded-full text-ios-subhead font-semibold text-white",
-            "bg-ios-blue shadow-[0_4px_12px_rgba(0,122,255,0.32)] transition-all duration-200 active:scale-[0.98] active:bg-ios-blue/80",
-            "focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/40",
-            "disabled:cursor-not-allowed disabled:bg-black/[0.12] disabled:shadow-none disabled:active:scale-100",
+            "bg-[#2d3142] shadow-[0_8px_20px_rgba(45,49,66,0.18)] transition-all duration-200 hover:-translate-y-[1px] hover:bg-[#272b39] active:scale-95",
+            "focus:outline-none focus-visible:ring-2 focus-visible:ring-foreground/20",
+            "disabled:cursor-not-allowed disabled:bg-[#2d3142]/60 disabled:shadow-none disabled:active:translate-y-0 disabled:active:scale-100",
             "[touch-action:manipulation] [-webkit-tap-highlight-color:transparent]",
           )}
         >
