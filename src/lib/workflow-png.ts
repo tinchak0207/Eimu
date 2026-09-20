@@ -8,6 +8,13 @@
 //
 // 長度寫在尾端，提取時只需讀最後 13 個位元組就知道 payload 起點，
 // 不必整檔掃描；magic + PNG 簽名雙重校驗 + JSON 合法性校驗來擋壞檔誤判。
+//
+// 本檔另有端到端視覺渲染出口 renderWorkflowDagPng（DAG 資料 → PNG buffer）：
+// 與上面 trailing data 的前綴／尾端格式無關，只是共用「工作流 PNG」這個檔名語義。
+
+import type { DagConnectionInput, DagNodeInput, DagRenderOptions } from "./dag-renderer";
+import { renderDagSvg } from "./dag-renderer";
+import { renderDagPng } from "./dag-png";
 
 export const WORKFLOW_PNG_MAGIC = "WFSTUDIO";
 export const WORKFLOW_PNG_VERSION = 1;
@@ -83,4 +90,20 @@ export function extractWorkflowFromPng(png: Uint8Array): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * 端到端：DAG 資料 → PNG buffer（含 layout）。
+ *
+ * 組合兩段純函式——renderDagSvg 算佈局並輸出 SVG，renderDagPng 走 sharp 轉 PNG。
+ * 刻意不在這裡做 workflow JSON 嵌入：嵌入（IEND 之後追加 trailing data）與
+ * 視覺渲染是兩件事，要一起用時由呼叫端自行 `embedWorkflowIntoPng(await renderWorkflowDagPng(...))`。
+ */
+export async function renderWorkflowDagPng(
+  nodes: DagNodeInput[],
+  connections: DagConnectionInput[],
+  options?: DagRenderOptions,
+): Promise<Buffer> {
+  const svg = renderDagSvg(nodes, connections, options);
+  return renderDagPng(svg);
 }

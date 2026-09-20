@@ -44,12 +44,27 @@ const PARAM = {
   imageSize: "size",
   starred: "starred",
   withImage: "withImage",
+  // 记录类型档位也进 URL：分享/刷新/后退都要保留「我正在只看的这一类」，
+  // 与 model/size 这些筛选参数同一待遇。
+  entryKind: "kind",
 } as const;
+
+/** URL 里只认这四个值；其它（含拼错）一律当作「全部」，不把非法值带进查询。 */
+const ENTRY_KIND_VALUES = ["image", "video", "workflow"] as const;
+type EntryKindFilter = (typeof ENTRY_KIND_VALUES)[number] | "all";
+
+function parseEntryKind(value: string | null): EntryKindFilter {
+  const trimmed = value?.trim();
+  return ENTRY_KIND_VALUES.includes(trimmed as (typeof ENTRY_KIND_VALUES)[number])
+    ? (trimmed as (typeof ENTRY_KIND_VALUES)[number])
+    : "all";
+}
 
 function queryFromSearchParams(params: URLSearchParams): HistoryQuery {
   const keyword = params.get(PARAM.keyword)?.trim();
   const modelId = params.get(PARAM.modelId)?.trim();
   const imageSize = params.get(PARAM.imageSize)?.trim();
+  const entryKind = parseEntryKind(params.get(PARAM.entryKind));
 
   return {
     ...(keyword ? { keyword } : {}),
@@ -57,6 +72,7 @@ function queryFromSearchParams(params: URLSearchParams): HistoryQuery {
     ...(imageSize ? { imageSize } : {}),
     ...(params.get(PARAM.starred) === "1" ? { starredOnly: true } : {}),
     ...(params.get(PARAM.withImage) === "1" ? { withImageOnly: true } : {}),
+    ...(entryKind !== "all" ? { entryKind } : {}),
   };
 }
 
@@ -67,6 +83,7 @@ function searchParamsFromQuery(query: HistoryQuery): string {
   if (query.imageSize) params.set(PARAM.imageSize, query.imageSize);
   if (query.starredOnly) params.set(PARAM.starred, "1");
   if (query.withImageOnly) params.set(PARAM.withImage, "1");
+  if (query.entryKind) params.set(PARAM.entryKind, query.entryKind);
   return params.toString();
 }
 
@@ -233,10 +250,13 @@ export function HistoryClient() {
   );
 
   const handleDownload = useCallback(async (entry: HistoryEntry) => {
-    const result = entry.results.find((item) => item.image || item.imageUrl);
-    const src = result?.image ? result.image : result?.imageUrl;
+    // 视频记录的结果里只有 videoUrl，没有 image/imageUrl。历史卡片既然已经把
+    // 视频缩略图显示出来了，下载钮就必须能把那段视频拿走，否则按下去只会得到
+    // 一句「没有可下载的图片」。
+    const result = entry.results.find((item) => item.image || item.imageUrl || item.videoUrl);
+    const src = result?.image ? result.image : result?.imageUrl ?? result?.videoUrl;
     if (!src) {
-      setNotice("这条记录没有可下载的图片。");
+      setNotice("这条记录没有可下载的图片或视频。");
       return;
     }
     try {
@@ -489,6 +509,7 @@ export function HistoryClient() {
         ) : (
           <HistoryGrid
             entries={history.entries}
+            entryKindFilter={parseEntryKind(searchParams.get(PARAM.entryKind))}
             selectionMode={selectionMode}
             selectedIds={selectedIds}
             loadingMore={history.loadingMore}

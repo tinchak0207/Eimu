@@ -16,7 +16,7 @@ import { createPortal } from "react-dom";
 import { Coins, Layers, SlidersHorizontal, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getStoredToken, getStoredUser } from "@/lib/new-api-client";
-import { formatModelLabel, primaryModelId } from "@/lib/history-types";
+import { formatModelLabel, coinsFromQuota, primaryModelId } from "@/lib/history-types";
 import type { HistoryEntry } from "@/lib/history-types";
 import { extractPromptSection } from "@/lib/workflow-recall";
 import { IMAGE_MODEL_IDS } from "@/lib/generation-model-catalog";
@@ -135,6 +135,12 @@ export function RerunDialog({ entry, mode, onClose, onDone }: RerunDialogProps) 
   }, [entry]);
 
   const displaySize = isVariant ? variantSize : (entrySize ?? null);
+
+  // 实付：只从 entry.quota 换算（上游计费日志归并）。生成任务的两条
+  // 落盘路径都不写 quota，所以本站记录通常是 null——这里诚实显示。
+  const paidCoins = coinsFromQuota(entry.quota);
+  const formatPaidCoins = (coins: number) =>
+    coins < 1 ? coins.toFixed(3).replace(/0+$/, "").replace(/\.$/, "") : String(Math.round(coins));
 
   if (!mounted) return null;
 
@@ -302,14 +308,34 @@ export function RerunDialog({ entry, mode, onClose, onDone }: RerunDialogProps) 
           </div>
         </div>
 
-        {/* 预估由计费配置实时计算（含管理员覆写），不写死数字 */}
-        <div className="mt-4 flex items-center gap-1.5">
+      {/* 费用：实付优先，没有实付就只给预估并明确标「预估」。
+          实付来源是 entry.quota（上游计费日志归并进来的真实消耗）。这里有一个
+          诚实的缺口：generate-images 与 generation-task-history 两条落盘路径都
+          不写 quota，所以本站自己的记录绝大多数没有实付数据。此时宁可只显示
+          预估，也不拿预估冒充实付——把一个编出来的数字标成「上次实付」，
+          用户会据此判断这次会不会被多扣。 */}
+      <div className="mt-4 space-y-1">
+        <div className="flex items-center gap-1.5">
+          <Coins className={cn("h-3 w-3 shrink-0", paidCoins !== null ? "text-[#FF9500]" : "text-[rgba(0,0,0,0.44)]")} />
+          {paidCoins !== null ? (
+            <p className="text-ios-footnote text-[rgba(0,0,0,0.72)]">
+              上次实付 {formatPaidCoins(paidCoins)} 币
+            </p>
+          ) : (
+            <p className="text-ios-footnote text-[rgba(0,0,0,0.44)]">
+              上次实付未知
+              <span className="ml-1 text-ios-caption1">（这条记录没有留下计费数据）</span>
+            </p>
+          )}
+        </div>
+        <div className="flex items-center gap-1.5">
           <Coins className="h-3 w-3 shrink-0 text-[rgba(120,90,20,0.85)]" />
           <p className="text-ios-footnote text-[rgba(120,90,20,0.85)]">
-            预计 {count} 张 × {perImage} 币 ≈ {total} 币
+            本次预估 {count} 张 × {perImage} 币 ≈ {total} 币
             <span className="ml-1 text-ios-caption1 text-[rgba(0,0,0,0.45)]">（预估，按任务实际计费）</span>
           </p>
         </div>
+      </div>
 
         {error && (
           <p role="alert" className="mt-3 text-ios-footnote text-[#FF3B30]">

@@ -1,11 +1,12 @@
 "use client";
 
 import { memo, useCallback, useMemo, useState } from "react";
-import { AlertTriangle, Bot, Boxes, Check, Coins, CopyPlus, Download, FileQuestion, IdCard, Loader2, Megaphone, RotateCcw, SlidersHorizontal, Star, Trash2 } from "lucide-react";
+import { AlertTriangle, Bot, Boxes, Check, Coins, CopyPlus, Download, FileQuestion, IdCard, Loader2, Megaphone, Play, RotateCcw, SlidersHorizontal, Star, Trash2, Workflow } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { formatCoins, formatModelLabel, formatRelativeTime, primaryModelId } from "@/lib/history-types";
+import { formatCoins, formatModelLabel, formatRelativeTime, inferEntryKind, primaryModelId } from "@/lib/history-types";
 import { canHistoryEntryRerun } from "@/lib/history-rerun";
 import { assetPackPayloadFromHistoryEntry } from "@/lib/history-card-anchor";
+import { workflowDagThumbnailUrl } from "@/lib/history-workflow-view";
 import type { HistoryEntry } from "@/lib/history-types";
 
 export interface HistoryCardProps {
@@ -118,8 +119,20 @@ function HistoryCardComponent({
     }
   }, [downloadBusy, onDownload, entry]);
 
-  const result = entry.results.find((item) => item.image || item.imageUrl);
-  const src = result?.image ? `data:image/png;base64,${result.image}` : result?.imageUrl ?? null;
+  const kind = inferEntryKind(entry);
+  /**
+   * 缩略图选择：工作流卡用后端渲染好的 DAG 图（不在这里画 DAG——那是后端
+   * Phase 2/4 的事）；其它卡按 image → imageUrl → videoUrl 依次取第一个命中。
+   * 原来只找 image/imageUrl，纯视频记录（结果里只有 videoUrl）在历史里
+   * 一律显示「没有留存图片」，是既有缺口。
+   */
+  const dagThumbnailUrl = workflowDagThumbnailUrl(entry);
+  const result = entry.results.find((item) => item.image || item.imageUrl || item.videoUrl);
+  const isVideo = !dagThumbnailUrl && !(result?.image || result?.imageUrl) && Boolean(result?.videoUrl);
+  /** 真的有一张静态图（base64 或 URL）——DAG 缩略图与视频首帧都不算。 */
+  const hasStillImage = Boolean(result?.image || result?.imageUrl);
+  const src = dagThumbnailUrl
+    ?? (result?.image ? `data:image/png;base64,${result.image}` : result?.imageUrl ?? result?.videoUrl ?? null);
   const model = primaryModelId(entry);
   const promptText = entry.prompt.trim();
   const rerunnable = canHistoryEntryRerun(entry);
@@ -189,6 +202,16 @@ function HistoryCardComponent({
               onLoad={() => setImageLoaded(true)}
               onError={() => setImageFailed(true)}
             />
+            {/*
+              视频记录的缩略图是静态首帧，没有任何东西告诉用户「这能播」。
+              角标用 lg-float 二级材质（design-system/MASTER.md 的材料层级），
+              和操作条上的 32px 圆钮同族，压在缩略图左上角不挡操作条。
+            */}
+            {isVideo && (
+              <span className="lg-float pointer-events-none absolute bottom-3 left-3 flex h-7 w-7 items-center justify-center rounded-full text-[rgba(0,0,0,0.72)]">
+                <Play className="h-3.5 w-3.5" fill="currentColor" />
+              </span>
+            )}
           </div>
         ) : (
           <div className="flex aspect-[4/3] w-full flex-col items-center justify-center gap-2 border-b border-dashed border-[rgba(0,0,0,0.08)] bg-[rgba(0,0,0,0.015)]">
@@ -264,6 +287,16 @@ function HistoryCardComponent({
         </button>
       )}
 
+      {/* 工作流徽章：卡片右下角。用 lg-float 二级材质，不用实心色——工作流不是
+          状态（成功/失败各有颜色），只是这条记录的类型标签，与视频播放角标同族。
+          左上角是多选勾选框、右上角是操作条，两个角都被占了，所以放右下。 */}
+      {kind === "workflow" && (
+        <span className="lg-float pointer-events-none absolute bottom-3 right-3 z-10 inline-flex items-center gap-1 rounded-full px-2 py-1 text-ios-caption1 font-medium text-[rgba(0,0,0,0.62)]">
+          <Workflow className="h-3 w-3" />
+          工作流
+        </span>
+      )}
+
       {/* 悬停浮出的操作条 */}
       <div className="hist-card-actions absolute right-3 top-3 z-20 flex gap-1.5">
         <CardAction
@@ -297,8 +330,9 @@ function HistoryCardComponent({
             <SlidersHorizontal className="h-3.5 w-3.5" />
           </CardAction>
         )}
-        {/* 有图才有锚定成卡的意义；纯信息卡不挂这颗按钮。 */}
-        {onSaveCard && src && !imageFailed && (
+        {/* 有图才有锚定成卡的意义；纯信息卡与视频卡都不挂——角色卡的输入是
+            一张参考图，拿视频首帧去锚定是编造，不如不挂。 */}
+        {onSaveCard && hasStillImage && !imageFailed && (
           <CardAction label="存为角色卡" onClick={() => onSaveCard(entry)}>
             <IdCard className="h-3.5 w-3.5" />
           </CardAction>

@@ -28,7 +28,7 @@ import { getGenerationSql } from "@/lib/generation-core/database";
 // ─────────────────────────── 类型
 
 export type MemoryScope = "private" | "shared";
-export type MemoryType = "user" | "feedback" | "project" | "domain";
+export type MemoryType = "user" | "feedback" | "project" | "domain" | "workflow";
 export type EvidenceKind = "tool_result" | "user_confirmed" | "verbatim";
 export type MemoryStatus = "active" | "retracted" | "pending_review";
 
@@ -350,7 +350,7 @@ async function writeRevision(previous: AgentMemoryDoc): Promise<void> {
 
 const SLUG_PATTERN = /^[a-z0-9-]{1,64}$/;
 const SCOPES: MemoryScope[] = ["private", "shared"];
-const TYPES: MemoryType[] = ["user", "feedback", "project", "domain"];
+const TYPES: MemoryType[] = ["user", "feedback", "project", "domain", "workflow"];
 const EVIDENCE_KINDS: EvidenceKind[] = ["tool_result", "user_confirmed", "verbatim"];
 
 function isStructurallyValid(input: AgentMemoryDocInput): boolean {

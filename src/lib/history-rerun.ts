@@ -11,7 +11,7 @@
 // 可進行，只是無父鏈、參考圖無法自動找回——對話框裡要把這件事說出來。
 import { extractPromptSection } from "./workflow-recall";
 import { aspectRatioFromImageSize, generationCoins, generationModel } from "./generation-model-catalog";
-import { primaryModelId } from "./history-types";
+import { inferEntryKind, primaryModelId } from "./history-types";
 import type { HistoryEntry } from "./history-types";
 
 /** 再来 N 组的组数档位（与工作站张数上限 1..8 对齐的常用选项）。 */
@@ -45,13 +45,26 @@ export interface HistoryRerunPlan {
 /**
  * 判定一条历史记录能否 payload 级重跑：有 prompt、有主模型、且是图像模型
  * （视频按时长计费，重跑预估口径不同，先不放开）。
+ *
+ * workflow 记录没有「一个」主模型——模型是各节点各自的事，历史卡上的模型字段
+ * 往往是空的，用图像模型清单去卡会把整类工作流记录判成不可重跑。它的配方完整
+ * 性由 workflow 自身保证，所以这里直接放行，让「再来 N 组／微调变体」可用。
  */
 export function canHistoryEntryRerun(entry: HistoryEntry): boolean {
   if (!entry.prompt.trim()) return false;
   const modelId = primaryModelId(entry);
   if (!modelId) return false;
+  if (inferEntryKind(entry) === "workflow") return true;
   return generationModel(modelId)?.kind === "image";
 }
+
+/**
+ * workflow 记录在 workflow 字段上额外挂了 DAG 结构（节点/连线）与后端渲染好的
+ * 缩略图 URL。这三个是前端展示与后端落盘用的，不是 /api/generation-jobs 的提交
+ * 参数：原样带上会让 DAG 被当成配方写回新任务（新任务的 DAG 由它自己展开）。
+ * 与 copies/concurrency/estimatedCredits 同一处理方式——提交前剥掉。
+ */
+const WORKFLOW_DISPLAY_ONLY_KEYS = ["dagNodes", "dagConnections", "dagThumbnailUrl"] as const;
 
 /**
  * 把历史记录（含微调覆写）折叠成重跑计划。
@@ -78,6 +91,7 @@ export function buildHistoryRerunPlan(
     delete workflow.copies;
     delete workflow.concurrency;
     delete workflow.estimatedCredits;
+    for (const key of WORKFLOW_DISPLAY_ONLY_KEYS) delete workflow[key];
     if (overrideSize) {
       workflow.imageSize = overrideSize;
       workflow.imageSizes = [overrideSize];

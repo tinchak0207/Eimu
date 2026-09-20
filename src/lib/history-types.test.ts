@@ -14,6 +14,7 @@ import {
   formatCoins,
   formatRelativeTime,
   groupHistoryByDay,
+  inferEntryKind,
   mergeHistoryEntries,
   normalizeBillingLogEntry,
   normalizeHistoryEntry,
@@ -472,4 +473,105 @@ test("formatRelativeTime 覆盖各个量级且不会给出未来时间", () => {
   assert.equal(formatRelativeTime(now - 2 * 86_400_000, now), "2 天前");
   assert.equal(formatRelativeTime(now - 60 * 86_400_000, now), "2 个月前");
   assert.equal(formatRelativeTime(now - 400 * 86_400_000, now), "1 年前");
+});
+
+// ─────────────────────────────────────────── 记录类型（entryKind）
+
+test("inferEntryKind 三条分支：显式 entryKind / source=workflow / DAG / results 媒体类型", () => {
+  // ① 显式 entryKind 永远最准（即使 source 是 local）
+  assert.equal(inferEntryKind(entry({ id: "a", generatedAt: 1, entryKind: "workflow" })), "workflow");
+  assert.equal(inferEntryKind(entry({ id: "a", generatedAt: 1, source: "workflow", entryKind: "video" })), "video");
+
+  // ② source === "workflow"
+  assert.equal(inferEntryKind(entry({ id: "b", generatedAt: 1, source: "workflow" })), "workflow");
+
+  // ③ workflow 带 dagNodes（老记录，source 被归并成 server 面）
+  assert.equal(
+    inferEntryKind(entry({ id: "c", generatedAt: 1, workflow: { dagNodes: [{ id: "n1" }] } })),
+    "workflow",
+  );
+  // 空 dagNodes 不算工作流（推送失败留下的空数组）
+  assert.equal(inferEntryKind(entry({ id: "c2", generatedAt: 1, workflow: { dagNodes: [] } })), "image");
+
+  // ④ results 媒体类型 → video
+  assert.equal(
+    inferEntryKind(
+      entry({
+        id: "d",
+        generatedAt: 1,
+        results: [{ provider: "p", modelId: "m", image: null, imageUrl: null, mediaType: "video" }],
+      }),
+    ),
+    "video",
+  );
+  assert.equal(
+    inferEntryKind(
+      entry({
+        id: "d2",
+        generatedAt: 1,
+        results: [{ provider: "p", modelId: "m", image: null, imageUrl: null, videoUrl: "https://x/a.mp4" }],
+      }),
+    ),
+    "video",
+  );
+
+  // ⑤ 兜底 image（含无 results 的空记录，绝不抛）
+  assert.equal(inferEntryKind(entry({ id: "e", generatedAt: 1 })), "image");
+  assert.equal(
+    inferEntryKind(
+      entry({
+        id: "f",
+        generatedAt: 1,
+        results: [{ provider: "p", modelId: "m", image: null, imageUrl: "https://x/a.png" }],
+      }),
+    ),
+    "image",
+  );
+});
+
+test("matchesHistoryQuery 按 entryKind 过滤（且与 withImageOnly 正交）", () => {
+  const workflowEntry = entry({ id: "w", generatedAt: 3, source: "workflow", prompt: "工作流 x" });
+  const imageEntry = entry({
+    id: "i",
+    generatedAt: 2,
+    results: [{ provider: "p", modelId: "m", image: null, imageUrl: "https://x/a.png" }],
+  });
+  const videoEntry = entry({
+    id: "v",
+    generatedAt: 1,
+    results: [{ provider: "p", modelId: "m", image: null, imageUrl: null, mediaType: "video" }],
+  });
+
+  assert.deepEqual(filterHistoryEntries([workflowEntry, imageEntry, videoEntry], { entryKind: "workflow" }).map((e) => e.id), ["w"]);
+  assert.deepEqual(filterHistoryEntries([workflowEntry, imageEntry, videoEntry], { entryKind: "video" }).map((e) => e.id), ["v"]);
+  assert.deepEqual(filterHistoryEntries([workflowEntry, imageEntry, videoEntry], { entryKind: "image" }).map((e) => e.id), ["i"]);
+  // 缺 entryKind 时不限类型
+  assert.equal(filterHistoryEntries([workflowEntry, imageEntry, videoEntry], {}).length, 3);
+  // hasImage 与 entryKind 是两条独立条件：工作流记录没有图，withImageOnly 会把它筛掉
+  assert.deepEqual(
+    filterHistoryEntries([workflowEntry, imageEntry], { entryKind: "workflow", withImageOnly: true }).map((e) => e.id),
+    [],
+  );
+});
+
+test("normalizeHistoryEntry 白名单收 entryKind（非法值丢弃），source=workflow 自动补 workflow", () => {
+  const withKind = normalizeHistoryEntry({ id: "a", generatedAt: 1, entryKind: "video" }, "server");
+  assert.equal(withKind?.entryKind, "video");
+
+  const bogus = normalizeHistoryEntry({ id: "a", generatedAt: 1, entryKind: "hologram" }, "server");
+  assert.equal(bogus?.entryKind, undefined);
+  assert.ok(!("entryKind" in (bogus as object)));
+
+  // 推送端点写的记录走 server 面：source 由调用方给，entryKind 显式给 workflow
+  const pushed = normalizeHistoryEntry(
+    { id: "workflow-wf1", generatedAt: 1, entryKind: "workflow", workflow: { dagNodes: [{ id: "n1" }] } },
+    "server",
+  );
+  assert.equal(pushed?.entryKind, "workflow");
+  // workflow 字段维持 passthrough：DAG 四欄原样保留
+  assert.deepEqual((pushed?.workflow as { dagNodes: unknown[] }).dagNodes, [{ id: "n1" }]);
+
+  // source=workflow 且没给 entryKind → 自动补 workflow（旧记录/漏欄的兜底）
+  const fromSource = normalizeHistoryEntry({ id: "b", generatedAt: 1 }, "workflow");
+  assert.equal(fromSource?.entryKind, "workflow");
 });

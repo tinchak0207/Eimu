@@ -1,13 +1,18 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import { groupHistoryByDay } from "@/lib/history-types";
+import { useEffect, useMemo, useRef } from "react";
+import { groupHistoryByDay, inferEntryKind } from "@/lib/history-types";
 import type { HistoryEntry } from "@/lib/history-types";
 import { HistoryCard } from "./HistoryCard";
 import { HistorySkeleton } from "./HistorySkeleton";
 
+/** 记录类型档位；"all" 不过滤。与 HistoryFilterBar 的 Chip 一一对应。 */
+export type HistoryEntryKindFilter = "all" | "image" | "video" | "workflow";
+
 export interface HistoryGridProps {
   entries: HistoryEntry[];
+  /** 类型档位：只渲染这一类的记录。缺席时不过滤（与接线前逐位元一致）。 */
+  entryKindFilter?: HistoryEntryKindFilter;
   selectionMode: boolean;
   selectedIds: Set<string>;
   loadingMore: boolean;
@@ -32,6 +37,7 @@ export interface HistoryGridProps {
 
 export function HistoryGrid({
   entries,
+  entryKindFilter = "all",
   selectionMode,
   selectedIds,
   loadingMore,
@@ -72,7 +78,19 @@ export function HistoryGrid({
     return () => observer.disconnect();
   }, [hasMore]);
 
-  const groups = groupHistoryByDay(entries);
+  // 服务端只对它返回的那批做过查询过滤，而这里还归并了只存在于本机缓存的记录
+  // （history-client-store 把 readLocalEntries 直接并进来，不过查询条件）。
+  // 所以类型档位必须在渲染前再过一遍，否则「只看工作流」时本地缓存里的图片
+  // 记录照样会出现，档位形同虚设。
+  const visibleEntries = useMemo(
+    () =>
+      entryKindFilter === "all"
+        ? entries
+        : entries.filter((entry) => inferEntryKind(entry) === entryKindFilter),
+    [entries, entryKindFilter],
+  );
+
+  const groups = groupHistoryByDay(visibleEntries);
 
   return (
     <div>

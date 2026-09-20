@@ -87,6 +87,26 @@ export interface GenerationWorkflowMetadata {
   estimatedCredits?: number;
   copies?: number;
   concurrency?: number;
+  // ── 工作流跑批记录专用（2026-09-20 Phase 2）────────────────────────────
+  // gateway 跑批完成推送落盘的 history 记录，除六槽配方外还带整张 DAG。
+  // 全部 optional：既有记录（单图/视频生成的 workflow）不受影响，读端一律
+  // 用 `Array.isArray(...)` 判存在，不做「缺值即默认」。
+  //
+  // 形状声明成 unknown[] 而非 DagNodeInput[] 是刻意的：本档是 UI 与生成路由
+  // 共用的基础类型档，import dag-renderer 会把 dagre 拖进每一个引用它的
+  // bundle；真正要用 DAG 的只有渲染 DAG 缩图的链路，那一侧自己 cast。
+  /** DAG 节点（gateway 推送的原样投影：id/role/kind/title/status/content/costCoins/error）。 */
+  dagNodes?: unknown[];
+  /** DAG 连线（已正规化为 `{from: nodeId, to: nodeId}`，不是 role）。 */
+  dagConnections?: unknown[];
+  /** 后端渲染好的 DAG 缩略图公开 URL；渲染失败或未渲染时为 undefined。 */
+  dagThumbnailUrl?: string;
+  /** 整张工作流的实际币耗（各节点 costCoins 之和）；估算值走 estimatedCredits，两者不混。 */
+  totalCostCoins?: number;
+  /** gateway 侧的工作流 id（幂等键；历史记录 id 由它派生）。 */
+  workflowId?: string;
+  /** gateway 侧模板 id（single_image / feature_film / novel_film …）。 */
+  templateId?: string;
 }
 
 export interface GeneratedImage {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { FileJson, Filter, Image as ImageIcon, Search, Sheet, Star, X } from "lucide-react";
+import { FileJson, Filter, Image as ImageIcon, Search, Sheet, Star, Video, Workflow, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { HistoryFacets, HistoryQuery } from "@/lib/history-types";
 
@@ -70,13 +70,35 @@ export function HistoryFilterBar({ query, facets, stats, onExportCsv, onExportJs
     return () => clearTimeout(timer);
   }, [keyword, query, onChange]);
 
+  /**
+   * 记录类型档位。工作流是一种记录（一条 DAG 跑完的结果），不是「有图／没图」
+   * 这类属性开关，所以和「有图」同属 kind 族：同一个 Chip 位只亮一个，不会出现
+   * 「收藏 + 工作流 + 有图」三个高亮叠在一起的多选错觉。
+   */
+  const kinds: ReadonlyArray<{ value: "image" | "video" | "workflow"; label: string; icon: React.ReactNode }> = [
+    { value: "image", label: "图片", icon: <ImageIcon className="h-3.5 w-3.5" /> },
+    { value: "video", label: "视频", icon: <Video className="h-3.5 w-3.5" /> },
+    { value: "workflow", label: "工作流", icon: <Workflow className="h-3.5 w-3.5" /> },
+  ];
+
   const patch = (next: Partial<HistoryQuery>) => onChange({ ...query, ...next });
+
+  /**
+   * 类型档位与「有图」是同一件事的两种叫法（有图 ⊂ 图片）：选了类型就清掉
+   * withImageOnly，选了「有图」就把类型档位切回「全部」，避免两个筛选条件
+   * 叠出「什么都没有」的空列表。
+   */
+  const selectKind = (value: "image" | "video" | "workflow") => {
+    const next = query.entryKind === value ? undefined : value;
+    patch({ entryKind: next, withImageOnly: undefined });
+  };
 
   const activeFilters =
     (query.modelId ? 1 : 0) +
     (query.imageSize ? 1 : 0) +
     (query.starredOnly ? 1 : 0) +
-    (query.withImageOnly ? 1 : 0);
+    (query.withImageOnly ? 1 : 0) +
+    (query.entryKind ? 1 : 0);
 
   const hasAnyFilter = activeFilters > 0 || Boolean(query.keyword);
 
@@ -130,7 +152,7 @@ export function HistoryFilterBar({ query, facets, stats, onExportCsv, onExportJs
 
       {/* 常用开关：一行横滑，手机上不折行把首屏再压高一层 */}
       <div className="-mx-4 flex items-center gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:mx-0 sm:px-0 lg:order-1 lg:shrink-0">
-        <Chip active={!query.starredOnly && !query.withImageOnly} onClick={() => onChange({})}>
+        <Chip active={!query.starredOnly && !query.withImageOnly && !query.entryKind} onClick={() => onChange({})}>
           全部
         </Chip>
         <Chip
@@ -141,9 +163,21 @@ export function HistoryFilterBar({ query, facets, stats, onExportCsv, onExportJs
           <Star className="h-3.5 w-3.5" fill={query.starredOnly ? "currentColor" : "none"} />
           收藏
         </Chip>
+        {/* 类型档位：图片／视频／工作流。之前只有「有图」一颗，工作流记录混在
+            图片列表里没有出口；「有图」保留为「不看计费日志」的开关。 */}
+        {kinds.map((kind) => (
+          <Chip
+            key={kind.value}
+            active={query.entryKind === kind.value}
+            onClick={() => selectKind(kind.value)}
+          >
+            {kind.icon}
+            {kind.label}
+          </Chip>
+        ))}
         <Chip
           active={Boolean(query.withImageOnly)}
-          onClick={() => patch({ withImageOnly: query.withImageOnly ? undefined : true })}
+          onClick={() => patch({ withImageOnly: query.withImageOnly ? undefined : true, entryKind: undefined })}
           count={facets?.withImageCount}
         >
           <ImageIcon className="h-3.5 w-3.5" />
