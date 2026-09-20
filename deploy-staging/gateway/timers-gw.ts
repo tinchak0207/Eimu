@@ -3,13 +3,13 @@
 // R2-A watchdog clearWatchdogTimer/armWatchdogTimer、R5-C 中段停滯哨
 // clearMidturnStallTimer/armMidturnStallTimer、R8-B question 心跳/代答
 // clearQuestionHeartbeat/clearQuestionAssumeTimer/armQuestionAssumeTimer/
-// autoAssumeQuestions/armQuestionHeartbeat/reconcilePendingQuestions、中段靜默通知
-// clearQuietNoticeTimer/armQuietNoticeTimer、turnHasActivity、R4-A 錯誤停滯哨
+// autoAssumeQuestions/armQuestionHeartbeat/reconcilePendingQuestions、
+// turnHasActivity、R4-A 錯誤停滯哨
 // clearErrorStallTimer/armErrorStallTimer、emitTurnEndSummaryIfSilent/
 // emitRecoveryClosingIfSilent/isInterrogativeMessage/releasePendingVideoWorkflows）
 // （原 index.ts 5821–6368 行，逐行原樣搬運）。
 import type { SessionState } from "./types-gateway.ts"
-import { ACK_DELAY_MS, HEARTBEAT_DELAY_MS, HEARTBEAT_DELAY_AFTER_ACK_MS, MIDTURN_STALL_MS, QUESTION_ASSUME_MS, QUESTION_HEARTBEAT_MS, QUIET_NOTICE_MS, TURN_WATCHDOG_MS, TURN_ERROR_WATCHDOG_MS, OPENCODE_URL } from "./constants-gateway.ts"
+import { ACK_DELAY_MS, HEARTBEAT_DELAY_MS, HEARTBEAT_DELAY_AFTER_ACK_MS, MIDTURN_STALL_MS, QUESTION_ASSUME_MS, QUESTION_HEARTBEAT_MS, TURN_WATCHDOG_MS, TURN_ERROR_WATCHDOG_MS, OPENCODE_URL } from "./constants-gateway.ts"
 import { sessions, markDirty } from "./sessions-core.ts"
 import { emitToSession, stripStaleTurnTextFromReplay } from "./sse-core.ts"
 import { personaPatienceMul } from "./sessions-http.ts"
@@ -303,46 +303,6 @@ export async function reconcilePendingQuestions(state: SessionState): Promise<vo
   }
 }
 
-// ── R8-B 工單 #5（2026-08-29）：中段靜默通知 ──
-// turn 進行中 >45s 無模型正文（message.delta）→ 補一幀用戶可見進度，此後每
-// 45s 續發。與 R5-C 停滯哨並存：停滯哨以「零任何幀」判定（reasoning/tool 幀
-// 都算活著），本通知以「零正文」判定（長推理段用戶側黑屏 ≤45s）。與 R7 啟動
-// 看門狗（turn 未啟動）三層各管一段，判定域互斥不衝突。
-export function clearQuietNoticeTimer(state: SessionState): void {
-  if (state.quietNoticeTimer) {
-    clearTimeout(state.quietNoticeTimer)
-    state.quietNoticeTimer = null
-  }
-}
-
-export function armQuietNoticeTimer(state: SessionState): void {
-  clearQuietNoticeTimer(state)
-  state.lastUserVisibleAt = Date.now()
-  const gen = state.turnGen ?? 0
-  const tick = (): void => {
-    state.quietNoticeTimer = null
-    const cur = sessions.get(state.sessionId)
-    if (!cur || (cur.turnGen ?? 0) !== gen || cur.turnAborted) return
-    // question pending 期間心跳接管（避免兩路同時補幀刷屏）。
-    if (cur.pendingQuestions.size === 0 && cur.pendingConfirms.size === 0) {
-      const silentMs = Date.now() - (cur.lastUserVisibleAt ?? 0)
-      if (silentMs >= QUIET_NOTICE_MS) {
-        // R1（2026-09-11）刀3：空轉文案動作導向——舊文案資訊量零（評測 P0 唯一送達
-        // 用戶的字 ×19）且自曝無正文，改為告知仍在跑；>90s 給可執行的中斷指引。
-        const sec = Math.round(silentMs / 1000)
-        emitToSession(cur, "turn.status", {
-          text:
-            sec >= 90
-              ? `處理中（已 ${sec}s）：可繼續等待；若想中斷，按停止後改派更小範圍。`
-              : `處理中（已 ${sec}s）：工具與子代理仍在執行。`,
-        })
-      }
-    }
-    cur.quietNoticeTimer = setTimeout(tick, QUIET_NOTICE_MS)
-  }
-  state.quietNoticeTimer = setTimeout(tick, QUIET_NOTICE_MS)
-}
-
 /** turn 是否有任何「已啟動」的證據：模型吐過字（正文或思維鏈），或工具開跑過。
  *  罪狀2 根因修復（2026-08-29）：思維鏈（reasoning.delta）也是模型活著的證據——
  *  此前只看正文與工具，思考型模型整段推理期間被 ack/心跳/看門狗/停滯哨誤判死寂。
@@ -354,8 +314,6 @@ export function turnHasActivity(st: SessionState): boolean {
 /** 用戶消息/resume 送達後布哨；每次觸發後自續（第二輪觸發=終局判定）。 */
 export function armWatchdogTimer(state: SessionState): void {
   clearWatchdogTimer(state)
-  // R8-B 工單 #5：中段靜默通知同點布防（重投輪重布），撤哨走 idle。
-  armQuietNoticeTimer(state)
   // R5-C：中段停滯哨與啟動看門狗同點布防/重布（含重投輪），撤哨走 idle。
   armMidturnStallTimer(state)
   const gen = state.turnGen ?? 0

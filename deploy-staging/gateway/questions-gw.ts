@@ -4,7 +4,7 @@ import { getOwnedSession } from "./sessions-core.ts"
 import { emitToSession } from "./sse-core.ts"
 import { opencodeFetch } from "./opencode-client.ts"
 import { jsonError } from "./gw-lib.ts"
-import { armQuestionHeartbeat, armQuestionAssumeTimer, clearQuestionHeartbeat, armMidturnStallTimer, armQuietNoticeTimer } from "./timers-gw.ts"
+import { armQuestionHeartbeat, armQuestionAssumeTimer, clearQuestionHeartbeat, armMidturnStallTimer } from "./timers-gw.ts"
 // TODO(整合 Wave3): timers 同波 W13 在建 timers-gw.ts（armAckTimer/armHeartbeatTimer/... ），落地後換成真 import（bun build 硬查 named import）。
 export function normalizeQuestionOptions(raw: unknown): Array<{ label: string; description?: string }> {
   if (!Array.isArray(raw)) return []
@@ -209,7 +209,6 @@ export async function handleQuestion(key: string, id: string, req: Request): Pro
         // 恢復段重新布哨：若答覆後 opencode 未續跑，中段停滯哨 90s 兜底；
         // pending 期間停滯哨會讓位（見 armMidturnStallTimer），此處已清空 pending。
         armMidturnStallTimer(state)
-        armQuietNoticeTimer(state)
         emitToSession(state, "question.replied", { request_id: requestId, answer: answerText })
         return Response.json({ ok: true })
       }
@@ -256,9 +255,9 @@ export async function settleQuestion(state: SessionState, requestId: string, ans
   }
   state.pendingQuestions.delete(requestId)
   if (replied) {
-    // ok 後記賬同 handleQuestion：答覆語義標記 + 時間戳刷新。此處布的中段哨/
-    // 靜默哨捕獲舊 turnGen，handleSendMessage 隨後 bump turnGen，tick 因 gen
-    // 不匹配自行失效，無殘留（見 armMidturnStallTimer/armQuietNoticeTimer 守衛）。
+    // ok 後記賬同 handleQuestion：答覆語義標記 + 時間戳刷新。此處布的中段哨捕獲舊
+    // turnGen，handleSendMessage 隨後 bump turnGen，tick 因 gen
+    // 不匹配自行失效，無殘留（見 armMidturnStallTimer 守衛）。
     state.questionAnsweredThisTurn = true
     state.turnFrozenByQuestion = false
     if (state.pendingQuestions.size === 0) clearQuestionHeartbeat(state)
@@ -266,7 +265,6 @@ export async function settleQuestion(state: SessionState, requestId: string, ans
     state.turnProgressAt = Date.now()
     state.lastUserVisibleAt = Date.now()
     armMidturnStallTimer(state)
-    armQuietNoticeTimer(state)
   }
   // 無論上游成敗都按既有形態 emit：前端 question 卡必須變已決，否則永遠 pending。
   emitToSession(state, "question.replied", { request_id: requestId, answer: answerText })

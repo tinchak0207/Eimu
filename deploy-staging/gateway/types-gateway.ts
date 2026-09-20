@@ -253,8 +253,6 @@ export interface SessionState {
   questionHeartbeatTimer?: ReturnType<typeof setTimeout> | null
   /** 片AJ：question 3 分鐘超時代答 timer（手動答覆/跳過/會話拆除時清）。 */
   questionAssumeTimer?: ReturnType<typeof setTimeout> | null
-  /** 工單 #5：中段靜默通知 timer（>45s 無 message.delta 補進度幀，此後每 45s 續發）。 */
-  quietNoticeTimer?: ReturnType<typeof setTimeout> | null
   /** 工單 #5：turn 內最後一次模型正文（message.delta）打點——靜默通知判定依據。 */
   lastUserVisibleAt?: number
   /** 工單 #9：session.idle 在 question pending 期間到達 → 凍結旗標（答覆後復位）。 */

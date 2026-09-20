@@ -90,10 +90,6 @@ export const QUESTION_HEARTBEAT_MS = Number.parseInt(process.env.QUESTION_HEARTB
 // 片AJ（2026-09-07）：question 卡 3 分鐘無人回覆 → 按推薦方案（各題第一選項）代答繼續，
 // 答覆文案標注 assumed——無人值守跑批不再掛死（T4 實錘 question 卡挂死 15+ 分鐘）。
 export const QUESTION_ASSUME_MS = Number.parseInt(process.env.QUESTION_ASSUME_MS || "180000", 10) || 180_000
-// R8-B 工單 #5：中段靜默通知閾值——turn 進行中 >45s 無正文（message.delta）
-// 補一幀用戶可見進度，此後每 45s 續發。與 R5-C 中段停滯哨（90s 零「任何」幀）
-// 並存：停滯哨管「全幀死亡」，本通知管「模型活著但用戶看不見」（長推理段）。
-export const QUIET_NOTICE_MS = Number.parseInt(process.env.QUIET_NOTICE_MS || "45000", 10) || 45_000
 
 export const OPENCODE_URL = (process.env.OPENCODE_URL || "http://127.0.0.1:4096").replace(/\/+$/, "")
 export const OPENCODE_PASSWORD = process.env.OPENCODE_PASSWORD || ""

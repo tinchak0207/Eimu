@@ -11,14 +11,14 @@ import { canvasStates } from "./canvas-cascade-state.ts"
 import { emitToSession, stripStaleTurnTextFromReplay, closeSessionStreams } from "./sse-core.ts"
 import { opencodeHeaders } from "./opencode-client.ts"
 import { sseTickets, SSE_TICKET_TTL_MS } from "./auth-gw.ts"
-import { armWatchdogTimer, armHeartbeatTimer, clearAckTimer, clearWatchdogTimer, clearQuestionHeartbeat, clearQuietNoticeTimer } from "./timers-gw.ts"
+import { armWatchdogTimer, armHeartbeatTimer, clearAckTimer, clearWatchdogTimer, clearQuestionHeartbeat } from "./timers-gw.ts"
 import { personaModel } from "./model-registry.ts"
 import { workflowService, workflowOwnerBySession, workflowSnapshotFor, restoreWorkflowsFromSnapshot } from "./workflow-gw.ts"
 import { memoryRecallPrefetch, memoryRecallInflight } from "./memory-wiring.ts"
 import { rejectOpencodeQuestion } from "./questions-gw.ts"
 // TODO(整合 Wave1): 以下為「仍住 index.ts 且尚未 export」符號的 declare 佔位（stage1 記憶「subagent 佔位符法」，bun build 不查名可過）。
 // 整合階段把下行註釋還原成真 import、刪除全部 declare，即完成橋接：
-// import { workflowOwnerBySession, workflowSnapshotFor, workflowService, sseTickets, SSE_TICKET_TTL_MS, stripStaleTurnTextFromReplay, armWatchdogTimer, armHeartbeatTimer, personaModel, restoreWorkflowsFromSnapshot, memoryRecallPrefetch, memoryRecallInflight, rejectOpencodeQuestion, clearAckTimer, clearWatchdogTimer, clearQuestionHeartbeat, clearQuietNoticeTimer, closeSessionStreams } from "./index.ts"
+// import { workflowOwnerBySession, workflowSnapshotFor, workflowService, sseTickets, SSE_TICKET_TTL_MS, stripStaleTurnTextFromReplay, armWatchdogTimer, armHeartbeatTimer, personaModel, restoreWorkflowsFromSnapshot, memoryRecallPrefetch, memoryRecallInflight, rejectOpencodeQuestion, clearAckTimer, clearWatchdogTimer, clearQuestionHeartbeat, closeSessionStreams } from "./index.ts"
 // ---- 服務端會話持久化（bun:sqlite，見 persistence.ts）----
 // 進程重啟不再丟會話：session row 落在 sessions.db；getOwnedSession 與事件
 // fan-out ���內存 miss 時 lazy reload。訊息歷史的權威存儲是 opencode（重啟不丟），
@@ -353,7 +353,6 @@ export function teardownSession(id: string, state: SessionState, reason: string,
   clearAckTimer(state) // S6：會話拆了，ack timer 不得再觸發（發了也沒人收）
   clearWatchdogTimer(state) // R2-A：看門狗同撤，不得對死會話重投
   clearQuestionHeartbeat(state) // R8-B：question 心跳同撤
-  clearQuietNoticeTimer(state) // R8-B：靜默通知同撤
   state.pendingVideoWorkflows = [] // 凍結的工作流隨會話一併作廢
   // 2026-09-12：idle reap（keepRow=true）是內存回收不是會話死亡。emitToSession 會把 closed 幀
   // 寫進 replayBuffer 並落盤，之後任何 Last-Event-ID=0 的回放都會帶上它 → 前端按合同把會話

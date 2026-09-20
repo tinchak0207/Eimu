@@ -176,16 +176,15 @@ filmera 是我們最複雜的適配器。它是一個第三方平台，沒有公
 
 **中控屎山 10 病灶**（08-30）：resolveNodeModel 取首個 config 而非最新、帳戶無自愈、0 額漏損。全修了。
 
-### 哨兵體系（7 種）
+### 哨兵體系（6 種）
 
-這 7 個哨兵，是我最自豪的部分，因為每個都是從真實事故裡長出來的：
+這 6 個哨兵，是我最自豪的部分，因為每個都是從真實事故裡長出來的：
 
 | 哨兵 | 時長 | 偵測什麼 | 事故根因 |
 |--------|------|----------|--------|
 | TURN_WATCHDOG | 90s | turn 全程無進展 | R3 LLM 卡死 |
 | TURN_ERROR_WATCHDOG | 90s | 錯誤狀態停滯 | R4 compaction+APIError 停 5 分鐘 |
 | MIDTURN_STALL | 90s | 工具執行中途死亡 | R5 影片放置 12 分鐘 |
-| quietNotice | 45/90/135s | 靜默無訊息，遞進播報 | R8 question 卡 129s 零幀 |
 | questionHeartbeat | 30s×N | question 掛起+turn 凍結 | R8 question 上游靜默 |
 | HEARTBEAT_DELAY | 30s | turn 心跳 | R1 零匯報 |
 | ACK_DELAY | 15s | 確認延遲 | R4 收斂 |

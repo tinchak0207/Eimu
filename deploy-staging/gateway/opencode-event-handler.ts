@@ -15,7 +15,7 @@ import { emitSessionError } from "./emit-helpers.ts"
 import { eventSessionId, handleToolPartUpdate, finalizeIdleStep, isAssistantMessage, boundMap, boundSet } from "./events-translate.ts"
 import { noteTurnUsage, noteTurnPromptDispatch } from "./metrics-gw.ts"
 import { noteAssistantHeadForRecall, scheduleMemoryRecallPrefetch } from "./memory-wiring.ts"
-import { clearWatchdogTimer, clearHeartbeatTimer, clearAckTimer, clearErrorStallTimer, clearMidturnStallTimer, clearQuietNoticeTimer, armWatchdogTimer, emitTurnEndSummaryIfSilent, emitRecoveryClosingIfSilent, releasePendingVideoWorkflows } from "./timers-gw.ts"
+import { clearWatchdogTimer, clearHeartbeatTimer, clearAckTimer, clearErrorStallTimer, clearMidturnStallTimer, armWatchdogTimer, emitTurnEndSummaryIfSilent, emitRecoveryClosingIfSilent, releasePendingVideoWorkflows } from "./timers-gw.ts"
 import { markProviderDegraded, isDeadAccountError, isDeadModelError, personaModelForAttempt } from "./model-registry.ts"
 import { maybeCompactSession } from "./messages-gw.ts"
 import { opencodeErrorCode, opencodeErrorMessage } from "./emit-helpers.ts"
@@ -202,7 +202,6 @@ export function handleOpencodeEvent(event: any): void {
           clearAckTimer(state)
           clearErrorStallTimer(state)
           clearMidturnStallTimer(state)
-          clearQuietNoticeTimer(state)
           break
         }
         // 會話摘要標題（2026-09-12）：正常收尾路徑（非 question 凍結分支）掛
@@ -257,8 +256,6 @@ export function handleOpencodeEvent(event: any): void {
         clearErrorStallTimer(state)
         // R5-C：中段停滯哨同撤（turn 已收尾）。
         clearMidturnStallTimer(state)
-        // R8-B 工單 #5：中段靜默通知同撤（turn 已收尾）。
-        clearQuietNoticeTimer(state)
         // N1 規格3：turn 正常結束（turn.done 即將發出）——清 in-flight 打點。
         state.lastTurnActiveAt = 0
         markDirty(state)
