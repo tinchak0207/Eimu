@@ -64,7 +64,7 @@ export function expandTemplate(
   templateId: string,
   template: {
     id: string
-    nodes: { role: string; kind: WorkflowNodeKind; title: string; defaults?: Record<string, unknown> }[]
+    nodes: { role: string; kind: WorkflowNodeKind; title: string; defaults?: Record<string, unknown>; deliverable?: string; gate?: string }[]
     connections: { fromRole: string; toRole: string }[]
     multiShot?: boolean
   },
@@ -75,6 +75,11 @@ export function expandTemplate(
       ...(spec.defaults ?? {}),
       ...(content[spec.role] ?? {}),
     }
+    // 骨架自述（2026-09-20）：deliverable/gate 是节点自带的产出合同与验收门禁，
+    // 与 defaults 同源铺进 metadata——打字路径建骨架时卡片不再只有「(待填:…)」占位。
+    // 放在 content 之后：Deepseek 显式改写可覆盖模板预设。
+    if (spec.deliverable !== undefined && filled.deliverable === undefined) filled.deliverable = spec.deliverable
+    if (spec.gate !== undefined && filled.gate === undefined) filled.gate = spec.gate
     return {
       id: `${templateId}-${spec.role}-${i}`,
       role: spec.role,
@@ -111,7 +116,7 @@ export function expandTemplate(
           .map((c) => c.fromRole)
         for (const shotRole of extraShots) {
           const n = parseInt(shotRole.slice(4), 10)
-          const shotSpecs: { role: string; kind: WorkflowNodeKind; title: string; defaults?: Record<string, unknown> }[] = [
+          const shotSpecs: { role: string; kind: WorkflowNodeKind; title: string; defaults?: Record<string, unknown>; deliverable?: string; gate?: string }[] = [
             { ...protoShot, role: shotRole, title: `镜头 ${n} 脚本` },
             { ...protoGen, role: `${shotRole}_gen`, title: `镜头 ${n} 影片配置` },
             { ...protoVideo, role: `${shotRole}_video`, title: `镜头 ${n} 影片` },
@@ -121,6 +126,9 @@ export function expandTemplate(
               ...(spec.defaults ?? {}),
               ...(content[spec.role] ?? {}),
             }
+            // 同主循环：克隆链继承原型的 deliverable/gate（spread 已带，content 未覆盖时保底）。
+            if (spec.deliverable !== undefined && filled.deliverable === undefined) filled.deliverable = spec.deliverable
+            if (spec.gate !== undefined && filled.gate === undefined) filled.gate = spec.gate
             nodes.push({
               id: `${templateId}-${spec.role}-${nodes.length}`,
               role: spec.role,

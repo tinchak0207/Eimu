@@ -356,6 +356,8 @@ export function NodeBody({
             : isPipelineGenCard && node.type === CanvasNodeType.Text
               ? "等待 agent 回填产出"
               : "（未填写内容，双击编辑）";
+        // 後端骨架 text 節點（如「镜头 1 脚本」）也會帶產出合同：複用步驟頭卡膠囊樣式。
+        const deliverableText = metadata?.deliverable?.trim();
         // A11：雙擊直編。textarea 蓋滿正文區，blur/Ctrl+Enter 提交、Esc 取消。
         if (editingText !== null) {
           return (
@@ -456,7 +458,20 @@ export function NodeBody({
             className="canvas-node-scroll touch-pan-y overscroll-contain overflow-auto whitespace-pre-wrap break-words p-3 leading-relaxed text-foreground"
             style={{ fontSize }}
           >
-            {text?.trim() ? (
+            {deliverableText ? (
+              <>
+                <span className="inline-flex items-center gap-1 rounded-full bg-[rgba(52,199,89,0.12)] px-2 py-0.5 text-[11.5px] font-medium leading-none text-[#248A3D]">
+                  <Package className="h-3 w-3" aria-hidden="true" />
+                  产出
+                </span>
+                <p className="mt-1.5 break-words text-[13px] leading-relaxed text-foreground">{deliverableText}</p>
+                {text?.trim() ? (
+                  <p className="mt-1.5 whitespace-pre-wrap break-words">{text}</p>
+                ) : (
+                  <span className="mt-1.5 block text-ios-caption1 text-muted-foreground">{emptyHint}</span>
+                )}
+              </>
+            ) : text?.trim() ? (
               text
             ) : (
               <span className="text-ios-caption1 text-muted-foreground">{emptyHint}</span>
@@ -475,10 +490,16 @@ export function NodeBody({
         // content 文本（模板步骤头卡的「产出：」合同）与结构化行可并存；
         // 只有 content 也照常渲染——空配置才落骨架。
         const content = metadata?.content?.trim() ?? "";
+        // 後端 workflow 骨架節點的產出合同/驗收門禁（SSE 放行，2026-09-20）：
+        // 複用步驟頭卡的膠囊樣式（Package 綠膠囊 + 全文），門禁走灰小字行。
+        const deliverableText = metadata?.deliverable?.trim();
+        const gateText = metadata?.gate?.trim();
         // 流水線步驟頭卡（agent-template-canvas 鋪的）：Liquid Glass 分層正文
         // ——「产出」green tint 胶囊（Package 图标）+ deliverable 全文 + 输入来源行。
-        if (metadata?.pipelineCard === "step_head") {
-          const deliverable = metadata.deliverable?.trim() || content.replace(/^产出：/, "");
+        // 後端骨架 Config 節點帶 metadata.deliverable/gate（2026-09-20 SSE 放行）時
+        // 走同一分層（膠囊樣式逐行複用），不另造卡型。
+        if (metadata?.pipelineCard === "step_head" || deliverableText || gateText) {
+          const deliverable = deliverableText || (metadata?.content ?? "").replace(/^产出：/, "");
           return (
             <div
               onPointerDown={onScrollAreaPointerDown}
@@ -496,7 +517,7 @@ export function NodeBody({
               ) : (
                 <span className="text-ios-caption1 text-muted-foreground">（未定义产出合同）</span>
               )}
-              {metadata.inputFrom && (
+              {metadata?.inputFrom && (
                 <div className="flex items-start gap-1.5">
                   <CornerDownRight className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground/60" aria-hidden="true" />
                   <p className="min-w-0 break-words text-[13px] leading-snug text-muted-foreground">
@@ -504,6 +525,12 @@ export function NodeBody({
                     <span className="ml-1.5">{metadata.inputFrom}</span>
                   </p>
                 </div>
+              )}
+              {gateText && (
+                <p className="break-words text-ios-caption1 leading-relaxed text-muted-foreground">
+                  <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground/70">门禁</span>
+                  <span className="ml-1.5">{gateText}</span>
+                </p>
               )}
             </div>
           );

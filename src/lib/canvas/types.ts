@@ -155,6 +155,11 @@ export interface CanvasNodeMetadata {
   requiredCapability?: string;
   /** 步驟頭卡：本步產出合同全文。 */
   deliverable?: string;
+  /**
+   * 骨架節點：本步驗收門禁一行（後端 workflow 骨架經 SSE canvas.node.created/updated
+   * 帶入；與 pipelineCard 的 "gate" 卡型別是兩回事，勿混）。
+   */
+  gate?: string;
   /** 步驟頭卡：本步輸入來源。 */
   inputFrom?: string;
   /** 步驟序號（生成卡頂欄 stepName 條）。 */

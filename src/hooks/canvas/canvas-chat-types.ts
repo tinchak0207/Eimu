@@ -83,6 +83,10 @@ export function compactMetadataForAgent(metadata: CanvasNodeMetadata | undefined
   if (metadata.status) out.status = metadata.status;
   // reference 節點角色讓 agent 知道「這張圖以什麼身份參與生成」。
   if (metadata.referenceRole) out.referenceRole = metadata.referenceRole;
+  // 後端 workflow 骨架節點：產出合同/驗收門禁各一行透傳——agent 讀畫布狀態時
+  // 也該看到本步的合同與門禁（漏傳 = 下行還原後骨架失語義）。
+  if (metadata.deliverable) out.deliverable = metadata.deliverable;
+  if (metadata.gate) out.gate = metadata.gate;
   if (typeof metadata.count === "number") out.count = metadata.count;
   if (typeof metadata.cost_coins === "number") out.cost_coins = metadata.cost_coins;
   // director 節點：只回傳指針欄位，SVG（可達 48KB×2）維持排除——agent 用 director 工具

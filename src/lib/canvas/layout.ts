@@ -135,6 +135,9 @@ export function toNodeMetadata(raw: unknown): CanvasNodeMetadata {
     // director 節點（gateway director.done 攔截同步，spec §5 片5）：SVG 可達 48KB，
     // 原樣收字串欄位；planName 明確 null 時保留 null（活卡語義=「目前無方案」）。
     ...(m.pipelineCard === "director" ? { pipelineCard: "director" as const } : {}),
+    // 後端 workflow 骨架節點的產出合同/驗收門禁（各一行，SSE canvas.node.created/updated 帶入）。
+    ...(str(m.deliverable) !== undefined ? { deliverable: str(m.deliverable) } : {}),
+    ...(str(m.gate) !== undefined ? { gate: str(m.gate) } : {}),
     ...(str(m.directorSessionId) !== undefined ? { directorSessionId: str(m.directorSessionId) } : {}),
     ...(str(m.planName) !== undefined ? { planName: str(m.planName) } : {}),
     ...(m.planName === null ? { planName: null } : {}),
