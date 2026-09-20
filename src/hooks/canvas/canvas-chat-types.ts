@@ -89,6 +89,17 @@ export function compactMetadataForAgent(metadata: CanvasNodeMetadata | undefined
   if (metadata.gate) out.gate = metadata.gate;
   if (typeof metadata.count === "number") out.count = metadata.count;
   if (typeof metadata.cost_coins === "number") out.cost_coins = metadata.cost_coins;
+  // derived 工具卡/門禁卡（後端 pipelineCard:"tool"|"gate"，kind=text）：五欄透傳
+  // ——agent 讀畫布狀態時也該看到工具調用與「harness 未接上游」標記
+  //（漏傳 = 下行還原後工具卡失語義，2026-09-03 director 空殼事故同構）。
+  if (metadata.pipelineCard === "tool" || metadata.pipelineCard === "gate") {
+    out.pipelineCard = metadata.pipelineCard;
+    if (metadata.toolId) out.toolId = metadata.toolId;
+    if (metadata.toolInput) out.toolInput = metadata.toolInput;
+    if (metadata.toolOutput) out.toolOutput = metadata.toolOutput;
+    if (typeof metadata.unsupported === "boolean") out.unsupported = metadata.unsupported;
+    if (metadata.requiredCapability) out.requiredCapability = metadata.requiredCapability;
+  }
   // director 節點：只回傳指針欄位，SVG（可達 48KB×2）維持排除——agent 用 director 工具
   // 讀工程真值、不讀 SVG；回傳會吃 512KB 快照額度。缺指針的後果（2026-09-03 事故）：
   // 刷新/恢復後下行還原出空殼 director 節點，NodeBody 落到「示意图未同步」兜底。

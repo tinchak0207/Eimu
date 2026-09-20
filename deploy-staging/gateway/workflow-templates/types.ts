@@ -21,6 +21,10 @@ export interface WorkflowNodeSpec {
   deliverable?: string
   /** 该节点的验收门禁（不达标怎么办；无门禁省略）。 */
   gate?: string
+  /** 工具链卡：该节点要调的 harness 工具（expandTemplate 衍生工具卡用）。 */
+  tools?: { id: string; input?: string; output?: string; unsupported?: boolean; requiredCapability?: string }[]
+  /** 配方笔记：每条衍生一张配方卡（expandTemplate 用）。 */
+  notes?: string[]
 }
 
 export interface WorkflowConnectionSpec {

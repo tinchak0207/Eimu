@@ -132,9 +132,22 @@ export function toNodeMetadata(raw: unknown): CanvasNodeMetadata {
     ...(num(m.progress) !== undefined ? { progress: num(m.progress) } : {}),
     // reference 節點角色：只收合法 ReferenceImageRole，未知值丟棄（收斂在讀取端做）。
     ...(isReferenceImageRole(m.referenceRole) ? { referenceRole: m.referenceRole } : {}),
+    // pipeline 卡型白名單：director（導演台）＋ tool/gate（後端 derived 工具卡/門禁卡，
+    // kind=text，NodeBody 工具/門禁分支渲染）。未列舉值（含 step_head——前端模板
+    // 路徑直産、後端不送）照舊丟棄。
+    ...(m.pipelineCard === "tool" || m.pipelineCard === "gate" || m.pipelineCard === "director"
+      ? { pipelineCard: m.pipelineCard as "tool" | "gate" | "director" }
+      : {}),
+    // derived 工具卡欄位族（pipelineCard:"tool"）：四字串欄走 str() 收斂；
+    // unsupported 是 boolean 旗標——truthy 判斷保留 boolean，只過 str() 會剝掉
+    //（同 gate boolean 形態的教訓）。
+    ...(str(m.toolId) !== undefined ? { toolId: str(m.toolId) } : {}),
+    ...(str(m.toolInput) !== undefined ? { toolInput: str(m.toolInput) } : {}),
+    ...(str(m.toolOutput) !== undefined ? { toolOutput: str(m.toolOutput) } : {}),
+    ...(str(m.requiredCapability) !== undefined ? { requiredCapability: str(m.requiredCapability) } : {}),
+    ...(m.unsupported ? { unsupported: true } : {}),
     // director 節點（gateway director.done 攔截同步，spec §5 片5）：SVG 可達 48KB，
     // 原樣收字串欄位；planName 明確 null 時保留 null（活卡語義=「目前無方案」）。
-    ...(m.pipelineCard === "director" ? { pipelineCard: "director" as const } : {}),
     // 後端 workflow 骨架節點的產出合同/驗收門禁（各一行，SSE canvas.node.created/updated 帶入）。
     ...(str(m.deliverable) !== undefined ? { deliverable: str(m.deliverable) } : {}),
     // gate 兩形態（types.ts 註解）：string 門禁全文照走；boolean（workflow-dsl

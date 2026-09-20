@@ -48,9 +48,24 @@ export function detectShotRoles(template: { nodes: { role: string; kind: Workflo
   return [...all].sort((a, b) => (parseInt(a.slice(4), 10) || 0) - (parseInt(b.slice(4), 10) || 0))
 }
 
+/** 衍生工具卡的材料（与 workflow-templates/types.ts 的 WorkflowNodeSpec.tools 同构，引擎侧解耦用）。 */
+type DerivableToolSpec = { id: string; input?: string; output?: string; unsupported?: boolean; requiredCapability?: string }
+
+/** expandTemplate 接受的节点规格（模板 WorkflowNodeSpec 的结构子集 + 衍生卡材料）。 */
+type DerivableNodeSpec = {
+  role: string
+  kind: WorkflowNodeKind
+  title: string
+  defaults?: Record<string, unknown>
+  deliverable?: string
+  gate?: string
+  tools?: DerivableToolSpec[]
+  notes?: string[]
+}
+
 /**
  * 展開模板：把模板節點實例化成具體節點。
- * role 出現在 contentOverrides 時，merge 進 metadata（Deepseek 的 prompt/model 等）。
+ * role 出現在 contentOverrides 時，merge 進節點 metadata（Deepseek 的 prompt/model 等）。
  * multiShot 模板：可由 Deepseek 透過 add_node 追加同 role 的新實例（id 加 -N 後綴）。
  *
  * R8（2026-09-10）：multiShot 模板 + content 含 shotN（N≥2）時自動展開 N 條鏈——
@@ -58,18 +73,20 @@ export function detectShotRoles(template: { nodes: { role: string; kind: Workflo
  *   shotN → shotN_gen → shotN_video → final_cut 全連，
  *   char_view1 / scene_img 參考連接與 shot1_gen 同構。
  * 暴君裁定（2026-09-10）：「垃圾後端沒執行好，後端要改」——推翻 08-31 SKILL 的
- * 「agent 手動 add_node 克隆」舊範式，多鏈展開是後端責任。
+ *   「agent 手動 add_node 克隆」舊範式，多鏈展開是後端責任。
  */
 export function expandTemplate(
   templateId: string,
   template: {
     id: string
-    nodes: { role: string; kind: WorkflowNodeKind; title: string; defaults?: Record<string, unknown>; deliverable?: string; gate?: string }[]
+    nodes: DerivableNodeSpec[]
     connections: { fromRole: string; toRole: string }[]
     multiShot?: boolean
   },
   content: TemplateContent,
 ): WorkflowGraph {
+  // 节点 id → 其模板规格（含 tools/notes/gate 衍生材料；克隆链的规格经 spread 继承原型）
+  const specByNodeId = new Map<string, DerivableNodeSpec>()
   const nodes: WorkflowNode[] = template.nodes.map((spec, i) => {
     const filled: Record<string, unknown> = {
       ...(spec.defaults ?? {}),
@@ -88,6 +105,7 @@ export function expandTemplate(
       metadata: filled,
     }
   })
+  for (const [i, spec] of template.nodes.entries()) specByNodeId.set(`${templateId}-${spec.role}-${i}`, spec)
 
   // ── R8 多鏡展開：multiShot 模板 + content 帶 shot2..N → 克隆 shot1 鏈 ──
   // 原型 = 模板已定義的 shot1 三件套（text/config/video）。content 只給 shot1
@@ -116,7 +134,7 @@ export function expandTemplate(
           .map((c) => c.fromRole)
         for (const shotRole of extraShots) {
           const n = parseInt(shotRole.slice(4), 10)
-          const shotSpecs: { role: string; kind: WorkflowNodeKind; title: string; defaults?: Record<string, unknown>; deliverable?: string; gate?: string }[] = [
+          const shotSpecs: DerivableNodeSpec[] = [
             { ...protoShot, role: shotRole, title: `镜头 ${n} 脚本` },
             { ...protoGen, role: `${shotRole}_gen`, title: `镜头 ${n} 影片配置` },
             { ...protoVideo, role: `${shotRole}_video`, title: `镜头 ${n} 影片` },
@@ -129,8 +147,11 @@ export function expandTemplate(
             // 同主循环：克隆链继承原型的 deliverable/gate（spread 已带，content 未覆盖时保底）。
             if (spec.deliverable !== undefined && filled.deliverable === undefined) filled.deliverable = spec.deliverable
             if (spec.gate !== undefined && filled.gate === undefined) filled.gate = spec.gate
+            const nodeId = `${templateId}-${spec.role}-${nodes.length}`
+            // 同主循环：克隆节点也登记规格——tools/notes 经 spread 从原型继承，供衍生卡展开。
+            specByNodeId.set(nodeId, spec)
             nodes.push({
-              id: `${templateId}-${spec.role}-${nodes.length}`,
+              id: nodeId,
               role: spec.role,
               kind: spec.kind,
               title: spec.title,
@@ -150,6 +171,67 @@ export function expandTemplate(
     }
   }
 
+  // ── 衍生卡展開（2026-09-20 spec A）：tools/notes/gate 自動生成子卡 ──
+  // 打字路径骨架原来只有主节点卡（点卡片路径却有 101 张富卡），这里把模板节点
+  // 自带的工具链/配方/门禁材料展开成画布子卡，两条铺轨路径的卡片密度对齐。
+  // 顺序铁律：必须跑在 R8 克隆之后（克隆节点经 spread 继承原型的 tools/notes/gate，
+  // 也要展开）、连线解析之前（衍生连线直接按节点 id 生成，不走 fromRole 解析）。
+  // 衍生卡 id 用 nodes.length 递增保唯一（主节点/克隆节点/衍生卡三源不撞）。
+  const derivedConns: WorkflowConnection[] = []
+  for (const n of [...nodes]) {
+    const spec = specByNodeId.get(n.id)
+    if (!spec) continue
+    // 工具卡：每个 tool 一颗，连线 tool 卡 → 主节点（工具产出喂给主节点）。
+    if (spec.tools) {
+      spec.tools.forEach((tool, ti) => {
+        const id = `${templateId}-${n.role}__tool_${ti}-${nodes.length}`
+        nodes.push({
+          id,
+          role: `${n.role}__tool_${ti}`,
+          kind: "text",
+          title: tool.id,
+          metadata: {
+            pipelineCard: "tool",
+            toolId: tool.id,
+            toolInput: tool.input,
+            toolOutput: tool.output,
+            unsupported: tool.unsupported,
+            requiredCapability: tool.requiredCapability,
+          },
+        })
+        derivedConns.push({ from: id, to: n.id })
+      })
+    }
+    // 配方笔记卡：每条一张，连线 note 卡 → 主节点。
+    if (spec.notes) {
+      spec.notes.forEach((note, ni) => {
+        const id = `${templateId}-${n.role}__note_${ni}-${nodes.length}`
+        nodes.push({
+          id,
+          role: `${n.role}__note_${ni}`,
+          kind: "text",
+          title: "配方",
+          metadata: { content: note },
+        })
+        derivedConns.push({ from: id, to: n.id })
+      })
+    }
+    // 门禁卡：主节点 → 门禁卡（在主节点下游，验收语义）。文案优先用 content
+    // 合并后的最终值（Deepseek 可覆盖模板预设），非字符串（DSL boolean 旗标）时回退 spec。
+    const gateText = typeof n.metadata.gate === "string" ? n.metadata.gate : spec.gate
+    if (gateText !== undefined) {
+      const id = `${templateId}-${n.role}__gate-${nodes.length}`
+      nodes.push({
+        id,
+        role: `${n.role}__gate`,
+        kind: "text",
+        title: "门禁",
+        metadata: { pipelineCard: "gate", content: gateText },
+      })
+      derivedConns.push({ from: n.id, to: id })
+    }
+  }
+
   const byRole = new Map(nodes.map((n) => [n.role, n]))
   // R8：多鏈擴展連線與模板連線合併後一次性解析（非模板 role 的 content keys 不解析，
   // 與舊版 from&&to null 過濾行為一致）
@@ -164,7 +246,8 @@ export function expandTemplate(
       return from && to ? { from: from.id, to: to.id } : null
     })
     .filter((c): c is WorkflowConnection => c !== null)
-  return { nodes, connections }
+  // 衍生卡连线按节点 id 直连（不走 fromRole 解析），与模板/R8 连线合并返回。
+  return { nodes, connections: [...connections, ...derivedConns] }
 }
 
 /**
