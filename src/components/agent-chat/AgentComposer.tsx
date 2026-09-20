@@ -11,7 +11,7 @@ import {
   type DragEvent,
   type KeyboardEvent,
 } from "react";
-import { ImagePlus, Loader2, Send, Square, X } from "lucide-react";
+import { ArrowUp, ImagePlus, Loader2, Square, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   toAgentAttachmentRef,
@@ -143,7 +143,7 @@ interface PendingAttachment {
 }
 
 /**
- * 输入框跟着内容长高，上限交给 CSS 的 max-h-32（到顶后自己滚）。
+ * 输入框跟着内容长高，上限交给 CSS 的 max-h-[140px]（到顶后自己滚）。
  * rows=1 的固定高度下，续写一段长愿望只能看见最后一行，看不到自己写了什么。
  */
 function autoGrow(el: HTMLTextAreaElement) {
@@ -205,7 +205,7 @@ let attachmentSeq = 0;
 function AgentComposerComponent({
   disabled,
   onSend,
-  placeholder = "描述新需求，或要求修改上一轮的图…",
+  placeholder = "描述你想做的…",
   sessionId,
   onEnsureSession,
   prefill,
@@ -648,7 +648,7 @@ function AgentComposerComponent({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
       className={cn(
-        "agent-composer lg-float relative flex items-end gap-2 rounded-[22px] px-3 py-1.5 touch-manipulation [-webkit-tap-highlight-color:transparent] outline-none focus-within:ring-[1.5px] focus-within:ring-ring/60",
+        "agent-composer lg-float relative flex items-end gap-1 rounded-[22px] p-1.5 touch-manipulation [-webkit-tap-highlight-color:transparent] outline-none focus-within:ring-[1.5px] focus-within:ring-ring/60",
         dragActive && "!ring-2 !ring-ios-blue/45 !bg-ios-blue/[0.04]",
       )}
     >
@@ -686,7 +686,7 @@ function AgentComposerComponent({
           "disabled:cursor-not-allowed disabled:bg-transparent disabled:text-foreground/45",
         )}
       >
-        <ImagePlus className="h-5 w-5" aria-hidden="true" />
+        <ImagePlus className="h-[18px] w-[18px]" aria-hidden="true" />
       </button>
 
       <input
@@ -799,10 +799,10 @@ function AgentComposerComponent({
           enterKeyHint="send"
           disabled={disabled}
           placeholder={placeholder}
-          rows={3}
+          rows={1}
           className={cn(
-            "min-h-[60px] max-h-52 w-full resize-none bg-transparent py-1.5 text-base text-foreground sm:min-h-[72px] sm:text-[15px]",
-            "placeholder:text-muted-foreground/70 focus:outline-none",
+            "min-h-[52px] max-h-[140px] w-full resize-none bg-transparent py-[15px] text-[15px] leading-[22px] text-foreground",
+            "placeholder:text-foreground/35 focus:outline-none",
             "touch-manipulation [-webkit-tap-highlight-color:transparent]",
             "disabled:cursor-not-allowed disabled:opacity-50",
           )}
@@ -866,7 +866,7 @@ function AgentComposerComponent({
           {sending ? (
             <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
           ) : (
-            <Send className="h-5 w-5" aria-hidden="true" />
+            <ArrowUp className="h-[18px] w-[18px]" aria-hidden="true" />
           )}
         </button>
       )}

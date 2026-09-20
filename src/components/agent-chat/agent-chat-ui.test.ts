@@ -421,7 +421,7 @@ test("composer textarea grows with content and collapses after send", () => {
   assert.match(composer, /autoGrow\(event\.currentTarget\)/);
   assert.match(composer, /autoGrow\(el\)/);
   // 上限交给 CSS，不在 JS 里另写一个数字。
-  assert.match(composer, /max-h-32/);
+  assert.match(composer, /max-h-\[140px\]/);
   // 送出后清空文字，高度要一起收回来。
   assert.match(composer, /textareaRef\.current\.style\.height = "auto"/);
 });
@@ -444,7 +444,7 @@ test("09-18 送出在途：空輸入也必須是轉圈送出鈕（aria-busy + sp
   // 转圈是序列化出来的真图标（lucide loader + animate-spin），不是靠 class 猜。
   assert.match(markup, /class="lucide lucide-loader-circle[^"]*animate-spin"/, "在途必须渲染转圈图标");
   // 两颗图标互斥：同屏出现等于两套语义。
-  assert.doesNotMatch(markup, /lucide-send/, "在途不得同时渲染送图标");
+  assert.doesNotMatch(markup, /lucide-arrow-up/, "在途不得同时渲染送图标");
   // 連點在属性层就挡死（邏輯层还有 sendingRef / externalSendPending 两道）。
   assert.match(markup, /disabled="" aria-label="发送"/, "在途时送出钮必须 disabled（防连点）");
   // 样式沿用 2026-09-20 改版词汇：主色深底 #2d3142 + cursor-wait——
@@ -463,7 +463,7 @@ test("09-18 非在途：送出鈕回到送圖示，不得常轉圈", () => {
     createElement(AgentComposer, { disabled: false, onSend: () => {} }),
   );
   assert.doesNotMatch(markup, /aria-busy="true"/, "常態不得宣稱在途");
-  assert.match(markup, /class="lucide lucide-send[^"]*"/, "常態渲染送图标");
+  assert.match(markup, /class="lucide lucide-arrow-up[^"]*"/, "常態渲染送图标");
   assert.doesNotMatch(markup, /lucide-loader-circle/, "常態不得有转圈图标");
   // 常態且輸入框空：disabled 样式逐字保留（#bcc2ca 浅灰，2026-09-20 改版值；
   // 这时候「不可用」才是对的语义）。

@@ -445,7 +445,9 @@ function AgentChatPanelComponent({
             <div className="flex min-h-full flex-col items-center justify-center px-5">
               <div className="flex w-full flex-col items-center pb-[8vh]">
                 <h2 className="text-2xl font-semibold tracking-tight text-foreground">想做点什么？</h2>
-                <div className="mt-8 w-full">{composerNode}</div>
+                <div className="mt-8 w-full [&_.agent-composer]:py-2 [&_.agent-composer]:shadow-[0_16px_48px_rgba(0,0,0,0.10)]">
+                  {composerNode}
+                </div>
                 <div className="mt-5 flex flex-col items-center gap-1">
                   {EXAMPLES.map((ex) => {
                     // 三态：被点的那一颗转圈，其余在途期间禁用（防重复点＝重复计费）。

@@ -111,7 +111,7 @@ test("送出钮：字面契约不回归，sending 时只换图标与 aria-busy",
   assert.doesNotMatch(sendRegion, /disabled=\{disabled \|\| !canSend \|\| sending\}/);
   assert.match(sendRegion, /aria-busy=\{sending\}/);
   assert.match(sendRegion, /<Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" \/>/);
-  assert.match(sendRegion, /<Send className="h-5 w-5" aria-hidden="true" \/>/);
+  assert.match(sendRegion, /<ArrowUp className="h-\[18px\] w-\[18px\]" aria-hidden="true" \/>/);
 });
 
 test("输入区其余契约不动：disabled / canSend / autoGrow", () => {
