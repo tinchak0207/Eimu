@@ -64,7 +64,7 @@ function AgentPlanCardComponent({ item }: AgentPlanCardProps) {
           setOpen((prev) => !prev);
         }}
         aria-expanded={open}
-        className="flex min-h-11 w-full items-start gap-2.5 rounded-[18px] px-3 py-2.5 text-left transition-colors hover:bg-black/[0.05] focus:outline-none focus-visible:ring-2 focus-visible:ring-foreground/20 [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
+        className="flex min-h-11 w-full -mx-1 items-start gap-2.5 rounded-[18px] px-1 py-[7px] text-left transition-colors hover:bg-black/[0.05] focus:outline-none focus-visible:ring-2 focus-visible:ring-foreground/20 [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
       >
         <Brain className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
         {/* 右側欄＝兩列柵格（09-20 對齊根治，取代 absolute+pl 手調魔法數字）：
