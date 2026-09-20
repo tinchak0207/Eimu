@@ -4,10 +4,10 @@ import {
   AGENT_TEMPLATES,
   AGENT_TEMPLATE_DOMAIN_LABELS,
   type AgentTemplateDomain,
-} from "./agent-templates.ts";
+} from "./agent-templates/index.ts";
 // 2026-09-12 首屏減重拆分：執行欄位（initialPrompt/directive/slots/步驟文案）與
 // cropTemplate 在 payload 檔；本檔結構測試以合併後的 FULL 為準。
-import { AGENT_TEMPLATES_FULL, AGENT_TEMPLATE_PAYLOADS, cropTemplate } from "./agent-templates-payload.ts";
+import { AGENT_TEMPLATES_FULL, AGENT_TEMPLATE_PAYLOADS, cropTemplate } from "./agent-templates-payload/index.ts";
 import { recipeTemplateToRecallConfig } from "./recipe-templates.ts";
 import { getStyleById } from "./style-library.ts";
 

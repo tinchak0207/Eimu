@@ -19,6 +19,13 @@ import { sceneSetupTemplate } from "./scene_setup";
 import { singleVideoTemplate } from "./single_video";
 import { featureFilmTemplate } from "./feature_film";
 import { novelFilmTemplate } from "./novel_film";
+import { novelIpTemplate } from "./novel_ip";
+import { ecomLaunchTemplate } from "./ecom_launch";
+import { ecomModelTemplate } from "./ecom_model";
+import { shortdramaVisualTemplate } from "./shortdrama_visual";
+import { shortdramaPosterTemplate } from "./shortdrama_poster";
+import { artCurationTemplate } from "./art_curation";
+import { artStyleTemplate } from "./art_style";
 
 export type { WorkflowNodeSpec, WorkflowConnectionSpec, WorkflowTemplate } from "./types";
 
@@ -29,9 +36,16 @@ export {
   singleVideoTemplate,
   featureFilmTemplate,
   novelFilmTemplate,
+  novelIpTemplate,
+  ecomLaunchTemplate,
+  ecomModelTemplate,
+  shortdramaVisualTemplate,
+  shortdramaPosterTemplate,
+  artCurationTemplate,
+  artStyleTemplate,
 };
 
-/** 六个工作流模板（顺序即部署顺序；新增模板在此加一行）。 */
+/** 十五个工作流模板（顺序即部署顺序；新增模板在此加一行）。 */
 export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
   singleImageTemplate,
   characterSheetTemplate,
@@ -39,6 +53,13 @@ export const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
   singleVideoTemplate,
   featureFilmTemplate,
   novelFilmTemplate,
+  novelIpTemplate,
+  ecomLaunchTemplate,
+  ecomModelTemplate,
+  shortdramaVisualTemplate,
+  shortdramaPosterTemplate,
+  artCurationTemplate,
+  artStyleTemplate,
 ];
 
 /** 按 id 取模板（undefined 表示不存在）。 */

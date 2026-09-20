@@ -1,11 +1,20 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { AGENT_TEMPLATES, AGENT_TEMPLATE_DOMAIN_LABELS } from "@/lib/agent-templates";
 
 function read(relPath: string) {
   return readFileSync(join(process.cwd(), relPath), "utf8");
+}
+
+/** 2026-09-20 逐模板拆檔後：模板資料散在同目錄多檔，讀整目錄當一份來源。 */
+function readDirSources(relDir: string) {
+  const abs = join(process.cwd(), relDir);
+  return readdirSync(abs)
+    .filter((f) => f.endsWith(".ts"))
+    .map((f) => readFileSync(join(abs, f), "utf8"))
+    .join("\n");
 }
 
 /**
@@ -62,7 +71,7 @@ test("carousel is a verbatim copy of CaseShowcase interaction machinery", () => 
 
 test("carousel renders template cards with poster watermark and circular step selector", () => {
   const source = read("src/components/canvas-workstation/AgentTemplateCarousel.tsx");
-  const data = read("src/lib/agent-templates.ts");
+  const data = readDirSources("src/lib/agent-templates");
 
   for (const template of AGENT_TEMPLATES) {
     assert.ok(data.includes(template.name), `模板数据应包含卡片名「${template.name}」`);
