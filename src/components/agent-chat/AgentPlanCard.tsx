@@ -67,34 +67,38 @@ function AgentPlanCardComponent({ item }: AgentPlanCardProps) {
         className="flex min-h-11 w-full items-start gap-2.5 rounded-[18px] px-3 py-2.5 text-left transition-colors hover:bg-black/[0.05] focus:outline-none focus-visible:ring-2 focus-visible:ring-foreground/20 [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
       >
         <Brain className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-        {/* 右側欄（標籤＋正文＋專家晶片同列流排）：正文起點＝「计划」緊鄰右邊。
-            flex-wrap＋min-w-0：長文在剩餘寬度內折行、專家晶片溢出時整顆換行，
-            永不撐破面板（2026-09-20 根因清剿：收合預覽的 truncate 必須有寬度約束）。 */}
-        <span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 gap-y-1.5">
+        {/* 右側欄（2026-09-20 第二版修正）：舊 flex-wrap 讓正文換行回到標籤
+            底下（懸空難看）＋專家晶片插進句子中間。改懸掛縮排：「计划」絕對
+            定位在左，正文 pl 讓位——首行從標籤緊鄰右邊開始，換行與首行左對齊；
+            專家晶片自成一排不再插正文。 */}
+        <span className="relative block min-w-0 flex-1 pl-[38px]">
           {/* 標籤：字級/字重/色對齊子代理卡（ios-footnote font-medium foreground/80）。 */}
-          <span className="shrink-0 text-ios-footnote font-medium text-foreground/80">
+          <span className="absolute left-0 top-[3px] text-ios-footnote font-medium text-foreground/80">
             计划
           </span>
           {open ? (
-            <span className="min-w-0 flex-1 break-words text-ios-subhead leading-[1.55] text-foreground [overflow-wrap:anywhere] whitespace-pre-wrap">
+            <span className="block break-words whitespace-pre-wrap text-ios-subhead leading-[1.55] text-foreground [overflow-wrap:anywhere]">
               {item.text}
             </span>
           ) : (
-            <span className="min-w-0 flex-1 truncate text-ios-footnote text-muted-foreground/70">
+            <span className="block truncate text-ios-footnote leading-5 text-muted-foreground/70">
               {collapsedPreview}
             </span>
           )}
           {/* 專家晶片：唯讀，缺席就不畫（網關只在 digest 白名單命中時才帶 experts）。
               刻意不是按鈕——這不是可點的操作，只是「這輪會派誰」的事實陳列。 */}
-          {open &&
-            experts.map((expert) => (
-              <span
-                key={expert}
-                className="inline-flex min-w-0 max-w-full items-center rounded-full bg-black/[0.05] px-2 py-0.5 text-ios-footnote text-muted-foreground [overflow-wrap:anywhere]"
-              >
-                {expert}
-              </span>
-            ))}
+          {open && experts.length > 0 && (
+            <span className="mt-1.5 flex flex-wrap gap-1.5">
+              {experts.map((expert) => (
+                <span
+                  key={expert}
+                  className="inline-flex min-w-0 max-w-full items-center rounded-full bg-black/[0.05] px-2 py-0.5 text-ios-footnote text-muted-foreground [overflow-wrap:anywhere]"
+                >
+                  {expert}
+                </span>
+              ))}
+            </span>
+          )}
         </span>
         <ChevronDown
           className={cn("mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200", open && "rotate-180")}

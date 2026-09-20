@@ -648,7 +648,7 @@ function AgentComposerComponent({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
       className={cn(
-        "agent-composer lg-float relative flex flex-col gap-1 rounded-[22px] p-1.5 touch-manipulation [-webkit-tap-highlight-color:transparent] outline-none focus-within:ring-[1.5px] focus-within:ring-ring/60",
+        "agent-composer lg-float relative flex items-end gap-1.5 rounded-[22px] p-1.5 touch-manipulation [-webkit-tap-highlight-color:transparent] outline-none focus-within:ring-[1.5px] focus-within:ring-ring/60",
         dragActive && "!ring-2 !ring-ios-blue/45 !bg-ios-blue/[0.04]",
       )}
     >
@@ -668,7 +668,7 @@ function AgentComposerComponent({
           松开以添加附件
         </div>
       )}
-      {/* 隐式文件选择：附件鈕在下方按鈕行（見 textarea 之後），這裡只留 input 本體。 */}
+      {/* 隐式文件选择：附件鈕在文字左侧（items-end 底对齐），這裡只留 input 本體。 */}
       <input
         ref={fileInputRef}
         type="file"
@@ -679,6 +679,27 @@ function AgentComposerComponent({
         aria-hidden="true"
         tabIndex={-1}
       />
+
+      {/*
+        附件按钮：点击打开隐式文件选择，一次可选多个文件，选完即逐个上传。
+        上传中的 chip 显示 spinner，失败显示错误态（可移除重传或删除）。
+        2026-09-20 轻量化定案：36px 浅灰幽灵圆钮（主色只留给送出钮）。
+      */}
+      <button
+        type="button"
+        onClick={handlePick}
+        disabled={!canAttach}
+        aria-label="添加附件"
+        title="添加附件（图片 / 视频 / 文档）"
+        className={cn(
+          "flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-black/[0.06] text-foreground/65",
+          "touch-manipulation [-webkit-tap-highlight-color:transparent]",
+          "transition-colors hover:bg-black/[0.10] hover:text-foreground active:bg-black/[0.14] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+          "disabled:cursor-not-allowed disabled:bg-transparent disabled:text-foreground/35",
+        )}
+      >
+        <ImagePlus className="h-4 w-4" aria-hidden="true" />
+      </button>
 
       <div className="flex min-w-0 max-w-[42rem] flex-1 flex-col">
         {/* 待发送附件 chip 行：成功 / 上传中 / 错误 三种状态都带移除按钮。 */}
@@ -764,9 +785,9 @@ function AgentComposerComponent({
           输入消息
         </label>
         {/* 移动端虚拟键盘把回车键显示成「发送」，回车即送出（Shift+Enter 换行不变）。
-            2026-09-20 长文重排（暴君「长文本视觉效果非常差」）：按钮退出文字行改住
-            下方按鈕行，文字全幅不夹缝；max-h 124→240px（≈10 行才滚，不再三行就
-            出滚动条），min-h 收到一行半。 */}
+            2026-09-20 轻量化定案（两版试错后）：钮回文字两侧（items-end 底对齐，
+            长文时钮贴右下＝ChatGPT 同款），36px 小钮＋附件钮浅灰幽灵＝轻；
+            max-h 124→240px（≈10 行才滚，不再三行出滚动条＝上一版「长文差」真凶之一）。 */}
         <textarea
           id="agent-composer-input"
           ref={textareaRef}
@@ -788,28 +809,9 @@ function AgentComposerComponent({
             "disabled:cursor-not-allowed disabled:opacity-50",
           )}
         />
-        {/* 底部按鈕行：附件左、送出/停止右（同 36px 圆钮家族）。 */}
-        <div className="flex items-center justify-between pb-0.5">
-          {/*
-            附件按钮：点击打开隐式文件选择，一次可选多个文件，选完即逐个上传。
-            上传中的 chip 显示 spinner，失败显示错误态（可移除重传或删除）。
-          */}
-          <button
-            type="button"
-            onClick={handlePick}
-            disabled={!canAttach}
-            aria-label="添加附件"
-            title="添加附件（图片 / 视频 / 文档）"
-            className={cn(
-              "flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-black/[0.06] text-foreground/65",
-              "touch-manipulation [-webkit-tap-highlight-color:transparent]",
-              "transition-colors hover:bg-black/[0.10] hover:text-foreground active:bg-black/[0.14] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
-              "disabled:cursor-not-allowed disabled:bg-transparent disabled:text-foreground/35",
-            )}
-          >
-            <ImagePlus className="h-4 w-4" aria-hidden="true" />
-          </button>
-          {onStop && !canSend && !sending ? (
+      </div>
+
+      {onStop && !canSend && !sending ? (
             /*
               D-26 补全：生成中且输入框为空 → 送出钮位置渲染停止钮。
               2026-09-20 视觉改版（预览验收语汇）：红底方块 → 幽灵红文字钮
@@ -872,8 +874,6 @@ function AgentComposerComponent({
               )}
             </button>
           )}
-        </div>
-      </div>
     </div>
   );
 }
