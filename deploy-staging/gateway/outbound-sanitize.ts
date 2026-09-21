@@ -1,15 +1,8 @@
 // 從 index.ts 無損抽取（2026-09-19 第二階段 Wave1）：出站文本剝離（S2b/R4-A/R5-C，原 index.ts 736–888 行）。
-// 橋接依賴說明（仍住 index.ts 的符號）：
-//  - emitToSession：index.ts 已 export，真 import。
-//  - markTurnFirst / boundMap：index.ts 尚未 export（2026-09-19 實錘 bun build 報
-//    No matching export），以 declare 佔位（第一階段 pricing-gateway 同法，bun build
-//    只轉譯不查名，建得過）；index.ts 補 export 後替換為正式 import。
-import type { SessionState } from "./types-gateway.ts"
-import { PART_TEXT_TRACK_CAP } from "./constants-gateway.ts"
-import { emitToSession } from "./sse-core.ts"
-import { markTurnFirst } from "./metrics-gw.ts"
-import { boundMap } from "./events-translate.ts"
-// TODO(index.ts 接線): markTurnFirst(index.ts ≈4441)/boundMap(index.ts ≈2720) 補 export 後改真 import
+// 2026-09-21 拆分：本檔只留純剝離邏輯（零 gateway 模組 import，node:test 可直跑）；
+// emitSanitizedDelta 出口（依賴 sse-core/metrics/events-translate）移居
+// outbound-emit.ts，行為零變化。拆分動機：單測曾因 emit 函數的
+// sse-core → persistence → bun:sqlite import 鏈在 node 環境跑不動。
 
 // ─── S2b（2026-08-27）：出站文本內部框架段剝離 ───
 // 評測實錘：assistant 出站文本反覆出現 ## Objective / ## Work State /
@@ -19,8 +12,12 @@ import { boundMap } from "./events-translate.ts"
 // 扣留（未見換行不外發），保證不切爛正文句子、也不因 delta 邊界拆漏標題。
 // R2-C①（2026-08-27）：內部框架段擴到第二批——## Important Details /
 // ### Completed / ### Active / ### Blocked（評測 event 208 起實錘泄漏）。
+// 2026-09-21 e2e（60s 百合番 OP MV 野獸模式全流程）擴充第三批：
+// ## Progress Summary ＋ critic 交付契約機器欄位名（verdict/issues/evidence/
+// beats/shots/timeline_ops）——模型把它們當 markdown 標題輸出時直達用戶＝
+// 內部洩漏。整詞整行錨定（[ \t]*:?[ \t]*$），正文句子裡出現這些單詞不會命中。
 // 全部是 ASCII 詞組精確匹配 + 行尾錨定，中文字節永不命中 \w 詞表，不誤傷中文標題。
-export const INTERNAL_SECTION_HEADING_RE = /^#{1,6}[ \t]*(objective|work state|next move|relevant files|important details|completed|active|blocked)[ \t]*:?[ \t]*$/i
+export const INTERNAL_SECTION_HEADING_RE = /^#{1,6}[ \t]*(objective|work state|next move|relevant files|important details|completed|active|blocked|progress summary|verdict|issues|evidence|beats|shots|timeline_ops)[ \t]*:?[ \t]*$/i
 export const ANY_HEADING_RE = /^#{1,6}[ \t]/
 export type PartStripState = { pending: string; suppress: boolean; fence: boolean; sawEnglish: boolean }
 
@@ -138,29 +135,4 @@ export function stripOutboundFlush(st: PartStripState): string {
     return ""
   }
   return t2sLine(line.replace(SECTION_REF_RE, "按内部规定").replace(SECTION_TOKEN_RE, "内部规定"))
-}
-
-/** 統一出口：經剝離器後發 message.delta（無安全文本時靜默）。 */
-export function emitSanitizedDelta(state: SessionState, partId: string | undefined, chunk: string): void {
-  // Phase 0 觀測：模型正文 delta 抵達 = t_first_text（本輪只記第一次；此函數是
-  // 兩條正文路徑（delta / part.updated 補發後綴）的唯一交匯點）。
-  markTurnFirst(state, "text")
-  const pid = typeof partId === "string" && partId ? partId : "_turn"
-  let st = state.partStripState.get(pid)
-  if (!st) {
-    st = { pending: "", suppress: false, fence: false, sawEnglish: false }
-    state.partStripState.set(pid, st)
-    boundMap(state.partStripState, PART_TEXT_TRACK_CAP)
-  }
-  const safe = stripOutboundFeed(st, chunk)
-  // S1：英文正文被壓制時，以一幀中文提示替代（每 turn 一次，不刷屏）。
-  if (st.sawEnglish && !state.englishNoticeSent) {
-    state.englishNoticeSent = true
-    emitToSession(state, "turn.status", { text: "已自动略去一段英文内部思考，中文回复不受影响" })
-  }
-  if (safe) {
-    emitToSession(state, "message.delta", { text: safe })
-    // R8-B 工單 #5：模型正文到達 = 用戶可見輸出刷新（靜默通知判定依據）。
-    state.lastUserVisibleAt = Date.now()
-  }
 }

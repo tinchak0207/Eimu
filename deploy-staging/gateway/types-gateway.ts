@@ -145,6 +145,10 @@ export interface SessionState {
   // lastPromptBody.model 是 turn 起點模型，failover 換模後不回寫，用舊值會把死帳戶
   // 的錯誤記到無辜 provider 頭上（事故實錘：chaozhiyuan 403 五次誤標 hublinuxdo）。
   lastDispatchedModel?: { providerID: string; modelID: string } | null
+  // 黏性渠道（2026-09-21 暴君裁定）：failover 換模後輪子產出真實正文＝該渠道被實證可用，
+  // 釘死在本 session，下一輪起 personaModel() 直接返回它，不再每輪重跑死主模型重試鏈；
+  // 下一次 failover 排隊時解除（自我修復）。volatile，不進快照。
+  stickyModel?: { providerID: string; modelID: string; persona: "efficient" | "thoughtful" } | null
   turnGen?: number
   turnTextChars?: number
   // 罪狀2 根因修復（2026-08-29）：思維鏈字數。模型推理期間 reasoning.delta

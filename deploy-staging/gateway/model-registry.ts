@@ -76,6 +76,10 @@ export const PERSONA_MODEL_THOUGHTFUL = { providerID: "hublinuxdo", modelID: "de
 
 export function personaModel(state: SessionState): AgentModelRef {
   const persona = normalizeUserSettings(loadUserSettings(state.apiKey)).persona === "thoughtful" ? "thoughtful" : "efficient"
+  // 黏性快路（2026-09-21 暴君裁定）：上一輪 failover 實證可用的渠道釘在本 session，
+  // 直接用它，不再每輪從死主模型重跑重試鏈；persona 不符時自動繞過（尊重用戶切模式）。
+  const sticky = state.stickyModel
+  if (sticky && sticky.persona === persona) return { providerID: sticky.providerID, modelID: sticky.modelID }
   const fromRegistry = bindingRef(loadAgentModelRegistry()?.bindings?.persona?.[persona])
   if (fromRegistry) return fromRegistry
   // registry 缺失時的安全回退：回到原硬編碼值，行為與 2026-08-29 之前恆等。

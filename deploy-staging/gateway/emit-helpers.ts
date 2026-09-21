@@ -67,8 +67,14 @@ export function emitSessionError(state: SessionState, code: string, message: str
   // 去重僅作用幀發送；abort 路徑在函數開頭已早退，此處天然不觸及。
   const dedupKey = human || message
   const emitted = state.turnEmittedErrors ?? []
+  // 重試預算內＝failover 必然在 idle 接手（條件與 opencode-event-handler failover 塊同構：
+  // 非 tool_error、未中止、重試次數未用滿）→ 醜錯幀不下發，改由重試排隊處播「重试中 (x/N)」進度行。
+  const willRetry =
+    code !== "tool_error" && !state.turnAborted && (state.turnRetries ?? 0) < TURN_MAX_RETRIES
   if (emitted.includes(dedupKey)) {
     console.error(`[gateway] session.error [coalesced] duplicate this turn, frame suppressed code=${code}`)
+  } else if (willRetry) {
+    console.error("[gateway] session.error [retrying] frame held back")
   } else {
     state.turnEmittedErrors = [...emitted, dedupKey].slice(-32)
     emitToSession(state, "session.error", { code, message, ...(human ? { human_message: human } : {}) })

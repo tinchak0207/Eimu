@@ -5,7 +5,8 @@
 // 依賴解析：Wave1/已建模組真 import；仍住 index.ts 未 export 的符號 declare 佔位（stage1 記憶 subagent 佔位符法）。
 import { sessions, markDirty, findSessionByOpenCodeId } from "./sessions-core.ts"
 import { emitToSession, stripStaleTurnTextFromReplay } from "./sse-core.ts"
-import { emitSanitizedDelta, stripOutboundFlush } from "./outbound-sanitize.ts"
+import { stripOutboundFlush } from "./outbound-sanitize.ts"
+import { emitSanitizedDelta } from "./outbound-emit.ts"
 import { opencodeHeaders, scheduleTitleFetch } from "./opencode-client.ts"
 import { MESSAGE_ROLE_CAP, OPENCODE_URL, PART_TEXT_TRACK_CAP, STEP_COST_LOG_CAP, SUPPRESSED_PART_CAP, TURN_MAX_RETRIES, TURN_RETRY_DELAY_MS } from "./constants-gateway.ts"
 import type { SessionState } from "./types-gateway.ts"
@@ -17,6 +18,8 @@ import { noteTurnUsage, noteTurnPromptDispatch } from "./metrics-gw.ts"
 import { noteAssistantHeadForRecall, scheduleMemoryRecallPrefetch } from "./memory-wiring.ts"
 import { clearWatchdogTimer, clearHeartbeatTimer, clearAckTimer, clearErrorStallTimer, clearMidturnStallTimer, armWatchdogTimer, emitTurnEndSummaryIfSilent, emitRecoveryClosingIfSilent, releasePendingVideoWorkflows } from "./timers-gw.ts"
 import { markProviderDegraded, isDeadAccountError, isDeadModelError, personaModelForAttempt } from "./model-registry.ts"
+import { loadUserSettings } from "./persistence.ts"
+import { normalizeUserSettings } from "./sessions-http.ts"
 import { maybeCompactSession } from "./messages-gw.ts"
 import { opencodeErrorCode, opencodeErrorMessage } from "./emit-helpers.ts"
 
@@ -284,6 +287,9 @@ export function handleOpencodeEvent(event: any): void {
           state.turnUpstreamError = null
           const gen = state.turnGen ?? 0
           const attempt = (state.turnRetries ?? 0) + 1
+          // 黏性解除（2026-09-21）：本輪把釘住的渠道跑掛了＝不再押它，交回常規鏈輪轉。
+          state.stickyModel = null
+          emitToSession(state, "turn.status", { text: `重试中 (${attempt}/${TURN_MAX_RETRIES})` })
           const hadOutput = (state.turnTextChars ?? 0) > 0 || Boolean(state.turnToolStarted)
           const baseBody = state.lastPromptBody
           // 2026-09-13 刀1（b-ai 餘額歸零事故教訓）：確定性「賬戶死」類錯誤（credit/balance/
@@ -361,6 +367,7 @@ export function handleOpencodeEvent(event: any): void {
           state.retryQueued = true
           const gen = state.turnGen ?? 0
           const attempt = (state.turnRetries ?? 0) + 1
+          emitToSession(state, "turn.status", { text: `重试中 (${attempt}/${TURN_MAX_RETRIES})` })
           const body = state.lastPromptBody
           console.log(`[gateway] turn jitter: schedule retry #${attempt} for ${state.sessionId}`)
           setTimeout(async () => {
@@ -412,6 +419,25 @@ export function handleOpencodeEvent(event: any): void {
           break // 不發 turn.done：重試輪結束時自然會發
         }
         state.retryQueued = false
+        // 黏性渠道（2026-09-21 暴君裁定）：本輪由重試模型接手（turnRetries>0）且產出真實正文
+        // ＝該渠道實證可用，釘死本 session；personaModel() 下一輪直接用它。
+        if (
+          (state.turnTextChars ?? 0) > 0 &&
+          (state.turnRetries ?? 0) > 0 &&
+          !state.turnAborted &&
+          state.lastDispatchedModel
+        ) {
+          const stickyPersona =
+            normalizeUserSettings(loadUserSettings(state.apiKey)).persona === "thoughtful" ? "thoughtful" : "efficient"
+          state.stickyModel = {
+            providerID: state.lastDispatchedModel.providerID,
+            modelID: state.lastDispatchedModel.modelID,
+            persona: stickyPersona,
+          }
+          console.log(
+            `[gateway] sticky channel pinned model=${state.stickyModel.providerID}/${state.stickyModel.modelID} — session=${state.sessionId}`,
+          )
+        }
         // R4-A S3①：抖動重試已耗盡且本輪全程零文本零工具 = 上游連續報錯/空轉，
         // 舊路徑直接靜默 turn.done（R4 實錘：APIError 後 turn 空轉 5 分鐘無一句
         // 中文解釋）——補誠實收尾話術再交棒。
@@ -433,10 +459,10 @@ export function handleOpencodeEvent(event: any): void {
           // 最後一次 session.error 會再記（6670 行），此時非空 = 重試鏈死因仍在。
           const lastErr = state.turnUpstreamError ?? ""
           const exhaustedText = isDeadAccountError(lastErr)
-            ? "连续几次自动重试都没能完成回复（上游渠道账户欠费：未提交、未扣费、无产物，充值前重试不会成功，请联系维护方）。\n"
+            ? `自动重试已用满 ${TURN_MAX_RETRIES} 次仍未完成回复（上游渠道账户欠费：未提交、未扣费、无产物，充值前重试不会成功，请联系维护方）。\n`
             : isDeadModelError(lastErr)
-              ? "连续几次自动重试都没能完成回复（上游渠道缺少该模型，已尝试自动换线仍未成功）。\n"
-              : "连续几次自动重试都没能完成回复（上游持续报错）。你上一条消息可能没有处理成功，请重新发送一次即可继续；若内容较长，建议让我分章/分段处理。\n"
+              ? `自动重试已用满 ${TURN_MAX_RETRIES} 次仍未完成回复（上游渠道缺少该模型，已尝试自动换线仍未成功）。\n`
+              : `自动重试已用满 ${TURN_MAX_RETRIES} 次仍未完成回复（上游持续报错）。你上一条消息可能没有处理成功，请重新发送一次即可继续；若内容较长，建议让我分章/分段处理。\n`
           emitToSession(state, "message.delta", { text: exhaustedText })
           console.warn(`[gateway] S3① jitter retries exhausted with zero output, closing turn honestly — session=${state.sessionId} lastError=${lastErr.slice(0, 120) || "none"}`)
         }

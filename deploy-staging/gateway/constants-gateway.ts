@@ -5,7 +5,9 @@
 import path from "node:path"
 
 // 抖動重試參數：免費上游模型約三至四成 turn 異常早死（finish=unknown、零文本）。
-export const TURN_MAX_RETRIES = Number.parseInt(process.env.TURN_MAX_RETRIES || "4", 10) || 4
+// 2026-09-21 暴君裁定：重試預算 4→10——重試期間只播「重试中 (x/N)」進度行、醜錯幀
+// 不外泄，多換幾條線對用戶只是進度數字，把「一次事故就吐錯誤原文」換成「盡量救活」。
+export const TURN_MAX_RETRIES = Number.parseInt(process.env.TURN_MAX_RETRIES || "10", 10) || 10
 export const TURN_RETRY_DELAY_MS = Number.parseInt(process.env.TURN_RETRY_DELAY_MS || "1500", 10) || 1500
 // ── P2b（2026-09-11）刀2：空轉止損 ────────────────────────────────
 // 連續 N 個「空 step」（該 step 期間無 tool part、無非空正文 text part、
