@@ -557,16 +557,22 @@ function reduceSubagentDone(
 }
 
 /**
- * 回合收尾：子代理条目退场，但产出必须留下（F3）。带 summary / 串流全文的
- * 转存成一张可展开的产出卡（subagent_result）；中止（未 done）的标 interrupted
- * ——绝不把 1082 字产出随卡片一起删掉，用户中止后画面只会更丰富。
- * 零输出的空转卡（没 done 也没吐过字）没有产出可留，才真正丢弃。
- * 条目位置原地保留，产出卡就落在原子代理卡所在的转录位置。
+ * 回合收尾转存：只对**已定态**（done 帧到过的 ok/error/stopped）的子代理条目
+ * 做产出卡转存（F3）——带 summary / 串流全文的转成一张可展开的 subagent_result，
+ * 绝不把 1082 字产出随卡片一起删掉。条目位置原地保留，产出卡就落在原子代理卡
+ * 所在的转录位置。
+ *
+ * `status === "running"` 的条目**原样保留，不转卡不丢弃**（2026-09-21 暴君裁定）：
+ * 异步子代理的生命周期刻意长于派出回合——完工才 wakeParent 发 `subagent.done`
+ * （ok/error/stopped），子代理 lifecycle 的终态由那一帧独占裁决。回合收尾时把
+ * running 判死/丢弃，等于在跑的 3D 导演跨回合消失（暴君实测「没看到子代理啊」）。
+ * 与 09-18 pending 工具卡同构：turn 结束 ≠ 任务结束。wakeParent 后的回合收到
+ * done 幀、条目转为定态，下一次收尾才走上面的转存。
  */
 function retireSubagentItems(items: AgentTranscriptItem[]): AgentTranscriptItem[] {
   const out: AgentTranscriptItem[] = [];
   for (const it of items) {
-    if (it.kind !== "subagent") {
+    if (it.kind !== "subagent" || it.status === "running") {
       out.push(it);
       continue;
     }
@@ -574,14 +580,13 @@ function retireSubagentItems(items: AgentTranscriptItem[]): AgentTranscriptItem[
     const summary = it.summary?.trim() ?? "";
     // 取較完整者：SSE 的 summary 可能被帧长截斷，delta 串流才是全文。
     const text = summary.length > full.length ? summary : full;
-    if (it.status === "running" && text.length === 0) continue;
     const report: AgentSubagentReportItem = {
       kind: "subagent_result",
       id: `${it.id}-result`,
       seq: it.seq,
       subagentId: it.subagentId,
       label: it.label,
-      status: it.status === "running" ? "interrupted" : it.status,
+      status: it.status,
       text,
     };
     out.push(report);
@@ -620,6 +625,10 @@ function settleItems(items: AgentTranscriptItem[]): AgentTranscriptItem[] {
 }
 
 // turn.done 只结算当前条目，事件本体不参与；参数保留以符合 reducer 统一签名。
+// 2026-09-21 暴君裁定：异步子代理跨回合在跑，回合收尾只转存**已定态**条目，
+// running 卡原样保留（见 retireSubagentItems），wakeParent 后的回合收到
+// subagent.done 幀才把终态裁决定下来——settleItems 判死 running 工具卡，但
+// 子代理 lifecycle 的终态归 gateway 的 done 幀独占，与 pending 工具卡同构。
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 function reduceTurnDone(state: AgentChatState, _event: AgentSseEvent & { name: "turn.done" }): AgentChatState {
   const items = retireSubagentItems(settleItems(state.items));
@@ -766,12 +775,13 @@ function reduceSessionError(state: AgentChatState, event: AgentSseEvent & { name
     text: event.data.human_message || event.data.message,
   };
   // 错误不终结会话；但中止类错误（Tool execution aborted）到的这一刻，
-  // 子代理产出必须落成产出卡（F3）——本端可能等不到 turn.done，
-  // 不能让「画面比中止前更空」的路径再出现一次。
+  // **已定态**子代理的产出必须落成产出卡（F3）——本端可能等不到 turn.done。
+  // 0921 契约：仍在跑（running）的条目由 retireSubagentItems 原样保留，终态
+  // 等 gateway 的 subagent.done 裁决；「画面比中止前更空」自此不再发生。
   return { ...state, items: [...retireSubagentItems(state.items), notice] };
 }
 
-/** 收尾：停掉 streaming、把还在转的工具判死、子代理条目转存产出卡、清待确认、推一条 notice。 */
+/** 收尾：停掉 streaming、把还在 running 的工具判死、已定态子代理条目转存产出卡（running 跨回合保留，0921 契约）、清待确认、推一条 notice。 */
 function settleClosedTurn(state: AgentChatState, eventId: number, reason?: string): AgentChatState {
   const items = retireSubagentItems(settleItems(state.items));
   const notice: AgentNoticeItem = {

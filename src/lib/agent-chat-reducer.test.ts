@@ -689,7 +689,7 @@ test("F1 子代理狀態單一真源：started 綁定 dispatch 工具卡，done 
   assert.ok(!s.items.some((it) => it.kind === "subagent" && it.status === "running"), "不得還有一處說運行中");
 });
 
-test("F1 中止收尾不留矛盾狀態：started 未 done + turn.done → 工具卡判死、產出卡標已中止", () => {
+test("F1 跨回合在跑不退场：started 未 done + turn.done → 工具卡照旧判死、running 子代理原样保留（0921 契约）", () => {
   let s = agentChatReducer(
     EMPTY,
     evt({
@@ -703,12 +703,13 @@ test("F1 中止收尾不留矛盾狀態：started 未 done + turn.done → 工�
   s = agentChatReducer(s, evt({ name: "turn.done", event_id: 4, data: {} }));
 
   const tool = s.items.find((it): it is AgentToolCallItem => it.kind === "tool" && it.subagentId === "sa2");
-  const report = s.items.find((it): it is AgentSubagentReportItem => it.kind === "subagent_result");
-  assert.ok(tool && report);
+  const sub = s.items.find((it): it is AgentSubagentItem => it.kind === "subagent");
+  assert.ok(tool && sub);
   assert.notEqual(tool.status, "running", "收尾不能留一張永遠在轉的工具卡");
   assert.equal(tool.status, "failed");
-  assert.equal(report.status, "interrupted", "中止誠實標已中止，不謊報 ok");
-  assert.ok(!s.items.some((it) => it.kind === "subagent"), "子代理欄條目退場：不留第二處狀態源");
+  assert.equal(sub.status, "running", "回合收尾不得退場在跑的子代理：它完工才 wakeParent 發 done，那時才該退場");
+  assert.equal(sub.text, "610 秒零輸出", "串流產出留在條目上，定案前不轉存");
+  assert.ok(!s.items.some((it) => it.kind === "subagent_result"), "未定態不轉存：終態由 subagent.done 幀獨佔裁決");
 });
 
 test("F3 中止不銷毀產出：subagent.done 的 summary 轉存成產出卡留在轉錄裡", () => {
@@ -730,7 +731,7 @@ test("F3 中止不銷毀產出：subagent.done 的 summary 轉存成產出卡留
   assert.equal(report.subagentId, "sa1");
 });
 
-test("F3 中止走 session.error 也不銷毀產出（等不到 turn.done 的路徑）", () => {
+test("F3 中止走 session.error 也不銷毀產出：running 條目跨中止保留（0921 契約）", () => {
   const stream = "權威牌價表：seedance-2.0 13 幣/條\nseedance-2.0-fast 10 幣/條";
   let s = agentChatReducer(EMPTY, evt({ name: "subagent.started", event_id: 1, data: { id: "sa9", label: "视频全量模型普查" } }));
   s = agentChatReducer(s, evt({ name: "subagent.delta", event_id: 2, data: { id: "sa9", text: stream } }));
@@ -739,11 +740,10 @@ test("F3 中止走 session.error 也不銷毀產出（等不到 turn.done 的路
     evt({ name: "session.error", event_id: 3, data: { code: "tool_error", message: "Tool execution aborted", human_message: "已按你的要求中止本轮" } }),
   );
 
-  assert.ok(!s.items.some((it) => it.kind === "subagent"), "中止當下子代理條目退場");
-  const report = s.items.find((it): it is AgentSubagentReportItem => it.kind === "subagent_result");
-  assert.ok(report, "串流全文必須落成產出卡——中止後畫面不能比中止前更空");
-  assert.equal(report.text, stream);
-  assert.equal(report.status, "interrupted");
+  const sub = s.items.find((it): it is AgentSubagentItem => it.kind === "subagent");
+  assert.ok(sub, "中止當下 running 條目原樣保留——中止後畫面不能比中止前更空");
+  assert.equal(sub.status, "running", "終態留給 gateway 的 subagent.done（0920 停止閘會發 stopped）獨佔裁決");
+  assert.equal(sub.text, stream, "串流全文留在條目上，不丟棄");
 });
 
 test("F4 超長文字進模型時保留全文（截斷只發生在渲染層）", () => {
@@ -758,8 +758,18 @@ test("F4 超長文字進模型時保留全文（截斷只發生在渲染層）",
   assert.equal(sub.lastLine, lines[lines.length - 1], "lastLine 只是渲染預覽（末行）");
 
   s = agentChatReducer(s, evt({ name: "turn.done", event_id: 3, data: {} }));
+  // 0921 契約：running 條目跨回合保留，回合收尾不退場也不轉存——全文仍留在條目上。
+  const kept = s.items.find((it): it is AgentSubagentItem => it.kind === "subagent");
+  assert.ok(kept, "running 條目跨回合保留，收尾不得退場");
+  assert.equal(kept.status, "running");
+  assert.ok(!s.items.some((it) => it.kind === "subagent_result"), "未定態不轉存：等 done 幀");
+  assert.equal(kept.text, long, "模型層保留全文（截斷只發生在渲染層）");
+
+  // 完工的 done 幀落在後續回合，下一次收尾才轉存成帶全文的產出卡。
+  s = agentChatReducer(s, evt({ name: "subagent.done", event_id: 4, data: { id: "sa1", status: "ok" } }));
+  s = agentChatReducer(s, evt({ name: "turn.done", event_id: 5, data: {} }));
   const report = s.items.find((it): it is AgentSubagentReportItem => it.kind === "subagent_result");
-  assert.ok(report);
+  assert.ok(report, "定案後的收尾才轉存產出卡");
   assert.equal(report.text, long, "產出卡帶全文");
   assert.ok(report.text.includes("第 0 行"), "開頭沒有被砍掉");
   assert.ok(report.text.includes(lines[lines.length - 1]), "結尾沒有被砍掉");
@@ -795,10 +805,18 @@ test("S2 活動流：kind=reasoning 的 delta 只進 activity，不污染 text /
   assert.equal(sub.lastLine, "找到 3 张");
   assert.equal(sub.activity, "先看看候选，再核價找到 3 张", "活動流是「全部增量」的超集");
 
-  // 思考不是交付物：收尾後不得經由產出卡混進轉錄全文。
+  // 思考不是交付物（0921 契約版）：首回合收尾 running 不退場、無產出卡；
+  // done 落在 wake 後的回合，下一次收尾才轉存——屆時全文仍只收正文，思考不得混進。
   s = agentChatReducer(s, evt({ name: "turn.done", event_id: 5, data: {} }));
+  assert.ok(
+    s.items.some((it) => it.kind === "subagent" && (it as AgentSubagentItem).status === "running"),
+    "回合收尾保留 running 卡（跨回合在跑）",
+  );
+  s = agentChatReducer(s, evt({ name: "subagent.done", event_id: 6, data: { id: "sa1", status: "ok" } }));
+  s = agentChatReducer(s, evt({ name: "turn.done", event_id: 7, data: {} }));
   const report = s.items.find((it): it is AgentSubagentReportItem => it.kind === "subagent_result");
-  assert.ok(!report?.text.includes("先看看候选"), "reasoning 不得流入產出卡全文");
+  assert.ok(report, "定案後的收尾轉存產出卡");
+  assert.ok(!report.text.includes("先看看候选"), "reasoning 不得流入產出卡全文");
 });
 
 test("S2 活動流：無 kind 的正文 delta 同時追加 text 與 activity（正文也算活動）", () => {

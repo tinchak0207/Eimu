@@ -7,8 +7,10 @@ import type { AgentSubagentItem } from "@/lib/agent-chat-types";
 import { AGENT_TASK_STATUS_TABLE } from "@/lib/agent-task-status";
 
 // 子代理状态栏（罪状 4）：subagent.started/delta/done 的可视化。
-// 不进消息流——置顶堆叠在转录区上方（AgentBatchProgress 旁），turn.done 时
-// reducer 已把 subagent 条目整批清掉，这里只负责「还看得见」的那几行。
+// 不进消息流——置顶堆叠在转录区上方（AgentBatchProgress 旁）。0921 契约：
+// turn.done 收尾**不清 running 条目**（异步子代理跨回合在跑，终态由
+// subagent.done 独占裁决），所以回合结束后在跑的子任务照常渲染在此，
+// 本组件不看 turnActive、也不该看。
 // 2026-09-20 暴君裁定（Grok 级无底色细行）：「查看全部 N 个子任务」折叠头改
 //   「派出 N 个子代理」，展开后每行同工具行风格（无卡壳）＋右端状态词与 7px 圆点。
 // 2026-09-19 暴君裁定（子任务 UI 去重）：
