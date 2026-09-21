@@ -6,6 +6,7 @@ import {
   CircleDollarSign,
   Coins,
   Gauge,
+  History,
   KeyRound,
   ListChecks,
   Plug,
@@ -17,6 +18,8 @@ import {
   Sparkles,
   TerminalSquare,
   Wand2,
+  Wallet,
+  Workflow,
   Zap,
 } from "lucide-react";
 import { toSimplified } from "@/lib/traditional-to-simplified";
@@ -82,8 +85,10 @@ curl -s "$BASE/images/$TASK" \\
 const NAV_CHIPS: Array<{ href: string; label: string }> = [
   { href: "#start", label: "怎么开始对话" },
   { href: "#flow", label: "一轮会发生什么" },
+  { href: "#workflow", label: "工作流与画布" },
+  { href: "#history", label: "历史素材复用" },
   { href: "#settings", label: "助理设定" },
-  { href: "#billing", label: "计费" },
+  { href: "#billing", label: "充值与计费" },
   { href: "#portable", label: "把助理带走" },
   { href: "#dev", label: "开发进阶" },
 ];
@@ -131,7 +136,74 @@ const SETTING_ROWS: Array<{ name: string; plain: string; options: Array<{ k: str
   },
 ];
 
-// ---- 第 5 章：把助理带走（MCP 接入干货，工具描述逐字取自原 MCP 接入页）----
+// ---- 第 3 章：模板转盘卡面（现场逐字：与首页模板轮盘 8 张卡面一致，domain/name/note 不可改写）----
+
+const TEMPLATE_GALLERY: Array<{ domain: string; name: string; note: string }> = [
+  {
+    domain: "小说",
+    name: "小说影视化",
+    note: "小说到成片全链：拆剧本→角色圣经→美术圣经→锁构图分镜→关键帧，工业流水线跑法",
+  },
+  {
+    domain: "小说",
+    name: "IP视觉包",
+    note: "网文 IP 全案视觉：世界观锚定→主角色卡→名场面组图→封面主视觉一条链出齐",
+  },
+  {
+    domain: "电商",
+    name: "新品上市包",
+    note: "新品素材流水线：产品锁→场景图→模特图→主视觉→多画幅批量，一次锁定全线一致",
+  },
+  {
+    domain: "电商",
+    name: "模特种草线",
+    note: "平铺图到种草图流水线：服装提取→虚拟试穿→一致性网格→详情页排版",
+  },
+  {
+    domain: "短剧",
+    name: "剧本视觉化",
+    note: "剧本到视觉资产工业链：拆场→分镜→主演角色卡→CP剧照→竖屏海报，门禁层层放行",
+  },
+  {
+    domain: "短剧",
+    name: "投放海报线",
+    note: "短剧投放物料流水线：剧设锚定→主演海报→CP对戏图→信息流切片封面批量",
+  },
+  {
+    domain: "艺术",
+    name: "策展式创作",
+    note: "主题到个展全链：情绪板→风格锚→成组作品→展陈主视觉，一致性当一等公民",
+  },
+  {
+    domain: "艺术",
+    name: "风格深研线",
+    note: "艺术家风格深度内化流水线：解构→临摹对拍→变体矩阵→原创成组",
+  },
+];
+
+const RECIPE_CHIPS: string[] = [
+  "3D手办",
+  "黏土手作",
+  "Q版可爱",
+  "胶片质感",
+  "水墨插画",
+  "水彩插画",
+  "赛博朋克",
+  "极简主义",
+  "电影感",
+  "日系动漫",
+];
+
+// ---- 第 6 章：充值方案（现场逐字：与 /pricing 四档文案一致）----
+
+const PLAN_ROWS: Array<{ name: string; price: string; coins: string }> = [
+  { name: "梦芽 · 轻度尝鲜包", price: "¥9.9", coins: "100 金币" },
+  { name: "梦影 · 主力月度会员", price: "¥29.9", coins: "500 金币" },
+  { name: "梦虹 · 季度高频创作包", price: "¥69", coins: "1500 金币" },
+  { name: "自定义 · 自由额度", price: "2,000～100 万金币滑杆", coins: "按 0.045 元/金币计价" },
+];
+
+// ---- 第 7 章：把助理带走（MCP 接入干货，工具描述逐字取自原 MCP 接入页）----
 
 const MCP_TOOLS: Array<{ name: string; description: string }> = [
   {
@@ -367,7 +439,7 @@ export default function DocsPage() {
               note={
                 <>
                   它打算怎么做、大概花多少，都写在<strong className="font-semibold text-[rgba(0,0,0,0.72)]">计划卡</strong>
-                  里；然后按你设定的互动模式请求授权或直接开工（见第三章）。
+                  里；然后按你设定的互动模式请求授权或直接开工（见第五章）。
                 </>
               }
             />
@@ -401,9 +473,141 @@ export default function DocsPage() {
         </div>
       </section>
 
-      {/* ================= 第 3 章 助理设定 ================= */}
+      {/* ================= 第 3 章 工作流：模板库与画布 ================= */}
+      <section id="workflow" className="scroll-mt-28">
+        <SectionTitle icon={Workflow}>第三章 · 工作流：模板库与画布</SectionTitle>
+        <p className="mt-3 max-w-2xl text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.58)]">
+          一句话太小，它自己拆；工程太大，别自己拆——模板库里有现成的流水线。
+        </p>
+        <div className="mt-4 lg-card overflow-hidden rounded-ios-3xl sm:rounded-ios-4xl">
+          <Specular />
+          <div className="divide-y divide-[rgba(0,0,0,0.06)]">
+            <Step
+              n="1"
+              title="模板转盘：四条成熟产线摆在那"
+              note={
+                <>
+                  首轮对话前，右侧是一台 3D 卡片转盘，4 个领域 8 条产线都摆在那。点整张卡会弹确认窗，按「使用完整模板」全部环节开跑；也可以只点卡面下缘的环节 chip 挑着跑——
+                  <strong className="font-semibold text-[rgba(0,0,0,0.72)]">勾选 = 全部执行 · 单击环节开/关 · 按住拖过 = 只跑扫过的</strong>
+                  ，再按「按所选环节开工」。选定后右侧画布立刻铺出工序骨架，助理照单施工。
+                </>
+              }
+            />
+            <div className="grid gap-3 px-5 pb-5 sm:grid-cols-2 sm:px-7 sm:pb-7">
+              {TEMPLATE_GALLERY.map((template) => (
+                <div key={template.name} className="rounded-ios-2xl bg-[rgba(0,122,255,0.06)] p-4">
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex shrink-0 items-center rounded-full bg-[#007AFF] px-2.5 py-0.5 text-ios-caption1 font-semibold text-white">
+                      {template.domain}
+                    </span>
+                    <p className="text-ios-footnote font-semibold text-[rgba(0,0,0,0.85)]">{template.name}</p>
+                  </div>
+                  <p className="mt-1.5 text-ios-caption1 leading-relaxed text-[rgba(0,0,0,0.52)]">{template.note}</p>
+                </div>
+              ))}
+            </div>
+            <Step
+              n="2"
+              title="画布是工作台，不是画廊"
+              note={
+                <>
+                  每张节点卡悬浮就有一排动作：<strong className="font-semibold text-[rgba(0,0,0,0.72)]">「编辑提示词」「重新生成」</strong>
+                  （只重跑这一个环节，不整链重来）、<strong className="font-semibold text-[rgba(0,0,0,0.72)]">「连线到其他节点」</strong>、
+                  <strong className="font-semibold text-[rgba(0,0,0,0.72)]">「高清放大」「设为主图」「编辑图片（裁剪/切图/抠除/旋转）」「存入素材库」「下载」</strong>
+                  ；右键另有<strong className="font-semibold text-[rgba(0,0,0,0.72)]">「存为卡并锁定」</strong>（角色卡/场景卡/风格卡）、
+                  <strong className="font-semibold text-[rgba(0,0,0,0.72)]">「转为参考图节点」「对齐与排列」「下载全部子图 (zip)」</strong>
+                  。手势：拖空白平移、Shift/Ctrl+拖框选、Delete 删除、拖节点边缘圆点连线，图片文件直接拖进画布即上传。
+                </>
+              }
+            />
+            <Step
+              n="3"
+              title="续写靠嘴，不靠学按钮"
+              note={
+                <>
+                  成品落进历史与画布之后，接着打一句「再来一组」「微调一下」就行；重型多环节需求，把助理设定（第五章）里的野兽模式打开，它会自动套成熟模板的工序结构当导演派活（详见第五章）。
+                </>
+              }
+            />
+            <Step
+              n="4"
+              title="配方模板：现成的风格起点"
+              note={
+                <>
+                  画布右键 →「提示词库 / 素材」→「配方模板」分页，10 个内建风格一键起稿：{" "}
+                  {RECIPE_CHIPS.map((chip) => (
+                    <span
+                      key={chip}
+                      className="mr-1.5 mt-1.5 inline-block rounded-full bg-[rgba(0,122,255,0.08)] px-2.5 py-0.5 text-ios-caption1 font-semibold text-[#007AFF]"
+                    >
+                      {chip}
+                    </span>
+                  ))}
+                  <span className="mt-2 block">
+                    官方口径：
+                    <strong className="font-semibold text-[rgba(0,0,0,0.72)]">「点击即把六槽配方摊开进表单，可改可撤销，不会直接生成。」</strong>
+                  </span>
+                </>
+              }
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* ================= 第 4 章 历史素材复用 ================= */}
+      <section id="history" className="scroll-mt-28">
+        <SectionTitle icon={History}>第四章 · 历史素材复用</SectionTitle>
+        <p className="mt-3 max-w-2xl text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.58)]">
+          生成过的每样东西都有账——历史就是你的素材库，复用不用从头再来。
+        </p>
+        <div className="mt-4 lg-card overflow-hidden rounded-ios-3xl sm:rounded-ios-4xl">
+          <Specular />
+          <div className="divide-y divide-[rgba(0,0,0,0.06)]">
+            <Step
+              n="1"
+              title="生成历史：找得到"
+              note={
+                <>
+                  顶栏「历史」图标进 <InlineCode>/history</InlineCode>；可按关键词搜索，按「图片」「视频」「工作流」类型筛选，工作流记录自带工序结构图缩图。点开大图可看模型、时间、消耗金币；重跑衍生的记录带「衍生自任务」徽章，可溯源。
+                </>
+              }
+            />
+            <Step
+              n="2"
+              title="每张卡悬浮就是一排复用动作"
+              note={
+                <>
+                  「收藏」「下载」
+                  <strong className="font-semibold text-[rgba(0,0,0,0.72)]">「用这套参数继续做图」</strong>
+                  （把这一单的配方整套载回工作站接着做）、
+                  <strong className="font-semibold text-[rgba(0,0,0,0.72)]">「再来 N 组」「微调变体」</strong>、
+                  <strong className="font-semibold text-[rgba(0,0,0,0.72)]">「交给 AI 助理继续做」</strong>
+                  （把提示词与原参数带回助理对话续写）、「存为资产」「删除」。
+                </>
+              }
+            />
+            <Step
+              n="3"
+              title="两种复用姿势"
+              note={
+                <>
+                  <strong className="font-semibold text-[rgba(0,0,0,0.72)]">「再来 N 组」</strong>＝按这条记录的原配方原样重跑，参数不改动；
+                  <strong className="font-semibold text-[rgba(0,0,0,0.72)]">「微调变体」</strong>
+                  ＝改提示词、模型或尺寸后，按新配方批量重跑。组数可选 1/2/3/5/8（默认 3），弹窗逐单显示「上次实付 X 币」与本次预估（「本次预估 N 张 × P 币 ≈ T 币」），按「提交 N 个任务」下单；原配方带参考图的会「由任务系统原样带上」。
+                </>
+              }
+            />
+          </div>
+        </div>
+        <p className="mt-4 max-w-3xl rounded-ios-2xl bg-[rgba(255,149,0,0.1)] p-3.5 text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.66)]">
+          <strong className="font-semibold text-[#C76A00]">提示：</strong>
+          重跑前会预检余额，不足时提示「余额不足，请先充值再重跑」——充值见第六章。
+        </p>
+      </section>
+
+      {/* ================= 第 5 章 助理设定 ================= */}
       <section id="settings" className="scroll-mt-28">
-        <SectionTitle icon={Settings2}>第三章 · 助理设定（右上角齿轮）</SectionTitle>
+        <SectionTitle icon={Settings2}>第五章 · 助理设定（右上角齿轮）</SectionTitle>
         <p className="mt-3 max-w-2xl text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.58)]">
           聊天界面右上角的齿轮里一共五行，逐行讲清楚每行在管什么：
         </p>
@@ -482,9 +686,59 @@ export default function DocsPage() {
         </div>
       </section>
 
-      {/* ================= 第 4 章 计费怎么放心 ================= */}
+      {/* ================= 第 6 章 充值与计费 ================= */}
       <section id="billing" className="scroll-mt-28">
-        <SectionTitle icon={CircleDollarSign}>第四章 · 计费怎么放心</SectionTitle>
+        <SectionTitle icon={CircleDollarSign}>第六章 · 充值与计费</SectionTitle>
+        <div className="mt-4 flex items-center gap-2">
+          <Wallet className="h-4 w-4 shrink-0 text-[#007AFF]" />
+          <p className="text-ios-callout font-semibold text-[rgba(0,0,0,0.85)]">充值三步</p>
+        </div>
+        <div className="mt-3 lg-card overflow-hidden rounded-ios-3xl sm:rounded-ios-4xl">
+          <Specular />
+          <div className="divide-y divide-[rgba(0,0,0,0.06)]">
+            <Step
+              n="1"
+              title="入口就在顶栏"
+              note={
+                <>
+                  余额胶囊实时显示金币余额，点「＋」就有两项：
+                  <strong className="font-semibold text-[rgba(0,0,0,0.72)]">「充值」</strong>
+                  进入方案页（<InlineCode>/pricing</InlineCode>），
+                  <strong className="font-semibold text-[rgba(0,0,0,0.72)]">「每日签到」</strong>
+                  就地领币——签过之后显示「已签到 · 明日再来」。
+                </>
+              }
+            />
+            <Step
+              n="2"
+              title="四档方案，微信/支付宝"
+              note={
+                <>
+                  支付方式支持「微信支付」「支付宝支付」：点「立即支付 ¥X」会新开窗口收银台，完成后回到本页点「已完成支付，刷新余额」。
+                </>
+              }
+            />
+            <div className="grid gap-3 px-5 pb-5 sm:grid-cols-2 sm:px-7 sm:pb-7">
+              {PLAN_ROWS.map((plan) => (
+                <div key={plan.name} className="rounded-ios-2xl bg-[rgba(0,122,255,0.06)] p-4">
+                  <p className="text-ios-footnote font-semibold text-[rgba(0,0,0,0.85)]">{plan.name}</p>
+                  <p className="mt-1 text-ios-caption1 font-semibold text-[#007AFF]">{plan.price}</p>
+                  <p className="mt-1 text-ios-caption1 leading-relaxed text-[rgba(0,0,0,0.52)]">{plan.coins}</p>
+                </div>
+              ))}
+            </div>
+            <Step
+              n="3"
+              title="到账与兑换码"
+              note={
+                <>
+                  正常即时到账；有兑换码在 <InlineCode>/pricing</InlineCode> 输入，「金币会立即到账」；若有延迟联系客服，通常 5 分钟内解决。邀请奖励：好友首次充值双方都得金币，「以金币发放、不能提现」。
+                </>
+              }
+            />
+          </div>
+        </div>
+        <p className="mt-4 text-ios-footnote font-semibold text-[rgba(0,0,0,0.72)]">钱进来了，怎么花得放心：</p>
         <div className="mt-4 grid gap-4 sm:grid-cols-3">
           <KeyCard icon={Coins} title="一本账，跨模型可比价">
             所有模型用统一币制计价，不同模型之间可以直接比价。单价看定价页{" "}
@@ -505,9 +759,9 @@ export default function DocsPage() {
         </div>
       </section>
 
-      {/* ================= 第 5 章 把助理带走 ================= */}
+      {/* ================= 第 7 章 把助理带走 ================= */}
       <section id="portable" className="scroll-mt-28">
-        <SectionTitle icon={Plug}>第五章 · 把助理带走</SectionTitle>
+        <SectionTitle icon={Plug}>第七章 · 把助理带走</SectionTitle>
         <p className="mt-3 max-w-2xl text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.58)]">
           助理不只会在这站网页里干活，也能装进你已有的 AI 工具——通过 MCP（Model Context Protocol），Claude、Codex、Cursor 里的
           agent 说一句话，就能出图、出视频并拿到成品 URL，背后走的是同一套计费与队列。

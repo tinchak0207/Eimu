@@ -82,3 +82,37 @@ test("old docs subpage routes are removed and merged page exists", () => {
   // 合并后的单页存在。
   assert.equal(existsSync(join(process.cwd(), "src/app/docs/page.tsx")), true, "/docs 单页必须存在");
 });
+
+test("quick start gains workflow, history reuse and top-up chapters", () => {
+  const page = read("src/app/docs/page.tsx");
+
+  // 三章标题存在。
+  assert.match(page, /工作流：模板库与画布/, "缺第三章标题");
+  assert.match(page, /历史素材复用/, "缺第四章标题");
+  assert.match(page, /充值与计费/, "缺第六章标题");
+
+  // 关键教学文案锚点（逐字）。
+  assert.match(page, /配方模板/, "第三章缺配方模板小节");
+  assert.match(page, /再来 N 组/, "第四章缺复用姿势文案");
+  assert.match(page, /梦芽/, "第六章缺充值方案文案");
+  assert.match(page, /余额不足，请先充值再重跑/, "第四章缺余额预检提示");
+
+  // 新章 id 锚点存在（settings/billing/portable 为既有锚点）。
+  assert.match(page, /id="workflow"/, "缺工作流章节锚点");
+  assert.match(page, /id="history"/, "缺历史章节锚点");
+
+  // NAV_CHIPS 八枚齐全：href 与 label 逐一对应。
+  for (const [href, label] of [
+    ["#start", "怎么开始对话"],
+    ["#flow", "一轮会发生什么"],
+    ["#workflow", "工作流与画布"],
+    ["#history", "历史素材复用"],
+    ["#settings", "助理设定"],
+    ["#billing", "充值与计费"],
+    ["#portable", "把助理带走"],
+    ["#dev", "开发进阶"],
+  ] as const) {
+    assert.match(page, new RegExp(`href: "${href}"`), `NAV_CHIPS 缺 ${href}`);
+    assert.match(page, new RegExp(`label: "${label}"`), `NAV_CHIPS 缺文案 ${label}`);
+  }
+});
