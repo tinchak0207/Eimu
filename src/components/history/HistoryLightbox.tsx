@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, Check, ChevronLeft, ChevronRight, Coins, Download, Layers, Loader2, RotateCcw, SlidersHorizontal, Star, Trash2, X } from "lucide-react";
+import { AlertTriangle, Bot, Check, ChevronLeft, ChevronRight, Coins, Download, GitBranch, Layers, Loader2, RotateCcw, SlidersHorizontal, Star, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   formatAbsoluteTime,
@@ -28,6 +28,8 @@ export interface HistoryLightboxProps {
   /** 再来 N 组 / 微调变体（payload 级批量重跑）。缺席时工具栏不挂。 */
   onRerun?: (entry: HistoryEntry) => void;
   onRerunVariant?: (entry: HistoryEntry) => void;
+  /** REQ-D1：打开这条记录的「溯源」抽屉（与历史卡入口同一抽屉实例）。 */
+  onShowLineage?: (entry: HistoryEntry) => void;
 }
 
 /**
@@ -96,6 +98,7 @@ export function HistoryLightbox({
   onReuse,
   onRerun,
   onRerunVariant,
+  onShowLineage,
 }: HistoryLightboxProps) {
   const [mounted, setMounted] = useState(false);
   /** 下载要等整图 fetch 成 blob，期间工具栏下载钮转圈防重复点击。 */
@@ -288,6 +291,12 @@ export function HistoryLightbox({
             {onRerunVariant && rerunnable && (
               <ToolbarButton label="微调变体" onClick={() => onRerunVariant(entry)}>
                 <SlidersHorizontal className="h-4 w-4" />
+              </ToolbarButton>
+            )}
+            {/* REQ-D1：溯源抽屉入口。与历史卡同一抽屉实例（页面级单例）。 */}
+            {onShowLineage && (
+              <ToolbarButton label="溯源" onClick={() => onShowLineage(entry)}>
+                <GitBranch className="h-4 w-4" />
               </ToolbarButton>
             )}
             <ToolbarButton label="删除" tone="danger" onClick={() => onDelete(entry.id)}>

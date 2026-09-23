@@ -179,14 +179,35 @@ async function metasoRequest(
   try {
     payload = await response.json();
   } catch {
-    throw new SupplierRequestError(`Metaso returned invalid JSON (HTTP ${response.status}).`, 502);
+    // 同一類狀態洗白（D-3）：上游回 HTML 錯誤頁（常見於 400/5xx）時，真實狀態不能丟，
+    // 否則真 400 會以 502 進原生硬停判定。產品側 status 仍是 502（我方解析失敗）。
+    throw new SupplierRequestError(
+      `Metaso returned invalid JSON (HTTP ${response.status}).`,
+      502,
+      null,
+      undefined,
+      undefined,
+      undefined,
+      response.status,
+    );
   }
   if (!response.ok) {
     const message =
       typeof payload === "object" && payload !== null && "error" in payload
         ? String((payload as { error: { message?: unknown } }).error?.message ?? payload)
         : `Metaso API request failed with HTTP ${response.status}.`;
-    throw new SupplierRequestError(message, response.status === 429 ? 429 : response.status === 401 || response.status === 403 ? 401 : 502);
+    // status 照既有語義改寫（供應商側失敗，隔離/冷卻行為不動；請勿在此改判）；
+    // upstreamStatus 原樣帶上上游真實狀態，供確定性 4xx 的原生硬停判讀
+    // （D-3：真 400 不得被 502 洗成「可重放」而被重放 20 次）。
+    throw new SupplierRequestError(
+      message,
+      response.status === 429 ? 429 : response.status === 401 || response.status === 403 ? 401 : 502,
+      null,
+      undefined,
+      undefined,
+      undefined,
+      response.status,
+    );
   }
   if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
     throw new SupplierRequestError("Metaso returned a non-object response.", 502);

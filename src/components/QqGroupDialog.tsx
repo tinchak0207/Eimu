@@ -43,7 +43,7 @@ export function QqGroupDialog({ open, onClose }: QqGroupDialogProps) {
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(31,34,48,0.45)] p-4 backdrop-blur-md animate-in fade-in duration-200"
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-[rgba(31,34,48,0.45)] p-4 backdrop-blur-md animate-in fade-in duration-200"
       onClick={onClose}
     >
       <div

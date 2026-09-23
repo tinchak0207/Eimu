@@ -2,6 +2,7 @@
 // 認證：requireVerifiedUser（上游 /api/user/self 驗證，不信任 x-user-id）。
 import { NextRequest, NextResponse } from "next/server";
 import { requireVerifiedUser } from "@/lib/server-user";
+import { filterCardIdsForProject } from "@/lib/asset-library";
 import {
   deleteCanvasProjects,
   listCanvasProjects,
@@ -47,6 +48,16 @@ export async function PUT(req: NextRequest) {
 
   try {
     const now = new Date().toISOString();
+    // REQ-B2 作用域閘：cardIds 逐個過作用域裁決——跨項目、未顯式分享的卡不得鎖進本項目
+    // （生成時的卡注入讀的就是這份 cardIds）。走 asset-library 的單一裁決入口
+    // （內部＝resolveAssetVisibility）；個人卡逐位不變，查不到的 id 不猜（原樣保留）。
+    const cardIds = Array.isArray(body.cardIds)
+      ? await filterCardIdsForProject({
+          userId: caller.user.id,
+          projectId: body.id,
+          cardIds: body.cardIds.filter((id): id is string => typeof id === "string"),
+        })
+      : null;
     await saveCanvasProject(caller.user.id, {
       id: body.id,
       title: body.title?.trim()?.slice(0, 200) || "未命名画布",
@@ -57,7 +68,7 @@ export async function PUT(req: NextRequest) {
       viewport: body.viewport ?? { x: 0, y: 0, k: 1 },
       backgroundMode: body.backgroundMode === "blank" || body.backgroundMode === "lines" ? body.backgroundMode : "dots",
       ...(body.budget ? { budget: body.budget } : {}),
-      ...(Array.isArray(body.cardIds) ? { cardIds: body.cardIds } : {}),
+      ...(cardIds ? { cardIds } : {}),
       // 作品/劇集（2026-09-15 刀 1）：原樣透傳。清洗一律交給 project-store 的逐欄白名單，
       // 本路由不重複實作洗欄邏輯（避免兩處白名單漂移）。不在此靜默丟欄。
       ...(body.projectType !== undefined ? { projectType: body.projectType } : {}),

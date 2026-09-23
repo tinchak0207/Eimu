@@ -68,6 +68,8 @@ export const AGENT_EVENT_NAMES = [
   "question.request",
   "question.replied",
   "question.rejected",
+  // REQ-D2（2026-09-22）：steer 回合中引導的狀態幀（排隊中／已注入／已生效／已中止）。
+  "steer.status",
 ] as const;
 
 export type AgentEventName = (typeof AGENT_EVENT_NAMES)[number];
@@ -425,6 +427,7 @@ export type AgentSseEvent = WithEventId &
     | { name: "subagent.done"; data: AgentSubagentDone }
     | { name: "question.request"; data: AgentQuestionRequest }
     | { name: "question.replied"; data: AgentQuestionReplied }
+    | { name: "steer.status"; data: AgentSteerStatusEvent }
     | { name: "question.rejected"; data: AgentQuestionRejected }
   );
 
@@ -856,7 +859,57 @@ export function parseAgentSseEvent(name: string, rawData: string): AgentSseEvent
       if (!requestId) return null;
       return { name, event_id: eventId, data: { request_id: requestId, reason: str(d.reason) ?? "" } };
     }
+    case "steer.status": {
+      const steerId = str(d.steer_id);
+      const status = parseSteerStatus(d.status);
+      // 核心欄位（id + 狀態）缺一即整幀丟棄：認不得的狀態寧可不上屏，不猜。
+      if (!steerId || !status) return null;
+      const position = num(d.position);
+      return {
+        name,
+        event_id: eventId,
+        data: {
+          steer_id: steerId,
+          status,
+          ...(typeof position === "number" ? { position } : {}),
+          ...(str(d.text) ? { text: str(d.text) } : {}),
+          ...(str(d.reason) ? { reason: str(d.reason) } : {}),
+        },
+      };
+    }
   }
+}
+
+/**
+ * steer 狀態值域的唯一權威（與網關 steer-core.ts 的 SteerStatus 逐字對齊）。
+ *
+ * uncertain（REQ-D2b，2026-09-23）：**未確認**——網關投遞已發出但沒等到確認
+ * （進程中斷於投遞與確認之間／重啟後恢復）。它不是 failed：「不知道送沒送到」與
+ * 「確知沒送到」是兩件事，混為一談就是把不確定說成事實。網關契約是**永不自動重發**，
+ * 所以徽章顯示「未确认·未重送」，且此態是終態（遲到的幀不得改寫）。
+ */
+export const AGENT_STEER_STATUSES = ["queued", "injected", "applied", "aborted", "failed", "uncertain"] as const;
+export type AgentSteerStatus = (typeof AGENT_STEER_STATUSES)[number];
+
+/**
+ * 「排队中」徽章的存活上限（ms）——與網關 steer-core.ts 的 STEER_QUEUE_TTL_MS
+ * **必須逐字等值**（有測試釘著兩邊的字面）。
+ *
+ * 為什麼前端也要有這個時限（D2-3）：網關的 pendingSteers 是 volatile 的——重啟／
+ * 續期後隊列整個消失。此時前端的「排队中」徽章沒有任何東西會把它推進終態＝永久假話。
+ * 所以前端以同一個 TTL 自行兜底：逾時仍未見終態幀 → 翻「未能送達（未生效）」。
+ * 兩端都誠實：網關知道的（逾時條目）由網關發 queue_expired，網關不知道的由前端自己收口。
+ *
+ * D2b（2026-09-23）之後的分工更清楚：重啟後網關**記得**那些命令身份（steer_commands 表），
+ * 恢復時會補一張 uncertain 幀（「未确认·未重送」）；TTL 只負責「那張幀也沒送到／沒重連」
+ * 這一最後兜底——它是 UI 的時間語義，不是防重複投遞的機制（那是 tombstone 的職責）。
+ */
+export const AGENT_STEER_QUEUE_TTL_MS = 30 * 60 * 1000;
+
+function parseSteerStatus(raw: unknown): AgentSteerStatus | undefined {
+  return typeof raw === "string" && (AGENT_STEER_STATUSES as readonly string[]).includes(raw)
+    ? (raw as AgentSteerStatus)
+    : undefined;
 }
 
 function parseQuestionItems(raw: unknown): AgentQuestionRequest["questions"] | null {
@@ -916,6 +969,36 @@ export interface AgentUserTurnItem extends TranscriptItemBase {
   text: string;
   /** 附件（图／影片）在 step 8 才接，先留位子，避免之后改类型牵动所有渲染。 */
   attachments?: AgentAttachmentRef[];
+  /**
+   * REQ-D2（2026-09-22）：这条消息是「回合中追加的指引（steer）」时挂状态。
+   * 状态值域的权威在网络侧（steer.status 帧），这里只落账：
+   * queued=排队中（本回合结束后生效）/ injected=已注入本回合 / applied=已生效 /
+   * aborted=已中止（用户按了停止，停止优先）/ failed=未生效 /
+   * uncertain=未确认（REQ-D2b：投递已发出但没等到确认，网关**永不自动重发** ⇒ 「未确认·未重送」）。
+   */
+  steer?: {
+    id: string;
+    status: AgentSteerStatus;
+    position?: number;
+    /**
+     * 本端入队时刻（epoch ms，收到 queued ack 时打点）。排队的存活上限契约是
+     * AGENT_STEER_QUEUE_TTL_MS——`expireQueuedSteers` 用它判断这条还能不能算「排队中」。
+     * 缺席（旧存档／SSE 帧建出来的条目）→ 以存档时刻为基准兜底（见 reducer 的 restore）。
+     */
+    queuedAt?: number;
+  };
+}
+
+/** steer.status 帧：一条 steer 的状态迁移（前端据 steer_id 挂回那条 user 条目）。 */
+export interface AgentSteerStatusEvent {
+  steer_id: string;
+  status: AgentSteerStatus;
+  /** 排队位置（1-based），仅 queued 帧带。 */
+  position?: number;
+  /** 回显的指引文本，供排障与「排队中」提示展开。 */
+  text?: string;
+  /** 未生效原因（aborted / delivery_failed / delivery_unwired / queue_expired）。 */
+  reason?: string;
 }
 
 export interface AgentAttachmentRef {

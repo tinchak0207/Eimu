@@ -222,6 +222,11 @@ export interface UseCanvasChatReturn {
     currentStep?: unknown;
     episodes?: unknown;
   }) => boolean;
+  /**
+   * REQ-B2 團隊資產空間：讀當前畫布項目 id（尚未建號回 null）。
+   * 真源仍是 canvas-project-sync 的 projectIdRef（不新增第二份狀態，避免兩處漂移）。
+   */
+  getProjectId: () => string | null;
   // ── 作品/劇集三級狀態機（刀 1 前端接線；持久化在 CanvasProject 頂層三欄）
   /** 作品類型：undefined = 未設定。 */
   projectType: CanvasProjectType | undefined;
@@ -237,6 +242,12 @@ export interface UseCanvasChatReturn {
   activeCardIds: string[];
   /** 鎖定中的卡實體（生成時自動注入：片段前綴 + 參考圖 + 負面詞）。 */
   activeCharacterCards: CharacterCard[];
+  /**
+   * REQ-B2b：掛用（copy-on-use）產生的本地副本鎖定/解鎖。
+   * 項目資產庫面板掛用後把回應的 `localCopyIds` 傳進來（解除掛用則把副本解鎖）。
+   * 這是「畫面標已掛用」與「生成真的注入副本」之間唯一的接線。
+   */
+  applyMountCopyChange: (change: { locked: string[]; unlocked: string[] }) => Promise<void>;
   /** 建卡/更新卡（upsert）。 */
   upsertCharacterCard: (card: CharacterCard) => Promise<boolean>;
   /** 刪卡（同時解除鎖定）。 */

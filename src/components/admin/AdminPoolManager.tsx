@@ -6,7 +6,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { CircleDollarSign, KeyRound, LayoutDashboard, Layers3, LogOut, Network, Route, ServerCog, Waypoints } from "lucide-react";
+import { BarChart3, CircleDollarSign, KeyRound, LayoutDashboard, Layers3, LogOut, Network, Route, ServerCog, Waypoints } from "lucide-react";
 import { AdminHome } from "@/components/admin/AdminHome";
 import { AdminModelPricing } from "@/components/admin/AdminModelPricing";
 import { AdminRelayChannels } from "@/components/admin/AdminRelayChannels";
@@ -14,11 +14,13 @@ import { AdminBizKeys } from "@/components/admin/AdminBizKeys";
 import { AdminRoutingPanel } from "@/components/admin/AdminRoutingPanel";
 import { AdminTemplateManager } from "@/components/admin/AdminTemplateManager";
 import { AdminProxyPool } from "@/components/admin/AdminProxyPool";
+import { AdminStatistics } from "@/components/admin/AdminStatistics";
 
-type NavKey = "home" | "relays" | "pricing" | "bizKeys" | "routing" | "templates" | "proxyPool";
+type NavKey = "home" | "statistics" | "relays" | "pricing" | "bizKeys" | "routing" | "templates" | "proxyPool";
 
 const NAV_ITEMS: Array<{ key: NavKey; label: string; icon: typeof LayoutDashboard }> = [
   { key: "home", label: "总览", icon: LayoutDashboard },
+  { key: "statistics", label: "用量统计", icon: BarChart3 },
   { key: "relays", label: "中转渠道", icon: Waypoints },
   { key: "pricing", label: "模型定价", icon: CircleDollarSign },
   { key: "bizKeys", label: "B 端密钥", icon: KeyRound },
@@ -73,6 +75,8 @@ export function AdminPoolManager({ username }: { username: string }) {
         <div className="min-w-0 flex-1">
           {nav === "home" ? (
             <AdminHome />
+          ) : nav === "statistics" ? (
+            <AdminStatistics />
           ) : nav === "relays" ? (
             <AdminRelayChannels />
           ) : nav === "pricing" ? (

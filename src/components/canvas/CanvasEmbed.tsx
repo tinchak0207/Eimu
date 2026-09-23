@@ -40,6 +40,7 @@ import { CanvasZoomControls } from "./CanvasZoomControls";
 import { CanvasShortcutsHelp } from "./CanvasShortcutsHelp";
 import { CanvasNodeCreateMenu } from "./CanvasNodeCreateMenu";
 import { CanvasLibraryPanel } from "./CanvasLibraryPanel";
+import { ProjectAssetLibraryPanel } from "@/components/assets/ProjectAssetLibraryPanel";
 import { LoraLibraryPanel, type SelectedLora } from "@/components/canvas-workstation/panels/LoraLibraryPanel";
 import "@/components/canvas-workstation/panels/panels.css";
 import { cn } from "@/lib/utils";
@@ -101,6 +102,8 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
   const [cardsOpen, setCardsOpen] = useState(false);
   // G2（2026-09-16）：作品/劇集面板（同款左側彈層；資料取自 hook 三欄出口 + nodes）。
   const [creationFlowOpen, setCreationFlowOpen] = useState(false);
+  // REQ-B2 團隊資產空間：項目資產庫面板（右側滑入，同資源庫/角色卡同款彈層語彙）。
+  const [projectAssetsOpen, setProjectAssetsOpen] = useState(false);
   const [agentAutoApprove, setAgentAutoApprove] = useState(false);
 
   // ── 最新值 refs（組件殼域）
@@ -802,6 +805,16 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
           >
             角色卡{canvas.activeCardIds.length > 0 ? ` · ${canvas.activeCardIds.length}` : ""}
           </button>
+          {/* REQ-B2 團隊資產空間：項目資產庫（資產包 + 資產卡的作用域/掛用/顯式分享入口） */}
+          <button
+            type="button"
+            onClick={() => setProjectAssetsOpen((v) => !v)}
+            aria-pressed={projectAssetsOpen}
+            aria-label="项目资产库"
+            className="ce-embed-bar-btn lg-float pointer-events-auto cursor-pointer rounded-full font-medium text-ios-blue hover:bg-white active:bg-white"
+          >
+            项目资产
+          </button>
           {/* G2（2026-09-16）：作品/劇集——badge 數字 = 劇集數，當前步驟顯示在面板內 */}
           <button
             type="button"
@@ -896,6 +909,15 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
 
       {/* 快捷鍵幫助 / 資源庫 / 圖片編輯器（overflow 外層渲染） */}
       <CanvasShortcutsHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
+      {/* REQ-B2：項目資產庫（專案 id 由 hook 的 getProjectId 直讀，未建號則面板顯示空態） */}
+      {/* REQ-B2b：掛用＝copy-on-use——面板把副本 id 交回來，這裡鎖進項目 cardIds（生成注入讀的就是它） */}
+      <ProjectAssetLibraryPanel
+        open={projectAssetsOpen}
+        onClose={() => setProjectAssetsOpen(false)}
+        projectId={canvas.getProjectId()}
+        isLoggedIn={Boolean(buildAuthHeaders())}
+        onCopyChange={canvas.applyMountCopyChange}
+      />
       <CanvasLibraryPanel
         open={libraryOpen}
         onClose={() => setLibraryOpen(false)}

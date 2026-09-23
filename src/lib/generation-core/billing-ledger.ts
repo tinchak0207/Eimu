@@ -8,8 +8,15 @@ import {
   type GenerationBillingAdapter,
 } from "./billing-relay";
 import { getGenerationSql, type GenerationSql } from "./database";
+import { ensureAccountBaselines, recordConsumption, recordRefund } from "./account-ledger";
 import { getGenerationJob, mapGenerationJob } from "./job-repository";
 import { JOB_EVENT, emitJobEvent } from "./job-events";
+import {
+  billingReplayDenialDetail,
+  planBillingAttemptReplay,
+  type BillingReplayOperation,
+  type ReplayPlan,
+} from "./operation-registry";
 import type { FailureClass, GenerationJob } from "./types";
 
 type Row = Record<string, unknown>;
@@ -87,12 +94,34 @@ async function moveJobToQueued(jobId: string, sql: GenerationSql): Promise<void>
   `;
 }
 
+/** 計費動作 → 封閉 registry 的動作鍵（FG-b：重放預算的唯一來源）。 */
+const BILLING_REPLAY_KEY: Record<BillingOperation, BillingReplayOperation> = {
+  reserve: "billing.reserve",
+  commit: "billing.commit",
+  refund: "billing.refund",
+};
+
+type BillingClaimOutcome =
+  | { kind: "claimed"; row: Row }
+  | { kind: "unavailable" }
+  | { kind: "replay_denied"; plan: ReplayPlan };
+
+/**
+ * claim = 計費動作的自動重放裁決點。CAS（status='pending' → 'executing' ＋ 租約）
+ * 仍是併發邊界；差別是 claim 成功後**先問封閉 operation registry「這次嘗試准不准」**，
+ * 不許就更不執行外部扣款／退款。裁決序號用 RETURNING 的 attempt_count：
+ * UPDATE 內已 +1，故它就是「即將執行的這次嘗試」的序號（FG 教訓：先定序號語義再改點）。
+ *
+ * 被拒時的終結刻意沿用既有桶，不動金額與狀態機語義：
+ *  - reserve → unknown（扣款狀態不明 → 既有 6h zombie reclaim 全額退款給用戶，用戶不虧）
+ *  - refund  → failed（退款未落地且不再自動重試 → 出現在 probe 的 refund_failed 名單）
+ */
 async function claimBillingOperation(input: {
   jobId: string;
   operation: BillingOperation;
   executorId: string;
   sql: GenerationSql;
-}): Promise<Row | null> {
+}): Promise<BillingClaimOutcome> {
   const rows = await input.sql<Row[]>`
     UPDATE billing_operation
     SET status = 'executing',
@@ -108,7 +137,46 @@ async function claimBillingOperation(input: {
       AND next_attempt_at <= now()
     RETURNING *
   `;
-  return rows[0] ?? null;
+  const claimed = rows[0];
+  if (!claimed) return { kind: "unavailable" };
+
+  const replay = planBillingAttemptReplay({
+    operation: BILLING_REPLAY_KEY[input.operation],
+    nextAttemptNo: operationAttempts(claimed),
+  });
+  if (replay.allowed) return { kind: "claimed", row: claimed };
+
+  const detail = billingReplayDenialDetail(BILLING_REPLAY_KEY[input.operation], replay);
+  if (input.operation === "refund") {
+    await input.sql`
+      UPDATE billing_operation
+      SET status = 'failed', execution_expires_at = NULL, last_error = ${detail}, updated_at = now()
+      WHERE id = ${String(claimed.id)} AND status = 'executing'
+    `;
+  } else {
+    await markOperationUnknown({
+      id: String(claimed.id),
+      jobId: input.jobId,
+      operation: input.operation,
+      detail,
+      sql: input.sql,
+    });
+  }
+  emitJobEvent({
+    jobId: input.jobId,
+    event: JOB_EVENT.replayDenied,
+    actor: input.executorId,
+    upstreamRaw: detail,
+    detail: {
+      operation: BILLING_REPLAY_KEY[input.operation],
+      denial_reason: replay.denialReason,
+      attempt_no: replay.nextAttemptNo,
+      max_replay_attempts: replay.maxReplayAttempts,
+      billing_operation: input.operation,
+    },
+  }, input.sql);
+  console.error(`[billing-ledger] job ${input.jobId}: ${input.operation} ${detail}`);
+  return { kind: "replay_denied", plan: replay };
 }
 
 async function markOperationRetry(input: {
@@ -194,14 +262,19 @@ export async function reserveGenerationBilling(input: {
   }
   if (input.job.status !== "pending_billing") return freshJob(input.job.id, sql);
 
-  const claimed = await claimBillingOperation({
+  const claim = await claimBillingOperation({
     jobId: input.job.id,
     operation: "reserve",
     executorId: input.executorId,
     sql,
   });
-  if (!claimed) return freshJob(input.job.id, sql);
+  // replay_denied：claim 已把 reserve op 凍結為 unknown（job → billing_unknown），
+  // 不再執行外部扣款；後續由既有 zombie reclaim 走保守全額退款，金額不變。
+  if (claim.kind !== "claimed") return freshJob(input.job.id, sql);
+  const claimed = claim.row;
 
+  // REQ-E1a 順序鐵律：先種基線（取「扣款之前」的 users.quota），再扣上游，最後記帳本。
+  const baselineReady = await ensureAccountBaselines([input.job.billingUserId], { sql });
   try {
     await (input.adapter ?? configuredGenerationBillingAdapter()).reserve({
       jobId: input.job.id,
@@ -225,6 +298,21 @@ export async function reserveGenerationBilling(input: {
         `;
         emitJobEvent({ jobId: input.job.id, event: JOB_EVENT.billingReserved, actor: input.executorId, detail: { amount: input.job.billingAmount, operation: "reserve" } }, sql);
       });
+      // REQ-E1a 雙寫：legacy 路徑的 reserve 是真的動了上游 users.quota（gate 路徑
+      // billing_amount=0 會在前面早退，永不走到這裡），故上游扣款同步記進我方帳本。
+      // 記帳失敗不擋路，差額由 E1b 對帳報告逐筆指出。
+      const ledger = baselineReady
+        ? await recordConsumption({
+            billingUserId: input.job.billingUserId,
+            amountQuota: input.job.billingAmount,
+            jobId: input.job.id,
+            operationId: String(claimed.id),
+            source: "billing-ledger-reserve",
+          }, { sql })
+        : { posted: false, reason: "基線不可得（未記帳）" };
+      if (!ledger.posted) {
+        console.error(`[billing-ledger] job ${input.job.id}: reserve 帳本同步未落地（${ledger.reason}）——已由對帳報告負責`);
+      }
   } catch (error) {
     const detail = detailOf(error);
     const disposition = classifyBillingFailure(error);
@@ -355,14 +443,20 @@ export async function refundGenerationBilling(input: {
   if (operationStatus(operation) === "unknown") return "unknown";
   if (operationStatus(operation) === "failed") return "failed";
 
-  const claimed = await claimBillingOperation({
+  const claim = await claimBillingOperation({
     jobId: input.job.id,
     operation: "refund",
     executorId: input.executorId,
     sql,
   });
-  if (!claimed) return "pending";
+  // 預算耗盡 → claim 已把 refund op 終結為 failed（不重複 credit）。回報 "failed" 而非
+  // "pending"：pending 會讓呼叫方以為「還在跑、等一下就好」，那是假話。
+  if (claim.kind === "replay_denied") return "failed";
+  if (claim.kind === "unavailable") return "pending";
+  const claimed = claim.row;
 
+  // REQ-E1a 順序鐵律：先種基線（取「加款之前」的 users.quota），再加回上游，最後記帳本。
+  const baselineReady = await ensureAccountBaselines([input.job.billingUserId], { sql });
   try {
     await (input.adapter ?? configuredGenerationBillingAdapter()).refund({
       jobId: input.job.id,
@@ -387,6 +481,20 @@ export async function refundGenerationBilling(input: {
         WHERE id = ${input.job.id} AND status IN ('failed', 'cancelled')
       `;
     });
+    // REQ-E1a 雙寫：這筆退款真的把 quota 加回了上游 users.quota，我方帳本同步記加項。
+    // 記帳失敗不擋路（對帳報告會如實指出這筆未入帳）。
+    const ledger = baselineReady
+      ? await recordRefund({
+          billingUserId: input.job.billingUserId,
+          amountQuota: amount,
+          jobId: input.job.id,
+          operationId: String(claimed.id),
+          source: "billing-ledger-refund",
+        }, { sql })
+      : { posted: false, reason: "基線不可得（未記帳）" };
+    if (!ledger.posted) {
+      console.error(`[billing-ledger] job ${input.job.id}: refund 帳本同步未落地（${ledger.reason}）——已由對帳報告負責`);
+    }
     return "applied";
   } catch (error) {
     const detail = detailOf(error);
@@ -904,10 +1012,14 @@ export async function reconcileBillingOperationManually(input: {
       if (currentStatus !== "unknown" && currentStatus !== "failed" && currentStatus !== "pending") {
         throw new Error("Only unknown, failed, or pending billing operations can be retried.");
       }
+      // FG-b：人工重試同時把自動重放預算歸零（attempt_count = 0）。operation registry
+      // 的預算是**自動**重放的預算，不該否決一個明確的人工決定——否則預算耗盡後
+      // 這個入口會變成看得到摸不到的空殼（claim 每次都立刻被拒）。
       await tx`
         UPDATE billing_operation
         SET status = 'pending', executor_id = ${input.actor}, execution_expires_at = NULL,
-            external_reference = ${reference}, last_error = ${note}, next_attempt_at = now(), updated_at = now()
+            attempt_count = 0, external_reference = ${reference}, last_error = ${note},
+            next_attempt_at = now(), updated_at = now()
         WHERE id = ${input.operationId}
       `;
       if (String(operation.operation) === "reserve") {

@@ -29,6 +29,7 @@ import {
   buildWorkflowPrompt,
   normalizeGenerationWorkflowMetadata,
 } from "@/lib/generation-workflow";
+import { mergeLineageIntoHost, parentsFromReferences } from "@/lib/lineage";
 import type { GenerationWorkflowMetadata } from "@/lib/image-types";
 import {
   NANO_BANANA_PRO_MODEL_ID,
@@ -701,6 +702,14 @@ export async function POST(req: NextRequest) {
         // needs to see, and an error response can afford ~100ms.
         after(() => emitRoutingEvent("delivered", { deliveredBy: endpoint.label, imageUrls: responseImageUrl ? [responseImageUrl] : undefined }));
         if (authenticatedUser.id) {
+          // REQ-D1 掛鉤 a：生成完成落歷史時登記 parents——本次請求帶的參考圖若出自
+          // 另一條生成任務（sourceGenerationId）記 derivation、若直接引用產物
+          // （sourceResultId）記 reference；裸上傳無持久身份，不登記（跳不動的
+          // 假鏈條比沒有鏈條更壞）。血統只落歷史本體，agent/canvas 兩面零觸碰。
+          const historyLineage = mergeLineageIntoHost(
+            null,
+            parentsFromReferences(workflow?.referenceImages, new Date().toISOString()),
+          );
           // after()：响应返回后再持久化历史，避免 serverless 函数实例提前冻结导致历史丢失。
           after(() =>
             saveGeneratedHistoryEntry({
@@ -709,6 +718,7 @@ export async function POST(req: NextRequest) {
               prompt: finalPrompt,
               generatedAt: Date.now(),
               workflow,
+              ...(historyLineage ?? {}),
               results: [
                 {
                   // Already uploaded above, so persistImages() skips a second upload.

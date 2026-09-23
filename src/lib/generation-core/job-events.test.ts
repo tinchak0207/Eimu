@@ -217,6 +217,46 @@ test("listStuckJobs attaches evidence with raw upstream errors and unsettled rea
   assert.ok(String(calls[0].sql).includes("job.updated_at < now()"));
 });
 
+test("OBS-1：已扣款結算失敗（succeeded＋commit failed）如實列為 terminal_unsettled，reason 不誤標成 refund_*", async () => {
+  const { sql, calls } = recordingMock(() => [
+    {
+      id: "job-unsettled-commit",
+      status: "succeeded",
+      kind: "image_generate",
+      model_id: "gpt-image-2",
+      tenant_id: "biz:key-1",
+      created_at: "2026-08-27T00:00:00.000Z",
+      updated_at: "2026-08-27T12:00:00.000Z",
+      finished_at: "2026-08-27T12:00:00.000Z",
+      failure_class: null,
+      failure_detail: null,
+      lease_owner: null,
+      lease_expires_at: null,
+      billing_amount: 10,
+      reserve_status: "applied",
+      reserve_executor_id: "worker-a",
+      reserve_last_error: null,
+      reserve_next_attempt_at: null,
+      commit_status: "failed",
+      commit_last_error: "commit apply failed: upstream timeout",
+      refund_status: null,
+      refund_amount: null,
+      refund_last_error: null,
+    },
+  ]);
+  const stuck = await listStuckJobs({ minutes: 30, sql });
+  assert.equal(stuck.length, 1);
+  assert.equal(stuck[0].cause, "terminal_unsettled");
+  assert.equal(stuck[0].evidence.reason, "commit_failed", "語義是結算失敗，不得被退款分支吞掉");
+  assert.equal(
+    stuck[0].evidence.commitLastError,
+    "commit apply failed: upstream timeout",
+    "誠實帶出結算失敗的原始錯誤（人工對帳第一手證據）",
+  );
+  // 變更探針（不計入「已驗證」）：WHERE 確實多了 commit failed 分支；真實撈行需真庫，列 pending。
+  assert.match(String(calls[0].sql), /commit_op\.status = 'failed'/);
+});
+
 test("a newly applied refund emits billing_refunded with the raw error absent on retries", async () => {
   const calls: Call[] = [];
   let refundStatus = "pending";

@@ -1,5 +1,6 @@
 // types-gateway.ts — 從 index.ts 無損抽取（2026-09-19 第一階段）
 // 內容：會話/確認/問題/SSE/記憶 型別（原 index.ts 95–369）＋ turn metrics 型別（原 5125–5176）
+import type { PendingSteer } from "./steer-core.ts"
 
 export interface PendingConfirm {
   timer: ReturnType<typeof setTimeout>
@@ -163,7 +164,22 @@ export interface SessionState {
   jevGateSummaries?: string[]
   turnRetries?: number
   turnAborted?: boolean
+  /**
+   * 本輪中止的來源（D2-1b 修復，2026-09-23）：
+   *   "user"   用戶按了停止（session-read.handleAbortSession）→ 待投 steer 全數作廢。
+   *   "system" 內部斷路器（空轉止損 triggerIdleStepBreaker）自行中止並同輪重投
+   *            → 用戶沒有叫停，排隊中的指引不因此失效，等下一次收尾照常投遞。
+   * volatile（不落盤，與 turnAborted 同步生命週期）；缺席一律按 "user" 保守處置
+   * （見 steer-core.abortIsUserStop）。
+   */
+  turnAbortSource?: "user" | "system"
   retryQueued?: boolean
+  // ── REQ-D2（2026-09-22）：steer 回合中引導 ──
+  /** 本回合排隊中的引導語（FIFO；純代數在 steer-core.ts，接線在 steer-gw.ts）。
+   *  回合收尾時投遞成下一回合；用戶中止則全數作廢（停止優先）。volatile。
+   *  每條帶 deadline（STEER_QUEUE_TTL_MS）：逾時不投遞、落 failed 終態，
+   *  前端以同一個 TTL 自行翻「未能送達」——重啟後不得留下永久「排队中」。 */
+  pendingSteers?: PendingSteer[]
   // ── P2b（2026-09-11）：空轉止損（全部 volatile，不持久化）──
   /** 本 turn 連續空 step 計數。 */
   idleSteps?: number

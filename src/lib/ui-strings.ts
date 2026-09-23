@@ -1,0 +1,177 @@
+/**
+ * 界面文案單一來源（**只做禁硬編碼基座，不做多語**）。
+ *
+ * 規則：
+ * 1. 本期三個新面（C2 AdminStatistics／B2 ProjectAssetLibraryPanel／D1 LineageDrawer）的
+ *    用戶可見字串全部收在本檔，元件內零硬編文案（守門件 `src/lib/ui-strings.test.ts`）。
+ * 2. 文案內容＝改造前上屏原文，逐字不動＝UI 視覺零變化。
+ * 3. `{name}` 是插值佔位符，由 `text(key, params)` 填充；缺參數保留佔位符（可診斷，不吐 undefined）。
+ * 4. **未來要上 i18n 時的唯一接縫是本檔的 `text()`**（加一個 language 參數＋一張語言表即可），
+ *    元件端不需要動——所以本檔刻意不放語言欄位、語系型別、fallback 機制等未使用的骨架。
+ */
+
+export const UI_STRINGS = {
+  // ── 共用 ─────────────────────────────────────────────────
+  "common.close": "关闭",
+  "common.noRecord": "无记录",
+  "common.noDescription": "（无描述）",
+  /** 數值缺口佔位符（讀不到就不畫數字，用破折號表達「無值」）。 */
+  "common.placeholder": "—",
+
+  // ── C2 /admin 用量统计 ───────────────────────────────────
+  "stats.title": "用量统计",
+  "stats.subtitle": "全部数字都是既有账本的只读投影：每个数字都能指回一条 billing_operation / capability 记录，无数据源不画。",
+  "stats.refresh": "刷新",
+  "stats.window.days": "近 {days} 天",
+  "stats.window.summary": "窗口：近 {days} 天（日界 {timezone}）· 生成于 {generatedAt}",
+  "stats.error.read": "读取统计数据失败。",
+  "stats.error.generic": "读取失败。",
+  "stats.notConfigured": "本实例没有控制面数据库连線（GENERATION_DATABASE_URL），统计不可用——不展示任何推测数字。",
+  "stats.card.windowCoins": "窗口内消耗（币）",
+  "stats.card.totalQuota": "账本 quota 原值 {quota}",
+  "stats.card.windowCoinsCharged": "扣费 {charged} 币 · 已退款 {refunded} 币（净额已相减）",
+  "stats.card.ledgerRows": "已落账账本行",
+  "stats.card.ledgerSource": "billing_operation commit+refund/applied",
+  "stats.card.refunded": "已退款（币）",
+  "stats.refunded.breakdown": "{rows} 笔退款账本行 · {jobs} 个任务全额退款",
+  "stats.card.unattributed": "未归因消耗（币）",
+  "stats.card.unattributedNote": "{rows} 行无成功尝试，未摊派给任何渠道",
+  "stats.card.remainingQuota": "剩余额度（币）",
+  "stats.card.knownIdentities": "{count} 个付费身份已回读",
+  "stats.card.unknownIdentities": " · {count} 个无法判定",
+  "stats.card.noQuota": "资料不足：new-api 未回读任何额度",
+  "stats.card.unknownIdentitiesShort": "（{count} 个身份未知）",
+  "stats.card.quotaTruncated": "仅覆盖前 {covered}/{total} 个身份（单次上限 {limit}）——合计不是全部身份之和",
+  "stats.daily.title": "每日消耗",
+  "stats.daily.subtitle": "按账本 applied_at 切日（{timezone}）；只画有账本行的日子，缺日的空白就是没有记录。",
+  "stats.daily.coins": "{coins} 币",
+  "stats.daily.empty": "窗口内没有任何已落账记录。",
+  "stats.daily.partial": "部分",
+  "stats.daily.partialTitle": "窗口起点落在 {day} 日中（日界 {timezone}）：该日只含起点之后的记录，是半日桶，不是完整一天。",
+  "stats.byModel.title": "模型分布",
+  "stats.byModel.subtitle": "按 generation_job.model_id 汇总已落账消耗；无记录模型不出现在此表。",
+  "stats.byModel.key": "模型",
+  "stats.byChannel.title": "渠道用量",
+  "stats.byChannel.subtitle": "按实际交付的那次 generation_attempt 归因到 supplier；找不到成功尝试的消耗单列为「未归因」。",
+  "stats.byChannel.key": "渠道",
+  "stats.bucket.empty": "窗口内没有任何已落账的扣费记录——不做 0 曲线，这里是「无记录」。",
+  "stats.bucket.colCoins": "消耗（币）",
+  "stats.bucket.colLedgerRows": "账本行数",
+  "stats.bucket.colRecords": "记录",
+  "stats.records.none": "无记录",
+  "stats.records.sampleTitle": "账本行 id 样本：\n{ids}",
+  "stats.records.total": "共 {total} 笔",
+  "stats.rate.insufficient": "资料不足（{samples}/{minimum} 样本）",
+  "stats.rate.samples": "({count} 样本)",
+  "stats.rate.percent": "{value}%",
+  "stats.health.title": "渠道健康（三态判活）",
+  "stats.health.subtitle": "判据与执行侧调度同一把尺（supplier_capability / supplier / supplier_account 的启用与冷却），不是自造健康分；没有任何能力记录的渠道如实画成「无法判定」。",
+  "stats.health.empty": "未读到任何渠道记录（supplier 表为空或不可达）。",
+  "stats.health.colChannel": "渠道",
+  "stats.health.colLiveness": "判活",
+  "stats.health.colCapabilities": "可调度能力",
+  "stats.health.colSuccessRate": "历史成功率",
+  "stats.health.colLastSuccess": "最近成功",
+  "stats.health.colReason": "判据",
+  "stats.liveness.available": "可用",
+  "stats.liveness.unavailable": "不可用",
+  "stats.liveness.unknown": "无法判定",
+  "stats.quota.title": "剩余额度明细",
+  "stats.quota.subtitle": "数据源 new-api users.quota（与配额预检同通路）；读不到的身份标「未知」，不以 0 计入合计。",
+  "stats.quota.empty": "窗口内没有产生扣费的付费身份。",
+  "stats.quota.coverage": "窗口内付费身份共 {total} 个，本次只读取前 {covered} 个（单次上限 {limit}）——合计为部分身份之和，不是全部身份。",
+  /** 付費身份標識（billing_user_id）。 */
+  "stats.quota.userId": "user #{id}",
+  "stats.quota.entryCoins": "{coins} 币",
+  "stats.quota.entryRaw": "quota {quota}",
+  "stats.quota.unknown": "资料不足：未知（{reason}）",
+  "stats.quota.unknownReason": "上游未回读",
+  "stats.models.title": "模型活性（与 C 端模型菜单同一份判活）",
+  "stats.models.subtitle": "直接消费既有 /api/user/model-status（与 /v1/model-status 同源），本页不重算判活口径。",
+  "stats.models.unavailableDict": "无法判定：未取到模型活性字典（fail-open 时字典为空，不代表模型健康）。",
+  "stats.models.counts": "{availableLabel} {available} · {unavailableLabel} {unavailable} · {unknownLabel} {unknown}",
+  "stats.models.emptyDict": "模型活性字典为空——是「取不到」，不是「全挂」。",
+  "stats.sources.title": "数据来源对照",
+  "stats.sources.subtitle": "每个数字指回哪张表，逐条列明。",
+  "stats.sources.colMetric": "指标",
+  "stats.sources.colSource": "数据源",
+  "stats.sources.colNote": "口径",
+
+  // ── B2 項目資產庫面板 ────────────────────────────────────
+  "assets.title": "项目资产库",
+  "assets.subtitle": "挂用＝在本项目建本地副本（改来源不影响副本，删来源副本仍可用）；跨项目复用需先显式分享",
+  "assets.refresh": "刷新资产库",
+  "assets.close": "关闭资产库",
+  "assets.searchPlaceholder": "搜索资产名 / 标签",
+  "assets.filter.all": "全部",
+  "assets.filter.pack": "资产包",
+  "assets.filter.card": "卡片",
+  "assets.mountedOnly": "仅看已挂用",
+  "assets.guest": "登录后可用项目资产库",
+  "assets.noProject": "本项目尚未建号（画布为空）· 先放一个节点再挂用资产",
+  "assets.loading": "正在读取资产库…",
+  "assets.loadError": "加载失败：{error}",
+  "assets.error.loadFailed": "加载失败",
+  "assets.error.action": "操作失败",
+  "assets.error.share": "分享失败",
+  "assets.empty": "没有可见资产 · 去「资源库 / 角色卡」存一个",
+  "assets.emptyMounted": "本项目还没有挂用的资产",
+  "assets.summary": "共 {total} 项 · 已挂用 {mounted}",
+  "assets.mount.busy": "…",
+  "assets.mount.mount": "挂用",
+  "assets.mount.release": "已挂用 · 解除",
+  /** REQ-B2b：掛用＝copy-on-use（建本地副本並鎖進本項目生成用的卡）。 */
+  "assets.mount.created": "已挂用：已在本项目建本地副本并锁定（生成用的是副本）",
+  "assets.mount.existing": "此前已挂用（幂等，未重复建副本）",
+  "assets.mount.skipped": "已挂用：包内 {count} 个条目没有卡投影（如 LoRA / 3D 产物），未复制成卡",
+  "assets.mount.unmounted": "已解除挂用（副本已回收并停止注入）",
+  "assets.scope.toPersonal": "归属改回个人",
+  "assets.scope.toProject": "归属到本项目",
+  "assets.share.targetPlaceholder": "目标项目 id",
+  "assets.share.action": "显式分享",
+  "assets.share.created": "已显式分享到该项目",
+  "assets.share.existing": "此前已分享过该项目（幂等，未重复建记录）",
+  "assets.visibility.owner": "个人",
+  "assets.visibility.inProject": "本项目",
+  "assets.visibility.sharedIn": "分享进来",
+
+  // ── D1 資產血統溯源抽屜 ──────────────────────────────────
+  "lineage.title": "溯源 · {hostKind}",
+  "lineage.back": "返回上一级链",
+  "lineage.loading": "正在加载血统数据…",
+  "lineage.noLineage": "来源不明：这条记录没有可恢复的血统登记（存量早于溯源功能，或生成时未携带可解析的来源）。",
+  "lineage.kind.root": "本级",
+  "lineage.status.deleted": "已删除 · 曾有引用，记录已不在",
+  "lineage.status.unscanned": "查无 · 本范围扫描不完整",
+  "lineage.status.unknownOrigin": "来源不明 · 未登记血统",
+  "lineage.status.self": "自引用 · 已忽略",
+  "lineage.status.cycle": "成环 · 祖先链已出现",
+  "lineage.status.pruned": "更深链未展开",
+  "lineage.truncated": "直接来源超过上限，仅保留最近 5 个（截断已标记）",
+  "lineage.openSource": "打开该来源",
+  "lineage.openRecord": "打开该记录",
+  "lineage.jumpTitle": "跳转到这一级",
+  "lineage.expandMore": "继续向上（当前展开 {depth} 层）",
+  "lineage.footerPartial": "本层链已按当前可见记录展开；数据加载不完整时不会把「查无」说成「已删除」。",
+  "lineage.footerDefault": "默认展开 {depth} 层，点击箭头可逐级向上追溯。",
+} as const;
+
+export type UiStringKey = keyof typeof UI_STRINGS;
+
+/** 插值參數（值由呼叫方給，元件內不做字串拼接）。 */
+export type UiStringParams = Readonly<Record<string, string | number>>;
+
+/**
+ * 文案唯一取用口。未來上 i18n 時在這裡加語言參數與語言表，
+ * 呼叫端（元件）一行都不用改。
+ */
+export function text(key: UiStringKey, params?: UiStringParams): string {
+  const template: string = UI_STRINGS[key];
+  if (!params) return template;
+  return template.replace(/\{(\w+)\}/g, (match, name: string) => (name in params ? String(params[name]) : match));
+}
+
+/**
+ * 數字/日期格式化用的語言標籤（與文案同層，未來上 i18n 時跟隨文案一起切換）。
+ */
+export const NUMBER_LOCALE = "zh-CN";

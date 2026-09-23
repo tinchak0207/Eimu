@@ -9,9 +9,12 @@
 // 把服务端的图、本地的工作流参数、计费日志的真实消耗合并成同一条记录。
 //
 // 本模块只用 `import type` 跨文件引用，保证可以在 `node --test` 下直接导入做单元测试。
+// 唯一運行時依賴是 ./lineage（REQ-D1 血統清洗，零依賴純函數檔，不破壞上面這條）。
 
 import type { GenerationWorkflowMetadata } from "./image-types";
 import { QUOTA_PER_COIN } from "./quota-constants";
+import { normalizeLineageLinks } from "./lineage";
+import type { LineageLink } from "./lineage";
 
 export { QUOTA_PER_COIN };
 
@@ -88,6 +91,14 @@ export interface HistoryEntry {
   retryOfTaskId?: string;
   taskStatus?: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "refunded" | "unknown";
   errorCode?: string;
+  /**
+   * REQ-D1 資產血統：這條記錄的直接來源鏈（生成時帶的參考圖／重跑源／存卡來源）。
+   * 只存在歷史記錄本體，供人看的「溯源」抽屜用——嚴禁補進 compactMetadataForAgent
+   * 或 canvas 節點 metadata（agent 不讀血統是裁決，不是遺漏）。缺省＝來源不明。
+   */
+  lineage?: LineageLink[];
+  /** parents 曾超上限被截尾的顯式標記（讀時據此顯示「僅保留最近 N 個」）。 */
+  lineageTruncated?: boolean;
 }
 
 /** 服务端存储实体：比 HistoryEntry 多一个 userId。 */
@@ -315,6 +326,10 @@ export function normalizeHistoryEntry(raw: unknown, source: HistorySource): Hist
   const quota = finiteNumber(raw.quota);
   const modelId = nonEmptyString(raw.modelId) ?? results[0]?.modelId;
 
+  // REQ-D1：血統欄位走純函數白名單清洗（複用 ./lineage 收口），非法條目丟棄、
+  // 超上限截尾並顯式標記。缺欄＝來源不明，不捏造 parents。
+  const lineageRaw = Array.isArray(raw.lineage) ? normalizeLineageLinks(raw.lineage) : null;
+
   return {
     id,
     prompt: typeof raw.prompt === "string" ? raw.prompt.slice(0, HISTORY_MAX_PROMPT_LENGTH) : "",
@@ -340,6 +355,12 @@ export function normalizeHistoryEntry(raw: unknown, source: HistorySource): Hist
       ? { taskStatus: raw.taskStatus as HistoryEntry["taskStatus"] }
       : {}),
     ...(nonEmptyString(raw.errorCode) ? { errorCode: nonEmptyString(raw.errorCode) } : {}),
+    ...(lineageRaw && lineageRaw.parents.length
+      ? {
+          lineage: lineageRaw.parents,
+          ...(lineageRaw.truncated || raw.lineageTruncated === true ? { lineageTruncated: true } : {}),
+        }
+      : {}),
     schemaVersion: finiteNumber(raw.schemaVersion) ?? HISTORY_SCHEMA_VERSION,
   };
 }
@@ -394,6 +415,11 @@ function enrich(base: HistoryEntry, extra: HistoryEntry): HistoryEntry {
   if (!merged.retryOfTaskId && extra.retryOfTaskId) merged.retryOfTaskId = extra.retryOfTaskId;
   if (!merged.taskStatus && extra.taskStatus) merged.taskStatus = extra.taskStatus;
   if (!merged.errorCode && extra.errorCode) merged.errorCode = extra.errorCode;
+  // REQ-D1：血統欄位兩面取較全的一份（local 面一般為空，server 面帶登記）。
+  if (!merged.lineage?.length && extra.lineage?.length) {
+    merged.lineage = extra.lineage;
+    if (extra.lineageTruncated) merged.lineageTruncated = true;
+  }
   if (extra.starred) merged.starred = true;
   // 取更早的那个时间戳：客户端在所有出图落地后才记录，服务端在单个出图成功时就记录。
   if (extra.generatedAt < merged.generatedAt) merged.generatedAt = extra.generatedAt;

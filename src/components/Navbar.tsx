@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { BookOpen, History, Images, KeyRound, LogOut } from "lucide-react";
 import { WalletBadge } from "@/components/WalletBadge";
@@ -69,6 +69,30 @@ export function Navbar({ className }: NavbarProps) {
   const [pwaHandoffUrl, setPwaHandoffUrl] = useState<string | null>(null);
   const [qqOpen, setQqOpen] = useState(false);
   const popupRef = useRef<Window | null>(null);
+  const headerRef = useRef<HTMLElement | null>(null);
+
+  useLayoutEffect(() => {
+    const el = headerRef.current;
+    if (!el) return;
+    const apply = () => {
+      document.documentElement.style.setProperty("--site-header-offset", `${el.offsetHeight}px`);
+      // 助理工作站與導覽列同一條基準線：量頁殼（nav 內容盒）左右緣。
+      const nav = el.querySelector("nav");
+      if (nav) {
+        const rect = nav.getBoundingClientRect();
+        document.documentElement.style.setProperty("--site-shell-left", `${rect.left}px`);
+        document.documentElement.style.setProperty("--site-shell-right", `${window.innerWidth - rect.right}px`);
+      }
+    };
+    apply();
+    const observer = new ResizeObserver(apply);
+    observer.observe(el);
+    window.addEventListener("resize", apply);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", apply);
+    };
+  }, []);
 
   /**
    * 钥匙按钮：一键复制可用的 API 密钥（2026-08-27 暴君裁定）。
@@ -255,11 +279,12 @@ export function Navbar({ className }: NavbarProps) {
       )}
       <header
         id="global-navbar"
+        ref={headerRef}
         className={cn(
           // pt-2 而非 mt-2：body 无 border/padding 时子元素 margin-top 会折叠
           // 穿透，把整页推高 8px（html scrollHeight 恒 = 100vh + 8px）。
           // padding 不参与折叠，位置不变（nav 距页顶同为 8px）。
-          "page-shell pointer-events-none relative z-40 pt-2",
+          "page-shell pointer-events-none sticky top-0 z-[80] pt-2",
           className,
         )}
       >
@@ -368,7 +393,7 @@ export function Navbar({ className }: NavbarProps) {
                       <KeyRound className="h-3.5 w-3.5" aria-hidden="true" />
                     </button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" sideOffset={8}>
+                  <DropdownMenuContent align="end" sideOffset={8} className="z-[90]">
                     <DropdownMenuItem onSelect={() => void copyApiKey()} className="cursor-pointer">
                       <KeyRound className="mr-2 h-3.5 w-3.5 text-[rgba(0,0,0,0.44)]" aria-hidden="true" />
                       {copyingKey ? "复制中…" : "复制 API 密钥"}

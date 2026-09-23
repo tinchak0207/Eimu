@@ -16,6 +16,7 @@ import { personaModel } from "./model-registry.ts"
 import { workflowService, workflowOwnerBySession, workflowSnapshotFor, restoreWorkflowsFromSnapshot } from "./workflow-gw.ts"
 import { memoryRecallPrefetch, memoryRecallInflight } from "./memory-wiring.ts"
 import { rejectOpencodeQuestion } from "./questions-gw.ts"
+import { recoverSteerCommandsOnRevive } from "./steer-ledger-gw.ts"
 // TODO(整合 Wave1): 以下為「仍住 index.ts 且尚未 export」符號的 declare 佔位（stage1 記憶「subagent 佔位符法」，bun build 不查名可過）。
 // 整合階段把下行註釋還原成真 import、刪除全部 declare，即完成橋接：
 // import { workflowOwnerBySession, workflowSnapshotFor, workflowService, sseTickets, SSE_TICKET_TTL_MS, stripStaleTurnTextFromReplay, armWatchdogTimer, armHeartbeatTimer, personaModel, restoreWorkflowsFromSnapshot, memoryRecallPrefetch, memoryRecallInflight, rejectOpencodeQuestion, clearAckTimer, clearWatchdogTimer, clearQuestionHeartbeat, closeSessionStreams } from "./index.ts"
@@ -93,8 +94,7 @@ export function stashOrEmitRestoreNotice(state: SessionState, text: string): voi
   }
 }
 
-/** R4-A S3②：重投被斬 turn 的共用投遞體（原 maybeReprompInterruptedTurn 內聯邏輯）。 */
-export function dispatchInterruptedTurn(state: SessionState, body: NonNullable<SessionState["lastPromptBody"]>, gen: number): void {
+/** R4-A S3②：重投被斬 turn 的共用投遞體（原 maybeReprompInterruptedTurn 內聯邏輯）。 */export function dispatchInterruptedTurn(state: SessionState, body: NonNullable<SessionState["lastPromptBody"]>, gen: number): void {
   fetch(`${OPENCODE_URL}/session/${state.opencodeSessionId}/prompt_async`, {
     method: "POST",
     headers: opencodeHeaders(),
@@ -201,6 +201,31 @@ export function maybeReprompInterruptedTurn(state: SessionState): void {
 // 內存 miss 時從 DB lazy reload（進程重啟後的會話恢復路徑）。
 // 選 lazy 而非啟動全量載入：冷會話佔多數，lazy 免付啟動成本、不把殭屍
 // session 釘在內存，且 reaper 的 idle 規則照常生效。
+
+/**
+ * REQ-D2b（2026-09-23）：重啟恢復時的 steer 命令身份收口。
+ *
+ * 會話從 DB 恢復 = 上一條進程（可能）死過。此刻 pendingSteers（volatile）已經不存在，
+ * 而持久層的 steer_commands 表還記得每一條命令的最後狀態：
+ *   * 若是 dispatched（投遞已發出、沒等到確認）→ 落 uncertain：**不知道**上游收沒收到，
+ *     說 failed 是假話、重新投遞是同一條指引送第二次（本刀要禁的事故）；
+ *   * 若是 queued（進程中斷於投遞前）→ 同樣落 uncertain：隊列是 volatile 的，永不自動重發。
+ * 兩個都上報「未確認·未重送」（reason: restart_unconfirmed / restart_never_dispatched）。
+ *
+ * 幀走 emitToSession → 進 replayBuffer：重連的客戶端帶 Last-Event-ID 續傳時會收到，
+ * 徽章不會停在舊的「排队中」。零記錄＝零動作（無 steer 的會話與改動前逐位等價）。
+ */
+function recoverUnconfirmedSteers(state: SessionState): void {
+  try {
+    for (const frame of recoverSteerCommandsOnRevive(state)) {
+      emitToSession(state, "steer.status", frame.data)
+    }
+  } catch (e) {
+    // 恢復失敗不得阻止會話恢復（身份層是補強，不是會話活著的必要條件）。
+    console.error(`[gateway] steer ledger recovery failed for ${state.sessionId}:`, e)
+  }
+}
+
 export function hydrateFromDb(id: string): SessionState | null {  const row = loadSessionById(id)
   if (!row) return null
   const state = hydrateRow(row) as unknown as SessionState
@@ -221,6 +246,7 @@ export function hydrateFromDb(id: string): SessionState | null {  const row = lo
     console.error(`[gateway] workflow restore failed for ${state.sessionId}:`, e)
   }
   console.log(`[gateway] session restored from db: ${state.sessionId} (opencode ${state.opencodeSessionId})`)
+  recoverUnconfirmedSteers(state)
   maybeReprompInterruptedTurn(state)
   return state
 }
@@ -281,6 +307,7 @@ export function findSessionByOpenCodeId(opencodeSessionId: string): SessionState
     console.error(`[gateway] workflow restore failed for ${state.sessionId}:`, e)
   }
   console.log(`[gateway] session restored from db (event fan-out): ${state.sessionId}`)
+  recoverUnconfirmedSteers(state)
   maybeReprompInterruptedTurn(state)
   return state
 }

@@ -11,7 +11,7 @@ import {
   type DragEvent,
   type KeyboardEvent,
 } from "react";
-import { ArrowUp, ImagePlus, Loader2, Square, X } from "lucide-react";
+import { ArrowUp, ImagePlus, Loader2, Navigation, Square, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   toAgentAttachmentRef,
@@ -62,6 +62,18 @@ export interface AgentComposerProps {
    * 用户得到「按下了」的反馈且不能连按。缺省 false = 行为与不传时逐位元一致。
    */
   stopPending?: boolean;
+  /**
+   * REQ-D2（2026-09-22）：回合进行中＝可引导（steer）。
+   *
+   * 为真且输入框有字时，送出钮换成「引导」语义：图标由 ↑ 换成方向标、
+   * title 说明这条会作为指引插进当前回合、不打断它——与同一位置的停止钮
+   * （空输入框时的红方块）语义彻底分开：**空框＝停止，有字＝引导**。
+   *
+   * 状态真相不在这里：这条指引到底「已注入本回合」还是「排队中·本回合结束后
+   * 生效」，由网關 steer.status 帧决定，落在用户气泡的徽章上。这里只负责让
+   * 按钮不冒充停止。缺省 false = 渲染与不传时逐位元一致。
+   */
+  steerActive?: boolean;
   /**
    * 外部（面板）在途：这条送出还没落地，或本輪还没真正开始——空態首發要先建號
    * 鑄票，網關還要把 prompt 送進 opencode 才回 ack（实測 10–15s）。
@@ -211,6 +223,7 @@ function AgentComposerComponent({
   prefill,
   onPrefillConsumed,
   onStop,
+  steerActive = false,
   stopPending = false,
   externalSendPending = false,
 }: AgentComposerProps) {
@@ -847,6 +860,8 @@ function AgentComposerComponent({
               onClick={handleSend}
               disabled={disabled || !canSend}
               aria-label="发送"
+              title={steerActive ? "引导本轮：这条会插进当前回合，不打断它" : undefined}
+              data-steer={steerActive ? "true" : undefined}
               aria-busy={sending}
               className={cn(
                 // 2026-09-20 暴君細化：36px 圓鈕、主色實底保留（全畫面唯一的重音），
@@ -869,6 +884,10 @@ function AgentComposerComponent({
             >
               {sending ? (
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              ) : steerActive ? (
+                /* REQ-D2：回合中送出的不是「新消息」而是「引导」——方向标替掉 ↑，
+                   与「停止」的红方块两不相犯。 */
+                <Navigation className="h-4 w-4" aria-hidden="true" />
               ) : (
                 <ArrowUp className="h-4 w-4" aria-hidden="true" />
               )}

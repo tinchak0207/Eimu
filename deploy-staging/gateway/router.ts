@@ -26,6 +26,8 @@ import { handleCreateSession, handleEventStream, handleConfirm } from "./session
 import { handleSendMessage } from "./messages-gw.ts"
 import { turnMetricsSnapshot } from "./metrics-gw.ts"
 import { handleQuestion } from "./questions-gw.ts"
+// REQ-D2（2026-09-22）：steer 回合中引導受理端點（純代數在 steer-core.ts）。
+import { handleSteer } from "./steer-gw.ts"
 import { handleTranscript, handleAbortSession } from "./session-read.ts"
 import { handleQuota } from "./quota-ledger.ts"
 import { handleCanvasStateRead, handleTimelineRoutes, handleConfirmStatus, handleResumeSession, handleSessionKey, handleSessionTasks, handleOptimizePrompt, handleExtractLessons } from "./internal-http.ts"
@@ -594,6 +596,14 @@ if (req.method === "POST" && pathname === "/agent/v1/settings") {
     m = pathname.match(/^\/agent\/v1\/sessions\/([^/]+)\/abort$/)
     if (req.method === "POST" && m) {
       return handleAbortSession(key, m[1])
+    }
+
+    // REQ-D2：回合中追加指引（steer）。與 /messages 分開是刻意的——語義不同
+    //（不終止當前回合、不另起用戶訊息），前端據回應的 status 顯示
+    // 「已注入本回合」或「已排隊，下一回合生效」。
+    m = pathname.match(/^\/agent\/v1\/sessions\/([^/]+)\/steer$/)
+    if (req.method === "POST" && m) {
+      return handleSteer(key, m[1], req)
     }
 
     m = pathname.match(/^\/agent\/v1\/sessions\/([^/]+)$/)

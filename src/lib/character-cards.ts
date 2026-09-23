@@ -12,6 +12,10 @@
 
 import { toReferenceImageRole } from "./image-types";
 import type { ReferenceImageRole } from "./image-types";
+import { normalizeLineageLinks } from "./lineage";
+import type { LineageLink } from "./lineage";
+import { ASSET_KEY_DELIMITER, GHOST_ASSET_SCOPE, normalizeAssetScope } from "./asset-scope";
+import type { AssetScope } from "./asset-scope";
 
 /** 卡種類：角色卡（外觀鎖定）/ 場景卡（環境鎖定）/ 風格卡（畫風鎖定）。 */
 export type CharacterCardKind = "character" | "scene" | "style";
@@ -51,6 +55,21 @@ export interface CharacterCard {
   negativePrompt?: string;
   /** LoRA 關聯（可選）：引用既有 lora versionId，不建新體系。 */
   loraIds?: string[];
+  /**
+   * REQ-D1 資產血統：這張卡的直接來源鏈（例如「存為卡片」時登記的歷史來源）。
+   * 只存在卡本體供人看的「溯源」抽屜；不進 canvas 節點 metadata、
+   * 不進 compactMetadataForAgent（裁決②：agent 不讀血統）。缺省＝來源不明。
+   */
+  lineage?: LineageLink[];
+  /** parents 曾超上限被截尾的顯式標記。 */
+  lineageTruncated?: boolean;
+  /**
+   * REQ-B2 歸屬（個人 / 項目）：缺省＝personal（既有卡零改動）。
+   * 只給人看（項目資產庫面板的歸屬標記與顯式分享入口）——
+   * **裁決排除**（同 D1 lineage 先例）：不進 canvas 節點 metadata、
+   * 不進 toNodeMetadata、不進 compactMetadataForAgent。
+   */
+  scope?: AssetScope;
   createdAt: string;
   updatedAt: string;
 }
@@ -77,11 +96,27 @@ function boundedString(value: unknown, max: number): string | null {
   return clean && clean.length <= max ? clean : null;
 }
 
+/**
+ * 卡 id 邊界（REQ-B2）：在長度界之上**拒絕含保留分隔符 `:` 的 id**。
+ * 理由：`:` 是作用域層確定性鍵（share/mount）的段分隔符，含它的 id 在舊版裸拼接鍵下
+ * 可與別的 (kind, id) 組合撞鍵 → 授權跨資產別名。截斷/改寫 id 都不行（會斷掉 cardIds
+ * 與既有引用），故一律 fail-closed 拒收（回 null）。
+ */
+function usableCardId(value: unknown): string | null {
+  const clean = boundedString(value, MAX_CARD_ID_LENGTH);
+  if (!clean || clean.includes(ASSET_KEY_DELIMITER)) return null;
+  for (const ch of clean) {
+    const code = ch.codePointAt(0) ?? 0;
+    if (code < 0x20 || code === 0x7f) return null;
+  }
+  return clean;
+}
+
 /** 清洗單張卡：欄位缺損返回 null（API 與 store 共用同一收口）。 */
 export function normalizeCharacterCard(payload: unknown): CharacterCard | null {
   if (!payload || typeof payload !== "object") return null;
   const c = payload as Partial<CharacterCard>;
-  const id = boundedString(c.id, MAX_CARD_ID_LENGTH);
+  const id = usableCardId(c.id);
   const name = boundedString(c.name, MAX_CARD_NAME_LENGTH);
   if (!id || !name) return null;
   const now = new Date().toISOString();
@@ -103,6 +138,12 @@ export function normalizeCharacterCard(payload: unknown): CharacterCard | null {
   const loraIds = (Array.isArray(c.loraIds) ? c.loraIds : [])
     .filter((v): v is string => typeof v === "string" && v.trim().length > 0)
     .slice(0, MAX_CARD_LORA_IDS);
+  // REQ-D1：血統欄位復用 ./lineage 的清洗收口（非法條目丟、上限截尾並顯式標記）。
+  const lineageRaw = Array.isArray(c.lineage) ? normalizeLineageLinks(c.lineage) : null;
+  // REQ-B2 作用域：同樣走 ./asset-scope 的清洗收口（缺省＝personal 且省略欄位）。
+  // 回 null＝鬼狀態（owner=project 卻無 projectId）：**寫回 GHOST_ASSET_SCOPE**（不降格成 personal），
+  // 該卡在任何上下文都不可見/不可用（D3：降格＝把歸屬不明的項目資產變成人人可用的個人資產）。
+  const scope = normalizeAssetScope(c.scope);
   return {
     id,
     name,
@@ -111,6 +152,17 @@ export function normalizeCharacterCard(payload: unknown): CharacterCard | null {
     references,
     ...(negativePrompt ? { negativePrompt } : {}),
     ...(loraIds.length ? { loraIds } : {}),
+    ...(lineageRaw && lineageRaw.parents.length
+      ? {
+          lineage: lineageRaw.parents,
+          ...(lineageRaw.truncated || c.lineageTruncated === true ? { lineageTruncated: true } : {}),
+        }
+      : {}),
+    ...(scope === null
+      ? { scope: { ...GHOST_ASSET_SCOPE } }
+      : scope.owner === "project"
+        ? { scope }
+        : {}),
     createdAt: typeof c.createdAt === "string" ? c.createdAt : now,
     updatedAt: typeof c.updatedAt === "string" ? c.updatedAt : now,
   };

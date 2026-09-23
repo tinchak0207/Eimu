@@ -1,3 +1,5 @@
+import type { FailureRecord } from "./failure-record";
+
 export type GenerationSource = "web" | "biz" | "canary";
 export type GenerationKind = "image_generate" | "image_edit" | "video_generate" | "tts" | "avatar" | "lipsync";
 export type RoutingClass = "generic" | "firefly_only" | "hub_only";
@@ -83,6 +85,11 @@ export interface GenerationJob {
   leaseExpiresAt: Date | null;
   failureClass: FailureClass | null;
   failureDetail: string | null;
+  /**
+   * FG-01：版本化失敗記錄（原生欄位逐字保留、cause 遞迴）。null = 無失敗或記錄缺失。
+   * 產品解釋只住在 record.explanation，永不回寫 failureClass/failureDetail 的來源事實。
+   */
+  failureRecord: FailureRecord | null;
   result: GenerationJobResult | null;
   createdAt: Date;
   startedAt: Date | null;

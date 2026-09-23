@@ -68,6 +68,15 @@ export const ERROR_RULES: ErrorRule[] = [
     human: "输入内容太长，超出了模型单次可读的上限。我会在本轮结束后自动压缩上下文再继续；若反复出现，建议让我分章/分段处理。",
   },
   {
+    // 2026-09-21 e2e 实锤：视频生成被上游合规过滤器 451 legal_error 永久拒绝
+    // （prompt 内容审查不通过或账号/地区无视频权益）。永久拒绝不可重试。
+    name: "upstream-compliance-rejection",
+    pattern: /compliance filter|legal_error|lacks (?:video )?entitlement/i,
+    class: "content",
+    retryable: false,
+    human: "上游内容安全审查拒绝了这次生成（451），这是永久拒绝：同一提示词重试大概率同样被拒。建议调整提示词中可能触发审查的表述后重新生成，或更换其他模型。",
+  },
+  {
     name: "no-supplier-capability",
     pattern: /no enabled supplier capability matches/i,
     class: "unknown",

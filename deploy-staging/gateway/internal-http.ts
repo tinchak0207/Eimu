@@ -227,6 +227,7 @@ export async function handleResumeSession(req: Request): Promise<Response> {
   state.turnReasoningChars = 0
   state.turnRetries = 0
   state.turnAborted = false
+  state.turnAbortSource = undefined // D2-1b：新輪起點清中止來源（與 turnAborted 同點）
   state.retryQueued = false
   state.turnUpstreamError = null
   // R2-A 看門狗：resume 輪同樣要兜 turn 未啟動。

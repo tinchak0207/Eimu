@@ -23,6 +23,9 @@ import {
   RerunDialog,
 } from "@/components/history";
 import type { HistoryRerunMode } from "@/components/history";
+import { LineageDrawer } from "@/components/lineage/LineageDrawer";
+import { entryToLineageView } from "@/lib/lineage-view";
+import type { LineageRecordView } from "@/lib/lineage";
 import "@/components/history/history.css";
 
 /**
@@ -101,6 +104,8 @@ export function HistoryClient() {
   const [notice, setNotice] = useState<string | null>(null);
   /** 「再来 N 组 / 微调变体」目标记录 + 模式：非 null 时弹出重跑对话框。 */
   const [rerunTarget, setRerunTarget] = useState<{ entry: HistoryEntry; mode: HistoryRerunMode } | null>(null);
+  /** REQ-D1：溯源抽屉的目标记录（页面级单例，历史卡与灯箱共用）。 */
+  const [lineageEntry, setLineageEntry] = useState<HistoryEntry | null>(null);
 
   // ── 查询与 URL 同步 ───────────────────────────────────────
 
@@ -254,6 +259,30 @@ export function HistoryClient() {
     },
     [runSearch, urlQuery],
   );
+
+  // ── REQ-D1 溯源抽屉（页面级单例；历史卡与灯箱的「溯源」入口共用）────
+  const handleShowLineage = useCallback((entry: HistoryEntry) => {
+    setLineageEntry(entry);
+  }, []);
+
+  /**
+   * 抽屜逐級跳轉：血統節點的把手能對上當前列表裡的記錄時，直接開那條的燈箱並關抽屜
+   * （返回 true 回絕抽屜自己的就地鉆入）；對不上（例如資產卡在歷史頁沒有落點）
+   * 返回 false，抽屜就地鉆入該級鏈條，誠實且零死鏈。
+   */
+  const handleLineageJump = useCallback((view: LineageRecordView) => {
+    const jobId = view.selfHandles.jobId;
+    const assetId = view.selfHandles.assetId;
+    const index = history.entries.findIndex((item) =>
+      (jobId !== undefined && (item.taskId === jobId || item.generationId === jobId || item.id === jobId)) ||
+      (assetId !== undefined && item.id !== "" && `history-${item.id}` === assetId) ||
+      (assetId !== undefined && item.results.some((result) => result.resultId && result.resultId === assetId)),
+    );
+    if (index < 0) return false;
+    setLineageEntry(null);
+    setLightboxIndex(index);
+    return true;
+  }, [history.entries]);
 
   const handleDownload = useCallback(async (entry: HistoryEntry) => {
     // 视频记录的结果里只有 videoUrl，没有 image/imageUrl。历史卡片既然已经把
@@ -509,6 +538,7 @@ export function HistoryClient() {
             onOpenAgent={handleOpenAgent}
             onRerun={handleRerun}
             onRerunVariant={handleRerunVariant}
+            onShowLineage={handleShowLineage}
           />
         )}
       </div>
@@ -532,6 +562,7 @@ export function HistoryClient() {
         onDelete={handleDelete}
         onRerun={handleRerun}
         onRerunVariant={handleRerunVariant}
+        onShowLineage={handleShowLineage}
       />
 
       {rerunTarget && (
@@ -540,6 +571,15 @@ export function HistoryClient() {
           mode={rerunTarget.mode}
           onClose={() => setRerunTarget(null)}
           onDone={handleRerunDone}
+        />
+      )}
+
+      {lineageEntry && (
+        <LineageDrawer
+          host={entryToLineageView(lineageEntry)}
+          hostKindLabel="生成记录"
+          onClose={() => setLineageEntry(null)}
+          onJump={handleLineageJump}
         />
       )}
     </div>

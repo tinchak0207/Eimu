@@ -12,7 +12,8 @@ import type { CharacterCard } from "./character-cards";
 
 const CARD_SCHEMA_VERSION = 1;
 const INDEX_GENERATIONS_KEPT = 2;
-const MAX_CARDS_PER_USER = 100;
+/** 每用戶卡片上限（寫入時截尾；REQ-B2b 掛用建副本前先驗容量，超限誠實拒絕而非靜默丟卡）。 */
+export const MAX_CARDS_PER_USER = 100;
 const INDEX_CACHE_TTL_MS = 3_000;
 
 const memoryStore = new Map<number, CharacterCard[]>();

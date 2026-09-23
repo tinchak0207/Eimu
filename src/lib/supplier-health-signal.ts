@@ -111,6 +111,72 @@ export async function readSupplierHealthSignal(
   }
 }
 
+/**
+ * 按渠道分组的判活读法（REQ-C2 统计视图用）。**与上面 readSupplierHealthSignal
+ * 的判据逐字同源**（同一檔、同一组条件 = scheduler withHealthyAccount 的同一把尺），
+ * 差别只有两点：
+ *   1) 分组键是渠道（supplier.id）而不是模型；
+ *   2) 保留诚实第三态——当前生效能力记录为 0 的渠道回 capabilities=0，
+ *      判定权交调用方（statistics-projection 会画成 unknown），绝不猜成「健康」或「不可用」。
+ * 只读 SELECT，一条写语句都没有。DB 不可达时抛错，由调用方决定降级（回空清单，不猜）。
+ */
+export interface SupplierChannelHealthRow {
+  channel_id: string;
+  label: string;
+  /** 当前生效且启用的能力条数（count(DISTINCT) 抵掉 account 交叉积）。 */
+  capabilities: string | number;
+  /** 其中「供应商+账户都健康未冷却、且能力本身可用」的条数。 */
+  schedulable_capabilities: string | number;
+  reason: string;
+  success_count: string | number;
+  failure_count: string | number;
+  last_success_at: string | null;
+  last_failure_at: string | null;
+}
+
+export async function readSupplierChannelHealth(
+  sql: GenerationSql = getGenerationSql(),
+): Promise<SupplierChannelHealthRow[]> {
+  return sql<SupplierChannelHealthRow[]>`
+    SELECT supplier.id AS channel_id,
+           supplier.label AS label,
+           count(DISTINCT capability.id)
+             FILTER (WHERE capability.is_current AND capability.enabled) AS capabilities,
+           count(DISTINCT capability.id)
+             FILTER (
+               WHERE capability.is_current
+                 AND capability.enabled
+                 AND supplier.enabled
+                 AND supplier.health_status <> 'disabled'
+                 AND (supplier.cooldown_until IS NULL OR supplier.cooldown_until <= now())
+                 AND account.enabled
+                 AND account.health_status <> 'disabled'
+                 AND (account.cooldown_until IS NULL OR account.cooldown_until <= now())
+             ) AS schedulable_capabilities,
+           CASE
+             WHEN count(DISTINCT capability.id)
+               FILTER (WHERE capability.is_current AND capability.enabled) = 0
+               THEN '渠道无当前生效能力记录，账本无据可判'
+             WHEN NOT (supplier.enabled
+                       AND supplier.health_status <> 'disabled'
+                       AND (supplier.cooldown_until IS NULL OR supplier.cooldown_until <= now()))
+               THEN '执行侧供应商冷却或禁用'
+             ELSE '执行侧账户冷却或禁用'
+           END AS reason,
+           supplier.success_count AS success_count,
+           supplier.failure_count AS failure_count,
+           supplier.last_success_at AS last_success_at,
+           supplier.last_failure_at AS last_failure_at
+    FROM supplier
+    LEFT JOIN supplier_capability capability ON capability.supplier_id = supplier.id
+    LEFT JOIN supplier_account account ON account.supplier_id = supplier.id
+    GROUP BY supplier.id, supplier.label, supplier.enabled, supplier.health_status,
+             supplier.cooldown_until, supplier.success_count, supplier.failure_count,
+             supplier.last_success_at, supplier.last_failure_at
+    ORDER BY supplier.id
+  `;
+}
+
 const PROXY_TIMEOUT_MS = 15_000;
 
 /**

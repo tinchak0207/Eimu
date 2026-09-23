@@ -5,6 +5,8 @@ import path from "node:path"
 import { loadUserSettings, sweepStaleRows } from "./persistence"
 import { initSubagent, recoverReworkRunsOnStartup } from "./subagent"
 import { setDirectorEmitter, setDirectorSessionResolver } from "./director"
+import { setSteerTurnDeliverer } from "./steer-gw.ts"
+import { handleSendMessage } from "./messages-gw.ts"
 import { resolveSession, sessions, findSessionByOpenCodeId, teardownSession, deleteOpencodeSession } from "./sessions-core.ts"
 import { emitToSession } from "./sse-core.ts"
 import { corsOriginFor, corsHeaders, encoder, sseTickets, uploadTickets } from "./auth-gw.ts"
@@ -49,6 +51,21 @@ setDirectorEmitter((sid, name, data) => {
 setDirectorSessionResolver((sid) => {
   const st = resolveSession(sid)
   return st ? { sessionId: st.sessionId, apiKey: st.apiKey } : undefined
+})
+
+// ─── REQ-D2（2026-09-22）：steer 回合中引導的投遞縫 ───
+// 回合收尾時待投的 steer 要變成「下一回合」，走的必須是既有用戶訊息受理鏈
+//（handleSendMessage：記憶注入/計時/閘門/壓縮讓位全套語義），不另造投遞輪子。
+// 這條縫是為了不讓 steer-gw → messages-gw → opencode-client → opencode-event-handler
+// 繞成新環；合成 Request 只為滿足既有簽名，body 與前端送出的 shape 一致。
+setSteerTurnDeliverer(async (state, text) => {
+  const req = new Request(`http://gateway.internal/agent/v1/sessions/${state.sessionId}/messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content: text }),
+  })
+  const res = await handleSendMessage(state.apiKey, state.sessionId, req)
+  return res.ok
 })
 
 const server = Bun.serve({
@@ -175,7 +192,7 @@ async function wakeSessionForSubagent(
     const content =
       `【子代理${verdict}·系统自动唤醒】subagent ${shortId}（label="${run.label}"）已${verdict}。` +
       (run.status === "ok" ? `结果摘要：${payload}` : `失败原因：${payload}`) +
-      `\n请基于以上真实结果继续推进（汇总/补派/返工），并向用户简报。若尚有其他子代理在跑，等其余唤醒到齐再汇总（可用 subagent_status 工具查询，禁止 bash sleep 轮询）。`
+      `\n请基于以上真实结果立即继续推进（汇总/补派/返工），并简报当前进度。若尚有其他子代理在跑，可用 subagent_status 工具查询并在简报里说明还剩几路在跑；注意：最终成品未交付前，禁止宣称「已全部完成」，禁止结束回合等待用户——没有可推进动作时也要说明下一步计划。`
     // 刀 1（2026-09-19）：喚醒摘要收集（Jev 測謊題的事實面；有界 16 條，session.idle 消費）。
     state.jevGateSummaries = [...(state.jevGateSummaries ?? [] as string[]), content.slice(0, 300)].slice(-16)
     const body = { ...beastAgentField(state), parts: [{ type: "text", text: content }] }
@@ -192,6 +209,7 @@ async function wakeSessionForSubagent(
     state.turnReasoningChars = 0
     state.turnRetries = 0
     state.turnAborted = false
+    state.turnAbortSource = undefined // D2-1b：新輪起點清中止來源（與 turnAborted 同點）
     state.retryQueued = false
     state.turnUpstreamError = null
     state.turnToolStarted = false

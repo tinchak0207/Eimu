@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useCallback, useMemo, useState } from "react";
-import { AlertTriangle, Bot, Boxes, Check, Coins, CopyPlus, Download, FileQuestion, Loader2, Play, RotateCcw, SlidersHorizontal, Star, Trash2, Workflow } from "lucide-react";
+import { AlertTriangle, Bot, Boxes, Check, Coins, CopyPlus, Download, FileQuestion, GitBranch, Loader2, Play, RotateCcw, SlidersHorizontal, Star, Trash2, Workflow } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ParticleSeaWaiting } from "@/components/ParticleSeaWaiting";
 import { formatCoins, formatModelLabel, formatRelativeTime, inferEntryKind, primaryModelId } from "@/lib/history-types";
@@ -26,6 +26,8 @@ export interface HistoryCardProps {
   onRerun?: (entry: HistoryEntry) => void;
   /** 微调变体：改提示词/模型/尺寸后再批量重跑。 */
   onRerunVariant?: (entry: HistoryEntry) => void;
+  /** REQ-D1：打开这条记录的「溯源」抽屉（血统链，只给人看）。缺席时不挂入口。 */
+  onShowLineage?: (entry: HistoryEntry) => void;
   /**
    * D-18：交给 AI 助理继续做。只有「有可用内容」的卡才挂这颗按钮——
    * 纯信息卡不挂。这里的判据是这条记录得有 prompt 可以交接过去，
@@ -95,6 +97,7 @@ function HistoryCardComponent({
   onOpenAgent,
   onRerun,
   onRerunVariant,
+  onShowLineage,
 }: HistoryCardProps) {
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageFailed, setImageFailed] = useState(false);
@@ -348,6 +351,13 @@ function HistoryCardComponent({
         {onOpenAgent && promptText.length > 0 && (
           <CardAction label="交给 AI 助理继续做" onClick={() => onOpenAgent(entry)}>
             <Bot className="h-3.5 w-3.5" />
+          </CardAction>
+        )}
+        {/* REQ-D1 溯源抽屉入口：所有历史卡都挂（来源不明的记录也要能进来看到
+            「来源不明」这四个字，藏起来才是骗人）。 */}
+        {onShowLineage && (
+          <CardAction label="溯源" onClick={() => onShowLineage(entry)}>
+            <GitBranch className="h-3.5 w-3.5" />
           </CardAction>
         )}
         <CardAction label="删除" tone="danger" onClick={() => onDelete(entry.id)}>

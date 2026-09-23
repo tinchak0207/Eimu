@@ -149,12 +149,14 @@ test("canvas workstation chat panel keeps the composer inside the panel", () => 
   // transcript 的滚动接住，输入区会被推出面板外（用户截图：底部只见
   // 被裁掉的「思考过程」最后一行、输入框整体不可见）。加固规则：
   //  - 面板给 min-height:0 / max-height 兜底（bottom 已定界，双保险）
-  //  - section.lg-card 拿 flex:1 之外再显式 min-height:0 + overflow:hidden，
-  //    不许 agent 面把卡片按内容撑高
+  //  - section.lg-card 拿 flex:0 1 auto（2026-09-24 用戶版面方案：卡高隨內容、
+  //    面板內垂直置中，取代舊「fill 拉滿全高」裁定）再顯式 min-height:0 +
+  //    overflow:hidden——內容超高時由 flex-shrink 封頂、內部滾動接手，
+  //    不许 agent 面把卡片按内容撑高到溢出面板
   //  - 非 lg-card 兄弟（如 agentBaseline 撤回条）shrink-0，不抢高度
   //  - composer 锚点 shrink-0，永不被 flex 压没
   assert.match(source, /\.canvas-chat-panel \{[^}]*min-height: 0;[^}]*max-height: calc\(100dvh - 1\.5rem[^}]*\}/);
-  assert.match(source, /\.canvas-chat-scroll-fill > section\.lg-card \{[^}]*flex: 1 1 0%;[^}]*min-height: 0;[^}]*overflow: hidden;/);
+  assert.match(source, /\.canvas-chat-scroll-fill > section\.lg-card \{[^}]*flex: 0 1 auto;[^}]*min-height: 0;[^}]*overflow: hidden;/);
   assert.match(source, /\.canvas-chat-scroll-fill > :not\(section\.lg-card\) \{ flex-shrink: 0; \}/);
   assert.match(source, /\.agent-composer-anchor \{ flex-shrink: 0; \}/);
 });

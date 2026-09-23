@@ -85,7 +85,7 @@ export function buildHistoryRerunPlan(
   const imageSize = overrideSize ?? entry.workflow?.imageSize ?? entry.workflow?.imageSizes?.[0];
   const outputResolution: "1k" | "2k" = entry.workflow?.qualityProfile === "print" ? "2k" : "1k";
 
-  const workflow: Record<string, unknown> | null = entry.workflow ? { ...entry.workflow } : null;
+  const workflow: Record<string, unknown> | null = entry.workflow ? { ...entry.workflow } : {};
   if (workflow) {
     // 每个任务单张：原配方的张数/并发/预估字段不属于单次重跑，剥掉防止误导落盘。
     delete workflow.copies;
@@ -96,6 +96,10 @@ export function buildHistoryRerunPlan(
       workflow.imageSize = overrideSize;
       workflow.imageSizes = [overrideSize];
     }
+    // REQ-D1 掛鉤 c：源記錄 id 隨配方帶上——源不是任務隊列任務（無 taskId，
+    // retry_of_job_id 無處可落）時，job 投影仍能從這個欄位組出 rerun 血統；
+    // 有 taskId 時它只是冗餘旁註，投影以 retryOfTaskId 為準。
+    workflow.sourceHistoryId = entry.id;
   }
 
   const retryOfTaskId = entry.taskId?.trim() || null;

@@ -28,6 +28,7 @@ import {
 import { compactMetadataForAgent } from "@/hooks/canvas/canvas-chat-types";
 import { toNodeMetadata } from "./canvas/layout";
 import { runShortDramaTool } from "./shortdrama-domain";
+import { normalizeAssetShare } from "./asset-scope";
 
 /** 照 AID 契約順序的全形 21 欄樣本。 */
 function fullShot(overrides: Partial<StoryboardScriptShot> = {}): StoryboardScriptShot {
@@ -685,4 +686,91 @@ test("端到端（專案接線）：專案鎖定卡 + 節點比例經接線真�
   // segment_duration 仍如實 block（本接線沒有段長來源，不補假值）
   assert.equal(byId.get("segment_duration")?.passed, false);
   assert.ok(args.missing.includes("segmentDurationSeconds"));
+});
+
+// ─────────────────────────────────────────── ⑧ REQ-B2-2 生成卡注入的作用域裁決
+
+/** proj-a 的角色卡 + 一張個人卡（兩態：項目歸屬 / personal）。 */
+const scopedCards: StoryboardQcCardRef[] = [
+  { id: "card-in-a", name: "項目A角色", kind: "character", scope: { owner: "project", projectId: "proj-a" } },
+  { id: "card-personal", name: "個人卡", kind: "character" },
+];
+const scopedProject = { cardIds: ["card-in-a", "card-personal"] };
+
+test("B2-2 生成卡注入：跨項目未分享的卡不得進鎖定集合（個人卡零回歸、未給上下文逐位不變）", () => {
+  // 未給 scope 上下文 → 既有行為逐位不變（零回歸：既有呼叫端不受影響）。
+  const legacy = storyboardQcContextFromProject(scopedProject, { cards: scopedCards });
+  assert.deepEqual(legacy.context.lockedCharacterCardIds, ["card-in-a", "card-personal"]);
+  assert.deepEqual(legacy.outOfScopeCardIds, []);
+  assert.equal(legacy.context.cards?.length, 2);
+
+  // proj-b：proj-a 的卡不可用 → 不進鎖定集合，如實回報；個人卡照用。
+  const inB = storyboardQcContextFromProject(scopedProject, {
+    cards: scopedCards,
+    scope: { viewerUserId: 42, projectId: "proj-b", shares: [] },
+  });
+  assert.deepEqual(inB.context.lockedCharacterCardIds, ["card-personal"]);
+  assert.deepEqual(inB.outOfScopeCardIds, ["card-in-a"]);
+  assert.deepEqual(inB.unresolvedCardIds, [], "被作用域拒掉的卡不是『查不到實體』（兩態分開）");
+  assert.deepEqual(inB.context.cards?.map((c) => c.id), ["card-personal"], "注入上下文不得夾帶不可見的卡實體");
+
+  // proj-a：本項目 → 可用（不是無條件拒絕）。
+  const inA = storyboardQcContextFromProject(scopedProject, {
+    cards: scopedCards,
+    scope: { viewerUserId: 42, projectId: "proj-a", shares: [] },
+  });
+  assert.deepEqual(inA.context.lockedCharacterCardIds, ["card-in-a", "card-personal"]);
+  assert.deepEqual(inA.outOfScopeCardIds, []);
+
+  // 無項目上下文（null）→ 項目歸屬的卡不可用，個人卡照用。
+  const noCtx = storyboardQcContextFromProject(scopedProject, {
+    cards: scopedCards,
+    scope: { viewerUserId: 42, projectId: null, shares: [] },
+  });
+  assert.deepEqual(noCtx.context.lockedCharacterCardIds, ["card-personal"]);
+  assert.deepEqual(noCtx.outOfScopeCardIds, ["card-in-a"]);
+});
+
+test("B2-2 生成卡注入：顯式分享後跨項目可用；撤銷後回到不可用", () => {
+  const shared = normalizeAssetShare({
+    assetKind: "card",
+    assetId: "card-in-a",
+    fromProjectId: "proj-a",
+    toProjectId: "proj-b",
+    createdAt: "2026-09-22T00:00:00.000Z",
+  });
+  assert.ok(shared);
+  const inB = storyboardQcContextFromProject(scopedProject, {
+    cards: scopedCards,
+    scope: { viewerUserId: 42, projectId: "proj-b", shares: [shared] },
+  });
+  assert.deepEqual(inB.context.lockedCharacterCardIds, ["card-in-a", "card-personal"]);
+  assert.deepEqual(inB.outOfScopeCardIds, []);
+
+  // 撤銷後立刻回到不可用（記錄留痕不刪）。
+  const revoked = normalizeAssetShare({
+    assetKind: "card",
+    assetId: "card-in-a",
+    fromProjectId: "proj-a",
+    toProjectId: "proj-b",
+    createdAt: "2026-09-22T00:00:00.000Z",
+    revokedAt: "2026-09-22T01:00:00.000Z",
+  });
+  assert.ok(revoked);
+  const afterRevoke = storyboardQcContextFromProject(scopedProject, {
+    cards: scopedCards,
+    scope: { viewerUserId: 42, projectId: "proj-b", shares: [revoked] },
+  });
+  assert.deepEqual(afterRevoke.context.lockedCharacterCardIds, ["card-personal"]);
+  assert.deepEqual(afterRevoke.outOfScopeCardIds, ["card-in-a"]);
+
+  // 跨 owner：本函式的卡清單一律視為「呼叫者自己的卡」（真源 listCharacterCards(userId)），
+  // 故跨 owner 的裁決不在本純函式內——由使用路徑的 store 層負責
+  // （見 asset-library 的 isAssetUsable / filterCardIdsForProject 的跨 owner 斷言）。
+  // 這裡只釘住「不可見即不可用」在本函式的落點：卡的 ownerUserId 只能是呼叫者。
+  const emptyCards = storyboardQcContextFromProject(
+    { cardIds: ["card-in-a"] },
+    { cards: [], scope: { viewerUserId: 42, projectId: "proj-a", shares: [] } },
+  );
+  assert.deepEqual(emptyCards.unresolvedCardIds, ["card-in-a"], "無卡實體仍走『不猜』路徑");
 });

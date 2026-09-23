@@ -29,6 +29,9 @@
       "world_bible_extract": false,
       "keyframe_render": false,
       "search_web": false,
+      "workflow_start": false,
+      "workflow_update_node": false,
+      "workflow_status": false,
       "question": true
     }
   },
@@ -126,9 +129,6 @@
       "workflow_disconnect": false,
       "workflow_generate": false,
       "workflow_rerun_node": false,
-      "workflow_start": false,
-      "workflow_status": false,
-      "workflow_update_node": false,
       "world_bible_extract": false
     }
   },
@@ -228,9 +228,6 @@
       "workflow_disconnect": false,
       "workflow_generate": false,
       "workflow_rerun_node": false,
-      "workflow_start": false,
-      "workflow_status": false,
-      "workflow_update_node": false,
       "world_bible_extract": false
     }
   },
@@ -328,9 +325,6 @@
       "workflow_disconnect": false,
       "workflow_generate": false,
       "workflow_rerun_node": false,
-      "workflow_start": false,
-      "workflow_status": false,
-      "workflow_update_node": false,
       "world_bible_extract": false
     }
   },
@@ -421,9 +415,6 @@
       "workflow_disconnect": false,
       "workflow_generate": false,
       "workflow_rerun_node": false,
-      "workflow_start": false,
-      "workflow_status": false,
-      "workflow_update_node": false,
       "world_bible_extract": false
     }
   },
@@ -518,10 +509,7 @@
       "workflow_connect": false,
       "workflow_disconnect": false,
       "workflow_generate": false,
-      "workflow_rerun_node": false,
-      "workflow_start": false,
-      "workflow_status": false,
-      "workflow_update_node": false
+      "workflow_rerun_node": false
     }
   },
   "motion-director": {
@@ -618,9 +606,6 @@
       "workflow_disconnect": false,
       "workflow_generate": false,
       "workflow_rerun_node": false,
-      "workflow_start": false,
-      "workflow_status": false,
-      "workflow_update_node": false,
       "world_bible_extract": false
     }
   },
@@ -720,9 +705,6 @@
       "workflow_disconnect": false,
       "workflow_generate": false,
       "workflow_rerun_node": false,
-      "workflow_start": false,
-      "workflow_status": false,
-      "workflow_update_node": false,
       "world_bible_extract": false
     }
   },
@@ -823,9 +805,6 @@
       "workflow_disconnect": false,
       "workflow_generate": false,
       "workflow_rerun_node": false,
-      "workflow_start": false,
-      "workflow_status": false,
-      "workflow_update_node": false,
       "world_bible_extract": false
     }
   }

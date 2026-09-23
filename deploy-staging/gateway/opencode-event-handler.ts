@@ -22,6 +22,9 @@ import { loadUserSettings } from "./persistence.ts"
 import { normalizeUserSettings } from "./sessions-http.ts"
 import { maybeCompactSession } from "./messages-gw.ts"
 import { opencodeErrorCode, opencodeErrorMessage } from "./emit-helpers.ts"
+// REQ-D2（2026-09-22）：回合收尾投遞待投的 steer（空隊列＝零動作，無 steer 的回合逐位等價）。
+// 方向與既有 maybeCompactSession 同款（本檔 → messages-gw 家族），不新增環。
+import { flushPendingSteers } from "./steer-gw.ts"
 
 // TODO(來自 events-translate.ts): eventSessionId(index.ts 2715)/handleToolPartUpdate(index.ts 3309)
 //   —— W7 並行在建 events-translate.ts，建成後改真 import。
@@ -502,6 +505,11 @@ export function handleOpencodeEvent(event: any): void {
         releasePendingVideoWorkflows(state)
         // 回合結束是滾動摘要壓縮的觸發點：此刻無在途生成、訊息數穩定。
         void maybeCompactSession(state)
+        // REQ-D2（2026-09-22）：本回合排隊中的 steer（回合執行中用戶追加的指引）
+        // 在此投遞——空隊列零動作（與改動前逐位等價）；turnAborted 時 planSteerFlush
+        // 全數作廢（停止優先），不投遞。放在 turn.done 之後：前端先看到本回合收尾，
+        // 才看到下一回合的引導語開場。fire-and-forget（投遞失敗只上報 failed 幀）。
+        void flushPendingSteers(state)
         break
       }
       default:

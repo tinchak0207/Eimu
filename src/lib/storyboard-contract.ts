@@ -22,7 +22,13 @@
  *   - 雙白名單兩處：`layout.ts toNodeMetadata`（讀取端）+ `canvas-chat-types.ts
  *     compactMetadataForAgent`（上行壓縮端）。漏一端 = 刷新/換裝置後 21 欄憑空消失
  *     （2026-09-03 director SVG 事故同型病灶，見記憶 canvas-snapshot-compressor-director-whitelist-fix）。
+ *
+ * REQ-B2（2026-09-23）：本檔多了一個**純邏輯**依賴 `./asset-scope`（零 IO、不成環），
+ * 只為在「專案 cardIds → 鎖定卡」這條**生成注入路徑**上過一次作用域裁決
+ * （`options.scope` 給了才生效；未給＝既有行為逐位不變）。
  */
+import { canUseAsset } from "./asset-scope";
+import type { AssetScope, AssetShareRecord } from "./asset-scope";
 
 /**
  * 21 欄名稱，**順序即 AID 契約順序**（逐字取自 `doc/提示词开发指南.md` §分鏡脚本 輸出欄位表）。
@@ -346,6 +352,23 @@ export interface StoryboardQcCardRef {
   id: string;
   name: string;
   kind: string;
+  /**
+   * REQ-B2 作用域（可選）。缺省＝personal（本帳號所有項目可用）。
+   * 只在 `options.scope` 給了上下文時生效；未給＝既有行為逐位不變（零回歸）。
+   */
+  scope?: AssetScope;
+}
+
+/**
+ * REQ-B2 作用域裁決上下文（可選）。給了它＝卡清單與 `project.cardIds` 都先過
+ * `canUseAsset`（= `resolveAssetVisibility` 的唯一入口）：跨項目、未顯式分享的卡
+ * **不可見即不可用**——不進鎖定集合、不進注入上下文，另在 `outOfScopeCardIds` 如實回報。
+ */
+export interface StoryboardQcScopeContext {
+  viewerUserId: number;
+  /** 當前項目 id；null＝無項目上下文（項目歸屬的卡一律不可用，個人卡照用）。 */
+  projectId: string | null;
+  shares: readonly AssetShareRecord[];
 }
 
 /** 每鏡每欄的**值來源**（合法推導的可審計痕跡；缺者不在表內，改進 `missing`）。 */
@@ -565,11 +588,39 @@ export function storyboardQcContextFromProject(
     cards?: readonly StoryboardQcCardRef[];
     production?: Readonly<Record<string, StoryboardQcProductionFields>>;
     segmentDurationSeconds?: number;
+    /**
+     * REQ-B2 作用域上下文。未給 → 既有行為逐位不變（零回歸）；
+     * 給了 → 卡與 cardIds 先過作用域裁決（不可見即不可用）。
+     */
+    scope?: StoryboardQcScopeContext;
   },
-): { context: StoryboardQcContext; unresolvedCardIds: string[] } {
+): { context: StoryboardQcContext; unresolvedCardIds: string[]; outOfScopeCardIds: string[] } {
   const cards = options?.cards ?? [];
+  const scope = options?.scope;
+  // 作用域裁決：唯一入口 canUseAsset（= resolveAssetVisibility）。未給上下文＝全放行
+  // （＝本刀之前的行為，逐位不變）；給了＝跨項目未分享的卡在此不可用。
+  const usableCard = (card: StoryboardQcCardRef): boolean => {
+    if (!scope) return true;
+    const id = typeof card?.id === "string" ? card.id.trim() : "";
+    if (!id) return true; // 無 id 的卡既非可見也非不可見，走原有「不猜」路徑
+    return canUseAsset(
+      { id, kind: "card", scope: card.scope, ownerUserId: scope.viewerUserId },
+      { viewerUserId: scope.viewerUserId, projectId: scope.projectId, shares: scope.shares },
+    );
+  };
+  const visibleCards = scope ? cards.filter(usableCard) : cards;
+  // 被作用域拒掉的卡 id：與「查不到卡實體」分開如實回報（兩態不混）。
+  const outOfScopeCardIds: string[] = [];
+  if (scope) {
+    for (const card of cards) {
+      if (usableCard(card)) continue;
+      const id = typeof card?.id === "string" ? card.id.trim() : "";
+      if (id && !outOfScopeCardIds.includes(id)) outOfScopeCardIds.push(id);
+    }
+  }
+
   const kindById = new Map<string, string>();
-  for (const card of cards) {
+  for (const card of visibleCards) {
     if (!card || typeof card.id !== "string" || typeof card.kind !== "string") continue;
     const id = card.id.trim();
     if (!id) continue;
@@ -585,6 +636,8 @@ export function storyboardQcContextFromProject(
   for (const raw of project?.cardIds ?? []) {
     if (!isNonBlankString(raw)) continue;
     const id = raw.trim();
+    // 不可見即不可用：跨項目未分享的卡不進鎖定集合（已在上方如實回報，不重複算未解析）。
+    if (outOfScopeCardIds.includes(id)) continue;
     const kind = kindById.get(id);
     if (kind === "character") {
       if (!lockedCharacterCardIds.includes(id)) lockedCharacterCardIds.push(id);
@@ -613,13 +666,14 @@ export function storyboardQcContextFromProject(
 
   const context: StoryboardQcContext = {
     ...(options?.production ? { production: options.production } : {}),
-    cards,
+    // 注入上下文只帶可用（可見）的卡：不可見即不可用，卡實體也不例外。
+    cards: visibleCards,
     ...(Object.keys(shotMetadata).length > 0 ? { shotMetadata } : {}),
     ...(lockedCharacterCardIds.length > 0 ? { lockedCharacterCardIds } : {}),
     ...(lockedSceneCardIds.length > 0 ? { lockedSceneCardIds } : {}),
     ...(typeof options?.segmentDurationSeconds === "number" ? { segmentDurationSeconds: options.segmentDurationSeconds } : {}),
   };
-  return { context, unresolvedCardIds };
+  return { context, unresolvedCardIds, outOfScopeCardIds };
 }
 
 export interface StoryboardQcGateArgs {

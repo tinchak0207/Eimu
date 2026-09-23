@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getGenerationSql, type GenerationSql } from "./database";
 import { JOB_EVENT, emitJobEvent } from "./job-events";
+import { readFailureRecord, serializeFailureRecord, type FailureRecord } from "./failure-record";
 import type {
   CreateGenerationJobInput,
   FailureClass,
@@ -42,6 +43,24 @@ function jsonValue<T>(value: unknown, fallback: T): T {
   return value as T;
 }
 
+/**
+ * 落庫用：把 FailureRecord 轉成 postgres.js 的 jsonb 參數（null 走 SQL NULL）。
+ * 測試用的錄音 mock 沒有 `sql.json`，故退回原物件（真實客戶端由此包裝成 jsonb）。
+ * 回傳 `never` 是 postgres.js tagged template 的參數型別慣例（同檔其它 jsonb 寫法）。
+ */
+function failureRecordParam(sql: GenerationSql, record: FailureRecord | null | undefined): never {
+  if (!record) return null as never;
+  const value = JSON.parse(serializeFailureRecord(record)) as unknown;
+  const helper = (sql as unknown as { json?: (input: unknown) => unknown }).json;
+  const param = typeof helper === "function" ? helper.call(sql, value) : value;
+  return param as never;
+}
+
+/** 讀回用：jsonb → FailureRecord（未知版本／壞結構回 null，不靜默當成當前版本）。 */
+export function mapFailureRecordColumn(value: unknown): FailureRecord | null {
+  return readFailureRecord(value);
+}
+
 export function mapGenerationJob(row: Row): GenerationJob {
   return {
     id: String(row.id),
@@ -77,6 +96,7 @@ export function mapGenerationJob(row: Row): GenerationJob {
     leaseExpiresAt: nullableDate(row.lease_expires_at),
     failureClass: row.failure_class === null ? null : row.failure_class as FailureClass,
     failureDetail: row.failure_detail === null ? null : String(row.failure_detail),
+    failureRecord: mapFailureRecordColumn(row.failure_record_json),
     result: jsonValue<GenerationJobResult | null>(row.result_json, null),
     createdAt: asDate(row.created_at),
     startedAt: nullableDate(row.started_at),
@@ -458,11 +478,17 @@ export async function failGenerationAttempt(input: {
   providerHttpStatus?: number;
   retryAfterAt?: Date | null;
   latencyMs: number;
+  /**
+   * FG-01：版本化失敗記錄。原生欄位（name/message/code/status/requestId/metadata/
+   * cause 遞迴）逐字落庫，與 failureClass/failureDetail 這組產品解釋分欄存放。
+   */
+  failureRecord?: FailureRecord | null;
 }, sql: GenerationSql = getGenerationSql()): Promise<void> {
   await sql.begin(async (tx) => {
     await tx`
       UPDATE generation_attempt
       SET status = 'failed', failure_class = ${input.failureClass}, failure_detail = ${input.failureDetail.slice(0, 2000)},
+          failure_record_json = ${failureRecordParam(sql, input.failureRecord)},
           provider_task_id = ${input.providerTaskId ?? null},
           provider_http_status = ${input.providerHttpStatus ?? null}, retry_after_at = ${input.retryAfterAt ?? null},
           finished_at = now(), latency_ms = ${input.latencyMs}, updated_at = now()
@@ -659,6 +685,8 @@ export interface GenerationAttemptSummary {
   failureClass: string | null;
   /** 上游失敗原文（僅 failed attempt 有）。worker 診斷排除鏈時帶給 supplier_excluded 訊息。 */
   failureDetail: string | null;
+  /** FG-01：版本化失敗記錄（原生欄位逐字保留）；讀不出來（未知版本/壞結構）為 null。 */
+  failureRecord: FailureRecord | null;
   supplierLabel: string;
   supplierBaseUrl: string;
 }
@@ -719,12 +747,13 @@ export async function listGenerationAttemptsForJob(jobId: string, sql: Generatio
     latency_ms: number | null;
     failure_class: string | null;
     failure_detail: string | null;
+    failure_record_json: unknown;
     supplier_label: string;
     supplier_base_url: string;
   }[]>`
     SELECT attempt.attempt_no, attempt.output_index, attempt.status,
            attempt.provider_http_status, attempt.latency_ms, attempt.failure_class,
-           attempt.failure_detail,
+           attempt.failure_detail, attempt.failure_record_json,
            supplier.label AS supplier_label, supplier.base_url AS supplier_base_url
     FROM generation_attempt attempt
     JOIN supplier ON supplier.id = attempt.supplier_id
@@ -739,6 +768,7 @@ export async function listGenerationAttemptsForJob(jobId: string, sql: Generatio
     latencyMs: row.latency_ms === null ? null : Number(row.latency_ms),
     failureClass: row.failure_class,
     failureDetail: row.failure_detail === null ? null : String(row.failure_detail),
+    failureRecord: mapFailureRecordColumn(row.failure_record_json),
     supplierLabel: row.supplier_label,
     supplierBaseUrl: row.supplier_base_url,
   }));
@@ -749,11 +779,14 @@ export async function failGenerationJob(input: {
   workerId?: string;
   failureClass: FailureClass;
   failureDetail: string;
+  /** FG-01：終態失敗也要留版本化原生記錄（帳本之外的可回溯真相）。 */
+  failureRecord?: FailureRecord | null;
 }, sql: GenerationSql = getGenerationSql()): Promise<void> {
   const rows = await sql<{ id: string }[]>`
     UPDATE generation_job
     SET status = 'failed', failure_class = ${input.failureClass},
-        failure_detail = ${input.failureDetail.slice(0, 2000)}, finished_at = now(),
+        failure_detail = ${input.failureDetail.slice(0, 2000)},
+        failure_record_json = ${failureRecordParam(sql, input.failureRecord)}, finished_at = now(),
         lease_owner = NULL, lease_expires_at = NULL, heartbeat_at = NULL, updated_at = now()
     WHERE id = ${input.jobId}
       AND (${input.workerId ?? null}::text IS NULL OR lease_owner = ${input.workerId ?? null})

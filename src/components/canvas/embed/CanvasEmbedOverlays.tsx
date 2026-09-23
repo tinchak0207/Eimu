@@ -3,10 +3,13 @@
  * 本組件必須「無條件掛載」：<style> 的 .ce-embed-* 選擇器同時作用於組件殼的頂欄/根容器，
  * 浮層全關時仍渲染樣式塊，否則殼層樣式失效。
  */
+import { useState } from "react";
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import type { UseCanvasChatReturn } from "@/hooks/use-canvas-chat";
 import { summarizeCreationFlow } from "@/lib/canvas/creation-flow-panel";
 import { cn } from "@/lib/utils";
+import { LineageDrawer } from "@/components/lineage/LineageDrawer";
+import { cardToLineageView } from "@/lib/lineage-view";
 import { CreationFlowPanel } from "./CreationFlowPanel";
 import { formatRelative, toDvh } from "./embed-helpers";
 
@@ -51,6 +54,11 @@ export function CanvasEmbedOverlays({
   viewportSizeRef,
   setSelectedIds,
 }: CanvasEmbedOverlaysProps) {
+  // REQ-D1：資產卡「溯源」抽屜——卡片面板每行一顆入口，單例抽屜掛在本浮層。
+  const [lineageCardId, setLineageCardId] = useState<string | null>(null);
+  const lineageCard = lineageCardId
+    ? canvas.characterCards.find((card) => card.id === lineageCardId) ?? null
+    : null;
   return (
     <>
       <style>{`
@@ -213,6 +221,15 @@ export function CanvasEmbedOverlays({
                   >
                     {active ? "解锁" : "锁定"}
                   </button>
+                  {/* REQ-D1 溯源入口：卡本体的血统抽屉（「存为卡片」登记的来源可查）。 */}
+                  <button
+                    type="button"
+                    aria-label={`溯源卡 ${card.name}`}
+                    onClick={() => setLineageCardId(card.id)}
+                    className="shrink-0 cursor-pointer rounded-lg px-1.5 py-1 text-[11.5px] text-foreground/45 hover:bg-black/5 hover:text-[#007AFF]"
+                  >
+                    溯源
+                  </button>
                   <button
                     type="button"
                     aria-label={`删除卡 ${card.name}`}
@@ -226,6 +243,14 @@ export function CanvasEmbedOverlays({
             })
           )}
         </div>
+      )}
+
+      {lineageCard && (
+        <LineageDrawer
+          host={cardToLineageView(lineageCard)}
+          hostKindLabel="资产卡"
+          onClose={() => setLineageCardId(null)}
+        />
       )}
 
       {/* G2（2026-09-16）：作品/劇集面板——與角色卡同款左側彈層；資料全部取自

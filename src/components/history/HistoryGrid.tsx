@@ -29,6 +29,8 @@ export interface HistoryGridProps {
   /** 再来 N 组 / 微调变体（payload 级批量重跑）。缺席时卡片不挂。 */
   onRerun?: (entry: HistoryEntry) => void;
   onRerunVariant?: (entry: HistoryEntry) => void;
+  /** REQ-D1：溯源抽屉入口（与灯箱共用页面级单例抽屉）。 */
+  onShowLineage?: (entry: HistoryEntry) => void;
 }
 
 export function HistoryGrid({
@@ -48,6 +50,7 @@ export function HistoryGrid({
   onOpenAgent,
   onRerun,
   onRerunVariant,
+  onShowLineage,
 }: HistoryGridProps) {
   const sentinelRef = useRef<HTMLDivElement>(null);
   /** 放在 ref 里，这样 observer 不必因为回调变化而反复重建。 */
@@ -113,6 +116,7 @@ export function HistoryGrid({
                 {...(onOpenAgent ? { onOpenAgent } : {})}
                 {...(onRerun ? { onRerun } : {})}
                 {...(onRerunVariant ? { onRerunVariant } : {})}
+                {...(onShowLineage ? { onShowLineage } : {})}
               />
             ))}
           </div>

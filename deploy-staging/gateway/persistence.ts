@@ -21,6 +21,7 @@
  */
 
 import { Database } from "bun:sqlite"
+import type { SteerCommand, SteerLedgerStore } from "./steer-identity.ts"
 
 // ---- 型別 ----
 
@@ -160,6 +161,35 @@ export function initPersistence(): void {
         created_at INTEGER NOT NULL
       )
     `)
+    // REQ-D2b（2026-09-23）：steer 命令身份（tombstone）持久化。**復用同一 bun:sqlite 實例**
+    // （同一 DB 檔、同一連線，非自造第二套持久層，與 subagent_reworks / critic_passes 同慣例）。
+    //
+    // 為什麼要它：F-D2 的去重住在記憶體 pendingSteers（上限 3），重啟即失——同一條指引
+    // 可以被投遞第二次。這裡在**投遞之前**凍結 steer_id + payload_hash（含 content 與
+    // turn/session 標識），終態即 tombstone。
+    //
+    // tombstone 生命週期（刻意設計，勿「順手清理」）：
+    //   * 本表**不提供 delete**：沒有 deleteSteerCommand、也不進 sweepStaleRows。
+    //   * deleteSessionRow（clear/刪會話）只動 sessions 表 → tombstone 逐條存活。
+    //   * 終態 row 永不刪除：刪掉它就等於把「這條已經投遞過」的記憶抹去，重啟後又能重放。
+    //     代價是表單調成長（每會話 ≤ 用戶實際發過的指引條數），由 idx_steer_commands_session 支撐查詢。
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS steer_commands (
+        steer_id     TEXT PRIMARY KEY,
+        session_id   TEXT NOT NULL,
+        owner_key    TEXT NOT NULL,
+        alias_ids    TEXT NOT NULL,
+        payload_hash TEXT NOT NULL,
+        payload      TEXT NOT NULL,
+        state        TEXT NOT NULL,
+        created_at   INTEGER NOT NULL,
+        dispatched_at INTEGER,
+        settled_at   INTEGER,
+        reason       TEXT,
+        updated_at   INTEGER NOT NULL
+      )
+    `)
+    db.exec("CREATE INDEX IF NOT EXISTS idx_steer_commands_session ON steer_commands(session_id)")
     console.log(`[gateway] session persistence ready: ${DB_PATH}`)
   } catch (e) {
     degrade(e, "init")
@@ -522,6 +552,148 @@ export function deleteCriticPass(sessionId: string): void {
   } catch (e) {
     degrade(e, "deleteCriticPass")
   }
+}
+
+// ---- REQ-D2b（2026-09-23）：steer 命令身份（tombstone）存取 ----
+// 純語義（狀態機／payload 凍結／受理判定）在 steer-identity.ts；本節只做 SQLite 存取，
+// 實作 SteerLedgerStore 縫（見 steer-identity.createSteerLedger）。
+// **刻意不提供刪除函數**：終態 row 就是 tombstone，刪掉它＝重啟後同一條指引又能被投遞
+// （見 initPersistence 的建表註釋）。clear/刪會話（deleteSessionRow）與 sweepStaleRows
+// 都不碰本表。
+
+interface SteerCommandRow {
+  steer_id: string
+  session_id: string
+  owner_key: string
+  alias_ids: string
+  payload_hash: string
+  payload: string
+  state: string
+  created_at: number
+  dispatched_at: number | null
+  settled_at: number | null
+  reason: string | null
+}
+
+function parseSteerRow(row: SteerCommandRow): SteerCommand {
+  let aliases: string[] = []
+  try {
+    const parsed = JSON.parse(row.alias_ids) as unknown
+    if (Array.isArray(parsed)) aliases = parsed.filter((x): x is string => typeof x === "string")
+  } catch {
+    aliases = [] // 壞損的別名欄不影響主鍵身份（寧可少認別名，不可拒真身）
+  }
+  return {
+    steerId: row.steer_id,
+    sessionId: row.session_id,
+    ownerKey: row.owner_key,
+    aliasIds: aliases,
+    payloadHash: row.payload_hash,
+    payload: row.payload,
+    state: row.state as SteerCommand["state"],
+    at: row.created_at,
+    ...(typeof row.dispatched_at === "number" ? { dispatchedAt: row.dispatched_at } : {}),
+    ...(typeof row.settled_at === "number" ? { settledAt: row.settled_at } : {}),
+    ...(typeof row.reason === "string" ? { reason: row.reason } : {}),
+  }
+}
+
+const STEER_ROW_COLS =
+  "steer_id, session_id, owner_key, alias_ids, payload_hash, payload, state, created_at, dispatched_at, settled_at, reason"
+
+/**
+ * 讀一條命令：先按主鍵，再按別名 id（同文去重時第二個 id 是同一個邏輯 steer，
+ * 它的重放同樣必須命中 tombstone）。
+ *
+ * D-7b（2026-09-23）修掉的假命中：別名查詢原本是 `alias_ids LIKE '%"<id>"%'`，而 steer id
+ * 的字元集（steer-core.STEER_ID_PATTERN）**含底線 `_`**——`_` 是 LIKE 的單字元通配符，
+ * 於是查 `steer-p_q` 會命中別人的別名 `steer-pXq`：一顆與本請求無關的假 409（不會重複
+ * 投遞，但把「不存在」說成了「已存在」）。改成 JSON 陣列的元素級**精確等值**比對
+ * （json_each）：不靠轉義、也不靠「id 不含引號」這類外部假設，任何 id 都不會誤命中他人。
+ */
+export function loadSteerCommand(steerId: string): SteerCommand | null {
+  if (!db || !steerId) return null
+  try {
+    const row = db.query(`SELECT ${STEER_ROW_COLS} FROM steer_commands WHERE steer_id = ?`).get(steerId) as SteerCommandRow | null
+    if (row) return parseSteerRow(row)
+    const byAlias = db
+      .query(
+        // CASE 保序：json_valid 為假時不求值 json_each——壞損的別名欄只讓「自己」不被認作別名
+        // （與 parseSteerRow 同一個政策：寧可少認別名，不可讓一行壞資料炸掉整次查詢）。
+        `SELECT ${STEER_ROW_COLS} FROM steer_commands
+          WHERE CASE WHEN json_valid(steer_commands.alias_ids)
+                     THEN EXISTS (SELECT 1 FROM json_each(steer_commands.alias_ids) WHERE json_each.value = ?)
+                     ELSE 0 END`,
+      )
+      .get(steerId) as SteerCommandRow | null
+    return byAlias ? parseSteerRow(byAlias) : null
+  } catch (e) {
+    degrade(e, "loadSteerCommand")
+    return null
+  }
+}
+
+/** 讀一個會話的命令全表（重啟恢復掃描用；按建立時間升序＝投遞順序）。 */
+export function loadSteerCommandsForSession(sessionId: string): SteerCommand[] {
+  if (!db || !sessionId) return []
+  try {
+    const rows = db
+      .query(`SELECT ${STEER_ROW_COLS} FROM steer_commands WHERE session_id = ? ORDER BY created_at ASC`)
+      .all(sessionId) as SteerCommandRow[]
+    return rows.map(parseSteerRow)
+  } catch (e) {
+    degrade(e, "loadSteerCommandsForSession")
+    return []
+  }
+}
+
+/**
+ * 寫入/更新一條命令（steer_id 主鍵 UPSERT）。fail-open 同全局策略。
+ * 注意：寫入即「身份已凍結」，即使後續流程失敗也不回滾——寧可留下未終結的記錄
+ * （重啟恢復會把它落 uncertain），不可留下「查不到＝可重放」的漏洞。
+ */
+export function saveSteerCommand(c: SteerCommand): void {
+  if (!db || !c.steerId) return
+  try {
+    db.query(
+      `INSERT INTO steer_commands
+        (steer_id, session_id, owner_key, alias_ids, payload_hash, payload, state, created_at, dispatched_at, settled_at, reason, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(steer_id) DO UPDATE SET
+         session_id = excluded.session_id,
+         owner_key = excluded.owner_key,
+         alias_ids = excluded.alias_ids,
+         payload_hash = excluded.payload_hash,
+         payload = excluded.payload,
+         state = excluded.state,
+         dispatched_at = excluded.dispatched_at,
+         settled_at = excluded.settled_at,
+         reason = excluded.reason,
+         updated_at = excluded.updated_at`,
+    ).run(
+      c.steerId,
+      c.sessionId,
+      c.ownerKey,
+      JSON.stringify(c.aliasIds ?? []),
+      c.payloadHash,
+      c.payload,
+      c.state,
+      c.at,
+      c.dispatchedAt ?? null,
+      c.settledAt ?? null,
+      c.reason ?? null,
+      Date.now(),
+    )
+  } catch (e) {
+    degrade(e, "saveSteerCommand")
+  }
+}
+
+/** persistence.ts 對 steer-identity 的 SteerLedgerStore 縫實作（生產側唯一接線）。 */
+export const steerCommandStore: SteerLedgerStore = {
+  read: loadSteerCommand,
+  readBySession: loadSteerCommandsForSession,
+  write: saveSteerCommand,
 }
 
 /**

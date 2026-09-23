@@ -63,7 +63,12 @@ export function CanvasChatWorkstation({
             }
             .canvas-ws-backdrop {
               position: fixed;
-              inset: 0;
+              /* 站點 header 留在上面。助理是進站預設面，這層從視口頂蓋下來時
+                 充值／帳號入口就沒了。高度由 #global-navbar 寫進 --site-header-offset。 */
+              top: var(--site-header-offset, 4.25rem);
+              right: 0;
+              bottom: 0;
+              left: 0;
               z-index: 40;
               /* 環境光漸層與 body::after 同一配方（Trans 藍/粉光暈＋160deg 底色）。
                  此層的職責是遮蓋首頁文檔流內容；舊版 #F2F2F7 實底把首頁的彩色
@@ -91,11 +96,11 @@ export function CanvasChatWorkstation({
             }
             .canvas-ws-overlay {
               position: fixed;
-              top: 0;
+              top: var(--site-header-offset, 4.25rem);
               bottom: 0;
-              right: 0;
+              right: var(--site-shell-right, 0px);
               z-index: 50;
-              height: 100dvh;
+              height: auto;
               background: transparent;
               display: flex;
               align-items: center;
@@ -106,13 +111,13 @@ export function CanvasChatWorkstation({
             .canvas-chat-panel {
               position: fixed;
               z-index: 60;
-              top: calc(0.75rem + env(safe-area-inset-top, 0px));
+              top: calc(var(--site-header-offset, 4.25rem) + 0.75rem);
               bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
-              left: 0.75rem;
+              left: var(--site-shell-left, 0.75rem);
               display: flex;
               flex-direction: column;
               min-height: 0;
-              max-height: calc(100dvh - 1.5rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+              max-height: calc(100dvh - var(--site-header-offset, 4.25rem) - 1.5rem - env(safe-area-inset-bottom, 0px));
               max-width: calc(100vw - 1.5rem);
               /* 殼退為形狀宿主：底色/邊框交給內層 section.lg-card 的玻璃材質
                  （0.72 白玻璃＋blur＋specular 亮線），畫布在背後可折射。 */
@@ -127,10 +132,10 @@ export function CanvasChatWorkstation({
               /* 收起態 = 聊天气泡 FAB（2026-08-25 暴君裁定；2026-08-27 尺寸鎖死修復：
                  面板基礎規則的 top/bottom/right 拉伸定位 + width/height:auto 會讓
                  FAB 在移動端撐滿整屏成一個大白橢圓，完全不可用——四邊與尺寸全部顯式固定）。 */
-              top: calc(0.75rem + env(safe-area-inset-top, 0px));
+              top: calc(var(--site-header-offset, 4.25rem) + 0.75rem);
               bottom: auto !important;
               right: auto !important;
-              left: 0.75rem;
+              left: var(--site-shell-left, 0.75rem);
               width: 44px !important;
               height: 44px !important;
               min-width: 0 !important;
@@ -158,22 +163,32 @@ export function CanvasChatWorkstation({
               overscroll-behavior: contain;
               background: transparent;
             }
-            /* 面板態聊天區填滿面板：scroll 容器變縱向 flex、不再自己滾，
-               滾動收進 transcript 內部（agent 面的固定高在 46dvh 抽屜裡會溢出被裁）。 */
+            /* 面板態聊天區：scroll 容器變縱向 flex、不再自己滾，滾動收進
+               transcript 內部（agent 面的固定高在 46dvh 抽屜裡會溢出被裁）。
+               2026-09-24 用戶版面方案：卡高改隨內容（fit-content）並在面板內
+               垂直置中，不再把白卡拉滿全高；內容超高時 flex-shrink 自動吃滿、
+               內部滾動照舊。 */
             .canvas-chat-scroll.canvas-chat-scroll-fill {
               display: flex;
               flex-direction: column;
+              justify-content: center;
               overflow: hidden;
               overflow-y: hidden;
               padding: 0;
             }
             .canvas-chat-scroll-fill > * { min-height: 0; }
             .canvas-chat-scroll-fill > section.lg-card {
-              flex: 1 1 0%;
+              flex: 0 1 auto;
               min-height: 0;
               overflow: hidden;
               margin: 0;
               border-radius: 30px;
+              /* 2026-09-24 用戶版面方案（卡片減法陰影）：壓掉全域 lg-card 的
+                 重陰影與四邊漸變邊框——「深陰影會讓它顯得過時，邊框撐浮感就夠」；
+                 只覆寫 box-shadow/border，lg-card 的玻璃材質（backdrop-filter）
+                 原樣保留。 */
+              box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+              border: 1px solid oklch(0% 0 0 / 6%);
             }
             .canvas-chat-scroll-fill > :not(section.lg-card) { flex-shrink: 0; }
             .agent-composer-anchor { flex-shrink: 0; }
@@ -200,7 +215,7 @@ export function CanvasChatWorkstation({
               .canvas-chat-panel {
                 left: 0;
                 right: 0;
-                top: 0;
+                top: var(--site-header-offset, 4.25rem);
                 bottom: 0;
                 height: auto;
                 width: auto !important;
@@ -214,7 +229,7 @@ export function CanvasChatWorkstation({
               }
               /* FAB 態手機位置：靠左上角（導航欄下方）。 */
               .canvas-chat-rail {
-                top: calc(5rem + env(safe-area-inset-top, 0px));
+                top: calc(var(--site-header-offset, 4.25rem) + 0.75rem);
                 left: 0.5rem;
                 border-radius: 0;
               }
@@ -236,7 +251,7 @@ export function CanvasChatWorkstation({
             style={
               {
                 "--ce-dock-left": `${chatPanelState === "expanded" ? chatPanelWidth + 12 : 64}px`,
-                left: "calc(0.75rem + var(--ce-dock-left, 0px))",
+                left: "calc(var(--site-shell-left, 0.75rem) + var(--ce-dock-left, 0px))",
               } as CSSProperties
             }
           >
@@ -282,7 +297,7 @@ export function CanvasChatWorkstation({
               chatHeaderExtra 不再產出（render prop 簽名保留，傳 undefined）。 */}
           {children(undefined)}
         </div>
-        {/* 面板右緣拖寬手柄（320–560px） */}
+        {/* 面板右緣拖寬手柄（320–720px，2026-09-24 用戶版面方案放寬上限） */}
         <div
           className={inCanvasWorkstation && chatPanelState === "expanded" ? "canvas-chat-resize" : "hidden"}
           onPointerDown={(e) => {
@@ -293,7 +308,7 @@ export function CanvasChatWorkstation({
           onPointerMove={(e) => {
             const d = chatPanelDragRef.current;
             if (!d || d.pointerId !== e.pointerId) return;
-            setChatPanelWidth(Math.min(560, Math.max(320, d.startW + (e.clientX - d.startX))));
+            setChatPanelWidth(Math.min(720, Math.max(320, d.startW + (e.clientX - d.startX))));
           }}
           onPointerUp={(e) => {
             if (chatPanelDragRef.current?.pointerId === e.pointerId) chatPanelDragRef.current = null;

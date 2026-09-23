@@ -122,17 +122,21 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
   const pendingAgentOps = getQueueHeadEvent(agentOpsQueue);
 
   // ── 角色/場景卡域（P2 跨鏡頭一致性）：卡列表 + 項目級鎖定
+  // 項目 id ref 先於卡域建立並注入（REQ-B2b）：卡域的讀取端作用域閘要判「鎖定卡屬不屬於
+  // 當前項目」，讀的就是這一個 ref——卡域在本 hook 之前呼叫，若晚建則閘首幀拿到 null 漏判。
+  const projectIdRef = useRef<string | null>(null);
   const {
     characterCards,
     activeCardIds,
     activeCharacterCards,
     setActiveCardIds,
+    applyMountCopyChange,
     characterCardsRef,
     activeCardIdsRef,
     upsertCharacterCard,
     removeCharacterCard,
     toggleCharacterCard,
-  } = useCanvasCards();
+  } = useCanvasCards({ getProjectId: () => projectIdRef.current });
 
   // ── refs：給不參與 render 的路徑讀最新值
   const canvasRef = useRef(canvas);
@@ -497,13 +501,14 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
 
   // ─────────────────────── 專案持久化（init → debounce → snapshot，順序同原內聯版）
 
-  const { projectIdRef, createdAtRef, saveTimerRef, everHadNodesRef, buildProject } = useCanvasProjectSync({
+  const { createdAtRef, saveTimerRef, everHadNodesRef, buildProject } = useCanvasProjectSync({
     canvasRef,
     viewportRef,
     backgroundRef,
     titleRef,
     budgetRef,
     activeCardIdsRef,
+    projectIdRef,
     projectTypeRef,
     currentStepRef,
     episodesRef,
@@ -942,6 +947,8 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     refreshSavedProjects,
     openSavedCanvas,
     restoreAgentSnapshot,
+    // REQ-B2：項目 id 直讀 ref（ref 由 useCanvasProjectSync 擁有，不另存一份狀態）。
+    getProjectId: () => projectIdRef.current,
     pathFor,
     moveNodes,
     addNodes,
@@ -964,6 +971,7 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     characterCards,
     activeCardIds,
     activeCharacterCards,
+    applyMountCopyChange,
     projectType,
     currentStep,
     episodes,

@@ -24,9 +24,9 @@ import {
   MoreHorizontal,
   Search,
   Settings,
+  SlidersHorizontal,
   Sparkles,
   SquarePen,
-  X,
 } from "lucide-react";
 import {
   hasReflectedParams,
@@ -732,7 +732,7 @@ export function AgentChatSurface({
         面板 Header（2026-09-20 顶栏减负，视觉语言来自已批准的 agent-chat-preview）：
         logo 圆标（lg-tint-blue）+ 「AI 助理」标题 + 极弱状态文字（常态「随时待命」，
         reconnecting / closed 照旧显示原状态文案）+ 右侧三个幽灵钮
-        （新会话 SquarePen / 关闭 X / ⋯ MoreHorizontal）。
+        （新会话 SquarePen / 直接生成 SlidersHorizontal / ⋯ MoreHorizontal）。
         历史 / 资产 / 设定三颗触发钮收进 ⋯ 的 lg-sheet 小菜单——回调还是原有的
         toggleHistory / toggleAssets / 设定弹层，功能不删，只是收纳。
         embedded（工作站面板態）：外層面板已有把手，這裡的把手省掉——單層。
@@ -765,11 +765,11 @@ export function AgentChatSurface({
               <button
                 type="button"
                 onClick={onExit}
-                aria-label="收起"
-                title="收起助理，返回生成模式"
+                aria-label="直接生成"
+                title="直接生成：自己选模型和参数出图"
                 className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 touch-manipulation"
               >
-                <X className="h-[18px] w-[18px]" aria-hidden="true" />
+                <SlidersHorizontal className="h-[18px] w-[18px]" aria-hidden="true" />
               </button>
             )}
             {/* ⋯ 收纳菜单：历史 / 资产 / 设定（icon + 文字行，点击走原有回调）。 */}

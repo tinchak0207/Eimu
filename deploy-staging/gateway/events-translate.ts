@@ -902,6 +902,10 @@ export function triggerIdleStepBreaker(state: SessionState): void {
     timeoutMs: 5000,
   }).catch(() => {})
   state.turnAborted = true
+  // D2-1b（2026-09-23）：來源＝系統（內部斷路器），不是用戶叫停。排隊中的 steer
+  // 只能被「用戶停止」丟棄（停止優先的權威定義見 steer-core.abortIsUserStop）——
+  // 這裡只是換一種方式把同一輪續跑（下面補 nudge 重投），用戶的指引仍然有效。
+  state.turnAbortSource = "system"
   stripStaleTurnTextFromReplay(state)
   // 中止輪的 session.idle 不得再觸發抖動/failover 二次重投：retryQueued 佔位。
   // 本輪的重投就是下面的 nudge；再空轉保持佔位 = 不循環，讓它自然失敗。
@@ -918,6 +922,7 @@ export function triggerIdleStepBreaker(state: SessionState): void {
       })
       if (!res.ok) throw new Error(`status ${res.status}`)
       cur.turnAborted = false
+      cur.turnAbortSource = undefined // 續跑同輪：中止來源隨中止狀態一併清（下一輪／下一次中止重設）
       cur.idleSteps = 0
       cur.stepOpen = false
       cur.stepHasTool = false
@@ -932,6 +937,7 @@ export function triggerIdleStepBreaker(state: SessionState): void {
     } catch (e) {
       console.error(`[gateway] idle-step breaker: nudge resend failed:`, e)
       cur.turnAborted = false
+      cur.turnAbortSource = undefined
       emitToSession(cur, "turn.done", {})
     }
   }, TURN_RETRY_DELAY_MS)

@@ -93,8 +93,11 @@ function statusError(payload: Record<string, unknown>, httpStatus: number): Supp
       : typeof (payload.error as { message?: unknown } | undefined)?.message === "string"
         ? String((payload.error as { message?: unknown }).message)
         : `new-api video API request failed with HTTP ${httpStatus}.`;
+  // status 照既有語義改寫（供應商側失敗，隔離/冷卻行為不動；請勿在此改判）；
+  // upstreamStatus 原樣帶上上游真實狀態，供確定性 4xx 的原生硬停判讀
+  // （D-3：真 400 不得被 502 洗成「可重放」而被重放 20 次）。
   const status = httpStatus === 429 ? 429 : httpStatus === 401 || httpStatus === 403 ? 401 : 502;
-  return new SupplierRequestError(message, status);
+  return new SupplierRequestError(message, status, null, undefined, undefined, undefined, httpStatus);
 }
 
 async function newApiRequest(baseUrl: string, path: string, apiKey: string, init?: { body?: string }): Promise<{ payload: Record<string, unknown>; ok: boolean; status: number }> {

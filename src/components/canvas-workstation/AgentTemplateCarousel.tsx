@@ -986,6 +986,11 @@ export function AgentTemplateCarousel({ templates, onUseTemplate }: AgentTemplat
       {/* 2026-08-25 用户裁定：零文案。页头标题/胶囊、底部标题+痛点+启动按钮+
           「查看初始提示词」全部删除——卡面已带全部信息，正面卡点击即启动。 */}
 
+      {/* 2026-09-24 用戶版面方案·刀1：包一層緊貼 stage 的定位宿主。
+          根 section 是滿版 flex 置中容器（頂到視口底），控制行若 absolute
+          於根，bottom:16px 會落在卡外之下；wrap 高 = stage 高，卡片幾何
+          （stage = 1.2×cardH）全部由既有 JS measure() 驅動，此層零邏輯。 */}
+      <div className="atc-stage-wrap">
       <div
         ref={stageRef}
         className="case-stage"
@@ -1114,7 +1119,7 @@ export function AgentTemplateCarousel({ templates, onUseTemplate }: AgentTemplat
           sr-only 播报保留（无障碍不牺牲），交互入口 = 正面卡点击 + 箭头/圆点。 */}
       <p className="sr-only" aria-live="polite">{`第 ${panel + 1} 张，共 ${COUNT} 张：${cases[panel].name}`}</p>
 
-      <div className="mt-4 flex items-center justify-center gap-3 max-md:gap-1.5">
+      <div className="atc-controls mt-4 flex items-center justify-center gap-3 max-md:gap-1.5">
         {/* 桌面保留箭头；移动端 swipe 转卡即可，箭头只占黄金区（毒舌一审裁定）。 */}
         <button type="button" className="case-arrow lg-float max-md:hidden" onClick={() => step(-1)} aria-label="上一个模板">
           <ChevronLeft className="h-5 w-5" aria-hidden="true" />
@@ -1142,6 +1147,7 @@ export function AgentTemplateCarousel({ templates, onUseTemplate }: AgentTemplat
           <ChevronRight className="h-5 w-5" aria-hidden="true" />
         </button>
       </div>
+      </div>{/* end .atc-stage-wrap：分頁控制行收進卡內的定位宿主（2026-09-24 刀1） */}
 
       {/* 這裡曾經掛著 SVG 位移滤镜 #case-liquid-edge，已移除。
           它是使用者看到的「明顯分層」的成因：feMorphology 的結構元素是**矩形**，

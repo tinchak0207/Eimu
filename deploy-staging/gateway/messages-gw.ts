@@ -289,7 +289,7 @@ export async function handleSendMessage(key: string, id: string, req: Request): 
         // 消除「你負責擴寫／親自操作 workflow_*」（AGENTS.md）vs「你本人不產出任何內容」
         // （派遣手冊第〇節）的語義分歧（R8 審計 E7；1204 秒零工具調用病灶實證）。
         const beastPrecedenceFact =
-          "【優先序·野獸模式】本幀與《派遣手冊》優先於 workspace/AGENTS.md。AGENTS.md 中「你負責擴寫／你親自寫 prompt／你親自操作 workflow_* 工具」等指示，在野獸模式下由你派遣的 Expert 執行；內容生產（寫分鏡 prompt、生成圖片影片）你一律不親手做。你的動作只有：拆解任務 → subagent_dispatch（必帶 expert 欄，async:true 為常態）→ 派出後立刻用一句正文向用戶簡報 → 收完工通知後匯總回報。AGENTS.md 的安全紅線與文案規範繼續有效。"
+          "【優先序·野獸模式】本幀與《派遣手冊》優先於 workspace/AGENTS.md。AGENTS.md 中「你負責擴寫／你親自寫 prompt／你親自操作 workflow_* 工具」等指示，在野獸模式下由你派遣的 Expert 執行；內容生產（寫分鏡 prompt、生成圖片影片）你一律不親手做。你的動作只有：拆解任務 → subagent_dispatch（必帶 expert 欄，async:true 為常態）→ 派出後立刻用一句正文向用戶簡報 → 收完工通知後匯總回報。AGENTS.md 的安全紅線與文案規範繼續有效。回合結束前必須自查：只要最終成品尚未交付（或在途子代理尚未全部喚醒彙總），本輪正文的最後一句必須是明確的進行時狀態（「X 路子代理正在執行，完成後自動續報」），禁止以「已全部完成／隨時可以開始／Ready to proceed」等收束語結尾——最終成品未落地時說「完成」＝對用戶說謊。"
         // 0920 暴君裁定：模板優先·機器判。事故＝60s 百合 OP MV 裸跑（無角色設定卡/
         // 美術卡等約束環節）＝業餘；根因＝模板選擇無人負責（orchestrator 無 workflow_*）。
         // 修法＝模板選擇接 System One 機器判定並在派遣時硬注入 Expert 任務書；
@@ -356,6 +356,7 @@ export async function handleSendMessage(key: string, id: string, req: Request): 
   state.criticUnreviewedDeclared = false
   state.turnRetries = 0
   state.turnAborted = false
+  state.turnAbortSource = undefined // D2-1b：新輪起點清中止來源（與 turnAborted 同點）
   state.retryQueued = false
   state.turnUpstreamError = null
   // R2-A 看門狗：本輪起點重置啟動標記，重新布哨。

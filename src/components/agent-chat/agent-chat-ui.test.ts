@@ -366,9 +366,11 @@ test("D-17 有存档时默认开新对话，不拦人做选择题", () => {
   assert.match(surface, /AI 助理<\/h2>/);
   /*
    * 2026-09-20 Route D 頭部重構：常駐呼吸绿点（bg-emerald-500 animate-pulse）與
-   * bg-slate-300 已移除——新頭部＝lg-tint-blue 圆标 + SquarePen（开新对话）/X
-   * （收起）/MoreHorizontal（⋯）三顆幽靈鈕；「历史记录」触发鈕收进 ⋯ 選單，
-   * aria-label 换成 title="对话历史" 文字行。
+   * bg-slate-300 已移除——新頭部＝lg-tint-blue 圆标 + SquarePen（开新对话）/
+   * SlidersHorizontal（直接生成）/MoreHorizontal（⋯）三顆幽靈鈕；
+   * 「历史记录」触发鈕收进 ⋯ 選單，aria-label 换成 title="对话历史" 文字行。
+   * 2026-09-22 首屏翻面後第三顆鈕語義改寫：它不是「收起助理、回到原本的地方」
+   * （已經沒有原本的地方了），而是「走另一條路：自己选模型和参数直接出图」。
    */
   const surfaceCode = readCode(surface);
   assert.match(surface, /lg-tint-blue/);
@@ -376,7 +378,7 @@ test("D-17 有存档时默认开新对话，不拦人做选择题", () => {
   assert.doesNotMatch(surfaceCode, /bg-slate-300/, "bg-slate-300 已移除");
   assert.match(surface, /title="对话历史"/);
   assert.match(surface, /aria-label="开新对话"/);
-  assert.match(surface, /aria-label="收起"/);
+  assert.match(surface, /aria-label="直接生成"/);
   // 2026-09-05 暴君裁定：多功能欄彈窗水平置中（fixed left-1/2 + -translate-x-1/2），
   // 不再掛在按鈕右下角（舊 absolute top-full right-0 作廢）。
   assert.match(surface, /fixed left-1\/2 .*-translate-x-1\/2/);
@@ -671,7 +673,9 @@ test("D-1 the agent face never grows a second send button or a second textarea",
   // onExit 收起按钮做同一件事）——ActionRow 在 agent 面整组件不渲染（return null），
   // 返回由 Header 承担，底行高度由聊天区 flex-1 吃掉。
   assert.match(code, /if \(displayMode === "agent"\) return null;/);
-  // Header 收起按钮必须真的接着「回 generate」——底行删了之后它是唯一出口。
+  // Header 那顆鈕（SlidersHorizontal）必須真的接著「回 generate」——底行删了
+  // 之后它是首頁直接生圖的唯一入口（2026-09-22 首屏翻面：語義＝走另一條路，
+  // 不是收起，因為首屏本來就在 agent 面、沒有「原本的地方」可回）。
   assert.match(code, /onExit=\{\(\) => onModeChange\("generate"\)\}/);
   // 键盘旁路也要堵掉，否则 Enter 还能从别处触发一次生成。
   assert.match(code, /if \(displayMode === "agent"\) return;/);
@@ -680,10 +684,16 @@ test("D-1 the agent face never grows a second send button or a second textarea",
   // 聊天区内部靠 flex-1 + min-h-0 自己滚，外层必须给定高度。
   // 2026-08-22：高度改为「generate 面实测自然高」锁定（contentRef/contentHeight），
   // 所有模式共用同一外框——不再在组件中写死 clamp 或单一 CSS 变量高度。
+  // 2026-09-22 首屏翻面：高度鎖只在 generate/edit 量測，首屏落在 agent 面時
+  // contentHeight 恆為 null ⇒ 兜底 surfaceHeight 吃 --agent-surface-height，
+  // 等第一次進 generate 量到真高後自動讓位（見 PromptInput 的 surfaceHeight）。
   assert.match(code, /AGENT_SURFACE_HEIGHT = "var\(--agent-surface-height\)"/);
   assert.match(code, /contentRef/);
   assert.match(code, /contentHeight/);
-  assert.match(code, /height: contentHeight/);
+  assert.match(code, /height: surfaceHeight/);
+  // 常量必須真的被餵進 agent 面的兜底分支（此前只斷言宣告字串，宣告留著、
+  // JSX 零引用也照樣過關——那正是它當了死碼的原因）。
+  assert.match(code, /displayMode === "agent" \? AGENT_SURFACE_HEIGHT : null/);
 });
 
 test("ImagePlayground no longer hides itself to make room for the agent", () => {

@@ -370,6 +370,9 @@ function AgentChatPanelComponent({
            输入框为空时送出钮位置变停止钮，不再只能乾等。 */
         onStop={turnActive ? onStopGeneration : undefined}
         stopPending={stopPending}
+        /* REQ-D2：回合进行中＝可引导。空框仍是停止钮（红方块），有字才是引导
+           （方向标）——两个语义在同一位置上按「有没有字」分流，不互相冒充。 */
+        steerActive={turnActive}
         /* 09-18：面板的在途態餵下去——送出钮位置立刻转圈（输入框空白也一样是
            转圈送出钮，不退回 disabled 灰钮），本輪真的开始前不被停止钮分支盖掉。 */
         externalSendPending={sendPending}
@@ -440,12 +443,13 @@ function AgentChatPanelComponent({
              推薦語照常渲染（佔位不動）但強制 disabled＝點不到就不會重複送出（防二次
              計費）；在途回饋交給送出鈕轉圈（AgentComposer sending 態）。 */
           <div className="flex min-h-full flex-col items-center justify-center px-5">
-            <div className="flex w-full flex-col items-center pb-[8vh]">
+            {/* pb-[8vh] 於 2026-09-24 移除：左卡改 fit-content 垂直置中後，這 8vh 是殘留補償，保留會置中偏上。 */}
+            <div className="flex w-full flex-col items-center">
               <h2 className="text-2xl font-semibold tracking-tight text-foreground">想做点什么？</h2>
               <div className="mt-8 w-full [&_.agent-composer]:py-2 [&_.agent-composer]:shadow-[0_16px_48px_rgba(0,0,0,0.10)]">
                 {composerNode}
               </div>
-              <div className="mt-5 flex flex-col items-center gap-1">
+              <div className="mt-5 flex w-full flex-wrap items-center justify-center gap-2">
                 {EXAMPLES.map((ex) => {
                   // 三态：被点的那一颗转圈，其余在途期间禁用（防重复点＝重复计费）。
                   // 建号/首發在飛（sessionStarting/turnActive）＝全部強制禁用，
@@ -460,13 +464,14 @@ function AgentChatPanelComponent({
                       disabled={chipState !== "idle"}
                       aria-busy={chipState === "pending" ? true : undefined}
                       className={cn(
-                        "min-h-11 rounded-lg px-3 text-ios-footnote font-medium text-foreground/55",
-                        "underline-offset-4 transition-colors",
+                        // 2026-09-24 用戶版面方案：純文字行改玻璃膠囊 chip，min-h-11 保底 44px 觸摸靶。
+                        "min-h-11 rounded-full border border-black/[0.06] bg-white/55 px-4 py-2 text-ios-footnote font-medium text-foreground/70",
+                        "transition-colors",
                         chipState === "idle"
-                          ? "cursor-pointer hover:text-foreground/80 hover:underline hover:decoration-foreground/30"
+                          ? "cursor-pointer hover:bg-white/80 hover:text-foreground"
                           : "cursor-not-allowed",
                         chipState === "disabled" && "opacity-50",
-                        // 进行中那一颗：转圈与文字同排（幽灵文字链的既有排版与字级）。
+                        // 进行中那一颗：转圈与文字同排（chip 膠囊的既有排版与字级）。
                         chipState === "pending" && "inline-flex items-center gap-1.5",
                       )}
                     >
