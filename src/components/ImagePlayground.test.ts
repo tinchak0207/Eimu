@@ -91,9 +91,10 @@ test("canvas workstation is a fullscreen overlay with expandable chat panel", ()
   assert.match(source, /const \[chatPanelWidth, setChatPanelWidth\] = useState\(420\)/);
   assert.match(source, /canvas-chat-resize/);
   assert.match(source, /chatPanelState === "rail" && "canvas-chat-rail"/);
-  // 畫布 dock 偏移（面板寬 + 12px 間隙），overlay 自身 left 用它避讓面板。
+  // 畫布 dock 偏移（面板寬 + 12px 間隙），overlay 自身 left 用它避讓面板；
+  // 起點是導覽列實測左緣（--site-shell-left，0924 排版對齊刀），fallback 0.75rem。
   assert.match(source, /--ce-dock-left/);
-  assert.match(source, /left: "calc\(0\.75rem \+ var\(--ce-dock-left, 0px\)\)"/);
+  assert.match(source, /left: "calc\(var\(--site-shell-left, 0\.75rem\) \+ var\(--ce-dock-left, 0px\)\)"/);
   assert.match(embed, /expanded = false/);
   assert.match(nodeView, /enterDelay/);
   assert.match(nodeView, /transitionDelay/);
@@ -155,7 +156,9 @@ test("canvas workstation chat panel keeps the composer inside the panel", () => 
   //    不许 agent 面把卡片按内容撑高到溢出面板
   //  - 非 lg-card 兄弟（如 agentBaseline 撤回条）shrink-0，不抢高度
   //  - composer 锚点 shrink-0，永不被 flex 压没
-  assert.match(source, /\.canvas-chat-panel \{[^}]*min-height: 0;[^}]*max-height: calc\(100dvh - 1\.5rem[^}]*\}/);
+  //  - 面板頂從導覽列下緣起算（--site-header-offset，0924 header 露出刀），
+  //    max-height 同步扣掉該偏移＋上下 0.75rem 留白
+  assert.match(source, /\.canvas-chat-panel \{[^}]*min-height: 0;[^}]*max-height: calc\(100dvh - var\(--site-header-offset[^}]*\}/);
   assert.match(source, /\.canvas-chat-scroll-fill > section\.lg-card \{[^}]*flex: 0 1 auto;[^}]*min-height: 0;[^}]*overflow: hidden;/);
   assert.match(source, /\.canvas-chat-scroll-fill > :not\(section\.lg-card\) \{ flex-shrink: 0; \}/);
   assert.match(source, /\.agent-composer-anchor \{ flex-shrink: 0; \}/);
