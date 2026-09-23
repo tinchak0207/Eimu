@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { BookOpen, History, Images, KeyRound, LogOut } from "lucide-react";
 import { WalletBadge } from "@/components/WalletBadge";
 import {
@@ -64,6 +65,11 @@ function describeAuthError(code: string): string {
 export function Navbar({ className }: NavbarProps) {
   const { user, isLoggedIn, logout, refresh } = useAuth();
   const { toast } = useToast();
+  // 2026-09-24 首秒零回縮：導覽列退縮只屬首頁（助理工作站面）。--ws-navbar-inset
+  // 的 fallback 在首頁指向「面板寬+12px」終態，其他頁恆 0——否則直接 reload
+  // 非首頁時工作站未掛載、無人寫該變數，fallback 會把膠囊無緣無故退縮一格。
+  const pathname = usePathname();
+  const isHome = pathname === "/";
   const [loginPhase, setLoginPhase] = useState<"idle" | "drawing">("idle");
   const [copyingKey, setCopyingKey] = useState(false);
   const [pwaHandoffUrl, setPwaHandoffUrl] = useState<string | null>(null);
@@ -293,14 +299,21 @@ export function Navbar({ className }: NavbarProps) {
           className,
         )}
       >
-        {/* 2026-09-24 暴君裁定「header 往右退縮，讓 AI 助理占上來，吃滿天花板」：
-            聊天面板 expanded 態時 CanvasChatWorkstation 把面板寬+12px 寫進
-            --ws-navbar-inset，本膠囊以 margin-left 退縮讓位、寬度互補——右緣
-            位置與圓角膠囊質感不動＝纯退縮；拖寬時經 0.32s 同曲線過渡同步跟隨
-            （與 .canvas-chat-panel 的 width 過渡同源同拍）。max-md 歸零＝手機
-            全屏抽屜態導覽列不讓位。 */}
+        {/* 2026-09-24 暴君裁定「header 往右退縮，讓 AI 助理占上來，吃滿天花板」＋
+            同刀「首秒零回縮」：margin-left/寬度仍消費 --ws-navbar-inset，但 fallback
+            改指面板寬終態 calc(var(--ws-panel-w)+12px)——SSR 首幀即退縮態，不再
+            等 JS effect 從 0px 動畫退縮（病灶①）。過度動畫的類別已從本行移除：
+            只在 html[data-ws-settled]（工作站掛載穩定後寫）下生效，規則見
+            CanvasChatWorkstation 的 <style> 塊。max-md 歸零＝手機全屏抽屜態
+            導覽列不讓位。非首頁恆 0（isHome 分支）。 */}
         <nav
-          className="lg-bar pointer-events-auto ml-[var(--ws-navbar-inset,0px)] flex w-[calc(100%_-_var(--ws-navbar-inset,0px))] items-center justify-between gap-2 rounded-ios-3xl px-2.5 py-2 transition-[margin-left,width] duration-[320ms] ease-[cubic-bezier(0.2,0.8,0.2,1)] max-md:ml-0 max-md:w-full sm:px-5 sm:py-2.5"
+          className={cn(
+            "lg-bar pointer-events-auto flex items-center justify-between gap-2 rounded-ios-3xl px-2.5 py-2 sm:px-5 sm:py-2.5",
+            isHome
+              ? "ml-[var(--ws-navbar-inset,calc(var(--ws-panel-w,420px)_+_12px))] w-[calc(100%_-_var(--ws-navbar-inset,calc(var(--ws-panel-w,420px)_+_12px)))]"
+              : "ml-0 w-full",
+            "max-md:ml-0 max-md:w-full",
+          )}
           aria-label="主导航"
         >
           {/* 左组：Eimu Logo + QQ 群入口。justify-between 下子元素多于两个会把

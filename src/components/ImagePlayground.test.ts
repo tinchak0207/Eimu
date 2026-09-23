@@ -77,7 +77,10 @@ test("the result column is the canvas alone, with no duplicated chrome", () => {
   assert.match(source, /canvas-ws-overlay/);
   assert.match(source, /\{overlayContent \?\? <CanvasEmbed canvas=\{canvasHost\} expanded \/>\}/);
   assert.match(source, /<ImageDisplay/);
-  assert.match(source, /chatPanelState === "expanded" \? \{ width: chatPanelWidth \}/);
+  // 2026-09-24 首秒零回縮：面板寬不再由 inline style 寫 JS 值（舊斷言釘的
+  // { width: chatPanelWidth } ＝ 420→40vw 回縮元凶），改讀 CSS 單一真相源。
+  assert.match(source, /width: var\(--ws-panel-w\)/);
+  assert.doesNotMatch(source, /width: chatPanelWidth/);
   assert.doesNotMatch(source, /ModelSelect/);
 });
 
@@ -88,12 +91,16 @@ test("canvas workstation is a fullscreen overlay with expandable chat panel", ()
 
   // 工作站：畫布吃滿全場，聊天面板 expanded|rail 兩態 + 右緣拖寬，localStorage 記憶。
   assert.match(source, /const \[chatPanelState, setChatPanelState\] = useState<"expanded" \| "rail">\("expanded"\)/);
-  assert.match(source, /const \[chatPanelWidth, setChatPanelWidth\] = useState\(420\)/);
+  // 2026-09-24 首秒零回縮：寬度態 number|null——null＝CSS 默認（clamp）當終態，
+  // 舊「初始值 420 + mount effect 改 40vw」回縮鏈已拆。
+  assert.match(source, /const \[chatPanelWidth, setChatPanelWidth\] = useState<number \| null>\(null\)/);
   assert.match(source, /canvas-chat-resize/);
   assert.match(source, /chatPanelState === "rail" && "canvas-chat-rail"/);
-  // 畫布 dock 偏移（面板寬 + 12px 間隙），overlay 自身 left 用它避讓面板；
-  // 起點是導覽列實測左緣（--site-shell-left，0924 排版對齊刀），fallback 0.75rem。
+  // 畫布 dock 偏移＝--ws-panel-w 終態＋12px 間隙（不再由 JS 算 chatPanelWidth+12），
+  // overlay 自身 left 用它避讓面板；起點是導覽列實測左緣（--site-shell-left，
+  // 0924 排版對齊刀），fallback 0.75rem。
   assert.match(source, /--ce-dock-left/);
+  assert.match(source, /"--ce-dock-left": chatPanelState === "rail" \? "64px" : "calc\(var\(--ws-panel-w\) \+ 12px\)"/);
   assert.match(source, /left: "calc\(var\(--site-shell-left, 0\.75rem\) \+ var\(--ce-dock-left, 0px\)\)"/);
   assert.match(embed, /expanded = false/);
   assert.match(nodeView, /enterDelay/);
@@ -176,4 +183,54 @@ test("canvas workstation chat panel keeps the composer inside the panel", () => 
   assert.doesNotMatch(read("src/components/agent-chat/AgentChatPanel.tsx"), /agent-empty-state/);
   assert.match(source, /\.canvas-chat-scroll-fill > :not\(section\.lg-card\) \{ flex-shrink: 0; \}/);
   assert.match(source, /\.agent-composer-anchor \{ flex-shrink: 0; \}/);
+});
+
+// 暴君裁定 2026-09-24：「reload 和初始載入時有一堆明顯回縮的過程，破壞首秒體驗」。
+// 根治架構＝單一 CSS 變數真源（--ws-panel-w：默認 clamp 由純 CSS 承擔，SSR 首幀
+// 即新用戶終態）＋ settled 閘（所有 width/left transition 與入場 @keyframes 只在
+// 首幀穩定後開啟，載入零動畫直出終態）。
+test("first paint is the final state: --ws-panel-w single source + settled gate (2026-09-24)", () => {
+  const ws = read("src/components/canvas-workstation/CanvasChatWorkstation.tsx");
+  const panel = read("src/components/canvas-workstation/use-chat-panel.ts");
+  const navbar = read("src/components/Navbar.tsx");
+
+  // ① 單一真相源：CSS 默認＝新用戶終態（clamp 360–720 of 40vw），宣告在
+  //    工作站 <style> 的 :root——與 SSR 首幀同梱，零 JS。
+  assert.match(ws, /--ws-panel-w: clamp\(360px, 40vw, 720px\)/);
+  // ② JS 寫入端只在顯式值（存值/拖寬）時存在，且全部 useLayoutEffect（paint 前）：
+  //    顯式→setProperty px；null→removeProperty 讓位 CSS 默認。
+  assert.match(panel, /useLayoutEffect\(\(\) => \{/);
+  assert.match(panel, /documentElement\.style\.setProperty\("--ws-panel-w"/);
+  assert.match(panel, /documentElement\.style\.removeProperty\("--ws-panel-w"\)/);
+  // 默認寬度不再由 JS 讀 window 发明（420 初始值與視口 40% 換算都是回縮元凶）。
+  assert.doesNotMatch(panel, /innerWidth/);
+  // 落盤只收顯式寬：null（默認）不落盤，防「40vw 活語義被釘死成 px」。
+  assert.match(panel, /if \(chatPanelWidth === null\) return;/);
+
+  // ③ settled 閘：掛載雙 rAF 後才開。CSS 側——面板 width / overlay left 的
+  //    transition 與 backdrop fade、rail fab-in 入場動畫全部只在 .canvas-ws-settled 下。
+  assert.match(ws, /setWsSettled\(true\)/);
+  assert.match(ws, /\.canvas-chat-panel\.canvas-ws-settled \{[^}]*transition: width/);
+  assert.match(ws, /\.canvas-ws-overlay\.canvas-ws-settled \{[^}]*transition: left/);
+  assert.match(ws, /\.canvas-ws-backdrop\.canvas-ws-settled \{[^}]*animation: canvas-ws-fade/);
+  assert.match(ws, /\.canvas-chat-rail\.canvas-ws-settled:not\(\.canvas-ws-was-rail\) \{[^}]*animation: canvas-ws-fab-in/);
+  // navbar 退縮過度同樣進閘（規則從 nav 的 tailwind 類別搬進工作站 <style>）。
+  assert.match(ws, /html\[data-ws-settled\] #global-navbar nav \{[^}]*transition: margin-left/);
+  assert.match(ws, /dataset\.wsSettled = "1"/);
+
+  // ④ Navbar 跨檔契約：退縮分支只屬首頁（pathname === "/"），非首頁恆 0——
+  //    否則 reload /history 等頁會因 fallback 無端退縮。fallback 指面板寬終態。
+  assert.match(navbar, /usePathname/);
+  assert.match(navbar, /pathname === "\/"/);
+  assert.match(navbar, /ml-\[var\(--ws-navbar-inset,calc\(var\(--ws-panel-w,420px\)_\+_12px\)\)\]/);
+  assert.match(navbar, /w-\[calc\(100%_-_var\(--ws-navbar-inset,calc\(var\(--ws-panel-w,420px\)_\+_12px\)\)\)\]/);
+  assert.match(navbar, /max-md:ml-0 max-md:w-full/);
+  // 首幀即退縮＝舊「0px 起步 + JS 動畫退縮」契约作废；nav 上的常開 transition
+  // 類別必須全面退場（殘留＝回縮動畫回魂）。
+  assert.doesNotMatch(navbar, /--ws-navbar-inset,0px/);
+  assert.doesNotMatch(navbar, /duration-\[320ms\]/);
+  assert.doesNotMatch(navbar, /transition-\[margin-left/);
+
+  // ⑤ 工作站不再把像素回寫 --ws-navbar-inset（拖寬即時性改由 CSS 變數鏈承擔）。
+  assert.doesNotMatch(ws, /setProperty\("--ws-navbar-inset", `\$\{chatPanelWidth\}/);
 });

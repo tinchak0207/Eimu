@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import { MessageCircle } from "lucide-react";
 import type { UseCanvasChatReturn } from "@/hooks/use-canvas-chat";
 import { cn } from "@/lib/utils";
-import { useChatPanel } from "./use-chat-panel";
+import { CHAT_PANEL_MAX_WIDTH, CHAT_PANEL_MIN_WIDTH, useChatPanel } from "./use-chat-panel";
 
 // CanvasEmbed 維持 dynamic 懶載入：它是畫布工作站的天然 chunk 邊界，
 // 只有 inCanvasWorkstation 為真（overlay 真的渲染）時才拉 chunk。
@@ -43,22 +43,25 @@ export function CanvasChatWorkstation({
   overlayContent,
   children,
 }: CanvasChatWorkstationProps) {
-  const { chatPanelState, setChatPanelState, chatPanelWidth, setChatPanelWidth, chatPanelDragRef } = useChatPanel();
+  const { chatPanelState, setChatPanelState, chatPanelWidth, setChatPanelWidth, chatPanelDragRef, chatPanelRef } = useChatPanel();
 
-  // 2026-09-24 暴君裁定「header 往右退縮，讓 AI 助理占上來，吃滿天花板」：
-  // 聊天面板 expanded 態下導覽列整顆膠囊右退到面板右緣＋12px 間隙之外——
-  // --ws-navbar-inset 由本處寫進 <html>，Navbar 的 <nav> 以 margin-left/寬度
-  // calc 消費。僅桌面 expanded 態生效（手機 <768px 是全屏抽屜態，navbar 不動）；
-  // 其餘態與 unmount 一律歸零。值與 overlay 的 --ce-dock-left 同源（面板寬+12），
-  // 拖寬時 chatPanelWidth 變化即時跟隨（CSS 過渡與面板同曲線）。
-  useEffect(() => {
+  // 2026-09-24 暴君裁定「header 往右退縮，讓 AI 助理占上來，吃滿天花板」＋
+  // 同刀「首秒零回縮」根治：expanded 態的退縮量不再由 JS 回寫像素——
+  // Navbar 的 --ws-navbar-inset fallback 已直接消費 calc(var(--ws-panel-w)+12px)
+  // （單一真相源，拖寬即時跟隨、SSR 首幀即退縮終態）。本 effect 只負責
+  // 「不該退縮的態顯式寫 0px」：rail 態 / 手機（<768px 全屏抽屜）/ pro 面。
+  // useLayoutEffect 在首幀 paint 前寫入，且此刻 transition 閘（data-ws-settled）
+  // 未開＝瞬變零動畫；舊 useEffect+像素值寫法正是「navbar 從全寬 320ms
+  // 動畫退縮」回縮病灶的元凶，作廢。
+  useLayoutEffect(() => {
     const mq = window.matchMedia("(min-width: 768px)");
     const apply = () => {
-      const inset =
-        inCanvasWorkstation && chatPanelState === "expanded" && mq.matches
-          ? `${chatPanelWidth + 12}px`
-          : "0px";
-      document.documentElement.style.setProperty("--ws-navbar-inset", inset);
+      const shrink = inCanvasWorkstation && chatPanelState === "expanded" && mq.matches;
+      if (shrink) {
+        document.documentElement.style.removeProperty("--ws-navbar-inset");
+      } else {
+        document.documentElement.style.setProperty("--ws-navbar-inset", "0px");
+      }
     };
     apply();
     mq.addEventListener("change", apply);
@@ -66,7 +69,45 @@ export function CanvasChatWorkstation({
       mq.removeEventListener("change", apply);
       document.documentElement.style.setProperty("--ws-navbar-inset", "0px");
     };
-  }, [inCanvasWorkstation, chatPanelState, chatPanelWidth]);
+  }, [inCanvasWorkstation, chatPanelState]);
+
+  // ─── settled 閘（2026-09-24 首秒零回縮）───
+  // 掛載並讓首幀（含 useLayoutEffect 的值寫入）完成繪製後（雙 rAF）才開啟
+  // 過度動畫：首次載入零動畫直出終態；之後 rail↔expanded 切換、拖寬、
+  // pro↔agent 翻面照樣有過度。CSS 側所有 width/left transition 與入場
+  // @keyframes 都只掛在 .canvas-ws-settled / html[data-ws-settled] 下。
+  const [wsSettled, setWsSettled] = useState(false);
+  // settled 開啟當下面板是否已是 rail（localStorage 舊持久值載入）——那是
+  // 首幀終態不是用戶動作，fab-in 入場動畫不得補播（現行 UI 已無收合出口，
+  // rail 僅可能來自舊持久值，此幀純防回魂）。
+  const chatPanelStateRef = useRef(chatPanelState);
+  chatPanelStateRef.current = chatPanelState;
+  const railAtSettleRef = useRef(false);
+  useEffect(() => {
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
+        railAtSettleRef.current = chatPanelStateRef.current === "rail";
+        setWsSettled(true);
+      });
+    });
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+    };
+  }, []);
+  // html[data-ws-settled]：Navbar 退縮 transition 的唯一閘（規則在本組件
+  // style 塊）。pro 態與 unmount 移除——非首頁根本沒有這層，header 恆全寬。
+  useEffect(() => {
+    if (wsSettled && inCanvasWorkstation) {
+      document.documentElement.dataset.wsSettled = "1";
+    } else {
+      delete document.documentElement.dataset.wsSettled;
+    }
+    return () => {
+      delete document.documentElement.dataset.wsSettled;
+    };
+  }, [wsSettled, inCanvasWorkstation]);
 
   return (
     <>
@@ -76,11 +117,23 @@ export function CanvasChatWorkstation({
           section.lg-card 自己的玻璃材質（0.72 白玻璃＋blur＋頂緣 specular 亮線）
           透出來，畫布在背後可折射。08-25「白殼唯一卡」裁定由 09-20 預覽裁定取代。 */}
       <style>{`
+            /* ─── 面板寬度單一真相源（2026-09-24 首秒零回縮）───
+               純 CSS 默認＝SSR 首幀即新用戶終態（無任何 JS 追寫）；JS 只在
+               localStorage 有存值或拖寬進行中把 --ws-panel-w 覆寫成顯式 px
+               （寫入端在 use-chat-panel 的 useLayoutEffect，<html> 內聯樣式
+               壓過本 :root 規則）。消費端：.canvas-chat-panel 的 width、
+               overlay 的 --ce-dock-left、Navbar 的 --ws-navbar-inset fallback。 */
+            :root {
+              --ws-panel-w: clamp(360px, 40vw, 720px);
+            }
             @keyframes canvas-ws-fade {
               from { opacity: 0; }
               to { opacity: 1; }
             }
             @keyframes canvas-ws-panel-in {
+              /* 未接線（2026-09-24 首秒零回縮考古）：全站無任何規則引用本
+                 keyframes，入場動畫實際只有 canvas-ws-fade 與 canvas-ws-fab-in，
+                 兩者已全部收進 settled 閘。保留宣告僅作歷史記錄，不會播放。 */
               from { opacity: 0; transform: translateX(-18px) scale(0.985); }
               to { opacity: 1; transform: none; }
             }
@@ -115,6 +168,11 @@ export function CanvasChatWorkstation({
                   #fef5f7 50%,
                   #f5fbff 100%
                 );
+            }
+            /* 入場漸顯只在 settled 後生效（2026-09-24 首秒零回縮）：首次載入
+               backdrop 直出終態（其漸層與 body::after 逐字同配方，延遲觸發亦
+               不可見）；pro→agent 翻面時本元素是新掛載的，class 在場即照常漸顯。 */
+            .canvas-ws-backdrop.canvas-ws-settled {
               animation: canvas-ws-fade 0.32s ease-out;
             }
             .canvas-ws-overlay {
@@ -129,7 +187,19 @@ export function CanvasChatWorkstation({
               align-items: center;
               justify-content: center;
               overflow: hidden;
+            }
+            /* dock 偏移的過度只在 settled 後開啟：拖寬/rail 切換跟手，
+               載入首幀（left 已是終值）零動畫。 */
+            .canvas-ws-overlay.canvas-ws-settled {
               transition: left 0.32s cubic-bezier(0.2, 0.8, 0.2, 1);
+            }
+            /* Navbar 退縮過度（2026-09-24 首秒零回縮）：原先掛在 <nav> 的
+               tailwind 類別上＝每次載入都播「全寬 320ms 退縮」回縮動畫（病灶①），
+               移進本檔並只在 html[data-ws-settled]（工作站 settled 後寫）下生效。
+               非首頁無本 <style> 塊＝header 在任何態都零過度，天然正確。 */
+            html[data-ws-settled] #global-navbar nav {
+              transition: margin-left 0.32s cubic-bezier(0.2, 0.8, 0.2, 1),
+                width 0.32s cubic-bezier(0.2, 0.8, 0.2, 1);
             }
             .canvas-chat-panel {
               position: fixed;
@@ -141,6 +211,10 @@ export function CanvasChatWorkstation({
               top: 0.75rem;
               bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
               left: var(--site-shell-left, 0.75rem);
+              /* 寬度讀單一真相源：:root 默認 clamp 或 JS（use-chat-panel）在
+                 有存值/拖寬時覆寫的顯式 px。首幀即終態，無 inline style、
+                 無 hydration 追寫。 */
+              width: var(--ws-panel-w);
               display: flex;
               flex-direction: column;
               min-height: 0;
@@ -151,13 +225,18 @@ export function CanvasChatWorkstation({
               background: transparent;
               border-radius: 30px;
               overflow: hidden;
-              transition: width 0.32s cubic-bezier(0.2, 0.8, 0.2, 1);
               /* header 彈窗（歷史/資產/設定）水平置中用的頂部偏移。
                  2026-09-24 收斂：這些彈層是 fixed 於視口水平置中（left-1/2），
                  navbar 右退後膠囊仍橫跨視口中段（z-80 壓 z-50 彈層），所以頂部
                  仍須落在導覽列下緣＋0.75rem——但不再用 3.25rem 魔法數，改吃
                  Navbar 實測的 --site-header-offset，與面板吃頂後的新基準一致。 */
               --agent-pop-top: calc(env(safe-area-inset-top, 0px) + var(--site-header-offset, 4.25rem) + 0.75rem);
+            }
+            /* 面板寬度過度只在 settled 後開啟（首秒零回縮）：載入首幀寬度已是
+               終值零動畫；rail↔expanded 切換與拖寬（含 navbar/overlay 同拍）
+               在閘開後照常過度。 */
+            .canvas-chat-panel.canvas-ws-settled {
+              transition: width 0.32s cubic-bezier(0.2, 0.8, 0.2, 1);
             }
             .canvas-chat-rail {
               /* 收起態 = 聊天气泡 FAB（2026-08-25 暴君裁定；2026-08-27 尺寸鎖死修復：
@@ -172,7 +251,6 @@ export function CanvasChatWorkstation({
               min-width: 0 !important;
               max-width: none !important;
               overflow: hidden;
-              animation: canvas-ws-fab-in 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) both;
               /* FAB 態殼自身給玻璃外觀（此態無 lg-card 內層可依賴）。 */
               background: rgba(255, 255, 255, 0.72);
               border: 1px solid rgba(0, 0, 0, 0.08);
@@ -180,6 +258,12 @@ export function CanvasChatWorkstation({
               box-shadow: 0 8px 32px rgba(0, 0, 0, 0.10);
               backdrop-filter: blur(40px) saturate(180%);
               -webkit-backdrop-filter: blur(40px) saturate(180%);
+            }
+            /* FAB 入場彈現（首秒零回縮閘）：只在 settled 後、且不是「舊持久值
+               rail 直接首幀載入」時播——用戶動作收合是過度，載入直出是終態。
+               canvas-ws-was-rail 由工作站於 settled 當幀偵測（見 tsx）。 */
+            .canvas-chat-rail.canvas-ws-settled:not(.canvas-ws-was-rail) {
+              animation: canvas-ws-fab-in 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) both;
             }
             @keyframes canvas-ws-fab-in {
               from { opacity: 0; transform: scale(0.6); }
@@ -235,8 +319,16 @@ export function CanvasChatWorkstation({
             }
             .canvas-chat-resize:hover { background: linear-gradient(to right, transparent, rgba(0, 122, 255, 0.25)); }
             @media (prefers-reduced-motion: reduce) {
-              .canvas-ws-overlay { animation: none; transition: none; }
-              .canvas-chat-rail { animation: none; }
+              /* 選擇器權重要蓋得過 settled 閘規則（.x.canvas-ws-settled = 0,2,0）。 */
+              .canvas-ws-overlay,
+              .canvas-ws-overlay.canvas-ws-settled { animation: none; transition: none; }
+              .canvas-ws-backdrop,
+              .canvas-ws-backdrop.canvas-ws-settled { animation: none; }
+              .canvas-chat-panel,
+              .canvas-chat-panel.canvas-ws-settled { transition: none; }
+              .canvas-chat-rail,
+              .canvas-chat-rail.canvas-ws-settled:not(.canvas-ws-was-rail) { animation: none; }
+              html[data-ws-settled] #global-navbar nav { transition: none; }
             }
             @media (max-width: 767px) {
               /* 2026-09-05 暴君裁定：手機端 agent 態 = 全螢幕聊天，
@@ -276,12 +368,15 @@ export function CanvasChatWorkstation({
           初始態（canvas 空）以 overlayContent（模板庫）代替空畫布。 */}
       {inCanvasWorkstation && (
         <>
-          <div className="canvas-ws-backdrop" aria-hidden="true" />
+          <div className={cn("canvas-ws-backdrop", wsSettled && "canvas-ws-settled")} aria-hidden="true" />
           <div
-            className="canvas-ws-overlay"
+            className={cn("canvas-ws-overlay", wsSettled && "canvas-ws-settled")}
             style={
               {
-                "--ce-dock-left": `${chatPanelState === "expanded" ? chatPanelWidth + 12 : 64}px`,
+                /* dock 偏移讀單一真相源：expanded = 面板寬+12px 間隙（CSS 變數
+                   即時跟隨拖寬，JS 不經回寫）；rail 態 = 64px（FAB 44＋間隙）
+                   保持既有分支。字符串常量化＝SSR 首幀即終態、零 hydration 跳動。 */
+                "--ce-dock-left": chatPanelState === "rail" ? "64px" : "calc(var(--ws-panel-w) + 12px)",
                 left: "calc(var(--site-shell-left, 0.75rem) + var(--ce-dock-left, 0px))",
               } as CSSProperties
             }
@@ -295,11 +390,19 @@ export function CanvasChatWorkstation({
           control inside the card would widen the column past the
           viewport and push the whole page sideways on phones. */}
       <div
+        ref={chatPanelRef}
         className={cn(
           inCanvasWorkstation ? "canvas-chat-panel" : "min-w-0",
+          // settled 閘：width 過度與入場動畫只在首幀穩定後開啟（見 style 塊）。
+          inCanvasWorkstation && wsSettled && "canvas-ws-settled",
           inCanvasWorkstation && chatPanelState === "rail" && "canvas-chat-rail",
+          // 舊持久值 rail＝首幀終態，不補播 fab-in（settled 當幀偵測，見上）。
+          inCanvasWorkstation &&
+            wsSettled &&
+            chatPanelState === "rail" &&
+            railAtSettleRef.current &&
+            "canvas-ws-was-rail",
         )}
-        style={inCanvasWorkstation && chatPanelState === "expanded" ? { width: chatPanelWidth } : undefined}
       >
         {/* FAB 態（2026-08-25 暴君裁定：收起形態 = 左上角聊天气泡，不是長條 rail）：
             一顆 44px 圓形聊天气泡按鈕，圖標即語義（MessageCircle=打開對話）。
@@ -332,14 +435,17 @@ export function CanvasChatWorkstation({
         <div
           className={inCanvasWorkstation && chatPanelState === "expanded" ? "canvas-chat-resize" : "hidden"}
           onPointerDown={(e) => {
-            chatPanelDragRef.current = { pointerId: e.pointerId, startX: e.clientX, startW: chatPanelWidth };
+            // 拖寬起始值：無顯式寬（null，CSS clamp 默認在場）時實測渲染寬——
+            // JS 不再假設 420 這類魔法數。
+            const startW = chatPanelWidth ?? chatPanelRef.current?.getBoundingClientRect().width ?? CHAT_PANEL_MIN_WIDTH;
+            chatPanelDragRef.current = { pointerId: e.pointerId, startX: e.clientX, startW };
             e.currentTarget.setPointerCapture(e.pointerId);
             e.preventDefault();
           }}
           onPointerMove={(e) => {
             const d = chatPanelDragRef.current;
             if (!d || d.pointerId !== e.pointerId) return;
-            setChatPanelWidth(Math.min(720, Math.max(320, d.startW + (e.clientX - d.startX))));
+            setChatPanelWidth(Math.min(CHAT_PANEL_MAX_WIDTH, Math.max(CHAT_PANEL_MIN_WIDTH, d.startW + (e.clientX - d.startX))));
           }}
           onPointerUp={(e) => {
             if (chatPanelDragRef.current?.pointerId === e.pointerId) chatPanelDragRef.current = null;
