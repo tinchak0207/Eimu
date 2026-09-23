@@ -308,7 +308,7 @@ export function Navbar({ className }: NavbarProps) {
             導覽列不讓位。非首頁恆 0（isHome 分支）。 */}
         <nav
           className={cn(
-            "lg-bar pointer-events-auto flex items-center justify-between gap-2 rounded-ios-3xl px-2.5 py-2 sm:px-5 sm:py-2.5",
+            "lg-bar pointer-events-auto flex items-center justify-between gap-2 overflow-hidden rounded-ios-3xl px-2.5 py-2 sm:px-4 sm:py-2.5",
             isHome
               ? "ml-[var(--ws-navbar-inset,calc(var(--ws-panel-w,420px)_+_12px))] w-[calc(100%_-_var(--ws-navbar-inset,calc(var(--ws-panel-w,420px)_+_12px)))]"
               : "ml-0 w-full",
@@ -321,7 +321,7 @@ export function Navbar({ className }: NavbarProps) {
           <div className="flex min-w-0 shrink-0 items-center gap-2 sm:gap-2.5">
             <Link
               href="/"
-              className="flex min-w-0 shrink-0 items-center gap-2.5 rounded-full lg-transition hover:opacity-70 focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)]"
+              className="flex min-w-0 shrink items-center gap-2 rounded-full lg-transition hover:opacity-70 focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:gap-2.5"
               aria-label="回到首页"
             >
               {/* Eimu app icon */}
@@ -349,17 +349,17 @@ export function Navbar({ className }: NavbarProps) {
               onClick={() => setQqOpen(true)}
               aria-label="售后/交流群组"
               title="售后/交流群组"
-              className="lg-float hidden shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full bg-[rgba(0,0,0,0.05)] px-3 py-1.5 text-ios-footnote font-semibold text-[rgba(0,0,0,0.60)] select-none lg-transition hover:bg-[rgba(0,0,0,0.08)] hover:text-[rgba(0,0,0,0.85)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:inline-flex"
+              className="lg-float hidden min-w-0 shrink cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full bg-[rgba(0,0,0,0.05)] px-2.5 py-1.5 text-ios-footnote font-semibold text-[rgba(0,0,0,0.60)] select-none lg-transition hover:bg-[rgba(0,0,0,0.08)] hover:text-[rgba(0,0,0,0.85)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:inline-flex lg:px-3"
             >
               <QqLogo className="h-3.5 w-3.5" />
-              <span>售后/交流群组</span>
+              <span className="hidden lg:inline">售后/交流群组</span>
             </button>
           </div>
 
           {/* Right side */}
           <div
             className={cn(
-              "mobile-nav-actions flex min-w-0 flex-1 items-center justify-end gap-1.5 sm:flex-none sm:gap-3",
+              "mobile-nav-actions flex min-w-0 flex-1 items-center justify-end gap-1.5 sm:gap-2 lg:gap-3",
               isLoggedIn && user
                 ? ""
                 : "flex-none gap-2",
@@ -379,7 +379,7 @@ export function Navbar({ className }: NavbarProps) {
                     「文档」「审查页」只在 ≥sm 显示：手机端导航留给核心动作。 */}
                 <Link
                   href="/history"
-                  className="lg-float flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[rgba(0,0,0,0.78)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)]"
+                  className="lg-float flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[rgba(0,0,0,0.78)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:h-9 sm:w-9"
                   aria-label="历史"
                 >
                   <History className="h-3.5 w-3.5" aria-hidden="true" />
@@ -387,7 +387,7 @@ export function Navbar({ className }: NavbarProps) {
                 </Link>
                 <Link
                   href="/review"
-                  className="lg-float hidden h-11 w-11 shrink-0 items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[rgba(0,0,0,0.78)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:flex"
+                  className="lg-float hidden h-11 w-11 shrink-0 items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[rgba(0,0,0,0.78)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:flex sm:h-9 sm:w-9"
                   aria-label="审查页"
                 >
                   <Images className="h-3.5 w-3.5" aria-hidden="true" />
@@ -398,7 +398,7 @@ export function Navbar({ className }: NavbarProps) {
                     导航栏摆个入口会把人带离卡片，正好是使用者不要的那种交互。 */}
                 <Link
                   href="/docs"
-                  className="lg-float hidden h-11 w-11 shrink-0 items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[rgba(0,0,0,0.78)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:flex"
+                  className="lg-float hidden h-11 w-11 shrink-0 items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[rgba(0,0,0,0.78)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:flex sm:h-9 sm:w-9"
                   aria-label="文档"
                 >
                   <BookOpen className="h-3.5 w-3.5" aria-hidden="true" />
@@ -412,7 +412,7 @@ export function Navbar({ className }: NavbarProps) {
                       type="button"
                       aria-label="API 密钥"
                       title="API 密钥"
-                      className="lg-float hidden h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[#007AFF] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:flex"
+                      className="lg-float hidden h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[#007AFF] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:flex sm:h-9 sm:w-9"
                     >
                       <KeyRound className="h-3.5 w-3.5" aria-hidden="true" />
                     </button>
@@ -434,8 +434,8 @@ export function Navbar({ className }: NavbarProps) {
                 {/* 用户名 + 退出（2026-08-27 暴君裁定：右侧按钮只承担退出）。
                     手机端（<sm）也必须显示：用户名文字隐藏、退出图标保留——
                     账户出口在手机上消失 = 用户无法登出。 */}
-                <div className="lg-float flex shrink-0 items-center gap-1 rounded-full py-1 pl-3 pr-1">
-                  <span className="hidden max-w-[88px] truncate text-ios-footnote font-medium text-[rgba(0,0,0,0.56)] sm:inline">
+                <div className="lg-float flex shrink-0 items-center gap-1 rounded-full py-1 pl-2.5 pr-1 lg:pl-3">
+                  <span className="hidden max-w-[72px] truncate text-ios-footnote font-medium text-[rgba(0,0,0,0.56)] lg:inline xl:max-w-[88px]">
                     {user.display_name || user.username}
                   </span>
                   <button
