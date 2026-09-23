@@ -1,6 +1,6 @@
 "use client";
 
-import { type CSSProperties, type ReactNode } from "react";
+import { useEffect, type CSSProperties, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import { MessageCircle } from "lucide-react";
 import type { UseCanvasChatReturn } from "@/hooks/use-canvas-chat";
@@ -44,6 +44,29 @@ export function CanvasChatWorkstation({
   children,
 }: CanvasChatWorkstationProps) {
   const { chatPanelState, setChatPanelState, chatPanelWidth, setChatPanelWidth, chatPanelDragRef } = useChatPanel();
+
+  // 2026-09-24 暴君裁定「header 往右退縮，讓 AI 助理占上來，吃滿天花板」：
+  // 聊天面板 expanded 態下導覽列整顆膠囊右退到面板右緣＋12px 間隙之外——
+  // --ws-navbar-inset 由本處寫進 <html>，Navbar 的 <nav> 以 margin-left/寬度
+  // calc 消費。僅桌面 expanded 態生效（手機 <768px 是全屏抽屜態，navbar 不動）；
+  // 其餘態與 unmount 一律歸零。值與 overlay 的 --ce-dock-left 同源（面板寬+12），
+  // 拖寬時 chatPanelWidth 變化即時跟隨（CSS 過渡與面板同曲線）。
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 768px)");
+    const apply = () => {
+      const inset =
+        inCanvasWorkstation && chatPanelState === "expanded" && mq.matches
+          ? `${chatPanelWidth + 12}px`
+          : "0px";
+      document.documentElement.style.setProperty("--ws-navbar-inset", inset);
+    };
+    apply();
+    mq.addEventListener("change", apply);
+    return () => {
+      mq.removeEventListener("change", apply);
+      document.documentElement.style.setProperty("--ws-navbar-inset", "0px");
+    };
+  }, [inCanvasWorkstation, chatPanelState, chatPanelWidth]);
 
   return (
     <>
@@ -111,13 +134,17 @@ export function CanvasChatWorkstation({
             .canvas-chat-panel {
               position: fixed;
               z-index: 60;
-              top: calc(var(--site-header-offset, 4.25rem) + 0.75rem);
+              /* 2026-09-24 暴君裁定：面板吃滿天花板——頂部只留 0.75rem 呼吸位，
+                 不再從導覽列下緣起算； navbar 改由 --ws-navbar-inset 右退讓位
+                 （見組件頂部 useEffect 與 Navbar.tsx）。bottom 與 max-height
+                 上下對稱留 0.75rem，max-height 是 bottom 定界外的雙保險。 */
+              top: 0.75rem;
               bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
               left: var(--site-shell-left, 0.75rem);
               display: flex;
               flex-direction: column;
               min-height: 0;
-              max-height: calc(100dvh - var(--site-header-offset, 4.25rem) - 1.5rem - env(safe-area-inset-bottom, 0px));
+              max-height: calc(100dvh - 1.5rem - env(safe-area-inset-bottom, 0px));
               max-width: calc(100vw - 1.5rem);
               /* 殼退為形狀宿主：底色/邊框交給內層 section.lg-card 的玻璃材質
                  （0.72 白玻璃＋blur＋specular 亮線），畫布在背後可折射。 */
@@ -125,8 +152,12 @@ export function CanvasChatWorkstation({
               border-radius: 30px;
               overflow: hidden;
               transition: width 0.32s cubic-bezier(0.2, 0.8, 0.2, 1);
-              /* header 彈窗（歷史/資產/設定）水平置中用的頂部偏移。 */
-              --agent-pop-top: calc(0.75rem + env(safe-area-inset-top, 0px) + 3.25rem);
+              /* header 彈窗（歷史/資產/設定）水平置中用的頂部偏移。
+                 2026-09-24 收斂：這些彈層是 fixed 於視口水平置中（left-1/2），
+                 navbar 右退後膠囊仍橫跨視口中段（z-80 壓 z-50 彈層），所以頂部
+                 仍須落在導覽列下緣＋0.75rem——但不再用 3.25rem 魔法數，改吃
+                 Navbar 實測的 --site-header-offset，與面板吃頂後的新基準一致。 */
+              --agent-pop-top: calc(env(safe-area-inset-top, 0px) + var(--site-header-offset, 4.25rem) + 0.75rem);
             }
             .canvas-chat-rail {
               /* 收起態 = 聊天气泡 FAB（2026-08-25 暴君裁定；2026-08-27 尺寸鎖死修復：
@@ -165,9 +196,10 @@ export function CanvasChatWorkstation({
             }
             /* 面板態聊天區：scroll 容器變縱向 flex、不再自己滾，滾動收進
                transcript 內部（agent 面的固定高在 46dvh 抽屜裡會溢出被裁）。
-               2026-09-24 用戶版面方案：卡高改隨內容（fit-content）並在面板內
-               垂直置中，不再把白卡拉滿全高；內容超高時 flex-shrink 自動吃滿、
-               內部滾動照舊。 */
+               2026-09-24 暴君糾正：fit-content 把聊天態高度也壓了——聊天體驗
+               需要吃滿面板全高。正解＝:has() 分流：聊天態 flex:1 1 0% 吃滿；
+               僅空態（.agent-empty-state 標記）fit-content 垂直置中。
+               justify-content: center 保留：滿高時無感，置中卡靠它。 */
             .canvas-chat-scroll.canvas-chat-scroll-fill {
               display: flex;
               flex-direction: column;
@@ -178,7 +210,7 @@ export function CanvasChatWorkstation({
             }
             .canvas-chat-scroll-fill > * { min-height: 0; }
             .canvas-chat-scroll-fill > section.lg-card {
-              flex: 0 1 auto;
+              flex: 1 1 0%;
               min-height: 0;
               overflow: hidden;
               margin: 0;
@@ -189,6 +221,12 @@ export function CanvasChatWorkstation({
                  原樣保留。 */
               box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
               border: 1px solid oklch(0% 0 0 / 6%);
+            }
+            /* 2026-09-24 暴君糾正：僅空態（AgentChatPanel 根 div 帶
+               .agent-empty-state 標記）卡高隨內容＋靠容器 justify-content
+               垂直置中；聊天態維持上一條 flex:1 1 0% 吃滿面板全高。 */
+            .canvas-chat-scroll-fill > section.lg-card:has(.agent-empty-state) {
+              flex: 0 1 auto;
             }
             .canvas-chat-scroll-fill > :not(section.lg-card) { flex-shrink: 0; }
             .agent-composer-anchor { flex-shrink: 0; }

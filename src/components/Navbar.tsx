@@ -80,7 +80,12 @@ export function Navbar({ className }: NavbarProps) {
       const nav = el.querySelector("nav");
       if (nav) {
         const rect = nav.getBoundingClientRect();
-        document.documentElement.style.setProperty("--site-shell-left", `${rect.left}px`);
+        // 2026-09-24 navbar 右退刀：nav 的 margin-left 現在可能是
+        // --ws-navbar-inset（助理面板吃頂後的退縮量）。直接量 rect.left 會把
+        // 退縮量混進 --site-shell-left，再灌回面板/overlay 的 left＝反馈漂移，
+        // 減掉它才是「未退縮前」的頁殼真左緣（右緣因 ml+寬度互補恆定，不用扣）。
+        const inset = parseFloat(getComputedStyle(nav).marginLeft) || 0;
+        document.documentElement.style.setProperty("--site-shell-left", `${rect.left - inset}px`);
         document.documentElement.style.setProperty("--site-shell-right", `${window.innerWidth - rect.right}px`);
       }
     };
@@ -288,8 +293,14 @@ export function Navbar({ className }: NavbarProps) {
           className,
         )}
       >
+        {/* 2026-09-24 暴君裁定「header 往右退縮，讓 AI 助理占上來，吃滿天花板」：
+            聊天面板 expanded 態時 CanvasChatWorkstation 把面板寬+12px 寫進
+            --ws-navbar-inset，本膠囊以 margin-left 退縮讓位、寬度互補——右緣
+            位置與圓角膠囊質感不動＝纯退縮；拖寬時經 0.32s 同曲線過渡同步跟隨
+            （與 .canvas-chat-panel 的 width 過渡同源同拍）。max-md 歸零＝手機
+            全屏抽屜態導覽列不讓位。 */}
         <nav
-          className="lg-bar pointer-events-auto flex w-full items-center justify-between gap-2 rounded-ios-3xl px-2.5 py-2 sm:px-5 sm:py-2.5"
+          className="lg-bar pointer-events-auto ml-[var(--ws-navbar-inset,0px)] flex w-[calc(100%_-_var(--ws-navbar-inset,0px))] items-center justify-between gap-2 rounded-ios-3xl px-2.5 py-2 transition-[margin-left,width] duration-[320ms] ease-[cubic-bezier(0.2,0.8,0.2,1)] max-md:ml-0 max-md:w-full sm:px-5 sm:py-2.5"
           aria-label="主导航"
         >
           {/* 左组：Eimu Logo + QQ 群入口。justify-between 下子元素多于两个会把

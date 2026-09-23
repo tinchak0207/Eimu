@@ -442,7 +442,7 @@ function AgentChatPanelComponent({
              → 輸入框位置照樣跳。正解＝不分流：歡迎態 DOM 從頭到尾一套，建號/首發在飛時
              推薦語照常渲染（佔位不動）但強制 disabled＝點不到就不會重複送出（防二次
              計費）；在途回饋交給送出鈕轉圈（AgentComposer sending 態）。 */
-          <div className="flex min-h-full flex-col items-center justify-center px-5">
+          <div className="agent-empty-state flex min-h-full flex-col items-center justify-center px-5">
             {/* pb-[8vh] 於 2026-09-24 移除：左卡改 fit-content 垂直置中後，這 8vh 是殘留補償，保留會置中偏上。 */}
             <div className="flex w-full flex-col items-center">
               <h2 className="text-2xl font-semibold tracking-tight text-foreground">想做点什么？</h2>

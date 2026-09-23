@@ -150,16 +150,33 @@ test("canvas workstation chat panel keeps the composer inside the panel", () => 
   // transcript 的滚动接住，输入区会被推出面板外（用户截图：底部只见
   // 被裁掉的「思考过程」最后一行、输入框整体不可见）。加固规则：
   //  - 面板给 min-height:0 / max-height 兜底（bottom 已定界，双保险）
-  //  - section.lg-card 拿 flex:0 1 auto（2026-09-24 用戶版面方案：卡高隨內容、
-  //    面板內垂直置中，取代舊「fill 拉滿全高」裁定）再顯式 min-height:0 +
-  //    overflow:hidden——內容超高時由 flex-shrink 封頂、內部滾動接手，
-  //    不许 agent 面把卡片按内容撑高到溢出面板
+  //  - section.lg-card 拿 flex:1 1 0%（2026-09-24 暴君糾正：聊天態吃滿面板全高；
+  //    前一刀把聊天態高度也壓成 fit-content 屬劣化）再顯式 min-height:0 +
+  //    overflow:hidden——內容超高時由內部滾動接手，不许 agent 面把卡片按内容
+  //    撑高到溢出面板；僅空態經 :has(.agent-empty-state) 還原 flex:0 1 auto
+  //    （卡高隨內容＋容器 justify-content:center 垂直置中）
   //  - 非 lg-card 兄弟（如 agentBaseline 撤回条）shrink-0，不抢高度
   //  - composer 锚点 shrink-0，永不被 flex 压没
-  //  - 面板頂從導覽列下緣起算（--site-header-offset，0924 header 露出刀），
-  //    max-height 同步扣掉該偏移＋上下 0.75rem 留白
-  assert.match(source, /\.canvas-chat-panel \{[^}]*min-height: 0;[^}]*max-height: calc\(100dvh - var\(--site-header-offset[^}]*\}/);
-  assert.match(source, /\.canvas-chat-scroll-fill > section\.lg-card \{[^}]*flex: 0 1 auto;[^}]*min-height: 0;[^}]*overflow: hidden;/);
+  //  - 面板吃滿天花板（2026-09-24 暴君裁定）：top 固定 0.75rem、max-height 只扣
+  //    上下 0.75rem 留白＋底部安全區，不再從 --site-header-offset 起算；
+  //    navbar 改經 --ws-navbar-inset 右退讓位（跨檔契約見下）。
+  //    FAB 態 navbar 全寬，.canvas-chat-rail 的 top 仍從 --site-header-offset
+  //    起算不被擋。
+  assert.match(source, /\.canvas-chat-panel \{[^}]*top: 0\.75rem;[^}]*min-height: 0;[^}]*max-height: calc\(100dvh - 1\.5rem - env\(safe-area-inset-bottom, 0px\)\)/);
+  assert.match(source, /\.canvas-chat-rail \{[^}]*top: calc\(var\(--site-header-offset, 4\.25rem\) \+ 0\.75rem\)/);
+  // 跨檔契約：navbar 右退變數兩端都必須在場——工作站 useEffect 寫入、
+  // Navbar 的 <nav> 以 margin-left/寬度 calc 消費。缺任何一端＝面板吃頂後
+  // header 被蓋住（寫入端失聯）或膠囊不让位（消費端失聯）。
+  assert.match(source, /--ws-navbar-inset/);
+  assert.match(read("src/components/Navbar.tsx"), /--ws-navbar-inset/);
+  assert.match(source, /\.canvas-chat-scroll-fill > section\.lg-card \{[^}]*flex: 1 1 0%;[^}]*min-height: 0;[^}]*overflow: hidden;/);
+  assert.match(
+    source,
+    /\.canvas-chat-scroll-fill > section\.lg-card:has\(\.agent-empty-state\) \{[^}]*flex: 0 1 auto;/,
+  );
+  // 跨檔契約：:has() 分流的標記類由 AgentChatPanel 空態根 div 提供，缺了它
+  // 空態也會吃滿全高（2026-09-24 暴君糾正的兩半必須同時在）。
+  assert.match(read("src/components/agent-chat/AgentChatPanel.tsx"), /agent-empty-state/);
   assert.match(source, /\.canvas-chat-scroll-fill > :not\(section\.lg-card\) \{ flex-shrink: 0; \}/);
   assert.match(source, /\.agent-composer-anchor \{ flex-shrink: 0; \}/);
 });
