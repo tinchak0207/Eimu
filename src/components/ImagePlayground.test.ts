@@ -153,8 +153,8 @@ test("canvas workstation chat panel keeps the composer inside the panel", () => 
   //  - section.lg-card 拿 flex:1 1 0%（2026-09-24 暴君糾正：聊天態吃滿面板全高；
   //    前一刀把聊天態高度也壓成 fit-content 屬劣化）再顯式 min-height:0 +
   //    overflow:hidden——內容超高時由內部滾動接手，不许 agent 面把卡片按内容
-  //    撑高到溢出面板；僅空態經 :has(.agent-empty-state) 還原 flex:0 1 auto
-  //    （卡高隨內容＋容器 justify-content:center 垂直置中）
+  //    撑高到溢出面板；2026-09-24 暴君終裁：聊天態與空態一律吃滿全高，舊
+  //    :has() 空態分流作廢，空態內容置中改由 transcript 內部 justify-center 負責
   //  - 非 lg-card 兄弟（如 agentBaseline 撤回条）shrink-0，不抢高度
   //  - composer 锚点 shrink-0，永不被 flex 压没
   //  - 面板吃滿天花板（2026-09-24 暴君裁定）：top 固定 0.75rem、max-height 只扣
@@ -169,14 +169,11 @@ test("canvas workstation chat panel keeps the composer inside the panel", () => 
   // header 被蓋住（寫入端失聯）或膠囊不让位（消費端失聯）。
   assert.match(source, /--ws-navbar-inset/);
   assert.match(read("src/components/Navbar.tsx"), /--ws-navbar-inset/);
+  // 全高契約：lg-card 一律 flex:1 1 0%（2026-09-24 暴君終裁：聊天態與空態同標吃滿全高）
   assert.match(source, /\.canvas-chat-scroll-fill > section\.lg-card \{[^}]*flex: 1 1 0%;[^}]*min-height: 0;[^}]*overflow: hidden;/);
-  assert.match(
-    source,
-    /\.canvas-chat-scroll-fill > section\.lg-card:has\(\.agent-empty-state\) \{[^}]*flex: 0 1 auto;/,
-  );
-  // 跨檔契約：:has() 分流的標記類由 AgentChatPanel 空態根 div 提供，缺了它
-  // 空態也會吃滿全高（2026-09-24 暴君糾正的兩半必須同時在）。
-  assert.match(read("src/components/agent-chat/AgentChatPanel.tsx"), /agent-empty-state/);
+  // 拔除實錘：舊 :has() 空態分流與標記類必須兩檔全面退場（零命中），否則空態縮卡病灶回魂。
+  assert.doesNotMatch(source, /agent-empty-state/);
+  assert.doesNotMatch(read("src/components/agent-chat/AgentChatPanel.tsx"), /agent-empty-state/);
   assert.match(source, /\.canvas-chat-scroll-fill > :not\(section\.lg-card\) \{ flex-shrink: 0; \}/);
   assert.match(source, /\.agent-composer-anchor \{ flex-shrink: 0; \}/);
 });

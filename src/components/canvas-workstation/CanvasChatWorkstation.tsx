@@ -196,9 +196,8 @@ export function CanvasChatWorkstation({
             }
             /* 面板態聊天區：scroll 容器變縱向 flex、不再自己滾，滾動收進
                transcript 內部（agent 面的固定高在 46dvh 抽屜裡會溢出被裁）。
-               2026-09-24 暴君糾正：fit-content 把聊天態高度也壓了——聊天體驗
-               需要吃滿面板全高。正解＝:has() 分流：聊天態 flex:1 1 0% 吃滿；
-               僅空態（.agent-empty-state 標記）fit-content 垂直置中。
+               2026-09-24 暴君終裁：聊天態與空態一律吃滿全高，空態內容置中由
+               transcript 內部 justify-center 負責（舊 :has() 分流作廢）。
                justify-content: center 保留：滿高時無感，置中卡靠它。 */
             .canvas-chat-scroll.canvas-chat-scroll-fill {
               display: flex;
@@ -221,12 +220,6 @@ export function CanvasChatWorkstation({
                  原樣保留。 */
               box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
               border: 1px solid oklch(0% 0 0 / 6%);
-            }
-            /* 2026-09-24 暴君糾正：僅空態（AgentChatPanel 根 div 帶
-               .agent-empty-state 標記）卡高隨內容＋靠容器 justify-content
-               垂直置中；聊天態維持上一條 flex:1 1 0% 吃滿面板全高。 */
-            .canvas-chat-scroll-fill > section.lg-card:has(.agent-empty-state) {
-              flex: 0 1 auto;
             }
             .canvas-chat-scroll-fill > :not(section.lg-card) { flex-shrink: 0; }
             .agent-composer-anchor { flex-shrink: 0; }
