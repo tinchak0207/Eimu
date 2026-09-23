@@ -92,8 +92,11 @@ test("canvas workstation is a fullscreen overlay with expandable chat panel", ()
   // 工作站：畫布吃滿全場，聊天面板 expanded|rail 兩態 + 右緣拖寬，localStorage 記憶。
   assert.match(source, /const \[chatPanelState, setChatPanelState\] = useState<"expanded" \| "rail">\("expanded"\)/);
   // 2026-09-24 首秒零回縮：寬度態 number|null——null＝CSS 默認（clamp）當終態，
-  // 舊「初始值 420 + mount effect 改 40vw」回縮鏈已拆。
-  assert.match(source, /const \[chatPanelWidth, setChatPanelWidth\] = useState<number \| null>\(null\)/);
+  // 舊「初始值 420 + mount effect 改 40vw」回縮鏈已拆。同日追殺回填跳變：非
+  // null 分支＝初始態同步讀校驗過的 v2 存值（與 layout pre-paint 腳本同一值），
+  // 不再留 null 等 useLayoutEffect 回填——那正是「首幀 clamp→水合後縮回」的時序。
+  assert.match(source, /const \[chatPanelWidth, setChatPanelWidth\] = useState<number \| null>\(\(\) => \{/);
+  assert.doesNotMatch(source, /useState<number \| null>\(null\)/);
   assert.match(source, /canvas-chat-resize/);
   assert.match(source, /chatPanelState === "rail" && "canvas-chat-rail"/);
   // 畫布 dock 偏移＝--ws-panel-w 終態＋12px 間隙（不再由 JS 算 chatPanelWidth+12），
@@ -233,4 +236,46 @@ test("first paint is the final state: --ws-panel-w single source + settled gate 
 
   // ⑤ 工作站不再把像素回寫 --ws-navbar-inset（拖寬即時性改由 CSS 變數鏈承擔）。
   assert.doesNotMatch(ws, /setProperty\("--ws-navbar-inset", `\$\{chatPanelWidth\}/);
+});
+
+// 暴君回報 2026-09-24：「Ctrl+Shift+R 時聊天框先佔幾乎半屏、秒縮回 30% 以下，
+// 非常恐怖」。根因＝冷載入首幀由 HTML+CSS 繪出 clamp 默認（40vw≈半屏），JS
+// chunk 下載完才在水合 useLayoutEffect 裡讀到舊 localStorage 垃圾值（v1 key：
+// useState(420) 時代 mount effect 無條件落盤的 420）並覆寫變數——paint 之後的
+// 第二次變更＝跳變。修法兩半缺一不可：①存值升代 v2，舊 key 大赦不讀＋清盤，
+// 只認「用戶真的拖過」的值；②layout.tsx 以 HTML 解析期同步內聯 <script>
+// （非 next/script beforeInteractive——實裝 push 進 self.__next_s 由
+// app-bootstrap 跑，与水合同期，對首幀仍然太晚）在首個 paint 前套用校驗過的
+// v2 值，首幀即終態。
+test("stored width: legacy values amnestied, v2 applied before first paint (2026-09-24)", () => {
+  const panel = read("src/components/canvas-workstation/use-chat-panel.ts");
+  const layout = read("src/app/layout.tsx");
+
+  // ① 升代 v2：寫入端與初始態讀取都用新 key，舊 key 只准 removeItem。
+  assert.match(panel, /export const CHAT_PANEL_WIDTH_STORAGE_KEY = "canvas-chat-panel-width\.v2";/);
+  assert.match(panel, /localStorage\.getItem\(CHAT_PANEL_WIDTH_STORAGE_KEY\)/);
+  assert.match(panel, /localStorage\.setItem\(CHAT_PANEL_WIDTH_STORAGE_KEY, String\(chatPanelWidth\)\)/);
+  assert.match(panel, /localStorage\.removeItem\(CHAT_PANEL_WIDTH_LEGACY_KEY\)/);
+  // 舊 key 不讀（雷：註釋裡出現舊 key 名屬正常，斷言只釘「讀取呼叫」形態）。
+  assert.doesNotMatch(panel, /getItem\(\s*CHAT_PANEL_WIDTH_LEGACY_KEY\s*\)/);
+  assert.doesNotMatch(panel, /localStorage\.getItem\("canvas-chat-panel-width"\)/);
+  assert.doesNotMatch(layout, /localStorage\.getItem\("canvas-chat-panel-width"\)/);
+  // 校驗範圍單一表述：v2 值必須是 320–720 整數才落地（下限取拖寬底，非 clamp 底）。
+  assert.match(panel, /if \(!Number\.isInteger\(w\) \|\| w < CHAT_PANEL_MIN_WIDTH \|\| w > CHAT_PANEL_MAX_WIDTH\) return null;/);
+
+  // ② 第二跳變源大赦：rail 態 09-05 後 UI 不可達，舊持久值一律不讀。
+  assert.doesNotMatch(panel, /localStorage\.getItem\("canvas-chat-panel-state"\)/);
+
+  // ③ pre-paint 同步腳本在場且含校驗（釘 layout 源碼字串；生產 HTML grep 為
+  //    外部證據層，同字符串）。範圍常量與 panel 側逐字一致，防兩端驗證漂移。
+  assert.match(
+    layout,
+    /var w=Number\(localStorage\.getItem\("canvas-chat-panel-width\.v2"\)\);if\(Number\.isInteger\(w\)&&w>=320&&w<=720\)\{document\.documentElement\.style\.setProperty\("--ws-panel-w",w\+"px"\);\}/,
+  );
+  assert.match(panel, /export const CHAT_PANEL_MIN_WIDTH = 320;/);
+  assert.match(panel, /export const CHAT_PANEL_MAX_WIDTH = 720;/);
+  // 腳本必須是解析期内聯 <script>（dangerouslySetInnerHTML），不得改用
+  // next/script 的 beforeInteractive（水合同期執行＝跳變會回魂）。
+  // 雷位提示：本斷言只釘 import 形態，layout 註釋談論 next/script 屬正常。
+  assert.doesNotMatch(layout, /from\s*"next\/script"/);
 });
