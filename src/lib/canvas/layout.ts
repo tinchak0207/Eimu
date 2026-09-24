@@ -12,6 +12,9 @@ import type { AgentSseEvent } from "@/lib/agent-chat-types";
 import { isValidCreationStep, MAX_EPISODES_PER_PROJECT } from "@/lib/creation-flow-steps";
 import { isReferenceImageRole } from "@/lib/image-types";
 import { normalizeStoryboardSceneRef, normalizeStoryboardShot } from "@/lib/storyboard-contract";
+// 批准狀態清洗的**唯一收口**：不另寫第二把尺——`normalizeApprovalState` 同時服務
+// 卡側（`normalizeCharacterCard`/`setApproval`）與節點側，兩側值域判據同一份。
+import { normalizeApprovalState } from "@/lib/character-cards";
 import type { CanvasReducerState } from "./reducer";
 import {
   CANVAS_NODE_DEFAULT_SIZE,
@@ -346,11 +349,22 @@ export function toNodeMetadata(raw: unknown): CanvasNodeMetadata {
     // 只有純文字（使用者「資產圖都不讓我們確認」的 UI 側缺口）。三欄全字串才收，
     // 殘形整包丟棄（不製造半形狀態：缺 request_id 的卡按不下批准）。
     ...(toGateConfirm(m.gateConfirm) ? { gateConfirm: toGateConfirm(m.gateConfirm)! } : {}),
+    // 分鏡批准狀態（2026-09-24 WS-審查）：與 gateConfirm 同族的雙白名單鍵——漏此處
+    // ＝分鏡面板按下「批准」當下看似生效，刷新/回舊會話（fromCanvasProject → 本函式）
+    // 後退回「未批准」，且分鏡審查面板與門禁的批准態憑空翻面。清洗走卡側同一收口
+    //（`normalizeApprovalState`）：status 不在三值域/非物件 → null → 整包丟棄，
+    // 不製造半形狀態（缺 status 的批准讀不懂，不猜成「已批准」也不猜成「待批准」）。
+    ...(normalizeApprovalState(m.approval) ? { approval: normalizeApprovalState(m.approval)! } : {}),
   };
 }
 
-/** 門禁卡裁決憑據收斂：三欄型別全對才回物件，否則整包丟棄（同 storyboard 家族寫法）。 */
-function toGateConfirm(v: unknown): CanvasNodeGateConfirm | undefined {
+/**
+ * 門禁卡裁決憑據收斂：三欄型別全對才回物件，否則整包丟棄（同 storyboard 家族寫法）。
+ *
+ * 導出原因＝上行壓縮端 `compactMetadataForAgent` 必須走**同一份**清洗（雙白名單鐵律：
+ * 兩端各寫一份判據＝兩個漂移點；`cleanEmitsEntity`/`toCardMetadataName` 同為此而導出）。
+ */
+export function toGateConfirm(v: unknown): CanvasNodeGateConfirm | undefined {
   if (!v || typeof v !== "object") return undefined;
   const g = v as Record<string, unknown>;
   const requestId = str(g.request_id);

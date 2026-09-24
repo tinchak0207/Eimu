@@ -1,7 +1,8 @@
 // 畫布 chat 的展示型類型與介面（自 use-canvas-chat.ts 外圍搬遷，符號名不變）。
 // use-canvas-chat.ts 仍是唯一匯出點（barrel），消費端 import 路徑零改動。
-import { CARD_NAME_KEYS, cleanEmitsEntity, toCardMetadataName, toNodeFontSize } from "@/lib/canvas/layout";
+import { CARD_NAME_KEYS, cleanEmitsEntity, toCardMetadataName, toGateConfirm, toNodeFontSize } from "@/lib/canvas/layout";
 import type { AgentSseEvent } from "@/lib/agent-chat-types";
+import { normalizeApprovalState } from "@/lib/character-cards";
 import type { CharacterCard } from "@/lib/character-cards";
 import { compactStoryboardShot } from "@/lib/storyboard-contract";
 import type {
@@ -169,6 +170,17 @@ export function compactMetadataForAgent(metadata: CanvasNodeMetadata | undefined
   // 回舊會話/換裝置後字號憑空回到 14.5（讀取端 NodeBody.tsx:431 讀的就是本鍵）。
   const fontSize = toNodeFontSize(bag.fontSize);
   if (fontSize !== undefined) out.fontSize = fontSize;
+  // 協作確認閘的門禁卡裁決憑據（2026-09-24 收口）：三欄（request_id/session_id/status）
+  // 走與還原端**同一份**清洗（`layout.toGateConfirm`，非本地重寫）。漏此端＝使用者
+  // 刷新後回到畫布，門禁卡退回純文字、按不下批准——「可操作」只在當前會話成立，
+  // 是能力靜默消失（決策 5「資產確認不設超時」在重載後即失效）。
+  const gateConfirm = toGateConfirm(metadata.gateConfirm);
+  if (gateConfirm) out.gateConfirm = gateConfirm;
+  // 分鏡批准狀態（2026-09-24 WS-審查）：與上面 gateConfirm 同族的雙白名單鍵，語義
+  // 獨立（人對分鏡交付物的批准 vs 網關 pendingConfirms 憑據，不合併不互推）。清洗走
+  // 卡側唯一收口 `normalizeApprovalState`（status 落三值域外＝整包丟棄，不猜語義）。
+  const approval = normalizeApprovalState(metadata.approval);
+  if (approval) out.approval = approval;
   return Object.keys(out).length > 0 ? out : undefined;
 }
 

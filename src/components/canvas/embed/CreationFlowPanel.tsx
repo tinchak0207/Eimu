@@ -108,7 +108,7 @@ export function CreationStepBar({ contractStep, onOpenReview, onRewind, readOnly
                 {wizardStepCostLabel(step)}
               </span>
             </span>
-            {step.review && (
+            {action?.kind === "review" && (
               <span className="shrink-0 text-ios-caption2 text-ios-blue">审查</span>
             )}
           </>

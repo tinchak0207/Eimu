@@ -63,6 +63,8 @@ function render(over: Partial<React.ComponentProps<typeof CanvasEmbedOverlays>> 
       elementListOpen: false,
       reviewPanel: null,
       reviewPendingCount: 0,
+      // 步驟條接線後的新必填 prop（面板內步驟條據此切 readOnly）；本檔測的是工具列入口。
+      interactionMode: "preset" as const,
       onToggleReview: () => {},
       canvas: canvasStub([card()]),
       viewportSizeRef: { current: { width: 0, height: 0 } },

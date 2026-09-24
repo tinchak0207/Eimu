@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { compactMetadataForAgent } from "./canvas-chat-types";
-import { toNodeMetadata } from "@/lib/canvas/layout";
+import { fromCanvasProject, toNodeMetadata } from "@/lib/canvas/layout";
 import type { CanvasNodeMetadata } from "@/lib/canvas/types";
 import type { StoryboardScriptShot } from "@/lib/storyboard-contract";
 
@@ -422,4 +422,104 @@ test("fontSize 缺席＝零回歸：輸出物件逐位元不含該鍵（既有�
     undefined,
     "壓縮端缺席時同樣不多寫鍵",
   );
+});
+
+// ── 雙白名單收口（2026-09-24）：門禁裁決 gateConfirm ＋ 分鏡批准 approval ──
+// 兩鍵同族同寫法（結構化物件、走與還原端同一份清洗、殘形整包丟棄）。
+// 病灶：兩端任一漏放行＝「同會話內看起來正常、刷新/回舊會話後憑空消失」——
+// 門禁卡退回純文字（按不下批准）、分鏡審查面板退回「未批准」。屬最重的一類靜默失敗。
+
+const GATE_CONFIRM = { request_id: "wfgate_wf1_cast_card_abc", session_id: "sess_1", status: "pending" } as const;
+const APPROVAL = { status: "rejected", decidedAt: "2026-09-24T10:00:00.000Z", reason: "第 3 镜服装不一致" } as const;
+
+test("往復不丟：真 metadata（approval ＋ gateConfirm）→ 壓縮 → fromCanvasProject 還原後兩鍵逐位相同", () => {
+  const meta: CanvasNodeMetadata = {
+    prompt: "第 3 镜 少年推门",
+    gateConfirm: { ...GATE_CONFIRM },
+    approval: { ...APPROVAL },
+  };
+  // 上行：真壓縮端（canvas-project-sync 上行的就是這個函式的輸出）
+  const compacted = compactMetadataForAgent(meta);
+  assert.deepEqual(compacted?.gateConfirm, GATE_CONFIRM, "壓縮端放行 gateConfirm");
+  assert.deepEqual(compacted?.approval, APPROVAL, "壓縮端放行 approval（含 decidedAt/reason 逐欄）");
+
+  // 下行：真還原入口（use-canvas-chat.restoreAgentSnapshot → fromCanvasProject → toNodeMetadata），
+  // 不是直接餵 toNodeMetadata——中間的節點形狀校驗也必須讓兩鍵活著。
+  const restored = fromCanvasProject({ nodes: [{ id: "shot-1", type: "text", title: "第 3 镜", metadata: compacted }] });
+  assert.equal(restored.nodes.length, 1);
+  assert.deepEqual(restored.nodes[0]?.metadata?.gateConfirm, GATE_CONFIRM, "還原後 gateConfirm 逐位相同");
+  assert.deepEqual(restored.nodes[0]?.metadata?.approval, APPROVAL, "還原後 approval 逐位相同");
+  assert.deepEqual(toNodeMetadata(compacted), meta, "兩鍵與其他 metadata 同存時互不干擾（整包等價）");
+});
+
+test("兩鍵是獨立鍵：只帶 approval 不偽造 gateConfirm（反之亦然），不合併不互推", () => {
+  const onlyApproval = compactMetadataForAgent({ approval: { ...APPROVAL } });
+  assert.deepEqual(onlyApproval, { approval: APPROVAL });
+  const onlyGate = compactMetadataForAgent({ gateConfirm: { ...GATE_CONFIRM } });
+  assert.deepEqual(onlyGate, { gateConfirm: GATE_CONFIRM });
+  assert.equal("gateConfirm" in (onlyApproval ?? {}), false, "沒有裁決憑據就不寫該鍵");
+  assert.equal("approval" in (onlyGate ?? {}), false, "沒有批准狀態就不寫該鍵");
+});
+
+test("負對照：殘形/缺欄的輸入整包丟棄，不得半形半套（兩端同一把尺）", () => {
+  // gateConfirm：三欄缺一不可（缺 request_id 的卡按不下批准）
+  const badGate = [
+    { session_id: "s", status: "pending" },
+    { request_id: "r", status: "pending" },
+    { request_id: "r", session_id: "s", status: "weird" },
+    "pending",
+    null,
+    42,
+  ];
+  for (const bad of badGate) {
+    assert.deepEqual(
+      compactMetadataForAgent({ gateConfirm: bad } as unknown as CanvasNodeMetadata),
+      undefined,
+      `壓縮端丟棄殘形 gateConfirm：${JSON.stringify(bad)}`,
+    );
+    assert.equal("gateConfirm" in toNodeMetadata({ gateConfirm: bad }), false, `還原端同一把尺：${JSON.stringify(bad)}`);
+  }
+  // approval：status 三值域之外＝整包丟棄（讀不懂的值不猜成 pending 也不猜成 approved）
+  const badApproval = [
+    { status: "maybe" },
+    { reason: "只给理由不给结论" },
+    { status: "approved", decidedAt: 123 },
+    "",
+    null,
+    [],
+  ];
+  for (const bad of badApproval) {
+    const compacted = compactMetadataForAgent({ approval: bad } as unknown as CanvasNodeMetadata);
+    if (bad && typeof bad === "object" && (bad as { status?: string }).status === "approved") {
+      // decidedAt 非字串＝該欄省略，但 status 合法 → 鍵照留（批准結論可信）
+      assert.deepEqual(compacted, { approval: { status: "approved" } }, "非字串 decidedAt 只丟該欄，不丟整個結論");
+      continue;
+    }
+    assert.deepEqual(compacted, undefined, `壓縮端丟棄殘形 approval：${JSON.stringify(bad)}`);
+  }
+});
+
+test("髒 approval 走卡側同一收口：reason 裁剪/空白省略（不在節點側另立判據）", () => {
+  const compacted = compactMetadataForAgent({
+    approval: { status: "rejected", decidedAt: "2026-09-24T10:00:00.000Z", reason: "   " },
+  } as unknown as CanvasNodeMetadata);
+  assert.deepEqual(compacted, { approval: { status: "rejected", decidedAt: "2026-09-24T10:00:00.000Z" } }, "純空白理由＝沒有理由（欄位省略）");
+});
+
+test("缺席＝零回歸：既有鍵集逐位元不變（不多寫恆存在的空鍵）", () => {
+  const baseline = toNodeMetadata({ content: "正文", gate: "剧本人工批准", count: 2 });
+  assert.deepEqual(baseline, { content: "正文", gate: "剧本人工批准", count: 2 });
+  assert.deepEqual(compactMetadataForAgent({ content: "正文", gate: "剧本人工批准" } as unknown as CanvasNodeMetadata), {
+    content: "正文",
+    gate: "剧本人工批准",
+  });
+});
+
+test("全自動檔不受影響：兩鍵的存續與 interaction_mode 無關（純資料傳輸，不帶檔位判斷）", () => {
+  // 門禁/批准是「資料在不在」，不是「擋不擋」——檔位語義只活在 isAssetApproved/網關閘，
+  // 白名單端兩個檔位走同一條路（否則 auto 檔的門禁卡刷新後也會退回純文字）。
+  const meta = { gateConfirm: { ...GATE_CONFIRM }, approval: { status: "approved" } } as CanvasNodeMetadata;
+  const roundTrip = fromCanvasProject({ nodes: [{ id: "n", type: "text", title: "t", metadata: compactMetadataForAgent(meta) }] });
+  assert.deepEqual(roundTrip.nodes[0]?.metadata?.gateConfirm, GATE_CONFIRM);
+  assert.deepEqual(roundTrip.nodes[0]?.metadata?.approval, { status: "approved" });
 });

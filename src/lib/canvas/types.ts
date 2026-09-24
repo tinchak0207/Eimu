@@ -13,6 +13,9 @@
 import type { ReferenceImageRole } from "../image-types";
 import type { StoryboardSceneRef, StoryboardScriptShot } from "../storyboard-contract";
 import { AID_PROJECT_TYPE_ENUM, type AidProjectTypeEnumValue } from "../aid-enums/creation";
+// 批准狀態形狀的單一真源（type-only：執行期零依賴，不成環——`storyboard-contract.ts`
+// 已用同一寫法 type-only import 本檔，本檔反向 type-only 取 `ApprovalState` 是同構先例）。
+import type { ApprovalState } from "../character-cards";
 
 // ─────────────────────────────────────────── 作品形態值域
 
@@ -185,6 +188,20 @@ export interface CanvasNodeMetadata {
    * 交付物變更（重生成/換圖）會重新回到 pending（網關按交付物指紋記批准）。
    */
   gateConfirm?: CanvasNodeGateConfirm;
+  /**
+   * 分鏡批准狀態（2026-09-24 WS-審查：分鏡審查面板的批准/駁回寫進節點）。
+   * 形狀與卡側**同一個** `ApprovalState`（`character-cards.ts`，type-only import 不建
+   * 第二套）；清洗唯一收口＝`normalizeApprovalState`（讀取端與上行端共用同一把尺）。
+   *
+   * ⚠️ 本鍵**必須同時**存在於兩處 metadata 白名單，否則刷新/回舊會話即靜默消失
+   *（不是當下失效，是同會話內看起來正常、重載後退回「未批准」態）：
+   *   - 讀取/還原端 `src/lib/canvas/layout.ts` 的 `toNodeMetadata`
+   *   - 上行/壓縮端 `src/hooks/canvas/canvas-chat-types.ts` 的 `compactMetadataForAgent`
+   *
+   * 與同層 `gateConfirm`（網關門禁裁決憑據）是**兩個獨立鍵**：前者＝人對分鏡交付物的
+   * 批准，後者＝協作確認閘的 pendingConfirms 憑據；不合併、不互相推導。
+   */
+  approval?: ApprovalState;
   /** 步驟頭卡：本步輸入來源。 */
   inputFrom?: string;
   /** 步驟序號（生成卡頂欄 stepName 條）。 */

@@ -29,6 +29,7 @@ import {
   resolveWizardStepAction,
   wizardProgress,
   wizardRerunPlan,
+  wizardRewindAnchorNodeIds,
   wizardStepCoins,
   wizardStepCostLabel,
   wizardStepForContractStep,
@@ -37,6 +38,8 @@ import {
   type WizardStep,
 } from "./wizard-steps";
 import { CreationStepBar } from "@/components/canvas/embed/CreationFlowPanel";
+import { downstreamInvalidationIds } from "@/hooks/use-canvas-chat";
+import { CanvasNodeType, type CanvasNode, type CanvasConnection } from "@/lib/canvas/types";
 
 function step(value: number): WizardStep {
   const meta = wizardStepMeta(value);
@@ -218,14 +221,21 @@ test("點擊語義：全自動檔（readOnly）零可點；已完成步回跳；
   }
 
   // 審查步：只要有 onOpenReview 就可開面板（決策 10：主入口綁步驟條）
+  // 目標值域逐字對齊路 2 的 `ReviewPanelKind`（"asset" | "shot"）——接線一行直通
+  // `openReviewPanel({ panel: target })`，不經映射表。
   assert.deepEqual(resolveWizardStepAction(assets, "current", { canReview: true, canRewind: true }), {
     kind: "review",
-    target: "assets",
+    target: "asset",
   });
   assert.deepEqual(resolveWizardStepAction(shots, "pending", { canReview: true, canRewind: true }), {
     kind: "review",
-    target: "shots",
+    target: "shot",
   });
+  assert.deepEqual(
+    WIZARD_STEPS.filter((s) => s.review).map((s) => s.review),
+    ["asset", "shot"],
+    "審查目標只此兩個，且與面板詞彙同源",
+  );
   // 兩個入口都給時，審查優先於回跳（資產圖的改動入口就是面板本身）
   assert.equal(resolveWizardStepAction(assets, "done", { canReview: true, canRewind: true })?.kind, "review");
 
@@ -286,7 +296,9 @@ test("預估花費：文本步不編幣數（按用量計費），不冒充一�
 // ─────────────────────────── 5. 步驟條 SSR
 
 test("步驟條 SSR：5 步全印、當前步標記隨狀態移動、花費可見、審查入口標示", () => {
-  const html = renderToStaticMarkup(createElement(CreationStepBar, { contractStep: 4, onRewind: () => {} }));
+  const html = renderToStaticMarkup(
+    createElement(CreationStepBar, { contractStep: 4, onOpenReview: () => {}, onRewind: () => {} }),
+  );
   for (const label of ["上传剧本", "拆分剧本", "资产图", "故事板", "视频"]) {
     assert.match(html, new RegExp(label), `${label} 必須印出`);
   }
@@ -295,12 +307,14 @@ test("步驟條 SSR：5 步全印、當前步標記隨狀態移動、花費可�
   assert.match(html, /按用量计费/, "文本步按用量計費");
   assert.match(html, /约 [\d.]+ 币 · 6 张/, "資產圖步顯示預估花費與張數口徑");
   assert.match(html, /约 [\d.]+ 币 · 12 镜 × 5s/, "視頻步顯示鏡數 × 秒數口徑");
-  assert.match(html, /审查/, "資產圖/故事板要標出可進審查面板");
+  assert.equal((html.match(/>审查</g) ?? []).length, 2, "只有資產圖/故事板標審查入口");
 
   const moved = renderToStaticMarkup(createElement(CreationStepBar, { contractStep: 3, onRewind: () => {} }));
   assert.match(moved, />资产图<span[^>]*>· 进行中/, "契約 3 → 當前步移到資產圖");
   assert.doesNotMatch(moved, />故事板<span[^>]*>· 进行中/);
   assert.doesNotMatch(moved, /· 进行中[\s\S]*· 进行中/, "同一個步驟條只能有一個當前步");
+  // 沒接 onOpenReview：沒得開面板就不標「审查」（不留一個按了沒反應的入口）
+  assert.doesNotMatch(moved, /审查/);
 });
 
 test("步驟條 SSR：回跳鈕帶「要重跑該步與其後續」，readOnly 下零按鈕", () => {
@@ -327,5 +341,133 @@ test("步驟條 SSR：回跳鈕帶「要重跑該步與其後續」，readOnly �
     createElement(CreationStepBar, { contractStep: 4, onOpenReview: () => {}, onRewind: () => {}, readOnly: true }),
   );
   assert.doesNotMatch(readOnly, /<button/, "readOnly 下不得有任何可點鈕");
+  assert.doesNotMatch(readOnly, /审查/, "全自動檔不開審查入口（決策 13）");
   assert.match(readOnly, />故事板<span[^>]*>· 进行中/, "但進度照樣看得到");
+});
+// ─────────────────────────── 6. 回跳的畫布側落點（決策 15）
+
+/**
+ * 真 workflow DAG 形狀（照 gateway expandTemplate 的泳道：主節點 → 工具卡 → 門禁卡 →
+ * 下一步主節點）。標記照現場：三個停點主節點帶 metadata.gate；資產節點帶 entityCardId；
+ * 分鏡節點帶 storyboardShot；成片是 video 節點。
+ */
+const scriptNode: CanvasNode = {
+  id: "wf-script-0",
+  type: CanvasNodeType.Text,
+  title: "拆解剧本",
+  position: { x: 0, y: 0 },
+  width: 300,
+  height: 220,
+  metadata: { gate: "剧本人工批准", deliverable: "结构化场次 JSON" },
+};
+const castNode: CanvasNode = {
+  id: "wf-cast_card-1",
+  type: CanvasNodeType.Image,
+  title: "主演资产",
+  position: { x: 300, y: 0 },
+  width: 300,
+  height: 220,
+  metadata: { gate: "人物批准", entityCardId: "card-node-wf-cast_card-1" },
+};
+const storyboardNode: CanvasNode = {
+  id: "wf-storyboard-2",
+  type: CanvasNodeType.Text,
+  title: "锁定分镜",
+  position: { x: 600, y: 0 },
+  width: 300,
+  height: 220,
+  metadata: { gate: "分镜批准", storyboardShot: { shotNumber: "S03" } as unknown as CanvasNode["metadata"]["storyboardShot"] },
+};
+const keyframeNode: CanvasNode = {
+  id: "wf-keyframe-3",
+  type: CanvasNodeType.Image,
+  title: "关键帧",
+  position: { x: 900, y: 0 },
+  width: 300,
+  height: 220,
+  metadata: { content: "https://cdn.example.com/keyframe.png", status: "success" },
+};
+const videoNode: CanvasNode = {
+  id: "wf-shot_video-4",
+  type: CanvasNodeType.Video,
+  title: "镜头视频",
+  position: { x: 1200, y: 0 },
+  width: 300,
+  height: 220,
+  metadata: { content: "https://cdn.example.com/shot.mp4", status: "success" },
+};
+const finalCutNode: CanvasNode = {
+  id: "wf-final_cut-5",
+  type: CanvasNodeType.Video,
+  title: "剪辑成片",
+  position: { x: 1500, y: 0 },
+  width: 300,
+  height: 220,
+  metadata: { content: "https://cdn.example.com/film.mp4", status: "success" },
+};
+const WORKFLOW_NODES: readonly CanvasNode[] = [scriptNode, castNode, storyboardNode, keyframeNode, videoNode, finalCutNode];
+const WORKFLOW_CONNECTIONS: readonly CanvasConnection[] = [
+  { id: "c1", fromNodeId: scriptNode.id, toNodeId: castNode.id },
+  { id: "c2", fromNodeId: castNode.id, toNodeId: storyboardNode.id },
+  { id: "c3", fromNodeId: storyboardNode.id, toNodeId: keyframeNode.id },
+  { id: "c4", fromNodeId: keyframeNode.id, toNodeId: videoNode.id },
+  { id: "c5", fromNodeId: videoNode.id, toNodeId: finalCutNode.id },
+];
+
+test("回跳落點：各步挑的是該步的交付物節點（既有標記，不自造步→節點表）", () => {
+  assert.deepEqual(wizardRewindAnchorNodeIds(step(1), WORKFLOW_NODES), [scriptNode.id, castNode.id, storyboardNode.id], "劇本步＝帶 gate 的步驟頭節點");
+  assert.deepEqual(wizardRewindAnchorNodeIds(step(3), WORKFLOW_NODES), [castNode.id], "資產圖＝已落資產卡的節點");
+  assert.deepEqual(wizardRewindAnchorNodeIds(step(4), WORKFLOW_NODES), [storyboardNode.id], "故事板＝真分鏡實體節點");
+  assert.deepEqual(wizardRewindAnchorNodeIds(step(5), WORKFLOW_NODES), [videoNode.id, finalCutNode.id], "視頻＝video 節點");
+});
+
+test("回跳真行為：落點接既有 revokeDownstream 原語後，作廢集永不包含該步之前的步驟", () => {
+  const voidFrom = (value: number) =>
+    wizardRewindAnchorNodeIds(step(value), WORKFLOW_NODES).flatMap((id) =>
+      downstreamInvalidationIds(WORKFLOW_NODES, WORKFLOW_CONNECTIONS, id),
+    );
+
+  const fromShots = voidFrom(4);
+  assert.deepEqual(fromShots, [keyframeNode.id, videoNode.id, finalCutNode.id], "故事板回跳＝只作廢後續的關鍵帧/視頻/成片");
+  assert.equal(fromShots.includes(scriptNode.id), false, "劇本步成果不得被作廢");
+  assert.equal(fromShots.includes(castNode.id), false, "資產步成果不得被作廢");
+
+  const fromAssets = voidFrom(3);
+  assert.equal(fromAssets.includes(scriptNode.id), false, "資產圖回跳不得回頭作廢劇本");
+  assert.equal(fromAssets.includes(castNode.id), false, "落點自身保留（使用者要回去改的就是它）");
+  // 下游是關鍵帧/視頻/成片；分鏡節點是 text（純資料，`downstreamInvalidationIds` 的既有規則
+  // 只跳過「自身入列」，BFS 照樣穿過它——所以分鏡不進作廢集但它的下游照樣被作廢）。
+  assert.ok(fromAssets.includes(keyframeNode.id) && fromAssets.includes(finalCutNode.id), "資產圖回跳必須作廢其後續");
+
+  const fromVideo = voidFrom(5);
+  assert.deepEqual(fromVideo, [finalCutNode.id], "視頻回跳＝只作廢成片");
+
+  // 劇本步：落點含三個門禁步驟頭節點 → 作廢集＝劇本之後的整條後續（劇本自身保留＝要回去改的那步）
+  const fromScript = voidFrom(2);
+  assert.equal(fromScript.includes(scriptNode.id), false, "劇本節點自身保留（回跳改的就是它）");
+  for (const later of [castNode.id, keyframeNode.id, videoNode.id, finalCutNode.id]) {
+    assert.ok(fromScript.includes(later), `劇本回跳必須作廢後續步驟：${later}`);
+  }
+});
+
+test("回跳無落點＝零動作：畫布上還沒有該步交付物時回空陣列，不猜節點、不亂作廢", () => {
+  const onlyPrompt: CanvasNode[] = [
+    ...WORKFLOW_NODES.slice(0, 1).map((n) => ({ ...n, metadata: { deliverable: "结构化场次 JSON" } })),
+  ];
+  assert.deepEqual(wizardRewindAnchorNodeIds(step(1), onlyPrompt), [], "沒有 gate 標記＝解析不到落點");
+  assert.deepEqual(wizardRewindAnchorNodeIds(step(3), onlyPrompt), [], "沒有落卡標記＝解析不到落點");
+  assert.deepEqual(wizardRewindAnchorNodeIds(step(4), onlyPrompt), []);
+  assert.deepEqual(wizardRewindAnchorNodeIds(step(5), onlyPrompt), []);
+  assert.deepEqual(wizardRewindAnchorNodeIds(step(4), []), [], "空畫布＝零動作");
+});
+
+test("回跳落點不認殘形：storyboardShot 缺 shotNumber／gate 空字串／entityCardId 空白 一律不算落點", () => {
+  const dirty: CanvasNode[] = [
+    { ...storyboardNode, metadata: { storyboardShot: { shotNumber: "" } as unknown as CanvasNode["metadata"]["storyboardShot"] } },
+    { ...scriptNode, metadata: { gate: "" } },
+    { ...castNode, metadata: { entityCardId: "   " } },
+  ];
+  assert.deepEqual(wizardRewindAnchorNodeIds(step(4), dirty), [], "shotNumber 空＝整包丟（與 storyboard 契約同一把尺）");
+  assert.deepEqual(wizardRewindAnchorNodeIds(step(1), dirty), [], "空字串 gate 不是門禁節點");
+  assert.deepEqual(wizardRewindAnchorNodeIds(step(3), dirty), [], "空白 entityCardId 不是已落卡");
 });

@@ -674,13 +674,13 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
 
   /**
    * 分鏡批准狀態寫入（路 1 的凍結欄位；清洗走 `shotApprovalFor` → 真源 `normalizeApprovalState`）。
-   * **依賴聲明**：`CanvasNodeMetadata` 目前尚未白名單 `approval` 鍵（`layout.ts toNodeMetadata`
-   * 會在外層丟掉未列鍵，雙白名單另一端是 `canvas-chat-types.compactMetadataForAgent`）——
-   * 該鍵的持久化屬資料層（路 1），本片只負責寫進節點 metadata 並如實回報此依賴。
+   * **持久化已通**（2026-09-24 收口片）：`CanvasNodeMetadata.approval` 已宣告，且雙白名單兩端
+   * （`layout.toNodeMetadata` 讀取端、`canvas-chat-types.compactMetadataForAgent` 上行端）
+   * 都放行該鍵——刷新/回舊會話後分鏡審查面板的批准態不再消失。
    */
   const patchShotApproval = useCallback(
     (nodeId: string, approval: ApprovalState) => {
-      canvasStateRef.current.patchNodeMetadata(nodeId, { approval } as Partial<CanvasNodeMetadata>);
+      canvasStateRef.current.patchNodeMetadata(nodeId, { approval });
     },
     [canvasStateRef],
   );
@@ -1095,6 +1095,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
           elementListOpen={elementListOpen}
           reviewPanel={reviewPanel}
           reviewPendingCount={reviewPendingCount}
+          interactionMode={interactionMode}
           onToggleReview={(panel) => setReviewPanel((prev) => (prev === panel ? null : panel))}
           canvas={canvas}
           viewportSizeRef={viewportSizeRef}

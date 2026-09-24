@@ -27,14 +27,23 @@
 import { creationStepMeta, type CreationStep } from "./creation-flow-steps";
 import { generationCoins, generationModel } from "./generation-model-catalog";
 import { DEFAULT_IMAGE_MODEL_ID, VEO_31_FAST_MODEL_ID } from "./image-model-ids.js";
+import { normalizeStoryboardShot } from "./storyboard-contract";
+import { CanvasNodeType, type CanvasNode } from "./canvas/types";
 
 /** 嚮導步值（呈現層值域，1..5）。與契約層 `CREATION_STEPS[].value`（1..7）**不同值域**。 */
 export type WizardStepValue = 1 | 2 | 3 | 4 | 5;
 
 export type WizardStepKey = "upload-script" | "split-script" | "assets" | "shots" | "video";
 
-/** 步驟條可開啟的審查面板目標（決策 10/24：資產審查面板與分鏡審查面板）。 */
-export type WizardReviewTarget = "assets" | "shots";
+/**
+ * 步驟條可開啟的審查面板目標（決策 10/24：資產審查面板與分鏡審查面板）。
+ *
+ * 值域**逐字對齊路 2 已落地的開啟介面**：`ReviewPanelKind`（`src/components/assets/AssetReviewPanel.tsx:214`
+ * 的 `"asset" | "shot"`）＋ `openReviewPanel({ panel })`（同檔 `:230`，CanvasEmbed 掛
+ * `REVIEW_PANEL_OPEN_EVENT` 監聽）。刻意不另立第二套詞彙（`"assets"/"shots"` 會逼接線端
+ * 寫一張映射表＝兩個漂移點）；接線因此是一行：`onOpenReview={(k) => openReviewPanel({ panel: k })}`。
+ */
+export type WizardReviewTarget = "asset" | "shot";
 
 /**
  * 該步的預估花費口徑（決策 16：看得見但不攔）。
@@ -93,7 +102,7 @@ export const WIZARD_STEPS: readonly WizardStep[] = [
     label: "资产图",
     contractFrom: 3,
     contractTo: 3,
-    review: "assets",
+    review: "asset",
     cost: { kind: "image", modelId: DEFAULT_IMAGE_MODEL_ID, quantity: 6 },
   },
   {
@@ -102,7 +111,7 @@ export const WIZARD_STEPS: readonly WizardStep[] = [
     label: "故事板",
     contractFrom: 4,
     contractTo: 4,
-    review: "shots",
+    review: "shot",
     cost: { kind: "image", modelId: DEFAULT_IMAGE_MODEL_ID, quantity: 12 },
   },
   {
@@ -281,4 +290,74 @@ export function wizardStepCostLabel(step: WizardStep, options: WizardStepCostOpt
     return `约 ${coins} 币 · ${count} 镜 × ${seconds}s`;
   }
   return `约 ${coins} 币 · ${count} 张`;
+}
+// ─────────────────────────── 回跳的畫布側落點（決策 15）
+
+/**
+ * 回跳（步驟條點已完成步）在畫布上的落點節點 id：**該步的交付物節點**。
+ *
+ * 呼叫端對每個落點呼叫 `revokeDownstream(nodeId)`——作廢的是**它們的下游**，落點自身
+ * 保留（`downstreamInvalidationIds` 的既有語義：「被改的那步由用戶自己重跑」）。
+ *
+ * 判據一律用**既有節點標記**，不自造「步→節點」映射表：
+ *   - 上傳劇本／拆分劇本 → `metadata.gate` 非空字串＝網關骨架的門禁步驟頭節點
+ *     （劇本/資產/分鏡三個停點都帶它；作廢其下游＋其後續步驟的下游＝劇本之後的整條後續）
+ *   - 資產圖 → `metadata.entityCardId` 非空＝本節點交付物已落成資產卡
+ *     （寫入端＝`use-canvas-chat.ts` 的落卡路徑，非死鍵）
+ *   - 故事板 → `metadata.storyboardShot` 過 `normalizeStoryboardShot` 非 null
+ *     （與分鏡審查面板 `reviewShotsFromNodes` **同一把尺**，不另立判準）
+ *   - 視頻 → `type === video` 的節點
+ *
+ * 安全性質（測試釘死）：**永不回傳「該步之前」的節點**——回跳只能作廢該步與其後續。
+ * 該步在畫布上還沒有交付物（標記全空）→ 回空陣列＝零動作（沒東西可作廢，不是失敗）；
+ * 呼叫端此時不該偽造落點、也不該改專案步（否則顯示與實際不一致）。
+ *
+ * 已知邊界（誠實標記）：畫布節點**沒有**「wizard 步」欄位（gateway 路徑連 stepIndex 都沒有），
+ * 上述標記是代理判據——模板未宣告 gate/emitsEntity、或資產是使用者直接上傳（無卡）時，
+ * 該步可能解析不到落點。真正的「步→節點」映射需上游寫入步標記，屬後續產品決策。
+ */
+export function wizardRewindAnchorNodeIds(step: WizardStep, nodes: readonly CanvasNode[]): string[] {
+  // 空/純空白不算標記（與白名單端 `str()` 的 trim 收斂同向：空白字串不是「有交付物」）。
+  const hasGateNode = (node: CanvasNode) =>
+    typeof node.metadata?.gate === "string" && node.metadata.gate.trim().length > 0;
+  const hasEntityCard = (node: CanvasNode) =>
+    typeof node.metadata?.entityCardId === "string" && node.metadata.entityCardId.trim().length > 0;
+  const hasStoryboardShot = (node: CanvasNode) => normalizeStoryboardShot(node.metadata?.storyboardShot) !== null;
+
+  const match: (node: CanvasNode) => boolean =
+    step.key === "upload-script" || step.key === "split-script"
+      ? hasGateNode
+      : step.key === "assets"
+        ? hasEntityCard
+        : step.key === "shots"
+          ? hasStoryboardShot
+          : (node) => node.type === CanvasNodeType.Video;
+
+  return nodes.filter(match).map((node) => node.id);
+}
+
+/** 回跳的宿主能力（結構介面：`UseCanvasChatReturn` 的子集，兩處宿主都滿足）。 */
+export interface WizardRewindHost {
+  /** 當前畫布節點（落點解析的唯一輸入）。 */
+  nodes: readonly CanvasNode[];
+  /** 作廢某節點的下游成果，回傳被作廢的節點 id（路 3 的既有原語）。 */
+  revokeDownstream: (nodeId: string) => string[];
+  /** 流程步的唯一寫入口（`CanvasProject.currentStep`）。 */
+  setProjectMeta: (patch: { currentStep?: number }) => void;
+}
+
+/**
+ * 執行一次回跳（決策 15）：解析落點 → 逐落點作廢下游 → 把專案步退回該步。
+ * 回傳被作廢的節點 id（空陣列＝沒東西可作廢，且**不動**專案步：避免步驟條顯示
+ * 退回了而畫布實際沒動）。
+ *
+ * 為何放在本檔而不是宿主元件裡：兩個宿主（對話區步驟條、畫布面板步驟條）都要同一套
+ * 行為——各寫一份＝兩個漂移點。本檔仍是零副作用純函式（只調用宿主傳進來的原語）。
+ */
+export function applyWizardRewind(plan: WizardRerunPlan, host: WizardRewindHost): string[] {
+  const anchorIds = wizardRewindAnchorNodeIds(plan.target, host.nodes);
+  if (anchorIds.length === 0) return [];
+  const voided = anchorIds.flatMap((nodeId) => host.revokeDownstream(nodeId));
+  host.setProjectMeta({ currentStep: plan.target.contractFrom });
+  return voided;
 }

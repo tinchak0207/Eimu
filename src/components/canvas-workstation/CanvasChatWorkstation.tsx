@@ -1,10 +1,14 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import { MessageCircle } from "lucide-react";
 import type { UseCanvasChatReturn } from "@/hooks/use-canvas-chat";
 import { cn } from "@/lib/utils";
+import { DEFAULT_AGENT_SETTINGS, getAgentSettings, type AgentInteractionMode } from "@/lib/agent-chat-client";
+import { CreationStepBar } from "@/components/canvas/embed/CreationFlowPanel";
+import { openReviewPanel } from "@/components/assets/AssetReviewPanel";
+import { applyWizardRewind, type WizardRerunPlan, type WizardReviewTarget } from "@/lib/wizard-steps";
 import { CHAT_PANEL_MAX_WIDTH, CHAT_PANEL_MIN_WIDTH, useChatPanel } from "./use-chat-panel";
 
 // CanvasEmbed 維持 dynamic 懶載入：它是畫布工作站的天然 chunk 邊界，
@@ -30,6 +34,74 @@ export interface CanvasChatWorkstationProps {
 }
 
 /**
+ * 對話區步驟條（決策 12 的形態）：嵌在聊天面板的滾動區頂部，**不是**新增主視圖/路由。
+ *
+ * 檔位 → 可交互性的唯一映射就在這裡（決策 13）：`collaborate` 才可點（回跳/開審查），
+ * 全自動兩檔一律 `readOnly`＝只讀進度、一格按鈕都不渲染、零新增阻塞（護城河）。
+ * 本元件獨立匯出＝SSR 可直接按檔位渲染斷言（無 jsdom，本站測的是真 DOM 字串）。
+ */
+export function ChatCreationStepBar({
+  contractStep,
+  interactionMode,
+  onOpenReview,
+  onRewind,
+}: {
+  /** 契約層當前步（1..7，`CanvasProject.currentStep`）；未知＝全部待辦。 */
+  contractStep: number | undefined;
+  interactionMode: AgentInteractionMode;
+  onOpenReview: (target: WizardReviewTarget) => void;
+  onRewind: (plan: WizardRerunPlan) => void;
+}) {
+  const readOnly = interactionMode !== "collaborate";
+  return (
+    <section className="lg-float shrink-0 rounded-ios-2xl px-3 py-2.5" aria-label="创作流程">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[13px] font-semibold text-foreground">创作流程</p>
+        <span className="shrink-0 text-ios-caption2 text-foreground/45">
+          {readOnly ? "全自动 · 只读进度" : "协作 · 可点回跳/审查"}
+        </span>
+      </div>
+      <CreationStepBar
+        contractStep={contractStep}
+        onOpenReview={onOpenReview}
+        onRewind={onRewind}
+        readOnly={readOnly}
+      />
+    </section>
+  );
+}
+
+/**
+ * 步驟條兩根線的接法（決策 10 的審查入口 ＋ 決策 15 的回跳）。
+ *
+ * 抽成可直呼的純工廠**不是為了造抽象**：本站無 jsdom，SSR 點不到按鈕
+ * （同 `AgentChatPanel.resolveConfirmGroup` 的先例）——把「按下步驟條之後真的發生什麼」
+ * 做成函式，測試才能對**真事件總線**（`openReviewPanel` 派的 CustomEvent）與
+ * **真作廢原語**（`downstreamInvalidationIds` / `revokeDownstream`）斷言。
+ *
+ * 兩根線各自的接法：
+ *   - `onOpenReview(target)` → `openReviewPanel({ panel: target })`：路 2 的外開介面，
+ *     由 CanvasEmbed 掛 `REVIEW_PANEL_OPEN_EVENT` 監聽後開面板（本組件不碰面板本體）。
+ *   - `onRewind(plan)` → `applyWizardRewind`（落點解析 ＋ 逐落點 `revokeDownstream`
+ *     ＋ `setProjectMeta({ currentStep })` 把流程真的退回該步）；回傳被作廢的節點 id
+ *     （空陣列＝該步在畫布上還沒有交付物 → 零動作：不亂作廢、也不改專案步，免得
+ *     步驟條顯示退回而畫布實際沒動＝顯示與實際不一致）。
+ *     重跑本身仍交網關既有 rerun 入口，這裡只做同一條規則的畫布側立即投影。
+ */
+export function createStepBarWiring(
+  host: Pick<UseCanvasChatReturn, "nodes" | "revokeDownstream" | "setProjectMeta">,
+  open: (options: { panel: WizardReviewTarget }) => boolean = openReviewPanel,
+): {
+  onOpenReview: (target: WizardReviewTarget) => boolean;
+  onRewind: (plan: WizardRerunPlan) => string[];
+} {
+  return {
+    onOpenReview: (target) => open({ panel: target }),
+    onRewind: (plan) => applyWizardRewind(plan, host),
+  };
+}
+
+/**
  * 畫布工作站的殼：inline <style>（含跨檔作用於 AgentChatPanel 的
  * .agent-composer-anchor——style 塊必須跟 overlay 同一生命週期）+ 全場畫布
  * overlay + 聊天面板殼/拖寬手柄。面板兩態與寬度記憶在 use-chat-panel。
@@ -44,6 +116,24 @@ export function CanvasChatWorkstation({
   children,
 }: CanvasChatWorkstationProps) {
   const { chatPanelState, setChatPanelState, chatPanelWidth, setChatPanelWidth, chatPanelDragRef, chatPanelRef } = useChatPanel();
+
+  // ── 對話區步驟條（決策 12/13/15/16）：宿主＝本組件（見 ChatCreationStepBar 節）
+  // 檔位回讀與 CanvasEmbed 同一條路（網關為真源，失敗靜默落預設、永不 reject）。
+  // 放這裡而不是 CanvasEmbed 內：步驟條要嵌在**對話區**，CanvasEmbed 是畫布那一欄。
+  // 非工作站態（首頁默認面）不掛步驟條，故連檔位回讀都不用打（不多做一次外部請求）。
+  const [interactionMode, setInteractionMode] = useState<AgentInteractionMode>(DEFAULT_AGENT_SETTINGS.interaction_mode);
+  useEffect(() => {
+    if (!inCanvasWorkstation) return;
+    let cancelled = false;
+    void getAgentSettings().then((settings) => {
+      if (!cancelled) setInteractionMode(settings.interaction_mode);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [inCanvasWorkstation]);
+  // 兩根線的接法見 `createStepBarWiring`（同一個實作，不在元件裡再寫一份）。
+  const stepBarWiring = useMemo(() => createStepBarWiring(canvasHost), [canvasHost]);
 
   // 2026-09-24 暴君裁定「header 往右退縮，讓 AI 助理占上來，吃滿天花板」＋
   // 同刀「首秒零回縮」根治：expanded 態的退縮量不再由 JS 回寫像素——
@@ -427,6 +517,18 @@ export function CanvasChatWorkstation({
           </button>
         )}
         <div className={inCanvasWorkstation ? cn("canvas-chat-scroll min-w-0 flex-1 space-y-3", chatPanelState === "expanded" && "canvas-chat-scroll-fill") : "min-w-0 space-y-3"}>
+          {/* 對話區步驟條（決策 12「嵌在對話區的可交互步驟條」/ 13 兩檔都顯示 / 21
+              協作檔下為主視覺）：只在畫布工作站態渲染——首頁（非工作站）默認面不動。
+              5 步是呈現層投影，契約層 CREATION_STEPS 的 7 步一個字沒動（見 wizard-steps.ts）。
+              readOnly＝全自動檔只讀進度（一格都不可點、零新增阻塞＝護城河）。 */}
+          {inCanvasWorkstation && (
+            <ChatCreationStepBar
+              contractStep={canvasHost.currentStep}
+              interactionMode={interactionMode}
+              onOpenReview={stepBarWiring.onOpenReview}
+              onRewind={stepBarWiring.onRewind}
+            />
+          )}
           {/* 2026-09-05 暴君裁定：header 的「收起對話面板」鈕刪掉，退出只走右邊 X；
               chatHeaderExtra 不再產出（render prop 簽名保留，傳 undefined）。 */}
           {children(undefined)}
