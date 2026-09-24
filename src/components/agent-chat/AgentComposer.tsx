@@ -217,7 +217,7 @@ let attachmentSeq = 0;
 function AgentComposerComponent({
   disabled,
   onSend,
-  placeholder = "描述你想做的…",
+  placeholder = "描述你想做的，或把剧本／资产图拖进来",
   sessionId,
   onEnsureSession,
   prefill,
@@ -678,7 +678,7 @@ function AgentComposerComponent({
           aria-hidden="true"
           className="pointer-events-none absolute inset-x-2 inset-y-1 flex items-center justify-center rounded-[16px] bg-ios-blue/[0.08] text-sm font-medium text-ios-blue"
         >
-          松开以添加附件
+          松开以添加素材
         </div>
       )}
       {/* 隐式文件选择：附件鈕在文字左侧（items-end 底对齐），這裡只留 input 本體。 */}
@@ -702,8 +702,8 @@ function AgentComposerComponent({
         type="button"
         onClick={handlePick}
         disabled={!canAttach}
-        aria-label="添加附件"
-        title="添加附件（图片 / 视频 / 文档）"
+        aria-label="添加素材"
+        title="添加素材（剧本 / 图片 / 影片 / 文档）"
         className={cn(
           "flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-black/[0.06] text-foreground/65",
           "touch-manipulation [-webkit-tap-highlight-color:transparent]",

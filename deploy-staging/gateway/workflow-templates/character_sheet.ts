@@ -30,10 +30,18 @@ export const characterSheetTemplate: WorkflowTemplate =
         role: "view1",
         kind: "image",
         title: "正面",
+        // 实体宣告（2026-09-24）：四视图是**同一张角色卡的多张参考图**，只标 view1——
+        // 四颗都标会落四张重复卡。画布侧据 emitsEntity 自动落卡并回填分镜引用。
+        // referenceRoles（2026-09-24 四视图聚合）：view2/3/4 的交付圖是本卡的参考图，
+        // 由 expandTemplate 的參考圖 post-pass 解成 referenceNodeIds（作者不手写后者）。
+        defaults: {
+          emitsEntity: { kind: "character", nameFrom: "input", referenceRoles: ["view2", "view3", "view4"] },
+        },
         deliverable: "正面设定图，锁定面部基线 face_identity",
         gate: "用户逐角色确认四视图后才可供后续镜头引用（换脸是最大返工源）",
         notes: [
           "四视图同 seed 同批生成锁 face_identity；每张与 DNA 签名逐维比对，漂移即该张重出",
+          "交付本节点时把角色名写进节点 metadata 的 input 字段——画布侧据它自动落成角色卡并当卡名，缺了卡名只能退回节点标题「正面」",
         ],
         tools: [
           { id: "image_generate", input: "prompt + 模型 + 尺寸/张数", output: "图片 URL + 实际花费" },

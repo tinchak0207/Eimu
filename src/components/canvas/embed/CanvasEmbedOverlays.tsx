@@ -10,8 +10,10 @@ import { summarizeCreationFlow } from "@/lib/canvas/creation-flow-panel";
 import { cn } from "@/lib/utils";
 import { LineageDrawer } from "@/components/lineage/LineageDrawer";
 import { cardToLineageView } from "@/lib/lineage-view";
+import { CHARACTER_CARD_KIND_LABEL } from "@/lib/character-cards";
 import { CreationFlowPanel } from "./CreationFlowPanel";
 import { formatRelative, toDvh } from "./embed-helpers";
+import type { ReviewPanelKind } from "@/components/assets/AssetReviewPanel";
 
 interface CanvasEmbedOverlaysProps {
   /** embed 高度（.ce-embed-root 動態样式）。 */
@@ -32,6 +34,16 @@ interface CanvasEmbedOverlaysProps {
   onCloseHistory: () => void;
   /** B2：節點清單（全屏態）。 */
   elementListOpen: boolean;
+  /**
+   * WS-審查（2026-09-24）：資產/分鏡審查面板的畫布工具列入口狀態。
+   * 面板本體掛在 CanvasEmbed（宿主），這裡只放入口——第二個門（步驟條）由另一路實作，
+   * 呼叫端可用 `openReviewPanel()`（`src/components/assets/AssetReviewPanel.tsx` 導出）派事件開這裡。
+   */
+  reviewPanel: ReviewPanelKind | null;
+  /** 待批准＋已駁回的總數（入口徽章；0 ＝不顯示徽章）。 */
+  reviewPendingCount: number;
+  /** 入口開關（同一顆門：已開＝收合，未開＝開該面）。主面＝資產審查。 */
+  onToggleReview: (panel: ReviewPanelKind) => void;
   canvas: UseCanvasChatReturn;
   viewportSizeRef: RefObject<{ width: number; height: number }>;
   setSelectedIds: Dispatch<SetStateAction<Set<string>>>;
@@ -50,6 +62,9 @@ export function CanvasEmbedOverlays({
   historyOpen,
   onCloseHistory,
   elementListOpen,
+  reviewPanel,
+  reviewPendingCount,
+  onToggleReview,
   canvas,
   viewportSizeRef,
   setSelectedIds,
@@ -164,6 +179,29 @@ export function CanvasEmbedOverlays({
         </div>
       )}
 
+      {/* WS-審查（2026-09-24）：畫布工具列入口——資產圖／分鏡確認的兩個面共用這一顆門
+          （面板本體在宿主 CanvasEmbed；主入口是步驟條，由另一路實作）。
+          位置選左下角：頂欄與左右彈層都被既有面板佔滿，左下是唯一不打架的空位。 */}
+      <div
+        data-canvas-interactive
+        className="pointer-events-auto absolute z-20 flex items-center gap-1.5"
+        style={{
+          left: "calc(0.75rem + env(safe-area-inset-left, 0px))",
+          bottom: "calc(1rem + env(safe-area-inset-bottom, 0px))",
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => onToggleReview("asset")}
+          aria-pressed={reviewPanel !== null}
+          aria-label="资产与分镜审查"
+          className="ce-embed-bar-btn lg-float cursor-pointer rounded-full font-medium text-ios-blue hover:bg-white active:bg-white"
+        >
+          审查
+          {reviewPendingCount > 0 ? ` · 待确认 ${reviewPendingCount}` : ""}
+        </button>
+      </div>
+
       {/* P2：角色/場景卡面板——卡列表、生效 badge、鎖定/解鎖、刪卡 */}
       {cardsOpen && (
         <div
@@ -176,7 +214,7 @@ export function CanvasEmbedOverlays({
           }}
         >
           <div className="border-b px-3 py-2.5">
-            <p className="text-[12.5px] font-semibold text-foreground">角色 / 场景卡</p>
+            <p className="text-[12.5px] font-semibold text-foreground">实体卡（角色 / 场景 / 风格 / 道具 / 音频）</p>
             <p className="mt-0.5 text-ios-caption2 leading-snug text-foreground/45">
               锁定后本画布所有生成自动携带（提示词前缀 + 参考图 + 负面词）
             </p>
@@ -197,8 +235,13 @@ export function CanvasEmbedOverlays({
                     <p className="flex items-center gap-1.5 truncate text-[12.5px] font-medium text-foreground">
                       <span className="truncate">{card.name}</span>
                       <span className="shrink-0 rounded-full bg-black/5 px-1.5 py-0.5 text-ios-caption2 text-muted-foreground">
-                        {card.kind === "scene" ? "场景" : card.kind === "style" ? "风格" : "角色"}
+                        {CHARACTER_CARD_KIND_LABEL[card.kind]}
                       </span>
+                      {card.variantOf && (
+                        <span className="shrink-0 rounded-full bg-[rgba(0,122,255,0.12)] px-1.5 py-0.5 text-ios-caption2 text-[#007AFF]">
+                          變體
+                        </span>
+                      )}
                     </p>
                     <p className="mt-0.5 truncate text-ios-caption2 text-foreground/45">
                       {active ? (

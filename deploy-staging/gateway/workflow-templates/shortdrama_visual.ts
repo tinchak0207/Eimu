@@ -46,6 +46,9 @@ export const shortdramaVisualTemplate: WorkflowTemplate =
         role: "cast_card",
         kind: "image",
         title: "主演资产（三视图 + 情绪九宫格 + 道具状态变体）",
+        // 实体宣告（2026-09-24）：主演资产是**一张角色卡**的交付物（三视图/九宫格/变体
+        // 同属该角色的参考图），画布侧据此自动落卡并回填分镜引用。
+        defaults: { emitsEntity: { kind: "character", nameFrom: "input" } },
         deliverable: "每位主演的角色设定集：正/侧/背三视图 + 面部与服装的 DNA 签名描述串 + 情绪九宫格 + 道具状态变体",
         gate: "人物批准：主演三视图 + DNA 签名经用户确认后才进分镜；单角色可单独重铸不推倒全部",
         notes: [
@@ -53,6 +56,7 @@ export const shortdramaVisualTemplate: WorkflowTemplate =
           "场景设定图给一致性锚点（固定机位参照物）+ 尺度参照（门高/桌高），出无人无手白底图，避免手部崩坏污染资产",
           "情绪九宫格必须覆盖本剧情绪拍点表里出现过的所有情绪，后续 I2V 表情靠它当参考图",
           "道具要出「状态变体」：崭新/破损/血渍，剧情里道具变形时直接换图不换描述",
+          "交付本节点时把主演角色名写进节点 metadata 的 input 字段（多角色各节点各写各的）——画布侧据它自动落成角色卡并当卡名",
         ],
         tools: [
           { id: "cast_asset_lock", input: "角色名单 + 外观描述", output: "角色三视图锁定卡（DNA 签名 + 专属 seed）" },

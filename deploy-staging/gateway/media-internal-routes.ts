@@ -18,7 +18,7 @@ import { emitImageDone } from "./events-translate.ts"
 import { emitSessionError } from "./emit-helpers.ts"
 import { emitQuotaChanged, appendLedgerFor } from "./quota-ledger.ts"
 import { humanMessageFor } from "./humanize-gw.ts"
-import { wfGenerateContinuations, workflowGenerateApproved, workflowBilling, runWfGenerate } from "./workflow-gw.ts"
+import { wfGenerateContinuations, workflowGenerateApproved, workflowBilling, runWfGenerate, resumeWorkflowGate } from "./workflow-gw.ts"
 import { contentTypeForExt } from "./uploads-media.ts"
 
 // POST /internal/media/upload — agent 素材入庫：服務端下載外部影片/音頻 URL →
@@ -486,6 +486,15 @@ export function settleConfirm(state: SessionState, requestId: string, outcome: C
       })
       runWfGenerate(wfCont.state, wfCont.wfid)
     }
+    // 2026-09-24 協作確認閘（collaborate 檔）：停點批准 → 續跑。與上面的批次扣費
+    // 續跑鏈同構但**完全不碰計費真值**（見 workflow-gw 的 wfGateContinuations 註：
+    // 那條鏈會覆寫 workflowBilling，把真實退款抹成 0）。request_id 前綴互斥
+    //（wfgate_ vs wfgen_），兩表不可能同時命中，這個呼叫對計費確認是 no-op。
+    resumeWorkflowGate(requestId, true)
+  } else {
+    // 否決/過期（含會話拆除的 expired 沖刷）同樣要解停點註冊——否則該 workflow
+    // 永遠被當「已有一張未決卡」，後續 generate 再也彈不出確認卡（靜默卡死）。
+    resumeWorkflowGate(requestId, false)
   }
   return true
 }

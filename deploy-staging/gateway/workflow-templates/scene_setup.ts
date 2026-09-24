@@ -30,9 +30,12 @@ export const sceneSetupTemplate: WorkflowTemplate =
         role: "result",
         kind: "image",
         title: "场景图",
+        // 实体宣告（2026-09-24）：场景图是**一张场景卡**的交付物，画布侧据此自动落卡。
+        defaults: { emitsEntity: { kind: "scene", nameFrom: "input" } },
         deliverable: "场景设定图，作为后续镜头生成的背景参考锚点",
         notes: [
           "固定 seed 重生成同场景不漂移；建图后标注光源方向与色温，后续镜头生成按此对齐",
+          "交付本节点时把场景名写进节点 metadata 的 input 字段——画布侧据它自动落成场景卡并当卡名，缺了卡名只能退回节点标题「场景图」",
         ],
         tools: [
           { id: "image_generate", input: "prompt + 模型 + 尺寸/张数", output: "图片 URL + 实际花费" },

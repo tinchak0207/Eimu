@@ -72,8 +72,13 @@ export const novelFilmTemplate: WorkflowTemplate =
         role: "char_card",
         kind: "image",
         title: "角色卡（三视图）",
+        // 实体宣告（2026-09-24）：三视图是**一张角色卡**的交付物，画布侧据此自动落卡。
+        defaults: { emitsEntity: { kind: "character", nameFrom: "input" } },
         deliverable: "每角色三视图关键帧（正面/全身/侧面），锁定 face_identity 面部基线与 look_lock 造型",
         gate: "角色三视图人工确认门禁：用户逐角色点头后才可进美术阶段（换脸是成片最大返工源）",
+        notes: [
+          "交付本节点时把角色名写进节点 metadata 的 input 字段——画布侧据它自动落成角色卡并当卡名，缺了卡名只能退回节点标题「角色卡（三视图）」",
+        ],
       },
       // 环 3：美术卡
       {
@@ -105,8 +110,14 @@ export const novelFilmTemplate: WorkflowTemplate =
         role: "art_card",
         kind: "image",
         title: "美术卡（场景设定图）",
+        // 实体宣告（2026-09-24）：交付物是「每场景设定图」＝场景锚点，画布侧据此自动落
+        // **场景卡**。注意本节点是混合体（场景设定图 + 统一风格参考图组），只取场景语义。
+        defaults: { emitsEntity: { kind: "scene", nameFrom: "input" } },
         deliverable: "每场景设定图 1-2 张 + 统一风格参考图组（材质高光比例进规范：金属×1.5、皮肤×0.5），建档编号供镜头生成引用",
         gate: "风格统一性审计≥70 分：设定图组跑视觉审计（色彩方差/质感一致性/风格关键词命中），低于 70 分回去重修风格模板",
+        notes: [
+          "交付本节点时把场景名写进节点 metadata 的 input 字段——画布侧据它自动落成场景卡并当卡名，缺了卡名只能退回节点标题「美术卡（场景设定图）」",
+        ],
       },
       // 环 4：分镜（文本环节）
       {

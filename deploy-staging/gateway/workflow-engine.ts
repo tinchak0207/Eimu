@@ -87,6 +87,15 @@ export function expandTemplate(
 ): WorkflowGraph {
   // 节点 id → 其模板规格（含 tools/notes/gate 衍生材料；克隆链的规格经 spread 继承原型）
   const specByNodeId = new Map<string, DerivableNodeSpec>()
+  // role → 本模板實例生成的節點 id（保序、可多個；主迴圈與克隆迴圈都在生成處順手登記）。
+  // 這是參考圖 post-pass 的**唯一**依據：不從「${templateId}-${role}-${index}」反推 role
+  //（role 本身可含 `-`，字串反切不可靠）。衍生卡（tool/note/gate）不登記：它們不是模板實例。
+  const nodeIdsByRole = new Map<string, string[]>()
+  const registerRoleNode = (role: string, nodeId: string) => {
+    const bucket = nodeIdsByRole.get(role)
+    if (bucket) bucket.push(nodeId)
+    else nodeIdsByRole.set(role, [nodeId])
+  }
   const nodes: WorkflowNode[] = template.nodes.map((spec, i) => {
     const filled: Record<string, unknown> = {
       ...(spec.defaults ?? {}),
@@ -97,8 +106,17 @@ export function expandTemplate(
     // 放在 content 之后：Deepseek 显式改写可覆盖模板预设。
     if (spec.deliverable !== undefined && filled.deliverable === undefined) filled.deliverable = spec.deliverable
     if (spec.gate !== undefined && filled.gate === undefined) filled.gate = spec.gate
+    // 2026-09-24：emitsEntity 是模板宣告的**結構化物件**（画布侧实体卡自动落卡标记）。
+    // filled 走淺 spread → 節點 metadata 與模板模組層的 defaults 同一個物件參考，而
+    // workflow-service 有 `n.metadata.x = …` 的原地改寫模式 → 保留鍵有跨會話污染面。
+    // 防禦性複製一層（只複製這一鍵、只在它真的是物件時；其他欄位一行不動）。
+    if (filled.emitsEntity && typeof filled.emitsEntity === "object" && !Array.isArray(filled.emitsEntity)) {
+      filled.emitsEntity = { ...(filled.emitsEntity as Record<string, unknown>) }
+    }
+    const nodeId = `${templateId}-${spec.role}-${i}`
+    registerRoleNode(spec.role, nodeId)
     return {
-      id: `${templateId}-${spec.role}-${i}`,
+      id: nodeId,
       role: spec.role,
       kind: spec.kind,
       title: spec.title,
@@ -147,8 +165,14 @@ export function expandTemplate(
             // 同主循环：克隆链继承原型的 deliverable/gate（spread 已带，content 未覆盖时保底）。
             if (spec.deliverable !== undefined && filled.deliverable === undefined) filled.deliverable = spec.deliverable
             if (spec.gate !== undefined && filled.gate === undefined) filled.gate = spec.gate
+            // 同主循环：克隆链的 emitsEntity 也不得与模板模块层共用同一物件参考。
+            if (filled.emitsEntity && typeof filled.emitsEntity === "object" && !Array.isArray(filled.emitsEntity)) {
+              filled.emitsEntity = { ...(filled.emitsEntity as Record<string, unknown>) }
+            }
             const nodeId = `${templateId}-${spec.role}-${nodes.length}`
-            // 同主循环：克隆节点也登记规格——tools/notes 经 spread 从原型继承，供衍生卡展开。
+            // 同主迴圈：克隆節點也登記 role→nodeId（參考圖 post-pass 會看到同名 role 的多個實例）
+            registerRoleNode(spec.role, nodeId)
+            // 同主迴圈：克隆节点也登记规格——tools/notes/gate 经 spread 从原型继承，供衍生卡展开。
             specByNodeId.set(nodeId, spec)
             nodes.push({
               id: nodeId,
@@ -237,6 +261,32 @@ export function expandTemplate(
       derivedConns.push({ from: prevId, to: id })
       prevId = id
     }
+  }
+
+  // ── 參考圖 post-pass（2026-09-24 四視圖聚合）──
+  // 模板作者在 `emitsEntity.referenceRoles` 宣告「哪些 role 的交付物是本實體的參考圖」
+  // （如 character_sheet 的 view2/view3/view4）；這裡把它解成**本次展開真正的節點 id**
+  // 寫進 `emitsEntity.referenceNodeIds`——畫布側據此把四視角收進同一張實體卡。
+  //
+  // 判定來源＝展開時登記的 role→nodeId（零猜測）。multiShot 同名 role 有多個實例 → 全部納入
+  //（去重、保序）。找不到該 role → **不寫該鍵、不報錯**（作者寫錯 role 不該讓整個模板炸）。
+  // 寫入一律進**複製後的新物件**：`emitsEntity` 與模板模組層的 `defaults.emitsEntity`
+  // 是不同物件（上面已防禦性淺複製），原地寫 referenceNodeIds 會跨會話串味。
+  for (const n of nodes) {
+    const declaration = n.metadata.emitsEntity
+    if (!declaration || typeof declaration !== "object" || Array.isArray(declaration)) continue
+    const roles = (declaration as Record<string, unknown>).referenceRoles
+    if (!Array.isArray(roles) || roles.length === 0) continue
+    const ids: string[] = []
+    for (const role of roles) {
+      if (typeof role !== "string" || !role) continue
+      for (const id of nodeIdsByRole.get(role) ?? []) {
+        if (!ids.includes(id)) ids.push(id)
+      }
+    }
+    // 一個 role 都沒命中 → 不寫這一鍵（保持模板宣告原樣，不回空陣列假裝解析過）。
+    if (!ids.length) continue
+    n.metadata.emitsEntity = { ...(declaration as Record<string, unknown>), referenceNodeIds: ids }
   }
 
   const byRole = new Map(nodes.map((n) => [n.role, n]))

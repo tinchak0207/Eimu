@@ -11,7 +11,9 @@ import {
   MAX_STORYBOARD_FIELD_CHARS,
   STORYBOARD_SHOT_FIELDS,
   STORYBOARD_SNAPSHOT_FIELD_CHARS,
+  affectedShotNodesByCardIds,
   compactStoryboardShot,
+  filterApprovedShotCardIds,
   indexCardsByName,
   normalizeStoryboardSceneRef,
   normalizeStoryboardShots,
@@ -23,6 +25,8 @@ import {
   storyboardQcContextFromProject,
   storyboardQcShots,
   type StoryboardQcCardRef,
+  type StoryboardQcShot,
+  type StoryboardQcShotNodeMetadata,
   type StoryboardScriptShot,
 } from "./storyboard-contract";
 import { compactMetadataForAgent } from "@/hooks/canvas/canvas-chat-types";
@@ -298,6 +302,8 @@ test("storyboardQcShots：production 補齊成片欄位後 complete=true", () =>
     durationSeconds: 3,
     characterCardIds: ["char-1"],
     sceneCardIds: ["scene-1"],
+    // 道具是加成欄位（不在 QC_REQUIRED_FIELDS）：未供給時輸出空陣列、且不影響 complete。
+    propCardIds: [],
     keyframeId: "kf-1",
     lastFrameId: "lf-1",
     audioAnchorId: "au-1",
@@ -343,7 +349,7 @@ test("indexCardsByName：同名不同 kind 互不干擾；空/非字串欄位跳
   assert.equal(index.character.get("同名"), "a");
   assert.equal(index.scene.get("同名"), "b");
   assert.equal(index.character.size, 1);
-  assert.deepEqual(indexCardsByName([]), { character: new Map(), scene: new Map() });
+  assert.deepEqual(indexCardsByName([]), { character: new Map(), scene: new Map(), prop: new Map() });
 });
 
 test("resolveReferenceAssetsToCardIds：名稱逐字命中 → 卡 id；道具段無門禁欄位 → 原樣回報不靜默丟", () => {
@@ -434,7 +440,7 @@ test("storyboardQcGateArgs：全齊 → complete=true 且兩形 args 可直接�
   });
   assert.deepEqual(args.missing, []);
   assert.equal(args.complete, true);
-  assert.deepEqual(args.input.shots[0], { shotId: "001", order: 1, prompt: fullShot().visualDescription, ...production["001"] });
+  assert.deepEqual(args.input.shots[0], { shotId: "001", order: 1, prompt: fullShot().visualDescription, propCardIds: [], ...production["001"] });
   assert.equal(typeof args.toolArgs.shots, "string");
   assert.deepEqual(JSON.parse(args.toolArgs.shots), args.input.shots);
   assert.equal(args.toolArgs.locked_character_card_ids, '["card-lin"]');
@@ -453,7 +459,7 @@ test("storyboardQcGateArgs：**無來源 → 進 missing 且不憑空產生值**
   assert.ok(args.missing.includes("lockedSceneCardIds"));
   assert.ok(args.missing.includes("segmentDurationSeconds"));
   // 不含任何推導不到的欄位，且沒有補假值
-  assert.deepEqual(Object.keys(args.input.shots[0]).sort(), ["characterCardIds", "order", "prompt", "sceneCardIds", "shotId"]);
+  assert.deepEqual(Object.keys(args.input.shots[0]).sort(), ["characterCardIds", "order", "prompt", "propCardIds", "sceneCardIds", "shotId"]);
   assert.equal(args.input.shots[0].durationSeconds, undefined);
   assert.equal(args.input.shots[0].sceneId, undefined);
   assert.equal(args.input.shots[0].keyframeId, undefined);
@@ -773,4 +779,521 @@ test("B2-2 生成卡注入：顯式分享後跨項目可用；撤銷後回到不
     { cards: [], scope: { viewerUserId: 42, projectId: "proj-a", shares: [] } },
   );
   assert.deepEqual(emptyCards.unresolvedCardIds, ["card-in-a"], "無卡實體仍走『不猜』路徑");
+});
+
+// ─────────────────────────────────────────── ⑨ 道具卡解析鏈（2026-09-24：道具不再只是自由文字）
+
+/** 道具卡名（含歧義/未命中對照）。 */
+const PROP_NAME = "授权让读书";
+
+/** 既有卡清單 + 一張 `kind==="prop"` 的道具卡（`kind` 在本檔是 `string`，不 import WS1 的 union）。 */
+function cardsWithProp(): StoryboardQcCardRef[] {
+  return [...cards(), { id: "card-prop-book", name: PROP_NAME, kind: "prop" }];
+}
+
+/** 去掉 `propCardIds` 鍵的 shots（供「門禁判定不因道具而變」的對照組）。 */
+function withoutPropKey(shots: StoryboardQcShot[]): StoryboardQcShot[] {
+  return shots.map((shot) => {
+    const copy: Record<string, unknown> = { ...shot };
+    delete copy.propCardIds;
+    return copy as unknown as StoryboardQcShot;
+  });
+}
+
+test("道具解析：名稱逐字命中 kind===\"prop\" 卡 → propCardIds 含該 id；未命中 → unresolvedProps 含該名", () => {
+  const hit = resolveReferenceAssetsToCardIds(`道具:[${PROP_NAME}]`, cardsWithProp());
+  assert.deepEqual(hit.propCardIds, ["card-prop-book"]);
+  assert.deepEqual(hit.unresolvedProps, []);
+
+  const miss = resolveReferenceAssetsToCardIds("道具:[不存在的道具]", cardsWithProp());
+  assert.deepEqual(miss.propCardIds, []);
+  assert.deepEqual(miss.unresolvedProps, ["不存在的道具"]);
+
+  // 卡清單未載入（空）→ 一樣不臆造 id
+  const noCards = resolveReferenceAssetsToCardIds(`道具:[${PROP_NAME}]`, []);
+  assert.deepEqual(noCards.propCardIds, []);
+  assert.deepEqual(noCards.unresolvedProps, [PROP_NAME]);
+});
+
+test("道具解析沿用同一套尺：同名不同 kind 不解析、同名同 kind 歧義整批排除、style 卡不進 prop 表", () => {
+  // 名字對但 kind 不是 prop（character / style）→ 不解析（同 kind 才算）
+  const otherKind = resolveReferenceAssetsToCardIds(`道具:[${PROP_NAME}]`, [
+    { id: "card-char-same", name: PROP_NAME, kind: "character" },
+    { id: "card-style-same", name: PROP_NAME, kind: "style" },
+  ]);
+  assert.deepEqual(otherKind.propCardIds, []);
+  assert.deepEqual(otherKind.unresolvedProps, [PROP_NAME]);
+
+  // 同名同 kind 兩張 → 整批排除（與角色/場景用同一條規則，不為道具另立）
+  const dup = resolveReferenceAssetsToCardIds(`道具:[${PROP_NAME}]`, [
+    { id: "p1", name: PROP_NAME, kind: "prop" },
+    { id: "p2", name: PROP_NAME, kind: "prop" },
+  ]);
+  assert.deepEqual(dup.propCardIds, []);
+  assert.deepEqual(dup.unresolvedProps, [PROP_NAME]);
+
+  // 三族索引互不干擾：prop 表只收 prop 卡，別族的卡不會從 prop 表被撈出來
+  const index = indexCardsByName(cardsWithProp());
+  assert.equal(index.prop.get(PROP_NAME), "card-prop-book");
+  assert.equal(index.character.get(PROP_NAME), undefined);
+  assert.equal(index.prop.get("林昭_正面"), undefined);
+  assert.equal(index.prop.size, 1);
+});
+
+test("禁區 B：qcShots 的 missing 永不含 propCardIds（道具是加成欄位，不是門檻欄位）", () => {
+  // 完全沒有道具引用
+  const bare = storyboardQcShots([fullShot()]);
+  assert.equal(bare.missing.includes("propCardIds"), false);
+  assert.deepEqual(bare.shots[0].propCardIds, []);
+
+  // 引用了解析不到的道具（未命中）→ 照樣不得進 missing
+  const unresolvedOnly = storyboardQcShots([fullShot({ referenceAssets: "道具:[不存在的道具]" })]);
+  assert.equal(unresolvedOnly.missing.includes("propCardIds"), false);
+  assert.deepEqual(unresolvedOnly.shots[0].propCardIds, []);
+
+  // 有道具卡 id 時照樣輸出該欄（與另兩個卡 id 陣列同構），也不進 missing
+  const withProp = storyboardQcShots([fullShot()], { "001": { propCardIds: ["card-prop-book"] } });
+  assert.deepEqual(withProp.shots[0].propCardIds, ["card-prop-book"]);
+  assert.equal(withProp.missing.includes("propCardIds"), false);
+
+  // 空值道具 id 逐項過濾（門禁 strArr 只認非空字串），同樣不算缺
+  const hollowProp = storyboardQcShots([fullShot()], { "001": { propCardIds: ["", "   "] } });
+  assert.deepEqual(hollowProp.shots[0].propCardIds, []);
+  assert.equal(hollowProp.missing.includes("propCardIds"), false);
+});
+
+test("complete 判定不受 prop 影響：除道具外全齊 → complete=true；只有道具 → complete=false", () => {
+  const production = {
+    "001": {
+      sceneId: "S01",
+      durationSeconds: 3,
+      characterCardIds: ["card-lin"],
+      sceneCardIds: ["card-house"],
+      keyframeId: "kf-1",
+      lastFrameId: "lf-1",
+      audioAnchorId: "a-1",
+      aspectRatio: "9:16",
+    },
+  };
+  const withoutProp = storyboardQcShots([fullShot()], production);
+  assert.equal(withoutProp.complete, true);
+  assert.deepEqual(withoutProp.missing, []);
+
+  // 反向：道具欄有值也不能把其他缺項洗白
+  const onlyProp = storyboardQcShots([fullShot()], { "001": { propCardIds: ["card-prop-book"] } });
+  assert.equal(onlyProp.complete, false);
+  assert.ok(onlyProp.missing.includes("sceneId"));
+});
+
+test("productionFieldsFromContext 第 ④ 條推導：道具名 → propCardIds（來源 referenceAssets；呼叫端已供給不被覆蓋）", () => {
+  const shot = fullShot({ referenceAssets: `场景:[旧宅_主视] 角色:[林昭_正面] 道具:[${PROP_NAME}]` });
+  const derived = productionFieldsFromContext([shot], { cards: cardsWithProp() });
+  assert.deepEqual(derived.fields["001"].propCardIds, ["card-prop-book"]);
+  assert.equal(derived.sources["001"].propCardIds, "referenceAssets");
+  // 另兩條照舊（同一批解析，道具不干擾角色/場景）
+  assert.equal(derived.sources["001"].characterCardIds, "referenceAssets");
+  assert.equal(derived.sources["001"].sceneCardIds, "referenceAssets");
+
+  const supplied = productionFieldsFromContext([shot], {
+    production: { "001": { propCardIds: ["card-explicit-prop"] } },
+    cards: cardsWithProp(),
+  });
+  assert.deepEqual(supplied.fields["001"].propCardIds, ["card-explicit-prop"], "呼叫端已供給的道具 id 不被推導覆蓋");
+  assert.equal(supplied.sources["001"].propCardIds, "production");
+
+  // 沒有道具來源時完全不生成該欄（與其他推導同一紀律：不補默認值）
+  const bare = productionFieldsFromContext([fullShot({ referenceAssets: "角色:[林昭_正面]" })], { cards: cardsWithProp() });
+  assert.equal(bare.fields["001"].propCardIds, undefined);
+  assert.equal(bare.sources["001"].propCardIds, undefined);
+});
+
+test("行為斷言：帶道具的推導結果餵本地門禁，門禁判定與無道具時逐項相同（道具不改變任何一門）", () => {
+  const production = {
+    "001": { sceneId: "S01", durationSeconds: 3, keyframeId: "kf-1", lastFrameId: "lf-1", audioAnchorId: "a-1" },
+  };
+  const shots = [fullShot({ referenceAssets: `场景:[旧宅_主视] 角色:[林昭_正面] 道具:[${PROP_NAME}]` })];
+  const withPropArgs = storyboardQcGateArgs(shots, {
+    production,
+    cards: cardsWithProp(),
+    shotMetadata: { "001": { size: "9:16" } },
+    lockedCharacterCardIds: ["card-lin"],
+    lockedSceneCardIds: ["card-house"],
+    segmentDurationSeconds: 3,
+  });
+  // 道具名稱真的走完了「名稱 → 卡 id」解析鏈（來源記在審計跡上）
+  assert.deepEqual(withPropArgs.input.shots[0].propCardIds, ["card-prop-book"]);
+  assert.equal(withPropArgs.sources["001"].propCardIds, "referenceAssets");
+
+  const withProp = runShortDramaTool("storyboard_qc_17", withPropArgs.input);
+  const stripped = runShortDramaTool("storyboard_qc_17", {
+    ...withPropArgs.input,
+    shots: withoutPropKey(withPropArgs.input.shots),
+  });
+  assert.equal(withProp.gates.length, 17);
+  assert.deepEqual(withProp.gates, stripped.gates, "多帶 propCardIds 鍵不得改變任何一門的判定");
+  assert.equal(withProp.output.ready, true);
+});
+
+test("專案接線：專案鎖定清單裡的 prop 卡不算『查不到卡實體』（也不進兩集鎖定集合）", () => {
+  const { context, unresolvedCardIds } = storyboardQcContextFromProject(
+    { cardIds: ["card-lin", "card-prop-book"] },
+    { cards: cardsWithProp() },
+  );
+  assert.deepEqual(context.lockedCharacterCardIds, ["card-lin"]);
+  assert.deepEqual(context.lockedSceneCardIds, undefined);
+  assert.deepEqual(unresolvedCardIds, []);
+});
+
+// ─────────────────────────────────────────── ⑩ 第 ⑤ 條推導：節點 metadata 卡 id → 門禁（2026-09-24 閉環消費端）
+
+/** 分鏡節點樣本（結構相容 CanvasNodeRef）：鏡號 + 任意 metadata 欄。 */
+function shotNode(shotNumber: string, metadata: StoryboardQcShotNodeMetadata): { metadata: StoryboardQcShotNodeMetadata & { storyboardShot: { shotNumber: string } } } {
+  return { metadata: { ...metadata, storyboardShot: { shotNumber } } };
+}
+
+test("閉環（最重要）：節點 metadata 的卡 id 真的進 fields/sources，且 missing 確實少掉兩項", () => {
+  // referenceAssets 刻意留空：這條只驗 metadata 這一路（不得靠名稱解析借道）
+  const shot = fullShot({ referenceAssets: "" });
+  const context = {
+    shotMetadata: { "001": { characterCardIds: ["card-lin", "card-chen"], sceneCardIds: ["card-house"] } },
+  };
+  const { fields, sources } = productionFieldsFromContext([shot], context);
+  assert.deepEqual(fields["001"].characterCardIds, ["card-lin", "card-chen"]);
+  assert.deepEqual(fields["001"].sceneCardIds, ["card-house"]);
+  assert.equal(sources["001"].characterCardIds, "nodeMetadata");
+  assert.equal(sources["001"].sceneCardIds, "nodeMetadata");
+
+  // 對照組：同一鏡、無 metadata 卡 id → 兩項卡 id 進 missing
+  const withoutMeta = storyboardQcShots([shot], productionFieldsFromContext([shot], {}).fields);
+  assert.ok(withoutMeta.missing.includes("characterCardIds"));
+  assert.ok(withoutMeta.missing.includes("sceneCardIds"));
+
+  // 有 metadata → 這兩項真的從 missing 消失（閉環的價值本體）
+  const withMeta = storyboardQcShots([shot], fields);
+  assert.ok(!withMeta.missing.includes("characterCardIds"), "推導到值後不得再列 missing");
+  assert.ok(!withMeta.missing.includes("sceneCardIds"));
+  assert.deepEqual(
+    withoutMeta.missing.filter((f) => !["characterCardIds", "sceneCardIds"].includes(f)),
+    withMeta.missing.filter((f) => !["characterCardIds", "sceneCardIds"].includes(f)),
+    "除了這兩項，其餘 missing 逐項不變",
+  );
+});
+
+test("優先序三態：supplied > referenceAssets > 節點 metadata（metadata 絕不覆蓋前兩者）", () => {
+  const threeFromNode = { "001": { characterCardIds: ["card-x", "card-y", "card-z"] } };
+  // ① supplied 有值 → production 勝，src = "production"
+  const supplied = productionFieldsFromContext([fullShot()], {
+    production: { "001": { characterCardIds: ["card-explicit"] } },
+    cards: cards(),
+    shotMetadata: threeFromNode,
+  });
+  assert.deepEqual(supplied.fields["001"].characterCardIds, ["card-explicit"]);
+  assert.equal(supplied.sources["001"].characterCardIds, "production");
+
+  // ② supplied 無、referenceAssets 指 1 張、metadata 有 3 張 → 結果必須是那 1 張
+  const viaRefs = productionFieldsFromContext([fullShot({ referenceAssets: "角色:[林昭_正面]" })], {
+    cards: cards(),
+    shotMetadata: threeFromNode,
+  });
+  assert.deepEqual(viaRefs.fields["001"].characterCardIds, ["card-lin"], "metadata 不得覆蓋 referenceAssets");
+  assert.equal(viaRefs.sources["001"].characterCardIds, "referenceAssets");
+
+  // ③ 兩者都無 → metadata 勝，src = "nodeMetadata"
+  const viaNode = productionFieldsFromContext([fullShot({ referenceAssets: "" })], { shotMetadata: threeFromNode });
+  assert.deepEqual(viaNode.fields["001"].characterCardIds, ["card-x", "card-y", "card-z"]);
+  assert.equal(viaNode.sources["001"].characterCardIds, "nodeMetadata");
+});
+
+test("禁區：propCardIds 從 metadata 推導到值，missing 與 complete 逐項不變", () => {
+  const shot = fullShot({ referenceAssets: "" });
+  const production = {
+    "001": {
+      sceneId: "S01",
+      durationSeconds: 3,
+      characterCardIds: ["card-lin"],
+      sceneCardIds: ["card-house"],
+      keyframeId: "kf-1",
+      lastFrameId: "lf-1",
+      audioAnchorId: "a-1",
+      aspectRatio: "9:16",
+    },
+  };
+  const common = {
+    production,
+    lockedCharacterCardIds: ["card-lin"],
+    lockedSceneCardIds: ["card-house"],
+    segmentDurationSeconds: 3,
+  };
+  const withProp = storyboardQcGateArgs([shot], { ...common, shotMetadata: { "001": { propCardIds: ["card-prop-book"] } } });
+  const withoutProp = storyboardQcGateArgs([shot], common);
+  assert.deepEqual(withProp.missing, withoutProp.missing, "道具是加成欄位：missing 逐項不變");
+  assert.equal(withProp.complete, withoutProp.complete);
+  assert.equal(withProp.complete, true);
+  assert.deepEqual(withProp.input.shots[0].propCardIds, ["card-prop-book"]);
+  assert.equal(withProp.sources["001"].propCardIds, "nodeMetadata");
+  assert.deepEqual(withoutProp.input.shots[0].propCardIds, []);
+  // 行為斷言：門禁 17 門判定逐項相同（道具鍵不改變任何一門）
+  const gated = runShortDramaTool("storyboard_qc_17", withProp.input);
+  const stripped = runShortDramaTool("storyboard_qc_17", { ...withProp.input, shots: withoutPropKey(withProp.input.shots) });
+  assert.equal(gated.gates.length, 17);
+  assert.deepEqual(gated.gates, stripped.gates);
+});
+
+test("清洗與空值：非字串項剔除、重複去重；空陣列省略該鍵（不誤報「有值」）", () => {
+  const dirty = productionFieldsFromContext([fullShot({ referenceAssets: "" })], {
+    shotMetadata: { "001": { characterCardIds: ["a", "", "a", 123] } },
+  });
+  assert.deepEqual(dirty.fields["001"].characterCardIds, ["a"]);
+  assert.equal(dirty.sources["001"].characterCardIds, "nodeMetadata");
+
+  // 空陣列 / 全空白 / 非陣列 → 不生成該欄、來源不出現
+  for (const raw of [[], ["", "   "], "a", null, { 0: "a" }]) {
+    const bare = productionFieldsFromContext([fullShot({ referenceAssets: "" })], {
+      shotMetadata: { "001": { characterCardIds: raw } },
+    });
+    assert.equal(bare.fields["001"].characterCardIds, undefined, `raw=${JSON.stringify(raw)} 不得生成`);
+    assert.equal(bare.sources["001"].characterCardIds, undefined);
+  }
+});
+
+test("專案接線：節點卡 id 進 shotMetadata（與 size 共存；空值省略鍵；無鏡號不臆造鍵）", () => {
+  const { context } = storyboardQcContextFromProject({
+    nodes: [
+      shotNode("001", { size: "9:16", characterCardIds: ["card-lin", "", "card-lin"], sceneCardIds: ["card-house"], propCardIds: ["card-prop-book"] }),
+      shotNode("002", { characterCardIds: ["card-chen"] }), // 無 size 但卡 id 仍要帶
+      shotNode("003", { characterCardIds: [] }), // 空陣列 → 該鍵省略
+      { metadata: { characterCardIds: ["card-ghost"] } }, // 無鏡號 → 不歸屬任一鏡
+    ],
+  });
+  assert.deepEqual(context.shotMetadata, {
+    "001": { size: "9:16", characterCardIds: ["card-lin"], sceneCardIds: ["card-house"], propCardIds: ["card-prop-book"] },
+    "002": { characterCardIds: ["card-chen"] },
+  });
+  // 未被誤加的鍵：003 只有空陣列 → 整個鏡鍵都不生成（不造空殼）；size 語義不變
+  assert.equal(Object.prototype.hasOwnProperty.call(context.shotMetadata, "003"), false);
+  assert.equal(context.shotMetadata?.["002"]?.size, undefined);
+});
+
+test("整合（oracle = 真本地 storyboard_qc_17）：節點卡 id 帶入 → 門禁該些門通過；不帶 → block", () => {
+  // 輸入只有節點宣告的卡 id：專案鎖定集 = 同一批卡、鏡的 referenceAssets 為空（無名稱可解析）
+  const project = {
+    cardIds: ["card-lin", "card-chen", "card-house"],
+    nodes: [shotNode("001", { size: "9:16", characterCardIds: ["card-lin", "card-chen"], sceneCardIds: ["card-house"] })],
+  };
+  const { context, unresolvedCardIds } = storyboardQcContextFromProject(project, { cards: cards() });
+  assert.deepEqual(unresolvedCardIds, []);
+
+  const production = {
+    "001": { sceneId: "S01", durationSeconds: 3, keyframeId: "kf-1", lastFrameId: "lf-1", audioAnchorId: "a-1" },
+  };
+  const args = storyboardQcGateArgs([fullShot({ referenceAssets: "" })], { ...context, production });
+  const gated = runShortDramaTool("storyboard_qc_17", args.input);
+  const byId = new Map(gated.gates.map((g) => [g.id, g]));
+  assert.equal(args.sources["001"].characterCardIds, "nodeMetadata");
+  assert.equal(args.sources["001"].sceneCardIds, "nodeMetadata");
+  for (const id of ["characters_bound", "scenes_bound", "character_lock", "scene_lock"]) {
+    assert.equal(byId.get(id)?.passed, true, `${id} 應 pass（證據：${byId.get(id)?.detail}）`);
+  }
+  assert.ok(!args.missing.includes("characterCardIds"));
+  assert.ok(!args.missing.includes("sceneCardIds"));
+
+  // 對照組：同專案、同 production，但節點不宣告卡 id → 該些門如實 block
+  const noMeta = storyboardQcContextFromProject(
+    { cardIds: ["card-lin", "card-chen", "card-house"], nodes: [shotNode("001", { size: "9:16" })] },
+    { cards: cards() },
+  );
+  const bareArgs = storyboardQcGateArgs([fullShot({ referenceAssets: "" })], { ...noMeta.context, production });
+  const bare = runShortDramaTool("storyboard_qc_17", bareArgs.input);
+  const bareById = new Map(bare.gates.map((g) => [g.id, g]));
+  for (const id of ["characters_bound", "scenes_bound"]) {
+    assert.equal(bareById.get(id)?.passed, false, `${id} 應 block（無來源時不許通過）`);
+  }
+  // 兩集 lock 門在「引用集為空」時是空集合真空通過（門禁既有語義，非本刀改動）——
+  // 所以無來源時真正 block 的是 `*_bound`；有來源時 lock 門才是**非真空**地驗「每個引用都在鎖定集內」。
+  assert.equal(bareById.get("character_lock")?.passed, true);
+  assert.ok(bareArgs.missing.includes("characterCardIds"));
+  assert.ok(bareArgs.missing.includes("sceneCardIds"));
+  assert.equal(bare.output.ready, false);
+});
+
+// ─────────────────────────────────────────── ⑪ 資產批准閘（2026-09-24 決策 2/23）
+
+/** 批准狀態樣本名單（同一批名稱，只換 approval；undefined＝不帶欄位＝缺省）。 */
+function cardsWithApproval(status: "approved" | "pending" | "rejected" | undefined): StoryboardQcCardRef[] {
+  const names: [string, string, string][] = [
+    ["card-lin", "林昭_正面", "character"],
+    ["card-chen", "陈默_正面", "character"],
+    ["card-house", "旧宅_主视", "scene"],
+  ];
+  return names.map(([id, name, kind]) => ({
+    id,
+    name,
+    kind,
+    ...(status ? { approval: { status } } : {}),
+  }));
+}
+
+test("協作檔：未批准的卡 id 不得進分鏡卡引用欄；改 approved 後進來（真輸入真輸出）", () => {
+  const pending = productionFieldsFromContext([fullShot()], { cards: cardsWithApproval("pending"), mode: "collaborate" });
+  assert.equal("characterCardIds" in pending.fields["001"], false, "未批准 → 整欄不留值（不留空陣列騙門禁）");
+  assert.equal("sceneCardIds" in pending.fields["001"], false);
+  assert.deepEqual(pending.blockedCardIdsByShot?.["001"], ["card-lin", "card-chen", "card-house"], "擋下的 id 如實回報");
+  const viaGate = storyboardQcShots([fullShot()], pending.fields);
+  assert.ok(viaGate.missing.includes("characterCardIds"), "擋下後該欄進 missing（門禁會 block，不是靜默無引用）");
+  assert.ok(viaGate.missing.includes("sceneCardIds"));
+
+  // 同一份名單改 approved → 同一條推導路徑把 id 交出來
+  const okFields = productionFieldsFromContext([fullShot()], { cards: cardsWithApproval("approved"), mode: "collaborate" });
+  assert.deepEqual(okFields.fields["001"].characterCardIds, ["card-lin", "card-chen"]);
+  assert.deepEqual(okFields.fields["001"].sceneCardIds, ["card-house"]);
+  assert.equal(okFields.blockedCardIdsByShot, undefined, "沒擋到就不回報這欄");
+
+  // 缺省 approval（存量資產）→ 協作檔照樣當已批准
+  const legacy = productionFieldsFromContext([fullShot()], { cards: cardsWithApproval(undefined), mode: "collaborate" });
+  assert.deepEqual(legacy.fields["001"].characterCardIds, ["card-lin", "card-chen"], "缺省＝已批准（決策 23）");
+
+  // 逐 id 過閘：只有林昭 pending，已批准的陈默不受牽連
+  const partialCards = cardsWithApproval(undefined).map((c) =>
+    c.id === "card-lin" ? { ...c, approval: { status: "pending" as const } } : c,
+  );
+  const partial = productionFieldsFromContext([fullShot()], { cards: partialCards, mode: "collaborate" });
+  assert.deepEqual(partial.fields["001"].characterCardIds, ["card-chen"]);
+  assert.deepEqual(partial.blockedCardIdsByShot?.["001"], ["card-lin"]);
+});
+
+test("護城河回歸（最重要）：全自動兩檔＋未給 mode → 未批准卡照進卡引用欄，真門禁 17 門逐項相同", () => {
+  const production = {
+    "001": {
+      sceneId: "S01",
+      durationSeconds: 3,
+      keyframeId: "kf-1",
+      lastFrameId: "lf-1",
+      audioAnchorId: "a-1",
+      aspectRatio: "9:16",
+    },
+  };
+  // 全部卡都 rejected（最極端）：未給 mode ＝ 既有行為
+  const unlockCtx = {
+    production,
+    cards: cardsWithApproval("rejected"),
+    lockedCharacterCardIds: ["card-lin", "card-chen"],
+    lockedSceneCardIds: ["card-house"],
+    segmentDurationSeconds: 10,
+  };
+  const baseline = storyboardQcGateArgs([fullShot()], unlockCtx);
+  assert.equal(baseline.complete, true, "未給 mode：既有情境仍 complete=true（零回歸）");
+  assert.deepEqual(baseline.input.shots[0].characterCardIds, ["card-lin", "card-chen"]);
+  const baselineGates = runShortDramaTool("storyboard_qc_17", baseline.input).gates;
+  assert.equal(runShortDramaTool("storyboard_qc_17", baseline.input).output.ready, true);
+
+  for (const mode of ["preset", "auto"] as const) {
+    const args = storyboardQcGateArgs([fullShot()], { ...unlockCtx, mode });
+    assert.deepEqual(args.input.shots, baseline.input.shots, `mode=${mode}：門禁輸入逐位相同`);
+    assert.deepEqual(args.missing, baseline.missing, `mode=${mode}：missing 逐項相同`);
+    assert.equal(args.complete, true, `mode=${mode}：不得新增任何阻塞`);
+    assert.deepEqual(
+      runShortDramaTool("storyboard_qc_17", args.input).gates,
+      baselineGates,
+      `mode=${mode}：真門禁 17 門逐項相同`,
+    );
+  }
+
+  // 對照組（獨立 oracle）：同一份被駁回的卡，協作檔下真門禁必須翻臉 → 證明閘真的接上了
+  const collab = storyboardQcGateArgs([fullShot()], { ...unlockCtx, mode: "collaborate" });
+  const collabRun = runShortDramaTool("storyboard_qc_17", collab.input);
+  assert.equal(collabRun.output.ready, false, "協作檔＋未批准資產 → 真門禁 block");
+  assert.notDeepEqual(collabRun.gates, baselineGates);
+});
+
+test("駁回後：已寫進節點 metadata 的舊綁定照樣被擋（閘在生效層，不是事後貼紙）", () => {
+  const shotMetadata = { "001": { characterCardIds: ["card-lin"], sceneCardIds: ["card-house"] } };
+  const shot = fullShot({ referenceAssets: "" });
+  const open = productionFieldsFromContext([shot], { shotMetadata });
+  assert.deepEqual(open.fields["001"].characterCardIds, ["card-lin"], "未給 mode：metadata 綁定照常生效（零回歸）");
+  const gated = productionFieldsFromContext([shot], {
+    shotMetadata,
+    cards: [
+      { id: "card-lin", name: "林昭_正面", kind: "character", approval: { status: "rejected", reason: "光影不对" } },
+      { id: "card-house", name: "旧宅_主视", kind: "scene" },
+    ],
+    mode: "collaborate",
+  });
+  assert.equal("characterCardIds" in gated.fields["001"], false, "落卡後才駁回 → 舊綁定不得繼續生效");
+  assert.equal(gated.sources["001"].characterCardIds, undefined, "來源審計跡同步清掉（不留「有來源卻無值」）");
+  assert.deepEqual(gated.fields["001"].sceneCardIds, ["card-house"], "同鏡已批准的場景卡不受牽連");
+  assert.deepEqual(gated.blockedCardIdsByShot?.["001"], ["card-lin"]);
+});
+
+test("呼叫端供給的 production 卡 id 同樣過閘（供給不是繞道）", () => {
+  const args = storyboardQcGateArgs([fullShot()], {
+    production: { "001": { characterCardIds: ["card-lin", "card-chen"] } },
+    cards: [
+      { id: "card-lin", name: "林昭_正面", kind: "character", approval: { status: "pending" } },
+      { id: "card-chen", name: "陈默_正面", kind: "character", approval: { status: "approved" } },
+    ],
+    mode: "collaborate",
+  });
+  assert.deepEqual(args.input.shots[0].characterCardIds, ["card-chen"]);
+});
+
+test("filterApprovedShotCardIds：非協作檔原樣回傳（含順序與重複項）；查不到的 id 不猜著擋", () => {
+  const ids = ["card-b", "card-a", "card-a", "card-unknown"];
+  const rejectedA: StoryboardQcCardRef[] = [
+    { id: "card-a", name: "a", kind: "character", approval: { status: "rejected", reason: "不对" } },
+    { id: "card-b", name: "b", kind: "character" },
+  ];
+  for (const mode of [undefined, "preset", "auto"] as const) {
+    assert.deepEqual(filterApprovedShotCardIds(ids, rejectedA, mode), ids, `mode=${String(mode)} 必須逐位原樣`);
+  }
+  assert.deepEqual(filterApprovedShotCardIds(ids, rejectedA, "collaborate"), ["card-b", "card-unknown"]);
+  // 同 id 多筆且其中有未批准者 → 擋（不能證明已批准的，不當已批准處理）
+  const duplicate: StoryboardQcCardRef[] = [
+    { id: "card-a", name: "a", kind: "character", approval: { status: "approved" } },
+    { id: "card-a", name: "a", kind: "character", approval: { status: "pending" } },
+  ];
+  assert.deepEqual(filterApprovedShotCardIds(["card-a"], duplicate, "collaborate"), []);
+  assert.deepEqual(filterApprovedShotCardIds(undefined, rejectedA, "collaborate"), []);
+});
+
+test("分鏡側 approval：供給才出現（同一 shape、reason 原樣讀回），且不得改變 missing（門檻語義零變動）", () => {
+  const approval = { status: "pending" as const, decidedAt: "2026-09-24T10:00:00.000Z", reason: "等甲方核對" };
+  const withApproval = storyboardQcShots([fullShot()], { "001": { approval } });
+  assert.deepEqual(withApproval.shots[0].approval, approval, "與資產側同一個 shape，理由原樣讀回");
+  assert.deepEqual(
+    withApproval.missing,
+    storyboardQcShots([fullShot()], {}).missing,
+    "帶 approval 不得改變 missing（分鏡確認不是 QC 門檻欄位）",
+  );
+  assert.ok(!withApproval.missing.includes("approval"));
+  const bare = storyboardQcShots([fullShot()], {});
+  assert.equal("approval" in bare.shots[0], false, "未供給 → 不補默認值（既有輸出鍵逐位不變）");
+  // 獨立 oracle：真本地門禁對「帶 approval / 不帶 approval」兩形輸入判定逐項相同（未知鍵忽略）
+  assert.deepEqual(
+    runShortDramaTool("storyboard_qc_17", { shots: withApproval.shots }).gates,
+    runShortDramaTool("storyboard_qc_17", { shots: bare.shots }).gates,
+    "多帶 approval 鍵不得改變任何一門的判定",
+  );
+});
+
+// ─────────────────────────────────────────── ⑫ 重跑影響面（純判定）
+
+test("affectedShotNodesByCardIds：只回報真的引用了該批卡的分鏡節點（非分鏡節點/無 id 不回報）", () => {
+  const nodes = [
+    { id: "shot-1", metadata: { storyboardShot: { shotNumber: "001" }, characterCardIds: ["card-node-a"], sceneCardIds: ["card-node-s"] } },
+    { id: "shot-2", metadata: { storyboardShot: { shotNumber: "002" }, characterCardIds: ["card-node-b"] } },
+    { id: "asset-a", metadata: { storyboardShot: null, characterCardIds: ["card-node-a"] } },
+    { id: "shot-3", metadata: { storyboardShot: { shotNumber: "003" }, characterCardIds: ["card-node-a"] } },
+  ];
+  const single = affectedShotNodesByCardIds(nodes, ["card-node-a"]);
+  assert.deepEqual(single.affectedCardIds, ["card-node-a"]);
+  assert.deepEqual(single.shotNodeIds, ["shot-1", "shot-3"], "無鏡號的資產節點不是分鏡節點");
+
+  const batch = affectedShotNodesByCardIds(nodes, ["card-node-a", "card-node-b", "card-node-unused"]);
+  assert.deepEqual(batch.affectedCardIds, ["card-node-a", "card-node-b"], "沒被任何鏡引用的卡不回報");
+  assert.deepEqual(batch.shotNodeIds, ["shot-1", "shot-2", "shot-3"], "順序＝節點輸入序");
+  assert.deepEqual(affectedShotNodesByCardIds(nodes, []), { affectedCardIds: [], shotNodeIds: [] });
+  assert.deepEqual(affectedShotNodesByCardIds(nodes, ["  "]), { affectedCardIds: [], shotNodeIds: [] });
+  // 節點無 id → 卡仍如實回報，但不得臆造節點 id
+  const noId = affectedShotNodesByCardIds([{ metadata: { storyboardShot: { shotNumber: "001" }, characterCardIds: ["card-node-a"] } }], ["card-node-a"]);
+  assert.deepEqual(noId, { affectedCardIds: ["card-node-a"], shotNodeIds: [] });
 });

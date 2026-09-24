@@ -138,7 +138,11 @@ export function buildHistoryArchive(entries: HistoryEntry[]): {
   };
 }
 
-function triggerDownload(content: string, fileName: string, mimeType: string): void {
+/**
+ * 觸發瀏覽器下載（BOM/CRLF 由呼叫端決定）。
+ * 2026-09-24：導出化為公開輪子——資產審查面板的 CSV 導出複用它（純加法，函式本體零改動）。
+ */
+export function triggerDownload(content: string, fileName: string, mimeType: string): void {
   const url = URL.createObjectURL(new Blob([content], { type: mimeType }));
   try {
     const anchor = document.createElement("a");
@@ -162,8 +166,12 @@ export function exportHistoryJson(
   triggerDownload(JSON.stringify(buildHistoryArchive(entries), null, 2), fileName, "application/json");
 }
 
-/** CSV 字段转义：逗号、引号、换行都要包起来，引号内再翻倍。 */
-function csvCell(value: string | number | boolean | undefined): string {
+/**
+ * CSV 字段转义：逗号、引号、换行都要包起来，引号内再翻倍。
+ * 2026-09-24：導出化為公開輪子——資產審查面板只提供 header/rows 白名單，
+ * 轉義一律走這裡（禁止各面自創第二套轉義）。
+ */
+export function csvCell(value: string | number | boolean | undefined): string {
   const text = value === undefined ? "" : String(value);
   return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }

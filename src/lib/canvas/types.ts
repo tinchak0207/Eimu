@@ -95,6 +95,20 @@ export function errorDetailsText(details: string | CanvasErrorDetails | undefine
   return typeof details.message === "string" && details.message.length > 0 ? details.message : undefined;
 }
 
+/**
+ * 協作確認閘的裁決憑據（門禁卡 metadata.gateConfirm，2026-09-24）。
+ * 寫入者只有網關（workflow-gw 的 markGateNodeState），前端只讀＋據此發一次
+ * POST /api/agent/sessions/{session_id}/confirm（既有確認端點，不另開通路）。
+ */
+export interface CanvasNodeGateConfirm {
+  /** 網關 pendingConfirms 的鍵（裁決憑據；同一筆重放是冪等的）。 */
+  request_id: string;
+  /** 站點轉發用的會話鍵（= 網關 session id）。 */
+  session_id: string;
+  /** 卡面狀態真值：pending 可批准/退回；approved/rejected 為已裁決（唯讀）。 */
+  status: "pending" | "approved" | "rejected";
+}
+
 /** 節點元資料：承載 prompt/模型/尺寸/任務/結果。與 gateway autoCreateCanvasUnit 產出對齊。 */
 export interface CanvasNodeMetadata {
   content?: string; // 圖片節點 = public URL；文本節點 = 正文
@@ -163,6 +177,14 @@ export interface CanvasNodeMetadata {
    * 兩種寫入者共用本欄位，string = 全文門禁、true = 僅標記需批准。
    */
   gate?: string | boolean;
+  /**
+   * 門禁卡可操作狀態（2026-09-24 協作確認閘）：網關在協作檔的停點註冊 pending
+   * confirm 後，把該筆確認回寫到門禁卡 metadata，前端據此把「驗收條件」從純文字
+   * 變成可直接批准/退回的卡（不必回對話裡找確認卡）。
+   * 只在協作檔、且僅在該次停點未決期間存在——批准/退回後 status 翻面並保持可讀；
+   * 交付物變更（重生成/換圖）會重新回到 pending（網關按交付物指紋記批准）。
+   */
+  gateConfirm?: CanvasNodeGateConfirm;
   /** 步驟頭卡：本步輸入來源。 */
   inputFrom?: string;
   /** 步驟序號（生成卡頂欄 stepName 條）。 */
@@ -201,6 +223,67 @@ export interface CanvasNodeMetadata {
    *（AID v2.1.4 已廢 `sceneCode`）。真值 = 子節點的 `storyboardShot`，此處只存指針。
    */
   storyboardScene?: StoryboardSceneRef;
+  // ── 分鏡實體的卡引用（WS7 收口，2026-09-24；照 referenceNodeIds 的同款 id 陣列先例）──
+  /**
+   * 本鏡引用的角色卡 id（agent 模板交付自動落卡後回填；項目級鎖定在 `CanvasProject.cardIds`）。
+   * 寫入者：自動回填（agent-output-cards 的 shotBackfill）+ 人工/上游指定。
+   * **雙白名單**：與 storyboardShot 同族——漏 layout.ts toNodeMetadata 或
+   * canvas-chat-types.ts compactMetadataForAgent 任一處 = 刷新/回舊會話後憑空消失。
+   */
+  characterCardIds?: string[];
+  /** 本鏡引用的場景卡 id。清洗/白名單規則同 `characterCardIds`。 */
+  sceneCardIds?: string[];
+  /** 本鏡引用的道具卡 id。清洗/白名單規則同 `characterCardIds`。 */
+  propCardIds?: string[];
+  /** 本節點交付物自動落成的卡 id（冪等標記：同一節點不重複建卡）。 */
+  entityCardId?: string;
+  // ── 模板交付自動落卡（WS11 收口，2026-09-24；保留鍵，型別層具名）──
+  /**
+   * 本節點交付物自動落成的實體標記（保留鍵）。真源＝gateway 模板節點的
+   * `defaults.emitsEntity`（`deploy-staging/gateway/workflow-templates/*`），
+   * `expandTemplate` spread 進節點 metadata 後隨 SSE `canvas.node.created/updated` 落地；
+   * 畫布側據此自動建卡（`src/lib/agent-output-cards.ts` 的 `emittedEntityOf`）。
+   *
+   * ⚠️ 這個鍵必須**同時**存在於兩處 metadata 白名單，否則**一進前端就被剝掉**
+   *（不是重載才消失，是當下就沒了）：
+   *   - 讀取/還原端 `src/lib/canvas/layout.ts` 的 `toNodeMetadata`
+   *   - 上行/壓縮端 `src/hooks/canvas/canvas-chat-types.ts` 的 `compactMetadataForAgent`
+   * 症狀是「整條功能完全沒反應」，排查時先確認鍵有沒有活過這兩處。
+   *
+   * 形狀與 `layout.ts` 的 `EmittedEntityMetadata`（＝`agent-output-cards.ts` 的
+   * `EmittedEntitySpec` 同構）結構相容。五值字面與 `character-cards.ts` 的
+   * `CHARACTER_CARD_KIND_VALUES` **逐字同步，刻意不 import 以避免環依賴**
+   *（types → character-cards → agent-chat-client → agent-chat-types → types；
+   * 措辭同 `layout.ts` 的 `EMITS_ENTITY_KINDS`——本檔是前後端共用契約根，
+   * 不反向依賴客戶端卡模組）。漂移時會在本欄位的指派點炸型別錯，不靜默。
+   */
+  emitsEntity?: {
+    kind: "character" | "scene" | "style" | "prop" | "audio";
+    /** 卡名來源：預設節點標題；`"input"` ＝依序取底下三鍵的第一個非空值。 */
+    nameFrom?: "nodeTitle" | "input";
+    /**
+     * 參考圖來源 role 清單（模板作者宣告；四視圖＝`["view2","view3","view4"]`）：
+     * 同模板實例上哪些 role 的交付物是本實體的參考圖。
+     * 清洗走 `layout.ts` 的 `cleanEmitsEntity`（非空字串陣列、trim、去重、≤8 項、單項 ≤100）。
+     */
+    referenceRoles?: string[];
+    /**
+     * 參考圖來源**節點 id** 清單（引擎 `expandTemplate` 的參考圖 post-pass 解出；
+     * 站點據此把兄弟節點的交付圖併進同一張卡——四視圖聚合的站點側接線）。
+     * 與 `referenceRoles` 同一個清洗函式（漏放行＝聚合功能當下被剝，不是重載才消失）。
+     */
+    referenceNodeIds?: string[];
+  };
+  /**
+   * 落卡取卡名的來源（保留鍵；僅在 `emitsEntity.nameFrom === "input"` 時被讀）。
+   * 順序真源＝`agent-output-cards.ts` 的 `NAME_FROM_INPUT_KEYS`（input → characterName
+   * → sceneName），空字串/非字串在讀取端就被省略鍵。
+   * `input` 是通用鍵名，但 canvas 節點 metadata 只有本語義（與同層的 `inputFrom`
+   * ＝步驟頭卡輸入來源、`toolInput`＝工具卡契約是**不同鍵**），故在此具名收斂。
+   */
+  input?: string;
+  characterName?: string;
+  sceneName?: string;
 }
 
 /**

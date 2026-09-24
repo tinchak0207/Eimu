@@ -8,9 +8,10 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { RefreshCw, Image as ImageIcon, ArrowRight, CornerDownRight, Wrench, ShieldCheck, Lightbulb, Package, AlertTriangle, Clapperboard } from "lucide-react";
-import { CanvasNodeType, errorDetailsText, type CanvasNode, type CanvasNodeStatus } from "@/lib/canvas/types";
+import { CanvasNodeType, errorDetailsText, type CanvasNode, type CanvasNodeGateConfirm, type CanvasNodeStatus } from "@/lib/canvas/types";
 import { svgToDataUrl } from "@/lib/svg-data-url";
 import { DirectorMiniViewport } from "@/components/director-mini/DirectorMiniViewport";
+import { buildAuthHeaders } from "../embed/embed-helpers";
 import { Scene3dCardBody } from "./Scene3dCardBody";
 import { StoryboardSceneBody, StoryboardShotBody } from "./StoryboardShotBody";
 import { STATUS_LABEL } from "./constants";
@@ -60,6 +61,88 @@ function renderBrokenImage(onRetry: () => void): React.ReactNode {
 function formatProgress(progress: number): string {
   const pct = progress <= 1 ? Math.round(progress * 100) : Math.round(progress);
   return `${pct}%`;
+}
+
+/**
+ * 門禁卡裁決（2026-09-24 協作確認閘）：網關在協作檔的三個停點把 pending confirm
+ * 回寫到卡上（metadata.gateConfirm），這裡讓用戶在畫布上直接批准/退回——不必再回
+ * 對話裡找確認卡。裁決走**既有**站點轉發 /api/agent/sessions/{id}/confirm
+ *（與對話確認卡同一條網關鏈路：settleConfirm → 續跑），不另開通路、不新增後端。
+ * 卡面狀態真值＝metadata.gateConfirm.status（網關回寫）；本地只在送出期間鎖按鈕，
+ * 成功後維持鎖定、等網關回寫翻面——前端不搶先宣稱「已批准」（同 AgentConfirmCard
+ * 的鎖定語義：沒收到 confirm.resolved 前不算數）。
+ */
+function GateConfirmActions({ confirm }: { confirm: CanvasNodeGateConfirm }) {
+  const [busy, setBusy] = useState<false | "approve" | "reject">(false);
+  const [error, setError] = useState("");
+
+  const decide = useCallback(
+    async (approved: boolean) => {
+      setBusy(approved ? "approve" : "reject");
+      setError("");
+      try {
+        const res = await fetch(`/api/agent/sessions/${encodeURIComponent(confirm.session_id)}/confirm`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...(buildAuthHeaders() ?? {}) },
+          body: JSON.stringify({ request_id: confirm.request_id, approved }),
+        });
+        if (!res.ok) {
+          // 失敗如實說，不假裝已裁決（已處理過的同一筆會回「已處理過」——也是真話）。
+          const body = (await res.json().catch(() => null)) as { error?: unknown } | null;
+          setError(typeof body?.error === "string" && body.error ? body.error : "提交失败，请到对话里确认");
+          setBusy(false);
+        }
+      } catch {
+        setError("提交失败，请到对话里确认");
+        setBusy(false);
+      }
+    },
+    [confirm.session_id, confirm.request_id],
+  );
+
+  if (confirm.status !== "pending") {
+    return (
+      <p className="break-words text-ios-caption1 leading-relaxed text-muted-foreground">
+        {confirm.status === "approved" ? "已批准 · 系统已从断点续跑" : "已退回 · 请在对话里说明要改哪里"}
+      </p>
+    );
+  }
+
+  const locked = busy !== false;
+  return (
+    <div className="space-y-1.5">
+      <p className="text-ios-caption2 leading-relaxed text-ios-orange">
+        协作模式：这一步等你确认，确认后系统自动从断点续跑
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          data-canvas-interactive
+          disabled={locked}
+          onClick={(e) => {
+            e.stopPropagation();
+            void decide(true);
+          }}
+          className="rounded-full bg-primary px-3 py-1 text-[12.5px] font-medium text-primary-foreground transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {busy === "approve" ? "已提交…" : "批准 · 继续"}
+        </button>
+        <button
+          type="button"
+          data-canvas-interactive
+          disabled={locked}
+          onClick={(e) => {
+            e.stopPropagation();
+            void decide(false);
+          }}
+          className="rounded-full bg-black/5 px-3 py-1 text-[12.5px] font-medium text-muted-foreground transition-colors hover:bg-black/10 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {busy === "reject" ? "已提交…" : "退回 · 要改"}
+        </button>
+      </div>
+      {error ? <p className="break-words text-ios-caption2 leading-relaxed text-destructive">{error}</p> : null}
+    </div>
+  );
 }
 
 export interface NodeBodyProps {
@@ -440,6 +523,7 @@ export function NodeBody({
                     <span className="text-[11px] font-medium uppercase leading-none tracking-[0.18em] text-muted-foreground/70">验收条件</span>
                   </div>
                   <p className="break-words text-[13px] leading-relaxed text-foreground">{text}</p>
+                  {metadata?.gateConfirm && <GateConfirmActions confirm={metadata.gateConfirm} />}
                 </>
               ) : (
                 <>

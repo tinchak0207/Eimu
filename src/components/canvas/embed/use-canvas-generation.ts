@@ -23,6 +23,24 @@ import { generationCapabilities } from "@/lib/generation-model-catalog";
 import type { SelectedLora } from "@/components/canvas-workstation/panels/LoraLibraryPanel";
 import { buildAuthHeaders, imageUrlOf } from "./embed-helpers";
 
+/**
+ * 行內 @ 引用 → 本鏡參考集收窄覆寫（純函數，唯一推導入口；面板批次與原地生成共用同一契約）。
+ *   - entityCardIds 缺省/空 → undefined（不覆寫＝既有全量鎖定行為）
+ *   - 有 id 但全對不到卡 → undefined（**刻意**：收窄到空集合會讓參考圖靜默全空，
+ *     比不收窄更壞；退回既有全量行為）
+ *   - 命中 → { cards, referenceScope: "referenced" }，卡順序沿用 cards 原序（不重排；
+ *     注入端穩定序由 applyCharacterCards 負責）
+ */
+export function resolveEntityCardsOverride(
+  cards: CharacterCard[],
+  entityCardIds?: string[],
+): { cards: CharacterCard[]; referenceScope: "referenced" } | undefined {
+  if (!entityCardIds?.length) return undefined;
+  const picked = cards.filter((card) => entityCardIds.includes(card.id));
+  if (!picked.length) return undefined;
+  return { cards: picked, referenceScope: "referenced" };
+}
+
 export interface UseCanvasGenerationInput {
   /** canvas 最新值鏡像 ref（由組件殼持有並傳入）。 */
   canvasStateRef: RefObject<UseCanvasChatReturn>;
@@ -34,6 +52,8 @@ export interface UseCanvasGenerationInput {
   panelRefIds: string[];
   setPromptPanelNodeId: Dispatch<SetStateAction<string | null>>;
   setPanelRefIds: Dispatch<SetStateAction<string[]>>;
+  /** 生成面板行內 @ 引用的素材卡 id（生成落地後清空；與 setPanelRefIds 同款）。 */
+  setPanelEntityIds?: Dispatch<SetStateAction<string[]>>;
   setSelectedIds: Dispatch<SetStateAction<Set<string>>>;
   /** 當前選中的 LoRA（2026-08-27 自專業工作站遷入；null = 不帶）。 */
   selectedLora?: SelectedLora | null;
@@ -47,6 +67,7 @@ export function useCanvasGeneration({
   panelRefIds,
   setPromptPanelNodeId,
   setPanelRefIds,
+  setPanelEntityIds,
   setSelectedIds,
   selectedLora = null,
 }: UseCanvasGenerationInput) {
@@ -57,13 +78,23 @@ export function useCanvasGeneration({
   const selectedLoraRef = useRef(selectedLora);
   selectedLoraRef.current = selectedLora;
 
+  /**
+   * 生成唯一出口。第三參數（可選）＝本鏡參考集覆寫：
+   *   - 不傳：逐位元既有行為（用 canvasStateRef 的 activeCharacterCards 全量注入）
+   *   - 傳：用指定的卡子集注入，並把 referenceScope 交給 applyCharacterCardsToPayload
+   *     （"referenced" = 本鏡只行內 @ 引用了這幾張卡，其餘鎖定卡不進本鏡）
+   */
   const callCanvasGenerate = useCallback(
-    async (payload: Record<string, unknown>, signal: AbortSignal) => {
+    async (
+      payload: Record<string, unknown>,
+      signal: AbortSignal,
+      cardsOverride?: { cards: CharacterCard[]; referenceScope: "all" | "referenced" },
+    ) => {
       const headers = buildAuthHeaders();
       if (!headers) throw new Error("请先登录再生成图片");
-      const lockedCards = canvasStateRef.current.activeCharacterCards ?? [];
+      const lockedCards = cardsOverride?.cards ?? canvasStateRef.current.activeCharacterCards ?? [];
       let finalPayload: Record<string, unknown> = lockedCards.length
-        ? applyCharacterCardsToPayload(payload as CardAwareGeneratePayload, lockedCards as CharacterCard[])
+        ? applyCharacterCardsToPayload(payload as CardAwareGeneratePayload, lockedCards as CharacterCard[], cardsOverride ? { referenceScope: cardsOverride.referenceScope } : undefined)
         : payload;
       // 2026-08-27 LoRA 注入（自專業工作站等價接線）：模型支援才帶，單選鐵律一個 id。
       const lora = selectedLoraRef.current;
@@ -95,9 +126,21 @@ export function useCanvasGeneration({
    * 原地生成：結果回填該節點本體（A4 / A12 重試 / agent run_generation 共用）。
    * 語義接線（2026-08-22）：連入的 prompt 節點文本自動作為 prompt 前綴、
    * 連入的 reference 節點自動帶圖+角色進生成請求——手動 UI 與 agent 同一條路。
+   * entityCardIds（可選，2026-09-24 WS6）：本鏡正文行內 @ 引用過的素材卡 id——非空且
+   * 命中時把參考集收窄到這批（referenceScope "referenced"）；缺省/全 miss＝既有全量行為。
    */
   const generateIntoNode = useCallback(
-    async (nodeId: string, params: { prompt: string; model?: string; size?: string; sourceImage?: string | null; references?: CanvasGenerationReference[] }) => {
+    async (
+      nodeId: string,
+      params: {
+        prompt: string;
+        model?: string;
+        size?: string;
+        sourceImage?: string | null;
+        references?: CanvasGenerationReference[];
+        entityCardIds?: string[];
+      },
+    ) => {
       const state = canvasStateRef.current;
       const controller = new AbortController();
       abortRef.current = controller;
@@ -105,6 +148,7 @@ export function useCanvasGeneration({
       const semantic = resolveGenerationInputs(state.nodes, state.connections, nodeId);
       const finalPrompt = composeGenerationPrompt(semantic.promptParts, params.prompt);
       const references = mergeGenerationReferences(params.references ?? [], semantic.references);
+      const cardsOverride = resolveEntityCardsOverride(state.activeCharacterCards, params.entityCardIds);
       state.patchNodeMetadata(nodeId, {
         status: "loading",
         prompt: finalPrompt,
@@ -123,6 +167,7 @@ export function useCanvasGeneration({
             reference_images: references.map(({ url, role, name }) => ({ url, role, name })),
           },
           controller.signal,
+          cardsOverride,
         );
         const img = images[0];
         state.patchNodeMetadata(
@@ -152,12 +197,21 @@ export function useCanvasGeneration({
     [callCanvasGenerate, showError, canvasStateRef],
   );
 
-  /** 面板生成：空圖片節點 count=1 原地回填；其餘批次子節點插回。 */
+  /**
+   * 面板生成：空圖片節點 count=1 原地回填；其餘批次子節點插回。
+   * entityCardIds（可選）：本鏡正文行內 @ 引用過的素材卡 id——非空時把本鏡的卡注入
+   * 收窄到這幾張（referenceScope "referenced"）；缺省不傳＝既有全量鎖定行為逐位元不變。
+   */
   const handleGenerateFromNode = useCallback(
-    async (nodeId: string, prompt: string, options: { model?: string; size?: string; quality?: string; count?: number }) => {
+    async (
+      nodeId: string,
+      prompt: string,
+      options: { model?: string; size?: string; quality?: string; count?: number; entityCardIds?: string[] },
+    ) => {
       const state = canvasStateRef.current;
       const node = state.nodes.find((n) => n.id === nodeId);
       if (!node) return;
+      const cardsOverride = resolveEntityCardsOverride(state.activeCharacterCards, options.entityCardIds);
       // @引用（顯式選取）+ 連入 reference 節點（自動帶入）→ 帶角色的參考圖清單。
       const panelRefs: CanvasGenerationReference[] = panelRefIds
         .map((id) => state.nodes.find((n) => n.id === id))
@@ -178,7 +232,7 @@ export function useCanvasGeneration({
       // A4：空圖片節點 + 單張 → 原地變身，不另建節點。
       if (node.type === CanvasNodeType.Image && !sourceUrl && count === 1) {
         setPromptPanelNodeId(null);
-        await generateIntoNode(nodeId, { prompt, model: options.model, size: options.size, references });
+        await generateIntoNode(nodeId, { prompt, model: options.model, size: options.size, references, entityCardIds: options.entityCardIds });
         setPanelRefIds([]);
         return;
       }
@@ -198,6 +252,7 @@ export function useCanvasGeneration({
             reference_images: references.map(({ url, role, name }) => ({ url, role, name })),
           },
           controller.signal,
+          cardsOverride,
         );
         const existing = node.batchChildren?.length ?? 0;
         const ts = Date.now().toString(36);
@@ -219,6 +274,7 @@ export function useCanvasGeneration({
         });
         setPromptPanelNodeId(null);
         setPanelRefIds([]);
+        setPanelEntityIds?.([]);
         const size = viewportSizeRef.current;
         if (size.width > 0) state.fitView(size.width, size.height);
       } catch (error) {
@@ -229,7 +285,7 @@ export function useCanvasGeneration({
         if (abortRef.current === controller) abortRef.current = null;
       }
     },
-    [panelRefIds, generateIntoNode, callCanvasGenerate, showError, canvasStateRef, setPromptPanelNodeId, setPanelRefIds, viewportSizeRef],
+    [panelRefIds, generateIntoNode, callCanvasGenerate, showError, canvasStateRef, setPromptPanelNodeId, setPanelRefIds, setPanelEntityIds, viewportSizeRef],
   );
 
   const stopGeneration = useCallback(() => {

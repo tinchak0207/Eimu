@@ -1,6 +1,6 @@
 "use client";
 
-// 歷史「存为角色卡」輕量命名對話框：kind 三選（角色/場景/風格）+ 名稱輸入，
+// 歷史「存为角色卡」輕量命名對話框：kind 五選（角色/場景/風格/道具/音頻），名稱輸入，
 // POST /api/character-cards（復用 character-card-client，不重複造 API 層）。
 // 面板風格複用歷史頁既有語法：lg-sheet 玻璃面板 + iOS 字級/圓角。
 import { useEffect, useId, useRef, useState } from "react";
@@ -24,6 +24,8 @@ const KIND_HINT: Record<CharacterCardKind, string> = {
   character: "锁定角色外观",
   scene: "锁定场景环境",
   style: "锁定画面风格",
+  prop: "锁定道具细节",
+  audio: "锁定音频氛围",
 };
 
 export function SaveCardDialog({ entry, onClose, onDone }: SaveCardDialogProps) {
@@ -107,7 +109,7 @@ export function SaveCardDialog({ entry, onClose, onDone }: SaveCardDialogProps) 
           </button>
         </div>
 
-        {/* kind 三选：segmented，选中态用站内蓝 */}
+        {/* kind 五选：segmented（三列網格自動換行，選項由 CHARACTER_CARD_KIND_VALUES 驅動），选中态用站内蓝 */}
         <div role="radiogroup" aria-label="卡片类型" className="mt-4 grid grid-cols-3 gap-1.5">
           {CHARACTER_CARD_KIND_VALUES.map((value) => {
             const active = value === kind;

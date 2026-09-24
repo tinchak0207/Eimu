@@ -21,6 +21,7 @@ import {
   type CanvasEpisode,
   type CanvasErrorDetails,
   type CanvasNode,
+  type CanvasNodeGateConfirm,
   type CanvasNodeMetadata,
   type CanvasNodeStatus,
   type CanvasPosition,
@@ -91,6 +92,145 @@ function str(v: unknown): string | undefined {
   return typeof v === "string" ? v : undefined;
 }
 
+/**
+ * id 陣列收斂（照 project-store `normalizeProject` 對 `cardIds` 的同一把尺）：
+ * 只留非空字串（純空白＝沒指定）、按首次出現序去重；空陣列/非陣列 → undefined（省略鍵）。
+ * 值本身不動（不補不截）——長度界線在寫入端，讀取端只做形狀收斂。
+ */
+function toIdList(v: unknown): string[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const out = [...new Set(v.filter((id): id is string => typeof id === "string" && id.trim().length > 0))];
+  return out.length > 0 ? out : undefined;
+}
+
+// ─────────────────────────────────────────── 模板實體宣告（2026-09-24）
+
+/**
+ * 節點 metadata 的實體宣告鍵：gateway 模板節點的 `defaults.emitsEntity`
+ * （`deploy-staging/gateway/workflow-templates/*`）經 `expandTemplate` spread 進節點
+ * metadata，隨 SSE `canvas.node.created/updated` 落地；消費端
+ * `src/lib/agent-output-cards.ts` 據此自動落成可 @ 引用的實體卡。
+ *
+ * **本檔刻意零依賴**（不 import `character-cards.ts`）：五值字面與該檔
+ * `CHARACTER_CARD_KIND_VALUES` **逐字同步**，不 import 以避免讀取端反向依賴卡模組。
+ */
+export const EMITS_ENTITY_KINDS = ["character", "scene", "style", "prop", "audio"] as const;
+export type EmitsEntityKind = (typeof EMITS_ENTITY_KINDS)[number];
+
+/** 模板實體宣告（形狀與 `agent-output-cards.ts` 的 `EmittedEntitySpec` 同構）。 */
+export interface EmittedEntityMetadata {
+  kind: EmitsEntityKind;
+  /** 卡名來源：預設節點標題；`"input"` ＝依序取卡名三鍵。 */
+  nameFrom?: "nodeTitle" | "input";
+  /**
+   * 參考圖來源 role 清單（模板作者宣告，如四視圖的 `["view2","view3","view4"]`）：
+   * 同模板實例上哪些 role 的交付物算本實體的參考圖。單一交付物的實體不寫。
+   */
+  referenceRoles?: string[];
+  /**
+   * 參考圖來源**節點 id** 清單（引擎 `expandTemplate` 的參考圖 post-pass 按
+   * `referenceRoles` 解出後填入；作者不手寫）。站點據此把兄弟節點的交付圖併進同一張卡。
+   */
+  referenceNodeIds?: string[];
+}
+
+/**
+ * 卡名來源鍵（`nameFrom: "input"` 時按序取第一個非空字串）——
+ * 與 `agent-output-cards.ts` 的 `NAME_FROM_INPUT_KEYS` **逐字同序同步**。
+ * 卡名上限 100 與 character-cards / agent-output-cards 的 `MAX_NAME_LENGTH` 同尺。
+ */
+export const CARD_NAME_KEYS = ["input", "characterName", "sceneName"] as const;
+const MAX_CARD_NAME_LENGTH = 100;
+
+/** 卡名收斂：非字串/空字串（含純空白）→ undefined（省略該鍵，不寫空字串）。 */
+export function toCardMetadataName(v: unknown): string | undefined {
+  const s = str(v)?.trim();
+  return s ? s.slice(0, MAX_CARD_NAME_LENGTH) : undefined;
+}
+
+/**
+ * `emitsEntity` 內參考圖清單（`referenceRoles` / `referenceNodeIds`）的上限：
+ *   - 項數 8 ＝ `character-cards.ts` 的 `MAX_CARD_REFERENCES` 同尺（多出來的項在
+ *     建卡時本來也會被截，這裡先收斂＝上行/存檔不搬運永遠用不到的字串）
+ *   - 單項長度 100 ＝ id 邊界同尺（超過者建不出合法 card id，留著只是噪音）
+ */
+const MAX_ENTITY_REFERENCE_ITEMS = 8;
+const MAX_ENTITY_REFERENCE_ITEM_LENGTH = 100;
+
+/**
+ * 參考圖清單收斂（讀取端與上行端共用）：
+ *   - 非陣列 → `undefined`（省略鍵）
+ *   - 逐項 trim、只留非空字串、按首次出現序去重、單項截 100 字、項數上限 8
+ *   - 收斂後空集合 → `undefined`（**省略鍵**，不寫 `[]`：消費端「沒宣告」與「空集合」同義）
+ */
+function toEntityReferenceList(v: unknown): string[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const out: string[] = [];
+  for (const item of v) {
+    if (typeof item !== "string") continue;
+    const s = item.trim().slice(0, MAX_ENTITY_REFERENCE_ITEM_LENGTH);
+    if (!s || out.includes(s)) continue;
+    out.push(s);
+    if (out.length >= MAX_ENTITY_REFERENCE_ITEMS) break;
+  }
+  return out.length > 0 ? out : undefined;
+}
+
+/**
+ * `emitsEntity` 保留鍵的清洗（讀取端與上行端共用同一份，不製造第二個漂移點）：
+ *   - 非物件（含陣列/字串/數字）→ `undefined`
+ *   - `kind` 不在五值域 → **整個丟棄**（**不降格成 character**：這裡判的是「這號標記是否
+ *     合法」，猜錯會建出錯 kind 的卡；與 `character-cards.ts` `toCharacterCardKind` 的
+ *     fail-open 語義刻意不同）
+ *   - `nameFrom` 只認 `"nodeTitle" | "input"`，非法則省略該欄（kind 仍有效）
+ *   - `referenceRoles` / `referenceNodeIds`（2026-09-24 四視圖聚合）：只收**非空字串
+ *     陣列**（trim、去重、單項 ≤100、≤8 項），空集合/非陣列則省略該鍵
+ * 回傳**新物件**（不沿用輸入參考）：gateway 的 `expandTemplate` 是淺 spread，節點
+ * metadata 與模板模組層的 `defaults` 同參考，沿用參考會把原地改寫擴散到跨會話
+ *（`workflow-engine.ts` 已同步做防禦性複製，兩處互為保險）。
+ */
+export function cleanEmitsEntity(v: unknown): EmittedEntityMetadata | undefined {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return undefined;
+  const raw = v as Record<string, unknown>;
+  const kind = EMITS_ENTITY_KINDS.find((k) => k === raw.kind);
+  if (!kind) return undefined;
+  const nameFrom = str(raw.nameFrom);
+  // 聚合兩鍵（**雙白名單生效的關鍵一步**）：漏在這裡＝鍵一進前端就被剝掉，
+  // 四視圖聚合的 `referenceNodeIds` 永遠是 undefined（症狀＝功能完全沒反應）。
+  const referenceRoles = toEntityReferenceList(raw.referenceRoles);
+  const referenceNodeIds = toEntityReferenceList(raw.referenceNodeIds);
+  return {
+    kind,
+    ...(nameFrom === "nodeTitle" || nameFrom === "input" ? { nameFrom } : {}),
+    ...(referenceRoles ? { referenceRoles } : {}),
+    ...(referenceNodeIds ? { referenceNodeIds } : {}),
+  };
+}
+
+/**
+ * 文本節點字號（`metadata.fontSize`）的界：**與寫入端逐字同尺**
+ *（`src/components/canvas/embed/context-menu-items.ts:155/156` 的
+ *  `Math.min(28, …)` / `Math.max(10, …)`，缺省 14.5 由渲染層補）。
+ */
+const MIN_NODE_FONT_SIZE = 10;
+const MAX_NODE_FONT_SIZE = 28;
+
+/**
+ * 字號收斂（讀取端與上行端共用同一份）：
+ *   - 只收**有限數字**（`Number.isFinite`：字串 `"22"`／`NaN`／`Infinity`／`null` 一律不收
+ *     ——面板寫的是 number，字串是歷史髒值，不代為轉型）
+ *   - 四捨五入成整數（面板只寫整數；小數是髒值）
+ *   - 夾在 10..28（與寫入端同一把尺；超界＝收斂到界，不是丟掉）
+ * 不合法 → `undefined`（**省略該鍵**，渲染層回預設 14.5）。
+ *
+ * 為什麼要進白名單：本鍵原本「session 內可見、重載即消失」（右鍵放大/縮小字号改的字號
+ * 刷新就回默認）；`toNodeMetadata` 是唯一的耐久化路徑（fromCanvasProject → … → 本函式）。
+ */
+export function toNodeFontSize(v: unknown): number | undefined {
+  if (typeof v !== "number" || !Number.isFinite(v)) return undefined;
+  return Math.min(MAX_NODE_FONT_SIZE, Math.max(MIN_NODE_FONT_SIZE, Math.round(v)));
+}
+
 /** errorDetails 收斂：字串原樣；物件只留 message/human_message 兩個字串欄位（G-FE 合同），空形丟棄。 */
 function toErrorDetails(v: unknown): string | CanvasErrorDetails | undefined {
   const s = str(v);
@@ -109,6 +249,21 @@ export function toNodeMetadata(raw: unknown): CanvasNodeMetadata {
   const m = raw as Record<string, unknown>;
   const status = toNodeStatus(m.status);
   const errorDetails = toErrorDetails(m.errorDetails);
+  // 分鏡實體的卡引用（WS7）：三條 id 陣列走同一把尺（非空、去重、空則省略鍵）。
+  const characterCardIds = toIdList(m.characterCardIds);
+  const sceneCardIds = toIdList(m.sceneCardIds);
+  const propCardIds = toIdList(m.propCardIds);
+  const entityCardId = str(m.entityCardId)?.trim();
+  // 模板實體宣告 ＋ 卡名三鍵（2026-09-24）：emitsEntity 是**結構化物件**（非字串、
+  // 非 id 陣列），走專用清洗函式；卡名三鍵走字串 trim + 上限（空字串省略該鍵）。
+  const emitsEntity = cleanEmitsEntity(m.emitsEntity);
+  const cardNames = {
+    input: toCardMetadataName(m.input),
+    characterName: toCardMetadataName(m.characterName),
+    sceneName: toCardMetadataName(m.sceneName),
+  };
+  // 文本節點字號（2026-09-25）：右鍵「放大/縮小字号」寫的鍵——不放行＝刷新回默認字號。
+  const fontSize = toNodeFontSize(m.fontSize);
   return {
     ...(str(m.content) !== undefined ? { content: str(m.content) } : {}),
     ...(str(m.prompt) !== undefined ? { prompt: str(m.prompt) } : {}),
@@ -170,7 +325,39 @@ export function toNodeMetadata(raw: unknown): CanvasNodeMetadata {
     ...(normalizeStoryboardSceneRef(m.storyboardScene)
       ? { storyboardScene: normalizeStoryboardSceneRef(m.storyboardScene)! }
       : {}),
+    // 分鏡實體的卡引用＋自動落卡標記（WS7，2026-09-24）：與 storyboardShot 同族的
+    // 雙白名單欄位——漏此處 = 刷新/回舊會話（fromCanvasProject → 本函式）後
+    // 卡引用與冪等標記憑空消失，分鏡節點永遠拿不到卡引用。
+    ...(characterCardIds ? { characterCardIds } : {}),
+    ...(sceneCardIds ? { sceneCardIds } : {}),
+    ...(propCardIds ? { propCardIds } : {}),
+    ...(entityCardId ? { entityCardId } : {}),
+    // 模板交付自動落卡（2026-09-24）：emitsEntity 是**驅動整條落卡鏈**的鍵——漏此處
+    // ＝前端落地剝掉它 → `agent-output-cards.emittedEntityOf` 回 null → 一卡都落不成
+    //（已用真 expandTemplate 輸出 + 本函式＋ compactMetadataForAgent 實錘）。
+    // 三條卡名鍵是 `nameFrom: "input"` 的來源；只放行 emitsEntity 不放行它們，
+    // 卡名只會退回節點標題（「正面」而非角色名）。
+    ...(emitsEntity ? { emitsEntity } : {}),
+    ...(cardNames.input ? { input: cardNames.input } : {}),
+    ...(cardNames.characterName ? { characterName: cardNames.characterName } : {}),
+    ...(cardNames.sceneName ? { sceneName: cardNames.sceneName } : {}),
+    ...(fontSize !== undefined ? { fontSize } : {}),
+    // 協作確認閘的門禁卡狀態（2026-09-24）：漏此處＝SSE 到了也被剝掉，門禁卡永遠
+    // 只有純文字（使用者「資產圖都不讓我們確認」的 UI 側缺口）。三欄全字串才收，
+    // 殘形整包丟棄（不製造半形狀態：缺 request_id 的卡按不下批准）。
+    ...(toGateConfirm(m.gateConfirm) ? { gateConfirm: toGateConfirm(m.gateConfirm)! } : {}),
   };
+}
+
+/** 門禁卡裁決憑據收斂：三欄型別全對才回物件，否則整包丟棄（同 storyboard 家族寫法）。 */
+function toGateConfirm(v: unknown): CanvasNodeGateConfirm | undefined {
+  if (!v || typeof v !== "object") return undefined;
+  const g = v as Record<string, unknown>;
+  const requestId = str(g.request_id);
+  const sessionId = str(g.session_id);
+  const status = g.status === "pending" || g.status === "approved" || g.status === "rejected" ? g.status : undefined;
+  if (!requestId || !sessionId || !status) return undefined;
+  return { request_id: requestId, session_id: sessionId, status };
 }
 
 /** sceneCard 欄位族收斂：六欄逐一驗型，任一必填欄不符契約即整包丟棄。 */

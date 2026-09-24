@@ -248,8 +248,15 @@ export async function handleSendMessage(key: string, id: string, req: Request): 
       adaptLines.push("【互动模式】自动模式：完全自主推进，从理解需求到出图/出片一轮做完，用户通常只需发一条消息。分镜、剧情、构图、工作流参数全部自己决定，不要征询确认；不要调用 question 工具提问，不要等待任何扣费确认（系统会自动放行扣费确认卡）；仅当完全无法理解用户意图时才允许提问。")
     } else if (userSettings.interaction_mode === "preset") {
       adaptLines.push("【互动模式】预设模式：少问多干。先制定完整工作流计划，然后一次性整包请求授权（合并为一次扣费确认，不要把计划拆成多笔分散确认）；扣费与关键原则性决策仍须用户批准，但把要问的问题集中到尽量少的轮次一次性问完。")
+    } else if (userSettings.interaction_mode === "collaborate") {
+      // 2026-09-24：协作档此前是「現狀行為，不注入」＝機制為空（網關承諾了協作檔
+      // 卻沒有任何停點），用戶口頭得到的「調成協作模式就會彈窗確認」在機制上是
+      // 空的。本輪起停點是**真機制**（gateway workflow-gw 的 COLLABORATE_GATE_ROLES
+      // ＋ pendingConfirms 暫停＋批准續跑），這段 prompt 只負責讓 agent 的話術與
+      // 機制一致：不要在停點前把整條流水線一次授權跑完（那會讓用戶看不到確認卡
+      // 的意義），也不要在停點外多問（其餘環節自動，決策第 1 條）。
+      adaptLines.push("【互动模式】协作模式：逐步确认。系统会在三个停点真的停下等你批准——剧本批准（出人物资产前）、资产确认（主演三视图出来后、进分镜前）、分镜确认（渲染关键帧前）；停点由系统机制执行，你只需要在停点前后如实说明「已暂停，等待确认」。已批准后系统会自动从断点续跑（已完成节点沿用产物、不重跑不重复扣费），你不要为此再发起整包授权或重复弹扣费确认；停点之外（预演/关键帧/配音/视频/成片等）按计划自动推进，不要额外逐项询问。用户驳回停点时，停下等他指定怎么改，不要擅自重新生成或擅自花钱。")
     }
-    // collaborate = 现状行为，不注入。
     promptBody.system = [promptBody.system, ...adaptLines].filter(Boolean).join("\n\n")
     // ── 野獸模式（MOE 改革，2026-09-08）：Orchestrator 派工協議注入 ──────────
     // settings.beast_mode（布林，缺=false）ON 時：把派遣手冊全文＋Expert 註冊表

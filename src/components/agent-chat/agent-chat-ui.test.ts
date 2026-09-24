@@ -883,8 +883,16 @@ test("composer accepts pasted files (Ctrl+V) and dragged-in files, sharing the u
   // !important 前缀才能盖过 .lg-float 的 background/box-shadow（同特异性下
   // 手写 utilities 层的 lg-* 排在生成的 utility 之后）。
   assert.match(code, /dragActive && "!ring-2 !ring-ios-blue\/45 !bg-ios-blue\/\[0\.04\]"/);
-  assert.match(code, /松开以添加附件/);
+  // 2026-09-24（决策 18）：拖拽中提示改「松开以添加素材」（原文「松开以添加附件」——
+  // 「附件」搭配「图片」暗示让用户以为只能拖图；素材才是中性语义）。
+  assert.match(code, /松开以添加素材/);
   assert.match(code, /pointer-events-none/);
+
+  // 2026-09-24（决策 17/18）：上传入口语义中性化——去掉「只收图片」暗示，
+  // placeholder 明说可以把剧本/资产图拖进来（拖拽落点只支援拖进输入框，决策 19）。
+  assert.match(code, /aria-label="添加素材"/);
+  assert.match(code, /title="添加素材（剧本 \/ 图片 \/ 影片 \/ 文档）"/);
+  assert.match(code, /placeholder = "描述你想做的，或把剧本／资产图拖进来"/);
 
   // drop 复位高亮状态、有文件才 enqueue；无文件时不 preventDefault（文本拖入按默认插入）。
   assert.match(code, /handleDrop[\s\S]{0,120}setDragActive\(false\)/);

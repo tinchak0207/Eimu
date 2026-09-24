@@ -172,6 +172,18 @@ export const workflowService = new WorkflowService({
     if (r.ok && r.content && node.kind === "video") void emitVideoDone(session, r.content, r.costCoins, node.id, "video")
     return r
   },
+  // 2026-09-24 協作確認閘掛點（詳見本檔 COLLABORATE_GATE_ROLES 節）。
+  // 檔位判定在 gateway（settings 是 gateway 的真源），engine 只收「停不停」。
+  awaitingApproval: async (wf) => {
+    const state = ((wf.owner ?? stateForWorkflow) as SessionState | null) ?? null
+    if (!state) return null
+    // 只有協作檔停（決策 1/2）。auto/preset：這裡一句不問、零新增阻塞——護城河。
+    if (normalizeUserSettings(loadUserSettings(state.apiKey)).interaction_mode !== "collaborate") return null
+    const gate = resolveCollaborateGate(wf as Parameters<typeof resolveCollaborateGate>[0])
+    if (!gate) return null
+    if (!requestCollaborateApproval(state, wf, gate)) return null
+    return collaboratePauseNotice(gate)
+  },
 })
 
 // ── 跑批完成推送（2026-09-20 Phase 1）────────────────────────────────────
@@ -1035,6 +1047,206 @@ export const workflowGenerateApproved = new Map<string, { amount: number; nodes:
 // confirm_pending；settleConfirm(approved) 觸發 runWfGenerate。
 export const wfGenerateContinuations = new Map<string, { state: SessionState; wfid: string; nodes: number; amount: number }>()
 
+// ── 2026-09-24 協作確認閘（collaborate 檔專屬：劇本批准／資產確認／分鏡確認）────
+//
+// 要修的洞：模板 directive 早就寫死「一步一確認」，但 `step.gate` 只是
+// `metadata.gate` 字串 → 引擎在 expandTemplate 把它做成 `pipelineCard:"gate"` 的
+// 衍生卡（workflow-engine.ts:226-239），執行期只被算尺寸（workflow-service
+// emitNodeDelta），**沒有任何節點在此暫停**——用戶真話是「大哥你這個智能體，
+// 連資產圖都不讓我們確認嗎」。本閘把門禁卡從 prompt 裝飾升級成機制：
+// 交付物真的產出後，在批次間暫停並註冊 pending confirm（輪子＝
+// /internal/confirm-request 註冊 → settleConfirm 落帳/emit → 續跑；不新建暫停系統）。
+//
+// 三條硬邊界（決策定稿 2026-09-25 第 1/2/5 條）：
+//   ① 只在 interaction_mode === "collaborate" 生效；auto/preset 兩檔零改動
+//      （全自動＝一鍵一路跑完不問，護城河）。
+//   ② 停點只有這三個；final_cut（成片驗收）/promo 的門禁卡不在此列（決策第 1 條
+//      「其餘環節自動」），維持 prompt 層引導，不擴大硬閘範圍。
+//   ③ 確認不設超時（決策第 5 條：甲方核對一兩週是常態）——掛起期間 watchdog 與
+//      midturn-status 主動讓路（timers-gw.ts:142/:330 的 pendingConfirms 讓路），
+//      這是既有合法暫停語義，不需要新的保活機制。
+//
+// 為什麼判「交付物是否真的產出」而不是「門禁卡存在」：門禁卡在 start 就鋪好了，
+// 拿它當暫停條件＝建骨架當下就停，用戶會被問一個還不存在的資產。判據：
+//   - text/config 類交付（劇本/分鏡）：metadata.content 非空且不是佔位文案
+//     （templatePlaceholderContent 鋪的是「（待填：…）」——佔位不是交付物，
+//      拿它當「已產出」＝謊報可確認）。
+//   - 可執行類（資產圖）：nodeStatus === "success" 且有 nodeContent（真圖 URL）。
+//
+// 為什麼批准綁「交付物指紋」而不是布林：批准是對**某個具體交付物**的批准。用戶
+// 回跳改圖／重生成資產後，指紋變 → 該門禁重新進入待批准（不讓舊批准替新交付物
+// 放行）。這同時就是決策 15「回跳後只重跑後續」的閘側語義：網關既有的
+// updateNode/rerunFrom 已把下游重置 pending＋清結果（workflow-service.ts:660-675、
+// :957-966），不需新建作廢機制。
+export const COLLABORATE_GATE_ROLES: readonly string[] = ["script", "cast_card", "storyboard"]
+
+/** 停點中文名（confirm 卡與暫停回執的用戶可見前綴）。 */
+export const COLLABORATE_GATE_LABELS: Record<string, string> = {
+  script: "剧本批准",
+  cast_card: "资产确认",
+  storyboard: "分镜确认",
+}
+
+/**
+ * 已批准的停點：wfid → (role → 交付物指紋)。刻意**不持久化**（與 workflowBilling
+ * 同為進程內真值）：gateway 重啟後重新問一次，寧可多問一次也不放過未確認的資產。
+ */
+export const workflowGateApprovals = new Map<string, Map<string, string>>()
+
+/**
+ * 停點續跑註冊表（request_id → 待續跑的 workflow）。**刻意與 wfGenerateContinuations
+ * 分開**：那條鏈的 approved 分支會連帶寫 workflowGenerateApproved ＋ workflowBilling
+ *（confirmed_coins ← 批准額、refunded_coins ← 0）——拿它載確認閘會把真實退款真值
+ * 抹成 0，而 billing 真值正是 agent 對用戶報帳的唯一依據（最恨被騙）。故另設一表，
+ * settle 只觸發續跑，一毛錢不碰帳。
+ */
+export const wfGateContinuations = new Map<string, { state: SessionState; wfid: string; role: string; gateNodeId: string }>()
+
+/** 交付物指紋：內容前 16 位 sha256（內容可能含換行/中文，只取指紋比對，不外洩原文）。 */
+function deliverableFingerprint(content: string): string {
+  return createHash("sha256").update(content).digest("hex").slice(0, 16)
+}
+
+/** 佔位文案判定（templatePlaceholderContent 的產物＝未填，不是交付物）。 */
+function isPlaceholderContent(content: string): boolean {
+  return content.trim().startsWith("（待填：")
+}
+
+/**
+ * 停點的交付物是否**真的產出**（可被用戶確認）。false＝還沒東西可確認，門禁不擋。
+ */
+export function deliverableProduced(
+  wf: { nodeStatus: Record<string, string>; nodeContent: Record<string, string> },
+  node: { id: string; kind: string; metadata?: Record<string, unknown> },
+): { produced: boolean; fingerprint: string } {
+  if (node.kind === "text" || node.kind === "config") {
+    const text = typeof node.metadata?.content === "string" ? node.metadata.content.trim() : ""
+    if (!text || isPlaceholderContent(text)) return { produced: false, fingerprint: "" }
+    return { produced: true, fingerprint: deliverableFingerprint(text) }
+  }
+  const content = wf.nodeContent[node.id]
+  if (wf.nodeStatus[node.id] !== "success" || typeof content !== "string" || !content) {
+    return { produced: false, fingerprint: "" }
+  }
+  return { produced: true, fingerprint: deliverableFingerprint(content) }
+}
+
+/** 待批准的停點（按 COLLABORATE_GATE_ROLES 固定順序＝劇本→資產→分鏡，與圖序無關）。 */
+export function resolveCollaborateGate(wf: {
+  workflowId: string
+  graph: { nodes: { id: string; role: string; kind: string; metadata?: Record<string, unknown> }[] }
+  nodeStatus: Record<string, string>
+  nodeContent: Record<string, string>
+}): { role: string; label: string; gateText: string; gateNodeId: string; nodeId: string; fingerprint: string } | null {
+  const approved = workflowGateApprovals.get(wf.workflowId)
+  for (const role of COLLABORATE_GATE_ROLES) {
+    const main = wf.graph.nodes.find((n) => n.role === role)
+    const gate = wf.graph.nodes.find((n) => n.role === `${role}__gate`)
+    if (!main || !gate) continue
+    const { produced, fingerprint } = deliverableProduced(wf, main)
+    if (!produced) continue // 還沒交付物可確認：不擋（門禁不是無條件硬閘）
+    if (approved?.get(role) === fingerprint) continue // 這個交付物已批准
+    const gateText = typeof gate.metadata?.content === "string" ? gate.metadata.content.trim() : ""
+    return { role, label: COLLABORATE_GATE_LABELS[role] ?? role, gateText, gateNodeId: gate.id, nodeId: main.id, fingerprint }
+  }
+  return null
+}
+
+/** 暫停回執文案（runWfGenerate 的 !ok 分支會把它原樣播給用戶/agent，必須是人話）。 */
+export function collaboratePauseNotice(gate: { label: string }): string {
+  return `已暂停流程，等待你确认「${gate.label}」。协作模式下，确认后系统自动从断点续跑（已完成的节点沿用产物，不重跑、不重复扣费）。`
+}
+
+/**
+ * 註冊一次停點確認：pendingConfirms（讓 watchdog 讓路）＋續跑註冊表＋確認卡＋
+ * 畫布門禁卡可操作標記。同一個 workflow 已有一張未決確認卡時**不重複發卡**
+ *（F1 重啟續跑可能再次呼叫 generate），仍回 true＝維持暫停。
+ * 回 false＝無法註冊（state 不存在），呼叫端不暫停（fail-open 不卡死流程）。
+ */
+export function requestCollaborateApproval(
+  state: SessionState,
+  wf: { workflowId: string },
+  gate: { role: string; label: string; gateText: string; gateNodeId: string },
+): boolean {
+  for (const c of wfGateContinuations.values()) {
+    if (c.wfid === wf.workflowId) return true // 已有未決卡：維持暫停，不重複彈
+  }
+  const requestId = `wfgate_${wf.workflowId}_${gate.role}_${Date.now().toString(36)}`
+  // 無超時（決策 5）：timer 是 no-op——PendingConfirm.timer 是型別必需欄位，
+  // settleConfirm 會 clearTimeout 它，故不能省（同 /internal/confirm-request 的
+  // auto 分支形狀）。ledger 刻意不帶：這是「確認交付物」不是扣費，帶 ledger 會
+  // 寫一筆 0 幣帳目進帳本（假帳目）。
+  state.pendingConfirms.set(requestId, { timer: setTimeout(() => {}, 0) })
+  wfGateContinuations.set(requestId, { state, wfid: wf.workflowId, role: gate.role, gateNodeId: gate.gateNodeId })
+  const description = `【协作确认·${gate.label}】${gate.gateText || "确认这一步的交付物后继续后续环节。"}`
+  emitToSession(state, "confirm.request", { request_id: requestId, amount_coins: 0, description })
+  markGateNodeState(state, wf.workflowId, gate.gateNodeId, { request_id: requestId, session_id: state.sessionId, status: "pending" })
+  console.log(
+    `[gateway] collaborate gate paused: wf=${wf.workflowId} gate=${gate.role} state=${state.sessionId} request=${requestId}`,
+  )
+  return true
+}
+
+/**
+ * 畫布門禁卡狀態回寫（直發路徑繞過 workflowService 的 emit hook → 快照同步在此
+ * 自補，同 events-translate/workflow-gw 既有直發點的寫穿寫法，冪等）。
+ * 前端 NodeBody 據 metadata.gateConfirm 渲染「批准/退回」——門禁卡從純文字變可操作。
+ */
+function markGateNodeState(
+  state: SessionState,
+  wfid: string,
+  gateNodeId: string,
+  gateConfirm: { request_id: string; session_id: string; status: "pending" | "approved" | "rejected" },
+): void {
+  const data = { unit_id: wfid, node_id: gateNodeId, patch: { gateConfirm } }
+  emitToSession(state, "canvas.node.updated", data)
+  try {
+    applyCanvasNodeUpdated(state.sessionId, data)
+  } catch (e) {
+    console.error(`[gateway] gate node patch write-through failed: ${gateNodeId}`, e)
+  }
+}
+
+/**
+ * 停點裁決 → 解註冊。批准的記指紋（這個交付物算過了）並續跑；駁回=停下等用戶
+ * 指定怎麼改（決策 4：不擅自重生成、不擅自花錢），工作流停在暫停態。
+ * 回 true 表示這個 request_id 屬停點閘（呼叫端不需再看計費鏈）。
+ */
+export function resumeWorkflowGate(requestId: string, approved: boolean): boolean {
+  const cont = wfGateContinuations.get(requestId)
+  if (!cont) return false
+  wfGateContinuations.delete(requestId)
+  const wf = workflowService.get(cont.wfid)
+  // 卡片狀態回寫：不管批准或駁回都要落地，否則畫布門禁卡永遠停在「待確認」。
+  markGateNodeState(cont.state, cont.wfid, cont.gateNodeId, {
+    request_id: requestId,
+    session_id: cont.state.sessionId,
+    status: approved ? "approved" : "rejected",
+  })
+  if (!approved) {
+    console.log(`[gateway] collaborate gate denied: wf=${cont.wfid} gate=${cont.role}（停在该步等用户指定修改，不重生成）`)
+    return true
+  }
+  const gate = wf ? resolveGateByRole(wf, cont.role) : null
+  const approvedMap = workflowGateApprovals.get(cont.wfid) ?? new Map<string, string>()
+  approvedMap.set(cont.role, gate?.fingerprint ?? "")
+  workflowGateApprovals.set(cont.wfid, approvedMap)
+  console.log(`[gateway] collaborate gate approved: wf=${cont.wfid} gate=${cont.role} → resume`)
+  runWfGenerate(cont.state, cont.wfid) // 續跑輪子：generate 的 R5-B 語義只跑 pending/error 節點
+  return true
+}
+
+/** 取該 role 交付物的當前指紋（批准當下記帳用）。 */
+function resolveGateByRole(
+  wf: { graph: { nodes: { id: string; role: string; kind: string; metadata?: Record<string, unknown> }[] }; nodeStatus: Record<string, string>; nodeContent: Record<string, string> },
+  role: string,
+): { fingerprint: string } | null {
+  const main = wf.graph.nodes.find((n) => n.role === role)
+  if (!main) return null
+  const { produced, fingerprint } = deliverableProduced(wf, main)
+  return produced ? { fingerprint } : null
+}
+
 // 批量執行啟動器（含 S6 質詢凍結檢查）。兩個入口：/workflow/generate 免
 // confirm 直呼路徑，與 wfGenerateContinuations 批准回調——凍結語義收攏在此，
 // 兩個入口行為一致。
@@ -1102,6 +1314,9 @@ setInterval(() => {
     const terminal = wfStatus !== "running" && wfStatus !== "building" && wfStatus !== "pending"
     const stalled = !terminal && Date.now() - w.lastProgressAt > WORKFLOW_STALL_MS
     if (!terminal && !stalled) continue
+    // 2026-09-24：協作確認閘的暫停是**合法等待**（決策 5 不設超時），不是「跑完了」。
+    // 喚醒 agent 只會逼它對用戶謊報結果；批准後 runWfGenerate 會重新登記喚醒。
+    if (wfStatus === "paused_awaiting_approval") continue
     if (state.ackTimer != null) continue // turn 在途讓位，下一輪掃描再喚
     // 停滯判死：卡在 running 的節點 patch 成畫布終態（error，與
     // workflow-service/emitImageFailed 的節點失敗形狀對稱）+ 走修 2 退款留痕。

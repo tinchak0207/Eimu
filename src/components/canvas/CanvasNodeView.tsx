@@ -19,6 +19,7 @@ import { useEffect, useState } from "react";
 import { X, RefreshCw, Edit2, ChevronDown, ChevronUp, Image as ImageIcon, Download, Wrench, ShieldCheck, Lightbulb, FileText, Type, User, Mountain, Boxes, Paperclip, AudioLines, Video as VideoIcon, SlidersHorizontal, Clapperboard } from "lucide-react";
 import { CanvasNodeHoverToolbar } from "./CanvasNodeHoverToolbar";
 import { CanvasNodePromptPanel } from "./CanvasNodePromptPanel";
+import type { CanvasEntityCandidate } from "./CanvasNodePromptPanel";
 import { cn } from "@/lib/utils";
 import { CanvasNodeType, type CanvasNode, type CanvasNodeStatus } from "@/lib/canvas/types";
 import { REFERENCE_IMAGE_ROLES } from "../pro-workstation/workstation-constants";
@@ -75,6 +76,12 @@ export interface CanvasNodeViewProps {
   referenceCandidates?: { nodeId: string; title: string; previewUrl: string }[];
   selectedReferenceIds?: string[];
   onToggleReference?: (referenceNodeId: string) => void;
+  /** 素材卡 @引用（透傳給內嵌 prompt 面板；角色/場景/風格/道具卡） */
+  entityCandidates?: CanvasEntityCandidate[];
+  selectedEntityIds?: string[];
+  onToggleEntity?: (cardId: string) => void;
+  /** 本鏡節點已指定的實體卡 id（透傳給內嵌 prompt 面板；供清單的 "shot" 來源） */
+  shotEntityCardIds?: string[];
   /** A1：port 拖線起點（節點左右緣圓點按下）。 */
   onStartPortDrag?: (nodeId: string, side: "left" | "right", clientX: number, clientY: number) => void;
   /** A7：hover 上報（宿主做鄰接高亮）。 */
@@ -129,6 +136,10 @@ export function CanvasNodeView({
   referenceCandidates,
   selectedReferenceIds,
   onToggleReference,
+  entityCandidates,
+  selectedEntityIds,
+  onToggleEntity,
+  shotEntityCardIds,
   onStartPortDrag,
   onHoverChange,
   adjacent,
@@ -507,6 +518,10 @@ export function CanvasNodeView({
           referenceCandidates={referenceCandidates}
           selectedReferenceIds={selectedReferenceIds}
           onToggleReference={onToggleReference}
+          entityCandidates={entityCandidates}
+          selectedEntityIds={selectedEntityIds}
+          onToggleEntity={onToggleEntity}
+          shotEntityCardIds={shotEntityCardIds}
           onStop={onStopGenerate}
           onOpenPromptLibrary={onOpenPromptLibrary}
         />

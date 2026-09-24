@@ -68,13 +68,21 @@ export interface WorkflowServiceOptions {
    * 兜底）。輪子 = index.ts 的 resolveActiveModel 同源（/v1/model-status 判活）。
    */
   pickDefaultVideoModel?: () => Promise<string | null>
+  /**
+   * 2026-09-24 協作確認閘（collaborate 檔專屬）：批次間掛點，語義與 R9 中途閘
+   *（midBatchBudgetGate）同構——回非 null 字串＝暫停，該字串即回給呼叫端/用戶的
+   * 誠實原因；回 null＝照跑。gateway 注入的實作只認 interaction_mode === "collaborate"，
+   * auto/preset 兩檔恆回 null（護城河：全自動零新增阻塞）。
+   * 未注入（測試/舊呼叫端）＝恆 null，與舊行為逐位元一致。
+   */
+  awaitingApproval?: (wf: ActiveWorkflow) => Promise<string | null>
 }
 
 export interface ActiveWorkflow {
   workflowId: string
   templateId: string
   graph: WorkflowGraph
-  status: "building" | "running" | "success" | "partial" | "failed" | "paused_insufficient_quota"
+  status: "building" | "running" | "success" | "partial" | "failed" | "paused_insufficient_quota" | "paused_awaiting_approval"
   nodeStatus: Record<string, "pending" | "running" | "success" | "error">
   nodeContent: Record<string, string>
   nodeCost: Record<string, number>
@@ -780,6 +788,17 @@ export class WorkflowService {
         wf.status = "paused_insufficient_quota"
         this.dirty(wf)
         return { ok: false, status: pausedReason }
+      }
+      // 2026-09-24 協作確認閘（collaborate 檔專屬）：與上閘同構的批間掛點。
+      // 順序刻意在餘額閘之後——餘額不足是系統安全（一幣不燒），優先於人工確認。
+      // 掛點未注入＝恆不暫停（auto/preset 與測試呼叫端逐位元舊行為）。
+      if (this.opts.awaitingApproval) {
+        const approvalReason = await this.opts.awaitingApproval(wf)
+        if (approvalReason) {
+          wf.status = "paused_awaiting_approval"
+          this.dirty(wf) // 暫停落盤：重啟後回灌停在暫停態，不偽造還在跑
+          return { ok: false, status: approvalReason }
+        }
       }
       for (const nodeId of executableIds) {
         wf.nodeStatus[nodeId] = "running"

@@ -26,7 +26,15 @@
  * REQ-B2（2026-09-23）：本檔多了一個**純邏輯**依賴 `./asset-scope`（零 IO、不成環），
  * 只為在「專案 cardIds → 鎖定卡」這條**生成注入路徑**上過一次作用域裁決
  * （`options.scope` 給了才生效；未給＝既有行為逐位不變）。
+ *
+ * 資產批准閘（2026-09-24）：型別 `ApprovalState` 與判定函式 `isAssetApproved` **單一真源在
+ * `./character-cards`**（不另建第二套 shape、不重寫第二套判定），本檔只負責把它接到
+ * **分鏡卡引用欄**（`filterApprovedShotCardIds` ＋ `productionFieldsFromContext` 第 ⑥ 條）。
+ * 檔位語義同樣在該檔：**只有 `"collaborate"` 會擋**，`preset`/`auto`/未給 mode 一律放行（護城河）。
  */
+import { isAssetApproved } from "./character-cards";
+import type { ApprovalState } from "./character-cards";
+import type { AgentInteractionMode } from "./agent-chat-client";
 import { canUseAsset } from "./asset-scope";
 import type { AssetScope, AssetShareRecord } from "./asset-scope";
 
@@ -225,10 +233,23 @@ export interface StoryboardQcShot {
   durationSeconds?: number;
   characterCardIds: string[];
   sceneCardIds: string[];
+  /**
+   * 道具卡 id（本場鏡頭引用的道具資產，2026-09-24 加成欄位）。
+   * **刻意不在 `QC_REQUIRED_FIELDS` 內**（見該常數上方註）：道具是加成不是門檻，
+   * 缺道具不得讓門禁 block。門禁讀到不認得的鍵時忽略，故多帶此鍵對 17 門判定零影響。
+   */
+  propCardIds: string[];
   keyframeId?: string;
   lastFrameId?: string;
   audioAnchorId?: string;
   aspectRatio?: string;
+  /**
+   * 本鏡的分鏡確認狀態（決策 24：新建的分鏡審查面板與資產面板同構，**與資產側同一個 shape**）。
+   * 缺省＝已批准（決策 23 存量相容）；只在呼叫端供給時出現（不補默認值）。
+   * **不在 `QC_REQUIRED_FIELDS` 內**：門檻欄位清單一個字不加，否則全鏡次瞬間多一項 missing。
+   * 門禁 `storyboard_qc_17` 讀具名欄位、未知鍵忽略 → 本鍵對 17 門判定零影響。
+   */
+  approval?: ApprovalState;
 }
 
 /**
@@ -241,10 +262,18 @@ export interface StoryboardQcProductionFields {
   prompt?: string;
   characterCardIds?: string[];
   sceneCardIds?: string[];
+  /** 道具卡 id（`kind === "prop"` 逐字命中；加成欄位，不入 `QC_REQUIRED_FIELDS`）。 */
+  propCardIds?: string[];
   keyframeId?: string;
   lastFrameId?: string;
   audioAnchorId?: string;
   aspectRatio?: string;
+  /**
+   * 本鏡的分鏡確認狀態（決策 24：分鏡審查面板的載體，**與資產側同一個 shape**）。
+   * 缺省＝已批准（決策 23 存量相容）；只在呼叫端供給時出現（不補默認值）。
+   * **不在 `QC_REQUIRED_FIELDS` 內**：門檻欄位清單一個字不加（加了＝全鏡次多一項 missing）。
+   */
+  approval?: ApprovalState;
 }
 
 export interface StoryboardQcBridgeResult {
@@ -255,6 +284,16 @@ export interface StoryboardQcBridgeResult {
   complete: boolean;
 }
 
+/**
+ * 「缺了就列進 `missing`」的**門檻欄位**清單（門檻語義 = 缺 → `missing` → 門禁 block）。
+ *
+ * **刻意不含 `propCardIds`（2026-09-24 裁定，勿加）**：`missing` 會讓 `storyboard_qc_17`
+ * 門禁把該鏡 block。現存所有鏡次都沒有 `propCardIds`，一旦把道具卡列為門檻欄位，
+ * **全部鏡次會瞬間多一項 missing**（門禁分數從 11/17 起直接再掉）＝純回歸，不是新能力。
+ * 道具卡是**加成欄位**：它照樣出現在 `StoryboardQcShot` 輸出上（與
+ * `characterCardIds`/`sceneCardIds` 同構）、照樣有 `unresolvedProps` 誠實回報未命中的道具名，
+ * 但**不參與** `missing` / `complete` 的判定——有則更好，無則不罰。
+ */
 const QC_REQUIRED_FIELDS = [
   "sceneId",
   "durationSeconds",
@@ -295,6 +334,18 @@ function usableCardIds(v: unknown): string[] {
 }
 
 /**
+ * `usableCardIds` + 去重（清洗規則**完全復用**，只多一步「同一來源內重複 id 只留一份」）。
+ * 為何要一致：①②④ 的名稱解析路徑（`resolveReferenceAssetsToCardIds`）與
+ * `storyboardQcContextFromProject` 的節點累積本來就 `!ids.includes(id)` 去重；
+ * ⑤ 若不去重，同一批 id 會在 `fields` 裡長成 `["a","a"]`（審計跡與輸出無謂膨脹）。
+ */
+function uniqueCardIds(v: unknown): string[] {
+  const out: string[] = [];
+  for (const id of usableCardIds(v)) if (!out.includes(id)) out.push(id);
+  return out;
+}
+
+/**
  * 21 欄分鏡 → 門禁輸入。只做**欄名映射**，不製造 21 欄裡不存在的值：
  *   - `shotId` ← `shotNumber`（無則 `S{序}`）、`order` ← 陣列序（門禁 `shot_order` 要求 1..N 連續）
  *   - `prompt` ← `production.prompt` ?? `visualDescription`
@@ -330,10 +381,13 @@ function storyboardQcShotsWith(
         : {}),
       characterCardIds: usableCardIds(p.characterCardIds),
       sceneCardIds: usableCardIds(p.sceneCardIds),
+      propCardIds: usableCardIds(p.propCardIds),
       ...(isNonBlankString(p.keyframeId) ? { keyframeId: p.keyframeId.trim() } : {}),
       ...(isNonBlankString(p.lastFrameId) ? { lastFrameId: p.lastFrameId.trim() } : {}),
       ...(isNonBlankString(p.audioAnchorId) ? { audioAnchorId: p.audioAnchorId.trim() } : {}),
       ...(isNonBlankString(p.aspectRatio) ? { aspectRatio: p.aspectRatio.trim() } : {}),
+      // 分鏡確認狀態：呼叫端供給才帶（未供給＝缺省＝已批准，不補默認值 → 既有輸出鍵逐位不變）。
+      ...(p.approval ? { approval: p.approval } : {}),
     } satisfies StoryboardQcShot;
   });
   const missingList = [...missing];
@@ -357,6 +411,12 @@ export interface StoryboardQcCardRef {
    * 只在 `options.scope` 給了上下文時生效；未給＝既有行為逐位不變（零回歸）。
    */
   scope?: AssetScope;
+  /**
+   * 資產批准狀態（2026-09-24，**與 `CharacterCard.approval` 同一個 shape**，
+   * 型別真源在 `./character-cards`）。缺省＝已批准（決策 23）。
+   * 只在協作檔當門檻（見 `filterApprovedShotCardIds`）。
+   */
+  approval?: ApprovalState;
 }
 
 /**
@@ -372,7 +432,24 @@ export interface StoryboardQcScopeContext {
 }
 
 /** 每鏡每欄的**值來源**（合法推導的可審計痕跡；缺者不在表內，改進 `missing`）。 */
-export type StoryboardQcFieldSource = "production" | "referenceAssets" | "nodeSize";
+export type StoryboardQcFieldSource = "production" | "referenceAssets" | "nodeSize" | "nodeMetadata";
+
+/**
+ * 分鏡節點 metadata 的最小形（**結構相容 `CanvasNodeMetadata`，不 import**）。
+ * 為何不 import `canvas/types.ts`：該檔已 type-only import 本檔（`types.ts:19`），反向 import
+ * 會成環；本檔維持「純常數 + 純函式、零依賴」（同 `StoryboardQcCardRef` / `StoryboardQcNodeRef` 範式）。
+ *
+ * `size` 語義不變（canvas 的 `size` 就是交付比例，見 ③ 條推導）。三個卡 id 欄（2026-09-24 新增）
+ * 的真源是 agent 自動落卡後回填進節點 metadata 的引用——**粗（可能把該模板產出的卡全填上）**，
+ * 因此推導優先序刻意排在 `referenceAssets`（編劇逐字指名）之後。
+ */
+export interface StoryboardQcShotNodeMetadata {
+  size?: unknown;
+  /** 本鏡引用的實體卡 id（canvas 節點 metadata；真源見 `CanvasNodeMetadata`）。 */
+  characterCardIds?: unknown;
+  sceneCardIds?: unknown;
+  propCardIds?: unknown;
+}
 
 /**
  * 推導上下文。**每個欄位只在有真實來源時才生成**，缺者一律留在 `missing`（不補默認值）。
@@ -380,16 +457,24 @@ export type StoryboardQcFieldSource = "production" | "referenceAssets" | "nodeSi
  * - `production`：呼叫端已有的成片階段欄位（最高優先，覆蓋一切推導）
  * - `cards`：卡實體清單（唯一真源 = `character-card-store.listCharacterCards`，
  *   `src/lib/character-card-store.ts:122`）。**只用於名稱→id 解析**，不背書卡的存在性判定
- * - `shotMetadata`：每鏡節點 metadata（鍵 = `shotNumber`）。目前只用 `size` 一欄推 `aspectRatio`
+ * - `shotMetadata`：每鏡節點 metadata（鍵 = `shotNumber`）。用兩族欄位：
+ *   `size` 一欄推 `aspectRatio`（③）；`characterCardIds`/`sceneCardIds`/`propCardIds` 三欄推
+ *   同名成片欄位（⑤，**只在 `production` 與 `referenceAssets` 都沒供給時才生效**）
  * - `locked*CardIds`：專案級鎖定卡（真源 = `CanvasProject.cardIds`，`src/lib/canvas/types.ts:356`）
  */
 export interface StoryboardQcContext {
   production?: Readonly<Record<string, StoryboardQcProductionFields>>;
   cards?: readonly StoryboardQcCardRef[];
-  shotMetadata?: Readonly<Record<string, { size?: unknown }>>;
+  shotMetadata?: Readonly<Record<string, StoryboardQcShotNodeMetadata>>;
   lockedCharacterCardIds?: readonly string[];
   lockedSceneCardIds?: readonly string[];
   segmentDurationSeconds?: number;
+  /**
+   * 互動檔位（型別真源 = `AgentInteractionMode`，`src/lib/agent-chat-client.ts:749`）。
+   * **只有 `"collaborate"` 會讓批准閘（第 ⑥ 條）生效**；未給 = `preset`/`auto` 待遇 =
+   * 既有行為逐位不變（決策 2：全自動檔零改動、不停不阻塞＝護城河）。
+   */
+  mode?: AgentInteractionMode;
 }
 
 /** ratio 形狀（`9:16`）。**只認已顯式是比例的欄位**，不把像素尺寸換算成比例（見 `productionFieldsFromContext` 註）。 */
@@ -401,10 +486,13 @@ const RATIO_SHAPE = /^\d+:\d+$/;
  * 為何排除而非取首個：`CharacterCard.name` 沒有唯一性約束（`character-cards.ts:85` 只驗非空與長度），
  * 撞名時任取一個就是**猜**——寧可回報未解析（該鏡進 `missing`），也不把兩張卡混為一談。
  * 名稱比對用 trim 後逐字相等（不做大小寫/前綴模糊匹配：模糊匹配會把不同卡黏在一起）。
+ * `prop` 表**沿用完全同一套規則**（同 kind 逐字命中、同名同 kind 歧義整批排除），
+ * 不為道具另立規則；`style` 卡不進任何表（風格不是道具）。
  */
 export function indexCardsByName(cards: readonly StoryboardQcCardRef[]): {
   character: Map<string, string>;
   scene: Map<string, string>;
+  prop: Map<string, string>;
 } {
   const seen = new Map<string, { id: string; duplicated: boolean }>();
   for (const card of cards) {
@@ -419,13 +507,16 @@ export function indexCardsByName(cards: readonly StoryboardQcCardRef[]): {
   }
   const character = new Map<string, string>();
   const scene = new Map<string, string>();
+  const prop = new Map<string, string>();
   for (const [key, entry] of seen) {
     if (entry.duplicated) continue;
     const [kind, name] = key.split("\u0000");
     if (kind === "character") character.set(name, entry.id);
     else if (kind === "scene") scene.set(name, entry.id);
+    else if (kind === "prop") prop.set(name, entry.id);
+    // 其餘 kind（含 "style"）不進任何表：風格卡不是道具、也不屬門禁兩集。
   }
-  return { character, scene };
+  return { character, scene, prop };
 }
 
 /**
@@ -433,10 +524,15 @@ export function indexCardsByName(cards: readonly StoryboardQcCardRef[]): {
  *
  * 語義邊界（誠實標記）：AID 的 `referenceAssets` 名稱取自**資產庫**（`storyboard-contract.ts`
  * 契約註：名稱取自資產庫、未命中者 AID 後端剔除），本站資產庫有兩族：
- *   - `CharacterCard`（`kind: "character"|"scene"`，`character-cards.ts:33-35`）→ 可解析成卡 id
+ *   - `CharacterCard`（`kind: "character"|"scene"|"prop"`）→ 可解析成卡 id
  *   - 資產包/歷史資產條目（`node-to-asset-items.ts`）→ **沒有卡 id**，解析不到（留在 unsolved）
  * 故：解析失敗 = 名稱不存在於卡清單，或該名稱屬資產包另一族，或同名歧義 —— 三種都**不臆造 id**。
- * `prop` 段在本站沒有對應欄位（門禁 Shot 無 propCardIds）→ 原樣回報於 `unresolvedProps`，不靜默丟棄。
+ *
+ * **三段的 `unresolved*` 語義現在一致**（2026-09-24 統一）：「真的沒命中」的名稱清單——
+ * 名稱在卡清單裡找不到（含同名歧義、kind 不符）才進這裡。舊版 `unresolvedProps` 是
+ * 「本站沒有對應欄位」的原樣回報（`propCardIds` 不存在於門禁 Shot），道具卡走完解析鏈後
+ * 該語義已失效：`prop` 段現在與角色/場景段**逐字同一條解析規則**（`kind === "prop"` 命中
+ * `indexCardsByName` 的 prop 表 → 卡 id；未命中 → `unresolvedProps`）。
  */
 export function resolveReferenceAssetsToCardIds(
   referenceAssets: string,
@@ -444,6 +540,7 @@ export function resolveReferenceAssetsToCardIds(
 ): {
   characterCardIds: string[];
   sceneCardIds: string[];
+  propCardIds: string[];
   unresolvedCharacters: string[];
   unresolvedScenes: string[];
   unresolvedProps: string[];
@@ -462,13 +559,51 @@ export function resolveReferenceAssetsToCardIds(
   };
   const character = resolve(parsed.character, index.character);
   const scene = resolve(parsed.scene, index.scene);
+  const prop = resolve(parsed.prop, index.prop);
   return {
     characterCardIds: character.ids,
     sceneCardIds: scene.ids,
+    propCardIds: prop.ids,
     unresolvedCharacters: character.unresolved,
     unresolvedScenes: scene.unresolved,
-    unresolvedProps: parsed.prop,
+    unresolvedProps: prop.unresolved,
   };
+}
+
+// ─────────────────────────────────────────── 資產批准閘（檔位相關，2026-09-24）
+
+/** 分鏡的三條卡引用欄（鍵名 = `storyboard_qc_17` 門禁欄名；本檔唯一清單，勿另立）。 */
+const SHOT_CARD_ID_FIELDS = ["characterCardIds", "sceneCardIds", "propCardIds"] as const;
+
+/**
+ * 卡 id 過批准閘（純函式；**只有協作檔會擋**——護城河寫在函式體內，不靠呼叫端自律）。
+ *
+ * 規則（決策 2/23）：
+ *   - `mode !== "collaborate"`（含 `preset`/`auto`/**未給 mode**）→ **原樣回傳**：
+ *     順序與重複項逐位不變（全自動檔零改動、既有呼叫端零漂移）。
+ *   - `mode === "collaborate"` → 逐 id 問 `isAssetApproved`（判定單一真源在 `./character-cards`）：
+ *     顯式 `pending`/`rejected` 的卡 id 剔除；缺 `approval` 的卡（＝已批准）保留。
+ *   - **卡清單裡查不到的 id → 保留**：查不到 ≠ 未批准，不猜（與 `unresolvedCardIds` 同一條界線）。
+ *   - 同 id 多筆卡且其中有未批准者 → **擋**（不能證明已批准的，不當已批准處理）。
+ *
+ * 呼叫端＝寫入/消費分鏡卡引用欄的人（分鏡審查面板、`productionFieldsFromContext` 第 ⑥ 條）。
+ * 本函式**只做判定**：不做 UI 觸發、不改 gateway、不動扣費。
+ */
+export function filterApprovedShotCardIds(
+  ids: readonly string[] | undefined,
+  cards: readonly StoryboardQcCardRef[],
+  mode?: AgentInteractionMode,
+): string[] {
+  const list = Array.isArray(ids) ? ids : [];
+  if (mode !== "collaborate") return [...list];
+  const unapproved = new Set<string>();
+  for (const card of cards ?? []) {
+    if (!card || typeof card.id !== "string") continue;
+    const id = card.id.trim();
+    if (!id) continue;
+    if (!isAssetApproved(card.approval, mode)) unapproved.add(id);
+  }
+  return list.filter((id) => typeof id === "string" && !unapproved.has(id.trim()));
 }
 
 export interface StoryboardQcContextFields {
@@ -476,17 +611,34 @@ export interface StoryboardQcContextFields {
   fields: Record<string, StoryboardQcProductionFields>;
   /** 鍵 = `shotNumber` → 欄位 → 值來源（審計跡；無來源欄位不出現，改進 `missing`）。 */
   sources: Record<string, Record<string, StoryboardQcFieldSource>>;
+  /**
+   * 鍵 = `shotNumber` → 被批准閘擋下的卡 id（**只在協作檔且真的有擋到時出現**）。
+   * 為何要回報：被擋下的 id 不進 `fields`（連帶該欄進 `missing`），若不同時回報，
+   * 呼叫端只看到「憑空少了一張卡」＝無法解釋，正是本閘要修的「不明不白」病灶。
+   */
+  blockedCardIdsByShot?: Record<string, string[]>;
 }
 
 /**
  * 上下文 → 成片階段欄位（純函數，唯一推導入口——**不用隱式魔法、不改任何既有函數語義**）。
  *
- * 目前**只有三條**推導成立（每條都有來源，逐條列在回報）：
+ * 目前**只有五條**推導成立（每條都有來源，逐條列在回報）：
  *   1. `characterCardIds` ← `referenceAssets` 的 `角色:[…]` 名稱 → 卡 id（`kind==="character"` 逐字命中）
  *   2. `sceneCardIds` ← `referenceAssets` 的 `场景:[…]` 名稱 → 卡 id（`kind==="scene"` 逐字命中）
  *   3. `aspectRatio` ← 該鏡節點 `metadata.size`（canvas 的 `size` **就是比例**：
  *      `src/app/api/canvas/generate/route.ts:133` `const aspectRatio = body.size ?? "1:1"`；
- *      可選值域見 `src/components/canvas/CanvasNodePromptPanel.tsx:65-71`）
+ *      可選值域見 `src/components/canvas/CanvasNodePromptPanel.tsx:96-102`）
+ *   4. `propCardIds` ← `referenceAssets` 的 `道具:[…]` 名稱 → 卡 id（`kind==="prop"` 逐字命中，
+ *      2026-09-24 新增）。**加成欄位**：推導不到不進 `missing`（`QC_REQUIRED_FIELDS` 刻意不含它，
+ *      否則全部既有鏡次瞬間多一項 missing＝門禁回歸）。`kind==="style"` 的卡不進 prop 表。
+ *   5. `characterCardIds`/`sceneCardIds`/`propCardIds` ← 該鏡節點 `metadata` 的同名卡 id 三欄
+ *      （2026-09-24 新增；來源 = agent 自動落卡後回填，閉環的消費端）。
+ *
+ * **推導優先序（照抄，勿改）**：`production`（呼叫端供給） > `referenceAssets`（①②④）
+ * > 節點 metadata（⑤）。理由：`referenceAssets` 是**編劇階段逐字寫下的意圖**（名稱級、有明確
+ * 指名）；節點 metadata 的卡 id 多半是**機器自動落卡後回填**（粗：可能把該模板產出的卡全填上）。
+ * 若讓 metadata 優先，會用「機器猜的較大集合」蓋掉「編劇明確指名的較小集合」。
+ * 實作上 ①②④ 的 `if (!out.x …)` 寫法保證「已供給者不被覆蓋」，⑤ 再對同一條件做第二次檢查。
  *
  * **刻意不做的推導（附理由，避免下游誤以為漏做）**：
  *   - `durationSeconds`：本 repo 有兩把尺但**互相衝突**且**輸入契約不同**——
@@ -508,6 +660,7 @@ export function productionFieldsFromContext(
 ): StoryboardQcContextFields {
   const fields: Record<string, StoryboardQcProductionFields> = {};
   const sources: Record<string, Record<string, StoryboardQcFieldSource>> = {};
+  const blockedByShot: Record<string, string[]> = {};
   const cards = context?.cards ?? [];
   for (const shot of shots) {
     const key = shot.shotNumber;
@@ -519,6 +672,9 @@ export function productionFieldsFromContext(
       if (supplied[field] !== undefined) src[field] = "production";
     }
     if (supplied.prompt) src.prompt = "production";
+    // `propCardIds` 不在 `QC_REQUIRED_FIELDS`（加成欄位，見該常數註），故上面的迴圈不會標它；
+    // 呼叫端有供給時補記來源（與 `prompt` 同一範式），否則它在審計跡裡會是「有值卻無來源」。
+    if (supplied.propCardIds !== undefined) src.propCardIds = "production";
 
     // ① / ② referenceAssets 名稱 → 卡 id（僅在呼叫端未供給時才推導；已供給者不被覆蓋）
     const resolved = resolveReferenceAssetsToCardIds(shot.referenceAssets, cards);
@@ -538,10 +694,71 @@ export function productionFieldsFromContext(
       src.aspectRatio = "nodeSize";
     }
 
+    // ④ referenceAssets 道具名稱 → propCardIds（僅在呼叫端未供給時才推導）
+    // 加成欄位：推導不到不進 missing（`QC_REQUIRED_FIELDS` 刻意不含它），有命中才回報來源。
+    if (!(out.propCardIds && out.propCardIds.length > 0) && resolved.propCardIds.length > 0) {
+      out.propCardIds = resolved.propCardIds;
+      src.propCardIds = "referenceAssets";
+    }
+
+    // ⑤ 分鏡節點 metadata 的卡 id → 三欄（**只在 ①②④ 都沒推導到、且呼叫端未供給時**才生效）
+    // 優先序最低的理由見上方函數註（編劇逐字指名 > 機器自動落卡的較大集合）。
+    // 清洗復用 `usableCardIds`（`uniqueCardIds` = 同規則 + 去重）。
+    const nodeCards = context?.shotMetadata?.[key];
+    if (!(out.characterCardIds && out.characterCardIds.length > 0)) {
+      const ids = uniqueCardIds(nodeCards?.characterCardIds);
+      if (ids.length > 0) {
+        out.characterCardIds = ids;
+        src.characterCardIds = "nodeMetadata";
+      }
+    }
+    if (!(out.sceneCardIds && out.sceneCardIds.length > 0)) {
+      const ids = uniqueCardIds(nodeCards?.sceneCardIds);
+      if (ids.length > 0) {
+        out.sceneCardIds = ids;
+        src.sceneCardIds = "nodeMetadata";
+      }
+    }
+    if (!(out.propCardIds && out.propCardIds.length > 0)) {
+      const ids = uniqueCardIds(nodeCards?.propCardIds);
+      if (ids.length > 0) {
+        out.propCardIds = ids;
+        src.propCardIds = "nodeMetadata";
+      }
+    }
+
+    // ⑥ 資產批准閘（**只在協作檔生效**，決策 2/23）：未批准的卡 id 不得進分鏡卡引用欄。
+    // 未給 mode／preset／auto → 整段跳過（既有行為逐位不變，這是全自動檔的護城河）。
+    // 三條欄一律過（不論值來自 production 還是 ①②④⑤ 推導）：使用者在落卡後才駁回時，
+    // 節點 metadata 裡的舊綁定照樣要被擋——否則「駁回」只是事後貼紙。
+    // 擋到一個都不剩 → **連鍵與來源一起移除**（改進 `missing` 讓門禁如實 block，
+    // 不留 `[]` 這種「有鍵無值」騙門禁的空值；擋下的 id 記進 `blockedCardIdsByShot` 回報）。
+    if (context?.mode === "collaborate") {
+      for (const field of SHOT_CARD_ID_FIELDS) {
+        const before = out[field];
+        if (!before || before.length === 0) continue;
+        const after = filterApprovedShotCardIds(before, cards, context.mode);
+        if (after.length === before.length) continue;
+        const blocked = before.filter((id) => !after.includes(id));
+        if (blocked.length === 0) continue;
+        const list = (blockedByShot[key] ??= []);
+        for (const id of blocked) if (!list.includes(id)) list.push(id);
+        if (after.length > 0) out[field] = after;
+        else {
+          delete out[field];
+          delete src[field];
+        }
+      }
+    }
+
     fields[key] = out;
     sources[key] = src;
   }
-  return { fields, sources };
+  return {
+    fields,
+    sources,
+    ...(Object.keys(blockedByShot).length > 0 ? { blockedCardIdsByShot: blockedByShot } : {}),
+  };
 }
 
 // ─────────────────────────────────────────── 專案上下文 → 橋接上下文（G5 接線）
@@ -558,21 +775,33 @@ export interface StoryboardQcProjectRef {
   nodes?: readonly StoryboardQcNodeRef[];
 }
 
-/** 節點側最小形（結構相容 `CanvasNode`）：只用 `metadata.size` 與鏡號。 */
+/** 節點側最小形（結構相容 `CanvasNode`）：用 `metadata` 的 `size`、卡 id 三欄與鏡號。 */
 export interface StoryboardQcNodeRef {
-  metadata?: { size?: unknown; storyboardShot?: { shotNumber?: unknown } | null } | null;
+  /**
+   * 節點 id（真源 = `CanvasNode.id`）。**只**供 `affectedShotNodesByCardIds` 回報
+   * 「受影響的分鏡節點 id」；缺省/非字串 → 不回報該節點（不臆造 id）。
+   */
+  id?: unknown;
+  metadata?:
+    | (StoryboardQcShotNodeMetadata & { storyboardShot?: { shotNumber?: unknown } | null })
+    | null;
 }
 
 /**
  * 專案上下文 → 橋接上下文（**唯一專案級推導入口，顯式不魔法**）。
  *
- * 目前只有兩條專案級推導成立（每條都有來源）：
+ * 目前只有三條專案級推導成立（每條都有來源）：
  *   1. `lockedCharacterCardIds` / `lockedSceneCardIds` ← `project.cardIds` 按卡 `kind` 分流
- *      （卡實體真源 = `listCharacterCards`，`src/lib/character-card-store.ts:122`；`kind` 值域
- *      `"character"|"scene"|"style"`，`src/lib/character-cards.ts:17`）。
+ *      （卡實體真源 = `listCharacterCards`，`src/lib/character-card-store.ts:122`）。
  *      門禁 `character_lock`/`scene_lock` 要求「每鏡引用的卡都在鎖定集合內」——集合就是專案鎖定卡。
+ *      `kind` 分流只認門禁真有集合的兩族：`style`/`prop`（2026-09-24 起 prop 是真 kind）都
+ *      **靜默略過**（既不進鎖定集合也不算未解析）——門禁 `Shot` 沒有 lockedStyle/lockedProp 這兩集。
  *   2. `shotMetadata[k]` ← `project.nodes` 中 `metadata.size`（供 `productionFieldsFromContext`
  *      推 `aspectRatio`；該欄位是否**真的**已是 ratio 形狀由下游 `RATIO_SHAPE` 把關）。
+ *   3. `shotMetadata[k]` ← `project.nodes` 中 `metadata.characterCardIds`/`sceneCardIds`/
+ *      `propCardIds`（2026-09-24 新增；供 `productionFieldsFromContext` 第 ⑤ 條推導——即
+ *      「agent 自動落卡 → 節點 metadata 宣告 → 門禁消費」閉環的帶入端）。清洗用 `usableCardIds`，
+ *      **空陣列省略該鍵**（不造 `characterCardIds: []` 的空鍵，否則 `src` 審計跡會誤報「有值」）。
  *
  * **刻意不做的推導**：`aspectRatio` 沒有專案級欄位可取（`grep aspectRatio src/lib/canvas/types.ts`
  * 為空——比例只存在於**節點** metadata，不在 `CanvasProject`），故不「從專案繼承」；
@@ -588,6 +817,11 @@ export function storyboardQcContextFromProject(
     cards?: readonly StoryboardQcCardRef[];
     production?: Readonly<Record<string, StoryboardQcProductionFields>>;
     segmentDurationSeconds?: number;
+    /**
+     * 互動檔位（`AgentInteractionMode`）。未給 → 既有行為逐位不變（零回歸）；
+     * 給了 `"collaborate"` → 推導出的分鏡卡引用欄再過一次批准閘（第 ⑥ 條）。
+     */
+    mode?: AgentInteractionMode;
     /**
      * REQ-B2 作用域上下文。未給 → 既有行為逐位不變（零回歸）；
      * 給了 → 卡與 cardIds 先過作用域裁決（不可見即不可用）。
@@ -645,23 +879,47 @@ export function storyboardQcContextFromProject(
       if (!lockedSceneCardIds.includes(id)) lockedSceneCardIds.push(id);
     } else if (kind === "style") {
       // style 卡不屬門禁兩集（`Shot` 無 styleCardIds）→ 既非未解析也非兩者之一，靜默略過
+    } else if (kind === "prop") {
+      // prop 卡同理：門禁 `Shot` 沒有 lockedPropCardIds 這一集（道具是加成欄位，不設鎖），
+      // 故既不入角色/場景鎖定集合，也**不得**被當成「查不到卡實體」而誤進 unresolvedCardIds。
     } else {
       // 查不到卡實體 / id 撞 kind / 非字串 kind → 不猜
       if (!unresolvedCardIds.includes(id)) unresolvedCardIds.push(id);
     }
   }
 
-  const shotMetadata: Record<string, { size?: unknown }> = {};
+  const shotMetadata: Record<string, StoryboardQcShotNodeMetadata> = {};
+  // 卡 id 三欄與 `size` **分開累積**：`size` 是同鏡矛盾就整個不給（比例是單一交付格式，猜不得）；
+  // 卡 id 是**集合**語義（節點宣告「本鏡引用這些卡」），同鏡多節點取聯集去重、不取首個也不丟資訊。
+  const cardsByShot: Record<string, { character: string[]; scene: string[]; prop: string[] }> = {};
   for (const node of project?.nodes ?? []) {
-    const size = node?.metadata?.size;
-    if (size === undefined) continue;
-    const shotNumber = node?.metadata?.storyboardShot?.shotNumber;
+    const meta = node?.metadata;
+    const shotNumber = meta?.storyboardShot?.shotNumber;
     if (!isNonBlankString(shotNumber)) continue; // 無鏡號的節點不歸屬任一鏡（不臆造鍵）
     const key = shotNumber.trim();
+
+    const bucket = (cardsByShot[key] ??= { character: [], scene: [], prop: [] });
+    const collect = (target: string[], raw: unknown) => {
+      for (const id of uniqueCardIds(raw)) if (!target.includes(id)) target.push(id);
+    };
+    collect(bucket.character, meta?.characterCardIds);
+    collect(bucket.scene, meta?.sceneCardIds);
+    collect(bucket.prop, meta?.propCardIds);
+
+    const size = meta?.size;
+    if (size === undefined) continue;
     // 同鏡號多節點：ratio 不一致 → 寧可不給（該鏡 aspectRatio 留 missing），不取首個猜
     const prev = shotMetadata[key];
     if (prev === undefined) shotMetadata[key] = { size };
     else if (prev.size !== size) shotMetadata[key] = {};
+  }
+  // 卡 id 只在真的有值時掛上（空陣列省略該鍵 → 審計跡不誤報「有值」）
+  for (const [key, bucket] of Object.entries(cardsByShot)) {
+    if (bucket.character.length === 0 && bucket.scene.length === 0 && bucket.prop.length === 0) continue;
+    const entry = (shotMetadata[key] ??= {});
+    if (bucket.character.length > 0) entry.characterCardIds = bucket.character;
+    if (bucket.scene.length > 0) entry.sceneCardIds = bucket.scene;
+    if (bucket.prop.length > 0) entry.propCardIds = bucket.prop;
   }
 
   const context: StoryboardQcContext = {
@@ -672,6 +930,7 @@ export function storyboardQcContextFromProject(
     ...(lockedCharacterCardIds.length > 0 ? { lockedCharacterCardIds } : {}),
     ...(lockedSceneCardIds.length > 0 ? { lockedSceneCardIds } : {}),
     ...(typeof options?.segmentDurationSeconds === "number" ? { segmentDurationSeconds: options.segmentDurationSeconds } : {}),
+    ...(options?.mode ? { mode: options.mode } : {}),
   };
   return { context, unresolvedCardIds, outOfScopeCardIds };
 }
@@ -744,4 +1003,45 @@ export function storyboardQcGateArgs(
     complete: shots.length > 0 && missingList.length === 0,
     sources: derived.sources,
   };
+}
+
+// ─────────────────────────────────────────── 重跑影響面（純判定，2026-09-24）
+
+/**
+ * 「某步重跑 → 哪些已完成結果受影響」的**純判定**（決策 15：步驟條可回跳，只重跑後續）。
+ *
+ * 輸入：
+ *   - `nodes`：專案節點（`CanvasProject.nodes`，結構相容 `StoryboardQcNodeRef`）
+ *   - `cardIds`：本輪會重做的卡 id。例：重跑資產步 → 該步節點的卡 id ＝
+ *     `entityCardIdForNode(nodeId)`（`agent-output-cards.ts:154`，決定性推導），
+ *     把這批 id 原樣餵進來即得影響面（**不新建節點→卡的第二套推導**）。
+ * 輸出：
+ *   - `affectedCardIds`：真的被某顆分鏡節點引用到的卡 id（輸入裡沒被引用的不回報）
+ *   - `shotNodeIds`：宣告了這些卡的**分鏡節點** id（`metadata.storyboardShot.shotNumber`
+ *     非空才算分鏡節點；節點無 id／非分鏡節點 → 不回報，不臆造）
+ *
+ * **邊界（誠實標記）**：只認**節點 metadata 三條卡引用欄**宣告的綁定；專案級鎖定集合
+ * （`CanvasProject.cardIds` → 全項目注入）不在此判定內。只回報，不觸發任何重跑/UI/寫入。
+ */
+export function affectedShotNodesByCardIds(
+  nodes: readonly StoryboardQcNodeRef[],
+  cardIds: readonly string[],
+): { affectedCardIds: string[]; shotNodeIds: string[] } {
+  const targets = new Set(uniqueCardIds(cardIds));
+  const affectedCardIds: string[] = [];
+  const shotNodeIds: string[] = [];
+  if (targets.size === 0) return { affectedCardIds, shotNodeIds };
+  for (const node of nodes ?? []) {
+    const meta = node?.metadata;
+    if (!isNonBlankString(meta?.storyboardShot?.shotNumber)) continue;
+    const hits: string[] = [];
+    for (const field of SHOT_CARD_ID_FIELDS) {
+      for (const id of uniqueCardIds(meta?.[field])) if (targets.has(id)) hits.push(id);
+    }
+    if (hits.length === 0) continue;
+    for (const id of hits) if (!affectedCardIds.includes(id)) affectedCardIds.push(id);
+    const nodeId = isNonBlankString(node.id) ? node.id.trim() : "";
+    if (nodeId && !shotNodeIds.includes(nodeId)) shotNodeIds.push(nodeId);
+  }
+  return { affectedCardIds, shotNodeIds };
 }
