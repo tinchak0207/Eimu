@@ -1095,7 +1095,6 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
           elementListOpen={elementListOpen}
           reviewPanel={reviewPanel}
           reviewPendingCount={reviewPendingCount}
-          interactionMode={interactionMode}
           onToggleReview={(panel) => setReviewPanel((prev) => (prev === panel ? null : panel))}
           canvas={canvas}
           viewportSizeRef={viewportSizeRef}

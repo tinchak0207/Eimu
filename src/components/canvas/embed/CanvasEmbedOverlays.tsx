@@ -12,10 +12,8 @@ import { LineageDrawer } from "@/components/lineage/LineageDrawer";
 import { cardToLineageView } from "@/lib/lineage-view";
 import { CHARACTER_CARD_KIND_LABEL } from "@/lib/character-cards";
 import { CreationFlowPanel } from "./CreationFlowPanel";
-import { applyWizardRewind } from "@/lib/wizard-steps";
 import { formatRelative, toDvh } from "./embed-helpers";
 import type { ReviewPanelKind } from "@/components/assets/AssetReviewPanel";
-import type { AgentInteractionMode } from "@/lib/agent-chat-client";
 
 interface CanvasEmbedOverlaysProps {
   /** embed 高度（.ce-embed-root 動態样式）。 */
@@ -44,8 +42,6 @@ interface CanvasEmbedOverlaysProps {
   reviewPanel: ReviewPanelKind | null;
   /** 待批准＋已駁回的總數（入口徽章；0 ＝不顯示徽章）。 */
   reviewPendingCount: number;
-  /** 互動檔位（決策 1/2/13）：只有 collaborate 可回跳/開審查；全自動檔步驟條只讀進度。 */
-  interactionMode: AgentInteractionMode;
   /** 入口開關（同一顆門：已開＝收合，未開＝開該面）。主面＝資產審查。 */
   onToggleReview: (panel: ReviewPanelKind) => void;
   canvas: UseCanvasChatReturn;
@@ -68,7 +64,6 @@ export function CanvasEmbedOverlays({
   elementListOpen,
   reviewPanel,
   reviewPendingCount,
-  interactionMode,
   onToggleReview,
   canvas,
   viewportSizeRef,
@@ -302,10 +297,7 @@ export function CanvasEmbedOverlays({
       )}
 
       {/* G2（2026-09-16）：作品/劇集面板——與角色卡同款左側彈層；資料全部取自
-          hook 既有出口（projectType/currentStep/episodes/nodes），本層零新增狀態。
-          2026-09-24 步驟條接線：面板內的 5 步條不再是一列 inert 進度點——
-          「審查」走路 2 的畫布側同一顆門（`onToggleReview`，詞彙同源不經映射表），
-          「回跳」走 `applyWizardRewind`（與對話區步驟條**同一份**實作，不在此重寫）。 */}
+          hook 既有出口（projectType/currentStep/episodes/nodes），本層零新增狀態。 */}
       {creationFlowOpen && (
         <CreationFlowPanel
           summary={summarizeCreationFlow({
@@ -315,11 +307,6 @@ export function CanvasEmbedOverlays({
             nodes: canvas.nodes,
           })}
           onClose={onCloseCreationFlow}
-          onOpenReview={onToggleReview}
-          onRewind={(plan) => {
-            applyWizardRewind(plan, canvas);
-          }}
-          readOnly={interactionMode !== "collaborate"}
         />
       )}
 

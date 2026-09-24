@@ -4,7 +4,7 @@ import * as React from "react";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 // tsconfig jsx=preserve → classic runtime，SSR 渲染前補全局 React 桩
-// （同 src/lib/wizard-steps.test.ts 的既有寫法）。
+// （同站內其他 SSR 測試的既有寫法）。
 (globalThis as unknown as Record<string, unknown>).React ??= React;
 import { NodeBody } from "./NodeBody";
 import { downstreamInvalidationIds } from "@/hooks/use-canvas-chat";
