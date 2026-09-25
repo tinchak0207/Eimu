@@ -23,6 +23,8 @@ export interface RegistryChannel {
   seedPriority: number;          // seed 進 supplier 表的 priority
   sitePriority: number;          // 站點隊列 ENV_CHANNEL_PRIORITIES 用
   chatImageModels: string[];     // 上游模型名走 /chat/completions 生圖（空 = 全走 images/generations）
+  /** 上游 images/generations 拒收 quality 欄位時置 true（agnes 實錘 2026-09-19：text image queue 只認 model/prompt/size/n）。 */
+  omitQualityBody?: boolean;
   adapterType?: "openai_images" | "metaso" | "openai_video" | "blender_bridge" | "adobe2api"; // 缺省 openai_images；metaso 走自訂協議（見 metaso-upstream.ts），openai_video 走 /v1/videos 異步（見 openai-video-upstream.ts），blender_bridge 走橋 /v1/execute 同步單幀渲染（見 blender-node-upstream.ts），adobe2api 走 firefly-* 映射（見 adobe2api-upstream.ts，含視頻走 /v1/chat/completions）
   claims: RegistryChannelClaim[];
 }
@@ -186,6 +188,56 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
   },
 
 {
+    // napi（napi.wanzij.cn，2026-09-19 接入）：seedance 2.0/2.5 备用视频渠道。
+    // 上游模型 seed-2.0 / seed-2.5（$1/次不按秒计费），覆盖 15s/30s 档（上游
+    // 账号 2026-09-19 时点额度为零，充值前任务会以 insufficient_user_quota 失败，
+    // 由 failure classifier 归类欠费）。协议走 openai-video-upstream 的 NAPI 族
+    // 分支（ratio/seconds/images 字段方言），模型映射由 claims 的 supplierModelId
+    // 渠道级短路，不进 UPSTREAM_MODEL_BY_RESOLUTION 静态表。
+    label: "napi",
+    baseUrlEnv: "NAPI_BASE_URL",
+    apiKeyEnv: "NAPI_API_KEY",
+    enabledEnv: "NAPI_ENABLED",
+    tier: "managed_pool",
+    seedPriority: 11,
+    sitePriority: 11,
+    chatImageModels: [],
+    adapterType: "openai_video",
+    claims: [
+      {
+        modelId: "seedance-2.0",
+        supplierModelId: "seed-2.0",
+        kinds: ["video_generate"],
+      },
+      {
+        modelId: "seedance-2.0-fast",
+        supplierModelId: "seed-2.0",
+        kinds: ["video_generate"],
+      },
+      {
+        modelId: "seedance-2.0-mini",
+        supplierModelId: "seed-2.0",
+        kinds: ["video_generate"],
+      },
+      {
+        modelId: "seedance-2.5-480p",
+        supplierModelId: "seed-2.5",
+        kinds: ["video_generate"],
+      },
+      {
+        modelId: "seedance-2.5-720p",
+        supplierModelId: "seed-2.5",
+        kinds: ["video_generate"],
+      },
+      {
+        modelId: "seedance-2.5-30s",
+        supplierModelId: "seed-2.5",
+        kinds: ["video_generate"],
+      },
+    ],
+  },
+
+{
     // drama 渠道（drama.dafeiyangapi.top，2026-08-30 接入）：只供应 30 秒固定档
     // seedance 2.5（上游模型 sd25-30s，720p，按条 6 RMB）。唯一认领 seedance-2.5-30s，
     // 短时长 seedance 任务不会被路由到这里；上游账号当前欠费（暴君裁定无视，充值前
@@ -237,7 +289,7 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
   // 片X 未落盤（deploy-staging/blender-modal/ 不存在）、CNB 無實體節點——註冊即虛報能力。
   // NODES-PLAN §5：節點 ≥3 且異構＋需要場景檔分發時才評估 Flamenco 3。
 
-  {
+{
     label: "adobe2api-plus",
     baseUrlEnv: "ADOBE2API_PLUS_BASE_URL",
     apiKeyEnv: "ADOBE2API_PLUS_API_KEY",
@@ -265,6 +317,25 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
       { modelId: "kling-3.0-omni", supplierModelId: null, kinds: ["video_generate"] },
       { modelId: "sora-2", supplierModelId: null, kinds: ["video_generate"] },
       { modelId: "gemini-omni", supplierModelId: null, kinds: ["video_generate"] },
+    ],
+  },
+
+  {
+    label: "agnes",
+    baseUrlEnv: "AGNES_BASE_URL",
+    apiKeyEnv: "AGNES_API_KEY",
+    enabledEnv: null,
+    tier: "relay",
+    seedPriority: 30,
+    sitePriority: 25,
+    chatImageModels: [],
+    omitQualityBody: true,
+    claims: [
+      {
+        modelId: "agnes-image-2.5-flash",
+        supplierModelId: null,
+        kinds: ["image_generate"],
+      },
     ],
   },
   // REGISTRY-ENTRIES-END

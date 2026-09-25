@@ -335,6 +335,122 @@ test("drama sd25-30s：duration ≠ 30 直接 400（30 秒固定檔門禁）", a
   }
 });
 
+test("napi seed-2.0：body 帶 ratio/seconds、無 aspect_ratio/resolution/generate_audio、30s 放行", async () => {
+  let captured: Record<string, unknown> | null = null;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+    if (String(url).endsWith("/videos")) {
+      captured = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return jsonResponse(200, { id: TASK_ID, task_id: TASK_ID, model: "seed-2.0", status: "queued" });
+    }
+    return jsonResponse(200, {
+      id: TASK_ID,
+      status: "completed",
+      video_url: "http://172.81.98.24/generated_videos/video_napi.mp4",
+    });
+  }) as typeof fetch;
+
+  try {
+    process.env.NAPI_API_KEY = "sk-napi-test";
+    const output = await generateWithOpenaiVideo(
+      supplier({ id: "env:napi", label: "napi", baseUrl: "https://napi.wanzij.cn/v1", credentialRef: "NAPI_API_KEY", supplierModelId: "seed-2.0" }),
+      videoInput({ modelId: "seedance-2.5-30s", workflow: { references: [], metadata: {}, durationSeconds: 30, generateAudio: true } }),
+    );
+    assert.equal(output.url, "http://172.81.98.24/generated_videos/video_napi.mp4");
+    assert.equal(output.supplierModelId, "seed-2.0");
+    assert.ok(captured);
+    assert.equal(captured.model, "seed-2.0");
+    assert.equal(captured.ratio, "16:9");
+    assert.equal(captured.seconds, "30", "napi seconds 必須是字串（上游 Go struct 拒收數字）");
+    assert.equal(captured.duration, 30);
+    assert.equal("aspect_ratio" in captured, false, "napi 族不帶 aspect_ratio");
+    assert.equal("resolution" in captured, false, "napi 族不帶 resolution");
+    assert.equal("generate_audio" in captured, false, "napi 族不帶 generate_audio");
+  } finally {
+    delete process.env.NAPI_API_KEY;
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("napi seed-2.5：參考圖走 images 陣列、supplierModelId 渠道級短路", async () => {
+  let captured: Record<string, unknown> | null = null;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+    if (String(url).endsWith("/videos")) {
+      captured = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return jsonResponse(200, { id: TASK_ID, task_id: TASK_ID, model: "seed-2.5", status: "queued" });
+    }
+    return jsonResponse(200, {
+      id: TASK_ID,
+      status: "completed",
+      video_url: "http://172.81.98.24/generated_videos/video_napi25.mp4",
+    });
+  }) as typeof fetch;
+
+  try {
+    process.env.NAPI_API_KEY = "sk-napi-test";
+    const output = await generateWithOpenaiVideo(
+      supplier({ id: "env:napi", label: "napi", baseUrl: "https://napi.wanzij.cn/v1", credentialRef: "NAPI_API_KEY", supplierModelId: "seed-2.5" }),
+      videoInput({
+        modelId: "seedance-2.5-720p",
+        workflow: {
+          references: [
+            { role: "general" as const, url: "https://img.example.com/a.png" },
+            { role: "general" as const, url: "https://img.example.com/b.png" },
+          ],
+          metadata: {},
+          durationSeconds: 15,
+          generateAudio: false,
+        },
+      }),
+    );
+    assert.equal(output.supplierModelId, "seed-2.5");
+    assert.ok(captured);
+    assert.equal(captured.model, "seed-2.5");
+    assert.deepEqual(captured.images, ["https://img.example.com/a.png", "https://img.example.com/b.png"]);
+    assert.equal("reference_image_urls" in captured, false, "napi 參考圖欄位是 images");
+  } finally {
+    delete process.env.NAPI_API_KEY;
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("napi：completed 無公網 URL 時走 /content 鑑權下載回 base64", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+    const u = String(url);
+    if (u.endsWith("/videos")) {
+      return jsonResponse(200, { id: TASK_ID, task_id: TASK_ID, model: "seed-2.0", status: "queued" });
+    }
+    if (u.endsWith(`/videos/${TASK_ID}`)) {
+      return jsonResponse(200, { id: TASK_ID, status: "completed", url: null, error: null });
+    }
+    if (u.endsWith(`/videos/${TASK_ID}/content`)) {
+      const auth = (init?.headers as Record<string, string>)?.Authorization ?? "";
+      assert.equal(auth, "Bearer sk-napi-test", "content 下載必須帶 Bearer 鑑權");
+      return new Response(new Uint8Array([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70]), {
+        status: 200,
+        headers: { "Content-Type": "video/mp4" },
+      });
+    }
+    return jsonResponse(404, { error: { message: "not found" } });
+  }) as typeof fetch;
+
+  try {
+    process.env.NAPI_API_KEY = "sk-napi-test";
+    const output = await generateWithOpenaiVideo(
+      supplier({ id: "env:napi", label: "napi", baseUrl: "https://napi.wanzij.cn/v1", credentialRef: "NAPI_API_KEY", supplierModelId: "seed-2.0" }),
+      videoInput({ modelId: "seedance-2.0", workflow: { references: [], metadata: {}, durationSeconds: 15, generateAudio: false } }),
+    );
+    assert.equal(output.url, null);
+    assert.ok(output.base64 && output.base64.length > 0, "應回傳 base64 成品");
+    assert.equal(output.providerTaskId, TASK_ID);
+  } finally {
+    delete process.env.NAPI_API_KEY;
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("drama sd25-30s：completed 無 URL 時走 /content 鑑權下載回 base64", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {

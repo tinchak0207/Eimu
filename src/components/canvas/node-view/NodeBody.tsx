@@ -7,11 +7,14 @@
 // （不引入 context，避免 memo 失效）。
 
 import { useCallback, useEffect, useState } from "react";
-import { RefreshCw, Image as ImageIcon, ArrowRight, CornerDownRight, Wrench, ShieldCheck, Package, AlertTriangle, Clapperboard } from "lucide-react";
-import { CanvasNodeType, errorDetailsText, type CanvasNode, type CanvasNodeStatus } from "@/lib/canvas/types";
+import { RefreshCw, Image as ImageIcon, ArrowRight, CornerDownRight, Wrench, ShieldCheck, Lightbulb, Package, AlertTriangle, Clapperboard } from "lucide-react";
+import { CanvasNodeType, errorDetailsText, type CanvasNode, type CanvasNodeGateConfirm, type CanvasNodeStatus } from "@/lib/canvas/types";
 import { svgToDataUrl } from "@/lib/svg-data-url";
 import { DirectorMiniViewport } from "@/components/director-mini/DirectorMiniViewport";
+import { buildAuthHeaders } from "../embed/embed-helpers";
 import { Scene3dCardBody } from "./Scene3dCardBody";
+import { EntityText } from "@/components/entities/entity-chip";
+import { StoryboardSceneBody, StoryboardShotBody } from "./StoryboardShotBody";
 import { STATUS_LABEL } from "./constants";
 
 function isUrl(value: string): boolean {
@@ -59,6 +62,88 @@ function renderBrokenImage(onRetry: () => void): React.ReactNode {
 function formatProgress(progress: number): string {
   const pct = progress <= 1 ? Math.round(progress * 100) : Math.round(progress);
   return `${pct}%`;
+}
+
+/**
+ * 門禁卡裁決（2026-09-24 協作確認閘）：網關在協作檔的三個停點把 pending confirm
+ * 回寫到卡上（metadata.gateConfirm），這裡讓用戶在畫布上直接批准/退回——不必再回
+ * 對話裡找確認卡。裁決走**既有**站點轉發 /api/agent/sessions/{id}/confirm
+ *（與對話確認卡同一條網關鏈路：settleConfirm → 續跑），不另開通路、不新增後端。
+ * 卡面狀態真值＝metadata.gateConfirm.status（網關回寫）；本地只在送出期間鎖按鈕，
+ * 成功後維持鎖定、等網關回寫翻面——前端不搶先宣稱「已批准」（同 AgentConfirmCard
+ * 的鎖定語義：沒收到 confirm.resolved 前不算數）。
+ */
+function GateConfirmActions({ confirm }: { confirm: CanvasNodeGateConfirm }) {
+  const [busy, setBusy] = useState<false | "approve" | "reject">(false);
+  const [error, setError] = useState("");
+
+  const decide = useCallback(
+    async (approved: boolean) => {
+      setBusy(approved ? "approve" : "reject");
+      setError("");
+      try {
+        const res = await fetch(`/api/agent/sessions/${encodeURIComponent(confirm.session_id)}/confirm`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...(buildAuthHeaders() ?? {}) },
+          body: JSON.stringify({ request_id: confirm.request_id, approved }),
+        });
+        if (!res.ok) {
+          // 失敗如實說，不假裝已裁決（已處理過的同一筆會回「已處理過」——也是真話）。
+          const body = (await res.json().catch(() => null)) as { error?: unknown } | null;
+          setError(typeof body?.error === "string" && body.error ? body.error : "提交失败，请到对话里确认");
+          setBusy(false);
+        }
+      } catch {
+        setError("提交失败，请到对话里确认");
+        setBusy(false);
+      }
+    },
+    [confirm.session_id, confirm.request_id],
+  );
+
+  if (confirm.status !== "pending") {
+    return (
+      <p className="break-words text-ios-caption1 leading-relaxed text-muted-foreground">
+        {confirm.status === "approved" ? "已批准 · 系统已从断点续跑" : "已退回 · 请在对话里说明要改哪里"}
+      </p>
+    );
+  }
+
+  const locked = busy !== false;
+  return (
+    <div className="space-y-1.5">
+      <p className="text-ios-caption2 leading-relaxed text-ios-orange">
+        协作模式：这一步等你确认，确认后系统自动从断点续跑
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          data-canvas-interactive
+          disabled={locked}
+          onClick={(e) => {
+            e.stopPropagation();
+            void decide(true);
+          }}
+          className="rounded-full bg-primary px-3 py-1 text-[12.5px] font-medium text-primary-foreground transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {busy === "approve" ? "已提交…" : "批准 · 继续"}
+        </button>
+        <button
+          type="button"
+          data-canvas-interactive
+          disabled={locked}
+          onClick={(e) => {
+            e.stopPropagation();
+            void decide(false);
+          }}
+          className="rounded-full bg-black/5 px-3 py-1 text-[12.5px] font-medium text-muted-foreground transition-colors hover:bg-black/10 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {busy === "reject" ? "已提交…" : "退回 · 要改"}
+        </button>
+      </div>
+      {error ? <p className="break-words text-ios-caption2 leading-relaxed text-destructive">{error}</p> : null}
+    </div>
+  );
 }
 
 export interface NodeBodyProps {
@@ -226,6 +311,23 @@ export function NodeBody({
         />
       );
     }
+    // 分鏡實體（2026-09-16 G3 消費端）：`storyboardShot` 是欄位族專用標記（同 sceneCard/
+    // director 的處置）。**位置在批次收起封面之後、type 分發之前**，兩個理由：
+    //   ①資料形狀由 metadata 決定，不由節點型別決定——契約檔（storyboard-contract.ts:13）只說
+    //     「子節點 = 一鏡」，未約束其 type；agent 經 canvas_apply_ops 寫入時 type 可以是
+    //     text/image/group 任一，綁 type 分支必漏渲染。
+    //   ②放在批次封面早退之後 → 既有批次節點（batchPrimaryImageUrl + 收起）行為零改動。
+    // 快照壓縮與讀取白名單已在刀 2 同步，本處只補渲染端（禁動雙白名單）。
+    if (metadata?.storyboardShot) {
+      return (
+        <StoryboardShotBody
+          node={node}
+          onScrollAreaPointerDown={onScrollAreaPointerDown}
+          onScrollAreaPointerMove={onScrollAreaPointerMove}
+          onScrollAreaPointerEnd={onScrollAreaPointerEnd}
+        />
+      );
+    }
     switch (node.type) {
       case CanvasNodeType.Image:
       case CanvasNodeType.Reference:
@@ -308,7 +410,7 @@ export function NodeBody({
               </span>
             )}
             {description.trim() ? (
-              <p className="whitespace-pre-wrap break-words text-[13.5px] leading-relaxed text-muted-foreground">{description}</p>
+              <p className="whitespace-pre-wrap break-words text-[13.5px] leading-relaxed text-muted-foreground"><EntityText text={description} /></p>
             ) : (
               <span className="text-ios-caption1 text-muted-foreground">（未填写描述）</span>
             )}
@@ -338,6 +440,8 @@ export function NodeBody({
             : isPipelineGenCard && node.type === CanvasNodeType.Text
               ? "等待 agent 回填产出"
               : "（未填写内容，双击编辑）";
+        // 後端骨架 text 節點（如「镜头 1 脚本」）也會帶產出合同：複用步驟頭卡膠囊樣式。
+        const deliverableText = metadata?.deliverable?.trim();
         // A11：雙擊直編。textarea 蓋滿正文區，blur/Ctrl+Enter 提交、Esc 取消。
         if (editingText !== null) {
           return (
@@ -368,8 +472,10 @@ export function NodeBody({
         }
         // 流水線結構卡（agent-template-canvas 鋪的）：走 Liquid Glass 分層正文
         // （eyebrow 小标 + 正文 + 语义色胶囊 + Lucide 图标），不再纯文本堆行。
+        // note（配方卡，後端 derived notes）：正文 = content 多行配方文本，
+        // 無 toolId/IO 行——與 tool/gate 卡同族分層樣式。
         const pipelineCard = metadata?.pipelineCard;
-        if (pipelineCard === "tool" || pipelineCard === "gate") {
+        if (pipelineCard === "tool" || pipelineCard === "gate" || pipelineCard === "note") {
           return (
             <div
               onPointerDown={onScrollAreaPointerDown}
@@ -411,13 +517,26 @@ export function NodeBody({
                     </div>
                   )}
                 </>
-              ) : (
+              ) : pipelineCard === "gate" ? (
                 <>
                   <div className="flex items-center gap-1.5">
                     <ShieldCheck className="h-3 w-3 shrink-0 text-ios-orange" aria-hidden="true" />
                     <span className="text-[11px] font-medium uppercase leading-none tracking-[0.18em] text-muted-foreground/70">验收条件</span>
                   </div>
-                  <p className="break-words text-[13px] leading-relaxed text-foreground">{text}</p>
+                  <p className="break-words text-[13px] leading-relaxed text-foreground"><EntityText text={text ?? ""} /></p>
+                  {metadata?.gateConfirm && <GateConfirmActions confirm={metadata.gateConfirm} />}
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center gap-1.5">
+                    <Lightbulb className="h-3 w-3 shrink-0 text-[#B96A00]" aria-hidden="true" />
+                    <span className="text-[11px] font-medium uppercase leading-none tracking-[0.18em] text-muted-foreground/70">配方</span>
+                  </div>
+                  {text?.trim() ? (
+                    <p className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-foreground"><EntityText text={text} /></p>
+                  ) : (
+                    <span className="text-ios-caption1 text-muted-foreground">（未填写配方）</span>
+                  )}
                 </>
               )}
             </div>
@@ -438,8 +557,21 @@ export function NodeBody({
             className="canvas-node-scroll touch-pan-y overscroll-contain overflow-auto whitespace-pre-wrap break-words p-3 leading-relaxed text-foreground"
             style={{ fontSize }}
           >
-            {text?.trim() ? (
-              text
+            {deliverableText ? (
+              <>
+                <span className="inline-flex items-center gap-1 rounded-full bg-[rgba(52,199,89,0.12)] px-2 py-0.5 text-[11.5px] font-medium leading-none text-[#248A3D]">
+                  <Package className="h-3 w-3" aria-hidden="true" />
+                  产出
+                </span>
+                <p className="mt-1.5 break-words text-[13px] leading-relaxed text-foreground">{deliverableText}</p>
+                {text?.trim() ? (
+                  <p className="mt-1.5 whitespace-pre-wrap break-words"><EntityText text={text} /></p>
+                ) : (
+                  <span className="mt-1.5 block text-ios-caption1 text-muted-foreground">{emptyHint}</span>
+                )}
+              </>
+            ) : text?.trim() ? (
+              <EntityText text={text} />
             ) : (
               <span className="text-ios-caption1 text-muted-foreground">{emptyHint}</span>
             )}
@@ -457,10 +589,19 @@ export function NodeBody({
         // content 文本（模板步骤头卡的「产出：」合同）与结构化行可并存；
         // 只有 content 也照常渲染——空配置才落骨架。
         const content = metadata?.content?.trim() ?? "";
+        // 後端 workflow 骨架節點的產出合同/驗收門禁（SSE 放行，2026-09-20）：
+        // 複用步驟頭卡的膠囊樣式（Package 綠膠囊 + 全文），門禁走灰小字行。
+        const deliverableText = metadata?.deliverable?.trim();
+        // gate 兩種形態（types.ts 註解）：string = 後端骨架門禁全文；boolean true =
+        // workflow-dsl 的「需人工批准」旗標（compile.ts md.gate = true），顯示通用文案。
+        const gateText =
+          typeof metadata?.gate === "string" ? metadata.gate.trim() : metadata?.gate === true ? "此步骤需要人工批准后才继续" : undefined;
         // 流水線步驟頭卡（agent-template-canvas 鋪的）：Liquid Glass 分層正文
         // ——「产出」green tint 胶囊（Package 图标）+ deliverable 全文 + 输入来源行。
-        if (metadata?.pipelineCard === "step_head") {
-          const deliverable = metadata.deliverable?.trim() || content.replace(/^产出：/, "");
+        // 後端骨架 Config 節點帶 metadata.deliverable/gate（2026-09-20 SSE 放行）時
+        // 走同一分層（膠囊樣式逐行複用），不另造卡型。
+        if (metadata?.pipelineCard === "step_head" || deliverableText || gateText) {
+          const deliverable = deliverableText || (metadata?.content ?? "").replace(/^产出：/, "");
           return (
             <div
               onPointerDown={onScrollAreaPointerDown}
@@ -478,7 +619,7 @@ export function NodeBody({
               ) : (
                 <span className="text-ios-caption1 text-muted-foreground">（未定义产出合同）</span>
               )}
-              {metadata.inputFrom && (
+              {metadata?.inputFrom && (
                 <div className="flex items-start gap-1.5">
                   <CornerDownRight className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground/60" aria-hidden="true" />
                   <p className="min-w-0 break-words text-[13px] leading-snug text-muted-foreground">
@@ -486,6 +627,12 @@ export function NodeBody({
                     <span className="ml-1.5">{metadata.inputFrom}</span>
                   </p>
                 </div>
+              )}
+              {gateText && (
+                <p className="break-words text-ios-caption1 leading-relaxed text-muted-foreground">
+                  <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground/70">门禁</span>
+                  <span className="ml-1.5">{gateText}</span>
+                </p>
               )}
             </div>
           );
@@ -511,7 +658,7 @@ export function NodeBody({
               </div>
             ))}
             {content && (
-              <p className="whitespace-pre-wrap break-words text-[13.5px] leading-relaxed text-foreground">{content}</p>
+              <p className="whitespace-pre-wrap break-words text-[13.5px] leading-relaxed text-foreground"><EntityText text={content} /></p>
             )}
           </div>
         );
@@ -614,12 +761,26 @@ export function NodeBody({
         // 全部封裝在 Scene3dCardBody（複製 Video 分支輪子），此處只做型別分發。
         return <Scene3dCardBody node={node} />;
       }
-      case CanvasNodeType.Group:
+      case CanvasNodeType.Group: {
+        // 分鏡場景外殼（G3，2026-09-16）：Group 節點帶 metadata.storyboardScene 時，
+        // 正文顯示場景名 + 鏡數（真值在子節點的 storyboardShot，此處只是指針）；
+        // 無此欄位的既有 Group 節點維持原虛線框佔位（行為零改動）。
+        if (metadata?.storyboardScene) {
+          return (
+            <StoryboardSceneBody
+              node={node}
+              onScrollAreaPointerDown={onScrollAreaPointerDown}
+              onScrollAreaPointerMove={onScrollAreaPointerMove}
+              onScrollAreaPointerEnd={onScrollAreaPointerEnd}
+            />
+          );
+        }
         return (
           <div className="m-3 flex flex-1 items-center justify-center rounded-xl border-2 border-dashed border-black/10">
             <span className="px-3 text-center text-ios-footnote font-medium text-muted-foreground">{node.title}</span>
           </div>
         );
+      }
     }
   };
 

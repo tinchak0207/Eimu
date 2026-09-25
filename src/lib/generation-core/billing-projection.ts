@@ -4,7 +4,9 @@ import { imageGenerationCoins } from "@/lib/provider-config";
 import { generationCoins } from "@/lib/generation-model-catalog/pricing";
 import { syncModelPricing } from "@/lib/pricing-runtime";
 import { getGenerationSql, type GenerationSql } from "./database";
+import { ensureAccountBaselines, recordConsumption } from "./account-ledger";
 import { emitJobEvent } from "./job-events";
+import { billingReplayDenialDetail, planBillingAttemptReplay } from "./operation-registry";
 import { randomUUID } from "node:crypto";
 
 /**
@@ -23,6 +25,13 @@ import { randomUUID } from "node:crypto";
  */
 
 const PROJECTION_BATCH_DEFAULT = 50;
+
+/**
+ * 投影的 commit 嘗試序號：claim 行以 attempt_count=1 落庫（見下方 INSERT），
+ * 故第 1 次＝1；扣款失敗後要問的重放授權是第 `PROJECTION_COMMIT_ATTEMPT_NO + 1` 次。
+ * （FG 教訓：接 registry 前先把序號語義釘死，差一格就會多／少重放一次。）
+ */
+const PROJECTION_COMMIT_ATTEMPT_NO = 1;
 
 type Row = Record<string, unknown>;
 
@@ -128,14 +137,44 @@ export async function projectGatePathBilling(input: {
       if (!claimed[0]) continue; // 已投影或另一 worker 併發認領
       summary.claimed += 1;
 
+      // REQ-E1a 順序鐵律：先種基線（取「扣款之前」的 users.quota），再扣上游，最後記帳本。
+      // 先扣後種 = 基線已含這筆扣款 + 帳本再記一次 = 雙算。
+      const baselineReady = await ensureAccountBaselines([Number(row.billing_user_id)], { sql });
       try {
         await adjustGatewayUserQuotaExact(Number(row.billing_user_id), -amount);
       } catch (error) {
-        const reason = (error instanceof Error ? error.message : String(error)).slice(0, 500);
+        // FG-b：這是 billing.commit 的重放裁決點。扣款失敗後唯一該問的問題是
+        // 「還准不准再試一次」——答案只能來自封閉 operation registry。
+        // 第 1 次已執行（上面 claim 行的 attempt_count=1），故此處問第 2 次：
+        // 政策 maxReplayAttempts=1 ⇒ 必然拒絕，claim 終結為 failed 並把拒絕理由原文
+        // 寫進 last_error。**不在這裡發明重放**：上游對 quota 調整沒有冪等契約，
+        // 重放同一筆扣款可能雙扣（見 billing-ledger 的 classifyBillingFailure 註解）。
+        const failureDetail = (error instanceof Error ? error.message : String(error)).slice(0, 250);
+        const replay = planBillingAttemptReplay({
+          operation: "billing.commit",
+          nextAttemptNo: PROJECTION_COMMIT_ATTEMPT_NO + 1,
+        });
+        const reason = replay.allowed
+          ? `${failureDetail} | registry allows a commit replay but no replay path is implemented; claim frozen for manual reconciliation.`
+          : `${failureDetail} | ${billingReplayDenialDetail("billing.commit", replay)}`;
         await sql`
-          UPDATE billing_operation SET status = 'failed', last_error = ${reason}, updated_at = now()
+          UPDATE billing_operation SET status = 'failed', last_error = ${reason.slice(0, 500)}, updated_at = now()
           WHERE id = ${String(claimed[0].id)} AND status = 'pending'
         `;
+        emitJobEvent({
+          jobId,
+          event: "replay_denied",
+          actor: input.executorId,
+          upstreamRaw: failureDetail,
+          detail: {
+            operation: "billing.commit",
+            denial_reason: replay.allowed ? "replay_path_unimplemented" : replay.denialReason,
+            attempt_no: replay.nextAttemptNo,
+            max_replay_attempts: replay.maxReplayAttempts,
+            billing_operation: "commit",
+            projection: true,
+          },
+        }, sql);
         summary.failed += 1;
         console.error(`[billing-projection] job ${jobId}: users.quota debit failed, claim marked failed: ${reason}`);
         continue;
@@ -147,6 +186,20 @@ export async function projectGatePathBilling(input: {
       `;
       summary.projected += 1;
       emitJobEvent({ jobId, event: "billing_committed", actor: input.executorId, detail: { projection: true, amount } });
+      // REQ-E1a 雙寫：上游 users.quota 的這筆扣減同步記進我方帳本（餘額權威）。
+      // 記帳失敗不擋路（recordConsumption 內部吞掉並回報 false），差額由 E1b 對帳報告指出。
+      const ledger = baselineReady
+        ? await recordConsumption({
+            billingUserId: Number(row.billing_user_id),
+            amountQuota: amount,
+            jobId,
+            operationId: String(claimed[0].id),
+            source: "billing-projection",
+          }, { sql })
+        : { posted: false, reason: "基線不可得（未記帳）" };
+      if (!ledger.posted) {
+        console.error(`[billing-projection] job ${jobId}: 帳本同步未落地（${ledger.reason}）——已由對帳報告負責`);
+      }
       console.log(`[billing-projection] job ${jobId}: projected ${amount} (users.quota debited, ledger committed)`);
     } catch (error) {
       console.error(`[billing-projection] job ${jobId}: projection error (不擋路)`, error);

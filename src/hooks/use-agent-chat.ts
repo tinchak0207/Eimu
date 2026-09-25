@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import {
   AGENT_EVENT_NAMES,
+  AGENT_STEER_QUEUE_TTL_MS,
   EMPTY_AGENT_CHAT_STATE,
   parseAgentSseEvent,
   type AgentAttachmentRef,
@@ -18,8 +19,18 @@ import {
   type AgentNoticeItem,
   type AgentQuotaState,
   type AgentSseEvent,
+  type AgentSteerStatus,
 } from "@/lib/agent-chat-types";
-import { agentChatReducer, appendUserTurn, applyQuotaSnapshot, resumeZombieTurn } from "@/lib/agent-chat-reducer";
+import {
+  agentChatReducer,
+  appendUserTurn,
+  applyQuotaSnapshot,
+  applySteerRejection,
+  applySteerStatus,
+  expireQueuedSteers,
+  markQueuedSteersAborted,
+  resumeZombieTurn,
+} from "@/lib/agent-chat-reducer";
 import {
   AgentChatError,
   buildEventsUrl,
@@ -33,12 +44,17 @@ import {
   resolveAgentConfirm,
   replyAgentQuestion,
   sendAgentMessage,
+  steerAgentSession,
   abortAgentSession,
   readCachedAgentSettings,
+  isSteerUnavailableError,
+  isSteerReplayRejected,
+  steerReplayStatus,
   isTerminalAuthError,
   type DirectSendCapability,
 } from "@/lib/agent-chat-client";
 import { normalizeOpenCodeMessages } from "@/lib/agent-chat-history-normalize";
+import { createFrameBatcher, type FrameBatcher } from "@/lib/agent-chat-frame-batch";
 import {
   clearPersisted,
   loadPersisted,
@@ -56,6 +72,17 @@ const MAX_BACKOFF_MS = 30_000;
 const SAVE_THROTTLE_MS = 1_000;
 
 /**
+ * REQ-D2：steer id（本端生成）。值域与网關 steer-core.isValidSteerId 逐字对齐
+ * （[A-Za-z0-9._-]{1,64}）——乐观插入的条目要立刻有 id 可以挂状态帧，
+ * 等网關回号那一轮往返会让徽章闪一下空白。
+ */
+let steerSeq = 0;
+function newSteerId(): string {
+  steerSeq += 1;
+  return `steer-${Date.now().toString(36)}-${steerSeq.toString(36)}`;
+}
+
+/**
  * 殭屍还魂自愈的防抖窗口：turn.done 之后这个时间内到的内容帧当同 tick 毛刺，
  * 不触发自愈（watchdog 发完 turn.done 紧跟的补发帧不属于「还魂」证据）。
  */
@@ -68,13 +95,24 @@ const ZOMBIE_HEAL_GAP_MS = 800;
 
 type AgentChatAction =
   | AgentSseEvent
-  | { type: "user"; text: string; attachments?: AgentAttachmentRef[] }
+  | { type: "user"; text: string; attachments?: AgentAttachmentRef[]; steer?: { id: string; status: AgentSteerStatus; position?: number } }
   | { type: "quota"; quota: AgentQuotaState }
   | { type: "notice"; tone: "info" | "error"; text: string }
   // D-8/D-17：恢复上次会话时，把存档灌回 state（还原 items + 续传游标）。
-  | { type: "restore"; items: AgentTranscriptItem[]; lastEventId: number }
+  // savedAt = 存档写入时刻：存档里的「排队中」steer 徽章以它为兜底锚点判逾时（D2-3）。
+  | { type: "restore"; items: AgentTranscriptItem[]; lastEventId: number; savedAt?: number }
   // D-17：会话被回收 / 使用者选「开新会话」时，把 transcript 清空重来。
   | { type: "reset" }
+  // REQ-D2：steer 状态落地（本地 ack 与 SSE 帧共用同一个纯 helper）与「停止优先」
+  // 的本地改判（用户按停止 → 排队中的 steer 全数改判中止）。
+  | { type: "steer-ack"; steerId: string; status: AgentSteerStatus; position?: number; queuedAt?: number }
+  // D2b：重放被拒（同一 steer_id 第二次投递）——把 catch 里落的「未能送达」占位
+  // 纠正成网關带回来的真实状态（见 reducer.applySteerRejection）。
+  | { type: "steer-rejection"; steerId: string; status: AgentSteerStatus }
+  | { type: "steer-abort-queued" }
+  // REQ-D2（D2-3）：排队逾时清扫——「排队中」超过 AGENT_STEER_QUEUE_TTL_MS 还没收到
+  // 任何终态帧（网關重启后必然如此）→ 翻 failed「未能送达」，不留永久「排队中」。
+  | { type: "steer-expire"; now: number }
   // 殭屍还魂自愈：turn.done 宣告收尾后内容帧仍到达，把回合拉回流式中。
   // hook 侧判定时机（防抖/是否新发送），落地交给纯 helper，与上面同范式。
   | { type: "zombie-resurrect" };
@@ -86,7 +124,15 @@ function chatReducer(state: AgentChatState, action: AgentChatAction): AgentChatS
   }
   switch (action.type) {
     case "user":
-      return appendUserTurn(state, action.text, action.attachments);
+      return appendUserTurn(state, action.text, action.attachments, action.steer);
+    case "steer-ack":
+      return applySteerStatus(state, action.steerId, action.status, action.position, action.queuedAt);
+    case "steer-rejection":
+      return applySteerRejection(state, action.steerId, action.status);
+    case "steer-abort-queued":
+      return markQueuedSteersAborted(state);
+    case "steer-expire":
+      return expireQueuedSteers(state, { now: action.now, ttlMs: AGENT_STEER_QUEUE_TTL_MS });
     case "quota":
       return applyQuotaSnapshot(state, action.quota);
     case "notice": {
@@ -105,11 +151,19 @@ function chatReducer(state: AgentChatState, action: AgentChatAction): AgentChatS
     }
     // 恢复存档：items 与续传游标来自持久化层；额度只留已知的，其余字段回初始。
     case "restore": {
-      return {
+      const restored: AgentChatState = {
         ...EMPTY_AGENT_CHAT_STATE,
         items: action.items.map((item) => ({ ...item })),
         lastEventId: action.lastEventId,
       };
+      // D2-3：存档里的「排队中」徽章不能原样复活（网關的 pendingSteers 是 volatile，
+      // 重启即消失且不再补终态帧）。以存档时刻为兜底锚点扫一趟，逾时的一律落
+      // 「未能送达」；仍在时窗内的记下锚点，由下面排定的清扫定时器兜底。
+      return expireQueuedSteers(restored, {
+        now: Date.now(),
+        ttlMs: AGENT_STEER_QUEUE_TTL_MS,
+        ...(typeof action.savedAt === "number" ? { baselineAt: action.savedAt } : {}),
+      });
     }
     case "reset":
       return EMPTY_AGENT_CHAT_STATE;
@@ -183,6 +237,12 @@ export interface UseAgentChatReturn {
   abort: () => Promise<void>;
   /** 是否有一个 abort 请求正在飞行中（供 UI 禁用「停止」按钮，避免重复点击双发）。 */
   aborting: boolean;
+  /**
+   * true = 空态首发正在 lazy 建号（建号 + 铸 SSE 票两段跨境往返）。
+   * 这段真空期 UI 本来零变化，消费者据此渲染「正在建立对话」忙碌态 ——
+   * 不能用合成 turn.status 代替：那会让 turnActive 提前为真，制造假回合。
+   */
+  startingSession: boolean;
   // D-17：上次会话存档。非空时 Surface 把存档收进「对话历史」并清空回空态
   //（09-12：建号权收归发送按钮，挂载不再自动开场，存档不再驱动任何自动建号）。
   resumable: ResumableAgentChat | null;
@@ -207,6 +267,8 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
   const [resumable, setResumable] = useState<ResumableAgentChat | null>(null);
   // 供 UI 判断「停止」按钮是否该禁用——ref 本身不触发渲染，需要这份 state 镜像。
   const [aborting, setAborting] = useState(false);
+  // 空态首发 lazy 建号的真空期旗标（见 UseAgentChatReturn.startingSession）。
+  const [startingSession, setStartingSession] = useState(false);
 
   // ── refs：给稳定的 callback 阅最新值，避免闭包抓到旧 state。
   const stateRef = useRef(state);
@@ -214,6 +276,10 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
   const esRef = useRef<EventSource | null>(null);
   const retryTimerRef = useRef<number | null>(null);
   const connectSeqRef = useRef(0);
+  // SSE 帧併批器（A3）：串流期每个 delta 一次 dispatch = 每个 token 一次整棵
+  // 面板重渲染，按鈕 onClick 要排在这些渲染后面。併批器只把「纯文字追加」帧
+  // 折进同一个渲染窗口，其余帧语义不变。每个连线世代重建一个（见 openConnection）。
+  const frameBatcherRef = useRef<FrameBatcher | null>(null);
   // 操作身份代：switchSession/startNewSession/resume/start 建立新的活跃会话时
   // 一并递增（与 connectSeqRef 分开维护，虽然目前总是同步递增——保留独立
   // 计数器是为了不动 openConnection 既有的 seq 守卫行为）。send() 在入口
@@ -256,6 +322,10 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
   // D-8：存档节流的最后写入时间与待跑写入定时器。
   const lastSavedAtRef = useRef(0);
   const saveTimerRef = useRef<number | null>(null);
+  // REQ-D2（D2-3）：排队逾时清扫定时器。「排队中」的 steer 等不到终态帧时（网關
+  // 重启后 pendingSteers 消失、重连回放也补不回那张帧）由它把徽章翻成「未能送达」
+  // ——绝不允许永久「排队中」。每次新的排队事件重排（后到的锚点更晚，覆盖前面即可）。
+  const steerExpiryTimerRef = useRef<number | null>(null);
   // 09-12 直連發送腿：現任連線票（綁 sid 防跨會話誤用）。null = 鑄票在飛/
   // 失敗/尚未開連線 → send 走中繼（與舊行為等價）。生命週期與 openConnection
   // 一致：每次開新連線先清空、票到手才落位；switchSession/resume/reconnect
@@ -379,6 +449,10 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
       mountedRef.current = false;
       closedRef.current = true;
       closedReasonRef.current = 'manual';
+      // 卸载＝这条生命彻底结束：併批器的缓冲与计时器一并清掉，不给已卸载的
+      // 组件留任何迟到的 setState（React 会警告，且渲染结果无人消费）。
+      frameBatcherRef.current?.drop();
+      frameBatcherRef.current = null;
       if (esRef.current) {
         esRef.current.close();
         esRef.current = null;
@@ -404,6 +478,24 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
     [dispatch],
   );
 
+  /**
+   * REQ-D2（D2-3）：排定「排队中」徽章的清扫时刻——到时仍停在 queued 的一律翻
+   * 「未能送达（未生效）」。为什么前端自己排：网關的 pendingSteers 是 volatile，
+   * 重启后它连 steer_id 都不记得，永远不会补终态帧；等待这张永远不会来的帧＝
+   * 永久假「排队中」。delayMs 由调用方给（新入队＝TTL；存档恢复＝剩余时窗）。
+   */
+  const armSteerExpiry = useCallback(
+    (delayMs: number) => {
+      if (steerExpiryTimerRef.current !== null) window.clearTimeout(steerExpiryTimerRef.current);
+      steerExpiryTimerRef.current = window.setTimeout(() => {
+        steerExpiryTimerRef.current = null;
+        if (!mountedRef.current) return;
+        dispatch({ type: "steer-expire", now: Date.now() });
+      }, Math.max(1000, delayMs));
+    },
+    [dispatch],
+  );
+
   // 开一条连线：mint ticket → new EventSource → 挂 10 个事件监听。
   // 用 connectSeq 挡掉慢票竞态：旧的 mint 回来时若序号已变就直接丢。
   // resume 场景下，stateRef 还停留在旧值（restore 的 dispatch 要等 React 下一帧），
@@ -416,6 +508,11 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
       if (!sid) return;
 
       const seq = ++connectSeqRef.current;
+      // 舊連線的緩衝殘幀屬於上一條生命，換世代即丟——丟掉不會漏內容：還沒
+      // apply 的幀必然沒推進 lastEventId，而下面的 resumeFrom 取自
+      // stateRef.current.lastEventId，網關續傳會把它們原樣回放。
+      frameBatcherRef.current?.drop();
+      frameBatcherRef.current = createFrameBatcher({ apply: (evt) => dispatch(evt) });
       if (esRef.current) {
         esRef.current.close();
         esRef.current = null;
@@ -481,7 +578,9 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
         void openConnection();
       }, nextBackoff());
     }
-  }, []);
+    // dispatch 来自 useReducer，恒稳定；列进依赖只为让併批器的 apply 闭包
+    // 有据可依（行为与原来的空依赖等价）。
+  }, [dispatch]);
 
   // 一帧 SSE 的统一入口：parse → 丢掉不合契约的 → dispatch。
   const handleSseEvent = useCallback(
@@ -560,7 +659,11 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
           dispatch({ type: "zombie-resurrect" });
         }
       }
-      dispatch(evt);
+      // 併批出口：文字帧进缓冲（同窗口折成一次渲染），其余帧在 batcher 内部
+      // 先 flush 缓冲再自己落地。上面所有副作用都在本行之前同步跑完，顺序不变。
+      const batcher = frameBatcherRef.current;
+      if (batcher) batcher.push(evt);
+      else dispatch(evt);
     },
     [dispatch],
   );
@@ -674,7 +777,16 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
       // 失败不抛错（内部已走 setError 路）。
       if (!sessionIdRef.current) {
         forceNewRef.current = true;
-        await start();
+        // 空態首發＝建號（+SSE 票）兩段跨境往返的真空期：UI 必須立刻有回應，
+        // 不能等 start() 回來才動——那段時間輸入框已清空而畫面全真空，
+        // 使用者只看到「按了沒反應」。旗標只涵蓋自己觸發的這條建號路徑，
+        // ensureSession（附件上傳）不動。
+        setStartingSession(true);
+        try {
+          await start();
+        } finally {
+          if (mountedRef.current) setStartingSession(false);
+        }
       }
       // sessionId 判空必须留在乐观插入之前（铁律）：建号失败（未登录/网络/已
       // 关闭）时 sid 仍 null——不能把使用者的话回声进 transcript，否则留下一句
@@ -696,29 +808,80 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
       // 切换了会话，不能把消息送去旧会话。
       const epoch = sessionEpochRef.current;
 
+      // REQ-D2（2026-09-22）：回合进行中的输入分两种语义，先判定再决定乐观插入的形态。
+      //   steering=true（默认设定 interrupt_mode:"steer"）：走 steer 端点——回合中追加
+      //   指引，**不打断当前回合**（这正是 D2 要吃的对称差）。回合卡在 question 断点时
+      //   网關把它注入当前回合；没有断点时诚实排队（徽章显示「排队中·本回合结束后生效」）。
+      //   非回合中（turnActive=false）⇒ steering=false ⇒ 下面的路径与改动前逐位等價。
+      // interrupt_mode 从 localStorage 缓存即时读（设定弹层写入），不发网络请求阻塞发送。
+      const steering = stateRef.current.turnActive && readCachedAgentSettings().interrupt_mode === "steer";
+      const steerId = steering ? newSteerId() : "";
+
       // 乐观插入使用者消息。directive 是隐形上下文，只随请求上送，绝不进 transcript；
       // silent=true（模板注入）同样不进 transcript——用户只看到 agent 的引导，看不到被注入的 prompt。
       if (!opts?.silent) {
-        dispatch({ type: "user", text: trimmed });
+        // 分岔刻意寫成 if/else 而不是三元：非 steer 那一條與改動前**逐字相同**
+        //（既有 source 斷言（agent-chat-ui.test.ts 的樂觀插入順序鎖）釘著那行字面，
+        //  也讓「無 steer 時行為逐位等價」在原始碼層看得見）。
+        if (steering) {
+          dispatch({ type: "user", text: trimmed, steer: { id: steerId, status: "queued" } });
+        } else {
+          dispatch({ type: "user", text: trimmed });
+        }
+      }
+
+      // steer 腿：只追加指引，不碰 abort（停止仍由停止钮独占）。ack 的 status 是
+      // 网關的诚实判定，本地把它落到同一条目上（与 SSE 帧共用 applySteerStatus）。
+      // 409 契约（D2-2）：网關明说「当前没有可引导的回合」= 改走正常送出，
+      // 内容绝不能被吞——这条旗标就是「落回下面正常送出腿」的唯一开关。
+      let fellBackToPlainSend = false;
+      if (steering) {
+        try {
+          const ack = await steerAgentSession(sid, trimmed, { steerId });
+          dispatch({
+            type: "steer-ack",
+            steerId: ack.steer_id,
+            status: ack.status,
+            // 位置只在 queued 形态存在（injected 是本回合内即時生效，没有队列位置）。
+            position: ack.status === "queued" ? ack.position : undefined,
+            // 本端入队时刻：D2-3 逾时清扫的锚点（网關不送时间戳，只有本端知道）。
+            queuedAt: ack.status === "queued" ? Date.now() : undefined,
+          });
+          if (ack.status === "queued") armSteerExpiry(AGENT_STEER_QUEUE_TTL_MS);
+          dispatchNotice(
+            "info",
+            ack.status === "injected"
+              ? "已注入本回合：助理会按这条指引继续"
+              : `已排队${typeof ack.position === "number" ? `（第 ${ack.position} 条）` : ""}，本回合结束后生效`,
+          );
+        } catch (err) {
+          // 送不进去就说实话：徽章改「未生效」，不让用户以为指令已经在跑。
+          dispatch({ type: "steer-ack", steerId, status: "failed" });
+          if (isSteerUnavailableError(err)) {
+            // 网關 409：现在没有可引导的回合（没在跑／已中止）。改成普通消息送出去，
+            // 用户的这句话必须落地——徽章与提示照旧保留（诚实标注引导形态未生效）。
+            fellBackToPlainSend = true;
+            dispatchNotice("info", "当前没有进行中的回合，已改为直接发送消息。");
+          } else if (isSteerReplayRejected(err)) {
+            // D2b：网關拒绝重放（同一个 steer_id 第二次投递）——**绝不落回正常送出**
+            //（那等于把同一條指引送第二次，正是本刀要禁的事故）。上面那句「未能送达」
+            // 是本地占位猜测，这里用网關带回来的真实状态纠正它：可能已经生效、已经中止，
+            // 或（重启后未确认）uncertain。提示也要说清「不会重复发送」。
+            dispatch({ type: "steer-rejection", steerId, status: steerReplayStatus(err) });
+            dispatchNotice("info", "这条引导已经在处理中或已有结果，不会重复发送。");
+          } else {
+            dispatchNotice("error", err instanceof Error ? err.message : "引导未能提交，请重试。");
+          }
+        }
+        // 只有真的走完 steer 腿（注入或排队）才在这里收口；409 落回下面的正常送出腿。
+        if (!fellBackToPlainSend) return;
       }
 
       // 罪状 3：回合进行中再发消息，opencode 会把它排队静默吞掉——用户以为已
-      // 送达，实际要等本轮跑完才被处理，画面上没有任何提示。按用户设定显式化：
-      // steer（默认）先打断本轮再发送；queue 照发并说明「本轮结束后处理」。
-      // interrupt_mode 从 localStorage 缓存即时读（设定弹层写入），不发网络请求
-      // 阻塞发送；abort 失败不阻塞发送——打断了也要把话送到，只把实情说清楚。
-      if (stateRef.current.turnActive) {
-        const mode = readCachedAgentSettings().interrupt_mode;
-        if (mode === "steer") {
-          try {
-            await requestAbort(sid);
-            dispatchNotice("info", "已打断上一轮，正在按新指示执行");
-          } catch {
-            dispatchNotice("error", "上一轮未能打断，新消息已排队");
-          }
-        } else {
-          dispatchNotice("info", "已加入队列，本轮结束后自动处理");
-        }
+      // 送达，实际要等本轮跑完才被处理，画面上没有任何提示。interrupt_mode="queue"
+      // 时照发并说明「本轮结束后处理」（steer 腿已在上面 return，不会到这）。
+      if (stateRef.current.turnActive && !fellBackToPlainSend) {
+        dispatchNotice("info", "已加入队列，本轮结束后自动处理");
       }
 
       // 会话代校验：上面的 await（steer-abort）期间若使用者切了会话/开了新
@@ -749,7 +912,7 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
         dispatchNotice("error", err instanceof Error ? err.message : "消息传送失败，请重试。");
       }
     },
-    [dispatchNotice, requestAbort, start],
+    [dispatchNotice, armSteerExpiry, requestAbort, start],
   );
 
   const confirm = useCallback(
@@ -812,10 +975,26 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
       // 靜默窗開啟：server 端 abort 落地後，opencode 的殘響幀（遲到
       // delta/前綴補發）不再渲染，直到下一次 send()。
       mutedUntilNextSendRef.current = true;
+      // 網關對用戶中止刻意不發幀（收尾由 turn.done 表達），而 turn.done 要等
+      // opencode 真正 idle 才到——中間 turnActive 一直是真，停止鈕赖著不走、
+      // 送出鈕回不來，使用者只看到「按了終止像沒反應」，連按就是反覆打網關。
+      // 這裡本端立刻合成一幀終態收尾：event_id 用 0（reducer 的續傳去重守衛是
+      // eventId > 0 && eventId <= lastEventId，0 一律放行，Math.max 也不推進
+      // lastEventId，不污染游標記帳）；data 是空物件（AgentTurnDone =
+      // Record<string, never>）。順序鐵律：先 flush 待渲染的 pre-abort 正文幀，
+      // 再放終態幀——否則是「已收尾才長字」，turnActive 會被那批幀翻回真（假活）。
+      frameBatcherRef.current?.flush();
+      dispatch({ name: "turn.done", event_id: 0, data: {} });
+      // REQ-D2 停止優先：网關同一支 handleAbortSession 已把待投 steer 全數作廢
+      // （dropPendingSteers），本端同步改判排队中的徽章——不等那批 aborted 帧，
+      // 用户按下停止的那一刻画面就該顯示「已中止」。已 injected/applied 的条目不退。
+      dispatch({ type: "steer-abort-queued" });
     } catch (err) {
+      // 失敗時不合成終態幀：真回合還在跑，翻成收尾就是說謊；後續 delta 本就會
+      // 自癒（reducer 收到內容幀會把 turnActive 設回真）。
       dispatchNotice("error", err instanceof Error ? err.message : "中止失败，请重试。");
     }
-  }, [dispatchNotice, requestAbort]);
+  }, [dispatch, dispatchNotice, requestAbort]);
 
   const end = useCallback(async (): Promise<void> => {
     closedRef.current = true;
@@ -834,7 +1013,11 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
     }
     setConnection("closed");
     // 本端直接收尾：让 reducer 走一次 session.closed，UI 才看到「已结束」。
+    // 先 flush 缓冲：待渲染的正文幀必须落在终结帧之前，否则终结后还在长字。
+    frameBatcherRef.current?.flush();
     dispatch({ name: "session.closed", event_id: 0, data: { reason: "user_ended" } });
+    // 这条连线已经终局，併批器连同时间锚一起作废（下一条连线在 openConnection 重建）。
+    frameBatcherRef.current?.drop();
 
     const sid = sessionIdRef.current;
     if (sid) {
@@ -848,7 +1031,7 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
     clearPersisted();
     persistedRef.current = null;
     setResumable(null);
-  }, []);
+  }, [dispatch]);
 
   /**
    * D-17：继续上次会话。用存档里的 sessionId 铸票重开 SSE，带 last_event_id 续传；
@@ -878,11 +1061,18 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
       sessionIdRef.current = sid;
       setSessionId(sid);
       sessionEpochRef.current += 1; // 续接成功=建立新的活跃会话身份，飞行中的旧 send() 该放弃。
+      // 新身份＝新生命：旧连线的待渲染缓冲作废（续传游标会用存档 cursor 重放覆盖）。
+      frameBatcherRef.current?.drop();
       // 09-12：新的会话身份解除「用户中止静默窗」——否则 abort 过一次后，
       // 续档回放的 message/reasoning 帧会被 L567 整批丢弃，重建出来一片空白。
       mutedUntilNextSendRef.current = false;
       sessionTouchedInThisVisit = true;
-      dispatch({ type: "restore", items: saved.items, lastEventId });
+      dispatch({ type: "restore", items: saved.items, lastEventId, savedAt: saved.savedAt });
+      // D2-3：存档里若还有「排队中」的 steer 徽章（网關重启后它的 volatile 队列已经
+      // 没了，永远不会再补终态帧），按同一个 TTL 排一趟清扫——到点仍停 queued 的翻
+      // 「未能送达」，页面不留在永久「排队中」。锚点用存档时刻（restore 已按它扫过
+      // 一轮，活下来的都在时窗内，最晚的截止点就是 savedAt + TTL）。
+      armSteerExpiry(saved.savedAt + AGENT_STEER_QUEUE_TTL_MS - Date.now());
       try {
         const quota = await fetchAgentQuota();
         if (mountedRef.current) dispatch({ type: "quota", quota });
@@ -919,7 +1109,7 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
       // 其它错（网络 / 网关 5xx）：不做回收判定，保留存档，让 UI 还能再试。
       setError(err instanceof Error ? err.message : "恢复上次对话失败，请重试。");
     }
-  }, [dispatch, dispatchNotice, openConnection, start]);
+  }, [dispatch, dispatchNotice, armSteerExpiry, openConnection, start]);
 
   /**
    * 切换到指定的历史会话（对话历史 dropdown 的「回到某个会话」）。
@@ -946,6 +1136,9 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
         esRef.current.close();
         esRef.current = null;
       }
+      // 换轨＝换生命：旧连线的待渲染缓冲属于上一轨，连同计时器一起作废
+      //（丢弃不漏内容——未 apply 的帧没推进 lastEventId，续传会回放）。
+      frameBatcherRef.current?.drop();
       // 换轨前也要清掉可能已排定的重连计时器：上一条连线的 onerror 若恰好
       // 在使用者点切换的前一拍排了 scheduleReconnect，这个陈旧计时器之后
       // 触发时会读到 sessionIdRef.current（此时已经指向新会话）去重新开线，
@@ -1079,6 +1272,8 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
       esRef.current.close();
       esRef.current = null;
     }
+    // 换生命：旧连线的待渲染缓冲作废（同 switchSession 的理由）。
+    frameBatcherRef.current?.drop();
     // 同 switchSession：清掉可能已排定的重连计时器，避免旧连线的 onerror
     // 排的 scheduleReconnect 之后拿新 sessionIdRef 去重开一条多余的连线。
     if (retryTimerRef.current !== null) {
@@ -1151,6 +1346,7 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
     ensureSession,
     abort,
     aborting,
+    startingSession,
     discardAndStartNew,
   };
 }

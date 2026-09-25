@@ -27,10 +27,18 @@
   right: 0;
   bottom: 0;
   padding: calc(var(--case-card-w, 520px) * 0.07);
+  /* 2026-09-24 用戶版面方案·刀2：底部預留分頁點帶。
+     控制行錨在卡底內 16px、高 44px（桌面箭頭），點帶頂緣距卡底
+     = 0.1×cardH + 16 + 44；此處 0.1×cardH + 76 → Dock 底緣恒留 16px 淨空，
+     縮放（手機/桌面卡高不同）不重疊。--case-card-h 由 .case-stage 定義、
+     繼承到卡面，SSR 兜底值 390 與 CSS 默認幾何一致。 */
+  padding-bottom: calc(var(--case-card-h, 390px) * 0.1 + 76px);
   display: flex;
   flex-direction: column;
   gap: 12px;
-  background: linear-gradient(to top, rgba(0, 0, 0, 0.45) 0%, rgba(0, 0, 0, 0.15) 60%, transparent 100%);
+  /* 2026-09-24 刀2：用戶裁定「半透明深色帶與背景圖銜接自然」——0.45→0.32，
+     Dock 自身 bg-black/35+backdrop-blur 不動。 */
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.32) 0%, rgba(0, 0, 0, 0.15) 60%, transparent 100%);
   user-select: none;
 }
 
@@ -50,13 +58,17 @@
   /* 无额外样式：全部由 Tailwind 工具类承载，不引入 lg/ios 体系外的颜色。 */
 }
 
-/* 面板内嵌场景：舞台上下左右完全置中展示 */
+/* 面板内嵌场景：舞台上下左右完全置中展示。
+   高度吃父层（.canvas-ws-overlay 已从站点 header 下缘起算）——旧值
+   min-height:100vh 假设了全视口，header 露出后圆点与翻页钮被裁出视口底。 */
 .agent-template-carousel {
+  position: relative;
   display: flex;
   flex-direction: column;
   justify-content: center;
   align-items: center;
-  min-height: 100vh;
+  min-height: 100%;
+  height: 100%;
   width: 100%;
   padding: 0;
   box-sizing: border-box;
@@ -82,4 +94,69 @@
    样式本身无视觉变化——它是一个纯行为开关，规则留在这里做文档锚点。 */
 .agent-template-carousel.atc-tour-locking {
   /* 无样式副作用：转卡冻结逻辑在组件的 wheel/scroll handler 里判断。 */
+}
+
+/* ══ 2026-09-24 用戶版面方案·刀1：分頁點+箭頭收進卡內 ══
+   與 spec 的現場衝突（按意圖等價實現，已回報）：spec 原定控制行 absolute
+   於根 section（bottom:16px），但根是滿版 flex 置中容器（.canvas-ws-overlay
+   top:header→bottom:0，高 ≈ 視口−68px），卡底距根底約 130–230px，
+   bottom:16px 會把點釘在卡外的背板上——違反「壓在深色卡面上」與刀2 的
+   Dock 淨空設計。等價方案：控制行 absolute 於緊貼 stage 的 .atc-stage-wrap。
+   幾何推導：stage 高 = 1.2×cardH（measure() 的 inline 高度；SSR/手機 CSS
+   同比例 0.9×cardW），故 wrap 底 = stage 底，卡底高出 wrap 底 0.1×stage 高
+   → bottom: calc(8.334% + 16px) 即「卡底內 16px」，隨卡縮放自動對位。
+   z-index 依據：前卡 z=depth×1000（~1000）但全部被 .case-stage 的
+   perspective 鎖進 stage 自身堆疊上下文（該上下文在兄弟層只算 z≈0），
+   控制行是 wrap 的直接兄弟，z:30 穩壓整個 3D 環；確認彈窗走 createPortal
+   到 document.body（.fixed.z-50，DOM 在浮層之後）→ 彈窗永远盖過控制行；
+   driver.js 弹窗 z-9999 !important 不受影響。 */
+.agent-template-carousel .atc-stage-wrap {
+  position: relative;
+  width: 100%;
+  max-width: 76rem; /* 與 .case-stage 同步，wrap 不引入第二套置中線 */
+  margin-inline: auto;
+}
+
+.agent-template-carousel .atc-controls {
+  position: absolute;
+  bottom: calc(8.334% + 16px);
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 0; /* 中和 flow 時代的 mt-4：absolute 下 margin-top 會把盒子上抬 16px */
+  z-index: 30;
+}
+
+/* 卡內反色：共享 .case-arrow/.case-dot 是「淺底深字」（case-showcase.css
+   447–494），壓到深色卡面必須翻白。全部作用域覆蓋，case-showcase.css 一行不動
+   （它同時服務 CaseShowcase 頁與充值環，改它=誤傷）。 */
+.agent-template-carousel .case-dot::after {
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.agent-template-carousel .case-dot:hover::after {
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.agent-template-carousel .case-dot[aria-current="true"]::after {
+  /* 選中態保持品牌藍（用戶 spec 欽點 #0A84FF，比基礎 #007AFF 亮一档，深底更 readable） */
+  background: #0A84FF;
+}
+
+.agent-template-carousel .case-arrow {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.agent-template-carousel .case-arrow:hover {
+  color: rgba(255, 255, 255, 1);
+  background: rgba(255, 255, 255, 0.18);
+}
+
+/* ══ 2026-09-24 用戶版面方案·刀3：卡面陰影減法 ══
+   基礎重陰影真值在 case-showcase.css .case-slab::before（0 58px 96px/0.22 +
+   0 22px 44px/0.13 + 0 6px 12px/0.07，Vision Pro「懸浮深空」用）。模板卡右欄
+   貼近淺色背板，這套重影讀成「髒」。覆蓋成單層輕影；--case-depth 的景深調製
+   保留（側卡仍按距離變淡），邊框不動（掠射亮線 .case-edge 沿用既有玻璃 edge，
+   卡面是深圖視頻/封面，不加黑邊）。 */
+.agent-template-carousel .case-slab::before {
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
 }

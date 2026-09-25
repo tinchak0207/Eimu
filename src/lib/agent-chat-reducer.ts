@@ -1,8 +1,11 @@
 // Agent 聊天的纯逻辑核心：SSE 事件 → 可渲染 transcript 的 reducer。
 //
 // 规则：
-//   - 纯函数，不碰 React、不碰 DOM、不碰 Math.random / Date.now —— 同样输入
+//   - 纯函数，不碰 React、不碰 DOM、不碰 Math.random —— 同样输入
 //     永远产出同样输出，node --test 可直接测。
+//     唯一例外（2026-09-20 思維鏈計時）：reasoning.delta / 收尾結算會讀 Date.now()
+//     寫入 reasoningStartedAt / reasoningMs 兩個時間欄位——網關不送時間戳，秒數
+//     只能由本端時鐘得出。除這兩個欄位外，其餘轉換仍與輸入一一對應。
 //   - 永不 mutate 输入 state 或其阵列；每个分支都回新物件（重放的帧除外，
 //     直接回同一个 reference，让 React 可以 bail out）。
 //   - 条目 id 一律从 seq + kind 推出：`<kind>-<event_id>`（event_id 由网关
@@ -14,6 +17,7 @@
 // 前端合成的边角）永远处理，也不影响续传游标。
 
 import {
+  type AgentAssistantTextItem,
   type AgentAttachmentRef,
   type AgentAudioItem,
   type AgentChatState,
@@ -22,15 +26,19 @@ import {
   type AgentNoticeItem,
   type AgentPendingConfirm,
   type AgentPendingQuestion,
+  type AgentPlanItem,
   type AgentQuotaState,
   type AgentSseEvent,
   type AgentSubagentItem,
   type AgentSubagentReportItem,
+  type AgentSteerStatus,
   type AgentToolCallItem,
   type AgentTranscriptItem,
   type AgentUserTurnItem,
   type AgentVideoItem,
 } from "./agent-chat-types";
+// 状态值域的唯一权威（0920 收口）：reducer 只在类型层引用该 union，分支逻辑不变。
+import type { AgentTaskStatus } from "./agent-task-status";
 
 // ─────────────────────────── 条目 id 生成
 
@@ -53,14 +61,50 @@ function userItemId(state: AgentChatState): string {
 
 // ─────────────────────────── 事件对应分支
 
+/**
+ * 思維鏈計時結算（2026-09-20 真功能：把預覽承諾的「已思考 · N 秒」做成真數據）。
+ *
+ * 只對「有起點（reasoningStartedAt）且還沒結算（reasoningMs === undefined）」的
+ * 條目生效；回 undefined 代表本次一個欄位都不寫——呼叫方據此保持原本的物件形狀，
+ * 沒有思維鏈的條目逐位元與舊行為一致（不長出 undefined 鍵）。
+ *
+ * 為什麼讀 Date.now()：時長無從由事件推得（網關不送時間戳），唯一誠實的來源是
+ * 本端拿到 reasoning 的那一刻與思考結束的那一刻之差。reducer 因此在這兩處
+ * 破例碰時鐘——除時間欄位外，其餘狀態轉換仍與輸入一一對應。
+ */
+function settleReasoningMs(item: AgentAssistantTextItem, now: number): number | undefined {
+  if (item.reasoningStartedAt === undefined || item.reasoningMs !== undefined) return undefined;
+  return Math.max(0, now - item.reasoningStartedAt);
+}
+
 function reduceMessageDelta(state: AgentChatState, event: AgentSseEvent & { name: "message.delta" }): AgentChatState {
   const text = event.data.text;
   const items = state.items.slice();
   const last = items[items.length - 1];
   if (last && last.kind === "assistant" && last.streaming) {
     // 只对「正在 streaming 的最后一个助手条目」追加；否则开新条目。
-    items[items.length - 1] = { ...last, text: last.text + text };
+    // 思維鏈結算時機 a（2026-09-20）：想完開始說話——正文首次落到「已經想過」
+    // 的既有 streaming 條目。結算只發生一次（reasoningMs 已定就不再寫），
+    // 純正文條目（沒有 reasoningStartedAt）不長任何時間欄位。
+    const reasoningMs = settleReasoningMs(last, Date.now());
+    items[items.length - 1] =
+      reasoningMs === undefined
+        ? { ...last, text: last.text + text }
+        : { ...last, text: last.text + text, reasoningMs };
   } else {
+    // 計畫退場（2026-09-18 turn.plan 契約）：真實正文開「新」條目的這一刻，
+    // 代表計畫已經讓位——把還開著的計畫卡收合成一行，讓答案佔住版面。
+    // 只在開新條目這條分支做：追加到既有 streaming 條目的分支是同一條交付物的
+    // 續寫（工具卡 pending 契約的既有測試語義也掛在那裡），一行都不動。
+    // 判定用嚴格 === false（reducer 自己建的計畫卡才會有這個值），缺席的
+    // **不**收合——「手動收合優先於任何自動行為」的對偶：沒被自動展開過的
+    // 不該被自動收掉。
+    for (let i = 0; i < items.length; i += 1) {
+      const it = items[i];
+      if (it.kind === "plan" && it.collapsed === false) {
+        items[i] = { ...it, collapsed: true };
+      }
+    }
     items.push({
       kind: "assistant",
       id: eventItemId("assistant", event.event_id),
@@ -78,7 +122,13 @@ function reduceReasoningDelta(state: AgentChatState, event: AgentSseEvent & { na
   const last = items[items.length - 1];
   if (last && last.kind === "assistant" && last.streaming) {
     // 思維鏈通常先於最終文字到來；若已開 assistant 條目就直接累加。
-    items[items.length - 1] = { ...last, reasoning: (last.reasoning ?? "") + text };
+    // 計時起點只在條目「首次」拿到 reasoning 時寫（已有值不覆蓋）：後續 frame
+    // 累加文字的行為一字不動，形狀也一字不改（已有起點時不多長任何鍵）。
+    items[items.length - 1] = {
+      ...last,
+      reasoning: (last.reasoning ?? "") + text,
+      ...(last.reasoningStartedAt === undefined ? { reasoningStartedAt: Date.now() } : {}),
+    };
   } else {
     // reasoning 先到、text 還沒來：開 streaming 條目，只填 reasoning。
     items.push({
@@ -87,6 +137,7 @@ function reduceReasoningDelta(state: AgentChatState, event: AgentSseEvent & { na
       seq: event.event_id,
       text: "",
       reasoning: text,
+      reasoningStartedAt: Date.now(),
       streaming: true,
     });
   }
@@ -121,8 +172,14 @@ function reduceToolProgress(state: AgentChatState, event: AgentSseEvent & { name
 }
 
 function reduceToolResult(state: AgentChatState, event: AgentSseEvent & { name: "tool.result" }): AgentChatState {
-  const { tool, ok, cost_coins, error } = event.data;
+  const { tool, ok, cost_coins, task_id, artifact_pending, error } = event.data;
   const errText = !ok ? error?.human_message ?? error?.message ?? undefined : undefined;
+  // 终态映射（2026-09-18 契约）：ok + artifact_pending = 任務已提交、成品未到 →
+  // 中继态 pending，绝不报「已完成」；成品/失敗事件到达时由 settlePendingToolItems
+  // 结算成 ok/failed。缺 artifact_pending 的旧格式逐位元照旧走 ok。
+  const status: AgentToolCallItem["status"] = !ok ? "failed" : artifact_pending ? "pending" : "ok";
+  // 卡片上只有 task_id 有值时才写：旧格式不凭空长出 taskId 栏位。
+  const taskPatch = task_id !== undefined ? { taskId: task_id } : {};
   const items = state.items.slice();
   // 找「最近一个同名且还在 running 的工具条目」回填。没有就补一笔
   // 已定案的条目 —— 网关可能因为去重或断线把 invoke 弄丢了。
@@ -137,7 +194,7 @@ function reduceToolResult(state: AgentChatState, event: AgentSseEvent & { name: 
   if (target >= 0) {
     const existing = items[target];
     if (existing.kind === "tool") {
-      items[target] = { ...existing, status: ok ? "ok" : "failed", costCoins: cost_coins, error: errText };
+      items[target] = { ...existing, status, costCoins: cost_coins, error: errText, ...taskPatch };
     }
   } else {
     items.push({
@@ -146,16 +203,57 @@ function reduceToolResult(state: AgentChatState, event: AgentSseEvent & { name: 
       seq: event.event_id,
       tool,
       argsSummary: undefined,
-      status: ok ? "ok" : "failed",
+      status,
       costCoins: cost_coins,
       error: errText,
+      ...taskPatch,
     });
   }
   return { ...state, items, turnActive: true };
 }
 
+/**
+ * 成品／失敗事件到來 → 把對應的 pending 工具卡結算掉（2026-09-18 契約）。
+ *
+ * 匹配優先序：
+ *   1. `taskId === 事件的 task_id` 的精確匹配 —— 同一次提交的任務號對號入座；
+ *   2. 事件沒帶 task_id、或帶了卻找不到對應卡 → 回退結算**最舊的一張** pending 卡
+ *      （FIFO 兜底：寧可早一張結算，也不讓成品已經到了、卡片還在轉）。
+ *
+ * 只碰 status === "pending" 的卡：running 由 tool.result / turn.done 負責，
+ * 已定案的卡絕不被翻案。找不到任何 pending 卡時回傳原陣列（reference 不變，
+ * 呼叫端行為與現狀逐位元一致）。就地不 mutate：變更時回新 slice。
+ */
+function settlePendingToolItems(
+  items: AgentTranscriptItem[],
+  taskId: string | undefined,
+  status: Extract<AgentTaskStatus, "ok" | "failed">,
+  errorText?: string,
+): AgentTranscriptItem[] {
+  let fallback = -1;
+  for (let i = 0; i < items.length; i += 1) {
+    const it = items[i];
+    if (it.kind !== "tool" || it.status !== "pending") continue;
+    if (taskId !== undefined && it.taskId === taskId) {
+      const next = items.slice();
+      next[i] = { ...it, status, ...(errorText !== undefined ? { error: errorText } : {}) };
+      return next;
+    }
+    if (fallback < 0) fallback = i;
+  }
+  if (fallback < 0) return items;
+  const it = items[fallback];
+  if (it.kind !== "tool") return items;
+  const next = items.slice();
+  next[fallback] = { ...it, status, ...(errorText !== undefined ? { error: errorText } : {}) };
+  return next;
+}
+
 function reduceImageDone(state: AgentChatState, event: AgentSseEvent & { name: "image.done" }): AgentChatState {
   const { url, cost_coins, task_id, recipe } = event.data;
+  // 成品到了 = 對應的 pending 工具卡可以結算成 ok。先結算再建出圖卡：
+  // 兩件事互不干擾，出圖卡照舊建／照舊按 url 去重。
+  const items = settlePendingToolItems(state.items, task_id, "ok");
   const exists = state.items.some((it) => it.kind === "image" && it.url === url);
   if (!exists) {
     // seq 是展示序号（锚定文案里的「第 N 张」）：必须是会话内第几张图，
@@ -170,14 +268,16 @@ function reduceImageDone(state: AgentChatState, event: AgentSseEvent & { name: "
       taskId: task_id,
       recipe,
     };
-    return { ...state, items: [...state.items, item], turnActive: true, turnStatus: undefined };
+    return { ...state, items: [...items, item], turnActive: true, turnStatus: undefined };
   }
   // 同 url 已存在：忽略内容，但仍是「助手在产出」的讯号，turnActive 照设。
-  return { ...state, turnActive: true, turnStatus: undefined };
+  return { ...state, items, turnActive: true, turnStatus: undefined };
 }
 
 function reduceVideoDone(state: AgentChatState, event: AgentSseEvent & { name: "video.done" }): AgentChatState {
   const { url, cost_coins, task_id, media_kind } = event.data;
+  // 同 image.done：成品到了先結算對應 pending 卡，出片卡照舊建／照舊去重。
+  const items = settlePendingToolItems(state.items, task_id, "ok");
   const exists = state.items.some((it) => it.kind === "video" && it.url === url);
   if (!exists) {
     // seq 是展示序号：会话内第几条影片，不是网关全局 event_id（同 image.done 的理由）。
@@ -191,14 +291,16 @@ function reduceVideoDone(state: AgentChatState, event: AgentSseEvent & { name: "
       taskId: task_id,
       mediaKind: media_kind,
     };
-    return { ...state, items: [...state.items, item], turnActive: true, turnStatus: undefined };
+    return { ...state, items: [...items, item], turnActive: true, turnStatus: undefined };
   }
   // 同 url 已存在：忽略内容，但仍是「助手在产出」的讯号，turnActive 照设。
-  return { ...state, turnActive: true, turnStatus: undefined };
+  return { ...state, items, turnActive: true, turnStatus: undefined };
 }
 
 function reduceAudioDone(state: AgentChatState, event: AgentSseEvent & { name: "audio.done" }): AgentChatState {
   const { url, cost_coins, task_id, media_kind } = event.data;
+  // 同 image.done：成品到了先結算對應 pending 卡，出音頻卡照舊建／照舊去重。
+  const items = settlePendingToolItems(state.items, task_id, "ok");
   const exists = state.items.some((it) => it.kind === "audio" && it.url === url);
   if (!exists) {
     // seq 是展示序号：会话内第几条音频，不是网关全局 event_id（同 image.done 的理由）。
@@ -212,10 +314,10 @@ function reduceAudioDone(state: AgentChatState, event: AgentSseEvent & { name: "
       taskId: task_id,
       mediaKind: media_kind,
     };
-    return { ...state, items: [...state.items, item], turnActive: true, turnStatus: undefined };
+    return { ...state, items: [...items, item], turnActive: true, turnStatus: undefined };
   }
   // 同 url 已存在：忽略内容，但仍是「助手在产出」的讯号，turnActive 照设。
-  return { ...state, turnActive: true, turnStatus: undefined };
+  return { ...state, items, turnActive: true, turnStatus: undefined };
 }
 
 /**
@@ -274,7 +376,11 @@ function reduceDirectorDone(state: AgentChatState, event: AgentSseEvent & { name
 
 function reduceImageFailed(state: AgentChatState, event: AgentSseEvent & { name: "image.failed" }): AgentChatState {  // 失败也进对话流（与 image.done 对称）：用户在聊天里直接看到「没排上队，
   // 费用已退回」，不依赖画布节点才知道发生了什么。
-  const { reason, refunded } = event.data;
+  const { task_id, reason, refunded, human_message } = event.data;
+  // 失败事件 = 提交出去的那张卡可以判死了（原本只会留一条 notice，卡片会
+  // 一直停在「生成中…」）。精确配不到 task_id 时由 settler 按序兜底配对。
+  // human_message 有值就顺手填进卡片的 error（G-FE 合同：中文短句优先）。
+  const items = settlePendingToolItems(state.items, task_id, "failed", human_message);
   const text = refunded ? `这张图没排上队，费用已退回${reason ? `（${reason}）` : ""}。` : `这张图生成失败${reason ? `（${reason}）` : ""}。`;
   const notice: AgentNoticeItem = {
     kind: "notice",
@@ -283,7 +389,7 @@ function reduceImageFailed(state: AgentChatState, event: AgentSseEvent & { name:
     tone: "error",
     text,
   };
-  return { ...state, items: [...state.items, notice], turnActive: true, turnStatus: undefined };
+  return { ...state, items: [...items, notice], turnActive: true, turnStatus: undefined };
 }
 
 /**
@@ -330,12 +436,18 @@ function linkDispatchToolItem(items: AgentTranscriptItem[], subagentId: string):
  *     ok:false）的事实比子代理成功更具体，不覆写。
  *   - 子代理 error：把已 ok 的卡也拉回 failed —— async 派遣时工具早就回了 ok，
  *     子代理随后失败；若卡片还留「已完成」就是同一批任务两处状态互相打脸。
+ *   - 子代理 stopped（2026-09-20）：人工停止成功＝中性收尾，走 **ok 同款分支**
+ *     —— 派遣动作本身成功执行过，工具卡不许被打脸成 failed，也不显 abort 文案。
  */
-function settleLinkedDispatchTool(items: AgentTranscriptItem[], subagentId: string, ok: boolean): void {
+function settleLinkedDispatchTool(
+  items: AgentTranscriptItem[],
+  subagentId: string,
+  outcome: "ok" | "error" | "stopped",
+): void {
   for (let i = items.length - 1; i >= 0; i -= 1) {
     const it = items[i];
     if (it.kind !== "tool" || it.subagentId !== subagentId) continue;
-    if (ok) {
+    if (outcome !== "error") {
       if (it.status !== "running") return;
       items[i] = { ...it, status: "ok" };
       return;
@@ -426,7 +538,7 @@ function reduceSubagentDone(
     const it = items[i];
     if (it.kind === "subagent" && it.subagentId === id) {
       items[i] = { ...it, status, ...(summary !== undefined ? { summary } : {}) };
-      settleLinkedDispatchTool(items, id, status === "ok");
+      settleLinkedDispatchTool(items, id, status);
       return { ...state, items };
     }
   }
@@ -441,21 +553,27 @@ function reduceSubagentDone(
     status,
     ...(summary !== undefined ? { summary } : {}),
   };
-  settleLinkedDispatchTool(items, id, status === "ok");
+  settleLinkedDispatchTool(items, id, status);
   return { ...state, items: [...items, item] };
 }
 
 /**
- * 回合收尾：子代理条目退场，但产出必须留下（F3）。带 summary / 串流全文的
- * 转存成一张可展开的产出卡（subagent_result）；中止（未 done）的标 interrupted
- * ——绝不把 1082 字产出随卡片一起删掉，用户中止后画面只会更丰富。
- * 零输出的空转卡（没 done 也没吐过字）没有产出可留，才真正丢弃。
- * 条目位置原地保留，产出卡就落在原子代理卡所在的转录位置。
+ * 回合收尾转存：只对**已定态**（done 帧到过的 ok/error/stopped）的子代理条目
+ * 做产出卡转存（F3）——带 summary / 串流全文的转成一张可展开的 subagent_result，
+ * 绝不把 1082 字产出随卡片一起删掉。条目位置原地保留，产出卡就落在原子代理卡
+ * 所在的转录位置。
+ *
+ * `status === "running"` 的条目**原样保留，不转卡不丢弃**（2026-09-21 暴君裁定）：
+ * 异步子代理的生命周期刻意长于派出回合——完工才 wakeParent 发 `subagent.done`
+ * （ok/error/stopped），子代理 lifecycle 的终态由那一帧独占裁决。回合收尾时把
+ * running 判死/丢弃，等于在跑的 3D 导演跨回合消失（暴君实测「没看到子代理啊」）。
+ * 与 09-18 pending 工具卡同构：turn 结束 ≠ 任务结束。wakeParent 后的回合收到
+ * done 幀、条目转为定态，下一次收尾才走上面的转存。
  */
 function retireSubagentItems(items: AgentTranscriptItem[]): AgentTranscriptItem[] {
   const out: AgentTranscriptItem[] = [];
   for (const it of items) {
-    if (it.kind !== "subagent") {
+    if (it.kind !== "subagent" || it.status === "running") {
       out.push(it);
       continue;
     }
@@ -463,14 +581,13 @@ function retireSubagentItems(items: AgentTranscriptItem[]): AgentTranscriptItem[
     const summary = it.summary?.trim() ?? "";
     // 取較完整者：SSE 的 summary 可能被帧长截斷，delta 串流才是全文。
     const text = summary.length > full.length ? summary : full;
-    if (it.status === "running" && text.length === 0) continue;
     const report: AgentSubagentReportItem = {
       kind: "subagent_result",
       id: `${it.id}-result`,
       seq: it.seq,
       subagentId: it.subagentId,
       label: it.label,
-      status: it.status === "running" ? "interrupted" : it.status,
+      status: it.status,
       text,
     };
     out.push(report);
@@ -483,13 +600,22 @@ function retireSubagentItems(items: AgentTranscriptItem[]): AgentTranscriptItem[
  * 用 for 循环而非 map，是为了让每个分支都有确定性别（map 的回传类型会被
  * 宽化成 status: string），assignment 到 AgentTranscriptItem[] 也能给字面类型
  * 正确的 context。
+ *
+ * `pending`（2026-09-18 中继态）**不在这里判死**：turn 结束只代表这一轮助手文本
+ * 说完了，不代表成品到了 —— 提交型生图/生片工具的任務此刻仍在上游跑，成品
+ * （image/video/audio.done）或失敗（image.failed）事件可能落在下一轮里。判死它
+ * 就是谎报失败，所以 pending 必须留着等那两类事件结算。
  */
 function settleItems(items: AgentTranscriptItem[]): AgentTranscriptItem[] {
   const next: AgentTranscriptItem[] = new Array(items.length);
   for (let i = 0; i < items.length; i += 1) {
     const it = items[i];
     if (it.kind === "assistant" && it.streaming) {
-      next[i] = { ...it, streaming: false };
+      // 思維鏈結算時機 b（2026-09-20）：想完就直接結束、沒有正文可等——收尾這一刻
+      // 就是思考的終點。已在時機 a 結算過的條目（reasoningMs 已定）不再覆寫，
+      // 沒有計時起點的條目維持原本形狀。
+      const reasoningMs = settleReasoningMs(it, Date.now());
+      next[i] = reasoningMs === undefined ? { ...it, streaming: false } : { ...it, streaming: false, reasoningMs };
     } else if (it.kind === "tool" && it.status === "running") {
       next[i] = { ...it, status: "failed" };
     } else {
@@ -500,6 +626,10 @@ function settleItems(items: AgentTranscriptItem[]): AgentTranscriptItem[] {
 }
 
 // turn.done 只结算当前条目，事件本体不参与；参数保留以符合 reducer 统一签名。
+// 2026-09-21 暴君裁定：异步子代理跨回合在跑，回合收尾只转存**已定态**条目，
+// running 卡原样保留（见 retireSubagentItems），wakeParent 后的回合收到
+// subagent.done 幀才把终态裁决定下来——settleItems 判死 running 工具卡，但
+// 子代理 lifecycle 的终态归 gateway 的 done 幀独占，与 pending 工具卡同构。
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 function reduceTurnDone(state: AgentChatState, _event: AgentSseEvent & { name: "turn.done" }): AgentChatState {
   const items = retireSubagentItems(settleItems(state.items));
@@ -509,6 +639,51 @@ function reduceTurnDone(state: AgentChatState, _event: AgentSseEvent & { name: "
 function reduceTurnStatus(state: AgentChatState, event: AgentSseEvent & { name: "turn.status" }): AgentChatState {
   // 暂态单行：替换不累加。展示由 Transcript 专用状态行承担，绝不进 items 正文。
   return { ...state, turnStatus: event.data.text, turnActive: true };
+}
+
+/**
+ * 本輪計畫（turn.plan，2026-09-18 契約）：建立一張獨立的 `kind:"plan"` 條目。
+ *
+ * 為什麼不併進 assistant 條目：計畫是**導航**不是交付物。併進去會讓 100 秒後
+ * 才到的重模型正文物理接在計畫後面（同一條 streaming:true 條目），使用者分不清
+ * 「計畫 vs 答案」，agent-debug 的「首字延遲」語義也會被污染。所以這裡開新條目。
+ *
+ * 與 message.delta 同款清掉罐頭狀態行（turnStatus: undefined）並設 turnActive:true
+ * ——計畫幀到的這一刻回合確實已經開始了（送訊後 ~1.4–2.0s），狀態行/停止鈕
+ * 必須立刻反映，不能等到 100 秒後首行正文。
+ *
+ * `superseded === true`：就地換掉既有計畫條目的文字（同一 id，React 不重掛），
+ * 不新增第二張卡——同一輪只有一份計畫。找不到既有卡時照樣建立（寧可多一張卡，
+ * 也不讓網關送來的計畫文字消失）。
+ */
+function reduceTurnPlan(state: AgentChatState, event: AgentSseEvent & { name: "turn.plan" }): AgentChatState {
+  const { plan, experts, provisional, superseded } = event.data;
+  const items = state.items.slice();
+  if (superseded === true) {
+    for (let i = items.length - 1; i >= 0; i -= 1) {
+      const it = items[i];
+      if (it.kind === "plan") {
+        items[i] = {
+          ...it,
+          text: plan,
+          ...(experts !== undefined ? { experts } : {}),
+          ...(provisional !== undefined ? { provisional } : {}),
+        };
+        return { ...state, items, turnActive: true, turnStatus: undefined };
+      }
+    }
+  }
+  const item: AgentPlanItem = {
+    kind: "plan",
+    id: eventItemId("plan", event.event_id),
+    seq: event.event_id,
+    text: plan,
+    ...(experts !== undefined ? { experts } : {}),
+    ...(provisional !== undefined ? { provisional } : {}),
+    // 初始展開：計畫剛到、正文還沒來，這張卡此刻是畫面上唯一的資訊。
+    collapsed: false,
+  };
+  return { ...state, items: [...items, item], turnActive: true, turnStatus: undefined };
 }
 
 function reduceConfirmRequest(state: AgentChatState, event: AgentSseEvent & { name: "confirm.request" }): AgentChatState {
@@ -601,12 +776,13 @@ function reduceSessionError(state: AgentChatState, event: AgentSseEvent & { name
     text: event.data.human_message || event.data.message,
   };
   // 错误不终结会话；但中止类错误（Tool execution aborted）到的这一刻，
-  // 子代理产出必须落成产出卡（F3）——本端可能等不到 turn.done，
-  // 不能让「画面比中止前更空」的路径再出现一次。
+  // **已定态**子代理的产出必须落成产出卡（F3）——本端可能等不到 turn.done。
+  // 0921 契约：仍在跑（running）的条目由 retireSubagentItems 原样保留，终态
+  // 等 gateway 的 subagent.done 裁决；「画面比中止前更空」自此不再发生。
   return { ...state, items: [...retireSubagentItems(state.items), notice] };
 }
 
-/** 收尾：停掉 streaming、把还在转的工具判死、子代理条目转存产出卡、清待确认、推一条 notice。 */
+/** 收尾：停掉 streaming、把还在 running 的工具判死、已定态子代理条目转存产出卡（running 跨回合保留，0921 契约）、清待确认、推一条 notice。 */
 function settleClosedTurn(state: AgentChatState, eventId: number, reason?: string): AgentChatState {
   const items = retireSubagentItems(settleItems(state.items));
   const notice: AgentNoticeItem = {
@@ -688,12 +864,16 @@ export function agentChatReducer(state: AgentChatState, event: AgentSseEvent): A
       return reduceTurnDone(base, event);
     case "turn.status":
       return reduceTurnStatus(base, event);
+    case "turn.plan":
+      return reduceTurnPlan(base, event);
     case "confirm.request":
       return reduceConfirmRequest(base, event);
     case "confirm.resolved":
       return reduceConfirmResolved(base, event);
     case "question.request":
       return reduceQuestionRequest(base, event);
+    case "steer.status":
+      return reduceSteerStatus(base, event);
     case "question.replied":
       return reduceQuestionReplied(base, event);
     case "question.rejected":
@@ -719,7 +899,12 @@ export function agentChatReducer(state: AgentChatState, event: AgentSseEvent): A
 // ─────────────────────────── 纯 helpers（非 SSE 事件的路径）
 
 /** 乐观插入一则使用者消息，不等网关回声。 */
-export function appendUserTurn(state: AgentChatState, text: string, attachments?: AgentAttachmentRef[]): AgentChatState {
+export function appendUserTurn(
+  state: AgentChatState,
+  text: string,
+  attachments?: AgentAttachmentRef[],
+  steer?: { id: string; status: AgentSteerStatus; position?: number },
+): AgentChatState {
   const item: AgentUserTurnItem = {
     kind: "user",
     id: userItemId(state),
@@ -729,7 +914,157 @@ export function appendUserTurn(state: AgentChatState, text: string, attachments?
   if (attachments && attachments.length > 0) {
     item.attachments = attachments;
   }
+  // REQ-D2：回合中追加的指引（steer）带着状态徽章入场（queued／injected）。
+  // 不传 steer 时与改动前逐位等價（无 steer 的乐观插队语义不变）。
+  if (steer) {
+    item.steer = steer;
+  }
   return { ...state, items: [...state.items, item], turnActive: true, turnStatus: undefined };
+}
+
+/**
+ * REQ-D2：steer.status 帧 —— 把状态挂回那条 user 条目（乐观插入时带的 id）。
+ *
+ * 三条纪律：
+ *   1. 只有带 steer 徽章的 user 条目会被更新（绝不误标普通消息）。
+ *   2. 找不到对应 id（例如重连回放丢了乐观条目）→ 原样返回，不凭空造条目。
+ *   3. **终态冻结**：条目一旦进终态（injected/applied/aborted/failed），任何后续帧
+ *      都不再改动它——既挡住迟到的 queued 帧把它打回「排队中」（D2-5：injected 原本
+ *      不是终态，重放/迟到的 queued 帧能把「已注入本回合」打回假排队），也挡住
+ *      终态之间互相覆盖（已中止不得被迟到的 injected 帧复活成「已生效」）。
+ */
+function reduceSteerStatus(state: AgentChatState, event: AgentSseEvent & { name: "steer.status" }): AgentChatState {
+  return applySteerStatus(state, event.data.steer_id, event.data.status, event.data.position);
+}
+
+/** 单条 steer 的状态落地（SSE 帧与本地 ack 共用同一实现，两条来路不会漂移）。
+ *  queuedAt 只在状态真的落在 queued 时写入（本地 ack 带本端时刻）；其余状态不携带、
+ *  也不抹掉既有值（迟到的帧不该让「排队多久了」失真——D2-3 的逾时判定靠它）。 */
+export function applySteerStatus(
+  state: AgentChatState,
+  steerId: string,
+  status: AgentSteerStatus,
+  position?: number,
+  queuedAt?: number,
+): AgentChatState {
+  let touched = false;
+  const items = state.items.map((item) => {
+    if (item.kind !== "user" || !item.steer || item.steer.id !== steerId) return item;
+    if (isSteerTerminal(item.steer.status)) return item; // 终态冻结（见 reduceSteerStatus 纪律 3）
+    touched = true;
+    const anchor = status === "queued" ? (queuedAt ?? item.steer.queuedAt) : item.steer.queuedAt;
+    return {
+      ...item,
+      steer: {
+        id: steerId,
+        status,
+        ...(typeof position === "number" ? { position } : {}),
+        ...(typeof anchor === "number" ? { queuedAt: anchor } : {}),
+      },
+    };
+  });
+  return touched ? { ...state, items } : state;
+}
+
+/**
+ * D2-3：把「排队中」的徽章按 TTL 收口成终态。
+ *
+ * 为什么需要它：网關的 pendingSteers 是 volatile——重启／续期后队列整个消失，而且
+ * 网關已经不记得那些 steer_id，永远不会补终态帧。此时前端还原出来的条目会永远停在
+ * 「排队中」＝反向假话。所以前端以同一个 TTL 自行兜底：逾时仍未见任何终态帧 →
+ * 翻 failed（徽章文案＝「引导未能送达（未生效）」）。
+ *
+ * 纯函数：时钟从 opts.now 进来。基准 = ste.driven 的 queuedAt ?? opts.baselineAt
+ * （缺失＝无基准，本趟不动它，也不凭空猜）。**命中基准缺失且有 baselineAt 时把它
+ * 写回条目**（queuedAt = baselineAt），让下一趟有具体锚点可判——不留「无锚点」的
+ * 永动机徽章。
+ */
+export function expireQueuedSteers(
+  state: AgentChatState,
+  opts: { now: number; ttlMs: number; baselineAt?: number },
+): AgentChatState {
+  let touched = false;
+  const items = state.items.map((item) => {
+    if (item.kind !== "user" || !item.steer || item.steer.status !== "queued") return item;
+    const anchor = item.steer.queuedAt ?? opts.baselineAt;
+    if (typeof anchor !== "number") return item;
+    if (opts.now - anchor >= opts.ttlMs) {
+      touched = true;
+      return { ...item, steer: { id: item.steer.id, status: "failed" as AgentSteerStatus, queuedAt: anchor } };
+    }
+    if (item.steer.queuedAt !== undefined) return item;
+    touched = true; // 只在写回锚点时算改动（拿到锚点，下一趟才判得动）
+    return { ...item, steer: { ...item.steer, queuedAt: anchor } };
+  });
+  return touched ? { ...state, items } : state;
+}
+
+/**
+ * 用户按了停止：把还在排队中的 steer 全部改判中止（停止优先于 steer）。
+ *
+ * 为什么本端also改判而不是等网关的 aborted 帧：网關 handleAbortSession 里
+ * dropPendingSteers 与 abort 落地是同一次调用（确定性），本端这次改判与它同义；
+ * 已 injected / applied / aborted / failed 的终态条目不回退（见 applySteerStatus）。
+ */
+export function markQueuedSteersAborted(state: AgentChatState): AgentChatState {
+  let touched = false;
+  const items = state.items.map((item) => {
+    if (item.kind !== "user" || !item.steer || item.steer.status !== "queued") return item;
+    touched = true;
+    return { ...item, steer: { id: item.steer.id, status: "aborted" as AgentSteerStatus } };
+  });
+  return touched ? { ...state, items } : state;
+}
+
+/** 终态：已生效／已中止／未生效／未确认。到了这里就不再被后续帧改回进行中。
+ *  injected（D2-5 修复，2026-09-23）：它也是终态——「已注入本回合」是已经发生过的事，
+ *  迟到的 queued 帧（重连回放）不得把它打回「排队中」的假象。
+ *  uncertain（D2b，2026-09-23）：网关明说「投递已发出但没等到确认，永不自动重发」——
+ *  它同样是终态：迟到的 applied/queued 帧不得把「未确认」改写成已生效或排队中，
+ *  那正是「模型收到两次而 View 只显示一次」的镜像假话。 */
+function isSteerTerminal(status: AgentSteerStatus): boolean {
+  return (
+    status === "applied" ||
+    status === "aborted" ||
+    status === "failed" ||
+    status === "injected" ||
+    status === "uncertain"
+  );
+}
+
+/**
+ * D2b（2026-09-23）：重放被拒时的徽章纠正。
+ *
+ * 为什么需要一条专门的路径：hook 在 catch 里先按「未能送达」占位（那是本地猜测，不是
+ * 网关事实），而网关对重放的权威回应带着**既有命令的真实状态**（已生效／已中止／未确认）。
+ * 走通用 applySteerStatus 的话，先落的 "failed" 已经是终态，纠正会被终态冻结挡掉，
+ * 徽章就永远停在「未能送达」＝假话。
+ *
+ * 边界刻意收得很窄：**只纠正本地占位的 "failed"**，且拒绝把状态写成 "queued"
+ *（那会回到「排队中」等一张永远不会来的终态帧）。已是网关-authored 终态
+ *（含 uncertain）的条目一律不动——「uncertain 不得被迟到帧改写」的契约不破。
+ */
+export function applySteerRejection(
+  state: AgentChatState,
+  steerId: string,
+  status: AgentSteerStatus,
+): AgentChatState {
+  if (status === "queued") return state;
+  let touched = false;
+  const items = state.items.map((item) => {
+    if (item.kind !== "user" || !item.steer || item.steer.id !== steerId) return item;
+    if (item.steer.status !== "failed") return item; // 只纠正本地占位，不覆盖任何网关-authored 状态
+    touched = true;
+    return {
+      ...item,
+      steer: {
+        id: steerId,
+        status,
+        ...(typeof item.steer.queuedAt === "number" ? { queuedAt: item.steer.queuedAt } : {}),
+      },
+    };
+  });
+  return touched ? { ...state, items } : state;
 }
 
 /** 用 GET /quota 的结果（已对齐 AgentQuotaState 形状）填入初始余额。 */

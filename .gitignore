@@ -150,4 +150,8 @@ redteam-*
 /deploy-staging/*
 # 例外：gateway/ 子目錄是純程式碼真源（生產 index.ts 快照＋記憶模組，PRD D7），不含憑證
 !/deploy-staging/gateway/
+# 例外：laya-server/ 是 Jev 兜底判定服務純程式碼（server.py/Dockerfile），不含憑證與權重
+!/deploy-staging/laya-server/
+# 例外：vps-tools/ 是 VPS 運維工具純程式碼（gateway 對賬腳本等），不含憑證
+!/deploy-staging/vps-tools/
 *.bak-*

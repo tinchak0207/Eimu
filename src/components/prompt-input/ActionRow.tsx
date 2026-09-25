@@ -103,7 +103,7 @@ export function ActionRow({
               type="button"
               onClick={() => onModeChange(mode === "agent" ? "generate" : "agent")}
               aria-pressed={mode === "agent"}
-              title="交给 AI 助理：说一句话，它自动选模型、风格、比例并出图"
+              title="AI 助理：说一句话，它拆需求、调模型和工具，一路做到成品"
               className={cn(
                 "inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full px-3.5 text-[13px] font-medium transition-all duration-200",
                 mode === "agent"

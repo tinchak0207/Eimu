@@ -2,7 +2,7 @@
 //
 // 吞自 eternityspring/shuohao-skills（Apache 2.0）：outline/cast/art/script/storyboard
 // 五段 JSON 接力收敛为本平台「一条配方」（契约见 docs/skills/drama-recipe.md）。
-// 资产引用复用 character-cards 卡体系（C/P 编号惯例对应 character/scene 卡 id），
+// 资产引用复用 character-cards 卡体系（C/P/PR 编号惯例对应 character/scene/prop 卡 id），
 // 锁定注入复用 applyCharacterCards（卡 id 序稳定拼接、幂等），不建第二套注入。
 //
 // 「能算的不让模型猜」：
@@ -11,7 +11,7 @@
 //   - 资产清单 → deriveRequiredAssets（引用卡 id 全集，代码可复验）
 // 模型只产出语义字段；本文件所有函数零副作用、零 IO。
 
-import { applyCharacterCards } from "./character-cards";
+import { applyCharacterCards, mergeTokenReferencedCards } from "./character-cards";
 import type { CharacterCard, CharacterCardKind, CharacterCardReferenceImage } from "./character-cards";
 
 // ─────────────────────────────────────────── 段名与常量
@@ -29,7 +29,7 @@ const MAX_ENTRIES = 200; // cast/art 条目上限
 const MAX_SCENES = 200;
 const MAX_BEATS = 400;
 const MAX_SHOTS = 400;
-const MAX_CARD_REFS_PER_SHOT = 16; // 单分镜引用卡 id 上限（角色+场景各算一次）
+const MAX_CARD_REFS_PER_SHOT = 16; // 单分镜引用卡 id 上限（角色/场景/道具各算一次，每栏各自截断）
 
 // ─────────────────────────────────────────── 宽松清洗小工具
 
@@ -129,6 +129,11 @@ export interface DramaStoryboardShot {
   characterCardIds: string[];
   /** 引用场景卡 id（P 编号）。 */
   sceneCardIds: string[];
+  /**
+   * 引用道具卡 id（2026-09-24 新增；`kind==="prop"` 的卡，惯例 PR 前缀）。
+   * 可選：舊分鏡 JSON 沒有此欄（缺省＝無道具引用，零回歸）。
+   */
+  propCardIds?: string[];
   /** 段级负面词（与卡负面词合并）。 */
   negativePrompt: string | null;
   size: string | null;
@@ -264,12 +269,14 @@ function normalizeStoryboard(raw: unknown): DramaStoryboardSegment | null {
       if (!shotId || !prompt) return null;
       const characterCardIds = boundedStringArray(s.characterCardIds ?? s.character_card_ids ?? s.characters, MAX_CARD_REFS_PER_SHOT, MAX_SHORT_TEXT_LENGTH);
       const sceneCardIds = boundedStringArray(s.sceneCardIds ?? s.scene_card_ids ?? s.scenes, MAX_CARD_REFS_PER_SHOT, MAX_SHORT_TEXT_LENGTH);
+      const propCardIds = boundedStringArray(s.propCardIds ?? s.prop_card_ids ?? s.props, MAX_CARD_REFS_PER_SHOT, MAX_SHORT_TEXT_LENGTH);
       const duration = boundedNumber(s.durationSeconds ?? s.duration_seconds ?? s.duration);
       return {
         shotId,
         prompt,
         characterCardIds,
         sceneCardIds,
+        propCardIds,
         negativePrompt: boundedString(s.negativePrompt ?? s.negative_prompt, MAX_TEXT_LENGTH),
         size: boundedString(s.size, 40),
         durationSeconds: duration !== null && duration > 0 ? duration : null,
@@ -393,10 +400,16 @@ function mergeNegativePrompts(...parts: Array<string | null | undefined>): strin
   return out.length > 0 ? out.join(", ") : null;
 }
 
+/**
+ * 解析引用卡 id → 卡实体（`found`）/ 未解析（`missing`，任务不可提交）。
+ * `expectedKind` 認三族：`"character"`（角色）/ `"scene"`（場景）/ `"prop"`（道具）。
+ * 2026-09-24：`"prop"` 由本參數的聯集加入（道具卡與角色/場景卡走**逐字同一條**解析規則，
+ * 不另立第二套）；`CharacterCardKind` 本體由 character-cards.ts 擁有，本檔不越權改它。
+ */
 function resolveCardRefs(
   ids: string[],
   byId: Map<string, CharacterCard>,
-  expectedKind: CharacterCardKind,
+  expectedKind: CharacterCardKind | "prop",
 ): { found: CharacterCard[]; missing: string[] } {
   const found: CharacterCard[] = [];
   const missing: string[] = [];
@@ -405,8 +418,8 @@ function resolveCardRefs(
     if (seen.has(id)) continue;
     seen.add(id);
     const card = byId.get(id);
-    // C/P 编号惯例：characterCardIds 必须解析到 character 卡、sceneCardIds 到 scene 卡，
-    // id 存在但种类不符视同资产缺失（needs_asset），不做静默替换。
+    // C/P/PR 编号惯例：characterCardIds 必须解析到 character 卡、sceneCardIds 到 scene 卡、
+    // propCardIds 到 prop 卡；id 存在但种类不符视同资产缺失（needs_asset），不做静默替换。
     if (!card || card.kind !== expectedKind) missing.push(id);
     else found.push(card);
   }
@@ -418,6 +431,9 @@ function resolveCardRefs(
  *   - prompt = 段提示词 + 被引用卡锁定片段（applyCharacterCards：卡 id 升序前缀、幂等）
  *   - referenceImages = 被引用卡参考图（url 去重、角色保留）
  *   - negativePrompt = 段级负面词 + 卡负面词合并
+ *   - 段提示词里的 `@[種類:名]` token 會就地解析：命中**卡庫全量**（不只分鏡宣告的卡）時
+ *     併入注入集（mergeTokenReferencedCards）——卡在庫即可被引用，不必先手動鎖定
+ *   - propCardIds 的道具卡与角色/场景卡**同批**进 applyCharacterCards（同一把注入尺，不另开通道）
  *   - 引用卡 id 不存在或种类不符 → 该任务 needsAsset=true + missingCardIds，
  *     已解析卡照常注入（补齐资产后重切结果稳定）
  *   - 输入宽松：直接喂原始 storyboard 段；cards 来自 character-card-store 的当前态
@@ -429,11 +445,18 @@ export function storyboardToBatchTasks(storyboard: unknown, cards: CharacterCard
   return normalized.shots.map((shot) => {
     const characterRefs = resolveCardRefs(shot.characterCardIds, byId, "character");
     const sceneRefs = resolveCardRefs(shot.sceneCardIds, byId, "scene");
-    const missingCardIds = [...characterRefs.missing, ...sceneRefs.missing];
+    const propRefs = resolveCardRefs(shot.propCardIds ?? [], byId, "prop");
+    const missingCardIds = [...characterRefs.missing, ...sceneRefs.missing, ...propRefs.missing];
     // 卡 id 序稳定拼接：applyCharacterCards 内部按 id 升序注入，与传入顺序无关。
-    const applied = applyCharacterCards(shot.prompt, [...characterRefs.found, ...sceneRefs.found]);
+    // 顺序照写 character → scene → prop（只影响可读性：applyCharacterCards 内部本就按 id 升序重排）。
+    const appliedCards = [...characterRefs.found, ...sceneRefs.found, ...propRefs.found];
+    // 本段 prompt token 就地解析（2026-09-25）：卡在庫即可被 `@[種類:名]` 引用，不必先手動鎖定。
+    // 判準/聯集全在 mergeTokenReferencedCards（純函式）；零 token／全未命中＝回同一陣列參考，
+    // 故既有「只注入分鏡宣告的卡」行為逐位元不變。
+    const injectedCards = mergeTokenReferencedCards(appliedCards, cards, shot.prompt);
+    const applied = applyCharacterCards(shot.prompt, injectedCards);
     const loraIds: string[] = [];
-    for (const card of [...characterRefs.found, ...sceneRefs.found]) {
+    for (const card of injectedCards) {
       for (const loraId of card.loraIds ?? []) {
         if (!loraIds.includes(loraId)) loraIds.push(loraId);
       }
@@ -461,7 +484,7 @@ export function deriveRequiredAssets(storyboard: unknown): string[] {
   if (!normalized) return [];
   const ids = new Set<string>();
   for (const shot of normalized.shots) {
-    for (const id of [...shot.characterCardIds, ...shot.sceneCardIds]) ids.add(id);
+    for (const id of [...shot.characterCardIds, ...shot.sceneCardIds, ...(shot.propCardIds ?? [])]) ids.add(id);
   }
   return [...ids].sort((a, b) => (a === b ? 0 : a < b ? -1 : 1));
 }

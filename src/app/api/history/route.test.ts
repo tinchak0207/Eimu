@@ -93,3 +93,24 @@ test("server history store uses the shared blob-backed persistence adapter", () 
   // Legacy fixed-path documents still have to be migrated in, not orphaned.
   assert.match(source, /function legacyIndexPath/);
 });
+
+/**
+ * 生成任务跑在 VPS 控制面（Vercel 只配了 PROXY_ORIGIN，没有 GENERATION_DATABASE_URL），
+ * 而 /api/history 没有被 next.config 代理——不在路由里显式取回，任务卡片在 Vercel 上
+ * 永远投影不出来：用户「再来 N 组」跑完，历史里就是没有那张卡。
+ */
+test("Vercel 侧历史必须经控制面代理取回任务记录，否则任务卡片永远进不了历史", () => {
+  const source = read("src/app/api/history/route.ts");
+
+  assert.match(source, /GENERATION_CONTROL_PLANE_PROXY_ORIGIN/);
+  assert.match(source, /\/image-control\/api\/history/);
+  // 本地控制面未启用时才走代理，两边不会同时拉同一份数据。
+  assert.match(source, /if \(generationControlPlaneEnabled\(\)\)[\s\S]*?\} else \{[\s\S]*?fetchControlPlaneHistory/);
+  // 不传 cursor：本地还要按 cursor 重新分页，代理页大小必须够大。
+  assert.match(source, /params\.delete\("cursor"\)/);
+  assert.match(source, /CONTROL_PLANE_HISTORY_PAGE_SIZE/);
+  // 身份用调用者自己的凭据转发，绝不伪造 tenant。
+  assert.match(source, /req\.headers\.get\("authorization"\)/);
+  // 控制面不可达时不能把整页历史打挂。
+  assert.match(source, /catch[\s\S]*?\[history\] 控制面代理请求失败/);
+});

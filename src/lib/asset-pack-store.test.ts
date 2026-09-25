@@ -4,6 +4,7 @@ import {
   AssetPackLimitError,
   MAX_DIGEST_LENGTH,
   MAX_ITEMS_PER_PACK,
+  MAX_PACK_ID_LENGTH,
   MAX_PACKS_PER_USER,
   __resetAssetPackStoreForTests,
   deleteAssetPacks,
@@ -183,3 +184,16 @@ test("saveAssetPack：不合法 pack 拋錯", async () => {
     /invalid asset pack/,
   );
 });
+
+// ─────────────────────────────────────────── REQ-B2-4 pack id 邊界
+
+test("B2-4 pack id：長度上限與分隔符邊界（拒絕而非截斷，避免『可建不可分享』與撞鍵別名）", () => {
+  // 邊界內：200 字可用（與 share/mount 的 200 同一個界）。
+  const atLimit = "a".repeat(MAX_PACK_ID_LENGTH);
+  assert.ok(normalizeAssetPack({ id: atLimit, title: "边界内的包", items: [], tags: [] }));
+  // 超長：拒收（過去 str 無上限 → 能建但不能分享/掛用）。
+  assert.equal(normalizeAssetPack({ id: "a".repeat(MAX_PACK_ID_LENGTH + 1), title: "超长", items: [], tags: [] }), null);
+  // 含保留分隔符 `:`：拒收（作用域層確定性鍵的段分隔符，含它會撞鍵）。
+  assert.equal(normalizeAssetPack({ id: "pack:x:card:y", title: "撞键", items: [], tags: [] }), null);
+  assert.equal(normalizeAssetPack({ id: "  pack-ok  ", title: "空白", items: [], tags: [] })?.id, "pack-ok");
+}); 

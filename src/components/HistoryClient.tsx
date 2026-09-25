@@ -10,7 +10,6 @@ import { fetchUsageStat } from "@/lib/new-api-client";
 import { buildHistoryStats } from "@/lib/history-types";
 import type { HistoryEntry, HistoryQuery } from "@/lib/history-types";
 import { exportHistoryCsv, exportHistoryJson, exportHistoryZip } from "@/lib/history-export";
-import { publishUserShowcaseCase } from "@/lib/showcase-user-cases";
 import { imageHelpers } from "@/lib/image-helpers";
 import { cn } from "@/lib/utils";
 import {
@@ -22,9 +21,11 @@ import {
   HistorySkeleton,
   HistoryStats,
   RerunDialog,
-  SaveCardDialog,
 } from "@/components/history";
 import type { HistoryRerunMode } from "@/components/history";
+import { LineageDrawer } from "@/components/lineage/LineageDrawer";
+import { entryToLineageView } from "@/lib/lineage-view";
+import type { LineageRecordView } from "@/lib/lineage";
 import "@/components/history/history.css";
 
 /**
@@ -44,12 +45,27 @@ const PARAM = {
   imageSize: "size",
   starred: "starred",
   withImage: "withImage",
+  // 记录类型档位也进 URL：分享/刷新/后退都要保留「我正在只看的这一类」，
+  // 与 model/size 这些筛选参数同一待遇。
+  entryKind: "kind",
 } as const;
+
+/** URL 里只认这四个值；其它（含拼错）一律当作「全部」，不把非法值带进查询。 */
+const ENTRY_KIND_VALUES = ["image", "video", "workflow"] as const;
+type EntryKindFilter = (typeof ENTRY_KIND_VALUES)[number] | "all";
+
+function parseEntryKind(value: string | null): EntryKindFilter {
+  const trimmed = value?.trim();
+  return ENTRY_KIND_VALUES.includes(trimmed as (typeof ENTRY_KIND_VALUES)[number])
+    ? (trimmed as (typeof ENTRY_KIND_VALUES)[number])
+    : "all";
+}
 
 function queryFromSearchParams(params: URLSearchParams): HistoryQuery {
   const keyword = params.get(PARAM.keyword)?.trim();
   const modelId = params.get(PARAM.modelId)?.trim();
   const imageSize = params.get(PARAM.imageSize)?.trim();
+  const entryKind = parseEntryKind(params.get(PARAM.entryKind));
 
   return {
     ...(keyword ? { keyword } : {}),
@@ -57,6 +73,7 @@ function queryFromSearchParams(params: URLSearchParams): HistoryQuery {
     ...(imageSize ? { imageSize } : {}),
     ...(params.get(PARAM.starred) === "1" ? { starredOnly: true } : {}),
     ...(params.get(PARAM.withImage) === "1" ? { withImageOnly: true } : {}),
+    ...(entryKind !== "all" ? { entryKind } : {}),
   };
 }
 
@@ -67,6 +84,7 @@ function searchParamsFromQuery(query: HistoryQuery): string {
   if (query.imageSize) params.set(PARAM.imageSize, query.imageSize);
   if (query.starredOnly) params.set(PARAM.starred, "1");
   if (query.withImageOnly) params.set(PARAM.withImage, "1");
+  if (query.entryKind) params.set(PARAM.entryKind, query.entryKind);
   return params.toString();
 }
 
@@ -84,10 +102,10 @@ export function HistoryClient() {
   const [accountQuota, setAccountQuota] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  /** 「存为角色卡」目标记录：非 null 时弹出命名对话框。 */
-  const [saveCardEntry, setSaveCardEntry] = useState<HistoryEntry | null>(null);
   /** 「再来 N 组 / 微调变体」目标记录 + 模式：非 null 时弹出重跑对话框。 */
   const [rerunTarget, setRerunTarget] = useState<{ entry: HistoryEntry; mode: HistoryRerunMode } | null>(null);
+  /** REQ-D1：溯源抽屉的目标记录（页面级单例，历史卡与灯箱共用）。 */
+  const [lineageEntry, setLineageEntry] = useState<HistoryEntry | null>(null);
 
   // ── 查询与 URL 同步 ───────────────────────────────────────
 
@@ -110,6 +128,16 @@ export function HistoryClient() {
     lastQueryRef.current = serialized;
     runSearch(urlQuery);
   }, [isLoggedIn, urlQuery, runSearch, loaded]);
+
+  /** 生成中任务轮询：有 queued/running 卡时每 5 秒刷新，全部落地即停。 */
+  const hasInProgress = history.entries.some(
+    (entry) => entry.taskStatus === "queued" || entry.taskStatus === "running",
+  );
+  useEffect(() => {
+    if (!isLoggedIn || !hasInProgress) return;
+    const timer = window.setInterval(() => { runSearch(urlQuery); }, 5000);
+    return () => window.clearInterval(timer);
+  }, [isLoggedIn, hasInProgress, runSearch, urlQuery]);
 
   const handleQueryChange = useCallback(
     (next: HistoryQuery) => {
@@ -232,11 +260,38 @@ export function HistoryClient() {
     [runSearch, urlQuery],
   );
 
+  // ── REQ-D1 溯源抽屉（页面级单例；历史卡与灯箱的「溯源」入口共用）────
+  const handleShowLineage = useCallback((entry: HistoryEntry) => {
+    setLineageEntry(entry);
+  }, []);
+
+  /**
+   * 抽屜逐級跳轉：血統節點的把手能對上當前列表裡的記錄時，直接開那條的燈箱並關抽屜
+   * （返回 true 回絕抽屜自己的就地鉆入）；對不上（例如資產卡在歷史頁沒有落點）
+   * 返回 false，抽屜就地鉆入該級鏈條，誠實且零死鏈。
+   */
+  const handleLineageJump = useCallback((view: LineageRecordView) => {
+    const jobId = view.selfHandles.jobId;
+    const assetId = view.selfHandles.assetId;
+    const index = history.entries.findIndex((item) =>
+      (jobId !== undefined && (item.taskId === jobId || item.generationId === jobId || item.id === jobId)) ||
+      (assetId !== undefined && item.id !== "" && `history-${item.id}` === assetId) ||
+      (assetId !== undefined && item.results.some((result) => result.resultId && result.resultId === assetId)),
+    );
+    if (index < 0) return false;
+    setLineageEntry(null);
+    setLightboxIndex(index);
+    return true;
+  }, [history.entries]);
+
   const handleDownload = useCallback(async (entry: HistoryEntry) => {
-    const result = entry.results.find((item) => item.image || item.imageUrl);
-    const src = result?.image ? result.image : result?.imageUrl;
+    // 视频记录的结果里只有 videoUrl，没有 image/imageUrl。历史卡片既然已经把
+    // 视频缩略图显示出来了，下载钮就必须能把那段视频拿走，否则按下去只会得到
+    // 一句「没有可下载的图片」。
+    const result = entry.results.find((item) => item.image || item.imageUrl || item.videoUrl);
+    const src = result?.image ? result.image : result?.imageUrl ?? result?.videoUrl;
     if (!src) {
-      setNotice("这条记录没有可下载的图片。");
+      setNotice("这条记录没有可下载的图片或视频。");
       return;
     }
     try {
@@ -285,26 +340,6 @@ export function HistoryClient() {
       setBusy(false);
     }
   }, [selectedEntries]);
-
-  // ── 存为角色卡（历史一锚定）─────────────────────────
-
-  /** 对话框完成回调：结果进页面通知条（成功/失败统一走这里）。 */
-  const handleSaveCardDone = useCallback((message: string) => {
-    setSaveCardEntry(null);
-    setNotice(message);
-  }, []);
-
-  // ── 发布为案例（配方资产总线对向动作）───────────────────
-  // 把这条历史的配方快照发布进首页案例环（showcase-user-cases 的 localStorage
-  // 数据层扩展点，幂等）。无审核流的最小可用路径：发布后回首页即出现在案例环。
-  const handlePublishCase = useCallback((entry: HistoryEntry) => {
-    const result = publishUserShowcaseCase(entry);
-    setNotice(result.ok
-      ? (result.alreadyPublished
-          ? "这条配方已发布过案例，首页案例环里可以直接找到它。"
-          : "已发布为案例：回到首页，它已进入案例环，可随时「用此工作流打开」。")
-      : result.reason);
-  }, []);
 
   const { toggleStar } = history;
 
@@ -489,6 +524,7 @@ export function HistoryClient() {
         ) : (
           <HistoryGrid
             entries={history.entries}
+            entryKindFilter={parseEntryKind(searchParams.get(PARAM.entryKind))}
             selectionMode={selectionMode}
             selectedIds={selectedIds}
             loadingMore={history.loadingMore}
@@ -500,10 +536,9 @@ export function HistoryClient() {
             onDownload={handleDownload}
             onDelete={handleDelete}
             onOpenAgent={handleOpenAgent}
-            onSaveCard={setSaveCardEntry}
             onRerun={handleRerun}
             onRerunVariant={handleRerunVariant}
-            onPublishCase={handlePublishCase}
+            onShowLineage={handleShowLineage}
           />
         )}
       </div>
@@ -525,10 +560,9 @@ export function HistoryClient() {
         onToggleStar={toggleStar}
         onDownload={handleDownload}
         onDelete={handleDelete}
-        onSaveCard={setSaveCardEntry}
         onRerun={handleRerun}
         onRerunVariant={handleRerunVariant}
-        onPublishCase={handlePublishCase}
+        onShowLineage={handleShowLineage}
       />
 
       {rerunTarget && (
@@ -540,11 +574,12 @@ export function HistoryClient() {
         />
       )}
 
-      {saveCardEntry && (
-        <SaveCardDialog
-          entry={saveCardEntry}
-          onClose={() => setSaveCardEntry(null)}
-          onDone={handleSaveCardDone}
+      {lineageEntry && (
+        <LineageDrawer
+          host={entryToLineageView(lineageEntry)}
+          hostKindLabel="生成记录"
+          onClose={() => setLineageEntry(null)}
+          onJump={handleLineageJump}
         />
       )}
     </div>

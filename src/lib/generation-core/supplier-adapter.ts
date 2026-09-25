@@ -175,7 +175,9 @@ async function requestSupplier(supplier: SupplierRecord, input: SupplierGenerati
     form.append("model", upstreamModel);
     form.append("prompt", input.prompt);
     if (input.size) form.append("size", input.size);
-    form.append("quality", input.quality === "quality" ? "high" : "medium");
+    if (!supplier.configuration?.omitQualityBody) {
+      form.append("quality", input.quality === "quality" ? "high" : "medium");
+    }
     body = form;
   } else {
     headers["Content-Type"] = "application/json";
@@ -185,7 +187,8 @@ async function requestSupplier(supplier: SupplierRecord, input: SupplierGenerati
       prompt: input.prompt,
       n: 1,
       size,
-      quality: input.quality === "quality" ? "high" : "medium",
+      // agnes 類上游的 text image queue 拒收 quality（2026-09-19 實錘），渠道級開關跳過。
+      ...(supplier.configuration?.omitQualityBody ? {} : { quality: input.quality === "quality" ? "high" : "medium" }),
     };
     // ControlNet 透傳線路：workflow.metadata.controlNets 是已歸一成 pixai 形狀的
     // entries（見 pixai-controlnets.ts）。只鬆散讀 metadata —— 構造來源是上游

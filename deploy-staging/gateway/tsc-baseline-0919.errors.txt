@@ -1,0 +1,111 @@
+index.ts(949,25): error TS2345: Argument of type 'SessionState' is not assignable to parameter of type 'PersistableState'.
+  Property 'memoryInjected' is missing in type 'SessionState' but required in type 'PersistableState'.
+index.ts(1191,41): error TS2339: Property 'beast_mode' does not exist on type 'UserSettings'.
+index.ts(1559,42): error TS2353: Object literal may only specify known properties, and 'fence' does not exist in type '{ pending: string; suppress: boolean; }'.
+index.ts(1563,34): error TS2345: Argument of type '{ pending: string; suppress: boolean; }' is not assignable to parameter of type 'PartStripState'.
+  Type '{ pending: string; suppress: boolean; }' is missing the following properties from type 'PartStripState': fence, sawEnglish
+index.ts(1565,10): error TS2339: Property 'sawEnglish' does not exist on type '{ pending: string; suppress: boolean; }'.
+index.ts(2420,23): error TS2677: A type predicate's type must be assignable to its parameter's type.
+  Property 'role' is missing in type '{ id: string; kind: string; metadata: Record<string, unknown>; }' but required in type '{ id: string; role: string; kind: string; metadata: Record<string, unknown>; }'.
+index.ts(2427,23): error TS2677: A type predicate's type must be assignable to its parameter's type.
+  Property 'role' is missing in type '{ id: string; kind: string; metadata: Record<string, unknown>; }' but required in type '{ id: string; role: string; kind: string; metadata: Record<string, unknown>; }'.
+index.ts(2472,33): error TS2304: Cannot find name 'CommandResult'.
+index.ts(2479,34): error TS2304: Cannot find name 'CommandResult'.
+index.ts(2524,37): error TS2304: Cannot find name 'CommandResult'.
+index.ts(2527,37): error TS2304: Cannot find name 'CommandResult'.
+index.ts(2535,39): error TS2304: Cannot find name 'CommandResult'.
+index.ts(2547,39): error TS2304: Cannot find name 'CommandResult'.
+index.ts(2554,36): error TS2304: Cannot find name 'CommandResult'.
+index.ts(2710,27): error TS2339: Property 'id' does not exist on type '{ kind: string; metadata: Record<string, unknown>; }'.
+index.ts(2735,27): error TS2677: A type predicate's type must be assignable to its parameter's type.
+  Property 'role' is missing in type '{ id: string; kind: string; metadata: Record<string, unknown>; }' but required in type '{ id: string; role: string; kind: string; metadata: Record<string, unknown>; }'.
+index.ts(2757,22): error TS2339: Property 'id' does not exist on type '{ kind: string; metadata: Record<string, unknown>; }'.
+index.ts(2771,27): error TS2339: Property 'id' does not exist on type '{ kind: string; metadata: Record<string, unknown>; }'.
+index.ts(2790,49): error TS2339: Property 'task_id' does not exist on type 'unknown'.
+index.ts(2790,66): error TS2339: Property 'id' does not exist on type 'unknown'.
+index.ts(2792,28): error TS2339: Property 'task_id' does not exist on type 'unknown'.
+index.ts(2792,45): error TS2339: Property 'id' does not exist on type 'unknown'.
+index.ts(2827,17): error TS2339: Property 'status' does not exist on type 'unknown'.
+index.ts(2828,30): error TS2339: Property 'data' does not exist on type 'unknown'.
+index.ts(2828,52): error TS2339: Property 'result_url' does not exist on type 'unknown'.
+index.ts(2828,70): error TS2339: Property 'url' does not exist on type 'unknown'.
+index.ts(2835,42): error TS2339: Property 'id' does not exist on type '{ kind: string; metadata: Record<string, unknown>; }'.
+index.ts(2835,85): error TS2339: Property 'cost_coins' does not exist on type 'unknown'.
+index.ts(2838,17): error TS2339: Property 'status' does not exist on type 'unknown'.
+index.ts(2839,77): error TS2339: Property 'error' does not exist on type 'unknown'.
+index.ts(2840,33): error TS2339: Property 'id' does not exist on type '{ kind: string; metadata: Record<string, unknown>; }'.
+index.ts(2840,59): error TS2339: Property 'error' does not exist on type 'unknown'.
+index.ts(2856,26): error TS2339: Property 'id' does not exist on type '{ kind: string; metadata: Record<string, unknown>; }'.
+index.ts(2864,33): error TS2339: Property 'id' does not exist on type '{ kind: string; metadata: Record<string, unknown>; }'.
+index.ts(2869,23): error TS2339: Property 'data' does not exist on type 'unknown'.
+index.ts(2869,47): error TS2339: Property 'result_url' does not exist on type 'unknown'.
+index.ts(2869,67): error TS2339: Property 'url' does not exist on type 'unknown'.
+index.ts(2870,46): error TS2339: Property 'id' does not exist on type '{ kind: string; metadata: Record<string, unknown>; }'.
+index.ts(2870,91): error TS2339: Property 'cost_coins' does not exist on type 'unknown'.
+index.ts(2874,22): error TS2339: Property 'id' does not exist on type '{ kind: string; metadata: Record<string, unknown>; }'.
+index.ts(2881,27): error TS2339: Property 'id' does not exist on type '{ kind: string; metadata: Record<string, unknown>; }'.
+index.ts(2881,55): error TS2339: Property 'error' does not exist on type 'unknown'.
+index.ts(2884,27): error TS2339: Property 'id' does not exist on type '{ kind: string; metadata: Record<string, unknown>; }'.
+index.ts(2966,77): error TS2367: This comparison appears to be unintentional because the types '"success" | "partial" | "failed"' and '"pending"' have no overlap.
+index.ts(4500,45): error TS2345: Argument of type '{ pending: string; suppress: boolean; }' is not assignable to parameter of type 'PartStripState'.
+  Type '{ pending: string; suppress: boolean; }' is missing the following properties from type 'PartStripState': fence, sawEnglish
+index.ts(4511,25): error TS2339: Property 'sawEnglish' does not exist on type '{ pending: string; suppress: boolean; }'.
+index.ts(4922,15): error TS2345: Argument of type 'SessionState' is not assignable to parameter of type 'PersistableState'.
+  Property 'memoryInjected' is missing in type 'SessionState' but required in type 'PersistableState'.
+index.ts(4949,6): error TS2300: Duplicate identifier 'UserSettingsShape'.
+index.ts(4953,6): error TS2300: Duplicate identifier 'UserSettingsShape'.
+index.ts(5562,48): error TS2339: Property 'beast_mode' does not exist on type 'UserSettings'.
+index.ts(5619,20): error TS2339: Property 'agent' does not exist on type '{ parts: { type: string; text: string; }[]; system?: string; model?: { providerID: string; modelID: string; }; }'.
+index.ts(7362,24): error TS2345: Argument of type '{ ts: string; user_id: string; session_id: string; opencode_session_id: string; task_id?: string; model?: string; cost_coins?: number; result_url?: string; kind?: string; event?: string; }' is not assignable to parameter of type 'LedgerEntry'.
+  Property 'kind' is optional in type '{ ts: string; user_id: string; session_id: string; opencode_session_id: string; task_id?: string; model?: string; cost_coins?: number; result_url?: string; kind?: string; event?: string; }' but required in type 'LedgerEntry'.
+index.ts(7503,33): error TS2322: Type 'undefined[]' is not assignable to type 'Record<string, unknown>'.
+  Index signature for type 'string' is missing in type 'undefined[]'.
+index.ts(7504,10): error TS2352: Conversion of type 'Record<string, unknown>' to type 'Record<string, unknown>[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type 'Record<string, unknown>' is missing the following properties from type 'Record<string, unknown>[]': length, pop, push, concat, and 35 more.
+index.ts(7508,39): error TS2322: Type 'undefined[]' is not assignable to type 'Record<string, unknown>'.
+  Index signature for type 'string' is missing in type 'undefined[]'.
+index.ts(7509,10): error TS2352: Conversion of type 'Record<string, unknown>' to type 'Record<string, unknown>[]' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type 'Record<string, unknown>' is missing the following properties from type 'Record<string, unknown>[]': length, pop, push, concat, and 35 more.
+index.ts(7575,5): error TS2322: Type 'Record<string, unknown>[]' is not assignable to type 'Record<string, unknown>'.
+  Index signature for type 'string' is missing in type 'Record<string, unknown>[]'.
+index.ts(7578,5): error TS2322: Type 'Record<string, unknown>[]' is not assignable to type 'Record<string, unknown>'.
+  Index signature for type 'string' is missing in type 'Record<string, unknown>[]'.
+index.ts(7671,25): error TS2339: Property 'status' does not exist on type '{ ok: true; bytes: number; updatedAt: number; } | { ok: false; status: number; message: string; }'.
+  Property 'status' does not exist on type '{ ok: true; bytes: number; updatedAt: number; }'.
+index.ts(7672,29): error TS2339: Property 'status' does not exist on type '{ ok: true; bytes: number; updatedAt: number; } | { ok: false; status: number; message: string; }'.
+  Property 'status' does not exist on type '{ ok: true; bytes: number; updatedAt: number; }'.
+index.ts(7672,44): error TS2339: Property 'message' does not exist on type '{ ok: true; bytes: number; updatedAt: number; } | { ok: false; status: number; message: string; }'.
+  Property 'message' does not exist on type '{ ok: true; bytes: number; updatedAt: number; }'.
+index.ts(7813,38): error TS2339: Property 'message' does not exist on type '{ ok: true; ops: unknown[]; } | { ok: false; message: string; }'.
+  Property 'message' does not exist on type '{ ok: true; ops: unknown[]; }'.
+index.ts(7868,25): error TS2339: Property 'status' does not exist on type '{ ok: true; bytes: number; updatedAt: number; } | { ok: false; status: number; message: string; }'.
+  Property 'status' does not exist on type '{ ok: true; bytes: number; updatedAt: number; }'.
+index.ts(7869,29): error TS2339: Property 'status' does not exist on type '{ ok: true; bytes: number; updatedAt: number; } | { ok: false; status: number; message: string; }'.
+  Property 'status' does not exist on type '{ ok: true; bytes: number; updatedAt: number; }'.
+index.ts(7869,44): error TS2339: Property 'message' does not exist on type '{ ok: true; bytes: number; updatedAt: number; } | { ok: false; status: number; message: string; }'.
+  Property 'message' does not exist on type '{ ok: true; bytes: number; updatedAt: number; }'.
+index.ts(9447,101): error TS2339: Property 'session_id' does not exist on type 'unknown'.
+index.ts(9711,110): error TS2339: Property 'beast_mode' does not exist on type 'UserSettings'.
+index.ts(9733,50): error TS2339: Property 'beast_mode' does not exist on type 'UserSettingsShape'.
+index.ts(9734,20): error TS2339: Property 'beast_mode' does not exist on type 'UserSettingsShape'.
+index.ts(10003,75): error TS2339: Property 'beast_mode' does not exist on type 'UserSettings'.
+lint.ts(175,28): error TS2345: Argument of type 'ArrayBuffer' is not assignable to parameter of type 'string | ArrayBufferView<ArrayBufferLike> | Iterable<string | ArrayBufferView<ArrayBufferLike>> | AsyncIterable<...>'.
+  Type 'ArrayBuffer' is not assignable to type 'DataView<ArrayBufferLike> | Iterable<string | ArrayBufferView<ArrayBufferLike>> | AsyncIterable<string | ArrayBufferView<...>>'.
+    Type 'ArrayBuffer' is missing the following properties from type 'DataView<ArrayBufferLike>': buffer, byteOffset, getFloat32, getFloat64, and 20 more.
+mix.ts(7,86): error TS2459: Module '"./timeline"' declares 'AudioClip' locally, but it is not exported.
+mix.ts(7,102): error TS2459: Module '"./timeline"' declares 'AudioTrack' locally, but it is not exported.
+rhythm.ts(195,28): error TS2345: Argument of type 'ArrayBuffer' is not assignable to parameter of type 'string | ArrayBufferView<ArrayBufferLike> | Iterable<string | ArrayBufferView<ArrayBufferLike>> | AsyncIterable<...>'.
+  Type 'ArrayBuffer' is not assignable to type 'DataView<ArrayBufferLike> | Iterable<string | ArrayBufferView<ArrayBufferLike>> | AsyncIterable<string | ArrayBufferView<...>>'.
+    Type 'ArrayBuffer' is missing the following properties from type 'DataView<ArrayBufferLike>': buffer, byteOffset, getFloat32, getFloat64, and 20 more.
+subagent.ts(356,7): error TS2741: Property 'missing' is missing in type '{ ok: true; reworked: true; }' but required in type '{ ok: boolean; missing: string[]; reworked?: boolean; stillFailing?: boolean; orphaned?: boolean; }'.
+timeline.ts(524,13): error TS2352: Conversion of type 'TimelineClip' to type 'Record<string, unknown>' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Index signature for type 'string' is missing in type 'TimelineClip'.
+workflow-service.ts(25,59): error TS2305: Module '"./workflow-templates"' has no exported member 'TemplateContent'.
+workflow-service.ts(481,82): error TS2339: Property 'error' does not exist on type '{ ok: true; shot: ShotJson; } | { ok: false; error: string; }'.
+  Property 'error' does not exist on type '{ ok: true; shot: ShotJson; }'.
+workflow-service.ts(515,119): error TS2339: Property 'error' does not exist on type '{ ok: true; shot: ShotJson; } | { ok: false; error: string; }'.
+  Property 'error' does not exist on type '{ ok: true; shot: ShotJson; }'.
+workflow-service.ts(584,31): error TS2339: Property 'error' does not exist on type '{ ok: true; shot: ShotJson; } | { ok: false; error: string; }'.
+  Property 'error' does not exist on type '{ ok: true; shot: ShotJson; }'.
+workflow-service.ts(622,36): error TS2322: Type 'unknown' is not assignable to type 'string'.
+workflow-service.ts(761,9): error TS2322: Type '"paused_insufficient_quota"' is not assignable to type '"running" | "success" | "partial" | "failed" | "building"'.

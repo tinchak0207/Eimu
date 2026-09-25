@@ -2,19 +2,20 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BookOpen, Bot, Compass, FileText, House, Plug } from "lucide-react";
+import { BookOpen, CreditCard, History, Plug, Rocket, Settings2, Workflow } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const SECTIONS = [
   {
     label: "文档中心",
     items: [
-      { href: "/docs", label: "概览", icon: House },
-      { href: "/docs/api", label: "API 文档", icon: BookOpen },
-      { href: "/docs/mcp", label: "MCP 接入", icon: Plug },
-      { href: "/docs/harness", label: "DeepSeek Harness", icon: Bot },
-      { href: "/docs/harness/deep", label: "Harness 深度指南", icon: Compass },
-      { href: "/docs/report", label: "Eimu 作品報告", icon: FileText },
+      { href: "/docs", label: "快速上手", icon: BookOpen },
+      { href: "/docs/assistant", label: "助理设定", icon: Settings2 },
+      { href: "/docs/workflow", label: "工作流与画布", icon: Workflow },
+      { href: "/docs/history", label: "历史素材复用", icon: History },
+      { href: "/docs/billing", label: "充值与计费", icon: CreditCard },
+      { href: "/docs/mcp", label: "把助理带走", icon: Plug },
+      { href: "/docs/api", label: "开发进阶", icon: Rocket },
     ],
   },
 ];

@@ -12,6 +12,7 @@
 
 import { createHash, createHmac, randomUUID } from "node:crypto";
 import { getGenerationSql, type GenerationSql } from "./database";
+import { planReplay, resolveReplayPolicy } from "./operation-registry";
 
 type Row = Record<string, unknown>;
 
@@ -36,8 +37,22 @@ export interface CallbackDeliveryRow {
   updatedAt: Date;
 }
 
-/** 达到此次数仍未成功，直接判死信，不再重试（等运营/客户侵入排查）。 */
-export const MAX_CALLBACK_DELIVERY_ATTEMPTS = 8;
+/**
+ * 達到此次數仍未成功，直接判死信，不再重試（等運營/客戶介入排查）。
+ *
+ * FG-03（2026-09-23）：重放預算唯一來源是封閉 operation registry 的
+ * `callback.deliver` 政策；呼叫方（含本模組的調用者）不得自帶 retry 次數。
+ * 這個常量改為 registry 查詢結果，不再是一個獨立的魔數。
+ */
+export const MAX_CALLBACK_DELIVERY_ATTEMPTS = resolveReplayPolicy("callback.deliver").maxReplayAttempts;
+
+/**
+ * 投遞重放裁決（FG-02/03）：只有 registry 的 `callback.deliver` 政策說可以，
+ * 且下一次投遞序號還在預算內，才排下一次；否則進死信。
+ */
+export function planCallbackDeliveryReplay(nextAttemptNo: number): ReturnType<typeof planReplay> {
+  return planReplay({ operation: "callback.deliver", nextAttemptNo });
+}
 
 // ─────────────────────────────────────────────────────────── row mapping
 
@@ -333,7 +348,10 @@ export async function recordCallbackDeliveryResult(
     `;
     if (!rows[0]) return;
     const nextCount = Number(rows[0].delivery_count) + 1;
-    const deadLettered = nextCount >= MAX_CALLBACK_DELIVERY_ATTEMPTS;
+    // FG-02/03：剛失敗的是第 nextCount 次，下一次投遞的許可問 registry——
+    // 不是問本模組的魔數，也不是問呼叫方傳進來的任何預算。
+    const replay = planCallbackDeliveryReplay(nextCount + 1);
+    const deadLettered = !replay.allowed;
 
     if (deadLettered) {
       await tx`
@@ -380,7 +398,7 @@ export async function runCallbackWorkerOnce(
     await recordCallbackDeliveryResult({ id: row.id, ...result }, sql);
     if (result.ok && result.responseCode !== undefined && result.responseCode >= 200 && result.responseCode < 300) {
       summary.delivered += 1;
-    } else if (row.deliveryCount + 1 >= MAX_CALLBACK_DELIVERY_ATTEMPTS) {
+    } else if (!planCallbackDeliveryReplay(row.deliveryCount + 2).allowed) {
       summary.deadLettered += 1;
     } else {
       summary.failed += 1;

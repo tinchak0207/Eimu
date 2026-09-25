@@ -11,6 +11,39 @@
 // 本檔案 = 前端與後端共用的契約。任何改動必須同步兩端。
 
 import type { ReferenceImageRole } from "../image-types";
+import type { StoryboardSceneRef, StoryboardScriptShot } from "../storyboard-contract";
+import { AID_PROJECT_TYPE_ENUM, type AidProjectTypeEnumValue } from "../aid-enums/creation";
+// 批准狀態形狀的單一真源（type-only：執行期零依賴，不成環——`storyboard-contract.ts`
+// 已用同一寫法 type-only import 本檔，本檔反向 type-only 取 `ApprovalState` 是同構先例）。
+import type { ApprovalState } from "../character-cards";
+
+// ─────────────────────────────────────────── 作品形態值域
+
+/**
+ * 作品形態值域：`movie`（電影）/ `series`（劇集）。
+ *
+ * 值域來源＝AID `ProjectTypeEnum`（`src/lib/aid-enums/creation.ts`，MIT 逐字入庫）。
+ * 本站的作品/劇集實體本身就是吞 AID 產品層刀 1 的產物，形態詞彙不另立第二套——
+ * 兩處各寫一份 `"movie" | "series"` 就是兩個漂移點（AID 改值時本站默默不收）。
+ *
+ * 消費點：`CanvasProject.projectType`（落盤形狀）與 `CanvasProjectMetaPatch.projectType`
+ * （agent op 載荷）必須同值域，故共用本型別。
+ */
+export const CANVAS_PROJECT_TYPES = [
+  AID_PROJECT_TYPE_ENUM.MOVIE.value,
+  AID_PROJECT_TYPE_ENUM.SERIES.value,
+] as const;
+
+/** 作品形態（＝AID `ProjectTypeEnum` 的值集合）。 */
+export type CanvasProjectType = AidProjectTypeEnumValue;
+
+/**
+ * 執行期判據。agent 載荷（SSE 反序列化）與 Blob 讀回的值都不可信，一律過此；
+ * 直接寫 `v === "movie" || v === "series"` 則值域改動時必漏改一處。
+ */
+export function isCanvasProjectType(value: unknown): value is CanvasProjectType {
+  return typeof value === "string" && (CANVAS_PROJECT_TYPES as readonly string[]).includes(value);
+}
 
 export type CanvasPosition = { x: number; y: number };
 
@@ -65,6 +98,20 @@ export function errorDetailsText(details: string | CanvasErrorDetails | undefine
   return typeof details.message === "string" && details.message.length > 0 ? details.message : undefined;
 }
 
+/**
+ * 協作確認閘的裁決憑據（門禁卡 metadata.gateConfirm，2026-09-24）。
+ * 寫入者只有網關（workflow-gw 的 markGateNodeState），前端只讀＋據此發一次
+ * POST /api/agent/sessions/{session_id}/confirm（既有確認端點，不另開通路）。
+ */
+export interface CanvasNodeGateConfirm {
+  /** 網關 pendingConfirms 的鍵（裁決憑據；同一筆重放是冪等的）。 */
+  request_id: string;
+  /** 站點轉發用的會話鍵（= 網關 session id）。 */
+  session_id: string;
+  /** 卡面狀態真值：pending 可批准/退回；approved/rejected 為已裁決（唯讀）。 */
+  status: "pending" | "approved" | "rejected";
+}
+
 /** 節點元資料：承載 prompt/模型/尺寸/任務/結果。與 gateway autoCreateCanvasUnit 產出對齊。 */
 export interface CanvasNodeMetadata {
   content?: string; // 圖片節點 = public URL；文本節點 = 正文
@@ -110,10 +157,11 @@ export interface CanvasNodeMetadata {
   referenceRole?: ReferenceImageRole;
   /**
    * 流水線結構卡標記（agent-template-canvas 鋪的泳道卡）：step_head = 步驟頭卡、
-   * tool = 工具卡、gate = 門禁卡、director = 導演台卡（gateway director.done 同步）。
+   * tool = 工具卡、gate = 門禁卡、note = 配方卡（後端 derived notes，正文=content）、
+   * director = 導演台卡（gateway director.done 同步）。
    * 渲染層（NodeBody/CanvasNodeView）據此走結構化分層正文；與既有 kind（image/video）分開，不混用。
    */
-  pipelineCard?: "step_head" | "tool" | "gate" | "director";
+  pipelineCard?: "step_head" | "tool" | "gate" | "note" | "director";
   /** 工具卡：工具 id（等寬字體渲染）。 */
   toolId?: string;
   /** 工具卡：輸入/輸出契約。 */
@@ -125,6 +173,35 @@ export interface CanvasNodeMetadata {
   requiredCapability?: string;
   /** 步驟頭卡：本步產出合同全文。 */
   deliverable?: string;
+  /**
+   * 骨架節點：本步驗收門禁一行（後端 workflow 骨架經 SSE canvas.node.created/updated
+   * 帶入；與 pipelineCard 的 "gate" 卡型別是兩回事，勿混）。boolean 形態是
+   * workflow-dsl 的既有契約（compile.ts md.gate = true——「需人工批准」旗標），
+   * 兩種寫入者共用本欄位，string = 全文門禁、true = 僅標記需批准。
+   */
+  gate?: string | boolean;
+  /**
+   * 門禁卡可操作狀態（2026-09-24 協作確認閘）：網關在協作檔的停點註冊 pending
+   * confirm 後，把該筆確認回寫到門禁卡 metadata，前端據此把「驗收條件」從純文字
+   * 變成可直接批准/退回的卡（不必回對話裡找確認卡）。
+   * 只在協作檔、且僅在該次停點未決期間存在——批准/退回後 status 翻面並保持可讀；
+   * 交付物變更（重生成/換圖）會重新回到 pending（網關按交付物指紋記批准）。
+   */
+  gateConfirm?: CanvasNodeGateConfirm;
+  /**
+   * 分鏡批准狀態（2026-09-24 WS-審查：分鏡審查面板的批准/駁回寫進節點）。
+   * 形狀與卡側**同一個** `ApprovalState`（`character-cards.ts`，type-only import 不建
+   * 第二套）；清洗唯一收口＝`normalizeApprovalState`（讀取端與上行端共用同一把尺）。
+   *
+   * ⚠️ 本鍵**必須同時**存在於兩處 metadata 白名單，否則刷新/回舊會話即靜默消失
+   *（不是當下失效，是同會話內看起來正常、重載後退回「未批准」態）：
+   *   - 讀取/還原端 `src/lib/canvas/layout.ts` 的 `toNodeMetadata`
+   *   - 上行/壓縮端 `src/hooks/canvas/canvas-chat-types.ts` 的 `compactMetadataForAgent`
+   *
+   * 與同層 `gateConfirm`（網關門禁裁決憑據）是**兩個獨立鍵**：前者＝人對分鏡交付物的
+   * 批准，後者＝協作確認閘的 pendingConfirms 憑據；不合併、不互相推導。
+   */
+  approval?: ApprovalState;
   /** 步驟頭卡：本步輸入來源。 */
   inputFrom?: string;
   /** 步驟序號（生成卡頂欄 stepName 條）。 */
@@ -151,6 +228,79 @@ export interface CanvasNodeMetadata {
   // ── 3D 場景卡節點（type: scene_3d，2026-09-06 Astra PRD P1-3；3D 導演 subagent 回傳寫入）──
   /** 3D 場景卡欄位族（單一物件欄位，內部形狀 = Scene3dCardMetadata）。 */
   sceneCard?: Scene3dCardMetadata;
+  // ── 分鏡實體（2026-09-15 刀 2；AID 21 欄契約，MIT）──
+  /**
+   * 一鏡（AID 21 欄契約，`src/lib/storyboard-contract.ts`）：掛在 Group 節點的子節點。
+   * 形狀 = `StoryboardScriptShot`（21 個字串欄，空值 = ""）。讀取端以
+   * `normalizeStoryboardShot` 收斂——`shotNumber` 為空則整包丟棄（不製造半形分鏡）。
+   */
+  storyboardShot?: StoryboardScriptShot;
+  /**
+   * 場景外殼：掛在 **Group 節點**，`sceneName` 是場景歸屬唯一權威
+   *（AID v2.1.4 已廢 `sceneCode`）。真值 = 子節點的 `storyboardShot`，此處只存指針。
+   */
+  storyboardScene?: StoryboardSceneRef;
+  // ── 分鏡實體的卡引用（WS7 收口，2026-09-24；照 referenceNodeIds 的同款 id 陣列先例）──
+  /**
+   * 本鏡引用的角色卡 id（agent 模板交付自動落卡後回填；項目級鎖定在 `CanvasProject.cardIds`）。
+   * 寫入者：自動回填（agent-output-cards 的 shotBackfill）+ 人工/上游指定。
+   * **雙白名單**：與 storyboardShot 同族——漏 layout.ts toNodeMetadata 或
+   * canvas-chat-types.ts compactMetadataForAgent 任一處 = 刷新/回舊會話後憑空消失。
+   */
+  characterCardIds?: string[];
+  /** 本鏡引用的場景卡 id。清洗/白名單規則同 `characterCardIds`。 */
+  sceneCardIds?: string[];
+  /** 本鏡引用的道具卡 id。清洗/白名單規則同 `characterCardIds`。 */
+  propCardIds?: string[];
+  /** 本節點交付物自動落成的卡 id（冪等標記：同一節點不重複建卡）。 */
+  entityCardId?: string;
+  // ── 模板交付自動落卡（WS11 收口，2026-09-24；保留鍵，型別層具名）──
+  /**
+   * 本節點交付物自動落成的實體標記（保留鍵）。真源＝gateway 模板節點的
+   * `defaults.emitsEntity`（`deploy-staging/gateway/workflow-templates/*`），
+   * `expandTemplate` spread 進節點 metadata 後隨 SSE `canvas.node.created/updated` 落地；
+   * 畫布側據此自動建卡（`src/lib/agent-output-cards.ts` 的 `emittedEntityOf`）。
+   *
+   * ⚠️ 這個鍵必須**同時**存在於兩處 metadata 白名單，否則**一進前端就被剝掉**
+   *（不是重載才消失，是當下就沒了）：
+   *   - 讀取/還原端 `src/lib/canvas/layout.ts` 的 `toNodeMetadata`
+   *   - 上行/壓縮端 `src/hooks/canvas/canvas-chat-types.ts` 的 `compactMetadataForAgent`
+   * 症狀是「整條功能完全沒反應」，排查時先確認鍵有沒有活過這兩處。
+   *
+   * 形狀與 `layout.ts` 的 `EmittedEntityMetadata`（＝`agent-output-cards.ts` 的
+   * `EmittedEntitySpec` 同構）結構相容。五值字面與 `character-cards.ts` 的
+   * `CHARACTER_CARD_KIND_VALUES` **逐字同步，刻意不 import 以避免環依賴**
+   *（types → character-cards → agent-chat-client → agent-chat-types → types；
+   * 措辭同 `layout.ts` 的 `EMITS_ENTITY_KINDS`——本檔是前後端共用契約根，
+   * 不反向依賴客戶端卡模組）。漂移時會在本欄位的指派點炸型別錯，不靜默。
+   */
+  emitsEntity?: {
+    kind: "character" | "scene" | "style" | "prop" | "audio";
+    /** 卡名來源：預設節點標題；`"input"` ＝依序取底下三鍵的第一個非空值。 */
+    nameFrom?: "nodeTitle" | "input";
+    /**
+     * 參考圖來源 role 清單（模板作者宣告；四視圖＝`["view2","view3","view4"]`）：
+     * 同模板實例上哪些 role 的交付物是本實體的參考圖。
+     * 清洗走 `layout.ts` 的 `cleanEmitsEntity`（非空字串陣列、trim、去重、≤8 項、單項 ≤100）。
+     */
+    referenceRoles?: string[];
+    /**
+     * 參考圖來源**節點 id** 清單（引擎 `expandTemplate` 的參考圖 post-pass 解出；
+     * 站點據此把兄弟節點的交付圖併進同一張卡——四視圖聚合的站點側接線）。
+     * 與 `referenceRoles` 同一個清洗函式（漏放行＝聚合功能當下被剝，不是重載才消失）。
+     */
+    referenceNodeIds?: string[];
+  };
+  /**
+   * 落卡取卡名的來源（保留鍵；僅在 `emitsEntity.nameFrom === "input"` 時被讀）。
+   * 順序真源＝`agent-output-cards.ts` 的 `NAME_FROM_INPUT_KEYS`（input → characterName
+   * → sceneName），空字串/非字串在讀取端就被省略鍵。
+   * `input` 是通用鍵名，但 canvas 節點 metadata 只有本語義（與同層的 `inputFrom`
+   * ＝步驟頭卡輸入來源、`toolInput`＝工具卡契約是**不同鍵**），故在此具名收斂。
+   */
+  input?: string;
+  characterName?: string;
+  sceneName?: string;
 }
 
 /**
@@ -283,9 +433,25 @@ export const CANVAS_EVENT_NAMES = [
 // ─────────────────────────────────────────── Agent 操作畫布（Wave C）
 
 /**
+ * 專案級欄位補丁（作品類型 / 流程步 / 劇集清單）。
+ *
+ * 形狀刻意與 `useCanvasChat().setProjectMeta` 的參數同構——那是這三欄的**唯一寫入口**
+ * （`projectType`/`currentStep`/`episodes` 在 `CanvasProject` 頂層，不在 reducer state）。
+ * 載荷一律不可信：執行前必須過 `normalizeProjectMetaPatch`（layout.ts）逐欄白名單。
+ */
+export interface CanvasProjectMetaPatch {
+  projectType?: CanvasProjectType;
+  currentStep?: number;
+  episodes?: CanvasEpisode[];
+}
+
+/**
  * Agent 批量畫布操作：gateway 的 canvas_apply_ops 工具經 SSE 下發，
  * 前端執行（可先過確認閘）後把結果 POST 回 gateway resolve 該工具調用。
  * 與 infinite-canvas 的 8-op DSL 對齊，執行語義全在前端 reducer。
+ *
+ * 唯一例外：`set_project_meta`（2026-09-16 G1）改的是**專案級**欄位，不是畫布結構，
+ * 由 hook 層的 `setProjectMeta` 執行（同 select_nodes / set_viewport / run_generation 的分工）。
  */
 export type CanvasAgentOp =
   | { type: "add_node"; node: Partial<CanvasNode> & { id: string; type: CanvasNodeType | string } }
@@ -295,7 +461,14 @@ export type CanvasAgentOp =
   | { type: "delete_connections"; ids: string[] }
   | { type: "select_nodes"; ids: string[] }
   | { type: "set_viewport"; viewport: Partial<CanvasViewport> }
-  | { type: "run_generation"; node_id: string; prompt?: string; model?: string; size?: string; count?: number };
+  | { type: "run_generation"; node_id: string; prompt?: string; model?: string; size?: string; count?: number }
+  /**
+   * 專案級欄位補丁（2026-09-16 G1，刀 1 全鏈最後一環）：
+   * `CanvasProject.currentStep/episodes/projectType` 在專案頂層，先前 8 個 op 無一可達
+   * （PRD 全鏈定義「agent 調用 canvas_apply_ops 寫入 episode 節點成功」的缺口）。
+   * 執行端 = hook 層 `setProjectMeta`；載荷清洗 = `normalizeProjectMetaPatch`。
+   */
+  | { type: "set_project_meta"; patch: CanvasProjectMetaPatch };
 
 export interface CanvasAgentOpsEvent {
   request_id: string;
@@ -320,7 +493,7 @@ export interface CanvasProject {
   cardIds?: string[];
   // ── 作品/劇集三級狀態機（2026-09-15 吞 AID 產品層刀 1；全部 optional，向後相容）──
   /** 作品類型：movie=電影（劇本用 episode 0）/ series=劇集。 */
-  projectType?: "movie" | "series";
+  projectType?: CanvasProjectType;
   /** 7 步流程當前步驟（1..7）；未開始則 undefined。 */
   currentStep?: number;
   /** 劇集分集清單（電影留空）。 */

@@ -8,6 +8,13 @@
 //
 // 長度寫在尾端，提取時只需讀最後 13 個位元組就知道 payload 起點，
 // 不必整檔掃描；magic + PNG 簽名雙重校驗 + JSON 合法性校驗來擋壞檔誤判。
+//
+// 本檔**零依賴且可在瀏覽器端使用**（ReferenceImageUpload 等客戶端元件會
+// import extractWorkflowFromPng 讀取用戶拖進來的 PNG）。因此視覺渲染出口
+// （renderWorkflowDagPng，走 sharp 原生模組）刻意拆到 ./dag-png-server.ts：
+// 把 sharp 放進本檔會讓 webpack 把它拖進 browser bundle，build 直接失敗
+// （實錘：UnhandledSchemeError: Reading from "node:events" is not handled）。
+
 
 export const WORKFLOW_PNG_MAGIC = "WFSTUDIO";
 export const WORKFLOW_PNG_VERSION = 1;

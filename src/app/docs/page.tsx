@@ -1,105 +1,229 @@
-import Link from "next/link";
-import { BookOpen, Bot, FileText, Plug, ArrowUpRight } from "lucide-react";
+import type { Metadata } from "next";
+import {
+  BookOpen,
+  CreditCard,
+  History,
+  Plug,
+  Repeat,
+  Rocket,
+  Settings2,
+  Sparkles,
+  Wand2,
+  Workflow,
+} from "lucide-react";
+import { InlineCode, SectionTitle, Specular, Step } from "./DocsShell";
 
-const DOCS_TITLE = "文档中心 | Eimu";
-const DOCS_DESCRIPTION =
-  "Eimu文档中心：OpenAI 兼容生成 API 文档、MCP 接入指南、模型与计费说明。";
-
-export const metadata = {
-  title: DOCS_TITLE,
-  description: DOCS_DESCRIPTION,
-  openGraph: {
-    title: DOCS_TITLE,
-    description: DOCS_DESCRIPTION,
-    url: "https://eimu.dev/docs",
-  },
-  twitter: {
-    card: "summary_large_image",
-    title: DOCS_TITLE,
-    description: DOCS_DESCRIPTION,
-  },
+export const metadata: Metadata = {
+  title: "AI 助理快速上手 | 文档中心 | Eimu",
 };
 
-const SECTIONS = [
+// ---- 教学文案数据（现场逐字：与助理聊天首页示例句同文案）----
+
+const EXAMPLE_PROMPTS: Array<{ text: string; note: string }> = [
+  { text: "画一只戴帽子的橘猫，水彩风格", note: "一句话生图，最常见的起点" },
+  { text: "让这瓶香水出现在落日海滩，自然光", note: "给参考图，再给感觉" },
+  { text: "生成秦始皇骑北极熊的大电影", note: "认真的能力展示：重型流水线，不是玩笑" },
+];
+
+// ---- 分篇导航卡：每篇一句话导语，链往各子页 ----
+
+const DOC_CARDS: Array<{
+  href: string;
+  title: string;
+  desc: string;
+  icon: React.ComponentType<{ className?: string }>;
+}> = [
   {
-    href: "/docs/api",
-    icon: BookOpen,
-    label: "API 文档",
-    description: "OpenAI 兼容的生图 / 生视频接口。认证、限流、端点到计费，全部由线上 OpenAPI spec 渲染，不手写不漂移。",
-    tags: ["REST", "OpenAI 兼容", "异步任务", "Webhook"],
+    href: "/docs/assistant",
+    title: "助理设定",
+    desc: "右上角齿轮里每行管什么，以及野兽模式什么时候开。",
+    icon: Settings2,
+  },
+  {
+    href: "/docs/workflow",
+    title: "工作流与画布",
+    desc: "模板转盘、画布手势与配方模板，大工程一条链跑完。",
+    icon: Workflow,
+  },
+  {
+    href: "/docs/history",
+    title: "历史素材复用",
+    desc: "生成过的每样东西都有账，复用不用从头再来。",
+    icon: History,
+  },
+  {
+    href: "/docs/billing",
+    title: "充值与计费",
+    desc: "充值三步与四档方案，预扣、结算、失败自动退回的一本账。",
+    icon: CreditCard,
   },
   {
     href: "/docs/mcp",
+    title: "把助理带走",
+    desc: "用 MCP 把生成能力装进 Claude、Codex、Cursor。",
     icon: Plug,
-    label: "MCP 接入",
-    description: "把Eimu接入 Claude / Codex / Cursor。agent 说一句话，直接出图出视频，返回成品 URL。",
-    tags: ["Claude", "Codex", "Cursor", "stdio"],
   },
   {
-    href: "/docs/harness",
-    icon: Bot,
-    label: "DeepSeek Harness",
-    description: "零基础教程：下载、安装、使用 DeepSeek 官方开源智能体框架，照着做 10 分钟跑起来。",
-    tags: ["Node.js", "npx", "AI Agent", "教程"],
-  },
-  {
-    href: "/docs/report",
-    icon: FileText,
-    label: "Eimu 作品報告",
-    description: "多智能体高审美影音设计平台完整作品报告：产品定位、总体架构、核心技术、创新点与工程验证，在线预览或下载 PDF。",
-    tags: ["作品报告", "多智能体", "PDF"],
+    href: "/docs/api",
+    title: "开发进阶",
+    desc: "B 端 API：异步提交＋轮询，端点目录随 OpenAPI 实时更新。",
+    icon: Rocket,
   },
 ];
 
 export default function DocsPage() {
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-6">
+      {/* ================= Hero ================= */}
       <section className="pt-2">
-        <p className="text-ios-footnote font-semibold text-[#007AFF]">文档中心</p>
+        <div className="flex items-center gap-2">
+          <Sparkles className="h-4 w-4 text-[#007AFF]" />
+          <p className="text-ios-footnote font-semibold text-[#007AFF]">教程与参考</p>
+        </div>
         <h1 className="mt-2 text-ios-title1 font-bold tracking-tight text-[rgba(0,0,0,0.85)] sm:text-ios-largetitle">
-          让 AI 帮你完成每一个生成任务
+          AI 助理快速上手
         </h1>
         <p className="mt-3 max-w-2xl text-ios-body leading-relaxed text-[rgba(0,0,0,0.58)]">
-          面向开发者与 AI Agent 的接入指南：REST API 与 MCP 两条路径，共用同一套计费与队列。
+          不懂 API 也能立刻开始创作——一句话愿望，助理负责拆解、生成、交付。
         </p>
       </section>
 
-      <div className="flex flex-col gap-4">
-        {SECTIONS.map((section) => {
-          const Icon = section.icon;
-          return (
-            <Link
-              key={section.href}
-              href={section.href}
-              className="group lg-card relative overflow-hidden rounded-ios-3xl p-5 sm:rounded-ios-4xl sm:p-7"
-            >
-              <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white to-transparent opacity-80" />
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <span className="flex h-10 w-10 items-center justify-center rounded-ios-2xl bg-[rgba(0,122,255,0.10)]">
-                    <Icon className="h-5 w-5 text-[#007AFF]" />
-                  </span>
-                  <h2 className="text-ios-title2 font-semibold text-[rgba(0,0,0,0.85)]">{section.label}</h2>
+      {/* ================= 怎么开始对话 ================= */}
+      <section id="start" className="scroll-mt-28">
+        <SectionTitle icon={Wand2}>怎么开始对话</SectionTitle>
+        <div className="mt-4 lg-card overflow-hidden rounded-ios-3xl sm:rounded-ios-4xl">
+          <Specular />
+          <div className="divide-y divide-[rgba(0,0,0,0.06)]">
+            <Step
+              n="1"
+              title="打开首页就是 AI 助理"
+              note={
+                <>
+                  左边是对话框，右边是模板库与画布。发出第一句话后，模板库自动收起，画布开始长东西——你不需要先学任何界面。
+                </>
+              }
+            />
+            <Step
+              n="2"
+              title="直接说出愿望，或点助理给出的示例"
+              note={
+                <>
+                  不确定说什么？照抄这三句试试，每句都是一类玩法：
+                </>
+              }
+            />
+            <div className="grid gap-3 px-5 pb-5 sm:grid-cols-3 sm:px-7 sm:pb-7">
+              {EXAMPLE_PROMPTS.map((example) => (
+                <div
+                  key={example.text}
+                  className="rounded-ios-2xl bg-[rgba(0,122,255,0.06)] p-4"
+                >
+                  <p className="text-ios-footnote font-semibold text-[#007AFF]">“{example.text}”</p>
+                  <p className="mt-1.5 text-ios-caption1 leading-relaxed text-[rgba(0,0,0,0.52)]">{example.note}</p>
                 </div>
-                <ArrowUpRight className="h-5 w-5 shrink-0 text-[rgba(0,0,0,0.46)] lg-transition group-hover:text-[#007AFF]" />
-              </div>
-              <p className="mt-3 max-w-2xl text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.58)]">
-                {section.description}
-              </p>
-              <div className="mt-4 flex flex-wrap gap-1.5">
-                {section.tags.map((tag) => (
-                  <span
-                    key={tag}
-                    className="rounded-full bg-[rgba(0,122,255,0.08)] px-2.5 py-1 text-ios-caption1 font-medium text-[#007AFF]"
+              ))}
+            </div>
+            <Step
+              n="3"
+              title="描述越像说话越好"
+              note={
+                <>
+                  给对象、给感觉、给用途，例如
+                  <strong className="font-semibold text-[rgba(0,0,0,0.72)]">「磨砂黑保温杯，电商主图，干净背景」</strong>
+                  。专业参数不用懂，助理替你选。
+                </>
+              }
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* ================= 一轮对话里会发生什么 ================= */}
+      <section id="flow" className="scroll-mt-28">
+        <SectionTitle icon={Repeat}>一轮对话里会发生什么</SectionTitle>
+        <p className="mt-3 max-w-2xl text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.58)]">
+          发出第一句话后，这一轮里你会依次看到这些东西，全程透明：
+        </p>
+        <div className="mt-4 lg-card overflow-hidden rounded-ios-3xl sm:rounded-ios-4xl">
+          <Specular />
+          <div className="divide-y divide-[rgba(0,0,0,0.06)]">
+            <Step
+              n="1"
+              title="你说一句"
+              note="一句人话就行，格式不限。"
+            />
+            <Step
+              n="2"
+              title="助理先回一张计划卡"
+              note={
+                <>
+                  它打算怎么做、大概花多少，都写在<strong className="font-semibold text-[rgba(0,0,0,0.72)]">计划卡</strong>
+                  里；然后按你设定的互动模式请求授权或直接开工（见〈
+                  <a
+                    href="/docs/assistant"
+                    className="font-semibold text-[#007AFF] lg-transition hover:underline"
                   >
-                    {tag}
-                  </span>
-                ))}
-              </div>
-            </Link>
-          );
-        })}
-      </div>
+                    助理设定
+                  </a>
+                  〉）。
+                </>
+              }
+            />
+            <Step
+              n="3"
+              title="过程全程可见：思考链与工具卡"
+              note={
+                <>
+                  展开的是<strong className="font-semibold text-[rgba(0,0,0,0.72)]">思考链</strong>
+                  （默认展开，可收起）和一张张逐个推进的工具卡（生图／视频／配音等，各自从
+                  <InlineCode>pending</InlineCode> 走到完成）。它现在在干什么，你永远看得到。
+                </>
+              }
+            />
+            <Step
+              n="4"
+              title="成品自动落到画布与历史"
+              note={
+                <>
+                  产出会出现在右侧<strong className="font-semibold text-[rgba(0,0,0,0.72)]">画布</strong>
+                  与历史记录里：可预览、可复用，也可以继续说一句「微调一下」「再来一组」，不用从头再来。
+                </>
+              }
+            />
+            <Step
+              n="5"
+              title="随时可停"
+              note="任何时候按停止按钮中止本轮，已生成的部分不浪费、账单照实结算。"
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* ================= 全部篇章 ================= */}
+      <section>
+        <SectionTitle icon={BookOpen}>全部篇章</SectionTitle>
+        <p className="mt-3 max-w-2xl text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.58)]">
+          其余内容已分成六篇，各讲各的，按需取用：
+        </p>
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          {DOC_CARDS.map((doc) => {
+            const Icon = doc.icon;
+            return (
+              <a
+                key={doc.href}
+                href={doc.href}
+                className="lg-card flex flex-col rounded-ios-3xl p-5 lg-transition hover:bg-[rgba(0,122,255,0.06)]"
+              >
+                <div className="flex items-center gap-2">
+                  <Icon className="h-4 w-4 shrink-0 text-[#007AFF]" />
+                  <p className="text-ios-callout font-semibold text-[rgba(0,0,0,0.85)]">{doc.title}</p>
+                </div>
+                <p className="mt-2.5 text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.58)]">{doc.desc}</p>
+              </a>
+            );
+          })}
+        </div>
+      </section>
     </div>
   );
 }

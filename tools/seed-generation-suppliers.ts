@@ -306,6 +306,8 @@ async function main() {
     if (registry) {
       // adapter 據此把 chatImageModels 的上游模型改走 /chat/completions 生圖。
       channelConfig.chatImageModels = registry.chatImageModels;
+      // 上游拒收 quality 欄位的渠道（agnes：text image queue 契約）。
+      if (registry.omitQualityBody) channelConfig.omitQualityBody = true;
     }
     if (isFilmera) {
       channelConfig.supabaseUrl = process.env.FILMERA_SUPABASE_URL ?? "";

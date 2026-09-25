@@ -129,6 +129,19 @@ test("委派 prompt：deliverables 含 melody_notation 时给出可判形态指�
   assert.ok(r.prompt.includes("缺整栏＝未交付"));
 });
 
+test("委派 prompt：deliverables 含 melody_notation 时形态指引附带 score_abc 真源句（YuE2 白盒接线）", () => {
+  const composed = composeMusicDelegation(VALID_INPUT);
+  assert.ok(composed.ok);
+  if (!composed.ok) return;
+  const r = assembleMusicDirectorPrompt(composed.delegation, { beastMode: false });
+  assert.ok(r.ok);
+  if (!r.ok) return;
+  // 2026-09-19 additive：真源句（既有形态指引行一字未动，紧跟其后注入）。
+  assert.ok(r.prompt.includes("真源优先：music_gen 回执的 score_abc 栏带 ABC 乐谱"));
+  assert.ok(r.prompt.includes("melody_notation 直接引用其 Vocal 声部"));
+  assert.ok(r.prompt.includes("score_abc 为 null 时仍由你自行标注"));
+});
+
 test("委派 prompt：deliverables 不含 melody_notation 时形态指引零出现（零多余注入）", () => {
   const composed = composeMusicDelegation({ ...VALID_INPUT, deliverables: ["emotion_contract", "audio_url"] });
   assert.ok(composed.ok);

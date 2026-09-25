@@ -1,10 +1,10 @@
-// 歷史一鍵錨定（存为角色卡）純函式測試：
+// 歷史一鍵錨定純函式測試：
 //   - cardFromHistoryEntry 從歷史條目構造「純參考圖卡」：URL 選取（imageUrl 優先、base64 組 data URL）、
 //     kind 三類角色映射、無圖/無名拒建
 //   - assetPackPayloadFromHistoryEntry 從歷史條目構造「資產包 payload」（存为资产）：
 //     有 prompt 帶 prompt item、無 prompt 退 reference、含 lora 帶 lora item、無 id / 無內容回 null
 //   - 構造結果能通過 normalizeCharacterCard（資產層唯一 owner 的清洗收口，不另立標準）
-//   - 掛接契約（源碼級，倉庫既有模式）：歷史頁真的掛了這個入口且 POST 走 /api/character-cards
+//   - 掛接契約（源碼級）：歷史頁「存为角色卡 / 发布为案例」入口已拔除
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -171,31 +171,21 @@ test("assetPackPayloadFromHistoryEntry：payload 可通過 normalizeAssetPack（
   assert.equal(normalized.items[0].content, "雨夜霓虹街道");
 });
 
-// ─────────────────────────────────────────── 掛接契約（源碼級，倉庫既有模式）
-test("掛接契約：歷史頁「存为角色卡」入口存在且 POST 走 /api/character-cards", () => {
+// ─────────────────────────────────── 掛接契約（源碼級）：入口已拔除
+test("掛接契約：歷史頁「存为角色卡」「发布为案例」入口已拔除", () => {
+  // 剝行註釋再斷言，防拔除說明的註釋殘留誤紅；斷言只釘歷史頁三檔，
+  // 不做全倉掃描——畫布右鍵選單（context-menu-items.ts）仍有「存为角色卡」
+  // 入口，不在本契約範圍。
+  const stripLineComments = (source: string) => source.replace(/\/\/.*$/gm, "");
+
   const card = readFileSync("src/components/history/HistoryCard.tsx", "utf8");
-  assert.match(card, /onSaveCard/);
-  assert.match(card, /存为角色卡/);
+  assert.doesNotMatch(stripLineComments(card), /存为角色卡/);
+  assert.doesNotMatch(stripLineComments(card), /发布为案例/);
 
   const lightbox = readFileSync("src/components/history/HistoryLightbox.tsx", "utf8");
-  assert.match(lightbox, /onSaveCard/);
-  assert.match(lightbox, /存为角色卡/);
+  assert.doesNotMatch(stripLineComments(lightbox), /存为角色卡/);
+  assert.doesNotMatch(stripLineComments(lightbox), /发布为案例/);
 
   const client = readFileSync("src/components/HistoryClient.tsx", "utf8");
-  assert.match(client, /SaveCardDialog/);
-  assert.match(client, /setSaveCardEntry/);
-
-  // 對話框復用 character-card-client（不另建 API 層）與純函式構造。
-  const dialog = readFileSync("src/components/history/SaveCardDialog.tsx", "utf8");
-  assert.match(dialog, /saveCharacterCard/);
-  assert.match(dialog, /cardFromHistoryEntry/);
-
-  // 資產層唯一 owner：kind 三類枚舉生效。
-  const lib = readFileSync("src/lib/character-cards.ts", "utf8");
-  assert.match(lib, /"character" \| "scene" \| "style"/);
-
-  // 畫布右鍵菜單補 style 選項（既有入口只加選項，不新增入口）。
-  const menu = readFileSync("src/components/canvas/embed/context-menu-items.ts", "utf8");
-  assert.match(menu, /save-card-style/);
-  assert.match(menu, /存为风格卡/);
+  assert.doesNotMatch(stripLineComments(client), /SaveCardDialog|publishUserShowcaseCase/);
 });

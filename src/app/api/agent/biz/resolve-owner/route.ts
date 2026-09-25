@@ -44,5 +44,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return fail(503, "服务暂不可用，请稍后重试。", "agent_key_unavailable");
   }
 
-  return NextResponse.json({ canonical_key: canonicalKey });
+  // user_id（G4，2026-09-17）：屬主數字 id，**非密**（金鑰字面值才是密，照舊不出本響應）。
+  // gateway 對 agent 觸發的成片導出要向控制面報 `web:<userId>` tenant——控制面不持有
+  // agent key 明文（單向哈希），反解不了 owner，所以屬主身份必須在這個既有正典化回應裡
+  // 順帶給出。缺了它，導出索引無法歸屬（ingest 會 422）。
+  return NextResponse.json({ canonical_key: canonicalKey, user_id: auth.key.userId });
 }

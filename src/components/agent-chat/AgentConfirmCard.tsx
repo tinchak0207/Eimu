@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useState } from "react";
-import { Coins, Loader2, Sparkles } from "lucide-react";
+import { Loader2, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AgentPendingConfirm } from "@/lib/agent-chat-types";
 
@@ -68,9 +68,17 @@ function AgentConfirmCardComponent({ confirm, onConfirm, contextText, busy = fal
   // description 是网关工具侧的费用明细（「生成 N 张图（模型），预估花费 X 币」），
   // 归费用区块小字——它不是愿望解读，塞进解读标题下文不对题（2026-08-26 修正）。
   const interpret = (contextText ?? "").trim();
+  // 决策卡摘要行（预览语汇）：左端一行方案摘要，右端币金小字。
+  // 缺 description（单笔无明细）时退回「将花费」这个诚实标签，不凭空造句。
+  const summary = description && description.trim() ? description.trim() : "将花费";
 
   return (
-    <div className="agent-rise lg-sheet rounded-ios-2xl p-3.5" aria-busy={locked}>
+    <div className="agent-rise lg-sheet relative overflow-hidden rounded-[20px] p-4" aria-busy={locked}>
+      {/* 顶缘 specular 亮线（agent-chat-preview 决策卡已批准语汇）：玻璃上缘受光。 */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-[inherit] bg-gradient-to-r from-transparent via-white to-transparent opacity-80"
+      />
       {interpret && (
         <div className="flex items-start gap-3">
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[rgba(122,73,255,0.14)] text-[#7C4DFF]">
@@ -86,57 +94,24 @@ function AgentConfirmCardComponent({ confirm, onConfirm, contextText, busy = fal
           </div>
         </div>
       )}
-      {/* 扣费数字是这张卡的主角：金额单独成行放大加粗，金币单位跟行尾，一眼看清要扣多少。 */}
-      <div className="mt-3 flex items-start gap-3">
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[rgba(255,179,0,0.16)] text-[#B8860B]">
-          <Coins className="h-4 w-4" aria-hidden="true" />
+      {/* 预览决策卡语汇（2026-09-20 对版）：币数不再单独成行放大，改右端
+          `text-ios-footnote font-medium text-[#b8860b]` 小字「N 币」；
+          金额的第二处落在主钮文案「确认 · N 币」上。 */}
+      <div className={cn("flex items-baseline justify-between gap-3", interpret && "mt-3")}>
+        <p className="min-w-0 text-[15px] leading-snug text-foreground">
+          {summary}
+        </p>
+        <span className="shrink-0 text-ios-footnote font-medium text-[#b8860b]">
+          {formatCoins(amountCoins)} 币
         </span>
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-muted-foreground">
-            将花费
-          </p>
-          <p className="mt-0.5 flex items-baseline gap-1.5">
-            <span className="text-ios-title2 font-bold leading-none tabular-nums text-[#B8860B]">
-              {formatCoins(amountCoins)}
-            </span>
-            <span className="text-ios-subhead font-semibold text-muted-foreground">金币</span>
-          </p>
-          {/* 费用明细（description）：跟在金额下面当小字，只出现一次——
-              之前在解读区重复展示同一段，被用户点名。 */}
-          {description && (
-            <p className="mt-1.5 break-words text-sm leading-[1.55] text-muted-foreground">
-              {description}
-            </p>
-          )}
-        </div>
       </div>
-      {/* 两颗大按钮并排各占一半，拇指直接盖住；取消是中性灰，确认是实心蓝，视觉绝不混淆。 */}
-      <div className="mt-3.5 grid grid-cols-2 gap-2.5">
-        <button
-          type="button"
-          onClick={() => {
-            setPending("reject");
-            void (async () => {
-              try {
-                const ok = await onConfirm(requestId, false);
-                if (ok === false) setPending(null);
-              } catch {
-                setPending(null);
-              }
-            })();
-          }}
-          disabled={locked}
-          className={cn(
-            "flex min-h-12 items-center justify-center gap-1.5 rounded-full text-ios-subhead font-semibold",
-            "bg-black/[0.06] text-muted-foreground transition-colors duration-150 active:bg-black/10",
-            "focus:outline-none focus-visible:ring-2 focus-visible:ring-foreground/20",
-            "disabled:cursor-not-allowed disabled:opacity-50",
-            "[touch-action:manipulation] [-webkit-tap-highlight-color:transparent]",
-          )}
-        >
-          {pending === "reject" && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
-          取消
-        </button>
+      <p className="mt-1 text-ios-footnote text-muted-foreground">
+        确认后开始生成，可随时补充要求。
+      </p>
+      {/* 预览主 CTA 语汇：确认＝#2d3142 深底实心 + 悬浮微升（主钮自带金额）；
+          次钮＝幽灵灰字 + 蓝色 hover 底。取消语义照现场：拒绝这笔花费，
+          reducer 结「已拒绝该笔花费。」（不是换方案，不谎标「换个方案」）。 */}
+      <div className="mt-3 flex flex-wrap items-center gap-2">
         <button
           type="button"
           onClick={() => {
@@ -152,15 +127,40 @@ function AgentConfirmCardComponent({ confirm, onConfirm, contextText, busy = fal
           }}
           disabled={locked}
           className={cn(
-            "flex min-h-12 items-center justify-center gap-1.5 rounded-full text-ios-subhead font-semibold text-white",
-            "bg-ios-blue shadow-[0_4px_12px_rgba(0,122,255,0.32)] transition-all duration-200 active:scale-[0.98] active:bg-ios-blue/80",
-            "focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/40",
-            "disabled:cursor-not-allowed disabled:bg-black/[0.12] disabled:shadow-none disabled:active:scale-100",
+            "flex min-h-11 items-center justify-center gap-1.5 rounded-full bg-[#2d3142] px-5 text-ios-footnote font-medium text-white",
+            "shadow-[0_8px_20px_rgba(45,49,66,0.18)] transition-all duration-200 hover:-translate-y-[1px] hover:bg-[#272b39] active:scale-95",
+            "focus:outline-none focus-visible:ring-2 focus-visible:ring-foreground/20",
+            "disabled:cursor-not-allowed disabled:bg-[#2d3142]/60 disabled:shadow-none disabled:active:translate-y-0 disabled:active:scale-100",
             "[touch-action:manipulation] [-webkit-tap-highlight-color:transparent]",
           )}
         >
           {pending === "approve" && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
-          确认
+          确认 · {formatCoins(amountCoins)} 币
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setPending("reject");
+            void (async () => {
+              try {
+                const ok = await onConfirm(requestId, false);
+                if (ok === false) setPending(null);
+              } catch {
+                setPending(null);
+              }
+            })();
+          }}
+          disabled={locked}
+          className={cn(
+            "flex min-h-11 items-center justify-center gap-1.5 rounded-full px-4 text-ios-footnote font-medium",
+            "text-muted-foreground transition-all duration-200 hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95",
+            "focus:outline-none focus-visible:ring-2 focus-visible:ring-foreground/20",
+            "disabled:cursor-not-allowed disabled:opacity-50",
+            "[touch-action:manipulation] [-webkit-tap-highlight-color:transparent]",
+          )}
+        >
+          {pending === "reject" && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+          取消
         </button>
       </div>
     </div>

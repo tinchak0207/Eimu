@@ -1,9 +1,14 @@
 import { randomUUID } from "node:crypto";
+import { ingestRedeemedRecharges } from "./account-ledger";
+import { ingestSubscriptionRedemptions } from "./subscription";
+import { reconcileAccountBalances } from "./account-reconciliation";
 import { commitGenerationBilling, reconcileGenerationBilling, refundGenerationBilling } from "./billing-ledger";
 import { projectGatePathBilling } from "./billing-projection";
 import { decryptGenerationPrompt } from "./crypto";
 import { getGenerationSql, type GenerationSql } from "./database";
-import { classifySupplierFailure, SupplierRequestError } from "./failure-classifier";
+import { classifySupplierFailure, explainFailure, SupplierRequestError } from "./failure-classifier";
+import { createFailureRecord } from "./failure-record";
+import { planGenerationAttemptReplay } from "./operation-registry";
 import { JOB_EVENT, emitJobEvent } from "./job-events";
 import { persistOutputArtifact } from "./artifact-service";
 import {
@@ -219,6 +224,8 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
       }, Math.max(1_000, Math.floor(options.supplierLeaseMs / 3)));
       const startedAt = Date.now();
       let attemptId: string | null = null;
+      // 剛失敗那次 attempt 的序號（FG-02/03：重放裁決的唯一狀態輸入，非呼叫方預算）。
+      let attemptNo: number | null = null;
       try {
         const attempt = await beginGenerationAttempt({
           jobId: job.id,
@@ -228,6 +235,7 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
           outputIndex: completed,
         }, sql);
         attemptId = attempt.id;
+        attemptNo = attempt.attemptNo;
         // INC-0830-VIDEO / INC-0831：適配器在上游提交完成、取得 provider task id 的瞬間
         // 回調 → 先 durably 萬 attempt 行（task id + 對帳排程；事故根治點：只發事件
         // 不落行 = 輪詢斷掉後 task id 無人認領），再落 attempt_submitted 事件（遙測）。
@@ -321,6 +329,9 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
         completed += 1;
       } catch (error) {
         const failure = classifySupplierFailure(error);
+        // FG-01：先把上游原生錯誤逐字捕獲成版本化記錄（與產品解釋分欄存放），
+        // 之後所有落庫路徑共用同一份 record —— 解釋永不覆寫原生欄位。
+        const failureRecord = createFailureRecord({ error, explanation: explainFailure(failure) });
         // INC-0830-VIDEO：適配器拋錯時帶出的上游任務 id，回填 attempt 行。
         const failedProviderTaskId = error instanceof SupplierRequestError ? error.providerTaskId : undefined;
         if (attemptId) {
@@ -330,6 +341,7 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
             attemptId,
             failureClass: failure.failureClass,
             failureDetail: failure.detail,
+            failureRecord,
             providerTaskId: failedProviderTaskId,
             providerHttpStatus: failure.httpStatus,
             retryAfterAt: failure.cooldownUntil,
@@ -368,18 +380,48 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
           accountId: supplierLease.supplier.account.id,
           capabilityId: supplierLease.supplier.capabilityId,
         }, failure, sql);
-        if (!failure.retryable || !failure.switchSupplier) {
-          // INC-0831 鐵律：上游已提交的任務不因我們的錯誤分類被判死。先凍結進對帳
-          //（錢不動），reconciliation 查出上游確認失敗才退款；換渠道重試照舊。
+        // FG-02/03（2026-09-23）：自動重放許可**只**由封閉 operation registry 裁決
+        // （operation-registry.ts）。產品分類（retryable/switchSupplier）不再參與——
+        // 分類是關鍵字詞表猜的，餵給錢的決策就是「解釋決定再花一次錢」。
+        // 原生硬停（402/400/422/451：確定性失敗，同一個請求換渠道也不可能成功）由 registry
+        // 政策宣告，輸入是 FailureRecord.native 的原始 HTTP 狀態，不是產品 category。
+        // 402 例外來自暴君 2026-08-29 裁定（fail-fast，立刻誠實失敗＋退款）；改判須暴君點名。
+        const replay = planGenerationAttemptReplay({
+          kind: job.kind,
+          lastAttemptNo: attemptNo,
+          nativeFailure: failureRecord.native,
+        });
+        if (!replay.allowed) {
+          emitJobEvent({
+            jobId: job.id,
+            event: JOB_EVENT.replayDenied,
+            actor: `worker:${workerId}`,
+            upstreamRaw: failure.detail,
+            detail: {
+              operation: replay.operation,
+              denial_reason: replay.denialReason,
+              next_attempt_no: replay.nextAttemptNo,
+              max_replay_attempts: replay.maxReplayAttempts,
+              hard_stop_status: replay.hardStop?.status ?? null,
+            },
+          }, sql);
+          // INC-0831 鐵律：上游已提交的任務不因任何裁決被判死。先凍結進對帳
+          //（錢不動），reconciliation 查出上游確認失敗才退款。
           if (failedProviderTaskId) {
             await freezeGenerationJobForReconciliation({
               jobId: job.id,
               workerId,
-              reason: `Attempt failed (${failure.failureClass}) with a submitted provider task outstanding; frozen for reconciliation: ${failure.detail}`,
+              reason: `Replay denied (${replay.denialReason ?? "unknown"}) with a submitted provider task outstanding; frozen for reconciliation: ${failure.detail}`,
             }, sql);
             return;
           }
-          await failGenerationJob({ jobId: job.id, workerId, failureClass: failure.failureClass, failureDetail: failure.detail }, sql);
+          await failGenerationJob({
+            jobId: job.id,
+            workerId,
+            failureClass: failure.failureClass,
+            failureDetail: failure.detail,
+            failureRecord,
+          }, sql);
           await refundFailure(job, completed, workerId, sql);
           const jobAttempts = await listGenerationAttemptsForJob(job.id, sql);
           await emitJobRoutingEvent({ job, attempts: jobAttempts, outcome: "exhausted", refunded: true });
@@ -440,9 +482,66 @@ export async function runGenerationMaintenanceOnce(options: GenerationWorkerOpti
   // INC-0831：provider 對帳循環——按 task id 查上游真相，晚到成品落地、
   // 確認失敗才退款、窗口耗盡凍結人工。
   await runProviderReconciliation({ executorId, sql });
+  await runAccountMaintenanceOnce(sql);
   await refreshAdobeSupplierHealth(sql);
   await refreshFilmeraSupplierHealth(sql);
   await recoverExpiredCooldowns(sql);
+}
+
+/**
+ * REQ-E1a/E1b 帳本維護（充值入帳同步 + 跨層對帳）。
+ *
+ * 節奏刻意與 30s 記帳循環解耦：對帳每個身份一次上游 GET，30s 跑一輪會打爆 new-api。
+ * 默認 10 分鐘一次（ACCOUNT_MAINTENANCE_INTERVAL_MS 可調）；兩件事都只讀+冪等寫入，
+ * 任何失敗只 console.error（沿用既有告警通道），絕不擋任務路徑。
+ */
+const ACCOUNT_MAINTENANCE_INTERVAL_MS_DEFAULT = 10 * 60_000;
+let lastAccountMaintenanceAt = 0;
+
+export async function runAccountMaintenanceOnce(
+  sql: GenerationSql,
+  now = Date.now(),
+): Promise<boolean> {
+  const raw = Number(process.env.ACCOUNT_MAINTENANCE_INTERVAL_MS ?? "");
+  const intervalMs = Number.isFinite(raw) && raw > 0 ? raw : ACCOUNT_MAINTENANCE_INTERVAL_MS_DEFAULT;
+  if (now - lastAccountMaintenanceAt < intervalMs) return false;
+  lastAccountMaintenanceAt = now;
+
+  try {
+    const recharges = await ingestRedeemedRecharges({}, { sql });
+    console.log(
+      `[account-ledger] 充值入帳掃描 scanned=${recharges.scanned} charged=${recharges.charged} ` +
+        `未使用=${recharges.skippedUnused} 基線前=${recharges.skippedBeforeBaseline} ` +
+        `訂閱碼=${recharges.skippedSubscription} errors=${recharges.errors.length}`,
+    );
+  } catch (error) {
+    console.error("[account-ledger] 充值入帳失敗（繼續）", error);
+  }
+  // REQ-D3：訂閱兌換碼 → 期次發放（讀同一份上游兌換記錄；帶 SKU 標記的碼只走這條，
+  // 永久充值通道已明確跳過它們）。注意本掃描**不**做「到期清零」——過期是讀取時 lazy
+  // 判定的，這裡只處理「有人兌換了訂閱碼」這一個事件。
+  try {
+    const subscriptions = await ingestSubscriptionRedemptions({}, { sql });
+    console.log(
+      `[subscription] 訂閱發放掃描 scanned=${subscriptions.scanned} granted=${subscriptions.granted} ` +
+        `已發放=${subscriptions.skippedAlreadyGranted} 未使用=${subscriptions.skippedUnused} ` +
+        `基線前=${subscriptions.skippedBeforeBaseline} 未註冊SKU=${subscriptions.unknownSku} ` +
+        `errors=${subscriptions.errors.length}`,
+    );
+  } catch (error) {
+    console.error("[subscription] 訂閱發放失敗（繼續）", error);
+  }
+  try {
+    const report = await reconcileAccountBalances({}, { sql });
+    console.log(
+      `[account-reconcile] users=${report.totals.users} matched=${report.totals.matched} ` +
+        `explained=${report.totals.explained} unseeded=${report.totals.unseeded} ` +
+        `unknown=${report.totals.unknown} alerts=${report.alerts.length}`,
+    );
+  } catch (error) {
+    console.error("[account-reconcile] 跨層對帳失敗（繼續）", error);
+  }
+  return true;
 }
 
 export async function runGenerationWorker(options: GenerationWorkerOptions = {}): Promise<void> {
@@ -506,6 +605,8 @@ export async function runGenerationWorker(options: GenerationWorkerOptions = {})
         await runProviderReconciliation({ executorId: billingExecutorId, sql }).catch((error) => {
           console.error("[generation-worker] provider reconciliation failed（繼續）", error);
         });
+        // REQ-E1a/E1b：充值入帳同步 + 跨層對帳（內部自帶節奏門檻，非每輪執行）。
+        await runAccountMaintenanceOnce(sql);
         await refreshAdobeSupplierHealth(sql);
         await refreshFilmeraSupplierHealth(sql);
         // 病灶 C：cooldown 到期自動恢復（disabled 不自動恢復）。每 30s 與健康循環

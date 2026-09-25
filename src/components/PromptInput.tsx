@@ -221,6 +221,17 @@ export function PromptInput({
   // 綁定 contentRef 的那個 section（包含所有模式面的同一 DOM 節點）。
   const { contentRef, contentHeight } = useHeightLock({ displayMode, modelId, fillAvailableHeight });
 
+  // 2026-09-22 首屏翻面：高度鎖只在 generate/edit 量測（見 use-height-lock.ts），
+  // 首屏直接落在 agent 面時從未量過，contentHeight 恆為 null——agent 內層的
+  // flex-1 沒有定高父容器可以分配，transcript 會把卡片撐到無限長、
+  // composer 被推出螢幕。兜底用設計系統本來就為這個面保留的
+  // --agent-surface-height（globals.css 已含桌面與手機兩組 clamp），
+  // 等使用者第一次進 generate 面量到真實高度後自動讓位。
+  // 常量 AGENT_SURFACE_HEIGHT 原本只是申明給 dynamic() 佔位符註解用、
+  // JSX 零引用（死碼），這次讓它真的被用上。
+  const surfaceHeight: number | string | null =
+    contentHeight !== null ? contentHeight : displayMode === "agent" ? AGENT_SURFACE_HEIGHT : null;
+
   // 放大模式没有描述框；agent 模式自带输入区（AgentComposer），
   // 两个框并排会出现「我该往哪打字」的歧义，所以这里也让它消散。
   // 切走时文本框需要重新「凝聚」回来，内容还在（state 没清）。
@@ -466,8 +477,8 @@ export function PromptInput({
         fillAvailableHeight && "flex min-h-0 flex-1 flex-col",
       )}
       style={
-        !fillAvailableHeight && contentHeight !== null
-          ? { height: contentHeight, display: "flex", flexDirection: "column" }
+        !fillAvailableHeight && surfaceHeight !== null
+          ? { height: surfaceHeight, display: "flex", flexDirection: "column" }
           : undefined
       }
     >
@@ -480,7 +491,7 @@ export function PromptInput({
       <div
         className={cn(
           "relative space-y-4 min-h-0",
-          (fillAvailableHeight || contentHeight !== null) && "flex flex-1 flex-col",
+          (fillAvailableHeight || surfaceHeight !== null) && "flex flex-1 flex-col",
         )}
       >
 

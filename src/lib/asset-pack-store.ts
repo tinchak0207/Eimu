@@ -6,6 +6,10 @@
 import { randomBytes } from "node:crypto";
 import { del, get, list, put } from "@/lib/blob-backend";
 import { sanitizeBlobSegment } from "@/lib/history-types";
+import { GHOST_ASSET_SCOPE, isUsableAssetId, MAX_ASSET_ID_LENGTH, normalizeAssetScope } from "./asset-scope";
+import type { AssetScope } from "./asset-scope";
+import { normalizeLineageLinks } from "./lineage";
+import type { LineageLink } from "./lineage";
 
 const PACK_SCHEMA_VERSION = 1;
 const INDEX_GENERATIONS_KEPT = 2;
@@ -17,6 +21,11 @@ export const MAX_PACKS_PER_USER = 100;
 export const MAX_ITEMS_PER_PACK = 50;
 /** digest 語義摘要上限（模型注入用）。 */
 export const MAX_DIGEST_LENGTH = 500;
+/**
+ * pack id 上限（與 share/mount 的 200 同一個界；超長 id 過去「可建不可分享」）。
+ * 界線與字元邊界同源：一律走 asset-scope 的 isUsableAssetId。
+ */
+export const MAX_PACK_ID_LENGTH = MAX_ASSET_ID_LENGTH;
 const MAX_TITLE_LENGTH = 200;
 const MAX_TAGS_PER_PACK = 20;
 const MAX_TAG_LENGTH = 50;
@@ -67,6 +76,21 @@ export interface AssetPack {
   active?: boolean;
   tags: string[];
   note?: string;
+  /**
+   * REQ-B2 歸屬（個人 / 項目）：缺省＝personal（既有資產零改動）。
+   * 只給人看（項目資產庫面板的歸屬標記與顯式分享入口）——
+   * **裁決排除**：不進 canvas 節點 metadata、不進 toNodeMetadata、
+   * 不進 compactMetadataForAgent（agent 不讀資產歸屬）。
+   */
+  scope?: AssetScope;
+  /**
+   * REQ-D1 血統（與 CharacterCard 同形、同一清洗收口）：REQ-B2b 的
+   * 「包掛用＝在目標項目記本地包記錄＋lineage 指向來源包」寫入這一欄。
+   * 同 D1 裁決：只存在包本體供人看，不進 canvas 節點 metadata、不進 agent 壓縮白名單。
+   */
+  lineage?: LineageLink[];
+  /** parents 曾超上限被截尾的顯式標記。 */
+  lineageTruncated?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -210,11 +234,16 @@ function normalizeItem(payload: unknown): AssetPackItem | null {
  * 驗 id/title；items 逐項 normalizeItem（非法項 drop、超出 MAX_ITEMS_PER_PACK 截斷）；
  * tags 陣列化 + 去重 + 截斷；標題截 200；digest 截 500；note 截 200；
  * active 只收 boolean（僅 true 寫入）。不合法回 null。
+ *
+ * id 邊界（REQ-B2）：走 asset-scope 的 isUsableAssetId —— **拒絕**（非截斷）空 /
+ * 超長（>MAX_PACK_ID_LENGTH）/ 含保留分隔符 `:` / 含控制字元的 id。
+ * 截斷會讓兩個不同 id 落成同一個 id（作用域層確定性鍵的撞鍵源），故一律 fail-closed；
+ * 也與 share/mount 的長度界對齊，避免「可建不可分享」。
  */
 export function normalizeAssetPack(payload: unknown): AssetPack | null {
   if (!payload || typeof payload !== "object") return null;
   const p = payload as Partial<AssetPack>;
-  if (typeof p.id !== "string" || !p.id.trim()) return null;
+  if (!isUsableAssetId(p.id)) return null;
   if (typeof p.title !== "string" || !p.title.trim()) return null;
 
   const items: AssetPackItem[] = [];
@@ -243,6 +272,13 @@ export function normalizeAssetPack(payload: unknown): AssetPack | null {
   const now = new Date().toISOString();
   const note = typeof p.note === "string" ? p.note.trim().slice(0, MAX_NOTE_LENGTH) : "";
   const digest = typeof p.digest === "string" ? p.digest.trim().slice(0, MAX_DIGEST_LENGTH) : "";
+  // REQ-B2 作用域：走 ./asset-scope 的清洗收口（非 project 一律收斂成 personal 並省略欄位，
+  // 不寫 `scope:{owner:"personal"}` 冒充已設定）；**鬼狀態（project 但無 projectId）寫回
+  // GHOST_ASSET_SCOPE 而非降格成 personal**——降格＝把歸屬不明的項目資產變成人人可用的個人資產（D3）。
+  const scope = normalizeAssetScope(p.scope);
+  // REQ-D1 血統欄位復用 ./lineage 的清洗收口（非法條目丟、上限截尾並顯式標記）；
+  // 與 character-cards.normalizeCharacterCard 同款，宿主不同、白名單同一把尺。
+  const lineageRaw = Array.isArray(p.lineage) ? normalizeLineageLinks(p.lineage) : null;
   return {
     id: p.id.trim(),
     title: p.title.trim().slice(0, MAX_TITLE_LENGTH),
@@ -251,6 +287,17 @@ export function normalizeAssetPack(payload: unknown): AssetPack | null {
     ...(p.active === true ? { active: true } : {}),
     tags,
     ...(note ? { note } : {}),
+    ...(scope === null
+      ? { scope: { ...GHOST_ASSET_SCOPE } }
+      : scope.owner === "project"
+        ? { scope }
+        : {}),
+    ...(lineageRaw && lineageRaw.parents.length
+      ? {
+          lineage: lineageRaw.parents,
+          ...(lineageRaw.truncated || p.lineageTruncated === true ? { lineageTruncated: true } : {}),
+        }
+      : {}),
     createdAt: typeof p.createdAt === "string" ? p.createdAt : now,
     updatedAt: typeof p.updatedAt === "string" ? p.updatedAt : now,
   };

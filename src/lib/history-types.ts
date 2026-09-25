@@ -9,9 +9,12 @@
 // 把服务端的图、本地的工作流参数、计费日志的真实消耗合并成同一条记录。
 //
 // 本模块只用 `import type` 跨文件引用，保证可以在 `node --test` 下直接导入做单元测试。
+// 唯一運行時依賴是 ./lineage（REQ-D1 血統清洗，零依賴純函數檔，不破壞上面這條）。
 
 import type { GenerationWorkflowMetadata } from "./image-types";
 import { QUOTA_PER_COIN } from "./quota-constants";
+import { normalizeLineageLinks } from "./lineage";
+import type { LineageLink } from "./lineage";
 
 export { QUOTA_PER_COIN };
 
@@ -32,7 +35,24 @@ export const HISTORY_MAX_PROMPT_LENGTH = 8_000;
 export const HISTORY_MAX_RESULTS_PER_ENTRY = 8;
 export const HISTORY_MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 
-export type HistorySource = "local" | "server" | "billing";
+/**
+ * 记录来源。三个既有值都描述「这条记录是从哪个存储面读出来的」；
+ * `"workflow"` 不同——它描述「这条记录是 gateway 跑批完成推送落盘的」，
+ * 值本身也带信息（前端要据它把工作流记录从图片列表里分流）。
+ * 读路径上它只会以 server 面出现（推送端点写的 history/{userId}/ 索引），
+ * 但 source 是记录自身的身份，不该为了迁就存储面而丢掉。
+ */
+export type HistorySource = "local" | "server" | "billing" | "workflow";
+
+/**
+ * 记录类型：一条记录交付的是「一张图 / 一支视频 / 一次工作流跑批」。
+ *
+ * 为什么要有这个字段而不是直接看 source：source 是存储面（同一条记录在 local
+ * 与 server 两个面各有一份），entryKind 是内容种类，两者正交。工作流记录在
+ * 归并时可能以 server 面为主记录，那时只看 source 会把「有 DAG 的工作流记录」
+ * 与「单张图」混为一谈。缺省时用 inferEntryKind 推。
+ */
+export type HistoryEntryKind = "image" | "video" | "workflow";
 
 export interface HistoryResult {
   provider: string;
@@ -53,6 +73,11 @@ export interface HistoryEntry {
   generatedAt: number;
   results: HistoryResult[];
   source: HistorySource;
+  /**
+   * 记录类型。写入方（gateway 推送 / 生成路由）显式给值，历史读路径只认它；
+   * 旧记录没有这个字段 → inferEntryKind 按 source / DAG / results 推。
+   */
+  entryKind?: HistoryEntryKind;
   workflow?: GenerationWorkflowMetadata;
   /** 上游计费日志里的原始配额消耗；只有 billing 源才有，归并后会带到主记录上。 */
   quota?: number;
@@ -66,6 +91,14 @@ export interface HistoryEntry {
   retryOfTaskId?: string;
   taskStatus?: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "refunded" | "unknown";
   errorCode?: string;
+  /**
+   * REQ-D1 資產血統：這條記錄的直接來源鏈（生成時帶的參考圖／重跑源／存卡來源）。
+   * 只存在歷史記錄本體，供人看的「溯源」抽屜用——嚴禁補進 compactMetadataForAgent
+   * 或 canvas 節點 metadata（agent 不讀血統是裁決，不是遺漏）。缺省＝來源不明。
+   */
+  lineage?: LineageLink[];
+  /** parents 曾超上限被截尾的顯式標記（讀時據此顯示「僅保留最近 N 個」）。 */
+  lineageTruncated?: boolean;
 }
 
 /** 服务端存储实体：比 HistoryEntry 多一个 userId。 */
@@ -86,6 +119,8 @@ export interface HistoryQuery {
   starredOnly?: boolean;
   /** 只看带图的记录（计费日志没有图）。 */
   withImageOnly?: boolean;
+  /** 只看某一类记录（图片 / 视频 / 工作流）。缺省不限。 */
+  entryKind?: HistoryEntryKind;
   /** 闭区间，毫秒时间戳。 */
   since?: number;
   until?: number;
@@ -148,7 +183,10 @@ const DAY_BUCKET_LABELS: Record<HistoryDayBucket, string> = {
 
 /** 归并时谁当主记录：服务端记录字段最全，计费日志最贫瘠。 */
 const SOURCE_PRIORITY: Record<HistorySource, number> = {
+  // workflow 与 server 同级：两者都是服务端落盘的完整记录，同 id 时留哪条都比
+  // local/billing 强；不给更高优先级，避免抢掉同一 id 的 server 面记录。
   server: 3,
+  workflow: 3,
   local: 2,
   billing: 1,
 };
@@ -165,6 +203,11 @@ function finiteNumber(value: unknown): number | undefined {
 
 function nonEmptyString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+/** entryKind 白名單判定。写入口（POST /api/history）与推送端点共用同一把尺。 */
+function isEntryKind(value: unknown): value is HistoryEntryKind {
+  return value === "image" || value === "video" || value === "workflow";
 }
 
 /**
@@ -214,6 +257,33 @@ export function primaryModelId(entry: HistoryEntry): string {
   return entry.modelId ?? entry.results[0]?.modelId ?? "";
 }
 
+/**
+ * 记录类型推断（导出给前端用：列表分流「图片／视频／工作流」三档 chip）。
+ *
+ * 优先级从「最可信」到「最将就」：
+ *   1. entry.entryKind —— 写入方显式声明的，永远最准；
+ *   2. source === "workflow" —— gateway 推送落盘的记录，source 即身份；
+ *   3. workflow 带 dagNodes —— 老工作流记录可能没有 entryKind 也没有
+ *      workflow 这个 source（归并后主记录可能是 server 面），但 DAG 结构在，
+ *      它就是工作流记录；
+ *   4. results 里第一支视频（mediaType / videoUrl）→ "video"；
+ *   5. 其余（含无 results 的空记录）→ "image"。
+ *
+ * 第 5 条刻意兜底成 "image"：历史页绝大多数记录是图，把无结果记录判成
+ * "video" 会让默认列表被空记录淹掉。没有任何一条分支会抛错。
+ */
+export function inferEntryKind(entry: HistoryEntry): HistoryEntryKind {
+  if (entry.entryKind === "image" || entry.entryKind === "video" || entry.entryKind === "workflow") {
+    return entry.entryKind;
+  }
+  if (entry.source === "workflow") return "workflow";
+  if (Array.isArray(entry.workflow?.dagNodes) && entry.workflow.dagNodes.length > 0) return "workflow";
+  for (const result of entry.results) {
+    if (result.mediaType === "video" || result.videoUrl) return "video";
+  }
+  return "image";
+}
+
 /** 是否带图。计费日志永远没有图。 */
 export function hasImage(entry: HistoryEntry): boolean {
   return entry.results.some((result) => Boolean(result.image || result.imageUrl || result.videoUrl));
@@ -256,12 +326,23 @@ export function normalizeHistoryEntry(raw: unknown, source: HistorySource): Hist
   const quota = finiteNumber(raw.quota);
   const modelId = nonEmptyString(raw.modelId) ?? results[0]?.modelId;
 
+  // REQ-D1：血統欄位走純函數白名單清洗（複用 ./lineage 收口），非法條目丟棄、
+  // 超上限截尾並顯式標記。缺欄＝來源不明，不捏造 parents。
+  const lineageRaw = Array.isArray(raw.lineage) ? normalizeLineageLinks(raw.lineage) : null;
+
   return {
     id,
     prompt: typeof raw.prompt === "string" ? raw.prompt.slice(0, HISTORY_MAX_PROMPT_LENGTH) : "",
     generatedAt,
     results,
     source,
+    ...(isEntryKind(raw.entryKind) ? { entryKind: raw.entryKind } : source === "workflow" ? { entryKind: "workflow" as const } : {}),
+    // workflow 字段维持整体 passthrough（只验是 record，不逐欄白名單）：
+    // 生成路由写的六槽 + 本片新增的 DAG 四欄（dagNodes/dagConnections/
+    // dagThumbnailUrl/totalCostCoins）都挂在这里，白名單化會把未來新增的
+    // 欄位靜默砍掉，而這些欄位只被前端讀來展示、不參與任何寫回。
+    // 反過來，entryKind 必須白名單：它是查詢條件（matchesHistoryQuery），
+    // 放任客戶端塞任意字串會讓「類型」篩選出現無法命中的值。
     ...(isRecord(raw.workflow) ? { workflow: raw.workflow as GenerationWorkflowMetadata } : {}),
     ...(quota !== undefined ? { quota } : {}),
     ...(modelId ? { modelId } : {}),
@@ -274,6 +355,12 @@ export function normalizeHistoryEntry(raw: unknown, source: HistorySource): Hist
       ? { taskStatus: raw.taskStatus as HistoryEntry["taskStatus"] }
       : {}),
     ...(nonEmptyString(raw.errorCode) ? { errorCode: nonEmptyString(raw.errorCode) } : {}),
+    ...(lineageRaw && lineageRaw.parents.length
+      ? {
+          lineage: lineageRaw.parents,
+          ...(lineageRaw.truncated || raw.lineageTruncated === true ? { lineageTruncated: true } : {}),
+        }
+      : {}),
     schemaVersion: finiteNumber(raw.schemaVersion) ?? HISTORY_SCHEMA_VERSION,
   };
 }
@@ -316,6 +403,9 @@ function enrich(base: HistoryEntry, extra: HistoryEntry): HistoryEntry {
 
   if (!merged.prompt && extra.prompt) merged.prompt = extra.prompt;
   if (!merged.results.length && extra.results.length) merged.results = extra.results;
+  // entryKind 不在这里补：它是「内容种类」，由 inferEntryKind 现场推；
+  // 若把 extra 的值搬过来，一条 local 面推断为 image 的记录会覆盖 server 面的
+  // workflow 判定。归并只需保证 DAG 结构不丢（workflow 整体补）。
   if (!merged.workflow && extra.workflow) merged.workflow = extra.workflow;
   if (merged.quota === undefined && extra.quota !== undefined) merged.quota = extra.quota;
   if (!merged.modelId && extra.modelId) merged.modelId = extra.modelId;
@@ -325,6 +415,11 @@ function enrich(base: HistoryEntry, extra: HistoryEntry): HistoryEntry {
   if (!merged.retryOfTaskId && extra.retryOfTaskId) merged.retryOfTaskId = extra.retryOfTaskId;
   if (!merged.taskStatus && extra.taskStatus) merged.taskStatus = extra.taskStatus;
   if (!merged.errorCode && extra.errorCode) merged.errorCode = extra.errorCode;
+  // REQ-D1：血統欄位兩面取較全的一份（local 面一般為空，server 面帶登記）。
+  if (!merged.lineage?.length && extra.lineage?.length) {
+    merged.lineage = extra.lineage;
+    if (extra.lineageTruncated) merged.lineageTruncated = true;
+  }
   if (extra.starred) merged.starred = true;
   // 取更早的那个时间戳：客户端在所有出图落地后才记录，服务端在单个出图成功时就记录。
   if (extra.generatedAt < merged.generatedAt) merged.generatedAt = extra.generatedAt;
@@ -463,6 +558,7 @@ export function matchesHistoryQuery(entry: HistoryEntry, query: HistoryQuery): b
     const haystack = `${entry.prompt} ${primaryModelId(entry)} ${entry.workflow?.workflowPresetLabel ?? ""}`.toLowerCase();
     if (!haystack.includes(keyword)) return false;
   }
+  if (query.entryKind && inferEntryKind(entry) !== query.entryKind) return false;
   if (query.modelId && primaryModelId(entry) !== query.modelId) return false;
   if (query.imageSize && entry.workflow?.imageSize !== query.imageSize) return false;
   if (query.starredOnly && !entry.starred) return false;

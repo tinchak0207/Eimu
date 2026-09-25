@@ -12,20 +12,38 @@
   flex: 1;
 }
 
-/* 滚动区：细滚动条，与站内 iOS 风格一致 */
-.agent-transcript {
+/* 滚动区：细滚动条，与站内 iOS 风格一致。
+   2026-09-20 修：overflow-x hidden —— 單列對話流裡任何超寬內容（長英文串/
+   超長 URL）都不該撐出「帶箭頭的原生橫向滾動條」（視覺破損感第一元凶：
+   overflow-y:auto 時 overflow-x:visible 會被規範計算成 auto）；超寬內容的
+   裁切由各內容塊自己負責（行內 code=break-all、表格=自滾、氣泡=break-words）。
+
+   2026-09-20 第二刀（根因清剿）：細滾動條配方抽成可複用 class
+   `.agent-scroll-thin`——轉錄區與卡片區（confirm/questions）共用同一份，
+   不再各寫一份。webkit 的 `height` 必須跟 `width` 一起給：只給 width 時，
+   垂直條是細的、橫向條卻退回瀏覽器原生高度（Windows 上就是那條帶箭頭的
+   粗灰條），同一面板兩條滾動條兩種樣子＝破損感。 */
+.agent-transcript,
+.agent-scroll-thin {
   scrollbar-width: thin;
   scrollbar-color: rgba(0, 0, 0, 0.18) transparent;
 }
-.agent-transcript::-webkit-scrollbar {
+.agent-transcript::-webkit-scrollbar,
+.agent-scroll-thin::-webkit-scrollbar {
   width: 6px;
+  height: 6px;
 }
-.agent-transcript::-webkit-scrollbar-thumb {
+.agent-transcript::-webkit-scrollbar-thumb,
+.agent-scroll-thin::-webkit-scrollbar-thumb {
   background: rgba(0, 0, 0, 0.18);
   border-radius: 999px;
 }
-.agent-transcript::-webkit-scrollbar-track {
+.agent-transcript::-webkit-scrollbar-track,
+.agent-scroll-thin::-webkit-scrollbar-track {
   background: transparent;
+}
+.agent-transcript {
+  overflow-x: hidden;
 }
 
 /* 新条目入场 */

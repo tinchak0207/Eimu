@@ -27,6 +27,7 @@ import {
   SEEDREAM_20_MODEL_ID,
   SEEDREAM_50_PRO_MODEL_ID,
   SEEDREAM_50_LITE_MODEL_ID,
+  AGNES_IMAGE_25_FLASH_MODEL_ID,
   ADOBE_FIREFLY_MODEL_ID,
   FLUX_2_MODEL_ID,
   FLUX_2_PRO_MODEL_ID,
@@ -161,6 +162,11 @@ export const MODEL_KNOWLEDGE: Record<string, ModelKnowledge> = {
     strengths: ["2K/4K 同价，大批量出图成本最低", "4K 直出，放大展示不用二次处理"],
     knownDefects: ["细节上限低于 Pro 档，复杂人物手部偶发瑕疵"],
     usageTips: [{ text: "批量草稿与社媒配图用 Lite 4K 直出，商用精修再切 Pro", params: { outputResolution: "4k" } }],
+  },
+  [AGNES_IMAGE_25_FLASH_MODEL_ID]: {
+    strengths: ["出图快（实测约 11s 出 1024 PNG），轻量抽卡与占位图友好"],
+    knownDefects: ["无参考图能力，细节上限低于旗舰图模"],
+    usageTips: [{ text: "草稿和占位图用 Flash，成品再切旗舰模型" }],
   },
 
   // ── Adobe 图像 ──

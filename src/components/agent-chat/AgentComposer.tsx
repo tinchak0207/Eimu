@@ -11,7 +11,7 @@ import {
   type DragEvent,
   type KeyboardEvent,
 } from "react";
-import { ImagePlus, Loader2, Send, Square, X } from "lucide-react";
+import { ArrowUp, ImagePlus, Loader2, Navigation, Square, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   toAgentAttachmentRef,
@@ -30,7 +30,12 @@ import {
 export interface AgentComposerProps {
   /** 为 true 时（disabled 属性或会话已关闭）整个输入区禁用。 */
   disabled: boolean;
-  onSend: (text: string) => void;
+  /**
+   * 送出回调。允许返回 promise：真正的投递（跨网关往返，空态还要先建号+铸票）
+   * 耗时可见，composer 靠它把「已按下」的进行中态维持到投递落地，
+   * 期间送出钮换 spinner 并用 ref 挡连点。返回 void 时按立即完成处理。
+   */
+  onSend: (text: string) => void | Promise<void>;
   placeholder?: string;
   /** 上传附件所需的目标会话 id；空态未建号时由 onEnsureSession lazy 建号。 */
   sessionId?: string | null;
@@ -52,6 +57,34 @@ export interface AgentComposerProps {
    * 两条语义不打架。缺省 = 没有可停的回合，渲染完全不变。
    */
   onStop?: () => void;
+  /**
+   * 中止请求在飞（网络往返未回来的镜像）。为真时停止钮禁用 + 换 spinner，
+   * 用户得到「按下了」的反馈且不能连按。缺省 false = 行为与不传时逐位元一致。
+   */
+  stopPending?: boolean;
+  /**
+   * REQ-D2（2026-09-22）：回合进行中＝可引导（steer）。
+   *
+   * 为真且输入框有字时，送出钮换成「引导」语义：图标由 ↑ 换成方向标、
+   * title 说明这条会作为指引插进当前回合、不打断它——与同一位置的停止钮
+   * （空输入框时的红方块）语义彻底分开：**空框＝停止，有字＝引导**。
+   *
+   * 状态真相不在这里：这条指引到底「已注入本回合」还是「排队中·本回合结束后
+   * 生效」，由网關 steer.status 帧决定，落在用户气泡的徽章上。这里只负责让
+   * 按钮不冒充停止。缺省 false = 渲染与不传时逐位元一致。
+   */
+  steerActive?: boolean;
+  /**
+   * 外部（面板）在途：这条送出还没落地，或本輪还没真正开始——空態首發要先建號
+   * 鑄票，網關還要把 prompt 送進 opencode 才回 ack（实測 10–15s）。
+   *
+   * 为真时送出钮位置立刻进入在途态：转圈、不可再点，输入框空白时也一样是转圈
+   * 送出钮（不是 disabled 灰钮），并且压过「输入框空 → 停止钮」那条替换语义。
+   * 「本輪尚未开始」的单一真相源在 AgentChatPanel（它同时知道 turnActive 与
+   * onSend 的 promise），这里只负责渲染，不自己猜。缺省 false = 行为与不传时
+   * 逐位元一致。
+   */
+  externalSendPending?: boolean;
 }
 
 /** 允许选择的文件类型；列表与网关约定一致，避免上传后无法解析的格式。 */
@@ -93,6 +126,15 @@ function formatMb(bytes: number): string {
   return (Math.round((bytes / (1024 * 1024)) * 10) / 10).toFixed(1);
 }
 
+/**
+ * 送出锁的硬保险上限（20s）。relay 路径的 fetch 没有 timeout，请求卡死时
+ * 不能把送出钮永久锁死——到点无条件解锁，宁可让用户重试也不做假死按钮。
+ *
+ * 2026-09-18 起面板层（AgentChatPanel 的「本輪還沒开始」在途态）沿用同一个值，
+ * 两处寿命一致：这里锁的是输入区自己的投递，那边锁的是面板在等的本輪开始。
+ */
+export const SEND_HARD_TIMEOUT_MS = 20_000;
+
 interface PendingAttachment {
   id: string;
   fileName: string;
@@ -113,7 +155,7 @@ interface PendingAttachment {
 }
 
 /**
- * 输入框跟着内容长高，上限交给 CSS 的 max-h-32（到顶后自己滚）。
+ * 输入框跟着内容长高，上限交给 CSS 的 max-h-[240px]（到顶后自己滚）。
  * rows=1 的固定高度下，续写一段长愿望只能看见最后一行，看不到自己写了什么。
  */
 function autoGrow(el: HTMLTextAreaElement) {
@@ -155,20 +197,47 @@ export function computeCanSend(
   return (Boolean(trimmedText) || readyRefCount > 0) && !hasPendingAttachments(attachments);
 }
 
+/**
+ * 「在途」的下一个值（纯函数，可直测）。内部送出锁或面板餵進來的在途任一为真
+ * 就是在途；两边都放下才真的放下（面板收了在途、但输入区自己的投递还在飞，
+ * 仍然是在途）。回传 null ＝与当前值相同、不必动——render 期收敛靠这个 bail out，
+ * 不然每次渲染都要多跑一轮。
+ */
+export function nextSendBusy(
+  current: boolean,
+  internalSendInFlight: boolean,
+  externalSendPending: boolean,
+): boolean | null {
+  const next = internalSendInFlight || externalSendPending;
+  return next === current ? null : next;
+}
+
 let attachmentSeq = 0;
 
 function AgentComposerComponent({
   disabled,
   onSend,
-  placeholder = "描述新需求，或要求修改上一轮的图…",
+  placeholder = "描述你想做的，或把剧本／资产图拖进来",
   sessionId,
   onEnsureSession,
   prefill,
   onPrefillConsumed,
   onStop,
+  steerActive = false,
+  stopPending = false,
+  externalSendPending = false,
 }: AgentComposerProps) {
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  // 送出进行中：钉住 spinner 到投递落地（onSend 的 promise 结算或硬保险到点）。
+  const [sending, setSending] = useState(false);
+  /**
+   * 送出锁的同步镜像。连点发生在两次 re-render 之间时 state 还是旧值，
+   * 只有 ref 能在同一帧里挡住第二次送出（否则 = 两条消息 + 两次计费）。
+   */
+  const sendingRef = useRef(false);
+  /** 硬保险计时器句柄；解锁时清掉，避免悬空 setTimeout 反复 setState。 */
+  const sendUnlockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // 键盘规避：composer 根元素需要被抬升/复位，所以给它一个 ref。
@@ -327,10 +396,41 @@ function AgentComposerComponent({
   // patchAttachment 静默 no-op，等同于用户数据丢失）。
   const canSend = computeCanSend(trimmed, readyRefs.length, attachments);
 
+  /*
+   * 09-18「在途」的单一收敛点：输入区自己的送出锁（sendingRef）与面板餵進來的
+   * 在途（externalSendPending）合成同一个 sending——aria-busy={sending} 与
+   * 「在途就转圈」这组既有契约（另一条测试线钉着字面）在面板在途期间也必须为真。
+   *
+   * 为什么是 render 期调整而不是 useEffect：effect 在静态渲染（SSR）里根本不跑，
+   * 靠它会让「面板在途」的第一帧 aria-busy 缺位。这是 React 官方「prop 变了就
+   * 把 state 收敛」的模式（render 期 setState 会被立刻合并进同一帧，不闪中间态）。
+   */
+  const nextBusy = nextSendBusy(sending, sendingRef.current, externalSendPending);
+  if (nextBusy !== null) setSending(nextBusy);
+
+  /**
+   * 幂等解锁：ref 与 state 一起清，并清掉硬保险计时器。
+   * 三条路径都会调它（promise 结算 / 硬保险到点 / onSend 同步 throw），
+   * 所以必须能重复调用而不出错。
+   */
+  const unlockSend = useCallback(() => {
+    if (sendUnlockTimerRef.current !== null) {
+      clearTimeout(sendUnlockTimerRef.current);
+      sendUnlockTimerRef.current = null;
+    }
+    sendingRef.current = false;
+    setSending(false);
+  }, []);
+
   // 组装最终文本：附加 [附件] 区块（只纳入已传成功的），然后交给 onSend。
   // 影片一条 chip 展开成 4 行（4 张帧各自一个 path），编号连续。
   // 纯附件发送（空文本）：只发附件区块，不带前导换行。
   const handleSend = useCallback(() => {
+    // 同步连点守卫：同一帧内第二次点击时 sending 还是旧值，只有 ref 挡得住。
+    if (sendingRef.current) return;
+    // 09-18：面板餵進來的在途同样要挡——Enter 这条入口不吃 disabled 属性，
+    // 空態併發 send 是已记录的竞态（两条消息、两次计费）。
+    if (externalSendPending) return;
     if (!canSend) return;
     // 快照「本次实际发出去」的附件：canSend 已挡掉 uploading/extracting，
     // 正常情况下这就等于当前 attachments 全量；仍按 id 过滤只清掉这些，
@@ -342,7 +442,24 @@ function AgentComposerComponent({
         ? `${trimmed}\n${buildAttachmentBlock(readyRefs)}`
         : trimmed
       : buildAttachmentBlock(readyRefs).replace(/^\n+/, "");
-    onSend(finalText);
+    // 通过资格检查后立刻上锁，不等 re-render。
+    sendingRef.current = true;
+    setSending(true);
+    sendUnlockTimerRef.current = setTimeout(unlockSend, SEND_HARD_TIMEOUT_MS);
+    try {
+      // 统一成 promise：void 回调走 resolved 分支，finally 立刻解锁。
+      // catch 吞掉错误——用户可见的错误提示由 hook 的 notice 负责，
+      // 这里只负责别留 unhandled rejection，并把锁放掉。
+      Promise.resolve(onSend(finalText))
+        .catch(() => {})
+        .finally(unlockSend);
+    } catch {
+      // onSend 同步 throw（不是返回 rejected promise）＝ 这条消息根本没送出去：
+      // 解锁后直接返回，不清输入框、不释放附件——吃掉使用者的话且没人接手
+      // 比留一个可重试的框更糟。
+      unlockSend();
+      return;
+    }
     setText("");
     // 清空文字后高度要跟着收回来，否则空框还占着刚才那几行。
     if (textareaRef.current) {
@@ -352,7 +469,7 @@ function AgentComposerComponent({
     const sentIds = new Set(sentAttachments.map((a) => a.id));
     sentAttachments.forEach(releaseUrls);
     setAttachments((prev) => prev.filter((a) => !sentIds.has(a.id)));
-  }, [canSend, trimmed, readyRefs, onSend, attachments]);
+  }, [canSend, trimmed, readyRefs, onSend, attachments, unlockSend, externalSendPending]);
 
   /**
    * D-24：把半句话接进输入框并把光标放到末尾——用户下一个动作就是继续打字。
@@ -391,6 +508,16 @@ function AgentComposerComponent({
   useEffect(() => {
     return () => {
       attachmentsRef.current.forEach(releaseUrls);
+    };
+  }, []);
+
+  // 卸载时清掉硬保险计时器：面板关掉后不该还有 setTimeout 攥着 setState。
+  useEffect(() => {
+    return () => {
+      if (sendUnlockTimerRef.current !== null) {
+        clearTimeout(sendUnlockTimerRef.current);
+        sendUnlockTimerRef.current = null;
+      }
     };
   }, []);
 
@@ -447,6 +574,11 @@ function AgentComposerComponent({
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
       // Enter 发送，Shift+Enter 换行。
       if (event.key === "Enter" && !event.shiftKey) {
+        // 输入法组字中的 Enter 属于输入法（确认候选词），不是送出指令。
+        // 必须在 preventDefault 之前返回：对组字中的 Enter 调用 preventDefault
+        // 会让部分浏览器吃不到候选词确认，变成「按了 Enter 字不见」。
+        // keyCode 229 是旧式 IME 的残留判定（Android/部分输入法不补 isComposing）。
+        if (event.nativeEvent.isComposing || event.keyCode === 229) return;
         event.preventDefault();
         if (!canSend) return;
         handleSend();
@@ -529,40 +661,27 @@ function AgentComposerComponent({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
       className={cn(
-        "agent-composer relative flex items-end gap-2 rounded-[20px] bg-[rgba(120,120,128,0.07)] px-3 py-1.5 touch-manipulation [-webkit-tap-highlight-color:transparent] focus-within:ring-2 focus-within:ring-ios-blue/30",
+        "agent-composer lg-float relative flex items-end gap-1.5 rounded-[22px] p-1.5 touch-manipulation [-webkit-tap-highlight-color:transparent] outline-none focus-within:ring-[1.5px] focus-within:ring-ring/60",
         dragActive && "!ring-2 !ring-ios-blue/45 !bg-ios-blue/[0.04]",
       )}
     >
+      {/* 顶缘 specular 亮线（MASTER.md §5 / DESIGN.md §5 权威配方，2026-09-20
+          预览验收语汇）：lg-float 玻璃材质要有「上缘受光」的质感；纯装饰，
+          不吃鼠标事件。 */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-[inherit] bg-gradient-to-r from-transparent via-white to-transparent opacity-80"
+      />
       {/* 拖拽悬停提示：只是视觉反馈，不吃鼠标事件（pointer-events-none）。 */}
       {dragActive && (
         <div
           aria-hidden="true"
           className="pointer-events-none absolute inset-x-2 inset-y-1 flex items-center justify-center rounded-[16px] bg-ios-blue/[0.08] text-sm font-medium text-ios-blue"
         >
-          松开以添加附件
+          松开以添加素材
         </div>
       )}
-      {/*
-        附件按钮：点击打开隐式文件选择，一次可选多个文件，选完即逐个上传。
-        上传中的 chip 显示 spinner，失败显示错误态（可移除重传或删除）。
-      */}
-      <button
-        type="button"
-        onClick={handlePick}
-        disabled={!canAttach}
-        aria-label="添加附件"
-        title="添加附件（图片 / 视频 / 文档）"
-        className={cn(
-          "flex h-11 w-11 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-full",
-          "bg-ios-blue/10 text-ios-blue transition-colors",
-          "touch-manipulation [-webkit-tap-highlight-color:transparent]",
-          "hover:bg-ios-blue/[0.16] active:bg-ios-blue/[0.22] focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30",
-          "disabled:cursor-not-allowed disabled:bg-transparent disabled:text-foreground/45",
-        )}
-      >
-        <ImagePlus className="h-5 w-5" aria-hidden="true" />
-      </button>
-
+      {/* 隐式文件选择：附件鈕在文字左侧（items-end 底对齐），這裡只留 input 本體。 */}
       <input
         ref={fileInputRef}
         type="file"
@@ -573,6 +692,27 @@ function AgentComposerComponent({
         aria-hidden="true"
         tabIndex={-1}
       />
+
+      {/*
+        附件按钮：点击打开隐式文件选择，一次可选多个文件，选完即逐个上传。
+        上传中的 chip 显示 spinner，失败显示错误态（可移除重传或删除）。
+        2026-09-20 轻量化定案：36px 浅灰幽灵圆钮（主色只留给送出钮）。
+      */}
+      <button
+        type="button"
+        onClick={handlePick}
+        disabled={!canAttach}
+        aria-label="添加素材"
+        title="添加素材（剧本 / 图片 / 影片 / 文档）"
+        className={cn(
+          "flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-black/[0.06] text-foreground/65",
+          "touch-manipulation [-webkit-tap-highlight-color:transparent]",
+          "transition-colors hover:bg-black/[0.10] hover:text-foreground active:bg-black/[0.14] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+          "disabled:cursor-not-allowed disabled:bg-transparent disabled:text-foreground/35",
+        )}
+      >
+        <ImagePlus className="h-4 w-4" aria-hidden="true" />
+      </button>
 
       <div className="flex min-w-0 max-w-[42rem] flex-1 flex-col">
         {/* 待发送附件 chip 行：成功 / 上传中 / 错误 三种状态都带移除按钮。 */}
@@ -658,8 +798,9 @@ function AgentComposerComponent({
           输入消息
         </label>
         {/* 移动端虚拟键盘把回车键显示成「发送」，回车即送出（Shift+Enter 换行不变）。
-            2026-08-25 空间压实：min-h 从 ~3 行收到 ~2 行半——autoGrow 长高、
-            max-h 到顶自滚，min-h 只兜空框下限，不再是常驻留白。 */}
+            2026-09-20 轻量化定案（两版试错后）：钮回文字两侧（items-end 底对齐，
+            长文时钮贴右下＝ChatGPT 同款），36px 小钮＋附件钮浅灰幽灵＝轻；
+            max-h 124→240px（≈10 行才滚，不再三行出滚动条＝上一版「长文差」真凶之一）。 */}
         <textarea
           id="agent-composer-input"
           ref={textareaRef}
@@ -673,53 +814,85 @@ function AgentComposerComponent({
           enterKeyHint="send"
           disabled={disabled}
           placeholder={placeholder}
-          rows={3}
+          rows={1}
           className={cn(
-            "min-h-[60px] max-h-52 w-full resize-none bg-transparent py-1.5 text-base text-foreground sm:min-h-[72px] sm:text-[15px]",
-            "placeholder:text-muted-foreground/70 focus:outline-none",
+            "min-h-[40px] max-h-[240px] w-full resize-none bg-transparent px-1 py-1.5 text-[15px] leading-[22px] text-foreground",
+            "placeholder:text-foreground/35 focus:outline-none",
             "touch-manipulation [-webkit-tap-highlight-color:transparent]",
             "disabled:cursor-not-allowed disabled:opacity-50",
           )}
         />
       </div>
 
-      {onStop && !canSend ? (
-        /*
-          D-26 补全：生成中且输入框为空 → 送出钮位置渲染停止钮。
-          样式逐行复用 AgentBatchProgress 的「停下」钮（Square 图标 +
-          bg-destructive/[0.09] text-destructive + transition-colors +
-          focus-visible:ring-destructive/30 + [touch-action:manipulation]），
-          只改两处：外框换成与送出钮完全同尺寸的圆钮（h-11 w-11
-          sm:h-8 sm:w-8 rounded-full，切换零跳动）；去掉文字（圆钮放不下），
-          aria-label 与 title 原样保留。
-        */
-        <button
-          type="button"
-          onClick={onStop}
-          aria-label="中止助理生成"
-          title="立即中止当前这轮生成"
-          className="flex h-11 w-11 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-full bg-destructive/[0.09] text-destructive transition-colors duration-150 active:bg-destructive/[0.16] focus:outline-none focus-visible:ring-2 focus-visible:ring-destructive/30 [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
-        >
-          <Square className="h-3.5 w-3.5" aria-hidden="true" />
-        </button>
-      ) : (
-        <button
-          type="button"
-          onClick={handleSend}
-          disabled={disabled || !canSend}
-          aria-label="发送"
-          className={cn(
-            "flex h-11 w-11 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-full transition-all duration-200",
-            "touch-manipulation [-webkit-tap-highlight-color:transparent]",
-            "bg-ios-blue text-white shadow-[0_2px_8px_rgba(0,122,255,0.32)]",
-            "hover:opacity-90 active:scale-[0.94]",
-            "focus:outline-none focus:ring-2 focus:ring-ios-blue/40",
-            "disabled:cursor-not-allowed disabled:bg-[rgba(120,120,128,0.18)] disabled:text-white/80 disabled:shadow-none",
+      {onStop && !canSend && !sending ? (
+            /*
+              D-26 补全：生成中且输入框为空 → 送出钮位置渲染停止钮。
+              2026-09-20 视觉改版（预览验收语汇）：红底方块 → 幽灵红文字钮
+              （text-ios-red + hover 淡红底），与送出钮同尺寸圆钮（h-9 w-9
+              rounded-full，切换零跳动）；aria-label / title / 图标
+              （Square + Loader2 stopPending spinner）原样保留。
+
+              09-18：再补一个条件 !sending —— 本輪還沒开始（含面板餵進來的在途，
+              sending 已收敛成「内部或面板在途」）时不许被停止钮盖掉：那一段真空期
+              使用者需要的是「正在送」的转圈钮，不是一颗按下去可能没东西可停的停止钮。
+            */
+            <button
+              type="button"
+              onClick={onStop}
+              disabled={stopPending}
+              aria-label="中止助理生成"
+              title={stopPending ? "正在中止，请稍候…" : "立即中止当前这轮生成"}
+              className={cn(
+                "flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-ios-red transition-colors duration-150 [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]",
+                "hover:bg-ios-red/[0.07] active:bg-ios-red/[0.12] focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-red/30",
+                stopPending && "disabled:cursor-wait disabled:opacity-60",
+              )}
+            >
+              {stopPending ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+              ) : (
+                <Square className="h-3.5 w-3.5" aria-hidden="true" />
+              )}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={handleSend}
+              disabled={disabled || !canSend}
+              aria-label="发送"
+              title={steerActive ? "引导本轮：这条会插进当前回合，不打断它" : undefined}
+              data-steer={steerActive ? "true" : undefined}
+              aria-busy={sending}
+              className={cn(
+                // 2026-09-20 暴君細化：36px 圓鈕、主色實底保留（全畫面唯一的重音），
+                // signature 陰影減半（0_8px_20px 在 36px 圓上壓得過深）。
+                "flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-all duration-200",
+                "touch-manipulation [-webkit-tap-highlight-color:transparent]",
+                // 2026-09-20 視覺改版（預覽驗收語彙）：主色 #2d3142 + signature
+                // 陰影 + hover 微抬升；disabled 換淺灰 #bcc2ca。
+                "bg-[#2d3142] text-white shadow-[0_3px_10px_rgba(45,49,66,0.18)]",
+                "hover:-translate-y-[1px] hover:bg-[#272b39] active:scale-[0.94]",
+                "focus:outline-none focus:ring-2 focus:ring-ring/40",
+                // 在途期間不上 disabled 的灰階：在途是「正在送」不是「不可用」，
+                // 白轉圈壓在淺灰底上等於沒有回饋（深底＋白轉圈才看得見）。
+                // 非在途時 disabled 樣式逐字元照舊（會話關閉 / 輸入框空）。
+                !sending &&
+                  "disabled:cursor-not-allowed disabled:bg-[#bcc2ca] disabled:text-white/80 disabled:shadow-none",
+                // 送出進行中：游標與縮放回饋都收掉，連點由 sendingRef 在邏輯層擋。
+                sending && "cursor-wait active:scale-100",
+              )}
+            >
+              {sending ? (
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              ) : steerActive ? (
+                /* REQ-D2：回合中送出的不是「新消息」而是「引导」——方向标替掉 ↑，
+                   与「停止」的红方块两不相犯。 */
+                <Navigation className="h-4 w-4" aria-hidden="true" />
+              ) : (
+                <ArrowUp className="h-4 w-4" aria-hidden="true" />
+              )}
+            </button>
           )}
-        >
-          <Send className="h-5 w-5" aria-hidden="true" />
-        </button>
-      )}
     </div>
   );
 }

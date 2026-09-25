@@ -13,6 +13,7 @@ import {
 } from "@/lib/agent-memory-injection";
 import { getActiveAssetPack } from "@/lib/asset-pack-store";
 import { buildAssetPackInjection } from "@/lib/agent-assets";
+import { isAssetUsable, projectIdFromBody } from "@/lib/asset-library";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -55,9 +56,22 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     memoryInjection = null;
   }
   // 資產包激活注入（與記憶平行，缺省不阻塞）。
+  // REQ-B2：注入前過作用域裁決（不可見即不可用）——項目歸屬的包只有在請求帶了
+  // 相符的 projectId（或已顯式分享到該項目）時才注入；無項目上下文＝不注入。
+  // 個人包（無 scope，既有預設）逐位不變。
   let activeAssets: ReturnType<typeof buildAssetPackInjection> = null;
   try {
-    activeAssets = buildAssetPackInjection(await getActiveAssetPack(caller.userId));
+    const body = await req.json().catch(() => ({}));
+    const active = await getActiveAssetPack(caller.userId);
+    const usable = active
+      ? await isAssetUsable({
+          userId: caller.userId,
+          projectId: projectIdFromBody(body),
+          assetKind: "pack",
+          assetId: active.id,
+        })
+      : false;
+    activeAssets = active && usable ? buildAssetPackInjection(active) : null;
   } catch {
     activeAssets = null;
   }

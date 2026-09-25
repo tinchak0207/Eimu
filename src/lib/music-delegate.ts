@@ -248,11 +248,19 @@ export function assembleMusicDirectorPrompt(
     `交付字段：${delegation.deliverables.join("、")}`,
     // 刀 I（2026-09-15）：melody_notation 可判形态指引——措辞对齐上方「时长：」行的
     // 「字段：值（判据）」格式；机器判据口径 = 栏位名逐字出现＋紧跟实质内容（缺整栏＝未交付）。
+    // 2026-09-19 YuE2 白盒接线：追加真源句（additive，不删既有）——工具回执 score_abc
+    // 有值时 melody_notation 从「导演自己编音名序列」变「有真源可引」。
     ...(delegation.deliverables.includes("melody_notation")
       ? [
           `交付字段格式：melody_notation 需含调性＋节拍＋至少一段人声主旋律以音名字符序列标注（例：A4–C5–B4–A4，含时值），交付正文须逐字出现栏位名 melody_notation 并紧跟上述实质内容（缺整栏＝未交付）。`,
+          `真源优先：music_gen 回执的 score_abc 栏带 ABC 乐谱（K: 调号＋Q: 节拍＋V: Vocal 声部音符序列已齐）时，melody_notation 直接引用其 Vocal 声部，勿另行编造音名序列；score_abc 为 null 时仍由你自行标注。`,
         ]
       : []),
+    // 2026-09-19 编辑/翻唱委託指引（additive）：任务性质是「改编/翻唱/二次精修」时
+    // 指向 abc＋cot_mode 重渲染路径（工具参数由并行片接入）；措辞对齐上方
+    // 「字段：值（判据）」格式。故意不含 melody_notation 字样（护栏测试断言
+    // 无该交付栏时该词零出现）。
+    `编辑路径：effect_description 性质为改编/翻唱/二次精修（判据：要求基于既有歌曲改风格/改和声/换语言，而非从零新写）时，music_gen 走 YuE2 通路带 abc＋cot_mode 重渲染（编辑用 cot=full 重渲染，翻唱用 cot=melody＋chord-free abc），编辑不变量与版本对比规约见 skills/music-director/SKILL.md「乐谱编辑与翻唱工作流」节。`,
     `参考素材：${delegation.reference_refs && delegation.reference_refs.length > 0 ? delegation.reference_refs.join("、") : "无"}`,
   ].join("\n");
 

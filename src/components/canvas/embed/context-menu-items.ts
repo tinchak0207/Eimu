@@ -7,6 +7,7 @@ import type { UseCanvasChatReturn } from "@/hooks/use-canvas-chat";
 import { CanvasNodeType, type CanvasConnection, type CanvasNode, type CanvasPosition } from "@/lib/canvas/types";
 import type { AlignMode } from "@/lib/canvas/interaction";
 import type { CharacterCardKind } from "@/lib/character-cards";
+import { CHARACTER_CARD_KIND_LABEL, CHARACTER_CARD_KIND_VALUES } from "@/lib/character-cards";
 import type { CanvasMenuItem } from "../CanvasContextMenu";
 import { imageUrlOf, type CreateMenuState, type EditorState, type MenuState } from "./embed-helpers";
 
@@ -35,7 +36,7 @@ export interface CanvasEmbedMenuItemsInput {
   setConnecting: Dispatch<SetStateAction<{ sourceId: string; cursor: CanvasPosition | null } | null>>;
   copySelection: () => void;
   duplicateSelection: () => void;
-  saveNodeAsCard: (node: CanvasNode, kind: CharacterCardKind) => Promise<void>;
+  saveNodeAsCard: (node: CanvasNode, kind: CharacterCardKind, options?: { variantOf?: string }) => Promise<void>;
   saveNodeToAssets: (nodeId: string) => Promise<void>;
   setEditor: Dispatch<SetStateAction<EditorState | null>>;
   upscaleNode: (nodeId: string) => Promise<void>;
@@ -44,6 +45,9 @@ export interface CanvasEmbedMenuItemsInput {
   handleDeleteNode: (nodeId: string) => void;
   deleteSelected: () => void;
 }
+
+/** 變體母卡上限：超過即整個「存为角色变体卡」子選單不渲染（不造死按鈕、不靜默截斷）。 */
+export const MAX_VARIANT_MOTHER_CARDS = 8;
 
 export function buildCanvasEmbedMenuItems({
   menu,
@@ -153,17 +157,32 @@ export function buildCanvasEmbedMenuItems({
     items.push({ id: "save-asset-text", label: "存入素材库", onSelect: () => void saveNodeToAssets(node.id) });
   }
   // P2：reference 節點 → 存為角色/場景卡（鎖定到本畫布，所有生成自動攜帶）。
+  // B：五值化——子項由 CHARACTER_CARD_KIND_VALUES 驅動（前三個 id 與舊字面值逐字相同）。
   if (node.type === CanvasNodeType.Reference && url) {
     items.push("separator");
     items.push({
       id: "save-as-card",
       label: "存为卡并锁定",
-      children: [
-        { id: "save-card-character", label: "存为角色卡", onSelect: () => void saveNodeAsCard(node, "character") },
-        { id: "save-card-scene", label: "存为场景卡", onSelect: () => void saveNodeAsCard(node, "scene") },
-        { id: "save-card-style", label: "存为风格卡", onSelect: () => void saveNodeAsCard(node, "style") },
-      ],
+      children: CHARACTER_CARD_KIND_VALUES.map((kind) => ({
+        id: `save-card-${kind}`,
+        label: `存为${CHARACTER_CARD_KIND_LABEL[kind]}卡`,
+        onSelect: () => void saveNodeAsCard(node, kind),
+      })),
     });
+    // C：變體入口——母卡清單＝畫布上既有的角色卡。零母卡不渲染（不留死路徑）；
+    // 母卡超過上限時整個子選單不渲染（不做「更多母卡」死按鈕、不靜默截斷）。
+    const motherCards = state.characterCards.filter((card) => card.kind === "character");
+    if (motherCards.length > 0 && motherCards.length <= MAX_VARIANT_MOTHER_CARDS) {
+      items.push({
+        id: "save-as-variant",
+        label: "存为角色变体卡",
+        children: motherCards.map((card) => ({
+          id: `save-variant-${card.id}`,
+          label: card.name,
+          onSelect: () => void saveNodeAsCard(node, "character", { variantOf: card.id }),
+        })),
+      });
+    }
   }
   // 圖片節點 → 帶角色的參考圖節點（保留位置/尺寸/圖片，補默認角色）。
   if (node.type === CanvasNodeType.Image && url) {

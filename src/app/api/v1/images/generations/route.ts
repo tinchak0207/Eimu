@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { after } from "next/server";
 import { QUOTA_PER_COIN } from "@/lib/quota-constants";
@@ -13,6 +14,13 @@ import { imageGenerationCoins, isSupportedImageModel, type ModelMode } from "@/l
 import { ADOBE_FIREFLY_MODEL_ID } from "@/lib/provider-config";
 import { aspectRatioFromImageSize, resolveGenerationModelId } from "@/lib/generation-model-catalog";
 import { normalizeControlNets, toPixaiControlNets, MAX_CONTROL_NETS } from "@/lib/pixai-controlnets";
+import { listCharacterCards } from "@/lib/character-card-store";
+import {
+  EditInputError,
+  generationWorkflowField,
+  planBizGenerationInput,
+  type BizGenerationInputPlan,
+} from "@/lib/biz-image-references";
 import { generationControlPlaneEnabled } from "@/lib/generation-core/database";
 import { submitGenerationCommand } from "@/lib/generation-core/command-service";
 import { enforceQuotaGate } from "@/lib/generation-core/quota-precheck";
@@ -86,6 +94,12 @@ interface ImageRequestBody {
   callback_url?: unknown;
   control_nets?: unknown;
   routing_hint?: unknown;
+  /**
+   * 參考圖（2026-09-25）。元素為 http(s)/data:image URL 字符串，或
+   * `{ url, role?, name? }`；`role` 收斂到 `GenerationReference.referenceRole`
+   * 的五值值域，其餘一律 `"general"`。上限 5 張（超過 400，不靜默截斷）。
+   */
+  reference_images?: unknown;
 }
 
 export async function POST(req: NextRequest) {
@@ -195,6 +209,33 @@ export async function POST(req: NextRequest) {
     pixaiControlNets = toPixaiControlNets(normalized.valid);
   }
 
+  // ── 參考圖與行內實體 tag（2026-09-25）─────────────────────────
+  //
+  // 兩件事在這裡一次做完，結果直接進 submitGenerationCommand：
+  //   ① body.reference_images（http(s) 直通 / data:image 落地 Blob 換公網 URL）；
+  //   ② prompt 裡的 `@[種類:名稱]`——用呼叫金鑰 owner 的卡庫就地展開成卡的 prompt 片段，
+  //      命中的卡的 references 併進 workflow.references（卡的圖在前、顯式參考圖在後）。
+  // 形狀校驗在任何 I/O 之前（非法輸入 400 不碰額度）；卡庫讀取失敗只降級不擋生成。
+  // 零 token 且零參考圖 → plan 與改動前逐位元等價，`generationWorkflowField` 回空物件，
+  // 提交 payload 完全不加 workflow 鍵。
+  const idempotencyKeyHeader = req.headers.get("idempotency-key")?.trim() || null;
+  let plan: BizGenerationInputPlan;
+  try {
+    plan = await planBizGenerationInput({
+      prompt,
+      rawReferenceImages: body.reference_images,
+      // 只有 prompt 真的帶 token 時才會被呼叫（零 token 請求不讀卡庫、不加延遲）。
+      loadCards: () => listCharacterCards(apiKey.userId),
+      tenantId: `biz:${apiKey.id}`,
+      idempotencyKey: idempotencyKeyHeader ?? `biz-gen-${randomUUID()}`,
+    });
+  } catch (error) {
+    if (error instanceof EditInputError) {
+      return errorResponse(error.status, error.message, "invalid_request_error", error.code, traceId);
+    }
+    throw error;
+  }
+
   // 管理員改價需立即對扣費生效：算價前先把最新定價覆寫同步進目錄（核心層內部吞錯，失敗不擋生成）。
   // 放在計費共同上游：一次同步同時覆蓋 durable branch 的 billingAmount 與 legacy 的 coinsPerImage。
   await syncModelPricing();
@@ -234,7 +275,7 @@ export async function POST(req: NextRequest) {
           ? "firefly_only"
           : body.routing_hint === "hub" ? "hub_only" : "generic",
         modelId,
-        prompt,
+        prompt: plan.prompt,
         size,
         ratio: aspectRatioFromImageSize(size),
         resolution: qualityMode === "quality" ? "2k" : "1k",
@@ -243,16 +284,22 @@ export async function POST(req: NextRequest) {
         callbackUrl,
         requestedCount: rawN,
         billingAmount: gate.billingAmount,
-        ...(pixaiControlNets
-          ? { workflow: { metadata: { controlNets: pixaiControlNets } } }
-          : {}),
+        // references 與既有 metadata.controlNets 合成同一個 workflow（互不覆蓋）；
+        // 兩者皆無時展開零鍵 —— 提交 payload 與改動前逐位元等價。
+        ...generationWorkflowField({ references: plan.references, controlNets: pixaiControlNets }),
       });
       return withTraceId(
         addRateLimitHeaders(
-          NextResponse.json(generationTaskResponse(submitted.job), {
-            status: 202,
-            headers: { "Location": `/v1/images/${submitted.job.id}` },
-          }),
+          NextResponse.json(
+            {
+              ...generationTaskResponse(submitted.job),
+              ...(plan.warnings.length ? { warnings: plan.warnings } : {}),
+            },
+            {
+              status: 202,
+              headers: { "Location": `/v1/images/${submitted.job.id}` },
+            },
+          ),
           apiKey,
         ),
         traceId,
@@ -264,6 +311,18 @@ export async function POST(req: NextRequest) {
       console.error(`[biz-api] durable task creation failed requestId=${requestId}`, error);
       return errorResponse(503, "Generation control plane is temporarily unavailable.", "api_error", "control_plane_unavailable", traceId);
     }
+  }
+
+  // 遺留（非 durable）分支沒有 references 通道：`generateBizImage` 不吃參考圖。
+  // 帶了參考圖就誠實失敗（fail-closed）——絕不靜默丟掉參考圖後生出一張不像的圖。
+  if (plan.references.length > 0) {
+    return errorResponse(
+      501,
+      "参考图需要生成控制面（GENERATION_CONTROL_PLANE_ENABLED=true 且 GENERATION_DATABASE_URL 已配置）才能使用。",
+      "api_error",
+      "references_require_control_plane",
+      traceId,
+    );
   }
 
   // ── 计费预留 ──────────────────────────────────────────────
@@ -314,11 +373,11 @@ export async function POST(req: NextRequest) {
       ? await generateViaExternalChannel({
           channel: externalChannel,
           modelId,
-          prompt,
+          prompt: plan.prompt,
         })
       : await generateBizImage({
           modelId,
-          prompt,
+          prompt: plan.prompt,
           imageSize: size,
           qualityMode,
           requestId: `${requestId}-${index + 1}`,
@@ -378,6 +437,8 @@ export async function POST(req: NextRequest) {
       NextResponse.json({
         created: Math.floor(Date.now() / 1000),
         data: images,
+        // 實體 tag 未命中／卡庫降級等可見性欄位；無事發生時整鍵不出現（零漂移）。
+        ...(plan.warnings.length ? { warnings: plan.warnings } : {}),
       }),
       apiKey,
     ),

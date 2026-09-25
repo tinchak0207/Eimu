@@ -2,15 +2,17 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ChevronLeft, ChevronRight, Coins, Download, IdCard, Layers, Loader2, Megaphone, RotateCcw, SlidersHorizontal, Star, Trash2, X } from "lucide-react";
+import { AlertTriangle, Bot, Check, ChevronLeft, ChevronRight, Coins, Download, GitBranch, Layers, Loader2, RotateCcw, SlidersHorizontal, Star, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   formatAbsoluteTime,
   formatCoins,
   formatModelLabel,
+  inferEntryKind,
   primaryModelId,
 } from "@/lib/history-types";
 import { canHistoryEntryRerun } from "@/lib/history-rerun";
+import { historyDagNodes, historyDagNodesTotalCoins, workflowDagThumbnailUrl } from "@/lib/history-workflow-view";
 import type { HistoryEntry } from "@/lib/history-types";
 
 export interface HistoryLightboxProps {
@@ -23,19 +25,24 @@ export interface HistoryLightboxProps {
   onDownload: (entry: HistoryEntry) => void | Promise<void>;
   onDelete: (id: string) => void;
   onReuse?: (entry: HistoryEntry) => void;
-  /** 把这张图锚定成角色/场景/风格卡。缺席时工具栏不挂这颗按钮。 */
-  onSaveCard?: (entry: HistoryEntry) => void;
   /** 再来 N 组 / 微调变体（payload 级批量重跑）。缺席时工具栏不挂。 */
   onRerun?: (entry: HistoryEntry) => void;
   onRerunVariant?: (entry: HistoryEntry) => void;
-  /** 把这条记录的配方发布为首页「用户投稿」案例。缺席时工具栏不挂。 */
-  onPublishCase?: (entry: HistoryEntry) => void;
+  /** REQ-D1：打开这条记录的「溯源」抽屉（与历史卡入口同一抽屉实例）。 */
+  onShowLineage?: (entry: HistoryEntry) => void;
 }
 
+/**
+ * 灯箱主图/缩略图的取图顺序：工作流先看后端渲染好的 DAG 图，否则 image →
+ * imageUrl → videoUrl。视频记录的结果里只有 videoUrl，旧实现直接返回 null，
+ * 于是整条视频记录在灯箱里显示成「没有留存图片」，胶片条上也全是「无图」。
+ */
 function entrySrc(entry: HistoryEntry): string | null {
-  const result = entry.results.find((item) => item.image || item.imageUrl);
+  const dagThumbnailUrl = workflowDagThumbnailUrl(entry);
+  if (dagThumbnailUrl) return dagThumbnailUrl;
+  const result = entry.results.find((item) => item.image || item.imageUrl || item.videoUrl);
   if (!result) return null;
-  return result.image ? `data:image/png;base64,${result.image}` : result.imageUrl;
+  return result.image ? `data:image/png;base64,${result.image}` : result.imageUrl ?? result.videoUrl ?? null;
 }
 
 /** 工具栏按钮：44px 命中区，符合触摸目标下限。 */
@@ -89,10 +96,9 @@ export function HistoryLightbox({
   onDownload,
   onDelete,
   onReuse,
-  onSaveCard,
   onRerun,
   onRerunVariant,
-  onPublishCase,
+  onShowLineage,
 }: HistoryLightboxProps) {
   const [mounted, setMounted] = useState(false);
   /** 下载要等整图 fetch 成 blob，期间工具栏下载钮转圈防重复点击。 */
@@ -209,6 +215,11 @@ export function HistoryLightbox({
   const promptText = entry.prompt.trim();
   const workflow = entry.workflow;
   const rerunnable = canHistoryEntryRerun(entry);
+  // 只在真的带 DAG 节点时才算一遍，普通图像记录零开销。
+  const dagNodes = inferEntryKind(entry) === "workflow" ? historyDagNodes(entry) : null;
+  const dagNodesTotalCoins = historyDagNodesTotalCoins(dagNodes);
+  /** DAG 缩略图：主图用的就是它，这里额外用 type badge 说出来「这是工作流图」。 */
+  const isDagThumbnail = Boolean(workflowDagThumbnailUrl(entry));
 
   return createPortal(
     <div
@@ -238,6 +249,9 @@ export function HistoryLightbox({
             <p className="mt-0.5 truncate text-ios-caption1 text-white/70">
               {model ? formatModelLabel(model) : "未知模型"} · {formatAbsoluteTime(entry.generatedAt)}
               {entry.quota !== undefined && entry.quota > 0 && ` · 消耗 ${formatCoins(entry.quota)} 张`}
+              {/* 工作流记录的主图是后端渲染的 DAG 缩略图，不是生成结果本身。
+                  不说明的话用户会以为那就是跑出来的图。 */}
+              {isDagThumbnail && " · 工作流结构图"}
             </p>
           </div>
 
@@ -263,11 +277,6 @@ export function HistoryLightbox({
                 {downloadBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
               </ToolbarButton>
             )}
-            {src && onSaveCard && (
-              <ToolbarButton label="存为角色卡" onClick={() => onSaveCard(entry)}>
-                <IdCard className="h-4 w-4" />
-              </ToolbarButton>
-            )}
             {onReuse && workflow && (
               <ToolbarButton label="用这套参数继续做图" onClick={() => onReuse(entry)}>
                 <RotateCcw className="h-4 w-4" />
@@ -284,10 +293,10 @@ export function HistoryLightbox({
                 <SlidersHorizontal className="h-4 w-4" />
               </ToolbarButton>
             )}
-            {/* 配方双向总线对向动作：发布成首页案例。有配方才挂。 */}
-            {onPublishCase && (promptText.length > 0 || workflow) && (
-              <ToolbarButton label="发布为案例" onClick={() => onPublishCase(entry)}>
-                <Megaphone className="h-4 w-4" />
+            {/* REQ-D1：溯源抽屉入口。与历史卡同一抽屉实例（页面级单例）。 */}
+            {onShowLineage && (
+              <ToolbarButton label="溯源" onClick={() => onShowLineage(entry)}>
+                <GitBranch className="h-4 w-4" />
               </ToolbarButton>
             )}
             <ToolbarButton label="删除" tone="danger" onClick={() => onDelete(entry.id)}>
@@ -380,6 +389,40 @@ export function HistoryLightbox({
                 </span>
               )}
             </div>
+
+            {/* 节点产物清单：DAG 每個節點跑完各自的產物與實付。後端沒有寫入
+                dagNodes 時整塊不渲染（而不是顯示一個空清單）。 */}
+            {dagNodes && (
+              <div className="mt-3">
+                <p className="text-ios-caption1 font-medium text-[rgba(255,255,255,0.82)]">节点产物</p>
+                <ul className="mt-1.5 space-y-1">
+                  {dagNodes.map((node, nodeIndex) => (
+                    <li
+                      key={`${node.role ?? node.kind ?? "node"}-${nodeIndex}`}
+                      className="flex items-center gap-2 text-ios-caption1 text-white/70"
+                    >
+                      <span className="min-w-0 flex-1 truncate">
+                        {node.title ?? node.role ?? "未命名节点"}
+                        {node.kind && <span className="ml-1.5 text-white/50">{node.kind}</span>}
+                      </span>
+                      {node.status && <span className="shrink-0 text-white/50">{node.status}</span>}
+                      {node.costCoins !== null && (
+                        <span className="inline-flex shrink-0 items-center gap-0.5 text-[#FFCE73]">
+                          <Coins className="h-2.5 w-2.5" />
+                          {node.costCoins}
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+                {dagNodesTotalCoins !== null && (
+                  <p className="mt-1.5 inline-flex items-center gap-1 text-ios-caption1 text-[rgba(255,255,255,0.82)]">
+                    <Coins className="h-2.5 w-2.5 text-[#FFCE73]" />
+                    节点合计 {dagNodesTotalCoins} 币
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         )}
 

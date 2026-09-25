@@ -16,8 +16,9 @@ export interface GenerationTaskResultProjection {
   outputIndex: number;
   url: string | null;
   mimeType: string;
-  width: number;
-  height: number;
+  /** 實測尺寸；成片（G4）probe 缺失時為 null——禁止 0 冒充。 */
+  width: number | null;
+  height: number | null;
 }
 
 export interface GenerationTaskProjection {

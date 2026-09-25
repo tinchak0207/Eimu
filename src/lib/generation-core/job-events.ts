@@ -29,6 +29,9 @@ export const JOB_EVENT = {
   attemptSubmitted: "attempt_submitted", // attempt 已向上游提交（detail 帶 provider_task_id）
   attemptSucceeded: "attempt_succeeded", // attempt 成功（artifact 已落庫）
   attemptFailed: "attempt_failed", // attempt 失敗（upstream_raw = 錯誤原文，不改寫）
+  // FG-02/03：自動重放被 registry 拒絕（detail 帶 operation/denial_reason/預算）。
+  // 只發拒絕事件（允許重放不發，量太大且 attempt_failed 已覆蓋）。
+  replayDenied: "replay_denied",
   // INC-0831：provider 對帳事件。deadline/易主不再單方面宣判失敗——上游真相以
   // 對帳輪詢為準，錢在真相出來前凍結。
   reconcileFrozen: "reconcile_frozen", // job 進入對帳凍結（deadline 到/易主，但上游任務仍在跑）
@@ -205,6 +208,7 @@ function evidenceOf(row: Row): Record<string, unknown> {
       nextAttemptAt: toIso(row.reserve_next_attempt_at),
     },
     commitStatus: row.commit_status ?? null,
+    commitLastError: row.commit_last_error ?? null,
     refund: {
       status: row.refund_status ?? null,
       amount: row.refund_amount === null || row.refund_amount === undefined ? null : Number(row.refund_amount),
@@ -228,6 +232,11 @@ function unsettledReason(row: Row): string {
   if (String(row.status) === "succeeded" && (row.commit_status === null || row.commit_status === undefined)) {
     return "commit_missing";
   }
+  // 已扣款結算失敗（OBS-1）：succeeded 且 commit 行存在但 status='failed'——必須如實標，
+  // 不得掉進退款分支被誤標成 refund_*（語義是「結算失敗」，不是「退款進行中」）。
+  if (String(row.status) === "succeeded" && String(row.commit_status ?? "") === "failed") {
+    return "commit_failed";
+  }
   const refundStatus = row.refund_status === null || row.refund_status === undefined ? "" : String(row.refund_status);
   return refundStatus === "failed" ? "refund_failed" : "refund_pending";
 }
@@ -250,7 +259,7 @@ export async function listStuckJobs(input: {
       job.lease_owner, job.lease_expires_at, job.billing_amount,
       reserve.status AS reserve_status, reserve.executor_id AS reserve_executor_id,
       reserve.last_error AS reserve_last_error, reserve.next_attempt_at AS reserve_next_attempt_at,
-      commit_op.status AS commit_status,
+      commit_op.status AS commit_status, commit_op.last_error AS commit_last_error,
       refund_op.status AS refund_status, refund_op.amount AS refund_amount,
       refund_op.last_error AS refund_last_error
     FROM generation_job job
@@ -268,6 +277,9 @@ export async function listStuckJobs(input: {
       AND (
         (refund_op.status IN ('pending', 'failed') AND refund_op.amount > 0)
         OR (job.status = 'succeeded' AND job.billing_amount > 0 AND commit_op.status IS NULL)
+        -- OBS-1：已扣款、commit 行存在卻「結算失敗」（status='failed'，非缺行也非 applied）
+        -- 的終態作業先前被漏列——探針必須看得見錢卡死的作業（只加觀測，退款/重放仍歸對賬）。
+        OR (job.status = 'succeeded' AND commit_op.status = 'failed')
       )
     )
     ORDER BY job.updated_at

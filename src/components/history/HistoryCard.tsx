@@ -1,11 +1,13 @@
 "use client";
 
 import { memo, useCallback, useMemo, useState } from "react";
-import { AlertTriangle, Bot, Boxes, Check, Coins, CopyPlus, Download, FileQuestion, IdCard, Loader2, Megaphone, RotateCcw, SlidersHorizontal, Star, Trash2 } from "lucide-react";
+import { AlertTriangle, Bot, Boxes, Check, Coins, CopyPlus, Download, FileQuestion, GitBranch, Loader2, Play, RotateCcw, SlidersHorizontal, Star, Trash2, Workflow } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { formatCoins, formatModelLabel, formatRelativeTime, primaryModelId } from "@/lib/history-types";
+import { ParticleSeaWaiting } from "@/components/ParticleSeaWaiting";
+import { formatCoins, formatModelLabel, formatRelativeTime, inferEntryKind, primaryModelId } from "@/lib/history-types";
 import { canHistoryEntryRerun } from "@/lib/history-rerun";
 import { assetPackPayloadFromHistoryEntry } from "@/lib/history-card-anchor";
+import { workflowDagThumbnailUrl } from "@/lib/history-workflow-view";
 import type { HistoryEntry } from "@/lib/history-types";
 
 export interface HistoryCardProps {
@@ -20,14 +22,12 @@ export interface HistoryCardProps {
   onDelete: (id: string) => void;
   /** 以这条记录的参数回到工作站继续做图。 */
   onReuse?: (entry: HistoryEntry) => void;
-  /** 把这张图锚定成角色/场景/风格卡（存到 /api/character-cards）。 */
-  onSaveCard?: (entry: HistoryEntry) => void;
   /** 再来 N 组：按这条的原配方 payload 直接批量重跑（走 /api/generation-jobs）。 */
   onRerun?: (entry: HistoryEntry) => void;
   /** 微调变体：改提示词/模型/尺寸后再批量重跑。 */
   onRerunVariant?: (entry: HistoryEntry) => void;
-  /** 把这条记录的配方发布为首页「用户投稿」案例（showcase-user-cases）。 */
-  onPublishCase?: (entry: HistoryEntry) => void;
+  /** REQ-D1：打开这条记录的「溯源」抽屉（血统链，只给人看）。缺席时不挂入口。 */
+  onShowLineage?: (entry: HistoryEntry) => void;
   /**
    * D-18：交给 AI 助理继续做。只有「有可用内容」的卡才挂这颗按钮——
    * 纯信息卡不挂。这里的判据是这条记录得有 prompt 可以交接过去，
@@ -95,10 +95,9 @@ function HistoryCardComponent({
   onDelete,
   onReuse,
   onOpenAgent,
-  onSaveCard,
   onRerun,
   onRerunVariant,
-  onPublishCase,
+  onShowLineage,
 }: HistoryCardProps) {
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageFailed, setImageFailed] = useState(false);
@@ -118,11 +117,23 @@ function HistoryCardComponent({
     }
   }, [downloadBusy, onDownload, entry]);
 
-  const result = entry.results.find((item) => item.image || item.imageUrl);
-  const src = result?.image ? `data:image/png;base64,${result.image}` : result?.imageUrl ?? null;
+  const kind = inferEntryKind(entry);
+  /**
+   * 缩略图选择：工作流卡用后端渲染好的 DAG 图（不在这里画 DAG——那是后端
+   * Phase 2/4 的事）；其它卡按 image → imageUrl → videoUrl 依次取第一个命中。
+   * 原来只找 image/imageUrl，纯视频记录（结果里只有 videoUrl）在历史里
+   * 一律显示「没有留存图片」，是既有缺口。
+   */
+  const dagThumbnailUrl = workflowDagThumbnailUrl(entry);
+  const result = entry.results.find((item) => item.image || item.imageUrl || item.videoUrl);
+  const isVideo = !dagThumbnailUrl && !(result?.image || result?.imageUrl) && Boolean(result?.videoUrl);
+  const src = dagThumbnailUrl
+    ?? (result?.image ? `data:image/png;base64,${result.image}` : result?.imageUrl ?? result?.videoUrl ?? null);
   const model = primaryModelId(entry);
   const promptText = entry.prompt.trim();
   const rerunnable = canHistoryEntryRerun(entry);
+  /** 生成中（排队/在跑）的 job 也会进历史：媒体区换粒子海动画、不挂操作条、不开灯箱。 */
+  const inProgress = entry.taskStatus === "queued" || entry.taskStatus === "running";
 
   /** 构造资产包 payload；无 id / 无内容（无 prompt 也无图）时为 null，按钮不出现。 */
   const assetPayload = useMemo(() => assetPackPayloadFromHistoryEntry(entry), [entry]);
@@ -151,9 +162,10 @@ function HistoryCardComponent({
   }, [assetSaved, assetSaving, assetPayload, entry.id]);
 
   const handleActivate = useCallback(() => {
+    if (inProgress) return;
     if (selectionMode) onToggleSelect(entry.id);
     else onOpen(entry);
-  }, [selectionMode, onToggleSelect, onOpen, entry]);
+  }, [inProgress, selectionMode, onToggleSelect, onOpen, entry]);
 
   return (
     <article
@@ -170,13 +182,19 @@ function HistoryCardComponent({
             handleActivate();
           }
         }}
-        aria-label={selectionMode ? (selected ? "取消选中" : "选中这张") : "查看大图"}
+        aria-label={inProgress ? "生成中" : selectionMode ? (selected ? "取消选中" : "选中这张") : "查看大图"}
         className={cn(
           "block w-full text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.20)]",
-          src && !imageFailed ? "cursor-zoom-in" : "cursor-pointer",
+          inProgress ? "cursor-default" : src && !imageFailed ? "cursor-zoom-in" : "cursor-pointer",
         )}
       >
-        {src && !imageFailed ? (
+        {inProgress ? (
+          /* 生成中：粒子海进度动画铺满媒体区（ParticleSeaWaiting 是 absolute，
+             父层必须 relative + 固定高度）。落地/失败后自动走下面正常分支。 */
+          <div className="relative aspect-[4/3] w-full overflow-hidden rounded-none">
+            <ParticleSeaWaiting visible startedAt={entry.generatedAt} />
+          </div>
+        ) : src && !imageFailed ? (
           <div className="hist-card-media">
             {!imageLoaded && <div className="hist-skeleton absolute inset-0" aria-hidden="true" />}
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -189,6 +207,16 @@ function HistoryCardComponent({
               onLoad={() => setImageLoaded(true)}
               onError={() => setImageFailed(true)}
             />
+            {/*
+              视频记录的缩略图是静态首帧，没有任何东西告诉用户「这能播」。
+              角标用 lg-float 二级材质（design-system/MASTER.md 的材料层级），
+              和操作条上的 32px 圆钮同族，压在缩略图左上角不挡操作条。
+            */}
+            {isVideo && (
+              <span className="lg-float pointer-events-none absolute bottom-3 left-3 flex h-7 w-7 items-center justify-center rounded-full text-[rgba(0,0,0,0.72)]">
+                <Play className="h-3.5 w-3.5" fill="currentColor" />
+              </span>
+            )}
           </div>
         ) : (
           <div className="flex aspect-[4/3] w-full flex-col items-center justify-center gap-2 border-b border-dashed border-[rgba(0,0,0,0.08)] bg-[rgba(0,0,0,0.015)]">
@@ -264,7 +292,18 @@ function HistoryCardComponent({
         </button>
       )}
 
-      {/* 悬停浮出的操作条 */}
+      {/* 工作流徽章：卡片右下角。用 lg-float 二级材质，不用实心色——工作流不是
+          状态（成功/失败各有颜色），只是这条记录的类型标签，与视频播放角标同族。
+          左上角是多选勾选框、右上角是操作条，两个角都被占了，所以放右下。 */}
+      {kind === "workflow" && (
+        <span className="lg-float pointer-events-none absolute bottom-3 right-3 z-10 inline-flex items-center gap-1 rounded-full px-2 py-1 text-ios-caption1 font-medium text-[rgba(0,0,0,0.62)]">
+          <Workflow className="h-3 w-3" />
+          工作流
+        </span>
+      )}
+
+      {/* 悬停浮出的操作条（生成中不渲染：图还没出来，任何动作都无从谈起） */}
+      {!inProgress && (
       <div className="hist-card-actions absolute right-3 top-3 z-20 flex gap-1.5">
         <CardAction
           label={entry.starred ? "取消收藏" : "收藏"}
@@ -297,12 +336,6 @@ function HistoryCardComponent({
             <SlidersHorizontal className="h-3.5 w-3.5" />
           </CardAction>
         )}
-        {/* 有图才有锚定成卡的意义；纯信息卡不挂这颗按钮。 */}
-        {onSaveCard && src && !imageFailed && (
-          <CardAction label="存为角色卡" onClick={() => onSaveCard(entry)}>
-            <IdCard className="h-3.5 w-3.5" />
-          </CardAction>
-        )}
         {/* 存为资产：有可提取内容（prompt 或图）才出现；存成功置 disabled + 打勾（幂等）。 */}
         {assetPayload && (
           <CardAction
@@ -314,23 +347,24 @@ function HistoryCardComponent({
             {assetSaved ? <Check className="h-3.5 w-3.5" /> : <Boxes className="h-3.5 w-3.5" />}
           </CardAction>
         )}
-        {/* 配方双向总线对向动作：把这条配方发布成首页案例。有 prompt（或
-            workflow 配方）才可发布——与 publishUserShowcaseCase 的校验一致。 */}
-        {onPublishCase && (promptText.length > 0 || entry.workflow) && (
-          <CardAction label="发布为案例" onClick={() => onPublishCase(entry)}>
-            <Megaphone className="h-3.5 w-3.5" />
-          </CardAction>
-        )}
         {/* D-18：有 prompt 才有东西交接给助理；没有就不挂这颗按钮。 */}
         {onOpenAgent && promptText.length > 0 && (
           <CardAction label="交给 AI 助理继续做" onClick={() => onOpenAgent(entry)}>
             <Bot className="h-3.5 w-3.5" />
           </CardAction>
         )}
+        {/* REQ-D1 溯源抽屉入口：所有历史卡都挂（来源不明的记录也要能进来看到
+            「来源不明」这四个字，藏起来才是骗人）。 */}
+        {onShowLineage && (
+          <CardAction label="溯源" onClick={() => onShowLineage(entry)}>
+            <GitBranch className="h-3.5 w-3.5" />
+          </CardAction>
+        )}
         <CardAction label="删除" tone="danger" onClick={() => onDelete(entry.id)}>
           <Trash2 className="h-3.5 w-3.5" />
         </CardAction>
       </div>
+      )}
     </article>
   );
 }

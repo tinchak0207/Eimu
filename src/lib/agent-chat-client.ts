@@ -15,8 +15,10 @@ import type {
   AgentAttachmentRef,
   AgentQuotaState,
   AgentSessionHistoryResponse,
+  AgentSteerStatus,
   OpenCodeMessage,
 } from "./agent-chat-types";
+import { AGENT_STEER_STATUSES } from "./agent-chat-types";
 import { LOCAL_TEST_MODE } from "./local-test-mode";
 
 /** 网道附件清单：download/attachment 解析后可转成 AgentAttachmentRef。 */
@@ -42,17 +44,33 @@ export type AgentChatErrorCode =
   | "agent_unavailable"
   | "gateway_error"
   | "network_error"
-  | "parse_error";
+  | "parse_error"
+  // REQ-D2（2026-09-23 F-D2 對抗性驗收修復）：steer 端點的 409 契約——「當前沒有
+  // 可引導的回合（沒在跑／已中止）」。這不是失敗，是網關要求前端改走正常送出
+  //（見 use-agent-chat.send 的 fallback）；混進 gateway_error 會讓那條訊息被吞。
+  | "no_active_turn"
+  // REQ-D2b（2026-09-23）：steer 重放被拒（同一個 steer_id 的第二次投遞）。
+  // **不是**「改走正常送出」——改走就等於把同一條指引送第二次（本刀要禁的事故）。
+  // 網關回可辨識錯誤碼：steer_replay_settled / steer_replay_in_flight /
+  // steer_payload_mismatch / steer_id_conflict。
+  | "steer_replay_rejected";
 
 export class AgentChatError extends Error {
   readonly code: AgentChatErrorCode;
   readonly status?: number;
+  /**
+   * D2b：重放被拒時，網關帶回的**既有命令真實狀態**（applied/injected/uncertain…）。
+   * 前端據此把徽章從本地占位的「未能送達」糾正成事實——沒有這個欄位就只能是猜測。
+   * 只有 steer 端點的重放拒絕會帶它。
+   */
+  readonly steerStatus?: AgentSteerStatus;
 
-  constructor(code: AgentChatErrorCode, message: string, status?: number) {
+  constructor(code: AgentChatErrorCode, message: string, status?: number, steerStatus?: AgentSteerStatus) {
     super(message);
     this.name = "AgentChatError";
     this.code = code;
     this.status = status;
+    if (steerStatus) this.steerStatus = steerStatus;
   }
 }
 
@@ -101,13 +119,73 @@ function mapHttpStatus(status: number): AgentChatErrorCode {
  * `agent_not_signed_in`（guard 判定根本沒送凭证）映到 not_authenticated：
  * hook 收到它會直接关掉连线并提示登录，而不是把它当「登录过期」反覆重连 ——
  * 没登录的人重连一万次也还是没登录。
+ *
+ * `no_active_turn` / `turn_aborted`（steer 端點的 409 契約）映到 no_active_turn：
+ * 看的是這條訊息「該不該改走正常送出」，不是哪個端點回的。網關的錯誤 body 有兩種
+ * 形狀（站内代理 flat {success,error,code} 與网關 {error:{message,type,code}}），
+ * 两種都读。
  */
 function mapErrorCode(data: unknown, status: number): AgentChatErrorCode {
   if (data !== null && typeof data === "object") {
-    const code = (data as Record<string, unknown>).code;
+    const d = data as Record<string, unknown>;
+    // 站内代理回 flat {code}，网關回巢状 {error:{code}}——两种形状都读。
+    const code =
+      d.code ?? (d.error !== null && typeof d.error === "object" ? (d.error as Record<string, unknown>).code : undefined);
     if (code === "agent_not_signed_in") return "not_authenticated";
+    if (code === "no_active_turn" || code === "turn_aborted") return "no_active_turn";
+    // D2b：重放拒絕（同一 steer_id 的第二次投遞）——與「沒有可引導的回合」分開歸類，
+    // 否則呼叫端會把它當成 409 契約落回正常送出，把同一條指引送第二次。
+    if (
+      code === "steer_replay_settled" ||
+      code === "steer_replay_in_flight" ||
+      code === "steer_payload_mismatch" ||
+      code === "steer_id_conflict"
+    ) {
+      return "steer_replay_rejected";
+    }
   }
   return mapHttpStatus(status);
+}
+
+/** 網關重放拒絕回應裡的任務狀態（真實狀態；認不得就當作沒帶）。 */
+function replayStatusFromBody(data: unknown): AgentSteerStatus | undefined {
+  if (data === null || typeof data !== "object") return undefined;
+  const raw = (data as Record<string, unknown>).status;
+  return typeof raw === "string" && (AGENT_STEER_STATUSES as readonly string[]).includes(raw)
+    ? (raw as AgentSteerStatus)
+    : undefined;
+}
+
+/**
+ * steer 端點的「沒有可引導的回合」訊號（409）。前端唯一的合法反應是**改走正常送出**
+ * ——內容不得被吞（D2-2 實錘：舊版只把徽章改 failed 就 return，turnActive 陳舊為真
+ * 時每次送出都變成失敗的 steer，訊息永遠發不出去）。
+ * status 409 也算：steer 端點的 409 只有這一個語義（網關契約）。code 的精確映射
+ * 是給 body 透傳完整的情況用的（見 mapErrorCode）。
+ *
+ * D2b（2026-09-23）唯一的例外：**重放被拒**（steer_replay_rejected）同樣是 409，
+ * 但它說的是「這條指引已經有結論／還在途中，不要再送」——落回正常送出就等於把它
+ * 送第二次（正是本刀要禁的事故）。所以它明確排除在外（呼叫端另走糾正徽章那條路）。
+ */
+export function isSteerUnavailableError(err: unknown): boolean {
+  if (!(err instanceof AgentChatError)) return false;
+  if (err.code === "steer_replay_rejected") return false;
+  return err.code === "no_active_turn" || err.status === 409;
+}
+
+/** D2b：這次失敗是不是「重放被拒」（同 id 第二次投遞）。 */
+export function isSteerReplayRejected(err: unknown): boolean {
+  return err instanceof AgentChatError && err.code === "steer_replay_rejected";
+}
+
+/**
+ * D2b：重放被拒時網關帶回的既有任務狀態；帶不出來時回 "uncertain"——
+ * 「已經有結論/還在途中，且不會重送」的最小誠實陳述，絕不回 "queued"（那會讓徽章
+ * 停在排隊中，等一張永遠不會來的終態幀）。
+ */
+export function steerReplayStatus(err: unknown): AgentSteerStatus {
+  if (err instanceof AgentChatError && err.steerStatus && err.steerStatus !== "queued") return err.steerStatus;
+  return "uncertain";
 }
 
 function fallbackMessage(status: number): string {
@@ -199,7 +277,14 @@ async function agentFetch(path: string, init?: RequestInit): Promise<unknown> {
   }
 
   if (!res.ok) {
-    throw new AgentChatError(mapErrorCode(data, res.status), extractMessage(data, res.status), res.status);
+    // D2b：重放拒絕的回應帶既有命令的真實狀態（status），透傳進錯誤物件——
+    // 呼叫端據此把徽章從本地占位的「未能送達」糾正成事實（見 steerReplayStatus）。
+    throw new AgentChatError(
+      mapErrorCode(data, res.status),
+      extractMessage(data, res.status),
+      res.status,
+      replayStatusFromBody(data),
+    );
   }
   return data;
 }
@@ -577,6 +662,58 @@ export async function fetchAgentSessionMessages(sessionId: string): Promise<Agen
     replay_first_id: typeof replayFirst === "number" && Number.isFinite(replayFirst) ? replayFirst : null,
     ...(fallback ? { fallback } : {}),
   };
+}
+
+/**
+ * REQ-D2：回合中追加一条指引（steer）。
+ *
+ * 语义与 sendAgentMessage 刻意分开：不终止当前回合、不另起一条用户消息。
+ * 回传的 status 是网關的诚实判定——
+ *   "injected"：回合卡在 question 断点，这条已注入当前回合（applied_in_turn=true）
+ *   "queued"：  当前回合跑着但没有可注入的断点 → 已排队，本回合结束后生效
+ * 前端据此显示状态，绝不把 queued 当 injected 用。
+ *
+ * steer_id 由本端生成（乐观插入的条目要立刻有 id 可以挂状态帧；网關会回显同一个）。
+ */
+export type AgentSteerAck =
+  | { status: "injected"; steer_id: string; injected_into?: string[] }
+  | { status: "queued"; steer_id: string; position?: number; deduped?: boolean };
+
+export interface AgentSteerOptions {
+  /** 本端生成并上送；非法时网關自行铸号（回传值才是权威）。 */
+  steerId?: string;
+}
+
+export async function steerAgentSession(
+  sessionId: string,
+  content: string,
+  options?: AgentSteerOptions,
+): Promise<AgentSteerAck> {
+  const body: Record<string, unknown> = { content: content.trim() };
+  if (options?.steerId) body.steer_id = options.steerId;
+  const data = await agentFetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}/steer`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  const d = (data ?? {}) as Record<string, unknown>;
+  const steerId = typeof d.steer_id === "string" ? d.steer_id : (options?.steerId ?? "");
+  if (d.status === "injected") {
+    const into = Array.isArray(d.injected_into)
+      ? d.injected_into.filter((x): x is string => typeof x === "string")
+      : undefined;
+    return { status: "injected", steer_id: steerId, ...(into ? { injected_into: into } : {}) };
+  }
+  if (d.status === "queued") {
+    const position = typeof d.position === "number" && Number.isFinite(d.position) ? d.position : undefined;
+    return {
+      status: "queued",
+      steer_id: steerId,
+      ...(typeof position === "number" ? { position } : {}),
+      ...(d.deduped === true ? { deduped: true } : {}),
+    };
+  }
+  // 认不得的回应＝契约破裂，照实抛错让调用方显示「未能提交」，不假装成功。
+  throw new AgentChatError("parse_error", "服务器未返回有效的引导状态。");
 }
 
 /**

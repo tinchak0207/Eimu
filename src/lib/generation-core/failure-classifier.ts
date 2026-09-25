@@ -1,10 +1,31 @@
+import type { FailureExplanation } from "./failure-record";
 import type { FailureClass } from "./types";
 
 export interface ClassifiedFailure {
   failureClass: FailureClass;
+  /**
+   * 產品級的「可否重放」判斷。
+   *
+   * ⚠️ FG-02/03（2026-09-23）：**禁止**用這個欄位驅動自動重放裁決。
+   * 重放許可唯一來源是 `operation-registry.ts` 的封閉 registry（未宣告＝禁）。
+   * 本欄位只保留為顯示／統計用途；調度器與 worker 不得再讀它做重放決定。
+   */
   retryable: boolean;
+  /**
+   * 產品級的「應該換渠道」判斷。
+   *
+   * ⚠️ FG-02/03：同樣**禁止**驅動重放／換道裁決（換道＝重放的一種）。
+   * 只保留為顯示／診斷用途。
+   */
   switchSupplier: boolean;
+  /**
+   * 隔離維度：允許把 supplier/account 標成 cooldown/disabled（保護動作，不是重放）。
+   * 這一維仍由分類驅動——它只會「少做」不會「多做」，且不花上游與用戶的錢。
+   */
   quarantineSupplier: boolean;
+  /**
+   * 冷卻截止（保護動作）。仍由分類驅動；餵給調度器的租約/冷卻閘，不餵重放裁決。
+   */
   cooldownUntil: Date | null;
   detail: string;
   httpStatus?: number;
@@ -24,6 +45,15 @@ export class SupplierRequestError extends Error {
     readonly explicitClass?: FailureClass,
     /** 適配器拋錯時已知的上游任務 id，worker 回填 generation_attempt.provider_task_id。 */
     readonly providerTaskId?: string,
+    /**
+     * 上游**真實** HTTP 狀態（D-3，2026-09-23）：部分適配器（metaso/openai-video/newapi-video）
+     * 刻意把非 401/403/429 的狀態改寫成 502 當作供應商側錯誤；那個改寫是**產品解釋**，
+     * 不是原生事實。產品解釋決定隔離/冷卻（語義不動），但確定性 4xx 的重放裁決必須看到
+     * 上游原文狀態——否則真 400 被看成 502，會被當成暫時性錯誤重放到預算上限。
+     * 故此欄位原樣帶上 `response.status`，由 `captureNativeFailure` 存進
+     * `FailureRecord.native.status`（優先於被改寫的 status）。
+     */
+    readonly upstreamStatus?: number,
   ) {
     super(message);
     this.name = "SupplierRequestError";
@@ -38,6 +68,47 @@ function retryAfterDate(value: string | null | undefined, now: Date): Date {
     if (!Number.isNaN(parsed.getTime()) && parsed > now) return parsed;
   }
   return new Date(now.getTime() + 60_000);
+}
+
+/**
+ * FG-04：顯示層人話表。**只讀不改寫**——這些字串只允許出現在
+ * `FailureRecord.explanation.humanMessage` 與展示層，永不回寫上游錯誤原文
+ * （原生事實住在 `FailureRecord.native`，逐字保留）。
+ */
+const HUMAN_FAILURE_MESSAGES: Record<FailureClass, string> = {
+  user_input: "請求參數不被該模型接受，請調整提示詞或尺寸後重試。",
+  content_rejected: "內容被上游合規審查拒絕，請修改提示詞或參考圖後重試。",
+  model_unsupported: "當前渠道不支援這個模型，已自動切換其它渠道。",
+  authentication: "上游憑證失效，已暫停該渠道並等待人工恢復。",
+  quota_exhausted: "上游額度不足，已停止重試，請充值或恢復其它渠道。",
+  rate_limited: "上游限流，稍後會自動重試。",
+  overloaded: "上游暫時過載，正在換渠道重試。",
+  network: "網絡異常，正在重試。",
+  malformed_output: "上游返回的成品無法解碼，已換渠道重試。",
+  empty_result: "上游返回空結果，已換渠道重試。",
+  artifact_download: "成品下載失敗，已換渠道重試。",
+  upstream_protocol: "上游返回成功但解析失敗（我方協議問題），已記錄待查。",
+  deadline_exceeded: "等待預算用完；若上游仍在執行，結果會在對帳後補交付。",
+  cancelled: "任務已被取消。",
+  unknown: "生成失敗，正在重試。",
+};
+
+/** 顯示層人話（純函數）。不接觸、不覆寫原生錯誤欄位。 */
+export function humanMessageForFailureClass(failureClass: FailureClass): string {
+  return HUMAN_FAILURE_MESSAGES[failureClass] ?? HUMAN_FAILURE_MESSAGES.unknown;
+}
+
+/**
+ * 把分類結果轉成 FG-01 的產品解釋物件（寫進 `FailureRecord.explanation`）。
+ * 原生錯誤原文（`detail`）**原樣帶入不改寫**；人話另存 `humanMessage`。
+ */
+export function explainFailure(failure: ClassifiedFailure): FailureExplanation {
+  return {
+    failureClass: failure.failureClass,
+    detail: failure.detail,
+    humanMessage: humanMessageForFailureClass(failure.failureClass),
+    httpStatus: failure.httpStatus ?? null,
+  };
 }
 
 function containsAny(value: string, patterns: string[]): boolean {

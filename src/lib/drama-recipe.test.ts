@@ -258,3 +258,53 @@ test("deriveRequiredAssets：引用卡 id 全集升序去重（资产清单由�
   assert.deepEqual(deriveRequiredAssets({ shots: [] }), []);
   assert.deepEqual(deriveRequiredAssets("garbage"), []);
 });
+
+// ─────────────────────────────────────────── 道具卡（2026-09-24：prop 走完同一條解析鏈）
+
+/**
+ * 道具卡样本。`CharacterCardKind` 由 character-cards.ts 拥有（另一路正在扩含 `"prop"`），
+ * 本档只比字面 `"prop"`、不 import 那个 union，故以运行期改写 kind 避开「union 尚未同步」的假型别红。
+ */
+function propCard(partial: Partial<CharacterCard> & { id: string }): CharacterCard {
+  const built = card(partial);
+  (built as { kind: string }).kind = "prop";
+  return built;
+}
+
+test("storyboardToBatchTasks：道具卡与角色/场景卡同批注入 prompt（prop 卡锁定片段进得了组出的 prompt）", () => {
+  const c01 = card({ id: "C01", kind: "character", prompt: "围裙大叔" });
+  const pr01 = propCard({ id: "PR01", prompt: "铜钥匙特写，金属反光" });
+  const storyboard = {
+    shots: [
+      {
+        shotId: "E01-01",
+        prompt: "老陈掏出铜钥匙",
+        characterCardIds: ["C01"],
+        sceneCardIds: [],
+        propCardIds: ["PR01"],
+      },
+    ],
+  };
+  const tasks = storyboardToBatchTasks(storyboard, [pr01, c01]);
+  assert.equal(tasks.length, 1);
+  assert.equal(tasks[0].needsAsset, false);
+  assert.deepEqual(tasks[0].missingCardIds, []);
+  // 卡 id 序（C01 < PR01）稳定拼接：道具片段与角色片段同一把尺注入，与传入顺序无关
+  assert.equal(tasks[0].prompt, "围裙大叔\n铜钥匙特写，金属反光\n老陈掏出铜钥匙");
+  // 道具卡 id 也进资产全集（否则模型列的道具卡会被当成凭空捏造）
+  assert.deepEqual(deriveRequiredAssets(storyboard), ["C01", "PR01"]);
+});
+
+test("storyboardToBatchTasks：道具卡缺卡/种类不符 → needsAsset + missingCardIds（不静默降级成自由文字）", () => {
+  const c01 = card({ id: "C01", kind: "character", prompt: "围裙大叔" });
+  const storyboard = {
+    shots: [
+      { shotId: "E01-01", prompt: "铜钥匙特写", characterCardIds: [], sceneCardIds: [], propCardIds: ["PR99", "C01"] },
+    ],
+  };
+  const tasks = storyboardToBatchTasks(storyboard, [c01]);
+  assert.equal(tasks[0].needsAsset, true);
+  // PR99 不存在、C01 存在但 kind 不符（角色卡当道具用）→ 两者都算缺，与角色/场景同一把尺
+  assert.deepEqual(tasks[0].missingCardIds, ["PR99", "C01"]);
+  assert.equal(tasks[0].prompt, "铜钥匙特写");
+});

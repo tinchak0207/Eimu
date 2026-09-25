@@ -111,6 +111,22 @@ export default function RootLayout({
   return (
     <html lang="zh-CN" className={`${geistSans.variable} ${geistMono.variable}`}>
       <body className="font-sans antialiased text-[15px] text-foreground flex min-h-dvh flex-col">
+        {/* 面板寬 pre-paint 同步套用（2026-09-24 暴君回報「Ctrl+Shift+R 聊天框
+            先佔幾乎半屏、秒縮回 30% 以下」）：用戶真拖過寬的 v2 存值必須在首個
+            paint 前落到 --ws-panel-w，否則冷載入＝首幀畫 CSS 默認 clamp（40vw
+            半屏），JS chunk 下載完水合後才縮回存值寬——useLayoutEffect 救不了，
+            它對「服務端 HTML 的首幀」而言已經太晚。next/script 的
+            beforeInteractive 同樣太晚：實裝是把內聯腳本 push 進 self.__next_s，
+            由 app-bootstrap（main-app chunk 執行時）才跑，與水合同期、在 paint
+            之後。唯一首幀前路徑＝HTML 解析期同步執行的內聯 <script>（與下方
+            boot 錯誤捕獲腳本同机制），放在 <body> 頂端、任何工作站標記之前。
+            校驗與 use-chat-panel.parseStoredPanelWidth 逐字同範圍（320–720
+            整數，v2 key；舊 key 垃圾值一律不認）。 */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var w=Number(localStorage.getItem("canvas-chat-panel-width.v2"));if(Number.isInteger(w)&&w>=320&&w<=720){document.documentElement.style.setProperty("--ws-panel-w",w+"px");}}catch(_){}})();`,
+          }}
+        />
         <script
           dangerouslySetInnerHTML={{
             __html: `(function(){

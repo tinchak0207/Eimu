@@ -44,13 +44,17 @@ const COST_HINTS: Record<(typeof COST_MODES)[number], string> = {
   premium: "高质：允许多候选与高清放大",
 };
 
-/** 互动三档：slider 刻度顺序与网关枚举一一对应（index 0/1/2）。 */
+/** 互动三档：slider 刻度顺序与网关枚举一一对应（index 0/1/2）。
+ *  文案＝机制真话（2026-09-24）：协作档的三个停点（剧本批准／资产确认／分镜确认）
+ *  由网关注册 pending confirm 真的停下等你批准，批准后从断点续跑；预设＝跟着计划
+ *  一次整包授权，一路跑到尾（只有扣费闸拦）；自动＝连扣费确认都自动放行，一条消息
+ *  跑完。旧文案「协作：每步都和你确认」曾是**空承诺**（机制不存在），已按实况改写。 */
 const INTERACTION_MODES = ["collaborate", "preset", "auto"] as const;
 const INTERACTION_TIERS = ["协作", "预设", "自动"] as const;
 const INTERACTION_HINTS: Record<(typeof INTERACTION_MODES)[number], string> = {
-  collaborate: "协作：每步都和你确认，扣费与关键决策逐项询问",
-  preset: "预设：更自主，整包计划一次授权，扣费与关键决策仍找你",
-  auto: "自动：完全自主，不再询问与扣费确认，一键发送直出结果",
+  collaborate: "协作：剧本/资产/分镜三步停下等你确认，确认后自动续跑，其余环节自动",
+  preset: "预设：一次整包授权，一路跑完，只有扣费与关键决策拦你",
+  auto: "自动：一键发送直出结果，连扣费确认都自动放行，全程不问你",
 };
 
 /** iOS 风开关：h-6 w-10 胶囊 + 白色圆钮，选中态 ios-blue。 */

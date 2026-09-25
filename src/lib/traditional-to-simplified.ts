@@ -1,6 +1,6 @@
 // Traditional-to-Simplified conversion for docs rendering (common characters only).
 //
-// Rationale: /docs/api renders the live OpenAPI spec, whose summaries/descriptions
+// Rationale: /docs renders the live OpenAPI spec, whose summaries/descriptions
 // are Traditional Chinese. The site is Simplified Chinese, so the docs layer
 // converts spec text to Simplified before display - without mutating the spec
 // itself (other machine consumers still read it as-is). Literal substitution only.

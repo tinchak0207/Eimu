@@ -30,9 +30,14 @@ function AgentAnchorCardComponent({ anchor, onAnchor, onReanchor, onDismiss, bus
   const rest = anchor.params.length - preview.length;
 
   return (
-    <div className="agent-rise lg-sheet rounded-ios-2xl p-3.5">
+    <div className="agent-rise lg-sheet relative overflow-hidden rounded-ios-2xl p-3.5">
+      {/* 顶缘 specular 亮线：玻璃面板上缘的一线高光，纯装饰不吃事件。 */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-[inherit] bg-gradient-to-r from-transparent via-white to-transparent opacity-80"
+      />
       <div className="flex items-start gap-3">
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-ios-blue/[0.12] text-ios-blue">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-black/[0.05] text-muted-foreground">
           <Anchor className="h-4 w-4" aria-hidden="true" />
         </span>
         <div className="min-w-0 flex-1">
@@ -94,12 +99,14 @@ function AgentAnchorCardComponent({ anchor, onAnchor, onReanchor, onDismiss, bus
             换个方向
           </button>
         </div>
+        {/* 预览主 CTA 语汇（agent-chat-preview 决策卡已批准）：深底实心 #2d3142
+            + signature 阴影 + 悬浮微升，不再用 ios-blue 蓝底。 */}
         <button
           type="button"
           onClick={onAnchor}
           disabled={busy}
           title="把这张实际用过的参数念回给助理，整批照抄"
-          className="inline-flex min-h-12 w-full cursor-pointer items-center justify-center gap-1.5 rounded-full bg-ios-blue px-5 text-ios-subhead font-semibold text-white shadow-[0_4px_12px_rgba(0,122,255,0.30)] transition-all duration-200 active:scale-[0.98] active:bg-ios-blue/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/40 disabled:cursor-not-allowed disabled:bg-black/[0.12] disabled:text-foreground/45 disabled:shadow-none disabled:active:scale-100 sm:w-auto [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
+          className="inline-flex min-h-12 w-full cursor-pointer items-center justify-center gap-1.5 rounded-full bg-[#2d3142] px-5 text-ios-subhead font-semibold text-white shadow-[0_8px_20px_rgba(45,49,66,0.18)] transition-all duration-200 hover:-translate-y-[1px] hover:bg-[#272b39] active:scale-[0.98] active:bg-[#272b39] focus:outline-none focus-visible:ring-2 focus-visible:ring-foreground/20 disabled:cursor-not-allowed disabled:bg-black/[0.12] disabled:text-foreground/45 disabled:shadow-none disabled:active:scale-100 disabled:hover:translate-y-0 sm:w-auto [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
         >
           就按这张
         </button>

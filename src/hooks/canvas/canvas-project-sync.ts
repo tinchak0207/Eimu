@@ -1,7 +1,8 @@
 // 畫布專案持久化（自 use-canvas-chat.ts 外圍搬遷）。
 // 三個持久化 effect：進頁初始化（歷史清單）、儲存 debounce 400ms、壓縮快照上行。
-// 擁有 refs：projectId / createdAt / saveTimer / hydrated / everHadNodes ——
-// 主 hook 經回傳值讀寫這些身份/節流狀態（newCanvasSession / openSavedCanvas 等）。
+// 擁有 refs：createdAt / saveTimer / hydrated / everHadNodes ——
+// projectId 例外：**由主 hook 建立並注入**（REQ-B2b：卡域的讀取端作用域閘也要讀同一個
+// 項目 id 讀取器；兩處各自 useRef 就是兩份真相＝閘讀到舊項目而漏判）。
 "use client";
 
 import { useCallback, useEffect, useRef } from "react";
@@ -9,7 +10,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { listCanvasProjects, postCanvasSnapshot, saveCanvasProject } from "@/lib/canvas/client";
 import type { CanvasReducerState } from "@/lib/canvas/reducer";
 import { toCanvasProject } from "@/lib/canvas/layout";
-import type { CanvasEpisode, CanvasProject, CanvasViewport } from "@/lib/canvas/types";
+import type { CanvasEpisode, CanvasProject, CanvasProjectType, CanvasViewport } from "@/lib/canvas/types";
 import type { CharacterCard } from "@/lib/character-cards";
 import {
   SAVE_DEBOUNCE_MS,
@@ -29,8 +30,14 @@ export interface UseCanvasProjectSyncParams {
   titleRef: { current: string };
   budgetRef: { current: CanvasBudget | null };
   activeCardIdsRef: { current: string[] };
+  /**
+   * 當前項目 id ref：**由主 hook 建立並注入**（本函式不自建）。
+   * REQ-B2b：卡域（use-canvas-cards）的讀取端作用域閘要讀同一個讀取器——
+   * 兩處各自 useRef＝兩份真相（閘讀到舊項目 id 就會漏判跨項目卡）。
+   */
+  projectIdRef: { current: string | null };
   // 作品/劇集三級狀態機（2026-09-15 刀 1 前端接線）：照 activeCardIdsRef 同款「最新值鏈像 ref」。
-  projectTypeRef: { current: "movie" | "series" | undefined };
+  projectTypeRef: { current: CanvasProjectType | undefined };
   currentStepRef: { current: number | undefined };
   episodesRef: { current: CanvasEpisode[] };
   mountedRef: { current: boolean };
@@ -40,7 +47,7 @@ export interface UseCanvasProjectSyncParams {
   backgroundMode: CanvasBackgroundMode;
   projectTitle: string;
   activeCardIds: string[];
-  projectType: "movie" | "series" | undefined;
+  projectType: CanvasProjectType | undefined;
   currentStep: number | undefined;
   episodes: CanvasEpisode[];
   saveState: "idle" | "saving" | "saved" | "error" | "offline";
@@ -61,14 +68,13 @@ export interface UseCanvasProjectSyncParams {
 export function useCanvasProjectSync(params: UseCanvasProjectSyncParams) {
   const {
     canvasRef, viewportRef, backgroundRef, titleRef, budgetRef, activeCardIdsRef, mountedRef,
-    projectTypeRef, currentStepRef, episodesRef,
+    projectTypeRef, currentStepRef, episodesRef, projectIdRef,
     canvas, viewport, backgroundMode, projectTitle, activeCardIds, saveState,
     projectType, currentStep, episodes,
     sessionId, selectedNodeId, activeCharacterCards,
     setSavedProjects, setSaveState, setLoading,
   } = params;
 
-  const projectIdRef = useRef<string | null>(null);
   const createdAtRef = useRef<string | null>(null);
   const saveTimerRef = useRef<number | null>(null);
   // 載入完成前不要存：初始空畫布會把雲端那份覆蓋成空的。

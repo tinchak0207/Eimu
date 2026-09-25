@@ -14,7 +14,20 @@
 // agent 聊天区在两个模式下是同一套东西」——所以这里只有一套组件。
 
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
-import { Bot, Boxes, History, Loader2, LogIn, MessageSquarePlus, Search, X } from "lucide-react";
+import {
+  Bot,
+  Boxes,
+  History,
+  Loader2,
+  LogIn,
+  MessageSquarePlus,
+  MoreHorizontal,
+  Search,
+  Settings,
+  SlidersHorizontal,
+  Sparkles,
+  SquarePen,
+} from "lucide-react";
 import {
   hasReflectedParams,
   reflectParams,
@@ -218,6 +231,13 @@ export function AgentChatSurface({
   const [draft, setDraft] = useState(initialPrompt.trim());
   // 交给输入区的续写信号（D-24）。输入区吃掉后回调清空，避免重复注入。
   const [prefill, setPrefill] = useState<{ text: string; nonce: number } | null>(null);
+  const chat = useAgentChat({
+    // 09-12 建号权收归发送按钮：hook 的 autoStart 已撤——进助理挂载即空态，
+    // 不预建会话；首条消息 send() 内部才 lazy 建号（深链的 switchSession
+    // 是恢复旧会话，不是建号，不受影响）。
+    ...(onCanvasEvent ? { onCanvasEvent } : {}),
+    ...(canvasStateProvider ? { canvasStateProvider } : {}),
+  });
   const {
     state,
     connection,
@@ -229,17 +249,13 @@ export function AgentChatSurface({
     retry,
     resumable,
     abort,
+    aborting,
+    startingSession,
     discardAndStartNew,
     switchSession,
     startNewSession,
     ensureSession,
-  } = useAgentChat({
-    // 09-12 建号权收归发送按钮：hook 的 autoStart 已撤——进助理挂载即空态，
-    // 不预建会话；首条消息 send() 内部才 lazy 建号（深链的 switchSession
-    // 是恢复旧会话，不是建号，不受影响）。
-    ...(onCanvasEvent ? { onCanvasEvent } : {}),
-    ...(canvasStateProvider ? { canvasStateProvider } : {}),
-  });
+  } = chat;
   // D-26：已经问过锚定的那张图。问过就不再问——同一张图反复弹卡是骚扰。
   const [anchorAskedFor, setAnchorAskedFor] = useState<string | null>(null);
   const [anchorBusy, setAnchorBusy] = useState(false);
@@ -264,6 +280,29 @@ export function AgentChatSurface({
   // PWA standalone 登录交接面板（null = 未开启）。storage 与常用浏览器隔离，
   // popup 链路在 standalone 视窗里拿不回登录态，必须走 handoff。
   const [handoffLogin, setHandoffLogin] = useState<{ ticket: string; loginUrl: string } | null>(null);
+
+  // ⋯ 收纳菜单（2026-09-20 顶栏减负）：历史 / 资产 / 设定三颗触发钮收进
+  // lg-sheet 小菜单——功能不删，只是收纳。开着时点外面就收（与历史下拉同一条规矩）。
+  const [overflowOpen, setOverflowOpen] = useState(false);
+  const overflowRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!overflowOpen) return;
+    const onDocPointerDown = (ev: PointerEvent): void => {
+      if (overflowRef.current && !overflowRef.current.contains(ev.target as Node)) {
+        setOverflowOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", onDocPointerDown);
+    return () => document.removeEventListener("pointerdown", onDocPointerDown);
+  }, [overflowOpen]);
+
+  // 助理设定的触发钮收进 ⋯ 菜单：AgentSettingsPopover 是自带触发钮的自足组件
+  // （无受控 open prop，档案不在本刀白名单），这里以 0×0 容器承载它的原触发钮，
+  // 菜单「设置」行用程序化 click 触发——弹层本体、outside-click、持久化链路零改动。
+  const settingsTriggerWrapRef = useRef<HTMLDivElement | null>(null);
+  const openSettings = useCallback((): void => {
+    settingsTriggerWrapRef.current?.querySelector("button")?.click();
+  }, []);
 
   // 登录入口：standalone PWA 先申请 handoff ticket 弹交接面板；申请失败或普通
   // 浏览器走原 popup 链路（startLoginThenRetry 交互逻辑不动）。
@@ -428,6 +467,18 @@ export function AgentChatSurface({
   // 展示「余额未知」只浪费布局空间，扣费仍正常记账。
   const isActive = connection !== "idle" && connection !== "closed";
   const isInline = variant === "inline";
+
+  // 顶栏极弱状态文字（CONNECTION_META 语义保留）：常态（idle/open）只给
+  // 「随时待命」级别的弱文字，不再常驻呼吸绿点；reconnecting / closed /
+  // connecting 照旧显示原状态文案，异常态仍看得见。
+  const surfaceStatusText =
+    connection === "reconnecting"
+      ? "正在重新连接…"
+      : connection === "closed"
+        ? "会话已结束"
+        : connection === "connecting"
+          ? "连接中…"
+          : "随时待命";
 
   const onSaveToLibrary = useCallback(async (item: AgentImageItem): Promise<void> => {
     // 客户端幂等：连点两下不该在资产包里躺两条一样的记录。
@@ -678,44 +729,113 @@ export function AgentChatSurface({
       style={isInline ? undefined : { minHeight: "calc(100dvh - 5rem)", height: "calc(100dvh - 5rem)" }}
     >
       {/*
-        面板 Header（2026-08-21 移动端抽屉规范重排）：
-        拖拽手柄 + 「AI 助理」标题 + 呼吸绿点（连接态，替代消息流里的状态文字行）
-        + 右侧图标组（历史记录 / 开新对话 / 收起）。散落的「对话历史」文字链接
-        与常驻「已连接」状态行全部收编到这里——对话流里只剩对话。
+        面板 Header（2026-09-20 顶栏减负，视觉语言来自已批准的 agent-chat-preview）：
+        logo 圆标（lg-tint-blue）+ 「AI 助理」标题 + 极弱状态文字（常态「随时待命」，
+        reconnecting / closed 照旧显示原状态文案）+ 右侧三个幽灵钮
+        （新会话 SquarePen / 直接生成 SlidersHorizontal / ⋯ MoreHorizontal）。
+        历史 / 资产 / 设定三颗触发钮收进 ⋯ 的 lg-sheet 小菜单——回调还是原有的
+        toggleHistory / toggleAssets / 设定弹层，功能不删，只是收纳。
         embedded（工作站面板態）：外層面板已有把手，這裡的把手省掉——單層。
       */}
       <header className={cn("flex shrink-0 flex-col", embedded ? "mb-1" : "pb-2")}>
-        {/* 2026-08-22：拖拽把手已移除——黑色長條佔位搶文字空間，用戶裁定拿掉。 */}
-        <div className="flex items-center gap-1.5">
-          <span className="lg-tint-blue flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-ios-blue">
-            <Bot className="h-4 w-4" aria-hidden="true" />
+        <div className="flex items-center gap-2.5">
+          <span className="lg-tint-blue flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-ios-blue">
+            <Sparkles className="h-4 w-4" aria-hidden="true" />
           </span>
-          <h2 className="text-[15px] font-semibold text-foreground">AI 助理</h2>
-          <span
-            className={cn(
-              "h-1.5 w-1.5 shrink-0 rounded-full",
-              connection === "open" ? "bg-emerald-500 animate-pulse" : "bg-slate-300",
-            )}
-            title={connection === "open" ? "已连接" : "未连接"}
-            aria-label={connection === "open" ? "已连接" : "未连接"}
-          />
+          <div className="min-w-0 flex-1">
+            <h2 className="text-[15px] font-semibold text-foreground">AI 助理</h2>
+            <p className="truncate text-ios-caption1 text-foreground/35">{surfaceStatusText}</p>
+          </div>
           <div className="ml-auto flex items-center gap-0.5">
-            <div ref={historyRef} className="relative">
+            <button
+              type="button"
+              onClick={() => void onStartNewSession()}
+              disabled={startingNew}
+              aria-label="开新对话"
+              title="开新对话（当前对话保留在历史里）"
+              className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 touch-manipulation disabled:cursor-wait"
+            >
+              {startingNew ? (
+                <Loader2 className="h-[18px] w-[18px] animate-spin text-ios-blue" aria-hidden="true" />
+              ) : (
+                <SquarePen className="h-[18px] w-[18px]" aria-hidden="true" />
+              )}
+            </button>
+            {onExit && (
               <button
                 type="button"
-                onClick={() => void toggleHistory()}
-                aria-expanded={showHistory}
-                aria-label="历史记录"
-                title="对话历史"
-                className="relative flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-foreground/45 transition-colors hover:bg-black/5 hover:text-foreground/75 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 touch-manipulation"
+                onClick={onExit}
+                aria-label="直接生成"
+                title="直接生成：自己选模型和参数出图"
+                className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 touch-manipulation"
               >
-                <History className="h-4 w-4" aria-hidden="true" />
-                {historyList !== null && historyList.length > 0 && (
-                  <span className="absolute -top-0.5 -right-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-ios-blue px-1 text-[10px] font-semibold leading-none tabular-nums text-white">
-                    {historyList.length}
-                  </span>
-                )}
+                <SlidersHorizontal className="h-[18px] w-[18px]" aria-hidden="true" />
               </button>
+            )}
+            {/* ⋯ 收纳菜单：历史 / 资产 / 设定（icon + 文字行，点击走原有回调）。 */}
+            <div ref={overflowRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setOverflowOpen((v) => !v)}
+                aria-expanded={overflowOpen}
+                aria-label="更多选项"
+                title="更多选项"
+                className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 touch-manipulation"
+              >
+                <MoreHorizontal className="h-[18px] w-[18px]" aria-hidden="true" />
+              </button>
+              {overflowOpen && (
+                <div className="lg-sheet animate-lg-appear absolute right-0 top-[calc(100%+6px)] z-20 w-36 overflow-hidden rounded-[16px] p-1.5">
+                  {/* MASTER.md：每张 sheet 都要有一条顶缘高光线。 */}
+                  <div className="pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-[inherit] bg-gradient-to-r from-transparent via-white to-transparent opacity-80" />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOverflowOpen(false);
+                      void toggleHistory();
+                    }}
+                    aria-expanded={showHistory}
+                    title="对话历史"
+                    className="flex min-h-11 w-full cursor-pointer items-center gap-2.5 rounded-[10px] px-2.5 text-left text-[15px] text-foreground/70 transition-colors hover:bg-[rgba(0,122,255,0.12)] touch-manipulation"
+                  >
+                    <History className="h-4 w-4 shrink-0 text-foreground/40" aria-hidden="true" />
+                    历史
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOverflowOpen(false);
+                      void toggleAssets();
+                    }}
+                    aria-expanded={showAssets}
+                    title="我的资产"
+                    className="flex min-h-11 w-full cursor-pointer items-center gap-2.5 rounded-[10px] px-2.5 text-left text-[15px] text-foreground/70 transition-colors hover:bg-[rgba(0,122,255,0.12)] touch-manipulation"
+                  >
+                    <Boxes className="h-4 w-4 shrink-0 text-foreground/40" aria-hidden="true" />
+                    资产
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOverflowOpen(false);
+                      openSettings();
+                    }}
+                    title="助理设定"
+                    className="flex min-h-11 w-full cursor-pointer items-center gap-2.5 rounded-[10px] px-2.5 text-left text-[15px] text-foreground/70 transition-colors hover:bg-[rgba(0,122,255,0.12)] touch-manipulation"
+                  >
+                    <Settings className="h-4 w-4 shrink-0 text-foreground/40" aria-hidden="true" />
+                    设置
+                  </button>
+                </div>
+              )}
+            </div>
+            {/* 助理设定的原触发钮：收进 0×0 容器（视觉退役，程序化 click 保活），
+                弹层本体由 AgentSettingsPopover 自行渲染（fixed lg-sheet）。 */}
+            <div ref={settingsTriggerWrapRef} className="absolute h-0 w-0 overflow-hidden" aria-hidden="true">
+              <AgentSettingsPopover />
+            </div>
+            {/* 历史下拉浮层：触发钮已收进 ⋯ 菜单，fixed 定位与 outside-click 机制沿用。 */}
+            <div ref={historyRef} className="relative">
         {showHistory && (
           <div className="lg-sheet fixed left-1/2 top-[var(--agent-pop-top,5rem)] z-50 w-56 -translate-x-1/2 rounded-ios-2xl p-1">
             {historyList === null ? (
@@ -790,17 +910,8 @@ export function AgentChatSurface({
           </div>
         )}
             </div>
+            {/* 资产下拉浮层：触发钮已收进 ⋯ 菜单，fixed 定位与 outside-click 机制沿用。 */}
             <div ref={assetPanelRef} className="relative">
-              <button
-                type="button"
-                onClick={() => void toggleAssets()}
-                aria-expanded={showAssets}
-                aria-label="我的资产"
-                title="我的资产"
-                className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-foreground/45 transition-colors hover:bg-black/5 hover:text-foreground/75 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 touch-manipulation"
-              >
-                <Boxes className="h-4 w-4" aria-hidden="true" />
-              </button>
               {showAssets && (
                 <div className="lg-sheet fixed left-1/2 top-[var(--agent-pop-top,5rem)] z-50 w-64 -translate-x-1/2 rounded-ios-2xl p-1">
                   <p className="px-2.5 pt-2 pb-1 text-ios-caption1 font-medium text-foreground/60">我的资产</p>
@@ -858,34 +969,7 @@ export function AgentChatSurface({
                 </div>
               )}
             </div>
-            <button
-              type="button"
-              onClick={() => void onStartNewSession()}
-              disabled={startingNew}
-              aria-label="开新对话"
-              title="开新对话（当前对话保留在历史里）"
-              className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-foreground/45 transition-colors hover:bg-black/5 hover:text-foreground/75 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 touch-manipulation disabled:cursor-wait"
-            >
-              {startingNew ? (
-                <Loader2 className="h-4 w-4 animate-spin text-ios-blue" aria-hidden="true" />
-              ) : (
-                <MessageSquarePlus className="h-4 w-4" aria-hidden="true" />
-              )}
-            </button>
-            {/* 助理设定：中途输入（打断/排队）/ 模型性格 / 成本需求——自带触发钮与弹层。 */}
-            <AgentSettingsPopover />
             {headerExtra}
-            {onExit && (
-              <button
-                type="button"
-                onClick={onExit}
-                aria-label="收起"
-                title="收起助理，返回生成模式"
-                className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-foreground/45 transition-colors hover:bg-black/5 hover:text-foreground/75 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 touch-manipulation"
-              >
-                <X className="h-4 w-4" aria-hidden="true" />
-              </button>
-            )}
           </div>
         </div>
       </header>
@@ -960,7 +1044,7 @@ export function AgentChatSurface({
           connection={connection}
           sessionId={sessionId}
           onEnsureSession={ensureSession}
-          onSend={(text) => void send(text)}
+          onSend={(text) => send(text)}
           onConfirm={(requestId, approved) => confirm(requestId, approved)}
           onAnswerQuestion={(requestId, answers) => answerQuestion(requestId, answers)}
           onRetryConnection={() => void retry()}
@@ -975,6 +1059,10 @@ export function AgentChatSurface({
           /* D-26：只在助手还在产出时给「停止」——回合已结束时没有东西可停，
              摆一颗停不了任何东西的按钮是假承诺。 */
           onStopGeneration={state.turnActive ? onStopGeneration : undefined}
+          /* 09-18：把 hook 的两个在途镜像接下去——aborting 让停止钮显「正在中止」，
+             startingSession 让空态显「正在建立会话…」并撤掉推荐语。 */
+          stopPending={aborting}
+          sessionStarting={startingSession}
           prefill={prefill}
           onPrefillConsumed={clearPrefill}
           onFirstUserMessage={onUserMessage}

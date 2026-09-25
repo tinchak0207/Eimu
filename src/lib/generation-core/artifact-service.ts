@@ -21,13 +21,18 @@
 import { createHash, randomUUID } from "node:crypto";
 import { put } from "@/lib/blob-backend";
 import { getGenerationSql, type GenerationSql } from "./database";
+import type postgres from "postgres";
 
 export type ArtifactRole = "reference" | "output";
 
 export interface ValidatedImage {
   mimeType: string;
-  width: number;
-  height: number;
+  /**
+   * 實測尺寸；probe 缺失時為 null（G4：成片導出的 probe 可能失敗）。
+   * **禁止用 0 冒充**——`artifact.width/height` 是對外投影欄，寫 0 = 編造實測值。
+   */
+  width: number | null;
+  height: number | null;
   sha256: string;
 }
 
@@ -298,7 +303,8 @@ export interface RecordedArtifact {
  */
 export async function recordArtifact(
   input: RecordArtifactInput,
-  sql: GenerationSql = getGenerationSql(),
+  // 事務內呼叫（G4 成片索引：job+artifact 同事務）傳 tx；不傳則用進程級連線。
+  sql: GenerationSql | postgres.TransactionSql = getGenerationSql(),
 ): Promise<RecordedArtifact> {
   const id = randomUUID();
   const inserted = await sql<{ id: string }[]>`

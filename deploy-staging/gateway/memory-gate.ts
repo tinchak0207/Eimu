@@ -14,7 +14,7 @@
 // ─────────────────────────── 契約 §1 型別（本地副本，非 import）
 
 export type MemoryScope = "private" | "shared"
-export type MemoryType = "user" | "feedback" | "project" | "domain"
+export type MemoryType = "user" | "feedback" | "project" | "domain" | "workflow"
 export type EvidenceKind = "tool_result" | "user_confirmed" | "verbatim"
 
 /** 契約 §1：gateway 送 ingest 的 doc（id/status/revision/createdAt/updatedAt 由服務端生成）。 */
@@ -68,7 +68,7 @@ export interface GateResult {
 // ─────────────────────────── 閘門常量
 
 const SCOPE_VALUES: readonly string[] = ["private", "shared"]
-const TYPE_VALUES: readonly string[] = ["user", "feedback", "project", "domain"]
+const TYPE_VALUES: readonly string[] = ["user", "feedback", "project", "domain", "workflow"]
 const EVIDENCE_KIND_VALUES: readonly string[] = ["tool_result", "user_confirmed", "verbatim"]
 
 const SLUG_RE = /^[a-z0-9-]{1,64}$/

@@ -31,6 +31,7 @@ import {
   clampScale,
   fitToNodes,
   fromCanvasProject,
+  normalizeProjectMetaPatch,
   pushSnapshot,
   redoSnapshot,
   summarizeCanvasState,
@@ -39,6 +40,7 @@ import {
   type CanvasSnapshot,
 } from "@/lib/canvas/layout";
 import { listCanvasProjects, postCanvasOpsResult } from "@/lib/canvas/client";
+import { CanvasNodeType, isCanvasProjectType } from "@/lib/canvas/types";
 import { isValidCreationStep } from "@/lib/creation-flow-steps";
 import type {
   CanvasAgentOp,
@@ -48,6 +50,7 @@ import type {
   CanvasNodeMetadata,
   CanvasPosition,
   CanvasProject,
+  CanvasProjectType,
   CanvasViewport,
 } from "@/lib/canvas/types";
 import { canvasReducer } from "./canvas/canvas-reducer-adapter";
@@ -72,8 +75,13 @@ import {
   type AgentOpsQueue,
 } from "./canvas/canvas-agent-ops-queue";
 import { useCanvasProjectSync } from "./canvas/canvas-project-sync";
-import { useCanvasCards } from "./canvas/use-canvas-cards";
+import { upstreamTextNameFor, useCanvasCards } from "./canvas/use-canvas-cards";
 import { useCanvasEventSettler } from "./canvas/canvas-event-settler";
+import { ENTITY_CARD_ID_PREFIX, toAgentOutputNodeRef } from "@/lib/agent-output-cards";
+import { toast } from "@/hooks/use-toast";
+
+/** WS4：節點交付→自動落卡的 debounce（串流期間節點內容高頻變動，等安靜再落卡）。 */
+const EMITTED_ANCHOR_DEBOUNCE_MS = 500;
 
 // ─────────────────────────────────────────── 匯出面（barrel：消費端 import 路徑零改動）
 export { canvasReducer } from "./canvas/canvas-reducer-adapter";
@@ -87,6 +95,38 @@ export type {
   UseCanvasChatReturn,
 } from "./canvas/canvas-chat-types";
 
+/**
+ * 下游閉包（回跳作廢用，純函式，可直接單測）：沿連線 BFS 取 root 全部下游，
+ * 濾掉 text/prompt/config（純資料節點沒有生成結果，無所謂作廢——與網關
+ * `workflow-service.updateNode` 的 BFS 規則逐條對齊：它同樣只重置非 text/config）。
+ * root 自身不在回傳內（回跳改的是上游，被改的那步由用戶自己重跑）。
+ */
+export function downstreamInvalidationIds(
+  nodes: Pick<CanvasNode, "id" | "type">[],
+  connections: Pick<CanvasConnection, "fromNodeId" | "toNodeId">[],
+  rootId: string,
+): string[] {
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  if (!byId.has(rootId)) return [];
+  const voidsDataOnly = (id: string): boolean => {
+    const type = byId.get(id)?.type;
+    return type === CanvasNodeType.Text || type === CanvasNodeType.Prompt || type === CanvasNodeType.Config;
+  };
+  const visited = new Set<string>([rootId]);
+  const out: string[] = [];
+  const queue = [rootId];
+  while (queue.length > 0) {
+    const current = queue.shift() as string;
+    for (const c of connections) {
+      if (c.fromNodeId !== current || visited.has(c.toNodeId)) continue;
+      visited.add(c.toNodeId);
+      queue.push(c.toNodeId);
+      if (byId.has(c.toNodeId) && !voidsDataOnly(c.toNodeId)) out.push(c.toNodeId);
+    }
+  }
+  return out;
+}
+
 export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
   const [canvas, dispatchCanvas] = useReducer(canvasReducer, CANVAS_INITIAL_STATE);
   const [plans, setPlans] = useState<CanvasPlanCard[]>([]);
@@ -99,7 +139,7 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
   const [projectTitle, setProjectTitle] = useState("未命名画布");
   // 作品/劇集三級狀態機（2026-09-15 刀 1 前端接線）：專案級狀態，持久化在 CanvasProject 頂層三欄。
   // 寫入口＝setProjectMeta（UI 面板與 agent 驅動的畫布操作共用），讀回＝三處還原點 + canvasProjectMeta。
-  const [projectType, setProjectType] = useState<"movie" | "series" | undefined>(undefined);
+  const [projectType, setProjectType] = useState<CanvasProjectType | undefined>(undefined);
   const [currentStep, setCurrentStep] = useState<number | undefined>(undefined);
   const [episodes, setEpisodes] = useState<CanvasEpisode[]>([]);
   const [loading, setLoading] = useState(true);
@@ -119,17 +159,22 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
   const pendingAgentOps = getQueueHeadEvent(agentOpsQueue);
 
   // ── 角色/場景卡域（P2 跨鏡頭一致性）：卡列表 + 項目級鎖定
+  // 項目 id ref 先於卡域建立並注入（REQ-B2b）：卡域的讀取端作用域閘要判「鎖定卡屬不屬於
+  // 當前項目」，讀的就是這一個 ref——卡域在本 hook 之前呼叫，若晚建則閘首幀拿到 null 漏判。
+  const projectIdRef = useRef<string | null>(null);
   const {
     characterCards,
     activeCardIds,
     activeCharacterCards,
     setActiveCardIds,
+    applyMountCopyChange,
     characterCardsRef,
     activeCardIdsRef,
     upsertCharacterCard,
     removeCharacterCard,
     toggleCharacterCard,
-  } = useCanvasCards();
+    autoAnchorEmittedCards,
+  } = useCanvasCards({ getProjectId: () => projectIdRef.current });
 
   // ── refs：給不參與 render 的路徑讀最新值
   const canvasRef = useRef(canvas);
@@ -494,13 +539,14 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
 
   // ─────────────────────── 專案持久化（init → debounce → snapshot，順序同原內聯版）
 
-  const { projectIdRef, createdAtRef, saveTimerRef, everHadNodesRef, buildProject } = useCanvasProjectSync({
+  const { createdAtRef, saveTimerRef, everHadNodesRef, buildProject } = useCanvasProjectSync({
     canvasRef,
     viewportRef,
     backgroundRef,
     titleRef,
     budgetRef,
     activeCardIdsRef,
+    projectIdRef,
     projectTypeRef,
     currentStepRef,
     episodesRef,
@@ -646,6 +692,41 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     [pushHistory],
   );
 
+  // ─────────────────────── 回跳：作廢下游（決策 15，畫布側投影）
+
+  /**
+   * 作廢某節點的全部下游已完成結果（回跳改上游 = 下游成果失效）。
+   * **不新建機制**：作廢的真權威在網關——`workflow-service.updateNode` 的 BFS
+   *（改上游時把下游重置 pending＋刪 nodeContent/nodeCost）與 `rerunFrom`
+   *（root+下游閉包重跑）都已經在跑，且 `generate` 的 R5-B 續跑語義
+   *（"reuse succeeded node results, only failed/pending nodes will run"）保證
+   * 下游只重跑被作廢的那些。本函式是**畫布側的同一條規則的立即投影**（用戶按下
+   * 回跳的那一刻就看見下游變空，不必等網關事件回來），重跑本身仍交宿主既有的
+   * rerun 入口（workflow-node-rerun → rerunFrom），不在此另發請求。
+   *
+   * 規則逐條對齊網關：閉包沿連線 BFS（含 root）；text/config 類（純資料）不參與
+   * 作廢——它們沒有生成結果，重置只會讓卡面無故變空。
+   * 回傳作廢的節點 id（呼叫端據此提示「這些步驟會重跑」，順序＝BFS 序）。
+   */
+  const revokeDownstream = useCallback(
+    (nodeId: string): string[] => {
+      const nodes = canvasRef.current.nodes;
+      const connections = canvasRef.current.connections;
+      const voidIds = downstreamInvalidationIds(nodes, connections, nodeId);
+      if (voidIds.length === 0) return [];
+      pushHistory(); // 一格歷史：回跳作廢可一鍵撤銷
+      for (const id of voidIds) {
+        dispatchCanvas({
+          type: "patch_metadata",
+          nodeId: id,
+          patch: { status: "idle", content: "", errorDetails: undefined },
+        });
+      }
+      return voidIds;
+    },
+    [pushHistory],
+  );
+
   // ─────────────────────── Wave A：就地編輯
 
   const renameNode = useCallback(
@@ -664,6 +745,97 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     },
     [pushHistory],
   );
+
+  // ─────────────────────── WS4：模板節點交付 → 自動落卡（＋分鏡引用回填）
+
+  /**
+   * 節點投影：canvas 節點 → 落卡模組的結構子集（只讀 id/title/metadata 三個欄位）。
+   * `metadata` 在落卡模組眼裡是不透明袋子；投影是一次唯讀寬化（見
+   * `toAgentOutputNodeRef` 的註解：CanvasNodeMetadata 是 interface，無 index signature）。
+   */
+  const emittedNodeRefs = useMemo(() => canvas.nodes.map(toAgentOutputNodeRef), [canvas.nodes]);
+
+  /**
+   * 落卡指紋：只裝「會改變落卡判定」的欄位——節點 id、已落卡標記、交付物（長度＋尾段 64 字）。
+   * 刻意**不含整個 metadata**：回填會寫 metadata，指紋若含它就會自己觸發自己（無限迴圈）。
+   * 指紋不變 → 不重跑（同一份交付物重複觸發＝零動作）。
+   */
+  const emittedCardFingerprint = useMemo(
+    () =>
+      emittedNodeRefs
+        .map((n) => {
+          const content = typeof n.metadata?.content === "string" ? n.metadata.content : "";
+          const marker = typeof n.metadata?.entityCardId === "string" ? n.metadata.entityCardId : "";
+          return `${n.id}:${marker}:${content.length}:${content.slice(-64)}`;
+        })
+        .join("|"),
+    [emittedNodeRefs],
+  );
+
+  const emittedAnchorDoneRef = useRef("");
+  /**
+   * 既有自動落卡簽章：卡清單是**非同步**載入的（listCharacterCards），節點卻可能先到
+   * （回舊會話：專案 Blob 先還原、卡清單後回）。少了這一項，「卡上次已落、分鏡節點缺引用」
+   * 那一輪永遠等不到 → 耐久回填在競態下失效。只認自動落成的前綴卡，人工建卡不動簽章。
+   *
+   * 含**內容**（卡名＋參考圖數）不只 id：漸進聚合把 sibling 晚到的圖併進既存卡時 **id 不變**，
+   * 只認 id 的簽章不會再觸發一輪 → 第二張參考圖永遠補不進去。收斂：下一輪計畫為空
+   * （`updatedCards` 空 ∧ 補名無候選）⇒ 內容不再變 ⇒ 簽章穩定 ⇒ 不再重跑。
+   */
+  const emittedEntityCardSignature = useMemo(
+    () =>
+      characterCards
+        .filter((c) => c.id.startsWith(ENTITY_CARD_ID_PREFIX))
+        .map((c) => `${c.id}:${c.name}:${c.references.length}`)
+        .join(","),
+    [characterCards],
+  );
+  /** 落卡觸發串 = 節點指紋 ＋ 既有自動落成卡簽章（兩者任一變化都值得重跑一次計畫）。 */
+  const emittedAnchorTrigger = `${emittedCardFingerprint}|${emittedEntityCardSignature}`;
+  /**
+   * 節點集合一安靜就自動落卡：模板節點交出角色四視圖/場景圖 → 落成可 @ 引用的卡
+   * （冪等由決定性卡 id + existing 比對保證；`metadata.entityCardId` 標記亦視為已建）。
+   * 用「已完成觸發串」而非逐節點旗標：換模板/換項目（id 全變）自然重跑。
+   * 收斂：建卡那輪會寫 entityCardId 標記 → 節點指紋變一次 → 第二輪計畫為空
+   * （marker 已存在不建卡、分鏡引用已在）→ 不再產生任何 patch。
+   */
+  useEffect(() => {
+    if (!emittedAnchorTrigger) return;
+    if (emittedAnchorTrigger === emittedAnchorDoneRef.current) return;
+    const timer = window.setTimeout(() => {
+      emittedAnchorDoneRef.current = emittedAnchorTrigger;
+      void autoAnchorEmittedCards(canvasRef.current.nodes.map(toAgentOutputNodeRef), {
+        // 落卡標記：寫進**擁有該卡的那顆節點**的 metadata（自動動作不進撤銷棧）。
+        onEntityCardId: (nodeId, cardId) => {
+          patchNodeMetadata(nodeId, { entityCardId: cardId }, { history: false });
+        },
+        onShotBackfill: (items) => {
+          // 分鏡節點的卡引用欄（門禁欄名）寫進 metadata：patch 是 merge，欄位形狀對得上
+          // `CanvasNodeMetadata`（WS7 四欄白名單成員）。自動動作不進撤銷棧
+          //（history:false，同進度/自然尺寸的寫法）。
+          for (const item of items) {
+            const { nodeId, ...cardRefs } = item;
+            patchNodeMetadata(nodeId, cardRefs, { history: false });
+          }
+        },
+        // 卡名**第二來源**（C）：`nameFrom:"input"` 的三鍵全空時，往上找第一個有非空文本
+        // 的上游節點取第一行（走 canvas 連線＝真連線欄位 fromNodeId→toNodeId）。
+        resolveName: (ref) => upstreamTextNameFor(ref.id, canvasRef.current.nodes, canvasRef.current.connections),
+        // 退回可見化：真的只能拿節點標題當卡名（「正面」）時給一行提示——不新造通知元件，
+        // 用站內既有 toast（root layout 已掛 <Toaster/>）。真源＝落卡計畫的 nameFallbacks。
+        onNameFallback: (fallbacks) => {
+          console.warn("[canvas] 实体卡名退回节点标题", fallbacks.length);
+          toast({
+            description: `有 ${fallbacks.length} 张素材卡未取到名字，暂用节点标题（${fallbacks
+              .slice(0, 3)
+              .map((f) => f.fallbackName)
+              .join("、")}）`,
+          });
+        },
+      });
+    }, EMITTED_ANCHOR_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [emittedAnchorTrigger, autoAnchorEmittedCards, patchNodeMetadata]);
 
   // ─────────────────────── B2：飛行聚焦（450ms easeOutCubic）
 
@@ -711,6 +883,15 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
         setViewportState((prev) => ({ ...prev, ...op.viewport, k: clampScale(op.viewport.k ?? prev.k) }));
       } else if (op.type === "run_generation") {
         result.runGeneration.push({ nodeId: op.node_id, prompt: op.prompt, model: op.model, size: op.size, count: op.count });
+      } else if (op.type === "set_project_meta") {
+        // 2026-09-16 G1：專案級欄位（作品類型/流程步/劇集清單）的唯一寫入口。
+        // reducer 只認 nodes/connections，這三欄在 CanvasProject 頂層，故在此執行。
+        // 載荷不可信（agent 產出經 SSE 反序列化，型別不保證）：一律先過
+        // normalizeProjectMetaPatch 逐欄白名單 —— 非法欄位被省略＝不動該欄，
+        // 不讓模型的一個錯 enum 清掉用戶已填的劇集清單。空 patch 直接跳過，
+        // 免得多推一次 state 造成無謂的存檔 debounce 與快照上行。
+        const patch = normalizeProjectMetaPatch(op.patch);
+        if (Object.keys(patch).length > 0) setProjectMeta(patch);
       }
     }
     setAgentOpsQueue((prev) => dequeueAgentOps(prev, requestId));
@@ -720,6 +901,8 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
       void postCanvasOpsResult(sid, requestId, { ok: true, ...(createdIds.length ? { created_node_ids: createdIds } : {}) });
     }
     return result;
+    // setProjectMeta 不在依賴陣列：它是 useCallback(..., [])（身分恆定，無過期閉包問題），
+    // 且本 useCallback 宣告在它之前 —— 寫進陣列會在 render 期讀到 TDZ 的 const 而直接炸。
   }, [pushHistory]);
 
   /**
@@ -801,8 +984,8 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
    * 免得存檔時被 store 靜默丟掉），完整清洗仍只在 project-store。
    */
   const setProjectMeta = useCallback(
-    (patch: { projectType?: "movie" | "series"; currentStep?: number; episodes?: CanvasEpisode[] }) => {
-      if ("projectType" in patch && (patch.projectType === undefined || patch.projectType === "movie" || patch.projectType === "series")) {
+    (patch: { projectType?: CanvasProjectType; currentStep?: number; episodes?: CanvasEpisode[] }) => {
+      if ("projectType" in patch && (patch.projectType === undefined || isCanvasProjectType(patch.projectType))) {
         setProjectType(patch.projectType);
       }
       if ("currentStep" in patch && (patch.currentStep === undefined || isValidCreationStep(patch.currentStep))) {
@@ -928,6 +1111,8 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     refreshSavedProjects,
     openSavedCanvas,
     restoreAgentSnapshot,
+    // REQ-B2：項目 id 直讀 ref（ref 由 useCanvasProjectSync 擁有，不另存一份狀態）。
+    getProjectId: () => projectIdRef.current,
     pathFor,
     moveNodes,
     addNodes,
@@ -935,6 +1120,7 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     deleteNodes,
     addConnection,
     removeConnection,
+    revokeDownstream,
     addBatchChild,
     setBatchPrimary,
     deleteBatchChild,
@@ -950,6 +1136,7 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     characterCards,
     activeCardIds,
     activeCharacterCards,
+    applyMountCopyChange,
     projectType,
     currentStep,
     episodes,

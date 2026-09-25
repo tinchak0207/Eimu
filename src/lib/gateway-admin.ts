@@ -81,6 +81,47 @@ export async function fetchGatewayUser(userId: number): Promise<GatewayAdminUser
   return result.success && result.data?.id ? result.data : null;
 }
 
+/**
+ * 上游兑换码记录（REQ-E1a 充值入账的唯一上游依据）。
+ *
+ * 只读：`GET /api/redemption/?p=&page_size=`（AdminAuth 路由，与 mapay-redemption.ts
+ * 用的 /api/redemption/search 同一族）。充值在我方没有可观测的写入点——mPay 回调只
+ * **生成**兑换码，真正的入账是用户在 new-api 端兑换（`POST /api/user/topup`），
+ * 所以“已使用”这件事只能从上游记录读回来（`status=2` + `used_user_id` + `redeemed_time`）。
+ *
+ * 返回形状两种都收（`data.items` 或裸数组）——与 findGatewayUserByUsername 同一防御
+ * 姿势：上游不同版本分页信封不一致时，不要静默变成“没有兑换码”（那会把充值吞掉）。
+ */
+export interface GatewayRedemption {
+  id: number;
+  key: string;
+  name?: string;
+  quota: number;
+  status?: number;
+  used_user_id?: number;
+  redeemed_time?: number;
+  created_time?: number;
+}
+
+export async function listGatewayRedemptions(
+  input: { pages?: number; pageSize?: number; keyword?: string } = {},
+): Promise<GatewayRedemption[]> {
+  const pages = Math.max(1, Math.min(input.pages ?? 1, 20));
+  const pageSize = Math.max(1, Math.min(input.pageSize ?? 100, 100));
+  const items: GatewayRedemption[] = [];
+  for (let page = 0; page < pages; page += 1) {
+    const path = input.keyword
+      ? `/api/redemption/search?keyword=${encodeURIComponent(input.keyword)}&p=${page}&page_size=${pageSize}`
+      : `/api/redemption/?p=${page}&page_size=${pageSize}`;
+    const result = await callGateway<GatewayRedemption[] | { items?: GatewayRedemption[] }>(path);
+    if (!result.success) throw new Error(result.message ?? "读取上游兑换码失败。");
+    const pageItems = Array.isArray(result.data) ? result.data : (result.data?.items ?? []);
+    items.push(...pageItems);
+    if (pageItems.length < pageSize) break;
+  }
+  return items;
+}
+
 /** 把某个用户的额度调整到目标张数。返回调整后的用户。 */
 export async function setGatewayUserImageQuota(
   userId: number,

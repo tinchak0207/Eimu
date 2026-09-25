@@ -48,6 +48,12 @@ SOFTWARE.
   `sql/aid-init.sql` 的 `aid_comic_episode` / `aid_comic_script`；
   改写见 `src/lib/creation-flow-steps.ts` 与 `src/lib/canvas/types.ts` 的 `CanvasEpisode` 档头
   （砍 AID 审核三态与 `pending_*` 字段，本站无审核队列）。
+- 追加引入（2026-09-15，刀 2 分镜实体 + 21 栏位契约）：分镜 21 栏位契约（栏名与顺序逐字保留）
+  与 `aid_storyboard` 表栏位语义，来源 `doc/提示词开发指南.md` §「分鏡脚本与画师链路」输出栏位表、
+  `sql/aid-init.sql` 的 `aid_storyboard`（21 栏 + `final_image_id`/`final_video_id`/`final_audio_id`）；
+  改写见 `src/lib/storyboard-contract.ts` 档头（**剔除已废的第 22 栏 `sceneCode`**——AID v2.1.4
+  同档 §开发要点 5 已明令禁输出 sceneCode，场景归属只认外层 sceneName；本站不建 shot 表，
+  改挂 `CanvasNode.metadata`，即 `CanvasNodeMetadata.storyboardShot` / `.storyboardScene`）。
 - 完整许可证文本：
 
 ```

@@ -21,12 +21,28 @@
 // - 生成時序列化：chip → `@图片N`（N = 該 chip 在 selectedReferenceIds 的
 //   序號+1），其餘文字原樣；onGenerate 契約不變。
 // - 貼上只取 text/plain；IME 組合輸入期間不解析 @ 選單。
+//
+// 素材卡 @引用（2026-09-24 擴充，WS3）：@ 選單加開第二組候選——項目鎖定的角色/場景/
+// 風格/道具卡。選中插入紫色原子 chip（同幾何、異色票），生成時序列化成行內 token
+// `@[角色:霍辞渊]`（與圖片 chip 的 `@图片N` 走同一個 serializeEditor 分派，靠 dataset.cardId
+// 判定），讓「這一鏡要誰/哪個場景/用哪個道具」就地指名而不是靠整包前綴。
+// 兩個 chip 系統共用既有物理參數/事件監聽/caret 量測邏輯（本輪對此零改動）。
+// 編輯器下方另掛 ShotReferencePanel：純推導列出本鏡解析出的參考素材與未匹配 token。
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BookOpen, Bot, Settings2, X } from "lucide-react";
 import { PROVIDERS, imageGenerationCoins } from "@/lib/provider-config";
 import { generationModel } from "@/lib/generation-model-catalog";
 import { DEFAULT_IMAGE_MODEL_ID } from "@/lib/image-model-ids.js";
+import type { CharacterCardKind } from "@/lib/character-cards";
+import type { CanvasNodeMetadata } from "@/lib/canvas/types";
+import {
+  ShotReferencePanel,
+  buildMentionRows,
+  deriveShotReference,
+  serializeChipText,
+  type ShotReferenceEntry,
+} from "./ShotReferencePanel";
 import { cn } from "@/lib/utils";
 
 /** 上游可引用資源（由宿主從連線圖算出）。 */
@@ -34,6 +50,95 @@ export interface CanvasReferenceCandidate {
   nodeId: string;
   title: string;
   previewUrl: string;
+}
+
+/** @ 可引用的素材卡候選（角色/場景/風格/道具）。 */
+export interface CanvasEntityCandidate {
+  cardId: string;
+  name: string;
+  kind: CharacterCardKind;
+  /** 顯示用種類字（＝CHARACTER_CARD_KIND_LABEL[kind]）。 */
+  kindLabel: string;
+  /** 預覽縮圖（卡的第一張參考圖；無則空字串）。 */
+  previewUrl: string;
+}
+
+/**
+ * 純推導（本鏡參考素材清單，零請求零訂閱）：在既有 token/locked 推導上疊加第三種來源 shot。
+ *
+ * 優先序 `token` > `shot` > `locked`（同一張卡只出現一次）：
+ *   1. `token`：正文真的用 `@[種類:名]` 引用了（人明寫的最強意圖）；
+ *   2. `shot`：本鏡節點 metadata 三欄（character/scene/prop）已指定，且未被 token 引用；
+ *   3. `locked`：候選卡裡既沒被引用、也沒被指定的其餘卡（純提示「有哪些沒用到」）。
+ *
+ * `shotEntityCardIds` 中不在 `candidates` 的 id 靜默跳過（候選已過作用域裁決，不在裡面＝不可用），
+ * 避免出現沒名字的空條目。`shotEntityCardIds` 缺省／空 → 回傳結果與既有三來源推導逐位元相同。
+ * token/locked 條目直接沿用 `deriveShotReference` 的產物（物件與順序不重算）；unresolvedTokens 逐字不動。
+ */
+export function deriveShotReferenceEntries(
+  promptText: string,
+  candidates: readonly CanvasEntityCandidate[],
+  shotEntityCardIds?: readonly string[],
+): { entries: ShotReferenceEntry[]; unresolvedTokens: string[] } {
+  const base = deriveShotReference(promptText, candidates);
+  const byCardId = new Map(candidates.map((cand) => [cand.cardId, cand]));
+  const cardIdOf = (entry: ShotReferenceEntry) => entry.key.slice(entry.key.indexOf(":") + 1);
+
+  const tokenEntries: ShotReferenceEntry[] = [];
+  const lockedEntries: ShotReferenceEntry[] = [];
+  const usedCardIds = new Set<string>();
+  for (const entry of base.entries) {
+    if (entry.source === "token") {
+      usedCardIds.add(cardIdOf(entry));
+      tokenEntries.push(entry);
+    } else if (entry.source === "locked") {
+      lockedEntries.push(entry);
+    }
+  }
+
+  const shotEntries: ShotReferenceEntry[] = [];
+  const shotCardIds = new Set<string>();
+  for (const cardId of shotEntityCardIds ?? []) {
+    if (!cardId || usedCardIds.has(cardId) || shotCardIds.has(cardId)) continue;
+    const cand = byCardId.get(cardId);
+    if (!cand) continue;
+    shotCardIds.add(cardId);
+    shotEntries.push({
+      key: `shot:${cardId}`,
+      kindLabel: cand.kindLabel,
+      name: cand.name,
+      previewUrl: cand.previewUrl,
+      source: "shot",
+    });
+  }
+
+  return {
+    entries: [
+      ...tokenEntries,
+      ...shotEntries,
+      ...lockedEntries.filter((entry) => !shotCardIds.has(cardIdOf(entry))),
+    ],
+    unresolvedTokens: base.unresolvedTokens,
+  };
+}
+
+/**
+ * 純讀取：節點 metadata 三欄（character/scene/prop）的實體卡 id 聯集去重。
+ * 宿主（CanvasEmbed）用它算出 `shotEntityCardIds` 供本面板；缺省／全空 → 空陣列。
+ * 抽成模組級純函式以便直接行為斷言（CanvasEmbed 因 CSS import 無法在 node 測試內載入）。
+ */
+export function shotEntityCardIdsFromMetadata(
+  metadata: Pick<CanvasNodeMetadata, "characterCardIds" | "sceneCardIds" | "propCardIds"> | undefined,
+): string[] {
+  return [
+    ...new Set(
+      [
+        ...(metadata?.characterCardIds ?? []),
+        ...(metadata?.sceneCardIds ?? []),
+        ...(metadata?.propCardIds ?? []),
+      ].filter(Boolean),
+    ),
+  ];
 }
 
 export interface CanvasNodePromptPanelProps {
@@ -56,6 +161,14 @@ export interface CanvasNodePromptPanelProps {
   selectedReferenceIds?: string[];
   /** 切換某個引用的選取狀態。 */
   onToggleReference?: (referenceNodeId: string) => void;
+  /** @ 可引用的素材卡（第二組候選）。 */
+  entityCandidates?: CanvasEntityCandidate[];
+  /** 已被行內引用的卡 id（與 prompt 內 token 雙向同步）。 */
+  selectedEntityIds?: string[];
+  /** 切換某張卡的引用狀態（插入/移除對應 token chip）。 */
+  onToggleEntity?: (cardId: string) => void;
+  /** 本鏡節點已指定的實體卡 id（真源＝節點 metadata 的三個卡 id 欄；供清單的 "shot" 來源）。 */
+  shotEntityCardIds?: string[];
   /** 生成中點「停止」時回呼；未提供則 isRunning 只顯示轉圈段、不顯示停止鈕。 */
   onStop?: () => void;
   /** 開啟提示詞庫；未提供則不渲染入口按鈕。 */
@@ -106,9 +219,9 @@ function useImageModelOptions(): { id: string; label: string }[] {
 
 // ---------- contentEditable 純 DOM 工具（不經 React 渲染，React 不管理輸入框子樹） ----------
 
-/** chip 元素判定：帶 data-node-id 的元素即原子引用 chip。 */
+/** chip 元素判定：帶 data-node-id（上游圖片）或 data-card-id（素材卡）的元素即原子引用 chip。 */
 function isChipElement(node: Node): node is HTMLElement {
-  return node instanceof HTMLElement && Boolean(node.dataset.nodeId);
+  return node instanceof HTMLElement && Boolean(node.dataset.nodeId || node.dataset.cardId);
 }
 
 /** 可忽略的文字節點（空字串或僅零寬字元）。 */
@@ -128,7 +241,8 @@ function serializeChildren(root: Node, chipText: (chip: HTMLElement) => string):
       return;
     }
     if (!(node instanceof HTMLElement)) return;
-    if (node.dataset.nodeId) {
+    // chip 兩種：data-node-id（圖片）/ data-card-id（素材卡）——都用 chipText 轉換。
+    if (node.dataset.nodeId || node.dataset.cardId) {
       out += chipText(node);
       return;
     }
@@ -143,14 +257,24 @@ function serializeChildren(root: Node, chipText: (chip: HTMLElement) => string):
   return out;
 }
 
-/** 生成用序列化：chip → `@图片N`（N = 在 selectedReferenceIds 的序號+1；不在清單則退回標題）。 */
+/**
+ * 生成用序列化：chip → `@图片N`（N = 在 selectedReferenceIds 的序號+1；不在清單則退回標題）。
+ * 素材卡 chip（帶 data-card-id）改走 `@[種類:名稱]` 行內 token——分派在
+ * serializeChipText 內靠 dataset.cardId 判定（純函式，見 ShotReferencePanel）。
+ */
 function serializeEditor(editor: HTMLElement, selectedIds: string[]): string {
   return stripZeroWidth(
-    serializeChildren(editor, (chip) => {
-      const id = chip.dataset.nodeId || "";
-      const idx = selectedIds.indexOf(id);
-      return idx >= 0 ? `@图片${idx + 1}` : `@${chip.dataset.title || "图片"}`;
-    }),
+    serializeChildren(editor, (chip) =>
+      serializeChipText(
+        {
+          nodeId: chip.dataset.nodeId,
+          cardId: chip.dataset.cardId,
+          cardKind: chip.dataset.cardKind,
+          title: chip.dataset.title,
+        },
+        selectedIds,
+      ),
+    ),
   );
 }
 
@@ -186,6 +310,39 @@ function createChipElement(cand: CanvasReferenceCandidate): HTMLSpanElement {
   const label = document.createElement("span");
   label.className = "truncate";
   label.textContent = cand.title.length > CHIP_TITLE_MAX ? `${cand.title.slice(0, CHIP_TITLE_MAX)}…` : cand.title;
+  chip.appendChild(label);
+  return chip;
+}
+
+/**
+ * 建立素材卡原子 chip：幾何與 createChipElement 逐字相同（逐字複製，不精簡——
+ * 2026-08-25「模板旋轉木馬」教訓：每精簡一處既有物理參數＝埋一顆雷），
+ * 只換色票（紫）並多一個 kindLabel 小字；data-card-id/-kind 供序列化與刪除對賬。
+ */
+function createEntityChipElement(cand: CanvasEntityCandidate): HTMLSpanElement {
+  const chip = document.createElement("span");
+  chip.contentEditable = "false";
+  chip.dataset.cardId = cand.cardId;
+  chip.dataset.cardKind = cand.kind;
+  chip.dataset.title = cand.name;
+  chip.title = `${cand.kindLabel}:${cand.name}`;
+  chip.className =
+    "mx-0.5 inline-flex max-w-[140px] select-none items-center gap-1 rounded-md bg-ios-purple/15 px-1.5 py-0.5 align-middle text-xs font-medium text-ios-purple";
+  if (cand.previewUrl) {
+    const img = document.createElement("img");
+    img.src = cand.previewUrl;
+    img.alt = cand.name;
+    img.draggable = false;
+    img.className = "h-4 w-4 shrink-0 rounded-[3px] object-cover";
+    chip.appendChild(img);
+  }
+  const kind = document.createElement("span");
+  kind.className = "shrink-0 opacity-80";
+  kind.textContent = cand.kindLabel;
+  chip.appendChild(kind);
+  const label = document.createElement("span");
+  label.className = "truncate";
+  label.textContent = cand.name.length > CHIP_TITLE_MAX ? `${cand.name.slice(0, CHIP_TITLE_MAX)}…` : cand.name;
   chip.appendChild(label);
   return chip;
 }
@@ -241,6 +398,10 @@ export function CanvasNodePromptPanel({
   referenceCandidates = [],
   selectedReferenceIds = [],
   onToggleReference,
+  entityCandidates = [],
+  selectedEntityIds = [],
+  onToggleEntity,
+  shotEntityCardIds,
   onStop,
   onOpenPromptLibrary,
 }: CanvasNodePromptPanelProps) {
@@ -265,6 +426,8 @@ export function CanvasNodePromptPanel({
   const activeItemRef = useRef<HTMLButtonElement | null>(null);
   /** 上一輪輸入框內出現過的 chip id 集合，供刪除對賬（chip 消失 → 取消選取）。 */
   const prevChipIdsRef = useRef<Set<string>>(new Set());
+  /** 上一輪輸入框內出現過的素材卡 id 集合，供刪除對賬（chip 消失 → 取消引用）。 */
+  const prevEntityChipIdsRef = useRef<Set<string>>(new Set());
 
   // 首掛載灌入 initialPrompt（純文字；歷史 prompt 不回填 chip）。
   useEffect(() => {
@@ -296,13 +459,17 @@ export function CanvasNodePromptPanel({
 
   const modelLabel = modelOptions.find((m) => m.id === model)?.label ?? model;
 
-  // @ 候選：續鍵入以標題過濾。
-  const mentionCandidates = useMemo(() => {
-    if (!mention) return [];
-    const query = mention.query.trim().toLowerCase();
-    if (!query) return referenceCandidates;
-    return referenceCandidates.filter((cand) => cand.title.toLowerCase().includes(query));
-  }, [mention, referenceCandidates]);
+  // @ 候選：續鍵入過濾（兩組共用）；攤平成單一連續索引序列（↑↓ 跨組）。
+  const mentionRows = useMemo(
+    () => (mention ? buildMentionRows(referenceCandidates, entityCandidates, mention.query) : []),
+    [mention, referenceCandidates, entityCandidates],
+  );
+
+  // 本鏡參考素材解析（純推導，零請求零訂閱）：token 命中 / 本鏡已指定 / 鎖定未引用 / 未匹配 token。
+  const shotReference = useMemo(
+    () => deriveShotReferenceEntries(promptText, entityCandidates, shotEntityCardIds),
+    [promptText, entityCandidates, shotEntityCardIds],
+  );
 
   const closeMention = () => {
     setMention(null);
@@ -314,7 +481,7 @@ export function CanvasNodePromptPanel({
     const editor = editorRef.current;
     const root = rootRef.current;
     if (!editor || !root) return;
-    if (composingRef.current || referenceCandidates.length === 0) {
+    if (composingRef.current || (referenceCandidates.length === 0 && entityCandidates.length === 0)) {
       setMention(null);
       return;
     }
@@ -349,12 +516,17 @@ export function CanvasNodePromptPanel({
    * 每次內容變更後的統一同步：
    * 1) :empty 佔位符正規化（全刪後殘留 <br> 會令 :empty 失效）；
    * 2) chip 刪除對賬——上輪存在、這輪消失且仍在已選清單 → onToggleReference 取消；
+   *    素材卡 chip 同構對賬 → onToggleEntity 取消引用；
    * 3) 更新 promptText；4) 重算 @ 選單。
    */
   const syncFromEditor = () => {
     const editor = editorRef.current;
     if (!editor) return;
-    if (!editor.textContent && !editor.querySelector("[data-node-id]") && editor.childNodes.length > 0) {
+    if (
+      !editor.textContent &&
+      !editor.querySelector("[data-node-id],[data-card-id]") &&
+      editor.childNodes.length > 0
+    ) {
       editor.textContent = "";
       if (document.activeElement === editor) placeCaretAtEnd(editor);
     }
@@ -366,6 +538,14 @@ export function CanvasNodePromptPanel({
       if (!currentChipIds.has(id) && selectedReferenceIds.includes(id)) onToggleReference?.(id);
     });
     prevChipIdsRef.current = currentChipIds;
+    const currentEntityIds = new Set<string>();
+    editor.querySelectorAll<HTMLElement>("[data-card-id]").forEach((el) => {
+      if (el.dataset.cardId) currentEntityIds.add(el.dataset.cardId);
+    });
+    prevEntityChipIdsRef.current.forEach((id) => {
+      if (!currentEntityIds.has(id) && selectedEntityIds.includes(id)) onToggleEntity?.(id);
+    });
+    prevEntityChipIdsRef.current = currentEntityIds;
     setPromptText(serializeEditor(editor, selectedReferenceIds));
     syncMention();
   };
@@ -375,6 +555,33 @@ export function CanvasNodePromptPanel({
     const editor = editorRef.current;
     if (!editor) return;
     const chip = createChipElement(cand);
+    const space = document.createTextNode(" ");
+    const selection = window.getSelection();
+    const range =
+      selection && selection.rangeCount > 0 && editor.contains(selection.getRangeAt(0).startContainer)
+        ? selection.getRangeAt(0)
+        : null;
+    if (range) {
+      range.deleteContents();
+      range.insertNode(space);
+      range.insertNode(chip);
+      range.setStartAfter(space);
+      range.collapse(true);
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    } else {
+      editor.append(chip, space);
+    }
+  };
+
+  /**
+   * 在 caret（或末尾）插入素材卡 chip + 尾隨空格——與 insertChipDom 逐句同構
+   * （同一套 caret 定位/接續/回落末尾邏輯，只是 chip 工廠換成紫色卡片 chip）。
+   */
+  const insertEntityChipDom = (cand: CanvasEntityCandidate) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const chip = createEntityChipElement(cand);
     const space = document.createTextNode(" ");
     const selection = window.getSelection();
     const range =
@@ -417,6 +624,15 @@ export function CanvasNodePromptPanel({
     closeMention();
     syncFromEditor();
     if (!selectedReferenceIds.includes(cand.nodeId)) onToggleReference?.(cand.nodeId);
+  };
+
+  /** @ 選單選中（素材卡）：刪 @query → 插卡 chip → 同步 → 未引用則標記引用該卡。 */
+  const insertEntityReference = (cand: CanvasEntityCandidate) => {
+    removeMentionTextBeforeCaret();
+    insertEntityChipDom(cand);
+    closeMention();
+    syncFromEditor();
+    if (!selectedEntityIds.includes(cand.cardId)) onToggleEntity?.(cand.cardId);
   };
 
   /** 縮圖列雙入口：toggle 選取並同步輸入框 chip 插入/移除。 */
@@ -467,20 +683,23 @@ export function CanvasNodePromptPanel({
       handleGenerate();
       return;
     }
-    if (mention && mentionCandidates.length > 0) {
+    if (mention && mentionRows.length > 0) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        setActiveIndex((i) => (i + 1) % mentionCandidates.length);
+        setActiveIndex((i) => (i + 1) % mentionRows.length);
         return;
       }
       if (e.key === "ArrowUp") {
         e.preventDefault();
-        setActiveIndex((i) => (i - 1 + mentionCandidates.length) % mentionCandidates.length);
+        setActiveIndex((i) => (i - 1 + mentionRows.length) % mentionRows.length);
         return;
       }
       if (e.key === "Enter") {
         e.preventDefault();
-        insertReference(mentionCandidates[Math.min(activeIndex, mentionCandidates.length - 1)]);
+        const row = mentionRows[Math.min(activeIndex, mentionRows.length - 1)];
+        // 兩組候選共用同一個攤平索引：按列所屬組取回原候選再分派插入。
+        if (row.group === "image") insertReference(referenceCandidates[row.sourceIndex]);
+        else insertEntityReference(entityCandidates[row.sourceIndex]);
         return;
       }
       if (e.key === "Escape") {
@@ -599,7 +818,7 @@ export function CanvasNodePromptPanel({
             role="textbox"
             aria-multiline="true"
             aria-label="提示词输入框"
-            data-placeholder="编辑提示词… 输入 @ 引用上游图片"
+            data-placeholder="编辑提示词… 输入 @ 引用图片或素材卡"
             className={cn(
               "max-h-[180px] min-h-[88px] w-full cursor-text overflow-y-auto whitespace-pre-wrap break-words rounded-lg border border-input bg-black/5 p-2.5 text-sm leading-relaxed outline-none transition-colors focus:border-ios-blue",
               // 佔位符：contentEditable 用 :empty::before 呈現（syncFromEditor 會清掉殘留 <br> 保住 :empty）。
@@ -624,6 +843,9 @@ export function CanvasNodePromptPanel({
             }}
           />
         </div>
+
+        {/* 本镜参考素材：純推導（token 命中 / 鎖定未引用 / 未匹配 token），零空殼 */}
+        <ShotReferencePanel entries={shotReference.entries} unresolvedTokens={shotReference.unresolvedTokens} />
 
         {/* 參數與設置 */}
         <div className="border-t px-3 py-2">
@@ -752,52 +974,122 @@ export function CanvasNodePromptPanel({
         </div>
       </div>
 
-      {/* @ 候選懸浮選單：絕對定位於面板內，錨定 caret 像素位置 */}
-      {mention && mentionCandidates.length > 0 && (
+      {/* @ 候選懸浮選單：絕對定位於面板內，錨定 caret 像素位置；
+          兩組候選（图片 / 素材卡）共用同一個攤平索引序列，組標題在組邊界插入 */}
+      {mention && mentionRows.length > 0 && (
         <div
           role="listbox"
           aria-label="引用候选"
           className="absolute z-10 max-h-52 w-56 overflow-y-auto rounded-xl lg-sheet p-1"
           style={{ left: mention.left, top: mention.top }}
         >
-          {mentionCandidates.map((cand, index) => {
+          {mentionRows.map((row, index) => {
+            const isActive = index === Math.min(activeIndex, mentionRows.length - 1);
+            const header =
+              index === 0 || mentionRows[index - 1].group !== row.group
+                ? row.group === "image"
+                  ? "图片"
+                  : "素材卡"
+                : null;
+            if (row.group === "entity") {
+              const cand = entityCandidates[row.sourceIndex];
+              const referenced = selectedEntityIds.includes(cand.cardId);
+              return (
+                <Fragment key={`entity:${cand.cardId}`}>
+                  {header ? (
+                    <p className="px-2 pb-0.5 pt-1.5 text-ios-caption2 font-medium text-foreground/45">
+                      {header}
+                    </p>
+                  ) : null}
+                  <button
+                    type="button"
+                    role="option"
+                    ref={isActive ? activeItemRef : undefined}
+                    aria-selected={isActive}
+                    className={cn(
+                      "flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors",
+                      isActive ? "bg-ios-purple/10 text-ios-purple" : "text-muted-foreground hover:bg-black/5",
+                    )}
+                    // preventDefault 避免輸入框失焦（blur 會延時關閉選單）。
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      insertEntityReference(cand);
+                    }}
+                  >
+                    {cand.previewUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={cand.previewUrl}
+                        alt={cand.name}
+                        className="h-8 w-8 shrink-0 rounded-md object-cover"
+                        draggable={false}
+                      />
+                    ) : (
+                      <span className="h-8 w-8 shrink-0 rounded-md bg-black/5" />
+                    )}
+                    <span className="shrink-0 rounded-[4px] bg-ios-purple/15 px-1 font-medium">
+                      {cand.kindLabel}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate font-medium" title={cand.name}>
+                      {cand.name}
+                    </span>
+                    {referenced && (
+                      <span className="shrink-0 rounded-full bg-ios-purple px-1.5 text-ios-caption2 font-semibold leading-4 text-white">
+                        @
+                      </span>
+                    )}
+                  </button>
+                </Fragment>
+              );
+            }
+            const cand = referenceCandidates[row.sourceIndex];
             const selectedIdx = selectedReferenceIds.indexOf(cand.nodeId);
-            const isActive = index === Math.min(activeIndex, mentionCandidates.length - 1);
             return (
-              <button
-                key={cand.nodeId}
-                ref={isActive ? activeItemRef : undefined}
-                type="button"
-                role="option"
-                aria-selected={isActive}
-                className={cn(
-                  "flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors",
-                  isActive
-                    ? "bg-ios-blue/10 text-ios-blue"
-                    : "text-muted-foreground hover:bg-black/5",
-                )}
-                // preventDefault 避免輸入框失焦（blur 會延時關閉選單）。
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                }}
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  insertReference(cand);
-                }}
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={cand.previewUrl} alt={cand.title} className="h-8 w-8 shrink-0 rounded-md object-cover" draggable={false} />
-                <span className="min-w-0 flex-1 truncate font-medium" title={cand.title}>
-                  {cand.title}
-                </span>
-                {selectedIdx >= 0 && (
-                  <span className="shrink-0 rounded-full bg-ios-blue px-1.5 text-ios-caption2 font-semibold leading-4 text-white">
-                    {selectedIdx + 1}
+              <Fragment key={`image:${cand.nodeId}`}>
+                {header ? (
+                  <p className="px-2 pb-0.5 pt-1.5 text-ios-caption2 font-medium text-foreground/45">
+                    {header}
+                  </p>
+                ) : null}
+                <button
+                  ref={isActive ? activeItemRef : undefined}
+                  type="button"
+                  role="option"
+                  aria-selected={isActive}
+                  className={cn(
+                    "flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors",
+                    isActive
+                      ? "bg-ios-blue/10 text-ios-blue"
+                      : "text-muted-foreground hover:bg-black/5",
+                  )}
+                  // preventDefault 避免輸入框失焦（blur 會延時關閉選單）。
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                  }}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    insertReference(cand);
+                  }}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={cand.previewUrl} alt={cand.title} className="h-8 w-8 shrink-0 rounded-md object-cover" draggable={false} />
+                  <span className="min-w-0 flex-1 truncate font-medium" title={cand.title}>
+                    {cand.title}
                   </span>
-                )}
-              </button>
+                  {selectedIdx >= 0 && (
+                    <span className="shrink-0 rounded-full bg-ios-blue px-1.5 text-ios-caption2 font-semibold leading-4 text-white">
+                      {selectedIdx + 1}
+                    </span>
+                  )}
+                </button>
+              </Fragment>
             );
           })}
         </div>

@@ -11,6 +11,8 @@
 //   動作與提示詞卡對齊（插入畫布 / 填入當前節點 / 存入素材）。
 // - 我的素材：登入用戶的資產包（GET /api/assets）；未登入誠實顯示
 //   登入提示，不假裝可用。
+// - 镜头词库（2026-09-16 G7）：本地静态词库 src/lib/lens-language-library.ts
+//   （AID MIT 逐字 142 条 / 12 类）多选插入，走与提示词卡同一对插入回调。
 //
 // 視覺沿用 CanvasNodePromptPanel 的白底/暗色語彙；data-canvas-interactive +
 // 事件 stopPropagation 阻止畫布手勢吃掉面板操作；Escape / 關閉鈕收起。
@@ -35,6 +37,7 @@ import {
 } from "@/lib/kunpeng-prompt-templates";
 import { RecipeTemplateSection } from "@/components/canvas-workstation/panels/RecipeTemplateSection";
 import { useRecipeTemplates } from "@/components/canvas-workstation/panels/use-recipe-templates";
+import { LensPickerSection } from "./LensPickerSection";
 import "@/components/canvas-workstation/panels/panels.css";
 
 export interface CanvasLibraryPanelProps {
@@ -52,7 +55,7 @@ export interface CanvasLibraryPanelProps {
   isLoggedIn?: boolean;
 }
 
-type LibraryTab = "prompts" | "styles" | "recipes" | "assets";
+type LibraryTab = "prompts" | "styles" | "recipes" | "lens" | "assets";
 
 interface LibraryPromptItem {
   id: string;
@@ -442,6 +445,8 @@ export function CanvasLibraryPanel({ open, onClose, onInsertText, onInsertImage,
           [
             { id: "prompts", label: "提示词库" },
             { id: "styles", label: "风格库" },
+            // 镜头词库（2026-09-16 G7）：本地静态词库，与「风格库」同为纯客户端数据。
+            { id: "lens", label: "镜头词库" },
             ...(onApplyRecipeTemplate ? [{ id: "recipes" as LibraryTab, label: "配方模板" }] : []),
             { id: "assets", label: "我的素材" },
           ] as { id: LibraryTab; label: string }[]
@@ -694,6 +699,16 @@ export function CanvasLibraryPanel({ open, onClose, onInsertText, onInsertImage,
             ))}
           </div>
         </div>
+      )}
+
+      {/* ── 镜头词库 tab（2026-09-16 G7）：本地静态词库多选插入。
+          插入通道复用面板本体的 onInsertText / onUsePrompt（与提示词卡同一条路），
+          不新增 props、不另造插入机制。 */}
+      {tab === "lens" && (
+        <LensPickerSection
+          onInsertText={onInsertText}
+          onUsePrompt={onUsePrompt ? (prompt) => onUsePrompt(prompt) : undefined}
+        />
       )}
 
       {/* ── 配方模板 tab（2026-08-27 自專業工作站遷入：RecipeTemplateSection 原樣掛載） */}

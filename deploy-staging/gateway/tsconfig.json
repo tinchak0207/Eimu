@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "lib": ["esnext"],
+    "types": ["bun-types"],
+    "strict": false,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "target": "ES2022",
+    "allowJs": true
+  },
+  "include": ["./**/*.ts"],
+  "exclude": ["node_modules", "**/*.test.ts", "refactor-audit.ts"]
+}

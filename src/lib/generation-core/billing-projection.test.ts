@@ -39,6 +39,44 @@ function mockSql(opts: { succeeded?: Record<string, unknown>[]; writeoff?: Recor
   return { sql: tagged, calls };
 }
 
+test("FG-b：commit 扣款失敗 → 問 registry 求重放授權，被拒即終結該 claim（不得靜默重扣）", async () => {
+  // users.quota 扣減確定性失敗：管理憑證清空 → adminHeaders 在 fetch 之前就拋，
+  // 不會發出任何網路請求（測試不得碰真上游）。
+  const savedToken = process.env.GATEWAY_ADMIN_ACCESS_TOKEN;
+  const savedUserId = process.env.GATEWAY_ADMIN_USER_ID;
+  process.env.GATEWAY_ADMIN_ACCESS_TOKEN = "";
+  process.env.GATEWAY_ADMIN_USER_ID = "";
+  try {
+    const { sql, calls } = mockSql({ succeeded: [failedGateJobRow({ id: "job-debit-fail" })] });
+    // 對抗性：呼叫方夾帶 999 次預算（型別外欄位）。
+    const adversarial = {
+      executorId: "worker-test",
+      sql,
+      maxAttempts: 999,
+      maxReplayAttempts: 999,
+    } as unknown as Parameters<typeof projectGatePathBilling>[0];
+    const summary = await projectGatePathBilling(adversarial);
+
+    assert.equal(summary.failed, 1, "扣款失敗必須計入 failed（不灌水成 projected）");
+    assert.equal(summary.projected, 0, "扣款沒成功就不得聲稱已投影");
+    const terminal = calls.find((call) => call.sql.includes("UPDATE billing_operation SET status = 'failed'"));
+    assert.ok(terminal, "claim 必須被終結（不是留在 pending 等下一輪重扣）");
+    assert.ok(
+      String(terminal.values).includes("operation registry"),
+      "last_error 必須寫明是 registry 拒絕（不是靜默失敗）",
+    );
+    assert.ok(
+      !calls.some((call) => call.sql.includes("UPDATE billing_operation SET status = 'pending'")),
+      "不得把 claim 退回 pending 讓下一輪重扣（上游對 quota 調整無冪等契約 → 可能雙扣）",
+    );
+    const denied = calls.find((call) => (call.values as unknown[]).some((v) => typeof v === "string" && v === "replay_denied"));
+    assert.ok(denied, "必須留下 replay_denied 事件（裁決可審查，不是查常數）");
+  } finally {
+    process.env.GATEWAY_ADMIN_ACCESS_TOKEN = savedToken;
+    process.env.GATEWAY_ADMIN_USER_ID = savedUserId;
+  }
+});
+
 test("failed job with upstream attempt -> writeoff row written, no commit, no quota debit", async () => {
   const { sql, calls } = mockSql({ writeoff: [failedGateJobRow()] });
   const summary = await projectGatePathBilling({ executorId: "worker-test", sql });

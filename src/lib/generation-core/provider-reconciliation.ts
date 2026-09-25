@@ -10,6 +10,7 @@ import {
   reviveGenerationJobWithArtifacts,
 } from "./job-repository";
 import { JOB_EVENT, emitJobEvent } from "./job-events";
+import { planReplay, type ReplayPlan } from "./operation-registry";
 import { pollFilmeraTask } from "./filmera-upstream";
 import { pollMetasoTask } from "./metaso-upstream";
 import { pollNewApiVideoTask } from "./newapi-video-upstream";
@@ -37,7 +38,6 @@ const POLL_BACKOFF_MAX_MS = 15 * 60_000;
  */
 export async function runProviderReconciliation(input: {
   executorId: string;
-  maxAttempts?: number;
   sql?: GenerationSql;
 }): Promise<{
   claimed: number;
@@ -47,7 +47,9 @@ export async function runProviderReconciliation(input: {
   pollErrors: number;
 }> {
   const sql = input.sql ?? getGenerationSql();
-  const maxAttempts = Math.max(1, input.maxAttempts ?? 10);
+  // 每輪認領的 attempt 數（吞吐參數，**不是**重試預算——重試預算唯一來源是
+  // operation registry 的 provider.reconcile_poll 政策；此參數不接受呼叫方傳入）。
+  const claimBatchSize = 10;
   const summary = { claimed: 0, delivered: 0, confirmedFailed: 0, exhausted: 0, pollErrors: 0 };
 
   // ① 對帳窗口耗盡：永久退出輪詢（truth unknown → 凍結人工對帳，禁退款）。
@@ -87,7 +89,7 @@ export async function runProviderReconciliation(input: {
         AND candidate.provider_next_poll_at <= now()
         AND (candidate.reconcile_lease_expires_at IS NULL OR candidate.reconcile_lease_expires_at < now())
       ORDER BY candidate.provider_next_poll_at ASC
-      LIMIT ${maxAttempts}
+      LIMIT ${claimBatchSize}
       FOR UPDATE SKIP LOCKED
     )
     RETURNING id, job_id, output_index, supplier_id, provider_task_id,
@@ -165,9 +167,16 @@ export async function runProviderReconciliation(input: {
       try {
         result = await pollProviderTask(protocol, providerTaskId, supplier);
       } catch (error) {
-        // 查詢通道失敗 ≠ 任務失敗：真相未變，退避重試。
+        // 查詢通道失敗 ≠ 任務失敗：真相未變，退避重試（重放許可問 registry）。
         summary.pollErrors += 1;
-        await backoffAttempt(sql, attemptId, pollCount, detailOf(error));
+        const outcome = await backoffAttempt(sql, {
+          attemptId,
+          jobId,
+          executorId: input.executorId,
+          pollCount,
+          errorDetail: detailOf(error),
+        });
+        if (outcome === "retired") summary.exhausted += 1;
         emitJobEvent({
           jobId,
           event: JOB_EVENT.reconcilePolled,
@@ -179,7 +188,14 @@ export async function runProviderReconciliation(input: {
       }
 
       if (result.state === "running") {
-        await backoffAttempt(sql, attemptId, pollCount, null);
+        const outcome = await backoffAttempt(sql, {
+          attemptId,
+          jobId,
+          executorId: input.executorId,
+          pollCount,
+          errorDetail: null,
+        });
+        if (outcome === "retired") summary.exhausted += 1;
         emitJobEvent({
           jobId,
           event: JOB_EVENT.reconcilePolled,
@@ -245,13 +261,57 @@ async function pollProviderTask(
   }
 }
 
-/** 輪詢退避：指數拉長（60s→…→15min 上限），錯誤通道起點翻倍。 */
+/**
+ * 輪詢退避：指數拉長（60s→…→15min 上限），錯誤通道起點翻倍。
+ * 重放許可與預算由封閉 operation registry 的 `provider.reconcile_poll` 政策決定
+ * （FG-02/03），呼叫方不得自帶重試次數。
+ */
 function pollBackoffMs(pollCount: number, isError: boolean): number {
   const base = isError ? POLL_BACKOFF_ERROR_MS : POLL_BACKOFF_BASE_MS;
   return Math.min(base * Math.pow(2, pollCount), POLL_BACKOFF_MAX_MS);
 }
 
-async function backoffAttempt(sql: GenerationSql, attemptId: string, pollCount: number, errorDetail: string | null): Promise<void> {
+/** 下一輪對帳輪詢是否允許重放（registry 裁決；未宣告＝禁）。 */
+export function planReconcilePollReplay(nextPollNo: number): ReplayPlan {
+  return planReplay({ operation: "provider.reconcile_poll", nextAttemptNo: nextPollNo });
+}
+
+/**
+ * 排下一輪輪詢 / 或按 registry 預算退休。
+ * 預算是防禦性天花板（128），正常情況下 24h 對帳窗口先綁定；預算耗盡 =
+ * 凍結人工對帳（不退款、不宣判失敗），語義與窗口耗盡一致。
+ */
+async function backoffAttempt(
+  sql: GenerationSql,
+  input: { attemptId: string; jobId: string; executorId: string; pollCount: number; errorDetail: string | null },
+): Promise<"scheduled" | "retired"> {
+  const { attemptId, pollCount, errorDetail } = input;
+  // 剛完成的是第 pollCount+1 次輪詢；下一次是第 pollCount+2 次（FG-03：序號由
+  // registry 政策換算，呼叫方不得給預算）。
+  const replay = planReconcilePollReplay(pollCount + 2);
+  if (!replay.allowed) {
+    await sql`
+      UPDATE generation_attempt
+      SET provider_poll_count = provider_poll_count + 1,
+          provider_last_polled_at = now(), provider_next_poll_at = NULL,
+          reconcile_lease_owner = NULL, reconcile_lease_expires_at = NULL, updated_at = now()
+      WHERE id = ${attemptId}
+    `;
+    emitJobEvent({
+      jobId: input.jobId,
+      event: JOB_EVENT.reconcileExhausted,
+      actor: `reconcile:${input.executorId}`,
+      detail: {
+        attempt_id: attemptId,
+        reason: replay.denialReason,
+        operation: replay.operation,
+        poll_count: pollCount + 1,
+        max_replay_attempts: replay.maxReplayAttempts,
+      },
+    }, sql);
+    return "retired";
+  }
+
   const delaySec = Math.floor(pollBackoffMs(pollCount, errorDetail !== null) / 1000);
   const resultJson = errorDetail === null
     ? null
@@ -265,6 +325,7 @@ async function backoffAttempt(sql: GenerationSql, attemptId: string, pollCount: 
         reconcile_lease_owner = NULL, reconcile_lease_expires_at = NULL, updated_at = now()
     WHERE id = ${attemptId}
   `;
+  return "scheduled";
 }
 
 /**

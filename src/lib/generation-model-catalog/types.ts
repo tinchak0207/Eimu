@@ -120,6 +120,11 @@ export interface GenerationCapabilityProjection {
   defaultResolution: OutputResolution;
   defaultDuration?: number;
   defaultAudio: boolean;
+  /**
+   * 提交端 prompt 字元硬上限（POST /v1/videos/generations 的 prompt_too_long 閘，
+   * 全域 4000）。暴露給聚合平台/agent 做提交前預檢，免提交後才 400。
+   */
+  promptCharLimit?: number;
 }
 
 export interface GenerationConfigInput {

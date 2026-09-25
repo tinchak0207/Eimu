@@ -300,6 +300,10 @@ function summarizeEvent(name: string, data: unknown): string {
       return `task=${d.task_id ?? "?"} url=${String(d.url ?? "").slice(0, 60)}`;
     case "turn.done":
       return "(本輪結束)";
+    case "turn.plan":
+      // 首計畫延遲的來源幀（由網關在送訊後 ~1.4–2.0s 先送）。摘要要能一眼看出
+      // 是真模型計畫還是規則兜底：source + 命中的專家。
+      return `${d.source === "rule" ? "[rule]" : "[model]"} ${String(d.plan ?? "").slice(0, 60)}${Array.isArray(d.experts) && d.experts.length > 0 ? ` · 專家=${(d.experts as unknown[]).join(",")}` : ""}`;
     default:
       return JSON.stringify(d).slice(0, 90);
   }
@@ -316,6 +320,10 @@ function renderUxMetrics(events: RecordedEvent[]): void {
   console.log("\n─── 2) UX metrics ─────────────────────────────");
   const deltas = events.filter((e) => e.name === "message.delta" || e.name === "reasoning.delta");
   const firstDelta = deltas[0]?.tMs;
+  // 首計畫延遲（turn.plan）：獨立於上面的 deltas ——「首字延遲」必須維持
+  // 「真模型正文首個 delta」的語義，turn.plan 幀不得混進 deltas 的 filter
+  // （否則計畫幀一到就報 +1.5s 首字，是謊報）。這一條量的正是計畫卡上屏時間。
+  const firstPlan = events.find((e) => e.name === "turn.plan")?.tMs;
   const firstTool = events.find((e) => e.name === "tool.invoke")?.tMs;
   const last = events[events.length - 1]?.tMs ?? 0;
   const gaps: number[] = [];
@@ -324,6 +332,7 @@ function renderUxMetrics(events: RecordedEvent[]): void {
   const avgGap = gaps.length ? gaps.reduce((a, b) => a + b, 0) / gaps.length : 0;
   const gapOver500 = gaps.filter((g) => g > 500).length;
   console.log(`  首字延遲（首個 delta）: ${firstDelta !== undefined ? Math.round(firstDelta) + "ms" : "—"}`);
+  console.log(`  首計畫延遲（turn.plan）: ${firstPlan !== undefined ? Math.round(firstPlan) + "ms" : "—"}`);
   console.log(`  首工具延遲:            ${firstTool !== undefined ? Math.round(firstTool) + "ms" : "—"}`);
   console.log(`  delta 總數:             ${deltas.length}（message=${events.filter((e) => e.name === "message.delta").length}, reasoning=${events.filter((e) => e.name === "reasoning.delta").length}）`);
   console.log(`  delta 平均間隙:         ${avgGap ? Math.round(avgGap) + "ms" : "—"}  最大間隙: ${maxGap ? Math.round(maxGap) + "ms" : "—"}  >500ms 停頓: ${gapOver500} 次`);
@@ -367,6 +376,11 @@ function renderTranscriptItem(item: AgentTranscriptItem): void {
       break;
     case "tool":
       console.log(`  \u{1F527} 工具[${item.tool}] ${item.status}${item.argsSummary ? " · " + item.argsSummary : ""}${item.costCoins ? " · " + item.costCoins + " 幣" : ""}`);
+      break;
+    case "plan":
+      console.log(
+        `  \u{1F5C2} 計划${item.provisional ? "（进行中）" : ""}${item.collapsed ? "（已收合）" : ""}: ${item.text}${item.experts && item.experts.length > 0 ? ` · 專家=${item.experts.join(",")}` : ""}`,
+      );
       break;
     case "image":
       console.log(`  \u{1F5BC}  圖: ${item.url}`);

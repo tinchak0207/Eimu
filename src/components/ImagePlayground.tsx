@@ -71,8 +71,14 @@ export function ImagePlayground({ suggestions }: { suggestions: Suggestion[] }) 
   // D-1 + D-24 状态B：agent 是卡片的第四个面，和 edit / upscale 同一层级的 toggle。
   // 按下去只换卡片中间那块控件区（共用 generate/edit/upscale 那套 dust 转场），
   // 卡片底板、右边结果画布、底下案例区全部原地不动，也不跳 /agent 独立页。
-  const [mode, setMode] = useState<PlaygroundMode>("generate");
-  const [displayMode, setDisplayMode] = useState<PlaygroundMode>("generate");
+  //
+  // 2026-09-22 暴君裁定：**首屏初始面翻成 AI 助理**，直接生圖降為同級第二面
+  // （不刪除、toggle 語義一行不動）。理由是首屏決定產品定位——進站第一眼看見
+  // 的是參數框＋輸入框＋輸出框，就會被判定成生圖中轉站；新範式若鎖在「先點
+  // 助理再發話」兩步之後，每一步都不是使用者已知的。深度連結（?agent=1）的
+  // setMode("agent") 因此常態成為冪等，但那段仍需處理 q / session 注入。
+  const [mode, setMode] = useState<PlaygroundMode>("agent");
+  const [displayMode, setDisplayMode] = useState<PlaygroundMode>("agent");
   const [animState, setAnimState] = useState<"idle" | "exit" | "enter">("idle");
   // 别的页面（D-18 图库卡）用 ?agent=1&q= 交接过来的一句话。
   const [agentSeed, setAgentSeed] = useState("");

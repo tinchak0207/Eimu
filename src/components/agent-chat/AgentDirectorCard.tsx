@@ -26,8 +26,8 @@ interface HealthMeta {
 }
 
 const HEALTH_META: Record<"ok" | "issues", HealthMeta> = {
-  ok: { label: "分镜健康", Icon: CircleCheck, badge: "lg-tint-green", tone: "text-[#248A3D]" },
-  issues: { label: "待修正", Icon: TriangleAlert, badge: "lg-tint-gold", tone: "text-[rgba(120,90,20,0.9)]" },
+  ok: { label: "分镜健康", Icon: CircleCheck, badge: "", tone: "text-[#248A3D]" },
+  issues: { label: "待修正", Icon: TriangleAlert, badge: "", tone: "text-[rgba(120,90,20,0.9)]" },
 };
 
 /** 幀數 → 秒展示（24fps 對齊 gateway duration_frames 口徑）：48 → "2s"。 */
@@ -45,8 +45,13 @@ function AgentDirectorCardComponent({ item }: AgentDirectorCardProps) {
   const plan = item.plan;
 
   return (
-    <div className="agent-rise flex flex-col gap-2.5 rounded-[18px] bg-[rgba(120,120,128,0.06)] px-3.5 py-3">
-      {/* 头行：方案名 + 镜头数徽章 + 健康徽章 */}
+    <div className="agent-rise lg-sheet relative flex flex-col gap-2.5 overflow-hidden rounded-[20px] px-3.5 py-3">
+      {/* 顶缘 specular 亮线（agent-chat-preview 决策卡已批准语汇）：玻璃上缘受光。 */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-[inherit] bg-gradient-to-r from-transparent via-white to-transparent opacity-80"
+      />
+      {/* 头行：方案名 + 镜头数 + 健康状态（灰阶/状态色文字，无彩色胶囊底） */}
       <div className="flex items-center gap-2.5">
         <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white text-muted-foreground">
           <Clapperboard className="h-4 w-4" aria-hidden="true" />
@@ -54,13 +59,12 @@ function AgentDirectorCardComponent({ item }: AgentDirectorCardProps) {
         <p className="min-w-0 flex-1 truncate text-ios-subhead font-semibold text-foreground" title={plan?.name}>
           {plan ? plan.name : "导演台"}
         </p>
-        <span className="inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2.5 py-1 text-ios-footnote font-semibold tabular-nums lg-tint-blue text-ios-blue">
+        <span className="inline-flex shrink-0 items-center whitespace-nowrap text-ios-footnote font-semibold tabular-nums text-muted-foreground">
           {item.counts?.shots ?? 0} 镜头
         </span>
         <span
           className={cn(
-            "inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-1 text-ios-footnote font-semibold tabular-nums",
-            health.badge,
+            "inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-ios-footnote font-semibold tabular-nums",
             health.tone,
           )}
         >
@@ -73,9 +77,9 @@ function AgentDirectorCardComponent({ item }: AgentDirectorCardProps) {
         <p className="text-ios-caption1 leading-relaxed text-muted-foreground">{plan.summary}</p>
       )}
 
-      {/* 健康问题列表（琥珀态）：先给前 3 条，全量在导演台看 */}
+      {/* 健康问题列表（琥珀态）：先给前 3 条，全量在导演台看（无底色细行，文字直接表态） */}
       {!item.health.ok && item.health.issues.length > 0 && (
-        <ul className="flex flex-col gap-1 rounded-[14px] bg-[rgba(120,90,20,0.07)] px-2.5 py-1.5">
+        <ul className="flex flex-col gap-1 px-0.5">
           {item.health.issues.slice(0, 3).map((issue, i) => (
             <li key={`${issue.code}-${i}`} className="text-ios-caption1 leading-snug text-[rgba(120,90,20,0.9)]">
               {issue.message || issue.code}

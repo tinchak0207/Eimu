@@ -13,6 +13,8 @@ import { CHARACTER_CARD_KIND_LABEL, toCharacterCardKind } from "./character-card
 import type { CharacterCard, CharacterCardKind } from "./character-cards";
 import type { AssetPackItem } from "./asset-pack-store";
 import type { HistoryEntry } from "./history-types";
+import { historyEntryHandles, lineageTimestamp } from "./lineage";
+import type { LineageLink } from "./lineage";
 
 const MAX_ANCHOR_NAME_LENGTH = 100;
 
@@ -60,7 +62,7 @@ export function cardFromHistoryEntry(
   if (!cleanName) return null;
   const safeKind = toCharacterCardKind(kind);
   const now = new Date().toISOString();
-  return {
+  const card: CharacterCard = {
     id: `card-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
     name: cleanName,
     kind: safeKind,
@@ -69,6 +71,16 @@ export function cardFromHistoryEntry(
     createdAt: now,
     updatedAt: now,
   };
+  // REQ-D1 掛鉤 b：「存為卡片」把來源歷史記錄登記成卡的 lineage（derivation）。
+  // 只落卡本體（裁決②：不進 canvas、不進 agent 白名單）。缺 taskId 的同步直出
+  // 記錄用歷史把手 `history-${entry.id}` 作 assetId（與「存为资产」慣例同鍵）。
+  const handles = historyEntryHandles(entry);
+  const at = lineageTimestamp(entry.generatedAt);
+  const link: LineageLink = handles.jobId
+    ? { kind: "derivation", jobId: handles.jobId, at }
+    : { kind: "derivation", assetId: handles.assetIds[0], at };
+  card.lineage = [link];
+  return card;
 }
 
 /** 統一的結果文案（對話框與 toast 共用）。 */

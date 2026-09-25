@@ -2,6 +2,13 @@ import { GENERATION_MODEL_CATALOG } from "./catalog";
 import { currentEffectiveCatalog } from "./pricing-overrides";
 import type { AspectRatio, OutputResolution, GenerationModelDefinition, GenerationCapabilityProjection, GenerationConfigInput, GenerationConfigNormalization, ModelKnowledge } from "./types";
 
+/**
+ * 視頻提交端 prompt 字元硬上限（POST /v1/videos/generations 的 prompt_too_long 閘）。
+ * 與 route.ts 的 MAX_PROMPT_LENGTH 同值——上游 2026-09-19 實測：4000→202、4001→400。
+ * 投射到 x_capabilities.promptCharLimit 讓 agent/聚合平台提交前預檢。
+ */
+export const VIDEO_PROMPT_CHAR_LIMIT = 4000;
+
 /** 某模型的基準（未覆寫）定義，admin UI 要顯示基準價。 */
 export function baseGenerationModel(modelId: string): GenerationModelDefinition | null {
   return GENERATION_MODEL_CATALOG[modelId] ?? null;
@@ -58,6 +65,7 @@ export function generationCapabilities(modelId: string): GenerationCapabilityPro
     defaultResolution: model.defaultResolution,
     ...(model.defaultDuration !== undefined ? { defaultDuration: model.defaultDuration } : {}),
     defaultAudio: model.defaultAudio === true,
+    ...(model.kind === "video" ? { promptCharLimit: VIDEO_PROMPT_CHAR_LIMIT } : {}),
   };
 }
 

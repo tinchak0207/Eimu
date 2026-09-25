@@ -17,9 +17,9 @@
 //       * id 用 `<kind>-<全局序>`，全陣列唯一，且與 SSE 事件的
 //         `<kind>-<event_id>` 命名空間文字上不撞（合成游標帶 h 前綴）。
 //   - 產出的每個 item 必須能過 persistence.ts 的 sanitizeItemsForStorage
-//     白名單（ITEM_KINDS）：只會產出 user/assistant/tool/image/video/audio，
-//     不產 director/subagent/notice。附件 url 只收 http(s)（data: 的 base64
-//     嚴禁進 localStorage）。
+//     白名單（ITEM_KINDS）：只會產出 user/assistant/tool/image/video/audio
+//     /subagent_result，不產 director/subagent/notice。附件 url 只收
+//     http(s)（data: 的 base64 嚴禁進 localStorage）。
 //   - 未知 part / 髒資料一律跳過不炸，丟棄計進 droppedParts 統計。
 
 import type {
@@ -27,6 +27,7 @@ import type {
   AgentAssistantTextItem,
   AgentImageItem,
   AgentAudioItem,
+  AgentSubagentReportItem,
   AgentToolCallItem,
   AgentTranscriptItem,
   AgentUserTurnItem,
@@ -127,6 +128,123 @@ function toolErrorText(raw: unknown): string | undefined {
   return undefined;
 }
 
+// ─────────────────────────── 系統注入訊息識別（歸因錯覺病灶）
+
+// gateway 機制上必須以 user role 注入會話的三類訊息（喚醒/重試提示/召回前綴），
+// 歷史路徑若一律畫成用戶氣泡，用戶事後翻記錄會看到自己「說過」從沒說過的話。
+// 識別標記全部對齊後端真源（deploy-staging/gateway）：index.ts wakeSessionForSubagent、
+// opencode-event-handler.ts turn failover、memory-recall.ts renderRecallPrefix。
+
+/** 子代理喚醒訊息骨架（真源 gateway/index.ts wakeSessionForSubagent，勿改後端）。 */
+const SUBAGENT_WAKE_RE =
+  /^【子代理(完成|失败)·系统自动唤醒】subagent\s+([0-9A-Za-z]+)（label="([^"]*)"）已(?:完成|失败)。(?:结果摘要|失败原因)：/;
+
+/** 喚醒訊息尾部固定的續跑指令行（給模型的指令，不是產出內容）。 */
+const SUBAGENT_WAKE_TAIL = "请基于以上真实结果继续推进";
+
+/**
+ * 解析子代理喚醒訊息。命中回 {status, subagentId, label, text(產出正文)}；
+ * 標記對但骨架漂移（label 含引號等）走兜底盡力提取——總之絕不冒充用戶氣泡。
+ */
+function parseSubagentWake(text: string): { status: "ok" | "error"; subagentId: string; label: string; text: string } | null {
+  if (!text.startsWith("【子代理完成·系统自动唤醒】") && !text.startsWith("【子代理失败·系统自动唤醒】")) return null;
+  const m = SUBAGENT_WAKE_RE.exec(text);
+  if (m === null) {
+    const status: "ok" | "error" = text.startsWith("【子代理失败") ? "error" : "ok";
+    const subagentId = /subagent\s+([0-9A-Za-z]+)/.exec(text)?.[1] ?? "";
+    const label = /label="([^"]*)"/.exec(text)?.[1] ?? "";
+    return { status, subagentId, label, text };
+  }
+  const status: "ok" | "error" = m[1] === "完成" ? "ok" : "error";
+  let body = text.slice(m[0].length);
+  const cut = body.indexOf(SUBAGENT_WAKE_TAIL);
+  if (cut >= 0) body = body.slice(0, cut);
+  return { status, subagentId: m[2] ?? "", label: m[3] ?? "", text: body.trim() };
+}
+
+/** 記憶召回知識塊標記行開頭（真源 gateway/memory-recall.ts RECALL_HEADER）。 */
+const RECALL_BLOCK_MARKER = "[相關領域知識";
+
+/** 知識塊內容行：`- [domain] slug` 條目行或縮兩格的 body 延續行。 */
+function isRecallBodyLine(l: string): boolean {
+  return /^- \[[^\]]*\]\s*\S/.test(l) || /^ {2,}\S/.test(l);
+}
+
+/**
+ * 從用戶文本剝離 gateway 注入的記憶召回知識塊。位置無關（頭/尾皆處理）：
+ * messages-gw.ts 現場實際是前綴注入（`prefix + "\n\n" + 用戶正文`），
+ * 舊規格描述的「尾部追加」也一併覆蓋。找不到標記原樣返回。
+ * 塊 = 標記行 + 若干條目/body 行，直到空行接非塊內容或文本結束。
+ */
+function stripRecallBlock(text: string): string {
+  const lines = text.split("\n");
+  const head = lines.findIndex((l) => l.trim().startsWith(RECALL_BLOCK_MARKER));
+  if (head < 0) return text;
+  const out = lines.slice(0, head);
+  let i = head + 1;
+  for (; i < lines.length; i += 1) {
+    const l = lines[i] ?? "";
+    const next = lines[i + 1];
+    const isBlockGap = l.length === 0 && next !== undefined && isRecallBodyLine(next);
+    if (isRecallBodyLine(l) || isBlockGap) continue;
+    break; // 塊結束：此行起屬於用戶正文（前綴注入的分隔空行也在此消掉）
+  }
+  // 尾部注入：塊吞到文本結束（或只剩殘留空行）→ 前文的收尾空行一併吃掉。
+  const atTail = i >= lines.length || lines.slice(i).every((l) => l.trim().length === 0);
+  if (i < lines.length && !atTail) out.push(...lines.slice(i));
+  let res = out.join("\n");
+  if (head === 0) res = res.replace(/^(?:[ \t]*\n)+/, ""); // 前綴剝離：吃掉殘留空行
+  if (atTail) res = res.replace(/(?:[ \t]*\n)+$/, "");
+  return res;
+}
+
+/** 內部框架段標題行（live 路徑真源 gateway/outbound-sanitize.ts + e2e 實錘的 Progress Summary）。 */
+export const INTERNAL_SECTION_HEADING_RE =
+  /^#{1,6}[ \t]*(?:objective|work state|next move|relevant files|important details|completed|active|blocked|progress summary)[ \t]*:?[ \t]*$/i;
+
+const ANY_HEADING_RE = /^#{1,6}[ \t]/;
+const FENCE_RE = /^\s*(```|~~~)/;
+
+/**
+ * assistant 歷史文本的內部框架段剝離（live 路徑 gateway 出站已剝、歷史路徑漏）：
+ * `## Objective` 等標題行起吞到下一個非內部 markdown 標題或文本結束；
+ * 代碼柵欄（``` / ~~~）內容直通不判。無內部段時原樣返回（零改動）。
+ */
+export function stripInternalSections(text: string): string {
+  if (!text) return text;
+  const lines = text.split("\n");
+  if (!lines.some((l) => INTERNAL_SECTION_HEADING_RE.test(l))) return text;
+  const out: string[] = [];
+  let suppress = false;
+  let fence = false;
+  for (const line of lines) {
+    if (fence) {
+      out.push(line);
+      if (FENCE_RE.test(line)) fence = false;
+      continue;
+    }
+    if (FENCE_RE.test(line)) {
+      fence = true;
+      out.push(line);
+      continue;
+    }
+    if (suppress) {
+      // 內部段到下一個「非內部」標題為止；下一個內部段標題繼續吞。
+      if (ANY_HEADING_RE.test(line) && !INTERNAL_SECTION_HEADING_RE.test(line)) {
+        suppress = false;
+        out.push(line);
+      }
+      continue;
+    }
+    if (INTERNAL_SECTION_HEADING_RE.test(line)) {
+      suppress = true;
+      continue;
+    }
+    out.push(line);
+  }
+  return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
 // ─────────────────────────── 歸一化主體
 
 /**
@@ -209,7 +327,42 @@ export function normalizeOpenCodeMessages(messages: OpenCodeMessage[]): Normaliz
         drop(type);
       }
       const text = texts.join("\n");
-      if (text.length === 0 && attachments.length === 0) continue; // 全丟光的空輪不留言
+
+      // ① 子代理喚醒訊息：機制上必須走 user role，但它是系統注入，不是用戶
+      // 說的話——渲染成 subagent_result 產出卡（前端已有
+      // AgentSubagentReportCard），絕不畫成用戶氣泡。佔 order seq 保時序，
+      // 不佔 userCount（不是用戶輪，user id 續號不受污染）。
+      const wake = parseSubagentWake(text);
+      if (wake !== null) {
+        order += 1;
+        const item: AgentSubagentReportItem = {
+          kind: "subagent_result",
+          id: `subagent-report-h${order}`,
+          seq: order,
+          subagentId: wake.subagentId,
+          label: wake.label,
+          status: wake.status,
+          text: wake.text,
+        };
+        items.push(item);
+        continue;
+      }
+
+      // ② 系統重試提示（上游錯誤後 gateway 的續跑指令）：整條不顯示。
+      const trimmed = text.trim();
+      if (trimmed.startsWith("（系统提示：") && trimmed.endsWith("）")) {
+        drop("system-hint");
+        continue;
+      }
+
+      // ③ 記憶召回知識塊（gateway 每回合注入的語料前綴）：從用戶文本剝掉，
+      // 只留用戶真正說的話。剝完空文本且無附件 → 整條不留。
+      const userText = stripRecallBlock(text);
+      if (userText !== text && userText.trim().length === 0 && attachments.length === 0) {
+        drop("recall-block");
+        continue;
+      }
+      if (userText.length === 0 && attachments.length === 0) continue; // 全丟光的空輪不留言
       order += 1;
       userCount += 1;
       const item: AgentUserTurnItem = {
@@ -218,7 +371,7 @@ export function normalizeOpenCodeMessages(messages: OpenCodeMessage[]): Normaliz
         // 插入沿同一計數續號，不撞 React key。
         id: `user-${userCount - 1}`,
         seq: order,
-        text,
+        text: userText,
       };
       if (attachments.length > 0) item.attachments = attachments;
       items.push(item);
@@ -236,7 +389,9 @@ export function normalizeOpenCodeMessages(messages: OpenCodeMessage[]): Normaliz
     let pendingText: string[] = [];
     let pendingReasoning: string[] = [];
     const flush = (): void => {
-      const text = pendingText.join("\n");
+      // 內部框架段剝離（live 路徑 gateway 出站已剝、歷史路徑此前漏）：
+      // `## Objective` 等模型工作狀態骨架不得當正文渲染。
+      const text = stripInternalSections(pendingText.join("\n"));
       const reasoning = pendingReasoning.join("\n");
       pendingText = [];
       pendingReasoning = [];

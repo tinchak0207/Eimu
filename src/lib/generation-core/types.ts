@@ -1,3 +1,5 @@
+import type { FailureRecord } from "./failure-record";
+
 export type GenerationSource = "web" | "biz" | "canary";
 export type GenerationKind = "image_generate" | "image_edit" | "video_generate" | "tts" | "avatar" | "lipsync";
 export type RoutingClass = "generic" | "firefly_only" | "hub_only";
@@ -83,6 +85,11 @@ export interface GenerationJob {
   leaseExpiresAt: Date | null;
   failureClass: FailureClass | null;
   failureDetail: string | null;
+  /**
+   * FG-01：版本化失敗記錄（原生欄位逐字保留、cause 遞迴）。null = 無失敗或記錄缺失。
+   * 產品解釋只住在 record.explanation，永不回寫 failureClass/failureDetail 的來源事實。
+   */
+  failureRecord: FailureRecord | null;
   result: GenerationJobResult | null;
   createdAt: Date;
   startedAt: Date | null;
@@ -97,8 +104,9 @@ export interface GenerationArtifactResult {
   b64Json?: string;
   mimeType: string;
   sha256: string;
-  width: number;
-  height: number;
+  /** 實測尺寸；成片（G4）probe 缺失時為 null——禁止 0 冒充。 */
+  width: number | null;
+  height: number | null;
   endpointLabel: string;
 }
 
@@ -144,8 +152,9 @@ export interface CreateGenerationReferenceArtifactInput {
   mimeType: string;
   sha256: string;
   byteSize: number;
-  width: number;
-  height: number;
+  /** 實測尺寸；圖片上傳驗證路徑恆有值，放寬是配合 ValidatedImage（G4 成片 probe 可缺）。 */
+  width: number | null;
+  height: number | null;
   sourceResultId?: string | null;
   sourceGenerationId?: string | null;
   referenceRole?: "general" | "character" | "product" | "style" | "composition";

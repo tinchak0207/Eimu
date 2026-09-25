@@ -1,16 +1,16 @@
 // GET /v1/quota —— agent gateway 餘額閘的生產讀法。
 //
-// gateway 的 workflow preflightBudget（R5-B）與 fetchBalance（錢包角標）都打
-// 這條路：Bearer B端/agent key → biz_api_key.userId → new-api admin API 讀
-// users.quota（唯一真源，1 幣 = 500000）→ { balance_coins }。
-// 2026-08-29 事故前此路由不存在：預檢 404 → fail-open 靜默放行，agent 影片
-// 批量把餘額扣成負數無人攔截。餘額可為負（真實狀態，不夾到 0）。
+// 餘額權威（REQ-E1a）＋池口徑（REQ-D3）＋C 端降級的完整決策住在 ./decision.ts
+// （Next.js 對 route 檔匯出做白名單型別檢查，值匯出滯留本檔會炸 `next build`；
+// 2026-09-23 遠端建置實錘後拆檔，行為零改動）。本檔只做 HTTP 包裝。
+//
+// 回應形狀（success / balance_coins / currency）與 503（quota_unavailable）
+// 一字不改——契約不破。
 
 import { NextRequest, NextResponse } from "next/server";
 import { readBearerToken } from "@/lib/biz-api-keys";
 import { authenticateBizApiKey } from "@/lib/biz-api-key-store";
-import { fetchGatewayUser } from "@/lib/gateway-admin";
-import { QUOTA_PER_COIN } from "@/lib/quota-constants";
+import { decideQuota } from "./decision";
 
 export const runtime = "nodejs";
 export const preferredRegion = "sfo1";
@@ -27,22 +27,6 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  let user: Awaited<ReturnType<typeof fetchGatewayUser>>;
-  try {
-    user = await fetchGatewayUser(auth.key.userId);
-  } catch {
-    user = null;
-  }
-  if (!user) {
-    return NextResponse.json(
-      { success: false, error: { message: "余额查询暂不可用，请稍后重试。", code: "quota_unavailable" } },
-      { status: 503 },
-    );
-  }
-
-  const balanceCoins = Math.round((user.quota / QUOTA_PER_COIN) * 1e6) / 1e6;
-  return NextResponse.json(
-    { success: true, balance_coins: balanceCoins, currency: "coins" },
-    { headers: { "Cache-Control": "no-store" } },
-  );
+  const decision = await decideQuota(auth.key.userId);
+  return NextResponse.json(decision.body, { status: decision.status, headers: decision.headers });
 }

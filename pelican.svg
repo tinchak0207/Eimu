@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800" width="800" height="800" role="img" aria-labelledby="t d">
+  <title id="t">鵜鶘</title>
+  <desc id="d">一隻白鵜鶘站在水邊，長喙與下垂的喉囊朝向畫面左側。</desc>
+
+  <defs>
+    <linearGradient id="bodyFill" x1="0.1" y1="0" x2="0.5" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#dde7f0"/>
+    </linearGradient>
+    <linearGradient id="wingFill" x1="0.1" y1="0" x2="0.5" y2="1">
+      <stop offset="0" stop-color="#f8fbfd"/>
+      <stop offset="1" stop-color="#ccd9e5"/>
+    </linearGradient>
+    <linearGradient id="beakFill" x1="1" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffd15e"/>
+      <stop offset="1" stop-color="#ee8a1a"/>
+    </linearGradient>
+    <linearGradient id="pouchFill" x1="0.85" y1="0.05" x2="0.25" y2="1">
+      <stop offset="0" stop-color="#ffe89b"/>
+      <stop offset="1" stop-color="#f7ac2c"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 背景 -->
+  <rect width="800" height="800" fill="#eef6fb"/>
+  <circle cx="400" cy="380" r="300" fill="#e2f0fa"/>
+  <ellipse cx="410" cy="684" rx="330" ry="52" fill="#cde4f4"/>
+
+  <!-- 地面陰影 -->
+  <ellipse cx="452" cy="668" rx="158" ry="22" fill="#a8c9e0" opacity="0.5"/>
+
+  <!-- 尾羽 -->
+  <path d="M596 428 C648 410 692 418 704 442 C670 454 634 464 604 472 Z"
+        fill="#dde7f0" stroke="#c9d6e2" stroke-width="4" stroke-linejoin="round"/>
+
+  <!-- 腿 -->
+  <g stroke="#ee8a1a" stroke-width="15" stroke-linecap="round" fill="none">
+    <path d="M420 560 L404 644"/>
+    <path d="M476 566 L494 644"/>
+  </g>
+
+  <!-- 蹼足 -->
+  <g fill="#ee8a1a">
+    <path d="M406 638 C380 642 360 652 352 666 C370 674 396 674 412 662 Z"/>
+    <path d="M492 638 C518 642 538 652 546 666 C528 674 502 674 486 662 Z"/>
+  </g>
+
+  <!-- 頸（先畫，再被身體與頭蓋住接縫） -->
+  <g fill="none" stroke-linecap="round">
+    <path d="M440 452 C356 404 300 344 298 292" stroke="#c9d6e2" stroke-width="76"/>
+    <path d="M440 452 C356 404 300 344 298 292" stroke="#f7fafc" stroke-width="64"/>
+  </g>
+
+  <!-- 身體 -->
+  <path d="M300 470 C300 380 380 330 470 336 C566 342 632 400 640 470 C648 540 590 604 490 616 C392 628 300 560 300 470 Z"
+        fill="url(#bodyFill)" stroke="#c9d6e2" stroke-width="4"/>
+
+  <!-- 翅膀 -->
+  <path d="M366 430 C440 396 546 408 606 462 C616 508 570 560 486 574 C420 584 366 542 358 486 C354 460 356 442 366 430 Z"
+        fill="url(#wingFill)" stroke="#c9d6e2" stroke-width="4" stroke-linejoin="round"/>
+  <g stroke="#b9c9d8" stroke-width="3" fill="none" stroke-linecap="round">
+    <path d="M420 470 C470 466 520 480 556 508"/>
+    <path d="M404 502 C452 500 498 512 530 536"/>
+    <path d="M400 534 C442 534 480 544 506 562"/>
+  </g>
+
+  <!-- 冠羽 -->
+  <path d="M336 216 C362 195 392 189 412 195 C388 210 360 228 340 242 Z"
+        fill="#e6eef5" stroke="#c9d6e2" stroke-width="3" stroke-linejoin="round"/>
+
+  <!-- 喉囊 -->
+  <path d="M122 296 C116 366 168 430 246 432 C304 434 330 384 320 334 C290 322 240 312 180 306 C160 304 140 300 122 296 Z"
+        fill="url(#pouchFill)" stroke="#dd9a22" stroke-width="3" stroke-linejoin="round"/>
+
+  <!-- 頭 -->
+  <circle cx="300" cy="250" r="46" fill="#ffffff" stroke="#c9d6e2" stroke-width="4"/>
+
+  <!-- 上喙 -->
+  <path d="M276 236 C220 236 160 256 116 292 C150 302 216 288 282 266 Z"
+        fill="url(#beakFill)" stroke="#d98218" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M116 292 C108 297 104 306 106 314 C117 309 125 300 127 294 Z" fill="#d98218"/>
+
+  <!-- 喙縫（上喙與喉囊交界） -->
+  <path d="M282 266 C216 288 150 300 118 294" fill="none" stroke="#d98218" stroke-width="3" stroke-linecap="round"/>
+
+  <!-- 眼 -->
+  <circle cx="284" cy="238" r="11" fill="#f5c33b"/>
+  <circle cx="284" cy="238" r="6.5" fill="#26333f"/>
+  <circle cx="287" cy="235" r="2.6" fill="#ffffff"/>
+</svg>

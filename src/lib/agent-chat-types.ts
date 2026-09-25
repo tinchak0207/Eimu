@@ -46,6 +46,7 @@ export const AGENT_EVENT_NAMES = [
   "director.done",
   "turn.done",
   "turn.status",
+  "turn.plan",
   "confirm.request",
   "confirm.resolved",
   "quota.changed",
@@ -67,6 +68,8 @@ export const AGENT_EVENT_NAMES = [
   "question.request",
   "question.replied",
   "question.rejected",
+  // REQ-D2（2026-09-22）：steer 回合中引導的狀態幀（排隊中／已注入／已生效／已中止）。
+  "steer.status",
 ] as const;
 
 export type AgentEventName = (typeof AGENT_EVENT_NAMES)[number];
@@ -102,6 +105,17 @@ export interface AgentToolResult {
   tool: string;
   ok: boolean;
   cost_coins?: number;
+  /**
+   * gateway（2026-09-18 契约）—— 提交型工具的任務 id。任务已交给上游，
+   * 成品稍后由 image/video/audio.done（或 image.failed）带同一个 id 回来。
+   */
+  task_id?: string;
+  /**
+   * gateway（2026-09-18 契约）—— true = 任務已提交成功、成品還沒到（**中继态**）。
+   * 网關只在 `ok && task_id 有值 && 回包没有成品 url` 时带它；缺席一律当 false
+   * 处理，行为与旧格式逐位元一致（不带 = 照旧直接结算 ok，不是生成中）。
+   */
+  artifact_pending?: boolean;
   /** gateway 附带的人类可读错误（G-FE 合同：中文短句优先渲染）。 */
   error?: { code?: string; message?: string; human_message?: string };
 }
@@ -199,6 +213,34 @@ export type AgentTurnDone = Record<string, never>;
 /** 网关系统状态（静默通知/心跳/重投告警）。暂态单行：新状态替换旧状态，真实正文/turn.done 即清，绝不并入正文。 */
 export interface AgentTurnStatus {
   text: string;
+}
+
+/**
+ * gateway（2026-09-18 契約，同事在網關端施工）—— 送訊後 ~1.4–2.0s 先到的
+ * 「本輪計畫」幀：由模型現算的真實計畫（不是罐頭），讓使用者在重型回合
+ * 首行正文（可能 +100s）之前就知道助手打算做什麼。
+ *
+ * 為什麼獨立幀型別而**不**併進 message.delta：借用 message.delta 會讓 reducer
+ * 把計畫塞進同一條 streaming:true 的 assistant 條目，100 秒後重模型正文會物理
+ * 接在計畫後面，變成一條分不清「計畫 vs 答案」的長氣泡——把非交付物混進交付物。
+ * 所以計畫有自己的條目型別（AgentPlanItem）與自己的區塊。
+ *
+ * `plan` 是**唯一必需欄位**：缺它整幀丟棄（見 parseAgentSseEvent）。
+ * 其餘欄位缺席一律當 undefined/false 處理，行為與沒有這幀時逐位元一致。
+ */
+export interface AgentTurnPlan {
+  /** 由模型現算的計畫一句話（≤160 字）。唯一的必需欄位。 */
+  plan: string;
+  /** 命中的專家白名單（≤4）：只在 digest 命中時出現，缺就不畫晶片。 */
+  experts?: string[];
+  /** 預設 true：計畫還在進行中，據此顯示「（进行中）」。 */
+  provisional?: boolean;
+  /** 誠實來源標記：模型現算 / 規則兜底。 */
+  source?: "model" | "rule";
+  /** 產生計畫的模型名。只進 console，不進 UI。 */
+  model?: string;
+  /** 保留欄位：true = 就地換掉既有計畫文字（同一 id），預設不出現。 */
+  superseded?: boolean;
 }
 
 /** gateway:945 —— 要求使用者确认一笔花费。90 秒不回会过期（D-20 要改成 15 分钟）。 */
@@ -338,7 +380,8 @@ export interface AgentSubagentDelta {
 /** 子代理收尾。summary ≤600 字，只在卡内截断显示。 */
 export interface AgentSubagentDone {
   id: string;
-  status: "ok" | "error";
+  /** stopped＝人工停止成功（gateway stop 閘送出），中性收尾，不是失败。 */
+  status: "ok" | "error" | "stopped";
   summary?: string;
 }
 
@@ -363,6 +406,7 @@ export type AgentSseEvent = WithEventId &
     | { name: "director.done"; data: AgentDirectorDone }
     | { name: "turn.done"; data: AgentTurnDone }
     | { name: "turn.status"; data: AgentTurnStatus }
+    | { name: "turn.plan"; data: AgentTurnPlan }
     | { name: "confirm.request"; data: AgentConfirmRequest }
     | { name: "confirm.resolved"; data: AgentConfirmResolved }
     | { name: "quota.changed"; data: AgentQuotaChanged }
@@ -383,6 +427,7 @@ export type AgentSseEvent = WithEventId &
     | { name: "subagent.done"; data: AgentSubagentDone }
     | { name: "question.request"; data: AgentQuestionRequest }
     | { name: "question.replied"; data: AgentQuestionReplied }
+    | { name: "steer.status"; data: AgentSteerStatusEvent }
     | { name: "question.rejected"; data: AgentQuestionRejected }
   );
 
@@ -393,6 +438,16 @@ function str(v: unknown): string | undefined {
 }
 function num(v: unknown): number | undefined {
   return typeof v === "number" && Number.isFinite(v) ? v : undefined;
+}
+
+/**
+ * 寬鬆解析 string[]（turn.plan.experts）。非陣列 / 過濾後為空 → undefined
+ * （呼叫方據此決定「不畫晶片」）；逐項非字串或空字串一律剔除，絕不 throw。
+ */
+function strArray(v: unknown): string[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const out = v.filter((x): x is string => typeof x === "string" && x.length > 0);
+  return out.length > 0 ? out : undefined;
 }
 
 /**
@@ -521,7 +576,18 @@ export function parseAgentSseEvent(name: string, rawData: string): AgentSseEvent
         rawErr && typeof rawErr === "object"
           ? { code: str((rawErr as { code?: unknown }).code), message: str(rawErr.message), human_message: str(rawErr.human_message) }
           : undefined;
-      return { name, event_id: eventId, data: { tool, ok: d.ok === true, cost_coins: num(d.cost_coins), error } };
+      return {
+        name,
+        event_id: eventId,
+        data: {
+          tool,
+          ok: d.ok === true,
+          cost_coins: num(d.cost_coins),
+          task_id: str(d.task_id),
+          artifact_pending: d.artifact_pending === true,
+          error,
+        },
+      };
     }
     case "image.done": {
       const url = str(d.url);
@@ -589,6 +655,29 @@ export function parseAgentSseEvent(name: string, rawData: string): AgentSseEvent
       const text = str(d.text);
       if (text === undefined) return null;
       return { name, event_id: eventId, data: { text } };
+    }
+    case "turn.plan": {
+      // plan 是唯一必需欄位：空字串／缺欄位／非字串一律整幀丟棄（丟半張計畫卡
+      // 等於畫一張空話卡）。其餘欄位走白名單寬鬆解析，壞值折成 undefined 不 throw。
+      const plan = str(d.plan);
+      if (!plan || plan.trim().length === 0) return null;
+      const experts = strArray(d.experts);
+      // provisional 預設 true：只有明確 === false 才是 false（缺欄位當「還在進行中」，
+      // 這是保守誠實的一側——計畫剛到時本來就還沒定案）。
+      const sup = d.superseded === true;
+      const src = d.source === "model" || d.source === "rule" ? (d.source as "model" | "rule") : undefined;
+      return {
+        name,
+        event_id: eventId,
+        data: {
+          plan,
+          ...(experts ? { experts } : {}),
+          provisional: d.provisional !== false,
+          ...(src ? { source: src } : {}),
+          ...(str(d.model) ? { model: str(d.model) } : {}),
+          ...(sup ? { superseded: true } : {}),
+        },
+      };
     }
     case "confirm.request": {
       const requestId = str(d.request_id);
@@ -741,8 +830,16 @@ export function parseAgentSseEvent(name: string, rawData: string): AgentSseEvent
     }
     case "subagent.done": {
       const id = str(d.id);
-      // status 是核心栏位：既不是 ok 也不是 error 的帧不合合同，整帧丢弃。
-      const status = d.status === "ok" ? ("ok" as const) : d.status === "error" ? ("error" as const) : undefined;
+      // status 是核心栏位：不属于合同值域的帧不合合同，整帧丢弃。
+      // stopped＝人工停止成功（2026-09-20 gateway 契约），同为合法核心栏位。
+      const status =
+        d.status === "ok"
+          ? ("ok" as const)
+          : d.status === "error"
+            ? ("error" as const)
+            : d.status === "stopped"
+              ? ("stopped" as const)
+              : undefined;
       if (!id || !status) return null;
       return { name, event_id: eventId, data: { id, status, summary: str(d.summary) } };
     }
@@ -762,7 +859,57 @@ export function parseAgentSseEvent(name: string, rawData: string): AgentSseEvent
       if (!requestId) return null;
       return { name, event_id: eventId, data: { request_id: requestId, reason: str(d.reason) ?? "" } };
     }
+    case "steer.status": {
+      const steerId = str(d.steer_id);
+      const status = parseSteerStatus(d.status);
+      // 核心欄位（id + 狀態）缺一即整幀丟棄：認不得的狀態寧可不上屏，不猜。
+      if (!steerId || !status) return null;
+      const position = num(d.position);
+      return {
+        name,
+        event_id: eventId,
+        data: {
+          steer_id: steerId,
+          status,
+          ...(typeof position === "number" ? { position } : {}),
+          ...(str(d.text) ? { text: str(d.text) } : {}),
+          ...(str(d.reason) ? { reason: str(d.reason) } : {}),
+        },
+      };
+    }
   }
+}
+
+/**
+ * steer 狀態值域的唯一權威（與網關 steer-core.ts 的 SteerStatus 逐字對齊）。
+ *
+ * uncertain（REQ-D2b，2026-09-23）：**未確認**——網關投遞已發出但沒等到確認
+ * （進程中斷於投遞與確認之間／重啟後恢復）。它不是 failed：「不知道送沒送到」與
+ * 「確知沒送到」是兩件事，混為一談就是把不確定說成事實。網關契約是**永不自動重發**，
+ * 所以徽章顯示「未确认·未重送」，且此態是終態（遲到的幀不得改寫）。
+ */
+export const AGENT_STEER_STATUSES = ["queued", "injected", "applied", "aborted", "failed", "uncertain"] as const;
+export type AgentSteerStatus = (typeof AGENT_STEER_STATUSES)[number];
+
+/**
+ * 「排队中」徽章的存活上限（ms）——與網關 steer-core.ts 的 STEER_QUEUE_TTL_MS
+ * **必須逐字等值**（有測試釘著兩邊的字面）。
+ *
+ * 為什麼前端也要有這個時限（D2-3）：網關的 pendingSteers 是 volatile 的——重啟／
+ * 續期後隊列整個消失。此時前端的「排队中」徽章沒有任何東西會把它推進終態＝永久假話。
+ * 所以前端以同一個 TTL 自行兜底：逾時仍未見終態幀 → 翻「未能送達（未生效）」。
+ * 兩端都誠實：網關知道的（逾時條目）由網關發 queue_expired，網關不知道的由前端自己收口。
+ *
+ * D2b（2026-09-23）之後的分工更清楚：重啟後網關**記得**那些命令身份（steer_commands 表），
+ * 恢復時會補一張 uncertain 幀（「未确认·未重送」）；TTL 只負責「那張幀也沒送到／沒重連」
+ * 這一最後兜底——它是 UI 的時間語義，不是防重複投遞的機制（那是 tombstone 的職責）。
+ */
+export const AGENT_STEER_QUEUE_TTL_MS = 30 * 60 * 1000;
+
+function parseSteerStatus(raw: unknown): AgentSteerStatus | undefined {
+  return typeof raw === "string" && (AGENT_STEER_STATUSES as readonly string[]).includes(raw)
+    ? (raw as AgentSteerStatus)
+    : undefined;
 }
 
 function parseQuestionItems(raw: unknown): AgentQuestionRequest["questions"] | null {
@@ -806,7 +953,8 @@ export type AgentTranscriptItem =
   | AgentDirectorItem
   | AgentNoticeItem
   | AgentSubagentItem
-  | AgentSubagentReportItem;
+  | AgentSubagentReportItem
+  | AgentPlanItem;
 
 interface TranscriptItemBase {
   /** React key。同一条目的多次更新必须沿用同一个 id。 */
@@ -821,6 +969,36 @@ export interface AgentUserTurnItem extends TranscriptItemBase {
   text: string;
   /** 附件（图／影片）在 step 8 才接，先留位子，避免之后改类型牵动所有渲染。 */
   attachments?: AgentAttachmentRef[];
+  /**
+   * REQ-D2（2026-09-22）：这条消息是「回合中追加的指引（steer）」时挂状态。
+   * 状态值域的权威在网络侧（steer.status 帧），这里只落账：
+   * queued=排队中（本回合结束后生效）/ injected=已注入本回合 / applied=已生效 /
+   * aborted=已中止（用户按了停止，停止优先）/ failed=未生效 /
+   * uncertain=未确认（REQ-D2b：投递已发出但没等到确认，网关**永不自动重发** ⇒ 「未确认·未重送」）。
+   */
+  steer?: {
+    id: string;
+    status: AgentSteerStatus;
+    position?: number;
+    /**
+     * 本端入队时刻（epoch ms，收到 queued ack 时打点）。排队的存活上限契约是
+     * AGENT_STEER_QUEUE_TTL_MS——`expireQueuedSteers` 用它判断这条还能不能算「排队中」。
+     * 缺席（旧存档／SSE 帧建出来的条目）→ 以存档时刻为基准兜底（见 reducer 的 restore）。
+     */
+    queuedAt?: number;
+  };
+}
+
+/** steer.status 帧：一条 steer 的状态迁移（前端据 steer_id 挂回那条 user 条目）。 */
+export interface AgentSteerStatusEvent {
+  steer_id: string;
+  status: AgentSteerStatus;
+  /** 排队位置（1-based），仅 queued 帧带。 */
+  position?: number;
+  /** 回显的指引文本，供排障与「排队中」提示展开。 */
+  text?: string;
+  /** 未生效原因（aborted / delivery_failed / delivery_unwired / queue_expired）。 */
+  reason?: string;
 }
 
 export interface AgentAttachmentRef {
@@ -840,6 +1018,17 @@ export interface AgentAssistantTextItem extends TranscriptItemBase {
   text: string;
   /** 思维链（reasoning.delta 累积）。streaming 期间可能还在长。UI 可折叠显示。 */
   reasoning?: string;
+  /**
+   * 思維鏈起點（epoch ms）：reasoning.delta 首次落到本條目時由 reducer 寫入，
+   * 已有值不覆蓋。只當結算 reasoningMs 的基準，寫完保留、不再參與顯示。
+   */
+  reasoningStartedAt?: number;
+  /**
+   * 思維鏈總時長（ms）：思考結束時結算一次（正文首個 delta 到達、或串流收尾），
+   * 之後不再變。收合行據此顯示「已思考 · N 秒」；缺席＝沒有可誠實顯示的秒數
+   * （歷史回放重建的條目就沒有計時資料，顯示「已思考」不編秒數）。
+   */
+  reasoningMs?: number;
   /** true = 还在收 delta。turn.done 后转 false。 */
   streaming: boolean;
 }
@@ -851,7 +1040,14 @@ export interface AgentToolCallItem extends TranscriptItemBase {
   /** 派遣子代理时，綁定的子代理 id（subagent.started 回填）：狀態與子代理卡同源。 */
   subagentId?: string;
   argsSummary?: string;
-  status: "running" | "ok" | "failed";
+  /**
+   * 卡片状态。`pending` 是**中继態：已提交、成品未到**（tool.result.artifact_pending）
+   * —— 提交型生圖/生片工具在任務交出去的那一刻不再假報「已完成」，等
+   * image/video/audio.done 或 image.failed 到了才转终态。
+   */
+  status: "running" | "pending" | "ok" | "failed";
+  /** 提交型工具的任務 id（tool.result.task_id 回填）：成品/失敗事件用它精確配對 pending 卡。 */
+  taskId?: string;
   costCoins?: number;
   /** 失败时的人类可读错误（gateway tool.result error.human_message 优先）。 */
   error?: string;
@@ -934,7 +1130,7 @@ export interface AgentSubagentItem extends TranscriptItemBase {
   activity?: string;
   /** 全文（delta 增量累积，模型层不截断——F4：渲染层才截断 + 可展开）。 */
   text?: string;
-  status: "running" | "ok" | "error";
+  status: "running" | "ok" | "error" | "stopped";
   summary?: string;
 }
 
@@ -948,10 +1144,30 @@ export interface AgentSubagentReportItem extends TranscriptItemBase {
   /** 原 subagent id（同一子代理的产出与它的状态欄可對照）。 */
   subagentId: string;
   label: string;
-  /** running 中就被收尾（中止）= interrupted，誠實標「未完成」不留假 running。 */
-  status: "ok" | "error" | "interrupted";
+  /** running 中就被收尾（中止）= interrupted；人工停止成功 = stopped，均非失败。 */
+  status: "ok" | "error" | "interrupted" | "stopped";
   /** 全文（summary 或串流全文，取較完整者），模型層不截斷。 */
   text: string;
+}
+
+/**
+ * 本輪計畫卡（turn.plan → 獨立的「計划」區塊）。
+ *
+ * 刻意不併進 assistant 條目：計畫不是交付物，答案才是。混進同一條 streaming
+ * 氣泡後，100 秒後才到的正文會物理接在計畫後面，使用者無從分辨哪段是答案。
+ * 第一條 message.delta 到達時本卡自動收合成一行（reducer 負責，見 reduceTurnPlan /
+ * reduceMessageDelta），但使用者手動展開過就永不再自動收起（渲染層負責）。
+ */
+export interface AgentPlanItem extends TranscriptItemBase {
+  kind: "plan";
+  /** 計畫全文（模型現算，≤160 字）。 */
+  text: string;
+  /** 命中的專家白名單（≤4）。缺席 = 不畫晶片。 */
+  experts?: string[];
+  /** true = 計畫還在進行中（顯示「（进行中）」）。 */
+  provisional?: boolean;
+  /** true = 收合成一行（正文截 40 字）。初始 false。 */
+  collapsed?: boolean;
 }
 
 /** 待裁决的花费确认。不进 transcript，单独浮在输入区上方（随时只有 0..n 张）。 */

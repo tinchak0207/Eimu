@@ -18,7 +18,7 @@ import {
 } from "@/lib/canvas/interaction";
 import { toReferenceImageRole } from "@/lib/image-types";
 import type { ReferenceImageRole } from "@/lib/image-types";
-import type { CharacterCard, CharacterCardKind } from "@/lib/character-cards";
+import { CHARACTER_CARD_KIND_LABEL, type CharacterCard, type CharacterCardKind } from "@/lib/character-cards";
 import {
   IMPORT_STAGGER,
   fileToDataUrl,
@@ -44,6 +44,61 @@ export interface UseCanvasInteractionInput {
   childToParent: Map<string, string>;
   /** 生成面板節點 id setter（乾淨點擊開面板，A2）。 */
   setPromptPanelNodeId: Dispatch<SetStateAction<string | null>>;
+}
+
+/** 建卡結果：要寫入的卡 + 存卡成功的提示文案。 */
+export interface BuiltNodeCard {
+  card: CharacterCard;
+  /** 提示文案（變體卡帶母卡名，使用者看得出這是變體）。 */
+  message: string;
+}
+
+/**
+ * 建卡純邏輯（P2 存為卡）：無 React / 無 DOM，可直接單測。
+ *
+ * - 預設名與 toast 標籤一律查 CHARACTER_CARD_KIND_LABEL（五種 kind 一致，不再手寫三元式）。
+ * - variantOf 的三態（唯一生產者語義）：只在 `kind === "character"` **且**該 id 在既有卡清單裡
+ *   真的存在（trim 後非空）時才寫入；kind 非 character / id 不存在 / 空字串一律不寫該欄位
+ *   ——在建卡處就擋，不靠 normalize 事後丟。新卡 id 是當場生成的，必然不在既有卡清單裡，
+ *   故「等於自身 id」也被同一條 find 擋住。
+ * - 節點無可用圖（imageUrlOf 為空）→ 回 null（呼叫端原樣早退，與抽函式前行為一致）。
+ */
+export function buildNodeCard(
+  node: CanvasNode,
+  kind: CharacterCardKind,
+  options: { variantOf?: string } | undefined,
+  existingCards: readonly CharacterCard[],
+): BuiltNodeCard | null {
+  const url = imageUrlOf(node);
+  if (!url) return null;
+  const now = new Date().toISOString();
+  const label = CHARACTER_CARD_KIND_LABEL[kind];
+  const wantedVariant = typeof options?.variantOf === "string" ? options.variantOf.trim() : "";
+  const mother =
+    kind === "character" && wantedVariant
+      ? existingCards.find((card) => card.id === wantedVariant && card.kind === "character")
+      : undefined;
+  const card: CharacterCard = {
+    id: `card-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+    name: node.title || `${label}卡`,
+    kind,
+    // 純參考圖卡：locked 片段為空，鎖定的是參考圖與角色（可日後補描述）。
+    prompt: "",
+    references: [
+      {
+        url,
+        role: node.type === CanvasNodeType.Reference ? toReferenceImageRole(node.metadata?.referenceRole) : "general",
+        name: node.title || "参考图",
+      },
+    ],
+    createdAt: now,
+    updatedAt: now,
+    ...(mother ? { variantOf: mother.id } : {}),
+  };
+  const message = mother
+    ? `已存为角色变体卡并锁定：${card.name}（母卡：${mother.name}）`
+    : `已存为${label}卡并锁定：${card.name}`;
+  return { card, message };
 }
 
 /** 交互域回傳：state + 鏡像 refs + handlers（消費端：組件殼 / 生成 hook / 快捷鍵 hook / menuItems 工廠）。 */
@@ -488,35 +543,20 @@ export function useCanvasInteraction({ canvasStateRef, containerRef, visibleNode
     setMenu({ position: screen, world, targetNodeId: null });
   }, []);
 
-  /** P2：從 reference 節點「存為卡」——取節點圖 + 角色建卡，存檔並鎖定到本畫布。 */
+  /** P2：從 reference 節點「存為卡」——取節點圖 + 角色建卡，存檔並鎖定到本畫布。
+   *  options.variantOf（C）：指到存在的角色母卡時寫入卡物件的 variantOf（變體母卡）。 */
   const saveNodeAsCard = useCallback(
-    async (node: CanvasNode, kind: CharacterCardKind) => {
-      const url = imageUrlOf(node);
-      if (!url) return;
-      const now = new Date().toISOString();
-      const card: CharacterCard = {
-        id: `card-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-        name: node.title || (kind === "character" ? "角色卡" : kind === "scene" ? "场景卡" : "风格卡"),
-        kind,
-        // 純參考圖卡：locked 片段為空，鎖定的是參考圖與角色（可日後補描述）。
-        prompt: "",
-        references: [
-          {
-            url,
-            role: node.type === CanvasNodeType.Reference ? toReferenceImageRole(node.metadata?.referenceRole) : "general",
-            name: node.title || "参考图",
-          },
-        ],
-        createdAt: now,
-        updatedAt: now,
-      };
+    async (node: CanvasNode, kind: CharacterCardKind, options?: { variantOf?: string }) => {
+      const built = buildNodeCard(node, kind, options, canvasStateRef.current.characterCards);
+      if (!built) return;
+      const { card, message } = built;
       const ok = await canvasStateRef.current.upsertCharacterCard(card);
       if (!ok) {
         showError("存卡失败，请稍后再试");
         return;
       }
       canvasStateRef.current.toggleCharacterCard(card.id); // 存為卡即鎖定（生成自動攜帶）
-      showError(`已存为${kind === "character" ? "角色" : kind === "scene" ? "场景" : "风格"}卡并锁定：${card.name}`);
+      showError(message);
     },
     [showError, canvasStateRef],
   );

@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { generateWithMetaso, isMetasoModel } from "./metaso-upstream.ts";
+import { SupplierRequestError } from "./failure-classifier.ts";
+import { createFailureRecord } from "./failure-record.ts";
+import { planGenerationAttemptReplay } from "./operation-registry.ts";
 import { MINIMAX_H3_MODEL_ID } from "../image-model-ids.js";
 import type { SupplierGenerationInput, SupplierRecord } from "./types.ts";
 
@@ -88,6 +91,67 @@ function jsonResponse(status: number, payload: unknown): Response {
 test("isMetasoModel 只認 minimax-h3", () => {
   assert.equal(isMetasoModel(MINIMAX_H3_MODEL_ID), true);
   assert.equal(isMetasoModel("gpt-image-2"), false);
+});
+
+test("D-3（2026-09-23）：上游真 400 被改寫成 502，原生硬停仍必須擋住重放（adapter → native → registry 全鏈）", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    process.env.METASO_API_KEY = "mk-test-key";
+
+    globalThis.fetch = (async () => jsonResponse(400, { error: { message: "invalid prompt" } })) as typeof fetch;
+    let thrown: unknown = null;
+    try {
+      await generateWithMetaso(supplier(), videoInput());
+    } catch (error) {
+      thrown = error;
+    }
+    assert.ok(thrown instanceof SupplierRequestError, "上游 400 必須拋 SupplierRequestError");
+    // 產品側狀態照舊改寫成 502（供應商側失敗 → 隔離/冷卻語義不動，本刀不改判）。
+    assert.equal((thrown as SupplierRequestError).status, 502);
+    // 原生記錄必須是上游真實狀態：否則確定性 400 會被硬停看成 502，重放到預算上限。
+    const record = createFailureRecord({ error: thrown });
+    assert.equal(record.native.status, 400, "native.status 必須是上游真實狀態，不是被改寫的 502");
+    const replay = planGenerationAttemptReplay({ kind: "video_generate", lastAttemptNo: 0, nativeFailure: record.native });
+    assert.equal(replay.allowed, false, "確定性 400 不得被重放（D-3 修復前：allowed=true，會燒滿預算）");
+    assert.equal(replay.denialReason, "native_hard_stop");
+    assert.equal(replay.hardStop?.status, 400);
+
+    // 對照組：暫時性 503（同樣被改寫成 502）仍必須可換道重放——硬停不得把暫時性一起擋掉。
+    globalThis.fetch = (async () => jsonResponse(503, { error: { message: "temporarily unavailable" } })) as typeof fetch;
+    let transient: unknown = null;
+    try {
+      await generateWithMetaso(supplier(), videoInput());
+    } catch (error) {
+      transient = error;
+    }
+    const transientReplay = planGenerationAttemptReplay({
+      kind: "video_generate",
+      lastAttemptNo: 0,
+      nativeFailure: createFailureRecord({ error: transient }).native,
+    });
+    assert.equal(transientReplay.allowed, true, "503 是暫時性，仍可換道重放");
+
+    // 同一類洗白（HTML 錯誤頁）：非 JSON 回應原本連狀態都丟成 502，真 400 一樣要擋。
+    globalThis.fetch = (async () => new Response("<html>400 Bad Request</html>", {
+      status: 400,
+      headers: { "Content-Type": "text/html" },
+    })) as typeof fetch;
+    let htmlError: unknown = null;
+    try {
+      await generateWithMetaso(supplier(), videoInput());
+    } catch (error) {
+      htmlError = error;
+    }
+    const htmlNative = createFailureRecord({ error: htmlError }).native;
+    assert.equal(htmlNative.status, 400, "HTML 錯誤頁也要保留上游真實狀態");
+    assert.equal(
+      planGenerationAttemptReplay({ kind: "video_generate", lastAttemptNo: 0, nativeFailure: htmlNative }).denialReason,
+      "native_hard_stop",
+    );
+  } finally {
+    delete process.env.METASO_API_KEY;
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("成功：create → 輪詢 queued/running → succeeded 出 URL", async () => {

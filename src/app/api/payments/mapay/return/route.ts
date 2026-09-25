@@ -3,7 +3,7 @@ import { PLANS } from "@/lib/plans";
 import {
   getMapayConfig,
   isMapayPaymentSuccessful,
-  mapayMoneyMatches,
+  mapayMoneyAcceptable,
   verifyMapaySignature,
 } from "@/lib/mapay";
 import { fulfillMapayRedemption } from "@/lib/mapay-redemption";
@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
   }
 
   const plan = PLANS.find((item) => item.id === params.param);
-  if (!plan || !mapayMoneyMatches(params.money, plan.price)) {
+  if (!plan || !mapayMoneyAcceptable(params.money, plan.price)) {
     return NextResponse.redirect(pricingUrl(req, { mapay: "mismatch" }));
   }
 

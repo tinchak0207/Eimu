@@ -2,6 +2,7 @@
 // 404、视频模型报「不支持」）。此注释仅改变文件哈希，让下一次部署绕过 Vercel 远程缓存的
 // 旧构建层；同时本文件新增 resolveGenerationModelId（显示名风格 id 宽容归一）。
 import {
+  AGNES_IMAGE_25_FLASH_MODEL_ID,
   ADOBE_FIREFLY_FILL_MODEL_ID,
   ADOBE_FIREFLY_MODEL_ID,
   ADOBE_FIREFLY_VIDEO_MODEL_ID,
@@ -157,6 +158,19 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     defaultResolution: "2k",
     imageCredits: { "1k": 8, "2k": 8, "4k": 8 },
     referenceImages: true,
+  },
+  [AGNES_IMAGE_25_FLASH_MODEL_ID]: {
+    id: AGNES_IMAGE_25_FLASH_MODEL_ID,
+    displayName: "Agnes Image 2.5 Flash",
+    kind: "image",
+    popularity: 60,
+    vendor: "Agnes",
+    aspectRatios: COMMON_IMAGE_RATIOS,
+    resolutions: ["1k"],
+    defaultAspectRatio: "1:1",
+    defaultResolution: "1k",
+    imageCredits: { "1k": 5 },
+    referenceImages: false,
   },
   [ADOBE_FIREFLY_MODEL_ID]: {
     id: ADOBE_FIREFLY_MODEL_ID,

@@ -31,6 +31,15 @@
 //     editor 子代理仍能直調 image_generate 生成圖片（違反憲法第二條「域外工具不在你工具表」）。
 //   builtin（bash/read/glob/grep/edit/write/question/task/webfetch/todowrite/websearch/
 //     skill/apply_patch/invalid）不在工具檔清單內，天然不受影響，不列入 map。
+// 第三條（2026-09-21 e2e 事故修補）：workflow_start / workflow_update_node /
+//   workflow_status 是「共享工作流操作工具」＝生產線基礎設施，不是任何 Expert 的
+//   域工具。事故實錘：jev-gate workflowTemplateDirective 向被 Jev 判為製作類的
+//   Expert 任務書注入硬規則「第一個動作＝呼叫 workflow_start」，但本導出器的
+//   補集規則把這三個對全部 Expert 顯式 false（＝物理禁用），screenwriter 子代理
+//   回報「工具白名單未提供 workflow_start，無法依模板建立生產流程，任務 FAILED」
+//   ——系統指令叫子代理調一個被系統物理禁用的工具。修法＝SHARED_WORKFLOW_TOOLS
+//   豁免集：全部 Expert 默認開（不列進 false）；orchestrator 顯式 false（野獸幀
+//   beastTemplateFact 聲明「你沒有 workflow_* 工具」必須是物理事實）。
 //
 // 用法：
 //   npx tsx tools/export-expert-agents.ts                          # fallback 近似全集
@@ -125,6 +134,12 @@ const DOMAIN_TOOLS: string[] = dedupePreserveOrder(
   Object.values(EXPERT_REGISTRY).flatMap((expert) => [...expert.toolIds]),
 );
 
+/** 共享工作流操作工具（2026-09-21 e2e 實錘）：workflowTemplateDirective 指令要求
+ * 任意 Expert 都可能被 Jev 判為製作類而必須調 workflow_start/update_node——
+ * 這三個是生產線基礎設施不是域工具，全部 Expert 默認開；orchestrator 仍顯式
+ * 禁用（野獸幀聲明「你沒有 workflow_* 工具」必須是物理事實）。 */
+const SHARED_WORKFLOW_TOOLS = new Set(["workflow_start", "workflow_update_node", "workflow_status"])
+
 function buildAgentsJson(universeTools: readonly string[]): string {
   // tools map 只寫 false 項（opencode 語義：未列 = 默認開）；鍵序 = 來源清單插入序，確定性輸出。
   const toolsFalse = (ids: readonly string[]): Record<string, boolean> => {
@@ -135,17 +150,19 @@ function buildAgentsJson(universeTools: readonly string[]): string {
 
   const agents: Record<string, unknown> = {};
   // orchestrator 在前：25 域工具全 false + question true（主會話保留提問內建）。
-  // 注意：orchestrator 只斷 Expert 域工具，非 Expert 域工具（image_generate 等）保持默認開。
+  // 注意：orchestrator 只斷 Expert 域工具，非 Expert 域工具（image_generate 等）保持默認開；
+  // 例外＝SHARED_WORKFLOW_TOOLS 顯式 false（2026-09-21：野獸幀 beastTemplateFact 聲明
+  // 「你沒有 workflow_* 工具」必須是物理事實，模板骨架由 Expert 建立）。
   agents["orchestrator"] = {
     mode: "all",
     description: ORCHESTRATOR_DESCRIPTION,
-    tools: { ...toolsFalse(DOMAIN_TOOLS), question: true },
+    tools: { ...toolsFalse(DOMAIN_TOOLS), ...toolsFalse([...SHARED_WORKFLOW_TOOLS]), question: true },
   };
-  // 其後按 registry 插入序：每個 Expert false 掉「全集 − 自己域工具」
+  // 其後按 registry 插入序：每個 Expert false 掉「全集 − 自己域工具 − 共享工作流工具」
   // （含不屬於任何 Expert 的工具，如 image_generate）。
   for (const expert of Object.values(EXPERT_REGISTRY)) {
     const own = new Set(expert.toolIds);
-    const foreign = universeTools.filter((id) => !own.has(id));
+    const foreign = universeTools.filter((id) => !own.has(id) && !SHARED_WORKFLOW_TOOLS.has(id));
     agents[expert.id] = {
       mode: "all",
       description: `${expert.description}${EXPERT_DESCRIPTION_SUFFIX}`,

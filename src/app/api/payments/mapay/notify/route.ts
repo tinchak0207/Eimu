@@ -3,7 +3,7 @@ import { resolvePricingPlan } from "@/lib/plans";
 import {
   getMapayConfig,
   isMapayPaymentSuccessful,
-  mapayMoneyMatches,
+  mapayMoneyAcceptable,
   verifyMapaySignature,
   type MapayFields,
 } from "@/lib/mapay";
@@ -35,17 +35,34 @@ async function handleNotify(req: NextRequest) {
     const params = await readParams(req);
 
     if (!verifyMapaySignature(params, config.key)) {
+      // 驗簽失敗時欄位不可信，只回傳原值供排障。
+      console.warn("[mapay notify] rejected", {
+        reason: "signature",
+        out_trade_no: params.out_trade_no,
+        money: params.money,
+        param: params.param,
+      });
       return response("fail", 400);
     }
 
     if (!isMapayPaymentSuccessful(params)) {
+      console.info("[mapay notify] non-success status", {
+        out_trade_no: params.out_trade_no,
+        trade_status: params.trade_status,
+      });
       return response("success");
     }
 
     // 自定义档（custom:<coins>）与静态档共用一个解析器：价格一律服务端重算，
     // 回调里的 money 只用于比对，客户端传价不参与任何计价。
     const plan = resolvePricingPlan(params.param);
-    if (!plan || !mapayMoneyMatches(params.money, plan.price)) {
+    if (!plan || !mapayMoneyAcceptable(params.money, plan.price)) {
+      console.warn("[mapay notify] rejected", {
+        reason: "plan_or_money",
+        out_trade_no: params.out_trade_no,
+        money: params.money,
+        param: params.param,
+      });
       return response("fail", 400);
     }
 

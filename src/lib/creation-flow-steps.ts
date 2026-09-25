@@ -18,7 +18,13 @@
  *
  * 本檔為純常數 + 純函數，無副作用。
  * 消費入口：`CanvasProject.currentStep`（`src/lib/canvas/types.ts`）的合法值域判據。
+ *
+ * 2026-09-17（G6）：`AID_EPISODE_STATUS_MAP` 的鍵改由 `aid-enums/creation.ts` 的
+ * `AID_EPISODE_STATUS_ENUM` 推導，不再硬編數字。`aid-enums` 是純常數模組（零 import），
+ * 本檔仍是零副作用模組，客戶端安全。
  */
+
+import { AID_EPISODE_STATUS_ENUM, type AidEpisodeStatusEnumValue } from "./aid-enums/creation";
 
 export interface CreationStep {
   /** 步驟值（1..7，與 AID `aid_comic_episode.current_step` 同值域）。 */
@@ -50,20 +56,46 @@ export function creationStepMeta(value: unknown): CreationStep | undefined {
   return isValidCreationStep(value) ? CREATION_STEPS[value - 1] : undefined;
 }
 
+/**
+ * 單一作品的劇集上限。
+ *
+ * 用途（兩端同值，2026-09-16 收斂為單一常數）：
+ *   1. 落盤清洗 `project-store.normalizeEpisodes`（Blob 體積守門）；
+ *   2. agent op 載荷清洗 `layout.normalizeProjectMetaPatch`（`set_project_meta`）。
+ * 這裡是**唯一宣告處**：兩處各寫一個 200 = 兩個漂移點（前者原本就是本地 const）。
+ * 為何放本檔：本檔是純常數 + 純函數模組（零 import、客戶端安全），
+ * `project-store` 有 `node:crypto`/blob 依賴、不可能被客戶端載荷清洗端引用。
+ */
+export const MAX_EPISODES_PER_PROJECT = 200;
+
 /** 本站劇集三態（砍 AID 審核三態）。 */
 export type CanvasEpisodeStatus = "draft" | "processing" | "finished";
 
-const AID_EPISODE_STATUS_MAP: Record<number, CanvasEpisodeStatus> = {
-  0: "draft",
-  1: "processing",
-  2: "finished", // 完成未审核
-  3: "finished", // 审核中（本站無審核隊列 → 製作已完成）
-  4: "finished", // 审核通过
-  5: "processing", // 审核失败 → 退回製作
-};
+/**
+ * AID `EpisodeStatusEnum` 六態 → 本站三態。
+ *
+ * 鍵**由 AID enum 值推導**而非硬編數字：這張表的定義域就是 AID 的 enum 值域，
+ * 兩處各寫一份 = 兩個漂移點。`satisfies` 提供窮盡性檢查 —— AID 新增第七態時
+ * 此處編譯失敗，而不是靜默回 undefined（`readEpisode` 會把該劇集整筆丟掉，
+ * 用戶看到的是「劇集莫名消失」，最難查的一類 bug）。
+ */
+const AID_EPISODE_STATUS_MAP = {
+  [AID_EPISODE_STATUS_ENUM.DRAFT.value]: "draft",
+  [AID_EPISODE_STATUS_ENUM.PROCESSING.value]: "processing",
+  [AID_EPISODE_STATUS_ENUM.FINISHED_UNAUDITED.value]: "finished", // 完成未审核
+  [AID_EPISODE_STATUS_ENUM.AUDITING.value]: "finished", // 审核中（本站無審核隊列 → 製作已完成）
+  [AID_EPISODE_STATUS_ENUM.AUDIT_PASSED.value]: "finished", // 审核通过
+  [AID_EPISODE_STATUS_ENUM.AUDIT_FAILED.value]: "processing", // 审核失败 → 退回製作
+} as const satisfies Record<AidEpisodeStatusEnumValue, CanvasEpisodeStatus>;
+
+/**
+ * 查表視圖：鍵域放寬到 `number`。呼叫端拿到的是**未知整數**（AID DB 的 status 欄），
+ * 可能落在 AID 值域外 —— 直接索引上面的物件在型別上會是「必有值」，那是謊。
+ */
+const AID_EPISODE_STATUS_LOOKUP: Readonly<Record<number, CanvasEpisodeStatus | undefined>> = AID_EPISODE_STATUS_MAP;
 
 /** AID `aid_comic_episode.status`（0..5）→ 本站三態；未知值回 undefined。 */
 export function episodeStatusFromAid(value: unknown): CanvasEpisodeStatus | undefined {
   if (typeof value !== "number" || !Number.isInteger(value)) return undefined;
-  return AID_EPISODE_STATUS_MAP[value];
+  return AID_EPISODE_STATUS_LOOKUP[value];
 }

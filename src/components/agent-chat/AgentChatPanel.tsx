@@ -1,25 +1,37 @@
 "use client";
 
-import { memo, useEffect, useMemo, useRef } from "react";
-import { RotateCcw, Sparkles } from "lucide-react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Loader2, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AgentAssistantTextItem, AgentChatState } from "@/lib/agent-chat-types";
 import type { BatchAnchor } from "@/lib/agent-batch-anchor";
 import { describeGroup, groupPendingConfirms } from "@/lib/agent-confirm-groups";
 import { AgentTranscript, type AgentTranscriptProps } from "./AgentTranscript";
-import { AgentComposer, type AgentComposerProps } from "./AgentComposer";
+import { AgentComposer, SEND_HARD_TIMEOUT_MS, type AgentComposerProps } from "./AgentComposer";
 import { AgentConfirmCard } from "./AgentConfirmCard";
 import { AgentQuestionCard } from "./AgentQuestionCard";
 import { AgentBatchProgress } from "./AgentBatchProgress";
 import { AgentSubagentBar } from "./AgentSubagentBar";
 import { AgentAnchorCard } from "./AgentAnchorCard";
+import { NEAR_BOTTOM_PX } from "./scroll-threshold";
 import "./agent-chat.css";
 
 export interface AgentChatPanelProps {
   state: AgentChatState;
   connection: "idle" | "connecting" | "open" | "reconnecting" | "closed";
   disabled?: boolean;
-  onSend: (text: string) => void;
+  /** 回传 promise，输入区才能等到「投递完成」再收在途态（09-18 跨线契约放宽）。 */
+  onSend: (text: string) => void | Promise<void>;
+  /**
+   * 中止请求在飞（hook 的 aborting 镜像）。为真时「停下」钮变成「正在中止」态，
+   * 避免连点双发；缺席（undefined）时行为与接线前逐位元一致。
+   */
+  stopPending?: boolean;
+  /**
+   * 空态 lazy 建号在飞（hook 的 startingSession）。为真时空态显式说「正在建立会话…」，
+   * 推荐语不再渲染——不然用户以为没发出去而重复点（两条消息、两次计费）。
+   */
+  sessionStarting?: boolean;
   onConfirm: (requestId: string, approved: boolean) => Promise<boolean | void>;
   onAnswerQuestion: (requestId: string, answers: string[][]) => Promise<boolean | void>;
   onRetryConnection: () => void;
@@ -74,11 +86,31 @@ export async function resolveConfirmGroup(
   return results.every((r) => r.status === "fulfilled" && r.value !== false);
 }
 
+/**
+ * 空态模板 chip 的三态（纯函数，可直测）：
+ * - "pending"：这一颗刚被按下、本輪还没开始 → 转圈（进行中态）；
+ * - "disabled"：面板正在途，其余 chip 一律禁用（空態併發 send 是已记录的竞态，
+ *   两条消息、两次计费）；
+ * - "idle"：可以按。
+ *
+ * 被点的那一颗优先于「全部禁用」——否则使用者看不出自己按的是哪一颗。
+ */
+export function exampleChipState(
+  example: string,
+  pendingExample: string | null,
+  sendPending: boolean,
+): "pending" | "disabled" | "idle" {
+  if (pendingExample === example) return "pending";
+  return sendPending ? "disabled" : "idle";
+}
+
 const CONNECTION_META: Record<AgentChatPanelProps["connection"], { label: string; dotClass: string }> = {
+  // 2026-09-20 色彩纪律（预览验收语汇）：灰阶 + ios-blue accent + 红仅错误。
+  // 连接状态点全部收灰阶；「等你选择」用蓝（accent）。
   idle: { label: "未连接", dotClass: "bg-black/25" },
-  connecting: { label: "连接中…", dotClass: "bg-ios-orange" },
-  open: { label: "已连接", dotClass: "bg-ios-green" },
-  reconnecting: { label: "正在重新连接…", dotClass: "bg-ios-orange" },
+  connecting: { label: "连接中…", dotClass: "bg-foreground/35" },
+  open: { label: "已连接", dotClass: "bg-foreground/35" },
+  reconnecting: { label: "正在重新连接…", dotClass: "bg-foreground/35" },
   closed: { label: "会话已结束", dotClass: "bg-destructive" },
 };
 
@@ -87,6 +119,8 @@ function AgentChatPanelComponent({
   connection,
   disabled = false,
   onSend,
+  stopPending = false,
+  sessionStarting = false,
   onConfirm,
   onAnswerQuestion,
   onRetryConnection,
@@ -119,7 +153,90 @@ function AgentChatPanelComponent({
   // 用户是否停在列表底部附近。串流/新条目只在「本来就在底部」时自动贴底，
   // 往上翻历史时不许把滚动条强拉回底部（「往上翻不強拉」）。
   const isNearBottomRef = useRef(true);
+
+  // 推荐语连点保险：同一 frame 内两次点击时 re-render 还没到，靠 ref 同步上锁。
+  // 不锁＝两条消息、两次计费（空态并发 send 是已记录的竞态）。
+  const exampleSendRef = useRef(false);
+  /** 被按下的那一颗模板 chip（进行中态）；sendPending 期间三颗一起禁用。 */
+  const [pendingExample, setPendingExample] = useState<string | null>(null);
+  /**
+   * 09-18「送出在途」单一真相源（面板层）。
+   *
+   * 病灶：按下送出 / 模板 chip 到「本輪真的开始」之间有一段真空——空態首发要先
+   * 建號鑄票，網關還要把 prompt 送進 opencode 才回 ack（实測 10–15s）。这段
+   * 时间里输入框已空、画面没有回馈，人会以为没送出去而重复点（两条消息、
+   * 两次计费）。这里由上層掌握「本輪尚未开始」这个状态（面板同时知道 turnActive
+   * 与 onSend 的 promise），再餵给 AgentComposer 决定送出钮的忙碌態。
+   *
+   * 解除只有三条，全部在面板侧：①turnActive 由 false 变 true（reducer 在使用者
+   * 訊息落地那一刻就翻，等价「本輪已开始」）②onSend 的 promise 结算
+   * ③硬保险 SEND_HARD_TIMEOUT_MS 到点（沿用输入区同一个常量，防锁死）。
+   */
+  const [sendPending, setSendPending] = useState(false);
+  /** 硬保险计时器句柄；解锁时清掉，别留悬空的 setTimeout 攥着 setState。 */
+  const sendPendingTimerRef = useRef<number | null>(null);
+
+  /** 幂等解除：清计时器 + 落 state。promise 结算与硬保险到点都会调它。 */
+  const endSendPending = useCallback(() => {
+    if (sendPendingTimerRef.current !== null) {
+      window.clearTimeout(sendPendingTimerRef.current);
+      sendPendingTimerRef.current = null;
+    }
+    setSendPending(false);
+  }, []);
+
+  /** 立起在途態并重新计时硬保险（重复调用不会叠出两个计时器）。 */
+  const beginSendPending = useCallback(() => {
+    if (sendPendingTimerRef.current !== null) {
+      window.clearTimeout(sendPendingTimerRef.current);
+    }
+    setSendPending(true);
+    sendPendingTimerRef.current = window.setTimeout(endSendPending, SEND_HARD_TIMEOUT_MS);
+  }, [endSendPending]);
+
+  const handleExampleSend = (ex: string) => {
+    if (exampleSendRef.current) return;
+    exampleSendRef.current = true;
+    // 点击这一刻立刻进在途態：送出钮位置转圈、三颗 chip 全部禁用、
+    // 被点的那一颗自己转圈。
+    beginSendPending();
+    setPendingExample(ex);
+    // 硬保险 20s（20_000ms ＝ 输入区导出的 SEND_HARD_TIMEOUT_MS，两边同源）：
+    // 请求卡死也不能把推荐语永久锁死。
+    const unlockTimer = window.setTimeout(() => { exampleSendRef.current = false; }, SEND_HARD_TIMEOUT_MS);
+    Promise.resolve(onSend(ex)).catch(() => {}).finally(() => {
+      window.clearTimeout(unlockTimer);
+      exampleSendRef.current = false;
+      setPendingExample(null);
+      // 模板路徑：promise 结算（网关已收下这条 prompt＝本輪真的开始了）→ 解除。
+      endSendPending();
+    });
+  };
   const { items, pendingConfirms, pendingQuestions, closed, closedReason, turnActive, lastEventId, turnStatus } = state;
+
+  /*
+   * 本輪真的开始（turnActive 由 false 变 true）或会话已结束 → 在途態解除。
+   * 另外两条平行的解除在 beginSendPending 的两端：promise 结算与 20s 硬保险。
+   *
+   * 故意不拿 lastEventId（第一个 SSE 幀）当解除信号：连线期间任何一幀（含
+   * session / canvas 类的记账幀）都会推进它，用它等于在真空期把锁提前放掉、
+   * 把这次的修复原地抵消；turnActive 已经涵盖「第一个内容幀到达」这条语义
+   * （reducer 收到内容幀必翻 turnActive）。
+   */
+  useEffect(() => {
+    if (turnActive || closed) endSendPending();
+  }, [turnActive, closed, endSendPending]);
+
+  // 卸载：面板关掉之后不该还有 setTimeout 攥着 setState。
+  useEffect(
+    () => () => {
+      if (sendPendingTimerRef.current !== null) {
+        window.clearTimeout(sendPendingTimerRef.current);
+        sendPendingTimerRef.current = null;
+      }
+    },
+    [],
+  );
 
   // 罪状 4：子代理条目不进消息流，聚到转录区上方的状态栏（组件内部裁到至多 3 张）。
   const subagentItems = useMemo(() => {
@@ -151,12 +268,14 @@ function AgentChatPanelComponent({
   // 不同模型（或金额不同）各自成组逐张出。裁决时逐笔 resolve。
   const confirmGroups = useMemo(() => groupPendingConfirms(pendingConfirms), [pendingConfirms]);
 
-  // 滚动时实时记录「在不在底部附近」。128px 阈值 = 翻看最后几条时也算「在底部」，
-  // 新内容会温柔地贴上来；翻到历史深处就不再自动滚。
+  // 滚动时实时记录「在不在底部附近」。2026-09-20 起阈值与 Surface 侧统一：
+  // import scroll-threshold.ts 的 NEAR_BOTTOM_PX（Route A 并行在建），不再就地
+  // 写死 128。翻看最后几条时也算「在底部」，新内容会温柔地贴上来；翻到历史
+  // 深处就不再自动滚。
   const handleTranscriptScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
-    isNearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 128;
+    isNearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
   };
 
   // 虚拟键盘 / 捏合缩放：视觉视口被吃掉后，底部输入区可能被键盘盖住。
@@ -198,12 +317,68 @@ function AgentChatPanelComponent({
   const meta = awaitingChoice
     ? { label: "等你选择上面的对话", dotClass: "bg-ios-blue" }
     : CONNECTION_META[connection];
-  const composerDisabled = disabled || closed || pendingQuestions.length > 0 || pendingConfirms.length > 0;
-
-  // 等待卡片選擇期間的 placeholder 提示（R9-3 死線 4）。
-  const composerPlaceholder = pendingQuestions.length > 0 || pendingConfirms.length > 0
-    ? "等待卡片选择…"
+  /*
+   * 2026-09-20 行為變更（暴君批准，agent-chat-preview 已驗收）：決策卡在場
+   * 不再鎖輸入框。舊契約（R9-3 死線 4）用 disabled + 「等待卡片选择…」表達
+   * 優先級；新設計改為 composer 上緣一條 2px ios-blue 細提示條＋提示性
+   * placeholder——用戶在決策卡在場時發送的文字照常走 onSend（gateway 側本
+   * 就支持排隊）。輸入框只剩「面板禁用 / 會話關閉」兩個真正的禁用理由。
+   */
+  const composerDisabled = disabled || closed;
+  const decisionPending = pendingQuestions.length > 0 || pendingConfirms.length > 0;
+  const composerPlaceholder = decisionPending
+    ? "先选上方方案，或直接补充要求…"
     : undefined;
+
+  /*
+   * 輸入區本體（含決策卡在場時上緣的 2px 藍色細提示條）。空態與對話態兩處
+   * 擺位共用同一份 JSX：onSend 在途接線、stop / externalSendPending 等行為
+   * 契約只有這一份，不許出現第二份拷貝。
+   */
+  const composerNode = (
+    <div ref={composerAnchorRef} className="agent-composer-anchor">
+      {decisionPending ? (
+        <div className="mx-3 mb-2 h-[2px] rounded-full bg-ios-blue/70" aria-hidden="true" />
+      ) : null}
+      <AgentComposer
+        disabled={composerDisabled}
+        placeholder={composerPlaceholder}
+        onSend={(text) => {
+          // 第一条用户消息 = 右侧模板库退场的时刻（首条消息落地即收起）。
+          if (items.length === 0) onFirstUserMessage?.();
+          // 09-18 送出在途（面板＝单一真相源）：按下这一刻就立起来，送出钮位置
+          // 立刻转圈，直到本輪真的开始 / promise 结算 / 20s 硬保险（见 sendPending）。
+          beginSendPending();
+          let result: void | Promise<void>;
+          try {
+            result = onSend(text);
+          } catch (err) {
+            // 同步 throw＝这条根本没送出去，立刻解锁（不留假死按钮）。
+            endSendPending();
+            throw err;
+          }
+          // 回传 promise：输入区据此把送出钮钉在在途態直到投递落地；
+          // 面板自己也挂在同一个 promise 上（结算即解除在途）。
+          Promise.resolve(result).catch(() => {}).finally(endSendPending);
+          return result;
+        }}
+        sessionId={sessionId}
+        onEnsureSession={onEnsureSession}
+        prefill={prefill}
+        onPrefillConsumed={onPrefillConsumed}
+        /* D-26 补全：生成中（turnActive）把中止信号送进输入区——
+           输入框为空时送出钮位置变停止钮，不再只能乾等。 */
+        onStop={turnActive ? onStopGeneration : undefined}
+        stopPending={stopPending}
+        /* REQ-D2：回合进行中＝可引导。空框仍是停止钮（红方块），有字才是引导
+           （方向标）——两个语义在同一位置上按「有没有字」分流，不互相冒充。 */
+        steerActive={turnActive}
+        /* 09-18：面板的在途態餵下去——送出钮位置立刻转圈（输入框空白也一样是
+           转圈送出钮，不退回 disabled 灰钮），本輪真的开始前不被停止钮分支盖掉。 */
+        externalSendPending={sendPending}
+      />
+    </div>
+  );
 
   return (
     <section className="agent-panel" aria-label="智能体对话">
@@ -225,7 +400,10 @@ function AgentChatPanelComponent({
             </button>
           )}
           {closed && closedReason && !awaitingChoice && (
-            <span className="ml-auto truncate text-ios-caption1 text-foreground/45">
+            // min-w-0：truncate 需要寬度約束才生效——flex item 的自動最小尺寸
+            // 是 min-content，沒有它時一條長 reason（含 URL/路徑）不縮不截，
+            // 直接把狀態行撐出面板寬度。
+            <span className="ml-auto min-w-0 truncate text-ios-caption1 text-foreground/45">
               原因：{closedReason}
             </span>
           )}
@@ -234,7 +412,7 @@ function AgentChatPanelComponent({
 
       {/* D-26：批量愿望的燃烧进度常驻在顶部，不用点开才知道烧到哪。 */}
       <div className="pb-1">
-        <AgentBatchProgress items={items} onStop={onStopGeneration} />
+        <AgentBatchProgress items={items} onStop={onStopGeneration} stopPending={stopPending} />
       </div>
 
       {/* 罪状 4：子代理状态栏，置顶于转录区之上、从上到下堆叠（至多 3 张）。 */}
@@ -242,40 +420,69 @@ function AgentChatPanelComponent({
         <AgentSubagentBar items={subagentItems} />
       </div>
 
-      {/* 转录区：aria-live 的 polite live region；空态给开场提示，不显示一片空白。 */}
+      {/* 转录区：aria-live 的 polite live region；空态给开场提示，不显示一片空白。
+          溢出防護層（2026-09-20 根因清剿）：min-w-0 + overflow-x-hidden 保證
+          「未來任何超寬內容」都撐不出橫向滾動條——overflow-y:auto 時
+          overflow-x:visible 會被規範計算成 auto，一條超寬子項就是一條帶箭頭的
+          原生橫向滾動條。內容側仍各自負責換行/截斷（氣泡=break-words、
+          行內 code=break-all、表格/pre=自滾），防護層只是最後一道。 */}
       <div
         ref={scrollRef}
         aria-live="polite"
         onScroll={handleTranscriptScroll}
-        className="agent-transcript min-h-0 flex-1 overflow-y-auto overscroll-contain px-0.5 pb-2 pt-0"
+        className="agent-transcript min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-0.5 pb-2 pt-0"
       >
         {/* 第二輪就緒優化刀A：空態（歡迎語）不再等 SSE open —— idle/connecting/open
             都顯示（「沒內容且沒壞」）。建號+ticket+SSE 握手在背後接，error 態仍由
             connection meta 條目單獨呈現，此處只排除 reconnecting/closed。 */}
         {items.length === 0 && connection !== "reconnecting" && connection !== "closed" ? (
-          <div className="agent-empty flex h-full min-h-40 flex-col items-center justify-center gap-4 px-6 text-center">
-            <span className="lg-tint-blue flex h-12 w-12 items-center justify-center rounded-full text-ios-blue">
-              <Sparkles className="h-5 w-5" aria-hidden="true" />
-            </span>
-            <div>
-              <p className="text-ios-subhead font-semibold text-foreground">
-                和智能体聊聊，让它帮你生成图片
-              </p>
-              <p className="agent-empty-hint mx-auto mt-1.5 max-w-[30rem] text-sm leading-[1.5] text-foreground/45 sm:text-ios-footnote">
-                说一句话，它自动选好模型、风格和比例
-              </p>
-            </div>
-            <div className="flex max-w-[28rem] flex-wrap items-center justify-center gap-2">
-              {EXAMPLES.map((ex) => (
-                <button
-                  key={ex}
-                  type="button"
-                  onClick={() => onSend(ex)}
-                  className="lg-float cursor-pointer rounded-full px-3.5 py-2 text-ios-footnote font-medium text-muted-foreground transition-all duration-200 hover:-translate-y-0.5 hover:text-ios-blue hover:shadow-[0_6px_18px_rgba(0,0,0,0.10)] active:translate-y-0 active:scale-[0.97]"
-                >
-                  {ex}
-                </button>
-              ))}
+          /* 空態單一 DOM（09-20 零位移定案，取代 09-18 忙碌分流＋09-20 同構容器版）：
+             前两版都在忙碌態換了一套佈局——第一版裸 composer＋忙碌行，第二版同構容器
+             但置中群體不同（歡迎態置中「標題+輸入框+推薦語」整組，忙碌態只置中輸入框）
+             → 輸入框位置照樣跳。正解＝不分流：歡迎態 DOM 從頭到尾一套，建號/首發在飛時
+             推薦語照常渲染（佔位不動）但強制 disabled＝點不到就不會重複送出（防二次
+             計費）；在途回饋交給送出鈕轉圈（AgentComposer sending 態）。 */
+          <div className="flex min-h-full flex-col items-center justify-center px-5">
+            {/* pb-[8vh] 於 2026-09-24 移除：左卡改 fit-content 垂直置中後，這 8vh 是殘留補償，保留會置中偏上。 */}
+            <div className="flex w-full flex-col items-center">
+              <h2 className="text-2xl font-semibold tracking-tight text-foreground">想做点什么？</h2>
+              <div className="mt-8 w-full [&_.agent-composer]:py-2 [&_.agent-composer]:shadow-[0_16px_48px_rgba(0,0,0,0.10)]">
+                {composerNode}
+              </div>
+              <div className="mt-5 flex w-full flex-wrap items-center justify-center gap-2">
+                {EXAMPLES.map((ex) => {
+                  // 三态：被点的那一颗转圈，其余在途期间禁用（防重复点＝重复计费）。
+                  // 建号/首發在飛（sessionStarting/turnActive）＝全部強制禁用，
+                  // 但 DOM 與佔位不動＝輸入框零位移（09-20 暴君「移位也是劣化」）。
+                  const chipState =
+                    sessionStarting || turnActive ? "disabled" : exampleChipState(ex, pendingExample, sendPending);
+                  return (
+                    <button
+                      key={ex}
+                      type="button"
+                      onClick={() => handleExampleSend(ex)}
+                      disabled={chipState !== "idle"}
+                      aria-busy={chipState === "pending" ? true : undefined}
+                      className={cn(
+                        // 2026-09-24 用戶版面方案：純文字行改玻璃膠囊 chip，min-h-11 保底 44px 觸摸靶。
+                        "min-h-11 rounded-full border border-black/[0.06] bg-white/55 px-4 py-2 text-ios-footnote font-medium text-foreground/70",
+                        "transition-colors",
+                        chipState === "idle"
+                          ? "cursor-pointer hover:bg-white/80 hover:text-foreground"
+                          : "cursor-not-allowed",
+                        chipState === "disabled" && "opacity-50",
+                        // 进行中那一颗：转圈与文字同排（chip 膠囊的既有排版与字级）。
+                        chipState === "pending" && "inline-flex items-center gap-1.5",
+                      )}
+                    >
+                      {chipState === "pending" && (
+                        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" />
+                      )}
+                      {ex}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
         ) : (
@@ -332,12 +539,17 @@ function AgentChatPanelComponent({
           D-25：解读 = 该轮已收到的 message.delta 文本（lastAssistantText），
           与 confirm 事件的 description 一起由确认卡拼装成「我这么理解你的愿望」；
           缺省时确认卡退回纯花费确认。
-          2026-08-16：卡片区有界 + 内部滚动（最高 min(45dvh, 22rem)）——高卡片
-          不会再被面板高度裁掉底部选项，也不会把 transcript 挤到零高度。
+          2026-08-16：卡片区有界 + 内部滚动——高卡片不会被面板高度裁掉底部
+          选项，也不会把 transcript 挤到零高度。2026-09-20 限高放寬 45dvh→
+          62dvh：四選項的問答卡在 45dvh 下第三個選項被攔腰截斷（「看起來像
+          頁面崩了」），62dvh 常見卡完整可見、極端長卡仍走內部滾動。
           罪状 5/6：同批同模型合并成一张卡（model ×N 共 N 币），一键裁决逐笔
           resolve；确认卡容器限高 + 内部滚动，禁止整页溢出。 */}
       {confirmGroups.length > 0 && (
-        <div className="min-h-0 max-h-[min(45dvh,22rem)] shrink-0 overflow-y-auto overscroll-contain px-0.5 pb-1.5">
+        // 溢出防護層 + 細滾動條（可見性）：overflow-x-hidden 讓超寬卡片永遠
+        // 撐不出橫向滾動條；agent-scroll-thin 是 agent-chat.css 抽出的共用配方
+        // （與轉錄區同一份），讓「這裡可以滾」看得出來。
+        <div className="agent-scroll-thin min-h-0 min-w-0 max-h-[min(62dvh,30rem)] shrink-0 overflow-x-hidden overflow-y-auto overscroll-contain px-0.5 pb-1.5">
           <div className="flex flex-col gap-2">
             {confirmGroups.map((group) => {
               const merged = group.count > 1;
@@ -366,7 +578,8 @@ function AgentChatPanelComponent({
       )}
 
       {pendingConfirms.length === 0 && pendingQuestions.length > 0 && (
-        <div className="min-h-0 max-h-[min(45dvh,22rem)] shrink-0 overflow-y-auto overscroll-contain px-0.5 pb-1.5">
+        // 問答卡容器：與確認卡容器同一套溢出防護 + 細滾動條配方（見上）。
+        <div className="agent-scroll-thin min-h-0 min-w-0 max-h-[min(62dvh,30rem)] shrink-0 overflow-x-hidden overflow-y-auto overscroll-contain px-0.5 pb-1.5">
           {/* 問題卡串行：一次只出一張，答完（reducer 移除該 requestId）再浮出下一張，
               不讓多張疊在一起同時逼用戶做決定。 */}
           <div className="flex flex-col gap-2">
@@ -382,28 +595,14 @@ function AgentChatPanelComponent({
       )}
 
       {/* 输入区锚点：键盘弹起时以此为基准判断可见性，滚回可视区。
-          2026-08-22 完美主義審視曾讓輸入區在有待回答的問題/確認卡時「讓位消失」——
-          R9-3 死線 4 推翻：輸入框直接消失 = 用戶失去操作空間（想補充/換句話都沒門），
-          決策卡與輸入框的優先級靠 disabled + placeholder 表達，不靠讓位。
-          卡片在等選擇 → 輸入框禁用並提示「等待卡片选择…」；答完卡自動恢復。 */}
-      <div ref={composerAnchorRef} className="agent-composer-anchor">
-        <AgentComposer
-          disabled={composerDisabled}
-          placeholder={composerPlaceholder}
-          onSend={(text) => {
-            // 第一条用户消息 = 右侧模板库退场的时刻（首条消息落地即收起）。
-            if (items.length === 0) onFirstUserMessage?.();
-            onSend(text);
-          }}
-          sessionId={sessionId}
-          onEnsureSession={onEnsureSession}
-          prefill={prefill}
-          onPrefillConsumed={onPrefillConsumed}
-          /* D-26 补全：生成中（turnActive）把中止信号送进输入区——
-             输入框为空时送出钮位置变停止钮，不再只能乾等。 */
-          onStop={turnActive ? onStopGeneration : undefined}
-        />
-      </div>
+          2026-09-20 空態重構（暴君批准）：輸入框在空態移進上方居中的空態區
+          （composerNode），這裡只在有訊息（或 reconnecting/closed 的非空態）
+          時回落底部 sticky；兩處共用同一份 JSX，行為契約零重複。
+          決策卡在場不鎖輸入（行為變更）：用 composer 上緣 2px 藍色細提示條＋
+          placeholder 表達「先选上方方案，或直接补充要求…」，發送照常走 onSend。 */}
+      {items.length === 0 && connection !== "reconnecting" && connection !== "closed"
+        ? null
+        : composerNode}
     </section>
   );
 }

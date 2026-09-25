@@ -40,15 +40,37 @@ import { CanvasZoomControls } from "./CanvasZoomControls";
 import { CanvasShortcutsHelp } from "./CanvasShortcutsHelp";
 import { CanvasNodeCreateMenu } from "./CanvasNodeCreateMenu";
 import { CanvasLibraryPanel } from "./CanvasLibraryPanel";
+import { ProjectAssetLibraryPanel } from "@/components/assets/ProjectAssetLibraryPanel";
+// WS-審查（2026-09-24 能力建設）：資產／分鏡審查面板 + 純轉換（批准狀態一律經面板導出的純函式組裝，
+// 不在宿主重寫第二份形狀）。外部開啟介面＝`openReviewPanel()` 派 CustomEvent，本檔掛監聽。
+import {
+  AssetReviewPanel,
+  REVIEW_PANEL_OPEN_EVENT,
+  applyReplaceReference,
+  buildAssetRegeneratePayload,
+  reviewSummary,
+  type ReviewPanelKind,
+  type ReviewPanelOpenDetail,
+} from "@/components/assets/AssetReviewPanel";
+import { ShotReviewPanel, reviewShotsFromNodes, shotApprovalFor } from "@/components/assets/ShotReviewPanel";
+// 批准狀態（路 1 落地的真源）：寫入走 setApproval、分鏡側清洗走 shotApprovalFor（內部即 normalizeApprovalState）。
+import { setApproval } from "@/lib/character-cards";
+import type { ApprovalState } from "@/lib/character-cards";
+import { DEFAULT_AGENT_SETTINGS, getAgentSettings } from "@/lib/agent-chat-client";
+import type { AgentInteractionMode } from "@/lib/agent-chat-client";
+import { DEFAULT_IMAGE_MODEL_ID } from "@/lib/image-model-ids.js";
+import type { CanvasNodeMetadata } from "@/lib/canvas/types";
 import { LoraLibraryPanel, type SelectedLora } from "@/components/canvas-workstation/panels/LoraLibraryPanel";
 import "@/components/canvas-workstation/panels/panels.css";
 import { cn } from "@/lib/utils";
-import { AGENT_AUTO_APPROVE_KEY, CULL_MARGIN_PX, ENTER_STAGGER_MS, buildAuthHeaders, imageUrlOf } from "./embed/embed-helpers";
+import { AGENT_AUTO_APPROVE_KEY, CULL_MARGIN_PX, ENTER_STAGGER_MS, buildAuthHeaders, fileToDataUrl, imageUrlOf } from "./embed/embed-helpers";
 import { useCanvasInteraction } from "./embed/use-canvas-interaction";
 import { useCanvasGeneration } from "./embed/use-canvas-generation";
 import { useCanvasShortcuts } from "./embed/use-canvas-shortcuts";
 import { buildCanvasEmbedMenuItems } from "./embed/context-menu-items";
 import { CanvasEmbedOverlays } from "./embed/CanvasEmbedOverlays";
+import { CHARACTER_CARD_KIND_LABEL } from "@/lib/character-cards";
+import { shotEntityCardIdsFromMetadata } from "./CanvasNodePromptPanel";
 
 export interface CanvasEmbedProps {
   /** useCanvasChat 的完整 return（chat 部分由宿主另外用，這裡只用畫布部分）。 */
@@ -91,6 +113,8 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
   const reduceMotion = usePrefersReducedMotion();
   const [historyOpen, setHistoryOpen] = useState(false);
   const [promptPanelNodeId, setPromptPanelNodeId] = useState<string | null>(null);
+  // 面板行內 @ 引用的素材卡 id（與 panelRefIds 同級同生命週期；生成時收窄參考集）。
+  const [panelEntityIds, setPanelEntityIds] = useState<string[]>([]);
   const [helpOpen, setHelpOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
   // LoRA 庫（2026-08-27 自專業工作站遷入）：同款滑入面板，選中結果注入生成鏈路。
@@ -99,6 +123,14 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
   const [elementListOpen, setElementListOpen] = useState(false);
   // P2：角色/場景卡面板（左側彈出，與歷史畫布/節點清單同模式）。
   const [cardsOpen, setCardsOpen] = useState(false);
+  // G2（2026-09-16）：作品/劇集面板（同款左側彈層；資料取自 hook 三欄出口 + nodes）。
+  const [creationFlowOpen, setCreationFlowOpen] = useState(false);
+  // REQ-B2 團隊資產空間：項目資產庫面板（右側滑入，同資源庫/角色卡同款彈層語彙）。
+  const [projectAssetsOpen, setProjectAssetsOpen] = useState(false);
+  // WS-審查（2026-09-24）：資產／分鏡審查面板（null＝關）。兩個面共用一顆畫布工具列入口。
+  const [reviewPanel, setReviewPanel] = useState<ReviewPanelKind | null>(null);
+  // 互動檔位（決策 1/2）：只有協作檔才是停點；全自動檔下審查面板可看可改、不阻塞流程。
+  const [interactionMode, setInteractionMode] = useState<AgentInteractionMode>(DEFAULT_AGENT_SETTINGS.interaction_mode);
   const [agentAutoApprove, setAgentAutoApprove] = useState(false);
 
   // ── 最新值 refs（組件殼域）
@@ -133,6 +165,31 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
 
   useEffect(() => {
     setAgentAutoApprove(window.localStorage.getItem(AGENT_AUTO_APPROVE_KEY) === "1");
+  }, []);
+
+  /** 檔位回讀（網關為準，失敗靜默落預設——與 getAgentSettings 自身契約一致，永不 reject）。 */
+  useEffect(() => {
+    let cancelled = false;
+    void getAgentSettings().then((settings) => {
+      if (!cancelled) setInteractionMode(settings.interaction_mode);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /**
+   * 外部開啟介面（決策 10 的第二個門，步驟條由另一路實作）：
+   * 監聽 `REVIEW_PANEL_OPEN_EVENT`，把 `openReviewPanel({ panel })` 的請求翻成面板狀態。
+   * 沒有宿主掛載時呼叫端拿不到任何回應——`openReviewPanel()` 已在該處聲明「回傳 true 只代表事件已派發」。
+   */
+  useEffect(() => {
+    const handleOpen = (event: Event) => {
+      const detail = (event as CustomEvent<ReviewPanelOpenDetail>).detail;
+      setReviewPanel(detail?.panel === "shot" ? "shot" : "asset");
+    };
+    window.addEventListener(REVIEW_PANEL_OPEN_EVENT, handleOpen);
+    return () => window.removeEventListener(REVIEW_PANEL_OPEN_EVENT, handleOpen);
   }, []);
 
   useEffect(() => {
@@ -271,6 +328,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
   const {
     isGenerating,
     upscalingIds,
+    callCanvasGenerate,
     generateIntoNode,
     handleGenerateFromNode,
     stopGeneration,
@@ -284,6 +342,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
     panelRefIds,
     setPromptPanelNodeId,
     setPanelRefIds,
+    setPanelEntityIds,
     setSelectedIds,
     selectedLora,
   });
@@ -469,6 +528,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
 
   useEffect(() => {
     setPanelRefIds([]);
+    setPanelEntityIds([]);
   }, [promptPanelNodeId]);
 
   const referenceCandidatesFor = useCallback(
@@ -479,6 +539,167 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
         .filter((n): n is CanvasNode => !!n && !!imageUrlOf(n))
         .map((n) => ({ nodeId: n.id, title: n.title, previewUrl: imageUrlOf(n)! })),
     [canvas.connections, nodeById],
+  );
+
+  /**
+   * @ 可引用的素材卡候選 = 項目鎖定且過作用域裁決的卡（activeCharacterCards）。
+   * 語義是「全畫布可用」，不是「只連上游的卡」；音頻卡不做視覺引用故濾掉。
+   * nodeId 參數只為與 referenceCandidatesFor 同形（呼叫端條件式寫法照抄）。
+   */
+  const entityCandidatesFor = useCallback(
+    (nodeId: string) =>
+      canvas.activeCharacterCards
+        .filter((card) => card.kind !== "audio")
+        .map((card) => ({
+          cardId: card.id,
+          name: card.name,
+          kind: card.kind,
+          kindLabel: CHARACTER_CARD_KIND_LABEL[card.kind],
+          previewUrl: card.references[0]?.url ?? "",
+        })),
+    [canvas.activeCharacterCards],
+  );
+
+  /**
+   * 本鏡節點 metadata 已指定的實體卡 id（character/scene/prop 三欄聯集去重）。
+   * 供 prompt 面板「本镜参考素材」清單的 shot 來源；節點沒指定時為空陣列（既有行為不變）。
+   * 推導本體在 CanvasNodePromptPanel.shotEntityCardIdsFromMetadata（純函式，可直測）。
+   */
+  const shotEntityCardIdsFor = useCallback(
+    (nodeId: string): string[] => shotEntityCardIdsFromMetadata(nodeById.get(nodeId)?.metadata),
+    [nodeById],
+  );
+
+  // ── WS-審查（2026-09-24）：資產／分鏡審查域的接線
+  // 分鏡列＝畫布節點投影（純函式在面板檔內，可單測）；場景名由外層 Group 的 storyboardScene 解析。
+  const reviewShots = useMemo(
+    () =>
+      reviewShotsFromNodes(canvas.nodes, {
+        connections: canvas.connections,
+        sceneNameOf: (nodeId) => {
+          const parentId = childToParent.get(nodeId);
+          return parentId ? nodeById.get(parentId)?.metadata?.storyboardScene?.sceneName : undefined;
+        },
+      }),
+    [canvas.nodes, canvas.connections, childToParent, nodeById],
+  );
+  /** 入口徽章＝待批准＋已駁回的總數（僅顯示，不構成任何阻塞）。 */
+  const reviewPendingCount = useMemo(() => {
+    const cards = reviewSummary(canvas.characterCards);
+    const shots = reviewSummary(reviewShots);
+    return cards.pending + cards.rejected + shots.pending + shots.rejected;
+  }, [canvas.characterCards, reviewShots]);
+
+  /** 逐張重生成（決策 11：不過扣費確認卡，直接扣）。落地＝覆蓋該格原圖（決策 6）。 */
+  const handleRegenerateAsset = useCallback(
+    async (cardId: string, referenceIndex: number): Promise<{ url: string; costCoins?: number } | null> => {
+      const state = canvasStateRef.current;
+      const card = state.characterCards.find((c) => c.id === cardId);
+      if (!card) return null;
+      if (!card.prompt.trim()) {
+        showError("这张资产没有描述，先补上描述再重新生成");
+        return null;
+      }
+      const controller = new AbortController();
+      try {
+        // cards: [] ＝明確關閉卡注入：卡的片段與參考圖已在本 payload 內顯式給定，
+        // 再注入一次會讓「要被換掉的那張圖」同時當參考（把錯誤傳染給新圖）。
+        const images = await callCanvasGenerate(
+          buildAssetRegeneratePayload(card, referenceIndex, DEFAULT_IMAGE_MODEL_ID),
+          controller.signal,
+          { cards: [], referenceScope: "all" },
+        );
+        const image = images[0];
+        if (!image?.url) return null;
+        const saved = await state.upsertCharacterCard(applyReplaceReference(card, referenceIndex, image.url));
+        if (!saved) {
+          // 圖生了但沒寫回卡片＝不算成功（不謊報；原圖未動，用戶可重試）
+          showError("新图已生成但写回卡片失败，原图未改动");
+          return null;
+        }
+        return { url: image.url, ...(typeof image.cost_coins === "number" ? { costCoins: image.cost_coins } : {}) };
+      } catch (error) {
+        showError(error instanceof Error ? error.message : "重新生成失败");
+        return null;
+      }
+    },
+    [callCanvasGenerate, canvasStateRef, showError],
+  );
+
+  /** 用戶上傳自有素材＝直接覆蓋原圖（決策 6）；壓縮走既有的 `fileToDataUrl` 輪子（原地不改既有函式）。 */
+  const handleReplaceAsset = useCallback(
+    async (cardId: string, referenceIndex: number, file: File): Promise<boolean> => {
+      const state = canvasStateRef.current;
+      const card = state.characterCards.find((c) => c.id === cardId);
+      if (!card) return false;
+      try {
+        const { dataUrl } = await fileToDataUrl(file);
+        const saved = await state.upsertCharacterCard(applyReplaceReference(card, referenceIndex, dataUrl));
+        if (!saved) showError("上传成功但写回卡片失败，请重试");
+        return saved;
+      } catch (error) {
+        showError(error instanceof Error ? error.message : "上传失败");
+        return false;
+      }
+    },
+    [canvasStateRef, showError],
+  );
+
+  /** 駁回（決策 4）：寫狀態與理由後停下——不重生成、不花錢。寫入走真源 `setApproval`。 */
+  const handleRejectAsset = useCallback(
+    async (cardId: string, reason: string) => {
+      const state = canvasStateRef.current;
+      const card = state.characterCards.find((c) => c.id === cardId);
+      if (!card) return;
+      const saved = await state.upsertCharacterCard(setApproval(card, "rejected", { reason }));
+      if (!saved) showError("驳回状态没写回卡片，请重试");
+    },
+    [canvasStateRef, showError],
+  );
+
+  /** 整批一鍵批准（決策 3）：逐筆套同一動作；失敗逐筆如實報，不謊報整批成功。 */
+  const handleApproveAllAssets = useCallback(
+    async (cardIds: readonly string[]) => {
+      const state = canvasStateRef.current;
+      let failed = 0;
+      for (const id of cardIds) {
+        const card = state.characterCards.find((c) => c.id === id);
+        if (!card) continue;
+        if (!(await state.upsertCharacterCard(setApproval(card, "approved")))) failed += 1;
+      }
+      if (failed > 0) showError(`${failed} 张资产的批准没写回，请重试`);
+    },
+    [canvasStateRef, showError],
+  );
+
+  /**
+   * 分鏡批准狀態寫入（路 1 的凍結欄位；清洗走 `shotApprovalFor` → 真源 `normalizeApprovalState`）。
+   * **持久化已通**（2026-09-24 收口片）：`CanvasNodeMetadata.approval` 已宣告，且雙白名單兩端
+   * （`layout.toNodeMetadata` 讀取端、`canvas-chat-types.compactMetadataForAgent` 上行端）
+   * 都放行該鍵——刷新/回舊會話後分鏡審查面板的批准態不再消失。
+   */
+  const patchShotApproval = useCallback(
+    (nodeId: string, approval: ApprovalState) => {
+      canvasStateRef.current.patchNodeMetadata(nodeId, { approval });
+    },
+    [canvasStateRef],
+  );
+
+  const handleRejectShot = useCallback(
+    (shotId: string, reason: string) => {
+      const approval = shotApprovalFor("rejected", reason);
+      if (approval) patchShotApproval(shotId, approval);
+    },
+    [patchShotApproval],
+  );
+
+  const handleApproveAllShots = useCallback(
+    (shotIds: readonly string[]) => {
+      const approval = shotApprovalFor("approved");
+      if (!approval) return;
+      for (const shotId of shotIds) patchShotApproval(shotId, approval);
+    },
+    [patchShotApproval],
   );
 
   // ── A8：拖檔案入畫布
@@ -656,7 +877,9 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
                 onEditPrompt={(nodeId) => setPromptPanelNodeId(nodeId)}
                 promptPanelOpen={promptPanelNodeId === node.id}
                 onClosePromptPanel={() => setPromptPanelNodeId(null)}
-                onGenerateFromNode={(nodeId, prompt, options) => void handleGenerateFromNode(nodeId, prompt, options)}
+                onGenerateFromNode={(nodeId, prompt, options) =>
+                  void handleGenerateFromNode(nodeId, prompt, { ...options, entityCardIds: panelEntityIds })
+                }
                 isGenerating={isGenerating}
                 onStopGenerate={stopGeneration}
                 onOpenPromptLibrary={() => setLibraryOpen(true)}
@@ -664,6 +887,12 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
                 selectedReferenceIds={promptPanelNodeId === node.id ? panelRefIds : undefined}
                 onToggleReference={(refId) =>
                   setPanelRefIds((prev) => (prev.includes(refId) ? prev.filter((id) => id !== refId) : [...prev, refId]))
+                }
+                entityCandidates={promptPanelNodeId === node.id ? entityCandidatesFor(node.id) : undefined}
+                shotEntityCardIds={promptPanelNodeId === node.id ? shotEntityCardIdsFor(node.id) : undefined}
+                selectedEntityIds={promptPanelNodeId === node.id ? panelEntityIds : undefined}
+                onToggleEntity={(cardId) =>
+                  setPanelEntityIds((prev) => (prev.includes(cardId) ? prev.filter((id) => id !== cardId) : [...prev, cardId]))
                 }
                 batchExpanded={node.batchExpanded}
                 batchChildCount={node.batchChildren?.length}
@@ -800,6 +1029,26 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
           >
             角色卡{canvas.activeCardIds.length > 0 ? ` · ${canvas.activeCardIds.length}` : ""}
           </button>
+          {/* REQ-B2 團隊資產空間：項目資產庫（資產包 + 資產卡的作用域/掛用/顯式分享入口） */}
+          <button
+            type="button"
+            onClick={() => setProjectAssetsOpen((v) => !v)}
+            aria-pressed={projectAssetsOpen}
+            aria-label="项目资产库"
+            className="ce-embed-bar-btn lg-float pointer-events-auto cursor-pointer rounded-full font-medium text-ios-blue hover:bg-white active:bg-white"
+          >
+            项目资产
+          </button>
+          {/* G2（2026-09-16）：作品/劇集——badge 數字 = 劇集數，當前步驟顯示在面板內 */}
+          <button
+            type="button"
+            onClick={() => setCreationFlowOpen((v) => !v)}
+            aria-pressed={creationFlowOpen}
+            aria-label="作品与剧集"
+            className="ce-embed-bar-btn lg-float pointer-events-auto cursor-pointer rounded-full font-medium text-ios-blue hover:bg-white active:bg-white"
+          >
+            作品{canvas.episodes.length > 0 ? ` · ${canvas.episodes.length} 集` : ""}
+          </button>
           {expanded && (
             <button
               type="button"
@@ -839,9 +1088,14 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
           onToggleAgentAutoApprove={handleToggleAgentAutoApprove}
           onApproveAgentOps={approveAgentOps}
           cardsOpen={cardsOpen}
+          creationFlowOpen={creationFlowOpen}
+          onCloseCreationFlow={() => setCreationFlowOpen(false)}
           historyOpen={historyOpen}
           onCloseHistory={() => setHistoryOpen(false)}
           elementListOpen={elementListOpen}
+          reviewPanel={reviewPanel}
+          reviewPendingCount={reviewPendingCount}
+          onToggleReview={(panel) => setReviewPanel((prev) => (prev === panel ? null : panel))}
           canvas={canvas}
           viewportSizeRef={viewportSizeRef}
           setSelectedIds={setSelectedIds}
@@ -882,6 +1136,39 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
 
       {/* 快捷鍵幫助 / 資源庫 / 圖片編輯器（overflow 外層渲染） */}
       <CanvasShortcutsHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
+      {/* REQ-B2：項目資產庫（專案 id 由 hook 的 getProjectId 直讀，未建號則面板顯示空態） */}
+      {/* REQ-B2b：掛用＝copy-on-use——面板把副本 id 交回來，這裡鎖進項目 cardIds（生成注入讀的就是它） */}
+      <ProjectAssetLibraryPanel
+        open={projectAssetsOpen}
+        onClose={() => setProjectAssetsOpen(false)}
+        projectId={canvas.getProjectId()}
+        isLoggedIn={Boolean(buildAuthHeaders())}
+        onCopyChange={canvas.applyMountCopyChange}
+      />
+      {/* WS-審查（2026-09-24）：資產／分鏡審查面板（同一顆畫布入口 + 步驟條的外開介面；
+          決策 2：全自動檔下這兩個面板可看可改、不阻塞流程——面板本身不擋任何生成路徑） */}
+      <AssetReviewPanel
+        open={reviewPanel === "asset"}
+        onClose={() => setReviewPanel(null)}
+        cards={canvas.characterCards}
+        activeCardIds={canvas.activeCardIds}
+        interactionMode={interactionMode}
+        modelId={DEFAULT_IMAGE_MODEL_ID}
+        onRegenerate={handleRegenerateAsset}
+        onReplace={handleReplaceAsset}
+        onReject={handleRejectAsset}
+        onApproveAll={handleApproveAllAssets}
+        onSwitchToShots={() => setReviewPanel("shot")}
+      />
+      <ShotReviewPanel
+        open={reviewPanel === "shot"}
+        onClose={() => setReviewPanel(null)}
+        shots={reviewShots}
+        interactionMode={interactionMode}
+        onReject={handleRejectShot}
+        onApproveAll={handleApproveAllShots}
+        onSwitchToAssets={() => setReviewPanel("asset")}
+      />
       <CanvasLibraryPanel
         open={libraryOpen}
         onClose={() => setLibraryOpen(false)}

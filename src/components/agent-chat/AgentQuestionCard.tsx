@@ -68,7 +68,7 @@ function AgentQuestionCardComponent({ question, onAnswer }: AgentQuestionCardPro
             {item.header && (
               <p className="text-sm font-medium text-foreground/45">{item.header}</p>
             )}
-            <p className="text-ios-subhead leading-[1.5] font-semibold text-foreground">
+            <p className="text-ios-subhead font-semibold leading-[1.5] break-words text-foreground [overflow-wrap:anywhere]">
               {item.question}
             </p>
           </div>
@@ -82,7 +82,7 @@ function AgentQuestionCardComponent({ question, onAnswer }: AgentQuestionCardPro
               void submitQuestionAnswer(onAnswer, requestId, questions.map(() => []), setBusy);
             }}
             disabled={busy}
-            className="flex min-h-12 items-center justify-center gap-1.5 rounded-full bg-black/[0.06] text-ios-subhead font-semibold text-muted-foreground transition-colors duration-150 active:bg-black/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-foreground/20 disabled:cursor-not-allowed disabled:opacity-50 [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
+            className="flex min-h-12 items-center justify-center gap-1.5 rounded-full text-ios-subhead font-semibold text-muted-foreground transition-all duration-200 hover:bg-white/55 hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-foreground/20 disabled:cursor-not-allowed disabled:opacity-50 [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
           >
             重新说明
           </button>
@@ -99,7 +99,7 @@ function AgentQuestionCardComponent({ question, onAnswer }: AgentQuestionCardPro
               );
             }}
             disabled={busy}
-            className="flex min-h-12 items-center justify-center gap-1.5 rounded-full bg-ios-blue text-ios-subhead font-semibold text-white shadow-[0_4px_12px_rgba(0,122,255,0.32)] transition-all duration-200 active:scale-[0.98] active:bg-ios-blue/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/40 disabled:cursor-not-allowed disabled:bg-black/[0.12] disabled:shadow-none [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
+            className="flex min-h-12 items-center justify-center gap-1.5 rounded-full bg-[#2d3142] text-ios-subhead font-semibold text-white shadow-[0_8px_20px_rgba(45,49,66,0.18)] transition-all duration-200 hover:-translate-y-[1px] hover:bg-[#272b39] active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-foreground/20 disabled:cursor-not-allowed disabled:bg-[#2d3142]/60 disabled:shadow-none disabled:active:translate-y-0 disabled:active:scale-100 [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
           >
             {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
             明白，继续
@@ -144,7 +144,9 @@ function AgentQuestionCardComponent({ question, onAnswer }: AgentQuestionCardPro
             {item.header && (
               <p className="text-sm font-medium text-foreground/45">{item.header}</p>
             )}
-            <p className="text-ios-subhead font-semibold text-foreground">{item.question}</p>
+            <p className="text-ios-subhead font-semibold leading-[1.5] break-words text-foreground [overflow-wrap:anywhere]">
+              {item.question}
+            </p>
             {questions.length > 1 && (
               <p className="mt-0.5 text-ios-caption1 text-foreground/45">
                 {current + 1} / {questions.length}
@@ -152,7 +154,9 @@ function AgentQuestionCardComponent({ question, onAnswer }: AgentQuestionCardPro
             )}
           </div>
         </div>
-        {/* 选项是整行可点的清单项，不是一排无声的小胶囊：点下去有高亮 + 转圈回馈。 */}
+        {/* 选项是整行可点的清单项，不是一排无声的小胶囊：点下去有高亮 + 转圈回馈。
+            2026-09-20 截斷修復：label/description 都要 break-words——模型吐出的
+            選項文字可能是長英文串，白名單式 truncate 在問答卡語義裡是「藏答案」。 */}
         <div className="mt-3 flex flex-col gap-2">
           {item.options.map((opt) => {
             const isPicked = pickedLabel === opt.label;
@@ -164,7 +168,7 @@ function AgentQuestionCardComponent({ question, onAnswer }: AgentQuestionCardPro
                 onClick={() => void pick(opt.label)}
                 className={cn(
                   "flex min-h-12 w-full items-center gap-2.5 rounded-ios-xl px-4 py-2.5 text-left",
-                  "bg-ios-blue/[0.06] transition-all duration-150 active:scale-[0.99] active:bg-ios-blue/[0.14]",
+                  "bg-ios-blue/[0.06] transition-all duration-150 active:scale-[0.99] hover:bg-[rgba(0,122,255,0.12)]",
                   "focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30",
                   "disabled:cursor-wait disabled:opacity-60",
                   "touch-manipulation [-webkit-tap-highlight-color:transparent]",
@@ -172,9 +176,9 @@ function AgentQuestionCardComponent({ question, onAnswer }: AgentQuestionCardPro
                 )}
               >
                 <span className="min-w-0 flex-1">
-                  <span className="block text-ios-subhead font-semibold text-foreground">{opt.label}</span>
+                  <span className="block break-words text-ios-subhead font-semibold text-foreground [overflow-wrap:anywhere]">{opt.label}</span>
                   {opt.description && (
-                    <span className="mt-0.5 block text-sm leading-[1.5] text-muted-foreground">
+                    <span className="mt-0.5 block break-words text-sm leading-[1.5] text-foreground/60 [overflow-wrap:anywhere]">
                       {opt.description}
                     </span>
                   )}
@@ -209,7 +213,7 @@ function AgentQuestionCardComponent({ question, onAnswer }: AgentQuestionCardPro
                     setOtherText("");
                   }}
                   disabled={busy}
-                  className="flex min-h-9 items-center rounded-full px-3 text-sm font-semibold text-muted-foreground transition-colors duration-150 hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-foreground/20 disabled:cursor-not-allowed disabled:opacity-50 [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
+                  className="flex min-h-9 items-center rounded-full px-3 text-sm font-semibold text-muted-foreground transition-colors duration-150 hover:bg-white/55 hover:text-foreground/75 focus:outline-none focus-visible:ring-2 focus-visible:ring-foreground/20 disabled:cursor-not-allowed disabled:opacity-50 [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
                 >
                   取消
                 </button>
@@ -221,7 +225,7 @@ function AgentQuestionCardComponent({ question, onAnswer }: AgentQuestionCardPro
                     pick(text);
                   }}
                   disabled={busy || otherText.trim().length === 0}
-                  className="flex min-h-9 items-center gap-1.5 rounded-full bg-ios-blue px-4 text-sm font-semibold text-white shadow-[0_4px_12px_rgba(0,122,255,0.32)] transition-all duration-200 active:scale-[0.98] active:bg-ios-blue/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/40 disabled:cursor-not-allowed disabled:bg-black/[0.12] disabled:shadow-none [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
+                  className="flex min-h-9 items-center gap-1.5 rounded-full bg-[#2d3142] px-4 text-sm font-semibold text-white shadow-[0_8px_20px_rgba(45,49,66,0.18)] transition-all duration-200 hover:-translate-y-[1px] hover:bg-[#272b39] active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-foreground/20 disabled:cursor-not-allowed disabled:bg-[#2d3142]/60 disabled:shadow-none disabled:active:translate-y-0 disabled:active:scale-100 [touch-action:manipulation] [-webkit-tap-highlight-color:transparent]"
                 >
                   {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
                   提交
@@ -235,7 +239,7 @@ function AgentQuestionCardComponent({ question, onAnswer }: AgentQuestionCardPro
               onClick={() => setOtherOpen(true)}
               className={cn(
                 "flex min-h-12 w-full items-center gap-2.5 rounded-ios-xl px-4 py-2.5 text-left",
-                "bg-black/[0.03] transition-all duration-150 active:scale-[0.99] active:bg-black/[0.06]",
+                "transition-all duration-150 active:scale-[0.99] hover:bg-[rgba(0,122,255,0.12)]",
                 "focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30",
                 "disabled:cursor-wait disabled:opacity-60",
                 "touch-manipulation [-webkit-tap-highlight-color:transparent]",

@@ -1,62 +1,58 @@
 "use client";
 
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Bot, ChevronDown, X } from "lucide-react";
+import { Bot, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AgentSubagentItem } from "@/lib/agent-chat-types";
+import { AGENT_TASK_STATUS_TABLE } from "@/lib/agent-task-status";
 
 // 子代理状态栏（罪状 4）：subagent.started/delta/done 的可视化。
-// 不进消息流——置顶堆叠在转录区上方（AgentBatchProgress 旁），turn.done 时
-// reducer 已把 subagent 条目整批清掉，这里只负责「还看得见」的那几张卡。
+// 不进消息流——置顶堆叠在转录区上方（AgentBatchProgress 旁）。0921 契约：
+// turn.done 收尾**不清 running 条目**（异步子代理跨回合在跑，终态由
+// subagent.done 独占裁决），所以回合结束后在跑的子任务照常渲染在此，
+// 本组件不看 turnActive、也不该看。
+// 2026-09-20 暴君裁定（Grok 级无底色细行）：「查看全部 N 个子任务」折叠头改
+//   「派出 N 个子代理」，展开后每行同工具行风格（无卡壳）＋右端状态词与 7px 圆点。
+// 2026-09-19 暴君裁定（子任务 UI 去重）：
+//   折叠头放到列表上方，置顶三卡＋弹出面板两套重复 UI 合并为一份内联列表；
+//   默认展开、可收合（SubagentMenu 弹层整体下线）。
 // 2026-09-10 暴君裁定（子任务卡視覺迭代）：
-//   ①running 態的末行摘要換跑馬燈（marquee）——流式吐字觀感＝快；
-//   ②置頂卡暫時移除展開按鈕（ChevronDown/aria-expanded 整組下線，詳情面板
-//     代碼保留但不再從置頂卡進入；「查看全部」面板暫保留唯一入口）。
+//   running 態的末行摘要換跑馬燈（marquee）——流式吐字觀感＝快。
 
-/**
- * 可见卡选取（纯函数，node --test 可测）。至多 3 张：
- * running 的优先保留；超出名额时新出现的挤掉最旧的已完成项。
- * 返回顺序保持 transcript 原序，卡的位置不因完成而跳动。
- */
-export function pickVisibleSubagents(items: AgentSubagentItem[], max: number = 3): AgentSubagentItem[] {
-  const running: AgentSubagentItem[] = [];
-  const settled: AgentSubagentItem[] = [];
-  for (const it of items) {
-    if (it.status === "running") running.push(it);
-    else settled.push(it);
-  }
-  // running 超额：保最新的 max 张（旧的 running 也让位给新的）。
-  const keptRunning = running.length > max ? running.slice(running.length - max) : running;
-  const remaining = max - keptRunning.length;
-  const keptSettled = remaining > 0 ? settled.slice(settled.length - remaining) : [];
-  const keptIds = new Set([...keptRunning, ...keptSettled].map((it) => it.id));
-  return items.filter((it) => keptIds.has(it.id));
-}
-
+// 状态标签查 agent-task-status.ts 单一语义表（ok=已完成、error=失败，都是
+// 语义表的权威值，不再本地字面维护）；圆点着色是本行的展示层，留在这里。
+// 色彩纪律（0920）：ios-blue＝运行、深灰＝完成、灰＝停止/等待、红＝失败。
 const STATUS_DOT: Record<AgentSubagentItem["status"], string> = {
-  running: "bg-ios-orange animate-pulse",
-  ok: "bg-ios-green",
-  error: "bg-destructive",
+  running: "bg-ios-blue",
+  ok: "bg-foreground/60",
+  error: "bg-ios-red",
+  // 人工停止成功＝中性灰，不是失败（0920 款定）。
+  stopped: "bg-muted-foreground",
 };
 
 const STATUS_LABEL: Record<AgentSubagentItem["status"], string> = {
+  running: AGENT_TASK_STATUS_TABLE.running.label,
+  ok: AGENT_TASK_STATUS_TABLE.ok.label,
+  error: AGENT_TASK_STATUS_TABLE.error.label,
+  stopped: AGENT_TASK_STATUS_TABLE.stopped.label,
+};
+
+// 行尾状态词（2026-09-20 對版預覽）：与工具行同一套字面——用户看到的
+// 是「运行中／完成／失败」，不是工单状态「已完成」。
+const STATUS_WORD: Record<AgentSubagentItem["status"], string> = {
   running: "运行中",
-  ok: "已完成",
+  ok: "完成",
   error: "失败",
+  stopped: "已停止",
 };
 
-const STATUS_BADGE: Record<AgentSubagentItem["status"], string> = {
-  running: "lg-tint-blue text-ios-blue",
-  ok: "lg-tint-green text-[#248A3D]",
-  error: "lg-tint-red text-destructive",
+// 状态词着色：运行＝ios-blue，其余灰；只有失败用红（色彩纪律：红仅失败）。
+const STATUS_WORD_TONE: Record<AgentSubagentItem["status"], string> = {
+  running: "text-ios-blue",
+  ok: "text-foreground/45",
+  error: "text-ios-red",
+  stopped: "text-foreground/45",
 };
-
-/** 详情正文：收尾取摘要、进行中取串流全文，都没有就诚实说没有。 */
-function detailText(item: AgentSubagentItem): string {
-  // F4：展开区给全文（text），不再只有末行/摘要——长产出不再硬切到一行。
-  if (item.status === "running") return item.text || item.lastLine || "尚无输出";
-  return item.summary || item.text || item.lastLine || "尚无输出";
-}
 
 /**
  * DOM 上限（字元）：內容超過 HARD_CAP 才整塊裁到 KEEP 字（見 marqueeText）。
@@ -137,14 +133,15 @@ interface SubagentCardProps {
 
 function SubagentCard({ item }: SubagentCardProps) {
   return (
-    <div className="agent-rise flex w-full items-center gap-2 rounded-[16px] bg-[rgba(120,120,128,0.06)] px-3 py-2">
-      <Bot className="h-3.5 w-3.5 shrink-0 text-foreground/40" aria-hidden="true" />
-      {/* 状态点即语义：颜色 + aria-label，不靠颜色单独传达。 */}
-      <span
-        className={cn("h-2 w-2 shrink-0 rounded-full", STATUS_DOT[item.status])}
-        aria-label={STATUS_LABEL[item.status]}
-      />
-      <span className="shrink-0 text-ios-footnote font-semibold text-foreground">
+    <div className="agent-rise flex min-h-11 min-w-0 w-full items-center gap-2 rounded-[12px] px-2 -mx-2 transition-colors hover:bg-white/55">
+      <Bot className="h-4 w-4 shrink-0 text-foreground/40" aria-hidden="true" />
+      {/* 標籤（閘道給的短標籤）：舊寫法 shrink-0 沒有任何寬度上限＝長標籤
+         既不縮也不截，直接把整行撐出面板寬度（2026-09-20 根因清剿）。
+          這裡刻意用「讓位 + 換行」而不是省略號：running 行的活動流必須是
+          完整逐字滑窗（測試釘著 running 標記不得出現省略號截斷），標籤若也走
+          截斷語彙會與活動流的「全文可見」語義打架；max-w-[45%] + min-w-0 +
+          overflow-wrap:anywhere 保證它永遠不會撐破寬度。 */}
+      <span className="min-w-0 max-w-[45%] text-ios-footnote font-medium text-foreground/80 [overflow-wrap:anywhere]">
         {item.label}
       </span>
       {/* running：跑馬燈末行（活動流＝含 reasoning 的所有增量，尾巴跟隨快吐字觀感）；
@@ -156,136 +153,39 @@ function SubagentCard({ item }: SubagentCardProps) {
           {item.summary ?? item.lastLine}
         </span>
       )}
+      {/* 状态点即语义（6px 圆点）：颜色 + aria-label，不靠颜色单独传达。 */}
       <span
-        className={cn(
-          "inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold",
-          STATUS_BADGE[item.status],
-        )}
-      >
-        {STATUS_LABEL[item.status]}
-      </span>
-    </div>
-  );
-}
-
-interface SubagentMenuProps {
-  items: AgentSubagentItem[];
-  onClose: () => void;
-}
-
-/** 「查看全部」面板：lg-sheet 小卡，定位写法与设置/历史 dropdown 一致。 */
-function SubagentMenu({ items, onClose }: SubagentMenuProps) {
-  const rootRef = useRef<HTMLDivElement>(null);
-  const [openId, setOpenId] = useState<string | null>(null);
-
-  useEffect(() => {
-    const onPointerDown = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) onClose();
-    };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("mousedown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [onClose]);
-
-  const runningCount = items.filter((it) => it.status === "running").length;
-
-  return (
-    <div ref={rootRef} className="absolute inset-x-0 top-full z-50 mt-1.5">
-      {/* 底色比标准 lg-sheet 提高不透明度（0.82→0.94）：本面板罩在转录区的
-          饱和蓝用户气泡上，0.82 白 + saturate(200%) 会被采样成整片蓝染。 */}
-      <div className="lg-sheet agent-rise rounded-ios-2xl p-1" style={{ background: "rgba(255,255,255,0.94)" }}>
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-[inherit] bg-gradient-to-r from-transparent via-white to-transparent opacity-80" />
-        <div className="flex items-center justify-between px-2.5 pb-1.5 pt-2">
-          <span className="text-ios-footnote font-semibold text-foreground">
-            子任务{items.length > 0 && <span className="ml-1.5 font-normal text-muted-foreground">{items.length} 个 · 运行中 {runningCount}</span>}
-          </span>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="关闭子任务面板"
-            className="flex h-6 w-6 cursor-pointer items-center justify-center rounded-md text-foreground/40 transition-colors hover:bg-black/5 hover:text-foreground/75 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30"
-          >
-            <X className="h-3.5 w-3.5" aria-hidden="true" />
-          </button>
-        </div>
-        <div className="max-h-80 divide-y divide-black/[0.06] overflow-y-auto overscroll-contain">
-          {items.map((item) => {
-            const open = openId === item.id;
-            return (
-              <div key={item.id}>
-                <button
-                  type="button"
-                  onClick={() => setOpenId(open ? null : item.id)}
-                  aria-expanded={open}
-                  className="flex w-full cursor-pointer items-center gap-2 px-2.5 py-2 text-left transition-colors hover:bg-black/[0.04] focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ios-blue/30"
-                >
-                  <span
-                    className={cn("h-2 w-2 shrink-0 rounded-full", STATUS_DOT[item.status])}
-                    aria-label={STATUS_LABEL[item.status]}
-                  />
-                  <span className="min-w-0 flex-1 truncate text-ios-footnote font-medium text-foreground">
-                    {item.label}
-                  </span>
-                  <span
-                    className={cn(
-                      "inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold",
-                      STATUS_BADGE[item.status],
-                    )}
-                  >
-                    {STATUS_LABEL[item.status]}
-                  </span>
-                  <ChevronDown
-                    className={cn("h-3 w-3 shrink-0 text-foreground/30 transition-transform duration-300 ease-ios-spring", open && "rotate-180")}
-                    aria-hidden="true"
-                  />
-                </button>
-                {open && (
-                  <p className="whitespace-pre-wrap break-words px-2.5 pb-2.5 pt-0.5 text-ios-caption1 leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">
-                    {detailText(item)}
-                  </p>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </div>
+        className={cn("h-1.5 w-1.5 shrink-0 rounded-full", STATUS_DOT[item.status])}
+        aria-label={STATUS_LABEL[item.status]}
+      />
     </div>
   );
 }
 
 function AgentSubagentBarComponent({ items }: { items: AgentSubagentItem[] }) {
-  const visible = pickVisibleSubagents(items);
-  const [menuOpen, setMenuOpen] = useState(false);
+  // 默认展开：子任务在跑时用户要看的就是这份列表；收合由折叠头手动控制，
+  // 手动收合优先于任何自动行为（新一轮 subagent.started 不把收起的列表摊回去）。
+  const [open, setOpen] = useState(true);
   if (items.length === 0) return null;
 
   return (
-    <div className="relative flex flex-col gap-1.5" role="status" aria-label="子任务进度">
-      {visible.map((item) => (
-        <SubagentCard key={item.id} item={item} />
-      ))}
+    <div className="relative flex flex-col gap-0.5" role="status" aria-label="子任务进度">
       <button
         type="button"
-        onClick={() => setMenuOpen((o) => !o)}
-        aria-expanded={menuOpen}
-        className={cn(
-          "flex w-fit cursor-pointer items-center gap-1.5 rounded-full px-2.5 py-1 text-ios-caption1 font-medium text-foreground/45 transition-colors hover:bg-black/5 hover:text-foreground/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30",
-          menuOpen && "bg-black/5 text-foreground/70",
-        )}
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="flex min-h-11 w-fit cursor-pointer touch-manipulation items-center gap-1.5 rounded-[12px] px-2 -mx-2 text-left text-ios-footnote font-medium text-muted-foreground transition-colors hover:bg-white/55 hover:text-foreground/70 select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 [-webkit-tap-highlight-color:transparent]"
       >
-        <Bot className="h-3 w-3" aria-hidden="true" />
-        查看全部 {items.length} 个子任务
+        <Bot className="h-3.5 w-3.5 shrink-0 text-foreground/40" aria-hidden="true" />
+        派出 {items.length} 个子代理
         <ChevronDown
-          className={cn("h-3 w-3 transition-transform duration-300 ease-ios-spring", menuOpen && "rotate-180")}
+          className={cn("lg-transition h-3.5 w-3.5 shrink-0 text-foreground/45", open && "rotate-180")}
           aria-hidden="true"
         />
       </button>
-      {menuOpen && <SubagentMenu items={items} onClose={() => setMenuOpen(false)} />}
+      {open && items.map((item) => (
+        <SubagentCard key={item.id} item={item} />
+      ))}
     </div>
   );
 }

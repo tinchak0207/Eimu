@@ -256,6 +256,20 @@ export function canvasReducer(state: CanvasReducerState, action: CanvasAction): 
       };
     }
     case "patch_metadata": {
+      // 契約（metadata 直通）：此處 patch 原樣併入節點 metadata，不過白名單。
+      // **本 op 沒有 agent 入口**：`CanvasAgentOp`（types.ts:427 起的九個 op）裡沒有
+      // patch_metadata——agent 只能經 agent_ops 的 add_node/update_node 寫畫布；
+      // 本 action 的呼叫端全是前端/工具層（use-canvas-chat 的 patchNodeMetadata、
+      // revokeDownstream 下游作廢、CanvasEmbed 的批准/prompt/字號回填）。
+      // 為什麼要有白名單（理由不變）：session 內任意鍵可見、重載後只剩白名單鍵活著
+      //（唯一還原路徑 fromCanvasProject → normalizeCanvasNode → toNodeMetadata）。
+      //
+      // 2026-09-25 實測裁定：**不能收緊成「過一次 toNodeMetadata」**——本 action 的
+      // payload 裡有白名單外但**被讀**的鍵，收緊＝當場弄壞功能（非重載才壞）：
+      //   · `fontSize`：context-menu-items.ts:155/156 寫（放大/縮小字號）→ NodeBody.tsx:431 讀
+      //   · `approval`：CanvasEmbed.tsx:683 寫（分鏡批准閘）→ assets/ShotReviewPanel.tsx:144 讀
+      //   · `bytes`/`mimeType`：use-canvas-interaction.ts:443 寫（上傳回填；目前查無讀者）
+      // 要收緊的前提＝先把這些鍵加進 `layout.ts` 的 `toNodeMetadata`（白名單真源不在本檔）。
       return {
         ...state,
         nodes: state.nodes.map((n) =>
@@ -265,6 +279,29 @@ export function canvasReducer(state: CanvasReducerState, action: CanvasAction): 
     }
     case "agent_ops": {
       // Agent 批量操作原子套用：一次 dispatch = 撤銷棧一格，中途壞 op 跳過不炸整批。
+      // 契約（metadata 直通，2026-09-24 WS11）：本分派的 add_node（normalizeAgentNode 的
+      // raw.metadata）與 update_node（op.patch.metadata）都是**原始 metadata 直通，刻意不過
+      // 白名單**——agent 在同一 session 內可寫任意鍵；重載後只有存在於兩處白名單
+      //（layout.ts toNodeMetadata ＋ canvas-chat-types.ts compactMetadataForAgent）的鍵會活
+      // 下來，因為 fromCanvasProject → normalizeCanvasNode → toNodeMetadata 是唯一還原路徑。
+      // 消費端自行清洗（例：agent-output-cards.emittedEntityOf 對非法 kind 回 null）。
+      //
+      // 2026-09-25 實測裁定（逐鍵清點後）：**不能照「過一次 toNodeMetadata」收緊**——差集裡
+      // 有被讀的鍵，且不只 LLM 亂塞的鍵，還有**設計上必須透傳**的 DSL 通道：
+      //   · workflow-dsl/compile.ts:328-343 經本分派發 add_node/update_node，metadata 由
+      //     buildStepMetadata 組裝（compile.ts:129-131 寫 `workflow_ns` / `stepId` /
+      //     `stepIndex`）＋ `step.meta` 任意鍵透傳（compile.ts:139-141）；反推端
+      //     decompile.ts:87/102 讀回 `workflow_ns`/`stepId`/`stepIndex`/meta 做畫布→DSL
+      //     還原（workflow-dsl.test.ts:266 釘死「meta 透傳＝白名單外剩餘」）。
+      //     白名單外鍵一剝＝這條雙向契約單邊斷（AI 筆 workflow_write 通道為活路：
+      //     /api/v1/workflow/compile → canvas_apply_ops）。
+      //   · 其餘白名單外**被讀**的鍵（NodeBody.tsx:396/397/406/621 讀 description/
+      //     key_features/locked/inputFrom；CanvasNodeView.tsx:335/390/391 讀 role/
+      //     shot_size/camera_move；CanvasEmbed.tsx:395/412 與 use-canvas-chat.ts:333 讀
+      //     session_id；use-canvas-generation.ts:304 讀 referenceNodeIds）。
+      // 收緊的唯一正解＝先把要放行的鍵加進 `layout.ts` 的 `toNodeMetadata`（白名單真源不在
+      // 本檔），再回來把這裡改成過白名單。在那之前維持直通，消費端自行清洗。
+      // 未列舉白名單外且無讀者的死資料：batchIndex / batchTotal / storageKey / stepName / toolIds。
       let next = state;
       for (const op of action.ops) {
         switch (op.type) {
@@ -284,6 +321,8 @@ export function canvasReducer(state: CanvasReducerState, action: CanvasAction): 
                       ...(op.patch.position ? { position: op.patch.position, moved: true } : {}),
                       ...(typeof op.patch.width === "number" ? { width: Math.max(120, op.patch.width) } : {}),
                       ...(typeof op.patch.height === "number" ? { height: Math.max(90, op.patch.height) } : {}),
+                      // 契約：op.patch.metadata 原樣併入（不過白名單）——2026-09-25 逐鍵清點後
+                      // 確認收緊會剝掉被讀鍵，維持直通，理由見 agent_ops 開頭註釋。
                       ...(op.patch.metadata ? { metadata: { ...n.metadata, ...op.patch.metadata } } : {}),
                     }
                   : n,
@@ -301,6 +340,12 @@ export function canvasReducer(state: CanvasReducerState, action: CanvasAction): 
             break;
           case "delete_connections":
             next = { ...next, connections: next.connections.filter((c) => !op.ids.includes(c.id)) };
+            break;
+          case "set_project_meta":
+            // 專案級欄位（projectType/currentStep/episodes）在 CanvasProject 頂層，
+            // 不在 reducer state 裡，且不進撤銷棧（CanvasSnapshot 只有 nodes/connections/
+            // viewport）——由 hook 層 applyAgentOps 呼叫 setProjectMeta 執行。
+            // 這裡顯式列出而非落 default：新增 op 時若誤以為 reducer 會處理，行為會靜默消失。
             break;
           default:
             // select_nodes / set_viewport / run_generation 不是畫布結構，hook 層處理。
@@ -329,6 +374,8 @@ function normalizeAgentNode(
     position: raw.position ?? { x: 40, y: 40 },
     width: raw.width ?? preset.width,
     height: raw.height ?? preset.height,
+    // 契約：raw metadata 原始直通（不過白名單）——2026-09-25 逐鍵清點後確認
+    // 收緊會剝掉被讀鍵（含 DSL 通道的 step.meta 透傳），維持直通，見 agent_ops 開頭註釋。
     ...(raw.metadata ? { metadata: raw.metadata } : {}),
     moved: true,
   };

@@ -433,8 +433,11 @@ function storyboardQc(input: unknown): ShortDramaToolResult<StoryboardQcOutput> 
     gate("shot_identity", every((shot) => Boolean(shot.shotId)) && uniqueShotIds.size === shots.length, "shot ids are present and unique"),
     gate("shot_order", ordered, "shot order is contiguous"),
     gate("scene_binding", every((shot) => Boolean(shot.sceneId)), "each shot is bound to a scene"),
-    gate("duration_bounds", every((shot) => shot.durationSeconds >= 2 && shot.durationSeconds <= 5), "each shot is 2-5 seconds"),
-    gate("segment_duration", segmentDuration > 0 && segmentDuration <= 15, "segment is at most 15 seconds"),
+    // 2026-09-20 暴君裁定：上游视频按条计费（5/15/30s 同价），按条秒数最大化才划算。
+    // 单镜上限 2→30s（允许打满 seedance-2.5 480p/30s 固定档；2.0 档 10-15s 同样在界内）。
+    gate("duration_bounds", every((shot) => shot.durationSeconds >= 2 && shot.durationSeconds <= 30), "each shot is 2-30 seconds (per-clip billing: fill the model's largest slot)"),
+    // 段长去 15s 上限：总长由创作需求决定，门禁只验「已声明且为正」；拆条打满档位是分镜纪律不是门禁。
+    gate("segment_duration", segmentDuration > 0, "segment duration is declared and positive (split into max-slot clips, e.g. 80s -> 30+30+20)"),
     gate("prompt_present", every((shot) => Boolean(shot.prompt)), "each shot has a prompt"),
     gate("characters_bound", every((shot) => (shot.characterCardIds?.length ?? 0) > 0), "each shot has character bindings"),
     gate("scenes_bound", every((shot) => (shot.sceneCardIds?.length ?? 0) > 0), "each shot has scene bindings"),
@@ -544,7 +547,7 @@ function videoChain(input: unknown, capabilities: ShortDramaCapabilities): Short
   const gates = [
     gate("shots_ordered", shots.length > 0 && shots.every((shot) => Boolean(shot.shotId)), "shots have stable order"),
     gate("last_frame_reference_present", shots.every((shot, index) => Boolean(index === 0 ? shot.keyframeId : shot.lastFrameId)), "each shot has an input frame reference"),
-    gate("duration_bounds", shots.every((shot) => shot.durationSeconds >= 2 && shot.durationSeconds <= 5), "each shot is 2-5 seconds"),
+    gate("duration_bounds", shots.every((shot) => shot.durationSeconds >= 2 && shot.durationSeconds <= 30), "each shot is 2-30 seconds (per-clip billing: fill the model's largest slot)"),
     gate("video_upstream_available", Boolean(capabilities.videoGeneration?.provider), "video provider is declared"),
   ];
   if (!capabilities.videoGeneration?.provider) {

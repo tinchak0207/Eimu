@@ -78,6 +78,16 @@ export function mapayMoneyMatches(actual: string | undefined, expected: number):
   return Number(actual).toFixed(2) === formatMapayMoney(expected);
 }
 
+/** 渠道手續費容忍：實收必須 ≥ 應收（少付一律拒），超出部分 ≤ max(0.5 元, 5%)。 */
+export function mapayMoneyAcceptable(actual: string | undefined, expected: number): boolean {
+  const n = Number(actual);
+  if (!Number.isFinite(n) || actual === undefined || actual === "") return false;
+  const eps = 0.005;
+  if (n + eps < expected) return false;
+  const cap = expected + Math.max(0.5, expected * 0.05);
+  return n <= cap + eps;
+}
+
 export function buildMapayCheckoutFields(input: {
   config: MapayConfig;
   orderId: string;

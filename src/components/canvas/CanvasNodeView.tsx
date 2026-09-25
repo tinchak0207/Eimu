@@ -16,9 +16,10 @@
 // props 顯式轉發給 NodeBody（46 個 props 介面債就地償還，不引入 context——避免 memo 失效）。
 
 import { useEffect, useState } from "react";
-import { X, RefreshCw, Edit2, ChevronDown, ChevronUp, Image as ImageIcon, Download, Wrench, ShieldCheck, FileText, Type, User, Mountain, Boxes, Paperclip, AudioLines, Video as VideoIcon, SlidersHorizontal, Clapperboard } from "lucide-react";
+import { X, RefreshCw, Edit2, ChevronDown, ChevronUp, Image as ImageIcon, Download, Wrench, ShieldCheck, Lightbulb, FileText, Type, User, Mountain, Boxes, Paperclip, AudioLines, Video as VideoIcon, SlidersHorizontal, Clapperboard } from "lucide-react";
 import { CanvasNodeHoverToolbar } from "./CanvasNodeHoverToolbar";
 import { CanvasNodePromptPanel } from "./CanvasNodePromptPanel";
+import type { CanvasEntityCandidate } from "./CanvasNodePromptPanel";
 import { cn } from "@/lib/utils";
 import { CanvasNodeType, type CanvasNode, type CanvasNodeStatus } from "@/lib/canvas/types";
 import { REFERENCE_IMAGE_ROLES } from "../pro-workstation/workstation-constants";
@@ -27,6 +28,7 @@ import type { ReferenceImageRole } from "@/lib/image-types";
 import { STATUS_LABEL, TYPE_LABEL, RESIZE_HANDLES } from "./node-view/constants";
 import { useNodeGestures } from "./node-view/use-node-gestures";
 import { NodeBody } from "./node-view/NodeBody";
+import { EntityThumbStack, entitiesInText } from "@/components/entities/entity-chip";
 
 export interface CanvasNodeViewProps {
   node: CanvasNode;
@@ -75,6 +77,12 @@ export interface CanvasNodeViewProps {
   referenceCandidates?: { nodeId: string; title: string; previewUrl: string }[];
   selectedReferenceIds?: string[];
   onToggleReference?: (referenceNodeId: string) => void;
+  /** 素材卡 @引用（透傳給內嵌 prompt 面板；角色/場景/風格/道具卡） */
+  entityCandidates?: CanvasEntityCandidate[];
+  selectedEntityIds?: string[];
+  onToggleEntity?: (cardId: string) => void;
+  /** 本鏡節點已指定的實體卡 id（透傳給內嵌 prompt 面板；供清單的 "shot" 來源） */
+  shotEntityCardIds?: string[];
   /** A1：port 拖線起點（節點左右緣圓點按下）。 */
   onStartPortDrag?: (nodeId: string, side: "left" | "right", clientX: number, clientY: number) => void;
   /** A7：hover 上報（宿主做鄰接高亮）。 */
@@ -129,6 +137,10 @@ export function CanvasNodeView({
   referenceCandidates,
   selectedReferenceIds,
   onToggleReference,
+  entityCandidates,
+  selectedEntityIds,
+  onToggleEntity,
+  shotEntityCardIds,
   onStartPortDrag,
   onHoverChange,
   adjacent,
@@ -189,6 +201,7 @@ export function CanvasNodeView({
       case CanvasNodeType.Text:
         if (node.metadata?.pipelineCard === "tool") return { label: "工具", Icon: Wrench, cls: "bg-[rgba(0,122,255,0.12)] text-ios-blue", bar: "bg-ios-blue" };
         if (node.metadata?.pipelineCard === "gate") return { label: "门禁", Icon: ShieldCheck, cls: "bg-[rgba(255,149,0,0.14)] text-[#B96A00]", bar: "bg-[#B96A00]" };
+        if (node.metadata?.pipelineCard === "note") return { label: "配方", Icon: Lightbulb, cls: "bg-[rgba(255,204,0,0.16)] text-[#8A6D00]", bar: "bg-[#C79A00]" };
         return { label: "文本", Icon: Type, cls: "bg-black/5 text-muted-foreground", bar: "bg-black/30" };
       case CanvasNodeType.Prompt:
         return { label: "提示词", Icon: Type, cls: "bg-ios-blue/10 text-ios-blue", bar: "bg-ios-blue" };
@@ -284,6 +297,9 @@ export function CanvasNodeView({
             状态语义已由标题栏右侧状态徽章承担，顶线只表达节点身份。 */}
         <div className={cn("h-[3px] w-full shrink-0", typeBadge.bar)} />
         <div className="flex items-center gap-2 px-3 py-2">
+          {/* 卡面左緣微縮圖：標題字串（node.title）裡引用了哪些實體一眼可見。
+              無實體時 EntityThumbStack 回 null ⇒ 零 DOM、零位移。 */}
+          <EntityThumbStack entities={entitiesInText(node.title)} />
           {editingTitle !== null ? (
             <input
               data-canvas-interactive
@@ -506,6 +522,10 @@ export function CanvasNodeView({
           referenceCandidates={referenceCandidates}
           selectedReferenceIds={selectedReferenceIds}
           onToggleReference={onToggleReference}
+          entityCandidates={entityCandidates}
+          selectedEntityIds={selectedEntityIds}
+          onToggleEntity={onToggleEntity}
+          shotEntityCardIds={shotEntityCardIds}
           onStop={onStopGenerate}
           onOpenPromptLibrary={onOpenPromptLibrary}
         />

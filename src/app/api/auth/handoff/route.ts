@@ -4,7 +4,8 @@ import { claimHandoff, createHandoffTicket, pollHandoff } from "@/lib/pwa-handof
 export const preferredRegion = "sfo1";
 
 // PWA 跨浏览器登录交接：
-//   POST ?action=create → 签发 ticket，返回在常用浏览器打开的 loginUrl；
+//   POST ?action=create[&provider=github|google] → 签发 ticket，返回在常用浏览器
+//        打开的 loginUrl（provider 白名单，缺省/未知值一律 github，默认行为零回归）；
 //   GET  ?ticket=       → PWA 轮询投递状态；
 //   POST ?action=claim  → 原子一次性消费，Set-Cookie 种登录态。
 // Cookie flags 逐字对齐 /api/auth/github/callback（napi_token/napi_user，
@@ -13,12 +14,14 @@ export const preferredRegion = "sfo1";
 export async function POST(req: NextRequest) {
   const action = req.nextUrl.searchParams.get("action");
   if (action === "create") {
+    // provider 白名单：只有显式 google 才走 Google，其余（缺省/垃圾值）回落 github。
+    const provider = req.nextUrl.searchParams.get("provider") === "google" ? "google" : "github";
     try {
       const ticket = await createHandoffTicket();
       return NextResponse.json({
         success: true,
         ticket,
-        loginUrl: `/api/auth/github/start?handoff=${ticket}`,
+        loginUrl: `/api/auth/${provider}/start?handoff=${ticket}`,
       });
     } catch (error) {
       console.error("[auth/handoff:create]", error);
