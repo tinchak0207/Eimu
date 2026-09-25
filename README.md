@@ -27,6 +27,10 @@
 </p>
 
 <p align="center">
+  <video src="https://github.com/user-attachments/assets/f2f78020-f1f4-4907-a024-c643f867c8d1" width="100%"></video>
+</p>
+
+<p align="center">
   <a href="#产品预览">
     <img src="docs/preview/01-workstation.png" alt="Eimu 生图工作台：需求输入、参数选择与结果呈现同屏" width="100%">
   </a><br>
