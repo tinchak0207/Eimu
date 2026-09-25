@@ -4,6 +4,7 @@ import { memo, useState } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { EntityText } from "@/components/entities/entity-chip";
 import {
   isImageUrl,
   parseAgentMarkdown,
@@ -49,7 +50,7 @@ function AgentImageThumb({ src, alt, onOpen }: { src: string; alt: string; onOpe
 function InlineSpan({ span, onOpenImage }: { span: MdInline; onOpenImage: (src: string, alt: string) => void }) {
   switch (span.k) {
     case "text":
-      return <>{span.text}</>;
+      return <EntityText text={span.text} />;
     case "strong":
       return <strong className="font-semibold">{span.children.map((c, i) => <InlineSpan key={i} span={c} onOpenImage={onOpenImage} />)}</strong>;
     case "em":

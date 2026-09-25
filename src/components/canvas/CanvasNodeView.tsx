@@ -28,6 +28,7 @@ import type { ReferenceImageRole } from "@/lib/image-types";
 import { STATUS_LABEL, TYPE_LABEL, RESIZE_HANDLES } from "./node-view/constants";
 import { useNodeGestures } from "./node-view/use-node-gestures";
 import { NodeBody } from "./node-view/NodeBody";
+import { EntityThumbStack, entitiesInText } from "@/components/entities/entity-chip";
 
 export interface CanvasNodeViewProps {
   node: CanvasNode;
@@ -296,6 +297,9 @@ export function CanvasNodeView({
             状态语义已由标题栏右侧状态徽章承担，顶线只表达节点身份。 */}
         <div className={cn("h-[3px] w-full shrink-0", typeBadge.bar)} />
         <div className="flex items-center gap-2 px-3 py-2">
+          {/* 卡面左緣微縮圖：標題字串（node.title）裡引用了哪些實體一眼可見。
+              無實體時 EntityThumbStack 回 null ⇒ 零 DOM、零位移。 */}
+          <EntityThumbStack entities={entitiesInText(node.title)} />
           {editingTitle !== null ? (
             <input
               data-canvas-interactive

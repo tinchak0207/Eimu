@@ -13,6 +13,7 @@ import { svgToDataUrl } from "@/lib/svg-data-url";
 import { DirectorMiniViewport } from "@/components/director-mini/DirectorMiniViewport";
 import { buildAuthHeaders } from "../embed/embed-helpers";
 import { Scene3dCardBody } from "./Scene3dCardBody";
+import { EntityText } from "@/components/entities/entity-chip";
 import { StoryboardSceneBody, StoryboardShotBody } from "./StoryboardShotBody";
 import { STATUS_LABEL } from "./constants";
 
@@ -409,7 +410,7 @@ export function NodeBody({
               </span>
             )}
             {description.trim() ? (
-              <p className="whitespace-pre-wrap break-words text-[13.5px] leading-relaxed text-muted-foreground">{description}</p>
+              <p className="whitespace-pre-wrap break-words text-[13.5px] leading-relaxed text-muted-foreground"><EntityText text={description} /></p>
             ) : (
               <span className="text-ios-caption1 text-muted-foreground">（未填写描述）</span>
             )}
@@ -522,7 +523,7 @@ export function NodeBody({
                     <ShieldCheck className="h-3 w-3 shrink-0 text-ios-orange" aria-hidden="true" />
                     <span className="text-[11px] font-medium uppercase leading-none tracking-[0.18em] text-muted-foreground/70">验收条件</span>
                   </div>
-                  <p className="break-words text-[13px] leading-relaxed text-foreground">{text}</p>
+                  <p className="break-words text-[13px] leading-relaxed text-foreground"><EntityText text={text ?? ""} /></p>
                   {metadata?.gateConfirm && <GateConfirmActions confirm={metadata.gateConfirm} />}
                 </>
               ) : (
@@ -532,7 +533,7 @@ export function NodeBody({
                     <span className="text-[11px] font-medium uppercase leading-none tracking-[0.18em] text-muted-foreground/70">配方</span>
                   </div>
                   {text?.trim() ? (
-                    <p className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-foreground">{text}</p>
+                    <p className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-foreground"><EntityText text={text} /></p>
                   ) : (
                     <span className="text-ios-caption1 text-muted-foreground">（未填写配方）</span>
                   )}
@@ -564,13 +565,13 @@ export function NodeBody({
                 </span>
                 <p className="mt-1.5 break-words text-[13px] leading-relaxed text-foreground">{deliverableText}</p>
                 {text?.trim() ? (
-                  <p className="mt-1.5 whitespace-pre-wrap break-words">{text}</p>
+                  <p className="mt-1.5 whitespace-pre-wrap break-words"><EntityText text={text} /></p>
                 ) : (
                   <span className="mt-1.5 block text-ios-caption1 text-muted-foreground">{emptyHint}</span>
                 )}
               </>
             ) : text?.trim() ? (
-              text
+              <EntityText text={text} />
             ) : (
               <span className="text-ios-caption1 text-muted-foreground">{emptyHint}</span>
             )}
@@ -657,7 +658,7 @@ export function NodeBody({
               </div>
             ))}
             {content && (
-              <p className="whitespace-pre-wrap break-words text-[13.5px] leading-relaxed text-foreground">{content}</p>
+              <p className="whitespace-pre-wrap break-words text-[13.5px] leading-relaxed text-foreground"><EntityText text={content} /></p>
             )}
           </div>
         );
