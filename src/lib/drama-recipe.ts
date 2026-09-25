@@ -11,7 +11,7 @@
 //   - 资产清单 → deriveRequiredAssets（引用卡 id 全集，代码可复验）
 // 模型只产出语义字段；本文件所有函数零副作用、零 IO。
 
-import { applyCharacterCards } from "./character-cards";
+import { applyCharacterCards, mergeTokenReferencedCards } from "./character-cards";
 import type { CharacterCard, CharacterCardKind, CharacterCardReferenceImage } from "./character-cards";
 
 // ─────────────────────────────────────────── 段名与常量
@@ -431,6 +431,8 @@ function resolveCardRefs(
  *   - prompt = 段提示词 + 被引用卡锁定片段（applyCharacterCards：卡 id 升序前缀、幂等）
  *   - referenceImages = 被引用卡参考图（url 去重、角色保留）
  *   - negativePrompt = 段级负面词 + 卡负面词合并
+ *   - 段提示词里的 `@[種類:名]` token 會就地解析：命中**卡庫全量**（不只分鏡宣告的卡）時
+ *     併入注入集（mergeTokenReferencedCards）——卡在庫即可被引用，不必先手動鎖定
  *   - propCardIds 的道具卡与角色/场景卡**同批**进 applyCharacterCards（同一把注入尺，不另开通道）
  *   - 引用卡 id 不存在或种类不符 → 该任务 needsAsset=true + missingCardIds，
  *     已解析卡照常注入（补齐资产后重切结果稳定）
@@ -448,9 +450,13 @@ export function storyboardToBatchTasks(storyboard: unknown, cards: CharacterCard
     // 卡 id 序稳定拼接：applyCharacterCards 内部按 id 升序注入，与传入顺序无关。
     // 顺序照写 character → scene → prop（只影响可读性：applyCharacterCards 内部本就按 id 升序重排）。
     const appliedCards = [...characterRefs.found, ...sceneRefs.found, ...propRefs.found];
-    const applied = applyCharacterCards(shot.prompt, appliedCards);
+    // 本段 prompt token 就地解析（2026-09-25）：卡在庫即可被 `@[種類:名]` 引用，不必先手動鎖定。
+    // 判準/聯集全在 mergeTokenReferencedCards（純函式）；零 token／全未命中＝回同一陣列參考，
+    // 故既有「只注入分鏡宣告的卡」行為逐位元不變。
+    const injectedCards = mergeTokenReferencedCards(appliedCards, cards, shot.prompt);
+    const applied = applyCharacterCards(shot.prompt, injectedCards);
     const loraIds: string[] = [];
-    for (const card of appliedCards) {
+    for (const card of injectedCards) {
       for (const loraId of card.loraIds ?? []) {
         if (!loraIds.includes(loraId)) loraIds.push(loraId);
       }

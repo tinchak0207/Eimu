@@ -16,7 +16,7 @@ import {
 } from "@/lib/canvas/semantic-nodes";
 import { toReferenceImageRole } from "@/lib/image-types";
 import type { ReferenceImageRole } from "@/lib/image-types";
-import { applyCharacterCardsToPayload } from "@/lib/character-cards";
+import { applyCharacterCardsToPayload, mergeTokenReferencedCards } from "@/lib/character-cards";
 import type { CardAwareGeneratePayload, CharacterCard } from "@/lib/character-cards";
 import { createBatchChildNode } from "@/lib/canvas/batch-utils";
 import { generationCapabilities } from "@/lib/generation-model-catalog";
@@ -83,6 +83,8 @@ export function useCanvasGeneration({
    *   - 不傳：逐位元既有行為（用 canvasStateRef 的 activeCharacterCards 全量注入）
    *   - 傳：用指定的卡子集注入，並把 referenceScope 交給 applyCharacterCardsToPayload
    *     （"referenced" = 本鏡只行內 @ 引用了這幾張卡，其餘鎖定卡不進本鏡）
+   * 卡集最後再併入**本段 prompt token 引用到的卡**（mergeTokenReferencedCards：卡在庫即可
+   * 被 @ 引用，不必先手動鎖定；零 token／全未命中＝同一陣列參考，逐位元等價）。
    */
   const callCanvasGenerate = useCallback(
     async (
@@ -92,7 +94,16 @@ export function useCanvasGeneration({
     ) => {
       const headers = buildAuthHeaders();
       if (!headers) throw new Error("请先登录再生成图片");
-      const lockedCards = cardsOverride?.cards ?? canvasStateRef.current.activeCharacterCards ?? [];
+      const baseCards = cardsOverride?.cards ?? canvasStateRef.current.activeCharacterCards ?? [];
+      // 本段提示詞 token 就地解析（2026-09-25）：卡在庫即可被 @ 引用，不必先手動鎖定——
+      // 把命中 token 的卡併入注入集（聯集，不自動鎖定、不改鎖定語義）。
+      // 顯式關閉注入（cards: []，資產重生成那條路）＝不併入：該 payload 的參考圖已顯式給定，
+      // 再注入一次會把「要被換掉的那張圖」同時當參考（把錯誤傳染給新圖）。
+      const explicitOff = !!cardsOverride && cardsOverride.cards.length === 0;
+      const promptText = typeof payload.prompt === "string" ? payload.prompt : "";
+      const lockedCards = explicitOff
+        ? baseCards
+        : mergeTokenReferencedCards(baseCards, canvasStateRef.current.characterCards, promptText);
       let finalPayload: Record<string, unknown> = lockedCards.length
         ? applyCharacterCardsToPayload(payload as CardAwareGeneratePayload, lockedCards as CharacterCard[], cardsOverride ? { referenceScope: cardsOverride.referenceScope } : undefined)
         : payload;

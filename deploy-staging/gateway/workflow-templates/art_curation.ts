@@ -63,6 +63,9 @@ export const artCurationTemplate: WorkflowTemplate =
         role: "style_anchor",
         kind: "image",
         title: "风格锚（canonical key art）",
+        // 实体宣告（2026-09-24）：canonical key art + style DNA 是**一张风格卡**的交付物，
+        // 画布侧据此自动落卡（后续可 @ 引用该风格锚）。
+        defaults: { emitsEntity: { kind: "style", nameFrom: "input" } },
         deliverable: "canonical key art 一张（全展定调之作）+ style DNA 文字描述（笔触/光源/构图法则/渲染质感）",
         gate: "key art 与 style DNA 互证：拿描述反查画面，四个维度全部可指认才算铸成",
         notes: [
@@ -71,6 +74,7 @@ export const artCurationTemplate: WorkflowTemplate =
           "key art 定稿后锁定为 sref / 风格参考锚，成组阶段所有图共用此锚",
           "prompt 里显式写『本作为本展 canonical key art，气质 = 立意句』",
           "光源法则写成可执行参数：方向（如 45° 侧逆光）+ 硬度（硬光/柔光）+ 色温（如主光 5500K 暖补 3200K），全系列生图逐字复用，换词=换气质",
+          "交付本节点时把风格名写进节点 metadata 的 input 字段——画布侧据它自动落成风格卡并当卡名，缺了卡名只能退回节点标题「风格锚（canonical key art）」",
         ],
         tools: [
           { id: "style_anchor_sref", input: "风格参考图", output: "风格锚（sref 级固定后缀模板）" },

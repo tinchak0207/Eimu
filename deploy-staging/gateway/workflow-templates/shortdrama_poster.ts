@@ -23,6 +23,9 @@ export const shortdramaPosterTemplate: WorkflowTemplate =
         role: "key_art",
         kind: "image",
         title: "剧设 key art 主视觉（竖版 9:16）",
+        // 实体宣告（2026-09-24）：剧设 key art + 色彩情绪规范是**一张风格卡**的交付物
+        // （全剧物料的 sref 风格锚），画布侧据此自动落卡。
+        defaults: { emitsEntity: { kind: "style", nameFrom: "input" } },
         deliverable: "剧设 key art 主视觉 1 张（竖版 9:16）+ 色彩情绪规范 JSON（主色/辅色/对比度/光效方向/情绪关键词）",
         gate: "色彩规范 JSON 字段齐全（含 HEX/光效/情绪词各≥2），key art 与剧名题材气质对位，否则重出",
         notes: [
@@ -32,6 +35,7 @@ export const shortdramaPosterTemplate: WorkflowTemplate =
           "规范 JSON 字段执行细则：主色 HEX×2（背景基调+人物高光）、辅色 HEX×2、光效字段≥2（如伦勃朗光/轮廓光，各带方向角与强度档 1-5）、情绪词≥2，任一字段缺失按 gate 打回",
           "style_dna_extract 先解构 2-3 张同题材对标爆款海报（笔触/色板/构图三栏 DNA 表），再拼 key art 提示词，不凭空起稿",
           "规范 JSON 与 key art 同步冻结，后续步骤禁止漂移",
+          "交付本节点时把风格名写进节点 metadata 的 input 字段——画布侧据它自动落成风格卡并当卡名，缺了卡名只能退回节点标题「剧设 key art 主视觉（竖版 9:16）」",
         ],
         tools: [
           { id: "style_dna_extract", input: "key art/参考图", output: "风格 DNA 解构表（笔触/色板/构图）" },

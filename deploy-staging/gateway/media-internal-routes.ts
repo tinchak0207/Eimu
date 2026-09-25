@@ -20,6 +20,7 @@ import { emitQuotaChanged, appendLedgerFor } from "./quota-ledger.ts"
 import { humanMessageFor } from "./humanize-gw.ts"
 import { wfGenerateContinuations, workflowGenerateApproved, workflowBilling, runWfGenerate, resumeWorkflowGate } from "./workflow-gw.ts"
 import { contentTypeForExt } from "./uploads-media.ts"
+import { resolveAudioEntityTokens } from "./entity-resolve.ts"
 
 // POST /internal/media/upload — agent 素材入庫：服務端下載外部影片/音頻 URL →
 // 平台存儲（image-data uploads 目錄，公網面 store.tinchak0207.xyz/image-data/files/）。
@@ -335,6 +336,17 @@ export async function handleTts(key: string, req: Request): Promise<Response> {
     )
   }
 
+  // 行內實體 tag（`@[音频:夜雨环境音]`）展開（2026-09-25，音頻卡接線）。
+  // 背景：`applyCharacterCards(..., { target: "audio" })` 此前**零生產呼叫端**——音頻卡只是
+  // 型別層能力，`tts_speak` 收到 `@[音频:X]` 只會把字面串念出來。這裡在**送上游前**補上：
+  // 文字含 `@[` 才打站點（零 token 零 HTTP），站點用 `target:"audio"` 就地展開音頻卡的鎖定片段。
+  // **fail-open 硬契約**：解析失敗／逾時／形狀不符／缺 key → 原文照送，永不阻斷配音
+  // （薄客戶端 entity-resolve.ts 已內建；其 warn 只印長度與 status，prompt 全文與 key 永不落 log）。
+  const ttsText = await resolveAudioEntityTokens(text, undefined, { apiKey: key })
+  if (ttsText.prompt !== text) {
+    console.info(`[tts] 已展开行内实体 tag：prompt_length=${text.length}→${ttsText.prompt.length}`)
+  }
+
   // 上游可用路徑（目前現實中走不到，保留完整閉環以便上游接入後即刻生效）
   try {
     const res = await fetch(`${TTS_UPSTREAM.base}${TTS_UPSTREAM.speechPath}`, {
@@ -342,7 +354,7 @@ export async function handleTts(key: string, req: Request): Promise<Response> {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model: TTS_UPSTREAM.model,
-        input: text,
+        input: ttsText.prompt,
         voice: body.voice || TTS_UPSTREAM.voice,
         response_format: "mp3",
       }),

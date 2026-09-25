@@ -23,6 +23,9 @@ export const ecomLaunchTemplate: WorkflowTemplate =
         role: "product_card",
         kind: "image",
         title: "白底产品锁（DNA 基准图）",
+        // 实体宣告（2026-09-24）：白底产品锁 + 产品 DNA 是**一张道具卡**的交付物，
+        // 画布侧据此自动落卡（后续可 @ 引用该产品）。
+        defaults: { emitsEntity: { kind: "prop", nameFrom: "input" } },
         deliverable: "纯净白底产品图 + RMBG 透明底抠图 + 产品 DNA JSON（形状/颜色/材质/包装标签/LOGO位置/不可变特征）",
         gate: "VLM 门禁：对照原图校验形状、标签文字、LOGO 零变形零乱码，任一不符重出，未过禁入下一步",
         notes: [
@@ -30,6 +33,7 @@ export const ecomLaunchTemplate: WorkflowTemplate =
           "RMBG 抠图后检查边缘无残留光晕，半透明材质（玻璃/纱）保留 Alpha 通透",
           "DNA JSON 用 Product accuracy 字段显式声明 shape/color/packaging/label/material 等不可变特征",
           "负向约束固定尾缀：no fake text, no label distortion, no extra products, no warp",
+          "交付本节点时把产品名写进节点 metadata 的 input 字段——画布侧据它自动落成道具卡并当卡名，缺了卡名只能退回节点标题「白底产品锁（DNA 基准图）」",
         ],
         tools: [
           { id: "product_lock", input: "商品图", output: "商品 DNA 锁定（形变/色彩基准）" },

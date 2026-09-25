@@ -18,8 +18,14 @@ import { createHash } from "node:crypto";
 import { put } from "@/lib/blob-backend";
 import { validateImageBuffer } from "@/lib/generation-core/artifact-service";
 import type { GenerationReference, GenerationWorkflow } from "@/lib/generation-core/types";
+import { applyCharacterCards } from "./character-cards";
 import type { CharacterCard } from "./character-cards";
-import { expandEntityTokens, parseEntityTokens } from "./entity-tokens";
+import {
+  expandEntityTokens,
+  findMalformedEntityTokens,
+  parseEntityTokens,
+  type MalformedEntityToken,
+} from "./entity-tokens";
 
 // ─────────────────────────────────────────── 純搬移（原 edits 私有 helper）
 
@@ -220,6 +226,41 @@ function dedupeSpecsByUrl(specs: readonly ReferenceImageSpec[]): ReferenceImageS
   return out;
 }
 
+// ─────────────────────────────────────────── 生成鏈路（target）形狀校驗
+
+/**
+ * 生成鏈路值域。`"image"`＝視覺（既有行為）；`"audio"`＝音頻（只有音頻卡參與、無參考圖語義）。
+ */
+export type BizGenerationTarget = "image" | "audio";
+
+export const BIZ_GENERATION_TARGET_VALUES: readonly BizGenerationTarget[] = ["image", "audio"];
+
+/**
+ * `target` body 欄位的形狀校驗（純函式，零 I/O）。
+ *
+ * 契約：缺省／`null` → `"image"`（＝既有行為，逐位元不變）；值域外一律 **400
+ * `invalid_target`**，**不默默收斂成預設**——呼叫端把 `"Audio"`（大小寫）或 `"video"`
+ * 打成預設值時，音頻卡會被靜默排除（＝本輪要消滅的那類靜默失效），寧可當場報錯。
+ */
+export function parseBizGenerationTarget(input: unknown): BizGenerationTarget {
+  if (input === undefined || input === null) return "image";
+  if (input === "image" || input === "audio") return input;
+  const shown = typeof input === "string" ? input.slice(0, 40) : typeof input;
+  throw new EditInputError(400, "invalid_target", `target 只接受 "image" 或 "audio"，收到 ${shown}。`);
+}
+
+/** 畸形 token 的人話提示（**只提示，原文照留**——不改寫提示詞）。 */
+function malformedTokenWarning(entry: MalformedEntityToken): string {
+  switch (entry.reason) {
+    case "empty_name":
+      return `实体引用 ${entry.raw} 缺少名称（格式为 @[种类:名称]），已按原文保留在提示词里。`;
+    case "unclosed":
+      return `实体引用 ${entry.raw} 缺少右括号 "]"（格式为 @[种类:名称]），已按原文保留在提示词里。`;
+    default:
+      return `实体引用 ${entry.raw} 的种类字「${entry.kindLabel}」无法识别（可用：角色/场景/风格/道具/音频），已按原文保留在提示词里。`;
+  }
+}
+
 // ─────────────────────────────────────────── 組裝：prompt + references
 
 export interface BizGenerationInputPlan {
@@ -243,20 +284,65 @@ export interface BizGenerationInputPlan {
  *   - 未命中 token → 原樣保留 token（fail-open）＋一條 warning。
  *   - 卡庫讀取失敗 → **降級為不解析 token**（生成是主線、卡庫是增強），原樣送 prompt ＋ warning。
  *   - 形狀非法的 reference_images 在任何 I/O 之前拋 `EditInputError`。
+ *   - `target: "audio"`（新）→ 走 `applyCharacterCards(..., { target: "audio" })`：只有音頻卡
+ *     參與（被引用的卡就地展開片段、未引用的鎖定音頻卡照常進前綴），**references 一律空**、
+ *     顯式 `reference_images` 被忽略並出一條 warning。缺省／`"image"` 逐位元走上面那條舊路。
  */
 export async function planBizGenerationInput(input: {
   prompt: string;
   rawReferenceImages: unknown;
+  /** 生成鏈路；缺省 `"image"`＝既有行為（零漂移）。 */
+  target?: BizGenerationTarget;
   /** 卡庫讀取（route 注入 `listCharacterCards(userId)`）；只有 prompt 真的帶 token 時才會被呼叫。 */
   loadCards?: () => Promise<readonly CharacterCard[]>;
   tenantId: string;
   idempotencyKey: string;
 }): Promise<BizGenerationInputPlan> {
   const warnings: string[] = [];
+  const target = input.target ?? "image";
   // 形狀校驗先做：非法輸入必須在卡庫/Blob 任何 I/O 之前就 400。
   const explicitSpecs = parseReferenceImageSpecs(input.rawReferenceImages);
 
   let prompt = input.prompt;
+  // 畸形 token 診斷（只診斷、不改寫）：`@[角色:]` / `@[角色:灰羽` / `@[未知种类:灰羽]` 在
+  // 解析器裡分別是「不算 token」「不算 token」「未命中」，不主動提示就永遠靜默。原文一律照留。
+  const malformed = findMalformedEntityTokens(prompt);
+  const malformedRaws = new Set(malformed.map((entry) => entry.raw));
+  for (const entry of malformed) warnings.push(malformedTokenWarning(entry));
+
+  if (target === "audio") {
+    // 音頻鏈路：只有音頻卡參與（`character-cards.ts` 的 target:"audio" 語義），參考圖一律空。
+    // 註：`applyCharacterCards` 的卡參數是可變陣列，故載入後展開成新陣列（不改原陣列）。
+    let cards: CharacterCard[] = [];
+    // 與視覺鏈路同紀律：零 token 不讀卡庫（不多一次 I/O）。
+    if (parseEntityTokens(prompt).length > 0 && input.loadCards) {
+      try {
+        cards = [...(await input.loadCards())];
+      } catch (error) {
+        console.error("[biz-image-references] 卡库读取失败，本次不解析实体 tag。", error);
+        cards = [];
+        warnings.push("角色卡库读取失败，本次未解析 @[种类:名称] 引用，提示词原样提交。");
+      }
+    }
+    // 未命中清單：`applyCharacterCards` 不回報 unresolved，故用**同一個解析器**
+    // （`expandEntityTokens`，不是第二套解析）在原文上取一次未命中清單，才不會靜默。
+    // 必須餵**同一個參與卡池**（只有音頻卡）——餵全卡庫會把「被 target 排除、最終留在正文裡」
+    // 的非音頻 token 當成已命中，warning 就漏了（實測踩過）。
+    // 這行 kind 過濾與 `character-cards.ts:375` 的 audio 卡池規則同義（那邊是唯一權威；
+    // 本檔不改它、也不另立語義，只為「算 warning」對齊同一個池）。
+    const audioCards = cards.filter((card) => card.kind === "audio");
+    for (const raw of expandEntityTokens(prompt, audioCards).unresolved) {
+      if (malformedRaws.has(raw)) continue; // 已用更精確的「種類字無法辨識」提示過，不重複
+      warnings.push(`未找到匹配的实体引用 ${raw}，已原样保留在提示词里。`);
+    }
+    prompt = applyCharacterCards(prompt, cards, { target: "audio" }).prompt;
+    if (explicitSpecs.length > 0) {
+      // 音頻鏈路沒有參考圖語義 ⇒ 不回圖，但**不靜默**：明說忽略了幾張。
+      warnings.push(`音频链路不带参考图语义，已忽略 ${explicitSpecs.length} 张 reference_images（提示词照常展开）。`);
+    }
+    return { prompt, references: [], warnings };
+  }
+
   let cardSpecs: ReferenceImageSpec[] = [];
   if (parseEntityTokens(prompt).length > 0) {
     let cards: readonly CharacterCard[] = [];
@@ -272,6 +358,7 @@ export async function planBizGenerationInput(input: {
     const expanded = expandEntityTokens(prompt, cards);
     prompt = expanded.prompt;
     for (const raw of expanded.unresolved) {
+      if (malformedRaws.has(raw)) continue; // 同上：種類字不認的已單獨提示
       warnings.push(`未找到匹配的实体引用 ${raw}，已原样保留在提示词里。`);
     }
     cardSpecs = cardReferenceSpecs(cards, expanded.usedCardIds);

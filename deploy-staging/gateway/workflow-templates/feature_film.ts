@@ -54,11 +54,19 @@ export const featureFilmTemplate: WorkflowTemplate =
         role: "char_view1",
         kind: "image",
         title: "角色 A 正面",
+        // 实体宣告（2026-09-24）：四视图是**同一张角色卡的多张参考图**，只标 char_view1——
+        // 四颗都标会落四张重复卡。画布侧据 emitsEntity 自动落卡并回填分镜引用。
+        // referenceRoles（2026-09-24 四视图聚合）：char_view2/3/4 的交付图是本卡的参考图，
+        // 由 expandTemplate 的参考图 post-pass 解成 referenceNodeIds（作者不手写后者）。
+        defaults: {
+          emitsEntity: { kind: "character", nameFrom: "input", referenceRoles: ["char_view2", "char_view3", "char_view4"] },
+        },
         deliverable: "正/侧/背/动作四张设定图，锁定 DNA 签名供全片引用",
         gate: "用户逐角色确认后才进镜头生成（换脸是最大返工源）",
         notes: [
           "四视图同 seed 同批生成，材质高光比例写进签名（金属×1.5、皮肤×0.5）防质感漂移",
           "每张出图后立即与 DNA 签名逐维比对，五官/发型/服装任一维漂移即该张重出，不整批返工",
+          "交付本节点时把角色名写进节点 metadata 的 input 字段——画布侧据它自动落成角色卡并当卡名，缺了卡名只能退回节点标题「角色 A 正面」",
         ],
       },
       { role: "char_view2", kind: "image", title: "角色 A 侧面", deliverable: "侧面视图，与正面同 seed 同签名，锁定轮廓与发型基线" },
@@ -85,11 +93,14 @@ export const featureFilmTemplate: WorkflowTemplate =
         role: "scene_img",
         kind: "image",
         title: "场景图",
+        // 实体宣告（2026-09-24）：场景设定图是**一张场景卡**的交付物，画布侧据此自动落卡。
+        defaults: { emitsEntity: { kind: "scene", nameFrom: "input" } },
         deliverable: "场景设定图 1-2 张，建档编号充当全部镜头生成的背景参考",
         gate: "风格统一性审计≥70 分（色彩方差/质感一致性/风格关键词命中），不达标回去重修风格模板",
         notes: [
           "每张设定图用同一固定 seed 族生成，只变场景内容不变风格参数，肉眼比对风格漂移；建档编号供镜头生成引用",
           "材质高光比例进规范：金属×1.5、皮肤×0.5，避免不同镜头忽油忽干",
+          "交付本节点时把场景名写进节点 metadata 的 input 字段——画布侧据它自动落成场景卡并当卡名，缺了卡名只能退回节点标题「场景图」",
         ],
         tools: [
           { id: "image_generate", input: "prompt + 模型 + 尺寸/张数", output: "图片 URL + 实际花费" },

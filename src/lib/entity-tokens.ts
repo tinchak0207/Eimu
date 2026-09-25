@@ -67,6 +67,78 @@ export function parseEntityTokens(prompt: string): EntityTokenHit[] {
   return hits;
 }
 
+// ─────────────────────────────────────────── 畸形 token 診斷（只診斷、不改寫）
+
+/**
+ * 畸形形狀的分類（**只診斷，不改寫**：原文一律照留，只讓呼叫端多一句人話提示）。
+ *   - `empty_name`：`@[角色:]` —— 名稱段為空（`ENTITY_TOKEN_PATTERN` 要求名稱 1..100 字，故不算 token）
+ *   - `unclosed`：`@[角色:灰羽` —— 名稱段沒有右括號收尾
+ *   - `unknown_kind`：`@[未知种类:灰羽]` —— 語法完整但種類字無法辨識（會落在 `expandEntityTokens` 的 unresolved）
+ */
+export type MalformedEntityTokenReason = "empty_name" | "unclosed" | "unknown_kind";
+
+export interface MalformedEntityToken {
+  /** 原文片段（**原樣**，未做任何替換；呼叫端可直接寫進 warning）。 */
+  raw: string;
+  reason: MalformedEntityTokenReason;
+  /** token 裡寫的種類字（`@[角色:]` → "角色"）。 */
+  kindLabel: string;
+  /** 名稱段（`@[角色:]` → ""）。 */
+  name: string;
+}
+
+/** `@[種類:]`：名稱段為空。種類字 0..40（`@[:]` 也算畸形：種類字空）。 */
+const EMPTY_NAME_TOKEN_PATTERN = /@\[([^\[\]:]{0,40}):\]/g;
+
+/** `@[種類:名稱`：名稱段非空但**沒有**右括號收尾（後一個字元不是 `]` 即判畸形）。 */
+const UNCLOSED_TOKEN_PATTERN = /@\[([^\[\]:]{1,40}):([^\[\]]{1,100})/g;
+
+/**
+ * 找出「看起來想寫 token 但沒解析成功」的形狀（純函式、零 I/O、**不改寫任何內容**）。
+ *
+ * 只認三種形狀（刻意不收「缺冒號」如 `@[Verse]`——那更可能是正文而不是打錯的 token，
+ * 誤報會製造噪音）：
+ *   ①`@[角色:]` 名稱為空；②`@[角色:灰羽` 缺右括號；③`@[未知种类:灰羽]` 種類字無法辨識。
+ *
+ * 保序（按出現位置）、按原文去重；正常 token（如 `@[角色:灰羽]`）**絕不**回報
+ * （陰性對照：正常 token 不得被誤報為畸形）。
+ */
+export function findMalformedEntityTokens(prompt: string): MalformedEntityToken[] {
+  const found: (MalformedEntityToken & { start: number })[] = [];
+  if (!prompt || !prompt.includes("@[")) return found;
+  const seen = new Set<string>();
+  const push = (start: number, raw: string, reason: MalformedEntityTokenReason, kindLabel: string, name: string) => {
+    if (!raw || seen.has(raw)) return;
+    seen.add(raw);
+    found.push({ start, raw, reason, kindLabel, name });
+  };
+
+  // ③ 語法完整但種類字不認：用既有的 parseEntityTokens（**不另寫 token 語法**）。
+  for (const hit of parseEntityTokens(prompt)) {
+    if (resolveEntityTokenKind(hit.kindLabel)) continue;
+    push(hit.start, prompt.slice(hit.start, hit.end), "unknown_kind", hit.kindLabel, hit.name);
+  }
+
+  // ① 名稱為空（`ENTITY_TOKEN_PATTERN` 不匹配 ⇒ parseEntityTokens 看不到，必須另掃）。
+  const emptyName = new RegExp(EMPTY_NAME_TOKEN_PATTERN.source, "g");
+  for (let match = emptyName.exec(prompt); match; match = emptyName.exec(prompt)) {
+    push(match.index, match[0], "empty_name", match[1], "");
+    if (match[0].length === 0) emptyName.lastIndex += 1;
+  }
+
+  // ② 缺右括號：名稱字元集不含 `]`，所以「緊接在匹配之後的字元不是 `]`」＝名稱段沒收尾。
+  const unclosed = new RegExp(UNCLOSED_TOKEN_PATTERN.source, "g");
+  for (let match = unclosed.exec(prompt); match; match = unclosed.exec(prompt)) {
+    if (prompt[match.index + match[0].length] === "]") continue; // 正常 token（含名稱剛好頂到上限）
+    push(match.index, match[0], "unclosed", match[1], match[2]);
+    if (match[0].length === 0) unclosed.lastIndex += 1;
+  }
+
+  // 保序：按出現位置（三種形狀互斥，同位置不可能撞）。
+  found.sort((a, b) => a.start - b.start);
+  return found.map(({ start: _start, ...entry }) => entry);
+}
+
 /** 卡的 token 原文：`@[角色:霍辞渊]`。 */
 export function serializeEntityToken(card: Pick<CharacterCard, "kind" | "name">): string {
   return `@[${kindLabelForCardKind(card.kind)}:${card.name.trim()}]`;

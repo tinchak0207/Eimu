@@ -21,6 +21,9 @@ export const ecomModelTemplate: WorkflowTemplate =
         role: "garment_asset",
         kind: "image",
         title: "透明底服装单品（去背景）",
+        // 实体宣告（2026-09-24）：透明底服装单品 + 服装 DNA 卡是**一张道具卡**的交付物，
+        // 画布侧据此自动落卡（后续可 @ 引用该单品）。
+        defaults: { emitsEntity: { kind: "prop", nameFrom: "input" } },
         deliverable: "透明底服装平铺图（RMBG/BiRefNet 细带分割）+ 服装 DNA 卡（材质/版型/颜色/标签）+ 101% 回贴桩",
         gate: "抠图边缘与颜色还原人工过目，不过则重抠",
         notes: [
@@ -29,6 +32,7 @@ export const ecomModelTemplate: WorkflowTemplate =
           "101% 回贴桩：把抠出的服装按 101% 缩放回贴到干净白底与原图人工比对，边缘误差 ≤1% 视为藏住分割线，超标换分割模型重抠",
           "输入图最短边 ≥1024px，不足先 image_upscale 2x 再抠，低分辨率抠图必丢纹理",
           "抠图输出双格式：透明底 PNG（alpha 通道，给试穿通道）+ 纯色底 JPEG（给详情页证据图）各一份",
+          "交付本节点时把单品名写进节点 metadata 的 input 字段——画布侧据它自动落成道具卡并当卡名，缺了卡名只能退回节点标题「透明底服装单品（去背景）」",
         ],
         tools: [
           { id: "garment_extract", input: "服装图", output: "服装资产（去背景单品）" },
@@ -41,6 +45,9 @@ export const ecomModelTemplate: WorkflowTemplate =
         role: "model_card",
         kind: "image",
         title: "模特人设卡（FaceID 基线锁定）",
+        // 实体宣告（2026-09-24）：模特人设卡是**一张角色卡**的交付物（三张基准图同属
+        // 该模特的参考图组），画布侧据此自动落卡。
+        defaults: { emitsEntity: { kind: "character", nameFrom: "input" } },
         deliverable: "模特人设矩阵（客群反推）+ IP-Adapter FaceID 面部基线锁定",
         gate: "模特人设人工批准后才进试穿",
         notes: [
@@ -49,6 +56,7 @@ export const ecomModelTemplate: WorkflowTemplate =
           "模特卡配三张基准图：正面特写/全身/侧面，作为后续试穿与九宫格的 face_identity 参考图组，任一图与基准脸比对不过即重生",
           "人设矩阵出 2-3 个候选让用户选，选定后锁定不换；中途换模特=全链返工，是最贵的回头路",
           "negativePrompt 显式排除「多人物、五官漂移、脸部畸变」，与锁脸策略配套防串脸",
+          "交付本节点时把模特名写进节点 metadata 的 input 字段——画布侧据它自动落成角色卡并当卡名，缺了卡名只能退回节点标题「模特人设卡（FaceID 基线锁定）」",
         ],
         tools: [
           { id: "model_identity_lock", input: "模特参考图组", output: "模特身份锁定卡（FaceID 基线 + 固定 seed）" },

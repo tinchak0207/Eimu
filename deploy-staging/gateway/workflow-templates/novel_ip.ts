@@ -75,6 +75,9 @@ export const novelIpTemplate: WorkflowTemplate =
         role: "style_anchor",
         kind: "image",
         title: "风格锚（canonical key art + sref 配方）",
+        // 实体宣告（2026-09-24）：canonical key art + 冻结 sref 配方是**一张风格卡**的
+        // 交付物，画布侧据此自动落卡（后续可 @ 引用该风格锚）。
+        defaults: { emitsEntity: { kind: "style", nameFrom: "input" } },
         deliverable: "canonical key art 一张（全案定调）+ sref 码/权重/seed 配方冻结",
         gate: "风格锚配方复测门禁：同配方复测 2 次无偏差才算铸成",
         notes: [
@@ -82,6 +85,7 @@ export const novelIpTemplate: WorkflowTemplate =
           "sref 权重测试法：0.4/0.5/0.6/0.7 四档各出 1 图，按色彩/质感/笔触三项比对情绪板打分，选命中度最高档冻结",
           "冻结配方三件套写进锁定卡：sref 码 + 权重 + seed，全案后续生图逐字复用，改任一项必须走返工流程并记录原因",
           "配方复测：同配方重跑 2 次肉眼比对色彩方差与构图逻辑，无偏差才算铸成；有偏差说明 seed 不稳，换 seed 后四档重测",
+          "交付本节点时把风格名写进节点 metadata 的 input 字段——画布侧据它自动落成风格卡并当卡名，缺了卡名只能退回节点标题「风格锚（canonical key art + sref 配方）」",
         ],
         tools: [
           { id: "style_anchor_sref", input: "风格参考图", output: "风格锚（sref 级固定后缀模板）" },
@@ -101,6 +105,9 @@ export const novelIpTemplate: WorkflowTemplate =
         role: "char_card",
         kind: "image",
         title: "主角资产卡（三视图 + 表情差列）",
+        // 实体宣告（2026-09-24）：三视图与表情差列是**一张角色卡**的交付物，
+        // 画布侧据此自动落卡并回填分镜引用。
+        defaults: { emitsEntity: { kind: "character", nameFrom: "input" } },
         deliverable: "主角 DNA 签名 8 维表 + 三视图 + 表情差列 6 格",
         gate: "洗牌盲认门禁：三视图与表情列打乱后用户仍能认出同一角色",
         notes: [
@@ -108,6 +115,7 @@ export const novelIpTemplate: WorkflowTemplate =
           "三视图（正面特写/全身/侧面）用同一 seed 同一次生成锁 face_identity；材质高光比例随 DNA 附带（金属×1.5、皮肤×0.5）防质感漂移",
           "表情差列 6 格固定覆盖喜/怒/哀/惧/狂/静，同 seed 只换情绪关键词，后续 Q 版与表情包物料直接从这 6 格取情绪不重画",
           "每角色记录专属 seed 与参考图 ID 入资产表；主角必须单独成卡，配角 2-3 个可合并建档，被并档的配角进名场面前先补卡",
+          "交付本节点时把角色名写进节点 metadata 的 input 字段——画布侧据它自动落成角色卡并当卡名，缺了卡名只能退回节点标题「主角资产卡（三视图 + 表情差列）」",
         ],
         tools: [
           { id: "character_dna_turnaround", input: "角色设定", output: "角色三视图 + DNA 签名 8 维" },

@@ -62,6 +62,9 @@ export const artStyleTemplate: WorkflowTemplate =
         role: "dna_card",
         kind: "image",
         title: "style DNA 卡（用户逐条签核版）",
+        // 实体宣告（2026-09-24）：用户签核版 style DNA 卡是**一张风格卡**的交付物，
+        // 画布侧据此自动落卡（后续可 @ 引用该风格）。
+        defaults: { emitsEntity: { kind: "style", nameFrom: "input" } },
         deliverable: "用户逐条签核的 style DNA 卡与两张原作局部对位图",
         gate: "用户逐条确认并锁定版本；存在未决条目、来源不明条目或高权重项未确认时，工作流停留在本步",
         notes: [
@@ -70,6 +73,7 @@ export const artStyleTemplate: WorkflowTemplate =
           "没有明确批准不能进入临摹或批量生图",
           "签核定版号 style_dna_approved_v1，版本号写进后续每张临摹的 prompt_snapshot 备查；revision_log 逐条记「谁改的/改了什么/依据哪张原作局部」",
           "两张对位图各圈 3 处高权重特征锚点（笔触走向线、明暗交界带、色盘取样点），签核时让用户逐处点选确认，不接受整图扫一眼通过",
+          "交付本节点时把风格名写进节点 metadata 的 input 字段——画布侧据它自动落成风格卡并当卡名，缺了卡名只能退回节点标题「style DNA 卡（用户逐条签核版）」",
         ],
         tools: [
           { id: "style_dna_extract", input: "代表作 + DNA 草稿", output: "正式解构表（笔触/色板/构图/光照四栏）" },

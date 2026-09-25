@@ -17,7 +17,7 @@ import { normalizeLineageLinks } from "./lineage";
 import type { LineageLink } from "./lineage";
 import { ASSET_KEY_DELIMITER, GHOST_ASSET_SCOPE, normalizeAssetScope } from "./asset-scope";
 import type { AssetScope } from "./asset-scope";
-import { expandEntityTokens } from "./entity-tokens";
+import { expandEntityTokens, parseEntityTokens, resolveEntityTokenKind } from "./entity-tokens";
 
 /**
  * 卡種類：角色卡（外觀鎖定）/ 場景卡（環境鎖定）/ 風格卡（畫風鎖定）
@@ -351,6 +351,47 @@ export interface ApplyCharacterCardsOptions {
    *  退回 "all"（不讓「沒用 token」變成靜默丟參考圖）。 */
   referenceScope?: "all" | "referenced";
 }
+
+/**
+ * 生成時卡集推導：把**本段提示詞 token 引用到的卡**就地併入既有卡集（純函式）。
+ *
+ * 補的缺口：agent 建的卡只落進卡庫（`characterCards`），不會自動鎖進項目
+ * （`activeCardIds`／`project.cardIds` 的既有語義不動，本函式也**不自動鎖任何卡**）。
+ * 於是正文寫了 `@[角色:灰羽]`，注入集裡卻沒有灰羽 → `expandEntityTokens` 找不到卡
+ * → token 原樣送上游。本函式讓「卡在庫」就足以被 `@` 引用。
+ *
+ * 語義（判準與 `expandEntityTokens` 逐字同一把尺，不另立第二套）：
+ *   - 種類字 → kind 走 `resolveEntityTokenKind`；命中卡＝**卡庫全量**裡第一張
+ *     `card.kind === kind && card.name.trim() === hit.name.trim()` 的卡。
+ *   - 未命中（種類字未知／卡庫沒有同名同 kind 的卡）→ 不併入、不 throw；
+ *     該 token 交由 `expandEntityTokens` 既有的 fail-open 原樣保留處理。
+ *   - 併入＝**聯集**：`cards` 原序在前，新命中的卡按 token 出現序補在後，同 id 去重。
+ *   - 零 token／全部未命中 → **回傳同一陣列參考**（逐位元等價：零新增、零 I/O、payload 形狀不變）。
+ *   - 純函式：不 mutate 任何輸入。
+ */
+export function mergeTokenReferencedCards(
+  cards: CharacterCard[],
+  libraryCards: readonly CharacterCard[] | null | undefined,
+  prompt: string,
+): CharacterCard[] {
+  if (!prompt || !libraryCards?.length) return cards;
+  const hits = parseEntityTokens(prompt);
+  if (hits.length === 0) return cards;
+  const seen = new Set(cards.map((card) => card.id));
+  let merged: CharacterCard[] | null = null;
+  for (const hit of hits) {
+    const kind = resolveEntityTokenKind(hit.kindLabel);
+    if (!kind) continue;
+    const name = hit.name.trim();
+    const matched = libraryCards.find((card) => card.kind === kind && card.name.trim() === name);
+    if (!matched || seen.has(matched.id)) continue;
+    seen.add(matched.id);
+    merged ??= [...cards];
+    merged.push(matched);
+  }
+  return merged ?? cards;
+}
+
 
 /**
  * 鎖定注入核心（純函式、冪等）：

@@ -17,8 +17,10 @@ import { bizErrorResponse, guardBizApiKey } from "@/lib/biz-openai-error";
 import { listCharacterCards } from "@/lib/character-card-store";
 import {
   EditInputError,
+  parseBizGenerationTarget,
   planBizGenerationInput,
   type BizGenerationInputPlan,
+  type BizGenerationTarget,
 } from "@/lib/biz-image-references";
 
 export const runtime = "nodejs";
@@ -36,15 +38,22 @@ interface ResolveRequestBody {
   prompt?: unknown;
   /** `Array<string | { url, role?, name? }>`；形状校验在 plan 内（任何 I/O 之前）。 */
   reference_images?: unknown;
+  /** 生成链路：`"image"`（缺省）/ `"audio"`；值域外 400 `invalid_target`（形状校验在 plan 前）。 */
+  target?: unknown;
 }
 
 /**
  * POST /api/biz/character-resolve
  *
- * body：`{ prompt: string, reference_images?: Array<string | {url, role?, name?}> }`
+ * body：`{ prompt: string, reference_images?: Array<string | {url, role?, name?}>, target?: "image" | "audio" }`
  * 回：`{ prompt: string, reference_images: string[], warnings: string[] }`
  *   - `prompt` ＝ 展开后的正文（token 命中者就地换成卡的 prompt 片段，片段空 → 换卡名；
  *     未命中者**原样保留**；零 token 时与输入逐位元相同）。
+ *   - `target` ＝ 生成链路。缺省／`"image"`＝既有视觉行为（**逐位元不變**）；
+ *     `"audio"`＝只有音频卡参与（`applyCharacterCards(..., { target: "audio" })`），
+ *     未引用的锁定音频卡照常进前缀，**`reference_images` 一律空数组**（音频链路没有参考图语义），
+ *     显式传的 `reference_images` 被忽略并出一條 warning。值域外 → 400 `invalid_target`
+ *     （**不默默收敛成默认**：把 `"Audio"` 静默当视觉会静默丢掉音频卡）。
  *   - `reference_images` ＝ **已可直送上游的公网 URL**，顺序＝命中卡的图在前、调用端显式带的
  *     图在后，按 url 去重，总数上限 5。`data:image` 必须先落地 Blob 换成公网 URL——
  *     对象存储不可用时**明确失败（502）**，绝不把 `data:` URI 原样回给调用端冒充公网 URL。
@@ -70,11 +79,23 @@ export async function POST(req: NextRequest) {
     return bizErrorResponse(400, "缺少必填参数 prompt。", "invalid_request_error", "missing_prompt", traceId);
   }
 
+  // 生成链路形状校验（任何 I/O 之前）：缺省/null → "image"（＝既有行为，逐位元不變）。
+  let target: BizGenerationTarget;
+  try {
+    target = parseBizGenerationTarget(body?.target);
+  } catch (error) {
+    if (error instanceof EditInputError) {
+      return bizErrorResponse(error.status, error.message, "invalid_request_error", error.code, traceId);
+    }
+    throw error;
+  }
+
   let plan: BizGenerationInputPlan;
   try {
     plan = await planBizGenerationInput({
       prompt,
       rawReferenceImages: body.reference_images,
+      target,
       // 只有 prompt 真的带 token 时才会被调用（零 token 请求不读卡库、不加延迟）。
       loadCards: () => listCharacterCards(auth.key.userId),
       tenantId: `biz:${auth.key.id}`,

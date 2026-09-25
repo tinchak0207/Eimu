@@ -24,6 +24,7 @@ import { armWatchdogTimer, isInterrogativeMessage } from "./timers-gw.ts"
 import { beastAgentField } from "./session-lifecycle.ts"
 import { emitAgentNotice, reportNodeTerminalState } from "./emit-helpers.ts"
 import { emitVideoDone } from "./events-translate.ts"
+import { hasEntityToken, resolveEntityTokens, sanitizeEntityReferences } from "./entity-resolve.ts"
 // TODO(整合 Wave2): 以下為「仍住 index.ts 且未在 16 個 export 內」符號的 declare 佔位（stage1 記憶 subagent 佔位符法，bun build 不查名可過）。
 // 整合階段換成真 import（bun build 硬查 named import，已實錘）。註：CommandResult 是 index.ts 既有基線錯誤（tsc-baseline-0919 第 12–18 行 TS2304 ×7），如實不補宣告。
 // ─────────────────────────── 畫布工作流引擎（暴君策略 v2）
@@ -906,6 +907,34 @@ export async function submitWorkflowNode(
     if (refImages.length) payload.reference = refImages[0]
   } else if (refImages.length) {
     payload.reference = refImages[0]
+  }
+
+  // 2026-09-25：行內實體 tag（`@[種類:名稱]`）展開——工作流節點提示詞裡的 token 到這裡才被
+  // 解析。此前閘道整包零 `reference_images` 通道，token 原封不動送上游＝「畫布沒有實體卡節點、
+  // 四視圖各生各的、臉不一致」的結構缺口。
+  //
+  // 插入點刻意選在**最終 prompt 定案之後、payload.reference 寫入之後**：
+  //   ① video 分支的 prompt 可能已被上方 `compileShotPrompt` 重編（本檔 L866）——提早展開會被
+  //      重編打散（編譯器按模型族重排版面，token 片段會被當普通文本重排）；
+  //   ② 合併規則要用到 `payload.reference`（連線上游 image 節點那張，上面 video/image 兩分支
+  //      才寫入），在此處才能一次算完「卡參考圖 ∪ 既有 reference」；
+  //   ③ 放在 `if (!prompt)` 空提示詞守衛之前：零 token 時本塊整段跳過（原值、零 HTTP），
+  //      空 prompt 走原守衛報錯——既有語義逐字不變。
+  //
+  // 解析器是站點端點 `/api/biz/character-resolve` 的薄客戶端（不重寫解析）；零 token 零 HTTP；
+  // 任何失敗 fail-open（原 prompt + 空 refs），解析失敗永不阻斷生成。
+  // meta.prompt/meta.content 是 unknown（payload 袋）→ token 判定前先收斂成字串。
+  const promptForTokens = typeof prompt === "string" ? prompt : ""
+  if (hasEntityToken(promptForTokens)) {
+    // 解析用這位使用者的 key（`session.apiKey`，同下方提交用的 Bearer）：卡庫按使用者隔離。
+    const resolved = await resolveEntityTokens(promptForTokens, refImages, undefined, { apiKey: session.apiKey })
+    payload.prompt = resolved.prompt
+    // 卡的圖在前（resolved 內部已按控制面契約排序），既有單張 reference 併在後，去重、截 5。
+    const mergedRefs = sanitizeEntityReferences([
+      ...resolved.reference_images,
+      ...(typeof payload.reference === "string" ? [payload.reference] : []),
+    ])
+    if (mergedRefs.length) payload.reference_images = mergedRefs
   }
 
   if (!prompt) {
