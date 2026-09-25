@@ -14,7 +14,7 @@
 // worker 端 supplier-adapter 已有 references→edits/chat 分支，核心層原生支援
 // ——本刀只補 B 端路由這個入口。
 
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
 import { after } from "next/server";
 import { authenticateBizApiKey, flushBizApiKeyUsage, recordBizApiKeyUsage } from "@/lib/biz-api-key-store";
@@ -26,7 +26,6 @@ import {
 } from "@/lib/generation-model-catalog";
 import { imageGenerationCoins, isSupportedImageModel, type ModelMode } from "@/lib/provider-config";
 import { PIXAI_EDIT_MODEL_ID } from "@/lib/image-model-ids.js";
-import { put } from "@/lib/blob-backend";
 import {
   chargeBizRequest,
   jsonWithTrace,
@@ -52,7 +51,9 @@ import { submitGenerationCommand } from "@/lib/generation-core/command-service";
 import { hasGenerationCapability, IdempotencyConflictError } from "@/lib/generation-core/job-repository";
 import { enforceQuotaGate } from "@/lib/generation-core/quota-precheck";
 import { generationTaskResponse } from "@/lib/generation-core/task-response";
-import { validateImageBuffer } from "@/lib/generation-core/artifact-service";
+// 參考圖 helper（resolveEditReference 及相依的 mimeFromUrl/extensionFor/EditInputError）
+// 2026-09-25 整段搬到 lib，generations 路由共用同一份；本路由行為逐位元不變。
+import { EditInputError, resolveEditReference } from "@/lib/biz-image-references";
 import type { GenerationReference } from "@/lib/generation-core/types";
 import type { BizApiKey } from "@/lib/biz-api-keys";
 
@@ -208,65 +209,6 @@ export async function POST(req: NextRequest) {
 
 /** 與 generations 同口的上游尺寸白名單；另兼容舊 edits 合同的 "1k"/"2k"。 */
 const DURABLE_EDIT_SIZES = new Set(["1024x1024", "1536x1024", "1024x1536", "2048x2048"]);
-const MAX_DATA_IMAGE_BYTES = 4 * 1024 * 1024;
-
-class EditInputError extends Error {
-  constructor(readonly status: number, readonly code: string, message: string) {
-    super(message);
-  }
-}
-
-function mimeFromUrl(rawUrl: string): string {
-  const pathname = rawUrl.split("?")[0].toLowerCase();
-  if (pathname.endsWith(".jpg") || pathname.endsWith(".jpeg")) return "image/jpeg";
-  if (pathname.endsWith(".webp")) return "image/webp";
-  return "image/png";
-}
-
-function extensionFor(mimeType: string): string {
-  if (mimeType === "image/jpeg") return "jpg";
-  if (mimeType === "image/webp") return "webp";
-  return "png";
-}
-
-/** image 參數 → 工作流參考圖。URL 直接引用；data URI 落地 blob 後轉平台公網 URL。 */
-async function resolveEditReference(image: string, tenantId: string, idempotencyKey: string): Promise<GenerationReference> {
-  if (/^https?:\/\//i.test(image)) {
-    return { url: image, mimeType: mimeFromUrl(image), referenceRole: "general" };
-  }
-  const match = /^data:(image\/[a-z0-9.+-]+);base64,([\s\S]+)$/i.exec(image);
-  if (match) {
-    const buffer = Buffer.from(match[2], "base64");
-    if (buffer.length === 0) throw new EditInputError(400, "invalid_image", "image data URI is empty.");
-    if (buffer.length > MAX_DATA_IMAGE_BYTES) {
-      throw new EditInputError(413, "image_too_large", "image data URI exceeds 4MB. Upload the file first and pass a public URL.");
-    }
-    const validated = validateImageBuffer(buffer);
-    if ("error" in validated) throw new EditInputError(400, "invalid_image", `image decode failed: ${validated.error}`);
-    const stable = createHash("sha256")
-      .update(`${tenantId}|${idempotencyKey}|${validated.sha256}`)
-      .digest("hex");
-    const objectKey = `generation/references/${stable}.${extensionFor(validated.mimeType)}`;
-    const blob = await put(objectKey, buffer, {
-      access: "public",
-      contentType: validated.mimeType,
-      allowOverwrite: true,
-      cacheControlMaxAge: 31_536_000,
-    });
-    return {
-      artifactId: `ref-${stable}`,
-      url: blob.url,
-      mimeType: validated.mimeType,
-      name: "reference-1",
-      referenceRole: "general",
-    };
-  }
-  throw new EditInputError(
-    400,
-    "invalid_image",
-    "image must be a public http(s) URL or a data:image base64 URI（pixai media id 僅適用於 pixai 系模型）.",
-  );
-}
 
 async function durableEditBranch(input: {
   body: Record<string, unknown>;

@@ -128,7 +128,9 @@ const MAX_CARD_ID_LENGTH = 100;
 const MAX_CARD_NAME_LENGTH = 100;
 const MAX_CARD_PROMPT_LENGTH = 2000;
 const MAX_CARD_NEGATIVE_LENGTH = 1000;
-const MAX_CARD_REFERENCES = 8;
+/** 單張卡參考物上限（**唯一宣告**：卡清洗在此截尾；B 端 /v1/character-cards 用它做
+ *  「超限回 400」的前置校驗——不靜默截尾，故必須與此處同值、不得另立常數）。 */
+export const MAX_CARD_REFERENCES = 8;
 const MAX_CARD_LORA_IDS = 8;
 const MAX_REFERENCE_NAME_LENGTH = 60;
 const MAX_APPROVAL_REASON_LENGTH = 200;
