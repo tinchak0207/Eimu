@@ -25,6 +25,10 @@ export const BLOB_ALLOW_MEMORY_FALLBACK_ENV = "BLOB_ALLOW_MEMORY_FALLBACK";
  * 舊判斷式會誤判「無後端」而讓呼叫端靜默落進程內記憶體。
  */
 export function blobBackendConfigured(): boolean {
+  // `useVpsBlobBackend` 不是 React hook，是 blob-backend 的同步後端選擇器，只因命名以 use
+  // 開頭被 react-hooks/rules-of-hooks 誤判（同款豁免見 src/app/api/version/route.ts）。
+  // 單源判斷不可在此重抄一份，故就地豁免該規則。
+  // eslint-disable-next-line react-hooks/rules-of-hooks
   return useVpsBlobBackend() || Boolean(process.env.BLOB_READ_WRITE_TOKEN?.trim());
 }
 
