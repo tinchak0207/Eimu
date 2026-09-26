@@ -104,3 +104,9 @@ node_modules/@swc/*
 /eval-blender-director/
 /eval-anime-mv-0911/
 /eval-visual-replay/
+
+# 200MB 級本機影片產物（promo-video 渲染中會被即時寫入；eimu-promo.mp4 107MB
+# 超過 Vercel 100MB 單檔上限，上傳必失敗）。.gitignore 已列但 .vercelignore
+# 存在時 Vercel 不讀 .gitignore，必須在此再列一次。
+/artifacts/
+/promo-video/out/
