@@ -1,0 +1,218 @@
+/* ╁━ /pricing 3D 卡堆：舞台宿主、3D 接管後的正面卡、選片條、音效鈕、整頁氛圍 ╁━
+   方案色與世界色都取設計系統色板的低透明度變體；正文字色一律不動（淺底）。 */
+
+/* ── 舞台下方預留選片條的高度（常駐，不因狀態切換跳版）── */
+.pricing-plan-carousel .case-stage {
+  --p3d-strip-room: 96px;
+  margin-bottom: var(--p3d-strip-room);
+}
+
+@media (max-width: 767px) {
+  .pricing-plan-carousel .case-stage {
+    --p3d-strip-room: 80px;
+  }
+}
+
+/* ── 3D 宿主：蓋住舞台，上緣多留一截給「衝出鏡頭」的塔，下緣含選片條區 ──
+   pointer-events: none：所有手勢都歸 case-stage（環的手勢原樣），3D 只旁聽。
+   四周羽化進整頁氛圍，卡堆與頁面讀起來是同一個空間，而不是一塊貼上去的畫布。 */
+.p3d-host {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(var(--case-card-h, 390px) * -0.12);
+  bottom: calc(var(--p3d-strip-room, 96px) * -1);
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 480ms var(--lg-ease, ease);
+}
+
+.p3d-host::before {
+  content: "";
+  position: absolute;
+  inset: -14% -8%;
+  pointer-events: none;
+  background: radial-gradient(ellipse 58% 56% at 50% 46%, var(--p3d-halo, rgba(255, 255, 255, 0)) 0%, transparent 72%);
+  transition: background 360ms var(--lg-ease, ease);
+}
+
+.p3d-host[data-world="starter"] { --p3d-halo: rgba(255, 214, 160, 0.55); }
+.p3d-host[data-world="popular"] { --p3d-halo: rgba(27, 33, 48, 0.78); }
+.p3d-host[data-world="pro"] { --p3d-halo: rgba(196, 220, 240, 0.65); }
+.p3d-host[data-world="custom"] { --p3d-halo: rgba(255, 226, 212, 0.6); }
+
+.p3d-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  -webkit-mask-image: radial-gradient(ellipse 64% 66% at 50% 44%, #000 58%, transparent 100%);
+  mask-image: radial-gradient(ellipse 64% 66% at 50% 44%, #000 58%, transparent 100%);
+}
+
+.pricing-plan-carousel[data-pricing3d="on"] .p3d-host {
+  opacity: 1;
+}
+
+/* ── 3D 接管後的正面卡：拆殼，只剩浮在 3D 之上的價格玻璃層 ── */
+.pricing-plan-carousel[data-pricing3d="on"] .case-stage::after {
+  opacity: 0; /* 假地影退場：3D 裡有真陰影 */
+}
+
+.pricing-plan-carousel[data-pricing3d="on"] .case-slab[data-front="true"] .ppc-face {
+  background: transparent;
+}
+
+.pricing-plan-carousel[data-pricing3d="on"] .case-slab[data-front="true"] .ppc-poster,
+.pricing-plan-carousel[data-pricing3d="on"] .case-slab[data-front="true"] .ppc-face::before,
+.pricing-plan-carousel[data-pricing3d="on"] .case-slab[data-front="true"]::before,
+.pricing-plan-carousel[data-pricing3d="on"] .case-slab[data-front="true"] .case-edge,
+.pricing-plan-carousel[data-pricing3d="on"] .case-slab[data-front="true"] .case-surface,
+.pricing-plan-carousel[data-pricing3d="on"] .case-slab[data-front="true"] > .case-side {
+  opacity: 0;
+}
+
+.pricing-plan-carousel[data-pricing3d="on"] .case-slab[data-front="true"] .case-face {
+  filter: none;
+}
+
+/* ── 選片條：環停下後，非正面卡縮成底部一排縮圖（同一批 DOM 卡的第二個狀態）──
+   !important 只為了壓過 paint() 每幀寫的 inline 位姿；解除 data-rest 的那一刻
+   inline 位姿立即生效（無過渡），卡回到環上跟手轉。 */
+.pricing-plan-carousel .case-stage[data-rest="true"] .case-slab[data-front="false"] {
+  transform: translate3d(var(--strip-x, 0px), var(--strip-y, 0px), 0) scale(var(--strip-s, 0.16)) !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  transition:
+    transform 560ms var(--lg-ease, ease),
+    opacity 320ms var(--lg-ease, ease);
+}
+
+.pricing-plan-carousel .case-stage[data-rest="true"] .case-slab[data-front="false"] .case-face {
+  filter: none;
+}
+
+.pricing-plan-carousel .case-stage[data-rest="true"] .case-slab[data-front="false"] .ppc-card,
+.pricing-plan-carousel .case-stage[data-rest="true"] .case-slab[data-front="false"] > .case-side,
+.pricing-plan-carousel .case-stage[data-rest="true"] .case-slab[data-front="false"] .case-surface {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.pricing-plan-carousel .case-stage[data-rest="true"] .case-slab[data-front="false"]:hover .ppc-poster {
+  filter: brightness(1.08) saturate(1.08);
+}
+
+/* ── 音效開關（手機可關；偏好存 localStorage）── */
+.p3d-sound {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 1100;
+  display: inline-flex;
+  height: 2.25rem;
+  width: 2.25rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: rgba(0, 0, 0, 0.62);
+  cursor: pointer;
+  transition: color 200ms var(--lg-ease, ease);
+}
+
+.p3d-sound:hover {
+  color: rgba(0, 0, 0, 0.86);
+}
+
+.p3d-sound:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+
+/* ── 整頁氛圍（PricingClient 根節點內，不越 navbar / 頁尾）── */
+.p3d-atmo {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.p3d-atmo-layer {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 520ms var(--lg-ease, ease);
+}
+
+.p3d-atmo-layer[data-on="true"] {
+  opacity: 1;
+}
+
+/* 晨光窗台：暖奶油底，左上一口斜射晨光。 */
+.p3d-atmo-layer[data-world="starter"] {
+  background:
+    radial-gradient(70% 38% at 18% 8%, rgba(255, 214, 160, 0.42), transparent 70%),
+    linear-gradient(180deg, rgba(253, 246, 236, 0.9) 0%, rgba(250, 243, 232, 0.55) 60%, rgba(250, 243, 232, 0) 100%);
+}
+
+/* 夜燈書桌：頁首仍是淺暮色，越近環段越沉（文字留在淺區）。 */
+.p3d-atmo-layer[data-world="popular"] {
+  background:
+    radial-gradient(60% 30% at 62% 26%, rgba(255, 194, 126, 0.16), transparent 70%),
+    linear-gradient(180deg, rgba(232, 235, 244, 0.95) 0%, rgba(214, 219, 234, 0.8) 34%, rgba(236, 238, 245, 0.4) 70%, rgba(236, 238, 245, 0) 100%);
+}
+
+/* 雨後工作台：清冷天光，右上一抹虹。 */
+.p3d-atmo-layer[data-world="pro"] {
+  background:
+    radial-gradient(46% 22% at 82% 6%, rgba(175, 82, 222, 0.1), transparent 70%),
+    radial-gradient(56% 26% at 70% 10%, rgba(0, 122, 255, 0.08), transparent 72%),
+    linear-gradient(180deg, rgba(236, 244, 250, 0.95) 0%, rgba(240, 246, 250, 0.6) 55%, rgba(240, 246, 250, 0) 100%);
+}
+
+/* 無邊界工作室：破曉粉白，四邊都沒有牆。 */
+.p3d-atmo-layer[data-world="custom"] {
+  background:
+    radial-gradient(80% 36% at 80% 14%, rgba(255, 214, 196, 0.4), transparent 72%),
+    radial-gradient(60% 30% at 10% 30%, rgba(52, 199, 89, 0.06), transparent 70%),
+    linear-gradient(180deg, rgba(252, 246, 242, 0.95) 0%, rgba(250, 245, 240, 0.6) 55%, rgba(250, 245, 240, 0) 100%);
+}
+
+/* 光帶層：隨滾動視差位移（倍率 = 各世界的滾動節奏）。 */
+.p3d-atmo-beams {
+  position: absolute;
+  left: -10%;
+  right: -10%;
+  top: 0;
+  height: 160%;
+  opacity: 0.9;
+  transition: background 520ms var(--lg-ease, ease);
+  will-change: transform;
+}
+
+.p3d-atmo[data-world="starter"] .p3d-atmo-beams {
+  background: repeating-linear-gradient(118deg, rgba(255, 226, 180, 0) 0 140px, rgba(255, 226, 180, 0.16) 140px 190px, rgba(255, 226, 180, 0) 190px 420px);
+}
+
+.p3d-atmo[data-world="popular"] .p3d-atmo-beams {
+  background: radial-gradient(28% 14% at 64% 22%, rgba(255, 196, 128, 0.14), transparent 72%);
+}
+
+.p3d-atmo[data-world="pro"] .p3d-atmo-beams {
+  background: repeating-linear-gradient(100deg, rgba(220, 236, 250, 0) 0 90px, rgba(220, 236, 250, 0.22) 90px 120px, rgba(220, 236, 250, 0) 120px 300px);
+}
+
+.p3d-atmo[data-world="custom"] .p3d-atmo-beams {
+  background: repeating-linear-gradient(72deg, rgba(255, 232, 220, 0) 0 60px, rgba(255, 232, 220, 0.2) 60px 100px, rgba(255, 232, 220, 0) 100px 220px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .p3d-host,
+  .p3d-atmo-layer,
+  .pricing-plan-carousel .case-stage[data-rest="true"] .case-slab[data-front="false"] {
+    transition: none;
+  }
+}

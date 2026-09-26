@@ -31,6 +31,7 @@ import { cn } from "@/lib/utils";
 import { isStandalonePwa, createHandoffLogin } from "@/lib/github-login";
 import { PwaHandoffPanel } from "@/components/PwaHandoffPanel";
 import { PricingPlanCarousel } from "@/components/PricingPlanCarousel";
+import { PricingAtmosphere } from "@/components/pricing3d/PricingAtmosphere";
 
 /**
  * 2026-09-07 方案选择器 carousel 化：三列并排 → AI 助理模板同款环形轮播
@@ -122,6 +123,8 @@ export function PricingClient() {
   const [cycle, setCycle] = useState<CycleId>("all");
   // 自定义档额度（金币）。滑杆拖动只更新这个值；checkout 走 custom:<coins> id。
   const [customCoins, setCustomCoins] = useState<number>(20_000);
+  // 环正面档 = 当前「世界」：整页氛围（背景/光/滚动节奏）跟着它走，与 3D 卡堆同属一个空间。
+  const [frontWorld, setFrontWorld] = useState("popular");
 
   const selectedPlan = resolvePricingPlan(selectedPlanId) ?? PLANS[0];
 
@@ -224,8 +227,9 @@ export function PricingClient() {
   };
 
   return (
-    <div className="min-h-screen bg-transparent px-4 py-6 pb-10 sm:px-6 sm:py-8 lg:px-8">
-      <div className="mx-auto w-full max-w-6xl">
+    <div className="relative isolate min-h-screen bg-transparent px-4 py-6 pb-10 sm:px-6 sm:py-8 lg:px-8">
+      <PricingAtmosphere world={frontWorld} />
+      <div className="relative mx-auto w-full max-w-6xl">
 
         {/* Header — 标题 + 右上角标准关闭 X（弹窗化：释放垂直高度） */}
         <div className="flex items-start justify-between gap-3">
@@ -293,6 +297,7 @@ export function PricingClient() {
             onMethodChange={setPayMethod}
             onPay={handlePay}
             onRefreshBalance={handleRefreshBalance}
+            onFrontChange={setFrontWorld}
           />
         </div>
 

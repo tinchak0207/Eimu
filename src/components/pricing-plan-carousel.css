@@ -48,94 +48,82 @@
    真源在 PricingPlanCarousel.tsx 的 PLAN_TINTS（與 PLAN_GLOWS 同一張表），
    由 STATIC_FRAMES 以 inline style 寫到 .case-slab 上；這裡只消費。 */
 
-/* ── 卡面材料：本體是 .lg-card（Tailwind 類掛在 JSX 上）──
-   這裡只補它沒有的兩層：方案色暈染、選中環。 */
+/* ── 卡面材料（2026-09-26 3D 化：拆掉 .lg-card 外殼）──
+   卡面 = 3D 滿版（pricing3d/pricing3d.css 管 3D 接管後的正面卡）；這裡是靜態層：
+   封面照（真實生成圖）+ 方案色暈染 + 浮在上面的價格玻璃層。 */
 .ppc-face {
   position: absolute;
   inset: 0;
+  background: #eceae6;
 }
 
-/* 方案色從左上角取樣、右下角補一口（Liquid Glass 的 color sampling）。 */
+.ppc-poster {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+  user-select: none;
+  transition: opacity 420ms var(--lg-ease, ease);
+}
+
+/* 方案色從左上角取樣（Liquid Glass 的 color sampling），壓在封面上、玻璃層下。 */
 .ppc-face::before {
   content: "";
   position: absolute;
   inset: 0;
+  z-index: 1;
   pointer-events: none;
   background:
     radial-gradient(
       120% 92% at 12% 0%,
-      rgba(var(--ppc-tint, 0 122 255), 0.20) 0%,
+      rgba(var(--ppc-tint, 0 122 255), 0.18) 0%,
       rgba(var(--ppc-tint, 0 122 255), 0) 62%
     ),
-    radial-gradient(
-      120% 92% at 100% 100%,
-      rgba(var(--ppc-tint, 0 122 255), 0.10) 0%,
-      rgba(var(--ppc-tint, 0 122 255), 0) 55%
-    );
+    linear-gradient(to bottom, rgba(0, 0, 0, 0) 45%, rgba(0, 0, 0, 0.16) 100%);
+  transition: opacity 420ms var(--lg-ease, ease);
 }
 
-/* 選中態：2px 藍環。與 .lg-fill-active（選中填充的語言）、卡內「已選」膠囊、
-   卡內主 CTA 三處同一句話——正面卡 ≠ 已選卡，兩個狀態都必須看得出來。 */
-.ppc-face::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  box-shadow: inset 0 0 0 2px rgba(0, 122, 255, 0.42);
-  opacity: 0;
-  transition: opacity 200ms var(--lg-ease, ease);
-}
-
-.case-slab[aria-checked="true"] .ppc-face::after {
-  opacity: 1;
-}
-
-/* ── 卡面排版：三帶構圖（頭 / 中 / 尾）──
-   中帶 flex:1 並垂直居中，把「卡高於內容」的餘量吸收成對稱留白，而不是在說明盒
-   與收銀台之間留一塊空洞（截圖實測那個空洞有 140–200px）。內距跟卡寬縮放但有
-   上下限：手機 340px 卡不會貼邊，桌面 620px 卡也不會鬆散。 */
+/* ── 卡面排版：只剩底部一塊價格玻璃層 ── */
 .ppc-card {
   position: absolute;
   inset: 0;
+  z-index: 2;
   display: flex;
   flex-direction: column;
-  padding: clamp(18px, calc(var(--case-card-w, 520px) * 0.058), 32px);
+  justify-content: flex-end;
+  padding: clamp(12px, calc(var(--case-card-w, 520px) * 0.036), 20px);
   user-select: none;
+  transition: opacity 280ms var(--lg-ease, ease);
 }
 
-.ppc-band-top {
-  display: flex;
-  flex: none;
-  flex-direction: column;
-}
-
-.ppc-band-mid {
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-  /* 內容比剩餘高度高時（320px 手機 + 自訂檔 + 支付後狀態行）讓這一段先讓位，
-     而不是把尾帶的支付鈕頂出卡外被圓角裁掉 —— 支付控件永遠優先於說明盒。
-     safe center：正常情況垂直居中（吃下多餘高度），溢出時退化成頂端對齊。 */
-  justify-content: center;
-  justify-content: safe center;
-  min-height: 0;
-  overflow: hidden;
-  padding-block: 12px;
-}
-
-.ppc-band-bot {
-  flex: none;
-}
-
-/* 換算盒：白玻璃內襯（資訊井，不是第二張卡——無外陰影，只有內描邊 + 內頂高光）。 */
-.ppc-convert {
-  border-radius: 1rem;
-  padding: clamp(10px, calc(var(--case-card-w, 520px) * 0.026), 16px)
-    clamp(12px, calc(var(--case-card-w, 520px) * 0.03), 18px);
-  background: rgba(255, 255, 255, 0.62);
+/* 價格玻璃層：白玻璃 0.78（lg-card 同族：頂緣亮邊 + 卡片陰影）。
+   注意 .case-slab 有 will-change: opacity（backdrop root），backdrop-filter 在 3D 接管後
+   取樣不到 canvas —— 所以底色本身要夠實（0.78），不賭模糊。 */
+.ppc-glass {
+  position: relative;
+  border-radius: 1.5rem;
+  padding: clamp(14px, calc(var(--case-card-w, 520px) * 0.04), 20px);
+  background: rgba(255, 255, 255, 0.78);
+  border-top: 1px solid var(--lg-border-top, rgba(255, 255, 255, 0.92));
+  border-left: 1px solid var(--lg-border-side, rgba(255, 255, 255, 0.48));
+  border-right: 1px solid var(--lg-border-side, rgba(255, 255, 255, 0.48));
   box-shadow:
-    inset 0 0 0 1px rgba(0, 0, 0, 0.06),
-    inset 0 1px 0 rgba(255, 255, 255, 0.90);
+    0 12px 36px rgba(0, 0, 0, 0.14),
+    0 2px 8px rgba(0, 0, 0, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  backdrop-filter: blur(24px) saturate(160%);
+  transition: box-shadow 200ms var(--lg-ease, ease);
+}
+
+/* 選中態：2px 藍環落在玻璃層上（卡面已無外殼可掛）。與卡內主 CTA 同一句話。 */
+.case-slab[aria-checked="true"] .ppc-glass {
+  box-shadow:
+    inset 0 0 0 2px rgba(0, 122, 255, 0.42),
+    0 12px 36px rgba(0, 0, 0, 0.14),
+    0 2px 8px rgba(0, 0, 0, 0.06);
 }
 
 /* ── Log Scale 滑桿（自訂檔）──
@@ -213,10 +201,4 @@
   outline: 2px solid hsl(var(--ring));
   outline-offset: 4px;
   border-radius: 999px;
-}
-
-/* 刻度行：兩端標記（2,000 / 100 萬）。字級/字色由 Tailwind 掛在 JSX 上。 */
-.ppc-ticks {
-  display: flex;
-  justify-content: space-between;
 }
