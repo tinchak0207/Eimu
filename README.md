@@ -26,12 +26,9 @@
   <a href="https://eimu.dev/status"><strong>状态页</strong></a>
 </p>
 
-<table>
-  <tr>
-    <td width="50%"><video src="https://github.com/user-attachments/assets/f2f78020-f1f4-4907-a024-c643f867c8d1" width="100%"></video></td>
-    <td width="50%"><video src="https://github.com/user-attachments/assets/73167629-d472-468c-a552-c7b90b320d67" width="100%"></video></td>
-  </tr>
-</table>
+<p align="center">
+  <video src="https://github.com/user-attachments/assets/c5d7745e-5b45-462c-8b70-a30ae618de3b" width="100%"></video>
+</p>
 
 <p align="center">
   <a href="#产品预览">
