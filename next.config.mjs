@@ -5,6 +5,15 @@ const controlPlaneOrigin = process.env.GENERATION_CONTROL_PLANE_PROXY_ORIGIN
 const nextConfig = {
   output: "standalone",
   poweredByHeader: false,
+  // 建置期版本指紋，供 /api/version 取證用（唯一消費者，不影響其他 bundle）。
+  // 必要性：VERCEL_GIT_COMMIT_SHA 只在 build 階段保證存在、runtime 不保證；而 route 內
+  // new Date() 是「請求時間」不是「建置時間」。兩者都會誤導「生產跑的是哪一版」的取證，
+  // 故在此（=config 求值時 = build 時）凍結成常數，由 Next 內聯進 server bundle。
+  env: {
+    BUILD_COMMIT_SHA: process.env.VERCEL_GIT_COMMIT_SHA ?? "",
+    BUILD_COMMIT_REF: process.env.VERCEL_GIT_COMMIT_REF ?? "",
+    BUILD_TIMESTAMP: new Date().toISOString(),
+  },
   images: {
     formats: ["image/avif", "image/webp"],
     minimumCacheTTL: 31536000,

@@ -1,0 +1,691 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Emu · eimu.dev 宣传片</title>
+<style>
+@font-face { font-family: Geist; src: url(../src/app/fonts/GeistVF.woff) format("woff"); font-weight: 100 900; }
+@font-face { font-family: GeistMono; src: url(../src/app/fonts/GeistMonoVF.woff) format("woff"); font-weight: 100 900; }
+:root {
+  --bg: #f4f6f9; --fg: #2d3142; --fg2: #272b39; --muted: #6e7886; --eyebrow: #7b8694;
+  --gold: #c9a84c; --gold-l: #f5e6c0; --succ: #5b7a5e; --succ-l: #e7efe9;
+  --blue: #007AFF; --green: #34C759; --red: #FF3B30; --orange: #FF9500; --purple: #AF52DE; --indigo: #5856D6; --teal: #5AC8FA;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; background: var(--bg); }
+body { font-family: Geist, "Noto Sans CJK SC", -apple-system, sans-serif; color: var(--fg); -webkit-font-smoothing: antialiased; }
+#stage { position: absolute; inset: 0; overflow: hidden; }
+#bg { position: absolute; inset: 0; }
+#aurora { position: absolute; inset: 0; width: 1920px; height: 1080px; }
+#veil { position: absolute; inset: 0; background: #fff; }
+.scene { position: absolute; inset: 0; display: none; }
+.abs { position: absolute; }
+.cam { position: absolute; inset: 0; transform-origin: 50% 50%; }
+
+/* ---------- Liquid Glass 材料（對齊 DESIGN.md lg-card / lg-float / lg-bar / lg-sheet） ---------- */
+.lg { position: absolute; border: 1.5px solid rgba(255,255,255,.48); border-top-color: rgba(255,255,255,.92); border-bottom-color: rgba(0,0,0,.06);
+      box-shadow: 0 30px 70px rgba(45,49,66,.10), 0 4px 14px rgba(45,49,66,.05), inset 0 1.5px 0 rgba(255,255,255,.95), inset 0 -1px 0 rgba(0,0,0,.03); }
+.lg::before { content: ""; position: absolute; left: 8%; right: 8%; top: -1px; height: 1.5px; border-radius: inherit; pointer-events: none;
+      background: linear-gradient(90deg, transparent, #fff, transparent); opacity: .9; }
+.lg-card  { background: rgba(255,255,255,.72); backdrop-filter: blur(40px) saturate(180%) brightness(1.08); border-radius: 56px; }
+.lg-float { background: rgba(255,255,255,.56); backdrop-filter: blur(28px) saturate(180%) brightness(1.08); border-radius: 9999px; }
+.lg-bar   { background: rgba(255,255,255,.56); backdrop-filter: blur(48px) saturate(200%) brightness(1.1); }
+.lg-sheet { background: rgba(255,255,255,.66); backdrop-filter: blur(60px) saturate(180%) brightness(1.08); border-radius: 64px; }
+
+.eyebrow { font-size: 20px; letter-spacing: .18em; font-weight: 500; color: var(--eyebrow); text-transform: uppercase; white-space: nowrap; }
+.h1 { font-weight: 650; letter-spacing: -.03em; color: var(--fg); white-space: nowrap; }
+.sub { color: var(--muted); white-space: nowrap; }
+.ch { display: inline-block; white-space: pre; }
+svg.i { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; display: block; }
+.center-x { left: 0; right: 0; text-align: center; }
+
+/* S1 */
+.orb { width: 320px; height: 320px; border-radius: 50%; overflow: hidden;
+  background: radial-gradient(circle at 32% 24%, rgba(255,255,255,.92), rgba(255,255,255,.42) 46%, rgba(255,255,255,.22) 72%, rgba(255,255,255,.4));
+  backdrop-filter: blur(24px) saturate(190%) brightness(1.1);
+  box-shadow: 0 50px 110px rgba(45,49,66,.16), 0 8px 24px rgba(45,49,66,.06), inset 0 3px 2px rgba(255,255,255,.95), inset 0 -18px 40px rgba(88,86,214,.12), inset 0 0 0 1.5px rgba(255,255,255,.6); }
+.orb img { position: absolute; left: 30px; top: 26px; width: 260px; height: 260px; }
+.orb .rim { position: absolute; inset: 0; border-radius: 50%;
+  background: conic-gradient(from 0deg, transparent 0 8%, rgba(255,255,255,.95) 14%, transparent 22% 55%, rgba(90,200,250,.55) 62%, transparent 70% 100%);
+  -webkit-mask: radial-gradient(circle, transparent 64%, #000 66.5%, #000 69%, transparent 71.5%); }
+.orb .hi { position: absolute; left: 54px; top: 22px; width: 150px; height: 70px; border-radius: 50%;
+  background: radial-gradient(ellipse at 50% 40%, rgba(255,255,255,.95), rgba(255,255,255,0) 70%); transform: rotate(-24deg); }
+.ring { width: 320px; height: 320px; border-radius: 50%; border: 2px solid rgba(255,255,255,.95); box-shadow: 0 0 40px rgba(90,200,250,.35); }
+.word { font-size: 230px; font-weight: 650; letter-spacing: -.055em; line-height: 1; color: var(--fg); white-space: nowrap; }
+
+/* S2 */
+.dream { border-radius: 40px; overflow: hidden; box-shadow: 0 30px 60px rgba(45,49,66,.16); }
+.dream img, .cover { width: 100%; height: 100%; object-fit: cover; display: block; }
+.bar { border-radius: 76px; }
+.caret { display: inline-block; width: 3px; height: 46px; background: var(--blue); border-radius: 2px; vertical-align: -9px; margin-left: 3px; }
+.send { width: 96px; height: 96px; border-radius: 50%; color: #fff; display: grid; place-items: center; box-shadow: 0 18px 36px rgba(45,49,66,.18); }
+.chip { height: 64px; padding: 0 30px; display: flex; align-items: center; gap: 12px; font-size: 24px; font-weight: 500; color: var(--fg); white-space: nowrap; }
+
+/* S3 */
+.avatar { width: 80px; height: 80px; border-radius: 50%; overflow: hidden; background: linear-gradient(160deg, #dfe9ff, #f3e6fb); box-shadow: inset 0 0 0 2px rgba(255,255,255,.9), 0 8px 20px rgba(88,86,214,.18); }
+.avatar img { width: 100%; height: 100%; object-fit: cover; }
+.badge { display: inline-flex; align-items: center; gap: 10px; border-radius: 9999px; padding: 10px 20px; font-size: 20px; font-weight: 550; white-space: nowrap; }
+.tile { position: absolute; border-radius: 28px; background: rgba(255,255,255,.62); border: 1.5px solid rgba(255,255,255,.8); box-shadow: inset 0 1px 0 #fff, 0 6px 18px rgba(45,49,66,.05); padding: 20px 26px; }
+.tile .eyebrow { font-size: 15px; }
+.tile .v { font-size: 30px; font-weight: 600; margin-top: 8px; letter-spacing: -.01em; white-space: nowrap; }
+.btn { height: 80px; padding: 0 40px; border-radius: 9999px; background: var(--fg); color: #fff; display: inline-flex; align-items: center; gap: 12px; font-size: 26px; font-weight: 550; box-shadow: 0 18px 36px rgba(45,49,66,.16); white-space: nowrap; }
+.step { height: 50px; padding: 0 18px 0 12px; border-radius: 9999px; display: flex; align-items: center; gap: 8px; font-size: 19px; font-weight: 550; white-space: nowrap; background: rgba(45,49,66,.05); color: var(--muted); }
+.step .dot { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; }
+.cell { position: absolute; border-radius: 24px; overflow: hidden; background: rgba(45,49,66,.06); }
+.cell .shim { position: absolute; inset: 0; background: linear-gradient(100deg, transparent 20%, rgba(255,255,255,.75) 50%, transparent 80%); background-size: 200% 100%; }
+.cell img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+/* S4 */
+#wall-wrap { position: absolute; inset: -200px; perspective: 2200px; perspective-origin: 50% 40%; }
+#wall { position: absolute; left: 50%; top: 50%; width: 0; height: 0; transform-style: preserve-3d; }
+.row { position: absolute; left: -2200px; display: flex; gap: 26px; }
+.row .w { height: 340px; border-radius: 34px; overflow: hidden; flex: none; box-shadow: 0 24px 50px rgba(45,49,66,.18); outline: 2px solid rgba(255,255,255,.7); outline-offset: -2px; }
+.row .w img { height: 100%; width: 100%; object-fit: cover; display: block; }
+.act { height: 72px; padding: 0 28px; border-radius: 9999px; display: flex; align-items: center; gap: 12px; font-size: 24px; font-weight: 550; color: var(--fg); white-space: nowrap; }
+
+/* S5 */
+.cap { width: 392px; height: 560px; padding: 22px; }
+.cap .pv { position: relative; width: 348px; height: 290px; border-radius: 38px; overflow: hidden; }
+.cap .ic { position: absolute; left: 44px; top: 270px; width: 76px; height: 76px; border-radius: 26px; display: grid; place-items: center; color: #fff; box-shadow: 0 12px 26px rgba(45,49,66,.18), inset 0 1.5px 0 rgba(255,255,255,.6); }
+.cap .t { position: absolute; left: 44px; top: 374px; font-size: 40px; font-weight: 650; letter-spacing: -.02em; white-space: nowrap; }
+.cap .d { position: absolute; left: 44px; top: 434px; right: 30px; font-size: 22px; line-height: 34px; color: var(--muted); }
+.play { position: absolute; left: 50%; top: 50%; width: 92px; height: 92px; margin: -46px 0 0 -46px; border-radius: 50%; display: grid; place-items: center; color: #fff;
+  background: rgba(255,255,255,.28); backdrop-filter: blur(16px) saturate(180%); border: 1.5px solid rgba(255,255,255,.7); }
+
+/* S6 */
+.code { font-family: GeistMono, "Noto Sans CJK SC", monospace; font-size: 25px; line-height: 44px; white-space: pre; color: var(--fg); }
+.code .c { opacity: 0; }
+.code .c.on { opacity: 1; }
+.code .cur::after { content: ""; display: inline-block; width: 13px; height: 30px; background: var(--blue); vertical-align: -6px; margin-left: 2px; border-radius: 2px; }
+.bullet { display: flex; align-items: center; gap: 24px; font-size: 31px; font-weight: 500; white-space: nowrap; }
+.bullet .bi { width: 68px; height: 68px; border-radius: 22px; display: grid; place-items: center; flex: none; }
+.bullet small { display: block; font-size: 22px; color: var(--muted); font-weight: 400; margin-top: 4px; }
+
+#s1-orb, #s7-orb { display: none !important; }
+#grain { position: absolute; inset: 0; pointer-events: none; opacity: .07; mix-blend-mode: overlay; }
+#fade { position: absolute; inset: 0; background: var(--bg); opacity: 0; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="bg"><canvas id="aurora" width="1920" height="1080"></canvas><div id="veil"></div></div>
+
+  <!-- ===== S1 開場：玻璃液滴 → Logo → Emu ===== -->
+  <section class="scene" id="s1"><div class="cam" id="s1-cam">
+    <div class="abs ring" id="s1-ring"></div>
+    <div class="abs ring" id="s1-ring2"></div>
+    <div class="abs orb" id="s1-orb"><img src="../public/icon-512.png" id="s1-logo"><div class="rim" id="s1-rim"></div><div class="hi"></div></div>
+    <div class="abs word" id="s1-word">Emu</div>
+    <div class="abs eyebrow center-x" id="s1-eb" style="top:250px">eimu.dev</div>
+    <div class="abs sub center-x" id="s1-tag" style="top:760px;font-size:40px;letter-spacing:.02em">你的 AI 影音设计助理</div>
+  </div></section>
+
+  <!-- ===== S2 許願 ===== -->
+  <section class="scene" id="s2"><div class="cam" id="s2-cam">
+    <div class="abs dream" id="d0" style="left:150px;top:452px;width:250px;height:250px"><img src="../public/showcase/showcase5.webp"></div>
+    <div class="abs dream" id="d1" style="left:480px;top:420px;width:230px;height:306px"><img src="../public/showcase/cards/c09-ecom-model-2-12.webp"></div>
+    <div class="abs dream" id="d2" style="left:800px;top:438px;width:290px;height:290px"><img src="../public/showcase/showcase1.webp"></div>
+    <div class="abs dream" id="d3" style="left:1190px;top:416px;width:230px;height:306px"><img src="../public/showcase/cards/c01-art-curation-3-12.webp"></div>
+    <div class="abs dream" id="d4" style="left:1510px;top:448px;width:260px;height:260px"><img src="../public/showcase/showcase6.webp"></div>
+    <div class="abs eyebrow center-x" id="s2-eb" style="top:150px">01 · 许愿</div>
+    <div class="abs h1 center-x" id="s2-h" style="top:192px;font-size:92px">不用填参数，许个愿就好。</div>
+    <div class="abs lg lg-bar bar" id="s2-bar" style="left:330px;top:500px;width:1260px;height:152px">
+      <div class="abs" style="left:52px;top:52px;color:var(--blue)"><svg class="i" width="48" height="48" viewBox="0 0 24 24"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/></svg></div>
+      <div class="abs" id="s2-ph" style="left:124px;top:48px;font-size:40px;line-height:56px;color:#a4abb6;white-space:nowrap">描述你的愿望……</div>
+      <div class="abs" id="s2-txt" style="left:124px;top:48px;font-size:40px;line-height:56px;white-space:nowrap;font-weight:500"></div>
+      <div class="abs send" id="s2-send" style="left:1136px;top:26px"><svg class="i" width="44" height="44" viewBox="0 0 24 24" style="stroke-width:2.4"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg></div>
+      <div class="abs ring" id="s2-ripple" style="left:1136px;top:26px;width:96px;height:96px;border-color:rgba(0,122,255,.6);box-shadow:none"></div>
+    </div>
+    <div class="abs" id="s2-chips" style="left:0;right:0;top:800px;display:flex;justify-content:center;gap:20px">
+      <div class="lg lg-float chip" style="position:relative">电商主图</div>
+      <div class="lg lg-float chip" style="position:relative">空间大片</div>
+      <div class="lg lg-float chip" style="position:relative">短剧海报</div>
+      <div class="lg lg-float chip" style="position:relative">角色设定</div>
+      <div class="lg lg-float chip" style="position:relative">分镜视频</div>
+    </div>
+  </div></section>
+
+  <!-- ===== S3 Agent 接手 ===== -->
+  <section class="scene" id="s3"><div class="cam" id="s3-cam">
+    <div class="abs eyebrow center-x" id="s3-eb" style="top:96px">02 · Agent 接手</div>
+    <div class="abs h1 center-x" id="s3-h" style="top:134px;font-size:76px">确认一次，剩下的交给 Agent。</div>
+
+    <div class="abs lg lg-card" id="s3-conf" style="left:180px;top:286px;width:800px;height:690px">
+      <div class="abs avatar" style="left:44px;top:44px"><img src="../public/mascot/eimu-avatar.png"></div>
+      <div class="abs" style="left:146px;top:48px;font-size:32px;font-weight:650;white-space:nowrap">Emu Agent</div>
+      <div class="abs sub" style="left:146px;top:92px;font-size:21px">已读懂你的愿望，参数我来扛</div>
+      <div class="abs badge" id="s3-bw" style="right:44px;top:58px;background:rgba(0,122,255,.10);color:#007AFF">
+        <span style="width:10px;height:10px;border-radius:50%;background:var(--blue)"></span>待你确认</div>
+      <div class="abs badge" id="s3-bg" style="right:44px;top:58px;background:var(--succ-l);color:var(--succ)">
+        <svg class="i" width="22" height="22" viewBox="0 0 24 24" style="stroke-width:2.6"><path d="M20 6 9 17l-5-5"/></svg>已开工</div>
+      <div class="abs" style="left:44px;top:156px;right:44px;height:74px;border-radius:26px;background:rgba(45,49,66,.045);padding:0 28px;display:flex;align-items:center;font-size:23px;color:#56607a;white-space:nowrap">“给新品做 12 张视觉大片：产品、空间、街拍”</div>
+      <div class="tile" id="t0" style="left:44px;top:256px;width:348px;height:116px"><div class="eyebrow">风格</div><div class="v">电影感 · 柔光</div></div>
+      <div class="tile" id="t1" style="left:408px;top:256px;width:348px;height:116px"><div class="eyebrow">模型</div><div class="v">GPT Image 2</div></div>
+      <div class="tile" id="t2" style="left:44px;top:388px;width:348px;height:116px"><div class="eyebrow">尺寸</div><div class="v">2K · 多比例</div></div>
+      <div class="tile" id="t3" style="left:408px;top:388px;width:348px;height:116px"><div class="eyebrow">数量</div><div class="v">12 张</div></div>
+      <div class="abs badge" id="s3-coin" style="left:44px;top:572px;font-size:23px;padding:14px 24px;color:#b08f35;background:rgba(245,230,192,.7)">
+        <svg class="i" width="26" height="26" viewBox="0 0 24 24"><circle cx="8" cy="8" r="6"/><path d="M18.09 10.37A6 6 0 1 1 10.34 18"/><path d="M7 6h1v4"/><path d="m16.71 13.88.7.71-2.82 2.82"/></svg>预计 12 张 · 96 币</div>
+      <div class="abs btn" id="s3-btn" style="right:44px;top:560px">开始生成
+        <svg class="i" width="28" height="28" viewBox="0 0 24 24" style="transform:rotate(90deg);stroke-width:2.4"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg></div>
+      <div class="abs ring" id="s3-ripple" style="right:44px;top:560px;width:260px;height:80px;border-radius:40px;border-color:rgba(45,49,66,.35);box-shadow:none"></div>
+    </div>
+
+    <div class="abs lg lg-card" id="s3-run" style="left:1010px;top:286px;width:730px;height:690px">
+      <div class="abs" id="s3-spin" style="left:44px;top:46px;color:var(--blue)"><svg class="i" width="40" height="40" viewBox="0 0 24 24" style="stroke-width:2.4"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg></div>
+      <div class="abs" id="s3-okic" style="left:44px;top:46px;width:40px;height:40px;border-radius:50%;background:var(--green);color:#fff;display:grid;place-items:center"><svg class="i" width="26" height="26" viewBox="0 0 24 24" style="stroke-width:3"><path d="M20 6 9 17l-5-5"/></svg></div>
+      <div class="abs" id="s3-title" style="left:100px;top:42px;font-size:32px;font-weight:650;white-space:nowrap">正在执行</div>
+      <div class="abs" id="s3-title2" style="left:100px;top:42px;font-size:32px;font-weight:650;white-space:nowrap">全部完成</div>
+      <div class="abs" id="s3-count" style="right:48px;top:44px;font-family:GeistMono;font-size:30px;font-weight:500;color:var(--fg)">0 / 12</div>
+      <div class="abs" id="s3-steps" style="left:44px;top:112px;display:flex;gap:10px"></div>
+      <div class="abs" id="s3-grid" style="left:44px;top:190px;width:642px;height:456px"></div>
+    </div>
+  </div></section>
+
+  <!-- ===== S4 成片牆 ===== -->
+  <section class="scene" id="s4">
+    <div id="wall-wrap"><div id="wall"></div></div>
+    <div class="abs" id="s4-dim" style="inset:0;background:rgba(244,246,249,.35)"></div>
+    <div class="cam" id="s4-cam">
+      <div class="abs lg lg-sheet" id="s4-panel" style="left:420px;top:382px;width:1080px;height:316px">
+        <div class="abs eyebrow center-x" style="top:52px">03 · 成片</div>
+        <div class="abs h1 center-x" style="top:94px;font-size:96px">一句话，一整组作品。</div>
+        <div class="abs sub center-x" style="top:224px;font-size:28px;letter-spacing:.04em">产品海报 · 空间大片 · 街拍 · 角色 · 分镜</div>
+      </div>
+      <div class="abs lg lg-card" id="s4-focus" style="left:620px;top:84px;width:680px;height:680px;border-radius:60px;padding:20px">
+        <div style="position:relative;width:100%;height:100%;border-radius:44px;overflow:hidden">
+          <img class="cover" id="s4-img" src="../public/showcase/showcase1.webp">
+          <div class="abs" id="s4-sweep" style="inset:-40%;background:linear-gradient(115deg,transparent 42%,rgba(255,255,255,.55) 50%,transparent 58%)"></div>
+        </div>
+        <div class="abs lg lg-float badge" id="s4-hd" style="right:44px;top:44px;font-size:22px;padding:12px 22px;color:var(--fg)">
+          <span style="width:30px;height:30px;border-radius:50%;background:var(--green);display:grid;place-items:center;color:#fff"><svg class="i" width="18" height="18" viewBox="0 0 24 24" style="stroke-width:3"><path d="M20 6 9 17l-5-5"/></svg></span>高清放大完成</div>
+      </div>
+      <div class="abs lg lg-bar" id="s4-dock" style="left:450px;top:806px;width:1020px;height:108px;border-radius:9999px;display:flex;align-items:center;justify-content:center;gap:14px">
+        <div class="act" id="a0"><svg class="i" width="30" height="30" viewBox="0 0 24 24"><path d="m9.06 11.9 8.07-8.06a2.85 2.85 0 1 1 4.03 4.03l-8.06 8.08"/><path d="M7.07 14.94c-1.66 0-3 1.35-3 3.02 0 1.33-2.5 1.52-2 2.02 1.08 1.1 2.49 2.02 4 2.02 2.2 0 4-1.8 4-4.04a3.01 3.01 0 0 0-3-3.02z"/></svg>改图</div>
+        <div class="act" id="a1"><svg class="i" width="30" height="30" viewBox="0 0 24 24"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" x2="14" y1="3" y2="10"/><line x1="3" x2="10" y1="21" y2="14"/></svg>放大</div>
+        <div class="act" id="a2"><svg class="i" width="30" height="30" viewBox="0 0 24 24"><path d="M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3Z"/><path d="m6.2 5.3 3.1 3.9"/><path d="m12.4 3.4 3.1 4"/><path d="M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>生视频</div>
+        <div class="act" id="a3"><svg class="i" width="30" height="30" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>下载</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== S5 全能工作台 ===== -->
+  <section class="scene" id="s5"><div class="cam" id="s5-cam">
+    <div class="abs eyebrow center-x" id="s5-eb" style="top:120px">04 · 全能工作台</div>
+    <div class="abs h1 center-x" id="s5-h" style="top:160px;font-size:84px">从一张图，到一整部片。</div>
+    <div class="abs lg lg-card cap" id="c0" style="left:128px;top:356px">
+      <div class="pv"><img class="cover" src="../public/showcase/showcase5.webp"></div>
+      <div class="ic" style="background:linear-gradient(160deg,#3d9bff,#007AFF)"><svg class="i" width="38" height="38" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg></div>
+      <div class="t">文生图</div><div class="d">一句话，出 2K 成片</div>
+    </div>
+    <div class="abs lg lg-card cap" id="c1" style="left:548px;top:356px">
+      <div class="pv"><img class="cover" id="c1-a" src="../public/showcase/showcase6.webp"></div>
+      <div class="ic" style="background:linear-gradient(160deg,#f7a1c9,#ec4d92)"><svg class="i" width="38" height="38" viewBox="0 0 24 24"><path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72"/><path d="m14 7 3 3"/><path d="M5 6v4"/><path d="M19 14v4"/><path d="M10 2v2"/><path d="M7 8H3"/><path d="M21 16h-4"/><path d="M11 3H9"/></svg></div>
+      <div class="t">改图 · 放大</div><div class="d">局部重绘，一键高清</div>
+    </div>
+    <div class="abs lg lg-card cap" id="c2" style="left:968px;top:356px">
+      <div class="pv"><img class="cover" id="c2-img" src="../public/showcase/cards/c01-art-curation-3-12.webp"><div class="play"><svg width="36" height="36" viewBox="0 0 24 24" style="fill:#fff;margin-left:6px"><polygon points="6 3 20 12 6 21 6 3"/></svg></div></div>
+      <div class="ic" style="background:linear-gradient(160deg,#8fdcff,#3aa9f0)"><svg class="i" width="38" height="38" viewBox="0 0 24 24"><path d="M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3Z"/><path d="m6.2 5.3 3.1 3.9"/><path d="m12.4 3.4 3.1 4"/><path d="M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg></div>
+      <div class="t">生视频</div><div class="d">让画面动起来，成为镜头</div>
+    </div>
+    <div class="abs lg lg-card cap" id="c3" style="left:1388px;top:356px">
+      <div class="pv" style="background:rgba(45,49,66,.05)">
+        <div class="abs" id="k0" style="left:40px;top:40px;width:168px;height:224px;border-radius:24px;overflow:hidden;box-shadow:0 14px 30px rgba(45,49,66,.2)"><img class="cover" src="../public/showcase/cards/c11-ecom-model-2-62.webp"></div>
+        <div class="abs" id="k1" style="left:110px;top:30px;width:168px;height:224px;border-radius:24px;overflow:hidden;box-shadow:0 14px 30px rgba(45,49,66,.2)"><img class="cover" src="../public/showcase/showcase2.webp"></div>
+        <div class="abs" id="k2" style="left:180px;top:40px;width:168px;height:224px;border-radius:24px;overflow:hidden;box-shadow:0 14px 30px rgba(45,49,66,.2)"><img class="cover" src="../public/showcase/showcase4.webp"></div>
+      </div>
+      <div class="ic" style="background:linear-gradient(160deg,#6aa8ff,#ec6fae)"><svg class="i" width="38" height="38" viewBox="0 0 24 24"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"/><path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"/><path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"/></svg></div>
+      <div class="t">批量许愿</div><div class="d">说要多少张，就生到额度为止</div>
+    </div>
+  </div></section>
+
+  <!-- ===== S6 B 端 API ===== -->
+  <section class="scene" id="s6"><div class="cam" id="s6-cam">
+    <div class="abs eyebrow" id="s6-eb" style="left:170px;top:236px">05 · 团队与开发者</div>
+    <div class="abs h1" id="s6-h1" style="left:170px;top:282px;font-size:72px;line-height:92px">OpenAI 兼容，</div>
+    <div class="abs h1" id="s6-h2" style="left:170px;top:374px;font-size:72px;line-height:92px">一行接入批量生产。</div>
+    <div class="abs bullet" id="s6-b0" style="left:170px;top:540px"><div class="bi" style="background:rgba(52,199,89,.14);color:var(--succ)"><svg class="i" width="30" height="30" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg></div><div>Idempotency-Key 幂等<small>重复请求回同一任务，不重复扣费</small></div></div>
+    <div class="abs bullet" id="s6-b1" style="left:170px;top:662px"><div class="bi" style="background:rgba(0,122,255,.12);color:var(--blue)"><svg class="i" width="30" height="30" viewBox="0 0 24 24"><path d="M18 16.98h-5.99c-1.1 0-1.95.94-2.48 1.9A4 4 0 0 1 2 17c.01-.7.2-1.4.57-2"/><path d="m6 17 3.13-5.78c.53-.97.1-2.18-.5-3.1a4 4 0 1 1 6.89-4.06"/><path d="m12 6 3.13 5.73C15.66 12.7 16.9 13 18 13a4 4 0 0 1 0 8"/></svg></div><div>callback_url 回调<small>完成即通知，不用自己轮询</small></div></div>
+    <div class="abs bullet" id="s6-b2" style="left:170px;top:784px"><div class="bi" style="background:rgba(245,230,192,.8);color:var(--gold)"><svg class="i" width="30" height="30" viewBox="0 0 24 24"><circle cx="8" cy="8" r="6"/><path d="M18.09 10.37A6 6 0 1 1 10.34 18"/><path d="M7 6h1v4"/><path d="m16.71 13.88.7.71-2.82 2.82"/></svg></div><div>批发额度<small>预留 · 结算 · 退款，每一币都对得上</small></div></div>
+
+    <div class="abs lg lg-card" id="s6-term" style="left:900px;top:196px;width:880px;height:690px;border-radius:52px">
+      <div class="abs" style="left:40px;top:38px;display:flex;gap:12px"><i style="width:16px;height:16px;border-radius:50%;background:var(--red);opacity:.85"></i><i style="width:16px;height:16px;border-radius:50%;background:var(--orange);opacity:.85"></i><i style="width:16px;height:16px;border-radius:50%;background:var(--green);opacity:.85"></i></div>
+      <div class="abs eyebrow center-x" style="top:34px;font-size:15px">eimu.dev/v1</div>
+      <div class="abs" style="left:0;right:0;top:84px;height:1px;background:rgba(45,49,66,.07)"></div>
+      <div class="abs code" id="s6-code" style="left:44px;top:112px"></div>
+      <div class="abs" id="s6-resp" style="left:30px;right:30px;top:482px;height:178px;border-radius:32px;background:rgba(52,199,89,.08);border:1.5px solid rgba(52,199,89,.18)">
+        <div class="abs badge" style="left:26px;top:24px;background:var(--succ-l);color:var(--succ);font-family:GeistMono;font-size:20px;padding:8px 18px">
+          <svg class="i" width="20" height="20" viewBox="0 0 24 24" style="stroke-width:3"><path d="M20 6 9 17l-5-5"/></svg>202 Accepted</div>
+        <div class="abs code" style="left:30px;top:82px;font-size:23px;line-height:36px"><span style="color:#7b8694">{ </span><span style="color:#007AFF">"task_id"</span>: <span style="color:#5b7a5e">"3988af81-…"</span>, <span style="color:#007AFF">"status"</span>: <span style="color:#5b7a5e">"queued"</span><span style="color:#7b8694"> }</span></div>
+      </div>
+    </div>
+  </div></section>
+
+  <!-- ===== S7 收尾 ===== -->
+  <section class="scene" id="s7"><div class="cam" id="s7-cam">
+    <div class="abs ring" id="s7-ring" style="left:810px;top:118px;width:300px;height:300px"></div>
+    <div class="abs orb" id="s7-orb" style="left:810px;top:118px;width:300px;height:300px"><img src="../public/icon-512.png" style="left:26px;top:22px;width:248px;height:248px"><div class="rim" id="s7-rim"></div><div class="hi"></div></div>
+    <div class="abs word center-x" id="s7-word" style="top:452px;font-size:176px">Emu</div>
+    <div class="abs h1 center-x" id="s7-tag" style="top:660px;font-size:52px;font-weight:600">许个愿，作品就来了。</div>
+    <div class="abs" id="s7-cta-wrap" style="left:0;right:0;top:790px;display:flex;justify-content:center">
+      <div class="btn" id="s7-cta" style="position:relative;height:96px;padding:0 54px;font-size:32px;overflow:hidden;gap:18px">免费开始创作
+        <span style="width:1.5px;height:34px;background:rgba(255,255,255,.3)"></span><span style="font-family:Geist;font-weight:500;letter-spacing:.01em">eimu.dev</span>
+        <span class="abs" id="s7-sheen" style="top:0;bottom:0;width:180px;background:linear-gradient(100deg,transparent,rgba(255,255,255,.2),transparent)"></span></div>
+    </div>
+  </div></section>
+
+  <canvas id="grain" width="1920" height="1080"></canvas>
+  <div id="fade"></div>
+</div>
+
+<script>
+/* ============ 基礎：純函數時間軸，任何 t 都可獨立渲染 ============ */
+const $ = id => document.getElementById(id);
+const clamp = (x, a = 0, b = 1) => x < a ? a : x > b ? b : x;
+const lerp = (a, b, p) => a + (b - a) * p;
+const P = (t, a, b) => clamp((t - a) / (b - a));
+function cb(x1, y1, x2, y2) {
+  const bz = (u, a, b) => 3 * a * u * (1 - u) ** 2 + 3 * b * u * u * (1 - u) + u ** 3;
+  const dz = (u, a, b) => 3 * a * (1 - u) ** 2 + 6 * (b - a) * u * (1 - u) + 3 * (1 - b) * u * u;
+  return p => { if (p <= 0) return 0; if (p >= 1) return 1; let u = p;
+    for (let i = 0; i < 10; i++) { const d = dz(u, x1, x2); if (Math.abs(d) < 1e-7) break; u = clamp(u - (bz(u, x1, x2) - p) / d); }
+    return bz(u, y1, y2); };
+}
+const E = { ios: cb(.4, 0, .2, 1), out: cb(.16, 1, .3, 1), inn: cb(.6, 0, .9, .4), io: cb(.65, 0, .35, 1), spring: cb(.34, 1.56, .64, 1) };
+function spr(t, t0, k = 170, c = 19) {
+  const x = t - t0; if (x <= 0) return 0;
+  const w = Math.sqrt(k), z = c / (2 * w);
+  if (z < 1) { const wd = w * Math.sqrt(1 - z * z); return 1 - Math.exp(-z * w * x) * (Math.cos(wd * x) + (z * w / wd) * Math.sin(wd * x)); }
+  return 1 - Math.exp(-w * x) * (1 + w * x);
+}
+function set(el, p) {
+  const s = el.style;
+  if (p.o !== undefined) { const o = clamp(p.o); s.opacity = o.toFixed(4); s.visibility = o < .002 ? "hidden" : "visible"; }
+  let tr = "";
+  if (p.x || p.y || p.z) tr += `translate3d(${(p.x || 0).toFixed(2)}px,${(p.y || 0).toFixed(2)}px,${(p.z || 0).toFixed(2)}px) `;
+  if (p.rx) tr += `rotateX(${p.rx}deg) `; if (p.ry) tr += `rotateY(${p.ry}deg) `; if (p.r) tr += `rotate(${p.r}deg) `;
+  if (p.s !== undefined && Math.abs(p.s - 1) > 1e-4) tr += `scale(${p.s.toFixed(4)}) `;
+  s.transform = tr || "none";
+  if (p.b !== undefined) s.filter = p.b > .08 ? `blur(${p.b.toFixed(2)}px)` : "none";
+}
+/* 標準進出：spring 進場（上浮 + 去模糊 + 0.94→1 縮放，對齊 lg-appear），ease 退場 */
+function io(t, tin, tout, o = {}) {
+  const dy = o.dy ?? 46, blur = o.blur ?? 14, s0 = o.s0 ?? .94, dout = o.dout ?? .5;
+  const a = spr(t, tin, o.k ?? 160, o.c ?? 18);
+  const fin = E.out(P(t, tin, tin + (o.din ?? .6)));
+  const q = tout == null ? 0 : E.inn(P(t, tout, tout + dout));
+  return { o: fin * (1 - q), x: (o.dx ?? 0) * (1 - a), y: (1 - a) * dy - q * (o.qy ?? 40), s: lerp(s0, 1, a) + q * (o.qs ?? .03), b: (1 - fin) * blur + q * blur };
+}
+function split(el) {
+  const txt = el.textContent; el.textContent = "";
+  return [...txt].map(ch => { const s = document.createElement("span"); s.className = "ch"; s.textContent = ch; el.appendChild(s); return s; });
+}
+function chars(spans, t, t0, step, tout, o = {}) {
+  spans.forEach((s, i) => set(s, io(t, t0 + i * step, tout == null ? null : tout + i * (o.outStep ?? .012), { dy: o.dy ?? 60, blur: o.blur ?? 16, s0: 1, k: 190, c: 20, qy: 30 })));
+}
+const hash = i => { const x = Math.sin(i * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
+
+/* ============ 場景時間表 ============ */
+const DUR = 35;
+const SC = { s1: [0, 4.35], s2: [3.95, 9.85], s3: [9.4, 15.6], s4: [15.1, 21.6], s5: [21.1, 25.9], s6: [25.4, 29.9], s7: [29.4, 35] };
+const CUES = { swell: [0.05], chime: [], whoosh: [], tick: [], pop: [], pluck: [], success: [], bloom: [], shimmer: [], duration: DUR, chords: [[0, 4.1], [4.1, 9.6], [9.6, 15.3], [15.3, 21.3], [21.3, 25.6], [25.6, 29.6], [29.6, 35]] };
+
+/* ============ WebGL：Aurora 流光 + 液態玻璃透鏡（真折射 / 色散 / 菲涅爾） ============ */
+const ORB = { x: 960, y: 540, r: 160, a: 0, str: 1, logoA: 0, logoS: .8, rot: 0, sx: 1, sy: 1 };
+const gl = $("aurora").getContext("webgl", { preserveDrawingBuffer: true, antialias: false, premultipliedAlpha: false });
+let U = {};
+(function initGL() {
+  const vs = `attribute vec2 p; void main(){ gl_Position = vec4(p,0.,1.); }`;
+  const fs = `precision highp float;
+  uniform float t; uniform vec4 mood; uniform vec2 res;
+  uniform vec4 orb; uniform vec4 orb2; uniform vec2 shape; uniform sampler2D logo;
+  vec3 aur(vec2 px){
+    vec2 uv = px / res; vec2 q = uv * vec2(1.7778, 1.);
+    vec3 col = mix(vec3(.976,.981,.992), vec3(.937,.949,.969), uv.y);
+    float s = t * .11; vec2 dd; float g;
+    #define B(C,R,T,W) dd = q - (C); g = exp(-dot(dd,dd)/((R)*(R))); col = mix(col, mix(T, vec3(1.), .34), clamp(g*(W), 0., 1.));
+    B(vec2(.30 + .18*sin(s*1.3), .20 + .10*cos(s*1.7)), .62, vec3(.353,.784,.980), 0.48*mood.x)
+    B(vec2(1.50 + .16*cos(s*1.1), .26 + .12*sin(s*1.4+1.)), .58, vec3(.925,.302,.573), 0.34*mood.y)
+    B(vec2(1.10 + .22*sin(s*.9+2.), 1.0 + .08*cos(s*1.2)), .64, vec3(.231,.510,1.), 0.26*mood.w)
+    B(vec2(.25 + .12*cos(s*1.5+3.), 1.02 + .06*sin(s)), .46, vec3(.957,.447,.714), 0.26*mood.z)
+    B(vec2(.95 + .25*sin(s*.7), .52 + .12*sin(s*1.9)), .52, vec3(.353,.784,.980), 0.16*mood.x)
+    return col;
+  }
+  vec4 logoAt(vec2 px){
+    vec2 d = (px - orb.xy) / (orb.z * 2. * orb2.z);
+    float cs = cos(orb2.w), sn = sin(orb2.w); d = mat2(cs, -sn, sn, cs) * d;
+    vec2 uv = d + .5;
+    if (uv.x < 0. || uv.y < 0. || uv.x > 1. || uv.y > 1.) return vec4(0.);
+    vec4 c = texture2D(logo, uv);
+    return vec4(c.rgb * c.a, c.a) * orb2.y;
+  }
+  vec3 inside(vec2 px){ vec3 b = aur(px); vec4 l = logoAt(px); return b * (1. - l.a) + l.rgb; }
+  void main(){
+    vec2 px = vec2(gl_FragCoord.x, res.y - gl_FragCoord.y);
+    vec3 col = aur(px);
+    float R = orb.z, A = orb.w;
+    if (A > .001 && R > 1.) {
+      vec2 d = (px - orb.xy) / shape; float dist = length(d);
+      // 投影：柔和、略帶 indigo
+      float sd = length((px - orb.xy - vec2(0., R*.22)) / vec2(1., .9)) - R*.86;
+      float sh = A * .20 * (1. - smoothstep(-R*.25, R*.55, sd));
+      col = mix(col, col * vec3(.84,.85,.93), sh);
+      if (dist < R + 2.) {
+        float nd = dist / R; vec2 dir = dist > .0001 ? d / dist : vec2(0.);
+        float bev = .30; float k = clamp((nd - (1. - bev)) / bev, 0., 1.);
+        float slope = k * k * 2.6;
+        vec3 n = normalize(vec3(dir * slope, 1.));
+        float str = orb2.x;
+        vec2 off = n.xy * R * .20 * str;
+        vec3 g;
+        g.r = inside(px - off * 1.00).r;
+        g.g = inside(px - off * 1.07).g;
+        g.b = inside(px - off * 1.15).b;
+        // 玻璃體：提亮 + 飽和（對齊 lg 材料 brightness 1.08 / saturate 180%）
+        float lum = dot(g, vec3(.299,.587,.114));
+        g = mix(vec3(lum), g, 1.28) * 1.04;
+        g = mix(g, vec3(1.), .08 + .24 * k * k * k);
+        vec2 L = normalize(vec2(-.62, -.78));
+        float lit = dot(dir, L);
+        float rim = pow(k, 5.);
+        g += vec3(1.) * rim * (.30 + .45 * max(lit, 0.));
+        g += vec3(.93,.45,.70) * .16 * pow(k, 3.) * max(-lit, 0.);          // 底緣冷色焦散
+        g += vec3(.35,.78,.98) * .10 * pow(k, 2.) * max(dot(dir, vec2(.9,-.2)), 0.);
+        float ang = atan(d.y, d.x);
+        g += vec3(1.) * .55 * pow(max(cos(ang + 2.2 - t * 1.1), 0.), 22.) * pow(k, 5.);
+        vec2 hp = (px - orb.xy) / R - vec2(-.34, -.52);
+        float hc = cos(-.5), hs = sin(-.5); hp = mat2(hc, -hs, hs, hc) * hp;
+        g += vec3(1.) * .72 * exp(-(hp.x*hp.x/.075 + hp.y*hp.y/.012));      // 主高光
+        vec2 hp2 = (px - orb.xy) / R - vec2(.38, .56);
+        g += vec3(1.) * .22 * exp(-(hp2.x*hp2.x/.02 + hp2.y*hp2.y/.006));
+        g *= 1. - .07 * smoothstep(.955, 1., nd) * max(dir.y, 0.);        // 底緣暗線
+        float alpha = clamp(R - dist + .8, 0., 1.) * A;
+        col = mix(col, clamp(g, 0., 1.), alpha);
+      }
+    }
+    gl_FragColor = vec4(col, 1.);
+  }`;
+  const sh = (type, src) => { const x = gl.createShader(type); gl.shaderSource(x, src); gl.compileShader(x); if (!gl.getShaderParameter(x, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(x)); return x; };
+  const prog = gl.createProgram(); gl.attachShader(prog, sh(gl.VERTEX_SHADER, vs)); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, fs)); gl.linkProgram(prog); gl.useProgram(prog);
+  const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  const loc = gl.getAttribLocation(prog, "p"); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  for (const k of ["t", "mood", "res", "orb", "orb2", "shape", "logo"]) U[k] = gl.getUniformLocation(prog, k);
+  gl.uniform2f(U.res, 1920, 1080); gl.viewport(0, 0, 1920, 1080); gl.uniform1i(U.logo, 0);
+})();
+function loadLogoTexture() {
+  return new Promise((res, rej) => {
+    const im = new Image(); im.onload = () => {
+      const tex = gl.createTexture(); gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, im);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      res();
+    }; im.onerror = rej; im.src = "../public/icon-512.png";
+  });
+}
+function drawAurora(t) {
+  const moods = [[1.1, .9, .8, .8], [1, 1, .9, .9], [.9, 1.1, .8, 1], [1.1, 1, 1, .8], [1, 1, .9, 1], [1.1, .9, .7, 1.1], [1.15, 1.1, 1, .9]];
+  const keys = [0, 4, 9.6, 15.3, 21.3, 25.6, 29.6];
+  let i = 0; while (i < keys.length - 1 && t >= keys[i + 1]) i++;
+  const j = Math.min(i + 1, keys.length - 1); const p = j === i ? 0 : E.io(P(t, keys[j] - .8, keys[j] + .4));
+  const m = moods[i].map((v, k) => lerp(v, moods[j][k], p));
+  gl.uniform1f(U.t, t); gl.uniform4f(U.mood, ...m);
+  gl.uniform4f(U.orb, ORB.x, ORB.y, ORB.r, ORB.a); gl.uniform4f(U.orb2, ORB.str, ORB.logoA, ORB.logoS, ORB.rot); gl.uniform2f(U.shape, ORB.sx, ORB.sy);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+
+/* ============ 靜態準備 ============ */
+(function grain() {
+  const c = $("grain").getContext("2d"); const img = c.createImageData(1920, 1080); let seed = 7;
+  for (let i = 0; i < img.data.length; i += 4) { seed = (seed * 16807) % 2147483647; const v = (seed & 255); img.data[i] = img.data[i + 1] = img.data[i + 2] = v; img.data[i + 3] = 255; }
+  c.putImageData(img, 0, 0);
+})();
+
+let W = {};
+function layout() {
+  // S1：Logo 圓 + Emu 字標水平鎖定
+  $("s1").style.display = "block";
+  const word = $("s1-word"); const ww = word.getBoundingClientRect().width;
+  $("s1").style.display = "none";
+  const gap = 56, orb = 320, total = orb + gap + ww, x0 = (1920 - total) / 2, cy = 500;
+  W.orbFinalX = x0; W.orbStartX = 960 - orb / 2; W.orbY = cy - orb / 2;
+  word.style.left = (x0 + orb + gap) + "px"; word.style.top = (cy - 132) + "px";
+  W.s1Letters = split(word);
+  W.s2h = split($("s2-h")); W.s3h = split($("s3-h")); W.s5h = split($("s5-h"));
+  W.s7word = split($("s7-word")); W.s7tag = split($("s7-tag"));
+
+  // S2 打字時間表
+  W.prompt = "给新品做 12 张视觉大片：产品、空间、街拍";
+  W.typeT = []; let tt = 5.15;
+  for (let i = 0; i < [...W.prompt].length; i++) { W.typeT.push(tt); const ch = [...W.prompt][i]; tt += .072 + hash(i) * .06 + ("：、 ".includes(ch) ? .13 : 0); }
+  W.typeEnd = tt; CUES.tick.push(...W.typeT);
+  W.sendT = 8.2; CUES.pop.push(W.sendT);
+
+  // S3 步驟 + 12 格
+  const steps = ["拆解需求", "生成图片", "自动质检", "回流图库"];
+  W.steps = steps.map(s => { const d = document.createElement("div"); d.className = "step";
+    d.innerHTML = `<span class="dot"></span><span>${s}</span>`; $("s3-steps").appendChild(d); return d; });
+  const srcs = ["showcase/showcase1.webp", "showcase/cards-thumb/c09-ecom-model-2-12.webp", "showcase/showcase5.webp", "showcase/cards-thumb/c01-art-curation-3-12.webp",
+    "showcase/showcase6.webp", "showcase/cards-thumb/c04-art-style-2-62.webp", "showcase/showcase2.webp", "showcase/cards-thumb/c11-ecom-model-2-62.webp",
+    "showcase/showcase4.webp", "showcase/cards-thumb/c20-novel-film-3-88.webp", "showcase/showcase3.webp", "showcase/cards-thumb/c14-ip-pack-3-88.webp"];
+  W.cells = srcs.map((s, i) => { const d = document.createElement("div"); d.className = "cell";
+    const c = i % 4, r = (i / 4) | 0; d.style.left = c * (150 + 14) + "px"; d.style.top = r * (150 + 14) + "px"; d.style.width = d.style.height = "150px";
+    d.innerHTML = `<div class="shim"></div><img src="../public/${s}">`; $("s3-grid").appendChild(d); return d; });
+  W.pressT = 11.35; CUES.pop.push(W.pressT);
+  W.cellT = srcs.map((_, i) => 12.25 + i * .165 + hash(i + 40) * .05); CUES.pluck.push(...W.cellT);
+  W.doneT = 14.55; CUES.success.push(W.doneT);
+
+  // S4 成片牆
+  const wallSrc = ["cards/c01-art-curation-3-12", "showcase1", "cards/c09-ecom-model-2-12", "showcase4", "cards/c21-drama-visual-2-62", "showcase5", "cards/c13-ip-pack-3-38",
+    "showcase6", "cards/c17-novel-film-3-12", "showcase2", "cards/c04-art-style-2-62", "showcase3", "cards/c11-ecom-model-2-62", "cards/c19-novel-film-3-62", "cards/c14-ip-pack-3-88",
+    "cards/c10-ecom-model-2-38", "cards/c20-novel-film-3-88", "cards/c05-art-style-2-88", "cards/c16-novel-film-2-62", "cards/c22-art-curation-3-88"];
+  W.rows = [];
+  for (let r = 0; r < 5; r++) {
+    const row = document.createElement("div"); row.className = "row"; row.style.top = (-940 + r * 366) + "px";
+    for (let k = 0; k < 13; k++) {
+      const n = wallSrc[(k * 3 + r * 7) % wallSrc.length]; const sq = n.startsWith("showcase");
+      const w = document.createElement("div"); w.className = "w"; w.style.width = (sq ? 340 : 255) + "px";
+      w.innerHTML = `<img src="../public/showcase/${sq ? n : n.replace("cards/", "cards/")}.webp">`; row.appendChild(w);
+    }
+    $("wall").appendChild(row); W.rows.push(row);
+  }
+  W.upT = 19.35; CUES.pop.push(W.upT); CUES.shimmer.push(W.upT + .15);
+
+  // S6 程式碼
+  const C = { k: "#2d3142", f: "#d23f84", s: "#5b7a5e", u: "#007AFF", n: "#d23f84", m: "#7b8694" };
+  const code = [
+    [["$ ", C.m], ["curl", C.k], [" -X POST ", C.f], ["$BASE", C.u], ["/images/generations \\", C.k]],
+    [["    -H ", C.f], ['"Authorization: Bearer $KEY"', C.s], [" \\", C.k]],
+    [["    -H ", C.f], ['"Idempotency-Key: spring-drop-01"', C.s], [" \\", C.k]],
+    [["    -d ", C.f], ["'{", C.m], ['"model"', C.u], [":", C.k], ['"gpt-image-2"', C.s], [",", C.k]],
+    [["         ", C.k], ['"prompt"', C.u], [":", C.k], ['"新品春季视觉大片"', C.s], [",", C.k], [' "n"', C.u], [":", C.k], ["12", C.n], ["}'", C.m]],
+  ];
+  const host = $("s6-code"); W.codeChars = [];
+  code.forEach((line, li) => { line.forEach(([txt, col]) => { for (const ch of txt) { const s = document.createElement("span"); s.className = "c"; s.style.color = col; s.textContent = ch; host.appendChild(s); W.codeChars.push(s); } });
+    if (li < code.length - 1) host.appendChild(document.createTextNode("\n")); });
+  W.codeT0 = 26.2; W.codeCps = W.codeChars.length / 2.0;   // 2 秒打完，留足 202 回應的停留
+  W.codeEnd = W.codeT0 + W.codeChars.length / W.codeCps;
+  for (let i = 0; i < W.codeChars.length; i += 7) CUES.tick.push(W.codeT0 + i / W.codeCps);
+  W.respT = W.codeEnd + .3; CUES.success.push(W.respT);
+
+  CUES.chime.push(.62); CUES.whoosh.push(1.5, 3.95, 9.4, 15.05, 21.05, 25.35, 29.35);
+  CUES.bloom.push(29.7); CUES.pop.push(31.6);
+  CUES.pluck.push(1.65, 1.72, 1.79, 21.45, 21.57, 21.69, 21.81);
+}
+
+/* ============ 各幕 ============ */
+function s1(t) {
+  const out = 3.6;
+  const a = spr(t, .2, 110, 13), fin = E.out(P(t, .2, .75));
+  const q = E.inn(P(t, out, out + .6));
+  const mv = spr(t, 1.35, 150, 20);
+  const ox = lerp(W.orbStartX, W.orbFinalX, mv), oy = W.orbY + Math.sin(t * 1.4) * 6;
+  const la = spr(t, .5, 140, 14);
+  const wob = spr(t, .2, 260, 9) - 1, wob2 = (spr(t, 1.35, 260, 10) - 1) * -.6;
+  Object.assign(ORB, { x: ox + 160, y: oy + 160 - q * 40, r: 160 * lerp(.3, 1, a) * (1 + q * .05), a: fin * (1 - q), str: 1 + (1 - a) * 1.6,
+    logoA: E.out(P(t, .45, .95)) * (1 - q), logoS: lerp(.45, .62, la), rot: lerp(-.25, 0, la), sx: 1 + (wob + wob2) * .09, sy: 1 - (wob + wob2) * .09 });
+  [["s1-ring", .62], ["s1-ring2", .8]].forEach(([id, t0]) => { const r = $(id); const p = E.out(P(t, t0, t0 + 1.4));
+    r.style.left = ox + "px"; r.style.top = oy + "px"; set(r, { o: (t > t0 ? 1 : 0) * (1 - p) * .9, s: 1 + p * 1.5 }); });
+  chars(W.s1Letters, t, 1.6, .075, out + .05, { dy: 90, blur: 22 });
+  set($("s1-eb"), io(t, 2.15, out, { dy: 24 }));
+  set($("s1-tag"), io(t, 2.3, out + .08, { dy: 30 }));
+  $("s1-cam").style.transform = `scale(${1 + t * .006})`;
+}
+
+function s2(t) {
+  const out = 9.05;
+  set($("s2-eb"), io(t, 4.05, out, { dy: 24 }));
+  chars(W.s2h, t, 4.15, .035, out, { dy: 70 });
+  [0, 1, 2, 3, 4].forEach(i => { const d = $("d" + i); const p = io(t, 4.3 + i * .09, out - .1 + i * .04, { dy: 120, s0: .85, blur: 20, k: 90, c: 15 });
+    p.x = Math.sin(t * .35 + i * 1.7) * 26 + (t - 4) * (i % 2 ? -6 : 6); p.y += Math.cos(t * .5 + i) * 12; p.r = Math.sin(t * .3 + i) * 2.2 + (i - 2) * 1.6; p.o *= .96; set(d, p); });
+  // 輸入框：出場時往上縮成訊息
+  const bar = $("s2-bar"); const bin = io(t, 4.55, null, { dy: 80, s0: .9, blur: 16, k: 150, c: 16 });
+  const fly = E.io(P(t, out - .05, out + .7));
+  set(bar, { o: bin.o * (1 - E.inn(P(t, out + .3, out + .75))), y: bin.y - fly * 300, s: bin.s * lerp(1, .6, fly), b: bin.b + fly * 8 });
+  const glow = spr(t, W.sendT, 120, 14) * (1 - P(t, W.sendT + .5, W.sendT + 1.1));
+  bar.style.boxShadow = `0 30px 70px rgba(45,49,66,.10), 0 0 0 ${(glow * 6).toFixed(2)}px rgba(0,122,255,${(glow * .16).toFixed(3)}), 0 0 ${(glow * 80).toFixed(1)}px rgba(0,122,255,${(glow * .25).toFixed(3)}), inset 0 1.5px 0 rgba(255,255,255,.95)`;
+  const chs = [...W.prompt]; let n = 0; while (n < W.typeT.length && t >= W.typeT[n]) n++;
+  const typing = t >= W.typeT[0] && t < W.typeEnd + .1;
+  const blink = typing || (Math.floor((t - 4) * 1.8) % 2 === 0);
+  $("s2-txt").innerHTML = chs.slice(0, n).join("") + (t < W.sendT + .1 ? `<span class="caret" style="opacity:${blink ? 1 : 0}"></span>` : "");
+  set($("s2-ph"), { o: n === 0 ? .9 : 0 });
+  const send = $("s2-send"); const on = E.ios(P(t, W.typeT[0], W.typeT[0] + .35));
+  const mix = (a, b) => a.map((v, i) => Math.round(lerp(v, b[i], on)));
+  send.style.background = `rgb(${mix([188, 194, 202], [45, 49, 66]).join(",")})`;
+  const press = P(t, W.sendT - .08, W.sendT + .02);
+  set(send, { s: t < W.sendT + .02 ? 1 - press * .14 : lerp(.86, 1, spr(t, W.sendT + .02, 260, 12)) });
+  const rp = E.out(P(t, W.sendT, W.sendT + .8)); set($("s2-ripple"), { o: t > W.sendT ? (1 - rp) : 0, s: 1 + rp * 1.4 });
+  [...$("s2-chips").children].forEach((c, i) => set(c, io(t, 4.95 + i * .07, W.sendT + .05 + i * .03, { dy: 40, s0: .9 })));
+  $("s2-cam").style.transform = `scale(${1 + (t - 4) * .005})`;
+}
+
+function s3(t) {
+  const out = 14.95;
+  set($("s3-eb"), io(t, 9.5, out, { dy: 24 }));
+  chars(W.s3h, t, 9.58, .03, out, { dy: 60 });
+  { const p = io(t, 9.65, out + .1, { dy: 140, s0: .92, blur: 18, k: 140, c: 17 }); p.x = 380 * (1 - spr(t, W.pressT + .25, 140, 19)); set($("s3-conf"), p); }
+  [0, 1, 2, 3].forEach(i => set($("t" + i), io(t, 10.05 + i * .09, null, { dy: 30, s0: .9 })));
+  set($("s3-coin"), io(t, 10.5, null, { dy: 24, s0: .9 }));
+  const bp = P(t, W.pressT - .09, W.pressT);
+  set($("s3-btn"), { ...io(t, 10.6, null, { dy: 24, s0: .9 }), s: t < W.pressT ? lerp(1, .93, bp) * io(t, 10.6, null, { s0: .9 }).s : lerp(.93, 1, spr(t, W.pressT, 260, 13)) });
+  const rp = E.out(P(t, W.pressT, W.pressT + .8)); set($("s3-ripple"), { o: t > W.pressT ? (1 - rp) : 0, s: 1 + rp * .25 });
+  const sw = E.ios(P(t, W.pressT + .05, W.pressT + .35));
+  set($("s3-bw"), { o: 1 - sw, s: 1 - sw * .1 }); set($("s3-bg"), { o: sw, s: lerp(.8, 1, spr(t, W.pressT + .05, 220, 14)) });
+  set($("s3-run"), io(t, W.pressT + .3, out + .18, { dy: 0, dx: 140, s0: .92, blur: 18, k: 140, c: 17 }));
+  let n = 0; while (n < 12 && t >= W.cellT[n]) n++;
+  $("s3-count").textContent = `${n} / 12`;
+  const fin = E.ios(P(t, W.doneT, W.doneT + .3));
+  set($("s3-spin"), { o: 1 - fin, r: t * 400 }); set($("s3-okic"), { o: fin, s: lerp(.4, 1, spr(t, W.doneT, 240, 13)) });
+  set($("s3-title"), { o: 1 - fin, y: -fin * 16 }); set($("s3-title2"), { o: fin, y: (1 - fin) * 16 });
+  const stepDone = [11.95, W.cellT[11] + .2, W.doneT - .25, W.doneT];
+  const stepAct = [W.pressT + .4, 11.95, W.cellT[11] + .2, W.doneT - .25];
+  W.steps.forEach((s, i) => {
+    const done = t >= stepDone[i], act = t >= stepAct[i] && !done; const dot = s.firstChild;
+    set(s, io(t, W.pressT + .55 + i * .07, null, { dy: 20, s0: .9 }));
+    s.style.background = done ? "rgba(52,199,89,.12)" : act ? "rgba(0,122,255,.10)" : "rgba(45,49,66,.05)";
+    s.style.color = done ? "#3b7a4c" : act ? "#007AFF" : "#8a93a1";
+    dot.style.background = done ? "#34C759" : "transparent"; dot.style.color = done ? "#fff" : "currentColor";
+    dot.innerHTML = done ? `<svg class="i" width="16" height="16" viewBox="0 0 24 24" style="stroke-width:3.4"><path d="M20 6 9 17l-5-5"/></svg>`
+      : act ? `<svg class="i" width="22" height="22" viewBox="0 0 24 24" style="stroke-width:2.6;transform:rotate(${(t * 420) % 360}deg)"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>`
+      : `<span style="width:10px;height:10px;border-radius:50%;border:2px solid currentColor"></span>`;
+  });
+  W.cells.forEach((c, i) => {
+    set(c, io(t, W.pressT + .6 + i * .03, null, { dy: 20, s0: .9, blur: 0 }));
+    c.firstChild.style.backgroundPosition = `${(200 - ((t * 90 + i * 12) % 300))}% 0`;
+    const img = c.lastChild; const a = spr(t, W.cellT[i], 200, 14);
+    set(img, { o: E.out(P(t, W.cellT[i], W.cellT[i] + .25)), s: lerp(1.25, 1, a), b: (1 - E.out(P(t, W.cellT[i], W.cellT[i] + .35))) * 10 });
+  });
+  $("s3-cam").style.transform = `scale(${1.0 + (t - 9.4) * .004})`;
+}
+
+function s4(t) {
+  const t0 = 15.1, focusT = 17.95, out = 20.85;
+  const wi = E.out(P(t, t0, t0 + 1.4)), wq = E.inn(P(t, out, out + .7));
+  const push = lerp(1.35, 1.0, wi) + (t - t0) * .018;
+  $("wall").style.transform = `translateZ(0) rotateX(${lerp(24, 16, wi)}deg) rotateY(${-10 + (t - t0) * .6}deg) rotateZ(${-9 + (t - t0) * .25}deg) scale(${push.toFixed(4)})`;
+  W.rows.forEach((r, i) => { const dir = i % 2 ? 1 : -1; r.style.transform = `translateX(${(dir * (t - t0) * (46 + i * 7) + (i % 2 ? -380 : 0)).toFixed(2)}px)`; });
+  const foc = E.io(P(t, focusT, focusT + .8));
+  const wall = $("wall-wrap"); wall.style.opacity = (wi * (1 - wq)).toFixed(4);
+  wall.style.filter = foc > .01 || wq > .01 ? `blur(${(foc * 18 + wq * 10).toFixed(2)}px) saturate(${lerp(1, 1.15, foc).toFixed(3)})` : "none";
+  set($("s4-dim"), { o: lerp(.15, .9, foc) * (1 - wq) + wi * 0 });
+  set($("s4-panel"), io(t, 15.6, focusT - .15, { dy: 90, s0: .9, blur: 20, k: 130, c: 16 }));
+  set($("s4-focus"), io(t, focusT + .15, out, { dy: 120, s0: .82, blur: 22, k: 120, c: 15 }));
+  set($("s4-dock"), io(t, focusT + .5, out + .06, { dy: 60, s0: .9 }));
+  ["a0", "a1", "a2", "a3"].forEach((id, i) => {
+    const e = $(id); const p = io(t, focusT + .6 + i * .06, null, { dy: 20, s0: .85 });
+    if (id === "a1") { const pr = P(t, W.upT - .1, W.upT); p.s *= t < W.upT ? 1 - pr * .08 : lerp(.92, 1, spr(t, W.upT, 260, 13)); }
+    set(e, p);
+    const act = id === "a1" && t >= W.upT;
+    e.style.background = act ? "rgba(0,122,255,.12)" : "transparent"; e.style.color = act ? "#007AFF" : "#2d3142";
+  });
+  const sp = E.io(P(t, W.upT + .1, W.upT + 1.0)); $("s4-sweep").style.transform = `translateX(${lerp(-70, 70, sp)}%)`; $("s4-sweep").style.opacity = t > W.upT && sp < 1 ? 1 : 0;
+  const imgSharp = E.out(P(t, W.upT + .2, W.upT + .9));
+  $("s4-img").style.transform = `scale(${(1.06 - imgSharp * .04 + (t - focusT) * .006).toFixed(4)})`;
+  $("s4-img").style.filter = t < W.upT + .2 ? "blur(1.6px) saturate(.92)" : imgSharp < .999 ? `blur(${(1.6 * (1 - imgSharp)).toFixed(2)}px)` : "none";
+  set($("s4-hd"), io(t, W.upT + .75, null, { dy: -20, s0: .7, k: 220, c: 15 }));
+}
+
+function s5(t) {
+  const out = 25.3;
+  set($("s5-eb"), io(t, 21.2, out, { dy: 24 }));
+  chars(W.s5h, t, 21.28, .035, out, { dy: 70 });
+  [0, 1, 2, 3].forEach(i => {
+    const c = $("c" + i); const p = io(t, 21.45 + i * .12, out + i * .05, { dy: 200, s0: .9, blur: 18, k: 110, c: 14 });
+    const a = spr(t, 21.45 + i * .12, 110, 14);
+    p.rx = (1 - a) * 22; p.y += Math.sin(t * 1.3 + i * 1.1) * 7 * a; set(c, p);
+    c.querySelector(".pv img, .pv .abs img")?.style && (c.querySelector(".pv img").style.transform = `scale(${(1.1 - (t - 21.4) * .02).toFixed(4)})`);
+  });
+  // 批量：三張疊卡攤開
+  [0, 1, 2].forEach(k => { const f = spr(t, 22.4 + k * .1, 150, 13); set($("k" + k), { x: (k - 1) * -70 * (1 - f), y: 0, r: (k - 1) * 7 * f, s: .96 + f * .04 }); });
+  $("s5-cam").style.transform = `scale(${1 + (t - 21.1) * .006})`;
+}
+
+function s6(t) {
+  const out = 29.35;
+  set($("s6-eb"), io(t, 25.5, out, { dy: 24 }));
+  set($("s6-h1"), io(t, 25.58, out, { dy: 60, dx: -40 }));
+  set($("s6-h2"), io(t, 25.68, out + .04, { dy: 60, dx: -40 }));
+  ["s6-b0", "s6-b1", "s6-b2"].forEach((id, i) => set($(id), io(t, 26.0 + i * .12, out + .06 + i * .03, { dy: 40, dx: -30 })));
+  set($("s6-term"), io(t, 25.75, out + .1, { dy: 0, dx: 160, s0: .92, blur: 18, k: 130, c: 17 }));
+  const n = Math.floor(clamp((t - W.codeT0) * W.codeCps, 0, W.codeChars.length));
+  W.codeChars.forEach((c, i) => { c.className = i < n ? (i === n - 1 && t < W.respT + .6 ? "c on cur" : "c on") : "c"; });
+  set($("s6-resp"), io(t, W.respT, null, { dy: 40, s0: .92, k: 200, c: 16 }));
+  $("s6-cam").style.transform = `scale(${1 + (t - 25.4) * .006})`;
+}
+
+function s7(t) {
+  const a = spr(t, 29.55, 110, 13), fin = E.out(P(t, 29.55, 30.1));
+  const la = spr(t, 29.8, 140, 14), wob = spr(t, 29.55, 260, 9) - 1;
+  Object.assign(ORB, { x: 960, y: 268 + Math.sin(t * 1.4) * 6 - (1 - a) * 30, r: 150 * lerp(.3, 1, a), a: fin, str: 1 + (1 - a) * 1.6,
+    logoA: E.out(P(t, 29.75, 30.25)), logoS: lerp(.45, .62, la), rot: lerp(-.25, 0, la), sx: 1 + wob * .09, sy: 1 - wob * .09 });
+  const rp = E.out(P(t, 29.95, 31.4)); set($("s7-ring"), { o: t > 29.95 ? (1 - rp) * .9 : 0, s: 1 + rp * 1.6 });
+  chars(W.s7word, t, 30.0, .08, null, { dy: 90, blur: 22 });
+  chars(W.s7tag, t, 30.55, .04, null, { dy: 40 });
+  set($("s7-cta-wrap"), io(t, 31.3, null, { dy: 50, s0: .9, k: 180, c: 16 }));
+  const sh = E.io(P(t, 32.0, 33.0)); $("s7-sheen").style.left = lerp(-200, 520, sh) + "px";
+  $("s7-cam").style.transform = `scale(${1 + (t - 29.4) * .004})`;
+}
+
+const SCENES = { s1, s2, s3, s4, s5, s6, s7 };
+window.renderFrame = function (t) {
+  ORB.a = 0;
+  set($("veil"), { o: 1 - E.out(P(t, 0, 1.3)) });
+  for (const [id, [a, b]] of Object.entries(SC)) {
+    const on = t >= a && t <= b; $(id).style.display = on ? "block" : "none";
+    if (on) SCENES[id](t);
+  }
+  drawAurora(t);
+  $("fade").style.opacity = E.ios(P(t, 34.35, 35)).toFixed(4);
+};
+
+window.ready = (async () => {
+  await document.fonts.load('650 100px Geist'); await document.fonts.load('500 20px GeistMono'); await document.fonts.load('700 80px "Noto Sans CJK SC"');
+  await document.fonts.ready;
+  layout();
+  await loadLogoTexture();
+  await Promise.all([...document.images].map(i => i.decode().catch(() => { throw new Error("image failed: " + i.src); })));
+  window.renderFrame(0);
+  return CUES;
+})();
+</script>
+</body>
+</html>

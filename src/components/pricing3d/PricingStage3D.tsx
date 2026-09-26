@@ -1,8 +1,11 @@
 "use client";
 
 /* ╁━ /pricing 3D 舞台宿主（輕量殼：不 import three）╁━
-   漸進增強：首屏是靜態卡面 DOM（封面 + 價格玻璃層），這裡在 idle 之後才 import("./engine")
-   把 three 拉進來接管；接管完成前沒有任何 loading 遮罩，接管失敗就永遠停在靜態卡面。
+   秒載入（2026-09-26 暴君：「要秒載入，而不是先出卡片再幹嘛幹嘛」）：
+   - 首幀 = SSR 的夢境底圖 + 價格玻璃層；正面卡不放靜態封面，所以沒有「先一張卡、再換 3D」；
+   - 本模組一被瀏覽器執行就開始拉 engine chunk（不等 idle、不等 effect），掛載即建引擎；
+   - 透明畫布淡入，卡堆直接落進夢境（進場掉落本來就是這一幕的開場）；
+   - 3D 不可用 → section[data-pricing3d="off"]，CSS 退回封面卡。無任何 loading 遮罩。
 
    生命週期（CaseGlassWebGL 同款紀律）：
    - 全頁只有這一個 WebGL context；
@@ -26,25 +29,18 @@ interface PricingStage3DProps {
   coins: number;
 }
 
-const IDLE_TIMEOUT_MS = 1600;
+/** 模組求值時就開始下載 three + engine（和 hydration 並行，不排在 idle 之後）。 */
+let enginePromise: Promise<typeof import("./engine")> | null = null;
+function loadEngine() {
+  enginePromise ??= import("./engine");
+  return enginePromise;
+}
+if (typeof window !== "undefined") void loadEngine().catch(() => undefined);
 const DRAG_PULSE_MS = 90;
 const TAP_SLOP_PX = 5;
 
 function toWorld(planId: string): WorldId {
   return isWorldId(planId) ? planId : "popular";
-}
-
-function onIdle(cb: () => void) {
-  const w = window as Window & {
-    requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
-    cancelIdleCallback?: (id: number) => void;
-  };
-  if (w.requestIdleCallback) {
-    const id = w.requestIdleCallback(cb, { timeout: IDLE_TIMEOUT_MS });
-    return () => w.cancelIdleCallback?.(id);
-  }
-  const id = window.setTimeout(cb, 400);
-  return () => window.clearTimeout(id);
 }
 
 export function PricingStage3D({ planId, coins }: PricingStage3DProps) {
@@ -62,12 +58,16 @@ export function PricingStage3D({ planId, coins }: PricingStage3DProps) {
   worldRef.current = toWorld(planId);
   coinsRef.current = coins;
 
-  /* ① idle 後才武裝（首屏只有 DOM）。 */
+  /* ① 掛載即武裝；省流量 / 低記憶體 → 標記 off，CSS 退回封面卡。 */
   useEffect(() => {
     const nav = navigator as Navigator & { connection?: { saveData?: boolean }; deviceMemory?: number };
-    if (nav.connection?.saveData === true || (nav.deviceMemory !== undefined && nav.deviceMemory <= 2)) return;
+    if (nav.connection?.saveData === true || (nav.deviceMemory !== undefined && nav.deviceMemory <= 2)) {
+      const section = hostRef.current?.closest<HTMLElement>(".pricing-plan-carousel");
+      if (section) section.dataset.pricing3d = "off";
+      return;
+    }
     setSoundOn(readSoundPreference());
-    return onIdle(() => setArmed(true));
+    setArmed(true);
   }, []);
 
   /* ② 動態 import three + 建引擎；所有監聽與觀察者都在這一個 effect 裡建、在這裡拆。 */
@@ -87,14 +87,16 @@ export function PricingStage3D({ planId, coins }: PricingStage3DProps) {
     const reduceQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
     const compact = window.matchMedia("(max-width: 767px)").matches || window.matchMedia("(pointer: coarse)").matches;
 
-    const teardown = () => {
+    const teardown = (failed = false) => {
       for (const fn of cleanups.splice(0)) fn();
       engine?.dispose();
       engine = null;
       engineRef.current = null;
       shownWorldRef.current = null;
       setLive(false);
-      if (section) delete section.dataset.pricing3d;
+      if (!section) return;
+      if (failed) section.dataset.pricing3d = "off";
+      else delete section.dataset.pricing3d;
     };
 
     /* 首次用戶手勢才開聲卡（自動播放政策；也不在沒人碰的時候出聲）。 */
@@ -106,7 +108,7 @@ export function PricingStage3D({ planId, coins }: PricingStage3DProps) {
       window.removeEventListener("keydown", unlock);
     });
 
-    import("./engine")
+    loadEngine()
       .then(({ createPricing3DEngine }) => {
         if (cancelled) return;
         const coins0 = coinsRef.current;
@@ -124,11 +126,12 @@ export function PricingStage3D({ planId, coins }: PricingStage3DProps) {
               setLive(true);
             },
             onFailure: () => {
-              if (!cancelled) teardown();
+              if (!cancelled) teardown(true);
             },
           });
         } catch {
           engine = null;
+          if (section) section.dataset.pricing3d = "off";
           return;
         }
         engineRef.current = engine;
@@ -248,7 +251,8 @@ export function PricingStage3D({ planId, coins }: PricingStage3DProps) {
         });
       })
       .catch(() => {
-        /* chunk 載入失敗 = 停在靜態卡面，不打擾用戶。 */
+        /* chunk 載入失敗 = 退回封面卡，不打擾用戶。 */
+        if (!cancelled && section) section.dataset.pricing3d = "off";
       });
 
     return () => {
@@ -290,6 +294,10 @@ export function PricingStage3D({ planId, coins }: PricingStage3DProps) {
       <div ref={hostRef} className="p3d-host" data-world={world} aria-hidden="true">
         <canvas ref={canvasRef} className="p3d-canvas" />
       </div>
+      {/* 沒有 JS 就不會有 3D：退回封面卡。 */}
+      <noscript>
+        <style>{`.pricing-plan-carousel .case-slab[data-front="true"] .ppc-poster{opacity:1!important}`}</style>
+      </noscript>
       {live && (
         <button
           type="button"

@@ -3,7 +3,7 @@
 // 沿用 server-history-store.ts 的模式：每次寫入落到新路徑 + 修剪舊世代，
 // 避免 Blob cacheControlMaxAge 60s 下限造成的「剛存讀不到」。單用戶寫入串行。
 import { randomBytes } from "node:crypto";
-import { del, get, list, put } from "@/lib/blob-backend";
+import { del, ensureBlobBackendWritable, get, list, put } from "@/lib/blob-backend";
 import { sanitizeBlobSegment } from "@/lib/history-types";
 import { isValidCreationStep, MAX_EPISODES_PER_PROJECT } from "@/lib/creation-flow-steps";
 import { isCanvasProjectType, type CanvasEpisode, type CanvasProject } from "./types";
@@ -16,10 +16,6 @@ const INDEX_CACHE_TTL_MS = 3_000;
 const memoryStore = new Map<number, CanvasProject[]>();
 const indexCache = new Map<number, { projects: CanvasProject[]; expiresAt: number }>();
 const writeQueues = new Map<number, Promise<unknown>>();
-
-function hasBlobStore(): boolean {
-  return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
-}
 
 function userPrefix(userId: number): string {
   return `canvas/${sanitizeBlobSegment(String(userId), "0")}`;
@@ -148,7 +144,7 @@ async function fetchProjects(userId: number): Promise<CanvasProject[]> {
 }
 
 async function readProjects(userId: number): Promise<CanvasProject[]> {
-  if (!hasBlobStore()) return [...(memoryStore.get(userId) ?? [])];
+  if (!ensureBlobBackendWritable("canvas/project-store.readProjects")) return [...(memoryStore.get(userId) ?? [])];
   const cached = indexCache.get(userId);
   if (cached && cached.expiresAt > Date.now()) return [...cached.projects];
   const projects = await fetchProjects(userId);
@@ -158,7 +154,7 @@ async function readProjects(userId: number): Promise<CanvasProject[]> {
 
 async function writeProjects(userId: number, projects: CanvasProject[]): Promise<void> {
   const capped = [...projects].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt)).slice(0, MAX_PROJECTS_PER_USER);
-  if (!hasBlobStore()) {
+  if (!ensureBlobBackendWritable("canvas/project-store.writeProjects")) {
     memoryStore.set(userId, capped);
     indexCache.delete(userId);
     return;

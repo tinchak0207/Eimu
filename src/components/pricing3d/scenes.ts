@@ -1,14 +1,19 @@
-/* ╁━ /pricing 3D 家具場景（程序化幾何 + 程序化木紋；不下載任何模型資產）╁━
-   四個世界各一套：家具、牆/窗/天光、主光與補光、機位、卡堆落點。
+/* ╁━ /pricing 3D 夢境場景（2026-09-26 暴君：整體主題改成虹彩液態玻璃的夢幻空間）╁━
+   畫布透明，疊在 SSR 就到位的夢境底圖（PricingAtmosphere）上：這裡只畫「前景實物」——
+   卡堆落腳的液態玻璃台、水面漣漪、虹彩晶簇、氣泡、有方向的主光與陰影。
+   四個世界 = 同一座夢境的四種天光（晨 → 夜 → 雨後虹 → 天亮），台子隨量級放大：
+   梦芽一片小玻璃睡蓮 → 梦影一座浮台 → 梦虹三層階台 → 自訂一望無際的玻璃水面。
+   玻璃只活在邊緣與光掠過處：台面實心（薄膜虹彩 iridescence + clearcoat），
+   邊緣一圈亮環；不用 transmission（多一趟全屏渲染）。
    只在 engine.ts（動態 import 之後）被載入，所以這裡可以直接 import three。 */
 
 import * as THREE from "three";
 import type { WorldId } from "./worlds";
 
-/** 作品卡尺寸（世界單位）：寬 1、深 1.32（≈3:4 竪幅）、厚 0.034（玻璃厚度感）。 */
+/** 作品卡尺寸（世界單位）：寬 1、深 1.32（≈3:4 竪幅）、厚 0.024（薄玻璃片：堆高是量級，但不能高成一疊紙磚）。 */
 export const CARD_W = 1;
 export const CARD_D = 1.32;
-export const CARD_T = 0.034;
+export const CARD_T = 0.024;
 
 export interface PileSpec {
   x: number;
@@ -20,6 +25,26 @@ export interface PileSpec {
   baseY?: number;
   /** 堆底攤開成扇形的張數（讓更多張作品露臉）。 */
   fan?: number;
+}
+
+export interface SpillSpec {
+  /** 台心。 */
+  x: number;
+  z: number;
+  /** 落地環帶內外半徑。 */
+  rIn: number;
+  rOut: number;
+  /** 地面高度。 */
+  y: number;
+  /** 以鏡頭方向（+z）為中心的散落半角（弧度）。 */
+  arc: number;
+  /** 溢出多少張時鋪到最外圈。 */
+  full: number;
+  /** 最多溢出幾張（其餘繼續在台上長高）。 */
+  max: number;
+  /** 滑落起點：台沿半徑與高度。 */
+  edge: number;
+  edgeY: number;
 }
 
 export interface WorldRig {
@@ -34,6 +59,9 @@ export interface WorldRig {
   exposure: number;
   envIntensity: number;
   fog: THREE.Fog | null;
+  /** 台面裝得下的卡數；超過的從台沿滑落、鋪到地上（額度裝不下的滿足感）。 */
+  capacity: number;
+  spill: SpillSpec;
   /** 玻璃邊緣高光的顏色（跟著主光色走）。 */
   rim: THREE.Color;
   shadowLights: THREE.Light[];
@@ -60,188 +88,173 @@ function tracker(): Tracker {
   };
 }
 
-/* ── 程序化噪聲（可平鋪：座標按週期取模）── */
-function makeNoise(seed: number) {
-  const SIZE = 64;
-  const table = new Float32Array(SIZE * SIZE);
-  let s = seed * 9301 + 49297;
-  for (let i = 0; i < table.length; i += 1) {
-    s = (s * 9301 + 49297) % 233280;
-    table[i] = s / 233280;
-  }
-  const at = (x: number, y: number) => table[(((y % SIZE) + SIZE) % SIZE) * SIZE + (((x % SIZE) + SIZE) % SIZE)];
-  /** 週期 px/py（整數格）內可平鋪的值噪聲。 */
-  const noise = (x: number, y: number, px: number, py: number) => {
-    const xi = Math.floor(x);
-    const yi = Math.floor(y);
-    const xf = x - xi;
-    const yf = y - yi;
-    const u = xf * xf * (3 - 2 * xf);
-    const v = yf * yf * (3 - 2 * yf);
-    const x0 = ((xi % px) + px) % px;
-    const y0 = ((yi % py) + py) % py;
-    const x1 = (x0 + 1) % px;
-    const y1 = (y0 + 1) % py;
-    const a = at(x0, y0);
-    const b = at(x1, y0);
-    const c = at(x0, y1);
-    const d = at(x1, y1);
-    return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
-  };
-  return (u: number, v: number, fx: number, fy: number) => {
-    let sum = 0;
-    let amp = 0.5;
-    let norm = 0;
-    for (let o = 0; o < 3; o += 1) {
-      const m = 1 << o;
-      sum += noise(u * fx * m, v * fy * m, fx * m, fy * m) * amp;
-      norm += amp;
-      amp *= 0.5;
-    }
-    return sum / norm;
-  };
-}
 
-type RGB = [number, number, number];
+/* ── 材質 ── */
 
-/** 程序化木紋：年輪（正弦條紋被低頻噪聲扭曲）+ 細纖維條 + 可選木板接縫。 */
-function woodTexture(t: Tracker, size: number, light: RGB, dark: RGB, opts: { rings?: number; seed?: number; planks?: number; repeat?: number } = {}) {
-  const { rings = 9, seed = 1, planks = 0, repeat = 1 } = opts;
-  const canvas = document.createElement("canvas");
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return null;
-  const img = ctx.createImageData(size, size);
-  const fbm = makeNoise(seed);
-  const plankOffset = (row: number) => ((row * 0.618 + seed * 0.37) % 1) * 0.9;
-  for (let y = 0; y < size; y += 1) {
-    const v = y / size;
-    const row = planks > 0 ? Math.floor(v * planks) : 0;
-    for (let x = 0; x < size; x += 1) {
-      const u = x / size;
-      const pu = planks > 0 ? (u + plankOffset(row)) % 1 : u;
-      const warp = fbm(pu, v, 3, 8) * 1.6 + fbm(pu, v, 1, 2) * 0.9;
-      const ring = 0.5 + 0.5 * Math.sin((v * rings + warp + row * 0.37) * Math.PI * 2);
-      const fiber = fbm(pu, v, 2, 96);
-      let k = Math.pow(ring, 2.6) * 0.62 + fiber * 0.32;
-      if (planks > 0) {
-        const edge = Math.abs((v * planks) % 1 - 0.5) * 2;
-        if (edge > 0.965) k = Math.min(1, k + 0.55);
-        const tone = ((row * 0.7131 + seed) % 1) * 0.16 - 0.08;
-        k = Math.min(1, Math.max(0, k + tone));
-      }
-      const i = (y * size + x) * 4;
-      img.data[i] = light[0] + (dark[0] - light[0]) * k;
-      img.data[i + 1] = light[1] + (dark[1] - light[1]) * k;
-      img.data[i + 2] = light[2] + (dark[2] - light[2]) * k;
-      img.data[i + 3] = 255;
-    }
-  }
-  ctx.putImageData(img, 0, 0);
-  const tex = t.tex(new THREE.CanvasTexture(canvas));
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.wrapS = THREE.RepeatWrapping;
-  tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(repeat, repeat);
-  tex.anisotropy = 4;
-  return tex;
-}
-
-/** 窗外天光：竪向漸層 + 可選星點 / 彩虹弧。 */
-function skyTexture(t: Tracker, stops: Array<[number, string]>, extra?: "stars" | "rainbow") {
-  const canvas = document.createElement("canvas");
-  canvas.width = 256;
-  canvas.height = 256;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return null;
-  const g = ctx.createLinearGradient(0, 0, 0, 256);
-  for (const [at, color] of stops) g.addColorStop(at, color);
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, 256, 256);
-  if (extra === "stars") {
-    for (let i = 0; i < 70; i += 1) {
-      const a = 0.25 + Math.random() * 0.6;
-      ctx.fillStyle = `rgba(255,255,255,${a.toFixed(2)})`;
-      const r = Math.random() < 0.12 ? 1.4 : 0.8;
-      ctx.beginPath();
-      ctx.arc(Math.random() * 256, Math.random() * 170, r, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  } else if (extra === "rainbow") {
-    const colors = ["#ff6b6b", "#ffb86b", "#ffe66b", "#8fe38f", "#6bb8ff", "#9b8cff"];
-    ctx.lineWidth = 5;
-    colors.forEach((color, i) => {
-      ctx.strokeStyle = color;
-      ctx.globalAlpha = 0.34;
-      ctx.beginPath();
-      ctx.arc(150, 250, 170 - i * 5, Math.PI * 1.08, Math.PI * 1.92);
-      ctx.stroke();
-    });
-    ctx.globalAlpha = 1;
-  }
-  const tex = t.tex(new THREE.CanvasTexture(canvas));
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
-
-function box(t: Tracker, w: number, h: number, d: number, mat: THREE.Material, x: number, y: number, z: number, opts: { cast?: boolean; receive?: boolean; ry?: number; rz?: number } = {}) {
-  const mesh = new THREE.Mesh(t.geo(new THREE.BoxGeometry(w, h, d)), mat);
-  mesh.position.set(x, y, z);
-  if (opts.ry) mesh.rotation.y = opts.ry;
-  if (opts.rz) mesh.rotation.z = opts.rz;
-  mesh.castShadow = opts.cast ?? true;
-  mesh.receiveShadow = opts.receive ?? true;
-  return mesh;
-}
-
-function std(t: Tracker, params: THREE.MeshStandardMaterialParameters) {
-  return t.mat(new THREE.MeshStandardMaterial(params));
-}
-
-function lacquer(t: Tracker, map: THREE.Texture | null, fallback: number, roughness: number, clearcoat = 0.35) {
+/** 液態玻璃：實心、薄膜虹彩，只在光掠過處泛彩（產品攝影質感）。 */
+function iriGlass(t: Tracker, color: number, opts: { opacity?: number; roughness?: number; emissive?: number; env?: number; clearcoat?: number } = {}) {
   return t.mat(
     new THREE.MeshPhysicalMaterial({
-      map: map ?? undefined,
-      color: map ? 0xffffff : fallback,
-      roughness,
-      clearcoat,
-      clearcoatRoughness: 0.35,
+      color,
+      roughness: opts.roughness ?? 0.1,
+      metalness: 0,
+      clearcoat: opts.clearcoat ?? 1,
+      clearcoatRoughness: 0.04,
+      iridescence: 1,
+      iridescenceIOR: 1.32,
+      iridescenceThicknessRange: [140, 520],
+      sheen: 0.6,
+      sheenColor: new THREE.Color(0xf3e8ff),
+      transparent: (opts.opacity ?? 1) < 1,
+      opacity: opts.opacity ?? 1,
+      emissive: opts.emissive ?? 0x000000,
+      envMapIntensity: opts.env ?? 0.55,
     }),
   );
 }
 
-/** 開了一扇窗的牆：四塊牆板圍住洞口 + 白色窗框與十字窗櫺 + 窗外天光面。 */
-function windowWall(
-  t: Tracker,
-  group: THREE.Group,
-  o: { z: number; hole: [number, number, number, number]; wallMat: THREE.Material; frameMat: THREE.Material; sky: THREE.Texture | null; skyColor: number; span?: number },
-) {
-  const [x0, x1, y0, y1] = o.hole;
-  const span = o.span ?? 14;
-  const thick = 0.2;
-  const leftW = span / 2 + x0;
-  const rightW = span / 2 - x1;
-  group.add(box(t, leftW, 10, thick, o.wallMat, x0 - leftW / 2, 2, o.z, { cast: false }));
-  group.add(box(t, rightW, 10, thick, o.wallMat, x1 + rightW / 2, 2, o.z, { cast: false }));
-  group.add(box(t, x1 - x0, 7 - y1, thick, o.wallMat, (x0 + x1) / 2, y1 + (7 - y1) / 2, o.z, { cast: false }));
-  group.add(box(t, x1 - x0, y0 + 3, thick, o.wallMat, (x0 + x1) / 2, y0 - (y0 + 3) / 2, o.z, { cast: false }));
-  const f = 0.07;
-  const cx = (x0 + x1) / 2;
-  const cy = (y0 + y1) / 2;
-  const z = o.z + 0.02;
-  group.add(box(t, x1 - x0, f, 0.14, o.frameMat, cx, y0 + f / 2, z));
-  group.add(box(t, x1 - x0, f, 0.14, o.frameMat, cx, y1 - f / 2, z));
-  group.add(box(t, f, y1 - y0, 0.14, o.frameMat, x0 + f / 2, cy, z));
-  group.add(box(t, f, y1 - y0, 0.14, o.frameMat, x1 - f / 2, cy, z));
-  group.add(box(t, f * 0.7, y1 - y0, 0.1, o.frameMat, cx, cy, z));
-  group.add(box(t, x1 - x0, f * 0.7, 0.1, o.frameMat, cx, cy + (y1 - y0) * 0.08, z));
-  const sky = new THREE.Mesh(
-    t.geo(new THREE.PlaneGeometry((x1 - x0) * 2.4, (y1 - y0) * 2.4)),
-    t.mat(new THREE.MeshBasicMaterial({ map: o.sky ?? undefined, color: o.sky ? 0xffffff : o.skyColor, fog: false })),
+/** 邊緣淡出的圓形 alpha（水面盤、陰影承接面用）。 */
+function radialAlpha(t: Tracker, inner: number) {
+  const size = 256;
+  const c = document.createElement("canvas");
+  c.width = size;
+  c.height = size;
+  const ctx = c.getContext("2d");
+  if (ctx) {
+    const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    g.addColorStop(0, "#fff");
+    g.addColorStop(inner, "#fff");
+    g.addColorStop(1, "#000");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, size, size);
+  }
+  return t.tex(new THREE.CanvasTexture(c));
+}
+
+/** 柔光暈：加色混合的徑向漸層精靈（燈、日、魔法光點的「暈」，夢境感的主要來源）。 */
+function glowTexture(t: Tracker) {
+  const size = 128;
+  const c = document.createElement("canvas");
+  c.width = size;
+  c.height = size;
+  const ctx = c.getContext("2d");
+  if (ctx) {
+    const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    g.addColorStop(0, "rgba(255,255,255,1)");
+    g.addColorStop(0.18, "rgba(255,255,255,0.55)");
+    g.addColorStop(0.5, "rgba(255,255,255,0.12)");
+    g.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, size, size);
+  }
+  return t.tex(new THREE.CanvasTexture(c));
+}
+
+function glow(t: Tracker, g: THREE.Group, tex: THREE.Texture, x: number, y: number, z: number, size: number, color: number, opacity: number) {
+  const m = new THREE.Sprite(
+    t.mat(new THREE.SpriteMaterial({ map: tex, color, opacity, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, fog: false })),
   );
-  sky.position.set(cx, cy, o.z - 2.4);
-  group.add(sky);
+  m.position.set(x, y, z);
+  m.scale.setScalar(size);
+  g.add(m);
+}
+
+/** 浮在卡堆周圍的魔法光點（加色小點，決定性分佈）。 */
+function sparkles(t: Tracker, g: THREE.Group, tex: THREE.Texture, n: number, radius: number, height: number, color: number, seed: number) {
+  let s = seed;
+  const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+  const pos = new Float32Array(n * 3);
+  for (let i = 0; i < n; i += 1) {
+    const a = rnd() * Math.PI * 2;
+    /* 光點只在卡堆外圍飄（混進卡堆裡的加色光點近看像一團眩光）。 */
+    const r = radius * (0.72 + 0.28 * Math.sqrt(rnd()));
+    pos[i * 3] = Math.sin(a) * r;
+    pos[i * 3 + 1] = 0.15 + rnd() * height;
+    pos[i * 3 + 2] = Math.cos(a) * r - 0.4;
+  }
+  const geo = t.geo(new THREE.BufferGeometry());
+  geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  const pts = new THREE.Points(
+    geo,
+    t.mat(new THREE.PointsMaterial({ map: tex, color, size: 0.05, sizeAttenuation: true, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false })),
+  );
+  g.add(pts);
+}
+
+/** 逆光輪廓：從卡堆正後上方打一盞主光色的燈，堆的邊緣亮成一圈（電影的 rim light）。 */
+function backlight(g: THREE.Group, color: number, intensity: number) {
+  /* 強度打五五折：逆光只負責台子與晶簇的輪廓光，卡片的邊光交給卡面 shader 的 fresnel。 */
+  const light = new THREE.DirectionalLight(color, intensity * 0.55);
+  light.position.set(0.4, 3.2, -5.5);
+  light.target.position.set(0, 0.3, 0);
+  g.add(light, light.target);
+}
+
+/* ── 構件 ── */
+
+/** 液態玻璃台：實心圓台 + 頂緣亮環 + 台面陰影承接（卡堆的真陰影落在這裡）。 */
+function pedestal(t: Tracker, g: THREE.Group, o: { x: number; z: number; r: number; h: number; color: number; rim: number }) {
+  const body = new THREE.Mesh(t.geo(new THREE.CylinderGeometry(o.r, o.r * 0.94, o.h, 96)), iriGlass(t, o.color, { roughness: 0.42, opacity: 0.86, env: 0.12, clearcoat: 0.25 }));
+  body.position.set(o.x, o.h / 2, o.z);
+  body.receiveShadow = true;
+  g.add(body);
+  const ring = new THREE.Mesh(
+    t.geo(new THREE.TorusGeometry(o.r, Math.min(0.045, o.h * 0.4), 16, 128)),
+    iriGlass(t, 0xffffff, { roughness: 0.06, emissive: o.rim, env: 0.7 }),
+  );
+  ring.rotation.x = Math.PI / 2;
+  ring.position.set(o.x, o.h, o.z);
+  g.add(ring);
+  const catcher = new THREE.Mesh(t.geo(new THREE.CircleGeometry(o.r * 0.98, 64)), t.mat(new THREE.ShadowMaterial({ color: 0x3a4f9a, opacity: 0.26 })));
+  catcher.rotation.x = -Math.PI / 2;
+  catcher.position.set(o.x, o.h + 0.002, o.z);
+  catcher.receiveShadow = true;
+  g.add(catcher);
+}
+
+/** 虹彩水面：一張邊緣淡出的玻璃盤 + 幾圈漣漪，把底圖的水「接」到卡堆腳下。 */
+function waterDisc(t: Tracker, g: THREE.Group, radius: number, opacity: number) {
+  const mat = iriGlass(t, 0xeef4ff, { opacity, roughness: 0.18 });
+  mat.alphaMap = radialAlpha(t, 0.55);
+  mat.depthWrite = false;
+  const disc = new THREE.Mesh(t.geo(new THREE.CircleGeometry(radius, 96)), mat);
+  disc.rotation.x = -Math.PI / 2;
+  disc.position.y = -0.004;
+  disc.receiveShadow = true;
+  g.add(disc);
+  const rippleMat = t.mat(new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.22, depthWrite: false }));
+  for (let i = 1; i <= 4; i += 1) {
+    const r = radius * (0.24 + i * 0.13);
+    const ripple = new THREE.Mesh(t.geo(new THREE.RingGeometry(r, r + 0.012 + i * 0.004, 128)), rippleMat);
+    ripple.rotation.x = -Math.PI / 2;
+    ripple.position.y = -0.002;
+    g.add(ripple);
+  }
+}
+
+/** 虹彩晶簇：幾根拉長的八面體（平直切面才有寶石的閃）。 */
+function crystals(t: Tracker, g: THREE.Group, x: number, z: number, scale: number, seed: number) {
+  const mat = iriGlass(t, 0xffcfe6, { roughness: 0.05, opacity: 0.86, env: 0.8 });
+  mat.flatShading = true;
+  const geo = t.geo(new THREE.OctahedronGeometry(0.5, 0));
+  let s = seed;
+  const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+  for (let i = 0; i < 5; i += 1) {
+    const m = new THREE.Mesh(geo, mat);
+    const h = (0.5 + rnd() * 0.9) * scale;
+    m.scale.set(0.22 * scale, h, 0.22 * scale);
+    m.position.set(x + (rnd() - 0.5) * 0.5 * scale, h * 0.36, z + (rnd() - 0.5) * 0.5 * scale);
+    m.rotation.set((rnd() - 0.5) * 0.5, rnd() * Math.PI, (rnd() - 0.5) * 0.6);
+    m.castShadow = true;
+    g.add(m);
+  }
+}
+
+/** 氣泡：薄膜虹彩的透明球。 */
+function bubble(t: Tracker, g: THREE.Group, x: number, y: number, z: number, r: number) {
+  const m = new THREE.Mesh(t.geo(new THREE.SphereGeometry(r, 40, 24)), iriGlass(t, 0xffffff, { opacity: 0.32, roughness: 0.02 }));
+  m.position.set(x, y, z);
+  g.add(m);
 }
 
 function directional(color: number, intensity: number, pos: [number, number, number], target: [number, number, number], shadow: { size: number; span: number; far?: number } | null) {
@@ -270,287 +283,184 @@ export interface BuildOptions {
   shadows: boolean;
 }
 
-/* ── 梦芽：小木托盤 + 晨光窗台 ── */
+const shadowOf = (o: BuildOptions, span: number, far = 20) => (o.shadows ? { size: o.compact ? 512 : 1024, span, far } : null);
+
+/* ── 四档的「遞進」：同一套舞台語言，一档比一档大 ──
+   台子半徑 0.95 → 1.3 → 1.75 → 2.2（再加兩座副台），機位只退 3.3 → 3.75 → 4.3 → 5.1：
+   場景長得比鏡頭退得快，所以切档時一眼看到「變多了、變大了」。
+   主光方向四档一致（左前上方），只換色溫講「夜的故事」；溢出是點睛（0 → 6 → 30 → 60 張），不是山洪。 */
+
+function floor(t: Tracker, g: THREE.Group, radius: number, discOpacity: number) {
+  waterDisc(t, g, radius, discOpacity);
+  /* 地面陰影承接：掉到地上的作品要有落地的影子，不然像浮在畫上。 */
+  const catcher = new THREE.Mesh(t.geo(new THREE.CircleGeometry(radius * 0.8, 64)), t.mat(new THREE.ShadowMaterial({ color: 0x3a4f9a, opacity: 0.24 })));
+  catcher.rotation.x = -Math.PI / 2;
+  catcher.position.y = 0.001;
+  catcher.receiveShadow = true;
+  g.add(catcher);
+}
+
+function keyLight(g: THREE.Group, o: BuildOptions, color: number, intensity: number, span: number) {
+  const key = directional(color, intensity, [-2.6, 4.4, 2.6], [0, 0.4, 0], shadowOf(o, span));
+  g.add(key, key.target);
+  return key;
+}
+
+const PED_H = 0.42;
+
+/* ── 梦芽 · 晨光：一座小玻璃台，一小疊作品，桌面還看得見 ── */
 function buildStarter(o: BuildOptions): WorldRig {
   const t = tracker();
   const g = new THREE.Group();
-  const texSize = o.compact ? 256 : 512;
-  const oak = woodTexture(t, texSize, [226, 196, 152], [168, 124, 78], { rings: 7, seed: 3 });
-  const trayWood = woodTexture(t, texSize, [196, 150, 100], [122, 82, 48], { rings: 11, seed: 7 });
-
-  g.add(box(t, 4.6, 0.16, 2.0, lacquer(t, oak, 0xd8b98c, 0.5), 0, -0.08, 0.15, { cast: false }));
-  const wallMat = std(t, { color: 0xefe3cf, roughness: 0.92 });
-  const frameMat = std(t, { color: 0xfbf7f0, roughness: 0.55 });
-  windowWall(t, g, {
-    z: -0.95,
-    hole: [-1.45, 1.45, 0.02, 2.7],
-    wallMat,
-    frameMat,
-    sky: skyTexture(t, [[0, "#b9d3ee"], [0.55, "#f6e2c6"], [1, "#ffd3a1"]]),
-    skyColor: 0xf6e2c6,
-  });
-
-  const trayMat = lacquer(t, trayWood, 0xb88a5a, 0.42, 0.5);
-  const TW = 2.2;
-  const TD = 2.5;
-  g.add(box(t, TW, 0.05, TD, trayMat, 0, 0.025, 0.12));
-  g.add(box(t, TW, 0.11, 0.07, trayMat, 0, 0.055, 0.12 - TD / 2));
-  g.add(box(t, TW, 0.11, 0.07, trayMat, 0, 0.055, 0.12 + TD / 2));
-  g.add(box(t, 0.07, 0.11, TD, trayMat, -TW / 2, 0.055, 0.12));
-  g.add(box(t, 0.07, 0.11, TD, trayMat, TW / 2, 0.055, 0.12));
-
-  const pot = new THREE.Mesh(t.geo(new THREE.CylinderGeometry(0.22, 0.16, 0.36, 28)), std(t, { color: 0xc4744f, roughness: 0.85 }));
-  pot.position.set(1.72, 0.18, -0.45);
-  pot.castShadow = true;
-  pot.receiveShadow = true;
-  g.add(pot);
-  const soil = new THREE.Mesh(t.geo(new THREE.CylinderGeometry(0.2, 0.2, 0.02, 24)), std(t, { color: 0x4a3526, roughness: 1 }));
-  soil.position.set(1.72, 0.35, -0.45);
-  g.add(soil);
-  const leafMat = std(t, { color: 0x7fb069, roughness: 0.6 });
-  const stem = new THREE.Mesh(t.geo(new THREE.CylinderGeometry(0.012, 0.014, 0.22, 6)), leafMat);
-  stem.position.set(1.72, 0.46, -0.45);
-  g.add(stem);
-  for (const side of [-1, 1]) {
-    const leaf = new THREE.Mesh(t.geo(new THREE.SphereGeometry(0.1, 12, 8)), leafMat);
-    leaf.scale.set(1, 0.18, 0.55);
-    leaf.position.set(1.72 + side * 0.09, 0.57, -0.45);
-    leaf.rotation.z = side * 0.5;
-    leaf.castShadow = true;
-    g.add(leaf);
-  }
-
-  const sun = directional(0xffd29a, 3.4, [-2.8, 3.1, -5.2], [0.3, 0, 0.4], o.shadows ? { size: o.compact ? 512 : 1024, span: 3 } : null);
-  g.add(sun, sun.target);
-  g.add(new THREE.HemisphereLight(0xdce8ff, 0xb89b72, 0.6));
-
+  const glowTex = glowTexture(t);
+  floor(t, g, 3.2, 0.45);
+  pedestal(t, g, { x: 0, z: 0.05, r: 0.95, h: PED_H, color: 0xffc9df, rim: 0x3a1a2c });
+  crystals(t, g, 1.55, -0.6, 0.55, 11);
+  bubble(t, g, -1.45, 1.05, -0.5, 0.2);
+  glow(t, g, glowTex, -2.8, 1.5, -3.2, 4.5, 0xffd2e6, 0.45);
+  sparkles(t, g, glowTex, 30, 1.8, 1.4, 0xffd6e8, 11);
+  backlight(g, 0xffd6e8, 1.08);
+  const key = keyLight(g, o, 0xfff0f6, 3.2, 2.4);
+  g.add(new THREE.HemisphereLight(0xfff0f7, 0xa8b8f0, 0.62));
   return {
     id: "starter",
     group: g,
-    camera: { pos: new THREE.Vector3(0.55, 2.4, 3.2), target: new THREE.Vector3(0.05, 0.28, 0.1), fov: 34 },
-    surfaceY: 0.05,
-    piles: [{ x: -0.05, z: 0.12, yaw: 0.08, weight: 1, fan: 2 }],
+    camera: { pos: new THREE.Vector3(0.35, 2.55, 4.1), target: new THREE.Vector3(0, 0.5, 0.05), fov: 34 },
+    surfaceY: PED_H,
+    piles: [{ x: 0, z: 0.08, yaw: 0.08, weight: 1, fan: 2 }],
     scatterRadius: 0.75,
+    capacity: 999,
+    spill: { x: 0, z: 0.05, rIn: 1.1, rOut: 1.8, y: 0, arc: 1.4, full: 8, max: 0, edge: 0.9, edgeY: PED_H },
     exposure: 1.0,
-    envIntensity: 0.45,
+    envIntensity: 0.4,
     fog: null,
-    rim: new THREE.Color(0xfff0d8),
-    shadowLights: [sun],
+    rim: new THREE.Color(0xffd6ea),
+    shadowLights: [key],
     dispose: t.dispose,
   };
 }
 
-/* ── 梦影：寫字桌 + 夜燈 ── */
+/* ── 梦影 · 晴藍：台子大一圈，兩疊作品，堆滿了、有幾張滑到地上 ── */
 function buildPopular(o: BuildOptions): WorldRig {
   const t = tracker();
   const g = new THREE.Group();
-  const texSize = o.compact ? 256 : 512;
-  const walnut = woodTexture(t, texSize, [118, 78, 52], [52, 32, 22], { rings: 12, seed: 11 });
-
-  g.add(box(t, 5.4, 0.12, 2.8, lacquer(t, walnut, 0x6b4a33, 0.38, 0.55), 0, -0.06, 0.1, { cast: false }));
-  const wall = new THREE.Mesh(t.geo(new THREE.PlaneGeometry(16, 9)), std(t, { color: 0x1c2231, roughness: 0.95 }));
-  wall.position.set(0, 2.5, -1.35);
-  wall.receiveShadow = true;
-  g.add(wall);
-  const night = new THREE.Mesh(
-    t.geo(new THREE.PlaneGeometry(1.4, 1.8)),
-    t.mat(new THREE.MeshBasicMaterial({ map: skyTexture(t, [[0, "#0b1224"], [0.7, "#1d2a4a"], [1, "#34406a"]], "stars") ?? undefined, fog: false })),
-  );
-  night.position.set(-2.3, 1.75, -1.33);
-  g.add(night);
-  const frameMat = std(t, { color: 0x2a3144, roughness: 0.6 });
-  g.add(box(t, 1.52, 0.06, 0.05, frameMat, -2.3, 2.68, -1.31, { cast: false }));
-  g.add(box(t, 1.52, 0.06, 0.05, frameMat, -2.3, 0.82, -1.31, { cast: false }));
-  g.add(box(t, 0.06, 1.9, 0.05, frameMat, -3.03, 1.75, -1.31, { cast: false }));
-  g.add(box(t, 0.06, 1.9, 0.05, frameMat, -1.57, 1.75, -1.31, { cast: false }));
-
-  /* 檯燈：底座 → 立桿 → 橫臂 → 燈罩（開口錐）→ 燈泡。 */
-  const metal = t.mat(new THREE.MeshPhysicalMaterial({ color: 0x2b2b2e, metalness: 0.85, roughness: 0.32 }));
-  const brass = t.mat(new THREE.MeshPhysicalMaterial({ color: 0xc9a05a, metalness: 0.9, roughness: 0.28, side: THREE.DoubleSide }));
-  const lampBase = new THREE.Mesh(t.geo(new THREE.CylinderGeometry(0.26, 0.3, 0.07, 32)), metal);
-  lampBase.position.set(1.75, 0.035, -0.6);
-  lampBase.castShadow = true;
-  g.add(lampBase);
-  const pole = new THREE.Mesh(t.geo(new THREE.CylinderGeometry(0.022, 0.022, 1.45, 10)), metal);
-  pole.position.set(1.75, 0.76, -0.6);
-  pole.castShadow = true;
-  g.add(pole);
-  const arm = new THREE.Mesh(t.geo(new THREE.CylinderGeometry(0.02, 0.02, 1.0, 10)), metal);
-  arm.position.set(1.35, 1.5, -0.42);
-  arm.rotation.z = Math.PI / 2 - 0.28;
-  arm.rotation.y = -0.42;
-  g.add(arm);
-  const shade = new THREE.Mesh(t.geo(new THREE.ConeGeometry(0.3, 0.34, 36, 1, true)), brass);
-  shade.position.set(0.9, 1.5, -0.24);
-  shade.rotation.z = 0.35;
-  shade.castShadow = false;
-  g.add(shade);
-  const bulbPos = new THREE.Vector3(0.88, 1.36, -0.22);
-  const bulb = new THREE.Mesh(t.geo(new THREE.SphereGeometry(0.075, 16, 12)), t.mat(new THREE.MeshBasicMaterial({ color: 0xfff1cf })));
-  bulb.position.copy(bulbPos);
-  g.add(bulb);
-
-  const lamp = new THREE.SpotLight(0xffc27e, 34, 0, 0.72, 0.65, 2);
-  lamp.position.copy(bulbPos);
-  lamp.target.position.set(-0.05, 0, 0.2);
-  if (o.shadows) {
-    lamp.castShadow = true;
-    lamp.shadow.mapSize.set(o.compact ? 512 : 1024, o.compact ? 512 : 1024);
-    lamp.shadow.bias = -0.0005;
-    lamp.shadow.normalBias = 0.02;
-    lamp.shadow.radius = 4;
-  }
-  g.add(lamp, lamp.target);
-  const glow = new THREE.PointLight(0xffb870, 1.4, 4, 2);
-  glow.position.set(0.9, 1.62, -0.28);
-  g.add(glow);
-  g.add(new THREE.HemisphereLight(0x3a4a72, 0x0a0b10, 0.4));
-  const moon = directional(0x9fb4ff, 0.35, [-3, 3, -2], [0, 0, 0], null);
-  g.add(moon, moon.target);
-
-  const paper = std(t, { color: 0xefe8da, roughness: 0.9 });
-  g.add(box(t, 0.95, 0.035, 1.25, paper, -1.65, 0.0175, 0.2, { ry: 0.22 }));
-  g.add(box(t, 0.92, 0.012, 1.2, std(t, { color: 0xfaf5ea, roughness: 0.9 }), -1.63, 0.041, 0.19, { ry: 0.2 }));
-  const pencil = new THREE.Mesh(t.geo(new THREE.CylinderGeometry(0.018, 0.018, 0.9, 6)), std(t, { color: 0xe8b83a, roughness: 0.5 }));
-  pencil.rotation.z = Math.PI / 2;
-  pencil.rotation.y = 0.5;
-  pencil.position.set(-1.05, 0.02, 0.92);
-  pencil.castShadow = true;
-  g.add(pencil);
-  const mug = new THREE.Mesh(t.geo(new THREE.CylinderGeometry(0.19, 0.17, 0.42, 28)), t.mat(new THREE.MeshPhysicalMaterial({ color: 0xe9e4da, roughness: 0.3, clearcoat: 0.6 })));
-  mug.position.set(-2.05, 0.21, -0.55);
-  mug.castShadow = true;
-  g.add(mug);
-
+  const glowTex = glowTexture(t);
+  floor(t, g, 3.8, 0.38);
+  pedestal(t, g, { x: 0, z: 0.05, r: 1.3, h: PED_H, color: 0xb4d0ff, rim: 0x14284a });
+  crystals(t, g, -1.95, -0.9, 0.85, 23);
+  crystals(t, g, 2.05, -1.2, 0.65, 37);
+  /* 晴藍：天光從後上方灑下（逆光），左後一團粉、右後一團藍的天色暈在台後。 */
+  glow(t, g, glowTex, -2.6, 1.8, -3.4, 3.4, 0xffc6e2, 0.32);
+  glow(t, g, glowTex, 2.8, 2.0, -3.2, 3.4, 0xa8ccff, 0.36);
+  bubble(t, g, -1.5, 1.5, -1.2, 0.18);
+  sparkles(t, g, glowTex, 50, 2.4, 1.9, 0xd6e6ff, 23);
+  backlight(g, 0xd0e2ff, 1.32);
+  const key = keyLight(g, o, 0xf2f6ff, 3.0, 2.8);
+  g.add(new THREE.HemisphereLight(0xe6efff, 0x9aa8e0, 0.6));
   return {
     id: "popular",
     group: g,
-    camera: { pos: new THREE.Vector3(0.35, 2.5, 3.35), target: new THREE.Vector3(0.05, 0.32, 0.05), fov: 34 },
-    surfaceY: 0,
-    piles: [{ x: -0.05, z: 0.1, yaw: -0.06, weight: 1, fan: 3 }],
-    scatterRadius: 1.2,
-    exposure: 1.12,
-    envIntensity: 0.12,
+    camera: { pos: new THREE.Vector3(0.35, 2.7, 4.4), target: new THREE.Vector3(0, 0.55, 0.05), fov: 34 },
+    surfaceY: PED_H,
+    piles: [
+      { x: -0.3, z: 0.12, yaw: -0.08, weight: 1, fan: 3 },
+      { x: 0.55, z: -0.18, yaw: 0.42, weight: 0.55, fan: 2 },
+    ],
+    scatterRadius: 1.05,
+    capacity: 46,
+    spill: { x: 0, z: 0.05, rIn: 1.4, rOut: 1.9, y: 0, arc: 1.35, full: 8, max: 8, edge: 1.25, edgeY: PED_H },
+    exposure: 1.02,
+    envIntensity: 0.32,
     fog: null,
-    rim: new THREE.Color(0xffd6a0),
-    shadowLights: [lamp],
+    rim: new THREE.Color(0xd6e6ff),
+    shadowLights: [key],
     dispose: t.dispose,
   };
 }
 
-/* ── 梦虹：大工作台（抽屜、參考書）+ 雨後天光 ── */
+/* ── 梦虹 · 雨後：大台三疊，作品滿到從台沿瀉下一圈，虹色輪廓光 ── */
 function buildPro(o: BuildOptions): WorldRig {
   const t = tracker();
   const g = new THREE.Group();
-  const texSize = o.compact ? 256 : 512;
-  const maple = woodTexture(t, texSize, [232, 206, 166], [186, 146, 100], { rings: 8, seed: 21 });
-  const body = woodTexture(t, texSize, [200, 164, 118], [140, 102, 64], { rings: 10, seed: 23 });
-
-  g.add(box(t, 5.6, 0.16, 2.6, lacquer(t, maple, 0xe0c69c, 0.34, 0.6), 0, -0.08, 0.05, { cast: false }));
-  const bodyMat = lacquer(t, body, 0xc09a6e, 0.55, 0.2);
-  g.add(box(t, 5.2, 1.1, 2.3, bodyMat, 0, -0.71, -0.05, { cast: false }));
-  const drawerMat = lacquer(t, maple, 0xd8bb8e, 0.45, 0.4);
-  const knobMat = t.mat(new THREE.MeshPhysicalMaterial({ color: 0xc9a05a, metalness: 0.9, roughness: 0.25 }));
-  for (const row of [-0.42, -0.9]) {
-    for (const col of [-1.65, 0, 1.65]) {
-      g.add(box(t, 1.5, 0.4, 0.05, drawerMat, col, row, 1.12, { cast: false }));
-      const knob = new THREE.Mesh(t.geo(new THREE.CylinderGeometry(0.045, 0.045, 0.07, 14)), knobMat);
-      knob.rotation.x = Math.PI / 2;
-      knob.position.set(col, row, 1.18);
-      g.add(knob);
-    }
-  }
-
-  const covers = [0x8b3a3a, 0x2f4f6f, 0xc9a84c, 0x3d6b4f, 0x6a4c8c];
-  const pageMat = std(t, { color: 0xf3ecdc, roughness: 0.9 });
-  let y = 0;
-  [[1.25, 0.16, 0.92], [1.12, 0.12, 0.84], [1.18, 0.2, 0.88]].forEach(([w, h, d], i) => {
-    const cover = std(t, { color: covers[i], roughness: 0.62 });
-    g.add(box(t, w, h, d, cover, 2.05, y + h / 2, -0.55, { ry: 0.12 - i * 0.1 }));
-    g.add(box(t, w - 0.06, h * 0.8, d + 0.012, pageMat, 2.05 + 0.02, y + h / 2, -0.55, { ry: 0.12 - i * 0.1 }));
-    y += h;
-  });
-  g.add(box(t, 0.16, 1.1, 0.8, std(t, { color: covers[3], roughness: 0.6 }), 2.72, 0.55, -0.62, { rz: -0.14 }));
-  g.add(box(t, 0.2, 1.0, 0.76, std(t, { color: covers[4], roughness: 0.6 }), 2.9, 0.5, -0.62, { rz: -0.2 }));
-
-  const wallMat = std(t, { color: 0xd8e0e8, roughness: 0.9 });
-  const frameMat = std(t, { color: 0xf7f9fb, roughness: 0.5 });
-  windowWall(t, g, {
-    z: -1.4,
-    hole: [-2.7, 0.9, 0.35, 3.2],
-    wallMat,
-    frameMat,
-    sky: skyTexture(t, [[0, "#8fb8e2"], [0.6, "#dce9f4"], [1, "#f4f7f2"]], "rainbow"),
-    skyColor: 0xdce9f4,
-  });
-
-  const sky = directional(0xeef5ff, 2.6, [-3.2, 4.6, -4.2], [0.2, 0, 0.3], o.shadows ? { size: o.compact ? 512 : 1024, span: 3.6 } : null);
-  g.add(sky, sky.target);
-  g.add(new THREE.HemisphereLight(0xe3eefc, 0xb9a88f, 0.85));
-  const bounce = directional(0xfff4e0, 0.5, [3, 2, 4], [0, 0, 0], null);
-  g.add(bounce, bounce.target);
-
+  const glowTex = glowTexture(t);
+  floor(t, g, 4.6, 0.4);
+  pedestal(t, g, { x: 0, z: 0.05, r: 1.75, h: PED_H, color: 0x9ccaff, rim: 0x14304a });
+  crystals(t, g, -2.55, -1.1, 1.05, 51);
+  crystals(t, g, 2.6, -1.35, 0.95, 67);
+  crystals(t, g, 1.7, -2.3, 0.55, 71);
+  bubble(t, g, -2.1, 1.7, -1.5, 0.26);
+  bubble(t, g, 2.3, 1.3, -0.7, 0.14);
+  sparkles(t, g, glowTex, 80, 3.1, 2.4, 0xd8f0ff, 51);
+  glow(t, g, glowTex, -2.5, 2.4, -3.2, 3.6, 0xff9fd8, 0.38);
+  glow(t, g, glowTex, 2.7, 2.2, -3.0, 3.6, 0x8fe6ff, 0.38);
+  const magenta = directional(0xff9fd8, 1.0, [-4.5, 1.2, 0.5], [0, 0.4, 0], null);
+  const cyan = directional(0x8fe6ff, 1.0, [4.5, 1.2, 0.8], [0, 0.4, 0], null);
+  g.add(magenta, magenta.target, cyan, cyan.target);
+  backlight(g, 0xe6f6ff, 1.44);
+  const key = keyLight(g, o, 0xeef7ff, 3.0, 3.4);
+  g.add(new THREE.HemisphereLight(0xe6f4ff, 0xa4b4e8, 0.62));
   return {
     id: "pro",
     group: g,
-    camera: { pos: new THREE.Vector3(0.45, 2.05, 4.5), target: new THREE.Vector3(0.1, 0.1, 0.15), fov: 36 },
-    surfaceY: 0,
+    camera: { pos: new THREE.Vector3(0.4, 2.95, 4.9), target: new THREE.Vector3(0.05, 0.6, 0.1), fov: 36 },
+    surfaceY: PED_H,
     piles: [
-      { x: -0.6, z: 0.2, yaw: -0.14, weight: 1, fan: 3 },
-      { x: 0.78, z: 0.32, yaw: 0.24, weight: 0.72, fan: 1 },
+      { x: -0.5, z: 0.25, yaw: -0.14, weight: 1, fan: 3 },
+      { x: 0.7, z: 0.3, yaw: 0.3, weight: 0.8, fan: 2 },
+      { x: 0.05, z: -0.75, yaw: 0.08, weight: 0.7, fan: 2 },
     ],
-    scatterRadius: 1.6,
+    scatterRadius: 1.45,
+    capacity: 128,
+    spill: { x: 0, z: 0.05, rIn: 1.9, rOut: 3.1, y: 0, arc: 1.75, full: 30, max: 30, edge: 1.7, edgeY: PED_H },
     exposure: 1.0,
-    envIntensity: 0.8,
+    envIntensity: 0.4,
     fog: null,
-    rim: new THREE.Color(0xeaf4ff),
-    shadowLights: [sky],
+    rim: new THREE.Color(0xe6f6ff),
+    shadowLights: [key],
     dispose: t.dispose,
   };
 }
 
-/* ── 自訂：天亮後無邊界工作室（地板延伸進霧裡，塔高衝出鏡頭）── */
+/* ── 自訂 · 天亮之後：主台 + 兩座副台，額度越大塔越高、鏡頭越推近 ── */
 function buildCustom(o: BuildOptions): WorldRig {
   const t = tracker();
   const g = new THREE.Group();
-  const texSize = o.compact ? 256 : 512;
-  const floorTex = woodTexture(t, texSize, [236, 222, 200], [196, 172, 140], { rings: 5, seed: 31, planks: 6, repeat: 10 });
-  const floor = new THREE.Mesh(t.geo(new THREE.PlaneGeometry(60, 60)), lacquer(t, floorTex, 0xe6d8c2, 0.5, 0.25));
-  floor.rotation.x = -Math.PI / 2;
-  floor.receiveShadow = true;
-  g.add(floor);
-
-  const plinth = std(t, { color: 0xf6f3ee, roughness: 0.82 });
-  g.add(box(t, 1.7, 0.4, 1.9, plinth, -2.0, 0.2, -0.9));
-  g.add(box(t, 1.6, 0.62, 1.85, plinth, 2.2, 0.31, -1.5));
-  g.add(box(t, 1.5, 0.22, 1.8, plinth, 0.3, 0.11, -3.4));
-
-  const dawn = directional(0xffdcc6, 2.8, [5, 3.4, 3.2], [0, 0.5, -1], o.shadows ? { size: o.compact ? 512 : 1024, span: 6.5, far: 26 } : null);
-  g.add(dawn, dawn.target);
-  g.add(new THREE.HemisphereLight(0xfff6ee, 0xe6d8c6, 1.0));
-  const cool = directional(0xcfe0ff, 0.45, [-4, 5, -3], [0, 0, 0], null);
-  g.add(cool, cool.target);
-
+  const glowTex = glowTexture(t);
+  floor(t, g, 9, 0.3);
+  pedestal(t, g, { x: 0, z: 0.1, r: 2.2, h: PED_H, color: 0xf4f7ff, rim: 0x202a48 });
+  pedestal(t, g, { x: -3.1, z: -2.0, r: 1.05, h: 0.7, color: 0xffc6e0, rim: 0x3a1a2c });
+  pedestal(t, g, { x: 3.2, z: -2.3, r: 1.05, h: 0.95, color: 0xa8d0ff, rim: 0x14304a });
+  crystals(t, g, -4.6, -3.2, 1.3, 83);
+  crystals(t, g, 4.9, -3.6, 1.15, 97);
+  bubble(t, g, -2.6, 2.6, -3.4, 0.36);
+  bubble(t, g, 3.2, 3.1, -4.2, 0.26);
+  sparkles(t, g, glowTex, 110, 4.6, 3.2, 0xffffff, 97);
+  glow(t, g, glowTex, 5.5, 4.6, -5.5, 8, 0xf4f0ff, 0.55);
+  backlight(g, 0xf6f4ff, 1.32);
+  const key = keyLight(g, o, 0xffffff, 3.1, 5.5);
+  g.add(new THREE.HemisphereLight(0xffffff, 0xb4c2ec, 0.8));
   return {
     id: "custom",
     group: g,
-    camera: { pos: new THREE.Vector3(0.3, 2.4, 6.6), target: new THREE.Vector3(0, 1.1, -0.6), fov: 40 },
-    surfaceY: 0,
+    camera: { pos: new THREE.Vector3(0.3, 3.4, 6.2), target: new THREE.Vector3(0, 0.75, -0.4), fov: 38 },
+    surfaceY: PED_H,
     piles: [
-      { x: 0, z: 0.35, yaw: 0.06, weight: 1, fan: 3 },
-      { x: -2.0, z: -0.9, yaw: -0.2, weight: 0.78, baseY: 0.4 },
-      { x: 2.2, z: -1.5, yaw: 0.28, weight: 0.86, baseY: 0.62 },
-      { x: 0.3, z: -3.4, yaw: -0.1, weight: 0.6, baseY: 0.22 },
-      { x: -3.6, z: 0.7, yaw: 0.4, weight: 0.42, fan: 2 },
-      { x: 3.9, z: 0.1, yaw: -0.35, weight: 0.5, fan: 1 },
-      { x: -1.2, z: -4.8, yaw: 0.15, weight: 0.55 },
+      { x: -0.8, z: 0.45, yaw: 0.06, weight: 1, fan: 3 },
+      { x: 0.8, z: 0.4, yaw: -0.3, weight: 0.95, fan: 2 },
+      { x: 0, z: -0.75, yaw: 0.12, weight: 0.9, fan: 2 },
+      { x: -1.35, z: -0.45, yaw: 0.5, weight: 0.7, fan: 1 },
+      { x: 1.35, z: -0.5, yaw: -0.45, weight: 0.7, fan: 1 },
+      { x: -3.1, z: -2.0, yaw: -0.2, weight: 0.6, baseY: 0.7 - PED_H },
+      { x: 3.2, z: -2.3, yaw: 0.28, weight: 0.65, baseY: 0.95 - PED_H },
     ],
-    scatterRadius: 2.2,
-    exposure: 1.05,
-    envIntensity: 1.0,
-    fog: new THREE.Fog(0xf3ece4, 8, 26),
-    rim: new THREE.Color(0xfff2e6),
-    shadowLights: [dawn],
+    scatterRadius: 1.8,
+    capacity: 300,
+    spill: { x: 0, z: 0.1, rIn: 2.35, rOut: 3.9, y: 0, arc: 1.85, full: 60, max: 60, edge: 2.15, edgeY: PED_H },
+    exposure: 1.02,
+    envIntensity: 0.45,
+    fog: new THREE.Fog(0xe4ecff, 12, 34),
+    rim: new THREE.Color(0xf2f4ff),
+    shadowLights: [key],
     dispose: t.dispose,
   };
 }

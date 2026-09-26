@@ -4,7 +4,7 @@
 // 避免 Blob cacheControlMaxAge 60s 下限造成的「剛存讀不到」；單用戶寫入串行。
 // 與畫布素材庫分開命名空間（asset-packs/），互不影響。
 import { randomBytes } from "node:crypto";
-import { del, get, list, put } from "@/lib/blob-backend";
+import { del, ensureBlobBackendWritable, get, list, put } from "@/lib/blob-backend";
 import { sanitizeBlobSegment } from "@/lib/history-types";
 import { GHOST_ASSET_SCOPE, isUsableAssetId, MAX_ASSET_ID_LENGTH, normalizeAssetScope } from "./asset-scope";
 import type { AssetScope } from "./asset-scope";
@@ -106,10 +106,6 @@ export class AssetPackLimitError extends Error {
 const memoryStore = new Map<number, AssetPack[]>();
 const indexCache = new Map<number, { packs: AssetPack[]; expiresAt: number }>();
 const writeQueues = new Map<number, Promise<unknown>>();
-
-function hasBlobStore(): boolean {
-  return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
-}
 
 function userPrefix(userId: number): string {
   return `asset-packs/${sanitizeBlobSegment(String(userId), "0")}`;
@@ -334,7 +330,7 @@ async function fetchPacks(userId: number): Promise<AssetPack[]> {
 }
 
 async function readPacks(userId: number): Promise<AssetPack[]> {
-  if (!hasBlobStore()) return [...(memoryStore.get(userId) ?? [])];
+  if (!ensureBlobBackendWritable("asset-pack-store.readPacks")) return [...(memoryStore.get(userId) ?? [])];
   const cached = indexCache.get(userId);
   if (cached && cached.expiresAt > Date.now()) return [...cached.packs];
   const packs = await fetchPacks(userId);
@@ -345,7 +341,7 @@ async function readPacks(userId: number): Promise<AssetPack[]> {
 async function writePacks(userId: number, packs: AssetPack[]): Promise<void> {
   // 上限在 saveAssetPack 拒絕，這裡只排序（newest 優先），不靜默丟資料。
   const sorted = [...packs].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
-  if (!hasBlobStore()) {
+  if (!ensureBlobBackendWritable("asset-pack-store.writePacks")) {
     memoryStore.set(userId, sorted);
     indexCache.delete(userId);
     return;

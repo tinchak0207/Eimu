@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, MessageCircle, WalletCards } from "lucide-react";
+import { MessageCircle, WalletCards } from "lucide-react";
 import type { MapayPaymentType } from "@/lib/mapay";
 import {
   FLAGSHIP_COINS_PER_IMAGE,
@@ -18,7 +18,7 @@ import { commitSteps, detent, undetent } from "@/lib/carousel-detent";
 import { cn } from "@/lib/utils";
 import { PricingStage3D } from "@/components/pricing3d/PricingStage3D";
 import { usePlanFilmstrip } from "@/components/pricing3d/use-plan-filmstrip";
-import { WORLD_POSTERS, isWorldId } from "@/components/pricing3d/worlds";
+import { TIER_COPY, WORLD_POSTERS, isWorldId, type WorldId } from "@/components/pricing3d/worlds";
 import "./case-showcase.css";
 import "./pricing-plan-carousel.css";
 import "./pricing3d/pricing3d.css";
@@ -43,8 +43,8 @@ import "./pricing3d/pricing3d.css";
    环半径随卡宽等比缩放，物理不变）。
 
    ── 2026-09-26 卡面 3D 化（白名单②卡面渲染，几何/物理/手势/吸附/弹簧仍一行未动）──
-   ① 拆掉 .lg-card 外壳：卡面 = 3D 满版（pricing3d/，手写 three，idle 后动态 import 接管），
-      接管前与降级时是静态封面（public/showcase 真实生成图）；
+   ① 拆掉 .lg-card 外壳：卡面 = 3D 满版（pricing3d/，手写 three，透明画布叠在 SSR 夢境底图上）；
+      正面卡不放静态封面（避免「先出卡片再换 3D」），3D 到位时卡堆直接落进夢境；
    ② 卡面只留价格 + 支付 CTA（浮在 3D 之上的 DOM 玻璃层 .ppc-glass）；额度文字从卡面删除，
       只留在 sr-only 描述里（3D 卡堆是纯视觉，读屏用户仍要拿到额度与换算口径）；
    ③ 选片条：环停下后非正面卡缩成底部一排缩图（usePlanFilmstrip + CSS 覆盖位姿，
@@ -316,7 +316,7 @@ function CardCheckout({
     <div data-pricing-control onPointerDown={(event) => event.stopPropagation()}>
       {selected ? (
         <div className="space-y-3">
-          <div role="radiogroup" aria-label="支付方式" className="flex items-center gap-0.5 rounded-full bg-[rgba(0,0,0,0.05)] p-1">
+          <div role="radiogroup" aria-label="支付方式" className="flex items-center gap-0.5 rounded-full bg-[rgba(58,80,160,0.08)] p-1 shadow-[inset_0_1px_2px_rgba(58,80,160,0.08)]">
             {PAY_METHODS.map((method) => {
               const active = payMethod === method.id;
               const Icon = method.icon;
@@ -334,8 +334,8 @@ function CardCheckout({
                     "flex flex-1 cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-2 text-ios-footnote font-medium transition-all duration-200",
                     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                     active
-                      ? "bg-white text-[rgba(0,0,0,0.85)] shadow-[0_1px_4px_rgba(0,0,0,0.10)]"
-                      : "text-[rgba(0,0,0,0.56)] hover:text-[rgba(0,0,0,0.85)]",
+                      ? "bg-white text-[color:var(--t-ink)] shadow-[0_2px_8px_rgba(58,80,160,0.18)]"
+                      : "text-[color:var(--t-ink-2)] hover:text-[color:var(--t-ink)]",
                   )}
                 >
                   <Icon className={cn("h-3.5 w-3.5", active && method.tint)} aria-hidden="true" />
@@ -345,20 +345,20 @@ function CardCheckout({
               );
             })}
           </div>
-          {/* 卡内主 CTA：设计系统主按钮（#2d3142 + 玻璃投影 + hover 抬 1px）。 */}
+          {/* 卡内主 CTA：珍珠白票面上唯一的深墨蓝液态玻璃（掠光 + 粉蓝柔光，hover 抬 1px）。 */}
           <button
             type="button"
             onClick={(e) => {
               e.stopPropagation();
               onPay();
             }}
-            className="w-full cursor-pointer rounded-full bg-[#2d3142] px-5 py-3 text-ios-subhead font-semibold text-white shadow-[0_18px_36px_rgba(45,49,66,0.12)] transition-all duration-200 hover:-translate-y-[1px] hover:bg-[#272b39] active:translate-y-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            className="ppc-cta text-ios-subhead font-semibold"
           >
             立即支付 ¥{plan.price}
           </button>
           {payOpened && (
             <div className="flex items-center justify-between gap-2">
-              <p className="min-w-0 flex-1 truncate text-ios-footnote text-[rgba(0,0,0,0.58)]" role="status" aria-live="polite">
+              <p className="min-w-0 flex-1 truncate text-ios-footnote text-[color:var(--t-ink-2)]" role="status" aria-live="polite">
                 支付页已在新窗口打开，完成后回来刷新余额
               </p>
               <button
@@ -368,7 +368,7 @@ function CardCheckout({
                   onRefreshBalance();
                 }}
                 disabled={refreshingBalance}
-                className="shrink-0 cursor-pointer rounded-full bg-[rgba(0,122,255,0.10)] px-3 py-1.5 text-ios-footnote font-semibold text-[#0066DD] transition-colors hover:bg-[rgba(0,122,255,0.16)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="shrink-0 cursor-pointer rounded-full bg-[rgba(59,130,255,0.12)] px-3 py-1.5 text-ios-footnote font-semibold text-[#2f6fe8] transition-colors hover:bg-[rgba(59,130,255,0.2)] disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 {refreshingBalance ? "刷新中…" : "已完成支付，刷新余额"}
               </button>
@@ -376,15 +376,14 @@ function CardCheckout({
           )}
         </div>
       ) : (
-        /* 未选中 CTA：白玻璃胶囊。旧版是 rgba(0,0,0,0.05) 灰底 —— 在彩色卡面上
-           读起来就是一条禁用态的灰条，而不是一个可以按的按钮。 */
+        /* 未选中 CTA：珍珠白票面上的描边胶囊（墨字 + 细边），读起来是可按的按钮而非禁用灰条。 */
         <button
           type="button"
           onClick={(e) => {
             e.stopPropagation();
             onSelect(plan.id);
           }}
-          className="w-full cursor-pointer rounded-full bg-white/70 py-3 text-ios-subhead font-semibold text-[rgba(0,0,0,0.72)] shadow-[0_2px_10px_rgba(0,0,0,0.06)] ring-1 ring-inset ring-[rgba(0,0,0,0.06)] transition-all duration-200 hover:-translate-y-[1px] hover:bg-white/85 hover:text-[rgba(0,0,0,0.85)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          className="w-full cursor-pointer rounded-full bg-white/80 py-3 text-ios-subhead font-semibold text-[color:var(--t-ink)] shadow-[0_4px_14px_rgba(58,80,160,0.14)] ring-1 ring-inset ring-[rgba(58,80,160,0.18)] transition-all duration-200 hover:-translate-y-[1px] hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
         >
           选择此方案
         </button>
@@ -393,9 +392,72 @@ function CardCheckout({
   );
 }
 
+/* ── 票面：一眼看懂「给谁的、能画多少、每张多少钱」（2026-09-26 暴君：/pricing 的第一性原理
+   = 让人马上心动、一眼知道自己适合哪档、能充多少额度）。所有数字 catalog 现算，不写死。 */
+
+function worldOf(id: string): WorldId {
+  return isWorldId(id) ? id : "popular";
+}
+
+/** 每张约多少元（按套餐基准模型折算）。 */
+function perImageYuan(plan: PricingPlan, coinsPerImage: number): string {
+  const images = gptImage2EquivalentImages(plan, coinsPerImage);
+  if (images <= 0) return "—";
+  const v = plan.price / images;
+  return v >= 1 ? v.toFixed(2) : String(Number(v.toFixed(3)));
+}
+
+/** 相对入门档（金币最少的那档）的每金币单价省了多少（%，四舍五入；不省则 0）。 */
+function savingPercent(plan: PricingPlan, baseline: PricingPlan | null): number {
+  if (!baseline || baseline.coins <= 0 || plan.coins <= 0 || plan.id === baseline.id) return 0;
+  const r = 1 - plan.price / plan.coins / (baseline.price / baseline.coins);
+  return r > 0.005 ? Math.round(r * 100) : 0;
+}
+
+/** 档位梯的额度条：对数刻度（100 → 17%、500 → 41%、1500 → 57%、2 万 → 94%）。 */
+function ladderFill(coins: number): number {
+  const f = Math.log10(Math.max(coins, 30) / 30) / Math.log10(30_000 / 30);
+  return Math.min(1, Math.max(0.08, f));
+}
+
+function TicketHead({ world, images, meta }: { world: WorldId; images: number; meta: string }) {
+  return (
+    <>
+      <p className="text-ios-footnote text-[color:var(--t-ink-2)]">
+        <span className="ppc-tier-dot" data-world={world} aria-hidden="true" />
+        <span className="font-semibold text-[color:var(--t-ink)]">{TIER_COPY[world].short}</span>
+        <span className="mx-1.5 text-[color:var(--t-ink-3)]">·</span>
+        {TIER_COPY[world].persona}
+      </p>
+      <div className="mt-1.5 flex items-baseline gap-1.5">
+        <span className="text-ios-subhead font-semibold text-[color:var(--t-ink-2)]">约</span>
+        <span className="ppc-quota text-ios-largetitle font-bold tracking-tight tabular-nums">{images.toLocaleString("en-US")}</span>
+        <span className="text-ios-subhead font-semibold text-[color:var(--t-ink)]">张图</span>
+      </div>
+      <p className="mt-0.5 text-ios-footnote text-[color:var(--t-ink-3)]">{meta}</p>
+    </>
+  );
+}
+
+function PriceRow({ price, anchor, unit, saving }: { price: number; anchor: string | null; unit: string; saving: number }) {
+  return (
+    <div className="mt-3 flex flex-wrap items-end justify-between gap-x-3 gap-y-1">
+      <div className="flex items-baseline gap-2">
+        <span className="text-ios-title1 font-bold tracking-tight tabular-nums text-[color:var(--t-ink)]">¥{price}</span>
+        {anchor && <span className="text-ios-footnote text-[color:var(--t-ink-3)] line-through">{anchor}</span>}
+      </div>
+      <span className="text-ios-footnote text-[color:var(--t-ink-2)]">
+        每张约 ¥{unit}
+        {saving > 0 && <span className="ppc-save">省 {saving}%</span>}
+      </span>
+    </div>
+  );
+}
+
 /** 静态档卡面（原 PlanCard 内容 → 卡面白名单迁移；换算口径全部 catalog 活数据）。 */
 function PlanFace({
   plan,
+  baseline,
   selected,
   referenceCoinsPerImage,
   payMethod,
@@ -407,6 +469,7 @@ function PlanFace({
   onRefreshBalance,
 }: {
   plan: PricingPlan;
+  baseline: PricingPlan | null;
   selected: boolean;
   referenceCoinsPerImage: number;
   payMethod: MapayPaymentType;
@@ -419,9 +482,10 @@ function PlanFace({
 }) {
   const referenceImages = gptImage2EquivalentImages(plan, referenceCoinsPerImage);
   const flagshipImages = gptImage2EquivalentImages(plan, FLAGSHIP_COINS_PER_IMAGE);
+  const world = worldOf(plan.id);
   return (
     <div className="ppc-card">
-      {/* 额度与换算口径：卡面不再显示（数量交给 3D 卡堆的高度），读屏仍完整播报。 */}
+      {/* 换算口径全文（读屏）；票面上是精简版。 */}
       <div className="sr-only">
         <p>{plan.name} · {formatCoins(plan.coins)} 金币 · {plan.validDays} 天有效</p>
         <p>
@@ -432,14 +496,15 @@ function PlanFace({
         </p>
       </div>
 
-      {/* 浮在 3D 之上的 DOM 玻璃层：价格 + 支付 CTA，别无他物。 */}
+      {/* 浮在 3D 之上的票面：给谁的 → 能画多少张 → 多少钱、每张多少 → 支付。 */}
       <div className="ppc-glass">
-        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-          <span className="text-ios-largetitle font-bold tracking-tight tabular-nums text-[rgba(0,0,0,0.85)]">
-            ¥{plan.price}
-          </span>
-          <span className="text-ios-footnote text-[rgba(0,0,0,0.44)] line-through">¥{plan.anchorPrice}</span>
-        </div>
+        <TicketHead world={world} images={referenceImages} meta={`${formatCoins(plan.coins)} 金币 · ${plan.validDays} 天有效 · 按 GPT Image 2（1K）折算`} />
+        <PriceRow
+          price={plan.price}
+          anchor={plan.anchorPrice > plan.price ? `¥${plan.anchorPrice}` : null}
+          unit={perImageYuan(plan, referenceCoinsPerImage)}
+          saving={savingPercent(plan, baseline)}
+        />
         <div className="mt-3">
           <CardCheckout
             plan={plan}
@@ -461,6 +526,7 @@ function PlanFace({
 /** 自定义档卡面：Log Scale 滑杆 + 实时价格（拖动即时更新，计价走 customPlanPrice）。 */
 function CustomFace({
   plan,
+  baseline,
   selected,
   referenceCoinsPerImage,
   payMethod,
@@ -473,6 +539,7 @@ function CustomFace({
   onRefreshBalance,
 }: {
   plan: PricingPlan;
+  baseline: PricingPlan | null;
   selected: boolean;
   referenceCoinsPerImage: number;
   payMethod: MapayPaymentType;
@@ -494,17 +561,13 @@ function CustomFace({
         </p>
       </div>
 
-      {/* 玻璃层：实时价格 + Log Scale 滑杆（拖动 = 3D 卡堆原地伸缩，松手 = 落一轮）+ 支付 CTA。 */}
+      {/* 票面：给谁的 → 能画多少张（随滑杆实时变）→ 滑杆（拖动 = 3D 卡堆原地伸缩，松手 = 落一轮）→ 价格 → 支付。 */}
       <div className="ppc-glass">
-        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-          <span className="text-ios-largetitle font-bold tracking-tight tabular-nums text-[rgba(0,0,0,0.85)]">
-            ¥{plan.price}
-          </span>
-          <span className="text-ios-footnote text-[rgba(0,0,0,0.58)]">0.045 元/金币</span>
-        </div>
+        <TicketHead world="custom" images={referenceImages} meta={`${formatCustomCoins(plan.coins)} 金币 · 30 天有效 · 按 GPT Image 2（1K）折算`} />
         <div className="mt-2.5">
           <CustomAmountSlider coins={plan.coins} onChange={onCustomCoinsChange} />
         </div>
+        <PriceRow price={plan.price} anchor={null} unit={perImageYuan(plan, referenceCoinsPerImage)} saving={savingPercent(plan, baseline)} />
         <div className="mt-2.5">
           <CardCheckout
             plan={plan}
@@ -568,6 +631,20 @@ export function PricingPlanCarousel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plans, includeCustom]);
   const cases = items;
+  /* 票面与档位梯的对照基准 = 金币最少的静态档；徽章：主推档「最多人选」，每金币最便宜的档「单价最低」
+     （自定义档按滑杆当前额度现算，admin 改价后自动换人）。 */
+  const baseline = useMemo(() => plans.reduce<PricingPlan | null>((min, p) => (!min || p.coins < min.coins ? p : min), null), [plans]);
+  let cheapestId: string | null = null;
+  let cheapestRate = Infinity;
+  for (const item of cases) {
+    const plan = item.isCustom ? customPlan : item.plan;
+    const rate = plan.coins > 0 ? plan.price / plan.coins : Infinity;
+    if (rate < cheapestRate - 1e-9) {
+      cheapestRate = rate;
+      cheapestId = item.id;
+    }
+  }
+  const badgeFor = (item: CarouselItem) => (!item.isCustom && item.plan.highlight ? "最多人选" : item.id === cheapestId ? "单价最低" : null);
   const COUNT = cases.length;
   const STEP = 360 / COUNT;
   /* 环的起始档（状态初值）：首帧静态位姿、各 ref 初值、档数变化后的回位都用它。 */
@@ -645,12 +722,17 @@ export function PricingPlanCarousel({
 
     const stageWidth = stage.clientWidth || 1024;
     const compact = window.matchMedia("(max-width: 767px)").matches;
+    /* 卡面尺寸（白名单②）：2026-09-26 暴君实机「一进来看到的是截断态」（1536×~800 的笔电视口，
+       票面与支付钮落在首屏外）→ 宽屏卡高再受「首屏剩余高度」约束：舞台（= 卡高 × 1.2）必须在首屏内
+       放得下，票面永远首屏可见。只改尺寸输入，几何/物理公式一行未动。 */
+    const stageTop = stage.getBoundingClientRect().top + window.scrollY;
+    const foldBudget = Math.max(0, window.innerHeight - stageTop - 12) / 1.2;
     const cardW = compact
       ? Math.min(stageWidth * 0.78, 340)
-      : Math.min(Math.max(stageWidth * 0.52, 320), 620);
+      : Math.min(Math.max(stageWidth * 0.52, 320), 620, Math.max(foldBudget, 380) / 0.82);
     const cardH = compact
       ? Math.round(cardW * 1.45)
-      : Math.max(Math.round(cardW * 0.82), 384);
+      : Math.max(Math.round(cardW * 0.82), 340);
     const radius = cardW * (compact ? 0.84 : 0.78) * RADIUS_SCALE;
 
     radiusRef.current = radius;
@@ -1036,6 +1118,49 @@ export function PricingPlanCarousel({
 
   return (
     <section className="case-viewport pricing-plan-carousel pb-12" aria-label="充值方案" ref={sectionRef}>
+      {/* 档位梯（取代圆点，放在舞台之上——任何视口首屏都看得到全部四档）：额度条按对数刻度
+          一档比一档长，一眼看出递进、能画多少、多少钱；点哪档环就转到哪档（goTo，环物理原样）。 */}
+      <div className="ppc-ladder-wrap">
+        <div
+          role="tablist"
+          aria-label={`方案进度：第 ${front + 1} 档，共 ${COUNT} 档`}
+          className="ppc-ladder"
+          style={{ "--ppc-tiers": COUNT, "--ppc-active": front } as React.CSSProperties}
+        >
+          <span className="ppc-ladder-lens" aria-hidden="true" />
+          {cases.map((item, index) => {
+            const plan = item.isCustom ? customPlan : item.plan;
+            const world = worldOf(item.id);
+            const images = gptImage2EquivalentImages(plan, referenceCoinsPerImage);
+            const badge = badgeFor(item);
+            return (
+              <button
+                key={item.id}
+                type="button"
+                role="tab"
+                aria-selected={index === front}
+                className="ppc-tier"
+                data-world={world}
+                aria-label={`第 ${index + 1} 档：${item.isCustom ? "自定义 · 自由额度" : item.plan.name}，约 ${images} 张图，${plan.price} 元`}
+                onClick={() => goTo(index)}
+              >
+                {badge && <span className="ppc-tier-badge" data-kind={badge === "单价最低" ? "value" : "hot"}>{badge}</span>}
+                <span className="ppc-tier-top">
+                  <span className="ppc-tier-name">{TIER_COPY[world].short}</span>
+                  <span className="ppc-tier-price">¥{plan.price}</span>
+                </span>
+                <span className="ppc-tier-bar" aria-hidden="true">
+                  <span style={{ width: `${(ladderFill(plan.coins) * 100).toFixed(1)}%` }} />
+                </span>
+                <span className="ppc-tier-quota">
+                  <span className="max-md:hidden">约 </span>
+                  {images >= 10_000 ? `${Number((images / 10_000).toFixed(1))} 万` : images.toLocaleString("en-US")} 张
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
       <div
         ref={stageRef}
         className="case-stage"
@@ -1050,7 +1175,7 @@ export function PricingPlanCarousel({
         onKeyDown={onKeyDown}
       >
         <div ref={glowRef} className="case-glow" aria-hidden="true" />
-        {/* 3D 舞台：全页唯一 WebGL context；idle 后接管，接管前是静态卡面。 */}
+        {/* 3D 舞台：全页唯一 WebGL context；透明画布叠在夢境底图上，挂载即载入（不等 idle）。 */}
         {frontItem && (
           <PricingStage3D
             planId={frontItem.id}
@@ -1066,6 +1191,8 @@ export function PricingPlanCarousel({
             className="case-slab focus-visible:ring-2 focus-visible:ring-ring"
             style={STATIC_FRAMES[index]}
             data-plan={item.id}
+            /* SSR 首幀就標出正面卡（之後由 paint() 每幀維護）：首屏正面卡不閃一張封面。 */
+            data-front={index === HOME ? "true" : "false"}
             role="radio"
             aria-checked={isSelected(item)}
             aria-label={item.isCustom ? `自定义方案，当前 ${formatCustomCoins(customPlan.coins)} 金币，${customPlan.price} 元` : `${item.plan.name}，${formatCoins(item.plan.coins)} 金币 ${item.plan.price} 元`}
@@ -1085,8 +1212,8 @@ export function PricingPlanCarousel({
             <div className="case-face">
               <div className="case-media">
                 <div className="case-photo">
-                  {/* 卡面：无 .lg-card 外壳。底层是静态封面（真实生成图，3D 接管后正面卡隐去、
-                      露出 3D；选片条缩图一直用它），上层是价格玻璃层。 */}
+                  {/* 卡面：无 .lg-card 外壳。底层是封面（真实生成图 = 主角卡本身；选片条缩图也用它），
+                      上层是价格玻璃层。 */}
                   <div className="ppc-face">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
@@ -1100,6 +1227,7 @@ export function PricingPlanCarousel({
                     {item.isCustom ? (
                       <CustomFace
                         plan={customPlan}
+                        baseline={baseline}
                         selected={isSelected(item)}
                         referenceCoinsPerImage={referenceCoinsPerImage}
                         payMethod={payMethod}
@@ -1114,6 +1242,7 @@ export function PricingPlanCarousel({
                     ) : (
                       <PlanFace
                         plan={item.plan}
+                        baseline={baseline}
                         selected={isSelected(item)}
                         referenceCoinsPerImage={referenceCoinsPerImage}
                         payMethod={payMethod}
@@ -1143,32 +1272,6 @@ export function PricingPlanCarousel({
       {/* sr-only 播报（模板廊原样，文案换方案语义）。 */}
       <p className="sr-only" aria-live="polite">{`第 ${panel + 1} 档，共 ${COUNT} 档：${cases[panel] ? (cases[panel].isCustom ? "自定义 · 自由额度" : cases[panel].plan.name) : ""}`}</p>
 
-      <div className="mt-4 flex items-center justify-center gap-3 max-md:gap-1.5">
-        <button type="button" className="case-arrow lg-float max-md:hidden" onClick={() => step(-1)} aria-label="上一个方案">
-          <ChevronLeft className="h-5 w-5" aria-hidden="true" />
-        </button>
-        <div
-          role="tablist"
-          aria-label={`方案进度：第 ${front + 1} 档，共 ${COUNT} 档`}
-          className="max-md:rounded-full max-md:bg-black/[0.35] max-md:px-3 max-md:py-1.5 max-md:text-[11px] max-md:font-semibold max-md:text-white/85 max-md:[text-shadow:0_1px_2px_rgba(0,0,0,0.6)] flex items-center gap-1"
-        >
-          {cases.map((item, index) => (
-            <button
-              key={item.id}
-              type="button"
-              className={`case-dot ${index !== front ? "max-md:hidden" : ""}`}
-              aria-current={index === front}
-              aria-label={`第 ${index + 1} 档：${item.isCustom ? "自定义 · 自由额度" : item.plan.name}`}
-              onClick={() => goTo(index)}
-            >
-              {index === front && <span className="max-md:inline hidden">{front + 1}/{COUNT}</span>}
-            </button>
-          ))}
-        </div>
-        <button type="button" className="case-arrow lg-float max-md:hidden" onClick={() => step(1)} aria-label="下一个方案">
-          <ChevronRight className="h-5 w-5" aria-hidden="true" />
-        </button>
-      </div>
     </section>
   );
 }

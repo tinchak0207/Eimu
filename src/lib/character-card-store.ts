@@ -5,7 +5,7 @@
 // 「剛存讀不到」）、單用戶寫入串行（write queue）、無 Blob 時記憶體降級。
 // 冷啟動量小（每用戶上限 100 張卡），不建 SQL/新基建。
 import { randomBytes } from "node:crypto";
-import { del, get, list, put } from "@/lib/blob-backend";
+import { del, ensureBlobBackendWritable, get, list, put } from "@/lib/blob-backend";
 import { sanitizeBlobSegment } from "@/lib/history-types";
 import { normalizeCharacterCard } from "./character-cards";
 import type { CharacterCard } from "./character-cards";
@@ -19,10 +19,6 @@ const INDEX_CACHE_TTL_MS = 3_000;
 const memoryStore = new Map<number, CharacterCard[]>();
 const indexCache = new Map<number, { cards: CharacterCard[]; expiresAt: number }>();
 const writeQueues = new Map<number, Promise<unknown>>();
-
-function hasBlobStore(): boolean {
-  return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
-}
 
 function userPrefix(userId: number): string {
   return `character-cards/${sanitizeBlobSegment(String(userId), "0")}`;
@@ -85,7 +81,7 @@ async function fetchCards(userId: number): Promise<CharacterCard[]> {
 }
 
 async function readCards(userId: number): Promise<CharacterCard[]> {
-  if (!hasBlobStore()) return [...(memoryStore.get(userId) ?? [])];
+  if (!ensureBlobBackendWritable("character-card-store.readCards")) return [...(memoryStore.get(userId) ?? [])];
   const cached = indexCache.get(userId);
   if (cached && cached.expiresAt > Date.now()) return [...cached.cards];
   const cards = await fetchCards(userId);
@@ -95,7 +91,7 @@ async function readCards(userId: number): Promise<CharacterCard[]> {
 
 async function writeCards(userId: number, cards: CharacterCard[]): Promise<void> {
   const capped = [...cards].slice(0, MAX_CARDS_PER_USER);
-  if (!hasBlobStore()) {
+  if (!ensureBlobBackendWritable("character-card-store.writeCards")) {
     memoryStore.set(userId, capped);
     indexCache.delete(userId);
     return;

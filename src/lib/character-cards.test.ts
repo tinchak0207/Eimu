@@ -250,7 +250,11 @@ test("掛接契約：/api/character-cards 站內鑑權 + blob store", () => {
   assert.match(route, /saveCharacterCard/);
   assert.match(route, /deleteCharacterCards/);
   const store = readFileSync("src/lib/character-card-store.ts", "utf8");
-  assert.match(store, /BLOB_READ_WRITE_TOKEN/);
+  // 後端判斷已收口到 blob-backend.ts 的單一真源（VPS selector ∪ BLOB_READ_WRITE_TOKEN）；
+  // store 必須經共用門禁 ensureBlobBackendWritable，不得自帶 token-only 判斷（會靜默降級到記憶體）。
+  assert.match(store, /from "@\/lib\/blob-backend"/);
+  assert.match(store, /ensureBlobBackendWritable/);
+  assert.doesNotMatch(store, /BLOB_READ_WRITE_TOKEN/);
 });
 
 // ─────────────────────────────────────────── 實體模型擴充（道具/音頻/變體 + 行內 token）
