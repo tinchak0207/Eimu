@@ -1,46 +1,36 @@
-/* ╁━ /pricing 3D 卡堆：舞台宿主、3D 接管後的正面卡、選片條、音效鈕、整頁氛圍 ╁━
-   方案色與世界色都取設計系統色板的低透明度變體；正文字色一律不動（淺底）。 */
+/* ╁━ /pricing 夢境舞台：3D 宿主、正面卡、選片條、音效鈕、首屏墨色（夢境底圖在 dream-world.css）╁━ */
 
 /* ── 舞台下方預留選片條的高度（常駐，不因狀態切換跳版）── */
 .pricing-plan-carousel .case-stage {
-  --p3d-strip-room: 96px;
+  --p3d-strip-room: 28px;
   margin-bottom: var(--p3d-strip-room);
 }
 
 @media (max-width: 767px) {
   .pricing-plan-carousel .case-stage {
-    --p3d-strip-room: 80px;
+    --p3d-strip-room: 20px;
   }
 }
 
-/* ── 3D 宿主：蓋住舞台，上緣多留一截給「衝出鏡頭」的塔，下緣含選片條區 ──
-   pointer-events: none：所有手勢都歸 case-stage（環的手勢原樣），3D 只旁聽。
-   四周羽化進整頁氛圍，卡堆與頁面讀起來是同一個空間，而不是一塊貼上去的畫布。 */
+/* 舞台吃滿首屏：環段至少撐到首屏底（fold-top 由 PricingAtmosphere 量入；量到前不撐）。 */
+.pricing-plan-carousel {
+  min-height: calc(100svh - var(--p3d-fold-top, 100svh));
+}
+
+/* ── 3D 宿主：透明畫布疊在夢境底圖上，full-bleed 到內容區兩側（不越 navbar／頁尾）；
+   上緣多留一截給「衝出鏡頭」的塔，下緣含選片條區。pointer-events: none：手勢全歸
+   case-stage（環的手勢原樣），3D 只旁聽。畫布之上不疊任何半透明層。 */
 .p3d-host {
   position: absolute;
-  left: 0;
-  right: 0;
-  top: calc(var(--case-card-h, 390px) * -0.12);
+  left: calc(50% - 50vw);
+  right: calc(50% - 50vw);
+  top: calc(var(--case-card-h, 390px) * -0.22);
   bottom: calc(var(--p3d-strip-room, 96px) * -1);
   z-index: 0;
   pointer-events: none;
   opacity: 0;
-  transition: opacity 480ms var(--lg-ease, ease);
+  transition: opacity 420ms var(--lg-ease, ease);
 }
-
-.p3d-host::before {
-  content: "";
-  position: absolute;
-  inset: -14% -8%;
-  pointer-events: none;
-  background: radial-gradient(ellipse 58% 56% at 50% 46%, var(--p3d-halo, rgba(255, 255, 255, 0)) 0%, transparent 72%);
-  transition: background 360ms var(--lg-ease, ease);
-}
-
-.p3d-host[data-world="starter"] { --p3d-halo: rgba(255, 214, 160, 0.55); }
-.p3d-host[data-world="popular"] { --p3d-halo: rgba(27, 33, 48, 0.78); }
-.p3d-host[data-world="pro"] { --p3d-halo: rgba(196, 220, 240, 0.65); }
-.p3d-host[data-world="custom"] { --p3d-halo: rgba(255, 226, 212, 0.6); }
 
 .p3d-canvas {
   position: absolute;
@@ -48,43 +38,48 @@
   display: block;
   width: 100%;
   height: 100%;
-  -webkit-mask-image: radial-gradient(ellipse 64% 66% at 50% 44%, #000 58%, transparent 100%);
-  mask-image: radial-gradient(ellipse 64% 66% at 50% 44%, #000 58%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 7%, #000 90%, transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 7%, #000 90%, transparent 100%);
 }
 
 .pricing-plan-carousel[data-pricing3d="on"] .p3d-host {
   opacity: 1;
 }
 
-/* ── 3D 接管後的正面卡：拆殼，只剩浮在 3D 之上的價格玻璃層 ── */
-.pricing-plan-carousel[data-pricing3d="on"] .case-stage::after {
-  opacity: 0; /* 假地影退場：3D 裡有真陰影 */
-}
-
-.pricing-plan-carousel[data-pricing3d="on"] .case-slab[data-front="true"] .ppc-face {
-  background: transparent;
-}
-
-.pricing-plan-carousel[data-pricing3d="on"] .case-slab[data-front="true"] .ppc-poster,
-.pricing-plan-carousel[data-pricing3d="on"] .case-slab[data-front="true"] .ppc-face::before,
-.pricing-plan-carousel[data-pricing3d="on"] .case-slab[data-front="true"]::before,
-.pricing-plan-carousel[data-pricing3d="on"] .case-slab[data-front="true"] .case-edge,
-.pricing-plan-carousel[data-pricing3d="on"] .case-slab[data-front="true"] .case-surface,
-.pricing-plan-carousel[data-pricing3d="on"] .case-slab[data-front="true"] > .case-side {
+/* ── 正面卡 = 3D 卡堆本身：首屏就不放靜態封面（不做「先出一張卡、再換成 3D」），
+   只有價格玻璃層浮在夢境上；3D 到位時卡堆直接落進來。3D 不可用（data-pricing3d="off"：
+   省流量 / 低記憶體 / WebGL 失敗）或沒有 JS 時才退回封面。 */
+.pricing-plan-carousel:not([data-pricing3d="off"]) .case-glow,
+.pricing-plan-carousel:not([data-pricing3d="off"]) .case-stage::after {
   opacity: 0;
 }
 
-.pricing-plan-carousel[data-pricing3d="on"] .case-slab[data-front="true"] .case-face {
+.pricing-plan-carousel:not([data-pricing3d="off"]) .case-slab[data-front="true"] .ppc-face {
+  background: transparent;
+}
+
+.pricing-plan-carousel:not([data-pricing3d="off"]) .case-slab[data-front="true"] .ppc-poster,
+.pricing-plan-carousel:not([data-pricing3d="off"]) .case-slab[data-front="true"] .ppc-face::before,
+.pricing-plan-carousel:not([data-pricing3d="off"]) .case-slab[data-front="true"]::before,
+.pricing-plan-carousel:not([data-pricing3d="off"]) .case-slab[data-front="true"] .case-edge,
+.pricing-plan-carousel:not([data-pricing3d="off"]) .case-slab[data-front="true"] .case-surface,
+.pricing-plan-carousel:not([data-pricing3d="off"]) .case-slab[data-front="true"] > .case-side {
+  opacity: 0;
+}
+
+.pricing-plan-carousel:not([data-pricing3d="off"]) .case-slab[data-front="true"] .case-face {
   filter: none;
 }
 
 /* ── 選片條：環停下後，非正面卡縮成底部一排縮圖（同一批 DOM 卡的第二個狀態）──
    !important 只為了壓過 paint() 每幀寫的 inline 位姿；解除 data-rest 的那一刻
    inline 位姿立即生效（無過渡），卡回到環上跟手轉。 */
+/* 2026-09-26 第三輪：選片條的職責交給下方檔位梯（有名字、價格、張數、額度條），
+   靜止時非正面卡收進選片位後隱去，只在拖曳轉環時現身。 */
 .pricing-plan-carousel .case-stage[data-rest="true"] .case-slab[data-front="false"] {
   transform: translate3d(var(--strip-x, 0px), var(--strip-y, 0px), 0) scale(var(--strip-s, 0.16)) !important;
-  opacity: 1 !important;
-  pointer-events: auto !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
   transition:
     transform 560ms var(--lg-ease, ease),
     opacity 320ms var(--lg-ease, ease);
@@ -109,21 +104,16 @@
 .p3d-sound {
   position: absolute;
   top: 10px;
-  right: 10px;
-  z-index: 1100;
+  right: 24px;
+  z-index: 1300;
   display: inline-flex;
   height: 2.25rem;
   width: 2.25rem;
   align-items: center;
   justify-content: center;
   border-radius: 999px;
-  color: rgba(0, 0, 0, 0.62);
   cursor: pointer;
   transition: color 200ms var(--lg-ease, ease);
-}
-
-.p3d-sound:hover {
-  color: rgba(0, 0, 0, 0.86);
 }
 
 .p3d-sound:focus-visible {
@@ -131,88 +121,259 @@
   outline-offset: 2px;
 }
 
-/* ── 整頁氛圍（PricingClient 根節點內，不越 navbar / 頁尾）── */
-.p3d-atmo {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  overflow: hidden;
-  pointer-events: none;
+/* ── 首屏墨色：天是珍珠淺藍，字一律深墨藍（不用純黑——與藍粉白同一色相）── */
+.p3d-page {
+  --p3d-ink: #1a2147;
+  --p3d-ink-2: rgba(26, 33, 71, 0.74);
+  --p3d-ink-3: rgba(26, 33, 71, 0.58);
+  --p3d-pink: #ec4d92;
+  --p3d-blue: #3b82ff;
+  /* 漸變文字專用的半飽和版本（2026-09-27 暴君「粉/蓝渐变的那个饱和度减半」）：
+     只給 background-clip:text 的文字用；--p3d-pink / --p3d-blue 原色保留給
+     背景暈染、圖示、進度條（那些沒被要求降飽和）。 */
+  --p3d-pink-soft: #c47595; /* #ec4d92 的 HSL 飽和度 80.7% → 40.4% */
+  --p3d-blue-soft: #6c8fce; /* #3b82ff 的 HSL 飽和度 100% → 50% */
+  --p3d-line: rgba(58, 80, 160, 0.12);
 }
 
-.p3d-atmo-layer {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  transition: opacity 520ms var(--lg-ease, ease);
+.p3d-ink { color: var(--p3d-ink); }
+.p3d-ink-2 { color: var(--p3d-ink-2); }
+.p3d-ink-3 { color: var(--p3d-ink-3); }
+
+/* 標題裡的關鍵詞：粉 → 藍的虹彩字（oklab 插值，不經過髒紫）。 */
+.p3d-hl {
+  background: linear-gradient(in oklab 100deg, var(--p3d-pink-soft), var(--p3d-blue-soft));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
-.p3d-atmo-layer[data-on="true"] {
-  opacity: 1;
+.p3d-eyebrow-top {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  color: var(--p3d-ink-2);
 }
 
-/* 晨光窗台：暖奶油底，左上一口斜射晨光。 */
-.p3d-atmo-layer[data-world="starter"] {
-  background:
-    radial-gradient(70% 38% at 18% 8%, rgba(255, 214, 160, 0.42), transparent 70%),
-    linear-gradient(180deg, rgba(253, 246, 236, 0.9) 0%, rgba(250, 243, 232, 0.55) 60%, rgba(250, 243, 232, 0) 100%);
+.p3d-eyebrow-top::before,
+.p3d-eyebrow-top::after {
+  content: "";
+  width: 1.5rem;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--p3d-pink));
 }
 
-/* 夜燈書桌：頁首仍是淺暮色，越近環段越沉（文字留在淺區）。 */
-.p3d-atmo-layer[data-world="popular"] {
-  background:
-    radial-gradient(60% 30% at 62% 26%, rgba(255, 194, 126, 0.16), transparent 70%),
-    linear-gradient(180deg, rgba(232, 235, 244, 0.95) 0%, rgba(214, 219, 234, 0.8) 34%, rgba(236, 238, 245, 0.4) 70%, rgba(236, 238, 245, 0) 100%);
+.p3d-eyebrow-top::after {
+  background: linear-gradient(90deg, var(--p3d-blue), transparent);
 }
 
-/* 雨後工作台：清冷天光，右上一抹虹。 */
-.p3d-atmo-layer[data-world="pro"] {
-  background:
-    radial-gradient(46% 22% at 82% 6%, rgba(175, 82, 222, 0.1), transparent 70%),
-    radial-gradient(56% 26% at 70% 10%, rgba(0, 122, 255, 0.08), transparent 72%),
-    linear-gradient(180deg, rgba(236, 244, 250, 0.95) 0%, rgba(240, 246, 250, 0.6) 55%, rgba(240, 246, 250, 0) 100%);
+/* 夢境裡的圓形按鈕（關閉 / 音效）：白色液態玻璃泡 + 頂緣掠光。 */
+.p3d-page .p3d-roundbtn,
+.p3d-sound {
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.6));
+  color: var(--p3d-ink-2, #1a2147);
+  box-shadow:
+    inset 0 1px 0 #fff,
+    inset 0 0 0 1px rgba(255, 255, 255, 0.7),
+    0 6px 18px rgba(70, 100, 190, 0.18);
+  -webkit-backdrop-filter: blur(12px) saturate(1.6);
+  backdrop-filter: blur(12px) saturate(1.6);
 }
 
-/* 無邊界工作室：破曉粉白，四邊都沒有牆。 */
-.p3d-atmo-layer[data-world="custom"] {
-  background:
-    radial-gradient(80% 36% at 80% 14%, rgba(255, 214, 196, 0.4), transparent 72%),
-    radial-gradient(60% 30% at 10% 30%, rgba(52, 199, 89, 0.06), transparent 70%),
-    linear-gradient(180deg, rgba(252, 246, 242, 0.95) 0%, rgba(250, 245, 240, 0.6) 55%, rgba(250, 245, 240, 0) 100%);
-}
-
-/* 光帶層：隨滾動視差位移（倍率 = 各世界的滾動節奏）。 */
-.p3d-atmo-beams {
-  position: absolute;
-  left: -10%;
-  right: -10%;
-  top: 0;
-  height: 160%;
-  opacity: 0.9;
-  transition: background 520ms var(--lg-ease, ease);
-  will-change: transform;
-}
-
-.p3d-atmo[data-world="starter"] .p3d-atmo-beams {
-  background: repeating-linear-gradient(118deg, rgba(255, 226, 180, 0) 0 140px, rgba(255, 226, 180, 0.16) 140px 190px, rgba(255, 226, 180, 0) 190px 420px);
-}
-
-.p3d-atmo[data-world="popular"] .p3d-atmo-beams {
-  background: radial-gradient(28% 14% at 64% 22%, rgba(255, 196, 128, 0.14), transparent 72%);
-}
-
-.p3d-atmo[data-world="pro"] .p3d-atmo-beams {
-  background: repeating-linear-gradient(100deg, rgba(220, 236, 250, 0) 0 90px, rgba(220, 236, 250, 0.22) 90px 120px, rgba(220, 236, 250, 0) 120px 300px);
-}
-
-.p3d-atmo[data-world="custom"] .p3d-atmo-beams {
-  background: repeating-linear-gradient(72deg, rgba(255, 232, 220, 0) 0 60px, rgba(255, 232, 220, 0.2) 60px 100px, rgba(255, 232, 220, 0) 100px 220px);
+.p3d-page .p3d-roundbtn:hover,
+.p3d-sound:hover {
+  color: var(--p3d-ink, #1a2147);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .p3d-host,
-  .p3d-atmo-layer,
   .pricing-plan-carousel .case-stage[data-rest="true"] .case-slab[data-front="false"] {
     transition: none;
   }
+}
+
+
+/* ═══ 首屏以下：夢境化成珍珠白，面板是白色液態玻璃（虹彩細邊 + 頂緣高光 + 藍粉柔影）═══ */
+.p3d-panel {
+  position: relative;
+  border-radius: 1.75rem;
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.86), rgba(255, 255, 255, 0.62));
+  box-shadow:
+    inset 0 1px 0 #fff,
+    0 1px 2px rgba(60, 80, 160, 0.06),
+    0 24px 60px rgba(90, 110, 200, 0.14);
+  -webkit-backdrop-filter: blur(22px) saturate(1.5);
+  backdrop-filter: blur(22px) saturate(1.5);
+}
+
+/* 虹彩細邊：粉 → 白 → 藍的 1px 邊（mask 挖空，只留邊）。 */
+.p3d-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  background: linear-gradient(135deg, rgba(255, 170, 212, 0.9), rgba(255, 255, 255, 0.9) 40%, rgba(255, 255, 255, 0.6) 60%, rgba(140, 186, 255, 0.9));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+}
+
+.p3d-eyebrow {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  background: linear-gradient(in oklab 90deg, var(--p3d-pink-soft), var(--p3d-blue-soft));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.p3d-eyebrow svg {
+  color: var(--p3d-pink);
+}
+
+.p3d-seg {
+  position: relative;
+  display: inline-flex;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  border-radius: 999px;
+  background: rgba(58, 80, 160, 0.07);
+  box-shadow: inset 0 1px 2px rgba(58, 80, 160, 0.08);
+}
+
+.p3d-seg-btn {
+  padding: 0.4rem 1rem;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--p3d-ink-2);
+  cursor: pointer;
+  transition: background 200ms var(--lg-ease, ease), color 200ms var(--lg-ease, ease), box-shadow 200ms var(--lg-ease, ease);
+}
+
+.p3d-seg-btn[aria-selected="true"] {
+  background: #fff;
+  color: var(--p3d-ink);
+  box-shadow: 0 2px 8px rgba(58, 80, 160, 0.16), inset 0 0 0 1px rgba(255, 255, 255, 0.9);
+}
+
+.p3d-tile {
+  position: relative;
+  min-width: 0;
+  padding: 0.9rem 1rem;
+  border-radius: 1.1rem;
+  background: linear-gradient(160deg, #fff, rgba(255, 255, 255, 0.7));
+  box-shadow: inset 0 0 0 1px var(--p3d-line), 0 6px 18px rgba(90, 110, 200, 0.07);
+  transition: transform 220ms var(--lg-ease, ease), box-shadow 220ms var(--lg-ease, ease);
+}
+
+.p3d-tile:hover {
+  transform: translateY(-2px);
+  box-shadow: inset 0 0 0 1px rgba(236, 77, 146, 0.25), 0 14px 30px rgba(90, 110, 200, 0.14);
+}
+
+.p3d-tile-num {
+  font-size: 28px;
+  line-height: 1.1;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  background: linear-gradient(in oklab 100deg, var(--p3d-pink-soft), var(--p3d-blue-soft));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.p3d-summary,
+.p3d-faq-q {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.p3d-summary::-webkit-details-marker,
+.p3d-faq-q::-webkit-details-marker {
+  display: none;
+}
+
+.p3d-summary {
+  padding: 0.7rem 1rem;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--p3d-ink-2);
+  background: rgba(255, 255, 255, 0.7);
+  box-shadow: inset 0 0 0 1px var(--p3d-line);
+  transition: background 200ms var(--lg-ease, ease), color 200ms var(--lg-ease, ease);
+}
+
+.p3d-summary:hover {
+  color: var(--p3d-ink);
+  background: #fff;
+}
+
+.p3d-details[open] > .p3d-summary svg,
+.p3d-faq[open] > .p3d-faq-q svg {
+  transform: rotate(180deg);
+}
+
+.p3d-summary svg,
+.p3d-faq-q svg {
+  transition: transform 200ms var(--lg-ease, ease);
+}
+
+.p3d-faq {
+  border-bottom: 1px solid var(--p3d-line);
+}
+
+.p3d-faq-q {
+  padding: 0.85rem 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--p3d-ink);
+}
+
+.p3d-faq-q svg {
+  color: var(--p3d-ink-3);
+}
+
+.p3d-faq[open] > .p3d-faq-q {
+  color: var(--p3d-pink);
+}
+
+/* 首屏以下的主按鈕：深墨藍實心（DESIGN.md 主 CTA 同色系）+ 粉藍柔光。 */
+.p3d-btn-light {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 0.55rem 1.1rem;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(160deg, #2a3264, #1a2147);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 8px 20px rgba(236, 77, 146, 0.18), 0 4px 12px rgba(59, 130, 255, 0.2);
+  cursor: pointer;
+  transition: transform 200ms var(--lg-ease, ease), box-shadow 200ms var(--lg-ease, ease);
+}
+
+.p3d-btn-light:hover {
+  transform: translateY(-1px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 12px 26px rgba(236, 77, 146, 0.26), 0 6px 16px rgba(59, 130, 255, 0.28);
+}
+
+.p3d-btn-light:focus-visible,
+.p3d-seg-btn:focus-visible,
+.p3d-summary:focus-visible,
+.p3d-faq-q:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
 }

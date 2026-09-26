@@ -21,7 +21,7 @@
 }
 
 .pricing-plan-carousel .case-stage {
-  max-width: 76rem;
+  max-width: 72rem;
   margin-inline: auto;
 }
 
@@ -49,7 +49,7 @@
    由 STATIC_FRAMES 以 inline style 寫到 .case-slab 上；這裡只消費。 */
 
 /* ── 卡面材料（2026-09-26 3D 化：拆掉 .lg-card 外殼）──
-   卡面 = 3D 滿版（pricing3d/pricing3d.css 管 3D 接管後的正面卡）；這裡是靜態層：
+   卡面 = 主角卡本身（身後的夢境噴泉在 pricing3d/dream-*.css）；這裡是卡面層：
    封面照（真實生成圖）+ 方案色暈染 + 浮在上面的價格玻璃層。 */
 .ppc-face {
   position: absolute;
@@ -98,32 +98,132 @@
   transition: opacity 280ms var(--lg-ease, ease);
 }
 
-/* 價格玻璃層：白玻璃 0.78（lg-card 同族：頂緣亮邊 + 卡片陰影）。
-   注意 .case-slab 有 will-change: opacity（backdrop root），backdrop-filter 在 3D 接管後
-   取樣不到 canvas —— 所以底色本身要夠實（0.78），不賭模糊。 */
+/* 價格玻璃層 = 一張白色液態玻璃票券（2026-09-27 暴君：「kahoot 風」→ 堅守藍粉白）。
+   注意 .case-slab 有 will-change: opacity（backdrop root），backdrop-filter 取樣不到 canvas，
+   所以不賭模糊：本體是近實的珍珠白（右上一抹粉、左下一抹藍，像光穿過玻璃的色散），
+   邊是一圈跟著滑鼠轉的虹彩細邊（--mx 由 PricingAtmosphere 寫在頁面根），
+   面上一道全息鍍膜光帶隨滑鼠滑過；影子帶藍粉色，不用灰黑。 */
 .ppc-glass {
+  --t-ink: #1a2147;
+  --t-ink-2: rgba(26, 33, 71, 0.74);
+  --t-ink-3: rgba(26, 33, 71, 0.56);
   position: relative;
-  border-radius: 1.5rem;
+  isolation: isolate;
+  border-radius: 1.6rem;
   padding: clamp(14px, calc(var(--case-card-w, 520px) * 0.04), 20px);
-  background: rgba(255, 255, 255, 0.78);
-  border-top: 1px solid var(--lg-border-top, rgba(255, 255, 255, 0.92));
-  border-left: 1px solid var(--lg-border-side, rgba(255, 255, 255, 0.48));
-  border-right: 1px solid var(--lg-border-side, rgba(255, 255, 255, 0.48));
+  width: min(100%, 27rem);
+  margin-inline: auto;
+  color: var(--t-ink);
+  background:
+    radial-gradient(90% 55% at 100% 0%, rgba(255, 206, 230, 0.6), rgba(255, 206, 230, 0) 70%),
+    radial-gradient(90% 60% at 0% 100%, rgba(190, 216, 255, 0.62), rgba(190, 216, 255, 0) 70%),
+    linear-gradient(165deg, rgba(255, 255, 255, 0.96), rgba(250, 251, 255, 0.86));
   box-shadow:
-    0 12px 36px rgba(0, 0, 0, 0.14),
-    0 2px 8px rgba(0, 0, 0, 0.06),
-    inset 0 1px 0 rgba(255, 255, 255, 0.9);
-  -webkit-backdrop-filter: blur(24px) saturate(160%);
-  backdrop-filter: blur(24px) saturate(160%);
-  transition: box-shadow 200ms var(--lg-ease, ease);
+    inset 0 1px 0 #fff,
+    inset 0 -8px 20px rgba(255, 255, 255, 0.5),
+    0 34px 70px -18px rgba(60, 86, 190, 0.38),
+    0 12px 28px -8px rgba(236, 77, 146, 0.18);
 }
 
-/* 選中態：2px 藍環落在玻璃層上（卡面已無外殼可掛）。與卡內主 CTA 同一句話。 */
+/* 虹彩細邊：粉 → 白 → 藍的一圈 1.5px 邊，角度跟著滑鼠轉（像手裡轉一張雷射卡）。 */
+.ppc-glass::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+  padding: 1.5px;
+  pointer-events: none;
+  background: conic-gradient(from calc(210deg + var(--mx, 0) * 70deg),
+    #ff9fcc, #ffffff 18%, #8fbaff 34%, #ffffff 50%, #ffb6d9 66%, #b8d4ff 82%, #ff9fcc);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+}
+
+/* 全息鍍膜：一道粉白藍的斜光帶，滑鼠左右移時從票面上滑過。 */
+.ppc-glass::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(112deg, rgba(255, 255, 255, 0) 30%, rgba(255, 186, 222, 0.42) 42%, rgba(255, 255, 255, 0.95) 50%, rgba(160, 200, 255, 0.45) 58%, rgba(255, 255, 255, 0) 70%);
+  background-size: 280% 100%;
+  background-position: calc(50% - var(--mx, 0) * 60%) 0;
+  transition: background-position 700ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* 選中態（環停在哪檔即選中）：影子更深一點、藍粉光更亮——不另畫藍框。 */
 .case-slab[aria-checked="true"] .ppc-glass {
   box-shadow:
-    inset 0 0 0 2px rgba(0, 122, 255, 0.42),
-    0 12px 36px rgba(0, 0, 0, 0.14),
-    0 2px 8px rgba(0, 0, 0, 0.06);
+    inset 0 1px 0 #fff,
+    inset 0 -8px 20px rgba(255, 255, 255, 0.5),
+    0 40px 80px -18px rgba(60, 86, 190, 0.45),
+    0 14px 34px -8px rgba(236, 77, 146, 0.24);
+}
+
+/* 票面主 CTA：深墨藍液態玻璃（DESIGN.md 主 CTA 同色系），面上一道光週期掠過，
+   底下一團粉藍柔光——整頁唯一的深色塊，眼睛最後落在這裡。 */
+.ppc-cta {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  border-radius: 999px;
+  padding: 0.8rem 1.25rem;
+  color: #fff;
+  background: linear-gradient(160deg, #2c3569 0%, #1a2147 60%, #151a3a 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    inset 0 -2px 6px rgba(0, 0, 0, 0.25),
+    0 14px 30px -6px rgba(236, 77, 146, 0.4),
+    0 8px 22px -4px rgba(59, 130, 255, 0.4);
+  cursor: pointer;
+  transition: transform 200ms var(--lg-ease, ease), box-shadow 200ms var(--lg-ease, ease);
+}
+
+.ppc-cta::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -40%;
+  width: 30%;
+  background: linear-gradient(100deg, rgba(255, 255, 255, 0), rgba(255, 210, 235, 0.35) 40%, rgba(255, 255, 255, 0.5) 50%, rgba(190, 215, 255, 0.35) 60%, rgba(255, 255, 255, 0));
+  transform: skewX(-18deg);
+  animation: ppc-cta-sheen 4.2s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes ppc-cta-sheen {
+  0%, 62% { transform: translateX(0) skewX(-18deg); }
+  100% { transform: translateX(520%) skewX(-18deg); }
+}
+
+.ppc-cta:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    inset 0 -2px 6px rgba(0, 0, 0, 0.25),
+    0 18px 36px -6px rgba(236, 77, 146, 0.5),
+    0 10px 26px -4px rgba(59, 130, 255, 0.5);
+}
+
+.ppc-cta:active {
+  transform: translateY(0);
+}
+
+.ppc-cta:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ppc-cta::after {
+    animation: none;
+    opacity: 0;
+  }
 }
 
 /* ── Log Scale 滑桿（自訂檔）──
@@ -149,13 +249,9 @@
 .ppc-slider::-webkit-slider-runnable-track {
   height: 6px;
   border-radius: 999px;
-  background: linear-gradient(
-    to right,
-    rgb(var(--ppc-tint, 0 122 255)) 0%,
-    rgb(var(--ppc-tint, 0 122 255)) var(--ppc-fill),
-    rgba(0, 0, 0, 0.10) var(--ppc-fill),
-    rgba(0, 0, 0, 0.10) 100%
-  );
+  background:
+    linear-gradient(to right, #ff8fc2 0%, #3b82ff var(--ppc-fill), transparent var(--ppc-fill)),
+    rgba(58, 80, 160, 0.12);
 }
 
 .ppc-slider::-webkit-slider-thumb {
@@ -165,10 +261,10 @@
   height: 18px;
   /* (軌道 6px − 滑塊 18px) / 2：把滑塊對準軌道中線。 */
   margin-top: -6px;
-  border: 3px solid rgb(var(--ppc-tint, 0 122 255));
+  border: 3px solid #3b82ff;
   border-radius: 50%;
   background: #fff;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.22);
+  box-shadow: 0 2px 8px rgba(59, 130, 255, 0.35);
   transition: transform 160ms var(--lg-spring, ease-out);
 }
 
@@ -179,22 +275,22 @@
 .ppc-slider::-moz-range-track {
   height: 6px;
   border-radius: 999px;
-  background: rgba(0, 0, 0, 0.10);
+  background: rgba(58, 80, 160, 0.12);
 }
 
 .ppc-slider::-moz-range-progress {
   height: 6px;
   border-radius: 999px;
-  background: rgb(var(--ppc-tint, 0 122 255));
+  background: linear-gradient(to right, #ff8fc2, #3b82ff);
 }
 
 .ppc-slider::-moz-range-thumb {
   width: 18px;
   height: 18px;
-  border: 3px solid rgb(var(--ppc-tint, 0 122 255));
+  border: 3px solid #3b82ff;
   border-radius: 50%;
   background: #fff;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.22);
+  box-shadow: 0 2px 8px rgba(59, 130, 255, 0.35);
 }
 
 .ppc-slider:focus-visible {
@@ -202,3 +298,258 @@
   outline-offset: 4px;
   border-radius: 999px;
 }
+
+/* ── 票面（2026-09-26 第三輪：一眼看懂給誰的、能畫多少、每張多少錢）── */
+
+/* 張數：粉 → 藍的虹彩大字（oklab 插值，不經過髒紫），票面上最大的一個數。 */
+.ppc-quota {
+  background: linear-gradient(in oklab 100deg, #c47595 0%, #ae85c7 45%, #6c8fce 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 4px 14px rgba(196, 117, 149, 0.2));
+}
+
+.ppc-save {
+  margin-left: 0.4rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-weight: 700;
+  color: #c2256a;
+  background: linear-gradient(120deg, #ffe0ee, #ffeef6);
+  box-shadow: inset 0 0 0 1px rgba(236, 77, 146, 0.2);
+}
+
+/* ── 檔位梯：白色液態玻璃條，選中那格是一塊會滑動的玻璃透鏡（帶彈性過衝），
+   額度條一檔比一檔長 ── */
+.ppc-ladder-wrap {
+  position: relative;
+  z-index: 1200;
+  margin-bottom: 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding-inline: 1rem;
+}
+
+.ppc-ladder {
+  --lad-pad: 0.4rem;
+  --lad-gap: 0.5rem;
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(var(--ppc-tiers, 4), minmax(0, 1fr));
+  gap: var(--lad-gap);
+  width: min(100%, 44rem);
+  padding: var(--lad-pad);
+  border-radius: 1.4rem;
+  background: linear-gradient(165deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.42));
+  box-shadow:
+    inset 0 1px 0 #fff,
+    inset 0 0 0 1px rgba(255, 255, 255, 0.55),
+    0 20px 44px -10px rgba(70, 96, 200, 0.28);
+  -webkit-backdrop-filter: blur(20px) saturate(1.7);
+  backdrop-filter: blur(20px) saturate(1.7);
+}
+
+.ppc-ladder-lens {
+  position: absolute;
+  top: var(--lad-pad);
+  bottom: var(--lad-pad);
+  left: var(--lad-pad);
+  width: calc((100% - 2 * var(--lad-pad) - (var(--ppc-tiers, 4) - 1) * var(--lad-gap)) / var(--ppc-tiers, 4));
+  border-radius: 1rem;
+  pointer-events: none;
+  transform: translateX(calc(var(--ppc-active, 0) * (100% + var(--lad-gap))));
+  background:
+    radial-gradient(80% 60% at 90% 0%, rgba(255, 214, 234, 0.7), rgba(255, 214, 234, 0) 70%),
+    radial-gradient(80% 70% at 0% 100%, rgba(196, 220, 255, 0.7), rgba(196, 220, 255, 0) 70%),
+    #fff;
+  box-shadow:
+    inset 0 1px 0 #fff,
+    0 10px 24px -6px rgba(70, 96, 200, 0.35),
+    0 3px 8px rgba(236, 77, 146, 0.12);
+  transition: transform 560ms cubic-bezier(0.34, 1.4, 0.52, 1);
+}
+
+.ppc-ladder-lens::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: linear-gradient(135deg, #ff9fcc, #ffffff 45%, #8fbaff);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+}
+
+.ppc-tier {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.45rem 0.7rem 0.5rem;
+  border-radius: 1rem;
+  text-align: left;
+  color: rgba(26, 33, 71, 0.66);
+  cursor: pointer;
+  transition: background 200ms var(--lg-ease, ease), color 200ms var(--lg-ease, ease);
+}
+
+.ppc-tier:hover {
+  color: #1a2147;
+  background: rgba(255, 255, 255, 0.4);
+}
+
+.ppc-tier[aria-selected="true"] {
+  color: #1a2147;
+  background: transparent;
+}
+
+.ppc-tier:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+
+.ppc-tier-badge {
+  position: absolute;
+  top: -0.65rem;
+  right: 0.5rem;
+  padding: 0.05rem 0.5rem;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(120deg, #d9387f, #ec5a9c);
+  box-shadow: 0 4px 12px rgba(236, 77, 146, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+.ppc-tier-badge[data-kind="value"] {
+  background: linear-gradient(120deg, #2f6fe8, #4f8dff);
+  box-shadow: 0 4px 12px rgba(59, 130, 255, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+.ppc-tier-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+
+.ppc-tier-name {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.ppc-tier-price {
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.ppc-tier-bar {
+  display: block;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(58, 80, 160, 0.1);
+  overflow: hidden;
+}
+
+.ppc-tier-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #ffa3cf, #b7c6ff 55%, #3b82ff);
+  transition: width 360ms var(--lg-ease, ease), filter 200ms var(--lg-ease, ease);
+  filter: saturate(0.7);
+}
+
+.ppc-tier[aria-selected="true"] .ppc-tier-bar > span {
+  filter: none;
+  box-shadow: 0 0 10px rgba(120, 160, 255, 0.6);
+}
+
+.ppc-tier-quota {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(26, 33, 71, 0.62);
+}
+
+.ppc-tier[aria-selected="true"] .ppc-tier-quota {
+  color: rgba(26, 33, 71, 0.8);
+}
+
+@media (max-width: 767px) {
+  .ppc-ladder-wrap {
+    padding-inline: 0;
+  }
+
+  .ppc-ladder-wrap .case-arrow {
+    display: none;
+  }
+
+  .ppc-ladder {
+    --lad-pad: 0.3rem;
+    --lad-gap: 0.25rem;
+  }
+
+  .ppc-tier {
+    padding: 0.5rem 0.45rem;
+  }
+
+  .ppc-tier-top {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0;
+  }
+
+  .ppc-tier-name,
+  .ppc-tier-price {
+    font-size: 13px;
+  }
+
+  .ppc-tier-badge {
+    right: 0.25rem;
+    font-size: 11px;
+  }
+}
+
+/* 寬屏構圖：卡堆在左、票面在右，兩者不重疊（engine 的 fitCamera 按卡寬把卡堆推到左半）。
+   票面垂直置中、貼右緣：視線從檔位梯 → 卡堆 → 票面，一條 Z 字。 */
+@media (min-width: 768px) {
+  .pricing-plan-carousel .ppc-card {
+    justify-content: center;
+    align-items: flex-end;
+    padding-right: 0;
+  }
+
+  .pricing-plan-carousel .ppc-glass {
+    width: min(100%, 22.5rem);
+    margin: 0;
+    transform: translateX(min(calc(var(--case-card-w, 520px) * 0.46), calc((100vw - var(--case-card-w, 520px)) / 2 - 1rem)));
+  }
+
+  /* 正面卡的票面要伸出卡框右緣（卡框本身在 3D 模式下是隱形的），不裁。 */
+  .pricing-plan-carousel:not([data-pricing3d="off"]) .case-slab[data-front="true"] .case-media {
+    overflow: visible;
+  }
+}
+
+/* 票面首行的档位色點（四檔都在藍粉白之內）。 */
+.ppc-tier-dot {
+  display: inline-block;
+  width: 0.55rem;
+  height: 0.55rem;
+  margin-right: 0.45rem;
+  border-radius: 999px;
+  vertical-align: 0.05em;
+  background: linear-gradient(120deg, var(--chip-a, #ff9ecf), var(--chip-b, #8fbaff));
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9), 0 0 10px var(--chip-a, #ff9ecf);
+}
+
+.ppc-tier-dot[data-world="starter"] { --chip-a: #ff8fc2; --chip-b: #ffc4de; }
+.ppc-tier-dot[data-world="popular"] { --chip-a: #5b9bff; --chip-b: #a9ccff; }
+.ppc-tier-dot[data-world="pro"] { --chip-a: #ff8fc2; --chip-b: #5b9bff; }
+.ppc-tier-dot[data-world="custom"] { --chip-a: #c9dcff; --chip-b: #ffd6ea; }

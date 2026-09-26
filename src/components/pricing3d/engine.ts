@@ -1,5 +1,5 @@
 /* ╁━ /pricing 3D 卡堆引擎（手寫 three，無 R3F、無物理引擎）╁━
-   只被 PricingStage3D 以 import() 動態載入 —— three 不進首屏包，首屏是靜態卡面 DOM。
+   只被 PricingStage3D 以 import() 動態載入 —— three 不進首屏包；首屏是 SSR 夢境底圖 + 價格玻璃層。
 
    構成：
    - 一個 WebGLRenderer = 全頁唯一 WebGL context（離屏/分頁隱藏暫停，卸載 dispose 全部）；
@@ -14,7 +14,8 @@ import * as THREE from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { CARD_D, CARD_T, CARD_W, buildWorld, type WorldRig } from "./scenes";
 import type { PricingSound } from "./sound";
-import { SHOWCASE_POOL, WORLD_IDS, cardCountForCoins, type WorldId } from "./worlds";
+import { createFilmAtlas } from "./film-atlas";
+import { SHOWCASE_POOL, WORLD_IDS, cardCountForCoins, thumbOf, type WorldId } from "./worlds";
 
 export interface Pricing3DEngine {
   setWorld(id: WorldId, coins: number): void;
@@ -47,7 +48,8 @@ export interface EngineInit {
 
 /* ── 導演參數（快慢在這裡調，不在物理裡）── */
 const FALL_S = 0.42; // 單張從出場到觸桌
-const DROP_SPAN_S = 1.5; // 整堆出場時間上限（加上落下與沉降 ≈ 2–3.5 秒）
+const DROP_SPAN_S = 1.9; // 整堆出場時間上限（加上落下與沉降 ≈ 2–4 秒；溢出卡最後才滑落）
+const SPILL_FALL = 1.7; // 溢出卡從台沿滑落到地面比直落多花的時間倍率
 const DROP_STAGGER_MAX = 0.16;
 const DROP_STAGGER_MIN = 0.006;
 const SETTLE_S = 0.9;
@@ -55,8 +57,10 @@ const PICK_S = 1.55; // 懸停拾起：升起 → 在光下轉一圈 → 放回
 const GATHER_AFTER_S = 1.6; // 撥散後多久開始自己收回
 const FRICTION = 3.6; // 滑動摩擦（1/s）
 const GRAVITY = 9.8;
-const VIEW_SHIFT = 0.13; // 主角偏上：下方留給浮在 3D 之上的價格玻璃層
-const ATLAS_GRID = 4;
+/** 卡面本地 uv（與 BoxGeometry 上表面的 uv 同向），邊緣內縮半個像素避免取到鄰格。 */
+const LOCAL_UV_GLSL = `clamp(vec2(position.x / ${CARD_W.toFixed(3)} + 0.5, 0.5 - position.z / ${CARD_D.toFixed(3)}), 0.004, 0.996)`;
+const ATLAS_COLS = 5;
+const ATLAS_ROWS = 4;
 
 function mulberry(seed: number) {
   let a = seed >>> 0;
@@ -92,10 +96,16 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
   });
   renderer.setClearColor(0x000000, 0);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  /* Neutral（Khronos PBR Neutral）：不像 ACES 那樣把飽和色壓灰——作品要鮮，不要老照片。 */
+  renderer.toneMapping = THREE.NeutralToneMapping;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  let pixelRatio = Math.min(window.devicePixelRatio || 1, compact ? 1 : 1.5);
+  /* 精度（2026-09-27 暴君「不要渲染成 GTA3 級古董貼圖」）：
+     dpr=1 的機器原本 ratio 1.0 = 零超取樣，邊緣全是階梯；這裡給一個超取樣地板，
+     弱機也至少 1.75 倍渲染再降採樣；dpr 高的機器最多 2（再上去是白燒 fill rate）。 */
+  const ratioFloor = compact ? 1.25 : 1.75;
+  const basePixelRatio = Math.min(2, Math.max(window.devicePixelRatio || 1, ratioFloor));
+  let pixelRatio = basePixelRatio;
   renderer.setPixelRatio(pixelRatio);
 
   const scene = new THREE.Scene();
@@ -112,61 +122,27 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
   let viewW = 2;
   let viewH = 1;
 
-  /* ── 作品卡圖集：先用方案色佔位，圖到一張畫一張（不等圖，首幀就有東西）── */
-  const atlasSize = compact ? 1024 : 2048;
-  const slotPx = atlasSize / ATLAS_GRID;
-  const atlasCanvas = document.createElement("canvas");
-  atlasCanvas.width = atlasSize;
-  atlasCanvas.height = atlasSize;
-  const atlasCtx = atlasCanvas.getContext("2d");
-  if (atlasCtx) {
-    const tints = ["#e9d6b8", "#c9d6ea", "#dccbe8", "#cfe3d2", "#efd9cf", "#d6dde6"];
-    for (let s = 0; s < ATLAS_GRID * ATLAS_GRID; s += 1) {
-      const x = (s % ATLAS_GRID) * slotPx;
-      const y = Math.floor(s / ATLAS_GRID) * slotPx;
-      const g = atlasCtx.createLinearGradient(x, y, x + slotPx, y + slotPx);
-      g.addColorStop(0, tints[s % tints.length]);
-      g.addColorStop(1, "#f7f4ef");
-      atlasCtx.fillStyle = g;
-      atlasCtx.fillRect(x, y, slotPx, slotPx);
-    }
-  }
-  const atlas = new THREE.CanvasTexture(atlasCanvas);
-  atlas.colorSpace = THREE.SRGBColorSpace;
-  atlas.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
-  let atlasDirty = false;
+  /* ── 作品卡圖集：每格一張底片（片基 + 鏤空齒孔 + 邊碼 + 鮮豔作品），見 film-atlas.ts ── */
   let atlasTimer = 0;
-  const images: HTMLImageElement[] = [];
-  SHOWCASE_POOL.slice(0, ATLAS_GRID * ATLAS_GRID).forEach((src, slot) => {
-    const img = new window.Image();
-    img.decoding = "async";
-    img.onload = () => {
-      if (disposed || !atlasCtx) return;
-      const x = (slot % ATLAS_GRID) * slotPx;
-      const y = Math.floor(slot / ATLAS_GRID) * slotPx;
-      const scale = Math.max(slotPx / img.naturalWidth, slotPx / img.naturalHeight);
-      const w = img.naturalWidth * scale;
-      const h = img.naturalHeight * scale;
-      atlasCtx.save();
-      atlasCtx.beginPath();
-      atlasCtx.rect(x, y, slotPx, slotPx);
-      atlasCtx.clip();
-      atlasCtx.drawImage(img, x + (slotPx - w) / 2, y + (slotPx - h) / 2, w, h);
-      atlasCtx.restore();
-      atlasDirty = true;
-      if (!atlasTimer) {
-        atlasTimer = window.setTimeout(() => {
-          atlasTimer = 0;
-          if (disposed || !atlasDirty) return;
-          atlasDirty = false;
-          atlas.needsUpdate = true;
-          kick();
-        }, 140);
-      }
-    };
-    img.src = src;
-    images.push(img);
+  const film = createFilmAtlas({
+    cols: ATLAS_COLS,
+    rows: ATLAS_ROWS,
+    slotW: compact ? 320 : 640,
+    aspect: CARD_D / CARD_W,
+    sources: SHOWCASE_POOL.slice(0, ATLAS_COLS * ATLAS_ROWS).map((full) => ({ thumb: thumbOf(full), full })),
+    onPaint: () => {
+      if (atlasTimer || disposed) return;
+      atlasTimer = window.setTimeout(() => {
+        atlasTimer = 0;
+        if (disposed) return;
+        atlas.needsUpdate = true;
+        kick();
+      }, 140);
+    },
   });
+  const atlas = new THREE.CanvasTexture(film.canvas);
+  atlas.colorSpace = THREE.SRGBColorSpace;
+  atlas.anisotropy = renderer.capabilities.getMaxAnisotropy();
 
   /* ── 作品卡：一個 InstancedMesh ── */
   const cardGeo = new THREE.BoxGeometry(CARD_W, CARD_T, CARD_D);
@@ -183,11 +159,15 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
   const rimUniform = { value: new THREE.Color(0xffffff) };
   const cardMat = new THREE.MeshPhysicalMaterial({
     map: atlas,
-    roughness: 0.3,
+    roughness: 0.42,
     metalness: 0,
-    clearcoat: 1,
-    clearcoatRoughness: 0.05,
+    clearcoat: 0.3,
+    clearcoatRoughness: 0.26,
+    /* 2026-09-27：逆光（台後的天光）掠過近水平的卡面，粗糙度 0.42 的鏡面瓣會把整片卡洗成一團白霧
+       （逐物件隱藏實測：關掉逆光，霧消失）。卡面基底鏡面壓到三成，只留 clearcoat 那道窄高光。 */
+    specularIntensity: 0.3,
     ior: 1.5,
+    alphaTest: 0.5, // 底片齒孔真鏤空
   });
   cardMat.onBeforeCompile = (shader) => {
     shader.uniforms.uRim = rimUniform;
@@ -198,32 +178,47 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
       )
       .replace(
         "#include <uv_vertex>",
-        "#include <uv_vertex>\nvFace = aFace;\nvLocalUv = uv;\nvGlint = aGlint;\n#ifdef USE_MAP\nvMapUv = aFace > 0.5 ? aUvRect.xy + uv * aUvRect.zw : aUvRect.xy + aUvRect.zw * 0.5;\n#endif",
+        /* 貼圖座標一律由本地位置算（上下面與四個側面同一套）：側面取到的是載體邊緣的顏色與 alpha，
+           拍立得的白邊、底片的黑邊自然延伸成厚度；載體輪廓外（alpha 0）側面一起被裁掉。 */
+        `#include <uv_vertex>\nvFace = aFace;\nvLocalUv = ${LOCAL_UV_GLSL};\nvGlint = aGlint;\n#ifdef USE_MAP\nvMapUv = aUvRect.xy + vLocalUv * aUvRect.zw;\n#endif`,
       );
     shader.fragmentShader = shader.fragmentShader
       .replace("#include <common>", "#include <common>\nuniform vec3 uRim;\nvarying float vFace;\nvarying vec2 vLocalUv;\nvarying vec2 vGlint;")
       .replace(
         "#include <map_fragment>",
         /* 側面 = 玻璃邊：圖色壓暗再混一口冷白，讀起來是「一塊有厚度的玻璃的切邊」。 */
-        "#include <map_fragment>\ndiffuseColor.rgb = mix(diffuseColor.rgb * 0.28 + vec3(0.66, 0.74, 0.76) * 0.58, diffuseColor.rgb, vFace);",
+        "#include <map_fragment>\ndiffuseColor.rgb = mix(diffuseColor.rgb * 0.72, diffuseColor.rgb, vFace);",
       )
       .replace(
         "#include <opaque_fragment>",
         [
+          /* 卡面像燈箱上的正片：62% 直接取作品原色（不被打光壓暗、不被環境反射洗白），
+             38% 保留受光明暗，堆裡的層次還在。 */
+          "outgoingLight = mix(outgoingLight, diffuseColor.rgb * 1.06, vFace * 0.62);",
           "float pFres = pow(1.0 - clamp(abs(dot(normal, normalize(vViewPosition))), 0.0, 1.0), 3.0);",
-          "float pEdge = max(1.0 - vFace, smoothstep(0.44, 0.5, max(abs(vLocalUv.x - 0.5), abs(vLocalUv.y - 0.5))));",
-          "outgoingLight += uRim * (pFres * (0.22 + 0.78 * pEdge) * 0.85 + pEdge * 0.1);",
+          "float pEdge = max((1.0 - vFace) * 0.3, smoothstep(0.44, 0.5, max(abs(vLocalUv.x - 0.5), abs(vLocalUv.y - 0.5))));",
+          "outgoingLight += uRim * (pFres * (0.22 + 0.78 * pEdge) * 0.5 + pEdge * 0.06);",
           "float pBand = exp(-pow((vLocalUv.x * 0.62 + (1.0 - vLocalUv.y) * 0.38) - vGlint.y, 2.0) * 70.0);",
           "outgoingLight += uRim * pBand * vGlint.x * 1.5;",
           "#include <opaque_fragment>",
         ].join("\n"),
       );
   };
-  cardMat.customProgramCacheKey = () => "pricing3d-card-v1";
+  cardMat.customProgramCacheKey = () => "pricing3d-card-v3";
+
+  /* 陰影也照載體輪廓投（拍立得、幻燈片的影子不是一整塊長方形）。 */
+  const depthMat = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: atlas, alphaTest: 0.5 });
+  depthMat.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace("#include <common>", "#include <common>\nattribute vec4 aUvRect;")
+      .replace("#include <uv_vertex>", `#include <uv_vertex>\n#ifdef USE_MAP\nvMapUv = aUvRect.xy + (${LOCAL_UV_GLSL}) * aUvRect.zw;\n#endif`);
+  };
+  depthMat.customProgramCacheKey = () => "pricing3d-card-depth-v1";
 
   const cards = new THREE.InstancedMesh(cardGeo, cardMat, CAP);
   cards.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   cards.castShadow = true;
+  cards.customDepthMaterial = depthMat;
   cards.receiveShadow = true;
   cards.frustumCulled = false;
   scene.add(cards);
@@ -231,6 +226,11 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
   /* ── 每張卡的狀態（定長陣列，零 GC）── */
   const slotX = new Float32Array(CAP);
   const slotY = new Float32Array(CAP);
+  const slotFloor = new Float32Array(CAP);
+  const slotPitch = new Float32Array(CAP);
+  /* 溢出卡：台子裝不下，從台沿滑落、掉到地上（起點 = 台沿最近點）。 */
+  const spillFrom = new Float32Array(CAP * 3);
+  let spillPile = -1;
   const slotZ = new Float32Array(CAP);
   const slotYaw = new Float32Array(CAP);
   const slotLevel = new Int32Array(CAP);
@@ -258,6 +258,15 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
   const landed = new Uint8Array(CAP);
   const rand = new Float32Array(CAP);
   const pileTopLevel: number[] = [];
+
+  /* 額度超出設備卡數上限時，塔不再加卡、改為拉高（2 萬 → 100 萬金幣仍一眼更滿，
+     一路衝出鏡頭上緣）；滑桿拖動時平滑伸縮。 */
+  let stretch = 1;
+  /* 進場運鏡：落卡時鏡頭從高處遠處緩緩推進（電影開場的 push-in），落定時剛好到位。 */
+  let introStart = -10;
+  const INTRO_S = 3.2;
+  let stretchTarget = 1;
+  const stretchFor = (coins: number) => Math.min(4, Math.max(1, Math.pow(cardCountForCoins(coins) / Math.max(1, cap), 0.45)));
 
   const rigs = new Map<WorldId, WorldRig>();
   let rig: WorldRig | null = null;
@@ -293,6 +302,8 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
 
   /** 卡位：按「(層 + 0.5) / 堆權重」排序填位 —— 張數變化時每一堆都在長，塔高錯落。 */
   function layoutSlots(r: WorldRig, worldIndex: number) {
+    const onPiles = Math.min(CAP, r.capacity);
+    spillPile = r.piles.length;
     const sumW = r.piles.reduce((sum, p) => sum + p.weight, 0);
     const entries: Array<{ p: number; level: number; cost: number }> = [];
     r.piles.forEach((pile, p) => {
@@ -302,13 +313,47 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
     entries.sort((a, b) => a.cost - b.cost || a.p - b.p);
     const rnd = mulberry(97 + worldIndex * 131);
     const perm = SHOWCASE_POOL.map((_, i) => i).sort(() => rnd() - 0.5);
+    const floorCells = new Map<string, number>();
     for (let i = 0; i < CAP; i += 1) {
-      const { p, level } = entries[i];
+      rand[i] = rnd();
+      const [u0, v0, uw, vh] = film.uv(perm[i % perm.length] % film.slots);
+      uvRect.setXYZW(i, u0, v0, uw, vh);
+      slotPitch[i] = 0;
+      if (i >= onPiles && i < onPiles + r.spill.max) {
+        /* ── 溢出：台面滿了，多出來的作品從台沿掉到地上，越多鋪得越遠（前方為主，鏡頭看得到）──
+           地上重疊處往上疊（粗網格計數），少數斜倚著台邊。 */
+        const k = i - onPiles;
+        const sp = r.spill;
+        const theta = (rnd() * 2 - 1) * sp.arc * (0.55 + 0.45 * rnd());
+        const reach = Math.min(1, Math.sqrt((k + 1) / sp.full)) * (0.55 + 0.45 * rnd());
+        const rr = sp.rIn + (sp.rOut - sp.rIn) * reach;
+        const x = sp.x + Math.sin(theta) * rr;
+        const z = sp.z + Math.cos(theta) * rr;
+        const key = `${Math.round(x / 0.55)}:${Math.round(z / 0.55)}`;
+        const stacked = floorCells.get(key) ?? 0;
+        floorCells.set(key, stacked + 1);
+        slotX[i] = x;
+        slotZ[i] = z;
+        slotY[i] = sp.y + CARD_T * (0.5 + stacked);
+        slotFloor[i] = slotY[i];
+        slotYaw[i] = rnd() * Math.PI * 2;
+        slotPitch[i] = rr < sp.rIn + 0.35 && rnd() < 0.35 ? 0.28 + rnd() * 0.3 : (rnd() - 0.5) * 0.1;
+        slotLevel[i] = 1000 + k;
+        slotPile[i] = spillPile;
+        tableY[i] = slotY[i];
+        spillFrom[i * 3] = sp.x + Math.sin(theta) * sp.edge;
+        spillFrom[i * 3 + 1] = sp.edgeY + 0.1;
+        spillFrom[i * 3 + 2] = sp.z + Math.cos(theta) * sp.edge;
+        continue;
+      }
+      /* 溢出名額用完之後的卡回到台上繼續長高（溢出是點睛，不是山洪）。 */
+      const { p, level } = entries[i < onPiles ? i : i - r.spill.max];
       const pile = r.piles[p];
       const fan = pile.fan ?? 0;
-      let x = pile.x + (rnd() - 0.5) * 0.036;
-      let z = pile.z + (rnd() - 0.5) * 0.036;
-      let yaw = pile.yaw + (rnd() - 0.5) * 0.09;
+      /* 亂堆而不是一疊雜誌：逐張錯位 + 轉角，邊緣露出底下每一張作品。 */
+      let x = pile.x + (rnd() - 0.5) * 0.2;
+      let z = pile.z + (rnd() - 0.5) * 0.2;
+      let yaw = pile.yaw + (rnd() - 0.5) * 0.9;
       if (level < fan) {
         /* 堆底攤成扇形：讓底下幾張作品也露臉。 */
         const side = level % 2 === 0 ? 1 : -1;
@@ -321,21 +366,11 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
       slotX[i] = x;
       slotZ[i] = z;
       slotY[i] = baseY + level * CARD_T + CARD_T / 2;
+      slotFloor[i] = baseY;
       slotYaw[i] = yaw;
       slotLevel[i] = level;
       slotPile[i] = p;
       tableY[i] = r.surfaceY + CARD_T * (0.5 + (i % 3));
-      rand[i] = rnd();
-      /* 圖集裁切窗：同一張圖在不同卡上取不同的窗 → 卡卡不同。 */
-      const img = perm[i % perm.length] % (ATLAS_GRID * ATLAS_GRID);
-      const col = img % ATLAS_GRID;
-      const row = Math.floor(img / ATLAS_GRID);
-      const firstRound = i < perm.length;
-      const ch = firstRound ? 0.9 + rnd() * 0.06 : 0.62 + rnd() * 0.3;
-      const cw = ch / (CARD_D / CARD_W);
-      const ux = 0.02 + rnd() * Math.max(0, 1 - cw - 0.04);
-      const uy = 0.02 + rnd() * Math.max(0, 1 - ch - 0.04);
-      uvRect.setXYZW(i, (col + ux) / ATLAS_GRID, 1 - (row + uy + ch) / ATLAS_GRID, cw / ATLAS_GRID, ch / ATLAS_GRID);
     }
     uvRect.needsUpdate = true;
   }
@@ -371,11 +406,17 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
     camera.aspect = aspect;
     camera.fov = rig.camera.fov;
     /* 窄畫面（手機竪屏）把機位沿視線往後拉，讓主角整堆入鏡。 */
-    const pull = aspect < 1.7 ? Math.pow(1.7 / aspect, 0.62) : 1;
+    const pull = aspect < 1.7 ? Math.pow(1.7 / aspect, 0.42) : 1;
     camTarget.copy(rig.camera.target);
     camBase.copy(rig.camera.pos).sub(camTarget).multiplyScalar(pull).add(camTarget);
-    const shift = Math.round(viewH * VIEW_SHIFT);
-    camera.setViewOffset(viewW, viewH, 0, shift, viewW, viewH);
+    /* 竪屏：價格玻璃層佔了卡面下半，卡堆再往上讓（不被價格層蓋住）。 */
+    const shift = Math.round(viewH * (aspect < 1 ? 0.26 : 0.05));
+    /* 寬屏構圖：卡堆再往左讓，票面（DOM 玻璃層）往右推後兩者不重疊（與 pricing-plan-carousel.css
+       的 .ppc-glass translateX 0.46 配對）。位移按卡寬算（--case-card-w 由環寫在舞台上）。
+       竪屏置中、卡堆上移讓出下半給票面。 */
+    const cardW = Number.parseFloat(getComputedStyle(canvas).getPropertyValue("--case-card-w")) || 520;
+    const shiftX = aspect > 1.3 ? Math.round(cardW * 0.42) : 0;
+    camera.setViewOffset(viewW, viewH, shiftX, shift, viewW, viewH);
     camera.updateProjectionMatrix();
   }
 
@@ -396,6 +437,7 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
       dropEnd = t;
       return;
     }
+    introStart = t;
     const stagger = Math.min(DROP_STAGGER_MAX, Math.max(DROP_STAGGER_MIN, DROP_SPAN_S / Math.max(1, count)));
     /* 由下往上落：先按層、同層按堆輪流 —— 每一堆都在同時長高。 */
     const order = Array.from({ length: count }, (_, i) => i).sort((a, b) => slotLevel[a] - slotLevel[b] || slotPile[a] - slotPile[b]);
@@ -406,7 +448,7 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
       dropRoll[i] = (rand[(i + 7) % CAP] - 0.5) * 0.9;
       landed[i] = 0;
     });
-    dropEnd = t + 0.08 + count * stagger + FALL_S + SETTLE_S;
+    dropEnd = t + 0.08 + count * stagger + FALL_S * SPILL_FALL + SETTLE_S;
   }
 
   function setCount(n: number, immediate: boolean) {
@@ -427,6 +469,8 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
     layoutSlots(next, WORLD_IDS.indexOf(id));
     resetDynamics();
     setCount(cardCountForCoins(coins), true);
+    stretchTarget = stretchFor(coins);
+    stretch = stretchTarget;
     fitCamera();
     startDrop();
     kick();
@@ -439,10 +483,24 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
     const gathering = t - lastSwipe > GATHER_AFTER_S;
     const radius = rig?.scatterRadius ?? 1;
 
+    if (Math.abs(stretchTarget - stretch) > 0.001) {
+      stretch += (stretchTarget - stretch) * Math.min(1, dt * 6);
+      busy = true;
+    }
+
     sway.x += (sway.tx - sway.x) * Math.min(1, dt * 4);
     sway.y += (sway.ty - sway.y) * Math.min(1, dt * 4);
     if (Math.abs(sway.tx - sway.x) + Math.abs(sway.ty - sway.y) > 0.0005) busy = true;
-    camera.position.set(camBase.x + sway.x * 0.14, camBase.y + sway.y * 0.07, camBase.z);
+    /* 額度越過卡數上限：鏡頭往卡堆推近（塔更大、前景卡蓋掉一部分視線 = 溢出鏡頭）。 */
+    const introK = reduced ? 1 : Math.min(1, (t - introStart) / INTRO_S);
+    if (introK < 1) busy = true;
+    const push = 1 - (1 - introK) * (1 - introK) * (1 - introK);
+    const dolly = Math.max(0.58, 1 - (stretch - 1) * 0.2) * (1 + 0.28 * (1 - push));
+    camera.position.set(
+      camTarget.x + (camBase.x - camTarget.x) * dolly + sway.x * 0.14,
+      camTarget.y + (camBase.y - camTarget.y) * dolly + sway.y * 0.07 + 0.6 * (1 - push),
+      camTarget.z + (camBase.z - camTarget.z) * dolly,
+    );
     camera.lookAt(camTarget);
 
     for (let i = 0; i < CAP; i += 1) {
@@ -554,21 +612,37 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
         cards.setMatrixAt(i, dummy.matrix);
         continue;
       }
-      if (s < FALL_S) {
-        const k = s / FALL_S;
-        dy = dropFrom[i] * (1 - k * k);
-        dYaw = dropYaw[i] * (1 - easeInOut(k)) * 0.6;
-        dRoll = dropRoll[i] * (1 - k);
-      } else if (s < FALL_S + SETTLE_S) {
-        const a = s - FALL_S;
+      const spilled = slotPile[i] === spillPile;
+      const fallS = spilled ? FALL_S * SPILL_FALL : FALL_S;
+      /* 溢出卡的滑落軌跡：從台沿（稍高）出發，先被擠出去、再拋物線掉到地上。 */
+      let sx = 0;
+      let sy = 0;
+      let sz = 0;
+      if (s < fallS) {
+        const k = s / fallS;
+        if (spilled) {
+          const e = 1 - (1 - k) * (1 - k);
+          sx = (spillFrom[i * 3] - slotX[i]) * (1 - e);
+          sz = (spillFrom[i * 3 + 2] - slotZ[i]) * (1 - e);
+          sy = (spillFrom[i * 3 + 1] - slotY[i]) * (1 - k * k) + 0.32 * Math.sin(Math.PI * Math.min(1, k * 1.4)) * (1 - k);
+          dYaw = dropYaw[i] * (1 - e) * 0.8;
+          dRoll = dropRoll[i] * 1.6 * (1 - k);
+        } else {
+          dy = dropFrom[i] * (1 - k * k);
+          dYaw = dropYaw[i] * (1 - easeInOut(k)) * 0.6;
+          dRoll = dropRoll[i] * (1 - k);
+        }
+      } else if (s < fallS + SETTLE_S) {
+        const a = s - fallS;
         if (!landed[i]) {
           landed[i] = 1;
           const loud = count > 60 ? 0.45 : 1;
-          if (slotLevel[i] === 0) sound?.knock(0.8 * loud);
+          if (spilled || slotLevel[i] === 0) sound?.knock((spilled ? 0.55 : 0.8) * loud);
           else if (slotLevel[i] === pileTopLevel[slotPile[i]]) sound?.chime(0.7 * loud);
           else sound?.tick(0.8 * loud);
         }
-        dy = 0.05 * dropFrom[i] * Math.exp(-7 * a) * Math.abs(Math.sin(12 * a));
+        const bounce = spilled ? 0.5 : dropFrom[i];
+        dy = 0.05 * bounce * Math.exp(-7 * a) * Math.abs(Math.sin(12 * a));
         dYaw = dropYaw[i] * 0.05 * Math.exp(-6 * a) * Math.cos(10 * a);
       }
 
@@ -589,14 +663,15 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
         }
       }
 
-      const baseY = slotY[i] + (tableY[i] - slotY[i]) * fallMix[i];
+      const stackY = slotFloor[i] + (slotY[i] - slotFloor[i]) * stretch;
+      const baseY = stackY + (tableY[i] - stackY) * fallMix[i];
       const flipLift = Math.abs(Math.sin(flip[i])) * CARD_W * 0.5;
       dummy.position.set(
-        slotX[i] + ox[i],
-        baseY + dy + hop[i] + flipLift + lift,
-        slotZ[i] + oz[i] + toward,
+        slotX[i] + ox[i] + sx,
+        baseY + dy + sy + hop[i] + flipLift + lift,
+        slotZ[i] + oz[i] + toward + sz,
       );
-      euler.set(0, slotYaw[i] + spin[i] + dYaw, flip[i] + dRoll + pickRoll);
+      euler.set(slotPitch[i] * (1 - Math.min(1, lift * 2)), slotYaw[i] + spin[i] + dYaw, flip[i] + dRoll + pickRoll);
       dummy.quaternion.setFromEuler(euler);
       const sc = p < 1 ? 0.35 + 0.65 * p : 1;
       dummy.scale.set(sc, p < 1 ? p : 1, sc);
@@ -629,9 +704,6 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
   function applyQuality(level: number) {
     quality = level;
     if (level >= 1) {
-      pixelRatio = 1;
-      renderer.setPixelRatio(pixelRatio);
-      renderer.setSize(viewW, viewH, false);
       renderer.shadowMap.enabled = false;
       scene.traverse((obj) => {
         const mesh = obj as THREE.Mesh;
@@ -641,10 +713,10 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
       });
     }
     if (level >= 2) {
-      pixelRatio = 0.8;
+      /* 解析度是最後一張牌、且只降到地板的 75%（< 1 就是「糊」，永遠不回去）。 */
+      pixelRatio = Math.max(1.25, basePixelRatio * 0.75);
       renderer.setPixelRatio(pixelRatio);
-      renderer.setSize(viewW, viewH, false);
-      cap = Math.min(CAP, 120);
+      cap = Math.min(CAP, 260);
       if (count > cap) setCount(cap, false);
     }
   }
@@ -670,7 +742,10 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
         const avg = frameAcc / frameN;
         frameAcc = 0;
         frameN = 0;
-        if (avg > 1 / 38 && quality < 2) applyQuality(quality + 1);
+        /* 先砍效果（陰影/解析度），真的卡（< 24fps）才砍量——量就是額度，砍到比梦虹還少 =
+           把「越大越失控」畫反。 */
+        if (quality === 0 && avg > 1 / 34) applyQuality(1);
+        else if (quality === 1 && avg > 1 / 24) applyQuality(2);
       }
     }
     if (busy) raf = requestAnimationFrame(frame);
@@ -681,6 +756,7 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
     if (raf || disposed || !active) return;
     raf = requestAnimationFrame(frame);
   }
+
 
   /** 其餘世界在閒時預建，切档硬剪接時不卡那一下（手機不預建，省記憶體）。 */
   function prebuildOthers() {
@@ -711,7 +787,11 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
     setCoinsLive(coins) {
       if (!rig) return;
       const n = Math.min(cap, cardCountForCoins(coins));
-      if (n === count) return;
+      stretchTarget = stretchFor(coins);
+      if (n === count) {
+        kick();
+        return;
+      }
       /* 新增的卡原地長出（不落），減少的卡原地縮掉；位置表不變，所以是「伸縮」不是「重排」。 */
       for (let i = count; i < n; i += 1) {
         dropStart[i] = -1e6;
@@ -826,10 +906,6 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
       raf = 0;
       if (atlasTimer) window.clearTimeout(atlasTimer);
       canvas.removeEventListener("webglcontextlost", onLost);
-      for (const img of images) {
-        img.onload = null;
-        img.src = "";
-      }
       for (const r of rigs.values()) {
         scene.remove(r.group);
         r.dispose();
@@ -839,9 +915,9 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
       cards.dispose();
       cardGeo.dispose();
       cardMat.dispose();
+      depthMat.dispose();
       atlas.dispose();
-      atlasCanvas.width = 0;
-      atlasCanvas.height = 0;
+      film.dispose();
       envTarget.dispose();
       pmrem.dispose();
       scene.environment = null;
