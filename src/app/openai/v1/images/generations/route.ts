@@ -16,7 +16,6 @@ import {
   openAIError,
 } from "@/lib/openai-compat/errors";
 import {
-  FUNCTION_MAX_DURATION_SECONDS,
   artifactToBase64,
   awaitImageTask,
   resolveGenerationOrigin,
@@ -29,7 +28,10 @@ import { resolveCompatibleImageModelId } from "@/lib/openai-compat/models";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
 
 export const runtime = "nodejs";
-export const maxDuration = FUNCTION_MAX_DURATION_SECONDS;
+// Next.js 只靜態解析字面量：段配置 export 引用識別符會讓整包 build 失敗
+// （`Unknown identifier ... at maxDuration`）。值須與 lib/openai-compat/generation.ts 的
+// FUNCTION_MAX_DURATION_SECONDS 保持一致。
+export const maxDuration = 300;
 // 与 /v1/images/generations、/api/generate-images 同区：提交一跳、轮询多跳，
 // 每跳 RTT 才是这一层的成本。
 export const preferredRegion = "sfo1";
