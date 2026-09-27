@@ -1,13 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { CheckCircle2, CircleAlert, Copy, KeyRound, Loader2, Plus, Trash2, X } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import type { PublicBizApiKey } from "@/lib/biz-api-keys";
+import { DEV_QUICKSTART_BALANCE_NOTE, DEV_QUICKSTART_BASE_URL, quickstartCurlExamples } from "@/lib/dev-quickstart";
 import { cn } from "@/lib/utils";
-
-const BIZ_BASE_URL = "https://eimu.dev/v1";
 
 interface Notice {
   tone: "ok" | "bad";
@@ -44,6 +43,11 @@ export function ApiKeysClient() {
   /** 新签发的明文密钥，只在这一次拿得到。 */
   const [issued, setIssued] = useState<{ key: string; label: string } | null>(null);
   const [copied, setCopied] = useState(false);
+  /** 剛複製過的 curl 片段（逐段反饋，兩段互不干擾）。 */
+  const [copiedCurl, setCopiedCurl] = useState<string | null>(null);
+
+  /** 建 key 成功即給可直接跑通的範例：model/size 由 catalog 推導（見 lib/dev-quickstart）。 */
+  const curlExamples = useMemo(() => (issued ? quickstartCurlExamples(issued.key) : []), [issued]);
 
   const authHeaders = useCallback((): Record<string, string> | null => {
     if (!token || !user) return null;
@@ -134,6 +138,16 @@ export function ApiKeysClient() {
       await navigator.clipboard.writeText(issued.key);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setNotice({ tone: "bad", text: "复制失败，请手动选中复制。" });
+    }
+  };
+
+  const copyCurl = async (curl: string) => {
+    try {
+      await navigator.clipboard.writeText(curl);
+      setCopiedCurl(curl);
+      setTimeout(() => setCopiedCurl((current) => (current === curl ? null : current)), 2000);
     } catch {
       setNotice({ tone: "bad", text: "复制失败，请手动选中复制。" });
     }
@@ -352,7 +366,7 @@ export function ApiKeysClient() {
       {/* 明文密钥只显示这一次 */}
       {issued && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="lg-sheet animate-lg-appear relative w-full max-w-lg overflow-hidden rounded-ios-3xl p-6">
+          <div className="lg-sheet animate-lg-appear relative w-full max-w-lg overflow-hidden rounded-ios-3xl p-6 sm:max-w-xl">
             <Specular />
             <header>
               <h2 className="text-ios-body font-semibold text-[rgba(0,0,0,0.82)]">
@@ -385,9 +399,57 @@ export function ApiKeysClient() {
             <div className="mt-4">
               <span className="text-ios-footnote font-semibold text-[rgba(0,0,0,0.58)]">Base URL</span>
               <code className="mt-1.5 block truncate rounded-ios-xl bg-[rgba(0,0,0,0.05)] px-4 py-3 font-mono text-ios-footnote text-[rgba(0,0,0,0.80)]">
-                {BIZ_BASE_URL}
+                {DEV_QUICKSTART_BASE_URL}
               </code>
             </div>
+
+            {curlExamples.length > 0 && (
+              <div className="mt-4">
+                <span className="text-ios-footnote font-semibold text-[rgba(0,0,0,0.58)]">复制即可调用</span>
+                <p className="mt-1 text-ios-caption1 leading-relaxed text-[rgba(0,0,0,0.46)]">
+                  下面的命令已代入你的密钥，粘到终端就能出一张图。
+                </p>
+                <div className="mt-2 space-y-3">
+                  {curlExamples.map((example) => (
+                    <div
+                      key={example.modelId}
+                      className="rounded-ios-xl bg-[rgba(0,0,0,0.04)] p-3"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
+                        <div className="min-w-0">
+                          <p className="truncate text-ios-footnote font-semibold text-[rgba(0,0,0,0.74)]">
+                            {example.title}
+                          </p>
+                          <p className="truncate text-ios-caption1 text-[rgba(0,0,0,0.46)]">{example.subtitle}</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => copyCurl(example.curl)}
+                          className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full bg-[#2d3142] px-3.5 py-2 text-ios-caption1 font-semibold text-white transition-colors hover:bg-[#272b39]"
+                        >
+                          {copiedCurl === example.curl ? (
+                            <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+                          ) : (
+                            <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+                          )}
+                          {copiedCurl === example.curl ? "已复制" : "复制"}
+                        </button>
+                      </div>
+                      <pre className="mt-2 overflow-x-auto rounded-ios-xl bg-[rgba(0,0,0,0.06)] px-3 py-2.5 font-mono text-ios-caption1 leading-relaxed text-[rgba(0,0,0,0.78)]">
+                        {example.curl}
+                      </pre>
+                    </div>
+                  ))}
+                </div>
+                <p className="mt-3 text-ios-caption1 leading-relaxed text-[rgba(0,0,0,0.52)]">
+                  {DEV_QUICKSTART_BALANCE_NOTE}{" "}
+                  <Link href="/pricing" className="text-[#007AFF] hover:underline">
+                    前往充值
+                  </Link>
+                  。
+                </p>
+              </div>
+            )}
 
             <footer className="mt-6 flex justify-end">
               <button
@@ -395,6 +457,7 @@ export function ApiKeysClient() {
                 onClick={() => {
                   setIssued(null);
                   setCopied(false);
+                  setCopiedCurl(null);
                 }}
                 className="cursor-pointer rounded-full bg-[#007AFF] px-6 py-2.5 text-ios-footnote font-semibold text-white shadow-[0_4px_16px_rgba(0,122,255,0.26)] transition-all duration-200 hover:-translate-y-[1px] hover:bg-[#0066DD]"
               >
