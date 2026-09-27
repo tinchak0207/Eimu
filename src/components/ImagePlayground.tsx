@@ -53,6 +53,13 @@ import {
   type PromoEntryDecision,
 } from "@/components/promo/promo-gate";
 import { getInitialSuggestions, type Suggestion } from "@/lib/suggestions";
+import { WelcomeGiftDialog } from "@/components/welcome/WelcomeGiftDialog";
+import { AGENT_EXAMPLE_PROMPTS } from "@/lib/agent-example-prompts";
+import { ackWelcomeGiftModalSeen } from "@/lib/auth-client";
+import {
+  markWelcomeGiftModalSeenLocally,
+  welcomeGiftModalSeenLocally,
+} from "@/lib/welcome-gift-modal";
 import type { ReferenceImage } from "@/lib/image-types";
 import { CanvasChatWorkstation } from "@/components/canvas-workstation/CanvasChatWorkstation";
 import { AgentTemplateCarousel } from "@/components/canvas-workstation/AgentTemplateCarousel";
@@ -136,8 +143,13 @@ export function ImagePlayground({ suggestions }: { suggestions: Suggestion[] }) 
   // 那是生圖忙碌態，不是登入態——拿它當水合判斷，等於對狀態不明的用戶插播。
   // 註：措辭避開「生＋成＋中」那三字連寫，ImageDisplay.test 以它在四檔的
   // 出現次數＝1 當契約，這裡多一次會讓它誤紅。
-  const { user, isLoggedIn, refresh, isLoading: authLoading } = useAuth();
+  const { user, token, isLoggedIn, refresh, isLoading: authLoading, welcomeGift, clearWelcomeGift } = useAuth();
   const { toast } = useToast();
+  // 新人禮首登彈窗的開啟態（每設備只彈一次的輔助閘門見 welcomeGiftModalSeenLocally）。
+  const [welcomeGiftOpen, setWelcomeGiftOpen] = useState(false);
+  // 彈窗主按鈕的「預填但不送出」通路：走 AgentChatSurface 既有的 prefillRequest
+  // （輸入框有字、光標在末尾、焦點在框上，人再按送出），不是新機制。
+  const [composerPrefill, setComposerPrefill] = useState<{ text: string; nonce: number } | null>(null);
   const initialSuggestions = useMemo(() => getInitialSuggestions(suggestions), [suggestions]);
   const [selectedModels, setSelectedModels] = useState(MODEL_CONFIGS.fast);
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>(() => defaultAspectRatio(MODEL_CONFIGS.fast.image_tinchak));
@@ -552,6 +564,44 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
   }, [authLoading, isLoggedIn, runPromoTrial]);
 
   /**
+   * 新人禮待展示 → 開彈窗。
+   * 閘門權威在服務端（welcome_gift_grant.modal_seen_at，經 /api/auth/me 的加法欄位）；
+   * 本機 localStorage 只擋「同一台設備已經看過」的重複彈，換設備時本機標記是空的，
+   * 仍由服務端決定彈不彈。未登入／還沒水合完都不彈——否則會對未登入的人插播
+   * 一條「已送你 5 币」。
+   */
+  useEffect(() => {
+    if (authLoading || !isLoggedIn || !user?.id) return;
+    if (!welcomeGift?.pending) return;
+    if (welcomeGiftModalSeenLocally(user.id)) return;
+    setWelcomeGiftOpen(true);
+  }, [authLoading, isLoggedIn, user?.id, welcomeGift]);
+
+  /**
+   * 展示過的回執＋本機關門。回執失敗照樣關窗（見 ackWelcomeGiftModalSeen 註：
+   * 沒寫上只會讓下次登入再彈一次，比把新人禮藏起來輕）。
+   */
+  const handleWelcomeGiftSeen = useCallback(() => {
+    const userId = user?.id;
+    if (userId) markWelcomeGiftModalSeenLocally(userId);
+    setWelcomeGiftOpen(false);
+    clearWelcomeGift();
+    if (token) void ackWelcomeGiftModalSeen(token);
+  }, [clearWelcomeGift, token, user?.id]);
+
+  /**
+   * 主按鈕「马上生成第一张」：關窗、切到 AI 助理、把**既有示例的第一條**預填進輸入框。
+   * 示例句不寫死——與聊天面板空態快捷 chips 共用 agent-example-prompts 這一真源。
+   */
+  const handleWelcomeGiftStart = useCallback(() => {
+    handleWelcomeGiftSeen();
+    setMode("agent");
+    setDisplayMode("agent");
+    const sample = AGENT_EXAMPLE_PROMPTS[0];
+    if (sample) setComposerPrefill({ text: sample, nonce: Date.now() });
+  }, [handleWelcomeGiftSeen]);
+
+  /**
    * 工作站的 applyCreatorResource 依赖 [onModelChange]，一旦这个 prop 每次
    * render 都换身份，<CreatorResourcePanel> 的 memo 就完全失效，
    * 32 张资源卡（含 32 个 next/image）会跟着生成期间的每一次 render 重渲染。
@@ -781,6 +831,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
                     switchSessionRef={switchSessionRef}
                     startNewSessionRef={startNewSessionRef}
                     agentInjection={agentTemplateInjection}
+                    prefillRequest={composerPrefill}
                     onUserMessage={() => setAgentTemplateDismissed(true)}
                     onSendBlockedByAuth={handleSendBlockedByAuth}
                   />
@@ -837,6 +888,18 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
           onDismiss={handlePromoDismiss}
           needsLogin={!isLoggedIn}
           onLoginDismiss={handlePromoLoginDismiss}
+        />
+      )}
+
+      {/* 新人禮首登彈窗（已發放、未展示才彈）。標題/正文/幣數全部來自服務端，
+          這裡不寫死任何數字；與宣傳片浮層同層級（z-[95] 的 portal）。 */}
+      {welcomeGiftOpen && welcomeGift && welcomeGift.title && welcomeGift.body && (
+        <WelcomeGiftDialog
+          open
+          title={welcomeGift.title}
+          body={welcomeGift.body}
+          onStart={handleWelcomeGiftStart}
+          onLater={handleWelcomeGiftSeen}
         />
       )}
 

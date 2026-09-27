@@ -92,6 +92,11 @@ interface PromptInputProps {
   agentInjection?: { text: string; nonce: number; directive?: string; echo?: boolean } | null;
   /** 用戶發出第一條消息時回調（上層收起右側模板庫）。 */
   onUserMessage?: () => void;
+  /**
+   * 「預填但不送出」通路（AgentChatSurface 的 prefillRequest）：輸入框有字、
+   * 光標在末尾、焦點在框上，人再按送出。新人禮首登彈窗的主按鈕走這條。
+   */
+  prefillRequest?: { text: string; nonce: number } | null;
   /** 一句話因未登入送不出去時上拋（上層留住，登入後補送）。 */
   onSendBlockedByAuth?: (text: string) => void;
   /**
@@ -197,6 +202,7 @@ export function PromptInput({
   switchSessionRef,
   startNewSessionRef,
   agentInjection,
+  prefillRequest,
   onUserMessage,
   onSendBlockedByAuth,
   fillAvailableHeight = false,
@@ -711,6 +717,7 @@ export function PromptInput({
                 {...(switchSessionRef ? { switchSessionRef } : {})}
                 {...(startNewSessionRef ? { startNewSessionRef } : {})}
                 {...(agentInjection ? { agentInjection } : {})}
+                {...(prefillRequest ? { prefillRequest } : {})}
                 {...(onUserMessage ? { onUserMessage } : {})}
                 {...(onSendBlockedByAuth ? { onSendBlockedByAuth } : {})}
                 currentModelId={modelId}

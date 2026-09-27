@@ -1,6 +1,7 @@
 // 控制面侧的新人礼端点。调用方：
 //   - Vercel 上 /api/auth/me（src/lib/welcome-gift-login.ts）：op=grant 发放；
 //     站内通知写完后 op=noticed 回执（占位表 noticed_at）
+//   - Vercel 上 POST /api/auth/me：首登弹窗展示后 op=modal_seen 回执（modal_seen_at）
 //   - 运维回溯（在控制面容器内签名后打本端点）：op=backfill，可带 dryRun
 //
 // 鉴权复用 biz-key-sync 的 HMAC 通道（signatureDomain "welcome-gift"），
@@ -64,11 +65,16 @@ export async function POST(req: NextRequest) {
 
     const userId = typeof body.userId === "number" ? body.userId : Number.NaN;
     const op = body.op ?? "grant";
-    if ((op !== "grant" && op !== "noticed") || !Number.isInteger(userId) || userId <= 0) {
+    if ((op !== "grant" && op !== "noticed" && op !== "modal_seen") || !Number.isInteger(userId) || userId <= 0) {
       return NextResponse.json({ ok: false, message: "缺少合法的 op 或 userId。" }, { status: 400 });
     }
     if (op === "noticed") {
       const updated = await createPostgresWelcomeGiftStore().markNoticed(userId);
+      return NextResponse.json({ ok: true, updated });
+    }
+    if (op === "modal_seen") {
+      // 首登弹窗已展示（additive：grant / noticed 语义一字不动）。
+      const updated = await createPostgresWelcomeGiftStore().markModalSeen(userId);
       return NextResponse.json({ ok: true, updated });
     }
     const result = await grantWelcomeGift(userId, productionWelcomeGiftDeps());

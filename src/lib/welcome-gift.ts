@@ -30,6 +30,12 @@
 // （welcome-gift-login.ts，复用 notification-store）：占位表 noticed_at 为空＝通知待送，
 // 送达后经同一通道 op=noticed 回执。这样登录时发放与运维回溯发放的用户都只收到一次通知，
 // 且本档不依赖 notification-store（控制面不必同步那一族文件）。
+//
+// 首登弹窗（2026-09-27，通知铃被收进「API 密钥」下拉后新用户看不到通知）：
+// 展示回执单独记 modal_seen_at（migration 026），闸门 = status='applied' AND
+// modal_seen_at IS NULL。**不得复用 noticed_at**——同一轮登录在发放当刻就会写通知并
+// 回执 noticed_at，拿它当闸门 = 弹窗永远不出现。站点经 op=modal_seen 回执，
+// 服务端状态即权威（换设备不重弹）。
 
 import { signBizKeySync } from "@/lib/biz-key-sync";
 import {
@@ -75,6 +81,23 @@ export function welcomeGiftNotice(
   };
 }
 
+/** 首登弹窗标题（固定文案，不含数字）。 */
+export const WELCOME_GIFT_MODAL_TITLE = "新人礼已到账";
+
+/**
+ * 首登弹窗文案（简体中文、直白、无 emoji）。币数与张数一律从上面的具名常量推導，
+ * 不写死数字——定价或张数调整时这里自动跟随。
+ */
+export function welcomeGiftModalCopy(
+  coins: number = WELCOME_GIFT_COINS,
+  images: number = WELCOME_GIFT_IMAGE_COUNT,
+): { title: string; body: string } {
+  return {
+    title: WELCOME_GIFT_MODAL_TITLE,
+    body: `已送你 ${coins} 币，够生成约 ${images} 张图`,
+  };
+}
+
 // ─────────────────────────────────────────── 核心
 
 export type WelcomeClaimStatus = "pending" | "applied" | "failed" | "unknown";
@@ -98,6 +121,12 @@ export interface WelcomeGiftResult {
   coins: number;
   /** 已发放但站内通知尚未送达（登录路径据此写通知并回执）。 */
   noticePending: boolean;
+  /**
+   * 首登弹窗待展示（status=applied 且 modal_seen_at 为空）。
+   * 与 noticePending 是两条独立回执：通知在发放当刻就送出并回执 noticed_at，
+   * 拿 noticed 当弹窗闸门会让弹窗永远不出现，所以单独一条。
+   */
+  modalPending: boolean;
   reason?: string;
 }
 
@@ -105,6 +134,16 @@ export interface WelcomeClaim {
   status: WelcomeClaimStatus;
   /** 站内通知是否已送达（noticed_at 非空）。 */
   noticed: boolean;
+  /** 首登弹窗是否已展示（modal_seen_at 非空）。 */
+  modalSeen: boolean;
+}
+
+/**
+ * 首登弹窗的展示闸门（纯函数，唯一权威）：只有「上游已加额（applied）、弹窗还没
+ * 展示过」才要弹。pending/failed/unknown ＝ 还没真发出去（免双发），不弹。
+ */
+export function welcomeGiftModalPending(claim: WelcomeClaim | null | undefined): boolean {
+  return claim?.status === "applied" && !claim.modalSeen;
 }
 
 export interface WelcomeGiftStore {
@@ -115,6 +154,8 @@ export interface WelcomeGiftStore {
   mark(userId: number, status: Exclude<WelcomeClaimStatus, "pending">, detail?: string): Promise<void>;
   /** 站内通知已送达的回执（只对 applied 生效；重复回执无副作用）。 */
   markNoticed(userId: number): Promise<boolean>;
+  /** 首登弹窗已展示的回执（只对 applied 生效；重复回执无副作用）。 */
+  markModalSeen(userId: number): Promise<boolean>;
   /** B 端计费账户（biz key 归属）——回溯时排除。 */
   listBizBillingUserIds(): Promise<number[]>;
 }
@@ -139,6 +180,7 @@ function result(
   amountQuota: number,
   reason?: string,
   noticePending = false,
+  modalPending = false,
 ): WelcomeGiftResult {
   return {
     status,
@@ -146,12 +188,15 @@ function result(
     amountQuota,
     coins: amountQuota / QUOTA_PER_COIN,
     noticePending,
+    modalPending,
     ...(reason ? { reason } : {}),
   };
 }
 
 function claimToResult(claim: WelcomeClaim, userId: number, amountQuota: number): WelcomeGiftResult | null {
-  if (claim.status === "applied") return result("already_granted", userId, amountQuota, undefined, !claim.noticed);
+  if (claim.status === "applied") {
+    return result("already_granted", userId, amountQuota, undefined, !claim.noticed, welcomeGiftModalPending(claim));
+  }
   if (claim.status === "pending" || claim.status === "unknown") {
     return result("in_flight", userId, amountQuota, `占位状态 ${claim.status}`);
   }
@@ -226,8 +271,9 @@ export async function grantWelcomeGift(userId: number, deps: WelcomeGiftDeps): P
     }
   }
 
-  // ④ 站内通知由登录路径送达（noticePending=true），见 welcome-gift-login.ts。
-  return result("granted", userId, amountQuota, undefined, true);
+  // ④ 站内通知由登录路径送达（noticePending=true），见 welcome-gift-login.ts；
+  //    首登弹窗同步进入「待展示」（modal_seen_at 为空，由站点回执 modal_seen）。
+  return result("granted", userId, amountQuota, undefined, true, true);
 }
 
 // ─────────────────────────────────────────── 回溯（既有用户）
@@ -295,7 +341,8 @@ let schemaReady: Promise<void> | null = null;
 
 async function ensureSchema(sql: GenerationSql): Promise<void> {
   if (!schemaReady) {
-    // 与 db/migrations/024_welcome_gift_grant.sql 同一 DDL（幂等，首用即建，免人工迁移）。
+    // 与 db/migrations/024_welcome_gift_grant.sql 同一 DDL（幂等，首用即建，免人工迁移）；
+    // modal_seen_at 走 026 的 ALTER（表可能已存在，故单列 IF NOT EXISTS 补列）。
     schemaReady = (async () => {
       await sql`
         CREATE TABLE IF NOT EXISTS welcome_gift_grant (
@@ -308,6 +355,10 @@ async function ensureSchema(sql: GenerationSql): Promise<void> {
           created_at      timestamptz NOT NULL DEFAULT now(),
           updated_at      timestamptz NOT NULL DEFAULT now()
         )
+      `;
+      // 与 db/migrations/026_welcome_gift_modal_seen.sql 同一条 DDL（幂等）。
+      await sql`
+        ALTER TABLE welcome_gift_grant ADD COLUMN IF NOT EXISTS modal_seen_at timestamptz
       `;
     })().catch((error) => {
       schemaReady = null;
@@ -324,11 +375,15 @@ export function createPostgresWelcomeGiftStore(sql: GenerationSql = getGeneratio
     async readClaim(userId) {
       await ensureSchema(sql);
       const rows = await sql<Row[]>`
-        SELECT status, noticed_at FROM welcome_gift_grant WHERE user_id = ${userId} LIMIT 1
+        SELECT status, noticed_at, modal_seen_at FROM welcome_gift_grant WHERE user_id = ${userId} LIMIT 1
       `;
       const status = rows[0]?.status;
       if (typeof status !== "string") return null;
-      return { status: status as WelcomeClaimStatus, noticed: rows[0]?.noticed_at != null };
+      return {
+        status: status as WelcomeClaimStatus,
+        noticed: rows[0]?.noticed_at != null,
+        modalSeen: rows[0]?.modal_seen_at != null,
+      };
     },
     async hasSucceededGeneration(userId) {
       const rows = await sql<Row[]>`
@@ -364,6 +419,15 @@ export function createPostgresWelcomeGiftStore(sql: GenerationSql = getGeneratio
       const rows = await sql<Row[]>`
         UPDATE welcome_gift_grant SET noticed_at = now(), updated_at = now()
         WHERE user_id = ${userId} AND status = 'applied' AND noticed_at IS NULL
+        RETURNING user_id
+      `;
+      return rows.length > 0;
+    },
+    async markModalSeen(userId) {
+      await ensureSchema(sql);
+      const rows = await sql<Row[]>`
+        UPDATE welcome_gift_grant SET modal_seen_at = now(), updated_at = now()
+        WHERE user_id = ${userId} AND status = 'applied' AND modal_seen_at IS NULL
         RETURNING user_id
       `;
       return rows.length > 0;
@@ -463,6 +527,7 @@ export async function grantWelcomeGiftViaRelay(
       Number.isFinite(amountQuota) && amountQuota > 0 ? amountQuota : WELCOME_GIFT_QUOTA,
       undefined,
       payload.noticePending === true,
+      payload.modalPending === true,
     );
   } catch (error) {
     console.error(`[welcome-gift] relay grant failed user=${userId}：${reasonOf(error)}`);
@@ -476,6 +541,22 @@ export async function ackWelcomeGiftNoticeViaRelay(userId: number, options: Rela
     return (await postRelay({ op: "noticed", userId }, options)) !== null;
   } catch (error) {
     console.error(`[welcome-gift] relay ack failed user=${userId}：${reasonOf(error)}`);
+    return false;
+  }
+}
+
+/**
+ * 首登弹窗已展示的回执（用户按下「马上生成第一张」或「稍后」时调用）。
+ *
+ * 这是弹窗「只展示一次」的服务端权威：modal_seen_at 一旦写上，换设备/换浏览器
+ * 再登录也不会重弹。回执失败只回 false（下次登录会再弹一次——宁可多弹一次，
+ * 也不把人家的新人礼藏起来）。
+ */
+export async function ackWelcomeGiftModalSeenViaRelay(userId: number, options: RelayOptions = {}): Promise<boolean> {
+  try {
+    return (await postRelay({ op: "modal_seen", userId }, options)) !== null;
+  } catch (error) {
+    console.error(`[welcome-gift] relay modal ack failed user=${userId}：${reasonOf(error)}`);
     return false;
   }
 }

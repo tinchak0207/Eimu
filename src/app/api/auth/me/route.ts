@@ -4,6 +4,15 @@ import { MOCK_MODE, mockGetSelf } from "@/lib/mock";
 import { getGatewayBaseUrl } from "@/lib/new-api-auth-server";
 import { lookupUserIdByTokenViaRelay } from "@/lib/newapi-session-token";
 import { ensureWelcomeGiftOnLogin } from "@/lib/welcome-gift-login";
+import {
+  WELCOME_GIFT_IMAGE_COUNT,
+  ackWelcomeGiftModalSeenViaRelay,
+  welcomeGiftModalCopy,
+  type WelcomeGiftResult,
+} from "@/lib/welcome-gift";
+import type { WelcomeGiftModal } from "@/lib/welcome-gift-modal";
+import { FIRST_TOUCH_COOKIE } from "@/lib/first-touch-attribution";
+import { recordFirstTouchCookieViaRelay } from "@/lib/user-attribution";
 
 export const preferredRegion = "sfo1";
 
@@ -37,6 +46,33 @@ const WELCOME_GIFT_BUDGET_MS = 4_000;
 const WELCOME_GIFT_RETRY_MS = 5 * 60_000;
 const WELCOME_GIFT_MEMO_MAX = 5_000;
 const welcomeGiftNextCheckAt = new Map<number, number>();
+// 新人禮首登彈窗的待展示狀態（每實例每用戶一份）。
+// 為什麼要單獨記：上面的「結案即不再問控面」memo 會讓後續請求拿不到 grant 結果，
+// 但彈窗狀態必須持續可讀——用戶可能先落在別的頁面、刷新後才回首頁，那時才該彈。
+// 回執（POST）後立刻刪掉，本實例不再拿舊狀態回答。
+const welcomeGiftModalMemo = new Map<number, WelcomeGiftModal | null>();
+
+/** 由 grant 結果推導彈窗內容（幣數/張數/文案皆來自 welcome-gift 的具名常量）。 */
+function welcomeGiftModalOf(result: WelcomeGiftResult): WelcomeGiftModal {
+  const copy = welcomeGiftModalCopy(result.coins, WELCOME_GIFT_IMAGE_COUNT);
+  return { pending: true, coins: result.coins, images: WELCOME_GIFT_IMAGE_COUNT, ...copy };
+}
+
+/** 記住本輪拿到的彈窗狀態；本輪沒拿到答案（null）時保留上一輪的記憶。 */
+function rememberWelcomeGiftModal(userId: number, result: WelcomeGiftResult | null): void {
+  if (!result) return;
+  if (welcomeGiftModalMemo.size >= WELCOME_GIFT_MEMO_MAX) welcomeGiftModalMemo.clear();
+  welcomeGiftModalMemo.set(userId, result.modalPending ? welcomeGiftModalOf(result) : null);
+}
+
+/**
+ * 把彈窗狀態 additive 掛到 new-api 既有回應上（既有欄位一字不動，只多一個 welcomeGift）。
+ * pending=false 也照掛：前端只認 pending===true，缺欄位與 false 同義，明寫出來才好回報。
+ */
+function attachWelcomeGiftModal(user: { id?: unknown }, userId: number): void {
+  (user as { welcomeGift?: WelcomeGiftModal }).welcomeGift =
+    welcomeGiftModalMemo.get(userId) ?? { pending: false };
+}
 
 async function applyWelcomeGift(payload: unknown): Promise<void> {
   try {
@@ -44,7 +80,10 @@ async function applyWelcomeGift(payload: unknown): Promise<void> {
     const userId = Number(user?.id);
     if (!user || !Number.isInteger(userId) || userId <= 0) return;
     const nextCheckAt = welcomeGiftNextCheckAt.get(userId);
-    if (nextCheckAt !== undefined && nextCheckAt > Date.now()) return;
+    if (nextCheckAt !== undefined && nextCheckAt > Date.now()) {
+      attachWelcomeGiftModal(user, userId);
+      return;
+    }
 
     let budgetTimer: ReturnType<typeof setTimeout> | undefined;
     const result = await Promise.race([
@@ -58,6 +97,8 @@ async function applyWelcomeGift(payload: unknown): Promise<void> {
       ((result?.status === "granted" || result?.status === "already_granted") && !result.noticePending);
     if (welcomeGiftNextCheckAt.size >= WELCOME_GIFT_MEMO_MAX) welcomeGiftNextCheckAt.clear();
     welcomeGiftNextCheckAt.set(userId, settled ? Number.POSITIVE_INFINITY : Date.now() + WELCOME_GIFT_RETRY_MS);
+    rememberWelcomeGiftModal(userId, result);
+    attachWelcomeGiftModal(user, userId);
 
     if (result?.status === "granted" && typeof user.quota === "number") {
       user.quota += result.amountQuota;
@@ -65,6 +106,46 @@ async function applyWelcomeGift(payload: unknown): Promise<void> {
   } catch (error) {
     console.error("[auth/me] welcome gift skipped", error instanceof Error ? error.message : String(error));
   }
+}
+
+// 首次觸達歸因補記（src/lib/user-attribution.ts → 控面 user-attribution）：
+// OAuth 回調已帶 email 落庫，這裡是**所有 provider 的兜底**（微信等沒有 callback 的路徑
+// 也在登入後打 /api/auth/me，同樣帶著瀏覽器的 eimu_first_touch cookie）。控面是首觸勝出的
+// 冪等 upsert，重複送無副作用。沒有 cookie（多數回訪）＝零網路成本直接跳過。
+// 每個實例每個用戶成功一次即永久記住；失敗 10 分鐘後再試，整段最多等 FIRST_TOUCH_BUDGET_MS。
+const FIRST_TOUCH_BUDGET_MS = 1_500;
+const FIRST_TOUCH_RETRY_MS = 10 * 60_000;
+const FIRST_TOUCH_MEMO_MAX = 5_000;
+const firstTouchNextAttemptAt = new Map<number, number>();
+
+async function applyFirstTouchAttribution(userId: number, rawCookie: string | null | undefined): Promise<void> {
+  if (!rawCookie) return;
+  const nextAttemptAt = firstTouchNextAttemptAt.get(userId);
+  if (nextAttemptAt !== undefined && nextAttemptAt > Date.now()) return;
+  let budgetTimer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const recorded = await Promise.race([
+      recordFirstTouchCookieViaRelay(userId, rawCookie, { timeoutMs: FIRST_TOUCH_BUDGET_MS }),
+      new Promise<boolean>((resolve) => {
+        budgetTimer = setTimeout(() => resolve(false), FIRST_TOUCH_BUDGET_MS);
+      }),
+    ]);
+    if (firstTouchNextAttemptAt.size >= FIRST_TOUCH_MEMO_MAX) firstTouchNextAttemptAt.clear();
+    firstTouchNextAttemptAt.set(userId, recorded ? Number.POSITIVE_INFINITY : Date.now() + FIRST_TOUCH_RETRY_MS);
+  } catch (error) {
+    console.error("[auth/me] first touch attribution skipped", error instanceof Error ? error.message : String(error));
+  } finally {
+    clearTimeout(budgetTimer);
+  }
+}
+
+/** 登入後的側車事實：新人禮（額度）與首次觸達歸因並行；兩者都永不 throw、都不擋登入。 */
+async function applyLoginSideFacts(payload: unknown, req: NextRequest): Promise<void> {
+  const userId = Number((payload as { data?: { id?: unknown } } | null)?.data?.id);
+  const attribution = Number.isInteger(userId) && userId > 0
+    ? applyFirstTouchAttribution(userId, req.cookies.get(FIRST_TOUCH_COOKIE)?.value)
+    : Promise.resolve();
+  await Promise.all([applyWelcomeGift(payload), attribution]);
 }
 
 export async function GET(req: NextRequest) {
@@ -120,7 +201,7 @@ export async function GET(req: NextRequest) {
         if (retry.ok) {
           const retryData = await retry.json().catch(() => null);
           if (retryData?.success) {
-            await applyWelcomeGift(retryData);
+            await applyLoginSideFacts(retryData, req);
             cacheVerifiedMe(cacheKey, retryData);
             return NextResponse.json(retryData);
           }
@@ -140,11 +221,66 @@ export async function GET(req: NextRequest) {
         { status: upstream.status === 401 ? 401 : 502 },
       );
     }
-    await applyWelcomeGift(data);
+    await applyLoginSideFacts(data, req);
     cacheVerifiedMe(cacheKey, data);
     return NextResponse.json(data);
   } catch (err) {
     console.error("[auth/me]", err);
+    return NextResponse.json({ success: false, message: "服务暂时不可用" }, { status: 503 });
+  }
+}
+
+/** 用憑證向上游問自己的 userId（與 GET 同一真源：new-api 對 Bearer 強制 New-Api-User 頭）。 */
+async function upstreamUserId(token: string, userIdHeader: string | null): Promise<number | null> {
+  const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+  if (userIdHeader) headers["New-Api-User"] = userIdHeader;
+  const upstream = await fetch(`${getGatewayBaseUrl()}/api/user/self`, {
+    headers,
+    cache: "no-store",
+    signal: AbortSignal.timeout(ME_UPSTREAM_TIMEOUT_MS),
+  });
+  const data = await upstream.json().catch(() => null) as { success?: boolean; data?: { id?: unknown } } | null;
+  const id = Number(upstream.ok && data?.success ? data.data?.id : Number.NaN);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+/**
+ * POST /api/auth/me —— 「我的會話態」回執（加法式：GET 的語義一行不動）。
+ *
+ * 目前只有一件事：新人禮首登彈窗已展示（控制面 welcome-gift op=modal_seen，寫
+ * welcome_gift_grant.modal_seen_at）。這是彈窗「只展示一次」的服務端權威——換設備、
+ * 換瀏覽器再登入也不會重彈；前端 localStorage 只是本設備的輔助閘門。
+ *
+ * 身份取上游 /api/user/self（與 GET 同一真源），拿不到再走控面穩定令牌反查。
+ * 永不 throw 到調用方：失敗只回 {success:false}，前端已本地記「看過」，不影響登入。
+ */
+export async function POST(req: NextRequest) {
+  const authHeader = req.headers.get("authorization");
+  if (!authHeader?.startsWith("Bearer ")) {
+    return NextResponse.json({ success: false, message: "未授权" }, { status: 401 });
+  }
+  if (MOCK_MODE) return NextResponse.json({ success: true, updated: false });
+
+  const token = authHeader.slice(7);
+  const body = await req.json().catch(() => null) as { op?: unknown } | null;
+  if (body?.op !== "welcome-gift-modal-seen") {
+    return NextResponse.json({ success: false, message: "未知操作" }, { status: 400 });
+  }
+
+  try {
+    const userIdHeader = req.headers.get("x-user-id");
+    const userId = (await upstreamUserId(token, userIdHeader).catch(() => null))
+      ?? (await lookupUserIdByTokenViaRelay(token).catch(() => null));
+    if (!userId) {
+      return NextResponse.json({ success: false, message: "无法确认用户身份" }, { status: 401 });
+    }
+    const updated = await ackWelcomeGiftModalSeenViaRelay(userId);
+    // 本實例立刻忘掉待展示狀態（跨實例由服務端 modal_seen_at 保證不再彈）。
+    welcomeGiftModalMemo.delete(userId);
+    welcomeGiftNextCheckAt.delete(userId);
+    return NextResponse.json({ success: true, updated });
+  } catch (error) {
+    console.error("[auth/me] welcome gift modal ack failed", error instanceof Error ? error.message : String(error));
     return NextResponse.json({ success: false, message: "服务暂时不可用" }, { status: 503 });
   }
 }

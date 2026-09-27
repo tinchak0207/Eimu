@@ -205,6 +205,13 @@ export interface AgentChatSurfaceProps {
    * 詳見 use-agent-chat 的 UseAgentChatOptions.onSendBlockedByAuth。
    */
   onSendBlockedByAuth?: (text: string) => void;
+  /**
+   * 外部「把這句話預填進輸入框」（新人禮首登彈窗的主按鈕）。只搬運不發送——
+   * 半句話直接送出去會立刻開一輪扣費生成（D-5），所以走與 D-24 藥丸同一條
+   * prefill 通路：輸入框有字、光標在末尾、焦點在框上，人再按送出。
+   * 只認 nonce 變化，輸入區吃掉後不重播（見下面的 effect）。
+   */
+  prefillRequest?: { text: string; nonce: number } | null;
 }
 
 export function AgentChatSurface({
@@ -223,6 +230,7 @@ export function AgentChatSurface({
   agentInjection,
   onUserMessage,
   onSendBlockedByAuth,
+  prefillRequest,
   onExit,
   headerExtra,
 }: AgentChatSurfaceProps) {
@@ -598,6 +606,16 @@ export function AgentChatSurface({
     setDraft("");
     setPrefill({ text, nonce: Date.now() });
   }, [draft]);
+
+  /**
+   * 外部預填（新人禮彈窗主按鈕）：與 D-24 藥丸同一條通路——只搬進輸入框，不發送。
+   * 依賴是物件參考，所以「同一句話再點一次」由父層換 nonce 觸發；輸入區吃掉後
+   * 會把 internal prefill 清空，而這裡的依賴沒變，不會重播（人在打字的東西不會被沖）。
+   */
+  useEffect(() => {
+    if (!prefillRequest) return;
+    setPrefill(prefillRequest);
+  }, [prefillRequest]);
 
   // 稳定的引用：输入区把它放在 effect 依赖里，每次渲染换新函数会白跑一轮。
   const clearPrefill = useCallback((): void => setPrefill(null), []);
