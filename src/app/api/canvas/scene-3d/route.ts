@@ -20,6 +20,13 @@
 // `src/lib/canvas/scene-3d-import.ts` 的長註釋）——宣告 100MB 只會讓 4.5–100MB 的檔
 // 在前端驗證通過、卻在到達本函式前被平台 413；LibTV 級的 100MB 導入需要瀏覽器直傳
 // 物件存儲的通道，站內現無，不以文案假裝能吃大檔。
+//
+// 2026-09-27 刀（桌面 Blender → 畫布回流）：本檔**不新增第二條上傳路徑**，
+// 只多認一種身分來源——站內鑄的一次性連接碼（`src/lib/canvas/scene-3d-link.ts`）：
+//   ① `Authorization: Bearer <连接码>`：純本機驗簽，命中即免 cookie；
+//   ② 表單欄位 `code`：Blender addon 走這條（它發 multipart，不帶 cookie）。
+// 三條身分來源的優先序：Bearer 連接碼 → cookie（`requireVerifiedUser`，**順序與語義
+// 逐字不變**）→ 表單碼。落地物件鍵仍用驗出來的那個 userId，與 cookie 路徑同一套。
 
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
@@ -32,6 +39,7 @@ import {
   scene3dExtensionOf,
   validateScene3dUpload,
 } from "@/lib/canvas/scene-3d-import";
+import { scene3dLinkBearer, verifyScene3dLinkCode } from "@/lib/canvas/scene-3d-link";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,10 +48,63 @@ function fail(status: number, message: string, code: string): NextResponse {
   return NextResponse.json({ success: false, error: message, code }, { status });
 }
 
-export async function POST(req: NextRequest) {
-  const caller = await requireVerifiedUser(req);
-  if (!caller.ok) return fail(caller.status, caller.message, "unauthorized");
+/** 連接碼驗簽失敗的人話（**不插值任何碼內容**——憑證明文不得回顯）。 */
+function linkFailure(reason: "invalid" | "expired" | "not_configured"): NextResponse {
+  if (reason === "not_configured") {
+    return fail(503, "服务器未配置连接码签名密钥，暂时无法验证连接码。", "link_not_configured");
+  }
+  if (reason === "expired") {
+    return fail(401, "连接码已过期，请在画布重新生成。", "link_expired");
+  }
+  return fail(401, "连接码无效，请在画布重新生成。", "invalid_code");
+}
 
+export async function POST(req: NextRequest) {
+  // (A) Bearer 連接碼：純本機 HMAC 驗簽，命中即免 cookie（Blender 也可走這條）。
+  //     未命中就**原樣落到下面的 cookie 路徑**——會話令牌不是本碼，驗簽必失敗，
+  //     因此既有瀏覽器客戶端（Bearer 會話令牌）的行為逐字不變。
+  const bearer = scene3dLinkBearer(req.headers);
+  if (bearer) {
+    const linked = verifyScene3dLinkCode(bearer);
+    if (linked.ok) return acceptUpload(req, linked.userId);
+    // 簽章有效但已過期＝確定是連接碼：直接回人話，不再拿它去打上游。
+    // `invalid`（＝不是本碼，例如瀏覽器的會話令牌）與 `not_configured`（缺 env）
+    // 都**不在此短路**，落到下面的 cookie 路徑：一缺 env 就整個導入通道掛掉，
+    // 或把會話令牌誤判成無效碼，都是不可接受的。真正帶碼卻驗不過的情形，
+    // 由 (C) 的表單碼分支回 401/503。
+    if (linked.reason === "expired") return linkFailure(linked.reason);
+  }
+
+  // (B) cookie 路徑：**順序與語義逐字不變**（requireVerifiedUser → 長度 → multipart）。
+  const caller = await requireVerifiedUser(req);
+  if (caller.ok) return acceptUpload(req, caller.user.id);
+
+  // (C) 表單欄位 `code`：只有 cookie 沒過才需要看 body（Blender addon 走這條）。
+  //     解析失敗或沒有 code 欄位時，回的是 cookie 路徑原本那個錯誤，不新增語義。
+  let form: FormData;
+  try {
+    form = await req.formData();
+  } catch {
+    return fail(caller.status, caller.message, "unauthorized");
+  }
+
+  const codeField = form.get("code");
+  if (typeof codeField !== "string" || !codeField.trim()) {
+    return fail(caller.status, caller.message, "unauthorized");
+  }
+
+  const linked = verifyScene3dLinkCode(codeField.trim());
+  if (!linked.ok) return linkFailure(linked.reason);
+  return acceptUpload(req, linked.userId, form);
+}
+
+/**
+ * 落地：長度預檢 → multipart → 檔案驗證 → 物件存儲 → put。
+ *
+ * `preParsedForm`：表單碼那條路已經為了讀 `code` 解析過 body，不重複解析
+ * （請求體只能讀一次）。cookie 路徑不傳，解析位置與改刀前一致。
+ */
+async function acceptUpload(req: NextRequest, userId: number, preParsedForm?: FormData): Promise<NextResponse> {
   // 先看宣告長度：能擋就別把整個檔讀進記憶體（multipart 尾部會超過宣告值時，下面 file.size 再擋一次）。
   const declared = Number(req.headers.get("content-length") ?? "0");
   if (Number.isFinite(declared) && declared > MAX_SCENE_3D_BYTES + 1024 * 1024) {
@@ -51,10 +112,14 @@ export async function POST(req: NextRequest) {
   }
 
   let form: FormData;
-  try {
-    form = await req.formData();
-  } catch {
-    return fail(400, "请求体不是有效的 multipart/form-data。", "invalid_request");
+  if (preParsedForm) {
+    form = preParsedForm;
+  } else {
+    try {
+      form = await req.formData();
+    } catch {
+      return fail(400, "请求体不是有效的 multipart/form-data。", "invalid_request");
+    }
   }
 
   const file = form.get("file");
@@ -76,7 +141,9 @@ export async function POST(req: NextRequest) {
   }
 
   const ext = scene3dExtensionOf(file.name);
-  const objectKey = `canvas/scene3d/${caller.user.id}/${randomUUID()}${ext}`;
+  // 落地鍵用「驗出來的那個 userId」——cookie 與連接碼兩條路都收斂到同一個變數，
+  // 沒有第二處 userId 來源（域隔離的另一面：碼只能以它自己那個用戶落地）。
+  const objectKey = `canvas/scene3d/${userId}/${randomUUID()}${ext}`;
   try {
     const blob = await put(objectKey, Buffer.from(await file.arrayBuffer()), {
       access: "public",

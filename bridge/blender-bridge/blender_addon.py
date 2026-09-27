@@ -23,6 +23,8 @@ import hashlib, hmac, base64
 import os.path as osp
 from collections import deque
 from urllib.parse import quote
+import urllib.error
+import urllib.request
 from contextlib import contextmanager, redirect_stdout, suppress
 from bpy.app.handlers import persistent
 
@@ -3684,6 +3686,181 @@ class BlenderMCPServer:
                 shutil.rmtree(temp_dir)
     #endregion
 
+#region Eimu canvas export (image-studio bridge patch ⑨ — additive, 2026-09-27)
+#
+# 目的：把 Blender 里做好的资产送回站点画布（对标 LibTV「导出到创作」那一格）。
+# 这条通道**不改** MCP server 生命周期（那部分一行未动，也是一个独立 operator）：
+# 用户从画布「连接 Blender」拿到一串一次性连接码（15 分钟有效），粘到这里，
+# 本 operator 把**当前场景**导出成 GLB 并上传到 `POST <站点>/api/canvas/scene-3d`，
+# 成功后画布上出现一张 3D 场景卡（服务端落地 + 建卡的语义全在站点侧）。
+#
+# 本段自律（对应站点侧的同名约束）：
+#   · 只用 stdlib（urllib）发 multipart —— 本文件虽已 import requests，但这条新通道
+#     不引入任何新依赖用法；
+#   · 连接码只活在内存与 scene 属性里，且该属性标了 SKIP_SAVE（见 register()），
+#     **不写进 .blend、不写进 log、不写进 report**（report 只出现站点返回的 url）；
+#   · 导出的临时 GLB 用完即删（finally，成功失败都删）。
+#
+# 服务端契约（与站点 <repo>/src/app/api/canvas/scene-3d/route.ts 同源，改一侧要一起改）：
+#   请求：multipart/form-data，字段 file=<GLB>、code=<连接码>
+#   成功：HTTP 200 {"success":true,"url":"https://…"}
+#   失败：HTTP 4xx/5xx {"success":false,"error":"<人话>","code":"<机器码>"}
+# 体积上限（4MB）由服务端裁决，本段**不复制**那个数字：超限时把服务端的人话原样显示，
+# 免得两处上限各自漂移。
+EIMU_DEFAULT_SERVER_URL = "https://eimu.dev"
+EIMU_EXPORT_TIMEOUT_SECONDS = 180
+EIMU_MULTIPART_BOUNDARY_PREFIX = "----eimu-blender-"
+
+
+def _eimu_normalize_server_url(raw):
+    """规整站点地址：去空白、缺 scheme 就补 https、去尾斜杠；空值回默认站点。"""
+    value = (raw or "").strip() or EIMU_DEFAULT_SERVER_URL
+    if not value.startswith(("http://", "https://")):
+        value = "https://" + value
+    return value.rstrip("/")
+
+
+def _eimu_ascii_file_name(file_name):
+    """multipart 的 filename 参数走 ASCII：非 ASCII 的 .blend 名回退成 `scene.glb`。
+
+    Content-Disposition 的 filename 是 ASCII 字段（RFC 7578 允许 filename* 扩展，
+    但服务端解析器是否认它是未知数，赌它会**整个请求失败**）。所以这里保证：无论
+    .blend 叫什么，送出去的 filename 一定是 ASCII 且以 .glb 结尾。
+    代价＝中文工程名在画布上会显示成 scene（纯外观，不影响上传与扩展名校验）。
+    """
+    stem = file_name[: file_name.rfind(".")] if "." in file_name else file_name
+    ascii_stem = stem.encode("ascii", "ignore").decode("ascii").strip()
+    return f"{ascii_stem or 'scene'}.glb"
+
+
+def _eimu_multipart(boundary, fields, file_field, file_name, file_bytes, content_type):
+    """手搓 multipart/form-data（stdlib only）：若干普通字段 + 一个二进制文件字段。"""
+    chunks = []
+    for name, value in fields:
+        chunks.append(f"--{boundary}\r\n".encode("utf-8"))
+        chunks.append(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8"))
+        chunks.append(f"{value}\r\n".encode("utf-8"))
+    chunks.append(f"--{boundary}\r\n".encode("utf-8"))
+    chunks.append(
+        f'Content-Disposition: form-data; name="{file_field}"; '
+        f'filename="{_eimu_ascii_file_name(file_name)}"\r\n'.encode("utf-8")
+    )
+    chunks.append(f"Content-Type: {content_type}\r\n\r\n".encode("utf-8"))
+    chunks.append(file_bytes)
+    chunks.append(f"\r\n--{boundary}--\r\n".encode("utf-8"))
+    return b"".join(chunks)
+
+
+def _eimu_parse_json(raw):
+    """尽力解析 JSON；不是 JSON（例如网关的 HTML 错误页）就回 None。"""
+    try:
+        return json.loads(raw)
+    except Exception:
+        return None
+
+
+def _eimu_human_error(payload, status):
+    """取服务端的**人话**；没有 error 字段时才退回状态码文案（不编造原因）。"""
+    if isinstance(payload, dict):
+        message = payload.get("error")
+        if isinstance(message, str) and message.strip():
+            return message.strip()
+    return f"服务器返回 HTTP {status}"
+
+
+def _eimu_post_glb(server_url, code, file_name, file_bytes):
+    """上传 GLB。回 (ok, message)：成功时 message=站点返回的 url，失败时 message=人话。"""
+    boundary = f"{EIMU_MULTIPART_BOUNDARY_PREFIX}{uuid.uuid4().hex}"
+    body = _eimu_multipart(
+        boundary,
+        fields=[("code", code)],
+        file_field="file",
+        file_name=file_name,
+        file_bytes=file_bytes,
+        content_type="model/gltf-binary",
+    )
+    request = urllib.request.Request(
+        f"{server_url}/api/canvas/scene-3d",
+        data=body,
+        method="POST",
+        headers={
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "User-Agent": "eimu-blender-addon/1.0",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=EIMU_EXPORT_TIMEOUT_SECONDS) as response:
+            raw = response.read().decode("utf-8", "replace")
+            status = getattr(response, "status", 200)
+    except urllib.error.HTTPError as error:
+        raw = ""
+        with suppress(Exception):
+            raw = error.read().decode("utf-8", "replace")
+        return False, _eimu_human_error(_eimu_parse_json(raw), error.code)
+    except urllib.error.URLError as error:
+        return False, f"无法连接站点（{server_url}）：{error.reason}"
+
+    payload = _eimu_parse_json(raw)
+    if isinstance(payload, dict):
+        url = payload.get("url")
+        if isinstance(url, str) and url:
+            return True, url
+    return False, _eimu_human_error(payload, status)
+
+
+class BLENDERMCP_OT_ExportToEimu(bpy.types.Operator):
+    bl_idname = "blendermcp.export_to_eimu"
+    bl_label = "导出当前场景到 Eimu"
+    bl_description = "把当前场景导出为 GLB 并上传到 Eimu 画布（需要站点生成的连接码）"
+
+    def execute(self, context):
+        scene = context.scene
+        code = (scene.blendermcp_eimu_link_code or "").strip()
+        if not code:
+            self.report({'ERROR'}, "请先在 Eimu 画布点「连接 Blender」生成连接码，再粘贴到这里。")
+            return {'CANCELLED'}
+
+        # glTF 导出器是 Blender 自带 addon（io_scene_gltf2），默认启用；被用户关掉时
+        # bpy.ops.export_scene.gltf 会直接 AttributeError —— 这里先判再调，给人话。
+        if not hasattr(bpy.ops.export_scene, "gltf"):
+            self.report({'ERROR'}, "当前 Blender 未启用 glTF 导出器（io_scene_gltf2），无法导出 GLB。")
+            return {'CANCELLED'}
+
+        server_url = _eimu_normalize_server_url(scene.blendermcp_eimu_server_url)
+
+        tmp_path = None
+        file_bytes = None
+        try:
+            fd, tmp_path = tempfile.mkstemp(prefix="eimu-export-", suffix=".glb")
+            os.close(fd)
+            # 导出**当前场景**全部可见内容（不传 use_selection：默认整场导出）。
+            bpy.ops.export_scene.gltf(filepath=tmp_path, export_format='GLB')
+            with open(tmp_path, "rb") as handle:
+                file_bytes = handle.read()
+        except Exception as error:
+            self.report({'ERROR'}, f"导出 GLB 失败：{error}")
+            return {'CANCELLED'}
+        finally:
+            # 临时文件只服务于本次上传：读完字节立刻删（成功/失败都删）。
+            if tmp_path and os.path.exists(tmp_path):
+                with suppress(Exception):
+                    os.remove(tmp_path)
+
+        if not file_bytes:
+            self.report({'ERROR'}, "导出结果为空，请确认场景里有可导出的对象。")
+            return {'CANCELLED'}
+
+        blend_stem = os.path.splitext(os.path.basename(bpy.data.filepath))[0] or "scene"
+        ok, message = _eimu_post_glb(server_url, code, f"{blend_stem}.glb", file_bytes)
+        if not ok:
+            self.report({'ERROR'}, message)
+            return {'CANCELLED'}
+
+        self.report({'INFO'}, f"已上传到 Eimu：{message}")
+        return {'FINISHED'}
+
+#endregion
+
 # Blender Addon Preferences
 class BLENDERMCP_AddonPreferences(bpy.types.AddonPreferences):
     bl_idname = __name__
@@ -3867,6 +4044,16 @@ class BLENDERMCP_PT_Panel(bpy.types.Panel):
                 col.prop(scene, "blendermcp_hunyuan3d_num_inference_steps", text="Inference Steps")
                 col.prop(scene, "blendermcp_hunyuan3d_guidance_scale", text="Guidance Scale")
                 col.prop(scene, "blendermcp_hunyuan3d_texture", text="Generate Texture")
+
+        # Eimu 画布导出（桌面 Blender → 站点画布的回流通道）
+        layout.separator()
+        layout.label(text="Eimu 导出", icon='EXPORT')
+        eimu_box = layout.box()
+        eimu_col = eimu_box.column(align=True)
+        eimu_col.prop(scene, "blendermcp_eimu_server_url", text="服务器")
+        eimu_col.prop(scene, "blendermcp_eimu_link_code", text="连接码")
+        eimu_col.operator("blendermcp.export_to_eimu", text="导出当前场景到 Eimu", icon='EXPORT')
+        eimu_box.label(text="连接码在画布「连接 Blender」里生成，15 分钟内有效。", icon='INFO')
 
         # Feedback section
         layout.separator()
@@ -4092,6 +4279,22 @@ def register():
         default=""
     )
 
+    bpy.types.Scene.blendermcp_eimu_server_url = bpy.props.StringProperty(
+        name="Eimu Server URL",
+        description="Eimu site address used by \"Export current scene to Eimu\"",
+        default=EIMU_DEFAULT_SERVER_URL
+    )
+
+    # SKIP_SAVE: the link code is a **credential**. It must not be serialized into
+    # the .blend file — saving/sharing a .blend must never hand out upload rights
+    # for the user's own account. It lives in memory for this Blender session only.
+    bpy.types.Scene.blendermcp_eimu_link_code = bpy.props.StringProperty(
+        name="Eimu Link Code",
+        description="One-shot link code from the canvas \"连接 Blender\" panel (valid 15 minutes, never saved to .blend)",
+        default="",
+        options={'SKIP_SAVE'}
+    )
+
     # Register preferences class
     bpy.utils.register_class(BLENDERMCP_AddonPreferences)
 
@@ -4100,6 +4303,7 @@ def register():
     bpy.utils.register_class(BLENDERMCP_OT_StartServer)
     bpy.utils.register_class(BLENDERMCP_OT_StopServer)
     bpy.utils.register_class(BLENDERMCP_OT_OpenTerms)
+    bpy.utils.register_class(BLENDERMCP_OT_ExportToEimu)
 
     # Auto-start the server so the MCP client can connect without manual UI interaction
     scene = getattr(bpy.context, 'scene', None)
@@ -4134,6 +4338,7 @@ def unregister():
     bpy.utils.unregister_class(BLENDERMCP_OT_StartServer)
     bpy.utils.unregister_class(BLENDERMCP_OT_StopServer)
     bpy.utils.unregister_class(BLENDERMCP_OT_OpenTerms)
+    bpy.utils.unregister_class(BLENDERMCP_OT_ExportToEimu)
     bpy.utils.unregister_class(BLENDERMCP_AddonPreferences)
 
     del bpy.types.Scene.blendermcp_port
@@ -4147,6 +4352,8 @@ def unregister():
     del bpy.types.Scene.blendermcp_sketchfab_api_key
     del bpy.types.Scene.blendermcp_use_polypizza
     del bpy.types.Scene.blendermcp_polypizza_api_key
+    del bpy.types.Scene.blendermcp_eimu_server_url
+    del bpy.types.Scene.blendermcp_eimu_link_code
     del bpy.types.Scene.blendermcp_use_hunyuan3d
     del bpy.types.Scene.blendermcp_hunyuan3d_mode
     del bpy.types.Scene.blendermcp_hunyuan3d_secret_id
