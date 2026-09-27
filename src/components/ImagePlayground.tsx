@@ -39,7 +39,7 @@ import { cn } from "@/lib/utils";
 import { isStandalonePwa, createHandoffLogin } from "@/lib/github-login";
 import { PwaHandoffPanel } from "@/components/PwaHandoffPanel";
 import { PromoIntroOverlay } from "@/components/promo/PromoIntroOverlay";
-import { PROMO_SEEN_KEY, PROMO_TRIAL_PROMPT, shouldPlayPromo } from "@/components/promo/promo-gate";
+import { PROMO_SEEN_KEY, PROMO_TRIAL_PROMPT, isForcedPreview, shouldPlayPromo } from "@/components/promo/promo-gate";
 import { getInitialSuggestions, type Suggestion } from "@/lib/suggestions";
 import type { ReferenceImage } from "@/lib/image-types";
 import { CanvasChatWorkstation } from "@/components/canvas-workstation/CanvasChatWorkstation";
@@ -396,12 +396,17 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
    * 浮層收尾。trial＝「开始试玩」：把片中那句話預填進輸入框。
    * 刻意走 agentComposerSeed（只預填、不送出）而不是 agentInjection（直送）——
    * 送出去就是一次真扣費的生成，那一按必須由人按（同 D-5 / D-24 的語義）。
+   *
+   * 強制預覽（?promo=1）不寫「已看過」：驗收看過一次不等於這個瀏覽器已經
+   * 消耗掉真正的首次進站體驗。
    */
   const finishPromoIntro = useCallback((action: "trial" | "dismiss") => {
-    try {
-      window.localStorage.setItem(PROMO_SEEN_KEY, "1");
-    } catch {
-      // 存不了就算了：不擋這次的動作，最壞情況是下次再播一遍。
+    if (!isForcedPreview(window.location.search)) {
+      try {
+        window.localStorage.setItem(PROMO_SEEN_KEY, "1");
+      } catch {
+        // 存不了就算了：不擋這次的動作，最壞情況是下次再播一遍。
+      }
     }
     setPromoOpen(false);
     if (action !== "trial") return;

@@ -43,6 +43,11 @@ test("深鏈交接讓路：別頁交過來的一句話 / 別人分享的一段�
   assert.equal(isHandoffLink("?utm_source=bilibili"), false);
 });
 
+test("?promo=1 是驗收用的強制預覽：穿過全部守衛，但深鏈以外的正常進站不受影響", () => {
+  assert.equal(shouldPlayPromo({ ...coldVisitor, isLoading: true, isLoggedIn: true, seen: true, search: "?promo=1" }), true);
+  assert.equal(shouldPlayPromo({ ...coldVisitor, isLoggedIn: true, search: "?promo=0" }), false);
+});
+
 test("儲存鍵與試玩那句話是穩定的對外契約", () => {
   // 鍵改了＝所有看過的訪客再被插播一次；這句話改了＝試玩預填對不上片中的原始許願。
   assert.equal(PROMO_SEEN_KEY, "eimu-promo-seen-v1");

@@ -41,7 +41,19 @@ export function isHandoffLink(search: string): boolean {
   return params.has("session") || params.has("q");
 }
 
+/**
+ * 預覽開關：`?promo=1` 無視全部守衛播一次。
+ *
+ * 為什麼需要它：本地 LOCAL_TEST_MODE 一律算已登入、看過的人也不再播，
+ * 驗收的人就沒有一鍵看到成品的路徑。這條只服務驗收——不寫入「已看過」，
+ * 所以預覽不會把真正的首次進站體驗吃掉。
+ */
+export function isForcedPreview(search: string): boolean {
+  return new URLSearchParams(search).get("promo") === "1";
+}
+
 export function shouldPlayPromo(input: PromoGateInput): boolean {
+  if (isForcedPreview(input.search)) return true;
   if (input.isLoading) return false;
   if (input.isLoggedIn) return false;
   if (input.seen) return false;
