@@ -1,13 +1,15 @@
 "use client";
 
 import { memo, useCallback, useMemo, useState } from "react";
-import { AlertTriangle, Bot, Boxes, Check, Coins, CopyPlus, Download, FileQuestion, GitBranch, Loader2, Play, RotateCcw, SlidersHorizontal, Star, Trash2, Workflow } from "lucide-react";
+import { AlertTriangle, Bot, Boxes, Check, Coins, CopyPlus, Download, FileQuestion, GitBranch, Loader2, Play, RotateCcw, Share2, SlidersHorizontal, Star, Trash2, Workflow } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ParticleSeaWaiting } from "@/components/ParticleSeaWaiting";
+import { ShareDialog } from "@/components/history/ShareDialog";
 import { formatCoins, formatModelLabel, formatRelativeTime, inferEntryKind, primaryModelId } from "@/lib/history-types";
 import { canHistoryEntryRerun } from "@/lib/history-rerun";
 import { assetPackPayloadFromHistoryEntry } from "@/lib/history-card-anchor";
 import { workflowDagThumbnailUrl } from "@/lib/history-workflow-view";
+import { firstShareableIndex } from "@/lib/share-remix";
 import type { HistoryEntry } from "@/lib/history-types";
 
 export interface HistoryCardProps {
@@ -106,6 +108,10 @@ function HistoryCardComponent({
   const [assetSaving, setAssetSaving] = useState(false);
   /** 下载要等整图 fetch 成 blob，期间下载钮转圈防重复点击。 */
   const [downloadBusy, setDownloadBusy] = useState(false);
+  /** 「分享」对话框：打开＝就地建/取回公开链接（默认不公开，只有点过才有链接）。 */
+  const [shareOpen, setShareOpen] = useState(false);
+  /** 卡片里有自己的成品时的索引（视频/无图回 -1）：分享入口只对它出现。 */
+  const shareableIndex = useMemo(() => firstShareableIndex(entry), [entry]);
 
   const handleDownload = useCallback(async () => {
     if (downloadBusy) return;
@@ -360,11 +366,19 @@ function HistoryCardComponent({
             <GitBranch className="h-3.5 w-3.5" />
           </CardAction>
         )}
+        {/* 分享：有自己的成品才出现（视频/无图不挂）。默认不公开——点开对话框
+            才建立记录，撤销即删记录。 */}
+        {shareableIndex >= 0 && (
+          <CardAction label="分享" onClick={() => setShareOpen(true)}>
+            <Share2 className="h-3.5 w-3.5" />
+          </CardAction>
+        )}
         <CardAction label="删除" tone="danger" onClick={() => onDelete(entry.id)}>
           <Trash2 className="h-3.5 w-3.5" />
         </CardAction>
       </div>
       )}
+      {shareOpen && <ShareDialog entry={entry} onClose={() => setShareOpen(false)} />}
     </article>
   );
 }
