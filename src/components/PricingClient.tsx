@@ -159,6 +159,30 @@ export function PricingClient() {
     })();
   }, [token, refresh, toast]);
 
+  // 支付回跳带 ?mapay=credited：这笔单已由服务端直接入帐（notify／回跳直达加额，
+  // 见 src/lib/mapay-credit.ts），**不触发兑换**，只提示到账并刷新余额；
+  // 随后从 URL 拿掉参数，刷新不会重复提示。
+  const mapayNoticeTried = useRef(false);
+  useEffect(() => {
+    if (mapayNoticeTried.current) return;
+    const status = new URLSearchParams(window.location.search).get("mapay");
+    if (!status) return;
+    mapayNoticeTried.current = true;
+    const notice: Record<string, { title: string; description?: string }> = {
+      credited: { title: "支付成功，已到账", description: "金币已加到你的账户" },
+      pending: { title: "支付处理中", description: "到账后余额会自动更新，稍后刷新即可" },
+      invalid: { title: "支付结果校验失败", description: "如已扣款，请联系客服核对" },
+      mismatch: { title: "支付金额校验失败", description: "如已扣款，请联系客服核对" },
+      cdk_failed: { title: "兑换码生成失败", description: "如已扣款，请联系客服核对" },
+    };
+    const text = notice[status];
+    if (text) toast(text);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("mapay");
+    window.history.replaceState(null, "", url.toString());
+    if (status === "credited") void refresh();
+  }, [refresh, toast]);
+
   const handleMapayBuy = (planId: string, type: MapayPaymentType) => {
     window.open(`/api/payments/mapay/checkout?plan=${encodeURIComponent(planId)}&type=${encodeURIComponent(type)}`, "_blank");
   };

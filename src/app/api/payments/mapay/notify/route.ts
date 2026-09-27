@@ -8,6 +8,8 @@ import {
   type MapayFields,
 } from "@/lib/mapay";
 import { fulfillMapayRedemption } from "@/lib/mapay-redemption";
+import { creditMapayOrderViaRelay, mapayDeliveryFor } from "@/lib/mapay-credit";
+import { resolveMapayOrderBinding } from "@/lib/mapay-order-param";
 
 export const runtime = "nodejs";
 
@@ -53,9 +55,13 @@ async function handleNotify(req: NextRequest) {
       return response("success");
     }
 
+    // param 有兩種：已登入下單的三段自簽值（planId.userId.hmac8，可直達入帳），
+    // 以及未登入的舊格式（只有 planId，只能發兌換碼）。驗簽失敗／舊格式＝完全走舊流程。
+    const bound = resolveMapayOrderBinding(params.param);
+
     // 自定义档（custom:<coins>）与静态档共用一个解析器：价格一律服务端重算，
     // 回调里的 money 只用于比对，客户端传价不参与任何计价。
-    const plan = resolvePricingPlan(params.param);
+    const plan = resolvePricingPlan(bound?.planId ?? params.param);
     if (!plan || !mapayMoneyAcceptable(params.money, plan.price)) {
       console.warn("[mapay notify] rejected", {
         reason: "plan_or_money",
@@ -64,6 +70,45 @@ async function handleNotify(req: NextRequest) {
         param: params.param,
       });
       return response("fail", 400);
+    }
+
+    // ① 已綁用戶：直接加額（冪等鍵＝out_trade_no），成功就不再發兌換碼。
+    if (bound) {
+      const outcome = await creditMapayOrderViaRelay({
+        orderId: params.out_trade_no,
+        userId: bound.userId,
+        planId: plan.id,
+      });
+      const channel = mapayDeliveryFor(outcome);
+
+      if (channel === "direct") {
+        console.info("[mapay notify]", {
+          out_trade_no: params.out_trade_no,
+          trade_no: params.trade_no,
+          money: params.money,
+          user_id: bound.userId,
+          credit: outcome,
+        });
+        return response("success");
+      }
+
+      if (channel === "hold") {
+        // 已占位但結果未定（pending/unknown）：上游調額不冪等，再發一張兌換碼
+        // 可能疊成雙份。回 success 讓網關停止重投，留 warn 交人工核對（mapay_credit 表）。
+        console.warn("[mapay notify] credit in flight, no second delivery channel", {
+          out_trade_no: params.out_trade_no,
+          user_id: bound.userId,
+        });
+        return response("success");
+      }
+
+      // redemption＝上游明確沒動／通道或網路不可用 → 退回舊流程（生成兌換碼），
+      // 保證錢一定能落地（寧可讓用戶手動兌一次，也不能付了沒額度）。
+      console.warn("[mapay notify] direct credit unavailable, falling back to redemption", {
+        out_trade_no: params.out_trade_no,
+        user_id: bound.userId,
+        credit: outcome,
+      });
     }
 
     const redemption = await fulfillMapayRedemption({
