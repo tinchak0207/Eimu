@@ -55,16 +55,29 @@ import { generationTaskResponse } from "@/lib/generation-core/task-response";
 // 參考圖 helper（resolveEditReference 及相依的 mimeFromUrl/extensionFor/EditInputError）
 // 2026-09-25 整段搬到 lib，generations 路由共用同一份；本路由行為逐位元不變。
 import { EditInputError, resolveEditReference } from "@/lib/biz-image-references";
+import { withApiRejectionTelemetry, type RejectionContext } from "@/lib/api-rejection";
 import type { GenerationReference } from "@/lib/generation-core/types";
 import type { BizApiKey } from "@/lib/biz-api-keys";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
+/** 拒絕遙測用的路徑。寫死字面量：分組要穩定，不被 rewrite/代理改寫影響。 */
+const REJECTION_PATH = "/v1/images/edits";
+
 export async function POST(req: NextRequest) {
+  const rejection: RejectionContext = {
+    rawKey: readBearerToken(req.headers.get("authorization")),
+    userId: null,
+    model: null,
+  };
+  return withApiRejectionTelemetry(REJECTION_PATH, rejection, () => handleEdit(req, rejection));
+}
+
+async function handleEdit(req: NextRequest, rejection: RejectionContext): Promise<Response> {
   const traceId = getOrCreateTraceId(req);
 
-  const auth = await authenticateBizApiKey(readBearerToken(req.headers.get("authorization")));
+  const auth = await authenticateBizApiKey(rejection.rawKey);
   if (!auth.ok) {
     return jsonWithTrace(
       pixaiAuthError(auth.status, auth.message, auth.code, traceId),
@@ -73,6 +86,7 @@ export async function POST(req: NextRequest) {
       auth.retryAfterSeconds ? { "Retry-After": String(auth.retryAfterSeconds) } : undefined,
     );
   }
+  rejection.userId = auth.key.userId;
 
   // 認證成功後的所有回應（成功 + 錯誤）都帶限流預測頭；401/403/429 不走這裡。
   const respond = (data: unknown, status: number, headers?: Record<string, string>) =>
@@ -84,6 +98,8 @@ export async function POST(req: NextRequest) {
   } catch {
     return respond(pixaiRequestError("Invalid JSON body.", "invalid_json", traceId), 400);
   }
+  // 只記客戶請求的模型名（未歸一）：拒絕遙測裡它只是分組線索。
+  rejection.model = typeof body.model === "string" && body.model.trim() ? body.model.trim() : null;
 
   const image = typeof body.image === "string" ? body.image.trim() : "";
   const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
