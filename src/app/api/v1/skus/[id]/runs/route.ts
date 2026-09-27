@@ -39,7 +39,7 @@ type OpenAIErrorType =
   | "authentication_error"
   | "permission_error"
   | "rate_limit_error"
-  | "insufficient_quota"
+  | "insufficient_balance"
   | "api_error";
 
 function errorResponse(

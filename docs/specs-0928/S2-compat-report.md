@@ -55,25 +55,32 @@ POST 時若 `async !== true` 或客戶端標頭命中，內部提交任務並在
 - 免費可複現的自我核對：`curl -s https://eimu.dev/v1/models -H "Authorization: Bearer $KEY"`（唯讀），
   確認 model id 與 `x_coins_per_image`。
 
-## 四、本輪未落地項（衝突，待裁決）
+## 四、402 統一（已落地，暴君 2026-09-28 裁決鬆綁契約鎖）
 
-`docs/specs-0928/S2-dev-activation.md` 第 2 項要求把 `/v1/*` 餘額不足出口統一為：
+`/v1/*` 所有餘額不足出口統一為：
 
 ```json
 {"error":{"message":"余额不足，本次未扣费。充值：https://eimu.dev/pricing","type":"insufficient_balance","code":"insufficient_balance"}}
 ```
 
-**與既有契約鎖硬衝突，未動任何代碼**（依 spec「不許破壞，衝突時停下回報」）：
+單一真源＝`src/lib/generation-core/quota-precheck.ts` 的 `INSUFFICIENT_BALANCE_ERROR`：控制面閘門（拒單）
+與 legacy reserve 餘額不足分支共用同一份 status/type/code/message，路由原樣透傳（`errorResponse(gate.*)` 不動）。
+`param: null` 與 `trace_id` 為既有 OpenAI 信封欄位（`鐵律①` 鎖定），統一的是 message/type/code 三欄。
 
-1. `src/app/api/v1/contract-lock.test.ts:644-649` 要求 `generations/route.ts` 源碼出現 `errorResponse(402,` 且
-   `insufficient_quota` 字面量 ≥2 次（現況 3 次：型別聯集 + type + code）。
-2. `contract-lock.test.ts:678-695` 要求 `quota-precheck.ts` 源碼存在 `type: "insufficient_quota" | "api_error"`、
-   `code: "insufficient_quota" | "control_plane_unavailable"` 與文案 `余额不足，请先充值。` 逐字不差。
-3. `contract-lock.test.ts:315-328,329-364` 要求 openapi 的錯誤 `type` 六枚舉含 `insufficient_quota`、穩定錯誤碼
-   清單含 `insufficient_quota`（「對外承諾不得縮水」）。
-4. `src/lib/generation-core/quota-precheck.test.ts:245,315,454` 在 **runtime** 層斷言 402 文案逐字等於
-   `余额不足，请先充值。`。
+同輪鬆綁與校正（皆在同一變更內）：
 
-新碼 `insufficient_balance` 與新文案無法與上述任何一處並存（`insufficient_balance` 不含 `insufficient_quota`
-子串，改 type/code 即同時打爆 source-scan 與 runtime 兩層）。**改契約須先鬆綁上述 4 處鎖 + openapi 枚舉**，
-屬暴君裁決事項；本輪只交付不衝突的第 1、3 項（建 key 快速上手 + 本報告）。
+- `src/app/api/v1/contract-lock.test.ts`：402 來源掃描改鎖 `insufficient_balance`（type/code 同碼、常數單一真源）、
+  閘門拒單 type/code 聯集、openapi 六枚舉與穩定碼清單、端點錯誤碼對照表。
+- `src/lib/generation-core/quota-precheck.test.ts`：runtime 文案/碼斷言改為統一契約（文案獨立抄寫，實現改字即爆紅）。
+- `src/app/api/v1/{images,videos}/generations/route.ts`、`batches/route.ts`、`skus/[id]/runs/route.ts`：`OpenAIErrorType` 聯集同步改名。
+- `src/app/api/v1/openapi.json/route.ts`：錯誤 `type` 枚舉與穩定碼清單改名；`response_format` 預設校正為 `b64_json`；
+  `size` enum 補 `2048x2048`。
+- `docs/biz-api.md`：202 異步契約 + 輪詢取圖取代舊的同步 `data[0].b64_json` 敘述；SDK 段落改為誠實說明
+  （官方 SDK 能提交但拿不到異步任務的圖）；錯誤表 402 改碼；錯誤體補 `trace_id`。
+- `docs/biz-api-guide.md`：402 碼與 size 允許值數量同步（同屬 /v1 文檔面，一併校正不留半套）。
+
+**刻意保留（非 /v1 契約面，一個都沒動）**：成員額度不足／停用的 402 **文案**（`成员额度不足，请联系团队主账号…`）——
+碼已統一為 `insufficient_balance`，但文案保留成員專屬指引（叫成員去充值頁是錯的指引，REQ-B1 有測試鎖「與主帳明確區分」）。
+C 端（`/api/generate-images`、`/api/generation-jobs`、`RerunDialog.tsx`）的 `insufficient_quota` 屬另一套面向，
+規格只要求 /v1，未動；上游詞表（`failure-classifier.ts`）與上游代理（`pixai-proxy.ts`）的 `insufficient_quota`
+是識別上游文字用的比對詞，動了會壞事。

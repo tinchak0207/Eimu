@@ -23,7 +23,7 @@ import {
 } from "@/lib/biz-image-references";
 import { generationControlPlaneEnabled } from "@/lib/generation-core/database";
 import { submitGenerationCommand } from "@/lib/generation-core/command-service";
-import { enforceQuotaGate } from "@/lib/generation-core/quota-precheck";
+import { enforceQuotaGate, INSUFFICIENT_BALANCE_ERROR } from "@/lib/generation-core/quota-precheck";
 import { IdempotencyConflictError } from "@/lib/generation-core/job-repository";
 import { GenerationModelUnavailableError } from "@/lib/generation-core/model-availability-gate";
 import { generationTaskResponse } from "@/lib/generation-core/task-response";
@@ -64,7 +64,7 @@ type OpenAIErrorType =
   | "authentication_error"
   | "permission_error"
   | "rate_limit_error"
-  | "insufficient_quota"
+  | "insufficient_balance"
   | "api_error";
 
 /**
@@ -375,11 +375,25 @@ async function handleGeneration(req: NextRequest, rejection: RejectionContext): 
   try {
     await reserveImageQuota(apiKey.userId, totalQuota);
   } catch (error) {
+    const reserveMessage = error instanceof Error ? error.message : "余额不足。";
+    // 餘額不足類 → 與控制面閘門（quota-precheck）共用同一份 402 統一契約。
+    if (reserveMessage.includes("余额不足")) {
+      return errorResponse(
+        INSUFFICIENT_BALANCE_ERROR.status,
+        INSUFFICIENT_BALANCE_ERROR.message,
+        INSUFFICIENT_BALANCE_ERROR.type,
+        INSUFFICIENT_BALANCE_ERROR.code,
+        traceId,
+      );
+    }
+    // 其他預留失敗（網關不可達／回滾不確定）不是餘額問題：走本路由既有的控制面
+    // 不可用契約（與 durable 分支同一組碼），只把真因寫進服務端日誌，不對客戶說謊。
+    console.error(`[biz-api] reserve failed requestId=${requestId}: ${reserveMessage}`);
     return errorResponse(
-      402,
-      error instanceof Error ? error.message : "余额不足。",
-      "insufficient_quota",
-      "insufficient_quota",
+      503,
+      "Generation control plane is temporarily unavailable.",
+      "api_error",
+      "control_plane_unavailable",
       traceId,
     );
   }

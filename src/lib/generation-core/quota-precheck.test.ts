@@ -22,6 +22,12 @@ const CONTROL_PLANE_ENV = {
   [SURGERY_QUOTA_PRECHECK_ENV]: "1",
 };
 
+/**
+ * 402 統一契約（暴君 2026-09-28 裁決，破壞性變更已核准）：type 與 code 同碼，
+ * 文案逐字（含充值入口）。測試獨立抄寫這份文案，不從實現取——實現改字即爆紅。
+ */
+const BALANCE_MESSAGE = "余额不足，本次未扣费。充值：https://eimu.dev/pricing";
+
 function withEnv(overrides: Record<string, string | undefined>, fn: () => void | Promise<void>): Promise<void> | void {
   const saved: Record<string, string | undefined> = {};
   for (const key of Object.keys(overrides)) saved[key] = process.env[key];
@@ -229,7 +235,7 @@ test("(a) 無 token 映射 + user 額度足 → 放行（0 額快車道，不再
   });
 });
 
-test("(b) 無 token 映射 + user 額度不足 → 既有 402 契約（文案逐字）", async (t) => {
+test("(b) 無 token 映射 + user 額度不足 → 402 統一契約（文案逐字）", async (t) => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     t.mock.method(console, "log", () => {});
     const { sql } = mockPrecheckSql([], [LEGACY_TOKEN_MAPPING_ROW]);
@@ -240,9 +246,9 @@ test("(b) 無 token 映射 + user 額度不足 → 既有 402 契約（文案逐
     assert.equal(decision.ok, false);
     if (!decision.ok) {
       assert.equal(decision.status, 402);
-      assert.equal(decision.type, "insufficient_quota");
-      assert.equal(decision.code, "insufficient_quota");
-      assert.equal(decision.message, "余额不足，请先充值。", "402 文案與既有契約一字不改");
+      assert.equal(decision.type, "insufficient_balance");
+      assert.equal(decision.code, "insufficient_balance");
+      assert.equal(decision.message, BALANCE_MESSAGE, "402 文案逐字（統一契約）");
     }
   });
 });
@@ -275,7 +281,7 @@ test("(c) 有映射的 key 行為逐位不變（舊三態回歸：放行/402/回
     assert.deepEqual(unmapped.pass, { ok: true, billingAmount: 0 });
     assert.deepEqual(mapped.pass, unmapped.pass, "有映射 vs 無映射：放行面逐位相等");
     assert.deepEqual(mapped.short, unmapped.short, "有映射 vs 無映射：402 面逐位相等");
-    assert.deepEqual(mapped.short.ok === false ? mapped.short.message : "", "余额不足，请先充值。");
+    assert.deepEqual(mapped.short.ok === false ? mapped.short.message : "", BALANCE_MESSAGE);
     assert.deepEqual(mapped.down, unmapped.down, "有映射 vs 無映射：回落面逐位相等");
     assert.deepEqual(mapped.down, { ok: true, billingAmount: 250_000 });
     for (const { queries } of [unmapped, mapped]) {
@@ -299,7 +305,7 @@ test("gate ON with sufficient quota skips the blocking reserve (billingAmount = 
   });
 });
 
-test("gate ON with insufficient quota rejects under the existing 402 contract", async (t) => {
+test("gate ON with insufficient quota rejects under the unified 402 contract", async (t) => {
   await withEnv(CONTROL_PLANE_ENV, async () => {
     t.mock.method(console, "error", () => {});
     const { sql } = mockPrecheckSql();
@@ -310,9 +316,9 @@ test("gate ON with insufficient quota rejects under the existing 402 contract", 
     assert.equal(decision.ok, false);
     if (!decision.ok) {
       assert.equal(decision.status, 402);
-      assert.equal(decision.type, "insufficient_quota");
-      assert.equal(decision.code, "insufficient_quota");
-      assert.equal(decision.message, "余额不足，请先充值。");
+      assert.equal(decision.type, "insufficient_balance");
+      assert.equal(decision.code, "insufficient_balance");
+      assert.equal(decision.message, BALANCE_MESSAGE);
     }
   });
 });
@@ -414,10 +420,11 @@ test("成員額度不足 → 402 契約碼不變，文案與主帳不足明確�
     assert.equal(decision.ok, false);
     if (!decision.ok) {
       assert.equal(decision.status, 402);
-      assert.equal(decision.type, "insufficient_quota");
-      assert.equal(decision.code, "insufficient_quota");
+      // 碼統一（客戶端只認一套 402），文案保留成員專屬指引——不叫成員去充值頁。
+      assert.equal(decision.type, "insufficient_balance");
+      assert.equal(decision.code, "insufficient_balance");
       assert.equal(decision.message, MEMBER_QUOTA_INSUFFICIENT_MESSAGE);
-      assert.notEqual(decision.message, "余额不足，请先充值。");
+      assert.notEqual(decision.message, BALANCE_MESSAGE);
     }
     assert.deepEqual(order, ["member"], "成員額度不足時必須已判過成員額度");
     assert.deepEqual(calls, [115], "成員讀數按 user_id 讀（成員 key 的計費 user）");
@@ -450,8 +457,8 @@ test("先判成員額度再走既有計費戶檢查：次序可證，且計費�
     assert.equal(decision.ok, false);
     if (!decision.ok) {
       assert.equal(decision.status, 402);
-      assert.equal(decision.code, "insufficient_quota");
-      assert.equal(decision.message, "余额不足，请先充值。", "主帳不足維持既有契約文案，一字不改");
+      assert.equal(decision.code, "insufficient_balance");
+      assert.equal(decision.message, BALANCE_MESSAGE, "主帳不足 = 統一契約文案，逐字");
     }
     assert.deepEqual(order, ["member", "billing"], "先成員額度、後既有計費戶檢查");
     assert.deepEqual(calls, [115]);
@@ -513,7 +520,7 @@ test("成員額度被停用 → 402（同契約碼，文案指向團隊主帳號
     assert.equal(decision.ok, false);
     if (!decision.ok) {
       assert.equal(decision.status, 402);
-      assert.equal(decision.code, "insufficient_quota");
+      assert.equal(decision.code, "insufficient_balance");
       assert.equal(decision.message, MEMBER_QUOTA_DISABLED_MESSAGE);
     }
   });

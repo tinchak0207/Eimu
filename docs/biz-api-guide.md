@@ -166,10 +166,10 @@ HTTP 錯誤體是 OpenAI 形狀 + `trace_id`，同一個 id 也在 `X-Request-Id
 | 403 | `model_not_permitted` | 模型不在該 key 白名單 |
 | 400 | `missing_prompt` / `missing_model` | 缺必填參數 |
 | 400 | `model_not_found` | 站點不支援該模型 |
-| 400 | `unsupported_size` | size 不在三個允許值內 |
+| 400 | `unsupported_size` | size 不在四個允許值內 |
 | 400 | `invalid_n` | n 不是 1..4 |
 | 400 | `prompt_too_long` | prompt > 4000 字元 |
-| 402 | `insufficient_quota` | 餘額不足（legacy 路徑） |
+| 402 | `insufficient_balance` | 餘額／額度不足，本次未扣費（message 內含充值入口） |
 | 409 | `idempotency_key_reused` | 同 key 配不同請求體 |
 | 429 | `rate_limit_exceeded` | 超過 rpm，附 `Retry-After` |
 | 503 | `control_plane_unavailable` | 控制面故障 |

@@ -703,14 +703,14 @@ const SPEC = {
               "authentication_error",
               "permission_error",
               "rate_limit_error",
-              "insufficient_quota",
+              "insufficient_balance",
               "api_error",
             ],
           },
           code: {
             type: "string",
             description:
-              "穩定錯誤代碼：invalid_json, missing_prompt, prompt_too_long, missing_model, model_not_found, model_not_permitted, unsupported_size, invalid_n, no_endpoints, insufficient_quota, upstream_failed, control_plane_unavailable, idempotency_key_reused, task_not_found, result_not_ready, missing_image, missing_data, image_too_large, method_not_allowed, invalid_request_body, missing_requests, empty_requests, batch_too_large, invalid_max_in_flight, invalid_item, invalid_kind, invalid_control_nets, submission_failed, batch_not_found",
+              "穩定錯誤代碼：invalid_json, missing_prompt, prompt_too_long, missing_model, model_not_found, model_not_permitted, unsupported_size, invalid_n, no_endpoints, insufficient_balance, upstream_failed, control_plane_unavailable, idempotency_key_reused, task_not_found, result_not_ready, missing_image, missing_data, image_too_large, method_not_allowed, invalid_request_body, missing_requests, empty_requests, batch_too_large, invalid_max_in_flight, invalid_item, invalid_kind, invalid_control_nets, submission_failed, batch_not_found",
           },
           param: { type: ["string", "null"] },
           trace_id: { type: "string", description: "與 X-Request-Id 回應頭相同。" },
@@ -1091,9 +1091,9 @@ const SPEC = {
           n: { type: "integer", minimum: 1, maximum: 4, default: 1, description: "一次出幾張。" },
           size: {
             type: "string",
-            enum: ["1024x1024", "1536x1024", "1024x1536"],
+            enum: ["1024x1024", "1536x1024", "1024x1536", "2048x2048"],
             default: "1024x1024",
-            description: "只接受這三種尺寸。" },
+            description: "只接受這四種尺寸（2048x2048 由 seedream 系支援）。" },
           quality: {
             type: "string",
             enum: ["standard", "hd", "high"],
@@ -1102,8 +1102,8 @@ const SPEC = {
           response_format: {
             type: "string",
             enum: ["url", "b64_json"],
-            default: "url",
-            description: "b64_json 上游缺失時會降級回 URL。" },
+            default: "b64_json",
+            description: "未傳或非 url 一律按 b64_json 處理；legacy 同步分支上游缺 b64 時該項降級回 URL。" },
           async: { type: "boolean", default: true, description: "production 一律非同步 202；此欄位僅向後相容。" },
           callback_url: { type: "string", format: "uri", description: "任務完成時的 webhook 回調。" },
         },
