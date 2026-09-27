@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { ingestRedeemedRecharges } from "./account-ledger";
+import { runLifecycleEmailsWithSql } from "@/lib/lifecycle-email";
 import { ingestSubscriptionRedemptions } from "./subscription";
 import { reconcileAccountBalances } from "./account-reconciliation";
 import { commitGenerationBilling, reconcileGenerationBilling, refundGenerationBilling } from "./billing-ledger";
@@ -552,6 +553,12 @@ export async function runAccountMaintenanceOnce(
     );
   } catch (error) {
     console.error("[subscription] 訂閱發放失敗（繼續）", error);
+  }
+  try {
+    const mail = await runLifecycleEmailsWithSql(sql);
+    console.log(`[lifecycle-email] sent=${mail.sent} failed=${mail.failed}${mail.skipped ? ` skipped=${mail.skipped}` : ""}${mail.aborted ? ` aborted=${mail.aborted}` : ""}`);
+  } catch (error) {
+    console.error("[lifecycle-email] 生命週期郵件失敗（繼續）", error);
   }
   try {
     const report = await reconcileAccountBalances({}, { sql });

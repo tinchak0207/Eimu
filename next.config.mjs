@@ -82,6 +82,8 @@ const nextConfig = {
         // 控制面；同樣列在 beforeFiles，否則會落在 Vercel 上的同名 route（會被
         // 本地副本以「映射層未配置」擋下，永遠看不到真實歸屬）。
         { source: "/api/internal/team-membership", destination: `${controlPlaneOrigin}/image-control/api/internal/team-membership` },
+        // 營銷郵件退訂：email_preference 在控制面 postgres。
+        { source: "/api/email/unsubscribe", destination: `${controlPlaneOrigin}/image-control/api/email/unsubscribe` },
       ]
       : [];
     // CRITICAL: 控制面代理必須放 `beforeFiles`，不能放在回傳陣列裡。
