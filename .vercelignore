@@ -110,3 +110,6 @@ node_modules/@swc/*
 # 存在時 Vercel 不讀 .gitignore，必須在此再列一次。
 /artifacts/
 /promo-video/out/
+
+# 宣傳片渲染的 CJK 字型（23MB，站點完全用不到；.vercelignore 存在時 Vercel 不讀 .gitignore）
+/promo-video/fonts/

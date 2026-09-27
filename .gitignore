@@ -161,3 +161,6 @@ redteam-*
 # 兩者都是可重跑的本機產物，源碼（promo-video/audio.py、render.mjs、index.html）照常入庫。
 /artifacts/
 /promo-video/out/
+# 宣傳片渲染用的 CJK 字型（兩支 NotoSerifSC OTF 共 23MB）：本機工具鏈的輸入，
+# 不是產品資產，且體積等同半個倉庫 ⇒ 不入庫（重跑渲染前先自行放回 promo-video/fonts/）。
+/promo-video/fonts/

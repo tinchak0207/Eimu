@@ -34,17 +34,8 @@ def bell(f, dur=1.4, idx=2.2, ratio=2.0, dec=.45):
     return np.sin(2 * np.pi * f * t + idx * np.exp(-t / .12) * np.sin(2 * np.pi * f * ratio * t)) * env
 
 
-# ---------- Pad：每幕一個和弦，交叉淡入 ----------
-CH = [
-    (41, [57, 60, 64, 67]),        # Fmaj9
-    (38, [53, 57, 60, 64]),        # Dm9
-    (34, [50, 53, 57, 60]),        # Bbmaj9
-    (36, [52, 55, 57, 62]),        # C6/9
-    (33, [48, 52, 55, 59]),        # Am9
-    (31, [46, 50, 53, 57]),        # Gm9
-    (29, [48, 57, 64, 67, 72]),    # Fmaj9 開闊
-]
-for (a, b), (bass, notes) in zip(cues["chords"], CH):
+# ---------- Pad：每段一個和弦（和聲由畫面時間軸 cues.chords 決定），交叉淡入 ----------
+for (a, b, bass, notes, _) in cues["chords"]:
     a0 = max(0, a - .7); dur = b - a0 + 1.6
     t = tt(dur)
     env = np.minimum(1, t / 1.1) ** 2 * np.clip((dur - t) / 1.5, 0, 1) ** 1.5
@@ -61,23 +52,44 @@ for (a, b), (bass, notes) in zip(cues["chords"], CH):
     sub = (np.sin(2 * np.pi * hz(bass) * t) + .35 * np.sin(2 * np.pi * hz(bass + 12) * t)) * env * .10
     put(sub, a0, 1, 0, .1)
 
-# ---------- 琶音（100 BPM 八分音符） ----------
+# ---------- 琶音（100 BPM 八分音符，全局網格；力度由每段決定） ----------
 grid = .3
-for (a, b), (bass, notes), vel in zip(cues["chords"][1:6], CH[1:6], (.45, .8, 1.0, .9, .85)):
+for (a, b, bass, notes, vel) in cues["chords"]:
+    if vel <= 0: continue
     pat = [0, 2, 1, 3, 2, 1, 3, 2]
-    k = 0; t0 = np.ceil((a - 4.1) / grid) * grid + 4.1
+    k = int(np.ceil(a / grid)); t0 = k * grid
     while t0 < b - .05:
         m = notes[pat[k % 8] % len(notes)] + 12
         acc = 1.0 if k % 2 == 0 else .7
         put(bell(hz(m), 1.1, 1.4, 2.0, .28), t0, .055 * vel * acc, (-.5, .5)[k % 2] * .6, .55)
         k += 1; t0 += grid
 
-# ---------- 低頻脈動（成片 → API 段落） ----------
-t0 = 15.3
-while t0 < 29.4:
-    t = tt(.5); f = 55 + 45 * np.exp(-t / .03)
-    put(np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-t / .18) * .22, t0, 1, 0, .05)
-    t0 += grid * 2
+# ---------- 低頻脈動 ----------
+for (a, b) in cues["pulse"]:
+    t0 = np.ceil(a / (grid * 2)) * grid * 2
+    while t0 < b - .3:
+        t = tt(.5); f = 55 + 45 * np.exp(-t / .03)
+        put(np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-t / .18) * .22, t0, 1, 0, .05)
+        t0 += grid * 2
+
+# ---------- 電影重擊（影院段落剪輯點） ----------
+def boom():
+    t = tt(2.4)
+    f = 31 + 42 * np.exp(-t / .08)
+    body = np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-t / .6)
+    n = rng.standard_normal(len(t)) * np.exp(-t / .018)
+    n = np.convolve(n, np.ones(10) / 10, "same") * .5
+    return body + n
+for c in cues.get("boom", []):
+    put(boom(), c - .005, .42, 0, .35)
+
+# ---------- 倒帶：下行鈴音急奔 ----------
+for c in cues.get("rewind", []):
+    run = [96, 93, 91, 88, 86, 84, 81, 79, 76, 74, 72, 69, 67, 64, 62, 60]
+    tt0 = c
+    for i, m in enumerate(run):
+        put(bell(hz(m), .9, 1.2, 3.0, .2), tt0, .05 * (1 - i / 22), (1 - i / 8) * .6, .7)
+        tt0 += .055 + i * .009
 
 # ---------- 音效 ----------
 def whoosh(dur=1.4, peak=.95):
@@ -121,7 +133,7 @@ for c in cues["shimmer"]:
 
 for c in cues["bloom"]:
     t = tt(3.0)
-    put(np.sin(2 * np.pi * np.cumsum(38 + 30 * np.exp(-t / .1)) / SR) * np.exp(-t / .9) * .35, c, 1, 0, .2)
+    put(np.sin(2 * np.pi * np.cumsum(hz(29) + 30 * np.exp(-t / .1)) / SR) * np.exp(-t / .9) * .35, c, 1, 0, .2)
     rev_sw = whoosh(1.2, 1.1)
     put(rev_sw, c - 1.1, .16, 0, .6)
 

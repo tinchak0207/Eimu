@@ -9,8 +9,8 @@ import { fileURLToPath } from "node:url";
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 const OUT = path.join(DIR, "out");
-const FPS = Number(process.env.FPS || 60);
-const SUB = Number(process.env.SUB || 1);          // 動態模糊子幀數（快門 180°）
+const FPS = Number(process.env.FPS || 30);
+const SUB = Number(process.env.SUB || 8);          // 動態模糊子幀數（快門 180°）
 const WORKERS = Number(process.env.WORKERS || 4);
 const [mode = "stills", arg = "1"] = process.argv.slice(2);
 const MODE_STILL = mode === "stills";
@@ -45,6 +45,15 @@ if (mode === "stills") {
     fs.writeFileSync(path.join(OUT, "stills", `t${t.toFixed(2)}.png`), await grab(page, t));
     console.log("still", t);
   }
+} else if (mode === "cover") {
+  // 封面背景：arg = JSON 檔，[{name, t, cam, qinVid, grain, vig}]，輸出無疊字 PNG
+  const specs = JSON.parse(fs.readFileSync(arg, "utf8"));
+  const { page } = await openPage();
+  for (const sp of specs) {
+    await page.evaluate(sp => window.renderFrame(sp.t, { ...sp, noOverlay: true }), sp);
+    fs.writeFileSync(path.join(OUT, `${sp.name}.png`), await page.screenshot({ type: "png" }));
+    console.log("cover", sp.name);
+  }
 } else {
   const { page: p0, cues } = await openPage();
   fs.writeFileSync(path.join(OUT, "cues.json"), JSON.stringify(cues));
@@ -62,8 +71,11 @@ if (mode === "stills") {
     const ff = spawn("ffmpeg", ["-loglevel", "error", "-y", "-f", "image2pipe", "-c:v", "mjpeg", "-framerate", String(FPS * SUB), "-i", "-",
       "-vf", vf, "-r", String(FPS), "-c:v", "libx264", "-preset", "slow", "-crf", "12", "-pix_fmt", "yuv420p", "-x264-params", "aq-mode=3", file], { stdio: ["pipe", "inherit", "inherit"] });
     for (let f = a; f < b; f++) {
+      const tc = f / FPS, cuts = cues.cuts || [];
+      let lo = 0, hi = Infinity; for (const c of cuts) { if (c <= tc) lo = c; else { hi = c; break; } }
       for (let s = 0; s < SUB; s++) {
-        const t = (f + (SUB > 1 ? (s / SUB - 0.25) * 0.5 : 0)) / FPS;   // 180° 快門：子幀分佈在幀中心 ±1/4 幀
+        let t = (f + (SUB > 1 ? ((s + 0.5) / SUB - 0.5) * 0.5 : 0)) / FPS;   // 180° 快門：子幀對稱分佈在幀中心 ±1/4 幀
+        t = Math.min(Math.max(t, lo), hi - 1e-4);                           // 不跨硬切
         const buf = await grab(page, Math.max(0, t));
         if (!ff.stdin.write(buf)) await new Promise(r => ff.stdin.once("drain", r));
       }
