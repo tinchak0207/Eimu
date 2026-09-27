@@ -39,7 +39,6 @@ import { cn } from "@/lib/utils";
 import { isStandalonePwa, createHandoffLogin } from "@/lib/github-login";
 import { PwaHandoffPanel } from "@/components/PwaHandoffPanel";
 import { PromoIntroOverlay } from "@/components/promo/PromoIntroOverlay";
-import { PromoLoginDialog } from "@/components/promo/PromoLoginDialog";
 import {
   PROMO_SEEN_KEY,
   PROMO_TRIAL_PROMPT,
@@ -127,12 +126,6 @@ export function ImagePlayground({ suggestions }: { suggestions: Suggestion[] }) 
    * 掛 layout 就只能整頁跳轉，等於把畫布與聊天區整個重建一次。
    */
   const [promoOpen, setPromoOpen] = useState(false);
-  /**
-   * 結尾送出時的登入彈窗（2026-09-27 暴君第三輪）：未登入的話送不出去，
-   * 當場彈窗而不是把人丟去登入頁——彈窗背後還是那張結尾封面，登入完原地開跑。
-   * 彈窗開著時浮層的 Esc 要讓路（否則一個 Esc 把整個浮層關掉）。
-   */
-  const [promoLoginOpen, setPromoLoginOpen] = useState(false);
   // 未登入時送不出去的那句話：存起來，登入態翻真就自動補送（見 promo-gate.ts）。
   const promoPendingRef = useRef<string | null>(null);
   const { images, timings, failedProviders, isLoading, startGeneration, cancelTask, tasks } = useImageGeneration();
@@ -468,12 +461,11 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
       markPromoSeen();
       const intent = resolvePromoTrialIntent(text, isLoggedIn);
       if (intent.kind === "login") {
+        // 那句話先留住；登入小框由浮層自己長（在送出鈕正上方），不遮蓋結尾畫面。
         promoPendingRef.current = intent.pending;
         writePendingTrial(typeof window === "undefined" ? null : window.sessionStorage, intent.pending);
-        setPromoLoginOpen(true);
         return;
       }
-      setPromoLoginOpen(false);
       setPromoOpen(false);
       setMode("agent");
       setDisplayMode("agent");
@@ -489,14 +481,19 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
    */
   const handlePromoDismiss = useCallback(() => {
     markPromoSeen();
-    setPromoLoginOpen(false);
     setPromoOpen(false);
     promoPendingRef.current = null;
     clearPendingTrial(typeof window === "undefined" ? null : window.sessionStorage);
   }, [markPromoSeen]);
 
-  /** 登入彈窗自己收掉（關窗／先不登入）：浮層留在原地，待人再決定。 */
-  const handlePromoLoginClose = useCallback(() => setPromoLoginOpen(false), []);
+  /**
+   * 登入小框被關掉（先不登录／Esc／點封面空白處）：浮層留在原地，但那句話不再
+   * 待送——他選擇不登入，之後某次無關的登入不該突然把它送出去。
+   */
+  const handlePromoLoginDismiss = useCallback(() => {
+    promoPendingRef.current = null;
+    clearPendingTrial(typeof window === "undefined" ? null : window.sessionStorage);
+  }, []);
 
   /**
    * 登入態翻真 → 補送待送的試玩那句話。
@@ -510,8 +507,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
     if (!pending) return;
     promoPendingRef.current = null;
     clearPendingTrial(typeof window === "undefined" ? null : window.sessionStorage);
-    // 登入成功＝宣傳片這條線走完：浮層與登入窗一起收掉，然後真的開一個會話開跑。
-    setPromoLoginOpen(false);
+    // 登入成功＝宣傳片這條線走完：浮層收掉，然後真的開一個會話開跑。
     setPromoOpen(false);
     setMode("agent");
     setDisplayMode("agent");
@@ -801,11 +797,10 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
         <PromoIntroOverlay
           onTrial={handlePromoTrial}
           onDismiss={handlePromoDismiss}
-          suspendKeys={promoLoginOpen}
+          needsLogin={!isLoggedIn}
+          onLoginDismiss={handlePromoLoginDismiss}
         />
       )}
-      {/* 登入窗疊在浮層上（z-130 > 浮層 z-120）：彈窗背後仍是結尾封面。 */}
-      <PromoLoginDialog open={promoLoginOpen} onClose={handlePromoLoginClose} />
 
       {(!showProgress && (isLoading || failedProviders.length > 0)) && (
         <div className="pointer-events-none fixed inset-x-0 bottom-4 z-30 flex justify-center px-4 sm:bottom-6">

@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowUp, Play, Volume2, VolumeX } from "lucide-react";
+import { ArrowUp, Loader2, Play, Volume2, VolumeX } from "lucide-react";
 import { PROMO_TRIAL_PROMPT } from "./promo-gate";
+import { PromoLoginPopover } from "./PromoLoginPopover";
 
 /**
  * 未登入新訪客的進站宣傳片浮層（2026-09-27 暴君裁定落地）。
@@ -39,10 +40,12 @@ export interface PromoIntroOverlayProps {
   /** 「重播一遍」以外的退路（跳過 / Esc / 先逛逛）＝只關掉浮層，不送任何話。 */
   onDismiss: () => void;
   /**
-   * 上層另有彈窗（結尾的登入窗）開著時，Esc 交給它處理——
-   * 不讓一個 Esc 把整個浮層連同彈窗一起關掉。
+   * 未登入（宣傳片觀眾的大多數）：送出時不送訊息，改成在送出鈕上方長出登入小框。
+   * 判定留在上層（那裡才有登入態），這裡只負責表現。
    */
-  suspendKeys?: boolean;
+  needsLogin?: boolean;
+  /** 使用者放棄登入（關掉小框）：上層清掉待送的那句話——之後無關的登入不該補送。 */
+  onLoginDismiss?: () => void;
 }
 
 const VIDEO_SRC = "/promo/eimu-promo.mp4";
@@ -67,7 +70,12 @@ const BOX_CY = (BOX.top + BOX.height / 2) / COVER_H;
 const cqh = (px: number): string => `${((px / COVER_H) * 100).toFixed(4)}cqh`;
 const pct = (value: number, total: number): string => `${((value / total) * 100).toFixed(4)}%`;
 
-export function PromoIntroOverlay({ onTrial, onDismiss, suspendKeys = false }: PromoIntroOverlayProps) {
+export function PromoIntroOverlay({
+  onTrial,
+  onDismiss,
+  needsLogin = false,
+  onLoginDismiss,
+}: PromoIntroOverlayProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [muted, setMuted] = useState(true);
@@ -80,6 +88,14 @@ export function PromoIntroOverlay({ onTrial, onDismiss, suspendKeys = false }: P
   const [text, setText] = useState("");
   /** 直式（手機）：封面要放大到框好按的大小。 */
   const [portrait, setPortrait] = useState(false);
+  /**
+   * 送出鈕的 0.2 秒轉圈（2026-09-27 暴君裁定）：按下到「長出登入框」之間要有
+   * 「真的在做事」的反饋，否則人只看到一個小框冒出來＝沒接住他的動作。
+   */
+  const [sending, setSending] = useState(false);
+  /** 登入小框（未登入時）：長在送出鈕正上方，不遮蓋結尾畫面。 */
+  const [loginOpen, setLoginOpen] = useState(false);
+  const sendTimerRef = useRef<number | null>(null);
 
   // 浮層開著時鎖住底下的頁面捲動，否則手機上手指會把首頁連同影片一起滑走。
   useEffect(() => {
@@ -118,15 +134,28 @@ export function PromoIntroOverlay({ onTrial, onDismiss, suspendKeys = false }: P
   }, [settled]);
 
   useEffect(() => {
-    if (suspendKeys) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
+      // Esc 先收小框（一層一層退），沒有小框才是退出整個浮層。
+      if (loginOpen) {
+        setLoginOpen(false);
+        onLoginDismiss?.();
+        return;
+      }
       onDismiss();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onDismiss, suspendKeys]);
+  }, [loginOpen, onDismiss, onLoginDismiss]);
+
+  // 卸載時把那個 0.2 秒的計時器收乾淨（人可能在轉圈途中就按了先逛逛）。
+  useEffect(
+    () => () => {
+      if (sendTimerRef.current !== null) window.clearTimeout(sendTimerRef.current);
+    },
+    [],
+  );
 
   const handleTimeUpdate = useCallback(() => {
     const el = videoRef.current;
@@ -152,6 +181,7 @@ export function PromoIntroOverlay({ onTrial, onDismiss, suspendKeys = false }: P
   const replay = useCallback(() => {
     const el = videoRef.current;
     setSettled(false);
+    setLoginOpen(false);
     setProgress(0);
     setText("");
     if (!el) return;
@@ -162,14 +192,36 @@ export function PromoIntroOverlay({ onTrial, onDismiss, suspendKeys = false }: P
     }
   }, []);
 
-  /** 送出：空框也走得通——直接按送出就是跑片中那句話。 */
+  /**
+   * 送出：空框也走得通——直接按送出就是跑片中那句話。
+   * 未登入走「轉圈 0.2 秒 → 送出鈕上方長出登入小框」（暴君 2026-09-27：
+   * 直接彈全屏登入牆會讓人喪失興趣，先給一個正在開跑的反饋再問他要不要登入）。
+   */
   const submit = useCallback(
     (event?: React.FormEvent) => {
       event?.preventDefault();
-      onTrial(text.trim() || PROMO_TRIAL_PROMPT);
+      if (sending) return;
+      const payload = text.trim() || PROMO_TRIAL_PROMPT;
+      if (!needsLogin) {
+        onTrial(payload);
+        return;
+      }
+      setSending(true);
+      if (sendTimerRef.current !== null) window.clearTimeout(sendTimerRef.current);
+      sendTimerRef.current = window.setTimeout(() => {
+        sendTimerRef.current = null;
+        setSending(false);
+        setLoginOpen(true);
+      }, 200);
     },
-    [onTrial, text],
+    [needsLogin, onTrial, sending, text],
   );
+
+  /** 關掉登入小框（先不登录／點畫面空白處）：留人在結尾畫面上。 */
+  const dismissLogin = useCallback(() => {
+    setLoginOpen(false);
+    onLoginDismiss?.();
+  }, [onLoginDismiss]);
 
   return (
     <div
@@ -180,7 +232,11 @@ export function PromoIntroOverlay({ onTrial, onDismiss, suspendKeys = false }: P
     >
       {settled ? (
         // ── 結尾：宣傳片封面當畫面，封面裡那個輸入框換成真的 ────────────────
-        <div className="absolute inset-0 overflow-hidden bg-[#eef1f6]">
+        <div
+          className="absolute inset-0 overflow-hidden bg-[#eef1f6]"
+          // 點封面空白處＝關掉登入小框（結尾畫面不遮蓋，隨手點一下就回到原樣）。
+          onClick={loginOpen ? dismissLogin : undefined}
+        >
           <div
             className="absolute left-1/2 top-1/2 aspect-[16/9]"
             style={{
@@ -211,6 +267,7 @@ export function PromoIntroOverlay({ onTrial, onDismiss, suspendKeys = false }: P
                 它會精準蓋住封面裡畫上去的框（座標同源），所以看不到兩層字。 */}
             <form
               onSubmit={submit}
+              onClick={(event) => event.stopPropagation()}
               className="absolute flex items-center border-[1.5px] border-[rgba(255,255,255,0.98)] bg-[linear-gradient(180deg,rgba(255,255,255,0.94),rgba(255,255,255,0.86))] backdrop-blur-[24px] [backdrop-filter:blur(24px)_saturate(180%)]"
               style={{
                 left: pct(BOX.left, COVER_W),
@@ -257,16 +314,37 @@ export function PromoIntroOverlay({ onTrial, onDismiss, suspendKeys = false }: P
                 type="submit"
                 aria-label="开始做"
                 title="开始做"
-                className="grid shrink-0 cursor-pointer place-items-center rounded-full bg-[#2d3142] text-white lg-transition hover:bg-[#272b39] active:scale-95"
+                disabled={sending}
+                className="grid shrink-0 cursor-pointer place-items-center rounded-full bg-[#2d3142] text-white lg-transition hover:bg-[#272b39] active:scale-95 disabled:cursor-progress"
                 style={{
                   width: cqh(76),
                   height: cqh(76),
                   boxShadow: "0 12px 26px rgba(45,49,66,.28), inset 0 1.5px 0 rgba(255,255,255,.25)",
                 }}
               >
-                <ArrowUp className="h-[45%] w-[45%]" strokeWidth={2.6} aria-hidden="true" />
+                {sending ? (
+                  <Loader2 className="h-[45%] w-[45%] animate-spin" strokeWidth={2.6} aria-hidden="true" />
+                ) : (
+                  <ArrowUp className="h-[45%] w-[45%]" strokeWidth={2.6} aria-hidden="true" />
+                )}
               </button>
             </form>
+
+            {/* 登入小框：釘在送出鈕正上方（同一套容器座標，任何縮放都對得住），
+                自身尺寸用 CSS px——它是要給手指按的 UI，不該跟著封面縮放。
+                點畫面空白處＝關掉它（結尾畫面其餘部分全程可見，不遮蓋）。 */}
+            {loginOpen && (
+              <div
+                className="absolute z-10"
+                style={{
+                  left: pct(BOX.left + BOX.width / 2, COVER_W),
+                  bottom: cqh(COVER_H - BOX.top + 16),
+                  transform: "translateX(-50%)",
+                }}
+              >
+                <PromoLoginPopover onDismiss={dismissLogin} />
+              </div>
+            )}
           </div>
 
           {/* 兩個退路固定在螢幕上（不隨封面縮放跑掉）。 */}
