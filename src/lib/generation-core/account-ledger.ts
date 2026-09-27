@@ -285,6 +285,8 @@ export const ledgerRef = {
   transferOut: (transferId: string) => `transfer:${transferId}:out`,
   transferIn: (transferId: string) => `transfer:${transferId}:in`,
   recharge: (redemptionId: string | number) => `redemption:${String(redemptionId)}`,
+  /** 基線沖銷腿：充值發生在開戶基線之前（金額已含在 opening 內）時的對沖行（見 ingest）。 */
+  rechargeBaselineOffset: (redemptionId: string | number) => `redemption:${String(redemptionId)}:opening-offset`,
   adjustment: (sourceRef: string) => `adjustment:${sourceRef}`,
   /** REQ-D3 期次發放冪等鍵：(訂閱 id, 期次序號)（不變量 ③）。 */
   subscriptionTerm: (subscriptionId: string, termIndex: number) => `subscription:${subscriptionId}:term:${termIndex}`,
@@ -974,7 +976,7 @@ export async function recordTransfer(
   );
 }
 
-/** 充值入帳（兌換碼被使用）。 */
+/** 充值入帳（兌換碼被使用）。source 決定「現金 / 非現金」語義（投影層據此判付費）。 */
 export async function recordRecharge(
   input: {
     billingUserId: number;
@@ -982,6 +984,8 @@ export async function recordRecharge(
     redemptionId: string | number;
     redemptionKey?: string;
     redeemedAt?: string | null;
+    /** 省略＝現金通道（`redemption-sync`）；人工發碼必須傳非現金來源。 */
+    source?: string;
   },
   deps: LedgerWriterDeps = {},
 ): Promise<PendingWriteOutcome> {
@@ -994,7 +998,7 @@ export async function recordRecharge(
         billingUserId: input.billingUserId,
         entryType: "recharge",
         amount,
-        source: "redemption-sync",
+        source: input.source ?? REDEMPTION_CASH_SOURCE,
         sourceRef: `redemption:${String(input.redemptionId)}`,
         idempotencyRef: ledgerRef.recharge(input.redemptionId),
         note: "new-api 兌換碼已使用（充值入帳）",
@@ -1126,7 +1130,10 @@ export async function recordAdjustment(
 export interface RechargeIngestSummary {
   scanned: number;
   charged: number;
+  /** 基線前兌換、以「充值＋沖銷」兩條腿入帳的筆數（淨額 0，僅為讓來源可見）。 */
+  chargedBaselineAbsorbed: number;
   skippedUnused: number;
+  /** 基線前且連沖銷腿都寫不進去（擋下）的筆數——非 0 即為待查。 */
   skippedBeforeBaseline: number;
   skippedNoUser: number;
   /** REQ-D3：帶訂閱 SKU 標記的碼（由 subscription.ts 的訂閱通道入帳，本通道**不得**再記一筆）。 */
@@ -1136,6 +1143,98 @@ export interface RechargeIngestSummary {
 
 type RedemptionReader = (input: { pages: number; pageSize: number }) => Promise<GatewayRedemption[]>;
 
+/** 現金通道（mPay 真實單）的帳本來源：投影層据此把該行計入「付費」。 */
+export const REDEMPTION_CASH_SOURCE = "redemption-sync";
+/**
+ * 人工發碼 / 贈送碼的帳本來源。**必須**命中 statistics-projection 的
+ * NON_CASH_RECHARGE_SOURCE（`gift`）——人工碼沒有外部現金流入，記成現金＝謊報營收。
+ */
+export const REDEMPTION_MANUAL_SOURCE = "gift-manual-code";
+/** 基線沖銷腿的來源（淨額 0，兩條腿成對，永不單獨出現在帳上）。 */
+export const REDEMPTION_BASELINE_OFFSET_SOURCE = "opening-offset";
+
+/**
+ * 兌換碼是不是「真金白銀買來的」。唯一判據＝mPay 發碼時的命名約定
+ * （`mapay-redemption.mapayOrderRedemptionName` = `MP` + out_trade_no 後 18 碼）。
+ * 人工碼（eimu1500 / MANUAL-* / tier-* / gift）一律非現金——帳本語義上不是營收。
+ */
+export function isCashBackedRedemptionName(name: string | null | undefined): boolean {
+  return /^MP[A-Z0-9]{6,}$/.test((name ?? "").trim());
+}
+
+/**
+ * 基線前（`redeemed_time` 早於開戶基線行）的充值入帳：**兩條腿同一批**——
+ *
+ *   recharge       +Q  ← 讓「這筆錢從哪來」在帳本上可見（營收/漏斗的唯一事實源）
+ *   adjustment     −Q  ← 沖銷：該筆額度在開戶基線（opening，讀自 new-api 當時餘額）裡
+ *                        已經算過一次，若只記 recharge 就是憑空多一份錢。
+ *
+ * 淨額恆為 0 ⇒ 餘額（Σ amount）與既有帳本逐位相同；兩腿由 postLedgerEntries 包在
+ * 同一事務（`ON CONFLICT` 冪等），掃描重放不雙算。缺腿自癒：先讀兩把冪等鍵，
+ * 只補缺的那條——不會出現「recharge 在、沖銷不在」的單腿漂移。
+ */
+async function recordBaselineAbsorbedRecharge(
+  input: {
+    billingUserId: number;
+    amountQuota: number;
+    redemptionId: string | number;
+    redemptionKey?: string;
+    redeemedAt?: string | null;
+    source: string;
+  },
+  deps: LedgerWriterDeps = {},
+): Promise<PendingWriteOutcome> {
+  const amount = Math.round(input.amountQuota);
+  const sql = deps.sql;
+  if (!sql) return { posted: false, reason: "帳本儲存層未配置" };
+  try {
+    const rechargeRef = ledgerRef.recharge(input.redemptionId);
+    const offsetRef = ledgerRef.rechargeBaselineOffset(input.redemptionId);
+    const existing = await sql<Row[]>`
+      SELECT idempotency_ref FROM account_ledger
+      WHERE idempotency_ref IN (${rechargeRef}, ${offsetRef})
+    `;
+    const seen = new Set(existing.map((row) => String(row.idempotency_ref)));
+    if (seen.has(rechargeRef) && seen.has(offsetRef)) {
+      return { posted: false, reason: "已記過（重放）" };
+    }
+    const sourceRef = `redemption:${String(input.redemptionId)}`;
+    const drafts: LedgerEntryDraft[] = [];
+    if (!seen.has(rechargeRef)) {
+      drafts.push({
+        billingUserId: input.billingUserId,
+        entryType: "recharge",
+        amount,
+        source: input.source,
+        sourceRef,
+        idempotencyRef: rechargeRef,
+        note: "new-api 兌換碼已使用（充值入帳，金額已含在開戶基線內）",
+        metadata: { redemption_key: input.redemptionKey ?? null, redeemed_at: input.redeemedAt ?? null, baseline_absorbed: true },
+      });
+    }
+    if (!seen.has(offsetRef)) {
+      drafts.push({
+        billingUserId: input.billingUserId,
+        entryType: "adjustment",
+        amount: -amount,
+        source: REDEMPTION_BASELINE_OFFSET_SOURCE,
+        sourceRef,
+        idempotencyRef: offsetRef,
+        note: "沖銷：該筆充值已含在開戶基線（opening）內，避免雙算",
+        metadata: { redemption_key: input.redemptionKey ?? null, redeemed_at: input.redeemedAt ?? null, baseline_absorbed: true },
+      });
+    }
+    const result = await postLedgerEntries(drafts, { sql });
+    if (result.errors.length > 0) return { posted: false, reason: result.errors[0] };
+    if (result.rejected.length > 0) return { posted: false, reason: result.rejected[0].reason };
+    return { posted: result.inserted.length > 0, reason: undefined };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    console.error(`[account-ledger] 基線沖銷入帳異常（不擋錢路）：${reason}`);
+    return { posted: false, reason };
+  }
+}
+
 /**
  * 充值入帳：把 new-api「已被使用」的兌換碼同步成我方帳本的 recharge 加項。
  *
@@ -1143,10 +1242,18 @@ type RedemptionReader = (input: { pages: number; pageSize: number }) => Promise<
  * 真正入帳要用戶在 new-api 端兌換（`POST /api/user/topup`）。發碼即記 = 未被兌換的碼
  * 憑空變成餘額；故一律以「上游記錄顯示已使用」為唯一入帳依據（同時涵蓋人工發碼）。
  *
- * 防雙算（關鍵）：只入帳 `redeemed_time` **晚於該身份基線入帳時間**的碼——
- * 基線前發生的充值已含在 opening 裡。基線不存在 = 先種基線再同步。
+ * 兩種來源，兩套語義（現金判定在投影層按 `source` 做，此處只負責如實標記）：
+ *   - mPay 真實單（name=`MP…`）→ source=`redemption-sync`，是現金營收。
+ *   - 人工發碼 / 贈送碼 → source=`gift-manual-code`（命中 NON_CASH_RECHARGE_SOURCE），
+ *     額度有效但不是現金流入，禁止混進付費漏斗。
  *
- * 幂等：idempotency_ref = `redemption:<id>` ⇒ 週期性重掃不會重複入帳。
+ * 防雙算（關鍵）：`redeemed_time` **晚於該身份基線入帳時間**的碼直接入帳；早於基線的
+ * （額度已含在 opening 裡）入帳**兩條腿**——recharge +Q 讓「錢從哪來」在帳上可見，
+ * adjustment −Q 沖銷防雙算（淨額 0）。舊版是直接丟棄這類碼，導致 09-19 前後所有
+ * 已兌換碼在帳本上完全消失（營收恆為 0 的根因之一）。
+ *
+ * 幂等：idempotency_ref = `redemption:<id>`（沖銷腿 `…:opening-offset`）⇒ 週期性重掃
+ * 不會重複入帳。
  */
 export async function ingestRedeemedRecharges(
   input: { pages?: number; pageSize?: number } = {},
@@ -1155,6 +1262,7 @@ export async function ingestRedeemedRecharges(
   const summary: RechargeIngestSummary = {
     scanned: 0,
     charged: 0,
+    chargedBaselineAbsorbed: 0,
     skippedUnused: 0,
     skippedBeforeBaseline: 0,
     skippedNoUser: 0,
@@ -1170,7 +1278,7 @@ export async function ingestRedeemedRecharges(
 
   let items: GatewayRedemption[];
   try {
-    items = await reader({ pages: Math.max(1, Math.min(input.pages ?? 2, 20)), pageSize: Math.max(1, Math.min(input.pageSize ?? 100, 100)) });
+    items = await reader({ pages: Math.max(1, Math.min(input.pages ?? 20, 50)), pageSize: Math.max(1, Math.min(input.pageSize ?? 100, 100)) });
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     summary.errors.push(reason);
@@ -1209,20 +1317,25 @@ export async function ingestRedeemedRecharges(
     // 基線時刻 = 這筆充值是否已含在基線裡的分界線。基線行寫入失敗時保守取 now
     // （寧可漏記一筆舊充值讓對帳報告指出，也不把已含在基線裡的錢再加一次）。
     const openingAtMs = openingRow[0] ? new Date(String(openingRow[0].created_at)).getTime() : Date.now();
+    const source = isCashBackedRedemptionName(item.name) ? REDEMPTION_CASH_SOURCE : REDEMPTION_MANUAL_SOURCE;
+    const common = {
+      billingUserId: usedUserId,
+      amountQuota: Number(item.quota ?? 0),
+      redemptionId: item.id,
+      redemptionKey: item.key,
+      redeemedAt: new Date(redeemedAtSec * 1000).toISOString(),
+    };
     if (redeemedAtSec * 1000 < openingAtMs) {
-      summary.skippedBeforeBaseline += 1;
+      // 基線前兌換：額度已含在 opening 內 ⇒ 記「充值 + 沖銷」兩條腿，淨額 0 但可見。
+      const absorbed = await recordBaselineAbsorbedRecharge({ ...common, source }, { sql });
+      if (absorbed.posted) summary.chargedBaselineAbsorbed += 1;
+      else if (absorbed.reason && !/重放/.test(absorbed.reason)) {
+        summary.skippedBeforeBaseline += 1;
+        summary.errors.push(`redemption ${item.id}: ${absorbed.reason}`);
+      }
       continue;
     }
-    const outcome = await recordRecharge(
-      {
-        billingUserId: usedUserId,
-        amountQuota: Number(item.quota ?? 0),
-        redemptionId: item.id,
-        redemptionKey: item.key,
-        redeemedAt: new Date(redeemedAtSec * 1000).toISOString(),
-      },
-      { sql },
-    );
+    const outcome = await recordRecharge({ ...common, source }, { sql });
     if (outcome.posted) summary.charged += 1;
     else if (outcome.reason && !/重放/.test(outcome.reason)) summary.errors.push(`redemption ${item.id}: ${outcome.reason}`);
   }

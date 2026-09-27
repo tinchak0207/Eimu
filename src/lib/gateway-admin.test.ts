@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { ensureGatewayUserForOAuth } from "./gateway-admin.ts";
+import { ensureGatewayUserForOAuth, listGatewayRedemptions } from "./gateway-admin.ts";
 
 /**
  * 站点 OAuth 建号改走上游管理员建号 API（为关闭自助注册做准备）。
@@ -157,3 +157,39 @@ test("over-length username throws before touching the gateway", async () => {
     stub.restore();
   }
 });
+
+/**
+ * 生产实锤（2026-09-27）：上游 `p` 从 1 起算，`p=0` 与 `p=1` 返回同一页。
+ * 旧实现从 p=0 起、默认只翻 1 页 ⇒ 415 张码只看到最新 100 张、且被数两次
+ * （worker 日志 scanned=200），最旧的 315 张永远不扫 → 充值入账扫不到它们。
+ */
+test("兑换码全量分页：p 从 1 起、按上游 total 翻到尽、同一页不重复计数", async () => {
+  const total = 415;
+  const pageSize = 100;
+  const pageIds = (page: number): unknown[] => {
+    const items: unknown[] = [];
+    for (let i = 0; i < pageSize; i += 1) {
+      const id = total - (page - 1) * pageSize - i;
+      if (id > 0) items.push({ id, key: `k-${id}`, name: `code-${id}`, quota: 1, status: 1 });
+    }
+    return items;
+  };
+  const stub = withStubbedGateway((call) => {
+    const url = new URL(call.url);
+    const requested = Number(url.searchParams.get("p"));
+    const page = requested === 0 ? 1 : requested; // 上游语义：p=0 等同 p=1
+    return jsonResponse({ success: true, data: { items: pageIds(page), total, page, page_size: pageSize } });
+  });
+  try {
+    const items = await listGatewayRedemptions({ pages: 20, pageSize });
+    assert.equal(items.length, total, "415 张码必须一张不漏");
+    assert.equal(items[0]?.id, total);
+    assert.equal(items[items.length - 1]?.id, 1);
+    const requestedPages = stub.calls.map((call) => new URL(call.url).searchParams.get("p"));
+    assert.deepEqual(requestedPages, ["1", "2", "3", "4", "5"], "p 从 1 起，翻到空页即停");
+    assert.equal(new Set(items.map((item) => item.id)).size, total, "同一页不得重复计数");
+  } finally {
+    stub.restore();
+  }
+});
+

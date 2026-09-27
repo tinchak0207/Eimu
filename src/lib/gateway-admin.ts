@@ -87,9 +87,14 @@ export async function fetchGatewayUser(userId: number): Promise<GatewayAdminUser
  * 上游兑换码记录（REQ-E1a 充值入账的唯一上游依据）。
  *
  * 只读：`GET /api/redemption/?p=&page_size=`（AdminAuth 路由，与 mapay-redemption.ts
- * 用的 /api/redemption/search 同一族）。充值在我方没有可观测的写入点——mPay 回调只
+ * 用的 `/api/redemption/search` 同一族）。充值在我方没有可观测的写入点——mPay 回调只
  * **生成**兑换码，真正的入账是用户在 new-api 端兑换（`POST /api/user/topup`），
  * 所以“已使用”这件事只能从上游记录读回来（`status=2` + `used_user_id` + `redeemed_time`）。
+ *
+ * 分页（2026-09-27 修）：上游 **p 从 1 起算**，`p=0` 与 `p=1` 返回同一页。旧实现从
+ * `p=0` 起、默认只翻 1 页 ⇒ 生产上 415 张码只看到最新 100 张、且同一页被数两次
+ * （日志 scanned=200 而库里 415 张），最旧的 315 张永远不扫。现在按 upstream `total`
+ * 翻到尽、按 id 去重、`maxPages` 只作为防御上限。
  *
  * 返回形状两种都收（`data.items` 或裸数组）——与 findGatewayUserByUsername 同一防御
  * 姿势：上游不同版本分页信封不一致时，不要静默变成“没有兑换码”（那会把充值吞掉）。
@@ -108,20 +113,30 @@ export interface GatewayRedemption {
 export async function listGatewayRedemptions(
   input: { pages?: number; pageSize?: number; keyword?: string } = {},
 ): Promise<GatewayRedemption[]> {
-  const pages = Math.max(1, Math.min(input.pages ?? 1, 20));
+  const maxPages = Math.max(1, Math.min(input.pages ?? 20, 50));
   const pageSize = Math.max(1, Math.min(input.pageSize ?? 100, 100));
-  const items: GatewayRedemption[] = [];
-  for (let page = 0; page < pages; page += 1) {
+  const byId = new Map<number, GatewayRedemption>();
+  for (let page = 1; page <= maxPages; page += 1) {
     const path = input.keyword
       ? `/api/redemption/search?keyword=${encodeURIComponent(input.keyword)}&p=${page}&page_size=${pageSize}`
       : `/api/redemption/?p=${page}&page_size=${pageSize}`;
-    const result = await callGateway<GatewayRedemption[] | { items?: GatewayRedemption[] }>(path);
+    const result = await callGateway<GatewayRedemption[] | { items?: GatewayRedemption[]; total?: number }>(path);
     if (!result.success) throw new Error(result.message ?? "读取上游兑换码失败。");
     const pageItems = Array.isArray(result.data) ? result.data : (result.data?.items ?? []);
-    items.push(...pageItems);
-    if (pageItems.length < pageSize) break;
+    const total = Array.isArray(result.data) ? undefined : result.data?.total;
+    let added = 0;
+    for (const item of pageItems) {
+      if (!item || !Number.isFinite(Number(item.id))) continue;
+      if (!byId.has(item.id)) {
+        byId.set(item.id, item);
+        added += 1;
+      }
+    }
+    // 本页不足一页 / 已达 total / 本页没有新 id ⇒ 到底了（上游分页语义变动也不死循环）。
+    if (pageItems.length < pageSize || added === 0) break;
+    if (typeof total === "number" && byId.size >= total) break;
   }
-  return items;
+  return [...byId.values()];
 }
 
 /**

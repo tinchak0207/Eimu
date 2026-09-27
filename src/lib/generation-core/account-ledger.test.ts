@@ -123,6 +123,13 @@ function fakeLedger(seed: { rows?: FakeLedgerRow[]; failInsert?: boolean; clock?
       const row = rows.find((candidate) => candidate.idempotency_ref === values[0]);
       return row ? [{ amount: row.amount }] : [];
     }
+    // 基線沖銷兩條腿的存在性探測（`WHERE idempotency_ref IN (…, …)`）。
+    if (query.includes("SELECT idempotency_ref FROM account_ledger") && query.includes("IN")) {
+      const wanted = new Set(values.map((value) => String(value)));
+      return rows
+        .filter((row) => wanted.has(row.idempotency_ref))
+        .map((row) => ({ idempotency_ref: row.idempotency_ref }));
+    }
     if (query.includes("SELECT created_at FROM account_ledger WHERE idempotency_ref")) {
       const row = rows.find((candidate) => candidate.idempotency_ref === values[0]);
       return row ? [{ created_at: row.created_at }] : [];
@@ -472,7 +479,7 @@ test("管理員調整：加減皆入帳，幂等鍵含調整目標（重放同�
   assert.equal(ledger.balanceOf(40), 6_000_000);
 });
 
-test("充值入帳：已使用的兌換碼入帳、未使用的不入帳、基線前兌換的不重複計", async () => {
+test("充值入帳：已使用的兌換碼入帳、未使用的不入帳、基線前兌換補記而不雙算", async () => {
   // 基線時刻 = 2026-09-23T00:00:00Z（fake 時鐘），基線值 = 1,000,000。
   const ledger = fakeLedger();
   await withEnv(CONTROL_PLANE_ENV, () =>
@@ -482,9 +489,10 @@ test("充值入帳：已使用的兌換碼入帳、未使用的不入帳、基�
   const redemptions: GatewayRedemption[] = [
     // 已使用、且兌換時間晚於基線 → 應入帳 +2,000,000
     { id: 9001, key: "k-1", name: "MP0001", quota: 2_000_000, status: 2, used_user_id: 40, redeemed_time: Date.UTC(2026, 8, 23, 1, 0) / 1000 },
-    // 未使用（redeemed_time=0）→ 不入帳（發碼 ≠ 入帳）
+    // 未使用（redeemed_time=0）→ 不入帳（發碼 ≠ 入賬）
     { id: 9002, key: "k-2", name: "MP0002", quota: 3_000_000, status: 1, redeemed_time: 0 },
-    // 基線之前就已兌換 → 已含在基線裡，不得再加（防雙算）
+    // 基線之前就已兌換 → 額度已含在基線裡：記「充值 +2,000,000」讓來源可見，
+    // 同時記 −2,000,000 沖銷腿 ⇒ 淨額 0，不得讓餘額多出這 4,000,000。
     { id: 9003, key: "k-3", name: "MP0003", quota: 4_000_000, status: 2, used_user_id: 40, redeemed_time: Date.UTC(2026, 8, 22, 0, 0) / 1000 },
   ];
   const summary = await withEnv(CONTROL_PLANE_ENV, () =>
@@ -495,12 +503,16 @@ test("充值入帳：已使用的兌換碼入帳、未使用的不入帳、基�
   );
   assert.equal(summary.scanned, 3);
   assert.equal(summary.charged, 1);
+  assert.equal(summary.chargedBaselineAbsorbed, 1);
   assert.equal(summary.skippedUnused, 1);
-  assert.equal(summary.skippedBeforeBaseline, 1);
-  assert.equal(ledger.balanceOf(40), 3_000_000, "1,000,000 基線 + 2,000,000 充值");
-  assert.equal(ledger.rows.filter((row) => row.entry_type === "recharge").length, 1);
+  assert.equal(summary.skippedBeforeBaseline, 0);
+  assert.equal(ledger.balanceOf(40), 3_000_000, "1,000,000 基線 + 2,000,000 充值（沖銷腿淨額 0）");
+  assert.equal(ledger.rows.filter((row) => row.entry_type === "recharge").length, 2);
+  const offset = ledger.rows.filter((row) => row.entry_type === "adjustment" && row.source_ref === "redemption:9003");
+  assert.equal(offset.length, 1);
+  assert.equal(offset[0]?.amount, -4_000_000);
 
-  // 週期性重掃（同一批兌換碼再掃一次）不得重複入帳。
+  // 週期性重掃（同一批兌換碼再掃一次）不得重複入帳，也不得重複補記沖銷。
   const again = await withEnv(CONTROL_PLANE_ENV, () =>
     ingestRedeemedRecharges(
       {},
@@ -508,7 +520,194 @@ test("充值入帳：已使用的兌換碼入帳、未使用的不入帳、基�
     ),
   );
   assert.equal(again.charged, 0);
+  assert.equal(again.chargedBaselineAbsorbed, 0);
   assert.equal(ledger.balanceOf(40), 3_000_000);
+  assert.equal(ledger.rows.filter((row) => row.entry_type === "adjustment" && row.source_ref === "redemption:9003").length, 1);
+});
+
+test("生產實錄回放：415 張碼全掃、11 張已兌換全數在帳本上（含人工碼，淨額不變）", async () => {
+  // 2026-09-27 直查 /opt/imagesite/new-api-data/one-api.db 的原值（id/name/quota/
+  // used_user_id/redeemed_time 一字不改），上游分頁語義 p=0≡p=1 亦照實模擬。
+  const used: { id: number; name: string; quota: number; userId: number; at: string }[] = [
+    { id: 1, name: "starter-9.9-200", quota: 100_000_000, userId: 9, at: "2026-06-02 19:51:05" },
+    { id: 7, name: "tier-1", quota: 50_000_000, userId: 30, at: "2026-06-08 14:20:55" },
+    { id: 207, name: "tier-3", quota: 750_000_000, userId: 77, at: "2026-07-21 18:26:43" },
+    { id: 209, name: "tier-3", quota: 750_000_000, userId: 22, at: "2026-07-25 23:25:02" },
+    { id: 406, name: "gift", quota: 2_500_000, userId: 4, at: "2026-06-06 13:32:20" },
+    { id: 409, name: "eimu1500", quota: 750_000_000, userId: 102, at: "2026-08-27 17:19:48" },
+    { id: 410, name: "eimu1500-2", quota: 750_000_000, userId: 116, at: "2026-08-27 17:27:11" },
+    { id: 411, name: "eimu1500", quota: 750_000_000, userId: 117, at: "2026-08-29 17:57:00" },
+    { id: 412, name: "eimu1500b", quota: 750_000_000, userId: 124, at: "2026-08-29 18:14:03" },
+    { id: 413, name: "eimu1500", quota: 750_000_000, userId: 117, at: "2026-09-01 03:15:52" },
+    { id: 414, name: "MANUAL-1500C-0919", quota: 750_000_000, userId: 117, at: "2026-09-19 22:08:39" },
+  ];
+  const shanghai = (text: string) => Math.floor((Date.parse(`${text.replace(" ", "T")}+08:00`)) / 1000);
+  const byId = new Map(used.map((item) => [item.id, item]));
+  const upstreamTotal = 415;
+  const pageItems = (page: number) => {
+    const items: unknown[] = [];
+    for (let i = 0; i < 100; i += 1) {
+      const id = upstreamTotal - (page - 1) * 100 - i;
+      if (id <= 0) continue;
+      const hit = byId.get(id);
+      items.push(
+        hit
+          ? { id, key: `key-${id}`, name: hit.name, quota: hit.quota, status: 2, used_user_id: hit.userId, redeemed_time: shanghai(hit.at) }
+          : { id, key: `key-${id}`, name: `code-${id}`, quota: 100, status: 1, used_user_id: 0, redeemed_time: 0 },
+      );
+    }
+    return items;
+  };
+
+  // 開戶基線：全部種在 2026-09-23（中控手術日）⇒ 這 11 筆兌換全在基線之前。
+  const openingRows = [...new Set(used.map((item) => item.userId))].map((userId, index) => ({
+    id: `opening-${userId}`,
+    billing_user_id: userId,
+    entry_type: "opening",
+    amount: 0,
+    source: "seed",
+    source_ref: `new-api:users/${userId}@2026-09-23T00:00:00.000Z`,
+    idempotency_ref: `seed:${userId}:v1`,
+    job_id: null,
+    operation_id: null,
+    counterparty_user_id: null,
+    note: "基線",
+    metadata_json: "{}",
+    created_at: `2026-09-23T00:00:${String(index).padStart(2, "0")}.000Z`,
+  }));
+  const ledger = fakeLedger({ rows: openingRows });
+
+  const savedFetch = globalThis.fetch;
+  const savedEnv = { token: process.env.GATEWAY_ADMIN_ACCESS_TOKEN, user: process.env.GATEWAY_ADMIN_USER_ID, base: process.env.GATEWAY_BASE_URL };
+  process.env.GATEWAY_ADMIN_ACCESS_TOKEN = "test-token";
+  process.env.GATEWAY_ADMIN_USER_ID = "1";
+  process.env.GATEWAY_BASE_URL = "https://gateway.test";
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = new URL(String(input));
+    if (url.pathname.startsWith("/api/redemption")) {
+      const requested = Number(url.searchParams.get("p"));
+      const page = requested === 0 ? 1 : requested; // 上游 p=0 等同 p=1（生产实锤）
+      return { status: 200, text: async () => JSON.stringify({ success: true, data: { items: pageItems(page), total: upstreamTotal } }) } as unknown as Response;
+    }
+    const id = Number(url.pathname.split("/").pop());
+    return { status: 200, text: async () => JSON.stringify({ success: true, data: { id, username: `u-${id}`, quota: 0 } }) } as unknown as Response;
+  }) as typeof fetch;
+
+  try {
+    // 不注入 readRedemptions：走真 listGatewayRedemptions（真分頁邏輯）。
+    const summary = await withEnv(CONTROL_PLANE_ENV, () =>
+      ingestRedeemedRecharges({}, { sql: ledger.sql, fetchUser: async (id) => gatewayUser(id, 0) }),
+    );
+    assert.equal(summary.scanned, 415, "415 張碼必須一張不漏（舊版只看得到 200 次、100 張唯一）");
+    assert.equal(summary.skippedUnused, 404);
+    assert.equal(summary.charged + summary.chargedBaselineAbsorbed, 11, "11 張已兌換碼全部要在帳本上留痕");
+    assert.equal(summary.charged, 0, "全部早於基線 ⇒ 全走補記+沖銷，不走直接充值");
+    assert.equal(summary.chargedBaselineAbsorbed, 11);
+    assert.equal(summary.errors.length, 0);
+    const recharges = ledger.rows.filter((row) => row.entry_type === "recharge");
+    assert.equal(recharges.length, 11, "人工碼也要入帳（額度是真的發出去了）");
+    assert.equal(ledger.rows.filter((row) => row.entry_type === "adjustment").length, 11, "每筆補記都配一條沖銷腿");
+    // 人工碼（全部非 MP）不得被記成現金來源。
+    assert.equal(recharges.filter((row) => row.source === "redemption-sync").length, 0);
+    assert.equal(recharges.filter((row) => row.source === "gift-manual-code").length, 11);
+    // 淨額：基線 0 + Σ充值 − Σ沖銷 = 0（不許因為回放而多出一分錢）。
+    assert.equal(ledger.balanceOf(117), 0);
+
+    // 再掃一輪：不得重複入帳。
+    const again = await withEnv(CONTROL_PLANE_ENV, () =>
+      ingestRedeemedRecharges({}, { sql: ledger.sql, fetchUser: async (id) => gatewayUser(id, 0) }),
+    );
+    assert.equal(again.charged + again.chargedBaselineAbsorbed, 0);
+    assert.equal(ledger.rows.filter((row) => row.entry_type === "recharge").length, 11);
+  } finally {
+    globalThis.fetch = savedFetch;
+    if (savedEnv.token === undefined) delete process.env.GATEWAY_ADMIN_ACCESS_TOKEN;
+    else process.env.GATEWAY_ADMIN_ACCESS_TOKEN = savedEnv.token;
+    if (savedEnv.user === undefined) delete process.env.GATEWAY_ADMIN_USER_ID;
+    else process.env.GATEWAY_ADMIN_USER_ID = savedEnv.user;
+    if (savedEnv.base === undefined) delete process.env.GATEWAY_BASE_URL;
+    else process.env.GATEWAY_BASE_URL = savedEnv.base;
+  }
+});
+
+test("充值入帳現金判定：mPay 單記現金來源、人工碼記非現金來源（投影層据此排除付費）", async () => {
+  const ledger = fakeLedger();
+  await withEnv(CONTROL_PLANE_ENV, () =>
+    ensureAccountOpening(40, { sql: ledger.sql, fetchUser: async (id) => gatewayUser(id, 1_000_000) }),
+  );
+  const redemptions: GatewayRedemption[] = [
+    // mPay 真實單命名 = `MP` + out_trade_no 後 18 碼（mapay-redemption.mapayOrderRedemptionName）
+    { id: 9101, key: "k-cash", name: "MPIMGMUJU63WMD1D372", quota: 50_000_000, status: 2, used_user_id: 40, redeemed_time: Date.UTC(2026, 8, 24, 1, 0) / 1000 },
+    // 人工發碼（eimu1500 / MANUAL-* / tier-* 一族）
+    { id: 9102, key: "k-manual", name: "MANUAL-1500C-0919", quota: 750_000_000, status: 2, used_user_id: 40, redeemed_time: Date.UTC(2026, 8, 24, 2, 0) / 1000 },
+  ];
+  await withEnv(CONTROL_PLANE_ENV, () =>
+    ingestRedeemedRecharges(
+      {},
+      { sql: ledger.sql, readRedemptions: async () => redemptions, fetchUser: async (id) => gatewayUser(id, 1_000_000) },
+    ),
+  );
+  const cash = ledger.rows.find((row) => row.source_ref === "redemption:9101");
+  const manual = ledger.rows.find((row) => row.source_ref === "redemption:9102");
+  assert.equal(cash?.source, "redemption-sync");
+  assert.equal(manual?.source, "gift-manual-code");
+  // 非現金來源必須命中投影層的 NON_CASH_RECHARGE_SOURCE，否則人工碼會被算成營收。
+  assert.match(manual?.source ?? "", /gift|opening|checkin|check-in|welcome|bonus|grant|promo|trial|newbie|signup|reward/i);
+  assert.doesNotMatch(cash?.source ?? "", /gift|opening|checkin|check-in|welcome|bonus|grant|promo|trial|newbie|signup|reward/i);
+});
+
+test("充值入帳：沖銷腿缺一半時自癒補齊（不得留下單腿漂移）", async () => {
+  const ledger = fakeLedger({
+    rows: [
+      {
+        id: "opening-40",
+        billing_user_id: 40,
+        entry_type: "opening",
+        amount: 1_000_000,
+        source: "seed",
+        source_ref: "new-api:users/40@2026-09-23T00:00:00.000Z",
+        idempotency_ref: "seed:40:v1",
+        job_id: null,
+        operation_id: null,
+        counterparty_user_id: null,
+        note: "基線",
+        metadata_json: "{}",
+        created_at: "2026-09-23T00:00:00.000Z",
+      },
+      {
+        id: "broken-1",
+        billing_user_id: 40,
+        entry_type: "adjustment",
+        amount: -5_000_000,
+        source: "opening-offset",
+        source_ref: "redemption:9201",
+        idempotency_ref: "redemption:9201:opening-offset",
+        job_id: null,
+        operation_id: null,
+        counterparty_user_id: null,
+        note: "沖銷腿（充值腿遺失）",
+        metadata_json: "{}",
+        created_at: "2026-09-23T00:00:01.000Z",
+      },
+    ],
+  });
+  const balanceBefore = ledger.balanceOf(40);
+  const redemptions: GatewayRedemption[] = [
+    { id: 9201, key: "k-fix", name: "MPFIX", quota: 5_000_000, status: 2, used_user_id: 40, redeemed_time: Date.UTC(2026, 8, 22, 0, 0) / 1000 },
+  ];
+  const summary = await withEnv(CONTROL_PLANE_ENV, () =>
+    ingestRedeemedRecharges(
+      {},
+      { sql: ledger.sql, readRedemptions: async () => redemptions, fetchUser: async (id) => gatewayUser(id, 1_000_000) },
+    ),
+  );
+  assert.equal(summary.chargedBaselineAbsorbed, 1);
+  assert.equal(ledger.rows.filter((row) => row.idempotency_ref === "redemption:9201").length, 1);
+  assert.equal(ledger.rows.filter((row) => row.idempotency_ref === "redemption:9201:opening-offset").length, 1);
+  // 壞狀態本身是漂移（只有沖銷腿 ⇒ 少算了 5,000,000）；補上充值腿後回到
+  // 基線 1,000,000 + 充值 5,000,000 − 沖銷 5,000,000 = 1,000,000。
+  assert.equal(ledger.balanceOf(40), balanceBefore + 5_000_000);
+  assert.equal(ledger.balanceOf(40), 1_000_000);
 });
 
 test("單筆充值寫入器：金額非正數拒收（不得記出負充值）", async () => {

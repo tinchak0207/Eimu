@@ -511,7 +511,8 @@ export async function runAccountMaintenanceOnce(
     const recharges = await ingestRedeemedRecharges({}, { sql });
     console.log(
       `[account-ledger] 充值入帳掃描 scanned=${recharges.scanned} charged=${recharges.charged} ` +
-        `未使用=${recharges.skippedUnused} 基線前=${recharges.skippedBeforeBaseline} ` +
+        `基線前已補記=${recharges.chargedBaselineAbsorbed} 未使用=${recharges.skippedUnused} ` +
+        `基線前漏記=${recharges.skippedBeforeBaseline} ` +
         `訂閱碼=${recharges.skippedSubscription} errors=${recharges.errors.length}`,
     );
   } catch (error) {
