@@ -112,7 +112,7 @@ function EntityThumb({
   return (
     <span
       aria-hidden="true"
-      className={cn(box, "inline-flex items-center justify-center", unresolved || !kind ? "bg-ios-red/12 text-ios-red/70" : KIND_TINT[kind])}
+      className={cn(box, "inline-flex items-center justify-center", unresolved || !kind ? "bg-ios-red/[0.12] text-ios-red/70" : KIND_TINT[kind])}
     >
       <Icon className="h-[11px] w-[11px]" strokeWidth={2.2} />
     </span>
