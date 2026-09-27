@@ -90,8 +90,8 @@ export function computeFrameTimestamps(duration: number): FrameTimestamp[] {
   return timestamps;
 }
 
-/** 把秒格式成「约 3.4 秒」这类文案（保留一位小数）。 */
-function formatFrameTime(seconds: number): string {
+/** 把秒格式成「约 3.4 秒」这类文案（保留一位小数）。导出给节点动作与 API 的帧清单复用同一文案。 */
+export function formatFrameTime(seconds: number): string {
   const rounded = Math.round(seconds * 10) / 10;
   return `约 ${rounded} 秒`;
 }
@@ -129,6 +129,141 @@ export function validateVideoFile(file: { size: number; duration: number }): str
 
 function formatSeconds(seconds: number): string {
   return Math.round(seconds * 10) / 10 === 0 ? "0" : `${Math.round(seconds * 10) / 10}`;
+}
+
+// ─────────────────────────── 节点动作：截帧 / 序列帧计划（纯函数，可测）
+
+/**
+ * 序列帧的帧数上限。
+ *
+ * 为什么是 24：每一帧都要 seek 一次再 drawImage，浏览器 seek 是 100~300ms
+ * 量级；24 帧 ≈ 3~7 秒，仍在「节点动作」可接受的等待内。再高就该走后端合成
+ * （本仓不提供该路径），所以到顶**明确拒绝**，绝不静默截断。
+ */
+export const MAX_SEQUENCE_FRAMES = 24;
+
+/** 抽帧模式：current = 取指定时刻单帧；sequence = 按间隔或帧数抽序列帧。 */
+export type FrameActionMode = "current" | "sequence";
+
+export interface FrameExtractionRequest {
+  /** 视频总时长（秒）。必须是有限正数。 */
+  durationSec: number;
+  mode: FrameActionMode;
+  /** sequence 用：抽帧间隔（秒）。与 count 二选一。 */
+  intervalSec?: number;
+  /** sequence 用：均分帧数。与 intervalSec 二选一。 */
+  count?: number;
+  /** current 用：要取的那一帧在视频中的时刻（秒）。 */
+  atSec?: number;
+}
+
+/** 计划结果。**任何非法输入都回 ok:false，绝不抛异常**（调用方是路由与 UI，不能靠 try 兜）。 */
+export type FrameExtractionPlan =
+  | { ok: true; timesSec: number[] }
+  | { ok: false; reason: string };
+
+/** 毫秒对齐，杀掉 0.30000000000000004 这类浮点尾巴后再进输出。 */
+function alignToMillis(seconds: number): number {
+  return Math.round(seconds * 1000) / 1000;
+}
+
+function isPositiveFinite(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+/**
+ * 把「抽帧意图」算成具体时间点列表（节点动作的纯逻辑层，node 可测）。
+ *
+ * 规则（与上传统抽帧共用同一条「绝不 seek 到 duration」的坑位经验）：
+ *   - current：atSec 单点。atSec === duration 时回退 LAST_FRAME_SEEK_BACKOFF_S
+ *     （seek 到末尾多数浏览器拿不到画面）；atSec > duration 直接拒绝。
+ *   - sequence + intervalSec：t = 0, interval, 2*interval … 严格小于 duration 的全收
+ *     （末点不 seek 到片尾）。帧数 = ceil(duration/interval)，超上限拒绝。
+ *   - sequence + count：把 [0, duration) 均分 count 份，末点回退 LAST_FRAME_SEEK_BACKOFF_S，
+ *     与 computeFrameTimestamps 的末帧规矩一致。
+ *   - intervalSec 与 count 同时给 / 都不给 → 拒绝（不猜用户意图）。
+ *
+ * 输出全部毫秒对齐、单调递增、落在 [0, duration)；浮点撞点去重后不回退成重复帧。
+ */
+export function planFrameExtraction(req: FrameExtractionRequest): FrameExtractionPlan {
+  const durationSec = req?.durationSec;
+  if (!isPositiveFinite(durationSec)) {
+    return { ok: false, reason: "视频时长未知或不是正数，无法计算抽帧时间点。" };
+  }
+
+  if (req.mode === "current") {
+    const atSec = req.atSec;
+    if (typeof atSec !== "number" || !Number.isFinite(atSec)) {
+      return { ok: false, reason: "提取当前帧需要给出 atSec（秒）。" };
+    }
+    if (atSec < 0) {
+      return { ok: false, reason: `提取时刻 ${alignToMillis(atSec)} 秒不能为负。` };
+    }
+    if (atSec > durationSec) {
+      return {
+        ok: false,
+        reason: `提取时刻 ${alignToMillis(atSec)} 秒超过视频长度 ${alignToMillis(durationSec)} 秒。`,
+      };
+    }
+    const clamped =
+      atSec >= durationSec ? Math.max(0, durationSec - LAST_FRAME_SEEK_BACKOFF_S) : atSec;
+    return { ok: true, timesSec: [alignToMillis(clamped)] };
+  }
+
+  if (req.mode !== "sequence") {
+    return { ok: false, reason: `未知的抽帧模式：${String(req.mode)}。` };
+  }
+
+  const hasInterval = req.intervalSec !== undefined;
+  const hasCount = req.count !== undefined;
+  if (hasInterval && hasCount) {
+    return { ok: false, reason: "intervalSec 与 count 只能给一个，不能同时指定。" };
+  }
+  if (!hasInterval && !hasCount) {
+    return { ok: false, reason: "序列帧需要给出 intervalSec（按间隔）或 count（按帧数）。" };
+  }
+
+  if (hasInterval) {
+    const intervalSec = req.intervalSec;
+    if (!isPositiveFinite(intervalSec)) {
+      return { ok: false, reason: `抽帧间隔必须是正数，收到 ${String(intervalSec)}。` };
+    }
+    const expected = Math.ceil(durationSec / intervalSec);
+    if (expected > MAX_SEQUENCE_FRAMES) {
+      return {
+        ok: false,
+        reason: `按间隔 ${alignToMillis(intervalSec)} 秒会抽出 ${expected} 帧，超过上限 ${MAX_SEQUENCE_FRAMES} 帧，请把间隔调大。`,
+      };
+    }
+    const timesSec: number[] = [];
+    for (let i = 0; i < expected; i++) {
+      const t = alignToMillis(i * intervalSec);
+      if (t >= durationSec) break; // 绝不 seek 到 duration 本身
+      if (timesSec.length > 0 && t <= timesSec[timesSec.length - 1]) continue; // 浮点撞点去重
+      timesSec.push(t);
+    }
+    return { ok: true, timesSec };
+  }
+
+  const count = req.count;
+  if (typeof count !== "number" || !Number.isInteger(count) || count <= 0) {
+    return { ok: false, reason: `帧数必须是正整数，收到 ${String(count)}。` };
+  }
+  if (count > MAX_SEQUENCE_FRAMES) {
+    return { ok: false, reason: `帧数 ${count} 超过上限 ${MAX_SEQUENCE_FRAMES} 帧，请调小。` };
+  }
+  if (count === 1) {
+    return { ok: true, timesSec: [0] };
+  }
+  const maxSeek = durationSec - LAST_FRAME_SEEK_BACKOFF_S;
+  const timesSec: number[] = [];
+  for (let i = 0; i < count; i++) {
+    const raw = i === count - 1 ? maxSeek : (durationSec * i) / (count - 1);
+    const t = alignToMillis(Math.min(Math.max(0, raw), Math.max(0, maxSeek)));
+    if (timesSec.length > 0 && t <= timesSec[timesSec.length - 1]) continue; // 极短影片去重
+    timesSec.push(t);
+  }
+  return { ok: true, timesSec };
 }
 
 // ─────────────────────────── 浏览器侧抽帧（AgentComposer 调用）
@@ -202,6 +337,59 @@ export async function extractVideoFrames(
   return frames;
 }
 
+// ─────────────────────────── 节点动作：按计划抽帧（浏览器侧执行层）
+
+/** 一帧的抽取结果：blob + 时间点，供节点动作落成画布图片。 */
+export interface ExtractedFrameAt {
+  index: number;
+  /** 该帧在视频中的时间点（秒），来自 planFrameExtraction。 */
+  timeSec: number;
+  /** 预览 alt 用的中文文案（与帧批抽同一格式）。 */
+  label: string;
+  blob: Blob;
+}
+
+/**
+ * 按 planFrameExtraction 给出的时间点抽帧（节点动作的执行层）。
+ *
+ * 复用既有视频抽帧的同一套原语（waitForMetadata / seekTo / captureFrame），
+ * **不重写** video→canvas→blob 流程；与 extractVideoFrames 的唯一差别是
+ * 时间点由调用方给（支持截帧/序列帧），而不是写死 4 帧。
+ *
+ * 为什么不在这里调 validateVideoFile：那是**上传统**的 60 秒 / 100MB 闸门；
+ * 节点动作抽的是已生成视频的帧，代价由计划层的 MAX_SEQUENCE_FRAMES 兜住，
+ * 不应对长视频直接拒收（也不改上传统的行为）。
+ *
+ * Object URL 生命周期仍归调用方（同 extractVideoFrames 的注释）。
+ *
+ * @param timesSec 毫秒对齐、单调递增、落在 [0, duration) 的时间点（plan 的输出）。
+ * @returns 与 timesSec 等长、顺序一致的帧。
+ */
+export async function extractFramesAtTimes(
+  sample: VideoElementSample,
+  timesSec: number[],
+  onProgress?: (done: number, total: number) => void,
+): Promise<ExtractedFrameAt[]> {
+  const { video } = sample;
+  const total = timesSec.length;
+  if (total === 0) return [];
+
+  // 同 extractVideoFrames 的坑：读 duration / seek 前必须等 loadedmetadata。
+  await waitForMetadata(video);
+  video.muted = true;
+  (video as HTMLVideoElement & { playsInline?: boolean }).playsInline = true;
+
+  const frames: ExtractedFrameAt[] = [];
+  onProgress?.(0, total);
+  for (let i = 0; i < total; i++) {
+    const timeSec = timesSec[i];
+    await seekTo(video, timeSec);
+    frames.push({ index: i, timeSec, label: formatFrameTime(timeSec), blob: await captureFrame(video) });
+    onProgress?.(frames.length, total);
+  }
+  return frames;
+}
+
 /** 判断一个 File 是否要走抽帧路径（MIME 优先，扩展名兜底：部分系统给空 MIME）。 */
 export function isVideoFile(file: { type?: string; name?: string }): boolean {
   if (file.type?.startsWith("video/")) return true;
@@ -250,6 +438,28 @@ export async function extractFramesFromFile(
     ),
     timestamps,
   };
+}
+
+/**
+ * 等 loadedmetadata（读 duration / seek 前必须）。
+ *
+ * extractVideoFrames 内联着同一段（上传统路径依赖它，硬约束禁改其行为），
+ * 这里独立一份给节点动作的 extractFramesAtTimes 用；两段语义逐字相同。
+ */
+async function waitForMetadata(video: HTMLVideoElement): Promise<void> {
+  if (video.readyState >= 1) return;
+  await new Promise<void>((resolve, reject) => {
+    const onLoaded = () => {
+      video.removeEventListener("loadedmetadata", onLoaded);
+      resolve();
+    };
+    const onError = () => {
+      video.removeEventListener("error", onError);
+      reject(new Error("视频解码失败，无法读取。"));
+    };
+    video.addEventListener("loadedmetadata", onLoaded);
+    video.addEventListener("error", onError);
+  });
 }
 
 /** 等待 video 跳到指定时间（等 seeked，否则 draw 到的是上一帧）。 */

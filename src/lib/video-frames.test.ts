@@ -1,15 +1,23 @@
-// video-frames 纯函数测试（D-16 抽帧规格）。
-// 运行器 node:test，与仓库其余测试一致；浏览器侧的 extractVideoFrames 不在此测。
+// video-frames 纯函数测试（D-16 抽帧规格 + 节点动作抽帧计划）。
+// 与仓库其余测试一致走 node:test（npm test = tsx --test）；vitest.config.ts 开了
+// globals，这里以 globalThis.test 优先、fallback node:test.test，让同一份测试在
+// 两种执行器下都能注册。浏览器侧的 extractVideoFrames 不在此测。
 
-import test from "node:test";
 import assert from "node:assert/strict";
+import * as nodeTest from "node:test";
+
+type TestFn = (name: string, fn: () => void | Promise<void>) => unknown;
+const test = ((globalThis as unknown as { test?: TestFn }).test ??
+  (nodeTest.test as unknown as TestFn));
 import {
   FRAME_COUNT,
   LAST_FRAME_SEEK_BACKOFF_S,
+  MAX_SEQUENCE_FRAMES,
   MAX_VIDEO_DURATION_SECONDS,
   MAX_VIDEO_FILE_BYTES,
   computeFrameTimestamps,
   formatBytes,
+  planFrameExtraction,
   validateVideoFile,
 } from "./video-frames";
 
@@ -126,4 +134,85 @@ test("formatBytes 按量级切换单位", () => {
 test("formatBytes 对非有限值给可读兜底而不是 NaN", () => {
   assert.equal(formatBytes(Number.NaN), "未知大小");
   assert.equal(formatBytes(Number.POSITIVE_INFINITY), "未知大小");
+});
+
+// ─────────────────────────── 节点动作：planFrameExtraction 真行为断言
+
+test("序列帧：duration=10 interval=2 → 5 个时间点逐位元等于预期", () => {
+  const plan = planFrameExtraction({ durationSec: 10, mode: "sequence", intervalSec: 2 });
+  assert.equal(plan.ok, true);
+  if (!plan.ok) return;
+  assert.deepEqual(plan.timesSec, [0, 2, 4, 6, 8]);
+  // 逐位元复核（不是只看长度）
+  assert.equal(plan.timesSec[0], 0);
+  assert.equal(plan.timesSec[1], 2);
+  assert.equal(plan.timesSec[2], 4);
+  assert.equal(plan.timesSec[3], 6);
+  assert.equal(plan.timesSec[4], 8);
+});
+
+test("序列帧：count=5 duration=10 → 5 点，首尾在合理范围", () => {
+  const plan = planFrameExtraction({ durationSec: 10, mode: "sequence", count: 5 });
+  assert.equal(plan.ok, true);
+  if (!plan.ok) return;
+  assert.equal(plan.timesSec.length, 5);
+  assert.deepEqual(plan.timesSec, [0, 2.5, 5, 7.5, 9.95]);
+  assert.equal(plan.timesSec[0], 0, "首点必须是 0");
+  assert.ok(plan.timesSec[4] < 10 && plan.timesSec[4] >= 9.9, `末点应在片尾附近但不等于 duration，实际 ${plan.timesSec[4]}`);
+});
+
+test("超上限 / interval=0：回拒绝理由而非例外", () => {
+  const zero = planFrameExtraction({ durationSec: 10, mode: "sequence", intervalSec: 0 });
+  assert.equal(zero.ok, false);
+  if (zero.ok) return;
+  assert.match(zero.reason, /正数/);
+
+  const tooMany = planFrameExtraction({ durationSec: 10, mode: "sequence", count: MAX_SEQUENCE_FRAMES + 1 });
+  assert.equal(tooMany.ok, false);
+  if (tooMany.ok) return;
+  assert.match(tooMany.reason, /上限/);
+  assert.match(tooMany.reason, new RegExp(String(MAX_SEQUENCE_FRAMES)));
+
+  const dense = planFrameExtraction({ durationSec: 10, mode: "sequence", intervalSec: 0.1 });
+  assert.equal(dense.ok, false);
+  if (dense.ok) return;
+  assert.match(dense.reason, /超过上限/);
+});
+
+test("浮点对齐：interval=0.1 不产生 0.30000000000000004", () => {
+  const plan = planFrameExtraction({ durationSec: 0.5, mode: "sequence", intervalSec: 0.1 });
+  assert.equal(plan.ok, true);
+  if (!plan.ok) return;
+  assert.deepEqual(plan.timesSec, [0, 0.1, 0.2, 0.3, 0.4]);
+});
+
+test("截帧：current 取指定时刻；落在片尾时回退，超长度时拒绝", () => {
+  const mid = planFrameExtraction({ durationSec: 10, mode: "current", atSec: 3 });
+  assert.deepEqual(mid, { ok: true, timesSec: [3] });
+
+  const end = planFrameExtraction({ durationSec: 10, mode: "current", atSec: 10 });
+  assert.equal(end.ok, true);
+  if (!end.ok) return;
+  assert.deepEqual(end.timesSec, [Math.round((10 - LAST_FRAME_SEEK_BACKOFF_S) * 1000) / 1000]);
+
+  const over = planFrameExtraction({ durationSec: 10, mode: "current", atSec: 11 });
+  assert.equal(over.ok, false);
+  if (over.ok) return;
+  assert.match(over.reason, /超过视频长度/);
+});
+
+test("非法时长的多种输入一律回 ok:false，绝不抛例外", () => {
+  const cases = [
+    { durationSec: Number.NaN, mode: "sequence", intervalSec: 1 },
+    { durationSec: 10, mode: "sequence" },
+    { durationSec: 10, mode: "sequence", intervalSec: 1, count: 3 },
+    { durationSec: 10, mode: "sequence", count: -3 },
+    { durationSec: 10, mode: "sequence", count: 2.5 },
+  ] as const;
+  for (const input of cases) {
+    const result = planFrameExtraction(input as never);
+    assert.equal(result.ok, false, `${JSON.stringify(input)} 应被拒绝`);
+    if (result.ok) continue;
+    assert.ok(result.reason.length > 0, "拒绝必须给理由");
+  }
 });
