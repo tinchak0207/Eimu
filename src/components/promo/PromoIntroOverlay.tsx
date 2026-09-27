@@ -47,8 +47,13 @@ const COVER_SRC = "/promo/eimu-promo-cover.jpg";
 /** 封面畫布：1920×1080（見 promo-video/cover.html）。 */
 const COVER_W = 1920;
 const COVER_H = 1080;
-/** `.prompt` 框在畫布上的矩形——真輸入框就照這組數字蓋上去。 */
-const BOX = { left: 294, top: 690, width: 700, height: 112 };
+/**
+ * `.prompt` 框在畫布上的矩形（見 cover.html）。真輸入框照這組數字蓋上去，並
+ * **四周各出血 6px**：封面那張框是畫上去的（自帶文字、游標與送出鈕），蓋不乾淨
+ * 就會在圓角邊緣露一線雙層。出血只吃掉框外 6px 的背景漸層，肉眼無感。
+ */
+const BOX_BLEED = 6;
+const BOX = { left: 294 - BOX_BLEED, top: 690 - BOX_BLEED, width: 700 + BOX_BLEED * 2, height: 112 + BOX_BLEED * 2 };
 /** 框中心（先把畫面中心對到這裡，再看什麼尺寸下最好用）。 */
 const BOX_CX = (BOX.left + BOX.width / 2) / COVER_W;
 const BOX_CY = (BOX.top + BOX.height / 2) / COVER_H;
