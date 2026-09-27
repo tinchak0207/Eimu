@@ -304,24 +304,37 @@ export interface CanvasNodeMetadata {
 }
 
 /**
- * 3D 場景卡 metadata 形狀（契約：3D 導演 subagent 回傳寫入）。
+ * 3D 場景卡 metadata 形狀。**兩條生產者**：
+ *   - `source: "director"`（或未標）＝ 3D 導演 subagent 回傳寫入（`blender-delegate.ts`），
+ *     六欄全形；卡面 turntable 播放器 ＋ stills 網格 ＋ 資產下載。
+ *   - `source: "import"` ＝ 用戶從本機導入的 GLB/GLTF（`scene-3d-import.ts` ＋
+ *     `/api/canvas/scene-3d`），只保證 `glb_path`；卡面只出 GLB 視口與下載，
+ *     **缺的欄位整塊不渲染**（不給空播放器/空網格）。
+ *
+ * 契約底線（清洗端 `toScene3dCard` 的整包丟棄判據）：`glb_path` 與 `scene_summary`
+ * 非空才算一張場景卡——導入卡也不例外（`scene_summary` 必須是**真實**來源文字，
+ * 不許編造場景描述）。`turntable_url` / `stills_urls` / `blend_path` / `duration_ms`
+ * 為**可選**欄位（2026-09-27 本機導入刀放寬；導演卡仍永遠給全六欄）。
+ *
  * 鐵律（canvas-snapshot-compressor 事故教訓）：本欄位族必須同步兩處白名單——
  * 讀取端 toNodeMetadata（layout.ts）與上行壓縮端 compactMetadataForAgent
  * （canvas-chat-types.ts），漏一端 = 刷新後欄位憑空消失；往復合同測試釘死。
  */
 export interface Scene3dCardMetadata {
-  /** turntable 旋轉展示視頻（mp4/webm 可播放 URL）。 */
-  turntable_url: string;
-  /** 渲染静帧縮圖（3-6 張，卡內網格展示）。 */
-  stills_urls: string[];
-  /** .blend 源檔下載路徑。 */
-  blend_path: string;
-  /** .glb 交換格式下載路徑。 */
+  /** turntable 旋轉展示視頻（mp4/webm 可播放 URL）。導演卡必給；導入卡無此欄。 */
+  turntable_url?: string;
+  /** 渲染静帧縮圖（3-6 張，卡內網格展示）。導演卡必給；導入卡無此欄。 */
+  stills_urls?: string[];
+  /** .blend 源檔下載路徑。導演卡必給；導入卡無此欄。 */
+  blend_path?: string;
+  /** .glb 交換格式下載路徑（**契約底線，兩條來源都必填**）。 */
   glb_path: string;
-  /** 場景摘要（一句話，副標題展示）。 */
+  /** 場景摘要（一句話，副標題展示）。**必填**：導入卡寫真實來源（如「从本机导入的 GLB」）。 */
   scene_summary: string;
-  /** turntable 時長（ms；無值時播放器自帶 duration 顯示）。 */
-  duration_ms: number;
+  /** turntable 時長（ms；無值時播放器自帶 duration 顯示）。導入卡無此欄。 */
+  duration_ms?: number;
+  /** 卡片來源：`director`＝3D 導演 subagent 六欄全形；`import`＝本機導入的 GLB。 */
+  source?: "director" | "import";
 }
 
 export interface CanvasNode {

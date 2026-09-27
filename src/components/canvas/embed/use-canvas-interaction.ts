@@ -6,7 +6,22 @@
  */
 import { useCallback, useEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
 import type { UseCanvasChatReturn } from "@/hooks/use-canvas-chat";
-import { CanvasNodeType, type CanvasConnection, type CanvasNode, type CanvasPosition } from "@/lib/canvas/types";
+import {
+  CANVAS_NODE_DEFAULT_SIZE,
+  CanvasNodeType,
+  type CanvasConnection,
+  type CanvasNode,
+  type CanvasPosition,
+  type Scene3dCardMetadata,
+} from "@/lib/canvas/types";
+import { authHeaders } from "@/lib/canvas/client";
+import {
+  SCENE_3D_MAGIC_BYTES,
+  SCENE_3D_SIZE_HINT,
+  scene3dImportCardMetadata,
+  scene3dImportTitle,
+  validateScene3dUpload,
+} from "@/lib/canvas/scene-3d-import";
 import {
   alignNodes,
   arrangeGrid,
@@ -383,9 +398,17 @@ export function useCanvasInteraction({ canvasStateRef, containerRef, visibleNode
   // ── 建節點（雙擊/連線拖放/庫插入/導入共用）
   const createNodeAt = useCallback(
     (
-      type: "text" | "image" | "prompt" | "reference",
+      type: "text" | "image" | "prompt" | "reference" | "scene3d",
       world: CanvasPosition,
-      extras?: { content?: string; title?: string; width?: number; height?: number; referenceRole?: ReferenceImageRole },
+      extras?: {
+        content?: string;
+        title?: string;
+        width?: number;
+        height?: number;
+        referenceRole?: ReferenceImageRole;
+        /** scene3d：本機導入卡（source:"import"，只帶 glb_path）的 metadata。 */
+        sceneCard?: Scene3dCardMetadata;
+      },
     ) => {
       const state = canvasStateRef.current;
       const id = `n-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
@@ -396,23 +419,41 @@ export function useCanvasInteraction({ canvasStateRef, containerRef, visibleNode
             ? CanvasNodeType.Prompt
             : type === "reference"
               ? CanvasNodeType.Reference
-              : CanvasNodeType.Image;
-      const defaultTitle = type === "text" ? "文本" : type === "prompt" ? "提示词" : type === "reference" ? "参考图" : "图片";
+              : type === "scene3d"
+                ? CanvasNodeType.Scene3d
+                : CanvasNodeType.Image;
+      const defaultTitle =
+        type === "text"
+          ? "文本"
+          : type === "prompt"
+            ? "提示词"
+            : type === "reference"
+              ? "参考图"
+              : type === "scene3d"
+                ? CANVAS_NODE_DEFAULT_SIZE[CanvasNodeType.Scene3d].title
+                : "图片";
       const role = extras?.referenceRole;
+      const size = CANVAS_NODE_DEFAULT_SIZE[nodeType];
       const node: CanvasNode = {
         id,
         type: nodeType,
         title: extras?.title ?? defaultTitle,
         position: world,
-        width: extras?.width ?? (type === "reference" ? 300 : 340),
-        height: extras?.height ?? (type === "prompt" ? 200 : 240),
+        // 四個既有型別的尺寸逐字不變（reference 300×240、prompt 340×200、其餘 340×240）；
+        // 只有新增的 scene3d 取契約預設 420×360。
+        width: extras?.width ?? (type === "reference" ? 300 : type === "scene3d" ? size.width : 340),
+        height: extras?.height ?? (type === "prompt" ? 200 : type === "scene3d" ? size.height : 240),
         moved: true,
         metadata:
-          type === "text" || type === "prompt"
-            ? { content: extras?.content ?? "", status: "idle" }
-            : extras?.content
-              ? { content: extras.content, status: "success", ...(role ? { referenceRole: role } : {}) }
-              : { status: "idle", ...(role ? { referenceRole: role } : {}) },
+          type === "scene3d"
+            ? // 導入卡：glb_path 落地即完成（status:success 讓卡不顯示生成中骨架）；
+              // 其餘五欄缺席就是缺席，卡面走減法（Scene3dCardBody）。
+              { ...(extras?.sceneCard ? { sceneCard: extras.sceneCard } : {}), status: "success" }
+            : type === "text" || type === "prompt"
+              ? { content: extras?.content ?? "", status: "idle" }
+              : extras?.content
+                ? { content: extras.content, status: "success", ...(role ? { referenceRole: role } : {}) }
+                : { status: "idle", ...(role ? { referenceRole: role } : {}) },
       };
       state.addNodes([node]);
       setSelectedIds(new Set([id]));
@@ -448,6 +489,67 @@ export function useCanvasInteraction({ canvasStateRef, containerRef, visibleNode
       }
     },
     [createNodeAt, showError, canvasStateRef],
+  );
+
+  /**
+   * 本機 3D 模型（.glb/.gltf）→ 3D 場景卡節點（2026-09-27 本機導入刀）。
+   *
+   * 前後端同一把尺（`scene-3d-import.validateScene3dUpload`）：這裡先擋副檔名/體積/魔數，
+   * 服務端 `/api/canvas/scene-3d` 再驗一次（不信任客戶端）。成功才建卡：
+   * 標題＝檔名去副檔名、`scene_summary`＝真實來源文字、`source:"import"`；
+   * **不編造場景描述**（沒人看過這個模型）。
+   */
+  const importScene3dFile = useCallback(
+    async (file: File, world: CanvasPosition) => {
+      try {
+        const head = new Uint8Array(await file.slice(0, SCENE_3D_MAGIC_BYTES).arrayBuffer());
+        const checked = validateScene3dUpload({ name: file.name, size: file.size, head });
+        if (!checked.ok) {
+          showError(checked.message);
+          return;
+        }
+        const headers = authHeaders();
+        if (!headers) {
+          showError("请先登录再导入 3D 模型");
+          return;
+        }
+        const form = new FormData();
+        form.append("file", file);
+        let res: Response;
+        try {
+          res = await fetch("/api/canvas/scene-3d", { method: "POST", headers, body: form });
+        } catch {
+          showError("模型导入失败：网络连接失败");
+          return;
+        }
+        if (!res.ok) {
+          let message = `模型导入失败（HTTP ${res.status}）`;
+          try {
+            const body = (await res.json()) as { error?: unknown };
+            if (typeof body?.error === "string" && body.error) message = body.error;
+            else if (res.status === 413) {
+              message = SCENE_3D_SIZE_HINT;
+            }
+          } catch {
+            // 非 JSON 錯誤體：保留狀態碼訊息，不讓 parse 異常蓋掉真正原因。
+          }
+          showError(message);
+          return;
+        }
+        const data = (await res.json()) as { url?: unknown };
+        if (typeof data?.url !== "string" || !data.url) {
+          showError("模型导入失败：服务端未返回模型地址");
+          return;
+        }
+        createNodeAt("scene3d", world, {
+          title: scene3dImportTitle(file.name),
+          sceneCard: scene3dImportCardMetadata({ url: data.url, fileName: file.name }),
+        });
+      } catch (error) {
+        showError(error instanceof Error ? error.message : "模型导入失败");
+      }
+    },
+    [createNodeAt, showError],
   );
 
   // ── A1：port 拖線（window 級 move/up，capture 保證不被節點吃掉）
@@ -526,6 +628,17 @@ export function useCanvasInteraction({ canvasStateRef, containerRef, visibleNode
       });
     },
     [importImageFiles],
+  );
+
+  /** 建節點選單的「導入 3D 模型…」入口：落點取選單開出時的 world 座標（同上傳圖片形）。 */
+  const handleImportScene3d = useCallback(
+    (file: File) => {
+      const cm = createMenuRef.current;
+      setCreateMenu(null);
+      if (!cm) return;
+      void importScene3dFile(file, cm.world);
+    },
+    [importScene3dFile],
   );
 
   // ── 右鍵選單（沿用 v4 + 連線右鍵 + 字號）
@@ -620,6 +733,7 @@ export function useCanvasInteraction({ canvasStateRef, containerRef, visibleNode
     startPortDrag,
     handleCreateFromMenu,
     handleCreateMenuUpload,
+    handleImportScene3d,
     openNodeMenu,
     openCanvasMenu,
     saveNodeAsCard,

@@ -85,6 +85,47 @@ test("Scene3dGltfViewport 代理分支固定：只認 /api/blender-artifact 單�
   assert.doesNotMatch(source, /image-proxy/);
 });
 
+// ── 本機導入卡（2026-09-27）：缺 turntable/stills 一律走減法，不出空播放器/空網格 ──
+
+/** 導入卡：只帶 glb_path（真實來源＝公網物件存儲 URL）。 */
+const IMPORT_SCENE: Scene3dCardMetadata = {
+  glb_path: "https://blob.example.com/files/canvas/scene3d/42/a.glb",
+  scene_summary: "从本机导入的 GLB",
+  source: "import",
+};
+
+test("導入卡：缺 turntable/stills 時不渲染播放器、空網格與死按鈕，只留 GLB 視口與下載", () => {
+  const html = renderToStaticMarkup(createElement(Scene3dCardBody, { node: sceneNode(IMPORT_SCENE) }));
+  // 行為斷言：空播放器 / 未同步提示 / 靜帧網格 / 預覽切換鈕一律不出現
+  assert.doesNotMatch(html, /<video/);
+  assert.doesNotMatch(html, /turntable 未同步/);
+  assert.doesNotMatch(html, /场景静帧/);
+  assert.doesNotMatch(html, /3D 预览/);
+  // 留下的：GLB 視口容器（Scene3dGltfViewport 的殼）+ 下載連結 + 本機導入標籤 + 真實摘要
+  assert.match(html, /0b0f14/, "GLB 視口殼應在場");
+  assert.match(html, /\.glb/);
+  assert.match(html, /本机导入<\/span>/);
+  assert.match(html, /从本机导入的 GLB/);
+});
+
+test("導入卡：glb 地址不可用（空值）時主體與資產行整塊不出現，只剩摘要", () => {
+  const html = renderToStaticMarkup(
+    createElement(Scene3dCardBody, {
+      node: sceneNode({ glb_path: "", scene_summary: "从本机导入的 GLB", source: "import" }),
+    }),
+  );
+  assert.doesNotMatch(html, /0b0f14/);
+  assert.doesNotMatch(html, /本机导入<\/span>/);
+  assert.doesNotMatch(html, /<a/);
+  assert.match(html, /从本机导入的 GLB/);
+});
+
+test("導演卡不受導入刀影響：無「本机导入」標籤、turntable 主體照舊", () => {
+  const html = renderToStaticMarkup(createElement(Scene3dCardBody, { node: sceneNode(SCENE) }));
+  assert.doesNotMatch(html, /本机导入/);
+  assert.match(html, /场景资产/);
+});
+
 test("blender-artifact 代理路由形：白名單/禁 traversal/白模共存不動 elements", () => {
   const route = read("src/app/api/blender-artifact/route.ts");
   assert.match(route, /requireVerifiedUser/);

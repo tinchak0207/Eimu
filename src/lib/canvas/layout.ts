@@ -355,26 +355,36 @@ export function toGateConfirm(v: unknown): CanvasNodeGateConfirm | undefined {
   return { request_id: requestId, session_id: sessionId, status };
 }
 
-/** sceneCard 欄位族收斂：六欄逐一驗型，任一必填欄不符契約即整包丟棄。 */
+/**
+ * sceneCard 欄位族收斂。
+ *
+ * 契約（2026-09-27 本機導入刀放寬）：底線＝`glb_path` ＋ `scene_summary` 兩欄為非空字串，
+ * 其餘四欄（turntable_url / stills_urls / blend_path / duration_ms）**可選**——導入卡
+ * 只帶 GLB 也必須活下來。缺底線任一＝整包丟棄（不製造半形場景卡，負向對照有測試）。
+ * 可選欄位照舊逐欄驗型：型別不符＝省略該欄，不連坐整包。
+ */
 function toScene3dCard(v: unknown): Scene3dCardMetadata | undefined {
   if (!v || typeof v !== "object") return undefined;
   const s = v as Record<string, unknown>;
-  const turntableUrl = str(s.turntable_url);
-  const blendPath = str(s.blend_path);
   const glbPath = str(s.glb_path);
   const summary = str(s.scene_summary);
+  if (!glbPath || !summary) return undefined;
+  const turntableUrl = str(s.turntable_url);
+  const blendPath = str(s.blend_path);
   const durationMs = num(s.duration_ms);
   const stills = Array.isArray(s.stills_urls)
     ? s.stills_urls.filter((u): u is string => typeof u === "string")
     : undefined;
-  if (!turntableUrl || !blendPath || !glbPath || !summary || durationMs === undefined || !stills) return undefined;
+  // 來源判別欄位：只收兩值枚舉（未列舉值＝省略鍵，不連坐整包；卡仍以「無來源標記」存活）。
+  const source = s.source === "director" || s.source === "import" ? s.source : undefined;
   return {
-    turntable_url: turntableUrl,
-    stills_urls: stills,
-    blend_path: blendPath,
+    ...(turntableUrl ? { turntable_url: turntableUrl } : {}),
+    ...(stills && stills.length > 0 ? { stills_urls: stills } : {}),
+    ...(blendPath ? { blend_path: blendPath } : {}),
     glb_path: glbPath,
     scene_summary: summary,
-    duration_ms: durationMs,
+    ...(durationMs !== undefined ? { duration_ms: durationMs } : {}),
+    ...(source ? { source } : {}),
   };
 }
 

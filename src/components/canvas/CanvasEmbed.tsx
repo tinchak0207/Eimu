@@ -318,6 +318,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
     startPortDrag,
     handleCreateFromMenu,
     handleCreateMenuUpload,
+    handleImportScene3d,
     openNodeMenu,
     openCanvasMenu,
     saveNodeAsCard,
@@ -1130,6 +1131,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
           onClose={() => setCreateMenu(null)}
           onCreate={handleCreateFromMenu}
           onUploadFiles={handleCreateMenuUpload}
+          onImportScene3d={handleImportScene3d}
           title={createMenu?.connectFrom ? "连接到新节点" : "新建节点"}
         />
 

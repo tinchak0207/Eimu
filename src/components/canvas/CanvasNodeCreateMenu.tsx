@@ -2,8 +2,8 @@
 
 // CanvasNodeCreateMenu —— 新建節點小型 popover（雙擊空白 / 拉線到空白處彈出）。
 //
-// 只管「開在哪、怎麼關、五個入口」：文本節點、空白圖片節點、提示詞節點、
-// 上傳圖片、上傳參考圖（內藏 hidden file input，選檔後回調 onUploadFiles
+// 只管「開在哪、怎麼關、六個入口」：文本節點、空白圖片節點、提示詞節點、
+// 上傳圖片、上傳參考圖、導入 3D 模型（各自內藏 hidden file input，選檔後回調
 // 並自動關閉）；建立語義由呼叫端接手。標題列可換文案（如「连接到新节点」）。
 //
 // 定位：position = 相對畫布容器左上的座標；useLayoutEffect 量測實際尺寸
@@ -13,7 +13,8 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
-import { ImageIcon, Sparkles, Type, Upload } from "lucide-react";
+import { Box, ImageIcon, Sparkles, Type, Upload } from "lucide-react";
+import { MAX_SCENE_3D_BYTES, SCENE_3D_ACCEPT, SCENE_3D_SIZE_HINT } from "@/lib/canvas/scene-3d-import";
 
 export type CanvasCreateMenuKind = "text" | "image" | "prompt";
 
@@ -26,6 +27,8 @@ export interface CanvasNodeCreateMenuProps {
   onCreate: (type: CanvasCreateMenuKind) => void;
   /** 用戶選了本地圖片檔；kind="reference" 表示建成帶角色的參考圖節點 */
   onUploadFiles: (files: File[], kind?: "image" | "reference") => void;
+  /** 用戶選了本地 3D 模型檔（.glb/.gltf）→ 建 3D 場景卡節點（導入通道由呼叫端接）。 */
+  onImportScene3d?: (file: File) => void;
   /** 標題列說明（如「新建节点」/「连接到新节点」），預設「新建节点」 */
   title?: string;
 }
@@ -40,11 +43,13 @@ function CanvasNodeCreateMenu({
   onClose,
   onCreate,
   onUploadFiles,
+  onImportScene3d,
   title = "新建节点",
 }: CanvasNodeCreateMenuProps) {
   const menuRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const referenceInputRef = useRef<HTMLInputElement | null>(null);
+  const scene3dInputRef = useRef<HTMLInputElement | null>(null);
   const [adjusted, setAdjusted] = useState(position);
 
   // 翻轉定位：量測實際尺寸，超出畫布容器右 / 下緣就翻到游標另一側。
@@ -99,6 +104,15 @@ function CanvasNodeCreateMenu({
     onClose();
   };
 
+  // 3D 模型單檔（副檔名/體積驗證在呼叫端：那裡有錯誤提示通道）。
+  const handleScene3dChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !onImportScene3d) return;
+    onImportScene3d(file);
+    onClose();
+  };
+
   return (
     <div
       ref={menuRef}
@@ -137,7 +151,24 @@ function CanvasNodeCreateMenu({
         <span className="flex-1 truncate">上传参考图…</span>
       </button>
 
-      {/* 隱藏檔案選擇器：點「上传图片…」/「上传参考图…」代為觸發 */}
+      {/* 本機 3D 模型導入（.glb/.gltf）→ 3D 場景卡節點。選檔後由呼叫端驗證＋上傳。 */}
+      {onImportScene3d && (
+        <button
+          type="button"
+          role="menuitem"
+          title={SCENE_3D_SIZE_HINT}
+          className={ITEM_CLASS}
+          onClick={() => scene3dInputRef.current?.click()}
+        >
+          <Box className="h-4 w-4 shrink-0 text-muted-foreground" />
+          {/* 上限取自真源常數，不寫死——平台體頂收窄時文案自動跟上。 */}
+          <span className="flex-1 truncate">
+            导入 3D 模型…（≤ {Math.round(MAX_SCENE_3D_BYTES / 1024 / 1024)} MB）
+          </span>
+        </button>
+      )}
+
+      {/* 隱藏檔案選擇器：點「上传图片…」/「上传参考图…」/「导入 3D 模型…」代為觸發 */}
       <input
         ref={fileInputRef}
         type="file"
@@ -153,6 +184,13 @@ function CanvasNodeCreateMenu({
         multiple
         hidden
         onChange={(e) => handleFileChange(e, "reference")}
+      />
+      <input
+        ref={scene3dInputRef}
+        type="file"
+        accept={SCENE_3D_ACCEPT}
+        hidden
+        onChange={handleScene3dChange}
       />
     </div>
   );
