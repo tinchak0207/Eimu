@@ -45,7 +45,6 @@ export const metadata: Metadata = {
     "图片生成器",
     "AI画图工具",
   ],
-  alternates: { canonical: SITE_URL },
   openGraph: {
     type: "website",
     locale: "zh_CN",

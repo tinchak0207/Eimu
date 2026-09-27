@@ -1,9 +1,13 @@
 import type { Metadata } from "next";
+import { getSiteUrlFromEnv } from "@/lib/site-url";
 import { History } from "lucide-react";
 import { InlineCode, SectionTitle, Specular, Step } from "../DocsShell";
 
+const SITE_URL = getSiteUrlFromEnv();
+
 export const metadata: Metadata = {
   title: "历史素材复用 | 文档中心 | Eimu",
+  alternates: { canonical: `${SITE_URL}/docs/history` },
 };
 
 export default function DocsHistoryPage() {

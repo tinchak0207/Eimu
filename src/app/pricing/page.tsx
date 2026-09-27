@@ -1,4 +1,7 @@
 import { PricingClient } from "@/components/PricingClient";
+import { getSiteUrlFromEnv } from "@/lib/site-url";
+
+const SITE_URL = getSiteUrlFromEnv();
 
 const PRICING_TITLE = "充值方案 · Eimu";
 const PRICING_DESCRIPTION =
@@ -8,6 +11,7 @@ export const metadata = {
   title: PRICING_TITLE,
   description: PRICING_DESCRIPTION,
   keywords: ["GPT Image 2 价格", "Nano Banana Pro 价格", "AI生图充值", "生图中转 替代方案"],
+  alternates: { canonical: `${SITE_URL}/pricing` },
   openGraph: {
     title: PRICING_TITLE,
     description: PRICING_DESCRIPTION,

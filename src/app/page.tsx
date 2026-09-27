@@ -2,6 +2,9 @@ import type { Metadata } from "next";
 import { ImagePlayground } from "@/components/ImagePlayground";
 import { getAllSuggestions } from "@/lib/suggestions";
 import { SITE_DESCRIPTION, SITE_TITLE } from "@/lib/site-copy";
+import { getSiteUrlFromEnv } from "@/lib/site-url";
+
+const SITE_URL = getSiteUrlFromEnv();
 
 /**
  * 分頁標題＝站點介紹的第一句，也是被誤讀最狠的一格。
@@ -15,6 +18,7 @@ import { SITE_DESCRIPTION, SITE_TITLE } from "@/lib/site-copy";
 export const metadata: Metadata = {
   title: SITE_TITLE,
   description: SITE_DESCRIPTION,
+  alternates: { canonical: SITE_URL },
 };
 
 export default function Page() {

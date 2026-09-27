@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { getSiteUrlFromEnv } from "@/lib/site-url";
 import {
   BookOpen,
   CreditCard,
@@ -13,8 +14,11 @@ import {
 } from "lucide-react";
 import { InlineCode, SectionTitle, Specular, Step } from "./DocsShell";
 
+const SITE_URL = getSiteUrlFromEnv();
+
 export const metadata: Metadata = {
   title: "AI 助理快速上手 | 文档中心 | Eimu",
+  alternates: { canonical: `${SITE_URL}/docs` },
 };
 
 // ---- 教学文案数据（现场逐字：与助理聊天首页示例句同文案）----
