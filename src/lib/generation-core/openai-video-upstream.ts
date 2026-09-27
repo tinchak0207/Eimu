@@ -1,4 +1,5 @@
 import { SupplierRequestError } from "./failure-classifier";
+import { assertPaidVideoSubmissionAllowed } from "./paid-video-cost-gate";
 import type { ProviderTaskPollResult, SupplierGenerationInput, SupplierGenerationOutput, SupplierRecord } from "./types";
 
 // cangyuansuanli（new-api openai-video 兼容）seedance 视频上游封装（2026-08-30）。
@@ -144,6 +145,19 @@ export async function generateWithOpenaiVideo(
   // 上游模型名：capability 行显式携带 supplierModelId（napi/drama 渠道级映射）时
   // 直接短路，否则按平台模型 + resolution 查静态表（cangyuansuanli sd4/sd7 族）。
   const upstreamModel = supplier.supplierModelId ?? resolveUpstreamModel(platformModelId, resolution);
+
+  // 付費視頻上游硬閘（2026-09-27 ¥31.2857 事故後立）：唯一真源見
+  // paid-video-cost-gate.ts。此處是**提交前**的最後一道，只覆蓋 video 路徑，
+  // 圖片路徑不經本模組。缺 resolution／非白名單／4k／未核價三元組一律 400 拒收，
+  // 確保上游永遠拿不到缺省 resolution（上游缺省＝4k）。
+  assertPaidVideoSubmissionAllowed({
+    supplierModelId: upstreamModel,
+    resolution,
+    seconds: duration,
+    supplierId: supplier.id,
+    jobId: input.jobId,
+  });
+
   const isSd7 = SD7_MODEL_NAMES.has(upstreamModel);
   const isDrama30s = DRAMA_30S_MODEL_NAMES.has(upstreamModel);
   const isNapi = NAPI_MODEL_NAMES.has(upstreamModel);
