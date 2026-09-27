@@ -200,6 +200,11 @@ export interface AgentChatSurfaceProps {
   agentInjection?: { text: string; nonce: number; directive?: string; echo?: boolean } | null;
   /** 用戶發出消息時回調（上層收起右側模板庫）。 */
   onUserMessage?: () => void;
+  /**
+   * 一句話因為「沒登入」送不出去時上拋（上層留住，登入後補送）。
+   * 詳見 use-agent-chat 的 UseAgentChatOptions.onSendBlockedByAuth。
+   */
+  onSendBlockedByAuth?: (text: string) => void;
 }
 
 export function AgentChatSurface({
@@ -217,6 +222,7 @@ export function AgentChatSurface({
   startNewSessionRef,
   agentInjection,
   onUserMessage,
+  onSendBlockedByAuth,
   onExit,
   headerExtra,
 }: AgentChatSurfaceProps) {
@@ -239,6 +245,7 @@ export function AgentChatSurface({
     // 是恢复旧会话，不是建号，不受影响）。
     ...(onCanvasEvent ? { onCanvasEvent } : {}),
     ...(canvasStateProvider ? { canvasStateProvider } : {}),
+    ...(onSendBlockedByAuth ? { onSendBlockedByAuth } : {}),
   });
   const {
     state,

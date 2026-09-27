@@ -48,6 +48,7 @@ import {
   readPendingTrial,
   resolvePromoEntry,
   resolvePromoTrialIntent,
+  stashBlockedSend,
   writePendingTrial,
   type PromoEntryDecision,
 } from "@/components/promo/promo-gate";
@@ -510,9 +511,31 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
   }, []);
 
   /**
-   * 登入態翻真 → 補送待送的試玩那句話。
-   * 讀 ref 與 sessionStorage 兩處：ref 覆蓋同頁登入（按對話區的登入鈕），
+   * 主輸入區那句話被登入擋下（hook 的 onSendBlockedByAuth）→ 存進與宣傳片同一格。
+   *
+   * 為什麼要有這條：宣傳片浮層已經有「pending + 登入後補送」，但站上真正的入口
+   * （首頁主輸入區）沒吃到——未登入的人在那裡打字送出，那句話當場消失（composer
+   * 已清空，且 GitHub 登入是同窗口整頁跳轉，回來元件狀態全死），要重打一遍。
+   * 存同一格＝下面那條「登入態翻真 → 補送」effect 原樣接手，不必另造補送鏈。
+   */
+  const handleSendBlockedByAuth = useCallback((text: string) => {
+    const stashed = stashBlockedSend(
+      typeof window === "undefined" ? null : window.sessionStorage,
+      text,
+    );
+    promoPendingRef.current = stashed;
+  }, []);
+
+  /**
+   * 登入態翻真 → 補送那句話。
+   * 讀 ref 與 sessionStorage 兩處：ref 覆蓋同頁登入（按對話區的登入鈕／微信 popup），
    * sessionStorage 覆蓋跳轉型登入（OAuth 落地回 / 時元件已重掛、ref 早就沒了）。
+   *
+   * 這句話有兩個來源，共用同一格、走同一條補送：
+   * ①宣傳片收尾輸入框（handlePromoTrial 的 login 分支）；
+   * ②首頁主輸入區（handleSendBlockedByAuth：未登入送出＝hook 的 not_authenticated）。
+   * 兩者都是「使用者已經按下送出、只是還沒登入」，所以補送就是完成他那個動作，
+   * 不是替他多做一件事。
    */
   useEffect(() => {
     if (!isLoggedIn || authLoading) return;
@@ -759,6 +782,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
                     startNewSessionRef={startNewSessionRef}
                     agentInjection={agentTemplateInjection}
                     onUserMessage={() => setAgentTemplateDismissed(true)}
+                    onSendBlockedByAuth={handleSendBlockedByAuth}
                   />
                     </>
                   )}

@@ -203,3 +203,26 @@ export function clearPendingTrial(store: PromoStorage | null | undefined): void 
     // 同上：清不掉不是致命錯。
   }
 }
+
+/**
+ * 主輸入區（AI 助理 composer）那句話送不出去時，走與宣傳片收尾**同一格**。
+ *
+ * 2026-09-27 追「登入完成 → 第一次提交」斷點時發現：宣傳片浮層為了不讓那句話掉，
+ * 建了「pending + 登入後自動補送」這條路；但**站上真正的入口（首頁主輸入區）
+ * 沒有吃到同一條保護**——未登入的人在那裡打字送出，`send()` 的 lazy 建號以
+ * `not_authenticated` 收場，composer 已經 `setText("")`（onSend 是 async，
+ * 同步 throw 那條守衛永遠到不了），而 GitHub 登入是同窗口整頁跳轉回來，
+ * 元件狀態全死 ⇒ 那句話連痕跡都沒有，使用者得重打一遍。
+ *
+ * 這不是新機制：pending 那一格本來就是「這次造訪還沒做完的動作」的意思，
+ * 主輸入區被登入擋下的一句話與宣傳片結尾那句話是同一種東西。存同一格＝
+ * ImagePlayground 既有的「登入態翻真 → 補送」effect 原樣接手（零新補送鏈）。
+ *
+ * 回傳「補送 effect 將會讀到的那個值」（讀回同一格驗證），呼叫方不必自己再讀一次。
+ * 空／全空白不上寫（不覆蓋已存的），但仍回報那一格現在的值。
+ */
+export function stashBlockedSend(store: PromoStorage | null | undefined, text: string): string | null {
+  const trimmed = text.trim();
+  if (trimmed) writePendingTrial(store, trimmed);
+  return readPendingTrial(store);
+}

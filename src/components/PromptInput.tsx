@@ -92,6 +92,8 @@ interface PromptInputProps {
   agentInjection?: { text: string; nonce: number; directive?: string; echo?: boolean } | null;
   /** 用戶發出第一條消息時回調（上層收起右側模板庫）。 */
   onUserMessage?: () => void;
+  /** 一句話因未登入送不出去時上拋（上層留住，登入後補送）。 */
+  onSendBlockedByAuth?: (text: string) => void;
   /**
    * 畫布工作站浮動面板態：面板自己有確定高度（桌面全高 / 手機 46dvh 抽屜），
    * 聊天區改為填滿面板剩餘空間，由 transcript 內部滾動。仍然用
@@ -196,6 +198,7 @@ export function PromptInput({
   startNewSessionRef,
   agentInjection,
   onUserMessage,
+  onSendBlockedByAuth,
   fillAvailableHeight = false,
   chatHeaderExtra,
 }: PromptInputProps) {
@@ -709,6 +712,7 @@ export function PromptInput({
                 {...(startNewSessionRef ? { startNewSessionRef } : {})}
                 {...(agentInjection ? { agentInjection } : {})}
                 {...(onUserMessage ? { onUserMessage } : {})}
+                {...(onSendBlockedByAuth ? { onSendBlockedByAuth } : {})}
                 currentModelId={modelId}
               />
             </div>
