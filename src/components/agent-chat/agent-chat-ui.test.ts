@@ -368,7 +368,6 @@ test("D-17 有存档时默认开新对话，不拦人做选择题", () => {
   const hook = readCode(read("src/hooks/use-agent-chat.ts"));
   assert.match(hook, /startNewSession/);
   assert.match(surface, /onStartNewSession/);
-  assert.match(surface, /AI 助理<\/h2>/);
   /*
    * 2026-09-20 Route D 頭部重構：常駐呼吸绿点（bg-emerald-500 animate-pulse）與
    * bg-slate-300 已移除——新頭部＝lg-tint-blue 圆标 + SquarePen（开新对话）/
@@ -376,27 +375,31 @@ test("D-17 有存档时默认开新对话，不拦人做选择题", () => {
    * 2026-09-22 首屏翻面後第三顆鈕語義改寫：它不是「收起助理、回到原本的地方」
    * （已經沒有原本的地方了），而是「走另一條路：自己选模型和参数直接出图」。
    *
-   * 2026-09-27 暴君糾正定版：「AI 助理 / 随时待命」那兩行是廢話（助理就在眼前，
-   * 「随时待命」零資訊），常態回空串；那塊位置改放 资产 / 历史 兩個直接入口
-   * （原本埋在 ⋯ 選單裡），⋯（MoreHorizontal）連同選單整組退役，原位換成齒輪
-   * （设置）。異常態（reconnecting/closed/connecting）的文字照舊，一個字不能少。
+   * 2026-09-27 暴君糾正定版（兩輪）：先是「AI 助理 / 随时待命」那兩行被指為廢話，
+   * 接著標題與星芒圆标整組被要求拆掉——頂欄現在是純圖示列、零文字：那個位置放
+   * 资产 / 历史 兩顆圖示（原本埋在 ⋯ 選單裡），右側 新会话 / 直接生成 / 设置。
+   * ⋯（MoreHorizontal）連同收納選單整組退役，原位換成齒輪。連線異常態文字不再由
+   * 頂欄承擔（對話區本就有重試入口與「原因：…」行），所以頂欄不再出現狀態文案。
    */
   const surfaceCode = readCode(surface);
-  assert.match(surface, /lg-tint-blue/);
   assert.doesNotMatch(surfaceCode, /bg-emerald-500 animate-pulse/, "常駐呼吸绿点已移除");
   assert.doesNotMatch(surfaceCode, /bg-slate-300/, "bg-slate-300 已移除");
+  // 標題與 logo 圆标整組拆掉：頂欄零文字（只看得到圖示與 aria-label）。
+  assert.doesNotMatch(surfaceCode, /AI 助理<\/h2>/, "頂欄標題已拆");
+  assert.doesNotMatch(surfaceCode, /lg-tint-blue/, "頂欄星芒圆标已拆");
+  assert.doesNotMatch(surfaceCode, /随时待命/, "常態描述不得回魂");
+  assert.doesNotMatch(surfaceCode, /正在重新连接…|会话已结束|连接中…/, "狀態文案不再掛在頂欄");
+  assert.doesNotMatch(surfaceCode, /更多选项/, "⋯ 選單已退役");
+  // 五顆直接入口：資產／歷史在左（原標題位），新會話／直接生成／設置在右。
+  assert.match(surface, /aria-label="我的资产"/);
+  assert.match(surface, /aria-label="对话历史"/);
   assert.match(surface, /title="对话历史"/);
   assert.match(surface, /aria-label="开新对话"/);
   assert.match(surface, /aria-label="直接生成"/);
-  assert.doesNotMatch(surfaceCode, /随时待命/, "常態描述「随时待命」不得回魂");
-  assert.doesNotMatch(surfaceCode, /更多选项/, "⋯ 選單已退役");
-  // 資產／歷史直接站在頂欄，設定是齒輪直接觸發——三者都是原生按鈕，不再過一層菜單。
-  assert.match(surface, /aria-label="我的资产"/);
   assert.match(surface, /aria-label="设置"/);
   assert.match(surface, /onClick=\{openSettings\}/);
-  // 異常態文字是這條頂欄唯一的狀態出口，不得被常態化改動波及。
-  assert.match(surface, /正在重新连接…/);
-  assert.match(surface, /会话已结束/);
+  // 右簇要自己頂到最右——中間已沒有 flex-1 的標題塊可以撐。
+  assert.match(surface, /ml-auto flex items-center gap-0\.5/);
   // 2026-09-05 暴君裁定：多功能欄彈窗水平置中（fixed left-1/2 + -translate-x-1/2），
   // 不再掛在按鈕右下角（舊 absolute top-full right-0 作廢）。
   assert.match(surface, /fixed left-1\/2 .*-translate-x-1\/2/);

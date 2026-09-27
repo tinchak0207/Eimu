@@ -24,7 +24,6 @@ import {
   Search,
   Settings,
   SlidersHorizontal,
-  Sparkles,
   SquarePen,
 } from "lucide-react";
 import {
@@ -459,21 +458,6 @@ export function AgentChatSurface({
   const isActive = connection !== "idle" && connection !== "closed";
   const isInline = variant === "inline";
 
-  // 顶栏状态文字（CONNECTION_META 语义保留）：只给异常态，常态回空串。
-  //
-  // 2026-09-27 暴君糾正：「AI 助理 / 随时待命」那兩行是廢話——助理就在眼前，
-  // 「随时待命」不帶任何資訊，卻占掉頂欄第二行。常態不留字，那塊位置改放
-  // 資產／歷史兩個入口（原本埋在 ⋯ 選單裡）；reconnecting / closed / connecting
-  // 照舊顯示原狀態文案，異常態一個字都不能少。
-  const surfaceStatusText =
-    connection === "reconnecting"
-      ? "正在重新连接…"
-      : connection === "closed"
-        ? "会话已结束"
-        : connection === "connecting"
-          ? "连接中…"
-          : "";
-
   const onSaveToLibrary = useCallback(async (item: AgentImageItem): Promise<void> => {
     // 客户端幂等：连点两下不该在资产包里躺两条一样的记录。
     if (savedIds.has(item.id)) return;
@@ -736,53 +720,45 @@ export function AgentChatSurface({
     >
       {/*
         面板 Header（2026-09-27 暴君糾正後定版；2026-09-20 顶栏减负為前身）：
-        logo 圆标（lg-tint-blue）+ 「AI 助理」 + 異常態才有的弱状态文字
-        （reconnecting / closed / connecting；常態回空串——「随时待命」是廢話）+
-        资产 / 历史两颗入口（原本埋在 ⋯ 選單裡，現在直接站在頂欄）+ 右侧幽灵钮
-        （新会话 SquarePen / 直接生成 SlidersHorizontal / 设置 Settings）。
+        純圖示列、零文字。原本的 lg-tint-blue 星芒圆标＋「AI 助理」標題連同狀態
+        文字整組拆掉——助理就在眼前，標題與「随时待命」式描述零資訊，還占掉頂欄
+        一整塊；那個位置現在放的是 资产 / 历史 兩顆圖示（它們原本埋在 ⋯ 選單裡）。
+        右側維持 新会话 SquarePen / 直接生成 SlidersHorizontal / 设置 Settings。
 
         連帶作廢：⋯ 收納選單（三項現在全是直接入口，少一層菜單就少一次點擊）。
+        連線異常態（reconnecting / closed）的文字不再由頂欄承擔：對話區
+        （AgentChatPanel）本來就有自己的重試入口與「原因：…」行，頂欄那份是重複的。
         設定彈層本體仍由 AgentSettingsPopover 自足渲染，齒輪只是它的觸發鈕。
         embedded（工作站面板態）：外層面板已有把手，這裡的把手省掉——單層。
       */}
       <header className={cn("flex shrink-0 flex-col", embedded ? "mb-1" : "pb-2")}>
-        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-          <span className="lg-tint-blue flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-ios-blue">
-            <Sparkles className="h-4 w-4" aria-hidden="true" />
-          </span>
-          <div className="flex min-w-0 flex-1 items-center gap-2">
-            <h2 className="shrink-0 text-[15px] font-semibold text-foreground">AI 助理</h2>
-            {surfaceStatusText && (
-              <p className="min-w-0 truncate text-ios-caption1 text-foreground/35">{surfaceStatusText}</p>
-            )}
-            {/* 資產／歷史：常態就站在標題右邊（手機只有圖示，≥sm 帶文字），
-                點外即收的浮層機制沿用各自原本的 outside-click。 */}
-            <div className="ml-auto flex shrink-0 items-center gap-0.5">
-              <button
-                type="button"
-                onClick={() => void toggleAssets()}
-                aria-expanded={showAssets}
-                aria-label="我的资产"
-                title="我的资产"
-                className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-full text-foreground/45 outline-none transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 touch-manipulation sm:h-9 sm:w-auto sm:px-2.5"
-              >
-                <Boxes className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
-                <span className="hidden text-ios-caption1 font-medium sm:inline">资产</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => void toggleHistory()}
-                aria-expanded={showHistory}
-                aria-label="对话历史"
-                title="对话历史"
-                className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-full text-foreground/45 outline-none transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 touch-manipulation sm:h-9 sm:w-auto sm:px-2.5"
-              >
-                <History className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
-                <span className="hidden text-ios-caption1 font-medium sm:inline">历史</span>
-              </button>
-            </div>
-          </div>
+        <div className="flex flex-wrap items-center gap-x-1 gap-y-1">
+          {/* 資產／歷史：就是原本標題那塊位置，點外即收的浮層機制沿用各自原本的
+              outside-click；圖示即「logo」，不再掛文字標籤。 */}
           <div className="flex items-center gap-0.5">
+            <button
+              type="button"
+              onClick={() => void toggleAssets()}
+              aria-expanded={showAssets}
+              aria-label="我的资产"
+              title="我的资产"
+              className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 touch-manipulation"
+            >
+              <Boxes className="h-[18px] w-[18px]" aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              onClick={() => void toggleHistory()}
+              aria-expanded={showHistory}
+              aria-label="对话历史"
+              title="对话历史"
+              className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 touch-manipulation"
+            >
+              <History className="h-[18px] w-[18px]" aria-hidden="true" />
+            </button>
+          </div>
+          {/* 右簇靠 ml-auto 頂到最右（中間沒有 flex-1 的標題塊可撐了）。 */}
+          <div className="ml-auto flex items-center gap-0.5">
             <button
               type="button"
               onClick={() => void onStartNewSession()}
