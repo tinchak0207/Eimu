@@ -39,7 +39,15 @@ import { cn } from "@/lib/utils";
 import { isStandalonePwa, createHandoffLogin } from "@/lib/github-login";
 import { PwaHandoffPanel } from "@/components/PwaHandoffPanel";
 import { PromoIntroOverlay } from "@/components/promo/PromoIntroOverlay";
-import { PROMO_SEEN_KEY, PROMO_TRIAL_PROMPT, isForcedPreview, shouldPlayPromo } from "@/components/promo/promo-gate";
+import {
+  PROMO_SEEN_KEY,
+  PROMO_TRIAL_PROMPT,
+  clearPendingTrial,
+  isForcedPreview,
+  readPendingTrial,
+  shouldPlayPromo,
+  writePendingTrial,
+} from "@/components/promo/promo-gate";
 import { getInitialSuggestions, type Suggestion } from "@/lib/suggestions";
 import type { ReferenceImage } from "@/lib/image-types";
 import { CanvasChatWorkstation } from "@/components/canvas-workstation/CanvasChatWorkstation";
@@ -110,13 +118,15 @@ export function ImagePlayground({ suggestions }: { suggestions: Suggestion[] }) 
    *
    * 頻率：每瀏覽器一次（PROMO_SEEN_KEY）——新機／新瀏覽器給完整震撼，回訪的
    * 未登入用戶不再被反覆擋在門外。判定鏈是純函式（promo-gate.ts），這裡只負責
-   * 讀儲存、開浮層、以及在收尾時把試玩那句話預填進輸入框。
+   * 讀儲存、開浮層、以及收尾那句「一送出就開新對話直送產線」。
    *
-   * 為什麼掛在這頁而不是 layout：收尾要「直進試玩」，而預填輸入框的通路
-   * （agentSeed 的兄弟 agentComposerSeed）只在這棵樹上——掛 layout 就得整頁跳轉。
+   * 為什麼掛在這頁而不是 layout：收尾要當場開新對話並把那句話送進聊天區，
+   * 那條通路（startNewSessionRef ＋ agentTemplateInjection）只在這棵樹上——
+   * 掛 layout 就只能整頁跳轉，等於把畫布與聊天區整個重建一次。
    */
   const [promoOpen, setPromoOpen] = useState(false);
-  const [promoComposerSeed, setPromoComposerSeed] = useState<{ text: string; nonce: number } | null>(null);
+  // 未登入時送不出去的那句話：存起來，登入態翻真就自動補送（見 promo-gate.ts）。
+  const promoPendingRef = useRef<string | null>(null);
   const { images, timings, failedProviders, isLoading, startGeneration, cancelTask, tasks } = useImageGeneration();
   // authLoading 必須與上面 useImageGeneration 的 isLoading 區分開：
   // 那是生圖忙碌態，不是登入態——拿它當水合判斷，等於對狀態不明的用戶插播。
@@ -407,27 +417,77 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
   }, [authLoading, isLoggedIn]);
 
   /**
-   * 浮層收尾。trial＝「开始试玩」：把片中那句話預填進輸入框。
-   * 刻意走 agentComposerSeed（只預填、不送出）而不是 agentInjection（直送）——
-   * 送出去就是一次真扣費的生成，那一按必須由人按（同 D-5 / D-24 的語義）。
+   * 浮層收尾（2026-09-27 暴君第二輪：「还不如把封面做成结尾界面，输入框变成
+   * 真的能输入，用户一发送马上开新对话」）：不再只是預填，而是當場開新對話把那句
+   * 送進聊天區——送出去的動作就是人按的那一下，D-5／D-24 的語義不受影響。
    *
    * 強制預覽（?promo=1）不寫「已看過」：驗收看過一次不等於這個瀏覽器已經
    * 消耗掉真正的首次進站體驗。
    */
-  const finishPromoIntro = useCallback((action: "trial" | "dismiss") => {
-    if (!isForcedPreview(window.location.search)) {
-      try {
-        window.localStorage.setItem(PROMO_SEEN_KEY, "1");
-      } catch {
-        // 存不了就算了：不擋這次的動作，最壞情況是下次再播一遍。
-      }
+  const markPromoSeen = useCallback(() => {
+    if (isForcedPreview(window.location.search)) return;
+    try {
+      window.localStorage.setItem(PROMO_SEEN_KEY, "1");
+    } catch {
+      // 存不了就算了：不擋這次的動作，最壞情況是下次再播一遍。
     }
+  }, []);
+
+  /** 留舊開新＋直送。與模板卡同一條路（startNewSessionRef → 注入即送）。 */
+  const runPromoTrial = useCallback((text: string) => {
+    const trimmed = text.trim() || PROMO_TRIAL_PROMPT;
+    const inject = (): void => setAgentTemplateInjection({ text: trimmed, nonce: Date.now() });
+    const start = startNewSessionRef.current;
+    if (!start) {
+      // ref 未接上（極端時序）：退回直接送在當前會話，不能把這句話吃掉。
+      inject();
+      return;
+    }
+    void Promise.resolve(start()).then(inject);
+  }, []);
+
+  /** 收尾送出的那句話：關浮層 → 開新對話 → 直送產線。 */
+  const handlePromoTrial = useCallback(
+    (text: string) => {
+      markPromoSeen();
+      setPromoOpen(false);
+      setMode("agent");
+      setDisplayMode("agent");
+      const trimmed = text.trim() || PROMO_TRIAL_PROMPT;
+      // 未登入：這句話現在送不出去（對話區只會彈登入），先留住，
+      // 等登入態翻真自動補送——宣傳片的觀眾大半是未登入訪客，掉了就等於沒接上。
+      if (!isLoggedIn) {
+        promoPendingRef.current = trimmed;
+        writePendingTrial(typeof window === "undefined" ? null : window.sessionStorage, trimmed);
+        return;
+      }
+      runPromoTrial(trimmed);
+    },
+    [isLoggedIn, markPromoSeen, runPromoTrial],
+  );
+
+  /** 收尾的退路（跳過 / Esc / 先逛逛 / 重播之外的關閉）：只關浮層，不送話。 */
+  const handlePromoDismiss = useCallback(() => {
+    markPromoSeen();
     setPromoOpen(false);
-    if (action !== "trial") return;
+  }, [markPromoSeen]);
+
+  /**
+   * 登入態翻真 → 補送待送的試玩那句話。
+   * 讀 ref 與 sessionStorage 兩處：ref 覆蓋同頁登入（按對話區的登入鈕），
+   * sessionStorage 覆蓋跳轉型登入（OAuth 落地回 / 時元件已重掛、ref 早就沒了）。
+   */
+  useEffect(() => {
+    if (!isLoggedIn || authLoading) return;
+    const pending = promoPendingRef.current
+      ?? readPendingTrial(typeof window === "undefined" ? null : window.sessionStorage);
+    if (!pending) return;
+    promoPendingRef.current = null;
+    clearPendingTrial(typeof window === "undefined" ? null : window.sessionStorage);
     setMode("agent");
     setDisplayMode("agent");
-    setPromoComposerSeed({ text: PROMO_TRIAL_PROMPT, nonce: Date.now() });
-  }, []);
+    runPromoTrial(pending);
+  }, [authLoading, isLoggedIn, runPromoTrial]);
 
   /**
    * 工作站的 applyCreatorResource 依赖 [onModelChange]，一旦这个 prop 每次
@@ -652,7 +712,6 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
                     onParamsReflected={handleParamsReflected}
                     onImageResult={setPixaiResultUrl}
                     agentSeed={agentSeed}
-                    agentComposerSeed={promoComposerSeed}
                     initialAgentSessionId={initialAgentSessionId}
                     onCanvasEvent={handleCanvasEvent}
                     canvasStateProvider={handleCanvasSummary}
@@ -710,10 +769,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
           浮層開著時底下的首頁仍完整掛載——收尾的「开始试玩」要當場把話預填進輸入框，
           整頁跳轉會把那個輸入框連同畫布一起重建。 */}
       {promoOpen && (
-        <PromoIntroOverlay
-          onTrial={() => finishPromoIntro("trial")}
-          onDismiss={() => finishPromoIntro("dismiss")}
-        />
+        <PromoIntroOverlay onTrial={handlePromoTrial} onDismiss={handlePromoDismiss} />
       )}
 
       {(!showProgress && (isLoading || failedProviders.length > 0)) && (

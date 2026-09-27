@@ -194,12 +194,6 @@ export interface AgentChatSurfaceProps {
    * 這條直接送出，不讓用戶再點一次發送。nonce 變化即觸發一次。
    */
   agentInjection?: { text: string; nonce: number; directive?: string } | null;
-  /**
-   * 首頁宣傳片收尾「开始试玩」：把那句話預填進輸入框，光標落末尾，人自己按發送。
-   * 與 agentInjection（直接送出，送出即一輪扣費）刻意分開——預填只給人按最後一下。
-   * 認 nonce 不認掛載時機：這條可能在聊天區早已掛好之後才送達。
-   */
-  composerSeed?: { text: string; nonce: number } | null;
   /** 用戶發出消息時回調（上層收起右側模板庫）。 */
   onUserMessage?: () => void;
 }
@@ -218,7 +212,6 @@ export function AgentChatSurface({
   switchSessionRef,
   startNewSessionRef,
   agentInjection,
-  composerSeed = null,
   onUserMessage,
   onExit,
   headerExtra,
@@ -597,18 +590,6 @@ export function AgentChatSurface({
 
   // 稳定的引用：输入区把它放在 effect 依赖里，每次渲染换新函数会白跑一轮。
   const clearPrefill = useCallback((): void => setPrefill(null), []);
-
-  /*
-   * 首頁宣傳片收尾「开始试玩」：把片中的那句話落進輸入框（不送出）。
-   * 走的是同一條 prefill 通道（AgentComposer 認 nonce、預填＋聚焦光標落末尾），
-   * 所以「一鍵跑真實產線」的那一鍵仍然是人的發送鍵——送出去就是一輪真扣費。
-   */
-  useEffect(() => {
-    if (!composerSeed) return;
-    const text = composerSeed.text.trim();
-    if (!text) return;
-    setPrefill({ text, nonce: composerSeed.nonce });
-  }, [composerSeed]);
 
   /*
    * 暴君裁定 2026-09-01：進頁默認起新聊天，不靜默續舊——舊對話留在網關

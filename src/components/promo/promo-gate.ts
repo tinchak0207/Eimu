@@ -113,3 +113,47 @@ export function shouldPlayPromo(input: PromoGateInput): boolean {
   if (isChannelArrival(input)) return false;
   return true;
 }
+
+// ── 待補送的試玩那句話 ──────────────────────────────────────────────────────
+// 收尾輸入框送出的那句話，在「還沒登入」時送不出去：對話區會顯示「请先登录」
+// 與登入鈕，而使用者的話已經離開輸入框——那正是宣傳片的主要觀眾（未登入訪客），
+// 掉了就是「一发送马上开新对话」這句承諾當場破功。
+// 所以先把它存起來，登入態一翻真就自動補送。存 sessionStorage（不是 localStorage）：
+// 這是「這次造訪還沒做完的動作」，關掉分頁就該消失，不該留到下次進站。
+
+export const PROMO_PENDING_KEY = "eimu-promo-trial-pending-v1";
+
+/** 可注入的儲存介面：node --test 用假物件驗行為，不必碰真 sessionStorage。 */
+export interface PromoStorage {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+}
+
+export function writePendingTrial(store: PromoStorage | null | undefined, text: string): void {
+  const trimmed = text.trim();
+  if (!store || !trimmed) return;
+  try {
+    store.setItem(PROMO_PENDING_KEY, trimmed);
+  } catch {
+    // 私密模式／停用儲存：補送這條路失效，但其餘流程不該跟著壞。
+  }
+}
+
+export function readPendingTrial(store: PromoStorage | null | undefined): string | null {
+  if (!store) return null;
+  try {
+    return store.getItem(PROMO_PENDING_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function clearPendingTrial(store: PromoStorage | null | undefined): void {
+  if (!store) return;
+  try {
+    store.removeItem(PROMO_PENDING_KEY);
+  } catch {
+    // 同上：清不掉不是致命錯。
+  }
+}

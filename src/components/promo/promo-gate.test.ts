@@ -1,13 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  PROMO_PENDING_KEY,
   PROMO_SEEN_KEY,
   PROMO_TRIAL_PROMPT,
   hasChannelParam,
   hasChannelReferrer,
   isChannelArrival,
+  clearPendingTrial,
   isHandoffLink,
+  readPendingTrial,
   shouldPlayPromo,
+  writePendingTrial,
 } from "./promo-gate";
 
 /**
@@ -89,4 +93,25 @@ test("儲存鍵與試玩那句話是穩定的對外契約", () => {
   // 鍵改了＝所有看過的訪客再被插播一次；這句話改了＝試玩預填對不上片中的原始許願。
   assert.equal(PROMO_SEEN_KEY, "eimu-promo-seen-v1");
   assert.equal(PROMO_TRIAL_PROMPT, "生成秦始皇骑北极熊的电影");
+});
+
+test("待補送的試玩那句話：寫入去空白、空字串不寫、清掉就讀不到", () => {
+  const store = new Map<string, string>();
+  const fake = {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => void store.set(k, v),
+    removeItem: (k: string) => void store.delete(k),
+  };
+  assert.equal(readPendingTrial(fake), null);
+  writePendingTrial(fake, "  生成秦始皇骑北极熊的电影  ");
+  assert.equal(readPendingTrial(fake), "生成秦始皇骑北极熊的电影");
+  writePendingTrial(fake, "   ");
+  assert.equal(readPendingTrial(fake), "生成秦始皇骑北极熊的电影", "空字串不得覆蓋待送內容");
+  clearPendingTrial(fake);
+  assert.equal(readPendingTrial(fake), null);
+  // 儲存不可用（私密模式）時不炸，只讓補送這條路失效。
+  assert.doesNotThrow(() => writePendingTrial(null, "x"));
+  assert.equal(readPendingTrial(null), null);
+  assert.doesNotThrow(() => clearPendingTrial(undefined));
+  assert.equal(PROMO_PENDING_KEY, "eimu-promo-trial-pending-v1");
 });
