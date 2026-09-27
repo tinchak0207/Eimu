@@ -46,6 +46,8 @@ import {
 } from "@/lib/gateway-admin";
 import { ensureAccountBaselinesWithStatus, recordAdjustment } from "@/lib/generation-core/account-ledger";
 import { getGenerationSql, type GenerationSql } from "@/lib/generation-core/database";
+// 排除名单与统计剔除同源（唯一权威 = env INTERNAL_USER_IDS），不另造第二份内部账号名单。
+import { resolveInternalUserIds } from "@/lib/generation-core/statistics-projection";
 import { DEFAULT_IMAGE_MODEL_ID, imageGenerationCoins } from "@/lib/provider-config";
 import { QUOTA_PER_COIN } from "@/lib/quota-constants";
 
@@ -156,8 +158,11 @@ export interface WelcomeGiftStore {
   markNoticed(userId: number): Promise<boolean>;
   /** 首登弹窗已展示的回执（只对 applied 生效；重复回执无副作用）。 */
   markModalSeen(userId: number): Promise<boolean>;
-  /** B 端计费账户（biz key 归属）——回溯时排除。 */
-  listBizBillingUserIds(): Promise<number[]>;
+  /**
+   * 开发者补发候选：持有 biz key 的外部用户里，「还没拿到新人礼」（无行或上次 failed）
+   * 且「没有成功出图」的那些 user id，升序、最多 limit 条。内部排除名单由调用方传入。
+   */
+  listDevGiftCandidates(excludedUserIds: number[], limit: number): Promise<number[]>;
 }
 
 export interface WelcomeGiftDeps {
@@ -286,14 +291,26 @@ export interface WelcomeGiftBackfillSummary {
   userIds: Partial<Record<WelcomeGiftStatus | "eligible", number[]>>;
 }
 
-/** 回溯候选：普通用户（role<10）、启用状态、不是 B 端计费账户。 */
-export function welcomeGiftBackfillCandidates(users: GatewayAdminUser[], bizBillingUserIds: number[]): number[] {
-  const biz = new Set(bizBillingUserIds);
+/**
+ * 回溯/补发的排除名单：只排除**内部账号**（env INTERNAL_USER_IDS，与统计剔除同源）。
+ *
+ * 更正（2026-09-28）：这里原来按 store.listBizBillingUserIds() 把「所有持有 biz key 的用户」
+ * 都排除了。原意只是排除站内自己的 B 端计费账号，结果把真实开发者一起挡在门外——
+ * 245/250/251/252/254 建了 key 但 new-api quota 恒为 $0，按下生成只撞 402。
+ * biz key 是卖给外部开发者的商业能力，不是「内部人」标记；排除口径只认内部账号。
+ */
+export function welcomeGiftExcludedUserIds(raw: string | undefined = process.env.INTERNAL_USER_IDS): number[] {
+  return resolveInternalUserIds(raw);
+}
+
+/** 回溯候选：普通用户（role<10）、启用状态、不在内部排除名单里。 */
+export function welcomeGiftBackfillCandidates(users: GatewayAdminUser[], excludedUserIds: number[]): number[] {
+  const excluded = new Set(excludedUserIds);
   return users
     .filter((user) => Number.isInteger(user.id) && user.id > 0)
     .filter((user) => (user.role ?? 1) < 10)
     .filter((user) => user.status === undefined || user.status === 1)
-    .filter((user) => !biz.has(user.id))
+    .filter((user) => !excluded.has(user.id))
     .map((user) => user.id)
     .sort((a, b) => a - b);
 }
@@ -308,7 +325,7 @@ export async function backfillWelcomeGifts(
 ): Promise<WelcomeGiftBackfillSummary> {
   const dryRun = options.dryRun === true;
   const users = await deps.listUsers();
-  const candidates = welcomeGiftBackfillCandidates(users, await deps.store.listBizBillingUserIds());
+  const candidates = welcomeGiftBackfillCandidates(users, welcomeGiftExcludedUserIds());
   const summary: WelcomeGiftBackfillSummary = {
     dryRun,
     scanned: users.length,
@@ -333,6 +350,43 @@ export async function backfillWelcomeGifts(
     tally((await grantWelcomeGift(userId, deps)).status, userId);
   }
   return summary;
+}
+
+// ─────────────────────────────────────────── 开发者补发（worker 维护轮自动补齐）
+
+/** 每轮最多补发几人（维护轮 10 分钟一次；上游调额有成本，限速而非不限量）。 */
+export const DEV_GIFT_CATCH_UP_LIMIT = 20;
+
+export interface WelcomeGiftDevCatchUpReport {
+  scanned: number;
+  granted: number;
+  /** 无需处理（已有占位/已出图）——正常情况应为 0，因为候选查询已排掉。 */
+  skipped: number;
+  /** 上游/基线暂时不可得，下一轮自动重试。 */
+  failed: number;
+}
+
+/**
+ * 开发者漏发兜底（worker 维护轮调用）：外部用户只要「建了 biz key、还没领过新人礼、
+ * 也没成功出过图」就自动补发。与登录路径、回溯路径共用 grantWelcomeGift 与同一张占位表，
+ * 三路并发也只发一次——本函数不另写任何发放逻辑。
+ *
+ * 为什么不靠登录补发：开发者用 API，不会回网站登录，/api/auth/me 的补发永远打不到他们。
+ */
+export async function runWelcomeGiftDevCatchUp(
+  deps: WelcomeGiftDeps,
+  options: { limit?: number } = {},
+): Promise<WelcomeGiftDevCatchUpReport> {
+  const limit = options.limit ?? DEV_GIFT_CATCH_UP_LIMIT;
+  const candidates = await deps.store.listDevGiftCandidates(welcomeGiftExcludedUserIds(), limit);
+  const report: WelcomeGiftDevCatchUpReport = { scanned: candidates.length, granted: 0, skipped: 0, failed: 0 };
+  for (const userId of candidates) {
+    const result = await grantWelcomeGift(userId, deps);
+    if (result.status === "granted") report.granted += 1;
+    else if (result.status === "unavailable") report.failed += 1;
+    else report.skipped += 1;
+  }
+  return report;
 }
 
 // ─────────────────────────────────────────── 生产依赖（控制面 Postgres + 上游管理 API）
@@ -432,8 +486,27 @@ export function createPostgresWelcomeGiftStore(sql: GenerationSql = getGeneratio
       `;
       return rows.length > 0;
     },
-    async listBizBillingUserIds() {
-      const rows = await sql<Row[]>`SELECT DISTINCT user_id FROM biz_api_key WHERE user_id IS NOT NULL`;
+    async listDevGiftCandidates(excludedUserIds, limit) {
+      await ensureSchema(sql);
+      const rows = await sql<Row[]>`
+        SELECT DISTINCT b.user_id
+        FROM biz_api_key b
+        WHERE b.user_id IS NOT NULL
+          AND NOT (b.user_id = ANY(${excludedUserIds}::bigint[]))
+          -- 未领过：没有占位行，或上次明确没动上游（failed 可重占）。pending/unknown/applied 不动。
+          AND NOT EXISTS (
+            SELECT 1 FROM welcome_gift_grant g
+            WHERE g.user_id = b.user_id AND g.status IN ('applied', 'pending', 'unknown')
+          )
+          -- 没成功出过图：与 hasSucceededGeneration 同一口径（web 租户 + biz 计费归属）。
+          AND NOT EXISTS (
+            SELECT 1 FROM generation_job j
+            WHERE j.status = 'succeeded'
+              AND (j.billing_user_id = b.user_id OR j.tenant_id = ${"web:"} || b.user_id)
+          )
+        ORDER BY b.user_id
+        LIMIT ${limit}
+      `;
       return rows.map((row) => Number(row.user_id)).filter((id) => Number.isInteger(id) && id > 0);
     },
   };

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { ingestRedeemedRecharges } from "./account-ledger";
 import { runLifecycleEmailsWithSql } from "@/lib/lifecycle-email";
 import { runReferralRewardsWithSql } from "@/lib/referral-reward";
+import { productionWelcomeGiftDeps, runWelcomeGiftDevCatchUp } from "@/lib/welcome-gift";
 import { ingestSubscriptionRedemptions } from "./subscription";
 import { reconcileAccountBalances } from "./account-reconciliation";
 import { commitGenerationBilling, reconcileGenerationBilling, refundGenerationBilling } from "./billing-ledger";
@@ -562,6 +563,17 @@ export async function runAccountMaintenanceOnce(
     }
   } catch (error) {
     console.error("[referral] 邀請獎勵失敗（繼續）", error);
+  }
+  // 新人礼兜底：开发者建了 biz key 但用 API、不会再登录网站，/api/auth/me 的补发打不到他们。
+  // 这里对「持有 biz key ∧ 未领过新人礼 ∧ 没成功出图」的外部用户自动补发（复用 grantWelcomeGift），
+  // 每轮上限 20 人，幂等占位表保证与登录/回溯路径并发也只发一次。
+  try {
+    const dev = await runWelcomeGiftDevCatchUp(productionWelcomeGiftDeps(sql));
+    if (dev.scanned > 0) {
+      console.log(`[welcome-gift] 开发者补发 scanned=${dev.scanned} granted=${dev.granted} skipped=${dev.skipped} failed=${dev.failed}`);
+    }
+  } catch (error) {
+    console.error("[welcome-gift] 开发者补发失败（继续）", error);
   }
   try {
     const mail = await runLifecycleEmailsWithSql(sql);
