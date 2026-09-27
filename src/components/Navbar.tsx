@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { BookOpen, History, Images, KeyRound, LogOut } from "lucide-react";
 import { WalletBadge } from "@/components/WalletBadge";
+import { NotificationBell } from "@/components/notifications/NotificationBell";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -374,6 +375,10 @@ export function Navbar({ className }: NavbarProps) {
                 {/* 余额胶囊：余额 + 「+」合体——充值与签到都在「+」浮层里，
                     导航栏不再放独立入口（2026-08-27 暴君裁定）。 */}
                 <WalletBadge showTopUp showCheckin className="mobile-wallet-balance min-w-0 flex-1 sm:flex-none" />
+
+                {/* 站内通知入口：铃铛 + 未读红点 + 下拉列表（机制面，无运营内容）。
+                    与右侧其余入口同款圆钮，排在余额胶囊之后、导航链接之前。 */}
+                <NotificationBell />
 
                 {/* Nav links — icons only, text stays hidden for screen readers.
                     「文档」「审查页」只在 ≥sm 显示：手机端导航留给核心动作。 */}
