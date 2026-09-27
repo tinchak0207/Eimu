@@ -78,3 +78,23 @@
 
 - 不从 HTTP 408 推断 scope/token 问题；该诊断只留给直接 401/403、`invalid_ims_scope`、`x-access-error` 或 claim 证据。完整方法论见 skill `adobe2api-direct-debugging`（含 2026-08-22 适用范围前置判断：该 skill 是修复型纪律，能力建设任务不适用）
 - Adobe2API 是目标时：先追直接请求与上游响应，再动鉴权/路由；不改不动 relay 服务
+
+## OpenAI 同步兼容层（/openai/v1）在控面的部署依赖（2026-09-28 实锤）
+
+**症状**：`POST https://eimu.dev/openai/v1/images/generations` 回 `503 {"code":"control_plane_unreachable"}`，耗时约 1 秒（立刻失败，不是等超时）。
+
+**根因**：`src/lib/openai-compat/generation.ts` 的提交/轮询默认打「当前请求自己的 origin + `/api/v1/*`」——那是**站台（Vercel）拓扑**：Vercel 上 `/api/v1/*` 被 `beforeFiles` 代理到控面。但同步层现在跑在控面自己身上，控面那份 app 的对应路径在 `/image-control/api/v1/*` 底下（nginx `location ^~ /image-control/` rewrite 掉前缀），`+ /api/v1/*` 落不到任何 route。
+
+**修法（部署配置，非代码）**：控面 `control-plane-compose.yml` 的 `generation-api` 服务 `environment:` 里加
+
+```yaml
+      OPENAI_COMPAT_GENERATION_ORIGIN: http://127.0.0.1:3000
+```
+
+然后只重建 api：`sudo docker compose -f control-plane-compose.yml up -d generation-api`（`docker exec image-control-api printenv OPENAI_COMPAT_GENERATION_ORIGIN` 可验证）。备份档：`control-plane-compose.yml.bak-0928-openai-origin`。旋钮的语义写在 `resolveGenerationOrigin()` 的注释里，代码侧不需要改。
+
+**同类判据（下次先查这个）**：任何「站台上跑得好、搬到控面就 503/404」的路由，第一件事是看它内部 HTTP 调用的 path 有没有带 `/image-control` 前缀——站台靠 `beforeFiles` 代理补前缀，控面不会。
+
+**同一轮的其他两条部署事实**：
+- 段配置 `export const maxDuration` **只能是字面量**：写成 `= SOME_CONST` 会让 Next 抛 `Unknown identifier ... at maxDuration` 并炸掉整个 build（`tsc` 与单测全绿也抓不到，只有真 build 会爆）。
+- 本项目 Vercel 是 **Hobby**（函数硬上限 60s）⇒ 同步等待类路由不放 Vercel，放控面（无时长上限，且能读 `GENERATION_DATABASE_URL` 让熔断/断供闸真生效）。
