@@ -242,8 +242,11 @@ test("audio card plays via native <audio> and keeps the disabled action contract
   assert.match(markup, /音乐/, "mediaKind=music 徽章显示成曲语义");
 });
 
-test("思維鏈預設展開：首次渲染即打開，沒有 reasoning 就不渲染 details", () => {
+test("思維鏈串流中展開、結算後收合，沒有 reasoning 就不渲染 details", () => {
   /*
+   * 2026-09-27 暴君裁定 supersede 下方 09-20 裁定：思考中展開，結算後收合成
+   *「已思考 · N 秒」一行（展開的內部推理佔半屏）。
+   *
    * 2026-09-20 暴君同日再裁定：把「預設收合」（當日上午隨 Grok 極簡骨架預覽
    * 批准）再推翻回「預設展開」——思考過程開門見山，不要人再點一次。靜態 markup
    * 就是「首次渲染」的字面證據：React 把 open 布林屬性序列化成 open=""，
@@ -267,9 +270,10 @@ test("思維鏈預設展開：首次渲染即打開，沒有 reasoning 就不渲
   assert.match(streaming, /<details[^>]*\sopen=""/, "串流中的思維鏈默認展開");
   assert.match(streaming, /正在思考…/, "串流中的折疊殼文案＝正在思考…");
 
-  // ② 已完成（streaming:false、正文已到）＝ 同樣展開。展開不得只在串流期成立。
+  // ② 已完成（streaming:false、正文已到）＝ 收合，只剩「已思考」摘要行。
   const settled = renderToStaticMarkup(assistant({ streaming: false, text: "答案是 6, 7, 8" }));
-  assert.match(settled, /<details[^>]*\sopen=""/, "已完成條目同樣默認展開");
+  assert.match(settled, /<details/, "已完成條目仍保留可點開的思維鏈");
+  assert.doesNotMatch(settled, /<details[^>]*\sopen=""/, "已完成條目默認收合");
 
   // ③ 沒有 reasoning 的助理條目：連 details 都不渲染，不留空殼。
   const noReasoning = renderToStaticMarkup(assistant({ reasoning: undefined, text: "只有正文" }));
@@ -285,9 +289,10 @@ test("思維鏈預設展開：首次渲染即打開，沒有 reasoning 就不渲
   assert.match(code, /open=\{reasoningOpen\}/, "open 一律由 state 給值");
   assert.match(code, /onToggle=\{onReasoningToggle\}/, "toggle 是使用者手動開關的寫入口");
   const stateWrites = code.match(/setReasoningOpen\(/g) ?? [];
-  assert.equal(stateWrites.length, 1, "setReasoningOpen 只准有 toggle 這一個寫入口");
+  assert.equal(stateWrites.length, 2, "寫入口只有 toggle 與結算收合兩處");
   assert.doesNotMatch(code, /item\.streaming && !item\.text/, "自動展開條件已拆掉");
-  assert.match(code, /reasoningOpen, setReasoningOpen\] = useState\(true\)/, "seed 必須是 true（默認展開）");
+  assert.match(code, /reasoningOpen, setReasoningOpen\] = useState\(reasoningStreaming\)/, "seed＝是否串流中");
+  assert.match(code, /!reasoningStreaming && !reasoningTouched\.current/, "結算收合不得覆蓋使用者手動開關");
 });
 
 test("reconnecting shows an unobtrusive retry affordance", () => {

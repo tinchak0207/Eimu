@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useEffect, useState, type MouseEvent, type SyntheticEvent } from "react";
+import { memo, useEffect, useRef, useState, type MouseEvent, type SyntheticEvent } from "react";
 import { Brain, Check, ChevronDown, Copy, Navigation } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AgentAssistantTextItem, AgentSteerStatus, AgentUserTurnItem } from "@/lib/agent-chat-types";
@@ -64,14 +64,19 @@ function AgentMessageBubbleComponent({ item, sessionId }: AgentMessageBubbleProp
   const hasAttachments = userParsed !== null && userParsed.refs.length > 0;
   const displayText = hasAttachments ? userParsed.cleanText : item.text;
 
-  // 思維鏈預設展開（2026-09-20 暴君同日再裁定，supersede 本日稍早「Grok 極簡
-  // 預設收合」）：正文至上不再是默認姿態，思考過程開門見山。
   // 文案（2026-09-20）：已結算＝「已思考 · N 秒」，還在想＝「正在思考…」，
   // 無計時資料＝「已思考」——見下方 reasoningLabel。
-  // 單一 write path 語義不變：open 受控於 state（初值 true），使用者點 summary
+  // 單一 write path 語義不變：open 受控於 state（初值＝是否串流中），使用者點 summary
   // 造成的 toggle 由下面 handler 回寫，之後串流 delta 更新或父層 re-render 只會
   // 照著這個值渲染，不會把它打回收合——手動展開／收合優先於任何自動行為。
-  const [reasoningOpen, setReasoningOpen] = useState(true);
+  // 2026-09-27 暴君裁定 supersede：思考中展開、結算後自動收合成「已思考 · N 秒」
+  // 一行（展開的內部推理佔半屏）。使用者一旦手動點過 summary，自動收合就不再介入。
+  const reasoningStreaming = item.kind === "assistant" && item.streaming === true;
+  const [reasoningOpen, setReasoningOpen] = useState(reasoningStreaming);
+  const reasoningTouched = useRef(false);
+  useEffect(() => {
+    if (!reasoningStreaming && !reasoningTouched.current) setReasoningOpen(false);
+  }, [reasoningStreaming]);
 
   // 思維鏈一鍵複製：summary 上的按鈕要 preventDefault，否則點擊會順帶收合 details。
   const [reasoningCopied, setReasoningCopied] = useState(false);
@@ -140,7 +145,7 @@ function AgentMessageBubbleComponent({ item, sessionId }: AgentMessageBubbleProp
             {/* 觸控目標 ≥44px：行動端沒有 hover，摘要行要按得到（詳情由內部 span 撐高）。
                 select-none 只鎖摘要行（避免拖選時把「思考過程」標籤一起圈走），
                 展開後的思維鏈內容可自由選取複製。 */}
-            <summary className="brain-summary block min-h-11 cursor-pointer touch-manipulation select-none [-webkit-tap-highlight-color:transparent]">
+            <summary onClick={() => { reasoningTouched.current = true; }} className="brain-summary block min-h-11 cursor-pointer touch-manipulation select-none [-webkit-tap-highlight-color:transparent]">
               <span className="flex min-h-11 items-center gap-1.5 text-ios-footnote font-medium text-muted-foreground">
                 <Brain className="h-3.5 w-3.5 shrink-0 text-foreground/40" aria-hidden="true" />
                 {reasoningLabel}

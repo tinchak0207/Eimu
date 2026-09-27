@@ -5,12 +5,12 @@
 // 純受控元件：只負責把使用者意圖翻譯成 onZoomTo(k) / onFit / onHelp，
 // 縮放錨點（視口中心）與實際套用由宿主實作。由上到下：放大（×1.25）、
 // 縱向滑桿（log 刻度 5%–500%，等距 = 等倍率）、縮小（÷1.25）、
-// 當前百分比（點擊重置 100%）、適應視圖、快捷鍵幫助。
+// 當前百分比（點擊重置 100%）、適應視圖、快捷鍵幫助、縮略圖開關、審查入口。
 // 根節點帶 data-canvas-interactive，InfiniteCanvas 手勢層才會放行膠囊內
 // 的指針事件（否則拖滑桿 = 平移畫布）。
 
 import { useCallback, useRef, useState } from "react";
-import { Keyboard, Maximize, Minus, Plus } from "lucide-react";
+import { ClipboardCheck, Keyboard, Map as MapIcon, Maximize, Minus, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export interface CanvasZoomControlsProps {
@@ -22,6 +22,13 @@ export interface CanvasZoomControlsProps {
   onFit: () => void;
   /** 打開快捷鍵幫助 */
   onHelp: () => void;
+  /** 縮略圖開關（2026-09-27：縮略圖預設收合，入口併進本膠囊） */
+  minimapOpen?: boolean;
+  onToggleMinimap?: () => void;
+  /** 資產與分鏡審查入口（2026-09-27：左下孤兒按鈕併進本膠囊） */
+  reviewActive?: boolean;
+  reviewPendingCount?: number;
+  onToggleReview?: () => void;
   className?: string;
 }
 
@@ -47,7 +54,18 @@ const tToScale = (t: number) =>
 const BUTTON_CLASS =
   "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-black/5 hover:text-foreground disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent";
 
-function CanvasZoomControls({ scale, onZoomTo, onFit, onHelp, className }: CanvasZoomControlsProps) {
+function CanvasZoomControls({
+  scale,
+  onZoomTo,
+  onFit,
+  onHelp,
+  minimapOpen,
+  onToggleMinimap,
+  reviewActive,
+  reviewPendingCount = 0,
+  onToggleReview,
+  className,
+}: CanvasZoomControlsProps) {
   const trackRef = useRef<HTMLDivElement | null>(null);
   const [dragging, setDragging] = useState(false);
 
@@ -167,6 +185,38 @@ function CanvasZoomControls({ scale, onZoomTo, onFit, onHelp, className }: Canva
       <button type="button" className={BUTTON_CLASS} title="键盘快捷键" aria-label="键盘快捷键" onClick={onHelp}>
         <Keyboard className="h-4 w-4" />
       </button>
+      {onToggleMinimap && (
+        <button
+          type="button"
+          className={cn(BUTTON_CLASS, minimapOpen && "bg-ios-blue/10 text-ios-blue hover:bg-ios-blue/15 hover:text-ios-blue")}
+          title="缩略图"
+          aria-label="缩略图"
+          aria-pressed={minimapOpen}
+          onClick={onToggleMinimap}
+        >
+          <MapIcon className="h-4 w-4" />
+        </button>
+      )}
+      {onToggleReview && (
+        <>
+          <div className="my-0.5 h-px w-4 bg-black/10" />
+          <button
+            type="button"
+            className={cn(BUTTON_CLASS, "relative", reviewActive && "bg-ios-blue/10 text-ios-blue hover:bg-ios-blue/15 hover:text-ios-blue")}
+            title={reviewPendingCount > 0 ? `审查 · 待确认 ${reviewPendingCount}` : "审查"}
+            aria-label="资产与分镜审查"
+            aria-pressed={reviewActive}
+            onClick={onToggleReview}
+          >
+            <ClipboardCheck className="h-4 w-4" />
+            {reviewPendingCount > 0 && (
+              <span className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-ios-red px-1 text-[9px] font-semibold leading-none text-white tabular-nums">
+                {reviewPendingCount > 9 ? "9+" : reviewPendingCount}
+              </span>
+            )}
+          </button>
+        </>
+      )}
     </div>
   );
 }

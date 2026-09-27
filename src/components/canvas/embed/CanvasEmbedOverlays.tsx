@@ -184,7 +184,8 @@ export function CanvasEmbedOverlays({
           位置選左下角：頂欄與左右彈層都被既有面板佔滿，左下是唯一不打架的空位。 */}
       <div
         data-canvas-interactive
-        className="pointer-events-auto absolute z-20 flex items-center gap-1.5"
+        // 桌面全屏態入口已併進右側縮放膠囊（2026-09-27），這顆只留給行動端／非全屏。
+        className={cn("pointer-events-auto absolute z-20 flex items-center gap-1.5", expanded && "md:hidden")}
         style={{
           left: "calc(0.75rem + env(safe-area-inset-left, 0px))",
           bottom: "calc(1rem + env(safe-area-inset-bottom, 0px))",

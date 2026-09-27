@@ -650,9 +650,10 @@ export function NodeBody({
             className="canvas-node-scroll touch-pan-y overscroll-contain flex-1 space-y-1.5 overflow-auto p-3"
           >
             {rows.map((row) => (
-              <div key={row.label} className="flex items-baseline justify-between gap-2">
-                <span className="shrink-0 text-[12.5px] font-medium text-muted-foreground">{row.label}</span>
-                <span className="min-w-0 max-sm:text-ios-subhead truncate font-mono text-ios-footnote text-muted-foreground">
+              // 值緊貼標籤左對齊（2026-09-27）：右對齊時節點半截出視口，值被裁掉像空欄位。
+              <div key={row.label} className="flex items-baseline gap-3">
+                <span className="w-12 shrink-0 text-[12.5px] font-medium text-muted-foreground">{row.label}</span>
+                <span className="min-w-0 max-sm:text-ios-subhead truncate font-mono text-ios-footnote text-foreground">
                   {row.value}
                 </span>
               </div>
