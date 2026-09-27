@@ -20,6 +20,8 @@ function InlineCode({ children }: { children: React.ReactNode }) {
 const SITE_URL = getSiteUrlFromEnv();
 const MCP_ENDPOINT = `${SITE_URL}/api/mcp`;
 const WELL_KNOWN_URL = `${SITE_URL}/.well-known/oauth-protected-resource`;
+const PLUGIN_URL = `${SITE_URL}/plugin/`;
+const PLUGIN_README_URL = `${SITE_URL}/plugin/eimu/README.md`;
 const KEY_PLACEHOLDER = "sk-biz-你的密钥";
 
 const TITLE = "MCP 接入：把 Eimu 接到你的 coding agent";
@@ -215,6 +217,32 @@ const STEPS: Array<{ n: string; title: string; body: React.ReactNode }> = [
   },
 ];
 
+// 插件包（public/plugin/ 就是静态根，一份真源，部署后即可访问）。
+// 这里只做发现面摘要：包内文件清单与一段可直接喂给 agent 的安装指令。
+// 诚实边界：Eimu 目前没有公开的插件市集仓，`plugin marketplace add` 这一步跑不通，
+// 文案必须标明「待发布」，不得宣称今天就能一键装。
+const PLUGIN_TREE = `plugin/
+├── marketplace.json                    # 市集索引：只声明 eimu 这一个插件
+└── eimu/
+    ├── .codex-plugin/plugin.json       # 插件元数据：名称、描述、logo、默认提问
+    ├── .mcp.json                       # MCP 端点，只有 URL，不含任何密钥
+    ├── assets/eimu-icon.svg            # 图标
+    ├── README.md                       # 安装说明
+    └── skills/                         # 三个随包技能
+        ├── film-production/SKILL.md            # 一句话到成片
+        ├── character-consistency/SKILL.md      # 角色一致性
+        └── camera-motion/SKILL.md              # 运镜与镜头运动`;
+
+const PLUGIN_INSTALL_PROMPT = `1) 添加插件目录（待我方公开市集仓发布后可用；今天先走上面的手动配置）
+   codex plugin marketplace add <eimu-marketplace-git-url>
+
+2) 安装插件
+   codex plugin add eimu@eimu
+
+3) 授权
+   export EIMU_BIZ_KEY=${KEY_PLACEHOLDER}
+   # 密钥在 ${SITE_URL}/settings/api-keys 自助签发，只显示一次`;
+
 export default function McpPage() {
   return (
     <main className="min-h-screen bg-transparent px-4 pb-20 pt-20 sm:px-6 lg:px-8">
@@ -230,7 +258,7 @@ export default function McpPage() {
             直接生图、生视频、配音，查任务与余额；背后和网页共用同一本账——提交预扣、成功结算、失败自动退回。
           </p>
           <nav aria-label="快速跳转" className="mt-4 flex flex-wrap gap-2">
-            {[...CLIENT_SECTIONS.map((section) => ({ id: section.id, label: section.label })), { id: "tools", label: "工具清单" }].map(
+            {[...CLIENT_SECTIONS.map((section) => ({ id: section.id, label: section.label })), { id: "tools", label: "工具清单" }, { id: "plugin", label: "插件包" }].map(
               (item) => (
                 <a
                   key={item.id}
@@ -301,6 +329,54 @@ export default function McpPage() {
               </li>
             ))}
           </ul>
+        </section>
+
+        <section id="plugin" className="mt-8 scroll-mt-28">
+          <h2 className="text-ios-title2 font-semibold text-[rgba(0,0,0,0.85)]">插件包</h2>
+          <p className="mt-1.5 max-w-3xl text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.52)]">
+            不想手写配置的话，Eimu 还提供一个 coding agent 插件包：一份{" "}
+            <InlineCode>plugin.json</InlineCode> 声明能力与图标，一份 <InlineCode>.mcp.json</InlineCode>{" "}
+            指向本文的 MCP 端点，外加三个随包技能。文件都是静态的，直接取回即可，不需要装任何东西：
+            <a href={PLUGIN_URL} className="font-semibold text-[#007AFF] lg-transition hover:underline">
+              {PLUGIN_URL}
+            </a>
+            （入口说明：
+            <a
+              href={PLUGIN_README_URL}
+              className="font-semibold text-[#007AFF] lg-transition hover:underline"
+            >
+              README.md
+            </a>
+            ）。
+          </p>
+
+          <div className="mt-4 flex flex-col gap-4">
+            <div className="lg-card scroll-mt-28 rounded-ios-3xl p-5 sm:p-6">
+              <h3 className="text-ios-callout font-semibold text-[rgba(0,0,0,0.85)]">包内文件</h3>
+              <p className="mt-1.5 text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.58)]">
+                三个技能的正文只引用本页列出的 10 个工具，没有我们做不到的能力宣言；包内不含任何密钥，只有端点
+                URL。
+              </p>
+              <div className="mt-3">
+                <CodeBlock>{PLUGIN_TREE}</CodeBlock>
+              </div>
+            </div>
+
+            <div className="lg-card rounded-ios-3xl p-5 sm:p-6">
+              <h3 className="text-ios-callout font-semibold text-[rgba(0,0,0,0.85)]">
+                给 agent 的安装指令
+              </h3>
+              <p className="mt-1.5 text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.58)]">
+                三步：加目录 → 装插件 → 授权。第 1 步依赖一个 Eimu 公开的插件市集仓，
+                <span className="font-semibold text-[rgba(0,0,0,0.68)]">该仓尚未发布，这一步现在跑不通</span>
+                ；今天要装请走上面的手动配置，或用包内 <InlineCode>README.md</InlineCode>{" "}
+                里的本地目录装法。把下面这段整段发给你本机的 agent 即可。
+              </p>
+              <div className="mt-3">
+                <CodeBlock>{PLUGIN_INSTALL_PROMPT}</CodeBlock>
+              </div>
+            </div>
+          </div>
         </section>
 
         <section className="mt-8">
