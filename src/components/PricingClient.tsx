@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { BadgeCheck, BookOpen, ChevronDown, Copy, Gift, Sparkles, Ticket, X } from "lucide-react";
 import type { MapayPaymentType } from "@/lib/mapay";
@@ -125,10 +125,38 @@ export function PricingClient() {
   const quotaLabel = frontWorld === "custom" ? "自定义" : (quotaPlan.badge ?? quotaPlan.name);
   const featuredRows = (quotaKind === "image" ? imageRows : videoRows).slice(0, 8);
 
+  // 支付回跳带 ?cdk=：已登录就自动兑换（付了就到账，不让用户再点一次），
+  // 兑换后从 URL 拿掉 cdk，刷新不会重兑；未登录则只预填，登录后手动兑换。
+  const autoRedeemTried = useRef(false);
   useEffect(() => {
     const cdk = new URLSearchParams(window.location.search).get("cdk");
     if (cdk) setRedeemCode(cdk);
   }, []);
+  useEffect(() => {
+    if (autoRedeemTried.current || !token) return;
+    const cdk = new URLSearchParams(window.location.search).get("cdk")?.trim();
+    if (!cdk) return;
+    autoRedeemTried.current = true;
+    void (async () => {
+      setRedeemLoading(true);
+      try {
+        const res = await redeemTopupCode(token, cdk);
+        if (res.success) {
+          await refresh();
+          const coins = res.data?.quota ? quotaToCoins(res.data.quota) : null;
+          setRedeemedCoins(coins);
+          setRedeemCode("");
+          toast({ title: "支付成功，已到账", description: coins ? `${coins} 金币已加到你的账户` : "金币已加到你的账户" });
+          const url = new URL(window.location.href);
+          url.searchParams.delete("cdk");
+          window.history.replaceState(null, "", url.toString());
+        }
+        // 失败（已兑换过等）保留预填，由用户看到输入框里的码自行处理，不弹错吓人。
+      } finally {
+        setRedeemLoading(false);
+      }
+    })();
+  }, [token, refresh, toast]);
 
   const handleMapayBuy = (planId: string, type: MapayPaymentType) => {
     window.open(`/api/payments/mapay/checkout?plan=${encodeURIComponent(planId)}&type=${encodeURIComponent(type)}`, "_blank");

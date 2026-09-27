@@ -14,6 +14,7 @@ import {
 import { useImageGeneration } from "@/hooks/use-image-generation";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
+import { ToastAction } from "@/components/ui/toast";
 import { usePricingRevision } from "@/hooks/use-pricing-revision";
 import { useIsNarrow } from "@/hooks/use-is-narrow";
 import {
@@ -655,7 +656,17 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
       generateAudio,
     });
     if (!LOCAL_TEST_MODE && user && !hasEnoughQuota(user, requiredCoins)) {
-      toast({ title: "余额不足", description: "请先充值再继续做图", variant: "destructive" });
+      // 额度用完＝转化率最高的时刻：提示里直接给付款入口，不让用户自己找。
+      toast({
+        title: "余额不足",
+        description: `这次需要 ${requiredCoins} 币，充值后马上继续`,
+        variant: "destructive",
+        action: (
+          <ToastAction altText="去充值" onClick={() => { window.location.href = "/pricing"; }}>
+            去充值
+          </ToastAction>
+        ),
+      });
       return;
     }
     const finalPrompt = enhancePrompt(rawPrompt, stylePreset);
