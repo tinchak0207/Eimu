@@ -69,6 +69,12 @@ interface PromptInputProps {
    */
   agentSeed?: string;
   /**
+   * 首頁宣傳片收尾「开始试玩」預填進輸入框的那句話（只預填、不送出）。
+   * 與 agentSeed（半句話藥丸，掛載時讀一次）不同：這條在頁面活著的中途才送達，
+   * 所以下游認的是 nonce 而不是掛載時機——聊天區早就掛好了也接得住。
+   */
+  agentComposerSeed?: { text: string; nonce: number } | null;
+  /**
    * 会话深链（wish 插件 ?agent=1&session=<uuid>）：落地时直开指定会话。
    * 与 agentSeed 同批 setState 落地，聊天区挂载时即可读到；空串表示无深链。
    */
@@ -187,6 +193,7 @@ export function PromptInput({
   onUpscaleResult,
   onParamsReflected,
   agentSeed = "",
+  agentComposerSeed = null,
   initialAgentSessionId = "",
   onImageResult,
   onCanvasEvent,
@@ -708,6 +715,7 @@ export function PromptInput({
                 {...(switchSessionRef ? { switchSessionRef } : {})}
                 {...(startNewSessionRef ? { startNewSessionRef } : {})}
                 {...(agentInjection ? { agentInjection } : {})}
+                {...(agentComposerSeed ? { composerSeed: agentComposerSeed } : {})}
                 {...(onUserMessage ? { onUserMessage } : {})}
                 currentModelId={modelId}
               />

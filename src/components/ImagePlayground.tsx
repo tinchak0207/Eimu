@@ -38,6 +38,8 @@ import { LOCAL_TEST_MODE } from "@/lib/local-test-mode";
 import { cn } from "@/lib/utils";
 import { isStandalonePwa, createHandoffLogin } from "@/lib/github-login";
 import { PwaHandoffPanel } from "@/components/PwaHandoffPanel";
+import { PromoIntroOverlay } from "@/components/promo/PromoIntroOverlay";
+import { PROMO_SEEN_KEY, PROMO_TRIAL_PROMPT, shouldPlayPromo } from "@/components/promo/promo-gate";
 import { getInitialSuggestions, type Suggestion } from "@/lib/suggestions";
 import type { ReferenceImage } from "@/lib/image-types";
 import { CanvasChatWorkstation } from "@/components/canvas-workstation/CanvasChatWorkstation";
@@ -103,8 +105,22 @@ export function ImagePlayground({ suggestions }: { suggestions: Suggestion[] }) 
   const [pwaHandoffUrl, setPwaHandoffUrl] = useState<string | null>(null);
   // wish 插件深链（?agent=1&session=<uuid>）：落地后直开该会话而非新开对话。
   const [initialAgentSessionId, setInitialAgentSessionId] = useState("");
+  /**
+   * 未登入新訪客的進站宣傳片（2026-09-27 暴君裁定落地）。
+   *
+   * 頻率：每瀏覽器一次（PROMO_SEEN_KEY）——新機／新瀏覽器給完整震撼，回訪的
+   * 未登入用戶不再被反覆擋在門外。判定鏈是純函式（promo-gate.ts），這裡只負責
+   * 讀儲存、開浮層、以及在收尾時把試玩那句話預填進輸入框。
+   *
+   * 為什麼掛在這頁而不是 layout：收尾要「直進試玩」，而預填輸入框的通路
+   * （agentSeed 的兄弟 agentComposerSeed）只在這棵樹上——掛 layout 就得整頁跳轉。
+   */
+  const [promoOpen, setPromoOpen] = useState(false);
+  const [promoComposerSeed, setPromoComposerSeed] = useState<{ text: string; nonce: number } | null>(null);
   const { images, timings, failedProviders, isLoading, startGeneration, cancelTask, tasks } = useImageGeneration();
-  const { user, isLoggedIn, refresh } = useAuth();
+  // authLoading 必須與上面 useImageGeneration 的 isLoading 區分開：
+  // 拿生成中的忙碌態去當登入態水合判斷，等於對狀態不明的用戶插播。
+  const { user, isLoggedIn, refresh, isLoading: authLoading } = useAuth();
   const { toast } = useToast();
   const initialSuggestions = useMemo(() => getInitialSuggestions(suggestions), [suggestions]);
   const [selectedModels, setSelectedModels] = useState(MODEL_CONFIGS.fast);
@@ -360,6 +376,41 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
   }, [mode, agentSeed]);
 
   /**
+   * 進站判定：登入態水合完成後才判——水合中（authLoading）是「還不知道」，
+   * 對還不知道的用戶插播等於對已登入用戶插播。讀一次 localStorage，
+   * 看過就不再開；深鏈交接（?agent=1&q=/?session=）讓路，判準在 promo-gate.ts。
+   */
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    let seen = false;
+    try {
+      seen = window.localStorage.getItem(PROMO_SEEN_KEY) === "1";
+    } catch {
+      // 私密模式／停用儲存：讀不到就當沒看過（本次照播），不因此炸掉首頁。
+    }
+    if (!shouldPlayPromo({ isLoading: authLoading, isLoggedIn, seen, search: window.location.search })) return;
+    setPromoOpen(true);
+  }, [authLoading, isLoggedIn]);
+
+  /**
+   * 浮層收尾。trial＝「开始试玩」：把片中那句話預填進輸入框。
+   * 刻意走 agentComposerSeed（只預填、不送出）而不是 agentInjection（直送）——
+   * 送出去就是一次真扣費的生成，那一按必須由人按（同 D-5 / D-24 的語義）。
+   */
+  const finishPromoIntro = useCallback((action: "trial" | "dismiss") => {
+    try {
+      window.localStorage.setItem(PROMO_SEEN_KEY, "1");
+    } catch {
+      // 存不了就算了：不擋這次的動作，最壞情況是下次再播一遍。
+    }
+    setPromoOpen(false);
+    if (action !== "trial") return;
+    setMode("agent");
+    setDisplayMode("agent");
+    setPromoComposerSeed({ text: PROMO_TRIAL_PROMPT, nonce: Date.now() });
+  }, []);
+
+  /**
    * 工作站的 applyCreatorResource 依赖 [onModelChange]，一旦这个 prop 每次
    * render 都换身份，<CreatorResourcePanel> 的 memo 就完全失效，
    * 32 张资源卡（含 32 个 next/image）会跟着生成期间的每一次 render 重渲染。
@@ -582,6 +633,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
                     onParamsReflected={handleParamsReflected}
                     onImageResult={setPixaiResultUrl}
                     agentSeed={agentSeed}
+                    agentComposerSeed={promoComposerSeed}
                     initialAgentSessionId={initialAgentSessionId}
                     onCanvasEvent={handleCanvasEvent}
                     canvasStateProvider={handleCanvasSummary}
@@ -632,6 +684,16 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
             refresh().catch(() => {});
           }}
           onClose={() => setPwaHandoffUrl(null)}
+        />
+      )}
+
+      {/* 未登入新訪客的進站宣傳片：z-[120] 在 navbar(z-80) 與既有 portal 彈層(z-90) 之上，
+          浮層開著時底下的首頁仍完整掛載——收尾的「开始试玩」要當場把話預填進輸入框，
+          整頁跳轉會把那個輸入框連同畫布一起重建。 */}
+      {promoOpen && (
+        <PromoIntroOverlay
+          onTrial={() => finishPromoIntro("trial")}
+          onDismiss={() => finishPromoIntro("dismiss")}
         />
       )}
 
