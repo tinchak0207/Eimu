@@ -178,11 +178,18 @@ export function PromoIntroOverlay({ onTrial, onDismiss }: PromoIntroOverlayProps
           <div
             className="absolute left-1/2 top-1/2 aspect-[16/9]"
             style={{
-              // 直式放大到框好按；橫式至少鋪滿高度（不留黑邊）。
-              width: portrait ? "250vw" : "max(100vw, 177.78vh)",
-              // 以封面裡那個輸入框的中心對齊畫面中心：百分比是自身尺寸的
-              // 比例，所以任何縮放都成立。
-              transform: `translate(${(-BOX_CX * 100).toFixed(4)}%, ${(-BOX_CY * 100).toFixed(4)}%)`,
+              // 橫式＝整張封面完整入鏡（contain）：縮到能塞進視窗的最小那組尺寸，
+              // 多出來的邊留給同色底。**曾經寫成 max(100vw, 177.78vh) 想「不留
+              // 黑邊」，結果視窗比例接近 16:9 時封面被放大到高度溢出——品牌標與
+              // 右上「成片」標籤整個被切掉、底下還留一條空帶（2026-09-27 暴君
+              // 截圖實錘「你交给我的什么玩意啊」）。海報式結尾就該完整入鏡。
+              // 直式＝放大到框好按（手機手指放得下），此時刻意只露出框那一段。
+              width: portrait ? "250vw" : "min(100vw, 177.78vh)",
+              // 對齊點＝畫面中心：橫式對封面中心，直式對輸入框中心。
+              // 百分比是自身尺寸的比例，所以任何縮放都成立。
+              transform: portrait
+                ? `translate(${(-BOX_CX * 100).toFixed(4)}%, ${(-BOX_CY * 100).toFixed(4)}%)`
+                : "translate(-50%, -50%)",
               containerType: "size",
             }}
           >
@@ -198,7 +205,7 @@ export function PromoIntroOverlay({ onTrial, onDismiss }: PromoIntroOverlayProps
                 它會精準蓋住封面裡畫上去的框（座標同源），所以看不到兩層字。 */}
             <form
               onSubmit={submit}
-              className="absolute flex items-center border-[1.5px] border-[rgba(255,255,255,0.98)] bg-[linear-gradient(180deg,rgba(255,255,255,0.86),rgba(255,255,255,0.66))] backdrop-blur-[24px] [backdrop-filter:blur(24px)_saturate(180%)]"
+              className="absolute flex items-center border-[1.5px] border-[rgba(255,255,255,0.98)] bg-[linear-gradient(180deg,rgba(255,255,255,0.94),rgba(255,255,255,0.86))] backdrop-blur-[24px] [backdrop-filter:blur(24px)_saturate(180%)]"
               style={{
                 left: pct(BOX.left, COVER_W),
                 top: pct(BOX.top, COVER_H),
