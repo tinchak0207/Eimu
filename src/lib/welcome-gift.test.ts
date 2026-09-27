@@ -23,9 +23,9 @@ import {
 interface World {
   quota: Map<number, number>;
   claims: Map<number, WelcomeClaimStatus>;
+  noticed: Set<number>;
   ledger: Map<string, { userId: number; amount: number }>;
   succeeded: Set<number>;
-  notices: { userId: number; title: string }[];
   adjustCalls: number;
   deps: WelcomeGiftDeps;
 }
@@ -40,9 +40,9 @@ function world(options: {
   const w = {
     quota: new Map<number, number>(),
     claims: new Map<number, WelcomeClaimStatus>(),
+    noticed: new Set<number>(),
     ledger: new Map<string, { userId: number; amount: number }>(),
     succeeded: new Set(options.succeeded ?? []),
-    notices: [] as { userId: number; title: string }[],
     adjustCalls: 0,
   } as World;
   const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -50,7 +50,8 @@ function world(options: {
     store: {
       async readClaim(userId) {
         await tick();
-        return w.claims.get(userId) ?? null;
+        const status = w.claims.get(userId);
+        return status ? { status, noticed: w.noticed.has(userId) } : null;
       },
       async hasSucceededGeneration(userId) {
         await tick();
@@ -68,6 +69,11 @@ function world(options: {
       },
       async mark(userId, status) {
         w.claims.set(userId, status);
+      },
+      async markNoticed(userId) {
+        if (w.claims.get(userId) !== "applied" || w.noticed.has(userId)) return false;
+        w.noticed.add(userId);
+        return true;
       },
       async listBizBillingUserIds() {
         return options.biz ?? [];
@@ -92,9 +98,6 @@ function world(options: {
       w.ledger.set(ref, { userId, amount: amountQuota });
       return { posted: true };
     },
-    async notify(userId, notice) {
-      w.notices.push({ userId, title: notice.title });
-    },
     async listUsers() {
       return options.users ?? [];
     },
@@ -112,7 +115,7 @@ test("额度常量＝5 张默认模型标准图的真实定价（不写死魔数
   assert.equal(notice.title, `新人礼：已送你 ${WELCOME_GIFT_COINS} 币，够生成约 5 张图`);
 });
 
-test("新用户首次命中即发：上游 +N、帐本记一笔 adjustment、写一条站内通知", async () => {
+test("新用户首次命中即发：上游 +N、帐本记一笔 adjustment、通知待送", async () => {
   const w = world();
   const result = await grantWelcomeGift(301, w.deps);
   assert.equal(result.status, "granted");
@@ -120,7 +123,7 @@ test("新用户首次命中即发：上游 +N、帐本记一笔 adjustment、写
   assert.equal(w.quota.get(301), WELCOME_GIFT_QUOTA);
   assert.deepEqual(w.ledger.get("adjustment:welcome:301:v1"), { userId: 301, amount: WELCOME_GIFT_QUOTA });
   assert.equal(w.claims.get(301), "applied");
-  assert.equal(w.notices.length, 1);
+  assert.equal(result.noticePending, true);
 });
 
 test("幂等：连发两次只入帐一次（第二次 already_granted，上游不再加额）", async () => {
@@ -132,7 +135,11 @@ test("幂等：连发两次只入帐一次（第二次 already_granted，上游�
   assert.equal(w.adjustCalls, 1);
   assert.equal(w.quota.get(302), WELCOME_GIFT_QUOTA);
   assert.equal(w.ledger.size, 1);
-  assert.equal(w.notices.length, 1);
+  // 通知未回执前 already_granted 仍标 noticePending；回执后不再待送。
+  assert.equal(second.noticePending, true);
+  assert.equal(await w.deps.store.markNoticed(302), true);
+  assert.equal(await w.deps.store.markNoticed(302), false);
+  assert.equal((await grantWelcomeGift(302, w.deps)).noticePending, false);
 });
 
 test("幂等：并发两次登录（同时命中）也只加额一次", async () => {
@@ -151,7 +158,7 @@ test("已有成功出图的用户不发：上游、帐本、通知都不动", as
   assert.equal(result.status, "ineligible");
   assert.equal(w.adjustCalls, 0);
   assert.equal(w.ledger.size, 0);
-  assert.equal(w.notices.length, 0);
+  assert.equal(result.noticePending, false);
   assert.equal(w.claims.has(304), false);
 });
 
@@ -215,4 +222,36 @@ test("回溯：只发给从未成功出图的普通启用用户；排除管理�
   assert.deepEqual(replay.userIds.already_granted, [10, 14]);
   assert.equal(w.adjustCalls, 2);
   assert.equal(w.ledger.size, 2);
+});
+
+test("登录编排：通知待送 → 写一条站内通知并回执；回执成功后不再待送；无需通知时不写", async () => {
+  const { ensureWelcomeGiftOnLogin } = await import("./welcome-gift-login.ts");
+  const written: { userId: number; title: string }[] = [];
+  const acks: number[] = [];
+  const base = { userId: 401, amountQuota: WELCOME_GIFT_QUOTA, coins: WELCOME_GIFT_COINS };
+  const deps = (noticePending: boolean, ackOk = true) => ({
+    grant: async () => ({ ...base, status: "granted" as const, noticePending }),
+    ack: async (userId: number) => {
+      acks.push(userId);
+      return ackOk;
+    },
+    notify: async (userId: number, notice: { title: string }) => {
+      written.push({ userId, title: notice.title });
+    },
+  });
+
+  const delivered = await ensureWelcomeGiftOnLogin(401, {}, deps(true));
+  assert.equal(delivered?.noticePending, false);
+  assert.deepEqual(written, [{ userId: 401, title: `新人礼：已送你 ${WELCOME_GIFT_COINS} 币，够生成约 5 张图` }]);
+  assert.deepEqual(acks, [401]);
+
+  const ackFailed = await ensureWelcomeGiftOnLogin(401, {}, deps(true, false));
+  assert.equal(ackFailed?.noticePending, true, "回执失败＝下次再送，不假装送达");
+
+  written.length = 0;
+  acks.length = 0;
+  const nothingToSay = await ensureWelcomeGiftOnLogin(401, {}, deps(false));
+  assert.equal(nothingToSay?.status, "granted");
+  assert.equal(written.length, 0);
+  assert.equal(acks.length, 0);
 });

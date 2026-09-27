@@ -24,7 +24,12 @@
 //
 // 部署拓扑：本档的核心（grantWelcomeGift）只在控制面执行（直连控制面 Postgres + 上游管理凭证）；
 // Vercel 站点没有控制面 DB，走 HMAC 签名通道转投 /image-control/api/internal/welcome-gift
-// （与 newapi-session-token 同一骨架）。站内通知直接在控制面写入（两端 blob 存储为同一个）。
+// （与 newapi-session-token 同一骨架）。
+//
+// 站内通知（「新人礼：已送你 N 币，够生成约 5 张图」）由 Vercel 登录路径写入
+// （welcome-gift-login.ts，复用 notification-store）：占位表 noticed_at 为空＝通知待送，
+// 送达后经同一通道 op=noticed 回执。这样登录时发放与运维回溯发放的用户都只收到一次通知，
+// 且本档不依赖 notification-store（控制面不必同步那一族文件）。
 
 import { signBizKeySync } from "@/lib/biz-key-sync";
 import {
@@ -34,8 +39,7 @@ import {
   type GatewayAdminUser,
 } from "@/lib/gateway-admin";
 import { ensureAccountBaselinesWithStatus, recordAdjustment } from "@/lib/generation-core/account-ledger";
-import { generationDatabaseConfigured, getGenerationSql, type GenerationSql } from "@/lib/generation-core/database";
-import { createNotification } from "@/lib/notification-store";
+import { getGenerationSql, type GenerationSql } from "@/lib/generation-core/database";
 import { DEFAULT_IMAGE_MODEL_ID, imageGenerationCoins } from "@/lib/provider-config";
 import { QUOTA_PER_COIN } from "@/lib/quota-constants";
 
@@ -92,15 +96,25 @@ export interface WelcomeGiftResult {
   userId: number;
   amountQuota: number;
   coins: number;
+  /** 已发放但站内通知尚未送达（登录路径据此写通知并回执）。 */
+  noticePending: boolean;
   reason?: string;
 }
 
+export interface WelcomeClaim {
+  status: WelcomeClaimStatus;
+  /** 站内通知是否已送达（noticed_at 非空）。 */
+  noticed: boolean;
+}
+
 export interface WelcomeGiftStore {
-  readClaim(userId: number): Promise<WelcomeClaimStatus | null>;
+  readClaim(userId: number): Promise<WelcomeClaim | null>;
   hasSucceededGeneration(userId: number): Promise<boolean>;
   /** 占位：新插 pending，或把 failed 重新占成 pending。拿到占位回 true。 */
   claim(userId: number, idempotencyRef: string, amountQuota: number): Promise<boolean>;
   mark(userId: number, status: Exclude<WelcomeClaimStatus, "pending">, detail?: string): Promise<void>;
+  /** 站内通知已送达的回执（只对 applied 生效；重复回执无副作用）。 */
+  markNoticed(userId: number): Promise<boolean>;
   /** B 端计费账户（biz key 归属）——回溯时排除。 */
   listBizBillingUserIds(): Promise<number[]>;
 }
@@ -111,7 +125,6 @@ export interface WelcomeGiftDeps {
   readUpstreamQuota(userId: number): Promise<number | null>;
   adjustUpstream(userId: number, deltaQuota: number): Promise<void>;
   recordLedger(input: { userId: number; amountQuota: number; sourceRef: string }): Promise<{ posted: boolean; reason?: string }>;
-  notify(userId: number, notice: { title: string; body: string }): Promise<void>;
   listUsers(): Promise<GatewayAdminUser[]>;
   amountQuota?: number;
 }
@@ -125,13 +138,23 @@ function result(
   userId: number,
   amountQuota: number,
   reason?: string,
+  noticePending = false,
 ): WelcomeGiftResult {
-  return { status, userId, amountQuota, coins: amountQuota / QUOTA_PER_COIN, ...(reason ? { reason } : {}) };
+  return {
+    status,
+    userId,
+    amountQuota,
+    coins: amountQuota / QUOTA_PER_COIN,
+    noticePending,
+    ...(reason ? { reason } : {}),
+  };
 }
 
-function claimToResult(claim: WelcomeClaimStatus, userId: number, amountQuota: number): WelcomeGiftResult | null {
-  if (claim === "applied") return result("already_granted", userId, amountQuota);
-  if (claim === "pending" || claim === "unknown") return result("in_flight", userId, amountQuota, `占位状态 ${claim}`);
+function claimToResult(claim: WelcomeClaim, userId: number, amountQuota: number): WelcomeGiftResult | null {
+  if (claim.status === "applied") return result("already_granted", userId, amountQuota, undefined, !claim.noticed);
+  if (claim.status === "pending" || claim.status === "unknown") {
+    return result("in_flight", userId, amountQuota, `占位状态 ${claim.status}`);
+  }
   return null; // failed → 允许重新占位
 }
 
@@ -203,12 +226,8 @@ export async function grantWelcomeGift(userId: number, deps: WelcomeGiftDeps): P
     }
   }
 
-  // ④ 站内通知（失败不影响发放结果）。
-  await deps.notify(userId, welcomeGiftNotice(amountQuota / QUOTA_PER_COIN)).catch((error) => {
-    console.error(`[welcome-gift] user=${userId} 站内通知写入失败：${reasonOf(error)}`);
-  });
-
-  return result("granted", userId, amountQuota);
+  // ④ 站内通知由登录路径送达（noticePending=true），见 welcome-gift-login.ts。
+  return result("granted", userId, amountQuota, undefined, true);
 }
 
 // ─────────────────────────────────────────── 回溯（既有用户）
@@ -285,6 +304,7 @@ async function ensureSchema(sql: GenerationSql): Promise<void> {
           amount_quota    bigint NOT NULL CHECK (amount_quota > 0),
           status          text NOT NULL CHECK (status IN ('pending', 'applied', 'failed', 'unknown')),
           detail          text,
+          noticed_at      timestamptz,
           created_at      timestamptz NOT NULL DEFAULT now(),
           updated_at      timestamptz NOT NULL DEFAULT now()
         )
@@ -303,9 +323,12 @@ export function createPostgresWelcomeGiftStore(sql: GenerationSql = getGeneratio
   return {
     async readClaim(userId) {
       await ensureSchema(sql);
-      const rows = await sql<Row[]>`SELECT status FROM welcome_gift_grant WHERE user_id = ${userId} LIMIT 1`;
+      const rows = await sql<Row[]>`
+        SELECT status, noticed_at FROM welcome_gift_grant WHERE user_id = ${userId} LIMIT 1
+      `;
       const status = rows[0]?.status;
-      return typeof status === "string" ? (status as WelcomeClaimStatus) : null;
+      if (typeof status !== "string") return null;
+      return { status: status as WelcomeClaimStatus, noticed: rows[0]?.noticed_at != null };
     },
     async hasSucceededGeneration(userId) {
       const rows = await sql<Row[]>`
@@ -335,6 +358,15 @@ export function createPostgresWelcomeGiftStore(sql: GenerationSql = getGeneratio
         SET status = ${status}, detail = ${detail ?? null}, updated_at = now()
         WHERE user_id = ${userId}
       `;
+    },
+    async markNoticed(userId) {
+      await ensureSchema(sql);
+      const rows = await sql<Row[]>`
+        UPDATE welcome_gift_grant SET noticed_at = now(), updated_at = now()
+        WHERE user_id = ${userId} AND status = 'applied' AND noticed_at IS NULL
+        RETURNING user_id
+      `;
+      return rows.length > 0;
     },
     async listBizBillingUserIds() {
       const rows = await sql<Row[]>`SELECT DISTINCT user_id FROM biz_api_key WHERE user_id IS NOT NULL`;
@@ -367,14 +399,11 @@ export function productionWelcomeGiftDeps(sql: GenerationSql = getGenerationSql(
         },
         { sql, fetchUser },
       ),
-    notify: async (userId, notice) => {
-      await createNotification(userId, notice);
-    },
     listUsers: () => listGatewayUsers(),
   };
 }
 
-// ─────────────────────────────────────────── 登录路径入口（双模式：控制面直连 / Vercel 签名通道）
+// ─────────────────────────────────────────── Vercel 侧签名通道（登录路径用）
 
 export const WELCOME_GIFT_RELAY_SIGNATURE_DOMAIN = "welcome-gift";
 const RELAY_PATH = "/image-control/api/internal/welcome-gift";
@@ -390,51 +419,63 @@ function isWelcomeGiftStatus(value: unknown): value is WelcomeGiftStatus {
   );
 }
 
-/** Vercel 侧：经 HMAC 通道请控制面发新人礼。env 缺一或失败 → null（不挡登录）。 */
-export async function grantWelcomeGiftViaRelay(
-  userId: number,
-  options: { timeoutMs?: number; fetchImpl?: typeof fetch } = {},
-): Promise<WelcomeGiftResult | null> {
+interface RelayOptions {
+  timeoutMs?: number;
+  fetchImpl?: typeof fetch;
+}
+
+async function postRelay(body: Record<string, unknown>, options: RelayOptions): Promise<Record<string, unknown> | null> {
   const origin = process.env.GENERATION_CONTROL_PLANE_PROXY_ORIGIN?.trim().replace(/\/+$/, "");
   const secret = process.env.GENERATION_BILLING_RELAY_SECRET?.trim();
   if (!origin || !secret) return null;
+  const rawBody = JSON.stringify(body);
+  const timestamp = String(Date.now());
+  const signature = signBizKeySync(secret, timestamp, rawBody, WELCOME_GIFT_RELAY_SIGNATURE_DOMAIN);
+  const res = await (options.fetchImpl ?? fetch)(`${origin}${RELAY_PATH}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Biz-Key-Sync-Timestamp": timestamp,
+      "X-Biz-Key-Sync-Signature": signature,
+    },
+    body: rawBody,
+    cache: "no-store",
+    signal: AbortSignal.timeout(options.timeoutMs ?? DEFAULT_RELAY_TIMEOUT_MS),
+  });
+  if (!res.ok) return null;
+  const data = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+  return data?.ok === true ? data : null;
+}
+
+/** 请控制面发新人礼。env 缺一或失败 → null（不挡登录）。 */
+export async function grantWelcomeGiftViaRelay(
+  userId: number,
+  options: RelayOptions = {},
+): Promise<WelcomeGiftResult | null> {
   try {
-    const rawBody = JSON.stringify({ op: "grant", userId });
-    const timestamp = String(Date.now());
-    const signature = signBizKeySync(secret, timestamp, rawBody, WELCOME_GIFT_RELAY_SIGNATURE_DOMAIN);
-    const res = await (options.fetchImpl ?? fetch)(`${origin}${RELAY_PATH}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Biz-Key-Sync-Timestamp": timestamp,
-        "X-Biz-Key-Sync-Signature": signature,
-      },
-      body: rawBody,
-      cache: "no-store",
-      signal: AbortSignal.timeout(options.timeoutMs ?? DEFAULT_RELAY_TIMEOUT_MS),
-    });
-    if (!res.ok) return null;
-    const data = (await res.json().catch(() => null)) as { ok?: boolean; result?: Partial<WelcomeGiftResult> } | null;
-    const payload = data?.result;
-    if (!data?.ok || !payload || !isWelcomeGiftStatus(payload.status)) return null;
+    const data = await postRelay({ op: "grant", userId }, options);
+    const payload = data?.result as Partial<WelcomeGiftResult> | undefined;
+    if (!payload || !isWelcomeGiftStatus(payload.status)) return null;
     const amountQuota = Number(payload.amountQuota);
-    return result(payload.status, userId, Number.isFinite(amountQuota) ? amountQuota : WELCOME_GIFT_QUOTA);
+    return result(
+      payload.status,
+      userId,
+      Number.isFinite(amountQuota) && amountQuota > 0 ? amountQuota : WELCOME_GIFT_QUOTA,
+      undefined,
+      payload.noticePending === true,
+    );
   } catch (error) {
-    console.error(`[welcome-gift] relay failed user=${userId}：${reasonOf(error)}`);
+    console.error(`[welcome-gift] relay grant failed user=${userId}：${reasonOf(error)}`);
     return null;
   }
 }
 
-/** 登录/取当前用户路径调用：控制面实例直连执行，其余（Vercel）走签名通道。 */
-export async function ensureWelcomeGiftForUser(
-  userId: number,
-  options: { timeoutMs?: number } = {},
-): Promise<WelcomeGiftResult | null> {
+/** 站内通知已送达的回执。失败回 false（下次登录会再送一次通知——宁可多一条提示，不丢提示）。 */
+export async function ackWelcomeGiftNoticeViaRelay(userId: number, options: RelayOptions = {}): Promise<boolean> {
   try {
-    if (generationDatabaseConfigured()) return await grantWelcomeGift(userId, productionWelcomeGiftDeps());
-    return await grantWelcomeGiftViaRelay(userId, options);
+    return (await postRelay({ op: "noticed", userId }, options)) !== null;
   } catch (error) {
-    console.error(`[welcome-gift] ensure failed user=${userId}：${reasonOf(error)}`);
-    return null;
+    console.error(`[welcome-gift] relay ack failed user=${userId}：${reasonOf(error)}`);
+    return false;
   }
 }

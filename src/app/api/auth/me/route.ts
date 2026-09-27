@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { MOCK_MODE, mockGetSelf } from "@/lib/mock";
 import { getGatewayBaseUrl } from "@/lib/new-api-auth-server";
 import { lookupUserIdByTokenViaRelay } from "@/lib/newapi-session-token";
-import { ensureWelcomeGiftForUser } from "@/lib/welcome-gift";
+import { ensureWelcomeGiftOnLogin } from "@/lib/welcome-gift-login";
 
 export const preferredRegion = "sfo1";
 
@@ -28,10 +28,12 @@ function cacheVerifiedMe(key: string, data: unknown) {
   meMicroCache.set(key, { expiresAt: Date.now() + ME_CACHE_TTL_MS, data });
 }
 
-// 新人礼掛點（src/lib/welcome-gift.ts）：驗證通過後、寫快取前，首次命中即發，已發/不符合則
-// no-op。每個實例每個用戶只問一次控面（結案狀態永久記住；未結案 5 分鐘後再試），
-// 失敗只記日誌、絕不擋登入。本次發放成功時把 quota 就地加上，錢包當場看到到帳。
+// 新人礼掛點（src/lib/welcome-gift-login.ts → 控面 welcome-gift）：驗證通過後、寫快取前，
+// 首次命中即發，已發/不符合則 no-op。每個實例每個用戶只問一次控面（結案狀態永久記住；
+// 未結案 5 分鐘後再試），整段最多等 WELCOME_GIFT_BUDGET_MS，失敗只記日誌、絕不擋登入。
+// 本次發放成功時把 quota 就地加上，錢包當場看到到帳；站內通知同時寫入。
 const WELCOME_GIFT_TIMEOUT_MS = 3_000;
+const WELCOME_GIFT_BUDGET_MS = 4_000;
 const WELCOME_GIFT_RETRY_MS = 5 * 60_000;
 const WELCOME_GIFT_MEMO_MAX = 5_000;
 const welcomeGiftNextCheckAt = new Map<number, number>();
@@ -44,8 +46,16 @@ async function applyWelcomeGift(payload: unknown): Promise<void> {
     const nextCheckAt = welcomeGiftNextCheckAt.get(userId);
     if (nextCheckAt !== undefined && nextCheckAt > Date.now()) return;
 
-    const result = await ensureWelcomeGiftForUser(userId, { timeoutMs: WELCOME_GIFT_TIMEOUT_MS });
-    const settled = result?.status === "granted" || result?.status === "already_granted" || result?.status === "ineligible";
+    let budgetTimer: ReturnType<typeof setTimeout> | undefined;
+    const result = await Promise.race([
+      ensureWelcomeGiftOnLogin(userId, { timeoutMs: WELCOME_GIFT_TIMEOUT_MS }),
+      new Promise<null>((resolve) => {
+        budgetTimer = setTimeout(() => resolve(null), WELCOME_GIFT_BUDGET_MS);
+      }),
+    ]).finally(() => clearTimeout(budgetTimer));
+    // 結案＝不必再問：已發且通知已送達、或不符合資格。通知待送的下次再試。
+    const settled = result?.status === "ineligible" ||
+      ((result?.status === "granted" || result?.status === "already_granted") && !result.noticePending);
     if (welcomeGiftNextCheckAt.size >= WELCOME_GIFT_MEMO_MAX) welcomeGiftNextCheckAt.clear();
     welcomeGiftNextCheckAt.set(userId, settled ? Number.POSITIVE_INFINITY : Date.now() + WELCOME_GIFT_RETRY_MS);
 

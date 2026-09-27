@@ -8,6 +8,7 @@
 -- 状态机：pending（已占位，不自动重试）→ applied（上游已加额）
 --                                      → failed（上游明确没动，允许重新占位）
 --                                      → unknown（上游结果不明，不自动重试，人工核对）
+-- noticed_at：站内通知已送达的回执（Vercel 登录路径写完通知后经 op=noticed 回填）。
 -- 运行时首用会 CREATE TABLE IF NOT EXISTS 同一 DDL，本文件为留档与手工建表用。
 
 CREATE TABLE IF NOT EXISTS welcome_gift_grant (
@@ -16,6 +17,7 @@ CREATE TABLE IF NOT EXISTS welcome_gift_grant (
   amount_quota    bigint NOT NULL CHECK (amount_quota > 0),
   status          text NOT NULL CHECK (status IN ('pending', 'applied', 'failed', 'unknown')),
   detail          text,
+  noticed_at      timestamptz,
   created_at      timestamptz NOT NULL DEFAULT now(),
   updated_at      timestamptz NOT NULL DEFAULT now()
 );
