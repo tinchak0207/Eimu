@@ -110,3 +110,23 @@ test("bare 502 without quota copy is still a retryable overload (regression)", (
   assert.equal(result.quarantineSupplier, false);
 });
 
+
+test("xiaoyxiao 欠費以 HTTP 401 回來仍歸 quota_exhausted，不得隔離帳號（INC-VIDEO-0927b）", () => {
+  // 2026-09-27 生產原文：401 {"code":"insufficient_user_quota","message":"预扣费额度失败, 用户剩余额度: ¥0.400000, 需要预扣费额度: ¥1.000000"}
+  const result = classifySupplierFailure(
+    new SupplierRequestError(
+      '{"code":"insufficient_user_quota","message":"预扣费额度失败, 用户剩余额度: ¥0.400000, 需要预扣费额度: ¥1.000000","data":null}',
+      401,
+    ),
+    NOW,
+  );
+  assert.equal(result.failureClass, "quota_exhausted");
+  assert.equal(result.quarantineSupplier, false);
+  assert.equal(result.retryable, false);
+});
+
+test("401 without quota copy is still authentication + quarantine (regression)", () => {
+  const result = classifySupplierFailure(new SupplierRequestError("invalid api key", 401), NOW);
+  assert.equal(result.failureClass, "authentication");
+  assert.equal(result.quarantineSupplier, true);
+});

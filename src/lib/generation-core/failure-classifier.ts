@@ -152,6 +152,25 @@ export function classifySupplierFailure(error: unknown, now = new Date()): Class
   if (normalized.includes("malformed image") || normalized.includes("undecodable image")) {
     return { failureClass: "malformed_output", retryable: true, switchSupplier: true, quarantineSupplier: false, cooldownUntil: new Date(now.getTime() + 5 * 60_000), detail, httpStatus: status };
   }
+  // 順序鐵律（2026-09-27 INC-VIDEO-0927b）：欠費判定必須先於 401/403 鑑權判定。
+  // xiaoyxiao 欠費以 HTTP 401 + insufficient_user_quota 回來，若先進鑑權桶就會
+  // quarantineSupplier → 帳號被標 disabled、任務排隊空轉到 deadline。
+  if (status === 402 || containsAny(normalized, [
+    "quota exhausted", "insufficient quota", "insufficient_quota", "insufficient_user_quota",
+    "credit balance", "余额不足", "积分余额不足", "积分不足", "欠费", "额度不足",
+    "预扣费额度失败", "剩余额度", "额度已用完",
+    "insufficient balance", "insufficient credit", "balance exhausted", "(1008)",
+  ])) {
+    return {
+      failureClass: "quota_exhausted",
+      retryable: false,
+      switchSupplier: true,
+      quarantineSupplier: false,
+      cooldownUntil: new Date(now.getTime() + QUOTA_EXHAUSTED_ACCOUNT_COOLDOWN_MS),
+      detail,
+      httpStatus: status,
+    };
+  }
   if (status === 401 || status === 403 || containsAny(normalized, ["invalid api key", "invalid_api_key", "unauthorized", "token expired"])) {
     return { failureClass: "authentication", retryable: true, switchSupplier: true, quarantineSupplier: true, cooldownUntil: null, detail, httpStatus: status };
   }
@@ -177,22 +196,6 @@ export function classifySupplierFailure(error: unknown, now = new Date()): Class
   // 全部匹配不到 → 502 掉進 overloaded 桶 → retryable → 任務在退避循環空轉到
   // deadline（實錄：seedance-2.0/-fast/-mini/-2.5-720p 共 72 筆 deadline_exceeded，
   // 真話只躺在 attempt 表）。補齊中英詞與錯誤碼。
-  if (status === 402 || containsAny(normalized, [
-    "quota exhausted", "insufficient quota", "insufficient_quota", "insufficient_user_quota",
-    "credit balance", "余额不足", "积分余额不足", "积分不足", "欠费", "额度不足",
-    "预扣费额度失败", "剩余额度", "额度已用完",
-    "insufficient balance", "insufficient credit", "balance exhausted", "(1008)",
-  ])) {
-    return {
-      failureClass: "quota_exhausted",
-      retryable: false,
-      switchSupplier: true,
-      quarantineSupplier: false,
-      cooldownUntil: new Date(now.getTime() + QUOTA_EXHAUSTED_ACCOUNT_COOLDOWN_MS),
-      detail,
-      httpStatus: status,
-    };
-  }
   if (status === 408 || (status !== undefined && status >= 500) || containsAny(normalized, ["system under load", "overloaded", "service unavailable", "temporarily unavailable"])) {
     // 3 分鐘而非 30 秒（2026-08-27）：first_party 排序永遠壓過 managed_pool，
     // 30s 冷卻到期又被選中→再失敗，單個 job 的 attempt 預算被同一渠道燒光

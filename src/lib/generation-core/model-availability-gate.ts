@@ -81,7 +81,16 @@ export interface ModelBreakerVerdict extends ModelBreakerStats {
 export interface ModelBreakerSnapshot {
   generatedAt: number;
   verdicts: Map<string, ModelBreakerVerdict>;
+  /**
+   * 供給面斷供：有 capability 合約、但沒有任何「供應商＋合約＋帳號」三者皆 enabled 且
+   * 非 disabled 的組合（與 scheduler acquire 同條件，cooldown 屬暫時態不計）。
+   * 這種模型提交了也只會排隊空轉到 deadline（INC-VIDEO-0927b），且試探單不可能成功，
+   * 所以直接判不可用、不放半開試探；供應恢復（管理員重新啟用）即自動解除。
+   */
+  unsupplied?: Set<string>;
 }
+
+export const MODEL_UNSUPPLIED_REASON = "供应商账户暂不可用（已停用，等待恢复）";
 
 export interface ModelAlternative {
   modelId: string;
@@ -204,6 +213,7 @@ export function suggestAlternativeModels(
   if (!self || self.family === "other") return [];
   return [...snapshot.verdicts.values()]
     .filter((verdict) => verdict.modelId !== modelId
+      && !snapshot.unsupplied?.has(verdict.modelId)
       && verdict.family === self.family
       && verdict.state === "closed"
       && verdict.successes > 0
@@ -247,6 +257,20 @@ export async function readModelBreakerSnapshot(
       LIMIT ${MODEL_BREAKER_ROW_LIMIT}
     `;
     const snapshot = buildModelBreakerSnapshot(rows, now);
+    const supply = await db<{ public_model_id: string }[]>`
+      SELECT capability.public_model_id
+      FROM supplier_capability capability
+      JOIN supplier ON supplier.id = capability.supplier_id
+      LEFT JOIN supplier_account account ON account.supplier_id = supplier.id
+      WHERE capability.is_current
+      GROUP BY capability.public_model_id
+      HAVING NOT bool_or(
+        supplier.enabled AND supplier.health_status <> 'disabled'
+        AND capability.enabled AND capability.health_status <> 'disabled'
+        AND COALESCE(account.enabled AND account.health_status <> 'disabled', false)
+      )
+    `;
+    snapshot.unsupplied = new Set(supply.map((row) => row.public_model_id));
     snapshotCache = { expiresAt: now + MODEL_BREAKER_CACHE_TTL_MS, snapshot };
     return snapshot;
   } catch (error) {
@@ -266,6 +290,7 @@ export async function readUnavailableModels(
   for (const verdict of snapshot.verdicts.values()) {
     if (verdict.state === "open") unavailable.set(verdict.modelId, verdict.reason ?? "近期真实生成全部失败");
   }
+  for (const modelId of snapshot.unsupplied ?? []) unavailable.set(modelId, MODEL_UNSUPPLIED_REASON);
   return unavailable;
 }
 
@@ -289,6 +314,17 @@ export async function checkModelAvailability(
   if (modelBreakerDisabled(options.env)) return { allowed: true, probe: false };
   const nowFn = options.now ?? Date.now;
   const snapshot = await readModelBreakerSnapshot(options.sql, { now: nowFn });
+  if (snapshot.unsupplied?.has(modelId)) {
+    const alternatives = suggestAlternativeModels(snapshot, modelId);
+    const retryAfterSeconds = Math.ceil(MODEL_BREAKER_HALF_OPEN_INTERVAL_MS / 1000);
+    return {
+      allowed: false,
+      modelId,
+      message: `模型 ${modelId} 暂不可用：${MODEL_UNSUPPLIED_REASON}。本次未提交、未扣费。` + formatAlternatives(alternatives),
+      alternatives,
+      retryAfterSeconds,
+    };
+  }
   const verdict = snapshot.verdicts.get(modelId);
   if (!verdict || verdict.state === "closed") return { allowed: true, probe: false };
 

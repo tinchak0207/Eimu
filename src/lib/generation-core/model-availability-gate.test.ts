@@ -36,11 +36,13 @@ function row(
   };
 }
 
-function fakeSql(rows: ModelOutcomeRow[] | Error) {
+function fakeSql(rows: ModelOutcomeRow[] | Error, unsupplied: string[] = []) {
   const queries: string[] = [];
   const sql = (async (strings: TemplateStringsArray) => {
-    queries.push(strings.join(" ? "));
+    const text = strings.join(" ? ");
+    queries.push(text);
     if (rows instanceof Error) throw rows;
+    if (text.includes("supplier_capability")) return unsupplied.map((public_model_id) => ({ public_model_id }));
     return rows;
   }) as unknown as GenerationSql;
   return { sql, queries };
@@ -224,4 +226,38 @@ test("提交 fail-fast：被判死的模型在建單與預扣費之前拒單，�
   assert.match(queries[0], /SELECT id FROM generation_job/);
   assert.doesNotMatch(queries[0], /INSERT|UPDATE|billing_operation/i);
   assert.equal(billingCalls, 0);
+});
+
+test("供給面斷供（帳號全 disabled）→ 立即不可用、不放試探、列表標出；替代不含斷供模型（INC-VIDEO-0927b）", async () => {
+  __resetModelBreakerStateForTests();
+  const rows = [
+    // 斷供模型在窗口內沒有任何終態樣本（排隊中的單不算）——舊閘會判 closed 放行。
+    row("seedance-2.5-480p", "queued", 5, { kind: "video_generate" }),
+    row("minimax-h3", "succeeded", 90, { kind: "video_generate" }),
+    row("veo-good", "succeeded", 30, { kind: "video_generate" }),
+  ];
+  const { sql } = fakeSql(rows, ["seedance-2.5-480p", "minimax-h3"]);
+  const decision = await checkModelAvailability("seedance-2.5-480p", { sql, now: () => NOW + 60 * MIN, env: {} });
+  assert.equal(decision.allowed, false);
+  if (decision.allowed) return;
+  assert.match(decision.message, /供应商账户暂不可用/);
+  assert.match(decision.message, /未扣费/);
+
+  // 即使過了半開間隔也不放試探：斷供時試探不可能成功。
+  __resetModelBreakerStateForTests();
+  const later = await checkModelAvailability("seedance-2.5-480p", { sql, now: () => NOW + 24 * 60 * MIN, env: {} });
+  assert.equal(later.allowed, false);
+
+  __resetModelBreakerStateForTests();
+  const listed = await readUnavailableModels(sql, { now, env: {} });
+  assert.ok(listed.has("seedance-2.5-480p"));
+  assert.ok(listed.has("minimax-h3"), "有歷史成功但現已斷供，同樣下架");
+  assert.equal(listed.has("veo-good"), false);
+
+  __resetModelBreakerStateForTests();
+  const minimax = await checkModelAvailability("minimax-h3", { sql, now, env: {} });
+  assert.equal(minimax.allowed, false);
+  if (!minimax.allowed) {
+    assert.deepEqual(minimax.alternatives.map((a) => a.modelId), ["veo-good"], "替代只推有供給且有成功證據的模型");
+  }
 });
