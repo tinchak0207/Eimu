@@ -84,6 +84,13 @@ const nextConfig = {
         { source: "/api/internal/team-membership", destination: `${controlPlaneOrigin}/image-control/api/internal/team-membership` },
         // 營銷郵件退訂：email_preference 在控制面 postgres。
         { source: "/api/email/unsubscribe", destination: `${controlPlaneOrigin}/image-control/api/email/unsubscribe` },
+        // OpenAI 同步兼容層（2026-09-28）。必須在控面執行，不能留在 Vercel：
+        // ①同步等待要等生成完成（實測 p50 ≈36s），而本專案 Vercel 是 Hobby，函數
+        // 硬上限 60s，等待中的函數會被平台硬殺，連 504 都送不出去；
+        // ②`/openai/v1/models` 的熔斷／斷供閘要讀 GENERATION_DATABASE_URL，Vercel
+        // 不持有該環境變數，留在本地只會 fail-open（把已斷供的模型照樣列出去）。
+        // 控面沒有函數時長上限，且直接持有資料庫，兩件事同時解決。
+        { source: "/openai/v1/:path*", destination: `${controlPlaneOrigin}/image-control/openai/v1/:path*` },
       ]
       : [];
     // CRITICAL: 控制面代理必須放 `beforeFiles`，不能放在回傳陣列裡。
