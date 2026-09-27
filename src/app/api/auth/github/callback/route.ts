@@ -9,6 +9,7 @@ import {
   type GitHubProfile,
 } from "@/lib/github-auth";
 import { deliverHandoff } from "@/lib/pwa-handoff";
+import { ensureGatewayUserForOAuth } from "@/lib/gateway-admin";
 
 export const preferredRegion = "sfo1";
 
@@ -55,26 +56,18 @@ async function fetchGithubProfile(accessToken: string) {
 }
 
 async function registerGithubUser(profile: GitHubProfile, password: string) {
-  const gatewayBase = getGatewayBaseUrl();
   const username = buildGitHubUsername(profile);
   const email = buildGitHubEmail(profile);
-  const response = await fetch(`${gatewayBase}/api/user/register`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
+  try {
+    // 已存在（老用户）由 ensureGatewayUserForOAuth 内部按复用吸收，不抛。
+    await ensureGatewayUserForOAuth({ username, password });
+  } catch (error) {
+    console.error("[auth/github/register]", {
       username,
-      password,
       email,
-    }),
-    cache: "no-store",
-    signal: AbortSignal.timeout(GITHUB_UPSTREAM_TIMEOUT_MS),
-  });
-
-  const data = await response.json().catch(() => null) as { success?: boolean; message?: string } | null;
-  if (!response.ok || !data?.success) {
-    console.error("[auth/github/register]", { username, email, status: response.status, message: data?.message });
-    if (data?.message?.includes("已存在") || data?.message?.includes("exists")) return;
-    throw new Error(data?.message || "GitHub 用户自动注册失败");
+      message: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
   }
 }
 

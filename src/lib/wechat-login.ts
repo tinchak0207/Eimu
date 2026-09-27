@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import { del, get, put } from "@/lib/blob-backend";
-import { buildWechatUsername, buildWechatPassword, buildWechatEmail } from "./wechat-identity";
+import { buildWechatUsername, buildWechatPassword } from "./wechat-identity";
 import { loginViaNewApi } from "./new-api-auth-server";
 import { getGatewayBaseUrl } from "./new-api-auth-server";
+import { ensureGatewayUserForOAuth } from "./gateway-admin";
 import { WECHAT_WORDPOOL } from "./wechat-wordpool";
 
 export interface WechatLoginState {
@@ -173,35 +174,24 @@ export interface WechatPeerLoginResult {
  * 天然 1:1，滿足「一 peerId 一生只能綁一號」。
  *
  * 分流：
- * - register 成功 → 新用戶（isNewUser=true）→ login 拿 session
- * - register 回「已存在 / exists / already」→ 老用戶（isNewUser=false）→ login
- * - register 其他失敗 → throw
+ * - 上游账号不存在（管理员 API 建号成功）→ 新用戶（isNewUser=true）→ login 拿 session
+ * - 上游账号已存在（复用它）→ 老用戶（isNewUser=false）→ login
+ * - 建号其他失败 → throw
  * - login 失敗 → throw（帳戶狀態異常、停用、密碼失配等）
+ *
+ * 建号走管理员 API（ensureGatewayUserForOAuth），不再打公开注册端点
+ * `/api/user/register` —— 关闭自助注册后那个端点会被上游拒绝。
  */
 export async function loginWechatPeer(peerId: string, passwordSeed: string): Promise<WechatPeerLoginResult> {
   const gatewayBase = getGatewayBaseUrl();
   const username = buildWechatUsername(peerId);
   const password = buildWechatPassword(peerId, passwordSeed);
-  const email = buildWechatEmail(peerId);
-
-  const registerRes = await fetch(`${gatewayBase}/api/user/register`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password, email }),
-    cache: "no-store",
-  });
-  const regData = await registerRes.json().catch(() => null) as { success?: boolean; message?: string } | null;
 
   let isNewUser: boolean;
-  if (regData?.success === true) {
-    isNewUser = true;
-  } else {
-    const msg = regData?.message ?? "";
-    const alreadyExists = /exists|already|已存在|被使用|占用/i.test(msg);
-    if (!alreadyExists) {
-      throw new Error(`微信用户注册失败：${msg || `register http ${registerRes.status}`}`);
-    }
-    isNewUser = false;
+  try {
+    ({ created: isNewUser } = await ensureGatewayUserForOAuth({ username, password }));
+  } catch (error) {
+    throw new Error(`微信用户注册失败：${error instanceof Error ? error.message : "unknown"}`);
   }
 
   const result = await loginViaNewApi(gatewayBase, username, password);

@@ -206,6 +206,44 @@ export interface ProvisionResult {
 }
 
 /**
+ * 确保某个 OAuth 上游账号存在：已存在就复用，不存在则由管理员 API 建号。
+ *
+ * 站点三条 OAuth 建号路径（github / google / wechat）原本打上游公开注册端点
+ * `/api/user/register`；关闭自助注册（`RegisterEnabled=false`）后该端点会回
+ * 「New user registration has been disabled by administrator」，故改走管理员
+ * `POST /api/user/`（与 provisionBizBillingAccount 同一形状）。
+ *
+ * 密码由调用方按各自的确定性公式推导（见 github-auth / google-auth /
+ * wechat-identity），这里只负责把账号建出来；已存在的账号绝不能重复建，
+ * 故先查后建，撞到「已存在」也按复用处理（并发/竞态下的兜底）。
+ *
+ * 不传 display_name：实测上游管理员建号在 display_name 为空时会回落成
+ * username，与旧 register 路径落库结果（github_32261631 等账号
+ * display_name == username）逐字一致，email 同样落空、quota=0、group=default。
+ */
+export async function ensureGatewayUserForOAuth(
+  input: { username: string; password: string },
+): Promise<{ created: boolean }> {
+  const { username, password } = input;
+  if (username.length > GATEWAY_USERNAME_MAX_LENGTH) {
+    throw new Error(`用户名最长 ${GATEWAY_USERNAME_MAX_LENGTH} 个字符（上游限制）。`);
+  }
+
+  const existing = await findGatewayUserByUsername(username);
+  if (existing) return { created: false };
+
+  const created = await callGateway(`/api/user/`, {
+    method: "POST",
+    body: JSON.stringify({ username, password }),
+  });
+
+  if (created.success) return { created: true };
+  // 竞态：查的时候没有、建的瞬间被别的请求建走了，上游回「已存在」，按复用处理。
+  if (/exists|already|已存在|被使用|占用/i.test(created.message ?? "")) return { created: false };
+  throw new Error(created.message ?? "创建上游用户失败。");
+}
+
+/**
  * 开一个专用 B 端计费账户并设定初始额度。幂等：已存在就复用，只把额度调到目标值。
  *
  * 密码随机生成且不返回 —— 这个账户只由程序通过 B 端密钥调用，没人需要登录它。
