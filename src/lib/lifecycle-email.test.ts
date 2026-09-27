@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  EMAIL_EXAMPLES,
   NUDGE_DELAY_MS,
+  entryPlan,
   renderLifecycleEmail,
   runLifecycleEmailsOnce,
   unsubscribeToken,
@@ -12,7 +14,7 @@ import {
   type LifecycleTemplate,
 } from "@/lib/lifecycle-email";
 
-function fakeStore(welcome: LifecycleRecipient[], nudge: LifecycleRecipient[] = []) {
+function fakeStore(welcome: LifecycleRecipient[], nudge: LifecycleRecipient[] = [], depleted: LifecycleRecipient[] = []) {
   const log = new Map<string, { status: string; detail: string | null }>();
   let nudgeCutoff: Date | null = null;
   const store: LifecycleEmailStore = {
@@ -22,6 +24,9 @@ function fakeStore(welcome: LifecycleRecipient[], nudge: LifecycleRecipient[] = 
     async listNudgeCandidates(_limit, sentBefore) {
       nudgeCutoff = sentBefore;
       return nudge.filter((r) => !log.has(`${r.userId}:nudge`));
+    },
+    async listDepletedCandidates() {
+      return depleted.filter((r) => !log.has(`${r.userId}:depleted`));
     },
     async claim(userId: number, template: LifecycleTemplate) {
       const key = `${userId}:${template}`;
@@ -84,7 +89,7 @@ test("nudge carries a verifiable one-click unsubscribe and uses a 48h cutoff", a
   const url = new URL(header.slice(1, -1));
   assert.equal(url.pathname, "/api/email/unsubscribe");
   assert.ok(verifyUnsubscribeToken(Number(url.searchParams.get("u")), url.searchParams.get("t") ?? "", SECRET));
-  assert.ok(sent[0].html.includes(url.toString().replace(/&/g, "&")));
+  assert.ok(sent[0].html.includes(url.toString().replace(/&/g, "&amp;")), "html href is the same url, entity-escaped");
 });
 
 test("unsubscribe token rejects other users, other secrets and junk", () => {
@@ -97,7 +102,7 @@ test("unsubscribe token rejects other users, other secrets and junk", () => {
 });
 
 test("templates: simplified Chinese, utm-tagged CTA, no emoji", () => {
-  for (const tpl of ["welcome", "nudge"] as const) {
+  for (const tpl of ["welcome", "nudge", "depleted"] as const) {
     const { subject, html } = renderLifecycleEmail(tpl, { siteUrl: SITE, unsubscribeUrl: `${SITE}/u` });
     assert.ok(subject.length > 0);
     assert.ok(html.includes(`utm_campaign=${tpl}`));
@@ -116,4 +121,28 @@ test("systemic error (e.g. 403 domain not verified) releases the claim, aborts t
   const up = async () => ({ ok: true as const, id: "re_ok" });
   const r2 = await runLifecycleEmailsOnce({ store, apiKey: "k", secret: SECRET, send: up, siteUrl: SITE });
   assert.equal(r2.sent, 2);
+});
+
+test("welcome: every example links into the assistant input with its exact prompt", () => {
+  const { html } = renderLifecycleEmail("welcome", { siteUrl: SITE });
+  for (const ex of EMAIL_EXAMPLES) {
+    assert.ok(html.includes(`${SITE}${ex.image}`), "example image is absolute on the site");
+    assert.ok(html.includes(`/?agent=1&amp;q=${encodeURIComponent(ex.prompt)}`), "one click fills the prompt");
+  }
+  assert.equal(html.includes("退订"), false, "transactional welcome has no unsubscribe");
+});
+
+test("depleted: names images made and the cheapest plan, carries unsubscribe", async () => {
+  const { store } = fakeStore([], [], [{ userId: 9, email: "c@x.test", imagesMade: 4 }]);
+  const sent: EmailMessage[] = [];
+  const send = async (m: EmailMessage) => (sent.push(m), { ok: true as const, id: "re_d" });
+  await runLifecycleEmailsOnce({ store, apiKey: "k", secret: SECRET, send, siteUrl: SITE });
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].idempotencyKey, "depleted:9:v1");
+  assert.ok(sent[0].subject.includes("4 张图"));
+  const plan = entryPlan();
+  assert.ok(sent[0].html.includes(`¥${plan.price}`));
+  assert.ok(plan.images > 0 && !plan.name.includes("·"));
+  assert.ok(sent[0].headers?.["List-Unsubscribe"]);
+  assert.ok(sent[0].html.includes("/pricing?utm_source=email"));
 });
