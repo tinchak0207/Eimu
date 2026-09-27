@@ -16,55 +16,62 @@ import type { SupplierGenerationInput, SupplierRecord } from "./generation-core/
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 付費視頻上游硬閘（2026-09-27 ¥31.2857 事故）
-// 陽性（expected-pass）：白名單 model + 顯式 ≤720p + ≤5s + 已核價三元組 → 放行。
-// 陰性四條（缺一不可）：白名單外 model／缺 resolution／4k／未核價三元組 → 拒收。
+// 陽性（expected-pass）：白名單 model + 顯式 ≤720p + catalog 內時長 + 已核價三元組。
+// 陰性四條（缺一不可）：白名單外 model／缺 resolution／4k／未核價（未生成）三元組。
+// 三元組＝catalog 生成（registry claims × catalog durations/resolutions），非手抄。
 // ─────────────────────────────────────────────────────────────────────────────
 
-test("expected-pass：白名單 model + 顯式 720p + 5s + 已核價三元組 → 放行並回正確單價", () => {
-  const decision = evaluatePaidVideoSubmission({
-    supplierModelId: "seedance-2.0-900-特惠",
+test("expected-pass：白名單 model + 顯式 720p + catalog 內時長 + 已核價三元組 → 放行並回正確單價", () => {
+  const minimax = evaluatePaidVideoSubmission({
+    supplierModelId: "minimax-h3-933-2k-支持真人",
     resolution: "720p",
     seconds: 5,
   });
-  assert.equal(decision.allowed, true);
-  assert.equal(decision.allowed === true && decision.triple.unitCostCny, 0.7);
-  assert.equal(decision.allowed === true && decision.triple.billingBasis, "per_call");
+  assert.equal(minimax.allowed, true);
+  assert.equal(minimax.allowed === true && minimax.triple.unitCostCny, 1.1);
+  assert.equal(minimax.allowed === true && minimax.triple.billingBasis, "per_call");
 
-  // 480p/4s 亦已核價
-  assert.equal(
-    evaluatePaidVideoSubmission({ supplierModelId: "seedance-2.0-900-特惠", resolution: "480p", seconds: 4 }).allowed,
-    true,
-  );
-  // 直接呼叫 assert 也不拋
-  assert.equal(
-    assertPaidVideoSubmissionAllowed({ supplierModelId: "minimax-h3-933-2k-支持真人", resolution: "720p", seconds: 5 }).unitCostCny,
-    1.1,
-  );
-});
-
-test("expected-pass（放寬裁定後）：三條在售 model 的 catalog 最短時長 10s 通過", () => {
-  // 2026-09-27 裁定：seconds 上限 5→10（＝catalog 最短時長）。白名單皆按次固定價，
-  // 秒數不影響單價 ⇒ 放寬零成本，解鎖下列三條在售 model。
-  const cases: Array<{ model: string; resolution: string }> = [
-    { model: "seedance-2.0-900-特惠", resolution: "480p" },   // ← catalog seedance-2.0（10–15s）
-    { model: "seedance-2.0-900-特惠", resolution: "720p" },
-    { model: "seedance-2.5-900-特惠", resolution: "480p" },   // ← catalog seedance-2.5-480p（10–30s）
-    { model: "seedance-2.5-1010-特惠", resolution: "720p" },  // ← catalog seedance-2.5-720p（10–29s）
-  ];
-  for (const item of cases) {
-    const decision = evaluatePaidVideoSubmission({ supplierModelId: item.model, resolution: item.resolution, seconds: 10 });
-    assert.equal(decision.allowed, true, `${item.model}@${item.resolution}/10s 應放行`);
-  }
-  assert.equal(PAID_VIDEO_MAX_SECONDS, 10);
-
-  // 顯式枚舉而非「≤10 全放行」：未登錄 10s 的 model 在 10s 仍拒收
-  const notEnumerated = evaluatePaidVideoSubmission({
-    supplierModelId: "seedance-2.0-933-特惠",
+  const seedance = evaluatePaidVideoSubmission({
+    supplierModelId: "seedance-2.0-900-特惠",
     resolution: "720p",
     seconds: 10,
   });
-  assert.equal(notEnumerated.allowed, false);
-  assert.equal(notEnumerated.allowed === false && notEnumerated.reason, "triple_not_priced");
+  assert.equal(seedance.allowed, true);
+  assert.equal(seedance.allowed === true && seedance.triple.unitCostCny, 0.7);
+
+  assert.equal(
+    assertPaidVideoSubmissionAllowed({ supplierModelId: "seedance-2.0-900-特惠", resolution: "480p", seconds: 12 }).unitCostCny,
+    0.7,
+  );
+});
+
+test("expected-pass：每條映射 model 的 catalog 最長時長通過（10–30s 全放行，不增成本）", () => {
+  // catalog 實值（現場核對，2026-09-27）：
+  //   seedance-2.0      SEEDANCE_20_DURATIONS      = 10..15
+  //   seedance-2.5-480p SEEDANCE_25_480P_DURATIONS = 10..30
+  //   seedance-2.5-720p SEEDANCE_25_720P_DURATIONS = 10..29
+  //   minimax-h3        SEEDANCE_DURATIONS         = 4..15
+  const expected: Array<{ model: string; resolution: string; min: number; max: number }> = [
+    { model: "seedance-2.0-900-特惠", resolution: "480p", min: 10, max: 15 },
+    { model: "seedance-2.5-900-特惠", resolution: "480p", min: 10, max: 30 },
+    { model: "seedance-2.5-1010-特惠", resolution: "720p", min: 10, max: 29 },
+    { model: "minimax-h3-933-2k-支持真人", resolution: "720p", min: 4, max: 15 },
+  ];
+  for (const item of expected) {
+    const entry = PAID_VIDEO_PRICED_TRIPLES.find((triple) => triple.supplierModelId === item.model);
+    assert.ok(entry, `${item.model} 應有生成三元組`);
+    assert.equal(Math.min(...entry!.seconds), item.min, `${item.model} 最短時長`);
+    assert.equal(Math.max(...entry!.seconds), item.max, `${item.model} 最長時長`);
+    assert.equal(entry!.resolutions.includes(item.resolution as never), true);
+    // 最長時長本身必須通過
+    const atMax = evaluatePaidVideoSubmission({
+      supplierModelId: item.model,
+      resolution: item.resolution,
+      seconds: item.max,
+    });
+    assert.equal(atMax.allowed, true, `${item.model}@${item.max}s 應放行`);
+  }
+  assert.equal(PAID_VIDEO_MAX_SECONDS, 30);
 });
 
 test("陰性①：白名單外 model 一律拒收（含事故成因的動態價模型與被剔除檔位）", () => {
@@ -81,13 +88,13 @@ test("陰性①：白名單外 model 一律拒收（含事故成因的動態價�
     "",
   ];
   for (const model of offenders) {
-    const decision = evaluatePaidVideoSubmission({ supplierModelId: model, resolution: "720p", seconds: 5 });
+    const decision = evaluatePaidVideoSubmission({ supplierModelId: model, resolution: "720p", seconds: 10 });
     assert.equal(decision.allowed, false, `model ${model} 應被拒`);
     assert.equal(decision.allowed === false && decision.reason, "model_not_whitelisted");
   }
 
   assert.throws(
-    () => assertPaidVideoSubmissionAllowed({ supplierModelId: "dreamina-seedance-2.0", resolution: "720p", seconds: 5 }),
+    () => assertPaidVideoSubmissionAllowed({ supplierModelId: "dreamina-seedance-2.0", resolution: "720p", seconds: 10 }),
     (error: unknown) =>
       error instanceof SupplierRequestError
       && error.status === 400
@@ -100,14 +107,14 @@ test("陰性②：resolution 缺省／空字串 → 拒收（上游缺省＝4k�
     const decision = evaluatePaidVideoSubmission({
       supplierModelId: "seedance-2.0-900-特惠",
       resolution: resolution as string | null | undefined,
-      seconds: 5,
+      seconds: 10,
     });
     assert.equal(decision.allowed, false, `resolution ${JSON.stringify(resolution)} 應被拒`);
     assert.equal(decision.allowed === false && decision.reason, "resolution_missing");
   }
 
   assert.throws(
-    () => assertPaidVideoSubmissionAllowed({ supplierModelId: "seedance-2.0-900-特惠", resolution: null, seconds: 5 }),
+    () => assertPaidVideoSubmissionAllowed({ supplierModelId: "seedance-2.0-900-特惠", resolution: null, seconds: 10 }),
     (error: unknown) =>
       error instanceof SupplierRequestError && error.status === 400 && error.message.includes("resolution_missing"),
   );
@@ -118,7 +125,7 @@ test("陰性③：4K（及 2k/1080p 等高價檔位）無條件拒收", () => {
     const decision = evaluatePaidVideoSubmission({
       supplierModelId: "minimax-h3-933-2k-支持真人", // model 名帶 2k 也不許升檔
       resolution,
-      seconds: 5,
+      seconds: 10,
     });
     assert.equal(decision.allowed, false, `resolution ${resolution} 應被拒`);
     assert.equal(decision.allowed === false && decision.reason, "resolution_not_allowed");
@@ -128,44 +135,53 @@ test("陰性③：4K（及 2k/1080p 等高價檔位）無條件拒收", () => {
   assert.deepEqual([...PAID_VIDEO_ALLOWED_RESOLUTIONS], ["480p", "720p"]);
 
   assert.throws(
-    () => assertPaidVideoSubmissionAllowed({ supplierModelId: "minimax-h3-933-2k-支持真人", resolution: "4k", seconds: 5 }),
+    () => assertPaidVideoSubmissionAllowed({ supplierModelId: "minimax-h3-933-2k-支持真人", resolution: "4k", seconds: 10 }),
     (error: unknown) =>
       error instanceof SupplierRequestError && error.status === 400 && error.message.includes("resolution_not_allowed"),
   );
 });
 
-test("陰性④：未核價三元組拒收（model/resolution 各自合法但組合無核價記錄）", () => {
-  // seedance-2.5-900-特惠 只核價 480p；720p 雖在全局白名單內，但該 model 無此核價記錄
-  const decision = evaluatePaidVideoSubmission({
+test("陰性④：未核價／未生成三元組拒收（含 catalog 最長時長之外、未映射 model）", () => {
+  // (a) model/resolution 各自合法但組合未生成：seedance-2.5-900-特惠 只生成 480p
+  const wrongResolution = evaluatePaidVideoSubmission({
     supplierModelId: "seedance-2.5-900-特惠",
     resolution: "720p",
-    seconds: 5,
+    seconds: 10,
   });
-  assert.equal(decision.allowed, false);
-  assert.equal(decision.allowed === false && decision.reason, "triple_not_priced");
+  assert.equal(wrongResolution.allowed, false);
+  assert.equal(wrongResolution.allowed === false && wrongResolution.reason, "triple_not_priced");
 
-  // seconds 超上限（10s 硬線）或非整數／缺省，先被 seconds 檢查攔下
-  for (const seconds of [30, 11, 10.5, 0, -1, 4.5, Number.NaN, undefined, "abc", ""]) {
+  // (b) 超過該 model 的 catalog 最長時長（seedance-2.0 最長 15s；16s ≤30 仍在硬上限內）
+  const beyondCatalogMax = evaluatePaidVideoSubmission({
+    supplierModelId: "seedance-2.0-900-特惠",
+    resolution: "480p",
+    seconds: 16,
+  });
+  assert.equal(beyondCatalogMax.allowed, false);
+  assert.equal(beyondCatalogMax.allowed === false && beyondCatalogMax.reason, "triple_not_priced");
+
+  // (c) 未映射上游 model（grok-video-1.5 在名單內但無公開 model id ⇒ 零三元組 ⇒ 拒收）
+  for (const unmapped of ["grok-video-1.5", "minimax-h3-a", "seedance-2.0-933-特惠"]) {
+    const verdict = evaluatePaidVideoSubmission({ supplierModelId: unmapped, resolution: "720p", seconds: 10 });
+    assert.equal(verdict.allowed, false, `${unmapped} 未生成三元組應被拒`);
+    assert.equal(verdict.allowed === false && verdict.reason, "triple_not_priced");
+    assert.equal(PAID_VIDEO_PRICED_TRIPLES.some((triple) => triple.supplierModelId === unmapped), false);
+  }
+  assert.equal(PAID_VIDEO_PRICED_TRIPLES.length, 4, "只有 4 條 registry 映射生成三元組");
+
+  // (d) seconds 硬上限 30 之外或非整數／缺省
+  for (const seconds of [31, 45, 10.5, 0, -1, Number.NaN, undefined, "abc", ""]) {
     const verdict = evaluatePaidVideoSubmission({
-      supplierModelId: "seedance-2.0-900-特惠",
+      supplierModelId: "seedance-2.5-900-特惠",
       resolution: "480p",
       seconds: seconds as number,
     });
     assert.equal(verdict.allowed, false, `seconds ${String(seconds)} 應被拒`);
     assert.equal(verdict.allowed === false && verdict.reason, "seconds_missing_or_invalid");
   }
-  // 6s 在上限內但未登錄該三元組 ⇒ 走 triple_not_priced（顯式枚舉，非「≤10 全放行」）
-  const sixSeconds = evaluatePaidVideoSubmission({
-    supplierModelId: "seedance-2.0-900-特惠",
-    resolution: "480p",
-    seconds: 6,
-  });
-  assert.equal(sixSeconds.allowed, false);
-  assert.equal(sixSeconds.allowed === false && sixSeconds.reason, "triple_not_priced");
-  assert.equal(PAID_VIDEO_MAX_SECONDS, 10);
 
   assert.throws(
-    () => assertPaidVideoSubmissionAllowed({ supplierModelId: "seedance-2.5-900-特惠", resolution: "720p", seconds: 5 }),
+    () => assertPaidVideoSubmissionAllowed({ supplierModelId: "seedance-2.5-900-特惠", resolution: "720p", seconds: 10 }),
     (error: unknown) =>
       error instanceof SupplierRequestError && error.status === 400 && error.message.includes("triple_not_priced"),
   );
@@ -240,7 +256,7 @@ test("提交路徑：缺 resolution 的視頻請求在 fetch 之前被拒（上�
   }) as typeof fetch;
   try {
     await assert.rejects(
-      () => generateWithOpenaiVideo(fakeSupplier("seedance-2.0-900-特惠"), fakeInput(null, 5)),
+      () => generateWithOpenaiVideo(fakeSupplier("seedance-2.0-900-特惠"), fakeInput(null, 10)),
       (error: unknown) =>
         error instanceof SupplierRequestError && error.status === 400 && error.message.includes("resolution_missing"),
     );
@@ -262,8 +278,8 @@ test("提交路徑：4k 與白名單外 model 同樣在 fetch 之前被拒", asy
     throw new Error("上游不該被呼叫");
   }) as typeof fetch;
   try {
-    await assert.rejects(() => generateWithOpenaiVideo(fakeSupplier("seedance-2.0-900-特惠"), fakeInput("4k", 5)));
-    await assert.rejects(() => generateWithOpenaiVideo(fakeSupplier("dreamina-seedance-2.0"), fakeInput("720p", 5)));
+    await assert.rejects(() => generateWithOpenaiVideo(fakeSupplier("seedance-2.0-900-特惠"), fakeInput("4k", 10)));
+    await assert.rejects(() => generateWithOpenaiVideo(fakeSupplier("dreamina-seedance-2.0"), fakeInput("720p", 10)));
     assert.equal(upstreamCalls, 0, "4k／白名單外 model 不得發出任何上游請求");
   } finally {
     globalThis.fetch = originalFetch;
@@ -272,7 +288,7 @@ test("提交路徑：4k 與白名單外 model 同樣在 fetch 之前被拒", asy
   }
 });
 
-test("提交路徑 expected-pass：顯式 720p/5s 的請求把 resolution 寫進 body（不依賴上游缺省）", async () => {
+test("提交路徑 expected-pass：顯式 720p/10s 的請求把 resolution 寫進 body（不依賴上游缺省）", async () => {
   const originalEnv = process.env.XIAOYXIAO_API_KEY;
   process.env.XIAOYXIAO_API_KEY = "test-key-not-real";
   const seen: Array<{ url: string; body: string }> = [];
@@ -292,14 +308,14 @@ test("提交路徑 expected-pass：顯式 720p/5s 的請求把 resolution 寫進
     );
   }) as typeof fetch;
   try {
-    const output = await generateWithOpenaiVideo(fakeSupplier("seedance-2.0-900-特惠"), fakeInput("720p", 5));
+    const output = await generateWithOpenaiVideo(fakeSupplier("seedance-2.0-900-特惠"), fakeInput("720p", 10));
     assert.equal(output.url, "https://cdn.example/x.mp4");
     const post = seen.find((entry) => entry.body);
     assert.ok(post, "應有一次 POST 提交");
     const payload = JSON.parse(post!.body) as Record<string, unknown>;
     assert.equal(payload.model, "seedance-2.0-900-特惠");
     assert.equal(payload.resolution, "720p", "resolution 必須顯式出現在 body");
-    assert.equal(payload.duration, 5);
+    assert.equal(payload.duration, 10);
   } finally {
     globalThis.fetch = originalFetch;
     if (originalEnv === undefined) delete process.env.XIAOYXIAO_API_KEY;
@@ -316,7 +332,6 @@ test("作用域：白名單只含視頻上游 model，不含任何圖片 model i
   for (const model of PAID_VIDEO_MODEL_WHITELIST) {
     assert.equal(imageIds.has(model), false, `白名單不得含圖片 model：${model}`);
   }
-  assert.equal(PAID_VIDEO_PRICED_TRIPLES.length, PAID_VIDEO_MODEL_WHITELIST.length);
 });
 
 test("作用域：圖片路徑 2k/4k 檔位照常通過共用歸一化（閘不進共用層）", () => {
@@ -326,8 +341,8 @@ test("作用域：圖片路徑 2k/4k 檔位照常通過共用歸一化（閘不�
     const normalized = normalizeGenerationConfig("gpt-image-2", { outputResolution: resolution });
     assert.equal(normalized.config.outputResolution, resolution, `圖片 ${resolution} 不得被清除`);
   }
-  const imageIds = PAID_VIDEO_MODEL_WHITELIST as readonly string[];
-  assert.equal(imageIds.includes("gpt-image-2"), false);
-  assert.equal(imageIds.includes("seedream-5.0-lite"), false);
-  assert.equal(imageIds.includes("image-5-pro"), false);
+  const whitelist = PAID_VIDEO_MODEL_WHITELIST as readonly string[];
+  assert.equal(whitelist.includes("gpt-image-2"), false);
+  assert.equal(whitelist.includes("seedream-5.0-lite"), false);
+  assert.equal(whitelist.includes("image-5-pro"), false);
 });
