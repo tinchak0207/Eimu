@@ -5,6 +5,7 @@ import { addRateLimitHeaders } from "@/lib/biz-rate-limit-response-headers";
 import { submitGenerationCommand } from "@/lib/generation-core/command-service";
 import { enforceQuotaGate } from "@/lib/generation-core/quota-precheck";
 import { IdempotencyConflictError } from "@/lib/generation-core/job-repository";
+import { GenerationModelUnavailableError } from "@/lib/generation-core/model-availability-gate";
 import { generationTaskResponse } from "@/lib/generation-core/task-response";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
 
@@ -101,6 +102,10 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     if (error instanceof IdempotencyConflictError) {
       return errorResponse(409, error.message, "invalid_request_error", "idempotency_key_reused", traceId, apiKey);
+    }
+    // 模型可用性閘：建單/扣費前拒單，沿用既有穩定碼 no_endpoints。
+    if (error instanceof GenerationModelUnavailableError) {
+      return errorResponse(503, error.message, "api_error", "no_endpoints", traceId, apiKey);
     }
     console.error("[v1/tts/generations] submit failed:", error);
     return errorResponse(502, "提交 TTS 任务失败，请稍后重试。", "api_error", "submit_failed", traceId, apiKey);

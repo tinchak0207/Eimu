@@ -23,6 +23,7 @@ import { probeAllModelsStatus } from "@/lib/model-status-probe";
 import { readSupplierHealthSignal } from "@/lib/supplier-health-signal";
 import { listRoutingEvents, summarizeRecentModelStats, type ModelRecentStats } from "@/lib/routing-telemetry";
 import { summarizeChannelBalance } from "@/lib/routing-balance-signal";
+import { readUnavailableModels } from "@/lib/generation-core/model-availability-gate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -110,6 +111,9 @@ export async function GET(req: NextRequest) {
   }));
   // probe 的 media_type 是 "image"/"video"；signal 的 kind 是 "image_generate"/"video_generate"。
   const signalKindByMedia = (media: string): string => (media === "video" ? "video_generate" : "image_generate");
+  // 真實結果閘（2026-09-27，model-availability-gate）：近 72h 真實生成全失敗/極低成功率
+  // 的模型，提交面會在扣費前拒單——這裡同判 unavailable，agent 不再往死模型投單。
+  const breakerUnavailable = await readUnavailableModels().catch(() => new Map<string, string>());
   const models = snapshot.models.map((model) => {
     const last24h = statsByModel.get(model.id);
     const base = last24h ? { ...model, last_24h: last24h } : model;
@@ -123,6 +127,10 @@ export async function GET(req: NextRequest) {
         }
       : base;
     // 执行侧最终裁决：无可用供应商则不可用（覆盖探测/余额的一切乐观结论）。
+    const breakerReason = breakerUnavailable.get(model.id);
+    if (breakerReason) {
+      return { ...withBalance, availability: "unavailable" as const, note: `${breakerReason}，暂不可用，请换其他模型` };
+    }
     const key = `${model.id}:${signalKindByMedia(model.media_type)}`;
     const executionAvailable = supplierSignal.availableByModel[key];
     if (executionAvailable === false) {

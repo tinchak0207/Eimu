@@ -10,6 +10,7 @@ import {
 import { syncModelPricing } from "@/lib/pricing-runtime";
 import { generationControlPlaneEnabled } from "@/lib/generation-core/database";
 import { submitGenerationCommand } from "@/lib/generation-core/command-service";
+import { GenerationModelUnavailableError } from "@/lib/generation-core/model-availability-gate";
 import {
   getGenerationArtifactForTenant,
   getGenerationJobForTenant,
@@ -295,6 +296,10 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (error) {
+    // 模型可用性閘：該模型近期真實生成全失敗 → 建單/扣費前拒單，回誠實原因與替代模型。
+    if (error instanceof GenerationModelUnavailableError) {
+      return fail(503, error.message, "model_unavailable");
+    }
     console.error("[web-generation-task] submission failed", error);
     return fail(503, "任务提交失败，请稍后重试。", "task_submission_failed");
   }

@@ -25,6 +25,7 @@ import { generationControlPlaneEnabled } from "@/lib/generation-core/database";
 import { submitGenerationCommand } from "@/lib/generation-core/command-service";
 import { enforceQuotaGate } from "@/lib/generation-core/quota-precheck";
 import { IdempotencyConflictError } from "@/lib/generation-core/job-repository";
+import { GenerationModelUnavailableError } from "@/lib/generation-core/model-availability-gate";
 import { generationTaskResponse } from "@/lib/generation-core/task-response";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
 import { syncModelPricing } from "@/lib/pricing-runtime";
@@ -307,6 +308,10 @@ export async function POST(req: NextRequest) {
     } catch (error) {
       if (error instanceof IdempotencyConflictError) {
         return errorResponse(409, error.message, "invalid_request_error", "idempotency_key_reused", traceId);
+      }
+      // 模型可用性閘（真實生成結果驅動）：建單/扣費前拒單，沿用既有穩定碼 no_endpoints。
+      if (error instanceof GenerationModelUnavailableError) {
+        return errorResponse(503, error.message, "api_error", "no_endpoints", traceId);
       }
       console.error(`[biz-api] durable task creation failed requestId=${requestId}`, error);
       return errorResponse(503, "Generation control plane is temporarily unavailable.", "api_error", "control_plane_unavailable", traceId);

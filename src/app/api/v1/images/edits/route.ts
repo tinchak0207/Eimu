@@ -49,6 +49,7 @@ import {
 import { generationControlPlaneEnabled } from "@/lib/generation-core/database";
 import { submitGenerationCommand } from "@/lib/generation-core/command-service";
 import { hasGenerationCapability, IdempotencyConflictError } from "@/lib/generation-core/job-repository";
+import { GenerationModelUnavailableError } from "@/lib/generation-core/model-availability-gate";
 import { enforceQuotaGate } from "@/lib/generation-core/quota-precheck";
 import { generationTaskResponse } from "@/lib/generation-core/task-response";
 // 參考圖 helper（resolveEditReference 及相依的 mimeFromUrl/extensionFor/EditInputError）
@@ -341,6 +342,10 @@ async function durableEditBranch(input: {
   } catch (error) {
     if (error instanceof IdempotencyConflictError) {
       return respond(pixaiRequestError(error.message, "idempotency_key_reused", traceId), 409);
+    }
+    // 模型可用性閘：建單/扣費前拒單，沿用既有穩定碼 no_endpoints。
+    if (error instanceof GenerationModelUnavailableError) {
+      return respond(pixaiRequestError(error.message, "no_endpoints", traceId), 503);
     }
     console.error("[images/edits] durable submission failed", error);
     return respond(
