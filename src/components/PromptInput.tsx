@@ -89,7 +89,7 @@ interface PromptInputProps {
    * 2026-08-25 模板注入：要自動發出的第一條用戶消息（模板 initialPrompt）。
    * 點模板卡本身就是發送動作，這條直送 agent，不預填讓用戶再點發送。
    */
-  agentInjection?: { text: string; nonce: number; directive?: string } | null;
+  agentInjection?: { text: string; nonce: number; directive?: string; echo?: boolean } | null;
   /** 用戶發出第一條消息時回調（上層收起右側模板庫）。 */
   onUserMessage?: () => void;
   /**

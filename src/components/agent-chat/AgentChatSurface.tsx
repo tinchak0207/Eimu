@@ -192,8 +192,12 @@ export interface AgentChatSurfaceProps {
    * 2026-08-25 模板庫點卡：要自動發出的第一條用戶消息（模板 initialPrompt）。
    * 與 initialPrompt（半句話藥丸，點了才送）不同：點模板卡本身就是發送動作，
    * 這條直接送出，不讓用戶再點一次發送。nonce 變化即觸發一次。
+   *
+   * echo（2026-09-27）：這條訊息要不要當成「使用者自己說的話」進 transcript。
+   * 模板注入＝一長串機器配方，默認不進（silent）；但宣傳片結尾那句是使用者自己
+   * 打的，必須進——不然送出後到他看到第一個字之前是一片空白（暴君：TTFT 前空白）。
    */
-  agentInjection?: { text: string; nonce: number; directive?: string } | null;
+  agentInjection?: { text: string; nonce: number; directive?: string; echo?: boolean } | null;
   /** 用戶發出消息時回調（上層收起右側模板庫）。 */
   onUserMessage?: () => void;
 }
@@ -621,11 +625,10 @@ export function AgentChatSurface({
     if (!agentInjection || injectedNonceRef.current === agentInjection.nonce) return;
     injectedNonceRef.current = agentInjection.nonce;
     onUserMessage?.();
-    // directive（若有）随首条消息隐形上送：网关拼进 system，用户全程看不见。
-    // silent：注入的模板 prompt 同样不进 transcript——用户只看到 agent 的引导。
+    // directive 隐形上送（网关拼进 system）；模板注入默认 silent，echo 才进 transcript。
     void send(agentInjection.text, {
       ...(agentInjection.directive ? { sessionDirective: agentInjection.directive } : {}),
-      silent: true,
+      silent: !agentInjection.echo,
     });
   }, [agentInjection, send, onUserMessage]);
 

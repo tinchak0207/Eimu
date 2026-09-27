@@ -95,7 +95,7 @@ export function ImagePlayground({ suggestions }: { suggestions: Suggestion[] }) 
   const [agentSeed, setAgentSeed] = useState("");
   // 2026-08-25 模板庫：點卡注入 pending（nonce 讓「換一張卡」也是新注入）。
   // directive 是隱形引導詞：隨首條訊息經網關 system 欄位注入，用戶全程不可見。
-  const [agentTemplateInjection, setAgentTemplateInjection] = useState<{ text: string; nonce: number; directive?: string } | null>(null);
+  const [agentTemplateInjection, setAgentTemplateInjection] = useState<{ text: string; nonce: number; directive?: string; echo?: boolean } | null>(null);
   // C4 生成閉環事件橋：導演台視口「生成真实画面」完成 capture+上傳後 dispatch
   // director-render-request → 與模板庫共用同一注入 setter（AgentChatSurface 的
   // injection effect 收到即靜默發送，send() 無會話時 lazy 建號＋連線）。卸載時移除監聽。
@@ -434,10 +434,15 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
     }
   }, []);
 
-  /** 留舊開新＋直送。與模板卡同一條路（startNewSessionRef → 注入即送）。 */
+  /**
+   * 留舊開新＋直送。與模板卡同一條路（startNewSessionRef → 注入即送），
+   * 但這條要 echo：那句話是使用者自己打的，必須出現在他自己的聊天記錄裡
+   * ——不 echo 的話，送出後到第一個字回來之前畫面完全是空的（2026-09-27 暴君）。
+   */
   const runPromoTrial = useCallback((text: string) => {
     const trimmed = text.trim() || PROMO_TRIAL_PROMPT;
-    const inject = (): void => setAgentTemplateInjection({ text: trimmed, nonce: Date.now() });
+    const inject = (): void =>
+      setAgentTemplateInjection({ text: trimmed, nonce: Date.now(), echo: true });
     const start = startNewSessionRef.current;
     if (!start) {
       // ref 未接上（極端時序）：退回直接送在當前會話，不能把這句話吃掉。
