@@ -1,14 +1,17 @@
-// 生命週期郵件（Resend）——激活到付費的三個時刻，各發一封、只發一次。
+// 生命週期郵件（Resend）——激活到付費的四個時刻，各發一封、只發一次。
 //
 // 為什麼在控制面 worker 跑：email 存在控制面 postgres 的 user_attribution 側車表
 // （db/migrations/025），「有沒有出過圖」在 generation_job、餘額在 account_ledger，
 // Vercel 都讀不到；worker 的帳本維護循環（10 分鐘一輪）天然是排程點，不另造 cron。
 //
-// 三封信對應三個產品時刻：
+// 四封信對應四個產品時刻：
 //   - welcome（交易類）：新人禮 applied 且有已驗證 email。目標＝第一張圖。
 //   - nudge（營銷類）：welcome 已發滿 48h、仍無任何 succeeded 生成。目標＝第一張圖。
 //   - depleted（營銷類）：出過圖、新人禮額度已用到不夠一張標準圖、從未充值、
 //     最後一次出圖已過 1h（不在創作中途打擾）。目標＝第一次付費。
+//   - key_idle（營銷類）：建了第一把 biz key 滿 24h、卻沒有任何 source=biz 的 job。
+//     這一群不是被拒絕，是拿到 key 後沒有下一步；信裡直接放一段可直接跑通的 /v1 curl
+//     （key 位置只放 $EMU_API_KEY 佔位符，永不嵌入真實 key）。目標＝首次 API 調用。
 // 每個示例都是「這句話 → 它真實生成的那張圖」（public/email/example-*.jpg 由同一句
 // prompt 以 gpt-image-2 生成），點擊落地 `/?agent=1&q=` 交接通道：提示詞已填進
 // 助理輸入框，按發送即出圖；未登入者由 a8362440 的補送鏈在登入後自動送出。
@@ -23,6 +26,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { GenerationSql } from "@/lib/generation-core/database";
 import { readAccountBalance } from "@/lib/generation-core/account-ledger";
+import { quickstartCurlExamples } from "@/lib/dev-quickstart";
 import { PLANS } from "@/lib/plans";
 import { getSiteUrlFromEnv } from "@/lib/site-url";
 import {
@@ -30,14 +34,21 @@ import {
   WELCOME_GIFT_IMAGE_COUNT,
   WELCOME_GIFT_STANDARD_IMAGE_COINS,
 } from "@/lib/welcome-gift";
+import { DEFAULT_IMAGE_MODEL_ID } from "./image-model-ids.js";
 
-export type LifecycleTemplate = "welcome" | "nudge" | "depleted";
-const MARKETING_TEMPLATES: ReadonlySet<LifecycleTemplate> = new Set(["nudge", "depleted"]);
+export type LifecycleTemplate = "welcome" | "nudge" | "depleted" | "key_idle";
+const MARKETING_TEMPLATES: ReadonlySet<LifecycleTemplate> = new Set(["nudge", "depleted", "key_idle"]);
 
 export const LIFECYCLE_EMAIL_FROM = "Emu <hello@eimu.dev>";
 export const NUDGE_DELAY_MS = 48 * 60 * 60_000;
 /** 最後一次出圖後至少等多久才發「額度用完」——不在創作中途打擾。 */
 export const DEPLETED_QUIET_MS = 60 * 60_000;
+/** 建 key 後至少觀察多久仍無 biz 調用才發信（當天建的 key 不急著催）。 */
+export const KEY_IDLE_DELAY_MS = 24 * 60 * 60_000;
+/** curl 範例裡的 key 佔位符：郵件永不嵌入真實 key，收件人自己替換。 */
+export const KEY_IDLE_KEY_PLACEHOLDER = "$EMU_API_KEY";
+/** key 管理頁的實際路由（對應 src/app/settings/api-keys/page.tsx，非 query tab）。 */
+export const KEY_IDLE_SETTINGS_PATH = "/settings/api-keys";
 /** 每輪每種模板最多發幾封（Resend 免費檔 100 封/天、2 req/s）。 */
 export const LIFECYCLE_BATCH_LIMIT = 20;
 
@@ -55,6 +66,8 @@ export type LifecycleEmailStore = {
   listNudgeCandidates(limit: number, sentBefore: Date): Promise<LifecycleRecipient[]>;
   /** 已出圖、額度不足一張標準圖、未充值、最後出圖早於 quietBefore 的用戶。 */
   listDepletedCandidates(limit: number, quietBefore: Date): Promise<LifecycleRecipient[]>;
+  /** 建第一把 biz key 早於 idleBefore、卻無任何 source=biz job、未退訂的用戶。 */
+  listKeyIdleCandidates(limit: number, idleBefore: Date): Promise<LifecycleRecipient[]>;
   /** 佔位；已存在回 false。 */
   claim(userId: number, template: LifecycleTemplate): Promise<boolean>;
   settle(userId: number, template: LifecycleTemplate, status: "sent" | "failed", detail: string | null): Promise<void>;
@@ -184,6 +197,14 @@ function button(href: string, label: string): string {
 </td></tr></table>`;
 }
 
+function codeBlock(code: string): string {
+  return `<pre style="margin:0 0 16px;padding:16px 18px;background:${C.soft};border:1px solid ${C.hairline};border-radius:14px;overflow-x:auto;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,'Courier New',monospace;font-size:12.5px;line-height:1.7;color:${C.ink};white-space:pre">${esc(code)}</pre>`;
+}
+
+function note(html: string): string {
+  return `<div style="margin:0 0 24px;font-size:13px;line-height:1.7;color:${C.muted}">${html}</div>`;
+}
+
 function exampleCard(siteUrl: string, example: (typeof EMAIL_EXAMPLES)[number], href: string, big = false): string {
   return `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin:0 0 ${big ? 24 : 16}px;border:1px solid ${C.hairline};border-radius:16px;border-collapse:separate;overflow:hidden">
 <tr><td style="padding:0;line-height:0"><a href="${esc(href)}"><img src="${siteUrl}${example.image}" width="${big ? 504 : 504}" alt="${esc(example.prompt)}" style="display:block;width:100%;max-width:504px;height:auto;border:0;border-radius:16px 16px 0 0"></a></td></tr>
@@ -225,6 +246,18 @@ function marketingFooter(unsub?: string): string {
 
 // ── 模板 ──
 
+/**
+ * key_idle 信裡的 curl：直接復用建 key 頁的 gpt-image-2 範例（dev-quickstart 真源），
+ * 只把 key 換成 $EMU_API_KEY 佔位符——郵件永不嵌入真實 key。
+ * catalog 內查無該 model 時回 null（寧可不給範例，也不給一段打不通的命令）。
+ */
+function keyIdleCurlExample(): string | null {
+  const example = quickstartCurlExamples(KEY_IDLE_KEY_PLACEHOLDER).find(
+    (item) => item.modelId === DEFAULT_IMAGE_MODEL_ID,
+  );
+  return example?.curl ?? null;
+}
+
 export type RenderOptions = { siteUrl: string; unsubscribeUrl?: string; imagesMade?: number };
 
 export function renderLifecycleEmail(
@@ -264,6 +297,24 @@ ${cards}
 ${lead("你还没生成第一张图。试试下面这句：点一下，提示词会自动填进输入框，按发送就行，大约一分钟出图。")}
 ${exampleCard(site, ex, href, true)}
 ${button(href, "用这句生成")}`,
+        footer: marketingFooter(opts.unsubscribeUrl),
+      }),
+    };
+  }
+
+  if (template === "key_idle") {
+    const curl = keyIdleCurlExample();
+    const keyHref = `${site}${KEY_IDLE_SETTINGS_PATH}?${utm("key_idle", "cta")}`;
+    return {
+      subject: "你的 API key 还没出过第一张图",
+      html: layout({
+        siteUrl: site,
+        preheader: "复制一段命令就能出图，新人礼额度可直接调用。",
+        body: `${h1("你的 API key 还没出过第一张图")}
+${lead(`API key 建好了，但还没调用过 /v1。下面这段命令复制就能跑，新人礼 ${WELCOME_GIFT_IMAGE_COUNT} 张可直接调用，不用先充值。`)}
+${curl ? codeBlock(curl) : ""}
+${note(`把 <span style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,'Courier New',monospace;color:${C.ink}">${KEY_IDLE_KEY_PLACEHOLDER}</span> 换成你自己的 key——在「查看我的 key」页面可以复制，key 只在你自己的机器上使用。`)}
+${button(keyHref, "查看我的 key")}`,
         footer: marketingFooter(opts.unsubscribeUrl),
       }),
     };
@@ -323,6 +374,7 @@ export async function runLifecycleEmailsOnce(deps: {
     ["welcome", () => deps.store.listWelcomeCandidates(limit)],
     ["nudge", () => deps.store.listNudgeCandidates(limit, new Date(now.getTime() - NUDGE_DELAY_MS))],
     ["depleted", () => deps.store.listDepletedCandidates(limit, new Date(now.getTime() - DEPLETED_QUIET_MS))],
+    ["key_idle", () => deps.store.listKeyIdleCandidates(limit, new Date(now.getTime() - KEY_IDLE_DELAY_MS))],
   ];
   for (const [template, list] of batches) {
     for (const recipient of await list()) {
@@ -455,6 +507,30 @@ export function createPostgresLifecycleEmailStore(sql: GenerationSql): Lifecycle
         if (balance.coins < WELCOME_GIFT_STANDARD_IMAGE_COINS) out.push(recipient);
       }
       return out;
+    },
+    async listKeyIdleCandidates(limit, idleBefore) {
+      await ensureSchema(sql);
+      return toRecipients(await sql<Row[]>`
+        SELECT a.user_id, a.email
+        FROM user_attribution a
+        JOIN (
+          SELECT user_id, min(created_at) AS first_key_at
+          FROM biz_api_key
+          GROUP BY user_id
+        ) k ON k.user_id = a.user_id
+        WHERE a.email IS NOT NULL
+          AND k.first_key_at < ${idleBefore.toISOString()}::timestamptz
+          AND NOT EXISTS (SELECT 1 FROM email_send_log l WHERE l.user_id = a.user_id AND l.template = 'key_idle')
+          AND NOT EXISTS (SELECT 1 FROM email_preference p WHERE p.user_id = a.user_id AND p.marketing_opt_out)
+          AND NOT EXISTS (
+            SELECT 1 FROM generation_job j
+            WHERE j.source = 'biz'
+              AND (j.billing_user_id = a.user_id
+                OR j.api_key_id IN (SELECT bk.id FROM biz_api_key bk WHERE bk.user_id = a.user_id)
+                OR j.tenant_id IN (SELECT 'biz:' || bk.id FROM biz_api_key bk WHERE bk.user_id = a.user_id))
+          )
+        ORDER BY k.first_key_at
+        LIMIT ${limit}`);
     },
     async claim(userId, template) {
       await ensureSchema(sql);
