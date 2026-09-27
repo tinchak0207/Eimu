@@ -372,10 +372,14 @@ test("D-17 有存档时默认开新对话，不拦人做选择题", () => {
   /*
    * 2026-09-20 Route D 頭部重構：常駐呼吸绿点（bg-emerald-500 animate-pulse）與
    * bg-slate-300 已移除——新頭部＝lg-tint-blue 圆标 + SquarePen（开新对话）/
-   * SlidersHorizontal（直接生成）/MoreHorizontal（⋯）三顆幽靈鈕；
-   * 「历史记录」触发鈕收进 ⋯ 選單，aria-label 换成 title="对话历史" 文字行。
+   * SlidersHorizontal（直接生成）幽靈鈕。
    * 2026-09-22 首屏翻面後第三顆鈕語義改寫：它不是「收起助理、回到原本的地方」
    * （已經沒有原本的地方了），而是「走另一條路：自己选模型和参数直接出图」。
+   *
+   * 2026-09-27 暴君糾正定版：「AI 助理 / 随时待命」那兩行是廢話（助理就在眼前，
+   * 「随时待命」零資訊），常態回空串；那塊位置改放 资产 / 历史 兩個直接入口
+   * （原本埋在 ⋯ 選單裡），⋯（MoreHorizontal）連同選單整組退役，原位換成齒輪
+   * （设置）。異常態（reconnecting/closed/connecting）的文字照舊，一個字不能少。
    */
   const surfaceCode = readCode(surface);
   assert.match(surface, /lg-tint-blue/);
@@ -384,6 +388,15 @@ test("D-17 有存档时默认开新对话，不拦人做选择题", () => {
   assert.match(surface, /title="对话历史"/);
   assert.match(surface, /aria-label="开新对话"/);
   assert.match(surface, /aria-label="直接生成"/);
+  assert.doesNotMatch(surfaceCode, /随时待命/, "常態描述「随时待命」不得回魂");
+  assert.doesNotMatch(surfaceCode, /更多选项/, "⋯ 選單已退役");
+  // 資產／歷史直接站在頂欄，設定是齒輪直接觸發——三者都是原生按鈕，不再過一層菜單。
+  assert.match(surface, /aria-label="我的资产"/);
+  assert.match(surface, /aria-label="设置"/);
+  assert.match(surface, /onClick=\{openSettings\}/);
+  // 異常態文字是這條頂欄唯一的狀態出口，不得被常態化改動波及。
+  assert.match(surface, /正在重新连接…/);
+  assert.match(surface, /会话已结束/);
   // 2026-09-05 暴君裁定：多功能欄彈窗水平置中（fixed left-1/2 + -translate-x-1/2），
   // 不再掛在按鈕右下角（舊 absolute top-full right-0 作廢）。
   assert.match(surface, /fixed left-1\/2 .*-translate-x-1\/2/);
