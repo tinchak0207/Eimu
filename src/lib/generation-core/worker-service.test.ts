@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { applyExtendedDeadline, generationBudgetMs, shouldExtendQueueDeadline } from "./worker-service.ts";
+import { applyExtendedDeadline, generationBudgetMs, shouldExtendQueueDeadline, shouldFailFastOnExhaustedSupply } from "./worker-service.ts";
 import type { GenerationJob } from "./types.ts";
 
 function job(overrides: Partial<GenerationJob> = {}): GenerationJob {
@@ -132,4 +132,16 @@ test("generationBudgetMs：影片族（video_generate/avatar/lipsync）= 25 分�
   assert.equal(generationBudgetMs("image_generate"), 15 * 60_000);
   assert.equal(generationBudgetMs("image_edit"), 15 * 60_000);
   assert.equal(generationBudgetMs("tts"), 15 * 60_000);
+});
+
+test("欠費無替補即時失敗：上次失敗為 quota_exhausted 且無可用供應商 → fail fast", () => {
+  for (const diagnosisReason of ["supplier_excluded", "suppliers_cooldown", "accounts_unhealthy"] as const) {
+    assert.equal(shouldFailFastOnExhaustedSupply({ lastFailureClass: "quota_exhausted", diagnosisReason }), true, diagnosisReason);
+  }
+});
+
+test("欠費無替補即時失敗：別的健康供應商只是忙、或上次失敗不是欠費 → 照舊排隊", () => {
+  assert.equal(shouldFailFastOnExhaustedSupply({ lastFailureClass: "quota_exhausted", diagnosisReason: "capacity_saturated" }), false);
+  assert.equal(shouldFailFastOnExhaustedSupply({ lastFailureClass: "overloaded", diagnosisReason: "suppliers_cooldown" }), false);
+  assert.equal(shouldFailFastOnExhaustedSupply({ lastFailureClass: null, diagnosisReason: "supplier_excluded" }), false);
 });

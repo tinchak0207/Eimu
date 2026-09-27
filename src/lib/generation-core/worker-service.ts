@@ -126,6 +126,27 @@ export function shouldExtendQueueDeadline(input: {
   return RECOVERABLE_QUEUE_REASONS.has(diagnosisReason);
 }
 
+/**
+ * 欠費無替補即時失敗（2026-09-28 漫劇評測實錘）：唯一視頻渠道回 401＋insufficient_user_quota
+ * 時，registry 只認原生 402 為硬停，job 被放回佇列；帳號進 30 分鐘 cooldown 後再無可租
+ * 供應商，單子以 overloaded 空轉到 25 分鐘 deadline 才死——用戶等 25 分鐘只拿到「超時」。
+ * 本 job 上一次失敗已判定欠費，且診斷顯示沒有別的可用供應商（全被排除／冷卻／不健康）
+ * → 立即失敗＋退款，讓上游如實說「渠道余额不足」。容量滿（capacity_saturated）不算：
+ * 那代表還有別的健康供應商在忙，值得等。純邏輯，供測試直接斷言。
+ */
+const EXHAUSTED_SUPPLY_REASONS: ReadonlySet<SupplierUnavailabilityReason> = new Set([
+  "supplier_excluded",
+  "suppliers_cooldown",
+  "accounts_unhealthy",
+]);
+
+export function shouldFailFastOnExhaustedSupply(input: {
+  lastFailureClass: string | null;
+  diagnosisReason: SupplierUnavailabilityReason;
+}): boolean {
+  return input.lastFailureClass === "quota_exhausted" && EXHAUSTED_SUPPLY_REASONS.has(input.diagnosisReason);
+}
+
 /** 病灶 D：把 extend 實際寫入 DB 的 deadline 同步回內存 job.deadlineAt，消除語義漂移。 */
 export function applyExtendedDeadline(job: GenerationJob, extendedTo: Date | null): void {
   if (extendedTo) job.deadlineAt = extendedTo;
@@ -217,6 +238,21 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
           reason: "capacity_saturated" as const,
           detail: "Supplier diagnosis itself failed; the job will retry with backoff.",
         }));
+        const lastFailureClass = [...jobAttempts]
+          .reverse()
+          .find((candidate) => candidate.status === "failed")?.failureClass ?? null;
+        if (shouldFailFastOnExhaustedSupply({ lastFailureClass, diagnosisReason: diagnosis.reason })) {
+          await failGenerationJob({
+            jobId: job.id,
+            workerId,
+            failureClass: "quota_exhausted",
+            failureDetail: `No alternative supplier after upstream balance exhaustion (${diagnosis.reason}): ${lastFailureDetail ?? diagnosis.detail}`,
+          }, sql);
+          await refundFailure(job, completed, workerId, sql);
+          const attemptsAfterFail = await listGenerationAttemptsForJob(job.id, sql).catch(() => jobAttempts);
+          await emitJobRoutingEvent({ job, attempts: attemptsAfterFail, outcome: "exhausted", refunded: true });
+          return;
+        }
         // 病灶 D：排隊期退避撞穿 deadline —— 無 lease 反覆 claim→釋放直到 3 分鐘
         // deadline 到期被 deadline_exceeded 殺單（實錄 12 筆 video job，attempt_count=0）。
         // 當 deadline 快到期且處在「可恢復」的等容量狀態（cooldown 未到 / 併發滿 /
