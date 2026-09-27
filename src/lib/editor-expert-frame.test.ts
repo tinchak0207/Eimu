@@ -19,6 +19,8 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
+import * as nodePath from "node:path";
 
 import {
   EXPERT_CONSTITUTION_PATH,
@@ -104,8 +106,22 @@ test("persona 形状：id/label 钉死、工具白名单逐 id 存在于 harness
   ]);
 });
 
-test("persona 形状：SKILL 挂载置空有声明（skills/ 无剪辑域配方库，禁幻影路径）", () => {
-  assert.deepEqual([...EDITOR_PERSONA_SKILL_PATHS], []);
+test("persona 形状：SKILL 挂载逐条真实存在（禁幻影路径；2026-09-27 配方库落库）", () => {
+  // 配方库落库前本断言是「置空有声明」；落库后语义翻正为「逐条存在且非幻影」。
+  assert.ok(EDITOR_PERSONA_SKILL_PATHS.length > 0, "配方库已落库，skillPaths 不得为空（默认注入面）");
+  for (const p of EDITOR_PERSONA_SKILL_PATHS) {
+    assert.ok(existsSync(nodePath.resolve(process.cwd(), p)), `skill 路径不存在（幻影路径禁入）：${p}`);
+  }
+  // 域根 + 六子配方（每条对应一条真链路），顺序钉死
+  assert.deepEqual([...EDITOR_PERSONA_SKILL_PATHS], [
+    "skills/editor/SKILL.md",
+    "skills/editor/assembly/SKILL.md",
+    "skills/editor/audio-first/SKILL.md",
+    "skills/editor/rhythm/SKILL.md",
+    "skills/editor/look/SKILL.md",
+    "skills/editor/mix/SKILL.md",
+    "skills/editor/qc-master/SKILL.md",
+  ]);
 });
 
 // ── 2. 委托单：形状与 video 版同构 ───────────────────────────────────────────

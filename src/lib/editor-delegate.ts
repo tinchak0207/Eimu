@@ -263,7 +263,10 @@ function defaultLoadConstitution(): string {
 
 /**
  * 剪辑师委派 prompt 组装（唯一出口）：宪法（仅 BEAST_MODE=ON，注入头部）+
- * 委托单任务段（域字段平铺：源素材/时间线操作/节奏笔记/混音笔记/时长/交付规格）。
+ * 委托单任务段（域字段平铺：源素材/时间线操作/节奏笔记/混音笔记/时长/交付规格）
+ * + 质检闸硬规则段（2026-09-27 刀2 纪律层：timeline_lint 是闸门，must 未清不得
+ * 交付，qc 必须是 lint/master 真实结论；机器层对应 = 本档 collect 对缺 qc 回执
+ * 直接判 missing_deliverables）。
  * OFF 时一个字不多：宪法原文不出现、落位稿不被读取。宪法载入失败结构化报错
  * （code/hint 带原文死因），绝不静默降级成无宪法派遣。
  */
@@ -281,6 +284,9 @@ export function assembleEditorPrompt(
     `交付规格：${delegation.delivery_spec ?? "（剪辑师按域行情自主定）"}`,
     `交付字段：${delegation.deliverables.join("、")}`,
     `参考素材：${delegation.reference_refs && delegation.reference_refs.length > 0 ? delegation.reference_refs.join("、") : "无"}`,
+    // ↓ 2026-09-27 刀2 纪律层硬规则（活化为「不调用就过不去」的 prompt 面；
+    //   机器层同款语义由本档 collect 闸门执行：回执缺 qc = missing_deliverables）。
+    "硬规则（质检闸，未过不得交付）：成片交付前必须调用 timeline_lint 过闸（must 级未清不得交付），并以 timeline_master 聚合质检后导出；回执 qc 栏必须是 timeline_lint / timeline_master 的真实质检结论，qc 缺失或未过 lint 视为未交付。剪辑结构变更一律走 timeline_ops 批量原子（禁 run_py 手搓 ffmpeg 绕过）。",
   ].join("\n");
 
   if (context.beastMode !== true) {
