@@ -30,6 +30,7 @@
   - 充值与计费：https://eimu.dev/docs/billing
   - 把助理带走（MCP 接入）：https://eimu.dev/docs/mcp
   - 开发进阶（B 端 API）：https://eimu.dev/docs/api
+- 技能库（133 条内建技能，按 10 个题材家族分类，每条有独立页）：https://eimu.dev/skills
 - 定价：https://eimu.dev/pricing
 - 创作产线（8 条模板产线的落地页）：https://eimu.dev/workflows
   - 小说影视化：https://eimu.dev/workflows/novel-film-pipeline
@@ -105,6 +106,9 @@ Protocol errors (parse / invalid params / unknown method): HTTP 200 with a JSON-
 
 Install guide (Codex / Claude Code / Cursor / OpenClaw / generic MCP client, copy-paste config):
 https://eimu.dev/mcp
+
+Agent plugin bundle (Codex plugin layout: marketplace.json + .codex-plugin/plugin.json + .mcp.json + 3 bundled skills):
+https://eimu.dev/plugin/ — entry file https://eimu.dev/plugin/eimu/README.md
 
 Discovery document (no credentials required):
 https://eimu.dev/.well-known/oauth-protected-resource

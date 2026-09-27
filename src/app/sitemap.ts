@@ -1,4 +1,5 @@
 import type { MetadataRoute } from "next";
+import { AGENT_SKILLS } from "@/lib/agent-skills";
 import { USE_CASES } from "@/lib/use-cases";
 import { USE_CASE_CATEGORIES } from "@/lib/use-case-categories";
 import { WORKFLOW_PAGES } from "@/lib/workflow-pages";
@@ -26,6 +27,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     { url: `${siteUrl}/use-cases`, lastModified: CONTENT_UPDATED, changeFrequency: "weekly", priority: 0.9 },
     { url: `${siteUrl}/workflows`, lastModified: CONTENT_UPDATED, changeFrequency: "weekly", priority: 0.9 },
     { url: `${siteUrl}/docs`, lastModified: CONTENT_UPDATED, changeFrequency: "monthly", priority: 0.6 },
+    { url: `${siteUrl}/mcp`, lastModified: CONTENT_UPDATED, changeFrequency: "monthly", priority: 0.6 },
     { url: `${siteUrl}/status`, lastModified: CONTENT_UPDATED, changeFrequency: "daily", priority: 0.3 },
   ];
 
@@ -64,5 +66,16 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     priority: 0.7,
   }));
 
-  return [...corePages, ...workflowPages, ...categoryPages, ...guidePages, ...docPages];
+  // 技能库目录 + 每条内建技能的自指详情页；条数从内建真源取，不写死。
+  const skillPages: MetadataRoute.Sitemap = [
+    { url: `${siteUrl}/skills`, lastModified: CONTENT_UPDATED, changeFrequency: "weekly", priority: 0.8 },
+    ...AGENT_SKILLS.map((skill) => ({
+      url: `${siteUrl}/skills/${skill.id}`,
+      lastModified: CONTENT_UPDATED,
+      changeFrequency: "monthly" as const,
+      priority: 0.5,
+    })),
+  ];
+
+  return [...corePages, ...workflowPages, ...categoryPages, ...guidePages, ...docPages, ...skillPages];
 }
