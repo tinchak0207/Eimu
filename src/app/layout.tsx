@@ -5,6 +5,7 @@ import { AuthProvider } from "@/hooks/use-auth";
 import { Navbar } from "@/components/Navbar";
 import { PricingSync } from "@/components/PricingSync";
 import { PwaInstaller } from "@/components/PwaInstaller";
+import { AttributionCapture } from "@/components/AttributionCapture";
 import { Toaster } from "@/components/ui/toaster";
 import { getSiteUrlFromEnv } from "@/lib/site-url";
 import {
@@ -196,6 +197,9 @@ setTimeout(function(){
           <main className="flex min-h-0 flex-1 flex-col">{children}</main>
           <Toaster />
           <PwaInstaller />
+          {/* 首次觸達歸因採集（utm/referrer host/落地路徑 → eimu_first_touch cookie，90 天，
+              首觸不覆蓋）。渲染 null，不參與佈局。 */}
+          <AttributionCapture />
         </AuthProvider>
         <Analytics />
       </body>

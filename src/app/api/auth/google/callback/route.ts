@@ -10,6 +10,8 @@ import {
 import { extractTicketFromState } from "@/lib/github-auth";
 import { deliverHandoff } from "@/lib/pwa-handoff";
 import { ensureGatewayUserForOAuth } from "@/lib/gateway-admin";
+import { FIRST_TOUCH_COOKIE, decodeFirstTouchCookieValue } from "@/lib/first-touch-attribution";
+import { buildOAuthAttributionInput, recordUserAttributionViaRelay } from "@/lib/user-attribution";
 
 export const preferredRegion = "sfo1";
 
@@ -116,6 +118,24 @@ export async function GET(req: NextRequest) {
     if (!loginResult.ok) {
       console.error("[auth/google/login]", { username, status: loginResult.status, message: loginResult.message });
       throw new Error(`google_login:${loginResult.message || "unknown"}`);
+    }
+
+    // 側車事實（觸達 email ＋ 首次觸達歸因）：每次登入冪等 upsert，老用戶再登入一次即被補上。
+    // email 只認 userinfo 的 email_verified=true（未驗證的一律丟）。絕不擋登入，
+    // 失敗只記 user_id 與錯誤訊息（email 永不進日誌）。
+    try {
+      await recordUserAttributionViaRelay(
+        buildOAuthAttributionInput({
+          userId: loginResult.user.id,
+          provider: "google",
+          googleProfile: profile,
+          firstTouch: decodeFirstTouchCookieValue(req.cookies.get(FIRST_TOUCH_COOKIE)?.value),
+        }),
+      );
+    } catch (error) {
+      console.error(
+        `[auth/google/attribution] skipped user=${loginResult.user.id}：${error instanceof Error ? error.message : String(error)}`,
+      );
     }
 
     // PWA 交接分支：把会话投递到 ticket（PWA 侧轮询 claim 领回）；投递失败

@@ -10,6 +10,8 @@ import {
 } from "@/lib/github-auth";
 import { deliverHandoff } from "@/lib/pwa-handoff";
 import { ensureGatewayUserForOAuth } from "@/lib/gateway-admin";
+import { FIRST_TOUCH_COOKIE, decodeFirstTouchCookieValue, type GitHubEmailEntry } from "@/lib/first-touch-attribution";
+import { buildOAuthAttributionInput, recordUserAttributionViaRelay } from "@/lib/user-attribution";
 
 export const preferredRegion = "sfo1";
 
@@ -53,6 +55,27 @@ async function fetchGithubProfile(accessToken: string) {
   });
   if (!response.ok) throw new Error("获取 GitHub 用户信息失败");
   return response.json() as Promise<GitHubProfile>;
+}
+
+// 可觸達通道的原料：/user/emails 需要 user:email scope（authorize URL 已申請）。
+// 舊授權若沒有這個 scope 會回 404/403 —— 那不是登入失敗，只回空陣列（email 留給下次登入補）。
+async function fetchGithubEmails(accessToken: string): Promise<GitHubEmailEntry[]> {
+  try {
+    const response = await fetch("https://api.github.com/user/emails", {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: "application/vnd.github+json",
+        "User-Agent": "eimu.dev",
+      },
+      cache: "no-store",
+      signal: AbortSignal.timeout(GITHUB_UPSTREAM_TIMEOUT_MS),
+    });
+    if (!response.ok) return [];
+    const data = await response.json();
+    return Array.isArray(data) ? (data as GitHubEmailEntry[]) : [];
+  } catch {
+    return [];
+  }
 }
 
 async function registerGithubUser(profile: GitHubProfile, password: string) {
@@ -116,6 +139,24 @@ export async function GET(req: NextRequest) {
     if (!loginResult.ok) {
       console.error("[auth/github/login]", { username, status: loginResult.status, message: loginResult.message });
       throw new Error(`github_login:${loginResult.message || "unknown"}`);
+    }
+
+    // 側車事實（觸達 email ＋ 首次觸達歸因）：每次登入冪等 upsert，老用戶再登入一次即被補上。
+    // 絕不擋登入：失敗只記 user_id 與錯誤訊息（email 永不進日誌），流程照走。
+    try {
+      const emails = await fetchGithubEmails(tokenResult.access_token);
+      await recordUserAttributionViaRelay(
+        buildOAuthAttributionInput({
+          userId: loginResult.user.id,
+          provider: "github",
+          githubEmails: emails,
+          firstTouch: decodeFirstTouchCookieValue(req.cookies.get(FIRST_TOUCH_COOKIE)?.value),
+        }),
+      );
+    } catch (error) {
+      console.error(
+        `[auth/github/attribution] skipped user=${loginResult.user.id}：${error instanceof Error ? error.message : String(error)}`,
+      );
     }
 
     // PWA 交接分支：把会话投递到 ticket（PWA 侧轮询 claim 领回）；投递失败

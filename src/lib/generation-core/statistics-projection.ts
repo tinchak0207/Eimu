@@ -28,6 +28,8 @@ import {
   readSupplierChannelHealth,
   type SupplierChannelHealthRow,
 } from "@/lib/supplier-health-signal";
+import { UNATTRIBUTED_SOURCE } from "@/lib/first-touch-attribution";
+import { readFunnelAttribution } from "@/lib/user-attribution";
 import { generationDatabaseConfigured, getGenerationSql, type GenerationSql } from "./database";
 
 /** 比率的最小樣本門檻：與 routing-telemetry 的 latencyP80（<3 樣本回 null）同一把尺。 */
@@ -955,6 +957,61 @@ export interface FunnelRecharge {
 export type FunnelStepKey = "registered" | "generated" | "succeeded" | "returned" | "paid";
 export const FUNNEL_STEP_ORDER: readonly FunnelStepKey[] = ["registered", "generated", "succeeded", "returned", "paid"];
 
+/**
+ * 註冊來源事實（first-touch）：userId → 分組鍵（`user_attribution.signup_source`）。
+ * 沒有列的用戶（存量用戶、cookie 被清掉的）歸入 `UNATTRIBUTED_SOURCE`——
+ * 不猜成 'direct'（direct 是一句真話：首觸當下確實沒帶任何來源）。
+ */
+export interface FunnelAttribution {
+  userId: number;
+  source: string | null;
+}
+
+/** 按來源拆分的漏斗（每一格都是總漏斗對應步驟的子集，加總 = 總數）。 */
+export interface FunnelSourceRow {
+  source: string;
+  registered: number;
+  generated: number;
+  succeeded: number;
+  paid: number;
+}
+
+/** 一個來源桶：分組鍵 + 該來源在各步驟的人數。 */
+export function buildFunnelSourceRows(input: {
+  registered: readonly number[];
+  generated: readonly number[];
+  succeeded: readonly number[];
+  paid: readonly number[];
+  attribution?: readonly FunnelAttribution[];
+}): FunnelSourceRow[] {
+  const sourceOf = new Map<number, string>();
+  for (const row of input.attribution ?? []) {
+    const source = typeof row.source === "string" && row.source.trim() ? row.source.trim() : UNATTRIBUTED_SOURCE;
+    sourceOf.set(row.userId, source);
+  }
+  const sourceFor = (userId: number) => sourceOf.get(userId) ?? UNATTRIBUTED_SOURCE;
+
+  const buckets = new Map<string, FunnelSourceRow>();
+  const bucketFor = (source: string): FunnelSourceRow => {
+    const existing = buckets.get(source);
+    if (existing) return existing;
+    const created: FunnelSourceRow = { source, registered: 0, generated: 0, succeeded: 0, paid: 0 };
+    buckets.set(source, created);
+    return created;
+  };
+
+  // 只以 registered 開桶（後續步驟都是 registered 的子集 ⇒ 每一格必定落在既有桶裡，
+  // 加總恆等於總數；不在 cohort 內的歸因列不會憑空造出一個來源）。
+  for (const userId of input.registered) bucketFor(sourceFor(userId)).registered += 1;
+  for (const userId of input.generated) bucketFor(sourceFor(userId)).generated += 1;
+  for (const userId of input.succeeded) bucketFor(sourceFor(userId)).succeeded += 1;
+  for (const userId of input.paid) bucketFor(sourceFor(userId)).paid += 1;
+
+  return [...buckets.values()].sort(
+    (a, b) => b.registered - a.registered || a.source.localeCompare(b.source),
+  );
+}
+
 export interface FunnelStep {
   key: FunnelStepKey;
   count: number;
@@ -986,6 +1043,14 @@ export interface ActivationFunnelProjection {
   returnWindowImmature: number;
   /** 窗口內註冊且有現金充值的人數（不論是否走完前面步驟）。 */
   paidAnyStage: number;
+  /**
+   * 按註冊來源（first-touch）拆分的漏斗：每來源的註冊 / 發起 / 成功 / 付費人數。
+   * 各來源的每一格加總恆等於總漏斗對應步驟的人數（有具名測試）；沒有歸因事實的用戶
+   * 歸入 `UNATTRIBUTED_SOURCE` 桶（展示層本地化為「未標記」）。
+   */
+  sources: FunnelSourceRow[];
+  /** 歸因讀取失敗（例如 025 遷移未套用）：`sources` 只剩未標記桶，必須在 UI 說出來。 */
+  sourceBreakdownUnavailable: boolean;
   /** 被判為非現金而排除的 recharge 帳本行數。 */
   nonCashRechargesSkipped: number;
   timeToFirstImage: {
@@ -1073,6 +1138,10 @@ export function projectActivationFunnel(input: {
   includeInternal: boolean;
   truncated?: boolean;
   dayTimezone?: string;
+  /** 首次觸達歸因（可缺；缺＝全部歸入未標記桶，加總仍等於總數）。 */
+  attribution?: readonly FunnelAttribution[];
+  /** 歸因讀取失敗旗標（由組裝層傳入，投影本身不做 I/O 判斷）。 */
+  sourceBreakdownUnavailable?: boolean;
 }): ActivationFunnelProjection {
   const timeZone = input.dayTimezone ?? STATISTICS_DAY_TIMEZONE;
   const windowStartMs = input.now.getTime() - input.days * 86_400_000;
@@ -1186,6 +1255,14 @@ export function projectActivationFunnel(input: {
     returnWindowImmature,
     paidAnyStage: cashPaid.size,
     nonCashRechargesSkipped,
+    sources: buildFunnelSourceRows({
+      registered,
+      generated,
+      succeeded,
+      paid,
+      attribution: input.attribution,
+    }),
+    sourceBreakdownUnavailable: input.sourceBreakdownUnavailable === true,
     timeToFirstImage: {
       registerToFirstSuccess: summarizeDurations(registerToFirstSuccess),
       firstJobCreatedToFinished: {
@@ -1306,9 +1383,10 @@ export async function buildActivationFunnel(input: {
     const cohortIds = loaded.registrations
       .map((registration) => registration.userId)
       .filter((id) => input.includeInternal || !internal.has(id));
-    const [jobResult, recharges] = await Promise.all([
+    const [jobResult, recharges, attribution] = await Promise.all([
       readFunnelJobs({ userIds: cohortIds, since, sql: input.sql }),
       readFunnelRecharges({ userIds: cohortIds, since, sql: input.sql }),
+      readFunnelAttribution({ userIds: cohortIds, sql: input.sql }),
     ]);
     return projectActivationFunnel({
       days,
@@ -1319,6 +1397,8 @@ export async function buildActivationFunnel(input: {
       internalUserIds: input.internalUserIds,
       includeInternal: input.includeInternal,
       truncated: loaded.truncated || jobResult.truncated,
+      attribution: attribution.rows,
+      sourceBreakdownUnavailable: !attribution.ok,
     });
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);

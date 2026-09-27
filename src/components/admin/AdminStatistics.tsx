@@ -18,6 +18,7 @@
 import { useEffect, useState } from "react";
 import { BarChart3, CircleAlert, Loader2, RefreshCw } from "lucide-react";
 import { NUMBER_LOCALE, text, type UiStringKey } from "@/lib/ui-strings";
+import { UNATTRIBUTED_SOURCE } from "@/lib/first-touch-attribution";
 import type {
   ActivationFunnelResult,
   DurationSummary,
@@ -218,6 +219,43 @@ function ActivationFunnelCard({
             ) : null}
             {funnel.truncated ? <li className="text-[#8a6420]">{text("stats.funnel.truncated")}</li> : null}
           </ul>
+          <div className="border-t border-black/5 px-4 py-3">
+            <h4 className="text-[13px] font-semibold text-[#242830]">{text("stats.funnel.sources.title")}</h4>
+            <p className="mt-0.5 text-[13px] text-black/45">{text("stats.funnel.sources.subtitle")}</p>
+            {funnel.sourceBreakdownUnavailable ? (
+              <p className="mt-2 text-[13px] text-[#8a6420]">{text("stats.funnel.sources.unavailable")}</p>
+            ) : null}
+            {funnel.sources.length === 0 ? (
+              <p className="mt-2 text-[13px] text-black/45">{text("stats.funnel.sources.empty")}</p>
+            ) : (
+              <div className="mt-2 overflow-x-auto">
+                <table className="w-full text-[13px]">
+                  <thead>
+                    <tr className="text-black/45">
+                      <th className="py-1 pr-3 text-left font-medium">{text("stats.funnel.sources.source")}</th>
+                      <th className="py-1 pr-3 text-right font-medium">{text("stats.funnel.sources.registered")}</th>
+                      <th className="py-1 pr-3 text-right font-medium">{text("stats.funnel.sources.generated")}</th>
+                      <th className="py-1 pr-3 text-right font-medium">{text("stats.funnel.sources.succeeded")}</th>
+                      <th className="py-1 text-right font-medium">{text("stats.funnel.sources.paid")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {funnel.sources.map((row) => (
+                      <tr key={row.source} className="border-t border-black/5">
+                        <td className="py-1 pr-3 font-medium text-[#242830]">
+                          {row.source === UNATTRIBUTED_SOURCE ? text("stats.funnel.sources.unknown") : row.source}
+                        </td>
+                        <td className="py-1 pr-3 text-right">{row.registered}</td>
+                        <td className="py-1 pr-3 text-right">{row.generated}</td>
+                        <td className="py-1 pr-3 text-right">{row.succeeded}</td>
+                        <td className="py-1 text-right">{row.paid}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
           <div className="border-t border-black/5 px-4 py-3">
             <h4 className="text-[13px] font-semibold text-[#242830]">{text("stats.firstImage.title")}</h4>
             <p className="mt-0.5 text-[13px] text-black/45">{text("stats.firstImage.subtitle")}</p>
