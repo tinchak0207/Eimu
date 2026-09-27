@@ -23,10 +23,6 @@ body { font-family: "Geist", "Noto Sans CJK SC", sans-serif; -webkit-font-smooth
   -webkit-mask-image: linear-gradient(90deg, transparent 0, rgba(0,0,0,.55) 120px, #000 300px); }
 .film::after { content: ""; position: absolute; inset: 0;
   background: radial-gradient(120% 90% at 55% 45%, transparent 55%, rgba(0,0,0,.45) 100%), linear-gradient(0deg, rgba(0,0,0,.35), transparent 30%); }
-.tag { position: absolute; top: 118px; right: 262px; display: flex; align-items: center; gap: 12px; height: 58px; padding: 0 24px 0 18px; border-radius: 99px;
-  font: 600 25px "Noto Sans CJK SC"; color: #fff; letter-spacing: .04em;
-  background: rgba(20,22,30,.34); backdrop-filter: blur(14px) saturate(160%); border: 1.5px solid rgba(255,255,255,.35); box-shadow: 0 10px 30px rgba(0,0,0,.25); }
-.tag i { width: 12px; height: 12px; border-radius: 50%; background: #34C759; box-shadow: 0 0 12px #34C759; }
 
 /* 左側文字（全部在 4:3 安全區 x≥250 內） */
 .brand { position: absolute; left: 294px; top: 132px; display: flex; align-items: center; gap: 18px; height: 70px; padding: 0 30px 0 26px; border-radius: 99px;
@@ -53,7 +49,6 @@ body { font-family: "Geist", "Noto Sans CJK SC", sans-serif; -webkit-font-smooth
 <body>
 <div class="dots"></div>
 <div class="film"></div>
-<div class="tag"><i></i>成片 · 始皇帝的北境征途</div>
 
 <div class="brand"><b>Eimu</b><span></span><em>许愿式 AI 影像工作台</em></div>
 <div class="h h1">一句话</div>
