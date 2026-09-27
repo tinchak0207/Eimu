@@ -7,6 +7,11 @@ import { PricingSync } from "@/components/PricingSync";
 import { PwaInstaller } from "@/components/PwaInstaller";
 import { Toaster } from "@/components/ui/toaster";
 import { getSiteUrlFromEnv } from "@/lib/site-url";
+import {
+  SITE_DESCRIPTION,
+  SITE_FEATURE_LIST,
+  SITE_TITLE,
+} from "@/lib/site-copy";
 import "./globals.css";
 
 const geistSans = localFont({
@@ -21,10 +26,6 @@ const geistMono = localFont({
   display: "swap",
 });
 
-const SITE_TITLE = "Eimu — AI 图片与视频创作";
-const SITE_DESCRIPTION =
-  "Eimu：在线生成 GPT Image 2、Nano Banana Pro 图片与视频，登录即用，不用注册中转站，也不用申请 API Key。";
-
 const SITE_URL = getSiteUrlFromEnv();
 
 export const metadata: Metadata = {
@@ -34,6 +35,9 @@ export const metadata: Metadata = {
   keywords: [
     "Eimu",
     "Eimu AI",
+    "AI 影像工作台",
+    "AI 智能体",
+    "一句话生成视频",
     "AI生图",
     "AI 在线生图",
     "GPT Image 2",
@@ -83,12 +87,7 @@ function getStructuredData() {
       highPrice: "69",
       offerCount: "3",
     },
-    featureList: [
-      "GPT Image 2 在线生图",
-      "Nano Banana Pro 在线生图",
-      "无需注册中转站或申请 API Key",
-      "登录即用，生成后直接下载",
-    ],
+    featureList: [...SITE_FEATURE_LIST],
   };
 }
 
