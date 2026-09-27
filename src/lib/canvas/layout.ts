@@ -23,6 +23,8 @@ import {
   type DurableFieldSpec,
   type MetadataCleanerName,
 } from "./node-metadata-fields";
+// 版本清單清洗與 project-store 共用同一份（逐項白名單＋裁剪；不製造第二個漂移點）。
+import { normalizeNodeVersions } from "./node-versions";
 import {
   CANVAS_NODE_DEFAULT_SIZE,
   CanvasNodeType,
@@ -392,6 +394,8 @@ export function normalizeCanvasNode(raw: {
   metadata?: Record<string, unknown>;
   /** gateway 泳道座標已定局（moved:true）＝ reducer layoutGraph 不得重排。只透傳 true。 */
   moved?: boolean;
+  /** 軟刪時間戳（節點級欄位，非 metadata）；只透傳非空字串。 */
+  deletedAt?: string;
 }): CanvasNode {
   const type = toNodeType(raw.type);
   const size = CANVAS_NODE_DEFAULT_SIZE[type];
@@ -405,6 +409,8 @@ export function normalizeCanvasNode(raw: {
     metadata: toNodeMetadata(raw.metadata),
     // moved 是 boolean 旗標——只透傳 true（false/缺省不帶），同 gate/unsupported 形態教訓。
     ...(raw.moved === true ? { moved: true } : {}),
+    // 軟刪標記是節點級欄位（不進 metadata 雙白名單）；空字串＝未刪。
+    ...(str(raw.deletedAt)?.length ? { deletedAt: raw.deletedAt } : {}),
   };
 }
 
@@ -706,6 +712,11 @@ export interface CanvasSnapshot {
   nodes: CanvasNode[];
   connections: CanvasConnection[];
   viewport: CanvasViewport;
+  /**
+   * 軟刪節點（2026-09-27）：undo/redo 快照也要帶，否則「刪除→撤銷」後
+   * deletedNodes 會殘留一份已回到節點清單的重複項。optional＝舊快照相容。
+   */
+  deletedNodes?: CanvasNode[];
 }
 
 export interface CanvasHistory {
@@ -771,7 +782,12 @@ export function toCanvasProject(
     title: base.title || "未命名画布",
     createdAt: base.createdAt ?? now,
     updatedAt: now,
-    nodes: state.nodes,
+    // 軟刪節點仍要落盤（否則 restore API/還原撤銷都找不到資料）：
+    // 帶 deletedAt 隨 nodes 一起存，讀取端 fromCanvasProject 再拆回 deletedNodes。
+    nodes:
+      state.deletedNodes && state.deletedNodes.length > 0
+        ? [...state.nodes, ...state.deletedNodes]
+        : state.nodes,
     connections: state.connections,
     viewport,
     backgroundMode,
@@ -780,6 +796,8 @@ export function toCanvasProject(
     ...(projectType ? { projectType } : {}),
     ...(isValidCreationStep(currentStep) ? { currentStep } : {}),
     ...(episodes && episodes.length > 0 ? { episodes } : {}),
+    // 版本歷史（2026-09-27）：有版本才帶鍵，舊專案形狀不變。
+    ...(state.nodeVersions && state.nodeVersions.length > 0 ? { nodeVersions: state.nodeVersions } : {}),
   };
 }
 
@@ -790,9 +808,10 @@ export function toCanvasProject(
 export function fromCanvasProject(project: {
   nodes?: unknown;
   connections?: unknown;
+  nodeVersions?: unknown;
 }): CanvasReducerState {
   const rawNodes = Array.isArray(project.nodes) ? project.nodes : [];
-  const nodes = rawNodes.flatMap((n) => {
+  const allNodes = rawNodes.flatMap((n) => {
     if (!n || typeof n !== "object") return [];
     const r = n as Record<string, unknown>;
     if (typeof r.id !== "string" || r.id.length === 0) return [];
@@ -806,11 +825,15 @@ export function fromCanvasProject(project: {
       ...(num(r.width) !== undefined ? { width: num(r.width) } : {}),
       ...(num(r.height) !== undefined ? { height: num(r.height) } : {}),
       ...(r.metadata && typeof r.metadata === "object" ? { metadata: r.metadata as Record<string, unknown> } : {}),
+      ...(typeof r.deletedAt === "string" && r.deletedAt.length > 0 ? { deletedAt: r.deletedAt } : {}),
     });
     // 存檔裡的座標要原樣還原（normalizeCanvasNode 只在缺座標時給 0,0）。
     const pos = r.position as CanvasPosition | undefined;
     return [pos && num(pos.x) !== undefined && num(pos.y) !== undefined ? { ...node, position: { x: pos.x, y: pos.y } } : node];
   });
+  // 軟刪節點（有 deletedAt）不進可見 nodes，收進 deletedNodes（可經 restore 還原）。
+  const nodes = allNodes.filter((n) => !n.deletedAt);
+  const deletedNodes = allNodes.filter((n) => n.deletedAt);
   const ids = new Set(nodes.map((n) => n.id));
   const rawConns = Array.isArray(project.connections) ? project.connections : [];
   const connections = rawConns.flatMap((c) => {
@@ -821,7 +844,14 @@ export function fromCanvasProject(project: {
     if (!ids.has(r.fromNodeId) || !ids.has(r.toNodeId)) return [];
     return [{ id: r.id, fromNodeId: r.fromNodeId, toNodeId: r.toNodeId }];
   });
-  return { units: [], nodes, connections };
+  const nodeVersions = normalizeNodeVersions(project.nodeVersions);
+  return {
+    units: [],
+    nodes,
+    connections,
+    ...(deletedNodes.length > 0 ? { deletedNodes } : {}),
+    ...(nodeVersions ? { nodeVersions } : {}),
+  };
 }
 
 /**

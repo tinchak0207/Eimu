@@ -7,6 +7,8 @@ import { del, ensureBlobBackendWritable, get, list, put } from "@/lib/blob-backe
 import { sanitizeBlobSegment } from "@/lib/history-types";
 import { isValidCreationStep, MAX_EPISODES_PER_PROJECT } from "@/lib/creation-flow-steps";
 import { isCanvasProjectType, type CanvasEpisode, type CanvasProject } from "./types";
+// 版本清單清洗與讀取端 layout.fromCanvasProject 共用同一份（不製造第二個漂移點）。
+import { normalizeNodeVersions } from "./node-versions";
 
 const PROJECT_SCHEMA_VERSION = 1;
 const INDEX_GENERATIONS_KEPT = 2;
@@ -91,6 +93,8 @@ export function normalizeProject(payload: unknown): CanvasProject | null {
   const p = payload as Partial<CanvasProject>;
   if (typeof p.id !== "string" || typeof p.title !== "string" || !Array.isArray(p.nodes)) return null;
   const episodes = normalizeEpisodes(p.episodes);
+  // 節點版本歷史（2026-09-27）：逐項白名單＋逐節點裁剪（上限見 node-versions.ts）。
+  const nodeVersions = normalizeNodeVersions(p.nodeVersions);
   return {
     id: p.id,
     title: p.title.slice(0, 200),
@@ -109,6 +113,7 @@ export function normalizeProject(payload: unknown): CanvasProject | null {
     ...(isCanvasProjectType(p.projectType) ? { projectType: p.projectType } : {}),
     ...(isValidCreationStep(p.currentStep) ? { currentStep: p.currentStep } : {}),
     ...(episodes ? { episodes } : {}),
+    ...(nodeVersions ? { nodeVersions } : {}),
   };
 }
 
@@ -190,6 +195,42 @@ export async function saveCanvasProject(userId: number, project: CanvasProject):
   await enqueue(userId, async () => {
     const current = await readProjects(userId);
     await writeProjects(userId, [normalized, ...current.filter((p) => p.id !== normalized.id)]);
+  });
+}
+
+/** 讀單一畫布專案（找不到回 null）。 */
+export async function readCanvasProject(userId: number, id: string): Promise<CanvasProject | null> {
+  const projects = await readProjects(userId);
+  return projects.find((p) => p.id === id) ?? null;
+}
+
+/**
+ * 對單一專案做**讀-改-寫**（在 per-user 寫入佇列 `enqueue` 內執行，避免與 debounce 存檔競態。
+ *
+ * 版本回退/軟刪還原都走這裡：不新增第二套儲存、不繞過既有落盤白名單。
+ * mutator 回 `null`＝放棄寫入（例如找不到目標節點）；找不到專案同樣回 null。
+ * 回傳實際落盤的（已清洗）專案，供路由原樣回給端點。
+ */
+export async function mutateCanvasProject(
+  userId: number,
+  id: string,
+  mutator: (project: CanvasProject) => CanvasProject | null,
+): Promise<CanvasProject | null> {
+  return enqueue(userId, async () => {
+    const current = await readProjects(userId);
+    const existing = current.find((p) => p.id === id);
+    if (!existing) return null;
+    const next = mutator({
+      ...existing,
+      nodes: [...existing.nodes],
+      ...(existing.nodeVersions ? { nodeVersions: [...existing.nodeVersions] } : {}),
+    });
+    if (!next) return null;
+    // 走同一條落盤白名單（normalizeProject）；updatedAt 由 store 蓋章。
+    const normalized = normalizeProject({ ...next, updatedAt: new Date().toISOString() });
+    if (!normalized) return null;
+    await writeProjects(userId, [normalized, ...current.filter((p) => p.id !== id)]);
+    return normalized;
   });
 }
 

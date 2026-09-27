@@ -3,20 +3,36 @@
 // reduceCanvasEvent 的簽名是 (state, CanvasSseEvent)，不是標準 reducer。
 // 這裡包一層 adapter，同時容納「本端動作」（載入專案、拖動節點、undo 還原）。
 import type { AgentSseEvent } from "@/lib/agent-chat-types";
-import { CANVAS_INITIAL_STATE, reduceCanvasEvent, type CanvasReducerState } from "@/lib/canvas/reducer";
+import {
+  CANVAS_INITIAL_STATE,
+  recordCanvasNodeVersion,
+  reduceCanvasEvent,
+  restoreCanvasNodes,
+  revertCanvasNodeToVersion,
+  softDeleteCanvasNodes,
+  type CanvasReducerState,
+} from "@/lib/canvas/reducer";
 import { normalizeCanvasEvent } from "@/lib/canvas/layout";
+import { isNodeContentChange } from "@/lib/canvas/node-versions";
 import { CANVAS_NODE_DEFAULT_SIZE, CanvasNodeType } from "@/lib/canvas/types";
 import type {
   CanvasAgentOp,
   CanvasConnection,
   CanvasNode,
   CanvasNodeMetadata,
+  CanvasNodeVersion,
   CanvasPosition,
 } from "@/lib/canvas/types";
 
 export type CanvasAction =
   | { type: "event"; event: AgentSseEvent }
-  | { type: "load"; nodes: CanvasNode[]; connections: CanvasConnection[] }
+  | {
+      type: "load";
+      nodes: CanvasNode[];
+      connections: CanvasConnection[];
+      deletedNodes?: CanvasNode[];
+      nodeVersions?: CanvasNodeVersion[];
+    }
   | { type: "move"; nodeId: string; position: CanvasPosition }
   | { type: "resize"; nodeId: string; width: number; height: number }
   | { type: "remove"; nodeId: string }
@@ -36,6 +52,9 @@ export type CanvasAction =
   // Wave A：就地編輯（改名 / metadata 補丁——文本直編、原地生成回填、字號）
   | { type: "rename"; nodeId: string; title: string }
   | { type: "patch_metadata"; nodeId: string; patch: Partial<CanvasNodeMetadata> }
+  // 版本歷史＋回退（2026-09-27）：軟刪還原 / 回退到指定版或上一版
+  | { type: "restore_nodes"; nodeIds: string[] }
+  | { type: "revert_node"; nodeId: string; version?: number }
   // Wave C：agent 批量操作（一次 dispatch = 一格歷史）
   | { type: "agent_ops"; ops: CanvasAgentOp[] };
 
@@ -49,7 +68,13 @@ export function canvasReducer(state: CanvasReducerState, action: CanvasAction): 
       return reduceCanvasEvent(state, normalized);
     }
     case "load":
-      return { units: [], nodes: action.nodes, connections: action.connections };
+      return {
+        units: [],
+        nodes: action.nodes,
+        connections: action.connections,
+        ...(action.deletedNodes && action.deletedNodes.length > 0 ? { deletedNodes: action.deletedNodes } : {}),
+        ...(action.nodeVersions && action.nodeVersions.length > 0 ? { nodeVersions: action.nodeVersions } : {}),
+      };
     case "move":
       return {
         ...state,
@@ -64,17 +89,8 @@ export function canvasReducer(state: CanvasReducerState, action: CanvasAction): 
         ),
       };
     case "remove":
-      return {
-        units: state.units.map((u) => ({
-          ...u,
-          nodes: u.nodes.filter((n) => n.id !== action.nodeId),
-          connections: u.connections.filter((c) => c.fromNodeId !== action.nodeId && c.toNodeId !== action.nodeId),
-        })),
-        nodes: state.nodes.filter((n) => n.id !== action.nodeId),
-        connections: state.connections.filter(
-          (c) => c.fromNodeId !== action.nodeId && c.toNodeId !== action.nodeId,
-        ),
-      };
+      // 軟刪（2026-09-27）：節點離開 nodes（呼叫端語義不變），但可經 restore_nodes 還原。
+      return softDeleteCanvasNodes(state, [action.nodeId]);
     case "clear":
       return CANVAS_INITIAL_STATE;
     case "batch_add_child": {
@@ -199,37 +215,19 @@ export function canvasReducer(state: CanvasReducerState, action: CanvasAction): 
       const keptNodes = state.nodes.filter((n) => !incomingIds.has(n.id));
       const existingConn = new Set(state.connections.map((c) => c.id));
       const newConns = (action.connections ?? []).filter((c) => !existingConn.has(c.id));
-      return {
+      let next: CanvasReducerState = {
         ...state,
         nodes: [...keptNodes, ...action.nodes],
         connections: [...state.connections, ...newConns],
       };
+      // 新節點逐顆落一版 created 快照（貼上是內容事件的起點）。
+      for (const node of action.nodes) next = recordCanvasNodeVersion(next, node.id, "created");
+      return next;
     }
     case "delete_many": {
-      const dead = new Set(action.nodeIds);
-      if (dead.size === 0) return state;
-      return {
-        units: state.units.map((u) => ({
-          ...u,
-          nodes: u.nodes.filter((n) => !dead.has(n.id)),
-          connections: u.connections.filter((c) => !dead.has(c.fromNodeId) && !dead.has(c.toNodeId)),
-        })),
-        nodes: state.nodes
-          .filter((n) => !dead.has(n.id))
-          .map((n) => {
-            if (!n.batchChildren?.some((id) => dead.has(id))) return n;
-            const kept = n.batchChildren.filter((id) => !dead.has(id));
-            return {
-              ...n,
-              batchChildren: kept,
-              // 主圖被刪 → fallback 剩餘第一個；全刪光 → 清空。
-              batchPrimaryImageId:
-                n.batchPrimaryImageId && dead.has(n.batchPrimaryImageId) ? kept[0] : n.batchPrimaryImageId,
-              metadata: { ...n.metadata, batchTotal: kept.length },
-            };
-          }),
-        connections: state.connections.filter((c) => !dead.has(c.fromNodeId) && !dead.has(c.toNodeId)),
-      };
+      // 軟刪（2026-09-27）：與舊硬刪對呼叫端同語義（nodes 不含、連線斷、批次清理），
+      // 差別是收進 deletedNodes 可還原。
+      return softDeleteCanvasNodes(state, action.nodeIds);
     }
     case "connect": {
       const { fromNodeId, toNodeId } = action;
@@ -250,10 +248,17 @@ export function canvasReducer(state: CanvasReducerState, action: CanvasAction): 
     case "rename": {
       const title = action.title.trim().slice(0, 120);
       if (!title) return state;
-      return {
+      const prev = state.nodes.find((n) => n.id === action.nodeId);
+      if (!prev) return state;
+      const renamed: CanvasNode = { ...prev, title };
+      const next: CanvasReducerState = {
         ...state,
-        nodes: state.nodes.map((n) => (n.id === action.nodeId ? { ...n, title } : n)),
+        nodes: state.nodes.map((n) => (n.id === action.nodeId ? renamed : n)),
       };
+      // 改名是內容變更 → 落一版（版本歷史看得到改名軌跡）。
+      return isNodeContentChange(prev, renamed)
+        ? recordCanvasNodeVersion(next, action.nodeId, "edited")
+        : next;
     }
     case "patch_metadata": {
       // 契約（metadata 直通）：此處 patch 原樣併入節點 metadata，不過白名單。
@@ -270,13 +275,22 @@ export function canvasReducer(state: CanvasReducerState, action: CanvasAction): 
       //   · `approval`：CanvasEmbed.tsx:683 寫（分鏡批准閘）→ assets/ShotReviewPanel.tsx:144 讀
       //   · `bytes`/`mimeType`：use-canvas-interaction.ts:443 寫（上傳回填；目前查無讀者）
       // 要收緊的前提＝先把這些鍵加進 `layout.ts` 的 `toNodeMetadata`（白名單真源不在本檔）。
-      return {
+      const prev = state.nodes.find((n) => n.id === action.nodeId);
+      if (!prev) return state;
+      const patched: CanvasNode = { ...prev, metadata: { ...prev.metadata, ...action.patch } };
+      const next: CanvasReducerState = {
         ...state,
-        nodes: state.nodes.map((n) =>
-          n.id === action.nodeId ? { ...n, metadata: { ...n.metadata, ...action.patch } } : n,
-        ),
+        nodes: state.nodes.map((n) => (n.id === action.nodeId ? patched : n)),
       };
+      // 內容/metadata 真的變了才落版（純 status 抖動等瞬態由 isNodeContentChange 過濾）。
+      const reason = isNodeContentChange(prev, patched);
+      return reason ? recordCanvasNodeVersion(next, action.nodeId, reason) : next;
     }
+    // ── 版本歷史＋回退（2026-09-27）
+    case "restore_nodes":
+      return restoreCanvasNodes(state, action.nodeIds);
+    case "revert_node":
+      return revertCanvasNodeToVersion(state, action.nodeId, action.version);
     case "agent_ops": {
       // Agent 批量操作原子套用：一次 dispatch = 撤銷棧一格，中途壞 op 跳過不炸整批。
       // 契約（metadata 直通，2026-09-24 WS11）：本分派的 add_node（normalizeAgentNode 的
@@ -307,27 +321,33 @@ export function canvasReducer(state: CanvasReducerState, action: CanvasAction): 
         switch (op.type) {
           case "add_node": {
             const node = normalizeAgentNode(op.node, next.nodes);
-            if (node) next = { ...next, nodes: [...next.nodes, node] };
+            if (node) {
+              next = { ...next, nodes: [...next.nodes, node] };
+              // agent 落節點也是內容事件的起點 → 落 created 版。
+              next = recordCanvasNodeVersion(next, node.id, "created");
+            }
             break;
           }
           case "update_node": {
+            const prevNode = next.nodes.find((n) => n.id === op.id);
+            if (!prevNode) break;
+            const updated: CanvasNode = {
+              ...prevNode,
+              ...(op.patch.title ? { title: op.patch.title.slice(0, 120) } : {}),
+              ...(op.patch.position ? { position: op.patch.position, moved: true } : {}),
+              ...(typeof op.patch.width === "number" ? { width: Math.max(120, op.patch.width) } : {}),
+              ...(typeof op.patch.height === "number" ? { height: Math.max(90, op.patch.height) } : {}),
+              // 契約：op.patch.metadata 原樣併入（不過白名單）——2026-09-25 逐鍵清點後
+              // 確認收緊會剝掉被讀鍵，維持直通，理由見 agent_ops 開頭註釋。
+              ...(op.patch.metadata ? { metadata: { ...prevNode.metadata, ...op.patch.metadata } } : {}),
+            };
             next = {
               ...next,
-              nodes: next.nodes.map((n) =>
-                n.id === op.id
-                  ? {
-                      ...n,
-                      ...(op.patch.title ? { title: op.patch.title.slice(0, 120) } : {}),
-                      ...(op.patch.position ? { position: op.patch.position, moved: true } : {}),
-                      ...(typeof op.patch.width === "number" ? { width: Math.max(120, op.patch.width) } : {}),
-                      ...(typeof op.patch.height === "number" ? { height: Math.max(90, op.patch.height) } : {}),
-                      // 契約：op.patch.metadata 原樣併入（不過白名單）——2026-09-25 逐鍵清點後
-                      // 確認收緊會剝掉被讀鍵，維持直通，理由見 agent_ops 開頭註釋。
-                      ...(op.patch.metadata ? { metadata: { ...n.metadata, ...op.patch.metadata } } : {}),
-                    }
-                  : n,
-              ),
+              nodes: next.nodes.map((n) => (n.id === op.id ? updated : n)),
             };
+            // agent 的內容/meta 變更 → 落一版（位置/尺寸改動不算內容，由分類器過濾）。
+            const reason = isNodeContentChange(prevNode, updated);
+            if (reason) next = recordCanvasNodeVersion(next, op.id, reason);
             break;
           }
           case "delete_nodes":

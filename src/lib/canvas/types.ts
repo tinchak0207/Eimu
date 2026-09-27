@@ -340,6 +340,46 @@ export interface CanvasNode {
   batchExpanded?: boolean;
   /** 批次主圖片節點 id（縮圖/封面） */
   batchPrimaryImageId?: string;
+  /**
+   * 軟刪除標記（2026-09-27 節點版本歷史＋回退）：ISO 時間戳，有值＝已軟刪。
+   *
+   * 軟刪的節點**不進** reducer 的可見 `nodes`（改收進 `deletedNodes`），呼叫端語義
+   * （列表不含、連線斷開）與舊的硬刪一致；差別是資料還在，可經
+   * `POST /api/canvas/nodes/restore` 或 `restoreCanvasNodes` 還原。
+   * 節點級欄位（不是 metadata）：不進 metadata 雙白名單，不會被 `toNodeMetadata` 剝掉。
+   */
+  deletedAt?: string;
+}
+
+/**
+ * 節點版本快照的落版原因（2026-09-27 節點版本歷史＋回退）：
+ *   · created   —— agent/模板首次落節點
+ *   · generated —— 生成完成（status → success / 交付 URL 落地）
+ *   · edited    —— 內容編輯（文本直編提交、改名、prompt 改寫）
+ *   · metadata  —— 非內容的 metadata 更新（模型/尺寸/角色…）
+ *   · revert    —— 由某一版回退產生的新版本（版本歷史是**追加式**，回退本身也留痕）
+ */
+export type CanvasNodeVersionReason = "created" | "generated" | "edited" | "metadata" | "revert";
+
+/**
+ * 節點版本快照（2026-09-27）：一次「內容變更」＝一版。
+ *
+ * 「內容」＝ `title` ＋ `metadata`（純資料面）。座標/尺寸/連線**不進版本**——
+ * 它們是版面狀態不是內容，回退一版不該把節點搬回舊位置（版面權在前端 reducer）。
+ *
+ * 持久化：掛在既有 `CanvasProject.nodeVersions`（不新增 DB/檔案）；上限由
+ * `node-versions.ts` 的 `MAX_NODE_VERSIONS_PER_NODE` 逐節點裁剪。
+ */
+export interface CanvasNodeVersion {
+  /** 同一節點內 1 起、單調遞增（append-only，回退也 +1）。 */
+  version: number;
+  nodeId: string;
+  createdAt: string;
+  reason: CanvasNodeVersionReason;
+  /** 該版快照的節點標題。 */
+  title: string;
+  /** 該版快照的節點 metadata（深拷貝，不與當前節點共用參考）。 */
+  metadata: CanvasNodeMetadata;
 }
 
 export interface CanvasConnection {
@@ -498,6 +538,12 @@ export interface CanvasProject {
   currentStep?: number;
   /** 劇集分集清單（電影留空）。 */
   episodes?: CanvasEpisode[];
+  /**
+   * 節點版本歷史（2026-09-27）：所有節點的版本快照，按節點＋版號檢索。
+   * 掛在既有專案物件上（不新增 DB/檔案）；逐節點上限見 node-versions.ts。
+   * 舊專案無此欄＝空歷史，向後相容。
+   */
+  nodeVersions?: CanvasNodeVersion[];
 }
 
 /**
