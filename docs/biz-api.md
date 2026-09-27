@@ -1,8 +1,68 @@
 # Image Studio 图像生成 API（B 端接入文档）
 
-OpenAI 兼容的图像生成接口，供 API 聚合平台与企业客户直接调用。
+OpenAI 兼容的图像生成接口，供 API 聚合平台与企业客户直接调用。**同一把 `sk-biz-…` 密钥有两种接法，先按你的客户端选一种：**
 
-## 接入信息
+## 两种接法（先选一种，密钥通用）
+
+| | A. 标准 OpenAI 同步（客户端 / 中转站首选） | B. 异步任务（批量 / 自有后端） |
+| --- | --- | --- |
+| Base URL | `https://eimu.dev/openai/v1` | `https://eimu.dev/v1` |
+| 响应形状 | 一次 POST **同步回 200**，图片就在 `data[]` 里 | **202 + task_id**，轮询或 webhook 取件 |
+| 主要端点 | `POST /images/generations`、`POST /chat/completions`（含 `stream:true`）、`GET /models` | `POST /images/generations`、`GET /images/{id}`、`GET /images/{id}/result`、`POST /skus/{id}/runs`、`GET /models` |
+| 图片交付 | `data[].url` 或 `data[].b64_json`（由 `response_format` 控制） | 任务 `succeeded` 后取 `data[].url`（异步链路**不回** `b64_json`） |
+| 幂等 | 无（OpenAI 语义） | `Idempotency-Key` 头：同键重放不重复建任务、不重复扣费 |
+| 适合 | new-api / one-api 中转站、Cherry Studio、SillyTavern（酒馆）、Dify、Coze、n8n、LobeChat、直接用 OpenAI SDK 写代码的开发者 | 批量出图、自有任务系统、需要 `callback_url` 或 `Idempotency-Key`、单次几十张的长任务 |
+
+两套端点背后是**同一条生成管线**（同一套计费、调度与退款语义），只是响应形状不同；同一把密钥在两边都能用，模型 id 也一致。区别只有一个：同步层在服务端把任务等到终态再回复，异步层把 task_id 立刻交给你。
+
+### A. 标准 OpenAI 同步
+
+Base URL 填 `https://eimu.dev/openai/v1`（比异步那套多一层 `/openai`，**别填成 `/v1`**）。
+
+| 端点 | 说明 |
+| --- | --- |
+| `POST /openai/v1/images/generations` | OpenAI Images 语义：同步等到出图，回 `200 {created, data:[{url} \| {b64_json}]}`。`response_format` 默认 `url`，要 `b64_json` 时服务端取回成品再编码。失败回 OpenAI 错误信封 `{error:{message,type,code}}`，未出图不扣费 |
+| `POST /openai/v1/chat/completions` | 生图模型以对话形式调用：取最后一条 user 消息作为 prompt，回 `content = "![image](<url>)"` 的图片 markdown。支持 `stream:true`（酒馆、Cherry Studio 走这条：先 keep-alive，出图后送含图片 markdown 的 delta，最后 `[DONE]`）|
+| `GET /openai/v1/models` | 标准 `{object:"list", data:[{id, object:"model", owned_by:"eimu"}]}`，只列当前可用的图片模型 |
+
+```bash
+curl https://eimu.dev/openai/v1/images/generations \
+  -H "Authorization: Bearer $EMU_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-image-2","prompt":"一只戴帽子的猫","n":1,"size":"1024x1024"}'
+# → 200 {"created":1784912242,"data":[{"url":"https://…"}]}
+```
+
+**状态（如实标注）**：这条同步兼容层随本文档同日（2026-09-28）推出，**尚未部署到生产、目前不可调用**。判据只有一个：
+
+```bash
+curl -s https://eimu.dev/openai/v1/models -H "Authorization: Bearer $EMU_API_KEY"
+# 返回 {"object":"list",…} ＝ 已可用；返回 404/502 ＝ 还没上线，请先按接法 B 接
+```
+
+### B. 异步任务（现行、已上线）
+
+Base URL `https://eimu.dev/v1`。`POST` 一律回 `202 + task_id`，取图靠轮询或 `callback_url`；批量场景用 `Idempotency-Key` 保证重放不重复建单。契约细节见下文「接入信息」起的全部段落——它们描述的就是这条链路。
+
+### new-api / one-api 加渠道填法
+
+中转站只认同步形状，所以**必须走接法 A**。按下面填完即可用，没有隐藏步骤：
+
+1. new-api 后台 → 「渠道」→ 「添加渠道」。
+2. **类型**：`OpenAI`。
+3. **名称**：任意，如 `eimu-image`。
+4. **模型**：填你这把 key 允许的模型 id，逗号或换行分隔。取值方法（唯读、不计费）：
+   ```bash
+   curl -s https://eimu.dev/v1/models -H "Authorization: Bearer $EMU_API_KEY" | grep -o '"id":"[^"]*"'
+   ```
+   把列出的 `id` 逐个填进去（例如 `gpt-image-2`、`pixai-haruka-v2`）。new-api 的「填入相关模型」按钮也走同一份列表，任选其一。**注意 `GET /v1/models` 是图片与视频混列**，只把图片模型填进渠道（条目里 `x_capabilities.mediaType` 为 `video` 的走异步接法 `POST /v1/videos/generations`，同步层不支持）。
+5. **Base URL / 代理地址**：`https://eimu.dev/openai/v1`。new-api 会自己拼成 `…/openai/v1/images/generations` 与 `…/openai/v1/chat/completions`，**不要再带 `/v1` 或端点后缀**。
+6. **密钥**：填 `sk-biz-…` 明文（new-api 自己加 `Bearer`，不要手写 `Bearer `）。
+7. **要带的 header**：无需任何自定义 header。new-api 自动发 `Authorization: Bearer sk-biz-…` 与 `Content-Type: application/json`，这两个就是全部；`Idempotency-Key` 只有异步接法才用，接法 A 不需要。
+8. 保存后点「测试渠道」验证连通；再在 new-api 里发一次生图请求，返回 `data[].url` 即成功。
+9. 如果 new-api 版本把 base URL 藏起来（「自定义代理地址」灰掉），在渠道里打开「**覆盖代理地址**」或「自定义 Base URL」开关再填第 5 步的值。
+
+## 接入信息（以下为接法 B：異步任務）
 
 | 项目 | 值 |
 | --- | --- |

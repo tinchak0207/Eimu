@@ -1,5 +1,7 @@
 # B 端 API 調用指南（`/v1`）
 
+> 本指南講的是**異步接法**（base URL `https://eimu.dev/v1`）。要接中轉站或現成客戶端（New API、Cherry Studio、酒館、Dify、Coze、n8n、LobeChat、OpenAI SDK），走同一輪推出的**標準 OpenAI 同步層**，base URL `https://eimu.dev/openai/v1`，選型與填法見 `docs/biz-api.md` 開頭。
+
 ## 基本資訊
 
 | 項目 | 值 |
@@ -192,16 +194,23 @@ HTTP 錯誤體是 OpenAI 形狀 + `trace_id`，同一個 id 也在 `X-Request-Id
 
 ## 接聚合平台的關鍵限制
 
-**這個端點不是同步 OpenAI 契約。** `/v1/images/generations` 在控制面開啟時
+**`/v1` 這個端點不是同步 OpenAI 契約。** `/v1/images/generations` 在控制面開啟時
 **永遠**回 202 + task id，不會直接回 `{"data":[{"b64_json":...}]}`。
 
 實測確認：請求體裡的 `async` 欄位會被解析但**未被使用**，沒有同步旁路。
 `response_format` 同理——結果一律是 URL，不給 b64。
 
-後果：New API / one-api 這類期待同步回應的聚合平台**不能直接把它當
+後果：New API / one-api 這類期待同步回應的聚合平台**不能把 `/v1` 直接當
 OpenAI 生圖上游接**，需要中間層實作「提交 → 輪詢 → 取 URL」。
-要真正給聚合平台用，得在站上加一條同步包裝路由（提交後在服務端輪詢到終態
-再回標準 OpenAI 形狀），或讓客戶端直接按本文的非同步流程接。
+
+**不用自己寫這層了**：同一輪（2026-09-28）推出的標準 OpenAI 同步層
+`https://eimu.dev/openai/v1` 就是這個包裝路由——`POST /images/generations`
+同步回 `200 {created,data:[{url|b64_json}]}`，`POST /chat/completions` 支援
+`stream:true`，`GET /models` 回標準 list。New API、Cherry Studio、酒館、
+Dify、Coze、n8n、LobeChat 與 OpenAI SDK 一律改填這個 base URL，
+填法與選型見 `docs/biz-api.md` 開頭。該層與這份文件同日推出，**尚未部署到生產、目前不可調用**，
+判據是 `curl -s https://eimu.dev/openai/v1/models -H "Authorization: Bearer $EMU_API_KEY"`
+能否回 list（404/502 ＝ 還沒上線，此時只能按本文的非同步流程接 `/v1`）。
 
 ## 已知坑
 
