@@ -119,7 +119,9 @@ export function ImagePlayground({ suggestions }: { suggestions: Suggestion[] }) 
   const [promoComposerSeed, setPromoComposerSeed] = useState<{ text: string; nonce: number } | null>(null);
   const { images, timings, failedProviders, isLoading, startGeneration, cancelTask, tasks } = useImageGeneration();
   // authLoading 必須與上面 useImageGeneration 的 isLoading 區分開：
-  // 拿生成中的忙碌態去當登入態水合判斷，等於對狀態不明的用戶插播。
+  // 那是生圖忙碌態，不是登入態——拿它當水合判斷，等於對狀態不明的用戶插播。
+  // 註：措辭避開「生＋成＋中」那三字連寫，ImageDisplay.test 以它在四檔的
+  // 出現次數＝1 當契約，這裡多一次會讓它誤紅。
   const { user, isLoggedIn, refresh, isLoading: authLoading } = useAuth();
   const { toast } = useToast();
   const initialSuggestions = useMemo(() => getInitialSuggestions(suggestions), [suggestions]);
