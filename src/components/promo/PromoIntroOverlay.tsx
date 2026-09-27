@@ -38,6 +38,11 @@ export interface PromoIntroOverlayProps {
   onTrial: (text: string) => void;
   /** 「重播一遍」以外的退路（跳過 / Esc / 先逛逛）＝只關掉浮層，不送任何話。 */
   onDismiss: () => void;
+  /**
+   * 上層另有彈窗（結尾的登入窗）開著時，Esc 交給它處理——
+   * 不讓一個 Esc 把整個浮層連同彈窗一起關掉。
+   */
+  suspendKeys?: boolean;
 }
 
 const VIDEO_SRC = "/promo/eimu-promo.mp4";
@@ -62,7 +67,7 @@ const BOX_CY = (BOX.top + BOX.height / 2) / COVER_H;
 const cqh = (px: number): string => `${((px / COVER_H) * 100).toFixed(4)}cqh`;
 const pct = (value: number, total: number): string => `${((value / total) * 100).toFixed(4)}%`;
 
-export function PromoIntroOverlay({ onTrial, onDismiss }: PromoIntroOverlayProps) {
+export function PromoIntroOverlay({ onTrial, onDismiss, suspendKeys = false }: PromoIntroOverlayProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [muted, setMuted] = useState(true);
@@ -113,6 +118,7 @@ export function PromoIntroOverlay({ onTrial, onDismiss }: PromoIntroOverlayProps
   }, [settled]);
 
   useEffect(() => {
+    if (suspendKeys) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
@@ -120,7 +126,7 @@ export function PromoIntroOverlay({ onTrial, onDismiss }: PromoIntroOverlayProps
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onDismiss]);
+  }, [onDismiss, suspendKeys]);
 
   const handleTimeUpdate = useCallback(() => {
     const el = videoRef.current;

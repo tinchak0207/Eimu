@@ -10,6 +10,7 @@ import {
   clearPendingTrial,
   isHandoffLink,
   readPendingTrial,
+  resolvePromoTrialIntent,
   shouldPlayPromo,
   writePendingTrial,
 } from "./promo-gate";
@@ -114,4 +115,31 @@ test("待補送的試玩那句話：寫入去空白、空字串不寫、清掉�
   assert.equal(readPendingTrial(null), null);
   assert.doesNotThrow(() => clearPendingTrial(undefined));
   assert.equal(PROMO_PENDING_KEY, "eimu-promo-trial-pending-v1");
+});
+
+
+/**
+ * 結尾送出的分流（2026-09-27 暴君第三輪）：未登入不得直接把話吞掉——必須留一份
+ * pending 走登入；登入態才當場開跑。空框（直接按送出）兩條都要用片中的那句話。
+ */
+test("結尾送出分流：未登入留 pending 走登入，登入當場開跑", () => {
+  const cold = resolvePromoTrialIntent("生成秦始皇骑北极熊的电影", false);
+  assert.deepEqual(cold, { kind: "login", pending: "生成秦始皇骑北极熊的电影" });
+
+  const warm = resolvePromoTrialIntent("生成秦始皇骑北极熊的电影", true);
+  assert.deepEqual(warm, { kind: "run", text: "生成秦始皇骑北极熊的电影" });
+
+  // 使用者自己打的那句話優先於片中的許願（兩種登入態都不准被換掉）。
+  assert.equal(resolvePromoTrialIntent("  一只猫在月球上跳舞  ", true).kind, "run");
+  assert.deepEqual(resolvePromoTrialIntent("  一只猫在月球上跳舞  ", false), {
+    kind: "login",
+    pending: "一只猫在月球上跳舞",
+  });
+
+  // 空框＝他直接按了送出：跑片中那句話，不是空字串。
+  assert.deepEqual(resolvePromoTrialIntent("   ", false), {
+    kind: "login",
+    pending: PROMO_TRIAL_PROMPT,
+  });
+  assert.deepEqual(resolvePromoTrialIntent("", true), { kind: "run", text: PROMO_TRIAL_PROMPT });
 });

@@ -149,6 +149,23 @@ export function readPendingTrial(store: PromoStorage | null | undefined): string
   }
 }
 
+/**
+ * 結尾那句話送出去時的分流（2026-09-27 暴君第三輪：「发送按钮要产生一个真实的
+ * 会话，还要针对大部分用户并没有登录的情形做适配，发送前先弹登录窗」）。
+ *
+ * 這條分流是純函式：登入態決定「現在開跑」還是「先登入再開跑」。未登入那條不是
+ * 「丟掉」——pending 一定帶著那句話，登入態翻真後由呼叫方補送（同一句話，不重打）。
+ * 空框按送出＝跑片中那句話（PROMO_TRIAL_PROMPT）。
+ */
+export type PromoTrialIntent =
+  | { kind: "run"; text: string }
+  | { kind: "login"; pending: string };
+
+export function resolvePromoTrialIntent(rawText: string, isLoggedIn: boolean): PromoTrialIntent {
+  const text = rawText.trim() || PROMO_TRIAL_PROMPT;
+  return isLoggedIn ? { kind: "run", text } : { kind: "login", pending: text };
+}
+
 export function clearPendingTrial(store: PromoStorage | null | undefined): void {
   if (!store) return;
   try {
