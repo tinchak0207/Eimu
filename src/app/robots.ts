@@ -2,7 +2,7 @@ import type { MetadataRoute } from "next";
 import { getSiteUrl } from "@/lib/site-url";
 
 // 非內容路由：API、後台、需登入的個人頁、登入回跳與內部預覽頁。
-// /agent 只是跳回首頁的舊書籤路由，/review 與 /agent-chat-preview 是內部工具。
+// /agent 只是跳回首頁的舊書籤路由，/agent-chat-preview 是內部工具。
 const PRIVATE_PATHS = [
   "/api/",
   "/admin/",
@@ -10,7 +10,6 @@ const PRIVATE_PATHS = [
   "/settings/",
   "/auth/",
   "/wechat-login",
-  "/review",
   "/agent",
   "/agent-chat-preview",
 ];

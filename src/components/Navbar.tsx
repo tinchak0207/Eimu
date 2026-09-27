@@ -3,9 +3,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BookOpen, History, Images, KeyRound, LogOut } from "lucide-react";
+import { BookOpen, History, KeyRound, LogOut } from "lucide-react";
 import { WalletBadge } from "@/components/WalletBadge";
-import { NotificationBell } from "@/components/notifications/NotificationBell";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -376,12 +375,8 @@ export function Navbar({ className }: NavbarProps) {
                     导航栏不再放独立入口（2026-08-27 暴君裁定）。 */}
                 <WalletBadge showTopUp showCheckin className="mobile-wallet-balance min-w-0 flex-1 sm:flex-none" />
 
-                {/* 站内通知入口：铃铛 + 未读红点 + 下拉列表（机制面，无运营内容）。
-                    与右侧其余入口同款圆钮，排在余额胶囊之后、导航链接之前。 */}
-                <NotificationBell />
-
                 {/* Nav links — icons only, text stays hidden for screen readers.
-                    「文档」「审查页」只在 ≥sm 显示：手机端导航留给核心动作。 */}
+                    「文档」只在 ≥sm 显示：手机端导航留给核心动作。 */}
                 <Link
                   href="/history"
                   className="lg-float flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[rgba(0,0,0,0.78)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:h-9 sm:w-9"
@@ -389,14 +384,6 @@ export function Navbar({ className }: NavbarProps) {
                 >
                   <History className="h-3.5 w-3.5" aria-hidden="true" />
                   <span className="sr-only">历史</span>
-                </Link>
-                <Link
-                  href="/review"
-                  className="lg-float hidden h-11 w-11 shrink-0 items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[rgba(0,0,0,0.78)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:flex sm:h-9 sm:w-9"
-                  aria-label="审查页"
-                >
-                  <Images className="h-3.5 w-3.5" aria-hidden="true" />
-                  <span className="sr-only">审查页</span>
                 </Link>
                 {/* 这里曾有一颗「助理」导航链接，指向 /agent 独立页。已移除：
                     AI 助理是首页卡片上的一个 toggle，不是一个去处。

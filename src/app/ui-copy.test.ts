@@ -28,9 +28,10 @@ test("navbar exposes wallet, history and top-up controls on mobile", () => {
   assert.doesNotMatch(source, /grid-cols-\[minmax/);
   assert.doesNotMatch(source, /mobile-nav-actions[\s\S]{0,180}overflow-x-auto/);
   assert.doesNotMatch(source, /href="\/history"[\s\S]{0,220}hidden sm:flex/);
-  // 「文档」「审查页」手机端隐藏（≥sm 才显示）；历史与余额保持手机端可见。
-  assert.match(source, /hidden[\s\S]{0,320}?sm:flex[\s\S]{0,200}?aria-label="审查页"/);
+  // 「文档」手机端隐藏（≥sm 才显示）；历史与余额保持手机端可见。
+  // 2026-09-27 暴君裁定：审查页整页撤除（从未使用），故不再钉它的 aria-label。
   assert.match(source, /hidden[\s\S]{0,320}?sm:flex[\s\S]{0,200}?aria-label="文档"/);
+  assert.doesNotMatch(source, /href="\/review"/);
   // 钥匙独立按钮 + 专属 key 菜单（复制/管理，无退出）；名字右侧是退出按钮。
   assert.match(source, /aria-label="API 密钥"/);
   assert.match(source, /copyApiKey/);
