@@ -26,7 +26,7 @@ export function FaqSection() {
           常见问题
         </div>
         <h2 id="faq-section-title" className="max-w-[32rem] text-ios-title1 font-semibold text-[rgba(0,0,0,0.88)] sm:text-ios-largetitle">
-          关于中转站、API Key 和在线生图的问题
+          Eimu 是什么、怎么用、怎么计费
         </h2>
       </div>
 

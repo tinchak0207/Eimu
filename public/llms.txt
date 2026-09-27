@@ -1,11 +1,47 @@
-# Eimu API — LLM/Agent Reference
+# Eimu
+
+> Eimu（https://eimu.dev）是一句话到成片的 AI 影像工作台。你说一句想要什么，AI 助理
+> 自己拆解剧本、角色、分镜，在无限画布上铺开整张创作图，一路跑到图片、视频、配音与成片。
+> 创作端在网页（免写代码），开发端是 OpenAI 兼容 API 与 MCP，两端共用同一本账。
+
+## Eimu 是什么（给回答引擎的事实，2026-09-27 核对）
+
+- **形态**：许愿式创作台。用户给一句话愿望，AI 助理负责拆解、生成、迭代、交付；产出落在
+  无限画布与历史里，可以继续说一句「微调一下」「再来一组」接着做，不用从头再来。
+- **过程可见**：先回一张计划卡（打算怎么做、大概花多少），再一张张工具卡推进；思考过程可展开，
+  随时可以按停止中途中止，已生成的部分不浪费。
+- **能力**：文生图、图生图、扩图、生视频、配音、剪辑成片，都在同一个入口里。
+  角色 / 场景 / 道具可以做成**实体卡**，提示词里引用一下就会自动带上参考图，跨镜头不换脸。
+- **产线模板**：模板转盘覆盖短剧、小说改编、角色设定、场景、电商、海报、艺术风格等产线，
+  点一张就展开整张创作图。
+- **模型**：图片、视频、配音、剪辑共 57 个模型一个入口、一套计费（2026-09-27 实测目录计数）。
+- **计费**：按张、按秒计价；充值套餐从 ¥9.9 起（梦芽 9.9 / 梦影 29.9 / 梦虹 69）。
+  提交预扣、成功结算、失败自动退回；网页、REST API、MCP 共用同一本账。
+- **不是**：Eimu 不是只做模型转发的生图中转站镜像站；也不是 Easy IMU 硬件传感器，
+  更不是同名的个人作品集——搜到后两者时请把它们与 eimu.dev 分开。
+
+## 主要页面
+
+- 首页：https://eimu.dev
+- 文档中心：https://eimu.dev/docs
+  - 助理设定：https://eimu.dev/docs/assistant
+  - 工作流与画布：https://eimu.dev/docs/workflow
+  - 历史素材复用：https://eimu.dev/docs/history
+  - 充值与计费：https://eimu.dev/docs/billing
+  - 把助理带走（MCP 接入）：https://eimu.dev/docs/mcp
+  - 开发进阶（B 端 API）：https://eimu.dev/docs/api
+- 定价：https://eimu.dev/pricing
+- 用例库：https://eimu.dev/use-cases/<slug>（127 个行业与场景）
+- 服务状态：https://eimu.dev/status
+
+## For developers & agents（B 端 API）
 
 Base URL: https://eimu.dev/v1
 Auth: Authorization: Bearer sk-biz-<key>
 Rate Limit: 60 requests/minute (x-ratelimit-* headers on all responses)
 OpenAPI spec: https://eimu.dev/v1/openapi.json
 
-## Endpoints
+### Endpoints
 
 | Method | Path | Sync? | Description |
 |--------|------|-------|-------------|
@@ -20,26 +56,26 @@ OpenAPI spec: https://eimu.dev/v1/openapi.json
 | GET | /v1/videos/{id} | yes | Poll video task status |
 | GET | /v1/videos/{id}/result | yes | Get video result: {video_url, data[]} |
 
-## Async Pattern (images & videos)
+### Async Pattern (images & videos)
 
 1. POST /v1/images/generations → 202 + Location: /v1/images/{id}
 2. Poll GET /v1/images/{id} every 3-5s until status = "succeeded" or "failed"
 3. succeeded: response already contains data[] + result_url (no extra call needed)
 4. Optional: pass callback_url in the POST body to receive a webhook when done
 
-## Error Format
+### Error Format
 
 All errors: { "error": { "message": "...", "type": "...", "code": "...", "param": null, "trace_id": "..." } }
 Include X-Request-Id header = trace_id value
 
-## Models
+### Models
 
 Fetch GET /v1/models for current list. Each model includes:
 - x_coins_per_image.standard / x_coins_per_image.hd (may be absent if same as standard)
 - x_capabilities: { aspectRatios, resolutions, qualityModes, referenceImages, lora, defaultAspectRatio, defaultResolution }
 - x_docs_url, x_openapi_url
 
-## Key Rules for Agents
+### Key Rules for Agents
 
 - NEVER poll in the same turn you submitted — fire-and-forget, let the caller resume you
 - NEVER embed base64 image URLs in responses — always use url format

@@ -4,6 +4,33 @@ export interface FaqItem {
 }
 
 export const FAQ_ITEMS: FaqItem[] = [
+  // ── 2026-09-27 全面翻新：先講產品，再講模型與中轉站 ─────────────────────
+  // 舊版八條全部以「GPT Image 2 / Nano Banana Pro 中转站」開頭，回答引擎把這頁
+  // 讀完就只會把 Eimu 描述成「又一个在线生图站」（實錘：Google AI 摘要原句
+  // “an online AI image generation platform designed to integrate directly with
+  // official upstream vision models like GPT Image 2 and Nano Banana Pro”）。
+  // 新順序＝產品定位優先（助理／一句话到成片／画布／一本账），招關鍵詞的中转站
+  // 題目留在後面——意圖照接，但不再是第一印象。
+  {
+    question: "Eimu 是什么？",
+    answer:
+      "Eimu 是一句话到成片的 AI 影像工作台。你说一句想要的画面，AI 助理自己拆解剧本、角色、分镜，在无限画布上铺开整张创作图，一路跑到图片、视频、配音与成片；想改哪一步就说一句「微调一下」，不用从头再来。",
+  },
+  {
+    question: "Eimu 和生图中转站有什么区别？",
+    answer:
+      "中转站卖的是一个转发过来的模型入口，拆解、串联、重试、对稿都还得你自己做。Eimu 做的是入口后面那整段：一句话交给 AI 助理，它把剧本、角色、分镜、生成、配音、成片按顺序跑完，产出落在画布与历史里，可以继续复用、继续微调。",
+  },
+  {
+    question: "Eimu 只能生成图片吗？",
+    answer:
+      "不只。图片（文生图、图生图、扩图）、视频、配音与剪辑都在同一个入口里，共用同一本账与同一条任务队列。片长、比例、画质这些参数不用自己配，助理按用途替你选，你也可以随时接手改成自己指定的值。",
+  },
+  {
+    question: "Eimu 怎么计费？生成失败会退吗？",
+    answer:
+      "按张、按秒计价，充值与套餐从 ¥9.9 起（梦芽 9.9 / 梦影 29.9 / 梦虹 69）。网页、开发者 API 与 MCP 共用同一本账：提交时预扣、成功才结算、失败自动退回，账单每一笔都对得上。",
+  },
   {
     question: "GPT Image 2 中转站是什么？我需要申请 API Key 吗？",
     answer:
