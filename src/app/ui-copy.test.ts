@@ -228,7 +228,7 @@ test("pricing checkout keeps WeChat first and still routes through mapay", () =>
   assert.match(carousel, /支付宝支付/);
   // 支付方式在卡内结账的分段控件里选，支付动作只有一处。
   assert.match(carousel, /role="radiogroup" aria-label="支付方式"/);
-  assert.match(pricing, /handleMapayBuy\(selectedPlan\.id, payMethod\)/);
+  assert.match(pricing, /handleMapayBuy\(selectedPlanId === "custom" \? customPlan\.id : selectedPlan\.id, payMethod\)/);
   assert.match(pricing, /\/api\/payments\/mapay\/checkout\?plan=/);
   assert.match(pricing, /type=\$\{encodeURIComponent\(type\)\}/);
   assert.ok(carousel.indexOf("微信支付") < carousel.indexOf("支付宝支付"));

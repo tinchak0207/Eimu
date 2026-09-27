@@ -194,7 +194,7 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
         [
           /* 卡面像燈箱上的正片：62% 直接取作品原色（不被打光壓暗、不被環境反射洗白），
              38% 保留受光明暗，堆裡的層次還在。 */
-          "outgoingLight = mix(outgoingLight, diffuseColor.rgb * 1.06, vFace * 0.62);",
+          "outgoingLight = mix(outgoingLight, diffuseColor.rgb * 1.08, vFace * 0.62);",
           "float pFres = pow(1.0 - clamp(abs(dot(normal, normalize(vViewPosition))), 0.0, 1.0), 3.0);",
           "float pEdge = max((1.0 - vFace) * 0.3, smoothstep(0.44, 0.5, max(abs(vLocalUv.x - 0.5), abs(vLocalUv.y - 0.5))));",
           "outgoingLight += uRim * (pFres * (0.22 + 0.78 * pEdge) * 0.5 + pEdge * 0.06);",

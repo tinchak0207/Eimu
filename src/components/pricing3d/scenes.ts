@@ -317,8 +317,8 @@ function buildStarter(o: BuildOptions): WorldRig {
   pedestal(t, g, { x: 0, z: 0.05, r: 0.95, h: PED_H, color: 0xffc9df, rim: 0x3a1a2c });
   crystals(t, g, 1.55, -0.6, 0.55, 11);
   bubble(t, g, -1.45, 1.05, -0.5, 0.2);
-  glow(t, g, glowTex, -2.8, 1.5, -3.2, 4.5, 0xffd2e6, 0.45);
-  sparkles(t, g, glowTex, 30, 1.8, 1.4, 0xffd6e8, 11);
+  glow(t, g, glowTex, -2.8, 1.5, -3.2, 4.5, 0xfbd6de, 0.45);
+  sparkles(t, g, glowTex, 30, 1.8, 1.4, 0xfde0e6, 11);
   backlight(g, 0xffd6e8, 1.08);
   const key = keyLight(g, o, 0xfff0f6, 3.2, 2.4);
   g.add(new THREE.HemisphereLight(0xfff0f7, 0xa8b8f0, 0.62));
@@ -350,10 +350,10 @@ function buildPopular(o: BuildOptions): WorldRig {
   crystals(t, g, -1.95, -0.9, 0.85, 23);
   crystals(t, g, 2.05, -1.2, 0.65, 37);
   /* 晴藍：天光從後上方灑下（逆光），左後一團粉、右後一團藍的天色暈在台後。 */
-  glow(t, g, glowTex, -2.6, 1.8, -3.4, 3.4, 0xffc6e2, 0.32);
-  glow(t, g, glowTex, 2.8, 2.0, -3.2, 3.4, 0xa8ccff, 0.36);
+  glow(t, g, glowTex, -2.6, 1.8, -3.4, 3.4, 0xfad0d9, 0.32);
+  glow(t, g, glowTex, 2.8, 2.0, -3.2, 3.4, 0xbfe8fd, 0.36);
   bubble(t, g, -1.5, 1.5, -1.2, 0.18);
-  sparkles(t, g, glowTex, 50, 2.4, 1.9, 0xd6e6ff, 23);
+  sparkles(t, g, glowTex, 50, 2.4, 1.9, 0xdff3fe, 23);
   backlight(g, 0xd0e2ff, 1.32);
   const key = keyLight(g, o, 0xf2f6ff, 3.0, 2.8);
   g.add(new THREE.HemisphereLight(0xe6efff, 0x9aa8e0, 0.6));
@@ -390,9 +390,9 @@ function buildPro(o: BuildOptions): WorldRig {
   crystals(t, g, 1.7, -2.3, 0.55, 71);
   bubble(t, g, -2.1, 1.7, -1.5, 0.26);
   bubble(t, g, 2.3, 1.3, -0.7, 0.14);
-  sparkles(t, g, glowTex, 80, 3.1, 2.4, 0xd8f0ff, 51);
-  glow(t, g, glowTex, -2.5, 2.4, -3.2, 3.6, 0xff9fd8, 0.38);
-  glow(t, g, glowTex, 2.7, 2.2, -3.0, 3.6, 0x8fe6ff, 0.38);
+  sparkles(t, g, glowTex, 80, 3.1, 2.4, 0xe3f5fe, 51);
+  glow(t, g, glowTex, -2.5, 2.4, -3.2, 3.6, 0xf8c2cd, 0.38);
+  glow(t, g, glowTex, 2.7, 2.2, -3.0, 3.6, 0xaee4fd, 0.38);
   const magenta = directional(0xff9fd8, 1.0, [-4.5, 1.2, 0.5], [0, 0.4, 0], null);
   const cyan = directional(0x8fe6ff, 1.0, [4.5, 1.2, 0.8], [0, 0.4, 0], null);
   g.add(magenta, magenta.target, cyan, cyan.target);
@@ -435,7 +435,7 @@ function buildCustom(o: BuildOptions): WorldRig {
   bubble(t, g, -2.6, 2.6, -3.4, 0.36);
   bubble(t, g, 3.2, 3.1, -4.2, 0.26);
   sparkles(t, g, glowTex, 110, 4.6, 3.2, 0xffffff, 97);
-  glow(t, g, glowTex, 5.5, 4.6, -5.5, 8, 0xf4f0ff, 0.55);
+  glow(t, g, glowTex, 5.5, 4.6, -5.5, 8, 0xf5fbff, 0.55);
   backlight(g, 0xf6f4ff, 1.32);
   const key = keyLight(g, o, 0xffffff, 3.1, 5.5);
   g.add(new THREE.HemisphereLight(0xffffff, 0xb4c2ec, 0.8));
@@ -458,7 +458,7 @@ function buildCustom(o: BuildOptions): WorldRig {
     spill: { x: 0, z: 0.1, rIn: 2.35, rOut: 3.9, y: 0, arc: 1.85, full: 60, max: 60, edge: 2.15, edgeY: PED_H },
     exposure: 1.02,
     envIntensity: 0.45,
-    fog: new THREE.Fog(0xe4ecff, 12, 34),
+    fog: new THREE.Fog(0xf0f8ff, 12, 34),
     rim: new THREE.Color(0xf2f4ff),
     shadowLights: [key],
     dispose: t.dispose,

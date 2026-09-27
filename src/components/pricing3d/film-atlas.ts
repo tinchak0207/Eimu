@@ -97,8 +97,8 @@ export function createFilmAtlas(init: FilmAtlasInit): FilmAtlas {
       g.addColorStop(1, "#150e19");
       c.fillStyle = g;
       c.fillRect(ox, oy, W, H);
-      label(c, `EMU 400  ${n}`, ox + band * 0.5, oy + H * 0.5, W * 0.036, "#f2a93b", -Math.PI / 2);
-      label(c, `▸ ${slot + 12}A    DREAM`, ox + W - band * 0.5, oy + H * 0.5, W * 0.036, "#f2a93b", Math.PI / 2);
+      label(c, `EMU 400  ${n}`, ox + band * 0.5, oy + H * 0.5, W * 0.036, "#f4c88e", -Math.PI / 2);
+      label(c, `▸ ${slot + 12}A    DREAM`, ox + W - band * 0.5, oy + H * 0.5, W * 0.036, "#f4c88e", Math.PI / 2);
       c.globalCompositeOperation = "destination-out";
       const hw = W * 0.056;
       const hh = H * 0.034;
@@ -177,7 +177,7 @@ export function createFilmAtlas(init: FilmAtlasInit): FilmAtlas {
       const scale = Math.max(p.w / img.naturalWidth, p.h / img.naturalHeight);
       const w = img.naturalWidth * scale;
       const h = img.naturalHeight * scale;
-      c.filter = "saturate(1.3) contrast(1.1) brightness(1.04)";
+      c.filter = "saturate(1.05) contrast(1) brightness(1.16)";
       c.drawImage(img, p.x + (p.w - w) / 2, p.y + (p.h - h) / 2, w, h);
       c.filter = "none";
     } else {

@@ -274,7 +274,7 @@
 
 .p3d-tile:hover {
   transform: translateY(-2px);
-  box-shadow: inset 0 0 0 1px rgba(236, 77, 146, 0.25), 0 14px 30px rgba(90, 110, 200, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(247, 168, 184, 0.25), 0 14px 30px rgba(90, 110, 200, 0.14);
 }
 
 .p3d-tile-num {
@@ -360,14 +360,14 @@
   font-weight: 700;
   color: #fff;
   background: linear-gradient(160deg, #2a3264, #1a2147);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 8px 20px rgba(236, 77, 146, 0.18), 0 4px 12px rgba(59, 130, 255, 0.2);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 8px 20px rgba(247, 168, 184, 0.18), 0 4px 12px rgba(85, 205, 252, 0.2);
   cursor: pointer;
   transition: transform 200ms var(--lg-ease, ease), box-shadow 200ms var(--lg-ease, ease);
 }
 
 .p3d-btn-light:hover {
   transform: translateY(-1px);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 12px 26px rgba(236, 77, 146, 0.26), 0 6px 16px rgba(59, 130, 255, 0.28);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 12px 26px rgba(247, 168, 184, 0.26), 0 6px 16px rgba(85, 205, 252, 0.28);
 }
 
 .p3d-btn-light:focus-visible,

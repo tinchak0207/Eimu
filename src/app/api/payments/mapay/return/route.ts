@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { PLANS } from "@/lib/plans";
+import { resolvePricingPlan } from "@/lib/plans";
 import {
   getMapayConfig,
   isMapayPaymentSuccessful,
@@ -31,7 +31,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(pricingUrl(req, { mapay: "pending" }));
   }
 
-  const plan = PLANS.find((item) => item.id === params.param);
+  const plan = resolvePricingPlan(params.param); // 与 notify 同源：自定义档 custom:<coins> 也要能解析
   if (!plan || !mapayMoneyAcceptable(params.money, plan.price)) {
     return NextResponse.redirect(pricingUrl(req, { mapay: "mismatch" }));
   }

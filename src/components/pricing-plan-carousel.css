@@ -115,14 +115,14 @@
   margin-inline: auto;
   color: var(--t-ink);
   background:
-    radial-gradient(90% 55% at 100% 0%, rgba(255, 206, 230, 0.6), rgba(255, 206, 230, 0) 70%),
-    radial-gradient(90% 60% at 0% 100%, rgba(190, 216, 255, 0.62), rgba(190, 216, 255, 0) 70%),
+    radial-gradient(90% 55% at 100% 0%, rgba(247, 168, 184, 0.26), rgba(247, 168, 184, 0) 70%),
+    radial-gradient(90% 60% at 0% 100%, rgba(85, 205, 252, 0.16), rgba(85, 205, 252, 0) 70%),
     linear-gradient(165deg, rgba(255, 255, 255, 0.96), rgba(250, 251, 255, 0.86));
   box-shadow:
     inset 0 1px 0 #fff,
     inset 0 -8px 20px rgba(255, 255, 255, 0.5),
-    0 34px 70px -18px rgba(60, 86, 190, 0.38),
-    0 12px 28px -8px rgba(236, 77, 146, 0.18);
+    0 34px 70px -18px rgba(85, 205, 252, 0.24),
+    0 12px 28px -8px rgba(247, 168, 184, 0.24);
 }
 
 /* 虹彩細邊：粉 → 白 → 藍的一圈 1.5px 邊，角度跟著滑鼠轉（像手裡轉一張雷射卡）。 */
@@ -135,7 +135,7 @@
   padding: 1.5px;
   pointer-events: none;
   background: conic-gradient(from calc(210deg + var(--mx, 0) * 70deg),
-    #ff9fcc, #ffffff 18%, #8fbaff 34%, #ffffff 50%, #ffb6d9 66%, #b8d4ff 82%, #ff9fcc);
+    #f9c6d0, #ffffff 18%, #a9e4fd 34%, #ffffff 50%, #fbd3db 66%, #c6ecfe 82%, #f9c6d0);
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
@@ -149,7 +149,7 @@
   z-index: -1;
   border-radius: inherit;
   pointer-events: none;
-  background: linear-gradient(112deg, rgba(255, 255, 255, 0) 30%, rgba(255, 186, 222, 0.42) 42%, rgba(255, 255, 255, 0.95) 50%, rgba(160, 200, 255, 0.45) 58%, rgba(255, 255, 255, 0) 70%);
+  background: linear-gradient(112deg, rgba(255, 255, 255, 0) 30%, rgba(247, 168, 184, 0.3) 42%, rgba(255, 255, 255, 0.95) 50%, rgba(85, 205, 252, 0.24) 58%, rgba(255, 255, 255, 0) 70%);
   background-size: 280% 100%;
   background-position: calc(50% - var(--mx, 0) * 60%) 0;
   transition: background-position 700ms cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -160,8 +160,8 @@
   box-shadow:
     inset 0 1px 0 #fff,
     inset 0 -8px 20px rgba(255, 255, 255, 0.5),
-    0 40px 80px -18px rgba(60, 86, 190, 0.45),
-    0 14px 34px -8px rgba(236, 77, 146, 0.24);
+    0 40px 80px -18px rgba(85, 205, 252, 0.3),
+    0 14px 34px -8px rgba(247, 168, 184, 0.3);
 }
 
 /* 票面主 CTA：深墨藍液態玻璃（DESIGN.md 主 CTA 同色系），面上一道光週期掠過，
@@ -177,7 +177,7 @@
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.28),
     inset 0 -2px 6px rgba(0, 0, 0, 0.25),
-    0 14px 30px -6px rgba(236, 77, 146, 0.4),
+    0 14px 30px -6px rgba(247, 168, 184, 0.4),
     0 8px 22px -4px rgba(59, 130, 255, 0.4);
   cursor: pointer;
   transition: transform 200ms var(--lg-ease, ease), box-shadow 200ms var(--lg-ease, ease);
@@ -206,7 +206,7 @@
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.3),
     inset 0 -2px 6px rgba(0, 0, 0, 0.25),
-    0 18px 36px -6px rgba(236, 77, 146, 0.5),
+    0 18px 36px -6px rgba(247, 168, 184, 0.5),
     0 10px 26px -4px rgba(59, 130, 255, 0.5);
 }
 
@@ -250,7 +250,7 @@
   height: 6px;
   border-radius: 999px;
   background:
-    linear-gradient(to right, #ff8fc2 0%, #3b82ff var(--ppc-fill), transparent var(--ppc-fill)),
+    linear-gradient(to right, #ffb6d6 0%, #86acfb var(--ppc-fill), transparent var(--ppc-fill)),
     rgba(58, 80, 160, 0.12);
 }
 
@@ -261,10 +261,10 @@
   height: 18px;
   /* (軌道 6px − 滑塊 18px) / 2：把滑塊對準軌道中線。 */
   margin-top: -6px;
-  border: 3px solid #3b82ff;
+  border: 3px solid #86acfb;
   border-radius: 50%;
   background: #fff;
-  box-shadow: 0 2px 8px rgba(59, 130, 255, 0.35);
+  box-shadow: 0 2px 8px rgba(134, 172, 251, 0.3);
   transition: transform 160ms var(--lg-spring, ease-out);
 }
 
@@ -281,16 +281,16 @@
 .ppc-slider::-moz-range-progress {
   height: 6px;
   border-radius: 999px;
-  background: linear-gradient(to right, #ff8fc2, #3b82ff);
+  background: linear-gradient(to right, #ffb6d6, #86acfb);
 }
 
 .ppc-slider::-moz-range-thumb {
   width: 18px;
   height: 18px;
-  border: 3px solid #3b82ff;
+  border: 3px solid #86acfb;
   border-radius: 50%;
   background: #fff;
-  box-shadow: 0 2px 8px rgba(59, 130, 255, 0.35);
+  box-shadow: 0 2px 8px rgba(134, 172, 251, 0.3);
 }
 
 .ppc-slider:focus-visible {
@@ -303,21 +303,21 @@
 
 /* 張數：粉 → 藍的虹彩大字（oklab 插值，不經過髒紫），票面上最大的一個數。 */
 .ppc-quota {
-  background: linear-gradient(in oklab 100deg, #c47595 0%, #ae85c7 45%, #6c8fce 100%);
+  background: linear-gradient(in oklab 100deg, #eb8dbb 0%, #b69cf0 45%, #7fa6f7 100%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  filter: drop-shadow(0 4px 14px rgba(196, 117, 149, 0.2));
+  filter: drop-shadow(0 4px 14px rgba(235, 141, 187, 0.16));
 }
 
 .ppc-save {
   margin-left: 0.4rem;
   padding: 0.1rem 0.5rem;
   border-radius: 999px;
-  font-weight: 700;
-  color: #c2256a;
-  background: linear-gradient(120deg, #ffe0ee, #ffeef6);
-  box-shadow: inset 0 0 0 1px rgba(236, 77, 146, 0.2);
+  font-weight: 600;
+  color: #db5595;
+  background: #fff0f6;
+  box-shadow: inset 0 0 0 1px rgba(255, 143, 194, 0.3);
 }
 
 /* ── 檔位梯：白色液態玻璃條，選中那格是一塊會滑動的玻璃透鏡（帶彈性過衝），
@@ -368,7 +368,7 @@
   box-shadow:
     inset 0 1px 0 #fff,
     0 10px 24px -6px rgba(70, 96, 200, 0.35),
-    0 3px 8px rgba(236, 77, 146, 0.12);
+    0 3px 8px rgba(247, 168, 184, 0.12);
   transition: transform 560ms cubic-bezier(0.34, 1.4, 0.52, 1);
 }
 
@@ -378,7 +378,7 @@
   inset: 0;
   border-radius: inherit;
   padding: 1.5px;
-  background: linear-gradient(135deg, #ff9fcc, #ffffff 45%, #8fbaff);
+  background: linear-gradient(135deg, #ffc9e1, #ffffff 45%, #c2d8ff);
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
@@ -421,14 +421,15 @@
   border-radius: 999px;
   font-size: 13px;
   font-weight: 700;
-  color: #fff;
-  background: linear-gradient(120deg, #d9387f, #ec5a9c);
-  box-shadow: 0 4px 12px rgba(236, 77, 146, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  color: #d64a8c;
+  background: linear-gradient(120deg, #ffe1ee, #fff0f6);
+  box-shadow: 0 2px 8px rgba(255, 143, 194, 0.22), inset 0 0 0 1px rgba(255, 143, 194, 0.35);
 }
 
 .ppc-tier-badge[data-kind="value"] {
-  background: linear-gradient(120deg, #2f6fe8, #4f8dff);
-  box-shadow: 0 4px 12px rgba(59, 130, 255, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  color: #3f7be8;
+  background: linear-gradient(120deg, #e0ebff, #eff5ff);
+  box-shadow: 0 2px 8px rgba(122, 166, 255, 0.22), inset 0 0 0 1px rgba(122, 166, 255, 0.35);
 }
 
 .ppc-tier-top {
@@ -461,14 +462,14 @@
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, #ffa3cf, #b7c6ff 55%, #3b82ff);
+  background: linear-gradient(90deg, #ffc4df, #d9e4ff 55%, #8db3ff);
   transition: width 360ms var(--lg-ease, ease), filter 200ms var(--lg-ease, ease);
   filter: saturate(0.7);
 }
 
 .ppc-tier[aria-selected="true"] .ppc-tier-bar > span {
   filter: none;
-  box-shadow: 0 0 10px rgba(120, 160, 255, 0.6);
+  box-shadow: 0 0 8px rgba(141, 179, 255, 0.45);
 }
 
 .ppc-tier-quota {

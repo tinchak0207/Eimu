@@ -135,7 +135,8 @@ export function PricingClient() {
   };
 
   const handlePay = () => {
-    handleMapayBuy(selectedPlan.id, payMethod);
+    // 自定义档的 selectedPlanId 是 "custom"，resolvePricingPlan 解不出会退回 PLANS[0]；必须传 custom:<coins>。
+    handleMapayBuy(selectedPlanId === "custom" ? customPlan.id : selectedPlan.id, payMethod);
     // 支付在新窗口完成，卡片内必须给出「然后呢」——状态行 + 刷新余额闭环。
     setPayOpened(true);
   };

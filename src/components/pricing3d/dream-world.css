@@ -8,9 +8,10 @@
 /* 整頁（首屏以下）底色：夢境往下化成珍珠白。雙類選擇器壓過 Tailwind 的 bg-transparent。 */
 .p3d-page.p3d-page {
   background:
-    radial-gradient(60% 40% at 12% 70%, rgba(255, 205, 230, 0.45), rgba(255, 205, 230, 0) 70%),
-    radial-gradient(55% 40% at 88% 85%, rgba(186, 214, 255, 0.5), rgba(186, 214, 255, 0) 70%),
-    linear-gradient(180deg, #eef2ff 0%, #eef2ff 40%, #f7f5fd 75%, #fdfbff 100%);
+    radial-gradient(ellipse 130% 90% at 15% 5%, rgba(85, 205, 252, 0.1), transparent 60%),
+    radial-gradient(ellipse 110% 75% at 85% 95%, rgba(247, 168, 184, 0.1), transparent 60%),
+    radial-gradient(ellipse 90% 65% at 80% 10%, rgba(85, 205, 252, 0.07), transparent 55%),
+    #f5fbff;
 }
 
 .dw {
@@ -22,7 +23,7 @@
   z-index: 0;
   overflow: hidden;
   pointer-events: none;
-  background: #d6ddff;
+  background: #f5fbff;
 }
 
 /* 下緣化進整頁的珍珠白（.p3d-page 底色）：一條靜態漸層蓋上去
@@ -35,7 +36,7 @@
   bottom: 0;
   height: 340px;
   z-index: 4;
-  background: linear-gradient(to bottom, rgba(238, 242, 255, 0) 0%, rgba(238, 242, 255, 0.7) 55%, #eef2ff 100%);
+  background: linear-gradient(to bottom, rgba(245, 251, 255, 0) 0%, rgba(245, 251, 255, 0.7) 55%, #f5fbff 100%);
 }
 
 /* 珍珠霧：參考圖頂端是深藍夜空——罩一層由上往下淡去的天光，把天洗成淺藍，
@@ -46,8 +47,9 @@
   inset: 0;
   z-index: 1;
   background:
-    linear-gradient(180deg, rgba(236, 242, 255, 0.86) 0%, rgba(236, 242, 255, 0.55) 16%, rgba(236, 242, 255, 0.12) 36%, rgba(236, 242, 255, 0) 50%),
-    radial-gradient(130% 100% at 50% 55%, rgba(255, 255, 255, 0) 55%, rgba(150, 178, 255, 0.22) 100%);
+    linear-gradient(180deg, rgba(245, 251, 255, 0.9) 0%, rgba(245, 251, 255, 0.6) 16%, rgba(245, 251, 255, 0.3) 36%, rgba(245, 251, 255, 0.22) 100%),
+    radial-gradient(ellipse 130% 90% at 15% 5%, rgba(85, 205, 252, 0.1), transparent 60%),
+    radial-gradient(ellipse 110% 75% at 85% 95%, rgba(247, 168, 184, 0.12), transparent 60%);
 }
 
 .dw-plate {
@@ -61,7 +63,7 @@
   object-fit: cover;
   object-position: 44% 46%;
   /* 參考圖整體偏紫：往藍粉拉一點，並提亮。 */
-  filter: saturate(1.08) brightness(1.06) hue-rotate(-8deg);
+  filter: saturate(1) brightness(1.14) hue-rotate(-8deg);
 }
 
 /* ── 四種天光：同一座夢境，瞬切（硬剪接，不做過渡）── */
@@ -88,16 +90,16 @@
 
 /* 梦芽 · 粉晨：天剛亮，整片水面染上一層櫻花粉，左側地平線一口白粉色的朝陽。 */
 .dw-grade[data-world="starter"]::before {
-  background: linear-gradient(180deg, rgba(255, 222, 238, 0.42) 0%, rgba(255, 206, 228, 0.24) 50%, rgba(255, 226, 240, 0.16) 100%);
+  background: linear-gradient(180deg, rgba(247, 168, 184, 0.2) 0%, rgba(247, 168, 184, 0.1) 50%, rgba(245, 251, 255, 0.2) 100%);
 }
 
 .dw-grade[data-world="starter"]::after {
-  background: radial-gradient(34% 28% at 12% 42%, rgba(255, 255, 255, 0.9), rgba(255, 206, 228, 0.36) 45%, rgba(255, 206, 228, 0) 72%);
+  background: radial-gradient(34% 28% at 12% 42%, rgba(255, 255, 255, 0.9), rgba(247, 168, 184, 0.2) 45%, rgba(247, 168, 184, 0) 72%);
 }
 
 /* 梦影 · 晴藍：參考圖本身的天——藍天、粉地平線，中心一池白光托著卡堆。 */
 .dw-grade[data-world="popular"]::before {
-  background: linear-gradient(180deg, rgba(196, 222, 255, 0.36) 0%, rgba(214, 230, 255, 0.12) 48%, rgba(255, 214, 236, 0.16) 100%);
+  background: linear-gradient(180deg, rgba(85, 205, 252, 0.12) 0%, rgba(245, 251, 255, 0.12) 48%, rgba(247, 168, 184, 0.1) 100%);
 }
 
 .dw-grade[data-world="popular"]::after {
@@ -106,7 +108,7 @@
 
 /* 梦虹 · 虹暈：空氣更透、更藍，一道只由粉 / 白 / 藍組成的光暈跨過天空。 */
 .dw-grade[data-world="pro"]::before {
-  background: linear-gradient(180deg, rgba(172, 214, 255, 0.4) 0%, rgba(200, 232, 255, 0.16) 55%, rgba(255, 222, 240, 0.12) 100%);
+  background: linear-gradient(180deg, rgba(85, 205, 252, 0.14) 0%, rgba(245, 251, 255, 0.16) 55%, rgba(247, 168, 184, 0.08) 100%);
 }
 
 .dw-grade[data-world="pro"]::after {
@@ -119,8 +121,8 @@
   transform: translateX(-50%);
   border-radius: 50%;
   opacity: 0.85;
-  background: radial-gradient(closest-side, rgba(255, 255, 255, 0) 85%, rgba(255, 150, 205, 0.55) 87.5%, rgba(255, 255, 255, 0.9) 90.5%,
-    rgba(140, 196, 255, 0.6) 93.5%, rgba(255, 255, 255, 0) 96.5%);
+  background: radial-gradient(closest-side, rgba(255, 255, 255, 0) 85%, rgba(247, 168, 184, 0.4) 87.5%, rgba(255, 255, 255, 0.9) 90.5%,
+    rgba(85, 205, 252, 0.3) 93.5%, rgba(255, 255, 255, 0) 96.5%);
   -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 30%, transparent 50%);
   mask-image: linear-gradient(to bottom, #000 0%, #000 30%, transparent 50%);
   filter: blur(5px);
@@ -162,7 +164,7 @@
   z-index: 1;
   opacity: 0.55;
   background: repeating-linear-gradient(100deg,
-    rgba(255, 190, 225, 0) 0 70px, rgba(255, 190, 225, 0.26) 100px, rgba(255, 255, 255, 0.34) 120px, rgba(160, 205, 255, 0.28) 140px, rgba(160, 205, 255, 0) 180px 260px);
+    rgba(247, 168, 184, 0) 0 70px, rgba(247, 168, 184, 0.16) 100px, rgba(255, 255, 255, 0.34) 120px, rgba(85, 205, 252, 0.12) 140px, rgba(85, 205, 252, 0) 180px 260px);
   -webkit-mask-image: linear-gradient(to top, #000 20%, transparent 100%);
   mask-image: linear-gradient(to top, #000 20%, transparent 100%);
   animation: dw-shimmer 16s linear infinite;
