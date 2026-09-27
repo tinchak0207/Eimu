@@ -334,6 +334,37 @@ test("作用域：白名單只含視頻上游 model，不含任何圖片 model i
   }
 });
 
+test("豁免作用域：退役渠道豁免，但在線/新渠道一律受閘（fail-closed，不洩漏）", () => {
+  // 退役渠道（協議夾具）豁免：sd12-* 這類非白名單上游名不會被閘擋下，
+  // 否則 openai-video-upstream 的協議回歸（sd4/sd7/napi/drama 請求體形狀）無法執行。
+  const exempt = evaluatePaidVideoSubmission({
+    supplierModelId: "sd12-seedance-2.0",
+    resolution: "720p",
+    seconds: 5,
+    supplierId: "env:cangyuansuanli",
+  });
+  assert.equal(exempt.allowed, true);
+
+  // xiaoyxiao（在線、成本閘的真正對象）：同一組參數必須被白名單擋下。
+  const live = evaluatePaidVideoSubmission({
+    supplierModelId: "sd12-seedance-2.0",
+    resolution: "720p",
+    seconds: 5,
+    supplierId: "env:xiaoyxiao",
+  });
+  assert.equal(live.allowed, false);
+  assert.equal(live.allowed === false ? live.reason : null, "model_not_whitelisted");
+
+  // 未標明 supplierId（未來新渠道忘了帶）⇒ 同樣 fail-closed。
+  const unknown = evaluatePaidVideoSubmission({
+    supplierModelId: "sd12-seedance-2.0",
+    resolution: "720p",
+    seconds: 5,
+  });
+  assert.equal(unknown.allowed, false);
+  assert.equal(unknown.allowed === false ? unknown.reason : null, "model_not_whitelisted");
+});
+
 test("作用域：圖片路徑 2k/4k 檔位照常通過共用歸一化（閘不進共用層）", () => {
   assert.equal(isSupportedImageModel("gpt-image-2"), true);
   // 圖片 gpt-image-2 的 catalog 檔位含 2k/4k，歸一化必須原樣保留

@@ -204,6 +204,83 @@ test("seedance-2.5-480p：模型映射 + 30s 时长放行", async () => {
   }
 });
 
+test("xiaoyxiao minimax-h3：supplierModelId 渠道级短路 + 顶层 url 出片 + 时长範圍", async () => {
+  let captured: unknown = null;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+    if (String(url).endsWith("/videos")) {
+      captured = init?.body;
+      return jsonResponse(200, { id: TASK_ID, object: "video", status: "queued", progress: 0 });
+    }
+    // xiaoyxiao 形狀：completed 只有頂層 url（無 video_url / metadata / data[]）
+    return jsonResponse(200, {
+      id: TASK_ID,
+      object: "video",
+      status: "completed",
+      url: "https://dream-media.tos-cn-beijing.volces.com/videos/probe/0.mp4",
+    });
+  }) as typeof fetch;
+
+  try {
+    process.env.XIAOYXIAO_API_KEY = "xy-test-key";
+    const output = await generateWithOpenaiVideo(
+      supplier({
+        id: "env:xiaoyxiao",
+        label: "xiaoyxiao",
+        baseUrl: "https://api.xiaoyxiao.xyz/v1",
+        credentialRef: "XIAOYXIAO_API_KEY",
+        supplierModelId: "minimax-h3-933-2k-支持真人",
+      }),
+      videoInput({ modelId: "minimax-h3", resolution: "720p" }),
+    );
+    const body = JSON.parse(String(captured)) as Record<string, unknown>;
+    // 上游模型名走 capability 行顯式攜帶，不落靜態分辨率表
+    assert.equal(body.model, "minimax-h3-933-2k-支持真人");
+    assert.equal(body.resolution, "720p");
+    assert.equal(body.duration, 5);
+    assert.equal(output.supplierModelId, "minimax-h3-933-2k-支持真人");
+    assert.equal(output.url, "https://dream-media.tos-cn-beijing.volces.com/videos/probe/0.mp4");
+  } finally {
+    delete process.env.XIAOYXIAO_API_KEY;
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("xiaoyxiao minimax-h3：時長超出範圍（16s）直接 400，不觸發上游", async () => {
+  let fetchCalls = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    fetchCalls += 1;
+    return jsonResponse(200, { id: TASK_ID, status: "queued" });
+  }) as typeof fetch;
+
+  try {
+    process.env.XIAOYXIAO_API_KEY = "xy-test-key";
+    await assert.rejects(
+      () =>
+        generateWithOpenaiVideo(
+          supplier({
+            id: "env:xiaoyxiao",
+            label: "xiaoyxiao",
+            baseUrl: "https://api.xiaoyxiao.xyz/v1",
+            credentialRef: "XIAOYXIAO_API_KEY",
+            supplierModelId: "minimax-h3-933-2k-支持真人",
+          }),
+          videoInput({
+            modelId: "minimax-h3",
+            resolution: "720p",
+            workflow: { references: [], metadata: {}, durationSeconds: 16, generateAudio: false },
+          }),
+        ),
+      /duration must be an integer from 4 through 15 seconds/,
+    );
+    assert.equal(fetchCalls, 0);
+  } finally {
+    delete process.env.XIAOYXIAO_API_KEY;
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("INC-VIDEO-0927：平台 seedance 不再映射到已下架的 sd4-* 上游名", async () => {
   // 上游 2026-09-27 實查：sd4-* 整族下架，提交直接回
   // "model sd4-seedance-2.0 is not a public model name"。

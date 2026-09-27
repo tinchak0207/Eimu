@@ -99,6 +99,11 @@ const DURATION_RANGES: Record<string, [number, number]> = {
   "seedance-2.5-480p": [4, 30],
   "seedance-2.5-720p": [4, 29],
   "seedance-2.5-30s":  [30, 30],
+  // xiaoyxiao（2026-09-27 起為視頻唯一權威渠道）承载的 minimax-h3：
+  // 必須與 catalog 該 model 的 durations（4–15s）一致。
+  // 起因：capability 與 catalog 都有此 model，唯獨本表漏了 ⇒ 提交在呼叫上游前
+  // 被 400 擋下（"unknown model ... has no duration range configured"），零上游成本。
+  "minimax-h3":        [4, 15],
 };
 
 function resolveUpstreamModel(platformModelId: string, resolution: string): string {

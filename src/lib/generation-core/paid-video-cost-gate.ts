@@ -186,8 +186,29 @@ export interface PaidVideoSubmissionFacts {
 }
 
 export type PaidVideoGateDecision =
-  | { allowed: true; triple: PricedVideoTriple }
+  | { allowed: true; triple: PricedVideoTriple | null; exemptSupplierId?: string }
   | { allowed: false; reason: PaidVideoRejectionReason; detail: string };
+
+/**
+ * 成本閘豁免名單（2026-09-27 立）：
+ * 這三個渠道已於 2026-09-27 全數退役（`supplier.enabled=false`，不承接任何生產
+ * 流量），只作為 `openai_video` 的**協議夾具**存在（sd4/sd7/napi/drama 的請求體
+ * 形狀測試需要它們）。豁免它們是為了保住那些協議回歸；**任何在線或新接入的渠道
+ * 一律受閘（fail-closed）**——它們的模型名不在白名單，一旦被重新啟用，會直接
+ * 落到白名單檢查被拒收，繞不過。
+ */
+export const PAID_VIDEO_GATE_EXEMPT_SUPPLIER_IDS = [
+  "env:cangyuansuanli",
+  "env:napi",
+  "env:drama",
+] as const;
+
+function isPaidVideoGateExemptSupplier(supplierId: string | undefined): boolean {
+  return (
+    typeof supplierId === "string"
+    && (PAID_VIDEO_GATE_EXEMPT_SUPPLIER_IDS as readonly string[]).includes(supplierId)
+  );
+}
 
 export function isPaidVideoModelWhitelisted(value: string | null | undefined): value is PaidVideoModelId {
   return typeof value === "string" && (PAID_VIDEO_MODEL_WHITELIST as readonly string[]).includes(value);
@@ -195,9 +216,12 @@ export function isPaidVideoModelWhitelisted(value: string | null | undefined): v
 
 /**
  * 純函式判定（測試可直接調用，不拋錯也不寫日誌）。
- * 檢查順序：resolution → model → seconds → 三元組核價，全部 fail-closed。
+ * 檢查順序：豁免渠道 → resolution → model → seconds → 三元組核價，其餘全 fail-closed。
  */
 export function evaluatePaidVideoSubmission(facts: PaidVideoSubmissionFacts): PaidVideoGateDecision {
+  if (isPaidVideoGateExemptSupplier(facts.supplierId)) {
+    return { allowed: true, triple: null, exemptSupplierId: facts.supplierId };
+  }
   const rawResolution = typeof facts.resolution === "string" ? facts.resolution.trim() : "";
   if (!rawResolution) {
     return {
@@ -257,9 +281,23 @@ export function evaluatePaidVideoSubmission(facts: PaidVideoSubmissionFacts): Pa
  * 提交硬閘：拒收時寫結構化稽核日誌並拋 SupplierRequestError(400)。
  * 400 ⇒ 確定性失敗，不會被當成暫時性錯誤重放（不重複燒錢）。
  */
-export function assertPaidVideoSubmissionAllowed(facts: PaidVideoSubmissionFacts): PricedVideoTriple {
+export function assertPaidVideoSubmissionAllowed(facts: PaidVideoSubmissionFacts): PricedVideoTriple | null {
   const decision = evaluatePaidVideoSubmission(facts);
-  if (decision.allowed) return decision.triple;
+  if (decision.allowed) {
+    if (decision.exemptSupplierId) {
+      console.warn(
+        "[paid-video-cost-gate] exempt-retired-channel",
+        JSON.stringify({
+          supplierId: decision.exemptSupplierId,
+          supplierModelId: facts.supplierModelId ?? null,
+          resolution: facts.resolution ?? null,
+          seconds: facts.seconds ?? null,
+          jobId: facts.jobId ?? null,
+        }),
+      );
+    }
+    return decision.triple;
+  }
   console.warn(
     "[paid-video-cost-gate] rejected",
     JSON.stringify({
