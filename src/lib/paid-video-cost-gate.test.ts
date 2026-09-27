@@ -42,6 +42,31 @@ test("expected-pass：白名單 model + 顯式 720p + 5s + 已核價三元組 �
   );
 });
 
+test("expected-pass（放寬裁定後）：三條在售 model 的 catalog 最短時長 10s 通過", () => {
+  // 2026-09-27 裁定：seconds 上限 5→10（＝catalog 最短時長）。白名單皆按次固定價，
+  // 秒數不影響單價 ⇒ 放寬零成本，解鎖下列三條在售 model。
+  const cases: Array<{ model: string; resolution: string }> = [
+    { model: "seedance-2.0-900-特惠", resolution: "480p" },   // ← catalog seedance-2.0（10–15s）
+    { model: "seedance-2.0-900-特惠", resolution: "720p" },
+    { model: "seedance-2.5-900-特惠", resolution: "480p" },   // ← catalog seedance-2.5-480p（10–30s）
+    { model: "seedance-2.5-1010-特惠", resolution: "720p" },  // ← catalog seedance-2.5-720p（10–29s）
+  ];
+  for (const item of cases) {
+    const decision = evaluatePaidVideoSubmission({ supplierModelId: item.model, resolution: item.resolution, seconds: 10 });
+    assert.equal(decision.allowed, true, `${item.model}@${item.resolution}/10s 應放行`);
+  }
+  assert.equal(PAID_VIDEO_MAX_SECONDS, 10);
+
+  // 顯式枚舉而非「≤10 全放行」：未登錄 10s 的 model 在 10s 仍拒收
+  const notEnumerated = evaluatePaidVideoSubmission({
+    supplierModelId: "seedance-2.0-933-特惠",
+    resolution: "720p",
+    seconds: 10,
+  });
+  assert.equal(notEnumerated.allowed, false);
+  assert.equal(notEnumerated.allowed === false && notEnumerated.reason, "triple_not_priced");
+});
+
 test("陰性①：白名單外 model 一律拒收（含事故成因的動態價模型與被剔除檔位）", () => {
   // dreamina-seedance-2.0 = 事故當筆（6.25714288 * seconds 動態價，不在白名單）
   const offenders = [
@@ -119,8 +144,8 @@ test("陰性④：未核價三元組拒收（model/resolution 各自合法但組
   assert.equal(decision.allowed, false);
   assert.equal(decision.allowed === false && decision.reason, "triple_not_priced");
 
-  // seconds 超上限（30s 檔位）先被 seconds 檢查攔下
-  for (const seconds of [30, 6, 0, -1, 4.5, Number.NaN, undefined, "abc", ""]) {
+  // seconds 超上限（10s 硬線）或非整數／缺省，先被 seconds 檢查攔下
+  for (const seconds of [30, 11, 10.5, 0, -1, 4.5, Number.NaN, undefined, "abc", ""]) {
     const verdict = evaluatePaidVideoSubmission({
       supplierModelId: "seedance-2.0-900-特惠",
       resolution: "480p",
@@ -129,7 +154,15 @@ test("陰性④：未核價三元組拒收（model/resolution 各自合法但組
     assert.equal(verdict.allowed, false, `seconds ${String(seconds)} 應被拒`);
     assert.equal(verdict.allowed === false && verdict.reason, "seconds_missing_or_invalid");
   }
-  assert.equal(PAID_VIDEO_MAX_SECONDS, 5);
+  // 6s 在上限內但未登錄該三元組 ⇒ 走 triple_not_priced（顯式枚舉，非「≤10 全放行」）
+  const sixSeconds = evaluatePaidVideoSubmission({
+    supplierModelId: "seedance-2.0-900-特惠",
+    resolution: "480p",
+    seconds: 6,
+  });
+  assert.equal(sixSeconds.allowed, false);
+  assert.equal(sixSeconds.allowed === false && sixSeconds.reason, "triple_not_priced");
+  assert.equal(PAID_VIDEO_MAX_SECONDS, 10);
 
   assert.throws(
     () => assertPaidVideoSubmissionAllowed({ supplierModelId: "seedance-2.5-900-特惠", resolution: "720p", seconds: 5 }),

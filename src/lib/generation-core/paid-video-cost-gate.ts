@@ -14,6 +14,19 @@
  * `billing_usage_schema`），不隨 resolution/seconds 變動；非白名單的動態價模型
  * 一律拒收——這就是白名單的設計依據。
  *
+ * ── 秒數上限為何是 10（2026-09-27 協調者裁定，決策來源）──────────────────
+ * 初始上限 5 是 AGENTS.md「付費上游呼叫硬閘」的通用值，但對本白名單**不是成本
+ * 控制**：7 條皆按次固定價（同上），seconds 走 4 或 10 單價一分不差。5 只是「沒
+ * 登錄 10s 三元組」的副作用，且會把 catalog 最短時長＝10s 的三條在售 model
+ * （seedance-2.0 / seedance-2.5-480p / seedance-2.5-720p）全部擋死。
+ * 故裁定：`PAID_VIDEO_MAX_SECONDS = 10`（＝catalog 最短時長），並為該三條 model
+ * 的映射上游登錄 `seconds=10` 三元組。**其餘三條紅線一字不改**：
+ *   ① 4k/2k/1080p 無條件拒收（上限仍 ≤720p）；
+ *   ② resolution 缺省／空字串拒收（上游缺省＝4k）；
+ *   ③ 白名單外 model 拒收；`seconds > 10` 拒收。
+ * 三元組採**顯式枚舉**（非「≤10 全放行」）：seedance-2.0-933-特惠／minimax-h3-*／
+ * grok-video-1.5 仍只登錄 4/5s，未登錄即拒收——維持「沒核價就不放行」。
+ *
  * ── 作用域鐵律（2026-09-27 暴君追加，違反＝誤傷）────────────────────────
  * 本模組**只准被 video 提交路徑**（`openai-video-upstream.ts`）import。
  * 嚴禁寫進任何共用層：通用 resolution/size 校驗、模型目錄（catalog）、
@@ -25,8 +38,14 @@
 
 import { SupplierRequestError } from "./failure-classifier";
 
-/** 視頻付費上游單次秒數硬上限（AGENTS.md「付費上游呼叫硬閘」②）。 */
-export const PAID_VIDEO_MAX_SECONDS = 5;
+/**
+ * 單次秒數硬上限。
+ *
+ * 2026-09-27 協調者裁定：5 → 10（＝catalog 最短時長）。理由見檔頭「秒數上限為何
+ * 是 10」：白名單 7 條按次固定價，秒數不影響單價，放寬不增加支出，卻解鎖
+ * seedance-2.0 / -2.5-480p / -2.5-720p 三條在售 model。`seconds > 10` 仍拒收。
+ */
+export const PAID_VIDEO_MAX_SECONDS = 10;
 
 /**
  * 允許送給付費視頻上游的 resolution 白名單（上限 ≤720p）。
@@ -66,6 +85,14 @@ export type PaidVideoModelId = (typeof PAID_VIDEO_MODEL_WHITELIST)[number];
  * description 不回），故此處的 resolutions 枚舉是**保守取捨**而非已校準事實；
  * `semantics` 欄位標記之。真單校準後方可改為已驗。三元組沒有登錄＝拒收
  * （禁止現場猜）。
+ *
+ * seconds 枚舉口徑（2026-09-27 裁定後）：
+ *   - `seedance-2.0-900-特惠`／`seedance-2.5-900-特惠`／`seedance-2.5-1010-特惠`
+ *     ＝ [4, 5, 10]，對應 catalog 的 seedance-2.0（10–15s）、2.5-480p（10–30s）、
+ *     2.5-720p（10–29s）三條在售 model 的**最短合法時長 10s**。
+ *   - 其餘四條（933-特惠／minimax-h3-933-2k／minimax-h3-a／grok-video-1.5）
+ *     ＝ [4, 5]：未登錄 10s 即不放行（顯式枚舉，非「≤10 全放行」）。
+ *   11–30s 仍一律拒收（秒數上限 10 為硬線；代價是不支援超 10s 檔位）。
  */
 export interface PricedVideoTriple {
   supplierModelId: PaidVideoModelId;
@@ -100,7 +127,7 @@ export const PAID_VIDEO_PRICED_TRIPLES: readonly PricedVideoTriple[] = [
     unitCostCny: 0.7,
     billingBasis: "per_call",
     resolutions: ["480p", "720p"],
-    seconds: [4, 5],
+    seconds: [4, 5, 10], // 10s＝catalog seedance-2.0（10–15s）最短合法時長
     source: `${PRICING_SOURCE} → model_name="seedance-2.0-900-特惠", model_price=0.7, billing_usage_schema=null`,
     semantics: "upstream-tier-semantics-unverified",
   },
@@ -110,7 +137,7 @@ export const PAID_VIDEO_PRICED_TRIPLES: readonly PricedVideoTriple[] = [
     billingBasis: "per_call",
     // 900 檔位取較低分辨率檔（保守：不假設它支援 720p）。
     resolutions: ["480p"],
-    seconds: [4, 5],
+    seconds: [4, 5, 10], // 10s＝catalog seedance-2.5-480p（10–30s）最短合法時長
     source: `${PRICING_SOURCE} → model_name="seedance-2.5-900-特惠", model_price=0.9, billing_usage_schema=null`,
     semantics: "upstream-tier-semantics-unverified",
   },
@@ -128,7 +155,7 @@ export const PAID_VIDEO_PRICED_TRIPLES: readonly PricedVideoTriple[] = [
     unitCostCny: 1.6,
     billingBasis: "per_call",
     resolutions: ["720p"],
-    seconds: [4, 5],
+    seconds: [4, 5, 10], // 10s＝catalog seedance-2.5-720p（10–29s）最短合法時長
     source: `${PRICING_SOURCE} → model_name="seedance-2.5-1010-特惠", model_price=1.6, billing_usage_schema=null`,
     semantics: "upstream-tier-semantics-unverified",
   },
