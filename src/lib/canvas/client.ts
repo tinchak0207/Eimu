@@ -9,7 +9,13 @@ import { getStoredToken, getStoredUser } from "@/lib/new-api-client";
 import { LOCAL_TEST_MODE } from "../local-test-mode";
 import type { CanvasProject } from "./types";
 
-export type CanvasClientFailure = "not_authenticated" | "network" | "server" | "parse";
+export type CanvasClientFailure =
+  | "not_authenticated"
+  /** 團隊閘拒建共享畫布（服務端 code=member_canvas_forbidden）：保留服務端團隊文案，不降級成未登入。 */
+  | "team_canvas_forbidden"
+  | "network"
+  | "server"
+  | "parse";
 
 export interface CanvasClientResult<T> {
   ok: boolean;
@@ -54,6 +60,16 @@ async function request<T>(path: string, init: RequestInit, pick: (json: unknown)
       json && typeof json === "object" && typeof (json as { error?: unknown }).error === "string"
         ? (json as { error: string }).error
         : "请求失败";
+    // 團隊閘拒建共享畫布（片P 刀 3）：**只認這個專屬 code**，露出服務端團隊文案，
+    // 不再被當成 not_authenticated 靜默降級成 offline。其他 401/403（無此 code）
+    // 維持原降級行為，逐字不變——不擴散。
+    const code =
+      json && typeof json === "object" && typeof (json as { code?: unknown }).code === "string"
+        ? (json as { code: string }).code
+        : null;
+    if (code === "member_canvas_forbidden") {
+      return { ok: false, reason: "team_canvas_forbidden", message };
+    }
     return { ok: false, reason: res.status === 401 || res.status === 403 ? "not_authenticated" : "server", message };
   }
   const data = pick(json);

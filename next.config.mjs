@@ -77,6 +77,11 @@ const nextConfig = {
         { source: "/api/generation-jobs", destination: `${controlPlaneOrigin}/image-control/api/generation-jobs` },
         { source: "/api/generation-jobs/:path*", destination: `${controlPlaneOrigin}/image-control/api/generation-jobs/:path*` },
         { source: "/api/admin/billing-operations/:path*", destination: `${controlPlaneOrigin}/image-control/api/admin/billing-operations/:path*` },
+        // 團隊歸屬橋（HMAC 簽名通道，域 team-membership）。Vercel 側不持有
+        // GENERATION_DATABASE_URL，畫布閘門要判「該 user 是否為團隊成員」只能問
+        // 控制面；同樣列在 beforeFiles，否則會落在 Vercel 上的同名 route（會被
+        // 本地副本以「映射層未配置」擋下，永遠看不到真實歸屬）。
+        { source: "/api/internal/team-membership", destination: `${controlPlaneOrigin}/image-control/api/internal/team-membership` },
       ]
       : [];
     // CRITICAL: 控制面代理必須放 `beforeFiles`，不能放在回傳陣列裡。

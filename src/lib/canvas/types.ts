@@ -557,6 +557,22 @@ export interface CanvasProject {
    * 舊專案無此欄＝空歷史，向後相容。
    */
   nodeVersions?: CanvasNodeVersion[];
+  /**
+   * 畫布作用域（2026-09-27 片P 刀 1）：`personal`（缺省）＝個人畫布，
+   * 落 `canvas/<userId>/…`；`team`＝團隊共享畫布，落 `canvas/team/<teamId>/…`，
+   * 該團隊所有成員可讀同一份（讀路徑合併），寫入仍為單寫（普通 PUT，後寫覆蓋，
+   * 刻意不做鎖／CRDT／衝突解決）。
+   *
+   * **向後相容**：舊專案無此欄 ⇒ 一律視為 personal，路徑逐字不變。
+   * 專案級欄位（不是節點/metadata）——不進 metadata 雙白名單，不會被 toNodeMetadata 剝掉
+   *（同款先例：節點級 `deletedAt`／`nodeVersions`）。
+   *
+   * `teamId` 是**服務端蓋章**的權威值（來源＝控制面 team-membership 查詢），
+   * 客戶端送來的 teamId 不採信（見 team-canvas-gate.ts）。
+   */
+  scope?: "personal" | "team";
+  /** 團隊畫布所屬團隊 id（僅 scope="team" 時有意義；由服務端以已驗成員身份蓋章）。 */
+  teamId?: string;
 }
 
 /**
