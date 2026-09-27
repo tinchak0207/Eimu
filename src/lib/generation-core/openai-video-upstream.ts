@@ -21,25 +21,37 @@ const REQUEST_TIMEOUT_MS = 30_000;
 // 平台模型 id + resolution → 上游模型名映射
 // sd4 族：分辨率可选（480p/720p），请求带 resolution 字段
 // sd7 族：模型名固定分辨率，请求不带 resolution 字段
+//
+// INC-VIDEO-0927（2026-09-27 實彈）：上游已把 sd4-* 整族下架，/v1/models 只剩
+// sd7-* / sd8-* / sd10..sd14-*。對 sd4-seedance-2.0 提交直接被拒：
+//   {"error":{"code":"","message":"无效的请求，model sd4-seedance-2.0 is not a
+//    public model name","type":"new_api_error"}}
+// 帳號就算有餘額也 100% 失敗。下表改用 GET /v1/models（2026-09-27 實查 37 個模型）
+// 中確實存在的名字，每族取當前最低價（上游 /api/pricing，元/次）：
+//   sd12-seedance-2.0 2.9 / sd13-seedance-2.0-mini 1.7 / sd8-seedance-2.5 3.9
+//   sd12-seedance-2.0-fast 2.9 / sd7-seedance-2.0-1080p 5.9
+// 形狀假設（未驗證）：sd10..sd14 與 sd4 同族協議（completed + video_url/
+// metadata.url，收 resolution/duration/aspect_ratio）。名字存在性已實查；
+// 有餘額後第一單須覆核形狀假設。
 const UPSTREAM_MODEL_BY_RESOLUTION: Record<string, Record<string, string>> = {
   "seedance-2.0": {
-    "480p": "sd4-seedance-2.0",
-    "720p": "sd4-seedance-2.0",
+    "480p": "sd12-seedance-2.0",
+    "720p": "sd12-seedance-2.0",
     "1080p": "sd7-seedance-2.0-1080p",
   },
   "seedance-2.0-fast": {
-    "480p": "sd4-seedance-2.0-fast",
-    "720p": "sd4-seedance-2.0-fast",
+    "480p": "sd12-seedance-2.0-fast",
+    "720p": "sd12-seedance-2.0-fast",
   },
   "seedance-2.0-mini": {
-    "480p": "sd4-seedance-2.0-mini",
-    "720p": "sd4-seedance-2.0-mini",
+    "480p": "sd13-seedance-2.0-mini",
+    "720p": "sd13-seedance-2.0-mini",
   },
   "seedance-2.5-480p": {
-    "480p": "sd4-seedance-2.5-480p",
+    "480p": "sd8-seedance-2.5",
   },
   "seedance-2.5-720p": {
-    "720p": "sd4-seedance-2.5-720p",
+    "720p": "sd8-seedance-2.5",
   },
   // drama 渠道（drama.dafeiyangapi.top）专属 30 秒固定档（2026-08-30 接入）：
   // 上游只有 sd25-30s 一个模型，30s/720p 固定，按条计费。

@@ -76,8 +76,9 @@ test("502 wrapping Chinese quota-exhausted copy (hailuo 1008) fails fast as quot
   assert.equal(result.failureClass, "quota_exhausted");
   assert.equal(result.retryable, false);
   assert.equal(result.switchSupplier, true);
-  assert.equal(result.quarantineSupplier, true);
-  assert.equal(result.cooldownUntil, null);
+  // INC-VIDEO-0927：欠費改冷卻（可自癒），不再永久 disabled。
+  assert.equal(result.quarantineSupplier, false);
+  assert.equal(result.cooldownUntil?.getTime(), NOW.getTime() + 30 * 60_000);
 });
 
 test("402 English insufficient quota fails fast as quota exhaustion", () => {
@@ -85,8 +86,20 @@ test("402 English insufficient quota fails fast as quota exhaustion", () => {
   assert.equal(result.failureClass, "quota_exhausted");
   assert.equal(result.retryable, false);
   assert.equal(result.switchSupplier, true);
-  assert.equal(result.quarantineSupplier, true);
-  assert.equal(result.cooldownUntil, null);
+  assert.equal(result.quarantineSupplier, false);
+  assert.equal(result.cooldownUntil?.getTime(), NOW.getTime() + 30 * 60_000);
+});
+
+test("cangyuansuanli 实战欠费文案（预扣费额度失败）归 quota_exhausted 且可自癒", () => {
+  // 2026-09-27 查證原文：cangyuansuanli seedance-2.0 欠費 →
+  // 「预扣费额度失败, 用户剩余额度: ¥1.440000, 需要预扣费额度: ¥3.900000」
+  const result = classifySupplierFailure(
+    new SupplierRequestError("预扣费额度失败, 用户剩余额度: ¥1.440000, 需要预扣费额度: ¥3.900000", 502),
+    NOW,
+  );
+  assert.equal(result.failureClass, "quota_exhausted");
+  assert.equal(result.quarantineSupplier, false);
+  assert.equal(result.cooldownUntil?.getTime(), NOW.getTime() + 30 * 60_000);
 });
 
 test("bare 502 without quota copy is still a retryable overload (regression)", () => {

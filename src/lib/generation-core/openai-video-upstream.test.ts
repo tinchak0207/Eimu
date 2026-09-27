@@ -92,7 +92,7 @@ test("sd4 族成功：create → 輪詢 queued → completed → data[0].url 出
     const method = String(init?.method ?? "GET");
     calls.push({ method, url: u });
     if (u.endsWith("/videos") && method === "POST") {
-      return jsonResponse(200, { id: TASK_ID, model: "sd4-seedance-2.0", status: "queued" });
+      return jsonResponse(200, { id: TASK_ID, model: "sd12-seedance-2.0", status: "queued" });
     }
     if (u.includes(`/videos/${TASK_ID}`)) {
       return jsonResponse(200, {
@@ -111,7 +111,7 @@ test("sd4 族成功：create → 輪詢 queued → completed → data[0].url 出
     assert.equal(output.providerTaskId, TASK_ID);
     assert.equal(output.httpStatus, 200);
     assert.equal(output.endpointLabel, "cangyuansuanli");
-    assert.equal(output.supplierModelId, "sd4-seedance-2.0");
+    assert.equal(output.supplierModelId, "sd12-seedance-2.0");
     const create = calls.find((c) => c.url.endsWith("/videos") && c.method === "POST");
     assert.ok(create);
   } finally {
@@ -120,7 +120,7 @@ test("sd4 族成功：create → 輪詢 queued → completed → data[0].url 出
   }
 });
 
-test("create body：model 按 720p→sd4、resolution/duration/ratio/generate_audio 透傳", async () => {
+test("create body：model 按 720p→sd12、resolution/duration/ratio/generate_audio 透傳", async () => {
   let captured: unknown = null;
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
@@ -135,7 +135,7 @@ test("create body：model 按 720p→sd4、resolution/duration/ratio/generate_au
     process.env.CANGYUANSUANLI_API_KEY = "ck-test-key";
     await generateWithOpenaiVideo(supplier(), videoInput({ workflow: { references: [], metadata: {}, durationSeconds: 8, generateAudio: true } }));
     const body = JSON.parse(String(captured)) as Record<string, unknown>;
-    assert.equal(body.model, "sd4-seedance-2.0");
+    assert.equal(body.model, "sd12-seedance-2.0");
     assert.equal(body.prompt, "一只橘猫在窗台上打哈欠");
     assert.equal(body.aspect_ratio, "16:9");
     assert.equal(body.duration, 8);
@@ -195,12 +195,50 @@ test("seedance-2.5-480p：模型映射 + 30s 时长放行", async () => {
       videoInput({ modelId: "seedance-2.5-480p", resolution: "480p", workflow: { references: [], metadata: {}, durationSeconds: 30, generateAudio: true } }),
     );
     const body = JSON.parse(String(captured)) as Record<string, unknown>;
-    assert.equal(body.model, "sd4-seedance-2.5-480p");
+    assert.equal(body.model, "sd8-seedance-2.5");
     assert.equal(body.duration, 30);
-    assert.equal(output.supplierModelId, "sd4-seedance-2.5-480p");
+    assert.equal(output.supplierModelId, "sd8-seedance-2.5");
   } finally {
     delete process.env.CANGYUANSUANLI_API_KEY;
     globalThis.fetch = originalFetch;
+  }
+});
+
+test("INC-VIDEO-0927：平台 seedance 不再映射到已下架的 sd4-* 上游名", async () => {
+  // 上游 2026-09-27 實查：sd4-* 整族下架，提交直接回
+  // "model sd4-seedance-2.0 is not a public model name"。
+  const cases: Array<{ modelId: string; resolution: string; expect: string }> = [
+    { modelId: "seedance-2.0", resolution: "480p", expect: "sd12-seedance-2.0" },
+    { modelId: "seedance-2.0", resolution: "720p", expect: "sd12-seedance-2.0" },
+    { modelId: "seedance-2.0", resolution: "1080p", expect: "sd7-seedance-2.0-1080p" },
+    { modelId: "seedance-2.0-fast", resolution: "720p", expect: "sd12-seedance-2.0-fast" },
+    { modelId: "seedance-2.0-mini", resolution: "720p", expect: "sd13-seedance-2.0-mini" },
+    { modelId: "seedance-2.5-480p", resolution: "480p", expect: "sd8-seedance-2.5" },
+    { modelId: "seedance-2.5-720p", resolution: "720p", expect: "sd8-seedance-2.5" },
+  ];
+  for (const { modelId, resolution, expect } of cases) {
+    let captured: unknown = null;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+      if (String(url).endsWith("/videos")) {
+        captured = init?.body;
+        return jsonResponse(200, { id: TASK_ID, status: "queued" });
+      }
+      return jsonResponse(200, { id: TASK_ID, status: "completed", video_url: "https://cdn.cangyuansuanli.cn/video.mp4" });
+    }) as typeof fetch;
+    try {
+      process.env.CANGYUANSUANLI_API_KEY = "ck-test-key";
+      await generateWithOpenaiVideo(
+        supplier(),
+        videoInput({ modelId, resolution, workflow: { references: [], metadata: {}, durationSeconds: 4, generateAudio: false } }),
+      );
+      const body = JSON.parse(String(captured)) as Record<string, unknown>;
+      assert.equal(body.model, expect, `${modelId}/${resolution} 應映射到 ${expect}`);
+      assert.ok(!String(body.model).startsWith("sd4-"), `${modelId}/${resolution} 不得再用已下架的 sd4-* 名`);
+    } finally {
+      delete process.env.CANGYUANSUANLI_API_KEY;
+      globalThis.fetch = originalFetch;
+    }
   }
 });
 
