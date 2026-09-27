@@ -56,6 +56,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         max_members: capacity.maxMembers,
       },
       can_admit_more: roster.length < settings.seats,
+      // 誠實標註（刀 3）：席位目前只是意圖整數，未接計費——不能按席位購買/續費/扣款。
+      // 席位若要計價，既有下單入口是 GET /api/payments/mapay/checkout?plan=<id>
+      // （套餐目錄 src/lib/plans.ts，前端 src/components/PricingClient.tsx）；
+      // 到帳後成員額度分配的唯一通路是 member-quota.ts 的 allocateMemberQuota。
+      // 本端點刻意不做任何計費寫入（禁影子帳本）。
+      billing_connected: false,
+      billing_note:
+        "席位当前仅为人数上限的意图整数，未接入计费（不支持按席位购买/续费）；购买与续费走 /pricing 套餐，额度分配走 B 端额度接口。",
     },
     { headers: { "Cache-Control": "no-store" } },
   );

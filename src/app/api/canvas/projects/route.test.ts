@@ -19,9 +19,10 @@ function code(relPath: string): string {
 test("画布项目保存：cardIds 先过作用域閘再落库（跨项目未分享的卡不得锁进本项目）", () => {
   const source = code(ROUTE_PATH);
   const gateAt = source.indexOf("filterCardIdsForProject(");
-  const saveAt = source.indexOf("saveCanvasProject(");
+  // 落庫走帶團隊閘的 saveCanvasProjectWithTeamGate（片F 面 2 接線）；閘內仍是 saveCanvasProject。
+  const saveAt = source.indexOf("saveCanvasProjectWithTeamGate(");
   assert.ok(gateAt >= 0, "必须调用 filterCardIdsForProject（B2-2 生成卡注入闸）");
-  assert.ok(saveAt >= 0, "必须调用 saveCanvasProject");
+  assert.ok(saveAt >= 0, "必须调用 saveCanvasProjectWithTeamGate（团队建画布闸 + 落库）");
   assert.ok(gateAt < saveAt, "作用域裁决必须早于落库（否则不可见的卡已被锁进 cardIds）");
   assert.match(source, /\bcardIds\b/);
 });

@@ -6,8 +6,8 @@ import { filterCardIdsForProject } from "@/lib/asset-library";
 import {
   deleteCanvasProjects,
   listCanvasProjects,
-  saveCanvasProject,
 } from "@/lib/canvas/project-store";
+import { saveCanvasProjectWithTeamGate } from "@/lib/canvas/team-canvas-gate";
 import type { CanvasProject } from "@/lib/canvas/types";
 
 export const runtime = "nodejs";
@@ -58,7 +58,9 @@ export async function PUT(req: NextRequest) {
           cardIds: body.cardIds.filter((id): id is string => typeof id === "string"),
         })
       : null;
-    await saveCanvasProject(caller.user.id, {
+    // 團隊建畫布閘（片F 面 2）：先判後存。成員且團隊關閉「成員建畫布」時拒新建，
+    // 既有專案更新與非成員（個人畫布）不受影響；拒絕時不落盤（無半成品）。
+    const gate = await saveCanvasProjectWithTeamGate(caller.user.id, {
       id: body.id,
       title: body.title?.trim()?.slice(0, 200) || "未命名画布",
       createdAt: body.createdAt || now,
@@ -78,6 +80,7 @@ export async function PUT(req: NextRequest) {
       // normalizeNodeVersions（與讀取端同一份），本路由不重複實作。
       ...(body.nodeVersions !== undefined ? { nodeVersions: body.nodeVersions } : {}),
     });
+    if (!gate.ok) return fail(gate.status, gate.message, gate.code);
     return NextResponse.json({ success: true }, { status: 200 });
   } catch (error) {
     console.error("[canvas] save project failed:", error);

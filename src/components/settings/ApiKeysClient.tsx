@@ -287,7 +287,9 @@ export function ApiKeysClient() {
 
         <p className="mt-5 text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.46)]">
           密钥只在此页面显示一次，存储中仅保留哈希，关闭后无法再次查看；遗失只能吊销后重新创建。
-          使用方式见 <Link href="/docs" className="text-[#007AFF] hover:underline">接入文档</Link>。
+          使用方式见 <Link href="/docs" className="text-[#007AFF] hover:underline">接入文档</Link>；
+          团队席位、成员角色、建画布权限与审批见{" "}
+          <Link href="/settings/team" className="text-[#007AFF] hover:underline">团队管理</Link>。
         </p>
       </div>
 

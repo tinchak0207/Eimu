@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BookOpen, History, KeyRound, LogOut } from "lucide-react";
+import { BookOpen, History, KeyRound, LogOut, Users } from "lucide-react";
 import { WalletBadge } from "@/components/WalletBadge";
 import {
   DropdownMenu,
@@ -418,6 +418,14 @@ export function Navbar({ className }: NavbarProps) {
                       <Link href="/settings/api-keys" className="cursor-pointer">
                         <KeyRound className="mr-2 h-3.5 w-3.5 text-[rgba(0,0,0,0.44)]" aria-hidden="true" />
                         密钥管理
+                      </Link>
+                    </DropdownMenuItem>
+                    {/* 团队治理同样由 B 端密钥驱动（席位/角色/建画布开关/审批/解散/用量），
+                        故归在同一把「密钥」小菜单下，不新开顶层入口。 */}
+                    <DropdownMenuItem asChild>
+                      <Link href="/settings/team" className="cursor-pointer">
+                        <Users className="mr-2 h-3.5 w-3.5 text-[rgba(0,0,0,0.44)]" aria-hidden="true" />
+                        团队管理
                       </Link>
                     </DropdownMenuItem>
                   </DropdownMenuContent>
