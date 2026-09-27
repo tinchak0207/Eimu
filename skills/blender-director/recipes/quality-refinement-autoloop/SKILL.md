@@ -1,3 +1,9 @@
+---
+name: quality-refinement-autoloop
+description: Run a self-refinement loop when a Blender result is subpar, user expectations are not met, validation fails, or repeated issues reveal missing skill depth. The loop diagnoses the gap, decides whether to repair the artifact or acquire/refine a generic skill, sanitizes lessons for reusable publication, updates docs/versioning, validates, and prepares stage/commit/push when explicitly requested.
+when_to_use: Subpar output, user rejects quality, repeated Blender failure, RALPH loop, skill gap diagnosis, autonomous skill refinement, sanitized skill contribution, release prep, docs/version bump, staged commit and push workflow.
+allowed-tools: Read Bash Glob Grep mcp__blender__execute_blender_code mcp__blender__get_scene_info mcp__blender__get_object_info
+---
 <!--
 來源（輪子）: https://github.com/RobLe3/cc-blender-skill — plugin/skills/quality-refinement-autoloop/SKILL.md
 License: MIT · 原作者: RobLe3 (https://github.com/RobLe3)
@@ -5,12 +11,6 @@ License: MIT · 原作者: RobLe3 (https://github.com/RobLe3)
 Blender 5.2 雷區：① BLENDER_EEVEE_NEXT 已死，只認 BLENDER_EEVEE/BLENDER_WORKBENCH/CYCLES ② Filmic 已移除，AgX 為默認 ③ action.fcurves 在 4.4+ 移除，走 layers[*].strips[*].channelbags[*].fcurves
 正文保留英文原文；上游 MCP 調用表述執行時改走我方 bridge /v1/execute 同構協議。
 -->
----
-name: quality-refinement-autoloop
-description: Run a self-refinement loop when a Blender result is subpar, user expectations are not met, validation fails, or repeated issues reveal missing skill depth. The loop diagnoses the gap, decides whether to repair the artifact or acquire/refine a generic skill, sanitizes lessons for reusable publication, updates docs/versioning, validates, and prepares stage/commit/push when explicitly requested.
-when_to_use: Subpar output, user rejects quality, repeated Blender failure, RALPH loop, skill gap diagnosis, autonomous skill refinement, sanitized skill contribution, release prep, docs/version bump, staged commit and push workflow.
-allowed-tools: Read Bash Glob Grep mcp__blender__execute_blender_code mcp__blender__get_scene_info mcp__blender__get_object_info
----
 
 # Quality Refinement Autoloop
 

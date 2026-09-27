@@ -1,3 +1,7 @@
+---
+name: make-blender-education-video
+description: Create high-detail, fact-checked English cinematic educational animations in Blender for science, engineering, architecture, construction, manufacturing, machines, infrastructure, energy, medicine, biology, computing, and other complex systems. Use for Blender-based explainer videos that require authoritative research or supplied sources, reusable topic-specific GitHub workflows and assets, a user-provided visual reference or defined style, a realistic or stylized 3D scene, burned-in subtitles, one representative approval frame before full rendering, and verified 4K delivery.
+---
 <!--
 來源（輪子）: https://github.com/sunxiayi/make-blender-education-video-skill
 License: MIT · 原作者: sunxiayi · 僅內部使用
@@ -6,10 +10,6 @@ Blender 5.2 雷區（僅 Blender 類配方適用）：① BLENDER_EEVEE_NEXT 已
 正文保留英文原文；MCP 調用表述執行時改走我方 bridge /v1/execute 同構協議。
 -->
 
----
-name: make-blender-education-video
-description: Create high-detail, fact-checked English cinematic educational animations in Blender for science, engineering, architecture, construction, manufacturing, machines, infrastructure, energy, medicine, biology, computing, and other complex systems. Use for Blender-based explainer videos that require authoritative research or supplied sources, reusable topic-specific GitHub workflows and assets, a user-provided visual reference or defined style, a realistic or stylized 3D scene, burned-in subtitles, one representative approval frame before full rendering, and verified 4K delivery.
----
 
 # Make Blender Education Video
 

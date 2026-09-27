@@ -1,3 +1,9 @@
+---
+name: source-part-segmentation
+description: Segment overlapping visual parts from source images, wireframes, texture atlases, and decals before mesh reconstruction. Use when a mascot/logo/template contains touching or overlapping components and exact structural part masks are needed before contour-to-mesh, UV fitting, or landmark repair.
+when_to_use: Overlapping part extraction, component masks, marker/watershed segmentation, contour hierarchy analysis, atlas part isolation, manual seed fallback for source-locked Blender reconstruction.
+allowed-tools: Read Bash Glob Grep
+---
 <!--
 來源（輪子）: https://github.com/RobLe3/cc-blender-skill — plugin/skills/source-part-segmentation/SKILL.md
 License: MIT · 原作者: RobLe3 (https://github.com/RobLe3)
@@ -5,12 +11,6 @@ License: MIT · 原作者: RobLe3 (https://github.com/RobLe3)
 Blender 5.2 雷區：① BLENDER_EEVEE_NEXT 已死，只認 BLENDER_EEVEE/BLENDER_WORKBENCH/CYCLES ② Filmic 已移除，AgX 為默認 ③ action.fcurves 在 4.4+ 移除，走 layers[*].strips[*].channelbags[*].fcurves
 正文保留英文原文；上游 MCP 調用表述執行時改走我方 bridge /v1/execute 同構協議。
 -->
----
-name: source-part-segmentation
-description: Segment overlapping visual parts from source images, wireframes, texture atlases, and decals before mesh reconstruction. Use when a mascot/logo/template contains touching or overlapping components and exact structural part masks are needed before contour-to-mesh, UV fitting, or landmark repair.
-when_to_use: Overlapping part extraction, component masks, marker/watershed segmentation, contour hierarchy analysis, atlas part isolation, manual seed fallback for source-locked Blender reconstruction.
-allowed-tools: Read Bash Glob Grep
----
 
 # Source Part Segmentation
 

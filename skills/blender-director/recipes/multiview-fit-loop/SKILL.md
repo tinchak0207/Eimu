@@ -1,3 +1,9 @@
+---
+name: multiview-fit-loop
+description: Closed-loop compare-adjust-repeat workflow for fitting Blender models to supplied front/side/back/top templates and originals. Use when the user asks to compare the product to templates/originals and adjust until it fits across all dimensions, or when all views must pass measurable bbox/centroid/silhouette/edge validation before export.
+when_to_use: Multi-view validation and iterative fitting against reference templates, all-dimension mascot/object reconstruction, front/side/back/top overlay reports, fit deltas, automated adjustment loops.
+allowed-tools: Read Bash Glob Grep mcp__blender__execute_blender_code mcp__blender__get_scene_info mcp__blender__get_object_info
+---
 <!--
 來源（輪子）: https://github.com/RobLe3/cc-blender-skill — plugin/skills/multiview-fit-loop/SKILL.md
 License: MIT · 原作者: RobLe3 (https://github.com/RobLe3)
@@ -5,12 +11,6 @@ License: MIT · 原作者: RobLe3 (https://github.com/RobLe3)
 Blender 5.2 雷區：① BLENDER_EEVEE_NEXT 已死，只認 BLENDER_EEVEE/BLENDER_WORKBENCH/CYCLES ② Filmic 已移除，AgX 為默認 ③ action.fcurves 在 4.4+ 移除，走 layers[*].strips[*].channelbags[*].fcurves
 正文保留英文原文；上游 MCP 調用表述執行時改走我方 bridge /v1/execute 同構協議。
 -->
----
-name: multiview-fit-loop
-description: Closed-loop compare-adjust-repeat workflow for fitting Blender models to supplied front/side/back/top templates and originals. Use when the user asks to compare the product to templates/originals and adjust until it fits across all dimensions, or when all views must pass measurable bbox/centroid/silhouette/edge validation before export.
-when_to_use: Multi-view validation and iterative fitting against reference templates, all-dimension mascot/object reconstruction, front/side/back/top overlay reports, fit deltas, automated adjustment loops.
-allowed-tools: Read Bash Glob Grep mcp__blender__execute_blender_code mcp__blender__get_scene_info mcp__blender__get_object_info
----
 
 # Multiview Fit Loop
 

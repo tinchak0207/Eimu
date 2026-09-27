@@ -1,3 +1,7 @@
+---
+name: blender-agent-core
+description: Core discipline for ANY Blender/bpy work — contract-first, purpose-first (render-only / print / both), knowledge routing, execute-verify-refine loop with the AGENT_OK/AGENT_FAIL sentinel contract, numeric-first verification, Form gate before delivery media, production gate before delivery. Activate for every task that touches Blender, before any domain skill.
+---
 <!--
 來源（輪子）: https://github.com/jangtrinh/design-os-3d-blender
 License: MIT · 原作者: jangtrinh · 僅內部使用
@@ -6,10 +10,6 @@ Blender 5.2 雷區（僅 Blender 類配方適用）：① BLENDER_EEVEE_NEXT 已
 正文保留英文原文；MCP 調用表述執行時改走我方 bridge /v1/execute 同構協議。
 -->
 
----
-name: blender-agent-core
-description: Core discipline for ANY Blender/bpy work — contract-first, purpose-first (render-only / print / both), knowledge routing, execute-verify-refine loop with the AGENT_OK/AGENT_FAIL sentinel contract, numeric-first verification, Form gate before delivery media, production gate before delivery. Activate for every task that touches Blender, before any domain skill.
----
 
 # Blender Agent Core
 

@@ -1,9 +1,3 @@
-<!--
-來源（輪子）: https://github.com/arjun988/blender-skills — .claude/skills/compositing/SKILL.md
-License: MIT · 原作者: arjun988 (https://github.com/arjun988)
-白名單改動: ①輸出路徑→$BLENDER_WORK/out/ ②移除「via MCP」外部 IDE 整合表述 ③Blender 5.2 API 校正（無） ④文案譯為簡體（結構/表格/參數逐項保留）
--->
-
 ---
 name: compositing
 description: Blender 合成器工作流，涵盖美板堆叠（beauty stack）、渲染通道、调色、辉光与交付输出。
@@ -16,6 +10,12 @@ metadata:
   triggers: compositor, compositing, grade, beauty pass, render passes, cryptomatte, glare, vignette, color correction, post
   related-skills: rendering, lighting, lookdev, camera-cinematography, vfx-fx
 ---
+<!--
+來源（輪子）: https://github.com/arjun988/blender-skills — .claude/skills/compositing/SKILL.md
+License: MIT · 原作者: arjun988 (https://github.com/arjun988)
+白名單改動: ①輸出路徑→$BLENDER_WORK/out/ ②移除「via MCP」外部 IDE 整合表述 ③Blender 5.2 API 校正（無） ④文案譯為簡體（結構/表格/參數逐項保留）
+-->
+
 
 # 合成（Compositing）
 

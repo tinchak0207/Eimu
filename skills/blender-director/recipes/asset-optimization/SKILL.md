@@ -1,10 +1,3 @@
-<!--
-來源（輪子）: https://github.com/arjun988/blender-skills — .claude/skills/asset-optimization/SKILL.md
-License: MIT · 原作者: arjun988 (https://github.com/arjun988)
-入庫批次: 2026-09-06 對稱差擴容 W1（工藝/資產）。執行環境契約見 ../../SKILL.md（bridge POST /v1/execute、產物寫 $BLENDER_WORK/out/、Blender 5.2.1）。
-Blender 5.2 雷區（上游按 3.x/4.x 編寫，命中以下 API 時以雷區為準）：① BLENDER_EEVEE_NEXT 已死，只認 BLENDER_EEVEE/BLENDER_WORKBENCH/CYCLES ② Filmic 已移除，AgX 為默認視圖變換 ③ action.fcurves 在 4.4+ 移除，走 layers[*].strips[*].channelbags[*].fcurves
-正文保留英文原文；配方內殘留的 MCP/IDE 表述以上方執行環境契約為準。
--->
 ---
 name: asset-optimization
 description: Validates and optimizes Blender assets for polycount, topology, UV efficiency, material count, naming, collections, and game-ready performance. Use before export on all production assets via MCP.
@@ -17,6 +10,13 @@ metadata:
   triggers: optimize, optimization, polycount, LOD, cleanup, performance, game ready, validate, triangle count
   related-skills: export-pipeline, blender-modeler, uv-workflow
 ---
+<!--
+來源（輪子）: https://github.com/arjun988/blender-skills — .claude/skills/asset-optimization/SKILL.md
+License: MIT · 原作者: arjun988 (https://github.com/arjun988)
+入庫批次: 2026-09-06 對稱差擴容 W1（工藝/資產）。執行環境契約見 ../../SKILL.md（bridge POST /v1/execute、產物寫 $BLENDER_WORK/out/、Blender 5.2.1）。
+Blender 5.2 雷區（上游按 3.x/4.x 編寫，命中以下 API 時以雷區為準）：① BLENDER_EEVEE_NEXT 已死，只認 BLENDER_EEVEE/BLENDER_WORKBENCH/CYCLES ② Filmic 已移除，AgX 為默認視圖變換 ③ action.fcurves 在 4.4+ 移除，走 layers[*].strips[*].channelbags[*].fcurves
+正文保留英文原文；配方內殘留的 MCP/IDE 表述以上方執行環境契約為準。
+-->
 
 # Asset Optimization
 

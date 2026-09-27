@@ -1,3 +1,9 @@
+---
+name: text-to-blender
+description: Drive Blender from natural language. Converts plain-English requests ("model a sword and render it with cinematic lighting", "make this glass look frosted", "set up three-point lighting", "export this scene as glTF for the web") into Blender Python code executed via the Blender MCP server. Acts as the orchestrator that picks and chain-loads specialised sub-skills (blender-modeling, blender-materials, blender-lighting, blender-cameras, blender-rendering, blender-animation, blender-export, wireframe-to-3d, blender-pro-workflow, blender-skill-harmonizer, quality-refinement-autoloop). Use this skill whenever the user wants Claude to do anything in Blender, including creating geometry, applying materials, lighting a scene, framing a camera, rendering, animating, or exporting. Make sure to invoke this skill even if the user does not say "Blender" — also covers requests like "create a 3D model of...", "render this...", "make a glTF from...", "set up a scene with...", or any 3D-creation task. Requires the Blender MCP addon (ahujasid/blender-mcp) running on port 9876.
+when_to_use: User asks for any 3D creation, modification, lighting, rendering, animation, or export task. Anything involving Blender or that should reasonably be done in Blender.
+allowed-tools: Read Bash Glob Grep mcp__blender__execute_blender_code mcp__blender__get_scene_info mcp__blender__get_object_info mcp__blender__get_viewport_screenshot
+---
 <!--
 來源（輪子）: https://github.com/RobLe3/cc-blender-skill — plugin/skills/text-to-blender/SKILL.md
 License: MIT · 原作者: RobLe3 (https://github.com/RobLe3)
@@ -5,12 +11,6 @@ License: MIT · 原作者: RobLe3 (https://github.com/RobLe3)
 Blender 5.2 雷區：① BLENDER_EEVEE_NEXT 已死，只認 BLENDER_EEVEE/BLENDER_WORKBENCH/CYCLES ② Filmic 已移除，AgX 為默認 ③ action.fcurves 在 4.4+ 移除，走 layers[*].strips[*].channelbags[*].fcurves
 正文保留英文原文；上游 MCP 調用表述執行時改走我方 bridge /v1/execute 同構協議。
 -->
----
-name: text-to-blender
-description: Drive Blender from natural language. Converts plain-English requests ("model a sword and render it with cinematic lighting", "make this glass look frosted", "set up three-point lighting", "export this scene as glTF for the web") into Blender Python code executed via the Blender MCP server. Acts as the orchestrator that picks and chain-loads specialised sub-skills (blender-modeling, blender-materials, blender-lighting, blender-cameras, blender-rendering, blender-animation, blender-export, wireframe-to-3d, blender-pro-workflow, blender-skill-harmonizer, quality-refinement-autoloop). Use this skill whenever the user wants Claude to do anything in Blender, including creating geometry, applying materials, lighting a scene, framing a camera, rendering, animating, or exporting. Make sure to invoke this skill even if the user does not say "Blender" — also covers requests like "create a 3D model of...", "render this...", "make a glTF from...", "set up a scene with...", or any 3D-creation task. Requires the Blender MCP addon (ahujasid/blender-mcp) running on port 9876.
-when_to_use: User asks for any 3D creation, modification, lighting, rendering, animation, or export task. Anything involving Blender or that should reasonably be done in Blender.
-allowed-tools: Read Bash Glob Grep mcp__blender__execute_blender_code mcp__blender__get_scene_info mcp__blender__get_object_info mcp__blender__get_viewport_screenshot
----
 
 # Text-to-Blender Orchestrator
 

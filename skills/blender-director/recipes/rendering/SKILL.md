@@ -1,10 +1,3 @@
-<!--
-來源（輪子）: https://github.com/arjun988/blender-skills — .claude/skills/rendering/SKILL.md
-License: MIT · 原作者: arjun988 (https://github.com/arjun988)
-白名單改動: ①輸出路徑→$BLENDER_WORK/out/ ②移除「via MCP」與「## MCP Integration」節（外部 IDE 整合）
-③Blender 5.2 API 校正兩處（原文以「上游原文」註釋保留，僅 API 名/術語變更，邏輯不動） ④文案譯為簡體
--->
-
 ---
 name: rendering
 description: Blender 渲染，涵盖 Cycles 与 Eevee 的采样、降噪、相机设置、渲染通道、色彩管理与渲染优化。用于最终输出与外观验证。
@@ -17,6 +10,13 @@ metadata:
   triggers: render, Cycles, Eevee, sampling, denoise, camera, render pass, color management, output
   related-skills: lighting, materials, realistic-style, stylized-style
 ---
+<!--
+來源（輪子）: https://github.com/arjun988/blender-skills — .claude/skills/rendering/SKILL.md
+License: MIT · 原作者: arjun988 (https://github.com/arjun988)
+白名單改動: ①輸出路徑→$BLENDER_WORK/out/ ②移除「via MCP」與「## MCP Integration」節（外部 IDE 整合）
+③Blender 5.2 API 校正兩處（原文以「上游原文」註釋保留，僅 API 名/術語變更，邏輯不動） ④文案譯為簡體
+-->
+
 
 # 渲染（Rendering）
 

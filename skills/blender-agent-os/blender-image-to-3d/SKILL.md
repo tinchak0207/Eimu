@@ -1,3 +1,7 @@
+---
+name: blender-image-to-3d
+description: Reconstruct assets in Blender from reference images using only native Blender geometry, local skills, and project workflows; includes fidelity contracts, staged passes, and visual verification.
+---
 <!--
 來源（輪子）: https://github.com/jangtrinh/design-os-3d-blender
 License: MIT · 原作者: jangtrinh · 僅內部使用
@@ -6,10 +10,6 @@ Blender 5.2 雷區（僅 Blender 類配方適用）：① BLENDER_EEVEE_NEXT 已
 正文保留英文原文；MCP 調用表述執行時改走我方 bridge /v1/execute 同構協議。
 -->
 
----
-name: blender-image-to-3d
-description: Reconstruct assets in Blender from reference images using only native Blender geometry, local skills, and project workflows; includes fidelity contracts, staged passes, and visual verification.
----
 
 # Image → 3D (v3 — Blender native)
 

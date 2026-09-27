@@ -1,9 +1,3 @@
-<!--
-來源（輪子）: https://github.com/arjun988/blender-skills — .claude/skills/scene-assembly/SKILL.md
-License: MIT · 原作者: arjun988 (https://github.com/arjun988)
-白名單改動: ①產物路徑→$BLENDER_WORK/out/ ②移除「via MCP」外部 IDE 整合表述 ③Blender 5.2 API 校正（無） ④文案譯為簡體（結構/表格/參數逐項保留）
--->
-
 ---
 name: scene-assembly
 description: Blender 大型场景布局，涵盖集合（Collection）组织、链接（Linking）、重载（Overrides）、利于流式加载的结构化组织与场景组装。
@@ -16,6 +10,12 @@ metadata:
   triggers: scene assembly, layout, linking, library override, collection instance, level layout, set assembly, outliner organization
   related-skills: environment-artist, set-dressing, blender-modeler, lighting, qa-review
 ---
+<!--
+來源（輪子）: https://github.com/arjun988/blender-skills — .claude/skills/scene-assembly/SKILL.md
+License: MIT · 原作者: arjun988 (https://github.com/arjun988)
+白名單改動: ①產物路徑→$BLENDER_WORK/out/ ②移除「via MCP」外部 IDE 整合表述 ③Blender 5.2 API 校正（無） ④文案譯為簡體（結構/表格/參數逐項保留）
+-->
+
 
 # 场景组装（Scene Assembly）
 

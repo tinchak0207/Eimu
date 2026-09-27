@@ -1,3 +1,9 @@
+---
+name: landmark-fit-repair
+description: Validate and repair source-locked Blender models using named landmarks such as leaf tips, shell corners, eyes, smile, rim thickness, aura center/radius, and view-specific depth markers. Use when bbox/IoU is insufficient and the model must align to templates at designed feature points.
+when_to_use: Landmark validation, feature-point deltas, control-point repair, face/eye/smile alignment, leaf tip alignment, aura ring fitting, iterative recipe parameter updates.
+allowed-tools: Read Bash Glob Grep mcp__blender__execute_blender_code mcp__blender__get_scene_info mcp__blender__get_object_info
+---
 <!--
 來源（輪子）: https://github.com/RobLe3/cc-blender-skill — plugin/skills/landmark-fit-repair/SKILL.md
 License: MIT · 原作者: RobLe3 (https://github.com/RobLe3)
@@ -5,12 +11,6 @@ License: MIT · 原作者: RobLe3 (https://github.com/RobLe3)
 Blender 5.2 雷區：① BLENDER_EEVEE_NEXT 已死，只認 BLENDER_EEVEE/BLENDER_WORKBENCH/CYCLES ② Filmic 已移除，AgX 為默認 ③ action.fcurves 在 4.4+ 移除，走 layers[*].strips[*].channelbags[*].fcurves
 正文保留英文原文；上游 MCP 調用表述執行時改走我方 bridge /v1/execute 同構協議。
 -->
----
-name: landmark-fit-repair
-description: Validate and repair source-locked Blender models using named landmarks such as leaf tips, shell corners, eyes, smile, rim thickness, aura center/radius, and view-specific depth markers. Use when bbox/IoU is insufficient and the model must align to templates at designed feature points.
-when_to_use: Landmark validation, feature-point deltas, control-point repair, face/eye/smile alignment, leaf tip alignment, aura ring fitting, iterative recipe parameter updates.
-allowed-tools: Read Bash Glob Grep mcp__blender__execute_blender_code mcp__blender__get_scene_info mcp__blender__get_object_info
----
 
 # Landmark Fit Repair
 

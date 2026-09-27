@@ -1,3 +1,9 @@
+---
+name: animation-quality-gate
+description: Validate Blender animation attempts before accepting them by rendering contact sheets, checking silhouette stability, flicker, framing, subject dominance, layer separation, export compatibility, and motion-design coherence. Use after animation renders or when the user says motion/morph/outside elements look bad.
+when_to_use: Animation QA, contact-sheet review, motion critique, morph validation, texture flicker detection, storyboard checks, rejecting bad animation passes, pre-export animation acceptance gates.
+allowed-tools: Read Bash Glob Grep mcp__blender__execute_blender_code mcp__blender__get_scene_info mcp__blender__get_object_info
+---
 <!--
 來源（輪子）: https://github.com/RobLe3/cc-blender-skill — plugin/skills/animation-quality-gate/SKILL.md
 License: MIT · 原作者: RobLe3 (https://github.com/RobLe3)
@@ -5,12 +11,6 @@ License: MIT · 原作者: RobLe3 (https://github.com/RobLe3)
 Blender 5.2 雷區：① BLENDER_EEVEE_NEXT 已死，只認 BLENDER_EEVEE/BLENDER_WORKBENCH/CYCLES ② Filmic 已移除，AgX 為默認 ③ action.fcurves 在 4.4+ 移除，走 layers[*].strips[*].channelbags[*].fcurves
 正文保留英文原文；上游 MCP 調用表述執行時改走我方 bridge /v1/execute 同構協議。
 -->
----
-name: animation-quality-gate
-description: Validate Blender animation attempts before accepting them by rendering contact sheets, checking silhouette stability, flicker, framing, subject dominance, layer separation, export compatibility, and motion-design coherence. Use after animation renders or when the user says motion/morph/outside elements look bad.
-when_to_use: Animation QA, contact-sheet review, motion critique, morph validation, texture flicker detection, storyboard checks, rejecting bad animation passes, pre-export animation acceptance gates.
-allowed-tools: Read Bash Glob Grep mcp__blender__execute_blender_code mcp__blender__get_scene_info mcp__blender__get_object_info
----
 
 # Animation Quality Gate
 

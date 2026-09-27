@@ -1,3 +1,7 @@
+---
+name: aftereffects-motion
+description: Use this skill whenever Adobe After Effects is the working tool. Triggers on "After Effects", "AE", ".aep", "ExtendScript", "JSX", "composition", "comp", "keyframe in AE", "AE expression", "render queue", "wiggle", "loopOut", "Trim Paths", or any AE-driven motion graphics task. Also triggers when the user is mid-session with the AE MCP bridge active (mcp-bridge-auto.jsx). Pair with motion-design (foundation skill) for principles, timing, and taste. AE MCP server: TheLlamainator/after-effects-mcp.
+---
 <!--
 來源（輪子）: https://github.com/LobzyJay/motion-design-with-claude
 License: MIT · 原作者: LobzyJay · 僅內部使用
@@ -6,10 +10,6 @@ Blender 5.2 雷區（僅 Blender 類配方適用）：① BLENDER_EEVEE_NEXT 已
 正文保留英文原文；MCP 調用表述執行時改走我方 bridge /v1/execute 同構協議。
 -->
 
----
-name: aftereffects-motion
-description: Use this skill whenever Adobe After Effects is the working tool. Triggers on "After Effects", "AE", ".aep", "ExtendScript", "JSX", "composition", "comp", "keyframe in AE", "AE expression", "render queue", "wiggle", "loopOut", "Trim Paths", or any AE-driven motion graphics task. Also triggers when the user is mid-session with the AE MCP bridge active (mcp-bridge-auto.jsx). Pair with motion-design (foundation skill) for principles, timing, and taste. AE MCP server: TheLlamainator/after-effects-mcp.
----
 
 # After Effects Motion
 

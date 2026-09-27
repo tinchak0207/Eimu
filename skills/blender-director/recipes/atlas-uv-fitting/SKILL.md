@@ -1,3 +1,9 @@
+---
+name: atlas-uv-fitting
+description: Detect texture-atlas regions and map each source part to its own UV rectangle or projected UV surface. Use when a texture pack must fit a Blender model 1:1, when textures look off/stretched, when alpha decals or lightmaps are provided, or before exporting a textured GLB for a brand mascot/logo.
+when_to_use: Texture atlas region detection, per-part UV mapping, front-projected UVs, decal/lightmap handling, texture validation against source templates.
+allowed-tools: Read Bash Glob Grep mcp__blender__execute_blender_code mcp__blender__get_object_info
+---
 <!--
 來源（輪子）: https://github.com/RobLe3/cc-blender-skill — plugin/skills/atlas-uv-fitting/SKILL.md
 License: MIT · 原作者: RobLe3 (https://github.com/RobLe3)
@@ -5,12 +11,6 @@ License: MIT · 原作者: RobLe3 (https://github.com/RobLe3)
 Blender 5.2 雷區：① BLENDER_EEVEE_NEXT 已死，只認 BLENDER_EEVEE/BLENDER_WORKBENCH/CYCLES ② Filmic 已移除，AgX 為默認 ③ action.fcurves 在 4.4+ 移除，走 layers[*].strips[*].channelbags[*].fcurves
 正文保留英文原文；上游 MCP 調用表述執行時改走我方 bridge /v1/execute 同構協議。
 -->
----
-name: atlas-uv-fitting
-description: Detect texture-atlas regions and map each source part to its own UV rectangle or projected UV surface. Use when a texture pack must fit a Blender model 1:1, when textures look off/stretched, when alpha decals or lightmaps are provided, or before exporting a textured GLB for a brand mascot/logo.
-when_to_use: Texture atlas region detection, per-part UV mapping, front-projected UVs, decal/lightmap handling, texture validation against source templates.
-allowed-tools: Read Bash Glob Grep mcp__blender__execute_blender_code mcp__blender__get_object_info
----
 
 # Atlas UV Fitting
 

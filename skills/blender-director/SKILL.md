@@ -1,3 +1,8 @@
+---
+name: blender-director
+description: 3D/Blender 任务路由与执行配方库入口：委托单含 previz／3D／模型／场景／机位／运镜／骨架／turntable／分镜预演 关键词时必载（走 blender_exec / blender_render / blender_export_gltf 三工具链）。
+---
+
 # 3D 导演（Blender Director）SKILL
 
 > 配方库来源（轮子，License: MIT，原作者 arjun988）：

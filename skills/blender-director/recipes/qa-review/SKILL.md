@@ -1,9 +1,3 @@
-<!--
-來源（輪子）: https://github.com/arjun988/blender-skills — .claude/skills/qa-review/SKILL.md
-License: MIT · 原作者: arjun988 (https://github.com/arjun988)
-白名單改動: ①產物路徑→$BLENDER_WORK/out/（截圖存檔寫 $BLENDER_WORK/out/） ②移除「via MCP」外部 IDE 整合表述 ③Blender 5.2 API 校正（無） ④文案譯為簡體（結構/表格/參數逐項保留）
--->
-
 ---
 name: qa-review
 description: Blender 资产生产 QA 门禁，使用视口截图、验证清单、命名审计与 ship/no-ship 裁决。
@@ -16,6 +10,12 @@ metadata:
   triggers: QA, quality assurance, review, validation, checklist, screenshot review, ship check, art review
   related-skills: asset-optimization, export-pipeline, blender-director, lookdev
 ---
+<!--
+來源（輪子）: https://github.com/arjun988/blender-skills — .claude/skills/qa-review/SKILL.md
+License: MIT · 原作者: arjun988 (https://github.com/arjun988)
+白名單改動: ①產物路徑→$BLENDER_WORK/out/（截圖存檔寫 $BLENDER_WORK/out/） ②移除「via MCP」外部 IDE 整合表述 ③Blender 5.2 API 校正（無） ④文案譯為簡體（結構/表格/參數逐項保留）
+-->
+
 
 # QA 审查（QA Review）
 

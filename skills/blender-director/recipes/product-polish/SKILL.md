@@ -1,3 +1,7 @@
+---
+name: blender-product-polish
+description: Import a 3D model (GLB/GLTF) into Blender and apply a sleek, glossy product-shot finish with studio lighting. Trigger when asked to polish a 3D model, make a Meshy AI model look shiny, apply product lighting in Blender, or prepare a 3D asset for product shots.
+---
 <!--
 來源（輪子）: https://github.com/kevinbadi/blender-skills — product-polish/SKILL.md
 License: 上游無 LICENSE 檔（GitHub API 2026-09-06 查證）· 原作者: kevinbadi · 僅內部使用，不對外散佈
@@ -5,10 +9,6 @@ License: 上游無 LICENSE 檔（GitHub API 2026-09-06 查證）· 原作者: ke
 Blender 5.2 雷區：① BLENDER_EEVEE_NEXT 已死，只認 BLENDER_EEVEE/BLENDER_WORKBENCH/CYCLES ② Filmic 已移除，AgX 為默認 ③ action.fcurves 在 4.4+ 移除，走 layers[*].strips[*].channelbags[*].fcurves
 正文保留英文原文；上游若引用其專屬 MCP 工具面，執行時改走我方 bridge /v1/execute 同構協議。
 -->
----
-name: blender-product-polish
-description: Import a 3D model (GLB/GLTF) into Blender and apply a sleek, glossy product-shot finish with studio lighting. Trigger when asked to polish a 3D model, make a Meshy AI model look shiny, apply product lighting in Blender, or prepare a 3D asset for product shots.
----
 
 # Blender Product Polish
 

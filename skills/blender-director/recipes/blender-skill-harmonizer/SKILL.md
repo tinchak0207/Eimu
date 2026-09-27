@@ -1,3 +1,9 @@
+---
+name: blender-skill-harmonizer
+description: Harmonize multiple Blender skills into a coherent pipeline with clear activation precedence, handoff artifacts, dependency gates, and conflict-resolution rules. Use when a Blender task spans several skills, when reference-locked work conflicts with generic production workflow, after adding/updating skills, or when repeated failures indicate skill interference or missing inter/intra-play.
+when_to_use: Multi-skill Blender orchestration, skill graph audits, resolving overlaps between text-to-blender/pro-workflow/reference-to-3d/wireframe/UV/fit/repair skills, defining source-of-truth precedence, artifact contracts, and sequential-vs-parallel execution plans.
+allowed-tools: Read Bash Glob Grep mcp__blender__execute_blender_code mcp__blender__get_scene_info mcp__blender__get_object_info
+---
 <!--
 來源（輪子）: https://github.com/RobLe3/cc-blender-skill — plugin/skills/blender-skill-harmonizer/SKILL.md
 License: MIT · 原作者: RobLe3 (https://github.com/RobLe3)
@@ -5,12 +11,6 @@ License: MIT · 原作者: RobLe3 (https://github.com/RobLe3)
 Blender 5.2 雷區：① BLENDER_EEVEE_NEXT 已死，只認 BLENDER_EEVEE/BLENDER_WORKBENCH/CYCLES ② Filmic 已移除，AgX 為默認 ③ action.fcurves 在 4.4+ 移除，走 layers[*].strips[*].channelbags[*].fcurves
 正文保留英文原文；上游 MCP 調用表述執行時改走我方 bridge /v1/execute 同構協議。
 -->
----
-name: blender-skill-harmonizer
-description: Harmonize multiple Blender skills into a coherent pipeline with clear activation precedence, handoff artifacts, dependency gates, and conflict-resolution rules. Use when a Blender task spans several skills, when reference-locked work conflicts with generic production workflow, after adding/updating skills, or when repeated failures indicate skill interference or missing inter/intra-play.
-when_to_use: Multi-skill Blender orchestration, skill graph audits, resolving overlaps between text-to-blender/pro-workflow/reference-to-3d/wireframe/UV/fit/repair skills, defining source-of-truth precedence, artifact contracts, and sequential-vs-parallel execution plans.
-allowed-tools: Read Bash Glob Grep mcp__blender__execute_blender_code mcp__blender__get_scene_info mcp__blender__get_object_info
----
 
 # Blender Skill Harmonizer
 

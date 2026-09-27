@@ -1,3 +1,8 @@
+---
+name: awwwards-3d
+description: Build production-grade Awwwards-style scroll-driven 3D websites in the visual language of Active Theory, Lusion, 14islands, Bonhomme, Resn, Studio Freight, Locomotive, and Igloo Inc. Use when the user asks for an "Awwwards-style", "scroll-driven 3D", "WebGL hero", "3D landing page", "interactive product showcase", "scroll storytelling site", "cinematic web experience", "creative dev portfolio", "premium 3D site", "Lusion-style", "Active Theory-style", "scroll 3D animation", or mentions Three.js + GSAP + Lenis together. Also triggers on Mongolian phrases like "3D вэб", "scroll-тэй 3D", "premium вэбсайт", "cinematic вэб", "Awwwards маягтай", "3D landing", "интерактив 3D". Locks tech stack to Three.js r170 + GSAP 3.12.5 + Lenis 1.1.0 with three's built-in `EffectComposer` for post-processing. Produces single-file HTML deliverables when possible. Do NOT use for: static marketing sites without 3D, plain React/Next.js apps, dashboards, admin UIs, or simple landing pages where 3D would be decorative noise.
+license: MIT
+---
 <!--
 來源（輪子）: https://github.com/tsogjavklann/awwwards-3d
 License: MIT · 原作者: tsogjavklann · 僅內部使用
@@ -6,11 +11,6 @@ Blender 5.2 雷區（僅 Blender 類配方適用）：① BLENDER_EEVEE_NEXT 已
 正文保留英文原文；MCP 調用表述執行時改走我方 bridge /v1/execute 同構協議。
 -->
 
----
-name: awwwards-3d
-description: Build production-grade Awwwards-style scroll-driven 3D websites in the visual language of Active Theory, Lusion, 14islands, Bonhomme, Resn, Studio Freight, Locomotive, and Igloo Inc. Use when the user asks for an "Awwwards-style", "scroll-driven 3D", "WebGL hero", "3D landing page", "interactive product showcase", "scroll storytelling site", "cinematic web experience", "creative dev portfolio", "premium 3D site", "Lusion-style", "Active Theory-style", "scroll 3D animation", or mentions Three.js + GSAP + Lenis together. Also triggers on Mongolian phrases like "3D вэб", "scroll-тэй 3D", "premium вэбсайт", "cinematic вэб", "Awwwards маягтай", "3D landing", "интерактив 3D". Locks tech stack to Three.js r170 + GSAP 3.12.5 + Lenis 1.1.0 with three's built-in `EffectComposer` for post-processing. Produces single-file HTML deliverables when possible. Do NOT use for: static marketing sites without 3D, plain React/Next.js apps, dashboards, admin UIs, or simple landing pages where 3D would be decorative noise.
-license: MIT
----
 
 # Awwwards-Style 3D Websites
 

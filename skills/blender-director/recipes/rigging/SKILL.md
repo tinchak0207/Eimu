@@ -1,9 +1,3 @@
-<!--
-來源（輪子）: https://github.com/arjun988/blender-skills — .claude/skills/rigging/SKILL.md
-License: MIT · 原作者: arjun988 (https://github.com/arjun988)
-白名單改動: ①產物路徑→$BLENDER_WORK/out/ ②移除「## MCP Integration」節（外部 IDE 整合） ③Blender 5.2 API 校正（無） ④文案譯為簡體（結構/表格/參數逐項保留）
--->
-
 ---
 name: rigging
 description: Blender 生产级绑定，涵盖骨架（armature）、IK/FK、约束、权重绘制、机械绑定、面部绑定与驱动器（driver）。在形变资产做动画之前使用。
@@ -16,6 +10,12 @@ metadata:
   triggers: rig, rigging, armature, bone, IK, FK, weight paint, constraint, facial rig, driver
   related-skills: animation, character-artist, blender-modeler
 ---
+<!--
+來源（輪子）: https://github.com/arjun988/blender-skills — .claude/skills/rigging/SKILL.md
+License: MIT · 原作者: arjun988 (https://github.com/arjun988)
+白名單改動: ①產物路徑→$BLENDER_WORK/out/ ②移除「## MCP Integration」節（外部 IDE 整合） ③Blender 5.2 API 校正（無） ④文案譯為簡體（結構/表格/參數逐項保留）
+-->
+
 
 # 绑定（Rigging）
 

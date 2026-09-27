@@ -124,7 +124,15 @@ test("刀1：skills/editor/ 七份配方全部落盤，且 persona skillPaths �
 test("刀1：每份配方 frontmatter 有 name/description（可被 skill 索引收錄），且點名其工具鏈", () => {
   for (const [p, tools] of RECIPE_TOOL_CHAIN) {
     const body = readFileSync(nodePath.resolve(process.cwd(), p), "utf8");
-    const fm = /---\n([\s\S]*?)\n---/.exec(body.slice(0, 800));
+    // 2026-09-27 修：原本的 /---\n([\s\S]*?)\n---/.exec(body.slice(0, 800)) 允許
+    // frontmatter 前有前置註解（HTML 註解塊），是假陽性破口——VPS opencode 1.18.14
+    // 實測只解析 byte 0 的 frontmatter，前置註解者靜默不進索引。
+    // 此處改為 byte 0 錨定；repo 級全量掃描見 skill-frontmatter-indexability.test.ts。
+    assert.ok(
+      body.startsWith("---\n"),
+      `${p} frontmatter 未在 byte 0（前置註解＝opencode 靜默不收錄）`,
+    );
+    const fm = /^---\n([\s\S]*?)\n---/.exec(body);
     assert.ok(fm, `${p} 缺 frontmatter（skill 索引收錄面）`);
     assert.match(fm[1], /^name:\s*\S+/m, `${p} frontmatter 缺 name`);
     assert.match(fm[1], /^description:\s*\S+/m, `${p} frontmatter 缺 description`);

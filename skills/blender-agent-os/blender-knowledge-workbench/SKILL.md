@@ -1,3 +1,7 @@
+---
+name: blender-knowledge-workbench
+description: Retrieve and apply this Blender project's knowledge, engineering research and portable reference methods through a checked local catalog and bounded task workflows. Use when refreshing knowledge, compiling workflow/skill references, choosing sources or assembling a Blender task reading pack; scene execution remains owned by blender-agent-core.
+---
 <!--
 來源（輪子）: https://github.com/jangtrinh/design-os-3d-blender
 License: MIT · 原作者: jangtrinh · 僅內部使用
@@ -6,10 +10,6 @@ Blender 5.2 雷區（僅 Blender 類配方適用）：① BLENDER_EEVEE_NEXT 已
 正文保留英文原文；MCP 調用表述執行時改走我方 bridge /v1/execute 同構協議。
 -->
 
----
-name: blender-knowledge-workbench
-description: Retrieve and apply this Blender project's knowledge, engineering research and portable reference methods through a checked local catalog and bounded task workflows. Use when refreshing knowledge, compiling workflow/skill references, choosing sources or assembling a Blender task reading pack; scene execution remains owned by blender-agent-core.
----
 
 # Blender Knowledge Workbench
 

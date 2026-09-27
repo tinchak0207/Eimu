@@ -1,3 +1,9 @@
+---
+name: reference-to-3d
+description: Reconstruct Blender models from supplied reference sheets, branding templates, texture atlases, orthographic front/side/back/top views, or mascot/logo art where visual fidelity to the source is more important than a plausible generated object. Use when the user says the model must match a template, wireframe, texture pack, character sheet, mascot sheet, or brand asset exactly; also use after feedback like "does not look like the reference", "fit the texture 1:1", "wrong number of visible parts", or "compare against the template". Requires Blender MCP plus local Python with Pillow/OpenCV/numpy; pairs with blender-uv-texturing, wireframe-to-3d, blender-modeling, blender-materials, and blender-export.
+when_to_use: User supplies reference images/templates/texture atlases/orthographic views and wants a model matching them, or repeated visual mismatch feedback requires a reference-locked corrective loop.
+allowed-tools: Read Bash Glob Grep mcp__blender__execute_blender_code mcp__blender__get_scene_info mcp__blender__get_object_info mcp__blender__get_viewport_screenshot
+---
 <!--
 來源（輪子）: https://github.com/RobLe3/cc-blender-skill — plugin/skills/reference-to-3d/SKILL.md
 License: MIT · 原作者: RobLe3 (https://github.com/RobLe3)
@@ -5,12 +11,6 @@ License: MIT · 原作者: RobLe3 (https://github.com/RobLe3)
 Blender 5.2 雷區：① BLENDER_EEVEE_NEXT 已死，只認 BLENDER_EEVEE/BLENDER_WORKBENCH/CYCLES ② Filmic 已移除，AgX 為默認 ③ action.fcurves 在 4.4+ 移除，走 layers[*].strips[*].channelbags[*].fcurves
 正文保留英文原文；上游 MCP 調用表述執行時改走我方 bridge /v1/execute 同構協議。
 -->
----
-name: reference-to-3d
-description: Reconstruct Blender models from supplied reference sheets, branding templates, texture atlases, orthographic front/side/back/top views, or mascot/logo art where visual fidelity to the source is more important than a plausible generated object. Use when the user says the model must match a template, wireframe, texture pack, character sheet, mascot sheet, or brand asset exactly; also use after feedback like "does not look like the reference", "fit the texture 1:1", "wrong number of visible parts", or "compare against the template". Requires Blender MCP plus local Python with Pillow/OpenCV/numpy; pairs with blender-uv-texturing, wireframe-to-3d, blender-modeling, blender-materials, and blender-export.
-when_to_use: User supplies reference images/templates/texture atlases/orthographic views and wants a model matching them, or repeated visual mismatch feedback requires a reference-locked corrective loop.
-allowed-tools: Read Bash Glob Grep mcp__blender__execute_blender_code mcp__blender__get_scene_info mcp__blender__get_object_info mcp__blender__get_viewport_screenshot
----
 
 # Reference-to-3D Reconstruction
 

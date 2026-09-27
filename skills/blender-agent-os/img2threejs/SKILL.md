@@ -1,3 +1,9 @@
+---
+name: img2threejs
+description: Turn an object or character reference image into a quality-gated, animation-ready procedural Three.js model built in code. Use for image-to-3D reconstruction, detail-accurate object rebuilds, stylized/likeness-maximized human characters, sculpt specs, and staged code generation.
+license: Apache-2.0
+version: 1.5.0
+---
 <!--
 來源（輪子）: https://github.com/jangtrinh/design-os-3d-blender
 License: MIT · 原作者: jangtrinh · 僅內部使用
@@ -6,12 +12,6 @@ Blender 5.2 雷區（僅 Blender 類配方適用）：① BLENDER_EEVEE_NEXT 已
 正文保留英文原文；MCP 調用表述執行時改走我方 bridge /v1/execute 同構協議。
 -->
 
----
-name: img2threejs
-description: Turn an object or character reference image into a quality-gated, animation-ready procedural Three.js model built in code. Use for image-to-3D reconstruction, detail-accurate object rebuilds, stylized/likeness-maximized human characters, sculpt specs, and staged code generation.
-license: Apache-2.0
-version: 1.5.0
----
 
 # img2threejs — Image to procedural Three.js
 

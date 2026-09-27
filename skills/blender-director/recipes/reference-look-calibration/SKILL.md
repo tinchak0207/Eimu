@@ -1,3 +1,9 @@
+---
+name: reference-look-calibration
+description: Calibrate Blender materials, lighting, camera crop, emission/glow, color management, and aura/HUD styling against supplied original/reference images using measurable color, brightness, saturation, bbox, and mask statistics. Use when a product must match the lighting/look of a source image or when audits say the product is too bright, desaturated, wrong hue, wrong glow, or wrong silhouette extent.
+when_to_use: Reference-based look-dev, lighting/material/color calibration, original-image visual matching, glow/aura/HUD matching, HSV/brightness/mask fit reports, final look pass after geometry and UV are locked.
+allowed-tools: Read Bash Glob Grep mcp__blender__execute_blender_code mcp__blender__get_scene_info mcp__blender__get_object_info
+---
 <!--
 來源（輪子）: https://github.com/RobLe3/cc-blender-skill — plugin/skills/reference-look-calibration/SKILL.md
 License: MIT · 原作者: RobLe3 (https://github.com/RobLe3)
@@ -5,12 +11,6 @@ License: MIT · 原作者: RobLe3 (https://github.com/RobLe3)
 Blender 5.2 雷區：① BLENDER_EEVEE_NEXT 已死，只認 BLENDER_EEVEE/BLENDER_WORKBENCH/CYCLES ② Filmic 已移除，AgX 為默認 ③ action.fcurves 在 4.4+ 移除，走 layers[*].strips[*].channelbags[*].fcurves
 正文保留英文原文；上游 MCP 調用表述執行時改走我方 bridge /v1/execute 同構協議。
 -->
----
-name: reference-look-calibration
-description: Calibrate Blender materials, lighting, camera crop, emission/glow, color management, and aura/HUD styling against supplied original/reference images using measurable color, brightness, saturation, bbox, and mask statistics. Use when a product must match the lighting/look of a source image or when audits say the product is too bright, desaturated, wrong hue, wrong glow, or wrong silhouette extent.
-when_to_use: Reference-based look-dev, lighting/material/color calibration, original-image visual matching, glow/aura/HUD matching, HSV/brightness/mask fit reports, final look pass after geometry and UV are locked.
-allowed-tools: Read Bash Glob Grep mcp__blender__execute_blender_code mcp__blender__get_scene_info mcp__blender__get_object_info
----
 
 # Reference Look Calibration
 

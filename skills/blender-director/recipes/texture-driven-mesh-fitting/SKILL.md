@@ -1,3 +1,9 @@
+---
+name: texture-driven-mesh-fitting
+description: Reshape source-locked mesh boundaries so the geometry fits texture-atlas or decal contours 1:1 before final UV/material work. Use when textures look off because the model behind them does not match the source texture region, or when the mesh must adapt to the texture instead of stretching the texture onto an approximate mesh.
+when_to_use: Texture-driven geometry fitting, mesh boundary fitting to atlas masks, UV-preserving contour correspondence, point/landmark deformation, source mask to mesh repair.
+allowed-tools: Read Bash Glob Grep mcp__blender__execute_blender_code mcp__blender__get_object_info
+---
 <!--
 來源（輪子）: https://github.com/RobLe3/cc-blender-skill — plugin/skills/texture-driven-mesh-fitting/SKILL.md
 License: MIT · 原作者: RobLe3 (https://github.com/RobLe3)
@@ -5,12 +11,6 @@ License: MIT · 原作者: RobLe3 (https://github.com/RobLe3)
 Blender 5.2 雷區：① BLENDER_EEVEE_NEXT 已死，只認 BLENDER_EEVEE/BLENDER_WORKBENCH/CYCLES ② Filmic 已移除，AgX 為默認 ③ action.fcurves 在 4.4+ 移除，走 layers[*].strips[*].channelbags[*].fcurves
 正文保留英文原文；上游 MCP 調用表述執行時改走我方 bridge /v1/execute 同構協議。
 -->
----
-name: texture-driven-mesh-fitting
-description: Reshape source-locked mesh boundaries so the geometry fits texture-atlas or decal contours 1:1 before final UV/material work. Use when textures look off because the model behind them does not match the source texture region, or when the mesh must adapt to the texture instead of stretching the texture onto an approximate mesh.
-when_to_use: Texture-driven geometry fitting, mesh boundary fitting to atlas masks, UV-preserving contour correspondence, point/landmark deformation, source mask to mesh repair.
-allowed-tools: Read Bash Glob Grep mcp__blender__execute_blender_code mcp__blender__get_object_info
----
 
 # Texture-Driven Mesh Fitting
 
