@@ -7,7 +7,7 @@ import * as React from "react";
 import { AGENT_SKILLS, AGENT_SKILL_FAMILY_LABELS, getAgentSkill } from "@/lib/agent-skills";
 import type { AgentSkillView } from "@/lib/agent-skills/registry";
 import { getSiteUrlFromEnv } from "@/lib/site-url";
-import { OUTPUT_KIND_LABELS } from "../page";
+import { OUTPUT_KIND_LABELS } from "@/lib/agent-skills/output-kinds";
 
 const SITE_URL = getSiteUrlFromEnv();
 

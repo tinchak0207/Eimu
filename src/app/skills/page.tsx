@@ -10,7 +10,8 @@ import {
   countAgentSkillsByFamily,
   listAgentSkills,
 } from "@/lib/agent-skills";
-import type { AgentSkillFamily, AgentSkillOutputKind } from "@/lib/agent-skills/types";
+import type { AgentSkillFamily } from "@/lib/agent-skills/types";
+import { OUTPUT_KIND_LABELS } from "@/lib/agent-skills/output-kinds";
 import { getSiteUrlFromEnv } from "@/lib/site-url";
 
 const SITE_URL = getSiteUrlFromEnv();
@@ -25,19 +26,6 @@ export const metadata: Metadata = {
   twitter: { card: "summary_large_image", title: TITLE, description: DESCRIPTION },
 };
 
-/**
- * 交付形态中文标签。与 `MySkillsDialog.tsx` 的 `SKILL_OUTPUT_KINDS` 用词一致，
- * 但那支是 `"use client"` 的表单选项模块：服务端组件读 client 模块的值只会拿到
- * client reference 代理，不能当数据用，所以这里保留一份同词的服务端标签。
- */
-export const OUTPUT_KIND_LABELS: Record<AgentSkillOutputKind, string> = {
-  image: "图像",
-  text: "文本",
-  video: "视频",
-  audio: "音频",
-  director: "导演",
-  mixed: "混合",
-};
 
 /** 只接受权威家族枚举里的值；未知 / 重复的 query 一律当「全部」。 */
 function readFamily(value: string | string[] | undefined): AgentSkillFamily | undefined {

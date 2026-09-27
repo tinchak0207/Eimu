@@ -2,7 +2,7 @@
  * Agent Skill 統一註冊表——四來源薄層（2026-09-27 立）。
  *
  * 四來源（本檔只投影/聚合，不改任何來源檔）：
- * - `builtin`  = `./index` 的 AGENT_SKILLS（10 檔 121 條，輕量能力條目）。
+ * - `builtin`  = `./index` 的 AGENT_SKILLS（11 檔 133 條，輕量能力條目；數字以現場實測為準）。
  * - `recipe`   = `../recipe-templates` 的 BUILT_IN_RECIPE_TEMPLATES（六槽配方快照）投影成
  *                同一種 view（id 加 `recipe-` 前綴）；配方不是 skill，但消費面要能一列舉。
  * - `template` = `../agent-templates` 的 AGENT_TEMPLATES（重模板：8 環 pipeline）投影

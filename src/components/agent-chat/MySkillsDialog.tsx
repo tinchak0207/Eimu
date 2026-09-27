@@ -20,6 +20,7 @@
  * hover 只換底色不動尺寸（零 layout shift）。
  */
 
+import { SKILL_OUTPUT_KIND_OPTIONS } from "@/lib/agent-skills/output-kinds";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Loader2, Pencil, Plus, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -43,15 +44,8 @@ export interface MySkillRow {
   tags: string[];
 }
 
-/** 輸出類型選項（與 `AgentSkillOutputKind` 八個字面量一一對應；標籤全簡體）。 */
-export const SKILL_OUTPUT_KINDS = [
-  { id: "image", label: "图像" },
-  { id: "text", label: "文本" },
-  { id: "video", label: "视频" },
-  { id: "audio", label: "音频" },
-  { id: "director", label: "导演" },
-  { id: "mixed", label: "混合" },
-] as const;
+/** 輸出類型選項：真源在 `@/lib/agent-skills/output-kinds`（列表頁／詳情頁共用同一組詞）。 */
+export const SKILL_OUTPUT_KINDS = SKILL_OUTPUT_KIND_OPTIONS;
 
 /**
  * 型別 → 可調用工具。使用者填的是「交付什麼」，工具是機制層的必然推導，
