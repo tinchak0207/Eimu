@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { MOCK_MODE, mockGetSelf } from "@/lib/mock";
 import { getGatewayBaseUrl } from "@/lib/new-api-auth-server";
 import { lookupUserIdByTokenViaRelay } from "@/lib/newapi-session-token";
+import { ensureWelcomeGiftForUser } from "@/lib/welcome-gift";
 
 export const preferredRegion = "sfo1";
 
@@ -25,6 +26,35 @@ function cacheVerifiedMe(key: string, data: unknown) {
     if (oldestKey !== undefined) meMicroCache.delete(oldestKey);
   }
   meMicroCache.set(key, { expiresAt: Date.now() + ME_CACHE_TTL_MS, data });
+}
+
+// 新人礼掛點（src/lib/welcome-gift.ts）：驗證通過後、寫快取前，首次命中即發，已發/不符合則
+// no-op。每個實例每個用戶只問一次控面（結案狀態永久記住；未結案 5 分鐘後再試），
+// 失敗只記日誌、絕不擋登入。本次發放成功時把 quota 就地加上，錢包當場看到到帳。
+const WELCOME_GIFT_TIMEOUT_MS = 3_000;
+const WELCOME_GIFT_RETRY_MS = 5 * 60_000;
+const WELCOME_GIFT_MEMO_MAX = 5_000;
+const welcomeGiftNextCheckAt = new Map<number, number>();
+
+async function applyWelcomeGift(payload: unknown): Promise<void> {
+  try {
+    const user = (payload as { data?: { id?: unknown; quota?: unknown } } | null)?.data;
+    const userId = Number(user?.id);
+    if (!user || !Number.isInteger(userId) || userId <= 0) return;
+    const nextCheckAt = welcomeGiftNextCheckAt.get(userId);
+    if (nextCheckAt !== undefined && nextCheckAt > Date.now()) return;
+
+    const result = await ensureWelcomeGiftForUser(userId, { timeoutMs: WELCOME_GIFT_TIMEOUT_MS });
+    const settled = result?.status === "granted" || result?.status === "already_granted" || result?.status === "ineligible";
+    if (welcomeGiftNextCheckAt.size >= WELCOME_GIFT_MEMO_MAX) welcomeGiftNextCheckAt.clear();
+    welcomeGiftNextCheckAt.set(userId, settled ? Number.POSITIVE_INFINITY : Date.now() + WELCOME_GIFT_RETRY_MS);
+
+    if (result?.status === "granted" && typeof user.quota === "number") {
+      user.quota += result.amountQuota;
+    }
+  } catch (error) {
+    console.error("[auth/me] welcome gift skipped", error instanceof Error ? error.message : String(error));
+  }
 }
 
 export async function GET(req: NextRequest) {
@@ -80,6 +110,7 @@ export async function GET(req: NextRequest) {
         if (retry.ok) {
           const retryData = await retry.json().catch(() => null);
           if (retryData?.success) {
+            await applyWelcomeGift(retryData);
             cacheVerifiedMe(cacheKey, retryData);
             return NextResponse.json(retryData);
           }
@@ -99,6 +130,7 @@ export async function GET(req: NextRequest) {
         { status: upstream.status === 401 ? 401 : 502 },
       );
     }
+    await applyWelcomeGift(data);
     cacheVerifiedMe(cacheKey, data);
     return NextResponse.json(data);
   } catch (err) {

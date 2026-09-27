@@ -19,6 +19,8 @@ export interface GatewayAdminUser {
   quota: number;
   used_quota?: number;
   status?: number;
+  /** 上游角色：1=普通用户，10=管理员，100=root（model/user.go RoleCommonUser 等）。 */
+  role?: number;
   group?: string;
 }
 
@@ -120,6 +122,37 @@ export async function listGatewayRedemptions(
     if (pageItems.length < pageSize) break;
   }
   return items;
+}
+
+/**
+ * 全量列出上游用户（只读：`GET /api/user/?p=&page_size=`，AdminAuth）。
+ *
+ * 实测（2026-09-27）：p 从 1 起算，p=0 与 p=1 返回同一页；信封为
+ * `{ page, page_size, total, items }`。这里按 id 去重并在「本页不足一页 / 已达 total /
+ * 本页没有新 id」时停，免得上游分页语义变动时死循环或重复计数。
+ */
+export async function listGatewayUsers(input: { pageSize?: number; maxPages?: number } = {}): Promise<GatewayAdminUser[]> {
+  const pageSize = Math.max(1, Math.min(input.pageSize ?? 100, 100));
+  const maxPages = Math.max(1, Math.min(input.maxPages ?? 200, 1000));
+  const byId = new Map<number, GatewayAdminUser>();
+  for (let page = 1; page <= maxPages; page += 1) {
+    const result = await callGateway<GatewayAdminUser[] | { items?: GatewayAdminUser[]; total?: number }>(
+      `/api/user/?p=${page}&page_size=${pageSize}`,
+    );
+    if (!result.success) throw new Error(result.message ?? "读取上游用户列表失败。");
+    const items = Array.isArray(result.data) ? result.data : (result.data?.items ?? []);
+    const total = Array.isArray(result.data) ? undefined : result.data?.total;
+    let added = 0;
+    for (const user of items) {
+      if (user?.id && !byId.has(user.id)) {
+        byId.set(user.id, user);
+        added += 1;
+      }
+    }
+    if (items.length < pageSize || added === 0) break;
+    if (typeof total === "number" && byId.size >= total) break;
+  }
+  return [...byId.values()];
 }
 
 /** 把某个用户的额度调整到目标张数。返回调整后的用户。 */
