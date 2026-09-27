@@ -92,3 +92,37 @@ Fetch GET /v1/models for current list. Each model includes:
 - 429: wait Retry-After + jitter before retrying; failed requests still count against quota
 - 402 insufficient_quota: tell user to top up, do NOT retry
 - Polling (GET /v1/images/{id}) does NOT consume rate limit quota
+
+## MCP (connect Eimu to a coding agent)
+
+Endpoint: POST https://eimu.dev/api/mcp — JSON-RPC 2.0 over Streamable HTTP
+Auth: `Authorization: Bearer sk-biz-<key>` (same key as the B2B API; mint at https://eimu.dev/settings/api-keys)
+Methods: `initialize`, `tools/list`, `tools/call`, `ping`; `notifications/*` return HTTP 202 with no body
+Transport: single POST per request — no SSE stream in this version; GET returns 405 with `Allow: POST`
+Unauthorized: 401 with `WWW-Authenticate: Bearer realm="eimu-mcp", resource_metadata="https://eimu.dev/.well-known/oauth-protected-resource"`
+Protected resource metadata (scopes): https://eimu.dev/.well-known/oauth-protected-resource
+Protocol errors (parse / invalid params / unknown method): HTTP 200 with a JSON-RPC `error` object
+
+Install guide (Codex / Claude Code / Cursor / OpenClaw / generic MCP client, copy-paste config):
+https://eimu.dev/mcp
+
+Discovery document (no credentials required):
+https://eimu.dev/.well-known/oauth-protected-resource
+
+Tools exposed by `tools/list` (source of truth: `src/lib/mcp/tools.ts`):
+
+| Tool | Scope | What it does |
+|------|-------|--------------|
+| list_skills | eimu:skills:read | List public skills (builtin / recipe / template) with keyword and family filters; private skills never appear |
+| get_skill | eimu:skills:read | Read one public skill by id: scenario, inputs, deliverables, callable tools, owning expert |
+| list_models | eimu:models:read | List image/video models available to this key with endpoint routing and pricing; call it before generating to get a model id |
+| generate_image | eimu:image:write | Generate an image from a prompt (defaults to URL responses), same ledger path as /v1/images/generations |
+| edit_image | eimu:image:write | Edit one input image with a prompt, same path as /v1/images/edits |
+| generate_video | eimu:video:write | Submit an async video task (returns an id, poll with get_result) |
+| tts | eimu:audio:write | Submit an async text-to-speech task (returns an id, poll with get_result) |
+| upscale | eimu:image:write | Upscale an image with idempotent reserve and refund on failure |
+| get_quota | eimu:quota:read | Read the balance and currency of the account bound to this key (same ledger as /v1/quota) |
+| get_result | eimu:tasks:read | Fetch an async result by id: kind = image / video / tts |
+
+Recommended agent flow: `get_quota` → `list_models` → `generate_image` / `generate_video` / `tts` → `get_result`.
+Billing: web, REST API and MCP share one ledger — reserve on submit, commit on success, auto-refund on failure.
