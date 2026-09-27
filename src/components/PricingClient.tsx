@@ -6,11 +6,14 @@ import { BadgeCheck, BookOpen, ChevronDown, Copy, Gift, Sparkles, Ticket, X } fr
 import type { MapayPaymentType } from "@/lib/mapay";
 import {
   ACTIVE_PRICING_PROMO,
+  FIRST_CHARGE_PLAN,
+  FIRST_CHARGE_PLAN_ID,
   MAX_REWARDED_INVITES,
   REFERRAL_REWARD_COINS,
   REFEREE_REWARD_COINS,
   customPlanFor,
   formatCoins,
+  gptImage2EquivalentImages,
   modelPriceRows,
   PLANS,
   resolvePricingPlan,
@@ -68,6 +71,60 @@ function ActivityBanner({ promo }: { promo: PricingPromo }) {
 /** 表内分辨率的短标签：1k→1K、1080p→1080P，压缩横向宽度。 */
 function resolutionShortLabel(resolution: string): string {
   return resolution.toUpperCase();
+}
+
+/**
+ * 首充专享卡（一次性、限一帐号一次）：只在「已登录且控面确认还有资格」时出现，
+ * 且永远排在三档正价之前（这是转化率最高的一张牌）。
+ *
+ * 资格是服务端权威（/api/payments/first-charge/eligibility → 控面帐本判准），
+ * 前端只是显示闸门；真正的执法在 checkout 403 与入帐时按正价折算（见 src/lib/first-charge.ts）。
+ * 没资格或未登录整卡不渲染；未登录时卡上按钮先走登录（登录后回来才会重新判资格）。
+ */
+function FirstChargeOffer({
+  plan,
+  coinsPerImage,
+  paying,
+  onPay,
+}: {
+  plan: typeof FIRST_CHARGE_PLAN;
+  coinsPerImage: number;
+  paying: boolean;
+  onPay: () => void;
+}) {
+  return (
+    <section
+      id="first-charge"
+      aria-labelledby="first-charge-heading"
+      className="p3d-panel relative mt-4 scroll-mt-6 overflow-hidden p-4 sm:p-5"
+    >
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
+        <div className="min-w-0 flex-1">
+          <p className="p3d-eyebrow flex items-center gap-1.5">
+            <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+            {plan.badge}
+          </p>
+          <h2 id="first-charge-heading" className="mt-1.5 text-ios-title3 font-bold text-[color:var(--p3d-ink)]">
+            ¥{plan.price} 得 <span className="p3d-hl">{formatCoins(plan.coins)} 币</span>
+            <span className="ml-2 text-ios-footnote font-medium text-[color:var(--p3d-ink-3)]">
+              约 {gptImage2EquivalentImages(plan, coinsPerImage)} 张 GPT Image 2
+            </span>
+          </h2>
+          <p className="mt-1 text-ios-footnote text-[color:var(--p3d-ink-3)]">
+            每个账号限一次，仅限从未充值过的账号；{plan.validDays} 天内有效，全模型通用。
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onPay}
+          disabled={paying}
+          className="p3d-btn-light shrink-0 disabled:opacity-60"
+        >
+          {paying ? "正在打开支付页…" : `立即支付 ¥${plan.price}`}
+        </button>
+      </div>
+    </section>
+  );
 }
 
 export function PricingClient() {
@@ -200,6 +257,64 @@ export function PricingClient() {
     setPayOpened(false);
   };
 
+  /* ── 首充专享卡 ──
+     是否显示由服务端资格说了算（见 FirstChargeOffer 注释）：已登录才去问，
+     未登录 / 没资格整卡不渲染。答不出（通道挂）也当没资格——这卡是 4 倍划算的
+     一次性优惠，多显示一次就是多一次滥用入口。 */
+  const [firstChargeEligible, setFirstChargeEligible] = useState(false);
+  const [firstChargePaying, setFirstChargePaying] = useState(false);
+
+  useEffect(() => {
+    if (!isLoggedIn) {
+      setFirstChargeEligible(false);
+      return;
+    }
+    let alive = true;
+    void (async () => {
+      try {
+        const res = await fetch("/api/payments/first-charge/eligibility", { cache: "no-store" });
+        const data = (await res.json().catch(() => null)) as { eligible?: unknown } | null;
+        if (alive) setFirstChargeEligible(data?.eligible === true);
+      } catch {
+        if (alive) setFirstChargeEligible(false);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [isLoggedIn, token]);
+
+  /* ?plan=first-charge（余额不足提示的「去充值」带过来的）：滚到首充卡。
+     资格还没查完时延后一拍——卡可能要等资格回来才出现，落空会滚到页尾。 */
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("plan") !== FIRST_CHARGE_PLAN_ID) return;
+    const target = document.getElementById("first-charge");
+    const anchor = target ?? document.getElementById("pricing-plans") ?? document.body;
+    anchor.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (!isLoggedIn) {
+      // 未登录：卡不渲染，但用户意图明确——直接进入登录，回来才判资格。
+      startGithubLogin();
+    }
+    // 只认首帧的 URL 参数；isLoggedIn 变化不再重滚（避免登录回来又跳一次）。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleFirstChargePay = async () => {
+    if (!isLoggedIn) {
+      startGithubLogin();
+      return;
+    }
+    setFirstChargePaying(true);
+    try {
+      // 与正价档同一条收单链路（服务端另有资格闸：没资格 403、绝不发出支付页）。
+      await refresh();
+      handleMapayBuy(FIRST_CHARGE_PLAN_ID, payMethod);
+      toast({ title: "支付页已打开", description: "完成后金币自动到账，余额到此刷新" });
+    } finally {
+      setFirstChargePaying(false);
+    }
+  };
+
   /* 环停在哪档就选中哪档：正面票面的主按钮永远是「立即支付」，想买的人少点一次。
      引用必须稳定（环的 effect 依赖它，每次渲染换引用会反复重置「支付页已打开」）。 */
   const handleFrontChange = useCallback((planId: string) => {
@@ -298,9 +413,22 @@ export function PricingClient() {
         {/* 活动位 — 只有真实活动数据才渲染；无数据整条隐藏 */}
         {ACTIVE_PRICING_PROMO && <ActivityBanner promo={ACTIVE_PRICING_PROMO} />}
 
+        {/* 首充专享 — 有资格才渲染（服务端判准）；永远在正价档之前 */}
+        {firstChargeEligible && (
+          <FirstChargeOffer
+            plan={FIRST_CHARGE_PLAN}
+            coinsPerImage={referenceCoinsPerImage}
+            paying={firstChargePaying}
+            onPay={() => void handleFirstChargePay()}
+          />
+        )}
+
         {/* 套餐环（carousel）— AI 助理模板同款轮子：点前卡即选，收银台在卡内；
             末位自定义档带 Log Scale 滑杆（2,000 → 100 万金币，0.045 元/金币）。 */}
-        <div className="relative ml-[calc(50%-50vw)] mt-2 w-screen sm:mt-3">
+        <div
+          id="pricing-plans"
+          className="relative ml-[calc(50%-50vw)] mt-2 w-screen scroll-mt-6 sm:mt-3"
+        >
           <PricingPlanCarousel
             plans={plansForCarousel}
             includeCustom={includeCustom}

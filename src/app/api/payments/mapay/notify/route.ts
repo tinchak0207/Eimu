@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { resolvePricingPlan } from "@/lib/plans";
+import { FIRST_CHARGE_FALLBACK_COINS, FIRST_CHARGE_PLAN_ID, resolvePricingPlan } from "@/lib/plans";
 import {
   getMapayConfig,
   isMapayPaymentSuccessful,
@@ -7,8 +7,9 @@ import {
   verifyMapaySignature,
   type MapayFields,
 } from "@/lib/mapay";
-import { fulfillMapayRedemption } from "@/lib/mapay-redemption";
+import { fulfillMapayRedemption, type MapayRedemptionPlan } from "@/lib/mapay-redemption";
 import { creditMapayOrderViaRelay, mapayDeliveryFor } from "@/lib/mapay-credit";
+import { readFirstChargeEligibilityViaRelay } from "@/lib/first-charge";
 import { resolveMapayOrderBinding } from "@/lib/mapay-order-param";
 
 export const runtime = "nodejs";
@@ -18,6 +19,29 @@ function response(text: string, status = 200) {
     status,
     headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
   });
+}
+
+/**
+ * 首充专享档在发码兜底里的额度口径（直達入帳通道正不可用，所以另问一次只读资格）。
+ * 带本单单号：名额若就是本单占的（入帐失败后重试/发码兜底），仍然是全额 300 币。
+ * 三态处置（见 first-charge.ts）：确定没资格 → 按 ¥7 对应正价折算 70 币（不给 4 倍优惠）；
+ * 资格不明（通道也挂了，没人能判）→ 照档位原价发——**钱必兑现优先于优惠守门**
+ * （付了钱拿不到额度的代价比多发 230 币大得多，见 payment-must-fulfill-0920）。
+ */
+async function firstChargeRedemptionPlan(
+  plan: MapayRedemptionPlan,
+  userId: number,
+  orderId: string,
+): Promise<MapayRedemptionPlan> {
+  const eligible = await readFirstChargeEligibilityViaRelay({ userId, outTradeNo: orderId });
+  if (eligible === false) {
+    console.warn("[mapay notify] first-charge ineligible, redemption uses standard-rate coins", {
+      out_trade_no: orderId,
+      coins: FIRST_CHARGE_FALLBACK_COINS,
+    });
+    return { ...plan, coins: FIRST_CHARGE_FALLBACK_COINS };
+  }
+  return plan;
 }
 
 async function readParams(req: NextRequest): Promise<MapayFields> {
@@ -111,9 +135,14 @@ async function handleNotify(req: NextRequest) {
       });
     }
 
+    const redemptionPlan =
+      plan.id === FIRST_CHARGE_PLAN_ID && bound
+        ? await firstChargeRedemptionPlan(plan, bound.userId, params.out_trade_no)
+        : plan;
+
     const redemption = await fulfillMapayRedemption({
       orderId: params.out_trade_no,
-      plan,
+      plan: redemptionPlan,
     });
 
     console.info("[mapay notify]", {

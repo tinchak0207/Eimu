@@ -9,6 +9,9 @@
 //
 // 金額口徑一律由控面自己重算（planId → plans.ts），**不接受呼叫方傳來的額度**；
 // 上游調額不冪等，冪等鍵是 mPay 的 out_trade_no（mapay_credit 主鍵）。
+//
+// 首充专享档（plan id `first-charge`）的額度例外地不是標價函數：有資格才給 300 幣，
+// 資格不符按正價折算（見 src/lib/first-charge.ts 的 resolveFirstChargeGrant）。
 
 import { NextRequest, NextResponse } from "next/server";
 import {
@@ -24,7 +27,9 @@ import {
   type MapayCreditOutcome,
 } from "@/lib/mapay-credit";
 import { mapayPlanQuota } from "@/lib/mapay-redemption";
-import { resolvePricingPlan } from "@/lib/plans";
+import { FIRST_CHARGE_PLAN_ID, resolvePricingPlan } from "@/lib/plans";
+import { resolveFirstChargeGrantWithSql } from "@/lib/first-charge";
+import { QUOTA_PER_COIN } from "@/lib/quota-constants";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -95,13 +100,32 @@ export async function POST(req: NextRequest) {
   if (!plan) return NextResponse.json({ ok: false, message: "缺少合法的 planId。" }, { status: 400 });
 
   try {
-    const outcome = await runMapayCreditWithSql(getGenerationSql(), {
+    const sql = getGenerationSql();
+    // 首充专享档的额度不是标价函数：有资格才给 300 币；资格不符（并发第二单 / 已有充值记录 /
+    // 资格判不了）按 ¥7 对应正价折算（约 70 币）入帐，原因写进 mapay_credit.detail。
+    // 「每帐号限一次」的并发执法点是 first_charge_claim 的 user_id 主键（见 src/lib/first-charge.ts）。
+    let amountQuota = mapayPlanQuota(plan);
+    let detail: string | undefined;
+    if (plan.id === FIRST_CHARGE_PLAN_ID) {
+      const grant = await resolveFirstChargeGrantWithSql(sql, { userId, outTradeNo: orderId });
+      amountQuota = grant.amountQuota;
+      detail = grant.detail;
+    }
+
+    const outcome = await runMapayCreditWithSql(sql, {
       orderId,
       userId,
       planId: plan.id,
-      amountQuota: mapayPlanQuota(plan),
+      amountQuota,
+      detail,
     });
-    console.info("[internal/mapay-credit]", { order_id: orderId, user_id: userId, plan_id: plan.id, outcome });
+    console.info("[internal/mapay-credit]", {
+      order_id: orderId,
+      user_id: userId,
+      plan_id: plan.id,
+      coins: amountQuota / QUOTA_PER_COIN,
+      outcome,
+    });
     return NextResponse.json({ ok: true, outcome });
   } catch (error) {
     console.error(

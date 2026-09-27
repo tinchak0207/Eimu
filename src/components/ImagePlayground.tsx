@@ -662,7 +662,8 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
         description: `这次需要 ${requiredCoins} 币，充值后马上继续`,
         variant: "destructive",
         action: (
-          <ToastAction altText="去充值" onClick={() => { window.location.href = "/pricing"; }}>
+          // 带 ?plan=first-charge：定价页据此滚到首充专享卡（有资格的人第一眼就看到 4 倍划算那档）。
+          <ToastAction altText="去充值" onClick={() => { window.location.href = "/pricing?plan=first-charge"; }}>
             去充值
           </ToastAction>
         ),

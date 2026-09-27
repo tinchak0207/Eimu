@@ -68,6 +68,8 @@ export interface MapayCreditInput {
   userId: number;
   planId: string;
   amountQuota: number;
+  /** 入帳口徑說明（寫進 mapay_credit.detail；如首充資格不符、按正價折算）。 */
+  detail?: string;
 }
 
 // ─────────────────────────────────────────── 儲存介面
@@ -141,7 +143,7 @@ export async function runMapayCreditOnce(
     return untouched ? "failed" : "in_flight";
   }
 
-  await deps.store.mark(input.orderId, "applied").catch((error) => {
+  await deps.store.mark(input.orderId, "applied", input.detail).catch((error) => {
     console.error(
       `[mapay-credit] order=${input.orderId} 已加额但未能标 applied：${reasonOf(error)}`,
     );
