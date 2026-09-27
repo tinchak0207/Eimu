@@ -543,3 +543,34 @@ test("openaiVideoMaxWaitMs：預設 20 分鐘，可 OPENAI_VIDEO_MAX_WAIT_MS 覆
     else process.env.OPENAI_VIDEO_MAX_WAIT_MS = original;
   }
 });
+
+test("xiaoyxiao 實彈形狀：completed 響應只有頂層 url（無 video_url/metadata/data）也能出片", async () => {
+  // 2026-09-27 實查 xiaoyxiao /v1/videos/{id} completed 響應：
+  // {"id":"task_…","object":"video","model":"seedance-2.0-mini-deal","status":"completed",
+  //  "progress":100,"url":"https://dream-media.tos-cn-beijing.volces.com/videos/<uuid>/0.mp4"}
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+    if (String(url).endsWith("/videos") && String(init?.method ?? "") === "POST") {
+      return jsonResponse(200, { id: TASK_ID, object: "video", model: "sd12-seedance-2.0", status: "queued", progress: 0 });
+    }
+    return jsonResponse(200, {
+      id: TASK_ID,
+      object: "video",
+      model: "sd12-seedance-2.0",
+      status: "completed",
+      progress: 100,
+      url: "https://dream-media.tos-cn-beijing.volces.com/videos/19e7efa6-c6e8-410b-8b0e-d77a344b245e/0.mp4",
+    });
+  }) as typeof fetch;
+
+  try {
+    process.env.CANGYUANSUANLI_API_KEY = "ck-test-key";
+    const output = await generateWithOpenaiVideo(supplier(), videoInput());
+    assert.equal(output.url, "https://dream-media.tos-cn-beijing.volces.com/videos/19e7efa6-c6e8-410b-8b0e-d77a344b245e/0.mp4");
+    assert.equal(output.providerTaskId, TASK_ID);
+    assert.equal(output.httpStatus, 200);
+  } finally {
+    delete process.env.CANGYUANSUANLI_API_KEY;
+    globalThis.fetch = originalFetch;
+  }
+});

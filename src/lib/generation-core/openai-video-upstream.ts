@@ -313,6 +313,17 @@ function extractOutputUrl(response: Record<string, unknown>, baseUrl: string, ta
     return topLevelUrl;
   }
 
+  // 顶层 url（xiaoyxiao 實彈形狀，2026-09-27）：completed 響應為
+  // {"id":"task_…","object":"video","model":"seedance-2.0-mini-deal",
+  //  "status":"completed","progress":100,
+  //  "url":"https://dream-media.tos-cn-beijing.volces.com/videos/<uuid>/0.mp4"}
+  // —— 既無 video_url、無 metadata、無 data 陣列，缺這條會誤判 upstream_protocol
+  // （"completed but no output URL"），把已出好的片當協議 bug 丟掉。
+  const rawTopLevelUrl = String(response.url ?? "").trim();
+  if (rawTopLevelUrl.startsWith("http://") || rawTopLevelUrl.startsWith("https://")) {
+    return rawTopLevelUrl;
+  }
+
   const metadata = response.metadata as Record<string, unknown> | undefined;
   if (metadata) {
     // sd4 族冗余：metadata.url；sd7 族：metadata.video_url
