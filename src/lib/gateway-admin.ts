@@ -319,3 +319,45 @@ export async function provisionBizBillingAccount(
   const user = await setGatewayUserImageQuota(fresh.id, fresh.quota, initialImages);
   return { user, created: true };
 }
+
+/**
+ * 上游注册记录（只读）：激活漏斗的「注册」一步的唯一依据。
+ *
+ * `GET /api/user/?p=&page_size=` 按 id 倒序分页、`p` 从 1 起（生产实测 p=0 与 p=1
+ * 回同一页，故从 1 起算并按 id 去重）；`created_at` 为 unix 秒（new-api users.created_at）。
+ * 倒序分页里整页最早的注册早于 since 即可停——更旧的页不可能再有窗口内的注册。
+ * 软删除用户上游不返回（与 sqlite `deleted_at IS NULL` 同口径）。
+ */
+export interface GatewayRegisteredUser {
+  id: number;
+  created_at: number;
+}
+
+export async function listGatewayUsersRegisteredSince(
+  sinceUnixSeconds: number,
+  input: { maxPages?: number; pageSize?: number } = {},
+): Promise<{ users: GatewayRegisteredUser[]; truncated: boolean }> {
+  const maxPages = Math.max(1, Math.min(input.maxPages ?? 20, 50));
+  const pageSize = Math.max(1, Math.min(input.pageSize ?? 100, 100));
+  const byId = new Map<number, GatewayRegisteredUser>();
+  for (let page = 1; page <= maxPages; page += 1) {
+    const result = await callGateway<GatewayRegisteredUser[] | { items?: GatewayRegisteredUser[] }>(
+      `/api/user/?p=${page}&page_size=${pageSize}`,
+    );
+    if (!result.success) throw new Error(result.message ?? "读取上游用户列表失败。");
+    const pageItems = Array.isArray(result.data) ? result.data : (result.data?.items ?? []);
+    let oldest = Number.POSITIVE_INFINITY;
+    for (const item of pageItems) {
+      const id = Number(item.id);
+      const createdAt = Number(item.created_at);
+      if (!Number.isFinite(id) || !Number.isFinite(createdAt)) continue;
+      oldest = Math.min(oldest, createdAt);
+      if (createdAt >= sinceUnixSeconds) byId.set(id, { id, created_at: createdAt });
+    }
+    if (pageItems.length < pageSize || oldest < sinceUnixSeconds) {
+      return { users: [...byId.values()].sort((a, b) => a.id - b.id), truncated: false };
+    }
+  }
+  // 翻满页上限仍未越过 since：注册数只是下界，必须如实标记。
+  return { users: [...byId.values()].sort((a, b) => a.id - b.id), truncated: true };
+}

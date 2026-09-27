@@ -8,7 +8,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdminSession } from "@/lib/admin-session";
 import {
+  DEFAULT_FUNNEL_DAYS,
   DEFAULT_WINDOW_DAYS,
+  FUNNEL_WINDOW_OPTIONS,
   MAX_WINDOW_DAYS,
   buildStatisticsProjection,
 } from "@/lib/generation-core/statistics-projection";
@@ -41,7 +43,24 @@ export async function GET(req: NextRequest) {
       days = parsed;
     }
 
-    const projection = await buildStatisticsProjection({ days });
+    const rawFunnelDays = req.nextUrl.searchParams.get("funnelDays");
+    let funnelDays = DEFAULT_FUNNEL_DAYS;
+    if (rawFunnelDays !== null) {
+      const parsed = Number(rawFunnelDays);
+      if (!(FUNNEL_WINDOW_OPTIONS as readonly number[]).includes(parsed)) {
+        return NextResponse.json(
+          { success: false, message: `funnelDays 只能是 ${FUNNEL_WINDOW_OPTIONS.join(" 或 ")}。` },
+          { status: 400 },
+        );
+      }
+      funnelDays = parsed;
+    }
+
+    // 內部流量預設不計；只有明確 includeInternal=1/true 才計入。
+    const rawInclude = req.nextUrl.searchParams.get("includeInternal");
+    const includeInternal = rawInclude === "1" || rawInclude === "true";
+
+    const projection = await buildStatisticsProjection({ days, funnelDays, includeInternal });
     return NextResponse.json({ success: true, ...projection }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return errorResponse(error, "读取统计数据失败。");

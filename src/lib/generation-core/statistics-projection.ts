@@ -42,6 +42,13 @@ export const MAX_WINDOW_DAYS = 30;
 export const LEDGER_ROW_LIMIT = 5_000;
 /** 剩餘額度讀取上限（每個用戶一次上游 GET，避免統計頁打爆 new-api）；超上限必須標 truncated。 */
 export const MAX_QUOTA_USERS = 25;
+/** 激活漏斗時間窗（天）。 */
+export const FUNNEL_WINDOW_OPTIONS = [7, 30] as const;
+export const DEFAULT_FUNNEL_DAYS = 30;
+/** 回訪判定：首次生成日之後 1..RETURN_WINDOW_DAYS 個自然日內另有一天有生成。 */
+export const RETURN_WINDOW_DAYS = 7;
+/** 漏斗取任務行的上限；取滿即標 truncated（後續步驟變下界）。 */
+export const FUNNEL_JOB_ROW_LIMIT = 20_000;
 
 /** 帳本 operation：commit＝扣費（正向），refund＝退款（同一 job 的負向，用來抵消費）。 */
 export type LedgerOperationKind = "commit" | "refund";
@@ -500,6 +507,21 @@ export const STATISTICS_SOURCES: StatisticsSourceRow[] = [
     note: `與 quota-precheck 同通路；讀不到即 unknown，不以 0 代替。每個身份一次上游 GET，上限 ${MAX_QUOTA_USERS} 個——超過即標 truncated 並如實給出覆蓋數。`,
   },
   {
+    metric: "激活漏斗：註冊",
+    source: "new-api users.created_at（GET /api/user/ 管理分頁）",
+    note: "滾動窗口 now − 7/30 天內註冊；預設剔除 INTERNAL_USER_IDS。",
+  },
+  {
+    metric: "激活漏斗：生成 / 成功 / 回訪 / 首圖耗時",
+    source: "generation_job（擁有者 = web:<uid> 或 biz_api_key.user_id）",
+    note: `回訪 = 首次生成自然日（${STATISTICS_DAY_TIMEZONE}）後 1..${RETURN_WINDOW_DAYS} 日內另有一天有生成；首圖耗時取 succeeded 任務 finished_at，分位數為最近秩（同 percentile_disc）。`,
+  },
+  {
+    metric: "激活漏斗：付費",
+    source: "account_ledger (entry_type='recharge', amount > 0)",
+    note: "排除 seed/簽到/新人禮/贈送類來源；只計註冊之後的現金入帳。漏斗付費步要求已走完回訪步，未回訪即付費的人數單列。",
+  },
+  {
     metric: "模型三態",
     source: "GET /api/user/model-status（與 /v1/model-status 同一份判活）",
     note: "由管理頁直接消費既有端點，不在此層重算。",
@@ -530,10 +552,11 @@ function mapConsumptionRow(row: Record<string, unknown>): LedgerConsumptionRow {
  * release 解除預留、reserve 預留）不是用戶消耗，刻意排除。
  */
 export async function readLedgerConsumption(
-  input: { days: number; sql?: GenerationSql } = { days: DEFAULT_WINDOW_DAYS },
+  input: { days: number; sql?: GenerationSql; excludeUserIds?: number[] } = { days: DEFAULT_WINDOW_DAYS },
 ): Promise<LedgerConsumptionRow[]> {
   const sql = input.sql ?? getGenerationSql();
   const days = Math.max(1, Math.min(Math.floor(input.days), MAX_WINDOW_DAYS));
+  const excluded = userIdArrayLiteral(input.excludeUserIds ?? []);
   const rows = await sql<Record<string, unknown>[]>`
     SELECT operation.id AS operation_id,
            operation.job_id AS job_id,
@@ -555,10 +578,19 @@ export async function readLedgerConsumption(
       LIMIT 1
     ) attempt ON true
     LEFT JOIN supplier ON supplier.id = attempt.supplier_id
+    LEFT JOIN biz_api_key owner_key ON job.tenant_id = 'biz:' || owner_key.id
     WHERE operation.operation IN ('commit', 'refund')
       AND operation.status = 'applied'
       AND operation.applied_at IS NOT NULL
       AND operation.applied_at >= now() - (${String(days)}::text || ' days')::interval
+      AND COALESCE(
+        COALESCE(
+          CASE WHEN job.tenant_id ~ '^web:[0-9]+$' THEN split_part(job.tenant_id, ':', 2)::bigint END,
+          owner_key.user_id::bigint,
+          job.billing_user_id
+        ) = ANY(${excluded}::bigint[]),
+        false
+      ) = false
     ORDER BY operation.applied_at DESC
     LIMIT ${LEDGER_ROW_LIMIT}
   `;
@@ -583,10 +615,11 @@ export interface BillingIdentityCoverage {
  * 以前只回一組被 LIMIT 砍過的 id，展示層無從知道「合計只是前 25 個之和」。
  */
 export async function readBillingIdentityCoverage(
-  input: { days: number; sql?: GenerationSql } = { days: DEFAULT_WINDOW_DAYS },
+  input: { days: number; sql?: GenerationSql; excludeUserIds?: number[] } = { days: DEFAULT_WINDOW_DAYS },
 ): Promise<BillingIdentityCoverage> {
   const sql = input.sql ?? getGenerationSql();
   const days = Math.max(1, Math.min(Math.floor(input.days), MAX_WINDOW_DAYS));
+  const excluded = userIdArrayLiteral(input.excludeUserIds ?? []);
   const rows = await sql<{ billing_user_id: string | number; total_identities: string | number }[]>`
     SELECT identity.billing_user_id AS billing_user_id,
            count(*) OVER () AS total_identities
@@ -594,11 +627,20 @@ export async function readBillingIdentityCoverage(
       SELECT DISTINCT job.billing_user_id AS billing_user_id
       FROM billing_operation operation
       JOIN generation_job job ON job.id = operation.job_id
+      LEFT JOIN biz_api_key owner_key ON job.tenant_id = 'biz:' || owner_key.id
       WHERE operation.operation IN ('commit', 'refund')
         AND operation.status = 'applied'
         AND operation.applied_at IS NOT NULL
         AND operation.applied_at >= now() - (${String(days)}::text || ' days')::interval
         AND job.billing_user_id IS NOT NULL
+        AND COALESCE(
+          COALESCE(
+            CASE WHEN job.tenant_id ~ '^web:[0-9]+$' THEN split_part(job.tenant_id, ':', 2)::bigint END,
+            owner_key.user_id::bigint,
+            job.billing_user_id
+          ) = ANY(${excluded}::bigint[]),
+          false
+        ) = false
     ) identity
     ORDER BY identity.billing_user_id
     LIMIT ${MAX_QUOTA_USERS}
@@ -688,6 +730,9 @@ export interface StatisticsProjection {
   consumption: ConsumptionProjection | null;
   channelHealth: ChannelHealthEntry[];
   remainingQuota: RemainingQuotaProjection;
+  /** 內部流量口徑：消耗/剩餘額度/漏斗三處共用同一份名單與開關。 */
+  traffic: { includeInternal: boolean; internalUserIds: number[] };
+  activationFunnel: ActivationFunnelResult;
   sources: StatisticsSourceRow[];
   notes: string[];
 }
@@ -702,11 +747,23 @@ export async function buildStatisticsProjection(input: {
   loadRemainingQuota?: (userIds: number[]) => Promise<RemainingQuotaEntry[]>;
   /** 注入時鐘供測試（半天桶標記依賴「窗口起點落在哪一天」）。 */
   now?: Date;
+  /** 是否計入內部流量（預設不計）。 */
+  includeInternal?: boolean;
+  /** 內部用戶名單（預設讀 env INTERNAL_USER_IDS）。 */
+  internalUserIds?: number[];
+  /** 激活漏斗時間窗（7 / 30，預設 30）。 */
+  funnelDays?: number;
+  loadRegistrations?: RegistrationLoader;
 } = {}): Promise<StatisticsProjection> {
   const days = Math.max(1, Math.min(Math.floor(input.days ?? DEFAULT_WINDOW_DAYS), MAX_WINDOW_DAYS));
   const now = input.now ?? new Date();
   const generatedAt = now.toISOString();
   const partialFromDay = windowStartDay({ days, now });
+  const includeInternal = input.includeInternal === true;
+  const internalUserIds = input.internalUserIds ?? resolveInternalUserIds();
+  const traffic = { includeInternal, internalUserIds };
+  const excludeUserIds = includeInternal ? [] : internalUserIds;
+  const funnelDays = input.funnelDays ?? DEFAULT_FUNNEL_DAYS;
   if (!input.sql && !generationDatabaseConfigured()) {
     return {
       window: { days, generatedAt, dayTimezone: STATISTICS_DAY_TIMEZONE, partial: false, windowStartDay: partialFromDay },
@@ -714,21 +771,31 @@ export async function buildStatisticsProjection(input: {
       consumption: null,
       channelHealth: [],
       remainingQuota: projectRemainingQuota([]),
+      traffic,
+      activationFunnel: { state: "unavailable", days: funnelDays, reason: "控制面資料庫未配置" },
       sources: STATISTICS_SOURCES,
       notes: ["本實例沒有控制面資料庫連線（GENERATION_DATABASE_URL），統計不可用。"],
     };
   }
 
   const sql = input.sql ?? getGenerationSql();
-  const [rows, channelHealth, identityCoverage] = await Promise.all([
-    readLedgerConsumption({ days, sql }),
+  const [rows, channelHealth, identityCoverage, activationFunnel] = await Promise.all([
+    readLedgerConsumption({ days, sql, excludeUserIds }),
     readChannelHealth(sql).catch((error) => {
       console.error("[statistics] channel health read failed (回空清單，不猜健康)", error);
       return [] as ChannelHealthEntry[];
     }),
-    readBillingIdentityCoverage({ days, sql }).catch((error) => {
+    readBillingIdentityCoverage({ days, sql, excludeUserIds }).catch((error) => {
       console.error("[statistics] billing identity list failed", error);
       return { ids: [], limit: MAX_QUOTA_USERS, totalIdentities: 0, truncated: false } as BillingIdentityCoverage;
+    }),
+    buildActivationFunnel({
+      days: funnelDays,
+      now,
+      sql,
+      internalUserIds,
+      includeInternal,
+      loadRegistrations: input.loadRegistrations,
     }),
   ]);
 
@@ -748,6 +815,11 @@ export async function buildStatisticsProjection(input: {
     partialFromDay,
     quotaCoverage: remainingQuota.coverage,
   });
+  if (!includeInternal && internalUserIds.length > 0) {
+    usageNotes.notes.push(
+      `已剔除內部流量（用戶 ${internalUserIds.join(", ")}，env INTERNAL_USER_IDS）：消耗、剩餘額度、激活漏斗均不含其任務；渠道判活計數器是供應商級累計值，無法按用戶拆分，不受此開關影響。`,
+    );
+  }
   return {
     window: {
       days,
@@ -760,6 +832,8 @@ export async function buildStatisticsProjection(input: {
     consumption: projectConsumption(rows, { partialFromDay }),
     channelHealth,
     remainingQuota,
+    traffic,
+    activationFunnel,
     sources: STATISTICS_SOURCES,
     notes: usageNotes.notes,
   };
@@ -804,4 +878,451 @@ async function defaultLoadRemainingQuota(userIds: number[]): Promise<RemainingQu
       }
     }),
   );
+}
+
+// ── 內部流量剔除 ─────────────────────────────────────────────────────────────
+// 站長自測（117）與測試 key（82）佔近 30 天絕大多數生成——混進統計就是「看起來有量」的假象。
+// 內部名單唯一來源：env INTERNAL_USER_IDS（逗號分隔 new-api 用戶 id）；未設置用預設名單，
+// 明確設為空字串 = 沒有內部用戶（不剔除）。「用戶」一律指任務擁有者：web:<uid> 直接取 uid，
+// biz:<keyid> 取 biz_api_key.user_id（站長的 key 有記到別的計費身份上，只看 billing_user_id 會漏剔）。
+
+export const DEFAULT_INTERNAL_USER_IDS: readonly number[] = [117, 82];
+
+export function resolveInternalUserIds(raw: string | undefined = process.env.INTERNAL_USER_IDS): number[] {
+  if (raw === undefined) return [...DEFAULT_INTERNAL_USER_IDS];
+  const ids = raw
+    .split(",")
+    .map((part) => Number(part.trim()))
+    .filter((id) => isPositiveUserId(id));
+  return [...new Set(ids)].sort((a, b) => a - b);
+}
+
+function isPositiveUserId(id: number): boolean {
+  return Number.isInteger(id) && id > 0;
+}
+
+/**
+ * DB 時間 → ISO。postgres.js 回的是 Date：`String(date)` 會丟掉毫秒，同秒內建立的批次任務
+ * 因此排不出先後（首單會被 id 字典序決定）——必須直接取 Date 的毫秒值。
+ */
+function dbTimeToIso(value: unknown): string {
+  return (value instanceof Date ? value : new Date(String(value))).toISOString();
+}
+
+/** 整數 id → postgres 陣列字面量（只收正整數，作為綁定參數傳入，不拼 SQL）。 */
+function userIdArrayLiteral(ids: readonly number[]): string {
+  return `{${ids.filter(isPositiveUserId).join(",")}}`;
+}
+
+// ── 激活漏斗 ────────────────────────────────────────────────────────────────
+// 註冊（new-api users.created_at）→ 發起過生成 → 至少一單成功 → 7 日內回訪 → 現金充值。
+// 每一步都是上一步的子集（嚴格漏斗，人數單調不增）；不在漏斗鏈上的事實（沒回訪就付費的人、
+// D1 回訪數）單列，不塞進漏斗改變語義。
+
+
+/**
+ * 非現金入帳來源：開戶基線、簽到、新人禮、贈送類一律不是「付費」。
+ * 帳本現有來源：seed（開戶基線，entry_type=opening）、redemption-sync（兌換碼充值）、
+ * subscription-redemption（訂閱兌換）。新增贈送類來源時名稱帶以下任一詞即自動排除。
+ */
+export const NON_CASH_RECHARGE_SOURCE = /seed|opening|checkin|check-in|welcome|gift|bonus|grant|promo|trial|newbie|signup|reward/i;
+
+export function isCashRechargeSource(source: string): boolean {
+  return !NON_CASH_RECHARGE_SOURCE.test(source);
+}
+
+export interface FunnelRegistration {
+  userId: number;
+  /** ISO 時間（new-api users.created_at 秒 → ISO）。 */
+  registeredAt: string;
+}
+
+export interface FunnelJob {
+  userId: number;
+  jobId: string;
+  status: string;
+  createdAt: string;
+  finishedAt: string | null;
+}
+
+export interface FunnelRecharge {
+  ledgerId: string;
+  userId: number;
+  source: string;
+  createdAt: string;
+}
+
+export type FunnelStepKey = "registered" | "generated" | "succeeded" | "returned" | "paid";
+export const FUNNEL_STEP_ORDER: readonly FunnelStepKey[] = ["registered", "generated", "succeeded", "returned", "paid"];
+
+export interface FunnelStep {
+  key: FunnelStepKey;
+  count: number;
+  userIds: number[];
+  /** 相對上一步的轉化率（第一步為 null）；分母 < MIN_RATE_SAMPLES 為 insufficient。 */
+  fromPrevious: SampleRate | null;
+  /** 相對註冊數的轉化率（第一步為 null）。 */
+  fromRegistered: SampleRate | null;
+}
+
+export interface DurationSummary {
+  samples: number;
+  p50Seconds: number | null;
+  p90Seconds: number | null;
+}
+
+export interface ActivationFunnelProjection {
+  state: "ok";
+  days: number;
+  windowStart: string;
+  includeInternal: boolean;
+  internalUserIds: number[];
+  /** 窗口內註冊、但因內部名單被剔除的人數。 */
+  excludedInternalRegistrations: number;
+  steps: FunnelStep[];
+  /** 成功用戶中，首次生成日的下一個自然日（D1）有生成的人數。 */
+  d1Returned: number;
+  /** 成功用戶中，首次生成日 + RETURN_WINDOW_DAYS 尚未走完（回訪窗口未成熟）的人數。 */
+  returnWindowImmature: number;
+  /** 窗口內註冊且有現金充值的人數（不論是否走完前面步驟）。 */
+  paidAnyStage: number;
+  /** 被判為非現金而排除的 recharge 帳本行數。 */
+  nonCashRechargesSkipped: number;
+  timeToFirstImage: {
+    /** 註冊 → 首個 succeeded 任務的 finished_at。 */
+    registerToFirstSuccess: DurationSummary;
+    /** 首單（最早建立的任務）created_at → finished_at；未結束的首單不計入樣本，單列。 */
+    firstJobCreatedToFinished: DurationSummary & { unfinished: number; firstJobNotSucceeded: number };
+  };
+  /** 註冊讀取或任務讀取觸頂：人數為下界。 */
+  truncated: boolean;
+  dayTimezone: string;
+}
+
+export interface ActivationFunnelUnavailable {
+  state: "unavailable";
+  days: number;
+  reason: string;
+}
+
+export type ActivationFunnelResult = ActivationFunnelProjection | ActivationFunnelUnavailable;
+
+/** 按業務日界切自然日（YYYY-MM-DD）。 */
+export function calendarDayOf(iso: string, timeZone: string = STATISTICS_DAY_TIMEZONE): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(iso));
+  const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "";
+  return `${value("year")}-${value("month")}-${value("day")}`;
+}
+
+function dayNumber(day: string): number {
+  return Math.round(Date.parse(`${day}T00:00:00Z`) / 86_400_000);
+}
+
+/**
+ * 回訪判定（D1 / 7 日內）：以首次生成的自然日為 D0，D0+1..D0+withinDays 任一天有生成即回訪。
+ * 同一天生成多次不算回訪；超過窗口才再來也不算。
+ */
+export function returnedWithin(
+  jobDays: readonly string[],
+  withinDays: number = RETURN_WINDOW_DAYS,
+): { returned: boolean; d1: boolean; firstDay: string | null } {
+  if (jobDays.length === 0) return { returned: false, d1: false, firstDay: null };
+  const numbers = [...new Set(jobDays.map(dayNumber))].sort((a, b) => a - b);
+  const first = numbers[0];
+  const firstDay = [...jobDays].sort()[0];
+  const offsets = numbers.slice(1).map((value) => value - first);
+  return {
+    returned: offsets.some((offset) => offset >= 1 && offset <= withinDays),
+    d1: offsets.includes(1),
+    firstDay,
+  };
+}
+
+/** 最近秩分位數（與 postgres percentile_disc 同口徑）：排序後取第 ceil(p·n) 個。 */
+export function nearestRankPercentile(values: readonly number[], p: number): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const rank = Math.max(1, Math.ceil(p * sorted.length));
+  return sorted[Math.min(rank, sorted.length) - 1];
+}
+
+function summarizeDurations(values: number[]): DurationSummary {
+  return {
+    samples: values.length,
+    p50Seconds: nearestRankPercentile(values, 0.5),
+    p90Seconds: nearestRankPercentile(values, 0.9),
+  };
+}
+
+/**
+ * 激活漏斗的純投影。輸入是三份原始事實（註冊、任務、充值帳本行），
+ * 內部剔除、時間窗、回訪判定、現金判定都在這裡一次做完——SQL 對照即對照這裡的口徑。
+ */
+export function projectActivationFunnel(input: {
+  days: number;
+  now: Date;
+  registrations: FunnelRegistration[];
+  jobs: FunnelJob[];
+  recharges: FunnelRecharge[];
+  internalUserIds: readonly number[];
+  includeInternal: boolean;
+  truncated?: boolean;
+  dayTimezone?: string;
+}): ActivationFunnelProjection {
+  const timeZone = input.dayTimezone ?? STATISTICS_DAY_TIMEZONE;
+  const windowStartMs = input.now.getTime() - input.days * 86_400_000;
+  const internal = new Set(input.internalUserIds);
+
+  const inWindow = input.registrations.filter((registration) => {
+    const at = Date.parse(registration.registeredAt);
+    return Number.isFinite(at) && at >= windowStartMs && at <= input.now.getTime();
+  });
+  const cohort = new Map<number, number>();
+  let excludedInternalRegistrations = 0;
+  for (const registration of inWindow) {
+    if (!input.includeInternal && internal.has(registration.userId)) {
+      excludedInternalRegistrations += 1;
+      continue;
+    }
+    cohort.set(registration.userId, Date.parse(registration.registeredAt));
+  }
+
+  // 每個用戶的任務（只計註冊之後的——註冊前不可能有自己的任務，防髒資料）。
+  const jobsByUser = new Map<number, FunnelJob[]>();
+  for (const job of input.jobs) {
+    const registeredAt = cohort.get(job.userId);
+    if (registeredAt === undefined) continue;
+    const createdAt = Date.parse(job.createdAt);
+    if (!Number.isFinite(createdAt) || createdAt < registeredAt) continue;
+    const list = jobsByUser.get(job.userId) ?? [];
+    list.push(job);
+    jobsByUser.set(job.userId, list);
+  }
+
+  const cashPaid = new Set<number>();
+  let nonCashRechargesSkipped = 0;
+  for (const recharge of input.recharges) {
+    const registeredAt = cohort.get(recharge.userId);
+    if (registeredAt === undefined) continue;
+    if (!isCashRechargeSource(recharge.source)) {
+      nonCashRechargesSkipped += 1;
+      continue;
+    }
+    const at = Date.parse(recharge.createdAt);
+    if (Number.isFinite(at) && at >= registeredAt) cashPaid.add(recharge.userId);
+  }
+
+  const todayNumber = dayNumber(calendarDayOf(input.now.toISOString(), timeZone));
+  const registered = [...cohort.keys()].sort((a, b) => a - b);
+  const generated: number[] = [];
+  const succeeded: number[] = [];
+  const returned: number[] = [];
+  const paid: number[] = [];
+  let d1Returned = 0;
+  let returnWindowImmature = 0;
+  const registerToFirstSuccess: number[] = [];
+  const firstJobDurations: number[] = [];
+  let firstJobUnfinished = 0;
+  let firstJobNotSucceeded = 0;
+
+  for (const userId of registered) {
+    const jobs = (jobsByUser.get(userId) ?? []).sort(
+      (a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.jobId.localeCompare(b.jobId),
+    );
+    if (jobs.length === 0) continue;
+    generated.push(userId);
+
+    const firstJob = jobs[0];
+    if (firstJob.status !== "succeeded") firstJobNotSucceeded += 1;
+    if (firstJob.finishedAt) {
+      firstJobDurations.push((Date.parse(firstJob.finishedAt) - Date.parse(firstJob.createdAt)) / 1000);
+    } else {
+      firstJobUnfinished += 1;
+    }
+
+    const successes = jobs.filter((job) => job.status === "succeeded" && job.finishedAt);
+    if (successes.length === 0) continue;
+    succeeded.push(userId);
+    const firstSuccessFinished = Math.min(...successes.map((job) => Date.parse(job.finishedAt as string)));
+    registerToFirstSuccess.push((firstSuccessFinished - (cohort.get(userId) as number)) / 1000);
+
+    const days = jobs.map((job) => calendarDayOf(job.createdAt, timeZone));
+    const verdict = returnedWithin(days);
+    if (verdict.d1) d1Returned += 1;
+    if (verdict.firstDay && dayNumber(verdict.firstDay) + RETURN_WINDOW_DAYS > todayNumber) returnWindowImmature += 1;
+    if (!verdict.returned) continue;
+    returned.push(userId);
+
+    if (cashPaid.has(userId)) paid.push(userId);
+  }
+
+  const counts: Record<FunnelStepKey, number[]> = { registered, generated, succeeded, returned, paid };
+  const steps: FunnelStep[] = FUNNEL_STEP_ORDER.map((key, index) => {
+    const ids = counts[key];
+    const previous = index === 0 ? null : counts[FUNNEL_STEP_ORDER[index - 1]];
+    return {
+      key,
+      count: ids.length,
+      userIds: ids,
+      fromPrevious: previous === null ? null : sampleRate(ids.length, previous.length),
+      fromRegistered: index === 0 ? null : sampleRate(ids.length, registered.length),
+    };
+  });
+
+  return {
+    state: "ok",
+    days: input.days,
+    windowStart: new Date(windowStartMs).toISOString(),
+    includeInternal: input.includeInternal,
+    internalUserIds: [...input.internalUserIds],
+    excludedInternalRegistrations,
+    steps,
+    d1Returned,
+    returnWindowImmature,
+    paidAnyStage: cashPaid.size,
+    nonCashRechargesSkipped,
+    timeToFirstImage: {
+      registerToFirstSuccess: summarizeDurations(registerToFirstSuccess),
+      firstJobCreatedToFinished: {
+        ...summarizeDurations(firstJobDurations),
+        unfinished: firstJobUnfinished,
+        firstJobNotSucceeded,
+      },
+    },
+    truncated: input.truncated === true,
+    dayTimezone: timeZone,
+  };
+}
+
+/**
+ * 漏斗的任務事實（只讀）：擁有者 = web:<uid> 的 uid，或 biz key 的 user_id。
+ * 只讀給定用戶、給定起點之後的任務。
+ */
+export async function readFunnelJobs(input: {
+  userIds: number[];
+  since: Date;
+  sql?: GenerationSql;
+}): Promise<{ jobs: FunnelJob[]; truncated: boolean }> {
+  if (input.userIds.length === 0) return { jobs: [], truncated: false };
+  const sql = input.sql ?? getGenerationSql();
+  const ids = userIdArrayLiteral(input.userIds);
+  const rows = await sql<Record<string, unknown>[]>`
+    SELECT scoped.owner_user_id AS owner_user_id,
+           scoped.job_id AS job_id,
+           scoped.status AS status,
+           scoped.created_at AS created_at,
+           scoped.finished_at AS finished_at
+    FROM (
+      SELECT COALESCE(
+               CASE WHEN job.tenant_id ~ '^web:[0-9]+$' THEN split_part(job.tenant_id, ':', 2)::bigint END,
+               owner_key.user_id::bigint
+             ) AS owner_user_id,
+             job.id AS job_id,
+             job.status AS status,
+             job.created_at AS created_at,
+             job.finished_at AS finished_at
+      FROM generation_job job
+      LEFT JOIN biz_api_key owner_key ON job.tenant_id = 'biz:' || owner_key.id
+      WHERE job.created_at >= ${input.since.toISOString()}::timestamptz
+    ) scoped
+    WHERE scoped.owner_user_id = ANY(${ids}::bigint[])
+    ORDER BY scoped.created_at
+    LIMIT ${FUNNEL_JOB_ROW_LIMIT}
+  `;
+  return {
+    jobs: rows.map((row) => ({
+      userId: Number(row.owner_user_id),
+      jobId: String(row.job_id),
+      status: String(row.status),
+      createdAt: dbTimeToIso(row.created_at),
+      finishedAt: row.finished_at ? dbTimeToIso(row.finished_at) : null,
+    })),
+    truncated: rows.length >= FUNNEL_JOB_ROW_LIMIT,
+  };
+}
+
+/** 漏斗的充值事實（只讀）：account_ledger entry_type='recharge'，現金判定在投影層做。 */
+export async function readFunnelRecharges(input: {
+  userIds: number[];
+  since: Date;
+  sql?: GenerationSql;
+}): Promise<FunnelRecharge[]> {
+  if (input.userIds.length === 0) return [];
+  const sql = input.sql ?? getGenerationSql();
+  const ids = userIdArrayLiteral(input.userIds);
+  const rows = await sql<Record<string, unknown>[]>`
+    SELECT ledger.id AS ledger_id,
+           ledger.billing_user_id AS ledger_user_id,
+           ledger.source AS ledger_source,
+           ledger.created_at AS ledger_created_at
+    FROM account_ledger ledger
+    WHERE ledger.entry_type = 'recharge'
+      AND ledger.amount > 0
+      AND ledger.billing_user_id = ANY(${ids}::bigint[])
+      AND ledger.created_at >= ${input.since.toISOString()}::timestamptz
+  `;
+  return rows.map((row) => ({
+    ledgerId: String(row.ledger_id),
+    userId: Number(row.ledger_user_id),
+    source: String(row.ledger_source ?? ""),
+    createdAt: dbTimeToIso(row.ledger_created_at),
+  }));
+}
+
+export type RegistrationLoader = (since: Date) => Promise<{ registrations: FunnelRegistration[]; truncated: boolean }>;
+
+/** 註冊預設讀法：new-api 管理 API（不直連 sqlite）。 */
+async function defaultLoadRegistrations(since: Date): Promise<{ registrations: FunnelRegistration[]; truncated: boolean }> {
+  const { listGatewayUsersRegisteredSince } = await import("@/lib/gateway-admin");
+  const { users, truncated } = await listGatewayUsersRegisteredSince(Math.floor(since.getTime() / 1000));
+  return {
+    registrations: users.map((user) => ({
+      userId: user.id,
+      registeredAt: new Date(user.created_at * 1000).toISOString(),
+    })),
+    truncated,
+  };
+}
+
+/** 漏斗組裝：任何一段讀不到就整卡 unavailable 並說原因——不畫半截漏斗。 */
+export async function buildActivationFunnel(input: {
+  days: number;
+  now: Date;
+  sql: GenerationSql;
+  internalUserIds: number[];
+  includeInternal: boolean;
+  loadRegistrations?: RegistrationLoader;
+}): Promise<ActivationFunnelResult> {
+  const days = (FUNNEL_WINDOW_OPTIONS as readonly number[]).includes(input.days) ? input.days : DEFAULT_FUNNEL_DAYS;
+  const since = new Date(input.now.getTime() - days * 86_400_000);
+  try {
+    const loaded = await (input.loadRegistrations ?? defaultLoadRegistrations)(since);
+    const internal = new Set(input.internalUserIds);
+    const cohortIds = loaded.registrations
+      .map((registration) => registration.userId)
+      .filter((id) => input.includeInternal || !internal.has(id));
+    const [jobResult, recharges] = await Promise.all([
+      readFunnelJobs({ userIds: cohortIds, since, sql: input.sql }),
+      readFunnelRecharges({ userIds: cohortIds, since, sql: input.sql }),
+    ]);
+    return projectActivationFunnel({
+      days,
+      now: input.now,
+      registrations: loaded.registrations,
+      jobs: jobResult.jobs,
+      recharges,
+      internalUserIds: input.internalUserIds,
+      includeInternal: input.includeInternal,
+      truncated: loaded.truncated || jobResult.truncated,
+    });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    console.error("[statistics] activation funnel unavailable", reason);
+    return { state: "unavailable", days, reason };
+  }
 }

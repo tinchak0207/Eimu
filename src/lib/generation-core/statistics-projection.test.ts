@@ -12,11 +12,19 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   CHANNEL_LIVENESS_LABEL,
+  DEFAULT_INTERNAL_USER_IDS,
+  FUNNEL_STEP_ORDER,
   MAX_QUOTA_USERS,
   MIN_RATE_SAMPLES,
   buildStatisticsProjection,
   buildUsageNotes,
+  calendarDayOf,
   channelLivenessOf,
+  isCashRechargeSource,
+  nearestRankPercentile,
+  projectActivationFunnel,
+  resolveInternalUserIds,
+  returnedWithin,
   projectChannelHealth,
   projectConsumption,
   projectRemainingQuota,
@@ -24,6 +32,9 @@ import {
   readBillingIdentityCoverage,
   sampleRate,
   windowStartDay,
+  type FunnelJob,
+  type FunnelRecharge,
+  type FunnelRegistration,
   type LedgerConsumptionRow,
   type RemainingQuotaEntry,
 } from "./statistics-projection";
@@ -724,4 +735,281 @@ test("C2-2 组装层：身份数超上限时 remainingQuota 标 truncated 且 no
   assert.equal(projection.window.windowStartDay, "2026-09-15");
   assert.equal(projection.consumption!.skippedNonFiniteRows, 0);
   assert.equal(projection.consumption!.refunded.operations, 0);
+});
+
+// ── 激活漏斗 + 內部流量剔除 ──────────────────────────────────────────────────
+
+const FUNNEL_NOW = new Date("2026-09-27T12:00:00.000Z");
+
+function funnelFixture(): {
+  registrations: FunnelRegistration[];
+  jobs: FunnelJob[];
+  recharges: FunnelRecharge[];
+} {
+  const registrations: FunnelRegistration[] = [
+    { userId: 117, registeredAt: "2026-09-20T00:00:00.000Z" }, // 內部（假設窗口內註冊，驗證剔除）
+    { userId: 201, registeredAt: "2026-09-10T00:00:00.000Z" }, // 生成→成功→D1 回訪→現金充值
+    { userId: 202, registeredAt: "2026-09-11T00:00:00.000Z" }, // 生成→成功，同日兩單（不算回訪）
+    { userId: 203, registeredAt: "2026-09-12T00:00:00.000Z" }, // 生成但全失敗
+    { userId: 204, registeredAt: "2026-09-13T00:00:00.000Z" }, // 只註冊
+    { userId: 205, registeredAt: "2026-09-14T00:00:00.000Z" }, // 成功、未回訪但現金充值（不進漏斗付費步）
+    { userId: 206, registeredAt: "2026-09-15T00:00:00.000Z" }, // 成功、第 8 天才回來（不算回訪）；只有簽到入帳
+    { userId: 150, registeredAt: "2026-08-01T00:00:00.000Z" }, // 窗口外註冊
+  ];
+  const job = (userId: number, jobId: string, status: string, createdAt: string, finishedAt: string | null): FunnelJob => ({
+    userId,
+    jobId,
+    status,
+    createdAt,
+    finishedAt,
+  });
+  const jobs: FunnelJob[] = [
+    job(117, "j-117", "succeeded", "2026-09-20T01:00:00.000Z", "2026-09-20T01:02:00.000Z"),
+    job(201, "j-201a", "succeeded", "2026-09-10T02:00:00.000Z", "2026-09-10T02:02:00.000Z"),
+    job(201, "j-201b", "succeeded", "2026-09-11T02:00:00.000Z", "2026-09-11T02:01:00.000Z"),
+    job(202, "j-202a", "failed", "2026-09-11T01:00:00.000Z", "2026-09-11T01:10:00.000Z"),
+    job(202, "j-202b", "succeeded", "2026-09-11T03:00:00.000Z", "2026-09-11T03:05:00.000Z"),
+    job(203, "j-203", "failed", "2026-09-12T01:00:00.000Z", "2026-09-12T01:20:00.000Z"),
+    job(205, "j-205", "succeeded", "2026-09-14T01:00:00.000Z", "2026-09-14T01:03:00.000Z"),
+    job(206, "j-206a", "succeeded", "2026-09-15T01:00:00.000Z", "2026-09-15T01:04:00.000Z"),
+    job(206, "j-206b", "succeeded", "2026-09-23T01:00:00.000Z", "2026-09-23T01:04:00.000Z"),
+    job(150, "j-150", "succeeded", "2026-09-15T01:00:00.000Z", "2026-09-15T01:04:00.000Z"),
+  ];
+  const recharges: FunnelRecharge[] = [
+    { ledgerId: "l-201", userId: 201, source: "redemption-sync", createdAt: "2026-09-12T00:00:00.000Z" },
+    { ledgerId: "l-205", userId: 205, source: "redemption-sync", createdAt: "2026-09-15T00:00:00.000Z" },
+    { ledgerId: "l-206", userId: 206, source: "checkin", createdAt: "2026-09-16T00:00:00.000Z" },
+    { ledgerId: "l-117", userId: 117, source: "redemption-sync", createdAt: "2026-09-21T00:00:00.000Z" },
+  ];
+  return { registrations, jobs, recharges };
+}
+
+test("內部名單：env 未設用預設 117,82；設值按逗號解析；空字串 = 不剔除", () => {
+  assert.deepEqual(resolveInternalUserIds(undefined), [...DEFAULT_INTERNAL_USER_IDS]);
+  assert.deepEqual(DEFAULT_INTERNAL_USER_IDS, [117, 82]);
+  assert.deepEqual(resolveInternalUserIds(" 117, 82 ,253,abc,-1,117"), [82, 117, 253]);
+  assert.deepEqual(resolveInternalUserIds(""), []);
+});
+
+test("激活漏斗：預設剔除內部用戶，切到「含內部」才計入", () => {
+  const fixture = funnelFixture();
+  const excluded = projectActivationFunnel({
+    ...fixture,
+    days: 30,
+    now: FUNNEL_NOW,
+    internalUserIds: [117, 82],
+    includeInternal: false,
+  });
+  assert.equal(excluded.excludedInternalRegistrations, 1);
+  for (const step of excluded.steps) assert.ok(!step.userIds.includes(117), `${step.key} 混入內部用戶`);
+  assert.equal(excluded.steps[0].count, 6);
+
+  const included = projectActivationFunnel({
+    ...fixture,
+    days: 30,
+    now: FUNNEL_NOW,
+    internalUserIds: [117, 82],
+    includeInternal: true,
+  });
+  assert.equal(included.excludedInternalRegistrations, 0);
+  assert.equal(included.steps[0].count, 7);
+  assert.ok(included.steps[2].userIds.includes(117));
+});
+
+test("激活漏斗：每一步人數單調不增、且是上一步的子集；逐步人數與夾具手算一致", () => {
+  const funnel = projectActivationFunnel({
+    ...funnelFixture(),
+    days: 30,
+    now: FUNNEL_NOW,
+    internalUserIds: [117, 82],
+    includeInternal: false,
+  });
+  assert.deepEqual(
+    funnel.steps.map((step) => step.key),
+    [...FUNNEL_STEP_ORDER],
+  );
+  for (let index = 1; index < funnel.steps.length; index += 1) {
+    const previous = funnel.steps[index - 1];
+    const current = funnel.steps[index];
+    assert.ok(current.count <= previous.count, `${current.key} > ${previous.key}`);
+    for (const id of current.userIds) assert.ok(previous.userIds.includes(id), `${current.key} 的 ${id} 不在 ${previous.key}`);
+  }
+  assert.deepEqual(
+    funnel.steps.map((step) => step.userIds),
+    [[201, 202, 203, 204, 205, 206], [201, 202, 203, 205, 206], [201, 202, 205, 206], [201], [201]],
+  );
+  // 不在漏斗鏈上的事實單列：205 沒回訪就付費，206 只有簽到入帳（非現金）
+  assert.equal(funnel.paidAnyStage, 2);
+  assert.equal(funnel.nonCashRechargesSkipped, 1);
+  assert.equal(funnel.d1Returned, 1);
+  // 轉化率：註冊 6 → 生成 5
+  const generated = funnel.steps[1].fromPrevious;
+  assert.ok(generated && generated.state === "ok");
+  assert.equal(generated.value, 5 / 6);
+  // 分母 < MIN_RATE_SAMPLES 時是「資料不足」而不是 0%
+  assert.equal(funnel.steps[4].fromPrevious?.state, "insufficient");
+  // 首圖耗時：註冊→首成功 = 201:2h2m, 202:3h5m, 205:1h3m, 206:1h4m（秒）
+  const first = funnel.timeToFirstImage.registerToFirstSuccess;
+  assert.equal(first.samples, 4);
+  assert.equal(first.p50Seconds, 3840);
+  assert.equal(first.p90Seconds, 11100);
+  // 首單 created→finished：201:120, 202:600, 203:1200, 205:180, 206:240
+  const firstJob = funnel.timeToFirstImage.firstJobCreatedToFinished;
+  assert.equal(firstJob.samples, 5);
+  assert.equal(firstJob.p50Seconds, 240);
+  assert.equal(firstJob.p90Seconds, 1200);
+  assert.equal(firstJob.firstJobNotSucceeded, 2);
+});
+
+test("D1 回訪判定：同日多次不算、次日算 D1、第 7 天算回訪、第 8 天不算；日界按 Asia/Shanghai", () => {
+  assert.deepEqual(returnedWithin(["2026-09-10", "2026-09-10"]), { returned: false, d1: false, firstDay: "2026-09-10" });
+  assert.deepEqual(returnedWithin(["2026-09-10", "2026-09-11"]), { returned: true, d1: true, firstDay: "2026-09-10" });
+  assert.deepEqual(returnedWithin(["2026-09-10", "2026-09-17"]), { returned: true, d1: false, firstDay: "2026-09-10" });
+  assert.deepEqual(returnedWithin(["2026-09-10", "2026-09-18"]), { returned: false, d1: false, firstDay: "2026-09-10" });
+  assert.deepEqual(returnedWithin([]), { returned: false, d1: false, firstDay: null });
+  // 跨月
+  assert.equal(returnedWithin(["2026-08-31", "2026-09-01"]).d1, true);
+  // UTC 同一天、CST 跨日（15:30Z = 23:30 CST，16:30Z = 次日 00:30 CST）→ 是 D1
+  const days = ["2026-09-10T15:30:00.000Z", "2026-09-10T16:30:00.000Z"].map((iso) => calendarDayOf(iso));
+  assert.deepEqual(days, ["2026-09-10", "2026-09-11"]);
+  assert.equal(returnedWithin(days).d1, true);
+});
+
+test("現金判定與分位數口徑：開戶基線/簽到/新人禮不算付費；分位數同 percentile_disc", () => {
+  assert.equal(isCashRechargeSource("redemption-sync"), true);
+  assert.equal(isCashRechargeSource("subscription-redemption"), true);
+  for (const source of ["seed", "checkin", "daily-checkin", "welcome-grant", "gift", "newbie-bonus"]) {
+    assert.equal(isCashRechargeSource(source), false, source);
+  }
+  assert.equal(nearestRankPercentile([], 0.5), null);
+  assert.equal(nearestRankPercentile([5], 0.9), 5);
+  assert.equal(nearestRankPercentile([4, 1, 3, 2], 0.5), 2);
+  assert.equal(nearestRankPercentile([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 0.9), 9);
+});
+
+test("組裝層：內部名單以綁定參數傳進帳本與漏斗查詢，漏斗從 stub 事實算出（無寫庫）", async () => {
+  const seen: { text: string; values: unknown[] }[] = [];
+  const fixture = funnelFixture();
+  const stub = ((strings: TemplateStringsArray, ...values: unknown[]) => {
+    const text = strings.join("?");
+    seen.push({ text, values });
+    if (text.includes("scoped.owner_user_id")) {
+      return Promise.resolve(
+        fixture.jobs.map((job) => ({
+          owner_user_id: String(job.userId),
+          job_id: job.jobId,
+          status: job.status,
+          created_at: job.createdAt,
+          finished_at: job.finishedAt,
+        })),
+      );
+    }
+    if (text.includes("FROM account_ledger ledger")) {
+      return Promise.resolve(
+        fixture.recharges.map((row) => ({
+          ledger_id: row.ledgerId,
+          ledger_user_id: row.userId,
+          ledger_source: row.source,
+          ledger_created_at: row.createdAt,
+        })),
+      );
+    }
+    return Promise.resolve([]);
+  }) as unknown as GenerationSql;
+
+  const projection = await buildStatisticsProjection({
+    days: 7,
+    funnelDays: 30,
+    sql: stub,
+    now: FUNNEL_NOW,
+    internalUserIds: [82, 117],
+    loadRegistrations: async () => ({ registrations: fixture.registrations, truncated: false }),
+    loadRemainingQuota: async () => [],
+  });
+
+  assert.deepEqual(projection.traffic, { includeInternal: false, internalUserIds: [82, 117] });
+  const ledgerQuery = seen.find((entry) => entry.text.includes("FROM billing_operation operation") && entry.text.includes("operation_kind"));
+  assert.ok(ledgerQuery?.values.includes("{82,117}"), "帳本查詢未帶內部名單");
+  const jobQuery = seen.find((entry) => entry.text.includes("scoped.owner_user_id"));
+  assert.ok(jobQuery && !String(jobQuery.values.find((value) => typeof value === "string" && value.startsWith("{"))).includes("117"));
+  assert.equal(projection.activationFunnel.state, "ok");
+  if (projection.activationFunnel.state === "ok") {
+    assert.deepEqual(
+      projection.activationFunnel.steps.map((step) => step.count),
+      [6, 5, 4, 1, 1],
+    );
+  }
+  assert.ok(projection.notes.some((note) => note.includes("INTERNAL_USER_IDS")));
+
+  const withInternal = await buildStatisticsProjection({
+    days: 7,
+    sql: stub,
+    now: FUNNEL_NOW,
+    internalUserIds: [82, 117],
+    includeInternal: true,
+    loadRegistrations: async () => ({ registrations: fixture.registrations, truncated: false }),
+    loadRemainingQuota: async () => [],
+  });
+  const lastLedger = [...seen].reverse().find((entry) => entry.text.includes("operation_kind"));
+  assert.ok(lastLedger?.values.includes("{}"), "含內部時不應剔除任何人");
+  assert.equal(withInternal.activationFunnel.state === "ok" && withInternal.activationFunnel.steps[0].count, 7);
+});
+
+test("漏斗讀不到註冊時整卡 unavailable 並說原因，不畫半截漏斗", async () => {
+  const stub = (() => Promise.resolve([])) as unknown as GenerationSql;
+  const projection = await buildStatisticsProjection({
+    days: 7,
+    sql: stub,
+    now: FUNNEL_NOW,
+    loadRegistrations: async () => {
+      throw new Error("上游管理凭证未配置");
+    },
+    loadRemainingQuota: async () => [],
+  });
+  assert.equal(projection.activationFunnel.state, "unavailable");
+  if (projection.activationFunnel.state === "unavailable") {
+    assert.match(projection.activationFunnel.reason, /凭证未配置/);
+  }
+});
+
+test("首單取數保留毫秒：同一秒內建立的多單按真實先後取首單（postgres.js 回 Date 物件）", async () => {
+  const stub = ((strings: TemplateStringsArray) => {
+    const text = strings.join("?");
+    if (text.includes("scoped.owner_user_id")) {
+      return Promise.resolve([
+        {
+          owner_user_id: "246",
+          job_id: "z-first",
+          status: "succeeded",
+          created_at: new Date("2026-09-24T02:11:56.147Z"),
+          finished_at: new Date("2026-09-24T02:14:51.181Z"),
+        },
+        {
+          owner_user_id: "246",
+          job_id: "a-second",
+          status: "succeeded",
+          created_at: new Date("2026-09-24T02:11:56.333Z"),
+          finished_at: new Date("2026-09-24T02:13:48.477Z"),
+        },
+      ]);
+    }
+    return Promise.resolve([]);
+  }) as unknown as GenerationSql;
+  const projection = await buildStatisticsProjection({
+    days: 7,
+    funnelDays: 7,
+    sql: stub,
+    now: FUNNEL_NOW,
+    internalUserIds: [],
+    loadRegistrations: async () => ({
+      registrations: [{ userId: 246, registeredAt: "2026-09-21T04:14:48.000Z" }],
+      truncated: false,
+    }),
+    loadRemainingQuota: async () => [],
+  });
+  assert.equal(projection.activationFunnel.state, "ok");
+  if (projection.activationFunnel.state === "ok") {
+    const firstJob = projection.activationFunnel.timeToFirstImage.firstJobCreatedToFinished;
+    assert.equal(firstJob.p50Seconds, 175.034);
+  }
 });
