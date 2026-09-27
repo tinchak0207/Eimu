@@ -47,12 +47,13 @@ test("ships evidence-led Reddit use-case pages", () => {
   }
 });
 
-test("keeps Reddit pages additive to the existing catalog", () => {
-  assert.equal(USE_CASES.length, 127);
+test("USE_CASES is exactly the Reddit guide catalog", () => {
+  assert.equal(USE_CASES.length, ALL_REDDIT_USE_CASES.length);
   assert.equal(USE_CASES.filter((item) => item.slug.startsWith("reddit-")).length, 25);
 });
 
 test("deduplicates related links and removes self-links", () => {
-  const source = { ...USE_CASES[0], relatedSlugs: ["ecommerce-2", "ecommerce-2", USE_CASES[0].slug] };
-  assert.deepEqual(relatedUseCases(source).map((item) => item.slug), ["ecommerce-2"]);
+  const other = USE_CASES[1].slug;
+  const source = { ...USE_CASES[0], relatedSlugs: [other, other, USE_CASES[0].slug] };
+  assert.deepEqual(relatedUseCases(source).map((item) => item.slug), [other]);
 });

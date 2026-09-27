@@ -5,7 +5,9 @@ const HISTORY_TITLE = "生成历史 · Eimu";
 const HISTORY_DESCRIPTION = "查看你在 Eimu 用 GPT Image 2、Nano Banana Pro 生成的所有历史记录和金币消耗明细。";
 
 export const metadata = {
-  title: HISTORY_TITLE,
+  title: { absolute: HISTORY_TITLE },
+  // 個人頁（需登入）：不進索引，別浪費爬取預算。
+  robots: { index: false, follow: false },
   description: HISTORY_DESCRIPTION,
   openGraph: {
     title: HISTORY_TITLE,

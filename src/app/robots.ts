@@ -1,6 +1,20 @@
 import type { MetadataRoute } from "next";
 import { getSiteUrl } from "@/lib/site-url";
 
+// 非內容路由：API、後台、需登入的個人頁、登入回跳與內部預覽頁。
+// /agent 只是跳回首頁的舊書籤路由，/review 與 /agent-chat-preview 是內部工具。
+const PRIVATE_PATHS = [
+  "/api/",
+  "/admin/",
+  "/history",
+  "/settings/",
+  "/auth/",
+  "/wechat-login",
+  "/review",
+  "/agent",
+  "/agent-chat-preview",
+];
+
 export default async function robots(): Promise<MetadataRoute.Robots> {
   const siteUrl = await getSiteUrl();
 
@@ -27,12 +41,12 @@ export default async function robots(): Promise<MetadataRoute.Robots> {
         userAgent: "*",
         allow: "/",
         // Block non-content routes from crawl budget waste.
-        disallow: ["/api/", "/admin/"],
+        disallow: PRIVATE_PATHS,
       },
       {
         userAgent: aiCrawlers,
         allow: "/",
-        disallow: ["/api/", "/admin/"],
+        disallow: PRIVATE_PATHS,
       },
     ],
     sitemap: `${siteUrl}/sitemap.xml`,

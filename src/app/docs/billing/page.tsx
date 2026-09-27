@@ -6,7 +6,7 @@ import { InlineCode, KeyCard, SectionTitle, Specular, Step } from "../DocsShell"
 const SITE_URL = getSiteUrlFromEnv();
 
 export const metadata: Metadata = {
-  title: "充值与计费 | 文档中心 | Eimu",
+  title: "充值与计费 | 文档中心",
   alternates: { canonical: `${SITE_URL}/docs/billing` },
 };
 

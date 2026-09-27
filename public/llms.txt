@@ -31,7 +31,16 @@
   - 把助理带走（MCP 接入）：https://eimu.dev/docs/mcp
   - 开发进阶（B 端 API）：https://eimu.dev/docs/api
 - 定价：https://eimu.dev/pricing
-- 用例库：https://eimu.dev/use-cases/<slug>（127 个行业与场景）
+- 创作产线（8 条模板产线的落地页）：https://eimu.dev/workflows
+  - 小说影视化：https://eimu.dev/workflows/novel-film-pipeline
+  - IP视觉包：https://eimu.dev/workflows/novel-ip-visual-pack
+  - 新品上市包：https://eimu.dev/workflows/ecommerce-launch-pack
+  - 模特种草线：https://eimu.dev/workflows/ecommerce-model-grid
+  - 剧本视觉化：https://eimu.dev/workflows/shortdrama-visual-assets
+  - 投放海报线：https://eimu.dev/workflows/shortdrama-poster-line
+  - 策展式创作：https://eimu.dev/workflows/art-curation-series
+  - 风格深研线：https://eimu.dev/workflows/art-style-immersion
+- 场景指南：https://eimu.dev/use-cases（17 个行业做法页 /use-cases/<行业>，另有按真实社区问题整理的深度指南）
 - 服务状态：https://eimu.dev/status
 
 ## For developers & agents（B 端 API）

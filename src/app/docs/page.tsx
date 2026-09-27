@@ -17,7 +17,7 @@ import { InlineCode, SectionTitle, Specular, Step } from "./DocsShell";
 const SITE_URL = getSiteUrlFromEnv();
 
 export const metadata: Metadata = {
-  title: "AI 助理快速上手 | 文档中心 | Eimu",
+  title: "AI 助理快速上手 | 文档中心",
   alternates: { canonical: `${SITE_URL}/docs` },
 };
 

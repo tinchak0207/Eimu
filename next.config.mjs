@@ -32,6 +32,28 @@ const nextConfig = {
       },
     ],
   },
+  // 2026-09-27 SEO 重構：舊 URL 全部 301 到承接頁，不留 404。
+  //  - 102 個 `<行業>-<n>` 模板門頁併入 17 個行業樞紐頁 /use-cases/<行業>
+  //    （清單與 src/lib/use-case-categories/index.ts 的 17 個 slug 一致）。
+  //  - /docs/harness 與 /docs/harness/deep 在 GSC 仍有曝光且排名最好，
+  //    子頁已在文檔收斂時刪除，內容歸入「工作流与画布」。
+  async redirects() {
+    const legacyCategories = [
+      "ecommerce", "content", "design", "personal-brand", "marketing", "anime",
+      "photography", "ui", "education", "gaming", "architecture", "fashion",
+      "health", "finance", "travel", "automotive", "training",
+    ];
+    return [
+      ...legacyCategories.map((category) => ({
+        source: `/use-cases/${category}-:n(\\d+)`,
+        destination: `/use-cases/${category}`,
+        permanent: true,
+      })),
+      { source: "/docs/harness", destination: "/docs/workflow", permanent: true },
+      { source: "/docs/harness/:path*", destination: "/docs/workflow", permanent: true },
+      { source: "/docs/report", destination: "/docs", permanent: true },
+    ];
+  },
   async rewrites() {
     const controlPlaneRewrites = controlPlaneOrigin
       ? [

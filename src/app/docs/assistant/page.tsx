@@ -6,7 +6,7 @@ import { SectionTitle, Specular } from "../DocsShell";
 const SITE_URL = getSiteUrlFromEnv();
 
 export const metadata: Metadata = {
-  title: "助理设定与野兽模式 | 文档中心 | Eimu",
+  title: "助理设定与野兽模式 | 文档中心",
   alternates: { canonical: `${SITE_URL}/docs/assistant` },
 };
 

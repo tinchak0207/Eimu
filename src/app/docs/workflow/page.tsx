@@ -6,7 +6,7 @@ import { SectionTitle, Specular, Step } from "../DocsShell";
 const SITE_URL = getSiteUrlFromEnv();
 
 export const metadata: Metadata = {
-  title: "工作流：模板库与画布 | 文档中心 | Eimu",
+  title: "工作流：模板库与画布 | 文档中心",
   alternates: { canonical: `${SITE_URL}/docs/workflow` },
 };
 

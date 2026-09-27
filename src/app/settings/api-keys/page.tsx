@@ -4,7 +4,9 @@ const PAGE_TITLE = "API 密钥 · Eimu";
 const PAGE_DESCRIPTION = "管理你的 Eimu API 密钥：创建、查看与吊销，用于 DSH 插件等第三方工具调用 /v1 接口。";
 
 export const metadata = {
-  title: PAGE_TITLE,
+  title: { absolute: PAGE_TITLE },
+  // 個人頁（需登入）：不進索引，別浪費爬取預算。
+  robots: { index: false, follow: false },
   description: PAGE_DESCRIPTION,
   openGraph: {
     title: PAGE_TITLE,

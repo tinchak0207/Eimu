@@ -16,11 +16,18 @@ const SITE_URL = getSiteUrlFromEnv();
  * 描述尾段（長尾導流照舊，但不再當標題）。
  */
 export const metadata: Metadata = {
-  title: SITE_TITLE,
+  title: { absolute: SITE_TITLE },
   description: SITE_DESCRIPTION,
   alternates: { canonical: SITE_URL },
 };
 
 export default function Page() {
-  return <ImagePlayground suggestions={getAllSuggestions()} />;
+  return (
+    <>
+      {/* 首頁是工作台本身，版面上沒有標題位；H1 給搜索引擎與讀屏器認出這頁是什麼
+          （2026-09-27 SEO：先前全頁零 H1）。sr-only 不佔版面、不改視覺。 */}
+      <h1 className="sr-only">Eimu：一句话到成片的 AI 影像工作台——AI 智能体拆解剧本、角色、分镜，生成图片、视频、配音与成片</h1>
+      <ImagePlayground suggestions={getAllSuggestions()} />
+    </>
+  );
 }

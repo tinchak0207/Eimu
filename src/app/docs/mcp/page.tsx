@@ -6,7 +6,7 @@ import { CodeBlock, InlineCode, KeyCard, SectionTitle } from "../DocsShell";
 const SITE_URL = getSiteUrlFromEnv();
 
 export const metadata: Metadata = {
-  title: "把助理带走（MCP 接入） | 文档中心 | Eimu",
+  title: "把助理带走（MCP 接入） | 文档中心",
   alternates: { canonical: `${SITE_URL}/docs/mcp` },
 };
 
