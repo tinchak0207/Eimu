@@ -28,6 +28,10 @@ export interface PromoGateInput {
   seen: boolean;
   /** window.location.search。 */
   search: string;
+  /** document.referrer（空串＝直接輸入網址／書籤）。 */
+  referrer: string;
+  /** navigator.userAgent（微信內建瀏覽器要在這裡認）。 */
+  userAgent: string;
 }
 
 /**
@@ -39,6 +43,54 @@ export function isHandoffLink(search: string): boolean {
   const params = new URLSearchParams(search);
   if (params.get("agent") === "1") return true;
   return params.has("session") || params.has("q");
+}
+
+/**
+ * 渠道來訪：人是被宣傳片本身吸引來的（B 站投稿、微信公號/群轉發），
+ * 對他把同一支片再播一次＝把已經付出的注意力退回去，而且開場先浪費他 49 秒。
+ * 2026-09-27 暴君提，同日落地。
+ *
+ * 三條認定，任一命中即算渠道來訪：
+ * ①我們自己貼出去的鏈接帶的渠道參數（前提：投放時的鏈接要真的帶參數）
+ * ②來源域名是 B 站／微信（browser 預設的 strict-origin-when-cross-origin 會帶 origin，
+ *   主機名保留得下來）
+ * ③微信內建瀏覽器（MicroMessenger UA）——朋友圈與群裡點開一律在這裡開，
+ *   就算參數被轉發鏈接洗掉也認得出來
+ */
+const CHANNEL_PARAM_KEYS = ["utm_source", "from", "ref"] as const;
+const CHANNEL_TOKENS = ["bilibili", "b23", "weixin", "wechat", "wechat_mp", "wechatmp"] as const;
+const CHANNEL_HOSTS = ["bilibili.com", "b23.tv", "weixin.qq.com", "wechat.com"] as const;
+const WECHAT_UA = /micromessenger/i;
+
+/** 渠道參數是否命中（值只要含關鍵詞即可，如 utm_source=bilibili-video）。 */
+export function hasChannelParam(search: string): boolean {
+  const params = new URLSearchParams(search);
+  for (const key of CHANNEL_PARAM_KEYS) {
+    const value = params.get(key);
+    if (!value) continue;
+    const lower = value.toLowerCase();
+    if (CHANNEL_TOKENS.some((token) => lower.includes(token))) return true;
+  }
+  return false;
+}
+
+/** 來源域名是否命中（含子網域：m.bilibili.com、www.bilibili.com 都算）。 */
+export function hasChannelReferrer(referrer: string): boolean {
+  if (!referrer) return false;
+  let host = "";
+  try {
+    host = new URL(referrer).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  if (!host) return false;
+  return CHANNEL_HOSTS.some((known) => host === known || host.endsWith(`.${known}`));
+}
+
+export function isChannelArrival(input: Pick<PromoGateInput, "search" | "referrer" | "userAgent">): boolean {
+  if (hasChannelParam(input.search)) return true;
+  if (hasChannelReferrer(input.referrer)) return true;
+  return WECHAT_UA.test(input.userAgent);
 }
 
 /**
@@ -58,5 +110,6 @@ export function shouldPlayPromo(input: PromoGateInput): boolean {
   if (input.isLoggedIn) return false;
   if (input.seen) return false;
   if (isHandoffLink(input.search)) return false;
+  if (isChannelArrival(input)) return false;
   return true;
 }

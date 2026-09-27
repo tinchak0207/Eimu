@@ -378,7 +378,11 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
   /**
    * 進站判定：登入態水合完成後才判——水合中（authLoading）是「還不知道」，
    * 對還不知道的用戶插播等於對已登入用戶插播。讀一次 localStorage，
-   * 看過就不再開；深鏈交接（?agent=1&q=/?session=）讓路，判準在 promo-gate.ts。
+   * 看過就不再開；深鏈交接（?agent=1&q=/?session=）讓路、渠道來訪（B 站／微信，
+   * 人是被宣傳片吸引來的）也讓路，判準全在 promo-gate.ts。
+   *
+   * 渠道來訪只是「這次不開浮層」，不寫「已看過」：他下次直接進站（無 Referer）
+   * 仍會被影片接住，首次進站的震撼不會被渠道那一次的判斷吃掉。
    */
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -388,7 +392,15 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
     } catch {
       // 私密模式／停用儲存：讀不到就當沒看過（本次照播），不因此炸掉首頁。
     }
-    if (!shouldPlayPromo({ isLoading: authLoading, isLoggedIn, seen, search: window.location.search })) return;
+    const playable = shouldPlayPromo({
+      isLoading: authLoading,
+      isLoggedIn,
+      seen,
+      search: window.location.search,
+      referrer: document.referrer,
+      userAgent: navigator.userAgent,
+    });
+    if (!playable) return;
     setPromoOpen(true);
   }, [authLoading, isLoggedIn]);
 
