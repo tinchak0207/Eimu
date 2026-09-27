@@ -33,7 +33,7 @@ import {
 } from "./job-repository";
 import { acquireSupplierLease, diagnoseSupplierUnavailability, heartbeatSupplierLease, recoverExpiredCooldowns, releaseSupplierLease, reportSupplierFailure, reportSupplierSuccess, type SupplierUnavailabilityReason } from "./scheduler";
 import { generateWithSupplier } from "./supplier-adapter";
-import type { GenerationArtifactResult, GenerationJob, ProviderProtocol, SupplierRecord } from "./types";
+import type { GenerationArtifactResult, GenerationJob, GenerationKind, ProviderProtocol, SupplierRecord } from "./types";
 import { runProviderReconciliation } from "./provider-reconciliation";
 import { refreshAdobeSupplierHealth } from "./adobe-health";
 import { onFilmeraTokenRotated } from "./filmera-upstream";
@@ -84,6 +84,26 @@ const RECOVERABLE_QUEUE_REASONS: ReadonlySet<SupplierUnavailabilityReason> = new
   "capacity_saturated",
   "accounts_unhealthy",
 ]);
+
+/**
+ * 開工後的生成預算（2026-09-27 INC-VIDEO-0927）。
+ *
+ * 影片上游實測比圖片慢一個量級：napi 單次 attempt 最長 993.9s（16.6 分鐘）、
+ * 30 秒檔成功單均 868s；adapter 內輪詢窗口原本只有 540s（9 分鐘），
+ * 已實錄 1 筆 "openai-video upstream generation timed out after 540s
+ * (last status: in_progress)" —— 慢而健康的上游被我們的窗口誤殺。
+ * 影片類（video_generate / avatar / lipsync 同為異步影片族）放寬到 25 分鐘
+ * （含成品下載與持久化），其餘維持 15 分鐘。
+ */
+const GENERATION_BUDGET_MS = 15 * 60_000;
+const VIDEO_GENERATION_BUDGET_MS = 25 * 60_000;
+
+/** 按任務類型取開工後生成預算（純函數，供測試直接斷言）。 */
+export function generationBudgetMs(kind: GenerationKind): number {
+  return kind === "video_generate" || kind === "avatar" || kind === "lipsync"
+    ? VIDEO_GENERATION_BUDGET_MS
+    : GENERATION_BUDGET_MS;
+}
 
 /** 排隊順延決策：deadline 快到期 + 未超排隊上限 + 處在可恢復狀態。純邏輯，供測試直接斷言。 */
 export function shouldExtendQueueDeadline(input: {
@@ -168,10 +188,11 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
       }, sql);
       if (supplierLease) {
         // R7-D：排隊 3 分鐘 deadline 只保護等容量階段；真的租到供應商開工了，
-        // 立即按 started_at 展期到 15 分鐘總生成預算（慢而健康的 H3 單不被誤殺）。
+        // 立即按 started_at 展期到生成總預算（慢而健康的影片單不被誤殺）。
         // 病灶 D：extend 返回實際寫入的 deadline，同步回內存 job.deadlineAt，
         // 否則內存仍停在 claim 時的 3 分鐘快照，長任務會被誤殺。
-        const extendedTo = await extendGenerationDeadlineJob(job, workerId, 15 * 60_000, sql).catch(() => null);
+        // INC-VIDEO-0927：預算按 kind 分級（影片 25 分鐘，其餘 15 分鐘）。
+        const extendedTo = await extendGenerationDeadlineJob(job, workerId, generationBudgetMs(job.kind), sql).catch(() => null);
         applyExtendedDeadline(job, extendedTo);
       }
       if (!supplierLease) {

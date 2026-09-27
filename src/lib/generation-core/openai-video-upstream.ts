@@ -15,7 +15,19 @@ import type { ProviderTaskPollResult, SupplierGenerationInput, SupplierGeneratio
 // sd7 族固定分辨率由模型名决定），不依赖 supplier 表 supplierModelId。
 
 const POLL_INTERVAL_MS = 5_000;
-const MAX_WAIT_MS = 540_000;
+// INC-VIDEO-0927（2026-09-27）：輪詢窗口原本 540s（9 分鐘），會誤殺慢而健康的
+// 影片上游——napi 實測單次 attempt 最長 993.9s（16.6 分鐘），生產日誌實錄
+// 「openai-video upstream generation timed out after 540s (last status: in_progress)」。
+// 預設放寬到 20 分鐘，可用 OPENAI_VIDEO_MAX_WAIT_MS 覆寫（下限 60s）；
+// worker 端影片生成預算同步放寬到 25 分鐘，留成品下載／持久化餘裕。
+const DEFAULT_MAX_WAIT_MS = 1_200_000;
+
+/** 輪詢窗口（每次調用讀 env，便於運維與測試覆寫）。 */
+export function openaiVideoMaxWaitMs(): number {
+  const raw = Number(process.env.OPENAI_VIDEO_MAX_WAIT_MS ?? "");
+  return Number.isFinite(raw) && raw >= 60_000 ? raw : DEFAULT_MAX_WAIT_MS;
+}
+
 const REQUEST_TIMEOUT_MS = 30_000;
 
 // 平台模型 id + resolution → 上游模型名映射
@@ -210,7 +222,7 @@ export async function generateWithOpenaiVideo(
   input.onProviderTaskSubmitted?.(taskId, "openai_video");
 
   // 轮询
-  const deadline = Date.now() + MAX_WAIT_MS;
+  const deadline = Date.now() + openaiVideoMaxWaitMs();
   let lastStatus: string | undefined;
   while (Date.now() < deadline) {
     const queryResponse = await openaiVideoRequest(baseUrl, `videos/${encodeURIComponent(taskId)}`, {
@@ -276,7 +288,7 @@ export async function generateWithOpenaiVideo(
   }
 
   throw new SupplierRequestError(
-    `openai-video upstream generation timed out after ${Math.round(MAX_WAIT_MS / 1000)}s (last status: ${lastStatus ?? "none"}).`,
+    `openai-video upstream generation timed out after ${Math.round(openaiVideoMaxWaitMs() / 1000)}s (last status: ${lastStatus ?? "none"}).`,
     504,
     undefined,
     undefined,

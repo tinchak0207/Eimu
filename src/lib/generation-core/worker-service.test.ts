@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { applyExtendedDeadline, shouldExtendQueueDeadline } from "./worker-service.ts";
+import { applyExtendedDeadline, generationBudgetMs, shouldExtendQueueDeadline } from "./worker-service.ts";
 import type { GenerationJob } from "./types.ts";
 
 function job(overrides: Partial<GenerationJob> = {}): GenerationJob {
@@ -122,4 +122,14 @@ test("applyExtendedDeadline：extend 失敗（null）時內存 deadline 不變",
   const original = j.deadlineAt;
   applyExtendedDeadline(j, null);
   assert.equal(j.deadlineAt, original);
+});
+test("generationBudgetMs：影片族（video_generate/avatar/lipsync）= 25 分鐘，其餘 15 分鐘", () => {
+  // INC-VIDEO-0927：napi 單次 attempt 實測最長 993.9s、30s 檔成功單均 868s，
+  // 舊的 15 分鐘開工預算會誤殺慢而健康的影片上游。
+  assert.equal(generationBudgetMs("video_generate"), 25 * 60_000);
+  assert.equal(generationBudgetMs("avatar"), 25 * 60_000);
+  assert.equal(generationBudgetMs("lipsync"), 25 * 60_000);
+  assert.equal(generationBudgetMs("image_generate"), 15 * 60_000);
+  assert.equal(generationBudgetMs("image_edit"), 15 * 60_000);
+  assert.equal(generationBudgetMs("tts"), 15 * 60_000);
 });

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { generateWithOpenaiVideo } from "./openai-video-upstream.ts";
+import { generateWithOpenaiVideo, openaiVideoMaxWaitMs } from "./openai-video-upstream.ts";
 import type { SupplierGenerationInput, SupplierRecord } from "./types.ts";
 
 function supplier(overrides: Partial<SupplierRecord> = {}): SupplierRecord {
@@ -522,5 +522,24 @@ test("drama sd25-30s：completed 無 URL 時走 /content 鑑權下載回 base64"
   } finally {
     delete process.env.DRAMA_API_KEY;
     globalThis.fetch = originalFetch;
+  }
+});
+
+test("openaiVideoMaxWaitMs：預設 20 分鐘，可 OPENAI_VIDEO_MAX_WAIT_MS 覆寫（下限 60s）", () => {
+  // INC-VIDEO-0927：舊值 540s 會誤殺慢而健康的影片上游（實錄 timeout after 540s,
+  // last status in_progress；napi 實測單次 attempt 最長 993.9s）。
+  const original = process.env.OPENAI_VIDEO_MAX_WAIT_MS;
+  try {
+    delete process.env.OPENAI_VIDEO_MAX_WAIT_MS;
+    assert.equal(openaiVideoMaxWaitMs(), 1_200_000);
+    process.env.OPENAI_VIDEO_MAX_WAIT_MS = "1800000";
+    assert.equal(openaiVideoMaxWaitMs(), 1_800_000);
+    process.env.OPENAI_VIDEO_MAX_WAIT_MS = "1000";
+    assert.equal(openaiVideoMaxWaitMs(), 1_200_000, "低於 60s 的下限值忽略，回預設");
+    process.env.OPENAI_VIDEO_MAX_WAIT_MS = "abc";
+    assert.equal(openaiVideoMaxWaitMs(), 1_200_000);
+  } finally {
+    if (original === undefined) delete process.env.OPENAI_VIDEO_MAX_WAIT_MS;
+    else process.env.OPENAI_VIDEO_MAX_WAIT_MS = original;
   }
 });
