@@ -18,6 +18,17 @@ export const FIRST_TOUCH_MAX_AGE_DAYS = 90;
 /** cookie 值的結構版本；解不出版本號＝視為不合法（寧可重寫一次，不讀半截 JSON）。 */
 export const FIRST_TOUCH_COOKIE_VERSION = 1;
 
+/** 邀請碼在落地 URL 上的參數名（分享頁、定價頁邀請連結同一個）。 */
+export const INVITE_PARAM = "invite";
+
+/** 邀請碼 cookie：與首觸 cookie 分開——首觸不覆蓋，但訪客可能先自然來過、之後才點好友連結。首個邀請勝出。 */
+export const INVITE_COOKIE = "eimu_invite";
+
+/** 邀請碼形狀（`<id36>-<8hex>`）；只擋畸形，驗簽在服務端（referral-code.ts）。 */
+export function looksLikeInviteCode(value: string | null | undefined): value is string {
+  return typeof value === "string" && /^[0-9a-z]{1,10}-[0-9a-f]{8}$/.test(value);
+}
+
 /** 沒有歸因事實的用戶（存量用戶、cookie 被清掉的人）在統計投影裡的分組哨兵值。 */
 export const UNATTRIBUTED_SOURCE = "__unknown__";
 

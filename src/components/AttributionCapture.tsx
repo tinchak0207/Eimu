@@ -4,7 +4,10 @@ import { useEffect } from "react";
 import {
   FIRST_TOUCH_COOKIE,
   FIRST_TOUCH_MAX_AGE_DAYS,
+  INVITE_COOKIE,
+  INVITE_PARAM,
   firstTouchFromLocation,
+  looksLikeInviteCode,
   resolveFirstTouchCookieValue,
 } from "@/lib/first-touch-attribution";
 
@@ -30,6 +33,16 @@ function readCookie(name: string): string | null {
 
 export function AttributionCapture() {
   useEffect(() => {
+    try {
+      // 邀請碼：首個邀請勝出，與首觸互不影響（登入後由 /api/auth/me 交控面綁定）。
+      const invite = new URLSearchParams(window.location.search).get(INVITE_PARAM)?.trim().toLowerCase();
+      if (looksLikeInviteCode(invite) && !readCookie(INVITE_COOKIE)) {
+        const secure = window.location.protocol === "https:" ? "; Secure" : "";
+        document.cookie = `${INVITE_COOKIE}=${invite}; path=/; max-age=${FIRST_TOUCH_MAX_AGE_DAYS * 86_400}; SameSite=Lax${secure}`;
+      }
+    } catch {
+      // 同上：採集失敗不影響任何功能。
+    }
     try {
       const value = resolveFirstTouchCookieValue(
         readCookie(FIRST_TOUCH_COOKIE),

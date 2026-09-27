@@ -6,6 +6,7 @@ import { BadgeCheck, BookOpen, ChevronDown, Copy, Gift, Sparkles, Ticket, X } fr
 import type { MapayPaymentType } from "@/lib/mapay";
 import {
   ACTIVE_PRICING_PROMO,
+  MAX_REWARDED_INVITES,
   REFERRAL_REWARD_COINS,
   REFEREE_REWARD_COINS,
   customPlanFor,
@@ -19,7 +20,7 @@ import type { ModelPriceRow, PricingPromo } from "@/lib/plans";
 import { IMAGE_MODEL_IDS, VIDEO_MODEL_IDS, generationCoins } from "@/lib/generation-model-catalog";
 import { useAuth } from "@/hooks/use-auth";
 import { usePricingRevision } from "@/hooks/use-pricing-revision";
-import { fetchAffCode, quotaToCoins, redeemTopupCode } from "@/lib/new-api-client";
+import { fetchInviteLink, quotaToCoins, redeemTopupCode } from "@/lib/new-api-client";
 import { useToast } from "@/hooks/use-toast";
 import { isStandalonePwa, createHandoffLogin } from "@/lib/github-login";
 import { PwaHandoffPanel } from "@/components/PwaHandoffPanel";
@@ -74,7 +75,7 @@ export function PricingClient() {
   usePricingRevision();
   const { token, isLoggedIn, refresh } = useAuth();
   const { toast } = useToast();
-  const [affCode, setAffCode] = useState<string | null>(null);
+  const [inviteUrl, setInviteUrl] = useState<string | null>(null);
   const [affLoading, setAffLoading] = useState(false);
   const [redeemCode, setRedeemCode] = useState("");
   const [redeemLoading, setRedeemLoading] = useState(false);
@@ -205,8 +206,8 @@ export function PricingClient() {
     if (!token) { startGithubLogin(); return; }
     setAffLoading(true);
     try {
-      const res = await fetchAffCode(token);
-      if (res.success && res.data) setAffCode(res.data);
+      const res = await fetchInviteLink(token);
+      if (res.success && res.data) setInviteUrl(res.data.url);
       else toast({ title: "获取失败", description: res.message ?? "请稍后再试", variant: "destructive" });
     } catch {
       toast({ title: "网络错误", variant: "destructive" });
@@ -216,9 +217,8 @@ export function PricingClient() {
   };
 
   const handleCopyAff = () => {
-    if (!affCode) return;
-    const url = `${window.location.origin}?ref=${affCode}`;
-    navigator.clipboard.writeText(url).then(() =>
+    if (!inviteUrl) return;
+    navigator.clipboard.writeText(inviteUrl).then(() =>
       toast({ title: "已复制邀请链接" })
     );
   };
@@ -391,17 +391,17 @@ export function PricingClient() {
               邀请好友
             </p>
             <h3 id="invite-heading" className="mt-1.5 text-ios-title3 font-bold text-[color:var(--p3d-ink)]">
-              好友首次充值，你得 <span className="text-[#e0457f]">{REFERRAL_REWARD_COINS} 金币</span>
+              好友出第一张图，你得 <span className="text-[#e0457f]">{REFERRAL_REWARD_COINS} 金币</span>
             </h3>
             <p className="mt-1 text-ios-footnote text-[color:var(--p3d-ink-3)]">
-              好友也得 <span className="font-semibold text-[#c9a84c]">{REFEREE_REWARD_COINS} 金币</span>；以金币发放、不能提现。
+              好友也多得 <span className="font-semibold text-[#c9a84c]">{REFEREE_REWARD_COINS} 金币</span>；你分享出去的作品链接同样算邀请。
             </p>
             <div className="mt-4">
-              {affCode ? (
+              {inviteUrl ? (
                 <div className="flex min-w-0 items-center gap-2 rounded-full bg-white/80 py-1.5 pl-4 pr-1.5 ring-1 ring-inset ring-[rgba(58,80,160,0.14)]">
-                  {/* 展示的链接必须和「复制」按钮写进剪贴板的完全一致（?ref=，不是 /ref=）。 */}
+                  {/* 展示的链接必须和「复制」按钮写进剪贴板的完全一致。 */}
                   <span className="min-w-0 flex-1 truncate font-mono text-ios-footnote text-[color:var(--p3d-ink-2)]">
-                    {`${typeof window !== "undefined" ? window.location.origin : ""}?ref=${affCode}`}
+                    {inviteUrl}
                   </span>
                   <button type="button" onClick={handleCopyAff} aria-label="复制邀请链接" title="复制邀请链接" className="p3d-btn-light shrink-0">
                     <Copy className="h-3.5 w-3.5" aria-hidden="true" />
@@ -525,7 +525,7 @@ const FAQ = [
   },
   {
     q: "邀请奖励是现金吗？",
-    a: "不是。奖励会以金币形式发放，不能提现，也不能转让。",
+    a: `不是。好友经你的邀请链接（或你分享的作品链接）注册、并出了第一张图后，双方金币自动到账，通常几分钟内；每人最多累计 ${MAX_REWARDED_INVITES} 次邀请奖励。金币不能提现，也不能转让。`,
   },
   {
     q: "支持哪些模型？",

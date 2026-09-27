@@ -32,9 +32,10 @@ export function buildSharePath(shareId: string): string {
 }
 
 /** 對外分享連結：路徑 + 歸因參數。siteUrl 由呼叫端給（request 或 env，見 site-url.ts）。 */
-export function buildShareUrl(siteUrl: string, shareId: string): string {
+export function buildShareUrl(siteUrl: string, shareId: string, inviteCode?: string | null): string {
   const base = siteUrl.replace(/\/+$/, "");
-  const query = new URLSearchParams(shareUtmParams(shareId)).toString();
+  // 作者的邀請碼放第一位：看圖的人註冊並出第一張圖＝作者邀請成功（分享即邀請）。
+  const query = new URLSearchParams({ ...(inviteCode ? { invite: inviteCode } : {}), ...shareUtmParams(shareId) }).toString();
   return `${base}${buildSharePath(shareId)}?${query}`;
 }
 

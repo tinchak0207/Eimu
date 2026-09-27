@@ -4,6 +4,7 @@ import {
   generationCoins,
   generationModel,
 } from "./generation-model-catalog";
+import { DEFAULT_IMAGE_MODEL_ID, imageGenerationCoins } from "./provider-config";
 
 export interface PricingPlan {
   id: string;
@@ -29,9 +30,19 @@ export const FLAGSHIP_MODEL_ID = "gemini-3-image";
 export const FLAGSHIP_MODEL_LABEL = "Nano Banana Pro";
 export const FLAGSHIP_COINS_PER_IMAGE = generationCoins(FLAGSHIP_MODEL_ID, { resolution: "1k" });
 
-/** 邀请奖励口径（与后端发放一致）：邀请人 / 被邀请人各得金币。 */
-export const REFERRAL_REWARD_COINS = 100;
-export const REFEREE_REWARD_COINS = 50;
+/** 一张「标准图」的币价（默认模型默认档位，定价变动自动跟随；与新人礼同一把尺）。 */
+export const STANDARD_IMAGE_COINS = imageGenerationCoins(DEFAULT_IMAGE_MODEL_ID);
+
+/**
+ * 邀请奖励口径（唯一真源，控面 src/lib/referral-reward.ts 按此发放）：
+ * 好友经你的链接注册、并**出了第一张图**后，你得 INVITER_REWARD_IMAGES 张、好友额外得 INVITEE_REWARD_IMAGES 张。
+ */
+export const INVITER_REWARD_IMAGES = 10;
+export const INVITEE_REWARD_IMAGES = 5;
+export const REFERRAL_REWARD_COINS = INVITER_REWARD_IMAGES * STANDARD_IMAGE_COINS;
+export const REFEREE_REWARD_COINS = INVITEE_REWARD_IMAGES * STANDARD_IMAGE_COINS;
+/** 每位邀请人最多累计领奖次数（防小号农场）。 */
+export const MAX_REWARDED_INVITES = 30;
 
 export const PLANS: PricingPlan[] = [
   {

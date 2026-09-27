@@ -11,8 +11,8 @@ import {
   type WelcomeGiftResult,
 } from "@/lib/welcome-gift";
 import type { WelcomeGiftModal } from "@/lib/welcome-gift-modal";
-import { FIRST_TOUCH_COOKIE } from "@/lib/first-touch-attribution";
-import { recordFirstTouchCookieViaRelay } from "@/lib/user-attribution";
+import { FIRST_TOUCH_COOKIE, INVITE_COOKIE } from "@/lib/first-touch-attribution";
+import { recordFirstTouchCookieViaRelay, recordInviteViaRelay } from "@/lib/user-attribution";
 
 export const preferredRegion = "sfo1";
 
@@ -139,13 +139,40 @@ async function applyFirstTouchAttribution(userId: number, rawCookie: string | nu
   }
 }
 
+// 邀請綁定：同一套記憶（每實例每用戶處理完一次即永久記住，失敗 10 分鐘後再試）。
+const inviteNextAttemptAt = new Map<number, number>();
+
+async function applyInviteBinding(userId: number, rawCookie: string | null | undefined): Promise<void> {
+  if (!rawCookie) return;
+  const nextAttemptAt = inviteNextAttemptAt.get(userId);
+  if (nextAttemptAt !== undefined && nextAttemptAt > Date.now()) return;
+  let budgetTimer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const done = await Promise.race([
+      recordInviteViaRelay(userId, rawCookie, { timeoutMs: FIRST_TOUCH_BUDGET_MS }),
+      new Promise<boolean>((resolve) => {
+        budgetTimer = setTimeout(() => resolve(false), FIRST_TOUCH_BUDGET_MS);
+      }),
+    ]);
+    if (inviteNextAttemptAt.size >= FIRST_TOUCH_MEMO_MAX) inviteNextAttemptAt.clear();
+    inviteNextAttemptAt.set(userId, done ? Number.POSITIVE_INFINITY : Date.now() + FIRST_TOUCH_RETRY_MS);
+  } catch (error) {
+    console.error("[auth/me] invite binding skipped", error instanceof Error ? error.message : String(error));
+  } finally {
+    clearTimeout(budgetTimer);
+  }
+}
+
 /** 登入後的側車事實：新人禮（額度）與首次觸達歸因並行；兩者都永不 throw、都不擋登入。 */
 async function applyLoginSideFacts(payload: unknown, req: NextRequest): Promise<void> {
   const userId = Number((payload as { data?: { id?: unknown } } | null)?.data?.id);
   const attribution = Number.isInteger(userId) && userId > 0
     ? applyFirstTouchAttribution(userId, req.cookies.get(FIRST_TOUCH_COOKIE)?.value)
     : Promise.resolve();
-  await Promise.all([applyWelcomeGift(payload), attribution]);
+  const invite = Number.isInteger(userId) && userId > 0
+    ? applyInviteBinding(userId, req.cookies.get(INVITE_COOKIE)?.value)
+    : Promise.resolve();
+  await Promise.all([applyWelcomeGift(payload), attribution, invite]);
 }
 
 export async function GET(req: NextRequest) {

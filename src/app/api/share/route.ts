@@ -12,6 +12,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireVerifiedUser } from "@/lib/server-user";
 import { listGeneratedHistoryEntries, persistGeneratedImage } from "@/lib/server-history-store";
 import { getSiteUrl } from "@/lib/site-url";
+import { inviteCodeFor, referralSecret } from "@/lib/referral-code";
 import { isShareId } from "@/lib/share-id";
 import {
   buildShareSnapshot,
@@ -23,6 +24,12 @@ import { createShare, listSharesForUser, revokeShare, setShareHidden } from "@/l
 
 export const runtime = "nodejs";
 export const preferredRegion = "sfo1";
+
+/** 分享者自己的邀請碼（密鑰缺失＝不帶，分享照常）。 */
+function ownInviteCode(userId: number): string | null {
+  const secret = referralSecret();
+  return secret ? inviteCodeFor(userId, secret) : null;
+}
 
 function fail(status: number, message: string) {
   return NextResponse.json({ success: false, message }, { status });
@@ -92,7 +99,7 @@ export async function POST(req: NextRequest) {
     success: true,
     data: {
       shareId: record.shareId,
-      url: buildShareUrl(siteUrl, record.shareId),
+      url: buildShareUrl(siteUrl, record.shareId, ownInviteCode(auth.user.id)),
       path: `/p/${record.shareId}`,
       hidePrompt: record.hidePrompt,
       resultIndex: record.resultIndex,
@@ -114,7 +121,7 @@ export async function GET(req: NextRequest) {
     data: {
       shares: shares.map((item) => ({
         ...item,
-        url: buildShareUrl(siteUrl, item.shareId),
+        url: buildShareUrl(siteUrl, item.shareId, ownInviteCode(auth.user.id)),
         path: `/p/${item.shareId}`,
       })),
     },
@@ -147,7 +154,7 @@ export async function PATCH(req: NextRequest) {
     success: true,
     data: {
       shareId: record.shareId,
-      url: buildShareUrl(siteUrl, record.shareId),
+      url: buildShareUrl(siteUrl, record.shareId, ownInviteCode(auth.user.id)),
       hidePrompt: record.hidePrompt,
     },
   });

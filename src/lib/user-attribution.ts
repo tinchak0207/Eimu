@@ -276,6 +276,24 @@ export async function recordFirstTouchCookieViaRelay(
   return recordUserAttributionViaRelay({ userId, firstTouch }, options);
 }
 
+/**
+ * 邀請碼 cookie → 控面綁定邀請關係（驗簽與「未出過圖才可綁」都在控面）。永不 throw。
+ * 回 true ＝ 控面已處理（綁上或判定不可綁都算處理完，免得每次登入重送）。
+ */
+export async function recordInviteViaRelay(
+  userId: number,
+  inviteCode: string | null | undefined,
+  options: RelayOptions = {},
+): Promise<boolean> {
+  if (!inviteCode) return false;
+  try {
+    return await postRelay({ op: "invite", userId, inviteCode }, options);
+  } catch (error) {
+    console.error(`[user-attribution] relay invite failed user=${userId}：${error instanceof Error ? error.message : String(error)}`);
+    return false;
+  }
+}
+
 // ─────────────────────────────────────────── 控制面入站（供 internal route 組裝）
 
 /** 入站請求體（provider 已在 Vercel 側挑出「已驗證」email；控制面只做形狀校驗再落庫）。 */

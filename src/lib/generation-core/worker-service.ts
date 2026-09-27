@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { ingestRedeemedRecharges } from "./account-ledger";
 import { runLifecycleEmailsWithSql } from "@/lib/lifecycle-email";
+import { runReferralRewardsWithSql } from "@/lib/referral-reward";
 import { ingestSubscriptionRedemptions } from "./subscription";
 import { reconcileAccountBalances } from "./account-reconciliation";
 import { commitGenerationBilling, reconcileGenerationBilling, refundGenerationBilling } from "./billing-ledger";
@@ -553,6 +554,14 @@ export async function runAccountMaintenanceOnce(
     );
   } catch (error) {
     console.error("[subscription] 訂閱發放失敗（繼續）", error);
+  }
+  try {
+    const referral = await runReferralRewardsWithSql(sql);
+    if (referral.granted || referral.failed || referral.skipped) {
+      console.log(`[referral] granted=${referral.granted} skipped=${referral.skipped} failed=${referral.failed}${referral.aborted ? " aborted" : ""}`);
+    }
+  } catch (error) {
+    console.error("[referral] 邀請獎勵失敗（繼續）", error);
   }
   try {
     const mail = await runLifecycleEmailsWithSql(sql);
