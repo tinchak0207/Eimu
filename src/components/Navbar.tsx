@@ -20,6 +20,7 @@ import { cn } from "@/lib/utils";
 import { isStandalonePwa, createHandoffLogin } from "@/lib/github-login";
 import { PwaHandoffPanel } from "@/components/PwaHandoffPanel";
 import { QqGroupDialog } from "@/components/QqGroupDialog";
+import { NotificationBell } from "@/components/notifications/NotificationBell";
 
 interface NavbarProps {
   className?: string;
@@ -428,6 +429,10 @@ export function Navbar({ className }: NavbarProps) {
                         团队管理
                       </Link>
                     </DropdownMenuItem>
+                    {/* 站内通知：机制在、只此一个真业务（新人礼到账）；入口从 header 图示列搬进本菜单。
+                        放最后不打断上面「密钥/团队」三连（那组是同一条 B 端密钥语义），
+                        且通知是菜单里唯一面向普通用户的条目。 */}
+                    <NotificationBell variant="menuItem" />
                   </DropdownMenuContent>
                 </DropdownMenu>
 
