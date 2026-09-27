@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  PROMO_ENTRY_UNDECIDED,
   PROMO_PENDING_KEY,
   PROMO_SEEN_KEY,
   PROMO_TRIAL_PROMPT,
@@ -10,6 +11,7 @@ import {
   clearPendingTrial,
   isHandoffLink,
   readPendingTrial,
+  resolvePromoEntry,
   resolvePromoTrialIntent,
   shouldPlayPromo,
   writePendingTrial,
@@ -88,6 +90,52 @@ test("?promo=1 是驗收用的強制預覽：穿過全部守衛（含渠道判�
   assert.equal(shouldPlayPromo({ ...coldVisitor, isLoading: true, isLoggedIn: true, seen: true, search: "?promo=1" }), true);
   assert.equal(shouldPlayPromo({ ...coldVisitor, isLoggedIn: true, search: "?promo=0" }), false);
   assert.equal(shouldPlayPromo({ ...coldVisitor, search: "?promo=1&utm_source=bilibili" }), true);
+});
+
+/**
+ * 進站判定只做一次（2026-09-27 暴君實錘「?promo 在從登入態 logout 時也錯誤觸發」）：
+ * 登出讓 isLoggedIn 由真翻假、effect 重跑，若重判就會對只是登出的人再插播一次。
+ * 這裡用純函式的連續呼叫模擬那串登入態變化，把「定案就不改判」釘死。
+ */
+test("進站判定只做一次：登出（登入態由真翻假）不得重判、不得再開浮層", () => {
+  // ①已登入用戶帶著 ?promo=1 進站：定案為播（強制預覽），這是他進站那一刻的決策。
+  const preview = resolvePromoEntry(PROMO_ENTRY_UNDECIDED, {
+    ...coldVisitor,
+    isLoggedIn: true,
+    search: "?promo=1",
+  });
+  assert.deepEqual(preview, { decided: true, play: true });
+
+  // ②他按了登出：同一個定案物件原樣返回——不再播一次。
+  const afterLogout = resolvePromoEntry(preview, {
+    ...coldVisitor,
+    isLoggedIn: false,
+    search: "?promo=1", // URL 上那條 promo 還在，也不得因此重播
+  });
+  assert.equal(afterLogout, preview);
+  assert.equal(afterLogout.play, true, "沿用首次定案，不是重判出第二個 true");
+
+  // ③反向也一樣：已登入進站定案為不播，登出後不得補播一段。
+  const quiet = resolvePromoEntry(PROMO_ENTRY_UNDECIDED, { ...coldVisitor, isLoggedIn: true });
+  assert.deepEqual(quiet, { decided: true, play: false });
+  assert.equal(resolvePromoEntry(quiet, { ...coldVisitor, isLoggedIn: false }).play, false);
+
+  // ④冷啟訪客：首次定案照播。
+  assert.deepEqual(resolvePromoEntry(PROMO_ENTRY_UNDECIDED, coldVisitor), {
+    decided: true,
+    play: true,
+  });
+
+  // ⑤水合中＝還不知道：不判也不記（記了等於對狀態不明的用戶定案），
+  //    水合完成後才用真實登入態定案。
+  const pending = resolvePromoEntry(PROMO_ENTRY_UNDECIDED, {
+    ...coldVisitor,
+    isLoading: true,
+    isLoggedIn: true,
+  });
+  assert.equal(pending.decided, false);
+  assert.equal(pending, PROMO_ENTRY_UNDECIDED);
+  assert.equal(resolvePromoEntry(pending, { ...coldVisitor, isLoggedIn: false }).play, true);
 });
 
 test("儲存鍵與試玩那句話是穩定的對外契約", () => {

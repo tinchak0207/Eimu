@@ -114,6 +114,35 @@ export function shouldPlayPromo(input: PromoGateInput): boolean {
   return true;
 }
 
+// ── 進站判定只做一次 ────────────────────────────────────────────────────────
+// 「進站播一次」是**進站那一刻**的決策，不是「登入態每翻一次就重判一次」。
+// 2026-09-27 暴君實錘：登入中的用戶按登出，isLoggedIn 由真翻假，判定 effect
+// 重跑 ⇒ `?promo=1` 的強制預覽又開一次浮層（連不帶 promo 的未看過用戶也會被
+// 補播一段）。使用者只是登出，不是重新進站，不該有任何插播。
+//
+// 所以把「這頁載入的決策已定案」做成顯式狀態：水合完成前是「還不知道」，
+// 既不判也不記；一旦定案（decided），後續任何登入態變動都不再改判。
+
+export interface PromoEntryDecision {
+  /** 已對這頁載入做出定案（水合完成後才會是 true）。 */
+  decided: boolean;
+  /** 定案結果：這次載入要不要播。只在 decided 為真時有意義。 */
+  play: boolean;
+}
+
+/** 未定案的初始值（唯讀）：掛載時當起點。 */
+export const PROMO_ENTRY_UNDECIDED = { decided: false, play: false } as const;
+
+export function resolvePromoEntry(
+  previous: PromoEntryDecision,
+  input: PromoGateInput,
+): PromoEntryDecision {
+  if (previous.decided) return previous;
+  // 水合中＝還不知道登入態，不判也不記（記了等於對狀態不明的用戶定案）。
+  if (input.isLoading) return previous;
+  return { decided: true, play: shouldPlayPromo(input) };
+}
+
 // ── 待補送的試玩那句話 ──────────────────────────────────────────────────────
 // 收尾輸入框送出的那句話，在「還沒登入」時送不出去：對話區會顯示「请先登录」
 // 與登入鈕，而使用者的話已經離開輸入框——那正是宣傳片的主要觀眾（未登入訪客），
