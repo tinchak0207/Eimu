@@ -66,6 +66,31 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
   },
 
 {
+    // gway（極途Gway，api.gway.dev，2026-09-28）：xiaoyxiao 的直接上游（取證見記憶
+    // 2026-09-28-xiaoyxiao-upstream-chain-0928）。同名模型掛 vip 分組、單價恆＝xiaoyxiao−¥0.1。
+    // 現為**備用渠道**（priority 2，xiaoyxiao 失敗才輪到）；暴君裁定 xiaoyxiao 餘額跑完即搬家至此。
+    // 協議、模型名、成本閘白名單與 xiaoyxiao 完全同型（閘門只認 supplierModelId，零改動）。
+    label: "gway",
+    baseUrlEnv: "GWAY_BASE_URL",
+    apiKeyEnv: "GWAY_API_KEY",
+    enabledEnv: "GWAY_ENABLED",
+    tier: "managed_pool",
+    seedPriority: 2,
+    sitePriority: 2,
+    chatImageModels: [],
+    adapterType: "openai_video",
+    claims: [
+      // 已核價（GET https://www.gway.dev/api/pricing 2026-09-28，vip 分組，quota_type=1）：
+      // seedance-2.0-900-特惠 0.6、seedance-2.5-900-特惠 0.8、seedance-2.5-1010-特惠 1.5、
+      // minimax-h3-933-2k-支持真人 1.0。
+      { modelId: "seedance-2.0",      supplierModelId: "seedance-2.0-900-特惠",      kinds: ["video_generate"] },
+      { modelId: "seedance-2.5-480p", supplierModelId: "seedance-2.5-900-特惠",      kinds: ["video_generate"] },
+      { modelId: "seedance-2.5-720p", supplierModelId: "seedance-2.5-1010-特惠",     kinds: ["video_generate"] },
+      { modelId: "minimax-h3",        supplierModelId: "minimax-h3-933-2k-支持真人", kinds: ["video_generate"] },
+    ],
+  },
+
+{
     label: "hublinuxdo",
     baseUrlEnv: "HUBLINUXDO_BASE_URL",
     apiKeyEnv: "HUBLINUXDO_API_KEY",
