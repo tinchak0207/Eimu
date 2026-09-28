@@ -1,8 +1,11 @@
+# 模板，不是現役檔。現役真源＝VPS /opt/image-control-plane/control-plane-compose.yml
+# （api/worker 另有 PIXAI_BASE_URL/PIXAI_API_KEY 明文 env，secret 不入 git）。
+# deploy/vps/deploy-control-plane.sh 永不覆寫 VPS compose，只比對鍵名漂移。
 services:
   generation-postgres:
     image: postgres:16-alpine
     container_name: image-control-postgres
-    restart: unless-stopped
+    restart: always
     env_file:
       - ./.env.control-plane
     environment:
@@ -25,13 +28,16 @@ services:
       dockerfile: Dockerfile
       target: runner
     container_name: image-control-api
-    restart: unless-stopped
+    restart: always
     env_file:
       - ./.env.control-plane
     environment:
       NODE_ENV: production
       PORT: 3000
       HOSTNAME: 0.0.0.0
+      # OpenAI 同步兼容层（/openai/v1/*）由本容器承载：提交与轮询直连本机 3000，
+      # 免绕回公开域（绕回会命中 nginx 的 /image-control/ 前缀，路径对不上）。
+      OPENAI_COMPAT_GENERATION_ORIGIN: http://127.0.0.1:3000
     depends_on:
       generation-postgres:
         condition: service_healthy
@@ -44,10 +50,14 @@ services:
       dockerfile: Dockerfile
       target: generation-worker
     container_name: image-control-worker
-    restart: unless-stopped
+    restart: always
     env_file:
       - ./.env.control-plane
+    volumes:
+      - ./.env.control-plane:/app/.env.control-plane
+      - /opt/filmera-accounts:/opt/filmera-accounts
     environment:
+      FILMERA_ENV_PATH: /app/.env.control-plane
       NODE_ENV: production
     depends_on:
       generation-postgres:

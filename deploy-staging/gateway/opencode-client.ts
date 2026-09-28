@@ -98,16 +98,31 @@ export function scheduleTitleFetch(state: SessionState): void {
     )
   }
 }
+// opencode /event 每 ~10s 發一次 server.heartbeat（2026-09-28 實測 75s 內 7 次）。
+// 30s 收不到任何位元組＝連線已死（opencode-server 重啟後的半開 socket），主動 abort 重連。
+// 沒有這道看門狗時要等 Bun fetch 預設逾時：journal 09-28 06:37:26 斷線 → 06:42:28 才
+// TimeoutError 重連，5 分鐘盲窗內所有 delta 全丟——這就是「只重啟 opencode-server
+// 會讓網關 SSE 懸掛數分鐘」的根因，修掉後兩個服務不必再綁在一起重啟。
+const OPENCODE_SSE_IDLE_MS = 30_000
 export function connectOpencode(): void {
   const url = `${OPENCODE_URL}/event`
   void (async () => {
     while (true) {
+      const controller = new AbortController()
+      let lastByteAt = Date.now()
+      const watchdog = setInterval(() => {
+        if (Date.now() - lastByteAt > OPENCODE_SSE_IDLE_MS) {
+          console.error(`[gateway] opencode SSE idle > ${OPENCODE_SSE_IDLE_MS}ms, reconnecting`)
+          controller.abort()
+        }
+      }, 5_000)
       try {
         const res = await fetch(url, {
           headers: {
             Authorization: "Basic " + btoa("opencode:" + OPENCODE_PASSWORD),
             Accept: "text/event-stream",
           },
+          signal: controller.signal,
         })
         if (!res.ok || !res.body) {
           console.error(`[gateway] opencode SSE connect failed: status=${res.status}`)
@@ -121,6 +136,7 @@ export function connectOpencode(): void {
         while (true) {
           const { done, value } = await reader.read()
           if (done) break
+          lastByteAt = Date.now()
           buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n")
           let sep: number
           while ((sep = buffer.indexOf("\n\n")) >= 0) {
@@ -144,6 +160,8 @@ export function connectOpencode(): void {
         console.error(`[gateway] opencode SSE stream ended`)
       } catch (e) {
         console.error(`[gateway] opencode SSE error: ${e}`)
+      } finally {
+        clearInterval(watchdog)
       }
       await sleep(2000)
     }
