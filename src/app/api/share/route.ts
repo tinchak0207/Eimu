@@ -61,8 +61,15 @@ export async function POST(req: NextRequest) {
   const entryId = typeof body.entryId === "string" ? body.entryId.trim() : "";
   if (!entryId) return fail(400, "缺少作品 id。");
 
-  const entries = await listGeneratedHistoryEntries(auth.user.id);
-  const entry = entries.find((item) => item.id === entryId);
+  let entries = await listGeneratedHistoryEntries(auth.user.id);
+  let entry = entries.find((item) => item.id === entryId);
+  if (!entry) {
+    // 助理圖卡「分享」是先 POST /api/history 補寫、緊接著建分享：落在另一個實例時，
+    // 該實例的歷史索引快取（3s）可能還是寫入前的版本。等快取過期重讀一次再判 404。
+    await new Promise((resolve) => setTimeout(resolve, 3_200));
+    entries = await listGeneratedHistoryEntries(auth.user.id);
+    entry = entries.find((item) => item.id === entryId);
+  }
   // 不存在与不属于自己一律同一句话：不洩漏「這個 id 存在但不是你的」。
   if (!entry) return fail(404, "找不到这件作品。");
 
