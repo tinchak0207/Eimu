@@ -1,8 +1,9 @@
 // 畫布語義節點（prompt / reference）的純邏輯：
 //
-//   - resolveGenerationInputs：沿「入邊」收集連到生成節點的 prompt 節點文本
-//     與 reference 節點圖片（含角色），供手動 UI 與 agent run_generation 共用，
-//     保證兩條路徑的接線語義完全一致。
+//   - resolveGenerationInputs：沿「入邊」收集連到生成節點的 prompt 節點文本、
+//     reference 節點圖片（含角色），以及 3D 場景卡（scene_3d）的白模/靜態圖參考
+//     （P1-1 參考綁定），供手動 UI 與 agent run_generation 共用，保證兩條路徑的
+//     接線語義完全一致。
 //   - composeGenerationPrompt：prompt 節點文本作為前綴，與面板正文合成最終 prompt。
 //   - mergeGenerationReferences：手動 @引用 與連線自動帶入的參考圖按 nodeId 去重合併。
 //
@@ -11,6 +12,7 @@ import { CanvasNodeType } from "./types";
 import type { CanvasConnection, CanvasNode } from "./types";
 import { toReferenceImageRole } from "../image-types";
 import type { ReferenceImageRole } from "../image-types";
+import { sceneCardGenerationReferences } from "./scene-3d-reference";
 
 /** 畫布參考圖的傳輸形狀（CanvasEmbed → /api/canvas/generate）。 */
 export interface CanvasGenerationReference {
@@ -46,6 +48,8 @@ export interface GenerationSemanticInputs {
  * 收集 targetNodeId 的入邊語義輸入：
  *   - prompt 節點 → 文本進 promptParts（作為前綴）
  *   - reference 節點 → 圖 + 角色進 references
+ *   - scene_3d 節點 → sceneCard 白模/靜態圖進 references（P1-1 參考綁定；走
+ *     `sceneCardGenerationReferences` 的既有參考卡輪子，previz→composition）
  * 普通 image / text 節點不自動帶入（維持 @引用 的顯式選取語義）。
  */
 export function resolveGenerationInputs(
@@ -63,6 +67,9 @@ export function resolveGenerationInputs(
     if (from.type === CanvasNodeType.Prompt) {
       const text = (from.metadata?.content ?? "").trim();
       if (text) promptParts.push(text);
+    } else if (from.type === CanvasNodeType.Scene3d) {
+      // 3D 場景卡：白模/靜態圖 → 生成參考（首張帶 nodeId 作回分鏡指針，其餘靠 url 去重）。
+      references.push(...sceneCardGenerationReferences(from));
     } else if (from.type === CanvasNodeType.Reference) {
       const url = referenceImageUrlOf(from);
       if (url) {

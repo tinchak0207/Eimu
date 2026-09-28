@@ -331,12 +331,14 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
   const {
     isGenerating,
     upscalingIds,
+    extractingFramesIds,
     callCanvasGenerate,
     generateIntoNode,
     handleGenerateFromNode,
     stopGeneration,
     retryNode,
     upscaleNode,
+    extractFramesFromNode,
     runAgentGeneration,
   } = useCanvasGeneration({
     canvasStateRef,
@@ -907,6 +909,13 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
                 onEditImage={url ? (nid) => setEditor({ nodeId: nid, mode: "crop" }) : undefined}
                 onUpscale={url?.startsWith("http") ? (nid) => void upscaleNode(nid) : undefined}
                 upscaling={upscalingIds.has(node.id)}
+                // 影片取帧（2026-09-28）：仅 https 影片节点给按钮（本地/空内容不给「必定失败」的死按钮）。
+                onExtractVideoFrames={
+                  node.type === CanvasNodeType.Video && node.metadata?.content?.startsWith("https://")
+                    ? (nid, action, atSec) => void extractFramesFromNode(nid, action, atSec)
+                    : undefined
+                }
+                extractingVideoFrames={extractingFramesIds.has(node.id)}
                 onStartConnect={(nid) => setConnecting({ sourceId: nid, cursor: null })}
                 onStartPortDrag={startPortDrag}
                 onNodeContextMenu={openNodeMenu}

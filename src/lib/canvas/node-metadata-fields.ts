@@ -38,6 +38,7 @@ export type MetadataCleanerName =
   | "sceneCard"
   | "storyboardShot"
   | "storyboardScene"
+  | "shotCandidates"
   | "idList"
   | "trimmedString"
   | "emitsEntity"
@@ -93,7 +94,11 @@ export const DURABLE_METADATA_FIELDS: readonly DurableFieldSpec[] = [
   { key: "cameraViewSvg", cleaner: "string", note: "導演台：鏡頭框圖 SVG 原文（同上）" },
   { key: "revision", cleaner: "finiteNumber", note: "導演台：工程 revision（變更比對重拉）" },
   { key: "sceneCard", cleaner: "sceneCard", note: "3D 場景卡（底線 glb_path+scene_summary，其餘四欄可選；缺底線整包丟）" },
+  { key: "directorStageId", cleaner: "trimmedString", note: "3D 舞台參考溯源：來源 scene_3d 節點 id（缺＝無溯源，不寫空殼）" },
+  { key: "shotId", cleaner: "trimmedString", note: "3D 舞台參考溯源：所屬鏡號（storyboard-contract shotId 口徑）" },
+  { key: "episodeId", cleaner: "trimmedString", note: "分鏡的集歸屬（按集批次換模型的分組維度；缺＝不歸任何一集）" },
   { key: "storyboardShot", cleaner: "storyboardShot", note: "分鏡 AID 21 欄契約（shotNumber 為空即整包丟）" },
+  { key: "shotCandidates", cleaner: "shotCandidates", note: "分鏡級抽卡候選集＋星標（id+prompt 缺一即丟該條；空集合＝省略鍵）" },
   { key: "storyboardScene", cleaner: "storyboardScene", note: "分鏡場景歸屬（sceneName 是唯一權威）" },
   { key: "characterCardIds", cleaner: "idList", note: "分鏡：角色卡引用 id 陣列" },
   { key: "sceneCardIds", cleaner: "idList", note: "分鏡：場景卡引用 id 陣列" },
@@ -226,7 +231,11 @@ export const AGENT_METADATA_FIELDS: readonly AgentFieldSpec[] = [
   { key: "healthOk", transform: "boolean", requires: { key: "pipelineCard", oneOf: ["director"] }, note: "導演台族" },
   { key: "revision", transform: "number", requires: { key: "pipelineCard", oneOf: ["director"] }, note: "導演台族" },
   { key: "sceneCard", transform: "truthy", note: "3D 場景卡整族透傳（導入卡只帶 glb_path，全族皆小指針無 SVG 級重料）" },
+  { key: "directorStageId", transform: "truthy", note: "3D 舞台參考溯源（漏傳＝還原後回分鏡指針消失）" },
+  { key: "shotId", transform: "truthy", note: "3D 舞台參考溯源鏡號（漏傳＝還原後鏡號消失）" },
+  { key: "episodeId", transform: "truthy", note: "集歸屬（漏傳＝還原後按集換模型漏掉這些格）" },
   { key: "storyboardShot", transform: "storyboardShot", note: "分鏡 21 欄整族透傳（逐欄截 STORYBOARD_SNAPSHOT_FIELD_CHARS）" },
+  { key: "shotCandidates", transform: "truthy", note: "分鏡候選集＋星標（漏傳＝還原後抽卡結果與採用稿消失）" },
   { key: "storyboardScene", transform: "truthy", note: "分鏡場景歸屬" },
   { key: "characterCardIds", transform: "idList", note: "分鏡卡引用（漏傳＝還原後卡引用消失）" },
   { key: "sceneCardIds", transform: "idList", note: "分鏡卡引用" },

@@ -6,7 +6,7 @@
 // 手勢不在此檔：捲動區的 pointer 手勢由 use-node-gestures 提供、顯式 props 傳入
 // （不引入 context，避免 memo 失效）。
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshCw, Image as ImageIcon, ArrowRight, CornerDownRight, Wrench, ShieldCheck, Lightbulb, Package, AlertTriangle, Clapperboard } from "lucide-react";
 import { CanvasNodeType, errorDetailsText, type CanvasNode, type CanvasNodeGateConfirm, type CanvasNodeStatus } from "@/lib/canvas/types";
 import { svgToDataUrl } from "@/lib/svg-data-url";
@@ -159,6 +159,14 @@ export interface NodeBodyProps {
   onEditPrompt: (nodeId: string) => void;
   /** A11：文本節點就地編輯提交（雙擊正文觸發）。 */
   onUpdateText?: (nodeId: string, text: string) => void;
+  /**
+   * 影片節點動作（2026-09-28）：「截帧」= 取當前播放時刻一幀；「序列帧」= 等距中點抽一組。
+   * 宿主負責呼叫 /api/canvas/video-frames 拿計畫、用既有 extractFramesAtTimes 抽像素、落成圖片節點。
+   * atSec 由本元件從同一個 <video> 元素的 currentTime 讀出（播放位置只有這裡知道）。
+   */
+  onExtractVideoFrames?: (nodeId: string, action: "current" | "sequence", atSec?: number) => void;
+  /** 取幀進行中：按鈕停用（防重複提交）。 */
+  extractingVideoFrames?: boolean;
   /** 內容捲動手勢（use-node-gestures 的 scrollDrag 三件套，綁在正文捲動區上）。 */
   onScrollAreaPointerDown: (e: React.PointerEvent<HTMLDivElement>) => void;
   onScrollAreaPointerMove: (e: React.PointerEvent<HTMLDivElement>) => void;
@@ -173,6 +181,8 @@ export function NodeBody({
   onRetry,
   onEditPrompt,
   onUpdateText,
+  onExtractVideoFrames,
+  extractingVideoFrames = false,
   onScrollAreaPointerDown,
   onScrollAreaPointerMove,
   onScrollAreaPointerEnd,
@@ -182,6 +192,8 @@ export function NodeBody({
   const [useProxy, setUseProxy] = useState(false);
   // A11：就地編輯態（null = 未在編輯）
   const [editingText, setEditingText] = useState<string | null>(null);
+  /** 影片節點：本體那個 <video> 的引用，只為讀 currentTime（「截帧」的取樣時刻）。 */
+  const videoRef = useRef<HTMLVideoElement | null>(null);
 
   // 圖片 URL 變更時重置錯誤狀態，重新走「直鏈 → 代理 → 破圖」鏈路
   useEffect(() => {
@@ -336,7 +348,54 @@ export function NodeBody({
           const content = metadata?.content;
           if (content && isUrl(content)) {
             if (node.type === CanvasNodeType.Video) {
-              return <video src={content} controls className="h-full w-full object-cover" data-canvas-interactive />;
+              // 影片節點動作「截帧／序列帧」（2026-09-28）：按鈕貼在畫面左上（原生 controls 佔底部），
+              // 樣式沿用既有節點內動作（reference 角色 select / 批次指示器同款黑底白字膠囊）。
+              // 回呼未提供 = 不渲染（誠實原則：不長出必定失敗的按鈕）。
+              return (
+                <div className="relative h-full w-full">
+                  <video
+                    ref={videoRef}
+                    src={content}
+                    controls
+                    className="h-full w-full object-cover"
+                    data-canvas-interactive
+                  />
+                  {onExtractVideoFrames && (
+                    <div
+                      data-canvas-interactive
+                      className="absolute left-1.5 top-1.5 z-10 flex items-center gap-1"
+                      onPointerDown={(e) => e.stopPropagation()}
+                    >
+                      <button
+                        type="button"
+                        disabled={extractingVideoFrames}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onExtractVideoFrames(node.id, "current", videoRef.current?.currentTime ?? 0);
+                        }}
+                        title="截取当前播放时刻的一帧，落到画布"
+                        className="flex items-center gap-1 rounded-full bg-black/60 px-2 py-0.5 text-ios-caption2 font-medium text-white transition-colors hover:bg-black/70 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <Clapperboard className="h-3 w-3" aria-hidden="true" />
+                        {extractingVideoFrames ? "取帧中…" : "截帧"}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={extractingVideoFrames}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onExtractVideoFrames(node.id, "sequence");
+                        }}
+                        title="按视频长度等距抽一组帧，落到画布"
+                        className="flex items-center gap-1 rounded-full bg-black/60 px-2 py-0.5 text-ios-caption2 font-medium text-white transition-colors hover:bg-black/70 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <Clapperboard className="h-3 w-3" aria-hidden="true" />
+                        序列帧
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
             }
             if (imgError) {
               return renderBrokenImage(handleRetryImage);

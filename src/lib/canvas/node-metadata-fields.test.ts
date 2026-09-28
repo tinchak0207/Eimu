@@ -103,6 +103,10 @@ const SAMPLE_METADATA_BY_KEY: Record<string, Record<string, unknown>> = {
   cameraViewSvg: { cameraViewSvg: "<svg/>" },
   revision: { pipelineCard: "director", revision: 3 },
   sceneCard: { sceneCard: SCENE_CARD },
+  // P1-1（2026-09-29）兩鍵漏補樣本：本檔的契約是「新增耐久鍵必須同時補樣本」，
+  // 缺樣本＝該鍵永遠不被這條往復斷言覆蓋（守門件靜默失明）。
+  directorStageId: { directorStageId: "stage-1" },
+  shotId: { shotId: "001" },
   storyboardShot: { storyboardShot: SHOT },
   storyboardScene: { storyboardScene: { sceneName: "旧宅", shotCount: 1 } },
   characterCardIds: { characterCardIds: ["card-a"] },
@@ -116,6 +120,23 @@ const SAMPLE_METADATA_BY_KEY: Record<string, Record<string, unknown>> = {
   fontSize: { fontSize: 22 },
   gateConfirm: { gateConfirm: { request_id: "req-1", session_id: "sess-1", status: "pending" } },
   approval: { approval: { status: "approved" } },
+  // 2026-09-29 P1-2：集歸屬 ＋ 分鏡候選集（樣本一律取「清洗後仍等於原值」的形）。
+  episodeId: { episodeId: "ep-1" },
+  shotCandidates: {
+    shotCandidates: {
+      items: [
+        { id: "c1", prompt: "雨夜码头，中景，冷色" },
+        {
+          id: "c2",
+          prompt: "雨夜码头，特写，眼神",
+          model: "seedance-2.5-900-特惠",
+          url: "https://cdn.example.com/c2.mp4",
+          status: "success",
+        },
+      ],
+      selectedId: "c2",
+    },
+  },
 };
 
 const hasOwn = (o: object, key: string): boolean => Object.prototype.hasOwnProperty.call(o, key);

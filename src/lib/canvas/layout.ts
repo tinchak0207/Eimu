@@ -25,6 +25,7 @@ import {
 } from "./node-metadata-fields";
 // 版本清單清洗與 project-store 共用同一份（逐項白名單＋裁剪；不製造第二個漂移點）。
 import { normalizeNodeVersions } from "./node-versions";
+import { normalizeShotCandidates } from "./storyboard-shots";
 import {
   CANVAS_NODE_DEFAULT_SIZE,
   CanvasNodeType,
@@ -297,6 +298,9 @@ const DURABLE_FIELD_CLEANERS: Record<MetadataCleanerName, (raw: unknown) => unkn
   // 兩者語義不同，故顯式轉換（漏轉＝寫出 storyboardShot: null 的半形數據）。
   storyboardShot: (v) => normalizeStoryboardShot(v) ?? undefined,
   storyboardScene: (v) => normalizeStoryboardSceneRef(v) ?? undefined,
+  // `normalizeShotCandidates` 用 `undefined` 表示「省略鍵」（空集合/無候選）；
+  // 逐條非法候選在函式內丟棄（不連坐整包），`selectedId` 非成員即不收。
+  shotCandidates: (v) => normalizeShotCandidates(v),
   idList: toIdList,
   // 落卡冪等標記：trim 後非空才收（純空白＝沒有標記）。
   trimmedString: (v) => {

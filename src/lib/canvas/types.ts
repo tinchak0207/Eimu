@@ -12,6 +12,7 @@
 
 import type { ReferenceImageRole } from "../image-types";
 import type { StoryboardSceneRef, StoryboardScriptShot } from "../storyboard-contract";
+import type { StoryboardShotCandidateSet } from "./storyboard-shots";
 import { AID_PROJECT_TYPE_ENUM, type AidProjectTypeEnumValue } from "../aid-enums/creation";
 // 批准狀態形狀的單一真源（type-only：執行期零依賴，不成環——`storyboard-contract.ts`
 // 已用同一寫法 type-only import 本檔，本檔反向 type-only 取 `ApprovalState` 是同構先例）。
@@ -228,6 +229,44 @@ export interface CanvasNodeMetadata {
   // ── 3D 場景卡節點（type: scene_3d，2026-09-06 Astra PRD P1-3；3D 導演 subagent 回傳寫入）──
   /** 3D 場景卡欄位族（單一物件欄位，內部形狀 = Scene3dCardMetadata）。 */
   sceneCard?: Scene3dCardMetadata;
+  // ── 3D 舞台參考的回分鏡溯源（P1-1，2026-09-28）──
+  /**
+   * 本生成節點的參考圖來自哪個 3D 導演台 stage＝`scene_3d` 節點 id。
+   * 鍵名沿用 director 族 `directorSessionId` 的 `<domain>Id` 形；值域＝節點 id 字串。
+   * 寫入者＝生成時 `resolveSceneDirectorReferences` 配對的 trace（scene-3d-reference.ts）；
+   * **雙白名單**：漏 `layout.toNodeMetadata` 或 `canvas-chat-types.compactMetadataForAgent`
+   * 任一處＝刷新/回舊會話後指針憑空消失（與 sceneCard 同族鐵律）。
+   */
+  directorStageId?: string;
+  /**
+   * 本生成所屬鏡號（`storyboard-contract` 生產形 `StoryboardShotProduction.shotId`
+   * 口徑＝`shotNumber`，上限 16 字）；無分鏡歸屬＝缺席。
+   * 與 `directorStageId` 成對＝回分鏡可追溯指針；清洗規則同族。
+   */
+  shotId?: string;
+  // ── 集歸屬（P1-2，2026-09-29；按集批次換模型／批次重跑的唯一分組維度）──
+  /**
+   * 本分鏡屬於哪一集＝`CanvasProject.episodes[].id`（`CanvasEpisode.id`，types.ts 的
+   * 三級狀態機第二層）。鍵名沿用同族 `<domain>Id` 形（`directorStageId`/`directorSessionId`）。
+   *
+   * **現場缺口如實記錄**：畫布沒有 parent 邊、場景外殼只帶 `sceneName`、
+   * `CanvasNodeMetadata` 原本無任何集欄位 ⇒ 分鏡→集無法推導，故以本欄位明示。
+   * 缺席＝不歸任何一集（`storyboard-episode-batch.ts` 不猜、不按節點序切段）。
+   * **雙白名單**：漏 `layout.toNodeMetadata` 或 `compactMetadataForAgent` 任一處
+   * ＝刷新/回舊會話後集歸屬消失（按集換模型會靜默漏掉這些格）。
+   */
+  episodeId?: string;
+  // ── 分鏡級抽卡（P1-2，2026-09-29；對稱差 D9「一分鏡 ≤4 條＋星標選定」）──
+  /**
+   * 本鏡的候選集＋星標選中者（形狀＝`StoryboardShotCandidateSet`，真源
+   * `./storyboard-shots.ts`）。**刻意不是新增多個候選節點**：一鏡仍是一顆節點，
+   * 候選集掛在此處，`selectedId` 就是採用稿。
+   *
+   * 清洗端＝`normalizeShotCandidates`（`id`+`prompt` 缺一即丟該條、同 id 去重、
+   * 截到 `SHOT_CANDIDATE_LIMIT`、`selectedId` 必須是成員、空集合＝省略鍵）。
+   * **雙白名單**：與 `storyboardShot` 同族鐵律。
+   */
+  shotCandidates?: StoryboardShotCandidateSet;
   // ── 分鏡實體（2026-09-15 刀 2；AID 21 欄契約，MIT）──
   /**
    * 一鏡（AID 21 欄契約，`src/lib/storyboard-contract.ts`）：掛在 Group 節點的子節點。
