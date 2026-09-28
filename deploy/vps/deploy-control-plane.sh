@@ -324,7 +324,7 @@ do_deploy() {
   log "可用 ${avail}G"
   if ((avail < 6)); then
     log "< 6G → prune builder cache(>72h) 與 dangling image"
-    rsh "sudo -n docker builder prune -f --filter until=72h && sudo -n docker image prune -f"
+    rsh "sudo -n docker builder prune -f --keep-storage 2gb && sudo -n docker image prune -f"
     avail="$(rsh "df -B1G --output=avail / | tail -n1 | tr -d ' '")"
     log "prune 後可用 ${avail}G"
     ((avail >= 4)) || die "可用空間 ${avail}G < 4G，中止"
@@ -381,7 +381,7 @@ do_deploy() {
 
   # 6. DEPLOYED 標記
   local stamp
-  stamp="$SHORT $(date -u +%Y-%m-%dT%H:%M:%SZ) $(hostname)"
+  stamp="$SHORT $(date -u +%Y-%m-%dT%H:%M:%SZ) $(uname -n)"
   rsh "echo $(printf '%q' "$stamp") | sudo -n tee $(printf '%q' "$CP_DIR/DEPLOYED") >/dev/null"
   hdr "完成"
   log "DEPLOYED：$stamp"
