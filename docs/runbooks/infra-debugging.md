@@ -54,7 +54,7 @@
 - **根因**：网关 session 存在**内存 Map**（index.ts `sessions`），`getOwnedSession` 按 key 隔离且**进程重启即全丢**——任何 `systemctl restart agent-gateway`（如 CORS 修复部署）都会让所有已创建 session 变 404。前端"开新会话"（discardAndStartNew）best-effort 清理旧存档 → DELETE 已回收 session → 网关 404 → 站点透传 → console 噪音
 - **修复**：站点 `src/app/api/agent/sessions/[id]/route.ts` DELETE 幂等化——网关 404 且 `code==="not_found"` 时返回 `200 {success:true, already_gone:true}`（目标已不存在=删除成功），其他 4xx/5xx 原样透传
 - **验证**：`route.test.ts` 12/12 通过 + tsc 无错 + `vercel --prod` 部署
-- **排障要点**：`journalctl -u agent-gateway` 看 session created 时间线对照重启时间（`systemctl show agent-gateway --property=ActiveEnterTimestamp`）；会话进程重启即断是架构事实（内存 Map），若要持久化需另做；DELETE 幂等化只吞 not_found
+- **排障要点**：`journalctl -u agent-gateway` 看 session created 时间线对照重启时间（`systemctl show agent-gateway --property=ActiveEnterTimestamp`）；DELETE 幂等化只吞 not_found。**（2026-09-28 更新）session 已持久化到 `/opt/agent-harness/agent-gateway.db`（`persistence.ts`），`getOwnedSession` 内存 miss 时 `hydrateFromDb`，网关重启不再让 session 404；上面「内存 Map、重启全丢」只是 08-20 当时的事实**
 
 ## agent 模型註冊表：加/換底層模型 SOP（2026-08-29 治本）
 
@@ -72,7 +72,7 @@
   sudo -n systemctl restart opencode-server agent-gateway          # ⑤ 生效
   ```
 - **failover 語義**：turn 零正文抖動重試時，attempt 2 起換 fallback 鏈上的模型（跨 provider，防「主/備同源全死」復發）；registry 異常 = 鏈只剩主模型（行為退回現狀，不會更壞）。N1 redrive 路徑始終用主模型。
-- **坑位**：改 registry 後 `gen-opencode.ts --check` 有漂移屬正常（你剛改的），生成後重啟即收斂；opencode.json 手改會被下次生成沖掉——deny 表調整要改 gen-opencode.ts 的保留邏輯之外那份現檔（生成器不碰 permission 鍵，手改 permission 安全）。**特別提醒：必須同時重啟 `opencode-server` 與 `agent-gateway` 雙服務（步驟 ⑤）**——若只重啟 opencode-server，gateway 的 `/event` SSE 連線會死鎖/懸掛長達 4 分鐘（直到底層 fetch 逾時前收不到任何 delta 幀），導致前端完全看不到思考與正文、誤判「過程被隱藏/卡在正在思考」、watchdog 誤判零文本引發重複重發。
+- **坑位**：改 registry 後 `gen-opencode.ts --check` 有漂移屬正常（你剛改的），生成後重啟即收斂；opencode.json 手改會被下次生成沖掉——deny 表調整要改 gen-opencode.ts 的保留邏輯之外那份現檔（生成器不碰 permission 鍵，手改 permission 安全）。**特別提醒：必須同時重啟 `opencode-server` 與 `agent-gateway` 雙服務（步驟 ⑤）**——若只重啟 opencode-server，gateway 的 `/event` SSE 連線會死鎖/懸掛長達 4 分鐘（直到底層 fetch 逾時前收不到任何 delta 幀），導致前端完全看不到思考與正文、誤判「過程被隱藏/卡在正在思考」、watchdog 誤判零文本引發重複重發。**（2026-09-28 根因與修復）**懸掛是 `opencode-client.ts` 的 `/event` fetch 沒有看門狗、要等 Bun 預設逾時（journal 實錘 5 分鐘）；已加 30s 無位元組即 abort 重連（opencode 每 ~10s 發 `server.heartbeat`）。該修復部署到 VPS 後，只重啟 opencode-server 最多 ~32s 盲窗，雙服務綁定重啟不再必要。
 
 ## Adobe2API 定向排障附加规则
 
