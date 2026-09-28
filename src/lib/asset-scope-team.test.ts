@@ -23,7 +23,7 @@ import {
 import type { AssetScope, AssetUseContext, AssetVisibility, ScopedAssetLike } from "./asset-scope";
 import { normalizeAssetPack } from "./asset-pack-store";
 import { normalizeCharacterCard } from "./character-cards";
-import { decideTeamAssetScope } from "../app/api/assets/route";
+import { decideTeamAssetScope } from "./asset-team-scope";
 import type { TeamMembership } from "./team-membership-lookup";
 
 const TEAM_A = "team-a";
