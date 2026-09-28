@@ -23,7 +23,12 @@ export const CONTROL_PLANE_PROXY_SOURCES = [
   // 舊生成路徑並把上游直鏈交給瀏覽器（載不到、下載失敗）。
   "/api/generation-jobs",
   "/api/generation-jobs/:path*",
-  "/api/admin/billing-operations/:path*",
+  // 下列四條 2026-09-28 由漂移棘輪揪出：route 只有裸路徑（原 `/:path*` 匹配不到、
+  // 控面也沒有子路徑），且直接觸庫、Vercel 無閘 → 登入後必 500。控面容器內實測四條皆 401（存在）。
+  "/api/admin/billing-operations",
+  "/api/admin/biz-keys/provision",
+  "/api/probe/stuck",
+  "/api/probe/jobs/:path*",
   // 團隊歸屬橋（HMAC 簽名通道，域 team-membership）。Vercel 側不持有
   // GENERATION_DATABASE_URL，畫布閘門要判「該 user 是否為團隊成員」只能問
   // 控制面；同樣列在 beforeFiles，否則會落在 Vercel 上的同名 route（會被

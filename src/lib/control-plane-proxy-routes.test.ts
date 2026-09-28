@@ -19,7 +19,10 @@ const EXPECTED_REWRITES = [
   { source: "/api/generate-images", destination: "https://o.example/image-control/api/generate-images" },
   { source: "/api/generation-jobs", destination: "https://o.example/image-control/api/generation-jobs" },
   { source: "/api/generation-jobs/:path*", destination: "https://o.example/image-control/api/generation-jobs/:path*" },
-  { source: "/api/admin/billing-operations/:path*", destination: "https://o.example/image-control/api/admin/billing-operations/:path*" },
+  { source: "/api/admin/billing-operations", destination: "https://o.example/image-control/api/admin/billing-operations" },
+  { source: "/api/admin/biz-keys/provision", destination: "https://o.example/image-control/api/admin/biz-keys/provision" },
+  { source: "/api/probe/stuck", destination: "https://o.example/image-control/api/probe/stuck" },
+  { source: "/api/probe/jobs/:path*", destination: "https://o.example/image-control/api/probe/jobs/:path*" },
   { source: "/api/internal/team-membership", destination: "https://o.example/image-control/api/internal/team-membership" },
   { source: "/api/email/unsubscribe", destination: "https://o.example/image-control/api/email/unsubscribe" },
   { source: "/openai/v1/:path*", destination: "https://o.example/image-control/openai/v1/:path*" },
@@ -39,10 +42,8 @@ test("controlPlaneRewrites：origin 為空回 []", () => {
 // 目前在 Vercel 本地執行的 route。只准縮不准漲：新 route 要嘛被代理，要嘛寫進來
 // 並附具體理由；已不再違規的條目也會紅，逼人刪掉。
 const KNOWN_VERCEL_LOCAL: Record<string, string> = {
-  "/api/admin/billing-operations": "baseline 2026-09-28 未分類（疑似真漏網：/:path* 不匹配裸路徑，billing-ledger 直接 getGenerationSql，Vercel 觸庫即拋）",
   "/api/admin/biz-keys": "biz-api-key-store 以 bizKeyDatabaseEnabled() 閘 DB，Vercel 走 Blob 鏡像＋BIZ_API_KEY_HASHES 兜底",
   "/api/admin/biz-keys/[id]": "biz-api-key-store 以 bizKeyDatabaseEnabled() 閘 DB，Vercel 走 Blob 鏡像＋BIZ_API_KEY_HASHES 兜底",
-  "/api/admin/biz-keys/provision": "baseline 2026-09-28 未分類（疑似真漏網：account-ledger ensureAccountBaselines/recordAdjustment 直接觸庫，無 Vercel 閘）",
   "/api/admin/channels": "admin-audit 以 generationDatabaseConfigured() 閘 DB，未配置回 null 不寫審計",
   "/api/admin/channels/audit": "admin-audit 以 generationDatabaseConfigured() 閘 DB，未配置回 null 不寫審計",
   "/api/admin/channels/rollback": "admin-audit 以 generationDatabaseConfigured() 閘 DB，未配置回 null 不寫審計",
@@ -147,8 +148,6 @@ const KNOWN_VERCEL_LOCAL: Record<string, string> = {
   "/api/pixai/upload": "閉包只經 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直連 DB",
   "/api/pixai/upscale": "閉包只經 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直連 DB",
   "/api/pricing": "閉包只經 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直連 DB",
-  "/api/probe/jobs/[id]/timeline": "baseline 2026-09-28 未分類（admin probe；job-events 直接 getGenerationSql，Vercel 上拋錯被 catch 成 500）",
-  "/api/probe/stuck": "baseline 2026-09-28 未分類（admin probe；job-events 直接 getGenerationSql，Vercel 上拋錯被 catch 成 500）",
   "/api/project-assets": "閉包只經 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直連 DB",
   "/api/project-assets/shares": "閉包只經 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直連 DB",
   "/api/recipe-templates": "閉包只經 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直連 DB",
