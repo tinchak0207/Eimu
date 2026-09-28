@@ -11,6 +11,7 @@ import { STYLE_PRESETS, type StylePreset } from "@/lib/prompt-enhancer";
 import { generationCoins, generationModel, modelAspectRatios, type AspectRatio, type OutputResolution } from "@/lib/generation-model-catalog";
 import { aspectRatioDeviation, nearestAspectRatio } from "@/lib/generation-model-catalog/resolution";
 import { replacePromptSnippet, replacePromptStyleSuffix } from "@/lib/prompt-compose";
+import { CAMERA_MOTION_PRESETS, cameraMotionPrompt } from "@/lib/camera-motion-presets";
 import type { ReferenceImage } from "@/lib/image-types";
 import { usePricingRevision } from "@/hooks/use-pricing-revision";
 import type { ReflectedParams } from "@/lib/agent-param-reflect";
@@ -360,6 +361,17 @@ export function PromptInput({
     lastSuggestionRef.current = prompt;
   };
 
+  /** 视频运镜预设：与风格后缀同一套「换一个就替掉上一个」段落语义。 */
+  const [cameraMotionKey, setCameraMotionKey] = useState<string | null>(null);
+  const handleCameraMotionChange = (key: string | null) => {
+    setCameraMotionKey(key);
+    setInput((current) => replacePromptStyleSuffix(
+      current,
+      key ? cameraMotionPrompt(key) ?? undefined : undefined,
+      CAMERA_MOTION_PRESETS.map((preset) => cameraMotionPrompt(preset.key) ?? preset.prompt),
+    ));
+  };
+
   const handleStyleChange = (preset: StylePreset) => {
     onStyleChange(preset);
     const style = STYLE_PRESETS.find((candidate) => candidate.key === preset);
@@ -653,6 +665,8 @@ export function PromptInput({
               followReferenceRatio={followReferenceRatio}
               followRatioInfo={followRatioInfo}
               onFollowReferenceSelect={handleFollowReferenceSelect}
+              cameraMotionKey={cameraMotionKey}
+              onCameraMotionChange={handleCameraMotionChange}
             />
           )}
 

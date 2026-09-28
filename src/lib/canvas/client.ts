@@ -214,3 +214,44 @@ export async function postCanvasOpsResult(
     /* gateway 端 30s 超時兜底，不重試 */
   }
 }
+
+/** 一稿多版位裁切結果（/api/canvas/format-crops execute:true 的 done 項）。 */
+export interface FormatCropOutput {
+  id: string;
+  dataUrl: string;
+  width: number;
+  height: number;
+}
+
+/**
+ * 一稿多版位：對一張圖跑 format-crops（execute:true），只回伺服器真正裁出的版位。
+ * 擴圖版位（outpaint）無上游、伺服器回 skipped，這裡照實略過，不假裝出了圖。
+ */
+export async function fetchFormatCrops(sourceImageUrl: string): Promise<CanvasClientResult<FormatCropOutput[]>> {
+  const headers = authHeaders();
+  if (!headers) return { ok: false, reason: "not_authenticated" };
+  headers["Content-Type"] = "application/json";
+  try {
+    const res = await fetch("/api/canvas/format-crops", {
+      method: "POST",
+      headers,
+      cache: "no-store",
+      body: JSON.stringify({ sourceImageUrl, execute: true }),
+    });
+    const json = (await res.json().catch(() => null)) as {
+      ok?: boolean;
+      error?: string;
+      executed?: Array<{ id: string; status: string; dataUrl?: string; width?: number; height?: number }>;
+    } | null;
+    if (!res.ok || !json?.ok) {
+      return { ok: false, reason: "server", message: json?.error ?? `裁切失败（HTTP ${res.status}）` };
+    }
+    const done = (json.executed ?? []).filter(
+      (item): item is { id: string; status: string; dataUrl: string; width: number; height: number } =>
+        item.status === "done" && typeof item.dataUrl === "string" && typeof item.width === "number" && typeof item.height === "number",
+    );
+    return { ok: true, data: done.map(({ id, dataUrl, width, height }) => ({ id, dataUrl, width, height })) };
+  } catch {
+    return { ok: false, reason: "network", message: "网络连接失败" };
+  }
+}

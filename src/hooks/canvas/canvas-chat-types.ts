@@ -22,6 +22,7 @@ import type {
   CanvasEpisode,
   CanvasNode,
   CanvasNodeMetadata,
+  CanvasNodeVersion,
   CanvasPlanEvent,
   CanvasPosition,
   CanvasProject,
@@ -185,6 +186,8 @@ export interface UseCanvasChatReturn {
   nodes: CanvasNode[];
   connections: CanvasConnection[];
   units: CanvasUnit[];
+  /** 節點內容版本歷史（append-only；右鍵「恢复上一版」據此判斷可用）。 */
+  nodeVersions: CanvasNodeVersion[];
   plans: CanvasPlanCard[];
   derives: CanvasDeriveCard[];
   budget: CanvasBudget | null;
@@ -219,6 +222,8 @@ export interface UseCanvasChatReturn {
   // ── 批次操作（Phase 4）
   addBatchChild: (parentId: string, child: CanvasNode) => void;
   setBatchPrimary: (parentId: string, childId: string) => void;
+  /** 節點內容回退：version 省略＝上一版；回退本身也落一版，可再撤銷。 */
+  revertNode: (nodeId: string, version?: number) => void;
   deleteBatchChild: (parentId: string, childId: string) => void;
   toggleBatchExpanded: (parentId: string) => void;
   // ── @引用

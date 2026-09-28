@@ -109,6 +109,12 @@ export function DevAppendix() {
             <code className="mt-2 block overflow-x-auto rounded-ios-xl bg-[rgba(0,0,0,0.05)] px-3 py-2 text-ios-footnote text-[#242830]">
               https://eimu.dev/v1
             </code>
+            <p className="mt-2 text-ios-caption1 leading-relaxed text-[rgba(0,0,0,0.52)]">
+              OpenAI 兼容（同步出图，new-api／OpenAI SDK 直接填）：
+            </p>
+            <code className="mt-1 block overflow-x-auto rounded-ios-xl bg-[rgba(0,0,0,0.05)] px-3 py-2 text-ios-footnote text-[#242830]">
+              https://eimu.dev/openai/v1
+            </code>
           </div>
           <div>
             <div className="flex items-center gap-2">

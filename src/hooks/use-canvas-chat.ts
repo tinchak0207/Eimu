@@ -1060,6 +1060,14 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     [pushHistory],
   );
 
+  const revertNode = useCallback(
+    (nodeId: string, version?: number) => {
+      pushHistory();
+      dispatchCanvas({ type: "revert_node", nodeId, version });
+    },
+    [pushHistory],
+  );
+
   const deleteBatchChild = useCallback(
     (parentId: string, childId: string) => {
       pushHistory();
@@ -1100,6 +1108,7 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     nodes: canvas.nodes,
     connections: canvas.connections,
     units: canvas.units,
+    nodeVersions: canvas.nodeVersions ?? [],
     plans,
     derives,
     budget,
@@ -1143,6 +1152,7 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     revokeDownstream,
     addBatchChild,
     setBatchPrimary,
+    revertNode,
     deleteBatchChild,
     toggleBatchExpanded,
     addReference,

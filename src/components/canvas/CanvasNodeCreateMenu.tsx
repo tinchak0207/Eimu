@@ -281,6 +281,17 @@ function CanvasNodeCreateMenu({
           <p className="px-3 pb-1 text-ios-caption2 leading-relaxed text-foreground/60">
             把连接码粘贴到 Blender 侧边栏「MCP for Blender → Eimu 导出」。
           </p>
+          <p className="px-3 pb-1 text-ios-caption2 leading-relaxed text-foreground/60">
+            还没装插件？
+            <a
+              href="/downloads/eimu-blender-addon.py"
+              download
+              className="font-semibold text-[#007AFF] hover:underline"
+            >
+              下载 Blender 插件
+            </a>
+            ，在 Blender「编辑 → 偏好设置 → 插件 → 从磁盘安装」选中它并勾选启用。
+          </p>
 
           {link?.status === "loading" && (
             <p className="px-3 py-2 text-ios-footnote text-foreground/60">正在生成连接码…</p>

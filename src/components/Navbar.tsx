@@ -21,6 +21,7 @@ import { isStandalonePwa, createHandoffLogin } from "@/lib/github-login";
 import { PwaHandoffPanel } from "@/components/PwaHandoffPanel";
 import { QqGroupDialog } from "@/components/QqGroupDialog";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
+import { AnnouncementSurfaces } from "@/components/notifications/AnnouncementSurfaces";
 
 interface NavbarProps {
   className?: string;
@@ -278,6 +279,7 @@ export function Navbar({ className }: NavbarProps) {
   }, [toast]);
   return (
     <>
+      <AnnouncementSurfaces />
       {pwaHandoffUrl && (
         <PwaHandoffPanel
           loginUrl={pwaHandoffUrl}

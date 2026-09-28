@@ -5,7 +5,7 @@ import Link from "next/link";
 import { CheckCircle2, CircleAlert, Copy, KeyRound, Loader2, Plus, Trash2, X } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import type { PublicBizApiKey } from "@/lib/biz-api-keys";
-import { DEV_QUICKSTART_BALANCE_NOTE, DEV_QUICKSTART_BASE_URL, quickstartCurlExamples } from "@/lib/dev-quickstart";
+import { DEV_QUICKSTART_BALANCE_NOTE, DEV_QUICKSTART_BASE_URL, DEV_QUICKSTART_OPENAI_BASE_URL, quickstartCurlExamples } from "@/lib/dev-quickstart";
 import { cn } from "@/lib/utils";
 
 interface Notice {
@@ -400,6 +400,16 @@ export function ApiKeysClient() {
               <span className="text-ios-footnote font-semibold text-[rgba(0,0,0,0.58)]">Base URL</span>
               <code className="mt-1.5 block truncate rounded-ios-xl bg-[rgba(0,0,0,0.05)] px-4 py-3 font-mono text-ios-footnote text-[rgba(0,0,0,0.80)]">
                 {DEV_QUICKSTART_BASE_URL}
+              </code>
+            </div>
+
+            <div className="mt-4">
+              <span className="text-ios-footnote font-semibold text-[rgba(0,0,0,0.58)]">OpenAI 兼容 Base URL</span>
+              <p className="mt-1 text-ios-caption1 leading-relaxed text-[rgba(0,0,0,0.46)]">
+                new-api、Cherry Studio、OpenAI SDK 等只认标准协议的工具填这个，同步直接返回图片。
+              </p>
+              <code className="mt-1.5 block truncate rounded-ios-xl bg-[rgba(0,0,0,0.05)] px-4 py-3 font-mono text-ios-footnote text-[rgba(0,0,0,0.80)]">
+                {DEV_QUICKSTART_OPENAI_BASE_URL}
               </code>
             </div>
 

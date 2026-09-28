@@ -15,6 +15,12 @@ import {
 /** /v1 對外 Base URL（與站內接入文檔、DSH 插件同一真源）。 */
 export const DEV_QUICKSTART_BASE_URL = "https://eimu.dev/v1";
 
+/**
+ * OpenAI 標準同步兼容 Base URL（/openai/v1：images/generations、chat/completions、models）。
+ * 給 new-api／Cherry Studio／OpenAI SDK 這類只認標準協議的工具直接填，不用學 /v1 異步任務。
+ */
+export const DEV_QUICKSTART_OPENAI_BASE_URL = "https://eimu.dev/openai/v1";
+
 /** 充值入口（餘額不足 402 的落地頁）。 */
 export const DEV_QUICKSTART_PRICING_URL = "https://eimu.dev/pricing";
 
