@@ -200,7 +200,7 @@ test("yue2：六層齊備且帶 [Verse]/[Chorus] → 原文逐字不動（段落
 });
 
 test("yue2：style 是散文 → 不套 flowmusic 的 220 平面，長散文原樣保留", () => {
-  const long = `city pop, bittersweet and nostalgic, synth pads with slap bass, female alto, [Verse] verse and chorus, warm analog tape, 105 BPM, ${"patiently unfolding without hurry ".repeat(20).trim()}`;
+  const long = `city pop, bittersweet and nostalgic, synth pads with slap bass, female alto, [Verse] verse and chorus, warm analog tape, 105 BPM, ${"patiently unfolding without hurry ".repeat(10).trim()}`;
   const out = directMusicPrompt(long, { channel: "yue2" });
   assert.ok(runes(long) > 220);
   assert.equal(out.prompt, long);
@@ -208,11 +208,11 @@ test("yue2：style 是散文 → 不套 flowmusic 的 220 平面，長散文原�
   assert.ok(!out.applied.includes("collapse-single-line"));
 });
 
-test("yue2：超 3000 runes 走版面硬截（truncate-3000-hard）", () => {
+test("yue2：超 600 runes 走顯存預算硬截（truncate-600-hard）", () => {
   const huge = `city pop, 105 BPM, ${"warm analog synth pad with tape saturation, ".repeat(120)}`;
   const out = directMusicPrompt(huge, { channel: "yue2" });
-  assert.ok(runes(out.prompt) <= 3000);
-  assert.ok(out.applied.includes("truncate-3000-hard"));
+  assert.ok(runes(out.prompt) <= 600);
+  assert.ok(out.applied.includes("truncate-600-hard"));
 });
 
 // ─────────────────────────────────────────────── lyria 通路
