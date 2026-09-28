@@ -427,6 +427,16 @@ export function SkillSlashMenu({
           ))}
         </div>
       )}
+      {/* 技能目录页 /skills 此前站内零链接：打了「/」的人正是想找技能的人。 */}
+      <a
+        href="/skills"
+        target="_blank"
+        rel="noopener"
+        onMouseDown={(event) => event.preventDefault()}
+        className="mt-0.5 block rounded-[14px] px-2.5 py-1.5 text-ios-caption1 text-foreground/50 transition-colors hover:bg-black/[0.04] hover:text-foreground/75"
+      >
+        浏览全部技能 →
+      </a>
     </div>
   );
 }
