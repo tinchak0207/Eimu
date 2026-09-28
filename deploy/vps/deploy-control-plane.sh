@@ -5,7 +5,7 @@
 #   plan     git archive HEAD → 與 VPS app/ 做 checksum 比對 → 雙向 diff 閘（BLOCKED＝VPS 獨有修改）
 #            → compose 漂移（只印鍵名）→ 磁碟。不改 VPS 任何東西。
 #   deploy   plan 無 BLOCKED（或逐檔 --allow-overwrite）→ preflight → 磁碟閘 → rollback tag
-#            → 同步 → compose build → git tag → up -d → 重啟 imagesite-nginx → postcheck（失敗自動回滾）
+#            → 同步 → compose build → git tag → up -d → nginx -t＋reload imagesite-nginx → postcheck（失敗自動回滾）
 #   rollback [tag]  不給 tag 用最新的 :rollback-*
 #
 # 用法：
@@ -28,6 +28,10 @@ WORKER_IMAGE="image-control-plane-generation-worker"
 API_CTR="image-control-api"
 WORKER_CTR="image-control-worker"
 NGINX_CTR="imagesite-nginx"
+# 只 reload 不 restart（2026-09-28 事故）：restart 會讓 nginx 在啟動時重新解析 conf 內所有上游，
+# 任一上游容器已被移除（當時是 adobe2api-plus-web）→ [emerg] host not found → 全站入口重啟迴圈 2m42s。
+# reload 同樣重新解析上游 IP（控面重建後 IP 會變），但設定有錯時 master 保留舊 worker 繼續服務。
+PUBLIC_HEALTHZ="https://store.tinchak0207.xyz/image-control/api/healthz"
 SERVICES=(generation-api generation-worker)
 ROLLBACK_KEEP=3
 
@@ -259,6 +263,9 @@ postcheck() {
     out="${out:-no response}"; sleep 3
   done
   if grep -q ' 200' <<<"$out"; then log "OK   healthz ${out# *}"; else log "FAIL healthz：${out}"; ok=1; fi
+  # 經 nginx 的對外探測：容器內 healthz 綠不代表入口活著（09-28 nginx 重啟迴圈時容器內仍是 200）。
+  code="$(curl -s -o /dev/null -m 15 -w '%{http_code}' "$PUBLIC_HEALTHZ" || true)"
+  if [[ $code == 200 ]]; then log "OK   public $PUBLIC_HEALTHZ 200"; else log "FAIL public $PUBLIC_HEALTHZ → ${code:-無回應}"; ok=1; fi
   base="$(rsh "sudo -n docker inspect -f '{{.State.Status}} {{.RestartCount}}' $WORKER_CTR" 2>/dev/null || echo 'missing -1')"
   sleep 30
   now="$(rsh "sudo -n docker inspect -f '{{.State.Status}} {{.RestartCount}}' $WORKER_CTR" 2>/dev/null || echo 'missing -1')"
@@ -284,7 +291,7 @@ do_rollback() {  # $1=tag（可空）；postcheck 失敗只報錯，不遞迴回
        sudo -n docker tag $API_IMAGE:$tag $API_IMAGE:latest
        sudo -n docker tag $WORKER_IMAGE:$tag $WORKER_IMAGE:latest
        cd $(printf '%q' "$CP_DIR") && sudo -n docker compose -f $COMPOSE_FILE up -d --no-build ${SERVICES[*]}
-       sudo -n docker restart $NGINX_CTR >/dev/null && echo 'restarted $NGINX_CTR'"
+       sudo -n docker exec $NGINX_CTR nginx -t -q && sudo -n docker exec $NGINX_CTR nginx -s reload && echo 'reloaded $NGINX_CTR'"
   if postcheck; then log "rollback 完成，postcheck 通過"; else log "rollback 後 postcheck 失敗（不再遞迴回滾），請人工處理"; return 1; fi
 }
 
@@ -370,7 +377,7 @@ do_deploy() {
   t1="$(date +%s)"
   rsh "sudo -n docker tag $API_IMAGE:latest $API_IMAGE:git-$SHORT && sudo -n docker tag $WORKER_IMAGE:latest $WORKER_IMAGE:git-$SHORT"
   hdr "up -d ${SERVICES[*]}"
-  rsh "cd $(printf '%q' "$CP_DIR") && sudo -n docker compose -f $COMPOSE_FILE up -d ${SERVICES[*]} && sudo -n docker restart $NGINX_CTR >/dev/null && echo 'restarted $NGINX_CTR'"
+  rsh "cd $(printf '%q' "$CP_DIR") && sudo -n docker compose -f $COMPOSE_FILE up -d ${SERVICES[*]} && sudo -n docker exec $NGINX_CTR nginx -t -q && sudo -n docker exec $NGINX_CTR nginx -s reload && echo 'reloaded $NGINX_CTR'"
 
   # 5. postcheck（失敗 → 自動回滾到本次 rollback tag）
   if ! postcheck; then

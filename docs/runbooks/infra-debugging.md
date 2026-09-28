@@ -15,7 +15,7 @@
 - DB：`sudo docker exec image-control-postgres psql -U image_control -d image_control -c "<SQL>"`（VPS 上）
 - 容器状态：`sudo docker ps -a --format '{{.Names}} | {{.Status}}'`
 - adobe2api 容器无 curl/wget，容器内探测用 python3 urllib
-- **rebuild 控制面后必 restart imagesite-nginx**；改闸门必同步 VPS
+- **rebuild 控制面后必 reload imagesite-nginx**（`docker exec imagesite-nginx nginx -t && docker exec imagesite-nginx nginx -s reload`；**禁 restart**：2026-09-28 restart 时 conf 引用的 adobe2api-plus-web 容器已被移除 → `[emerg] host not found` → 全站入口重启回圈 2m42s。控面部署一律走 `deploy/vps/deploy-control-plane.sh`）；改闸门必同步 VPS
 - 中控已换血 new-api（2026-08-27/28）：记账/闸门/退款问题先读记忆 `control-plane-billing-paradigm`（唯一权威）与 `control-plane-newapi-surgery`
 
 ## 生图"卡"完整根因与修复（2026-08-19/20 彻查+修复+真图验证）
