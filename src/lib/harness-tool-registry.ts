@@ -1,11 +1,21 @@
 /**
- * Harness 真實工具面（產品誠實稽核真源，2026-08-31）。
+ * Harness 真實工具面（產品誠實稽核真源，2026-08-31；2026-09-28 再核）。
  *
  * 真源 = VPS /opt/agent-harness/workspace/.opencode/tools/（排除 .bak），
  * 核對日期 2026-08-31，來源於 agent-evolve 評測。
  * 這是 agent-templates.ts requiredTools 綁定的唯一判定集：
  * 站內 domain registry（agent-tool-contract / 5 個領域檔）是宣告層自我認證，
  * 不代表 harness 真的能執行——工具卡誠實與否只以本檔為準。
+ *
+ * ── 2026-09-28 誠實註記（登記 ≠ 可跑） ──
+ * 本檔是**站點側登記面**，不是 VPS 現場清單。2026-09-28 現場 `ls` 實測（排除 .bak）
+ * 共 **105 支**活體工具（比 08-31 的 101 支多出 4 支影片工具）；本檔不可能替
+ * VPS 背書「可跑」，只表示「id 已定形、模板可以引用」。已知**未登記**（VPS 有、本檔無）：
+ * character_card_list / character_card_save / director_manage_group / memory_recall /
+ * search_web / subagent_status / subagent_stop / vision_analyze。
+ * 另有族前綴未逐支登記：subagent_*（現 3 支：dispatch/status/stop）、
+ * workflow_*（本檔已登 9 支，VPS 現場同 9 支）。補齊清單留給下一輪稽核，
+ * 不在此一次灌滿（登記面一旦摻水就失去判定價值）。
  *
  * 實裝判定（2026-08-31 源碼逐檔核對，非實彈調用）：
  * - image_upscale：真調用 POST {API_BASE}/upscale，站點路由
@@ -96,7 +106,14 @@ export const HARNESS_TOOL_ID_LIST = [
   "timeline_rhythm",
   "timeline_style",
   "tts_speak",
+  // ↓ 2026-09-28 影片提取四支（VPS .opencode/tools/ 現場已落位，`ls` 實測在列；
+  //   本站知識庫已把「怎麼看參考片」接回這四支——2026-09-28 前正文教了動作卻沒有工具，屬自傷）。
+  //   誠實標注：本檔=登記面，活體註冊與實跑樣例待下一輪 harness 稽核補。
+  "video_evidence",
+  "video_fetch",
+  "video_measure",
   "video_quote",
+  "video_transcribe",
   "video_upload",
   "workflow_add_node",
   "workflow_connect",

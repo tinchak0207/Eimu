@@ -22,6 +22,7 @@ import {
   setMemberRole,
   teamCapacity,
 } from "@/lib/generation-core/team-governance";
+import { MEMBER_QUOTA_MODES, readQuotaLimits } from "@/lib/generation-core/team-quota-limits";
 
 export const runtime = "nodejs";
 export const preferredRegion = "sfo1";
@@ -47,6 +48,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const settings = await readTeamSettings(actorTeam.teamUserId);
   const capacity = teamCapacity();
   const actor = resolveTeamActor({ userId: auth.key.userId, teamUserId: actorTeam.teamUserId, roster });
+  // 配額意圖面（速率／上界，非餘額）：讀不到（映射層不在）就不冒充，省略該欄。
+  const quotaLimits = await readQuotaLimits({
+    teamUserId: actorTeam.teamUserId,
+    roster: roster.map((member) => ({
+      memberUserId: member.memberUserId,
+      displayName: member.displayName,
+      role: member.role,
+    })),
+  });
 
   return NextResponse.json(
     {
@@ -61,12 +71,40 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         member_count: roster.length,
       },
       settings: { member_create_canvas: settings.memberCreateCanvas },
+      ...(quotaLimits
+        ? {
+            quota: {
+              team: {
+                mode: quotaLimits.team.mode,
+                fixed_quota: quotaLimits.team.fixedQuota,
+                daily_reset_at: quotaLimits.team.dailyResetAt,
+              },
+              member_modes: [...MEMBER_QUOTA_MODES],
+            },
+          }
+        : {}),
       members: roster.map((member) => ({
         member_key_id: member.memberKeyId,
         member_user_id: member.memberUserId,
         display_name: member.displayName,
         enabled: member.enabled,
         role: member.role,
+        ...(quotaLimits
+          ? (() => {
+              const limit = quotaLimits.members.find((m) => m.memberUserId === member.memberUserId);
+              return limit
+                ? {
+                    quota: {
+                      mode: limit.mode,
+                      fixed_quota: limit.fixedQuota,
+                      daily_quota: limit.dailyQuota,
+                      daily_used: limit.dailyUsed,
+                      daily_remaining: limit.dailyRemaining,
+                    },
+                  }
+                : {};
+            })()
+          : {}),
       })),
     },
     { headers: { "Cache-Control": "no-store" } },

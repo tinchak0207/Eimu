@@ -158,6 +158,13 @@ const KNOWN_VERCEL_LOCAL: Record<string, string> = {
   "/api/token/[id]": "閉包只經 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直連 DB",
   "/api/topup": "閉包只經 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直連 DB",
   "/api/usage": "閉包只經 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直連 DB",
+  // 兩段式上傳（P1-10／對稱差 D36，2026-09-29）：本體只走 blob-backend（VPS image-data-api
+  // 或 Vercel Blob）與 blob 記錄，執行期不查 generation DB。閉包到達 DB 模組的路徑與
+  // /api/canvas/scene-3d 同源（server-user → image-billing → sub2api 供應商 registry），
+  // Vercel 側不配置該庫 ⇒ 留在本地安全。
+  "/api/uploads": "上傳本體只走 blob-backend（VPS image-data-api／Vercel Blob）；閉包觸 DB 模組的路徑同 /api/canvas/scene-3d（server-user→image-billing→sub2api 供應商 registry），Vercel 側不配置 generation DB",
+  "/api/uploads/commit": "上傳本體只走 blob-backend（VPS image-data-api／Vercel Blob）；閉包觸 DB 模組的路徑同 /api/canvas/scene-3d（server-user→image-billing→sub2api 供應商 registry），Vercel 側不配置 generation DB",
+  "/api/uploads/sign": "上傳本體只走 blob-backend（VPS image-data-api／Vercel Blob）；閉包觸 DB 模組的路徑同 /api/canvas/scene-3d（server-user→image-billing→sub2api 供應商 registry），Vercel 側不配置 generation DB",
   "/api/user/aff": "閉包只經 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直連 DB",
   "/api/user/biz-keys": "biz-api-key-store 以 bizKeyDatabaseEnabled() 閘 DB，Vercel 走 Blob 鏡像＋BIZ_API_KEY_HASHES 兜底",
   "/api/user/biz-keys/[id]": "biz-api-key-store 以 bizKeyDatabaseEnabled() 閘 DB，Vercel 走 Blob 鏡像＋BIZ_API_KEY_HASHES 兜底",

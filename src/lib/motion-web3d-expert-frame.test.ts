@@ -150,13 +150,15 @@ test("motion persona 工具白名单 id 与 harness 真源行号逐一对账（�
   // - blender-tools.ts：blender_exec L503 / blender_render L587 /
   //   blender_export_gltf L795（id: 字面量），L853 BLENDER_HARNESS_TOOL_IDS
   //   经 harness-tool-registry L36 spread 登记进 HARNESS_TOOL_ID_LIST。
+  // 2026-09-28：harness-tool-registry.ts 因档头诚实註記 +10 行、新增 4 支影片工具
+  // 而整体位移（keyframe_render 79→89、image_quote 76→86）；blender-tools.ts 未动。
   const harnessLines = readFileSync(nodePath.resolve(process.cwd(), "src/lib/harness-tool-registry.ts"), "utf8").split("\n");
   const blenderLines = readFileSync(nodePath.resolve(process.cwd(), "src/lib/blender-tools.ts"), "utf8").split("\n");
   const lineOf = (lines: string[], id: string): number =>
     lines.findIndex((l) => l.includes(`"${id}"`)) + 1;
   const harnessExpected: Record<string, number> = {
-    keyframe_render: 79,
-    image_quote: 76,
+    keyframe_render: 89,
+    image_quote: 86,
   };
   for (const [id, line] of Object.entries(harnessExpected)) {
     assert.ok(
@@ -506,6 +508,7 @@ test("web3d persona 工具白名单 id 与 harness 真源行号逐一对账（�
   // 行号考古（现场实测，2026-09-08）：blender-tools.ts blender_export_gltf L795
   // （id: 字面量；L853 BLENDER_HARNESS_TOOL_IDS 经 harness-tool-registry L36
   // spread）、harness-tool-registry.ts image_quote L76。
+  // 2026-09-28：image_quote 76→86（registry 档头註記 +10 行；blender-tools.ts 未动）。
   const harnessLines = readFileSync(nodePath.resolve(process.cwd(), "src/lib/harness-tool-registry.ts"), "utf8").split("\n");
   const blenderLines = readFileSync(nodePath.resolve(process.cwd(), "src/lib/blender-tools.ts"), "utf8").split("\n");
   const lineOf = (lines: string[], id: string): number =>
@@ -524,7 +527,7 @@ test("web3d persona 工具白名单 id 与 harness 真源行号逐一对账（�
     WEB3D_DIRECTOR_PERSONA_TOOL_IDS.includes("image_quote"),
     "白名单缺报价对偶 image_quote",
   );
-  assert.equal(lineOf(harnessLines, "image_quote"), 76, "harness-tool-registry 中 image_quote 行号漂移");
+  assert.equal(lineOf(harnessLines, "image_quote"), 86, "harness-tool-registry 中 image_quote 行号漂移");
 });
 
 test("web3d persona SKILL_PATHS：SKILL.md 真实存在（防幻影路径），与 registry 行对账", () => {

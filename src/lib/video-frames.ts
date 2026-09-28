@@ -1,9 +1,17 @@
-// 影片抽帧（D-16）：浏览器端把影片均匀抽成 4 帧 JPEG，走既有附件上传路径。
+// 影片抽帧：浏览器端把影片抽成 JPEG（上传统固定 4 帧；画布节点动作支持截帧/序列帧）。
 //
 // 设计文档锁定的规格（agent-chat-ux-design.md §3.6）：
-//   - 均匀 4 帧：第一帧、1/3、2/3、最后一帧。
-//   - 上限：时长 60 秒、文件 100 MB，超过就拒收并说明（不静默截断）。
+//   - 上传路径：均匀 4 帧——第一帧、1/3、2/3、最后一帧（FRAME_COUNT 与 computeFrameTimestamps）。
+//   - 上限：时长 600 秒、文件 100 MB，超过就拒收并说明（不静默截断）。
 //   - 理由：4 帧够覆盖内容变化，又压得住 Groq 眼睛的成本。
+//
+// 2026-09-28 取樣語義對齊（照競品 hypit 的實作語義，不自行發明）：
+//   - `intervalSamples`（對應 --every）：從 start 起、遞增 every、**不含 end**，every 下限 0.001 秒。
+//   - `tileSampleTimes`（對應 --frames）：等距**中點**（不是端點），至少 2 幀。
+//   - `tileFrameCount` / `TILE_COLUMNS` / `TILE_CELL_WIDTH`：預設格數與拼板常數逐字照競品。
+//   - `frameFileName`：`frame-<秒>_<毫秒>s.jpg`（檔名用請求時間，不是解碼到的真實來源時間）。
+//   - 上限政策同競品精神：瀏覽器端因記憶體必須有上限（MAX_SEQUENCE_FRAMES=600），但到頂**明確拒絕**，
+//     絕不靜默截斷；競品本身對幀數無上限（它跑在伺服器端）。
 //
 // 本文件保持纯逻辑（不依赖 DOM/浏览器 API），可用 node:test 测；
 // 真正触碰 <video>/<canvas> 的部分放在本文件末尾的 extractVideoFrames()，
@@ -15,8 +23,8 @@ import type { AgentAttachmentRef } from "./agent-chat-types";
 
 // ─────────────────────────── 上限常量
 
-/** 时长上限（秒）。超过直接拒收。 */
-export const MAX_VIDEO_DURATION_SECONDS = 60;
+/** 时长上限（秒）。超过直接拒收。2026-09-28 由 60 提到 600（对齐长镜头参考片场景）。 */
+export const MAX_VIDEO_DURATION_SECONDS = 600;
 
 /** 文件大小上限（字节）。超过直接拒收。 */
 export const MAX_VIDEO_FILE_BYTES = 100 * 1024 * 1024; // 100 MB
@@ -112,14 +120,14 @@ export function validateVideoFile(file: { size: number; duration: number }): str
   const issues: string[] = [];
   if (file.duration > MAX_VIDEO_DURATION_SECONDS) {
     issues.push(
-      `时长 ${formatSeconds(file.duration)} 超过上限 60 秒（超出 ${formatSeconds(
+      `时长 ${formatSeconds(file.duration)} 超过上限 ${MAX_VIDEO_DURATION_SECONDS} 秒（超出 ${formatSeconds(
         file.duration - MAX_VIDEO_DURATION_SECONDS,
       )}）`,
     );
   }
   if (file.size > MAX_VIDEO_FILE_BYTES) {
     issues.push(
-      `文件 ${formatBytes(file.size)} 超过上限 100 MB（超出 ${formatBytes(
+      `文件 ${formatBytes(file.size)} 超过上限 ${MAX_VIDEO_FILE_BYTES / (1024 * 1024)} MB（超出 ${formatBytes(
         file.size - MAX_VIDEO_FILE_BYTES,
       )}）`,
     );
@@ -136,25 +144,37 @@ function formatSeconds(seconds: number): string {
 /**
  * 序列帧的帧数上限。
  *
- * 为什么是 24：每一帧都要 seek 一次再 drawImage，浏览器 seek 是 100~300ms
- * 量级；24 帧 ≈ 3~7 秒，仍在「节点动作」可接受的等待内。再高就该走后端合成
- * （本仓不提供该路径），所以到顶**明确拒绝**，绝不静默截断。
+ * 2026-09-28 由 24 提到 600：旧值「24 帧 ≈ 3~7 秒」是我方自订的天花板，逼使用者
+ * 与 agent 在 24 帧封顶后无路可走；竞品（hypit `media frames/tiles`）对帧数**没有上限**
+ * （它跑在伺服器端）。我方像素抽取只能在浏览器做（每个时间点 seek 一次再 drawImage，
+ * seek 是 100~300ms 量级），所以必须保留一个上限，但拉到实用级：
+ * 600 帧 ≈ 1~3 分钟等待，且到顶**明确拒绝**（绝不静默截断），讯息里给出提高 step /
+ * 改用伺服器端的出口。
  */
-export const MAX_SEQUENCE_FRAMES = 24;
+export const MAX_SEQUENCE_FRAMES = 600;
 
-/** 抽帧模式：current = 取指定时刻单帧；sequence = 按间隔或帧数抽序列帧。 */
-export type FrameActionMode = "current" | "sequence";
+/** 拼板列数（照竞品 hypit 的 TILE_COLUMNS）。 */
+export const TILE_COLUMNS = 3;
+
+/** 拼板单元格宽度上限（px，照竞品 hypit 的 TILE_CELL_WIDTH）。 */
+export const TILE_CELL_WIDTH = 480;
+
+/** 拼板单元格宽度下限（px，照竞品 hypit cell 的下限 80）。 */
+export const TILE_MIN_CELL_WIDTH = 80;
+
+/** 抽帧模式：current = 取指定时刻单帧；sequence = 按间隔或帧数抽序列帧；at = 按时间点清单抽帧。 */
+export type FrameActionMode = "current" | "sequence" | "at";
 
 export interface FrameExtractionRequest {
   /** 视频总时长（秒）。必须是有限正数。 */
   durationSec: number;
   mode: FrameActionMode;
-  /** sequence 用：抽帧间隔（秒）。与 count 二选一。 */
+  /** sequence 用：抽帧间隔（秒，下限 0.001）。与 count 二选一。 */
   intervalSec?: number;
-  /** sequence 用：均分帧数。与 intervalSec 二选一。 */
+  /** sequence 用：均分帧数（≥ 2，等距中点）。与 intervalSec 二选一。 */
   count?: number;
-  /** current 用：要取的那一帧在视频中的时刻（秒）。 */
-  atSec?: number;
+  /** current 用：要取的那一帧在视频中的时刻（秒）。at 用：时间点清单（至少 1 个、严格递增、全部 < durationSec）。 */
+  atSec?: number | readonly number[];
 }
 
 /** 计划结果。**任何非法输入都回 ok:false，绝不抛异常**（调用方是路由与 UI，不能靠 try 兜）。 */
@@ -167,28 +187,150 @@ function alignToMillis(seconds: number): number {
   return Math.round(seconds * 1000) / 1000;
 }
 
+/**
+ * 竞品语义的取整：`round(v) = Number(v.toFixed(3))`（逐字照抄 hypit）。
+ *
+ * 与 alignToMillis 的差别只在极少数浮点半格情形（toFixed 走十进制表示、Math.round 走二进制），
+ * 既然竞技取样的输出要逐位对齐对手，序列帧路径就用这一支；`current` 单帧路径维持 alignToMillis
+ * 的既有输出不动（契约不变）。
+ */
+function roundSeconds(seconds: number): number {
+  return Number(seconds.toFixed(3));
+}
+
 function isPositiveFinite(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
 
 /**
+ * ── 竞品取样的逐字复刻 ①：`--every` 的取样子集 ──
+ *
+ * 竞品原文：
+ * ```ts
+ * assert(Number.isFinite(start) && start >= 0 && Number.isFinite(end) && end > start, "a sample range needs 0 <= start < end");
+ * assert(Number.isFinite(every) && every >= 0.001, "--every must be at least 0.001 seconds");
+ * return Array.from({ length: Math.ceil((end - start) / every) }, (_, index) => round(start + index * every))
+ *   .filter((time) => time < end);
+ * ```
+ * ⇒ 从 start 起（预设 0）、递增 every、**不含 end**；every 下限 0.001 秒。
+ *
+ * 非法输入照竞品的 assert 抛错（planFrameExtraction 会先自行校验，调用方不会撞到这些 throw 路径）。
+ */
+export function intervalSamples(start: number, end: number, every: number): number[] {
+  if (!(Number.isFinite(start) && start >= 0 && Number.isFinite(end) && end > start)) {
+    throw new Error("a sample range needs 0 <= start < end");
+  }
+  if (!(Number.isFinite(every) && every >= 0.001)) {
+    throw new Error("--every must be at least 0.001 seconds");
+  }
+  return Array.from({ length: Math.ceil((end - start) / every) }, (_, index) =>
+    roundSeconds(start + index * every),
+  ).filter((time) => time < end);
+}
+
+/**
+ * ── 竞品取样的逐字复刻 ②：`--frames` 的取样子集（**等距中点**，不是端点）──
+ *
+ * 竞品原文：
+ * ```ts
+ * assert(end > start, ...); assert(Number.isSafeInteger(frameCount) && frameCount >= 2, "a grid needs at least two frames");
+ * return Array.from({ length: frameCount }, (_, index) => round(start + (index + 0.5) * (end - start) / frameCount));
+ * ```
+ * 注意 `(index + 0.5)`：取每等份的**中点**（端点会切在切点上，中点才是这一格的代表画面）。
+ */
+export function tileSampleTimes(start: number, end: number, frameCount: number): number[] {
+  if (!(Number.isFinite(start) && Number.isFinite(end) && end > start)) {
+    throw new Error("a sample range needs start < end");
+  }
+  if (!(Number.isSafeInteger(frameCount) && frameCount >= 2)) {
+    throw new Error("a grid needs at least two frames");
+  }
+  return Array.from({ length: frameCount }, (_, index) =>
+    roundSeconds(start + ((index + 0.5) * (end - start)) / frameCount),
+  );
+}
+
+/**
+ * 竞品 `tileFrameCount(seconds) = clamp(Math.round(seconds * 1.5), 4, 9)` 逐字复刻：
+ * 影片越长拼板格数越多，但夹在 4~9 格（9 格刚好是 3x3）。
+ * 退化输入（NaN / 非正数）竞品会算出 NaN，我方回下限 4（诚实边界：宁少不多，不产生 NaN 格数）。
+ */
+export function tileFrameCount(seconds: number): number {
+  if (!Number.isFinite(seconds) || seconds <= 0) return 4;
+  return Math.min(Math.max(Math.round(seconds * 1.5), 4), 9);
+}
+
+export interface TileLayout {
+  columns: number;
+  rows: number;
+  cellWidth: number;
+}
+
+/**
+ * 拼板版式（照竞品 `tile` 的 `--columns` / `--cell` 语义）。
+ *
+ * - `columns`：缺省 3（TILE_COLUMNS），下限 1。
+ * - `cellWidth`：显式给了就用它（下限 80）；没给但有 `sourceWidth` → `max(80, min(480, sourceWidth))`
+ *   （竞品 `cell` 预设就是这一式，`info.width` = 来源帧宽）；两者都没有 → TILE_CELL_WIDTH=480。
+ *   缺省时**不猜来源宽度**：调用端没给 width 就用竞品预设 480。
+ * - `rows = ceil(count / columns)`（竞品分页网格 3 行起的分页逻辑同式）。
+ */
+export function planTileLayout(input: {
+  count: number;
+  columns?: number;
+  cellWidth?: number;
+  sourceWidth?: number;
+}): TileLayout {
+  const count = Math.max(1, Math.floor(Number.isFinite(input?.count) ? input.count : 1));
+  const columnsRaw = input?.columns;
+  const columns = Number.isFinite(columnsRaw) ? Math.max(1, Math.floor(columnsRaw as number)) : TILE_COLUMNS;
+
+  const explicitCell = input?.cellWidth;
+  const source = input?.sourceWidth;
+  const cellWidth = Number.isFinite(explicitCell)
+    ? Math.max(TILE_MIN_CELL_WIDTH, Math.round(explicitCell as number))
+    : Number.isFinite(source)
+      ? Math.max(TILE_MIN_CELL_WIDTH, Math.min(TILE_CELL_WIDTH, Math.round(source as number)))
+      : TILE_CELL_WIDTH;
+
+  return { columns, rows: Math.ceil(count / columns), cellWidth };
+}
+
+/**
+ * 帧档名（逐字照竞品）：`frame-${time.toFixed(3).replace(".", "_")}s.jpg` → `frame-2_500s.jpg`。
+ *
+ * 语义边界（勿混）：竞品档名用**请求时间**，而它回传的 `at` 是**解码到的真实来源时间**；
+ * 我方时间点是浏览器 seek 的请求时间，档名同样用它。
+ */
+export function frameFileName(timeSec: number): string {
+  return `frame-${timeSec.toFixed(3).replace(".", "_")}s.jpg`;
+}
+
+/**
  * 把「抽帧意图」算成具体时间点列表（节点动作的纯逻辑层，node 可测）。
  *
- * 规则（与上传统抽帧共用同一条「绝不 seek 到 duration」的坑位经验）：
+ * 规则：
  *   - current：atSec 单点。atSec === duration 时回退 LAST_FRAME_SEEK_BACKOFF_S
- *     （seek 到末尾多数浏览器拿不到画面）；atSec > duration 直接拒绝。
- *   - sequence + intervalSec：t = 0, interval, 2*interval … 严格小于 duration 的全收
- *     （末点不 seek 到片尾）。帧数 = ceil(duration/interval)，超上限拒绝。
- *   - sequence + count：把 [0, duration) 均分 count 份，末点回退 LAST_FRAME_SEEK_BACKOFF_S，
- *     与 computeFrameTimestamps 的末帧规矩一致。
- *   - intervalSec 与 count 同时给 / 都不给 → 拒绝（不猜用户意图）。
+ *     （seek 到末尾多数浏览器拿不到画面）；atSec > duration 直接拒绝。**既有语义逐字不变**。
+ *   - sequence + intervalSec：竞品 `intervalSamples(0, duration, intervalSec)` —— 从 0 起、
+ *     递增 intervalSec、不含 duration；intervalSec 下限 0.001 秒；帧数 = ceil(duration/interval)。
+ *   - sequence + count：竞品 `tileSampleTimes(0, duration, count)` —— **等距中点**，count ≥ 2。
+ *   - at：atSec 清单（≥ 1 个、严格递增、全部 < duration），照竞品 `--at` 的验证。
+ *   - intervalSec 与 count 同时给 / 都不给 → 拒绝（不猜用户意图）；at 与二者互斥。
+ *   - 时长 > MAX_VIDEO_DURATION_SECONDS → 明确拒绝（不静默只用前 600 秒）。
  *
- * 输出全部毫秒对齐、单调递增、落在 [0, duration)；浮点撞点去重后不回退成重复帧。
+ * 输出全部毫秒对齐、严格递增、落在 [0, duration)。
  */
 export function planFrameExtraction(req: FrameExtractionRequest): FrameExtractionPlan {
   const durationSec = req?.durationSec;
   if (!isPositiveFinite(durationSec)) {
     return { ok: false, reason: "视频时长未知或不是正数，无法计算抽帧时间点。" };
+  }
+  if (durationSec > MAX_VIDEO_DURATION_SECONDS) {
+    return {
+      ok: false,
+      reason: `视频时长 ${alignToMillis(durationSec)} 秒超过取帧上限 ${MAX_VIDEO_DURATION_SECONDS} 秒，请先裁剪，或改用服务器端抽帧。`,
+    };
   }
 
   if (req.mode === "current") {
@@ -210,6 +352,47 @@ export function planFrameExtraction(req: FrameExtractionRequest): FrameExtractio
     return { ok: true, timesSec: [alignToMillis(clamped)] };
   }
 
+  if (req.mode === "at") {
+    if (req.intervalSec !== undefined || req.count !== undefined) {
+      return { ok: false, reason: "at 模式不能与 intervalSec / count 同时使用（时间点清单与抽样方式互斥）。" };
+    }
+    const list = req.atSec;
+    if (!Array.isArray(list) || list.length === 0) {
+      return { ok: false, reason: "at 模式需要给出时间点清单 atSec（至少 1 个）。" };
+    }
+    if (list.length > MAX_SEQUENCE_FRAMES) {
+      return {
+        ok: false,
+        reason: `时间点清单 ${list.length} 个超过上限 ${MAX_SEQUENCE_FRAMES} 个：请先裁剪分段，或改用服务器端抽帧。`,
+      };
+    }
+    const timesSec: number[] = [];
+    let prev: number | null = null;
+    for (let i = 0; i < list.length; i++) {
+      const time = list[i];
+      if (typeof time !== "number" || !Number.isFinite(time)) {
+        return { ok: false, reason: `atSec 第 ${i + 1} 个时间点不是有效数字（收到 ${String(time)}）。` };
+      }
+      if (time < 0) {
+        return { ok: false, reason: `时间点 ${alignToMillis(time)} 秒不能为负。` };
+      }
+      if (time >= durationSec) {
+        // 照竞品：a frame time must be before the end of the file
+        return {
+          ok: false,
+          reason: `时间点 ${alignToMillis(time)} 秒必须在视频结束之前（视频时长 ${alignToMillis(durationSec)} 秒）。`,
+        };
+      }
+      if (prev !== null && time <= prev) {
+        // 照竞品：sample times must be strictly increasing
+        return { ok: false, reason: "时间点清单必须严格递增（sample times must be strictly increasing）。" };
+      }
+      prev = time;
+      timesSec.push(roundSeconds(time));
+    }
+    return { ok: true, timesSec };
+  }
+
   if (req.mode !== "sequence") {
     return { ok: false, reason: `未知的抽帧模式：${String(req.mode)}。` };
   }
@@ -225,45 +408,38 @@ export function planFrameExtraction(req: FrameExtractionRequest): FrameExtractio
 
   if (hasInterval) {
     const intervalSec = req.intervalSec;
-    if (!isPositiveFinite(intervalSec)) {
-      return { ok: false, reason: `抽帧间隔必须是正数，收到 ${String(intervalSec)}。` };
+    // 竞品下限 0.001 秒；这里连 0 / 负数一并收在这条讯息里（同时保留既有「正数」判词）。
+    if (!(typeof intervalSec === "number" && Number.isFinite(intervalSec) && intervalSec >= 0.001)) {
+      return {
+        ok: false,
+        reason: `抽帧间隔必须是正数且不小于 0.001 秒，收到 ${String(intervalSec)}。`,
+      };
     }
     const expected = Math.ceil(durationSec / intervalSec);
     if (expected > MAX_SEQUENCE_FRAMES) {
       return {
         ok: false,
-        reason: `按间隔 ${alignToMillis(intervalSec)} 秒会抽出 ${expected} 帧，超过上限 ${MAX_SEQUENCE_FRAMES} 帧，请把间隔调大。`,
+        reason: `按间隔 ${alignToMillis(intervalSec)} 秒会抽出 ${expected} 帧，超过上限 ${MAX_SEQUENCE_FRAMES} 帧：请把间隔调大，或改用服务器端抽帧。`,
       };
     }
-    const timesSec: number[] = [];
-    for (let i = 0; i < expected; i++) {
-      const t = alignToMillis(i * intervalSec);
-      if (t >= durationSec) break; // 绝不 seek 到 duration 本身
-      if (timesSec.length > 0 && t <= timesSec[timesSec.length - 1]) continue; // 浮点撞点去重
-      timesSec.push(t);
-    }
-    return { ok: true, timesSec };
+    return { ok: true, timesSec: intervalSamples(0, durationSec, intervalSec) };
   }
 
   const count = req.count;
-  if (typeof count !== "number" || !Number.isInteger(count) || count <= 0) {
-    return { ok: false, reason: `帧数必须是正整数，收到 ${String(count)}。` };
+  // 竞品 `tileSampleTimes` 要求帧数 ≥ 2（单帧请用 mode:"current"）。
+  if (typeof count !== "number" || !Number.isInteger(count) || count < 2) {
+    return {
+      ok: false,
+      reason: `序列帧数必须是不小于 2 的整数，收到 ${String(count)}（单帧请用 mode:"current"）。`,
+    };
   }
   if (count > MAX_SEQUENCE_FRAMES) {
-    return { ok: false, reason: `帧数 ${count} 超过上限 ${MAX_SEQUENCE_FRAMES} 帧，请调小。` };
+    return {
+      ok: false,
+      reason: `帧数 ${count} 超过上限 ${MAX_SEQUENCE_FRAMES} 帧：请调小，或改用服务器端抽帧（浏览器端一次最多 ${MAX_SEQUENCE_FRAMES} 帧）。`,
+    };
   }
-  if (count === 1) {
-    return { ok: true, timesSec: [0] };
-  }
-  const maxSeek = durationSec - LAST_FRAME_SEEK_BACKOFF_S;
-  const timesSec: number[] = [];
-  for (let i = 0; i < count; i++) {
-    const raw = i === count - 1 ? maxSeek : (durationSec * i) / (count - 1);
-    const t = alignToMillis(Math.min(Math.max(0, raw), Math.max(0, maxSeek)));
-    if (timesSec.length > 0 && t <= timesSec[timesSec.length - 1]) continue; // 极短影片去重
-    timesSec.push(t);
-  }
-  return { ok: true, timesSec };
+  return { ok: true, timesSec: tileSampleTimes(0, durationSec, count) };
 }
 
 // ─────────────────────────── 浏览器侧抽帧（AgentComposer 调用）
@@ -356,9 +532,10 @@ export interface ExtractedFrameAt {
  * **不重写** video→canvas→blob 流程；与 extractVideoFrames 的唯一差别是
  * 时间点由调用方给（支持截帧/序列帧），而不是写死 4 帧。
  *
- * 为什么不在这里调 validateVideoFile：那是**上传统**的 60 秒 / 100MB 闸门；
- * 节点动作抽的是已生成视频的帧，代价由计划层的 MAX_SEQUENCE_FRAMES 兜住，
- * 不应对长视频直接拒收（也不改上传统的行为）。
+ * 为什么不在这里调 validateVideoFile：那是**上传统**的时长/文件闸门；节点动作抽的是
+ * 已生成视频的帧，时长上限由计划层（planFrameExtraction → MAX_VIDEO_DURATION_SECONDS = 600 秒）
+ * 与帧数上限（MAX_SEQUENCE_FRAMES = 600）兜住，不在这里对同一个时长重复拒收一次
+ * （也不改上传统的行为：上传统仍额外受 100MB 文件闸门约束）。
  *
  * Object URL 生命周期仍归调用方（同 extractVideoFrames 的注释）。
  *
@@ -445,8 +622,12 @@ export async function extractFramesFromFile(
  *
  * extractVideoFrames 内联着同一段（上传统路径依赖它，硬约束禁改其行为），
  * 这里独立一份给节点动作的 extractFramesAtTimes 用；两段语义逐字相同。
+ *
+ * 2026-09-28 导出给画布节点动作（video-frames 路由的呼叫方）：节点动作要**先读 duration
+ * 再算计划**（planFrameExtraction 需要时长），所以要在自己的离屏 <video> 上等 metadata，
+ * 与该函数在 extractFramesAtTimes 内的用途同源，不另写第二份。
  */
-async function waitForMetadata(video: HTMLVideoElement): Promise<void> {
+export async function waitForMetadata(video: HTMLVideoElement): Promise<void> {
   if (video.readyState >= 1) return;
   await new Promise<void>((resolve, reject) => {
     const onLoaded = () => {

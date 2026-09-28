@@ -231,6 +231,77 @@ export function canCreateSharedCanvas(input: {
   return { allowed: false, code: TEAM_CANVAS_FORBIDDEN_CODE, message: TEAM_CANVAS_FORBIDDEN_MESSAGE };
 }
 
+// ── 資產面 RBAC（三級權限矩陣；與 canCreateSharedCanvas **並列**，不覆蓋）
+
+/**
+ * 資產面權限矩陣（逐字對照 Dramagic Team/Asset 頁；語義照做，命名用我方）。
+ *
+ * | 層級                     | view                | manage                              |
+ * |--------------------------|---------------------|-------------------------------------|
+ * | Main（Super Admin）      | 全帳號              | 全帳號（all global assets）          |
+ * | Sub（Team Admin）        | 隊內全部            | 隊內全部（含他人建的）               |
+ * | Sub（Member）            | 隊內全部            | **只可管自己建的**                   |
+ *
+ * 帳號級（= 非團隊資產 / 個人資產）維度：
+ *   - 自己建的 → 可管（任何人管自己的資產恆真）。
+ *   - 他人建的個人資產 → 任何人都不可管（跨帳號是硬邊界，見 asset-scope
+ *     resolveAssetVisibility 的「跨帳號：一律不可見（跨帳號是 RBAC 那一刀）」）。
+ *
+ * **fail-closed**：actor 為 null（查不到身份）或 actorUserId 不合法 → 拒。
+ * 這與建畫布閘的 fail-open **刻意不同**：建畫布閘的 null 語義是「relay 掛了」，
+ * 放行只是不擋創作；資產管理是**寫別人的資料**，證明不了身份就不得放行。
+ */
+export const TEAM_ASSET_FORBIDDEN_CODE = "team_asset_forbidden";
+export const TEAM_ASSET_FORBIDDEN_MESSAGE = "无权管理该资产：只有资产创建者或团队管理员可以修改团队资产。";
+
+/** 資產面總開關：Main / Team Admin 恆真，Member 需資產屬主。 */
+export function canManageTeamAsset(input: {
+  /** 判定主體的有效角色；null = 查不到身份（fail-closed → 拒）。 */
+  actor: Pick<TeamActor, "role"> | null;
+  /** 資產屬主 user id（= 建該資產的帳號）。 */
+  assetOwnerUserId: number | null;
+  /** 當前操作者 user id。 */
+  actorUserId: number | null;
+}): { allowed: boolean; code?: string; message: string } {
+  // fail-closed ①：身份不明 → 不得管任何資產。
+  if (!input.actor) return { allowed: false, code: TEAM_ASSET_FORBIDDEN_CODE, message: TEAM_ASSET_FORBIDDEN_MESSAGE };
+  if (
+    typeof input.actorUserId !== "number" ||
+    !Number.isInteger(input.actorUserId) ||
+    input.actorUserId <= 0
+  ) {
+    return { allowed: false, code: TEAM_ASSET_FORBIDDEN_CODE, message: TEAM_ASSET_FORBIDDEN_MESSAGE };
+  }
+  // 自己的資產恆可管（含匿名資產：assetOwnerUserId 為 null 時**只有**自己建的視角成立；
+  // 查不出屬主的資產不得被當成「人人可管」——見 fail-closed ③）。
+  if (input.assetOwnerUserId === input.actorUserId) return { allowed: true, message: "" };
+  // owner（= Main，含團隊主帳與共同所有者）與 admin（= Team Admin）：隊內/全帳號全部資產。
+  if (isTeamManager(input.actor.role)) return { allowed: true, message: "" };
+  // fail-closed ③：member 且屬主不明 → 拒（不把「查不出屬主」讀成「自己的」）。
+  if (
+    input.assetOwnerUserId === null ||
+    typeof input.assetOwnerUserId !== "number" ||
+    !Number.isInteger(input.assetOwnerUserId) ||
+    input.assetOwnerUserId <= 0
+  ) {
+    return { allowed: false, code: TEAM_ASSET_FORBIDDEN_CODE, message: TEAM_ASSET_FORBIDDEN_MESSAGE };
+  }
+  // member：只可管自己建的（上面已排除相等情形）⇒ 他人資產一律拒。
+  return { allowed: false, code: TEAM_ASSET_FORBIDDEN_CODE, message: TEAM_ASSET_FORBIDDEN_MESSAGE };
+}
+
+/** 資產面**讀取**權：Main / Team Admin / Member 皆可讀隊內全部；非成員只可讀自己的。 */
+export function canViewTeamAsset(input: {
+  actor: Pick<TeamActor, "role"> | null;
+  assetOwnerUserId: number | null;
+  actorUserId: number | null;
+}): boolean {
+  if (input.assetOwnerUserId === input.actorUserId && typeof input.actorUserId === "number") return true;
+  if (!input.actor) return false; // fail-closed：身份不明 → 不可讀他人資產
+  // 隊內任何角色皆可讀隊內資產（Dramagic：Member「Team assets view」）。
+  return true;
+}
+
 // ─────────────────────────────────────────── 映射層存取（唯讀名冊/設定）
 
 export async function listTeamRoster(teamUserId: number, sql?: GenerationSql): Promise<TeamRosterEntry[]> {

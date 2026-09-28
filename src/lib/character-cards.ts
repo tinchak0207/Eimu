@@ -242,8 +242,10 @@ export function normalizeCharacterCard(payload: unknown): CharacterCard | null {
   // REQ-D1：血統欄位復用 ./lineage 的清洗收口（非法條目丟、上限截尾並顯式標記）。
   const lineageRaw = Array.isArray(c.lineage) ? normalizeLineageLinks(c.lineage) : null;
   // REQ-B2 作用域：同樣走 ./asset-scope 的清洗收口（缺省＝personal 且省略欄位）。
-  // 回 null＝鬼狀態（owner=project 卻無 projectId）：**寫回 GHOST_ASSET_SCOPE**（不降格成 personal），
-  // 該卡在任何上下文都不可見/不可用（D3：降格＝把歸屬不明的項目資產變成人人可用的個人資產）。
+  // 回 null＝鬼狀態（owner=project 卻無 projectId / owner=team 卻無 teamId）：
+  // **寫回 GHOST_ASSET_SCOPE**（不降格成 personal），該卡在任何上下文都不可見/不可用
+  //（D3：降格＝把歸屬不明的項目資產變成人人可用的個人資產）。
+  // P0-2：team 作用域同樣要落欄（只寫 project 會讓團隊卡在存檔端靜默丟失歸屬）。
   const scope = normalizeAssetScope(c.scope);
   const approval = normalizeApprovalState(c.approval);
   return {
@@ -263,7 +265,7 @@ export function normalizeCharacterCard(payload: unknown): CharacterCard | null {
       : {}),
     ...(scope === null
       ? { scope: { ...GHOST_ASSET_SCOPE } }
-      : scope.owner === "project"
+      : scope.owner === "project" || scope.owner === "team"
         ? { scope }
         : {}),
     ...(approval ? { approval } : {}),

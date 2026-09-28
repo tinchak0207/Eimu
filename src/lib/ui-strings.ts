@@ -18,6 +18,11 @@ export const UI_STRINGS = {
   /** 數值缺口佔位符（讀不到就不畫數字，用破折號表達「無值」）。 */
   "common.placeholder": "—",
 
+  // ── 剧本入口曝光（P0-1，2026-09-28）───────────────────────
+  // 只做曝光：文案指向既有 novel_film 产线（长文本/小说改编成片），不改任何判定阈値。
+  /** 首屏模板库 novel_film 正面卡上的一行提示：讲清「丢文本」这个入口。 */
+  "templates.scriptEntry.hint": "有剧本或小说原文？丢进来，自动拆成分镜成片",
+
   // ── C2 /admin 用量统计 ───────────────────────────────────
   "stats.title": "用量统计",
   "stats.subtitle": "全部数字都是既有账本的只读投影：每个数字都能指回一条 billing_operation / capability 记录，无数据源不画。",
@@ -178,6 +183,7 @@ export const UI_STRINGS = {
   "assets.share.existing": "此前已分享过该项目（幂等，未重复建记录）",
   "assets.visibility.owner": "个人",
   "assets.visibility.inProject": "本项目",
+  "assets.visibility.inTeam": "本团队",
   "assets.visibility.sharedIn": "分享进来",
 
   // ── D1 資產血統溯源抽屜 ──────────────────────────────────

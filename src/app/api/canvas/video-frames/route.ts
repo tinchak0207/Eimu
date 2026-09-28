@@ -7,12 +7,17 @@
 // 纯函数 planFrameExtraction 算计划；像素由客户端 extractFramesAtTimes 执行，
 // 响应里 execution:"client" 明确这一点。
 //
+// 2026-09-28：取样语义照竞品（hypit media frames/tiles）——intervalSec 走「从 0 起、
+// 递增、不含片尾」的 intervalSamples，count 走等距中点的 tileSampleTimes，并新增
+// mode:"at"（时间点清单，严格递增、全部 < 时长）。上限 600 帧 / 600 秒，到顶明确拒绝。
+//
 // 认证：requireVerifiedUser（上游 /api/user/self 验证身份，不信任 x-user-id）。
 import { NextRequest, NextResponse } from "next/server";
 import { requireVerifiedUser } from "@/lib/server-user";
 import {
   MAX_SEQUENCE_FRAMES,
   formatFrameTime,
+  frameFileName,
   planFrameExtraction,
 } from "@/lib/video-frames";
 
@@ -45,6 +50,11 @@ function optionalNumber(raw: unknown): number | undefined {
   return raw === undefined || raw === null ? undefined : Number(raw);
 }
 
+/** mode:"at" 的时间点清单：必须真的是数组（非数组一律 undefined → 由计划层给出明确拒绝理由）。 */
+function optionalNumberList(raw: unknown): number[] | undefined {
+  return Array.isArray(raw) ? raw.map((value) => Number(value)) : undefined;
+}
+
 export async function POST(req: NextRequest) {
   const caller = await requireVerifiedUser(req);
   if (!caller.ok) return fail(caller.status, caller.message, "unauthorized");
@@ -60,8 +70,8 @@ export async function POST(req: NextRequest) {
   if (!urlResult.ok) return fail(400, urlResult.reason, "invalid_video_url");
 
   const mode = body?.mode;
-  if (mode !== "current" && mode !== "sequence") {
-    return fail(400, "mode 必须是 current 或 sequence", "invalid_plan");
+  if (mode !== "current" && mode !== "sequence" && mode !== "at") {
+    return fail(400, "mode 必须是 current、sequence 或 at", "invalid_plan");
   }
 
   const durationSec = Number(body?.durationSec);
@@ -70,7 +80,8 @@ export async function POST(req: NextRequest) {
     mode,
     intervalSec: optionalNumber(body?.intervalSec),
     count: optionalNumber(body?.count),
-    atSec: optionalNumber(body?.atSec),
+    // current 收单个数（atSec: number）；at 收清单（atSec: number[]）。计划层按 mode 各自校验。
+    atSec: mode === "at" ? optionalNumberList(body?.atSec) : optionalNumber(body?.atSec),
   });
   if (!plan.ok) return fail(400, plan.reason, "invalid_plan");
 
@@ -78,6 +89,8 @@ export async function POST(req: NextRequest) {
     index,
     timeSec,
     label: formatFrameTime(timeSec),
+    // 帧档名（照竞品：frame-2_500s.jpg），客户端落图片节点/下载时直接用它，不再另起一套命名。
+    fileName: frameFileName(timeSec),
   }));
 
   return NextResponse.json(

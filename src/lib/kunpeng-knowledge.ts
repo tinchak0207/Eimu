@@ -564,15 +564,19 @@ Stanley Kubrick 风格，纯黑无限虚空空间，单一冷白色顶光源（6
 /**
  * ── skill 4/5：电影镜头复刻分镜生成器（skills/storyboard-sketch/SKILL.md，部分接入）──
  *
- * 审计（不接入的工具依赖）：
- * - Step 0 的 `vision_video_analysis` 工具、Step 2/6 的「image 工具」→ 我们后端无此工具，
- *   剔除工具名，改写为「分析参考视频/帧（用户上传参考素材时）」纯指导文字
- * - Step 1 的 ffmpeg 抽帧 CLI → 剔除（无 ffmpeg 工具）
- * - Step 3 的「逐帧调用Gemini」→ 剔除调用方式，保留线稿 prompt
- * - Step 4 的 PIL 拼 3x3 网格脚本 → 剔除（改写为「把 9 张草图拼成 3x3 网格图」）
+ * 审计（外部工具剔除 → 自有工具接回；2026-09-28「还工具」）：
+ * - Step 0 的 `vision_video_analysis` 工具 → 本站无此外部工具，剔除工具名；
+ *   参考片取帧/拼板/切点候选改指本站 `video_evidence`（action=probe/frames/tile/tiles/boundaries）
+ * - Step 2/6 的「image 工具」→ 剔除外部工具名，改指「查看 `video_evidence` 产出的帧/拼板 + 视觉通道」
+ * - Step 1 的 ffmpeg 抽帧 CLI → 本站已有 ffmpeg 轮子（`video_evidence` 内部即走它），改指 `video_evidence`（action=frames）
+ * - Step 3 的「逐帧调用Gemini」→ 剔除外部调用方式，保留线稿 prompt（生图走 image_generate）
+ * - Step 4 的 PIL 拼 3x3 网格脚本 → 本站已有 PIL/python 拼板轮子；视频帧拼板走
+ *   `video_evidence`（action=tiles），草图网格走本站拼板能力（`shot_grid_batch` / `run_py`）
  * - Step 7 飞书发送 + message action=send channel=feishu → 剔除整段（改写为展示给用户确认）
  * - 「API配置」段（dmxapi.cn 端点 / DMXAPI_KEY）→ 剔除（我们有 image_generate，禁止暴露外部端点）
- * - 「依赖」段 → 剔除（Python/PIL/ffmpeg/DMXAPI_KEY 均不适用）
+ * - 「依赖」段 → 剔除（外部 Python 依赖与 DMXAPI_KEY 不适用；ffmpeg/PIL 本站已有轮子）
+ * - 远端链接取片：本站在线视频可直接用 `video_evidence`（action=fetch），但要先 `video_fetch`（action=prepare）
+ *   预热隔离环境；环境未就绪时 `video_fetch` 回 `video_fetch_unavailable`——正文如实写明，别让 agent 以为必定成功。
  * 保留：核心理念、构图规则、提示词工程公式（人物一致性/主角vs路人/禁文字/质感/剪影）、
  * 3x3 分镜提示词结构、中文文字生成策略、多轮微调。
  */
@@ -586,7 +590,9 @@ const STORYBOARD_SKETCH_TEXT = `# 电影镜头复刻分镜生成器（部分接�
 
 ### Step 0: 视频风格分析
 
-分析原始视频/参考素材，提取视觉风格信息，输出风格档案：
+先用 \`video_evidence\`（action=probe）取得参考片的时长、帧率、音视频流与体积，再按需取帧（action=frames，可 action=tiles 拼板），据此分析原始视频/参考素材，提取视觉风格信息，输出风格档案：
+
+（远端链接：先用 \`video_fetch\`（action=prepare）预热钉版 yt-dlp 隔离环境，再 \`video_evidence\`（action=fetch）抓回本地——视频取证内部用本站 ffmpeg 轮子取帧，不再让用户自己跑命令行。**边界：环境未 prepare 时 \`video_fetch\` 回 \`video_fetch_unavailable\`，此时如实告诉用户抓取不了，不要编造已抓到的内容。**）
 
 \`\`\`json
 {
@@ -609,11 +615,11 @@ const STORYBOARD_SKETCH_TEXT = `# 电影镜头复刻分镜生成器（部分接�
 
 ### Step 1: 原片抽帧
 
-从参考视频按节奏抽帧：长段落每 3 秒一帧；需要细节的段落每秒一帧；极速搜索每秒 2 帧。
+用 \`video_evidence\`（action=frames）从参考视频按节奏抽帧：长段落每 3 秒一帧（\`every: 3\`）；需要细节的段落每秒一帧（\`every: 1\`）；极速搜索每秒 2 帧（\`every: 0.5\`）。也可用 \`at: [...]\` 指定时点、\`every_frame\` 逐帧；\`at\` 与 \`every\`/\`every_frame\` 互斥，\`at\` 必须严格递增且都小于片长。需要一次看多帧时用 \`tile\` 拼板（或 action=tiles，分页网格，\`columns\` 默认 3、\`cell\` 默认按来源帧宽取 min(480, 宽) 且不低于 80）。帧数多就先 \`cut\` 分段或 \`tiles\` 分页，别一次拉满。
 
 ### Step 2: 筛选9帧
 
-批量分析帧，筛选**构图差异最大**的9帧：
+查看 Step 1 产出的帧/拼板（\`video_evidence\` action=frames 带 \`tile\`，或 action=tiles），筛选**构图差异最大**的9帧：
 - 排除构图重复的帧（同一角度、同一景别连续多帧）
 - 保留：不同景别、不同角度、有人/无人、特写/远景的多样性
 - 必要时可把特定用户要求的帧（如石块刹车、拿滑板）加回来
@@ -630,7 +636,7 @@ prompt = "Convert to clean pencil line drawing. Keep ONLY composition. Remove co
 
 ### Step 4: 拼3x3网格
 
-9张草图 resize 到 427x240，拼成 1281x720 的 3x3 网格图（不足9张时复制最后一帧补齐）。
+9张草图 resize 到 427x240，拼成 1281x720 的 3x3 网格图（不足9张时复制最后一帧补齐）。拼板是确定性操作：视频帧板用 \`video_evidence\`（action=tiles，默认 3 行分页）；草图网格用本站拼板能力（\`shot_grid_batch\` 或 \`run_py\` 的 PIL 链）。
 
 保存为：\`{scene}_3x3_grid.jpg\`
 
@@ -640,7 +646,7 @@ prompt = "Convert to clean pencil line drawing. Keep ONLY composition. Remove co
 
 ### Step 6: 质量检查
 
-**逐格分析**，检查：
+对网格图**逐格分析**（\`video_evidence\` 拼板产出 + 视觉通道），检查：
 - 人物一致性（脸、发型、服装）
 - 路人服装是否和主角撞衫
 - 有无文字/水印/标注
@@ -788,11 +794,18 @@ AI不是"写字"是"画像素"，笔画越多越容易画错。
 /**
  * ── skill 5/5：参考片复刻（skills/video-style-replication/SKILL.md，部分接入）──
  *
- * 审计（不接入的工具依赖）：
- * - `timeline_analyze_reference_video`（Kimi 剪辑项目工具）→ 剔除工具名，改写为
- *   「分析参考视频（用户上传参考素材时）」纯指导
- * - `timeline_kimi_edit_plan`（剪辑工具）→ 剔除工具名，改写为「输出剪辑执行计划」
- * - 「Kimi 参考视频分析链路」→ 改写为「参考视频分析」（我们后端无 Kimi 链路）
+ * 审计（外部工具剔除 → 自有工具接回；2026-09-28「还工具」）：
+ * - `timeline_analyze_reference_video`（外部剪辑项目工具）→ 剔除工具名；参考视频分析
+ *   改指本站 `video_evidence`（action=probe/frames/tile/tiles/boundaries/cut/fetch）
+ * - `timeline_kimi_edit_plan`（外部剪辑工具）→ 剔除；剪辑执行计划由 agent 基于
+ *   `video_evidence` 产物自行输出
+ * - 「外部参考视频分析链路」→ 改写为「参考视频分析」（本站无该外部链路）
+ * - 词级转写：本站 `video_transcribe`（{source, language} → 每词 start/end 秒，
+ *   `eimu.transcript@1` 形状；ASR 未配置时回 `asr_unavailable`，正文如实写明此边界；
+ *   language 不接受 auto/und）
+ * - 台词量测：本站 `video_measure`（中文沿用 4.5 字/秒口径：传 rate: 4.5；英文音節启发式估算）
+ * - 远端参考片：`video_fetch`（action=prepare/fetch/status，钉版 yt-dlp 隔离环境；
+ *   未 prepare 回 `video_fetch_unavailable`）→ `video_evidence`（action=fetch）
  * - 「旧 ConversationGuide 或单张串行脚本」→ 剔除（内部黑话，与我们无关）
  * 保留：方法论（拆规则→分结构/内容→适配方案→交付物清单）、版权与内容安全红线。
  */
@@ -802,12 +815,15 @@ const VIDEO_STYLE_REPLICATION_TEXT = `# 参考片复刻（部分接入：方法�
 
 ## 工作流
 
-1. 先观看完整参考视频（用户上传参考素材时逐段分析），保留镜头切点、转写、关键帧和风格档案。
-2. 把参考片拆成可迁移规则：开场钩子、信息顺序、平均镜长、景别分布、机位与运镜、表演节奏、转场、声音、字幕和图形包装。
-3. 区分"必须保留的结构"与"只属于原片的内容"。后者必须换成用户的角色、场景、品牌与叙事素材。
-4. 输出 2 至 3 套适配方案，说明每套保留了什么、改变了什么、制作成本和风险。用户确认后再生成分镜或剪辑计划。
-5. 需要分镜时使用工坊角色模板、电影分镜规则和内部场景一致性规则；需要剪辑时输出剪辑执行计划。
-6. 生图可以并行，单镜也能独立重做。只有用户要逐镜审看时才逐张等待确认。
+1. 先取参考片硬信息：\`video_evidence\`（action=probe）拿时长、帧率、音视频流与体积。远端链接先 \`video_fetch\`（action=prepare）预热隔离环境再 \`video_evidence\`（action=fetch）抓回；**未 prepare 时 \`video_fetch\` 回 \`video_fetch_unavailable\`，如实说明抓不到，不要假装拿到片源。**
+2. 取内容与切点：\`video_evidence\`（action=boundaries，\`rate\` 1..120、\`threshold\` 0..1）返回**机械式相邻帧变化候选＋分数**——这是候选不是剪辑判读，镜头切点与平均镜长由你结合画面对候选做人工确认；需要看画面时用 \`video_evidence\`（action=frames，支持 \`at: [...]\`/\`every\`/\`every_frame\`，\`at\` 与后两者互斥且必须严格递增；可 \`tile\`/\`tiles\` 拼板，\`columns\` 默认 3、\`cell\` 按来源帧宽取 min(480, 宽) 且不低于 80），保留关键帧和风格档案。
+3. 转写与词级时间：\`video_transcribe\`（{source, language}）返回每个词的 start/end 秒（\`eimu.transcript@1\`：\`passages[].words[{text,start_seconds,end_seconds,score}]\`），用于信息顺序、字幕与表演节奏。**边界：ASR 未配置时该工具回 \`asr_unavailable\`——此时如实告诉用户无法转写，绝不编造台词与时间；缺时间戳就保持缺，不要补。language 不接受 auto/und（auto 由客户端解析并记 warning）。**
+4. 台词量测：\`video_measure\`（{text, language, pace|rate, rounding, padding}）量台词时长——**中文要对我们自己的短剧口吻，传 \`rate: 4.5\`（4.5 字/秒）**；不传则用默认表（zh normal 5.25），英文是音节启发式估算，须向用户标明是估算。
+5. 把参考片拆成可迁移规则：开场钩子、信息顺序、平均镜长、景别分布、机位与运镜、表演节奏、转场、声音、字幕和图形包装。
+6. 区分"必须保留的结构"与"只属于原片的内容"。后者必须换成用户的角色、场景、品牌与叙事素材。
+7. 输出 2 至 3 套适配方案，说明每套保留了什么、改变了什么、制作成本和风险。用户确认后再生成分镜或剪辑计划。
+8. 需要分镜时使用工坊角色模板、电影分镜规则和内部场景一致性规则；需要剪辑时输出剪辑执行计划。需要把参考片切成多段（有序不重叠）时用 \`video_evidence\`（action=cut，多段 \`keeps\`）；声音转文字走 \`video_transcribe\`（它自己抽音轨，不需要另找音轨工具）。
+9. 生图可以并行，单镜也能独立重做。只有用户要逐镜审看时才逐张等待确认。
 
 ## 交付
 
@@ -855,13 +871,14 @@ export const KUNPENG_SKILL_AUDIT: readonly KunpengSkillAuditEntry[] = [
   {
     skill: "storyboard-sketch",
     decision: "partial",
-    reason: "提示词工程公式与构图规则全保留；vision_video_analysis / image 工具 / ffmpeg / PIL / 飞书发送 / dmxapi 端点 / DMXAPI_KEY 全部剔除或改写为纯指导文字。",
+    reason: "提示词工程公式与构图规则全保留；外部工具（vision_video_analysis / image 工具 / 飞书发送 / dmxapi 端点 / DMXAPI_KEY）剔除；抽帧与拼板改接本站 video_evidence（frames/tile/tiles，参数 at/every/every_frame、columns/cell），逐帧生图走 image_generate，远端参考片抓取走 video_fetch（prepare → video_evidence fetch）。",
     toolRewrites: [
-      { from: "vision_video_analysis 工具", to: "分析参考视频（用户上传参考素材时）" },
-      { from: "image 工具（帧筛选+质量检查）", to: "批量分析帧 / 逐格分析（纯指导文字）" },
-      { from: "ffmpeg 抽帧命令", to: "按节奏抽帧（纯指导文字）" },
-      { from: "逐帧调用Gemini 生成线稿", to: "逐帧生成铅笔线稿（prompt 保留）" },
-      { from: "PIL 拼 3x3 网格脚本", to: "把 9 张草图拼成 3x3 网格图" },
+      { from: "vision_video_analysis 工具", to: "video_evidence（action=probe/frames/tile/tiles/boundaries）" },
+      { from: "image 工具（帧筛选+质量检查）", to: "video_evidence 产出的帧/拼板 + 视觉通道逐格检查" },
+      { from: "ffmpeg 抽帧命令", to: "video_evidence（action=frames；本站已有 ffmpeg 轮子，工具内部即走它）" },
+      { from: "逐帧调用Gemini 生成线稿", to: "逐帧生成铅笔线稿（prompt 保留；生图走 image_generate）" },
+      { from: "PIL 拼 3x3 网格脚本", to: "视频帧板走 video_evidence（action=tiles，columns 默认 3）；草图网格走本站拼板能力（shot_grid_batch / run_py）" },
+      { from: "远端参考片下载（yt-dlp 命令行）", to: "video_fetch（action=prepare 预热 → video_evidence action=fetch）；未 prepare 回 video_fetch_unavailable" },
       { from: "message action=send channel=feishu（飞书发送）", to: "展示给用户确认 → 存档" },
       { from: "dmxapi.cn API 端点 + DMXAPI_KEY", to: "剔除（生图走 image_generate，不暴露外部端点）" },
     ],
@@ -869,11 +886,13 @@ export const KUNPENG_SKILL_AUDIT: readonly KunpengSkillAuditEntry[] = [
   {
     skill: "video-style-replication",
     decision: "partial",
-    reason: "方法论全保留；timeline_analyze_reference_video / timeline_kimi_edit_plan / Kimi 链路 / ConversationGuide 剔除或改写为纯指导文字。",
+    reason: "方法论全保留；外部链路（timeline_analyze_reference_video / timeline_kimi_edit_plan / Kimi 链路 / ConversationGuide）剔除；参考片分析改接本站 video_evidence + video_transcribe + video_measure + video_fetch。",
     toolRewrites: [
-      { from: "timeline_analyze_reference_video（Kimi 剪辑项目工具）", to: "分析参考视频（用户上传参考素材时）" },
-      { from: "timeline_kimi_edit_plan", to: "输出剪辑执行计划" },
-      { from: "Kimi 参考视频分析链路", to: "参考视频分析" },
+      { from: "timeline_analyze_reference_video（外部剪辑项目工具）", to: "video_evidence（probe/boundaries/frames/tile/tiles/cut/fetch）" },
+      { from: "timeline_kimi_edit_plan", to: "基于 video_evidence 产物输出剪辑执行计划" },
+      { from: "Kimi 参考视频分析链路", to: "参考视频分析（video_transcribe 词级时间 + video_measure 台词量测）" },
+      { from: "外部 ASR/转写链路", to: "video_transcribe（{source, language} → eimu.transcript@1 词级 start/end 秒；未配置回 asr_unavailable）" },
+      { from: "外部台词量测/朗读时长估算", to: "video_measure（中文对我方短剧口吻传 rate: 4.5；英文音节启发式估算）" },
       { from: "旧 ConversationGuide 或单张串行脚本", to: "剔除（内部黑话）" },
     ],
   },
@@ -932,7 +951,7 @@ export function buildKunpengKnowledgeInjection(): string {
 
   const sections = KUNPENG_KNOWLEDGE_SECTIONS.map((section) => section.text).join("\n\n---\n\n");
 
-  const toolContract = `工具边界：本站 agent 可用的生成工具只有 image_generate / image_edit / image_upscale / canvas_get_state / canvas_apply_ops（及画布/工作流工具）。知识库中提到的任何其他工具名（如 vision_video_analysis、timeline_*、lark-cli、飞书、runninghub、dmxapi）均已剔除或改写为纯指导文字——遇到需要这些能力的场景，用纯指导文字向用户说明，绝不虚构工具调用。`;
+  const toolContract = `工具边界：本站 agent 可用的生成工具只有 image_generate / image_edit / image_upscale / canvas_get_state / canvas_apply_ops（及画布/工作流工具）；影片取证与分析工具为 video_evidence（action=probe/frames/tile/tiles/boundaries/cut/fetch；frames 的 at 与 every/every_frame 互斥，boundaries 回机械式候选+分数不是剪辑判读）、video_transcribe（{source, language} → 每词 start/end 秒，形状 eimu.transcript@1；ASR 未配置时返回 asr_unavailable，缺时间戳就保持缺、不得编造；language 不接受 auto/und）、video_measure（台词量测：中文要对我方短剧口吻传 rate: 4.5，不传则用默认表 zh normal 5.25，英文为音节启发式估算）、video_fetch（action=fetch/prepare/status，钉版 yt-dlp 隔离环境；未 prepare 时回 video_fetch_unavailable，此时 video_evidence 的 fetch 不可用）。知识库中提到的任何其他工具名（如 vision_video_analysis、timeline_*、lark-cli、飞书、runninghub、dmxapi）均已剔除或改写——遇到需要这些能力的场景，用纯指导文字向用户说明，绝不虚构工具调用。`;
 
   return `${header}\n\n${sections}\n\n---\n\n${toolContract}`;
 }

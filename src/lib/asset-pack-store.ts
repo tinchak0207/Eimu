@@ -268,9 +268,10 @@ export function normalizeAssetPack(payload: unknown): AssetPack | null {
   const now = new Date().toISOString();
   const note = typeof p.note === "string" ? p.note.trim().slice(0, MAX_NOTE_LENGTH) : "";
   const digest = typeof p.digest === "string" ? p.digest.trim().slice(0, MAX_DIGEST_LENGTH) : "";
-  // REQ-B2 作用域：走 ./asset-scope 的清洗收口（非 project 一律收斂成 personal 並省略欄位，
-  // 不寫 `scope:{owner:"personal"}` 冒充已設定）；**鬼狀態（project 但無 projectId）寫回
-  // GHOST_ASSET_SCOPE 而非降格成 personal**——降格＝把歸屬不明的項目資產變成人人可用的個人資產（D3）。
+  // REQ-B2 作用域：走 ./asset-scope 的清洗收口（非 project/team 一律收斂成 personal 並省略欄位，
+  // 不寫 `scope:{owner:"personal"}` 冒充已設定）；**鬼狀態（project 但無 projectId / team 但無
+  // teamId）寫回 GHOST_ASSET_SCOPE 而非降格成 personal**——降格＝把歸屬不明的項目資產變成
+  // 人人可用的個人資產（D3）。P0-2：team 作用域同樣要落欄（否則團隊包在存檔端靜默丟歸屬）。
   const scope = normalizeAssetScope(p.scope);
   // REQ-D1 血統欄位復用 ./lineage 的清洗收口（非法條目丟、上限截尾並顯式標記）；
   // 與 character-cards.normalizeCharacterCard 同款，宿主不同、白名單同一把尺。
@@ -285,7 +286,7 @@ export function normalizeAssetPack(payload: unknown): AssetPack | null {
     ...(note ? { note } : {}),
     ...(scope === null
       ? { scope: { ...GHOST_ASSET_SCOPE } }
-      : scope.owner === "project"
+      : scope.owner === "project" || scope.owner === "team"
         ? { scope }
         : {}),
     ...(lineageRaw && lineageRaw.parents.length
