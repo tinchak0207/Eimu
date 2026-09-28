@@ -1,3 +1,5 @@
+import { controlPlaneRewrites as buildControlPlaneRewrites } from "./src/lib/control-plane-proxy-routes.mjs";
+
 /** @type {import('next').NextConfig} */
 const controlPlaneOrigin = process.env.GENERATION_CONTROL_PLANE_PROXY_ORIGIN
   ?.trim()
@@ -55,44 +57,7 @@ const nextConfig = {
     ];
   },
   async rewrites() {
-    const controlPlaneRewrites = controlPlaneOrigin
-      ? [
-        // Vercel remains the public web edge while durable work runs beside its
-        // PostgreSQL database and worker on the VPS.
-        { source: "/v1/:path*", destination: `${controlPlaneOrigin}/image-control/v1/:path*` },
-        // /api/v1/* 與 /v1/* 是同一套 B 端 API 的兩個入口（afterFiles 把 /v1 視為
-        // /api/v1 的別名）。若不在 beforeFiles 一併代理，直打 /api/v1 的請求會落在
-        // Vercel 本地 route——而 Vercel 按 设计不持有 GENERATION_DATABASE_URL，
-        // getGenerationJobForTenant 首次觸庫即拋錯 → 任何任務 ID 都 500（2026-08-21
-        // 實測：成功任務、不存在任務全部 500）。控制面在 /image-control/api/v1/*
-        // 前綴下可達（已驗證 200），代理後兩個入口語義一致。
-        { source: "/api/v1/:path*", destination: `${controlPlaneOrigin}/image-control/api/v1/:path*` },
-        { source: "/api/generate-images", destination: `${controlPlaneOrigin}/image-control/api/generate-images` },
-        // 裸路徑要單獨列一條。Next 的 `/:path*` 不匹配「後面完全沒有一段」的
-        // `/api/generation-jobs`，而前端提交新任務打的正是這個裸路徑（帶 :path*
-        // 的那條只服務 /api/generation-jobs/<id> 這種輪詢）。少了這條，POST 會
-        // 落在 Vercel，而 Vercel 沒有 GENERATION_CONTROL_PLANE_ENABLED 與
-        // GENERATION_DATABASE_URL，於是回 503 control_plane_disabled，前端退回
-        // 舊生成路徑並把上游直鏈交給瀏覽器（載不到、下載失敗）。
-        { source: "/api/generation-jobs", destination: `${controlPlaneOrigin}/image-control/api/generation-jobs` },
-        { source: "/api/generation-jobs/:path*", destination: `${controlPlaneOrigin}/image-control/api/generation-jobs/:path*` },
-        { source: "/api/admin/billing-operations/:path*", destination: `${controlPlaneOrigin}/image-control/api/admin/billing-operations/:path*` },
-        // 團隊歸屬橋（HMAC 簽名通道，域 team-membership）。Vercel 側不持有
-        // GENERATION_DATABASE_URL，畫布閘門要判「該 user 是否為團隊成員」只能問
-        // 控制面；同樣列在 beforeFiles，否則會落在 Vercel 上的同名 route（會被
-        // 本地副本以「映射層未配置」擋下，永遠看不到真實歸屬）。
-        { source: "/api/internal/team-membership", destination: `${controlPlaneOrigin}/image-control/api/internal/team-membership` },
-        // 營銷郵件退訂：email_preference 在控制面 postgres。
-        { source: "/api/email/unsubscribe", destination: `${controlPlaneOrigin}/image-control/api/email/unsubscribe` },
-        // OpenAI 同步兼容層（2026-09-28）。必須在控面執行，不能留在 Vercel：
-        // ①同步等待要等生成完成（實測 p50 ≈36s），而本專案 Vercel 是 Hobby，函數
-        // 硬上限 60s，等待中的函數會被平台硬殺，連 504 都送不出去；
-        // ②`/openai/v1/models` 的熔斷／斷供閘要讀 GENERATION_DATABASE_URL，Vercel
-        // 不持有該環境變數，留在本地只會 fail-open（把已斷供的模型照樣列出去）。
-        // 控面沒有函數時長上限，且直接持有資料庫，兩件事同時解決。
-        { source: "/openai/v1/:path*", destination: `${controlPlaneOrigin}/image-control/openai/v1/:path*` },
-      ]
-      : [];
+    const controlPlaneRewrites = buildControlPlaneRewrites(controlPlaneOrigin);
     // CRITICAL: 控制面代理必須放 `beforeFiles`，不能放在回傳陣列裡。
     //
     // `rewrites()` 回傳陣列時語意等同 `afterFiles`——Next.js 先比對檔案系統路由，
