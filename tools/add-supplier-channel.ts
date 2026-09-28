@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 import type { RegistryChannel, RegistryChannelClaim, RegistryClaimKind } from "../src/lib/supplier-channels.config";
+import { listSupplyProtocols } from "../src/lib/generation-core/supply-registry";
 
 const CONFIG_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "lib", "supplier-channels.config.ts");
 const START_MARKER = "// REGISTRY-ENTRIES-START";
@@ -119,8 +120,9 @@ function parseArgs(argv: string[]): Args {
     process.exit(1);
   }
   const adapterRaw = String(flags["adapter"] ?? "openai_images");
-  const ADAPTERS = ["openai_images", "metaso", "openai_video", "blender_bridge", "adobe2api"] as const;
-  if (!(ADAPTERS as readonly string[]).includes(adapterRaw)) {
+  // 合法協議＝supply-registry 已註冊的 protocol（V-06：不再在工具裡寫死清單）。
+  const ADAPTERS = listSupplyProtocols();
+  if (!ADAPTERS.includes(adapterRaw)) {
     console.error(`錯誤：未知 adapter "${adapterRaw}"（可選 ${ADAPTERS.join(" / ")}）。`);
     process.exit(1);
   }

@@ -36,6 +36,21 @@ const RETIRED_SUPPLIER_LABELS = new Set([
   "drama",
 ]);
 
+/**
+ * 渠道級上游模型別名（V-04，seed 進 supplier.configuration_json.modelAliases）。
+ * adapter 讀取順序：`supplierModelId ?? configuration.modelAliases[modelId] ?? modelId`
+ *（openai-images-adapter.ts `aliasedSupplierModel`）。取代原 supplier-adapter.ts 的
+ * `SUB2API_MODEL_ALIASES` + `supplier.id === "env:sub2api"` 寫死特例。
+ *
+ * sub2api（store.tinchak0207.xyz/sub2api）的 images endpoint 只認它自己字典裡的
+ * 上游模型名。實測（generation_attempt 2026-08-23~27 多筆 400）：平台 id
+ * 「gemini-3-image」直傳會被拒 `images endpoint requires an image model`；sub2api
+ * 對 Nano Banana Pro 的命名是「gemini-3-pro-image」。其餘平台 id 與 sub2api 字典一致。
+ */
+const CHANNEL_MODEL_ALIASES: Record<string, Record<string, string>> = {
+  sub2api: { "gemini-3-image": "gemini-3-pro-image" },
+};
+
 type Tier = "first_party" | "managed_pool" | "relay" | "fallback";
 type Capability = {
   modelId: string;
@@ -342,6 +357,8 @@ async function main() {
       // 上游拒收 quality 欄位的渠道（agnes：text image queue 契約）。
       if (registry.omitQualityBody) channelConfig.omitQualityBody = true;
     }
+    const modelAliases = CHANNEL_MODEL_ALIASES[channel.label];
+    if (modelAliases) channelConfig.modelAliases = { ...modelAliases };
     if (isFilmera) {
       channelConfig.supabaseUrl = process.env.FILMERA_SUPABASE_URL ?? "";
       channelConfig.anonKey = process.env.FILMERA_ANON_KEY ?? "";
@@ -354,7 +371,7 @@ async function main() {
         id, label, adapter_type, supply_tier, failure_domain, base_url, credential_ref,
         enabled, priority, concurrency_limit, quality_score, unit_cost, configuration_json, config_version
       ) VALUES (
-        ${id}, ${channel.label}, ${isAdobe ? "adobe2api" : isFilmera ? "filmera" : registry?.adapterType ?? "openai_images"}, ${tier(channel.label)},
+        ${id}, ${channel.label}, ${isAdobe ? "adobe2api" : isFilmera ? "filmera" : registry?.adapter?.protocol ?? registry?.adapterType ?? "openai_images"}, ${tier(channel.label)},
         ${origin(endpoint.baseURL)}, ${endpoint.baseURL}, ${credentialRef(channel.label)}, ${channel.defaultEnabled},
         ${registry ? registry.seedPriority : channel.label === "adobe2api" ? 10 : channel.label === "filmera" ? 15 : channel.label === "sub2api" ? 20 : channel.label === "primary" ? 30 : 40},
         ${channelConcurrency(channel.label)}, 1, 0,

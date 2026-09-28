@@ -3,14 +3,17 @@ import assert from "node:assert/strict";
 
 import { normalizeGenerationConfig, SUPPORTED_IMAGE_MODEL_IDS, isSupportedImageModel } from "./generation-model-catalog";
 import { SupplierRequestError } from "./generation-core/failure-classifier";
-import { generateWithOpenaiVideo } from "./generation-core/openai-video-upstream";
+import { submitWithSupplyCostGate } from "./generation-core/worker-service";
 import {
   PAID_VIDEO_ALLOWED_RESOLUTIONS,
   PAID_VIDEO_MAX_SECONDS,
   PAID_VIDEO_MODEL_WHITELIST,
   PAID_VIDEO_PRICED_TRIPLES,
+  PAID_VIDEO_UNIT_PRICE_CNY,
   assertPaidVideoSubmissionAllowed,
+  enforcePaidVideoCostGate,
   evaluatePaidVideoSubmission,
+  resolvePaidVideoUnitPrice,
 } from "./generation-core/paid-video-cost-gate";
 import type { SupplierGenerationInput, SupplierRecord } from "./generation-core/types";
 
@@ -189,6 +192,8 @@ test("陰性④：未核價／未生成三元組拒收（含 catalog 最長時�
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 提交路徑行為驗證：拒收必須發生在 fetch（真實上游 POST）之前 ⇒ 零支出。
+// V-03（2026-09-28）：閘已由 openai-video-upstream 移到生產平面 worker 的
+// submitWithSupplyCostGate（取得租約後、呼叫供給前），故經 worker 入口驗證。
 // ─────────────────────────────────────────────────────────────────────────────
 
 function fakeSupplier(supplierModelId: string): SupplierRecord {
@@ -256,7 +261,7 @@ test("提交路徑：缺 resolution 的視頻請求在 fetch 之前被拒（上�
   }) as typeof fetch;
   try {
     await assert.rejects(
-      () => generateWithOpenaiVideo(fakeSupplier("seedance-2.0-900-特惠"), fakeInput(null, 10)),
+      () => submitWithSupplyCostGate(fakeSupplier("seedance-2.0-900-特惠"), fakeInput(null, 10)),
       (error: unknown) =>
         error instanceof SupplierRequestError && error.status === 400 && error.message.includes("resolution_missing"),
     );
@@ -278,8 +283,8 @@ test("提交路徑：4k 與白名單外 model 同樣在 fetch 之前被拒", asy
     throw new Error("上游不該被呼叫");
   }) as typeof fetch;
   try {
-    await assert.rejects(() => generateWithOpenaiVideo(fakeSupplier("seedance-2.0-900-特惠"), fakeInput("4k", 10)));
-    await assert.rejects(() => generateWithOpenaiVideo(fakeSupplier("dreamina-seedance-2.0"), fakeInput("720p", 10)));
+    await assert.rejects(() => submitWithSupplyCostGate(fakeSupplier("seedance-2.0-900-特惠"), fakeInput("4k", 10)));
+    await assert.rejects(() => submitWithSupplyCostGate(fakeSupplier("dreamina-seedance-2.0"), fakeInput("720p", 10)));
     assert.equal(upstreamCalls, 0, "4k／白名單外 model 不得發出任何上游請求");
   } finally {
     globalThis.fetch = originalFetch;
@@ -308,7 +313,7 @@ test("提交路徑 expected-pass：顯式 720p/10s 的請求把 resolution 寫�
     );
   }) as typeof fetch;
   try {
-    const output = await generateWithOpenaiVideo(fakeSupplier("seedance-2.0-900-特惠"), fakeInput("720p", 10));
+    const output = await submitWithSupplyCostGate(fakeSupplier("seedance-2.0-900-特惠"), fakeInput("720p", 10));
     assert.equal(output.url, "https://cdn.example/x.mp4");
     const post = seen.find((entry) => entry.body);
     assert.ok(post, "應有一次 POST 提交");
@@ -376,4 +381,57 @@ test("作用域：圖片路徑 2k/4k 檔位照常通過共用歸一化（閘不�
   assert.equal(whitelist.includes("gpt-image-2"), false);
   assert.equal(whitelist.includes("seedream-5.0-lite"), false);
   assert.equal(whitelist.includes("image-5-pro"), false);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// V-03：價格按（供給 label, 上游 model）取 claim；閘在 worker 對所有 video_generate 生效，
+// 但只有 fail-closed 協議（openai_video）或白名單 model 才審。
+// ─────────────────────────────────────────────────────────────────────────────
+
+test("V-03 核價：gway 同名模型按 gway claim 價（0.6/0.8/1.5/1.0），xiaoyxiao 按自身價", () => {
+  const gway: Array<[string, number]> = [
+    ["seedance-2.0-900-特惠", 0.6],
+    ["seedance-2.5-900-特惠", 0.8],
+    ["seedance-2.5-1010-特惠", 1.5],
+    ["minimax-h3-933-2k-支持真人", 1.0],
+  ];
+  for (const [model, price] of gway) {
+    assert.equal(resolvePaidVideoUnitPrice("gway", model)?.unitCostCny, price, `gway ${model}`);
+    assert.match(resolvePaidVideoUnitPrice("gway", model)?.source ?? "", /gway\.dev\/api\/pricing 2026-09-28/);
+  }
+  const xiaoyxiao: Array<[string, number]> = [
+    ["seedance-2.0-900-特惠", 0.7],
+    ["seedance-2.5-900-特惠", 0.9],
+    ["seedance-2.5-1010-特惠", 1.6],
+    ["minimax-h3-933-2k-支持真人", 1.1],
+  ];
+  for (const [model, price] of xiaoyxiao) {
+    assert.equal(resolvePaidVideoUnitPrice("xiaoyxiao", model)?.unitCostCny, price, `xiaoyxiao ${model}`);
+  }
+  // 判定結果帶出的單價＝該供給的價（以 env:<label> 形狀 supplierId 推 label 亦同）。
+  const viaGway = evaluatePaidVideoSubmission({ supplierModelId: "seedance-2.0-900-特惠", resolution: "720p", seconds: 10, supplierId: "env:gway" });
+  assert.equal(viaGway.allowed === true && viaGway.triple?.unitCostCny, 0.6);
+  const viaXiaoyxiao = evaluatePaidVideoSubmission({ supplierModelId: "seedance-2.0-900-特惠", resolution: "720p", seconds: 10, supplierLabel: "xiaoyxiao" });
+  assert.equal(viaXiaoyxiao.allowed === true && viaXiaoyxiao.triple?.unitCostCny, 0.7);
+});
+
+test("V-03 兜底：claim 無價或未知供給 → 回退 PAID_VIDEO_UNIT_PRICE_CNY（兜底表保留）", () => {
+  assert.equal(resolvePaidVideoUnitPrice("no-such-channel", "minimax-h3-a")?.unitCostCny, PAID_VIDEO_UNIT_PRICE_CNY["minimax-h3-a"]);
+  assert.equal(resolvePaidVideoUnitPrice(null, "grok-video-1.5")?.unitCostCny, PAID_VIDEO_UNIT_PRICE_CNY["grok-video-1.5"]);
+  assert.equal(resolvePaidVideoUnitPrice("gway", "dreamina-seedance-2.0"), null);
+});
+
+test("V-03 作用域：非 fail-closed 協議且 model 不在白名單 → 不審（metaso/filmera 等既有視頻路徑不被擋）", () => {
+  assert.equal(enforcePaidVideoCostGate({ supplierModelId: "minimax-h3", resolution: null, seconds: null }, { failClosed: false }), null);
+  assert.equal(enforcePaidVideoCostGate({ supplierModelId: "filmera-video", resolution: "1080p", seconds: 60 }, { failClosed: false }), null);
+  // 同樣的非白名單 model 在 fail-closed 協議（openai_video）下照舊拒收。
+  assert.throws(
+    () => enforcePaidVideoCostGate({ supplierModelId: "minimax-h3", resolution: "720p", seconds: 5, supplierId: "env:xiaoyxiao" }, { failClosed: true }),
+    (error: unknown) => error instanceof SupplierRequestError && error.status === 400 && error.message.includes("model_not_whitelisted"),
+  );
+  // 白名單 model 走非 fail-closed 協議 → 照樣套價檢（4k 拒收）。
+  assert.throws(
+    () => enforcePaidVideoCostGate({ supplierModelId: "seedance-2.0-900-特惠", resolution: "4k", seconds: 10 }, { failClosed: false }),
+    (error: unknown) => error instanceof SupplierRequestError && error.message.includes("resolution_not_allowed"),
+  );
 });

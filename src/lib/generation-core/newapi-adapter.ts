@@ -1,5 +1,5 @@
 import { SupplierRequestError } from "./failure-classifier";
-import { chatImageOutput } from "./supplier-adapter";
+import { chatImageOutput } from "./openai-images-adapter";
 import type { SupplierGenerationInput, SupplierGenerationOutput, SupplierRecord } from "./types";
 
 /**

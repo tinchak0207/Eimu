@@ -35,8 +35,10 @@ import {
   releaseJobForRetry,
 } from "./job-repository";
 import { acquireSupplierLease, diagnoseSupplierUnavailability, heartbeatSupplierLease, recoverExpiredCooldowns, releaseSupplierLease, reportSupplierFailure, reportSupplierSuccess, type SupplierUnavailabilityReason } from "./scheduler";
-import { generateWithSupplier } from "./supplier-adapter";
-import type { GenerationArtifactResult, GenerationJob, GenerationKind, ProviderProtocol, SupplierRecord } from "./types";
+import { generateWithSupplier, resolveSupplyAdapter } from "./supplier-adapter";
+import { reconcileProtocolOf, workflowSeconds } from "./supply-registry";
+import { enforcePaidVideoCostGate } from "./paid-video-cost-gate";
+import type { GenerationArtifactResult, GenerationJob, GenerationKind, ProviderProtocol, SupplierGenerationInput, SupplierGenerationOutput, SupplierRecord } from "./types";
 import { runProviderReconciliation } from "./provider-reconciliation";
 import { refreshAdobeSupplierHealth } from "./adobe-health";
 import { onFilmeraTokenRotated } from "./filmera-upstream";
@@ -58,18 +60,41 @@ function backoffMs(attemptCount: number): number {
   return Math.min(60_000, 1_000 * 2 ** Math.min(6, attemptCount));
 }
 
-/** INC-0831：supplier adapter_type → 對帳協議標記（同步 adapter 無異步任務語義，不在此列）。 */
+/**
+ * INC-0831：supplier adapter_type → 對帳協議標記。V-06 起查 supply-registry：
+ * 異步協議＝自身，同步協議＝其顯式 `reconcileVia`，未知協議拋錯（不再 default 成 newapi_video）。
+ */
 function protocolOfAdapter(adapterType: SupplierRecord["adapterType"]): ProviderProtocol {
-  switch (adapterType) {
-    case "metaso":
-      return "metaso";
-    case "openai_video":
-      return "openai_video";
-    case "filmera":
-      return "filmera";
-    default:
-      return "newapi_video";
+  return reconcileProtocolOf(adapterType);
+}
+
+/**
+ * 生產平面成本閘 + 供給提交（V-03，docs/architecture/planes.md §4）。
+ *
+ * 取得供給租約後、呼叫供給 adapter 前執行付費視頻成本閘（原住在
+ * openai-video-upstream.ts:158，只擋 openai_video）。只對 video_generate 生效：
+ * - 閘看的 adapter＝真正會被呼叫的 adapter（resolveSupplyAdapter，含 kernel／new-api 分流）；
+ * - `openai_video`（paidVideoFailClosed）一律過閘，白名單外拒收——與搬遷前一致；
+ * - 其他協議只在上游 model 落入白名單時套價檢，metaso/filmera 等既有路徑放行不審。
+ * 拒收＝SupplierRequestError(400)，在 fetch 之前拋出（零上游支出），走既有失敗路徑。
+ */
+export async function submitWithSupplyCostGate(
+  supplier: SupplierRecord,
+  input: SupplierGenerationInput,
+): Promise<SupplierGenerationOutput> {
+  if (input.kind === "video_generate") {
+    const adapter = resolveSupplyAdapter(supplier, input);
+    const facts = adapter.paidVideoFacts?.(supplier, input) ?? {
+      supplierModelId: supplier.supplierModelId ?? input.modelId,
+      resolution: input.resolution,
+      seconds: workflowSeconds(input),
+    };
+    enforcePaidVideoCostGate(
+      { ...facts, supplierId: supplier.id, supplierLabel: supplier.label, jobId: input.jobId },
+      { failClosed: adapter.paidVideoFailClosed === true },
+    );
   }
+  return generateWithSupplier(supplier, input);
 }
 
 // 病灶 D（2026-08-30）：排隊期退避不再撞穿 3 分鐘 deadline。
@@ -322,7 +347,7 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
             },
           }, sql);
         };
-        const output = await generateWithSupplier(supplierLease.supplier, {
+        const output = await submitWithSupplyCostGate(supplierLease.supplier, {
           jobId: job.id,
           attemptId: attempt.id,
           modelId: job.modelId,

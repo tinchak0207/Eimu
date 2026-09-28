@@ -5,6 +5,14 @@
 //
 // 檔案必須是 .ts（而非 JSON）：Next 打包（Vercel lambda bundle）與 tsx 跑 tools
 // 都要能直接 import。
+//
+// 新增一條**新協議**供給＝2 檔（V-06，docs/architecture/planes.md §2.3）：
+//   ① 新 adapter 檔 `export const fooAdapter: SupplyAdapter = { protocol: "foo", submit, poll? }`
+//   ② 本檔條目 `adapterType: "foo", adapter: fooAdapter`（import 該 adapter）
+// generation-core/supply-registry.ts 載入時自動註冊條目上的 adapter，分派／對帳／
+// 對帳協議映射都查 registry，不需改其他檔。同協議供給只動本檔（N=1）。
+
+import type { SupplyAdapter } from "./generation-core/supply-registry";
 
 export type RegistryClaimKind = "image_generate" | "image_edit" | "video_generate";
 
@@ -12,6 +20,13 @@ export interface RegistryChannelClaim {
   modelId: string;                // 平台 catalog 模型 id
   supplierModelId: string | null; // 上游模型名；null = 同名直傳
   kinds: RegistryClaimKind[];
+  /**
+   * 已核上游單價（人民幣元／次，V-03）。按（本渠道, supplierModelId）定，不按模型名全域定；
+   * 付費視頻成本閘（paid-video-cost-gate.ts）優先讀這裡，缺省才回退閘內兜底表。
+   */
+  unitPriceCny?: number;
+  /** 核價來源原文＋日期，例 "GET https://www.gway.dev/api/pricing 2026-09-28 vip quota_type=1"。 */
+  priceSource?: string;
 }
 
 export interface RegistryChannel {
@@ -25,7 +40,14 @@ export interface RegistryChannel {
   chatImageModels: string[];     // 上游模型名走 /chat/completions 生圖（空 = 全走 images/generations）
   /** 上游 images/generations 拒收 quality 欄位時置 true（agnes 實錘 2026-09-19：text image queue 只認 model/prompt/size/n）。 */
   omitQualityBody?: boolean;
-  adapterType?: "openai_images" | "metaso" | "openai_video" | "blender_bridge" | "adobe2api"; // 缺省 openai_images；metaso 走自訂協議（見 metaso-upstream.ts），openai_video 走 /v1/videos 異步（見 openai-video-upstream.ts），blender_bridge 走橋 /v1/execute 同步單幀渲染（見 blender-node-upstream.ts），adobe2api 走 firefly-* 映射（見 adobe2api-upstream.ts，含視頻走 /v1/chat/completions）
+  /**
+   * 供給協議（＝DB supplier.adapter_type ＝ supply-registry 的 protocol）；合法值由
+   * registry 執行期判定（未註冊＝明確失敗）。內建：openai_images / adobe2api / metaso /
+   * openai_video / filmera / blender_bridge / newapi_video。
+   */
+  adapterType?: string; // 缺省 openai_images；metaso 走自訂協議（見 metaso-upstream.ts），openai_video 走 /v1/videos 異步（見 openai-video-upstream.ts），blender_bridge 走橋 /v1/execute 同步單幀渲染（見 blender-node-upstream.ts），adobe2api 走 firefly-* 映射（見 adobe2api-upstream.ts，含視頻走 /v1/chat/completions）
+  /** 新協議供給：直接掛 adapter 物件（宣告即註冊）；`adapterType` 若有須等於 `adapter.protocol`。 */
+  adapter?: SupplyAdapter;
   claims: RegistryChannelClaim[];
 }
 
@@ -57,11 +79,12 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
     claims: [
       // 已核價（¥/次，GET /api/pricing 2026-09-27 免登入唯讀實查）：
       // seedance-2.0-900-特惠 0.7、seedance-2.5-900-特惠 0.9、
-      // minimax-h3-933-2k-支持真人 1.1。
-      { modelId: "seedance-2.0",      supplierModelId: "seedance-2.0-900-特惠",      kinds: ["video_generate"] },
-      { modelId: "seedance-2.5-480p", supplierModelId: "seedance-2.5-900-特惠",      kinds: ["video_generate"] },
-      { modelId: "seedance-2.5-720p", supplierModelId: "seedance-2.5-1010-特惠",     kinds: ["video_generate"] },
-      { modelId: "minimax-h3",        supplierModelId: "minimax-h3-933-2k-支持真人", kinds: ["video_generate"] },
+      // minimax-h3-933-2k-支持真人 1.1；seedance-2.5-1010-特惠 1.6（原文見
+      // paid-video-cost-gate.ts PAID_VIDEO_UNIT_PRICE_CNY）。V-03 起寫成 claim 欄位。
+      { modelId: "seedance-2.0",      supplierModelId: "seedance-2.0-900-特惠",      kinds: ["video_generate"], unitPriceCny: 0.7, priceSource: "GET https://api.xiaoyxiao.xyz/api/pricing 2026-09-27 (quota_type=1, model_price)" },
+      { modelId: "seedance-2.5-480p", supplierModelId: "seedance-2.5-900-特惠",      kinds: ["video_generate"], unitPriceCny: 0.9, priceSource: "GET https://api.xiaoyxiao.xyz/api/pricing 2026-09-27 (quota_type=1, model_price)" },
+      { modelId: "seedance-2.5-720p", supplierModelId: "seedance-2.5-1010-特惠",     kinds: ["video_generate"], unitPriceCny: 1.6, priceSource: "GET https://api.xiaoyxiao.xyz/api/pricing 2026-09-27 (quota_type=1, model_price)" },
+      { modelId: "minimax-h3",        supplierModelId: "minimax-h3-933-2k-支持真人", kinds: ["video_generate"], unitPriceCny: 1.1, priceSource: "GET https://api.xiaoyxiao.xyz/api/pricing 2026-09-27 (quota_type=1, model_price)" },
     ],
   },
 
@@ -69,7 +92,8 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
     // gway（極途Gway，api.gway.dev，2026-09-28）：xiaoyxiao 的直接上游（取證見記憶
     // 2026-09-28-xiaoyxiao-upstream-chain-0928）。同名模型掛 vip 分組、單價恆＝xiaoyxiao−¥0.1。
     // 現為**備用渠道**（priority 2，xiaoyxiao 失敗才輪到）；暴君裁定 xiaoyxiao 餘額跑完即搬家至此。
-    // 協議、模型名、成本閘白名單與 xiaoyxiao 完全同型（閘門只認 supplierModelId，零改動）。
+    // 協議、模型名、成本閘白名單與 xiaoyxiao 完全同型。V-03（2026-09-28）起成本閘按
+    //（供給 label, supplierModelId）讀下方 claim 的 unitPriceCny，gway 的真實單價進閘。
     label: "gway",
     baseUrlEnv: "GWAY_BASE_URL",
     apiKeyEnv: "GWAY_API_KEY",
@@ -83,10 +107,10 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
       // 已核價（GET https://www.gway.dev/api/pricing 2026-09-28，vip 分組，quota_type=1）：
       // seedance-2.0-900-特惠 0.6、seedance-2.5-900-特惠 0.8、seedance-2.5-1010-特惠 1.5、
       // minimax-h3-933-2k-支持真人 1.0。
-      { modelId: "seedance-2.0",      supplierModelId: "seedance-2.0-900-特惠",      kinds: ["video_generate"] },
-      { modelId: "seedance-2.5-480p", supplierModelId: "seedance-2.5-900-特惠",      kinds: ["video_generate"] },
-      { modelId: "seedance-2.5-720p", supplierModelId: "seedance-2.5-1010-特惠",     kinds: ["video_generate"] },
-      { modelId: "minimax-h3",        supplierModelId: "minimax-h3-933-2k-支持真人", kinds: ["video_generate"] },
+      { modelId: "seedance-2.0",      supplierModelId: "seedance-2.0-900-特惠",      kinds: ["video_generate"], unitPriceCny: 0.6, priceSource: "GET https://www.gway.dev/api/pricing 2026-09-28 (vip 分組, quota_type=1)" },
+      { modelId: "seedance-2.5-480p", supplierModelId: "seedance-2.5-900-特惠",      kinds: ["video_generate"], unitPriceCny: 0.8, priceSource: "GET https://www.gway.dev/api/pricing 2026-09-28 (vip 分組, quota_type=1)" },
+      { modelId: "seedance-2.5-720p", supplierModelId: "seedance-2.5-1010-特惠",     kinds: ["video_generate"], unitPriceCny: 1.5, priceSource: "GET https://www.gway.dev/api/pricing 2026-09-28 (vip 分組, quota_type=1)" },
+      { modelId: "minimax-h3",        supplierModelId: "minimax-h3-933-2k-支持真人", kinds: ["video_generate"], unitPriceCny: 1.0, priceSource: "GET https://www.gway.dev/api/pricing 2026-09-28 (vip 分組, quota_type=1)" },
     ],
   },
 

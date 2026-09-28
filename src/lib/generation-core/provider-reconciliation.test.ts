@@ -173,6 +173,9 @@ test("recordArtifact：首次落列 → RETURNING 命中（inserted=true）", as
 const CONTEXT_ROW: Record<string, unknown> = {
   attempt_id: "att-1",
   supplier_id: "sup-1",
+  // 真實 SQL 為 COALESCE(attempt.provider_protocol, supplier.adapter_type)，恆非空。
+  // V-06 起未知/缺失協議不再默認 newapi_video，夾具須與真實查詢形狀一致。
+  protocol: "newapi_video",
   id: "sup-1",
   label: "cangyuansuanli",
   adapter_type: "newapi_video",

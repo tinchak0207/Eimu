@@ -20,6 +20,12 @@ import { validateImageBuffer } from "@/lib/generation-core/artifact-service";
 import { generationTaskProjection } from "@/lib/generation-core/task-projection";
 import type { CreateGenerationReferenceArtifactInput, GenerationReference } from "@/lib/generation-core/types";
 import { authenticateImageUser } from "@/lib/image-billing";
+import {
+  composeWebTaskPrompt,
+  displayGenerationPrompt,
+  readRequestWorkflow,
+  withOriginalPrompt,
+} from "@/lib/web-task-prompt";
 import { QUOTA_PER_COIN } from "@/lib/quota-constants";
 
 export const runtime = "nodejs";
@@ -51,6 +57,12 @@ interface ReferenceMetadata {
   role?: string;
   sourceResultId?: string;
   sourceGenerationId?: string;
+}
+
+/** 任務投影：job.prompt 是組好給供給的長 prompt，對用戶顯示還原成原文（workflow.originalPrompt）。 */
+function webTaskProjection(job: Parameters<typeof generationTaskProjection>[0]) {
+  const projection = generationTaskProjection(job, { includePrompt: true });
+  return { ...projection, prompt: displayGenerationPrompt(projection.prompt, job.workflow) };
 }
 
 function fail(status: number, message: string, code: string) {
@@ -177,7 +189,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     success: true,
     enabled: true,
-    data: jobs.map((job) => generationTaskProjection(job, { includePrompt: true })),
+    data: jobs.map(webTaskProjection),
   }, { headers: { "Cache-Control": "no-store" } });
 }
 
@@ -249,10 +261,12 @@ export async function POST(req: NextRequest) {
       tenantId,
       idempotencyKey,
     });
-    const requestedWorkflow = typeof parsed.body.workflow === "object" && parsed.body.workflow !== null
-      ? parsed.body.workflow as Record<string, unknown>
-      : {};
-    const workflow = { ...(retryJob?.workflow ?? {}), ...requestedWorkflow };
+    const requestWorkflow = readRequestWorkflow(parsed.body.workflow);
+    const requestedWorkflow = requestWorkflow ?? {};
+    // 負面詞/參考圖角色：generation-core 不讀 workflow，這裡用 legacy 同一函式組進供給 prompt；
+    // 只看本次 body 的 workflow（canvas 已預組且不送 workflow → 原樣透傳，不重複套用）。
+    const submittedPrompt = composeWebTaskPrompt(prompt, requestWorkflow);
+    const workflow = withOriginalPrompt({ ...(retryJob?.workflow ?? {}), ...requestedWorkflow }, prompt, submittedPrompt);
     const references = persisted.references.length
       ? persisted.references
       : retryJob?.workflow.references ?? [];
@@ -263,7 +277,7 @@ export async function POST(req: NextRequest) {
       idempotencyKey,
       kind: normalized.config.mediaType === "video" ? "video_generate" : references.length ? "image_edit" : "image_generate",
       modelId,
-      prompt,
+      prompt: submittedPrompt,
       size: normalized.config.mediaType === "image" ? imageSizeForAspectRatio(normalized.config.aspectRatio) : null,
       ratio: normalized.config.aspectRatio,
       resolution: normalized.config.outputResolution,
@@ -287,7 +301,7 @@ export async function POST(req: NextRequest) {
     }
     return NextResponse.json({
       success: true,
-      data: generationTaskProjection(submitted.job, { includePrompt: true }),
+      data: webTaskProjection(submitted.job),
     }, {
       status: submitted.created ? 202 : 200,
       headers: {

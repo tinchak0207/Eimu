@@ -19,10 +19,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { readBearerToken, looksLikeBizApiKey } from "@/lib/biz-api-keys";
 import { authenticateBizApiKey } from "@/lib/biz-api-key-store";
 import { authenticateImageUser } from "@/lib/image-billing";
-import { cancelGenerationJob, getGenerationJobForTenant } from "@/lib/generation-core/job-repository";
-import { refundGenerationBilling } from "@/lib/generation-core/billing-ledger";
+import { getGenerationJobForTenant } from "@/lib/generation-core/job-repository";
+import { cancelGenerationJobWithRefund } from "@/lib/generation-core/cancel-service";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
 import { generationTaskProjection } from "@/lib/generation-core/task-projection";
+import { displayGenerationPrompt } from "@/lib/web-task-prompt";
 
 export const runtime = "nodejs";
 
@@ -57,6 +58,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
   }
 
   const body = generationTaskProjection(job, { includePrompt: true });
+  body.prompt = displayGenerationPrompt(body.prompt, job.workflow);
 
   return withTraceId(NextResponse.json(body, { headers: { "Cache-Control": "no-store" } }), traceId);
 }
@@ -94,7 +96,8 @@ export async function DELETE(req: NextRequest, context: { params: Promise<{ id: 
     );
   }
 
-  const result = await cancelGenerationJob(id, tenant.tenantId);
+  // 取消 + 條件退款收在生產平面門面（V-01）；路由不觸發帳本動作。
+  const result = await cancelGenerationJobWithRefund(id, tenant.tenantId, existing);
   if (!result.cancelled) {
     // 读取后与 CAS 更新之间的竞态：job 已被并发终结（worker 完成/失败/退款）。
     return withTraceId(
@@ -105,18 +108,7 @@ export async function DELETE(req: NextRequest, context: { params: Promise<{ id: 
       traceId,
     );
   }
-
-  let refund: { amount: number; full: boolean } | null = null;
-  if ((result.previousStatus === "queued" || result.previousStatus === "leased") && existing.billingAmount > 0) {
-    const outcome = await refundGenerationBilling({ job: existing, executorId: `cancel:${tenant.tenantId}` });
-    if (outcome === "applied") {
-      refund = { amount: existing.billingAmount, full: true };
-    } else {
-      // pending/unknown/failed：退款 op 已落地（或冻结），由 reconcile 周期性
-      // 重试兜底；不向客户端谎报退款已完成。
-      console.error(`[generation-jobs] cancel refund not applied yet job=${id} state=${outcome}`);
-    }
-  }
+  const { refund } = result;
 
   return withTraceId(
     NextResponse.json(

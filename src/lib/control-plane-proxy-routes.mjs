@@ -43,6 +43,13 @@ export const CONTROL_PLANE_PROXY_SOURCES = [
   // 不持有該環境變數，留在本地只會 fail-open（把已斷供的模型照樣列出去）。
   // 控面沒有函數時長上限，且直接持有資料庫，兩件事同時解決。
   "/openai/v1/:path*",
+  // PixAI 同步計費路由（2026-09-28，V-08）：扣退款改走 generation-core/sync-charge
+  // 帳本門面，需 GENERATION_DATABASE_URL；留在 Vercel 只會回落直扣、不留帳本列。
+  // 鑑權同 /api/generate-images（authenticateImageUser，已在控面運行）；上游同
+  // /api/v1/images/edits 的 proxyPixai（已在控面運行）。
+  "/api/pixai/edit",
+  "/api/pixai/upscale",
+  "/api/pixai/template-generations",
 ];
 
 /**

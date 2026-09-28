@@ -1,5 +1,5 @@
 import { SupplierRequestError } from "./failure-classifier";
-import { assertPaidVideoSubmissionAllowed } from "./paid-video-cost-gate";
+import type { PaidVideoSubmissionFacts } from "./paid-video-cost-gate";
 import type { ProviderTaskPollResult, SupplierGenerationInput, SupplierGenerationOutput, SupplierRecord } from "./types";
 
 // cangyuansuanli（new-api openai-video 兼容）seedance 视频上游封装（2026-08-30）。
@@ -121,10 +121,13 @@ function resolveUpstreamModel(platformModelId: string, resolution: string): stri
   return upstreamModel;
 }
 
-export async function generateWithOpenaiVideo(
-  supplier: SupplierRecord,
-  input: SupplierGenerationInput,
-): Promise<SupplierGenerationOutput> {
+/**
+ * 提交前的輸入校驗與上游模型名解析（prompt／duration 範圍／model 映射）。
+ * generateWithOpenaiVideo 與成本閘的 `openaiVideoSubmissionFacts` 共用同一份，
+ * 保證閘審的（model, resolution, seconds）＝真正送出的值，且拒收順序與搬遷前一致
+ *（先輸入校驗，後成本閘）。
+ */
+function prepareOpenaiVideoSubmission(supplier: SupplierRecord, input: SupplierGenerationInput) {
   const prompt = input.prompt.trim();
   if (!prompt || prompt.length > 5_000) {
     throw new SupplierRequestError("Video prompt must contain 1–5000 characters.", 400);
@@ -150,18 +153,35 @@ export async function generateWithOpenaiVideo(
   // 上游模型名：capability 行显式携带 supplierModelId（napi/drama 渠道级映射）时
   // 直接短路，否则按平台模型 + resolution 查静态表（cangyuansuanli sd4/sd7 族）。
   const upstreamModel = supplier.supplierModelId ?? resolveUpstreamModel(platformModelId, resolution);
+  return { prompt, resolution, duration, ratio, upstreamModel };
+}
 
-  // 付費視頻上游硬閘（2026-09-27 ¥31.2857 事故後立）：唯一真源見
-  // paid-video-cost-gate.ts。此處是**提交前**的最後一道，只覆蓋 video 路徑，
-  // 圖片路徑不經本模組。缺 resolution／非白名單／4k／未核價三元組一律 400 拒收，
-  // 確保上游永遠拿不到缺省 resolution（上游缺省＝4k）。
-  assertPaidVideoSubmissionAllowed({
+/**
+ * 付費視頻成本閘的提交事實（V-03）：本協議實際會送給上游的（model, resolution, seconds）。
+ * 閘本身已移到生產平面 worker（提交前執行，見 worker-service `submitWithSupplyCostGate`
+ * 與 paid-video-cost-gate.ts）；本檔只回報事實，不做放行判定。
+ */
+export function openaiVideoSubmissionFacts(supplier: SupplierRecord, input: SupplierGenerationInput): PaidVideoSubmissionFacts {
+  const { upstreamModel, resolution, duration } = prepareOpenaiVideoSubmission(supplier, input);
+  return {
     supplierModelId: upstreamModel,
     resolution,
     seconds: duration,
     supplierId: supplier.id,
+    supplierLabel: supplier.label,
     jobId: input.jobId,
-  });
+  };
+}
+
+export async function generateWithOpenaiVideo(
+  supplier: SupplierRecord,
+  input: SupplierGenerationInput,
+): Promise<SupplierGenerationOutput> {
+  const { prompt, resolution, duration, ratio, upstreamModel } = prepareOpenaiVideoSubmission(supplier, input);
+
+  // 付費視頻上游硬閘（2026-09-27 ¥31.2857 事故後立）已於 V-03 移到生產平面：
+  // worker-service 取得租約後、呼叫本 adapter 前執行（對所有 video_generate 生效，
+  // 本協議 fail-closed）。唯一真源見 paid-video-cost-gate.ts。
 
   const isSd7 = SD7_MODEL_NAMES.has(upstreamModel);
   const isDrama30s = DRAMA_30S_MODEL_NAMES.has(upstreamModel);

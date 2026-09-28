@@ -766,9 +766,10 @@ test("402 契約不破：不足時的狀態碼/錯誤碼/文案與現狀逐字�
   assert.deepEqual(denied, {
     ok: false,
     status: 402,
-    type: "insufficient_quota",
-    code: "insufficient_quota",
-    message: "余额不足，请先充值。",
+    // a9ceb2f0（2026-09-28）已把 402 契約統一為 insufficient_balance。
+    type: "insufficient_balance",
+    code: "insufficient_balance",
+    message: "余额不足，本次未扣费。充值：https://eimu.dev/pricing",
   });
 
   const allowed = await gate(900_000);

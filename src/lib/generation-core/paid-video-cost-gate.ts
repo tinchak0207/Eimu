@@ -32,13 +32,19 @@
  * `durations` 與 `resolutions`）× 本檔 `PAID_VIDEO_ALLOWED_RESOLUTIONS`（≤720p）。
  * 交集即登錄；**沒有登錄＝拒收**（`triple_not_priced`），禁止現場猜檔位語義。
  * 後果：catalog 加時長/加檔位，閘門自動跟上；catalog 沒有的組合永遠進不來。
- * 上游單價是站外事實，留在 `PAID_VIDEO_UNIT_PRICE_CNY`（附來源原文）；未核價的
+ * 上游單價是站外事實：2026-09-28 V-03 起按（供給 label, 上游 model）存在
+ * `supplier-channels.config.ts` 的 claim `unitPriceCny/priceSource`；claim 無價時才回退
+ * `PAID_VIDEO_UNIT_PRICE_CNY`（xiaoyxiao 價，附來源原文，保留為兜底）。未核價的
  * 上游 model **不生成任何三元組**（等於不許提交）。
  * `grok-video-1.5` 在白名單內但**無公開 model id ⇒ 無 claim ⇒ 零三元組 ⇒ 一律
  * 拒收**（2026-09-27 暴君裁定「先搁置留 memory」，見 notes/2026-09-27-grok-video-15-shelved.md）。
  *
  * ── 作用域鐵律（2026-09-27 暴君追加，違反＝誤傷）────────────────────────
- * 本模組**只准被 video 提交路徑**（`openai-video-upstream.ts`）import。
+ * 本模組**只准在 video 提交路徑**上執行。2026-09-28 V-03（docs/architecture/
+ * planes.md §4）起，執行點由供給 adapter（`openai-video-upstream.ts`）移到生產平面
+ * `worker-service.ts` 的 `submitWithSupplyCostGate`：取得租約後、呼叫供給前，且**只**
+ * 在 `job.kind === "video_generate"` 時呼叫；`openai_video` 協議 fail-closed（行為同
+ * 搬遷前），其他協議只在上游 model 落入白名單時套價檢（metaso/filmera 等現有路徑不受影響）。
  * 嚴禁寫進任何共用層：通用 resolution/size 校驗、模型目錄（catalog）、
  * node-metadata 白名單、scheduler／派單層、或任何被圖片路徑 import 的模組。
  * 理由：我方 53 條圖片 capability 帶 `{1k,2k,4k}` 檔位（gpt-image-2 家族、
@@ -130,39 +136,70 @@ function isAllowedResolution(value: string): value is PaidVideoResolution {
   return (PAID_VIDEO_ALLOWED_RESOLUTIONS as readonly string[]).includes(value);
 }
 
+interface ClaimPrice {
+  unitCostCny: number;
+  source: string;
+}
+
+/**
+ * 按（供給 label, 上游 model）查 claim 核價（V-03）；claim 無價回退
+ * `PAID_VIDEO_UNIT_PRICE_CNY`（兜底表，xiaoyxiao 價）；兩者皆無回 null（＝未核價）。
+ * label 未知（未帶 label 的呼叫）直接用兜底表。
+ */
+export function resolvePaidVideoUnitPrice(supplierLabel: string | null | undefined, supplierModelId: string): ClaimPrice | null {
+  if (supplierLabel) {
+    const channel = REGISTRY_CHANNELS.find((entry) => entry.label === supplierLabel);
+    const claim = channel?.claims.find(
+      (entry) => entry.supplierModelId === supplierModelId && typeof entry.unitPriceCny === "number",
+    );
+    if (claim && typeof claim.unitPriceCny === "number") {
+      return { unitCostCny: claim.unitPriceCny, source: claim.priceSource ?? `supplier-channels.config ${supplierLabel}` };
+    }
+  }
+  const fallback = PAID_VIDEO_UNIT_PRICE_CNY[supplierModelId as PaidVideoModelId];
+  return fallback === undefined ? null : { unitCostCny: fallback, source: PRICING_SOURCE };
+}
+
 /**
  * 由 registry claims（平台 id → 上游 model）× catalog（durations/resolutions）
  * 生成已核價三元組。未核價、未映射（如 grok-video-1.5）、或交集為空的組合
  * **不生成** ⇒ 提交時以 `triple_not_priced` 拒收。
+ *
+ * V-03：掃**所有** registry 渠道的 claims（同名同映射的供給去重，不重複生成），
+ * 三元組只定「可提交的檔位組合」；單價在判定時按（供給 label, 上游 model）另查。
  */
 function buildPricedVideoTriples(): PricedVideoTriple[] {
-  const xiaoyxiao = REGISTRY_CHANNELS.find((channel) => channel.label === "xiaoyxiao");
-  if (!xiaoyxiao) return [];
   const triples: PricedVideoTriple[] = [];
-  for (const claim of xiaoyxiao.claims) {
-    if (!claim.kinds.includes("video_generate")) continue;
-    const upstreamModel = claim.supplierModelId;
-    // 上游 model 必須在白名單內（白名單是硬上界；registry 不得繞過）
-    if (!upstreamModel || !(PAID_VIDEO_MODEL_WHITELIST as readonly string[]).includes(upstreamModel)) continue;
-    const unitCostCny = PAID_VIDEO_UNIT_PRICE_CNY[upstreamModel as PaidVideoModelId];
-    if (unitCostCny === undefined) continue; // 未核價＝不許提交
-    const catalogModel = GENERATION_MODEL_CATALOG[claim.modelId];
-    if (!catalogModel) continue;
-    const resolutions = (catalogModel.resolutions ?? []).filter(isAllowedResolution);
-    const seconds = (catalogModel.durations ?? []).filter(
-      (value) => Number.isInteger(value) && value >= 1 && value <= PAID_VIDEO_MAX_SECONDS,
-    );
-    if (!resolutions.length || !seconds.length) continue;
-    triples.push({
-      supplierModelId: upstreamModel as PaidVideoModelId,
-      unitCostCny,
-      billingBasis: "per_call",
-      resolutions: [...resolutions],
-      seconds: [...seconds],
-      source: `${PRICING_SOURCE} → model_name="${upstreamModel}", model_price=${unitCostCny}, billing_usage_schema=null；`
-        + `seconds/resolutions 取自 catalog "${claim.modelId}"`,
-      semantics: "upstream-tier-semantics-unverified",
-    });
+  const seen = new Set<string>();
+  for (const channel of REGISTRY_CHANNELS) {
+    for (const claim of channel.claims) {
+      if (!claim.kinds.includes("video_generate")) continue;
+      const upstreamModel = claim.supplierModelId;
+      // 上游 model 必須在白名單內（白名單是硬上界；registry 不得繞過）
+      if (!upstreamModel || !(PAID_VIDEO_MODEL_WHITELIST as readonly string[]).includes(upstreamModel)) continue;
+      const dedupeKey = `${upstreamModel}\u0000${claim.modelId}`;
+      if (seen.has(dedupeKey)) continue;
+      const price = resolvePaidVideoUnitPrice(channel.label, upstreamModel);
+      if (!price) continue; // 未核價＝不許提交
+      const catalogModel = GENERATION_MODEL_CATALOG[claim.modelId];
+      if (!catalogModel) continue;
+      const resolutions = (catalogModel.resolutions ?? []).filter(isAllowedResolution);
+      const seconds = (catalogModel.durations ?? []).filter(
+        (value) => Number.isInteger(value) && value >= 1 && value <= PAID_VIDEO_MAX_SECONDS,
+      );
+      if (!resolutions.length || !seconds.length) continue;
+      seen.add(dedupeKey);
+      triples.push({
+        supplierModelId: upstreamModel as PaidVideoModelId,
+        unitCostCny: price.unitCostCny,
+        billingBasis: "per_call",
+        resolutions: [...resolutions],
+        seconds: [...seconds],
+        source: `${price.source} → model_name="${upstreamModel}", model_price=${price.unitCostCny}, billing_usage_schema=null；`
+          + `seconds/resolutions 取自 catalog "${claim.modelId}"`,
+        semantics: "upstream-tier-semantics-unverified",
+      });
+    }
   }
   return triples;
 }
@@ -182,6 +219,8 @@ export interface PaidVideoSubmissionFacts {
   /** 上游將收到的秒數（整數）。 */
   seconds?: number | string | null;
   supplierId?: string;
+  /** 供給 label（＝registry channel label）；按（label, model）查 claim 核價。缺省時由 `env:<label>` 形狀的 supplierId 推出。 */
+  supplierLabel?: string | null;
   jobId?: string;
 }
 
@@ -274,7 +313,28 @@ export function evaluatePaidVideoSubmission(facts: PaidVideoSubmissionFacts): Pa
       detail: `三元組 (model="${model}", resolution="${rawResolution}", seconds=${seconds}) 未由 catalog 核價生成，拒收（禁止現場猜價／猜檔位語義）。`,
     };
   }
-  return { allowed: true, triple };
+  // V-03：單價按（供給 label, 上游 model）取 claim 核價，無則兜底表。
+  const label = facts.supplierLabel
+    ?? (typeof facts.supplierId === "string" && facts.supplierId.startsWith("env:") ? facts.supplierId.slice(4) : null);
+  const price = resolvePaidVideoUnitPrice(label, model);
+  if (!price) {
+    return {
+      allowed: false,
+      reason: "triple_not_priced",
+      detail: `供給 "${label ?? "(unknown)"}" 的 model "${model}" 無核價（claim 與兜底表皆無），拒收。`,
+    };
+  }
+  if (price.unitCostCny === triple.unitCostCny && triple.source.startsWith(price.source)) {
+    return { allowed: true, triple };
+  }
+  return {
+    allowed: true,
+    triple: {
+      ...triple,
+      unitCostCny: price.unitCostCny,
+      source: `${price.source} → supplier="${label ?? "(unknown)"}", model_name="${model}", model_price=${price.unitCostCny}`,
+    },
+  };
 }
 
 /**
@@ -311,4 +371,22 @@ export function assertPaidVideoSubmissionAllowed(facts: PaidVideoSubmissionFacts
     }),
   );
   throw new SupplierRequestError(`paid-video-cost-gate: ${decision.reason}: ${decision.detail}`, 400);
+}
+
+/**
+ * 生產平面入口（V-03，worker-service 在取得租約後、呼叫供給前呼叫；只用於 video_generate）。
+ * - `failClosed`（`openai_video` 協議）：一律過閘，白名單外即拒——與搬遷前行為一致。
+ * - 否則：只有上游 model 落在白名單內才過閘；不在白名單的既有視頻路徑（metaso/filmera 等）放行不審。
+ * 回傳 null＝未審（非白名單的非 fail-closed 協議）或豁免。
+ */
+export function enforcePaidVideoCostGate(
+  facts: PaidVideoSubmissionFacts,
+  options: { failClosed: boolean },
+): PricedVideoTriple | null {
+  if (!options.failClosed && !isPaidVideoModelWhitelisted(
+    typeof facts.supplierModelId === "string" ? facts.supplierModelId.trim() : facts.supplierModelId,
+  )) {
+    return null;
+  }
+  return assertPaidVideoSubmissionAllowed(facts);
 }

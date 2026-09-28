@@ -27,15 +27,14 @@ import {
 import { imageGenerationCoins, isSupportedImageModel, type ModelMode } from "@/lib/provider-config";
 import { PIXAI_EDIT_MODEL_ID } from "@/lib/image-model-ids.js";
 import {
-  chargeBizRequest,
   jsonWithTrace,
   pixaiAuthError,
   pixaiError,
   pixaiRequestError,
   proxyPixai,
-  refundBizRequest,
   resolveBridgeModel,
 } from "@/lib/pixai-proxy";
+import { commitSyncCharge, refundSyncCharge, reserveSyncCharge } from "@/lib/generation-core/sync-charge";
 import { QUOTA_PER_COIN } from "@/lib/quota-constants";
 import { syncModelPricing } from "@/lib/pricing-runtime";
 import { getOrCreateTraceId } from "@/lib/request-trace";
@@ -135,7 +134,7 @@ async function handleEdit(req: NextRequest, rejection: RejectionContext): Promis
   await syncModelPricing();
   const quota = Math.round(generationCoins(PIXAI_EDIT_MODEL_ID, { resolution: size }) * QUOTA_PER_COIN) * n;
 
-  // ── 冪等（chargeBizRequest 之前）：同 key 重試不重複扣費 ──────
+  // ── 冪等（reserveSyncCharge 之前）：同 key 重試不重複扣費 ──────
   const idempotencyKey = req.headers.get("idempotency-key")?.trim() || null;
   let reservedIdempotency: { tenantId: string; key: string } | null = null;
   if (idempotencyKey) {
@@ -167,11 +166,21 @@ async function handleEdit(req: NextRequest, rejection: RejectionContext): Promis
     }
   }
 
-  const charged = await chargeBizRequest({
+  // 錢走生產平面帳本（V-07）：同步 job 列 + billing_operation，失敗退款可被 reconcile 撈回。
+  const charged = await reserveSyncCharge({
     userId: auth.key.userId,
     quota,
     keyId: auth.key.id,
     action: "images/edits",
+    modelId: PIXAI_EDIT_MODEL_ID,
+    kind: "image_edit",
+    source: "biz",
+    tenantId: `biz:${auth.key.id}`,
+    apiKeyId: auth.key.id,
+    prompt,
+    requestedCount: n,
+    resolution: size,
+    ratio: typeof body.ratio === "string" ? body.ratio : null,
   });
   if (!charged.ok) return respond(charged.body, charged.status);
 
@@ -189,11 +198,8 @@ async function handleEdit(req: NextRequest, rejection: RejectionContext): Promis
     : 0;
 
   if (status === 200 && delivered > 0) {
-    // 少出的圖按張退：客戶只該為拿到的結果付費。
-    const unused = Math.round((quota / n) * (n - delivered));
-    if (unused > 0) {
-      after(() => refundBizRequest({ ...charged.charge, reservedQuota: unused }, auth.key.userId, "images/edits"));
-    }
+    // 少出的圖按張退：客戶只該為拿到的結果付費（commit 實耗＋未交付部分落 refund op）。
+    after(await commitSyncCharge(charged.charge, { delivered }));
     recordBizApiKeyUsage(auth.key.id, delivered);
     after(() => flushBizApiKeyUsage().catch(() => undefined));
     if (reservedIdempotency) {
@@ -209,7 +215,7 @@ async function handleEdit(req: NextRequest, rejection: RejectionContext): Promis
     return respond(data, 200);
   }
 
-  after(() => refundBizRequest(charged.charge, auth.key.userId, "images/edits"));
+  after(await refundSyncCharge(charged.charge, { status }));
   return respond(
     pixaiError(data, "Image edit failed.", traceId),
     status >= 400 ? status : 502,

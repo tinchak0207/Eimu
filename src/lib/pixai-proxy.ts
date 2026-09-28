@@ -5,10 +5,13 @@
 //   1. 從 repo 部署會直接刪掉生產上正在工作的 edits/upscale/templates
 //   2. 這些路由裡 `const coins = …` 算完從未使用 —— B 端改圖/放大/模板
 //      一直是免費的，賬對不上
-// 補回 repo 的同時把計費接上真實通道（見 chargeBizRequest）。
+// 補回 repo 的同時把計費接上真實通道。
+//
+// 2026-09-28（V-07）：扣退款已移出本檔——供給模組不碰錢。同步路由改呼叫生產平面
+// 門面 generation-core/sync-charge.ts（經 billing-ledger，留 billing_operation 列）。
+// 本檔只剩上游呼叫與錯誤體形狀。
 
 import { NextResponse } from "next/server";
-import { configuredGenerationBillingAdapter } from "@/lib/generation-core/billing-relay";
 import { pixaiBridgeModelId } from "@/lib/pixai-model-map";
 import { withTraceId } from "@/lib/request-trace";
 
@@ -124,87 +127,4 @@ export function json(data: unknown, status: number, headers?: Record<string, str
 /** 帶 trace id 的響應。同一個 id 同時進錯誤體與 X-Request-Id 頭。 */
 export function jsonWithTrace(data: unknown, status: number, traceId: string, headers?: Record<string, string>) {
   return withTraceId(NextResponse.json(data, { status, ...(headers ? { headers } : {}) }), traceId);
-}
-
-export type BizCharge = {
-  /** 已扣的配額，失敗時原數退回。 */
-  reservedQuota: number;
-  /** 這次扣費的冪等鍵，退款要用同一個。 */
-  jobId: string;
-};
-
-export type BizChargeResult =
-  | { ok: true; charge: BizCharge }
-  | { ok: false; status: number; body: unknown };
-
-/**
- * 同步路由的 B 端扣費。
- *
- * 走 configuredGenerationBillingAdapter：control plane 上它解析成 billing
- * relay（HMAC 簽名回打 Vercel 的 /api/internal/generation-billing），因為
- * GATEWAY_ADMIN_ACCESS_TOKEN 只在 Vercel 側。這是 control plane 唯一能真正
- * 扣到錢的通道 —— 直連網關會因為缺 token 靜默失敗。
- *
- * userId 為 0 表示這把 key 來自 BIZ_API_KEY_HASHES 且沒帶 userId（應急格式
- * `sha256` 或 `sha256:0`）。這種 key 無從計費，直接放行但明確記錄：
- * 應急通道優先保可用性，賬留給 admin 對。
- */
-export async function chargeBizRequest(input: {
-  userId: number;
-  quota: number;
-  keyId: string;
-  action: string;
-}): Promise<BizChargeResult> {
-  if (input.quota <= 0) {
-    return { ok: true, charge: { reservedQuota: 0, jobId: "" } };
-  }
-  if (!input.userId) {
-    console.warn(
-      `[pixai-proxy] uncharged request action=${input.action} keyId=${input.keyId} quota=${input.quota}`
-      + " reason=env_fallback_key_without_user_id",
-    );
-    return { ok: true, charge: { reservedQuota: 0, jobId: "" } };
-  }
-
-  // relay 要求 job_id 長度 8..128，且用它做冪等鍵。
-  const jobId = `pixai-${input.action.replace(/[^a-z0-9]+/gi, "-")}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-  try {
-    await configuredGenerationBillingAdapter().reserve({
-      jobId,
-      operation: "reserve",
-      userId: input.userId,
-      amount: input.quota,
-    });
-    return { ok: true, charge: { reservedQuota: input.quota, jobId } };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Billing failed.";
-    return {
-      ok: false,
-      status: 402,
-      body: { error: { message, type: "insufficient_quota", code: "insufficient_quota" } },
-    };
-  }
-}
-
-/**
- * 上游失敗後退款。
- *
- * 吞掉退款自身的異常並記錄：退款失敗不應該把「上游失敗」這條更有用的錯誤
- * 蓋掉。丟掉的賬留在日誌裡，由 admin 的 billing-operations 面板兜。
- */
-export async function refundBizRequest(charge: BizCharge, userId: number, action: string): Promise<void> {
-  if (!charge.reservedQuota || !charge.jobId || !userId) return;
-  try {
-    await configuredGenerationBillingAdapter().refund({
-      jobId: charge.jobId,
-      operation: "refund",
-      userId,
-      amount: charge.reservedQuota,
-    });
-  } catch (error) {
-    console.error(
-      `[pixai-proxy] refund failed action=${action} userId=${userId} quota=${charge.reservedQuota} jobId=${charge.jobId}`,
-      error,
-    );
-  }
 }

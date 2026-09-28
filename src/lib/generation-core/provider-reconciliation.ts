@@ -11,10 +11,7 @@ import {
 } from "./job-repository";
 import { JOB_EVENT, emitJobEvent } from "./job-events";
 import { planReplay, type ReplayPlan } from "./operation-registry";
-import { pollFilmeraTask } from "./filmera-upstream";
-import { pollMetasoTask } from "./metaso-upstream";
-import { pollNewApiVideoTask } from "./newapi-video-upstream";
-import { pollOpenaiVideoTask } from "./openai-video-upstream";
+import { pollSupplyTask } from "./supply-registry";
 import type { ProviderTaskPollResult, ProviderProtocol, SupplierRecord } from "./types";
 
 type Row = Record<string, unknown>;
@@ -243,22 +240,17 @@ export async function runProviderReconciliation(input: {
   return summary;
 }
 
+/**
+ * 對帳輪詢分派（V-06）：按協議查 supply-registry，由 adapter 自帶的 poll 執行；
+ * 同步協議走其顯式 `reconcileVia`。未知協議拋錯 → 上層記 poll_error 並退避（不再
+ * 靜默當成 newapi_video 去查）。
+ */
 async function pollProviderTask(
   protocol: ProviderProtocol,
   providerTaskId: string,
   supplier: SupplierRecord,
 ): Promise<ProviderTaskPollResult> {
-  switch (protocol) {
-    case "metaso":
-      return pollMetasoTask(supplier, providerTaskId);
-    case "openai_video":
-      return pollOpenaiVideoTask(supplier, providerTaskId);
-    case "filmera":
-      return pollFilmeraTask(providerTaskId);
-    case "newapi_video":
-    default:
-      return pollNewApiVideoTask(providerTaskId);
-  }
+  return pollSupplyTask(protocol, supplier, providerTaskId);
 }
 
 /**

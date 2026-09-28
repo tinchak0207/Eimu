@@ -26,6 +26,9 @@ const EXPECTED_REWRITES = [
   { source: "/api/internal/team-membership", destination: "https://o.example/image-control/api/internal/team-membership" },
   { source: "/api/email/unsubscribe", destination: "https://o.example/image-control/api/email/unsubscribe" },
   { source: "/openai/v1/:path*", destination: "https://o.example/image-control/openai/v1/:path*" },
+  { source: "/api/pixai/edit", destination: "https://o.example/image-control/api/pixai/edit" },
+  { source: "/api/pixai/upscale", destination: "https://o.example/image-control/api/pixai/upscale" },
+  { source: "/api/pixai/template-generations", destination: "https://o.example/image-control/api/pixai/template-generations" },
 ];
 
 test("controlPlaneRewrites：有 origin 時與改動前手寫清單逐條相等", () => {
@@ -143,10 +146,7 @@ const KNOWN_VERCEL_LOCAL: Record<string, string> = {
   "/api/payments/mapay/checkout": "只用 readFirstChargeEligibilityViaRelay／lookupUserIdByTokenViaRelay 打控面",
   "/api/payments/mapay/notify": "只用 creditMapayOrderViaRelay／readFirstChargeEligibilityViaRelay 打控面",
   "/api/payments/mapay/return": "只用 creditMapayOrderViaRelay 打控面",
-  "/api/pixai/edit": "閉包只經 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直連 DB",
-  "/api/pixai/template-generations": "閉包只經 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直連 DB",
   "/api/pixai/upload": "閉包只經 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直連 DB",
-  "/api/pixai/upscale": "閉包只經 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直連 DB",
   "/api/pricing": "閉包只經 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直連 DB",
   "/api/project-assets": "閉包只經 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直連 DB",
   "/api/project-assets/shares": "閉包只經 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直連 DB",
