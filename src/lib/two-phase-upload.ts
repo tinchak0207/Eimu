@@ -78,6 +78,7 @@ export class UploadSignError extends Error {
 export function resolveDirectUploadBackend(
   env: Record<string, string | undefined> = process.env,
 ): DirectUploadBackend {
+  // eslint-disable-next-line react-hooks/rules-of-hooks -- 非 hook：blob-backend 同步選擇器（見 blob-backend.ts）
   if (useVpsBlobBackend()) return "vps-blob";
   if (env.BLOB_READ_WRITE_TOKEN?.trim()) return "vercel-blob";
   return "unconfigured";
@@ -176,6 +177,7 @@ export function assertUploadObjectKeyOwnedBy(objectKey: unknown, userId: number)
 
 /** 物件的公網讀取 URL（Vercel Blob 由 storeId 推；VPS 由 IMAGE_DATA_BASE_URL 推）。 */
 export function publicObjectUrl(objectKey: string): string | null {
+  // eslint-disable-next-line react-hooks/rules-of-hooks -- 非 hook：blob-backend 同步選擇器（見 blob-backend.ts）
   if (useVpsBlobBackend()) {
     const base = process.env.IMAGE_DATA_BASE_URL?.trim().replace(/\/+$/, "");
     return base ? `${base}/files/${objectKey}` : null;
