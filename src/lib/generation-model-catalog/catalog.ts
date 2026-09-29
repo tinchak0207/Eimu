@@ -227,6 +227,12 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     // 价目表同源：一口价 0.001 币（admin 覆写层 fixedCoins 原值折入，与覆写层同值）。
     fixedCoins: 0.001,
     referenceImages: true,
+    // 一鍵超分檔位（P1-4／對稱差 D10）。**能力宣告 ≠ 已可提交**：
+    // - `1k`／`2k`：上游 bridge 的 size 白名單內、factor=2，可提交。
+    // - `4k`：契約已備（size="2k"＋factor=4，保底長邊 4608px），但 factor 的輸出色
+    //   語義未由真單校準 ⇒ 提交端 fail-closed；`/v1/models` 只外露 `servableUpscaleTiers`
+    //   （即 4K 校準前不外露）。真源＝generation-core/upscale-tier.ts。
+    upscaleTiers: ["1k", "2k", "4k"],
   },
   // 模板生成的定價鍵。2026-08-29 价目表同源（暴君钦定）：模板 0.001 币/张 → 0.01 credit，
   // 与 gateway workflow 估价的 unit_price_coins=0.001 对接；/v1/template-generations 扣费走

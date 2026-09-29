@@ -8,7 +8,7 @@ import { NextRequest } from "next/server";
 import { after } from "next/server";
 import { authenticateBizApiKey, flushBizApiKeyUsage, recordBizApiKeyUsage } from "@/lib/biz-api-key-store";
 import { readBearerToken } from "@/lib/biz-api-keys";
-import { generationCoins } from "@/lib/generation-model-catalog";
+import { declaredUpscaleTiers, generationCoins } from "@/lib/generation-model-catalog";
 import { PIXAI_UPSCALE_MODEL_ID } from "@/lib/image-model-ids.js";
 import {
   jsonWithTrace,
@@ -18,6 +18,7 @@ import {
   proxyPixai,
 } from "@/lib/pixai-proxy";
 import { commitSyncCharge, refundSyncCharge, reserveSyncCharge } from "@/lib/generation-core/sync-charge";
+import { resolveUpscaleSubmission, UpscaleTierError } from "@/lib/generation-core/upscale-tier";
 import { QUOTA_PER_COIN } from "@/lib/quota-constants";
 import { syncModelPricing } from "@/lib/pricing-runtime";
 import { getOrCreateTraceId } from "@/lib/request-trace";
@@ -61,7 +62,23 @@ export async function POST(req: NextRequest) {
     return respond(pixaiRequestError("image is required.", "missing_image", traceId), 400);
   }
 
-  const size = body.size === "2k" ? "2k" : "1k";
+  // 超分檔位（P1-4）：`size` 在此入口是**檔位**語義（1k／2k／4k）；像素尺寸寫法
+  // （"1024x1024"）只作計費提示。舊碼 `body.size === "2k" ? "2k" : "1k"` 讓
+  // `size:"4k"` 靜默降級成 1k——本刀改成具名拒絕／具名檔位契約。
+  let submission: ReturnType<typeof resolveUpscaleSubmission>;
+  try {
+    submission = resolveUpscaleSubmission({
+      declaredTiers: declaredUpscaleTiers(PIXAI_UPSCALE_MODEL_ID),
+      modelId: PIXAI_UPSCALE_MODEL_ID,
+      input: body,
+    });
+  } catch (error) {
+    if (error instanceof UpscaleTierError) {
+      return respond(pixaiRequestError(error.message, error.code, traceId), error.status);
+    }
+    throw error;
+  }
+  const size = submission.tier;
 
   await syncModelPricing();
   const quota = Math.round(generationCoins(PIXAI_UPSCALE_MODEL_ID, { resolution: size }) * QUOTA_PER_COIN);
@@ -117,9 +134,12 @@ export async function POST(req: NextRequest) {
 
   const { status, data } = await proxyPixai("upscale", {
     image,
-    factor: Number(body.factor) || 2,
+    // factor 由檔位契約決定（1k／2k⇒2、4k⇒4），不再吃呼叫端任意倍率。
+    factor: submission.factor,
     ratio: typeof body.ratio === "string" ? body.ratio : undefined,
-    size,
+    // 只送 bridge 白名單內的 size；4K 靠 (size="2k", factor=4) 表達——
+    // 送 "4k" 會被上游靜默回退 1k（見 upscale-tier.ts 檔頭）。
+    size: submission.bridgeSize,
   });
 
   const delivered = Array.isArray((data as { data?: unknown[] } | null)?.data)

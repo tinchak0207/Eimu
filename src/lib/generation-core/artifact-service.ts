@@ -345,6 +345,13 @@ function extensionForMimeType(mimeType: string): string {
   return "png";
 }
 
+/**
+ * 平台把上游結果抓回本地校驗／落庫時的單檔硬上限。
+ * 原為 `outputBuffer` 內兩處散落的 magic number（2026-09-29 P1-4 抽出成具名常數）：
+ * 高階檔位（4K 超分）的產物體積上限必須由**同一條**真源判定，不能各處各寫一份。
+ */
+export const ARTIFACT_MAX_DOWNLOAD_BYTES = 25 * 1024 * 1024;
+
 async function outputBuffer(input: { base64: string | null; url: string | null }): Promise<Buffer> {
   if (input.base64) {
     const decoded = Buffer.from(input.base64.replace(/^data:[^;,]*;base64,/, ""), "base64");
@@ -355,9 +362,9 @@ async function outputBuffer(input: { base64: string | null; url: string | null }
   const response = await fetch(input.url, { signal: AbortSignal.timeout(30_000) });
   if (!response.ok) throw new Error(`Artifact download failed: HTTP ${response.status}.`);
   const contentLength = Number(response.headers.get("content-length") ?? 0);
-  if (contentLength > 25 * 1024 * 1024) throw new Error("Artifact download failed: file exceeds 25 MiB.");
+  if (contentLength > ARTIFACT_MAX_DOWNLOAD_BYTES) throw new Error("Artifact download failed: file exceeds 25 MiB.");
   const bytes = Buffer.from(await response.arrayBuffer());
-  if (!bytes.length || bytes.length > 25 * 1024 * 1024) throw new Error("Artifact download failed: empty or oversized response.");
+  if (!bytes.length || bytes.length > ARTIFACT_MAX_DOWNLOAD_BYTES) throw new Error("Artifact download failed: empty or oversized response.");
   return bytes;
 }
 

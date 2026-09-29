@@ -7,6 +7,15 @@ export type MediaKind = "image" | "video" | "audio";
  * **不推導不升格**（見 generation-core/video-post-production.ts 檔頭）。
  */
 export type VideoGenerationType = "generate" | "extend_video" | "edit_video";
+/**
+ * 超分檔位（P1-4／對稱差 D10「一鍵超分到 4K」）。值與 `ImageResolution` 同形，
+ * 但語義不同：這是**超分產品線的目標檔位**（長邊門檻 1k=1024／2k=2048／4k=3840）。
+ * 真源＝`generation-core/upscale-tier.ts` 的 `UPSCALE_TIER_CONTRACTS`（含每個檔位送
+ * bridge 的 `(size, factor)` 與由真實比例表算出的長邊保證）；本欄位只做**能力宣告**，
+ * 缺省＝該模型不支援超分。宣告 4K ≠ 一定能出 4K：4K 的上游 factor 語義未校準，
+ * 提交端 fail-closed（`upscale_4k_upstream_unverified`），`/v1/models` 只外露可提交檔位。
+ */
+export type UpscaleTier = "1k" | "2k" | "4k";
 export type AspectRatio =
   | "1:1"
   | "1:8"
@@ -114,6 +123,15 @@ export interface GenerationModelDefinition {
    * 非 video 模型不得宣告本欄位。
    */
   videoGenerationTypes?: readonly VideoGenerationType[];
+  /**
+   * 超分檔位**能力宣告面**（P1-4）：產品線上有哪些檔位，含尚未校準者（如 4K）。
+   * 宣告 ≠ 可提交：提交閘門用 `declaredUpscaleTiers` 判「這個檔位是否為本模型所有」，
+   * 再用 `servableUpscaleTiers` 判「此刻能否提交」（4K 在 factor 真單校準前 fail-closed，
+   * env `UPSCALE_4K_UPSTREAM`）。`/v1/models`（`generationCapabilities`）只外露可提交者，
+   * 所以對外不會出現一個提交時必被具名拒收的檔位。
+   * 缺省 ⇒ 該模型不支援超分（不輸出空能力宣稱）。
+   */
+  upscaleTiers?: readonly UpscaleTier[];
   /** LoRA is currently a PixAI-only single-selection capability. */
   supportsLora?: boolean;
   supportsAudio?: boolean;
@@ -135,6 +153,12 @@ export interface GenerationCapabilityProjection {
    * `x_capabilities` 直接外露此欄位，聚合平台據此決定是否上架後期能力。
    */
   videoGenerationTypes?: readonly VideoGenerationType[];
+  /**
+   * 超分檔位（P1-4）：`/v1/models` 的 `x_capabilities` 直接外露此欄位，
+   * 前端／聚合平台據此決定要不要上架「一鍵超分到 4K」的檔位選單。
+   * 內容＝catalog 宣告檔位 ∩ 上游語義已校準（見 capabilities.ts 的 modelUpscaleTiers）。
+   */
+  upscaleTiers?: readonly UpscaleTier[];
   qualityModes: readonly ("fast" | "quality")[];
   defaultAspectRatio: AspectRatio;
   defaultResolution: OutputResolution;

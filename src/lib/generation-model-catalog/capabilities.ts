@@ -1,6 +1,7 @@
 import { GENERATION_MODEL_CATALOG } from "./catalog";
 import { currentEffectiveCatalog } from "./pricing-overrides";
-import type { AspectRatio, OutputResolution, GenerationModelDefinition, GenerationCapabilityProjection, GenerationConfigInput, GenerationConfigNormalization, ModelKnowledge, VideoGenerationType } from "./types";
+import { servableUpscaleTiers } from "../generation-core/upscale-tier";
+import type { AspectRatio, OutputResolution, GenerationModelDefinition, GenerationCapabilityProjection, GenerationConfigInput, GenerationConfigNormalization, ModelKnowledge, VideoGenerationType, UpscaleTier } from "./types";
 
 /**
  * 視頻提交端 prompt 字元硬上限（POST /v1/videos/generations 的 prompt_too_long 閘）。
@@ -69,6 +70,9 @@ export function generationCapabilities(modelId: string): GenerationCapabilityPro
     // 非 video 模型不外露——那會變成無意義的空能力宣稱。
     ...(model.kind === "video" ? { videoGenerationTypes: model.videoGenerationTypes ?? (["generate"] as const) } : {}),
     ...(model.kind === "video" ? { promptCharLimit: VIDEO_PROMPT_CHAR_LIMIT } : {}),
+    // 超分檔位（P1-4）：只在模型真的宣告超分鏈路時外露，且只外露**可提交**檔位
+    // （4K 未校準前不在此列）——不輸出空能力宣稱，也不宣告會被拒收的檔位。
+    ...(model.upscaleTiers?.length ? { upscaleTiers: servableUpscaleTiers(model.upscaleTiers) } : {}),
   };
 }
 
@@ -163,6 +167,31 @@ export function modelVideoGenerationTypes(modelId: string): readonly VideoGenera
 
 export function supportsVideoGenerationType(modelId: string, type: VideoGenerationType): boolean {
   return modelVideoGenerationTypes(modelId).includes(type);
+}
+
+/**
+ * 超分檔位能力查詢（P1-4）。真源＝catalog 宣告；未宣告 ⇒ 空陣列
+ * （**不升格**：能力宣告缺一即不許提交，見 generation-core/upscale-tier.ts）。
+ * 回傳值＝宣告檔位 ∩ 上游可提交檔位（4K 在 factor 真單校準前不在內）。
+ */
+export function modelUpscaleTiers(modelId: string): readonly UpscaleTier[] {
+  const declared = generationModel(modelId)?.upscaleTiers ?? [];
+  return servableUpscaleTiers(declared);
+}
+
+/** 該模型此刻宣告的超分檔位（未經可用性過濾）——呼叫端拿去跑提交閘門用。 */
+export function declaredUpscaleTiers(modelId: string): readonly UpscaleTier[] {
+  return generationModel(modelId)?.upscaleTiers ?? [];
+}
+
+export function supportsUpscaleTier(modelId: string, tier: UpscaleTier): boolean {
+  return modelUpscaleTiers(modelId).includes(tier);
+}
+
+/** 一鍵超分的預設檔位＝該模型最高可提交檔位；不支援超分回 null。 */
+export function defaultUpscaleTierFor(modelId: string): UpscaleTier | null {
+  const tiers = modelUpscaleTiers(modelId);
+  return tiers.length ? tiers[tiers.length - 1] : null;
 }
 
 /** AV 成片鏈路的管道種類（提交端點與能力探測的路由鍵）。 */
