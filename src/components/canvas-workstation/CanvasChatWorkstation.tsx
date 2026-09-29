@@ -196,7 +196,7 @@ export function CanvasChatWorkstation({
             /* Navbar 退縮過度（2026-09-24 首秒零回縮）：原先掛在 <nav> 的
                tailwind 類別上＝每次載入都播「全寬 320ms 退縮」回縮動畫（病灶①），
                移進本檔並只在 html[data-ws-settled]（工作站 settled 後寫）下生效。
-               非首頁無本 <style> 塊＝header 在任何態都零過度，天然正確。 */
+               非首頁無本 style 塊＝header 在任何態都零過度，天然正確。 */
             html[data-ws-settled] #global-navbar nav {
               transition: margin-left 0.32s cubic-bezier(0.2, 0.8, 0.2, 1),
                 width 0.32s cubic-bezier(0.2, 0.8, 0.2, 1);
