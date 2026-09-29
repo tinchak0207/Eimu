@@ -14,6 +14,7 @@ import {
   MAX_WINDOW_DAYS,
   buildStatisticsProjection,
 } from "@/lib/generation-core/statistics-projection";
+import { statisticsCsvFilename, statisticsToCsv } from "@/lib/generation-core/statistics-csv";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -60,7 +61,25 @@ export async function GET(req: NextRequest) {
     const rawInclude = req.nextUrl.searchParams.get("includeInternal");
     const includeInternal = rawInclude === "1" || rawInclude === "true";
 
+    // 導出格式（P2-1／對稱差 D16）：`format=csv` 回同一個投影的 CSV（Excel 可直接開）。
+    // 只認 json／csv 兩種，其餘具名 400——避免拼錯 format 卻拿到一份 JSON 以為是導出檔。
+    const format = req.nextUrl.searchParams.get("format") ?? "json";
+    if (format !== "json" && format !== "csv") {
+      return NextResponse.json({ success: false, message: "format 只能是 json 或 csv。" }, { status: 400 });
+    }
+
     const projection = await buildStatisticsProjection({ days, funnelDays, includeInternal });
+    if (format === "csv") {
+      // 導出檔與畫面上看到的數字**同一份投影**（統計頁不是第二個真相，導出檔也不是）。
+      return new NextResponse(statisticsToCsv(projection), {
+        status: 200,
+        headers: {
+          "Content-Type": "text/csv; charset=utf-8",
+          "Content-Disposition": `attachment; filename="${statisticsCsvFilename(projection)}"`,
+          "Cache-Control": "no-store",
+        },
+      });
+    }
     return NextResponse.json({ success: true, ...projection }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return errorResponse(error, "读取统计数据失败。");
