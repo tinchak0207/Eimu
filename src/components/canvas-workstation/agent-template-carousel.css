@@ -20,34 +20,47 @@
   user-select: none;
 }
 
-/* 卡面底部資訊排版：對齊 Vision Pro 磨砂卡面標準 */
+/* 卡面資訊排版（2026-09-29 暴君：資訊塊壓在卡中央搶成片、重心不平衡）：
+   整塊改錨卡**頂**做一條頁眉——左欄標題/副標、右欄按鈕，同一行左右平衡；
+   卡中央與下半部完全讓給成片，底部只剩分頁帶。調整環節的托盤從頁眉
+   下方展開（用戶主動打開才佔畫面）。頂部漸層只為頁眉文字托底。 */
 .atc-info {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 0;
-  padding: calc(var(--case-card-w, 520px) * 0.07);
-  /* 2026-09-24 用戶版面方案·刀2：底部預留分頁點帶。
-     控制行錨在卡底內 16px、高 44px（桌面箭頭），點帶頂緣距卡底
-     = 0.1×cardH + 16 + 44；此處 0.1×cardH + 76 → Dock 底緣恒留 16px 淨空，
-     縮放（手機/桌面卡高不同）不重疊。--case-card-h 由 .case-stage 定義、
-     繼承到卡面，SSR 兜底值 390 與 CSS 默認幾何一致。 */
-  padding-bottom: calc(var(--case-card-h, 390px) * 0.1 + 4.75rem);
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  /* 2026-09-24 刀2：用戶裁定「半透明深色帶與背景圖銜接自然」——0.45→0.32，
-     Dock 自身 bg-black/35+backdrop-blur 不動。 */
-  background: linear-gradient(to top, rgba(0, 0, 0, 0.32) 0%, rgba(0, 0, 0, 0.15) 60%, transparent 100%);
+  top: 0;
+  /* 頂/側內距 ≥ 卡片圓角的半徑感，標題不貼圓角。 */
+  padding: calc(var(--case-card-w, 520px) * 0.072) calc(var(--case-card-w, 520px) * 0.078)
+    calc(var(--case-card-w, 520px) * 0.1);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  /* 標題與按鈕同一行左右平衡；副標獨佔整行，不被按鈕擠成兩行。 */
+  grid-template-areas:
+    "title actions"
+    "sub sub"
+    "tray tray";
+  column-gap: calc(var(--case-card-w, 520px) * 0.03);
+  row-gap: calc(var(--case-card-w, 520px) * 0.012);
+  align-items: center;
+  background: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.4) 0%,
+    rgba(0, 0, 0, 0.2) 55%,
+    rgba(0, 0, 0, 0.06) 82%,
+    transparent 100%
+  );
   user-select: none;
 }
 
 .atc-title {
-  font-size: calc(var(--case-card-w, 520px) * 0.052);
-  font-weight: 700;
-  color: rgba(255, 255, 255, 0.96);
-  letter-spacing: -0.01em;
-  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+  grid-area: title;
+  font-size: calc(var(--case-card-w, 520px) * 0.048);
+  font-weight: 650;
+  line-height: 1.15;
+  color: #fff;
+  letter-spacing: -0.025em;
+  text-wrap: balance;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.18), 0 4px 24px rgba(0, 0, 0, 0.28);
 }
 
 /* 剧本入口一行提示（P0-1 曝光，2026-09-28）：只出现在 novel_film 正面卡。
@@ -55,20 +68,133 @@
    避免与标题抢主体；配色/字影沿用卡面白字规范，不引入体系外颜色。
    正文最低 ≥13px：手机卡宽 340px 时 0.032×340 ≈ 11px 偏小，用 max() 兜底 13px。 */
 .atc-script-entry {
-  margin-top: 6px;
-  font-size: max(13px, calc(var(--case-card-w, 520px) * 0.032));
-  font-weight: 500;
-  line-height: 1.35;
-  color: rgba(255, 255, 255, 0.88);
-  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.55);
+  grid-area: sub;
+  align-self: start;
+  font-size: max(13px, calc(var(--case-card-w, 520px) * 0.026));
+  font-weight: 450;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.78);
+  text-shadow: 0 1px 12px rgba(0, 0, 0, 0.45);
 }
 
-/* 环节选择器（2026-08-26）：圆形 chip 由 Tailwind 类实现（atc-step-chip，
-   见 AgentTemplateCarousel.tsx 的 PipelineStepSelector），这里只留容器文档位。
-   布局 = flex flex-wrap gap-2：8 个圆在 420px 卡面内排得下，放不下自动换行不横向溢出。
-   拖拽手势的 pointer 四件套 + setPointerCapture + touch-none 都在组件内实现。 */
+/* 环节选择 + 开工（2026-09-29 定稿，交互见 AgentTemplateCarousel.tsx 的
+   PipelineStepSelector）：默认只有一行按钮压在卡底，成片是主角；
+   「调整环节」展开玻璃托盘。尺寸全部跟卡宽等比（--case-card-w），
+   正文下限 13px、上限防超宽屏发胖。颜色由 Tailwind 工具类承载。 */
+.atc-info {
+  --atc-u: calc(var(--case-card-w, 520px) / 100);
+}
+/* 選擇器本身不佔盒子：托盤與按鈕列直接落進 .atc-info 的格線區。 */
 .atc-step-selector {
-  /* 无额外样式：全部由 Tailwind 工具类承载，不引入 lg/ios 体系外的颜色。 */
+  display: contents;
+}
+
+/* 托盘展开：grid-template-rows 0fr→1fr，高度真实过渡，不猜 max-height。 */
+.atc-step-tray-wrap {
+  grid-area: tray;
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transform: translateY(-6px);
+  transition:
+    grid-template-rows 320ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 220ms ease-out,
+    transform 320ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.atc-step-tray-wrap[data-open] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transform: none;
+}
+.atc-step-tray-clip {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.atc-step-tray {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--atc-u) * 0.8);
+  margin-top: calc(var(--atc-u) * 2.4);
+  padding: calc(var(--atc-u) * 0.9);
+  border-radius: calc(var(--atc-u) * 3.4);
+  background: rgba(20, 20, 24, 0.42);
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.atc-step-chip {
+  height: clamp(30px, calc(var(--atc-u) * 6.2), 40px);
+  padding-inline: 0.95em;
+  font-size: clamp(13px, calc(var(--atc-u) * 2.5), 16px);
+  letter-spacing: -0.01em;
+}
+.atc-step-reset {
+  padding-inline: 0.6em;
+}
+
+.atc-step-actions {
+  grid-area: actions;
+  display: flex;
+  align-items: center;
+  gap: calc(var(--atc-u) * 1.2);
+}
+
+.atc-step-submit,
+.atc-step-toggle {
+  height: clamp(32px, calc(var(--atc-u) * 6.6), 46px);
+  font-size: clamp(13px, calc(var(--atc-u) * 2.5), 16px);
+  letter-spacing: -0.01em;
+}
+.atc-step-submit {
+  gap: 0.4em;
+  padding-inline: 1.1em 0.95em;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+}
+.atc-step-arrow {
+  width: 1em;
+  height: 1em;
+}
+.atc-step-toggle {
+  gap: 0.4em;
+  padding-inline: 0.9em 1em;
+}
+.atc-step-toggle-icon {
+  width: 0.95em;
+  height: 0.95em;
+  opacity: 0.85;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .atc-step-tray-wrap {
+    transition: none;
+  }
+}
+
+/* 手机卡（≤340px 宽、255px 高）容不下多行托盘：单行横滑，右缘渐隐提示还有。 */
+@media (max-width: 767px) {
+  /* 手機卡太窄，頁眉改兩段：標題/副標在上，按鈕在下，仍錨卡頂。 */
+  .atc-info {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "title"
+      "sub"
+      "actions"
+      "tray";
+  }
+  .atc-step-actions {
+    margin-top: 8px;
+  }
+  .atc-step-tray {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    mask-image: linear-gradient(to right, #000 86%, transparent);
+  }
+  .atc-step-tray::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 /* 面板内嵌场景：舞台上下左右完全置中展示。
