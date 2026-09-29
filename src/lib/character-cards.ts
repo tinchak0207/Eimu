@@ -81,6 +81,41 @@ export interface CharacterCardReferenceImage {
   name: string;
 }
 
+/**
+ * 變裝（Disguise，對稱差 D8「變裝作為角色的一等子資產」）：
+ * **同一角色的具名替代造型**——有自己在本卡內唯一的穩定識別 `id`、自己的名字、
+ * 自己的參考圖（與可選的鎖定 prompt 片段）。
+ *
+ * 為什麼不是「把變裝攤平成互不相關的角色卡」（我方舊況只有 `variantOf` 單向指針）：
+ *   - 母卡身分不變（`kind` 仍 `"character"`、卡 id/名稱不變）⇒ 卡 id 序鎖定注入、
+ *     分鏡引用欄（`characterCardIds`）、專案鎖定（`activeCardIds`）全部零遷移；
+ *   - 一個角色可掛**多個**變裝，鏡次只挑它要的那個（`resolveCharacterDisguises`）；
+ *   - **變裝自己的參考圖就是它自己的參考圖**，缺件時不回退主造型（見 `withCharacterDisguises`）。
+ */
+export interface CharacterCardDisguise {
+  /** 卡內唯一識別（新增時沒有也可由名字導出，見 `disguiseIdFromName`）。 */
+  id: string;
+  /** 變裝名（**具名狀態的載體**：缺件回報、`requiredDisguises` 對帳都用這個名字）。 */
+  name: string;
+  /** 該變裝的鎖定 prompt 片段（可選；空＝只用參考圖鎖造型）。 */
+  prompt?: string;
+  /** 該變裝專屬參考圖（自己的尺，不共用主造型的）。 */
+  references: CharacterCardReferenceImage[];
+}
+
+/** 變裝選擇：在哪些角色卡上找哪個具名變裝（`cardId` 缺省＝在全部傳入卡拉上找）。 */
+export interface DisguiseSelection {
+  cardId?: string;
+  name: string;
+}
+
+export interface ResolvedCharacterDisguises {
+  /** 命中的變裝（帶所屬卡 id）。 */
+  matched: { cardId: string; disguise: CharacterCardDisguise }[];
+  /** 具名缺件：找不到同名變裝的名字（trim 去重、宣告序）。 */
+  missing: string[];
+}
+
 export interface CharacterCard {
   id: string;
   name: string;
@@ -96,6 +131,20 @@ export interface CharacterCard {
   /** 變體母卡 id（變體＝kind 仍是 "character" 但帶此欄，例如「劼后-霍辞渊」是「霍辞渊」的造型變體）。
    *  指到的卡不存在＝當普通角色卡處理（fail-open，不報錯）。 */
   variantOf?: string;
+  /**
+   * 變裝清單（對稱差 D8，一等子資產）：本角色可用的具名造型，每個帶自己的 id/名字/參考圖。
+   * 缺省＝沒有變裝（舊卡零改動、零欄位）。**不影響既有鎖定注入**——
+   * 只有當分鏡/呼叫端**明確選用**某個變裝時才換參考（`withCharacterDisguises`），
+   * 沒選＝行為與舊況逐位元相同（用 `references` 主造型）。
+   */
+  disguises?: CharacterCardDisguise[];
+  /**
+   * 必要變裝清單（**設定階段的強制補齊要求**）：這個角色在本劇必須具備哪些具名造型。
+   * 缺省＝無要求（舊卡零改動）。以**名字**對帳（不是 id：缺件要用人看得懂的名字回報），
+   * 對帳入口 `auditCharacterDisguises` / 全庫入口 `auditDisguiseRequirements`——
+   * 缺件＝明確回報缺哪些名字，**不得靜默用主造型頂替**。
+   */
+  requiredDisguises?: string[];
   /**
    * REQ-D1 資產血統：這張卡的直接來源鏈（例如「存為卡片」時登記的歷史來源）。
    * 只存在卡本體供人看的「溯源」抽屜；不進 canvas 節點 metadata、
@@ -135,6 +184,12 @@ const MAX_CARD_LORA_IDS = 8;
 const MAX_REFERENCE_NAME_LENGTH = 60;
 const MAX_APPROVAL_REASON_LENGTH = 200;
 const MAX_APPROVAL_DECIDED_AT_LENGTH = 40;
+/** 單卡變裝上限（新增超過＝拒絕，清洗超過＝截尾；與 `MAX_CARD_REFERENCES` 同一種界）。 */
+export const MAX_DISGUISES_PER_CARD = 12;
+const MAX_DISGUISE_NAME_LENGTH = 60;
+const MAX_DISGUISE_PROMPT_LENGTH = 1000;
+/** 必要變裝清單上限（`requiredDisguises`）。 */
+export const MAX_REQUIRED_DISGUISES = 12;
 
 /** 圖片 URL 判定核心：與 semantic-nodes 的收口一致（http(s) 與 data:image）。純布林，兩種呼叫端共用。 */
 function isCardImageUrl(url: string): boolean {
@@ -186,6 +241,31 @@ function usableCardId(value: unknown): string | null {
 }
 
 /**
+ * 參考物陣列清洗（**唯一收口**：卡的 `references` 與變裝的 `references` 走同一把尺，
+ * 不另立第二套變裝參考尺）。非法 URL 丟、名字缺省回 `fallbackName`、上限截尾。
+ */
+function normalizeCardReferenceImages(
+  raw: unknown,
+  kind: CharacterCardKind,
+  fallbackName: string,
+): CharacterCardReferenceImage[] {
+  return (Array.isArray(raw) ? raw : [])
+    .flatMap((ref): CharacterCardReferenceImage[] => {
+      if (!ref || typeof ref !== "object") return [];
+      const r = ref as { url?: unknown; role?: unknown; name?: unknown };
+      if (typeof r.url !== "string" || !isUsableCardReferenceUrl(r.url, kind)) return [];
+      return [
+        {
+          url: r.url,
+          role: toReferenceImageRole(r.role),
+          name: boundedString(r.name, MAX_REFERENCE_NAME_LENGTH) ?? fallbackName,
+        },
+      ];
+    })
+    .slice(0, MAX_CARD_REFERENCES);
+}
+
+/**
  * 批准狀態清洗（**唯一收口**：`normalizeCharacterCard` 與 `setApproval` 共用同一把尺）。
  *   - 非物件 / `status` 不在 `APPROVAL_STATUS_VALUES` 三值域 → **null（呼叫端省略欄位＝缺省＝已批准）**。
  *     讀不懂的值不猜成「未批准」：批准狀態不是安全邊界（卡內容對本帳號本來就可見），
@@ -216,20 +296,7 @@ export function normalizeCharacterCard(payload: unknown): CharacterCard | null {
   const now = new Date().toISOString();
   // kind 先落定：參考物 URL 的收口尺是 kind-aware 的（音頻卡收 data:audio/，見上）。
   const kind = toCharacterCardKind(c.kind);
-  const references = (Array.isArray(c.references) ? c.references : [])
-    .flatMap((ref): CharacterCardReferenceImage[] => {
-      if (!ref || typeof ref !== "object") return [];
-      const r = ref as { url?: unknown; role?: unknown; name?: unknown };
-      if (typeof r.url !== "string" || !isUsableCardReferenceUrl(r.url, kind)) return [];
-      return [
-        {
-          url: r.url,
-          role: toReferenceImageRole(r.role),
-          name: boundedString(r.name, MAX_REFERENCE_NAME_LENGTH) ?? name,
-        },
-      ];
-    })
-    .slice(0, MAX_CARD_REFERENCES);
+  const references = normalizeCardReferenceImages(c.references, kind, name);
   const negativePrompt = boundedString(c.negativePrompt, MAX_CARD_NEGATIVE_LENGTH);
   const loraIds = (Array.isArray(c.loraIds) ? c.loraIds : [])
     .filter((v): v is string => typeof v === "string" && v.trim().length > 0)
@@ -239,6 +306,11 @@ export function normalizeCharacterCard(payload: unknown): CharacterCard | null {
   // 自環（指向自己）同樣省略——不製造鬼引用。
   const variantOfRaw = usableCardId(c.variantOf);
   const variantOf = variantOfRaw && variantOfRaw !== id ? variantOfRaw : null;
+  // 變裝（D8）：走本檔的變裝清洗收口；id 與卡本體 id 相同的變裝條目丟掉
+  //（自指＝鬼引用，與 variantOf 自環同款處置）。空清單＝不寫欄位（舊卡零改動）。
+  const disguises = normalizeCharacterDisguises(c.disguises).filter((d) => d.id !== id);
+  // 必要變裝清單：名字清單，缺省＝無要求（不寫空陣列）。
+  const requiredDisguises = normalizeRequiredDisguises(c.requiredDisguises);
   // REQ-D1：血統欄位復用 ./lineage 的清洗收口（非法條目丟、上限截尾並顯式標記）。
   const lineageRaw = Array.isArray(c.lineage) ? normalizeLineageLinks(c.lineage) : null;
   // REQ-B2 作用域：同樣走 ./asset-scope 的清洗收口（缺省＝personal 且省略欄位）。
@@ -257,6 +329,8 @@ export function normalizeCharacterCard(payload: unknown): CharacterCard | null {
     ...(negativePrompt ? { negativePrompt } : {}),
     ...(loraIds.length ? { loraIds } : {}),
     ...(variantOf ? { variantOf } : {}),
+    ...(disguises.length ? { disguises } : {}),
+    ...(requiredDisguises.length ? { requiredDisguises } : {}),
     ...(lineageRaw && lineageRaw.parents.length
       ? {
           lineage: lineageRaw.parents,
@@ -331,6 +405,261 @@ export function clearApproval(card: CharacterCard): CharacterCard {
   const next: CharacterCard = { ...card, updatedAt: new Date().toISOString() };
   delete next.approval;
   return next;
+}
+
+// ─────────────────────────────────────────── 變裝子資產（對稱差 D8）
+
+/**
+ * 由變裝名導出穩定 id（無 id 時使用）：trim、空白折成 `-`，再走**與卡 id 同一把尺**
+ * （`usableCardId`：長度上限、拒保留分隔符 `:`、拒控制字元）。
+ * 導不出（名含 `:`／空／超長）→ null（呼叫端拒收，不製造半形 id）。
+ */
+export function disguiseIdFromName(name: unknown): string | null {
+  const clean = boundedString(name, MAX_DISGUISE_NAME_LENGTH);
+  if (!clean) return null;
+  return usableCardId(clean.replace(/\s+/g, "-"));
+}
+
+/**
+ * 清洗單個變裝。缺名字 = null（沒有名字就沒有「具名狀態」，無法被要求/對帳）。
+ * id 非法或未給 → 由名字導出（導不出才 null）；參考圖走卡參考物同一把尺。
+ */
+export function normalizeCharacterDisguise(payload: unknown): CharacterCardDisguise | null {
+  if (!payload || typeof payload !== "object") return null;
+  const d = payload as Partial<CharacterCardDisguise>;
+  const name = boundedString(d.name, MAX_DISGUISE_NAME_LENGTH);
+  if (!name) return null;
+  const id = usableCardId(d.id) ?? disguiseIdFromName(name);
+  if (!id) return null;
+  const prompt = typeof d.prompt === "string" ? d.prompt.trim().slice(0, MAX_DISGUISE_PROMPT_LENGTH) : "";
+  return {
+    id,
+    name,
+    ...(prompt ? { prompt } : {}),
+    references: normalizeCardReferenceImages(d.references, "character", name),
+  };
+}
+
+/** 清洗變裝清單：非法項丟、同 id 只留第一張、上限 `MAX_DISGUISES_PER_CARD` 截尾。 */
+export function normalizeCharacterDisguises(raw: unknown): CharacterCardDisguise[] {
+  const out: CharacterCardDisguise[] = [];
+  const seen = new Set<string>();
+  if (!Array.isArray(raw)) return out;
+  for (const item of raw) {
+    const disguise = normalizeCharacterDisguise(item);
+    if (!disguise || seen.has(disguise.id)) continue;
+    seen.add(disguise.id);
+    out.push(disguise);
+    if (out.length >= MAX_DISGUISES_PER_CARD) break;
+  }
+  return out;
+}
+
+/** 清洗必要變裝名清單：trim、去重、上限 `MAX_REQUIRED_DISGUISES` 截尾。 */
+export function normalizeRequiredDisguises(raw: unknown): string[] {
+  const out: string[] = [];
+  if (!Array.isArray(raw)) return out;
+  for (const item of raw) {
+    const name = boundedString(item, MAX_DISGUISE_NAME_LENGTH);
+    if (!name || out.includes(name)) continue;
+    out.push(name);
+    if (out.length >= MAX_REQUIRED_DISGUISES) break;
+  }
+  return out;
+}
+
+export interface AddCharacterDisguiseInput {
+  /** 穩定 id（可選；缺省由名字導出）。同名／同 id ＝ 覆蓋（新增冪等）。 */
+  id?: string;
+  name: string;
+  prompt?: string;
+  references?: unknown;
+}
+
+/**
+ * **可新增變裝**（為既有角色新增，含命名與參考圖）：純函式，回新卡、**不改傳入卡**。
+ *
+ * 拒收（回 null，不製造半形資產）：
+ *   - 非角色卡（`kind !== "character"`：變裝是角色的子資產，場景/道具卡沒有這個概念）；
+ *   - 沒有名字 / 名字含保留分隔符 `:` / id 導不出；
+ *   - id 等於卡自己的 id（自指）；
+ *   - 已達 `MAX_DISGUISES_PER_CARD` 且不是覆蓋既有變裝。
+ * 同名或同 id ＝ **覆蓋**（同一名字重複新增不長張數，參考圖/片段換成新的）。
+ */
+export function addCharacterDisguise(
+  card: CharacterCard,
+  input: AddCharacterDisguiseInput,
+): CharacterCard | null {
+  if (!card || card.kind !== "character") return null;
+  const name = boundedString(input?.name, MAX_DISGUISE_NAME_LENGTH);
+  if (!name) return null;
+  const id = usableCardId(input?.id) ?? disguiseIdFromName(name);
+  if (!id || id === card.id) return null;
+  const prompt = typeof input?.prompt === "string" ? input.prompt.trim().slice(0, MAX_DISGUISE_PROMPT_LENGTH) : "";
+  const existing = card.disguises ?? [];
+  const isOverwrite = existing.some((d) => d.id === id || d.name === name);
+  if (!isOverwrite && existing.length >= MAX_DISGUISES_PER_CARD) return null;
+  const disguise: CharacterCardDisguise = {
+    id,
+    name,
+    ...(prompt ? { prompt } : {}),
+    references: normalizeCardReferenceImages(input?.references, "character", name),
+  };
+  return {
+    ...card,
+    disguises: [...existing.filter((d) => d.id !== id && d.name !== name), disguise],
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * 設定這個角色**必要的變裝名清單**（設定階段的「要求補齊」寫入端）。
+ * 空清單＝清掉要求（回缺省＝無要求）；純函式，回新卡。
+ */
+export function setRequiredDisguises(card: CharacterCard, names: readonly string[]): CharacterCard {
+  const clean = normalizeRequiredDisguises(names);
+  const next: CharacterCard = { ...card, updatedAt: new Date().toISOString() };
+  if (clean.length) next.requiredDisguises = clean;
+  else delete next.requiredDisguises;
+  return next;
+}
+
+export interface CharacterDisguiseAudit {
+  /** 沒有缺件＝true（無 `requiredDisguises` 的舊卡一律 true，零追溯）。 */
+  complete: boolean;
+  required: string[];
+  /** 要求中已具備的變裝名。 */
+  present: string[];
+  /** **缺件（具名）**：要求中卡上沒有的變裝名——這就是「要求補齊」要回報的東西。 */
+  missing: string[];
+  /** 卡上實際掛載的變裝名（診斷用）。 */
+  provided: string[];
+}
+
+/** 單卡變裝對帳（純函式）：以**名字**比對 `requiredDisguises` ↔ `disguises`。 */
+export function auditCharacterDisguises(card: CharacterCard): CharacterDisguiseAudit {
+  const required = normalizeRequiredDisguises(card?.requiredDisguises);
+  const provided = (card?.disguises ?? []).map((d) => d.name);
+  return {
+    complete: required.every((name) => provided.includes(name)),
+    required,
+    present: required.filter((name) => provided.includes(name)),
+    missing: required.filter((name) => !provided.includes(name)),
+    provided,
+  };
+}
+
+export interface DisguiseRequirementGap {
+  cardId: string;
+  cardName: string;
+  /** 具名缺件（設定階段要照這個名字要求補齊）。 */
+  missingDisguises: string[];
+}
+
+export interface DisguiseRequirementReport {
+  /** 全部有要求的卡都已補齊＝true（沒有任何要求＝true）。 */
+  complete: boolean;
+  /** 未補齊的卡（具名：卡 id + 卡名 + 缺的變裝名）。 */
+  gaps: DisguiseRequirementGap[];
+  /** 有要求且已補齊的卡 id。 */
+  satisfiedCardIds: string[];
+}
+
+/**
+ * **設定階段強制補齊的入口**（純函式）：掃卡庫裡所有宣告了 `requiredDisguises` 的卡，
+ * 回報哪些卡缺哪些**具名**變裝。呼叫端據此要求補齊（缺件非空即不得放行），
+ * 而不是拿主造型頂上——「強制」二字的落點。
+ */
+export function auditDisguiseRequirements(cards: readonly CharacterCard[]): DisguiseRequirementReport {
+  const gaps: DisguiseRequirementGap[] = [];
+  const satisfiedCardIds: string[] = [];
+  for (const card of cards ?? []) {
+    if (!card || !card.requiredDisguises?.length) continue;
+    const audit = auditCharacterDisguises(card);
+    if (audit.missing.length) {
+      gaps.push({ cardId: card.id, cardName: card.name, missingDisguises: audit.missing });
+    } else {
+      satisfiedCardIds.push(card.id);
+    }
+  }
+  return { complete: gaps.length === 0, gaps, satisfiedCardIds };
+}
+
+/**
+ * 解析變裝選擇 → 命中的（卡 id, 變裝）與**具名缺件**。
+ * `cardId` 有給＝只在那張卡拉上找；缺省＝在全部傳入卡拉上找（同名到多卡＝全命中）。
+ * 缺件名字 trim 去重、按宣告序（回報順序穩定＝可測）。
+ */
+export function resolveCharacterDisguises(
+  cards: readonly CharacterCard[],
+  selections: readonly DisguiseSelection[],
+): ResolvedCharacterDisguises {
+  const matched: { cardId: string; disguise: CharacterCardDisguise }[] = [];
+  const missing: string[] = [];
+  const seenMatch = new Set<string>();
+  const seenMissing = new Set<string>();
+  for (const selection of selections ?? []) {
+    const name = typeof selection?.name === "string" ? selection.name.trim() : "";
+    if (!name) continue;
+    const cardId = typeof selection?.cardId === "string" ? selection.cardId.trim() : "";
+    const scope = cardId ? (cards ?? []).filter((card) => card.id === cardId) : (cards ?? []);
+    let hit = false;
+    for (const card of scope) {
+      const disguise = (card.disguises ?? []).find((d) => d.name === name);
+      if (!disguise) continue;
+      const key = `${card.id}\u0000${disguise.id}`;
+      if (seenMatch.has(key)) continue;
+      seenMatch.add(key);
+      matched.push({ cardId: card.id, disguise });
+      hit = true;
+    }
+    if (!hit && !seenMissing.has(name)) {
+      seenMissing.add(name);
+      missing.push(name);
+    }
+  }
+  return { matched, missing };
+}
+
+/**
+ * 把命中的變裝套成「該角色卡在本鏡的造型版本」（純函式，回 clone、原卡不動）：
+ *   - 參考圖＝**變裝自己的參考圖**（url 去重），主造型參考圖**一律不進**——
+ *     變裝的造型由它自己的參考圖表達，混入主造型參考即「靜默用主造型頂替」；
+ *     變裝沒帶參考圖＝這一鏡沒有角色參考（缺件由 `resolveCharacterDisguises.missing` /
+ *     審計函式具名回報，不靠主造型補位）。
+ *   - prompt＝各變裝片段（去重、"\\n" 連接）；全都沒片段＝沿用卡本體片段
+ *     （那是角色的基礎外觀描述，不是造型替換）。
+ *   - 卡 id / 名稱 / kind / loraIds / negativePrompt 原樣保留（母卡身分不變，
+ *     卡 id 序鎖定注入與分鏡引用欄零遷移）。
+ * 呼叫本函式＝宣告「本卡在這一鏡**不是主造型**」⇒ 變裝清單為空時參考圖一樣清空
+ * （仍回 clone，不退化成主造型；那正是「綁定式缺件不得頂替」的落點）。
+ * 不需要變裝的呼叫端就**別呼叫本函式**（原卡直通，零行為漂移）。
+ */
+export function withCharacterDisguises(
+  card: CharacterCard,
+  disguises: readonly CharacterCardDisguise[],
+): CharacterCard {
+  const fragments: string[] = [];
+  const references: CharacterCardReferenceImage[] = [];
+  const seenUrls = new Set<string>();
+  for (const disguise of disguises) {
+    const fragment = (disguise.prompt ?? "").trim();
+    if (fragment && !fragments.includes(fragment)) fragments.push(fragment);
+    for (const ref of disguise.references) {
+      if (!isUsableCardImageUrl(ref.url) || seenUrls.has(ref.url)) continue;
+      seenUrls.add(ref.url);
+      references.push({
+        url: ref.url,
+        role: toReferenceImageRole(ref.role),
+        name: ref.name || disguise.name,
+      });
+    }
+  }
+  return {
+    ...card,
+    prompt: fragments.length ? fragments.join("\n") : card.prompt,
+    references,
+  };
 }
 
 // ─────────────────────────────────────────── 鎖定注入語義

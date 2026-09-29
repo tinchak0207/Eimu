@@ -26,6 +26,9 @@ import {
 // 版本清單清洗與 project-store 共用同一份（逐項白名單＋裁剪；不製造第二個漂移點）。
 import { normalizeNodeVersions } from "./node-versions";
 import { normalizeShotCandidates } from "./storyboard-shots";
+// 任務版本史（P1-9/D37）的清洗收口＝`./task-versions` 的 `normalizeTaskVersions`，
+// 本檔只註冊（與 shotCandidates 同款：清洗實作在原模組，白名單真源在 node-metadata-fields）。
+import { normalizeTaskVersions } from "./task-versions";
 import {
   CANVAS_NODE_DEFAULT_SIZE,
   CanvasNodeType,
@@ -314,6 +317,9 @@ const DURABLE_FIELD_CLEANERS: Record<MetadataCleanerName, (raw: unknown) => unkn
   // `normalizeApprovalState` 用 `null` 表示「整包丟棄」（status 不在三值域/非物件），
   // 本迴圈的 `undefined` 才是「省略鍵」——不轉換會寫出 `approval: null` 的半形狀態。
   approval: (v) => normalizeApprovalState(v) ?? undefined,
+  // `normalizeTaskVersions` 用 `undefined` 表示「省略鍵」（空集合/無任務版本）；
+  // 逐筆非法在函式內丟棄（不連坐整包），`selectedVersion` 非成員即不收。
+  taskVersions: (v) => normalizeTaskVersions(v),
 };
 
 /**

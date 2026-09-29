@@ -137,6 +137,23 @@ const SAMPLE_METADATA_BY_KEY: Record<string, Record<string, unknown>> = {
       selectedId: "c2",
     },
   },
+  // 2026-09-29 P1-9：任務版本史＋標籤＋星標選中（樣本取「清洗後仍等於原值」的形：
+  // version 已正規化成 ISO 8601 UTC、時序升序、selectedVersion 是成員、tags 在值域內）。
+  taskVersions: {
+    taskVersions: {
+      items: [
+        { version: "2026-09-29T02:00:00.000Z", taskId: "task-1", status: "error", tags: ["main_image"] },
+        {
+          version: "2026-09-29T02:05:00.000Z",
+          taskId: "task-2",
+          status: "success",
+          tags: ["main_image"],
+          url: "https://cdn.example.com/a.png",
+        },
+      ],
+      selectedVersion: "2026-09-29T02:05:00.000Z",
+    },
+  },
 };
 
 const hasOwn = (o: object, key: string): boolean => Object.prototype.hasOwnProperty.call(o, key);

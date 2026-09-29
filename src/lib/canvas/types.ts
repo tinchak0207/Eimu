@@ -13,6 +13,7 @@
 import type { ReferenceImageRole } from "../image-types";
 import type { StoryboardSceneRef, StoryboardScriptShot } from "../storyboard-contract";
 import type { StoryboardShotCandidateSet } from "./storyboard-shots";
+import type { TaskVersionSet } from "./task-versions";
 import { AID_PROJECT_TYPE_ENUM, type AidProjectTypeEnumValue } from "../aid-enums/creation";
 // 批准狀態形狀的單一真源（type-only：執行期零依賴，不成環——`storyboard-contract.ts`
 // 已用同一寫法 type-only import 本檔，本檔反向 type-only 取 `ApprovalState` 是同構先例）。
@@ -267,6 +268,21 @@ export interface CanvasNodeMetadata {
    * **雙白名單**：與 `storyboardShot` 同族鐵律。
    */
   shotCandidates?: StoryboardShotCandidateSet;
+  // ── 任務版本＋標籤＋選中（P1-9，對稱差 D37；2026-09-29）──
+  /**
+   * 本格的任務版本史 ＋ 星標選中的那一版（形狀＝`TaskVersionSet`，真源
+   * `./task-versions.ts`）。**刻意不是「任務節點」**：一「格」＝一顆節點，同一格重跑
+   * ＝追加一筆**新版本**（`items[].version` ＝任務時戳，ISO 8601 UTC），舊版本原樣留著。
+   *
+   * `items[].tags` 值域＝`TASK_TAGS`（`main_image`/`main_video`，D37 字面）；
+   * `selectedVersion` ＝素材 `Selected`（該版 `url` 即本格採用稿）。
+   * 清洗端＝`normalizeTaskVersions`（`version` 解析不出即丟該筆、同版去重、按時序升序、
+   * 裁到上限、`selectedVersion` 非成員即不收、空集合＝省略鍵）。
+   *
+   * **雙白名單**：與 `shotCandidates` 同族鐵律——漏 `layout.toNodeMetadata` 或
+   * `canvas-chat-types.compactMetadataForAgent` 任一處＝刷新/回舊會話後版本史與採用稿消失。
+   */
+  taskVersions?: TaskVersionSet;
   // ── 分鏡實體（2026-09-15 刀 2；AID 21 欄契約，MIT）──
   /**
    * 一鏡（AID 21 欄契約，`src/lib/storyboard-contract.ts`）：掛在 Group 節點的子節點。

@@ -1,4 +1,5 @@
 import type { FailureRecord } from "./failure-record";
+import type { NormalizedVideoPostProduction } from "./video-post-production";
 
 export type GenerationSource = "web" | "biz" | "canary";
 export type GenerationKind = "image_generate" | "image_edit" | "video_generate" | "tts" | "avatar" | "lipsync";
@@ -46,6 +47,12 @@ export interface GenerationReference {
 export interface GenerationWorkflow {
   references?: GenerationReference[];
   metadata?: Record<string, unknown>;
+  /**
+   * 生成式後期（P1-3／對稱差 D22）：續片 `extend_video`／局部改片 `edit_video`。
+   * 建單前由 `parseVideoPostProduction()` 正規化（來源影片已解析成可讀 URL）；
+   * 缺省＝普通生成，零行為變化。kind 仍是 `video_generate`（不新增 DB kind）。
+   */
+  videoPostProduction?: NormalizedVideoPostProduction;
   [key: string]: unknown;
 }
 

@@ -45,7 +45,8 @@ export type MetadataCleanerName =
   | "cardName"
   | "fontSize"
   | "gateConfirm"
-  | "approval";
+  | "approval"
+  | "taskVersions";
 
 /** 一個耐久化鍵：鍵名 ＋ 清洗器名稱（型別對應）＋ 為何它必須活著。 */
 export interface DurableFieldSpec {
@@ -111,6 +112,11 @@ export const DURABLE_METADATA_FIELDS: readonly DurableFieldSpec[] = [
   { key: "fontSize", cleaner: "fontSize", note: "文本節點字號（10..28 整數；漏放行＝重載回 14.5）" },
   { key: "gateConfirm", cleaner: "gateConfirm", note: "協作確認閘憑據（三欄全對才收；漏放行＝門禁卡退回純文字）" },
   { key: "approval", cleaner: "approval", note: "分鏡批准狀態（status 三值域；漏放行＝批准態重載後翻面）" },
+  {
+    key: "taskVersions",
+    cleaner: "taskVersions",
+    note: "任務版本史＋標籤＋星標選中（P1-9/D37：version＝任務時戳，同格重跑追加新版本、舊版本留著；漏放行＝刷新後版本史與採用稿消失）",
+  },
 ];
 
 /** A 必須放行的鍵名清單（供測試與消費端列舉）。 */
@@ -248,6 +254,11 @@ export const AGENT_METADATA_FIELDS: readonly AgentFieldSpec[] = [
   { key: "fontSize", transform: "fontSize", note: "文本節點字號（漏傳＝回舊會話字號回 14.5）" },
   { key: "gateConfirm", transform: "gateConfirm", note: "協作確認閘憑據（漏傳＝重載後按不下批准）" },
   { key: "approval", transform: "approval", note: "分鏡批准狀態（漏傳＝重載後批准態翻面）" },
+  {
+    key: "taskVersions",
+    transform: "truthy",
+    note: "任務版本史＋標籤＋選中（P1-9/D37；漏傳＝還原後重跑版本史與採用稿消失）",
+  },
 ];
 
 /** B 應透傳的鍵名清單。 */

@@ -15,6 +15,13 @@ import { enforceQuotaGate } from "@/lib/generation-core/quota-precheck";
 import { IdempotencyConflictError } from "@/lib/generation-core/job-repository";
 import { GenerationModelUnavailableError } from "@/lib/generation-core/model-availability-gate";
 import { generationTaskResponse } from "@/lib/generation-core/task-response";
+import {
+  VideoPostProductionError,
+  effectiveVideoPrompt,
+  parseVideoPostProduction,
+  videoPostProductionGeneratedSeconds,
+} from "@/lib/generation-core/video-post-production";
+import { publicObjectUrl } from "@/lib/two-phase-upload";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
 import { syncModelPricing } from "@/lib/pricing-runtime";
 
@@ -59,6 +66,13 @@ interface VideoRequestBody {
   generate_audio?: unknown;
   response_format?: unknown;
   callback_url?: unknown;
+  /**
+   * 生成式後期（P1-3／對稱差 D22）：
+   *   { mode: "extend_video", source: {url|object_key, duration_seconds}, continue_seconds, continue_from_seconds? }
+   *   { mode: "edit_video",  source: {...}, start_seconds, end_seconds, instruction }
+   * 不帶＝普通生成（零行為變化）。不支援的模型 ⇒ 400 video_generation_type_unsupported。
+   */
+  video_post_production?: unknown;
 }
 
 function optionalBoolean(value: unknown): boolean | undefined {
@@ -113,18 +127,23 @@ export async function POST(req: NextRequest) {
     return errorResponse(400, "请求体不是合法的 JSON。", "invalid_request_error", "invalid_json", traceId);
   }
 
-  const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
-  if (!prompt) {
-    return errorResponse(400, "缺少必填参数 prompt。", "invalid_request_error", "missing_prompt", traceId);
-  }
-  if (prompt.length > MAX_PROMPT_LENGTH) {
-    return errorResponse(
-      400,
-      `prompt 长度不能超过 ${MAX_PROMPT_LENGTH} 个字符。`,
-      "invalid_request_error",
-      "prompt_too_long",
-      traceId,
-    );
+  const rawPrompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
+  // 生成式後期（局部改片）允許用「改動描述」當 prompt，故其 prompt 檢查下移到參數解析後；
+  // 普通生成（未帶 video_post_production）的檢查順序一字不變（對外穩定承諾）。
+  const hasPostProductionRequest = body.video_post_production !== undefined && body.video_post_production !== null;
+  if (!hasPostProductionRequest) {
+    if (!rawPrompt) {
+      return errorResponse(400, "缺少必填参数 prompt。", "invalid_request_error", "missing_prompt", traceId);
+    }
+    if (rawPrompt.length > MAX_PROMPT_LENGTH) {
+      return errorResponse(
+        400,
+        `prompt 长度不能超过 ${MAX_PROMPT_LENGTH} 个字符。`,
+        "invalid_request_error",
+        "prompt_too_long",
+        traceId,
+      );
+    }
   }
 
   const rawModelId = typeof body.model === "string" && body.model ? body.model : "";
@@ -148,6 +167,34 @@ export async function POST(req: NextRequest) {
       `当前密钥无权调用模型 ${modelId}。`,
       "permission_error",
       "model_not_permitted",
+      traceId,
+    );
+  }
+
+  // 生成式後期（續片／局部改片）：契約校驗＋能力閘＋來源影片定位。全部失敗都在
+  // 建單／扣費／呼叫上游之前——不支援的模型具名拒收，絕不靜默降級成普通生成。
+  let postProduction: ReturnType<typeof parseVideoPostProduction> = null;
+  try {
+    postProduction = parseVideoPostProduction(body.video_post_production, {
+      modelId,
+      resolveObjectKeyUrl: publicObjectUrl,
+    });
+  } catch (error) {
+    if (error instanceof VideoPostProductionError) {
+      return errorResponse(error.status, error.message, "invalid_request_error", error.code, traceId);
+    }
+    throw error;
+  }
+  const prompt = effectiveVideoPrompt(rawPrompt, postProduction);
+  if (!prompt) {
+    return errorResponse(400, "缺少必填参数 prompt。", "invalid_request_error", "missing_prompt", traceId);
+  }
+  if (prompt.length > MAX_PROMPT_LENGTH) {
+    return errorResponse(
+      400,
+      `prompt 长度不能超过 ${MAX_PROMPT_LENGTH} 个字符。`,
+      "invalid_request_error",
+      "prompt_too_long",
       traceId,
     );
   }
@@ -200,9 +247,13 @@ export async function POST(req: NextRequest) {
   }
 
   // 時長 / 音訊 / 寬高比 都交给 catalog 归一化：非法值回默认，合法值透传。
+  // 生成式後期：本次生成的秒數由續長／區段長決定（已在契約校驗時確認落在 catalog 檔位），
+  // 直接以它做歸一化輸入——扣費、成本閘、上游拿到的秒數同源。
+  const generatedSeconds = postProduction ? videoPostProductionGeneratedSeconds(postProduction) : undefined;
   const normalized = normalizeGenerationConfig(modelId, {
     aspectRatio: aspectRatioFromVideoSize(typeof body.size === "string" ? body.size : undefined),
-    durationSeconds: body.duration_seconds === undefined ? undefined : Number(body.duration_seconds),
+    durationSeconds: generatedSeconds
+      ?? (body.duration_seconds === undefined ? undefined : Number(body.duration_seconds)),
     generateAudio: optionalBoolean(body.generate_audio),
   });
 
@@ -244,6 +295,7 @@ export async function POST(req: NextRequest) {
       workflow: {
         durationSeconds: normalized.config.durationSeconds,
         generateAudio: normalized.config.generateAudio,
+        ...(postProduction ? { videoPostProduction: postProduction } : {}),
       },
       responseFormat,
       callbackUrl,

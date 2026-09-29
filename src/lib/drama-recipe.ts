@@ -11,8 +11,19 @@
 //   - 资产清单 → deriveRequiredAssets（引用卡 id 全集，代码可复验）
 // 模型只产出语义字段；本文件所有函数零副作用、零 IO。
 
-import { applyCharacterCards, mergeTokenReferencedCards } from "./character-cards";
-import type { CharacterCard, CharacterCardKind, CharacterCardReferenceImage } from "./character-cards";
+import {
+  applyCharacterCards,
+  auditDisguiseRequirements,
+  mergeTokenReferencedCards,
+  resolveCharacterDisguises,
+  withCharacterDisguises,
+} from "./character-cards";
+import type {
+  CharacterCard,
+  CharacterCardKind,
+  CharacterCardReferenceImage,
+  DisguiseSelection,
+} from "./character-cards";
 
 // ─────────────────────────────────────────── 段名与常量
 
@@ -49,6 +60,36 @@ function boundedStringArray(value: unknown, maxItems: number, max: number): stri
 
 function boundedNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+/**
+ * 分鏡變裝宣告清洗（D8 消費端入口）：兩種形狀 → 一律長成 `{ cardId?, name }`：
+ *   - 字符串＝非綁定式具名變裝（`"侠客造型"`）；
+ *   - 物件＝`{ cardId, name }`（相容 `card_id`／`characterCardId`／`disguise`／`look` 別名）。
+ * 沒有 name 的條目丟；同 (cardId, name) 去重；上限 `MAX_CARD_REFS_PER_SHOT` 截尾。
+ */
+function normalizeDisguiseSelections(raw: unknown): DisguiseSelection[] {
+  if (!Array.isArray(raw)) return [];
+  const out: DisguiseSelection[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    let cardId = "";
+    let name: string | null = null;
+    if (typeof item === "string") {
+      name = boundedString(item, MAX_SHORT_TEXT_LENGTH);
+    } else if (item && typeof item === "object") {
+      const obj = item as Record<string, unknown>;
+      name = boundedString(obj.name ?? obj.disguise ?? obj.look, MAX_SHORT_TEXT_LENGTH);
+      cardId = boundedString(obj.cardId ?? obj.card_id ?? obj.characterCardId, MAX_SHORT_TEXT_LENGTH) ?? "";
+    }
+    if (!name) continue;
+    const key = `${cardId}\u0000${name}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(cardId ? { cardId, name } : { name });
+    if (out.length >= MAX_CARD_REFS_PER_SHOT) break;
+  }
+  return out;
 }
 
 /** 从段对象里宽松提取条目数组：段本身是数组，或常见键名下的数组。 */
@@ -134,6 +175,17 @@ export interface DramaStoryboardShot {
    * 可選：舊分鏡 JSON 沒有此欄（缺省＝無道具引用，零回歸）。
    */
   propCardIds?: string[];
+  /**
+   * 本鏡選用的**變裝**（對稱差 D8 的消費端；2026-09-28 新增）：具名造型選擇。
+   * 可選：舊分鏡 JSON 沒有此欄（缺省＝用角色卡主造型，零回歸）。
+   * 兩種形狀都收（清洗後一律長成 `{ cardId?, name }`）：
+   *   - `{ cardId, name }`＝綁定式（只在那張角色卡上找該變裝）：**命中與否都換裝**，
+   *     缺件時該卡參考圖清空（主造型不代打）；
+   *   - `"name"`＝非綁定式（在分鏡引用的角色卡上找同名變裝）：命中才換裝。
+   * 命中＝該角色卡的主造型參考圖**被該變裝的參考圖取代**（不混用）；
+   * 找不到＝該任務 `needsAsset` 且 `missingDisguiseNames` **具名回報**。
+   */
+  disguises?: DisguiseSelection[];
   /** 段级负面词（与卡负面词合并）。 */
   negativePrompt: string | null;
   size: string | null;
@@ -270,6 +322,7 @@ function normalizeStoryboard(raw: unknown): DramaStoryboardSegment | null {
       const characterCardIds = boundedStringArray(s.characterCardIds ?? s.character_card_ids ?? s.characters, MAX_CARD_REFS_PER_SHOT, MAX_SHORT_TEXT_LENGTH);
       const sceneCardIds = boundedStringArray(s.sceneCardIds ?? s.scene_card_ids ?? s.scenes, MAX_CARD_REFS_PER_SHOT, MAX_SHORT_TEXT_LENGTH);
       const propCardIds = boundedStringArray(s.propCardIds ?? s.prop_card_ids ?? s.props, MAX_CARD_REFS_PER_SHOT, MAX_SHORT_TEXT_LENGTH);
+      const disguises = normalizeDisguiseSelections(s.disguises ?? s.disguiseSelections ?? s.disguise_selections ?? s.disguiseNames ?? s.disguise_names);
       const duration = boundedNumber(s.durationSeconds ?? s.duration_seconds ?? s.duration);
       return {
         shotId,
@@ -277,6 +330,7 @@ function normalizeStoryboard(raw: unknown): DramaStoryboardSegment | null {
         characterCardIds,
         sceneCardIds,
         propCardIds,
+        disguises,
         negativePrompt: boundedString(s.negativePrompt ?? s.negative_prompt, MAX_TEXT_LENGTH),
         size: boundedString(s.size, 40),
         durationSeconds: duration !== null && duration > 0 ? duration : null,
@@ -386,6 +440,12 @@ export interface DramaBatchTask {
   /** 引用了不存在或种类不符的卡 id：任务不可提交（needs_asset），先补资产再重切。 */
   needsAsset: boolean;
   missingCardIds: string[];
+  /**
+   * **具名缺件（變裝）**：本鏡宣告的變裝名在引用角色卡上找不到（D8）。
+   * 非空即任務不可提交（與 missingCardIds 同一道 needsAsset 閘）；
+   * 缺件由呼叫端按名字要求補齊，**不得用主造型頂替**。
+   */
+  missingDisguiseNames: string[];
 }
 
 /** 负面词合并：", "/"，" 分词、trim、去重、", " 连接。 */
@@ -434,6 +494,8 @@ function resolveCardRefs(
  *   - 段提示词里的 `@[種類:名]` token 會就地解析：命中**卡庫全量**（不只分鏡宣告的卡）時
  *     併入注入集（mergeTokenReferencedCards）——卡在庫即可被引用，不必先手動鎖定
  *   - propCardIds 的道具卡与角色/场景卡**同批**进 applyCharacterCards（同一把注入尺，不另开通道）
+ *   - `disguises` 宣告（D8）：命中的变装**替换该角色卡在本镜的参考图与 prompt 片段**
+ *     （不混用主造型）；找不到＝`needsAsset` + `missingDisguiseNames`（具名），主造型不代打
  *   - 引用卡 id 不存在或种类不符 → 该任务 needsAsset=true + missingCardIds，
  *     已解析卡照常注入（补齐资产后重切结果稳定）
  *   - 输入宽松：直接喂原始 storyboard 段；cards 来自 character-card-store 的当前态
@@ -447,9 +509,33 @@ export function storyboardToBatchTasks(storyboard: unknown, cards: CharacterCard
     const sceneRefs = resolveCardRefs(shot.sceneCardIds, byId, "scene");
     const propRefs = resolveCardRefs(shot.propCardIds ?? [], byId, "prop");
     const missingCardIds = [...characterRefs.missing, ...sceneRefs.missing, ...propRefs.missing];
+    // 變裝解析（D8）：命中＝該角色卡在**本鏡**換成變裝造型版本（`withCharacterDisguises`：
+    // 參考圖換成變裝自己的、prompt 片段換成變裝片段）；找不到＝具名缺件（needsAsset），
+    // 該名字不貢獻任何參考（主造型不代打）。無宣告＝原卡直通，零回歸。
+    const resolvedDisguises = resolveCharacterDisguises(characterRefs.found, shot.disguises ?? []);
+    // 綁定式宣告（有 cardId）＝那張卡在這一鏡**明確不是主造型**：命中與否都走變裝版本
+    // （缺件時參考圖清空，主造型不代打）；非綁定式命中那張卡時同樣換裝。
+    const boundCardIds = new Set(
+      (shot.disguises ?? [])
+        .map((selection) => selection.cardId)
+        .filter((id): id is string => typeof id === "string" && id.length > 0),
+    );
+    const disguisedCardIds = new Set([
+      ...boundCardIds,
+      ...resolvedDisguises.matched.map((hit) => hit.cardId),
+    ]);
+    const characterCards = characterRefs.found.map((card) =>
+      disguisedCardIds.has(card.id)
+        ? withCharacterDisguises(
+            card,
+            resolvedDisguises.matched.filter((hit) => hit.cardId === card.id).map((hit) => hit.disguise),
+          )
+        : card,
+    );
+    const missingDisguiseNames = resolvedDisguises.missing;
     // 卡 id 序稳定拼接：applyCharacterCards 内部按 id 升序注入，与传入顺序无关。
     // 顺序照写 character → scene → prop（只影响可读性：applyCharacterCards 内部本就按 id 升序重排）。
-    const appliedCards = [...characterRefs.found, ...sceneRefs.found, ...propRefs.found];
+    const appliedCards = [...characterCards, ...sceneRefs.found, ...propRefs.found];
     // 本段 prompt token 就地解析（2026-09-25）：卡在庫即可被 `@[種類:名]` 引用，不必先手動鎖定。
     // 判準/聯集全在 mergeTokenReferencedCards（純函式）；零 token／全未命中＝回同一陣列參考，
     // 故既有「只注入分鏡宣告的卡」行為逐位元不變。
@@ -469,8 +555,9 @@ export function storyboardToBatchTasks(storyboard: unknown, cards: CharacterCard
       loraIds,
       size: shot.size,
       durationSeconds: shot.durationSeconds,
-      needsAsset: missingCardIds.length > 0,
+      needsAsset: missingCardIds.length > 0 || missingDisguiseNames.length > 0,
       missingCardIds,
+      missingDisguiseNames,
     };
   });
 }
@@ -487,4 +574,37 @@ export function deriveRequiredAssets(storyboard: unknown): string[] {
     for (const id of [...shot.characterCardIds, ...shot.sceneCardIds, ...(shot.propCardIds ?? [])]) ids.add(id);
   }
   return [...ids].sort((a, b) => (a === b ? 0 : a < b ? -1 : 1));
+}
+
+// ─────────────────────────────────────────── 變裝強制補齊（D8）
+
+export interface DramaDisguiseRequirementReport {
+  /** 兩邊都沒有缺件＝true（沒有變裝宣告/要求＝true，零回歸）。 */
+  complete: boolean;
+  /** 分鏡宣告但解析不到的**具名**缺件（按分镜序）。 */
+  missingFromShots: { shotId: string; missingDisguiseNames: string[] }[];
+  /** 角色卡宣告 `requiredDisguises` 但未補齊的卡（具名：卡 id/卡名/缺的變裝名）。 */
+  missingOnCards: { cardId: string; cardName: string; missingDisguises: string[] }[];
+}
+
+/**
+ * **設定階段的強制補齊閘**（純函式）：一次回報兩邊的具名缺件——
+ *   - 分鏡側：宣告了卻在引用角色卡上找不到的變裝名（走 `storyboardToBatchTasks` 的同一把尺，
+ *     不另立第二套解析）；
+ *   - 卡側：角色卡自己宣告的必要變裝（`requiredDisguises`）尚未補齊者。
+ * `complete === false` 即要求補齊（缺哪些**按名字**回報）；缺件不代表可以用主造型出圖。
+ */
+export function auditDramaDisguiseRequirements(
+  storyboard: unknown,
+  cards: CharacterCard[],
+): DramaDisguiseRequirementReport {
+  const missingFromShots = storyboardToBatchTasks(storyboard, cards)
+    .filter((task) => task.missingDisguiseNames.length > 0)
+    .map((task) => ({ shotId: task.shotId, missingDisguiseNames: task.missingDisguiseNames }));
+  const missingOnCards = auditDisguiseRequirements(cards).gaps;
+  return {
+    complete: missingFromShots.length === 0 && missingOnCards.length === 0,
+    missingFromShots,
+    missingOnCards,
+  };
 }

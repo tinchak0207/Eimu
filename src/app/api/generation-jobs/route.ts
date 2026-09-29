@@ -18,7 +18,14 @@ import {
 } from "@/lib/generation-core/job-repository";
 import { validateImageBuffer } from "@/lib/generation-core/artifact-service";
 import { generationTaskProjection } from "@/lib/generation-core/task-projection";
+import {
+  VideoPostProductionError,
+  effectiveVideoPrompt,
+  parseVideoPostProduction,
+  videoPostProductionGeneratedSeconds,
+} from "@/lib/generation-core/video-post-production";
 import type { CreateGenerationReferenceArtifactInput, GenerationReference } from "@/lib/generation-core/types";
+import { publicObjectUrl } from "@/lib/two-phase-upload";
 import { authenticateImageUser } from "@/lib/image-billing";
 import {
   composeWebTaskPrompt,
@@ -205,10 +212,34 @@ export async function POST(req: NextRequest) {
 
   const prompt = cleanString(parsed.body.prompt) ?? "";
   const modelId = cleanString(parsed.body.modelId) ?? "";
-  if (!prompt || prompt.length > MAX_PROMPT_LENGTH) return fail(400, "画面描述为空或过长。", "invalid_prompt");
+  const requestWorkflow = readRequestWorkflow(parsed.body.workflow);
+  // 局部改片允許用「改動描述」當畫面描述，故帶 videoPostProduction 的請求把這道
+  // 檢查下移到契約解析之後（見下）；其餘請求的檢查順序與錯誤碼一字不變。
+  const hasPostProductionRequest =
+    requestWorkflow?.videoPostProduction !== undefined && requestWorkflow?.videoPostProduction !== null;
+  if (!hasPostProductionRequest && (!prompt || prompt.length > MAX_PROMPT_LENGTH)) {
+    return fail(400, "画面描述为空或过长。", "invalid_prompt");
+  }
   const capabilities = generationCapabilities(modelId);
   const dreaminaImageModel = modelId === "image-5-pro" || modelId === "image-5-lite" || modelId === "seedream-2.0";
   if (!capabilities && !dreaminaImageModel) return fail(400, "所选模型不可用。", "model_not_found");
+
+  // 生成式後期（P1-3／對稱差 D22）：B/C 端都用同一份契約與能力閘。
+  // 來源影片：`url` 直用，`objectKey` 走兩段式上傳的公網 URL 推導（P1-10 同一輪子）；
+  // 解不出＝具名拒絕，不猜 URL、不靜默降級成普通生成。
+  let postProduction: ReturnType<typeof parseVideoPostProduction> = null;
+  try {
+    postProduction = parseVideoPostProduction(requestWorkflow?.videoPostProduction, {
+      modelId,
+      resolveObjectKeyUrl: publicObjectUrl,
+    });
+  } catch (error) {
+    if (error instanceof VideoPostProductionError) return fail(error.status, error.message, error.code);
+    throw error;
+  }
+  const requestedPrompt = effectiveVideoPrompt(prompt, postProduction);
+  if (!requestedPrompt || requestedPrompt.length > MAX_PROMPT_LENGTH) return fail(400, "画面描述为空或过长。", "invalid_prompt");
+  const generatedSeconds = postProduction ? videoPostProductionGeneratedSeconds(postProduction) : undefined;
 
   const rawLora = Array.isArray(parsed.body.loraModelVersionIds) ? parsed.body.loraModelVersionIds.map(String) : [];
   const rawDuration = parsed.body.durationSeconds;
@@ -217,7 +248,10 @@ export async function POST(req: NextRequest) {
     ? normalizeGenerationConfig(modelId, {
         aspectRatio: cleanString(parsed.body.aspectRatio),
         outputResolution: cleanString(parsed.body.outputResolution),
-        durationSeconds: rawDuration === undefined || rawDuration === null || rawDuration === "" ? undefined : Number(rawDuration),
+        // 生成式後期：本次生成秒數＝續長／區段長（契約校驗已確認落在 catalog 檔位），
+        // 覆蓋 body 的 durationSeconds——扣費、成本閘、上游同源。
+        durationSeconds: generatedSeconds
+          ?? (rawDuration === undefined || rawDuration === null || rawDuration === "" ? undefined : Number(rawDuration)),
         generateAudio: rawAudio === undefined || rawAudio === null || rawAudio === "" ? undefined : rawAudio === true || rawAudio === "true",
         qualityMode: cleanString(parsed.body.qualityMode),
         referenceCount: parsed.files.length,
@@ -261,12 +295,16 @@ export async function POST(req: NextRequest) {
       tenantId,
       idempotencyKey,
     });
-    const requestWorkflow = readRequestWorkflow(parsed.body.workflow);
     const requestedWorkflow = requestWorkflow ?? {};
     // 負面詞/參考圖角色：generation-core 不讀 workflow，這裡用 legacy 同一函式組進供給 prompt；
     // 只看本次 body 的 workflow（canvas 已預組且不送 workflow → 原樣透傳，不重複套用）。
-    const submittedPrompt = composeWebTaskPrompt(prompt, requestWorkflow);
-    const workflow = withOriginalPrompt({ ...(retryJob?.workflow ?? {}), ...requestedWorkflow }, prompt, submittedPrompt);
+    const submittedPrompt = composeWebTaskPrompt(requestedPrompt, requestWorkflow);
+    const workflow = withOriginalPrompt({
+      ...(retryJob?.workflow ?? {}),
+      ...requestedWorkflow,
+      // 後期參數一律以本次正規化結果為準（重試時沿用上一單的後期參數＝不靜默降級）。
+      ...(postProduction ? { videoPostProduction: postProduction } : {}),
+    }, requestedPrompt, submittedPrompt);
     const references = persisted.references.length
       ? persisted.references
       : retryJob?.workflow.references ?? [];

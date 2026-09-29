@@ -1,6 +1,12 @@
 import { SupplierRequestError } from "./failure-classifier";
 import type { PaidVideoSubmissionFacts } from "./paid-video-cost-gate";
 import type { ProviderTaskPollResult, SupplierGenerationInput, SupplierGenerationOutput, SupplierRecord } from "./types";
+import {
+  applyVideoPostProductionToUpstreamBody,
+  assertVideoPostProductionUpstreamReady,
+  readNormalizedVideoPostProduction,
+  videoPostProductionGeneratedSeconds,
+} from "./video-post-production";
 
 // cangyuansuanli（new-api openai-video 兼容）seedance 视频上游封装（2026-08-30）。
 //
@@ -126,6 +132,9 @@ function resolveUpstreamModel(platformModelId: string, resolution: string): stri
  * generateWithOpenaiVideo 與成本閘的 `openaiVideoSubmissionFacts` 共用同一份，
  * 保證閘審的（model, resolution, seconds）＝真正送出的值，且拒收順序與搬遷前一致
  *（先輸入校驗，後成本閘）。
+ *
+ * P1-3：生成式後期（續片／改片）的秒數＝**本次新生成的秒數**（續長／區段長），
+ * 由 workflow.videoPostProduction 覆寫 `durationSeconds`——成本閘與上游拿到的是同一個值。
  */
 function prepareOpenaiVideoSubmission(supplier: SupplierRecord, input: SupplierGenerationInput) {
   const prompt = input.prompt.trim();
@@ -135,7 +144,10 @@ function prepareOpenaiVideoSubmission(supplier: SupplierRecord, input: SupplierG
 
   const platformModelId = input.modelId;
   const resolution = input.resolution ?? "";
-  const duration = Math.round(Number(input.workflow.durationSeconds ?? 5));
+  const postProduction = readNormalizedVideoPostProduction(input.workflow);
+  const duration = postProduction
+    ? videoPostProductionGeneratedSeconds(postProduction)
+    : Math.round(Number(input.workflow.durationSeconds ?? 5));
   const ratio = input.ratio ?? "16:9";
 
   // 校验 duration 范围
@@ -153,7 +165,7 @@ function prepareOpenaiVideoSubmission(supplier: SupplierRecord, input: SupplierG
   // 上游模型名：capability 行显式携带 supplierModelId（napi/drama 渠道级映射）时
   // 直接短路，否则按平台模型 + resolution 查静态表（cangyuansuanli sd4/sd7 族）。
   const upstreamModel = supplier.supplierModelId ?? resolveUpstreamModel(platformModelId, resolution);
-  return { prompt, resolution, duration, ratio, upstreamModel };
+  return { prompt, resolution, duration, ratio, upstreamModel, postProduction };
 }
 
 /**
@@ -177,7 +189,11 @@ export async function generateWithOpenaiVideo(
   supplier: SupplierRecord,
   input: SupplierGenerationInput,
 ): Promise<SupplierGenerationOutput> {
-  const { prompt, resolution, duration, ratio, upstreamModel } = prepareOpenaiVideoSubmission(supplier, input);
+  const { prompt, resolution, duration, ratio, upstreamModel, postProduction } = prepareOpenaiVideoSubmission(supplier, input);
+
+  // P1-3 生成式後期：映射未由真單校準 ⇒ 具名拒收（零上游成本）。
+  // 放在成本閘之後、任何 fetch 之前；見 video-post-production.ts 檔頭為何必須 fail-closed。
+  if (postProduction) assertVideoPostProductionUpstreamReady(postProduction);
 
   // 付費視頻上游硬閘（2026-09-27 ¥31.2857 事故後立）已於 V-03 移到生產平面：
   // worker-service 取得租約後、呼叫本 adapter 前執行（對所有 video_generate 生效，
@@ -243,6 +259,12 @@ export async function generateWithOpenaiVideo(
     }
   }
 
+  // P1-3 生成式後期欄位（來源影片＋續長／續接點｜區段＋改動描述）。欄位映射集中在
+  // video-post-production.ts 的 VIDEO_POST_PRODUCTION_UPSTREAM_FIELD（未校準，唯一落點）。
+  const requestBody = postProduction
+    ? applyVideoPostProductionToUpstreamBody(body, postProduction)
+    : body;
+
   const apiKey = readOpenaiVideoCredential(supplier);
   const baseUrl = supplier.baseUrl.replace(/\/+$/, "");
 
@@ -250,7 +272,7 @@ export async function generateWithOpenaiVideo(
   const createResponse = await openaiVideoRequest(baseUrl, "videos", {
     method: "POST",
     apiKey,
-    body: JSON.stringify(body),
+    body: JSON.stringify(requestBody),
   });
   const taskId = String(createResponse.id ?? "").trim();
   if (!taskId) {
