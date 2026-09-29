@@ -744,7 +744,9 @@ if (status === "pending" || status === "running") {
         tool: toolName,
         ok,
         ...(toolErr ? { error: toolErr } : {}),
-        ...(typeof costCoins === "number" ? { cost_coins: costCoins } : {}),
+        // 報價類的 total_coins 是估價不是扣費：不掛 cost_coins（前端會當「已用/消耗」累加，
+        // 2026-09-29 e2e 實錘「已用 614 币」而帳戶只有 7 币）；金額已在 summary 裡。
+        ...(typeof costCoins === "number" && !/quote/i.test(toolName) ? { cost_coins: costCoins } : {}),
         ...(quoteSummary ? { summary: quoteSummary } : {}),
         ...(subagentTimeout ? { partial: true, reason: "timeout" } : {}),
         ...(artifactPending ? { task_id: parsed.task_id, artifact_pending: true } : {}),
