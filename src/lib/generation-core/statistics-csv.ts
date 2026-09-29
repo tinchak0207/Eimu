@@ -69,7 +69,9 @@ export type StatisticsCsvSection =
   /** 帳本有行但金額非有限值（不當 0 計）。 */
   | "skipped_non_finite"
   /** 組織維度（總/團隊/子帳號/專案）——**目前恆空**，見檔頭第 2 條。 */
-  | "scope";
+  | "scope"
+  /** 生成物類別（P2-2／D8b）：分鏡影片／一般圖片／未歸類。 */
+  | "asset_kind";
 
 /** 多筆 id 塞一格時的分隔字元（Excel 單格可讀；不用逗號以免與 CSV 分隔衝突）。 */
 export const STATISTICS_CSV_ID_SEPARATOR = "|";
@@ -167,6 +169,10 @@ export function statisticsToCsv(projection: StatisticsCsvInput): string {
     for (const bucket of consumption.byDay) lines.push(csvRow(bucketRow("day", bucket)));
     for (const bucket of consumption.byModel) lines.push(csvRow(bucketRow("model", bucket)));
     for (const bucket of consumption.byChannel) lines.push(csvRow(bucketRow("channel", bucket)));
+    // 生成物類別切面（P2-2／D8b）：桶鍵即類別值域，label 已是中文（投影帶出來）。
+    // D8b 的角色／場景／道具在提交端還沒有落盤事實 ⇒ 不會出現這三列（見 usage-asset-kind.ts）；
+    // 出現的只有分鏡影片／一般圖片／未歸類——**未歸類不攤進任何一類**。
+    for (const bucket of consumption.byAssetKind) lines.push(csvRow(bucketRow("asset_kind", bucket)));
     // 這兩個桶在投影裡沒有 key/label（它們不是「按某個維度分桶」的結果），
   // 導出時補上具名 key/label——空 key 的列對消費 CSV 的人等於沒說這是什麼。
   lines.push(csvRow(bucketRow("refunded", { ...consumption.refunded, key: "refund", label: "已退款" })));

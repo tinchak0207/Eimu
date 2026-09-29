@@ -31,6 +31,7 @@ import {
 import { UNATTRIBUTED_SOURCE } from "@/lib/first-touch-attribution";
 import { readFunnelAttribution } from "@/lib/user-attribution";
 import { generationDatabaseConfigured, getGenerationSql, type GenerationSql } from "./database";
+import { USAGE_ASSET_KIND_LABELS, usageAssetKindForJobKind, type UsageAssetKind } from "./usage-asset-kind";
 
 /** 比率的最小樣本門檻：與 routing-telemetry 的 latencyP80（<3 樣本回 null）同一把尺。 */
 export const MIN_RATE_SAMPLES = 3;
@@ -76,6 +77,13 @@ export interface LedgerConsumptionRow {
   appliedAt: string;
   /** 已按 STATISTICS_DAY_TIMEZONE 切好的日界（YYYY-MM-DD）。 */
   day: string;
+  /** `generation_job.kind` 原值（`image_generate`／`image_edit`／`video_generate`）；缺欄＝null。 */
+  jobKind?: string | null;
+  /**
+   * 生成物類別（P2-2／D8b）：由 `jobKind` 判得，**不猜**（判不出來＝`unclassified`）。
+   * 真源與判準見 `usage-asset-kind.ts` 的檔頭（含「D8b 的角色/場景/道具目前無落盤事實」的誠實邊界）。
+   */
+  assetKind?: UsageAssetKind;
 }
 
 /** 樣本是否足夠撐起一個比率。不足時 `value` 缺席——不許拿 0 冒充。 */
@@ -122,6 +130,13 @@ export interface ConsumptionProjection {
   byDay: UsageBucket[];
   byModel: UsageBucket[];
   byChannel: UsageBucket[];
+  /**
+   * 生成物類別切面（P2-2／D8b）：分鏡影片／一般圖片／未歸類。
+   * **誠實邊界**：D8b 的角色／場景／道具在提交端尚無落盤事實（見 usage-asset-kind.ts 檔頭），
+   * 因此目前不會出現這三桶——不是漏算，是還沒有可判的資料；補法是提交端把類別蓋章落盤。
+   * 零記錄的類別不出現（與其他切面同語義）。
+   */
+  byAssetKind: UsageBucket[];
   /** 帳本有行但找不到 delivered 嘗試的淨消耗——如實單列，不攤進任何渠道。 */
   unattributed: { quota: number; coins: number; operations: number; recordIds: string[] };
   /** 退款單列（不攤進任何消耗桶、不落「未歸因」）：口徑變了，數字才能對上帳本。 */
@@ -186,7 +201,11 @@ function addGroupToBucket(
 
 function toBuckets(
   buckets: Map<string, BucketAccumulator>,
-  labels: Map<string, string>,
+  /**
+   * 標籤來源：`Map`（模型/渠道，key 是動態 id）或**唯讀字面表**（類別切面，key 是封閉值域）。
+   * 只讀 `get`，兩種形狀都滿足——不必為了共用一個函式把類別表包成 Map。
+   */
+  labels: { get(key: string): string | undefined },
 ): UsageBucket[] {
   return [...buckets.entries()]
     .map(([key, bucket]) => ({
@@ -217,6 +236,8 @@ export function projectConsumption(
   const byDay = new Map<string, BucketAccumulator>();
   const byModel = new Map<string, BucketAccumulator>();
   const byChannel = new Map<string, BucketAccumulator>();
+  // 生成物類別（P2-2／D8b）：第三個切面，判準只在 usage-asset-kind.ts 一處。
+  const byAssetKind = new Map<string, BucketAccumulator>();
   const modelLabels = new Map<string, string>();
   const channelLabels = new Map<string, string>();
   const unattributed: BucketAccumulator = { quota: 0, operations: 0, recordIds: [] };
@@ -271,6 +292,9 @@ export function projectConsumption(
     addGroupToBucket(byDay, anchor.day, netQuota, group);
     addGroupToBucket(byModel, anchor.modelId, netQuota, group);
     modelLabels.set(anchor.modelId, anchor.modelId);
+    // 類別切面的錨點與日／模型同一個 job（同一組帳本行），所以三切面合計可逐桶對帳。
+    const assetKind = usageAssetKindForJobKind(anchor.jobKind);
+    addGroupToBucket(byAssetKind, assetKind, netQuota, group);
     if (anchor.channelId) {
       addGroupToBucket(byChannel, anchor.channelId, netQuota, group);
       channelLabels.set(anchor.channelId, anchor.channelLabel ?? anchor.channelId);
@@ -308,6 +332,8 @@ export function projectConsumption(
       .sort((a, b) => a.key.localeCompare(b.key)),
     byModel: toBuckets(byModel, modelLabels),
     byChannel: toBuckets(byChannel, channelLabels),
+    // 標籤走共用詞表（USAGE_ASSET_KIND_LABELS）——桶鍵即類別值域，呼叫端不必再映射。
+    byAssetKind: toBuckets(byAssetKind, { get: (key: string) => USAGE_ASSET_KIND_LABELS[key as UsageAssetKind] }),
     unattributed: {
       quota: unattributed.quota,
       coins: quotaToCoins(unattributed.quota),
@@ -545,6 +571,11 @@ function mapConsumptionRow(row: Record<string, unknown>): LedgerConsumptionRow {
     kind: String(row.operation_kind) === "refund" ? "refund" : "commit",
     appliedAt: new Date(String(row.applied_at)).toISOString(),
     day: String(row.day),
+    // 生成物類別（P2-2／D8b）：唯一的落盤事實是 `generation_job.kind`——
+    // 影片 ⇒ 分鏡影片，圖片 ⇒ 一般靜態圖，其餘 unclassified。判準集中在
+    // usage-asset-kind.ts（本檔不自己再寫一份映射，避免兩處漂移）。
+    jobKind: row.job_kind === null || row.job_kind === undefined ? null : String(row.job_kind),
+    assetKind: usageAssetKindForJobKind(row.job_kind),
   };
 }
 
@@ -564,6 +595,7 @@ export async function readLedgerConsumption(
            operation.job_id AS job_id,
            operation.operation AS operation_kind,
            job.model_id AS model_id,
+           job.kind AS job_kind,
            job.billing_user_id AS billing_user_id,
            operation.amount AS amount,
            operation.applied_at AS applied_at,

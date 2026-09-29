@@ -49,6 +49,12 @@ function projection(overrides: Partial<StatisticsCsvInput["consumption"]> = {}):
       byChannel: [
         { key: "pixai", label: "PixAI\n主通道", quota: 3345, coins: 3.345, operations: 2, recordIds: [] },
       ],
+      // 生成物類別切面（P2-2／D8b）：手寫值，當作獨立 oracle 比對導出檔逐格相等。
+      // 刻意只給「真的會出現」的兩桶（角色/場景/道具在提交端尚無落盤事實 ⇒ 不出現）。
+      byAssetKind: [
+        { key: "shot_video", label: "分镜影片", quota: 5000, coins: 5, operations: 2, recordIds: ["r5"] },
+        { key: "still_image", label: "一般图片", quota: 7345, coins: 7.345, operations: 5, recordIds: ["r1"] },
+      ],
       unattributed: { quota: 0, coins: 0, operations: 0, recordIds: [] },
       refunded: {
         quota: 7655,
@@ -124,6 +130,24 @@ test("導出的數字逐格等於投影（含 section/key/label 與帳本行 id�
     "r1",
   ]);
   assert.deepEqual(rowFor(rows, "channel", "pixai"), ["channel", "pixai", "PixAI\n主通道", "3345", "3.345", "2", ""]);
+  assert.deepEqual(rowFor(rows, "asset_kind", "shot_video"), [
+    "asset_kind",
+    "shot_video",
+    "分镜影片",
+    "5000",
+    "5",
+    "2",
+    "r5",
+  ]);
+  assert.deepEqual(rowFor(rows, "asset_kind", "still_image"), [
+    "asset_kind",
+    "still_image",
+    "一般图片",
+    "7345",
+    "7.345",
+    "5",
+    "r1",
+  ]);
   assert.deepEqual(rowFor(rows, "unattributed", "unattributed"), [
     "unattributed",
     "unattributed",
