@@ -40,6 +40,8 @@ import {
   type CanvasSnapshot,
 } from "@/lib/canvas/layout";
 import { listCanvasProjects, postCanvasOpsResult } from "@/lib/canvas/client";
+// 風格 id 值域判據（＝STYLE_LIBRARY 註冊面），與落盤/生成端共用同一把尺。
+import { normalizeProjectStyleId } from "@/lib/canvas/project-style";
 import { CanvasNodeType, isCanvasProjectType } from "@/lib/canvas/types";
 import { isValidCreationStep } from "@/lib/creation-flow-steps";
 import type {
@@ -142,6 +144,9 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
   const [projectType, setProjectType] = useState<CanvasProjectType | undefined>(undefined);
   const [currentStep, setCurrentStep] = useState<number | undefined>(undefined);
   const [episodes, setEpisodes] = useState<CanvasEpisode[]>([]);
+  // 專案級風格綁定（P1-8／對稱差 D34）：StyleTemplate.id，與上面三欄同一組檔位/同一寫入口。
+  // 生成時由呼叫端把這個 id 帶進 /api/canvas/generate 的 style_id（本 hook 不改生成請求）。
+  const [styleId, setStyleId] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [saveState, setSaveState] = useState<UseCanvasChatReturn["saveState"]>("idle");
   const [savedProjects, setSavedProjects] = useState<CanvasProjectSummary[]>([]);
@@ -194,6 +199,9 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
   currentStepRef.current = currentStep;
   const episodesRef = useRef(episodes);
   episodesRef.current = episodes;
+  // 風格綁定（P1-8／D34）：同款「最新值鏈像 ref」，供 buildProject 取當下值。
+  const styleIdRef = useRef(styleId);
+  styleIdRef.current = styleId;
   const selectedNodeIdRef = useRef(selectedNodeId);
   selectedNodeIdRef.current = selectedNodeId;
   const agentOpsQueueRef = useRef(agentOpsQueue);
@@ -234,6 +242,8 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     setProjectType(undefined);
     setCurrentStep(undefined);
     setEpisodes([]);
+    // 風格綁定同層清零：新項目不繼承上一張畫布的風格（缺省＝無綁定）。
+    setStyleId(undefined);
     // 新畫布 = 新項目：卡鎖定是項目級配置，隨舊項目留在歷史裡。
     setActiveCardIds([]);
     // 新畫布要有新身份：後續存檔才會寫進新的一份，而不是覆寫上一張。
@@ -268,11 +278,13 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     setBackgroundMode(target.backgroundMode ?? "dots");
     setProjectTitle(target.title || "未命名画布");
     setActiveCardIds(Array.isArray(target.cardIds) ? target.cardIds.filter(Boolean) : []);
-    // 作品/劇集三欄：與 cardIds 同層還原（缺欄位＝回到未設定，不殘留上一張畫布的值）。
+    // 作品/劇集三欄（＋風格綁定第四欄）：與 cardIds 同層還原
+    //（缺欄位＝回到未設定，不殘留上一張畫布的值）。
     const meta = canvasProjectMeta(target);
     setProjectType(meta.projectType);
     setCurrentStep(meta.currentStep);
     setEpisodes(meta.episodes ?? []);
+    setStyleId(meta.styleId);
     if (target.budget) {
       setBudget({
         usedCoins: target.budget.usedCoins,
@@ -305,6 +317,7 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
       projectType?: unknown;
       currentStep?: unknown;
       episodes?: unknown;
+      styleId?: unknown;
     }): boolean => {
       if (!snapshot || typeof snapshot !== "object") return false;
       const restored = fromCanvasProject(snapshot);
@@ -339,11 +352,13 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
       // 雙向同步方向B：chat 切 session → 畫布選中對應節點
       const linked = restored.nodes.find((n) => n.metadata?.session_id === sessionIdRef.current);
       setSelectedNodeId(linked ? linked.id : null);
-      // 作品/劇集三欄：快照有帶才覆蓋；沒帶＝保留現值（不可把已存在的作品資訊清成空白）。
+      // 作品/劇集三欄＋風格綁定：快照有帶才覆蓋；沒帶＝保留現值
+      //（不可把已存在的作品資訊/風格清成空白）。
       const meta = canvasProjectMeta(snapshot);
       if (meta.projectType !== undefined) setProjectType(meta.projectType);
       if (meta.currentStep !== undefined) setCurrentStep(meta.currentStep);
       if (meta.episodes !== undefined) setEpisodes(meta.episodes);
+      if (meta.styleId !== undefined) setStyleId(meta.styleId);
       return true;
     },
     [],
@@ -559,6 +574,7 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     projectTypeRef,
     currentStepRef,
     episodesRef,
+    styleIdRef,
     mountedRef,
     canvas,
     viewport,
@@ -568,6 +584,7 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     projectType,
     currentStep,
     episodes,
+    styleId,
     saveState,
     sessionId,
     selectedNodeId,
@@ -973,6 +990,7 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
       projectType?: unknown;
       currentStep?: unknown;
       episodes?: unknown;
+      styleId?: unknown;
     }) => {
       pushHistory();
       const restored = fromCanvasProject(project);
@@ -991,6 +1009,7 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
       if (meta.projectType !== undefined) setProjectType(meta.projectType);
       if (meta.currentStep !== undefined) setCurrentStep(meta.currentStep);
       if (meta.episodes !== undefined) setEpisodes(meta.episodes);
+      if (meta.styleId !== undefined) setStyleId(meta.styleId);
       setSelectedNodeId(null);
     },
     [pushHistory],
@@ -999,12 +1018,18 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
   const exportProject = useCallback((): CanvasProject => buildProject(), [buildProject]);
 
   /**
-   * 作品/劇集三欄寫入口（刀 1 前端接線）。UI 面板與 agent 驅動路徑共用這一個出口；
-   * 傳入 `undefined` = 清除該欄（例：電影改回未設定）。只做型別守門（非法值不進 state，
+   * 專案級欄位寫入口（刀 1 前端接線；P1-8 起多帶風格綁定第四欄）。
+   * UI 面板與 agent 驅動路徑共用這一個出口；傳入 `undefined` = 清除該欄
+   * （例：電影改回未設定、解除風格綁定）。只做型別守門（非法值不進 state，
    * 免得存檔時被 store 靜默丟掉），完整清洗仍只在 project-store。
    */
   const setProjectMeta = useCallback(
-    (patch: { projectType?: CanvasProjectType; currentStep?: number; episodes?: CanvasEpisode[] }) => {
+    (patch: {
+      projectType?: CanvasProjectType;
+      currentStep?: number;
+      episodes?: CanvasEpisode[];
+      styleId?: string;
+    }) => {
       if ("projectType" in patch && (patch.projectType === undefined || isCanvasProjectType(patch.projectType))) {
         setProjectType(patch.projectType);
       }
@@ -1012,6 +1037,11 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
         setCurrentStep(patch.currentStep);
       }
       if ("episodes" in patch) setEpisodes(patch.episodes ?? []);
+      // 風格綁定：合法＝STYLE_LIBRARY 註冊表查得到（同一把尺：normalizeProjectStyleId）；
+      // `undefined` 依 "k" in patch 慣例＝清除綁定。
+      if ("styleId" in patch && (patch.styleId === undefined || normalizeProjectStyleId(patch.styleId))) {
+        setStyleId(patch.styleId === undefined ? undefined : (normalizeProjectStyleId(patch.styleId) as string));
+      }
     },
     [],
   );
@@ -1170,6 +1200,7 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     projectType,
     currentStep,
     episodes,
+    styleId,
     setProjectMeta,
     upsertCharacterCard,
     removeCharacterCard,

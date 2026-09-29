@@ -551,6 +551,12 @@ export interface CanvasProjectMetaPatch {
   projectType?: CanvasProjectType;
   currentStep?: number;
   episodes?: CanvasEpisode[];
+  /**
+   * 專案級風格綁定（P1-8／對稱差 D34）：`StyleTemplate.id`（值域唯一真源＝`STYLE_LIBRARY`，
+   * 清洗見 `project-style.ts` 的 `normalizeProjectStyleId`）。型別是寬的 string 是因為
+   * 載荷不可信——合法性一律在執行/落盤前判，非法值省略該鍵（同其余三欄語義）。
+   */
+  styleId?: string;
 }
 
 /**
@@ -606,6 +612,15 @@ export interface CanvasProject {
   currentStep?: number;
   /** 劇集分集清單（電影留空）。 */
   episodes?: CanvasEpisode[];
+  /**
+   * 專案級風格綁定（P1-8／對稱差 D34）：`StyleTemplate.id`（見 `@/lib/style-library`）。
+   *
+   * 對應對手 `CreateProject.VisualPromptId`——風格 id 是**專案建立時的一等參數**，
+   * 不是只在 skill/prompt 層的當次選擇；生成時由 `project-style.ts` 把 id 展開成
+   * 對手 `VisualMeta.VisualStyle` 那樣的全文素材。**缺省＝無綁定，舊專案零改動**；
+   * 註冊表查不到的 id 不落盤（`normalizeProject` 逐欄白名單省略該鍵）。
+   */
+  styleId?: string;
   /**
    * 節點版本歷史（2026-09-27）：所有節點的版本快照，按節點＋版號檢索。
    * 掛在既有專案物件上（不新增 DB/檔案）；逐節點上限見 node-versions.ts。

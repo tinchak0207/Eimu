@@ -25,6 +25,8 @@ import {
 } from "./node-metadata-fields";
 // 版本清單清洗與 project-store 共用同一份（逐項白名單＋裁剪；不製造第二個漂移點）。
 import { normalizeNodeVersions } from "./node-versions";
+// 風格 id 值域的唯一判據（＝STYLE_LIBRARY 註冊面），與 project-store/生成端共用同一份。
+import { normalizeProjectStyleId } from "./project-style";
 import { normalizeShotCandidates } from "./storyboard-shots";
 // 任務版本史（P1-9/D37）的清洗收口＝`./task-versions` 的 `normalizeTaskVersions`，
 // 本檔只註冊（與 shotCandidates 同款：清洗實作在原模組，白名單真源在 node-metadata-fields）。
@@ -795,8 +797,13 @@ export function toCanvasProject(
   projectType?: CanvasProjectType,
   currentStep?: number,
   episodes?: CanvasEpisode[],
+  // 專案級風格綁定（P1-8／D34）：同樣「不清洗」，只決定要不要帶鍵 ——
+  // 註冊面判據在 project-store 的 normalizeProject（呼叫 normalizeProjectStyleId）。
+  styleId?: string,
 ): CanvasProject {
   const now = new Date().toISOString();
+  // 風格 id 只在此判「有沒有合法值」；非法/未知 id 不落盤（落盤端 normalizeProject 同一把尺）。
+  const projectStyleId = normalizeProjectStyleId(styleId);
   return {
     id: base.id,
     title: base.title || "未命名画布",
@@ -816,6 +823,8 @@ export function toCanvasProject(
     ...(projectType ? { projectType } : {}),
     ...(isValidCreationStep(currentStep) ? { currentStep } : {}),
     ...(episodes && episodes.length > 0 ? { episodes } : {}),
+    // 風格綁定（P1-8／D34）：有合法 id 才帶鍵；缺欄＝無綁定（舊專案形狀不變）。
+    ...(projectStyleId ? { styleId: projectStyleId } : {}),
     // 版本歷史（2026-09-27）：有版本才帶鍵，舊專案形狀不變。
     ...(state.nodeVersions && state.nodeVersions.length > 0 ? { nodeVersions: state.nodeVersions } : {}),
   };
@@ -901,16 +910,18 @@ function readEpisode(payload: unknown): CanvasEpisode | null {
 }
 
 /**
- * 從 CanvasProject 取出三級狀態機欄位（給 hook 還原用；缺欄位/非法值一律省略）。
+ * 從 CanvasProject 取出專案級欄位（給 hook 還原用；缺欄位/非法值一律省略）。
  *
  * 刻意獨立於 `fromCanvasProject`：後者回 `CanvasReducerState`（只有 nodes/connections/
  * units），改它的回傳型別會炸一票消費端；三欄是「專案級」狀態，不是 reducer 狀態。
+ * （`styleId` 是同一批專案級欄位的第四員，P1-8／D34；合法性判據共用 `project-style.ts`。）
  */
 export function canvasProjectMeta(project: {
   projectType?: unknown;
   currentStep?: unknown;
   episodes?: unknown;
-}): { projectType?: CanvasProjectType; currentStep?: number; episodes?: CanvasEpisode[] } {
+  styleId?: unknown;
+}): { projectType?: CanvasProjectType; currentStep?: number; episodes?: CanvasEpisode[]; styleId?: string } {
   if (!project || typeof project !== "object") return {};
   const episodes = Array.isArray(project.episodes)
     ? project.episodes.flatMap((item) => {
@@ -918,10 +929,12 @@ export function canvasProjectMeta(project: {
         return episode ? [episode] : [];
       })
     : [];
+  const styleId = normalizeProjectStyleId(project.styleId);
   return {
     ...(isCanvasProjectType(project.projectType) ? { projectType: project.projectType } : {}),
     ...(isValidCreationStep(project.currentStep) ? { currentStep: project.currentStep } : {}),
     ...(episodes.length > 0 ? { episodes } : {}),
+    ...(styleId ? { styleId } : {}),
   };
 }
 
@@ -949,6 +962,10 @@ export function normalizeProjectMetaPatch(payload: unknown): CanvasProjectMetaPa
   const out: CanvasProjectMetaPatch = {};
   if (isCanvasProjectType(p.projectType)) out.projectType = p.projectType;
   if (isValidCreationStep(p.currentStep)) out.currentStep = p.currentStep;
+  // 風格綁定（P1-8／D34）：未註冊 id 省略該鍵＝不動專案已綁的風格
+  // （同其餘欄位：模型打錯一個 id 不該把用戶綁好的風格清掉）。
+  const styleId = normalizeProjectStyleId(p.styleId);
+  if (styleId) out.styleId = styleId;
   if (Array.isArray(p.episodes)) {
     const seen = new Set<number>();
     const episodes: CanvasEpisode[] = [];
@@ -995,6 +1012,8 @@ export function parseImportFile(raw: unknown): {
   projectType?: CanvasProjectType;
   currentStep?: number;
   episodes?: CanvasEpisode[];
+  /** 專案級風格綁定（P1-8／D34）：匯出→匯入帶著走（否則靜默丟風格）。 */
+  styleId?: string;
 } | null {
   if (!raw || typeof raw !== "object") return null;
   const env = raw as Record<string, unknown>;

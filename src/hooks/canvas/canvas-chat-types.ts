@@ -248,7 +248,7 @@ export interface UseCanvasChatReturn {
   setProjectTitle: (title: string) => void;
   loading: boolean;
   saveState: "idle" | "saving" | "saved" | "error" | "offline";
-  loadProject: (project: { nodes?: unknown; connections?: unknown; viewport?: CanvasViewport; backgroundMode?: CanvasBackgroundMode; title?: string; projectType?: unknown; currentStep?: unknown; episodes?: unknown }) => void;
+  loadProject: (project: { nodes?: unknown; connections?: unknown; viewport?: CanvasViewport; backgroundMode?: CanvasBackgroundMode; title?: string; projectType?: unknown; currentStep?: unknown; episodes?: unknown; styleId?: unknown }) => void;
   exportProject: () => CanvasProject;
   clearCanvas: () => void;
   newCanvasSession: () => void;
@@ -264,6 +264,7 @@ export interface UseCanvasChatReturn {
     projectType?: unknown;
     currentStep?: unknown;
     episodes?: unknown;
+    styleId?: unknown;
   }) => boolean;
   /**
    * REQ-B2 團隊資產空間：讀當前畫布項目 id（尚未建號回 null）。
@@ -277,8 +278,13 @@ export interface UseCanvasChatReturn {
   currentStep: number | undefined;
   /** 劇集分集清單（電影為空陣列）。 */
   episodes: CanvasEpisode[];
-  /** 三欄的唯一寫入口（UI 面板與 agent 驅動路徑共用）；欄位傳 undefined 即清除。 */
-  setProjectMeta: (patch: { projectType?: CanvasProjectType; currentStep?: number; episodes?: CanvasEpisode[] }) => void;
+  /**
+   * 專案級風格綁定（P1-8／對稱差 D34）：`StyleTemplate.id`（`@/lib/style-library` 註冊面）；
+   * undefined = 無綁定（舊專案語義）。生成時呼叫端把這個 id 帶進 `/api/canvas/generate` 的 `style_id`。
+   */
+  styleId: string | undefined;
+  /** 專案級欄位的唯一寫入口（UI 面板與 agent 驅動路徑共用）；欄位傳 undefined 即清除。 */
+  setProjectMeta: (patch: { projectType?: CanvasProjectType; currentStep?: number; episodes?: CanvasEpisode[]; styleId?: string }) => void;
   // ── 角色/場景卡（P2 跨鏡頭一致性）：卡列表 + 項目級鎖定
   characterCards: CharacterCard[];
   /** 鎖定到當前畫布項目的卡 id（持久化在 CanvasProject.cardIds）。 */

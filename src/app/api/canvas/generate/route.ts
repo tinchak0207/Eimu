@@ -33,6 +33,12 @@ import type { GenerationWorkflowMetadata } from "@/lib/image-types";
 import { imageGenerationCoins, type ModelMode } from "@/lib/provider-config";
 import { DEFAULT_IMAGE_MODEL_ID, SUPPORTED_GENERATION_MODEL_IDS } from "@/lib/image-model-ids.js";
 import { isReferenceImageRole, toReferenceImageRole, type ReferenceImageRole } from "@/lib/image-types";
+import {
+  applyProjectStyle,
+  normalizeProjectStyleId,
+  resolveProjectStyle,
+  type AppliedStyleSource,
+} from "@/lib/canvas/project-style";
 import { syncModelPricing } from "@/lib/pricing-runtime";
 
 export const runtime = "nodejs";
@@ -57,6 +63,14 @@ export interface CanvasGenerateRequest {
    */
   negative_prompt?: string;
   /**
+   * 風格（P1-8／對稱差 D34）：**風格是可引用的一等 id**（`STYLE_LIBRARY` 的 id，
+   * 例 `ads-advertising`）——對手 `CreateProject.VisualPromptId` 的對應物。
+   * 伺服器端把 id 展開成風格全文併入 prompt／負面詞（對手 `VisualMeta.VisualStyle` 全文
+   * 素材化的那一步），所以風格不再只是前端把字串拼進 prompt 的行為。
+   * 未知 id ⇒ 400 `style_id_unknown`（提交上游前擋，不燒錢）；不帶 ⇒ 逐位零回歸。
+   */
+  style_id?: string;
+  /**
    * LoRA（2026-08-27 自專業工作站遷入）：選中的 LoRA 模型版本 id，
    * 單選；轉發 generate-images 的 loraModelVersionIds（JSON 陣列字串）。
    * 模型不支援時由 generate-images 的能力歸一裁掉。
@@ -77,6 +91,10 @@ export interface CanvasGenerateResponse {
   images?: CanvasImageResult[];
   error?: string;
   code?: string;
+  /** 本次生成實際套用的風格 id（null＝未套風格）。 */
+  style_id?: string | null;
+  /** 風格來源：`request`／`none`（專案綁定由呼叫端帶 id，故此層只會回這兩種）。 */
+  style_source?: AppliedStyleSource;
 }
 
 /** 單次生成最多帶的參考圖張數（含 source_image）。 */
@@ -169,8 +187,30 @@ export async function POST(req: NextRequest) {
   const aspectRatio = body.size ?? "1:1";
   const qualityMode: ModelMode = body.quality === "high" || body.quality === "quality" ? "quality" : "fast";
   // P2：卡鎖定的負面詞（可選；空字串 = 未帶，行為與舊路徑一致）。
-  const negativePrompt =
+  const rawNegativePrompt =
     typeof body.negative_prompt === "string" ? body.negative_prompt.trim().slice(0, 1000) : "";
+
+  // 風格素材化（P1-8／D34）：`style_id` 是**一等 id**，伺服器端展開成風格全文。
+  // 未知 id 具名 400（在提交上游前擋）；無 id ⇒ prompt／負面詞逐位不變（零回歸）。
+  //
+  // 為什麼生成路由不自己去讀專案綁定（`CanvasProject.styleId`）：本路由的認證立場是
+  // **原樣轉發 header、由下游唯一收口驗證與扣費**（見檔頭）；按未經上游驗證的 x-user-id
+  // 去讀別人的專案，等於開一條跨租戶讀取。而風格註冊表（`STYLE_LIBRARY`）是**靜態**的，
+  // 所以「專案級綁定」以 `CanvasProject.styleId` 持久化（隨專案存檔／匯出／agent op 走），
+  // 由呼叫端帶 id 進來；本層只負責「id → 全文」的素材化與值域把關。
+  const rawStyleId = typeof body.style_id === "string" ? body.style_id.trim() : "";
+  if (rawStyleId && !normalizeProjectStyleId(rawStyleId)) {
+    return fail(400, `未知的风格 id：${truncate(rawStyleId, 60)}`, "style_id_unknown");
+  }
+  const appliedStyle = applyProjectStyle({
+    style: resolveProjectStyle({ requestStyleId: rawStyleId }),
+    prompt: body.prompt.trim(),
+    negativePrompt: rawNegativePrompt,
+  });
+  /** 已素材化的提示詞（含風格全文；無風格＝與改動前逐位相同）。 */
+  const styledPrompt = appliedStyle.prompt;
+  /** 已合併的負面詞；空字串＝不帶（保持既有的 falsy 判準）。 */
+  const negativePrompt = appliedStyle.negativePrompt ?? "";
   // LoRA（2026-08-27）：最多 1 個（單選鐵律，與專業工作站/generation-jobs 同款）。
   const loraModelVersionIds = Array.isArray(body.loraModelVersionIds)
     ? body.loraModelVersionIds.map(String).map((value) => value.trim()).filter(Boolean).slice(0, 1)
@@ -258,7 +298,7 @@ export async function POST(req: NextRequest) {
     let res: Response;
     if (referenceBuffers.length > 0) {
       const form = new FormData();
-      form.append("prompt", body.prompt.trim());
+      form.append("prompt", styledPrompt);
       form.append("provider", "image_tinchak");
       form.append("modelId", modelId);
       form.append("qualityMode", qualityMode);
@@ -284,7 +324,7 @@ export async function POST(req: NextRequest) {
         method: "POST",
         headers: { ...forwardHeaders, "Content-Type": "application/json" },
         body: JSON.stringify({
-          prompt: body.prompt.trim(),
+          prompt: styledPrompt,
           provider: "image_tinchak",
           modelId,
           qualityMode,
@@ -326,7 +366,7 @@ export async function POST(req: NextRequest) {
         ...(JSON.parse(workflowField) as GenerationWorkflowMetadata),
       })
     : undefined;
-  const durablePrompt = buildWorkflowPrompt(body.prompt.trim(), workflowMetadata);
+  const durablePrompt = buildWorkflowPrompt(styledPrompt, workflowMetadata);
   // 與 legacy 同一解析度推導（generate-images：quality→2k、fast→1k，再由目錄歸一）。
   const outputResolution = qualityMode === "quality" ? "2k" : "1k";
   const batchId = randomUUID();
@@ -432,5 +472,14 @@ export async function POST(req: NextRequest) {
     return fail(502, truncate(reason, 200), "generation_failed");
   }
 
-  return NextResponse.json<CanvasGenerateResponse>({ ok: true, task_id: null, images });
+  // 明示用了哪個風格（不靜默）。**沒套風格時不吐這兩個鍵**——與本檔「無風格的請求
+  // 逐位元組不變」的既有紀律一致（舊客戶端看到的回應形狀一字不改）。
+  return NextResponse.json<CanvasGenerateResponse>({
+    ok: true,
+    task_id: null,
+    images,
+    ...(appliedStyle.styleId
+      ? { style_id: appliedStyle.styleId, style_source: appliedStyle.styleSource }
+      : {}),
+  });
 }

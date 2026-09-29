@@ -88,6 +88,9 @@ export async function PUT(req: NextRequest) {
       ...(body.projectType !== undefined ? { projectType: body.projectType } : {}),
       ...(body.currentStep !== undefined ? { currentStep: body.currentStep } : {}),
       ...(body.episodes !== undefined ? { episodes: body.episodes } : {}),
+      // 專案級風格綁定（P1-8／對稱差 D34）：原樣透傳，清洗（＝STYLE_LIBRARY 註冊面查詢）
+      // 交給 project-store 的 normalizeProject，本路由不重複實作（避免兩處白名單漂移）。
+      ...(body.styleId !== undefined ? { styleId: body.styleId } : {}),
       // 節點版本歷史（2026-09-27）：原樣透傳，清洗/裁剪交給 project-store 的
       // normalizeNodeVersions（與讀取端同一份），本路由不重複實作。
       ...(body.nodeVersions !== undefined ? { nodeVersions: body.nodeVersions } : {}),

@@ -40,6 +40,8 @@ export interface UseCanvasProjectSyncParams {
   projectTypeRef: { current: CanvasProjectType | undefined };
   currentStepRef: { current: number | undefined };
   episodesRef: { current: CanvasEpisode[] };
+  /** 專案級風格綁定（P1-8／D34）：同款最新值 ref，供 buildProject 落盤。 */
+  styleIdRef: { current: string | undefined };
   mountedRef: { current: boolean };
   // ── 當前 render 的值（effect 依賴）
   canvas: CanvasReducerState;
@@ -50,6 +52,8 @@ export interface UseCanvasProjectSyncParams {
   projectType: CanvasProjectType | undefined;
   currentStep: number | undefined;
   episodes: CanvasEpisode[];
+  /** 專案級風格綁定（P1-8／D34）；在 save effect 依賴裡，變更即觸發落盤。 */
+  styleId: string | undefined;
   saveState: "idle" | "saving" | "saved" | "error" | "offline";
   sessionId?: string | null;
   selectedNodeId: string | null;
@@ -68,9 +72,9 @@ export interface UseCanvasProjectSyncParams {
 export function useCanvasProjectSync(params: UseCanvasProjectSyncParams) {
   const {
     canvasRef, viewportRef, backgroundRef, titleRef, budgetRef, activeCardIdsRef, mountedRef,
-    projectTypeRef, currentStepRef, episodesRef, projectIdRef,
+    projectTypeRef, currentStepRef, episodesRef, styleIdRef, projectIdRef,
     canvas, viewport, backgroundMode, projectTitle, activeCardIds, saveState,
-    projectType, currentStep, episodes,
+    projectType, currentStep, episodes, styleId,
     sessionId, selectedNodeId, activeCharacterCards,
     setSavedProjects, setSaveState, setLoading,
   } = params;
@@ -121,6 +125,8 @@ export function useCanvasProjectSync(params: UseCanvasProjectSyncParams) {
       projectTypeRef.current,
       currentStepRef.current,
       episodesRef.current,
+      // 專案級風格綁定（P1-8／D34）：第 10 個位置參數（照三欄先例往後追加）。
+      styleIdRef.current,
     );
   }, []);
 
@@ -141,10 +147,10 @@ export function useCanvasProjectSync(params: UseCanvasProjectSyncParams) {
         else setSaveState(res.reason === "not_authenticated" ? "offline" : "error");
       });
     }, SAVE_DEBOUNCE_MS);
-    // 依賴畫布本體與視口/背景/標題/卡鎖定/作品劇集欄位：任何一項變化都該落盤。
+    // 依賴畫布本體與視口/背景/標題/卡鎖定/作品劇集欄位 + 風格綁定：任何一項變化都該落盤。
     // saveState 刻意不進依賴 —— 它由這個 effect 自己寫，進去會變成自觸發循環。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canvas, viewport, backgroundMode, projectTitle, activeCardIds, projectType, currentStep, episodes, buildProject]);
+  }, [canvas, viewport, backgroundMode, projectTitle, activeCardIds, projectType, currentStep, episodes, styleId, buildProject]);
 
   // ─────────────────────── Wave C1：壓縮快照上行（agent 的眼睛）
   // 3s 尾隨防抖（第二輪就緒優化刀C，原 300ms）：sessionId 落地（AI 助理開場）

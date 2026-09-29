@@ -9,6 +9,8 @@ import { isValidCreationStep, MAX_EPISODES_PER_PROJECT } from "@/lib/creation-fl
 import { isCanvasProjectType, type CanvasEpisode, type CanvasProject } from "./types";
 // 版本清單清洗與讀取端 layout.fromCanvasProject 共用同一份（不製造第二個漂移點）。
 import { normalizeNodeVersions } from "./node-versions";
+// 風格 id 值域的唯一判據（＝STYLE_LIBRARY 註冊面）；讀取端與生成端共用同一份。
+import { normalizeProjectStyleId } from "./project-style";
 
 const PROJECT_SCHEMA_VERSION = 1;
 const INDEX_GENERATIONS_KEPT = 2;
@@ -121,6 +123,8 @@ export function normalizeProject(payload: unknown): CanvasProject | null {
   const episodes = normalizeEpisodes(p.episodes);
   // 節點版本歷史（2026-09-27）：逐項白名單＋逐節點裁剪（上限見 node-versions.ts）。
   const nodeVersions = normalizeNodeVersions(p.nodeVersions);
+  // 專案級風格綁定（P1-8／D34）：唯一註冊面＝STYLE_LIBRARY，查不到即省略鍵。
+  const styleId = normalizeProjectStyleId(p.styleId);
   return {
     id: p.id,
     title: p.title.slice(0, 200),
@@ -140,6 +144,9 @@ export function normalizeProject(payload: unknown): CanvasProject | null {
     ...(isValidCreationStep(p.currentStep) ? { currentStep: p.currentStep } : {}),
     ...(episodes ? { episodes } : {}),
     ...(nodeVersions ? { nodeVersions } : {}),
+    // 專案級風格綁定（P1-8／對稱差 D34）：非法／未註冊 id 一律**省略欄位**
+    // （不寫預設值冒充用戶設定，與 projectType 同範式）；缺欄＝無綁定，舊專案零改動。
+    ...(styleId ? { styleId } : {}),
     // 作用域（2026-09-27 片P 刀 1）：**只認 team**——personal 與缺欄一律省略欄位
     //（讀取端語義即「缺省＝personal」），不寫 "personal" 冒充用戶設定（照 projectType 同範式）。
     // teamId 只在 scope=team 且為非空字串時保留（去空白、上限 128）。

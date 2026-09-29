@@ -16,6 +16,10 @@ import test, { afterEach, beforeEach, mock } from "node:test";
 import assert from "node:assert/strict";
 import { NextRequest } from "next/server";
 import { POST } from "./route";
+import { getStyleById, STYLE_LIBRARY } from "@/lib/style-library";
+
+/** 真實註冊表 id（不造假風格）。 */
+const STYLE_ID = STYLE_LIBRARY[0].id;
 
 const PNG_1X1 =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
@@ -271,4 +275,54 @@ test("缺身分 header → 401，不打任何下游", async () => {
   const res = await drive(POST(canvasRequest({ prompt: "x" }, false)));
   assert.equal(res.status, 401);
   assert.equal(calls.filter((c) => isSubmit(c) || isLegacy(c)).length, 0);
+});
+
+// ───────────────────────── 風格一等 id（P1-8／對稱差 D34）
+
+test("風格：合法 style_id → 送上游的 prompt 已素材化（含風格實文、無 {prompt}），回應明示 style_id/source", async () => {
+  handler = (call) => {
+    if (isSubmit(call)) return json({ success: true, data: projection("job-s", "queued") }, 202);
+    if (isPoll(call)) return json(projection(call.url.split("/").pop()!, "succeeded"));
+    return json({ error: "unexpected" }, 404);
+  };
+  const style = getStyleById(STYLE_ID)!;
+  const styleText = style.prompt.split("{prompt}")[0].trim();
+  const res = await drive(
+    POST(canvasRequest({ prompt: "一台跑车", style_id: STYLE_ID, negative_prompt: "noisy" })),
+  );
+  assert.equal(res.status, 200);
+  const payload = await res.json();
+  assert.equal(payload.style_id, STYLE_ID);
+  assert.equal(payload.style_source, "request");
+
+  const submit = calls.find(isSubmit);
+  assert.ok(submit, "應有一次 durable 提交");
+  const sentPrompt = (submit!.body as { prompt: string }).prompt;
+  assert.equal(sentPrompt.includes("{prompt}"), false, "佔位符不得漏到上游");
+  assert.equal(sentPrompt.includes(styleText), true, "風格的固定實文必須進 prompt");
+  assert.equal(sentPrompt.includes("一台跑车"), true, "用戶提示詞仍必須在");
+  // 風格 negative 與用戶 "noisy"（風格 negative 的子字串）⇒ 依輪子語義收斂，不重複堆疊。
+  assert.equal(sentPrompt.split("noisy").length - 1, 1, "重複堆疊會讓同一片段出現兩次");
+});
+
+test("風格：未知 style_id → 400 style_id_unknown，且完全不碰下游（不燒錢）", async () => {
+  const res = await drive(POST(canvasRequest({ prompt: "x", style_id: "不存在的風格" })));
+  assert.equal(res.status, 400);
+  const payload = await res.json();
+  assert.equal(payload.code, "style_id_unknown");
+  assert.equal(calls.length, 0, "值域把關必須發生在任何下游請求之前");
+});
+
+test("風格：不帶 style_id → 不吐風格鍵（回應形狀與舊版逐位一致）", async () => {
+  handler = (call) => {
+    if (isSubmit(call)) return json({ success: true, data: projection("job-n", "queued") }, 202);
+    if (isPoll(call)) return json(projection(call.url.split("/").pop()!, "succeeded"));
+    return json({ error: "unexpected" }, 404);
+  };
+  const res = await drive(POST(canvasRequest({ prompt: "一台跑车" })));
+  const payload = await res.json();
+  assert.equal("style_id" in payload, false);
+  assert.equal("style_source" in payload, false);
+  const submit = calls.find(isSubmit)!;
+  assert.equal((submit.body as { prompt: string }).prompt, "一台跑车", "無風格 ⇒ prompt 逐位不變");
 });
