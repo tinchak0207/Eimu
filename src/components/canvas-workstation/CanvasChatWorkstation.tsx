@@ -368,6 +368,11 @@ export function CanvasChatWorkstation({
           初始態（canvas 空）以 overlayContent（模板庫）代替空畫布。 */}
       {inCanvasWorkstation && (
         <>
+          {/* 2026-09-29 跨螢幕不變量：工作站是應用式滿屏，面板／overlay 左右緣都由
+              Navbar 量出的 --site-shell-left/right 推導；頁殼 max-w-[1440px] 在
+              >1440 視口會把整個工作站夾成置中窄殼、兩側大片留白。工作站態解除
+              導覽列頁殼上限（pro 態仍 1440，與其內容欄對齊）。SSR 首幀即生效。 */}
+          <style>{`#global-navbar.page-shell { max-width: none; }`}</style>
           <div className={cn("canvas-ws-backdrop", wsSettled && "canvas-ws-settled")} aria-hidden="true" />
           <div
             className={cn("canvas-ws-overlay", wsSettled && "canvas-ws-settled")}
