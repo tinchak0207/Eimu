@@ -4,20 +4,24 @@
 //   1. 變裝清單為一等子資產（多個具名變裝掛同一張角色卡，各帶自己的識別與參考圖）
 //   2. 可新增變裝（addCharacterDisguise：命名＋參考圖；重複＝覆蓋；非法＝null）
 //   3. 強制補齊（requiredDisguises 對帳：具名回報缺哪些；缺件不得用主造型頂替）
-//   4. 消費端 drama-recipe storyboardToBatchTasks：roles → referenceImages 真的取到變裝參考
+//      ——**fail-closed 落在資料面**：缺件時參考圖與 prompt 片段雙清（needsAsset 只是回報欄位，
+//      生產端無人讀它，光靠旗標擋不住「挑 referenceImages/prompt 就出圖」）。
+//   4. 消費端 drama-recipe storyboardToBatchTasks：roles → referenceImages 真的取到變裝參考；
+//      未解析的變裝宣告 ⇒ 本鏡**所有角色卡**去造型（場景/道具卡不受影響）
 //   5. 舊資料相容：只有 variantOf、沒有變裝清單的卡逐位不變（零回歸）
 //   6. 作用域不變：AssetScope（含 team）清洗結果與卡上是否帶變裝無關
 //
 // 位置索引（本檔斷言的實作落點，2026-09-28）：
 //   - character-cards.ts:133 variantOf 定義／:307-308 寫入端清洗／:331 寫出欄位／
-//     :745 applyCharacterCards 消費註記／:746-748 卡池過濾
+//     :753 applyCharacterCards 消費註記／:754+ 卡池過濾
 //   - character-cards.ts:95-104 CharacterCardDisguise 型別／:140 disguises 欄／
 //     :147 requiredDisguises 欄／:311-313 清洗落點／:332-333 寫出欄位
-//   - character-cards.ts:417 disguiseIdFromName／:427-441 單筆清洗／:444-456 清單清洗／
-//     :489-513 新增（addCharacterDisguise）／:519-525 要求寫入／:540-550 單卡對帳／
-//     :573-586 全庫對帳／:593-622 解析選擇／:638-663 套用變裝
+//   - character-cards.ts:417 disguiseIdFromName／:427 單筆清洗／:453 清單清洗（去重鍵＝id 或 name，留最後一張）／
+//     :499 新增（addCharacterDisguise）／:529 要求寫入／:550 單卡對帳／
+//     :583 全庫對帳／:603 解析選擇／:649 套用變裝（缺件＝參考圖與 prompt 雙清）
 //   - drama-recipe.ts:71-93 分鏡變裝宣告清洗／:188 shot.disguises 欄／:325 清洗接入／
-//     :515 變裝解析／:518-535 換裝落點／:558 needsAsset 閘／:597-609 強制補齊閘
+//     :515 變裝解析／:527-543 換裝落點（未解析宣告⇒本鏡全部角色卡去造型）／
+//     :567 needsAsset 閘／:597-609 強制補齊閘
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -152,7 +156,7 @@ test("一等子資產：變裝參考圖與卡參考圖共用同一把尺（>8 �
   assert.equal(many[0].references.some((r) => r.url.includes("audio")), false);
 });
 
-test("一等子資產：變裝清單清洗的邊界（無名丟、非物件丟、同 id 只留第一張、自指丟）", () => {
+test("一等子資產：變裝清單清洗的邊界（無名丟、非物件丟、同 id 只留最後一張、自指丟）", () => {
   assert.deepEqual(normalizeCharacterDisguises([null, 1, "x", { id: "d" }, { name: "   " }]), []);
   assert.deepEqual(
     normalizeCharacterDisguises([{ id: "d1", name: "甲" }, { id: "d1", name: "乙" }, { name: "丙" }]).map((d) => [
@@ -160,7 +164,7 @@ test("一等子資產：變裝清單清洗的邊界（無名丟、非物件丟�
       d.name,
     ]),
     [
-      ["d1", "甲"],
+      ["d1", "乙"],
       ["丙", "丙"],
     ],
   );
@@ -455,7 +459,7 @@ test("消費端：變裝宣告清洗（字串／物件別名、缺 name 丟、�
   assert.equal(task.needsAsset, true);
 });
 
-test("消費端：綁定式缺件時 prompt 片段與參考圖的處置（記錄現況，非斷言設計偏好）", () => {
+test("消費端：綁定式缺件時 prompt 片段與參考圖**雙清**（fail-closed 落在資料面，不只靠 needsAsset）", () => {
   const hero = heroWithDisguises();
   const tasks = storyboardToBatchTasks(
     {
@@ -463,11 +467,49 @@ test("消費端：綁定式缺件時 prompt 片段與參考圖的處置（記錄
     },
     [hero],
   );
-  // 現況（withCharacterDisguises 文件明載）：參考圖一律清空（不頂替），
-  // prompt 在變裝無片段時沿用卡本體片段（母卡的基礎外觀描述）。
+  // 收口後：參考圖**與** prompt 片段都清空。理由——needsAsset 只是回報欄位，
+  // repo 內沒有任何生產消費端讀它，光靠旗標擋不住「挑 referenceImages/prompt 就出圖」的路徑。
   assert.deepEqual(tasks[0].referenceImages, []);
-  assert.equal(tasks[0].prompt.startsWith("主造型：玄色长袍"), true);
-  assert.equal(tasks[0].needsAsset, true, "閘在 needsAsset：缺件任務不可提交");
+  assert.equal(
+    tasks[0].prompt.startsWith("主造型：玄色长袍"),
+    false,
+    "缺件不得沿用卡本體片段（否則參考圖空了、文字還在＝用主造型出圖）",
+  );
+  assert.equal(tasks[0].prompt.includes("主造型"), false);
+  assert.equal(tasks[0].needsAsset, true, "回報欄位仍在：缺件任務具名給出");
+});
+
+test("消費端：非綁定式缺件時，本鏡**所有**角色卡一起去造型；場景/道具卡不受影響", () => {
+  // 宣告了變裝卻找不到同名變裝（且沒綁 cardId）＝無法歸屬到哪張卡；
+  // 但作者既然宣告了變裝，就不該讓任何角色以主造型出圖 ⇒ 全部角色卡清造型。
+  const hero = heroWithDisguises();
+  const other = addCharacterDisguise(
+    card({ id: "C02", name: "沈砚", prompt: "沈砚：青衫", references: [ref("https://main/shen.png", "沈砚主图")] }),
+    { name: "战损造型", prompt: "战损：血衣", references: [ref("https://dg/shen-hurt.png", "沈砚战损")] },
+  );
+  assert.ok(other, "夹具：沈砚战损新增不应被拒");
+  const tasks = storyboardToBatchTasks(
+    {
+      shots: [
+        {
+          shotId: "S-02",
+          prompt: "对峙",
+          characterCardIds: ["C01", "C02"],
+          sceneCardIds: ["P01"],
+          disguises: [{ name: "缺的造型" }],
+        },
+      ],
+    },
+    [hero, other, sceneCard()],
+  );
+  const task = tasks[0];
+  assert.deepEqual(task.missingDisguiseNames, ["缺的造型"]);
+  assert.equal(task.needsAsset, true);
+  // 兩張角色卡的主造型參考都沒進（C01 主圖 / C02 主圖 / 任一變裝圖皆無），場景參考照進。
+  assert.deepEqual(task.referenceImages.map((r) => r.url), ["https://main/scene.png"]);
+  assert.equal(task.prompt.includes("主造型"), false, "C01 主造型片段不得出現");
+  assert.equal(task.prompt.includes("沈砚：青衫"), false, "C02 主造型片段不得出現");
+  assert.equal(task.prompt.includes("雨夜客栈内景"), true, "场景卡照常注入（只清角色造型，不殃及他類）");
 });
 
 test("消費端：舊分鏡（無 disguises 欄）任務物件逐位不變（零回歸）", () => {
@@ -741,12 +783,27 @@ test("套用：withCharacterDisguises 保留母卡身分欄位，只換 prompt �
   assert.deepEqual(hero.references.map((r) => r.url), ["https://main/hero.png"]);
 });
 
-test("套用：空變裝清單＝參考圖清空（宣告「本鏡不是主造型」），不退化成主造型", () => {
+test("套用：空變裝清單＝參考圖**與 prompt 片段都清空**（宣告「本鏡不是主造型」），不退化成主造型", () => {
   const hero = heroWithDisguises();
   const applied = withCharacterDisguises(hero, []);
   assert.deepEqual(applied.references, []);
-  assert.equal(applied.prompt, "主造型：玄色长袍", "變裝無片段＝沿用卡本體片段（角色的基礎外觀描述）");
+  assert.equal(
+    applied.prompt,
+    "",
+    "空清單＝宣告了變裝卻沒命中（缺件）：不得沿用卡本體片段，否則等於用主造型出圖",
+  );
   assert.notEqual(applied, hero, "仍回 clone，不原地改");
+});
+
+test("套用：命中變裝但變裝自己沒寫 prompt＝沿用卡本體片段（基礎外觀描述）；有寫就用變裝片段", () => {
+  const hero = heroWithDisguises();
+  // 命中、且變裝帶 prompt → 用變裝片段（不混卡本體）。
+  const matched = withCharacterDisguises(hero, [hero.disguises![0]]);
+  assert.equal(matched.prompt, "侠客：斗笠与披风");
+  // 命中、但變裝沒寫 prompt → 沿用卡本體片段（角色基礎外觀仍成立，本鏡只換造型）。
+  const silent = withCharacterDisguises(hero, [{ id: "d-silent", name: "静默造型", references: [ref("https://dg/silent.png", "静默")] }]);
+  assert.equal(silent.prompt, "主造型：玄色长袍");
+  assert.deepEqual(silent.references.map((r) => r.url), ["https://dg/silent.png"]);
 });
 
 test("解析：resolveCharacterDisguises 的命中／具名缺件／cardId 綁定（含宣告序與去重）", () => {
@@ -778,12 +835,19 @@ test("解析：resolveCharacterDisguises 的命中／具名缺件／cardId 綁�
 
 // ═══════════════════════════════════════════ 已知現況（非偏好斷言，供 orchestrator 判定）
 
-test("現況記錄：清單清洗只按 id 去重（同名不同 id 兩條都存活），新增路徑才是按名字覆蓋", () => {
+test("去重鍵與新增路徑一致：同名不同 id 在清洗端就收斂成一條，解析不再取決於清單序", () => {
+  // 這一條原本是「現況記錄」（清洗器只按 id 去重、同名兩條並存、下游按 name 取第一條 ⇒ 結果取決於清單序）。
+  // 收口後：清洗器與 addCharacterDisguise 用同一組去重鍵（id 或 name），且都留最後一張。
   const cleaned = normalizeCharacterDisguises([
     { id: "d1", name: "侠客造型", references: [ref("https://dg/a.png", "a")] },
     { id: "d2", name: "侠客造型", references: [ref("https://dg/b.png", "b")] },
   ]);
-  assert.equal(cleaned.length, 2, "同名不同 id：清洗器兩條都留（去重鍵是 id）");
-  // 下游按名字解析 → 取第一條；新增路徑（addCharacterDisguise）則不會產生這種資料。
-  assert.deepEqual(resolveCharacterDisguises([card({ id: "C01", disguises: cleaned })], [{ name: "侠客造型" }]).matched[0].disguise.id, "d1");
+  assert.equal(cleaned.length, 1, "同名不同 id：清洗端即收斂成唯一（去重鍵＝id 或 name）");
+  assert.equal(cleaned[0].id, "d2", "留最後一張（與 addCharacterDisguise 的覆蓋語義同向）");
+  assert.deepEqual(cleaned[0].references.map((r) => r.url), ["https://dg/b.png"], "留下的是最後一張的參考圖");
+
+  // 解析結果因此是確定的：同一份輸入無論順序如何，命中的都是唯一那一條。
+  const matchedId = resolveCharacterDisguises([card({ id: "C01", disguises: cleaned })], [{ name: "侠客造型" }])
+    .matched[0].disguise.id;
+  assert.equal(matchedId, "d2");
 });

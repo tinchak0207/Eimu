@@ -495,7 +495,9 @@ function resolveCardRefs(
  *     併入注入集（mergeTokenReferencedCards）——卡在庫即可被引用，不必先手動鎖定
  *   - propCardIds 的道具卡与角色/场景卡**同批**进 applyCharacterCards（同一把注入尺，不另开通道）
  *   - `disguises` 宣告（D8）：命中的变装**替换该角色卡在本镜的参考图与 prompt 片段**
- *     （不混用主造型）；找不到＝`needsAsset` + `missingDisguiseNames`（具名），主造型不代打
+ *     （不混用主造型）；找不到＝`needsAsset` + `missingDisguiseNames`（具名），主造型不代打——
+ *     缺件時**這一鏡全部角色卡一起去造型**（參考圖與 prompt 片段雙清），
+ *     因為 `needsAsset` 沒有生產消費端，缺件的安全必須落在資料面（見 `withCharacterDisguises`）
  *   - 引用卡 id 不存在或种类不符 → 该任务 needsAsset=true + missingCardIds，
  *     已解析卡照常注入（补齐资产后重切结果稳定）
  *   - 输入宽松：直接喂原始 storyboard 段；cards 来自 character-card-store 的当前态
@@ -524,15 +526,24 @@ export function storyboardToBatchTasks(storyboard: unknown, cards: CharacterCard
       ...boundCardIds,
       ...resolvedDisguises.matched.map((hit) => hit.cardId),
     ]);
+    const missingDisguiseNames = resolvedDisguises.missing;
+    // 有未解析的變裝宣告（缺件）時，**本鏡所有角色卡一律當成「不是主造型」**（`withCharacterDisguises(card, [])`：
+    // 參考圖與 prompt 片段都清空）：
+    //   * 綁定式缺件——那張卡已知，本來就該清；
+    //   * 非綁定式缺件——`resolveCharacterDisguises` 是「在所有角色卡按 name 找」，找不到代表沒人穿得上，
+    //     此時無法歸屬到哪張卡；但作者既然宣告了變裝，就不該讓任何角色以主造型出圖。
+    // 為什麼非清不可：`needsAsset`／`missingDisguiseNames` 只是回報欄位，**repo 內沒有任何生產消費端讀它**
+    // （只有測試在讀），所以光靠旗標擋不住「挑 referenceImages 就出圖」的路徑——安全必須落在資料面。
+    // 仍保留卡身分與 loraIds／negativePrompt（`withCharacterDisguises` 是 spread），只清造型資料。
+    const hasUnresolvedDisguise = missingDisguiseNames.length > 0;
     const characterCards = characterRefs.found.map((card) =>
-      disguisedCardIds.has(card.id)
+      hasUnresolvedDisguise || disguisedCardIds.has(card.id)
         ? withCharacterDisguises(
             card,
             resolvedDisguises.matched.filter((hit) => hit.cardId === card.id).map((hit) => hit.disguise),
           )
         : card,
     );
-    const missingDisguiseNames = resolvedDisguises.missing;
     // 卡 id 序稳定拼接：applyCharacterCards 内部按 id 升序注入，与传入顺序无关。
     // 顺序照写 character → scene → prop（只影响可读性：applyCharacterCards 内部本就按 id 升序重排）。
     const appliedCards = [...characterCards, ...sceneRefs.found, ...propRefs.found];

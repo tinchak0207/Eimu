@@ -440,19 +440,29 @@ export function normalizeCharacterDisguise(payload: unknown): CharacterCardDisgu
   };
 }
 
-/** 清洗變裝清單：非法項丟、同 id 只留第一張、上限 `MAX_DISGUISES_PER_CARD` 截尾。 */
+/**
+ * 清洗變裝清單：非法項丟、**同 id 或同 name 只留最後一張**、上限 `MAX_DISGUISES_PER_CARD` 截尾。
+ *
+ * 為什麼是「同 id **或**同 name」且留最後一張：去重鍵必須與 `addCharacterDisguise` 一致。
+ * 新增路徑覆蓋既有變裝時用的判準是 `d.id === id || d.name === name`，即**同名不同 id 也會被覆蓋**
+ * （舊稿被移出、新稿排在後面）——舊版清洗器只按 `id` 去重，於是「同名不同 id」兩條並存，
+ * 而下游 `resolveCharacterDisguises` 是**按 name 取第一條**，解析結果就取決於清單序（不確定）。
+ * 留最後一張而非第一張，理由同上：清洗器讀的是可能被多次寫入過的持久化資料，
+ * 先出現者是被覆蓋掉的舊稿；若留第一張，把 add 路徑寫出的資料再清洗一次會把舊稿復活。
+ */
 export function normalizeCharacterDisguises(raw: unknown): CharacterCardDisguise[] {
-  const out: CharacterCardDisguise[] = [];
-  const seen = new Set<string>();
-  if (!Array.isArray(raw)) return out;
+  if (!Array.isArray(raw)) return [];
+  const kept = new Map<string, CharacterCardDisguise>();
   for (const item of raw) {
     const disguise = normalizeCharacterDisguise(item);
-    if (!disguise || seen.has(disguise.id)) continue;
-    seen.add(disguise.id);
-    out.push(disguise);
-    if (out.length >= MAX_DISGUISES_PER_CARD) break;
+    if (!disguise) continue;
+    for (const [key, existing] of kept) {
+      if (existing.id === disguise.id || existing.name === disguise.name) kept.delete(key);
+    }
+    kept.set(disguise.id, disguise);
   }
-  return out;
+  // 截尾在去重之後：上限管的是「最終有幾張」，不是「掃過幾筆」。
+  return [...kept.values()].slice(0, MAX_DISGUISES_PER_CARD);
 }
 
 /** 清洗必要變裝名清單：trim、去重、上限 `MAX_REQUIRED_DISGUISES` 截尾。 */
@@ -627,8 +637,9 @@ export function resolveCharacterDisguises(
  *     變裝的造型由它自己的參考圖表達，混入主造型參考即「靜默用主造型頂替」；
  *     變裝沒帶參考圖＝這一鏡沒有角色參考（缺件由 `resolveCharacterDisguises.missing` /
  *     審計函式具名回報，不靠主造型補位）。
- *   - prompt＝各變裝片段（去重、"\\n" 連接）；全都沒片段＝沿用卡本體片段
- *     （那是角色的基礎外觀描述，不是造型替換）。
+ *   - prompt＝各變裝片段（去重、"\\n" 連接）。**缺件（`disguises` 為空）時 prompt 一律清空**，
+ *     不沿用卡本體片段——參考圖已清空而文字還在，等於用主造型出圖；命中的變裝自己沒寫 prompt
+ *     才沿用卡本體片段（那是角色的基礎外觀描述，不是造型替換）。
  *   - 卡 id / 名稱 / kind / loraIds / negativePrompt 原樣保留（母卡身分不變，
  *     卡 id 序鎖定注入與分鏡引用欄零遷移）。
  * 呼叫本函式＝宣告「本卡在這一鏡**不是主造型**」⇒ 變裝清單為空時參考圖一樣清空
@@ -655,9 +666,15 @@ export function withCharacterDisguises(
       });
     }
   }
+  // prompt：全部變裝都沒片段時要分辨兩種形狀相同的處境——
+  //   * `disguises` 為空＝**這張卡在這一鏡宣告了變裝卻沒命中（缺件）**：不得沿用卡本體片段，
+  //     否則參考圖清空了、文字描述卻還在，等於用主造型去出圖（缺件必須整格 fail-closed）。
+  //   * `disguises` 非空但都沒寫 prompt＝命中變裝、只是它沒描述：沿用卡本體片段合理
+  //     （角色的基礎外觀描述仍然成立，這一鏡換的只是造型）。
+  const missingDeclaration = disguises.length === 0;
   return {
     ...card,
-    prompt: fragments.length ? fragments.join("\n") : card.prompt,
+    prompt: fragments.length ? fragments.join("\n") : missingDeclaration ? "" : card.prompt,
     references,
   };
 }
