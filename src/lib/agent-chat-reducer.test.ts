@@ -1065,3 +1065,15 @@ test("superseded 幀就地換掉既有計畫文字（同一 id），不新增第
   assert.equal(plans[0].text, "新計畫：先拆解剧情节拍，再逐镜生成并剪辑。");
   assert.equal(plans[0].collapsed, true, "換文字不動使用者在看／收合狀態");
 });
+
+test("思考後直接調工具：tool.invoke 當下結算 reasoningMs，不拖到整輪結束", () => {
+  let s = agentChatReducer(EMPTY, evt({ name: "reasoning.delta", event_id: 1, data: { text: "先抓影片" } }));
+  const started = s.items[0];
+  assert.equal(started.kind, "assistant");
+  assert.equal(started.kind === "assistant" ? started.reasoningMs : "x", undefined);
+  s = agentChatReducer(s, evt({ name: "tool.invoke", event_id: 2, data: { tool: "video_fetch", args_summary: "{}" } }));
+  const settled = s.items[0];
+  assert.equal(settled.kind, "assistant");
+  assert.equal(typeof (settled.kind === "assistant" ? settled.reasoningMs : undefined), "number");
+  assert.equal(s.items[1].kind, "tool");
+});

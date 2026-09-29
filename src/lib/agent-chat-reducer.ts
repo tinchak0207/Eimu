@@ -153,7 +153,17 @@ function reduceToolInvoke(state: AgentChatState, event: AgentSseEvent & { name: 
     argsSummary: event.data.args_summary,
     status: "running",
   };
-  return { ...state, items: [...state.items, item], turnActive: true };
+  // 思維鏈結算時機 c（2026-09-29 e2e 像素實錘）：想完直接調工具、中間沒有正文時，
+  // 原本要等整輪 settleItems 才結算——每段「已思考 · N 秒」都變成「從它開始到整輪
+  // 結束」（實測 117/109/104/94… 秒遞減排列）。工具一開跑＝這段思考已結束。
+  const items = state.items.slice();
+  const last = items[items.length - 1];
+  if (last && last.kind === "assistant") {
+    const reasoningMs = settleReasoningMs(last, Date.now());
+    if (reasoningMs !== undefined) items[items.length - 1] = { ...last, reasoningMs };
+  }
+  items.push(item);
+  return { ...state, items, turnActive: true };
 }
 
 function reduceToolProgress(state: AgentChatState, event: AgentSseEvent & { name: "tool.progress" }): AgentChatState {
