@@ -325,7 +325,7 @@ function PipelineStepSelector({ steps, selected, onToggle, onSelectOnly, onSubmi
       {/* 引导文案：一行讲清「勾选全选 + 单击开关 + 拖拽=选正集」三种动线。 */}
       <p
         data-atc-hint
-        className="mb-1.5 select-none text-center text-[11px] leading-[1.4] text-white/85 [text-shadow:0_1px_3px_rgba(0,0,0,0.75)]"
+        className="mb-1.5 select-none text-center text-[0.6875rem] leading-[1.4] text-white/85 [text-shadow:0_1px_3px_rgba(0,0,0,0.75)]"
       >
         {dragCount !== null
           ? `已选 ${dragCount}/${steps.length} · 松开完成`
@@ -407,7 +407,7 @@ function PipelineStepSelector({ steps, selected, onToggle, onSelectOnly, onSubmi
                  字影保右侧亮云背景上的识别度。 */
               className={cn(
                 "atc-step-chip inline-flex h-10 w-full touch-none select-none items-center justify-center rounded-full px-1",
-                "text-[10px] leading-none tracking-[-0.2px] transition-colors duration-150 motion-reduce:transition-none",
+                "text-[0.625rem] leading-none tracking-[-0.2px] transition-colors duration-150 motion-reduce:transition-none",
                 "[text-shadow:0_1px_2px_rgba(0,0,0,0.5)]",
                 /* 按压反馈：按下即提亮（触控板用户需要立刻看到「收到了」）。 */
                 "cursor-pointer active:brightness-150",

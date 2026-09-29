@@ -124,7 +124,7 @@ export function CanvasChatWorkstation({
                壓過本 :root 規則）。消費端：.canvas-chat-panel 的 width、
                overlay 的 --ce-dock-left、Navbar 的 --ws-navbar-inset fallback。 */
             :root {
-              --ws-panel-w: clamp(360px, 40vw, 720px);
+              --ws-panel-w: clamp(22.5rem, 40vw, 45rem);
             }
             @keyframes canvas-ws-fade {
               from { opacity: 0; }
@@ -223,7 +223,7 @@ export function CanvasChatWorkstation({
               /* 殼退為形狀宿主：底色/邊框交給內層 section.lg-card 的玻璃材質
                  （0.72 白玻璃＋blur＋specular 亮線），畫布在背後可折射。 */
               background: transparent;
-              border-radius: 30px;
+              border-radius: 1.875rem;
               overflow: hidden;
               /* header 彈窗（歷史/資產/設定）水平置中用的頂部偏移。
                  2026-09-24 收斂：這些彈層是 fixed 於視口水平置中（left-1/2），
@@ -246,8 +246,8 @@ export function CanvasChatWorkstation({
               bottom: auto !important;
               right: auto !important;
               left: var(--site-shell-left, 0.75rem);
-              width: 44px !important;
-              height: 44px !important;
+              width: 2.75rem !important;
+              height: 2.75rem !important;
               min-width: 0 !important;
               max-width: none !important;
               overflow: hidden;
@@ -297,7 +297,7 @@ export function CanvasChatWorkstation({
               min-height: 0;
               overflow: hidden;
               margin: 0;
-              border-radius: 30px;
+              border-radius: 1.875rem;
               /* 2026-09-24 用戶版面方案（卡片減法陰影）：壓掉全域 lg-card 的
                  重陰影與四邊漸變邊框——「深陰影會讓它顯得過時，邊框撐浮感就夠」；
                  只覆寫 box-shadow/border，lg-card 的玻璃材質（backdrop-filter）
@@ -371,17 +371,24 @@ export function CanvasChatWorkstation({
           {/* 2026-09-29 跨螢幕不變量：工作站是應用式滿屏，面板／overlay 左右緣都由
               Navbar 量出的 --site-shell-left/right 推導；頁殼 max-w-[1440px] 在
               >1440 視口會把整個工作站夾成置中窄殼、兩側大片留白。工作站態解除
-              導覽列頁殼上限（pro 態仍 1440，與其內容欄對齊）。SSR 首幀即生效。 */}
-          <style>{`#global-navbar.page-shell { max-width: none; }`}</style>
+              導覽列頁殼上限（pro 態仍 1440，與其內容欄對齊）。SSR 首幀即生效。
+              同刀·等比縮放：設計基準視口＝暴君本機 1274×664 CSS px。工作站全部
+              尺寸走 rem（面板寬/間隙/圓角/FAB 已改 rem），根字級按 min(寬比,高比)
+              放大 → 大螢幕上間距、呼吸感、字級與視口的比例和基準機一致；下限
+              16px（基準機及更小視口零變化），上限 26px（≈1.6 倍）。 */}
+          <style>{`
+            #global-navbar.page-shell { max-width: none; }
+            html { font-size: clamp(16px, min(100vw * 16 / 1274, 100vh * 16 / 664), 26px); }
+          `}</style>
           <div className={cn("canvas-ws-backdrop", wsSettled && "canvas-ws-settled")} aria-hidden="true" />
           <div
             className={cn("canvas-ws-overlay", wsSettled && "canvas-ws-settled")}
             style={
               {
-                /* dock 偏移讀單一真相源：expanded = 面板寬+12px 間隙（CSS 變數
-                   即時跟隨拖寬，JS 不經回寫）；rail 態 = 64px（FAB 44＋間隙）
+                /* dock 偏移讀單一真相源：expanded = 面板寬+0.75rem 間隙（CSS 變數
+                   即時跟隨拖寬，JS 不經回寫）；rail 態 = 4rem（FAB 2.75rem＋間隙）
                    保持既有分支。字符串常量化＝SSR 首幀即終態、零 hydration 跳動。 */
-                "--ce-dock-left": chatPanelState === "rail" ? "64px" : "calc(var(--ws-panel-w) + 12px)",
+                "--ce-dock-left": chatPanelState === "rail" ? "4rem" : "calc(var(--ws-panel-w) + 0.75rem)",
                 left: "calc(var(--site-shell-left, 0.75rem) + var(--ce-dock-left, 0px))",
               } as CSSProperties
             }

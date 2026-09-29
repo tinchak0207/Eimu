@@ -32,7 +32,7 @@
      = 0.1×cardH + 16 + 44；此處 0.1×cardH + 76 → Dock 底緣恒留 16px 淨空，
      縮放（手機/桌面卡高不同）不重疊。--case-card-h 由 .case-stage 定義、
      繼承到卡面，SSR 兜底值 390 與 CSS 默認幾何一致。 */
-  padding-bottom: calc(var(--case-card-h, 390px) * 0.1 + 76px);
+  padding-bottom: calc(var(--case-card-h, 390px) * 0.1 + 4.75rem);
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -92,6 +92,15 @@
   margin-inline: auto;
 }
 
+/* 2026-09-29 跨螢幕等比：卡寬隨畫布寬放大，透視距離若恆 1400px，大螢幕上
+   3D 環的縱深感會變強、形變跟基準機（卡寬 525px ↔ 1400px）不一致。
+   桌面改成跟卡寬等比（2.667×）；手機維持原 1400px 觀感。 */
+@media (min-width: 768px) {
+  .agent-template-carousel .case-stage {
+    perspective: calc(var(--case-card-w, 525px) * 2.667);
+  }
+}
+
 /* R9-4：driver.js 弹层 z-index 硬顶在页面浮层之上——教学弹窗盖住交互按钮时，
    用户点不到「下一步」会以为是引导坏了。overlay 挖槽/背板由 driver.js 自带
    CSS 提供，这里只保证弹窗本体不被其他高 z 元素压住。 */
@@ -132,7 +141,7 @@
 
 .agent-template-carousel .atc-controls {
   position: absolute;
-  bottom: calc(8.334% + 16px);
+  bottom: calc(8.334% + 1rem);
   left: 50%;
   transform: translateX(-50%);
   margin-top: 0; /* 中和 flow 時代的 mt-4：absolute 下 margin-top 會把盒子上抬 16px */

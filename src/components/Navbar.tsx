@@ -313,7 +313,7 @@ export function Navbar({ className }: NavbarProps) {
           className={cn(
             "lg-bar pointer-events-auto flex items-center justify-between gap-2 overflow-hidden rounded-ios-3xl px-2.5 py-2 sm:px-4 sm:py-2.5",
             isHome
-              ? "ml-[var(--ws-navbar-inset,calc(var(--ws-panel-w,420px)_+_12px))] w-[calc(100%_-_var(--ws-navbar-inset,calc(var(--ws-panel-w,420px)_+_12px)))]"
+              ? "ml-[var(--ws-navbar-inset,calc(var(--ws-panel-w,420px)_+_0.75rem))] w-[calc(100%_-_var(--ws-navbar-inset,calc(var(--ws-panel-w,420px)_+_0.75rem)))]"
               : "ml-0 w-full",
             "max-md:ml-0 max-md:w-full",
           )}
@@ -442,7 +442,7 @@ export function Navbar({ className }: NavbarProps) {
                     手机端（<sm）也必须显示：用户名文字隐藏、退出图标保留——
                     账户出口在手机上消失 = 用户无法登出。 */}
                 <div className="lg-float flex shrink-0 items-center gap-1 rounded-full py-1 pl-2.5 pr-1 lg:pl-3">
-                  <span className="hidden max-w-[72px] truncate text-ios-footnote font-medium text-[rgba(0,0,0,0.56)] lg:inline xl:max-w-[88px]">
+                  <span className="hidden max-w-[4.5rem] truncate text-ios-footnote font-medium text-[rgba(0,0,0,0.56)] lg:inline xl:max-w-[5.5rem]">
                     {user.display_name || user.username}
                   </span>
                   <button

@@ -99,11 +99,11 @@ test("canvas workstation is a fullscreen overlay with expandable chat panel", ()
   assert.doesNotMatch(source, /useState<number \| null>\(null\)/);
   assert.match(source, /canvas-chat-resize/);
   assert.match(source, /chatPanelState === "rail" && "canvas-chat-rail"/);
-  // 畫布 dock 偏移＝--ws-panel-w 終態＋12px 間隙（不再由 JS 算 chatPanelWidth+12），
+  // 畫布 dock 偏移＝--ws-panel-w 終態＋0.75rem 間隙（不再由 JS 算 chatPanelWidth+12），
   // overlay 自身 left 用它避讓面板；起點是導覽列實測左緣（--site-shell-left，
   // 0924 排版對齊刀），fallback 0.75rem。
   assert.match(source, /--ce-dock-left/);
-  assert.match(source, /"--ce-dock-left": chatPanelState === "rail" \? "64px" : "calc\(var\(--ws-panel-w\) \+ 12px\)"/);
+  assert.match(source, /"--ce-dock-left": chatPanelState === "rail" \? "4rem" : "calc\(var\(--ws-panel-w\) \+ 0\.75rem\)"/);
   assert.match(source, /left: "calc\(var\(--site-shell-left, 0\.75rem\) \+ var\(--ce-dock-left, 0px\)\)"/);
   assert.match(embed, /expanded = false/);
   assert.match(nodeView, /enterDelay/);
@@ -199,7 +199,7 @@ test("first paint is the final state: --ws-panel-w single source + settled gate 
 
   // ① 單一真相源：CSS 默認＝新用戶終態（clamp 360–720 of 40vw），宣告在
   //    工作站 <style> 的 :root——與 SSR 首幀同梱，零 JS。
-  assert.match(ws, /--ws-panel-w: clamp\(360px, 40vw, 720px\)/);
+  assert.match(ws, /--ws-panel-w: clamp\(22\.5rem, 40vw, 45rem\)/);
   // ② JS 寫入端只在顯式值（存值/拖寬）時存在，且全部 useLayoutEffect（paint 前）：
   //    顯式→setProperty px；null→removeProperty 讓位 CSS 默認。
   assert.match(panel, /useLayoutEffect\(\(\) => \{/);
@@ -225,8 +225,8 @@ test("first paint is the final state: --ws-panel-w single source + settled gate 
   //    否則 reload /history 等頁會因 fallback 無端退縮。fallback 指面板寬終態。
   assert.match(navbar, /usePathname/);
   assert.match(navbar, /pathname === "\/"/);
-  assert.match(navbar, /ml-\[var\(--ws-navbar-inset,calc\(var\(--ws-panel-w,420px\)_\+_12px\)\)\]/);
-  assert.match(navbar, /w-\[calc\(100%_-_var\(--ws-navbar-inset,calc\(var\(--ws-panel-w,420px\)_\+_12px\)\)\)\]/);
+  assert.match(navbar, /ml-\[var\(--ws-navbar-inset,calc\(var\(--ws-panel-w,420px\)_\+_0\.75rem\)\)\]/);
+  assert.match(navbar, /w-\[calc\(100%_-_var\(--ws-navbar-inset,calc\(var\(--ws-panel-w,420px\)_\+_0\.75rem\)\)\)\]/);
   assert.match(navbar, /max-md:ml-0 max-md:w-full/);
   // 首幀即退縮＝舊「0px 起步 + JS 動畫退縮」契约作废；nav 上的常開 transition
   // 類別必須全面退場（殘留＝回縮動畫回魂）。
