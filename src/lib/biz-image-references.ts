@@ -17,6 +17,7 @@
 import { createHash } from "node:crypto";
 import { put } from "@/lib/blob-backend";
 import { validateImageBuffer } from "@/lib/generation-core/artifact-service";
+import { MAX_REQUEST_REFERENCE_IMAGES } from "@/lib/generation-core/request-limits";
 import type { GenerationReference, GenerationWorkflow } from "@/lib/generation-core/types";
 import { applyCharacterCards } from "./character-cards";
 import type { CharacterCard } from "./character-cards";
@@ -32,8 +33,12 @@ import {
 /** data:image URI 單張大小上限（4MB；Vercel 請求體限制留餘裕）。 */
 export const MAX_DATA_IMAGE_BYTES = 4 * 1024 * 1024;
 
-/** 單次生成最多帶的參考圖張數（與 /api/canvas/generate 同尺）。 */
-export const MAX_REFERENCE_IMAGES = 5;
+/**
+ * 單次生成最多帶的參考圖張數（與 /api/canvas/generate 同尺）。
+ * 值＝執行端常數單點（`generation-core/request-limits.ts`）——本檔只是這個閘門的
+ * **引用點**，不再自己存一份數字（D23：能力契約揭露的值與真的擋人的值必須同一顆）。
+ */
+export const MAX_REFERENCE_IMAGES = MAX_REQUEST_REFERENCE_IMAGES;
 
 /** 參考圖名稱上限（與 character-cards 的 MAX_REFERENCE_NAME_LENGTH 同尺）。 */
 const MAX_REFERENCE_NAME_LENGTH = 60;

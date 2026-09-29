@@ -1,6 +1,9 @@
 import { GENERATION_MODEL_CATALOG } from "./catalog";
 import { currentEffectiveCatalog } from "./pricing-overrides";
 import { servableUpscaleTiers } from "../generation-core/upscale-tier";
+// 數量上限的唯一真源（葉模組，零 import）：能力投射與執行端閘門吃同一顆常數。
+// **不得**改從 route 或 biz-image-references 取——那兩者會把 node:/DB 拖進 client bundle。
+import { MAX_REQUEST_BATCH_COUNT, MAX_REQUEST_REFERENCE_IMAGES } from "../generation-core/request-limits";
 import type { AspectRatio, OutputResolution, GenerationModelDefinition, GenerationCapabilityProjection, GenerationConfigInput, GenerationConfigNormalization, ModelKnowledge, VideoGenerationType, UpscaleTier } from "./types";
 
 /**
@@ -57,6 +60,11 @@ export function generationCapabilities(modelId: string): GenerationCapabilityPro
     resolutions: model.resolutions,
     durations: model.durations ?? [],
     referenceImages: model.referenceImages,
+    // 能力契約（對稱差 D23／P1-7）：揭露「實際會擋人的數字」。
+    // 參考圖張數只在模型真的收參考圖時給（不收的模型省略 ⇒ 不輸出空能力宣稱）；
+    // 批次數每個模型都給。兩者皆直接取自執行端常數，能力宣告與提交閘門同源。
+    maxBatchCount: MAX_REQUEST_BATCH_COUNT,
+    ...(model.referenceImages ? { maxReferenceImages: MAX_REQUEST_REFERENCE_IMAGES } : {}),
     audio: model.supportsAudio === true,
     lora: model.supportsLora === true || model.vendor === "PixAI",
     qualityModes: model.kind === "image" && model.resolutions.some((resolution) => resolution === "2k" || resolution === "4k")

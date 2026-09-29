@@ -10,6 +10,7 @@ import {
   resolveGenerationModelId,
 } from "@/lib/generation-model-catalog";
 import { generationControlPlaneEnabled } from "@/lib/generation-core/database";
+import { MAX_REQUEST_BATCH_COUNT } from "@/lib/generation-core/request-limits";
 import { submitGenerationCommand } from "@/lib/generation-core/command-service";
 import { enforceQuotaGate } from "@/lib/generation-core/quota-precheck";
 import { IdempotencyConflictError } from "@/lib/generation-core/job-repository";
@@ -31,8 +32,11 @@ export const maxDuration = 300;
 export const preferredRegion = "sfo1";
 
 const MAX_PROMPT_LENGTH = 4_000;
-/** 一次请求最多几段视频。再多会顶到上游并发的极限。 */
-const MAX_N = 4;
+/** 一次请求最多几段视频。再多会顶到上游并发的极限。
+ *  值＝數量上限單點（generation-core/request-limits.ts），與 `/v1/models` 的
+ *  `x_capabilities.maxBatchCount` 同一顆常數（D23）。
+ */
+const MAX_N = MAX_REQUEST_BATCH_COUNT;
 
 type OpenAIErrorType =
   | "invalid_request_error"

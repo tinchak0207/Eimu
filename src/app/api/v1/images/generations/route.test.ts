@@ -28,6 +28,8 @@ import {
   resolveEditReference,
 } from "@/lib/biz-image-references";
 import { POST } from "./route";
+import { generationCapabilities } from "@/lib/generation-model-catalog";
+import { MAX_REQUEST_BATCH_COUNT } from "@/lib/generation-core/request-limits";
 
 const VALID_KEY = `sk-biz-${"a1b2c3d4e5f60718".repeat(2)}`;
 const USER_ID = 4242;
@@ -343,4 +345,35 @@ test("route：无参考图时不进 fail-closed 分支（零回归的 route 层�
   // 关键是它**不是** 501 references_require_control_plane —— 新分支只咬真的带了参考图的请求。
   assert.equal(bare.response.status, 502);
   assert.equal(bare.body.error?.code, "no_endpoints");
+});
+
+// ─────────────────────────────────────────── 能力契约 ⨯ 真行为（D23／P1-7）
+
+test("能力契约的批次数＝真的挡人的 n 闸：n = maxBatchCount + 1 → 400 invalid_n", async () => {
+  const advertised = generationCapabilities(MODEL)?.maxBatchCount;
+  assert.equal(advertised, MAX_REQUEST_BATCH_COUNT, "前置：能力面必须揭露执行端常量");
+
+  // 上限内（＝广告值）必须放行到既有分支（本机无渠道 → 502 no_endpoints，不是 invalid_n）。
+  const atLimit = await post({ model: MODEL, prompt: "一只猫", n: advertised });
+  assert.notEqual(atLimit.body.error?.code, "invalid_n", `n = ${advertised}（广告值）不得被判非法`);
+
+  // 上限 +1 必须被同一颗常数挡下（揭露值与挡人值同源，不是两份）。
+  const over = await post({ model: MODEL, prompt: "一只猫", n: (advertised ?? 0) + 1 });
+  assert.equal(over.response.status, 400);
+  assert.equal(over.body.error?.code, "invalid_n");
+  assert.ok(over.body.error?.trace_id, "400 必须带 trace_id");
+});
+
+test("能力契约的参考上限＝真的挡人的闸：reference_images = maxReferenceImages + 1 张 → 400 invalid_reference_images", async () => {
+  const advertised = generationCapabilities(MODEL)?.maxReferenceImages;
+  assert.equal(typeof advertised, "number", `前置：${MODEL} 必须揭露参考图上限`);
+
+  const over = await post({
+    model: MODEL,
+    prompt: "一只猫",
+    reference_images: Array.from({ length: (advertised ?? 0) + 1 }, (_, index) => `https://cdn.example/${index}.png`),
+  });
+  assert.equal(over.response.status, 400);
+  assert.equal(over.body.error?.code, "invalid_reference_images");
+  assert.ok(over.body.error?.trace_id, "400 必须带 trace_id");
 });

@@ -66,7 +66,7 @@ const SPEC = {
         operationId: "listModels",
         summary: "列出可用模型（圖像 + 視頻，含能力、單價、文檔鏈接）",
         description:
-          "只返回當前密鑰真正有權調用的模型，圖像與視頻同列一張表。每項帶非標準擴展 `x_endpoint`（該往哪個端點投递）、`x_capabilities`（能力面投影）、`x_docs_url`、`x_openapi_url`；圖像另帶 `x_coins_per_image`（standard/hd），視頻另帶 `x_coins_per_second`（按解析度的每秒單價）。",
+          "只返回當前密鑰真正有權調用的模型，圖像與視頻同列一張表。每項帶非標準擴展 `x_endpoint`（該往哪個端點投递）、`x_capabilities`（逐模型能力契約：比例／解析度／時長／品質檔／生成型別／超分檔位／批次数 `maxBatchCount`／參考上限 `maxReferenceImages`）、`x_docs_url`、`x_openapi_url`；圖像另帶 `x_coins_per_image`（standard/hd），視頻另帶 `x_coins_per_second`（按解析度的每秒單價）。",
         security: [bearerAuth],
         responses: {
           200: {
@@ -1017,14 +1017,25 @@ const SPEC = {
       },
       ModelCapabilities: {
         type: "object",
-        description: "x_capabilities：能力面投影，聚合平台可用它決定是否把模型上架。",
+        description:
+          "x_capabilities：逐模型的能力契約（對稱差 D23／P1-7），聚合平台可用它決定是否把模型上架、以及提交前預檢。數量面的值真源＝執行端常數，與真的擋人的閘同源；但**能力宣告 ≠ 一定能提交**（上限是全站共同上限，模型／上游可能更嚴）。",
         properties: {
           modelId: { type: "string" },
           mediaType: { type: "string", enum: ["image", "video"] },
           aspectRatios: { type: "array", items: { type: "string" } },
           resolutions: { type: "array", items: { type: "string" } },
           durations: { type: "array", items: { type: "integer" } },
-          referenceImages: { type: "boolean" },
+          referenceImages: { type: "boolean", description: "該模型是否收參考圖（不收則省略 maxReferenceImages）。" },
+          maxReferenceImages: {
+            type: "integer",
+            description:
+              "每次請求可帶的參考圖上限（只有 referenceImages=true 的模型有）。值＝/v1/images/generations 的 invalid_reference_images 閘。",
+          },
+          maxBatchCount: {
+            type: "integer",
+            description:
+              "每次請求可出的張數／段數上限（每個模型都有）。值＝/v1/images|videos/generations 的 `n` 閘，超限回 400 invalid_n。",
+          },
           audio: { type: "boolean" },
           lora: { type: "boolean" },
           qualityModes: { type: "array", items: { type: "string", enum: ["fast", "quality"] } },
@@ -1032,6 +1043,17 @@ const SPEC = {
           defaultResolution: { type: "string" },
           defaultDuration: { type: "integer" },
           defaultAudio: { type: "boolean" },
+          videoGenerationTypes: {
+            type: "array",
+            items: { type: "string", enum: ["generate", "extend_video", "edit_video"] },
+            description: "只有 video 模型有；缺省代表只支援 generate。",
+          },
+          promptCharLimit: { type: "integer", description: "只有 video 模型有：提交端 prompt 字元硬上限。" },
+          upscaleTiers: {
+            type: "array",
+            items: { type: "string", enum: ["1k", "2k", "4k"] },
+            description: "只有宣告超分鏈路的模型有；只列**此刻可提交**的檔位。",
+          },
         },
       },
       ModelObject: {

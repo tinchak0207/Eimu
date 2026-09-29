@@ -31,6 +31,7 @@ import { generationRequestHash } from "./crypto";
 import { getGenerationSql, type GenerationSql } from "./database";
 import { mapGenerationJob } from "./job-repository";
 import { taskStatus } from "./task-response";
+import { MAX_REQUEST_BATCH_COUNT } from "./request-limits";
 import type { GenerationJob, GenerationJobStatus, GenerationWorkflow } from "./types";
 
 // ─────────────────────────────────────────── 常量（可調）
@@ -41,7 +42,9 @@ export const MAX_BATCH_SIZE = 100;
 export const MAX_IN_FLIGHT_LIMIT = 1_000;
 /** 與 /v1/images/generations、/v1/videos/generations 逐項對齊的約束。 */
 export const MAX_BATCH_ITEM_PROMPT_LENGTH = 4_000;
-export const MAX_BATCH_ITEM_N = 4;
+/** 逐項 `n` 上限＝單點常數（request-limits.ts），與 `/v1/models` 的
+ *  `x_capabilities.maxBatchCount` 同一顆（D23：揭露值＝擋人值）。 */
+export const MAX_BATCH_ITEM_N = MAX_REQUEST_BATCH_COUNT;
 /** 與 /v1/images/generations 的 SUPPORTED_SIZES 對齊（上游只接受這三種）。 */
 const BATCH_IMAGE_SIZES = new Set(["1024x1024", "1536x1024", "1024x1536"]);
 

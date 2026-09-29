@@ -22,6 +22,7 @@ import {
   type BizGenerationInputPlan,
 } from "@/lib/biz-image-references";
 import { generationControlPlaneEnabled } from "@/lib/generation-core/database";
+import { MAX_REQUEST_BATCH_COUNT } from "@/lib/generation-core/request-limits";
 import { submitGenerationCommand } from "@/lib/generation-core/command-service";
 import { enforceQuotaGate, INSUFFICIENT_BALANCE_ERROR } from "@/lib/generation-core/quota-precheck";
 import { IdempotencyConflictError } from "@/lib/generation-core/job-repository";
@@ -56,8 +57,12 @@ const SUPPORTED_SIZES = new Set(["1024x1024", "1536x1024", "1024x1536", "2048x20
 const REJECTION_PATH = "/v1/images/generations";
 const DEFAULT_SIZE = "1024x1024";
 const MAX_PROMPT_LENGTH = 4_000;
-/** 一次请求最多出几张。再多会顶到 maxDuration。 */
-const MAX_N = 4;
+/**
+ * 一次请求最多出几张。再多会顶到 maxDuration。
+ * 值＝數量上限單點（generation-core/request-limits.ts）——`/v1/models` 的
+ * `x_capabilities.maxBatchCount` 揭露的是同一顆常數，不另存第二份（D23）。
+ */
+const MAX_N = MAX_REQUEST_BATCH_COUNT;
 
 type OpenAIErrorType =
   | "invalid_request_error"

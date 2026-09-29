@@ -24,6 +24,16 @@ const REJECTION_PATH = "/v1/models";
  * 端点投递；单价按介质给不同的扩展字段（图像按张、视频按秒）。
  * 标准字段一个不少，不认识这些扩展的客户端会自动忽略。
  *
+ * 能力契约（对称差 D23／P1-7）：`x_capabilities` 是**逐模型的能力契约**，不只「有无」——
+ * 比例、解析度、时长、品质档、生成型别、超分档位，以及数量面（`maxBatchCount`＝
+ * 每次请求可出的张数／段数上限、`maxReferenceImages`＝可带的参考图上限）。
+ * 数量面的数字**真源＝执行端常数**（`generation-core/request-limits.ts`，即
+ * `/v1/images|videos/generations` 的 `invalid_n` 与 `invalid_reference_images` 闸），
+ * 与真的挡人的值同一颗——揭露与行为不得脱节（旧版的病灶）。
+ * 语义仍是「能力宣告 ≠ 一定能提交」：上限是全站共同上限，模型／上游可能更严。
+ * 超分服务条目（`pixai-upscale`）**不在**本表：它是服务类定价条目、提交端点是
+ * `/v1/upscale`（非 OpenAI images 形状），见 `lib/image-model-ids.js` 的明文规则。
+ *
  * 价格必须先 `syncModelPricing()` 再算：扣费路由都同步过 admin 覆写层，列表若不同步，
  * 就会出现「报价用旧表、扣费用新表」的不诚实差异。
  */

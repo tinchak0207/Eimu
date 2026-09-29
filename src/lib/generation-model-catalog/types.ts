@@ -145,6 +145,23 @@ export interface GenerationCapabilityProjection {
   resolutions: readonly OutputResolution[];
   durations: readonly number[];
   referenceImages: boolean;
+  /**
+   * 每次請求可帶的參考圖上限（對稱差 D23）。只有 `referenceImages === true` 的模型
+   * 外露本欄位；不收參考圖的模型**省略**（不輸出空能力宣稱）。
+   * 數字真源＝執行端常數（`generation-core/request-limits.ts` 的
+   * `MAX_REQUEST_REFERENCE_IMAGES`，即 `/v1/images/generations` 的
+   * `invalid_reference_images` 閘）——宣告值與真的擋人的值同一顆，不另存第二份。
+   * 宣告 ≠ 一定能提交：這是全站共同上限，模型／上游仍可能有更嚴格的限制。
+   */
+  maxReferenceImages?: number;
+  /**
+   * 每次請求可出的張數／段數上限（對稱差 D23：對手 `ListModelCapabilities` 逐模型揭露批次數，
+   * 我方舊版 `/v1/models` 完全沒有）。每個模型都有值（圖／視頻同尺）。
+   * 數字真源＝執行端常數（`generation-core/request-limits.ts` 的
+   * `MAX_REQUEST_BATCH_COUNT`，即 `/v1/images|videos/generations` 的 `n` 閘，
+   * 超限 → 400 `invalid_n`）。宣告 ≠ 一定能提交：它是全站共同上限。
+   */
+  maxBatchCount: number;
   audio: boolean;
   lora: boolean;
   /**
