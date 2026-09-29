@@ -352,7 +352,12 @@ const SPEC = {
         operationId: "upscaleImage",
         summary: "高清放大（同步，~20s）",
         description:
-          "base64 圖放大 1k/2k。支援 `Idempotency-Key` 請求頭。定價走 generationCoins(pixai-upscale)。",
+          "base64 圖放大到檔位 1k／2k／4k。檔位用 `upscale_tier` 顯式指定最清楚；`size`＋`factor` 是舊寫法的檔位配對（`size` 是上游基底檔、只有 `1k`／`2k`，"
+          + "`factor=4` 才配到 `4k`）。三個檔位的上游參數化固定：`1k`=`size\"1k\"×2`、`2k`=`size\"2k\"×2`、`4k`=`size\"2k\"×4`（保底長邊 4608px）——"
+          + "呼叫端給的倍率**不落在檔位上就具名拒** `upscale_factor_conflict`（不再靜默取用任意倍率）。"
+          + "4K 的 factor 輸出色語義未經真單校準 ⇒ 未開啟 `UPSCALE_4K_UPSTREAM` 前對 4K 具名拒 `upscale_4k_upstream_unverified`（不販售未校準檔位；開啟後一鍵預設自動變 4K）。"
+          + "什麼都不給＝一鍵預設＝**當下最高可提交檔位**。影片超分在上游無通道 ⇒ 具名拒 `upscale_video_upstream_unsupported`。"
+          + "支援 `Idempotency-Key` 請求頭。定價走 generationCoins(pixai-upscale)。",
         security: [bearerAuth],
         requestBody: {
           required: true,
@@ -1179,9 +1184,24 @@ const SPEC = {
         required: ["image"],
         properties: {
           image: { type: "string", description: "base64 原圖。" },
-          factor: { type: "number", default: 2, description: "放大倍數。" },
+          upscale_tier: {
+            type: "string",
+            enum: ["1k", "2k", "4k"],
+            description:
+              "目標檔位（顯式鍵，與 `size`／`factor` 同時給且矛盾時具名拒 `upscale_factor_conflict`）。別名：`tier`、`output_resolution`。未給＝當下最高可提交檔位。",
+          },
+          factor: {
+            type: "number",
+            description:
+              "檔位倍率寫法：`2`⇒2k、`4`⇒4k。**不是任意倍率**——不落在任何檔位上的值具名拒 `upscale_factor_conflict`。別名：`upscale`、`scale`。",
+          },
           ratio: { type: "string", description: "寬高比，可選。" },
-          size: { type: "string", enum: ["1k", "2k"], default: "1k" },
+          size: {
+            type: "string",
+            enum: ["1k", "2k"],
+            description:
+              "舊寫法：上游 bridge 的基底檔（白名單只有 `1k`／`2k`，4K 靠 `factor=4` 推上去）。單給 `size` 即該檔位；與 `factor` 同給則按檔位組合配對（`(\"2k\",4)`⇒4k）。像素尺寸寫法（`\"1024x1024\"`）只作計費提示。",
+          },
         },
       },
       VideoGenerationRequest: {

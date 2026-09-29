@@ -118,3 +118,42 @@ test("非 JSON 請求體具名拒絕（舊行為是 1k 兜底＋原樣轉發＝�
     assert.equal(payload.code, "upscale_request_body_invalid");
   });
 });
+// ── 對外文件與執行端同源（P1-4）：OpenAPI 的檔位列舉不得偏離實作常數 ──────────
+// 走真 handler（`GET /v1/openapi.json`）取**服務出去的文件**，oracle＝執行端常數
+// （UPSCALE_TIERS／檔位契約／上游 bridge 的比例表）。文件說 4K 可提交、執行端卻拒，
+// 或反之，都會在這裡紅。
+test("OpenAPI 的檔位契約與執行端同源：列舉、配對、具名閘碼三項都對得上", async () => {
+  const { GET } = await import("../../app/api/v1/openapi.json/route.ts");
+  const { UPSCALE_TIERS, UPSCALE_TIER_CONTRACTS, PIXAI_BRIDGE_UPSCALE_RATIO_SIZES } = await import("./upscale-tier.ts");
+
+  const response = await GET(new Request("https://site.test/v1/openapi.json") as never);
+  const doc = (await response.json()) as {
+    paths: Record<string, { post: { description: string } }>;
+    components: { schemas: Record<string, { properties: Record<string, { enum?: string[] }> }> };
+  };
+
+  const schema = doc.components.schemas.UpscaleRequest;
+  assert.deepEqual(schema.properties.upscale_tier.enum, [...UPSCALE_TIERS], "檔位顯式鍵的列舉必須＝執行端檔位全集");
+  assert.deepEqual(
+    schema.properties.size.enum,
+    Object.keys(PIXAI_BRIDGE_UPSCALE_RATIO_SIZES["1:1"]),
+    "size 的列舉必須＝上游 bridge 比例表實際有的基底檔（未知 size 會被上游靜默回退）",
+  );
+
+  const description = doc.paths["/upscale"].post.description;
+  for (const tier of UPSCALE_TIERS) {
+    const contract = UPSCALE_TIER_CONTRACTS[tier];
+    assert.ok(
+      description.includes(`size"${contract.bridgeSize}"×${contract.factor}`),
+      `文件缺少檔位 ${tier} 的上游配對（size=${contract.bridgeSize}、factor=${contract.factor}）`,
+    );
+  }
+  // 具名閘碼：拒絕時呼叫端看得到的 code，必須在被拒前就寫在文件上。
+  for (const code of [
+    "upscale_4k_upstream_unverified",
+    "upscale_factor_conflict",
+    "upscale_video_upstream_unsupported",
+  ]) {
+    assert.ok(description.includes(code), `文件未揭露具名閘碼 ${code}`);
+  }
+});
