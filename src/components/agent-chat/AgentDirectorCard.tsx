@@ -99,11 +99,11 @@ function AgentDirectorCardComponent({ item }: AgentDirectorCardProps) {
         revision={item.revision}
         topViewSvg={topView}
         cameraViewSvg={cameraView}
-        className="h-[180px]"
+        className="h-[11.25rem]"
       />
 
       {/* 摘要行：active_shot 名 / 时长 / 运镜 / 景别（13px 正文档 = ios-footnote 0.8125rem） */}
-      <p className="truncate text-[13px] leading-relaxed text-muted-foreground">
+      <p className="truncate text-[0.8125rem] leading-relaxed text-muted-foreground">
         {shot
           ? `镜头 ${shot.no} · ${shot.name} · ${formatDuration(shot.duration_frames)} · ${shot.camera_move || "未定运镜"}${shot.shot_scale ? ` · ${shot.shot_scale}` : ""}`
           : "暂无活跃镜头"}

@@ -163,7 +163,7 @@ interface PendingAttachment {
 }
 
 /**
- * 输入框跟着内容长高，上限交给 CSS 的 max-h-[240px]（到顶后自己滚）。
+ * 输入框跟着内容长高，上限交给 CSS 的 max-h-[15rem]（=240px＠16px 根字級）（到顶后自己滚）。
  * rows=1 的固定高度下，续写一段长愿望只能看见最后一行，看不到自己写了什么。
  */
 function autoGrow(el: HTMLTextAreaElement) {
@@ -899,7 +899,7 @@ function AgentComposerComponent({
           placeholder={placeholder}
           rows={1}
           className={cn(
-            "min-h-[40px] max-h-[240px] w-full resize-none bg-transparent px-1 py-1.5 text-[15px] leading-[22px] text-foreground",
+            "min-h-[2.5rem] max-h-[15rem] w-full resize-none bg-transparent px-1 py-1.5 text-[0.9375rem] leading-[1.375rem] text-foreground",
             "placeholder:text-foreground/35 focus:outline-none",
             "touch-manipulation [-webkit-tap-highlight-color:transparent]",
             "disabled:cursor-not-allowed disabled:opacity-50",

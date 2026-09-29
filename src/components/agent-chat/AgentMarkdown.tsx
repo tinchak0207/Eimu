@@ -60,7 +60,7 @@ function InlineSpan({ span, onOpenImage }: { span: MdInline; onOpenImage: (src: 
     case "code":
       // 罪状 9：task_id / 端点路径等行内代码弱化——低调等宽小字，不删原文。
       return (
-        <code className="break-all rounded bg-black/[0.05] px-1 py-0.5 font-mono text-[12px] leading-none text-foreground/55">
+        <code className="break-all rounded bg-black/[0.05] px-1 py-0.5 font-mono text-[0.75rem] leading-none text-foreground/55">
           {span.text}
         </code>
       );
@@ -92,12 +92,12 @@ function BlockNode({ block, onOpenImage }: { block: MdBlock; onOpenImage: (src: 
         </p>
       );
     case "h": {
-      const size = block.level <= 1 ? "text-base font-bold" : block.level === 2 ? "text-[15px] font-bold" : "text-[15px] font-semibold";
+      const size = block.level <= 1 ? "text-base font-bold" : block.level === 2 ? "text-[0.9375rem] font-bold" : "text-[0.9375rem] font-semibold";
       return <p className={cn("mt-2 mb-1 first:mt-0", size)}>{block.children.map((c, i) => <InlineSpan key={i} span={c} onOpenImage={onOpenImage} />)}</p>;
     }
     case "code":
       return (
-        <pre className="my-1.5 overflow-x-auto rounded-[10px] bg-black/[0.045] px-3 py-2.5 font-mono text-[13px] leading-[1.6] text-foreground/80">
+        <pre className="my-1.5 overflow-x-auto rounded-[10px] bg-black/[0.045] px-3 py-2.5 font-mono text-[0.8125rem] leading-[1.6] text-foreground/80">
           <code>{block.text}</code>
         </pre>
       );
@@ -125,7 +125,7 @@ function BlockNode({ block, onOpenImage }: { block: MdBlock; onOpenImage: (src: 
       // 表格：横向可滚（窄气泡不撑爆），13px 正文下限，斑马线弱分隔。
       return (
         <div className="my-1.5 overflow-x-auto rounded-[10px] border border-black/[0.07]">
-          <table className="w-full border-collapse text-[13px]">
+          <table className="w-full border-collapse text-[0.8125rem]">
             <thead>
               <tr className="bg-black/[0.035]">
                 {block.head.map((cell, i) => (

@@ -136,7 +136,7 @@ export default function RootLayout({
 
   return (
     <html lang="zh-CN" className={`${geistSans.variable} ${geistMono.variable}`}>
-      <body className="font-sans antialiased text-[15px] text-foreground flex min-h-dvh flex-col">
+      <body className="font-sans antialiased text-[0.9375rem] text-foreground flex min-h-dvh flex-col">
         {/* 面板寬 pre-paint 同步套用（2026-09-24 暴君回報「Ctrl+Shift+R 聊天框
             先佔幾乎半屏、秒縮回 30% 以下」）：用戶真拖過寬的 v2 存值必須在首個
             paint 前落到 --ws-panel-w，否則冷載入＝首幀畫 CSS 默認 clamp（40vw

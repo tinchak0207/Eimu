@@ -125,7 +125,7 @@ function AgentMessageBubbleComponent({ item, sessionId }: AgentMessageBubbleProp
           // 長文提早折行、右側空出一條，畫面像卡片沒排滿。用戶氣泡維持 85%——右對齊的
           // 短氣泡才是對話的視覺語言。
           // 助理正文走 Markdown 渲染，版式由塊級元素接管，不用 pre-wrap。
-          "min-w-0 break-words [overflow-wrap:anywhere] text-[15px]",
+          "min-w-0 break-words [overflow-wrap:anywhere] text-[0.9375rem]",
           item.kind === "user" ? "whitespace-pre-wrap max-w-[85%]" : "w-full",
           isUser
             ? "ml-auto rounded-[20px] rounded-br-[6px] lg-float px-3.5 py-2.5 text-foreground leading-[1.45]"
@@ -190,7 +190,7 @@ function AgentMessageBubbleComponent({ item, sessionId }: AgentMessageBubbleProp
           <span
             data-steer-status={item.steer.status}
             className={cn(
-              "mt-1.5 flex items-center gap-1 text-[12px] leading-[1.4]",
+              "mt-1.5 flex items-center gap-1 text-[0.75rem] leading-[1.4]",
               item.steer.status === "injected" || item.steer.status === "applied"
                 ? "text-ios-green"
                 : item.steer.status === "aborted" || item.steer.status === "failed"

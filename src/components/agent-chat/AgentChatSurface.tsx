@@ -753,7 +753,7 @@ export function AgentChatSurface({
               title="我的资产"
               className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 touch-manipulation"
             >
-              <Boxes className="h-[18px] w-[18px]" aria-hidden="true" />
+              <Boxes className="h-[1.125rem] w-[1.125rem]" aria-hidden="true" />
             </button>
             <button
               type="button"
@@ -763,7 +763,7 @@ export function AgentChatSurface({
               title="对话历史"
               className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 touch-manipulation"
             >
-              <History className="h-[18px] w-[18px]" aria-hidden="true" />
+              <History className="h-[1.125rem] w-[1.125rem]" aria-hidden="true" />
             </button>
           </div>
           {/* 右簇靠 ml-auto 頂到最右（中間沒有 flex-1 的標題塊可撐了）。 */}
@@ -777,9 +777,9 @@ export function AgentChatSurface({
               className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 touch-manipulation disabled:cursor-wait"
             >
               {startingNew ? (
-                <Loader2 className="h-[18px] w-[18px] animate-spin text-ios-blue" aria-hidden="true" />
+                <Loader2 className="h-[1.125rem] w-[1.125rem] animate-spin text-ios-blue" aria-hidden="true" />
               ) : (
-                <SquarePen className="h-[18px] w-[18px]" aria-hidden="true" />
+                <SquarePen className="h-[1.125rem] w-[1.125rem]" aria-hidden="true" />
               )}
             </button>
             {onExit && (
@@ -790,7 +790,7 @@ export function AgentChatSurface({
                 title="直接生成：自己选模型和参数出图"
                 className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 touch-manipulation"
               >
-                <SlidersHorizontal className="h-[18px] w-[18px]" aria-hidden="true" />
+                <SlidersHorizontal className="h-[1.125rem] w-[1.125rem]" aria-hidden="true" />
               </button>
             )}
             {/* 设置：原本是 ⋯（MoreHorizontal）＋選單，2026-09-27 暴君糾正後
@@ -804,7 +804,7 @@ export function AgentChatSurface({
               title="助理设定"
               className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 touch-manipulation"
             >
-              <Settings className="h-[18px] w-[18px]" aria-hidden="true" />
+              <Settings className="h-[1.125rem] w-[1.125rem]" aria-hidden="true" />
             </button>
             {/* 助理设定的原触发钮：收进 0×0 容器（视觉退役，程序化 click 保活），
                 弹层本体由 AgentSettingsPopover 自行渲染（fixed lg-sheet）。 */}
