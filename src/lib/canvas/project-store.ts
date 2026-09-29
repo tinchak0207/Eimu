@@ -11,6 +11,8 @@ import { isCanvasProjectType, type CanvasEpisode, type CanvasProject } from "./t
 import { normalizeNodeVersions } from "./node-versions";
 // 風格 id 值域的唯一判據（＝STYLE_LIBRARY 註冊面）；讀取端與生成端共用同一份。
 import { normalizeProjectStyleId } from "./project-style";
+// 解說劇設定（P1-5／D7）的逐欄白名單（型別值域＋旁白音色值域，一處收口）。
+import { normalizeProjectNarration } from "./project-narration";
 
 const PROJECT_SCHEMA_VERSION = 1;
 const INDEX_GENERATIONS_KEPT = 2;
@@ -125,6 +127,8 @@ export function normalizeProject(payload: unknown): CanvasProject | null {
   const nodeVersions = normalizeNodeVersions(p.nodeVersions);
   // 專案級風格綁定（P1-8／D34）：唯一註冊面＝STYLE_LIBRARY，查不到即省略鍵。
   const styleId = normalizeProjectStyleId(p.styleId);
+  // 解說劇設定（P1-5／D7）：型別與旁白音色走同一個清洗入口（逐欄獨立、非法省略該鍵）。
+  const narration = normalizeProjectNarration({ scriptType: p.scriptType, narrationVoice: p.narrationVoice });
   return {
     id: p.id,
     title: p.title.slice(0, 200),
@@ -147,6 +151,9 @@ export function normalizeProject(payload: unknown): CanvasProject | null {
     // 專案級風格綁定（P1-8／對稱差 D34）：非法／未註冊 id 一律**省略欄位**
     // （不寫預設值冒充用戶設定，與 projectType 同範式）；缺欄＝無綁定，舊專案零改動。
     ...(styleId ? { styleId } : {}),
+    // 解說劇設定：有值才落鍵（缺欄＝未宣告，舊專案形狀不變）。
+    ...(narration.scriptType ? { scriptType: narration.scriptType } : {}),
+    ...(narration.narrationVoice ? { narrationVoice: narration.narrationVoice } : {}),
     // 作用域（2026-09-27 片P 刀 1）：**只認 team**——personal 與缺欄一律省略欄位
     //（讀取端語義即「缺省＝personal」），不寫 "personal" 冒充用戶設定（照 projectType 同範式）。
     // teamId 只在 scope=team 且為非空字串時保留（去空白、上限 128）。

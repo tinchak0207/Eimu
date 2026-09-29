@@ -14,6 +14,7 @@ import {
 import type { AgentSseEvent } from "@/lib/agent-chat-types";
 import { normalizeApprovalState } from "@/lib/character-cards";
 import type { CharacterCard } from "@/lib/character-cards";
+import type { CanvasScriptType } from "@/lib/canvas/project-narration";
 import { compactStoryboardShot, type StoryboardScriptShot } from "@/lib/storyboard-contract";
 import type {
   CanvasAgentOp,
@@ -248,7 +249,7 @@ export interface UseCanvasChatReturn {
   setProjectTitle: (title: string) => void;
   loading: boolean;
   saveState: "idle" | "saving" | "saved" | "error" | "offline";
-  loadProject: (project: { nodes?: unknown; connections?: unknown; viewport?: CanvasViewport; backgroundMode?: CanvasBackgroundMode; title?: string; projectType?: unknown; currentStep?: unknown; episodes?: unknown; styleId?: unknown }) => void;
+  loadProject: (project: { nodes?: unknown; connections?: unknown; viewport?: CanvasViewport; backgroundMode?: CanvasBackgroundMode; title?: string; projectType?: unknown; currentStep?: unknown; episodes?: unknown; styleId?: unknown; scriptType?: unknown; narrationVoice?: unknown }) => void;
   exportProject: () => CanvasProject;
   clearCanvas: () => void;
   newCanvasSession: () => void;
@@ -265,6 +266,8 @@ export interface UseCanvasChatReturn {
     currentStep?: unknown;
     episodes?: unknown;
     styleId?: unknown;
+    scriptType?: unknown;
+    narrationVoice?: unknown;
   }) => boolean;
   /**
    * REQ-B2 團隊資產空間：讀當前畫布項目 id（尚未建號回 null）。
@@ -283,8 +286,12 @@ export interface UseCanvasChatReturn {
    * undefined = 無綁定（舊專案語義）。生成時呼叫端把這個 id 帶進 `/api/canvas/generate` 的 `style_id`。
    */
   styleId: string | undefined;
+  /** 解說劇型別（P1-5／D7）：`plot`｜`monologue`（＝解說劇）；undefined＝未宣告。 */
+  scriptType: CanvasScriptType | undefined;
+  /** 旁白音色（P1-5／D7）：voice-library 的 id；undefined＝用上游預設。 */
+  narrationVoice: string | undefined;
   /** 專案級欄位的唯一寫入口（UI 面板與 agent 驅動路徑共用）；欄位傳 undefined 即清除。 */
-  setProjectMeta: (patch: { projectType?: CanvasProjectType; currentStep?: number; episodes?: CanvasEpisode[]; styleId?: string }) => void;
+  setProjectMeta: (patch: { projectType?: CanvasProjectType; currentStep?: number; episodes?: CanvasEpisode[]; styleId?: string; scriptType?: string; narrationVoice?: string }) => void;
   // ── 角色/場景卡（P2 跨鏡頭一致性）：卡列表 + 項目級鎖定
   characterCards: CharacterCard[];
   /** 鎖定到當前畫布項目的卡 id（持久化在 CanvasProject.cardIds）。 */

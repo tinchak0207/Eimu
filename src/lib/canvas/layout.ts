@@ -27,6 +27,8 @@ import {
 import { normalizeNodeVersions } from "./node-versions";
 // 風格 id 值域的唯一判據（＝STYLE_LIBRARY 註冊面），與 project-store/生成端共用同一份。
 import { normalizeProjectStyleId } from "./project-style";
+// 解說劇設定（P1-5／D7）：型別值域＋旁白音色值域的唯一清洗入口（與 project-style 同地位）。
+import { normalizeProjectNarration, type CanvasScriptType } from "./project-narration";
 import { normalizeShotCandidates } from "./storyboard-shots";
 // 任務版本史（P1-9/D37）的清洗收口＝`./task-versions` 的 `normalizeTaskVersions`，
 // 本檔只註冊（與 shotCandidates 同款：清洗實作在原模組，白名單真源在 node-metadata-fields）。
@@ -800,10 +802,16 @@ export function toCanvasProject(
   // 專案級風格綁定（P1-8／D34）：同樣「不清洗」，只決定要不要帶鍵 ——
   // 註冊面判據在 project-store 的 normalizeProject（呼叫 normalizeProjectStyleId）。
   styleId?: string,
+  // 解說劇設定（P1-5／D7）：第 11、12 個位置參數（照三欄/風格先例往後追加）。
+  // 同樣「不清洗」——只決定要不要帶鍵，值域判據在 project-store 的 normalizeProject
+  // （呼叫 normalizeProjectNarration）。
+  scriptType?: string,
+  narrationVoice?: string,
 ): CanvasProject {
   const now = new Date().toISOString();
   // 風格 id 只在此判「有沒有合法值」；非法/未知 id 不落盤（落盤端 normalizeProject 同一把尺）。
   const projectStyleId = normalizeProjectStyleId(styleId);
+  const narration = normalizeProjectNarration({ scriptType, narrationVoice });
   return {
     id: base.id,
     title: base.title || "未命名画布",
@@ -825,6 +833,9 @@ export function toCanvasProject(
     ...(episodes && episodes.length > 0 ? { episodes } : {}),
     // 風格綁定（P1-8／D34）：有合法 id 才帶鍵；缺欄＝無綁定（舊專案形狀不變）。
     ...(projectStyleId ? { styleId: projectStyleId } : {}),
+    // 解說劇設定（P1-5／D7）：有值才帶鍵；缺欄＝未宣告（舊專案形狀不變）。
+    ...(narration.scriptType ? { scriptType: narration.scriptType } : {}),
+    ...(narration.narrationVoice ? { narrationVoice: narration.narrationVoice } : {}),
     // 版本歷史（2026-09-27）：有版本才帶鍵，舊專案形狀不變。
     ...(state.nodeVersions && state.nodeVersions.length > 0 ? { nodeVersions: state.nodeVersions } : {}),
   };
@@ -914,14 +925,24 @@ function readEpisode(payload: unknown): CanvasEpisode | null {
  *
  * 刻意獨立於 `fromCanvasProject`：後者回 `CanvasReducerState`（只有 nodes/connections/
  * units），改它的回傳型別會炸一票消費端；三欄是「專案級」狀態，不是 reducer 狀態。
- * （`styleId` 是同一批專案級欄位的第四員，P1-8／D34；合法性判據共用 `project-style.ts`。）
+ * （`styleId` 是同一批專案級欄位的第四員，P1-8／D34；`scriptType`／`narrationVoice` 是
+ * 第五、六員，P1-5／D7；合法性判據共用 `project-style.ts` 與 `project-narration.ts`。）
  */
 export function canvasProjectMeta(project: {
   projectType?: unknown;
   currentStep?: unknown;
   episodes?: unknown;
   styleId?: unknown;
-}): { projectType?: CanvasProjectType; currentStep?: number; episodes?: CanvasEpisode[]; styleId?: string } {
+  scriptType?: unknown;
+  narrationVoice?: unknown;
+}): {
+  projectType?: CanvasProjectType;
+  currentStep?: number;
+  episodes?: CanvasEpisode[];
+  styleId?: string;
+  scriptType?: CanvasScriptType;
+  narrationVoice?: string;
+} {
   if (!project || typeof project !== "object") return {};
   const episodes = Array.isArray(project.episodes)
     ? project.episodes.flatMap((item) => {
@@ -930,11 +951,15 @@ export function canvasProjectMeta(project: {
       })
     : [];
   const styleId = normalizeProjectStyleId(project.styleId);
+  // 解說劇設定（P1-5／D7）：清洗入口與落盤端同一份（逐欄獨立、非法省略該鍵）。
+  const narration = normalizeProjectNarration({ scriptType: project.scriptType, narrationVoice: project.narrationVoice });
   return {
     ...(isCanvasProjectType(project.projectType) ? { projectType: project.projectType } : {}),
     ...(isValidCreationStep(project.currentStep) ? { currentStep: project.currentStep } : {}),
     ...(episodes.length > 0 ? { episodes } : {}),
     ...(styleId ? { styleId } : {}),
+    ...(narration.scriptType ? { scriptType: narration.scriptType } : {}),
+    ...(narration.narrationVoice ? { narrationVoice: narration.narrationVoice } : {}),
   };
 }
 
@@ -966,6 +991,11 @@ export function normalizeProjectMetaPatch(payload: unknown): CanvasProjectMetaPa
   // （同其餘欄位：模型打錯一個 id 不該把用戶綁好的風格清掉）。
   const styleId = normalizeProjectStyleId(p.styleId);
   if (styleId) out.styleId = styleId;
+  // 解說劇設定（P1-5／D7）：同款逐欄判——型別值域外省略該鍵（模型打錯型別不該清掉
+  // 用戶選好的解說劇設定），音色未在語音庫裡也省略該鍵。
+  const narration = normalizeProjectNarration({ scriptType: p.scriptType, narrationVoice: p.narrationVoice });
+  if (narration.scriptType) out.scriptType = narration.scriptType;
+  if (narration.narrationVoice) out.narrationVoice = narration.narrationVoice;
   if (Array.isArray(p.episodes)) {
     const seen = new Set<number>();
     const episodes: CanvasEpisode[] = [];
@@ -1014,6 +1044,10 @@ export function parseImportFile(raw: unknown): {
   episodes?: CanvasEpisode[];
   /** 專案級風格綁定（P1-8／D34）：匯出→匯入帶著走（否則靜默丟風格）。 */
   styleId?: string;
+  /** 解說劇型別（P1-5／D7）：同樣帶著走（否則「匯出→匯入」會靜默丟掉解說劇設定）。 */
+  scriptType?: CanvasScriptType;
+  /** 旁白音色（P1-5／D7）：同上。 */
+  narrationVoice?: string;
 } | null {
   if (!raw || typeof raw !== "object") return null;
   const env = raw as Record<string, unknown>;

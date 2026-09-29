@@ -42,6 +42,9 @@ import {
 import { listCanvasProjects, postCanvasOpsResult } from "@/lib/canvas/client";
 // 風格 id 值域判據（＝STYLE_LIBRARY 註冊面），與落盤/生成端共用同一把尺。
 import { normalizeProjectStyleId } from "@/lib/canvas/project-style";
+// 解說劇設定（P1-5／D7）：型別值域＋旁白音色的判據（與落盤端同一份）。
+import { isCanvasScriptType, type CanvasScriptType } from "@/lib/canvas/project-narration";
+import { normalizeVoiceId } from "@/lib/voice-library";
 import { CanvasNodeType, isCanvasProjectType } from "@/lib/canvas/types";
 import { isValidCreationStep } from "@/lib/creation-flow-steps";
 import type {
@@ -147,6 +150,9 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
   // 專案級風格綁定（P1-8／對稱差 D34）：StyleTemplate.id，與上面三欄同一組檔位/同一寫入口。
   // 生成時由呼叫端把這個 id 帶進 /api/canvas/generate 的 style_id（本 hook 不改生成請求）。
   const [styleId, setStyleId] = useState<string | undefined>(undefined);
+  // 解說劇設定（P1-5／D7）：型別＋旁白音色；與風格綁定同款 state（寫入口＝setProjectMeta）。
+  const [scriptType, setScriptType] = useState<CanvasScriptType | undefined>(undefined);
+  const [narrationVoice, setNarrationVoice] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [saveState, setSaveState] = useState<UseCanvasChatReturn["saveState"]>("idle");
   const [savedProjects, setSavedProjects] = useState<CanvasProjectSummary[]>([]);
@@ -202,6 +208,10 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
   // 風格綁定（P1-8／D34）：同款「最新值鏈像 ref」，供 buildProject 取當下值。
   const styleIdRef = useRef(styleId);
   styleIdRef.current = styleId;
+  const scriptTypeRef = useRef(scriptType);
+  scriptTypeRef.current = scriptType;
+  const narrationVoiceRef = useRef(narrationVoice);
+  narrationVoiceRef.current = narrationVoice;
   const selectedNodeIdRef = useRef(selectedNodeId);
   selectedNodeIdRef.current = selectedNodeId;
   const agentOpsQueueRef = useRef(agentOpsQueue);
@@ -285,6 +295,8 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     setCurrentStep(meta.currentStep);
     setEpisodes(meta.episodes ?? []);
     setStyleId(meta.styleId);
+    setScriptType(meta.scriptType);
+    setNarrationVoice(meta.narrationVoice);
     if (target.budget) {
       setBudget({
         usedCoins: target.budget.usedCoins,
@@ -318,6 +330,8 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
       currentStep?: unknown;
       episodes?: unknown;
       styleId?: unknown;
+      scriptType?: unknown;
+      narrationVoice?: unknown;
     }): boolean => {
       if (!snapshot || typeof snapshot !== "object") return false;
       const restored = fromCanvasProject(snapshot);
@@ -359,6 +373,8 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
       if (meta.currentStep !== undefined) setCurrentStep(meta.currentStep);
       if (meta.episodes !== undefined) setEpisodes(meta.episodes);
       if (meta.styleId !== undefined) setStyleId(meta.styleId);
+      if (meta.scriptType !== undefined) setScriptType(meta.scriptType);
+      if (meta.narrationVoice !== undefined) setNarrationVoice(meta.narrationVoice);
       return true;
     },
     [],
@@ -575,6 +591,8 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     currentStepRef,
     episodesRef,
     styleIdRef,
+    scriptTypeRef,
+    narrationVoiceRef,
     mountedRef,
     canvas,
     viewport,
@@ -585,6 +603,8 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     currentStep,
     episodes,
     styleId,
+    scriptType,
+    narrationVoice,
     saveState,
     sessionId,
     selectedNodeId,
@@ -991,6 +1011,8 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
       currentStep?: unknown;
       episodes?: unknown;
       styleId?: unknown;
+      scriptType?: unknown;
+      narrationVoice?: unknown;
     }) => {
       pushHistory();
       const restored = fromCanvasProject(project);
@@ -1010,6 +1032,8 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
       if (meta.currentStep !== undefined) setCurrentStep(meta.currentStep);
       if (meta.episodes !== undefined) setEpisodes(meta.episodes);
       if (meta.styleId !== undefined) setStyleId(meta.styleId);
+      if (meta.scriptType !== undefined) setScriptType(meta.scriptType);
+      if (meta.narrationVoice !== undefined) setNarrationVoice(meta.narrationVoice);
       setSelectedNodeId(null);
     },
     [pushHistory],
@@ -1029,6 +1053,8 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
       currentStep?: number;
       episodes?: CanvasEpisode[];
       styleId?: string;
+      scriptType?: string;
+      narrationVoice?: string;
     }) => {
       if ("projectType" in patch && (patch.projectType === undefined || isCanvasProjectType(patch.projectType))) {
         setProjectType(patch.projectType);
@@ -1041,6 +1067,16 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
       // `undefined` 依 "k" in patch 慣例＝清除綁定。
       if ("styleId" in patch && (patch.styleId === undefined || normalizeProjectStyleId(patch.styleId))) {
         setStyleId(patch.styleId === undefined ? undefined : (normalizeProjectStyleId(patch.styleId) as string));
+      }
+      // 解說劇設定（P1-5／D7）：值域判據與落盤端同一份（isCanvasScriptType／normalizeVoiceId）；
+      // `undefined` 依 "k" in patch 慣例＝清除該欄。
+      if ("scriptType" in patch && (patch.scriptType === undefined || isCanvasScriptType(patch.scriptType))) {
+        setScriptType(patch.scriptType as CanvasScriptType | undefined);
+      }
+      if ("narrationVoice" in patch && (patch.narrationVoice === undefined || normalizeVoiceId(patch.narrationVoice))) {
+        setNarrationVoice(
+          patch.narrationVoice === undefined ? undefined : (normalizeVoiceId(patch.narrationVoice) as string),
+        );
       }
     },
     [],
@@ -1201,6 +1237,8 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     currentStep,
     episodes,
     styleId,
+    scriptType,
+    narrationVoice,
     setProjectMeta,
     upsertCharacterCard,
     removeCharacterCard,

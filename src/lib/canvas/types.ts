@@ -15,6 +15,8 @@ import type { StoryboardSceneRef, StoryboardScriptShot } from "../storyboard-con
 import type { StoryboardShotCandidateSet } from "./storyboard-shots";
 import type { TaskVersionSet } from "./task-versions";
 import { AID_PROJECT_TYPE_ENUM, type AidProjectTypeEnumValue } from "../aid-enums/creation";
+// 劇本型別（P1-5／D7）：值域直接取自既有 AID enum（見 CanvasProject.scriptType 的註解）。
+import { type CanvasScriptType } from "./project-narration";
 // 批准狀態形狀的單一真源（type-only：執行期零依賴，不成環——`storyboard-contract.ts`
 // 已用同一寫法 type-only import 本檔，本檔反向 type-only 取 `ApprovalState` 是同構先例）。
 import type { ApprovalState } from "../character-cards";
@@ -557,6 +559,14 @@ export interface CanvasProjectMetaPatch {
    * 載荷不可信——合法性一律在執行/落盤前判，非法值省略該鍵（同其余三欄語義）。
    */
   styleId?: string;
+  /**
+   * 劇本型別（P1-5／對稱差 D7）：值域與清洗同 `CanvasProject.scriptType`
+   * （`project-narration.ts` 的 `normalizeProjectNarration`）。型別是寬的 string 是因為
+   * 載荷不可信——合法性一律在執行/落盤前判，非法值省略該鍵（同其余欄語義）。
+   */
+  scriptType?: string;
+  /** 旁白音色（P1-5／對稱差 D7）：`voice-library` 認可的 id；未知不落鍵。 */
+  narrationVoice?: string;
 }
 
 /**
@@ -621,6 +631,25 @@ export interface CanvasProject {
    * 註冊表查不到的 id 不落盤（`normalizeProject` 逐欄白名單省略該鍵）。
    */
   styleId?: string;
+  /**
+   * 劇本型別（P1-5／對稱差 D7）：`plot`（剧情演绎）｜`monologue`（真人解说漫＝**解說劇**）。
+   *
+   * 對應對手「AI Short drama」／「AI Commentary Drama」兩種型別。值域**不另立**，
+   * 逐字取自既有 `AID_SCRIPT_TYPE_ENUM`（`@/lib/aid-enums/creation`）——該 enum 早就
+   * 定義了這兩型，只是全 repo 沒有任何消費端（這正是 D7 說「零命中」的形狀）。
+   * **缺省＝未宣告，舊專案零改動**；值域外的一律不落盤（`normalizeProject` 逐欄白名單省略該鍵）。
+   */
+  scriptType?: CanvasScriptType;
+  /**
+   * 旁白音色（P1-5／對稱差 D7）：對應對手的「narration voice configuration item」。
+   *
+   * 值域＝`voice-library.ts` 的語音庫（`normalizeVoiceId`，與 `POST /v1/tts/generations`
+   * 的 `voice` 同一把尺）——避免出現「專案裡設了某音色、合成時被 400 voice_unknown」的假設定。
+   * **只在 `scriptType === "monologue"` 時生效**；其他型別綁了＝衝突，
+   * 由 `narrationVoiceConflicts` 具名回報（不靜默忽略、也不代用戶清掉）。
+   * 缺省＝用上游預設音色（`DEFAULT_TTS_VOICE`），不假裝綁了某一顆。
+   */
+  narrationVoice?: string;
   /**
    * 節點版本歷史（2026-09-27）：所有節點的版本快照，按節點＋版號檢索。
    * 掛在既有專案物件上（不新增 DB/檔案）；逐節點上限見 node-versions.ts。

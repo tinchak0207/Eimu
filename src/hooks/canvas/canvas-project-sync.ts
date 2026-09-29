@@ -11,6 +11,7 @@ import { listCanvasProjects, postCanvasSnapshot, saveCanvasProject } from "@/lib
 import type { CanvasReducerState } from "@/lib/canvas/reducer";
 import { toCanvasProject } from "@/lib/canvas/layout";
 import type { CanvasEpisode, CanvasProject, CanvasProjectType, CanvasViewport } from "@/lib/canvas/types";
+import type { CanvasScriptType } from "@/lib/canvas/project-narration";
 import type { CharacterCard } from "@/lib/character-cards";
 import {
   SAVE_DEBOUNCE_MS,
@@ -42,6 +43,9 @@ export interface UseCanvasProjectSyncParams {
   episodesRef: { current: CanvasEpisode[] };
   /** 專案級風格綁定（P1-8／D34）：同款最新值 ref，供 buildProject 落盤。 */
   styleIdRef: { current: string | undefined };
+  /** 解說劇設定（P1-5／D7）：劇本型別與旁白音色，同樣走「最新值鏈像 ref」。 */
+  scriptTypeRef: { current: CanvasScriptType | undefined };
+  narrationVoiceRef: { current: string | undefined };
   mountedRef: { current: boolean };
   // ── 當前 render 的值（effect 依賴）
   canvas: CanvasReducerState;
@@ -54,6 +58,9 @@ export interface UseCanvasProjectSyncParams {
   episodes: CanvasEpisode[];
   /** 專案級風格綁定（P1-8／D34）；在 save effect 依賴裡，變更即觸發落盤。 */
   styleId: string | undefined;
+  /** 解說劇設定（P1-5／D7）；同在 save effect 依賴裡。 */
+  scriptType: CanvasScriptType | undefined;
+  narrationVoice: string | undefined;
   saveState: "idle" | "saving" | "saved" | "error" | "offline";
   sessionId?: string | null;
   selectedNodeId: string | null;
@@ -72,9 +79,9 @@ export interface UseCanvasProjectSyncParams {
 export function useCanvasProjectSync(params: UseCanvasProjectSyncParams) {
   const {
     canvasRef, viewportRef, backgroundRef, titleRef, budgetRef, activeCardIdsRef, mountedRef,
-    projectTypeRef, currentStepRef, episodesRef, styleIdRef, projectIdRef,
+    projectTypeRef, currentStepRef, episodesRef, styleIdRef, scriptTypeRef, narrationVoiceRef, projectIdRef,
     canvas, viewport, backgroundMode, projectTitle, activeCardIds, saveState,
-    projectType, currentStep, episodes, styleId,
+    projectType, currentStep, episodes, styleId, scriptType, narrationVoice,
     sessionId, selectedNodeId, activeCharacterCards,
     setSavedProjects, setSaveState, setLoading,
   } = params;
@@ -127,6 +134,9 @@ export function useCanvasProjectSync(params: UseCanvasProjectSyncParams) {
       episodesRef.current,
       // 專案級風格綁定（P1-8／D34）：第 10 個位置參數（照三欄先例往後追加）。
       styleIdRef.current,
+      // 解說劇設定（P1-5／D7）：第 11、12 個位置參數。
+      scriptTypeRef.current,
+      narrationVoiceRef.current,
     );
   }, []);
 
@@ -150,7 +160,7 @@ export function useCanvasProjectSync(params: UseCanvasProjectSyncParams) {
     // 依賴畫布本體與視口/背景/標題/卡鎖定/作品劇集欄位 + 風格綁定：任何一項變化都該落盤。
     // saveState 刻意不進依賴 —— 它由這個 effect 自己寫，進去會變成自觸發循環。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canvas, viewport, backgroundMode, projectTitle, activeCardIds, projectType, currentStep, episodes, styleId, buildProject]);
+  }, [canvas, viewport, backgroundMode, projectTitle, activeCardIds, projectType, currentStep, episodes, styleId, scriptType, narrationVoice, buildProject]);
 
   // ─────────────────────── Wave C1：壓縮快照上行（agent 的眼睛）
   // 3s 尾隨防抖（第二輪就緒優化刀C，原 300ms）：sessionId 落地（AI 助理開場）
