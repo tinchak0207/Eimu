@@ -78,6 +78,27 @@ const DOC_CARDS: Array<{
   },
 ];
 
+const RECIPE_CARDS: typeof DOC_CARDS = [
+  {
+    href: "/use-cases",
+    title: "场景指南",
+    desc: "17 个行业、各 6 个子场景，写清构图光线比例，提示词可直接复制。",
+    icon: Sparkles,
+  },
+  {
+    href: "/workflows",
+    title: "创作产线",
+    desc: "小说影视化、电商上新等 8 条多步产线，每一环做什么、交付什么。",
+    icon: Workflow,
+  },
+  {
+    href: "/skills",
+    title: "技能目录",
+    desc: "助理会的全部技能；在输入框打「/」也能直接调用。",
+    icon: Repeat,
+  },
+];
+
 export default function DocsPage() {
   return (
     <div className="flex flex-col gap-6">
@@ -214,6 +235,34 @@ export default function DocsPage() {
         </p>
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
           {DOC_CARDS.map((doc) => {
+            const Icon = doc.icon;
+            return (
+              <a
+                key={doc.href}
+                href={doc.href}
+                className="lg-card flex flex-col rounded-ios-3xl p-5 lg-transition hover:bg-[rgba(0,122,255,0.06)]"
+              >
+                <div className="flex items-center gap-2">
+                  <Icon className="h-4 w-4 shrink-0 text-[#007AFF]" />
+                  <p className="text-ios-callout font-semibold text-[rgba(0,0,0,0.85)]">{doc.title}</p>
+                </div>
+                <p className="mt-2.5 text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.58)]">{doc.desc}</p>
+              </a>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* ================= 找现成做法 =================
+          /use-cases、/workflows 在首页只以视觉隐藏的 SEO 块存在，/skills 只能在
+          输入框打「/」时撞见——三处对用户是零入口，从文档中心给出可见路径。 */}
+      <section>
+        <SectionTitle icon={Wand2}>找现成做法</SectionTitle>
+        <p className="mt-3 max-w-2xl text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.58)]">
+          不想从零写提示词，就从这三处挑一个照着做：
+        </p>
+        <div className="mt-4 grid gap-4 sm:grid-cols-3">
+          {RECIPE_CARDS.map((doc) => {
             const Icon = doc.icon;
             return (
               <a
