@@ -4,6 +4,7 @@ import {
   generationCoins,
   generationModel,
 } from "./generation-model-catalog";
+import { DEFAULT_IMAGE_MODEL_ID, imageGenerationCoins } from "./provider-config";
 
 export interface PricingPlan {
   id: string;
@@ -29,9 +30,19 @@ export const FLAGSHIP_MODEL_ID = "gemini-3-image";
 export const FLAGSHIP_MODEL_LABEL = "Nano Banana Pro";
 export const FLAGSHIP_COINS_PER_IMAGE = generationCoins(FLAGSHIP_MODEL_ID, { resolution: "1k" });
 
-/** 邀请奖励口径（与后端发放一致）：邀请人 / 被邀请人各得金币。 */
-export const REFERRAL_REWARD_COINS = 100;
-export const REFEREE_REWARD_COINS = 50;
+/** 一张「标准图」的币价（默认模型默认档位，定价变动自动跟随；与新人礼同一把尺）。 */
+export const STANDARD_IMAGE_COINS = imageGenerationCoins(DEFAULT_IMAGE_MODEL_ID);
+
+/**
+ * 邀请奖励口径（唯一真源，控面 src/lib/referral-reward.ts 按此发放）：
+ * 好友经你的链接注册、并**出了第一张图**后，你得 INVITER_REWARD_IMAGES 张、好友额外得 INVITEE_REWARD_IMAGES 张。
+ */
+export const INVITER_REWARD_IMAGES = 10;
+export const INVITEE_REWARD_IMAGES = 5;
+export const REFERRAL_REWARD_COINS = INVITER_REWARD_IMAGES * STANDARD_IMAGE_COINS;
+export const REFEREE_REWARD_COINS = INVITEE_REWARD_IMAGES * STANDARD_IMAGE_COINS;
+/** 每位邀请人最多累计领奖次数（防小号农场）。 */
+export const MAX_REWARDED_INVITES = 30;
 
 export const PLANS: PricingPlan[] = [
   {
@@ -93,6 +104,45 @@ export const PLANS: PricingPlan[] = [
     badge: "梦虹",
   },
 ];
+
+/* ── 首充专享档（2026-09-28 暴君拍板）──
+   一次性首充优惠：¥7（≈$1）得 300 币（约为正价 ¥9.9=100 币 的 4 倍划算），每帐号限一次。
+   **故意不进 PLANS 数组**：①它不该出现在正价档位梯与价目表列头里；②lifecycle-email 的
+   entryPlan() 按价格挑最便宜的档，放进去会被误当成常规最低档。
+   资格判准（唯一权威在 src/lib/first-charge.ts）：该帐号在 account_ledger 从未有过 recharge
+   行、且从未买过本档。checkout 无资格 = 403；notify 时资格不符（例如并发下两单）=
+   按 ¥7 对应正价币数（FIRST_CHARGE_FALLBACK_COINS）入帐，不给 300。 */
+export const FIRST_CHARGE_PLAN_ID = "first-charge";
+/** 首充一口价（RMB，暴君口径；不是正价）。 */
+export const FIRST_CHARGE_PRICE = 7;
+/** 首充到账币数。 */
+export const FIRST_CHARGE_COINS = 300;
+/** 首充档可换算的基准图张数（与定价页同一把尺，改价自动跟随）。 */
+export const FIRST_CHARGE_REFERENCE_IMAGES = Math.floor(
+  FIRST_CHARGE_COINS / Math.max(1, PLAN_REFERENCE_COINS_PER_IMAGE),
+);
+/** 资格不符时的口径：¥7 按「¥9.9 = 100 币」的正价折算 ≈ 70 币（取整向下，不吃用户的钱）。 */
+export const FIRST_CHARGE_FALLBACK_COINS = Math.floor(
+  (FIRST_CHARGE_PRICE / PLANS[0].price) * PLANS[0].coins,
+);
+
+export const FIRST_CHARGE_PLAN: PricingPlan = {
+  id: FIRST_CHARGE_PLAN_ID,
+  name: "首充专享 · 限一次",
+  tagline: `一次性首充优惠：${FIRST_CHARGE_PRICE} 元得 ${FIRST_CHARGE_COINS} 金币，约可生成 ${FIRST_CHARGE_REFERENCE_IMAGES} 张 GPT Image 2（1K）。每个账号限购一次。`,
+  price: FIRST_CHARGE_PRICE,
+  anchorPrice: Math.round((PLANS[0].price / PLANS[0].coins) * FIRST_CHARGE_COINS * 100) / 100,
+  coins: FIRST_CHARGE_COINS,
+  validDays: 30,
+  purchaseUrl: "",
+  features: [
+    `${FIRST_CHARGE_COINS} 金币通用额度`,
+    `约 ${FIRST_CHARGE_REFERENCE_IMAGES} 张 GPT Image 2（1K）`,
+    "仅限从未充值过的账号，每个账号限一次",
+    `折合 ${(FIRST_CHARGE_PRICE / Math.max(1, FIRST_CHARGE_REFERENCE_IMAGES)).toFixed(3)} 元/张 GPT Image 2（1K）`,
+  ],
+  badge: "首充专享",
+};
 
 /* ── 自定义方案（2026-09-07 暴君钦定）──
    单价常量单点定义：0.045 RMB/金币。价格只允许由 customPlanPrice() 推导，
@@ -164,6 +214,8 @@ export function customPlanFor(coins: number): PricingPlan {
 export function resolvePricingPlan(planParam: string): PricingPlan | null {
   const staticPlan = PLANS.find((plan) => plan.id === planParam);
   if (staticPlan) return staticPlan;
+  // 首充专享档不在 PLANS 里，但 checkout/notify/入帐仍共用这一个解析器（价格口径不分叉）。
+  if (planParam === FIRST_CHARGE_PLAN_ID) return FIRST_CHARGE_PLAN;
   const match = /^custom:(\d+)$/.exec(planParam);
   if (!match) return null;
   return customPlanFor(Number(match[1]));

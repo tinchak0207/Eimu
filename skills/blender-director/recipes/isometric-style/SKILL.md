@@ -1,11 +1,3 @@
-<!--
-來源（輪子）: https://github.com/arjun988/blender-skills — .claude/skills/isometric-style/SKILL.md
-License: MIT · 原作者: arjun988 (https://github.com/arjun988)
-入庫批次: 2026-09-06 對稱差擴容 W2（風格/mood/世界觀）。執行環境契約見 ../../SKILL.md（bridge POST /v1/execute、產物寫 $BLENDER_WORK/out/、Blender 5.2.1）。
-Blender 5.2 雷區：① BLENDER_EEVEE_NEXT 已死，只認 BLENDER_EEVEE/BLENDER_WORKBENCH/CYCLES ② Filmic 已移除，AgX 為默認 ③ action.fcurves 在 4.4+ 移除，走 layers[*].strips[*].channelbags[*].fcurves
-正文保留英文原文；配方內殘留的 MCP/IDE 表述以上方執行環境契約為準。
--->
-
 ---
 name: isometric-style
 description: Isometric and strategy-game art direction for Blender including diorama framing, true-iso camera setup, readable silhouettes, and tile asset rules.
@@ -18,6 +10,14 @@ metadata:
   triggers: isometric, iso camera, diorama, strategy game, tile asset, orthographic iso, city builder view
   related-skills: camera-cinematography, environment-artist, lowpoly-style, scene-assembly, rendering
 ---
+<!--
+來源（輪子）: https://github.com/arjun988/blender-skills — .claude/skills/isometric-style/SKILL.md
+License: MIT · 原作者: arjun988 (https://github.com/arjun988)
+入庫批次: 2026-09-06 對稱差擴容 W2（風格/mood/世界觀）。執行環境契約見 ../../SKILL.md（bridge POST /v1/execute、產物寫 $BLENDER_WORK/out/、Blender 5.2.1）。
+Blender 5.2 雷區：① BLENDER_EEVEE_NEXT 已死，只認 BLENDER_EEVEE/BLENDER_WORKBENCH/CYCLES ② Filmic 已移除，AgX 為默認 ③ action.fcurves 在 4.4+ 移除，走 layers[*].strips[*].channelbags[*].fcurves
+正文保留英文原文；配方內殘留的 MCP/IDE 表述以上方執行環境契約為準。
+-->
+
 
 # Isometric Style
 

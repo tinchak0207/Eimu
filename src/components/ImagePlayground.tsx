@@ -14,6 +14,7 @@ import {
 import { useImageGeneration } from "@/hooks/use-image-generation";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
+import { ToastAction } from "@/components/ui/toast";
 import { usePricingRevision } from "@/hooks/use-pricing-revision";
 import { useIsNarrow } from "@/hooks/use-is-narrow";
 import {
@@ -38,7 +39,28 @@ import { LOCAL_TEST_MODE } from "@/lib/local-test-mode";
 import { cn } from "@/lib/utils";
 import { isStandalonePwa, createHandoffLogin } from "@/lib/github-login";
 import { PwaHandoffPanel } from "@/components/PwaHandoffPanel";
+import { PromoIntroOverlay } from "@/components/promo/PromoIntroOverlay";
+import {
+  PROMO_ENTRY_UNDECIDED,
+  PROMO_SEEN_KEY,
+  PROMO_TRIAL_PROMPT,
+  clearPendingTrial,
+  isForcedPreview,
+  readPendingTrial,
+  resolvePromoEntry,
+  resolvePromoTrialIntent,
+  stashBlockedSend,
+  writePendingTrial,
+  type PromoEntryDecision,
+} from "@/components/promo/promo-gate";
 import { getInitialSuggestions, type Suggestion } from "@/lib/suggestions";
+import { WelcomeGiftDialog } from "@/components/welcome/WelcomeGiftDialog";
+import { AGENT_EXAMPLE_PROMPTS } from "@/lib/agent-example-prompts";
+import { ackWelcomeGiftModalSeen } from "@/lib/auth-client";
+import {
+  markWelcomeGiftModalSeenLocally,
+  welcomeGiftModalSeenLocally,
+} from "@/lib/welcome-gift-modal";
 import type { ReferenceImage } from "@/lib/image-types";
 import { CanvasChatWorkstation } from "@/components/canvas-workstation/CanvasChatWorkstation";
 import { AgentTemplateCarousel } from "@/components/canvas-workstation/AgentTemplateCarousel";
@@ -84,7 +106,7 @@ export function ImagePlayground({ suggestions }: { suggestions: Suggestion[] }) 
   const [agentSeed, setAgentSeed] = useState("");
   // 2026-08-25 模板庫：點卡注入 pending（nonce 讓「換一張卡」也是新注入）。
   // directive 是隱形引導詞：隨首條訊息經網關 system 欄位注入，用戶全程不可見。
-  const [agentTemplateInjection, setAgentTemplateInjection] = useState<{ text: string; nonce: number; directive?: string } | null>(null);
+  const [agentTemplateInjection, setAgentTemplateInjection] = useState<{ text: string; nonce: number; directive?: string; echo?: boolean } | null>(null);
   // C4 生成閉環事件橋：導演台視口「生成真实画面」完成 capture+上傳後 dispatch
   // director-render-request → 與模板庫共用同一注入 setter（AgentChatSurface 的
   // injection effect 收到即靜默發送，send() 無會話時 lazy 建號＋連線）。卸載時移除監聽。
@@ -103,9 +125,32 @@ export function ImagePlayground({ suggestions }: { suggestions: Suggestion[] }) 
   const [pwaHandoffUrl, setPwaHandoffUrl] = useState<string | null>(null);
   // wish 插件深链（?agent=1&session=<uuid>）：落地后直开该会话而非新开对话。
   const [initialAgentSessionId, setInitialAgentSessionId] = useState("");
+  /**
+   * 未登入新訪客的進站宣傳片（2026-09-27 暴君裁定落地）。
+   *
+   * 頻率：每瀏覽器一次（PROMO_SEEN_KEY）——新機／新瀏覽器給完整震撼，回訪的
+   * 未登入用戶不再被反覆擋在門外。判定鏈是純函式（promo-gate.ts），這裡只負責
+   * 讀儲存、開浮層、以及收尾那句「一送出就開新對話直送產線」。
+   *
+   * 為什麼掛在這頁而不是 layout：收尾要當場開新對話並把那句話送進聊天區，
+   * 那條通路（startNewSessionRef ＋ agentTemplateInjection）只在這棵樹上——
+   * 掛 layout 就只能整頁跳轉，等於把畫布與聊天區整個重建一次。
+   */
+  const [promoOpen, setPromoOpen] = useState(false);
+  // 未登入時送不出去的那句話：存起來，登入態翻真就自動補送（見 promo-gate.ts）。
+  const promoPendingRef = useRef<string | null>(null);
   const { images, timings, failedProviders, isLoading, startGeneration, cancelTask, tasks } = useImageGeneration();
-  const { user, isLoggedIn, refresh } = useAuth();
+  // authLoading 必須與上面 useImageGeneration 的 isLoading 區分開：
+  // 那是生圖忙碌態，不是登入態——拿它當水合判斷，等於對狀態不明的用戶插播。
+  // 註：措辭避開「生＋成＋中」那三字連寫，ImageDisplay.test 以它在四檔的
+  // 出現次數＝1 當契約，這裡多一次會讓它誤紅。
+  const { user, token, isLoggedIn, refresh, isLoading: authLoading, welcomeGift, clearWelcomeGift } = useAuth();
   const { toast } = useToast();
+  // 新人禮首登彈窗的開啟態（每設備只彈一次的輔助閘門見 welcomeGiftModalSeenLocally）。
+  const [welcomeGiftOpen, setWelcomeGiftOpen] = useState(false);
+  // 彈窗主按鈕的「預填但不送出」通路：走 AgentChatSurface 既有的 prefillRequest
+  // （輸入框有字、光標在末尾、焦點在框上，人再按送出），不是新機制。
+  const [composerPrefill, setComposerPrefill] = useState<{ text: string; nonce: number } | null>(null);
   const initialSuggestions = useMemo(() => getInitialSuggestions(suggestions), [suggestions]);
   const [selectedModels, setSelectedModels] = useState(MODEL_CONFIGS.fast);
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>(() => defaultAspectRatio(MODEL_CONFIGS.fast.image_tinchak));
@@ -360,6 +405,204 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
   }, [mode, agentSeed]);
 
   /**
+   * 進站判定：登入態水合完成後才判——水合中（authLoading）是「還不知道」，
+   * 對還不知道的用戶插播等於對已登入用戶插播。讀一次 localStorage，
+   * 看過就不再開；深鏈交接（?agent=1&q=/?session=）讓路、渠道來訪（B 站／微信，
+   * 人是被宣傳片吸引來的）也讓路，判準全在 promo-gate.ts。
+   *
+   * 頻率：**每頁載入只判一次**（resolvePromoEntry）。這條 effect 依賴登入態，
+   * 但登入態翻面不等於重新進站——2026-09-27 暴君實錘：登入中的用戶按登出，
+   * isLoggedIn 由真翻假，若重判就會把 `?promo=1` 的強制預覽又播一次（見
+   * promo-gate.ts 的 resolvePromoEntry 註釋）。定案後一律沿用首次結果。
+   *
+   * 渠道來訪只是「這次不開浮層」，不寫「已看過」：他下次直接進站（無 Referer）
+   * 仍會被影片接住，首次進站的震撼不會被渠道那一次的判斷吃掉。
+   */
+  const promoEntryRef = useRef<PromoEntryDecision>(PROMO_ENTRY_UNDECIDED);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (promoEntryRef.current.decided) return;
+    let seen = false;
+    try {
+      seen = window.localStorage.getItem(PROMO_SEEN_KEY) === "1";
+    } catch {
+      // 私密模式／停用儲存：讀不到就當沒看過（本次照播），不因此炸掉首頁。
+    }
+    const decision = resolvePromoEntry(promoEntryRef.current, {
+      isLoading: authLoading,
+      isLoggedIn,
+      seen,
+      search: window.location.search,
+      referrer: document.referrer,
+      userAgent: navigator.userAgent,
+    });
+    promoEntryRef.current = decision;
+    if (decision.decided && decision.play) setPromoOpen(true);
+  }, [authLoading, isLoggedIn]);
+
+  /**
+   * 浮層收尾（2026-09-27 暴君第二輪：「还不如把封面做成结尾界面，输入框变成
+   * 真的能输入，用户一发送马上开新对话」）：不再只是預填，而是當場開新對話把那句
+   * 送進聊天區——送出去的動作就是人按的那一下，D-5／D-24 的語義不受影響。
+   *
+   * 強制預覽（?promo=1）不寫「已看過」：驗收看過一次不等於這個瀏覽器已經
+   * 消耗掉真正的首次進站體驗。
+   */
+  const markPromoSeen = useCallback(() => {
+    if (isForcedPreview(window.location.search)) return;
+    try {
+      window.localStorage.setItem(PROMO_SEEN_KEY, "1");
+    } catch {
+      // 存不了就算了：不擋這次的動作，最壞情況是下次再播一遍。
+    }
+  }, []);
+
+  /**
+   * 留舊開新＋直送。與模板卡同一條路（startNewSessionRef → 注入即送），
+   * 但這條要 echo：那句話是使用者自己打的，必須出現在他自己的聊天記錄裡
+   * ——不 echo 的話，送出後到第一個字回來之前畫面完全是空的（2026-09-27 暴君）。
+   */
+  const runPromoTrial = useCallback((text: string) => {
+    const trimmed = text.trim() || PROMO_TRIAL_PROMPT;
+    const inject = (): void =>
+      setAgentTemplateInjection({ text: trimmed, nonce: Date.now(), echo: true });
+    const start = startNewSessionRef.current;
+    if (!start) {
+      // ref 未接上（極端時序）：退回直接送在當前會話，不能把這句話吃掉。
+      inject();
+      return;
+    }
+    void Promise.resolve(start()).then(inject);
+  }, []);
+
+  /**
+   * 收尾送出的那句話（2026-09-27 暴君第三輪）：登入態決定「當場開跑」還是
+   * 「先彈登入窗再開跑」，分流是純函式（resolvePromoTrialIntent）。
+   *
+   * 未登入那條不是丟掉：那句話先寫進 ref ＋ sessionStorage，登入態一翻真就補送。
+   * 兩型登入都吃這條——微信彈窗是原地完成（ref 還在），GitHub 同窗口跳轉回來
+   * 時元件已重掛（ref 沒了，靠 sessionStorage 那一份接住）。
+   * 使用者主動按了送出＝這部片對他是有效的，所以無論走哪條都先記「看過」。
+   */
+  const handlePromoTrial = useCallback(
+    (text: string) => {
+      markPromoSeen();
+      const intent = resolvePromoTrialIntent(text, isLoggedIn);
+      if (intent.kind === "login") {
+        // 那句話先留住；登入小框由浮層自己長（在送出鈕正上方），不遮蓋結尾畫面。
+        promoPendingRef.current = intent.pending;
+        writePendingTrial(typeof window === "undefined" ? null : window.sessionStorage, intent.pending);
+        return;
+      }
+      setPromoOpen(false);
+      setMode("agent");
+      setDisplayMode("agent");
+      runPromoTrial(intent.text);
+    },
+    [isLoggedIn, markPromoSeen, runPromoTrial],
+  );
+
+  /**
+   * 收尾的退路（跳過 / Esc / 先逛逛）：只關浮層，不送話。
+   * 順手清掉待送的那句——使用者在登入窗前選了「先不登入」並離開，
+   * 之後某次無關的登入不該突然把這句話送出去（那不是他要的）。
+   */
+  const handlePromoDismiss = useCallback(() => {
+    markPromoSeen();
+    setPromoOpen(false);
+    promoPendingRef.current = null;
+    clearPendingTrial(typeof window === "undefined" ? null : window.sessionStorage);
+  }, [markPromoSeen]);
+
+  /**
+   * 登入小框被關掉（先不登录／Esc／點封面空白處）：浮層留在原地，但那句話不再
+   * 待送——他選擇不登入，之後某次無關的登入不該突然把它送出去。
+   */
+  const handlePromoLoginDismiss = useCallback(() => {
+    promoPendingRef.current = null;
+    clearPendingTrial(typeof window === "undefined" ? null : window.sessionStorage);
+  }, []);
+
+  /**
+   * 主輸入區那句話被登入擋下（hook 的 onSendBlockedByAuth）→ 存進與宣傳片同一格。
+   *
+   * 為什麼要有這條：宣傳片浮層已經有「pending + 登入後補送」，但站上真正的入口
+   * （首頁主輸入區）沒吃到——未登入的人在那裡打字送出，那句話當場消失（composer
+   * 已清空，且 GitHub 登入是同窗口整頁跳轉，回來元件狀態全死），要重打一遍。
+   * 存同一格＝下面那條「登入態翻真 → 補送」effect 原樣接手，不必另造補送鏈。
+   */
+  const handleSendBlockedByAuth = useCallback((text: string) => {
+    const stashed = stashBlockedSend(
+      typeof window === "undefined" ? null : window.sessionStorage,
+      text,
+    );
+    promoPendingRef.current = stashed;
+  }, []);
+
+  /**
+   * 登入態翻真 → 補送那句話。
+   * 讀 ref 與 sessionStorage 兩處：ref 覆蓋同頁登入（按對話區的登入鈕／微信 popup），
+   * sessionStorage 覆蓋跳轉型登入（OAuth 落地回 / 時元件已重掛、ref 早就沒了）。
+   *
+   * 這句話有兩個來源，共用同一格、走同一條補送：
+   * ①宣傳片收尾輸入框（handlePromoTrial 的 login 分支）；
+   * ②首頁主輸入區（handleSendBlockedByAuth：未登入送出＝hook 的 not_authenticated）。
+   * 兩者都是「使用者已經按下送出、只是還沒登入」，所以補送就是完成他那個動作，
+   * 不是替他多做一件事。
+   */
+  useEffect(() => {
+    if (!isLoggedIn || authLoading) return;
+    const pending = promoPendingRef.current
+      ?? readPendingTrial(typeof window === "undefined" ? null : window.sessionStorage);
+    if (!pending) return;
+    promoPendingRef.current = null;
+    clearPendingTrial(typeof window === "undefined" ? null : window.sessionStorage);
+    // 登入成功＝宣傳片這條線走完：浮層收掉，然後真的開一個會話開跑。
+    setPromoOpen(false);
+    setMode("agent");
+    setDisplayMode("agent");
+    runPromoTrial(pending);
+  }, [authLoading, isLoggedIn, runPromoTrial]);
+
+  /**
+   * 新人禮待展示 → 開彈窗。
+   * 閘門權威在服務端（welcome_gift_grant.modal_seen_at，經 /api/auth/me 的加法欄位）；
+   * 本機 localStorage 只擋「同一台設備已經看過」的重複彈，換設備時本機標記是空的，
+   * 仍由服務端決定彈不彈。未登入／還沒水合完都不彈——否則會對未登入的人插播
+   * 一條「已送你 5 币」。
+   */
+  useEffect(() => {
+    if (authLoading || !isLoggedIn || !user?.id) return;
+    if (!welcomeGift?.pending) return;
+    if (welcomeGiftModalSeenLocally(user.id)) return;
+    setWelcomeGiftOpen(true);
+  }, [authLoading, isLoggedIn, user?.id, welcomeGift]);
+
+  /**
+   * 展示過的回執＋本機關門。回執失敗照樣關窗（見 ackWelcomeGiftModalSeen 註：
+   * 沒寫上只會讓下次登入再彈一次，比把新人禮藏起來輕）。
+   */
+  const handleWelcomeGiftSeen = useCallback(() => {
+    const userId = user?.id;
+    if (userId) markWelcomeGiftModalSeenLocally(userId);
+    setWelcomeGiftOpen(false);
+    clearWelcomeGift();
+    if (token) void ackWelcomeGiftModalSeen(token);
+  }, [clearWelcomeGift, token, user?.id]);
+
+  /**
+   * 主按鈕「马上生成第一张」：關窗、切到 AI 助理、把**既有示例的第一條**預填進輸入框。
+   * 示例句不寫死——與聊天面板空態快捷 chips 共用 agent-example-prompts 這一真源。
+   */
+  const handleWelcomeGiftStart = useCallback(() => {
+    handleWelcomeGiftSeen();
+    setMode("agent");
+    setDisplayMode("agent");
+    const sample = AGENT_EXAMPLE_PROMPTS[0];
+    if (sample) setComposerPrefill({ text: sample, nonce: Date.now() });
+  }, [handleWelcomeGiftSeen]);
+
+  /**
    * 工作站的 applyCreatorResource 依赖 [onModelChange]，一旦这个 prop 每次
    * render 都换身份，<CreatorResourcePanel> 的 memo 就完全失效，
    * 32 张资源卡（含 32 个 next/image）会跟着生成期间的每一次 render 重渲染。
@@ -413,7 +656,18 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
       generateAudio,
     });
     if (!LOCAL_TEST_MODE && user && !hasEnoughQuota(user, requiredCoins)) {
-      toast({ title: "余额不足", description: "请先充值再继续做图", variant: "destructive" });
+      // 额度用完＝转化率最高的时刻：提示里直接给付款入口，不让用户自己找。
+      toast({
+        title: "余额不足",
+        description: `这次需要 ${requiredCoins} 币，充值后马上继续`,
+        variant: "destructive",
+        action: (
+          // 带 ?plan=first-charge：定价页据此滚到首充专享卡（有资格的人第一眼就看到 4 倍划算那档）。
+          <ToastAction altText="去充值" onClick={() => { window.location.href = "/pricing?plan=first-charge"; }}>
+            去充值
+          </ToastAction>
+        ),
+      });
       return;
     }
     const finalPrompt = enhancePrompt(rawPrompt, stylePreset);
@@ -589,7 +843,9 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
                     switchSessionRef={switchSessionRef}
                     startNewSessionRef={startNewSessionRef}
                     agentInjection={agentTemplateInjection}
+                    prefillRequest={composerPrefill}
                     onUserMessage={() => setAgentTemplateDismissed(true)}
+                    onSendBlockedByAuth={handleSendBlockedByAuth}
                   />
                     </>
                   )}
@@ -632,6 +888,30 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
             refresh().catch(() => {});
           }}
           onClose={() => setPwaHandoffUrl(null)}
+        />
+      )}
+
+      {/* 未登入新訪客的進站宣傳片：z-[120] 在 navbar(z-80) 與既有 portal 彈層(z-90) 之上，
+          浮層開著時底下的首頁仍完整掛載——收尾的「开始试玩」要當場把話預填進輸入框，
+          整頁跳轉會把那個輸入框連同畫布一起重建。 */}
+      {promoOpen && (
+        <PromoIntroOverlay
+          onTrial={handlePromoTrial}
+          onDismiss={handlePromoDismiss}
+          needsLogin={!isLoggedIn}
+          onLoginDismiss={handlePromoLoginDismiss}
+        />
+      )}
+
+      {/* 新人禮首登彈窗（已發放、未展示才彈）。標題/正文/幣數全部來自服務端，
+          這裡不寫死任何數字；與宣傳片浮層同層級（z-[95] 的 portal）。 */}
+      {welcomeGiftOpen && welcomeGift && welcomeGift.title && welcomeGift.body && (
+        <WelcomeGiftDialog
+          open
+          title={welcomeGift.title}
+          body={welcomeGift.body}
+          onStart={handleWelcomeGiftStart}
+          onLater={handleWelcomeGiftSeen}
         />
       )}
 

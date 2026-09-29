@@ -23,7 +23,6 @@ import {
 import {
   ArrowUp,
   Brain,
-  Check,
   ChevronDown,
   Coins,
   Crop,
@@ -41,7 +40,6 @@ import {
   RefreshCw,
   Search,
   Settings,
-  Sparkles,
   SquarePen,
   X,
 } from "lucide-react";
@@ -232,7 +230,16 @@ function ToolRow({ tool }: { tool: DemoTool }) {
         ) : null}
         {tool.status === "done" ? (
           <>
-            <Check className="h-3.5 w-3.5 shrink-0 text-ios-green" aria-hidden="true" />
+            {/* 源圖只有 3 張表情：done → emo-1（張嘴大笑），沿用原 Check 的 14px 位。 */}
+            {/* eslint-disable-next-line @next/next/no-img-element -- 本地看板娘素材，固定尺寸 */}
+            <img
+              src="/mascot/eimu-emo-1.png"
+              alt=""
+              aria-hidden="true"
+              width={14}
+              height={14}
+              className="h-3.5 w-3.5 shrink-0 object-contain"
+            />
             <span className="shrink-0 text-ios-footnote text-foreground/45">完成</span>
           </>
         ) : null}
@@ -395,6 +402,16 @@ function BatchProgressRow({
 function ThinkingRow() {
   return (
     <div className="flex items-center gap-1.5 py-1" role="status" aria-label="正在思考">
+      {/* 思考態 → emo-2（睜眼微笑）；源圖只有 3 張表情，emo-3 留著不用。 */}
+      {/* eslint-disable-next-line @next/next/no-img-element -- 本地看板娘素材，固定尺寸 */}
+      <img
+        src="/mascot/eimu-emo-2.png"
+        alt=""
+        aria-hidden="true"
+        width={18}
+        height={18}
+        className="h-[18px] w-[18px] shrink-0 object-contain"
+      />
       <span className="h-1 w-1 animate-pulse rounded-full bg-foreground/35 [animation-delay:0ms]" />
       <span className="h-1 w-1 animate-pulse rounded-full bg-foreground/35 [animation-delay:200ms]" />
       <span className="h-1 w-1 animate-pulse rounded-full bg-foreground/35 [animation-delay:400ms]" />
@@ -590,8 +607,17 @@ function AgentChatPreviewClientComponent() {
       <SpecularLine />
       {/* 顶栏（减负版）：logo + 标题 + 极弱状态；右侧新会话 / 关闭 / ⋯ 收纳 */}
       <header className="flex shrink-0 items-center gap-2.5 border-b border-black/[0.04] px-3 py-1.5">
-        <div className="lg-tint-blue flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-ios-blue">
-          <Sparkles className="h-4 w-4" aria-hidden="true" />
+        {/* 看板娘头像：容器尺寸沿用原 logo 位（h-8 w-8）＝零位移；头像本体 28px 圆形。
+            去掉 lg-tint-blue 底色，避免 UI 蓝与角色自带配色混用。 */}
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center">
+          {/* eslint-disable-next-line @next/next/no-img-element -- 本地看板娘素材，固定尺寸 */}
+          <img
+            src="/mascot/eimu-avatar.png"
+            alt="AI 助理头像"
+            width={28}
+            height={28}
+            className="h-7 w-7 shrink-0 rounded-full object-cover"
+          />
         </div>
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-ios-headline text-foreground">AI 助理</h1>
@@ -640,7 +666,22 @@ function AgentChatPreviewClientComponent() {
 
       {!started ? (
         /* 空态：输入框居中放大为主角，下方三个幽灵文字链示例。 */
-        <div className="flex flex-1 flex-col items-center overflow-y-auto px-5">
+        <div className="relative flex flex-1 flex-col items-center overflow-y-auto px-5">
+          {/* 空态主角：看板娘只在玻璃容器内出现（不与界面配色混用）。
+              绝对定位在既有 30vh 顶部留白内，标题与输入框位置不动（零位移）。
+              容器与图片均为固定尺寸，素材未落地前也不会撑出滚动条。 */}
+          <div className="pointer-events-none absolute inset-x-0 top-0 flex h-[30vh] items-center justify-center">
+            <div className="lg-float flex h-[min(24vh,168px)] w-[min(24vh,168px)] items-center justify-center overflow-hidden rounded-[28px] p-2">
+              {/* eslint-disable-next-line @next/next/no-img-element -- 本地看板娘素材，固定尺寸 */}
+              <img
+                src="/mascot/eimu-hero.png"
+                alt="Eimu 助理形象"
+                width={256}
+                height={256}
+                className="h-full w-full object-contain"
+              />
+            </div>
+          </div>
           <div className="flex w-full flex-col items-center" style={{ paddingTop: "30vh" }}>
             <h2 className="text-2xl font-semibold tracking-tight text-foreground">想做点什么？</h2>
             <div className="mt-8 w-full">

@@ -104,14 +104,16 @@
     color: #1d1d1f;
   }
 
-  *::-webkit-scrollbar { width: 8px; height: 8px; }
+  *::-webkit-scrollbar { width: 6px; height: 6px; }
   *::-webkit-scrollbar-thumb {
-    background: rgba(0, 0, 0, 0.14);
+    background: transparent;
     border: 2px solid transparent;
     border-radius: 999px;
     background-clip: padding-box;
   }
   *::-webkit-scrollbar-track { background: transparent; }
+  /* 2026-09-27：細條、懸停才顯示——常駐灰條太吵。 */
+  *:hover::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.16); background-clip: padding-box; }
 }
 
 @media (max-width: 767px) {

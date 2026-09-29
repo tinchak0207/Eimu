@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { Coins, CreditCard, Gift, CheckCircle2, Plus } from "lucide-react";
 import { quotaToRewardCount } from "@/lib/checkin-copy";
@@ -43,6 +44,35 @@ export function WalletBadge({ className, showTopUp = true, showCheckin = true }:
       .catch(() => {});
   }, [showCheckin, token]);
 
+  const plusBtnRef = useRef<HTMLButtonElement | null>(null);
+  /* 「+」浮層的落點（fixed 座標）：portal 到 body 後就脫離了 .lg-bar 的
+     overflow-hidden 與 backdrop-filter containing block，位置必須自己算。
+     量測時機＝開啟當下 ＋ resize/scroll（navbar 是 sticky，捲動時鈕的視口座標不變，
+     但展開中的浮層仍跟著量，避免縮窗後錯位）。 */
+  const [menuAnchor, setMenuAnchor] = useState<{ top: number; right: number } | null>(null);
+  const measureAnchor = useCallback(() => {
+    const btn = plusBtnRef.current;
+    const rect = btn?.getBoundingClientRect();
+    if (!rect) return;
+    // 用「+」鈕下緣對齊，但膠囊鈕比 .lg-bar 矮（bar 有 py 內距），只取鈕下緣
+    // 會讓浮層頂端落進 bar 的下內距、蓋住玻璃條底緣；故取兩者較低者再留 8px。
+    const barBottom = btn?.closest(".lg-bar")?.getBoundingClientRect().bottom ?? rect.bottom;
+    setMenuAnchor({ top: Math.max(rect.bottom, barBottom) + 8, right: Math.max(8, window.innerWidth - rect.right) });
+  }, []);
+  useEffect(() => {
+    if (!plusOpen) {
+      setMenuAnchor(null);
+      return;
+    }
+    measureAnchor();
+    window.addEventListener("resize", measureAnchor);
+    window.addEventListener("scroll", measureAnchor, true);
+    return () => {
+      window.removeEventListener("resize", measureAnchor);
+      window.removeEventListener("scroll", measureAnchor, true);
+    };
+  }, [plusOpen, measureAnchor]);
+
   if (!isLoggedIn || !user) return null;
 
   const coins = quotaToCoins(user.quota);
@@ -78,6 +108,7 @@ export function WalletBadge({ className, showTopUp = true, showCheckin = true }:
         {(showTopUp || showCheckin) && (
           <button
             type="button"
+            ref={plusBtnRef}
             onClick={() => setPlusOpen((v) => !v)}
             aria-expanded={plusOpen}
             aria-haspopup="menu"
@@ -91,15 +122,19 @@ export function WalletBadge({ className, showTopUp = true, showCheckin = true }:
         )}
       </div>
 
-      {/* 「+」菜单：数量为 2（充值 / 签到），lg-sheet 玻璃 + specular 顶线。 */}
-      {plusOpen && (showTopUp || showCheckin) && (
+      {/* 「+」菜单：数量为 2（充值 / 签到），lg-sheet 玻璃 + specular 顶线。
+          2026-09-27：portal 到 body——祖先 .lg-bar 的 overflow-hidden 會裁掉浮層、
+          backdrop-filter 又會把 fixed 後代縮成 bar 大小，兩者都在 portal 後失效；
+          位置改用「+」鈕的 rect 以 fixed 座標自算，層級對齊同檔帳號選單 z-90。 */}
+      {plusOpen && menuAnchor && (showTopUp || showCheckin) && createPortal(
         <>
-          {/* 点外收起：透明层只承接点击，不遮视觉。 */}
-          <div className="fixed inset-0 z-30" aria-hidden="true" onClick={() => setPlusOpen(false)} />
+          {/* 点外收起：透明层只承接点击，不遮视觉。portal 到 body 後才是真正的全屏层。 */}
+          <div className="fixed inset-0 z-[89]" aria-hidden="true" onClick={() => setPlusOpen(false)} />
           <div
             role="menu"
             aria-label="余额操作"
-            className="lg-sheet animate-lg-appear absolute right-0 top-full z-40 mt-2 w-48 overflow-hidden rounded-ios-2xl p-1.5"
+            style={{ top: menuAnchor.top, right: menuAnchor.right }}
+            className="lg-sheet animate-lg-appear fixed z-[90] w-48 overflow-hidden rounded-ios-2xl p-1.5"
           >
             <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white to-transparent opacity-80" />
             {showTopUp && (
@@ -142,7 +177,8 @@ export function WalletBadge({ className, showTopUp = true, showCheckin = true }:
               </button>
             )}
           </div>
-        </>
+        </>,
+        document.body,
       )}
     </div>
   );

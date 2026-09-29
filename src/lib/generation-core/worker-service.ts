@@ -1,5 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { ingestRedeemedRecharges } from "./account-ledger";
+import { runLifecycleEmailsWithSql } from "@/lib/lifecycle-email";
+import { runReferralRewardsWithSql } from "@/lib/referral-reward";
+import { productionWelcomeGiftDeps, runWelcomeGiftDevCatchUp } from "@/lib/welcome-gift";
 import { ingestSubscriptionRedemptions } from "./subscription";
 import { reconcileAccountBalances } from "./account-reconciliation";
 import { commitGenerationBilling, reconcileGenerationBilling, refundGenerationBilling } from "./billing-ledger";
@@ -32,8 +35,10 @@ import {
   releaseJobForRetry,
 } from "./job-repository";
 import { acquireSupplierLease, diagnoseSupplierUnavailability, heartbeatSupplierLease, recoverExpiredCooldowns, releaseSupplierLease, reportSupplierFailure, reportSupplierSuccess, type SupplierUnavailabilityReason } from "./scheduler";
-import { generateWithSupplier } from "./supplier-adapter";
-import type { GenerationArtifactResult, GenerationJob, ProviderProtocol, SupplierRecord } from "./types";
+import { generateWithSupplier, resolveSupplyAdapter } from "./supplier-adapter";
+import { reconcileProtocolOf, workflowSeconds } from "./supply-registry";
+import { enforcePaidVideoCostGate } from "./paid-video-cost-gate";
+import type { GenerationArtifactResult, GenerationJob, GenerationKind, ProviderProtocol, SupplierGenerationInput, SupplierGenerationOutput, SupplierRecord } from "./types";
 import { runProviderReconciliation } from "./provider-reconciliation";
 import { refreshAdobeSupplierHealth } from "./adobe-health";
 import { onFilmeraTokenRotated } from "./filmera-upstream";
@@ -55,18 +60,41 @@ function backoffMs(attemptCount: number): number {
   return Math.min(60_000, 1_000 * 2 ** Math.min(6, attemptCount));
 }
 
-/** INC-0831：supplier adapter_type → 對帳協議標記（同步 adapter 無異步任務語義，不在此列）。 */
+/**
+ * INC-0831：supplier adapter_type → 對帳協議標記。V-06 起查 supply-registry：
+ * 異步協議＝自身，同步協議＝其顯式 `reconcileVia`，未知協議拋錯（不再 default 成 newapi_video）。
+ */
 function protocolOfAdapter(adapterType: SupplierRecord["adapterType"]): ProviderProtocol {
-  switch (adapterType) {
-    case "metaso":
-      return "metaso";
-    case "openai_video":
-      return "openai_video";
-    case "filmera":
-      return "filmera";
-    default:
-      return "newapi_video";
+  return reconcileProtocolOf(adapterType);
+}
+
+/**
+ * 生產平面成本閘 + 供給提交（V-03，docs/architecture/planes.md §4）。
+ *
+ * 取得供給租約後、呼叫供給 adapter 前執行付費視頻成本閘（原住在
+ * openai-video-upstream.ts:158，只擋 openai_video）。只對 video_generate 生效：
+ * - 閘看的 adapter＝真正會被呼叫的 adapter（resolveSupplyAdapter，含 kernel／new-api 分流）；
+ * - `openai_video`（paidVideoFailClosed）一律過閘，白名單外拒收——與搬遷前一致；
+ * - 其他協議只在上游 model 落入白名單時套價檢，metaso/filmera 等既有路徑放行不審。
+ * 拒收＝SupplierRequestError(400)，在 fetch 之前拋出（零上游支出），走既有失敗路徑。
+ */
+export async function submitWithSupplyCostGate(
+  supplier: SupplierRecord,
+  input: SupplierGenerationInput,
+): Promise<SupplierGenerationOutput> {
+  if (input.kind === "video_generate") {
+    const adapter = resolveSupplyAdapter(supplier, input);
+    const facts = adapter.paidVideoFacts?.(supplier, input) ?? {
+      supplierModelId: supplier.supplierModelId ?? input.modelId,
+      resolution: input.resolution,
+      seconds: workflowSeconds(input),
+    };
+    enforcePaidVideoCostGate(
+      { ...facts, supplierId: supplier.id, supplierLabel: supplier.label, jobId: input.jobId },
+      { failClosed: adapter.paidVideoFailClosed === true },
+    );
   }
+  return generateWithSupplier(supplier, input);
 }
 
 // 病灶 D（2026-08-30）：排隊期退避不再撞穿 3 分鐘 deadline。
@@ -85,6 +113,26 @@ const RECOVERABLE_QUEUE_REASONS: ReadonlySet<SupplierUnavailabilityReason> = new
   "accounts_unhealthy",
 ]);
 
+/**
+ * 開工後的生成預算（2026-09-27 INC-VIDEO-0927）。
+ *
+ * 影片上游實測比圖片慢一個量級：napi 單次 attempt 最長 993.9s（16.6 分鐘）、
+ * 30 秒檔成功單均 868s；adapter 內輪詢窗口原本只有 540s（9 分鐘），
+ * 已實錄 1 筆 "openai-video upstream generation timed out after 540s
+ * (last status: in_progress)" —— 慢而健康的上游被我們的窗口誤殺。
+ * 影片類（video_generate / avatar / lipsync 同為異步影片族）放寬到 25 分鐘
+ * （含成品下載與持久化），其餘維持 15 分鐘。
+ */
+const GENERATION_BUDGET_MS = 15 * 60_000;
+const VIDEO_GENERATION_BUDGET_MS = 25 * 60_000;
+
+/** 按任務類型取開工後生成預算（純函數，供測試直接斷言）。 */
+export function generationBudgetMs(kind: GenerationKind): number {
+  return kind === "video_generate" || kind === "avatar" || kind === "lipsync"
+    ? VIDEO_GENERATION_BUDGET_MS
+    : GENERATION_BUDGET_MS;
+}
+
 /** 排隊順延決策：deadline 快到期 + 未超排隊上限 + 處在可恢復狀態。純邏輯，供測試直接斷言。 */
 export function shouldExtendQueueDeadline(input: {
   diagnosisReason: SupplierUnavailabilityReason;
@@ -101,6 +149,27 @@ export function shouldExtendQueueDeadline(input: {
   if (deadlineAt.getTime() - now >= windowMs) return false;
   if (now >= startedAt.getTime() + capMs) return false;
   return RECOVERABLE_QUEUE_REASONS.has(diagnosisReason);
+}
+
+/**
+ * 欠費無替補即時失敗（2026-09-28 漫劇評測實錘）：唯一視頻渠道回 401＋insufficient_user_quota
+ * 時，registry 只認原生 402 為硬停，job 被放回佇列；帳號進 30 分鐘 cooldown 後再無可租
+ * 供應商，單子以 overloaded 空轉到 25 分鐘 deadline 才死——用戶等 25 分鐘只拿到「超時」。
+ * 本 job 上一次失敗已判定欠費，且診斷顯示沒有別的可用供應商（全被排除／冷卻／不健康）
+ * → 立即失敗＋退款，讓上游如實說「渠道余额不足」。容量滿（capacity_saturated）不算：
+ * 那代表還有別的健康供應商在忙，值得等。純邏輯，供測試直接斷言。
+ */
+const EXHAUSTED_SUPPLY_REASONS: ReadonlySet<SupplierUnavailabilityReason> = new Set([
+  "supplier_excluded",
+  "suppliers_cooldown",
+  "accounts_unhealthy",
+]);
+
+export function shouldFailFastOnExhaustedSupply(input: {
+  lastFailureClass: string | null;
+  diagnosisReason: SupplierUnavailabilityReason;
+}): boolean {
+  return input.lastFailureClass === "quota_exhausted" && EXHAUSTED_SUPPLY_REASONS.has(input.diagnosisReason);
 }
 
 /** 病灶 D：把 extend 實際寫入 DB 的 deadline 同步回內存 job.deadlineAt，消除語義漂移。 */
@@ -168,10 +237,11 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
       }, sql);
       if (supplierLease) {
         // R7-D：排隊 3 分鐘 deadline 只保護等容量階段；真的租到供應商開工了，
-        // 立即按 started_at 展期到 15 分鐘總生成預算（慢而健康的 H3 單不被誤殺）。
+        // 立即按 started_at 展期到生成總預算（慢而健康的影片單不被誤殺）。
         // 病灶 D：extend 返回實際寫入的 deadline，同步回內存 job.deadlineAt，
         // 否則內存仍停在 claim 時的 3 分鐘快照，長任務會被誤殺。
-        const extendedTo = await extendGenerationDeadlineJob(job, workerId, 15 * 60_000, sql).catch(() => null);
+        // INC-VIDEO-0927：預算按 kind 分級（影片 25 分鐘，其餘 15 分鐘）。
+        const extendedTo = await extendGenerationDeadlineJob(job, workerId, generationBudgetMs(job.kind), sql).catch(() => null);
         applyExtendedDeadline(job, extendedTo);
       }
       if (!supplierLease) {
@@ -193,6 +263,21 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
           reason: "capacity_saturated" as const,
           detail: "Supplier diagnosis itself failed; the job will retry with backoff.",
         }));
+        const lastFailureClass = [...jobAttempts]
+          .reverse()
+          .find((candidate) => candidate.status === "failed")?.failureClass ?? null;
+        if (shouldFailFastOnExhaustedSupply({ lastFailureClass, diagnosisReason: diagnosis.reason })) {
+          await failGenerationJob({
+            jobId: job.id,
+            workerId,
+            failureClass: "quota_exhausted",
+            failureDetail: `No alternative supplier after upstream balance exhaustion (${diagnosis.reason}): ${lastFailureDetail ?? diagnosis.detail}`,
+          }, sql);
+          await refundFailure(job, completed, workerId, sql);
+          const attemptsAfterFail = await listGenerationAttemptsForJob(job.id, sql).catch(() => jobAttempts);
+          await emitJobRoutingEvent({ job, attempts: attemptsAfterFail, outcome: "exhausted", refunded: true });
+          return;
+        }
         // 病灶 D：排隊期退避撞穿 deadline —— 無 lease 反覆 claim→釋放直到 3 分鐘
         // deadline 到期被 deadline_exceeded 殺單（實錄 12 筆 video job，attempt_count=0）。
         // 當 deadline 快到期且處在「可恢復」的等容量狀態（cooldown 未到 / 併發滿 /
@@ -262,7 +347,7 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
             },
           }, sql);
         };
-        const output = await generateWithSupplier(supplierLease.supplier, {
+        const output = await submitWithSupplyCostGate(supplierLease.supplier, {
           jobId: job.id,
           attemptId: attempt.id,
           modelId: job.modelId,
@@ -511,7 +596,8 @@ export async function runAccountMaintenanceOnce(
     const recharges = await ingestRedeemedRecharges({}, { sql });
     console.log(
       `[account-ledger] 充值入帳掃描 scanned=${recharges.scanned} charged=${recharges.charged} ` +
-        `未使用=${recharges.skippedUnused} 基線前=${recharges.skippedBeforeBaseline} ` +
+        `基線前已補記=${recharges.chargedBaselineAbsorbed} 未使用=${recharges.skippedUnused} ` +
+        `基線前漏記=${recharges.skippedBeforeBaseline} ` +
         `訂閱碼=${recharges.skippedSubscription} errors=${recharges.errors.length}`,
     );
   } catch (error) {
@@ -530,6 +616,31 @@ export async function runAccountMaintenanceOnce(
     );
   } catch (error) {
     console.error("[subscription] 訂閱發放失敗（繼續）", error);
+  }
+  try {
+    const referral = await runReferralRewardsWithSql(sql);
+    if (referral.granted || referral.failed || referral.skipped) {
+      console.log(`[referral] granted=${referral.granted} skipped=${referral.skipped} failed=${referral.failed}${referral.aborted ? " aborted" : ""}`);
+    }
+  } catch (error) {
+    console.error("[referral] 邀請獎勵失敗（繼續）", error);
+  }
+  // 新人礼兜底：开发者建了 biz key 但用 API、不会再登录网站，/api/auth/me 的补发打不到他们。
+  // 这里对「持有 biz key ∧ 未领过新人礼 ∧ 没成功出图」的外部用户自动补发（复用 grantWelcomeGift），
+  // 每轮上限 20 人，幂等占位表保证与登录/回溯路径并发也只发一次。
+  try {
+    const dev = await runWelcomeGiftDevCatchUp(productionWelcomeGiftDeps(sql));
+    if (dev.scanned > 0) {
+      console.log(`[welcome-gift] 开发者补发 scanned=${dev.scanned} granted=${dev.granted} skipped=${dev.skipped} failed=${dev.failed}`);
+    }
+  } catch (error) {
+    console.error("[welcome-gift] 开发者补发失败（继续）", error);
+  }
+  try {
+    const mail = await runLifecycleEmailsWithSql(sql);
+    console.log(`[lifecycle-email] sent=${mail.sent} failed=${mail.failed}${mail.skipped ? ` skipped=${mail.skipped}` : ""}${mail.aborted ? ` aborted=${mail.aborted}` : ""}`);
+  } catch (error) {
+    console.error("[lifecycle-email] 生命週期郵件失敗（繼續）", error);
   }
   try {
     const report = await reconcileAccountBalances({}, { sql });

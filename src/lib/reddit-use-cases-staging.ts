@@ -9,6 +9,7 @@ const AUTHOR = {
 export const REDDIT_USE_CASES_STAGING: UseCase[] = [
   {
     slug: "reddit-room-photo-virtual-staging-directions",
+    categorySlug: "architecture",
     keyword: "房间照片 AI 软装方案对比",
     title: "用现有房间照片对比软装与虚拟布置方向，同时保留空间辨识度",
     tagline: "固定房间结构，一次比较多套家具与装饰方向",
@@ -58,7 +59,7 @@ export const REDDIT_USE_CASES_STAGING: UseCase[] = [
     relatedSlugs: [
       "reddit-compare-ai-image-models",
       "reddit-control-specific-ai-image",
-      "design-6",
+      "reddit-move-resize-object-only",
     ],
     searchVariants: [
       "AI 房间软装效果图",

@@ -7,7 +7,7 @@
 //     落 queued（job-repository 零額快車道），阻塞式 reserve 執行器整段被跳過，
 //     計費交事後投影（本階段未實現，帳面真源 = new-api logs type=2）；
 //     commit/refund 機制原樣保留（0 額時天然 no-op，不動帳）。
-//   - 額度不足 → 按現契約 402 insufficient_quota 拒單，不產生註定失敗的 job。
+//   - 額度不足 → 按現契約 402 insufficient_balance 拒單，不產生註定失敗的 job。
 //   - 上游不可達 → 不替閘門做主，原樣回落現行阻塞式 reserve 路徑：現有代碼對
 //     new-api 不可用的既有姿勢是歧義結果凍結 billing_unknown、永不盲目重放
 //     （billing-ledger classifyBillingFailure）——手術模式不讓可用性變差。
@@ -23,7 +23,7 @@
 // 成員點數配額（REQ-B1，見 member-quota.ts，user 層模型）：成員 = new-api 另一個
 // user，配額桶 = 該 user 的 users.quota（token 桶模型已被 09-23 只讀探針硬否定）。
 // 若該 key 的計費 user 已被登記為某團隊主帳的成員，預檢**先判成員 user 額度再走
-// 既有計費戶檢查**，兩種不足都是既有 402 insufficient_quota 契約，文案區分
+// 既有計費戶檢查**，兩種不足都是既有 402 insufficient_balance 契約，文案區分
 // （成員額度不足／餘額不足）。未被登記為成員的 key 整段跳過，不新增任何上游讀取。
 //
 // 0 額任務（今日 TTS 即是）無帳可守，閘門不啟動——不給任務路徑添加今天沒有的
@@ -50,8 +50,20 @@ export const SURGERY_QUOTA_PRECHECK_ENV = "SURGERY_QUOTA_PRECHECK";
 /** 預檢讀數的硬上限（僅異常情況的天花板；同網單次 GET 常規個位數毫秒）。 */
 export const QUOTA_PRECHECK_TIMEOUT_MS_DEFAULT = 3_000;
 
-/** 既有契約文案：與 image-billing「余额不足」及 legacy 402 分支同款，一字不改。 */
-const INSUFFICIENT_QUOTA_MESSAGE = "余额不足，请先充值。";
+/**
+ * /v1 對外 402 統一契約（暴君 2026-09-28 裁決：破壞性變更已核准，受害面近乎零）。
+ *
+ * 所有「餘額／額度不足」出口一律回這一套：type 與 code 同碼 `insufficient_balance`，
+ * 文案逐字固定（含充值入口）。legacy reserve 分支與本閘門共用同一常數——客戶端
+ * 只認一種 402 形狀，不再有第二套文案與碼。非 402 的其他錯誤碼一律不動。
+ */
+export const INSUFFICIENT_BALANCE_ERROR = {
+  ok: false,
+  status: 402,
+  type: "insufficient_balance",
+  code: "insufficient_balance",
+  message: "余额不足，本次未扣费。充值：https://eimu.dev/pricing",
+} as const;
 
 /** 成員配額讀數（預檢注入點；默認讀 new-api 成員 user 的 users.quota）。 */
 type MemberQuotaReader = (memberUserId: number) => Promise<MemberQuotaSnapshot | null>;
@@ -77,8 +89,8 @@ export type QuotaGateDecision =
   | {
       ok: false;
       status: 402 | 503;
-      type: "insufficient_quota" | "api_error";
-      code: "insufficient_quota" | "control_plane_unavailable";
+      type: "insufficient_balance" | "api_error";
+      code: "insufficient_balance" | "control_plane_unavailable";
       message: string;
     };
 
@@ -257,10 +269,8 @@ export async function enforceQuotaGate(
     if (!member.enabled) {
       console.log(`[quota-precheck] member disabled memberUser=${member.memberUserId} memberKey=${member.memberKeyId}`);
       return {
-        ok: false,
-        status: 402,
-        type: "insufficient_quota",
-        code: "insufficient_quota",
+        ...INSUFFICIENT_BALANCE_ERROR,
+        // 成員額度停在管理員手上，補救是找團隊主帳號——不套主帳的充值文案（指引會錯）。
         message: MEMBER_QUOTA_DISABLED_MESSAGE,
       };
     }
@@ -300,8 +310,8 @@ export async function enforceQuotaGate(
       return {
         ok: false,
         status: 402,
-        type: "insufficient_quota",
-        code: "insufficient_quota",
+        type: "insufficient_balance",
+        code: "insufficient_balance",
         message: MEMBER_QUOTA_INSUFFICIENT_MESSAGE,
       };
     }
@@ -321,13 +331,7 @@ export async function enforceQuotaGate(
   );
 
   if (precheck.verdict === "insufficient") {
-    return {
-      ok: false,
-      status: 402,
-      type: "insufficient_quota",
-      code: "insufficient_quota",
-      message: INSUFFICIENT_QUOTA_MESSAGE,
-    };
+    return { ...INSUFFICIENT_BALANCE_ERROR };
   }
 
   if (precheck.verdict === "unreachable") {

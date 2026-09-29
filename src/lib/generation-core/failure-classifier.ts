@@ -71,6 +71,15 @@ function retryAfterDate(value: string | null | undefined, now: Date): Date {
 }
 
 /**
+ * 上游欠費/額度不足時賬號冷卻時長（2026-09-27 INC-VIDEO-0927）。
+ *
+ * 欠費是帳務狀態，不是憑證失效：冷卻而非永久隔離，讓 recoverExpiredCooldowns
+ * 在充值後自動撿回渠道（30 分鐘足夠人工或自動充值落地，也足夠避免對欠費上游
+ * 空轉燒 attempt）。憑證類（authentication）仍走 disabled 人工恢復。
+ */
+const QUOTA_EXHAUSTED_ACCOUNT_COOLDOWN_MS = 30 * 60_000;
+
+/**
  * FG-04：顯示層人話表。**只讀不改寫**——這些字串只允許出現在
  * `FailureRecord.explanation.humanMessage` 與展示層，永不回寫上游錯誤原文
  * （原生事實住在 `FailureRecord.native`，逐字保留）。
@@ -143,6 +152,25 @@ export function classifySupplierFailure(error: unknown, now = new Date()): Class
   if (normalized.includes("malformed image") || normalized.includes("undecodable image")) {
     return { failureClass: "malformed_output", retryable: true, switchSupplier: true, quarantineSupplier: false, cooldownUntil: new Date(now.getTime() + 5 * 60_000), detail, httpStatus: status };
   }
+  // 順序鐵律（2026-09-27 INC-VIDEO-0927b）：欠費判定必須先於 401/403 鑑權判定。
+  // xiaoyxiao 欠費以 HTTP 401 + insufficient_user_quota 回來，若先進鑑權桶就會
+  // quarantineSupplier → 帳號被標 disabled、任務排隊空轉到 deadline。
+  if (status === 402 || containsAny(normalized, [
+    "quota exhausted", "insufficient quota", "insufficient_quota", "insufficient_user_quota",
+    "credit balance", "余额不足", "积分余额不足", "积分不足", "欠费", "额度不足",
+    "预扣费额度失败", "剩余额度", "额度已用完",
+    "insufficient balance", "insufficient credit", "balance exhausted", "(1008)",
+  ])) {
+    return {
+      failureClass: "quota_exhausted",
+      retryable: false,
+      switchSupplier: true,
+      quarantineSupplier: false,
+      cooldownUntil: new Date(now.getTime() + QUOTA_EXHAUSTED_ACCOUNT_COOLDOWN_MS),
+      detail,
+      httpStatus: status,
+    };
+  }
   if (status === 401 || status === 403 || containsAny(normalized, ["invalid api key", "invalid_api_key", "unauthorized", "token expired"])) {
     return { failureClass: "authentication", retryable: true, switchSupplier: true, quarantineSupplier: true, cooldownUntil: null, detail, httpStatus: status };
   }
@@ -153,16 +181,21 @@ export function classifySupplierFailure(error: unknown, now = new Date()): Class
   // 中文文案「H3 積分餘額不足 (1008)」匹配不到 → 502 掉進下方 overloaded 桶，
   // 任務在退避循環裡空轉到 deadline，真話只躺在 attempt 表。擴成中英雙語 +
   // hailuo 錯誤碼帶括號形態（避免裸數字誤配）。改為 fail-fast：retryable=false，
-  // 寧可立刻誠實失敗 + 退款，也不要靜默空轉。單供應商渠道因此放棄換渠道重試；
-  // quarantineSupplier=true 會讓 reportSupplierFailure 的 accountFailure 分支
-  // 自動隔離賬號，充值後人工恢復。
-  if (status === 402 || containsAny(normalized, [
-    "quota exhausted", "insufficient quota", "insufficient_quota", "credit balance",
-    "积分余额不足", "余额不足", "积分不足", "欠费", "额度不足",
-    "insufficient balance", "insufficient credit", "balance exhausted", "(1008)",
-  ])) {
-    return { failureClass: "quota_exhausted", retryable: false, switchSupplier: true, quarantineSupplier: true, cooldownUntil: null, detail, httpStatus: status };
-  }
+  // 寧可立刻誠實失敗 + 退款，也不要靜默空轉。單供應商渠道因此放棄換渠道重試。
+  //
+  // 2026-09-27 修正「充值 ≠ 自動恢復」：原 quarantineSupplier=true 把賬號設成
+  // disabled，而 recoverExpiredCooldowns 只恢復 'cooldown'（disabled 是「憑證
+  // 吊銷待人工」語義，刻意不自愈）→ 上游一充值，渠道仍被永久擋住，必須人工 SQL
+  // （實錄 cangyuansuanli 08-31 欠費 disabled 後 27 天零單；napi 09-19 同）。
+  // 欠費是帳務狀態、不是憑證失效：改成「長 cooldown + 不自癒賬號」——
+  // fail-fast 不變（retryable=false，仍換渠道），只是冷卻到期後由
+  // recoverExpiredCooldowns 自動撿回。憑證類（authentication）維持 quarantine。
+  // 2026-09-27 INC-VIDEO-0927（升級既有裁定，同 metaso 事故同型）：new-api fork
+  // 的欠費文案是「预扣费额度失败, 用户剩余额度: ¥1.440000, 需要预扣费额度: ¥3.900000」
+  // 與錯誤碼 `insufficient_user_quota`——舊詞表（余额不足/额度不足/insufficient_quota）
+  // 全部匹配不到 → 502 掉進 overloaded 桶 → retryable → 任務在退避循環空轉到
+  // deadline（實錄：seedance-2.0/-fast/-mini/-2.5-720p 共 72 筆 deadline_exceeded，
+  // 真話只躺在 attempt 表）。補齊中英詞與錯誤碼。
   if (status === 408 || (status !== undefined && status >= 500) || containsAny(normalized, ["system under load", "overloaded", "service unavailable", "temporarily unavailable"])) {
     // 3 分鐘而非 30 秒（2026-08-27）：first_party 排序永遠壓過 managed_pool，
     // 30s 冷卻到期又被選中→再失敗，單個 job 的 attempt 預算被同一渠道燒光

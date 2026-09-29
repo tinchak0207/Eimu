@@ -101,27 +101,21 @@ export const SUPPORTED_IMAGE_MODEL_IDS = [
   AGNES_IMAGE_25_FLASH_MODEL_ID,
 ];
 
+// 2026-09-27 暴君裁定「無供貨即下架」：以下 14 條視頻 model 全層零供貨（無任何
+// enabled AND is_current 的 video_generate capability；adobe2api 停視頻後亦無人承接），
+// 自公開/在售目錄移除（常數保留供 capability 歷史與 adobe2api 映射表引用）：
+//   adobe-firefly-video / kling-2.5-turbo / kling-3.0 / kling-3.0-omni /
+//   luma-ray-2 / luma-ray-2-flash / luma-ray-3 / luma-ray-3-hdr /
+//   luma-ray-3.14 / luma-ray-3.14-hdr / runway-gen-4 / runway-gen-4.5 /
+//   veo-3.1 / veo-3.1-fast
+// 另 3 條經 xiaoyxiao 白名單核對後**無白名單檔位可承接**（不硬映射），一併下架：
+//   seedance-2.0-fast（先前依賴 sd-2.0-933-720-fast-原生真人，該檔位不在白名單）/
+//   seedance-2.0-mini（依賴 seedance2.0-mini-A，不在白名單）/
+//   seedance-2.5-30s（依賴 seedance-2.5-3010-特惠，不在白名單）
 export const SUPPORTED_VIDEO_MODEL_IDS = [
-  VEO_31_FAST_MODEL_ID,
-  KLING_30_MODEL_ID,
-  KLING_30_OMNI_MODEL_ID,
-  SEEDANCE_20_FAST_MODEL_ID,
   SEEDANCE_20_MODEL_ID,
-  SEEDANCE_20_MINI_MODEL_ID,
   SEEDANCE_25_480P_MODEL_ID,
   SEEDANCE_25_720P_MODEL_ID,
-  SEEDANCE_25_30S_MODEL_ID,
-  VEO_31_MODEL_ID,
-  RUNWAY_GEN45_VIDEO_MODEL_ID,
-  ADOBE_FIREFLY_VIDEO_MODEL_ID,
-  LUMA_RAY314_MODEL_ID,
-  RUNWAY_GEN4_VIDEO_MODEL_ID,
-  LUMA_RAY3_MODEL_ID,
-  LUMA_RAY314_HDR_MODEL_ID,
-  LUMA_RAY2_FLASH_MODEL_ID,
-  LUMA_RAY2_MODEL_ID,
-  LUMA_RAY3_HDR_MODEL_ID,
-  KLING_25_TURBO_MODEL_ID,
   MINIMAX_H3_MODEL_ID,
 ];
 
@@ -137,6 +131,9 @@ export const AVATAR_1_MODEL_ID = /** @type {const} */ ("avatar-1");
 export const LIPSYNC_1_MODEL_ID = /** @type {const} */ ("lipsync-1");
 export const SUPPORTED_AV_MODEL_IDS = [TTS_1_MODEL_ID, AVATAR_1_MODEL_ID, LIPSYNC_1_MODEL_ID];
 
+// 2026-09-27 暴君裁定「adobe2api 留圖、停視頻」：本表只列 adobe2api 仍承接的**圖像**
+// 模型；原視頻條目（veo/kling/seedance/firefly-video/luma/runway 全族）一併移除，
+// 對應 capability 由 seed 的 retireUnclaimedCapabilities 退役。
 export const ADOBE2API_MODEL_IDS = [
   DEFAULT_IMAGE_MODEL_ID,
   NANO_BANANA_2_MODEL_ID,
@@ -154,20 +151,4 @@ export const ADOBE2API_MODEL_IDS = [
   FLUX_11_ULTRA_MODEL_ID,
   FLUX_11_PRO_MODEL_ID,
   RUNWAY_GEN4_IMAGE_MODEL_ID,
-  VEO_31_FAST_MODEL_ID,
-  KLING_30_MODEL_ID,
-  KLING_30_OMNI_MODEL_ID,
-  SEEDANCE_20_FAST_MODEL_ID,
-  SEEDANCE_20_MODEL_ID,
-  VEO_31_MODEL_ID,
-  RUNWAY_GEN45_VIDEO_MODEL_ID,
-  ADOBE_FIREFLY_VIDEO_MODEL_ID,
-  LUMA_RAY314_MODEL_ID,
-  RUNWAY_GEN4_VIDEO_MODEL_ID,
-  LUMA_RAY3_MODEL_ID,
-  LUMA_RAY314_HDR_MODEL_ID,
-  LUMA_RAY2_FLASH_MODEL_ID,
-  LUMA_RAY2_MODEL_ID,
-  LUMA_RAY3_HDR_MODEL_ID,
-  KLING_25_TURBO_MODEL_ID,
 ];

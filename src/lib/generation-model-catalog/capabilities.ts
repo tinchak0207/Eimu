@@ -1,6 +1,6 @@
 import { GENERATION_MODEL_CATALOG } from "./catalog";
 import { currentEffectiveCatalog } from "./pricing-overrides";
-import type { AspectRatio, OutputResolution, GenerationModelDefinition, GenerationCapabilityProjection, GenerationConfigInput, GenerationConfigNormalization, ModelKnowledge } from "./types";
+import type { AspectRatio, OutputResolution, GenerationModelDefinition, GenerationCapabilityProjection, GenerationConfigInput, GenerationConfigNormalization, ModelKnowledge, VideoGenerationType } from "./types";
 
 /**
  * 視頻提交端 prompt 字元硬上限（POST /v1/videos/generations 的 prompt_too_long 閘）。
@@ -65,6 +65,9 @@ export function generationCapabilities(modelId: string): GenerationCapabilityPro
     defaultResolution: model.defaultResolution,
     ...(model.defaultDuration !== undefined ? { defaultDuration: model.defaultDuration } : {}),
     defaultAudio: model.defaultAudio === true,
+    // 影片生成型別（P1-3）：video 模型恆有值（缺省＝只有普通生成），
+    // 非 video 模型不外露——那會變成無意義的空能力宣稱。
+    ...(model.kind === "video" ? { videoGenerationTypes: model.videoGenerationTypes ?? (["generate"] as const) } : {}),
     ...(model.kind === "video" ? { promptCharLimit: VIDEO_PROMPT_CHAR_LIMIT } : {}),
   };
 }
@@ -147,6 +150,19 @@ export function isSupportedImageModel(modelId: string): boolean {
 
 export function isSupportedVideoModel(modelId: string): boolean {
   return generationModel(modelId)?.kind === "video";
+}
+
+/**
+ * 影片生成型別能力查詢（P1-3 生成式後期）。真源＝catalog 宣告；
+ * 未宣告 ⇒ `["generate"]`（**不升格**：能力宣告缺一即不許提交）。
+ * 消費端：generation-core/video-post-production.ts 的能力閘門。
+ */
+export function modelVideoGenerationTypes(modelId: string): readonly VideoGenerationType[] {
+  return generationModel(modelId)?.videoGenerationTypes ?? ["generate"];
+}
+
+export function supportsVideoGenerationType(modelId: string, type: VideoGenerationType): boolean {
+  return modelVideoGenerationTypes(modelId).includes(type);
 }
 
 /** AV 成片鏈路的管道種類（提交端點與能力探測的路由鍵）。 */

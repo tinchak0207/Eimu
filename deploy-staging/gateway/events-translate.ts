@@ -244,6 +244,11 @@ export function readGenerateInput(input: unknown): {
 // 建立一個畫布單元並 emit 節點/連線事件。回傳 unit id。
 // S4：cost_hint 需查平台目錄（async），函數簽名改 async；兩處呼叫點
 //（tool status running / completed 補發）均改 await，行為語義不變。
+// 自動製畫布只給「真的會出圖」的工具（2026-09-29 e2e 像素實錘）：原本 startsWith("image_")
+// 讓 image_quote／image_get_result／image_upload 也各鋪一組「(未填写内容) + gpt-image-2 · 1024x1024
+// 待处理」空節點，永遠不會跑，還一路帶到用戶之後開的新對話畫布上。
+const AUTO_CANVAS_TOOLS = new Set(["image_generate", "image_edit", "image_upscale"])
+
 export async function autoCreateCanvasUnit(
   state: SessionState,
   toolName: string,
@@ -661,7 +666,7 @@ if (status === "pending" || status === "running") {
     })
     // 自動製畫布：image_* 工具首次建立畫布單元。deepseek 完全不知道——
     // 它只是提交請求，gateway 攔截參數自動建文本/配置/圖片節點。
-    if (toolName.startsWith("image_") && !state.canvasUnitByCall.has(callId) && st.input != null) {
+    if (AUTO_CANVAS_TOOLS.has(toolName) && !state.canvasUnitByCall.has(callId) && st.input != null) {
       void autoCreateCanvasUnit(state, toolName, st.input, callId)
     }
   } else if (status === "completed") {
@@ -675,7 +680,7 @@ if (status === "pending" || status === "running") {
         args_summary: summarizeArgs(st.input),
       })
       // 同上：跑到 completed 才見到 input 的工具（理論上不會，但保險起見）。
-      if (toolName.startsWith("image_") && !state.canvasUnitByCall.has(callId)) {
+      if (AUTO_CANVAS_TOOLS.has(toolName) && !state.canvasUnitByCall.has(callId)) {
         void autoCreateCanvasUnit(state, toolName, st.input, callId)
       }
     }
@@ -744,7 +749,9 @@ if (status === "pending" || status === "running") {
         tool: toolName,
         ok,
         ...(toolErr ? { error: toolErr } : {}),
-        ...(typeof costCoins === "number" ? { cost_coins: costCoins } : {}),
+        // 報價類的 total_coins 是估價不是扣費：不掛 cost_coins（前端會當「已用/消耗」累加，
+        // 2026-09-29 e2e 實錘「已用 614 币」而帳戶只有 7 币）；金額已在 summary 裡。
+        ...(typeof costCoins === "number" && !/quote/i.test(toolName) ? { cost_coins: costCoins } : {}),
         ...(quoteSummary ? { summary: quoteSummary } : {}),
         ...(subagentTimeout ? { partial: true, reason: "timeout" } : {}),
         ...(artifactPending ? { task_id: parsed.task_id, artifact_pending: true } : {}),

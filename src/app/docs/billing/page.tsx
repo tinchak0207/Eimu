@@ -1,9 +1,13 @@
 import type { Metadata } from "next";
+import { getSiteUrlFromEnv } from "@/lib/site-url";
 import { AlertTriangle, CircleDollarSign, Coins, ShieldCheck, Wallet } from "lucide-react";
 import { InlineCode, KeyCard, SectionTitle, Specular, Step } from "../DocsShell";
 
+const SITE_URL = getSiteUrlFromEnv();
+
 export const metadata: Metadata = {
-  title: "充值与计费 | 文档中心 | Eimu",
+  title: "充值与计费 | 文档中心",
+  alternates: { canonical: `${SITE_URL}/docs/billing` },
 };
 
 // ---- 充值方案（现场逐字：与 /pricing 四档文案一致）----

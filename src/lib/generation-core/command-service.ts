@@ -2,7 +2,12 @@ import { randomUUID } from "node:crypto";
 import { reserveGenerationBilling } from "./billing-ledger";
 import type { GenerationBillingAdapter } from "./billing-relay";
 import { encryptGenerationPrompt, generationRequestHash } from "./crypto";
-import { getGenerationSql, type GenerationSql } from "./database";
+import { generationControlPlaneEnabled, getGenerationSql, type GenerationSql } from "./database";
+import {
+  checkModelAvailability,
+  GenerationModelUnavailableError,
+  type ModelAvailabilityGate,
+} from "./model-availability-gate";
 import {
   createGenerationJob,
   failGenerationJob,
@@ -46,7 +51,16 @@ export interface SubmittedGenerationCommand extends CreatedJob {
 
 export async function submitGenerationCommand(
   command: GenerationCommand,
-  options: { sql?: GenerationSql; billingAdapter?: GenerationBillingAdapter; executorId?: string } = {},
+  options: {
+    sql?: GenerationSql;
+    billingAdapter?: GenerationBillingAdapter;
+    executorId?: string;
+    /**
+     * 模型可用性閘（circuit breaker）。缺省：控制面啟用時用真實判定
+     * （checkModelAvailability），否則不設閘；傳 null 顯式關閉。
+     */
+    availabilityGate?: ModelAvailabilityGate | null;
+  } = {},
 ): Promise<SubmittedGenerationCommand> {
   const sql = options.sql ?? getGenerationSql();
   const requestedCount = command.requestedCount ?? 1;
@@ -95,6 +109,19 @@ export async function submitGenerationCommand(
     // 展期到 15 分鐘總生成預算（extendGenerationDeadlineJob，GREATEST 防縮短）。
     deadlineAt: new Date(Date.now() + (command.deadlineMs ?? 3 * 60_000)),
   };
+  // 模型可用性閘：在建單與預扣費（reserve）之前 fail-fast——被判死的模型不建 job、
+  // 不動錢、不讓用戶白等到 deadline。唯一例外是同一冪等鍵的重放：原 job 已存在，
+  // 照舊回同一 job（冪等承諾優先於閘門）。
+  const gate = options.availabilityGate === undefined
+    ? (generationControlPlaneEnabled() ? defaultAvailabilityGate(sql) : null)
+    : options.availabilityGate;
+  if (gate) {
+    const decision = await gate({ modelId: command.modelId, kind: command.kind });
+    if (!decision.allowed && !(input.idempotencyKey && await idempotentJobExists(input.tenantId, input.idempotencyKey, sql))) {
+      throw new GenerationModelUnavailableError(decision);
+    }
+  }
+
   const created = await createGenerationJob(input, sql);
   if (!created.created) {
     // The original HTTP process can die after committing the job but before it
@@ -133,4 +160,17 @@ export async function submitGenerationCommand(
     adapter: options.billingAdapter,
   }, sql);
   return { job, created: true, requestHash };
+}
+
+function defaultAvailabilityGate(sql: GenerationSql): ModelAvailabilityGate {
+  return ({ modelId }) => checkModelAvailability(modelId, { sql });
+}
+
+async function idempotentJobExists(tenantId: string, idempotencyKey: string, sql: GenerationSql): Promise<boolean> {
+  const rows = await sql<{ id: string }[]>`
+    SELECT id FROM generation_job
+    WHERE tenant_id = ${tenantId} AND idempotency_key = ${idempotencyKey}
+    LIMIT 1
+  `;
+  return rows.length > 0;
 }

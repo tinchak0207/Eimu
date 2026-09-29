@@ -1,3 +1,9 @@
+---
+name: fit-repair-optimizer
+description: Turn multiview fit reports into a sequential or parallel repair queue for aligning Blender products to source-of-truth templates. Use after validation shows disalignment, when the agent must iteratively fix wireframe, texture, lighting, or projection mismatches, and when skill gaps should trigger self-refinement before another rebuild.
+when_to_use: Iterative source-of-truth alignment repair, choosing sequential vs parallel correction order, generating fit repair queues, stopping on contradictory templates, or coordinating geometry/UV/lighting fixes from validation reports.
+allowed-tools: Read Bash Glob Grep mcp__blender__execute_blender_code mcp__blender__get_scene_info mcp__blender__get_object_info
+---
 <!--
 來源（輪子）: https://github.com/RobLe3/cc-blender-skill — plugin/skills/fit-repair-optimizer/SKILL.md
 License: MIT · 原作者: RobLe3 (https://github.com/RobLe3)
@@ -5,12 +11,6 @@ License: MIT · 原作者: RobLe3 (https://github.com/RobLe3)
 Blender 5.2 雷區：① BLENDER_EEVEE_NEXT 已死，只認 BLENDER_EEVEE/BLENDER_WORKBENCH/CYCLES ② Filmic 已移除，AgX 為默認 ③ action.fcurves 在 4.4+ 移除，走 layers[*].strips[*].channelbags[*].fcurves
 正文保留英文原文；上游 MCP 調用表述執行時改走我方 bridge /v1/execute 同構協議。
 -->
----
-name: fit-repair-optimizer
-description: Turn multiview fit reports into a sequential or parallel repair queue for aligning Blender products to source-of-truth templates. Use after validation shows disalignment, when the agent must iteratively fix wireframe, texture, lighting, or projection mismatches, and when skill gaps should trigger self-refinement before another rebuild.
-when_to_use: Iterative source-of-truth alignment repair, choosing sequential vs parallel correction order, generating fit repair queues, stopping on contradictory templates, or coordinating geometry/UV/lighting fixes from validation reports.
-allowed-tools: Read Bash Glob Grep mcp__blender__execute_blender_code mcp__blender__get_scene_info mcp__blender__get_object_info
----
 
 # Fit Repair Optimizer
 

@@ -10,6 +10,7 @@ const AUTHOR = {
 export const REDDIT_COMMERCE_USE_CASES: UseCase[] = [
   {
     slug: "reddit-ai-self-publishing-book-cover-concepts",
+    categorySlug: "design",
     keyword: "AI 自出版书封视觉概念",
     title: "AI 自出版书封视觉概念：先探索 artwork，再把字体与印刷交给后期",
     tagline: "用视觉概念加速书封方向探索",
@@ -56,7 +57,7 @@ export const REDDIT_COMMERCE_USE_CASES: UseCase[] = [
       },
     ],
     author: AUTHOR,
-    relatedSlugs: ["content-1", "ecommerce-3"],
+    relatedSlugs: ["reddit-accurate-text-in-ai-images", "reddit-edit-transfer-texture-film-surface", "reddit-compare-ai-image-models"],
     searchVariants: [
       "奇幻小说封面概念图",
       "AI book cover artwork concept",

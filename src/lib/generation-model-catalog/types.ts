@@ -1,4 +1,12 @@
 export type MediaKind = "image" | "video" | "audio";
+
+/**
+ * 影片生成型別（P1-3 生成式後期；值逐字對齊上游 `AvailableGenerationType` 的
+ * `extend_video`／`edit_video`，`generate` 為我方代表普通生成的基準值）。
+ * 這是「模型能做什麼」的能力宣告欄位真源——缺省＝只支援 `generate`，
+ * **不推導不升格**（見 generation-core/video-post-production.ts 檔頭）。
+ */
+export type VideoGenerationType = "generate" | "extend_video" | "edit_video";
 export type AspectRatio =
   | "1:1"
   | "1:8"
@@ -100,6 +108,12 @@ export interface GenerationModelDefinition {
   videoCreditsWithAudioPerSecond?: VideoCreditTable;
   fixedCoins?: number;
   referenceImages: boolean;
+  /**
+   * 可用的影片生成型別（P1-3）：只有 Seedance-2.5 族帶 extend_video／edit_video
+   * （對稱差 D22，上游 ListModelCapabilities 實測）。缺省 ⇒ 只支援 `generate`。
+   * 非 video 模型不得宣告本欄位。
+   */
+  videoGenerationTypes?: readonly VideoGenerationType[];
   /** LoRA is currently a PixAI-only single-selection capability. */
   supportsLora?: boolean;
   supportsAudio?: boolean;
@@ -115,6 +129,12 @@ export interface GenerationCapabilityProjection {
   referenceImages: boolean;
   audio: boolean;
   lora: boolean;
+  /**
+   * 影片生成型別（P1-3）：`["generate"]` 為基準；Seedance-2.5 族多出
+   * `extend_video`（續片）／`edit_video`（局部改片）。`/v1/models` 的
+   * `x_capabilities` 直接外露此欄位，聚合平台據此決定是否上架後期能力。
+   */
+  videoGenerationTypes?: readonly VideoGenerationType[];
   qualityModes: readonly ("fast" | "quality")[];
   defaultAspectRatio: AspectRatio;
   defaultResolution: OutputResolution;

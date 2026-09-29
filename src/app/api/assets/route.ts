@@ -1,5 +1,14 @@
 // 資產包 API：list / upsert / delete。
 // 認證：requireVerifiedUser（上游 /api/user/self 驗證，不信任 x-user-id）。
+//
+// P0-2 資產團隊維度（寫入端閘）：PUT 接受 `scope.owner === "team"` —— 照
+// `src/lib/canvas/team-canvas-gate.ts` 的既有模式：用 `lookupTeamMembershipViaRelay`
+// 驗成員身份，並以**relay 回的權威 teamId 蓋章**（客戶端送來的 teamId 一律不採信）。
+//   * relay 回 null（未配置／逾時／查不到）→ **fail-open 降級個人**（不拒、不寫進別人的團隊），
+//     與畫布閘的「查不到成員身份 → 降級個人命名空間」同語義。
+//   * 宣告 team 但客戶端送的 teamId 與權威值不符 → 降級個人（**不**寫進別人的團隊）。
+//   * 非 team 宣告（personal / project）→ 完全不查 relay，零額外開銷、既有語義逐位不變。
+// 本路由不碰任何計費/配額（RBAC 與團隊配額由後續刀接手）。
 import { NextRequest, NextResponse } from "next/server";
 import { requireVerifiedUser } from "@/lib/server-user";
 import {
@@ -10,6 +19,7 @@ import {
   saveAssetPack,
 } from "@/lib/asset-pack-store";
 import type { AssetPack } from "@/lib/asset-pack-store";
+import { decideTeamAssetScope, lookupAssetsTeamMembership } from "@/lib/asset-team-scope";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -49,9 +59,26 @@ export async function PUT(req: NextRequest) {
   } catch {
     return fail(400, "请求体必须是合法 JSON", "invalid_json");
   }
-  const normalized = normalizeAssetPack(body);
-  if (!normalized) {
+  // 清洗 + 歸屬欄位（存檔端的唯一收口；team 的權威蓋章在下面的閘）。
+  const cleaned = normalizeAssetPack(body);
+  if (!cleaned) {
     return fail(400, "资产包数据无效（需要 id / title，items 每项需要合法 kind / title）", "invalid_payload");
+  }
+
+  // P0-2：team 宣告的寫入端閘——以 relay 權威 teamId 蓋章；查不到成員身份（fail-open）
+  // 或客戶端送的 teamId 與權威值不符 → 降級個人（不拒、不寫進別人的團隊）。
+  // 歸屬欄位**一律由本閘重新落定**（清洗出的 scope 只是「宣告」，不是權威）。
+  let normalized: AssetPack = cleaned;
+  if (cleaned.scope?.owner === "team") {
+    const membership = await lookupAssetsTeamMembership(caller.user.id);
+    const decision = decideTeamAssetScope({ declaredTeamId: cleaned.scope.teamId, membership });
+    const { scope: _dropped, ...rest } = cleaned;
+    // decision.ok → 蓋章（authoritative teamId）；否則降級個人（**剝掉** scope 欄，
+    // personal 恆省略欄位，不寫 `{owner:"personal"}` 冒充已設定）。
+    normalized = decision.ok
+      ? { ...cleaned, scope: decision.scope }
+      : (rest as AssetPack);
+    void _dropped;
   }
 
   try {

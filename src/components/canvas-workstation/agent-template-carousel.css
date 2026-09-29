@@ -50,6 +50,19 @@
   text-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
 }
 
+/* 剧本入口一行提示（P0-1 曝光，2026-09-28）：只出现在 novel_film 正面卡。
+   字级与卡面同比例缩放（与 .atc-title 同源），比标题小一档、比环境低对比，
+   避免与标题抢主体；配色/字影沿用卡面白字规范，不引入体系外颜色。
+   正文最低 ≥13px：手机卡宽 340px 时 0.032×340 ≈ 11px 偏小，用 max() 兜底 13px。 */
+.atc-script-entry {
+  margin-top: 6px;
+  font-size: max(13px, calc(var(--case-card-w, 520px) * 0.032));
+  font-weight: 500;
+  line-height: 1.35;
+  color: rgba(255, 255, 255, 0.88);
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.55);
+}
+
 /* 环节选择器（2026-08-26）：圆形 chip 由 Tailwind 类实现（atc-step-chip，
    见 AgentTemplateCarousel.tsx 的 PipelineStepSelector），这里只留容器文档位。
    布局 = flex flex-wrap gap-2：8 个圆在 420px 卡面内排得下，放不下自动换行不横向溢出。

@@ -1,6 +1,8 @@
 /**
  * use-canvas-generation —— CanvasEmbed 生成編排域（自 CanvasEmbed.tsx L621-1002 機械搬遷，符號/依賴陣列不變）：
  *   callCanvasGenerate → generateIntoNode → handleGenerateFromNode → stopGeneration/retryNode/upscaleNode → runAgentGeneration。
+ * 2026-09-28 新增節點動作 extractFramesFromNode（影片節點「截帧／序列帧」：計劃走 /api/canvas/video-frames，
+ * 像素走 video-frames.ts 的 extractFramesAtTimes，產物落成畫布圖片節點）。
  * P2 掛接點：鎖定的角色/場景卡在 callCanvasGenerate 注入——手動面板、agent run_generation、
  * 編輯器派生全部經過這一條路，保證項目級鎖定對所有畫布生成生效。
  * 認證立場：生成/超分走 Bearer + x-user-id，未登入誠實報錯。
@@ -19,9 +21,30 @@ import type { ReferenceImageRole } from "@/lib/image-types";
 import { applyCharacterCardsToPayload, mergeTokenReferencedCards } from "@/lib/character-cards";
 import type { CardAwareGeneratePayload, CharacterCard } from "@/lib/character-cards";
 import { createBatchChildNode } from "@/lib/canvas/batch-utils";
+import { resolveSceneDirectorReferences, sceneDirectorTraceMetadata } from "@/lib/canvas/scene-3d-reference";
 import { generationCapabilities } from "@/lib/generation-model-catalog";
+import {
+  extractFramesAtTimes,
+  frameFileName,
+  tileFrameCount,
+  waitForMetadata,
+  type VideoElementSample,
+} from "@/lib/video-frames";
 import type { SelectedLora } from "@/components/canvas-workstation/panels/LoraLibraryPanel";
 import { buildAuthHeaders, imageUrlOf } from "./embed-helpers";
+
+/**
+ * Blob → data URL（影片取帧落节点用）。用 FileReader 而不是 fetch(blob:)：
+ * 与画布其余本地像素路径同款，且不依赖第三方压缩库（帧已是 512px/q0.8 JPEG）。
+ */
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(new Error("无法读取取帧结果"));
+    reader.readAsDataURL(blob);
+  });
+}
 
 /**
  * 行內 @ 引用 → 本鏡參考集收窄覆寫（純函數，唯一推導入口；面板批次與原地生成共用同一契約）。
@@ -159,12 +182,16 @@ export function useCanvasGeneration({
       const semantic = resolveGenerationInputs(state.nodes, state.connections, nodeId);
       const finalPrompt = composeGenerationPrompt(semantic.promptParts, params.prompt);
       const references = mergeGenerationReferences(params.references ?? [], semantic.references);
+      // 回分鏡溯源（P1-1）：連入的 scene_3d 舞台 → 記下 directorStageId/shotId（讀得回）。
+      const sceneTrace = resolveSceneDirectorReferences(state.nodes, state.connections, nodeId).trace;
+      const traceMetadata = sceneDirectorTraceMetadata(sceneTrace);
       const cardsOverride = resolveEntityCardsOverride(state.activeCharacterCards, params.entityCardIds);
       state.patchNodeMetadata(nodeId, {
         status: "loading",
         prompt: finalPrompt,
         ...(params.model ? { model: params.model } : {}),
         ...(params.size ? { size: params.size } : {}),
+        ...traceMetadata,
         errorDetails: undefined,
       });
       try {
@@ -237,6 +264,10 @@ export function useCanvasGeneration({
       const references = mergeGenerationReferences(panelRefs, semantic.references);
       const finalPrompt = composeGenerationPrompt(semantic.promptParts, prompt);
       const refNodeIds = references.map((r) => r.nodeId).filter((id): id is string => !!id);
+      // 回分鏡溯源（P1-1）：連入的 scene_3d 舞台 → 本節點與其批次的 directorStageId/shotId。
+      const traceMetadata = sceneDirectorTraceMetadata(
+        resolveSceneDirectorReferences(state.nodes, state.connections, nodeId).trace,
+      );
       const count = Math.min(Math.max(1, options.count ?? 1), 4);
       const sourceUrl = imageUrlOf(node);
 
@@ -395,7 +426,113 @@ export function useCanvasGeneration({
     [showError, canvasStateRef, setSelectedIds],
   );
 
-  // ── Wave C：agent run_generation 代跑（確認閘允許後執行）
+  // ── 影片取帧（2026-09-28）：画布视频节点动作「截帧／序列帧」
+  //
+  // 为什么在这里而不是新开一套：这条路与 upscaleNode 同款（节点动作 → 拿结果 → 建图片节点 → 连线），
+  // 复用的既有轮子有两条：
+  //   ① 计划层 `POST /api/canvas/video-frames`（纯函数 planFrameExtraction，与客户端同一份语义）；
+  //   ② 像素层 `extractFramesAtTimes`（video-frames.ts 既有 seek/drawImage/toBlob 管线，不重写）。
+  // 视频元素在这里自建（与 extractFramesFromFile 建离屏 <video> 同法）：不动用户正在播放的节点元素，
+  // 序列帧连抽多次也不会有可见抖动。
+  const [extractingFramesIds, setExtractingFramesIds] = useState<Set<string>>(new Set());
+
+  const extractFramesFromNode = useCallback(
+    async (nodeId: string, action: "current" | "sequence", atSec?: number) => {
+      const state = canvasStateRef.current;
+      const node = state.nodes.find((n) => n.id === nodeId);
+      const content = node?.metadata?.content;
+      if (!node || !content || !content.startsWith("https://")) {
+        showError("该视频没有可用的在线地址，无法取帧（仅支持 https 视频）");
+        return;
+      }
+      const headers = buildAuthHeaders();
+      if (!headers) {
+        showError("请先登录再取帧");
+        return;
+      }
+      if (extractingFramesIds.has(nodeId)) return;
+      setExtractingFramesIds((prev) => new Set(prev).add(nodeId));
+      try {
+        const video = document.createElement("video");
+        video.preload = "metadata";
+        video.muted = true;
+        (video as HTMLVideoElement & { playsInline?: boolean }).playsInline = true;
+        // canvas 导出必须拿到未污染像素：跨域视频要显式请求 CORS，否则 toBlob 会抛 SecurityError。
+        // 上游 CDN 不放 CORS 头时读取会直接失败——那时如实报错，不假装成功。
+        video.crossOrigin = "anonymous";
+        video.src = content;
+        await waitForMetadata(video);
+        const durationSec = video.duration;
+        if (!Number.isFinite(durationSec) || durationSec <= 0) throw new Error("读不到视频时长");
+
+        const payload =
+          action === "current"
+            ? { videoUrl: content, durationSec, mode: "current", atSec: typeof atSec === "number" ? atSec : 0 }
+            : // 序列帧默认格数照竞品 tileFrameCount：clamp(round(秒数*1.5), 4, 9)（长片 9 格封顶，不默认抽数百帧）
+              { videoUrl: content, durationSec, mode: "sequence", count: tileFrameCount(durationSec) };
+        const res = await fetch("/api/canvas/video-frames", {
+          method: "POST",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const body = (await res.json().catch(() => null)) as
+          | { success?: boolean; error?: string; timesSec?: number[]; frames?: { fileName?: string }[] }
+          | null;
+        // 超上限 / 超时长 / 参数非法都在这里被服务端明确拒绝（提示原样透出，绝不静默截断）。
+        if (!res.ok || !body?.success || !body.timesSec?.length) {
+          throw new Error(body?.error || `取帧计划失败（${res.status}）`);
+        }
+
+        const sample: VideoElementSample = {
+          video,
+          sample: { kind: "video", url: content, name: node.title, mime: "video/mp4", size: 0 },
+        };
+        const frames = await extractFramesAtTimes(sample, body.timesSec);
+        // 落节点用 data URL：与画布图片编辑器「本地像素结果」同款（Object URL 刷新即失效，
+        // data URL 才能随画布持久化、下载与再次作为参考图）。
+        const dataUrls = await Promise.all(frames.map((frame) => blobToDataUrl(frame.blob)));
+        const newNodes: CanvasNode[] = frames.map((frame, i) => ({
+          id: `${nodeId}-vf-${Date.now().toString(36)}-${i}`,
+          type: CanvasNodeType.Image,
+          // 档名照竞品：frame-2_500s.jpg（档名用请求时间；下载与 alt 都吃这个标题）
+          title: body.frames?.[i]?.fileName || frameFileName(frame.timeSec),
+          position: {
+            x: node.position.x + node.width + 60 + (i % 3) * (node.width + 24),
+            y: node.position.y + Math.floor(i / 3) * (node.height + 24),
+          },
+          width: node.width,
+          height: node.height,
+          moved: true,
+          metadata: {
+            content: dataUrls[i],
+            status: "success",
+            source_image: content,
+          },
+        }));
+        const newConns = newNodes.map((created) => ({
+          id: `conn-${nodeId}-${created.id}`,
+          fromNodeId: nodeId,
+          toNodeId: created.id,
+        }));
+        state.addNodes(newNodes, newConns);
+        setSelectedIds(new Set(newNodes.map((created) => created.id)));
+        if (newNodes[0]) state.selectNode(newNodes[0].id);
+        const size = viewportSizeRef.current;
+        if (size.width > 0) state.fitView(size.width, size.height);
+      } catch (error) {
+        showError(error instanceof Error ? `取帧失败：${error.message}` : "取帧失败");
+      } finally {
+        setExtractingFramesIds((prev) => {
+          const next = new Set(prev);
+          next.delete(nodeId);
+          return next;
+        });
+      }
+    },
+    [canvasStateRef, extractingFramesIds, showError, setSelectedIds, viewportSizeRef],
+  );
+
+  // ── Wave C：agent run_generation 代跑（确认闸允许后执行）
   const runAgentGeneration = useCallback(
     (items: { nodeId: string; prompt?: string; model?: string; size?: string; count?: number }[]) => {
       for (const item of items) {
@@ -416,12 +553,14 @@ export function useCanvasGeneration({
   return {
     isGenerating,
     upscalingIds,
+    extractingFramesIds,
     callCanvasGenerate,
     generateIntoNode,
     handleGenerateFromNode,
     stopGeneration,
     retryNode,
     upscaleNode,
+    extractFramesFromNode,
     runAgentGeneration,
   };
 }

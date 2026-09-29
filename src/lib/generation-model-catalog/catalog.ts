@@ -639,6 +639,9 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     referenceImages: true,
     supportsAudio: true,
     defaultAudio: true,
+    // 生成式後期（P1-3／對稱差 D22）：續片＋局部改片是 Seedance-2.5 專屬型別
+    // （上游 ListModelCapabilities 實測：2.0 系只有 reference_frame／head_tail_frame）。
+    videoGenerationTypes: ["generate", "extend_video", "edit_video"],
   },
   [SEEDANCE_25_720P_MODEL_ID]: {
     id: SEEDANCE_25_720P_MODEL_ID,
@@ -656,6 +659,8 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     referenceImages: true,
     supportsAudio: true,
     defaultAudio: true,
+    // 生成式後期（P1-3／對稱差 D22）：同 2.5-480p，續片＋局部改片。
+    videoGenerationTypes: ["generate", "extend_video", "edit_video"],
   },
   // drama 渠道专属 30 秒固定档（上游 sd25-30s，按条 6 RMB；94 = 9.4 币/秒 × 10，
   // 30s 整条 282 币 = 成本 6 RMB × 2.35 利润率）。上游不支持音频生成，勿开 supportsAudio。

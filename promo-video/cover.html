@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Eimu · B站封面</title>
+<style>
+@font-face { font-family: "Geist"; src: url(../src/app/fonts/GeistVF.woff) format("woff"); font-weight: 100 900; }
+@font-face { font-family: "GeistMono"; src: url(../src/app/fonts/GeistMonoVF.woff) format("woff"); font-weight: 100 900; }
+* { box-sizing: border-box; margin: 0; }
+html, body { width: 1920px; height: 1080px; overflow: hidden; }
+body { font-family: "Geist", "Noto Sans CJK SC", sans-serif; -webkit-font-smoothing: antialiased; position: relative;
+  background:
+    radial-gradient(900px 700px at 8% 12%, rgba(160,200,255,.75), transparent 70%),
+    radial-gradient(800px 640px at 42% 96%, rgba(246,190,220,.65), transparent 70%),
+    radial-gradient(700px 520px at 60% 8%, rgba(198,236,252,.6), transparent 70%),
+    #eef1f6; }
+/* 點陣畫布 */
+.dots { position: absolute; inset: 0; background-image: radial-gradient(rgba(27,32,48,.10) 1.6px, transparent 1.9px); background-size: 34px 34px;
+  -webkit-mask-image: linear-gradient(90deg, #000 0, #000 45%, transparent 65%); }
+/* 成片畫面 */
+.film { position: absolute; left: 860px; top: 0; width: 1100px; height: 1080px;
+  background: url(assets/cover-gate.jpg) center 40% / cover no-repeat;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, rgba(0,0,0,.55) 120px, #000 300px); }
+.film::after { content: ""; position: absolute; inset: 0;
+  background: radial-gradient(120% 90% at 55% 45%, transparent 55%, rgba(0,0,0,.45) 100%), linear-gradient(0deg, rgba(0,0,0,.35), transparent 30%); }
+
+/* 左側文字（全部在 4:3 安全區 x≥250 內） */
+.brand { position: absolute; left: 294px; top: 132px; display: flex; align-items: center; gap: 18px; height: 70px; padding: 0 30px 0 26px; border-radius: 99px;
+  background: rgba(255,255,255,.62); border: 1.5px solid rgba(255,255,255,.95); box-shadow: 0 14px 34px rgba(45,49,66,.10), inset 0 1.5px 0 #fff; backdrop-filter: blur(20px); }
+.brand b { font: 700 38px "Geist"; letter-spacing: -.03em; color: #141824; }
+.brand span { width: 2px; height: 28px; background: rgba(27,32,48,.18); }
+.brand em { font: 500 25px "Noto Sans CJK SC"; font-style: normal; color: #4d5670; letter-spacing: .06em; }
+.h { position: absolute; left: 288px; font-family: "Noto Sans CJK SC"; font-weight: 900; letter-spacing: -.02em; line-height: 1; white-space: nowrap; }
+.h1 { top: 262px; font-size: 168px; color: #111624; }
+.h2 { top: 450px; font-size: 168px; background: linear-gradient(95deg, #2f7bff 0%, #6a6cf5 45%, #ec4d92 100%); -webkit-background-clip: text; color: transparent;
+  filter: drop-shadow(0 10px 24px rgba(99,102,241,.18)); }
+/* 真實需求：液態玻璃輸入框 */
+.prompt { position: absolute; left: 294px; top: 690px; width: 700px; height: 112px; border-radius: 99px; display: flex; align-items: center; gap: 18px; padding: 0 22px 0 34px;
+  background: linear-gradient(180deg, rgba(255,255,255,.86), rgba(255,255,255,.66)); border: 1.5px solid rgba(255,255,255,.98);
+  box-shadow: 0 26px 60px rgba(45,49,66,.16), 0 4px 14px rgba(45,49,66,.06), inset 0 2px 0 #fff, inset 0 -1px 0 rgba(0,0,0,.04); backdrop-filter: blur(24px) saturate(180%); }
+.prompt svg { flex: none; }
+.prompt .q { flex: 1; font: 600 40px "Noto Sans CJK SC"; color: #141824; letter-spacing: .01em; white-space: nowrap; }
+.prompt .caret { display: inline-block; width: 4px; height: 44px; background: #2f7bff; border-radius: 2px; vertical-align: -8px; margin-left: 4px; }
+.prompt .send { flex: none; width: 76px; height: 76px; border-radius: 50%; background: #2d3142; display: grid; place-items: center; box-shadow: 0 12px 26px rgba(45,49,66,.28), inset 0 1.5px 0 rgba(255,255,255,.25); }
+.cap { position: absolute; left: 306px; top: 832px; font: 500 24px "GeistMono", "Noto Sans CJK SC"; color: #5f6880; letter-spacing: .08em; }
+.cap b { color: #141824; font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="dots"></div>
+<div class="film"></div>
+
+<div class="brand"><b>Eimu</b><span></span><em>许愿式 AI 影像工作台</em></div>
+<div class="h h1">一句话</div>
+<div class="h h2">拍成电影</div>
+<div class="prompt">
+  <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#2f7bff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/></svg>
+  <div class="q">生成秦始皇骑北极熊的电影<span class="caret"></span></div>
+  <div class="send"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg></div>
+</div>
+<div class="cap"><b>真实会话</b> · 2026.08.29 · 只输入了这一句</div>
+</body>
+</html>

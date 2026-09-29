@@ -40,12 +40,14 @@ export interface ProjectAssetLibraryPanelProps {
 const VISIBILITY_KEY: Record<AssetVisibility, UiStringKey> = {
   owner: "assets.visibility.owner",
   "in-project": "assets.visibility.inProject",
+  "in-team": "assets.visibility.inTeam",
   "shared-in": "assets.visibility.sharedIn",
 };
 
 const VISIBILITY_CLASSES: Record<AssetVisibility, string> = {
   owner: "bg-black/5 text-muted-foreground",
   "in-project": "bg-ios-blue/10 text-[#007AFF]",
+  "in-team": "bg-ios-indigo/10 text-[#5856D6]",
   "shared-in": "bg-ios-green/10 text-[#248A3D]",
 };
 

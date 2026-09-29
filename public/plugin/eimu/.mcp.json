@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "eimu": {
+      "type": "http",
+      "url": "https://eimu.dev/api/mcp"
+    }
+  }
+}

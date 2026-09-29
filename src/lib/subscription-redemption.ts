@@ -48,7 +48,8 @@ export interface SubscriptionRedemptionPlan {
 }
 
 function gatewayBaseUrl(env: EnvLike): string {
-  return env.GATEWAY_BASE_URL ?? (env.NODE_ENV === "production" ? "http://43.172.85.76" : "http://localhost:3001");
+  // [riskclose 2026-09-27] TLS gateway channel (bare-IP plaintext /api closed).
+  return env.GATEWAY_BASE_URL ?? (env.NODE_ENV === "production" ? "https://store.tinchak0207.xyz/newapi" : "http://localhost:3001");
 }
 
 function bearer(value: string): string {

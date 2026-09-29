@@ -5,6 +5,14 @@
 //
 // 檔案必須是 .ts（而非 JSON）：Next 打包（Vercel lambda bundle）與 tsx 跑 tools
 // 都要能直接 import。
+//
+// 新增一條**新協議**供給＝2 檔（V-06，docs/architecture/planes.md §2.3）：
+//   ① 新 adapter 檔 `export const fooAdapter: SupplyAdapter = { protocol: "foo", submit, poll? }`
+//   ② 本檔條目 `adapterType: "foo", adapter: fooAdapter`（import 該 adapter）
+// generation-core/supply-registry.ts 載入時自動註冊條目上的 adapter，分派／對帳／
+// 對帳協議映射都查 registry，不需改其他檔。同協議供給只動本檔（N=1）。
+
+import type { SupplyAdapter } from "./generation-core/supply-registry";
 
 export type RegistryClaimKind = "image_generate" | "image_edit" | "video_generate";
 
@@ -12,6 +20,13 @@ export interface RegistryChannelClaim {
   modelId: string;                // 平台 catalog 模型 id
   supplierModelId: string | null; // 上游模型名；null = 同名直傳
   kinds: RegistryClaimKind[];
+  /**
+   * 已核上游單價（人民幣元／次，V-03）。按（本渠道, supplierModelId）定，不按模型名全域定；
+   * 付費視頻成本閘（paid-video-cost-gate.ts）優先讀這裡，缺省才回退閘內兜底表。
+   */
+  unitPriceCny?: number;
+  /** 核價來源原文＋日期，例 "GET https://www.gway.dev/api/pricing 2026-09-28 vip quota_type=1"。 */
+  priceSource?: string;
 }
 
 export interface RegistryChannel {
@@ -25,12 +40,80 @@ export interface RegistryChannel {
   chatImageModels: string[];     // 上游模型名走 /chat/completions 生圖（空 = 全走 images/generations）
   /** 上游 images/generations 拒收 quality 欄位時置 true（agnes 實錘 2026-09-19：text image queue 只認 model/prompt/size/n）。 */
   omitQualityBody?: boolean;
-  adapterType?: "openai_images" | "metaso" | "openai_video" | "blender_bridge" | "adobe2api"; // 缺省 openai_images；metaso 走自訂協議（見 metaso-upstream.ts），openai_video 走 /v1/videos 異步（見 openai-video-upstream.ts），blender_bridge 走橋 /v1/execute 同步單幀渲染（見 blender-node-upstream.ts），adobe2api 走 firefly-* 映射（見 adobe2api-upstream.ts，含視頻走 /v1/chat/completions）
+  /**
+   * 供給協議（＝DB supplier.adapter_type ＝ supply-registry 的 protocol）；合法值由
+   * registry 執行期判定（未註冊＝明確失敗）。內建：openai_images / adobe2api / metaso /
+   * openai_video / filmera / blender_bridge / newapi_video。
+   */
+  adapterType?: string; // 缺省 openai_images；metaso 走自訂協議（見 metaso-upstream.ts），openai_video 走 /v1/videos 異步（見 openai-video-upstream.ts），blender_bridge 走橋 /v1/execute 同步單幀渲染（見 blender-node-upstream.ts），adobe2api 走 firefly-* 映射（見 adobe2api-upstream.ts，含視頻走 /v1/chat/completions）
+  /** 新協議供給：直接掛 adapter 物件（宣告即註冊）；`adapterType` 若有須等於 `adapter.protocol`。 */
+  adapter?: SupplyAdapter;
   claims: RegistryChannelClaim[];
 }
 
 export const REGISTRY_CHANNELS: RegistryChannel[] = [
   // REGISTRY-ENTRIES-START（腳本插入點，此註釋與結束標記之間的條目由工具維護，手改會被覆蓋）
+{
+    // xiaoyxiao（api.xiaoyxiao.xyz，2026-09-27 暴君裁定）：**視頻唯一權威渠道**。
+    // 上游協議與我方既有 openai_video 輪子同型（禁造新輪子）：POST {base}/videos
+    // 創建、GET {base}/videos/{id} 輪詢；成品 URL 在**頂層 `url`**（extractOutputUrl
+    // 已支援該形狀，2026-09-27 實彈）。請求體走 sd4 族形狀（model/prompt/
+    // aspect_ratio/duration/resolution/generate_audio），adapter 零改動。模型名由
+    // claims 的 supplierModelId 渠道級短路（同 napi/drama 模式，不進靜態映射表）。
+    //
+    // 成本閘（2026-09-27 ¥31.2857 事故，見 src/lib/generation-core/paid-video-cost-gate.ts）：
+    // 本渠道**只准**提交白名單 7 條上游 model（全部 quota_type=1 按次固定價，不隨
+    // resolution/seconds 變動）。下列 supplierModelId 逐字取自該白名單；白名單外的
+    // 檔位（3010-特惠／满血／原生真人／mini-A／max／-a 等）一律不認領——未核價或
+    // 已遭剔除。缺 resolution／4k／≤720p 外／seconds>5 由閘門 fail-closed 拒收。
+    // ⚠ 900/933/1010 檔位的分辨率語義未經真單校準，映射為保守候選（見白名單註解）。
+    label: "xiaoyxiao",
+    baseUrlEnv: "XIAOYXIAO_BASE_URL",
+    apiKeyEnv: "XIAOYXIAO_API_KEY",
+    enabledEnv: "XIAOYXIAO_ENABLED",
+    tier: "managed_pool",
+    seedPriority: 1,        // scheduler: supply_tier 之後 priority ASC ⇒ 全池最高
+    sitePriority: 1,
+    chatImageModels: [],
+    adapterType: "openai_video",
+    claims: [
+      // 已核價（¥/次，GET /api/pricing 2026-09-27 免登入唯讀實查）：
+      // seedance-2.0-900-特惠 0.7、seedance-2.5-900-特惠 0.9、
+      // minimax-h3-933-2k-支持真人 1.1；seedance-2.5-1010-特惠 1.6（原文見
+      // paid-video-cost-gate.ts PAID_VIDEO_UNIT_PRICE_CNY）。V-03 起寫成 claim 欄位。
+      { modelId: "seedance-2.0",      supplierModelId: "seedance-2.0-900-特惠",      kinds: ["video_generate"], unitPriceCny: 0.7, priceSource: "GET https://api.xiaoyxiao.xyz/api/pricing 2026-09-27 (quota_type=1, model_price)" },
+      { modelId: "seedance-2.5-480p", supplierModelId: "seedance-2.5-900-特惠",      kinds: ["video_generate"], unitPriceCny: 0.9, priceSource: "GET https://api.xiaoyxiao.xyz/api/pricing 2026-09-27 (quota_type=1, model_price)" },
+      { modelId: "seedance-2.5-720p", supplierModelId: "seedance-2.5-1010-特惠",     kinds: ["video_generate"], unitPriceCny: 1.6, priceSource: "GET https://api.xiaoyxiao.xyz/api/pricing 2026-09-27 (quota_type=1, model_price)" },
+      { modelId: "minimax-h3",        supplierModelId: "minimax-h3-933-2k-支持真人", kinds: ["video_generate"], unitPriceCny: 1.1, priceSource: "GET https://api.xiaoyxiao.xyz/api/pricing 2026-09-27 (quota_type=1, model_price)" },
+    ],
+  },
+
+{
+    // gway（極途Gway，api.gway.dev，2026-09-28）：xiaoyxiao 的直接上游（取證見記憶
+    // 2026-09-28-xiaoyxiao-upstream-chain-0928）。同名模型掛 vip 分組、單價恆＝xiaoyxiao−¥0.1。
+    // 現為**備用渠道**（priority 2，xiaoyxiao 失敗才輪到）；暴君裁定 xiaoyxiao 餘額跑完即搬家至此。
+    // 協議、模型名、成本閘白名單與 xiaoyxiao 完全同型。V-03（2026-09-28）起成本閘按
+    //（供給 label, supplierModelId）讀下方 claim 的 unitPriceCny，gway 的真實單價進閘。
+    label: "gway",
+    baseUrlEnv: "GWAY_BASE_URL",
+    apiKeyEnv: "GWAY_API_KEY",
+    enabledEnv: "GWAY_ENABLED",
+    tier: "managed_pool",
+    seedPriority: 2,
+    sitePriority: 2,
+    chatImageModels: [],
+    adapterType: "openai_video",
+    claims: [
+      // 已核價（GET https://www.gway.dev/api/pricing 2026-09-28，vip 分組，quota_type=1）：
+      // seedance-2.0-900-特惠 0.6、seedance-2.5-900-特惠 0.8、seedance-2.5-1010-特惠 1.5、
+      // minimax-h3-933-2k-支持真人 1.0。
+      { modelId: "seedance-2.0",      supplierModelId: "seedance-2.0-900-特惠",      kinds: ["video_generate"], unitPriceCny: 0.6, priceSource: "GET https://www.gway.dev/api/pricing 2026-09-28 (vip 分組, quota_type=1)" },
+      { modelId: "seedance-2.5-480p", supplierModelId: "seedance-2.5-900-特惠",      kinds: ["video_generate"], unitPriceCny: 0.8, priceSource: "GET https://www.gway.dev/api/pricing 2026-09-28 (vip 分組, quota_type=1)" },
+      { modelId: "seedance-2.5-720p", supplierModelId: "seedance-2.5-1010-特惠",     kinds: ["video_generate"], unitPriceCny: 1.5, priceSource: "GET https://www.gway.dev/api/pricing 2026-09-28 (vip 分組, quota_type=1)" },
+      { modelId: "minimax-h3",        supplierModelId: "minimax-h3-933-2k-支持真人", kinds: ["video_generate"], unitPriceCny: 1.0, priceSource: "GET https://www.gway.dev/api/pricing 2026-09-28 (vip 分組, quota_type=1)" },
+    ],
+  },
+
 {
     label: "hublinuxdo",
     baseUrlEnv: "HUBLINUXDO_BASE_URL",
@@ -84,45 +167,6 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
   },
 
 {
-    label: "metaso",
-    baseUrlEnv: "METASO_BASE_URL",
-    apiKeyEnv: "METASO_API_KEY",
-    enabledEnv: "METASO_ENABLED",
-    tier: "managed_pool",
-    seedPriority: 12,
-    sitePriority: 12,
-    chatImageModels: [],
-    adapterType: "metaso",
-    claims: [
-      {
-        modelId: "minimax-h3",
-        supplierModelId: null,
-        kinds: ["video_generate"],
-      },
-    ],
-  },
-
-{
-    label: "tokenmix",
-    baseUrlEnv: "TOKENMIX_BASE_URL",
-    apiKeyEnv: "TOKENMIX_API_KEY",
-    enabledEnv: "TOKENMIX_ENABLED",
-    tier: "managed_pool",
-    seedPriority: 12,
-    sitePriority: 12,
-    // tokenmix 上游接受平台 id「seedream-5.0-lite」直傳（2026-08-28 實測 HTTP 200），
-    // 與 new-api 渠道 9 的 model_mapping（→ bytedance/seedream-5.0-lite）雙路兼容。
-    chatImageModels: [],
-    claims: [
-      {
-        modelId: "seedream-5.0-lite",
-        supplierModelId: null,
-        kinds: ["image_generate"],
-      },
-    ],
-  },
-
-{
     label: "yyds",
     baseUrlEnv: "YYDS_BASE_URL",
     apiKeyEnv: "YYDS_API_KEY",
@@ -140,122 +184,6 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
         // image_generate，使 gpt-image-2 的 edit 能力表只剩死渠道
         // （adobe2api 403 額度枯竭、sub2api 524），改圖全軍覆沒。
         kinds: ["image_generate", "image_edit"],
-      },
-    ],
-  },
-
-{
-    label: "cangyuansuanli",
-    baseUrlEnv: "CANGYUANSUANLI_BASE_URL",
-    apiKeyEnv: "CANGYUANSUANLI_API_KEY",
-    enabledEnv: "CANGYUANSUANLI_ENABLED",
-    tier: "managed_pool",
-    seedPriority: 8,
-    sitePriority: 8,
-    // seedance 2.5/2.0 视频主渠道（2026-08-30 接入）。上游为 new-api openai-video
-    // 兼容（POST /v1/videos + GET /videos/{task_id} 轮询），adapterType=openai_video
-    // 走 openai-video-upstream.ts。模型名按平台 modelId+resolution 在 adapter 内
-    // 解析（sd4 族分辨率可选 / sd7 族固定），supplierModelId 一律 null。
-    chatImageModels: [],
-    adapterType: "openai_video",
-    claims: [
-      {
-        modelId: "seedance-2.0",
-        supplierModelId: null,
-        kinds: ["video_generate"],
-      },
-      {
-        modelId: "seedance-2.0-fast",
-        supplierModelId: null,
-        kinds: ["video_generate"],
-      },
-      {
-        modelId: "seedance-2.0-mini",
-        supplierModelId: null,
-        kinds: ["video_generate"],
-      },
-      {
-        modelId: "seedance-2.5-480p",
-        supplierModelId: null,
-        kinds: ["video_generate"],
-      },
-      {
-        modelId: "seedance-2.5-720p",
-        supplierModelId: null,
-        kinds: ["video_generate"],
-      },
-    ],
-  },
-
-{
-    // napi（napi.wanzij.cn，2026-09-19 接入）：seedance 2.0/2.5 备用视频渠道。
-    // 上游模型 seed-2.0 / seed-2.5（$1/次不按秒计费），覆盖 15s/30s 档（上游
-    // 账号 2026-09-19 时点额度为零，充值前任务会以 insufficient_user_quota 失败，
-    // 由 failure classifier 归类欠费）。协议走 openai-video-upstream 的 NAPI 族
-    // 分支（ratio/seconds/images 字段方言），模型映射由 claims 的 supplierModelId
-    // 渠道级短路，不进 UPSTREAM_MODEL_BY_RESOLUTION 静态表。
-    label: "napi",
-    baseUrlEnv: "NAPI_BASE_URL",
-    apiKeyEnv: "NAPI_API_KEY",
-    enabledEnv: "NAPI_ENABLED",
-    tier: "managed_pool",
-    seedPriority: 11,
-    sitePriority: 11,
-    chatImageModels: [],
-    adapterType: "openai_video",
-    claims: [
-      {
-        modelId: "seedance-2.0",
-        supplierModelId: "seed-2.0",
-        kinds: ["video_generate"],
-      },
-      {
-        modelId: "seedance-2.0-fast",
-        supplierModelId: "seed-2.0",
-        kinds: ["video_generate"],
-      },
-      {
-        modelId: "seedance-2.0-mini",
-        supplierModelId: "seed-2.0",
-        kinds: ["video_generate"],
-      },
-      {
-        modelId: "seedance-2.5-480p",
-        supplierModelId: "seed-2.5",
-        kinds: ["video_generate"],
-      },
-      {
-        modelId: "seedance-2.5-720p",
-        supplierModelId: "seed-2.5",
-        kinds: ["video_generate"],
-      },
-      {
-        modelId: "seedance-2.5-30s",
-        supplierModelId: "seed-2.5",
-        kinds: ["video_generate"],
-      },
-    ],
-  },
-
-{
-    // drama 渠道（drama.dafeiyangapi.top，2026-08-30 接入）：只供应 30 秒固定档
-    // seedance 2.5（上游模型 sd25-30s，720p，按条 6 RMB）。唯一认领 seedance-2.5-30s，
-    // 短时长 seedance 任务不会被路由到这里；上游账号当前欠费（暴君裁定无视，充值前
-    // 该渠道任务会以 insufficient_user_quota 失败，由 failure classifier 归类欠费）。
-    label: "drama",
-    baseUrlEnv: "DRAMA_BASE_URL",
-    apiKeyEnv: "DRAMA_API_KEY",
-    enabledEnv: "DRAMA_ENABLED",
-    tier: "managed_pool",
-    seedPriority: 9,
-    sitePriority: 9,
-    chatImageModels: [],
-    adapterType: "openai_video",
-    claims: [
-      {
-        modelId: "seedance-2.5-30s",
-        supplierModelId: "sd25-30s",
-        kinds: ["video_generate"],
       },
     ],
   },
@@ -285,40 +213,16 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
       { modelId: "blender-render-cycles", supplierModelId: null, kinds: ["image_generate"] },
     ],
   },
+
   // blender-modal（managed_pool，片X Modal L4）與 blender-cnb（relay）只埋樁不註冊：
   // 片X 未落盤（deploy-staging/blender-modal/ 不存在）、CNB 無實體節點——註冊即虛報能力。
   // NODES-PLAN §5：節點 ≥3 且異構＋需要場景檔分發時才評估 Flamenco 3。
-
-{
-    label: "adobe2api-plus",
-    baseUrlEnv: "ADOBE2API_PLUS_BASE_URL",
-    apiKeyEnv: "ADOBE2API_PLUS_API_KEY",
-    enabledEnv: null,
-    tier: "first_party",
-    seedPriority: 12,
-    sitePriority: 12,
-    chatImageModels: [],
-    adapterType: "adobe2api",
-    // claims kinds 依域拆分：圖像模型（gpt-image-2/gemini 系/gpt-image）只認領
-    // image_generate+image_edit；視頻模型（seedance/veo/kling/sora/omni）只認領
-    // video_generate。上游 adobe2api-plus 歸一化層（media-response.ts）從模型名
-    // 自解析 duration/ratio/resolution，supplierModelId=null 同名直傳即可。
-    claims: [
-      { modelId: "gpt-image-2", supplierModelId: null, kinds: ["image_generate", "image_edit"] },
-      { modelId: "gemini-3.1-flash-image", supplierModelId: null, kinds: ["image_generate", "image_edit"] },
-      { modelId: "gemini-3-image", supplierModelId: null, kinds: ["image_generate", "image_edit"] },
-      { modelId: "gemini-2.5-flash-image", supplierModelId: null, kinds: ["image_generate", "image_edit"] },
-      { modelId: "gpt-image", supplierModelId: null, kinds: ["image_generate", "image_edit"] },
-      { modelId: "seedance-2.0", supplierModelId: null, kinds: ["video_generate"] },
-      { modelId: "seedance-2.0-fast", supplierModelId: null, kinds: ["video_generate"] },
-      { modelId: "veo-3.1", supplierModelId: null, kinds: ["video_generate"] },
-      { modelId: "veo-3.1-fast", supplierModelId: null, kinds: ["video_generate"] },
-      { modelId: "kling-3.0", supplierModelId: null, kinds: ["video_generate"] },
-      { modelId: "kling-3.0-omni", supplierModelId: null, kinds: ["video_generate"] },
-      { modelId: "sora-2", supplierModelId: null, kinds: ["video_generate"] },
-      { modelId: "gemini-omni", supplierModelId: null, kinds: ["video_generate"] },
-    ],
-  },
+  //
+  // 2026-09-27 暴君裁定（視頻渠道重整）：metaso／tokenmix／cangyuansuanli／napi／
+  // drama／adobe2api-plus 六條 registry 條目**自本表移除**（連同 env:filmera 由
+  // seed 的 RETIRED_SUPPLIER_LABELS 一併停用）——視頻供貨唯一權威改為 xiaoyxiao，
+  // 其餘渠道不得再藉 seed 復活（它們在控面已 supplier.enabled=false + capability
+  // 停用）。adobe2api 留圖停視頻（見 seed 的 video 跳過）。
 
   {
     label: "agnes",

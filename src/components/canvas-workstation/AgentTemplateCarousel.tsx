@@ -6,6 +6,7 @@ import { ArrowRight, Check, ChevronLeft, ChevronRight, X } from "lucide-react";
 import { AGENT_TEMPLATE_DOMAIN_LABELS, type AgentPipelineStep, type AgentTemplate } from "@/lib/agent-templates";
 import { forceStartAtcTour, maybeStartAtcTour } from "@/lib/atc-tour-content";
 import { commitSteps, detent, undetent } from "@/lib/carousel-detent";
+import { text } from "@/lib/ui-strings";
 import { cn } from "@/lib/utils";
 import "../case-showcase.css";
 import "./agent-template-carousel.css";
@@ -1086,6 +1087,12 @@ export function AgentTemplateCarousel({ templates, onUseTemplate }: AgentTemplat
                       用戶指定的是畫布節點卡，不是 carousel 卡面。） */}
                   <div className="atc-info">
                     <div className="atc-title">{item.name}</div>
+                    {/* P0-1 劇本入口曝光（2026-09-28）：只在 novel_film 正面卡上補一行
+                        「有文本就丟進來」的提示。零新輪子——沿用 atc-info 既有排版與
+                        卡面字影規範，純文案加一行，不碰輪播幾何/手勢/事件。 */}
+                    {item.harnessTemplateId === "novel_film" && (
+                      <div className="atc-script-entry">{text("templates.scriptEntry.hint")}</div>
+                    )}
                     <PipelineStepSelector
                       steps={item.pipeline.steps}
                       selected={selectedStepsByTemplate[item.id]}

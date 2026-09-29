@@ -1,10 +1,13 @@
 import type { MetadataRoute } from "next";
+import { SITE_SHORT_DESCRIPTION, SITE_TITLE } from "@/lib/site-copy";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Eimu — AI 创作",
+    // 安裝對話框顯示的就是這兩個欄位：與分頁標題／OG 卡同一份真源，
+    // 免得這裡還留著「不用註冊中轉站」那套舊介紹（2026-09-27 統一）。
+    name: SITE_TITLE,
     short_name: "Eimu",
-    description: "在线生成 GPT Image 2、Nano Banana Pro 图片，登录即用，不用注册中转站，也不用申请 API Key。",
+    description: SITE_SHORT_DESCRIPTION,
     id: "/",
     start_url: "/",
     scope: "/",

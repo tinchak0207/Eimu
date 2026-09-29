@@ -1,4 +1,5 @@
 import type { FailureRecord } from "./failure-record";
+import type { NormalizedVideoPostProduction } from "./video-post-production";
 
 export type GenerationSource = "web" | "biz" | "canary";
 export type GenerationKind = "image_generate" | "image_edit" | "video_generate" | "tts" | "avatar" | "lipsync";
@@ -46,6 +47,12 @@ export interface GenerationReference {
 export interface GenerationWorkflow {
   references?: GenerationReference[];
   metadata?: Record<string, unknown>;
+  /**
+   * 生成式後期（P1-3／對稱差 D22）：續片 `extend_video`／局部改片 `edit_video`。
+   * 建單前由 `parseVideoPostProduction()` 正規化（來源影片已解析成可讀 URL）；
+   * 缺省＝普通生成，零行為變化。kind 仍是 `video_generate`（不新增 DB kind）。
+   */
+  videoPostProduction?: NormalizedVideoPostProduction;
   [key: string]: unknown;
 }
 
@@ -164,7 +171,11 @@ export interface CreateGenerationReferenceArtifactInput {
 export interface SupplierRecord {
   id: string;
   label: string;
-  adapterType: "adobe2api" | "openai_images" | "minimax" | "did" | "filmera" | "metaso" | "openai_video" | "blender_bridge";
+  /**
+   * 供給協議（DB supplier.adapter_type）。V-06 起放寬為 string：合法值由
+   * supply-registry 在執行期判定（未註冊＝明確失敗），不再隨供給增長改聯集。
+   */
+  adapterType: string;
   supplyTier: "first_party" | "managed_pool" | "relay" | "fallback";
   failureDomain: string;
   baseUrl: string;
@@ -209,9 +220,10 @@ export interface SupplierLease {
 
 /**
  * 異步任務適配器的對帳協議標記（INC-0831）：provider task id 落庫後，由
- * provider-reconciliation 按協議向上游查詢真相。新增異步適配器時同步擴充。
+ * provider-reconciliation 按協議向上游查詢真相。V-06 起＝supply-registry 的
+ * `SupplyAdapter.protocol`（string），執行期由 registry 校驗；新增異步適配器不再改此型別。
  */
-export type ProviderProtocol = "openai_video" | "newapi_video" | "metaso" | "filmera";
+export type ProviderProtocol = string;
 
 export interface SupplierGenerationInput {
   jobId: string;

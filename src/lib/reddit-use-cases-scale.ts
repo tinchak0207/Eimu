@@ -18,6 +18,8 @@ type ScalePage = {
   prompts: [string, string];
   evidence: [RedditEvidence, RedditEvidence];
   related: string[];
+  /** 所屬行業樞紐 slug（/use-cases/<category>）。 */
+  category: string;
 };
 
 function page(input: ScalePage): UseCase {
@@ -45,6 +47,7 @@ function page(input: ScalePage): UseCase {
     ],
     author: AUTHOR,
     relatedSlugs: input.related,
+    categorySlug: input.category,
     searchVariants: input.variants,
     workflowSteps: input.steps,
     fitBoundary: input.boundary,
@@ -55,6 +58,7 @@ function page(input: ScalePage): UseCase {
 export const REDDIT_SCALE_USE_CASES: UseCase[] = [
   page({
     slug: "reddit-move-resize-object-only",
+    category: "photography",
     keyword: "AI 移动物体不改变其他区域",
     title: "只移动或缩放图片里的一个物体，不重画整张图",
     tagline: "固定背景、光线和主体，只改目标物体的位置",
@@ -71,6 +75,7 @@ export const REDDIT_SCALE_USE_CASES: UseCase[] = [
   }),
   page({
     slug: "reddit-edit-one-face-in-group-photo",
+    category: "photography",
     keyword: "AI 只修改合照中的一张脸",
     title: "合照里只修一个人的脸，避免其他人物一起变化",
     tagline: "先选中目标人物，再锁定其他人的身份与位置",
@@ -87,6 +92,7 @@ export const REDDIT_SCALE_USE_CASES: UseCase[] = [
   }),
   page({
     slug: "reddit-generate-inpaint-detail-workflow",
+    category: "design",
     keyword: "AI 生成后局部修复再细化工作流",
     title: "先生成构图，再局部修复，最后细化高风险区域",
     tagline: "把整图生成、问题修复和细节增强拆成三步",
@@ -103,6 +109,7 @@ export const REDDIT_SCALE_USE_CASES: UseCase[] = [
   }),
   page({
     slug: "reddit-clean-background-segmentation-edges",
+    category: "ecommerce",
     keyword: "AI 抠图与换背景边缘自然",
     title: "AI 抠图或换背景后边缘发硬：先检查头发、透明物和光线",
     tagline: "让主体边缘、环境光和新背景真正融合",
@@ -119,6 +126,7 @@ export const REDDIT_SCALE_USE_CASES: UseCase[] = [
   }),
   page({
     slug: "reddit-multiple-lora-style-conflicts",
+    category: "anime",
     keyword: "AI 多 LoRA 风格冲突对比",
     title: "多个 LoRA 一起用效果打架：固定基准图再逐个调整权重",
     tagline: "先测试单个效果，再组合，不把冲突留到最后",
@@ -135,6 +143,7 @@ export const REDDIT_SCALE_USE_CASES: UseCase[] = [
   }),
   page({
     slug: "reddit-product-color-material-variants",
+    category: "ecommerce",
     keyword: "AI 商品颜色与材质变体图",
     title: "同一商品快速比较配色和材质，不重新设计产品结构",
     tagline: "固定几何、标签和机位，只改变指定表面变量",
@@ -147,10 +156,11 @@ export const REDDIT_SCALE_USE_CASES: UseCase[] = [
       { title: "How do I sell customized items", quote: "发帖者讨论定制商品销售，反映同一产品多变体展示的商业需求。", url: "https://www.reddit.com/r/ecommerce/comments/1f363lq/how_do_i_sell_customized_items/", score: 5, comments: 5 },
       { title: "DTF vs DTG colors question", quote: "发帖者比较不同印刷方式的颜色表现，说明材质和颜色预览需要明确边界。", url: "https://www.reddit.com/r/printondemand/comments/16jnfmm/dtf_vs_dtg_colors_question/", score: 5, comments: 4 },
     ],
-    related: ["ecommerce-1", "ecommerce-4", "reddit-reference-photo-to-style"],
+    related: ["reddit-product-multi-reference-composite", "reddit-marketplace-thumbnail-small-size", "reddit-reference-photo-to-style"],
   }),
   page({
     slug: "reddit-product-multi-reference-composite",
+    category: "ecommerce",
     keyword: "AI 多参考图合成商品场景",
     title: "把商品、背景和道具参考图合成一张自然商业图",
     tagline: "统一比例、透视、光线和接触阴影",
@@ -163,10 +173,11 @@ export const REDDIT_SCALE_USE_CASES: UseCase[] = [
       { title: "Move or resize an object without affecting the rest", quote: "发帖者希望在已有画面里控制单个物体位置，体现多素材合成中的局部控制需求。", url: "https://www.reddit.com/r/comfyui/comments/1f49c8d/hello_this_image_was_made_with_flux_devrealism/", score: 14, comments: 31 },
       { title: "Wont blend with mask", quote: "发帖者尝试把生成图和原图通过遮罩融合但无法自然合成，直接反映融合痛点。", url: "https://www.reddit.com/r/comfyui/comments/1f6jvs6/wont_blend_wmask/", score: 2, comments: 8 },
     ],
-    related: ["ecommerce-3", "reddit-control-specific-ai-image", "reddit-background-swap-keep-person"],
+    related: ["reddit-clean-background-segmentation-edges", "reddit-control-specific-ai-image", "reddit-background-swap-keep-person"],
   }),
   page({
     slug: "reddit-campaign-visual-consistency",
+    category: "marketing",
     keyword: "AI 营销活动多图视觉一致",
     title: "一场营销活动的多张素材保持同一视觉方向",
     tagline: "复用色板、构图语言和工作流，而不是每张重新猜",
@@ -179,10 +190,11 @@ export const REDDIT_SCALE_USE_CASES: UseCase[] = [
       { title: "Facebook Ads: test multiple creatives at once", quote: "发帖者询问如何高效同时测试多套创意，说明持续生产可比较素材的需求。", url: "https://www.reddit.com/r/ecommerce/comments/1f6hm75/facebook_ads_how_to_efficiently_test_multiple/", score: 4, comments: 4 },
       { title: "Alternatives to adcreative.ai", quote: "发帖者寻找可以规模化生成广告创意的替代工具，体现批量素材生产压力。", url: "https://www.reddit.com/r/FacebookAds/comments/165xgm1/any_alternatives_to_adcreativeai/", score: 3, comments: 23 },
     ],
-    related: ["marketing-5", "marketing-6", "reddit-simple-image-workflow-recall"],
+    related: ["reddit-accurate-text-in-ai-images", "reddit-edit-compare-recompose-crops", "reddit-simple-image-workflow-recall"],
   }),
   page({
     slug: "reddit-marketplace-thumbnail-small-size",
+    category: "ecommerce",
     keyword: "电商缩略图小尺寸主体清晰",
     title: "商品图缩小和平台裁切后仍然一眼看清主体",
     tagline: "先检查安全区、主体占比和移动端缩略图",
@@ -195,10 +207,11 @@ export const REDDIT_SCALE_USE_CASES: UseCase[] = [
       { title: "Which crop should I go with?", quote: "发帖者并排比较不同裁切方案并征求选择意见，反映裁切决策的实际痛点。", url: "https://www.reddit.com/r/postprocessing/comments/1740rer/which_crop_should_i_go_with/", score: 37, comments: 43 },
       { title: "Which crop should I go with, or crop further?", quote: "发帖者讨论是否继续收紧裁切，说明主体占比和画面边界需要比较。", url: "https://www.reddit.com/r/postprocessing/comments/16ewz46/which_crop_should_i_go_with_or_should_i_crop_in/", score: 52, comments: 33 },
     ],
-    related: ["ecommerce-5", "reddit-edit-compare-recompose-crops", "ecommerce-1"],
+    related: ["reddit-clean-background-segmentation-edges", "reddit-edit-compare-recompose-crops", "reddit-product-color-material-variants"],
   }),
   page({
     slug: "reddit-sticker-merch-illustration-set",
+    category: "design",
     keyword: "AI 贴纸与周边插画套图",
     title: "生成同主题贴纸和周边插画套图，保持系列语言",
     tagline: "固定轮廓、色板和细节密度，再批量扩展主题",
@@ -211,6 +224,6 @@ export const REDDIT_SCALE_USE_CASES: UseCase[] = [
       { title: "How do you get art for POD stores?", quote: "发帖者询问 POD 店铺如何获取图稿以及是否会购买，体现持续图案生产需求。", url: "https://www.reddit.com/r/printondemand/comments/16sn6zm/how_do_you_get_art_for_your_pod_stores_would_you/", score: 5, comments: 17 },
       { title: "Improve my first print-on-demand design", quote: "发帖者展示第一张设计并寻求改进建议，说明周边图稿需要迭代与系列化质量控制。", url: "https://www.reddit.com/r/printondemand/comments/16cpap3/i_want_to_start_a_print_on_demand_business_and_i/", score: 5, comments: 13 },
     ],
-    related: ["design-4", "design-5", "reddit-reference-photo-to-style"],
+    related: ["reddit-multiple-lora-style-conflicts", "reddit-campaign-visual-consistency", "reddit-reference-photo-to-style"],
   }),
 ];

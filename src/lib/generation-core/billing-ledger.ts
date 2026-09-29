@@ -1043,3 +1043,147 @@ export async function reconcileBillingOperationManually(input: {
   emitJobEvent({ jobId: view.jobId, event: JOB_EVENT.billingManuallyReconciled, actor: input.actor, upstreamRaw: note, detail: { action: input.action, operation: view.operation, status: view.status, jobStatus: view.jobStatus, amount: view.amount, manual: true, note } }, sql);
   return view;
 }
+
+// ── 同步路由門面用的帳本原語（V-07/V-08，2026-09-28）──────────────────────
+//
+// 同步直通路由（/v1/images/edits pixai 分支、/v1/upscale、/v1/template-generations、
+// /api/pixai/*）沒有 worker 執行，但錢必須跟 durable 任務一樣留 billing_operation 列，
+// 讓 reconcileGenerationBilling／retryStrandedRefundOperations 撈得到。
+// 以下兩個 export 是**新增**的，不改上方既有函式語義；唯一門面是 ./sync-charge.ts。
+
+export type SyncReserveOutcome =
+  | { status: "applied"; job: GenerationJob }
+  | { status: "rejected"; job: GenerationJob; error: unknown }
+  | { status: "unknown"; job: GenerationJob; error: unknown };
+
+/**
+ * 同步 job 的預扣。與 reserveGenerationBilling 同一條 claim／外部扣款／帳本雙寫鏈，
+ * 差別只在 job 狀態機：
+ *  - 成功：job 保持在「已在執行」態（'running'，租約由門面設），**絕不進 queued**——
+ *    同步 job 沒有 worker 可接，進隊列等於讓 worker 再打一次付費上游。
+ *  - 確定未扣（rejected／retry 類）：op → failed、job → failed。同步路由不排程重試：
+ *    客戶當下就拿到 402，不能在背後偷偷扣。
+ *  - 不明（unknown）：op → unknown、job → billing_unknown，交既有 zombie reclaim
+ *    （6h 後全額退款）——與 durable 路徑同一保守語義。
+ * 呼叫前 job 必須處於 'submitting'（門面建單時設定），使 dueReservationJobs／
+ * zombie reclaim（只認 pending_billing/billing_unknown）在扣款進行中碰不到它。
+ */
+export async function reserveSyncGenerationBilling(input: {
+  job: GenerationJob;
+  executorId: string;
+  adapter?: GenerationBillingAdapter;
+}, sql: GenerationSql = getGenerationSql()): Promise<SyncReserveOutcome> {
+  if (!input.job.billingUserId || !input.job.billingAmount) {
+    throw new Error(`Sync generation job ${input.job.id} needs a billing user and a positive amount.`);
+  }
+  const claim = await claimBillingOperation({
+    jobId: input.job.id,
+    operation: "reserve",
+    executorId: input.executorId,
+    sql,
+  });
+  if (claim.kind !== "claimed") {
+    return {
+      status: "unknown",
+      job: await freshJob(input.job.id, sql),
+      error: new Error(`Sync reserve for job ${input.job.id} could not be claimed (${claim.kind}).`),
+    };
+  }
+  const claimed = claim.row;
+
+  const baselineReady = await ensureAccountBaselines([input.job.billingUserId], { sql });
+  try {
+    await (input.adapter ?? configuredGenerationBillingAdapter()).reserve({
+      jobId: input.job.id,
+      operation: "reserve",
+      userId: input.job.billingUserId,
+      amount: input.job.billingAmount,
+    });
+  } catch (error) {
+    const detail = detailOf(error);
+    const disposition = classifyBillingFailure(error);
+    if (disposition === "unknown") {
+      await sql.begin(async (tx) => {
+        await tx`
+          UPDATE billing_operation
+          SET status = 'unknown', execution_expires_at = NULL, last_error = ${detail}, updated_at = now()
+          WHERE id = ${String(claimed.id)} AND status = 'executing'
+        `;
+        await tx`
+          UPDATE generation_job
+          SET status = 'billing_unknown', failure_class = 'unknown', failure_detail = ${detail},
+              lease_owner = NULL, lease_expires_at = NULL, heartbeat_at = NULL, updated_at = now()
+          WHERE id = ${input.job.id} AND status = 'submitting'
+        `;
+      });
+      emitJobEvent({ jobId: input.job.id, event: JOB_EVENT.billingUnknown, actor: input.executorId, upstreamRaw: detail, detail: { operation: "reserve", jobStatus: "billing_unknown", sync: true } }, sql);
+      return { status: "unknown", job: await freshJob(input.job.id, sql), error };
+    }
+    const failureClass = rejectedFailureClass(error);
+    await sql.begin(async (tx) => {
+      await tx`
+        UPDATE billing_operation
+        SET status = 'failed', execution_expires_at = NULL, last_error = ${detail}, updated_at = now()
+        WHERE id = ${String(claimed.id)} AND status = 'executing'
+      `;
+      await tx`
+        UPDATE generation_job
+        SET status = 'failed', failure_class = ${failureClass}, failure_detail = ${detail},
+            finished_at = now(), lease_owner = NULL, lease_expires_at = NULL, heartbeat_at = NULL,
+            updated_at = now()
+        WHERE id = ${input.job.id} AND status = 'submitting'
+      `;
+    });
+    emitJobEvent({ jobId: input.job.id, event: JOB_EVENT.jobFailed, actor: input.executorId, upstreamRaw: detail, detail: { reason: "billing_rejected", failureClass, operation: "reserve", disposition, sync: true } }, sql);
+    return { status: "rejected", job: await freshJob(input.job.id, sql), error };
+  }
+
+  await sql.begin(async (tx) => {
+    const applied = await tx<Row[]>`
+      UPDATE billing_operation
+      SET status = 'applied', applied_at = now(), execution_expires_at = NULL,
+          last_error = NULL, updated_at = now()
+      WHERE id = ${String(claimed.id)} AND status = 'executing'
+      RETURNING id
+    `;
+    if (!applied[0]) return;
+    await tx`
+      UPDATE generation_job
+      SET status = 'running', updated_at = now()
+      WHERE id = ${input.job.id} AND status = 'submitting'
+    `;
+  });
+  emitJobEvent({ jobId: input.job.id, event: JOB_EVENT.billingReserved, actor: input.executorId, detail: { amount: input.job.billingAmount, operation: "reserve", sync: true } }, sql);
+  const ledger = baselineReady
+    ? await recordConsumption({
+        billingUserId: input.job.billingUserId,
+        amountQuota: input.job.billingAmount,
+        jobId: input.job.id,
+        operationId: String(claimed.id),
+        source: "billing-ledger-reserve",
+      }, { sql })
+    : { posted: false, reason: "基線不可得（未記帳）" };
+  if (!ledger.posted) {
+    console.error(`[billing-ledger] sync job ${input.job.id}: reserve 帳本同步未落地（${ledger.reason}）——已由對帳報告負責`);
+  }
+  return { status: "applied", job: await freshJob(input.job.id, sql) };
+}
+
+/**
+ * 只落一條 pending 的 refund op（不做外部 credit）。同步門面在回應客戶前先把
+ * 「該退多少」寫進帳本，外部退款放到回應之後執行；進程若在那之前死掉，
+ * reconcileGenerationBilling（failed 終態）或 retryStrandedRefundOperations
+ * （succeeded 終態的部分退款）會撈到這條 op 補退。與 refundGenerationBilling
+ * 共用同一個 ensureRefundOperation（同 idempotency_ref，金額衝突即拋）。
+ */
+export async function recordPendingGenerationRefund(
+  job: GenerationJob,
+  amount: number,
+  sql: GenerationSql = getGenerationSql(),
+): Promise<void> {
+  if (!amount) return;
+  if (amount < 0 || amount > job.billingAmount) {
+    throw new Error(`Invalid refund amount for generation job ${job.id}.`);
+  }
+  await ensureRefundOperation(job, amount, sql);
+}

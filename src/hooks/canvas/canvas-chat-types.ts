@@ -1,10 +1,20 @@
 // 畫布 chat 的展示型類型與介面（自 use-canvas-chat.ts 外圍搬遷，符號名不變）。
 // use-canvas-chat.ts 仍是唯一匯出點（barrel），消費端 import 路徑零改動。
-import { CARD_NAME_KEYS, cleanEmitsEntity, toCardMetadataName, toGateConfirm, toNodeFontSize } from "@/lib/canvas/layout";
+import { cleanEmitsEntity, toCardMetadataName, toGateConfirm, toNodeFontSize } from "@/lib/canvas/layout";
+// 上行白名單的**鍵集合單一真源**（與還原端 layout.toNodeMetadata 共用同一份清單；
+// 漏一端＝回舊會話還原後該鍵靜默消失）。
+import {
+  AGENT_CONTENT_TRUNCATE_KEEP,
+  AGENT_CONTENT_TRUNCATE_TRIGGER,
+  AGENT_METADATA_FIELDS,
+  AGENT_PROMPT_TRUNCATE_KEEP,
+  type AgentFieldCondition,
+  type AgentFieldTransform,
+} from "@/lib/canvas/node-metadata-fields";
 import type { AgentSseEvent } from "@/lib/agent-chat-types";
 import { normalizeApprovalState } from "@/lib/character-cards";
 import type { CharacterCard } from "@/lib/character-cards";
-import { compactStoryboardShot } from "@/lib/storyboard-contract";
+import { compactStoryboardShot, type StoryboardScriptShot } from "@/lib/storyboard-contract";
 import type {
   CanvasAgentOp,
   CanvasAgentOpsEvent,
@@ -12,6 +22,7 @@ import type {
   CanvasEpisode,
   CanvasNode,
   CanvasNodeMetadata,
+  CanvasNodeVersion,
   CanvasPlanEvent,
   CanvasPosition,
   CanvasProject,
@@ -80,107 +91,81 @@ function cleanIdList(v: unknown): string[] | undefined {
   return out.length > 0 ? out : undefined;
 }
 
-/** agent 快照的 metadata 壓縮：content 超 240 字截 120、prompt 截 120，不餵 base64 長文。 */
+/** 分族條件是否命中（工具卡族要求 pipelineCard∈{tool,gate,note}；導演台族要求 =director）。 */
+function agentFieldConditionMet(bag: Record<string, unknown>, condition: AgentFieldCondition): boolean {
+  const value = bag[condition.key];
+  return typeof value === "string" && condition.oneOf.includes(value);
+}
+
+/**
+ * 依真源的 `transform` 分派。回傳 `undefined` ＝「省略該鍵」（不寫空殼）。
+ *
+ * 每個 transform 的判據與既有 runtime **逐字相同**（含髒值行為：truthy 判斷、
+ * `typeof === "number"` 不收斂 NaN、非字串 content/prompt 直接讀 `.length`/`.slice`）——
+ * 本函式只把「哪個鍵走哪個動作」交給真源，動作本身不改。
+ */
+function applyAgentFieldTransform(transform: AgentFieldTransform, raw: unknown): unknown {
+  switch (transform) {
+    case "content": {
+      // 超預算只留前 N 字＋省略號（門檻/保留字數＝真源 AGENT_TRUNCATION_BUDGETS）。
+      if (!raw) return undefined;
+      const text = raw as string;
+      return text.length > AGENT_CONTENT_TRUNCATE_TRIGGER
+        ? `${text.slice(0, AGENT_CONTENT_TRUNCATE_KEEP)}…`
+        : text;
+    }
+    case "prompt": {
+      if (!raw) return undefined;
+      return (raw as string).slice(0, AGENT_PROMPT_TRUNCATE_KEEP);
+    }
+    case "truthy":
+      return raw ? raw : undefined;
+    case "number":
+      return typeof raw === "number" ? raw : undefined;
+    case "boolean":
+      return typeof raw === "boolean" ? raw : undefined;
+    case "defined":
+      return raw !== undefined ? raw : undefined;
+    case "pipelineCard":
+      // 四值枚舉；未列舉值（含 step_head——前端模板路徑直産、後端不送）照舊丟棄。
+      return raw === "tool" || raw === "gate" || raw === "note" || raw === "director" ? raw : undefined;
+    case "idList":
+      return cleanIdList(raw);
+    case "cardName":
+      return toCardMetadataName(raw);
+    case "storyboardShot":
+      // 欄位清單只准一份（storyboard-contract.ts），壓縮下放純函數，未來加欄自動跟上。
+      return raw ? compactStoryboardShot(raw as StoryboardScriptShot) : undefined;
+    case "emitsEntity":
+      return cleanEmitsEntity(raw);
+    case "fontSize":
+      return toNodeFontSize(raw);
+    case "gateConfirm":
+      return toGateConfirm(raw);
+    case "approval":
+      // `normalizeApprovalState` 用 `null` 表示「整包丟棄」，本函式的 `undefined` 才是
+      // 「省略鍵」——不轉換會寫出 `approval: null` 的空殼鍵。
+      return normalizeApprovalState(raw) ?? undefined;
+  }
+}
+
+/**
+ * agent 快照的 metadata 壓縮（上行端白名單）。
+ *
+ * **鍵集合不寫在本檔**：唯一真源＝`src/lib/canvas/node-metadata-fields.ts` 的
+ * `AGENT_METADATA_FIELDS`（鍵、分族條件、截斷預算與排除理由都在那裡）。
+ * 與還原端 `layout.toNodeMetadata` 構成雙白名單：任一端漏鍵＝回舊會話/換裝置還原後
+ * 該鍵靜默消失（2026-09-03 導演台空殼、2026-09-24 `emitsEntity` 當下被剝兩次事故）。
+ */
 export function compactMetadataForAgent(metadata: CanvasNodeMetadata | undefined): Record<string, unknown> | undefined {
   if (!metadata) return undefined;
-  const out: Record<string, unknown> = {};
-  if (metadata.content) {
-    out.content = metadata.content.length > 240 ? `${metadata.content.slice(0, 120)}…` : metadata.content;
-  }
-  if (metadata.prompt) out.prompt = metadata.prompt.slice(0, 120);
-  if (metadata.model) out.model = metadata.model;
-  if (metadata.size) out.size = metadata.size;
-  if (metadata.status) out.status = metadata.status;
-  // reference 節點角色讓 agent 知道「這張圖以什麼身份參與生成」。
-  if (metadata.referenceRole) out.referenceRole = metadata.referenceRole;
-  // 後端 workflow 骨架節點：產出合同/驗收門禁各一行透傳——agent 讀畫布狀態時
-  // 也該看到本步的合同與門禁（漏傳 = 下行還原後骨架失語義）。
-  if (metadata.deliverable) out.deliverable = metadata.deliverable;
-  if (metadata.gate) out.gate = metadata.gate;
-  if (typeof metadata.count === "number") out.count = metadata.count;
-  if (typeof metadata.cost_coins === "number") out.cost_coins = metadata.cost_coins;
-  // derived 工具卡/門禁卡/配方卡（後端 pipelineCard:"tool"|"gate"|"note"，kind=text）：
-  // 六欄透傳——agent 讀畫布狀態時也該看到工具調用與「harness 未接上游」標記
-  //（漏傳 = 下行還原後工具卡失語義，2026-09-03 director 空殼事故同構）。
-  // note（配方卡）只有 content 一欄（上方 content 截斷已帶），pipelineCard 標記本身
-  // 透傳才知下行還原時該鋪成配方卡。
-  if (metadata.pipelineCard === "tool" || metadata.pipelineCard === "gate" || metadata.pipelineCard === "note") {
-    out.pipelineCard = metadata.pipelineCard;
-    if (metadata.toolId) out.toolId = metadata.toolId;
-    if (metadata.toolInput) out.toolInput = metadata.toolInput;
-    if (metadata.toolOutput) out.toolOutput = metadata.toolOutput;
-    if (typeof metadata.unsupported === "boolean") out.unsupported = metadata.unsupported;
-    if (metadata.requiredCapability) out.requiredCapability = metadata.requiredCapability;
-  }
-  // director 節點：只回傳指針欄位，SVG（可達 48KB×2）維持排除——agent 用 director 工具
-  // 讀工程真值、不讀 SVG；回傳會吃 512KB 快照額度。缺指針的後果（2026-09-03 事故）：
-  // 刷新/恢復後下行還原出空殼 director 節點，NodeBody 落到「示意图未同步」兜底。
-  // 有 directorSessionId + revision 即可：小視口經 /director/state 拉 gateway 持久化的
-  // 工程重渲染 3D 白模，SVG 僅在 WebGL 失敗時才需要（屆時顯示降級佔位，可接受）。
-  if (metadata.pipelineCard === "director") {
-    out.pipelineCard = "director";
-    if (metadata.directorSessionId) out.directorSessionId = metadata.directorSessionId;
-    if (metadata.planName !== undefined) out.planName = metadata.planName;
-    if (typeof metadata.shotCount === "number") out.shotCount = metadata.shotCount;
-    if (typeof metadata.healthOk === "boolean") out.healthOk = metadata.healthOk;
-    if (typeof metadata.revision === "number") out.revision = metadata.revision;
-  }
-  // 3D 場景卡節點（Astra PRD P1-3）：sceneCard 欄位族整族透傳——六欄全是小指針
-  // （URL/路徑/一句摘要/時長），無 SVG 級重料；漏傳 = 刷新後 3D 場景卡變空殼
-  //（2026-09-03 快照壓縮器 director 事故同構）。往復合同測試釘死。
-  if (metadata.sceneCard) {
-    out.sceneCard = metadata.sceneCard;
-  }
-  // 分鏡實體（2026-09-15 刀 2）：AID 21 欄整族透傳（逐欄截 STORYBOARD_SNAPSHOT_FIELD_CHARS）。
-  // 同屬「漏傳 = 刷新/換裝置後空殼」病灶（2026-09-03 director 事故同構）：agent 產的
-  // 21 欄分鏡經 canvas_apply_ops 寫進節點後，這份快照是回舊會話時
-  // restoreAgentSnapshot 的唯一資料源。
-  // 為何不在這裡寫 21 個 if：欄位清單只准一份（storyboard-contract.ts），壓縮下放純函數
-  //（compactStoryboardShot），未來加欄自動跟上、不製造第二個漂移點。
-  if (metadata.storyboardShot) {
-    out.storyboardShot = compactStoryboardShot(metadata.storyboardShot);
-  }
-  if (metadata.storyboardScene) {
-    out.storyboardScene = metadata.storyboardScene;
-  }
-  // 分鏡實體的卡引用＋自動落卡標記（WS7 收口，2026-09-24）：與 storyboardShot 同族的
-  // 雙白名單欄位——漏傳 = 回舊會話/換裝置還原後分鏡節點失去卡引用、落卡標記消失
-  //（同 2026-09-03 director 空殼病灶）。往復合同測試釘死。
-  const characterCardIds = cleanIdList(metadata.characterCardIds);
-  const sceneCardIds = cleanIdList(metadata.sceneCardIds);
-  const propCardIds = cleanIdList(metadata.propCardIds);
-  if (characterCardIds) out.characterCardIds = characterCardIds;
-  if (sceneCardIds) out.sceneCardIds = sceneCardIds;
-  if (propCardIds) out.propCardIds = propCardIds;
-  if (metadata.entityCardId) out.entityCardId = metadata.entityCardId;
-  // 模板交付自動落卡（2026-09-24）：emitsEntity（結構化物件，走與讀取端
-  // `layout.toNodeMetadata` **同一份**清洗）＋卡名三鍵（`nameFrom:"input"` 的來源）。
-  // 與上面 storyboardShot/卡引用同族的雙白名單欄位——漏傳 = 上行後實體宣告自快照
-  // 消失、還原時一卡都落不成（同 2026-09-03 director 空殼病灶）。
-  // 型別註記：`CanvasNodeMetadata` 尚未宣告這四鍵（本刀擁有清單不含 types.ts），
-  // 故以寬化袋子讀；寫進 `out`（Record<string, unknown>）不受影響。
   const bag = metadata as Record<string, unknown>;
-  const emitsEntity = cleanEmitsEntity(bag.emitsEntity);
-  if (emitsEntity) out.emitsEntity = emitsEntity;
-  for (const key of CARD_NAME_KEYS) {
-    const name = toCardMetadataName(bag[key]);
-    if (name) out[key] = name;
+  const out: Record<string, unknown> = {};
+  for (const field of AGENT_METADATA_FIELDS) {
+    if (field.requires && !agentFieldConditionMet(bag, field.requires)) continue;
+    const value = applyAgentFieldTransform(field.transform, bag[field.key]);
+    if (value !== undefined) out[field.key] = value;
   }
-  // 文本節點字號（2026-09-25）：與還原端同一把尺（有限數、整數、10..28）——漏此端＝
-  // 回舊會話/換裝置後字號憑空回到 14.5（讀取端 NodeBody.tsx:431 讀的就是本鍵）。
-  const fontSize = toNodeFontSize(bag.fontSize);
-  if (fontSize !== undefined) out.fontSize = fontSize;
-  // 協作確認閘的門禁卡裁決憑據（2026-09-24 收口）：三欄（request_id/session_id/status）
-  // 走與還原端**同一份**清洗（`layout.toGateConfirm`，非本地重寫）。漏此端＝使用者
-  // 刷新後回到畫布，門禁卡退回純文字、按不下批准——「可操作」只在當前會話成立，
-  // 是能力靜默消失（決策 5「資產確認不設超時」在重載後即失效）。
-  const gateConfirm = toGateConfirm(metadata.gateConfirm);
-  if (gateConfirm) out.gateConfirm = gateConfirm;
-  // 分鏡批准狀態（2026-09-24 WS-審查）：與上面 gateConfirm 同族的雙白名單鍵，語義
-  // 獨立（人對分鏡交付物的批准 vs 網關 pendingConfirms 憑據，不合併不互推）。清洗走
-  // 卡側唯一收口 `normalizeApprovalState`（status 落三值域外＝整包丟棄，不猜語義）。
-  const approval = normalizeApprovalState(metadata.approval);
-  if (approval) out.approval = approval;
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
@@ -201,6 +186,8 @@ export interface UseCanvasChatReturn {
   nodes: CanvasNode[];
   connections: CanvasConnection[];
   units: CanvasUnit[];
+  /** 節點內容版本歷史（append-only；右鍵「恢复上一版」據此判斷可用）。 */
+  nodeVersions: CanvasNodeVersion[];
   plans: CanvasPlanCard[];
   derives: CanvasDeriveCard[];
   budget: CanvasBudget | null;
@@ -235,6 +222,8 @@ export interface UseCanvasChatReturn {
   // ── 批次操作（Phase 4）
   addBatchChild: (parentId: string, child: CanvasNode) => void;
   setBatchPrimary: (parentId: string, childId: string) => void;
+  /** 節點內容回退：version 省略＝上一版；回退本身也落一版，可再撤銷。 */
+  revertNode: (nodeId: string, version?: number) => void;
   deleteBatchChild: (parentId: string, childId: string) => void;
   toggleBatchExpanded: (parentId: string) => void;
   // ── @引用

@@ -17,6 +17,7 @@ import { generationCoins, imageSizeForAspectRatio, type AspectRatio } from "@/li
 import type { GenerationJob, GenerationWorkflow } from "@/lib/generation-core/types";
 import { submitGenerationCommand } from "@/lib/generation-core/command-service";
 import { IdempotencyConflictError, mapGenerationJob } from "@/lib/generation-core/job-repository";
+import { GenerationModelUnavailableError } from "@/lib/generation-core/model-availability-gate";
 import {
   computeBatchAggregate,
   type GenerationBatch,
@@ -212,6 +213,16 @@ export function createLoopSkuDispatcher(): SkuDispatcher {
                 code: "idempotency_key_reused",
                 param: null,
               },
+            });
+            continue;
+          }
+          // 模型可用性閘：該鏡頭建單/扣費前拒絕，誠實回報（不假裝提交）。
+          if (error instanceof GenerationModelUnavailableError) {
+            outcomes.push({
+              shotIndex: plan.shotIndex,
+              accepted: false,
+              taskId: null,
+              error: { message: error.message, type: "api_error", code: "no_endpoints", param: null },
             });
             continue;
           }

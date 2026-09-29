@@ -2,6 +2,9 @@
  * context-menu-items —— CanvasEmbed 右鍵選單工廠（自 CanvasEmbed.tsx L1079-1228 機械搬遷，項目 id/label/shortcut 不變）。
  * 原 useMemo 閉包捕獲 20+ handlers；工廠化後顯式傳參，組件殼仍以原依賴陣列 memo 呼叫。
  */
+import { previousNodeVersion } from "@/lib/canvas/node-versions";
+import { fetchFormatCrops } from "@/lib/canvas/client";
+import { AD_SIZE_OPTIONS } from "@/lib/ad-formats";
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import type { UseCanvasChatReturn } from "@/hooks/use-canvas-chat";
 import { CanvasNodeType, type CanvasConnection, type CanvasNode, type CanvasPosition } from "@/lib/canvas/types";
@@ -216,6 +219,7 @@ export function buildCanvasEmbedMenuItems({
       ],
     });
     if (url.startsWith("http")) {
+      items.push({ id: "format-crops", label: "一稿多版位（按常用尺寸裁切）", onSelect: () => void produceFormatCrops(state, node, url) });
       items.push({ id: "upscale", label: "高清放大", disabled: upscalingIds.has(node.id), onSelect: () => void upscaleNode(node.id) });
     }
     items.push({ id: "save-asset-image", label: "存入素材库", onSelect: () => void saveNodeToAssets(node.id) });
@@ -234,6 +238,16 @@ export function buildCanvasEmbedMenuItems({
     items.push("separator");
     items.push({ id: "align", label: "对齐与排列", children: alignChildren });
   }
+  if (sel.size <= 1) {
+    const hasPrevious = previousNodeVersion(state.nodeVersions ?? [], node.id) !== undefined;
+    items.push("separator");
+    items.push({
+      id: "revert-version",
+      label: hasPrevious ? "恢复上一版" : "恢复上一版（暂无更早版本）",
+      disabled: !hasPrevious,
+      onSelect: () => state.revertNode(node.id),
+    });
+  }
   items.push("separator");
   items.push({
     id: "delete",
@@ -243,4 +257,51 @@ export function buildCanvasEmbedMenuItems({
     onSelect: () => (sel.size > 1 ? deleteSelected() : handleDeleteNode(node.id)),
   });
   return items;
+}
+
+/**
+ * 一稿多版位：伺服器按 AD_SIZE_OPTIONS 裁出能裁的版位（擴圖版位無上游，照實跳過），
+ * 產物落成源圖右側的子圖節點＋連線——形狀與「编辑图片 → 裁剪」產出（CanvasEmbed
+ * handleEditorProduce）一致。
+ */
+async function produceFormatCrops(state: UseCanvasChatReturn, source: CanvasNode, url: string): Promise<void> {
+  const result = await fetchFormatCrops(url);
+  if (!result.ok || !result.data || result.data.length === 0) {
+    if (typeof window !== "undefined") {
+      window.alert(result.ok ? "这张图的比例没有可直接裁切的版位。" : (result.message ?? "裁切失败，请稍后重试。"));
+    }
+    return;
+  }
+  const ts = Date.now().toString(36);
+  const width = 300;
+  const newNodes: CanvasNode[] = result.data.map((crop, i) => {
+    const label = AD_SIZE_OPTIONS.find((option) => option.id === crop.id)?.label ?? crop.id;
+    const heightRaw = crop.width > 0 ? Math.round((width * crop.height) / crop.width) : 220;
+    return {
+      id: `${source.id}-fmt-${ts}-${i}`,
+      type: CanvasNodeType.Image,
+      title: `${source.title} · ${label}`,
+      position: {
+        x: source.position.x + source.width + 60 + (i % 3) * (width + 24),
+        y: source.position.y + Math.floor(i / 3) * 260,
+      },
+      width,
+      height: Math.min(Math.max(heightRaw, 120), 460),
+      moved: true,
+      metadata: {
+        content: crop.dataUrl,
+        status: "success",
+        naturalWidth: crop.width,
+        naturalHeight: crop.height,
+        source_image: url,
+      },
+    };
+  });
+  const newConns: CanvasConnection[] = newNodes.map((n) => ({
+    id: `conn-${source.id}-${n.id}`,
+    fromNodeId: source.id,
+    toNodeId: n.id,
+  }));
+  state.addNodes(newNodes, newConns);
+  if (newNodes.length > 0) state.selectNode(newNodes[0].id);
 }

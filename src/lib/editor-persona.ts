@@ -20,10 +20,17 @@
  * AGENTS.md）都在 VPS /opt/agent-harness，本地 repo 无 gateway 真源可改。
  * 本档钉死契约四要素并被委托单/回传两端 import。
  *
- * SKILL 挂载：repo skills/ 无剪辑域配方库（考古结论 2026-09-08：时间线后期
- * 全役 B1-B7 的配方沉淀在记忆 timeline-post-production-buildout-0831 与
- * docs/timeline-post-production-plan.md，未落 skills/ 目录）→ 本档 skillPaths
- * 置空并在此声明，收口片/后续配方库落库时再补。
+ * SKILL 挂载（2026-09-27 配方库落库，消「skill 待补」）：考古结论 2026-09-08 时
+ * repo skills/ 无剪辑域配方库（B1-B7 配方只沉淀在记忆
+ * timeline-post-production-buildout-0831 与 docs/timeline-post-production-plan.md）
+ * → 当时置空并声明待补。本片按既有盘面（docs/timeline-post-production-plan.md §2
+ * B1-B7 拆片表 + §7 全役完结）把配方落成 skills/editor/ 域根 + 六子配方
+ * （assembly / audio-first / rhythm / look / mix / qc-master），本节 skillPaths
+ * 逐条指向已落盘的真实 SKILL.md 文件（禁幻影路径；存在性由
+ * editor-timeline-activation.test.ts 逐条 fs 断言）。
+ * 默认注入链：本常量 → expert-registry editor 行 skillPaths →
+ * orchestrator-beast-frame.ts buildExpertLine → Orchestrator 主 prompt 的 Expert
+ * 注册表摘要（beast ON 时），故补齐即默认可见（不需调用就在 prompt 里）。
  *
  * 隔离铁律：剪辑师回传只含交付物契约 + 交付摘要（三栏 payload + edit_summary
  * ≤500 token），过程（试剪中间态/逐次 lint 报告/多轮痕迹）不出 subagent——
@@ -98,14 +105,24 @@ export type EditorPersonaToolId = (typeof EDITOR_PERSONA_TOOL_IDS)[number];
 // ─────────────────────────────────────────── ③ SKILL 挂载引用
 
 /**
- * SKILL 挂载点：repo skills/ 经考古（2026-09-08）无剪辑域配方库——
- * 剪辑域配方沉淀在 docs/timeline-post-production-plan.md 与记忆
- * timeline-post-production-buildout-0831（B1-B7 拆片表+轮子源），未落
- * skills/<域>/SKILL.md 结构。本档置空数组并声明：配方库落库
- * （editor/SKILL.md）后由收口片补挂，禁提前指幻影路径（记忆
- * subagent-spec-must-read-memory 幻影檔教训）。
+ * SKILL 挂载点：skills/editor/ 剪辑域配方库（2026-09-27 落库，7 份 SKILL.md：
+ * 域根 + assembly / audio-first / rhythm / look / mix / qc-master），每条路径
+ * 对应一条真链路（素材→manifest→ops→lint→rhythm→mix→style→master）。
+ *
+ * 逐条列 SKILL.md 文件路径（非域目录）：与 music-director 先例同款精确文件引用，
+ * 且本档每条路径都经 fs 存在性断言（editor-timeline-activation.test.ts），
+ * 禁幻影路径（记忆 subagent-spec-must-read-memory 幻影档教训）。
+ * 全部为本片自建自有配方，非第三方轮子入库，无授权义务。
  */
-export const EDITOR_PERSONA_SKILL_PATHS: readonly string[] = [];
+export const EDITOR_PERSONA_SKILL_PATHS: readonly string[] = [
+  "skills/editor/SKILL.md",
+  "skills/editor/assembly/SKILL.md",
+  "skills/editor/audio-first/SKILL.md",
+  "skills/editor/rhythm/SKILL.md",
+  "skills/editor/look/SKILL.md",
+  "skills/editor/mix/SKILL.md",
+  "skills/editor/qc-master/SKILL.md",
+];
 
 // ─────────────────────────────────────────── ④ 委托单 + 回传契约（import，零重定义）
 

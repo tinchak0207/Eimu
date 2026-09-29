@@ -318,7 +318,13 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
       const nodes = unpositioned
         ? layoutGraph({ ...CANVAS_INITIAL_STATE, nodes: restored.nodes, connections: restored.connections }).nodes
         : restored.nodes;
-      dispatchCanvas({ type: "load", nodes, connections: restored.connections });
+      dispatchCanvas({
+        type: "load",
+        nodes,
+        connections: restored.connections,
+        ...(restored.deletedNodes && restored.deletedNodes.length > 0 ? { deletedNodes: restored.deletedNodes } : {}),
+        ...(restored.nodeVersions && restored.nodeVersions.length > 0 ? { nodeVersions: restored.nodeVersions } : {}),
+      });
       if (
         typeof snapshot.viewport?.x === "number" &&
         typeof snapshot.viewport?.y === "number" &&
@@ -378,10 +384,13 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
   // ─────────────────────── 快照
 
   const snapshotNow = useCallback((): CanvasSnapshot => {
+    const current = canvasRef.current;
     return {
-      nodes: canvasRef.current.nodes,
-      connections: canvasRef.current.connections,
+      nodes: current.nodes,
+      connections: current.connections,
       viewport: viewportRef.current,
+      // 軟刪節點進快照：否則「刪除→撤銷」後 deletedNodes 殘留已回到 nodes 的重複項。
+      ...(current.deletedNodes && current.deletedNodes.length > 0 ? { deletedNodes: current.deletedNodes } : {}),
     };
   }, []);
 
@@ -924,7 +933,12 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
 
   const applySnapshot = useCallback((snapshot: CanvasSnapshot) => {
     restoringRef.current = true;
-    dispatchCanvas({ type: "load", nodes: snapshot.nodes, connections: snapshot.connections });
+    dispatchCanvas({
+      type: "load",
+      nodes: snapshot.nodes,
+      connections: snapshot.connections,
+      ...(snapshot.deletedNodes && snapshot.deletedNodes.length > 0 ? { deletedNodes: snapshot.deletedNodes } : {}),
+    });
     setViewportState(snapshot.viewport);
     // 還原是同步 dispatch，但 React 批次更新到下一帧才落地；
     // 用 microtask 解鎖，避免同一輪裡的 pushHistory 把還原也記成一步。
@@ -962,7 +976,13 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     }) => {
       pushHistory();
       const restored = fromCanvasProject(project);
-      dispatchCanvas({ type: "load", nodes: restored.nodes, connections: restored.connections });
+      dispatchCanvas({
+        type: "load",
+        nodes: restored.nodes,
+        connections: restored.connections,
+        ...(restored.deletedNodes && restored.deletedNodes.length > 0 ? { deletedNodes: restored.deletedNodes } : {}),
+        ...(restored.nodeVersions && restored.nodeVersions.length > 0 ? { nodeVersions: restored.nodeVersions } : {}),
+      });
       if (project.viewport) setViewportState(project.viewport);
       if (project.backgroundMode) setBackgroundMode(project.backgroundMode);
       if (project.title) setProjectTitle(project.title);
@@ -1040,6 +1060,14 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     [pushHistory],
   );
 
+  const revertNode = useCallback(
+    (nodeId: string, version?: number) => {
+      pushHistory();
+      dispatchCanvas({ type: "revert_node", nodeId, version });
+    },
+    [pushHistory],
+  );
+
   const deleteBatchChild = useCallback(
     (parentId: string, childId: string) => {
       pushHistory();
@@ -1080,6 +1108,7 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     nodes: canvas.nodes,
     connections: canvas.connections,
     units: canvas.units,
+    nodeVersions: canvas.nodeVersions ?? [],
     plans,
     derives,
     budget,
@@ -1123,6 +1152,7 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     revokeDownstream,
     addBatchChild,
     setBatchPrimary,
+    revertNode,
     deleteBatchChild,
     toggleBatchExpanded,
     addReference,

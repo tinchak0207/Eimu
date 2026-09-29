@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { getSiteUrlFromEnv } from "@/lib/site-url";
 import {
   BookOpen,
   CreditCard,
@@ -13,8 +14,11 @@ import {
 } from "lucide-react";
 import { InlineCode, SectionTitle, Specular, Step } from "./DocsShell";
 
+const SITE_URL = getSiteUrlFromEnv();
+
 export const metadata: Metadata = {
-  title: "AI 助理快速上手 | 文档中心 | Eimu",
+  title: "AI 助理快速上手 | 文档中心",
+  alternates: { canonical: `${SITE_URL}/docs` },
 };
 
 // ---- 教学文案数据（现场逐字：与助理聊天首页示例句同文案）----
@@ -22,7 +26,10 @@ export const metadata: Metadata = {
 const EXAMPLE_PROMPTS: Array<{ text: string; note: string }> = [
   { text: "画一只戴帽子的橘猫，水彩风格", note: "一句话生图，最常见的起点" },
   { text: "让这瓶香水出现在落日海滩，自然光", note: "给参考图，再给感觉" },
-  { text: "生成秦始皇骑北极熊的大电影", note: "认真的能力展示：重型流水线，不是玩笑" },
+  // 2026-09-28（P0-1 剧本入口曝光）：与首页聊天空态第三颗 chip 同文案（本档约定
+  // 逐字同步），换成剧本/长文改编口径——这一句会把助理带进「剧本→分镜→成片」
+  // 那条重型产线，正是「这里可以丢剧本」的示范。
+  { text: "把我这篇小说改成成片，先给我分镜表", note: "丢一段长文进来：自动拆剧本→分镜→成片的重型产线" },
 ];
 
 // ---- 分篇导航卡：每篇一句话导语，链往各子页 ----
@@ -68,6 +75,27 @@ const DOC_CARDS: Array<{
     title: "开发进阶",
     desc: "B 端 API：异步提交＋轮询，端点目录随 OpenAPI 实时更新。",
     icon: Rocket,
+  },
+];
+
+const RECIPE_CARDS: typeof DOC_CARDS = [
+  {
+    href: "/use-cases",
+    title: "场景指南",
+    desc: "17 个行业、各 6 个子场景，写清构图光线比例，提示词可直接复制。",
+    icon: Sparkles,
+  },
+  {
+    href: "/workflows",
+    title: "创作产线",
+    desc: "小说影视化、电商上新等 8 条多步产线，每一环做什么、交付什么。",
+    icon: Workflow,
+  },
+  {
+    href: "/skills",
+    title: "技能目录",
+    desc: "助理会的全部技能；在输入框打「/」也能直接调用。",
+    icon: Repeat,
   },
 ];
 
@@ -207,6 +235,34 @@ export default function DocsPage() {
         </p>
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
           {DOC_CARDS.map((doc) => {
+            const Icon = doc.icon;
+            return (
+              <a
+                key={doc.href}
+                href={doc.href}
+                className="lg-card flex flex-col rounded-ios-3xl p-5 lg-transition hover:bg-[rgba(0,122,255,0.06)]"
+              >
+                <div className="flex items-center gap-2">
+                  <Icon className="h-4 w-4 shrink-0 text-[#007AFF]" />
+                  <p className="text-ios-callout font-semibold text-[rgba(0,0,0,0.85)]">{doc.title}</p>
+                </div>
+                <p className="mt-2.5 text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.58)]">{doc.desc}</p>
+              </a>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* ================= 找现成做法 =================
+          /use-cases、/workflows 在首页只以视觉隐藏的 SEO 块存在，/skills 只能在
+          输入框打「/」时撞见——三处对用户是零入口，从文档中心给出可见路径。 */}
+      <section>
+        <SectionTitle icon={Wand2}>找现成做法</SectionTitle>
+        <p className="mt-3 max-w-2xl text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.58)]">
+          不想从零写提示词，就从这三处挑一个照着做：
+        </p>
+        <div className="mt-4 grid gap-4 sm:grid-cols-3">
+          {RECIPE_CARDS.map((doc) => {
             const Icon = doc.icon;
             return (
               <a

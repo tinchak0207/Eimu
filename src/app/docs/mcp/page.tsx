@@ -1,9 +1,13 @@
 import type { Metadata } from "next";
+import { getSiteUrlFromEnv } from "@/lib/site-url";
 import { ListChecks, Plug, TerminalSquare } from "lucide-react";
 import { CodeBlock, InlineCode, KeyCard, SectionTitle } from "../DocsShell";
 
+const SITE_URL = getSiteUrlFromEnv();
+
 export const metadata: Metadata = {
-  title: "把助理带走（MCP 接入） | 文档中心 | Eimu",
+  title: "把助理带走（MCP 接入） | 文档中心",
+  alternates: { canonical: `${SITE_URL}/docs/mcp` },
 };
 
 // ---- 把助理带走（MCP 接入干货，工具描述逐字取自原 MCP 接入页）----
@@ -59,6 +63,13 @@ export default function DocsMcpPage() {
         <p className="mt-3 max-w-2xl text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.58)]">
           助理不只会在这站网页里干活，也能装进你已有的 AI 工具——通过 MCP（Model Context Protocol），Claude、Codex、Cursor 里的
           agent 说一句话，就能出图、出视频并拿到成品 URL，背后走的是同一套计费与队列。
+        </p>
+        <p className="mt-2 max-w-2xl text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.58)]">
+          最省事的是远程 MCP：不用克隆仓库，一段配置直接连 eimu.dev，工具更全——
+          <a href="/mcp" className="font-semibold text-[#007AFF] lg-transition hover:underline">
+            查看各客户端的一键安装写法
+          </a>
+          。下面是自建本地 server 的做法。
         </p>
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
           <KeyCard icon={TerminalSquare} title="接入你的 AI 工具（MCP）">

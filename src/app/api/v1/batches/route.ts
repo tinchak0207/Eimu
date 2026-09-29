@@ -5,6 +5,7 @@ import { addRateLimitHeaders } from "@/lib/biz-rate-limit-response-headers";
 import { generationControlPlaneEnabled } from "@/lib/generation-core/database";
 import { submitGenerationCommand } from "@/lib/generation-core/command-service";
 import { IdempotencyConflictError } from "@/lib/generation-core/job-repository";
+import { GenerationModelUnavailableError } from "@/lib/generation-core/model-availability-gate";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
 import { syncModelPricing } from "@/lib/pricing-runtime";
 import {
@@ -41,7 +42,7 @@ type OpenAIErrorType =
   | "authentication_error"
   | "permission_error"
   | "rate_limit_error"
-  | "insufficient_quota"
+  | "insufficient_balance"
   | "api_error";
 
 function errorResponse(
@@ -200,6 +201,14 @@ export async function POST(req: NextRequest) {
         failedItems.push({
           index,
           error: { message: error.message, type: "invalid_request_error", code: "idempotency_key_reused", param: null },
+        });
+        continue;
+      }
+      // 模型可用性閘：該項建單/扣費前拒絕，逐項誠實回報（其餘項照常提交）。
+      if (error instanceof GenerationModelUnavailableError) {
+        failedItems.push({
+          index,
+          error: { message: error.message, type: "api_error", code: "no_endpoints", param: null },
         });
         continue;
       }

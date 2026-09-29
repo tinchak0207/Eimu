@@ -1,3 +1,7 @@
+---
+name: astra-ad-studio
+description: "Create finished advertising campaigns directly inside Codex with GPT-6 Astra: develop distinct creative directions, generate or compose polished static ads and motion previews, produce platform variants, and save the campaign assets plus a native Markdown report. Use when the user wants actual ads for a product, app, startup, launch, feature, or offer rather than only ad copy or a strategy document."
+---
 <!--
 來源（輪子）: https://github.com/Kappaemme-git/astra-ad-studio
 License: MIT · 原作者: Kappaemme-git · 僅內部使用
@@ -6,10 +10,6 @@ Blender 5.2 雷區（僅 Blender 類配方適用）：① BLENDER_EEVEE_NEXT 已
 正文保留英文原文；MCP 調用表述執行時改走我方 bridge /v1/execute 同構協議。
 -->
 
----
-name: astra-ad-studio
-description: "Create finished advertising campaigns directly inside Codex with GPT-6 Astra: develop distinct creative directions, generate or compose polished static ads and motion previews, produce platform variants, and save the campaign assets plus a native Markdown report. Use when the user wants actual ads for a product, app, startup, launch, feature, or offer rather than only ad copy or a strategy document."
----
 
 # Astra Ad Studio
 

@@ -23,8 +23,9 @@ import {
 } from "@/lib/biz-image-references";
 import { generationControlPlaneEnabled } from "@/lib/generation-core/database";
 import { submitGenerationCommand } from "@/lib/generation-core/command-service";
-import { enforceQuotaGate } from "@/lib/generation-core/quota-precheck";
+import { enforceQuotaGate, INSUFFICIENT_BALANCE_ERROR } from "@/lib/generation-core/quota-precheck";
 import { IdempotencyConflictError } from "@/lib/generation-core/job-repository";
+import { GenerationModelUnavailableError } from "@/lib/generation-core/model-availability-gate";
 import { generationTaskResponse } from "@/lib/generation-core/task-response";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
 import { syncModelPricing } from "@/lib/pricing-runtime";
@@ -32,6 +33,7 @@ import { addRateLimitHeaders } from "@/lib/biz-rate-limit-response-headers";
 import { getRuntimeExternalChannelDocument } from "@/lib/external-channels-store";
 import { resolveExternalChannelForKey } from "@/lib/external-channels";
 import { generateViaExternalChannel } from "@/lib/external-channel-adapter";
+import { withApiRejectionTelemetry, type RejectionContext } from "@/lib/api-rejection";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -49,6 +51,9 @@ export const preferredRegion = "sfo1";
 
 /** 上游只接受这三种尺寸；seedream 系额外支持 2048x2048。 */
 const SUPPORTED_SIZES = new Set(["1024x1024", "1536x1024", "1024x1536", "2048x2048"]);
+
+/** 拒絕遙測用的路徑。寫死字面量：分組要穩定，不被 rewrite/代理改寫影響。 */
+const REJECTION_PATH = "/v1/images/generations";
 const DEFAULT_SIZE = "1024x1024";
 const MAX_PROMPT_LENGTH = 4_000;
 /** 一次请求最多出几张。再多会顶到 maxDuration。 */
@@ -59,7 +64,7 @@ type OpenAIErrorType =
   | "authentication_error"
   | "permission_error"
   | "rate_limit_error"
-  | "insufficient_quota"
+  | "insufficient_balance"
   | "api_error";
 
 /**
@@ -103,11 +108,21 @@ interface ImageRequestBody {
 }
 
 export async function POST(req: NextRequest) {
+  // 拒絕遙測：出口統一由包裝層記錄（只記非 2xx；key 只留前 8 位，不記 prompt）。
+  const rejection: RejectionContext = {
+    rawKey: readBearerToken(req.headers.get("authorization")),
+    userId: null,
+    model: null,
+  };
+  return withApiRejectionTelemetry(REJECTION_PATH, rejection, () => handleGeneration(req, rejection));
+}
+
+async function handleGeneration(req: NextRequest, rejection: RejectionContext): Promise<Response> {
   const requestId = Math.random().toString(36).slice(2);
   const traceId = getOrCreateTraceId(req);
 
   // ── 认证 ──────────────────────────────────────────────────
-  const auth = await authenticateBizApiKey(readBearerToken(req.headers.get("authorization")));
+  const auth = await authenticateBizApiKey(rejection.rawKey);
   if (!auth.ok) {
     const type: OpenAIErrorType =
       auth.status === 429 ? "rate_limit_error" : auth.status === 403 ? "permission_error" : "authentication_error";
@@ -121,6 +136,7 @@ export async function POST(req: NextRequest) {
     );
   }
   const apiKey = auth.key;
+  rejection.userId = apiKey.userId;
 
   // ── 解析请求 ──────────────────────────────────────────────
   let body: ImageRequestBody;
@@ -145,6 +161,7 @@ export async function POST(req: NextRequest) {
   }
 
   const rawModelId = typeof body.model === "string" && body.model ? body.model : "";
+  rejection.model = rawModelId || null;
   if (!rawModelId) {
     return errorResponse(400, "缺少必填参数 model。", "invalid_request_error", "missing_model", traceId);
   }
@@ -308,6 +325,10 @@ export async function POST(req: NextRequest) {
       if (error instanceof IdempotencyConflictError) {
         return errorResponse(409, error.message, "invalid_request_error", "idempotency_key_reused", traceId);
       }
+      // 模型可用性閘（真實生成結果驅動）：建單/扣費前拒單，沿用既有穩定碼 no_endpoints。
+      if (error instanceof GenerationModelUnavailableError) {
+        return errorResponse(503, error.message, "api_error", "no_endpoints", traceId);
+      }
       console.error(`[biz-api] durable task creation failed requestId=${requestId}`, error);
       return errorResponse(503, "Generation control plane is temporarily unavailable.", "api_error", "control_plane_unavailable", traceId);
     }
@@ -354,11 +375,25 @@ export async function POST(req: NextRequest) {
   try {
     await reserveImageQuota(apiKey.userId, totalQuota);
   } catch (error) {
+    const reserveMessage = error instanceof Error ? error.message : "余额不足。";
+    // 餘額不足類 → 與控制面閘門（quota-precheck）共用同一份 402 統一契約。
+    if (reserveMessage.includes("余额不足")) {
+      return errorResponse(
+        INSUFFICIENT_BALANCE_ERROR.status,
+        INSUFFICIENT_BALANCE_ERROR.message,
+        INSUFFICIENT_BALANCE_ERROR.type,
+        INSUFFICIENT_BALANCE_ERROR.code,
+        traceId,
+      );
+    }
+    // 其他預留失敗（網關不可達／回滾不確定）不是餘額問題：走本路由既有的控制面
+    // 不可用契約（與 durable 分支同一組碼），只把真因寫進服務端日誌，不對客戶說謊。
+    console.error(`[biz-api] reserve failed requestId=${requestId}: ${reserveMessage}`);
     return errorResponse(
-      402,
-      error instanceof Error ? error.message : "余额不足。",
-      "insufficient_quota",
-      "insufficient_quota",
+      503,
+      "Generation control plane is temporarily unavailable.",
+      "api_error",
+      "control_plane_unavailable",
       traceId,
     );
   }
@@ -448,11 +483,18 @@ export async function POST(req: NextRequest) {
 
 /** 明确拒绝其他方法，避免聚合平台探测时收到 405 之外的怪结果。 */
 export function GET(req: NextRequest) {
-  return errorResponse(
-    405,
-    "该端点只接受 POST。模型列表请调用 GET /v1/models。",
-    "invalid_request_error",
-    "method_not_allowed",
-    getOrCreateTraceId(req),
+  const rejection: RejectionContext = {
+    rawKey: readBearerToken(req.headers.get("authorization")),
+    userId: null,
+    model: null,
+  };
+  return withApiRejectionTelemetry(REJECTION_PATH, rejection, async () =>
+    errorResponse(
+      405,
+      "该端点只接受 POST。模型列表请调用 GET /v1/models。",
+      "invalid_request_error",
+      "method_not_allowed",
+      getOrCreateTraceId(req),
+    ),
   );
 }

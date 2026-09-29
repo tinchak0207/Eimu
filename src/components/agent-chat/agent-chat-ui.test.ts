@@ -26,6 +26,7 @@ import {
 } from "./AgentSubagentBar";
 import { AgentToolCard, toolArgPreview, toolDisplayName } from "./AgentToolCard";
 import { AgentAudioCard } from "./AgentAudioCard";
+import { AgentBatchProgress } from "./AgentBatchProgress";
 import { AgentMessageBubble } from "./AgentMessageBubble";
 import { reportPreview } from "./AgentSubagentReportCard";
 import { submitConfirmDecision } from "./AgentConfirmCard";
@@ -242,8 +243,11 @@ test("audio card plays via native <audio> and keeps the disabled action contract
   assert.match(markup, /音乐/, "mediaKind=music 徽章显示成曲语义");
 });
 
-test("思維鏈預設展開：首次渲染即打開，沒有 reasoning 就不渲染 details", () => {
+test("思維鏈串流中展開、結算後收合，沒有 reasoning 就不渲染 details", () => {
   /*
+   * 2026-09-27 暴君裁定 supersede 下方 09-20 裁定：思考中展開，結算後收合成
+   *「已思考 · N 秒」一行（展開的內部推理佔半屏）。
+   *
    * 2026-09-20 暴君同日再裁定：把「預設收合」（當日上午隨 Grok 極簡骨架預覽
    * 批准）再推翻回「預設展開」——思考過程開門見山，不要人再點一次。靜態 markup
    * 就是「首次渲染」的字面證據：React 把 open 布林屬性序列化成 open=""，
@@ -267,9 +271,10 @@ test("思維鏈預設展開：首次渲染即打開，沒有 reasoning 就不渲
   assert.match(streaming, /<details[^>]*\sopen=""/, "串流中的思維鏈默認展開");
   assert.match(streaming, /正在思考…/, "串流中的折疊殼文案＝正在思考…");
 
-  // ② 已完成（streaming:false、正文已到）＝ 同樣展開。展開不得只在串流期成立。
+  // ② 已完成（streaming:false、正文已到）＝ 收合，只剩「已思考」摘要行。
   const settled = renderToStaticMarkup(assistant({ streaming: false, text: "答案是 6, 7, 8" }));
-  assert.match(settled, /<details[^>]*\sopen=""/, "已完成條目同樣默認展開");
+  assert.match(settled, /<details/, "已完成條目仍保留可點開的思維鏈");
+  assert.doesNotMatch(settled, /<details[^>]*\sopen=""/, "已完成條目默認收合");
 
   // ③ 沒有 reasoning 的助理條目：連 details 都不渲染，不留空殼。
   const noReasoning = renderToStaticMarkup(assistant({ reasoning: undefined, text: "只有正文" }));
@@ -285,9 +290,10 @@ test("思維鏈預設展開：首次渲染即打開，沒有 reasoning 就不渲
   assert.match(code, /open=\{reasoningOpen\}/, "open 一律由 state 給值");
   assert.match(code, /onToggle=\{onReasoningToggle\}/, "toggle 是使用者手動開關的寫入口");
   const stateWrites = code.match(/setReasoningOpen\(/g) ?? [];
-  assert.equal(stateWrites.length, 1, "setReasoningOpen 只准有 toggle 這一個寫入口");
+  assert.equal(stateWrites.length, 2, "寫入口只有 toggle 與結算收合兩處");
   assert.doesNotMatch(code, /item\.streaming && !item\.text/, "自動展開條件已拆掉");
-  assert.match(code, /reasoningOpen, setReasoningOpen\] = useState\(true\)/, "seed 必須是 true（默認展開）");
+  assert.match(code, /reasoningOpen, setReasoningOpen\] = useState\(reasoningStreaming\)/, "seed＝是否串流中");
+  assert.match(code, /!reasoningStreaming && !reasoningTouched\.current/, "結算收合不得覆蓋使用者手動開關");
 });
 
 test("reconnecting shows an unobtrusive retry affordance", () => {
@@ -363,22 +369,38 @@ test("D-17 有存档时默认开新对话，不拦人做选择题", () => {
   const hook = readCode(read("src/hooks/use-agent-chat.ts"));
   assert.match(hook, /startNewSession/);
   assert.match(surface, /onStartNewSession/);
-  assert.match(surface, /AI 助理<\/h2>/);
   /*
    * 2026-09-20 Route D 頭部重構：常駐呼吸绿点（bg-emerald-500 animate-pulse）與
    * bg-slate-300 已移除——新頭部＝lg-tint-blue 圆标 + SquarePen（开新对话）/
-   * SlidersHorizontal（直接生成）/MoreHorizontal（⋯）三顆幽靈鈕；
-   * 「历史记录」触发鈕收进 ⋯ 選單，aria-label 换成 title="对话历史" 文字行。
+   * SlidersHorizontal（直接生成）幽靈鈕。
    * 2026-09-22 首屏翻面後第三顆鈕語義改寫：它不是「收起助理、回到原本的地方」
    * （已經沒有原本的地方了），而是「走另一條路：自己选模型和参数直接出图」。
+   *
+   * 2026-09-27 暴君糾正定版（兩輪）：先是「AI 助理 / 随时待命」那兩行被指為廢話，
+   * 接著標題與星芒圆标整組被要求拆掉——頂欄現在是純圖示列、零文字：那個位置放
+   * 资产 / 历史 兩顆圖示（原本埋在 ⋯ 選單裡），右側 新会话 / 直接生成 / 设置。
+   * ⋯（MoreHorizontal）連同收納選單整組退役，原位換成齒輪。連線異常態文字不再由
+   * 頂欄承擔（對話區本就有重試入口與「原因：…」行），所以頂欄不再出現狀態文案。
    */
   const surfaceCode = readCode(surface);
-  assert.match(surface, /lg-tint-blue/);
   assert.doesNotMatch(surfaceCode, /bg-emerald-500 animate-pulse/, "常駐呼吸绿点已移除");
   assert.doesNotMatch(surfaceCode, /bg-slate-300/, "bg-slate-300 已移除");
+  // 標題與 logo 圆标整組拆掉：頂欄零文字（只看得到圖示與 aria-label）。
+  assert.doesNotMatch(surfaceCode, /AI 助理<\/h2>/, "頂欄標題已拆");
+  assert.doesNotMatch(surfaceCode, /lg-tint-blue/, "頂欄星芒圆标已拆");
+  assert.doesNotMatch(surfaceCode, /随时待命/, "常態描述不得回魂");
+  assert.doesNotMatch(surfaceCode, /正在重新连接…|会话已结束|连接中…/, "狀態文案不再掛在頂欄");
+  assert.doesNotMatch(surfaceCode, /更多选项/, "⋯ 選單已退役");
+  // 五顆直接入口：資產／歷史在左（原標題位），新會話／直接生成／設置在右。
+  assert.match(surface, /aria-label="我的资产"/);
+  assert.match(surface, /aria-label="对话历史"/);
   assert.match(surface, /title="对话历史"/);
   assert.match(surface, /aria-label="开新对话"/);
   assert.match(surface, /aria-label="直接生成"/);
+  assert.match(surface, /aria-label="设置"/);
+  assert.match(surface, /onClick=\{openSettings\}/);
+  // 右簇要自己頂到最右——中間已沒有 flex-1 的標題塊可以撐。
+  assert.match(surface, /ml-auto flex items-center gap-0\.5/);
   // 2026-09-05 暴君裁定：多功能欄彈窗水平置中（fixed left-1/2 + -translate-x-1/2），
   // 不再掛在按鈕右下角（舊 absolute top-full right-0 作廢）。
   assert.match(surface, /fixed left-1\/2 .*-translate-x-1\/2/);
@@ -1308,4 +1330,19 @@ test("history session dropdown prefers gateway title, falls back to time label",
   assert.equal(formatSessionLabelMirror({ created_at: created, title: "" }), timeLabel);
   assert.equal(formatSessionLabelMirror({ created_at: created, title: "   " }), timeLabel);
   assert.equal(formatSessionLabelMirror({ created_at: created }), timeLabel);
+});
+
+test("批量进度「已用 N 币」不把报价类工具的估价、失败工具算成花费", () => {
+  const html = renderToStaticMarkup(
+    createElement(AgentBatchProgress, {
+      items: [
+        { kind: "tool", id: "q1", seq: 1, tool: "video_quote", status: "ok", costCoins: 600 },
+        { kind: "tool", id: "q2", seq: 2, tool: "quote_bundle", status: "ok", costCoins: 11 },
+        { kind: "tool", id: "g0", seq: 3, tool: "image_generate", status: "failed", costCoins: 5 },
+        { kind: "tool", id: "g1", seq: 4, tool: "image_generate", status: "ok", costCoins: 3 },
+      ],
+    }),
+  );
+  assert.match(html, /已用 3 币/);
+  assert.doesNotMatch(html, /614|619/);
 });

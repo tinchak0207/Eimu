@@ -48,7 +48,20 @@ export async function handleTimelineRoutes(key: string, req: Request, pathname: 
   if (!sid) return jsonError(400, "session_id (query) is required", "bad_request", "bad_request")
   // B2 修復（08-31）：opencode 工具傳的是 opencode session id，getOwnedSession 只認 gateway UUID。
   // 收斂到 canvasKeyFor 同款三段解析（resolveSession），並收攏 canonical id 防雙目錄。
-  const tlState = resolveSession(sid)
+  // 0927 身份傳遞修復：Expert 子代理（editor）跑在獨立 opencode 子會話，該 id 不在主
+  // sessions 表 → resolveSession 查無 → 整族 timeline 端點一律 404，剪輯域工具在生產
+  // 路徑上物理不可用（子代理只能 bash 手搓繞過）。縫用既有同款（handleSessionKey 244 /
+  // canvas 讀取 28 / media 39）：命中活躍子會話時回溯其父 gateway 會話（byChildOc 註冊表，
+  // 只由可信的 internal dispatch 寫入）。下面那道 apiKey 比對照舊——回溯出的父會話必須
+  // 與呼叫者同一把 key，跨租戶隔離不變，驗證未放鬆。
+  const tlDirect = resolveSession(sid)
+  const tlParent = tlDirect ? undefined : subagentParentState(sid)
+  const tlState = tlDirect ?? tlParent
+  // 身份診斷（每呼叫一行，只記 id 與是否同一把 key，不落 key 本身）：日後再遇
+  // timeline 404，一次 journal 就能分清「查無會話」與「會話非本 key」。
+  console.log(
+    `[gateway] timeline auth: sid=${sid} direct=${tlDirect ? "yes" : "no"} parentFallback=${tlParent ? "yes" : "no"} owner=${tlState?.sessionId ?? "-"} keyMatch=${tlState ? (tlState.apiKey === key ? "yes" : "no") : "n/a"}`,
+  )
   if (!tlState || tlState.apiKey !== key) return jsonError(404, "session not found", "not_found", "not_found")
   sid = tlState.sessionId
   const r3 = (n: number) => Math.round(n * 1000) / 1000

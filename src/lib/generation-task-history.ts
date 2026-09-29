@@ -3,6 +3,7 @@ import { generationTaskProjection } from "./generation-core/task-projection";
 import { mergeLineageIntoHost, parentsFromReferences } from "./lineage";
 import type { LineageLink } from "./lineage";
 import type { HistoryEntry } from "./history-types";
+import { displayGenerationPrompt } from "./web-task-prompt";
 
 export function generationJobHistoryEntry(job: GenerationJob): HistoryEntry {
   const task = generationTaskProjection(job, { includePrompt: true });
@@ -28,7 +29,7 @@ export function generationJobHistoryEntry(job: GenerationJob): HistoryEntry {
     id: task.taskId,
     taskId: task.taskId,
     generationId: task.taskId,
-    prompt: task.prompt ?? "",
+    prompt: displayGenerationPrompt(task.prompt, job.workflow) ?? "",
     generatedAt: Date.parse(task.createdAt),
     source: "server",
     modelId: task.modelId,

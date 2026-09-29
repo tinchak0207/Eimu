@@ -7,7 +7,7 @@
 // 本檔只存兩種**連結記錄**（顯式分享授權 / 項目掛用），不存資產本體：
 // 資產本體仍是 asset-pack-store 與 character-card-store 那兩套表示（禁另造格式）。
 import { randomBytes } from "node:crypto";
-import { del, get, list, put } from "@/lib/blob-backend";
+import { del, ensureBlobBackendWritable, get, list, put } from "@/lib/blob-backend";
 import { sanitizeBlobSegment } from "@/lib/history-types";
 import {
   applyAssetMount,
@@ -69,10 +69,6 @@ type Collection = "shares" | "mounts";
 const memoryStore = new Map<string, unknown[]>();
 const indexCache = new Map<string, { rows: unknown[]; expiresAt: number }>();
 const writeQueues = new Map<string, Promise<unknown>>();
-
-function hasBlobStore(): boolean {
-  return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
-}
 
 /** 命名空間：asset-scope/{userId}/{shares|mounts}/index-*。 */
 function collectionPrefix(userId: number, collection: Collection): string {
@@ -143,7 +139,7 @@ async function fetchRows(userId: number, collection: Collection): Promise<unknow
 
 async function readRows<T>(userId: number, collection: Collection): Promise<T[]> {
   const key = memoryKey(userId, collection);
-  if (!hasBlobStore()) return [...((memoryStore.get(key) ?? []) as T[])];
+  if (!ensureBlobBackendWritable("asset-scope-store.readRows")) return [...((memoryStore.get(key) ?? []) as T[])];
   const cached = indexCache.get(key);
   if (cached && cached.expiresAt > Date.now()) return [...(cached.rows as T[])];
   const rows = (await fetchRows(userId, collection)) as T[];
@@ -153,7 +149,7 @@ async function readRows<T>(userId: number, collection: Collection): Promise<T[]>
 
 async function writeRows(userId: number, collection: Collection, rows: unknown[]): Promise<void> {
   const key = memoryKey(userId, collection);
-  if (!hasBlobStore()) {
+  if (!ensureBlobBackendWritable("asset-scope-store.writeRows")) {
     memoryStore.set(key, rows);
     indexCache.delete(key);
     return;

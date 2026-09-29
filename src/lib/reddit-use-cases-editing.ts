@@ -9,6 +9,7 @@ const AUTHOR = {
 export const REDDIT_EDITING_USE_CASES: UseCase[] = [
   {
     slug: "reddit-edit-remove-reflections-defects",
+    categorySlug: "photography",
     keyword: "AI 图片去反射与缺陷修复",
     title: "照片里的反光和镜头缺陷怎么去：先做小范围、低改动修复",
     tagline: "尽量保留原图，只清理影响主体的瑕疵",
@@ -47,6 +48,7 @@ export const REDDIT_EDITING_USE_CASES: UseCase[] = [
   },
   {
     slug: "reddit-edit-transfer-texture-film-surface",
+    categorySlug: "photography",
     keyword: "AI 图片迁移纹理颗粒胶片表面",
     title: "想复刻颗粒、胶片或绘画表面：只迁移质感，不重画内容",
     tagline: "把表面语言拆出来，控制强度再叠回原图",
@@ -85,6 +87,7 @@ export const REDDIT_EDITING_USE_CASES: UseCase[] = [
   },
   {
     slug: "reddit-edit-compare-recompose-crops",
+    categorySlug: "photography",
     keyword: "AI 图片裁剪方案比较与重构",
     title: "一张图到底怎么裁：先并排比较裁剪，再重构成目标比例",
     tagline: "保留主体关系，比较不同画幅后再定稿",

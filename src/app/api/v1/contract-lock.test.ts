@@ -319,7 +319,7 @@ test("鐵律①：錯誤 type 六枚舉是穩定承諾，openapi 原文鎖死", 
     "authentication_error",
     "permission_error",
     "rate_limit_error",
-    "insufficient_quota",
+    "insufficient_balance",
     "api_error",
   ]) {
     assert.ok(openapi.includes(`"${type}"`), `openapi ErrorBody type 枚舉缺少 ${type}`);
@@ -338,7 +338,7 @@ test("鐵律①：穩定錯誤碼清單（承諾永不變）——每個碼都�
     "unsupported_size",
     "invalid_n",
     "no_endpoints",
-    "insufficient_quota",
+    "insufficient_balance",
     "upstream_failed",
     "control_plane_unavailable",
     "idempotency_key_reused",
@@ -366,7 +366,7 @@ test("鐵律①：穩定錯誤碼清單（承諾永不變）——每個碼都�
 
 test("鐵律①：各端點實際拋出的錯誤碼與路由一一對應（摘除一個即爆紅）", () => {
   const expected: Array<[string, string[]]> = [
-    [GENERATIONS, ["invalid_json", "missing_prompt", "prompt_too_long", "missing_model", "model_not_found", "model_not_permitted", "unsupported_size", "invalid_n", "invalid_control_nets", "idempotency_key_reused", "control_plane_unavailable", "no_endpoints", "insufficient_quota", "upstream_failed", "method_not_allowed"]],
+    [GENERATIONS, ["invalid_json", "missing_prompt", "prompt_too_long", "missing_model", "model_not_found", "model_not_permitted", "unsupported_size", "invalid_n", "invalid_control_nets", "idempotency_key_reused", "control_plane_unavailable", "no_endpoints", "insufficient_balance", "upstream_failed", "method_not_allowed"]],
     [VIDEOS, ["invalid_json", "missing_prompt", "prompt_too_long", "missing_model", "model_not_found", "model_not_permitted", "invalid_n", "idempotency_key_reused", "control_plane_unavailable", "method_not_allowed"]],
     [TTS, ["invalid_json", "missing_input", "input_too_long", "idempotency_key_reused", "submit_failed"]],
     [IMAGE_STATUS, ["task_not_found"]],
@@ -641,12 +641,23 @@ test("鐵律⑤source：submit_unknown / billing_unknown 在活躍隊列集裡�
 
 // ═══════════════════════════════════════════ quota / 計費對稱（鐵律 ④）
 
-test("鐵律④source：餘額不足必須 402 insufficient_quota（type 與 code 同碼），預留先於生成", () => {
+test("鐵律④source：餘額不足必須 402 insufficient_balance（type 與 code 同碼），預留先於生成", () => {
+  // 權威出口 = 配額預檢閘（quota-precheck）的統一契約常數：status 402、type/code 同碼、文案逐字。
+  const gate = code("src/lib/generation-core/quota-precheck.ts");
+  assert.match(gate, /INSUFFICIENT_BALANCE_ERROR\s*=\s*\{/, "402 統一契約必須是單一常數（唯一真源）");
+  assert.match(gate, /status:\s*402\b/, "餘額不足必須回 402");
+  const occurrences = gate.split('"insufficient_balance"').length - 1;
+  assert.ok(occurrences >= 2, "type 與 code 都必須是 insufficient_balance");
+  assert.match(
+    gate,
+    /message:\s*"余额不足，本次未扣费。充值：https:\/\/eimu\.dev\/pricing"/,
+    "402 文案必須逐字（暴君 2026-09-28 裁決）",
+  );
+
+  // 路由接線：預留先於生成；legacy 餘額不足出口引用同一份常數，不得另寫文案。
   const source = code(GENERATIONS);
-  assert.match(source, /errorResponse\(\s*402,/, "餘額不足必須回 402");
   assert.match(source, /reserveImageQuota\(apiKey\.userId/, "必須先預留配額");
-  const occurrences = source.split("insufficient_quota").length - 1;
-  assert.ok(occurrences >= 2, "type 與 code 都必須是 insufficient_quota");
+  assert.match(source, /INSUFFICIENT_BALANCE_ERROR/, "legacy 餘額不足出口必須引用統一契約常數");
 });
 
 test("鐵律④source：未出圖張數全退，退款在 after() 不阻塞響應", () => {
@@ -677,19 +688,19 @@ test("鐵律④source：批量 quota 帳面四欄必填，billed 只有 succeede
 
 test("鐵律④source：手術配額預檢閘（quota-precheck）拒單只准用既有契約碼，不得發明新碼", () => {
   const source = code("src/lib/generation-core/quota-precheck.ts");
-  // 拒單面 = 402 insufficient_quota（文案與 legacy 402 同款）或 503 control_plane_unavailable（映射 fail-closed）。
+  // 拒單面 = 402 insufficient_balance（統一契約）或 503 control_plane_unavailable（成員 fail-closed，行為不變）。
   assert.match(source, /status:\s*402\s*\|\s*503/, "閘門拒單狀態碼必須是既有 402/503");
   assert.match(
     source,
-    /type:\s*"insufficient_quota"\s*\|\s*"api_error"/,
+    /type:\s*"insufficient_balance"\s*\|\s*"api_error"/,
     "閘門拒單 type 必須落在既有枚舉內",
   );
   assert.match(
     source,
-    /code:\s*"insufficient_quota"\s*\|\s*"control_plane_unavailable"/,
+    /code:\s*"insufficient_balance"\s*\|\s*"control_plane_unavailable"/,
     "閘門不得發明新的對外錯誤碼",
   );
-  assert.match(source, /余额不足，请先充值。/, "402 文案必須與既有契約一字不差");
+  assert.match(source, /余额不足，本次未扣费。充值：https:\/\/eimu\.dev\/pricing/, "402 文案必須逐字");
   // 路由接線：gate 的 status/type/code 原樣進 errorResponse，不得改寫。
   const route = code(GENERATIONS);
   assert.match(route, /enforceQuotaGate\(/, "durable 提交必須經配額預檢閘");

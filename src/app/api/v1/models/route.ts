@@ -7,9 +7,14 @@ import { generationCapabilities, generationCoins } from "@/lib/generation-model-
 import { syncModelPricing } from "@/lib/pricing-runtime";
 import { addRateLimitHeaders } from "@/lib/biz-rate-limit-response-headers";
 import { getSiteUrlFromRequest } from "@/lib/site-url";
+import { readUnavailableModels } from "@/lib/generation-core/model-availability-gate";
+import { withApiRejectionTelemetry, type RejectionContext } from "@/lib/api-rejection";
 
 export const runtime = "nodejs";
 export const preferredRegion = "sfo1";
+
+/** 拒絕遙測用的路徑。聚合平台的模型探測 401 也記——這是它拿不到模型清單的證據。 */
+const REJECTION_PATH = "/v1/models";
 
 /**
  * GET /v1/models — OpenAI 兼容的模型列表。
@@ -23,7 +28,16 @@ export const preferredRegion = "sfo1";
  * 就会出现「报价用旧表、扣费用新表」的不诚实差异。
  */
 export async function GET(req: NextRequest) {
-  const auth = await authenticateBizApiKey(readBearerToken(req.headers.get("authorization")));
+  const rejection: RejectionContext = {
+    rawKey: readBearerToken(req.headers.get("authorization")),
+    userId: null,
+    model: null,
+  };
+  return withApiRejectionTelemetry(REJECTION_PATH, rejection, () => handleModels(req, rejection));
+}
+
+async function handleModels(req: NextRequest, rejection: RejectionContext): Promise<Response> {
+  const auth = await authenticateBizApiKey(rejection.rawKey);
   if (!auth.ok) {
     return NextResponse.json(
       {
@@ -41,12 +55,18 @@ export async function GET(req: NextRequest) {
     );
   }
 
+  rejection.userId = auth.key.userId;
   await syncModelPricing();
+  // 真實結果閘（2026-09-27）：近期真實生成全失敗的模型提交會被拒，列表不再宣稱它可用
+  // （agent / MCP list_models 讀的就是這張表）。讀取失敗 → 空 map，全量照列。
+  const breakerUnavailable = await readUnavailableModels().catch(() => new Map<string, string>());
 
   const siteUrl = getSiteUrlFromRequest(req);
   const created = Math.floor(new Date("2026-01-01T00:00:00Z").getTime() / 1000);
 
-  const data = SUPPORTED_GENERATION_MODEL_IDS.filter((modelId) => isModelAllowedForKey(auth.key, modelId)).map(
+  const data = SUPPORTED_GENERATION_MODEL_IDS.filter(
+    (modelId) => isModelAllowedForKey(auth.key, modelId) && !breakerUnavailable.has(modelId),
+  ).map(
     (modelId) => {
       const capabilities = generationCapabilities(modelId);
       const isVideo = capabilities?.mediaType === "video";

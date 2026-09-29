@@ -1,9 +1,13 @@
 import type { Metadata } from "next";
+import { getSiteUrlFromEnv } from "@/lib/site-url";
 import { Settings2, Zap } from "lucide-react";
 import { SectionTitle, Specular } from "../DocsShell";
 
+const SITE_URL = getSiteUrlFromEnv();
+
 export const metadata: Metadata = {
-  title: "助理设定与野兽模式 | 文档中心 | Eimu",
+  title: "助理设定与野兽模式 | 文档中心",
+  alternates: { canonical: `${SITE_URL}/docs/assistant` },
 };
 
 // ---- 教学文案数据（现场逐字：与助理设定弹层 AgentSettingsPopover 同文案）----

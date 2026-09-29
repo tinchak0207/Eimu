@@ -11,14 +11,13 @@ import { readBearerToken } from "@/lib/biz-api-keys";
 import { generationCoins } from "@/lib/generation-model-catalog";
 import { PIXAI_UPSCALE_MODEL_ID } from "@/lib/image-model-ids.js";
 import {
-  chargeBizRequest,
   jsonWithTrace,
   pixaiAuthError,
   pixaiError,
   pixaiRequestError,
   proxyPixai,
-  refundBizRequest,
 } from "@/lib/pixai-proxy";
+import { commitSyncCharge, refundSyncCharge, reserveSyncCharge } from "@/lib/generation-core/sync-charge";
 import { QUOTA_PER_COIN } from "@/lib/quota-constants";
 import { syncModelPricing } from "@/lib/pricing-runtime";
 import { getOrCreateTraceId } from "@/lib/request-trace";
@@ -67,7 +66,7 @@ export async function POST(req: NextRequest) {
   await syncModelPricing();
   const quota = Math.round(generationCoins(PIXAI_UPSCALE_MODEL_ID, { resolution: size }) * QUOTA_PER_COIN);
 
-  // ── 冪等（chargeBizRequest 之前）：同 key 重試不重複扣費 ──────
+  // ── 冪等（reserveSyncCharge 之前）：同 key 重試不重複扣費 ──────
   const idempotencyKey = req.headers.get("idempotency-key")?.trim() || null;
   let reservedIdempotency: { tenantId: string; key: string } | null = null;
   if (idempotencyKey) {
@@ -99,11 +98,20 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const charged = await chargeBizRequest({
+  // 錢走生產平面帳本（V-07）：同步 job 列 + billing_operation，失敗退款可被 reconcile 撈回。
+  const charged = await reserveSyncCharge({
     userId: auth.key.userId,
     quota,
     keyId: auth.key.id,
     action: "upscale",
+    modelId: PIXAI_UPSCALE_MODEL_ID,
+    kind: "image_edit",
+    source: "biz",
+    tenantId: `biz:${auth.key.id}`,
+    apiKeyId: auth.key.id,
+    requestedCount: 1,
+    resolution: size,
+    ratio: typeof body.ratio === "string" ? body.ratio : null,
   });
   if (!charged.ok) return respond(charged.body, charged.status);
 
@@ -119,6 +127,7 @@ export async function POST(req: NextRequest) {
     : 0;
 
   if (status === 200 && delivered > 0) {
+    after(await commitSyncCharge(charged.charge, { delivered: 1 }));
     recordBizApiKeyUsage(auth.key.id, 1);
     after(() => flushBizApiKeyUsage().catch(() => undefined));
     if (reservedIdempotency) {
@@ -134,6 +143,6 @@ export async function POST(req: NextRequest) {
     return respond(data, 200);
   }
 
-  after(() => refundBizRequest(charged.charge, auth.key.userId, "upscale"));
+  after(await refundSyncCharge(charged.charge, { status }));
   return respond(pixaiError(data, "Upscale failed.", traceId), status >= 400 ? status : 502);
 }

@@ -15,7 +15,7 @@
 - DB：`sudo docker exec image-control-postgres psql -U image_control -d image_control -c "<SQL>"`（VPS 上）
 - 容器状态：`sudo docker ps -a --format '{{.Names}} | {{.Status}}'`
 - adobe2api 容器无 curl/wget，容器内探测用 python3 urllib
-- **rebuild 控制面后必 restart imagesite-nginx**；改闸门必同步 VPS
+- **rebuild 控制面后必 reload imagesite-nginx**（`docker exec imagesite-nginx nginx -t && docker exec imagesite-nginx nginx -s reload`；**禁 restart**：2026-09-28 restart 时 conf 引用的 adobe2api-plus-web 容器已被移除 → `[emerg] host not found` → 全站入口重启回圈 2m42s。控面部署一律走 `deploy/vps/deploy-control-plane.sh`）；改闸门必同步 VPS
 - 中控已换血 new-api（2026-08-27/28）：记账/闸门/退款问题先读记忆 `control-plane-billing-paradigm`（唯一权威）与 `control-plane-newapi-surgery`
 
 ## 生图"卡"完整根因与修复（2026-08-19/20 彻查+修复+真图验证）
@@ -54,7 +54,7 @@
 - **根因**：网关 session 存在**内存 Map**（index.ts `sessions`），`getOwnedSession` 按 key 隔离且**进程重启即全丢**——任何 `systemctl restart agent-gateway`（如 CORS 修复部署）都会让所有已创建 session 变 404。前端"开新会话"（discardAndStartNew）best-effort 清理旧存档 → DELETE 已回收 session → 网关 404 → 站点透传 → console 噪音
 - **修复**：站点 `src/app/api/agent/sessions/[id]/route.ts` DELETE 幂等化——网关 404 且 `code==="not_found"` 时返回 `200 {success:true, already_gone:true}`（目标已不存在=删除成功），其他 4xx/5xx 原样透传
 - **验证**：`route.test.ts` 12/12 通过 + tsc 无错 + `vercel --prod` 部署
-- **排障要点**：`journalctl -u agent-gateway` 看 session created 时间线对照重启时间（`systemctl show agent-gateway --property=ActiveEnterTimestamp`）；会话进程重启即断是架构事实（内存 Map），若要持久化需另做；DELETE 幂等化只吞 not_found
+- **排障要点**：`journalctl -u agent-gateway` 看 session created 时间线对照重启时间（`systemctl show agent-gateway --property=ActiveEnterTimestamp`）；DELETE 幂等化只吞 not_found。**（2026-09-28 更新）session 已持久化到 `/opt/agent-harness/agent-gateway.db`（`persistence.ts`），`getOwnedSession` 内存 miss 时 `hydrateFromDb`，网关重启不再让 session 404；上面「内存 Map、重启全丢」只是 08-20 当时的事实**
 
 ## agent 模型註冊表：加/換底層模型 SOP（2026-08-29 治本）
 
@@ -72,9 +72,29 @@
   sudo -n systemctl restart opencode-server agent-gateway          # ⑤ 生效
   ```
 - **failover 語義**：turn 零正文抖動重試時，attempt 2 起換 fallback 鏈上的模型（跨 provider，防「主/備同源全死」復發）；registry 異常 = 鏈只剩主模型（行為退回現狀，不會更壞）。N1 redrive 路徑始終用主模型。
-- **坑位**：改 registry 後 `gen-opencode.ts --check` 有漂移屬正常（你剛改的），生成後重啟即收斂；opencode.json 手改會被下次生成沖掉——deny 表調整要改 gen-opencode.ts 的保留邏輯之外那份現檔（生成器不碰 permission 鍵，手改 permission 安全）。**特別提醒：必須同時重啟 `opencode-server` 與 `agent-gateway` 雙服務（步驟 ⑤）**——若只重啟 opencode-server，gateway 的 `/event` SSE 連線會死鎖/懸掛長達 4 分鐘（直到底層 fetch 逾時前收不到任何 delta 幀），導致前端完全看不到思考與正文、誤判「過程被隱藏/卡在正在思考」、watchdog 誤判零文本引發重複重發。
+- **坑位**：改 registry 後 `gen-opencode.ts --check` 有漂移屬正常（你剛改的），生成後重啟即收斂；opencode.json 手改會被下次生成沖掉——deny 表調整要改 gen-opencode.ts 的保留邏輯之外那份現檔（生成器不碰 permission 鍵，手改 permission 安全）。**特別提醒：必須同時重啟 `opencode-server` 與 `agent-gateway` 雙服務（步驟 ⑤）**——若只重啟 opencode-server，gateway 的 `/event` SSE 連線會死鎖/懸掛長達 4 分鐘（直到底層 fetch 逾時前收不到任何 delta 幀），導致前端完全看不到思考與正文、誤判「過程被隱藏/卡在正在思考」、watchdog 誤判零文本引發重複重發。**（2026-09-28 根因與修復）**懸掛是 `opencode-client.ts` 的 `/event` fetch 沒有看門狗、要等 Bun 預設逾時（journal 實錘 5 分鐘）；已加 30s 無位元組即 abort 重連（opencode 每 ~10s 發 `server.heartbeat`）。該修復部署到 VPS 後，只重啟 opencode-server 最多 ~32s 盲窗，雙服務綁定重啟不再必要。
 
 ## Adobe2API 定向排障附加规则
 
 - 不从 HTTP 408 推断 scope/token 问题；该诊断只留给直接 401/403、`invalid_ims_scope`、`x-access-error` 或 claim 证据。完整方法论见 skill `adobe2api-direct-debugging`（含 2026-08-22 适用范围前置判断：该 skill 是修复型纪律，能力建设任务不适用）
 - Adobe2API 是目标时：先追直接请求与上游响应，再动鉴权/路由；不改不动 relay 服务
+
+## OpenAI 同步兼容层（/openai/v1）在控面的部署依赖（2026-09-28 实锤）
+
+**症状**：`POST https://eimu.dev/openai/v1/images/generations` 回 `503 {"code":"control_plane_unreachable"}`，耗时约 1 秒（立刻失败，不是等超时）。
+
+**根因**：`src/lib/openai-compat/generation.ts` 的提交/轮询默认打「当前请求自己的 origin + `/api/v1/*`」——那是**站台（Vercel）拓扑**：Vercel 上 `/api/v1/*` 被 `beforeFiles` 代理到控面。但同步层现在跑在控面自己身上，控面那份 app 的对应路径在 `/image-control/api/v1/*` 底下（nginx `location ^~ /image-control/` rewrite 掉前缀），`+ /api/v1/*` 落不到任何 route。
+
+**修法（部署配置，非代码）**：控面 `control-plane-compose.yml` 的 `generation-api` 服务 `environment:` 里加
+
+```yaml
+      OPENAI_COMPAT_GENERATION_ORIGIN: http://127.0.0.1:3000
+```
+
+然后只重建 api：`sudo docker compose -f control-plane-compose.yml up -d generation-api`（`docker exec image-control-api printenv OPENAI_COMPAT_GENERATION_ORIGIN` 可验证）。备份档：`control-plane-compose.yml.bak-0928-openai-origin`。旋钮的语义写在 `resolveGenerationOrigin()` 的注释里，代码侧不需要改。
+
+**同类判据（下次先查这个）**：任何「站台上跑得好、搬到控面就 503/404」的路由，第一件事是看它内部 HTTP 调用的 path 有没有带 `/image-control` 前缀——站台靠 `beforeFiles` 代理补前缀，控面不会。
+
+**同一轮的其他两条部署事实**：
+- 段配置 `export const maxDuration` **只能是字面量**：写成 `= SOME_CONST` 会让 Next 抛 `Unknown identifier ... at maxDuration` 并炸掉整个 build（`tsc` 与单测全绿也抓不到，只有真 build 会爆）。
+- 本项目 Vercel 是 **Hobby**（函数硬上限 60s）⇒ 同步等待类路由不放 Vercel，放控面（无时长上限，且能读 `GENERATION_DATABASE_URL` 让熔断/断供闸真生效）。

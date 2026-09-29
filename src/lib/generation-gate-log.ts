@@ -5,7 +5,7 @@
 // 「刚存读不到」）、单用户写入门（write queue）串行、无 Blob 时内存降级。
 // 容量：每用户上限 500 条滚动。
 import { randomBytes } from "node:crypto";
-import { del, get, list, put } from "@/lib/blob-backend";
+import { del, ensureBlobBackendWritable, get, list, put } from "@/lib/blob-backend";
 import { sanitizeBlobSegment } from "@/lib/history-types";
 import { gatesBlock } from "./generation-gates";
 import type { GateCheck } from "./generation-gates";
@@ -38,10 +38,6 @@ export interface GateStat {
 const memoryStore = new Map<number, GateLogEntry[]>();
 const indexCache = new Map<number, { entries: GateLogEntry[]; expiresAt: number }>();
 const writeQueues = new Map<number, Promise<unknown>>();
-
-function hasBlobStore(): boolean {
-  return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
-}
 
 function userPrefix(userId: number): string {
   return `generation-gates/${sanitizeBlobSegment(String(userId), "0")}`;
@@ -114,7 +110,7 @@ async function fetchEntries(userId: number): Promise<GateLogEntry[]> {
 }
 
 async function readEntries(userId: number): Promise<GateLogEntry[]> {
-  if (!hasBlobStore()) return [...(memoryStore.get(userId) ?? [])];
+  if (!ensureBlobBackendWritable("generation-gate-log.readEntries")) return [...(memoryStore.get(userId) ?? [])];
   const cached = indexCache.get(userId);
   if (cached && cached.expiresAt > Date.now()) return [...cached.entries];
   const entries = await fetchEntries(userId);
@@ -124,7 +120,7 @@ async function readEntries(userId: number): Promise<GateLogEntry[]> {
 
 async function writeEntries(userId: number, entries: GateLogEntry[]): Promise<void> {
   const capped = entries.slice(0, MAX_GATE_LOG_ENTRIES);
-  if (!hasBlobStore()) {
+  if (!ensureBlobBackendWritable("generation-gate-log.writeEntries")) {
     memoryStore.set(userId, capped);
     indexCache.delete(userId);
     return;

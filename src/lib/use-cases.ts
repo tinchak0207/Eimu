@@ -4,50 +4,16 @@ import { REDDIT_EDITING_USE_CASES } from "./reddit-use-cases-editing";
 import { REDDIT_COMMERCE_USE_CASES } from "./reddit-use-cases-commerce";
 import { REDDIT_USE_CASES_STAGING } from "./reddit-use-cases-staging";
 import { REDDIT_SCALE_USE_CASES } from "./reddit-use-cases-scale";
-import { BASE_ECOMMERCE_USE_CASES } from "./use-cases/base-ecommerce";
-import { BASE_CONTENT_USE_CASES } from "./use-cases/base-content";
-import { BASE_DESIGN_USE_CASES } from "./use-cases/base-design";
-import { BASE_PERSONAL_BRAND_USE_CASES } from "./use-cases/base-personal";
-import { BASE_MARKETING_USE_CASES } from "./use-cases/base-marketing";
-import { BASE_ANIME_USE_CASES } from "./use-cases/base-anime";
-import { BASE_PHOTOGRAPHY_USE_CASES } from "./use-cases/base-photography";
-import { BASE_UI_USE_CASES } from "./use-cases/base-ui";
-import { BASE_EDUCATION_USE_CASES } from "./use-cases/base-education";
-import { BASE_GAMING_USE_CASES } from "./use-cases/base-gaming";
-import { BASE_ARCHITECTURE_USE_CASES } from "./use-cases/base-architecture";
-import { BASE_FASHION_USE_CASES } from "./use-cases/base-fashion";
-import { BASE_HEALTH_USE_CASES } from "./use-cases/base-health";
-import { BASE_FINANCE_USE_CASES } from "./use-cases/base-finance";
-import { BASE_TRAVEL_USE_CASES } from "./use-cases/base-travel";
-import { BASE_AUTOMOTIVE_USE_CASES } from "./use-cases/base-automotive";
-import { BASE_TRAINING_USE_CASES } from "./use-cases/base-training";
 
 import type { UseCase, UseCaseAuthor } from "./use-cases/types";
 
 export * from "./use-cases/types";
 
-const BASE_USE_CASES: UseCase[] = [
-  ...BASE_ECOMMERCE_USE_CASES,
-  ...BASE_CONTENT_USE_CASES,
-  ...BASE_DESIGN_USE_CASES,
-  ...BASE_PERSONAL_BRAND_USE_CASES,
-  ...BASE_MARKETING_USE_CASES,
-  ...BASE_ANIME_USE_CASES,
-  ...BASE_PHOTOGRAPHY_USE_CASES,
-  ...BASE_UI_USE_CASES,
-  ...BASE_EDUCATION_USE_CASES,
-  ...BASE_GAMING_USE_CASES,
-  ...BASE_ARCHITECTURE_USE_CASES,
-  ...BASE_FASHION_USE_CASES,
-  ...BASE_HEALTH_USE_CASES,
-  ...BASE_FINANCE_USE_CASES,
-  ...BASE_TRAVEL_USE_CASES,
-  ...BASE_AUTOMOTIVE_USE_CASES,
-  ...BASE_TRAINING_USE_CASES,
-];
-
+/**
+ * 只收 Reddit 深度指南。舊的 102 個 `<行業>-<n>` 模板門頁已併入行業樞紐頁
+ * （src/lib/use-case-categories），舊 URL 由 next.config.mjs 301 過去。
+ */
 export const USE_CASES: UseCase[] = [
-  ...BASE_USE_CASES,
   ...REDDIT_USE_CASES,
   ...REDDIT_TECHNICAL_USE_CASES,
   ...REDDIT_EDITING_USE_CASES,

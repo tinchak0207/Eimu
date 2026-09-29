@@ -1,5 +1,8 @@
 import type { Metadata } from "next";
+import { getSiteUrlFromEnv } from "@/lib/site-url";
 import { StatusDashboard, type GatusEndpoint } from "./StatusDashboard";
+
+const SITE_URL = getSiteUrlFromEnv();
 
 const GATUS_STATUS_URL =
   "https://store.tinchak0207.xyz/gatus-api/endpoints/statuses";
@@ -7,8 +10,9 @@ const GATUS_STATUS_URL =
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "系统状态 | Eimu",
+  title: "系统状态",
   description: "Eimu GPT Image 2 生成接口实时状态。",
+  alternates: { canonical: `${SITE_URL}/status` },
 };
 
 async function getInitialStatus(): Promise<GatusEndpoint[]> {

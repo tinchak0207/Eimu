@@ -91,9 +91,9 @@ test("canvasProjectMeta：逐項校驗不捏造時間戳（缺 createdAt/updated
 });
 
 test("canvasProjectMeta：非物件輸入（快照可能是 null/字串）回 {}", () => {
-  assert.deepEqual(canvasProjectMeta(null as unknown as {}), {});
-  assert.deepEqual(canvasProjectMeta(undefined as unknown as {}), {});
-  assert.deepEqual(canvasProjectMeta("junk" as unknown as {}), {});
+  assert.deepEqual(canvasProjectMeta(null as unknown as Parameters<typeof canvasProjectMeta>[0]), {});
+  assert.deepEqual(canvasProjectMeta(undefined as unknown as Parameters<typeof canvasProjectMeta>[0]), {});
+  assert.deepEqual(canvasProjectMeta("junk" as unknown as Parameters<typeof canvasProjectMeta>[0]), {});
 });
 
 // ─────────────────────────── 往復合同

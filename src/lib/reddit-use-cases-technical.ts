@@ -9,6 +9,7 @@ const AUTHOR = {
 export const REDDIT_TECHNICAL_USE_CASES: UseCase[] = [
   {
     slug: "reddit-change-pose-keep-character",
+    categorySlug: "anime",
     keyword: "AI 改变人物姿势保持脸型服装",
     title: "AI 改人物姿势怎么不变脸：用参考图锁住身份锚点",
     tagline: "只改动作，不把整个人物重新抽一遍",
@@ -37,6 +38,7 @@ export const REDDIT_TECHNICAL_USE_CASES: UseCase[] = [
   },
   {
     slug: "reddit-upscale-preserve-details",
+    categorySlug: "photography",
     keyword: "AI 图片放大保持人脸细节",
     title: "AI 放大后人脸变形：先区分放大与重绘，再保留原图",
     tagline: "提高尺寸，不让细节变成另一张脸",
@@ -55,6 +57,7 @@ export const REDDIT_TECHNICAL_USE_CASES: UseCase[] = [
   },
   {
     slug: "reddit-simple-image-workflow-recall",
+    categorySlug: "design",
     keyword: "AI 生图工作流配置与版本保存",
     title: "AI 工作流怎么保存和找回：追踪配置、修订与输出",
     tagline: "不靠下载文件夹猜哪张图怎么来的",
@@ -73,6 +76,7 @@ export const REDDIT_TECHNICAL_USE_CASES: UseCase[] = [
   },
   {
     slug: "reddit-repair-sideways-face",
+    categorySlug: "photography",
     keyword: "AI 侧脸与坏脸修复",
     title: "AI 侧脸和坏脸怎么修：保留角度，只编辑面部细节",
     tagline: "修复五官，不把侧脸拉回正脸",
@@ -91,6 +95,7 @@ export const REDDIT_TECHNICAL_USE_CASES: UseCase[] = [
   },
   {
     slug: "reddit-multiple-characters-no-mixing",
+    categorySlug: "anime",
     keyword: "AI 多人物生成不混脸和属性",
     title: "AI 多人物怎么不混脸：分别锁定角色与画面位置",
     tagline: "减少串脸、串衣服和触发词互相污染",

@@ -129,6 +129,8 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
   const [projectAssetsOpen, setProjectAssetsOpen] = useState(false);
   // WS-審查（2026-09-24）：資產／分鏡審查面板（null＝關）。兩個面共用一顆畫布工具列入口。
   const [reviewPanel, setReviewPanel] = useState<ReviewPanelKind | null>(null);
+  // 縮略圖預設收合（2026-09-27）：常駐會壓住縮放條與右側節點，入口在縮放膠囊。
+  const [minimapOpen, setMinimapOpen] = useState(false);
   // 互動檔位（決策 1/2）：只有協作檔才是停點；全自動檔下審查面板可看可改、不阻塞流程。
   const [interactionMode, setInteractionMode] = useState<AgentInteractionMode>(DEFAULT_AGENT_SETTINGS.interaction_mode);
   const [agentAutoApprove, setAgentAutoApprove] = useState(false);
@@ -316,6 +318,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
     startPortDrag,
     handleCreateFromMenu,
     handleCreateMenuUpload,
+    handleImportScene3d,
     openNodeMenu,
     openCanvasMenu,
     saveNodeAsCard,
@@ -328,12 +331,14 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
   const {
     isGenerating,
     upscalingIds,
+    extractingFramesIds,
     callCanvasGenerate,
     generateIntoNode,
     handleGenerateFromNode,
     stopGeneration,
     retryNode,
     upscaleNode,
+    extractFramesFromNode,
     runAgentGeneration,
   } = useCanvasGeneration({
     canvasStateRef,
@@ -904,6 +909,13 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
                 onEditImage={url ? (nid) => setEditor({ nodeId: nid, mode: "crop" }) : undefined}
                 onUpscale={url?.startsWith("http") ? (nid) => void upscaleNode(nid) : undefined}
                 upscaling={upscalingIds.has(node.id)}
+                // 影片取帧（2026-09-28）：仅 https 影片节点给按钮（本地/空内容不给「必定失败」的死按钮）。
+                onExtractVideoFrames={
+                  node.type === CanvasNodeType.Video && node.metadata?.content?.startsWith("https://")
+                    ? (nid, action, atSec) => void extractFramesFromNode(nid, action, atSec)
+                    : undefined
+                }
+                extractingVideoFrames={extractingFramesIds.has(node.id)}
                 onStartConnect={(nid) => setConnecting({ sourceId: nid, cursor: null })}
                 onStartPortDrag={startPortDrag}
                 onNodeContextMenu={openNodeMenu}
@@ -926,12 +938,13 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
           })}
         </InfiniteCanvas>
 
-        {canvas.nodes.length > 1 && expanded && (
+        {canvas.nodes.length > 1 && expanded && minimapOpen && (
           <CanvasMiniMap
             nodes={canvas.nodes}
             viewport={canvas.viewport}
             viewportSize={viewportSize}
             onJumpTo={(world) => canvas.centerOn(world, viewportSize.width, viewportSize.height)}
+            onClose={() => setMinimapOpen(false)}
             className="bottom-[calc(1rem+env(safe-area-inset-bottom,0px))] right-[calc(1rem+env(safe-area-inset-right,0px))]"
           />
         )}
@@ -955,6 +968,11 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
               if (size.width > 0) canvas.fitView(size.width, size.height);
             }}
             onHelp={() => setHelpOpen(true)}
+            minimapOpen={minimapOpen}
+            onToggleMinimap={canvas.nodes.length > 1 ? () => setMinimapOpen((v) => !v) : undefined}
+            reviewActive={reviewPanel !== null}
+            reviewPendingCount={reviewPendingCount}
+            onToggleReview={() => setReviewPanel((prev) => (prev === "asset" ? null : "asset"))}
             className="absolute right-[calc(1rem+env(safe-area-inset-right,0px))] top-1/2 z-10 -translate-y-1/2 max-md:hidden"
           />
         )}
@@ -975,7 +993,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
               type="button"
               onClick={onToggleExpand}
               aria-pressed={expanded}
-              className="ce-embed-bar-btn lg-float pointer-events-auto cursor-pointer rounded-full font-medium text-ios-blue hover:bg-white active:bg-white"
+              className="ce-embed-bar-btn lg-float pointer-events-auto cursor-pointer rounded-full font-medium text-foreground/70 hover:bg-white hover:text-foreground active:bg-white aria-pressed:bg-ios-blue/10 aria-pressed:text-ios-blue aria-expanded:bg-ios-blue/10 aria-expanded:text-ios-blue"
             >
               {expanded ? "收合" : "展开"}
             </button>
@@ -984,7 +1002,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
             type="button"
             onClick={() => canvas.newCanvasSession()}
             aria-label="新建画布"
-            className="ce-embed-bar-btn lg-float pointer-events-auto cursor-pointer rounded-full font-medium text-ios-blue hover:bg-white active:bg-white"
+            className="ce-embed-bar-btn lg-float pointer-events-auto cursor-pointer rounded-full font-medium text-foreground/70 hover:bg-white hover:text-foreground active:bg-white aria-pressed:bg-ios-blue/10 aria-pressed:text-ios-blue aria-expanded:bg-ios-blue/10 aria-expanded:text-ios-blue"
           >
             新建画布
           </button>
@@ -998,7 +1016,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
             aria-expanded={historyOpen}
             aria-haspopup="listbox"
             aria-label="历史画布"
-            className="ce-embed-bar-btn lg-float pointer-events-auto cursor-pointer rounded-full font-medium text-ios-blue hover:bg-white active:bg-white"
+            className="ce-embed-bar-btn lg-float pointer-events-auto cursor-pointer rounded-full font-medium text-foreground/70 hover:bg-white hover:text-foreground active:bg-white aria-pressed:bg-ios-blue/10 aria-pressed:text-ios-blue aria-expanded:bg-ios-blue/10 aria-expanded:text-ios-blue"
           >
             历史画布
           </button>
@@ -1006,7 +1024,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
             type="button"
             onClick={() => setLibraryOpen(true)}
             aria-label="提示词库与素材"
-            className="ce-embed-bar-btn lg-float pointer-events-auto cursor-pointer rounded-full font-medium text-ios-blue hover:bg-white active:bg-white"
+            className="ce-embed-bar-btn lg-float pointer-events-auto cursor-pointer rounded-full font-medium text-foreground/70 hover:bg-white hover:text-foreground active:bg-white aria-pressed:bg-ios-blue/10 aria-pressed:text-ios-blue aria-expanded:bg-ios-blue/10 aria-expanded:text-ios-blue"
           >
             资源库
           </button>
@@ -1015,7 +1033,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
             type="button"
             onClick={() => setLoraPanelOpen(true)}
             aria-label="LoRA 模型库"
-            className="ce-embed-bar-btn lg-float pointer-events-auto cursor-pointer rounded-full font-medium text-ios-blue hover:bg-white active:bg-white"
+            className="ce-embed-bar-btn lg-float pointer-events-auto cursor-pointer rounded-full font-medium text-foreground/70 hover:bg-white hover:text-foreground active:bg-white aria-pressed:bg-ios-blue/10 aria-pressed:text-ios-blue aria-expanded:bg-ios-blue/10 aria-expanded:text-ios-blue"
           >
             LoRA{selectedLora ? " · 1" : ""}
           </button>
@@ -1025,7 +1043,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
             onClick={() => setCardsOpen((v) => !v)}
             aria-pressed={cardsOpen}
             aria-label="角色与场景卡"
-            className="ce-embed-bar-btn lg-float pointer-events-auto cursor-pointer rounded-full font-medium text-ios-blue hover:bg-white active:bg-white"
+            className="ce-embed-bar-btn lg-float pointer-events-auto cursor-pointer rounded-full font-medium text-foreground/70 hover:bg-white hover:text-foreground active:bg-white aria-pressed:bg-ios-blue/10 aria-pressed:text-ios-blue aria-expanded:bg-ios-blue/10 aria-expanded:text-ios-blue"
           >
             角色卡{canvas.activeCardIds.length > 0 ? ` · ${canvas.activeCardIds.length}` : ""}
           </button>
@@ -1035,7 +1053,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
             onClick={() => setProjectAssetsOpen((v) => !v)}
             aria-pressed={projectAssetsOpen}
             aria-label="项目资产库"
-            className="ce-embed-bar-btn lg-float pointer-events-auto cursor-pointer rounded-full font-medium text-ios-blue hover:bg-white active:bg-white"
+            className="ce-embed-bar-btn lg-float pointer-events-auto cursor-pointer rounded-full font-medium text-foreground/70 hover:bg-white hover:text-foreground active:bg-white aria-pressed:bg-ios-blue/10 aria-pressed:text-ios-blue aria-expanded:bg-ios-blue/10 aria-expanded:text-ios-blue"
           >
             项目资产
           </button>
@@ -1045,7 +1063,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
             onClick={() => setCreationFlowOpen((v) => !v)}
             aria-pressed={creationFlowOpen}
             aria-label="作品与剧集"
-            className="ce-embed-bar-btn lg-float pointer-events-auto cursor-pointer rounded-full font-medium text-ios-blue hover:bg-white active:bg-white"
+            className="ce-embed-bar-btn lg-float pointer-events-auto cursor-pointer rounded-full font-medium text-foreground/70 hover:bg-white hover:text-foreground active:bg-white aria-pressed:bg-ios-blue/10 aria-pressed:text-ios-blue aria-expanded:bg-ios-blue/10 aria-expanded:text-ios-blue"
           >
             作品{canvas.episodes.length > 0 ? ` · ${canvas.episodes.length} 集` : ""}
           </button>
@@ -1055,7 +1073,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
               onClick={() => setElementListOpen((v) => !v)}
               aria-pressed={elementListOpen}
               aria-label="节点清单"
-              className="ce-embed-bar-btn lg-float pointer-events-auto cursor-pointer rounded-full font-medium text-ios-blue hover:bg-white active:bg-white max-md:hidden"
+              className="ce-embed-bar-btn lg-float pointer-events-auto cursor-pointer rounded-full font-medium text-foreground/70 hover:bg-white hover:text-foreground active:bg-white aria-pressed:bg-ios-blue/10 aria-pressed:text-ios-blue aria-expanded:bg-ios-blue/10 aria-expanded:text-ios-blue max-md:hidden"
             >
               节点清单
             </button>
@@ -1065,7 +1083,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
               type="button"
               onClick={onClose}
               aria-label="关闭画布，回到图片结果"
-              className="ce-embed-bar-btn lg-float pointer-events-auto cursor-pointer rounded-full font-medium text-ios-blue hover:bg-white active:bg-white"
+              className="ce-embed-bar-btn lg-float pointer-events-auto cursor-pointer rounded-full font-medium text-foreground/70 hover:bg-white hover:text-foreground active:bg-white aria-pressed:bg-ios-blue/10 aria-pressed:text-ios-blue aria-expanded:bg-ios-blue/10 aria-expanded:text-ios-blue"
             >
               关闭画布
             </button>
@@ -1122,6 +1140,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
           onClose={() => setCreateMenu(null)}
           onCreate={handleCreateFromMenu}
           onUploadFiles={handleCreateMenuUpload}
+          onImportScene3d={handleImportScene3d}
           title={createMenu?.connectFrom ? "连接到新节点" : "新建节点"}
         />
 

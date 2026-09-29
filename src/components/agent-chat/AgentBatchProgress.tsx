@@ -45,6 +45,8 @@ function formatCoins(n: number): string {
  * 总数 Y 无法从事件推出时的诚实呈现：只显示「已出 X 张 · 已花 Z 币」，
  * 不假装知道分母，也绝不把未知数显示成 0。
  */
+const isQuoteTool = (tool: string) => /quote/i.test(tool);
+
 function AgentBatchProgressComponent({ items, onStop, stopPending = false, total }: AgentBatchProgressProps) {
   let images = 0;
   let coins = 0;
@@ -52,7 +54,10 @@ function AgentBatchProgressComponent({ items, onStop, stopPending = false, total
   for (const item of items) {
     if (item.kind === "image") {
       images += 1;
-    } else if (item.kind === "tool" && typeof item.costCoins === "number") {
+    } else if (item.kind === "tool" && typeof item.costCoins === "number" && item.status !== "failed" && !isQuoteTool(item.tool)) {
+      // 報價類（image_quote / video_quote / quote_bundle…）回的是「估價」不是扣費；
+      // 網關把它們的 total_coins 也掛在 cost_coins 上。2026-09-29 e2e 實錘：只報了價、
+      // 一張沒出，進度條寫「已用 614 币」（帳戶實際 7 币）。失敗的工具同理不算花費。
       coins += item.costCoins;
     }
   }

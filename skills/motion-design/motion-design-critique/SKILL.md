@@ -1,3 +1,7 @@
+---
+name: motion-design-critique
+description: Use this skill when something has gone wrong, looks wrong, or needs a second opinion. Triggers on: "something looks off", "this doesn't look right", "why is this happening", "script error", "render artifact", "the timing feels wrong", "animation looks robotic", "AE error", "bpy error", "Blender crashed", "nothing is moving", "wrong position", "wrong keyframe", "expression error", "the material looks fake", "shadows are wrong", "why does this look cheap", "critique this", "review this", "what's wrong with". Also triggers when the user is stuck and doesn't know why. Works with or without MCP attached.
+---
 <!--
 來源（輪子）: https://github.com/LobzyJay/motion-design-with-claude
 License: MIT · 原作者: LobzyJay · 僅內部使用
@@ -6,10 +10,6 @@ Blender 5.2 雷區（僅 Blender 類配方適用）：① BLENDER_EEVEE_NEXT 已
 正文保留英文原文；MCP 調用表述執行時改走我方 bridge /v1/execute 同構協議。
 -->
 
----
-name: motion-design-critique
-description: Use this skill when something has gone wrong, looks wrong, or needs a second opinion. Triggers on: "something looks off", "this doesn't look right", "why is this happening", "script error", "render artifact", "the timing feels wrong", "animation looks robotic", "AE error", "bpy error", "Blender crashed", "nothing is moving", "wrong position", "wrong keyframe", "expression error", "the material looks fake", "shadows are wrong", "why does this look cheap", "critique this", "review this", "what's wrong with". Also triggers when the user is stuck and doesn't know why. Works with or without MCP attached.
----
 
 # Motion Design Critique
 

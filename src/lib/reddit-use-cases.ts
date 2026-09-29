@@ -9,6 +9,7 @@ const AUTHOR = {
 export const REDDIT_USE_CASES: UseCase[] = [
   {
     slug: "reddit-accurate-text-in-ai-images",
+    categorySlug: "design",
     keyword: "AI 图片文字准确生成",
     title: "AI 图片里的文字总写错？先缩短文案，再决定哪些文字交给模型",
     tagline: "减少乱码，不把长文案交给一次生成",
@@ -30,7 +31,7 @@ export const REDDIT_USE_CASES: UseCase[] = [
       { question: "已经接近正确的图要不要重新生成？", answer: "优先保留构图，针对文字区域继续编辑；整张重抽会同时改变本来已经满意的部分。" },
     ],
     author: AUTHOR,
-    relatedSlugs: ["design-1", "content-3", "reddit-compare-ai-image-models"],
+    relatedSlugs: ["reddit-ai-self-publishing-book-cover-concepts", "reddit-campaign-visual-consistency", "reddit-compare-ai-image-models"],
     searchVariants: ["AI生成图片文字不乱码", "海报文字 AI 生成", "best AI image generator for accurate text"],
     workflowSteps: [
       "把必须逐字准确的内容压缩成一个短标题，正文先从生成任务里移除。",
@@ -47,6 +48,7 @@ export const REDDIT_USE_CASES: UseCase[] = [
   },
   {
     slug: "reddit-background-swap-keep-person",
+    categorySlug: "photography",
     keyword: "AI 换背景保持人物一致",
     title: "AI 换背景怎么不变脸：先锁住主体，再只改场景",
     tagline: "换场景时尽量保留脸、服装与质感",
@@ -64,7 +66,7 @@ export const REDDIT_USE_CASES: UseCase[] = [
       { question: "整图不满意时应该重抽吗？", answer: "如果主体已可用，先只编辑背景或问题区域。整图重抽会同时改变本来正确的部分。" },
     ],
     author: AUTHOR,
-    relatedSlugs: ["photography-1", "ecommerce-3", "reddit-reference-photo-to-style"],
+    relatedSlugs: ["reddit-clean-background-segmentation-edges", "reddit-product-multi-reference-composite", "reddit-reference-photo-to-style"],
     searchVariants: ["换背景不变脸 AI", "参考图换场景保持主体", "AI background swap keep character consistent"],
     workflowSteps: ["上传清晰参考图，先列出脸、发型、服装、姿势等不可改变项。", "第一轮只描述新背景，不同时要求大幅改变镜头和动作。", "比较结果与原图，保留主体最接近的一张。", "对皮肤、边缘或光线问题做局部编辑，并保留可回退版本。"],
     fitBoundary: "适合单人、主体清晰、遮挡较少的换景任务。强透视、多人互动、复杂手部遮挡或完全相反的光线方向会提高身份漂移风险，不能视为精确身份复制。",
@@ -76,6 +78,7 @@ export const REDDIT_USE_CASES: UseCase[] = [
   },
   {
     slug: "reddit-reference-photo-to-style",
+    categorySlug: "personal-brand",
     keyword: "参考照片转卡通保持人物特征",
     title: "参考照片转卡通：把人物特征和画风分开写",
     tagline: "固定人物锚点，只改变媒介与画风",
@@ -93,7 +96,7 @@ export const REDDIT_USE_CASES: UseCase[] = [
       { question: "可以拿生成图做证件照吗？", answer: "不适合。风格转换追求视觉相似，不是生物特征验证，也不保证身份级准确。" },
     ],
     author: AUTHOR,
-    relatedSlugs: ["anime-3", "personal-brand-4", "reddit-background-swap-keep-person"],
+    relatedSlugs: ["reddit-change-pose-keep-character", "reddit-multiple-lora-style-conflicts", "reddit-background-swap-keep-person"],
     searchVariants: ["照片转像素画保留长相", "参考图生成角色一致", "photo to cartoon preserve identity AI"],
     workflowSteps: ["选择脸部清晰、服装和发型可辨认的主参考图。", "列出四到六个必须保留的身份锚点。", "另起一句只描述目标媒介、线条、色板和背景。", "先确认相似性，再逐轮调整风格强度，不同时改变姿势和镜头。"],
     fitBoundary: "适合头像、角色立绘和社交媒体插画，不适用于证件、身份验证或要求精确生物特征的场景。夸张画风、侧脸、遮挡和低清参考图会降低可辨认度。",
@@ -104,6 +107,7 @@ export const REDDIT_USE_CASES: UseCase[] = [
   },
   {
     slug: "reddit-compare-ai-image-models",
+    categorySlug: "design",
     keyword: "同一提示词对比 AI 生图模型",
     title: "同一提示词怎么公平对比 AI 生图模型",
     tagline: "锁定输入，只改变模型再做任务评分",
@@ -121,7 +125,7 @@ export const REDDIT_USE_CASES: UseCase[] = [
       { question: "哪个模型绝对最好？", answer: "不存在脱离任务的绝对最好。文字、人物保真、风格和后续编辑对模型的要求不同。" },
     ],
     author: AUTHOR,
-    relatedSlugs: ["reddit-accurate-text-in-ai-images", "reddit-reference-photo-to-style", "design-6"],
+    relatedSlugs: ["reddit-accurate-text-in-ai-images", "reddit-reference-photo-to-style", "reddit-multiple-lora-style-conflicts"],
     searchVariants: ["GPT Image 2 vs Nano Banana 同提示词", "AI生图模型横向对比", "compare image models same prompt"],
     workflowSteps: ["写一个包含明确验收点的基准 prompt。", "锁定比例、参考图、数量和增强设置。", "分别用候选模型生成同样数量的结果。", "按文字、构图、主体保真、风格和可编辑性记录评分与失败。"],
     fitBoundary: "适合为具体生产任务选择模型，不适合据此发布脱离版本、参数和样本量的永久排行榜。不同模型的专属参数并不完全等价，结论应限定在当前 prompt 与用途。",
@@ -133,6 +137,7 @@ export const REDDIT_USE_CASES: UseCase[] = [
   },
   {
     slug: "reddit-control-specific-ai-image",
+    categorySlug: "design",
     keyword: "AI 生图怎么还原脑中画面",
     title: "AI 生图总像抽卡？把脑中画面拆成可回退的四步工作流",
     tagline: "先锁构图，再逐层增加风格和细节",
@@ -150,7 +155,7 @@ export const REDDIT_USE_CASES: UseCase[] = [
       { question: "怎样避免每次从头开始？", answer: "保存成功轮次的 prompt、比例、模型、参考图和结果。Eimu 的 workflow recall 可用于恢复这些状态。" },
     ],
     author: AUTHOR,
-    relatedSlugs: ["reddit-compare-ai-image-models", "reddit-background-swap-keep-person", "design-6"],
+    relatedSlugs: ["reddit-compare-ai-image-models", "reddit-background-swap-keep-person", "reddit-generate-inpaint-detail-workflow"],
     searchVariants: ["提示词写很长还是不准确", "AI生图反复抽卡怎么办", "how to get a specific AI image instead of random results"],
     workflowSteps: ["用一句话只写场景、主体和关键动作，先获得可用构图。", "固定选中的构图，再增加媒介、镜头和光线。", "一次只修一个局部问题，不让模型重画全部内容。", "保存模型、prompt、比例、参考图和结果，下一轮从成功状态继续。"],
     fitBoundary: "适合有明确目标、愿意进行多轮选择和局部修改的创作。高约束画面通常无法靠一次 prompt 完成；页面提供的是减少随机试错的方法，不承诺精确复现脑中图像。",

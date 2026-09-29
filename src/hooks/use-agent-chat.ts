@@ -206,6 +206,21 @@ export interface UseAgentChatOptions {
   onCanvasEvent?: (event: AgentSseEvent) => void;
   /** 發送前提供畫布摘要（v3 embed）。 */
   canvasStateProvider?: () => unknown;
+  /**
+   * 這句話因為「沒登入」送不出去時，把原文交給呼叫端留住（登入完成後補送）。
+   *
+   * 為什麼 hook 要主動回報而不是讓 composer 自己接錯誤：這條失敗**不會 reject**。
+   * `send()` 的 lazy 建號走 `start()`，而 `start()` 內部（runStartCore）自己
+   * catch 掉 `not_authenticated` 並只做 setError/關閉連線，然後返回 false；
+   * send() 接著走 `!sid` 分支回一句 notice 就 return —— promise 是 resolved。
+   * composer 那條「onSend 同步 throw＝沒送出去，不清輸入框」的守衛因此永遠到不了
+   * （onSend 是 async 函式，同步 throw 根本不存在）。唯一知道真相的地方是這裡。
+   *
+   * 只回報 auth 這一種：網路抖動/上游故障時把話留在 pending 格，會在使用者之後
+   * 某次無關的登入突然替他送出去，那不是他要的（見 agent-session-guard 的
+   * 「沒送憑證」與「憑證被上游拒絕」之分）。
+   */
+  onSendBlockedByAuth?: (text: string) => void;
 }
 
 /**
@@ -258,7 +273,7 @@ export interface UseAgentChatReturn {
 }
 
 export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn {
-  const { onCanvasEvent, canvasStateProvider } = options ?? {};
+  const { onCanvasEvent, canvasStateProvider, onSendBlockedByAuth } = options ?? {};
 
   const [state, dispatch] = useReducer(chatReducer, EMPTY_AGENT_CHAT_STATE);
   const [connection, setConnection] = useState<UseAgentChatReturn["connection"]>("idle");
@@ -793,6 +808,15 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
       // 永久的「幽灵」用户发言，且没有任何办法标记它其实从未送达。
       const sid = sessionIdRef.current;
       if (!sid) {
+        // 登入失效這一種要分開處理：那句話沒送出去（也不是使用者放棄），
+        // 交給呼叫端留住、登入後補送——否則未登入訪客在主輸入區打的字當場消失
+        // （composer 已清空，且 GitHub 登入是整頁跳轉，回來什麼都不剩）。
+        // 文案也要說得出路，不能只回一句「无法发送」。
+        if (closedRef.current && closedReasonRef.current === "auth") {
+          onSendBlockedByAuth?.(trimmed);
+          dispatchNotice("error", "这条消息还没发出去（需要登录）——登录完成后会自动发出。");
+          return;
+        }
         dispatchNotice("error", "尚未建立会话，无法发送消息。");
         return;
       }
@@ -912,7 +936,7 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
         dispatchNotice("error", err instanceof Error ? err.message : "消息传送失败，请重试。");
       }
     },
-    [dispatchNotice, armSteerExpiry, requestAbort, start],
+    [dispatchNotice, armSteerExpiry, requestAbort, start, onSendBlockedByAuth],
   );
 
   const confirm = useCallback(

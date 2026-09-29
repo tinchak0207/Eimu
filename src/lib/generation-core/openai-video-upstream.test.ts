@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { generateWithOpenaiVideo } from "./openai-video-upstream.ts";
+import { generateWithOpenaiVideo, openaiVideoMaxWaitMs } from "./openai-video-upstream.ts";
 import type { SupplierGenerationInput, SupplierRecord } from "./types.ts";
 
 function supplier(overrides: Partial<SupplierRecord> = {}): SupplierRecord {
@@ -92,7 +92,7 @@ test("sd4 族成功：create → 輪詢 queued → completed → data[0].url 出
     const method = String(init?.method ?? "GET");
     calls.push({ method, url: u });
     if (u.endsWith("/videos") && method === "POST") {
-      return jsonResponse(200, { id: TASK_ID, model: "sd4-seedance-2.0", status: "queued" });
+      return jsonResponse(200, { id: TASK_ID, model: "sd12-seedance-2.0", status: "queued" });
     }
     if (u.includes(`/videos/${TASK_ID}`)) {
       return jsonResponse(200, {
@@ -111,7 +111,7 @@ test("sd4 族成功：create → 輪詢 queued → completed → data[0].url 出
     assert.equal(output.providerTaskId, TASK_ID);
     assert.equal(output.httpStatus, 200);
     assert.equal(output.endpointLabel, "cangyuansuanli");
-    assert.equal(output.supplierModelId, "sd4-seedance-2.0");
+    assert.equal(output.supplierModelId, "sd12-seedance-2.0");
     const create = calls.find((c) => c.url.endsWith("/videos") && c.method === "POST");
     assert.ok(create);
   } finally {
@@ -120,7 +120,7 @@ test("sd4 族成功：create → 輪詢 queued → completed → data[0].url 出
   }
 });
 
-test("create body：model 按 720p→sd4、resolution/duration/ratio/generate_audio 透傳", async () => {
+test("create body：model 按 720p→sd12、resolution/duration/ratio/generate_audio 透傳", async () => {
   let captured: unknown = null;
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
@@ -135,7 +135,7 @@ test("create body：model 按 720p→sd4、resolution/duration/ratio/generate_au
     process.env.CANGYUANSUANLI_API_KEY = "ck-test-key";
     await generateWithOpenaiVideo(supplier(), videoInput({ workflow: { references: [], metadata: {}, durationSeconds: 8, generateAudio: true } }));
     const body = JSON.parse(String(captured)) as Record<string, unknown>;
-    assert.equal(body.model, "sd4-seedance-2.0");
+    assert.equal(body.model, "sd12-seedance-2.0");
     assert.equal(body.prompt, "一只橘猫在窗台上打哈欠");
     assert.equal(body.aspect_ratio, "16:9");
     assert.equal(body.duration, 8);
@@ -195,12 +195,127 @@ test("seedance-2.5-480p：模型映射 + 30s 时长放行", async () => {
       videoInput({ modelId: "seedance-2.5-480p", resolution: "480p", workflow: { references: [], metadata: {}, durationSeconds: 30, generateAudio: true } }),
     );
     const body = JSON.parse(String(captured)) as Record<string, unknown>;
-    assert.equal(body.model, "sd4-seedance-2.5-480p");
+    assert.equal(body.model, "sd8-seedance-2.5");
     assert.equal(body.duration, 30);
-    assert.equal(output.supplierModelId, "sd4-seedance-2.5-480p");
+    assert.equal(output.supplierModelId, "sd8-seedance-2.5");
   } finally {
     delete process.env.CANGYUANSUANLI_API_KEY;
     globalThis.fetch = originalFetch;
+  }
+});
+
+test("xiaoyxiao minimax-h3：supplierModelId 渠道级短路 + 顶层 url 出片 + 时长範圍", async () => {
+  let captured: unknown = null;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+    if (String(url).endsWith("/videos")) {
+      captured = init?.body;
+      return jsonResponse(200, { id: TASK_ID, object: "video", status: "queued", progress: 0 });
+    }
+    // xiaoyxiao 形狀：completed 只有頂層 url（無 video_url / metadata / data[]）
+    return jsonResponse(200, {
+      id: TASK_ID,
+      object: "video",
+      status: "completed",
+      url: "https://dream-media.tos-cn-beijing.volces.com/videos/probe/0.mp4",
+    });
+  }) as typeof fetch;
+
+  try {
+    process.env.XIAOYXIAO_API_KEY = "xy-test-key";
+    const output = await generateWithOpenaiVideo(
+      supplier({
+        id: "env:xiaoyxiao",
+        label: "xiaoyxiao",
+        baseUrl: "https://api.xiaoyxiao.xyz/v1",
+        credentialRef: "XIAOYXIAO_API_KEY",
+        supplierModelId: "minimax-h3-933-2k-支持真人",
+      }),
+      videoInput({ modelId: "minimax-h3", resolution: "720p" }),
+    );
+    const body = JSON.parse(String(captured)) as Record<string, unknown>;
+    // 上游模型名走 capability 行顯式攜帶，不落靜態分辨率表
+    assert.equal(body.model, "minimax-h3-933-2k-支持真人");
+    assert.equal(body.resolution, "720p");
+    assert.equal(body.duration, 5);
+    assert.equal(output.supplierModelId, "minimax-h3-933-2k-支持真人");
+    assert.equal(output.url, "https://dream-media.tos-cn-beijing.volces.com/videos/probe/0.mp4");
+  } finally {
+    delete process.env.XIAOYXIAO_API_KEY;
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("xiaoyxiao minimax-h3：時長超出範圍（16s）直接 400，不觸發上游", async () => {
+  let fetchCalls = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    fetchCalls += 1;
+    return jsonResponse(200, { id: TASK_ID, status: "queued" });
+  }) as typeof fetch;
+
+  try {
+    process.env.XIAOYXIAO_API_KEY = "xy-test-key";
+    await assert.rejects(
+      () =>
+        generateWithOpenaiVideo(
+          supplier({
+            id: "env:xiaoyxiao",
+            label: "xiaoyxiao",
+            baseUrl: "https://api.xiaoyxiao.xyz/v1",
+            credentialRef: "XIAOYXIAO_API_KEY",
+            supplierModelId: "minimax-h3-933-2k-支持真人",
+          }),
+          videoInput({
+            modelId: "minimax-h3",
+            resolution: "720p",
+            workflow: { references: [], metadata: {}, durationSeconds: 16, generateAudio: false },
+          }),
+        ),
+      /duration must be an integer from 4 through 15 seconds/,
+    );
+    assert.equal(fetchCalls, 0);
+  } finally {
+    delete process.env.XIAOYXIAO_API_KEY;
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("INC-VIDEO-0927：平台 seedance 不再映射到已下架的 sd4-* 上游名", async () => {
+  // 上游 2026-09-27 實查：sd4-* 整族下架，提交直接回
+  // "model sd4-seedance-2.0 is not a public model name"。
+  const cases: Array<{ modelId: string; resolution: string; expect: string }> = [
+    { modelId: "seedance-2.0", resolution: "480p", expect: "sd12-seedance-2.0" },
+    { modelId: "seedance-2.0", resolution: "720p", expect: "sd12-seedance-2.0" },
+    { modelId: "seedance-2.0", resolution: "1080p", expect: "sd7-seedance-2.0-1080p" },
+    { modelId: "seedance-2.0-fast", resolution: "720p", expect: "sd12-seedance-2.0-fast" },
+    { modelId: "seedance-2.0-mini", resolution: "720p", expect: "sd13-seedance-2.0-mini" },
+    { modelId: "seedance-2.5-480p", resolution: "480p", expect: "sd8-seedance-2.5" },
+    { modelId: "seedance-2.5-720p", resolution: "720p", expect: "sd8-seedance-2.5" },
+  ];
+  for (const { modelId, resolution, expect } of cases) {
+    let captured: unknown = null;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+      if (String(url).endsWith("/videos")) {
+        captured = init?.body;
+        return jsonResponse(200, { id: TASK_ID, status: "queued" });
+      }
+      return jsonResponse(200, { id: TASK_ID, status: "completed", video_url: "https://cdn.cangyuansuanli.cn/video.mp4" });
+    }) as typeof fetch;
+    try {
+      process.env.CANGYUANSUANLI_API_KEY = "ck-test-key";
+      await generateWithOpenaiVideo(
+        supplier(),
+        videoInput({ modelId, resolution, workflow: { references: [], metadata: {}, durationSeconds: 4, generateAudio: false } }),
+      );
+      const body = JSON.parse(String(captured)) as Record<string, unknown>;
+      assert.equal(body.model, expect, `${modelId}/${resolution} 應映射到 ${expect}`);
+      assert.ok(!String(body.model).startsWith("sd4-"), `${modelId}/${resolution} 不得再用已下架的 sd4-* 名`);
+    } finally {
+      delete process.env.CANGYUANSUANLI_API_KEY;
+      globalThis.fetch = originalFetch;
+    }
   }
 });
 
@@ -483,6 +598,56 @@ test("drama sd25-30s：completed 無 URL 時走 /content 鑑權下載回 base64"
     assert.equal(output.providerTaskId, TASK_ID);
   } finally {
     delete process.env.DRAMA_API_KEY;
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("openaiVideoMaxWaitMs：預設 20 分鐘，可 OPENAI_VIDEO_MAX_WAIT_MS 覆寫（下限 60s）", () => {
+  // INC-VIDEO-0927：舊值 540s 會誤殺慢而健康的影片上游（實錄 timeout after 540s,
+  // last status in_progress；napi 實測單次 attempt 最長 993.9s）。
+  const original = process.env.OPENAI_VIDEO_MAX_WAIT_MS;
+  try {
+    delete process.env.OPENAI_VIDEO_MAX_WAIT_MS;
+    assert.equal(openaiVideoMaxWaitMs(), 1_200_000);
+    process.env.OPENAI_VIDEO_MAX_WAIT_MS = "1800000";
+    assert.equal(openaiVideoMaxWaitMs(), 1_800_000);
+    process.env.OPENAI_VIDEO_MAX_WAIT_MS = "1000";
+    assert.equal(openaiVideoMaxWaitMs(), 1_200_000, "低於 60s 的下限值忽略，回預設");
+    process.env.OPENAI_VIDEO_MAX_WAIT_MS = "abc";
+    assert.equal(openaiVideoMaxWaitMs(), 1_200_000);
+  } finally {
+    if (original === undefined) delete process.env.OPENAI_VIDEO_MAX_WAIT_MS;
+    else process.env.OPENAI_VIDEO_MAX_WAIT_MS = original;
+  }
+});
+
+test("xiaoyxiao 實彈形狀：completed 響應只有頂層 url（無 video_url/metadata/data）也能出片", async () => {
+  // 2026-09-27 實查 xiaoyxiao /v1/videos/{id} completed 響應：
+  // {"id":"task_…","object":"video","model":"seedance-2.0-mini-deal","status":"completed",
+  //  "progress":100,"url":"https://dream-media.tos-cn-beijing.volces.com/videos/<uuid>/0.mp4"}
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+    if (String(url).endsWith("/videos") && String(init?.method ?? "") === "POST") {
+      return jsonResponse(200, { id: TASK_ID, object: "video", model: "sd12-seedance-2.0", status: "queued", progress: 0 });
+    }
+    return jsonResponse(200, {
+      id: TASK_ID,
+      object: "video",
+      model: "sd12-seedance-2.0",
+      status: "completed",
+      progress: 100,
+      url: "https://dream-media.tos-cn-beijing.volces.com/videos/19e7efa6-c6e8-410b-8b0e-d77a344b245e/0.mp4",
+    });
+  }) as typeof fetch;
+
+  try {
+    process.env.CANGYUANSUANLI_API_KEY = "ck-test-key";
+    const output = await generateWithOpenaiVideo(supplier(), videoInput());
+    assert.equal(output.url, "https://dream-media.tos-cn-beijing.volces.com/videos/19e7efa6-c6e8-410b-8b0e-d77a344b245e/0.mp4");
+    assert.equal(output.providerTaskId, TASK_ID);
+    assert.equal(output.httpStatus, 200);
+  } finally {
+    delete process.env.CANGYUANSUANLI_API_KEY;
     globalThis.fetch = originalFetch;
   }
 });

@@ -14,6 +14,7 @@ import { AgentBatchProgress } from "./AgentBatchProgress";
 import { AgentSubagentBar } from "./AgentSubagentBar";
 import { AgentAnchorCard } from "./AgentAnchorCard";
 import { NEAR_BOTTOM_PX } from "./scroll-threshold";
+import { AGENT_EXAMPLE_PROMPTS } from "@/lib/agent-example-prompts";
 import "./agent-chat.css";
 
 export interface AgentChatPanelProps {
@@ -144,12 +145,9 @@ function AgentChatPanelComponent({
   // 输入区锚点：虚拟键盘弹起后，拿它判断「输入区是不是被键盘盖住了」。
   const composerAnchorRef = useRef<HTMLDivElement>(null);
 
-  /** 空态快捷示例：点一下就发送（ChatGPT 同款模式），当回合结束后输入区自动沉到底部。 */
-  const EXAMPLES = [
-    "画一只戴帽子的橘猫，水彩风格",
-    "让这瓶香水出现在落日海滩，自然光",
-    "生成秦始皇骑北极熊的大电影",
-  ];
+  /** 空态快捷示例：点一下就发送（ChatGPT 同款模式），当回合结束后输入区自动沉到底部。
+   *  清单真源抽到 lib/agent-example-prompts.ts（新人礼弹窗要预填第一条，两处共引用一份）。 */
+  const EXAMPLES = AGENT_EXAMPLE_PROMPTS;
   // 用户是否停在列表底部附近。串流/新条目只在「本来就在底部」时自动贴底，
   // 往上翻历史时不许把滚动条强拉回底部（「往上翻不強拉」）。
   const isNearBottomRef = useRef(true);

@@ -9,6 +9,10 @@
  *      L91/timeline_mix L92/timeline_ops L93/timeline_query L94/timeline_restore
  *      L95/timeline_rhythm L96/timeline_style L97/editing_manifest L70/
  *      audio_first_timeline L150/video_upload L100）+ 回复 token 帽
+ *      ※ 2026-09-28：本组行号只为考古记录（本檔只做 id 白名单断言，不断言行号）；
+ *        当天 registry 档头註記 +10 行、新增 4 支影片工具，现场行号以
+ *        harness-tool-registry.ts 为准（timeline_* →100~107 / editing_manifest 80 /
+ *        video_upload 117 / audio_first_timeline 167）。
  *   2. composeEditorDelegation：白名单收敛/未知键丢弃/时长秒取整/边界结构化报错
  *   3. OFF：委派 prompt 不含宪法文本；ON：宪法经 loadConstitution DI 注入头部
  *      （样本串，不读真档）；载入失败 constitution_unavailable 拒绝裸奔
@@ -19,6 +23,8 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
+import * as nodePath from "node:path";
 
 import {
   EXPERT_CONSTITUTION_PATH,
@@ -104,8 +110,22 @@ test("persona 形状：id/label 钉死、工具白名单逐 id 存在于 harness
   ]);
 });
 
-test("persona 形状：SKILL 挂载置空有声明（skills/ 无剪辑域配方库，禁幻影路径）", () => {
-  assert.deepEqual([...EDITOR_PERSONA_SKILL_PATHS], []);
+test("persona 形状：SKILL 挂载逐条真实存在（禁幻影路径；2026-09-27 配方库落库）", () => {
+  // 配方库落库前本断言是「置空有声明」；落库后语义翻正为「逐条存在且非幻影」。
+  assert.ok(EDITOR_PERSONA_SKILL_PATHS.length > 0, "配方库已落库，skillPaths 不得为空（默认注入面）");
+  for (const p of EDITOR_PERSONA_SKILL_PATHS) {
+    assert.ok(existsSync(nodePath.resolve(process.cwd(), p)), `skill 路径不存在（幻影路径禁入）：${p}`);
+  }
+  // 域根 + 六子配方（每条对应一条真链路），顺序钉死
+  assert.deepEqual([...EDITOR_PERSONA_SKILL_PATHS], [
+    "skills/editor/SKILL.md",
+    "skills/editor/assembly/SKILL.md",
+    "skills/editor/audio-first/SKILL.md",
+    "skills/editor/rhythm/SKILL.md",
+    "skills/editor/look/SKILL.md",
+    "skills/editor/mix/SKILL.md",
+    "skills/editor/qc-master/SKILL.md",
+  ]);
 });
 
 // ── 2. 委托单：形状与 video 版同构 ───────────────────────────────────────────

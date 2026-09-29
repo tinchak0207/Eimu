@@ -12,6 +12,8 @@
 
 import type { ReferenceImageRole } from "../image-types";
 import type { StoryboardSceneRef, StoryboardScriptShot } from "../storyboard-contract";
+import type { StoryboardShotCandidateSet } from "./storyboard-shots";
+import type { TaskVersionSet } from "./task-versions";
 import { AID_PROJECT_TYPE_ENUM, type AidProjectTypeEnumValue } from "../aid-enums/creation";
 // 批准狀態形狀的單一真源（type-only：執行期零依賴，不成環——`storyboard-contract.ts`
 // 已用同一寫法 type-only import 本檔，本檔反向 type-only 取 `ApprovalState` 是同構先例）。
@@ -228,6 +230,59 @@ export interface CanvasNodeMetadata {
   // ── 3D 場景卡節點（type: scene_3d，2026-09-06 Astra PRD P1-3；3D 導演 subagent 回傳寫入）──
   /** 3D 場景卡欄位族（單一物件欄位，內部形狀 = Scene3dCardMetadata）。 */
   sceneCard?: Scene3dCardMetadata;
+  // ── 3D 舞台參考的回分鏡溯源（P1-1，2026-09-28）──
+  /**
+   * 本生成節點的參考圖來自哪個 3D 導演台 stage＝`scene_3d` 節點 id。
+   * 鍵名沿用 director 族 `directorSessionId` 的 `<domain>Id` 形；值域＝節點 id 字串。
+   * 寫入者＝生成時 `resolveSceneDirectorReferences` 配對的 trace（scene-3d-reference.ts）；
+   * **雙白名單**：漏 `layout.toNodeMetadata` 或 `canvas-chat-types.compactMetadataForAgent`
+   * 任一處＝刷新/回舊會話後指針憑空消失（與 sceneCard 同族鐵律）。
+   */
+  directorStageId?: string;
+  /**
+   * 本生成所屬鏡號（`storyboard-contract` 生產形 `StoryboardShotProduction.shotId`
+   * 口徑＝`shotNumber`，上限 16 字）；無分鏡歸屬＝缺席。
+   * 與 `directorStageId` 成對＝回分鏡可追溯指針；清洗規則同族。
+   */
+  shotId?: string;
+  // ── 集歸屬（P1-2，2026-09-29；按集批次換模型／批次重跑的唯一分組維度）──
+  /**
+   * 本分鏡屬於哪一集＝`CanvasProject.episodes[].id`（`CanvasEpisode.id`，types.ts 的
+   * 三級狀態機第二層）。鍵名沿用同族 `<domain>Id` 形（`directorStageId`/`directorSessionId`）。
+   *
+   * **現場缺口如實記錄**：畫布沒有 parent 邊、場景外殼只帶 `sceneName`、
+   * `CanvasNodeMetadata` 原本無任何集欄位 ⇒ 分鏡→集無法推導，故以本欄位明示。
+   * 缺席＝不歸任何一集（`storyboard-episode-batch.ts` 不猜、不按節點序切段）。
+   * **雙白名單**：漏 `layout.toNodeMetadata` 或 `compactMetadataForAgent` 任一處
+   * ＝刷新/回舊會話後集歸屬消失（按集換模型會靜默漏掉這些格）。
+   */
+  episodeId?: string;
+  // ── 分鏡級抽卡（P1-2，2026-09-29；對稱差 D9「一分鏡 ≤4 條＋星標選定」）──
+  /**
+   * 本鏡的候選集＋星標選中者（形狀＝`StoryboardShotCandidateSet`，真源
+   * `./storyboard-shots.ts`）。**刻意不是新增多個候選節點**：一鏡仍是一顆節點，
+   * 候選集掛在此處，`selectedId` 就是採用稿。
+   *
+   * 清洗端＝`normalizeShotCandidates`（`id`+`prompt` 缺一即丟該條、同 id 去重、
+   * 截到 `SHOT_CANDIDATE_LIMIT`、`selectedId` 必須是成員、空集合＝省略鍵）。
+   * **雙白名單**：與 `storyboardShot` 同族鐵律。
+   */
+  shotCandidates?: StoryboardShotCandidateSet;
+  // ── 任務版本＋標籤＋選中（P1-9，對稱差 D37；2026-09-29）──
+  /**
+   * 本格的任務版本史 ＋ 星標選中的那一版（形狀＝`TaskVersionSet`，真源
+   * `./task-versions.ts`）。**刻意不是「任務節點」**：一「格」＝一顆節點，同一格重跑
+   * ＝追加一筆**新版本**（`items[].version` ＝任務時戳，ISO 8601 UTC），舊版本原樣留著。
+   *
+   * `items[].tags` 值域＝`TASK_TAGS`（`main_image`/`main_video`，D37 字面）；
+   * `selectedVersion` ＝素材 `Selected`（該版 `url` 即本格採用稿）。
+   * 清洗端＝`normalizeTaskVersions`（`version` 解析不出即丟該筆、同版去重、按時序升序、
+   * 裁到上限、`selectedVersion` 非成員即不收、空集合＝省略鍵）。
+   *
+   * **雙白名單**：與 `shotCandidates` 同族鐵律——漏 `layout.toNodeMetadata` 或
+   * `canvas-chat-types.compactMetadataForAgent` 任一處＝刷新/回舊會話後版本史與採用稿消失。
+   */
+  taskVersions?: TaskVersionSet;
   // ── 分鏡實體（2026-09-15 刀 2；AID 21 欄契約，MIT）──
   /**
    * 一鏡（AID 21 欄契約，`src/lib/storyboard-contract.ts`）：掛在 Group 節點的子節點。
@@ -304,24 +359,37 @@ export interface CanvasNodeMetadata {
 }
 
 /**
- * 3D 場景卡 metadata 形狀（契約：3D 導演 subagent 回傳寫入）。
+ * 3D 場景卡 metadata 形狀。**兩條生產者**：
+ *   - `source: "director"`（或未標）＝ 3D 導演 subagent 回傳寫入（`blender-delegate.ts`），
+ *     六欄全形；卡面 turntable 播放器 ＋ stills 網格 ＋ 資產下載。
+ *   - `source: "import"` ＝ 用戶從本機導入的 GLB/GLTF（`scene-3d-import.ts` ＋
+ *     `/api/canvas/scene-3d`），只保證 `glb_path`；卡面只出 GLB 視口與下載，
+ *     **缺的欄位整塊不渲染**（不給空播放器/空網格）。
+ *
+ * 契約底線（清洗端 `toScene3dCard` 的整包丟棄判據）：`glb_path` 與 `scene_summary`
+ * 非空才算一張場景卡——導入卡也不例外（`scene_summary` 必須是**真實**來源文字，
+ * 不許編造場景描述）。`turntable_url` / `stills_urls` / `blend_path` / `duration_ms`
+ * 為**可選**欄位（2026-09-27 本機導入刀放寬；導演卡仍永遠給全六欄）。
+ *
  * 鐵律（canvas-snapshot-compressor 事故教訓）：本欄位族必須同步兩處白名單——
  * 讀取端 toNodeMetadata（layout.ts）與上行壓縮端 compactMetadataForAgent
  * （canvas-chat-types.ts），漏一端 = 刷新後欄位憑空消失；往復合同測試釘死。
  */
 export interface Scene3dCardMetadata {
-  /** turntable 旋轉展示視頻（mp4/webm 可播放 URL）。 */
-  turntable_url: string;
-  /** 渲染静帧縮圖（3-6 張，卡內網格展示）。 */
-  stills_urls: string[];
-  /** .blend 源檔下載路徑。 */
-  blend_path: string;
-  /** .glb 交換格式下載路徑。 */
+  /** turntable 旋轉展示視頻（mp4/webm 可播放 URL）。導演卡必給；導入卡無此欄。 */
+  turntable_url?: string;
+  /** 渲染静帧縮圖（3-6 張，卡內網格展示）。導演卡必給；導入卡無此欄。 */
+  stills_urls?: string[];
+  /** .blend 源檔下載路徑。導演卡必給；導入卡無此欄。 */
+  blend_path?: string;
+  /** .glb 交換格式下載路徑（**契約底線，兩條來源都必填**）。 */
   glb_path: string;
-  /** 場景摘要（一句話，副標題展示）。 */
+  /** 場景摘要（一句話，副標題展示）。**必填**：導入卡寫真實來源（如「从本机导入的 GLB」）。 */
   scene_summary: string;
-  /** turntable 時長（ms；無值時播放器自帶 duration 顯示）。 */
-  duration_ms: number;
+  /** turntable 時長（ms；無值時播放器自帶 duration 顯示）。導入卡無此欄。 */
+  duration_ms?: number;
+  /** 卡片來源：`director`＝3D 導演 subagent 六欄全形；`import`＝本機導入的 GLB。 */
+  source?: "director" | "import";
 }
 
 export interface CanvasNode {
@@ -340,6 +408,46 @@ export interface CanvasNode {
   batchExpanded?: boolean;
   /** 批次主圖片節點 id（縮圖/封面） */
   batchPrimaryImageId?: string;
+  /**
+   * 軟刪除標記（2026-09-27 節點版本歷史＋回退）：ISO 時間戳，有值＝已軟刪。
+   *
+   * 軟刪的節點**不進** reducer 的可見 `nodes`（改收進 `deletedNodes`），呼叫端語義
+   * （列表不含、連線斷開）與舊的硬刪一致；差別是資料還在，可經
+   * `POST /api/canvas/nodes/restore` 或 `restoreCanvasNodes` 還原。
+   * 節點級欄位（不是 metadata）：不進 metadata 雙白名單，不會被 `toNodeMetadata` 剝掉。
+   */
+  deletedAt?: string;
+}
+
+/**
+ * 節點版本快照的落版原因（2026-09-27 節點版本歷史＋回退）：
+ *   · created   —— agent/模板首次落節點
+ *   · generated —— 生成完成（status → success / 交付 URL 落地）
+ *   · edited    —— 內容編輯（文本直編提交、改名、prompt 改寫）
+ *   · metadata  —— 非內容的 metadata 更新（模型/尺寸/角色…）
+ *   · revert    —— 由某一版回退產生的新版本（版本歷史是**追加式**，回退本身也留痕）
+ */
+export type CanvasNodeVersionReason = "created" | "generated" | "edited" | "metadata" | "revert";
+
+/**
+ * 節點版本快照（2026-09-27）：一次「內容變更」＝一版。
+ *
+ * 「內容」＝ `title` ＋ `metadata`（純資料面）。座標/尺寸/連線**不進版本**——
+ * 它們是版面狀態不是內容，回退一版不該把節點搬回舊位置（版面權在前端 reducer）。
+ *
+ * 持久化：掛在既有 `CanvasProject.nodeVersions`（不新增 DB/檔案）；上限由
+ * `node-versions.ts` 的 `MAX_NODE_VERSIONS_PER_NODE` 逐節點裁剪。
+ */
+export interface CanvasNodeVersion {
+  /** 同一節點內 1 起、單調遞增（append-only，回退也 +1）。 */
+  version: number;
+  nodeId: string;
+  createdAt: string;
+  reason: CanvasNodeVersionReason;
+  /** 該版快照的節點標題。 */
+  title: string;
+  /** 該版快照的節點 metadata（深拷貝，不與當前節點共用參考）。 */
+  metadata: CanvasNodeMetadata;
 }
 
 export interface CanvasConnection {
@@ -498,6 +606,28 @@ export interface CanvasProject {
   currentStep?: number;
   /** 劇集分集清單（電影留空）。 */
   episodes?: CanvasEpisode[];
+  /**
+   * 節點版本歷史（2026-09-27）：所有節點的版本快照，按節點＋版號檢索。
+   * 掛在既有專案物件上（不新增 DB/檔案）；逐節點上限見 node-versions.ts。
+   * 舊專案無此欄＝空歷史，向後相容。
+   */
+  nodeVersions?: CanvasNodeVersion[];
+  /**
+   * 畫布作用域（2026-09-27 片P 刀 1）：`personal`（缺省）＝個人畫布，
+   * 落 `canvas/<userId>/…`；`team`＝團隊共享畫布，落 `canvas/team/<teamId>/…`，
+   * 該團隊所有成員可讀同一份（讀路徑合併），寫入仍為單寫（普通 PUT，後寫覆蓋，
+   * 刻意不做鎖／CRDT／衝突解決）。
+   *
+   * **向後相容**：舊專案無此欄 ⇒ 一律視為 personal，路徑逐字不變。
+   * 專案級欄位（不是節點/metadata）——不進 metadata 雙白名單，不會被 toNodeMetadata 剝掉
+   *（同款先例：節點級 `deletedAt`／`nodeVersions`）。
+   *
+   * `teamId` 是**服務端蓋章**的權威值（來源＝控制面 team-membership 查詢），
+   * 客戶端送來的 teamId 不採信（見 team-canvas-gate.ts）。
+   */
+  scope?: "personal" | "team";
+  /** 團隊畫布所屬團隊 id（僅 scope="team" 時有意義；由服務端以已驗成員身份蓋章）。 */
+  teamId?: string;
 }
 
 /**

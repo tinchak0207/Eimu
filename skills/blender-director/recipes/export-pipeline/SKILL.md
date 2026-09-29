@@ -1,9 +1,3 @@
-<!--
-來源（輪子）: https://github.com/arjun988/blender-skills — .claude/skills/export-pipeline/SKILL.md
-License: MIT · 原作者: arjun988 (https://github.com/arjun988)
-白名單改動: ①輸出路徑→$BLENDER_WORK/out/ ②移除「## MCP Integration」節（外部 IDE 整合） ③Blender 5.2 API 校正（無） ④文案譯為簡體（結構/表格/參數逐項保留）
--->
-
 ---
 name: export-pipeline
 description: Blender 生产级导出到 FBX、GLTF、OBJ、USD 与 Alembic，含比例、轴心、旋转、法线、材质、动画与碰撞验证。
@@ -16,6 +10,12 @@ metadata:
   triggers: export, FBX, GLTF, GLB, OBJ, USD, Alembic, Unity, Unreal, game engine import
   related-skills: asset-optimization, blender-modeler, materials
 ---
+<!--
+來源（輪子）: https://github.com/arjun988/blender-skills — .claude/skills/export-pipeline/SKILL.md
+License: MIT · 原作者: arjun988 (https://github.com/arjun988)
+白名單改動: ①輸出路徑→$BLENDER_WORK/out/ ②移除「## MCP Integration」節（外部 IDE 整合） ③Blender 5.2 API 校正（無） ④文案譯為簡體（結構/表格/參數逐項保留）
+-->
+
 
 # 导出管线（Export Pipeline）
 

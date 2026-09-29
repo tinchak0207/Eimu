@@ -196,7 +196,7 @@ export function CanvasChatWorkstation({
             /* Navbar 退縮過度（2026-09-24 首秒零回縮）：原先掛在 <nav> 的
                tailwind 類別上＝每次載入都播「全寬 320ms 退縮」回縮動畫（病灶①），
                移進本檔並只在 html[data-ws-settled]（工作站 settled 後寫）下生效。
-               非首頁無本 <style> 塊＝header 在任何態都零過度，天然正確。 */
+               非首頁無本 style 塊＝header 在任何態都零過度，天然正確。 */
             html[data-ws-settled] #global-navbar nav {
               transition: margin-left 0.32s cubic-bezier(0.2, 0.8, 0.2, 1),
                 width 0.32s cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -368,6 +368,11 @@ export function CanvasChatWorkstation({
           初始態（canvas 空）以 overlayContent（模板庫）代替空畫布。 */}
       {inCanvasWorkstation && (
         <>
+          {/* 2026-09-29 跨螢幕不變量：工作站是應用式滿屏，面板／overlay 左右緣都由
+              Navbar 量出的 --site-shell-left/right 推導；頁殼 max-w-[1440px] 在
+              >1440 視口會把整個工作站夾成置中窄殼、兩側大片留白。工作站態解除
+              導覽列頁殼上限（pro 態仍 1440，與其內容欄對齊）。SSR 首幀即生效。 */}
+          <style>{`#global-navbar.page-shell { max-width: none; }`}</style>
           <div className={cn("canvas-ws-backdrop", wsSettled && "canvas-ws-settled")} aria-hidden="true" />
           <div
             className={cn("canvas-ws-overlay", wsSettled && "canvas-ws-settled")}

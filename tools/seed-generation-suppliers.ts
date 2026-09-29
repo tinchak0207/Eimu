@@ -12,7 +12,44 @@ import { FILMERA_IMAGE_MODEL, FILMERA_VIDEO_MODEL } from "../src/lib/generation-
 import { REGISTRY_CHANNELS } from "../src/lib/supplier-channels.config";
 
 // reblood：这些渠道的调度已整体切到 new-api，supplier 表路由指向 NEWAPI_BASE_URL。
-const NEWAPI_MIGRATED_LABELS = new Set(["hublinuxdo", "pixai", "sub2api", "dreamina", "fallback", "tokenmix"]);
+// 2026-09-27 暴君裁定：tokenmix 已砍除（含 new-api 渠道 9），從遷移清單移除。
+const NEWAPI_MIGRATED_LABELS = new Set(["hublinuxdo", "pixai", "sub2api", "dreamina", "fallback"]);
+
+/**
+ * 已退役視頻渠道（2026-09-27 暴君裁定；視頻唯一權威改為 xiaoyxiao）。
+ *
+ * DB 端已把這 7 條的 supplier／supplier_account `enabled=false`、capability
+ * `is_current=false AND enabled=false`（止損態）。但 seed 每次 worker 重啟都會跑
+ * `INSERT … ON CONFLICT DO UPDATE SET enabled = EXCLUDED.enabled`，會按 env 默認值
+ * 把它們**重新開啟**——止損態在第一次重啟就會被沖掉。此清單讓 seed 直接跳過它們
+ * （不 upsert、不認領、不回收），是「停用維持」的代碼級保證。
+ *
+ * 移除本清單任一項＝恢復該渠道供貨，必須先有暴君裁定。
+ */
+const RETIRED_SUPPLIER_LABELS = new Set([
+  "filmera",
+  "adobe2api-plus",
+  "tokenmix",
+  "cangyuansuanli",
+  "metaso",
+  "napi",
+  "drama",
+]);
+
+/**
+ * 渠道級上游模型別名（V-04，seed 進 supplier.configuration_json.modelAliases）。
+ * adapter 讀取順序：`supplierModelId ?? configuration.modelAliases[modelId] ?? modelId`
+ *（openai-images-adapter.ts `aliasedSupplierModel`）。取代原 supplier-adapter.ts 的
+ * `SUB2API_MODEL_ALIASES` + `supplier.id === "env:sub2api"` 寫死特例。
+ *
+ * sub2api（store.tinchak0207.xyz/sub2api）的 images endpoint 只認它自己字典裡的
+ * 上游模型名。實測（generation_attempt 2026-08-23~27 多筆 400）：平台 id
+ * 「gemini-3-image」直傳會被拒 `images endpoint requires an image model`；sub2api
+ * 對 Nano Banana Pro 的命名是「gemini-3-pro-image」。其餘平台 id 與 sub2api 字典一致。
+ */
+const CHANNEL_MODEL_ALIASES: Record<string, Record<string, string>> = {
+  sub2api: { "gemini-3-image": "gemini-3-pro-image" },
+};
 
 type Tier = "first_party" | "managed_pool" | "relay" | "fallback";
 type Capability = {
@@ -149,6 +186,12 @@ function channelCapabilities(label: string): Capability[] {
     if (!allowed && isPixaiModelId(model.id)) continue;
     if (!allowed && model.kind !== "image") continue;
     if (!allowed && GENERIC_CHANNEL_REJECTED_IMAGE_MODEL_IDS.has(model.id)) continue;
+    // 2026-09-27 暴君裁定「adobe2api 留圖、停視頻」：本渠道所有 video_generate
+    // 認領一律不產出 ⇒ retireUnclaimedCapabilities 會把既有 video capability
+    // 逐條 enabled=false + is_current=false（含 seedance-2.0/-fast、veo-3.1/-fast、
+    // kling-3.0/-omni、firefly-video、luma 全族、runway-gen-4/4.5）。圖片
+    // （image_generate/image_edit，16+16 條）認領逐條不動。視頻唯一權威＝xiaoyxiao。
+    if (label === "adobe2api" && model.kind === "video") continue;
     if (model.kind === "video") {
       result.push({
         modelId: model.id,
@@ -291,6 +334,11 @@ async function main() {
   const newApiBase = (process.env.NEWAPI_BASE_URL ?? "").trim().replace(/\/+$/, "");
   const newApiEnabled = (process.env.NEWAPI_ENABLED ?? "").trim().toLowerCase() === "true" && Boolean(newApiBase);
   for (const channel of channels) {
+    // 退役渠道（見 RETIRED_SUPPLIER_LABELS）：seed 不碰，避免把 DB 的停用態沖回。
+    if (RETIRED_SUPPLIER_LABELS.has(channel.label)) {
+      console.log(`[generation-seed] ${channel.label}: retired (video supply moved to xiaoyxiao), skipped`);
+      continue;
+    }
     const endpoint = channel.endpoint!;
     const id = channel.id;
     // reblood：已迁移渠道的 endpoint.baseURL 改指 new-api（adapter 按 base_url 分流），
@@ -309,6 +357,8 @@ async function main() {
       // 上游拒收 quality 欄位的渠道（agnes：text image queue 契約）。
       if (registry.omitQualityBody) channelConfig.omitQualityBody = true;
     }
+    const modelAliases = CHANNEL_MODEL_ALIASES[channel.label];
+    if (modelAliases) channelConfig.modelAliases = { ...modelAliases };
     if (isFilmera) {
       channelConfig.supabaseUrl = process.env.FILMERA_SUPABASE_URL ?? "";
       channelConfig.anonKey = process.env.FILMERA_ANON_KEY ?? "";
@@ -321,7 +371,7 @@ async function main() {
         id, label, adapter_type, supply_tier, failure_domain, base_url, credential_ref,
         enabled, priority, concurrency_limit, quality_score, unit_cost, configuration_json, config_version
       ) VALUES (
-        ${id}, ${channel.label}, ${isAdobe ? "adobe2api" : isFilmera ? "filmera" : registry?.adapterType ?? "openai_images"}, ${tier(channel.label)},
+        ${id}, ${channel.label}, ${isAdobe ? "adobe2api" : isFilmera ? "filmera" : registry?.adapter?.protocol ?? registry?.adapterType ?? "openai_images"}, ${tier(channel.label)},
         ${origin(endpoint.baseURL)}, ${endpoint.baseURL}, ${credentialRef(channel.label)}, ${channel.defaultEnabled},
         ${registry ? registry.seedPriority : channel.label === "adobe2api" ? 10 : channel.label === "filmera" ? 15 : channel.label === "sub2api" ? 20 : channel.label === "primary" ? 30 : 40},
         ${channelConcurrency(channel.label)}, 1, 0,

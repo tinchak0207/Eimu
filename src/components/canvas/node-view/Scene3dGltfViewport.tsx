@@ -21,12 +21,21 @@ import { useCallback, useEffect, useRef, useState, type MouseEvent, type Pointer
 import { authHeaders } from "@/lib/canvas/client";
 import { cn } from "@/lib/utils";
 
-/** 鑑權拉取 .blender-work 產物（站內代理分支：/api/blender-artifact?name=）。 */
+/**
+ * 拉 glb bytes → blob URL。兩條來源：
+ *   - 站內橋產物（導演卡）：走 `/api/blender-artifact?name=` 代讀，**必帶 authHeaders**
+ *     （歷史坑：裸 fetch 401 靜默 → 視口永遠空）。
+ *   - 公網物件存儲（本機導入卡，2026-09-27）：glb_path 本身是 http(s) URL，直連拉取。
+ *     **不帶 Authorization**——token 只送本站 origin，禁止外洩到第三方主機。
+ */
 async function fetchGltfAsBlobUrl(glbPath: string): Promise<string> {
-  const name = glbPath.split("/").filter(Boolean).pop() ?? "";
   const headers = authHeaders();
   if (!headers) throw new Error("尚未登录，无法加载 3D 预览");
-  const resp = await fetch(`/api/blender-artifact?name=${encodeURIComponent(name)}`, { cache: "no-store", headers });
+  const remote = /^https?:\/\//i.test(glbPath);
+  const url = remote
+    ? glbPath
+    : `/api/blender-artifact?name=${encodeURIComponent(glbPath.split("/").filter(Boolean).pop() ?? "")}`;
+  const resp = await fetch(url, remote ? { cache: "no-store" } : { cache: "no-store", headers });
   if (!resp.ok) {
     let detail = "";
     try {
@@ -45,7 +54,7 @@ async function fetchGltfAsBlobUrl(glbPath: string): Promise<string> {
 type GltfViewportPhase = "loading" | "ready" | "fallback";
 
 export interface Scene3dGltfViewportProps {
-  /** sceneCard.glb_path（站內路徑或 http URL；取純檔名走代理分支）。 */
+  /** sceneCard.glb_path：站內橋產物路徑（取純檔名走 /api/blender-artifact 代理）或 http(s) 公網 URL（直連）。 */
   glbPath: string;
   className?: string;
 }

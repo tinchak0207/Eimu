@@ -27,15 +27,14 @@ import {
 import { imageGenerationCoins, isSupportedImageModel, type ModelMode } from "@/lib/provider-config";
 import { PIXAI_EDIT_MODEL_ID } from "@/lib/image-model-ids.js";
 import {
-  chargeBizRequest,
   jsonWithTrace,
   pixaiAuthError,
   pixaiError,
   pixaiRequestError,
   proxyPixai,
-  refundBizRequest,
   resolveBridgeModel,
 } from "@/lib/pixai-proxy";
+import { commitSyncCharge, refundSyncCharge, reserveSyncCharge } from "@/lib/generation-core/sync-charge";
 import { QUOTA_PER_COIN } from "@/lib/quota-constants";
 import { syncModelPricing } from "@/lib/pricing-runtime";
 import { getOrCreateTraceId } from "@/lib/request-trace";
@@ -49,21 +48,35 @@ import {
 import { generationControlPlaneEnabled } from "@/lib/generation-core/database";
 import { submitGenerationCommand } from "@/lib/generation-core/command-service";
 import { hasGenerationCapability, IdempotencyConflictError } from "@/lib/generation-core/job-repository";
+import { GenerationModelUnavailableError } from "@/lib/generation-core/model-availability-gate";
 import { enforceQuotaGate } from "@/lib/generation-core/quota-precheck";
 import { generationTaskResponse } from "@/lib/generation-core/task-response";
 // 參考圖 helper（resolveEditReference 及相依的 mimeFromUrl/extensionFor/EditInputError）
 // 2026-09-25 整段搬到 lib，generations 路由共用同一份；本路由行為逐位元不變。
 import { EditInputError, resolveEditReference } from "@/lib/biz-image-references";
+import { withApiRejectionTelemetry, type RejectionContext } from "@/lib/api-rejection";
 import type { GenerationReference } from "@/lib/generation-core/types";
 import type { BizApiKey } from "@/lib/biz-api-keys";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
+/** 拒絕遙測用的路徑。寫死字面量：分組要穩定，不被 rewrite/代理改寫影響。 */
+const REJECTION_PATH = "/v1/images/edits";
+
 export async function POST(req: NextRequest) {
+  const rejection: RejectionContext = {
+    rawKey: readBearerToken(req.headers.get("authorization")),
+    userId: null,
+    model: null,
+  };
+  return withApiRejectionTelemetry(REJECTION_PATH, rejection, () => handleEdit(req, rejection));
+}
+
+async function handleEdit(req: NextRequest, rejection: RejectionContext): Promise<Response> {
   const traceId = getOrCreateTraceId(req);
 
-  const auth = await authenticateBizApiKey(readBearerToken(req.headers.get("authorization")));
+  const auth = await authenticateBizApiKey(rejection.rawKey);
   if (!auth.ok) {
     return jsonWithTrace(
       pixaiAuthError(auth.status, auth.message, auth.code, traceId),
@@ -72,6 +85,7 @@ export async function POST(req: NextRequest) {
       auth.retryAfterSeconds ? { "Retry-After": String(auth.retryAfterSeconds) } : undefined,
     );
   }
+  rejection.userId = auth.key.userId;
 
   // 認證成功後的所有回應（成功 + 錯誤）都帶限流預測頭；401/403/429 不走這裡。
   const respond = (data: unknown, status: number, headers?: Record<string, string>) =>
@@ -83,6 +97,8 @@ export async function POST(req: NextRequest) {
   } catch {
     return respond(pixaiRequestError("Invalid JSON body.", "invalid_json", traceId), 400);
   }
+  // 只記客戶請求的模型名（未歸一）：拒絕遙測裡它只是分組線索。
+  rejection.model = typeof body.model === "string" && body.model.trim() ? body.model.trim() : null;
 
   const image = typeof body.image === "string" ? body.image.trim() : "";
   const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
@@ -118,7 +134,7 @@ export async function POST(req: NextRequest) {
   await syncModelPricing();
   const quota = Math.round(generationCoins(PIXAI_EDIT_MODEL_ID, { resolution: size }) * QUOTA_PER_COIN) * n;
 
-  // ── 冪等（chargeBizRequest 之前）：同 key 重試不重複扣費 ──────
+  // ── 冪等（reserveSyncCharge 之前）：同 key 重試不重複扣費 ──────
   const idempotencyKey = req.headers.get("idempotency-key")?.trim() || null;
   let reservedIdempotency: { tenantId: string; key: string } | null = null;
   if (idempotencyKey) {
@@ -150,11 +166,21 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const charged = await chargeBizRequest({
+  // 錢走生產平面帳本（V-07）：同步 job 列 + billing_operation，失敗退款可被 reconcile 撈回。
+  const charged = await reserveSyncCharge({
     userId: auth.key.userId,
     quota,
     keyId: auth.key.id,
     action: "images/edits",
+    modelId: PIXAI_EDIT_MODEL_ID,
+    kind: "image_edit",
+    source: "biz",
+    tenantId: `biz:${auth.key.id}`,
+    apiKeyId: auth.key.id,
+    prompt,
+    requestedCount: n,
+    resolution: size,
+    ratio: typeof body.ratio === "string" ? body.ratio : null,
   });
   if (!charged.ok) return respond(charged.body, charged.status);
 
@@ -172,11 +198,8 @@ export async function POST(req: NextRequest) {
     : 0;
 
   if (status === 200 && delivered > 0) {
-    // 少出的圖按張退：客戶只該為拿到的結果付費。
-    const unused = Math.round((quota / n) * (n - delivered));
-    if (unused > 0) {
-      after(() => refundBizRequest({ ...charged.charge, reservedQuota: unused }, auth.key.userId, "images/edits"));
-    }
+    // 少出的圖按張退：客戶只該為拿到的結果付費（commit 實耗＋未交付部分落 refund op）。
+    after(await commitSyncCharge(charged.charge, { delivered }));
     recordBizApiKeyUsage(auth.key.id, delivered);
     after(() => flushBizApiKeyUsage().catch(() => undefined));
     if (reservedIdempotency) {
@@ -192,7 +215,7 @@ export async function POST(req: NextRequest) {
     return respond(data, 200);
   }
 
-  after(() => refundBizRequest(charged.charge, auth.key.userId, "images/edits"));
+  after(await refundSyncCharge(charged.charge, { status }));
   return respond(
     pixaiError(data, "Image edit failed.", traceId),
     status >= 400 ? status : 502,
@@ -341,6 +364,10 @@ async function durableEditBranch(input: {
   } catch (error) {
     if (error instanceof IdempotencyConflictError) {
       return respond(pixaiRequestError(error.message, "idempotency_key_reused", traceId), 409);
+    }
+    // 模型可用性閘：建單/扣費前拒單，沿用既有穩定碼 no_endpoints。
+    if (error instanceof GenerationModelUnavailableError) {
+      return respond(pixaiRequestError(error.message, "no_endpoints", traceId), 503);
     }
     console.error("[images/edits] durable submission failed", error);
     return respond(

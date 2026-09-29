@@ -1,9 +1,3 @@
-<!--
-來源（輪子）: https://github.com/arjun988/blender-skills — .claude/skills/lookdev/SKILL.md
-License: MIT · 原作者: arjun988 (https://github.com/arjun988)
-白名單改動: ①產物路徑→$BLENDER_WORK/out/（截圖/渲染產物一律寫 $BLENDER_WORK/out/） ②移除「via MCP」外部 IDE 整合表述 ③Blender 5.2 API 校正（無） ④文案譯為簡體（結構/表格/參數逐項保留）
--->
-
 ---
 name: lookdev
 description: Blender 资产外观开发（Lookdev）循环，组合材质、灯光、相机与截图对比，直到着色效果达标。
@@ -16,6 +10,12 @@ metadata:
   triggers: lookdev, look development, shading review, material lighting loop, turntable, asset presentation
   related-skills: materials, lighting, rendering, camera-cinematography, compositing, qa-review
 ---
+<!--
+來源（輪子）: https://github.com/arjun988/blender-skills — .claude/skills/lookdev/SKILL.md
+License: MIT · 原作者: arjun988 (https://github.com/arjun988)
+白名單改動: ①產物路徑→$BLENDER_WORK/out/（截圖/渲染產物一律寫 $BLENDER_WORK/out/） ②移除「via MCP」外部 IDE 整合表述 ③Blender 5.2 API 校正（無） ④文案譯為簡體（結構/表格/參數逐項保留）
+-->
+
 
 # 外观开发（Lookdev）
 

@@ -1,15 +1,75 @@
 # Image Studio 图像生成 API（B 端接入文档）
 
-OpenAI 兼容的图像生成接口，供 API 聚合平台与企业客户直接调用。
+OpenAI 兼容的图像生成接口，供 API 聚合平台与企业客户直接调用。**同一把 `sk-biz-…` 密钥有两种接法，先按你的客户端选一种：**
 
-## 接入信息
+## 两种接法（先选一种，密钥通用）
+
+| | A. 标准 OpenAI 同步（客户端 / 中转站首选） | B. 异步任务（批量 / 自有后端） |
+| --- | --- | --- |
+| Base URL | `https://eimu.dev/openai/v1` | `https://eimu.dev/v1` |
+| 响应形状 | 一次 POST **同步回 200**，图片就在 `data[]` 里 | **202 + task_id**，轮询或 webhook 取件 |
+| 主要端点 | `POST /images/generations`、`POST /chat/completions`（含 `stream:true`）、`GET /models` | `POST /images/generations`、`GET /images/{id}`、`GET /images/{id}/result`、`POST /skus/{id}/runs`、`GET /models` |
+| 图片交付 | `data[].url` 或 `data[].b64_json`（由 `response_format` 控制） | 任务 `succeeded` 后取 `data[].url`（异步链路**不回** `b64_json`） |
+| 幂等 | 无（OpenAI 语义） | `Idempotency-Key` 头：同键重放不重复建任务、不重复扣费 |
+| 适合 | new-api / one-api 中转站、Cherry Studio、SillyTavern（酒馆）、Dify、Coze、n8n、LobeChat、直接用 OpenAI SDK 写代码的开发者 | 批量出图、自有任务系统、需要 `callback_url` 或 `Idempotency-Key`、单次几十张的长任务 |
+
+两套端点背后是**同一条生成管线**（同一套计费、调度与退款语义），只是响应形状不同；同一把密钥在两边都能用，模型 id 也一致。区别只有一个：同步层在服务端把任务等到终态再回复，异步层把 task_id 立刻交给你。
+
+### A. 标准 OpenAI 同步
+
+Base URL 填 `https://eimu.dev/openai/v1`（比异步那套多一层 `/openai`，**别填成 `/v1`**）。
+
+| 端点 | 说明 |
+| --- | --- |
+| `POST /openai/v1/images/generations` | OpenAI Images 语义：同步等到出图，回 `200 {created, data:[{url} \| {b64_json}]}`。`response_format` 默认 `url`，要 `b64_json` 时服务端取回成品再编码。失败回 OpenAI 错误信封 `{error:{message,type,code}}`，未出图不扣费 |
+| `POST /openai/v1/chat/completions` | 生图模型以对话形式调用：取最后一条 user 消息作为 prompt，回 `content = "![image](<url>)"` 的图片 markdown。支持 `stream:true`（酒馆、Cherry Studio 走这条：先 keep-alive，出图后送含图片 markdown 的 delta，最后 `[DONE]`）|
+| `GET /openai/v1/models` | 标准 `{object:"list", data:[{id, object:"model", owned_by:"eimu"}]}`，只列当前可用的图片模型 |
+
+```bash
+curl https://eimu.dev/openai/v1/images/generations \
+  -H "Authorization: Bearer $EMU_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-image-2","prompt":"一只戴帽子的猫","n":1,"size":"1024x1024"}'
+# → 200 {"created":1784912242,"data":[{"url":"https://…"}]}
+```
+
+**状态（如实标注）**：这条同步兼容层随本文档同日（2026-09-28）推出，**尚未部署到生产、目前不可调用**。判据只有一个：
+
+```bash
+curl -s https://eimu.dev/openai/v1/models -H "Authorization: Bearer $EMU_API_KEY"
+# 返回 {"object":"list",…} ＝ 已可用；返回 404/502 ＝ 还没上线，请先按接法 B 接
+```
+
+### B. 异步任务（现行、已上线）
+
+Base URL `https://eimu.dev/v1`。`POST` 一律回 `202 + task_id`，取图靠轮询或 `callback_url`；批量场景用 `Idempotency-Key` 保证重放不重复建单。契约细节见下文「接入信息」起的全部段落——它们描述的就是这条链路。
+
+### new-api / one-api 加渠道填法
+
+中转站只认同步形状，所以**必须走接法 A**。按下面填完即可用，没有隐藏步骤：
+
+1. new-api 后台 → 「渠道」→ 「添加渠道」。
+2. **类型**：`OpenAI`。
+3. **名称**：任意，如 `eimu-image`。
+4. **模型**：填你这把 key 允许的模型 id，逗号或换行分隔。取值方法（唯读、不计费）：
+   ```bash
+   curl -s https://eimu.dev/v1/models -H "Authorization: Bearer $EMU_API_KEY" | grep -o '"id":"[^"]*"'
+   ```
+   把列出的 `id` 逐个填进去（例如 `gpt-image-2`、`pixai-haruka-v2`）。new-api 的「填入相关模型」按钮也走同一份列表，任选其一。**注意 `GET /v1/models` 是图片与视频混列**，只把图片模型填进渠道（条目里 `x_capabilities.mediaType` 为 `video` 的走异步接法 `POST /v1/videos/generations`，同步层不支持）。
+5. **Base URL / 代理地址**：`https://eimu.dev/openai/v1`。new-api 会自己拼成 `…/openai/v1/images/generations` 与 `…/openai/v1/chat/completions`，**不要再带 `/v1` 或端点后缀**。
+6. **密钥**：填 `sk-biz-…` 明文（new-api 自己加 `Bearer`，不要手写 `Bearer `）。
+7. **要带的 header**：无需任何自定义 header。new-api 自动发 `Authorization: Bearer sk-biz-…` 与 `Content-Type: application/json`，这两个就是全部；`Idempotency-Key` 只有异步接法才用，接法 A 不需要。
+8. 保存后点「测试渠道」验证连通；再在 new-api 里发一次生图请求，返回 `data[].url` 即成功。
+9. 如果 new-api 版本把 base URL 藏起来（「自定义代理地址」灰掉），在渠道里打开「**覆盖代理地址**」或「自定义 Base URL」开关再填第 5 步的值。
+
+## 接入信息（以下为接法 B：異步任務）
 
 | 项目 | 值 |
 | --- | --- |
 | Base URL | `https://eimu.dev/v1` |
 | 认证方式 | `Authorization: Bearer sk-biz-…` |
 | 请求编码 | `application/json`，UTF-8 |
-| 兼容性 | OpenAI Images API 形状，可直接用官方 SDK |
+| 兼容性 | OpenAI 的请求形状与错误信封；**返回是异步任务**（202 + task_id），取图靠轮询 |
 
 密钥由我方后台签发，形如 `sk-biz-` 加 32 位十六进制。**密钥只在签发时出示一次**，请妥善保存；丢失只能吊销后重新签发。
 
@@ -65,55 +125,65 @@ curl https://eimu.dev/v1/images/generations \
 | `model` | string | 是 | — | 见 `GET /v1/models` |
 | `prompt` | string | 是 | — | 最长 4000 字符 |
 | `n` | integer | 否 | `1` | 1–4。串行出图，`n` 越大耗时越长 |
-| `size` | string | 否 | `1024x1024` | `1024x1024`、`1536x1024`、`1024x1536` |
+| `size` | string | 否 | `1024x1024` | `1024x1024`、`1536x1024`、`1024x1536`、`2048x2048`（2048 由 seedream 系支持） |
 | `quality` | string | 否 | `standard` | `standard` 或 `hd`（`high` 等同 `hd`） |
-| `response_format` | string | 否 | `b64_json` | `b64_json` 或 `url` |
+| `response_format` | string | 否 | `b64_json` | `b64_json` 或 `url`。**只影响 legacy 同步分支**；当前生产返回异步任务，成品一律是图片 URL |
+| `callback_url` | string | 否 | — | 任务完成时的 webhook 回调（生产异步链路的可选加速） |
 
-#### 成功响应
+#### 成功响应：202 + 任务（生产一律异步）
 
 ```json
 {
+  "object": "image_generation.task",
+  "id": "3988af81-…",
+  "task_id": "3988af81-…",
+  "status": "queued",
   "created": 1784912242,
-  "data": [{ "b64_json": "iVBORw0KGgo…" }]
+  "model": "gpt-image-2",
+  "requested_count": 1,
+  "completed_count": 0,
+  "task_url": "/v1/images/3988af81-…"
 }
 ```
 
-请求 `b64_json` 但上游只返回了 URL 时，该项会退化为 `{ "url": "…" }`。**客户端请同时处理两种字段**，不要假定只有 `b64_json`。
+响应头带 `Location: /v1/images/{id}`。取图：
 
-`n > 1` 时若中途失败，已成功的图片仍会返回，`data` 长度可能小于 `n`；未消耗的额度会自动退回。
+```bash
+# 轮询（3~5 秒一次，轮询不消耗限流额度）直到 status 变成 succeeded
+curl -s https://eimu.dev/v1/images/3988af81-… \
+  -H "Authorization: Bearer $API_KEY"
+```
+
+`succeeded` 的响应追加 `result_url` 与 `data[]`（元素为 `{id,url,mimeType,sha256,width,height,outputIndex,endpointLabel}`），直接读 `data[0].url` 即成品；`GET /v1/images/{id}/result` 是同一份 `data[]` 的便捷入口（未完成时 409 `result_not_ready`）。**异步链路不回 `b64_json`**——要字节流请自行下载 `data[].url`。
+
+`n > 1` 时若中途失败，`requested_count` 与 `completed_count` 会拉开差距，已成功的图照样可取；未消耗的额度会自动退回。
 
 ### 使用 OpenAI SDK
+
+官方 SDK 可以**提交**请求（请求体与错误信封都是 OpenAI 形状），但它的 `images.generate()` 类型是按「同步返回图片」定义的，**拿不到异步任务里的图**：它会解析到 202 的那个任务对象，`result.data` 为空。
 
 ```python
 from openai import OpenAI
 
-client = OpenAI(
-    api_key="sk-biz-…",
-    base_url="https://eimu.dev/v1",
-)
+client = OpenAI(api_key="sk-biz-…", base_url="https://eimu.dev/v1")
 
-result = client.images.generate(
+# 提交：把原始响应体拿出来读 task_id（typed helper 会丢掉非标准字段）
+raw = client.images.with_raw_response.generate(
     model="gpt-image-2",
     prompt="一只戴帽子的猫",
     size="1024x1024",
 )
-print(result.data[0].b64_json[:40])
+task_id = raw.http_response.json()["task_id"]
+
+# 取图：用普通 HTTP 轮询（SDK 没有任务轮询这一层）
+poll = client.get(f"/images/{task_id}")
+while poll.status_code == 200 and poll.json()["status"] not in ("succeeded", "failed"):
+    time.sleep(3)
+    poll = client.get(f"/images/{task_id}")
+print(poll.json()["data"][0]["url"])
 ```
 
-```javascript
-import OpenAI from "openai";
-
-const client = new OpenAI({
-  apiKey: "sk-biz-…",
-  baseURL: "https://eimu.dev/v1",
-});
-
-const result = await client.images.generate({
-  model: "gpt-image-2",
-  prompt: "一只戴帽子的猫",
-  size: "1024x1024",
-});
-```
+最省事的方式是直接用 HTTP（见上面的 `curl` 三连）：提交 → 轮询任务 → 读 `data[0].url`。异步语义下没有「一次调用直接拿到图片字节」这条路。
 
 ## 错误
 
@@ -125,10 +195,13 @@ const result = await client.images.generate({
     "message": "API 密钥无效。",
     "type": "authentication_error",
     "code": "invalid_api_key",
-    "param": null
+    "param": null,
+    "trace_id": "…"
   }
 }
 ```
+
+`trace_id` 与响应头 `X-Request-Id` 同值，报障时带上它可直达本次请求的日志。
 
 | HTTP | `code` | 含义与处理 |
 | --- | --- | --- |
@@ -142,7 +215,7 @@ const result = await client.images.generate({
 | 401 | `invalid_api_key` | 密钥无效或已吊销 |
 | 403 | `api_key_disabled` | 密钥被停用，请联系我方 |
 | 403 | `model_not_permitted` | 该密钥未开通此模型 |
-| 402 | `insufficient_quota` | 账户余额不足，需充值 |
+| 402 | `insufficient_balance` | 余额/额度不足，**本次未扣费**；`message` 内含充值入口（成员额度不足时指向团队主账号） |
 | 429 | `rate_limit_exceeded` | 超出每分钟上限，见 `Retry-After` 响应头 |
 | 502 | `upstream_failed` | 所有上游端点均失败，`message` 内含各端点失败原因 |
 
@@ -159,7 +232,7 @@ const result = await client.images.generate({
 - 按成功出图张数计费，失败不计费。
 - 单价随模型与 `quality` 变化，见 `GET /v1/models` 的 `x_coins_per_image`。
 - 额度在请求开始时预留，失败或未出满 `n` 张时自动退回。
-- 余额不足返回 402。
+- 余额不足返回 402 `insufficient_balance`（本次未扣费，`message` 内含充值入口；成员额度不足时指向团队主账号）。
 
 ## 超时
 

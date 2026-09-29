@@ -1,3 +1,7 @@
+---
+name: motion-design
+description: Use this skill whenever motion, animation, timing, easing, or composition over time is the subject. Triggers on "animate", "motion", "easing", "timing", "keyframe", "transition", "stagger", "loop", "bounce", "overshoot", "follow-through", "anticipation", "12 principles", "motion hierarchy", "composition for motion". Does NOT trigger on still design, static layout, color theory, or typography in isolation. Pair with aftereffects-motion or blender-motion when a tool is named. Load this first; specialists layer on top.
+---
 <!--
 來源（輪子）: https://github.com/LobzyJay/motion-design-with-claude
 License: MIT · 原作者: LobzyJay · 僅內部使用
@@ -6,10 +10,6 @@ Blender 5.2 雷區（僅 Blender 類配方適用）：① BLENDER_EEVEE_NEXT 已
 正文保留英文原文；MCP 調用表述執行時改走我方 bridge /v1/execute 同構協議。
 -->
 
----
-name: motion-design
-description: Use this skill whenever motion, animation, timing, easing, or composition over time is the subject. Triggers on "animate", "motion", "easing", "timing", "keyframe", "transition", "stagger", "loop", "bounce", "overshoot", "follow-through", "anticipation", "12 principles", "motion hierarchy", "composition for motion". Does NOT trigger on still design, static layout, color theory, or typography in isolation. Pair with aftereffects-motion or blender-motion when a tool is named. Load this first; specialists layer on top.
----
 
 # Motion Design
 

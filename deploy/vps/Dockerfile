@@ -8,7 +8,9 @@ WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN npm run build
+# `COPY . .` 讓本層每次都失效；.next/cache 放 BuildKit 快取掛載，next build
+# 跨部署沿用 webpack 持久快取，改一行不再從零編譯。
+RUN --mount=type=cache,id=image-control-next-cache,target=/app/.next/cache npm run build
 
 # Durable generation work must not live in the Next.js HTTP container. This target
 # keeps the same source/dependencies but runs the Postgres-backed worker loop.

@@ -11,6 +11,7 @@ import { STYLE_PRESETS, type StylePreset } from "@/lib/prompt-enhancer";
 import { generationCoins, generationModel, modelAspectRatios, type AspectRatio, type OutputResolution } from "@/lib/generation-model-catalog";
 import { aspectRatioDeviation, nearestAspectRatio } from "@/lib/generation-model-catalog/resolution";
 import { replacePromptSnippet, replacePromptStyleSuffix } from "@/lib/prompt-compose";
+import { CAMERA_MOTION_PRESETS, cameraMotionPrompt } from "@/lib/camera-motion-presets";
 import type { ReferenceImage } from "@/lib/image-types";
 import { usePricingRevision } from "@/hooks/use-pricing-revision";
 import type { ReflectedParams } from "@/lib/agent-param-reflect";
@@ -89,9 +90,16 @@ interface PromptInputProps {
    * 2026-08-25 模板注入：要自動發出的第一條用戶消息（模板 initialPrompt）。
    * 點模板卡本身就是發送動作，這條直送 agent，不預填讓用戶再點發送。
    */
-  agentInjection?: { text: string; nonce: number; directive?: string } | null;
+  agentInjection?: { text: string; nonce: number; directive?: string; echo?: boolean } | null;
   /** 用戶發出第一條消息時回調（上層收起右側模板庫）。 */
   onUserMessage?: () => void;
+  /**
+   * 「預填但不送出」通路（AgentChatSurface 的 prefillRequest）：輸入框有字、
+   * 光標在末尾、焦點在框上，人再按送出。新人禮首登彈窗的主按鈕走這條。
+   */
+  prefillRequest?: { text: string; nonce: number } | null;
+  /** 一句話因未登入送不出去時上拋（上層留住，登入後補送）。 */
+  onSendBlockedByAuth?: (text: string) => void;
   /**
    * 畫布工作站浮動面板態：面板自己有確定高度（桌面全高 / 手機 46dvh 抽屜），
    * 聊天區改為填滿面板剩餘空間，由 transcript 內部滾動。仍然用
@@ -195,7 +203,9 @@ export function PromptInput({
   switchSessionRef,
   startNewSessionRef,
   agentInjection,
+  prefillRequest,
   onUserMessage,
+  onSendBlockedByAuth,
   fillAvailableHeight = false,
   chatHeaderExtra,
 }: PromptInputProps) {
@@ -349,6 +359,17 @@ export function PromptInput({
   const handleSuggestionSelect = (prompt: string) => {
     setInput((current) => replacePromptSnippet(current, lastSuggestionRef.current, prompt));
     lastSuggestionRef.current = prompt;
+  };
+
+  /** 视频运镜预设：与风格后缀同一套「换一个就替掉上一个」段落语义。 */
+  const [cameraMotionKey, setCameraMotionKey] = useState<string | null>(null);
+  const handleCameraMotionChange = (key: string | null) => {
+    setCameraMotionKey(key);
+    setInput((current) => replacePromptStyleSuffix(
+      current,
+      key ? cameraMotionPrompt(key) ?? undefined : undefined,
+      CAMERA_MOTION_PRESETS.map((preset) => cameraMotionPrompt(preset.key) ?? preset.prompt),
+    ));
   };
 
   const handleStyleChange = (preset: StylePreset) => {
@@ -644,6 +665,8 @@ export function PromptInput({
               followReferenceRatio={followReferenceRatio}
               followRatioInfo={followRatioInfo}
               onFollowReferenceSelect={handleFollowReferenceSelect}
+              cameraMotionKey={cameraMotionKey}
+              onCameraMotionChange={handleCameraMotionChange}
             />
           )}
 
@@ -708,7 +731,9 @@ export function PromptInput({
                 {...(switchSessionRef ? { switchSessionRef } : {})}
                 {...(startNewSessionRef ? { startNewSessionRef } : {})}
                 {...(agentInjection ? { agentInjection } : {})}
+                {...(prefillRequest ? { prefillRequest } : {})}
                 {...(onUserMessage ? { onUserMessage } : {})}
+                {...(onSendBlockedByAuth ? { onSendBlockedByAuth } : {})}
                 currentModelId={modelId}
               />
             </div>

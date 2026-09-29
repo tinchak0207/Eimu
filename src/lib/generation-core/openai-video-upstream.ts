@@ -1,5 +1,12 @@
 import { SupplierRequestError } from "./failure-classifier";
+import type { PaidVideoSubmissionFacts } from "./paid-video-cost-gate";
 import type { ProviderTaskPollResult, SupplierGenerationInput, SupplierGenerationOutput, SupplierRecord } from "./types";
+import {
+  applyVideoPostProductionToUpstreamBody,
+  assertVideoPostProductionUpstreamReady,
+  readNormalizedVideoPostProduction,
+  videoPostProductionGeneratedSeconds,
+} from "./video-post-production";
 
 // cangyuansuanli（new-api openai-video 兼容）seedance 视频上游封装（2026-08-30）。
 //
@@ -15,31 +22,55 @@ import type { ProviderTaskPollResult, SupplierGenerationInput, SupplierGeneratio
 // sd7 族固定分辨率由模型名决定），不依赖 supplier 表 supplierModelId。
 
 const POLL_INTERVAL_MS = 5_000;
-const MAX_WAIT_MS = 540_000;
+// INC-VIDEO-0927（2026-09-27）：輪詢窗口原本 540s（9 分鐘），會誤殺慢而健康的
+// 影片上游——napi 實測單次 attempt 最長 993.9s（16.6 分鐘），生產日誌實錄
+// 「openai-video upstream generation timed out after 540s (last status: in_progress)」。
+// 預設放寬到 20 分鐘，可用 OPENAI_VIDEO_MAX_WAIT_MS 覆寫（下限 60s）；
+// worker 端影片生成預算同步放寬到 25 分鐘，留成品下載／持久化餘裕。
+const DEFAULT_MAX_WAIT_MS = 1_200_000;
+
+/** 輪詢窗口（每次調用讀 env，便於運維與測試覆寫）。 */
+export function openaiVideoMaxWaitMs(): number {
+  const raw = Number(process.env.OPENAI_VIDEO_MAX_WAIT_MS ?? "");
+  return Number.isFinite(raw) && raw >= 60_000 ? raw : DEFAULT_MAX_WAIT_MS;
+}
+
 const REQUEST_TIMEOUT_MS = 30_000;
 
 // 平台模型 id + resolution → 上游模型名映射
 // sd4 族：分辨率可选（480p/720p），请求带 resolution 字段
 // sd7 族：模型名固定分辨率，请求不带 resolution 字段
+//
+// INC-VIDEO-0927（2026-09-27 實彈）：上游已把 sd4-* 整族下架，/v1/models 只剩
+// sd7-* / sd8-* / sd10..sd14-*。對 sd4-seedance-2.0 提交直接被拒：
+//   {"error":{"code":"","message":"无效的请求，model sd4-seedance-2.0 is not a
+//    public model name","type":"new_api_error"}}
+// 帳號就算有餘額也 100% 失敗。下表改用 GET /v1/models（2026-09-27 實查 37 個模型）
+// 中確實存在的名字，每族取當前最低價（上游 /api/pricing，元/次）：
+//   sd12-seedance-2.0 2.9 / sd13-seedance-2.0-mini 1.7 / sd8-seedance-2.5 3.9
+//   sd12-seedance-2.0-fast 2.9 / sd7-seedance-2.0-1080p 5.9
+// 形狀假設（未驗證）：sd10..sd14 與 sd4 同族協議（completed + video_url/
+// metadata.url，收 resolution/duration/aspect_ratio）。名字存在性已實查；
+// 有餘額後第一單須覆核形狀假設。
 const UPSTREAM_MODEL_BY_RESOLUTION: Record<string, Record<string, string>> = {
   "seedance-2.0": {
-    "480p": "sd4-seedance-2.0",
-    "720p": "sd4-seedance-2.0",
+    "480p": "sd12-seedance-2.0",
+    "720p": "sd12-seedance-2.0",
     "1080p": "sd7-seedance-2.0-1080p",
   },
   "seedance-2.0-fast": {
-    "480p": "sd4-seedance-2.0-fast",
-    "720p": "sd4-seedance-2.0-fast",
+    "480p": "sd12-seedance-2.0-fast",
+    "720p": "sd12-seedance-2.0-fast",
   },
   "seedance-2.0-mini": {
-    "480p": "sd4-seedance-2.0-mini",
-    "720p": "sd4-seedance-2.0-mini",
+    "480p": "sd13-seedance-2.0-mini",
+    "720p": "sd13-seedance-2.0-mini",
   },
   "seedance-2.5-480p": {
-    "480p": "sd4-seedance-2.5-480p",
+    "480p": "sd8-seedance-2.5",
   },
   "seedance-2.5-720p": {
-    "720p": "sd4-seedance-2.5-720p",
+    "720p": "sd8-seedance-2.5",
   },
   // drama 渠道（drama.dafeiyangapi.top）专属 30 秒固定档（2026-08-30 接入）：
   // 上游只有 sd25-30s 一个模型，30s/720p 固定，按条计费。
@@ -74,6 +105,11 @@ const DURATION_RANGES: Record<string, [number, number]> = {
   "seedance-2.5-480p": [4, 30],
   "seedance-2.5-720p": [4, 29],
   "seedance-2.5-30s":  [30, 30],
+  // xiaoyxiao（2026-09-27 起為視頻唯一權威渠道）承载的 minimax-h3：
+  // 必須與 catalog 該 model 的 durations（4–15s）一致。
+  // 起因：capability 與 catalog 都有此 model，唯獨本表漏了 ⇒ 提交在呼叫上游前
+  // 被 400 擋下（"unknown model ... has no duration range configured"），零上游成本。
+  "minimax-h3":        [4, 15],
 };
 
 function resolveUpstreamModel(platformModelId: string, resolution: string): string {
@@ -91,10 +127,16 @@ function resolveUpstreamModel(platformModelId: string, resolution: string): stri
   return upstreamModel;
 }
 
-export async function generateWithOpenaiVideo(
-  supplier: SupplierRecord,
-  input: SupplierGenerationInput,
-): Promise<SupplierGenerationOutput> {
+/**
+ * 提交前的輸入校驗與上游模型名解析（prompt／duration 範圍／model 映射）。
+ * generateWithOpenaiVideo 與成本閘的 `openaiVideoSubmissionFacts` 共用同一份，
+ * 保證閘審的（model, resolution, seconds）＝真正送出的值，且拒收順序與搬遷前一致
+ *（先輸入校驗，後成本閘）。
+ *
+ * P1-3：生成式後期（續片／改片）的秒數＝**本次新生成的秒數**（續長／區段長），
+ * 由 workflow.videoPostProduction 覆寫 `durationSeconds`——成本閘與上游拿到的是同一個值。
+ */
+function prepareOpenaiVideoSubmission(supplier: SupplierRecord, input: SupplierGenerationInput) {
   const prompt = input.prompt.trim();
   if (!prompt || prompt.length > 5_000) {
     throw new SupplierRequestError("Video prompt must contain 1–5000 characters.", 400);
@@ -102,7 +144,10 @@ export async function generateWithOpenaiVideo(
 
   const platformModelId = input.modelId;
   const resolution = input.resolution ?? "";
-  const duration = Math.round(Number(input.workflow.durationSeconds ?? 5));
+  const postProduction = readNormalizedVideoPostProduction(input.workflow);
+  const duration = postProduction
+    ? videoPostProductionGeneratedSeconds(postProduction)
+    : Math.round(Number(input.workflow.durationSeconds ?? 5));
   const ratio = input.ratio ?? "16:9";
 
   // 校验 duration 范围
@@ -120,6 +165,40 @@ export async function generateWithOpenaiVideo(
   // 上游模型名：capability 行显式携带 supplierModelId（napi/drama 渠道级映射）时
   // 直接短路，否则按平台模型 + resolution 查静态表（cangyuansuanli sd4/sd7 族）。
   const upstreamModel = supplier.supplierModelId ?? resolveUpstreamModel(platformModelId, resolution);
+  return { prompt, resolution, duration, ratio, upstreamModel, postProduction };
+}
+
+/**
+ * 付費視頻成本閘的提交事實（V-03）：本協議實際會送給上游的（model, resolution, seconds）。
+ * 閘本身已移到生產平面 worker（提交前執行，見 worker-service `submitWithSupplyCostGate`
+ * 與 paid-video-cost-gate.ts）；本檔只回報事實，不做放行判定。
+ */
+export function openaiVideoSubmissionFacts(supplier: SupplierRecord, input: SupplierGenerationInput): PaidVideoSubmissionFacts {
+  const { upstreamModel, resolution, duration } = prepareOpenaiVideoSubmission(supplier, input);
+  return {
+    supplierModelId: upstreamModel,
+    resolution,
+    seconds: duration,
+    supplierId: supplier.id,
+    supplierLabel: supplier.label,
+    jobId: input.jobId,
+  };
+}
+
+export async function generateWithOpenaiVideo(
+  supplier: SupplierRecord,
+  input: SupplierGenerationInput,
+): Promise<SupplierGenerationOutput> {
+  const { prompt, resolution, duration, ratio, upstreamModel, postProduction } = prepareOpenaiVideoSubmission(supplier, input);
+
+  // P1-3 生成式後期：映射未由真單校準 ⇒ 具名拒收（零上游成本）。
+  // 放在成本閘之後、任何 fetch 之前；見 video-post-production.ts 檔頭為何必須 fail-closed。
+  if (postProduction) assertVideoPostProductionUpstreamReady(postProduction);
+
+  // 付費視頻上游硬閘（2026-09-27 ¥31.2857 事故後立）已於 V-03 移到生產平面：
+  // worker-service 取得租約後、呼叫本 adapter 前執行（對所有 video_generate 生效，
+  // 本協議 fail-closed）。唯一真源見 paid-video-cost-gate.ts。
+
   const isSd7 = SD7_MODEL_NAMES.has(upstreamModel);
   const isDrama30s = DRAMA_30S_MODEL_NAMES.has(upstreamModel);
   const isNapi = NAPI_MODEL_NAMES.has(upstreamModel);
@@ -180,6 +259,12 @@ export async function generateWithOpenaiVideo(
     }
   }
 
+  // P1-3 生成式後期欄位（來源影片＋續長／續接點｜區段＋改動描述）。欄位映射集中在
+  // video-post-production.ts 的 VIDEO_POST_PRODUCTION_UPSTREAM_FIELD（未校準，唯一落點）。
+  const requestBody = postProduction
+    ? applyVideoPostProductionToUpstreamBody(body, postProduction)
+    : body;
+
   const apiKey = readOpenaiVideoCredential(supplier);
   const baseUrl = supplier.baseUrl.replace(/\/+$/, "");
 
@@ -187,7 +272,7 @@ export async function generateWithOpenaiVideo(
   const createResponse = await openaiVideoRequest(baseUrl, "videos", {
     method: "POST",
     apiKey,
-    body: JSON.stringify(body),
+    body: JSON.stringify(requestBody),
   });
   const taskId = String(createResponse.id ?? "").trim();
   if (!taskId) {
@@ -198,7 +283,7 @@ export async function generateWithOpenaiVideo(
   input.onProviderTaskSubmitted?.(taskId, "openai_video");
 
   // 轮询
-  const deadline = Date.now() + MAX_WAIT_MS;
+  const deadline = Date.now() + openaiVideoMaxWaitMs();
   let lastStatus: string | undefined;
   while (Date.now() < deadline) {
     const queryResponse = await openaiVideoRequest(baseUrl, `videos/${encodeURIComponent(taskId)}`, {
@@ -264,7 +349,7 @@ export async function generateWithOpenaiVideo(
   }
 
   throw new SupplierRequestError(
-    `openai-video upstream generation timed out after ${Math.round(MAX_WAIT_MS / 1000)}s (last status: ${lastStatus ?? "none"}).`,
+    `openai-video upstream generation timed out after ${Math.round(openaiVideoMaxWaitMs() / 1000)}s (last status: ${lastStatus ?? "none"}).`,
     504,
     undefined,
     undefined,
@@ -287,6 +372,17 @@ function extractOutputUrl(response: Record<string, unknown>, baseUrl: string, ta
   const topLevelUrl = String(response.video_url ?? "").trim();
   if (topLevelUrl.startsWith("http://") || topLevelUrl.startsWith("https://")) {
     return topLevelUrl;
+  }
+
+  // 顶层 url（xiaoyxiao 實彈形狀，2026-09-27）：completed 響應為
+  // {"id":"task_…","object":"video","model":"seedance-2.0-mini-deal",
+  //  "status":"completed","progress":100,
+  //  "url":"https://dream-media.tos-cn-beijing.volces.com/videos/<uuid>/0.mp4"}
+  // —— 既無 video_url、無 metadata、無 data 陣列，缺這條會誤判 upstream_protocol
+  // （"completed but no output URL"），把已出好的片當協議 bug 丟掉。
+  const rawTopLevelUrl = String(response.url ?? "").trim();
+  if (rawTopLevelUrl.startsWith("http://") || rawTopLevelUrl.startsWith("https://")) {
+    return rawTopLevelUrl;
   }
 
   const metadata = response.metadata as Record<string, unknown> | undefined;

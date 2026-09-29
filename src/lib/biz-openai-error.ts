@@ -12,12 +12,19 @@ import { withTraceId } from "@/lib/request-trace";
 import { readBearerToken } from "@/lib/biz-api-keys";
 import { authenticateBizApiKey } from "@/lib/biz-api-key-store";
 
-/** 错误 type 值域（`insufficient_quota` 只有生图端点用，这里不需要）。 */
+/**
+ * 错误 type 值域。
+ *
+ * `insufficient_balance` = `/v1/*` 统一的余额不足 type（2026-09-28 契约，见 S2 §4），
+ * `/openai/v1/*` 兼容层透传上游 402 时会带这个 type；此前不在值域里，透传就得靠 cast。
+ * `insufficient_quota` 只有 legacy 生图分支用，仍然不从这条路出。
+ */
 export type BizOpenAIErrorType =
   | "invalid_request_error"
   | "authentication_error"
   | "permission_error"
   | "rate_limit_error"
+  | "insufficient_balance"
   | "api_error";
 
 /**

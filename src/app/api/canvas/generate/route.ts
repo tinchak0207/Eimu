@@ -1,19 +1,35 @@
 // POST /api/canvas/generate — 畫布節點觸發的圖片生成。
 //
-// 與 /api/generate-images 的關係：這裡是畫布專用的薄殼，把畫布欄位
-// （prompt / model / size / quality / count / source_image / reference_image_urls）
-// 翻譯成 generate-images 的請求，並把單張回應聚合成畫布 reducer 可直接吃的陣列。
+// 與生產平面的關係（2026-09-28 V-09 修正）：這裡是畫布專用的分發薄殼。
+// 預設走 durable job——每張圖 `POST /api/generation-jobs`（帶 Idempotency-Key）→
+// 伺服器端輪詢 `GET /api/generation-jobs/{id}` → 取件，聚合成畫布 reducer 可直接吃的
+// 陣列（回應形狀與舊版一字不變）。同步形狀只在本層做，生產只認異步 job
+// （docs/architecture/planes.md §3.3；範本 use-image-generation.ts:627、openai-compat/generation.ts）。
+// 等待上限 = maxDuration − 20s；超時回 504 generation_timeout，**不取消任務**
+// （job 仍在帳本裡跑完/退款，完成後出現在生成記錄）。
 //
-// 認證立場（2026-08-15 修正）：generate-images 的 authenticateImageUser 吃的是
-// `Authorization: Bearer` + `x-user-id` header（與 playground 的 getStoredToken 一致），
-// 不是站上 Cookie。這裡不再自作 Cookie 認證——原樣轉發兩個 header，讓下游
+// 仍走 legacy /api/generate-images 的情境（只有這些；durable 不支援、不准靜默丟）：
+//   ① 帶 LoRA——generation-core 沒有任何 adapter 消費 workflow.loraModelVersionIds；
+//   ② 帶參考圖但模型能力 referenceImages === false——durable 會 400 拒單，legacy 會照送上游；
+//   ③ 參考圖不是 PNG/JPEG/WEBP 或超過 12MB——durable 的 persistReferences 會拒。
+// 負面詞與參考圖角色在 durable 路徑由本層用 legacy 同一函式 buildWorkflowPrompt
+// 預先組進 prompt（generation-core 不消費 workflow.negativePrompt/referenceImages），
+// 角色另經 referenceMetadata 落到參考圖 artifact 的 referenceRole。
+//
+// 認證立場（2026-08-15 修正）：generation-jobs 與 generate-images 的 authenticateImageUser
+// 吃的都是 `Authorization: Bearer` + `x-user-id` header（與 playground 的 getStoredToken 一致），
+// 不是站上 Cookie。這裡不自作 Cookie 認證——原樣轉發兩個 header，讓下游
 // 唯一收口驗證與扣費（曾經轉發 Cookie 導致整條鏈路必然 401）。
 //
 // 誠實原則：cost_coins 算不出來就給 null，絕不填 0 假裝免費；count 部分成功
 // 就回部分結果，不假裝全成；參考圖取不回來直接報錯，不靜默丟棄。
 
+import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { generationModel } from "@/lib/generation-model-catalog";
+import { generationCapabilities, generationModel } from "@/lib/generation-model-catalog";
+import { WORKFLOW_SCHEMA_VERSION, buildWorkflowPrompt, normalizeGenerationWorkflowMetadata } from "@/lib/generation-workflow";
+import type { GenerationTaskProjection } from "@/lib/generation-task-types";
+import type { GenerationWorkflowMetadata } from "@/lib/image-types";
 import { imageGenerationCoins, type ModelMode } from "@/lib/provider-config";
 import { DEFAULT_IMAGE_MODEL_ID, SUPPORTED_GENERATION_MODEL_IDS } from "@/lib/image-model-ids.js";
 import { isReferenceImageRole, toReferenceImageRole, type ReferenceImageRole } from "@/lib/image-types";
@@ -70,6 +86,25 @@ const MAX_REFERENCE_BYTES = 15 * 1024 * 1024;
 /** 參考圖取回逾時（ms）。 */
 const REFERENCE_FETCH_TIMEOUT_MS = 10_000;
 
+// ── durable job 輪詢參數（照 openai-compat/generation.ts:63-66 的慣例） ──
+const POLL_INTERVAL_MS = 2_500;
+const POLL_INTERVAL_MAX_MS = 5_000;
+const SUBMIT_TIMEOUT_MS = 30_000;
+const POLL_REQUEST_TIMEOUT_MS = 15_000;
+/** 總等待上限：maxDuration 減 20s 餘裕（從請求進站起算，含參考圖取回）。 */
+const WAIT_BUDGET_MS = (maxDuration - 20) * 1000;
+/** durable persistReferences 的限制（generation-jobs/route.ts:31 + validateImageBuffer）。 */
+const DURABLE_REFERENCE_MAX_BYTES = 12 * 1024 * 1024;
+const DURABLE_REFERENCE_MIMES = new Set(["image/png", "image/jpeg", "image/webp"]);
+const FAILED_TASK_STATUSES = new Set(["failed", "cancelled", "refunded", "unknown"]);
+
+/** 等待超過上限：任務仍在跑，不取消。 */
+class CanvasJobWaitTimeout extends Error {}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function fail(status: number, message: string, code: string): NextResponse<CanvasGenerateResponse> {
   return NextResponse.json({ ok: false, error: message, code }, { status });
 }
@@ -103,7 +138,8 @@ async function fetchReferenceBuffer(url: string): Promise<{ buffer: Buffer; mime
 }
 
 export async function POST(req: NextRequest) {
-  // 認證前置檢查：缺 header 直接 401，省一次下游往返。真正驗證在 generate-images。
+  const deadlineAt = Date.now() + WAIT_BUDGET_MS;
+  // 認證前置檢查：缺 header 直接 401，省一次下游往返。真正驗證在下游（generation-jobs／generate-images）。
   const authorization = req.headers.get("authorization");
   const userId = req.headers.get("x-user-id") ?? req.headers.get("new-api-user");
   if (!authorization || !userId) {
@@ -217,8 +253,8 @@ export async function POST(req: NextRequest) {
     "x-user-id": userId,
   };
 
-  /** 單次呼叫 generate-images：有參考圖走 multipart（File 每次重建），否則 JSON。 */
-  const generateOnce = async (): Promise<CanvasImageResult> => {
+  /** 單次呼叫 legacy generate-images（僅限檔頭列出的 durable 不支援情境）：有參考圖走 multipart（File 每次重建），否則 JSON。 */
+  const generateLegacyOnce = async (): Promise<CanvasImageResult> => {
     let res: Response;
     if (referenceBuffers.length > 0) {
       const form = new FormData();
@@ -272,13 +308,126 @@ export async function POST(req: NextRequest) {
     return { url, cost_coins: costCoins, natural_width: null, natural_height: null };
   };
 
-  const settled = await Promise.allSettled(Array.from({ length: count }, () => generateOnce()));
+  // ── 路徑判定：durable 為預設；只有 durable 不支援的欄位才留在 legacy（見檔頭 ①②③）。
+  const capabilities = generationCapabilities(modelId);
+  const useLegacy =
+    loraModelVersionIds.length > 0 ||
+    (referenceBuffers.length > 0 && capabilities?.referenceImages === false) ||
+    referenceBuffers.some(
+      (ref) =>
+        ref.buffer.byteLength > DURABLE_REFERENCE_MAX_BYTES ||
+        !DURABLE_REFERENCE_MIMES.has(ref.mime.split(";")[0].trim().toLowerCase()),
+    );
+
+  // durable 路徑：負面詞/角色由 legacy 同一函式預組進 prompt（與 generate-images:493 位元組一致）。
+  const workflowMetadata = workflowField
+    ? normalizeGenerationWorkflowMetadata({
+        schemaVersion: WORKFLOW_SCHEMA_VERSION,
+        ...(JSON.parse(workflowField) as GenerationWorkflowMetadata),
+      })
+    : undefined;
+  const durablePrompt = buildWorkflowPrompt(body.prompt.trim(), workflowMetadata);
+  // 與 legacy 同一解析度推導（generate-images：quality→2k、fast→1k，再由目錄歸一）。
+  const outputResolution = qualityMode === "quality" ? "2k" : "1k";
+  const batchId = randomUUID();
+
+  /** 單張 durable：提交 → 輪詢 → 取件。超時拋 CanvasJobWaitTimeout，不取消任務。 */
+  const generateDurableOnce = async (index: number): Promise<CanvasImageResult> => {
+    let submitBody: BodyInit;
+    const submitHeaders: Record<string, string> = { ...forwardHeaders, "Idempotency-Key": `canvas-${batchId}-${index}` };
+    if (referenceBuffers.length > 0) {
+      const form = new FormData();
+      form.append("prompt", durablePrompt);
+      form.append("modelId", modelId);
+      form.append("qualityMode", qualityMode);
+      form.append("aspectRatio", aspectRatio);
+      form.append("outputResolution", outputResolution);
+      form.append(
+        "referenceMetadata",
+        JSON.stringify(limitedRefSpecs.map((spec) => ({ name: spec.name, role: spec.role }))),
+      );
+      referenceBuffers.forEach((ref, i) => {
+        form.append(
+          "referenceImages",
+          new File([new Uint8Array(ref.buffer)], `ref-${i}.png`, { type: ref.mime || "image/png" }),
+          limitedRefSpecs[i]?.name ?? `ref-${i}.png`,
+        );
+      });
+      submitBody = form;
+    } else {
+      submitHeaders["Content-Type"] = "application/json";
+      submitBody = JSON.stringify({ prompt: durablePrompt, modelId, qualityMode, aspectRatio, outputResolution });
+    }
+
+    const submitRes = await fetch(`${req.nextUrl.origin}/api/generation-jobs`, {
+      method: "POST",
+      headers: submitHeaders,
+      body: submitBody,
+      signal: AbortSignal.timeout(Math.max(1, Math.min(SUBMIT_TIMEOUT_MS, deadlineAt - Date.now()))),
+    });
+    const submitted = (await submitRes.json().catch(() => null)) as
+      | { data?: GenerationTaskProjection; error?: string; code?: string }
+      | null;
+    if (!submitRes.ok || !submitted?.data || typeof submitted.data.taskId !== "string") {
+      throw new Error(submitted?.error ? truncate(submitted.error, 200) : `任务提交失败（${submitRes.status}）`);
+    }
+
+    let task: GenerationTaskProjection = submitted.data;
+    let interval = POLL_INTERVAL_MS;
+    while (task.status !== "succeeded" && !FAILED_TASK_STATUSES.has(task.status)) {
+      const remaining = deadlineAt - Date.now();
+      if (remaining <= 0) throw new CanvasJobWaitTimeout(task.taskId);
+      await sleep(Math.min(interval, remaining));
+      if (deadlineAt - Date.now() <= 0) throw new CanvasJobWaitTimeout(task.taskId);
+      let pollRes: Response;
+      try {
+        pollRes = await fetch(`${req.nextUrl.origin}/api/generation-jobs/${encodeURIComponent(task.taskId)}`, {
+          headers: forwardHeaders,
+          cache: "no-store",
+          signal: AbortSignal.timeout(Math.max(1, Math.min(POLL_REQUEST_TIMEOUT_MS, deadlineAt - Date.now()))),
+        });
+      } catch {
+        // 網路斷/逾時：任務仍在跑，退避後再問（不把任務誤判為失敗）。
+        interval = Math.min(Math.round(interval * 1.5), POLL_INTERVAL_MAX_MS);
+        continue;
+      }
+      if (pollRes.status >= 500 || pollRes.status === 429) {
+        interval = Math.min(Math.round(interval * 1.5), POLL_INTERVAL_MAX_MS);
+        continue;
+      }
+      const polled = (await pollRes.json().catch(() => null)) as (GenerationTaskProjection & { error?: string }) | null;
+      if (!pollRes.ok) {
+        throw new Error(polled?.error ? truncate(polled.error, 200) : `任务查询失败（${pollRes.status}）`);
+      }
+      if (!polled || typeof polled.taskId !== "string" || typeof polled.status !== "string") {
+        interval = Math.min(Math.round(interval * 1.5), POLL_INTERVAL_MAX_MS);
+        continue;
+      }
+      task = polled;
+      interval = POLL_INTERVAL_MS;
+    }
+
+    if (task.status !== "succeeded") {
+      throw new Error(truncate(task.errorMessage || `生成任务结束于 ${task.status}`, 200));
+    }
+    const url = task.results?.[0]?.url;
+    if (!url) throw new Error("生成服务未返回图片");
+    return { url, cost_coins: costCoins, natural_width: null, natural_height: null };
+  };
+
+  const settled = await Promise.allSettled(
+    Array.from({ length: count }, (_, index) => (useLegacy ? generateLegacyOnce() : generateDurableOnce(index))),
+  );
   const images = settled
     .filter((s): s is PromiseFulfilledResult<CanvasImageResult> => s.status === "fulfilled")
     .map((s) => s.value);
 
   if (images.length === 0) {
-    const firstError = settled.find((s): s is PromiseRejectedResult => s.status === "rejected");
+    const rejected = settled.filter((s): s is PromiseRejectedResult => s.status === "rejected");
+    if (rejected.some((s) => s.reason instanceof CanvasJobWaitTimeout)) {
+      return fail(504, "生成仍在进行中，已超过等待上限；任务未取消，完成后可在生成记录中查看。", "generation_timeout");
+    }
+    const firstError = rejected[0];
     const reason = firstError?.reason instanceof Error ? firstError.reason.message : "生成请求失败，请稍后再试";
     return fail(502, truncate(reason, 200), "generation_failed");
   }

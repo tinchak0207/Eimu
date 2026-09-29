@@ -29,7 +29,7 @@ let mockCalls: Array<{ url: string; init: RequestInit }> = [];
 let mockResponder: (url: string, init: RequestInit) => MockResponse = () => ({ status: 500, body: "no responder" });
 
 const originalFetch = globalThis.fetch;
-const ENV_KEYS = [YUE2_MODAL_ENDPOINT_ENV, YUE2_HMAC_SECRET_ENV, "FLOWMUSIC2API_URL", "FLOWMUSIC2API_KEY"] as const;
+const ENV_KEYS = [YUE2_MODAL_ENDPOINT_ENV, YUE2_HMAC_SECRET_ENV, "FLOWMUSIC2API_URL", "FLOWMUSIC2API_KEY", "GEMINI_API_KEY"] as const;
 const originalEnv = new Map<string, string | undefined>(ENV_KEYS.map((key) => [key, process.env[key]]));
 
 function installFetchMock(responder: (url: string, init: RequestInit) => MockResponse): void {
@@ -48,6 +48,7 @@ beforeEach(() => {
   process.env[YUE2_HMAC_SECRET_ENV] = "test-secret";
   process.env.FLOWMUSIC2API_URL = "http://127.0.0.1:8000"; // 同時在場 → 驗優先序
   process.env.FLOWMUSIC2API_KEY = "test-key";
+  delete process.env.GEMINI_API_KEY; // Lyria 回落入鏈與否由各用例顯式決定
 });
 
 afterEach(() => {
@@ -240,6 +241,50 @@ test("回落：yue2 拋錯 → FlowMusic 未配置 → fail 帶 YuE2 原錯誤�
   const urls = mockCalls.map((call) => call.url);
   assert.equal(urls.filter((url) => url.includes("/v1/chat/completions")).length, 0);
   assert.equal(urls.filter((url) => url.includes("generativelanguage")).length, 0);
+});
+
+test("全鏈回落：yue2 400（純器樂無歌詞）→ FlowMusic 鑑權 502 → GEMINI_API_KEY 在場 → Lyria 直連出曲", async () => {
+  process.env.GEMINI_API_KEY = "test-gemini-key";
+  installFetchMock((url) => {
+    if (url.endsWith("/generate")) {
+      return { status: 400, body: JSON.stringify({ ok: false, error: "bad_request", detail: "lyrics must be a non-empty string" }) };
+    }
+    if (url.includes("/v1/chat/completions")) {
+      return { status: 502, body: JSON.stringify({ error: { code: 502, message: "no active FlowMusic account with usable Bearer token" } }) };
+    }
+    if (url.includes("generativelanguage")) {
+      return { status: 200, body: JSON.stringify({ steps: [{ model_output: { parts: [{ type: "audio", mime_type: "audio/mpeg", data: "AAECAw==" }] } }] }) };
+    }
+    return defaultResponder(url);
+  });
+  const result = await musicGenTool.execute({ prompt: "cinematic chinese orchestral, 90 BPM" }, CONTEXT);
+  const out = JSON.parse(result.output) as Record<string, unknown>;
+  assert.equal(out.ok, true);
+  assert.equal(out.channel, "lyria_gemini");
+  assert.equal(out.fallback_from, "yue2_modal");
+  assert.match(String(out.fallback_reason), /lyrics must be a non-empty string/);
+  assert.match(String(out.fallback_reason), /no active FlowMusic account/);
+  assert.deepEqual(out.prompt_director && (out.prompt_director as { channel: string }).channel, "lyria");
+  const urls = mockCalls.map((call) => call.url).filter((url) => !url.includes("/internal/media/upload"));
+  const order = urls.map((url) => (url.endsWith("/generate") ? "yue2" : url.includes("/v1/chat/completions") ? "flowmusic" : url.includes("generativelanguage") ? "lyria" : "other"));
+  assert.deepEqual(order.filter((x) => x !== "other"), ["yue2", "flowmusic", "lyria"]);
+});
+
+test("全鏈失敗：每一路原因都寫進 hint（不只最後一路）", async () => {
+  process.env.GEMINI_API_KEY = "test-gemini-key";
+  installFetchMock((url) => {
+    if (url.endsWith("/generate")) throw new Error("fetch failed: tunnel is down");
+    if (url.includes("/v1/chat/completions")) return { status: 502, body: "flowmusic auth dead" };
+    if (url.includes("generativelanguage")) return { status: 500, body: "lyria upstream exploded" };
+    return defaultResponder(url);
+  });
+  const result = await musicGenTool.execute({ prompt: "city pop, 105 BPM" }, CONTEXT);
+  const out = JSON.parse(result.output) as { ok: boolean; error: { code: string; hint: string } };
+  assert.equal(out.ok, false);
+  assert.equal(out.error.code, "music_all_channels_failed");
+  assert.match(out.error.hint, /yue2_modal：.*tunnel is down/);
+  assert.match(out.error.hint, /flowmusic2api：/);
+  assert.match(out.error.hint, /lyria_gemini：/);
 });
 
 test("回落回執 additive-only：既有鍵零刪除（與非回落 flowmusic 回執的鍵集合對照，只多不少）", async () => {

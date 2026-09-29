@@ -3,11 +3,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireVerifiedUser } from "@/lib/server-user";
 import { filterCardIdsForProject } from "@/lib/asset-library";
+import { deleteCanvasProjects } from "@/lib/canvas/project-store";
 import {
-  deleteCanvasProjects,
-  listCanvasProjects,
-  saveCanvasProject,
-} from "@/lib/canvas/project-store";
+  listCanvasProjectsForCaller,
+  readTeamCanvasProjectsForCaller,
+  saveCanvasProjectWithTeamGate,
+} from "@/lib/canvas/team-canvas-gate";
 import type { CanvasProject } from "@/lib/canvas/types";
 
 export const runtime = "nodejs";
@@ -21,7 +22,18 @@ export async function GET(req: NextRequest) {
   const caller = await requireVerifiedUser(req);
   if (!caller.ok) return fail(caller.status, caller.message, "unauthorized");
   try {
-    const projects = await listCanvasProjects(caller.user.id);
+    // 團隊可讀（片P 刀 2）：顯式指定 teamId ⇒ 只回該團隊畫布（非成員 403，同刀3 碼/文案）；
+    // 不指定 ⇒ 我個人的 + 我所屬團隊的（relay 查不到成員身份時只回個人，fail-open，不 500）。
+    const teamId = req.nextUrl.searchParams.get("teamId")?.trim();
+    if (teamId) {
+      const scoped = await readTeamCanvasProjectsForCaller(caller.user.id, teamId);
+      if (!scoped.ok) return fail(scoped.status, scoped.message, scoped.code);
+      return NextResponse.json(
+        { success: true, projects: scoped.projects },
+        { status: 200, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+    const projects = await listCanvasProjectsForCaller(caller.user.id);
     return NextResponse.json({ success: true, projects }, { status: 200, headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("[canvas] list projects failed:", error);
@@ -58,7 +70,9 @@ export async function PUT(req: NextRequest) {
           cardIds: body.cardIds.filter((id): id is string => typeof id === "string"),
         })
       : null;
-    await saveCanvasProject(caller.user.id, {
+    // 團隊建畫布閘（片F 面 2）：先判後存。成員且團隊關閉「成員建畫布」時拒新建，
+    // 既有專案更新與非成員（個人畫布）不受影響；拒絕時不落盤（無半成品）。
+    const gate = await saveCanvasProjectWithTeamGate(caller.user.id, {
       id: body.id,
       title: body.title?.trim()?.slice(0, 200) || "未命名画布",
       createdAt: body.createdAt || now,
@@ -74,7 +88,15 @@ export async function PUT(req: NextRequest) {
       ...(body.projectType !== undefined ? { projectType: body.projectType } : {}),
       ...(body.currentStep !== undefined ? { currentStep: body.currentStep } : {}),
       ...(body.episodes !== undefined ? { episodes: body.episodes } : {}),
+      // 節點版本歷史（2026-09-27）：原樣透傳，清洗/裁剪交給 project-store 的
+      // normalizeNodeVersions（與讀取端同一份），本路由不重複實作。
+      ...(body.nodeVersions !== undefined ? { nodeVersions: body.nodeVersions } : {}),
+      // 作用域（片P 刀 1）：只透傳「宣告為 team」的情形；清洗在 project-store，
+      // teamId 由 team-canvas-gate 以已驗成員身份的權威值蓋章（不採信客戶端值）。
+      ...(body.scope === "team" ? { scope: "team" as const } : {}),
+      ...(body.scope === "team" && typeof body.teamId === "string" ? { teamId: body.teamId } : {}),
     });
+    if (!gate.ok) return fail(gate.status, gate.message, gate.code);
     return NextResponse.json({ success: true }, { status: 200 });
   } catch (error) {
     console.error("[canvas] save project failed:", error);

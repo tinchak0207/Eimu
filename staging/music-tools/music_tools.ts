@@ -554,49 +554,69 @@ export const musicGenTool: MusicToolDef = {
       // additive 加 fallback_from/fallback_reason。回落時 prompt 必須用 flowmusic 通道
       // **重新過 director**（yue2 與 flowmusic 的規則層不同：剝時間戳 vs 壓單行/220 上限），
       // 不能拿 yue2 版面直接送 flowmusic——director 是純函數，可重複呼叫。
-      // FlowMusic 也未配置 → 照舊 fail（帶 YuE2 原錯誤原文，不回落 Lyria：三路優先序的
-      // 語義是「配置選路」，回落只救「已選通路臨時故障」）。
+      // 2026-09-28 改為整條鏈回落：YuE2 → FlowMusic → Gemini Lyria 直連（Lyria 僅在
+      // GEMINI_API_KEY 已配置時入鏈）。起因＝漫劇評測實錘：純器樂 BGM 送 YuE2 被凍結合約
+      // 400（lyrics 必填）→ 回落 FlowMusic 又遇帳號鑑權 502 → 整集無 BGM，而 Lyria 金鑰
+      // 在場卻從未被嘗試。回落只在「已選通路拋錯」時發生，全鏈失敗 fail 帶每一路原因。
       // 2026-09-19 片 K 例外：帶 abc 的委託 YuE2 拋錯**不觸發回落**，直接 fail 帶原文。
       // 理由＝語義完整性優先：FlowMusic 不認 abc，回落會靜靜丟失「以這份樂譜為約束」的
       // 委託語義，agent 拿到的是一首語義無關的歌卻以為編輯已生效——比直接失敗更糟
       //（誠實鐵律：能力不匹配要如實報錯，絕不靜默降級）。
       // 2026-09-19 片 O 同款：帶 source_audio（翻唱）的委託拋錯同樣不回落。
       const hasScoreSemantics = abc !== undefined || sourceAudioRaw !== undefined
-      let activeChannel: "yue2" | "flowmusic" | "lyria"
-      let generated: GenerateYue2TrackResult | GenerateFlowMusicTrackResult | GenerateLyriaTrackResult
+      const lyriaEnabled = Boolean(process.env.GEMINI_API_KEY?.trim())
+      const channelChain: Array<"yue2" | "flowmusic" | "lyria"> = []
+      if (yue2Enabled) channelChain.push("yue2")
+      if (flowMusicEnabled) channelChain.push("flowmusic")
+      if (lyriaEnabled || channelChain.length === 0) channelChain.push("lyria")
+      const channelLabel = { yue2: "yue2_modal", flowmusic: "flowmusic2api", lyria: "lyria_gemini" } as const
+      let activeChannel: "yue2" | "flowmusic" | "lyria" = channelChain[0]
+      let generated: GenerateYue2TrackResult | GenerateFlowMusicTrackResult | GenerateLyriaTrackResult | undefined
       let fallbackFrom: string | null = null
       let fallbackReason: string | null = null
-      if (yue2Enabled) {
-        activeChannel = "yue2"
-        try {
-          generated = await generateYue2Track({
-            style: finalPrompt,
-            lyrics: lyrics ?? "",
-            cot: cotMode,
-            ...(effectiveAbc !== undefined ? { abc: effectiveAbc } : {}),
-          })
-        } catch (e) {
-          if (hasScoreSemantics) throw e
-          if (!flowMusicEnabled) throw e
-          fallbackFrom = "yue2_modal"
-          fallbackReason = yue2FallbackReason(e)
-          activeChannel = "flowmusic"
-          directorChannel = "flowmusic"
+      const channelFailures: string[] = []
+      for (let i = 0; i < channelChain.length; i += 1) {
+        const channel = channelChain[i]
+        activeChannel = channel
+        if (channel !== directorChannel) {
+          // 換通路必須用該通路**重新過 director**（各通路規則層不同），director 是純函數可重複呼叫。
+          directorChannel = channel
           directed = directMusicPrompt(toolPrompt, {
-            channel: "flowmusic",
+            channel,
             hasLyrics: Boolean(lyrics),
             durationSeconds: durationHintRaw === "clip30" ? 30 : undefined,
           })
           finalPrompt = directed.prompt
-          generated = await generateFlowMusicTrack({ prompt: finalPrompt, lyrics, model: flowMusicModel })
         }
-      } else if (flowMusicEnabled) {
-        activeChannel = "flowmusic"
-        generated = await generateFlowMusicTrack({ prompt: finalPrompt, lyrics, model: flowMusicModel })
-      } else {
-        activeChannel = "lyria"
-        generated = await generateLyriaTrack({ prompt: finalPrompt, lyrics, model: lyriaModel, imagesBase64 })
+        try {
+          generated =
+            channel === "yue2"
+              ? await generateYue2Track({
+                  style: finalPrompt,
+                  lyrics: lyrics ?? "",
+                  cot: cotMode,
+                  ...(effectiveAbc !== undefined ? { abc: effectiveAbc } : {}),
+                })
+              : channel === "flowmusic"
+                ? await generateFlowMusicTrack({ prompt: finalPrompt, lyrics, model: flowMusicModel })
+                : await generateLyriaTrack({ prompt: finalPrompt, lyrics, model: lyriaModel, imagesBase64 })
+          break
+        } catch (e) {
+          if (hasScoreSemantics) throw e
+          if (i === channelChain.length - 1) {
+            // 單通路失敗照舊拋原錯誤；多通路全滅則每一路原因都要在回執裡看得見。
+            if (channelFailures.length === 0) throw e
+            throw new MusicToolError(
+              "music_all_channels_failed",
+              `音乐生成全部通路失败：${[...channelFailures, `${channelLabel[channel]}：${yue2FallbackReason(e)}`].join("；")}`,
+            )
+          }
+          channelFailures.push(`${channelLabel[channel]}：${yue2FallbackReason(e)}`)
+          if (fallbackFrom === null) fallbackFrom = channelLabel[channel]
+          fallbackReason = channelFailures.join("；")
+        }
       }
+      if (generated === undefined) throw new MusicToolError("music_tool_error", "音乐生成没有可用通路")
       const model: string =
         activeChannel === "yue2" ? YUE2_MODEL_ID : activeChannel === "flowmusic" ? flowMusicModel : lyriaModel
       const upstreamUrl =

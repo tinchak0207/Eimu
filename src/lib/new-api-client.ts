@@ -293,6 +293,14 @@ export async function fetchUserModels(
 }
 
 /** Fetch user's referral code */
+/** GET /api/user/invite：我方自簽邀請連結（取代 new-api aff 碼——OAuth 註冊從不帶 aff，舊碼從未生效）。 */
+export async function fetchInviteLink(
+  token: string,
+): Promise<{ success: boolean; data?: { code: string; url: string }; message?: string }> {
+  const res = await fetch(`/api/user/invite`, { headers: bearerHeader(token) });
+  return res.json() as Promise<{ success: boolean; data?: { code: string; url: string }; message?: string }>;
+}
+
 export async function fetchAffCode(
   token: string,
 ): Promise<{ success: boolean; data?: string; message?: string }> {

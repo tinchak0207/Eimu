@@ -1,3 +1,9 @@
+---
+name: reference-analysis-validator
+description: Measure and validate supplied reference images, wireframes, texture atlases, and Blender renders before declaring a reconstruction 1:1. Use when an asset must match a template, when visual feedback says the output is off, when part counts must be exact, or before exporting a brand mascot/logo reconstruction. Pairs with reference-to-3d, contour-to-mesh, orthographic-registration, atlas-uv-fitting, and Blender MCP.
+when_to_use: Any 1:1 reference/model validation task involving masks, overlays, part counts, centroids, bounding boxes, SSIM/IoU, source manifests, or fail-before-export gates.
+allowed-tools: Read Bash Glob Grep mcp__blender__execute_blender_code mcp__blender__get_scene_info mcp__blender__get_object_info
+---
 <!--
 來源（輪子）: https://github.com/RobLe3/cc-blender-skill — plugin/skills/reference-analysis-validator/SKILL.md
 License: MIT · 原作者: RobLe3 (https://github.com/RobLe3)
@@ -5,12 +11,6 @@ License: MIT · 原作者: RobLe3 (https://github.com/RobLe3)
 Blender 5.2 雷區：① BLENDER_EEVEE_NEXT 已死，只認 BLENDER_EEVEE/BLENDER_WORKBENCH/CYCLES ② Filmic 已移除，AgX 為默認 ③ action.fcurves 在 4.4+ 移除，走 layers[*].strips[*].channelbags[*].fcurves
 正文保留英文原文；上游 MCP 調用表述執行時改走我方 bridge /v1/execute 同構協議。
 -->
----
-name: reference-analysis-validator
-description: Measure and validate supplied reference images, wireframes, texture atlases, and Blender renders before declaring a reconstruction 1:1. Use when an asset must match a template, when visual feedback says the output is off, when part counts must be exact, or before exporting a brand mascot/logo reconstruction. Pairs with reference-to-3d, contour-to-mesh, orthographic-registration, atlas-uv-fitting, and Blender MCP.
-when_to_use: Any 1:1 reference/model validation task involving masks, overlays, part counts, centroids, bounding boxes, SSIM/IoU, source manifests, or fail-before-export gates.
-allowed-tools: Read Bash Glob Grep mcp__blender__execute_blender_code mcp__blender__get_scene_info mcp__blender__get_object_info
----
 
 # Reference Analysis Validator
 

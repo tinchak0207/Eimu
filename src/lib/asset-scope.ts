@@ -53,15 +53,26 @@ export function toAssetKind(value: unknown): AssetKind | null {
   return value === "pack" || value === "card" ? value : null;
 }
 
-// ─────────────────────────────────────────── 歸屬（個人 / 項目）
+// ─────────────────────────────────────────── 歸屬（個人 / 項目 / 團隊）
 
-export type AssetOwnership = "personal" | "project";
+export type AssetOwnership = "personal" | "project" | "team";
 
-/** 資產歸屬：personal＝個人資產（本帳號所有項目可用）；project＝屬於某個項目。 */
+/**
+ * 資產歸屬：personal＝個人資產（本帳號所有項目可用）；
+ * project＝屬於某個項目；team＝屬於某個團隊（P0-2 資產團隊維度：跟組織走，切隊嚴格隔離）。
+ *
+ * **維度只到此為止**：本刀只加歸屬維度與可見性，RBAC／配額／席位由後續刀接手
+ *（見 asset-scope-store 的 MAX_*_PER_USER，仍是 per-user 而非 per-team）。
+ */
 export interface AssetScope {
   owner: AssetOwnership;
-  /** 僅 owner==="project" 有意義（personal 恆省略，不寫 `projectId: ""` 冒充）。 */
+  /** 僅 owner==="project" 有意義（其餘恆省略，不寫 `projectId: ""` 冒充）。 */
   projectId?: string;
+  /**
+   * 僅 owner==="team" 有意義（其餘恆省略，不寫 `teamId: ""` 冒充）。
+   * 寫入端以 **relay 權威值**蓋章（見 /api/assets 的 PUT），不採信客戶端送來的值。
+   */
+  teamId?: string;
 }
 
 /** 缺省＝personal，向後相容既有資產（本刀之前存的包/卡都沒有 scope 欄）。 */
@@ -75,29 +86,55 @@ export const DEFAULT_ASSET_SCOPE: AssetScope = { owner: "personal" };
  * 既不降格成人人可用的 personal，也不猜是哪個項目。
  * 代理人（character-cards / asset-pack-store）收到 normalizeAssetScope 回 null 時寫回此形狀，
  * 使「存檔 → 讀檔」兩端都不會漂移成 personal。
+ *
+ * **團隊同理**（P0-2 對稱）：`owner:"team"` 而無 teamId 也是鬼狀態 → 回 null、寫回本形狀
+ *（本常數是「project 無 projectId」的形狀；team 鬼狀態若也無 projectId，落盤形狀與它逐字相同）。
  */
 export const GHOST_ASSET_SCOPE: AssetScope = { owner: "project" };
 
+/**
+ * 團隊鬼狀態的持久化形狀：`owner:"team"` 而**無** teamId（正常收口不會產生——
+ * 寫入端遇 relay 查不到成員身份時**降級 personal**，此形狀只可能來自外部偽造或舊資料）。
+ */
+export const GHOST_TEAM_ASSET_SCOPE: AssetScope = { owner: "team" };
+
 const MAX_PROJECT_ID_LENGTH = 120;
+const MAX_TEAM_ID_LENGTH = 120;
 
 /**
  * 收斂作用域欄位（存檔與讀檔共用同一收口）：
- * - 非物件 / 非 "project" → personal（含舊資料）
+ * - 非物件 / 非 "project" / 非 "team" → personal（含舊資料）
  * - owner==="project" 但 projectId 空 → **null**（鬼狀態；呼叫端寫回 GHOST_ASSET_SCOPE，
  *   不得降格成 personal —— 降格＝把「歸屬不明的項目資產」變成所有人都能用的個人資產，
  *   正是 D3 的 fail-open 病灶）
+ * - owner==="team" 但 teamId 空 → **null**（同款鬼狀態，fail-closed；**不**降格 personal）
+ * - 每種 owner **只保留自己那一個 id 欄**：`{owner:"project", teamId}` / `{owner:"team", projectId}`
+ *   的跨欄殘留一律剝除（否則 scope 內兩個座標並存，讀取端就得多一層「聽誰的」）。
  */
 export function normalizeAssetScope(raw: unknown): AssetScope | null {
   if (!raw || typeof raw !== "object") return { ...DEFAULT_ASSET_SCOPE };
-  const r = raw as { owner?: unknown; projectId?: unknown };
+  const r = raw as { owner?: unknown; projectId?: unknown; teamId?: unknown };
+  if (r.owner === "team") {
+    const teamId = typeof r.teamId === "string" ? r.teamId.trim().slice(0, MAX_TEAM_ID_LENGTH) : "";
+    return teamId ? { owner: "team", teamId } : null;
+  }
   if (r.owner !== "project") return { ...DEFAULT_ASSET_SCOPE };
   const projectId = typeof r.projectId === "string" ? r.projectId.trim().slice(0, MAX_PROJECT_ID_LENGTH) : "";
   return projectId ? { owner: "project", projectId } : null;
 }
 
-/** 兩份作用域是否等值（掛用/分享去重與測試斷言用）。 */
+/** 兩份作用域是否等值（掛用/分享去重與測試斷言用）；owner 不同即不等值。 */
 export function sameAssetScope(a: AssetScope, b: AssetScope): boolean {
-  return a.owner === b.owner && (a.projectId ?? "") === (b.projectId ?? "");
+  return (
+    a.owner === b.owner &&
+    (a.projectId ?? "") === (b.projectId ?? "") &&
+    (a.teamId ?? "") === (b.teamId ?? "")
+  );
+}
+
+/** 取作用域上的團隊座標（只認 owner==="team"；其餘回 ""，與「缺省＝personal」同精神）。 */
+export function teamIdOfScope(scope: AssetScope | undefined): string {
+  return scope && scope.owner === "team" ? (scope.teamId ?? "") : "";
 }
 
 // ─────────────────────────────────────────── 顯式分享（跨項目授權）
@@ -319,33 +356,54 @@ export interface ScopedAssetLike {
   ownerUserId: number;
 }
 
-/** 可見性判定結果：owner＝個人資產；in-project＝本項目資產；shared-in＝顯式分享進來。 */
-export type AssetVisibility = "owner" | "in-project" | "shared-in";
+/**
+ * 可見性判定結果：owner＝個人資產；in-project＝本項目資產；
+ * in-team＝本團隊資產（P0-2：team-scoped 且屬當前團隊）；shared-in＝顯式分享進來。
+ */
+export type AssetVisibility = "owner" | "in-project" | "in-team" | "shared-in";
 
 export interface AssetUseContext {
   viewerUserId: number;
   /** 當前項目 id；無項目上下文（如全域資產頁）為 null —— 此時只有 personal 資產可見。 */
   projectId: string | null;
+  /**
+   * 當前團隊 id（P0-2 資產團隊維度）。**必須由呼叫端以 relay 權威值注入**
+   *（`lookupTeamMembershipViaRelay` 回傳的 teamId），**不得採信客戶端送來的值**；
+   * 查不到成員身份／未配置 → 省略此欄（＝無團隊上下文）→ team 資產一律不可見（fail-closed）。
+   */
+  teamId?: string | null;
   shares: readonly AssetShareRecord[];
 }
 
 /**
- * **作用域段的唯一裁決**（不含 owner 驗證）：
+ * **作用域段的唯一裁決**（不含 owner 驗證，裁決順序與本檔既有版逐條同序）：
  * - personal（缺省）→ owner（跨項目恆可用）
  * - project-scoped 且屬於當前項目 → in-project
+ * - team-scoped 且屬於當前團隊 → in-team（P0-2；ctx.teamId 由 relay 權威值注入）
  * - project-scoped 但有 from→to 有效分享 → shared-in
- * - 其餘（含「owner=project 但 projectId 空」的鬼狀態）→ null（不可見即不可用）
+ * - 其餘（含「owner=project 但 projectId 空」與「owner=team 但 teamId 空」兩種鬼狀態）→ null
  *
  * 為何抽出這一層：伺服器端（resolveAssetVisibility）與**客戶端讀取閘**
  * （use-canvas-cards 的鎖定卡清單；客戶端的卡已由按登入用戶隔離的
  * `/api/character-cards` 取得，故無 owner 可比）必須是同一把尺——
  * 兩處各寫一份 scope 分支＝寫入端放行、讀取端丟卡的「畫面說掛用、生成不注入」病灶。
+ *
+ * **team 段為什麼 fail-closed**：team 座標來自 relay（可為 null）與外部載荷——
+ * 查不到成員身份（ctx.teamId 缺／空）時 team 資產一律不可見，不降格成「人人可見的 personal」，
+ * 也不猜「大概是哪個團隊」。與既有 project 鬼狀態同一把尺。
  */
 export function resolveAssetScopeVisibility(
   asset: { id: string; kind: AssetKind; scope?: AssetScope },
   ctx: AssetUseContext,
 ): AssetVisibility | null {
   const scope = asset.scope ?? DEFAULT_ASSET_SCOPE;
+  if (scope.owner === "team") {
+    const ownedByTeam = scope.teamId ?? "";
+    if (!ownedByTeam) return null;
+    const viewerTeam = typeof ctx.teamId === "string" ? ctx.teamId.trim() : "";
+    if (!viewerTeam) return null;
+    return viewerTeam === ownedByTeam ? "in-team" : null;
+  }
   if (scope.owner !== "project") return "owner";
   const ownedBy = scope.projectId ?? "";
   if (!ownedBy) return null;

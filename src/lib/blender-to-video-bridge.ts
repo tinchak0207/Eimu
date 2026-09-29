@@ -109,15 +109,17 @@ export function buildSceneFrameReferenceCard(input: SceneFrameReferenceInput): S
   }
 
   // 首/尾幀位：僅 lookdev 檔允許；顯式覆蓋優先，否則 stills 順位補位。
+  // stills_urls 自 2026-09-27 起是可選欄（本機導入卡只帶 glb_path）→ 缺席＝空清單。
+  const stills = input.sceneCard.stills_urls ?? [];
   if (!compositionOnly) {
-    const first = input.firstFrameUrl?.trim() || input.sceneCard.stills_urls[0];
+    const first = input.firstFrameUrl?.trim() || stills[0];
     if (first) push(first, "scene3d-first-frame");
-    const last = input.lastFrameUrl?.trim() || input.sceneCard.stills_urls[1];
+    const last = input.lastFrameUrl?.trim() || stills[1];
     if (last) push(last, "scene3d-last-frame");
   }
 
   // 剩餘槽位：stills 順位補齊（previz 檔在這裡以 composition 角色進卡）。
-  for (const still of input.sceneCard.stills_urls) {
+  for (const still of stills) {
     if (references.length >= max) break;
     push(still, `scene3d-ref-${references.length}`);
   }

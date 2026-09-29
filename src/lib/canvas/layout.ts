@@ -16,6 +16,19 @@ import { normalizeStoryboardSceneRef, normalizeStoryboardShot } from "@/lib/stor
 // 卡側（`normalizeCharacterCard`/`setApproval`）與節點側，兩側值域判據同一份。
 import { normalizeApprovalState } from "@/lib/character-cards";
 import type { CanvasReducerState } from "./reducer";
+// metadata 白名單的**鍵集合單一真源**（雙白名單鐵律：本檔與 canvas-chat-types.ts 的
+// compactMetadataForAgent 曾各自手工維護鍵清單，漏一端＝功能靜默消失）。
+import {
+  DURABLE_METADATA_FIELDS,
+  type DurableFieldSpec,
+  type MetadataCleanerName,
+} from "./node-metadata-fields";
+// 版本清單清洗與 project-store 共用同一份（逐項白名單＋裁剪；不製造第二個漂移點）。
+import { normalizeNodeVersions } from "./node-versions";
+import { normalizeShotCandidates } from "./storyboard-shots";
+// 任務版本史（P1-9/D37）的清洗收口＝`./task-versions` 的 `normalizeTaskVersions`，
+// 本檔只註冊（與 shotCandidates 同款：清洗實作在原模組，白名單真源在 node-metadata-fields）。
+import { normalizeTaskVersions } from "./task-versions";
 import {
   CANVAS_NODE_DEFAULT_SIZE,
   CanvasNodeType,
@@ -246,116 +259,94 @@ function toErrorDetails(v: unknown): string | CanvasErrorDetails | undefined {
   return { ...(message !== undefined ? { message } : {}), ...(human !== undefined ? { human_message: human } : {}) };
 }
 
-/** 把寬鬆 metadata 收斂成 CanvasNodeMetadata（丟掉不認得的欄位，status 走映射）。 */
-export function toNodeMetadata(raw: unknown): CanvasNodeMetadata {
+/**
+ * 清洗器註冊表：**鍵集合由 `node-metadata-fields.ts` 的 `DURABLE_METADATA_FIELDS` 導出**
+ * （逐鍵列舉的清單不在本檔），清洗實作留在本檔（不搬家＝不動既有 export 與 import 拓撲）。
+ * `Record<MetadataCleanerName, …>` 標型：真源新增清洗器名稱而這裡沒實作 → tsc 紅
+ *（編譯期守門件，不是「註釋說要同步」）。
+ */
+const DURABLE_FIELD_CLEANERS: Record<MetadataCleanerName, (raw: unknown) => unknown> = {
+  string: str,
+  finiteNumber: num,
+  nodeStatus: toNodeStatus,
+  errorDetails: toErrorDetails,
+  // null 是合法值（「目前沒有來源圖」），字串照收，其餘省略。
+  sourceImage: (v) => (v === null ? null : str(v)),
+  referenceRole: (v) => (isReferenceImageRole(v) ? v : undefined),
+  // pipeline 卡型白名單：director（導演台）＋ tool/gate/note（後端 derived 工具卡/門禁卡/
+  // 配方卡，kind=text，NodeBody 工具/門禁/配方分支渲染）。未列舉值（含 step_head——
+  // 前端模板路徑直産、後端不送）照舊丟棄。
+  pipelineCard: (v) =>
+    v === "tool" || v === "gate" || v === "note" || v === "director"
+      ? (v as "tool" | "gate" | "note" | "director")
+      : undefined,
+  // unsupported 是 boolean 旗標——truthy 判斷保留 boolean，只過 str() 會剝掉
+  //（同 gate boolean 形態的教訓）。
+  unsupportedFlag: (v) => (v ? true : undefined),
+  // gate 兩形態（types.ts 註解）：string 門禁全文照走；boolean（workflow-dsl
+  // 的「需人工批准」旗標）原樣保留，不能只過 str() 否則旗標會被剝掉。
+  stringOrTrue: (v) => {
+    const s = str(v);
+    return s !== undefined ? s : v === true ? true : undefined;
+  },
+  // planName 明確 null 時保留 null（活卡語義=「目前無方案」）。
+  nullableString: (v) => {
+    const s = str(v);
+    return s !== undefined ? s : v === null ? null : undefined;
+  },
+  // healthOk 只收真 boolean 兩態（綠徽章/琥珀徽章）。
+  booleanFlag: (v) => (v === true || v === false ? v : undefined),
+  sceneCard: toScene3dCard,
+  // 契約清洗函式用 `null` 表示「整包丟棄」，本迴圈的 `undefined` 才是「省略鍵」，
+  // 兩者語義不同，故顯式轉換（漏轉＝寫出 storyboardShot: null 的半形數據）。
+  storyboardShot: (v) => normalizeStoryboardShot(v) ?? undefined,
+  storyboardScene: (v) => normalizeStoryboardSceneRef(v) ?? undefined,
+  // `normalizeShotCandidates` 用 `undefined` 表示「省略鍵」（空集合/無候選）；
+  // 逐條非法候選在函式內丟棄（不連坐整包），`selectedId` 非成員即不收。
+  shotCandidates: (v) => normalizeShotCandidates(v),
+  idList: toIdList,
+  // 落卡冪等標記：trim 後非空才收（純空白＝沒有標記）。
+  trimmedString: (v) => {
+    const s = str(v)?.trim();
+    return s ? s : undefined;
+  },
+  emitsEntity: cleanEmitsEntity,
+  cardName: toCardMetadataName,
+  fontSize: toNodeFontSize,
+  gateConfirm: toGateConfirm,
+  // `normalizeApprovalState` 用 `null` 表示「整包丟棄」（status 不在三值域/非物件），
+  // 本迴圈的 `undefined` 才是「省略鍵」——不轉換會寫出 `approval: null` 的半形狀態。
+  approval: (v) => normalizeApprovalState(v) ?? undefined,
+  // `normalizeTaskVersions` 用 `undefined` 表示「省略鍵」（空集合/無任務版本）；
+  // 逐筆非法在函式內丟棄（不連坐整包），`selectedVersion` 非成員即不收。
+  taskVersions: (v) => normalizeTaskVersions(v),
+};
+
+/**
+ * 把寬鬆 metadata 收斂成 CanvasNodeMetadata（丟掉不認得的欄位，status 走映射）。
+ *
+ * **逐鍵放行清單不寫在本檔**：唯一真源＝`src/lib/canvas/node-metadata-fields.ts` 的
+ * `DURABLE_METADATA_FIELDS`（每個耐久鍵的清洗器名稱與理由都在那裡）。
+ * 雙白名單鐵律：本函式（還原端）與 `compactMetadataForAgent`（上行端）任一端漏放行
+ * ＝功能靜默消失（2026-09-24 `emitsEntity` 事故：當下就被剝，症狀是「完全沒反應」）。
+ *
+ * 第二參數只為契約測試的「注入新鍵、驗證缺鍵可被偵測」而存在；正式呼叫端一律用預設值。
+ */
+export function toNodeMetadata(
+  raw: unknown,
+  fields: readonly DurableFieldSpec[] = DURABLE_METADATA_FIELDS,
+): CanvasNodeMetadata {
   if (!raw || typeof raw !== "object") return {};
   const m = raw as Record<string, unknown>;
-  const status = toNodeStatus(m.status);
-  const errorDetails = toErrorDetails(m.errorDetails);
-  // 分鏡實體的卡引用（WS7）：三條 id 陣列走同一把尺（非空、去重、空則省略鍵）。
-  const characterCardIds = toIdList(m.characterCardIds);
-  const sceneCardIds = toIdList(m.sceneCardIds);
-  const propCardIds = toIdList(m.propCardIds);
-  const entityCardId = str(m.entityCardId)?.trim();
-  // 模板實體宣告 ＋ 卡名三鍵（2026-09-24）：emitsEntity 是**結構化物件**（非字串、
-  // 非 id 陣列），走專用清洗函式；卡名三鍵走字串 trim + 上限（空字串省略該鍵）。
-  const emitsEntity = cleanEmitsEntity(m.emitsEntity);
-  const cardNames = {
-    input: toCardMetadataName(m.input),
-    characterName: toCardMetadataName(m.characterName),
-    sceneName: toCardMetadataName(m.sceneName),
-  };
-  // 文本節點字號（2026-09-25）：右鍵「放大/縮小字号」寫的鍵——不放行＝刷新回默認字號。
-  const fontSize = toNodeFontSize(m.fontSize);
-  return {
-    ...(str(m.content) !== undefined ? { content: str(m.content) } : {}),
-    ...(str(m.prompt) !== undefined ? { prompt: str(m.prompt) } : {}),
-    ...(str(m.negativePrompt) !== undefined ? { negativePrompt: str(m.negativePrompt) } : {}),
-    ...(str(m.model) !== undefined ? { model: str(m.model) } : {}),
-    ...(str(m.size) !== undefined ? { size: str(m.size) } : {}),
-    ...(str(m.quality) !== undefined ? { quality: str(m.quality) } : {}),
-    ...(num(m.count) !== undefined ? { count: num(m.count) } : {}),
-    ...(str(m.kind) !== undefined ? { kind: str(m.kind) } : {}),
-    ...(m.source_image === null || str(m.source_image) !== undefined
-      ? { source_image: (str(m.source_image) ?? null) as string | null }
-      : {}),
-    ...(status ? { status } : {}),
-    ...(errorDetails !== undefined ? { errorDetails } : {}),
-    ...(num(m.naturalWidth) !== undefined ? { naturalWidth: num(m.naturalWidth) } : {}),
-    ...(num(m.naturalHeight) !== undefined ? { naturalHeight: num(m.naturalHeight) } : {}),
-    ...(num(m.cost_coins) !== undefined ? { cost_coins: num(m.cost_coins) } : {}),
-    ...(num(m.cost_hint) !== undefined ? { cost_hint: num(m.cost_hint) } : {}),
-    ...(str(m.imageTaskId) !== undefined ? { imageTaskId: str(m.imageTaskId) } : {}),
-    ...(num(m.startedAt) !== undefined ? { startedAt: num(m.startedAt) } : {}),
-    ...(num(m.progress) !== undefined ? { progress: num(m.progress) } : {}),
-    // reference 節點角色：只收合法 ReferenceImageRole，未知值丟棄（收斂在讀取端做）。
-    ...(isReferenceImageRole(m.referenceRole) ? { referenceRole: m.referenceRole } : {}),
-    // pipeline 卡型白名單：director（導演台）＋ tool/gate/note（後端 derived 工具卡/
-    // 門禁卡/配方卡，kind=text，NodeBody 工具/門禁/配方分支渲染）。未列舉值（含
-    // step_head——前端模板路徑直産、後端不送）照舊丟棄。
-    ...(m.pipelineCard === "tool" || m.pipelineCard === "gate" || m.pipelineCard === "note" || m.pipelineCard === "director"
-      ? { pipelineCard: m.pipelineCard as "tool" | "gate" | "note" | "director" }
-      : {}),
-    // derived 工具卡欄位族（pipelineCard:"tool"）：四字串欄走 str() 收斂；
-    // unsupported 是 boolean 旗標——truthy 判斷保留 boolean，只過 str() 會剝掉
-    //（同 gate boolean 形態的教訓）。
-    ...(str(m.toolId) !== undefined ? { toolId: str(m.toolId) } : {}),
-    ...(str(m.toolInput) !== undefined ? { toolInput: str(m.toolInput) } : {}),
-    ...(str(m.toolOutput) !== undefined ? { toolOutput: str(m.toolOutput) } : {}),
-    ...(str(m.requiredCapability) !== undefined ? { requiredCapability: str(m.requiredCapability) } : {}),
-    ...(m.unsupported ? { unsupported: true } : {}),
-    // director 節點（gateway director.done 攔截同步，spec §5 片5）：SVG 可達 48KB，
-    // 原樣收字串欄位；planName 明確 null 時保留 null（活卡語義=「目前無方案」）。
-    // 後端 workflow 骨架節點的產出合同/驗收門禁（各一行，SSE canvas.node.created/updated 帶入）。
-    ...(str(m.deliverable) !== undefined ? { deliverable: str(m.deliverable) } : {}),
-    // gate 兩形態（types.ts 註解）：string 門禁全文照走；boolean（workflow-dsl
-    // 的「需人工批准」旗標）原樣保留，不能只過 str() 否則旗標會被剝掉。
-    ...(str(m.gate) !== undefined ? { gate: str(m.gate) } : m.gate === true ? { gate: true } : {}),
-    ...(str(m.directorSessionId) !== undefined ? { directorSessionId: str(m.directorSessionId) } : {}),
-    ...(str(m.planName) !== undefined ? { planName: str(m.planName) } : {}),
-    ...(m.planName === null ? { planName: null } : {}),
-    ...(num(m.shotCount) !== undefined ? { shotCount: num(m.shotCount) } : {}),
-    ...(m.healthOk === true || m.healthOk === false ? { healthOk: m.healthOk } : {}),
-    ...(str(m.topViewSvg) !== undefined ? { topViewSvg: str(m.topViewSvg) } : {}),
-    ...(str(m.cameraViewSvg) !== undefined ? { cameraViewSvg: str(m.cameraViewSvg) } : {}),
-    ...(num(m.revision) !== undefined ? { revision: num(m.revision) } : {}),
-    // 3D 場景卡節點（Astra PRD P1-3）：sceneCard 欄位族收斂（Scene3dCardMetadata）。
-    // 契約全形六欄；非契約形狀（任一必填欄缺失/型別不符）整包丟棄，不製造半形數據。
-    ...(toScene3dCard(m.sceneCard) ? { sceneCard: toScene3dCard(m.sceneCard) } : {}),
-    // 分鏡實體（2026-09-15 刀 2）：AID 21 欄契約。shotNumber 為空即整包丟棄
-    //（分鏡無鏡號 = 無法與門禁 storyboard_qc_17 的 shot_identity 對齊）。
-    ...(normalizeStoryboardShot(m.storyboardShot) ? { storyboardShot: normalizeStoryboardShot(m.storyboardShot)! } : {}),
-    ...(normalizeStoryboardSceneRef(m.storyboardScene)
-      ? { storyboardScene: normalizeStoryboardSceneRef(m.storyboardScene)! }
-      : {}),
-    // 分鏡實體的卡引用＋自動落卡標記（WS7，2026-09-24）：與 storyboardShot 同族的
-    // 雙白名單欄位——漏此處 = 刷新/回舊會話（fromCanvasProject → 本函式）後
-    // 卡引用與冪等標記憑空消失，分鏡節點永遠拿不到卡引用。
-    ...(characterCardIds ? { characterCardIds } : {}),
-    ...(sceneCardIds ? { sceneCardIds } : {}),
-    ...(propCardIds ? { propCardIds } : {}),
-    ...(entityCardId ? { entityCardId } : {}),
-    // 模板交付自動落卡（2026-09-24）：emitsEntity 是**驅動整條落卡鏈**的鍵——漏此處
-    // ＝前端落地剝掉它 → `agent-output-cards.emittedEntityOf` 回 null → 一卡都落不成
-    //（已用真 expandTemplate 輸出 + 本函式＋ compactMetadataForAgent 實錘）。
-    // 三條卡名鍵是 `nameFrom: "input"` 的來源；只放行 emitsEntity 不放行它們，
-    // 卡名只會退回節點標題（「正面」而非角色名）。
-    ...(emitsEntity ? { emitsEntity } : {}),
-    ...(cardNames.input ? { input: cardNames.input } : {}),
-    ...(cardNames.characterName ? { characterName: cardNames.characterName } : {}),
-    ...(cardNames.sceneName ? { sceneName: cardNames.sceneName } : {}),
-    ...(fontSize !== undefined ? { fontSize } : {}),
-    // 協作確認閘的門禁卡狀態（2026-09-24）：漏此處＝SSE 到了也被剝掉，門禁卡永遠
-    // 只有純文字（使用者「資產圖都不讓我們確認」的 UI 側缺口）。三欄全字串才收，
-    // 殘形整包丟棄（不製造半形狀態：缺 request_id 的卡按不下批准）。
-    ...(toGateConfirm(m.gateConfirm) ? { gateConfirm: toGateConfirm(m.gateConfirm)! } : {}),
-    // 分鏡批准狀態（2026-09-24 WS-審查）：與 gateConfirm 同族的雙白名單鍵——漏此處
-    // ＝分鏡面板按下「批准」當下看似生效，刷新/回舊會話（fromCanvasProject → 本函式）
-    // 後退回「未批准」，且分鏡審查面板與門禁的批准態憑空翻面。清洗走卡側同一收口
-    //（`normalizeApprovalState`）：status 不在三值域/非物件 → null → 整包丟棄，
-    // 不製造半形狀態（缺 status 的批准讀不懂，不猜成「已批准」也不猜成「待批准」）。
-    ...(normalizeApprovalState(m.approval) ? { approval: normalizeApprovalState(m.approval)! } : {}),
-  };
+  const out: Record<string, unknown> = {};
+  for (const field of fields) {
+    const clean = DURABLE_FIELD_CLEANERS[field.cleaner];
+    // 未註冊清洗器＝fail-closed（不放行、不猜語義）：注入清單寫錯名稱時寧可漏鍵也不亂放。
+    if (!clean) continue;
+    const value = clean(m[field.key]);
+    if (value !== undefined) out[field.key] = value;
+  }
+  return out as unknown as CanvasNodeMetadata;
 }
 
 /**
@@ -374,26 +365,36 @@ export function toGateConfirm(v: unknown): CanvasNodeGateConfirm | undefined {
   return { request_id: requestId, session_id: sessionId, status };
 }
 
-/** sceneCard 欄位族收斂：六欄逐一驗型，任一必填欄不符契約即整包丟棄。 */
+/**
+ * sceneCard 欄位族收斂。
+ *
+ * 契約（2026-09-27 本機導入刀放寬）：底線＝`glb_path` ＋ `scene_summary` 兩欄為非空字串，
+ * 其餘四欄（turntable_url / stills_urls / blend_path / duration_ms）**可選**——導入卡
+ * 只帶 GLB 也必須活下來。缺底線任一＝整包丟棄（不製造半形場景卡，負向對照有測試）。
+ * 可選欄位照舊逐欄驗型：型別不符＝省略該欄，不連坐整包。
+ */
 function toScene3dCard(v: unknown): Scene3dCardMetadata | undefined {
   if (!v || typeof v !== "object") return undefined;
   const s = v as Record<string, unknown>;
-  const turntableUrl = str(s.turntable_url);
-  const blendPath = str(s.blend_path);
   const glbPath = str(s.glb_path);
   const summary = str(s.scene_summary);
+  if (!glbPath || !summary) return undefined;
+  const turntableUrl = str(s.turntable_url);
+  const blendPath = str(s.blend_path);
   const durationMs = num(s.duration_ms);
   const stills = Array.isArray(s.stills_urls)
     ? s.stills_urls.filter((u): u is string => typeof u === "string")
     : undefined;
-  if (!turntableUrl || !blendPath || !glbPath || !summary || durationMs === undefined || !stills) return undefined;
+  // 來源判別欄位：只收兩值枚舉（未列舉值＝省略鍵，不連坐整包；卡仍以「無來源標記」存活）。
+  const source = s.source === "director" || s.source === "import" ? s.source : undefined;
   return {
-    turntable_url: turntableUrl,
-    stills_urls: stills,
-    blend_path: blendPath,
+    ...(turntableUrl ? { turntable_url: turntableUrl } : {}),
+    ...(stills && stills.length > 0 ? { stills_urls: stills } : {}),
+    ...(blendPath ? { blend_path: blendPath } : {}),
     glb_path: glbPath,
     scene_summary: summary,
-    duration_ms: durationMs,
+    ...(durationMs !== undefined ? { duration_ms: durationMs } : {}),
+    ...(source ? { source } : {}),
   };
 }
 
@@ -413,6 +414,8 @@ export function normalizeCanvasNode(raw: {
   metadata?: Record<string, unknown>;
   /** gateway 泳道座標已定局（moved:true）＝ reducer layoutGraph 不得重排。只透傳 true。 */
   moved?: boolean;
+  /** 軟刪時間戳（節點級欄位，非 metadata）；只透傳非空字串。 */
+  deletedAt?: string;
 }): CanvasNode {
   const type = toNodeType(raw.type);
   const size = CANVAS_NODE_DEFAULT_SIZE[type];
@@ -426,6 +429,8 @@ export function normalizeCanvasNode(raw: {
     metadata: toNodeMetadata(raw.metadata),
     // moved 是 boolean 旗標——只透傳 true（false/缺省不帶），同 gate/unsupported 形態教訓。
     ...(raw.moved === true ? { moved: true } : {}),
+    // 軟刪標記是節點級欄位（不進 metadata 雙白名單）；空字串＝未刪。
+    ...(str(raw.deletedAt)?.length ? { deletedAt: raw.deletedAt } : {}),
   };
 }
 
@@ -727,6 +732,11 @@ export interface CanvasSnapshot {
   nodes: CanvasNode[];
   connections: CanvasConnection[];
   viewport: CanvasViewport;
+  /**
+   * 軟刪節點（2026-09-27）：undo/redo 快照也要帶，否則「刪除→撤銷」後
+   * deletedNodes 會殘留一份已回到節點清單的重複項。optional＝舊快照相容。
+   */
+  deletedNodes?: CanvasNode[];
 }
 
 export interface CanvasHistory {
@@ -792,7 +802,12 @@ export function toCanvasProject(
     title: base.title || "未命名画布",
     createdAt: base.createdAt ?? now,
     updatedAt: now,
-    nodes: state.nodes,
+    // 軟刪節點仍要落盤（否則 restore API/還原撤銷都找不到資料）：
+    // 帶 deletedAt 隨 nodes 一起存，讀取端 fromCanvasProject 再拆回 deletedNodes。
+    nodes:
+      state.deletedNodes && state.deletedNodes.length > 0
+        ? [...state.nodes, ...state.deletedNodes]
+        : state.nodes,
     connections: state.connections,
     viewport,
     backgroundMode,
@@ -801,6 +816,8 @@ export function toCanvasProject(
     ...(projectType ? { projectType } : {}),
     ...(isValidCreationStep(currentStep) ? { currentStep } : {}),
     ...(episodes && episodes.length > 0 ? { episodes } : {}),
+    // 版本歷史（2026-09-27）：有版本才帶鍵，舊專案形狀不變。
+    ...(state.nodeVersions && state.nodeVersions.length > 0 ? { nodeVersions: state.nodeVersions } : {}),
   };
 }
 
@@ -811,9 +828,10 @@ export function toCanvasProject(
 export function fromCanvasProject(project: {
   nodes?: unknown;
   connections?: unknown;
+  nodeVersions?: unknown;
 }): CanvasReducerState {
   const rawNodes = Array.isArray(project.nodes) ? project.nodes : [];
-  const nodes = rawNodes.flatMap((n) => {
+  const allNodes = rawNodes.flatMap((n) => {
     if (!n || typeof n !== "object") return [];
     const r = n as Record<string, unknown>;
     if (typeof r.id !== "string" || r.id.length === 0) return [];
@@ -827,11 +845,15 @@ export function fromCanvasProject(project: {
       ...(num(r.width) !== undefined ? { width: num(r.width) } : {}),
       ...(num(r.height) !== undefined ? { height: num(r.height) } : {}),
       ...(r.metadata && typeof r.metadata === "object" ? { metadata: r.metadata as Record<string, unknown> } : {}),
+      ...(typeof r.deletedAt === "string" && r.deletedAt.length > 0 ? { deletedAt: r.deletedAt } : {}),
     });
     // 存檔裡的座標要原樣還原（normalizeCanvasNode 只在缺座標時給 0,0）。
     const pos = r.position as CanvasPosition | undefined;
     return [pos && num(pos.x) !== undefined && num(pos.y) !== undefined ? { ...node, position: { x: pos.x, y: pos.y } } : node];
   });
+  // 軟刪節點（有 deletedAt）不進可見 nodes，收進 deletedNodes（可經 restore 還原）。
+  const nodes = allNodes.filter((n) => !n.deletedAt);
+  const deletedNodes = allNodes.filter((n) => n.deletedAt);
   const ids = new Set(nodes.map((n) => n.id));
   const rawConns = Array.isArray(project.connections) ? project.connections : [];
   const connections = rawConns.flatMap((c) => {
@@ -842,7 +864,14 @@ export function fromCanvasProject(project: {
     if (!ids.has(r.fromNodeId) || !ids.has(r.toNodeId)) return [];
     return [{ id: r.id, fromNodeId: r.fromNodeId, toNodeId: r.toNodeId }];
   });
-  return { units: [], nodes, connections };
+  const nodeVersions = normalizeNodeVersions(project.nodeVersions);
+  return {
+    units: [],
+    nodes,
+    connections,
+    ...(deletedNodes.length > 0 ? { deletedNodes } : {}),
+    ...(nodeVersions ? { nodeVersions } : {}),
+  };
 }
 
 /**

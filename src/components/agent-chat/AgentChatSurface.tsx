@@ -21,11 +21,9 @@ import {
   Loader2,
   LogIn,
   MessageSquarePlus,
-  MoreHorizontal,
   Search,
   Settings,
   SlidersHorizontal,
-  Sparkles,
   SquarePen,
 } from "lucide-react";
 import {
@@ -194,10 +192,26 @@ export interface AgentChatSurfaceProps {
    * 2026-08-25 模板庫點卡：要自動發出的第一條用戶消息（模板 initialPrompt）。
    * 與 initialPrompt（半句話藥丸，點了才送）不同：點模板卡本身就是發送動作，
    * 這條直接送出，不讓用戶再點一次發送。nonce 變化即觸發一次。
+   *
+   * echo（2026-09-27）：這條訊息要不要當成「使用者自己說的話」進 transcript。
+   * 模板注入＝一長串機器配方，默認不進（silent）；但宣傳片結尾那句是使用者自己
+   * 打的，必須進——不然送出後到他看到第一個字之前是一片空白（暴君：TTFT 前空白）。
    */
-  agentInjection?: { text: string; nonce: number; directive?: string } | null;
+  agentInjection?: { text: string; nonce: number; directive?: string; echo?: boolean } | null;
   /** 用戶發出消息時回調（上層收起右側模板庫）。 */
   onUserMessage?: () => void;
+  /**
+   * 一句話因為「沒登入」送不出去時上拋（上層留住，登入後補送）。
+   * 詳見 use-agent-chat 的 UseAgentChatOptions.onSendBlockedByAuth。
+   */
+  onSendBlockedByAuth?: (text: string) => void;
+  /**
+   * 外部「把這句話預填進輸入框」（新人禮首登彈窗的主按鈕）。只搬運不發送——
+   * 半句話直接送出去會立刻開一輪扣費生成（D-5），所以走與 D-24 藥丸同一條
+   * prefill 通路：輸入框有字、光標在末尾、焦點在框上，人再按送出。
+   * 只認 nonce 變化，輸入區吃掉後不重播（見下面的 effect）。
+   */
+  prefillRequest?: { text: string; nonce: number } | null;
 }
 
 export function AgentChatSurface({
@@ -215,6 +229,8 @@ export function AgentChatSurface({
   startNewSessionRef,
   agentInjection,
   onUserMessage,
+  onSendBlockedByAuth,
+  prefillRequest,
   onExit,
   headerExtra,
 }: AgentChatSurfaceProps) {
@@ -237,6 +253,7 @@ export function AgentChatSurface({
     // 是恢复旧会话，不是建号，不受影响）。
     ...(onCanvasEvent ? { onCanvasEvent } : {}),
     ...(canvasStateProvider ? { canvasStateProvider } : {}),
+    ...(onSendBlockedByAuth ? { onSendBlockedByAuth } : {}),
   });
   const {
     state,
@@ -280,21 +297,6 @@ export function AgentChatSurface({
   // PWA standalone 登录交接面板（null = 未开启）。storage 与常用浏览器隔离，
   // popup 链路在 standalone 视窗里拿不回登录态，必须走 handoff。
   const [handoffLogin, setHandoffLogin] = useState<{ ticket: string; loginUrl: string } | null>(null);
-
-  // ⋯ 收纳菜单（2026-09-20 顶栏减负）：历史 / 资产 / 设定三颗触发钮收进
-  // lg-sheet 小菜单——功能不删，只是收纳。开着时点外面就收（与历史下拉同一条规矩）。
-  const [overflowOpen, setOverflowOpen] = useState(false);
-  const overflowRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (!overflowOpen) return;
-    const onDocPointerDown = (ev: PointerEvent): void => {
-      if (overflowRef.current && !overflowRef.current.contains(ev.target as Node)) {
-        setOverflowOpen(false);
-      }
-    };
-    document.addEventListener("pointerdown", onDocPointerDown);
-    return () => document.removeEventListener("pointerdown", onDocPointerDown);
-  }, [overflowOpen]);
 
   // 助理设定的触发钮收进 ⋯ 菜单：AgentSettingsPopover 是自带触发钮的自足组件
   // （无受控 open prop，档案不在本刀白名单），这里以 0×0 容器承载它的原触发钮，
@@ -468,18 +470,6 @@ export function AgentChatSurface({
   const isActive = connection !== "idle" && connection !== "closed";
   const isInline = variant === "inline";
 
-  // 顶栏极弱状态文字（CONNECTION_META 语义保留）：常态（idle/open）只给
-  // 「随时待命」级别的弱文字，不再常驻呼吸绿点；reconnecting / closed /
-  // connecting 照旧显示原状态文案，异常态仍看得见。
-  const surfaceStatusText =
-    connection === "reconnecting"
-      ? "正在重新连接…"
-      : connection === "closed"
-        ? "会话已结束"
-        : connection === "connecting"
-          ? "连接中…"
-          : "随时待命";
-
   const onSaveToLibrary = useCallback(async (item: AgentImageItem): Promise<void> => {
     // 客户端幂等：连点两下不该在资产包里躺两条一样的记录。
     if (savedIds.has(item.id)) return;
@@ -617,6 +607,16 @@ export function AgentChatSurface({
     setPrefill({ text, nonce: Date.now() });
   }, [draft]);
 
+  /**
+   * 外部預填（新人禮彈窗主按鈕）：與 D-24 藥丸同一條通路——只搬進輸入框，不發送。
+   * 依賴是物件參考，所以「同一句話再點一次」由父層換 nonce 觸發；輸入區吃掉後
+   * 會把 internal prefill 清空，而這裡的依賴沒變，不會重播（人在打字的東西不會被沖）。
+   */
+  useEffect(() => {
+    if (!prefillRequest) return;
+    setPrefill(prefillRequest);
+  }, [prefillRequest]);
+
   // 稳定的引用：输入区把它放在 effect 依赖里，每次渲染换新函数会白跑一轮。
   const clearPrefill = useCallback((): void => setPrefill(null), []);
 
@@ -650,11 +650,10 @@ export function AgentChatSurface({
     if (!agentInjection || injectedNonceRef.current === agentInjection.nonce) return;
     injectedNonceRef.current = agentInjection.nonce;
     onUserMessage?.();
-    // directive（若有）随首条消息隐形上送：网关拼进 system，用户全程看不见。
-    // silent：注入的模板 prompt 同样不进 transcript——用户只看到 agent 的引导。
+    // directive 隐形上送（网关拼进 system）；模板注入默认 silent，echo 才进 transcript。
     void send(agentInjection.text, {
       ...(agentInjection.directive ? { sessionDirective: agentInjection.directive } : {}),
-      silent: true,
+      silent: !agentInjection.echo,
     });
   }, [agentInjection, send, onUserMessage]);
 
@@ -729,23 +728,45 @@ export function AgentChatSurface({
       style={isInline ? undefined : { minHeight: "calc(100dvh - 5rem)", height: "calc(100dvh - 5rem)" }}
     >
       {/*
-        面板 Header（2026-09-20 顶栏减负，视觉语言来自已批准的 agent-chat-preview）：
-        logo 圆标（lg-tint-blue）+ 「AI 助理」标题 + 极弱状态文字（常态「随时待命」，
-        reconnecting / closed 照旧显示原状态文案）+ 右侧三个幽灵钮
-        （新会话 SquarePen / 直接生成 SlidersHorizontal / ⋯ MoreHorizontal）。
-        历史 / 资产 / 设定三颗触发钮收进 ⋯ 的 lg-sheet 小菜单——回调还是原有的
-        toggleHistory / toggleAssets / 设定弹层，功能不删，只是收纳。
+        面板 Header（2026-09-27 暴君糾正後定版；2026-09-20 顶栏减负為前身）：
+        純圖示列、零文字。原本的 lg-tint-blue 星芒圆标＋「AI 助理」標題連同狀態
+        文字整組拆掉——助理就在眼前，標題與「随时待命」式描述零資訊，還占掉頂欄
+        一整塊；那個位置現在放的是 资产 / 历史 兩顆圖示（它們原本埋在 ⋯ 選單裡）。
+        右側維持 新会话 SquarePen / 直接生成 SlidersHorizontal / 设置 Settings。
+
+        連帶作廢：⋯ 收納選單（三項現在全是直接入口，少一層菜單就少一次點擊）。
+        連線異常態（reconnecting / closed）的文字不再由頂欄承擔：對話區
+        （AgentChatPanel）本來就有自己的重試入口與「原因：…」行，頂欄那份是重複的。
+        設定彈層本體仍由 AgentSettingsPopover 自足渲染，齒輪只是它的觸發鈕。
         embedded（工作站面板態）：外層面板已有把手，這裡的把手省掉——單層。
       */}
       <header className={cn("flex shrink-0 flex-col", embedded ? "mb-1" : "pb-2")}>
-        <div className="flex items-center gap-2.5">
-          <span className="lg-tint-blue flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-ios-blue">
-            <Sparkles className="h-4 w-4" aria-hidden="true" />
-          </span>
-          <div className="min-w-0 flex-1">
-            <h2 className="text-[15px] font-semibold text-foreground">AI 助理</h2>
-            <p className="truncate text-ios-caption1 text-foreground/35">{surfaceStatusText}</p>
+        <div className="flex flex-wrap items-center gap-x-1 gap-y-1">
+          {/* 資產／歷史：就是原本標題那塊位置，點外即收的浮層機制沿用各自原本的
+              outside-click；圖示即「logo」，不再掛文字標籤。 */}
+          <div className="flex items-center gap-0.5">
+            <button
+              type="button"
+              onClick={() => void toggleAssets()}
+              aria-expanded={showAssets}
+              aria-label="我的资产"
+              title="我的资产"
+              className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 touch-manipulation"
+            >
+              <Boxes className="h-[18px] w-[18px]" aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              onClick={() => void toggleHistory()}
+              aria-expanded={showHistory}
+              aria-label="对话历史"
+              title="对话历史"
+              className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 touch-manipulation"
+            >
+              <History className="h-[18px] w-[18px]" aria-hidden="true" />
+            </button>
           </div>
+          {/* 右簇靠 ml-auto 頂到最右（中間沒有 flex-1 的標題塊可撐了）。 */}
           <div className="ml-auto flex items-center gap-0.5">
             <button
               type="button"
@@ -772,69 +793,25 @@ export function AgentChatSurface({
                 <SlidersHorizontal className="h-[18px] w-[18px]" aria-hidden="true" />
               </button>
             )}
-            {/* ⋯ 收纳菜单：历史 / 资产 / 设定（icon + 文字行，点击走原有回调）。 */}
-            <div ref={overflowRef} className="relative">
-              <button
-                type="button"
-                onClick={() => setOverflowOpen((v) => !v)}
-                aria-expanded={overflowOpen}
-                aria-label="更多选项"
-                title="更多选项"
-                className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 touch-manipulation"
-              >
-                <MoreHorizontal className="h-[18px] w-[18px]" aria-hidden="true" />
-              </button>
-              {overflowOpen && (
-                <div className="lg-sheet animate-lg-appear absolute right-0 top-[calc(100%+6px)] z-20 w-36 overflow-hidden rounded-[16px] p-1.5">
-                  {/* MASTER.md：每张 sheet 都要有一条顶缘高光线。 */}
-                  <div className="pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-[inherit] bg-gradient-to-r from-transparent via-white to-transparent opacity-80" />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setOverflowOpen(false);
-                      void toggleHistory();
-                    }}
-                    aria-expanded={showHistory}
-                    title="对话历史"
-                    className="flex min-h-11 w-full cursor-pointer items-center gap-2.5 rounded-[10px] px-2.5 text-left text-[15px] text-foreground/70 transition-colors hover:bg-[rgba(0,122,255,0.12)] touch-manipulation"
-                  >
-                    <History className="h-4 w-4 shrink-0 text-foreground/40" aria-hidden="true" />
-                    历史
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setOverflowOpen(false);
-                      void toggleAssets();
-                    }}
-                    aria-expanded={showAssets}
-                    title="我的资产"
-                    className="flex min-h-11 w-full cursor-pointer items-center gap-2.5 rounded-[10px] px-2.5 text-left text-[15px] text-foreground/70 transition-colors hover:bg-[rgba(0,122,255,0.12)] touch-manipulation"
-                  >
-                    <Boxes className="h-4 w-4 shrink-0 text-foreground/40" aria-hidden="true" />
-                    资产
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setOverflowOpen(false);
-                      openSettings();
-                    }}
-                    title="助理设定"
-                    className="flex min-h-11 w-full cursor-pointer items-center gap-2.5 rounded-[10px] px-2.5 text-left text-[15px] text-foreground/70 transition-colors hover:bg-[rgba(0,122,255,0.12)] touch-manipulation"
-                  >
-                    <Settings className="h-4 w-4 shrink-0 text-foreground/40" aria-hidden="true" />
-                    设置
-                  </button>
-                </div>
-              )}
-            </div>
+            {/* 设置：原本是 ⋯（MoreHorizontal）＋選單，2026-09-27 暴君糾正後
+                歷史與資產已直接站上頂欄，這顆就只剩設定一件事，所以換成齒輪。
+                彈層本體仍是 AgentSettingsPopover 的自足渲染（0×0 容器裡的
+                原觸發鈕被程序化 click），outside-click 與持久化鏈路零改動。 */}
+            <button
+              type="button"
+              onClick={openSettings}
+              aria-label="设置"
+              title="助理设定"
+              className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 touch-manipulation"
+            >
+              <Settings className="h-[18px] w-[18px]" aria-hidden="true" />
+            </button>
             {/* 助理设定的原触发钮：收进 0×0 容器（视觉退役，程序化 click 保活），
                 弹层本体由 AgentSettingsPopover 自行渲染（fixed lg-sheet）。 */}
             <div ref={settingsTriggerWrapRef} className="absolute h-0 w-0 overflow-hidden" aria-hidden="true">
               <AgentSettingsPopover />
             </div>
-            {/* 历史下拉浮层：触发钮已收进 ⋯ 菜单，fixed 定位与 outside-click 机制沿用。 */}
+            {/* 历史下拉浮层：触发钮＝顶栏那颗「历史」，fixed 定位与 outside-click 机制沿用。 */}
             <div ref={historyRef} className="relative">
         {showHistory && (
           <div className="lg-sheet fixed left-1/2 top-[var(--agent-pop-top,5rem)] z-50 w-56 -translate-x-1/2 rounded-ios-2xl p-1">

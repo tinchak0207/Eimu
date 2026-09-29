@@ -26,6 +26,14 @@ import {
   isVideoFile,
   type FrameTimestamp,
 } from "@/lib/video-frames";
+import {
+  SkillSlashMenu,
+  applySkillPick,
+  moveActiveIndex,
+  shouldOpenSlashMenu,
+  slashQueryOf,
+  type SlashMenuSkill,
+} from "./SkillSlashMenu";
 
 export interface AgentComposerProps {
   /** 为 true 时（disabled 属性或会话已关闭）整个输入区禁用。 */
@@ -229,6 +237,21 @@ function AgentComposerComponent({
 }: AgentComposerProps) {
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  /**
+   * 打「/」直呼 Skill（2026-09-27）：输入框开头的「/」把能力条目当场叫出来。
+   *
+   * 闸门有两层，都在纯函数里：slashArmed＝使用者**真的打出那一颗「/」**的动作
+   * （只有动作才开菜单，空框不主动弹一层盖住欢迎态）；shouldOpenSlashMenu(text)
+   * ＝文字形态還是指令（空框或首字符「/」）。两层都真才显示。
+   */
+  const [slashArmed, setSlashArmed] = useState(false);
+  /** 菜单当前选中行（受控）。查询词一变就复位到第一行。 */
+  const [slashIndex, setSlashIndex] = useState(0);
+  /**
+   * 菜单当前可见列表（由菜单上报）。Enter/Tab 要按 slashIndex 取当前项，读它即可——
+   * 用 ref 不用 state：列表本身没有独立渲染意义，为它多一轮渲染不值。
+   */
+  const slashSkillsRef = useRef<SlashMenuSkill[]>([]);
   // 送出进行中：钉住 spinner 到投递落地（onSend 的 promise 结算或硬保险到点）。
   const [sending, setSending] = useState(false);
   /**
@@ -243,6 +266,9 @@ function AgentComposerComponent({
   // 键盘规避：composer 根元素需要被抬升/复位，所以给它一个 ref。
   const composerRef = useRef<HTMLDivElement>(null);
   const trimmed = text.trim();
+  /** 斜线菜单：查询词＝「/」之后的文字；两层闸门都真才显示（见上面 slashArmed）。 */
+  const slashQuery = slashQueryOf(text);
+  const slashMenuOpen = slashArmed && shouldOpenSlashMenu(text);
 
   const handlePick = useCallback(() => {
     fileInputRef.current?.click();
@@ -570,8 +596,60 @@ function AgentComposerComponent({
     };
   }, []);
 
+  /**
+   * 选中一条技能（点行，或菜单开着时的 Enter/Tab）：
+   * **只把「/技能名 」写回输入框**——不自动送出（送出=立刻扣费，与 D-5 花钱前必
+   * 交用户确认冲突）、不动附件、不改送出逻辑。焦点与高度回收照打字路径走，
+   * 光标落到末尾＝使用者下一个动作就是接着打需求。
+   */
+  const handleSlashPick = useCallback((skill: SlashMenuSkill) => {
+    setText((current) => applySkillPick(current, skill));
+    setSlashArmed(false);
+    setSlashIndex(0);
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(el.value.length, el.value.length);
+      autoGrow(el);
+    });
+  }, []);
+
+  /** 菜单上报可见列表（进 ref，不触渲染）。 */
+  const handleSlashSkills = useCallback((skills: SlashMenuSkill[]) => {
+    slashSkillsRef.current = skills;
+  }, []);
+
   const handleKeyDown = useCallback(
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
+      /*
+        打「/」直呼 Skill：菜单开着时上下键移动、Enter/Tab 选中、Esc 收起。
+        只有菜单开着才走这一段；关着时下面每一行逐字不变（送出/换行/IME 契约不动）。
+        IME 组字中的按键先让开：候选词要用上下键翻页、Enter 确认，不能被菜单吃掉。
+      */
+      if (slashMenuOpen) {
+        if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          const delta = event.key === "ArrowDown" ? 1 : -1;
+          setSlashIndex((index) => moveActiveIndex(index, delta, slashSkillsRef.current.length));
+          return;
+        }
+        if (event.key === "Enter" || event.key === "Tab") {
+          // 选中 ≠ 送出：把技能名写回输入框就停手。没有可选项时也吞掉这次 Enter
+          // （框里正打着一个指令，送出半截「/关键词」不是使用者要的）。
+          event.preventDefault();
+          const picked = slashSkillsRef.current[slashIndex];
+          if (picked) handleSlashPick(picked);
+          return;
+        }
+        if (event.key === "Escape") {
+          // 收起菜单：不送出、不清输入框（清掉等于吃掉使用者打的指令）。
+          event.preventDefault();
+          setSlashArmed(false);
+          return;
+        }
+      }
       // Enter 发送，Shift+Enter 换行。
       if (event.key === "Enter" && !event.shiftKey) {
         // 输入法组字中的 Enter 属于输入法（确认候选词），不是送出指令。
@@ -584,7 +662,7 @@ function AgentComposerComponent({
         handleSend();
       }
     },
-    [canSend, handleSend],
+    [canSend, handleSend, handleSlashPick, slashIndex, slashMenuOpen],
   );
 
   /** Ctrl+V 粘贴：有文件时走附件管道，纯文本/HTML 放行。 */
@@ -806,7 +884,12 @@ function AgentComposerComponent({
           ref={textareaRef}
           value={text}
           onChange={(event) => {
-            setText(event.target.value);
+            const next = event.target.value;
+            // 斜线直呼：只在「打進那一顆 /」的當下開菜單（text 還是編輯前的值，
+            // 量的是這一擊的變化）；選完技能接著打需求不再弹。
+            setSlashArmed(next.startsWith("/") && !text.startsWith("/"));
+            if (next.startsWith("/")) setSlashIndex(0);
+            setText(next);
             autoGrow(event.currentTarget);
           }}
           onKeyDown={handleKeyDown}
@@ -823,6 +906,21 @@ function AgentComposerComponent({
           )}
         />
       </div>
+
+      {/*
+        打「/」直呼 Skill 的浮层：贴在输入框正上方（元件自己 absolute bottom-full，
+        零 layout shift）。只有两层闸门都真时才渲染——空框不主动弹一层盖住欢迎态。
+      */}
+      {slashMenuOpen ? (
+        <SkillSlashMenu
+          query={slashQuery}
+          activeIndex={slashIndex}
+          onActiveIndexChange={setSlashIndex}
+          onPick={handleSlashPick}
+          onClose={() => setSlashArmed(false)}
+          onSkillsChange={handleSlashSkills}
+        />
+      ) : null}
 
       {onStop && !canSend && !sending ? (
             /*

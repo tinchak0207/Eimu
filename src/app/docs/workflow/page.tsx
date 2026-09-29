@@ -1,9 +1,13 @@
 import type { Metadata } from "next";
+import { getSiteUrlFromEnv } from "@/lib/site-url";
 import { Workflow } from "lucide-react";
 import { SectionTitle, Specular, Step } from "../DocsShell";
 
+const SITE_URL = getSiteUrlFromEnv();
+
 export const metadata: Metadata = {
-  title: "工作流：模板库与画布 | 文档中心 | Eimu",
+  title: "工作流：模板库与画布 | 文档中心",
+  alternates: { canonical: `${SITE_URL}/docs/workflow` },
 };
 
 // ---- 模板转盘卡面（现场逐字：与首页模板轮盘 8 张卡面一致，domain/name/note 不可改写）----

@@ -1,3 +1,9 @@
+---
+name: contour-to-mesh
+description: Build Blender mesh surfaces directly from extracted 2D contours/masks instead of approximate primitives. Use for 1:1 mascot/logo reconstruction, exact leaf/petal silhouettes, filled wireframe shapes, shallow bas-relief forms, or when the model outline must match a front template before adding depth.
+when_to_use: Source-locked contour-derived meshes, silhouette-first modeling, triangulated mask/contour surfaces, mesh generation from OpenCV contours, or replacing generic ellipses/primitives with measured shapes.
+allowed-tools: Read Bash Glob Grep mcp__blender__execute_blender_code mcp__blender__get_scene_info mcp__blender__get_object_info
+---
 <!--
 來源（輪子）: https://github.com/RobLe3/cc-blender-skill — plugin/skills/contour-to-mesh/SKILL.md
 License: MIT · 原作者: RobLe3 (https://github.com/RobLe3)
@@ -5,12 +11,6 @@ License: MIT · 原作者: RobLe3 (https://github.com/RobLe3)
 Blender 5.2 雷區：① BLENDER_EEVEE_NEXT 已死，只認 BLENDER_EEVEE/BLENDER_WORKBENCH/CYCLES ② Filmic 已移除，AgX 為默認 ③ action.fcurves 在 4.4+ 移除，走 layers[*].strips[*].channelbags[*].fcurves
 正文保留英文原文；上游 MCP 調用表述執行時改走我方 bridge /v1/execute 同構協議。
 -->
----
-name: contour-to-mesh
-description: Build Blender mesh surfaces directly from extracted 2D contours/masks instead of approximate primitives. Use for 1:1 mascot/logo reconstruction, exact leaf/petal silhouettes, filled wireframe shapes, shallow bas-relief forms, or when the model outline must match a front template before adding depth.
-when_to_use: Source-locked contour-derived meshes, silhouette-first modeling, triangulated mask/contour surfaces, mesh generation from OpenCV contours, or replacing generic ellipses/primitives with measured shapes.
-allowed-tools: Read Bash Glob Grep mcp__blender__execute_blender_code mcp__blender__get_scene_info mcp__blender__get_object_info
----
 
 # Contour to Mesh
 

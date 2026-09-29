@@ -166,8 +166,9 @@ test("R4：每行含配方库与交付契约字段，requiredFields 逐字来自
 
 test("R4：空 skillPaths 行照实写「未配置」（零编造路径）", () => {
   const digest = buildExpertRegistryDigest();
-  // 真源现状（审计 §3）：video-director/editor/screenwriter 的 persona 常量为空数组。
-  for (const id of ["video-director", "editor", "screenwriter"]) {
+  // 真源现状（审计 §3；2026-09-27 剪輯域配方庫落庫後 editor 自空集移除）：
+  // video-director/screenwriter 的 persona 常量为空数组。
+  for (const id of ["video-director", "screenwriter"]) {
     const line = digest.split("\n").find((l) => l.startsWith(`- ${id}（`));
     assert.ok(line, `${id} 行必须存在`);
     assert.ok(
@@ -176,7 +177,8 @@ test("R4：空 skillPaths 行照实写「未配置」（零编造路径）", () 
     );
   }
   // 非空行不得出现「未配置」（照 registry 现值为非空，逐字输出）。
-  for (const id of ["director3d", "music", "motion-director", "web3d-director"]) {
+  // editor 于 2026-09-27 配方库落库后进本列（skills/editor/ 域根+六子配方）。
+  for (const id of ["director3d", "music", "motion-director", "web3d-director", "editor"]) {
     const line = digest.split("\n").find((l) => l.startsWith(`- ${id}（`));
     assert.ok(line, `${id} 行必须存在`);
     assert.ok(

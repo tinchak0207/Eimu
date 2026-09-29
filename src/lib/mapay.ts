@@ -93,8 +93,10 @@ export function buildMapayCheckoutFields(input: {
   orderId: string;
   paymentType: MapayPaymentType;
   plan: MapayPlanInput;
+  /** 已登入下單時的三段自簽值（`planId.userId.hmac8`，見 mapay-order-param.ts）；省略＝舊格式 plan.id。 */
+  param?: string;
 }): MapayFields {
-  const { config, orderId, paymentType, plan } = input;
+  const { config, orderId, paymentType, plan, param } = input;
   const siteHostname = config.siteUrl.replace(/^https?:\/\//, "");
   const fields: MapayFields = {
     pid: config.pid,
@@ -104,7 +106,7 @@ export function buildMapayCheckoutFields(input: {
     return_url: `${config.siteUrl}/api/payments/mapay/return`,
     name: `${siteHostname} ${plan.name} ${plan.coins}金币`,
     money: formatMapayMoney(plan.price),
-    param: plan.id,
+    param: param ?? plan.id,
     sitename: siteHostname,
   };
 

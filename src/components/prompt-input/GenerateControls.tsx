@@ -18,6 +18,7 @@ import {
   type OutputResolution,
 } from "@/lib/generation-model-catalog";
 import { cn } from "@/lib/utils";
+import { CAMERA_MOTION_PRESETS } from "@/lib/camera-motion-presets";
 import { LABEL_CLASS, RAIL_CLASS, ROW_CLASS } from "@/components/prompt-input/rail-classes";
 
 interface GenerateControlsProps {
@@ -46,6 +47,10 @@ interface GenerateControlsProps {
   followRatioInfo?: { ratio: AspectRatio; deviation: number } | null;
   /** 选中「跟随参考图」。 */
   onFollowReferenceSelect?: () => void;
+  /** 视频运镜预设（camera-motion-presets 的 key；null＝不指定）。 */
+  cameraMotionKey?: string | null;
+  /** 选运镜：PromptInput 把该运镜指令作为提示词后缀替换进输入框。 */
+  onCameraMotionChange?: (key: string | null) => void;
 }
 
 /**
@@ -74,6 +79,8 @@ export function GenerateControls({
   followReferenceRatio = false,
   followRatioInfo = null,
   onFollowReferenceSelect,
+  cameraMotionKey = null,
+  onCameraMotionChange,
 }: GenerateControlsProps) {
   const aspectRatios = modelAspectRatios(modelId);
   const resolutions = modelResolutions(modelId);
@@ -212,6 +219,32 @@ export function GenerateControls({
                               generateAudio,
                             })} 币
                           </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
+                {isVideo && onCameraMotionChange ? (
+                  <div className={ROW_CLASS}>
+                    <span className={LABEL_CLASS}>运镜</span>
+                    <div className={RAIL_CLASS}>
+                      <button
+                        type="button"
+                        onClick={() => onCameraMotionChange(null)}
+                        className={cn("style-chip", cameraMotionKey === null && "active")}
+                      >
+                        不指定
+                      </button>
+                      {CAMERA_MOTION_PRESETS.map((preset) => (
+                        <button
+                          key={preset.key}
+                          type="button"
+                          title={preset.name}
+                          onClick={() => onCameraMotionChange(preset.key)}
+                          className={cn("style-chip", cameraMotionKey === preset.key && "active")}
+                        >
+                          {preset.name}
                         </button>
                       ))}
                     </div>

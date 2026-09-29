@@ -3,13 +3,10 @@
 
 import { NextResponse } from "next/server";
 import { after } from "next/server";
-import {
-  authenticateImageUser,
-  reserveImageQuota,
-  refundImageQuota,
-  ImageBillingRevertedError,
-} from "@/lib/image-billing";
+import { authenticateImageUser } from "@/lib/image-billing";
+import { refundSyncCharge, commitSyncCharge, reserveSyncCharge } from "@/lib/generation-core/sync-charge";
 import { QUOTA_PER_COIN } from "@/lib/new-api-client";
+import { PIXAI_TEMPLATE_MODEL_ID } from "@/lib/image-model-ids.js";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -53,12 +50,18 @@ async function handle(req: Request) {
     return NextResponse.json({ success: false, message: auth.message }, { status: auth.status });
   }
 
-  try {
-    await reserveImageQuota(auth.user.id, requiredQuota, auth.user.quota);
-  } catch (error) {
-    if (error instanceof ImageBillingRevertedError) {
-      return NextResponse.json({ success: false, message: "余额不足，请先充值。" }, { status: 402 });
-    }
+  // 錢走生產平面門面（V-08）：有帳本的實例留 billing_operation 列；失敗一律 402 同形。
+  const charged = await reserveSyncCharge({
+    userId: auth.user.id,
+    quota: requiredQuota,
+    action: "template-generations",
+    modelId: PIXAI_TEMPLATE_MODEL_ID,
+    kind: "image_generate",
+    source: "web",
+    tenantId: `web:${auth.user.id}`,
+    requestedCount: batch,
+  });
+  if (!charged.ok) {
     return NextResponse.json({ success: false, message: "余额不足，请先充值。" }, { status: 402 });
   }
 
@@ -67,6 +70,8 @@ async function handle(req: Request) {
   try {
     raw = await req.arrayBuffer();
   } catch (error) {
+    // 已預扣：讀體失敗也必須退（舊碼漏退；帳本化後不退會卡成 submit_unknown 凍結錢）。
+    after(await refundSyncCharge(charged.charge, { status: 400, detail: "Failed to read request body." }));
     return NextResponse.json(
       { success: false, message: `Failed to read request body: ${error instanceof Error ? error.message : String(error)}` },
       { status: 400 },
@@ -85,9 +90,10 @@ async function handle(req: Request) {
       signal: AbortSignal.timeout(240_000),
     });
   } catch (error) {
-    after(() => {
-      void refundImageQuota(auth.user.id, requiredQuota).catch(() => {});
-    });
+    after(await refundSyncCharge(charged.charge, {
+      status: 502,
+      detail: `Control plane request failed: ${error instanceof Error ? error.message : String(error)}`,
+    }));
     return NextResponse.json(
       { success: false, message: `Control plane request failed: ${error instanceof Error ? error.message : String(error)}` },
       { status: 502 },
@@ -96,9 +102,7 @@ async function handle(req: Request) {
 
   if (!response.ok) {
     const text = await response.text();
-    after(() => {
-      void refundImageQuota(auth.user.id, requiredQuota).catch(() => {});
-    });
+    after(await refundSyncCharge(charged.charge, { status: response.status, detail: text.slice(0, 2000) }));
     return new NextResponse(text, {
       status: response.status < 500 ? response.status : 502,
       headers: { "Content-Type": response.headers.get("content-type") ?? "application/json" },
@@ -106,6 +110,7 @@ async function handle(req: Request) {
   }
 
   const text = await response.text();
+  after(await commitSyncCharge(charged.charge, { delivered: charged.charge.requestedCount }));
   return new NextResponse(text, {
     status: response.status,
     headers: { "Content-Type": response.headers.get("content-type") ?? "application/json" },

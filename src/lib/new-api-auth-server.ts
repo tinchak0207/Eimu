@@ -30,7 +30,10 @@ type TokenResult = {
   data?: string;
 };
 
-const PROD_GATEWAY_BASE = "http://43.172.85.76";
+// [riskclose 2026-09-27] TLS channel: nginx store vhost rewrites /newapi/* -> new-api.
+// The old bare-IP plaintext gateway (http://43.172.85.76) had its /api management
+// surface closed with 444; only this TLS path is reachable by the Vercel site.
+const PROD_GATEWAY_BASE = "https://store.tinchak0207.xyz/newapi";
 
 export function getGatewayBaseUrl() {
   return (process.env.GATEWAY_BASE_URL

@@ -155,3 +155,12 @@ redteam-*
 # 例外：vps-tools/ 是 VPS 運維工具純程式碼（gateway 對賬腳本等），不含憑證
 !/deploy-staging/vps-tools/
 *.bak-*
+
+# ── 影片產物（本機渲染輸出，200MB 級，2026-09-27 commit 瘦身）──
+# artifacts/：宣傳片 mp4/webm 與 vote-kit 交付物；promo-video/out/：分段渲染 segN.mkv/stills/score.wav。
+# 兩者都是可重跑的本機產物，源碼（promo-video/audio.py、render.mjs、index.html）照常入庫。
+/artifacts/
+/promo-video/out/
+# 宣傳片渲染用的 CJK 字型（兩支 NotoSerifSC OTF 共 23MB）：本機工具鏈的輸入，
+# 不是產品資產，且體積等同半個倉庫 ⇒ 不入庫（重跑渲染前先自行放回 promo-video/fonts/）。
+/promo-video/fonts/

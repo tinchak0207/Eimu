@@ -18,7 +18,11 @@
 import { useEffect, useState } from "react";
 import { BarChart3, CircleAlert, Loader2, RefreshCw } from "lucide-react";
 import { NUMBER_LOCALE, text, type UiStringKey } from "@/lib/ui-strings";
+import { UNATTRIBUTED_SOURCE } from "@/lib/first-touch-attribution";
 import type {
+  ActivationFunnelResult,
+  DurationSummary,
+  FunnelStepKey,
   ChannelHealthEntry,
   ChannelLiveness,
   ConsumptionProjection,
@@ -34,6 +38,8 @@ interface StatisticsPayload {
   consumption: ConsumptionProjection | null;
   channelHealth: ChannelHealthEntry[];
   remainingQuota: RemainingQuotaProjection;
+  traffic?: { includeInternal: boolean; internalUserIds: number[] };
+  activationFunnel?: ActivationFunnelResult;
   sources: StatisticsSourceRow[];
   notes: string[];
 }
@@ -41,6 +47,15 @@ interface StatisticsPayload {
 type ModelAvailability = "available" | "unavailable" | "unknown";
 
 const WINDOW_OPTIONS = [1, 7, 14, 30] as const;
+const FUNNEL_WINDOW_CHOICES = [7, 30] as const;
+
+const FUNNEL_STEP_LABEL: Record<FunnelStepKey, UiStringKey> = {
+  registered: "stats.funnel.step.registered",
+  generated: "stats.funnel.step.generated",
+  succeeded: "stats.funnel.step.succeeded",
+  returned: "stats.funnel.step.returned",
+  paid: "stats.funnel.step.paid",
+};
 
 /**
  * 三態標籤（展示層話術，只在這裡取用）。unknown 是誠實第三態，不併入任何一邊。
@@ -80,6 +95,188 @@ function RateCell({ rate }: { rate: SampleRate }) {
       {text("stats.rate.percent", { value: (rate.value * 100).toFixed(1) })}
       <span className="ml-1 text-black/40">{text("stats.rate.samples", { count: rate.samples })}</span>
     </span>
+  );
+}
+
+/** 秒數 → 人讀時長（秒 / 分鐘 / 小時 / 天），單位文案取自文案表。 */
+function formatDuration(seconds: number | null): string {
+  if (seconds === null || !Number.isFinite(seconds)) return text("common.placeholder");
+  if (seconds < 120) return text("stats.duration.seconds", { value: Math.round(seconds) });
+  if (seconds < 7200) return text("stats.duration.minutes", { value: (seconds / 60).toFixed(1) });
+  if (seconds < 172800) return text("stats.duration.hours", { value: (seconds / 3600).toFixed(1) });
+  return text("stats.duration.days", { value: (seconds / 86400).toFixed(1) });
+}
+
+function DurationRow({ label, summary, meta }: { label: string; summary: DurationSummary; meta?: string }) {
+  return (
+    <div className="rounded-md border border-black/10 px-3 py-2.5">
+      <p className="text-[13px] text-black/55">{label}</p>
+      {summary.samples > 0 ? (
+        <p className="mt-1 text-base font-semibold text-[#242830]">
+          {text("stats.firstImage.percentiles", {
+            p50: formatDuration(summary.p50Seconds),
+            p90: formatDuration(summary.p90Seconds),
+          })}
+        </p>
+      ) : (
+        <p className="mt-1 text-[13px] font-semibold text-[#8a6420]">{text("stats.firstImage.empty")}</p>
+      )}
+      <p className="mt-1 text-[13px] text-black/45">
+        {text("stats.firstImage.samples", { count: summary.samples })}
+        {meta ? ` · ${meta}` : ""}
+      </p>
+    </div>
+  );
+}
+
+/** 激活漏斗卡：每步人數 + 相對上一步 / 相對註冊的轉化率；樣本不足沿用「資料不足」。 */
+function ActivationFunnelCard({
+  funnel,
+  funnelDays,
+  onFunnelDays,
+}: {
+  funnel: ActivationFunnelResult | undefined;
+  funnelDays: number;
+  onFunnelDays: (days: number) => void;
+}) {
+  const registered = funnel && funnel.state === "ok" ? Math.max(1, funnel.steps[0]?.count ?? 0) : 1;
+  return (
+    <section className="rounded-md border border-black/10 bg-white">
+      <header className="flex flex-wrap items-start justify-between gap-3 border-b border-black/10 px-4 py-3">
+        <div>
+          <h3 className="text-sm font-semibold">{text("stats.funnel.title")}</h3>
+          <p className="mt-0.5 text-[13px] text-black/45">{text("stats.funnel.subtitle")}</p>
+        </div>
+        <div className="flex items-center gap-1 rounded-md border border-black/10 p-1">
+          {FUNNEL_WINDOW_CHOICES.map((option) => (
+            <button
+              key={option}
+              type="button"
+              onClick={() => onFunnelDays(option)}
+              className={`rounded px-2.5 py-1 text-[13px] font-semibold ${
+                funnelDays === option ? "bg-[#20242c] text-white" : "text-black/55 hover:bg-black/5"
+              }`}
+            >
+              {text("stats.funnel.window", { days: option })}
+            </button>
+          ))}
+        </div>
+      </header>
+      {!funnel || funnel.state === "unavailable" ? (
+        <p className="px-4 py-6 text-[13px] text-[#8a6420]">
+          {text("stats.funnel.unavailable", {
+            reason: funnel && funnel.state === "unavailable" ? funnel.reason : text("common.placeholder"),
+          })}
+        </p>
+      ) : (
+        <>
+          <ol className="flex flex-col gap-2.5 px-4 py-3">
+            {funnel.steps.map((step) => (
+              <li key={step.key} className="flex flex-wrap items-center gap-3 text-[13px]">
+                <span className="w-28 shrink-0 font-medium text-[#242830]">{text(FUNNEL_STEP_LABEL[step.key])}</span>
+                <span className="h-2.5 min-w-[120px] flex-1 overflow-hidden rounded bg-black/5">
+                  <span
+                    className="block h-full rounded bg-[#20242c]"
+                    style={{ width: `${step.count === 0 ? 0 : Math.max(2, (step.count / registered) * 100)}%` }}
+                  />
+                </span>
+                <span
+                  className="w-16 shrink-0 text-right font-semibold"
+                  title={text("stats.funnel.userIdsTitle", { ids: step.userIds.join(", ") || text("common.placeholder") })}
+                >
+                  {text("stats.funnel.users", { count: step.count })}
+                </span>
+                <span className="w-44 shrink-0 text-black/55">
+                  {step.fromPrevious ? (
+                    <>
+                      <span className="mr-1 text-black/40">{text("stats.funnel.fromPrevious")}</span>
+                      <RateCell rate={step.fromPrevious} />
+                    </>
+                  ) : null}
+                </span>
+                <span className="w-44 shrink-0 text-black/55">
+                  {step.fromRegistered ? (
+                    <>
+                      <span className="mr-1 text-black/40">{text("stats.funnel.fromRegistered")}</span>
+                      <RateCell rate={step.fromRegistered} />
+                    </>
+                  ) : null}
+                </span>
+              </li>
+            ))}
+          </ol>
+          <ul className="flex flex-col gap-1 border-t border-black/5 px-4 py-3 text-[13px] text-black/55">
+            <li>{text("stats.funnel.d1", { count: funnel.d1Returned })}</li>
+            {funnel.returnWindowImmature > 0 ? (
+              <li>{text("stats.funnel.immature", { count: funnel.returnWindowImmature })}</li>
+            ) : null}
+            <li>{text("stats.funnel.paidAny", { count: funnel.paidAnyStage })}</li>
+            {funnel.nonCashRechargesSkipped > 0 ? (
+              <li>{text("stats.funnel.nonCash", { count: funnel.nonCashRechargesSkipped })}</li>
+            ) : null}
+            {funnel.excludedInternalRegistrations > 0 ? (
+              <li>{text("stats.funnel.excludedInternal", { count: funnel.excludedInternalRegistrations })}</li>
+            ) : null}
+            {funnel.truncated ? <li className="text-[#8a6420]">{text("stats.funnel.truncated")}</li> : null}
+          </ul>
+          <div className="border-t border-black/5 px-4 py-3">
+            <h4 className="text-[13px] font-semibold text-[#242830]">{text("stats.funnel.sources.title")}</h4>
+            <p className="mt-0.5 text-[13px] text-black/45">{text("stats.funnel.sources.subtitle")}</p>
+            {funnel.sourceBreakdownUnavailable ? (
+              <p className="mt-2 text-[13px] text-[#8a6420]">{text("stats.funnel.sources.unavailable")}</p>
+            ) : null}
+            {funnel.sources.length === 0 ? (
+              <p className="mt-2 text-[13px] text-black/45">{text("stats.funnel.sources.empty")}</p>
+            ) : (
+              <div className="mt-2 overflow-x-auto">
+                <table className="w-full text-[13px]">
+                  <thead>
+                    <tr className="text-black/45">
+                      <th className="py-1 pr-3 text-left font-medium">{text("stats.funnel.sources.source")}</th>
+                      <th className="py-1 pr-3 text-right font-medium">{text("stats.funnel.sources.registered")}</th>
+                      <th className="py-1 pr-3 text-right font-medium">{text("stats.funnel.sources.generated")}</th>
+                      <th className="py-1 pr-3 text-right font-medium">{text("stats.funnel.sources.succeeded")}</th>
+                      <th className="py-1 text-right font-medium">{text("stats.funnel.sources.paid")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {funnel.sources.map((row) => (
+                      <tr key={row.source} className="border-t border-black/5">
+                        <td className="py-1 pr-3 font-medium text-[#242830]">
+                          {row.source === UNATTRIBUTED_SOURCE ? text("stats.funnel.sources.unknown") : row.source}
+                        </td>
+                        <td className="py-1 pr-3 text-right">{row.registered}</td>
+                        <td className="py-1 pr-3 text-right">{row.generated}</td>
+                        <td className="py-1 pr-3 text-right">{row.succeeded}</td>
+                        <td className="py-1 text-right">{row.paid}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+          <div className="border-t border-black/5 px-4 py-3">
+            <h4 className="text-[13px] font-semibold text-[#242830]">{text("stats.firstImage.title")}</h4>
+            <p className="mt-0.5 text-[13px] text-black/45">{text("stats.firstImage.subtitle")}</p>
+            <div className="mt-2 grid gap-3 sm:grid-cols-2">
+              <DurationRow
+                label={text("stats.firstImage.registerToSuccess")}
+                summary={funnel.timeToFirstImage.registerToFirstSuccess}
+              />
+              <DurationRow
+                label={text("stats.firstImage.firstJob")}
+                summary={funnel.timeToFirstImage.firstJobCreatedToFinished}
+                meta={text("stats.firstImage.firstJobMeta", {
+                  unfinished: funnel.timeToFirstImage.firstJobCreatedToFinished.unfinished,
+                  notSucceeded: funnel.timeToFirstImage.firstJobCreatedToFinished.firstJobNotSucceeded,
+                })}
+              />
+            </div>
+          </div>
+        </>
+      )}
+    </section>
   );
 }
 
@@ -149,17 +346,23 @@ function BucketTable({
 
 export function AdminStatistics() {
   const [days, setDays] = useState<number>(7);
+  const [funnelDays, setFunnelDays] = useState<number>(30);
+  // 內部流量預設不計（站長自測會把「沒有量」畫成「有量」）。
+  const [includeInternal, setIncludeInternal] = useState(false);
   const [payload, setPayload] = useState<StatisticsPayload | null>(null);
   const [modelStatus, setModelStatus] = useState<Record<string, ModelAvailability> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const load = async (windowDays: number) => {
+  const load = async (windowDays: number, windowFunnelDays: number, withInternal: boolean) => {
     setLoading(true);
     setError(null);
     try {
       const [statsRes, modelsRes] = await Promise.all([
-        fetch(`/api/admin/statistics?days=${windowDays}`, { cache: "no-store" }),
+        fetch(
+          `/api/admin/statistics?days=${windowDays}&funnelDays=${windowFunnelDays}&includeInternal=${withInternal ? "1" : "0"}`,
+          { cache: "no-store" },
+        ),
         fetch("/api/user/model-status", { cache: "no-store" }),
       ]);
       const statsBody = (await statsRes.json().catch(() => null)) as unknown;
@@ -185,8 +388,8 @@ export function AdminStatistics() {
   };
 
   useEffect(() => {
-    void load(days);
-  }, [days]);
+    void load(days, funnelDays, includeInternal);
+  }, [days, funnelDays, includeInternal]);
 
   const consumption = payload?.consumption ?? null;
   const quota = payload?.remainingQuota ?? null;
@@ -209,7 +412,21 @@ export function AdminStatistics() {
               <p className="mt-0.5 text-xs text-black/45">{text("stats.subtitle")}</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1 rounded-md border border-black/10 p-1">
+              {[false, true].map((option) => (
+                <button
+                  key={String(option)}
+                  type="button"
+                  onClick={() => setIncludeInternal(option)}
+                  className={`rounded px-2.5 py-1 text-[13px] font-semibold ${
+                    includeInternal === option ? "bg-[#20242c] text-white" : "text-black/55 hover:bg-black/5"
+                  }`}
+                >
+                  {text(option ? "stats.traffic.include" : "stats.traffic.exclude")}
+                </button>
+              ))}
+            </div>
             <div className="flex items-center gap-1 rounded-md border border-black/10 p-1">
               {WINDOW_OPTIONS.map((option) => (
                 <button
@@ -226,7 +443,7 @@ export function AdminStatistics() {
             </div>
             <button
               type="button"
-              onClick={() => void load(days)}
+              onClick={() => void load(days, funnelDays, includeInternal)}
               title={text("stats.refresh")}
               className="flex h-9 w-9 items-center justify-center rounded-md border border-black/10 text-black/55 hover:bg-black/5 hover:text-black"
             >
@@ -241,6 +458,13 @@ export function AdminStatistics() {
               timezone: payload.window.dayTimezone,
               generatedAt: new Date(payload.window.generatedAt).toLocaleString(NUMBER_LOCALE),
             })}
+          </p>
+        ) : null}
+        {payload?.traffic ? (
+          <p className="mt-1 text-[13px] text-black/45">
+            {payload.traffic.internalUserIds.length > 0
+              ? text("stats.traffic.summary", { ids: payload.traffic.internalUserIds.join(", ") })
+              : text("stats.traffic.none")}
           </p>
         ) : null}
       </header>
@@ -266,6 +490,8 @@ export function AdminStatistics() {
 
       {payload?.configured ? (
         <>
+          <ActivationFunnelCard funnel={payload.activationFunnel} funnelDays={funnelDays} onFunnelDays={setFunnelDays} />
+
           <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div className="rounded-md border border-black/10 bg-white px-4 py-3">
               <p className="text-xs text-black/45">{text("stats.card.windowCoins")}</p>

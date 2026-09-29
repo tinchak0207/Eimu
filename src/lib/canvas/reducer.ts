@@ -10,17 +10,36 @@ import type {
   CanvasNodeCreatedEvent,
   CanvasNodeStatus,
   CanvasNodeUpdatedEvent,
+  CanvasNodeVersion,
+  CanvasNodeVersionReason,
   CanvasPlanEvent,
   CanvasPosition,
   CanvasSseEvent,
   CanvasUnit,
 } from "./types";
 import { CanvasNodeType } from "./types";
+import {
+  appendNodeVersion,
+  applyNodeVersion,
+  createNodeVersion,
+  isNodeContentChange,
+  latestNodeVersion,
+  previousNodeVersion,
+  selectNodeVersion,
+} from "./node-versions";
 
 export interface CanvasReducerState {
   units: CanvasUnit[]; // 畫布單元（gateway 自動製畫布產出）
-  nodes: CanvasNode[]; // 扁平節點清單
+  nodes: CanvasNode[]; // 扁平節點清單（**不含**已軟刪節點）
   connections: CanvasConnection[]; // 扁平連線清單
+  /**
+   * 軟刪節點（2026-09-27）：不進 `nodes`，因此既有呼叫端（渲染/連線/批次）
+   * 看到的行為與舊硬刪一致；資料仍在，可經 `restoreCanvasNodes` 還原。
+   * optional＝向後相容（舊 state 沒有此欄視為空）。
+   */
+  deletedNodes?: CanvasNode[];
+  /** 節點版本歷史（快照清單）；optional＝向後相容。 */
+  nodeVersions?: CanvasNodeVersion[];
 }
 
 export const CANVAS_INITIAL_STATE: CanvasReducerState = {
@@ -219,7 +238,11 @@ export function reduceCanvasNodeCreated(state: CanvasReducerState, data: CanvasN
     ...unit,
     nodes: existingInUnit ? unit.nodes.map((n) => (n.id === stamped.id ? stamped : n)) : [...unit.nodes, stamped],
   };
-  return upsertNode(upsertUnit(state, nextUnit), stamped);
+  const nextState = upsertNode(upsertUnit(state, nextUnit), stamped);
+  // 新節點落一版 created 快照；已存在的節點被重送 create 時不重複落版。
+  return state.nodes.some((n) => n.id === stamped.id)
+    ? nextState
+    : recordCanvasNodeVersion(nextState, stamped.id, "created");
 }
 
 /** canvas.node.connected — 建連線（跨 unit 也可）。 */
@@ -255,7 +278,10 @@ export function reduceCanvasNodeUpdated(state: CanvasReducerState, data: CanvasN
       ? { ...u, nodes: u.nodes.map((n) => (n.id === data.node_id ? nextNode : n)) }
       : u,
   );
-  return { ...state, nodes, units };
+  const nextState: CanvasReducerState = { ...state, nodes, units };
+  // 內容變更即落一版快照；進度/花費等瞬態抖動由 isNodeContentChange 過濾為 null。
+  const reason = isNodeContentChange(node, nextNode);
+  return reason ? recordCanvasNodeVersion(nextState, data.node_id, reason) : nextState;
 }
 
 /** canvas.node.generating — 節點進生成態。 */
@@ -270,24 +296,136 @@ export function reduceCanvasNodeGenerating(
   });
 }
 
-/** canvas.node.deleted — 移除節點與其連線。 */
+/**
+ * canvas.node.deleted — **軟刪**節點（2026-09-27 版本歷史＋回退）。
+ *
+ * 語義與舊硬刪對呼叫端一致：節點離開 `nodes`（列表不含）、連線斷開；差別是節點被
+ * 收進 `deletedNodes` 並蓋 `deletedAt`，可經 `restoreCanvasNodes` / restore API 還原。
+ */
 export function reduceCanvasNodeDeleted(
   state: CanvasReducerState,
   data: { unit_id: string; node_id?: string },
 ): CanvasReducerState {
   if (!data.node_id) return state;
-  const nodes = state.nodes.filter((n) => n.id !== data.node_id);
-  const connections = state.connections.filter((c) => c.fromNodeId !== data.node_id && c.toNodeId !== data.node_id);
-  const units = state.units.map((u) =>
-    u.unitId === data.unit_id
-      ? {
-          ...u,
-          nodes: u.nodes.filter((n) => n.id !== data.node_id),
-          connections: u.connections.filter((c) => c.fromNodeId !== data.node_id && c.toNodeId !== data.node_id),
-        }
-      : u,
-  );
-  return { nodes, connections, units };
+  return softDeleteCanvasNodes(state, [data.node_id]);
+}
+
+/**
+ * 批量軟刪（`delete_nodes` op 與 UI 刪除的單一執行體）。
+ *
+ * 逐條保留舊硬刪的可觀察行為：節點離開 `nodes`/`units`、連線全斷、批次父節點的
+ * `batchChildren` 清掉死子並把主圖 fallback 到剩餘第一個（全刪光則清空）。
+ */
+export function softDeleteCanvasNodes(
+  state: CanvasReducerState,
+  ids: readonly string[],
+  deletedAt: string = new Date().toISOString(),
+): CanvasReducerState {
+  const dead = new Set(ids.filter(Boolean));
+  if (dead.size === 0) return state;
+  const removed = state.nodes.filter((n) => dead.has(n.id)).map((n) => ({ ...n, deletedAt }));
+  const existing = state.deletedNodes ?? [];
+  const existingIds = new Set(existing.map((n) => n.id));
+  const deletedNodes = [...existing, ...removed.filter((n) => !existingIds.has(n.id))];
+  return {
+    ...state,
+    units: state.units.map((u) => ({
+      ...u,
+      nodes: u.nodes.filter((n) => !dead.has(n.id)),
+      connections: u.connections.filter((c) => !dead.has(c.fromNodeId) && !dead.has(c.toNodeId)),
+    })),
+    nodes: state.nodes
+      .filter((n) => !dead.has(n.id))
+      .map((n) => {
+        if (!n.batchChildren?.some((id) => dead.has(id))) return n;
+        const kept = n.batchChildren.filter((id) => !dead.has(id));
+        return {
+          ...n,
+          batchChildren: kept,
+          // 主圖被刪 → fallback 剩餘第一個；全刪光 → 清空。
+          batchPrimaryImageId:
+            n.batchPrimaryImageId && dead.has(n.batchPrimaryImageId) ? kept[0] : n.batchPrimaryImageId,
+          metadata: { ...n.metadata, batchTotal: kept.length },
+        };
+      }),
+    connections: state.connections.filter((c) => !dead.has(c.fromNodeId) && !dead.has(c.toNodeId)),
+    deletedNodes,
+  };
+}
+
+/**
+ * 批量還原軟刪節點：把 `deletedNodes` 裡的目標搬回 `nodes` 並清掉 `deletedAt`。
+ * `ids` 為空＝不回任何節點（不製造「靜默全還原」）。找不到的 id 略過，不捏造節點。
+ * 還原後跑一次 `layoutGraph`：回來的節點與既有版面一起重排（與事件路徑一致）。
+ */
+export function restoreCanvasNodes(state: CanvasReducerState, ids: readonly string[]): CanvasReducerState {
+  const wanted = new Set(ids.filter(Boolean));
+  if (wanted.size === 0) return state;
+  const deleted = state.deletedNodes ?? [];
+  const restored: CanvasNode[] = [];
+  for (const n of deleted) {
+    if (!wanted.has(n.id)) continue;
+    const { deletedAt: _dropped, ...rest } = n;
+    restored.push(rest);
+  }
+  if (restored.length === 0) return state;
+  const alive = new Set(state.nodes.map((n) => n.id));
+  const nodes = [...state.nodes, ...restored.filter((n) => !alive.has(n.id))];
+  const deletedNodes = deleted.filter((n) => !restored.some((r) => r.id === n.id));
+  return layoutGraph({ ...state, nodes, deletedNodes });
+}
+
+/**
+ * 對當前節點落一版快照。
+ *
+ * 去重：若與該節點最新一版的內容無差（`isNodeContentChange` 回 null），不重複落版
+ * （呼叫端可能對同一 patch 重送；版本歷史不該被同內容灌滿）。
+ */
+export function recordCanvasNodeVersion(
+  state: CanvasReducerState,
+  nodeId: string,
+  reason: CanvasNodeVersionReason = "edited",
+  createdAt?: string,
+): CanvasReducerState {
+  const node = state.nodes.find((n) => n.id === nodeId);
+  if (!node) return state;
+  const versions = state.nodeVersions ?? [];
+  const latest = latestNodeVersion(versions, nodeId);
+  if (latest) {
+    const pseudoPrev: CanvasNode = { ...node, title: latest.title, metadata: latest.metadata };
+    if (isNodeContentChange(pseudoPrev, node) === null) return state;
+  }
+  const entry = createNodeVersion(node, reason, versions, createdAt);
+  return { ...state, nodeVersions: appendNodeVersion(versions, entry) };
+}
+
+/**
+ * 回退節點到某一版：`version` 有值＝指定版；省略＝上一版（`previousNodeVersion`）。
+ *
+ * 回退本身也落一版（reason `revert`）——版本歷史 append-only，回退可再被回退。
+ * 只還原 title＋metadata（`applyNodeVersion`），座標/尺寸不動。
+ * 沒有可回的版本、或該版與當前內容無差 → 原樣返回（不製造空版本）。
+ */
+export function revertCanvasNodeToVersion(
+  state: CanvasReducerState,
+  nodeId: string,
+  version?: number,
+  createdAt?: string,
+): CanvasReducerState {
+  const node = state.nodes.find((n) => n.id === nodeId);
+  if (!node) return state;
+  const versions = state.nodeVersions ?? [];
+  const entry = version === undefined ? previousNodeVersion(versions, nodeId) : selectNodeVersion(versions, nodeId, version);
+  if (!entry) return state;
+  const reverted = applyNodeVersion(node, entry);
+  if (isNodeContentChange(node, reverted) === null) return state;
+  const nodes = state.nodes.map((n) => (n.id === nodeId ? reverted : n));
+  const units = state.units.map((u) => ({
+    ...u,
+    nodes: u.nodes.map((n) => (n.id === nodeId ? reverted : n)),
+  }));
+  const recorded = createNodeVersion(reverted, "revert", versions, createdAt);
+  return { ...state, nodes, units, nodeVersions: appendNodeVersion(versions, recorded) };
 }
 
 /** canvas.node.disconnected — 移除 from->to 連線（不斷節點）。 */

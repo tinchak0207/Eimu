@@ -5,8 +5,14 @@ import { AuthProvider } from "@/hooks/use-auth";
 import { Navbar } from "@/components/Navbar";
 import { PricingSync } from "@/components/PricingSync";
 import { PwaInstaller } from "@/components/PwaInstaller";
+import { AttributionCapture } from "@/components/AttributionCapture";
 import { Toaster } from "@/components/ui/toaster";
 import { getSiteUrlFromEnv } from "@/lib/site-url";
+import {
+  SITE_DESCRIPTION,
+  SITE_FEATURE_LIST,
+  SITE_TITLE,
+} from "@/lib/site-copy";
 import "./globals.css";
 
 const geistSans = localFont({
@@ -21,19 +27,19 @@ const geistMono = localFont({
   display: "swap",
 });
 
-const SITE_TITLE = "Eimu — AI 图片与视频创作";
-const SITE_DESCRIPTION =
-  "Eimu：在线生成 GPT Image 2、Nano Banana Pro 图片与视频，登录即用，不用注册中转站，也不用申请 API Key。";
-
 const SITE_URL = getSiteUrlFromEnv();
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
-  title: SITE_TITLE,
+  // 子頁只寫自己的標題，品牌尾巴由 template 統一補上；首頁用 absolute 取全名。
+  title: { default: SITE_TITLE, template: "%s | Eimu" },
   description: SITE_DESCRIPTION,
   keywords: [
     "Eimu",
     "Eimu AI",
+    "AI 影像工作台",
+    "AI 智能体",
+    "一句话生成视频",
     "AI生图",
     "AI 在线生图",
     "GPT Image 2",
@@ -41,7 +47,6 @@ export const metadata: Metadata = {
     "图片生成器",
     "AI画图工具",
   ],
-  alternates: { canonical: SITE_URL },
   openGraph: {
     type: "website",
     locale: "zh_CN",
@@ -66,10 +71,35 @@ export const metadata: Metadata = {
   },
 };
 
+/**
+ * 站點實體圖（2026-09-27 SEO 重構）：Organization＋WebSite＋SoftwareApplication
+ * 用 @id 互相引用。Google 靠 Organization/WebSite 認出「Eimu 這個品牌＝eimu.dev」，
+ * 否則品牌詞會和同名的個人作品集、Easy IMU 硬體混在一起。
+ */
 function getStructuredData() {
-  return {
-    "@context": "https://schema.org",
+  const orgId = `${SITE_URL}/#organization`;
+  const siteId = `${SITE_URL}/#website`;
+  const organization = {
+    "@type": "Organization",
+    "@id": orgId,
+    name: "Eimu",
+    url: SITE_URL,
+    logo: { "@type": "ImageObject", url: `${SITE_URL}/icon-512.png`, width: 512, height: 512 },
+    description: SITE_DESCRIPTION,
+  };
+  const website = {
+    "@type": "WebSite",
+    "@id": siteId,
+    name: "Eimu",
+    alternateName: ["Eimu AI", "eimu.dev"],
+    url: SITE_URL,
+    inLanguage: "zh-CN",
+    publisher: { "@id": orgId },
+  };
+  const app = {
     "@type": "SoftwareApplication",
+    "@id": `${SITE_URL}/#app`,
+    publisher: { "@id": orgId },
     name: "Eimu",
     alternateName: SITE_URL.replace(/^https?:\/\//, ""),
     url: SITE_URL,
@@ -83,13 +113,9 @@ function getStructuredData() {
       highPrice: "69",
       offerCount: "3",
     },
-    featureList: [
-      "GPT Image 2 在线生图",
-      "Nano Banana Pro 在线生图",
-      "无需注册中转站或申请 API Key",
-      "登录即用，生成后直接下载",
-    ],
+    featureList: [...SITE_FEATURE_LIST],
   };
+  return { "@context": "https://schema.org", "@graph": [organization, website, app] };
 }
 
 /** Next 15 將 viewport 欄位從 metadata 拆出獨立 export（含 themeColor）。 */
@@ -171,6 +197,9 @@ setTimeout(function(){
           <main className="flex min-h-0 flex-1 flex-col">{children}</main>
           <Toaster />
           <PwaInstaller />
+          {/* 首次觸達歸因採集（utm/referrer host/落地路徑 → eimu_first_touch cookie，90 天，
+              首觸不覆蓋）。渲染 null，不參與佈局。 */}
+          <AttributionCapture />
         </AuthProvider>
         <Analytics />
       </body>

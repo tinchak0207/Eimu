@@ -1,3 +1,7 @@
+---
+name: blender-motion
+description: Use this skill whenever Blender is the working tool. Triggers on "Blender", "bpy", "geometry nodes", "Cycles", "EEVEE", "Principled BSDF", "F-curve", "NLA", "keyframe in Blender", "3D motion graphics", "Blender render", "shape keys", "drivers", or any Blender-driven motion or rendering task. Pair with motion-design (foundation skill) for principles, timing, and taste. Blender MCP server: official Blender Lab MCP at projects.blender.org/lab/blender_mcp.
+---
 <!--
 來源（輪子）: https://github.com/LobzyJay/motion-design-with-claude
 License: MIT · 原作者: LobzyJay · 僅內部使用
@@ -6,10 +10,6 @@ Blender 5.2 雷區（僅 Blender 類配方適用）：① BLENDER_EEVEE_NEXT 已
 正文保留英文原文；MCP 調用表述執行時改走我方 bridge /v1/execute 同構協議。
 -->
 
----
-name: blender-motion
-description: Use this skill whenever Blender is the working tool. Triggers on "Blender", "bpy", "geometry nodes", "Cycles", "EEVEE", "Principled BSDF", "F-curve", "NLA", "keyframe in Blender", "3D motion graphics", "Blender render", "shape keys", "drivers", or any Blender-driven motion or rendering task. Pair with motion-design (foundation skill) for principles, timing, and taste. Blender MCP server: official Blender Lab MCP at projects.blender.org/lab/blender_mcp.
----
 
 # Blender Motion
 

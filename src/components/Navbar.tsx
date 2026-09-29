@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BookOpen, History, Images, KeyRound, LogOut } from "lucide-react";
+import { BookOpen, History, KeyRound, LogOut, Users } from "lucide-react";
 import { WalletBadge } from "@/components/WalletBadge";
 import {
   DropdownMenu,
@@ -20,6 +20,8 @@ import { cn } from "@/lib/utils";
 import { isStandalonePwa, createHandoffLogin } from "@/lib/github-login";
 import { PwaHandoffPanel } from "@/components/PwaHandoffPanel";
 import { QqGroupDialog } from "@/components/QqGroupDialog";
+import { NotificationBell } from "@/components/notifications/NotificationBell";
+import { AnnouncementSurfaces } from "@/components/notifications/AnnouncementSurfaces";
 
 interface NavbarProps {
   className?: string;
@@ -277,6 +279,7 @@ export function Navbar({ className }: NavbarProps) {
   }, [toast]);
   return (
     <>
+      <AnnouncementSurfaces />
       {pwaHandoffUrl && (
         <PwaHandoffPanel
           loginUrl={pwaHandoffUrl}
@@ -376,7 +379,7 @@ export function Navbar({ className }: NavbarProps) {
                 <WalletBadge showTopUp showCheckin className="mobile-wallet-balance min-w-0 flex-1 sm:flex-none" />
 
                 {/* Nav links — icons only, text stays hidden for screen readers.
-                    「文档」「审查页」只在 ≥sm 显示：手机端导航留给核心动作。 */}
+                    「文档」只在 ≥sm 显示：手机端导航留给核心动作。 */}
                 <Link
                   href="/history"
                   className="lg-float flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[rgba(0,0,0,0.78)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:h-9 sm:w-9"
@@ -384,14 +387,6 @@ export function Navbar({ className }: NavbarProps) {
                 >
                   <History className="h-3.5 w-3.5" aria-hidden="true" />
                   <span className="sr-only">历史</span>
-                </Link>
-                <Link
-                  href="/review"
-                  className="lg-float hidden h-11 w-11 shrink-0 items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[rgba(0,0,0,0.78)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:flex sm:h-9 sm:w-9"
-                  aria-label="审查页"
-                >
-                  <Images className="h-3.5 w-3.5" aria-hidden="true" />
-                  <span className="sr-only">审查页</span>
                 </Link>
                 {/* 这里曾有一颗「助理」导航链接，指向 /agent 独立页。已移除：
                     AI 助理是首页卡片上的一个 toggle，不是一个去处。
@@ -428,6 +423,18 @@ export function Navbar({ className }: NavbarProps) {
                         密钥管理
                       </Link>
                     </DropdownMenuItem>
+                    {/* 团队治理同样由 B 端密钥驱动（席位/角色/建画布开关/审批/解散/用量），
+                        故归在同一把「密钥」小菜单下，不新开顶层入口。 */}
+                    <DropdownMenuItem asChild>
+                      <Link href="/settings/team" className="cursor-pointer">
+                        <Users className="mr-2 h-3.5 w-3.5 text-[rgba(0,0,0,0.44)]" aria-hidden="true" />
+                        团队管理
+                      </Link>
+                    </DropdownMenuItem>
+                    {/* 站内通知：机制在、只此一个真业务（新人礼到账）；入口从 header 图示列搬进本菜单。
+                        放最后不打断上面「密钥/团队」三连（那组是同一条 B 端密钥语义），
+                        且通知是菜单里唯一面向普通用户的条目。 */}
+                    <NotificationBell variant="menuItem" />
                   </DropdownMenuContent>
                 </DropdownMenu>
 

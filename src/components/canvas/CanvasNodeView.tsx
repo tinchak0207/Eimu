@@ -65,6 +65,10 @@ export interface CanvasNodeViewProps {
   onEditImage?: (nodeId: string) => void;
   onUpscale?: (nodeId: string) => void;
   upscaling?: boolean;
+  /** 影片節點動作（2026-09-28）：「截帧／序列帧」，宿主只在 https 影片節點上傳入。 */
+  onExtractVideoFrames?: (nodeId: string, action: "current" | "sequence", atSec?: number) => void;
+  /** 取幀進行中（按鈕停用防重複提交）。 */
+  extractingVideoFrames?: boolean;
   /** 批次子節點：設為主圖 */
   onSetPrimary?: (nodeId: string) => void;
   /** 批次父節點：下載全部子圖（zip） */
@@ -130,6 +134,8 @@ export function CanvasNodeView({
   onEditImage,
   onUpscale,
   upscaling,
+  onExtractVideoFrames,
+  extractingVideoFrames,
   onSetPrimary,
   onDownloadAll,
   batchPrimaryImageUrl,
@@ -495,6 +501,8 @@ export function CanvasNodeView({
             onScrollAreaPointerDown={handleScrollAreaDown}
             onScrollAreaPointerMove={handleScrollAreaMove}
             onScrollAreaPointerEnd={handleScrollAreaEnd}
+            onExtractVideoFrames={onExtractVideoFrames}
+            extractingVideoFrames={extractingVideoFrames}
           />
         </div>
         {showCostBadge && (

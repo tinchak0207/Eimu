@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { del, get, list, put } from "@/lib/blob-backend";
+import { blobBackendConfigured, del, ensureBlobBackendWritable, get, list, put } from "@/lib/blob-backend";
 import { validateAndDescribeBase64Image } from "./generation-core/artifact-service";
 import {
   HISTORY_MAX_IMAGE_BYTES,
@@ -72,10 +72,6 @@ const indexCache = new Map<number, { entries: ServerHistoryEntry[]; expiresAt: n
  * 彻底解决需要条件写入，而 Blob 目前不提供。
  */
 const writeQueues = new Map<number, Promise<unknown>>();
-
-function hasBlobStore(): boolean {
-  return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
-}
 
 function userPrefix(userId: number): string {
   return `history/${sanitizeBlobSegment(String(userId), "0")}`;
@@ -177,7 +173,7 @@ async function fetchEntries(userId: number): Promise<ServerHistoryEntry[]> {
 }
 
 async function readEntries(userId: number): Promise<ServerHistoryEntry[]> {
-  if (!hasBlobStore()) {
+  if (!ensureBlobBackendWritable("server-history-store.readEntries")) {
     return [...(memoryStore.get(userId) ?? [])];
   }
 
@@ -197,7 +193,7 @@ async function writeEntries(userId: number, entries: ServerHistoryEntry[]): Prom
     MAX_HISTORY_ENTRIES_PER_USER,
   ) as ServerHistoryEntry[];
 
-  if (!hasBlobStore()) {
+  if (!ensureBlobBackendWritable("server-history-store.writeEntries")) {
     memoryStore.set(userId, capped);
     indexCache.delete(userId);
     return;
@@ -224,7 +220,8 @@ async function writeEntries(userId: number, entries: ServerHistoryEntry[]): Prom
 }
 
 export function canPersistGeneratedImages(): boolean {
-  return hasBlobStore();
+  // 能力探針（非寫入路徑）：任一後端可用即 true——只看 token 會在 VPS 後端下誤報「不能存圖」。
+  return blobBackendConfigured();
 }
 
 /**
@@ -291,8 +288,8 @@ export async function persistUpstreamImageBytes(
 
 /** 把还留在记录里的 base64 转存到独立 Blob；索引会被整份读写，绝不能塞进几 MB 的字符串。 */
 async function persistImages(entry: ServerHistoryEntry): Promise<ServerHistoryEntry> {
-  if (!hasBlobStore()) {
-    // 本地开发没有 Blob：直接丢掉 base64，避免把内存吃满。
+  if (!ensureBlobBackendWritable("server-history-store.persistImages")) {
+    // 允许内存降级（非生产或显式 opt-in）时没有 Blob：直接丢掉 base64，避免把内存吃满。
     return { ...entry, results: entry.results.map((result) => ({ ...result, image: null })) };
   }
 

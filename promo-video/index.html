@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Eimu · 一句话，到成片</title>
+<script type="importmap">
+{ "imports": { "three": "../node_modules/three/build/three.module.js", "three/addons/": "../node_modules/three/examples/jsm/" } }
+</script>
+<style>
+@font-face { font-family: "Geist"; src: url(../src/app/fonts/GeistVF.woff) format("woff"); font-weight: 100 900; }
+@font-face { font-family: "GeistMono"; src: url(../src/app/fonts/GeistMonoVF.woff) format("woff"); font-weight: 100 900; }
+@font-face { font-family: "Noto Serif SC"; src: url(fonts/NotoSerifSC-SemiBold.otf) format("opentype"); font-weight: 600; }
+@font-face { font-family: "Noto Serif SC"; src: url(fonts/NotoSerifSC-Medium.otf) format("opentype"); font-weight: 500; }
+* { box-sizing: border-box; }
+html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; background: #000; }
+body { font-family: "Geist", "Noto Sans CJK SC", sans-serif; -webkit-font-smoothing: antialiased; }
+#gl { position: absolute; inset: 0; width: 1920px; height: 1080px; display: block; }
+#ov { position: absolute; inset: 0; pointer-events: none; }
+.lb { position: absolute; left: 0; right: 0; height: 0; background: #000; overflow: hidden; }
+#lb-top { top: 0; } #lb-bot { bottom: 0; }
+.credit { position: absolute; bottom: 52px; right: 64px; font: 500 17px "GeistMono", "Noto Sans CJK SC"; letter-spacing: .08em; color: rgba(255,255,255,.62); opacity: 0; white-space: nowrap; }
+.credit b { color: rgba(255,255,255,.9); font-weight: 500; }
+
+/* 影院字幕：思源宋體 */
+.cine { position: absolute; left: 190px; top: 560px; text-align: left; color: #fff; visibility: hidden;
+  font-family: "Noto Serif SC", serif; font-weight: 600; font-size: 64px; line-height: 1.55; text-shadow: 0 2px 30px rgba(0,0,0,.55); }
+.cine .ln { display: block; opacity: 0; }
+
+/* 產品世界標題：遮罩上滑 */
+.ttl { position: absolute; visibility: hidden; color: #121622; }
+.ttl .ln { display: block; overflow: hidden; padding-bottom: .06em; margin-bottom: -.06em; }
+.ttl .ln > span { display: inline-block; will-change: transform; }
+.ttl .big { font-family: "Geist", "Noto Sans CJK SC", sans-serif; font-weight: 700; font-size: 84px; line-height: 1.16; letter-spacing: -.012em; }
+.ttl .cap { font-family: "Noto Sans CJK SC", "Geist", sans-serif; font-weight: 400; font-size: 25px; letter-spacing: .03em; color: #58627a; margin-top: 30px; opacity: 0; white-space: nowrap; }
+.ttl .cap i { font-style: normal; color: #9aa3b4; padding: 0 .55em; }
+.ttl.w { color: #fff; } .ttl.w .cap { color: rgba(255,255,255,.72); } .ttl.w .cap i { color: rgba(255,255,255,.4); }
+
+#end { position: absolute; left: 0; right: 0; top: 700px; text-align: center; visibility: hidden; }
+#end .tag { font-family: "Noto Sans CJK SC", sans-serif; font-weight: 500; font-size: 46px; letter-spacing: .08em; color: #1a1e2b; opacity: 0; }
+#end .url { margin-top: 26px; font: 500 20px "GeistMono"; letter-spacing: .34em; color: #6b7487; opacity: 0; text-transform: uppercase; }
+</style>
+</head>
+<body>
+<canvas id="gl" width="1920" height="1080"></canvas>
+<div id="ov">
+  <div id="lb-top" class="lb"></div>
+  <div id="lb-bot" class="lb">
+    <div id="cr-qin" class="credit"><b>《始皇帝的北境征途》</b>　Eimu 生成 · 36 秒</div>
+    <div id="cr-ming" class="credit"><b>《大明最后的十七年》</b>　Eimu 小说影视化产线 · 64 秒</div>
+  </div>
+
+  <div id="t0" class="cine"><span class="ln">这部短片，</span><span class="ln">始于一句话。</span></div>
+
+  <div id="t1" class="ttl" style="left:150px;top:150px">
+    <div class="ln"><span class="big" style="font-size:76px">当时输入的，</span></div>
+    <div class="ln"><span class="big" style="font-size:76px">就这一句。</span></div>
+    <div class="cap">2026.08.29<i>/</i>真实会话记录<i>/</i>智能体没有反问，直接开工</div>
+  </div>
+
+  <div id="t2" class="ttl" style="left:140px;bottom:120px">
+    <div class="ln"><span class="big">21 个生成节点，</span></div>
+    <div class="ln"><span class="big">一次编排到位。</span></div>
+    <div class="cap">剧本<i>·</i>角色四视图<i>·</i>场景<i>·</i>分镜<i>·</i>视频<i>·</i>配乐<i>·</i>成片</div>
+  </div>
+
+  <div id="t3" class="ttl" style="left:140px;top:128px">
+    <div class="ln"><span class="big">角色锁定一次，</span></div>
+    <div class="ln"><span class="big">每个镜头都是他。</span></div>
+    <div class="cap">角色、场景、风格封装为实体卡<i>/</i>生成时自动带上参考图</div>
+  </div>
+
+  <div id="t4" class="ttl w" style="left:140px;top:150px">
+    <div class="ln"><span class="big">机位与运动，</span></div>
+    <div class="ln"><span class="big">先在三维里排好。</span></div>
+    <div class="cap">三维导演台<i>·</i>Blender 渲染节点<i>·</i>142 条镜头语言</div>
+  </div>
+
+  <div id="t5" class="ttl" style="left:140px;top:360px">
+    <div class="ln"><span class="big">13 条产线，57 个模型，</span></div>
+    <div class="ln"><span class="big">都在一张画布上。</span></div>
+    <div class="cap">图片<i>·</i>视频<i>·</i>配音<i>·</i>剪辑<i>/</i>开发者：OpenAI 兼容 API</div>
+  </div>
+
+  <div id="end"><div class="tag">一句话，到成片。</div><div class="url">eimu.dev</div></div>
+</div>
+<script type="module" src="film.js"></script>
+</body>
+</html>

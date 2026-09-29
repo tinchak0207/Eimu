@@ -9,7 +9,13 @@ import { getStoredToken, getStoredUser } from "@/lib/new-api-client";
 import { LOCAL_TEST_MODE } from "../local-test-mode";
 import type { CanvasProject } from "./types";
 
-export type CanvasClientFailure = "not_authenticated" | "network" | "server" | "parse";
+export type CanvasClientFailure =
+  | "not_authenticated"
+  /** 團隊閘拒建共享畫布（服務端 code=member_canvas_forbidden）：保留服務端團隊文案，不降級成未登入。 */
+  | "team_canvas_forbidden"
+  | "network"
+  | "server"
+  | "parse";
 
 export interface CanvasClientResult<T> {
   ok: boolean;
@@ -54,6 +60,16 @@ async function request<T>(path: string, init: RequestInit, pick: (json: unknown)
       json && typeof json === "object" && typeof (json as { error?: unknown }).error === "string"
         ? (json as { error: string }).error
         : "请求失败";
+    // 團隊閘拒建共享畫布（片P 刀 3）：**只認這個專屬 code**，露出服務端團隊文案，
+    // 不再被當成 not_authenticated 靜默降級成 offline。其他 401/403（無此 code）
+    // 維持原降級行為，逐字不變——不擴散。
+    const code =
+      json && typeof json === "object" && typeof (json as { code?: unknown }).code === "string"
+        ? (json as { code: string }).code
+        : null;
+    if (code === "member_canvas_forbidden") {
+      return { ok: false, reason: "team_canvas_forbidden", message };
+    }
     return { ok: false, reason: res.status === 401 || res.status === 403 ? "not_authenticated" : "server", message };
   }
   const data = pick(json);
@@ -196,5 +212,46 @@ export async function postCanvasOpsResult(
     });
   } catch {
     /* gateway 端 30s 超時兜底，不重試 */
+  }
+}
+
+/** 一稿多版位裁切結果（/api/canvas/format-crops execute:true 的 done 項）。 */
+export interface FormatCropOutput {
+  id: string;
+  dataUrl: string;
+  width: number;
+  height: number;
+}
+
+/**
+ * 一稿多版位：對一張圖跑 format-crops（execute:true），只回伺服器真正裁出的版位。
+ * 擴圖版位（outpaint）無上游、伺服器回 skipped，這裡照實略過，不假裝出了圖。
+ */
+export async function fetchFormatCrops(sourceImageUrl: string): Promise<CanvasClientResult<FormatCropOutput[]>> {
+  const headers = authHeaders();
+  if (!headers) return { ok: false, reason: "not_authenticated" };
+  headers["Content-Type"] = "application/json";
+  try {
+    const res = await fetch("/api/canvas/format-crops", {
+      method: "POST",
+      headers,
+      cache: "no-store",
+      body: JSON.stringify({ sourceImageUrl, execute: true }),
+    });
+    const json = (await res.json().catch(() => null)) as {
+      ok?: boolean;
+      error?: string;
+      executed?: Array<{ id: string; status: string; dataUrl?: string; width?: number; height?: number }>;
+    } | null;
+    if (!res.ok || !json?.ok) {
+      return { ok: false, reason: "server", message: json?.error ?? `裁切失败（HTTP ${res.status}）` };
+    }
+    const done = (json.executed ?? []).filter(
+      (item): item is { id: string; status: string; dataUrl: string; width: number; height: number } =>
+        item.status === "done" && typeof item.dataUrl === "string" && typeof item.width === "number" && typeof item.height === "number",
+    );
+    return { ok: true, data: done.map(({ id, dataUrl, width, height }) => ({ id, dataUrl, width, height })) };
+  } catch {
+    return { ok: false, reason: "network", message: "网络连接失败" };
   }
 }

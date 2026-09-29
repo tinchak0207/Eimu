@@ -1,9 +1,3 @@
-<!--
-來源（輪子）: https://github.com/arjun988/blender-skills — .claude/skills/set-dressing/SKILL.md
-License: MIT · 原作者: arjun988 (https://github.com/arjun988)
-白名單改動: ①產物路徑→$BLENDER_WORK/out/（本檔無輸出路徑） ②移除「via MCP」外部 IDE 整合表述 ③Blender 5.2 API 校正（無） ④文案譯為簡體（結構/表格/參數逐項保留）
--->
-
 ---
 name: set-dressing
 description: 面向室内外场景的陈设（Set Dressing）与环境叙事摆位，运用道具密度、叙事簇与可读性规则。
@@ -16,6 +10,12 @@ metadata:
   triggers: set dressing, dressing, storytelling props, interior dressing, clutter, narrative placement, set decals
   related-skills: prop-artist, scene-assembly, environment-artist, horror-style, qa-review
 ---
+<!--
+來源（輪子）: https://github.com/arjun988/blender-skills — .claude/skills/set-dressing/SKILL.md
+License: MIT · 原作者: arjun988 (https://github.com/arjun988)
+白名單改動: ①產物路徑→$BLENDER_WORK/out/（本檔無輸出路徑） ②移除「via MCP」外部 IDE 整合表述 ③Blender 5.2 API 校正（無） ④文案譯為簡體（結構/表格/參數逐項保留）
+-->
+
 
 # 道具陈设（Set Dressing）
 

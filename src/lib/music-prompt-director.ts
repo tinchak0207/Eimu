@@ -76,12 +76,11 @@ const CHANNEL_LIMITS = {
   flowmusicFlat: 220,
   flowmusicLayout: 3000,
   /**
-   * YuE2 style 欄上限。依據（誠實標注，非上游記載）：YuE2 凍結合約**沒有** style 字數上限
-   * 條款，庫內（CORE_01／CORE_03／DATA_*）也無 YuE2 條目 → 沿用本檔既有的版面預算 3000 runes
-   * （CORE_01_STYLE §13 LENGTH DISCIPLINE 的「front-loading／版面」預算），
-   * 只做防爆，不把散文壓成 flowmusic 的 220 平面。
+   * YuE2 style 欄上限 600 runes。依據（2026-09-28 本機 8GB 卡實測）：style 進 NAR prefill 的
+   * prefix，1353 字 style＋500 token ABC 在 NAR 階段 OOM；同單截到 600 字 → prefix 675、
+   * 峰值 7.10 GiB、52.4 秒成片。自譜成功單 prefix 皆 ≤846。凍結合約無字數條款，這是顯存預算。
    */
-  yue2Style: 3000,
+  yue2Style: 600,
 } as const;
 
 /** 整曲門檻（秒）：≥ 此值時結構補層講「整曲」。來源：DATA_FLOWMUSIC_2026-09.md:148-159 §4（成品 162–182s）。 */
@@ -550,7 +549,7 @@ export function directMusicPrompt(rawPrompt: string, options: MusicDirectorOptio
     //  ② [Verse]/[Chorus] 段落標籤**保留**：那是 YuE2 歌詞欄的必需語法，不是偽標籤，
     //     stripTimestamps 不動它（它只認數字時間碼），標籤原樣穿過。
     //  ③ style 是散文描述：允許換行，不做 collapse-single-line、不套 220 平面分支。
-    //  ④ 上限 yue2Style＝庫內版面預算 3000 runes（依據見 CHANNEL_LIMITS 註釋）。
+    //  ④ 上限 yue2Style＝600 runes 顯存預算（依據見 CHANNEL_LIMITS 註釋）。
     const stripped = stripTimestamps(core);
     if (stripped !== core) applied.push("strip-timestamps");
     core = stripped;
@@ -565,7 +564,7 @@ export function directMusicPrompt(rawPrompt: string, options: MusicDirectorOptio
   const assembled = assembleWithLimit(core, fills, limit, allowNewline);
   for (const id of assembled.kept) applied.push(`fill-${id}`);
   if (assembled.hardCapped) {
-    applied.push(limit === CHANNEL_LIMITS.flowmusicFlat ? "truncate-220-hard" : "truncate-3000-hard");
+    applied.push(`truncate-${limit}-hard`);
   }
 
   // 6. 偵測到但無法確定性修補的缺口（如實回報，不虛報）。

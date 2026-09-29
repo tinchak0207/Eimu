@@ -10,10 +10,14 @@ import {
   Library,
   Maximize2,
   RotateCw,
+  Share2,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AgentImageItem } from "@/lib/agent-chat-types";
+import type { HistoryEntry } from "@/lib/history-types";
+import { agentHistoryEntry, saveAgentImageToHistory } from "@/lib/agent-image-share";
+import { ShareDialog } from "@/components/history/ShareDialog";
 
 export interface AgentImageCardProps {
   item: AgentImageItem;
@@ -377,6 +381,8 @@ function AgentImageCardComponent({
   onDownload,
 }: AgentImageCardProps) {
   const [viewerOpen, setViewerOpen] = useState(false);
+  const [shareEntry, setShareEntry] = useState<HistoryEntry | null>(null);
+  const [sharing, setSharing] = useState(false);
   const [failed, setFailed] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
@@ -496,7 +502,23 @@ function AgentImageCardComponent({
         <ImageAction label="下载" disabled={!onDownload} onClick={() => onDownload?.(item)}>
           <Download className="h-3.5 w-3.5" aria-hidden="true" />
         </ImageAction>
+        <ImageAction
+          label="分享"
+          disabled={sharing || failed}
+          onClick={() => {
+            const entry = agentHistoryEntry(item);
+            setSharing(true);
+            // 補寫失敗（未登入等）也照樣開框：ShareDialog 會把 /api/share 的真實錯誤講給用戶。
+            void saveAgentImageToHistory(entry).finally(() => {
+              setSharing(false);
+              setShareEntry(entry);
+            });
+          }}
+        >
+          <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
+        </ImageAction>
       </div>
+      {shareEntry && <ShareDialog entry={shareEntry} onClose={() => setShareEntry(null)} />}
       {viewerOpen &&
         createPortal(
           <ImageLightbox src={item.url} alt="智能体生成的图片" onClose={closeViewer} />,

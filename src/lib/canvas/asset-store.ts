@@ -4,7 +4,7 @@
 // 避免 Blob cacheControlMaxAge 60s 下限造成的「剛存讀不到」；單用戶寫入串行。
 // 與畫布專案分開命名空間（canvas-assets/），互不影響。
 import { randomBytes } from "node:crypto";
-import { del, get, list, put } from "@/lib/blob-backend";
+import { del, ensureBlobBackendWritable, get, list, put } from "@/lib/blob-backend";
 import { sanitizeBlobSegment } from "@/lib/history-types";
 
 const ASSET_SCHEMA_VERSION = 1;
@@ -44,10 +44,6 @@ export class CanvasAssetLimitError extends Error {
 const memoryStore = new Map<number, CanvasAsset[]>();
 const indexCache = new Map<number, { assets: CanvasAsset[]; expiresAt: number }>();
 const writeQueues = new Map<number, Promise<unknown>>();
-
-function hasBlobStore(): boolean {
-  return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
-}
 
 function userPrefix(userId: number): string {
   return `canvas-assets/${sanitizeBlobSegment(String(userId), "0")}`;
@@ -157,7 +153,7 @@ async function fetchAssets(userId: number): Promise<CanvasAsset[]> {
 }
 
 async function readAssets(userId: number): Promise<CanvasAsset[]> {
-  if (!hasBlobStore()) return [...(memoryStore.get(userId) ?? [])];
+  if (!ensureBlobBackendWritable("canvas/asset-store.readAssets")) return [...(memoryStore.get(userId) ?? [])];
   const cached = indexCache.get(userId);
   if (cached && cached.expiresAt > Date.now()) return [...cached.assets];
   const assets = await fetchAssets(userId);
@@ -168,7 +164,7 @@ async function readAssets(userId: number): Promise<CanvasAsset[]> {
 async function writeAssets(userId: number, assets: CanvasAsset[]): Promise<void> {
   // 上限在 saveCanvasAsset 拒絕，這裡只排序（newest 優先），不靜默丟資料。
   const sorted = [...assets].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
-  if (!hasBlobStore()) {
+  if (!ensureBlobBackendWritable("canvas/asset-store.writeAssets")) {
     memoryStore.set(userId, sorted);
     indexCache.delete(userId);
     return;
