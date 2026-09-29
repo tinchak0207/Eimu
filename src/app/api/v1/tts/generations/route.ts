@@ -8,6 +8,7 @@ import { IdempotencyConflictError } from "@/lib/generation-core/job-repository";
 import { GenerationModelUnavailableError } from "@/lib/generation-core/model-availability-gate";
 import { generationTaskResponse } from "@/lib/generation-core/task-response";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
+import { normalizeVoiceId } from "@/lib/voice-library";
 
 export const runtime = "nodejs";
 
@@ -60,7 +61,21 @@ export async function POST(req: NextRequest) {
   }
 
   const modelId = typeof body.model === "string" && body.model ? body.model : "tts-default";
-  const voice = typeof body.voice === "string" && body.voice ? body.voice : "default";
+  // 音色（P1-11／D33）：值域收在語音庫（`GET /v1/tts/voices`）。
+  // 為什麼要擋：上游 proxy 對無法辨識的 voice 是**靜默回退**的（edge 路徑回 DEFAULT_VOICE，
+  // SF 路徑把不含 ":" 的值改寫成 `<model>:alex`）——呼叫端以為指定了音色、實際拿到另一顆。
+  // 未帶 voice ⇒ 保持既有 `"default"` 行為**逐位不變**（上游自己決定預設，不是本層的決定）。
+  const rawVoice = typeof body.voice === "string" ? body.voice.trim() : "";
+  if (rawVoice && !normalizeVoiceId(rawVoice)) {
+    return errorResponse(
+      400,
+      `未知的 voice "${rawVoice.slice(0, 60)}"；可用音色见 GET /v1/tts/voices。`,
+      "invalid_request_error",
+      "voice_unknown",
+      traceId,
+    );
+  }
+  const voice = rawVoice || "default";
   const callbackUrl = typeof body.callback_url === "string" ? body.callback_url : null;
 
   // 手術 P1 計費閘（詳見 quota-precheck.ts）：TTS 今日為 0 額提交（無 reserve 可
