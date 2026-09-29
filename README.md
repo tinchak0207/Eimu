@@ -4,7 +4,7 @@
 
 **简体中文**
 
-把一句自然语言需求变成可交付的图片与视频：脚本、分镜、画面、配音、成片在同一条工作流里完成，参数由智能体承担。
+一次性把一句自然语言需求全自动变成可交付的图片与视频：脚本、分镜、画面、配音、成片在同一条工作流里完成，参数由智能体承担。
 
 <p>
   <img src="https://img.shields.io/badge/Next.js-15.5-black.svg" alt="Next.js">
@@ -24,6 +24,10 @@
   <a href="https://eimu.dev/docs"><strong>API 文档</strong></a>
   &nbsp;&nbsp;·&nbsp;&nbsp;
   <a href="https://eimu.dev/status"><strong>状态页</strong></a>
+</p>
+
+<p align="center">
+  <video src="https://github.com/user-attachments/assets/c5d7745e-5b45-462c-8b70-a30ae618de3b" width="100%"></video>
 </p>
 
 <p align="center">
