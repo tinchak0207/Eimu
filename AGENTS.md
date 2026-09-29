@@ -91,6 +91,7 @@
 - UI 設計權威：`design-system/MASTER.md` + `DESIGN.md` + `tailwind.config.ts`（lg-* 體系；正文 ≥13px）；任何 UI 任務先載 impeccable skill（~/.agents/skills/impeccable，它會載 PRODUCT.md/DESIGN.md）；Agent 交互鎖定決策見記憶檔 2026-08-08-agent-frontend-design-rules.md
 - 產品決策準則全文 + 品牌/套餐/交互規則：PRODUCT.md（「Product Decision Doctrine」節）
 - 中控記帳/計費/排帳唯一權威：記憶 control-plane-billing-paradigm
+- 雙真相邊界（畫布 world1 ↔ 產線執行圖 world2；含節點 metadata 雙白名單三處、CanvasProject 新欄位七處清單、VPS 活本 vs repo 鏡像）：`docs/architecture/dual-truth-boundary.md`（W5，2026-09-29）
 
 ## repo 掃描地圖（2026-08-30，降低模型掃描成本）
 
