@@ -26,6 +26,7 @@ import {
 } from "./AgentSubagentBar";
 import { AgentToolCard, toolArgPreview, toolDisplayName } from "./AgentToolCard";
 import { AgentAudioCard } from "./AgentAudioCard";
+import { AgentBatchProgress } from "./AgentBatchProgress";
 import { AgentMessageBubble } from "./AgentMessageBubble";
 import { reportPreview } from "./AgentSubagentReportCard";
 import { submitConfirmDecision } from "./AgentConfirmCard";
@@ -1329,4 +1330,19 @@ test("history session dropdown prefers gateway title, falls back to time label",
   assert.equal(formatSessionLabelMirror({ created_at: created, title: "" }), timeLabel);
   assert.equal(formatSessionLabelMirror({ created_at: created, title: "   " }), timeLabel);
   assert.equal(formatSessionLabelMirror({ created_at: created }), timeLabel);
+});
+
+test("批量进度「已用 N 币」不把报价类工具的估价、失败工具算成花费", () => {
+  const html = renderToStaticMarkup(
+    createElement(AgentBatchProgress, {
+      items: [
+        { kind: "tool", id: "q1", seq: 1, tool: "video_quote", status: "ok", costCoins: 600 },
+        { kind: "tool", id: "q2", seq: 2, tool: "quote_bundle", status: "ok", costCoins: 11 },
+        { kind: "tool", id: "g0", seq: 3, tool: "image_generate", status: "failed", costCoins: 5 },
+        { kind: "tool", id: "g1", seq: 4, tool: "image_generate", status: "ok", costCoins: 3 },
+      ],
+    }),
+  );
+  assert.match(html, /已用 3 币/);
+  assert.doesNotMatch(html, /614|619/);
 });
