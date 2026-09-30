@@ -124,7 +124,7 @@ test("非 JSON 請求體具名拒絕（舊行為是 1k 兜底＋原樣轉發＝�
 // 檔位逐字等於 resolution、比例必須落在模型已宣告的可提交比例內、偏差如實回報。
 
 test("後端默認＝legacy（PixAI bridge）：不設 UPSCALE_BACKEND 不會偷偷換後端", async () => {
-  const { resolveUpscaleBackend } = await import("../../app/api/v1/upscale/route.ts");
+  const { resolveUpscaleBackend } = await import("./upscale-backend.ts");
   assert.equal(resolveUpscaleBackend({} as NodeJS.ProcessEnv), "pixai-bridge");
   assert.equal(resolveUpscaleBackend({ UPSCALE_BACKEND: "" } as NodeJS.ProcessEnv), "pixai-bridge");
   assert.equal(resolveUpscaleBackend({ UPSCALE_BACKEND: "pixai" } as NodeJS.ProcessEnv), "pixai-bridge");
@@ -133,7 +133,7 @@ test("後端默認＝legacy（PixAI bridge）：不設 UPSCALE_BACKEND 不會偷
 });
 
 test("檔位→gpt-image-2 後端參數：resolution 逐字等於檔位，比例落在模型已宣告清單內", async () => {
-  const { planGptImageUpscale, UPSCALE_BACKEND_MODEL_ID } = await import("../../app/api/v1/upscale/route.ts");
+  const { planGptImageUpscale, UPSCALE_BACKEND_MODEL_ID } = await import("./upscale-backend.ts");
   const { generationModel } = await import("@/lib/generation-model-catalog");
 
   const declared = generationModel(UPSCALE_BACKEND_MODEL_ID)?.aspectRatios ?? [];
@@ -156,7 +156,7 @@ test("檔位→gpt-image-2 後端參數：resolution 逐字等於檔位，比例
 });
 
 test("標題外的原圖比例被貼近到可提交比例，並如實回報偏差（不靜默失真）", async () => {
-  const { planGptImageUpscale } = await import("../../app/api/v1/upscale/route.ts");
+  const { planGptImageUpscale } = await import("./upscale-backend.ts");
 
   // 1.9:1 不在 COMMON_IMAGE_RATIOS 內（最近的是 16:9=1.777…）⇒ 必須折算並報偏差。
   const plan = planGptImageUpscale({ tier: "2k", sourcePixels: { width: 1900, height: 1000 } });

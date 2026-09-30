@@ -24,9 +24,16 @@ import { NextRequest } from "next/server";
 import { after } from "next/server";
 import { authenticateBizApiKey, flushBizApiKeyUsage, recordBizApiKeyUsage } from "@/lib/biz-api-key-store";
 import { readBearerToken } from "@/lib/biz-api-keys";
-import { declaredUpscaleTiers, generationCoins, generationModel, imageSizeForAspectRatio } from "@/lib/generation-model-catalog";
-import { aspectRatioValue, nearestAspectRatio } from "@/lib/generation-model-catalog/resolution";
-import { DEFAULT_IMAGE_MODEL_ID, PIXAI_UPSCALE_MODEL_ID } from "@/lib/image-model-ids.js";
+import { declaredUpscaleTiers, generationCoins } from "@/lib/generation-model-catalog";
+import { PIXAI_UPSCALE_MODEL_ID } from "@/lib/image-model-ids.js";
+import {
+  UPSCALE_AWAIT_MS,
+  UPSCALE_POLL_INTERVAL_MAX_MS,
+  UPSCALE_POLL_INTERVAL_MS,
+  planGptImageUpscale,
+  resolveUpscaleBackend,
+  type GptImageUpscalePlan,
+} from "@/lib/generation-core/upscale-backend";
 import {
   jsonWithTrace,
   pixaiAuthError,
@@ -39,7 +46,6 @@ import { generationControlPlaneEnabled } from "@/lib/generation-core/database";
 import { submitGenerationCommand } from "@/lib/generation-core/command-service";
 import { getGenerationJobForTenant, hasGenerationCapability } from "@/lib/generation-core/job-repository";
 import { taskStatus } from "@/lib/generation-core/task-response";
-import type { AspectRatio } from "@/lib/generation-model-catalog/types";
 import type { GenerationArtifactResult, GenerationReference } from "@/lib/generation-core/types";
 import type { BizApiKey } from "@/lib/biz-api-keys";
 import { commitSyncCharge, refundSyncCharge, reserveSyncCharge, type SyncCharge } from "@/lib/generation-core/sync-charge";
@@ -57,84 +63,6 @@ import {
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
-
-// ── 後端選擇 ────────────────────────────────────────────────────────────────
-
-export type UpscaleBackend = "pixai-bridge" | "gpt-image-2";
-
-/** 切換後端的 env 名（控面）：只有逐字 `gpt-image-2` 才切，其餘（含未設）＝legacy。 */
-export const UPSCALE_BACKEND_ENV = "UPSCALE_BACKEND";
-
-/** 新後端跑的平台模型（上游變體名 = `firefly-gpt-image-{resolution}-{ratio}`）。 */
-export const UPSCALE_BACKEND_MODEL_ID = DEFAULT_IMAGE_MODEL_ID;
-
-export function resolveUpscaleBackend(env: NodeJS.ProcessEnv = process.env): UpscaleBackend {
-  return (env[UPSCALE_BACKEND_ENV] ?? "").trim().toLowerCase() === "gpt-image-2" ? "gpt-image-2" : "pixai-bridge";
-}
-
-/** 等待 durable 任務的預算（同 openai-compat 的 240s：函數 300s 留 60s 結算餘裕）。 */
-const UPSCALE_AWAIT_MS = 240_000;
-const UPSCALE_POLL_INTERVAL_MS = 2_500;
-const UPSCALE_POLL_INTERVAL_MAX_MS = 5_000;
-
-/** 後端能力（`resolution`×`ratio`＝上游變體）與檔位的對應：檔位就是解析度，不加倍率。 */
-export interface GptImageUpscalePlan {
-  modelId: string;
-  resolution: string;
-  ratio: AspectRatio;
-  /** 比例來源（診斷用）：顯式 `ratio`／原圖像素折算／預設。 */
-  ratioSource: "explicit" | "source_pixels" | "default";
-  /** 折算後與原圖比例的相對差（>0 表示畫面比例被貼近到最接近的可提交檔），0＝沒有折算。 */
-  ratioDeviation: number;
-  size: string;
-  prompt: string;
-}
-
-/**
- * 檔位契約 → gpt-image-2 後端參數（**純函式**，測試直接斷言映射）。
- *
- * 兩個真源：① 檔位（1k／2k／4k）逐字就是 `resolution`；② 原圖比例要落在模型
- * **已宣告的 `aspectRatios`** 內——上游變體只認宣告內的比例，宣告外的比例上游拿不到，
- * 所以這裡用 `nearestAspectRatio` 貼近最接近的可提交比例，並把實際偏差回報出去
- * （不靜默：偏離 >15% 時呼叫端看得到 `ratio` 與 `ratio_deviation`）。
- */
-export function planGptImageUpscale(input: {
-  tier: string;
-  ratio?: unknown;
-  sourcePixels?: { width: number; height: number } | null;
-}): GptImageUpscalePlan {
-  const model = generationModel(UPSCALE_BACKEND_MODEL_ID);
-  const supported = (model?.aspectRatios ?? ["1:1"]) as readonly AspectRatio[];
-  const explicit = typeof input.ratio === "string" ? input.ratio.trim() : "";
-
-  let ratio: AspectRatio;
-  let ratioSource: GptImageUpscalePlan["ratioSource"];
-  let target: number | null = null;
-  if (explicit && supported.includes(explicit as AspectRatio)) {
-    ratio = explicit as AspectRatio;
-    ratioSource = "explicit";
-  } else {
-    if (explicit) target = aspectRatioValue(explicit as AspectRatio);
-    else if (input.sourcePixels) target = input.sourcePixels.width / input.sourcePixels.height;
-    ratio = target === null ? "1:1" : nearestAspectRatio(target, supported);
-    ratioSource = target === null ? "default" : explicit ? "explicit" : "source_pixels";
-  }
-  const ratioDeviation = target === null ? 0 : Math.abs(aspectRatioValue(ratio) - target) / target;
-
-  return {
-    modelId: UPSCALE_BACKEND_MODEL_ID,
-    resolution: input.tier,
-    ratio,
-    ratioSource,
-    ratioDeviation,
-    size: imageSizeForAspectRatio(ratio),
-    // 「一鍵超分」的提示詞：把「只提升解析度」寫死，避免模型順手重新設計畫面。
-    prompt:
-      `把輸入的這張圖做高清放大，輸出檔位 ${input.tier}。`
-      + "嚴格保留原圖的內容、主體、構圖、比例、色彩與風格，只提升解析度與細節清晰度"
-      + "（去噪、銳化邊緣、補足紋理）；不要新增、刪除或替換任何元素，不要改動畫面中的文字，不要重新設計。",
-  };
-}
 
 export async function POST(req: NextRequest) {
   const traceId = getOrCreateTraceId(req);
