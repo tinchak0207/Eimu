@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { getSiteUrlFromEnv } from "@/lib/site-url";
+import { DURABLE_IMAGE_SIZES } from "@/lib/generation-core/durable-image-sizes";
 
 export const runtime = "nodejs";
 export const dynamic = "auto"; // 依賴環境變數，不強制靜態
@@ -1125,9 +1126,17 @@ const SPEC = {
           n: { type: "integer", minimum: 1, maximum: 4, default: 1, description: "一次出幾張。" },
           size: {
             type: "string",
-            enum: ["1024x1024", "1536x1024", "1024x1536", "2048x2048"],
+            enum: [...DURABLE_IMAGE_SIZES],
             default: "1024x1024",
-            description: "只接受這四種尺寸（2048x2048 由 seedream 系支援）。" },
+            description: "已知可交的上游尺寸白名單（唯一真源＝執行端常數）；白名單外具名拒 unsupported_size。" },
+          resolution: {
+            type: "string",
+            enum: ["1k", "2k", "4k"],
+            description:
+              "目標檔位（顯式鍵；別名 `output_resolution`）。優先序：顯式檔位 > `size` 檔位字串 > `size` 像素長邊 > `quality`（hd⇒2k、其餘⇒1k）> 1k；"
+              + "模型未宣告該檔位 ⇒ 具名拒 `resolution_not_declared_by_model`（不靜默降級）。4K 只能由這裡或 `size` 帶到此值。",
+          },
+          output_resolution: { type: "string", enum: ["1k", "2k", "4k"], description: "`resolution` 的別名。" },
           quality: {
             type: "string",
             enum: ["standard", "hd", "high"],

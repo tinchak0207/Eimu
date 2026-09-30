@@ -230,6 +230,7 @@ test("B 端 handler 可被載入且在無憑證時停在認證層（模組圖未
 test("OpenAPI 的檔位契約與執行端同源：列舉、配對、具名閘碼三項都對得上", async () => {
   const { GET } = await import("../../app/api/v1/openapi.json/route.ts");
   const { UPSCALE_TIERS, UPSCALE_TIER_CONTRACTS, PIXAI_BRIDGE_UPSCALE_RATIO_SIZES } = await import("./upscale-tier.ts");
+  const { DURABLE_IMAGE_SIZES } = await import("./durable-image-sizes.ts");
 
   const response = await GET(new Request("https://site.test/v1/openapi.json") as never);
   const doc = (await response.json()) as {
@@ -266,6 +267,12 @@ test("OpenAPI 的檔位契約與執行端同源：列舉、配對、具名閘碼
     assert.ok(description.includes(code), `文件未揭露具名閘碼 ${code}`);
   }
   assert.ok(description.includes("重新繪製"), "文件必須說明 gpt-image-2 後端是重新繪製（不是保真像素放大）");
+  // 生成端同一條紀律：size 白名單與 resolution 檔位都不得偏離執行端常數。
+  const generations = doc.components.schemas.ImageGenerationRequest;
+  assert.deepEqual(generations.properties.size.enum, [...DURABLE_IMAGE_SIZES], "size 列舉必須＝執行端白名單（含 4096x4096）");
+  assert.deepEqual(generations.properties.resolution.enum, ["1k", "2k", "4k"], "resolution 列舉必須＝檔位全集");
+  assert.ok(generations.properties.output_resolution, "resolution 的別名要揭露");
+
   const imageObject = doc.components.schemas.ImageObject;
   assert.ok(imageObject.properties.width && imageObject.properties.height, "回應必須揭露實測 width/height（4K 交付要可自證）");
 });
