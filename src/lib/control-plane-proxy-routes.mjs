@@ -43,6 +43,12 @@ export const CONTROL_PLANE_PROXY_SOURCES = [
   // 不持有該環境變數，留在本地只會 fail-open（把已斷供的模型照樣列出去）。
   // 控面沒有函數時長上限，且直接持有資料庫，兩件事同時解決。
   "/openai/v1/:path*",
+  // 後台統計（2026-09-30）：統計投影要讀帳本與能力表（GENERATION_DATABASE_URL），Vercel 側
+  // 不持該庫 ⇒ 本地副本只能回「本實例沒有控制面資料庫連線…統計不可用」的降級投影，後台看板上
+  // 永遠沒有真數字（CSV 導出／類別切分同理）。控面同時有庫與該 route，故代理過去執行。
+  // 前提（缺了代理過去也只是 401）：控面要有 ADMIN_SESSION_SECRET／ADMIN_USERNAME
+  // ——簽發 session 的秘密原本只在 Vercel，2026-09-30 已同步進控面 .env.control-plane。
+  "/api/admin/statistics",
   // PixAI 同步計費路由（2026-09-28，V-08）：扣退款改走 generation-core/sync-charge
   // 帳本門面，需 GENERATION_DATABASE_URL；留在 Vercel 只會回落直扣、不留帳本列。
   // 鑑權同 /api/generate-images（authenticateImageUser，已在控面運行）；上游同
