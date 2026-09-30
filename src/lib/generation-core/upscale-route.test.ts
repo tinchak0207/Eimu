@@ -118,6 +118,73 @@ test("非 JSON 請求體具名拒絕（舊行為是 1k 兜底＋原樣轉發＝�
     assert.equal(payload.code, "upscale_request_body_invalid");
   });
 });
+// ── 後端二：gpt-image-2 生成式重繪（2026-09-30 暴君指令）──────────────────────
+// 這條後端把「4K 超分」的真源從 PixAI 的 factor 換成 gpt-image-2 的 檔位×比例
+// （上游變體 `firefly-gpt-image-{resolution}-{ratio}`），所以這裡斷言的是映射本身：
+// 檔位逐字等於 resolution、比例必須落在模型已宣告的可提交比例內、偏差如實回報。
+
+test("後端默認＝legacy（PixAI bridge）：不設 UPSCALE_BACKEND 不會偷偷換後端", async () => {
+  const { resolveUpscaleBackend } = await import("../../app/api/v1/upscale/route.ts");
+  assert.equal(resolveUpscaleBackend({} as NodeJS.ProcessEnv), "pixai-bridge");
+  assert.equal(resolveUpscaleBackend({ UPSCALE_BACKEND: "" } as NodeJS.ProcessEnv), "pixai-bridge");
+  assert.equal(resolveUpscaleBackend({ UPSCALE_BACKEND: "pixai" } as NodeJS.ProcessEnv), "pixai-bridge");
+  assert.equal(resolveUpscaleBackend({ UPSCALE_BACKEND: "gpt-image-2" } as NodeJS.ProcessEnv), "gpt-image-2");
+  assert.equal(resolveUpscaleBackend({ UPSCALE_BACKEND: " GPT-Image-2 " } as NodeJS.ProcessEnv), "gpt-image-2");
+});
+
+test("檔位→gpt-image-2 後端參數：resolution 逐字等於檔位，比例落在模型已宣告清單內", async () => {
+  const { planGptImageUpscale, UPSCALE_BACKEND_MODEL_ID } = await import("../../app/api/v1/upscale/route.ts");
+  const { generationModel } = await import("@/lib/generation-model-catalog");
+
+  const declared = generationModel(UPSCALE_BACKEND_MODEL_ID)?.aspectRatios ?? [];
+  assert.ok(declared.length > 0, "後端模型必須宣告可提交比例（否則無從挑上游變體）");
+  assert.ok(
+    generationModel(UPSCALE_BACKEND_MODEL_ID)?.resolutions.includes("4k"),
+    "4K 檔位的真源＝模型宣告了 4k（宣告沒有就不該賣）",
+  );
+
+  for (const tier of ["1k", "2k", "4k"] as const) {
+    const plan = planGptImageUpscale({ tier, sourcePixels: { width: 1200, height: 800 } });
+    assert.equal(plan.resolution, tier);
+    assert.equal(plan.modelId, UPSCALE_BACKEND_MODEL_ID);
+    assert.ok(declared.includes(plan.ratio), `比例 ${plan.ratio} 必須在模型宣告清單內`);
+    // 1200x800 = 3:2，正是宣告內的比例 ⇒ 不該被折算。
+    assert.equal(plan.ratio, "3:2");
+    assert.equal(plan.ratioDeviation, 0);
+    assert.match(plan.prompt, /保留/);
+  }
+});
+
+test("標題外的原圖比例被貼近到可提交比例，並如實回報偏差（不靜默失真）", async () => {
+  const { planGptImageUpscale } = await import("../../app/api/v1/upscale/route.ts");
+
+  // 1.9:1 不在 COMMON_IMAGE_RATIOS 內（最近的是 16:9=1.777…）⇒ 必須折算並報偏差。
+  const plan = planGptImageUpscale({ tier: "2k", sourcePixels: { width: 1900, height: 1000 } });
+  assert.equal(plan.ratio, "16:9");
+  assert.ok(plan.ratioDeviation > 0 && plan.ratioDeviation < 0.15, `偏差應在可見範圍內：${plan.ratioDeviation}`);
+  assert.equal(plan.ratioSource, "source_pixels");
+
+  const explicit = planGptImageUpscale({ tier: "1k", ratio: "9:16" });
+  assert.equal(explicit.ratio, "9:16");
+  assert.equal(explicit.ratioSource, "explicit");
+  assert.equal(explicit.ratioDeviation, 0);
+
+  const nothing = planGptImageUpscale({ tier: "1k" });
+  assert.equal(nothing.ratio, "1:1");
+  assert.equal(nothing.ratioSource, "default");
+  assert.equal(nothing.size, "1024x1024");
+});
+
+test("B 端 handler 可被載入且在無憑證時停在認證層（模組圖未因換後端而斷）", async () => {
+  const { POST: postUpscale } = await import("../../app/api/v1/upscale/route.ts");
+  const response = await postUpscale(new Request("https://site.test/v1/upscale", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ image: "https://x/y.png", tier: "2k" }),
+  }) as never);
+  assert.equal(response.status, 401);
+});
+
 // ── 對外文件與執行端同源（P1-4）：OpenAPI 的檔位列舉不得偏離實作常數 ──────────
 // 走真 handler（`GET /v1/openapi.json`）取**服務出去的文件**，oracle＝執行端常數
 // （UPSCALE_TIERS／檔位契約／上游 bridge 的比例表）。文件說 4K 可提交、執行端卻拒，
@@ -153,7 +220,13 @@ test("OpenAPI 的檔位契約與執行端同源：列舉、配對、具名閘碼
     "upscale_4k_upstream_unverified",
     "upscale_factor_conflict",
     "upscale_video_upstream_unsupported",
+    // 後端二（gpt-image-2 生成式重繪）的具名碼與「不是保真放大」的口徑也必須揭露。
+    "upscale_backend_capability_missing",
+    "upscale_backend_timeout",
   ]) {
     assert.ok(description.includes(code), `文件未揭露具名閘碼 ${code}`);
   }
+  assert.ok(description.includes("重新繪製"), "文件必須說明 gpt-image-2 後端是重新繪製（不是保真像素放大）");
+  const imageObject = doc.components.schemas.ImageObject;
+  assert.ok(imageObject.properties.width && imageObject.properties.height, "回應必須揭露實測 width/height（4K 交付要可自證）");
 });

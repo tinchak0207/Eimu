@@ -23,6 +23,7 @@ import {
   generationCoins,
   aspectRatioFromImageSize,
   resolveGenerationModelId,
+  resolveSubmitResolution,
 } from "@/lib/generation-model-catalog";
 import { imageGenerationCoins, isSupportedImageModel, type ModelMode } from "@/lib/provider-config";
 import { PIXAI_EDIT_MODEL_ID } from "@/lib/image-model-ids.js";
@@ -231,7 +232,7 @@ async function handleEdit(req: NextRequest, rejection: RejectionContext): Promis
 // 為準做誠實預檢，杜絕「probe 說可用、結算才死」。
 
 /** 與 generations 同口的上游尺寸白名單；另兼容舊 edits 合同的 "1k"/"2k"。 */
-const DURABLE_EDIT_SIZES = new Set(["1024x1024", "1536x1024", "1024x1536", "2048x2048"]);
+const DURABLE_EDIT_SIZES = new Set(["1024x1024", "1536x1024", "1024x1536", "2048x2048", "4096x4096"]);
 
 async function durableEditBranch(input: {
   body: Record<string, unknown>;
@@ -290,7 +291,17 @@ async function durableEditBranch(input: {
   // OpenAI 用 hd/standard，本站內部用 quality/fast（與 generations 同譯法）。
   const qualityMode: ModelMode = body.quality === "hd" || body.quality === "high" ? "quality" : "fast";
   const ratio = aspectRatioFromImageSize(size);
-  const resolution = qualityMode === "quality" ? "2k" : "1k";
+  // 提交解析度（2026-09-30）：顯式 `resolution`／`size:"4k"`／`size:"4096x4096"` 都能到 4k。
+  // 與 generations 同一顆嚴格解析器：未宣告就 400，不靜默降到 1k 去賣一個不存在的檔位。
+  const resolutionResult = resolveSubmitResolution(modelId, {
+    resolution: body.resolution ?? body.output_resolution,
+    size,
+    quality: qualityMode,
+  });
+  if (!resolutionResult.ok) {
+    return respond(pixaiRequestError(resolutionResult.message, resolutionResult.code, traceId), 400);
+  }
+  const resolution = resolutionResult.resolution;
 
   const tenantId = `biz:${key.id}`;
   const localIdempotencyKey = idempotencyKeyHeader?.trim() || `biz-edit-${randomUUID()}`;
@@ -326,7 +337,7 @@ async function durableEditBranch(input: {
 
   // 管理員改價立即生效：算價前同步最新覆寫（與 generations 同序）。
   await syncModelPricing();
-  const baseBillingAmount = imageGenerationCoins(modelId, qualityMode) * QUOTA_PER_COIN * rawN;
+  const baseBillingAmount = imageGenerationCoins(modelId, qualityMode, resolution) * QUOTA_PER_COIN * rawN;
   const gate = await enforceQuotaGate({
     bizKeyId: key.id,
     billingUserId: key.userId,

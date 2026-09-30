@@ -353,11 +353,15 @@ const SPEC = {
         summary: "高清放大（同步，~20s）",
         description:
           "base64 圖放大到檔位 1k／2k／4k。檔位用 `upscale_tier` 顯式指定最清楚；`size`＋`factor` 是舊寫法的檔位配對（`size` 是上游基底檔、只有 `1k`／`2k`，"
-          + "`factor=4` 才配到 `4k`）。三個檔位的上游參數化固定：`1k`=`size\"1k\"×2`、`2k`=`size\"2k\"×2`、`4k`=`size\"2k\"×4`（保底長邊 4608px）——"
+          + "`factor=4` 才配到 `4k`）。檔位契約（兩種後端共用）：`1k`=`size\"1k\"×2`、`2k`=`size\"2k\"×2`、`4k`=`size\"2k\"×4`——"
           + "呼叫端給的倍率**不落在檔位上就具名拒** `upscale_factor_conflict`（不再靜默取用任意倍率）。"
-          + "4K 的 factor 輸出色語義未經真單校準 ⇒ 未開啟 `UPSCALE_4K_UPSTREAM` 前對 4K 具名拒 `upscale_4k_upstream_unverified`（不販售未校準檔位；開啟後一鍵預設自動變 4K）。"
           + "什麼都不給＝一鍵預設＝**當下最高可提交檔位**。影片超分在上游無通道 ⇒ 具名拒 `upscale_video_upstream_unsupported`。"
-          + "支援 `Idempotency-Key` 請求頭。定價走 generationCoins(pixai-upscale)。",
+          + "支援 `Idempotency-Key` 請求頭。定價走 generationCoins(pixai-upscale)。\n"
+          + "**後端**（2026-09-30）：`UPSCALE_BACKEND=gpt-image-2` 時走 **gpt-image-2 生成式重繪**——把原圖當參考圖提交 durable `image_edit` 任務，"
+          + "檔位挑輸出解析度、原圖比例貼近模型已宣告的可提交比例（實際採用的 `ratio` 與 `ratio_deviation` 如實回報）。"
+          + "**這不是保真像素放大，是重新繪製**（內容可能被模型重畫）；回應用 `data[].width/height` 給出真實輸出尺寸供自證。"
+          + "該 比例×檔位 沒有 image_edit 渠道 ⇒ 具名拒 `upscale_backend_capability_missing`；等待超時 ⇒ `upscale_backend_timeout`（504，任務仍在後台，已提交退款）。"
+          + "**4K 默認 fail-closed**：輸出色未經真單校準前對 4K 具名拒 `upscale_4k_upstream_unverified`（不販售未校準檔位；校準後由 `UPSCALE_4K_UPSTREAM=1` 開啟，開啟後一鍵預設自動變 4K）。",
         security: [bearerAuth],
         requestBody: {
           required: true,
@@ -1142,6 +1146,8 @@ const SPEC = {
           url: { type: "string", format: "uri" },
           b64_json: { type: "string" },
           revised_prompt: { type: "string" },
+          width: { type: "integer", nullable: true, description: "實測輸出寬（拿不到回 null，不以 0 冒充）。" },
+          height: { type: "integer", nullable: true, description: "實測輸出高（拿不到回 null，不以 0 冒充）。" },
         },
       },
       SyncImageResponse: {
@@ -1195,7 +1201,7 @@ const SPEC = {
             description:
               "檔位倍率寫法：`2`⇒2k、`4`⇒4k。**不是任意倍率**——不落在任何檔位上的值具名拒 `upscale_factor_conflict`。別名：`upscale`、`scale`。",
           },
-          ratio: { type: "string", description: "寬高比，可選。" },
+          ratio: { type: "string", description: "寬高比，可選。gpt-image-2 後端會把它貼近模型已宣告的可提交比例，實際採用值回報在 `upscale.ratio`。" },
           size: {
             type: "string",
             enum: ["1k", "2k"],

@@ -122,3 +122,85 @@ export const SUPPORTED_IMAGE_SIZES: string[] = Array.from(
 export function imageSizeForAspectRatio(ratio: AspectRatio): string {
   return IMAGE_SIZE_BY_ASPECT_RATIO[ratio] ?? "1024x1024";
 }
+
+// ── 提交端解析度（嚴格版；2026-09-30 打開 4K 這一格）─────────────────────────
+
+/** 呼叫端是用哪一種說法指出檔位的（診斷/回報用，不影響語義）。 */
+export type SubmitResolutionSource = "explicit" | "size_tier" | "size_pixels" | "quality" | "default";
+
+export type SubmitResolutionResult =
+  | { ok: true; resolution: ImageResolution; source: SubmitResolutionSource }
+  | { ok: false; code: string; message: string };
+
+/** 像素長邊超過這個值才按像素折算成 4k（≤3072 沿用舊品質規則，保持既有行為逐位元不變）。 */
+const PIXEL_4K_LONG_EDGE = 3072;
+
+/**
+ * 請求 → **提交**解析度（嚴格，禁靜默降級）。
+ *
+ * 為什麼要嚴格版：同檔的 `resolveSupportedResolution` 對未宣告的檔位**回退模型預設**
+ * （給 UI 挑選用，友善）；但提交端一旦回退，就是「賣一個上游不認的檔位」或靜默降級
+ * ——P1-4 在 PixAI 橋的 size 白名單上吃過同一顆雷（`size:"4k"` 被靜默回退成 1k）。
+ * 所以這裡不合法就具名拒，讓呼叫端在付費之前看到 `unsupported_resolution`。
+ *
+ * 語義優先序：
+ *   ① 顯式 `resolution`／`output_resolution`＝它說話（須是 1k/2k/4k，否則具名拒）；
+ *   ② `size` 本身是檔位字串（`"4k"`）＝該檔位；
+ *   ③ `size` 是像素寫法且長邊 > 3072（如 4096x4096）＝按長邊折算（新開的 4K 通道）；
+ *   ④ 其餘（含 1024x1024／2048x2048 等既有尺寸）＝沿用舊品質規則：`quality`⇒2k、其餘⇒1k；
+ *   ⑤ 什麼都沒給＝1k。
+ * 最後仍要過「該模型宣告的 `resolutions`」這一關（宣告了才准提交）。
+ */
+export function resolveSubmitResolution(
+  modelId: string,
+  input: { resolution?: unknown; size?: unknown; quality?: string } = {},
+): SubmitResolutionResult {
+  const model = generationModel(modelId);
+  const declared = model?.resolutions ?? [];
+
+  let resolution: ImageResolution;
+  let source: SubmitResolutionSource;
+
+  const explicit = input.resolution;
+  if (explicit !== undefined && explicit !== null && String(explicit).trim() !== "") {
+    const raw = String(explicit).trim().toLowerCase();
+    if (raw !== "1k" && raw !== "2k" && raw !== "4k") {
+      return {
+        ok: false,
+        code: "unsupported_resolution",
+        message: `不支持的解析度 ${raw}。可选：1k、2k、4k。`,
+      };
+    }
+    resolution = raw as ImageResolution;
+    source = "explicit";
+  } else {
+    const rawSize = typeof input.size === "string" ? input.size.trim() : "";
+    const lowered = rawSize.toLowerCase();
+    if (lowered === "1k" || lowered === "2k" || lowered === "4k") {
+      resolution = lowered as ImageResolution;
+      source = "size_tier";
+    } else {
+      const pixels = /^\s*(\d{2,5})\s*[x×]\s*(\d{2,5})\s*$/u.exec(rawSize);
+      const maxDim = pixels ? Math.max(Number(pixels[1]), Number(pixels[2])) : 0;
+      if (maxDim > PIXEL_4K_LONG_EDGE) {
+        resolution = resolutionFromImageSize(rawSize);
+        source = "size_pixels";
+      } else if (input.quality === "quality" || input.quality === "hd" || input.quality === "high") {
+        resolution = "2k";
+        source = "quality";
+      } else {
+        resolution = "1k";
+        source = "default";
+      }
+    }
+  }
+
+  if (declared.length > 0 && !declared.includes(resolution)) {
+    return {
+      ok: false,
+      code: "resolution_not_declared_by_model",
+      message: `模型 ${modelId} 未宣告解析度 ${resolution}（已宣告：${declared.join("／")}）——未宣告即不許提交，避免上游靜默降級。`,
+    };
+  }
+  return { ok: true, resolution, source };
+}

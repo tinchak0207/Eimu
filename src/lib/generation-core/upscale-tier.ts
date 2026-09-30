@@ -46,6 +46,20 @@
  *
  * 本檔是**葉模組**：不 import catalog（只用 type-only import）、不 import DB／node 內建，
  * 因此可被 `generation-model-catalog/capabilities.ts` 安全引用（無循環、不污染 client bundle）。
+ *
+ * ── 後端換血（2026-09-30 暴君指令「4k超分可以走 gpt image 2 執行超分」）───────────
+ * PixAI 渠道當日已死（站點風控）⇒ 上面的 `(size, factor)` 參數化只描述 **legacy 後端**
+ * （`/v1/upscale` 未設 `UPSCALE_BACKEND` 時的預設），它現在只會回 502。
+ * 新後端（控面設 `UPSCALE_BACKEND=gpt-image-2`，實作在 `/v1/upscale`）是 **gpt-image-2
+ * 生成式重繪**：檔位＝提交 `resolution`、比例＝模型已宣告的可提交比例，上游變體名即
+ * `firefly-gpt-image-{resolution}-{ratio}`（`generation-core/adobe2api-upstream.ts:82`）。
+ * **語義差別要說清楚**：不是保真像素放大，是重新繪製（內容可能被模型重畫）。
+ *
+ * 這裡的**檔位門檻**與 fail-closed 政策原樣留用（4K 未校準前不販售），但注意
+ * `minOutputLongEdgePx`／`maxOutputLongEdgePx` 是 **PixAI 比例表推出來的 legacy 保證值**，
+ * **不可當新後端的保證**：新後端的真實輸出尺寸只能以實測 `data[].width/height` 為準，
+ * 因此 4K 在新後端上同樣 fail-closed（`upscale_4k_upstream_unverified`），
+ * 直到有一次真單量到長邊 ≥3840px 為止。
  */
 
 import type { UpscaleTier } from "../generation-model-catalog/types";

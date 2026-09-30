@@ -12,7 +12,7 @@ import { generateBizImage, resolveBizEndpoints } from "@/lib/biz-image-pipeline"
 import { refundImageQuota, reserveImageQuota } from "@/lib/image-billing";
 import { imageGenerationCoins, isSupportedImageModel, type ModelMode } from "@/lib/provider-config";
 import { ADOBE_FIREFLY_MODEL_ID } from "@/lib/provider-config";
-import { aspectRatioFromImageSize, resolveGenerationModelId } from "@/lib/generation-model-catalog";
+import { aspectRatioFromImageSize, resolveGenerationModelId, resolveSubmitResolution } from "@/lib/generation-model-catalog";
 import { normalizeControlNets, toPixaiControlNets, MAX_CONTROL_NETS } from "@/lib/pixai-controlnets";
 import { listCharacterCards } from "@/lib/character-card-store";
 import {
@@ -51,7 +51,7 @@ export const preferredRegion = "sfo1";
  */
 
 /** 上游只接受这三种尺寸；seedream 系额外支持 2048x2048。 */
-const SUPPORTED_SIZES = new Set(["1024x1024", "1536x1024", "1024x1536", "2048x2048"]);
+const SUPPORTED_SIZES = new Set(["1024x1024", "1536x1024", "1024x1536", "2048x2048", "4096x4096"]);
 
 /** 拒絕遙測用的路徑。寫死字面量：分組要穩定，不被 rewrite/代理改寫影響。 */
 const REJECTION_PATH = "/v1/images/generations";
@@ -110,6 +110,13 @@ interface ImageRequestBody {
    * 的五值值域，其餘一律 `"general"`。上限 5 張（超過 400，不靜默截斷）。
    */
   reference_images?: unknown;
+  /**
+   * 輸出解析度（2026-09-30）：`"1k"｜"2k"｜"4k"`，顯式檔位優先於 `size`／`quality`。
+   * 未給＝沿用舊語義（quality⇒2k、其餘⇒1k）。這是 4K 唯一的提交入口——舊碼把
+   * resolution 寫死成 1k/2k，能力面宣告的 4k 根本送不到上游（宣告與行為脫節）。
+   */
+  resolution?: unknown;
+  output_resolution?: unknown;
 }
 
 export async function POST(req: NextRequest) {
@@ -210,6 +217,18 @@ async function handleGeneration(req: NextRequest, rejection: RejectionContext): 
   // OpenAI 用 hd/standard，本站内部用 quality/fast。
   const qualityMode: ModelMode = body.quality === "hd" || body.quality === "high" ? "quality" : "fast";
 
+  // 提交解析度（2026-09-30）：顯式 `resolution`／`size:"4k"`／`size:"4096x4096"` 都能到 4k；
+  // 未宣告該檔位的模型具名拒（不靜默降級）。≤3072 的既有尺寸沿用舊品質規則，行為不變。
+  const resolutionResult = resolveSubmitResolution(modelId, {
+    resolution: body.resolution ?? body.output_resolution,
+    size: body.size,
+    quality: qualityMode,
+  });
+  if (!resolutionResult.ok) {
+    return errorResponse(400, resolutionResult.message, "invalid_request_error", resolutionResult.code, traceId);
+  }
+  const submitResolution = resolutionResult.resolution;
+
   const responseFormat = body.response_format === "url" ? "url" : "b64_json";
 
   // ControlNet 結構控制。只有 pixai 渠道真正消費這個欄位；其他模型/渠道傳了也
@@ -274,7 +293,7 @@ async function handleGeneration(req: NextRequest, rejection: RejectionContext): 
     // 無狀態配額預檢——通過 → 以 0 額提交，job 直接進 queued，阻塞式 reserve 整段
     // 跳過（計費交事後投影）；額度不足 → 按現契約 402；上游不可達 → 原樣回落
     // 下方 reserve 路徑。env 未設 = 金額原樣，路徑一字不變。
-    const baseBillingAmount = imageGenerationCoins(modelId, qualityMode) * QUOTA_PER_COIN * rawN;
+    const baseBillingAmount = imageGenerationCoins(modelId, qualityMode, submitResolution) * QUOTA_PER_COIN * rawN;
     const gate = await enforceQuotaGate({
       bizKeyId: apiKey.id,
       billingUserId: apiKey.userId,
@@ -300,7 +319,7 @@ async function handleGeneration(req: NextRequest, rejection: RejectionContext): 
         prompt: plan.prompt,
         size,
         ratio: aspectRatioFromImageSize(size),
-        resolution: qualityMode === "quality" ? "2k" : "1k",
+        resolution: submitResolution,
         quality: qualityMode,
         responseFormat,
         callbackUrl,
@@ -352,7 +371,7 @@ async function handleGeneration(req: NextRequest, rejection: RejectionContext): 
   }
 
   // ── 计费预留 ──────────────────────────────────────────────
-  const coinsPerImage = imageGenerationCoins(modelId, qualityMode);
+  const coinsPerImage = imageGenerationCoins(modelId, qualityMode, submitResolution);
   const totalQuota = coinsPerImage * QUOTA_PER_COIN * rawN;
 
   // 先查队列再动钱（与 C 端主链路同序）：admin 在路由调度分页停用全部渠道后，

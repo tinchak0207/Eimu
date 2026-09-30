@@ -3,13 +3,30 @@
 // 2026-08-05：原先只在 VPS 上，且扣費空轉（見 pixai-proxy.ts 頭部說明）。
 // 定價走 generationCoins(pixai-upscale)，與 admin 覆寫層同源。
 // 錯誤體與 trace id 與 /v1/images/generations 對齊。
+//
+// ── 後端（2026-09-30 暴君指令「4k超分可以走 gpt image 2 執行超分」）────────────
+// 事實：① PixAI 渠道已死（當日裁定，站點風控），legacy 後端只會回 502；
+//      ② 4K 檔位在 legacy 後端上本來就卡 `factor=4` 未校準（fail-closed）。
+// 新後端＝**gpt-image-2 生成式重繪**：把原圖當參考圖、走 durable `image_edit` 任務，
+// 檔位挑 `resolution`（1k／2k／4k）、原圖比例挑 `ratio`——上游變體名即
+// `firefly-gpt-image-{resolution}-{ratio}`（`generation-core/adobe2api-upstream.ts:82`），
+// 由**檔位×比例**決定輸出變體，不看像素 `size`。
+//
+// **語義變了，必須說清楚**：這不是保真的像素放大（不是原圖 ×N），是**重新繪製**——
+// 內容會被模型重畫一遍，細節可能與原圖不同。文件（`/v1/openapi.json`）同步改成這個口徑。
+//
+// **默認仍是 legacy（PixAI bridge）**：換後端會把成本從 `pixai-upscale` 的一口價
+// 0.001 币變成 gpt-image-2 的檔位價（catalog：1k=10／2k=20／4k=80 币）。那是**定價決策**，
+// 未經裁定不得擅自切換（2026-09-27 付費硬閘）。切換＝控面設 `UPSCALE_BACKEND=gpt-image-2`。
 
+import { randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
 import { after } from "next/server";
 import { authenticateBizApiKey, flushBizApiKeyUsage, recordBizApiKeyUsage } from "@/lib/biz-api-key-store";
 import { readBearerToken } from "@/lib/biz-api-keys";
-import { declaredUpscaleTiers, generationCoins } from "@/lib/generation-model-catalog";
-import { PIXAI_UPSCALE_MODEL_ID } from "@/lib/image-model-ids.js";
+import { declaredUpscaleTiers, generationCoins, generationModel, imageSizeForAspectRatio } from "@/lib/generation-model-catalog";
+import { aspectRatioValue, nearestAspectRatio } from "@/lib/generation-model-catalog/resolution";
+import { DEFAULT_IMAGE_MODEL_ID, PIXAI_UPSCALE_MODEL_ID } from "@/lib/image-model-ids.js";
 import {
   jsonWithTrace,
   pixaiAuthError,
@@ -17,7 +34,15 @@ import {
   pixaiRequestError,
   proxyPixai,
 } from "@/lib/pixai-proxy";
-import { commitSyncCharge, refundSyncCharge, reserveSyncCharge } from "@/lib/generation-core/sync-charge";
+import { EditInputError, resolveEditReference } from "@/lib/biz-image-references";
+import { generationControlPlaneEnabled } from "@/lib/generation-core/database";
+import { submitGenerationCommand } from "@/lib/generation-core/command-service";
+import { getGenerationJobForTenant, hasGenerationCapability } from "@/lib/generation-core/job-repository";
+import { taskStatus } from "@/lib/generation-core/task-response";
+import type { AspectRatio } from "@/lib/generation-model-catalog/types";
+import type { GenerationArtifactResult, GenerationReference } from "@/lib/generation-core/types";
+import type { BizApiKey } from "@/lib/biz-api-keys";
+import { commitSyncCharge, refundSyncCharge, reserveSyncCharge, type SyncCharge } from "@/lib/generation-core/sync-charge";
 import { resolveUpscaleSubmission, UpscaleTierError } from "@/lib/generation-core/upscale-tier";
 import { QUOTA_PER_COIN } from "@/lib/quota-constants";
 import { syncModelPricing } from "@/lib/pricing-runtime";
@@ -32,6 +57,84 @@ import {
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
+
+// ── 後端選擇 ────────────────────────────────────────────────────────────────
+
+export type UpscaleBackend = "pixai-bridge" | "gpt-image-2";
+
+/** 切換後端的 env 名（控面）：只有逐字 `gpt-image-2` 才切，其餘（含未設）＝legacy。 */
+export const UPSCALE_BACKEND_ENV = "UPSCALE_BACKEND";
+
+/** 新後端跑的平台模型（上游變體名 = `firefly-gpt-image-{resolution}-{ratio}`）。 */
+export const UPSCALE_BACKEND_MODEL_ID = DEFAULT_IMAGE_MODEL_ID;
+
+export function resolveUpscaleBackend(env: NodeJS.ProcessEnv = process.env): UpscaleBackend {
+  return (env[UPSCALE_BACKEND_ENV] ?? "").trim().toLowerCase() === "gpt-image-2" ? "gpt-image-2" : "pixai-bridge";
+}
+
+/** 等待 durable 任務的預算（同 openai-compat 的 240s：函數 300s 留 60s 結算餘裕）。 */
+const UPSCALE_AWAIT_MS = 240_000;
+const UPSCALE_POLL_INTERVAL_MS = 2_500;
+const UPSCALE_POLL_INTERVAL_MAX_MS = 5_000;
+
+/** 後端能力（`resolution`×`ratio`＝上游變體）與檔位的對應：檔位就是解析度，不加倍率。 */
+export interface GptImageUpscalePlan {
+  modelId: string;
+  resolution: string;
+  ratio: AspectRatio;
+  /** 比例來源（診斷用）：顯式 `ratio`／原圖像素折算／預設。 */
+  ratioSource: "explicit" | "source_pixels" | "default";
+  /** 折算後與原圖比例的相對差（>0 表示畫面比例被貼近到最接近的可提交檔），0＝沒有折算。 */
+  ratioDeviation: number;
+  size: string;
+  prompt: string;
+}
+
+/**
+ * 檔位契約 → gpt-image-2 後端參數（**純函式**，測試直接斷言映射）。
+ *
+ * 兩個真源：① 檔位（1k／2k／4k）逐字就是 `resolution`；② 原圖比例要落在模型
+ * **已宣告的 `aspectRatios`** 內——上游變體只認宣告內的比例，宣告外的比例上游拿不到，
+ * 所以這裡用 `nearestAspectRatio` 貼近最接近的可提交比例，並把實際偏差回報出去
+ * （不靜默：偏離 >15% 時呼叫端看得到 `ratio` 與 `ratio_deviation`）。
+ */
+export function planGptImageUpscale(input: {
+  tier: string;
+  ratio?: unknown;
+  sourcePixels?: { width: number; height: number } | null;
+}): GptImageUpscalePlan {
+  const model = generationModel(UPSCALE_BACKEND_MODEL_ID);
+  const supported = (model?.aspectRatios ?? ["1:1"]) as readonly AspectRatio[];
+  const explicit = typeof input.ratio === "string" ? input.ratio.trim() : "";
+
+  let ratio: AspectRatio;
+  let ratioSource: GptImageUpscalePlan["ratioSource"];
+  let target: number | null = null;
+  if (explicit && supported.includes(explicit as AspectRatio)) {
+    ratio = explicit as AspectRatio;
+    ratioSource = "explicit";
+  } else {
+    if (explicit) target = aspectRatioValue(explicit as AspectRatio);
+    else if (input.sourcePixels) target = input.sourcePixels.width / input.sourcePixels.height;
+    ratio = target === null ? "1:1" : nearestAspectRatio(target, supported);
+    ratioSource = target === null ? "default" : explicit ? "explicit" : "source_pixels";
+  }
+  const ratioDeviation = target === null ? 0 : Math.abs(aspectRatioValue(ratio) - target) / target;
+
+  return {
+    modelId: UPSCALE_BACKEND_MODEL_ID,
+    resolution: input.tier,
+    ratio,
+    ratioSource,
+    ratioDeviation,
+    size: imageSizeForAspectRatio(ratio),
+    // 「一鍵超分」的提示詞：把「只提升解析度」寫死，避免模型順手重新設計畫面。
+    prompt:
+      `把輸入的這張圖做高清放大，輸出檔位 ${input.tier}。`
+      + "嚴格保留原圖的內容、主體、構圖、比例、色彩與風格，只提升解析度與細節清晰度"
+      + "（去噪、銳化邊緣、補足紋理）；不要新增、刪除或替換任何元素，不要改動畫面中的文字，不要重新設計。",
+  };
+}
 
 export async function POST(req: NextRequest) {
   const traceId = getOrCreateTraceId(req);
@@ -79,6 +182,58 @@ export async function POST(req: NextRequest) {
     throw error;
   }
   const size = submission.tier;
+
+  // ── 後端（預設 legacy PixAI bridge；切 gpt-image-2 需控面設 env）──────────────
+  const backend = resolveUpscaleBackend();
+  let plan: GptImageUpscalePlan | null = null;
+  let reference: GenerationReference | null = null;
+  if (backend === "gpt-image-2") {
+    if (!generationControlPlaneEnabled()) {
+      // 沒有控制面（＝沒有 durable 任務與 DB）就沒有這條後端：具名拒，不假裝成功。
+      return respond(
+        pixaiRequestError(
+          `超分後端 gpt-image-2 需要生成控制面（GENERATION_CONTROL_PLANE_ENABLED=true 且 GENERATION_DATABASE_URL 已配置）。`,
+          "upscale_backend_unavailable",
+          traceId,
+        ),
+        503,
+      );
+    }
+    plan = planGptImageUpscale({
+      tier: submission.tier,
+      ratio: body.ratio,
+      sourcePixels: submission.requestedPixelSize,
+    });
+    // 誠實預檢（碰額度之前）：跑完 job 才發現沒有該 比例×檔位 的 image_edit 渠道，
+    // 就是「先扣費、進場才失敗退款」的殭屍往返。與提交同參數（ratio×resolution）。
+    const capable = await hasGenerationCapability({
+      modelId: plan.modelId,
+      kind: "image_edit",
+      ratio: plan.ratio,
+      resolution: plan.resolution,
+      routingClass: "generic",
+    });
+    if (!capable) {
+      return respond(
+        pixaiRequestError(
+          `超分後端 ${plan.modelId} 沒有 ${plan.ratio}×${plan.resolution} 的改圖渠道`
+            + `（image_edit capability 不存在或已停用）——不販售沒有供給的檔位。`,
+          "upscale_backend_capability_missing",
+          traceId,
+        ),
+        400,
+      );
+    }
+    // 參考圖解析同樣放在扣費之前：非法 image（400／413）不該先動錢再退錢。
+    try {
+      reference = await resolveEditReference(image, `biz:${auth.key.id}`, `biz-upscale-${randomUUID()}`);
+    } catch (error) {
+      if (error instanceof EditInputError) {
+        return respond(pixaiRequestError(error.message, error.code, traceId), error.status);
+      }
+      throw error;
+    }
+  }
 
   await syncModelPricing();
   const quota = Math.round(generationCoins(PIXAI_UPSCALE_MODEL_ID, { resolution: size }) * QUOTA_PER_COIN);
@@ -132,6 +287,19 @@ export async function POST(req: NextRequest) {
   });
   if (!charged.ok) return respond(charged.body, charged.status);
 
+  if (backend === "gpt-image-2" && plan && reference) {
+    return await deliverGptImageUpscale({
+      plan,
+      reference,
+      key: auth.key,
+      charged,
+      traceId,
+      respond,
+      reservedIdempotency,
+      idempotencyKey,
+    });
+  }
+
   const { status, data } = await proxyPixai("upscale", {
     image,
     // factor 由檔位契約決定（1k／2k⇒2、4k⇒4），不再吃呼叫端任意倍率。
@@ -147,22 +315,194 @@ export async function POST(req: NextRequest) {
     : 0;
 
   if (status === 200 && delivered > 0) {
-    after(await commitSyncCharge(charged.charge, { delivered: 1 }));
-    recordBizApiKeyUsage(auth.key.id, 1);
-    after(() => flushBizApiKeyUsage().catch(() => undefined));
-    if (reservedIdempotency) {
-      await commitSyncIdempotency({
-        tenantId: reservedIdempotency.tenantId,
-        idempotencyKey: reservedIdempotency.key,
-        status: 200,
-        body: data,
-      }).catch((error) => {
-        console.error(`[pixai] idempotency commit failed action=upscale`, error);
-      });
-    }
+    await commitUpscaleDelivery({
+      charge: charged.charge,
+      keyId: auth.key.id,
+      data,
+      reservedIdempotency,
+    });
     return respond(data, 200);
   }
 
   after(await refundSyncCharge(charged.charge, { status }));
   return respond(pixaiError(data, "Upscale failed.", traceId), status >= 400 ? status : 502);
+}
+
+// ── 後端二：gpt-image-2 生成式重繪（durable image_edit 任務，同步等待）─────────
+
+type UpscaleCharge = SyncCharge;
+
+interface UpscaleDeliverContext {
+  plan: GptImageUpscalePlan;
+  reference: GenerationReference;
+  key: BizApiKey;
+  charged: Extract<Awaited<ReturnType<typeof reserveSyncCharge>>, { ok: true }>;
+  traceId: string;
+  respond: (data: unknown, status: number, headers?: Record<string, string>) => Response;
+  reservedIdempotency: { tenantId: string; key: string } | null;
+  idempotencyKey: string | null;
+}
+
+/**
+ * 交付（2026-09-30）：把原圖當參考圖提交 durable `image_edit`，同步等到終態再回
+ * `{ created, data: [...] }`（＝對外文件 `SyncImageResponse`；呼叫端契約不變）。
+ *
+ * 為什麼用 `billingAmount: 0` 提交：**錢已經在這一層收過了**（`reserveSyncCharge`
+ * 的同步 job 列＋billing_operation）。讓 job 再記一次金額＝同一筆請求扣兩次。
+ * 交付後由本層 commit、失敗由本層 refund，帳仍然只有一本（同 quota-precheck 的 0 額提交手法）。
+ *
+ * 任務不取消：超時只是本層放棄等待，任務仍在控面後台跑（與 openai-compat 同政策）。
+ */
+async function deliverGptImageUpscale(ctx: UpscaleDeliverContext): Promise<Response> {
+  const tenantId = `biz:${ctx.key.id}`;
+  let jobId: string;
+  try {
+    const submitted = await submitGenerationCommand({
+      tenantId,
+      apiKeyId: ctx.key.id,
+      billingUserId: ctx.key.userId,
+      source: "biz",
+      idempotencyKey: ctx.idempotencyKey,
+      kind: "image_edit",
+      modelId: ctx.plan.modelId,
+      prompt: ctx.plan.prompt,
+      size: ctx.plan.size,
+      ratio: ctx.plan.ratio,
+      resolution: ctx.plan.resolution,
+      quality: "quality",
+      responseFormat: "url",
+      requestedCount: 1,
+      billingAmount: 0,
+      workflow: { references: [ctx.reference], prompt: ctx.plan.prompt },
+    });
+    jobId = submitted.job.id;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[upscale] gpt-image-2 submit failed key=${ctx.key.id}`, error);
+    await refundUpscaleDelivery(ctx.charged.charge, 502, `submit failed: ${message}`);
+    return ctx.respond(pixaiRequestError(`超分任務提交失敗：${message}`, "upscale_backend_submit_failed", ctx.traceId), 502);
+  }
+
+  const settled = await awaitUpscaleJob(jobId, tenantId);
+  if (settled.kind === "succeeded") {
+    // `data` 逐項帶 width/height：檔位是不是真的交付到（4K＝長邊 ≥3840）由呼叫端可自證，不必信文案。
+    const data = {
+      created: Math.floor(Date.now() / 1000),
+      data: settled.artifacts.map((artifact) => ({
+        url: artifact.url,
+        ...(artifact.b64Json ? { b64_json: artifact.b64Json } : {}),
+        width: artifact.width,
+        height: artifact.height,
+        mime_type: artifact.mimeType,
+      })),
+      upscale: {
+        tier: ctx.plan.resolution,
+        model: ctx.plan.modelId,
+        ratio: ctx.plan.ratio,
+        ratio_source: ctx.plan.ratioSource,
+        ratio_deviation: Number(ctx.plan.ratioDeviation.toFixed(4)),
+        task_id: jobId,
+      },
+    };
+    await commitUpscaleDelivery({
+      charge: ctx.charged.charge,
+      keyId: ctx.key.id,
+      data,
+      reservedIdempotency: ctx.reservedIdempotency,
+    });
+    return ctx.respond(data, 200);
+  }
+
+  if (settled.kind === "timeout") {
+    await refundUpscaleDelivery(ctx.charged.charge, 504, `await timeout, task ${jobId}`);
+    return ctx.respond(
+      pixaiRequestError(
+        `超分超時：任務 ${jobId} 仍在後台執行，可稍後以 GET /v1/images/${jobId} 查詢；本次未交付，已提交退款。`,
+        "upscale_backend_timeout",
+        ctx.traceId,
+      ),
+      504,
+    );
+  }
+
+  await refundUpscaleDelivery(ctx.charged.charge, 502, `task ${jobId} ${settled.status}: ${settled.message}`);
+  return ctx.respond(
+    pixaiRequestError(
+      `超分任務 ${jobId} 未交付（${settled.status}）：${settled.message}；已提交退款。`,
+      settled.code || "upscale_backend_failed",
+      ctx.traceId,
+    ),
+    502,
+  );
+}
+
+type UpscaleJobOutcome =
+  | { kind: "succeeded"; artifacts: GenerationArtifactResult[] }
+  | { kind: "timeout" }
+  | { kind: "failed"; status: string; code: string; message: string };
+
+/**
+ * 本地輪詢 durable 任務到終態（直讀 DB，不繞 HTTP）：控面自己承載這條路由，
+ * 沒有理由再對自己做一次帶鑑權的 HTTP 往返。終態判定用既有 `taskStatus`
+ * （唯一狀態映射真源），查詢本身失敗只拉長間隔、不當終態（同 openai-compat 政策）。
+ */
+async function awaitUpscaleJob(jobId: string, tenantId: string): Promise<UpscaleJobOutcome> {
+  const deadlineAt = Date.now() + UPSCALE_AWAIT_MS;
+  let interval = UPSCALE_POLL_INTERVAL_MS;
+  for (;;) {
+    if (Date.now() >= deadlineAt) return { kind: "timeout" };
+    let job: Awaited<ReturnType<typeof getGenerationJobForTenant>> = null;
+    try {
+      job = await getGenerationJobForTenant(jobId, tenantId);
+    } catch (error) {
+      console.error(`[upscale] job poll failed job=${jobId}`, error);
+    }
+    if (job) {
+      const status = taskStatus(job);
+      if (status === "succeeded") {
+        return { kind: "succeeded", artifacts: job.result?.artifacts ?? [] };
+      }
+      if (status === "failed" || status === "cancelled" || status === "refunded" || status === "unknown") {
+        return {
+          kind: "failed",
+          status,
+          code: "",
+          message: job.failureDetail?.trim() || "生成失敗，未出圖。",
+        };
+      }
+      interval = UPSCALE_POLL_INTERVAL_MS;
+    } else {
+      interval = Math.min(Math.round(interval * 1.5), UPSCALE_POLL_INTERVAL_MAX_MS);
+    }
+    const wait = Math.min(interval, Math.max(0, deadlineAt - Date.now()));
+    if (wait <= 0) return { kind: "timeout" };
+    await new Promise((resolve) => setTimeout(resolve, wait));
+  }
+}
+
+/** 同步超分交付成功：commit 實耗 + 用量記帳 + 冪等快取（兩條後端共用同一結算）。 */
+async function commitUpscaleDelivery(input: {
+  charge: UpscaleCharge;
+  keyId: string;
+  data: unknown;
+  reservedIdempotency: { tenantId: string; key: string } | null;
+}): Promise<void> {
+  after(await commitSyncCharge(input.charge, { delivered: 1 }));
+  recordBizApiKeyUsage(input.keyId, 1);
+  after(() => flushBizApiKeyUsage().catch(() => undefined));
+  if (input.reservedIdempotency) {
+    await commitSyncIdempotency({
+      tenantId: input.reservedIdempotency.tenantId,
+      idempotencyKey: input.reservedIdempotency.key,
+      status: 200,
+      body: input.data,
+    }).catch((error) => {
+      console.error(`[pixai] idempotency commit failed action=upscale`, error);
+    });
+  }
+}
+
+/** 同步超分交付失敗：先落 pending refund op、job → failed，再嘗試外部退款（reconcile 可補退）。 */
+async function refundUpscaleDelivery(charge: UpscaleCharge, status: number, detail?: string): Promise<void> {
+  after(await refundSyncCharge(charge, { status, ...(detail ? { detail } : {}) }));
 }
