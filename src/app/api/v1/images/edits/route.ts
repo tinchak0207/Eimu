@@ -26,7 +26,7 @@ import {
   resolveSubmitResolution,
 } from "@/lib/generation-model-catalog";
 import { imageGenerationCoins, isSupportedImageModel, type ModelMode } from "@/lib/provider-config";
-import { DURABLE_IMAGE_SIZE_ALIASES, DURABLE_IMAGE_SIZES } from "@/lib/generation-core/durable-image-sizes";
+import { DURABLE_IMAGE_SIZES, resolveDurableImageSizeAlias } from "@/lib/generation-core/durable-image-sizes";
 import { PIXAI_EDIT_MODEL_ID } from "@/lib/image-model-ids.js";
 import {
   jsonWithTrace,
@@ -274,7 +274,7 @@ async function durableEditBranch(input: {
   }
 
   const rawSize = typeof body.size === "string" && body.size ? body.size : "1024x1024";
-  const size = DURABLE_IMAGE_SIZE_ALIASES[rawSize] ?? rawSize;
+  const size = resolveDurableImageSizeAlias(rawSize) ?? rawSize;
   if (!(DURABLE_EDIT_SIZES as readonly string[]).includes(size)) {
     return respond(
       pixaiRequestError(

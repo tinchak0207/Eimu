@@ -32,6 +32,17 @@ export const DURABLE_IMAGE_SIZE_ALIASES: Readonly<Record<string, string>> = {
   "2k": "2048x2048",
 };
 
+/**
+ * 別名 → 尺寸。用 Map 而非物件索引：物件索引會命中原型鍵（`size:"toString"` 之類
+ * 會拿到函式），Map 只認自己那兩把。回 null ＝不是別名，呼叫端原樣往下走白名單檢查。
+ */
+export function resolveDurableImageSizeAlias(size: string): string | null {
+  const raw = size.trim().toLowerCase();
+  return Object.prototype.hasOwnProperty.call(DURABLE_IMAGE_SIZE_ALIASES, raw)
+    ? DURABLE_IMAGE_SIZE_ALIASES[raw]
+    : null;
+}
+
 /** 尺寸是否在已知可交白名單內（大小寫/空白無關）。 */
 export function isDurableImageSize(size: unknown): boolean {
   const raw = typeof size === "string" ? size.trim().toLowerCase() : "";
