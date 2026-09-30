@@ -357,10 +357,13 @@ const SPEC = {
           + "呼叫端給的倍率**不落在檔位上就具名拒** `upscale_factor_conflict`（不再靜默取用任意倍率）。"
           + "什麼都不給＝一鍵預設＝**當下最高可提交檔位**。影片超分在上游無通道 ⇒ 具名拒 `upscale_video_upstream_unsupported`。"
           + "支援 `Idempotency-Key` 請求頭。定價走 generationCoins(pixai-upscale)。\n"
-          + "**後端**（2026-09-30）：`UPSCALE_BACKEND=gpt-image-2` 時走 **gpt-image-2 生成式重繪**——把原圖當參考圖提交 durable `image_edit` 任務，"
-          + "檔位挑輸出解析度、原圖比例貼近模型已宣告的可提交比例（實際採用的 `ratio` 與 `ratio_deviation` 如實回報）。"
+          + "**後端**（2026-09-30）：`UPSCALE_BACKEND=gpt-image-2` 時走 **gpt-image-2 生成式重繪**——把原圖當參考圖提交 durable `image_edit` 任務；"
+          + "**檔位以像素 `size` 表達**（實有渠道是 openai_images 型的 `/images/edits`，只收 size／quality，不看 resolution）："
+          + "`1k`＝1024x1024／1536x1024／1024x1536、`2k`＝2048x2048、`4k`＝4096x4096；"
+          + "原圖比例貼近模型已宣告的可提交比例（實際採用的 `ratio` 與 `ratio_deviation` 如實回報）。"
           + "**這不是保真像素放大，是重新繪製**（內容可能被模型重畫）；回應用 `data[].width/height` 給出真實輸出尺寸供自證。"
-          + "該 比例×檔位 沒有 image_edit 渠道 ⇒ 具名拒 `upscale_backend_capability_missing`；等待超時 ⇒ `upscale_backend_timeout`（504，任務仍在後台，已提交退款）。"
+          + "該 比例×檔位 折算不出已知可交尺寸（例如 3:2 的 2k⇒3072x2048、16:9 的 1k⇒1792x1024）⇒ 具名拒 `upscale_backend_size_unavailable`（未驗證的尺寸不放行，也不靜默降級成較低檔位）；"
+          + "沒有該 比例×檔位 的 image_edit 渠道 ⇒ 具名拒 `upscale_backend_capability_missing`；等待超時 ⇒ `upscale_backend_timeout`（504，任務仍在後台，已提交退款）。"
           + "**4K 默認 fail-closed**：輸出色未經真單校準前對 4K 具名拒 `upscale_4k_upstream_unverified`（不販售未校準檔位；校準後由 `UPSCALE_4K_UPSTREAM=1` 開啟，開啟後一鍵預設自動變 4K）。",
         security: [bearerAuth],
         requestBody: {

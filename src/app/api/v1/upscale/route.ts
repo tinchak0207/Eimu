@@ -127,11 +127,16 @@ export async function POST(req: NextRequest) {
         503,
       );
     }
-    plan = planGptImageUpscale({
+    const planned = planGptImageUpscale({
       tier: submission.tier,
       ratio: body.ratio,
       sourcePixels: submission.requestedPixelSize,
     });
+    if (!planned.ok) {
+      // 未驗證的 檔位×比例 組合：具名拒（不靜默降級成較低檔位、不拿客戶的錢賭上游收得下）。
+      return respond(pixaiRequestError(planned.message, planned.code, traceId), 400);
+    }
+    plan = planned.plan;
     // 誠實預檢（碰額度之前）：跑完 job 才發現沒有該 比例×檔位 的 image_edit 渠道，
     // 就是「先扣費、進場才失敗退款」的殭屍往返。與提交同參數（ratio×resolution）。
     const capable = await hasGenerationCapability({

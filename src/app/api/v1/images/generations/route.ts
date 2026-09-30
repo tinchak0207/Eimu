@@ -13,6 +13,7 @@ import { refundImageQuota, reserveImageQuota } from "@/lib/image-billing";
 import { imageGenerationCoins, isSupportedImageModel, type ModelMode } from "@/lib/provider-config";
 import { ADOBE_FIREFLY_MODEL_ID } from "@/lib/provider-config";
 import { aspectRatioFromImageSize, resolveGenerationModelId, resolveSubmitResolution } from "@/lib/generation-model-catalog";
+import { DURABLE_IMAGE_SIZES } from "@/lib/generation-core/durable-image-sizes";
 import { normalizeControlNets, toPixaiControlNets, MAX_CONTROL_NETS } from "@/lib/pixai-controlnets";
 import { listCharacterCards } from "@/lib/character-card-store";
 import {
@@ -50,8 +51,8 @@ export const preferredRegion = "sfo1";
  * 计费落在密钥绑定的 New API 用户上，复用已有的预留/退款逻辑。
  */
 
-/** 上游只接受这三种尺寸；seedream 系额外支持 2048x2048。 */
-const SUPPORTED_SIZES = new Set(["1024x1024", "1536x1024", "1024x1536", "2048x2048", "4096x4096"]);
+/** 已知可交的上游尺寸白名單（唯一真源：generation-core/durable-image-sizes.ts）。 */
+const SUPPORTED_SIZES = new Set(DURABLE_IMAGE_SIZES);
 
 /** 拒絕遙測用的路徑。寫死字面量：分組要穩定，不被 rewrite/代理改寫影響。 */
 const REJECTION_PATH = "/v1/images/generations";

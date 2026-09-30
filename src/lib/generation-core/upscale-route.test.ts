@@ -119,9 +119,10 @@ test("非 JSON 請求體具名拒絕（舊行為是 1k 兜底＋原樣轉發＝�
   });
 });
 // ── 後端二：gpt-image-2 生成式重繪（2026-09-30 暴君指令）──────────────────────
-// 這條後端把「4K 超分」的真源從 PixAI 的 factor 換成 gpt-image-2 的 檔位×比例
-// （上游變體 `firefly-gpt-image-{resolution}-{ratio}`），所以這裡斷言的是映射本身：
-// 檔位逐字等於 resolution、比例必須落在模型已宣告的可提交比例內、偏差如實回報。
+// 這條後端把「4K 超分」的真源從 PixAI 的 factor 換成 gpt-image-2 的 **像素 size**
+// （實有渠道是 openai_images 型的 /images/edits，adapter 只送 size／quality，不送
+// resolution——所以檔位必須折算成尺寸，否則就是「付 4K 的錢拿 1K 的圖」）。
+// 這裡斷言的就是那個折算：檔位×比例 → 尺寸，落不進已知可交白名單就具名拒。
 
 test("後端默認＝legacy（PixAI bridge）：不設 UPSCALE_BACKEND 不會偷偷換後端", async () => {
   const { resolveUpscaleBackend } = await import("./upscale-backend.ts");
@@ -132,47 +133,84 @@ test("後端默認＝legacy（PixAI bridge）：不設 UPSCALE_BACKEND 不會偷
   assert.equal(resolveUpscaleBackend({ UPSCALE_BACKEND: " GPT-Image-2 " } as NodeJS.ProcessEnv), "gpt-image-2");
 });
 
-test("檔位→gpt-image-2 後端參數：resolution 逐字等於檔位，比例落在模型已宣告清單內", async () => {
+test("檔位折算成像素 size：1:1 的 1k／2k／4k 分別是 1024／2048／4096（逐字進白名單）", async () => {
   const { planGptImageUpscale, UPSCALE_BACKEND_MODEL_ID } = await import("./upscale-backend.ts");
+  const { DURABLE_IMAGE_SIZES } = await import("./durable-image-sizes.ts");
   const { generationModel } = await import("@/lib/generation-model-catalog");
 
-  const declared = generationModel(UPSCALE_BACKEND_MODEL_ID)?.aspectRatios ?? [];
-  assert.ok(declared.length > 0, "後端模型必須宣告可提交比例（否則無從挑上游變體）");
   assert.ok(
     generationModel(UPSCALE_BACKEND_MODEL_ID)?.resolutions.includes("4k"),
     "4K 檔位的真源＝模型宣告了 4k（宣告沒有就不該賣）",
   );
 
-  for (const tier of ["1k", "2k", "4k"] as const) {
-    const plan = planGptImageUpscale({ tier, sourcePixels: { width: 1200, height: 800 } });
-    assert.equal(plan.resolution, tier);
-    assert.equal(plan.modelId, UPSCALE_BACKEND_MODEL_ID);
-    assert.ok(declared.includes(plan.ratio), `比例 ${plan.ratio} 必須在模型宣告清單內`);
-    // 1200x800 = 3:2，正是宣告內的比例 ⇒ 不該被折算。
-    assert.equal(plan.ratio, "3:2");
-    assert.equal(plan.ratioDeviation, 0);
-    assert.match(plan.prompt, /保留/);
+  const expected: Record<string, string> = { "1k": "1024x1024", "2k": "2048x2048", "4k": "4096x4096" };
+  for (const [tier, size] of Object.entries(expected)) {
+    const planned = planGptImageUpscale({ tier, ratio: "1:1" });
+    assert.equal(planned.ok, true, `1:1 的 ${tier} 應該可規劃：${planned.ok ? "" : planned.message}`);
+    if (!planned.ok) continue;
+    assert.equal(planned.plan.size, size);
+    assert.equal(planned.plan.resolution, tier);
+    assert.equal(planned.plan.modelId, UPSCALE_BACKEND_MODEL_ID);
+    assert.ok(DURABLE_IMAGE_SIZES.includes(planned.plan.size), `${size} 必須在已知可交白名單內`);
+    assert.match(planned.plan.prompt, /保留/);
   }
 });
 
-test("標題外的原圖比例被貼近到可提交比例，並如實回報偏差（不靜默失真）", async () => {
+test("1k 的非 1:1 尺寸（1536x1024／1024x1536）可交付，且比例不被折算", async () => {
   const { planGptImageUpscale } = await import("./upscale-backend.ts");
 
-  // 1.9:1 不在 COMMON_IMAGE_RATIOS 內（最近的是 16:9=1.777…）⇒ 必須折算並報偏差。
-  const plan = planGptImageUpscale({ tier: "2k", sourcePixels: { width: 1900, height: 1000 } });
-  assert.equal(plan.ratio, "16:9");
-  assert.ok(plan.ratioDeviation > 0 && plan.ratioDeviation < 0.15, `偏差應在可見範圍內：${plan.ratioDeviation}`);
-  assert.equal(plan.ratioSource, "source_pixels");
+  const landscape = planGptImageUpscale({ tier: "1k", sourcePixels: { width: 1200, height: 800 } });
+  assert.equal(landscape.ok, true);
+  if (landscape.ok) {
+    assert.equal(landscape.plan.ratio, "3:2");
+    assert.equal(landscape.plan.ratioDeviation, 0);
+    assert.equal(landscape.plan.size, "1536x1024");
+  }
+  const portrait = planGptImageUpscale({ tier: "1k", ratio: "2:3" });
+  assert.equal(portrait.ok, true);
+  if (portrait.ok) assert.equal(portrait.plan.size, "1024x1536");
+});
 
-  const explicit = planGptImageUpscale({ tier: "1k", ratio: "9:16" });
-  assert.equal(explicit.ratio, "9:16");
-  assert.equal(explicit.ratioSource, "explicit");
-  assert.equal(explicit.ratioDeviation, 0);
+test("沒有已知可交尺寸的 檔位×比例 具名拒（不靜默降級成較低檔位）", async () => {
+  const { planGptImageUpscale } = await import("./upscale-backend.ts");
+
+  // 3:2 的 2k 折算成 3072x2048：上游沒收過這個尺寸 ⇒ 拒，且不退回 1k。
+  const refused = planGptImageUpscale({ tier: "2k", ratio: "3:2" });
+  assert.equal(refused.ok, false);
+  if (!refused.ok) {
+    assert.equal(refused.code, "upscale_backend_size_unavailable");
+    assert.match(refused.message, /3072x2048/);
+  }
+  // 16:9 的 1k 折算成 1792x1024，同樣不在已知可交集合內 ⇒ 拒（與 generations 的 size 契約一致）。
+  const wide = planGptImageUpscale({ tier: "1k", sourcePixels: { width: 1920, height: 1080 } });
+  assert.equal(wide.ok, false);
+  if (!wide.ok) assert.equal(wide.code, "upscale_backend_size_unavailable");
+});
+
+test("原圖比例被貼近到可提交比例，並如實回報偏差（不靜默失真）", async () => {
+  const { planGptImageUpscale } = await import("./upscale-backend.ts");
+
+  // 1.9:1 不在 COMMON_IMAGE_RATIOS 內（最近的是 16:9=1.777…）⇒ 折算並報偏差（比例本身仍照實回報）。
+  const snapped = planGptImageUpscale({ tier: "1k", sourcePixels: { width: 1900, height: 1000 } });
+  assert.equal(snapped.ok, false, "16:9 的 1k 沒有已知可交尺寸 ⇒ 具名拒");
+  if (!snapped.ok) assert.equal(snapped.code, "upscale_backend_size_unavailable");
+
+  // 1.5:1 貼近 3:2（偏差 0）——這是可交組合，順便把 ratioSource／deviation 一起驗。
+  const exact = planGptImageUpscale({ tier: "1k", sourcePixels: { width: 1500, height: 1000 } });
+  assert.equal(exact.ok, true);
+  if (exact.ok) {
+    assert.equal(exact.plan.ratio, "3:2");
+    assert.equal(exact.plan.ratioSource, "source_pixels");
+    assert.equal(exact.plan.ratioDeviation, 0);
+  }
 
   const nothing = planGptImageUpscale({ tier: "1k" });
-  assert.equal(nothing.ratio, "1:1");
-  assert.equal(nothing.ratioSource, "default");
-  assert.equal(nothing.size, "1024x1024");
+  assert.equal(nothing.ok, true);
+  if (nothing.ok) {
+    assert.equal(nothing.plan.ratio, "1:1");
+    assert.equal(nothing.plan.ratioSource, "default");
+    assert.equal(nothing.plan.size, "1024x1024");
+  }
 });
 
 test("B 端 handler 可被載入且在無憑證時停在認證層（模組圖未因換後端而斷）", async () => {
@@ -222,6 +260,7 @@ test("OpenAPI 的檔位契約與執行端同源：列舉、配對、具名閘碼
     "upscale_video_upstream_unsupported",
     // 後端二（gpt-image-2 生成式重繪）的具名碼與「不是保真放大」的口徑也必須揭露。
     "upscale_backend_capability_missing",
+    "upscale_backend_size_unavailable",
     "upscale_backend_timeout",
   ]) {
     assert.ok(description.includes(code), `文件未揭露具名閘碼 ${code}`);

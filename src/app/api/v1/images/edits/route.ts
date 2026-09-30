@@ -26,6 +26,7 @@ import {
   resolveSubmitResolution,
 } from "@/lib/generation-model-catalog";
 import { imageGenerationCoins, isSupportedImageModel, type ModelMode } from "@/lib/provider-config";
+import { DURABLE_IMAGE_SIZE_ALIASES, DURABLE_IMAGE_SIZES } from "@/lib/generation-core/durable-image-sizes";
 import { PIXAI_EDIT_MODEL_ID } from "@/lib/image-model-ids.js";
 import {
   jsonWithTrace,
@@ -231,8 +232,8 @@ async function handleEdit(req: NextRequest, rejection: RejectionContext): Promis
 // base64（≤4MB，Vercel 請求體限制留餘裕）；渠道可用性以 supplier_capability
 // 為準做誠實預檢，杜絕「probe 說可用、結算才死」。
 
-/** 與 generations 同口的上游尺寸白名單；另兼容舊 edits 合同的 "1k"/"2k"。 */
-const DURABLE_EDIT_SIZES = new Set(["1024x1024", "1536x1024", "1024x1536", "2048x2048", "4096x4096"]);
+/** 與 generations 同口的上游尺寸白名單（唯一真源）＋舊 edits 合同的 "1k"/"2k" 別寫法。 */
+const DURABLE_EDIT_SIZES = DURABLE_IMAGE_SIZES;
 
 async function durableEditBranch(input: {
   body: Record<string, unknown>;
@@ -273,11 +274,11 @@ async function durableEditBranch(input: {
   }
 
   const rawSize = typeof body.size === "string" && body.size ? body.size : "1024x1024";
-  const size = rawSize === "1k" ? "1024x1024" : rawSize === "2k" ? "2048x2048" : rawSize;
-  if (!DURABLE_EDIT_SIZES.has(size)) {
+  const size = DURABLE_IMAGE_SIZE_ALIASES[rawSize] ?? rawSize;
+  if (!(DURABLE_EDIT_SIZES as readonly string[]).includes(size)) {
     return respond(
       pixaiRequestError(
-        `不支持的 size ${size}。可选：${[...DURABLE_EDIT_SIZES].join("、")}。`,
+        `不支持的 size ${size}。可选：${DURABLE_EDIT_SIZES.join("、")}。`,
         "unsupported_size",
         traceId,
       ),
