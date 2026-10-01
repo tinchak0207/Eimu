@@ -15,16 +15,19 @@ import { listRoutingEvents, summarizeRecentModelStats } from "@/lib/routing-tele
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
 
 const ETA_TTL_MS = 60_000;
 const ETA_EVENT_LIMIT = 200;
+// CDN：60s 新鮮，之後 10 分鐘內先回舊值、背景重算（效能審計 P1-E：冷 MISS 實測 1.6–1.9s，ETA 是加分項不必等）。
+const ETA_CACHE_CONTROL = "public, s-maxage=60, stale-while-revalidate=600";
 
 let etaCache: { expiresAt: number; data: Record<string, number> } | null = null;
 
 export async function GET() {
   const now = Date.now();
   if (etaCache && etaCache.expiresAt > now) {
-    return NextResponse.json({ models: etaCache.data }, { headers: { "Cache-Control": "public, s-maxage=60" } });
+    return NextResponse.json({ models: etaCache.data }, { headers: { "Cache-Control": ETA_CACHE_CONTROL } });
   }
   // 遙測讀取失敗回空表（ETA 是加分項，絕不讓它把端點打掛）——調用方
   // 拿不到 p80 就沿用原本的固定 duration。
@@ -39,5 +42,5 @@ export async function GET() {
     if (stat.p80_latency_ms != null) data[stat.modelId] = stat.p80_latency_ms;
   }
   etaCache = { expiresAt: now + ETA_TTL_MS, data };
-  return NextResponse.json({ models: data }, { headers: { "Cache-Control": "public, s-maxage=60" } });
+  return NextResponse.json({ models: data }, { headers: { "Cache-Control": ETA_CACHE_CONTROL } });
 }

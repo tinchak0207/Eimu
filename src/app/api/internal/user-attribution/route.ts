@@ -26,6 +26,7 @@ import { createPostgresReferralStore } from "@/lib/referral-reward";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
 
 export async function POST(req: NextRequest) {
   const secret = process.env.GENERATION_BILLING_RELAY_SECRET?.trim();

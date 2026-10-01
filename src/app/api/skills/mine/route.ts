@@ -27,6 +27,7 @@ import { noStore, resolveSkillOwner } from "./owner";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
 
 // 把 user-skill 的載入器接上 registry 的 ownerKey 插槽：registry 的私有列舉
 // （`listMySkills` 等）與本端點因此走同一份讀取邏輯，不會有兩條會分叉的路。

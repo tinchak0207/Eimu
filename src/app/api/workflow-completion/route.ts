@@ -77,6 +77,7 @@ export const dynamic = "force-dynamic";
 // DAG 渲染（sharp）+ Blob 上傳留餘裕。回應本身不等渲染（fire-and-forget），
 // 這個上限是給「同步等渲染」的部署形態兜底。
 export const maxDuration = 60;
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
 
 /** payload 上限：整張 DAG 的節點/連線 + 各節點 content，1MB 足夠且擋得住放大攻擊。 */
 const MAX_PAYLOAD_BYTES = 1024 * 1024;

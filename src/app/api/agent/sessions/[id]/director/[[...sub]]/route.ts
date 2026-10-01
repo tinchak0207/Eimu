@@ -12,6 +12,7 @@ import { agentCallerFailureCode, resolveAgentCaller } from "@/lib/agent-session-
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const preferredRegion = "sfo1"; // 與 VPS（閘道/控制面 DB，矽谷）同區：每次上游往返省一趟橫跨美國（2026-10-01 效能審計）
 
 const SESSION_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
 /** 請求體體積上限：op/proposals 載荷含 SVG 對照也不該超 512KB。 */

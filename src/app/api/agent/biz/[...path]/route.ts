@@ -21,6 +21,7 @@ import { AgentKeyConfigError, getOrCreateAgentKeyForUser } from "@/lib/agent-use
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const preferredRegion = "sfo1"; // 與 VPS（閘道/控制面 DB，矽谷）同區：每次上游往返省一趟橫跨美國（2026-10-01 效能審計）
 
 /** JSON 路径的硬超时：与 callAgentGateway 的 10s 约定一致；SSE 不适用。 */
 const BIZ_PROXY_JSON_TIMEOUT_MS = 10_000;

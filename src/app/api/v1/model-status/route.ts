@@ -27,6 +27,7 @@ import { readUnavailableModels } from "@/lib/generation-core/model-availability-
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
 
 /** 近 24h 表現統計：與探測緩存同節奏（60 秒），「时不时记录」不需要秒級實時。 */
 const RECENT_STATS_TTL_MS = 60_000;

@@ -6,6 +6,7 @@ import { taskStatus } from "@/lib/generation-core/task-response";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
 
 export const runtime = "nodejs";
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
 
 export async function GET(req: NextRequest, context: { params: Promise<{ id: string }> }) {
   const traceId = getOrCreateTraceId(req);

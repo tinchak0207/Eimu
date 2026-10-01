@@ -9,6 +9,7 @@ import { mutateCanvasProject } from "@/lib/canvas/project-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
 
 /** Next 15 的動態段是異步的，params 必須 await。 */
 type RouteContext = { params: Promise<{ id: string }> };

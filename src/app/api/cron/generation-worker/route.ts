@@ -4,6 +4,7 @@ import { generationControlPlaneEnabled } from "@/lib/generation-core/database";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
 
 /**
  * Generation worker cron：每分鐘執行一次，claim 待處理與過期任務、執行生成、處理失敗退款。

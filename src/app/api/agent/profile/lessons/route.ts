@@ -16,6 +16,7 @@ import type { AgentTranscriptItem } from "@/lib/agent-chat-types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const preferredRegion = "sfo1"; // 與 VPS（閘道/控制面 DB，矽谷）同區：每次上游往返省一趟橫跨美國（2026-10-01 效能審計）
 
 const MAX_TRANSCRIPT_BYTES = 64 * 1024;
 const MAX_LESSONS_PER_RUN = 6;

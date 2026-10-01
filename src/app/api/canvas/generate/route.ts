@@ -3,7 +3,7 @@
 // 與生產平面的關係（2026-09-28 V-09 修正）：這裡是畫布專用的分發薄殼。
 // 預設走 durable job——每張圖 `POST /api/generation-jobs`（帶 Idempotency-Key）→
 // 伺服器端輪詢 `GET /api/generation-jobs/{id}` → 取件，聚合成畫布 reducer 可直接吃的
-// 陣列（回應形狀與舊版一字不變）。同步形狀只在本層做，生產只認異步 job
+// 陣列（回應形狀與舊版相容：只加 images[i].task_id＝durable job id，供 LOD3 工程透析回查；legacy 為 null）。同步形狀只在本層做，生產只認異步 job
 // （docs/architecture/planes.md §3.3；範本 use-image-generation.ts:627、openai-compat/generation.ts）。
 // 等待上限 = maxDuration − 20s；超時回 504 generation_timeout，**不取消任務**
 // （job 仍在帳本裡跑完/退款，完成後出現在生成記錄）。
@@ -43,6 +43,7 @@ import { syncModelPricing } from "@/lib/pricing-runtime";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
+export const preferredRegion = "sfo1"; // 與 VPS（閘道/控制面 DB，矽谷）同區：每次上游往返省一趟橫跨美國（2026-10-01 效能審計）
 
 export interface CanvasGenerateRequest {
   prompt: string;
@@ -83,6 +84,11 @@ export interface CanvasImageResult {
   cost_coins: number | null;
   natural_width: number | null;
   natural_height: number | null;
+  /**
+   * 產出本張圖的 durable generation job id（`GET /api/generation-jobs/{id}` 可查真參數）；
+   * legacy generate-images 路徑沒有 job＝null（不編造）。前端落為節點 `metadata.imageTaskId`。
+   */
+  task_id: string | null;
 }
 
 export interface CanvasGenerateResponse {
@@ -345,7 +351,7 @@ export async function POST(req: NextRequest) {
     }
     const url = data?.imageUrl || (data?.image ? `data:image/png;base64,${data.image}` : "");
     if (!url) throw new Error("生成服务未返回图片");
-    return { url, cost_coins: costCoins, natural_width: null, natural_height: null };
+    return { url, cost_coins: costCoins, natural_width: null, natural_height: null, task_id: null };
   };
 
   // ── 路徑判定：durable 為預設；只有 durable 不支援的欄位才留在 legacy（見檔頭 ①②③）。
@@ -452,7 +458,7 @@ export async function POST(req: NextRequest) {
     }
     const url = task.results?.[0]?.url;
     if (!url) throw new Error("生成服务未返回图片");
-    return { url, cost_coins: costCoins, natural_width: null, natural_height: null };
+    return { url, cost_coins: costCoins, natural_width: null, natural_height: null, task_id: task.taskId };
   };
 
   const settled = await Promise.allSettled(
@@ -476,7 +482,8 @@ export async function POST(req: NextRequest) {
   // 逐位元組不變」的既有紀律一致（舊客戶端看到的回應形狀一字不改）。
   return NextResponse.json<CanvasGenerateResponse>({
     ok: true,
-    task_id: null,
+    // 頂層 task_id＝首張圖的 job id（舊客戶端只讀頂層）；逐張以 images[i].task_id 為準。
+    task_id: images[0]?.task_id ?? null,
     images,
     ...(appliedStyle.styleId
       ? { style_id: appliedStyle.styleId, style_source: appliedStyle.styleSource }

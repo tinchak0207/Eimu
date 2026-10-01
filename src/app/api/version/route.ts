@@ -22,6 +22,7 @@ import {
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 export const runtime = "nodejs";
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
 
 // ⚠️ 必須寫成「字面 process.env.X」：Next 的 env 內聯（DefinePlugin）只替換字面成員存取，
 // 動態 `process.env[name]` 不會被替換，會靜默取到 runtime 的空值（本檔初版就踩到，

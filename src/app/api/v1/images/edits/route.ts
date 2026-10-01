@@ -62,6 +62,7 @@ import type { BizApiKey } from "@/lib/biz-api-keys";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
 
 /** 拒絕遙測用的路徑。寫死字面量：分組要穩定，不被 rewrite/代理改寫影響。 */
 const REJECTION_PATH = "/v1/images/edits";

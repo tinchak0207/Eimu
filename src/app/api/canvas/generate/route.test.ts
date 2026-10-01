@@ -3,7 +3,8 @@
 // 釘住的不變量：
 //   ① 預設走 durable：每張圖 POST /api/generation-jobs（各自 Idempotency-Key、原樣轉發
 //      Authorization + x-user-id）→ 輪詢 GET /api/generation-jobs/{id} → 取件；零次打 /api/generate-images；
-//   ② 對前端回應形狀一字不變：{ ok, task_id: null, images: [{ url, cost_coins, natural_width, natural_height }] }；
+//   ② 對前端回應形狀只加鍵不改義：{ ok, task_id, images: [{ url, cost_coins, natural_width, natural_height, task_id }] }；
+//      images[i].task_id＝產出該圖的 durable job id（LOD3 工程透析指針；legacy 無 job＝null），頂層 task_id＝首張的 id；
 //   ③ 負面詞/參考圖角色不靜默丟：預組進 prompt（Avoid:/Reference images:）且角色進 referenceMetadata；
 //   ④ 只有 durable 不支援的情境（LoRA、模型不收參考圖、參考圖格式/體積超 durable 限制）仍走 legacy；
 //   ⑤ 超時回 504 generation_timeout，且**不**發出任何 DELETE（不取消任務）；
@@ -128,13 +129,15 @@ test("預設走 durable：count=2 → 兩次提交（各自冪等鍵、轉發身
   const payload = await res.json();
   assert.deepEqual(Object.keys(payload).sort(), ["images", "ok", "task_id"]);
   assert.equal(payload.ok, true);
-  assert.equal(payload.task_id, null);
   assert.equal(payload.images.length, 2);
   for (const image of payload.images) {
-    assert.deepEqual(Object.keys(image).sort(), ["cost_coins", "natural_height", "natural_width", "url"]);
+    assert.deepEqual(Object.keys(image).sort(), ["cost_coins", "natural_height", "natural_width", "task_id", "url"]);
     assert.match(image.url, /^https:\/\/cdn\.test\/job-\d\.png$/);
     assert.equal(image.natural_width, null);
+    // 每張圖的 task_id 就是產出它的 job（url 由 job id 派生，兩者必須一致）。
+    assert.equal(image.url, `https://cdn.test/${image.task_id}.png`);
   }
+  assert.equal(payload.task_id, payload.images[0].task_id);
 
   assert.equal(calls.filter(isLegacy).length, 0, "不得打 legacy 引擎");
   const submits = calls.filter(isSubmit);
@@ -197,6 +200,9 @@ test("LoRA → 仍走 legacy（durable 無 adapter 消費 LoRA），不打 gener
   assert.equal(res.status, 200);
   const payload = await res.json();
   assert.equal(payload.images[0].url, "https://cdn.test/legacy.png");
+  // legacy 沒有 durable job：不編造指針（逐張與頂層都是 null）。
+  assert.equal(payload.images[0].task_id, null);
+  assert.equal(payload.task_id, null);
   assert.equal(calls.filter(isSubmit).length, 0);
   const legacy = calls.find(isLegacy)!;
   assert.deepEqual((legacy.body as { loraModelVersionIds: string[] }).loraModelVersionIds, ["lora-1"]);

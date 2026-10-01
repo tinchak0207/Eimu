@@ -8,6 +8,7 @@ import { addRateLimitHeaders } from "@/lib/biz-rate-limit-response-headers";
 import { withApiRejectionTelemetry, type RejectionContext } from "@/lib/api-rejection";
 
 export const runtime = "nodejs";
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
 
 /** 拒絕遙測用的路徑。任務查詢失敗＝B 端客戶拿不到成品，也必須看得見。 */
 const REJECTION_PATH = "/v1/images/{id}";

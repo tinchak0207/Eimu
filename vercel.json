@@ -3,6 +3,7 @@
   "buildCommand": "NODE_OPTIONS='--max-old-space-size=8192' npm run build",
   "installCommand": "npm install",
   "outputDirectory": ".next",
+  "regions": ["sfo1"],
   "headers": [
     {
       "source": "/docs/eimu-competition-report.pdf",

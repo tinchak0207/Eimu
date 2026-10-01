@@ -3,6 +3,7 @@ import { requireAdminSession } from "@/lib/admin-session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
 
 function adminConfig() {
   const baseURL = process.env.ADOBE2API_ADMIN_BASE_URL?.trim().replace(/\/+$/, "");

@@ -13,6 +13,7 @@ import { agentCallerFailureCode, resolveAgentCaller } from "@/lib/agent-session-
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const preferredRegion = "sfo1"; // 與 VPS（閘道/控制面 DB，矽谷）同區：每次上游往返省一趟橫跨美國（2026-10-01 效能審計）
 
 // Vercel 平台對單一請求 body 有 4.5MB 的硬上限；超過時由平台直接擋掉，
 // 本地不另外做大檔繞過。這裡多個檔案合計就是總 body，注意別一次選爆。

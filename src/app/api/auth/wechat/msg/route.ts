@@ -6,7 +6,6 @@ import {
   getWechatOfficialToken,
 } from "@/lib/wechat-official";
 import {
-  getWechatLoginState,
   getWechatLoginStateByState,
   completeWechatLogin,
   loginWechatPeer,
@@ -80,6 +79,13 @@ export async function POST(req: NextRequest) {
     console.warn("[wechat/msg] WECHAT_OFFICIAL_TOKEN 未配置，拒絕請求");
     return new NextResponse("not configured", { status: 503 });
   }
+  // 這個端點收到的掃碼事件＝直接發 session，理應驗簽（否則可偽造 SCAN 事件）。
+  // 2026-09-30 先只記錄不擋：用 `vercel env pull` 拿到的 token 簽的 GET 被線上判
+  // 403，無法證明真實推送的簽名會過；硬擋可能讓所有微信登入失效。等日誌證實真實
+  // 推送 signature_ok=true 後再改成 403 擋下。
+  const sp = req.nextUrl.searchParams;
+  const signatureOk = verifyWechatSignature(token, sp.get("signature"), sp.get("timestamp"), sp.get("nonce"));
+  console.log(`[wechat/msg] POST signature_ok=${signatureOk}`);
 
   const xml = await req.text();
   const msg = parseIncomingMessage(xml);
@@ -97,7 +103,7 @@ export async function POST(req: NextRequest) {
       record = await getWechatLoginStateByState(scene);
     }
     if (!record) {
-      void pushCustomText(msg.fromUserName, "欢迎使用微信授权服务，向我发送网站上的四字验证码即可快速登录。");
+      void pushCustomText(msg.fromUserName, "欢迎关注 Eimu。要登录网站，请用微信扫描网页上的登录二维码。");
       return new NextResponse("", { status: 200 });
     }
     if (record.status !== "pending" || record.expiresAt < Date.now()) {
@@ -110,24 +116,10 @@ export async function POST(req: NextRequest) {
     return new NextResponse("", { status: 200 });
   }
 
-  // text 訊息：驗證碼兌換（兜底通道）
-  if (msg.msgType === "text" && msg.content) {
-    const clean = msg.content.replace(/[\s，。、：:；;.,!?！？/\\|"'-]/g, "");
-    if (clean) {
-      const loginPrefix = clean.startsWith("/login") || clean.startsWith("login");
-      const code = loginPrefix ? clean.replace(/^\/?login/i, "").trim() : clean;
-      record = await getWechatLoginState(code);
-    }
-    if (!record) {
-      void pushCustomText(msg.fromUserName, "验证码无效，请刷新页面重新获取后再发送。");
-      return new NextResponse("", { status: 200 });
-    }
-    if (record.status !== "pending" || record.expiresAt < Date.now()) {
-      void pushCustomText(msg.fromUserName, "验证码已过期或已被使用，请刷新页面重新获取。");
-      return new NextResponse("", { status: 200 });
-    }
-    waitUntil(redeemAsync(msg.fromUserName, record));
-    void pushCustomText(msg.fromUserName, "正在登录，请稍候，登录成功后页面会自动跳转。");
+  // text 訊息：驗證碼通道已取消（2026-09-30 暴君裁定：掃到即登入，少一個阻塞）。
+  // 有人照舊習慣發字過來，就告訴他正確做法，不再兌換任何碼。
+  if (msg.msgType === "text") {
+    void pushCustomText(msg.fromUserName, "现在无需验证码：直接用微信扫网页上的二维码即可登录。");
     return new NextResponse("", { status: 200 });
   }
 

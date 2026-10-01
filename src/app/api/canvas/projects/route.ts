@@ -10,12 +10,35 @@ import {
   saveCanvasProjectWithTeamGate,
 } from "@/lib/canvas/team-canvas-gate";
 import type { CanvasProject } from "@/lib/canvas/types";
+import { toCanvasProjectSummaryWire } from "@/lib/canvas/project-summary";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
 
 function fail(status: number, message: string, code: string): NextResponse {
   return NextResponse.json({ success: false, error: message, code }, { status });
+}
+
+/**
+ * 回應形狀（效能審計 P0-B，2026-10-01）：
+ *   `?id=<projectId>` → `{ project }`，只回那一張（找不到 404）；
+ *   `?view=summary`   → `{ summaries }`，只回標題/時間/節點數（歷史清單用）；
+ *   缺省              → `{ projects }` 全量（舊客戶端相容，形狀逐字不變）。
+ * 可見範圍與全量一致（同一份 listCanvasProjectsForCaller / 團隊讀閘結果），只是少傳。
+ */
+function projectsResponse(projects: CanvasProject[], params: URLSearchParams): NextResponse {
+  const headers = { "Cache-Control": "no-store" };
+  const id = params.get("id")?.trim();
+  if (id) {
+    const project = projects.find((p) => p.id === id);
+    if (!project) return fail(404, "画布不存在或已删除", "not_found");
+    return NextResponse.json({ success: true, project }, { status: 200, headers });
+  }
+  if (params.get("view") === "summary") {
+    return NextResponse.json({ success: true, summaries: projects.map(toCanvasProjectSummaryWire) }, { status: 200, headers });
+  }
+  return NextResponse.json({ success: true, projects }, { status: 200, headers });
 }
 
 export async function GET(req: NextRequest) {
@@ -25,16 +48,15 @@ export async function GET(req: NextRequest) {
     // 團隊可讀（片P 刀 2）：顯式指定 teamId ⇒ 只回該團隊畫布（非成員 403，同刀3 碼/文案）；
     // 不指定 ⇒ 我個人的 + 我所屬團隊的（relay 查不到成員身份時只回個人，fail-open，不 500）。
     const teamId = req.nextUrl.searchParams.get("teamId")?.trim();
+    let projects: CanvasProject[];
     if (teamId) {
       const scoped = await readTeamCanvasProjectsForCaller(caller.user.id, teamId);
       if (!scoped.ok) return fail(scoped.status, scoped.message, scoped.code);
-      return NextResponse.json(
-        { success: true, projects: scoped.projects },
-        { status: 200, headers: { "Cache-Control": "no-store" } },
-      );
+      projects = scoped.projects;
+    } else {
+      projects = await listCanvasProjectsForCaller(caller.user.id);
     }
-    const projects = await listCanvasProjectsForCaller(caller.user.id);
-    return NextResponse.json({ success: true, projects }, { status: 200, headers: { "Cache-Control": "no-store" } });
+    return projectsResponse(projects, req.nextUrl.searchParams);
   } catch (error) {
     console.error("[canvas] list projects failed:", error);
     return fail(500, "读取画布失败，请稍后再试", "internal_error");

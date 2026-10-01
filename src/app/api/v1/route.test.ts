@@ -2,6 +2,27 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+
+import type { CONTROL_PLANE_PROXY_SOURCES as ProxySources } from "../../../../lib/control-plane-proxy-routes.mjs";
+
+// 代理清單真源是 .mjs（next.config.mjs 在建置期直接 import 它）。本檔跑在
+// tsx 的 CJS 模式下，靜態 import 相對路徑的 .mjs 會被包成 require 並解析失敗
+// （require 相對 .mjs 只認 .js）；靜態 import type 可以（型別不進執行期）。
+// 故執行期用 pathToFileURL 產生絕對 file:// URL 後動態 import。
+type ControlPlaneRewrite = { source: string; destination: string };
+let proxyModule: {
+  CONTROL_PLANE_PROXY_SOURCES: string[];
+  controlPlaneRewrites: (origin?: string | null) => ControlPlaneRewrite[];
+};
+async function loadProxyRoutes() {
+  if (!proxyModule) {
+    proxyModule = (await import(pathToFileURL(join(root, "src/lib/control-plane-proxy-routes.mjs")).href)) as typeof proxyModule;
+  }
+  return proxyModule;
+}
+/** 用不到的執行期值，只為讓上面的型別匯入不成為孤兒（避免 noUnusedLocals 類規則失火）。 */
+type _ProxySources = typeof ProxySources;
 
 const root = process.cwd();
 
@@ -247,18 +268,43 @@ test("/v1 对外路径通过重写指向 /api/v1，客户填的 Base URL 不带 
   assert.doesNotMatch(doc, /eimu\.dev\/api\/v1/, "对外文档不应暴露 /api/v1");
 });
 
-test("代理到控制面的端點必須同時覆蓋裸路徑與子路徑", () => {
+test("代理到控制面的端點必須同時覆蓋裸路徑與子路徑", async () => {
   // `/:path*` 匹配不到「後面沒有任何一段」的裸路徑。前端打的是
   // `POST /api/generation-jobs`（無子路徑），只寫 `/api/generation-jobs/:path*`
   // 會讓它落在 Vercel，而 Vercel 沒有 GENERATION_CONTROL_PLANE_ENABLED /
   // GENERATION_DATABASE_URL，於是回 503 control_plane_disabled，前端退回舊路徑、
   // 拿到上游直鏈導致瀏覽器 ERR_CONNECTION_CLOSED。裸路徑要單獨寫一條。
-  const config = read("next.config.mjs");
+  //
+  // 斷言對象是代理清單的單一真源（`control-plane-proxy-routes.mjs`）的真實輸出，
+  // 不是 next.config.mjs 的文字：2026-09-28 起該檔只是呼叫 `controlPlaneRewrites()`，
+  // 清單本身不再以字面出現在 next.config.mjs，讀文字會永遠抓不到。
+  // 清單的逐條全量相等由 src/lib/control-plane-proxy-routes.test.ts 守；這裡只守
+  // 「裸路徑 vs 子路徑」這一格。
+  const origin = "https://o.example";
+  const { CONTROL_PLANE_PROXY_SOURCES, controlPlaneRewrites } = await loadProxyRoutes();
+  const rewrites = controlPlaneRewrites(origin);
   for (const base of ["/api/generation-jobs"]) {
-    const exact = new RegExp(`source:\\s*"${base.replace(/\//g, "\\/")}"`);
-    const nested = new RegExp(`source:\\s*"${base.replace(/\//g, "\\/")}\\/:path\\*"`);
-    assert.match(config, exact, `${base} 缺精確匹配的 rewrite，裸路徑會落在 Vercel 回 503`);
-    assert.match(config, nested, `${base} 缺子路徑 rewrite`);
+    assert.ok(
+      CONTROL_PLANE_PROXY_SOURCES.includes(base),
+      `${base} 缺精確匹配的 rewrite，裸路徑會落在 Vercel 回 503`,
+    );
+    assert.ok(
+      CONTROL_PLANE_PROXY_SOURCES.includes(`${base}/:path*`),
+      `${base} 缺子路徑 rewrite`,
+    );
+
+    // destination 也必須原樣把路徑接在控面 origin 之後（控面在 /image-control
+    // 前綴下服務同一組路徑）。只驗 source 抓不到 destination 被寫壞。
+    assert.equal(
+      rewrites.find((r) => r.source === base)?.destination,
+      `${origin}/image-control${base}`,
+      `${base} 的 destination 必須原樣接到控面 origin 之後`,
+    );
+    assert.equal(
+      rewrites.find((r) => r.source === `${base}/:path*`)?.destination,
+      `${origin}/image-control${base}/:path*`,
+      `${base}/:path* 的 destination 必須原樣接到控面 origin 之後`,
+    );
   }
 });
 

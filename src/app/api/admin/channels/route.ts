@@ -27,6 +27,7 @@ import { SUPPORTED_IMAGE_MODEL_IDS } from "@/lib/image-model-ids.js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
 
 /** 只回「是否存在（去空白後非空）」的布林，絕不回值。 */
 const ENV_PRESENCE_KEYS = [
