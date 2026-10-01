@@ -20,7 +20,7 @@ test("主渠道 403、備用渠道通 → available（2026-10-02 xiaoyxiao 封 V
       probed.push(endpoint.baseURL);
       return endpoint.baseURL.includes("xiaoyxiao")
         ? { ok: false, status: 403, ms: 5, note: "上游返回 HTTP 403" }
-        : { ok: true, status: 200, ms: 7 };
+        : { ok: true, status: 200, ms: 7, modelIds: ["seedance-2.0-900-特惠"] };
     },
   });
   assert.equal(entry.availability, "available");
@@ -35,7 +35,7 @@ test("主渠道通 → 不再探備用", async () => {
     env,
     probeFn: async (endpoint: ProbeEndpointInput) => {
       probed.push(endpoint.baseURL);
-      return { ok: true, status: 200, ms: 3 };
+      return { ok: true, status: 200, ms: 3, modelIds: ["seedance-2.0-900-特惠"] };
     },
   });
   assert.equal(entry.availability, "available");
@@ -47,6 +47,28 @@ test("全部渠道都不通 → unavailable，note 列出每條渠道死因", as
   const entry = await probeModelStatus("seedance-2.0", {
     env,
     probeFn: async () => ({ ok: false, status: 403, ms: 5, note: "上游返回 HTTP 403" }),
+  });
+  assert.equal(entry.availability, "unavailable");
+  assert.match(entry.note ?? "", /全部 2 个渠道不可达/);
+});
+
+test("/models 200 但清單沒有上游模型名 → 不算通，繼續探下一順位（2026-10-02 hublinuxdo 零生圖模型實錘）", async () => {
+  const entry = await probeModelStatus("seedance-2.0", {
+    env,
+    probeFn: async (endpoint: ProbeEndpointInput) =>
+      endpoint.baseURL.includes("xiaoyxiao")
+        ? { ok: true, status: 200, ms: 4, modelIds: ["glm-5.3", "deepseek-v4-flash"] }
+        : { ok: true, status: 200, ms: 6, modelIds: ["seedance-2.0-900-特惠"] },
+  });
+  assert.equal(entry.availability, "available");
+  assert.equal(entry.channel_id, "env:gway");
+  assert.match(entry.note ?? "", /未列出上游模型 seedance-2\.0-900-特惠/);
+});
+
+test("所有渠道 /models 都不列該模型 → unavailable", async () => {
+  const entry = await probeModelStatus("seedance-2.0", {
+    env,
+    probeFn: async () => ({ ok: true, status: 200, ms: 4, modelIds: ["glm-5.3"] }),
   });
   assert.equal(entry.availability, "unavailable");
   assert.match(entry.note ?? "", /全部 2 个渠道不可达/);

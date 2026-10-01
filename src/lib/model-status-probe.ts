@@ -40,6 +40,8 @@ export interface ProbeEndpointResult {
   status?: number;
   ms: number;
   note?: string;
+  /** /models 回應裡的模型 id 清單；回應不是 OpenAI 清單格式時為 undefined。 */
+  modelIds?: string[];
 }
 
 export interface ModelStatusEntry {
@@ -138,12 +140,28 @@ export async function probeEndpointModels(endpoint: ProbeEndpointInput): Promise
     if (!response.ok) {
       return { ok: false, status: response.status, ms, note: `上游返回 HTTP ${response.status}` };
     }
-    return { ok: true, status: response.status, ms };
+    const payload = (await response.json().catch(() => null)) as { data?: Array<{ id?: unknown }> } | null;
+    const modelIds = Array.isArray(payload?.data)
+      ? payload.data.map((model) => model?.id).filter((id): id is string => typeof id === "string")
+      : undefined;
+    return { ok: true, status: response.status, ms, modelIds };
   } catch (error) {
     const ms = Date.now() - startedAt;
     const note = error instanceof Error && error.name === "TimeoutError" ? "连接超时（10 秒）" : "无法连接上游";
     return { ok: false, ms, note };
   }
+}
+
+/**
+ * 該渠道上這個模型的上游模型名（registry claims；null＝同名直傳）。非 registry 渠道（admin 池）
+ * 回 undefined——沒有 claim 就無從核對清單，只看 /models 是否 200。
+ */
+function expectedSupplierModelId(label: string, modelId: string): string | undefined {
+  const claim = REGISTRY_CHANNELS.find((channel) => channel.label === label)?.claims.find(
+    (candidate) => candidate.modelId === modelId,
+  );
+  if (!claim) return undefined;
+  return claim.supplierModelId ?? modelId;
 }
 
 /** 把 GatewayEndpoint.label 對回渠道 id（env:sub2api / 池名）。 */
@@ -201,6 +219,15 @@ export async function probeModelStatus(
       continue;
     }
     const result = await probeFn({ baseURL: endpoint.baseURL, apiKey: endpoint.apiKey, label: endpoint.label });
+    // /models 200 ≠ 有這個模型（2026-10-02 hublinuxdo 實錘：200 但清單 20 個全是 LLM、零生圖模型，
+    // gpt-image-2 等被報 available）。registry 有 claim 的渠道必須在清單裡看到上游模型名才算通。
+    const expected = expectedSupplierModelId(endpoint.label, modelId);
+    if (result.ok && expected && !result.modelIds?.includes(expected)) {
+      failures.push(
+        `${channelId}: ${result.modelIds ? `/models 未列出上游模型 ${expected}` : "/models 回应不是模型清单，无法核对"}`,
+      );
+      continue;
+    }
     if (result.ok) {
       const entry = { ...base, availability: "available" as const, channel_id: channelId, latency_ms: result.ms };
       return failures.length > 0 ? { ...entry, note: `主渠道不可达，已由备用渠道承接（${failures.join("；")}）` } : entry;
