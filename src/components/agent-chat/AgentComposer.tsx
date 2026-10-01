@@ -772,11 +772,11 @@ function AgentComposerComponent({
         if (event.target === event.currentTarget) textareaRef.current?.focus();
       }}
       className={cn(
-        // 2026-10-01 Eimu 虹彩改版：上下两层（上＝通栏文字区，下＝工具行 上传｜发送）。
+        // 2026-10-01 改版：上下两层（上＝通栏文字区，下＝工具行 上传｜发送）。
         // 旧版三者同排 items-end：多行时附件钮孤零零坠在左下、左侧空出一整列、文字区被挤窄。
-        // 外框＝agent-composer-iris（agent-chat.css）：1px 玻璃 E 虹彩描边＋紫调柔影，
-        // 聚焦只加深投影，不再外套 ring（与描边叠成双框）。
-        "agent-composer agent-composer-iris lg-float relative flex cursor-text flex-col rounded-[24px] px-2 pb-1.5 pt-2 touch-manipulation [-webkit-tap-highlight-color:transparent] outline-none",
+        // 外框＝agent-composer-shell（agent-chat.css）：白玻璃＋中性描边，聚焦描边转 iOS 蓝、
+        // 投影加深，不再外套 ring（与描边叠成双框）。
+        "agent-composer agent-composer-shell lg-float relative flex cursor-text flex-col rounded-[24px] px-2 pb-1.5 pt-2 touch-manipulation [-webkit-tap-highlight-color:transparent] outline-none",
         dragActive && "!ring-2 !ring-ios-blue/45 !bg-ios-blue/[0.04]",
       )}
     >
@@ -940,7 +940,7 @@ function AgentComposerComponent({
       ) : null}
 
       {/* 工具行：上传（左）｜停止或发送（右），同为 36px 圆、同一条基线——
-          左边描边空心、右边虹彩实心，重量对称。 */}
+          左边描边空心、右边主色实心，重量对称。 */}
       <div
         onClick={(event) => {
           if (event.target === event.currentTarget) textareaRef.current?.focus();
@@ -962,7 +962,7 @@ function AgentComposerComponent({
         className={cn(
           "flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-black/[0.09] text-foreground/60",
           "touch-manipulation [-webkit-tap-highlight-color:transparent]",
-          "transition-colors hover:border-[rgba(140,123,240,0.35)] hover:bg-[rgba(140,123,240,0.08)] hover:text-[#6f5fd6] active:bg-[rgba(140,123,240,0.14)] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+          "transition-colors hover:border-ios-blue/30 hover:bg-ios-blue/[0.08] hover:text-ios-blue active:bg-ios-blue/[0.14] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
           "disabled:cursor-not-allowed disabled:border-black/[0.05] disabled:bg-transparent disabled:text-foreground/30",
         )}
       >
@@ -1013,16 +1013,16 @@ function AgentComposerComponent({
                 // signature 陰影減半（0_8px_20px 在 36px 圓上壓得過深）。
                 "flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-all duration-200",
                 "touch-manipulation [-webkit-tap-highlight-color:transparent]",
-                // 2026-10-01 Eimu 虹彩改版：agent-send-iris（agent-chat.css）＝玻璃 E 同色
-                // 蓝→薰衣草→粉实心球＋紫调投影；hover 微抬升。
-                "agent-send-iris text-white",
+                // 2026-10-01：agent-send-btn（agent-chat.css）＝#2d3142 主色实心球（DESIGN.md
+                // 主 CTA）＋签名投影；hover 微抬升。
+                "agent-send-btn text-white",
                 "hover:-translate-y-[1px] active:scale-[0.94]",
                 "focus:outline-none focus:ring-2 focus:ring-ring/40",
                 // 在途期間不上 disabled 的褪色：在途是「正在送」不是「不可用」，
                 // 白轉圈壓在褪色球上等於沒有回饋（實色＋白轉圈才看得見）。
-                // 非在途時 disabled＝同一顆球褪色待命（不是死灰；會話關閉 / 輸入框空）。
+                // 非在途時 disabled＝同一顆球褪色待命（會話關閉 / 輸入框空）。
                 !sending &&
-                  "disabled:cursor-not-allowed disabled:opacity-35 disabled:saturate-[0.6] disabled:shadow-none disabled:hover:translate-y-0",
+                  "disabled:cursor-not-allowed disabled:opacity-25 disabled:shadow-none disabled:hover:translate-y-0",
                 // 送出進行中：游標與縮放回饋都收掉，連點由 sendingRef 在邏輯層擋。
                 sending && "cursor-wait active:scale-100",
               )}

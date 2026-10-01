@@ -230,26 +230,42 @@
   }
 }
 
-/* ── Eimu 虹彩（2026-10-01）────────────────────────────────────────────
-   取色自玻璃 E 图标（/icon.png）：蓝 #5B8DEF → 薰衣草 #8C7BF0 → 粉 #E58DBA。
-   只给品牌签名件用：输入框描边、发送钮、空态光晕——小面积/软边，
-   不做卡片底色、不做渐变文字。 */
-.agent-composer-iris {
-  /* padding-box 白玻璃 + border-box 虹彩渐变＝1px 虹彩描边（lg-float 的模糊折射保留）。 */
-  background:
-    linear-gradient(rgba(255, 255, 255, 0.86), rgba(255, 255, 255, 0.86)) padding-box,
-    linear-gradient(120deg, rgba(91, 141, 239, 0.55), rgba(140, 123, 240, 0.45), rgba(229, 141, 186, 0.55)) border-box;
-  border: 1px solid transparent;
-  box-shadow: 0 10px 32px rgba(140, 123, 240, 0.14);
-  transition: box-shadow 200ms ease;
+/* ── 输入框外壳 / 发送钮（2026-10-01）────────────────────────────────
+   色系回到站内：白玻璃 + 中性描边 + #2d3142 主色（DESIGN.md 主 CTA），聚焦用 iOS 蓝。
+   （同日虹彩紫版被暴君否决：「色系都换了」——不引入设计系统外的紫调。） */
+.agent-composer-shell {
+  background: rgba(255, 255, 255, 0.86);
+  border: 1px solid rgba(0, 0, 0, 0.07);
+  border-top-color: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 10px 30px rgba(45, 49, 66, 0.08), 0 1px 3px rgba(45, 49, 66, 0.04);
+  transition: box-shadow 200ms ease, border-color 200ms ease;
 }
-.agent-composer-iris:focus-within {
-  box-shadow: 0 14px 40px rgba(140, 123, 240, 0.24);
+.agent-composer-shell:focus-within {
+  border-color: rgba(0, 122, 255, 0.32);
+  box-shadow: 0 12px 36px rgba(45, 49, 66, 0.12), 0 1px 3px rgba(45, 49, 66, 0.04);
 }
-.agent-send-iris {
-  background: linear-gradient(135deg, #5b8def, #8c7bf0, #e58dba);
-  box-shadow: 0 6px 16px rgba(140, 123, 240, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.45);
+.agent-send-btn {
+  background: #2d3142;
+  box-shadow: 0 3px 10px rgba(45, 49, 66, 0.18);
 }
-.agent-send-iris:not(:disabled):hover {
-  box-shadow: 0 10px 22px rgba(140, 123, 240, 0.48), inset 0 1px 0 rgba(255, 255, 255, 0.45);
+.agent-send-btn:not(:disabled):hover {
+  background: #272b39;
+  box-shadow: 0 6px 16px rgba(45, 49, 66, 0.24);
+}
+
+/* ── 顶栏弹层材质（资产 / 历史 / 设置）───────────────────────────────
+   老问题：lg-sheet 太透，弹层下面的标题、输入框、推荐语透上来和列表字叠在一起。
+   弹层要读字，不是看风景：0.96 白 + blur 打底、发丝描边、两层柔影把它从卡面上托起来。 */
+.agent-pop {
+  background: rgba(255, 255, 255, 0.96);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  backdrop-filter: blur(40px) saturate(180%);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 18px 48px rgba(45, 49, 66, 0.16), 0 2px 8px rgba(45, 49, 66, 0.06);
+}
+/* 列表滚动区：底缘渐隐，滚到一半的那一行不再被硬切成半截字。 */
+.agent-pop-scroll {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 20px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 20px), transparent);
+  padding-bottom: 12px;
 }

@@ -751,7 +751,7 @@ export function AgentChatSurface({
               aria-expanded={showAssets}
               aria-label="我的资产"
               title="我的资产"
-              className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 touch-manipulation"
+              className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:bg-black/[0.06] aria-expanded:bg-black/[0.06] aria-expanded:text-foreground/80 touch-manipulation"
             >
               <Boxes className="h-[1.125rem] w-[1.125rem]" aria-hidden="true" />
             </button>
@@ -761,7 +761,7 @@ export function AgentChatSurface({
               aria-expanded={showHistory}
               aria-label="对话历史"
               title="对话历史"
-              className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 touch-manipulation"
+              className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:bg-black/[0.06] aria-expanded:bg-black/[0.06] aria-expanded:text-foreground/80 touch-manipulation"
             >
               <History className="h-[1.125rem] w-[1.125rem]" aria-hidden="true" />
             </button>
@@ -774,7 +774,7 @@ export function AgentChatSurface({
               disabled={startingNew}
               aria-label="开新对话"
               title="开新对话（当前对话保留在历史里）"
-              className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 touch-manipulation disabled:cursor-wait"
+              className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:bg-black/[0.06] aria-expanded:bg-black/[0.06] aria-expanded:text-foreground/80 touch-manipulation disabled:cursor-wait"
             >
               {startingNew ? (
                 <Loader2 className="h-[1.125rem] w-[1.125rem] animate-spin text-ios-blue" aria-hidden="true" />
@@ -788,7 +788,7 @@ export function AgentChatSurface({
                 onClick={onExit}
                 aria-label="直接生成"
                 title="直接生成：自己选模型和参数出图"
-                className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 touch-manipulation"
+                className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:bg-black/[0.06] aria-expanded:bg-black/[0.06] aria-expanded:text-foreground/80 touch-manipulation"
               >
                 <SlidersHorizontal className="h-[1.125rem] w-[1.125rem]" aria-hidden="true" />
               </button>
@@ -802,19 +802,19 @@ export function AgentChatSurface({
               onClick={openSettings}
               aria-label="设置"
               title="助理设定"
-              className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 touch-manipulation"
+              className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:bg-black/[0.06] aria-expanded:bg-black/[0.06] aria-expanded:text-foreground/80 touch-manipulation"
             >
               <Settings className="h-[1.125rem] w-[1.125rem]" aria-hidden="true" />
             </button>
             {/* 助理设定的原触发钮：收进 0×0 容器（视觉退役，程序化 click 保活），
-                弹层本体由 AgentSettingsPopover 自行渲染（fixed lg-sheet）。 */}
+                弹层本体由 AgentSettingsPopover 自行渲染（fixed agent-pop）。 */}
             <div ref={settingsTriggerWrapRef} className="absolute h-0 w-0 overflow-hidden" aria-hidden="true">
               <AgentSettingsPopover />
             </div>
             {/* 历史下拉浮层：触发钮＝顶栏那颗「历史」，fixed 定位与 outside-click 机制沿用。 */}
             <div ref={historyRef} className="relative">
         {showHistory && (
-          <div className="lg-sheet fixed left-1/2 top-[var(--agent-pop-top,5rem)] z-50 w-56 -translate-x-1/2 rounded-ios-2xl p-1">
+          <div className="agent-pop animate-lg-appear fixed left-1/2 top-[var(--agent-pop-top,5rem)] z-50 w-56 -translate-x-1/2 rounded-[18px] p-1.5">
             {historyList === null ? (
               <p className="px-2.5 py-3 text-center text-ios-caption1 text-foreground/45">
                 正在加载历史会话…
@@ -841,7 +841,7 @@ export function AgentChatSurface({
                 </button>
               </div>
             ) : (
-              <div className="max-h-64 overflow-y-auto overscroll-contain">
+              <div className="agent-pop-scroll max-h-64 overflow-y-auto overscroll-contain">
                 {historyList.map((it) => {
                   const active = it.session_id === sessionId;
                   const statusMeta = SESSION_STATUS_META[it.status ?? "idle"];
@@ -890,7 +890,7 @@ export function AgentChatSurface({
             {/* 资产下拉浮层：触发钮已收进 ⋯ 菜单，fixed 定位与 outside-click 机制沿用。 */}
             <div ref={assetPanelRef} className="relative">
               {showAssets && (
-                <div className="lg-sheet fixed left-1/2 top-[var(--agent-pop-top,5rem)] z-50 w-64 -translate-x-1/2 rounded-ios-2xl p-1">
+                <div className="agent-pop animate-lg-appear fixed left-1/2 top-[var(--agent-pop-top,5rem)] z-50 w-64 -translate-x-1/2 rounded-[18px] p-1.5">
                   <p className="px-2.5 pt-2 pb-1 text-ios-caption1 font-medium text-foreground/60">我的资产</p>
                   <div className="relative px-2.5 pb-1">
                     <Search className="pointer-events-none absolute left-[13px] top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-foreground/45" />
@@ -910,7 +910,7 @@ export function AgentChatSurface({
                       还没有保存过资产
                     </p>
                   ) : (
-                    <div className="max-h-64 overflow-y-auto overscroll-contain">
+                    <div className="agent-pop-scroll max-h-64 overflow-y-auto overscroll-contain">
                       {assetPacks.map((pack) => {
                         const activating = activatingPackId === pack.id;
                         return (
