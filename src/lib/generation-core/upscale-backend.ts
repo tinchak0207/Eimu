@@ -15,18 +15,21 @@
  * 而且 4K 未校準前照樣 fail-closed（`upscale_4k_upstream_unverified`）。
  *
  * ── 錢的邊界（違反＝事故）──────────────────────────────────────────────────
- * 換後端會把單次成本從 `pixai-upscale` 的一口價 0.001 币變成 gpt-image-2 的檔位價
- * （catalog：1k=10／2k=20／4k=80 币）。這是**定價決策**，未經暴君裁定不得擅自切換
- * （2026-09-27 付費硬閘）。故默認＝legacy，切換要控面逐字設 `UPSCALE_BACKEND=gpt-image-2`。
+ * **收費跟後端走（2026-10-01 暴君授權「4K放大后端你自己决定 做好就行」）**：後端既然從
+ * legacy 的一口價換成 gpt-image-2 的一次生成式重繪（有真實上游成本），收費就按 gpt-image-2
+ * 在該檔位的 **catalog 價**（`imageCredits` 1k=10／2k=20／4k=80 credits ⇒ `generationCoins`
+ * 1／2／8 币）；legacy 仍維持 `pixai-upscale` 的 0.001 币不動。價表**不另寫**：唯一來源仍是
+ * `generation-model-catalog`，本檔只做「後端 → 定價鍵 → 檔位價」的選擇（`upscaleChargeQuota`）。
+ * 默認＝legacy，切換要控面逐字設 `UPSCALE_BACKEND=gpt-image-2`。
  *
  * 本檔被 route import，故**不可**放進 route 檔（Next.js 15 只允許 route 檔匯出
  * handler 與 config；多餘匯出會讓 `next build` 的型別檢查直接失敗，2026-09-30 實錘）。
  */
 
-import { generationModel, imageSizeForAspectRatio } from "../generation-model-catalog";
+import { generationCoins, generationModel, imageSizeForAspectRatio } from "../generation-model-catalog";
 import { aspectRatioValue, nearestAspectRatio } from "../generation-model-catalog/resolution";
-import type { AspectRatio } from "../generation-model-catalog/types";
-import { DEFAULT_IMAGE_MODEL_ID } from "../image-model-ids.js";
+import type { AspectRatio, UpscaleTier } from "../generation-model-catalog/types";
+import { DEFAULT_IMAGE_MODEL_ID, PIXAI_UPSCALE_MODEL_ID } from "../image-model-ids.js";
 import {
   DURABLE_IMAGE_SIZES,
   DURABLE_TIER_SCALE,
@@ -45,6 +48,34 @@ export const UPSCALE_BACKEND_MODEL_ID = DEFAULT_IMAGE_MODEL_ID;
 export function resolveUpscaleBackend(env: NodeJS.ProcessEnv = process.env): UpscaleBackend {
   return (env[UPSCALE_BACKEND_ENV] ?? "").trim().toLowerCase() === "gpt-image-2" ? "gpt-image-2" : "pixai-bridge";
 }
+
+// ── 收費（價表唯一來源＝generation-model-catalog；本節只做選擇與換算）──────────
+
+/**
+ * 收費的定價鍵（**不複製任何價目數字**，只是「後端 → 定價鍵」的選擇）：
+ * - `gpt-image-2`：一次生成式重繪（真實上游成本）⇒ 定價鍵＝該模型本身，
+ *   價＝gpt-image-2 在該檔位的 `imageCredits`（1k=10／2k=20／4k=80 credits）。
+ * - `pixai-bridge`（legacy）：定價鍵＝`pixai-upscale`，仍是 0.001 币一口價，不被新後端打到。
+ */
+export function upscaleChargeModelId(backend: UpscaleBackend): string {
+  return backend === "gpt-image-2" ? UPSCALE_BACKEND_MODEL_ID : PIXAI_UPSCALE_MODEL_ID;
+}
+
+/**
+ * 一次超分在**同步層**（`/v1/upscale`）要預扣的 quota＝catalog 檔位價 × `quotaPerCoin`。
+ * 價走 `generationCoins`／`imageCredits`／`fixedCoins`（與 admin 覆寫層同源），此處僅把
+ * 「後端 → 定價鍵 → 檔位價」串起來；禁在此另寫價目（否則就是第二份價表）。
+ */
+export function upscaleChargeQuota(backend: UpscaleBackend, tier: UpscaleTier, quotaPerCoin: number): number {
+  return Math.round(generationCoins(upscaleChargeModelId(backend), { resolution: tier }) * quotaPerCoin);
+}
+
+/**
+ * 提交 durable 上游任務時帶的 `billingAmount`：**恆 0**。
+ * 錢已在同步層的 `reserveSyncCharge` 收過（見 `upscaleChargeQuota`）；上游若再記一次金額
+ * ＝同一筆請求扣兩次（雙扣事故）。此常數是「同一筆只收一次」契約的唯一出口，route 消費它。
+ */
+export const UPSCALE_UPSTREAM_BILLING_AMOUNT = 0;
 
 /** 等待 durable 任務的預算（同 openai-compat 的 240s：函數 300s 留 60s 結算餘裕）。 */
 export const UPSCALE_AWAIT_MS = 240_000;

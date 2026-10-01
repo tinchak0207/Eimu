@@ -276,3 +276,99 @@ test("OpenAPI 的檔位契約與執行端同源：列舉、配對、具名閘碼
   const imageObject = doc.components.schemas.ImageObject;
   assert.ok(imageObject.properties.width && imageObject.properties.height, "回應必須揭露實測 width/height（4K 交付要可自證）");
 });
+
+// ── 收費跟後端走（2026-10-01 暴君授權「4K放大后端你自己决定 做好就行」）───────────
+// 真行為斷言：讀真 catalog 的 `imageCredits`、走真的收費／預扣函式，斷言**金額本身**；
+// 不是掃源碼字串。病根＝4K 已改成 gpt-image-2 生成式重繪（有真實上游成本），收費卻仍是
+// legacy 的 0.001 币一口價（1k／2k／4k 同價 ⇒ 4K 自打成免費升級，每檔賠錢）。
+
+const CHARGE_TIERS = ["1k", "2k", "4k"] as const;
+
+test("① gpt-image-2 後端按檔位價收費（1k=1／2k=2／4k=8 币），逐檔嚴格遞增", async () => {
+  const { upscaleChargeModelId, upscaleChargeQuota } = await import("./upscale-backend.ts");
+  const { generationModel } = await import("@/lib/generation-model-catalog");
+  const { QUOTA_PER_COIN } = await import("@/lib/quota-constants");
+
+  // 定價鍵＝後端模型本身（不再是 legacy 的 pixai-upscale）。
+  assert.equal(upscaleChargeModelId("gpt-image-2"), "gpt-image-2");
+  // 獨立 oracle：直接讀 catalog 的 imageCredits 原值（不是從 generationCoins 反推）。
+  const credits = generationModel("gpt-image-2")?.imageCredits;
+  assert.ok(credits, "gpt-image-2 必須有 imageCredits 表，否則檔位價會退回 0");
+  assert.deepEqual([credits["1k"], credits["2k"], credits["4k"]], [10, 20, 80]);
+
+  const coins = CHARGE_TIERS.map((tier) => upscaleChargeQuota("gpt-image-2", tier, QUOTA_PER_COIN) / QUOTA_PER_COIN);
+  assert.deepEqual(coins, [1, 2, 8]);
+  assert.ok(coins[0] < coins[1] && coins[1] < coins[2], "1k < 2k < 4k 必須嚴格遞增（4K 不再被自己打成免費升級）");
+});
+
+test("② legacy 未被打到：pixai-bridge 後端仍是 pixai-upscale 的一口價 0.001 币（與檔位無關）", async () => {
+  const { upscaleChargeModelId, upscaleChargeQuota } = await import("./upscale-backend.ts");
+  const { QUOTA_PER_COIN } = await import("@/lib/quota-constants");
+
+  assert.equal(upscaleChargeModelId("pixai-bridge"), "pixai-upscale");
+  const expected = Math.round(0.001 * QUOTA_PER_COIN);
+  for (const tier of CHARGE_TIERS) {
+    assert.equal(upscaleChargeQuota("pixai-bridge", tier, QUOTA_PER_COIN), expected, `legacy ${tier} 必須維持 0.001 币`);
+  }
+});
+
+test("③ 上游不雙扣：同步層收足檔位價、durable 提交額恆 0（0 額快車道外呼零次）", async () => {
+  const { upscaleChargeQuota, UPSCALE_UPSTREAM_BILLING_AMOUNT } = await import("./upscale-backend.ts");
+  const { reserveGenerationBilling } = await import("./billing-ledger.ts");
+  const { QUOTA_PER_COIN } = await import("@/lib/quota-constants");
+
+  // 同步層真的收錢（route 的 reserveSyncCharge 用的就是這個額）。
+  assert.ok(upscaleChargeQuota("gpt-image-2", "4k", QUOTA_PER_COIN) > 0, "同步層必須真的收錢");
+  // route 提交上游時消費的常數恆 0（錢已在本層收過，上游再記一次＝雙扣）。
+  assert.equal(UPSCALE_UPSTREAM_BILLING_AMOUNT, 0, "上游提交額必須 0");
+
+  // 真行為：billingAmount=0 的 durable 預扣走零額快車道，一次外部扣款都不發。
+  let externalDebits = 0;
+  const now = new Date();
+  const row = {
+    id: "job-zero-1", tenant_id: "biz:key-zero", api_key_id: "key-zero", billing_user_id: 7,
+    source: "biz", idempotency_key: "idem-zero", request_hash: "hash", kind: "image_edit",
+    routing_class: "generic", model_id: "gpt-image-2", size: "4096x4096", ratio: "1:1",
+    resolution: "4k", quality: "quality", prompt_ciphertext: "v1.a.b.c",
+    workflow_json: {}, response_format: "url", callback_url: null, retry_of_job_id: null,
+    batch_id: null, batch_index: null, primary_artifact_id: null,
+    status: "pending_billing", requested_count: 1, completed_count: 0, attempt_count: 0,
+    billing_amount: 0, deadline_at: now, available_at: now, lease_owner: null,
+    lease_expires_at: null, failure_class: null, failure_detail: null, failure_record_json: null,
+    result_json: null, created_at: now, started_at: null, finished_at: null, updated_at: now,
+  };
+  const sql = (async (strings: TemplateStringsArray) => {
+    const text = strings.join(" ");
+    if (text.includes("UPDATE generation_job")) return [];
+    if (text.includes("INSERT INTO job_events")) return [];
+    if (text.includes("FROM generation_job")) return [row];
+    return [];
+  }) as never;
+  const job = { id: "job-zero-1", billingAmount: 0 } as never;
+  const adapter = { reserve: async () => { externalDebits += 1; }, refund: async () => { externalDebits += 1; } } as never;
+
+  await reserveGenerationBilling({ job, executorId: "test", adapter }, sql);
+  assert.equal(externalDebits, 0, "billingAmount=0 的提交不得再動一次上游錢包");
+});
+
+test("④ 4K 閘關閉時行為不變：一鍵預設仍是 2k、4K 具名拒（改價不動閘語義）", async () => {
+  const { resolveUpscaleSubmission, defaultUpscaleTier } = await import("./upscale-tier.ts");
+
+  const before = process.env.UPSCALE_4K_UPSTREAM;
+  delete process.env.UPSCALE_4K_UPSTREAM;
+  try {
+    assert.equal(defaultUpscaleTier(["1k", "2k", "4k"]), "2k", "閘關時一鍵預設＝2k（不會默默收 4K 的價）");
+    assert.throws(
+      () => resolveUpscaleSubmission({
+        declaredTiers: ["1k", "2k", "4k"],
+        modelId: "pixai-upscale",
+        input: { image: "https://x/y.png", tier: "4k" },
+      }),
+      (error: unknown) => (error as { code?: string }).code === "upscale_4k_upstream_unverified",
+      "閘關時 4K 仍在檔位閘被具名拒（先於計費）",
+    );
+  } finally {
+    if (before === undefined) delete process.env.UPSCALE_4K_UPSTREAM;
+    else process.env.UPSCALE_4K_UPSTREAM = before;
+  }
+});

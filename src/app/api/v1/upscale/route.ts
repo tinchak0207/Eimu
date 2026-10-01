@@ -1,7 +1,8 @@
 // POST /v1/upscale — B 端高清放大。
 //
 // 2026-08-05：原先只在 VPS 上，且扣費空轉（見 pixai-proxy.ts 頭部說明）。
-// 定價走 generationCoins(pixai-upscale)，與 admin 覆寫層同源。
+// 定價跟**後端**走（見下方「錢的邊界」）；價表唯一來源仍是 generation-model-catalog，
+// 與 admin 覆寫層同源。
 // 錯誤體與 trace id 與 /v1/images/generations 對齊。
 //
 // ── 後端（2026-09-30 暴君指令「4k超分可以走 gpt image 2 執行超分」）────────────
@@ -15,23 +16,34 @@
 // **語義變了，必須說清楚**：這不是保真的像素放大（不是原圖 ×N），是**重新繪製**——
 // 內容會被模型重畫一遍，細節可能與原圖不同。文件（`/v1/openapi.json`）同步改成這個口徑。
 //
-// **默認仍是 legacy（PixAI bridge）**：換後端會把成本從 `pixai-upscale` 的一口價
-// 0.001 币變成 gpt-image-2 的檔位價（catalog：1k=10／2k=20／4k=80 币）。那是**定價決策**，
-// 未經裁定不得擅自切換（2026-09-27 付費硬閘）。切換＝控面設 `UPSCALE_BACKEND=gpt-image-2`。
+// **默認仍是 legacy（PixAI bridge）**；切換＝控面設 `UPSCALE_BACKEND=gpt-image-2`。
+//
+// ── 錢的邊界（違反＝事故；2026-10-01 暴君授權「4K放大后端你自己决定 做好就行」）────
+// **收費跟後端、檔位走**：後端從 legacy 的一口價換成 gpt-image-2 的一次生成式重繪
+// （有真實上游成本），收費就按 gpt-image-2 在該檔位的 **catalog 價**（`imageCredits`
+// 1k=10／2k=20／4k=80 credits ⇒ `generationCoins` 1／2／8 币）；`pixai-bridge`（legacy）
+// 仍維持 `pixai-upscale` 的 0.001 币不動。
+// **價表不另寫**：唯一來源仍是 `generation-model-catalog`，本路由只做「後端 → 定價鍵 →
+// 檔位價」的選擇（`generation-core/upscale-backend.ts` 的 `upscaleChargeQuota`／
+// `upscaleChargeModelId`）。錢只在**這一層**收一次：durable 上游提交一律帶
+// `billingAmount: 0`（`UPSCALE_UPSTREAM_BILLING_AMOUNT`），再記一次＝雙扣。
 
 import { randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
 import { after } from "next/server";
 import { authenticateBizApiKey, flushBizApiKeyUsage, recordBizApiKeyUsage } from "@/lib/biz-api-key-store";
 import { readBearerToken } from "@/lib/biz-api-keys";
-import { declaredUpscaleTiers, generationCoins } from "@/lib/generation-model-catalog";
+import { declaredUpscaleTiers } from "@/lib/generation-model-catalog";
 import { PIXAI_UPSCALE_MODEL_ID } from "@/lib/image-model-ids.js";
 import {
   UPSCALE_AWAIT_MS,
   UPSCALE_POLL_INTERVAL_MAX_MS,
   UPSCALE_POLL_INTERVAL_MS,
+  UPSCALE_UPSTREAM_BILLING_AMOUNT,
   planGptImageUpscale,
   resolveUpscaleBackend,
+  upscaleChargeModelId,
+  upscaleChargeQuota,
   type GptImageUpscalePlan,
 } from "@/lib/generation-core/upscale-backend";
 import {
@@ -170,7 +182,10 @@ export async function POST(req: NextRequest) {
   }
 
   await syncModelPricing();
-  const quota = Math.round(generationCoins(PIXAI_UPSCALE_MODEL_ID, { resolution: size }) * QUOTA_PER_COIN);
+  // 收費跟後端走（價表唯一來源＝generation-model-catalog）：gpt-image-2 後端按該模型的
+  // 檔位價（1k／2k／4k），legacy pixai-bridge 仍是一口價 0.001 币（同源價，禁另寫價目）。
+  const pricingModelId = upscaleChargeModelId(backend);
+  const quota = upscaleChargeQuota(backend, size, QUOTA_PER_COIN);
 
   // ── 冪等（reserveSyncCharge 之前）：同 key 重試不重複扣費 ──────
   const idempotencyKey = req.headers.get("idempotency-key")?.trim() || null;
@@ -210,7 +225,8 @@ export async function POST(req: NextRequest) {
     quota,
     keyId: auth.key.id,
     action: "upscale",
-    modelId: PIXAI_UPSCALE_MODEL_ID,
+    // 帳本定價鍵跟後端走（顯示＝實際）：gpt-image-2 後端記 gpt-image-2，legacy 記 pixai-upscale。
+    modelId: pricingModelId,
     kind: "image_edit",
     source: "biz",
     tenantId: `biz:${auth.key.id}`,
@@ -281,8 +297,9 @@ interface UpscaleDeliverContext {
  * 交付（2026-09-30）：把原圖當參考圖提交 durable `image_edit`，同步等到終態再回
  * `{ created, data: [...] }`（＝對外文件 `SyncImageResponse`；呼叫端契約不變）。
  *
- * 為什麼用 `billingAmount: 0` 提交：**錢已經在這一層收過了**（`reserveSyncCharge`
- * 的同步 job 列＋billing_operation）。讓 job 再記一次金額＝同一筆請求扣兩次。
+ * 為什麼用 `billingAmount: UPSCALE_UPSTREAM_BILLING_AMOUNT`（＝0）提交：**錢已經在這一層收過了**
+ * （`reserveSyncCharge` 的同步 job 列＋billing_operation，價見 `upscaleChargeQuota`）。
+ * 讓 job 再記一次金額＝同一筆請求扣兩次。
  * 交付後由本層 commit、失敗由本層 refund，帳仍然只有一本（同 quota-precheck 的 0 額提交手法）。
  *
  * 任務不取消：超時只是本層放棄等待，任務仍在控面後台跑（與 openai-compat 同政策）。
@@ -306,7 +323,7 @@ async function deliverGptImageUpscale(ctx: UpscaleDeliverContext): Promise<Respo
       quality: "quality",
       responseFormat: "url",
       requestedCount: 1,
-      billingAmount: 0,
+      billingAmount: UPSCALE_UPSTREAM_BILLING_AMOUNT,
       workflow: { references: [ctx.reference], prompt: ctx.plan.prompt },
     });
     jobId = submitted.job.id;
