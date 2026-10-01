@@ -184,21 +184,39 @@ export async function probeModelStatus(
   };
 
   const queue = buildModelQueue(modelId, env, pools, overrides);
-  const first = queue[0];
-  if (!first) {
+  if (queue.length === 0) {
     return { ...base, availability: "unavailable" as const, note: "无可用渠道" };
   }
 
-  const channelId = channelIdFromEndpointLabel(first.label);
-  if (UNPROBEABLE_CHANNEL_IDS.has(channelId)) {
-    return { ...base, availability: "unknown" as const, channel_id: channelId, note: "不支持 /models 探测" };
+  // 按隊列順位逐個探，任一渠道通即 available——與真實生成的 failover 同源。
+  // 只探第一順位會把「主渠道封 IP、備用渠道健在」誤判成整個模型不可用
+  // （2026-10-02 事故：xiaoyxiao nginx 對 VPS IP 全路徑 403，gway 備用正常，
+  // 4 個視頻模型全被報 unavailable，agent 誤以為影片通道全滅）。
+  const failures: string[] = [];
+  let unprobeableChannelId: string | undefined;
+  for (const endpoint of queue) {
+    const channelId = channelIdFromEndpointLabel(endpoint.label);
+    if (UNPROBEABLE_CHANNEL_IDS.has(channelId)) {
+      unprobeableChannelId ??= channelId;
+      continue;
+    }
+    const result = await probeFn({ baseURL: endpoint.baseURL, apiKey: endpoint.apiKey, label: endpoint.label });
+    if (result.ok) {
+      const entry = { ...base, availability: "available" as const, channel_id: channelId, latency_ms: result.ms };
+      return failures.length > 0 ? { ...entry, note: `主渠道不可达，已由备用渠道承接（${failures.join("；")}）` } : entry;
+    }
+    failures.push(`${channelId}: ${result.note ?? "上游不可达"}`);
   }
 
-  const result = await probeFn({ baseURL: first.baseURL, apiKey: first.apiKey, label: first.label });
-  if (result.ok) {
-    return { ...base, availability: "available" as const, channel_id: channelId, latency_ms: result.ms };
+  if (unprobeableChannelId) {
+    return { ...base, availability: "unknown" as const, channel_id: unprobeableChannelId, note: "不支持 /models 探测" };
   }
-  return { ...base, availability: "unavailable" as const, channel_id: channelId, note: result.note ?? "上游不可达" };
+  return {
+    ...base,
+    availability: "unavailable" as const,
+    channel_id: channelIdFromEndpointLabel(queue[0].label),
+    note: `全部 ${queue.length} 个渠道不可达（${failures.join("；")}）`,
+  };
 }
 
 function computeSummary(models: ModelStatusEntry[]): ModelStatusSummary {
