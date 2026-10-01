@@ -497,9 +497,12 @@ async function openaiVideoRequest(
   } catch {
     // 同一類狀態洗白（D-3）：上游回 HTML 錯誤頁（常見於 400/5xx）時，真實狀態不能丟，
     // 否則真 400 會以 502 進原生硬停判定。產品側 status 仍是 502（我方解析失敗）。
+    // 例外：401/403 的 HTML 頁＝被拒（2026-10-02 xiaoyxiao nginx 封 VPS IP），按鑑權失敗
+    // 交 401（與 newapi-video 同口徑）讓帳號進冷卻換道；當成 502 overloaded 帳號永遠 healthy。
+    const denied = response.status === 401 || response.status === 403;
     throw new SupplierRequestError(
       `openai-video upstream returned invalid JSON (HTTP ${response.status}).`,
-      502,
+      denied ? 401 : 502,
       null,
       undefined,
       undefined,

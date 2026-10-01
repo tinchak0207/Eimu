@@ -651,3 +651,24 @@ test("xiaoyxiao 實彈形狀：completed 響應只有頂層 url（無 video_url/
     globalThis.fetch = originalFetch;
   }
 });
+
+test("上游 403 HTML 頁（nginx 封 IP）→ 401 鑑權失敗讓帳號冷卻換道，不洗成 502 overloaded", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    new Response("<html><head><title>403 Forbidden</title></head></html>", {
+      status: 403,
+      headers: { "Content-Type": "text/html" },
+    })) as typeof fetch;
+
+  try {
+    process.env.CANGYUANSUANLI_API_KEY = "ck-test-key";
+    await assert.rejects(generateWithOpenaiVideo(supplier(), videoInput()), (error: { status?: number; message?: string }) => {
+      assert.equal(error.status, 401);
+      assert.match(String(error.message), /HTTP 403/);
+      return true;
+    });
+  } finally {
+    delete process.env.CANGYUANSUANLI_API_KEY;
+    globalThis.fetch = originalFetch;
+  }
+});
