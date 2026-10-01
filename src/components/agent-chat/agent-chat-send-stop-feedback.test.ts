@@ -77,7 +77,8 @@ test("空态单一 DOM：忙碌不再分流，建号在飞推荐语渲染但强�
   );
   // 单一欢迎 DOM：标题、composer 容器、推荐语各一份。
   assert.match(emptyBlock, /想做点什么？/);
-  assert.match(emptyBlock, /\[&_\.agent-composer\]:py-2 \[&_\.agent-composer\]:shadow-\[0_16px_48px_rgba\(0,0,0,0\.10\)\]/);
+  // 2026-10-01：空態不再覆寫 composer 的 py/shadow（虹彩外框自帶上下兩層間距與紫調投影）。
+  assert.match(emptyBlock, /<div className="mt-8 w-full">\s*\{composerNode\}/);
   assert.match(emptyBlock, /EXAMPLES\.map/);
 });
 

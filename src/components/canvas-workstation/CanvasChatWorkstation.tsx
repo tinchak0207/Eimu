@@ -304,6 +304,9 @@ export function CanvasChatWorkstation({
                  原樣保留。 */
               box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
               border: 1px solid oklch(0% 0 0 / 6%);
+              /* 2026-10-01 暴君「背景像水泥砖」：卡面 0.72 实白 → 0.56，让首页环境光透进来；
+                 对话正文对比度由 lg-card 的 blur40 + saturate 托底。 */
+              background: rgba(255, 255, 255, 0.56);
             }
             .canvas-chat-scroll-fill > :not(section.lg-card) { flex-shrink: 0; }
             .agent-composer-anchor { flex-shrink: 0; }

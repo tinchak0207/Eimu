@@ -11,7 +11,7 @@ import {
   type DragEvent,
   type KeyboardEvent,
 } from "react";
-import { ArrowUp, ImagePlus, Loader2, Navigation, Square, X } from "lucide-react";
+import { ArrowUp, Loader2, Navigation, Plus, Square, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   toAgentAttachmentRef,
@@ -767,8 +767,16 @@ function AgentComposerComponent({
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
+      onClick={(event) => {
+        // 点外壳/工具行空白处也聚焦输入：整块都是输入框，不是只有文字那一条。
+        if (event.target === event.currentTarget) textareaRef.current?.focus();
+      }}
       className={cn(
-        "agent-composer lg-float relative flex items-end gap-1.5 rounded-[22px] p-1.5 touch-manipulation [-webkit-tap-highlight-color:transparent] outline-none focus-within:ring-[1.5px] focus-within:ring-ring/60",
+        // 2026-10-01 Eimu 虹彩改版：上下两层（上＝通栏文字区，下＝工具行 上传｜发送）。
+        // 旧版三者同排 items-end：多行时附件钮孤零零坠在左下、左侧空出一整列、文字区被挤窄。
+        // 外框＝agent-composer-iris（agent-chat.css）：1px 玻璃 E 虹彩描边＋紫调柔影，
+        // 聚焦只加深投影，不再外套 ring（与描边叠成双框）。
+        "agent-composer agent-composer-iris lg-float relative flex cursor-text flex-col rounded-[24px] px-2 pb-1.5 pt-2 touch-manipulation [-webkit-tap-highlight-color:transparent] outline-none",
         dragActive && "!ring-2 !ring-ios-blue/45 !bg-ios-blue/[0.04]",
       )}
     >
@@ -788,7 +796,7 @@ function AgentComposerComponent({
           松开以添加素材
         </div>
       )}
-      {/* 隐式文件选择：附件鈕在文字左侧（items-end 底对齐），這裡只留 input 本體。 */}
+      {/* 隐式文件选择：附件鈕在底部工具行左端，這裡只留 input 本體。 */}
       <input
         ref={fileInputRef}
         type="file"
@@ -800,28 +808,7 @@ function AgentComposerComponent({
         tabIndex={-1}
       />
 
-      {/*
-        附件按钮：点击打开隐式文件选择，一次可选多个文件，选完即逐个上传。
-        上传中的 chip 显示 spinner，失败显示错误态（可移除重传或删除）。
-        2026-09-20 轻量化定案：36px 浅灰幽灵圆钮（主色只留给送出钮）。
-      */}
-      <button
-        type="button"
-        onClick={handlePick}
-        disabled={!canAttach}
-        aria-label="添加素材"
-        title="添加素材（剧本 / 图片 / 影片 / 文档）"
-        className={cn(
-          "flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-black/[0.06] text-foreground/65",
-          "touch-manipulation [-webkit-tap-highlight-color:transparent]",
-          "transition-colors hover:bg-black/[0.10] hover:text-foreground active:bg-black/[0.14] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
-          "disabled:cursor-not-allowed disabled:bg-transparent disabled:text-foreground/35",
-        )}
-      >
-        <ImagePlus className="h-4 w-4" aria-hidden="true" />
-      </button>
-
-      <div className="flex min-w-0 max-w-[42rem] flex-1 flex-col">
+      <div className="flex min-w-0 flex-col px-1">
         {/* 待发送附件 chip 行：成功 / 上传中 / 错误 三种状态都带移除按钮。 */}
         {attachments.length > 0 && (
           <div className="mb-1 flex flex-wrap gap-1.5">
@@ -928,7 +915,7 @@ function AgentComposerComponent({
           placeholder={compactPlaceholder && placeholder === DEFAULT_PLACEHOLDER ? COMPACT_PLACEHOLDER : placeholder}
           rows={1}
           className={cn(
-            "min-h-[2.5rem] max-h-[15rem] w-full resize-none bg-transparent px-1 py-1.5 text-[0.9375rem] leading-[1.375rem] text-foreground",
+            "block min-h-[1.875rem] max-h-[15rem] w-full resize-none bg-transparent px-1.5 pb-1 pt-1 text-[0.9375rem] leading-[1.375rem] text-foreground",
             // 空框只有一行高：placeholder 一律不折行（折了第二行必被裁半截），極窄時寧可截尾。
             "placeholder:text-foreground/35 placeholder:whitespace-nowrap focus:outline-none",
             "touch-manipulation [-webkit-tap-highlight-color:transparent]",
@@ -951,6 +938,36 @@ function AgentComposerComponent({
           onSkillsChange={handleSlashSkills}
         />
       ) : null}
+
+      {/* 工具行：上传（左）｜停止或发送（右），同为 36px 圆、同一条基线——
+          左边描边空心、右边虹彩实心，重量对称。 */}
+      <div
+        onClick={(event) => {
+          if (event.target === event.currentTarget) textareaRef.current?.focus();
+        }}
+        className="agent-composer-toolbar flex items-center justify-between"
+      >
+      {/*
+        附件按钮：点击打开隐式文件选择，一次可选多个文件，选完即逐个上传。
+        上传中的 chip 显示 spinner，失败显示错误态（可移除重传或删除）。
+        2026-10-01：36px 描边空心圆＋Plus（ImagePlus 的加号挂右上角，字形重心偏，
+        放进圆里永远看着歪）；与发送钮同尺寸同基线。
+      */}
+      <button
+        type="button"
+        onClick={handlePick}
+        disabled={!canAttach}
+        aria-label="添加素材"
+        title="添加素材（剧本 / 图片 / 影片 / 文档）"
+        className={cn(
+          "flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-black/[0.09] text-foreground/60",
+          "touch-manipulation [-webkit-tap-highlight-color:transparent]",
+          "transition-colors hover:border-[rgba(140,123,240,0.35)] hover:bg-[rgba(140,123,240,0.08)] hover:text-[#6f5fd6] active:bg-[rgba(140,123,240,0.14)] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+          "disabled:cursor-not-allowed disabled:border-black/[0.05] disabled:bg-transparent disabled:text-foreground/30",
+        )}
+      >
+        <Plus className="h-[1.125rem] w-[1.125rem]" strokeWidth={2} aria-hidden="true" />
+      </button>
 
       {onStop && !canSend && !sending ? (
             /*
@@ -996,16 +1013,16 @@ function AgentComposerComponent({
                 // signature 陰影減半（0_8px_20px 在 36px 圓上壓得過深）。
                 "flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-all duration-200",
                 "touch-manipulation [-webkit-tap-highlight-color:transparent]",
-                // 2026-09-20 視覺改版（預覽驗收語彙）：主色 #2d3142 + signature
-                // 陰影 + hover 微抬升；disabled 換淺灰 #bcc2ca。
-                "bg-[#2d3142] text-white shadow-[0_3px_10px_rgba(45,49,66,0.18)]",
-                "hover:-translate-y-[1px] hover:bg-[#272b39] active:scale-[0.94]",
+                // 2026-10-01 Eimu 虹彩改版：agent-send-iris（agent-chat.css）＝玻璃 E 同色
+                // 蓝→薰衣草→粉实心球＋紫调投影；hover 微抬升。
+                "agent-send-iris text-white",
+                "hover:-translate-y-[1px] active:scale-[0.94]",
                 "focus:outline-none focus:ring-2 focus:ring-ring/40",
-                // 在途期間不上 disabled 的灰階：在途是「正在送」不是「不可用」，
-                // 白轉圈壓在淺灰底上等於沒有回饋（深底＋白轉圈才看得見）。
-                // 非在途時 disabled 樣式逐字元照舊（會話關閉 / 輸入框空）。
+                // 在途期間不上 disabled 的褪色：在途是「正在送」不是「不可用」，
+                // 白轉圈壓在褪色球上等於沒有回饋（實色＋白轉圈才看得見）。
+                // 非在途時 disabled＝同一顆球褪色待命（不是死灰；會話關閉 / 輸入框空）。
                 !sending &&
-                  "disabled:cursor-not-allowed disabled:bg-[#bcc2ca] disabled:text-white/80 disabled:shadow-none",
+                  "disabled:cursor-not-allowed disabled:opacity-35 disabled:saturate-[0.6] disabled:shadow-none disabled:hover:translate-y-0",
                 // 送出進行中：游標與縮放回饋都收掉，連點由 sendingRef 在邏輯層擋。
                 sending && "cursor-wait active:scale-100",
               )}
@@ -1021,6 +1038,7 @@ function AgentComposerComponent({
               )}
             </button>
           )}
+      </div>
     </div>
   );
 }

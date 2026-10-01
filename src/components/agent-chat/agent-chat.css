@@ -209,12 +209,12 @@
   }
 
   /* 所有可点项 ≥44×44：状态行重试、历史、放弃、错误重试、
-     composer 的两颗圆形钮（直接子级，避开附件 chip 里的小移除钮）。 */
+     composer 工具行的两颗圆形钮（直接子级，避开附件 chip 里的小移除钮）。 */
   .agent-retry,
   .agent-meta-link,
   .agent-draft-discard,
   .agent-surface-retry,
-  .agent-composer > button {
+  .agent-composer-toolbar > button {
     min-height: 44px;
     min-width: 44px;
   }
@@ -228,4 +228,28 @@
   .agent-composer textarea {
     font-size: 16px;
   }
+}
+
+/* ── Eimu 虹彩（2026-10-01）────────────────────────────────────────────
+   取色自玻璃 E 图标（/icon.png）：蓝 #5B8DEF → 薰衣草 #8C7BF0 → 粉 #E58DBA。
+   只给品牌签名件用：输入框描边、发送钮、空态光晕——小面积/软边，
+   不做卡片底色、不做渐变文字。 */
+.agent-composer-iris {
+  /* padding-box 白玻璃 + border-box 虹彩渐变＝1px 虹彩描边（lg-float 的模糊折射保留）。 */
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.86), rgba(255, 255, 255, 0.86)) padding-box,
+    linear-gradient(120deg, rgba(91, 141, 239, 0.55), rgba(140, 123, 240, 0.45), rgba(229, 141, 186, 0.55)) border-box;
+  border: 1px solid transparent;
+  box-shadow: 0 10px 32px rgba(140, 123, 240, 0.14);
+  transition: box-shadow 200ms ease;
+}
+.agent-composer-iris:focus-within {
+  box-shadow: 0 14px 40px rgba(140, 123, 240, 0.24);
+}
+.agent-send-iris {
+  background: linear-gradient(135deg, #5b8def, #8c7bf0, #e58dba);
+  box-shadow: 0 6px 16px rgba(140, 123, 240, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+.agent-send-iris:not(:disabled):hover {
+  box-shadow: 0 10px 22px rgba(140, 123, 240, 0.48), inset 0 1px 0 rgba(255, 255, 255, 0.45);
 }
