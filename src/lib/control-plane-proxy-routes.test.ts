@@ -27,6 +27,7 @@ const EXPECTED_REWRITES = [
   { source: "/api/email/unsubscribe", destination: "https://o.example/image-control/api/email/unsubscribe" },
   { source: "/openai/v1/:path*", destination: "https://o.example/image-control/openai/v1/:path*" },
   { source: "/api/admin/statistics", destination: "https://o.example/image-control/api/admin/statistics" },
+  { source: "/api/admin/model-routes", destination: "https://o.example/image-control/api/admin/model-routes" },
   { source: "/api/pixai/edit", destination: "https://o.example/image-control/api/pixai/edit" },
   { source: "/api/pixai/upscale", destination: "https://o.example/image-control/api/pixai/upscale" },
   { source: "/api/pixai/template-generations", destination: "https://o.example/image-control/api/pixai/template-generations" },

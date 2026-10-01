@@ -49,6 +49,9 @@ export const CONTROL_PLANE_PROXY_SOURCES = [
   // 前提（缺了代理過去也只是 401）：控面要有 ADMIN_SESSION_SECRET／ADMIN_USERNAME
   // ——簽發 session 的秘密原本只在 Vercel，2026-09-30 已同步進控面 .env.control-plane。
   "/api/admin/statistics",
+  // 模型路由（2026-10-01 路由收口）：讀寫 model_route_override 與 supplier 表，只在控面庫；
+  // 面板顯示＝調度器同一份 resolveModelRoute 結果。
+  "/api/admin/model-routes",
   // PixAI 同步計費路由（2026-09-28，V-08）：扣退款改走 generation-core/sync-charge
   // 帳本門面，需 GENERATION_DATABASE_URL；留在 Vercel 只會回落直扣、不留帳本列。
   // 鑑權同 /api/generate-images（authenticateImageUser，已在控面運行）；上游同

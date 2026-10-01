@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getGenerationSql, type GenerationSql } from "./database";
 import { JOB_EVENT, emitJobEvent } from "./job-events";
+import { resolveModelRoute } from "./model-routing";
 import { readFailureRecord, serializeFailureRecord, type FailureRecord } from "./failure-record";
 import type {
   CreateGenerationJobInput,
@@ -273,6 +274,9 @@ export async function hasGenerationCapability(input: {
   resolution?: string | null;
   routingClass: GenerationJob["routingClass"];
 }, sql: GenerationSql = getGenerationSql()): Promise<boolean> {
+  // 與 acquireSupplierLease 同一把尺：不在生效路由裡的 supplier 不算可供給。
+  const route = await resolveModelRoute(input.modelId, sql);
+  if (!route.supplierIds.length) return false;
   const rows = await sql<{ present: boolean }[]>`
     SELECT EXISTS (
       SELECT 1
@@ -286,6 +290,7 @@ export async function hasGenerationCapability(input: {
         AND (${input.ratio ?? null}::text IS NULL OR cardinality(capability.ratios) = 0 OR ${input.ratio ?? null} = ANY(capability.ratios))
         AND (${input.resolution ?? null}::text IS NULL OR cardinality(capability.resolutions) = 0 OR ${input.resolution ?? null} = ANY(capability.resolutions))
         AND (${input.routingClass} <> 'firefly_only' OR supplier.adapter_type = 'adobe2api')
+        AND supplier.id = ANY(${route.supplierIds}::text[])
     ) AS present
   `;
   return Boolean(rows[0]?.present);

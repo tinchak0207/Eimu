@@ -6,7 +6,7 @@
 //   npx tsx tools/add-supplier-channel.ts <label> <baseUrl> --api-key-env HUBLINUXDO_API_KEY \
 //     --models gpt-image-2,gemini-3.1-flash-image,gemini-3-image=gemini-3-pro-image \
 //     [--kinds image_generate] [--chat-models gemini-3-pro-image] \
-//     [--tier relay] [--seed-priority 25] [--site-priority 25] \
+//     [--tier relay] [--site-priority 25] \
 //     [--enabled-env HUBLINUXDO_ENABLED] [--probe --key <apikey>] [--force]
 //
 // models 語法：`platformId`（同名直傳）或 `platformId=upstreamId`（上游改名）。
@@ -20,6 +20,37 @@ import type { RegistryChannel, RegistryChannelClaim, RegistryClaimKind } from ".
 import { listSupplyProtocols } from "../src/lib/generation-core/supply-registry";
 
 const CONFIG_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "lib", "supplier-channels.config.ts");
+const ROUTES_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "lib", "model-routes.config.ts");
+
+/**
+ * 把新渠道 label 追加到所認領模型的路由**隊尾**（調度序最低）。調序請改
+ * model-routes.config.ts 陣列順序或在 /admin「模型路由」覆寫。
+ * 模型尚無路由行時，在 MODEL_ROUTES 結尾補一行。
+ */
+export function appendLabelToRoutes(source: string, label: string, modelIds: string[]): string {
+  const tableStart = source.indexOf("export const MODEL_ROUTES");
+  if (tableStart === -1) throw new Error(`${ROUTES_PATH} 找不到 MODEL_ROUTES。`);
+  const tableEnd = source.indexOf("\n};", tableStart);
+  if (tableEnd === -1) throw new Error(`${ROUTES_PATH} 的 MODEL_ROUTES 沒有結尾 "};"。`);
+  let head = source.slice(0, tableEnd);
+  const tail = source.slice(tableEnd);
+  for (const modelId of [...new Set(modelIds)]) {
+    const escaped = modelId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const line = new RegExp(`^(\\s*"${escaped}":\\s*\\[)([^\\]]*)(\\],?)`, "m");
+    const match = line.exec(head.slice(tableStart));
+    if (match) {
+      const labels = match[2].split(",").map((item) => item.trim().replace(/^"|"$/g, "")).filter(Boolean);
+      if (labels.includes(label)) continue;
+      const replaced = `${match[1]}${[...labels, label].map((item) => JSON.stringify(item)).join(", ")}${match[3]}`;
+      const at = tableStart + match.index;
+      head = head.slice(0, at) + replaced + head.slice(at + match[0].length);
+    } else {
+      head += `\n  ${JSON.stringify(modelId)}: [${JSON.stringify(label)}],`;
+    }
+  }
+  return head + tail;
+}
+
 const START_MARKER = "// REGISTRY-ENTRIES-START";
 const END_MARKER = "// REGISTRY-ENTRIES-END";
 
@@ -35,7 +66,6 @@ const USAGE = `用法：
   --chat-models <list>       走 /chat/completions 生圖的上游模型名（逗號分隔，預設空）
   --adapter <a>              openai_images（預設）| metaso（自訂協議，見 metaso-upstream.ts）
   --tier <t>                 first_party | managed_pool | relay | fallback（預設 relay）
-  --seed-priority <n>        seed 進 supplier 表的 priority（預設 25）
   --site-priority <n>        站點隊列 ENV_CHANNEL_PRIORITIES 用（預設 25）
   --enabled-env <ENV>        有值時：清洗後 === "true" 才 defaultEnabled
   --probe --key <apikey>     GET 上游 /v1/models 核對模型清單（只 WARN 不擋）
@@ -51,7 +81,6 @@ interface Args {
   chatModels: string[];
   tier: RegistryChannel["tier"];
   adapter: RegistryChannel["adapterType"];
-  seedPriority: number;
   sitePriority: number;
   enabledEnv: string | null;
   probe: boolean;
@@ -135,7 +164,6 @@ function parseArgs(argv: string[]): Args {
     chatModels: String(flags["chat-models"] ?? "").split(",").map((x) => x.trim()).filter(Boolean),
     tier,
     adapter: adapterRaw as RegistryChannel["adapterType"],
-    seedPriority: Number(flags["seed-priority"] ?? 25),
     sitePriority: Number(flags["site-priority"] ?? 25),
     enabledEnv: flags["enabled-env"] ? String(flags["enabled-env"]) : null,
     probe: flags.probe === true,
@@ -161,7 +189,6 @@ function renderEntry(channel: RegistryChannel): string {
   lines.push(`    apiKeyEnv: ${JSON.stringify(channel.apiKeyEnv)},`);
   lines.push(`    enabledEnv: ${JSON.stringify(channel.enabledEnv)},`);
   lines.push(`    tier: ${JSON.stringify(channel.tier)},`);
-  lines.push(`    seedPriority: ${channel.seedPriority},`);
   lines.push(`    sitePriority: ${channel.sitePriority},`);
   lines.push(`    chatImageModels: [${channel.chatImageModels.map((m) => JSON.stringify(m)).join(", ")}],`);
   if (channel.adapterType && channel.adapterType !== "openai_images") {
@@ -262,7 +289,6 @@ async function main() {
     apiKeyEnv: args.apiKeyEnv,
     enabledEnv: args.enabledEnv,
     tier: args.tier,
-    seedPriority: args.seedPriority,
     sitePriority: args.sitePriority,
     chatImageModels: args.chatModels,
     adapterType: args.adapter,
@@ -289,11 +315,15 @@ async function main() {
   const backup = source;
   writeFileSync(CONFIG_PATH, nextSource, "utf8");
   console.log(`[add-supplier-channel] 已寫入 ${CONFIG_PATH}（渠道 "${args.label}"${existing.includes(args.label) ? "，替換舊條目" : ""}）。`);
+  const routesBackup = readFileSync(ROUTES_PATH, "utf8");
+  writeFileSync(ROUTES_PATH, appendLabelToRoutes(routesBackup, args.label, claims.map((claim) => claim.modelId)), "utf8");
+  console.log(`[add-supplier-channel] 已把 "${args.label}" 追加到 ${claims.length} 個模型的路由隊尾（${ROUTES_PATH}）。`);
 
   // 語法驗證：tsc 失敗即還原。
   const tsc = spawnSync("npx", ["tsc", "--noEmit"], { stdio: "pipe", shell: process.platform === "win32", cwd: dirname(CONFIG_PATH) });
   if (tsc.status !== 0) {
     writeFileSync(CONFIG_PATH, backup, "utf8");
+    writeFileSync(ROUTES_PATH, routesBackup, "utf8");
     console.error("[add-supplier-channel] tsc --noEmit 失敗，已還原原檔。錯誤輸出：");
     console.error(tsc.stdout?.toString() ?? "");
     console.error(tsc.stderr?.toString() ?? "");
@@ -319,7 +349,10 @@ async function main() {
 `);
 }
 
-main().catch((error) => {
-  console.error("[add-supplier-channel] failed", error);
-  process.exitCode = 1;
-});
+// 直接執行才跑 main；測試 import appendLabelToRoutes 時不觸發。
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  main().catch((error) => {
+    console.error("[add-supplier-channel] failed", error);
+    process.exitCode = 1;
+  });
+}

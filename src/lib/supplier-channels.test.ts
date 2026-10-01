@@ -15,7 +15,6 @@ const CHANNEL: RegistryChannel = {
   apiKeyEnv: "TESTCHANNEL_API_KEY",
   enabledEnv: "TESTCHANNEL_ENABLED",
   tier: "relay",
-  seedPriority: 25,
   sitePriority: 25,
   chatImageModels: ["gemini-3-pro-image"],
   claims: [

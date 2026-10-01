@@ -3,6 +3,14 @@ import { getGenerationSql, type GenerationSql } from "./database";
 import { mapSupplierLease } from "./job-repository";
 import type { ClassifiedFailure } from "./failure-classifier";
 import type { GenerationJob, SupplierLease } from "./types";
+import { NEWAPI_ROUTE_LABEL, routeSupplierId } from "../model-routes.config";
+import { resolveModelRoute } from "./model-routing";
+
+/**
+ * B 端 `routing_hint=hub`（routingClass hub_only）原意＝只走 hub.linux.do。hublinuxdo
+ * 已併入 new-api（其內部渠道之一），控面能指定的最近粒度就是 new-api 那一步。
+ */
+const HUB_ONLY_SUPPLIER_ID = routeSupplierId(NEWAPI_ROUTE_LABEL);
 
 type Row = Record<string, unknown>;
 
@@ -14,6 +22,9 @@ export async function acquireSupplierLease(input: {
   excludedFailureDomains?: string[];
   leaseMs: number;
 }, sql: GenerationSql = getGenerationSql()): Promise<SupplierLease | null> {
+  // 路由是閘門也是排序：不在該模型生效路由裡的 supplier 一律不可租；順序＝陣列順序。
+  const route = await resolveModelRoute(input.job.modelId, sql);
+  if (!route.supplierIds.length) return null;
   return sql.begin(async (tx) => {
     await tx`DELETE FROM supplier_lease WHERE expires_at < now()`;
     const excluded = input.excludedSupplierIds ?? [];
@@ -48,7 +59,8 @@ export async function acquireSupplierLease(input: {
         AND (${input.job.ratio}::text IS NULL OR cardinality(capability.ratios) = 0 OR ${input.job.ratio} = ANY(capability.ratios))
         AND (${input.job.resolution}::text IS NULL OR cardinality(capability.resolutions) = 0 OR ${input.job.resolution} = ANY(capability.resolutions))
         AND (${input.job.routingClass} <> 'firefly_only' OR supplier.adapter_type = 'adobe2api')
-        AND (${input.job.routingClass} <> 'hub_only' OR supplier.id = 'env:hublinuxdo')
+        AND (${input.job.routingClass} <> 'hub_only' OR supplier.id = ${HUB_ONLY_SUPPLIER_ID})
+        AND supplier.id = ANY(${route.supplierIds}::text[])
         AND NOT (supplier.id = ANY(${excluded}::text[]))
         AND NOT (supplier.failure_domain = ANY(${excludedDomains}::text[]))
         AND (
@@ -66,9 +78,7 @@ export async function acquireSupplierLease(input: {
           WHERE lease.supplier_account_id = account.id AND lease.expires_at > now()) < account.concurrency_limit
         AND (SELECT count(*) FROM supplier_lease lease
           WHERE lease.supplier_capability_id = capability.id AND lease.expires_at > now()) < capability.concurrency_limit
-      ORDER BY CASE supplier.supply_tier
-          WHEN 'first_party' THEN 0 WHEN 'managed_pool' THEN 1 WHEN 'relay' THEN 2 ELSE 3 END,
-        supplier.priority ASC,
+      ORDER BY array_position(${route.supplierIds}::text[], supplier.id::text) ASC,
         CASE supplier.health_status WHEN 'healthy' THEN 0 WHEN 'degraded' THEN 1 ELSE 2 END,
         supplier.health_score * supplier.quality_score * capability.health_score DESC,
         (SELECT count(*)::float FROM supplier_lease lease
@@ -111,6 +121,7 @@ export async function acquireSupplierLease(input: {
 
 export type SupplierUnavailabilityReason =
   | "model_not_provisioned"
+  | "model_not_routed"
   | "capability_disabled"
   | "suppliers_disabled"
   | "suppliers_cooldown"
@@ -193,6 +204,15 @@ export async function diagnoseSupplierUnavailability(
     };
   }
 
+  const route = await resolveModelRoute(job.modelId, sql);
+  if (!route.supplierIds.length) {
+    return {
+      reason: "model_not_routed",
+      detail: `${job.modelId} has no route (source: ${route.source}). `
+        + "Add it to MODEL_ROUTES in src/lib/model-routes.config.ts or set a route in /admin.",
+    };
+  }
+
   const routable = await sql<Row[]>`
     SELECT supplier.id, supplier.enabled, supplier.health_status, supplier.cooldown_until,
       supplier.adapter_type, supplier.concurrency_limit,
@@ -204,17 +224,25 @@ export async function diagnoseSupplierUnavailability(
       AND capability.is_current AND capability.enabled
       AND (${job.ratio}::text IS NULL OR cardinality(capability.ratios) = 0 OR ${job.ratio} = ANY(capability.ratios))
       AND (${job.resolution}::text IS NULL OR cardinality(capability.resolutions) = 0 OR ${job.resolution} = ANY(capability.resolutions))
+      AND supplier.id = ANY(${route.supplierIds}::text[])
   `;
+  if (!routable.length) {
+    return {
+      reason: "model_not_routed",
+      detail: `None of the routed channels for ${job.modelId} [${route.labels.join(" > ")}] (source: ${route.source}) `
+        + "holds a current capability contract. Fix the route or seed the channel.",
+    };
+  }
   if (job.routingClass === "firefly_only" && !routable.some((row) => row.adapter_type === "adobe2api")) {
     return {
       reason: "routing_class_unmet",
       detail: `Job requires the Adobe supplier (routing class firefly_only) but no adobe2api supplier serves ${job.modelId}.`,
     };
   }
-  if (job.routingClass === "hub_only" && !routable.some((row) => row.id === "env:hublinuxdo")) {
+  if (job.routingClass === "hub_only" && !routable.some((row) => row.id === HUB_ONLY_SUPPLIER_ID)) {
     return {
       reason: "routing_class_unmet",
-      detail: `Job requires the hub supplier (routing class hub_only) but no hublinuxdo supplier serves ${job.modelId}.`,
+      detail: `Job requires the hub supplier (routing class hub_only → ${HUB_ONLY_SUPPLIER_ID}) but it is not on the route for ${job.modelId}.`,
     };
   }
   const enabled = routable.filter((row) => Boolean(row.enabled) && row.health_status !== "disabled");
@@ -243,6 +271,7 @@ export async function diagnoseSupplierUnavailability(
     JOIN supplier_account account ON account.supplier_id = supplier.id
     WHERE capability.public_model_id = ${job.modelId} AND capability.kind = ${job.kind}
       AND capability.is_current AND capability.enabled
+      AND supplier.id = ANY(${route.supplierIds}::text[])
       AND supplier.enabled AND supplier.health_status <> 'disabled'
       AND (supplier.cooldown_until IS NULL OR supplier.cooldown_until <= now())
       AND account.enabled AND account.health_status <> 'disabled'

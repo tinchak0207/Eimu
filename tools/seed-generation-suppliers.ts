@@ -10,10 +10,14 @@ import {
 import { describeEnvChannels } from "../src/lib/sub2api";
 import { FILMERA_IMAGE_MODEL, FILMERA_VIDEO_MODEL } from "../src/lib/generation-core/filmera-upstream";
 import { REGISTRY_CHANNELS } from "../src/lib/supplier-channels.config";
+import { MODEL_ROUTES, NEWAPI_ROUTE_LABEL, NEWAPI_SUPERSEDED_LABELS, modelsRoutedTo, routeSupplierId } from "../src/lib/model-routes.config";
 
-// reblood：这些渠道的调度已整体切到 new-api，supplier 表路由指向 NEWAPI_BASE_URL。
+// reblood：这些渠道的调度已整体切到 new-api。
 // 2026-09-27 暴君裁定：tokenmix 已砍除（含 new-api 渠道 9），從遷移清單移除。
-const NEWAPI_MIGRATED_LABELS = new Set(["hublinuxdo", "pixai", "sub2api", "dreamina", "fallback"]);
+// 2026-10-01 路由收口：NEWAPI_ENABLED 時它們不再各自 seed 成「base_url 全指向同一個
+// new-api」的假 supplier（DB 排一次、new-api 再排一次＝雙重調度，標籤與實際去向不符），
+// 一律由單一 supplier `env:newapi` 代表；new-api 內部的渠道順序在 new-api 後台調。
+const NEWAPI_MIGRATED_LABELS = NEWAPI_SUPERSEDED_LABELS;
 
 /**
  * 已退役視頻渠道（2026-09-27 暴君裁定；視頻唯一權威改為 xiaoyxiao）。
@@ -51,6 +55,17 @@ const CHANNEL_MODEL_ALIASES: Record<string, Record<string, string>> = {
   sub2api: { "gemini-3-image": "gemini-3-pro-image" },
 };
 
+/**
+ * supplier.priority 已不參與調度（2026-10-01 起排序唯一真源＝MODEL_ROUTES 陣列順序，
+ * scheduler 按 array_position 排）。欄位保留只為相容舊讀者，一律寫常數，別再拿它調序。
+ */
+const SUPPLIER_PRIORITY_UNUSED = 0;
+
+/** new-api 單一 supplier 的併發（原 5 個假 supplier 合計 1+1+1+2+1=6）。 */
+function newApiConcurrency(): number {
+  return Math.max(1, Number(process.env.NEWAPI_SUPPLIER_CONCURRENCY ?? 6));
+}
+
 type Tier = "first_party" | "managed_pool" | "relay" | "fallback";
 type Capability = {
   modelId: string;
@@ -77,7 +92,7 @@ function registryChannel(label: string) {
 function credentialRef(label: string): string {
   // reblood（2026-08-27）：已迁移 new-api 的渠道 credential 一律指向 NEWAPI_API_KEY，
   // seed 重跑不再把 credential_ref 拉回旧上游 env。
-  if (NEWAPI_MIGRATED_LABELS.has(label)) return "NEWAPI_API_KEY";
+  if (label === NEWAPI_ROUTE_LABEL || NEWAPI_MIGRATED_LABELS.has(label)) return "NEWAPI_API_KEY";
   // registry 渠道：apiKeyEnv 同時就是 credentialRef（add-supplier-channel 腳本落檔）。
   const registry = registryChannel(label);
   if (registry) return registry.apiKeyEnv;
@@ -122,6 +137,26 @@ function origin(value: string): string {
  * 全部不可用」能被區分開的前提。
  */
 function channelCapabilities(label: string): Capability[] {
+  // new-api 單一 supplier：認領範圍＝MODEL_ROUTES 裡含 "newapi" 那一步的模型。
+  // 上游模型名透傳（new-api 內部 model_mapping 負責），故 supplierModelId 恆 null。
+  if (label === NEWAPI_ROUTE_LABEL) {
+    const result: Capability[] = [];
+    for (const modelId of modelsRoutedTo(NEWAPI_ROUTE_LABEL)) {
+      const model = GENERATION_MODEL_CATALOG[modelId];
+      if (!model) {
+        console.warn(`[generation-seed] newapi: routed model "${modelId}" not in GENERATION_MODEL_CATALOG, skipped.`);
+        continue;
+      }
+      const base = { modelId, supplierModelId: null, ratios: [...model.aspectRatios], resolutions: [...model.resolutions] };
+      if (model.kind === "video") {
+        result.push({ ...base, kind: "video_generate", editSupport: false, videoSupport: true });
+      } else if (model.kind === "image") {
+        result.push({ ...base, kind: "image_generate", editSupport: false, videoSupport: false });
+        result.push({ ...base, kind: "image_edit", editSupport: true, videoSupport: false });
+      }
+    }
+    return result;
+  }
   // registry 渠道：認領範圍 = config 檔裡登記的 claims，逐 claim 逐 kind 產出
   // capability；ratios/resolutions 照抄平台 catalog，不在 catalog 的模型跳過並
   // 提醒（不擋 seed——寧可少認領也不虛報能力）。
@@ -239,7 +274,12 @@ function sameArray(left: unknown, right: string[]): boolean {
   return Array.isArray(left) && left.length === right.length && left.every((item, index) => item === right[index]);
 }
 
-async function upsertCapability(sql: ReturnType<typeof getGenerationSql>, supplierId: string, capability: Capability) {
+async function upsertCapability(
+  sql: ReturnType<typeof getGenerationSql>,
+  supplierId: string,
+  capability: Capability,
+  concurrencyLimit: number,
+) {
   await sql.begin(async (tx) => {
     // 不篩 is_current：渠道可能曾認領後被 retireUnclaimed 收回（is_current=false
     // 留檔）。只查在役行會讓復活場景的 nextVersion 從 1 重算，撞歷史行唯一約束。
@@ -274,7 +314,7 @@ async function upsertCapability(sql: ReturnType<typeof getGenerationSql>, suppli
       ) VALUES (
         ${supplierId}, ${nextVersion}, true, ${capability.modelId}, ${capability.supplierModelId}, ${capability.kind},
         ${capability.ratios}, ${capability.resolutions}, ${capability.editSupport}, ${capability.videoSupport},
-        ${Math.max(1, Number(process.env.GENERATION_CAPABILITY_CONCURRENCY ?? 1))}, true
+        ${concurrencyLimit}, true
       )
     `;
   });
@@ -322,6 +362,7 @@ async function retireUnclaimedCapabilities(
  * （seed 只在新建 capability 時寫），不受此重置影響。
  */
 function channelConcurrency(label: string): number {
+  if (label === NEWAPI_ROUTE_LABEL) return newApiConcurrency();
   if (label === "metaso") return 6;
   if (label === "pixai") return 2;
   return Math.max(1, Number(process.env.GENERATION_SUPPLIER_CONCURRENCY ?? 1));
@@ -333,19 +374,32 @@ async function main() {
   if (!channels.length) throw new Error("No configured Image Studio channels were found to seed.");
   const newApiBase = (process.env.NEWAPI_BASE_URL ?? "").trim().replace(/\/+$/, "");
   const newApiEnabled = (process.env.NEWAPI_ENABLED ?? "").trim().toLowerCase() === "true" && Boolean(newApiBase);
+  if (newApiEnabled) {
+    channels.push({
+      id: `env:${NEWAPI_ROUTE_LABEL}`,
+      label: NEWAPI_ROUTE_LABEL,
+      configured: true,
+      defaultEnabled: true,
+      source: "NEWAPI_BASE_URL",
+      usesBillingGateway: false,
+      endpoint: { baseURL: newApiBase, apiKey: "", label: NEWAPI_ROUTE_LABEL },
+    });
+  }
+  const seededIds: string[] = [];
+  const seededClaims = new Set<string>();
   for (const channel of channels) {
     // 退役渠道（見 RETIRED_SUPPLIER_LABELS）：seed 不碰，避免把 DB 的停用態沖回。
     if (RETIRED_SUPPLIER_LABELS.has(channel.label)) {
       console.log(`[generation-seed] ${channel.label}: retired (video supply moved to xiaoyxiao), skipped`);
       continue;
     }
+    // 已併入 env:newapi 的舊渠道：不再 seed，交給下方孤兒清掃停用。
+    if (newApiEnabled && NEWAPI_MIGRATED_LABELS.has(channel.label)) {
+      console.log(`[generation-seed] ${channel.label}: superseded by ${routeSupplierId(NEWAPI_ROUTE_LABEL)}, skipped`);
+      continue;
+    }
     const endpoint = channel.endpoint!;
     const id = channel.id;
-    // reblood：已迁移渠道的 endpoint.baseURL 改指 new-api（adapter 按 base_url 分流），
-    // 原上游 URL 由 new-api 内部的 channel/model_mapping 负责。
-    if (newApiEnabled && NEWAPI_MIGRATED_LABELS.has(channel.label)) {
-      endpoint.baseURL = newApiBase;
-    }
     const accountId = `${id}:default`;
     const isAdobe = endpoint.protocol === "adobe2api";
     const isFilmera = endpoint.protocol === "filmera";
@@ -373,7 +427,7 @@ async function main() {
       ) VALUES (
         ${id}, ${channel.label}, ${isAdobe ? "adobe2api" : isFilmera ? "filmera" : registry?.adapter?.protocol ?? registry?.adapterType ?? "openai_images"}, ${tier(channel.label)},
         ${origin(endpoint.baseURL)}, ${endpoint.baseURL}, ${credentialRef(channel.label)}, ${channel.defaultEnabled},
-        ${registry ? registry.seedPriority : channel.label === "adobe2api" ? 10 : channel.label === "filmera" ? 15 : channel.label === "sub2api" ? 20 : channel.label === "primary" ? 30 : 40},
+        ${SUPPLIER_PRIORITY_UNUSED},
         ${channelConcurrency(channel.label)}, 1, 0,
         ${sql.json(channelConfig as never)}, 1
       )
@@ -416,14 +470,38 @@ async function main() {
         updated_at = now()
     `;
     const capabilities = channelCapabilities(channel.label);
+    const capabilityConcurrency = channel.label === NEWAPI_ROUTE_LABEL
+      ? newApiConcurrency()
+      : Math.max(1, Number(process.env.GENERATION_CAPABILITY_CONCURRENCY ?? 1));
     for (const capability of capabilities) {
-      await upsertCapability(sql, id, capability);
+      await upsertCapability(sql, id, capability, capabilityConcurrency);
+      seededClaims.add(`${capability.modelId} ${channel.label}`);
     }
+    seededIds.push(id);
     const retired = await retireUnclaimedCapabilities(sql, id, capabilities);
     console.log(
       `[generation-seed] ${channel.label}: ${capabilities.length} capability contracts`
       + (retired ? `, ${retired} stale contracts retired` : ""),
     );
+  }
+
+  // 孤兒清掃：本輪沒 seed 到的 supplier（退役、已併入 newapi、env 已撤、config 已刪）
+  // 一律 enabled=false。過去 seed 只 upsert 不收尾，config 刪掉的渠道在 DB 裡永遠開著
+  //（2026-10-01 實錄：env:dreamina 已無任何代碼來源，仍以「healthy」排在 image-5-pro 第一位）。
+  const swept = await sql<{ id: string }[]>`
+    UPDATE supplier SET enabled = false, updated_at = now()
+    WHERE enabled AND NOT (id = ANY(${seededIds}::text[]))
+    RETURNING id
+  `;
+  if (swept.length) console.log(`[generation-seed] disabled orphan suppliers: ${swept.map((row) => row.id).join(", ")}`);
+
+  // 路由自檢：MODEL_ROUTES 裡每一步都必須有本輪 seed 出的 capability，否則那一步永遠選不中。
+  for (const [modelId, route] of Object.entries(MODEL_ROUTES)) {
+    for (const label of route) {
+      if (!seededClaims.has(`${modelId} ${label}`)) {
+        console.warn(`[generation-seed] route step ${modelId} → ${label} has no seeded capability (channel unconfigured/disabled or not claiming this model).`);
+      }
+    }
   }
   await closeGenerationSql();
 }

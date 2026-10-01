@@ -1,8 +1,10 @@
 "use client";
 
-// /admin 第四分頁「路由调度」：環境真相 → 渠道總表（可啟停/調序）→ 每模型隊列
-// 靜態預覽 → 真實路由事件。資料全部來自 /api/admin/channels 與
-// /api/admin/routing-events；本組件只搬運 host 與開關，絕不接觸任何密鑰。
+// /admin 第四分頁「路由调度」：模型路由（控面真實調度序，可調序/增刪，見
+// AdminModelRoutesPanel）→ 環境真相 → 舊同步兜底路徑的渠道總表與隊列預覽 → 路由事件。
+// 舊兜底兩節資料來自 /api/admin/channels（Blob overrides），只作用於
+// /api/generate-images 舊同步路徑，不影響主任務（/api/generation-jobs）調度。
+// 本組件只搬運 host 與開關，絕不接觸任何密鑰。
 
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -18,6 +20,7 @@ import type { ChannelDescriptor } from "@/lib/channel-registry";
 import type { ChannelOverride, ChannelOverrides } from "@/lib/channel-overrides";
 import type { ChannelAggregate, RoutingEvent, RoutingOutcome } from "@/lib/routing-telemetry";
 import { modelBaseName } from "@/lib/provider-config";
+import { AdminModelRoutesPanel } from "@/components/admin/AdminModelRoutesPanel";
 
 interface QueuePreviewEntry {
   label: string;
@@ -242,8 +245,10 @@ export function AdminRoutingPanel({ onOpenRelays }: { onOpenRelays?: () => void 
     <div className="space-y-5">
       <div>
         <h2 className="text-lg font-semibold">路由调度</h2>
-        <p className="mt-1 text-sm text-black/45">环境真相、渠道开关与真实路由事件——与生产队列同一来源。</p>
+        <p className="mt-1 text-sm text-black/45">模型路由即生产调度顺序；下方为环境真相、旧同步兜底路径与路由事件。</p>
       </div>
+
+      <AdminModelRoutesPanel />
 
       {notice && (
         <div className={`flex items-start gap-2 rounded-md border px-3 py-2.5 text-sm ${notice.tone === "ok" ? "border-[#b7dfc8] bg-[#eef9f2] text-[#12643b]" : "border-[#efc3bf] bg-[#fff2f0] text-[#a82d24]"}`}>
@@ -320,8 +325,8 @@ export function AdminRoutingPanel({ onOpenRelays }: { onOpenRelays?: () => void 
           <section className="overflow-hidden rounded-md border border-black/10 bg-white">
             <div className="flex items-center justify-between gap-3 border-b border-black/10 px-5 py-4">
               <div>
-                <h3 className="font-semibold">渠道总表</h3>
-                <p className="mt-1 text-xs text-black/40">env 渠道可在此启停、调优先级（0 最高、99 最低）；池渠道在中转渠道页维护。</p>
+                <h3 className="font-semibold">旧同步兜底路径 · 渠道开关</h3>
+                <p className="mt-1 text-xs text-black/40">仅作用于 /api/generate-images 旧同步路径；主任务调度顺序以上方「模型路由」为准。</p>
               </div>
               <button
                 type="button"
@@ -409,7 +414,7 @@ export function AdminRoutingPanel({ onOpenRelays }: { onOpenRelays?: () => void 
             )}
             <div className="border-b border-black/10 px-5 py-4">
               <div className="flex flex-wrap items-baseline gap-2">
-                <h3 className="font-semibold">每模型队列预览</h3>
+                <h3 className="font-semibold">旧同步兜底路径 · 队列预览</h3>
                 <span className="text-xs text-[#d99024]">静态顺序：不含各实例的冷却降级——实际尝试顺序见下方路由事件</span>
               </div>
               {dirty && <p className="mt-1 text-xs text-black/40">当前有未保存的修改：预览基于已保存配置。</p>}

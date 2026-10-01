@@ -35,7 +35,6 @@ export interface RegistryChannel {
   apiKeyEnv: string;             // 同時作為 credentialRef
   enabledEnv: string | null;     // 有值時：清洗後 === "true" 才 defaultEnabled
   tier: "first_party" | "managed_pool" | "relay" | "fallback";
-  seedPriority: number;          // seed 進 supplier 表的 priority
   sitePriority: number;          // 站點隊列 ENV_CHANNEL_PRIORITIES 用
   chatImageModels: string[];     // 上游模型名走 /chat/completions 生圖（空 = 全走 images/generations）
   /** 上游 images/generations 拒收 quality 欄位時置 true（agnes 實錘 2026-09-19：text image queue 只認 model/prompt/size/n）。 */
@@ -72,7 +71,6 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
     apiKeyEnv: "XIAOYXIAO_API_KEY",
     enabledEnv: "XIAOYXIAO_ENABLED",
     tier: "managed_pool",
-    seedPriority: 1,        // scheduler: supply_tier 之後 priority ASC ⇒ 全池最高
     sitePriority: 1,
     chatImageModels: [],
     adapterType: "openai_video",
@@ -99,7 +97,6 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
     apiKeyEnv: "GWAY_API_KEY",
     enabledEnv: "GWAY_ENABLED",
     tier: "managed_pool",
-    seedPriority: 2,
     sitePriority: 2,
     chatImageModels: [],
     adapterType: "openai_video",
@@ -120,7 +117,6 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
     apiKeyEnv: "HUBLINUXDO_API_KEY",
     enabledEnv: "HUBLINUXDO_ENABLED",
     tier: "managed_pool",
-    seedPriority: 12,
     sitePriority: 12,
     // 上游實測（2026-08-27 二次實測）：聚合 key 手動綁 19 渠道，nano-banana 家族
     // 以「真名」掛在 chat/completions（gemini 系平台名一律 422 model not found，
@@ -172,7 +168,6 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
     apiKeyEnv: "YYDS_API_KEY",
     enabledEnv: null,
     tier: "managed_pool",
-    seedPriority: 13,
     sitePriority: 13,
     chatImageModels: [],
     claims: [
@@ -202,7 +197,6 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
     apiKeyEnv: "BLENDER_NODE_LOCAL_TOKEN",  // 橋側 Bearer 共享 token（同時作為 credentialRef）
     enabledEnv: "BLENDER_NODE_LOCAL_ENABLED",
     tier: "first_party",
-    seedPriority: 10,                       // 同 adobe2api 檔位
     sitePriority: 10,
     chatImageModels: [],                    // blender 節點無 chat 生圖概念，恆空
     adapterType: "blender_bridge",
@@ -230,7 +224,6 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
     apiKeyEnv: "AGNES_API_KEY",
     enabledEnv: null,
     tier: "relay",
-    seedPriority: 30,
     sitePriority: 25,
     chatImageModels: [],
     omitQualityBody: true,
@@ -249,7 +242,6 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
     apiKeyEnv: "HARNESS_TTS_API_KEY",
     enabledEnv: "HARNESS_TTS_ENABLED",
     tier: "relay",
-    seedPriority: 50,
     sitePriority: 50,
     chatImageModels: [],
     adapterType: "harness_tts",
