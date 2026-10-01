@@ -230,27 +230,37 @@
   }
 }
 
-/* ── 输入框外壳 / 发送钮（2026-10-01）────────────────────────────────
-   色系回到站内：白玻璃 + 中性描边 + #2d3142 主色（DESIGN.md 主 CTA），聚焦用 iOS 蓝。
-   （同日虹彩紫版被暴君否决：「色系都换了」——不引入设计系统外的紫调。） */
+/* ── 输入框外壳 / 发送钮：Eimu 虹彩（2026-10-01）───────────────────────
+   取色自玻璃 E 图标：蓝 → 薰衣草 → 粉。同日一度撤回站内中性色，暴君复裁
+   「不如刚才的色系，改回来，只是浅一点」→ 色相不变、整体调淡（寧淡勿豔）。
+   只给签名件用：输入框描边、发送钮、空态光晕——不做卡片底色、不做渐变文字。 */
 .agent-composer-shell {
-  background: rgba(255, 255, 255, 0.86);
-  border: 1px solid rgba(0, 0, 0, 0.07);
-  border-top-color: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 10px 30px rgba(45, 49, 66, 0.08), 0 1px 3px rgba(45, 49, 66, 0.04);
-  transition: box-shadow 200ms ease, border-color 200ms ease;
+  /* padding-box 白玻璃 + border-box 虹彩渐变＝1px 虹彩描边（lg-float 的模糊折射保留）。 */
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.88)) padding-box,
+    linear-gradient(120deg, rgba(91, 141, 239, 0.34), rgba(140, 123, 240, 0.26), rgba(229, 141, 186, 0.34)) border-box;
+  border: 1px solid transparent;
+  box-shadow: 0 10px 30px rgba(140, 123, 240, 0.08);
+  transition: box-shadow 200ms ease;
 }
 .agent-composer-shell:focus-within {
-  border-color: rgba(0, 122, 255, 0.32);
-  box-shadow: 0 12px 36px rgba(45, 49, 66, 0.12), 0 1px 3px rgba(45, 49, 66, 0.04);
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.88)) padding-box,
+    linear-gradient(120deg, rgba(91, 141, 239, 0.5), rgba(140, 123, 240, 0.4), rgba(229, 141, 186, 0.5)) border-box;
+  box-shadow: 0 12px 36px rgba(140, 123, 240, 0.14);
 }
+/* 发送＝纯箭头（2026-10-01 暴君：不包圆形，现代审美）。箭头染玻璃 E 的薰衣草蓝，
+   图标尺寸/描边在这里放大加粗（JSX 里的 h-4 w-4 被测试钉住，CSS 覆写不动契约）。 */
 .agent-send-btn {
-  background: #2d3142;
-  box-shadow: 0 3px 10px rgba(45, 49, 66, 0.18);
+  color: #8a86f0;
 }
 .agent-send-btn:not(:disabled):hover {
-  background: #272b39;
-  box-shadow: 0 6px 16px rgba(45, 49, 66, 0.24);
+  color: #7468e2;
+}
+.agent-send-btn svg {
+  width: 22px;
+  height: 22px;
+  stroke-width: 2.4;
 }
 
 /* ── 顶栏弹层材质（资产 / 历史 / 设置）───────────────────────────────
@@ -262,6 +272,27 @@
   backdrop-filter: blur(40px) saturate(180%);
   border: 1px solid rgba(0, 0, 0, 0.06);
   box-shadow: 0 18px 48px rgba(45, 49, 66, 0.16), 0 2px 8px rgba(45, 49, 66, 0.06);
+}
+/* 弹出动效：弹层靠 left-1/2 + -translate-x-1/2 水平置中，动效的 transform 必须带上
+   translateX(-50%)——曾用 animate-lg-appear（0.4s 弹簧、fill both），它的 transform
+   整个盖掉 -translate-x-1/2，弹层左缘落在卡片中线＝「浮窗乱飘」，还慢。改 140ms 轻淡入。 */
+@keyframes agent-pop-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%);
+  }
+}
+.agent-pop-in {
+  animation: agent-pop-in 140ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .agent-pop-in {
+    animation: none;
+  }
 }
 /* 列表滚动区：底缘渐隐，滚到一半的那一行不再被硬切成半截字。 */
 .agent-pop-scroll {

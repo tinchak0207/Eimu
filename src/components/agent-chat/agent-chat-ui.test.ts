@@ -470,16 +470,16 @@ test("09-18 送出在途：空輸入也必須是轉圈送出鈕（aria-busy + sp
   assert.doesNotMatch(markup, /lucide-arrow-up/, "在途不得同时渲染送图标");
   // 連點在属性层就挡死（邏輯层还有 sendingRef / externalSendPending 两道）。
   assert.match(markup, /disabled="" aria-label="发送"/, "在途时送出钮必须 disabled（防连点）");
-  // 样式（2026-10-01 改版）：主色实心球 agent-send-btn（#2d3142）+ cursor-wait——
+  // 样式（2026-10-01 改版）：淡虹彩实心球 agent-send-btn + cursor-wait——
   // 在途是「正在送」不是「不可用」。
-  assert.match(markup, /agent-send-btn/, "在途仍是主色实心钮，不退回褪色钮");
+  assert.match(markup, /agent-send-btn/, "在途仍是实色钮，不退回褪色钮");
   assert.match(markup, /cursor-wait/, "在途带既有 cursor-wait");
   // 只釘送出鈕那一段：本斷言原意是「送出鈕在途時不上褪色 disabled 樣式」。
   const sendBtn = markup.match(/<button[^>]*aria-label="发送"[^>]*class="([^"]*)"/)?.[1] ?? "";
   assert.ok(sendBtn.length > 0, "必须能定位到送出钮的 class");
   assert.doesNotMatch(
     sendBtn,
-    /disabled:opacity-25/,
+    /disabled:opacity-40/,
     "送出钮在途期间不上褪色 disabled 样式（白轉圈压在褪色球上等于没有回馈）",
   );
 });
@@ -491,11 +491,11 @@ test("09-18 非在途：送出鈕回到送圖示，不得常轉圈", () => {
   assert.doesNotMatch(markup, /aria-busy="true"/, "常態不得宣稱在途");
   assert.match(markup, /class="lucide lucide-arrow-up[^"]*"/, "常態渲染送图标");
   assert.doesNotMatch(markup, /lucide-loader-circle/, "常態不得有转圈图标");
-  // 常態且輸入框空：disabled＝同一顆主色球褪色待命（2026-10-01 改版值；
+  // 常態且輸入框空：disabled＝同一顆虹彩球褪色待命（2026-10-01 改版值；
   // 这时候「不可用」才是对的语义）。
   assert.match(
     markup,
-    /disabled:opacity-25/,
+    /disabled:opacity-40/,
     "非在途的 disabled 褪色样式必须在",
   );
 });

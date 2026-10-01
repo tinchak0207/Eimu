@@ -356,22 +356,33 @@ export function AgentChatSurface({
     try {
       const url = query ? `/api/assets?q=${encodeURIComponent(query)}` : "/api/assets";
       const res = await fetch(url);
-      if (!res.ok) return;
+      if (!res.ok) {
+        lastAssetQueryRef.current = null; // 失败要能重拉，不能被去重挡死
+        return;
+      }
       const data = (await res.json()) as { packs?: AssetPack[] };
       if (Array.isArray(data?.packs)) setAssetPacks(data.packs);
     } catch {
-      // 静默失败：面板保持原状，可重试。
+      // 静默失败：面板保持原状，可重试（清去重标记）。
+      lastAssetQueryRef.current = null;
     }
   }, []);
+
+  /*
+   * 2026-10-01 暴君「打开反应缓慢」：悬停/聚焦顶栏图标就先拉数据，点下去时列表多半已就绪。
+   * 去重交给 loadAssets 的 lastAssetQueryRef 与 historyLoadingRef，悬停多次不重复请求。
+   */
+  const prefetchAssets = useCallback((): void => {
+    if (assetPacks === null) void loadAssets("");
+  }, [assetPacks, loadAssets]);
 
   /** 我的资产：开关。首次打开拉全量；搜索词变化由下方 effect 重新拉取。 */
   const toggleAssets = useCallback(async (): Promise<void> => {
     setShowAssets((prev) => {
       const next = !prev;
-      if (next && assetPacks === null) {
-        lastAssetQueryRef.current = "";
-        void loadAssets("");
-      }
+      // 2026-10-01 修：原本先把 lastAssetQueryRef 设成 "" 再 loadAssets("")——去重判定
+      // 当场命中直接 return，首开永远不发请求，面板卡在「正在加载资产…」直到用户打字。
+      if (next && assetPacks === null) void loadAssets("");
       return next;
     });
   }, [assetPacks, loadAssets]);
@@ -404,17 +415,25 @@ export function AgentChatSurface({
   );
 
   /** dropdown 开关：第一次打开时拉取目录（之后直接切换显示，不重复请求）。 */
+  const historyLoadingRef = useRef(false);
+  const prefetchHistory = useCallback((): void => {
+    if (historyList !== null || historyLoadingRef.current) return;
+    historyLoadingRef.current = true;
+    void listAgentSessions()
+      .then(setHistoryList)
+      .catch(() => setHistoryList([]))
+      .finally(() => {
+        historyLoadingRef.current = false;
+      });
+  }, [historyList]);
+
   const toggleHistory = useCallback(async (): Promise<void> => {
     setShowHistory((prev) => {
       const next = !prev;
-      if (next && historyList === null) {
-        void listAgentSessions()
-          .then(setHistoryList)
-          .catch(() => setHistoryList([]));
-      }
+      if (next) prefetchHistory();
       return next;
     });
-  }, [historyList]);
+  }, [prefetchHistory]);
 
   /** 点选某个历史会话：切过去（SSE 续传 agent 端上下文），成功后收起 dropdown。 */
   const onPickSession = useCallback(async (targetSessionId: string): Promise<void> => {
@@ -748,6 +767,8 @@ export function AgentChatSurface({
             <button
               type="button"
               onClick={() => void toggleAssets()}
+              onPointerEnter={prefetchAssets}
+              onFocus={prefetchAssets}
               aria-expanded={showAssets}
               aria-label="我的资产"
               title="我的资产"
@@ -758,6 +779,8 @@ export function AgentChatSurface({
             <button
               type="button"
               onClick={() => void toggleHistory()}
+              onPointerEnter={prefetchHistory}
+              onFocus={prefetchHistory}
               aria-expanded={showHistory}
               aria-label="对话历史"
               title="对话历史"
@@ -814,7 +837,7 @@ export function AgentChatSurface({
             {/* 历史下拉浮层：触发钮＝顶栏那颗「历史」，fixed 定位与 outside-click 机制沿用。 */}
             <div ref={historyRef} className="relative">
         {showHistory && (
-          <div className="agent-pop animate-lg-appear fixed left-1/2 top-[var(--agent-pop-top,5rem)] z-50 w-56 -translate-x-1/2 rounded-[18px] p-1.5">
+          <div className="agent-pop agent-pop-in fixed left-1/2 top-[var(--agent-pop-top,5rem)] z-50 w-56 -translate-x-1/2 rounded-[18px] p-1.5">
             {historyList === null ? (
               <p className="px-2.5 py-3 text-center text-ios-caption1 text-foreground/45">
                 正在加载历史会话…
@@ -890,7 +913,7 @@ export function AgentChatSurface({
             {/* 资产下拉浮层：触发钮已收进 ⋯ 菜单，fixed 定位与 outside-click 机制沿用。 */}
             <div ref={assetPanelRef} className="relative">
               {showAssets && (
-                <div className="agent-pop animate-lg-appear fixed left-1/2 top-[var(--agent-pop-top,5rem)] z-50 w-64 -translate-x-1/2 rounded-[18px] p-1.5">
+                <div className="agent-pop agent-pop-in fixed left-1/2 top-[var(--agent-pop-top,5rem)] z-50 w-64 -translate-x-1/2 rounded-[18px] p-1.5">
                   <p className="px-2.5 pt-2 pb-1 text-ios-caption1 font-medium text-foreground/60">我的资产</p>
                   <div className="relative px-2.5 pb-1">
                     <Search className="pointer-events-none absolute left-[13px] top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-foreground/45" />

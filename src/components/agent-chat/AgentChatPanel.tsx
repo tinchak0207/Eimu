@@ -441,7 +441,7 @@ function AgentChatPanelComponent({
              推薦語照常渲染（佔位不動）但強制 disabled＝點不到就不會重複送出（防二次
              計費）；在途回饋交給送出鈕轉圈（AgentComposer sending 態）。 */
           <div className="relative flex min-h-full flex-col items-center justify-center px-5">
-            {/* 2026-10-01 空態光暈（與首頁 body::after 環境光同色：藍 85,205,252／粉 247,168,184）：從標題後方散開的
+            {/* 2026-10-01 空態淡虹彩光暈（玻璃 E 取色：藍/薰衣草/粉，整體調淡）：從標題後方散開的
                 軟邊徑向漸變；尺寸夾在容器內（h-full/w-full 封頂 520px）、不溢出撐滾動條，
                 漸變在自身邊緣前衰減到 0——不是 inset-0 滿版色塊（09-20 教訓：
                 滿版裝飾必露硬邊）；有訊息即隨空態一起消失；純裝飾不吃事件、不佔位（零位移）。 */}
@@ -450,7 +450,7 @@ function AgentChatPanelComponent({
               className="pointer-events-none absolute left-1/2 top-1/2 h-full max-h-[520px] w-full max-w-[520px] -translate-x-1/2 -translate-y-1/2"
               style={{
                 background:
-                  "radial-gradient(closest-side at 32% 50%, rgba(85,205,252,0.20), transparent 72%), radial-gradient(closest-side at 70% 56%, rgba(247,168,184,0.18), transparent 72%)",
+                  "radial-gradient(closest-side at 50% 42%, rgba(140,123,240,0.13), transparent 70%), radial-gradient(closest-side at 26% 58%, rgba(91,141,239,0.11), transparent 72%), radial-gradient(closest-side at 74% 60%, rgba(229,141,186,0.11), transparent 72%)",
               }}
             />
             {/* pb-[8vh] 於 2026-09-24 移除：左卡改 fit-content 垂直置中後，這 8vh 是殘留補償，保留會置中偏上。 */}
@@ -475,11 +475,11 @@ function AgentChatPanelComponent({
                       aria-busy={chipState === "pending" ? true : undefined}
                       className={cn(
                         // 2026-09-24 用戶版面方案：純文字行改玻璃膠囊 chip，min-h-11 保底 44px 觸摸靶。
-                        // 2026-10-01：半透明玻璃＋中性柔影，hover 微浮起（與輸入框同一語彙）。
-                        "min-h-11 rounded-full border border-white/80 bg-white/45 px-4 py-2 text-ios-footnote font-medium text-foreground/70 shadow-[0_2px_10px_rgba(45,49,66,0.06)] backdrop-blur-md",
+                        // 2026-10-01：半透明玻璃＋淡紫柔影，hover 微浮起（與輸入框同一語彙）。
+                        "min-h-11 rounded-full border border-white/80 bg-white/45 px-4 py-2 text-ios-footnote font-medium text-foreground/70 shadow-[0_2px_10px_rgba(140,123,240,0.06)] backdrop-blur-md",
                         "transition-all duration-200",
                         chipState === "idle"
-                          ? "cursor-pointer hover:-translate-y-[1px] hover:bg-white/75 hover:text-foreground hover:shadow-[0_6px_18px_rgba(45,49,66,0.10)]"
+                          ? "cursor-pointer hover:-translate-y-[1px] hover:bg-white/75 hover:text-foreground hover:shadow-[0_6px_18px_rgba(140,123,240,0.12)]"
                           : "cursor-not-allowed",
                         chipState === "disabled" && "opacity-50",
                         // 进行中那一颗：转圈与文字同排（chip 膠囊的既有排版与字级）。
