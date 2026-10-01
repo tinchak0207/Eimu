@@ -29,10 +29,12 @@ import {
 import { mapayPlanQuota } from "@/lib/mapay-redemption";
 import { FIRST_CHARGE_PLAN_ID, resolvePricingPlan } from "@/lib/plans";
 import { resolveFirstChargeGrantWithSql } from "@/lib/first-charge";
+import { parseSeatOrderParam, seatOrderEntitlementCoins } from "@/lib/team-seat-order";
 import { QUOTA_PER_COIN } from "@/lib/quota-constants";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
 
 /** 已佔位記錄 → 只讀回報用結果詞（applied 以外的狀態呼叫方不得再發一次）。 */
 function outcomeOfStatus(status: string | null): MapayCreditOutcome {
@@ -96,33 +98,52 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, message: "缺少合法的 userId。" }, { status: 400 });
   }
   const planId = typeof body.planId === "string" ? body.planId.trim() : "";
-  const plan = planId ? resolvePricingPlan(planId) : null;
-  if (!plan) return NextResponse.json({ ok: false, message: "缺少合法的 planId。" }, { status: 400 });
+  // 席位訂單（`seat:` 前綴）：額度由 param 的 (team,tier,cycle,seats) 在同源價表重算
+  // （seats × 檔位含幣額 × QUOTA_PER_COIN），team 身分也以 param 為準——一律不接受
+  // 呼叫方傳來的額度；其餘維持既有 plan 解析（靜態檔 / custom:<coins> / 首充）。
+  const seatIdentity = parseSeatOrderParam(planId);
+  if (seatIdentity && seatIdentity.teamUserId !== userId) {
+    return NextResponse.json({ ok: false, message: "席位订单团队与调用方不一致。" }, { status: 400 });
+  }
+  const plan = seatIdentity ? null : planId ? resolvePricingPlan(planId) : null;
+  if (!seatIdentity && !plan) {
+    return NextResponse.json({ ok: false, message: "缺少合法的 planId。" }, { status: 400 });
+  }
 
   try {
     const sql = getGenerationSql();
-    // 首充专享档的额度不是标价函数：有资格才给 300 币；资格不符（并发第二单 / 已有充值记录 /
-    // 资格判不了）按 ¥7 对应正价折算（约 70 币）入帐，原因写进 mapay_credit.detail。
-    // 「每帐号限一次」的并发执法点是 first_charge_claim 的 user_id 主键（见 src/lib/first-charge.ts）。
-    let amountQuota = mapayPlanQuota(plan);
+    let amountQuota: number;
     let detail: string | undefined;
-    if (plan.id === FIRST_CHARGE_PLAN_ID) {
-      const grant = await resolveFirstChargeGrantWithSql(sql, { userId, outTradeNo: orderId });
-      amountQuota = grant.amountQuota;
-      detail = grant.detail;
+    if (seatIdentity) {
+      const seatCoins = seatOrderEntitlementCoins(seatIdentity);
+      if (seatCoins === null) {
+        return NextResponse.json({ ok: false, message: "缺少合法的席位订单参数。" }, { status: 400 });
+      }
+      amountQuota = seatCoins * QUOTA_PER_COIN;
+      detail = `团队席位 ${seatIdentity.tier}/${seatIdentity.cycle} × ${seatIdentity.seats} 席（${seatCoins} 币）`;
+    } else {
+      // 首充专享档的额度不是标价函数：有资格才给 300 币；资格不符（并发第二单 / 已有充值记录 /
+      // 资格判不了）按 ¥7 对应正价折算（约 70 币）入帐，原因写进 mapay_credit.detail。
+      // 「每帐号限一次」的并发执法点是 first_charge_claim 的 user_id 主键（见 src/lib/first-charge.ts）。
+      amountQuota = mapayPlanQuota(plan!);
+      if (plan!.id === FIRST_CHARGE_PLAN_ID) {
+        const grant = await resolveFirstChargeGrantWithSql(sql, { userId, outTradeNo: orderId });
+        amountQuota = grant.amountQuota;
+        detail = grant.detail;
+      }
     }
 
     const outcome = await runMapayCreditWithSql(sql, {
       orderId,
       userId,
-      planId: plan.id,
+      planId: seatIdentity ? planId : plan!.id,
       amountQuota,
       detail,
     });
     console.info("[internal/mapay-credit]", {
       order_id: orderId,
       user_id: userId,
-      plan_id: plan.id,
+      plan_id: seatIdentity ? planId : plan!.id,
       coins: amountQuota / QUOTA_PER_COIN,
       outcome,
     });

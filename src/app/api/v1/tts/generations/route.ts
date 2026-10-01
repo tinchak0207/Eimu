@@ -7,10 +7,12 @@ import { enforceQuotaGate } from "@/lib/generation-core/quota-precheck";
 import { IdempotencyConflictError } from "@/lib/generation-core/job-repository";
 import { GenerationModelUnavailableError } from "@/lib/generation-core/model-availability-gate";
 import { generationTaskResponse } from "@/lib/generation-core/task-response";
+import { ttsQuotaForChars } from "@/lib/generation-model-catalog/tts-pricing";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
 import { normalizeVoiceId } from "@/lib/voice-library";
 
 export const runtime = "nodejs";
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
 
 function errorResponse(
   status: number,
@@ -78,13 +80,18 @@ export async function POST(req: NextRequest) {
   const voice = rawVoice || "default";
   const callbackUrl = typeof body.callback_url === "string" ? body.callback_url : null;
 
-  // 手術 P1 計費閘（詳見 quota-precheck.ts）：TTS 今日為 0 額提交（無 reserve 可
-  // 跳），閘門對 0 額直通、兩種模式下行為一致、不產生任何新 I/O；日後 TTS 定價
-  // 接入後把 baseBillingAmount 改為實際金額，即自動獲得配額預檢與 reserve 跳過。
+  // 計費：TTS 逐字計價（0.001 幣/字，唯一真源＝generation-model-catalog/tts-pricing）。
+  // 金額在提交時由**本請求文本的實際字數**推導（`input.length`，請求自身即真源，非估算），
+  // 沿用生圖 route 同一條「coins × QUOTA_PER_COIN → enforceQuotaGate → submitGenerationCommand」
+  // 的既有輪子（src/app/api/v1/images/generations/route.ts:297-328）。
+  // 閘門：額度足夠 → 0 額提交走投影記帳（SURGERY_QUOTA_PRECHECK=1 生產態）；不足 → 402；
+  // 上游不可達 → 自動回落原 reserve 路徑（billing-ledger 扣 users.quota）。
+  // 0 額短路只在本請求真 0 字時成立——但 input 已在上面拒空，故此路由永不會真 0 字。
+  const baseBillingAmount = ttsQuotaForChars(input.length);
   const gate = await enforceQuotaGate({
     bizKeyId: apiKey.id,
     billingUserId: apiKey.userId,
-    baseBillingAmount: 0,
+    baseBillingAmount,
   });
   if (!gate.ok) {
     return errorResponse(gate.status, gate.message, gate.type, gate.code, traceId);
@@ -94,6 +101,9 @@ export async function POST(req: NextRequest) {
     const submitted = await submitGenerationCommand({
       tenantId: `biz:${apiKey.id}`,
       apiKeyId: apiKey.id,
+      // 計費戶＝金鑰綁定的 new-api user（與生圖 route 同源）；缺此欄位則閘門路徑的
+      // 投影（billing-projection 只認 billing_user_id 非空）無法記帳。
+      billingUserId: apiKey.userId,
       source: "biz",
       idempotencyKey: req.headers.get("idempotency-key"),
       kind: "tts",

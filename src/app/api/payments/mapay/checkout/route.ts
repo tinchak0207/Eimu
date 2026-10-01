@@ -9,10 +9,13 @@ import {
   renderMapaySubmitPage,
 } from "@/lib/mapay";
 import { buildMapayOrderParam, mapayOrderSecret } from "@/lib/mapay-order-param";
+import { buildSeatPendingOrder, parseSeatOrderParam, seatOrderEntitlementCoins, type SeatOrderIdentity } from "@/lib/team-seat-order";
+import { quoteSeatOrder } from "@/lib/team-seat-pricing";
 import { readFirstChargeEligibilityViaRelay } from "@/lib/first-charge";
 import { lookupUserIdByTokenViaRelay } from "@/lib/newapi-session-token";
 
 export const runtime = "nodejs";
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
 
 // 下單頁是 window.open 開的頂層導航，拿不到 localStorage 的 Bearer；唯一能帶上來的
 // 憑證是登入寫的 napi_token cookie（見 new-api-client.ts）。用它反查 userId 走控面
@@ -69,8 +72,65 @@ async function firstChargeAllowed(userId: number | null): Promise<boolean> {
   return (await readFirstChargeEligibilityViaRelay({ userId })) === true;
 }
 
+/**
+ * 席位訂單收銀台：`?plan=seat:<team>:<tier>:<cycle>:<seats>` → mapay 收款頁。
+ * 金額與 out_trade_no 全來自同源價表/決定性推導（與下單端 pending_order 一字不差；
+ * 同請求重放永遠是同一張單）；只有團隊主帳本人（登入 cookie 反查 userId ＝訂單團隊）
+ * 可發起支付。複用 mapay 既有簽名與欄位口徑（buildMapayCheckoutFields），不造第二套支付。
+ */
+async function seatCheckout(req: NextRequest, identity: SeatOrderIdentity) {
+  const userId = await resolveUserId(req);
+  if (!userId || userId !== identity.teamUserId) {
+    console.warn("[mapay checkout] seat rejected", { reason: "not_team_owner" });
+    return NextResponse.json(
+      { success: false, message: "席位订单只能由团队主账号本人支付。" },
+      { status: 403 },
+    );
+  }
+
+  const quote = quoteSeatOrder({ tier: identity.tier, cycle: identity.cycle, seats: identity.seats });
+  if (!quote.ok) {
+    return NextResponse.json(
+      { success: false, message: quote.message },
+      { status: quote.reason === "price_not_configured" ? 409 : 400 },
+    );
+  }
+
+  try {
+    const config = getMapayConfig();
+    const pending = buildSeatPendingOrder({ teamUserId: identity.teamUserId, quote });
+    const coins = seatOrderEntitlementCoins(identity) ?? 0;
+    const fields = buildMapayCheckoutFields({
+      config,
+      orderId: pending.out_trade_no,
+      paymentType: normalizeMapayPaymentType(req.nextUrl.searchParams.get("type")),
+      plan: { id: pending.param, name: pending.name, price: quote.totalPrice, coins },
+      param: pending.param,
+    });
+
+    return new NextResponse(renderMapaySubmitPage(getMapaySubmitUrl(config.gatewayUrl), fields), {
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "no-store",
+      },
+    });
+  } catch (error) {
+    return NextResponse.json(
+      { success: false, message: error instanceof Error ? error.message : "MaPay 配置错误" },
+      { status: 500 },
+    );
+  }
+}
+
 export async function GET(req: NextRequest) {
   const planId = req.nextUrl.searchParams.get("plan") ?? "";
+
+  // 席位訂單（`seat:` 前綴）走席位收銀台分支；其餘維持既有 plan 流程一字不動。
+  const seatIdentity = parseSeatOrderParam(planId);
+  if (seatIdentity) {
+    return seatCheckout(req, seatIdentity);
+  }
+
   const plan = resolvePricingPlan(planId);
 
   if (!plan) {

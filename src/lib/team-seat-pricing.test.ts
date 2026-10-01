@@ -11,10 +11,13 @@ import { join } from "node:path";
 import { formatMapayMoney } from "@/lib/mapay";
 import {
   TEAM_SEAT_CYCLES,
+  TEAM_SEAT_INCLUDED_COINS,
   TEAM_SEAT_PRICING,
   TEAM_SEAT_TIERS,
   configuredSeatUnitPrice,
   quoteSeatOrder,
+  resolveSeatPerSeatCoins,
+  seatIncludedCoins,
   type TeamSeatPriceTable,
 } from "./team-seat-pricing.ts";
 
@@ -70,21 +73,28 @@ test("價格來源單一：同一請求換價表就換總價，報價不含任�
   assert.equal(after.ok === true ? after.totalPrice : 0, 236, "改成 59 後總價必須跟著變");
 });
 
-test("placeholder 形狀：真實真源三檔 × 三週期全為 null（未配置），且集中在單一檔", () => {
+test("真源已配置：三檔 × 三週期皆為正數單價，且集中在單一檔", () => {
   for (const tier of TEAM_SEAT_TIERS) {
     for (const cycle of TEAM_SEAT_CYCLES) {
+      const unit = TEAM_SEAT_PRICING[tier][cycle];
       assert.equal(
-        TEAM_SEAT_PRICING[tier][cycle],
-        null,
-        `${tier}.${cycle} 必須是 null placeholder（待暴君填），目前為 ${String(TEAM_SEAT_PRICING[tier][cycle])}`,
+        typeof unit === "number" && Number.isFinite(unit) && unit > 0,
+        true,
+        `${tier}.${cycle} 必須是已配置的正數單價，目前為 ${String(unit)}`,
       );
-      assert.equal(configuredSeatUnitPrice(tier, cycle), null);
+      assert.equal(configuredSeatUnitPrice(tier, cycle), unit);
     }
+  }
+  // 週期口徑：季度 = 月 × 3 × 0.90、年度 = 月 × 12 × 0.80（四捨五入到整元）。
+  for (const tier of TEAM_SEAT_TIERS) {
+    const month = TEAM_SEAT_PRICING[tier].month as number;
+    assert.equal(TEAM_SEAT_PRICING[tier].quarter, Math.round(month * 3 * 0.9), `${tier} 季度折扣`);
+    assert.equal(TEAM_SEAT_PRICING[tier].year, Math.round(month * 12 * 0.8), `${tier} 年度折扣`);
   }
   // 變更探針：真值只在 team-seat-pricing.ts 這一個檔出現（別處不得有第二份價表）。
   const source = readFileSync(join(process.cwd(), "src/lib/team-seat-pricing.ts"), "utf8");
   assert.match(source, /席位價格唯一真源/, "檔頭必須標明「改價格只改本檔」");
-  assert.match(source, /待暴君填/);
+  assert.match(source, /team-seat-prd/, "定價口徑必須指向 PRD（docs/prd/team-seat-prd.md §2）");
 });
 
 test("反例：seats = 0 / -1 / 1.5 / 非數 一律 invalid_seats，且不給出任何金額", () => {
@@ -116,10 +126,15 @@ test("反例：未知檔位 / 未知週期各自回自己的 reason", () => {
 });
 
 test("反例：價格未配置 → price_not_configured（明確說未配置，不是 0 元）", () => {
-  // 真源目前全 null：三個檔位 × 三個週期都必須是「未配置」。
+  // 未配置的語義用**注入的全 null 價表**驗（真源已於 2026-10-01 配置，見上一條）。
+  const unconfigured: TeamSeatPriceTable = {
+    starter: { month: null, quarter: null, year: null },
+    team: { month: null, quarter: null, year: null },
+    flagship: { month: null, quarter: null, year: null },
+  };
   for (const tier of TEAM_SEAT_TIERS) {
     for (const cycle of TEAM_SEAT_CYCLES) {
-      const quote = quoteSeatOrder({ tier, cycle, seats: 10 });
+      const quote = quoteSeatOrder({ tier, cycle, seats: 10 }, unconfigured);
       assert.equal(quote.ok, false, `${tier}/${cycle} 未配價不得成立訂單`);
       assert.equal(quote.ok === false ? quote.reason : "", "price_not_configured");
       assert.match(quote.ok === false ? quote.message : "", /未配置/);
@@ -136,4 +151,39 @@ test("反例：價格未配置 → price_not_configured（明確說未配置，�
   }
   const missing = quoteSeatOrder({ tier: "starter", cycle: "year", seats: 1 }, {} as TeamSeatPriceTable);
   assert.equal(missing.ok === false ? missing.reason : "", "price_not_configured");
+});
+
+test("含幣額真源：300 / 1000 / 3000，且與價表同源單點（改這裡改全部）", () => {
+  assert.deepEqual(TEAM_SEAT_INCLUDED_COINS, { starter: 300, team: 1000, flagship: 3000 });
+  for (const tier of TEAM_SEAT_TIERS) {
+    assert.equal(seatIncludedCoins(tier), TEAM_SEAT_INCLUDED_COINS[tier]);
+  }
+  // 變更探針：含幣額真值只在 team-seat-pricing.ts 這一個檔出現。
+  const source = readFileSync(join(process.cwd(), "src/lib/team-seat-pricing.ts"), "utf8");
+  assert.match(source, /席位含幣額唯一真源/);
+});
+
+test("④ per_seat_coins 上限＝所購檔位含幣額：超額拒、邊界（＝上限）放行、非法拒", () => {
+  // 真行為斷言（PRD §2/§6）：上限由檔位決定，不是一個可隨意調的數字。
+  const ok = resolveSeatPerSeatCoins({ tier: "starter", perSeatCoins: 300 });
+  assert.equal(ok.ok, true);
+  assert.equal(ok.ok === true ? ok.cap : 0, 300, "上限＝轻量档含币额 300");
+  assert.equal(resolveSeatPerSeatCoins({ tier: "starter", perSeatCoins: 300.5 }).ok, false, "超过上限一分也拒");
+
+  // 逐檔上限：超額一律拒、等於上限放行。
+  for (const tier of TEAM_SEAT_TIERS) {
+    const cap = seatIncludedCoins(tier);
+    assert.equal(resolveSeatPerSeatCoins({ tier, perSeatCoins: cap }).ok, true, `${tier} 等于上限放行`);
+    const over = resolveSeatPerSeatCoins({ tier, perSeatCoins: cap + 1 });
+    assert.equal(over.ok, false, `${tier} 超上限必须拒`);
+    assert.equal(over.ok === false ? over.reason : "", "per_seat_coins_above_included");
+  }
+
+  // 非法：未知檔位 / 非正數 / 非數。
+  assert.equal(resolveSeatPerSeatCoins({ tier: "nope", perSeatCoins: 1 }).ok, false);
+  for (const coins of [0, -1, Number.NaN, "300", null, undefined]) {
+    const result = resolveSeatPerSeatCoins({ tier: "team", perSeatCoins: coins });
+    assert.equal(result.ok, false, String(coins));
+    assert.equal(result.ok === false ? result.reason : "", "invalid_per_seat_coins");
+  }
 });

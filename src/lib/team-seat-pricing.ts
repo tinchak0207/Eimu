@@ -60,15 +60,83 @@ export type TeamSeatPriceTable = Record<TeamSeatTier, Record<TeamSeatCycle, numb
 
 /**
  * ⬇⬇⬇ 席位價格唯一真源 ⬇⬇⬇
- * 待暴君填：把 null 換成每席位單價（元）。例如 team.month = 39 代表「团队档 39 元/席位/月」。
+ * 口徑（2026-10-01，PRD: docs/prd/team-seat-prd.md §2）：底價＝零售幣價 ¥0.099/幣
+ * （plans.ts 入門包 9.9 元 / 100 幣）。席位的履約物是配額，不是金幣之外的新權益，
+ * 所以席位單價必須低於同量零售幣價才賣得動——本表採批發折扣：
+ *   轻量档 300 幣/席位/月 → 0.090 元/幣；团队档 1,000 幣 → 0.085；旗舰档 3,000 幣 → 0.080。
+ * 週期折扣：季度 = 月 × 3 × 0.90；年度 = 月 × 12 × 0.80（皆四捨五入到整元）。
  * 改價格只改這個物件，其他地方（報價、下單、文案）全部自動跟隨。
  */
 export const TEAM_SEAT_PRICING: TeamSeatPriceTable = {
-  starter: { month: null, quarter: null, year: null },
-  team: { month: null, quarter: null, year: null },
-  flagship: { month: null, quarter: null, year: null },
+  starter: { month: 27, quarter: 73, year: 259 },
+  team: { month: 85, quarter: 230, year: 816 },
+  flagship: { month: 240, quarter: 648, year: 2304 },
 };
 /** ⬆⬆⬆ 席位價格唯一真源 ⬆⬆⬆ */
+
+/**
+ * ⬇⬇⬇ 席位含幣額唯一真源 ⬇⬇⬇（PRD §2 新定義，口徑同價表）
+ * 一個席位一個週期包含多少金幣——這是「一個席位值多少」的定義，也是分配時
+ * `per_seat_coins` 的上限（主帳不得把沒買的額度劃給成員）。與上方價表同源：
+ * 改含幣額只改這個物件。
+ */
+export const TEAM_SEAT_INCLUDED_COINS: Record<TeamSeatTier, number> = {
+  starter: 300,
+  team: 1000,
+  flagship: 3000,
+};
+
+export function seatIncludedCoins(tier: TeamSeatTier): number {
+  return TEAM_SEAT_INCLUDED_COINS[tier];
+}
+
+export type SeatPerSeatCoinsFailureReason =
+  | "unknown_tier"
+  | "invalid_per_seat_coins"
+  | "per_seat_coins_above_included";
+
+export interface SeatPerSeatCoinsOk {
+  ok: true;
+  tier: TeamSeatTier;
+  perSeatCoins: number;
+  /** 該檔位含幣額（上限）。 */
+  cap: number;
+}
+
+export interface SeatPerSeatCoinsFailure {
+  ok: false;
+  reason: SeatPerSeatCoinsFailureReason;
+  message: string;
+}
+
+export type SeatPerSeatCoins = SeatPerSeatCoinsOk | SeatPerSeatCoinsFailure;
+
+/**
+ * per_seat_coins 上限＝所購檔位含幣額，超額一律拒（PRD §2 / §6④）。
+ * 純函式（錢路不做隱式轉換）：非數/負數 → invalid；超過含幣額 → 拒。
+ */
+export function resolveSeatPerSeatCoins(input: {
+  tier: unknown;
+  perSeatCoins: unknown;
+}): SeatPerSeatCoins {
+  if (!isTeamSeatTier(input.tier)) {
+    return { ok: false, reason: "unknown_tier", message: `未知席位档位 ${String(input.tier)}。` };
+  }
+  const coins = input.perSeatCoins;
+  if (typeof coins !== "number" || !Number.isFinite(coins) || coins <= 0) {
+    return { ok: false, reason: "invalid_per_seat_coins", message: "每席位币数必须是大于 0 的数值。" };
+  }
+  const cap = seatIncludedCoins(input.tier);
+  if (coins > cap) {
+    return {
+      ok: false,
+      reason: "per_seat_coins_above_included",
+      message: `每席位币数 ${coins} 超过${TEAM_SEAT_TIER_LABELS[input.tier]}含币额 ${cap}。`,
+    };
+  }
+  return { ok: true, tier: input.tier, perSeatCoins: coins, cap };
+}
+/** ⬆⬆⬆ 席位含幣額唯一真源 ⬆⬆⬆ */
 
 /** 已配置的單價（正的有限數）；null / 0 / 負數 / 非數一律視為未配置。 */
 export function configuredSeatUnitPrice(

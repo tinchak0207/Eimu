@@ -11,8 +11,10 @@ import { fulfillMapayRedemption, type MapayRedemptionPlan } from "@/lib/mapay-re
 import { creditMapayOrderViaRelay, mapayDeliveryFor } from "@/lib/mapay-credit";
 import { readFirstChargeEligibilityViaRelay } from "@/lib/first-charge";
 import { resolveMapayOrderBinding } from "@/lib/mapay-order-param";
+import { fulfillSeatOrder } from "@/lib/team-seat-fulfillment";
 
 export const runtime = "nodejs";
+export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
 
 function response(text: string, status = 200) {
   return new NextResponse(text, {
@@ -77,6 +79,40 @@ async function handleNotify(req: NextRequest) {
         trade_status: params.trade_status,
       });
       return response("success");
+    }
+
+    // 席位訂單不走 plan 流程：`seat:` 前綴者走席位履約分支（同源價表重算 → 比對 money
+    // → 記下席位意圖並把配額加到團隊主帳，冪等鍵＝out_trade_no）。金額不符/參數不合法
+    // → 拒且不履約。**絕不**落 fulfillMapayRedemption（那條發金幣兌換碼，席位不是金幣套餐）。
+    const seat = await fulfillSeatOrder({
+      param: params.param,
+      money: params.money,
+      orderId: params.out_trade_no,
+    });
+    if (seat.handled) {
+      if (!seat.ok) {
+        console.warn("[mapay notify] seat rejected", {
+          reason: seat.code,
+          out_trade_no: params.out_trade_no,
+          money: params.money,
+          param: params.param,
+        });
+        return response("fail", 400);
+      }
+      console.info("[mapay notify] seat", {
+        out_trade_no: params.out_trade_no,
+        trade_no: params.trade_no,
+        money: params.money,
+        team_user_id: seat.teamUserId,
+        tier: seat.tier,
+        cycle: seat.cycle,
+        seats: seat.seats,
+        target_coins: seat.targetCoins,
+        outcome: seat.outcome,
+      });
+      // 錢必落地：已入帳（credited/already_credited）→ success；通道不可用/結果未定
+      // → fail 讓網關重投（不發兌換碼兜底——席位沒有兌換碼可發）。
+      return seat.credited ? response("success") : response("fail", 500);
     }
 
     // param 有兩種：已登入下單的三段自簽值（planId.userId.hmac8，可直達入帳），

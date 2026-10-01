@@ -11,11 +11,12 @@ import {
   type TeamSeatPriceTable,
 } from "./team-seat-pricing.ts";
 import {
-  SEAT_ORDER_FULFILLMENT_CODE,
   SEAT_PRICE_NOT_CONFIGURED_CODE,
   buildSeatPendingOrder,
   decideSeatOrder,
   isSeatOrderId,
+  parseSeatOrderParam,
+  seatOrderEntitlementCoins,
   seatOrderId,
   seatOrderParam,
 } from "./team-seat-order.ts";
@@ -79,7 +80,13 @@ test("待支付訂單形狀：out_trade_no/param/name/money 沿用 mapay 欄位�
 });
 
 test("價格未配置 → 409 seat_price_not_configured：沒有報價、更沒有待支付訂單", () => {
-  const decision = decideSeatOrder({ teamUserId: 117, tier: "team", cycle: "month", seats: 5 });
+  // 未配置語義用注入的全 null 價表驗（真源已於 2026-10-01 配置；見下一條）。
+  const unconfigured: TeamSeatPriceTable = {
+    starter: { month: null, quarter: null, year: null },
+    team: { month: null, quarter: null, year: null },
+    flagship: { month: null, quarter: null, year: null },
+  };
+  const decision = decideSeatOrder({ teamUserId: 117, tier: "team", cycle: "month", seats: 5 }, unconfigured);
   assert.equal(decision.ok, false);
   assert.equal(decision.status, 409);
   assert.equal(decision.code, SEAT_PRICE_NOT_CONFIGURED_CODE);
@@ -90,19 +97,44 @@ test("價格未配置 → 409 seat_price_not_configured：沒有報價、更沒�
   assert.equal(JSON.stringify(decision).includes("money"), false, "不得出现任何金额字段（不能算成 0 元）");
 });
 
-test("價格已配置但未接線 → 501 未接線：回報價 + 待支付訂單，但 payable:false 且附接線清單", () => {
+test("真源已配置 → 不注入價表也能算出報價：可支付，報價/金額來自單一真源", () => {
+  // 真行為斷言：改 team-seat-pricing.ts 這一個物件，下單判定（不注入）就必須跟著動。
+  const decision = decideSeatOrder({ teamUserId: 117, tier: "team", cycle: "month", seats: 5 });
+  assert.equal(decision.status, 200);
+  assert.equal(decision.payable, true, "全链已接線：报价合法即可支付");
+  assert.equal(decision.quote?.unitPrice, TEAM_SEAT_PRICING.team.month);
+  assert.equal(decision.quote?.totalPrice, (TEAM_SEAT_PRICING.team.month as number) * 5);
+  assert.equal(decision.pending_order?.money, formatMapayMoney((TEAM_SEAT_PRICING.team.month as number) * 5));
+  assert.equal(decision.pending_order?.param.startsWith("seat:"), true);
+});
+
+test("報價合法 → 200 可支付：回報價 + 待支付訂單 + 收銀台入口（決定性 out_trade_no）", () => {
   const decision = decideSeatOrder({ teamUserId: 117, tier: "team", cycle: "month", seats: 5 }, PRICED);
-  assert.equal(decision.status, 501);
-  assert.equal(decision.code, SEAT_ORDER_FULFILLMENT_CODE);
-  assert.equal(decision.payable, false);
+  assert.equal(decision.status, 200);
+  assert.equal(decision.payable, true);
   assert.equal(decision.quote?.totalPrice, 195);
   assert.equal(decision.pending_order?.money, "195.00");
-  assert.equal(decision.todo?.length, 3);
-  assert.match(decision.todo?.join("\n") ?? "", /allocateMemberQuota/);
-  assert.match(decision.todo?.join("\n") ?? "", /fulfillMapayRedemption/);
+  // 收銀台入口帶著同一個 seat: param（與金幣套餐 id 空間隔離）。
+  assert.equal(decision.checkout.method, "GET");
+  assert.match(decision.checkout.path, /^\/api\/payments\/mapay\/checkout\?plan=seat%3A117%3Ateam%3Amonth%3A5$/);
+  // 接線清單保留（前兩條已落地、續費/退款未做）。
+  assert.equal(decision.todo.length, 3);
+  assert.match(decision.todo.join("\n"), /已落地/);
+  assert.match(decision.todo.join("\n"), /fulfillMapayRedemption/);
   // 重放：同一請求再判一次，out_trade_no 一模一樣（沒有第二張訂單、沒有狀態被寫）。
   const replay = decideSeatOrder({ teamUserId: 117, tier: "team", cycle: "month", seats: 5 }, PRICED);
   assert.equal(replay.pending_order?.out_trade_no, decision.pending_order?.out_trade_no);
+});
+
+test("param 反解：seatOrderParam → parseSeatOrderParam 逐欄還原；畸形/非席位一律 null", () => {
+  const identity = { teamUserId: 117, tier: "team", cycle: "month", seats: 5 };
+  assert.deepEqual(parseSeatOrderParam(seatOrderParam(identity)), identity);
+  // 含幣額與價表同源（席位數 × 檔位含幣額）。
+  assert.equal(seatOrderEntitlementCoins(identity), 5 * 1000);
+  for (const bad of [null, "", "popular", "seat:117:team:month", "seat:0:team:month:5", "seat:117:nope:month:5", "seat:117:team:monthly:5", "seat:117:team:month:0", "IMG123"]) {
+    assert.equal(parseSeatOrderParam(bad), null, String(bad));
+  }
+  assert.equal(seatOrderEntitlementCoins({ teamUserId: 1, tier: "nope", cycle: "month", seats: 1 }), null);
 });
 
 test("參數不合法逐條回自己的碼（400），且都不產生訂單", () => {

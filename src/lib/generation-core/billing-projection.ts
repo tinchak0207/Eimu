@@ -2,6 +2,7 @@ import { QUOTA_PER_COIN } from "@/lib/quota-constants";
 import { adjustGatewayUserQuotaExact } from "@/lib/gateway-admin";
 import { imageGenerationCoins } from "@/lib/provider-config";
 import { generationCoins } from "@/lib/generation-model-catalog/pricing";
+import { ttsQuotaForChars } from "@/lib/generation-model-catalog/tts-pricing";
 import { syncModelPricing } from "@/lib/pricing-runtime";
 import { getGenerationSql, type GenerationSql } from "./database";
 import { ensureAccountBaselines, recordConsumption } from "./account-ledger";
@@ -73,6 +74,17 @@ export function estimateGatePathBasePrice(row: GatePathJobRow): number {
         generateAudio: workflow.generateAudio,
       } as never);
       return Math.round(coins * QUOTA_PER_COIN) * count;
+    }
+    // TTS（2026-10-01 接入逐字計費）：閘門路徑（billing_amount=0）的 succeeded tts job
+    // 由投影補記帳。金額＝提交時已落庫的 `workflow.inputLength`（請求文本實際字數，
+    // 提交端寫入的真源；缺此欄位的舊單 → NaN → 0 → 如實跳過並記 skippedUnknownPrice，
+    // 不猜字數）逐字計價，與 /v1/tts/generations 的 baseBillingAmount 同源同價。
+    // 不乘 count：`inputLength` 已是整段文本字數，`requestedCount` 對 TTS 恆為 1。
+    if (row.kind === "tts") {
+      const workflow = (row.workflow_json && typeof row.workflow_json === "object" ? row.workflow_json : {}) as {
+        inputLength?: number;
+      };
+      return ttsQuotaForChars(Number(workflow.inputLength));
     }
   } catch {
     return 0;

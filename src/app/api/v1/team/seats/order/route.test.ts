@@ -37,6 +37,7 @@ interface SeatOrderBody {
   quote?: unknown;
   pending_order?: unknown;
   payment?: { payable: boolean; wired: boolean };
+  checkout?: { method: string; path: string };
   todo?: string[];
 }
 
@@ -64,19 +65,19 @@ test("席位数非法 → 400 invalid_seats（不产生订单）", async () => {
   }
 });
 
-test("价格未配置（当前真源全为 null）→ 409，且响应里没有任何金额（绝不能是 0 元订单）", async () => {
+test("真源已配置 → 200 可支付：回报价 + 待支付订单 + 收银台入口（金额来自同源价表，绝非 0 元）", async () => {
   reset();
   const response = await POST(req({ headers: AUTH, body: { tier: "team", cycle: "month", seats: 5 } }));
-  assert.equal(response.status, 409);
+  assert.equal(response.status, 200);
   const body = await bodyOf(response);
-  assert.equal(body.success, false);
-  assert.equal(body.error?.code, "seat_price_not_configured");
-  assert.match(body.error?.message ?? "", /未配置/);
-  assert.equal(body.pending_order, undefined);
-  assert.equal(body.quote, undefined);
-  const raw = JSON.stringify(body);
-  assert.equal(raw.includes("money"), false, "不得出现 money 字段");
-  assert.equal(/"0\.00"|"0"|"total_price"/.test(raw), false, "不得以 0 元/0 价格成立订单");
+  assert.equal(body.success, true);
+  assert.equal(body.payment?.payable, true, "全链已接線：报价合法即可支付");
+  assert.equal(body.payment?.wired, true);
+  const pending = body.pending_order as { money?: string; param?: string; out_trade_no?: string } | undefined;
+  assert.equal(pending?.money, "425.00", "85 元/席位 × 5 席（同源价表）");
+  assert.equal(pending?.param?.startsWith("seat:"), true);
+  assert.equal(pending?.out_trade_no?.startsWith("TS"), true);
+  assert.equal(body.checkout?.path?.startsWith("/api/payments/mapay/checkout?plan=seat"), true, "收银台入口");
 });
 
 test("未知档位/周期 → 400，各回自己的码", async () => {
