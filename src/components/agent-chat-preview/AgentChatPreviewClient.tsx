@@ -7,6 +7,10 @@
  * 色彩纪律：全页只有 foreground 灰阶 + ios-blue accent + 红（仅错误/停止）
  * + 币数金（coin-badge 既有金色 #b8860b，tailwind.config 无 ios-gold token）。
  *
+ * Eimu 味（2026-10-01）：版面常驻零装饰（顶栏纯图标）；品牌只靠 Navbar 同款
+ * 玻璃 E 图标（/icon.png）在两处出场——空态迎接、助理回合抬头/思考中。
+ * 红线：助理界面禁用人物形象（public/mascot/* 看板娘一律不用，暴君已否决）。
+ *
  * 红线：不 import 任何现有 agent-chat 组件；IME Enter 守卫逐字复刻
  * AgentComposer.tsx 的既有契约（isComposing / keyCode 229，且在
  * preventDefault 之前返回）。
@@ -22,27 +26,27 @@ import {
 } from "react";
 import {
   ArrowUp,
-  Brain,
+  Boxes,
+  Check,
   ChevronDown,
   Coins,
   Crop,
   Download,
   History,
   Image as ImageIcon,
-  ImagePlus,
-  Images,
   LayoutGrid,
   Loader2,
   Maximize2,
-  MoreHorizontal,
   Palette,
+  Plus,
   PenLine,
   RefreshCw,
   Search,
   Settings,
+  SlidersHorizontal,
   SquarePen,
-  X,
 } from "lucide-react";
+import { AGENT_EXAMPLE_PROMPTS } from "@/lib/agent-example-prompts";
 import { cn } from "@/lib/utils";
 
 /* ──────────────────────────── 假数据 ──────────────────────────── */
@@ -126,8 +130,6 @@ const DEMO_REASONING = [
 const FIXED_REPLY =
   "收到。这里是预览环境的固定回复——真实环境会接入工具与子代理，继续执行你的要求。";
 
-const EXAMPLE_PROMPTS = ["橘猫水彩", "香水落日海滩", "秦始皇骑北极熊"];
-
 /* ──────────────────────────── 消息类型 ──────────────────────────── */
 
 interface PreviewMessage {
@@ -174,7 +176,31 @@ function SpecularLine() {
   );
 }
 
-/** 思维链（新形态）：默认收合的一行「已思考 · N 秒」，点开灰底圆角块。 */
+/**
+ * Eimu 品牌标：Navbar 同款玻璃 E 图标（lg-float 圆角方块 + /icon.png），
+ * 与首页左上角 logo 同一件东西——助理界面的品牌只从这里来，不用人物形象。
+ * breathing＝思考中，整枚图标轻呼吸（motion-safe，减弱动效偏好下静止）。
+ */
+function BrandMark({ size, breathing = false }: { size: number; breathing?: boolean }) {
+  return (
+    <span
+      className={cn(
+        "lg-float relative inline-flex shrink-0 overflow-hidden",
+        breathing && "motion-safe:animate-pulse",
+      )}
+      style={{ width: size, height: size, borderRadius: Math.round(size * 0.28) }}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element -- 站点 app icon，固定尺寸 */}
+      <img src="/icon.png" alt="" aria-hidden="true" width={size} height={size} className="h-full w-full object-cover" />
+    </span>
+  );
+}
+
+/**
+ * 思维链（新形态）：默认收合的一行「已思考 · N 秒」，点开灰底圆角块。
+ * 行首＝Eimu 玻璃 E 图标（取代 Brain）：助理回合的抬头，与思考中那行同位同尺寸，
+ * 思考结束只是图标停止呼吸、文案换掉——位置不动。
+ */
 function ReasoningDisclosure({ open, onToggle }: { open: boolean; onToggle: () => void }) {
   return (
     <div>
@@ -182,9 +208,9 @@ function ReasoningDisclosure({ open, onToggle }: { open: boolean; onToggle: () =
         type="button"
         onClick={onToggle}
         aria-expanded={open}
-        className="flex min-h-11 w-full items-center gap-1.5 text-left text-ios-footnote font-medium text-muted-foreground select-none [-webkit-tap-highlight-color:transparent]"
+        className="flex min-h-11 w-full items-center gap-2 text-left text-ios-footnote font-medium text-muted-foreground select-none [-webkit-tap-highlight-color:transparent]"
       >
-        <Brain className="h-3.5 w-3.5 shrink-0 text-foreground/40" aria-hidden="true" />
+        <BrandMark size={20} />
         已思考 · 12 秒
         <ChevronDown
           className={cn(
@@ -230,16 +256,7 @@ function ToolRow({ tool }: { tool: DemoTool }) {
         ) : null}
         {tool.status === "done" ? (
           <>
-            {/* 源圖只有 3 張表情：done → emo-1（張嘴大笑），沿用原 Check 的 14px 位。 */}
-            {/* eslint-disable-next-line @next/next/no-img-element -- 本地看板娘素材，固定尺寸 */}
-            <img
-              src="/mascot/eimu-emo-1.png"
-              alt=""
-              aria-hidden="true"
-              width={14}
-              height={14}
-              className="h-3.5 w-3.5 shrink-0 object-contain"
-            />
+            <Check className="h-3.5 w-3.5 shrink-0 text-foreground/40" aria-hidden="true" />
             <span className="shrink-0 text-ios-footnote text-foreground/45">完成</span>
           </>
         ) : null}
@@ -398,31 +415,32 @@ function BatchProgressRow({
   );
 }
 
-/** 思考指示（极弱形态）：三点 + 灰字。 */
+/**
+ * 思考指示：与「已思考」行同位同尺寸（min-h-11 + 20px 品牌标），品牌标呼吸。
+ * 呼吸本身就是「在动」的信号，三个跳点拿掉——一个动效就够。
+ */
 function ThinkingRow() {
   return (
-    <div className="flex items-center gap-1.5 py-1" role="status" aria-label="正在思考">
-      {/* 思考態 → emo-2（睜眼微笑）；源圖只有 3 張表情，emo-3 留著不用。 */}
-      {/* eslint-disable-next-line @next/next/no-img-element -- 本地看板娘素材，固定尺寸 */}
-      <img
-        src="/mascot/eimu-emo-2.png"
-        alt=""
-        aria-hidden="true"
-        width={18}
-        height={18}
-        className="h-[18px] w-[18px] shrink-0 object-contain"
-      />
-      <span className="h-1 w-1 animate-pulse rounded-full bg-foreground/35 [animation-delay:0ms]" />
-      <span className="h-1 w-1 animate-pulse rounded-full bg-foreground/35 [animation-delay:200ms]" />
-      <span className="h-1 w-1 animate-pulse rounded-full bg-foreground/35 [animation-delay:400ms]" />
-      <span className="ml-1 text-ios-footnote text-muted-foreground">正在思考…</span>
+    <div className="flex min-h-11 items-center gap-2" role="status" aria-label="Eimu 正在思考">
+      <BrandMark size={20} breathing />
+      <span className="text-ios-footnote font-medium text-muted-foreground">Eimu 正在想…</span>
     </div>
   );
 }
 
+/* ──────────────────────────── Eimu 虹彩 ──────────────────────────── */
+
+/**
+ * Eimu 虹彩＝玻璃 E 图标自带的蓝 → 薰衣草 → 粉（取色自 /icon.png）。
+ * 只给三件品牌签名件用：输入框描边、发送钮、空态光晕——都是小面积/软边，
+ * 不做卡片底色、不做渐变文字。
+ */
+const IRIS = "#5B8DEF, #8C7BF0, #E58DBA";
+const IRIS_SOFT = "rgba(91,141,239,0.55), rgba(140,123,240,0.45), rgba(229,141,186,0.55)";
+
 /* ──────────────────────────── 输入框 ──────────────────────────── */
 
-const TEXTAREA_MAX_HEIGHT = 140; // 5 行 × 22px 行高 + 上下内边距。
+const TEXTAREA_MAX_HEIGHT = 137; // 6 行 × 22px 行高 + 上下内边距（文字区通栏后可多给一行）。
 
 function Composer({
   value,
@@ -475,22 +493,31 @@ function Composer({
   );
 
   return (
+    /*
+     * 上下两层（ChatGPT / Claude 同款结构）：上＝通栏文字区，下＝工具行（上传｜发送）。
+     * 旧版三者同排：多行时上传钮孤零零坠在左下、左侧空出一整列，文字区被挤窄，
+     * 上下 padding 叠成一大块留白——结构问题，调间距救不回来。
+     * 上传与发送同为 36px 圆、同一条基线：左边描边空心、右边虹彩实心，重量对称。
+     */
     <div
+      onClick={(e) => {
+        // 点外壳/工具行空白处也能聚焦输入（整块都像输入框，而不是只有文字那一条）。
+        if (e.target === e.currentTarget) taRef.current?.focus();
+      }}
       className={cn(
-        "lg-float relative flex items-end gap-1 rounded-[22px] p-1.5",
-        "outline-none focus-within:ring-[1.5px] focus-within:ring-ring/60",
-        large ? "py-2 shadow-[0_16px_48px_rgba(0,0,0,0.10)]" : null,
+        // 外壳：lg-float 的模糊折射保留，底色与描边由 style 接管——1px 虹彩描边
+        // （padding-box 白玻璃 + border-box 虹彩渐变）＝玻璃 E 的边缘光，Eimu 味的主承载。
+        // 聚焦只加深投影，不再外套一圈 4px 光环（与描边叠成双框）。
+        "lg-float relative flex cursor-text flex-col rounded-[24px] px-2 pb-1.5 pt-2",
+        "shadow-[0_10px_32px_rgba(140,123,240,0.14)] transition-shadow duration-200",
+        "focus-within:shadow-[0_14px_40px_rgba(140,123,240,0.24)]",
+        large ? "pt-2.5" : null,
       )}
+      style={{
+        background: `linear-gradient(rgba(255,255,255,0.86), rgba(255,255,255,0.86)) padding-box, linear-gradient(120deg, ${IRIS_SOFT}) border-box`,
+        border: "1px solid transparent",
+      }}
     >
-      <SpecularLine />
-      <button
-        type="button"
-        aria-label="添加参考图"
-        title="添加参考图"
-        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-foreground/40 transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/70 active:scale-95"
-      >
-        <ImagePlus className="h-[18px] w-[18px]" aria-hidden="true" />
-      </button>
       <textarea
         ref={taRef}
         rows={1}
@@ -499,22 +526,53 @@ function Composer({
         onKeyDown={handleKeyDown}
         placeholder={placeholder}
         aria-label="消息输入框"
-        className="min-h-[52px] w-full flex-1 resize-none overflow-y-auto bg-transparent px-1 py-[15px] text-[15px] leading-[22px] text-foreground outline-none placeholder:text-foreground/35"
+        className="block min-h-[30px] w-full resize-none overflow-y-auto bg-transparent px-2.5 pb-1 pt-1 text-[15px] leading-[22px] text-foreground outline-none placeholder:text-foreground/35"
       />
-      <button
-        type="button"
-        aria-label="发送"
-        title="发送"
-        onClick={handleSend}
-        disabled={!canSend}
-        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#2d3142] text-white outline-none transition-all duration-200 hover:-translate-y-[1px] hover:bg-[#272b39] hover:shadow-[0_8px_20px_rgba(45,49,66,0.22)] active:scale-95 disabled:bg-[#bcc2ca] disabled:cursor-not-allowed disabled:shadow-none"
+      <div
+        onClick={(e) => {
+          if (e.target === e.currentTarget) taRef.current?.focus();
+        }}
+        className="flex items-center justify-between"
       >
-        {busy ? (
-          <Loader2 className="h-[18px] w-[18px] animate-spin" aria-hidden="true" />
-        ) : (
-          <ArrowUp className="h-[18px] w-[18px]" aria-hidden="true" />
-        )}
-      </button>
+        {/* 上传：36px 描边空心圆＋居中对称的 Plus（ImagePlus 的加号挂在右上角，
+            字形重心偏移，放进圆里永远看着歪）。44px 触控区由外层 button 保底。 */}
+        <button
+          type="button"
+          aria-label="添加参考图"
+          title="添加参考图"
+          className="group flex h-11 w-11 shrink-0 items-center justify-center rounded-full outline-none active:scale-95"
+        >
+          <span className="flex h-9 w-9 items-center justify-center rounded-full border border-black/[0.09] text-foreground/55 transition-colors duration-200 group-hover:border-[rgba(140,123,240,0.35)] group-hover:bg-[rgba(140,123,240,0.08)] group-hover:text-[#6f5fd6]">
+            <Plus className="h-[18px] w-[18px]" strokeWidth={2} aria-hidden="true" />
+          </span>
+        </button>
+        {/* 发送：虹彩实心圆（玻璃 E 同色）。不可发送时不是死灰——同一颗球褪色待命，
+            有字就亮起来。 */}
+        <button
+          type="button"
+          aria-label="发送"
+          title="发送"
+          onClick={handleSend}
+          disabled={!canSend}
+          className="group flex h-11 w-11 shrink-0 items-center justify-center rounded-full outline-none active:scale-95 disabled:cursor-not-allowed"
+        >
+          <span
+            className={cn(
+              "flex h-9 w-9 items-center justify-center rounded-full text-white transition-all duration-200",
+              canSend || busy
+                ? "shadow-[0_6px_16px_rgba(140,123,240,0.40),inset_0_1px_0_rgba(255,255,255,0.45)] group-hover:-translate-y-[1px] group-hover:shadow-[0_10px_22px_rgba(140,123,240,0.48),inset_0_1px_0_rgba(255,255,255,0.45)]"
+                : "opacity-35 saturate-[0.6]",
+            )}
+            style={{ background: `linear-gradient(135deg, ${IRIS})` }}
+          >
+            {busy ? (
+              <Loader2 className="h-[17px] w-[17px] animate-spin" aria-hidden="true" />
+            ) : (
+              <ArrowUp className="h-[17px] w-[17px]" strokeWidth={2.4} aria-hidden="true" />
+            )}
+          </span>
+        </button>
+      </div>
     </div>
   );
 }
@@ -526,7 +584,6 @@ function AgentChatPreviewClientComponent() {
   const [messages, setMessages] = useState<PreviewMessage[]>([]);
   const [thinking, setThinking] = useState(false);
   const [input, setInput] = useState("");
-  const [menuOpen, setMenuOpen] = useState(false);
   const [reasoningOpen, setReasoningOpen] = useState(false);
   const [batchStopped, setBatchStopped] = useState(false);
   const [planIndex, setPlanIndex] = useState(0);
@@ -592,7 +649,6 @@ function AgentChatPreviewClientComponent() {
     setMessages([]);
     setThinking(false);
     setInput("");
-    setMenuOpen(false);
     setReasoningOpen(false);
     setBatchStopped(false);
     setPlanIndex(0);
@@ -603,104 +659,80 @@ function AgentChatPreviewClientComponent() {
   const decisionPending = decisionState === "pending";
 
   return (
-    <div className="lg-card relative z-10 mt-2 flex h-[calc(100dvh-3.25rem)] w-full max-w-[430px] flex-col overflow-hidden rounded-[2.4rem]">
+    <div
+      className="lg-card relative z-10 mt-2 flex h-[calc(100dvh-3.25rem)] w-full max-w-[430px] flex-col overflow-hidden rounded-[2.4rem]"
+      // 卡面由 0.72 实白降到 0.56：首页环境光要能透进来，玻璃才不是水泥墙；
+      // 对话正文的对比度靠 blur40 + saturate 托底，仍远高于 4.5:1。
+      style={{ background: "rgba(255,255,255,0.56)" }}
+    >
       <SpecularLine />
-      {/* 顶栏（减负版）：logo + 标题 + 极弱状态；右侧新会话 / 关闭 / ⋯ 收纳 */}
-      <header className="flex shrink-0 items-center gap-2.5 border-b border-black/[0.04] px-3 py-1.5">
-        {/* 看板娘头像：容器尺寸沿用原 logo 位（h-8 w-8）＝零位移；头像本体 28px 圆形。
-            去掉 lg-tint-blue 底色，避免 UI 蓝与角色自带配色混用。 */}
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center">
-          {/* eslint-disable-next-line @next/next/no-img-element -- 本地看板娘素材，固定尺寸 */}
-          <img
-            src="/mascot/eimu-avatar.png"
-            alt="AI 助理头像"
-            width={28}
-            height={28}
-            className="h-7 w-7 shrink-0 rounded-full object-cover"
-          />
-        </div>
-        <div className="min-w-0 flex-1">
-          <h1 className="truncate text-ios-headline text-foreground">AI 助理</h1>
-          <p className="truncate text-ios-caption1 text-foreground/35">随时待命</p>
-        </div>
-        <GhostIconButton label="新会话" onClick={resetAll}>
-          <SquarePen className="h-[18px] w-[18px]" aria-hidden="true" />
+      {/* 顶栏＝正式版 09-27 定版：纯图标、零文字、不放头像（角色不做常驻装饰）。
+          左：资产 / 历史；右：新会话 / 直接生成 / 设置。 */}
+      <header className="flex shrink-0 items-center px-3 pt-2">
+        <GhostIconButton label="资产">
+          <Boxes className="h-[18px] w-[18px]" aria-hidden="true" />
         </GhostIconButton>
-        <GhostIconButton label="关闭" onClick={() => setMenuOpen(false)}>
-          <X className="h-[18px] w-[18px]" aria-hidden="true" />
+        <GhostIconButton label="历史">
+          <History className="h-[18px] w-[18px]" aria-hidden="true" />
         </GhostIconButton>
-        <div className="relative">
-          <GhostIconButton
-            label="更多选项"
-            onClick={() => setMenuOpen((v) => !v)}
-          >
-            <MoreHorizontal className="h-[18px] w-[18px]" aria-hidden="true" />
+        <div className="ml-auto flex items-center">
+          <GhostIconButton label="新会话" onClick={resetAll}>
+            <SquarePen className="h-[18px] w-[18px]" aria-hidden="true" />
           </GhostIconButton>
-          {menuOpen ? (
-            <div className="lg-sheet animate-lg-appear absolute right-0 top-[calc(100%+6px)] z-20 w-36 overflow-hidden rounded-[16px] p-1.5">
-              <SpecularLine />
-              {(
-                [
-                  { icon: History, label: "历史" },
-                  { icon: Images, label: "资产" },
-                  { icon: Settings, label: "设置" },
-                ] as const
-              ).map((item) => {
-                const Icon = item.icon;
-                return (
-                  <button
-                    key={item.label}
-                    type="button"
-                    onClick={() => setMenuOpen(false)}
-                    className="flex min-h-11 w-full items-center gap-2.5 rounded-[10px] px-2.5 text-[15px] text-foreground/70 transition-colors hover:bg-[rgba(0,122,255,0.12)]"
-                  >
-                    <Icon className="h-4 w-4 text-foreground/40" aria-hidden="true" />
-                    {item.label}
-                  </button>
-                );
-              })}
-            </div>
-          ) : null}
+          <GhostIconButton label="直接生成">
+            <SlidersHorizontal className="h-[18px] w-[18px]" aria-hidden="true" />
+          </GhostIconButton>
+          <GhostIconButton label="设置">
+            <Settings className="h-[18px] w-[18px]" aria-hidden="true" />
+          </GhostIconButton>
         </div>
       </header>
 
       {!started ? (
-        /* 空态：输入框居中放大为主角，下方三个幽灵文字链示例。 */
-        <div className="relative flex flex-1 flex-col items-center overflow-y-auto px-5">
-          {/* 空态主角：看板娘只在玻璃容器内出现（不与界面配色混用）。
-              绝对定位在既有 30vh 顶部留白内，标题与输入框位置不动（零位移）。
-              容器与图片均为固定尺寸，素材未落地前也不会撑出滚动条。 */}
-          <div className="pointer-events-none absolute inset-x-0 top-0 flex h-[30vh] items-center justify-center">
-            <div className="lg-float flex h-[min(24vh,168px)] w-[min(24vh,168px)] items-center justify-center overflow-hidden rounded-[28px] p-2">
-              {/* eslint-disable-next-line @next/next/no-img-element -- 本地看板娘素材，固定尺寸 */}
-              <img
-                src="/mascot/eimu-hero.png"
-                alt="Eimu 助理形象"
-                width={256}
-                height={256}
-                className="h-full w-full object-contain"
-              />
+        /* 空态：品牌标 → 标题 → 输入框 → 示例，一组垂直居中。
+           品牌标＝Navbar 同款玻璃 E（48px），入场走 lg-appear 弹簧，只在进空态时动一次。 */
+        <div
+          className="relative flex flex-1 flex-col items-center justify-center overflow-y-auto px-5 pb-6"
+          // 卡底环境光：与首页 body::after 同构（蓝在左、粉在右），只从卡的下缘升起，
+          // 在到达顶栏前衰减为 0——上缘不露接缝；左右下三边就是卡本身的圆角边，自然裁切。
+          style={{
+            background:
+              "radial-gradient(ellipse 70% 55% at 8% 100%, rgba(91,141,239,0.13), transparent 70%), radial-gradient(ellipse 70% 55% at 92% 100%, rgba(229,141,186,0.14), transparent 70%)",
+          }}
+        >
+          {/* 空态光晕：玻璃 E 的虹彩从品牌标后方散开。软边径向渐变、在卡缘之前就衰减到 0
+              ——不是 inset-0 满版色块（09-20 教训：满版装饰必露硬边）；有消息即消失。 */}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute left-1/2 top-1/2 h-[520px] w-[520px] -translate-x-1/2 -translate-y-[62%]"
+            style={{
+              background:
+                "radial-gradient(closest-side at 50% 42%, rgba(140,123,240,0.22), transparent 70%), radial-gradient(closest-side at 26% 58%, rgba(91,141,239,0.18), transparent 72%), radial-gradient(closest-side at 74% 60%, rgba(229,141,186,0.18), transparent 72%)",
+            }}
+          />
+          <div className="relative flex w-full flex-col items-center">
+            <div className="animate-lg-appear rounded-[14px] shadow-[0_10px_28px_rgba(140,123,240,0.30)]">
+              <BrandMark size={52} />
             </div>
-          </div>
-          <div className="flex w-full flex-col items-center" style={{ paddingTop: "30vh" }}>
-            <h2 className="text-2xl font-semibold tracking-tight text-foreground">想做点什么？</h2>
-            <div className="mt-8 w-full">
+            <h2 className="mt-5 text-2xl font-semibold tracking-tight text-foreground">想做点什么？</h2>
+            <div className="mt-7 w-full">
               <Composer
                 value={input}
                 onChange={setInput}
                 onSend={handleSend}
                 busy={thinking}
-                placeholder="描述你想做的…"
+                placeholder="跟 Eimu 说说你想做的…"
                 large
               />
             </div>
-            <div className="mt-5 flex flex-col items-center gap-1 pb-12">
-              {EXAMPLE_PROMPTS.map((prompt) => (
+            {/* 示例＝正式版同源（agent-example-prompts 唯一真源）＋同款玻璃膠囊。 */}
+            <div className="mt-5 flex w-full flex-wrap items-center justify-center gap-2">
+              {AGENT_EXAMPLE_PROMPTS.map((prompt) => (
                 <button
                   key={prompt}
                   type="button"
                   onClick={() => startChat(prompt)}
-                  className="min-h-11 rounded-lg px-3 text-[15px] text-foreground/55 underline-offset-4 transition-colors hover:text-foreground/80 hover:underline hover:decoration-foreground/30"
+                  className="min-h-11 cursor-pointer rounded-full border border-white/80 bg-white/45 px-4 py-2 text-ios-footnote font-medium text-foreground/70 shadow-[0_2px_10px_rgba(140,123,240,0.08)] backdrop-blur-md transition-all duration-200 hover:-translate-y-[1px] hover:bg-white/75 hover:text-foreground hover:shadow-[0_6px_18px_rgba(140,123,240,0.16)]"
                 >
                   {prompt}
                 </button>
@@ -807,7 +839,7 @@ function AgentChatPreviewClientComponent() {
               onSend={handleSend}
               busy={thinking}
               placeholder={
-                decisionPending ? "先选上方方案，或直接补充要求…" : "给 AI 助理发消息…"
+                decisionPending ? "先选上方方案，或直接补充要求…" : "给 Eimu 发消息…"
               }
             />
           </div>
