@@ -1,8 +1,39 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { createServer } from "node:http";
+import type { IncomingMessage, ServerResponse } from "node:http";
 
-import { validateImageBuffer, validateAndDescribeBase64Image, validateOutputMediaBuffer } from "./artifact-service.ts";
+import {
+  validateImageBuffer,
+  validateAndDescribeBase64Image,
+  validateOutputMediaBuffer,
+  outputBuffer,
+  artifactBodyTimeoutMs,
+  ARTIFACT_MAX_DOWNLOAD_BYTES,
+  ARTIFACT_DOWNLOAD_MAX_TIMEOUT_MS,
+  type ArtifactDownloadTimeouts,
+} from "./artifact-service.ts";
+
+/** 起一個真實 HTTP server（127.0.0.1 隨機埠）供 outputBuffer 的真行為斷言使用。 */
+function startArtifactServer(handler: (req: IncomingMessage, res: ServerResponse) => void): Promise<{ url: string; close: () => Promise<void> }> {
+  return new Promise((resolve) => {
+    const server = createServer(handler);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      const port = typeof address === "object" && address ? address.port : 0;
+      resolve({
+        url: `http://127.0.0.1:${port}/artifact.png`,
+        close: () =>
+          new Promise<void>((done) => {
+            // keep-alive 連線會讓 close() 久等；先切斷既有連線再關。
+            server.closeAllConnections();
+            server.close(() => done());
+          }),
+      });
+    });
+  });
+}
 
 // 1x1 透明 PNG（真实字节，67 字节）。
 const PNG_1X1_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
@@ -126,4 +157,105 @@ test("validateAndDescribeBase64Image 超过体积上限时返回 error", () => {
 test("validateAndDescribeBase64Image 空字符串返回 error", () => {
   const result = validateAndDescribeBase64Image("", 1024);
   assert.equal("error" in result, true);
+});
+
+// ── outputBuffer 下載時限：真行為斷言（真實 HTTP server、真位元組，非源碼字串比對）──
+
+const MIB = 1024 * 1024;
+
+test("預設時限對 18MB 4K 產物放大到 >30s，未知大小仍有硬上界（非無限等待）", () => {
+  const eighteenMb = 18 * MIB;
+  const scaled = artifactBodyTimeoutMs(eighteenMb);
+  assert.ok(scaled > 30_000, `18MB 產物需 >30s（實測 ${scaled}ms）`);
+  assert.ok(scaled <= ARTIFACT_DOWNLOAD_MAX_TIMEOUT_MS, `不得超過硬上界（實測 ${scaled}ms）`);
+  // chunked（無 Content-Length）→ 用硬上界，但仍具上界。
+  assert.equal(artifactBodyTimeoutMs(0), ARTIFACT_DOWNLOAD_MAX_TIMEOUT_MS);
+  // 上限封頂：25MiB 級亦不得超過硬上界。
+  assert.ok(artifactBodyTimeoutMs(ARTIFACT_MAX_DOWNLOAD_BYTES) <= ARTIFACT_DOWNLOAD_MAX_TIMEOUT_MS);
+});
+
+test("outputBuffer：≥10MB 慢速串流在依 Content-Length 放大的時限內完成", async () => {
+  const total = 10 * MIB;
+  const chunk = Buffer.alloc(64 * 1024, 7);
+  const server = await startArtifactServer((_req, res) => {
+    res.writeHead(200, { "content-type": "image/png", "content-length": String(total) });
+    res.flushHeaders(); // 標頭立即送出，隔離出「主體讀取」階段
+    let sent = 0;
+    const push = () => {
+      if (sent >= total) {
+        res.end();
+        return;
+      }
+      const slice = chunk.subarray(0, Math.min(chunk.length, total - sent));
+      sent += slice.length;
+      res.write(slice);
+      setTimeout(push, 4);
+    };
+    setTimeout(push, 300); // 模擬 TTFB：總時長超過標頭上限
+  });
+  try {
+    const timeouts: ArtifactDownloadTimeouts = { headerTimeoutMs: 250, minBytesPerSecond: 2 * MIB, maxTimeoutMs: 20_000 };
+    // 10MB / 2MBps = 5000ms 為放大後的主體上限。
+    const started = Date.now();
+    const bytes = await outputBuffer({ base64: null, url: server.url }, timeouts);
+    const elapsed = Date.now() - started;
+    assert.equal(bytes.length, total);
+    assert.ok(elapsed > timeouts.headerTimeoutMs, `應超過標頭上限（實測 ${elapsed}ms）`);
+    assert.ok(elapsed < 20_000, `應在放大後的上限內完成（實測 ${elapsed}ms）`);
+  } finally {
+    await server.close();
+  }
+});
+
+test("outputBuffer：小檔不受放大影響，保底為標頭上限且真位元組等價", async () => {
+  const body = Buffer.from(PNG_1X1_BASE64, "base64");
+  const server = await startArtifactServer((_req, res) => {
+    res.writeHead(200, { "content-type": "image/png", "content-length": String(body.length) });
+    res.end(body);
+  });
+  try {
+    const timeouts: ArtifactDownloadTimeouts = { headerTimeoutMs: 500, minBytesPerSecond: 1 * MIB, maxTimeoutMs: 10_000 };
+    assert.equal(artifactBodyTimeoutMs(body.length, timeouts), timeouts.headerTimeoutMs);
+    const started = Date.now();
+    const bytes = await outputBuffer({ base64: null, url: server.url }, timeouts);
+    assert.deepEqual(bytes, body);
+    assert.ok(Date.now() - started < 2_000);
+  } finally {
+    await server.close();
+  }
+});
+
+test("outputBuffer：超過硬上界仍具名逾時失敗（不無限等待）", async () => {
+  const server = await startArtifactServer((_req, res) => {
+    res.writeHead(200, { "content-type": "image/png", "content-length": String(10 * MIB) });
+    res.flushHeaders();
+    res.write(Buffer.alloc(64 * 1024)); // 先吐一點，之後停住 → 主體讀取逾時
+  });
+  try {
+    const timeouts: ArtifactDownloadTimeouts = { headerTimeoutMs: 500, minBytesPerSecond: 1 * MIB, maxTimeoutMs: 800 };
+    // 10MB / 1MBps = 10000ms → 被硬上界 800ms 封頂。
+    const started = Date.now();
+    await assert.rejects(
+      () => outputBuffer({ base64: null, url: server.url }, timeouts),
+      /Artifact download failed: body read timed out after 800ms/,
+    );
+    assert.ok(Date.now() - started < 4_000, "應在硬上界附近失敗，而非無限等待");
+  } finally {
+    await server.close();
+  }
+});
+
+test("outputBuffer：Content-Length 超過 25MiB 的產物具名拒絕", async () => {
+  const server = await startArtifactServer((_req, res) => {
+    res.writeHead(200, { "content-type": "image/png", "content-length": String(ARTIFACT_MAX_DOWNLOAD_BYTES + 1) });
+    res.flushHeaders();
+  });
+  try {
+    await assert.rejects(
+      () => outputBuffer({ base64: null, url: server.url }),
+      /Artifact download failed: file exceeds 25 MiB/,
+    );
+  } finally {
+    await server.close();
+  }
 });

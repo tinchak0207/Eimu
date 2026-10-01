@@ -352,18 +352,86 @@ function extensionForMimeType(mimeType: string): string {
  */
 export const ARTIFACT_MAX_DOWNLOAD_BYTES = 25 * 1024 * 1024;
 
-async function outputBuffer(input: { base64: string | null; url: string | null }): Promise<Buffer> {
+/**
+ * 「上游回 URL」抓回產物的時間上限。原為單一 `AbortSignal.timeout(30_000)`
+ * （連線＋主體讀取共用 30s），對 4K 級產物（~18MB）明顯過短：2026-10-01 yyds
+ * 4K 事故即上游已生成、我方卻在讀取階段逾時（`env:yyds` network timeout 55.6s）。
+ * 改為兩段式：標頭階段固定上限，主體階段依 Content-Length 分級放大，且**硬上界**。
+ */
+/** 連線與標頭階段的固定上限（毫秒）。 */
+export const ARTIFACT_DOWNLOAD_HEADER_TIMEOUT_MS = 30_000;
+/** 主體讀取時對上游要求的最低吞吐（位元組/秒）；用於依 Content-Length 放大時限。 */
+export const ARTIFACT_DOWNLOAD_MIN_BYTES_PER_SECOND = 256 * 1024;
+/** 主體讀取時限的硬上界（毫秒）：任何情況都不得超過，禁止無上限等待。 */
+export const ARTIFACT_DOWNLOAD_MAX_TIMEOUT_MS = 180_000;
+
+export interface ArtifactDownloadTimeouts {
+  headerTimeoutMs: number;
+  minBytesPerSecond: number;
+  maxTimeoutMs: number;
+}
+
+export const DEFAULT_ARTIFACT_DOWNLOAD_TIMEOUTS: ArtifactDownloadTimeouts = {
+  headerTimeoutMs: ARTIFACT_DOWNLOAD_HEADER_TIMEOUT_MS,
+  minBytesPerSecond: ARTIFACT_DOWNLOAD_MIN_BYTES_PER_SECOND,
+  maxTimeoutMs: ARTIFACT_DOWNLOAD_MAX_TIMEOUT_MS,
+};
+
+/**
+ * 依 Content-Length 求主體讀取上限：未知大小（chunked）時用硬上界，仍具上界；
+ * 小檔不放大（下限＝標頭上限），大檔按 minBytesPerSecond 線性放大到硬上界為止。
+ */
+export function artifactBodyTimeoutMs(
+  contentLength: number,
+  config: ArtifactDownloadTimeouts = DEFAULT_ARTIFACT_DOWNLOAD_TIMEOUTS,
+): number {
+  if (!Number.isFinite(contentLength) || contentLength <= 0) return config.maxTimeoutMs;
+  const scaled = Math.ceil((contentLength / config.minBytesPerSecond) * 1000);
+  return Math.min(config.maxTimeoutMs, Math.max(config.headerTimeoutMs, scaled));
+}
+
+/** 抓回「上游回 URL」的產物；失敗一律具名拋出，絕不以空／截斷的成功回應收場。 */
+export async function outputBuffer(
+  input: { base64: string | null; url: string | null },
+  timeouts: ArtifactDownloadTimeouts = DEFAULT_ARTIFACT_DOWNLOAD_TIMEOUTS,
+): Promise<Buffer> {
   if (input.base64) {
     const decoded = Buffer.from(input.base64.replace(/^data:[^;,]*;base64,/, ""), "base64");
     if (!decoded.length) throw new Error("Supplier returned an empty image result.");
     return decoded;
   }
   if (!input.url) throw new Error("Supplier returned an empty image result.");
-  const response = await fetch(input.url, { signal: AbortSignal.timeout(30_000) });
+
+  const controller = new AbortController();
+  let response: Response;
+  const headerTimer = setTimeout(() => controller.abort(), timeouts.headerTimeoutMs);
+  try {
+    response = await fetch(input.url, { signal: controller.signal });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(`Artifact download failed: no response within ${timeouts.headerTimeoutMs}ms.`);
+    }
+    throw new Error(`Artifact download failed: request failed (${error instanceof Error ? error.message : String(error)}).`);
+  } finally {
+    clearTimeout(headerTimer);
+  }
   if (!response.ok) throw new Error(`Artifact download failed: HTTP ${response.status}.`);
   const contentLength = Number(response.headers.get("content-length") ?? 0);
   if (contentLength > ARTIFACT_MAX_DOWNLOAD_BYTES) throw new Error("Artifact download failed: file exceeds 25 MiB.");
-  const bytes = Buffer.from(await response.arrayBuffer());
+
+  const bodyTimeoutMs = artifactBodyTimeoutMs(contentLength, timeouts);
+  const bodyTimer = setTimeout(() => controller.abort(), bodyTimeoutMs);
+  let bytes: Buffer;
+  try {
+    bytes = Buffer.from(await response.arrayBuffer());
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(`Artifact download failed: body read timed out after ${bodyTimeoutMs}ms (content-length ${contentLength || "unknown"}).`);
+    }
+    throw new Error(`Artifact download failed: body read failed (${error instanceof Error ? error.message : String(error)}).`);
+  } finally {
+    clearTimeout(bodyTimer);
+  }
   if (!bytes.length || bytes.length > ARTIFACT_MAX_DOWNLOAD_BYTES) throw new Error("Artifact download failed: empty or oversized response.");
   return bytes;
 }
