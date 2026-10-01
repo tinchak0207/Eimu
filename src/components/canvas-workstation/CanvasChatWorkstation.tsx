@@ -338,10 +338,14 @@ export function CanvasChatWorkstation({
                  手機用戶沒有操作畫布的需求——畫布 overlay/模板庫直接不渲染。 */
               .canvas-ws-overlay { display: none; }
               .canvas-ws-backdrop { display: none; }
+              /* 2026-10-01 暴君「AI 助理背景沒覆滿全屏、主頁莫名能滾」：
+                 面板從視口 0 鋪到底（導覽膠囊 z-80 浮在玻璃卡上），卡片去圓角/
+                 邊框/陰影成全出血底；導覽列高度與安全區改由卡片內距吸收，
+                 圖示列緊貼膠囊下緣。彈層頂＝導覽列下緣＋圖示列高。 */
               .canvas-chat-panel {
                 left: 0;
                 right: 0;
-                top: var(--site-header-offset, 4.25rem);
+                top: 0;
                 bottom: 0;
                 height: auto;
                 width: auto !important;
@@ -349,9 +353,24 @@ export function CanvasChatWorkstation({
                 max-height: none;
                 border-radius: 0;
                 background: transparent;
-                padding-top: env(safe-area-inset-top, 0px);
-                padding-bottom: env(safe-area-inset-bottom, 0px);
-                --agent-pop-top: calc(env(safe-area-inset-top, 0px) + 3.25rem);
+                padding: 0;
+                --agent-pop-top: calc(var(--site-header-offset, 4.25rem) + 3.5rem);
+              }
+              .canvas-chat-scroll-fill > section.lg-card {
+                border-radius: 0;
+                border: 0;
+                box-shadow: none;
+                padding-top: calc(var(--site-header-offset, 4.25rem) + 0.25rem);
+                padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+                padding-left: 0.75rem;
+                padding-right: 0.75rem;
+              }
+              /* 助理展開態全部內容都是 fixed，文檔流沒有可看的東西——鎖死整頁滾動，
+                 只留 transcript 自己滾（overscroll-contain 已在組件上）。 */
+              html:has(.canvas-chat-panel:not(.canvas-chat-rail)),
+              html:has(.canvas-chat-panel:not(.canvas-chat-rail)) body {
+                overflow: hidden;
+                overscroll-behavior: none;
               }
               /* FAB 態手機位置：靠左上角（導航欄下方）。 */
               .canvas-chat-rail {

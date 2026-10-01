@@ -117,11 +117,22 @@
 }
 
 @media (max-width: 767px) {
-  html,
-  body {
+  /* 2026-10-01：手機端 sticky header 修復。原本 html, body 一起套 overflow-x:hidden，
+     但 body 一旦是 overflow-x:hidden，依規範 overflow-y 由 visible 計算成 auto ⇒ body
+     成為滾動容器，header 的 sticky 就綁在「永不滾動的 body scrollport」上，實際滾動發生在
+     viewport(html) ⇒ header 跟著頁面捲走（桌機 >767px 走 overflow-x:clip，clip 不建立滾動
+     容器，所以正常）。故 body 改用 clip：clip 只裁切、不建立滾動容器，橫向仍不可平移。 */
+  /* html 保留 hidden：裁切需求傳導到 viewport，維持本 media query 原本「禁橫向平移」的目的。 */
+  html {
     width: 100%;
     max-width: 100%;
     overflow-x: hidden;
+    overscroll-behavior-x: none;
+  }
+  body {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: clip;
     overscroll-behavior-x: none;
   }
 }

@@ -116,8 +116,10 @@ test("首页工作台与出图框离 header 的距离是其他页的一半", () 
   const source = read("src/components/ImagePlayground.tsx");
   // 左侧工作台与右侧出图框在同一个 wrapper 里，一个值同时管两边。
   // 2026-09-10 F6：≥xl 改应用式满屏（flex-1 链），底部 padding 收敛到 pb-16
-  // （只为 fixed bottom-4 浮动 toast 条留安全空间）；<xl 仍 min-h-screen 文档流。
-  assert.match(source, /min-h-screen bg-transparent pb-16 pt-10 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col/);
+  // （只为 fixed bottom-4 浮动 toast 条留安全空间）；2026-10-01：<xl 由 min-h-screen
+  // 改 flex-1（min-h-screen 在 header 之下多撑出 100vh，造成手机端纯空滑），
+  // 精确吃满「视口−header」。
+  assert.match(source, /flex-1 bg-transparent pb-16 pt-10 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col/);
   assert.doesNotMatch(source, /pt-20/);
   assert.doesNotMatch(source, /pt-32/);
   assert.doesNotMatch(source, /pb-28 pt-10|sm:pb-32/);

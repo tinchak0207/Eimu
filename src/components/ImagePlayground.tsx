@@ -775,9 +775,14 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
       {/* F6 應用式滿屏（2026-09-10）：≥xl 兩欄態走「Navbar 自然高 → main flex-1 →
           本層 flex-1 → page-shell flex-1 → grid flex-1 → 結果欄吃滿」的高度鏈，
           視口高於內容時右欄結果卡撐滿到視口底，不再出現下方大面積空白。
-          <xl（含手機）維持文檔流：min-h-screen + 自然高滾動。
+          2026-10-01：<xl（含手機）原本用 min-h-screen，但本層是 main(flex-1) 的直接
+          子項，min-h-screen＝100vh 又加在 70px header 之下 ⇒ body＝100vh+header，
+          手機 agent 態內容全 fixed、流內高度 0 ⇒ 多出的 header 高度成為純空滑（且
+          header 被 sticky 一起拖走）。改用 flex-1：精確吃掉「視口−header」，視覺上
+          仍撐滿視口；內容真的高於視口時 flex item 的自動最小高度會讓它自然長高、
+          整頁照常滾動。
           pb 收斂 28/32→16：底部只需為 fixed bottom-4 的浮動 toast 條留安全空間。 */}
-      <div className="min-h-screen bg-transparent pb-16 pt-10 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col">
+      <div className="flex-1 bg-transparent pb-16 pt-10 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col">
             <div className="page-shell xl:flex xl:min-h-0 xl:flex-1 xl:flex-col">
               <div className={inCanvasWorkstation ? "block" : "grid gap-6 xl:min-h-0 xl:flex-1 xl:grid-rows-1 xl:grid-cols-[minmax(0,1fr)_minmax(380px,460px)]"}>
                 {/* min-w-0 is load-bearing: an auto-sized grid column takes its
