@@ -52,6 +52,9 @@ export const CONTROL_PLANE_PROXY_SOURCES = [
   // 模型路由（2026-10-01 路由收口）：讀寫 model_route_override 與 supplier 表，只在控面庫；
   // 面板顯示＝調度器同一份 resolveModelRoute 結果。
   "/api/admin/model-routes",
+  // 管理員調額（2026-10-01）：占位表 admin_account_adjustment 與 account_ledger 都在控面庫，
+  // 上游管理憑證也只在控面；留在 Vercel 觸庫即 500。
+  "/api/admin/account-adjustments",
   // PixAI 同步計費路由（2026-09-28，V-08）：扣退款改走 generation-core/sync-charge
   // 帳本門面，需 GENERATION_DATABASE_URL；留在 Vercel 只會回落直扣、不留帳本列。
   // 鑑權同 /api/generate-images（authenticateImageUser，已在控面運行）；上游同
