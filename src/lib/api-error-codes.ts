@@ -61,6 +61,8 @@ export function failureClassToApiErrorCode(cls: FailureClass): ApiErrorCode {
     // INC-0830-VIDEO：上游成功但我們解析不出輸出（我方協議解析 bug）。對客戶
     // 語義同「試了但沒產出可用結果」，復用 generation_failed，不新增對外代碼。
     case "upstream_protocol":
+    // 我方計價配置錯（H2）：對客戶同樣是「試了但沒產出」，不暴露內部配置。
+    case "pricing_config":
       return "generation_failed";
     case "deadline_exceeded":
       return "deadline_exceeded";

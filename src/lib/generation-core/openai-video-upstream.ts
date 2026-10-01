@@ -384,6 +384,16 @@ function extractOutputUrl(response: Record<string, unknown>, baseUrl: string, _t
     return rawTopLevelUrl;
   }
 
+  // result_urls（gway 形狀）：陣列取第一個有效 http(s) URL；容忍單一字串
+  const resultUrls = response.result_urls;
+  const resultCandidates: unknown[] = Array.isArray(resultUrls) ? resultUrls : [resultUrls];
+  for (const candidate of resultCandidates) {
+    const u = typeof candidate === "string" ? candidate.trim() : "";
+    if (u.startsWith("http://") || u.startsWith("https://")) {
+      return u;
+    }
+  }
+
   const metadata = response.metadata as Record<string, unknown> | undefined;
   if (metadata) {
     // sd4 族冗余：metadata.url；sd7 族：metadata.video_url

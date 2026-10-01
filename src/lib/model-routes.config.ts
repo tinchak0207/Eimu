@@ -72,7 +72,7 @@ export const MODEL_ROUTES: Record<string, readonly string[]> = {
   "seedance-2.0": ["xiaoyxiao", "gway"],
   "seedance-2.5-480p": ["xiaoyxiao", "gway"],
   "seedance-2.5-720p": ["xiaoyxiao", "gway"],
-  "minimax-h3": ["xiaoyxiao", "gway"],
+  "minimax-h3": ["xiaoyxiao"],
 
   // ── 語音 ──
   "tts-1": ["harness-tts"],

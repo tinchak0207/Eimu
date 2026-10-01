@@ -403,7 +403,7 @@ export async function reportSupplierFailure(
   }
   await sql.begin(async (tx) => {
     const accountFailure = failure.failureClass === "authentication" || failure.failureClass === "quota_exhausted" || failure.failureClass === "rate_limited";
-    const capabilityFailure = failure.failureClass === "model_unsupported" || failure.failureClass === "malformed_output" || failure.failureClass === "empty_result" || failure.failureClass === "artifact_download";
+    const capabilityFailure = failure.failureClass === "model_unsupported" || failure.failureClass === "malformed_output" || failure.failureClass === "empty_result" || failure.failureClass === "artifact_download" || failure.failureClass === "pricing_config";
     // 429 is normally enforced at the channel/project boundary rather than the
     // individual credential. Persist the cooldown on both levels so another
     // worker or account cannot immediately resume the same upstream traffic.
@@ -413,17 +413,22 @@ export async function reportSupplierFailure(
         ? null
         : failure.cooldownUntil;
     const supplierStatus = supplierCooldown ? "cooldown" : "degraded";
-    await tx`
-      INSERT INTO supplier_health_event (supplier_id, supplier_account_id, supplier_capability_id, outcome)
-      VALUES (${supplier.supplierId}, ${supplier.accountId}, ${supplier.capabilityId}, 'failure')
-    `;
-    await tx`
-      UPDATE supplier
-      SET health_status = ${supplierStatus}, cooldown_until = ${supplierCooldown},
-          health_score = GREATEST(0, health_score * 0.7), failure_count = failure_count + 1,
-          last_failure_at = now(), updated_at = now()
-      WHERE id = ${supplier.supplierId}
-    `;
+    // H2：pricing_config 是我方本地配置錯，只冷卻該 capability，不得連坐 supplier
+    // （不記 health event、不動 supplier 健康/冷卻/賬號成功率）。
+    const localConfigFailure = failure.failureClass === "pricing_config";
+    if (!localConfigFailure) {
+      await tx`
+        INSERT INTO supplier_health_event (supplier_id, supplier_account_id, supplier_capability_id, outcome)
+        VALUES (${supplier.supplierId}, ${supplier.accountId}, ${supplier.capabilityId}, 'failure')
+      `;
+      await tx`
+        UPDATE supplier
+        SET health_status = ${supplierStatus}, cooldown_until = ${supplierCooldown},
+            health_score = GREATEST(0, health_score * 0.7), failure_count = failure_count + 1,
+            last_failure_at = now(), updated_at = now()
+        WHERE id = ${supplier.supplierId}
+      `;
+    }
     if (accountFailure) {
       await tx`
         UPDATE supplier_account

@@ -483,3 +483,27 @@ test("配音时长对齐文案不得教 agent 调语速（speed 上游不生效�
     assert.ok(text.includes("改短"), `${label} 必须保留「改短台词再逐句重出」这条做得到的替代路`);
   }
 });
+
+// ── H15：OP/MV 題材不得落豎屏短劇模板 ──
+import { resolveHarnessTemplateId, isMvOpTopic } from "./agent-templates/index.ts";
+
+test("H15: OP/MV topics never resolve to vertical shortdrama_visual", () => {
+  for (const t of ["我想要日漫风格的百合番MV片头曲 有卡点", "做一支 OP", "角色歌 MV", "music video for my band"]) {
+    assert.equal(isMvOpTopic(t), true, t);
+    assert.equal(resolveHarnessTemplateId("shortdrama_visual", t), "feature_film", t);
+  }
+  const ff = WORKFLOW_TEMPLATES.find((x) => x.id === "feature_film");
+  assert.ok(ff, "feature_film exists as landscape fallback");
+});
+
+test("H15: real shortdrama topics, explicit vertical, and other templates are untouched", () => {
+  assert.equal(resolveHarnessTemplateId("shortdrama_visual", "把我的短剧剧本做成视觉资产包"), "shortdrama_visual");
+  assert.equal(resolveHarnessTemplateId("shortdrama_visual", "竖屏 MV 切片"), "shortdrama_visual");
+  assert.equal(resolveHarnessTemplateId("novel_film", "MV"), "novel_film");
+  assert.equal(resolveHarnessTemplateId(undefined, "MV"), undefined);
+});
+
+test("H15: shortdrama payload directive carries the MV/OP guard", () => {
+  const t = AGENT_TEMPLATES_FULL.find((x) => x.id === "agent-shortdrama-visual-assets");
+  assert.ok(t && /feature_film/.test(t.directive) && /OP\/MV/.test(t.directive));
+});

@@ -120,6 +120,17 @@ test("storyboard qc duration bounds allow full 30s clips and reject beyond 30s",
   assert.equal(bounds?.passed, false);
   const segment = over.output.gates.find((gate) => gate.id === "segment_duration");
   assert.equal(segment?.passed, true);
+
+  // H7：<10s 短檔判 fail 且文案點名鏡號與秒數；10/30 邊界通過。
+  for (const d of [2, 4, 9, 9.9]) {
+    const r = run(d).output.gates.find((gate) => gate.id === "duration_bounds");
+    assert.equal(r?.passed, false, `${d}s must fail`);
+    assert.match(r?.detail ?? "", /S01-01\(/);
+    assert.match(r?.detail ?? "", /<10/);
+  }
+  for (const d of [10, 15, 30]) {
+    assert.equal(run(d).output.gates.find((gate) => gate.id === "duration_bounds")?.passed, true, `${d}s must pass`);
+  }
 });
 
 test("video, audio, editing, and delivery tools preserve upstream boundaries", () => {

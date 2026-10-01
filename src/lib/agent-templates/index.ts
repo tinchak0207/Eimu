@@ -80,3 +80,34 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
   artCurationSeriesCard,
   artStyleImmersionCard,
 ];
+
+/**
+ * H15（2026-10-02）題材 → 後端 workflow 模板映射護欄。
+ * 病根：OP/MV 類（片頭曲/主題曲/卡點 MV/預告）被路由到 shortdrama_visual，整條鏈是 9:16 豎屏短劇骨架
+ * （分鏡 9:16、鏡頭視頻 size=9:16、成片 9:16），與 OP/MV 橫屏母帶衝突；真實生產走的是 feature_film（16:9）。
+ * repo 內沒有專用 MV 模板，feature_film（泛用多鏡頭、16:9 影片配置）是最貼近的橫屏模板。
+ * 純函式：任何以題材文字決定 harnessTemplateId 的使用處，一律過這裡；非 MV/OP 題材原樣回傳。
+ */
+export const MV_OP_TOPIC_RE =
+  /(?:\bMV\b|\bOP\b|\bED\b|\bPV\b|music\s*video|opening\s*(?:theme|song)|片头曲|片頭曲|片头|片頭|主题曲|主題曲|角色歌|卡点|卡點|音乐视频|音樂視頻|音樂影片|歌曲\s*MV)/i;
+
+/** 橫屏 MV/OP 落點：repo 現有最貼近的橫屏模板。 */
+export const MV_OP_HARNESS_TEMPLATE_ID = "feature_film";
+
+/** 豎屏短劇模板 id（MV/OP 不得落此）。 */
+export const VERTICAL_SHORTDRAMA_TEMPLATE_ID = "shortdrama_visual";
+
+export function isMvOpTopic(text: string): boolean {
+  return typeof text === "string" && MV_OP_TOPIC_RE.test(text);
+}
+
+/**
+ * 依題材文字修正 harnessTemplateId：題材為 OP/MV 且候選落在 shortdrama_visual → feature_film（橫屏）。
+ * 用戶明說「豎屏/竖屏/9:16」時尊重其意圖，不改寫。
+ */
+export function resolveHarnessTemplateId(candidateId: string | undefined, topicText: string): string | undefined {
+  if (candidateId !== VERTICAL_SHORTDRAMA_TEMPLATE_ID) return candidateId;
+  if (!isMvOpTopic(topicText)) return candidateId;
+  if (/竖屏|豎屏|9\s*:\s*16|vertical/i.test(topicText)) return candidateId;
+  return MV_OP_HARNESS_TEMPLATE_ID;
+}

@@ -188,7 +188,7 @@ export const novelFilmTemplate: WorkflowTemplate =
         role: "video_gen",
         kind: "config",
         title: "视频生成配置",
-        defaults: { model: "minimax-h3", size: "16:9", duration_seconds: 15, kind: "video", unit_price_per_second: 5, unit_price_per_second_1080p: 10 },
+        defaults: { model: "seedance-2.0", size: "16:9", duration_seconds: 15, kind: "video", unit_price_per_second: 13, unit_price_per_second_1080p: 16 },
         deliverable: "视频生成配置（I2V 双帧法：起始帧定入场、结束帧定落点；单镜 3-8 秒，超长拆段拼接）",
       },
       {

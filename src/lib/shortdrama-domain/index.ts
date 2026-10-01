@@ -336,6 +336,13 @@ function blocked<T>(tool: ShortDramaToolId, input: unknown, output: T, gates: Sh
   return result(tool, input, output, gates, "blocked", kind, { input: [] });
 }
 
+export const STORYBOARD_MIN_SHOT_SECONDS = 10;
+
+function durationBoundsDetail(offenders: string[]): string {
+  if (offenders.length === 0) return `each shot is ${STORYBOARD_MIN_SHOT_SECONDS}-30 seconds (per-clip billing: fill the model's largest slot)`;
+  return `duration_bounds failed: every shot must be ${STORYBOARD_MIN_SHOT_SECONDS}-30 seconds (hard rule: no <${STORYBOARD_MIN_SHOT_SECONDS}s short slots; 單鏡須 ${STORYBOARD_MIN_SHOT_SECONDS}-30 秒，嚴禁 <${STORYBOARD_MIN_SHOT_SECONDS} 秒短檔，不足請併入前一鏡或加長至 ${STORYBOARD_MIN_SHOT_SECONDS}s 以上). offending shots: ${offenders.slice(0, 10).join(", ")}`;
+}
+
 function gate(id: string, passed: boolean, detail: string): ShortDramaGate {
   return { id, passed, detail };
 }
@@ -435,7 +442,10 @@ function storyboardQc(input: unknown): ShortDramaToolResult<StoryboardQcOutput> 
     gate("scene_binding", every((shot) => Boolean(shot.sceneId)), "each shot is bound to a scene"),
     // 2026-09-20 暴君裁定：上游视频按条计费（5/15/30s 同价），按条秒数最大化才划算。
     // 单镜上限 2→30s（允许打满 seedance-2.5 480p/30s 固定档；2.0 档 10-15s 同样在界内）。
-    gate("duration_bounds", every((shot) => shot.durationSeconds >= 2 && shot.durationSeconds <= 30), "each shot is 2-30 seconds (per-clip billing: fill the model's largest slot)"),
+    // 2026-10-02 H7：AGENTS.md 硬規則「嚴禁 <10 秒短檔」（workflow-video-rules §4b，seedance 2.0/2.5 下限 10s）機器化。
+    // 適用範圍＝本門禁驗的每個分鏡條目（每鏡 = 一條上游視頻計費單位，不分題材/鏡頭類型；§4b 無例外條款，
+    // 餘數不足 10s 須併入前一條或明確說明，故不豁免末鏡）。
+    gate("duration_bounds", every((shot) => shot.durationSeconds >= STORYBOARD_MIN_SHOT_SECONDS && shot.durationSeconds <= 30), durationBoundsDetail(shots.filter((shot) => !(shot.durationSeconds >= STORYBOARD_MIN_SHOT_SECONDS && shot.durationSeconds <= 30)).map((shot) => `${shot.shotId}(${Number.isFinite(shot.durationSeconds) ? shot.durationSeconds : "?"}s)`))),
     // 段长去 15s 上限：总长由创作需求决定，门禁只验「已声明且为正」；拆条打满档位是分镜纪律不是门禁。
     gate("segment_duration", segmentDuration > 0, "segment duration is declared and positive (split into max-slot clips, e.g. 80s -> 30+30+20)"),
     gate("prompt_present", every((shot) => Boolean(shot.prompt)), "each shot has a prompt"),

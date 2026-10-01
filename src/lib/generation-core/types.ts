@@ -30,6 +30,7 @@ export type FailureClass =
   | "empty_result"
   | "artifact_download"
   | "upstream_protocol"
+  | "pricing_config"
   | "deadline_exceeded"
   | "cancelled"
   | "unknown";

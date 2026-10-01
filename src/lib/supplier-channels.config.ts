@@ -82,7 +82,12 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
       { modelId: "seedance-2.0",      supplierModelId: "seedance-2.0-900-特惠",      kinds: ["video_generate"], unitPriceCny: 0.7, priceSource: "GET https://api.xiaoyxiao.xyz/api/pricing 2026-09-27 (quota_type=1, model_price)" },
       { modelId: "seedance-2.5-480p", supplierModelId: "seedance-2.5-900-特惠",      kinds: ["video_generate"], unitPriceCny: 0.9, priceSource: "GET https://api.xiaoyxiao.xyz/api/pricing 2026-09-27 (quota_type=1, model_price)" },
       { modelId: "seedance-2.5-720p", supplierModelId: "seedance-2.5-1010-特惠",     kinds: ["video_generate"], unitPriceCny: 1.6, priceSource: "GET https://api.xiaoyxiao.xyz/api/pricing 2026-09-27 (quota_type=1, model_price)" },
-      { modelId: "minimax-h3",        supplierModelId: "minimax-h3-933-2k-支持真人", kinds: ["video_generate"], unitPriceCny: 1.1, priceSource: "GET https://api.xiaoyxiao.xyz/api/pricing 2026-09-27 (quota_type=1, model_price)" },
+      // H-fix（2026-10-02）：minimax-h3 → minimax-h3-a（白名單內、quota_type=1 按次 ¥1.6，
+      // 上游 /api/pricing 2026-10-02 實查，billing_expr=tier("standard",1.6)，無分辨率鍵）。
+      // 舊映射 minimax-h3-933-2k-支持真人 在 xiaoyxiao 與 gway 皆回
+      // `no per_request price configured for resolution "2k"`（gway 該變體 video_pricing.by_group["*"].tiers=[]，
+      // 且僅支持 resolution=2k，成本閘禁 2k）；故兩渠道均不再認領該變體。
+      { modelId: "minimax-h3", supplierModelId: "minimax-h3-a", kinds: ["video_generate"], unitPriceCny: 1.6, priceSource: "GET https://api.xiaoyxiao.xyz:18443/api/pricing 2026-10-02 (quota_type=1, model_price=1.6)" },
     ],
   },
 
@@ -107,7 +112,7 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
       { modelId: "seedance-2.0",      supplierModelId: "seedance-2.0-900-特惠",      kinds: ["video_generate"], unitPriceCny: 0.6, priceSource: "GET https://www.gway.dev/api/pricing 2026-09-28 (vip 分組, quota_type=1)" },
       { modelId: "seedance-2.5-480p", supplierModelId: "seedance-2.5-900-特惠",      kinds: ["video_generate"], unitPriceCny: 0.8, priceSource: "GET https://www.gway.dev/api/pricing 2026-09-28 (vip 分組, quota_type=1)" },
       { modelId: "seedance-2.5-720p", supplierModelId: "seedance-2.5-1010-特惠",     kinds: ["video_generate"], unitPriceCny: 1.5, priceSource: "GET https://www.gway.dev/api/pricing 2026-09-28 (vip 分組, quota_type=1)" },
-      { modelId: "minimax-h3",        supplierModelId: "minimax-h3-933-2k-支持真人", kinds: ["video_generate"], unitPriceCny: 1.0, priceSource: "GET https://www.gway.dev/api/pricing 2026-09-28 (vip 分組, quota_type=1)" },
+      // H-fix：gway 的 minimax-h3-933-2k-支持真人 無 per_request 價（上游 502），不認領；gway 無其他 minimax 變體。
     ],
   },
 

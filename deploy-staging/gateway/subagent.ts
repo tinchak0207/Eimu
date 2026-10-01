@@ -28,7 +28,7 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSyn
 import { join } from "node:path"
 // 刀 2B/刀 3（2026-09-19）：Jev 權威閘——spec 注入隔離＋expert 路由＋sync 資格。
 // 量級瘦身 A：spec 模板機器注入（playbook 2.0 起模板不進 orchestrator 上下文）。
-import { quarantineSpec, routeExpertAuthoritative, syncDispatchEligible, classifyDispatchMeta, workflowTemplateDirective } from "./jev-gate"
+import { guardExpertContent, musicFirstBlockReason, isReworkSpec, reworkLockDirective, quarantineSpec, routeExpertAuthoritative, syncDispatchEligible, classifyDispatchMeta, workflowTemplateDirective } from "./jev-gate"
 // 任務狀態枚舉真源（0920 收口）：running/ok/error/stopped 以此為準，禁散布裸字串。
 import type { TaskStatus } from "./types-gateway.ts"
 // 0920：模板判定即建骨架（不等 Expert）——workflowService 是純 service 模組，
@@ -227,6 +227,9 @@ const pendingCriticTargets = new Map<string, CriticPassTarget[]>()
 // orchestrator 自派（handleSubagentDispatch expert="critic"）與機器 pass 派遣皆登記於此。
 // 有界 Map 防無界增長。
 const criticDispatchedByParent = new Map<string, number>()
+// M2/M3（2026-10-02）：每父會話交付簿——music-first 前置斷言（music 交付事件）＋
+// 返工內容鎖（上一份交付物落盤路徑）。有界 Map，每父會話 ≤20 筆。
+const deliveredByParent = new Map<string, Array<{ agent: string; label: string; relPath: string }>>()
 // 本會話是否已用掉 machine critic pass（內存鏡像；權威在 persistence.critic_passes）。
 const criticPassUsed = new Set<string>()
 const CRITIC_PENDING_CAP = 16
@@ -381,6 +384,13 @@ function finishRun(run: SubagentRun, status: "ok" | "error", fullText: string, e
   // E 片（2026-09-12）缺陷一：**先落盤完整全文/死因全文，再走摘要與 DELETE**。行內
   // 摘要仍只給 600 字（semantics 不變），但前綴掛落盤指針 → 父會話可 read 全文。
   const persist = persistRunOutput(run, status, fullText, error)
+  if (status === "ok" && run.agent && !run.stopped) {
+    const arr = deliveredByParent.get(run.parentGatewaySessionId) ?? []
+    arr.push({ agent: run.agent, label: run.label, relPath: persist.relPath ?? "" })
+    if (arr.length > 20) arr.shift()
+    deliveredByParent.set(run.parentGatewaySessionId, arr)
+    boundMap(deliveredByParent, 500)
+  }
   const inline = (error && status === "error" ? error : fullText).slice(0, SUMMARY_MAX_CHARS)
   let summary = `${persist.pointer}${inline}`
   run.summary = summary
@@ -922,6 +932,12 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
           run.messageRole.set(mid, role)
           boundMap(run.messageRole, 200)
         }
+        // 壓縮復讀機修復（2026-10-02）：compaction 摘要訊息 role 也是 assistant，
+        // 標成非 assistant 後 subagent.delta 不再把摘要草稿當子代理正文上屏。
+        if (mid && role === "assistant" && info?.summary === true) {
+          run.messageRole.set(mid, "compaction")
+          boundMap(run.messageRole, 200)
+        }
         break
       }
       case "message.part.delta": {
@@ -1187,9 +1203,11 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
 
   // R8 修復片2（2026-09-10）＋刀3 權威化（2026-09-19）：Expert 路由。
   // 僅 beast_mode ON 時生效（OFF 時 expert 靜默丟棄 = 零 OFF 回歸）。
-  // 刀3 教義（暴君裁定 2026-09-19）：「派誰」不是 LLM 的決策——
+  // 刀3 教義（2026-09-19 立、2026-10-02 暴君修正）：「派誰」不是 LLM 的決策——
   //   ① expert 欄可省略：省略時 Jev 選域（高信心才派，否則通用子代理）；
-  //   ② LLM 點名 expert：Jev 高信心不同意 → 機器改派（ROUTE_OVERRIDE）；
+  //   ② LLM 點名 expert＝最終裁決：Jev 高信心不同意只記 ROUTE_DISSENT，不改派
+  //     （原 ROUTE_OVERRIDE 已廢除——曾把點名 video-director 的預覽轉存強改派
+  //     editor，改派後域內無鑑權工具全 401；表面詞彙無法反映工具持有面）；
   //   ③ Jev 掛 → fail-open 用點名值（行為＝部署前）。
   // 白名單校驗照舊（Jev 建議也過 expert-ids.json；域外/未知 → 拒絕 400）。
   let expertId = ""
@@ -1225,6 +1243,28 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
       expertId = rawExpert
     } else {
       expertId = routed.expertId
+    }
+    // H9（2026-10-02）：內容 vs expert 域一致性守衛（確定性，Jev 掛也生效）。
+    // 在 critic 登記之前執行——被降級的研究任務不得頂掉機器 critic pass 的觸發判據。
+    {
+      const g = guardExpertContent(prompt, expertId)
+      if (g.reason) {
+        console.log(`[gateway] jev_gate: EXPERT_GUARD ${expertId || "-"} -> ${g.expertId || "generic"} label="${label}" reason=${g.reason}`)
+        expertId = g.expertId
+      }
+    }
+    // M2：music-first 機器前置斷言（依賴音樂的任務須等 music 交付事件）。
+    {
+      const delivered = deliveredByParent.get(parent.sessionId) ?? []
+      const musicInFlight = (byParent.get(parent.sessionId) ?? []).some((r) => r.agent === "music" && r.status === "running")
+      const reason = musicFirstBlockReason(prompt, expertId, {
+        musicInFlight,
+        musicDelivered: delivered.some((d) => d.agent === "music"),
+      })
+      if (reason) {
+        console.log(`[gateway] jev_gate: MUSIC_FIRST_BLOCKED label="${label}" expert=${expertId || "-"} inflight=${musicInFlight}`)
+        return Response.json({ ok: false, error: reason, blocked: "music_first" }, { status: 409 })
+      }
     }
     // 刀 2（2026-09-15）：orchestrator **自行**派 critic = 本輪已有 critic 審核動作，
     // 機器 pass 的觸發判據據此豁免（不重複派遣）。登記有界 Map。
@@ -1286,6 +1326,15 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
       console.log(`[gateway] spec template injection skipped (read/classify failed): ${e instanceof Error ? e.message : String(e)}`)
     }
     if (templateInjected) console.log(`[gateway] spec template injected: label="${label}"`)
+  }
+
+  // M3（2026-10-02）：返工 spec 內容鎖。偵測到返工任務 → 注入「只改 X 欄、其餘逐字沿用
+  // <原稿路徑>＋交付附 diff」（原稿路徑＝同 label/同 expert 最近一份落盤交付物）。
+  if (isReworkSpec(prompt)) {
+    const delivered = deliveredByParent.get(parent.sessionId) ?? []
+    const prior = [...delivered].reverse().find((d) => d.relPath && (d.label === label.slice(0, 20) || (expertId && d.agent === expertId)))
+    prompt = `${reworkLockDirective(prior?.relPath ?? "")}\n\n---\n\n${prompt}`
+    console.log(`[gateway] jev_gate: REWORK_LOCK injected label="${label}" original=${prior?.relPath || "-"}`)
   }
 
   // 并发上限：第 4 个拒绝，文案原样给主代理。

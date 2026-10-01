@@ -28,6 +28,35 @@ export interface SupplierHealthSignal {
   availableByModel: Record<string, boolean>;
   /** modelId -> 不可用原因（供 note 拼装） */
   reasonByModel: Record<string, string>;
+  /**
+   * key -> 成功證據（H4，向後相容：舊控制面/代理可能不帶，缺省 = 未知，調用方不得據此降級）。
+   * available=true 只代表「前置條件過」，是否有真實成功證據看這裡。
+   */
+  evidenceByModel?: Record<string, SupplierEvidence>;
+}
+
+export interface SupplierEvidence {
+  /** 該 key 下健康供應商的累計成功數。 */
+  successCount: number;
+  /** 最近一次成功（ISO），無則 null。 */
+  lastSuccessAt: string | null;
+  /** 供應商配置顯示餘額 <= 0。 */
+  zeroBalance: boolean;
+}
+
+export type AvailabilityConfidence = "high" | "low" | "probe_only";
+
+export const SUPPLIER_EVIDENCE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/** 有近期成功 = high；只有陳舊成功 = low；零樣本 = probe_only。 */
+export function classifyEvidence(
+  evidence: Pick<SupplierEvidence, "successCount" | "lastSuccessAt"> | undefined,
+  nowMs: number = Date.now(),
+): AvailabilityConfidence {
+  if (!evidence || evidence.successCount <= 0) return "probe_only";
+  const at = evidence.lastSuccessAt ? Date.parse(evidence.lastSuccessAt) : NaN;
+  if (Number.isFinite(at) && nowMs - at <= SUPPLIER_EVIDENCE_WINDOW_MS) return "high";
+  return "low";
 }
 
 const SIGNAL_TTL_MS = 60_000;
@@ -60,6 +89,9 @@ export async function readSupplierHealthSignal(
       kind: string;
       has_healthy: boolean;
       reason: string;
+      success_count: string | number | null;
+      last_success_at: string | Date | null;
+      zero_balance: boolean | null;
     }[]>`
       SELECT cap.public_model_id AS public_model_id,
              cap.kind AS kind,
@@ -82,7 +114,13 @@ export async function readSupplierHealthSignal(
                  AND (account.cooldown_until IS NULL OR account.cooldown_until <= now())
                ) THEN '执行侧账户冷却或禁用'
                ELSE '执行侧无可用供应商'
-             END AS reason
+             END AS reason,
+             coalesce(sum(supplier.success_count), 0) AS success_count,
+             max(supplier.last_success_at) AS last_success_at,
+             coalesce(bool_and(
+               supplier.configuration_json ->> 'balance' ~ '^-?[0-9]+(\\.[0-9]+)?$'
+               AND (supplier.configuration_json ->> 'balance')::numeric <= 0
+             ), false) AS zero_balance
       FROM supplier_capability cap
       JOIN supplier ON supplier.id = cap.supplier_id
       LEFT JOIN supplier_account account ON account.supplier_id = supplier.id
@@ -91,8 +129,20 @@ export async function readSupplierHealthSignal(
     `;
     const availableByModel: Record<string, boolean> = {};
     const reasonByModel: Record<string, string> = {};
-    for (const row of rows) {
+    const evidenceByModel: Record<string, SupplierEvidence> = {};
+    for (let row of rows) {
       const key = `${row.public_model_id}:${row.kind}`;
+      const lastSuccess = row.last_success_at ? new Date(row.last_success_at).toISOString() : null;
+      const prev = evidenceByModel[key];
+      evidenceByModel[key] = {
+        successCount: (prev?.successCount ?? 0) + Number(row.success_count ?? 0),
+        lastSuccessAt: [prev?.lastSuccessAt ?? null, lastSuccess].filter(Boolean).sort().pop() ?? null,
+        zeroBalance: prev ? prev.zeroBalance && Boolean(row.zero_balance) : Boolean(row.zero_balance),
+      };
+      // 餘額為 0 = 不可用（與渠道欠費同判），不論前置條件。
+      if (row.zero_balance && row.has_healthy) {
+        row = { ...row, has_healthy: false, reason: "渠道余额为 0，充值前不可用" };
+      }
       // 同一模型多个 kind（image/video），取任一种可用即可（探测按端点分 media_type）。
       if (availableByModel[key] === undefined) {
         availableByModel[key] = Boolean(row.has_healthy);
@@ -102,7 +152,7 @@ export async function readSupplierHealthSignal(
         delete reasonByModel[key];
       }
     }
-    const signal = { availableByModel, reasonByModel };
+    const signal: SupplierHealthSignal = { availableByModel, reasonByModel, evidenceByModel };
     cache = { expiresAt: now + SIGNAL_TTL_MS, signal };
     return signal;
   } catch (error) {

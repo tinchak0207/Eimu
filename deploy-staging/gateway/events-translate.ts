@@ -871,7 +871,10 @@ if (status === "pending" || status === "running") {
 // step 結算：無 tool、無非空正文、無非空 reasoning = 空 step。空 step 連續累計；
 // 任一活動歸零。達閾值且 turn 活躍 → 中止 + 同輪補一次動作導向 nudge。
 export function finalizeIdleStep(state: SessionState): void {
-  const empty = !state.stepHasTool && !state.stepHasText && !state.stepHasReasoning
+  // 空轉補丁：本 step 只有 no-op bash 且無正文 → 視為空 step（即使有 reasoning）
+  const noopOnly = !!state.stepNoopTool && !state.stepHasTool && !state.stepHasText
+  const empty = noopOnly || (!state.stepHasTool && !state.stepHasText && !state.stepHasReasoning)
+  state.stepNoopTool = false
   state.stepHasTool = false
   state.stepHasText = false
   state.stepHasReasoning = false

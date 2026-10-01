@@ -13,7 +13,7 @@ export const singleVideoTemplate: WorkflowTemplate =
         title: "镜头脚本",
         deliverable: "镜头脚本（景别/机位/运镜/时长秒数 + 运动与情绪描述，按「听见→停顿→眼神→表情→说话」拆反应）",
         notes: [
-          "运动提示词只描述起止之间的运动与情绪变化，不重复静态外观；单镜 3-8 秒为宜，超长拆段拼接",
+          "运动提示词只描述起止之间的运动与情绪变化，不重复静态外观；Seedance 单镜 10-15 秒，超长拆段拼接",
         ],
         tools: [
           { id: "canvas_apply_ops", input: "节点/连线操作指令", output: "画布更新结果" },
@@ -32,8 +32,8 @@ export const singleVideoTemplate: WorkflowTemplate =
         role: "generation",
         kind: "config",
         title: "影片配置",
-        defaults: { model: "minimax-h3", size: "16:9", duration_seconds: 5, kind: "video", unit_price_per_second: 5, unit_price_per_second_1080p: 10 },
-        deliverable: "视频生成参数（模型/画幅/时长，单镜 3-8 秒为宜）",
+        defaults: { model: "seedance-2.0", size: "16:9", duration_seconds: 10, kind: "video", unit_price_per_second: 13, unit_price_per_second_1080p: 16 },
+        deliverable: "视频生成参数（模型/画幅/时长，Seedance 单镜 10-15 秒）",
       },
       {
         role: "result",

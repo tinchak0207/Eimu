@@ -18,7 +18,7 @@ import { emitImageDone } from "./events-translate.ts"
 import { emitSessionError } from "./emit-helpers.ts"
 import { emitQuotaChanged, appendLedgerFor } from "./quota-ledger.ts"
 import { humanMessageFor } from "./humanize-gw.ts"
-import { wfGenerateContinuations, workflowGenerateApproved, workflowBilling, runWfGenerate, resumeWorkflowGate } from "./workflow-gw.ts"
+import { wfGenerateContinuations, workflowGenerateApproved, workflowBilling, recordWorkflowApproval, runWfGenerate, resumeWorkflowGate } from "./workflow-gw.ts"
 import { contentTypeForExt } from "./uploads-media.ts"
 import { resolveAudioEntityTokens } from "./entity-resolve.ts"
 
@@ -491,11 +491,7 @@ export function settleConfirm(state: SessionState, requestId: string, outcome: C
       workflowGenerateApproved.set(wfCont.wfid, { amount: wfCont.amount, nodes: wfCont.nodes }) // 本批（節點數）已批；擴計畫須重批
       // 修 2：批量批准額記入 billing 真值——節點失敗時據此寫 refund 終態行，
       // workflow_status 據此回真值對象。
-      workflowBilling.set(wfCont.wfid, {
-        confirmed_coins: wfCont.amount,
-        refunded_coins: 0,
-        billing_status: "confirmed",
-      })
+      recordWorkflowApproval(wfCont.wfid, wfCont.amount) // H13：累加不覆寫
       runWfGenerate(wfCont.state, wfCont.wfid)
     }
     // 2026-09-24 協作確認閘（collaborate 檔）：停點批准 → 續跑。與上面的批次扣費

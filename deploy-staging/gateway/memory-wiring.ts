@@ -84,7 +84,7 @@ export const FRESH_CREATIVE_TURN_DIRECTIVE =
 export function buildMemoryInjectionBlocks(
   userMemory: SessionState["userMemory"],
   sharedEnabled: boolean,
-  opts: { freshCreative?: boolean } = {},
+  opts: { freshCreative?: boolean; continuityLines?: string[] } = {},
 ): { lines: string[]; trace: { private_docs: string[]; shared_index_chars: number } } {
   const l0Parts: string[] = []
   const privateDocs: string[] = []
@@ -134,6 +134,11 @@ export function buildMemoryInjectionBlocks(
     lines.push(l1)
     sharedIndexChars = l1.length // trace 口徑＝實際注入 L1 塊字元數（預算消耗面）
   }
+  // H17：首回合連續性塊（工作區資產索引／同題重下提示）。獨立預算 MEMORY_CONTINUITY_BUDGET，
+  // 2400+800+900<5000，不擠壓上面兩塊。呼叫端只在首回合（!state.vettingInjected）傳入。
+  if (opts.continuityLines && opts.continuityLines.length > 0) {
+    lines.push(clampMemoryChars(opts.continuityLines.join("\n"), MEMORY_CONTINUITY_BUDGET))
+  }
   const total = lines.reduce((n, s) => n + s.length, 0)
   if (total > MEMORY_INJECTION_TOTAL_BUDGET) {
     console.error(`[memory-inject] BUDGET ASSERT: total=${total} > ${MEMORY_INJECTION_TOTAL_BUDGET} — force clamp`)
@@ -147,6 +152,128 @@ export function buildMemoryInjectionBlocks(
     return { lines: kept, trace: { private_docs: privateDocs, shared_index_chars: sharedIndexChars } }
   }
   return { lines, trace: { private_docs: privateDocs, shared_index_chars: sharedIndexChars } }
+}
+
+
+// ── H17 跨會話連續性（機制層；2026-10-02）──────────────────────────────────
+// 事故：同題 7 輪/7 小時/165 萬 input token，每輪從零開始、首回合對上一輪產物毫無所知。
+// 邊界：不改「新創作禁沿用舊專案」規則——這裡只做兩件事：
+//   (a) 首回合列「近期工作區資產索引」（只列清單供參考，明寫新創作不得沿用，除非用戶明說）；
+//   (b) 同題重下偵測 → 提示 agent「此題已做過 N 輪，先向用戶說明並確認新方向」。
+// 兩者都不自動沿用任何內容。純函式，輸入為 listSessionRows 的行（本檔不碰 DB，易測）。
+export const MEMORY_CONTINUITY_BUDGET = 900
+export const RECENT_ASSET_WINDOW_MS = 72 * 3600_000
+export const RECENT_ASSET_MAX_ITEMS = 10
+export const REPEAT_TOPIC_WINDOW_MS = 12 * 3600_000
+export const REPEAT_TOPIC_MIN_ROUNDS = 2
+export const REPEAT_TOPIC_MIN_SIMILARITY = 0.3
+
+export interface ContinuityRow {
+  sessionId: string
+  createdAt: number
+  updatedAt: number
+  data: { title?: string | null; workflowSnapshot?: Record<string, unknown> | undefined }
+}
+
+/** 字元二元組 Jaccard（中英通吃、無分詞依賴）。 */
+export function topicSimilarity(a: string, b: string): number {
+  const grams = (t: string) => {
+    const x = t.toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, "")
+    const out = new Set<string>()
+    for (let i = 0; i < x.length - 1; i++) out.add(x.slice(i, i + 2))
+    return out
+  }
+  const A = grams(a)
+  const B = grams(b)
+  if (A.size === 0 || B.size === 0) return 0
+  let inter = 0
+  for (const g of A) if (B.has(g)) inter++
+  return inter / (A.size + B.size - inter)
+}
+
+/** 同題重下偵測：窗口內、非本會話、標題與本輪內容相似的會話數 = 已做輪數。 */
+export function detectRepeatTopic(
+  rows: ContinuityRow[],
+  content: string,
+  opts: { excludeSessionId?: string; nowMs?: number } = {},
+): { rounds: number; titles: string[] } {
+  const now = opts.nowMs ?? Date.now()
+  const hits = rows.filter((r) => {
+    if (r.sessionId === opts.excludeSessionId) return false
+    if (now - r.updatedAt > REPEAT_TOPIC_WINDOW_MS) return false
+    const title = typeof r.data?.title === "string" ? r.data.title : ""
+    return title.length > 0 && topicSimilarity(title, content) >= REPEAT_TOPIC_MIN_SIMILARITY
+  })
+  return { rounds: hits.length, titles: hits.slice(0, 3).map((r) => String(r.data.title)) }
+}
+
+/** 從 workflowSnapshot 抽「已完成且有產物 URL 的節點」→ `標題 → url`。 */
+export function extractSnapshotAssets(snap: Record<string, unknown> | undefined): Array<{ title: string; url: string }> {
+  if (!snap || typeof snap !== "object") return []
+  const status = (snap.nodeStatus ?? {}) as Record<string, unknown>
+  const content = (snap.nodeContent ?? {}) as Record<string, unknown>
+  const nodes = ((snap.graph as { nodes?: unknown[] } | undefined)?.nodes ?? []) as Array<Record<string, unknown>>
+  const titleOf = new Map<string, string>()
+  for (const n of nodes) {
+    const id = typeof n?.id === "string" ? n.id : ""
+    const t = typeof n?.title === "string" ? n.title : typeof (n?.data as any)?.title === "string" ? (n.data as any).title : ""
+    if (id) titleOf.set(id, t)
+  }
+  const out: Array<{ title: string; url: string }> = []
+  for (const [id, v] of Object.entries(content)) {
+    if (typeof v !== "string" || !/^https?:\/\//i.test(v.trim())) continue
+    const st = status[id]
+    if (typeof st === "string" && !/^(done|completed|success|succeeded)$/i.test(st)) continue
+    out.push({ title: titleOf.get(id) || id, url: v.trim() })
+  }
+  return out
+}
+
+/** 近期工作區資產索引（72h、≤10 條；只列清單）。無資產 → null。 */
+export function buildRecentAssetIndex(
+  rows: ContinuityRow[],
+  opts: { excludeSessionId?: string; nowMs?: number } = {},
+): string | null {
+  const now = opts.nowMs ?? Date.now()
+  const items: string[] = []
+  for (const r of rows) {
+    if (r.sessionId === opts.excludeSessionId) continue
+    if (now - r.updatedAt > RECENT_ASSET_WINDOW_MS) continue
+    const label = typeof r.data?.title === "string" && r.data.title ? r.data.title : r.sessionId.slice(0, 8)
+    for (const a of extractSnapshotAssets(r.data?.workflowSnapshot)) {
+      if (items.length >= RECENT_ASSET_MAX_ITEMS) break
+      items.push(`- [${label}] ${a.title} → ${a.url}`)
+    }
+    if (items.length >= RECENT_ASSET_MAX_ITEMS) break
+  }
+  if (items.length === 0) return null
+  return [
+    "【近期工作区资产索引（仅供参考的清单）】新创作不得沿用下列任何资产，除非用户明说「沿用/延续/基于某项」；这里只让你知道账户里已有什么，不是底稿。",
+    ...items,
+  ].join("\n")
+}
+
+/**
+ * 首回合連續性行（buildMemoryInjectionBlocks 的 opts.continuityLines）。
+ * 呼叫端（messages-gw.ts，首回合 !state.vettingInjected 時）：
+ *   continuityLines = buildFirstTurnContinuityLines(listSessionRows(key), state.sessionId, content)
+ */
+export function buildFirstTurnContinuityLines(
+  rows: ContinuityRow[],
+  sessionId: string,
+  content: string,
+  nowMs?: number,
+): string[] {
+  const lines: string[] = []
+  const rep = detectRepeatTopic(rows, content, { excludeSessionId: sessionId, nowMs })
+  if (rep.rounds >= REPEAT_TOPIC_MIN_ROUNDS) {
+    lines.push(
+      `【同题重下提示】此题近 ${REPEAT_TOPIC_WINDOW_MS / 3600_000} 小时内已做过 ${rep.rounds} 轮（${rep.titles.join("、")}）：先用一两句话向用户说明这一点，并确认本次要的新方向（沿用哪一版、还是全新重做），确认前不要开始大规模生成。不要自行沿用旧轮产物。`,
+    )
+  }
+  const idx = buildRecentAssetIndex(rows, { excludeSessionId: sessionId, nowMs })
+  if (idx) lines.push(idx)
+  return lines
 }
 
 /** §3.6 形狀 trace：首個觀測點（注入或召回命中）落地時建立。 */
@@ -570,6 +697,21 @@ export async function handleMemoryRecallSearch(key: string, req: Request): Promi
 // 運維經 POST /internal/memory/batch-run 手動重跑。每 tick 順帶 drainPending()
 // （pending 重發指數退避；無 pending 檔時 noop，總開關 off 也照跑——殘留檔要有人收）。
 export let memoryBatchLastRunDate = ""
+// H17 批次時機最小修法：原先「每日單一 UTC 時（預設 20h＝台北 04:00）」→ 當日產物結構上不可能可用。
+// 改為可配多個 UTC 時窗（env MEMORY_BATCH_EXTRA_HOURS_UTC，如 "2,8,14"；預設空＝行為不變），
+// 閘門由「日期」改為「日期+小時」key，同小時仍只跑一次。純函式便於單測。
+export function memoryBatchHours(primary: number, extraEnv: string | undefined): number[] {
+  const extra = (extraEnv ?? "")
+    .split(",")
+    .map((x) => Number.parseInt(x.trim(), 10))
+    .filter((n) => Number.isInteger(n) && n >= 0 && n <= 23)
+  return Array.from(new Set([primary, ...extra]))
+}
+export function memoryBatchSlotKey(now: Date, hours: number[]): string | null {
+  if (!hours.includes(now.getUTCHours())) return null
+  return `${now.toISOString().slice(0, 10)}T${String(now.getUTCHours()).padStart(2, "0")}`
+}
+let memoryBatchLastSlotKey = ""
 setInterval(() => {
   void (async () => {
     try {
@@ -579,9 +721,10 @@ setInterval(() => {
     }
     if (!MEMORY_BATCH_ENABLED) return
     const now = new Date()
-    if (now.getUTCHours() !== MEMORY_BATCH_HOUR_UTC) return
-    const today = now.toISOString().slice(0, 10)
-    if (memoryBatchLastRunDate >= today) return
+    const slot = memoryBatchSlotKey(now, memoryBatchHours(MEMORY_BATCH_HOUR_UTC, process.env.MEMORY_BATCH_EXTRA_HOURS_UTC))
+    if (!slot || memoryBatchLastSlotKey === slot) return
+    memoryBatchLastSlotKey = slot
+    const today = slot.slice(0, 10)
     memoryBatchLastRunDate = today
     console.log(`[memory-batch] scheduled batch starting (UTC ${MEMORY_BATCH_HOUR_UTC}h ${today})`)
     try {

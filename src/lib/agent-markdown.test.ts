@@ -72,3 +72,11 @@ test("解析失败退回纯文本段，不吞内容", () => {
   assert.equal(blocks.length >= 1, true);
   assert.match(JSON.stringify(blocks), /just text/);
 });
+
+test("影片/音频直链（含裸 URL）转成 video/audio span，不留裸链接", () => {
+  const v = JSON.stringify(parseAgentMarkdown("S02 预览：https://store.tinchak0207.xyz/image-data/files/generation/jobs/a58c/000-b9.mp4"));
+  assert.match(v, /"k":"video"/);
+  assert.doesNotMatch(v, /"k":"link"/);
+  const a = JSON.stringify(parseAgentMarkdown("[成曲](https://store.tinchak0207.xyz/uploads/x.m4a)"));
+  assert.match(a, /"k":"audio"/);
+});

@@ -4,7 +4,7 @@
 // （SESSION_COMPACT_*/compactionJobs/maybeCompactSession）（原 index.ts 4594–5143 行）。
 import { createHash, randomBytes } from "node:crypto"
 import { readFileSync } from "node:fs"
-import { loadUserSettings } from "./persistence"
+import { loadUserSettings, listSessionRows } from "./persistence"
 import { gateUserInput, classifyDispatchMeta } from "./jev-gate"
 // 0920：首條訊息即建模板骨架（不等模型思考/不等 Expert）——見下方 PROMPT_SKELETON。
 import { workflowService, workflowOwnerBySession } from "./workflow-gw.ts"
@@ -21,7 +21,7 @@ import type { SessionState } from "./types-gateway.ts"
 import { resolveInvisibleUploadPaths } from "./events-translate.ts"
 import { settleQuestion } from "./questions-gw.ts"
 import { clearQuestionHeartbeat, armAckTimer, armHeartbeatTimer, armWatchdogTimer, clearErrorStallTimer } from "./timers-gw.ts"
-import { buildMemoryInjectionBlocks, ensureMemoryTrace, appendMemoryRecallTrace, takeMemoryRecallPrefix, scheduleMemoryRecallPrefetch, isFreshCreativeRequest, FRESH_CREATIVE_TURN_DIRECTIVE } from "./memory-wiring.ts"
+import { buildMemoryInjectionBlocks, ensureMemoryTrace, appendMemoryRecallTrace, takeMemoryRecallPrefix, scheduleMemoryRecallPrefetch, isFreshCreativeRequest, FRESH_CREATIVE_TURN_DIRECTIVE, buildFirstTurnContinuityLines } from "./memory-wiring.ts"
 import { personaModel } from "./model-registry.ts"
 // TODO(整合)：以下符號仍住 index.ts 且未 export（本任務禁改 index.ts；bun build 對未 export
 // 的 named import 報錯，已實測 2026-09-19）。依第一階段佔位符法（記憶
@@ -257,7 +257,10 @@ export async function handleSendMessage(key: string, id: string, req: Request): 
   {
     const gwNonce = ensureGatewayNonce(state)
     const authorityLines = authorityRule(gwNonce)
-    const memory = buildMemoryInjectionBlocks(state.userMemory, MEMORY_SHARED_ENABLED, { freshCreative })
+    const memory = buildMemoryInjectionBlocks(state.userMemory, MEMORY_SHARED_ENABLED, {
+      freshCreative,
+      continuityLines: !state.vettingInjected ? buildFirstTurnContinuityLines(listSessionRows(key), state.sessionId, content) : undefined,
+    })
     const memoryLines = memory.lines
     if (memoryLines.length > 0 && !state.vettingInjected) {
       const trace = ensureMemoryTrace(state)

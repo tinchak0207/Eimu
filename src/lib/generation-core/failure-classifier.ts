@@ -79,6 +79,9 @@ function retryAfterDate(value: string | null | undefined, now: Date): Date {
  */
 const QUOTA_EXHAUSTED_ACCOUNT_COOLDOWN_MS = 30 * 60_000;
 
+/** 計價配置錯的 capability 冷卻（H2）：只作用於 capability，不碰 supplier/account。 */
+const PRICING_CONFIG_CAPABILITY_COOLDOWN_MS = 180_000;
+
 /**
  * FG-04：顯示層人話表。**只讀不改寫**——這些字串只允許出現在
  * `FailureRecord.explanation.humanMessage` 與展示層，永不回寫上游錯誤原文
@@ -97,6 +100,7 @@ const HUMAN_FAILURE_MESSAGES: Record<FailureClass, string> = {
   empty_result: "上游返回空結果，已換渠道重試。",
   artifact_download: "成品下載失敗，已換渠道重試。",
   upstream_protocol: "上游返回成功但解析失敗（我方協議問題），已記錄待查。",
+  pricing_config: "該模型的計價配置暫不完整（我方問題），已換其它渠道並記錄待修。",
   deadline_exceeded: "等待預算用完；若上游仍在執行，結果會在對帳後補交付。",
   cancelled: "任務已被取消。",
   unknown: "生成失敗，正在重試。",
@@ -135,6 +139,15 @@ export function classifySupplierFailure(error: unknown, now = new Date()): Class
   if (requestError?.explicitClass) {
     const explicit = requestError.explicitClass;
     return { failureClass: explicit, retryable: true, switchSupplier: true, quarantineSupplier: false, cooldownUntil: null, detail, httpStatus: status };
+  }
+
+  // H2：我方計價配置錯（如 `no per_request price configured for resolution "2k"`）
+  // 是本地配置缺口，不是上游故障。必須先於 status>=500 / 詞表判定：適配器常把它
+  // 包成 502，若落入 overloaded 桶會觸發供應商級 180s 冷卻，連坐同供應商其它健康
+  // capability。這裡只冷卻該 capability（scheduler 以 capabilityFailure 處理，
+  // 不動 supplier/account），retryable=false：同 capability 重試必然同錯。
+  if (/no [\w-]+ price configured/.test(normalized)) {
+    return { failureClass: "pricing_config", retryable: false, switchSupplier: true, quarantineSupplier: false, cooldownUntil: new Date(now.getTime() + PRICING_CONFIG_CAPABILITY_COOLDOWN_MS), detail, httpStatus: status };
   }
 
   if (error instanceof Error && error.name === "AbortError") {

@@ -121,6 +121,8 @@ export interface SessionState {
   // 滾動摘要壓縮水位：上次 opencode summarize 後的訊息數與時間（持久化）。
   // 觸發條件 = 訊息數 ≥ SESSION_COMPACT_THRESHOLD 且自上次壓縮新增 ≥ 半個閾值。
   compact?: { lastCount: number; at: number }
+  /** 已上報過 turn.status 的 compaction part id（2026-10-02 壓縮可見化去重，volatile）。 */
+  compactionNotified?: Set<string>
   // ── PRD P0-4（2026-09-15）記憶 trace 與召回輔助（皆 volatile，不入持久化白名單）──
   /** §3.6 形狀：注入trace，供 GET /agent/v1/sessions/:id/memory-trace（R2 尺觀測點）。
    *  重啟即丟屬已知限制（持久化白名單在 persistence.ts，非本片工作對象）。 */
@@ -186,6 +188,7 @@ export interface SessionState {
   /** 當前是否處於一個未收尾的 step（step-start 置位 / step-finish 清位）。 */
   stepOpen?: boolean
   /** 當前 step 是否出現過 tool part。 */
+  stepNoopTool?: boolean
   stepHasTool?: boolean
   /** 當前 step 是否出現過非空正文 text part。 */
   stepHasText?: boolean

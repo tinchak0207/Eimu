@@ -127,7 +127,7 @@ export const featureFilmTemplate: WorkflowTemplate =
         role: "shot1_gen",
         kind: "config",
         title: "镜头 1 影片配置",
-        defaults: { size: "16:9", kind: "video", unit_price_per_second: 5, unit_price_per_second_1080p: 10 },
+        defaults: { size: "16:9", kind: "video", unit_price_per_second: 13, unit_price_per_second_1080p: 16 },
         deliverable: "影片生成配置（模型由 workflow-service 动态选活、时长对齐镜头脚本折算；单镜 3-8 秒，超长拆段拼接防崩坏）",
       },
       {

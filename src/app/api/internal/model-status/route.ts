@@ -24,7 +24,7 @@ import {
 import { readAdminPools } from "@/lib/admin-pool-store";
 import { getRuntimeChannelOverrides } from "@/lib/channel-overrides";
 import { probeAllModelsStatus } from "@/lib/model-status-probe";
-import { readSupplierHealthSignal } from "@/lib/supplier-health-signal";
+import { classifyEvidence, readSupplierHealthSignal, type AvailabilityConfidence, type SupplierHealthSignal } from "@/lib/supplier-health-signal";
 import { listRoutingEvents, summarizeRecentModelStats, type ModelRecentStats } from "@/lib/routing-telemetry";
 import { summarizeChannelBalance } from "@/lib/routing-balance-signal";
 import { readUnavailableModels } from "@/lib/generation-core/model-availability-gate";
@@ -86,7 +86,7 @@ export async function POST(req: NextRequest) {
   ]);
   const snapshot = await probeAllModelsStatus({ env: process.env, pools, overrides, recentStats });
   const balanceSignals = summarizeChannelBalance(await getRecentRoutingEvents());
-  const supplierSignal = await readSupplierHealthSignal().catch(() => ({
+  const supplierSignal: SupplierHealthSignal = await readSupplierHealthSignal().catch(() => ({
     availableByModel: {} as Record<string, boolean>,
     reasonByModel: {} as Record<string, string>,
   }));
@@ -96,6 +96,8 @@ export async function POST(req: NextRequest) {
   const breakerUnavailable = await readUnavailableModels().catch(() => new Map<string, string>());
 
   const models: Record<string, string> = {};
+  const confidence: Record<string, AvailabilityConfidence> = {};
+  const probeOnly: Record<string, boolean> = {};
   const notes: Record<string, string> = {};
   for (const model of snapshot.models) {
     const balance = balanceSignals.get(model.id);
@@ -117,8 +119,22 @@ export async function POST(req: NextRequest) {
       note = `${breakerReason}，暂不可用`;
     }
     models[model.id] = availability;
+    if (availability === "available") {
+      // H4：available 只代表前置條件過；無真實成功證據 → probe_only，不與有證據者同等呈現。
+      const recent = recentStats.find((stat) => stat.modelId === model.id);
+      const supplierConfidence = classifyEvidence(supplierSignal.evidenceByModel?.[key]);
+      const hasEvidence = (recent?.delivered ?? 0) > 0;
+      const level: AvailabilityConfidence = hasEvidence
+        ? "high"
+        : supplierSignal.evidenceByModel
+          ? supplierConfidence
+          : "probe_only";
+      confidence[model.id] = level;
+      probeOnly[model.id] = level === "probe_only";
+      if (level === "probe_only" && !note) note = "仅通过前置条件探测，无近期成功样本（probe_only）";
+    }
     if (note) notes[model.id] = note;
   }
 
-  return NextResponse.json({ ok: true, models, notes });
+  return NextResponse.json({ ok: true, models, notes, confidence, probe_only: probeOnly });
 }

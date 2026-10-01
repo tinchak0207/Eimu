@@ -78,6 +78,20 @@ function InlineSpan({ span, onOpenImage }: { span: MdInline; onOpenImage: (src: 
     case "img":
       // 消息里的平台图片直链：缩略图卡，点击放大（罪状 9）。
       return <AgentImageThumb src={span.src} alt={span.alt} onOpen={() => onOpenImage(span.src, span.alt)} />;
+    case "video":
+      // 消息里的平台影片直链：内嵌播放器，不再是一串裸 URL。
+      return (
+        <video
+          src={span.src}
+          controls
+          playsInline
+          preload="metadata"
+          aria-label={`影片：${span.src}`}
+          className="my-1 block max-h-72 w-full max-w-md rounded-ios-lg bg-black"
+        />
+      );
+    case "audio":
+      return <audio src={span.src} controls preload="metadata" aria-label={`音频：${span.src}`} className="my-1 block w-full max-w-md" />;
     case "br":
       return <br />;
   }

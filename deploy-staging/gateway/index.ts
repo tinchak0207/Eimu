@@ -7,7 +7,7 @@ import { initSubagent, recoverReworkRunsOnStartup } from "./subagent"
 import { setDirectorEmitter, setDirectorSessionResolver } from "./director"
 import { setSteerTurnDeliverer } from "./steer-gw.ts"
 import { handleSendMessage } from "./messages-gw.ts"
-import { resolveSession, sessions, findSessionByOpenCodeId, teardownSession, deleteOpencodeSession } from "./sessions-core.ts"
+import { resolveSession, sessions, findSessionByOpenCodeId, teardownSession, deleteOpencodeSession, markDirty } from "./sessions-core.ts"
 import { emitToSession } from "./sse-core.ts"
 import { corsOriginFor, corsHeaders, encoder, sseTickets, uploadTickets } from "./auth-gw.ts"
 import { handleRequest } from "./router.ts"
@@ -216,6 +216,11 @@ async function wakeSessionForSubagent(
     state.watchdogRetried = false
     state.questionAnsweredThisTurn = false
     state.deathDeclared = false
+    // 2026-10-02 steer 誤判修復：喚醒輪也是「進行中的回合」——lastTurnActiveAt 是
+    // steer 受理閘（steer-gw.turnInFlight）的唯一依據。此漏點曾讓喚醒驅動的會話
+    // （MV 全程）所有 steer 被 409 no_active_turn 誤判失敗、前端彈兩條無用提示。
+    state.lastTurnActiveAt = Date.now()
+    markDirty(state)
     armWatchdogTimer(state)
     console.log(`[gateway] subagent wake resumed: session=${state.sessionId} sub=${shortId} status=${run.status}`)
   }

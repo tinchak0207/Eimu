@@ -14,6 +14,7 @@ import { catalogUnitCoins, estimateNodeCoins, priceCatalogCache, resolveNodeMode
 import { TTS_UPSTREAM, probeTtsUpstream, settleConfirm } from "./media-internal-routes.ts"
 import { CONFIRM_THRESHOLD_COINS, CONFIRM_TIMEOUT_MS, OPENCODE_URL, PLATFORM_BASE, TTS_AUDIO_DIR, TTS_PUBLIC_BASE } from "./constants-gateway.ts"
 import { jsonError } from "./gw-lib.ts"
+import { VIDEO_FALLBACK_MODEL, pickVideoModel, videoDisqualifyReason, type ModelStatusEntryLike } from "./video-model-select.ts"
 import { normalizeUserSettings } from "./sessions-http.ts"
 import { applyCanvasNodeCreated, applyCanvasNodeConnected, applyCanvasNodeDisconnected, applyCanvasNodeUpdated } from "./canvas-cascade-state.ts"
 import { humanMessageFor } from "./humanize-gw.ts"
@@ -24,6 +25,28 @@ import { armWatchdogTimer, isInterrogativeMessage } from "./timers-gw.ts"
 import { beastAgentField } from "./session-lifecycle.ts"
 import { emitAgentNotice, reportNodeTerminalState } from "./emit-helpers.ts"
 import { emitVideoDone } from "./events-translate.ts"
+
+/** H11 補完：workflow 路徑生成任務登記進 state.sessionTasks（與聊天路徑 attachCanvasTask 同表）。 */
+export function registerWorkflowTask(
+  state: { sessionTasks?: SessionState["sessionTasks"] },
+  taskId: string,
+  label: string,
+  status: "queued" | "succeeded" | "failed",
+  url?: string,
+): void {
+  try {
+    if (!taskId) return
+    if (!state.sessionTasks) state.sessionTasks = new Map()
+    const prev = state.sessionTasks.get(taskId)
+    state.sessionTasks.set(taskId, {
+      task_id: taskId,
+      label: prev?.label ?? label,
+      status,
+      submitted_at: prev?.submitted_at ?? Date.now(),
+      ...(url ? { url } : prev?.url ? { url: prev.url } : {}),
+    })
+  } catch { /* 登記失敗不得影響生成 */ }
+}
 import { hasEntityToken, resolveEntityTokens, sanitizeEntityReferences } from "./entity-resolve.ts"
 // TODO(整合 Wave2): 以下為「仍住 index.ts 且未在 16 個 export 內」符號的 declare 佔位（stage1 記憶 subagent 佔位符法，bun build 不查名可過）。
 // 整合階段換成真 import（bun build 硬查 named import，已實錘）。註：CommandResult 是 index.ts 既有基線錯誤（tsc-baseline-0919 第 12–18 行 TS2304 ×7），如實不補宣告。
@@ -120,12 +143,11 @@ export const workflowService = new WorkflowService({
     if (!apiKey) return null
     const models = await fetchModelStatusCached(apiKey)
     if (!models) return null
-    const pool = (models as Array<{ id: string; media_type?: string; availability?: string; last_24h?: { success_rate?: number } }>)
-      .filter((m) => m.media_type === "video" && m.availability === "available")
-    if (pool.length === 0) return null
-    pool.sort((a, b) => (b.last_24h?.success_rate ?? 0.5) - (a.last_24h?.success_rate ?? 0.5))
-    console.log(`[gateway] R8 default video model picked: ${pool[0].id} (available video pool=${pool.length})`)
-    return pool[0].id
+    // 2026-10-02 MODEL-SELECT：只選有真實交付且斷路器非 open 者（video-model-select 單真源）。
+    const picked = pickVideoModel(models as ModelStatusEntryLike[])
+    if (!picked) return null
+    console.log(`[gateway] R8 default video model picked: ${picked.id} (proven=${picked.proven})`)
+    return picked.id
   },
   // 工作流持久化掛點（對齊 canvas 快照的 markDirty 模式）：狀態每次變更
   // （start/addNode/connect/generate 逐節點）鏡像進 owner session 並防抖落盤。
@@ -170,6 +192,12 @@ export const workflowService = new WorkflowService({
       return r
     }
     const r = await submitWorkflowNode(session, node, upstream, graph)
+    // 2026-10-02 MODEL-SELECT 回執：生成前若換過視頻模型，結果帶說明（metadata.model_swap 同步供 workflow_status 回顯）。
+    const swap = (node.metadata as Record<string, unknown>).model_swap as { from?: string; to?: string; reason?: string } | undefined
+    if (swap && node.kind === "video") {
+      ;(r as Record<string, unknown>).modelSwapNote = `视频模型已自动替换：${swap.from}（${swap.reason}）→ ${swap.to}`
+      console.log(`[workflow] node ${node.id} ${(r as Record<string, unknown>).modelSwapNote}`)
+    }
     if (r.ok && r.content && node.kind === "video") void emitVideoDone(session, r.content, r.costCoins, node.id, "video")
     return r
   },
@@ -329,6 +357,24 @@ export const workflowOwnerBySession = new Map<string, string>() // sessionId -> 
 // F1（2026-08-31）斷點續跑登記表：每進程每工作流只自動續跑一次，防循環重試。
 export const autoResumedWorkflows = new Set<string>()
 
+/**
+ * H8（2026-10-02）：節點失敗文案必須帶 failure_class + 上游原文首句。
+ * 舊文案把本地配置/解析錯與上游錯一律洗成「执行侧无可用供应商/上游渠道未能执行」，
+ * orchestrator 據此對用戶說「瓶頸不在我們這邊」。現在 class 與原文原樣外露，
+ * 歸因只准引用它們（見 AGENTS.md 4.8）。
+ */
+export function firstSentence(raw: unknown, max = 160): string {
+  const t = String(raw ?? "").trim()
+  if (!t) return ""
+  const m = t.split(/[。！？!?\n]/)[0].trim()
+  return (m || t).slice(0, max)
+}
+export function formatNodeFailure(failureClass: unknown, raw: unknown, lead: string, tail = ""): string {
+  const cls = typeof failureClass === "string" && failureClass ? failureClass : "unknown"
+  const first = firstSentence(raw)
+  return `${lead} [failure_class=${cls}]${first ? `，原文：「${first}」` : "，原文：（无）"}${tail}`
+}
+
 // ── 修 2（2026-09-01）計費終態留痕 + billing 真值 ─────────────────────
 // 實測實錘（會話 f340fcab/8b7dc1fd）：批量 confirm approved 25.001/75.001 幣後
 // 節點失敗，ledger 零 refund 零 done，agent 卻對用戶說「未產生成功扣款」——
@@ -340,13 +386,38 @@ export interface WorkflowBillingTruth {
   confirmed_coins: number
   refunded_coins: number
   billing_status: "confirmed" | "refunded" | "settled"
+  /** H13：逐次批准額明細（confirmed_coins = 其總和）。 */
+  approvals?: number[]
 }
 export const workflowBilling = new Map<string, WorkflowBillingTruth>()
+
+/**
+ * H13（2026-10-02）：批准額累加而非覆寫。舊版每次 approve 直接 set 覆寫，同一 wf
+ * 第二次 approve（1210.01）抹掉第一次（460），refund 只退最後一筆（750.005）→
+ * 批准總額與退款不對稱。現在逐次累加 confirmed_coins，並記 approvals 逐次明細；
+ * 已退款的 wf 再批准新一筆時退款額保留、狀態回 confirmed，終態再退「未退部分」。
+ */
+export function recordWorkflowApproval(wfid: string, amount: number): WorkflowBillingTruth {
+  const prev = workflowBilling.get(wfid)
+  const add = Number.isFinite(amount) && amount > 0 ? amount : 0
+  const approvals = [...(prev?.approvals ?? []), add]
+  const next: WorkflowBillingTruth = {
+    confirmed_coins: Math.round(((prev?.confirmed_coins ?? 0) + add) * 1e6) / 1e6,
+    refunded_coins: prev?.refunded_coins ?? 0,
+    billing_status: "confirmed",
+    approvals,
+  }
+  workflowBilling.set(wfid, next)
+  return next
+}
 
 /** 修 2：節點失敗 → 該工作流退款留痕（每工作流只記一次）+ 餘額刷新。 */
 export function recordWorkflowRefund(state: SessionState, wfid: string): void {
   const billing = workflowBilling.get(wfid)
-  if (!billing || billing.refunded_coins > 0 || billing.confirmed_coins <= 0) return
+  if (!billing) return
+  // H13：只退「已批准但尚未退」的部分；累加後 refunded 與 approve 總額對稱。
+  const toRefund = Math.round((billing.confirmed_coins - billing.refunded_coins) * 1e6) / 1e6
+  if (toRefund <= 0) return
   billing.refunded_coins = billing.confirmed_coins
   billing.billing_status = "refunded"
   const wf = workflowService.get(wfid)
@@ -355,10 +426,10 @@ export function recordWorkflowRefund(state: SessionState, wfid: string): void {
     event: "refunded",
     task_id: wfid,
     model: `workflow:${wf?.templateId ?? "unknown"}`,
-    cost_coins: billing.confirmed_coins,
+    cost_coins: toRefund,
   })
   void emitQuotaChanged(state)
-  console.log(`[gateway] workflow refund recorded: wf=${wfid} coins=${billing.confirmed_coins} session=${state.sessionId}`)
+  console.log(`[gateway] workflow refund recorded: wf=${wfid} coins=${toRefund} total_refunded=${billing.confirmed_coins} approvals=${JSON.stringify(billing.approvals ?? [])} session=${state.sessionId}`)
 }
 
 // ── 修 3（2026-09-01）長任務交接：喚醒登記表 + 掃描器 ────��─────────��───
@@ -770,6 +841,17 @@ export async function fetchModelStatusCached(apiKey: string): Promise<Array<Reco
   return modelStatusCache?.models ?? null
 }
 
+/** M4：近 24h 影片零交付判定（available>0 且 delivered>0 者為 0）。探測不可達回 null（fail-open）。 */
+export async function videoZeroDelivery24h(apiKey: string): Promise<{ available: string[] } | null> {
+  const models = await fetchModelStatusCached(apiKey)
+  if (!models) return null
+  const vids = (models as Array<{ id?: string; media_type?: string; availability?: string; last_24h?: { delivered?: unknown } }>).filter((m) => m.media_type === "video")
+  const available = vids.filter((m) => m.availability === "available")
+  if (available.length === 0) return null
+  const proven = available.filter((m) => Number(m.last_24h?.delivered ?? 0) > 0)
+  return proven.length === 0 ? { available: available.map((m) => String(m.id)) } : null
+}
+
 /**
  * F2（2026-08-31）路由單真源 + 強制跨 provider failover：原邏輯發現模型
  * unavailable 就直接報錯要人手動換模型——這裡改成主動在同 media_type、不同
@@ -788,6 +870,32 @@ export async function resolveActiveModel(
   const entry = models.find((m) => (m as { id?: string }).id === model) as
     | { id: string; media_type?: string; availability?: string; channel_id?: string; note?: string; last_24h?: { success_rate?: number } }
     | undefined
+  // 2026-10-02 MODEL-SELECT：視頻不再只認 availability==="unavailable"——斷路器 open、
+  // 近 24h 足量單 0 交付也視為死模型，生成前換成 proven 最高者並留回執（node.metadata.model_swap）。
+  if (kind === "video") {
+    const reason = entry ? videoDisqualifyReason(entry as ModelStatusEntryLike) : "不在 model-status 目錄（无可用路由证据）"
+    if (!reason) return { model, switched: false }
+    const triedModels = new Set<string>(Array.isArray(node.metadata.__triedModels) ? (node.metadata.__triedModels as string[]) : [])
+    triedModels.add(model)
+    const chosenV = pickVideoModel(models as ModelStatusEntryLike[], triedModels)
+    node.metadata.__triedModels = [...triedModels]
+    if (!chosenV) {
+      return {
+        model,
+        switched: false,
+        exhausted: true,
+        error: formatNodeFailure(
+          (entry as { failure_class?: unknown } | undefined)?.failure_class ?? "model_unavailable",
+          typeof entry?.note === "string" ? entry.note : reason,
+          `模型 ${model} 不可选（${reason}）`,
+          "；且没有其他有真实交付证据的视频模型可自动切换。请稍后重试",
+        ),
+      }
+    }
+    const note = `[gateway] 视频模型自动替换：${model}（${reason}）→ ${chosenV.id}（${chosenV.proven ? "近 24h 有真实交付" : "无近期失败样本"}）`
+    node.metadata.model_swap = { from: model, to: chosenV.id, reason, proven: chosenV.proven }
+    return { model: chosenV.id, switched: true, note }
+  }
   if (!entry || entry.availability !== "unavailable") return { model, switched: false }
   const tried = new Set<string>(Array.isArray(node.metadata.__triedChannels) ? (node.metadata.__triedChannels as string[]) : [])
   const currentChannel = typeof entry.channel_id === "string" ? entry.channel_id : undefined
@@ -801,7 +909,12 @@ export async function resolveActiveModel(
       model,
       switched: false,
       exhausted: true,
-      error: `模型 ${model} 不可用（${typeof entry.note === "string" ? entry.note : "渠道故障"}），且没有其他可用渠道可自动切换。请稍后重试或在画布上更换模型`,
+      error: formatNodeFailure(
+        (entry as { failure_class?: unknown }).failure_class ?? "model_unavailable",
+        typeof entry.note === "string" ? entry.note : "渠道故障",
+        `模型 ${model} 不可用`,
+        "；且没有其他可用渠道可自动切换。请稍后重试或在画布上更换模型",
+      ),
     }
   }
   pool.sort((a, b) => (b.last_24h?.success_rate ?? 0.5) - (a.last_24h?.success_rate ?? 0.5))
@@ -844,7 +957,7 @@ export async function submitWorkflowNode(
   // 模型解析三級：節點自身 metadata.model → 沿上游 config 節點鏈（與 estimateNodeCoins 報價同口徑）→ 兜底。
   // 視頻兜底必須是活路由模型（metaso/minimax-h3）；seedance-2.0 的唯一供應商 filmera 已 degraded，寫死即死單。
   let model = typeof meta.model === "string" && meta.model ? meta.model : resolveNodeModel(nodeId, node, graph ?? { nodes: [], connections: [] })
-  if (node.kind === "video" && (!model || model === "pixai-tsubaki2")) model = "minimax-h3"
+  if (node.kind === "video" && (!model || model === "pixai-tsubaki2")) model = VIDEO_FALLBACK_MODEL // 2026-10-02：不再寫死 minimax-h3（斷路器 open）；resolveActiveModel 再按交付證據校正
   // F2（2026-08-31）：提交前主動查活性+跨 provider failover（取代舊的「探測到
   // unavailable 就報錯」）。放在 shot 編譯之前——編譯要按實際會用的模型族來。
   const failoverResolved = await resolveActiveModel(model, node.kind === "video" ? "video" : "image", session.apiKey, node)
@@ -966,6 +1079,8 @@ export async function submitWorkflowNode(
       try {
         ;(node.metadata as Record<string, unknown>).last_job_id = String(taskId)
       } catch {}
+      // H11 補完：workflow 生成任務同樣登記進會話任務表（/internal/session-tasks、image_get_result 讀它）。
+      registerWorkflowTask(session, String(taskId), node.id, "queued")
       const pollEndpoint = node.kind === "video" ? `/videos/${taskId}` : `/images/${taskId}`
       // 輪詢：間隔 3s；圖最多 120s、影片最多 300s（seedance 5 秒片可能排隊較久）
       // 2026-08-21（PM 要求）：預算按真實耗時放寬——實測 image 60-90s、kling 8s 影片 >300s
@@ -1003,11 +1118,15 @@ export async function submitWorkflowNode(
               ? rawUrl
               : `${PLATFORM_BASE}${rawUrl.startsWith("/") ? "" : "/"}${rawUrl}`
             : ""
-          if (url) return { nodeId: node.id, ok: true, content: url, costCoins: pd?.cost_coins }
+          if (url) {
+            registerWorkflowTask(session, String(taskId), node.id, "succeeded", url)
+            return { nodeId: node.id, ok: true, content: url, costCoins: pd?.cost_coins }
+          }
           break
         }
         if (pd?.status === "failed") {
           console.error(`[workflow] node ${nodeId} generation failed: ${pd?.error?.message}`)
+          registerWorkflowTask(session, String(taskId), node.id, "failed")
           return { nodeId: node.id, ok: false, error: pd?.error?.message || "generation failed", lastAttempt }
         }
         // R7-A（2026-08-29）失敗即翻面：供應商並發飽和時上游 job 會以 queued +
@@ -1023,10 +1142,16 @@ export async function submitWorkflowNode(
               : ""
         if (failSignal && pdFail?.status !== "succeeded") {
           console.error(`[workflow] node ${nodeId} upstream failure signal (${pdFail?.status}): ${failSignal}`)
+          registerWorkflowTask(session, String(taskId), node.id, "failed")
           return {
             nodeId: node.id,
             ok: false,
-            error: "生成失败：任务已提交但上游渠道未能执行（供应商并发满或排队超时）；可在画布上稍后重试或更换模型。若已扣款以平台账单为准",
+            error: formatNodeFailure(
+              pdFail?.failure_class,
+              pdFail?.failure_detail ?? failSignal,
+              "生成失败：任务已提交但上游渠道未能执行",
+              "；可在画布上稍后重试或更换模型。若已扣款以平台账单为准（归因以 failure_class 与原文为准，勿自行推断供应商并发满/排队超时）",
+            ),
             lastAttempt,
           }
         }
@@ -1404,6 +1529,10 @@ setInterval(() => {
         state.watchdogRetried = false
         state.questionAnsweredThisTurn = false
         state.deathDeclared = false
+        // 2026-10-02 steer 誤判修復：workflow 喚醒輪同樣要打 lastTurnActiveAt
+        //（steer 受理閘唯一依據，漏點＝喚醒輪期間 steer 全被 409 誤判）。
+        state.lastTurnActiveAt = Date.now()
+        markDirty(state)
         armWatchdogTimer(state)
         console.log(`[gateway] workflow wake resumed: session=${state.sessionId} wf=${wfid}`)
       })
@@ -1576,6 +1705,47 @@ export async function handleWorkflowInternal(req: Request, session: SessionState
     const wfid = typeof body.workflow_id === "string" ? body.workflow_id : ""
     if (!workflowService.get(wfid)) return jsonError(404, "workflow not found", "not_found", "not_found")
     const wf = workflowService.get(wfid)!
+    // H6（2026-10-02）：同步拒絕「已在跑」。舊世界 runWfGenerate 是後台 fire-and-forget，
+    // 引擎回 already running 時路由早已回 ok:true running/approved，agent 被假成功誤導
+    //（01:24 的 10s 改價重跑根本沒生效）。在彈確認卡/開跑之前如實回 ok:false。
+    // 改價（如 460→750）要重估重確認，必須等當前批次結束或先暫停後再 generate。
+    if (workflowService.isGenerating(wfid)) {
+      return Response.json(
+        {
+          ok: false,
+          status: "rejected",
+          reason: "already_running",
+          workflow_id: wfid,
+          note: "工作流正在执行中，本次 generate 未生效（没有重新估价、没有新确认卡）。节点参数/价格的修改不会作用于进行中的批次；请等当前批次结束（workflow_status 复核终态）后再调用 workflow_generate，届时会按新价格重新确认。",
+        },
+        { status: 409 },
+      )
+    }
+    // M4（2026-10-02）機器閘：近 24h 影片零真實交付（有 available 影片模型但無一有 delivered>0，
+    // 與 video_quote.evidence_warning 同口徑）時，含影片節點的工作流不得直接開跑付費生成，
+    // 必須帶 override_zero_delivery=true + override_reason（引用用戶顯式同意）。
+    // 探測不可達（models=null）fail-open 與既有行為一致；無影片節點/已覆寫則不攔。
+    const hasVideoExec = wf.graph.nodes.some((n) => n.kind === "video")
+    if (hasVideoExec) {
+      const overrideOk = body.override_zero_delivery === true && typeof body.override_reason === "string" && body.override_reason.trim().length > 0
+      if (!overrideOk) {
+        const zd = await videoZeroDelivery24h(state.apiKey)
+        if (zd) {
+          return Response.json(
+            {
+              ok: false,
+              status: "needs_override",
+              reason: "zero_delivery_24h",
+              workflow_id: wfid,
+              available_video_models: zd.available,
+              note: "近 24h 影片零真实交付（available 仅代表探测可达，无交付证据），付费生成未开跑。必须先向用户说明并取得其明确同意；同意后再次调用 workflow_generate 并带 override_zero_delivery=true 与 override_reason（引用用户原话）。用户未同意不得自行覆写。",
+              override: { override_zero_delivery: true, override_reason: "<用户同意的原话>" },
+            },
+            { status: 409 },
+          )
+        }
+      }
+    }
     // S4 規格1（2026-08-27）：計費確認門檻改金額維度。舊世界 = 門檻倒掛：
     // 6.25 幣的批量 workflow 零確認直接開跑，1 幣的單筆重試反而彈卡——因為
     // confirm 只存在於工具層（image_* 單筆），workflow 批量執行完全繞過。

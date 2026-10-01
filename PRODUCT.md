@@ -77,3 +77,26 @@ AI 圖片/影片生成 SaaS（中轉站）。用戶「許願」→ Agent（codin
 - State important beliefs as `FACT`, `INFERENCE`, or `HYPOTHESIS`. Each accepted issue must name the dominant bottleneck, smallest useful intervention, acceptance evidence, and what remains out of scope.
 - Verification depth is a product decision. Use expected-pass contract tests, type checks, and production builds by default; add browser automation only when its result can change a decision. If the user takes over visual acceptance, report it as pending and stop after the agreed deploy boundary.
 - When implementation is requested and expected-pass gates succeed, Image Studio changes default to production deployment unless the user explicitly limits the task to research, planning, documentation, or local-only work.
+
+## Decision Record: 可編輯工程（2026-10-02 立，FotorCut 對稱差實測後）
+
+背景：Fotor Agent（內部代號 FotorCut）API 級實測（memory `fotorcut-api-teardown`；取證 bundle 留存 `/tmp/fotor-recon/`）證實「可編輯工程」是其真護城河（Rocicorp Zero CRDT 同步 store＋幀級多軌時間線＋Remotion MG 的 editableManifest/nodeOverrides 機制＋詞級字幕），而其生成側僅 seedance-2-fast 720p 單模型。對稱差結論：它贏「文字/圖表/字幕要改」，我方贏「畫面要改」（多模型艦隊＋局部重畫＋續拍）。據此立決策如下。
+
+### 架構決策
+
+- **A1 時間線升格為第三真相**：剪輯 Expert 已有的內部時間線（過 lint/master 後即丟）持久化為用戶可見工程物件。幀精度（fromFrame/durFrames）＋詞級字幕（CaptionSegment→CaptionWord→Speaker 三層）；schema 形態照 FotorCut（25 實體全欄位已提取，不重新設計）。差異化支點＝**片段錨定 lineage 生成節點**：替換鏡頭直通局部重畫/續拍/換模型——FotorCut 單模型做不到。
+- **A2 不上 CRDT、不做實時協同**：單寫入方＋既有節點版本史（20 版）覆蓋衝突需求；CRDT 工程量與 C 端 mobile-first 單用戶場景不成比例。多人實時協同成為付費需求再議。
+- **A3 MG 走「生成代碼＋editableManifest＋nodeOverrides」，不生成視頻**：LLM 產出帶可編輯標註的 Remotion 代碼，instrumenter 抽欄位白名單（text.content/gradientColors/visibility/lifecycle），改字改色＝本地補丁零積分。Remotion 作為新 supplier channel 接入（照 Blender 先例），進現有調度與計費，不另起任務系統。
+- **A4 agent 改時間線走 typed mutation**（`timeline.batch_diff`、`subtitle.applyPatches` 的同構物），掛現有 gateway 工具面，復用確認卡/版本史/計費；不建第二個任務系統（Doctrine 第 9 條）。
+
+### 產品決策
+
+- **P1 對外敘事**：撤「不做時間軸剪輯」（在對手「單軌黑盒」話術下是靶子）。終局句「**成片之後，改稿不用重來**」——P1 落地後才上首屏；落地前 CAPABILITIES 只撤負面宣稱，不宣稱未兌現能力。
+- **P2 優先級釘死**：
+  - **P0 生成主線可靠性**（一句話→計劃卡→首張關鍵幀；全庫 526 會話僅 84 出過媒體、一張圖說畫就畫約 50%）——編輯台建在搖晃地基上＝在失敗現場精修。
+  - **P1 時間線工程**：詞級字幕雙擊改（零積分）＋片段錨定生成節點。驗收證據＝「改一個字幕字、替換一個鏡頭」全程不重新生成整片。
+  - **P2 MG/文檔軸**：PDF/CSV 輸入→可編輯動態圖表（信息型視頻灘頭；進攻性擴張，單獨裁）。
+  - **P3 多語本地化**（詞級字幕延伸，復用 TTS 8 音色）。
+- **P3 計費三層**：字幕文字/時長/位置＝零積分；MG 補丁/重渲染＝按渲染成本低價計；新生成＝模型積分。標價與扣費同源（既有原則不變）。
+- **P4 不做**：模板市集（「做同款」已覆蓋複用）；通用剪輯軟體參數面（轉場濾鏡全家桶不碰）；Photoshop、技能市集照舊。
+- **P5 工程物件進 `/v1` API**（讀工程 JSON、按 mutation 改片段）——B 端「按規格下單後改其中一鏡」閉環；封閉工作台的對手結構性做不到。

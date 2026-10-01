@@ -261,6 +261,8 @@ const ROUTE_CRITERIA: Record<string, string> = {
   director3d: "3D 預演/場景建模/blender 類",
   "motion-director": "動作設計/節奏/運動編排",
   "web3d-director": "Web3D/網頁三維交付",
+  critic: "審核/評審/驗收一份【已存在】的交付物（輸入是被審成品，產出是 verdict）；純調研、蒐集、分析不屬此域",
+  research: "調研/資料蒐集/趨勢分析/知識整理（無被審成品，產出是研究結論）；用通用子代理，不是 critic",
   other: "研究/分析/其他（none of the above）",
 }
 
@@ -273,6 +275,12 @@ export interface JevRouteDecision {
 /**
  * 刀3：權威路由。回 null＝Jev 掛（呼叫端 fail-open 用點名值）。
  * 呼叫端須對回傳 id 再過 expert-ids.json 白名單（Jev 建議域外的保守回退）。
+ *
+ * 2026-10-02 暴君裁定修正（S02 預覽轉存事故）：ROUTE_OVERRIDE 廢除——點名 expert＝最終
+ * 裁決，Jev 只記異議（ROUTE_DISSENT）不改派。事故鏈：orchestrator 點名 video-director 的
+ * 「S02 單鏡預覽轉存」被 Jev 以 0.96 置信強改派 editor（「轉存/上傳」表面詞彙命中 editor
+ * 判據），editor 域無帶鑑權工具、四路全 401 白跑一趟。表面關鍵詞無法反映各域工具持有面，
+ * 機器改派只會把任務推進沒有對應工具的域。未點名時 Jev 選域照舊（高信心才派）。
  */
 export async function routeExpertAuthoritative(prompt: string, provided: string): Promise<JevRouteDecision | null> {
   const task = (prompt ?? "").slice(0, 4000)
@@ -282,20 +290,28 @@ export async function routeExpertAuthoritative(prompt: string, provided: string)
     route: {
       type: "choice",
       instructions:
-        "Which expert id should handle the task described in `task`? Choose by domain: composer/lyrics→music; script/dialogue/long-text adaptation→screenwriter; editing/timeline/dubbing/upload→editor; storyboard/shot design/video prompts→video-director; 3D/blender scenes→director3d; action/choreography/motion design→motion-director; web 3D delivery→web3d-director; research/analysis/other→other.",
+        "Which expert id should handle the task described in `task`? Choose by domain: composer/lyrics→music; script/dialogue/long-text adaptation→screenwriter; editing/timeline/dubbing/upload→editor; storyboard/shot design/video prompts→video-director; 3D/blender scenes→director3d; action/choreography/motion design→motion-director; web 3D delivery→web3d-director; reviewing/auditing an EXISTING deliverable→critic; research/investigation/analysis with no artifact to review→research; anything else→other.",
       criteria: ROUTE_CRITERIA,
     },
   })
   if (!answers) return null
   const a = answers.route as { choice?: unknown; confidence?: unknown } | undefined
   if (!a || typeof a.choice !== "string" || typeof a.confidence !== "number") return fallback
-  if (a.choice === "other" || a.confidence < 0.9) return fallback
-  if (provided && a.choice === provided) return { expertId: provided, source: "provided" }
+  // 點名域＝最終裁決：只記異議不改派（改派廢除令見函數 docblock）。
   if (provided) {
-    console.log(`[gateway] jev_gate: ROUTE_OVERRIDE provided=${provided} suggested=${a.choice} confidence=${a.confidence.toFixed(2)}`)
-  } else {
-    console.log(`[gateway] jev_gate: ROUTE_AUTO suggested=${a.choice} confidence=${a.confidence.toFixed(2)}`)
+    if (a.choice !== provided && a.choice !== "other" && a.confidence >= 0.9) {
+      console.log(`[gateway] jev_gate: ROUTE_DISSENT provided=${provided} suggested=${a.choice} confidence=${a.confidence.toFixed(2)} (點名值生效，不改派)`)
+    }
+    return { expertId: provided, source: "provided" }
   }
+  // 未點名 → Jev 選域（高信心才派）。
+  if (a.choice === "other" || a.confidence < 0.9) return fallback
+  // H9：research 不是 expert 域（走通用子代理）。
+  if (a.choice === "research") {
+    console.log(`[gateway] jev_gate: ROUTE_AUTO suggested=research(generic) confidence=${a.confidence.toFixed(2)}`)
+    return { expertId: "", source: "jev" }
+  }
+  console.log(`[gateway] jev_gate: ROUTE_AUTO suggested=${a.choice} confidence=${a.confidence.toFixed(2)}`)
   return { expertId: a.choice, source: "jev" }
 }
 
@@ -355,9 +371,9 @@ const TEMPLATE_CRITERIA: Record<string, string> = {
   character_sheet: "角色設定卡：人物設計、多視角、跨鏡一致性鎖定",
   scene_setup: "場景/美術設定：環境、光線、場地美術",
   single_video: "單鏡頭短片：一段連續鏡頭成片",
-  feature_film: "多鏡頭成片（泛用兜底）：分鏡→角色→場景→逐鏡生成→拼接；不帶領域關鍵詞的普通多鏡頭影片",
+  feature_film: "多鏡頭成片（泛用兜底，橫屏 16:9）：分鏡→角色→場景→逐鏡生成→拼接；不帶領域關鍵詞的普通多鏡頭影片；OP/MV/片頭曲/主題曲/卡點/角色歌/預告片類（橫屏成片）一律選此",
   novel_film: "長文本改編成片：小說/長篇→劇本→角色→美術→分鏡→關鍵幀→影片→配音→成片",
-  shortdrama_visual: "番劇/短劇/動漫/MV/預告片/OP 全工業鏈（9 環）：主演 DNA 資產→17 道分鏡 QC→3D 白模預演→關鍵幀→配音→鏡頭視頻→成片→投放物料；提到動漫/二次元/番劇/短劇/百合/角色歌 MV/預告片製作選此（feature_film 的工業級超集；泛用商品短片不帶動漫/影視詞 → feature_film）",
+  shortdrama_visual: "番劇/短劇/動漫 全工業鏈（9 環，豎屏短劇向）：主演 DNA 資產→17 道分鏡 QC→3D 白模預演→關鍵幀→配音→鏡頭視頻→成片→投放物料；提到動漫/二次元/番劇/短劇/百合劇集製作選此；OP/MV/片頭曲/主題曲/卡點/角色歌/預告片即使是動漫題材也 → feature_film（橫屏）；泛用商品短片不帶動漫/影視詞 → feature_film",
   novel_ip: "網文 IP 全案視覺包（不出片）：世界觀→情緒板→風格錨→主角卡→名場面組圖→封面→多畫幅→衍生物料；提到 IP 視覺/小說封面/人設全套選此",
   ecom_launch: "新品上市素材包（要完整上市行銷物料：主圖/詳情頁/畫幅矩陣/精修歸檔，8 環）：僅當用戶明確要新品上市/電商詳情/全套行銷素材時選此；只拍商品展示短片（鏡頭拼接、無詳情頁/畫幅交付）→ feature_film",
   ecom_model: "AI 試穿種草線：服裝摳圖→模特人設→虛擬試穿→精修→九宮格→詳情頁→分發尺寸；提到試穿/種草/模特圖/平铺變上身選此",
@@ -390,7 +406,7 @@ export async function classifyDispatchMeta(prompt: string): Promise<JevDispatchM
     workflow_template: {
       type: "choice",
       instructions:
-        "Which workflow template should be the production skeleton for the task described in `task`? Choose by deliverable, domain keywords first: anime/二次元/番剧/短剧/MV/trailer/OP production with full industrial chain (cast DNA, storyboard QC, previz, voiceover, promo)→shortdrama_visual; web-novel IP visual package (covers, character set, no film)→novel_ip; new product launch marketing suite→ecom_launch; AI try-on/model content→ecom_model; poster/cover batch for promotion→shortdrama_poster; art series/curation→art_curation; artist style immersion→art_style; adaptation of a novel or long text into a film pipeline→novel_film; generic multi-shot film without domain keywords→feature_film; single still image→single_image; character design sheet→character_sheet; environment/art setting→scene_setup; one continuous clip→single_video; research/Q&A/analysis/review/plain lookup (no production)→none. Prefer the domain-specific template over the generic one when domain keywords are present.",
+        "Which workflow template should be the production skeleton for the task described in `task`? Choose by deliverable, domain keywords first: anime/二次元/番剧/短剧 series production with full industrial chain (cast DNA, storyboard QC, previz, voiceover, promo)→shortdrama_visual; web-novel IP visual package (covers, character set, no film)→novel_ip; new product launch marketing suite→ecom_launch; AI try-on/model content→ecom_model; poster/cover batch for promotion→shortdrama_poster; art series/curation→art_curation; artist style immersion→art_style; adaptation of a novel or long text into a film pipeline→novel_film; generic multi-shot film without domain keywords, and any OP/MV/theme-song/opening/beat-sync/character-song/trailer video (landscape 16:9)→feature_film; single still image→single_image; character design sheet→character_sheet; environment/art setting→scene_setup; one continuous clip→single_video; research/Q&A/analysis/review/plain lookup (no production)→none. Prefer the domain-specific template over the generic one when domain keywords are present.",
       criteria: TEMPLATE_CRITERIA,
     },
   })
@@ -506,3 +522,84 @@ export async function gateWorkflowMemory(doc: WorkflowMemoryDoc): Promise<boolea
   return keep
 }
 
+
+// ── H9/M2/M3（2026-10-02）：確定性守衛（不依賴 Jev，Jev 掛也生效）────────────
+// 全部為純函式，subagent.ts 派遣組裝處呼叫；測試見 dispatch-guards.test.ts。
+
+const RESEARCH_RE = /調研|调研|研究|調查|调查|搜索|搜尋|蒐集|搜集|收集資料|收集资料|資料整理|趨勢|趋势|research|investigat|survey|參考資料|参考资料|competitor|競品|竞品/i
+const REVIEW_RE = /審核|审核|評審|评审|驗收|验收|審查|审查|審閱|审阅|質檢|质检|verdict|critique|review|audit|返工判|退回|毒蛇|拷問|拷问/i
+
+export interface ExpertGuardResult {
+  /** 最終 expert id（""＝通用子代理）。 */
+  expertId: string
+  /** 非空＝守衛改派了，值為原因（供 log）。 */
+  reason: string
+}
+
+/**
+ * H9 內容守衛。2026-10-02 暴君裁定修正：跨域關鍵詞翻轉已移除——關鍵詞計數無法反映
+ * 各域工具持有面（「轉存/上傳」詞彙曾把點名 video-director 的任務翻成 editor，域內
+ * 無鑑權工具全 401），點名域一律保留。僅存 critic 研究降級（critic 是昂貴審核域，
+ * 研究任務降通用子代理不會讓任務無路可走）。
+ */
+export function guardExpertContent(prompt: string, expertId: string): ExpertGuardResult {
+  const text = (prompt ?? "").slice(0, 4000)
+  if (!expertId || !text) return { expertId, reason: "" }
+  if (expertId === "critic") {
+    if (RESEARCH_RE.test(text) && !REVIEW_RE.test(text)) {
+      return { expertId: "", reason: "critic 只審已存在成品；研究/調研任務改派通用子代理" }
+    }
+    return { expertId, reason: "" }
+  }
+  return { expertId, reason: "" }
+}
+
+const MUSIC_DEP_RE =
+  /(按|依|根據|根据|對齊|对齐|卡|踩|跟隨|跟随|配合|基於|基于|以|對準|对准)[^。\n]{0,14}(音樂|音乐|曲|節拍|节拍|BPM|beat|旋律|歌)|節拍|节拍|卡點|卡点|踩點|踩点|\bBPM\b|\bbeat/i
+const AUDIO_REF_RE = /\.(mp3|wav|m4a|flac|aac|ogg)\b|audio_url|音[頻频]路徑|音[頻频]路径|已有音[樂乐]|用戶(上傳|提供)的?音/i
+const MUSIC_DEP_EXPERTS = new Set(["video-director", "editor", "motion-director"])
+
+export interface MusicFirstState {
+  /** 本父會話已有 music run 在途（未交付）。 */
+  musicInFlight: boolean
+  /** 本父會話已有 music 交付事件（ok 收尾）。 */
+  musicDelivered: boolean
+}
+
+/**
+ * M2：music-first 機器前置斷言。依賴音樂的分鏡/節拍/剪輯任務（expert 屬依賴域，或任務書含節拍依賴語彙）
+ * 在 music 交付事件前一律擋下並回原因。spec 已帶音訊檔證據（副檔名/audio_url）→ 放行（音樂已有）。
+ * 回 null＝放行；字串＝擋下原因（原樣回給 orchestrator）。
+ */
+export function musicFirstBlockReason(prompt: string, expertId: string, state: MusicFirstState): string | null {
+  const text = (prompt ?? "").slice(0, 6000)
+  if (!text || expertId === "music" || expertId === "critic" || expertId === "screenwriter") return null
+  const depByExpert = MUSIC_DEP_EXPERTS.has(expertId)
+  const depByText = MUSIC_DEP_RE.test(text)
+  if (!(depByText && (depByExpert || /分鏡|分镜|鏡頭|镜头|剪輯|剪辑|storyboard|shot/i.test(text)))) return null
+  if (state.musicDelivered || AUDIO_REF_RE.test(text)) return null
+  if (state.musicInFlight) {
+    return "【機器閘·music-first】本任務依賴音樂（時長/節拍/段落），但 music 尚未交付。請先等 music 的完成事件，再以實際成曲（時長、節拍、段落）為準派本任務；禁止與音樂並發。"
+  }
+  return "【機器閘·music-first】本任務依賴音樂（時長/節拍/段落），但本會話沒有任何 music 交付，spec 也未附音訊檔。請先派 music expert 並等其交付事件，或在 spec 內附已有音訊檔路徑，再重派本任務。"
+}
+
+const REWORK_RE = /返工|重寫|重写|重做|重派|修正|修改|修訂|修订|改一下|只改|rework|redo|revise/i
+
+/** M3：判斷任務書是否為返工（改既有交付物）。 */
+export function isReworkSpec(prompt: string): boolean {
+  return REWORK_RE.test((prompt ?? "").slice(0, 1500))
+}
+
+/**
+ * M3：返工內容鎖指令。originalPath＝上一份交付物的落盤路徑（空＝未知，仍注入鎖並要求 orchestrator 補路徑）。
+ */
+export function reworkLockDirective(originalPath: string): string {
+  const src = originalPath || "〔原稿路徑缺失：請向派遣方索取，不得憑記憶重寫〕"
+  return [
+    "【機器閘·返工內容鎖】本任務是返工。硬規則：",
+    `1. 只改任務書明確點名的欄位/段落（X 欄）；其餘內容逐字沿用原稿 ${src}，先 read 原稿再動手，禁止重述、改寫、換人設/題材/情節。`,
+    "2. 角色性別/年齡/身份、故事主線、場景設定屬內容白名單，未被點名即不得變動。",
+    `3. 交付正文末尾必須附【與原稿 diff】：逐條列出改動欄位＋改前/改後；diff 以外的任何差異＝違規。`,
+  ].join("\n")
+}

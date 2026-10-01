@@ -169,7 +169,21 @@ export function shouldFailFastOnExhaustedSupply(input: {
   lastFailureClass: string | null;
   diagnosisReason: SupplierUnavailabilityReason;
 }): boolean {
-  return input.lastFailureClass === "quota_exhausted" && EXHAUSTED_SUPPLY_REASONS.has(input.diagnosisReason);
+  return failFastClassForExhaustedSupply(input) !== null;
+}
+
+/**
+ * 無替補時以「真因」終結的 failure_class（H-fix 2026-10-02）：quota_exhausted（欠費）與
+ * pricing_config（上游定價/本地配置錯，重試同供應商必同錯）都不該空轉到 deadline、
+ * 更不該被標成 overloaded。回傳 null 表示仍值得排隊等。
+ */
+export function failFastClassForExhaustedSupply(input: {
+  lastFailureClass: string | null;
+  diagnosisReason: SupplierUnavailabilityReason;
+}): "quota_exhausted" | "pricing_config" | null {
+  if (!EXHAUSTED_SUPPLY_REASONS.has(input.diagnosisReason)) return null;
+  if (input.lastFailureClass === "quota_exhausted" || input.lastFailureClass === "pricing_config") return input.lastFailureClass;
+  return null;
 }
 
 /** 病灶 D：把 extend 實際寫入 DB 的 deadline 同步回內存 job.deadlineAt，消除語義漂移。 */
@@ -266,12 +280,13 @@ async function executeGenerationJob(job: GenerationJob, workerId: string, option
         const lastFailureClass = [...jobAttempts]
           .reverse()
           .find((candidate) => candidate.status === "failed")?.failureClass ?? null;
-        if (shouldFailFastOnExhaustedSupply({ lastFailureClass, diagnosisReason: diagnosis.reason })) {
+        const failFastClass = failFastClassForExhaustedSupply({ lastFailureClass, diagnosisReason: diagnosis.reason });
+        if (failFastClass) {
           await failGenerationJob({
             jobId: job.id,
             workerId,
-            failureClass: "quota_exhausted",
-            failureDetail: `No alternative supplier after upstream balance exhaustion (${diagnosis.reason}): ${lastFailureDetail ?? diagnosis.detail}`,
+            failureClass: failFastClass,
+            failureDetail: `No alternative supplier after ${failFastClass === "pricing_config" ? "upstream pricing/config error" : "upstream balance exhaustion"} (${diagnosis.reason}): ${lastFailureDetail ?? diagnosis.detail}`,
           }, sql);
           await refundFailure(job, completed, workerId, sql);
           const attemptsAfterFail = await listGenerationAttemptsForJob(job.id, sql).catch(() => jobAttempts);

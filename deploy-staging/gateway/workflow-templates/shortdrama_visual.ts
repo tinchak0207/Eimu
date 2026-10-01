@@ -142,7 +142,7 @@ export const shortdramaVisualTemplate: WorkflowTemplate =
         ],
       },
       // 环 7：生成镜头视频（I2V：关键帧首尾帧 + 角色/场景参考）
-      { role: "video_gen", kind: "config", title: "镜头视频生成配置", deliverable: "镜头视频环节的生图价目与参数配置（尺寸/每秒单价），逐镜 I2V 片段按此执行", defaults: { size: "9:16", kind: "video", unit_price_per_second: 5, unit_price_per_second_1080p: 10 } },
+      { role: "video_gen", kind: "config", title: "镜头视频生成配置", deliverable: "镜头视频环节的生图价目与参数配置（尺寸/每秒单价），逐镜 I2V 片段按此执行", defaults: { size: "9:16", kind: "video", unit_price_per_second: 13, unit_price_per_second_1080p: 16 } },
       {
         role: "shot_video",
         kind: "video",

@@ -708,6 +708,11 @@ export class WorkflowService {
     return { ok: true }
   }
 
+  /** H6：路由層同步預檢用——該工作流是否已有 generate 循環在跑。 */
+  isGenerating(workflowId: string): boolean {
+    return this.generateLoops.has(workflowId)
+  }
+
   /** 执行工作流。emit canvas 事件；text/config 节点视为完成，image/video 调 runNode。 */
   async generate(workflowId: string): Promise<{ ok: boolean; status: string }> {
     // F1（2026-08-31）重入守衛：同一工作流已有執行循環在跑時拒絕二次 generate，

@@ -130,3 +130,17 @@ test("401 without quota copy is still authentication + quarantine (regression)",
   assert.equal(result.failureClass, "authentication");
   assert.equal(result.quarantineSupplier, true);
 });
+
+test("H2: local pricing config error is pricing_config, capability-scoped, not overloaded", () => {
+  const msg = 'no per_request price configured for resolution "2k"';
+  for (const err of [new Error(msg), new SupplierRequestError(msg, 502)]) {
+    const result = classifySupplierFailure(err, NOW);
+    assert.equal(result.failureClass, "pricing_config");
+    assert.equal(result.retryable, false);
+    assert.equal(result.quarantineSupplier, false);
+    assert.equal(result.switchSupplier, true);
+    assert.equal(result.cooldownUntil?.toISOString(), "2026-07-29T00:03:00.000Z");
+  }
+  // genuine upstream 502 stays overloaded
+  assert.equal(classifySupplierFailure(new SupplierRequestError("bad gateway", 502), NOW).failureClass, "overloaded");
+});

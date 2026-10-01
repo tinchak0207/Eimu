@@ -10,7 +10,7 @@ import { masterCheck, masterExport, MASTER_PRESETS, type MasterPresetId } from "
 import { registerMasterExport } from "./masters-index"
 import { subagentParentApiKey, subagentParentState } from "./subagent"
 import { beastAgentField } from "./session-lifecycle"
-import { resolveSession } from "./sessions-core"
+import { resolveSession, markDirty } from "./sessions-core"
 import { opencodeFetch } from "./opencode-client"
 import { jsonError } from "./gw-lib"
 import { hashKey } from "./auth-gw"
@@ -250,6 +250,11 @@ export async function handleResumeSession(req: Request): Promise<Response> {
   state.deathDeclared = false
   // R8-B 工單 #4：resume 輪同樣重置 question 答覆標記。
   state.questionAnsweredThisTurn = false
+  // 2026-10-02 steer 誤判修復：resume 輪同樣要打 lastTurnActiveAt（steer 受理閘
+  // 唯一依據；三條「從 idle 起輪」路徑——子代理喚醒／workflow 喚醒／本端點——
+  // 原本全漏，喚醒驅動會話的 steer 因此全被 409 no_active_turn 誤判失敗）。
+  state.lastTurnActiveAt = Date.now()
+  markDirty(state)
   armWatchdogTimer(state)
   return Response.json({ ok: true })
 }
@@ -268,7 +273,9 @@ export async function handleSessionKey(req: Request): Promise<Response> {
   const state = resolveSession(session_id) ?? subagentParentState(session_id)
   if (state) {
     const user_id = await hashKey(state.apiKey)
-    return Response.json({ ok: true, api_key: state.apiKey, user_id })
+    // 2026-09-29 審計（H5）：回傳可信的上傳歸屬＝該會話的 gateway sessionId（uploads/<id>/）。
+    // plugin 以此為唯一允許的 upload 目錄，取代「用戶提到即授權」的舊機制。
+    return Response.json({ ok: true, api_key: state.apiKey, user_id, upload_owner: state.sessionId })
   }
   // 死线③（片 AN，评测 REPORT S2）：子代理 opencode session 只在 subagent 运行时
   // 注册表（byChildOc）里，主 sessions 表查无记录 → 工具侧 resolveKey 全挂。
@@ -295,8 +302,11 @@ export async function handleSessionTasks(req: Request): Promise<Response> {
     return jsonError(400, "session_id is required", "bad_request", "bad_request")
   }
   const state = resolveSession(session_id) ?? subagentParentState(session_id)
-  if (!state) return Response.json({ ok: false, error: "session not found", tasks: [] }, { status: 404 })
-  return Response.json({ ok: true, tasks: [...state.sessionTasks.values()] })
+  // H11：查無會話不再回 404——工具側（image_get_result.listTasks）以 resp.ok 判斷，404 會被吞成
+  // 「迴環未回應」。改回 200 + tasks:[] + session_found:false，如實區分「無會話」與「無任務」。
+  if (!state) return Response.json({ ok: true, session_found: false, tasks: [] })
+  // hydrate 重啟恢復的 session 該欄可能 undefined（sessions-core 已補，這裡再兜底防 500）。
+  return Response.json({ ok: true, session_found: true, tasks: [...(state.sessionTasks?.values() ?? [])] })
 }
 
 

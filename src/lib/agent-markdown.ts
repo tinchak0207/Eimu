@@ -16,6 +16,8 @@ export type MdInline =
   | { k: "code"; text: string }
   | { k: "link"; href: string; children: MdInline[] }
   | { k: "img"; src: string; alt: string }
+  | { k: "video"; src: string }
+  | { k: "audio"; src: string }
   | { k: "br" };
 
 export type MdBlock =
@@ -33,6 +35,18 @@ export type MdBlock =
 export function isImageUrl(url: string): boolean {
   if (!/^https?:\/\//i.test(url)) return false;
   return /\.(png|jpe?g|webp|gif)(\?\S*)?$/i.test(url.trim());
+}
+
+/** 影片直链（mp4/mov/webm/m4v）：命中即由渲染层画成播放器，不留裸 URL。 */
+export function isVideoUrl(url: string): boolean {
+  if (!/^https?:\/\//i.test(url)) return false;
+  return /\.(mp4|mov|webm|m4v)(\?\S*)?$/i.test(url.trim());
+}
+
+/** 音频直链（m4a/mp3/wav/aac/ogg/flac/opus）：同上，画成音频播放器。 */
+export function isAudioUrl(url: string): boolean {
+  if (!/^https?:\/\//i.test(url)) return false;
+  return /\.(m4a|mp3|wav|aac|ogg|flac|opus)(\?\S*)?$/i.test(url.trim());
 }
 
 function inlineFromTokens(tokens: Token[] | undefined): MdInline[] {
@@ -66,6 +80,10 @@ function inlineFromTokens(tokens: Token[] | undefined): MdInline[] {
         // 图片直链的 <a>：整条转缩略图，不留裸 URL 文本。
         if (isImageUrl(tok.href)) {
           out.push({ k: "img", src: tok.href, alt: tok.text });
+        } else if (isVideoUrl(tok.href)) {
+          out.push({ k: "video", src: tok.href });
+        } else if (isAudioUrl(tok.href)) {
+          out.push({ k: "audio", src: tok.href });
         } else {
           out.push({ k: "link", href: tok.href, children: inlineFromTokens(tok.tokens) });
         }

@@ -5,9 +5,9 @@
 // 依賴解析：Wave1/已建模組真 import；仍住 index.ts 未 export 的符號 declare 佔位（stage1 記憶 subagent 佔位符法）。
 import { sessions, markDirty, findSessionByOpenCodeId } from "./sessions-core.ts"
 import { emitToSession, stripStaleTurnTextFromReplay } from "./sse-core.ts"
-import { stripOutboundFlush } from "./outbound-sanitize.ts"
+import { flushOtherPartTails, takeTurnEndTail } from "./outbound-sanitize.ts"
 import { emitSanitizedDelta } from "./outbound-emit.ts"
-import { opencodeHeaders, scheduleTitleFetch } from "./opencode-client.ts"
+import { opencodeHeaders, scheduleTitleFetch, revertDeadTail } from "./opencode-client.ts"
 import { MESSAGE_ROLE_CAP, OPENCODE_URL, PART_TEXT_TRACK_CAP, STEP_COST_LOG_CAP, SUPPRESSED_PART_CAP, TURN_MAX_RETRIES, TURN_RETRY_DELAY_MS } from "./constants-gateway.ts"
 import type { SessionState } from "./types-gateway.ts"
 import { subagentHandlesSession, handleSubagentEvent, maybeRunMachineCriticPass, snapshotPendingCriticTargets } from "./subagent"
@@ -31,6 +31,30 @@ import { flushPendingSteers } from "./steer-gw.ts"
 
 // TODO(整合 Wave2): 以下為仍住 index.ts 且尚未 export 的符號 declare 佔位
 // （bun build 只轉譯不查名，建得過；index.ts 補 export 或符號遷出後替換為真 import）。
+
+// H14（2026-10-02）：系統喚醒不冒充用戶發言。prompt_async 注入的喚醒文本在 opencode 裡只能是
+// user-role message（身份由 opencode 存儲決定）；網關側能做的是把它從「用戶發言」語義摘出——
+// messageRole 改記 "system"（isAssistantMessage 僅認 "assistant"，回聲抑制語義不變），
+// 並以 turn.status 暫態單行告知前端（不落 transcript，參照 turn-status-transient-row 修法）。
+import { isSystemWakeText } from "./system-wake.ts"
+export { isSystemWakeText }
+export function markSystemWakeMessage(state: SessionState, messageID: unknown, text: unknown): boolean {
+  if (typeof messageID !== "string" || !isSystemWakeText(text)) return false
+  if (state.messageRole.get(messageID) !== "user") return false // 已標過/非 user 訊息 → 不重發
+  state.messageRole.set(messageID, "system")
+  emitToSession(state, "turn.status", { text: "子代理已完成，系統自動喚醒主代理匯總中…" })
+  return true
+}
+
+// R9-B（2026-09-30）：其他 part 扣住的尾行（無尾換行的單行旁白）當場吐出，
+// 保持「旁白 → 工具/下一段」時序；否則會被壓到 session.idle 才補播（SSE 9888–9894）。
+function emitOtherPartTails(state: SessionState, exceptPid?: string): void {
+  const text = flushOtherPartTails(state.partStripState, exceptPid)
+  if (text) {
+    emitToSession(state, "message.delta", { text })
+    state.lastUserVisibleAt = Date.now()
+  }
+}
 
 export function handleOpencodeEvent(event: any): void {
   try {
@@ -62,7 +86,17 @@ export function handleOpencodeEvent(event: any): void {
         const mid = typeof info?.id === "string" ? info.id : undefined
         const role = typeof info?.role === "string" ? info.role : undefined
         if (mid && role) {
-          state.messageRole.set(mid, role)
+          // H14：已標為 system 的喚醒訊息，後續 message.updated 不得回寫成 user。
+          if (!(role === "user" && state.messageRole.get(mid) === "system")) state.messageRole.set(mid, role)
+          boundMap(state.messageRole, MESSAGE_ROLE_CAP)
+        }
+        // 壓縮復讀機修復（2026-10-02）：compaction 代理產出的「摘要訊息」role 也是
+        // assistant（同會話、mode=primary，只有 summary:true 能辨識），會被
+        // isAssistantMessage 放行、把摘要草稿整段灌進用戶可見流——模型壓縮時前端
+        // 秒變復讀機（同一份摘要反覆重跑＝反覆上屏）。標成第三種角色 "compaction"
+        // 後 text/reasoning 兩條流都不再上屏；壓縮動作改以 turn.status 一行告知。
+        if (mid && role === "assistant" && info?.summary === true) {
+          state.messageRole.set(mid, "compaction")
           boundMap(state.messageRole, MESSAGE_ROLE_CAP)
         }
         // Phase 0 觀測：assistant message 自帶的 tokens/cache 用量（事件本來就送到，
@@ -92,6 +126,8 @@ export function handleOpencodeEvent(event: any): void {
             if (p.delta.trim().length > 0) state.stepHasReasoning = true
             break
           }
+          // R9-B：新 part 開講前，先吐出前面 part 扣住的尾行（pid 口徑同 emitSanitizedDelta）。
+          emitOtherPartTails(state, typeof p.partID === "string" && p.partID ? p.partID : "_turn")
           // S2b：出站文本先過內部框架段剝離器（## Objective 等四段）。
           // turnTextChars 仍按原文計——剝到零輸出代表模型確實說過話，不觸發抖動重試。
           emitSanitizedDelta(state, p.partID, p.delta)
@@ -123,6 +159,7 @@ export function handleOpencodeEvent(event: any): void {
             const full = typeof part.text === "string" ? part.text : ""
             const id = typeof part.id === "string" ? part.id : ""
             if (full.length === 0 || !id) break
+            markSystemWakeMessage(state, part.messageID, full)
             // Drop unless we know this belongs to an assistant message. Losing a
             // frame is recoverable; echoing the user's own prompt back as AI
             // output is not.
@@ -134,6 +171,8 @@ export function handleOpencodeEvent(event: any): void {
             // prefix, so only emit the un-emitted suffix. A part that never
             // produced deltas has emittedLen 0 and emits its full text once.
             if (full.length > rec.emittedLen) {
+              // R9-B：同 delta 路徑——先吐出其他 part 扣住的尾行。
+              emitOtherPartTails(state, id)
               // S2b：part.updated 補發的後綴同樣過剝離器（與 delta 路徑共用逐 part 狀態）。
               emitSanitizedDelta(state, id, full.slice(rec.emittedLen))
               state.turnTextChars = (state.turnTextChars ?? 0) + (full.length - rec.emittedLen)
@@ -145,10 +184,44 @@ export function handleOpencodeEvent(event: any): void {
             }
             break
           }
+          case "compaction": {
+            // 壓縮動作可見化（前端零改動：走既有 turn.status 通道）。同一 part 只報一次；
+            // 該 part 所屬訊息一併標非 assistant（摘要不入對話流，見 message.updated 段）。
+            if (typeof part.messageID === "string") {
+              state.messageRole.set(part.messageID, "compaction")
+              boundMap(state.messageRole, MESSAGE_ROLE_CAP)
+            }
+            const cid = typeof part.id === "string" ? part.id : ""
+            if (cid) {
+              const seen = state.compactionNotified ?? new Set<string>()
+              if (!seen.has(cid)) {
+                seen.add(cid)
+                state.compactionNotified = seen
+                boundSet(seen, PART_TEXT_TRACK_CAP)
+                emitToSession(state, "turn.status", {
+                  text: part.auto === false ? "正在压缩上下文记忆…" : "上下文较长，系统正在自动压缩历史记忆（不影响本轮任务）…",
+                })
+              }
+            }
+            break
+          }
           case "tool":
+            // R9-B：工具調用起點（pending/running）＝前面的旁白已講完，尾行當場吐出，
+            // 讓「先讓歌跑起來：」出現在 tool.invoke 之前而非回合結束後。
+            if (!state.turnAborted && (part.state?.status === "pending" || part.state?.status === "running")) {
+              emitOtherPartTails(state)
+            }
             handleToolPartUpdate(state, part)
             // P2b 刀2：出現 tool = 本 step 不空。
-            state.stepHasTool = true
+            // 空轉補丁（2026-10-02）：裸 true/date/:/空 command 的 bash 不算「有動作」——
+            // step-5-preview 實測 64% bash 是此類空轉，原本因「有 tool」躲過止損。
+            {
+              const _inp = (part.state?.input ?? {}) as { command?: unknown }
+              const _cmd = typeof _inp.command === "string" ? _inp.command.trim() : ""
+              const _noop = part.tool === "bash" && (_cmd === "" || _cmd === "true" || _cmd === "date" || _cmd === ":")
+              if (_noop) state.stepNoopTool = true
+              else state.stepHasTool = true
+            }
             break
           case "step-finish": {
             const cost = typeof part.cost === "number" ? part.cost : 0
@@ -223,10 +296,13 @@ export function handleOpencodeEvent(event: any): void {
         // S2b：回合結束——把各 part 剝離器扣住的最後一行安全文本吐出
         //（在 turn.done 之前，前端收幀順序不亂），再清狀態。
         // 中止窗口不吐剝離器尾巴（2026-09-02）：用戶叫停後再冒一句=沒停乾淨。
+        // R9-B（2026-09-30）：只吐最後一個 part（最終答覆）的尾行；更早 part 的尾行
+        // 已在下一段/工具起點當場吐出，殘留即過期旁白——丟棄留日誌，不接在答覆後補播。
         if (!state.turnAborted) {
-          for (const [, stripSt] of state.partStripState) {
-            const tail = stripOutboundFlush(stripSt)
-            if (tail) emitToSession(state, "message.delta", { text: tail })
+          const { tail, dropped } = takeTurnEndTail(state.partStripState)
+          if (tail) emitToSession(state, "message.delta", { text: tail })
+          if (dropped.length) {
+            console.log(`[gateway] R9-B stale part tails dropped at idle: x${dropped.length} — session=${state.sessionId}`)
           }
         }
         // S1 補口（2026-08-29，smoke agent_text 根因）：一次性「英文已略去」提示
@@ -334,6 +410,8 @@ export function handleOpencodeEvent(event: any): void {
               retryBody.model = attemptModel
               // 修復1：重投後實際 dispatch 的模型同步記檔（降權判定用，見 failover 塊上方）。
               cur.lastDispatchedModel = { providerID: attemptModel.providerID, modelID: attemptModel.modelID }
+              // 2026-10-01 去重：上一條 user（原 prompt 或上一條續寫提示）其後零產出 → 先撤再投，不疊兩條。
+              await revertDeadTail(cur.opencodeSessionId)
               const res = await fetch(`${OPENCODE_URL}/session/${cur.opencodeSessionId}/prompt_async`, {
                 method: "POST",
                 headers: opencodeHeaders(),
@@ -395,6 +473,8 @@ export function handleOpencodeEvent(event: any): void {
               body.model = attemptModel
               // 修復1：jitter 重投同樣記實際 dispatch 模型（與 failover 重投對稱）。
               cur.lastDispatchedModel = { providerID: attemptModel.providerID, modelID: attemptModel.modelID }
+              // 2026-10-01 去重：零正文重投原 prompt 前撤掉上一條零產出的同一 user 訊息，歷史只留一條。
+              await revertDeadTail(cur.opencodeSessionId)
               const res = await fetch(`${OPENCODE_URL}/session/${cur.opencodeSessionId}/prompt_async`, {
                 method: "POST",
                 headers: opencodeHeaders(),

@@ -14,6 +14,8 @@ import { gzipSync } from "node:zlib"
 import { loadUserSettings } from "./persistence"
 import { jsonError } from "./gw-lib.ts"
 import type { SessionState } from "./types-gateway.ts"
+import { MergedReplayFrame } from "./replay-frame.ts"
+import { isSystemWakeText } from "./system-wake.ts"
 import { getOwnedSession } from "./sessions-core.ts"
 import { TAIL_PAYLOAD_MARKER } from "./messages-gw.ts"
 import { opencodeFetch } from "./opencode-client.ts"
@@ -139,7 +141,7 @@ function stripTailInjectedPayload(text: string): string {
   return i >= 0 ? text.slice(0, i).trimEnd() : text
 }
 
-function slimHistoryMessages(msgs: unknown[]): unknown[] {
+export function slimHistoryMessages(msgs: unknown[]): unknown[] {
   const out: unknown[] = []
   for (const rawMsg of msgs) {
     try {
@@ -154,6 +156,11 @@ function slimHistoryMessages(msgs: unknown[]): unknown[] {
         if (typeof infoSrc.role === "string") info.role = infoSrc.role
       }
       const partsSrc = Array.isArray(msg.parts) ? (msg.parts as unknown[]) : []
+      // H14 補完：user 訊息首個 text part 為系統喚醒文本 → 歷史回放呈現為 system（顯示層，不改模型上下文）。
+      if (info.role === "user" && partsSrc.some((p) => {
+        const q = p as Record<string, unknown> | null
+        return !!q && q.type === "text" && isSystemWakeText(q.text)
+      })) info.role = "system"
       const parts: unknown[] = []
       for (const rawPart of partsSrc) {
         try {
@@ -165,7 +172,7 @@ function slimHistoryMessages(msgs: unknown[]): unknown[] {
             // payload（野獸幀等，見 appendSystemPayloadToTurnTail），否則用戶
             // 氣泡會被 17.2k 字的派遣協議正文灌爆。模型上下文由 opencode 持有、
             // 不經本函式，故剝除不改變模型看到的內容（純顯示層過濾）。
-            if (type === "text" && info.role === "user" && typeof part.text === "string") {
+            if (type === "text" && (info.role === "user" || info.role === "system") && typeof part.text === "string") {
               parts.push({ ...part, text: stripTailInjectedPayload(part.text) })
               continue
             }
@@ -224,7 +231,12 @@ export async function handleGetSessionMessages(key: string, id: string): Promise
   if (!state) return jsonError(404, "session not found", "not_found", "not_found")
   const cursor = {
     event_counter: state.eventCounter,
-    replay_first_id: state.replayBuffer.length > 0 ? state.replayBuffer[0].id : null,
+    replay_first_id:
+      state.replayBuffer.length > 0
+        ? state.replayBuffer[0] instanceof MergedReplayFrame
+          ? state.replayBuffer[0].firstId
+          : state.replayBuffer[0].id
+        : null,
   }
   try {
     const res = await opencodeFetch(`/session/${state.opencodeSessionId}/message`, {

@@ -4,6 +4,30 @@
 # Do NOT drop the leading slash on /docs/ or /output/ — unanchored "docs/" would
 # also match the real Next.js route src/app/docs/.
 
+# 根目錄白名單（2026-10-01）：黑名單制擋不住每天新冒出的 eval-*/、.tools/、plugins/、
+# 憑證備份、mp4 等——上傳集一天內 1167→2696 檔，構建 2m→4m，還把 .credentials.bak.yaml、
+# .vercel-cli-data（CLI token）推進部署源碼。改為先排除根目錄全部，只放行構建/執行期真正需要的。
+# 新增根目錄檔案若站點執行期要讀（process.cwd() + 路徑），必須在這裡加 ! 放行。
+/*
+!/src/
+!/public/
+!/db/
+!/worker/
+!/package.json
+!/package-lock.json
+!/pnpm-lock.yaml
+!/pnpm-workspace.yaml
+!/next.config.mjs
+!/next-env.d.ts
+!/tsconfig.json
+!/tailwind.config.ts
+!/postcss.config.mjs
+!/components.json
+!/vercel.json
+!/.eslintrc.json
+!/.node-version
+!/node_modules/
+
 # Remote builds install dependencies themselves. Local `vercel build --prod` emits
 # filePathMap entries for these traced runtime packages, so prebuilt uploads must
 # include exactly this allowlist instead of dropping node_modules wholesale.

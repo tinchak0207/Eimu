@@ -1,6 +1,7 @@
 // session-read.ts —— 自 index.ts 第二階段 Wave3 無損抽取（2026-09-19）：會話讀取與中止——
 // handleTranscript/handleAbortSession＋前導註釋（原 index.ts 5531–5600 行，逐行原樣搬運）。
 import { jsonError } from "./gw-lib.ts"
+import { isSystemWakeText } from "./system-wake.ts"
 import { getOwnedSession } from "./sessions-core.ts"
 import { opencodeFetch, opencodeJson } from "./opencode-client.ts"
 import { stripStaleTurnTextFromReplay } from "./sse-core.ts"
@@ -36,7 +37,8 @@ export async function handleTranscript(key: string, id: string, req: Request): P
   if (Array.isArray(msgs)) {
     const tail = msgs.slice(-limit)
     for (const m of tail) {
-      const role = m?.info?.role === "user" ? "user" : "assistant"
+      let role = m?.info?.role === "user" ? "user" : "assistant"
+      if (role === "user" && Array.isArray(m?.parts) && m.parts.some((p: any) => p?.type === "text" && isSystemWakeText(p.text))) role = "system"
       const parts: Array<{ type: "text"; text: string } | { type: "tool"; tool: string; input: unknown }> = []
       if (Array.isArray(m?.parts)) {
         for (const p of m.parts) {

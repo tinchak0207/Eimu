@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { applyExtendedDeadline, generationBudgetMs, shouldExtendQueueDeadline, shouldFailFastOnExhaustedSupply } from "./worker-service.ts";
+import { failFastClassForExhaustedSupply, applyExtendedDeadline, generationBudgetMs, shouldExtendQueueDeadline, shouldFailFastOnExhaustedSupply } from "./worker-service.ts";
 import type { GenerationJob } from "./types.ts";
 
 function job(overrides: Partial<GenerationJob> = {}): GenerationJob {
@@ -144,4 +144,13 @@ test("欠費無替補即時失敗：別的健康供應商只是忙、或上次�
   assert.equal(shouldFailFastOnExhaustedSupply({ lastFailureClass: "quota_exhausted", diagnosisReason: "capacity_saturated" }), false);
   assert.equal(shouldFailFastOnExhaustedSupply({ lastFailureClass: "overloaded", diagnosisReason: "suppliers_cooldown" }), false);
   assert.equal(shouldFailFastOnExhaustedSupply({ lastFailureClass: null, diagnosisReason: "supplier_excluded" }), false);
+});
+
+test("H-fix：pricing_config 無替補 → 以 pricing_config 真因即時終結，不空轉", () => {
+  for (const diagnosisReason of ["supplier_excluded", "suppliers_cooldown", "accounts_unhealthy"] as const) {
+    assert.equal(failFastClassForExhaustedSupply({ lastFailureClass: "pricing_config", diagnosisReason }), "pricing_config", diagnosisReason);
+    assert.equal(failFastClassForExhaustedSupply({ lastFailureClass: "quota_exhausted", diagnosisReason }), "quota_exhausted", diagnosisReason);
+  }
+  assert.equal(failFastClassForExhaustedSupply({ lastFailureClass: "pricing_config", diagnosisReason: "capacity_saturated" }), null);
+  assert.equal(failFastClassForExhaustedSupply({ lastFailureClass: "overloaded", diagnosisReason: "supplier_excluded" }), null);
 });

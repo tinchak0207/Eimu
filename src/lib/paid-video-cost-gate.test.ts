@@ -26,12 +26,12 @@ import type { SupplierGenerationInput, SupplierRecord } from "./generation-core/
 
 test("expected-pass：白名單 model + 顯式 720p + catalog 內時長 + 已核價三元組 → 放行並回正確單價", () => {
   const minimax = evaluatePaidVideoSubmission({
-    supplierModelId: "minimax-h3-933-2k-支持真人",
+    supplierModelId: "minimax-h3-a",
     resolution: "720p",
     seconds: 5,
   });
   assert.equal(minimax.allowed, true);
-  assert.equal(minimax.allowed === true && minimax.triple.unitCostCny, 1.1);
+  assert.equal(minimax.allowed === true && minimax.triple.unitCostCny, 1.6);
   assert.equal(minimax.allowed === true && minimax.triple.billingBasis, "per_call");
 
   const seedance = evaluatePaidVideoSubmission({
@@ -58,7 +58,7 @@ test("expected-pass：每條映射 model 的 catalog 最長時長通過（10–3
     { model: "seedance-2.0-900-特惠", resolution: "480p", min: 10, max: 15 },
     { model: "seedance-2.5-900-特惠", resolution: "480p", min: 10, max: 30 },
     { model: "seedance-2.5-1010-特惠", resolution: "720p", min: 10, max: 29 },
-    { model: "minimax-h3-933-2k-支持真人", resolution: "720p", min: 4, max: 15 },
+    { model: "minimax-h3-a", resolution: "720p", min: 4, max: 15 },
   ];
   for (const item of expected) {
     const entry = PAID_VIDEO_PRICED_TRIPLES.find((triple) => triple.supplierModelId === item.model);
@@ -126,7 +126,7 @@ test("陰性②：resolution 缺省／空字串 → 拒收（上游缺省＝4k�
 test("陰性③：4K（及 2k/1080p 等高價檔位）無條件拒收", () => {
   for (const resolution of ["4k", "2k", "1080p", "4K", "540p", "360p"]) {
     const decision = evaluatePaidVideoSubmission({
-      supplierModelId: "minimax-h3-933-2k-支持真人", // model 名帶 2k 也不許升檔
+      supplierModelId: "minimax-h3-a", // 2k 等高價檔位無條件拒收
       resolution,
       seconds: 10,
     });
@@ -138,7 +138,7 @@ test("陰性③：4K（及 2k/1080p 等高價檔位）無條件拒收", () => {
   assert.deepEqual([...PAID_VIDEO_ALLOWED_RESOLUTIONS], ["480p", "720p"]);
 
   assert.throws(
-    () => assertPaidVideoSubmissionAllowed({ supplierModelId: "minimax-h3-933-2k-支持真人", resolution: "4k", seconds: 10 }),
+    () => assertPaidVideoSubmissionAllowed({ supplierModelId: "minimax-h3-a", resolution: "4k", seconds: 10 }),
     (error: unknown) =>
       error instanceof SupplierRequestError && error.status === 400 && error.message.includes("resolution_not_allowed"),
   );
@@ -164,7 +164,7 @@ test("陰性④：未核價／未生成三元組拒收（含 catalog 最長時�
   assert.equal(beyondCatalogMax.allowed === false && beyondCatalogMax.reason, "triple_not_priced");
 
   // (c) 未映射上游 model（grok-video-1.5 在名單內但無公開 model id ⇒ 零三元組 ⇒ 拒收）
-  for (const unmapped of ["grok-video-1.5", "minimax-h3-a", "seedance-2.0-933-特惠"]) {
+  for (const unmapped of ["grok-video-1.5", "minimax-h3-933-2k-支持真人", "seedance-2.0-933-特惠"]) {
     const verdict = evaluatePaidVideoSubmission({ supplierModelId: unmapped, resolution: "720p", seconds: 10 });
     assert.equal(verdict.allowed, false, `${unmapped} 未生成三元組應被拒`);
     assert.equal(verdict.allowed === false && verdict.reason, "triple_not_priced");
@@ -393,7 +393,6 @@ test("V-03 核價：gway 同名模型按 gway claim 價（0.6/0.8/1.5/1.0），x
     ["seedance-2.0-900-特惠", 0.6],
     ["seedance-2.5-900-特惠", 0.8],
     ["seedance-2.5-1010-特惠", 1.5],
-    ["minimax-h3-933-2k-支持真人", 1.0],
   ];
   for (const [model, price] of gway) {
     assert.equal(resolvePaidVideoUnitPrice("gway", model)?.unitCostCny, price, `gway ${model}`);
@@ -403,7 +402,7 @@ test("V-03 核價：gway 同名模型按 gway claim 價（0.6/0.8/1.5/1.0），x
     ["seedance-2.0-900-特惠", 0.7],
     ["seedance-2.5-900-特惠", 0.9],
     ["seedance-2.5-1010-特惠", 1.6],
-    ["minimax-h3-933-2k-支持真人", 1.1],
+    ["minimax-h3-a", 1.6],
   ];
   for (const [model, price] of xiaoyxiao) {
     assert.equal(resolvePaidVideoUnitPrice("xiaoyxiao", model)?.unitCostCny, price, `xiaoyxiao ${model}`);

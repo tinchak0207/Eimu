@@ -104,7 +104,7 @@ export function videoTierPerSecondSync(
       ? node.metadata.model
       : graph
         ? resolveNodeModel((node as { id?: string }).id ?? "", node, graph)
-        : "minimax-h3"
+        : "seedance-2.0"
   const catalogTable = priceCatalogPerSecondCache?.table[model] ?? null
   return resolveVideoPerSecond(
     node as never,
@@ -167,7 +167,7 @@ export async function videoTierPerSecond(
       ? node.metadata.model
       : graph
         ? resolveNodeModel((node as { id?: string }).id ?? "", node, graph)
-        : "minimax-h3"
+        : "seedance-2.0"
   // catalog 快取：先查一次目錄（同一 apiKey 10 分鐘快取，見 catalogVideoPerSecondCoins）——
   // 本次事故修復：seedance-2.0 等無 MiniMax 硬編碼檔位的模型，從 /v1/models 的
   // x_coins_per_second 同源取（與扣費同一函式 generationCoins），不再被錯誤套用

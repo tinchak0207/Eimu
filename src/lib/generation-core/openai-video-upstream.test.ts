@@ -672,3 +672,27 @@ test("上游 403 HTML 頁（nginx 封 IP）→ 401 鑑權失敗讓帳號冷卻�
     globalThis.fetch = originalFetch;
   }
 });
+
+for (const [label, resultUrls, expected] of [
+  ["陣列", ["", "ftp://bad", "https://gway.example.com/out/a.mp4", "https://gway.example.com/out/b.mp4"], "https://gway.example.com/out/a.mp4"],
+  ["字串", "https://gway.example.com/out/s.mp4", "https://gway.example.com/out/s.mp4"],
+] as const) {
+  test(`gway 形狀：completed 只有 result_urls（${label}）也能出片`, async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+      if (String(url).endsWith("/videos") && String(init?.method ?? "") === "POST") {
+        return jsonResponse(200, { id: TASK_ID, object: "video", model: "sd12-seedance-2.0", status: "queued", progress: 0 });
+      }
+      return jsonResponse(200, { id: TASK_ID, object: "video", status: "completed", progress: 100, result_urls: resultUrls });
+    }) as typeof fetch;
+    try {
+      process.env.CANGYUANSUANLI_API_KEY = "ck-test-key";
+      const output = await generateWithOpenaiVideo(supplier(), videoInput());
+      assert.equal(output.url, expected);
+      assert.equal(output.providerTaskId, TASK_ID);
+    } finally {
+      delete process.env.CANGYUANSUANLI_API_KEY;
+      globalThis.fetch = originalFetch;
+    }
+  });
+}
