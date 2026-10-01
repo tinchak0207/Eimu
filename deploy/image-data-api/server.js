@@ -8,7 +8,7 @@ const PORT = Number(process.env.PORT || 8082);
 const DATA_DIR = process.env.DATA_DIR || "/data/files";
 const PUBLIC_BASE = (process.env.PUBLIC_BASE_URL || "").replace(/\/+$/, "");
 const API_KEY = process.env.IMAGE_DATA_API_KEY || "";
-const MAX_BODY_BYTES = 25 * 1024 * 1024;
+const MAX_BODY_BYTES = 100 * 1024 * 1024;
 
 const pool = new Pool({
   host: process.env.PGHOST || "sub2api-vps-postgres",
