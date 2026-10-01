@@ -199,7 +199,7 @@ Claude Code、Cursor、Codex，复制一行指令，就能直接调用 Eimu—�
 ---
 
 ¹ 3D 白模作为参考图出图已可用；由 3D 机位直接驱动成片尚在验证，对外文案暂不宣称。
-² 图像类实体卡已可用；音色卡的 `@` 引用尚在验证。
+² 图像类实体卡已可用；音色卡的 `@` 引用已可用（站点公开 `POST /v1/tts/generations` 真跑成功：mp3 实测 2.52 秒、41,599 bytes、sha256 相符，扣费 0.011 币＝11 字 × 0.001，账本 commit 5,500 quota 逐字对得上；能力列 `tts-1 | tts | enabled | current`，渠道 `harness-tts` 走上游 harness 网关 edge-tts）。边界：网关单次上限 2000 字、站点路由上限 5000 ⇒ 2001–5000 字在网关诚实 400 并退费。
 
 ---
 
@@ -226,12 +226,12 @@ Claude Code、Cursor、Codex，复制一行指令，就能直接调用 Eimu—�
 
 | 项目 | 现况 | 兑现条件 |
 | --- | --- | --- |
-| 4K 生图与 4K 放大 | 超分路径已有真交付证据（2026-10-01 下载历史成品实测 PNG image data, 4096 x 4096, 8-bit/color RGB, 17,967,811 bytes，sha256 与 artifact 列一致，gpt-image-2 超分／upscale_tier=4k）；但原生 resolution=4k 从未交出 4K：另两笔标 resolution=4k 的历史成品实测 1376×768 与 1672×941，该字段不可当证据；seedream-5.0-lite 4K 真单被上游 503（new-api default 群组完全没有任何 seedream id），失败单未扣费（账本 delta 0） | 原生 4K 交出一张实测 4096 真档，或把对外 4K 标签收敛到超分路径 |
+| 4K 生图与 4K 放大 | 超分路径已有真交付证据（2026-10-01 下载历史成品实测 PNG image data, 4096 x 4096, 8-bit/color RGB, 17,967,811 bytes，sha256 与 artifact 列一致，gpt-image-2 超分／upscale_tier=4k）；4K 放大闸已开（控面 `UPSCALE_BACKEND=gpt-image-2`、`UPSCALE_4K_UPSTREAM=1`；零成本 oracle 由 `upscale_4k_upstream_unverified` 转 `invalid_image` 证明）；收费已随后端对齐（gpt-image-2 档位 credit 1k/2k/4k ⇒ 1/2/8 币；legacy pixai-bridge 维持 0.001；上游任务仍以 `billingAmount:0` 提交不双扣）；4K 成品持久化上限已修（413 出自应用层 `image-data-api` 的 `MAX_BODY_BYTES` 25 MiB，非 nginx／CF，已提到 100 MiB，实测 26MB／30MB 可过；反证是 kv 内 3039 笔成品最大仅 17.9MB、无任何 >20MB 纪录）；但端到端仍未交付，瓶颈已从持久化移到供应商路由：`sub2api` 无 gpt-image-2 渠道（422 `no channel candidates`，全链 hard stop）、`yyds` network timeout、`adobe2api` 503 overloaded，三次尝试皆全额退款（0 币），对外码 `upscale_backend_failed`；次级上限：kv 以 postgres BYTEA 全量存，>~40MB 写入会把 backend 打死，实务安全上限约 30–40MB（未擅自转档或分片）；原生 resolution=4k 从未交出 4K：另两笔标 resolution=4k 的历史成品实测 1376×768 与 1672×941，该字段不可当证据；seedream-5.0-lite 4K 真单被上游 503（new-api default 群组完全没有任何 seedream id），失败单未扣费（账本 delta 0） | 原生 4K 交出一张实测 4096 真档，或把对外 4K 标签收敛到超分路径 |
 | 3D 场景直出影片 | 工具链在，缺端到端出片 | 一支由 3D 机位驱动的真实成片 |
-| 音色卡 `@` 引用 | 「上游 502，无可用账号」已被推翻：502 是 FlowMusic2API（音乐通道），TTS 上游自 08-30 起可用（昨日实跑 6 行台词→6 个 distinct 音档）；真缺口是扣费——站点 TTS 原本 0 额试运行价，已接真计费 0.001 币/字（repo，未部署） | 一段真生成音频＋扣费记录（需部署） |
+| 音色卡 `@` 引用 | 「上游 502，无可用账号」已被推翻：502 是 FlowMusic2API（音乐通道），TTS 上游自 08-30 起可用（昨日实跑 6 行台词→6 个 distinct 音档）；站点公开 `POST /v1/tts/generations` 过去对任何 model 都回 `model_unsupported`，现已接上真供给并真跑成功：新渠道 `harness-tts`（走既有渠道注册表）认领 `tts-1`／kind=tts，上游为已验证的 harness 网关 edge-tts 路径；控面 seed 后能力列 `tts-1 | tts | enabled | current`；幻影 model id `tts-default` 收敛为真源 `tts-1`；已知边界：网关单次上限 2000 字，站点路由上限 5000 ⇒ 2001–5000 字会在网关诚实 400（退费，不假成功） | 已达成：2026-10-01 真生成 mp3 实测 2.52 秒、41,599 bytes、sha256 相符，扣费 0.011 币（11 字 × 0.001），账本 commit 5,500 quota 逐字对得上 |
 | 项目风格绑定全案套用 | 前端生成请求已带 style_id（第一波接线，含 agent 的 run_generation 路径）；只有测试绿，尚无多图样本 | 绑定后同项目多张出图样本 |
 | 分镜／资产确认闸（未确认不许往下） | 已在生产真的拦下：2026-10-01 一次 run 连拦两道（剧本闸、故事板闸），gateConfirm.status 由 pending 转 approved 后才续跑；journalctl 的 collaborate gate paused 计数=2；负控制（preset 同流程）=0；零花费、设定改完逐字还原零漂移 | 已达成：2026-10-01 生产拦下（连拦两道，负控制 0） |
-| 团队席位购买 | 下单→收款→履约全链已接通（notify seat: 分支与金币套餐分离、收银台 seat: 入口、金额覆核、含币额上限 300/1000/3000 币）；九格定价已落地 src/lib/team-seat-pricing.ts（轻量 27/73/259、团队 85/230/816、旗舰 240/648/2304）；有 PRD docs/prd/team-seat-prd.md。尚未部署（Vercel 与控制面须原子部署，否则收得到钱、配额入不了账） | 一笔真实席位成交入账 |
+| 团队席位购买 | 下单→收款→履约全链已接通（notify seat: 分支与金币套餐分离、收银台 seat: 入口、金额覆核、含币额上限 300/1000/3000 币）；九格定价已落地 src/lib/team-seat-pricing.ts（轻量 27/73/259、团队 85/230/816、旗舰 240/648/2304）；有 PRD docs/prd/team-seat-prd.md。已部署：6 个 commit 推到 github/image（HEAD 4e74140f），控制面 `DEPLOYED 4e74140f`（postcheck 4 OK、nginx 只 reload），Vercel 生产 `Ready` 且 alias `eimu.dev`；部署后以真 key 打 `POST /v1/team/seats/order` 回真报价（`unitPrice 85`、`totalPrice 85`、`out_trade_no TS889FC0CC22FEF909`、`payment {payable:true, wired:true}`；未收款、无副作用） | 一笔真实席位成交入账 |
 | 用户投稿案例上首页 | **不做**：不接受任何自定義用戶發布內容（暴君鐵律） | —（不排期） |
 | 时装域（试穿、修手） | 「8 个工具只有 1 个有真能力」已推翻（那是 08-26 宣告层旧账）：2026-10-01 8 支逐支真 invoke 完成，6 支零成本有真产物 oracle（rembg 那支验 alpha 分布、PIL 拼贴验尺寸恰等公式、reflow 验实测比例），2 支为诚实替代（virtual_tryon、hand_contact_repair 档内自承「非专用模型」，付费段只跑免费 dry_run），0 支不可跑 | 专用模型替代是否要接专用上游＝产品决策 |
 | art-style 模板 | 已接线：art-style 工具集纳入 video-director Expert toolIds（2026-10-01）——缺口在 Expert toolIds（八个 Expert 原本全都 image_generate:false），已把 6 件工具纳入 video-director 并用生成指令重生导出物；真单已验：真图 1024×1024 PNG、账本 delta 0.5 币、单次提交无重试 | 模板全 8 环端到端跑完（当前只验单张真产物的生图跳）；模板 config 默认渠道 pixai-tsubaki2 已判死，换活模型属产品决策 |
