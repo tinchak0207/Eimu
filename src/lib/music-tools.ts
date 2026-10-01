@@ -756,10 +756,6 @@ export const musicGenTool: MusicToolDef = {
         transcribedAbcSha256 = createHash("sha256").update(transcribed.abc, "utf8").digest("hex")
         transcribeWarnings = transcribed.warnings
       }
-      // 實際送生成的樂譜指紋：帶 abc＝委託譜；翻唱＝扒譜產物（與 transcribed_abc_sha256 同值）。
-      const effectiveAbcSha256 = effectiveAbc
-        ? createHash("sha256").update(effectiveAbc, "utf8").digest("hex")
-        : null
 
       // ── 生成＋失敗回落（2026-09-19）────────────────────────────────────────
       // yue2 啟用且 generateYue2Track 拋錯（網路層/超時/非 2xx）→ 若 FlowMusic 已配置，

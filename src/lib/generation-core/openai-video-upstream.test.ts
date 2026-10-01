@@ -356,7 +356,7 @@ test("參考圖透傳 reference_image_urls（≤4）", async () => {
 
 test("失敗：任務 failed 拋 SupplierRequestError 帶上游錯誤", async () => {
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+  globalThis.fetch = (async (url: RequestInfo | URL, _init?: RequestInit) => {
     if (String(url).endsWith("/videos")) {
       return jsonResponse(200, { id: TASK_ID, status: "queued" });
     }

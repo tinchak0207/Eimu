@@ -2,8 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  FILMERA_IMAGE_MODEL,
-  FILMERA_VIDEO_MODEL,
   generateWithFilmera,
   isFilmeraModel,
   onFilmeraTokenRotated,
@@ -83,7 +81,7 @@ function input(modelId: string, kind: "image_generate" | "video_generate" = "ima
 function mockFetch(routes: Array<{ match: (url: string) => boolean; body: unknown; status?: number }>) {
   const original = globalThis.fetch;
   const calls: string[] = [];
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+  globalThis.fetch = (async (input: RequestInfo | URL, _init?: RequestInit) => {
     const url = String(input);
     calls.push(url);
     const route = routes.find((r) => r.match(url));

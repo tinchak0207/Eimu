@@ -17,7 +17,6 @@ import type { CharacterCard } from "@/lib/character-cards";
 import type { CanvasScriptType } from "@/lib/canvas/project-narration";
 import { compactStoryboardShot, type StoryboardScriptShot } from "@/lib/storyboard-contract";
 import type {
-  CanvasAgentOp,
   CanvasAgentOpsEvent,
   CanvasConnection,
   CanvasEpisode,

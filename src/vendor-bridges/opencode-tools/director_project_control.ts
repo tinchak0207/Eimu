@@ -1,5 +1,5 @@
 import { tool } from "@opencode-ai/plugin/tool"
-import { ok, fail, directorFetch, directorFail, guardFail } from "../lib/director-common"
+import { ok, fail, directorFetch, guardFail } from "../lib/director-common"
 
 // 3D 导演台工程控制（片4，2026-09-02）。kunpeng projectControlTool 的三个 operation 属
 // 前端运行时命令（switch-workshop-shot / recognize-storyboard / repair-scene，dispatchDirectorRuntimeCommand），

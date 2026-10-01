@@ -33,7 +33,7 @@ import {
   mountAssetWithCopy,
   mountCopyIds,
 } from "./asset-library";
-import { __resetAssetScopeStoreForTests, grantAssetShare, listAssetMounts } from "./asset-scope-store";
+import { __resetAssetScopeStoreForTests, listAssetMounts } from "./asset-scope-store";
 import { __resetAssetPackStoreForTests, deleteAssetPacks, normalizeAssetPack, saveAssetPack } from "./asset-pack-store";
 import {
   __resetCharacterCardStoreForTests,

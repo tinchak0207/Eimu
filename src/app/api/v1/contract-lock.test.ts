@@ -470,7 +470,7 @@ test("鐵律②runtime：跨 tenant 同名 Idempotency-Key 不衝突（tenant �
 });
 
 test("鐵律②source：三個 generations 路由讀 Idempotency-Key 頭、衝突回 409 idempotency_key_reused、202 體與 Location 同源同一 job", () => {
-  for (const [relPath, resource] of [
+  for (const [relPath, _resource] of [
     [GENERATIONS, "images"],
     [VIDEOS, "videos"],
     [TTS, "tts"],

@@ -15,7 +15,7 @@
 //     防止把一次性的噪音当成稳定规律。
 
 import { randomBytes } from "node:crypto";
-import { del, get, list, put } from "@/lib/blob-backend";
+import { get, put } from "@/lib/blob-backend";
 import { getGenerationSql } from "@/lib/generation-core/database";
 
 // ─────────────────────────── 类型

@@ -15,7 +15,7 @@
 //
 // 本元件不得殘留硬編用戶可見字串。
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { ArrowLeft, Ban, ChevronDown, CornerUpLeft, GitBranch, HelpCircle, ShieldAlert, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -161,8 +161,6 @@ export function LineageDrawer({ host, hostKindLabel, onClose, onJump }: LineageD
     status: "loading",
     data: null,
   });
-  const closedRef = useRef(false);
-
   useEffect(() => setMounted(true), []);
   // host 變化（換卡重開）重置鉆入與深度。
   useEffect(() => {
@@ -218,6 +216,7 @@ export function LineageDrawer({ host, hostKindLabel, onClose, onJump }: LineageD
     <div className="fixed inset-0 z-50" role="presentation">
       <div className="absolute inset-0 bg-[rgba(31,34,48,0.45)] backdrop-blur-md" onClick={onClose} />
       <aside
+        role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
         className="lg-sheet absolute inset-y-0 right-0 flex w-full max-w-sm flex-col rounded-l-ios-2xl p-0"

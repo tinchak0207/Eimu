@@ -12,12 +12,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 (globalThis as unknown as Record<string, unknown>).React ??= React;
 
 // 罪状 1/4 行为断言用的纯函数（解析与 reducer 都不碰 DOM，node --test 直测）。
-import {
-  VideoBubble,
-  groupAttachmentRefs,
-  groupsNeedTicket,
-  parseUserAttachmentBlock,
-} from "./AgentAttachmentCards";
+import { parseUserAttachmentBlock } from "./AgentAttachmentCards";
 import {
   AgentSubagentBar,
   MARQUEE_HARD_CAP,
@@ -29,9 +24,7 @@ import { AgentAudioCard } from "./AgentAudioCard";
 import { AgentBatchProgress } from "./AgentBatchProgress";
 import { AgentMessageBubble } from "./AgentMessageBubble";
 import { reportPreview } from "./AgentSubagentReportCard";
-import { submitConfirmDecision } from "./AgentConfirmCard";
-import { submitQuestionAnswer } from "./AgentQuestionCard";
-import { computeCanSend, hasPendingAttachments, nextSendBusy, AgentComposer } from "./AgentComposer";
+import { nextSendBusy, AgentComposer } from "./AgentComposer";
 import Module, { createRequire } from "node:module";
 
 // AgentChatPanel.tsx 唯一带副作用 `import "./agent-chat.css"` 的组件文件——
@@ -45,7 +38,7 @@ import Module, { createRequire } from "node:module";
   (m as { exports: unknown }).exports = {};
 };
 const requireHere = createRequire(import.meta.url);
-const { resolveConfirmGroup, exampleChipState } = requireHere("./AgentChatPanel.tsx") as {
+const { exampleChipState } = requireHere("./AgentChatPanel.tsx") as {
   resolveConfirmGroup: (
     requestIds: string[],
     approved: boolean,
@@ -61,7 +54,6 @@ import { agentChatReducer, appendUserTurn, lastNonEmptyLine } from "../../lib/ag
 import {
   EMPTY_AGENT_CHAT_STATE,
   type AgentAssistantTextItem,
-  type AgentAttachmentRef,
   type AgentAudioItem,
   type AgentSseEvent,
   type AgentSubagentItem,
@@ -352,9 +344,13 @@ test("D-17 有存档时默认开新对话，不拦人做选择题", () => {
    * 仍静默续上（sessionTouchedInThisVisit 时 resumable 根本不会被设置）。
    */
   assert.match(surface, /resumable,/);
-  assert.match(surface, /discardAndStartNew,/);
   // mount 后发现存档 → 直接开新会话；深链（initialSessionId）让路给
-  // switchSession，避免建号赛跑。discardAndStartNew 保留在 hook 里但已无 UI 调用方。
+  // switchSession，避免建号赛跑。（2026-10-01 lint 清理移除了 AgentChatSurface
+  // 未使用的 discardAndStartNew 解構項——该識別字在 HEAD 就已是「hook 保留、
+  // 零 UI 调用方」，此處原本的字串斷言只是對死識別字的源碼探針，非行為斷言，
+  // 故一併移除；D-17 的真契約由本測試其餘斷言承載：resumable / didAutoFreshStartRef /
+  // void startNewSession() / if (initialSessionId) return; / doesNotMatch(void resume()) /
+  // 以及對 setHistorySnapshot 快照寫入的否定斷言。）
   assert.match(surface, /didAutoFreshStartRef/);
   assert.doesNotMatch(surface, /setHistorySnapshot\(\{ itemCount: resumable\.itemCount, savedAt: resumable\.savedAt \}\)/);
   assert.doesNotMatch(surface, /void resume\(\)/);

@@ -1,5 +1,5 @@
 import { tool } from "@opencode-ai/plugin/tool"
-import { ok, fail, directorFetch, directorFail, guardFail, activePlanOf, resolveShot, resolveAction, num, bool, hasVecParams, vecFromParams, projectFrameToSec, newKfId, actionFrameRangeHint } from "../lib/director-common"
+import { ok, fail, directorFetch, guardFail, activePlanOf, resolveShot, resolveAction, bool, hasVecParams, vecFromParams, projectFrameToSec, newKfId, actionFrameRangeHint } from "../lib/director-common"
 import { smoothPathFrame, cornerPathFrame } from "../lib/director/pathCurve"
 import { findPose } from "../lib/director/poses"
 import type { DirectorMotionKeyframe, DirectorKeyframeInterpolation } from "../lib/director/types"

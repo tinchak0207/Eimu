@@ -353,6 +353,7 @@ function ImageLightbox({ src, alt, onClose }: { src: string; alt: string; onClos
           轻点关闭 · 双指缩放
         </div>
       </div>
+      {/* eslint-disable-next-line @next/next/no-img-element -- 燈箱原圖雙指縮放（blob:/proxy 來源），next/image 無法優化且固定寬高推導會綁死縮放自由度 */}
       <img
         ref={imgRef}
         src={src}

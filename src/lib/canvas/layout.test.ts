@@ -311,7 +311,6 @@ test("bezierPath 長距離前向跳線走頂部拱橋（頂心出頂心入），
 
 test("gridBackground blank 空物件、太密回空、dots/lines 各自漸層、負視口取正模", () => {
   assert.deepEqual(gridBackground({ x: 0, y: 0, k: 1 }, "blank"), {});
-  const size = CANVAS_GRID_BASE * 0.1; // 4.8 < 6 → 直接不畫
   assert.deepEqual(gridBackground({ x: 0, y: 0, k: 0.1 }, "dots"), {});
   assert.deepEqual(gridBackground({ x: 0, y: 0, k: 0.1 }, "lines"), {});
 

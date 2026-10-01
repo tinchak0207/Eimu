@@ -260,7 +260,7 @@ async function buildMixFlow(sessionId: string): Promise<{ report: MixReport; mix
 
 /** GET /agent/v1/timeline/mix：只量測不落盤。 */
 export async function analyzeMix(sessionId: string): Promise<MixReport> {
-  const { report, mixPath, workDir } = await buildMixFlow(sessionId)
+  const { report, workDir } = await buildMixFlow(sessionId)
   if (workDir) await rm(workDir, { recursive: true, force: true }).catch(() => {})
   return report
 }

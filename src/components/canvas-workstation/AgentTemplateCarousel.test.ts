@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { AGENT_TEMPLATES, AGENT_TEMPLATE_DOMAIN_LABELS } from "@/lib/agent-templates";
+import { AGENT_TEMPLATES } from "@/lib/agent-templates";
 
 function read(relPath: string) {
   return readFileSync(join(process.cwd(), relPath), "utf8");

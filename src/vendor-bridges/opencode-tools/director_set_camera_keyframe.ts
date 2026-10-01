@@ -1,5 +1,5 @@
 import { tool } from "@opencode-ai/plugin/tool"
-import { ok, fail, directorFetch, directorFail, guardFail, activePlanOf, resolveShot, num, bool, hasVecParams, vecFromParams, projectFrameToSec, newCkfId, shotFrameRangeHint } from "../lib/director-common"
+import { ok, fail, directorFetch, guardFail, activePlanOf, resolveShot, num, bool, vecFromParams, projectFrameToSec, newCkfId, shotFrameRangeHint } from "../lib/director-common"
 import type { DirectorCameraKeyframe, DirectorKeyframeInterpolation } from "../lib/director/types"
 
 // 3D 导演台摄影机 K 帧（片4，2026-09-02）。schema 照搬 kunpeng cameraKeyframeTool；

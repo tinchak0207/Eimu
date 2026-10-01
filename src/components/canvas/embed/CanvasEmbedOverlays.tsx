@@ -600,6 +600,7 @@ export function CanvasEmbedOverlays({
                 key={p.id}
                 type="button"
                 role="option"
+                aria-selected={false}
                 onClick={() => {
                   void canvas.openSavedCanvas(p.id).then(() => onCloseHistory());
                 }}

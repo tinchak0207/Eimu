@@ -13,7 +13,7 @@
 // 定時任務；過期只在讀取餘額/預檢時由 computePoolBalances(entries, now) 判定。
 // 本檔唯一與時間有關的寫入是「續期替換」（有人按了續費，是事件不是時間流逝）。
 
-import { fetchGatewayUser, listGatewayRedemptions, type GatewayAdminUser, type GatewayRedemption } from "@/lib/gateway-admin";
+import { listGatewayRedemptions, type GatewayAdminUser, type GatewayRedemption } from "@/lib/gateway-admin";
 import {
   SUBSCRIPTION_FULFILLMENT_CHANNEL,
   SUBSCRIPTION_RENEWAL_MODE,

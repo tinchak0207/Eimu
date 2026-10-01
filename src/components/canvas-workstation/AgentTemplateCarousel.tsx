@@ -568,7 +568,7 @@ export function AgentTemplateCarousel({ templates, onUseTemplate }: AgentTemplat
       if (panelTimerRef.current) clearTimeout(panelTimerRef.current);
       panelTimerRef.current = setTimeout(() => setPanel(frontIndex), PANEL_MS);
     }
-  }, [cases]);
+  }, [cases, COUNT, STEP]);
 
   /* ── 弹簧积分器 ──
      ẍ = −k(x−target) − c·ẋ，c = 2ζ√k。ζ<1 让末端有极轻的 overshoot，
@@ -682,7 +682,7 @@ export function AgentTemplateCarousel({ templates, onUseTemplate }: AgentTemplat
 
   const goTo = useCallback((index: number) => {
     snap(nearestAngleFor(index, targetRef.current, STEP));
-  }, [snap]);
+  }, [snap, STEP]);
 
   const step = useCallback((dir: number) => {
     snap(Math.round(targetRef.current / STEP) * STEP + dir * STEP);
@@ -736,7 +736,7 @@ export function AgentTemplateCarousel({ templates, onUseTemplate }: AgentTemplat
     }
     glowRef.current?.style.setProperty("--case-glow-rgb", rgbTriple(cases[0].glow));
     paint(0);
-  }, [cases, paint]);
+  }, [cases, paint, COUNT]);
 
   /* 只在这一段进入视野时累计滚动量；离开视野后滚动与它无关。 */
   useEffect(() => {

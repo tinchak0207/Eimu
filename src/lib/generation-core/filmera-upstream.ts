@@ -584,11 +584,9 @@ export async function generateWithFilmera(
 
   // 完整 session cookie（含 user）——认证必需
   const user = state.user ?? await fetchFilmeraUser(config, token, internalSignal);
-  const cookie = cookieValue(token, refreshToken, expiresAt, user);
 
   // 上下文自愈：動態解析 projectId/imageNodeId（env 只是 cache 起點）
   const context = await ensureFilmeraContext(config, token, user, internalSignal);
-  const genNodeId = isVideo ? (config.videoNodeId || context.imageNodeId) : context.imageNodeId;
 
   // 1) 改写节点 prompt + modelId（filmera 生成用的是节点的 data.prompt；图片/视频节点不同）
   //    500 時（跨帳號節點失效等）強制重建上下文重試一次

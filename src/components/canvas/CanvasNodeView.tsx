@@ -221,7 +221,6 @@ export function CanvasNodeView({
    * 着色克制（bg 12% + 文字色），不喧宾夺主。
    */
   const typeBadge = (() => {
-    const base = "shrink-0 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10.5px] font-medium leading-none";
     switch (node.type) {
       case CanvasNodeType.Image:
         return { label: "生成", Icon: ImageIcon, cls: "bg-[rgba(52,199,89,0.12)] text-[#248A3D]", bar: "bg-[#248A3D]" };

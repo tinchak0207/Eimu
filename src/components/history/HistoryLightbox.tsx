@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, Bot, Check, ChevronLeft, ChevronRight, Coins, Download, GitBranch, Layers, Loader2, RotateCcw, SlidersHorizontal, Star, Trash2, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Coins, Download, GitBranch, Layers, Loader2, RotateCcw, SlidersHorizontal, Star, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   formatAbsoluteTime,

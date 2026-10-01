@@ -70,7 +70,7 @@ function userSearch(username: string, found: boolean): Response {
 }
 
 test("existing upstream account is reused without any create call", async () => {
-  const stub = withStubbedGateway((call) => userSearch("github_12345678", true));
+  const stub = withStubbedGateway((_call) => userSearch("github_12345678", true));
   try {
     const result = await ensureGatewayUserForOAuth({
       username: "github_12345678",

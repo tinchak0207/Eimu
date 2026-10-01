@@ -26,7 +26,7 @@ export function WalletBadge({ className, showTopUp = true, showCheckin = true }:
   const [plusOpen, setPlusOpen] = useState(false);
   const [canCheckin, setCanCheckin] = useState(false);
   const [checkinLoading, setCheckinLoading] = useState(false);
-  const [checkinDone, setCheckinDone] = useState(false);
+  const [, setCheckinDone] = useState(false);
   const [checkinRewardCount, setCheckinRewardCount] = useState<number | null>(null);
 
   // Check checkin status on mount

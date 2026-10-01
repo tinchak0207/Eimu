@@ -1,5 +1,5 @@
 import { tool } from "@opencode-ai/plugin/tool"
-import { ok, fail, directorFetch, directorFail, guardFail, activePlanOf } from "../lib/director-common"
+import { ok, fail, directorFetch, guardFail, activePlanOf } from "../lib/director-common"
 
 // 3D 导演台方案管理（片4，2026-09-02；R3 2026-09-03 补 add_plan）。schema 照搬 kunpeng managePlanTool；
 // add_plan=addPlan（bare 壳 {name, shots:[]}，gateway 本就会激活新方案，set_active=false 时建后切回原方案）；

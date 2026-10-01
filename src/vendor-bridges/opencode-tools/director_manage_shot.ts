@@ -1,5 +1,5 @@
 import { tool } from "@opencode-ai/plugin/tool"
-import { ok, fail, directorFetch, directorFail, guardFail, activePlanOf, resolveShot, num, framesToSec } from "../lib/director-common"
+import { ok, fail, directorFetch, guardFail, activePlanOf, resolveShot, num, framesToSec } from "../lib/director-common"
 import { cameraPatchFromTemplate } from "../lib/director/cameraTemplates"
 import type { DirectorSequenceShot } from "../lib/director/types"
 

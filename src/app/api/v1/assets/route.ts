@@ -16,7 +16,6 @@ import {
   normalizeAssetPack,
   saveAssetPack,
 } from "@/lib/asset-pack-store";
-import type { AssetPack } from "@/lib/asset-pack-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

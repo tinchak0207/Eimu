@@ -58,12 +58,12 @@ const FX_STUB_ERROR =
   '特效/花字渲染层未接入：纯拼接场景不需要；带字幕烧录需 Chromium worker 农场另立项（fx 渲染需 Chromium，harness 場景不支援）';
 
 /** TextClip → 完整舞台文档（vendor fxRender.ts:51 同签名） */
-export function buildTextClipDoc(t: TextClip, themeId?: string): FxDoc {
+export function buildTextClipDoc(_t: TextClip, _themeId?: string): FxDoc {
   throw new Error(FX_STUB_ERROR);
 }
 
 /** FxClip → 完整舞台文档（vendor fxRender.ts:74 同签名） */
-export function buildFxClipDoc(f: FxClip): FxDoc {
+export function buildFxClipDoc(_f: FxClip): FxDoc {
   throw new Error(FX_STUB_ERROR);
 }
 
@@ -74,17 +74,17 @@ export async function renderFxTimelineLayer(
   durationSec: number,
   signal?: AbortSignal,
   onProgress?: (p: FxTimelineProgress) => void,
-  opaqueBackground = false,
+  _opaqueBackground = false,
 ): Promise<FxLayerResult | null> {
   throw new Error(FX_STUB_ERROR);
 }
 
 export async function renderFxTimelineOpaqueSegments(
-  items: FxTimelineLayerItem[],
-  exportWidth: number,
-  fps: number,
-  signal?: AbortSignal,
-  onProgress?: (p: FxTimelineProgress) => void,
+  _items: FxTimelineLayerItem[],
+  _exportWidth: number,
+  _fps: number,
+  _signal?: AbortSignal,
+  _onProgress?: (p: FxTimelineProgress) => void,
 ): Promise<FxSegmentLayerResult[] | null> {
   throw new Error(FX_STUB_ERROR);
 }

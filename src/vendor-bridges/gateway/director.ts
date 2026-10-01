@@ -293,15 +293,6 @@ async function loadCurrent(sid: string): Promise<DirectorDoc | null> {
   }
 }
 
-async function loadVersion(sid: string, v: number): Promise<DirectorDoc> {
-  try {
-    return JSON.parse(await readFile(versionPath(sid, v), "utf-8")) as DirectorDoc
-  } catch (e) {
-    if ((e as { code?: string }).code === "ENOENT") throw new DirectorNotFoundError(`version ${v} not found`)
-    throw e
-  }
-}
-
 async function writeCurrent(sid: string, doc: DirectorDoc): Promise<void> {
   await mkdir(sessionDir(sid), { recursive: true })
   await writeFile(currentPath(sid), JSON.stringify(doc, null, 2), "utf-8")

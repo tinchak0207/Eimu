@@ -72,7 +72,11 @@ test("the result column is the canvas alone, with no duplicated chrome", () => {
   // 2026-08-21：overlay 向右 dock（right-0 + --ce-dock-left），面板不再蓋住畫布左緣節點。
   // 2026-08-25 canvas 常駐化：agent 模式右側恆為 canvas（resultMode 由 displayMode
   // 派生，不再有「助理左邊、圖片右邊」的中間態），CanvasEmbed 的關閉鈕退場。
-  assert.match(source, /const resultMode: "image" \| "canvas" = displayMode === "agent" \? "canvas" : "image"/);
+  // 2026-10-01 lint 清理移除了 ImagePlayground 未使用的 resultMode 宣告
+  // （HEAD 即只有宣告一處、零引用，語義由同行的 inCanvasWorkstation 承載）。
+  // 原本對 resultMode 的字串斷言只是對死識別字的源碼探針，非行為斷言，故一併
+  // 移除；「agent 模式右側恆為 canvas」的真契約由下方 inCanvasWorkstation /
+  // canvas-ws-overlay / CanvasEmbed / ImageDisplay 四條斷言承載。
   assert.match(source, /inCanvasWorkstation = displayMode === "agent"/);
   assert.match(source, /canvas-ws-overlay/);
   assert.match(source, /\{overlayContent \?\? <CanvasEmbed canvas=\{canvasHost\} expanded \/>\}/);

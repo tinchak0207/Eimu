@@ -198,7 +198,7 @@ test("production + 無後端：寫入路徑誠實失敗（帶非生產控制組�
   ];
 
   await withEnv({ NODE_ENV: "test", BLOB_ALLOW_MEMORY_FALLBACK: undefined }, async () => {
-    for (const [label, run, reset] of writes) {
+    for (const [_label, run, reset] of writes) {
       reset();
       await run(); // 控制組：輸入合法且非生產路徑可寫 → 不 reject
       reset();

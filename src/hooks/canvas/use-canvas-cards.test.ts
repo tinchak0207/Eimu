@@ -20,7 +20,6 @@ import type { CharacterCard } from "@/lib/character-cards";
 
 const IMG = "https://cdn.example.com/char.png";
 const IMG2 = "https://cdn.example.com/side.png";
-const IMG3 = "https://cdn.example.com/back.png";
 
 type NodeLike = { id: string; metadata?: object | null };
 type ConnLike = { fromNodeId: string; toNodeId: string };

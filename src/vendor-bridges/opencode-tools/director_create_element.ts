@@ -1,5 +1,5 @@
 import { tool } from "@opencode-ai/plugin/tool"
-import { ok, fail, directorFetch, directorFail, newElementId, vecFromParams, guardFail } from "../lib/director-common"
+import { ok, fail, directorFetch, newElementId, vecFromParams, guardFail } from "../lib/director-common"
 import { findPose } from "../lib/director/poses"
 import type { DirectorElement } from "../lib/director/types"
 

@@ -18,10 +18,6 @@ const WATERMARK_BOTTOM_OFFSET_START = 65;
 const WATERMARK_BOTTOM_OFFSET_END = 47;
 /** 修復區外擴像素，避免邊緣殘影。 */
 const PATCH_EXPAND_PX = 4;
-/** 反混合假設：水印為白色 alpha≈0.55 疊加。 */
-const BLEND_ALPHA = 0.55;
-/** 反混合後若修復區與周邊均值差超過此值，fallback 插值填充。 */
-const FALLBACK_MEAN_DELTA = 30;
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
@@ -257,9 +253,6 @@ function cleanPngBuffer(input: Buffer): Buffer {
   const py0 = Math.max(0, by0 - PATCH_EXPAND_PX);
   const py1 = Math.min(height - 1, by1 + PATCH_EXPAND_PX);
 
-  // 周邊 ring（修復區外擴 2px 的邊框，不含修復區本身）綠色通道均值，用於評估
-  const ring = ringMean(data, stride, channels, width, height, px0, py0, px1, py1);
-
   const patched = Buffer.from(data);
   // 水印是抗鋸齒文字：實心筆畫 alpha≈1.0（純白），反混合 (c-a*255)/(1-a) 對其
   // 無效（信息已丟失），固定 alpha 反推會放大噪聲。實測（1280x720 真圖）：
@@ -267,34 +260,6 @@ function cleanPngBuffer(input: Buffer): Buffer {
   bilinearFill(patched, data, stride, channels, width, height, px0, py0, px1, py1);
 
   return encodePng({ width, height, channels, data: patched });
-}
-
-/** 修復區外擴 2px 邊框的綠色通道均值。 */
-function ringMean(
-  data: Buffer,
-  stride: number,
-  channels: number,
-  width: number,
-  height: number,
-  x0: number,
-  y0: number,
-  x1: number,
-  y1: number,
-): number {
-  const rx0 = Math.max(0, x0 - 2);
-  const ry0 = Math.max(0, y0 - 2);
-  const rx1 = Math.min(width - 1, x1 + 2);
-  const ry1 = Math.min(height - 1, y1 + 2);
-  let sum = 0;
-  let count = 0;
-  for (let y = ry0; y <= ry1; y++) {
-    for (let x = rx0; x <= rx1; x++) {
-      if (x >= x0 && x <= x1 && y >= y0 && y <= y1) continue;
-      sum += data[y * stride + x * channels + 1];
-      count++;
-    }
-  }
-  return count > 0 ? sum / count : 0;
 }
 
 /**

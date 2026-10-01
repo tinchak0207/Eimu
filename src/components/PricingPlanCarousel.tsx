@@ -800,7 +800,7 @@ export function PricingPlanCarousel({
       if (panelTimerRef.current) clearTimeout(panelTimerRef.current);
       panelTimerRef.current = setTimeout(() => setPanel(frontIndex), PANEL_MS);
     }
-  }, [cases]);
+  }, [cases, COUNT, STEP]);
 
   /* ── 弹簧积分器（模板廊原样：dt 积分，与刷新率解耦）── */
   const tick = useCallback(() => {
@@ -903,7 +903,7 @@ export function PricingPlanCarousel({
 
   const goTo = useCallback((index: number) => {
     snap(nearestAngleFor(index, targetRef.current, STEP));
-  }, [snap]);
+  }, [snap, STEP]);
 
   const step = useCallback((dir: number) => {
     snap(Math.round(targetRef.current / STEP) * STEP + dir * STEP);
@@ -987,7 +987,7 @@ export function PricingPlanCarousel({
     }
     glowRef.current?.style.setProperty("--case-glow-rgb", rgbTriple(cases[HOME].glow));
     paint(home);
-  }, [cases, paint, HOME, STEP]);
+  }, [cases, paint, HOME, STEP, COUNT]);
 
   /* 正面卡换人 → 回报 plan id（整页氛围）；3D 舞台与选片条跟着同一个 front。 */
   const frontItem = cases[front] ?? cases[0];

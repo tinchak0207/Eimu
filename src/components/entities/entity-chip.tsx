@@ -92,7 +92,7 @@ const KIND_TINT: Record<CharacterCardKind, string> = {
  */
 function EntityThumb({
   kind,
-  name,
+  name: _name,
   previewUrl,
   unresolved,
 }: {

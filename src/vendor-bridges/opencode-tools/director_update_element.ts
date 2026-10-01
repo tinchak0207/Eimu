@@ -1,5 +1,5 @@
 import { tool } from "@opencode-ai/plugin/tool"
-import { ok, fail, directorFetch, directorFail, guardFail, activePlanOf, resolveShot, elementState, hasVecParams, vecFromParams } from "../lib/director-common"
+import { ok, fail, directorFetch, guardFail, activePlanOf, resolveShot, elementState, hasVecParams, vecFromParams } from "../lib/director-common"
 import type { DirectorElement } from "../lib/director/types"
 
 // 3D 导演台对象变换（片4，2026-09-02）。schema 照搬 kunpeng updateElementTool；

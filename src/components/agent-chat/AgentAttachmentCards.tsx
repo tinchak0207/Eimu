@@ -214,7 +214,6 @@ function AttachmentThumb({
   attRef,
   ticket,
   minting,
-  mintFailed,
   imgClassName,
   wrapperClassName,
 }: {
@@ -250,6 +249,7 @@ function AttachmentThumb({
       title={`打开原图：${attRef.name ?? "附件"}`}
       className={cn("block overflow-hidden rounded-ios-lg", wrapperClassName)}
     >
+      {/* eslint-disable-next-line @next/next/no-img-element -- 網關簽票 URL（帶 ticket，必要時經本站 proxy），next/image 無法優化且 fill／寬高推導會綁死附件自適應版面 */}
       <img
         src={url}
         alt={attRef.name ?? "附件图片"}

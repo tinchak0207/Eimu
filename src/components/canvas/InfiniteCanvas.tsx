@@ -327,6 +327,7 @@ function InfiniteCanvas({
       lastTapRef.current = { px, py, time: now };
       onBackgroundPointerDown?.();
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 缺 onBackgroundPointerDown（父層 CanvasEmbed 以 inline arrow 傳入、每次 render 新身分）；硬加會讓 handleTap 每次 render 重建，進而重掛 canvas 手勢監聽。
     [getBounds],
   );
 

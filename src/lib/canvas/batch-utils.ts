@@ -94,13 +94,13 @@ export function getBatchStatusSummary(
  *
  * @param parent - 批次父節點。
  * @param childIndex - 子節點在批次中的順序索引（0-based）。
- * @param totalCount - 批次總數（用於控制換行，目前僅用於傳遞語意）。
+ * @param _totalCount - 批次總數（用於控制換行，目前僅用於傳遞語意）。
  * @returns 子節點的左上角位置。
  */
 export function computeBatchChildPosition(
   parent: CanvasNode,
   childIndex: number,
-  totalCount: number,
+  _totalCount: number,
 ): CanvasPosition {
   const childSize = CANVAS_NODE_DEFAULT_SIZE[CanvasNodeType.Image];
   const row = Math.floor(childIndex / BATCH_ROW_CAPACITY);

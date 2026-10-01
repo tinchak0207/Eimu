@@ -330,7 +330,6 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
   // 2026-08-25 canvas 常駐化：右側面板 mode 由 displayMode 唯一決定——agent 模式
   // 恆為 canvas（模板庫→畫布），非 agent 模式恆為 ImageDisplay。原黏性旗標/
   // workflow_start 切換/節點數回退等中間態邏輯全部收斂刪除。
-  const resultMode: "image" | "canvas" = displayMode === "agent" ? "canvas" : "image";
   const inCanvasWorkstation = displayMode === "agent";
   // 首頁輸入欄高度自適應（2026-09-11）：結果欄 ImageDisplay 一直吃滿欄高，輸入卡
   // 過去由內容高決定、下方留一片空白。≥xl（Tailwind xl = 1280px，與 globals.css 的
@@ -695,7 +694,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
     if (!LOCAL_TEST_MODE) {
       refresh().catch(() => {});
     }
-  }, [isLoggedIn, user, stylePreset, selectedModels, outputResolution, durationSeconds, generateAudio, aspectRatio, startGeneration, toast, refresh, referenceImages, redirectToGithub]);
+  }, [isLoggedIn, user, stylePreset, selectedModels, outputResolution, durationSeconds, generateAudio, aspectRatio, startGeneration, toast, refresh, referenceImages, redirectToGithub, etaDurationForModel]);
 
   const usedFallback = images.some((image) =>
     image.endpointLabel === "fallback" && (image.image || image.imageUrl),

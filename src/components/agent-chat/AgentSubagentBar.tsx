@@ -153,6 +153,16 @@ function SubagentCard({ item }: SubagentCardProps) {
           {item.summary ?? item.lastLine}
         </span>
       )}
+      {/* 状态词（无胶囊）：whitespace-nowrap 保证不被长工具名挤出行
+          （工具名那一侧自己 truncate 让位）。 */}
+      <span
+        className={cn(
+          "shrink-0 whitespace-nowrap text-ios-footnote tabular-nums",
+          STATUS_WORD_TONE[item.status],
+        )}
+      >
+        {STATUS_WORD[item.status]}
+      </span>
       {/* 状态点即语义（6px 圆点）：颜色 + aria-label，不靠颜色单独传达。 */}
       <span
         className={cn("h-1.5 w-1.5 shrink-0 rounded-full", STATUS_DOT[item.status])}

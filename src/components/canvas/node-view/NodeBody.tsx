@@ -320,6 +320,7 @@ export function NodeBody({
         return renderBrokenImage(handleRetryImage);
       }
       return (
+        // eslint-disable-next-line @next/next/no-img-element -- 節點批次主圖（blob:/data:/本站 proxy 來源），next/image 無法優化且會綁死節點拖曳縮放版面
         <img
           src={useProxy && batchPrimaryImageUrl.startsWith("http") ? proxySrc(batchPrimaryImageUrl) : batchPrimaryImageUrl}
           alt={`${node.title} 主图`}
@@ -410,6 +411,7 @@ export function NodeBody({
             }
             const rawContent = content.startsWith("data:") ? content : thumbUrl(content, node.width * scale);
             return (
+              // eslint-disable-next-line @next/next/no-img-element -- 節點內容圖（data:/縮圖/本站 proxy 來源），next/image 無法優化且會綁死節點拖曳縮放版面
               <img
                 src={useProxy && content.startsWith("http") ? proxySrc(content) : rawContent}
                 alt={node.title}

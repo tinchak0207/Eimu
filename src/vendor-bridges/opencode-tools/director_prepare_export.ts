@@ -1,5 +1,5 @@
 import { tool } from "@opencode-ai/plugin/tool"
-import { ok, fail, directorFetch, directorFail, guardFail, activePlanOf, resolveShot, projectFrameToSec, num } from "../lib/director-common"
+import { ok, fail, directorFetch, guardFail, activePlanOf, resolveShot, projectFrameToSec, num } from "../lib/director-common"
 
 // 3D 导演台导出准备（片4，2026-09-02）。kunpeng prepareExportTool 的 set-export-range/
 // set-output-path/open-panel 属前端运行时命令（导出面板/输出路径是 UI 概念），gateway 文档

@@ -29,7 +29,7 @@ import {
 import { resolveAdobe2ApiVideoModelId } from "@/lib/generation-core/adobe2api-upstream";
 import { syncModelPricing } from "@/lib/pricing-runtime";
 import { optimizeVideoPrompt } from "@/lib/agent-prompt-optimizer";
-import { fuseSceneVideo, type SceneVideoFusion } from "@/lib/scene3d-video-fusion";
+import { fuseSceneVideo } from "@/lib/scene3d-video-fusion";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;

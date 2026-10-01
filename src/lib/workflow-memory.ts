@@ -140,9 +140,6 @@ export function extractWorkflowMemoryBody(input: {
   }
 
   const header = `[workflow] name=${name || "(unnamed)"}`;
-  // nodes/尾端标记的保留预算：max(剩余空间, 0)
-  const reservedForTail =
-    WORKFLOW_MEMORY_TRUNCATION_MARK.length + (configTruncated ? `\nconfig_truncated=true`.length : 0);
 
   const build = (nodeBudget: number): string => {
     const lines = [header, `config=${configJson}`];

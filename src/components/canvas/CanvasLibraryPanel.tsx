@@ -29,12 +29,8 @@ import {
   KUNPENG_SOURCE,
   buildKunpengStylePrompt,
   kunpengStyleSummary,
-  type KunpengStyleAsset,
 } from "@/lib/kunpeng-style-assets";
-import {
-  KUNPENG_PROMPT_TEMPLATES,
-  type KunpengPromptTemplate,
-} from "@/lib/kunpeng-prompt-templates";
+import { KUNPENG_PROMPT_TEMPLATES } from "@/lib/kunpeng-prompt-templates";
 import { RecipeTemplateSection } from "@/components/canvas-workstation/panels/RecipeTemplateSection";
 import { useRecipeTemplates } from "@/components/canvas-workstation/panels/use-recipe-templates";
 import { LensPickerSection } from "./LensPickerSection";
@@ -150,7 +146,7 @@ async function upsertCanvasPack(newItems: AssetPackItem[]): Promise<PromptSaveSt
   }
 }
 
-export function CanvasLibraryPanel({ open, onClose, onInsertText, onInsertImage, onUsePrompt, onApplyRecipeTemplate, isLoggedIn = false }: CanvasLibraryPanelProps) {
+export function CanvasLibraryPanel({ open, onClose, onInsertText, onInsertImage: _onInsertImage, onUsePrompt, onApplyRecipeTemplate, isLoggedIn = false }: CanvasLibraryPanelProps) {
   const [tab, setTab] = useState<LibraryTab>("prompts");
 
   // ── 配方模板（2026-08-27 自專業工作站遷入：useRecipeTemplates 原樣引用）

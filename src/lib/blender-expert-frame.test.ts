@@ -24,6 +24,7 @@ import {
   assembleDirectorReply,
   composeDirectorDelegation,
   composeDirectorDelegationPrompt,
+  getExpertRegistryLoadFailure,
   primeExpertRegistry,
 } from "./blender-director-persona";
 import { estimateTokens, type BlenderDelegation } from "./blender-delegate";
@@ -310,5 +311,41 @@ test("讀取路徑：未 prime → 內聯後備判準；prime 後 → registry �
     if (!offPrimed.ok) return;
     assert.equal(offPrimed.constitutionInjected, false);
     assert.equal(offPrimed.prompt, base.serialized);
+  }
+});
+
+test("載入失敗留痕：inject 拋錯 loader → prime false＋死因出口＋決策現場 additive 透傳", async () => {
+  __resetExpertRegistryForTest();
+  try {
+    // 注入會拋錯的 loader：prime 如實回 false，死因可讀（誠實鐵律：禁靜默降級）。
+    const ok = await primeExpertRegistry(async () => {
+      throw new Error("boom");
+    });
+    assert.equal(ok, false);
+    const failure = getExpertRegistryLoadFailure();
+    assert.equal(typeof failure, "string");
+    assert.ok(failure?.includes("boom"));
+
+    // 決策現場（野獸 ON）接住 prime 結果：失敗時回傳物件帶 registry_load_failure 且含死因。
+    const onFailed = await composeDirectorDelegationPrompt(delegationInput(), { beast_mode: true });
+    assert.equal(onFailed.ok, true);
+    if (!onFailed.ok) return;
+    assert.ok("registry_load_failure" in onFailed);
+    assert.ok(onFailed.registry_load_failure?.includes("boom"));
+
+    // 再注入成功 loader：prime true、死因出口清空、決策現場欄位缺席（成功時不寫 undefined）。
+    const okLoad = await primeExpertRegistry(async () => ({
+      readBeastMode: (s: unknown) =>
+        typeof s === "object" && s !== null && (s as { beast_mode?: unknown }).beast_mode === true,
+    }));
+    assert.equal(okLoad, true);
+    assert.equal(getExpertRegistryLoadFailure(), undefined);
+    const onLoaded = await composeDirectorDelegationPrompt(delegationInput(), { beast_mode: true });
+    assert.equal(onLoaded.ok, true);
+    if (!onLoaded.ok) return;
+    assert.equal("registry_load_failure" in onLoaded, false);
+    assert.equal(onLoaded.registry_load_failure, undefined);
+  } finally {
+    __resetExpertRegistryForTest();
   }
 });

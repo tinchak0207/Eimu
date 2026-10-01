@@ -13,7 +13,6 @@ import type {
   DirectorPlan,
   DirectorSequenceShot,
   DirectorShotScale,
-  Vec3,
 } from './types';
 import { createMotionKeyframes } from './motionTemplates';
 import { cameraPatchFromTemplate } from './cameraTemplates';
@@ -126,12 +125,6 @@ function applyRawCamera(shot: DirectorSequenceShot, raw: RawShot, elements: Dire
   const focal = Math.max(18, Math.min(135, Number(raw.focalLengthMm) || settings.focal));
   const fov = (2 * Math.atan(24 / (2 * focal)) * 180) / Math.PI;
   return { ...shot, position, target, fov, focalLengthMm: focal, shotScale: scale, primaryElementId: primary?.id, recognition: { version: 2, confidence: 0.7, cameraYawDeg: yawDeg, cameraPitchDeg: pitchDeg } };
-}
-
-function parseJson(text: string): { plans?: RawPlan[] } {
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1];
-  const source = fenced ?? text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1);
-  return JSON.parse(source) as { plans?: RawPlan[] };
 }
 
 function promptShotSections(prompt: string): string[] {
@@ -301,27 +294,6 @@ function buildPlans(rawPlans: RawPlan[], base: DirectorPlan, elements: DirectorE
       shots,
     };
   });
-}
-
-function preserveLockedEdits(generated: DirectorPlan[], base: DirectorPlan): DirectorPlan[] {
-  return generated.map((plan) => ({
-    ...plan,
-    shots: plan.shots.map((shot, index) => {
-      const source = base.shots[index];
-      if (!source) return shot;
-      const lockedActions = source.actions.filter((action) => action.locked || action.keyframes?.some((keyframe) => keyframe.locked));
-      const actions = [
-        ...shot.actions.filter((candidate) => !lockedActions.some((locked) => locked.elementId === candidate.elementId && candidate.startSec < locked.startSec + locked.durationSec && locked.startSec < candidate.startSec + candidate.durationSec)),
-        ...structuredClone(lockedActions),
-      ].sort((a, b) => a.startSec - b.startSec);
-      const lockedCamera = source.cameraKeyframes?.filter((keyframe) => keyframe.locked) ?? [];
-      const cameraKeyframes = lockedCamera.length ? [
-        ...(shot.cameraKeyframes ?? []).filter((candidate) => !lockedCamera.some((locked) => Math.abs(locked.timeSec - candidate.timeSec) < 0.04)),
-        ...structuredClone(lockedCamera),
-      ].sort((a, b) => a.timeSec - b.timeSec) : shot.cameraKeyframes;
-      return { ...shot, actions, cameraKeyframes };
-    }),
-  }));
 }
 
 // 測試閘導出（spec 片1+2 測試要求直接呼叫 fallbackPlans；vendor 原為私有，除此之外逐行等價）

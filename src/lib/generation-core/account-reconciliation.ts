@@ -187,7 +187,6 @@ export function reconcileAccountRow(input: ReconcileRowInput): AccountReconcilia
   }
 
   const findings: ReconciliationFinding[] = [];
-  const entryIds = new Set(input.entries.map((entry) => entry.id));
   // **opening 基線時間截斷**：種子語義＝「以種帳當時的 users.quota 種入 opening」，基線
   // 時刻之前的上游 applied 事件已被 opening 吸收（兩層在種帳一刻逐位相等），再對它們
   // 逐筆要求帳本行必產生假 unrecorded（生產實錘：user 82 的 1026 筆事件 1022 筆在種帳前，

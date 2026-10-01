@@ -15,7 +15,6 @@ import {
   listTeamRoster,
   readTeamSettings,
   resolveActorTeam,
-  resolveTeamActor,
   setTeamSeats,
   teamCapacity,
 } from "@/lib/generation-core/team-governance";

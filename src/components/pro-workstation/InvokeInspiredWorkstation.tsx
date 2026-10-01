@@ -81,16 +81,13 @@ import {
   generationModel,
   imageSizeForAspectRatio,
   modelBaseName,
-  modelDurations,
-  modelSupportsAudio,
   type ModelUsageTipParams,
   type OutputResolution,
 } from "@/lib/generation-model-catalog";
 import { ModelPicker } from "@/components/ModelPicker";
-import { LoraLibraryPanel, type SelectedLora } from "@/components/pro-workstation/LoraLibraryPanel";
+import { type SelectedLora } from "@/components/pro-workstation/LoraLibraryPanel";
 import {
   WORKFLOW_PRESETS,
-  REFERENCE_IMAGE_ROLES,
   type WorkspaceMode,
   type MobilePanel,
   normalizeLeftPanelTab,
@@ -101,14 +98,9 @@ import {
   type SlotState,
   type RegionalPromptItem,
   type TemplateStateSnapshot,
-  PRODUCTION_INTENT_OPTIONS,
   WORKSPACE_MODES,
-  MOBILE_PANELS,
-  CANVAS_TOOLS,
-  BRUSH_SIZES,
   LEFT_PANEL_TABS,
   INSPECTOR_TABS,
-  SLOT_STATE_LABELS,
   LORA_TOUR_STORAGE_KEY,
   LORA_TOUR_STEP_COUNT,
   type LayoutPrefs,
@@ -121,7 +113,6 @@ import {
   type CanvasNotice,
   useEventCallback,
   waitForSelector,
-  CREATIVE_TEMPLATE_COUNT,
   qualityProfileOptions,
   adSizeOptionsForModel,
   failureHint,
@@ -446,7 +437,6 @@ export function InvokeInspiredWorkstation({
     startPanelResize,
     handlePanelResize,
     endPanelResize,
-    nudgePanel,
     resetPanel,
     handleResizeKeyDown,
   } = usePanelResize({
@@ -1280,7 +1270,6 @@ export function InvokeInspiredWorkstation({
     refreshBoards,
     handleImportShotAsReference,
     handleCreateBoard,
-    handleDeleteBoard,
     handleDeleteActiveBoard,
     saveResultToBoard,
     handleMoveShot,

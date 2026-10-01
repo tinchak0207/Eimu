@@ -43,7 +43,7 @@ export function ActionRow({
   stylePreset,
   handleStyleChange,
   handlePrimaryAction,
-  onCancelGenerate,
+  onCancelGenerate: _onCancelGenerate,
   primaryDisabled,
   isLoading,
   isVideo,

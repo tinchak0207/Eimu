@@ -275,24 +275,40 @@ export type ExpertRegistryModule = {
 };
 
 let expertRegistryModule: ExpertRegistryModule | undefined;
-let expertRegistryLoadFailure: string | undefined;
+let expertRegistryLoadFailureState: string | undefined;
+/**
+ * 測試注入的 loader（僅經 primeExpertRegistry 的可選參數設定）。生產呼叫端
+ * 一律不傳參 → 恆走動態 import 真源；注入值在本模組生命週期內生效，使不傳
+ * 參的生產呼叫端（如 composeDirectorDelegationPrompt）亦能覆現載入失敗路徑。
+ */
+let expertRegistryLoaderOverride: (() => Promise<unknown>) | undefined;
 
-export async function primeExpertRegistry(): Promise<boolean> {
+export async function primeExpertRegistry(
+  loadExpertRegistry?: () => Promise<unknown>,
+): Promise<boolean> {
   if (expertRegistryModule) return true;
+  if (loadExpertRegistry !== undefined) expertRegistryLoaderOverride = loadExpertRegistry;
+  const load = expertRegistryLoaderOverride ?? (() => import("./expert-registry"));
   try {
-    expertRegistryModule = (await import("./expert-registry")) as ExpertRegistryModule;
-    expertRegistryLoadFailure = undefined;
+    expertRegistryModule = (await load()) as ExpertRegistryModule;
+    expertRegistryLoadFailureState = undefined;
     return true;
   } catch (err) {
-    expertRegistryLoadFailure = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    expertRegistryLoadFailureState = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
     return false;
   }
+}
+
+/** 動態 import expert-registry 失敗的死因（成功／未 prime 時為 undefined）。誠實鐵律：兩態皆記檔待查，此為唯一出口。 */
+export function getExpertRegistryLoadFailure(): string | undefined {
+  return expertRegistryLoadFailureState;
 }
 
 /** 測試專用：清空 registry 動態 import 快取（野獸分支讀取路徑回退測試用）。 */
 export function __resetExpertRegistryForTest(): void {
   expertRegistryModule = undefined;
-  expertRegistryLoadFailure = undefined;
+  expertRegistryLoadFailureState = undefined;
+  expertRegistryLoaderOverride = undefined;
 }
 
 function readBeastModeSync(settings: unknown): boolean {
@@ -313,7 +329,14 @@ export async function composeDirectorDelegationPrompt(
   settings?: unknown,
   opts: { constitutionPath?: string } = {},
 ): Promise<
-  | { ok: true; prompt: string; constitutionInjected: boolean; estimated_tokens: number }
+  | {
+      ok: true;
+      prompt: string;
+      constitutionInjected: boolean;
+      estimated_tokens: number;
+      /** 野獸分支 registry 動態 import 失敗死因（成功時缺席）；誠實鐵律唯一出口。 */
+      registry_load_failure?: string;
+    }
   | { ok: false; code: string; hint: string; fields?: string[] }
 > {
   const composed = composeDelegation(input);
@@ -327,7 +350,8 @@ export async function composeDirectorDelegationPrompt(
       estimated_tokens: composed.estimated_tokens,
     };
   }
-  await primeExpertRegistry();
+  // 決策現場留痕（誠實鐵律）：接住 prime 結果，失敗時 additive 補死因出口。
+  const primed = await primeExpertRegistry();
   let constitution: string | undefined;
   let constitutionError: string | undefined;
   try {
@@ -358,6 +382,7 @@ export async function composeDirectorDelegationPrompt(
     prompt,
     constitutionInjected: true,
     estimated_tokens: estimateTokens(prompt),
+    ...(primed ? {} : { registry_load_failure: getExpertRegistryLoadFailure() ?? "unknown" }),
   };
 }
 
@@ -371,7 +396,12 @@ export async function composeDirectorDelegationForSettings(
   input: unknown,
   settings?: unknown,
 ): Promise<
-  | (Extract<DelegationResult, { ok: true }> & { constitutionInjected: boolean; prompt: string })
+  | (Extract<DelegationResult, { ok: true }> & {
+      constitutionInjected: boolean;
+      prompt: string;
+      /** 野獸分支 registry 動態 import 失敗死因（成功時缺席）；透傳自 prompt 組裝。 */
+      registry_load_failure?: string;
+    })
   | Extract<DelegationResult, { ok: false }>
   | { ok: false; code: "constitution_unavailable"; hint: string }
 > {
@@ -392,5 +422,8 @@ export async function composeDirectorDelegationForSettings(
     ...composed,
     constitutionInjected: promptResult.constitutionInjected,
     prompt: promptResult.prompt,
+    ...(promptResult.registry_load_failure !== undefined
+      ? { registry_load_failure: promptResult.registry_load_failure }
+      : {}),
   };
 }

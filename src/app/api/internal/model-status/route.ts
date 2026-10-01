@@ -85,7 +85,6 @@ export async function POST(req: NextRequest) {
     getRecentModelStats(),
   ]);
   const snapshot = await probeAllModelsStatus({ env: process.env, pools, overrides, recentStats });
-  const statsByModel = new Map(recentStats.map((stats) => [stats.modelId, stats]));
   const balanceSignals = summarizeChannelBalance(await getRecentRoutingEvents());
   const supplierSignal = await readSupplierHealthSignal().catch(() => ({
     availableByModel: {} as Record<string, boolean>,

@@ -45,7 +45,6 @@
 import { randomUUID } from "node:crypto";
 
 import { fetchGatewayUser, listGatewayRedemptions, type GatewayAdminUser, type GatewayRedemption } from "@/lib/gateway-admin";
-import { QUOTA_PER_COIN } from "@/lib/quota-constants";
 import { generationDatabaseConfigured, getGenerationSql, type GenerationSql } from "./database";
 import { quotaToCoins } from "./statistics-projection";
 import {
@@ -1088,11 +1087,6 @@ export async function recordSubscriptionTermSwitch(
     });
   }
   return withOpeningGuard([input.billingUserId], drafts, deps);
-}
-
-/** 期次身份（與 subscription-sku.ts 的 subscriptionTermRef 同一格式；此處避免循環引用）。 */
-function subscriptionTermRefOf(subscriptionId: string, termIndex: number): string {
-  return `sub:${subscriptionId}:term:${termIndex}`;
 }
 
 /** 管理員加減額度（建戶初始額度、人工補正）。sourceRef 必填且要能指回操作人。 */

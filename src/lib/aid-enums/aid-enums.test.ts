@@ -23,175 +23,99 @@ import {
   episodeStatusFromAid,
 } from "../creation-flow-steps.ts";
 
-
 import {
 
   AID_CREATION_STEP_ENUM,
 
-  type AidCreationStepEnumValue,
-
   AID_CREATION_MODE_ENUM,
-
-  type AidCreationModeEnumValue,
 
   AID_PROJECT_TYPE_ENUM,
 
-  type AidProjectTypeEnumValue,
-
   AID_PROJECT_STATUS_ENUM,
-
-  type AidProjectStatusEnumValue,
 
   AID_EPISODE_STATUS_ENUM,
 
-  type AidEpisodeStatusEnumValue,
-
   AID_SCRIPT_TYPE_ENUM,
-
-  type AidScriptTypeEnumValue,
 
   AID_SCRIPT_STATUS_ENUM,
 
-  type AidScriptStatusEnumValue,
-
 } from "./creation";
-
 
 import {
 
   AID_GEN_MODE_ENUM,
 
-  type AidGenModeEnumValue,
-
   AID_GENERATE_MODE_ENUM,
-
-  type AidGenerateModeEnumValue,
 
   AID_GEN_TYPE_ENUM,
 
-  type AidGenTypeEnumValue,
-
   AID_GEN_RESULT_TARGET_ENUM,
-
-  type AidGenResultTargetEnumValue,
 
   AID_MODEL_TYPE_ENUM,
 
-  type AidModelTypeEnumValue,
-
   AID_MEDIA_TYPE_ENUM,
-
-  type AidMediaTypeEnumValue,
 
   AID_MEDIA_TYPE,
 
-  type AidMediaTypeValue,
-
   AID_PRODUCT_TYPE_ENUM,
-
-  type AidProductTypeEnumValue,
 
   AID_ASPECT_RATIO_ENUM,
 
-  type AidAspectRatioEnumValue,
-
   AID_DISPATCH_MODE,
-
-  type AidDispatchModeValue,
 
   AID_MEDIA_TASK_STATUS,
 
-  type AidMediaTaskStatusValue,
-
 } from "./generation";
-
 
 import {
 
   AID_STORYBOARD_SHOT_DENSITY_ENUM,
 
-  type AidStoryboardShotDensityEnumValue,
-
   AID_VIDEO_PROMPT_CONTINUITY_MODE,
-
-  type AidVideoPromptContinuityModeValue,
 
   AID_PROMPT_TYPE_ENUM,
 
-  type AidPromptTypeEnumValue,
-
   AID_SUBTITLE_RECOGNITION_STATUS,
-
-  type AidSubtitleRecognitionStatusValue,
 
   AID_PROJECT_GEN_CONFIG_SCENE,
 
-  type AidProjectGenConfigSceneValue,
-
   AID_STYLE_CATEGORY_ENUM,
-
-  type AidStyleCategoryEnumValue,
 
   AID_VIDEO_STYLE_TYPE_ENUM,
 
-  type AidVideoStyleTypeEnumValue,
-
 } from "./storyboard";
-
 
 import {
 
   AID_ASSET_TYPE_ENUM,
 
-  type AidAssetTypeEnumValue,
-
   AID_ASSET_SOURCE_TYPE_ENUM,
-
-  type AidAssetSourceTypeEnumValue,
 
   AID_ASSET_CENTER_CATEGORY_ENUM,
 
-  type AidAssetCenterCategoryEnumValue,
-
   AID_AUDIO_SOURCE_ENUM,
 
-  type AidAudioSourceEnumValue,
-
 } from "./asset";
-
 
 import {
 
   AID_BILLING_MODE,
 
-  type AidBillingModeValue,
-
   AID_CHARGE_TYPE,
-
-  type AidChargeTypeValue,
 
   AID_METER_TYPE,
 
-  type AidMeterTypeValue,
-
   AID_SETTLE_MODE,
-
-  type AidSettleModeValue,
 
   AID_TEXT_SETTLE_STATUS,
 
   AID_MEDIA_BILLING_STATUS,
 
-  type AidMediaBillingStatusValue,
-
   AID_EXTRACT_BILLING_STATUS,
-
-  type AidExtractBillingStatusValue,
 
   AID_BILLING_CONSTANTS,
 
 } from "./billing";
-
 
 // ── ① 逐 enum 值集合逐字斷言（37 個）─────────────────────────────────────────
 

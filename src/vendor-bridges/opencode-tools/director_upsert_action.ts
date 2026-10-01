@@ -1,5 +1,5 @@
 import { tool } from "@opencode-ai/plugin/tool"
-import { ok, fail, directorFetch, directorFail, guardFail, activePlanOf, resolveShot, resolveAction, elementState, num, bool, vecFromParams, hasVecParams } from "../lib/director-common"
+import { ok, fail, directorFetch, guardFail, activePlanOf, resolveShot, resolveAction, elementState, num, bool, vecFromParams } from "../lib/director-common"
 import { motionTemplate, createMotionKeyframes } from "../lib/director/motionTemplates"
 import type { DirectorActionId } from "../lib/director/types"
 

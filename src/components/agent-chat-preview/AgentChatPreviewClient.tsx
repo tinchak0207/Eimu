@@ -639,7 +639,7 @@ function AgentChatPreviewClientComponent() {
         startChat(text);
       }
     },
-    [simulateReply, startChat],
+    [simulateReply, startChat, started],
   );
 
   /** 新会话：整体复位回空态。 */

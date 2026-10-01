@@ -118,7 +118,7 @@ export function useCanvasProjectSync(params: UseCanvasProjectSyncParams) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [mountedRef, projectIdRef, setLoading, setSaveState, setSavedProjects]);
 
   // ─────────────────────── 專案儲存（debounce 400ms）
 
@@ -141,7 +141,7 @@ export function useCanvasProjectSync(params: UseCanvasProjectSyncParams) {
       scriptTypeRef.current,
       narrationVoiceRef.current,
     );
-  }, []);
+  }, [activeCardIdsRef, backgroundRef, budgetRef, canvasRef, currentStepRef, episodesRef, narrationVoiceRef, projectIdRef, projectTypeRef, scriptTypeRef, styleIdRef, titleRef, viewportRef]);
 
   useEffect(() => {
     if (!hydratedRef.current) return;

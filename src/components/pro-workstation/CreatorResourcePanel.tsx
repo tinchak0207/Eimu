@@ -13,7 +13,6 @@ import {
   KUNPENG_STYLE_ASSETS,
   KUNPENG_STYLE_CATEGORY_LABELS,
   KUNPENG_SOURCE,
-  buildKunpengStylePrompt,
   kunpengStyleSummary,
   type KunpengStyleAsset,
 } from "@/lib/kunpeng-style-assets";

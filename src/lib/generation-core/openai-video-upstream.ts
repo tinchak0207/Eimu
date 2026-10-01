@@ -278,7 +278,6 @@ export async function generateWithOpenaiVideo(
   if (!taskId) {
     throw new SupplierRequestError("openai-video upstream create response is missing id.", 502);
   }
-  const modelInResponse = String(createResponse.model ?? "").trim();
   // 上游任务已提交：通知 worker durably 落 attempt 行（task id + 对账排程，INC-0831）
   input.onProviderTaskSubmitted?.(taskId, "openai_video");
 
@@ -367,7 +366,7 @@ export async function generateWithOpenaiVideo(
  *   3. metadata.video_url        （sd7 族）
  *   4. data[0].url               （sd10 族相对路径 → 拼 baseUrl；http(s) 直用）
  */
-function extractOutputUrl(response: Record<string, unknown>, baseUrl: string, taskId: string): string | null {
+function extractOutputUrl(response: Record<string, unknown>, baseUrl: string, _taskId: string): string | null {
   // 顶层 video_url（sd4 族实锤形状）
   const topLevelUrl = String(response.video_url ?? "").trim();
   if (topLevelUrl.startsWith("http://") || topLevelUrl.startsWith("https://")) {

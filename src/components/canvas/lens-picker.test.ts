@@ -300,7 +300,6 @@ test("詞庫元件不碰 src/lib/：只讀 lens-language-library 的既有導出
 test("CanvasLibraryPanel 的 tab 註冊表含「镜头词库」且與既有 tab 同構（源碼形狀）", () => {
   const panel = read("src/components/canvas/CanvasLibraryPanel.tsx");
   // tab 註冊表是 inline 陣列；「镜头词库」必須在同一張表裡（不是孤立的死字串）
-  const table = panel.slice(panel.indexOf("as { id: LibraryTab; label: string }[]"));
   const arr = panel.slice(panel.indexOf("[\n            { id: \"prompts\""), panel.indexOf("as { id: LibraryTab; label: string }[]"));
   const entries = [...arr.matchAll(/\{ id: "([a-z]+)"[^}]*label: "([^"]+)"/g)].map((m) => ({ id: m[1], label: m[2] }));
   assert.deepEqual(

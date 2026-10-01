@@ -27,7 +27,7 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import { X } from "lucide-react";
 import type { UseCanvasChatReturn } from "@/hooks/use-canvas-chat";
-import { CanvasNodeType, type CanvasConnection, type CanvasNode, type CanvasViewport } from "@/lib/canvas/types";
+import { CanvasNodeType, type CanvasConnection, type CanvasNode } from "@/lib/canvas/types";
 import type { CanvasGenerationReference } from "@/lib/canvas/semantic-nodes";
 import { bezierPath } from "@/lib/canvas/layout";
 import { InfiniteCanvas } from "./InfiniteCanvas";
@@ -60,7 +60,6 @@ import type { ApprovalState } from "@/lib/character-cards";
 import { DEFAULT_AGENT_SETTINGS, getAgentSettings } from "@/lib/agent-chat-client";
 import type { AgentInteractionMode } from "@/lib/agent-chat-client";
 import { DEFAULT_IMAGE_MODEL_ID } from "@/lib/image-model-ids.js";
-import type { CanvasNodeMetadata } from "@/lib/canvas/types";
 import { LoraLibraryPanel, type SelectedLora } from "@/components/canvas-workstation/panels/LoraLibraryPanel";
 import "@/components/canvas-workstation/panels/panels.css";
 import { cn } from "@/lib/utils";
@@ -310,7 +309,7 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
           : undefined;
       flyTo(fitStageViewport(stage.bbox, size), { duration: STAGE_FLIGHT_MS, from });
     },
-    [flyTo, holdStageFocus],
+    [flyTo, holdStageFocus, viewportRef],
   );
   const handleReviewStage = useCallback(
     (stage: CanvasStageSummary) => {
@@ -332,7 +331,7 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
       if (size.width <= 0) return;
       flyTo(zoomAroundCenter(viewportRef.current, LOD_TARGET_SCALE[level], size), { duration: LOD_FLIGHT_MS });
     },
-    [flyTo],
+    [flyTo, viewportRef],
   );
   // 透析：開面板＋把卡片飛到面板左側可見區正中，同時進 focus 模式。
   const openEngineering = useCallback(
@@ -347,7 +346,7 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
       const free = rect ? { left: 16, right: Math.max(160, Math.min(size.width, panelLeft - rect.left) - 28) } : undefined;
       flyTo(engineeringFocusViewport(target, size, viewportRef.current.k, free), { duration: 560 });
     },
-    [flyTo],
+    [flyTo, viewportRef],
   );
   // 互動檔位（決策 1/2）：只有協作檔才是停點；全自動檔下審查面板可看可改、不阻塞流程。
   const [interactionMode, setInteractionMode] = useState<AgentInteractionMode>(DEFAULT_AGENT_SETTINGS.interaction_mode);
@@ -728,7 +727,7 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
     if (!connectingRef.current) return;
     const world = screenToWorld(e.clientX, e.clientY);
     if (world) setConnecting((prev) => (prev ? { ...prev, cursor: world } : prev));
-  }, [screenToWorld, connectingRef]);
+  }, [screenToWorld, connectingRef, setConnecting]);
 
   const pendingPath = useMemo(() => {
     const active = portDrag?.cursor
@@ -753,7 +752,7 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
   useEffect(() => {
     setPanelRefIds([]);
     setPanelEntityIds([]);
-  }, [promptPanelNodeId]);
+  }, [promptPanelNodeId, setPanelRefIds]);
 
   const referenceCandidatesFor = useCallback(
     (nodeId: string) =>
@@ -771,7 +770,7 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
    * nodeId 參數只為與 referenceCandidatesFor 同形（呼叫端條件式寫法照抄）。
    */
   const entityCandidatesFor = useCallback(
-    (nodeId: string) =>
+    (_nodeId: string) =>
       canvas.activeCharacterCards
         .filter((card) => card.kind !== "audio")
         .map((card) => ({

@@ -604,6 +604,7 @@ export function CanvasImageEditorDialog({
           )}
           {bmp && display && (
             <>
+              {/* eslint-disable-next-line @next/next/no-img-element -- 畫布編輯器中的 blob:/data:/本站 proxy 影像，next/image 無法優化且寬高推導會綁死節點自適應版面 */}
               <img
                 src={imageUrl}
                 alt={nodeTitle}

@@ -205,7 +205,7 @@ test("T6 二次解除＝no-op 不拋錯；未掛用的三元組空轉；旁人�
   reset();
   await saveCharacterCard(USER, card("card-src"));
   await saveCharacterCard(USER, card("keep-me"));
-  const mounted = await mountAssetWithCopy({ userId: USER, projectId: "proj-b", assetKind: "card", assetId: "card-src", now: AT });
+  await mountAssetWithCopy({ userId: USER, projectId: "proj-b", assetKind: "card", assetId: "card-src", now: AT });
   const first = await unmountAssetAndCopies({ userId: USER, projectId: "proj-b", assetKind: "card", assetId: "card-src" });
   assert.equal(first.removed, true);
 

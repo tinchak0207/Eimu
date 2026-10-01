@@ -3,7 +3,7 @@
 // 認證頭復用 canvas/client 的 authHeaders（Bearer token + x-user-id 成對），
 // 行為模式對齊 canvas/client：不 throw 認證錯，回 { ok:false, reason }——
 // 卡是「順手鎖定」的配置，未登入時安靜降級，不擋畫布創作。
-import { authHeaders, type CanvasClientFailure, type CanvasClientResult } from "@/lib/canvas/client";
+import { authHeaders, type CanvasClientResult } from "@/lib/canvas/client";
 import type { CharacterCard } from "@/lib/character-cards";
 
 async function request<T>(

@@ -78,7 +78,7 @@ export function useAgentParamReflect({
       setOutputResolution(params.resolution);
     }
     setAgentTouched((prev) => new Set([...prev, ...touched]));
-  }, [modelId, aspectRatio, outputResolution, handleModelChange]);
+  }, [modelId, aspectRatio, outputResolution, handleModelChange, setAspectRatio, setOutputResolution]);
 
   /** 逐项撤销：把某一项还原成助理插手之前的值。 */
   const undoAgentParam = useCallback((key: "modelId" | "aspectRatio" | "resolution") => {
@@ -91,7 +91,7 @@ export function useAgentParamReflect({
       next.delete(key);
       return next;
     });
-  }, [agentBaseline, handleModelChange]);
+  }, [agentBaseline, handleModelChange, setAspectRatio, setOutputResolution]);
 
   // 三态里的第三态：使用者自己动了控件 → 这一项不再算「agent 改成」。
   // 关键是不共用 setter：助理回流走 setAspectRatio/setOutputResolution 原始
@@ -105,7 +105,7 @@ export function useAgentParamReflect({
       s.delete("aspectRatio");
       return s;
     });
-  }, []);
+  }, [setAspectRatio]);
 
   const userSetOutputResolution = useCallback((next: OutputResolution) => {
     setOutputResolution(next);
@@ -115,7 +115,7 @@ export function useAgentParamReflect({
       s.delete("resolution");
       return s;
     });
-  }, []);
+  }, [setOutputResolution]);
 
   const userSetModel = useCallback((next: string) => {
     handleModelChange(next);
@@ -131,7 +131,7 @@ export function useAgentParamReflect({
     setAspectRatio(agentBaseline.aspectRatio);
     setOutputResolution(agentBaseline.resolution);
     setAgentTouched(new Set());
-  }, [agentBaseline, handleModelChange]);
+  }, [agentBaseline, handleModelChange, setAspectRatio, setOutputResolution]);
 
   return {
     agentBaseline,

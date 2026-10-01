@@ -284,10 +284,6 @@ export function useCanvasGeneration({
       const references = mergeGenerationReferences(panelRefs, semantic.references);
       const finalPrompt = composeGenerationPrompt(semantic.promptParts, prompt);
       const refNodeIds = references.map((r) => r.nodeId).filter((id): id is string => !!id);
-      // 回分鏡溯源（P1-1）：連入的 scene_3d 舞台 → 本節點與其批次的 directorStageId/shotId。
-      const traceMetadata = sceneDirectorTraceMetadata(
-        resolveSceneDirectorReferences(state.nodes, state.connections, nodeId).trace,
-      );
       const count = Math.min(Math.max(1, options.count ?? 1), 4);
       const sourceUrl = imageUrlOf(node);
 

@@ -68,7 +68,7 @@ function isAuthError(error: string): boolean {
  * 旧实现只认 ③——手机把弹窗开成新标签、或 window.close() 被拦时，
  * 登录早已完成却永远等不到「关闭」，重试不触发，看起来就是回调丢了。
  */
-async function startLoginThenRetry(onDone: () => Promise<void>): Promise<void> {
+async function startLoginThenRetry(_onDone: () => Promise<void>): Promise<void> {
   // 登录一律同窗口跳转：popup 在套壳/内嵌 webview 上会出现死窗（三個完成
   // 信号全部不來）。同窗口跳转全浏览器兼容；用户登录完回来，会话经本地
   // 存档 resume 续上，再补一次 onDone 刷新。
@@ -268,7 +268,6 @@ export function AgentChatSurface({
     abort,
     aborting,
     startingSession,
-    discardAndStartNew,
     switchSession,
     startNewSession,
     ensureSession,
@@ -287,7 +286,7 @@ export function AgentChatSurface({
    * 快照是纯展示：会话已经删掉了，所以这里不给「继续」按钮——
    * 摆一颗按下去必然失败的按钮比没有按钮更糟。
    */
-  const [historySnapshot, setHistorySnapshot] = useState<{ itemCount: number; savedAt: number } | null>(null);
+  const [, setHistorySnapshot] = useState<{ itemCount: number; savedAt: number } | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   // 会话目录（对话历史 dropdown 的数据）：null = 未加载，[] = 已加载但为空。
   const [historyList, setHistoryList] = useState<AgentSessionSummary[] | null>(null);

@@ -217,7 +217,7 @@ test("create body 映射：resolution 720p→768P、duration、ratio、無參考
 
 test("失敗：任務 failed 拋 SupplierRequestError 帶上游錯誤碼", async () => {
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
+  globalThis.fetch = (async (url: RequestInfo | URL, _init?: RequestInit) => {
     if (String(url).endsWith("/v2/video_generation")) {
       return jsonResponse(200, { task_id: TASK_ID });
     }

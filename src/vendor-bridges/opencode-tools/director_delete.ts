@@ -1,5 +1,5 @@
 import { tool } from "@opencode-ai/plugin/tool"
-import { ok, fail, directorFetch, directorFail, guardFail, activePlanOf, resolveShot, resolveAction, bool } from "../lib/director-common"
+import { ok, fail, directorFetch, guardFail, activePlanOf, resolveShot, resolveAction, bool } from "../lib/director-common"
 
 // 3D 导演台删除面（片4，2026-09-02）。kunpeng deleteTool → gateway ops：
 // element=delete_element；action=delete_action；motion/camera K 帧=delete_keyframe。

@@ -309,20 +309,6 @@ async function persistImages(entry: ServerHistoryEntry): Promise<ServerHistoryEn
   return { ...entry, results };
 }
 
-/** 收集一条记录名下由本站托管的图片 URL，供删除时一并清理。 */
-function ownedImageUrls(entries: ServerHistoryEntry[]): string[] {
-  const vpsBlobHost = process.env.IMAGE_DATA_BASE_URL?.trim().replace(/\/+$/, "");
-  return entries.flatMap((entry) =>
-    entry.results
-      .map((result) => result.imageUrl)
-      .filter((url): url is string =>
-        typeof url === "string" &&
-        (url.includes(".public.blob.vercel-storage.com/") ||
-          (vpsBlobHost ? url.startsWith(`${vpsBlobHost}/files/`) : false)),
-      ),
-  );
-}
-
 // ─────────────────────────────────────────────────────────── 对外接口
 
 /** 写入一条生成记录。同一用户的并发调用会被串行执行。 */

@@ -595,7 +595,8 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
     }
     // dispatch 来自 useReducer，恒稳定；列进依赖只为让併批器的 apply 闭包
     // 有据可依（行为与原来的空依赖等价）。
-  }, [dispatch]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 缺 handleSseEvent：它是本檔案在 openConnection 之後（第 601 行）才宣告的 useCallback，列入依賴陣列會在首帧 render 求值時觸發 TDZ（Cannot access 'handleSseEvent' before initialization）；nextBackoff 已補進依賴。
+  }, [dispatch, nextBackoff]);
 
   // 一帧 SSE 的统一入口：parse → 丢掉不合契约的 → dispatch。
   const handleSseEvent = useCallback(
@@ -936,7 +937,7 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
         dispatchNotice("error", err instanceof Error ? err.message : "消息传送失败，请重试。");
       }
     },
-    [dispatchNotice, armSteerExpiry, requestAbort, start, onSendBlockedByAuth],
+    [dispatchNotice, armSteerExpiry, start, onSendBlockedByAuth],
   );
 
   const confirm = useCallback(

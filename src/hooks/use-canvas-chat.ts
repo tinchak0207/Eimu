@@ -264,7 +264,8 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     for (const t of progressTimerRef.current.values()) window.clearTimeout(t);
     progressTimerRef.current.clear();
     progressPendingRef.current.clear();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 缺 createdAtRef/everHadNodesRef/saveTimerRef：三者由下方第 583 行 useCanvasProjectSync 解構取得（在本 callback 之後），列入依賴陣列會在 render 期觸發 TDZ；ref 物件身分恆定，省略安全。
+  }, [setActiveCardIds]);
 
   const refreshSavedProjects = useCallback(async () => {
     const res = await listCanvasProjectSummaries();
@@ -312,7 +313,8 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     setSelectedNodeId(null);
     setPlans([]);
     setDerives([]);
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 缺 createdAtRef/everHadNodesRef：由下方第 583 行 useCanvasProjectSync 解構取得（在本 callback 之後），列入依賴會 TDZ；ref 身分恆定。
+  }, [setActiveCardIds]);
 
   /**
    * Agent 快照下行回填（2026-08-26 Bug1b）：resume 到已有歷史的 session 時，左聊天
@@ -378,6 +380,7 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
       if (meta.narrationVoice !== undefined) setNarrationVoice(meta.narrationVoice);
       return true;
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 缺 everHadNodesRef：由下方第 583 行 useCanvasProjectSync 解構取得（在本 callback 之後），列入依賴會 TDZ；ref 身分恆定。
     [],
   );
 
@@ -403,14 +406,17 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
   }, [sessionId, newCanvasSession]);
 
   useEffect(() => {
+    const progressTimers = progressTimerRef.current;
+    const progressPending = progressPendingRef.current;
     return () => {
       mountedRef.current = false;
       if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
       if (flyRafRef.current !== null) cancelAnimationFrame(flyRafRef.current);
-      for (const t of progressTimerRef.current.values()) window.clearTimeout(t);
-      progressTimerRef.current.clear();
-      progressPendingRef.current.clear();
+      for (const t of progressTimers.values()) window.clearTimeout(t);
+      progressTimers.clear();
+      progressPending.clear();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 缺 saveTimerRef：由下方第 583 行 useCanvasProjectSync 解構取得（在本文之後），列入依賴會 TDZ；ref 身分恆定。
   }, []);
 
   // ─────────────────────── 快照
@@ -950,6 +956,7 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     return result;
     // setProjectMeta 不在依賴陣列：它是 useCallback(..., [])（身分恆定，無過期閉包問題），
     // 且本 useCallback 宣告在它之前 —— 寫進陣列會在 render 期讀到 TDZ 的 const 而直接炸。
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 缺 setProjectMeta：它是本檔案第 1051 行才宣告的 useCallback（在本 callback 之後），列入依賴陣列會在 render 期觸發 TDZ（Cannot access before initialization）；身分恆定故無閉包過期風險。
   }, [pushHistory]);
 
   /**

@@ -172,8 +172,8 @@ export const ReferenceImageUpload = memo(
             {value.map((image) => (
               <div key={image.id} className="group relative h-12 w-12 shrink-0 overflow-hidden rounded-ios-md bg-black/5">
                 <button type="button" onClick={() => setLightboxImage(image)} className="h-full w-full" title={`预览 ${image.name}`}>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
                   {/* 單張 object-contain＋淺底保留原比例認知；多張（≥2）object-cover 方格。 */}
+                  {/* eslint-disable-next-line @next/next/no-img-element -- blob: 本地預覽來源（URL.createObjectURL），next/image 無法優化且會綁死縮圖自適應版面 */}
                   <img src={image.previewUrl} alt={image.name} className={cn("h-full w-full", value.length >= 2 ? "object-cover" : "object-contain")} />
                 </button>
                 <button type="button" onClick={() => removeImage(image.id)} aria-label="移除参考图" className="absolute right-0.5 top-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-white opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">

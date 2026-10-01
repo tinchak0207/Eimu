@@ -25,8 +25,6 @@ const MG_COLOR = '#ffd166'; // 中景
 const BG_COLOR = '#4d96ff'; // 背景
 const FONT = 'ui-monospace, SFMono-Regular, Menlo, monospace';
 
-const MAX_BYTES = 32 * 1024;
-
 function esc(text: string): string {
   return text
     .replace(/&/g, '&amp;')
