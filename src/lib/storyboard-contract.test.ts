@@ -1297,3 +1297,148 @@ test("affectedShotNodesByCardIds：只回報真的引用了該批卡的分鏡節
   const noId = affectedShotNodesByCardIds([{ metadata: { storyboardShot: { shotNumber: "001" }, characterCardIds: ["card-node-a"] } }], ["card-node-a"]);
   assert.deepEqual(noId, { affectedCardIds: ["card-node-a"], shotNodeIds: [] });
 });
+
+// ─────────────────────────────────────────── ⑬ 旁白加成欄位（2026-09-30）
+
+const NARRATION = "第三天清晨，林昭終於推開那扇門。";
+
+test("旁白是加成欄位：供給時原值輸出且不進 missing；未供給時也不進 missing（不罰），門檻結論不變", () => {
+  const supplied = storyboardQcShots([fullShot()], { "001": { narration: NARRATION } });
+  // 真行為斷言：欄位值真的流到輸出（不是源碼字串斷言）
+  assert.equal(supplied.shots[0].narration, NARRATION);
+  assert.equal(supplied.missing.includes("narration"), false, "旁白不參與 missing 判定");
+
+  const bare = storyboardQcShots([fullShot()], {});
+  // 未供給 → 不補默認值（不冒充用戶設定），且同樣不罰
+  assert.equal("narration" in bare.shots[0], false);
+  assert.equal(bare.missing.includes("narration"), false);
+  // 供給旁白不得改變門檻結論：missing / complete 逐項相同
+  assert.deepEqual(bare.missing, supplied.missing);
+  assert.equal(bare.complete, supplied.complete);
+
+  // 空值/純空白 → 省略該鍵（本檔既有紀律），且照樣不進 missing
+  const hollow = storyboardQcShots([fullShot()], { "001": { narration: "   " } });
+  assert.equal("narration" in hollow.shots[0], false);
+  assert.equal(hollow.missing.includes("narration"), false);
+});
+
+test("旁白來源補記與不推導：供給記 production、未供給不生成，且不從 dialogue 猜", () => {
+  const supplied = productionFieldsFromContext([fullShot()], {
+    production: { "001": { narration: NARRATION } },
+  });
+  assert.equal(supplied.fields["001"].narration, NARRATION, "旁白原樣進 fields");
+  assert.equal(supplied.sources["001"].narration, "production", "加成欄位也要有審計跡（與 prompt/propCardIds 同範式）");
+
+  const bare = productionFieldsFromContext([fullShot()], { cards: cards() });
+  assert.equal(bare.fields["001"].narration, undefined, "無來源則完全不生成該欄");
+  assert.equal(bare.sources["001"].narration, undefined);
+  // 行為斷言：dialogue 有值也不得憑空生成 narration（從 dialogue 猜旁白＝自造轉換，禁）
+  const withDialogue = productionFieldsFromContext([fullShot({ dialogue: "[林昭]：「有人嗎」" })], { cards: cards() });
+  assert.equal(withDialogue.fields["001"].narration, undefined);
+});
+
+test("行為斷言：多帶 narration 鍵不得改變門禁任何一門的判定（獨立 oracle = 真本地 storyboard_qc_17）", () => {
+  const production = {
+    "001": { sceneId: "S01", durationSeconds: 3, keyframeId: "kf-1", lastFrameId: "lf-1", audioAnchorId: "a-1", aspectRatio: "9:16" },
+  };
+  const withNarration = storyboardQcGateArgs([fullShot()], {
+    production: { "001": { ...production["001"], narration: NARRATION } },
+  });
+  const without = storyboardQcGateArgs([fullShot()], { production });
+  assert.equal(withNarration.input.shots[0].narration, NARRATION);
+  assert.deepEqual(withNarration.missing, without.missing, "旁白是加成欄位：missing 逐項不變");
+  assert.equal(withNarration.complete, without.complete);
+  assert.deepEqual(
+    runShortDramaTool("storyboard_qc_17", withNarration.input).gates,
+    runShortDramaTool("storyboard_qc_17", without.input).gates,
+    "多帶 narration 鍵不得改變任何一門的判定",
+  );
+});
+
+// ─────────────────────────────────────────── ⑭ 分鏡節點音軌錨 → 門禁（2026-09-30）
+
+/** 除音軌錨外的成片欄位樣本（音軌錨刻意留給「節點 metadata vs 呼叫端供給」兩路對照）。 */
+const ANCHOR_PRODUCTION = {
+  "001": {
+    sceneId: "S01",
+    durationSeconds: 3,
+    keyframeId: "kf-1",
+    lastFrameId: "lf-1",
+    aspectRatio: "9:16",
+  },
+};
+
+test("閉環（真行為）：節點 audioAnchorId 真餵進門禁 → audio_anchor_present/dialogue_alignment 由 block 轉 pass", () => {
+  const project = {
+    cardIds: ["card-lin", "card-chen", "card-house"],
+    nodes: [shotNode("001", { audioAnchorId: "anchor-from-voiceover" })],
+  };
+  const { context } = storyboardQcContextFromProject(project, { cards: cards() });
+  // 帶入端：逐鏡配音回寫的節點音軌錨真的進 shotMetadata
+  assert.equal(context.shotMetadata?.["001"]?.audioAnchorId, "anchor-from-voiceover");
+
+  const args = storyboardQcGateArgs([fullShot()], { ...context, production: ANCHOR_PRODUCTION });
+  assert.equal(args.sources["001"].audioAnchorId, "nodeMetadata", "來源審計跡 = 節點 metadata");
+  assert.equal(args.input.shots[0].audioAnchorId, "anchor-from-voiceover");
+  assert.ok(!args.missing.includes("audioAnchorId"), "節點供給後不得再列 missing");
+
+  const gated = runShortDramaTool("storyboard_qc_17", args.input);
+  const byId = new Map(gated.gates.map((g) => [g.id, g]));
+  assert.equal(byId.get("audio_anchor_present")?.passed, true, `應 pass（證據：${byId.get("audio_anchor_present")?.detail}）`);
+  assert.equal(byId.get("dialogue_alignment")?.passed, true, `應 pass（證據：${byId.get("dialogue_alignment")?.detail}）`);
+});
+
+test("反證：拔掉節點音軌錨 → 同一兩門必 block（證明判定真吃了節點音軌，非同源偽證）", () => {
+  const stripped = storyboardQcContextFromProject(
+    { cardIds: ["card-lin", "card-chen", "card-house"], nodes: [shotNode("001", {})] },
+    { cards: cards() },
+  );
+  const bareArgs = storyboardQcGateArgs([fullShot()], { ...stripped.context, production: ANCHOR_PRODUCTION });
+  assert.ok(bareArgs.missing.includes("audioAnchorId"), "無來源必須誠實回報 missing");
+  assert.equal(bareArgs.input.shots[0].audioAnchorId, undefined, "不得憑空補值");
+
+  const bare = runShortDramaTool("storyboard_qc_17", bareArgs.input);
+  const bareById = new Map(bare.gates.map((g) => [g.id, g]));
+  assert.equal(bareById.get("audio_anchor_present")?.passed, false, `拔掉後必 block（證據：${bareById.get("audio_anchor_present")?.detail}）`);
+  assert.equal(bareById.get("dialogue_alignment")?.passed, false, `拔掉後必 block（證據：${bareById.get("dialogue_alignment")?.detail}）`);
+});
+
+test("優先序：呼叫端明確供給的 audioAnchorId 勝；未供給時才從節點 metadata 拿（⑤ 生效條件）", () => {
+  const supplied = storyboardQcGateArgs([fullShot()], {
+    production: { "001": { ...ANCHOR_PRODUCTION["001"], audioAnchorId: "anchor-explicit" } },
+    shotMetadata: { "001": { audioAnchorId: "anchor-node" } },
+  });
+  assert.equal(supplied.input.shots[0].audioAnchorId, "anchor-explicit", "metadata 不得覆蓋呼叫端供給");
+  assert.equal(supplied.sources["001"].audioAnchorId, "production");
+
+  const fromNode = storyboardQcGateArgs([fullShot()], {
+    production: ANCHOR_PRODUCTION,
+    shotMetadata: { "001": { audioAnchorId: "anchor-node" } },
+  });
+  assert.equal(fromNode.input.shots[0].audioAnchorId, "anchor-node");
+  assert.equal(fromNode.sources["001"].audioAnchorId, "nodeMetadata");
+});
+
+test("節點音軌錨是單值語義（同 size，非卡 id 聯集）：同鏡首個非空勝、矛盾則不給、空值不佔位", () => {
+  // 同鏡兩節點矛尖不同 → 整個不給（不取首個猜；仍有該鏡鍵但無值）
+  const conflict = storyboardQcContextFromProject({
+    nodes: [shotNode("001", { audioAnchorId: "a-1" }), shotNode("001", { audioAnchorId: "a-2" })],
+  });
+  assert.deepEqual(conflict.context.shotMetadata, { "001": {} });
+
+  // 相同值多節點 + 空/純空白 → 收斂成單一純字串（不是陣列，空值不佔位也不製造矛盾）
+  const agree = storyboardQcContextFromProject({
+    nodes: [
+      shotNode("001", { audioAnchorId: "a-1" }),
+      shotNode("001", { audioAnchorId: "a-1" }),
+      shotNode("001", { audioAnchorId: "   " }),
+    ],
+  });
+  assert.deepEqual(agree.context.shotMetadata, { "001": { audioAnchorId: "a-1" } });
+
+  // 非字串 / 無鏡號 → 不臆造
+  const dirty = storyboardQcContextFromProject({
+    nodes: [shotNode("002", { audioAnchorId: 123 }), { metadata: { audioAnchorId: "a-ghost" } }],
+  });
+  assert.equal(dirty.context.shotMetadata, undefined);
+});

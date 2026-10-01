@@ -236,8 +236,12 @@ const AUDIO_URL_EXTENSIONS = [".mp3", ".m4a", ".wav", ".aac", ".ogg", ".opus", "
  *   - `http(s)://` 且**路徑**（先剝 `?query` / `#fragment`）落在音頻副檔名白名單 → 收
  *   - 其餘（`.png` 圖 URL、無副檔名裸 URL、本地路徑）→ null
  *     **不建空殼音頻卡**（舊版會把任何 http URL 當合法音頻交付，png 也照落一張空殼卡）。
+ *
+ * 導出原因（2026-09-30）：分鏡音軌綁定（`canvas/storyboard-shots.ts` 的
+ * `bindShotAudioTrack`）必須走**同一把尺**——音頻可用性判準只准一份，否則
+ * 「音頻副檔名白名單」會出現第二個漂移點（禁造輪子）。
  */
-function usableAudioUrl(value: unknown): string | null {
+export function usableAudioUrl(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const clean = value.trim();
   if (!clean) return null;

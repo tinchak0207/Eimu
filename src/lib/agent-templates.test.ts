@@ -10,6 +10,11 @@ import {
 import { AGENT_TEMPLATES_FULL, AGENT_TEMPLATE_PAYLOADS, cropTemplate } from "./agent-templates-payload/index.ts";
 import { recipeTemplateToRecallConfig } from "./recipe-templates.ts";
 import { getStyleById } from "./style-library.ts";
+// 誠實性紅線（2026-09-30）：audio_first_timeline 的 speed 參數上游未支持、傳入不生效，
+// 產線文案不得反過來教 agent「超時就調語速」。本檔一併掃 repo 側鏡像與頁面文案。
+import { WORKFLOW_TEMPLATES } from "../../deploy-staging/gateway/workflow-templates/index";
+import { novelFilmPipelinePage } from "./workflow-pages/novel-film-pipeline.ts";
+import { shortdramaVisualAssetsPage } from "./workflow-pages/shortdrama-visual-assets.ts";
 
 const DOMAINS: AgentTemplateDomain[] = ["novel", "ecommerce", "shortdrama", "art"];
 const QUALITY_PROFILES = ["draft", "balanced", "print"];
@@ -439,4 +444,42 @@ test("every display card hydrates: payload ids and step counts align (拆分兩�
   const full0 = AGENT_TEMPLATES_FULL[0];
   assert.ok(typeof full0.initialPrompt === "string" && full0.initialPrompt.length > 0);
   assert.ok(Array.isArray(full0.pipeline.steps[0].promptNotes));
+});
+
+// 誠實性紅線（2026-09-30）：TTS 時長對齊不得教 agent 調語速。
+// 現場事實：audio_first_timeline 的 speed 參數字面標注「當前上游未支持，傳入不生效」，
+// 而 harness-tool-registry 記載該工具是「gateway /agent/v1/tts 逐行真 TTS + ffprobe 實測」。
+// 所以 agent 真正捏得動的只有兩頭：① 改短台詞文本再逐句重出 ② 調鏡頭計畫秒數（durationSeconds）。
+// 教「微調語速」＝教工具做不到的事，agent 只會幻覺或空轉。此斷言掃全部相關文案本體。
+test("配音时长对齐文案不得教 agent 调语速（speed 上游不生效），且必须留下做得到的替代路", () => {
+  const corpus: ReadonlyArray<readonly [string, string]> = [
+    ["agent-templates-payload（novel/shortdrama 全文）", JSON.stringify(AGENT_TEMPLATES_FULL)],
+    ["deploy-staging workflow-templates（gateway 镜像全文）", JSON.stringify(WORKFLOW_TEMPLATES)],
+    ["workflow-pages novel-film-pipeline", JSON.stringify(novelFilmPipelinePage)],
+    ["workflow-pages shortdrama-visual-assets", JSON.stringify(shortdramaVisualAssetsPage)],
+  ];
+  // 暗示「語速可調」的字眼（簡繁都涵蓋）；出現任一即紅。
+  const forbiddenSpeedPhrases = [
+    "微调语速",
+    "微調語速",
+    "调语速",
+    "調語速",
+    "调整语速",
+    "調整語速",
+    "语速对齐",
+    "語速對齊",
+    "语速锁",
+    "語速鎖",
+  ];
+  for (const [label, text] of corpus) {
+    for (const phrase of forbiddenSpeedPhrases) {
+      assert.ok(
+        !text.includes(phrase),
+        `${label} 不得出现「${phrase}」：speed 参数上游不生效，调语速是工具做不到的事（教不会的指令 ⇒ 幻觉或空转）`,
+      );
+    }
+    // 反向：必須真的留下兩條做得到的路 + 明說不生效，而不是刪句子了事。
+    assert.ok(text.includes("不生效"), `${label} 必须明说 speed 传入不生效（不得让 agent 误以为可调速）`);
+    assert.ok(text.includes("改短"), `${label} 必须保留「改短台词再逐句重出」这条做得到的替代路`);
+  }
 });

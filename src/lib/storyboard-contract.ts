@@ -239,6 +239,16 @@ export interface StoryboardQcShot {
    * 缺道具不得讓門禁 block。門禁讀到不認得的鍵時忽略，故多帶此鍵對 17 門判定零影響。
    */
   propCardIds: string[];
+  /**
+   * 本鏡旁白文本（2026-09-30 加成欄位；單一鏡的旁白，供旁白 TTS 逐鏡合成對齊）。
+   * 結構性動機：分鏡過去無旁白欄 → 旁白 TTS 只能整段合成、無法按鏡對齊
+   * （記憶 `tts-multiline-narration-p2-bug`）。本欄是**加成欄位**：有則更好、無則不罰。
+   * **刻意不在 `QC_REQUIRED_FIELDS` 內**（見該常數上方註）：我方 21 欄契約無旁白欄、AID 的
+   * `dialogue` 也不是旁白（見 `productionFieldsFromContext`「刻意不做的推導」），一旦列為門檻，
+   * 全部既有鏡次會瞬間多一項 missing＝純回歸。門禁 `storyboard_qc_17` 讀具名欄位、未知鍵忽略
+   * → 本鍵對 17 門判定零影響。只在呼叫端供給時出現（不補默認值）。
+   */
+  narration?: string;
   keyframeId?: string;
   lastFrameId?: string;
   audioAnchorId?: string;
@@ -264,6 +274,8 @@ export interface StoryboardQcProductionFields {
   sceneCardIds?: string[];
   /** 道具卡 id（`kind === "prop"` 逐字命中；加成欄位，不入 `QC_REQUIRED_FIELDS`）。 */
   propCardIds?: string[];
+  /** 本鏡旁白文本（單一鏡的旁白；**加成欄位**，不入 `QC_REQUIRED_FIELDS`——有則更好、無則不罰）。 */
+  narration?: string;
   keyframeId?: string;
   lastFrameId?: string;
   audioAnchorId?: string;
@@ -293,6 +305,10 @@ export interface StoryboardQcBridgeResult {
  * 道具卡是**加成欄位**：它照樣出現在 `StoryboardQcShot` 輸出上（與
  * `characterCardIds`/`sceneCardIds` 同構）、照樣有 `unresolvedProps` 誠實回報未命中的道具名，
  * 但**不參與** `missing` / `complete` 的判定——有則更好，無則不罰。
+ *
+ * **同樣刻意不含 `narration`（2026-09-30 裁定，勿加）**：旁白是同一類**加成欄位**——只有呼叫端
+ * 供給時才出現在輸出上，未供給既不補默認值也不進 `missing`。理由同道具卡（加了＝全鏡次多一項
+ * missing＝純回歸）；且我方 21 欄契約無旁白欄、無合法推導來源（見下方「刻意不做的推導」）。
  */
 const QC_REQUIRED_FIELDS = [
   "sceneId",
@@ -386,6 +402,8 @@ function storyboardQcShotsWith(
       ...(isNonBlankString(p.lastFrameId) ? { lastFrameId: p.lastFrameId.trim() } : {}),
       ...(isNonBlankString(p.audioAnchorId) ? { audioAnchorId: p.audioAnchorId.trim() } : {}),
       ...(isNonBlankString(p.aspectRatio) ? { aspectRatio: p.aspectRatio.trim() } : {}),
+      // 旁白（加成欄位）：呼叫端供給才帶（同 `approval` 範式，未供給不補默認值 → 既有輸出鍵逐位不變）。
+      ...(isNonBlankString(p.narration) ? { narration: p.narration.trim() } : {}),
       // 分鏡確認狀態：呼叫端供給才帶（未供給＝缺省＝已批准，不補默認值 → 既有輸出鍵逐位不變）。
       ...(p.approval ? { approval: p.approval } : {}),
     } satisfies StoryboardQcShot;
@@ -442,6 +460,10 @@ export type StoryboardQcFieldSource = "production" | "referenceAssets" | "nodeSi
  * `size` 語義不變（canvas 的 `size` 就是交付比例，見 ③ 條推導）。三個卡 id 欄（2026-09-24 新增）
  * 的真源是 agent 自動落卡後回填進節點 metadata 的引用——**粗（可能把該模板產出的卡全填上）**，
  * 因此推導優先序刻意排在 `referenceAssets`（編劇逐字指名）之後。
+ *
+ * `audioAnchorId`（2026-09-30 新增）**有真生產者**：逐鏡配音（`storyboard-voiceover`）把
+ * `dialogueAudioId || narrationAudioId` 寫回節點 metadata；本欄供 `productionFieldsFromContext`
+ * 第 ⑤ 條在呼叫端未供給時把它餵進門禁的 `audio_anchor_present`/`dialogue_alignment`。
  */
 export interface StoryboardQcShotNodeMetadata {
   size?: unknown;
@@ -449,6 +471,13 @@ export interface StoryboardQcShotNodeMetadata {
   characterCardIds?: unknown;
   sceneCardIds?: unknown;
   propCardIds?: unknown;
+  /**
+   * 本鏡的音軌錨 id（2026-09-30 新增；節點 metadata 的相容鍵
+   * `CanvasNodeMetadata.audioAnchorId` = `dialogueAudioId || narrationAudioId`，寫入者 =
+   * `storyboard-voiceover` 逐鏡配音回寫）。**單值語義**（同 `size`，非卡 id 的集合語義）：
+   * 同鏡多節點取首個非空，矛盾則整個不給——音軌錨是單一交付物，猜不得。
+   */
+  audioAnchorId?: unknown;
 }
 
 /**
@@ -459,7 +488,8 @@ export interface StoryboardQcShotNodeMetadata {
  *   `src/lib/character-card-store.ts:122`）。**只用於名稱→id 解析**，不背書卡的存在性判定
  * - `shotMetadata`：每鏡節點 metadata（鍵 = `shotNumber`）。用兩族欄位：
  *   `size` 一欄推 `aspectRatio`（③）；`characterCardIds`/`sceneCardIds`/`propCardIds` 三欄推
- *   同名成片欄位（⑤，**只在 `production` 與 `referenceAssets` 都沒供給時才生效**）
+ *   同名成片欄位（⑤，**只在 `production` 與 `referenceAssets` 都沒供給時才生效**）；
+ *   `audioAnchorId` 一欄推同名成片欄位（⑤，2026-09-30；**單值語義**，只在 `production` 未供給時生效）
  * - `locked*CardIds`：專案級鎖定卡（真源 = `CanvasProject.cardIds`，`src/lib/canvas/types.ts:356`）
  */
 export interface StoryboardQcContext {
@@ -631,8 +661,10 @@ export interface StoryboardQcContextFields {
  *   4. `propCardIds` ← `referenceAssets` 的 `道具:[…]` 名稱 → 卡 id（`kind==="prop"` 逐字命中，
  *      2026-09-24 新增）。**加成欄位**：推導不到不進 `missing`（`QC_REQUIRED_FIELDS` 刻意不含它，
  *      否則全部既有鏡次瞬間多一項 missing＝門禁回歸）。`kind==="style"` 的卡不進 prop 表。
- *   5. `characterCardIds`/`sceneCardIds`/`propCardIds` ← 該鏡節點 `metadata` 的同名卡 id 三欄
- *      （2026-09-24 新增；來源 = agent 自動落卡後回填，閉環的消費端）。
+ *   5. `characterCardIds`/`sceneCardIds`/`propCardIds`/`audioAnchorId` ← 該鏡節點 `metadata` 的同名
+ *      欄（2026-09-24 卡 id；2026-09-30 `audioAnchorId`）。來源 = agent 自動落卡後回填 ＋ 逐鏡配音
+ *      回寫（閉環的消費端）。卡 id 是**集合**語義（聯集去重）；`audioAnchorId` 是**單值**語義
+ *      （同鏡矛盾不給，值真源見 `storyboardQcContextFromProject`）。
  *
  * **推導優先序（照抄，勿改）**：`production`（呼叫端供給） > `referenceAssets`（①②④）
  * > 節點 metadata（⑤）。理由：`referenceAssets` 是**編劇階段逐字寫下的意圖**（名稱級、有明確
@@ -646,11 +678,20 @@ export interface StoryboardQcContextFields {
  *     `shortdrama-domain/index.ts:499`（4 字/秒，吃「台詞行清單」），而劇本模板教義寫 **4.5 字/秒**
  *     （`agent-templates-payload.ts:103`）。射手的 `dialogue` 是**單一字串**、其 `[角色]：「…」`
  *     標記格式無契約文件，硬套等於**自造轉換**→ 不生成，留 `missing` 由門禁如實 block。
+ *   - `narration`（2026-09-30）：**旁白不從 `dialogue` 猜**。我方 21 欄契約**無旁白欄**，
+ *     射手的 `dialogue` 是**單一字串**且其 `[角色]：「…」` 標記格式**無契約文件**——從 `dialogue`
+ *     切出旁白＝**自造轉換**（同 `durationSeconds` 的病灶），且分鏡的旁白本就非逐鏡台詞可比。
+ *     故本檔不推導 `narration`，一律留給呼叫端供給：供給即進 `fields`（來源記 `production`）；
+ *     未供給＝加成欄位不罰（不進 `missing`）。
  *   - `sceneId`：門禁 `sceneId` 是**場次編號**（`drama-recipe.ts:111-112` `DramaScriptScene.sceneId`
  *     「場次編號（如 S01）」），21 欄只有外層 `sceneName` = **場景資產名**（`storyboard-contract.ts:148`）。
  *     兩者是不同實體，名稱不可互換 → 不生成。
- *   - `keyframeId`/`lastFrameId`/`audioAnchorId`：本 repo **無生產者**（`grep keyframeId src/` 除本檔與
- *     `shortdrama-domain` 型別外無寫入端；`audio_first_timeline` 的 `anchorId` 亦無呼叫端）→ 不生成。
+ *   - `keyframeId`/`lastFrameId`：本 repo **無生產者**（`grep keyframeId src/` 除本檔與
+ *     `shortdrama-domain` 型別外無寫入端）→ 不生成。
+ *   - `audioAnchorId`：**2026-09-30 起有生產者**——`storyboard-voiceover`／voiceboard 把
+ *     `dialogueAudioId || narrationAudioId` 寫回節點 metadata 的相容鍵，本橋第 ⑤ 條現會在
+ *     呼叫端未供給時從節點 metadata 讀取（單值語義：同鏡矛盾不給）。因為 `audioAnchorId`
+ *     已在 `QC_REQUIRED_FIELDS` 內，供給後自然不再進 `missing`。（舊註「無生產者→不生成」已過時。）
  *   - `pixels→ratio` 換算（`aspectRatioFromImageSize`）：canvas 存的是比例不是像素，用不到；
  *     且會把「尺寸」與「交付比例」兩概念混一，故只認已是 ratio 形狀的值。
  */
@@ -675,6 +716,9 @@ export function productionFieldsFromContext(
     // `propCardIds` 不在 `QC_REQUIRED_FIELDS`（加成欄位，見該常數註），故上面的迴圈不會標它；
     // 呼叫端有供給時補記來源（與 `prompt` 同一範式），否則它在審計跡裡會是「有值卻無來源」。
     if (supplied.propCardIds !== undefined) src.propCardIds = "production";
+    // `narration` 同樣不在 `QC_REQUIRED_FIELDS`（加成欄位，見該常數註），迴圈不標它；呼叫端供給時
+    // 補記來源（與 `propCardIds`/`prompt` 同一範式），否則審計跡裡會是「有值卻無來源」。
+    if (supplied.narration !== undefined) src.narration = "production";
 
     // ① / ② referenceAssets 名稱 → 卡 id（僅在呼叫端未供給時才推導；已供給者不被覆蓋）
     const resolved = resolveReferenceAssetsToCardIds(shot.referenceAssets, cards);
@@ -724,6 +768,17 @@ export function productionFieldsFromContext(
       if (ids.length > 0) {
         out.propCardIds = ids;
         src.propCardIds = "nodeMetadata";
+      }
+    }
+    // `audioAnchorId` 同樣由節點 metadata 帶入（2026-09-30；寫法與上方三條卡 id 逐行對稱，
+    // 含 `src[X] = "nodeMetadata"` 的來源補記）。**單值語義**（同 `size`，非卡 id 的集合語義），
+    // 故只在呼叫端未供給且節點值是非空字串時才拿；因為本欄在 `QC_REQUIRED_FIELDS` 內，
+    // 供給後自然不再進 `missing`。
+    if (!isNonBlankString(out.audioAnchorId)) {
+      const nodeAudioAnchorId = nodeCards?.audioAnchorId;
+      if (isNonBlankString(nodeAudioAnchorId)) {
+        out.audioAnchorId = nodeAudioAnchorId.trim();
+        src.audioAnchorId = "nodeMetadata";
       }
     }
 
@@ -790,7 +845,7 @@ export interface StoryboardQcNodeRef {
 /**
  * 專案上下文 → 橋接上下文（**唯一專案級推導入口，顯式不魔法**）。
  *
- * 目前只有三條專案級推導成立（每條都有來源）：
+ * 目前只有四條專案級推導成立（每條都有來源）：
  *   1. `lockedCharacterCardIds` / `lockedSceneCardIds` ← `project.cardIds` 按卡 `kind` 分流
  *      （卡實體真源 = `listCharacterCards`，`src/lib/character-card-store.ts:122`）。
  *      門禁 `character_lock`/`scene_lock` 要求「每鏡引用的卡都在鎖定集合內」——集合就是專案鎖定卡。
@@ -802,6 +857,10 @@ export interface StoryboardQcNodeRef {
  *      `propCardIds`（2026-09-24 新增；供 `productionFieldsFromContext` 第 ⑤ 條推導——即
  *      「agent 自動落卡 → 節點 metadata 宣告 → 門禁消費」閉環的帶入端）。清洗用 `usableCardIds`，
  *      **空陣列省略該鍵**（不造 `characterCardIds: []` 的空鍵，否則 `src` 審計跡會誤報「有值」）。
+ *   4. `shotMetadata[k]` ← `project.nodes` 中 `metadata.audioAnchorId`（2026-09-30 新增；供第 ⑤ 條
+ *      推導——「逐鏡配音回寫 → 節點 metadata → 門禁 `audio_anchor_present`/`dialogue_alignment`」
+ *      閉環的帶入端）。**單值語義**（同 `size`）：同鏡多節點取首個非空，矛盾則整個不給；空值/非
+ *      字串一律省略該鍵（不臆造、不誤報「有值」）。
  *
  * **刻意不做的推導**：`aspectRatio` 沒有專案級欄位可取（`grep aspectRatio src/lib/canvas/types.ts`
  * 為空——比例只存在於**節點** metadata，不在 `CanvasProject`），故不「從專案繼承」；
@@ -892,6 +951,10 @@ export function storyboardQcContextFromProject(
   // 卡 id 三欄與 `size` **分開累積**：`size` 是同鏡矛盾就整個不給（比例是單一交付格式，猜不得）；
   // 卡 id 是**集合**語義（節點宣告「本鏡引用這些卡」），同鏡多節點取聯集去重、不取首個也不丟資訊。
   const cardsByShot: Record<string, { character: string[]; scene: string[]; prop: string[] }> = {};
+  // `audioAnchorId` 與 `size` **同範式（單值語義）**、**不照卡 id 的聯集**：同鏡多節點取首個非空，
+  // 一旦矛盾（第二個非空值不同）就整個不給（`null` 哨兵），後續節點不得把它「救回」——音軌錨是
+  // 單一交付物，猜不得。空/非字串值一律忽略（不佔位、不算首個）。
+  const anchorByShot: Record<string, string | null> = {};
   for (const node of project?.nodes ?? []) {
     const meta = node?.metadata;
     const shotNumber = meta?.storyboardShot?.shotNumber;
@@ -906,12 +969,27 @@ export function storyboardQcContextFromProject(
     collect(bucket.scene, meta?.sceneCardIds);
     collect(bucket.prop, meta?.propCardIds);
 
+    const rawAnchor = meta?.audioAnchorId;
+    if (isNonBlankString(rawAnchor)) {
+      const anchor = rawAnchor.trim();
+      const prevAnchor = anchorByShot[key];
+      if (prevAnchor === undefined) anchorByShot[key] = anchor;
+      else if (prevAnchor !== anchor) anchorByShot[key] = null; // 同鏡矛盾 → 不給（不取首個猜）
+    }
+
     const size = meta?.size;
     if (size === undefined) continue;
     // 同鏡號多節點：ratio 不一致 → 寧可不給（該鏡 aspectRatio 留 missing），不取首個猜
     const prev = shotMetadata[key];
     if (prev === undefined) shotMetadata[key] = { size };
     else if (prev.size !== size) shotMetadata[key] = {};
+  }
+  // 音軌錨：真的有單一非空值時才掛上；同鏡矛盾則**保留該鏡鍵但不給值**（照 `size` 範式——
+  // `{ [key]: {} }`，審計跡不誤報「有值」）。
+  for (const [key, anchor] of Object.entries(anchorByShot)) {
+    const entry = (shotMetadata[key] ??= {});
+    if (anchor === null) continue;
+    entry.audioAnchorId = anchor;
   }
   // 卡 id 只在真的有值時掛上（空陣列省略該鍵 → 審計跡不誤報「有值」）
   for (const [key, bucket] of Object.entries(cardsByShot)) {
