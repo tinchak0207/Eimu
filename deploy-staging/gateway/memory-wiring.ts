@@ -30,10 +30,47 @@ export const MEMORY_TRUNC_MARK = "（已截斷）" // 契約 §4 截斷標記
 export const MEMORY_RECALL_PREFETCH_TTL_MS = 5 * 60 * 1000 // 預取候選保鮮期（§7 prefetch）
 export const MEMORY_ASSISTANT_HEAD_CHARS = 200 // §7 query 的 assistant 頭部長度
 
+/**
+ * §4 注入文案（用途邊界）：私有記憶只作「方法與偏好」參考，不是本輪創作底稿。
+ * 病根：既往作品方案（角色/世界觀/劇情/分鏡）原樣入 prompt，模型對「全新的世界觀、
+ * 全新的片」也照樣沿用，創意被舊方案污染。故在私有記憶塊前明寫邊界。
+ */
+export const MEMORY_PRIVATE_SCOPE_NOTE = [
+  "以下过往记忆只作「方法与偏好」参考，不是本轮创作的底稿：",
+  "- 用户要全新原创（新世界观、新片、新创意）时，禁止沿用其中任何既有作品的具体内容（角色、设定、剧情、片名、分镜、方案、文案），一律从零创作。",
+  "- 只有用户明确点名「沿用 / 延续 / 基于 X」时，才可复用 X 的具体内容。",
+  "- 可借用的只有方法：流程、风格配方、参数经验、失败教训。",
+].join("\n")
+
 export function clampMemoryChars(text: string, cap: number): string {
   if (text.length <= cap) return text
   return text.slice(0, Math.max(0, cap - MEMORY_TRUNC_MARK.length)) + MEMORY_TRUNC_MARK
 }
+
+// ── 新創作閘門（2026-10-01 翻舊賬事故）────────────────────────────────────
+// 病根：私有 memory_docs（舊專案 brief/世界觀/分鏡/曲目）每會話無條件注入，召回又按
+// 字面把「百合 OP」直配舊專案；模型把「可參考」當成「默認沿用」，用戶要新創意卻拿到舊方案。
+// 處置：①偏好類記憶（跨專案通用）照常注入；專案檔案前置複用紀律；②本輪用戶明確要新創意
+// → 專案檔案與召回前綴整段不注入，並在本輪 parts 前綴強制「從零構思」指令。
+const FRESH_CREATIVE_RE =
+  /新(创意|創意|点子|點子|构思|構思|故事|题材|題材|世界观|世界觀|作品|企划|企劃)|全新|原创|原創|从零|從零|另起(炉灶|爐灶)?|重新(设计|設計|构思|構思|想|做一个|做一個)|不要(沿用|参考|參考|照搬|复用|複用|套用)|别(用|抄|套)(之前|以前|旧|舊)|別(用|抄|套)(之前|以前|旧|舊)|from scratch|brand[- ]new|fresh (idea|concept|take)|new (idea|concept|world)/i
+
+export function isFreshCreativeRequest(text: string): boolean {
+  return typeof text === "string" && FRESH_CREATIVE_RE.test(text)
+}
+
+/** 偏好類記憶（pref-*／preference/user/feedback domain）跨專案通用；其餘視為過往專案/作品檔案。 */
+export function isPreferenceMemoryDoc(d: { domain?: unknown; slug?: unknown }): boolean {
+  const slug = typeof d.slug === "string" ? d.slug : ""
+  const domain = typeof d.domain === "string" ? d.domain : ""
+  return /^pref(erence)?[-_]/i.test(slug) || /^(pref|preference|preferences|user|profile|feedback)$/i.test(domain)
+}
+
+export const PROJECT_REUSE_RULE =
+  "【历史项目档案·复用纪律】下列是过往项目/作品档案，只有用户明确点名续作（提到该片名、角色名，或说『接着做/继续上次』）时才可复用；其余任何新的创作请求都必须从零构思世界观、角色、分镜与曲目，禁止借用或改写其中设定，派发给 expert 的简报也不得夹带这些档案。"
+
+export const FRESH_CREATIVE_TURN_DIRECTIVE =
+  "【本轮为全新创作】用户要的是新创意：忽略一切历史项目档案（片名、角色、世界观、分镜、曲目、时长版本），从零构思；只保留账户偏好与通用领域知识。派发给 expert 的简报同样不得引用旧项目。"
 
 /**
  * 契約 §4 注入塊組裝（純函式；PRD §9 R1 注入形狀尺的可測面）：
@@ -47,6 +84,7 @@ export function clampMemoryChars(text: string, cap: number): string {
 export function buildMemoryInjectionBlocks(
   userMemory: SessionState["userMemory"],
   sharedEnabled: boolean,
+  opts: { freshCreative?: boolean } = {},
 ): { lines: string[]; trace: { private_docs: string[]; shared_index_chars: number } } {
   const l0Parts: string[] = []
   const privateDocs: string[] = []
@@ -67,12 +105,21 @@ export function buildMemoryInjectionBlocks(
       l0Parts.push(`以下是这个账户从过往合作中提炼的教训（仅供参考，可能已过期，冲突以现场为准）：\n${lessons.map((l) => `- ${l}`).join("\n")}`)
     }
     const docs = Array.isArray(userMemory.memory_docs) ? userMemory.memory_docs.slice(0, MEMORY_PRIVATE_DOCS_MAX) : []
-    for (const d of docs) {
+    if (docs.length > 0) l0Parts.push(MEMORY_PRIVATE_SCOPE_NOTE)
+    // 偏好在前、專案檔案在後且前置複用紀律：2400 截斷只會吃掉檔案正文尾，不會吃掉紀律。
+    const prefDocs = docs.filter((d) => isPreferenceMemoryDoc(d))
+    const projectDocs = opts.freshCreative ? [] : docs.filter((d) => !isPreferenceMemoryDoc(d))
+    const pushDoc = (d: (typeof docs)[number]) => {
       const domain = typeof d.domain === "string" && d.domain ? d.domain : "general"
       const slug = typeof d.slug === "string" && d.slug ? d.slug : "doc"
       // §4 索引行格式：`- [domain] slug — description` + 正文縮排。
       l0Parts.push(`- [${domain}] ${slug} — ${String(d.description ?? "")}\n   ${String(d.body ?? "")}`)
       privateDocs.push(typeof d.id === "string" && d.id ? d.id : slug)
+    }
+    prefDocs.forEach(pushDoc)
+    if (projectDocs.length > 0) {
+      l0Parts.push(PROJECT_REUSE_RULE)
+      projectDocs.forEach(pushDoc)
     }
   }
   const lines: string[] = []
@@ -81,7 +128,7 @@ export function buildMemoryInjectionBlocks(
   const indexMd = typeof userMemory?.memory_index_md === "string" ? userMemory.memory_index_md.trim() : ""
   if (sharedEnabled && indexMd) {
     const l1 = clampMemoryChars(
-      `以下是本平台积累的领域知识目录（仅供参考，可能已过期，冲突以现场为准）：\n${indexMd}\n（模型可调用 memory_recall 工具读取全部正文）`,
+      `以下是本平台积累的领域知识目录（仅供参考，可能已过期，冲突以现场为准）：\n${indexMd}\n（目录只作方法与领域知识参考：用户要全新原创时，不得把其中任一既有作品的具体内容当作可沿用的底稿；用户明确点名沿用某个 slug 时才可读取它的正文。）\n（模型可调用 memory_recall 工具读取全部正文）`,
       MEMORY_L1_BUDGET,
     )
     lines.push(l1)
