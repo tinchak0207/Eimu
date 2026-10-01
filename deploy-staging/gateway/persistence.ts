@@ -21,6 +21,7 @@
  */
 
 import { Database } from "bun:sqlite"
+import { MergedReplayFrame } from "./replay-frame.ts"
 import type { SteerCommand, SteerLedgerStore } from "./steer-identity.ts"
 
 // ---- 型別 ----
@@ -62,7 +63,7 @@ export interface PersistableState {
 /** DB row 的 data 欄位 JSON 形狀（Map/Set 均序列化為陣列）。 */
 interface PersistedData {
   eventCounter: number
-  replayBuffer: { id: number; frame: string }[]
+  replayBuffer: { id: number; frame: string; merge?: { name: string; ids: number[]; lens: number[] } }[]
   lastActivityAt: number
   partTextEmitted: [string, { emittedLen: number }][]
   announcedUrls: string[]
@@ -202,7 +203,11 @@ export function initPersistence(): void {
 function serialize(state: PersistableState): PersistedData {
   return {
     eventCounter: state.eventCounter,
-    replayBuffer: state.replayBuffer.map((f) => ({ id: f.id, frame: textDecoder.decode(f.frame) })),
+    replayBuffer: state.replayBuffer.map((f) =>
+      f instanceof MergedReplayFrame
+        ? { id: f.id, frame: textDecoder.decode(f.frame), merge: f.toPersisted() }
+        : { id: f.id, frame: textDecoder.decode(f.frame) },
+    ),
     lastActivityAt: state.lastActivityAt,
     partTextEmitted: [...state.partTextEmitted.entries()],
     announcedUrls: [...state.announcedUrls],
@@ -239,7 +244,9 @@ export function hydrateRow(row: PersistedRow): Record<string, unknown> {
     pendingQuestions: new Map(),
     resolvedConfirms: new Map(),
     eventCounter: typeof d.eventCounter === "number" ? d.eventCounter : 0,
-    replayBuffer: (d.replayBuffer ?? []).map((f) => ({ id: f.id, frame: textEncoder.encode(f.frame) })),
+    replayBuffer: (d.replayBuffer ?? []).map(
+      (f) => (f.merge && MergedReplayFrame.fromPersisted(f.frame, f.merge)) || { id: f.id, frame: textEncoder.encode(f.frame) },
+    ),
     lastActivityAt: typeof d.lastActivityAt === "number" ? d.lastActivityAt : row.updatedAt,
     partTextEmitted: new Map(d.partTextEmitted ?? []),
     // S2b：出站剝離器狀態——回合級 ephemeral，不持久化（重啟後新回合重建）。

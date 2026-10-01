@@ -11,7 +11,19 @@ import { PART_TEXT_TRACK_CAP } from "./constants-gateway.ts"
 import { emitToSession } from "./sse-core.ts"
 import { markTurnFirst } from "./metrics-gw.ts"
 import { boundMap } from "./events-translate.ts"
-import { stripOutboundFeed, type PartStripState } from "./outbound-sanitize.ts"
+import { stripOutboundFeed, resolveUserScript, shouldT2sForUserScript, type PartStripState, type UserScript } from "./outbound-sanitize.ts"
+
+// R9-B（2026-09-30）：會話用戶書寫體（黏性，volatile）。按 lastUserMessage 判定，
+// 無判定力的短回覆（「A」「好」）沿用上次；只在消息變化時重算。
+const userScriptBySession = new WeakMap<SessionState, { msg: string | undefined; script: UserScript }>()
+function sessionUserScript(state: SessionState): UserScript {
+  const msg = state.lastUserMessage
+  const rec = userScriptBySession.get(state)
+  if (rec && rec.msg === msg) return rec.script
+  const script = resolveUserScript(rec?.script, msg)
+  userScriptBySession.set(state, { msg, script })
+  return script
+}
 // TODO(index.ts 接線): markTurnFirst(index.ts ≈4441)/boundMap(index.ts ≈2720) 補 export 後改真 import
 
 /** 統一出口：經剝離器後發 message.delta（無安全文本時靜默）。 */
@@ -22,7 +34,8 @@ export function emitSanitizedDelta(state: SessionState, partId: string | undefin
   const pid = typeof partId === "string" && partId ? partId : "_turn"
   let st = state.partStripState.get(pid)
   if (!st) {
-    st = { pending: "", suppress: false, fence: false, sawEnglish: false }
+    // R9-B：繁體用戶會話的 part 不做 R5-C 繁→簡（簡體/未判定照舊）。
+    st = { pending: "", suppress: false, fence: false, sawEnglish: false, t2s: shouldT2sForUserScript(sessionUserScript(state)) }
     state.partStripState.set(pid, st)
     boundMap(state.partStripState, PART_TEXT_TRACK_CAP)
   }

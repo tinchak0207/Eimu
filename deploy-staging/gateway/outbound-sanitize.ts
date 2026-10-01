@@ -19,7 +19,9 @@
 // 全部是 ASCII 詞組精確匹配 + 行尾錨定，中文字節永不命中 \w 詞表，不誤傷中文標題。
 export const INTERNAL_SECTION_HEADING_RE = /^#{1,6}[ \t]*(objective|work state|next move|relevant files|important details|completed|active|blocked|progress summary|verdict|issues|evidence|beats|shots|timeline_ops)[ \t]*:?[ \t]*$/i
 export const ANY_HEADING_RE = /^#{1,6}[ \t]/
-export type PartStripState = { pending: string; suppress: boolean; fence: boolean; sawEnglish: boolean }
+// R9-B（2026-09-30）：t2s = 本 part 正文是否做 R5-C 繁→簡（缺省/undefined ＝ 轉，舊行為）。
+// 由 outbound-emit 按會話用戶書寫體決定（shouldT2sForUserScript）；繁體用戶置 false。
+export type PartStripState = { pending: string; suppress: boolean; fence: boolean; sawEnglish: boolean; t2s?: boolean }
 
 // ── R4-A S1（2026-08-28）：英文正文守門 ──
 // R4 實錘（死線一）：message.delta 出現成段英文 reasoning（event 5180 "The
@@ -54,9 +56,57 @@ export const T2S_MAP = new Map<string, string>()
 for (let i = 0; i + 1 < T2S_PAIRS.length; i += 2) T2S_MAP.set(T2S_PAIRS[i]!, T2S_PAIRS[i + 1]!)
 export const T2S_RE = new RegExp(`[${Array.from(T2S_MAP.keys()).join("")}]`, "g")
 
-/** 正文行繁→簡轉換：無映射命中原樣返回；有轉換時留 journal 證據行。 */
+// ── R9-B（2026-09-30）：R5-C 跟隨用戶書寫體 ──
+// R9 實錘（eval-yuri-op-mv-0930 SSE 9861–9887）：用戶以繁體書寫，出口仍按 R5-C
+// 逐字繁→簡，精簡表只覆蓋部分字 → 「帳號余额」「現在交不出成片」繁簡混雜；
+// 日文歌詞被轉（「この距離が」→「この距离が」、「放課後」→「放课后」）。
+// R5-C 原意（站點文案簡體）保留給簡體用戶與無法判定者；規則：
+//  ① 任何含平假名/片假名的行一律不轉（日文漢字不是繁體中文）；
+//  ② 會話用戶書寫體 = 繁體 → 不轉；簡體/未判定 → 照舊轉。
+// ・（U+30FB）與 ー（U+30FC）中文排版也常用，不算假名證據。
+export const KANA_RE = /[\u3041-\u309F\u30A1-\u30FA\u30FD-\u30FF\u31F0-\u31FF\uFF66-\uFF9D]/
+
+export type UserScript = "hant" | "hans" | "unknown"
+// 簡體證據字：映射表的簡體側，扣掉繁體文本裡同樣常見的共用字（后/台/只/面/余/于…），
+// 避免繁體用戶寫「皇后」「台北」被誤判為簡體。
+const T2S_SHARED = new Set(Array.from("里后发复干台只志谷松胡斗板周游回制征范丑面余于喂迹夸荐洒杆柜愿几个松尽"))
+const TRAD_EVIDENCE = new Set<string>()
+const SIMP_EVIDENCE = new Set<string>()
+for (const [t, sc] of T2S_MAP) {
+  if (t === sc) continue
+  TRAD_EVIDENCE.add(t)
+  if (!T2S_SHARED.has(sc) && !T2S_MAP.has(sc)) SIMP_EVIDENCE.add(sc)
+}
+
+/** 判定一段用戶文本的書寫體：繁體特徵字多→hant，簡體特徵字多→hans，否則 unknown。 */
+export function detectUserScript(text: string): UserScript {
+  if (!text) return "unknown"
+  let hant = 0
+  let hans = 0
+  for (const c of text) {
+    if (TRAD_EVIDENCE.has(c)) hant++
+    else if (SIMP_EVIDENCE.has(c)) hans++
+  }
+  if (hant > hans) return "hant"
+  if (hans > hant) return "hans"
+  return "unknown"
+}
+
+/** 會話書寫體黏性：本條消息無判定力（如「A」「好」）時沿用上一次判定。 */
+export function resolveUserScript(prev: UserScript | undefined, userText: string | undefined): UserScript {
+  const cur = detectUserScript(userText ?? "")
+  return cur !== "unknown" ? cur : (prev ?? "unknown")
+}
+
+/** 該書寫體下出口是否做 R5-C 繁→簡：只有繁體用戶不轉（簡體/未判定保 R5-C 舊行為）。 */
+export function shouldT2sForUserScript(script: UserScript): boolean {
+  return script !== "hant"
+}
+
+/** 正文行繁→簡轉換：無映射命中原樣返回；有轉換時留 journal 證據行。含假名的行（日文）原樣返回。 */
 export function t2sLine(line: string): string {
   if (!line) return line
+  if (KANA_RE.test(line)) return line // R9-B ①：日文行不轉
   let converted = false
   const out = line.replace(T2S_RE, (c) => {
     converted = true
@@ -71,6 +121,28 @@ export function t2sLine(line: string): string {
 // 直達用戶。剝編號留語義：§\d+(\.\d+)* 整體替換為「内部规定」。
 export const SECTION_REF_RE = /按\s*§\s?\d+(?:\.\d+)*/g
 export const SECTION_TOKEN_RE = /§\s?\d+(?:\.\d+)*/g
+
+// ── 2026-09-28 漫劇工作室評測：內部路徑／規則代號剝離 ──
+// 實錘：面向工作室的進度簡報出現「spec 已落盘 `runs/txj-ep01/audio/…md`」「R7 止损线执行正确」
+// 「完整结果已落盘 outputs/subagent/…」——AGENTS.md §0 已禁內部標識入正文，模型仍會帶出。
+// 出站確定性兜底：URL 段原樣保留（交付物鏈接是給用戶的），只在非 URL 段替換工作區路徑
+// （/opt/agent-harness/…、outputs/…、runs/…、以及帶文檔/數據副檔名的相對路徑）與 R 系列規則代號。
+const URL_SEGMENT_RE = /(https?:\/\/[^\s)）\]」>`"']+)/
+export const INTERNAL_PATH_RE = /`?(?:\/opt\/agent-harness\/[^\s`，。；、（）()「」\[\]]+|(?:outputs|runs)\/[^\s`，。；、（）()「」\[\]]+|(?:[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_.-]+\.(?:md|json|jsonl|txt|ts|py|mjs|srt|ass))`?/g
+export const INTERNAL_RULE_CODE_RE = /\bR\d{1,2}(?:-[A-Z]\d?)?\s*(止损线|止损条款|止损|铁律)/g
+
+export function scrubInternalRefs(line: string): string {
+  if (!line) return line
+  return line
+    .split(URL_SEGMENT_RE)
+    .map((part, i) => (i % 2 === 1 ? part : part.replace(INTERNAL_PATH_RE, "（内部存档）").replace(INTERNAL_RULE_CODE_RE, "$1")))
+    .join("")
+}
+
+/** R9-B：本 part 的正文轉換出口（t2s === false ＝ 繁體用戶會話，原樣）。 */
+function bodyT2s(st: PartStripState, line: string): string {
+  return st.t2s === false ? line : t2sLine(line)
+}
 
 /** 餵入一個 chunk，回傳可安全外發的文本（行未完整時扣留，可能回空串）。 */
 export function stripOutboundFeed(st: PartStripState, chunk: string): string {
@@ -94,7 +166,7 @@ export function stripOutboundFeed(st: PartStripState, chunk: string): string {
       // 內部段到下一個「非內部」標題為止；下一個內部段標題繼續吞
       if (ANY_HEADING_RE.test(line) && !INTERNAL_SECTION_HEADING_RE.test(line)) {
         st.suppress = false
-        out += t2sLine(line) + "\n" // R5-C：正文行繁→簡
+        out += bodyT2s(st, line) + "\n" // R5-C：正文行繁→簡（R9-B：跟隨用戶書寫體）
       }
       continue
     }
@@ -108,7 +180,7 @@ export function stripOutboundFeed(st: PartStripState, chunk: string): string {
       continue
     }
     // S2：內部條款編號剝離（留語義）+ R5-C 繁→簡守門。
-    out += t2sLine(line.replace(SECTION_REF_RE, "按内部规定").replace(SECTION_TOKEN_RE, "内部规定")) + "\n"
+    out += bodyT2s(st, scrubInternalRefs(line).replace(SECTION_REF_RE, "按内部规定").replace(SECTION_TOKEN_RE, "内部规定")) + "\n"
   }
   return out
 }
@@ -122,7 +194,7 @@ export function stripOutboundFlush(st: PartStripState): string {
   if (st.suppress) {
     if (ANY_HEADING_RE.test(line) && !INTERNAL_SECTION_HEADING_RE.test(line)) {
       st.suppress = false
-      return t2sLine(line) // R5-C：正文行繁→簡
+      return bodyT2s(st, line) // R5-C：正文行繁→簡（R9-B：跟隨用戶書寫體）
     }
     return ""
   }
@@ -134,5 +206,37 @@ export function stripOutboundFlush(st: PartStripState): string {
     st.sawEnglish = true
     return ""
   }
-  return t2sLine(line.replace(SECTION_REF_RE, "按内部规定").replace(SECTION_TOKEN_RE, "内部规定"))
+  return bodyT2s(st, scrubInternalRefs(line).replace(SECTION_REF_RE, "按内部规定").replace(SECTION_TOKEN_RE, "内部规定"))
+}
+
+// ── R9-B（2026-09-30）：part 尾行即時吐出，回合結束不再補播過期旁白 ──
+// R9 實錘（eval-yuri-op-mv-0930 SSE 9888–9894）：工具調用前的單行旁白 text part
+//（「我先掌握行情…」「先让歌跑起来：」「付费通路是活的…」，均無尾換行）被
+// stripOutboundFeed 的尾行扣留機制整行壓在 pending，整個回合沒有外發（SSE 全檔
+// 各只出現一次）；session.idle 按 partStripState 插入序一次性 flush → 7 句過期
+// 旁白接在最終答覆（9861–9887）之後、turn.done（9895）之前「報幕」。
+// 修法：新 text part 開始／工具調用開始時，把其他 part 扣住的尾行當場吐出
+//（加段落分隔，保持與工具/下一段的時序）；回合結束只吐最後一個 part 的尾行。
+
+/** 把 exceptPid 以外各 part 扣住的尾行吐出（即時、按插入序），回傳待發文本（可能空串）。 */
+export function flushOtherPartTails(map: Map<string, PartStripState>, exceptPid?: string): string {
+  let out = ""
+  for (const [pid, st] of map) {
+    if (pid === exceptPid || !st.pending) continue
+    const tail = stripOutboundFlush(st)
+    if (tail) out += tail + "\n\n"
+  }
+  return out
+}
+
+/** 回合結束：只吐最後一個 part（最終答覆）的尾行；更早 part 的殘留一律丟棄不補播。 */
+export function takeTurnEndTail(map: Map<string, PartStripState>): { tail: string; dropped: string[] } {
+  const entries = Array.from(map.values())
+  const dropped: string[] = []
+  for (let i = 0; i < entries.length - 1; i++) {
+    const t = stripOutboundFlush(entries[i]!)
+    if (t) dropped.push(t)
+  }
+  const last = entries[entries.length - 1]
+  return { tail: last ? stripOutboundFlush(last) : "", dropped }
 }

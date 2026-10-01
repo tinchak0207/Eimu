@@ -55,10 +55,13 @@ export async function fetchBalance(key: string): Promise<number | null> {
   }
 }
 
+// R9-A（2026-09-30）：available 語義＝「餘額數據可得」（前端據此顯示/隱藏餘額 chip，
+// agent-chat-types.ts / agent-chat-client.ts 只讀 available===true），不是「可消費」。
+// spendable＝餘額 >0 才可發起付費生成；負債 -3.01 幣時 available:true 但 spendable:false。
 export function quotaPayload(balance: number | null): Record<string, unknown> {
   return balance === null
-    ? { balance_coins: null, currency: "coins", available: false, reason: "platform_balance_endpoint_missing" }
-    : { balance_coins: balance, currency: "coins", available: true }
+    ? { balance_coins: null, currency: "coins", available: false, spendable: null, reason: "platform_balance_endpoint_missing" }
+    : { balance_coins: balance, currency: "coins", available: true, spendable: balance > 0 }
 }
 
 export async function handleQuota(key: string): Promise<Response> {

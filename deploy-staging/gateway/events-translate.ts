@@ -5,7 +5,7 @@ import path from "node:path"
 import type { SessionState } from "./types-gateway.ts"
 import { PLATFORM_BASE, WORKSPACE_DIR, UPLOADS_DIR, TURN_RETRY_DELAY_MS, IDLE_STEP_ABORT_THRESHOLD, IDLE_STEP_NUDGE, IMAGE_URL_DEDUP_CAP, TOOL_STATUS_DEDUP_CAP } from "./constants-gateway.ts"
 import { sessions, markDirty } from "./sessions-core.ts"
-import { opencodeFetch } from "./opencode-client.ts"
+import { opencodeFetch, revertDeadTail } from "./opencode-client.ts"
 import { emitToSession, stripStaleTurnTextFromReplay } from "./sse-core.ts"
 import { estimateNodeCoins } from "./pricing-gateway.ts"
 import { applyCanvasNodeCreated, applyCanvasNodeConnected, applyCanvasNodeUpdated } from "./canvas-cascade-state.ts"
@@ -925,6 +925,8 @@ export function triggerIdleStepBreaker(state: SessionState): void {
     const cur = sessions.get(state.sessionId)
     if (!cur || (cur.turnGen ?? 0) !== gen) return
     try {
+      // 2026-10-01 去重：空 step 輪零產出 → 撤掉原 user 訊息，nudgeBody（原文＋提示）只留一條。
+      await revertDeadTail(cur.opencodeSessionId)
       const res = await opencodeFetch(`/session/${cur.opencodeSessionId}/prompt_async`, {
         method: "POST",
         body: JSON.stringify(nudgeBody),

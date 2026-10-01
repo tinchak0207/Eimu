@@ -95,6 +95,27 @@ const G3_REGEXES: readonly RegExp[] = [
   /(密码|密碼|验证码|驗證碼|一次性密碼|一次性密码)/,
 ]
 
+/**
+ * G7 指令注入樣板（2026-09-29 審計新增，僅 shared → 丟棄）。
+ * 威脅：shared 記憶會被召回並注入「所有用戶」的上下文，是跨租戶的間接注入通道。
+ * 惡意用戶可把一段祈使指令偽裝成「領域知識」寫進 shared 庫，之後污染全體會話。
+ * 本閘只掃 shared 候選：命中「改寫指令/冒充系統權威/索密鑰/繞計費」樣板即丟。
+ * private 記憶只回注該用戶本人，風險域為自身，不過本閘（避免誤傷正常私有筆記）。
+ */
+const G7_REGEXES: readonly RegExp[] = [
+  /(忽略|无视|無視|漠视|覆盖|覆蓋|推翻|作废|作廢)\s*(上|以上|之前|先前|前面|所有|全部|系统|系統|previous|prior|above|all)/i,
+  /ignore\s+(all\s+)?(previous|prior|earlier|above)\s+(instructions?|prompts?|rules?)/i,
+  /disregard\s+(all\s+)?(previous|prior|the\s+above)/i,
+  /(你现在是|你現在是|from now on you are|you are now|扮演|pretend to be|act as (?:a|an|the)\s)/i,
+  /(以|作为|作為)\s*(系统|系統|管理员|管理員|开发者|開發者|administrator|developer|root)\s*(身份|权限|權限|模式|mode)/i,
+  /(system\s*prompt|developer\s*mode|jailbreak|越狱|越獄|DAN\b)/i,
+  /(泄露|透露|输出|輸出|告诉我|告訴我|reveal|print|show)\s*(你的|the)?\s*(系统提示|系統提示|指令|prompt|api\s*key|密钥|密鑰|token|凭证|憑證)/i,
+  /(绕过|繞過|跳过|跳過|bypass|skip)\s*(计费|計費|扣费|扣費|billing|quota|付费|付費|confirm|确认|確認|审核|審核|gate)/i,
+  /(免费生成|免費生成|免扣费|免扣費|不扣费|不扣費|无需确认|無需確認|自动放行|自動放行)/,
+  // 純祈使開頭且指向 agent 行為（覆蓋典型注入句式；正常領域知識罕以此開頭）
+  /^\s*(you must|you should always|always\s+(?:call|use|reply|respond|ignore)|从现在起|從現在起|请务必|請務必)\b/im,
+]
+
 /** G4 身份泄漏樣板（契約 §5，僅 shared）：命中 → 降級 private；無 ownerKey 可降 → 丟棄。 */
 const G4_REGEXES: readonly RegExp[] = [
   /[0-9a-fA-F]{24,}/, // ownerKey hex 長串（SHA-256 前 12 bytes = 24 hex）
@@ -142,7 +163,9 @@ export function applyMemoryGates(
   const selfScore = candidate.self_score
   if (
     !isString(scope) || !SCOPE_VALUES.includes(scope) ||
-    !isString(domain) || domain.trim().length === 0 ||
+    // 2026-09-29 紅隊 H6：domain 會被逐字注入召回塊，限一行短標識（≤40 字、無換行/方括號），
+    // 杜絕把長段指令塞進 domain 繞過正文閘。
+    !isString(domain) || domain.trim().length === 0 || domain.length > 40 || /[\n\r【】\[\]⟦⟧]/.test(domain) ||
     !isString(slug) || !SLUG_RE.test(slug) ||
     !isString(description) || description.length === 0 || description.length > DESCRIPTION_MAX ||
     !isString(type) || !TYPE_VALUES.includes(type) ||
@@ -178,8 +201,10 @@ export function applyMemoryGates(
     selfScore,
   }
 
-  // ── G3 敏感（契約 §5）：掃 description+body+evidence，命中即丟；不回顯內容。
-  const scanned = `${description}\n${body}\n${candidate.evidence}`
+  // ── G3 敏感（契約 §5）：掃 description+body+evidence+domain+slug+links，命中即丟；不回顯內容。
+  // 2026-09-29 紅隊 H6：domain/slug 會被 renderRecallPrefix 逐字注入「所有用戶」的召回塊，
+  //   必須與正文同受 G3/G4/G7 把關（此前只掃 3 欄，domain 是未設防的跨租戶注入縫）。
+  const scanned = `${description}\n${body}\n${candidate.evidence}\n${domain}\n${slug}\n${links.join("\n")}`
   for (const needle of G3_SUBSTRINGS) {
     if (scanned.includes(needle)) {
       return { action: "drop", reason: "g3_secret" }
@@ -195,6 +220,15 @@ export function applyMemoryGates(
   const minScore = doc.scope === "shared" ? SELF_SCORE_MIN_SHARED : SELF_SCORE_MIN_PRIVATE
   if (doc.selfScore < minScore) {
     return { action: "drop", reason: "g6_score" }
+  }
+
+  // ── G7 指令注入（2026-09-29 審計，僅 shared）：防跨租戶記憶投毒。命中即丟，不回顯內容。
+  if (doc.scope === "shared") {
+    for (const re of G7_REGEXES) {
+      if (re.test(scanned)) {
+        return { action: "drop", reason: "g7_injection" }
+      }
+    }
   }
 
   // ── G4 身份泄漏（契約 §5，僅 shared）：命中 → 降級 private；無 ownerKey 可降 → 丟棄。

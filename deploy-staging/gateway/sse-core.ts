@@ -7,6 +7,7 @@ import { markDirty } from "./sessions-core.ts"
 import { encoder, decoder, corsOriginFor, corsHeaders } from "./auth-gw.ts"
 import { trackTurnNodeTerminal } from "./events-translate.ts"
 import { markTurnFirst } from "./metrics-gw.ts"
+import { appendReplayFrame, MergedReplayFrame } from "./replay-frame.ts"
 import { finishTurnMetrics } from "./metrics-gw.ts"
 import { hydratePendingQuestions } from "./questions-gw.ts"
 // TODO(整合)：以下符號仍住 index.ts 且未 export（本任務禁改 index.ts；bun build 對未 export 的 named import 報錯，已實測 2026-09-19）。
@@ -75,7 +76,8 @@ export function emitToSession(state: SessionState, name: string, data: unknown):
   if (name === "canvas.node.updated") trackTurnNodeTerminal(state, data)
   state.eventCounter += 1
   const frame = encoder.encode(serializeSse(name, data, state.eventCounter))
-  state.replayBuffer.push({ id: state.eventCounter, frame })
+  // 2026-10-01：文字幀在 replay 層合併（見 replay-frame.ts），直播仍逐幀。
+  appendReplayFrame(state.replayBuffer, name, data, state.eventCounter, frame)
   if (state.replayBuffer.length > REPLAY_BUFFER_SIZE) {
     state.replayBuffer.splice(0, state.replayBuffer.length - REPLAY_BUFFER_SIZE)
   }
@@ -111,6 +113,7 @@ export function emitToSession(state: SessionState, name: string, data: unknown):
 export function stripStaleTurnTextFromReplay(state: SessionState): void {
   const before = state.replayBuffer.length
   state.replayBuffer = state.replayBuffer.filter((f) => {
+    if (f instanceof MergedReplayFrame) return false // 合併條目只會是 message/reasoning.delta
     // 幀文本形如 "id: N\nevent: NAME\ndata: {...}\n\n"——事件名在第二行。
     const head = decoder.decode(f.frame.subarray(0, Math.min(f.frame.length, 64)))
     const evMatch = head.match(/^id: \d+\nevent: ([a-z.]+)\n/)
@@ -148,7 +151,12 @@ export function openEventStream(state: SessionState, lastEventId?: number, req?:
       if (typeof lastEventId === "number" && !Number.isNaN(lastEventId)) {
         for (const frame of state.replayBuffer) {
           if (frame.id > lastEventId) {
-            controller.enqueue(frame.frame.slice())
+            // Last-Event-ID 落在合併段中間 → 只補其後的段，不重字。
+            if (frame instanceof MergedReplayFrame && frame.firstId <= lastEventId) {
+              controller.enqueue(frame.suffixFrame(lastEventId))
+            } else {
+              controller.enqueue(frame.frame.slice())
+            }
           }
         }
       }

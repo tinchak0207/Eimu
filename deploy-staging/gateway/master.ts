@@ -204,7 +204,12 @@ export async function masterExport(sessionId: string, presetId: MasterPresetId =
       const ext = (c.path.split("?")[0].split(".").pop() || "mp4").replace(/[^a-z0-9]/gi, "") || "mp4"
       const s = await resolveSource(c.path, idx, ext)
       if (!s) throw new TimelineValidationError(`clip ${c.id} 素材不可達：${c.path.slice(0, 120)}`)
-      inputs.push(`-i ${shq(s.path)}`)
+      // 靜幀素材（2026-09-28 漫劇評測實錘）：單張 png/jpg 不帶 -loop 1 只解出 1 幀，trim 後視頻軌
+      // 只剩 0.08 秒、音軌照樣 60 秒——容器時長騙過 probe，成片實為壞片。靜幀一律 -loop 1 成連續流，
+      // -t 以 outSec 封頂（多留一幀餘量給 trim），動態素材路徑不變。
+      const isStill = /^(png|jpe?g|webp|bmp)$/i.test(ext)
+      const stillSec = Math.max(0.1, Math.min(c.outSec ?? c.duration, c.duration)) + 0.1
+      inputs.push(isStill ? `-loop 1 -framerate 25 -t ${stillSec.toFixed(3)} -i ${shq(s.path)}` : `-i ${shq(s.path)}`)
       chains.push(clipChain(c, idx, preset.w, preset.h))
       srcByClip.push({ clip: c, path: s.path })
       idx++

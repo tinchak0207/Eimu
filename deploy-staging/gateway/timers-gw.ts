@@ -13,7 +13,7 @@ import { ACK_DELAY_MS, HEARTBEAT_DELAY_MS, HEARTBEAT_DELAY_AFTER_ACK_MS, MIDTURN
 import { sessions, markDirty } from "./sessions-core.ts"
 import { emitToSession, stripStaleTurnTextFromReplay } from "./sse-core.ts"
 import { personaPatienceMul } from "./sessions-http.ts"
-import { opencodeHeaders } from "./opencode-client.ts"
+import { opencodeHeaders, revertDeadTail } from "./opencode-client.ts"
 import { workflowService, workflowOwnerBySession } from "./workflow-gw.ts"
 import { emitAgentNotice } from "./emit-helpers.ts"
 import { settleQuestion } from "./questions-gw.ts"
@@ -156,12 +156,13 @@ export function armMidturnStallTimer(state: SessionState): void {
         armMidturnStallTimer(cur)
         return
       }
-      fetch(`${OPENCODE_URL}/session/${cur.opencodeSessionId}/prompt_async`, {
+      // 2026-10-01 去重：清殭屍後撤零產出死尾（revertDeadTail 內部吞錯，永不擋重投）。
+      clearZombieBusyRun(cur).catch(() => false).then(() => revertDeadTail(cur.opencodeSessionId)).then(() => fetch(`${OPENCODE_URL}/session/${cur.opencodeSessionId}/prompt_async`, {
         method: "POST",
         headers: opencodeHeaders(),
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(10000),
-      })
+      }))
         .then((res) => {
           if (!res.ok) throw new Error(`status ${res.status}`)
           console.log(`[gateway] R5-C midturn-stall: re-dispatch sent — session=${cur.sessionId} gen=${gen}`)
@@ -303,6 +304,27 @@ export async function reconcilePendingQuestions(state: SessionState): Promise<vo
   }
 }
 
+/**
+ * 重投前清殭屍 run（2026-09-28 漫劇工作室評測實錘）：opencode-server 被重啟時，重啟前在飛的
+ * run 在 opencode 側永遠停在 busy（進程已死、狀態沒清），此後每條 prompt 都排在殭屍後面——
+ * 會話永久變磚：看門狗兩咬都咬空，用戶只看到「后端无响应」。實測 POST /session/{id}/abort
+ * 清掉後同一會話立刻恢復應答（會話 dea89da6，變磚 48 分鐘後一次 abort 即活）。
+ * 只在兩處重投前呼叫（本 turn 已零動靜才會走到），opencode 報 busy 才 abort；查詢失敗不擋重投。
+ */
+async function clearZombieBusyRun(st: SessionState): Promise<boolean> {
+  const res = await fetch(`${OPENCODE_URL}/session/status`, { headers: opencodeHeaders(), signal: AbortSignal.timeout(5000) })
+  if (!res.ok) return false
+  const status = (await res.json().catch(() => null)) as Record<string, { type?: string }> | null
+  if (status?.[st.opencodeSessionId]?.type !== "busy") return false
+  const aborted = await fetch(`${OPENCODE_URL}/session/${st.opencodeSessionId}/abort`, {
+    method: "POST",
+    headers: opencodeHeaders(),
+    signal: AbortSignal.timeout(5000),
+  })
+  if (aborted.ok) console.warn(`[gateway] cleared zombie busy run before re-dispatch — session=${st.sessionId}`)
+  return aborted.ok
+}
+
 /** turn 是否有任何「已啟動」的證據：模型吐過字（正文或思維鏈），或工具開跑過。
  *  罪狀2 根因修復（2026-08-29）：思維鏈（reasoning.delta）也是模型活著的證據——
  *  此前只看正文與工具，思考型模型整段推理期間被 ack/心跳/看門狗/停滯哨誤判死寂。
@@ -341,12 +363,13 @@ export function armWatchdogTimer(state: SessionState): void {
       if (turnHasActivity(cur)) return
       const body = cur.lastPromptBody
       if (!body) return
-      fetch(`${OPENCODE_URL}/session/${cur.opencodeSessionId}/prompt_async`, {
+      // 2026-10-01 去重：清殭屍後撤零產出死尾（revertDeadTail 內部吞錯，永不擋重投）。
+      clearZombieBusyRun(cur).catch(() => false).then(() => revertDeadTail(cur.opencodeSessionId)).then(() => fetch(`${OPENCODE_URL}/session/${cur.opencodeSessionId}/prompt_async`, {
         method: "POST",
         headers: opencodeHeaders(),
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(10000),
-      })
+      }))
         .then((res) => {
           if (!res.ok) throw new Error(`status ${res.status}`)
           console.log(`[gateway] watchdog: retry dispatched for session=${cur.sessionId} gen=${gen}`)
@@ -363,7 +386,6 @@ export function armWatchdogTimer(state: SessionState): void {
           if ((cur.turnGen ?? 0) === gen && !turnHasActivity(cur)) {
             // 修 1：死亡宣告置位——此後若仍有內容幀到達（上游慢復活），
             // emitToSession 會先發撤回幀。
-            cur.deathDeclared = true
             emitToSession(cur, "message.delta", {
               text: "自动重试后 LLM 后端仍无响应（服务端问题，不是你的操作）。已停止等待。请稍后重试发送同一条消息，若持续失败请联系管理员。\n",
             })
@@ -372,6 +394,9 @@ export function armWatchdogTimer(state: SessionState): void {
               text: "你刚才的消息可能未处理完成，稍后重新发送即可继续。\n",
             })
             emitToSession(cur, "turn.done", {})
+            // 置位必須在終局話術發完之後（2026-09-28 評測實錘：先置位＝自己的死亡宣告被當成
+            // 「還魂幀」，緊接著發「刚才是误判，已自动恢复」，兩句互相打臉）。
+            cur.deathDeclared = true
           }
         })
       return
@@ -381,7 +406,6 @@ export function armWatchdogTimer(state: SessionState): void {
     // 修 1：死亡宣告置位——重投的 retry 若之後開始產出（殭屍还魂實錄：
     // 宣告死亡 10 秒後 retry 輸出照灌），第一條內容幀觸發撤回幀，用戶明確
     // 知道剛才是誤判、任務已恢復；「宣告死亡 + 靜默还魂」不再並存。
-    cur.deathDeclared = true
     emitToSession(cur, "message.delta", {
       text: "自动重试后 LLM 后端仍无响应（服务端问题，不是你的操作）。已停止等待。请稍后重试发送同一条消息，若持续失败请联系管理员。\n",
     })
@@ -390,6 +414,7 @@ export function armWatchdogTimer(state: SessionState): void {
       text: "你刚才的消息可能未处理完成，稍后重新发送即可继续。\n",
     })
     emitToSession(cur, "turn.done", {}) // 收尾：別讓前端永遠掛著「輸入中」
+    cur.deathDeclared = true // 同上：終局話術發完才置位，避免自己的宣告觸發撤回幀
   }, TURN_WATCHDOG_MS)
 }
 

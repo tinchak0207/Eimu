@@ -40,6 +40,73 @@ export async function opencodeJson<T>(path: string, init?: RequestInit & { timeo
   return (await res.json()) as T
 }
 
+// ── 重試前撤死尾（2026-10-01 重複 user 訊息事故）─────────────────────
+// 重試出口（failover/jitter/watchdog/midturn-stall/idle-step）用 prompt_async 重投時，
+// opencode 會「新增」一條 user 訊息，上一次失敗的那條（及其後零產出的 assistant）仍留在
+// 歷史裡：E2E 實錘續寫提示 2s 內疊兩條、零正文抖動重投 40s 內同一 user 訊息疊 5 條。
+// 修法：重投前找最後一條 user 訊息 U；U 之後的 assistant 全部零產出（無非空 text、
+// 無 tool、無其他未知 part；reasoning/step-start/step-finish/retry 不算產出）→
+// POST /session/{id}/revert {messageID: U}，opencode 於下一次 prompt 時 cleanup 掉
+// U 與其後全部訊息（2026-10-01 一次性會話實測 /message 與 /prompt_async 兩路皆生效）。
+// U 之後已有產出（工具已跑/正文已出）→ 不動（保留部分輸出，續寫提示接在其後）。
+// 全程短 timeout；任何失敗回 false 只記 log，絕不擋重試（失敗＝退回原行為）。
+const DEAD_TAIL_NON_OUTPUT_PARTS = new Set(["reasoning", "step-start", "step-finish", "retry"])
+export async function revertDeadTail(opencodeSessionId: string): Promise<boolean> {
+  if (!opencodeSessionId) return false
+  const sid = encodeURIComponent(opencodeSessionId)
+  try {
+    const res = await opencodeFetch(`/session/${sid}/message?limit=30`, { timeoutMs: 5000 })
+    if (!res.ok) {
+      console.log(`[gateway] revertDeadTail: list messages HTTP ${res.status} — oc=${opencodeSessionId}`)
+      return false
+    }
+    type OcPart = { type?: string; text?: string }
+    type OcMsg = { info?: { id?: string; role?: string }; parts?: OcPart[] }
+    const msgs = (await res.json().catch(() => null)) as OcMsg[] | null
+    if (!Array.isArray(msgs) || msgs.length === 0) return false
+    let ui = -1
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i]?.info?.role === "user") {
+        ui = i
+        break
+      }
+    }
+    if (ui < 0) return false // 窗口內無 user（尾部 assistant 過長）＝必有產出，不動
+    const u = msgs[ui]
+    const uid = u.info?.id
+    if (!uid) return false
+    // compaction 摘要觸發訊息不撤（撤了等於丟壓縮）。
+    if ((u.parts ?? []).some((p) => p?.type === "compaction")) return false
+    for (const m of msgs.slice(ui + 1)) {
+      for (const p of m.parts ?? []) {
+        const t = p?.type ?? ""
+        if (t === "text") {
+          if ((p.text ?? "").trim()) return false
+          continue
+        }
+        if (DEAD_TAIL_NON_OUTPUT_PARTS.has(t)) continue
+        return false // tool / patch / file / 未知類型一律視為產出
+      }
+    }
+    const rv = await opencodeFetch(`/session/${sid}/revert`, {
+      method: "POST",
+      body: JSON.stringify({ messageID: uid }),
+      timeoutMs: 5000,
+    })
+    if (!rv.ok) {
+      console.log(`[gateway] revertDeadTail: revert HTTP ${rv.status} — oc=${opencodeSessionId} msg=${uid}`)
+      return false
+    }
+    console.log(
+      `[gateway] revertDeadTail: reverted dead tail (user msg + ${msgs.length - ui - 1} empty assistant) — oc=${opencodeSessionId} msg=${uid}`,
+    )
+    return true
+  } catch (e) {
+    console.log(`[gateway] revertDeadTail failed (ignored) — oc=${opencodeSessionId}: ${e}`)
+    return false
+  }
+}
+
 // ── 會話摘要標題（2026-09-12）────────────────────────────────────
 // opencode 在首條用戶消息後異步生成 session.title（真會話實測「戴帽橘猫水彩插画」
 // 級別；零消息會話是 "New session - <時間戳>" 佔位）。網關讀輪子不造輪子：
