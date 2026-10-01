@@ -6,6 +6,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   addShotCandidate,
+  bindShotAudioTrack,
+  clearShotAudioTrack,
   cloneShotNode,
   deleteShotEntry,
   duplicateShotEntry,
@@ -21,6 +23,7 @@ import {
   shotCandidatePrompt,
   shotCandidatesMetadata,
   shotListEntries,
+  shotMediaReadiness,
   shotNumberOf,
   SHOT_CANDIDATE_LIMIT,
   shotRerunRequest,
@@ -232,6 +235,62 @@ test("重跑請求：星標候選 prompt 優先，其次節點 prompt；都沒�
   assert.equal(shotRerunRequest({ id: "x", type: CanvasNodeType.Text, title: "t", position: { x: 0, y: 0 }, width: 1, height: 1 }), null);
 });
 
+// ─────────────────────────────────────────── ⑤ 旁白文本＋雙音軌（audioAnchorId 的生產者）
+
+test("音軌綁定：對白軌優先當錨（audioAnchorId = dialogueAudioId || narrationAudioId）", () => {
+  const dialogue = bindShotAudioTrack(undefined, "dialogue", "https://cdn.example.com/line.mp3");
+  assert.equal(dialogue.accepted, true);
+  assert.equal(dialogue.patch.dialogueAudioId, "https://cdn.example.com/line.mp3");
+  assert.equal(dialogue.patch.audioAnchorId, "https://cdn.example.com/line.mp3", "單軌時錨＝該軌");
+
+  const both = bindShotAudioTrack(dialogue.patch as CanvasNodeMetadata, "narration", "https://cdn.example.com/vo.m4a");
+  assert.equal(both.patch.narrationAudioId, "https://cdn.example.com/vo.m4a");
+  assert.equal(both.patch.dialogueAudioId, "https://cdn.example.com/line.mp3", "綁旁白不動對白軌");
+  assert.equal(both.patch.audioAnchorId, "https://cdn.example.com/line.mp3", "有對白軌時錨＝對白軌（優先）");
+  // 純函式：不改輸入
+  assert.equal(dialogue.patch.narrationAudioId, undefined);
+});
+
+test("音軌綁定：只有旁白軌時錨＝旁白軌；清除後錨不再指向被清的那軌", () => {
+  const narrationOnly = bindShotAudioTrack(undefined, "narration", "data:audio/mpeg;base64,AAAA");
+  assert.equal(narrationOnly.accepted, true);
+  assert.equal(narrationOnly.patch.narrationAudioId, "data:audio/mpeg;base64,AAAA", "data:audio/* 收（同一把尺）");
+  assert.equal(narrationOnly.patch.audioAnchorId, "data:audio/mpeg;base64,AAAA", "無對白軌時錨＝旁白軌");
+
+  const withDialogue = bindShotAudioTrack(narrationOnly.patch as CanvasNodeMetadata, "dialogue", "https://cdn.example.com/line.wav");
+  assert.equal(withDialogue.patch.audioAnchorId, "https://cdn.example.com/line.wav");
+
+  const cleared = clearShotAudioTrack(withDialogue.patch as CanvasNodeMetadata, "dialogue");
+  assert.equal(cleared.accepted, true);
+  assert.equal(cleared.patch.dialogueAudioId, undefined, "對白軌被清");
+  assert.equal(cleared.patch.audioAnchorId, "data:audio/mpeg;base64,AAAA", "錨回退到剩餘的旁白軌（不指向被清的那軌）");
+
+  const allCleared = clearShotAudioTrack(cleared.patch as CanvasNodeMetadata, "narration");
+  assert.equal(allCleared.patch.audioAnchorId, undefined, "兩軌皆清＝不寫懸空錨");
+  assert.deepEqual(allCleared.patch, {});
+});
+
+test("音軌綁定：非音頻值（.png 圖 URL／無副檔名裸 URL）明確拒絕，不冒充已綁定", () => {
+  const png = bindShotAudioTrack(undefined, "dialogue", "https://cdn.example.com/a.png");
+  assert.equal(png.accepted, false);
+  assert.equal(png.reason, "invalid-audio");
+  assert.deepEqual(png.patch, {}, "拒絕＝不寫任何音軌鍵");
+
+  const bare = bindShotAudioTrack(undefined, "narration", "https://cdn.example.com/no-extension");
+  assert.equal(bare.accepted, false);
+  assert.equal(bare.patch.narrationAudioId, undefined);
+  assert.equal(bare.patch.audioAnchorId, undefined);
+});
+
+test("音軌四鍵經雙白名單真往復存活（漏一端＝刷新後音軌與錨消失）", () => {
+  const bound = bindShotAudioTrack(undefined, "dialogue", "https://cdn.example.com/line.mp3");
+  const restored = roundTrip({ ...bound.patch, narration: "她推开门。" } as CanvasNodeMetadata) as Record<string, unknown>;
+  assert.equal(restored.dialogueAudioId, "https://cdn.example.com/line.mp3");
+  assert.equal(restored.narrationAudioId, undefined);
+  assert.equal(restored.audioAnchorId, "https://cdn.example.com/line.mp3");
+  assert.equal(restored.narration, "她推开门。");
+});
+
 // ─────────────────────────────────────────── ④ 增刪複製重排
 
 const LIST = [
@@ -326,4 +385,63 @@ test("複製節點：換身份、剝掉來源那格的產物與裁決、卡引�
   assert.deepEqual(copy.metadata?.sceneCardIds, ["scene-a"]);
   assert.deepEqual(source, frozen, "來源節點零改動");
   assert.notEqual(copy.metadata, source.metadata, "metadata 是深拷貝（不共用參考）");
+});
+
+// ─────────────────────────────────────────── ⑥ 單鏡媒體就緒（引導面板進度推導）
+
+test("媒體就緒：三支音軌鍵任一非空＝hasAudio；旁白文本不算配音", () => {
+  const dialogue = shotMediaReadiness({ dialogueAudioId: "https://cdn.example.com/line.mp3" });
+  assert.equal(dialogue.hasAudio, true);
+  assert.equal(dialogue.hasImage, false);
+  assert.equal(dialogue.hasVideo, false);
+
+  assert.equal(shotMediaReadiness({ narrationAudioId: "vo-asset-1" }).hasAudio, true, "資產 id 非 URL 也認（判準＝非空，非副檔名）");
+  assert.equal(shotMediaReadiness({ audioAnchorId: "anchor-1" }).hasAudio, true, "錨鍵單獨存在也算配音就緒");
+});
+
+test("媒體就緒：narration（旁白文本）是輸入不是配音交付物 → hasAudio 仍 false", () => {
+  const text = shotMediaReadiness({ narration: "她推开门，雨还在下。" });
+  assert.equal(text.hasAudio, false, "文本不冒充配音（旁白要真的逐鏡合成出音軌）");
+  assert.equal(text.hasImage, false);
+  assert.equal(text.hasVideo, false);
+});
+
+test("媒體就緒：缺鍵／空字串／純空白一律不算有值 → 三個 false", () => {
+  assert.deepEqual(shotMediaReadiness({}), { hasImage: false, hasVideo: false, hasAudio: false });
+  const blank = shotMediaReadiness({
+    dialogueAudioId: "   ",
+    narrationAudioId: "",
+    audioAnchorId: "\t",
+    shotCandidates: { items: [] },
+  });
+  assert.deepEqual(blank, { hasImage: false, hasVideo: false, hasAudio: false });
+});
+
+test("媒體就緒：shotCandidates 有星標採用稿＝hasImage；有候選未星標不算", () => {
+  const starred = addShotCandidate(undefined, { id: "c1", prompt: "p1" }).set; // 首條自動上星標
+  const adopted = shotMediaReadiness({ shotCandidates: starred });
+  assert.equal(adopted.hasImage, true, "有採用稿（星標）＝圖就緒");
+  assert.equal(adopted.hasVideo, false, "候選沒有影片語義，不冒充影片");
+
+  const unstarred = normalizeShotCandidates({ items: [{ id: "c1", prompt: "p1" }] });
+  assert.equal(shotMediaReadiness({ shotCandidates: unstarred }).hasImage, false, "有候選但無採用稿＝不算（照既有星標語義）");
+});
+
+test("媒體就緒：影片只認影片語義欄位（taskVersions 的 main_video ＋真 URL）；有圖≠有影", () => {
+  const video = shotMediaReadiness({
+    taskVersions: { items: [{ version: "2026-09-30T10:00:00.000Z", tags: ["main_video"], url: "https://cdn.example.com/clip.mp4" }] },
+  });
+  assert.equal(video.hasVideo, true);
+  assert.equal(video.hasImage, false);
+
+  const image = shotMediaReadiness({
+    taskVersions: { items: [{ version: "2026-09-30T10:00:00.000Z", tags: ["main_image"], url: "https://cdn.example.com/frame.png" }] },
+  });
+  assert.equal(image.hasImage, true);
+  assert.equal(image.hasVideo, false, "有圖≠有影（不用圖冒充影片）");
+
+  const planned = shotMediaReadiness({
+    taskVersions: { items: [{ version: "2026-09-30T10:00:00.000Z", tags: ["main_video"] }] },
+  });
+  assert.equal(planned.hasVideo, false, "有版本但無交付 URL＝只有計畫值，不算就緒");
 });

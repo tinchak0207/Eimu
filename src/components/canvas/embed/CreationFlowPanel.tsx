@@ -14,11 +14,64 @@
 // 把「已落畫布鏡數 / 場景計畫鏡數」寫成「完成度」就是灌水（D2 缺口的正確解法是
 // 呈現真實計數，不是造一個好看的百分比）。
 
-import type { CreationFlowSummary } from "@/lib/canvas/creation-flow-panel";
+import type {
+  CreationFlowSummary,
+  CreationNextStepId,
+  CreationNextSurface,
+  NextCreationStep,
+} from "@/lib/canvas/creation-flow-panel";
 import { CREATION_STEPS } from "@/lib/creation-flow-steps";
+
+/** 主按鈕文案（依動作面；`none` 不渲染，故不入表）。簡體，照本面板既有文案體例。 */
+const NEXT_ACTION_LABEL: Record<Exclude<CreationNextSurface, "none">, string> = {
+  agent: "交给 AI 助理",
+  "canvas-generation": "打开分镜处理",
+};
+
+/**
+ * 「补齐配音」（`id === "shot-audio"`）的主動作文案：**先試算費用**（乾跑，不扣費），
+ * 確認鍵才真跑。與其他 id 的 `NEXT_ACTION_LABEL` 分開，因為它不是「打開某個面」而是生成。
+ */
+const VOICEOVER_QUOTE_LABEL = "补齐配音（先试算费用）";
+
+/**
+ * 配音流程的顯示狀態（**主體是宿主 CanvasEmbedOverlays 的 state**；本面板只負責印出來）。
+ *
+ * 幣數欄位一律由**伺服器回應**填寫：`estimatedCoins`＝乾跑報價、`costCoins`＝真跑實扣。
+ * 面板端零計算（成本公式是伺服器的事）。
+ */
+export interface VoiceoverFlowView {
+  status: "idle" | "quoting" | "quoted" | "applying" | "applied" | "refused" | "error";
+  /** 台詞行數（伺服器回）。 */
+  lineCount?: number;
+  /** 總字數（伺服器回）。 */
+  totalChars?: number;
+  /** 乾跑報價幣數（伺服器回）。 */
+  estimatedCoins?: number;
+  /** 真跑實扣幣數（伺服器回）。 */
+  costCoins?: number;
+  /** 失敗／被拒原因（伺服器回或傳輸錯誤；如實顯示，不美化）。 */
+  reason?: string;
+}
 
 export interface CreationFlowPanelProps {
   summary: CreationFlowSummary;
+  /**
+   * 由當前現況推導的**唯一下一步**（一步一跳；`deriveNextStep`，2026-09-30）。
+   * `id === "unknown"`（資料不足以判斷）或 `surface === "none"`（終態）時不渲染——
+   * 不給假動作。缺席＝本面板不顯示引導。
+   */
+  nextStep?: NextCreationStep;
+  /**
+   * 主動作：依 `surface` 導向既有入口（宿主提供，面板不自己找路）。
+   * 「补齐配音」需要知道**是哪一個 next step**（同為 `canvas-generation` 的還有補圖／補影），
+   * 故補上第二個可選參數 `id`；既有呼叫端只讀 `surface`，行為不變。
+   */
+  onNextAction?: (surface: CreationNextSurface, id?: CreationNextStepId) => void;
+  /** 配音流程狀態（宿主 state；缺席＝本面板不渲染配音報價區）。 */
+  voiceover?: VoiceoverFlowView;
+  /** 確認鍵：使用者同意報價後才真跑（`dryRun: false`）。 */
+  onVoiceoverConfirm?: () => void;
   /** 關閉面板（點標題列關閉鈕）。 */
   onClose: () => void;
 }
@@ -31,7 +84,14 @@ function Chip({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function CreationFlowPanel({ summary, onClose }: CreationFlowPanelProps) {
+export function CreationFlowPanel({
+  summary,
+  nextStep,
+  onNextAction,
+  voiceover,
+  onVoiceoverConfirm,
+  onClose,
+}: CreationFlowPanelProps) {
   const { projectTypeLabel, currentStep, episodeCount, finishedCount, episodes, storyboard } = summary;
   const configured = Boolean(projectTypeLabel || currentStep || episodeCount > 0);
   const stepIndex = currentStep ? CREATION_STEPS.findIndex((s) => s.value === currentStep.value) : -1;
@@ -64,6 +124,81 @@ export function CreationFlowPanel({ summary, onClose }: CreationFlowPanelProps) 
           ✕
         </button>
       </div>
+
+      {/* 下一步（一步一跳）：同一時刻只渲染一個，且排在面板內容最前＝打開就看到。
+          由當前現況推導（不讀任何持久化標記）；unknown＝資料不足以判斷、none＝終態，
+          兩者都不渲染，不給假動作。主按鈕導向既有入口（宿主提供 `onNextAction`）。 */}
+      {nextStep && nextStep.id !== "unknown" && nextStep.surface !== "none" ? (
+        <div className="border-b bg-ios-blue/5 px-3 py-2.5">
+          <p className="text-[11px] font-medium uppercase leading-none tracking-[0.18em] text-ios-blue/70">
+            下一步
+          </p>
+          <p className="mt-1.5 text-[13px] font-medium leading-snug text-foreground">{nextStep.label}</p>
+          {/* 补齐配音：主動作＝先乾跑試算（不扣費），報價與行數/字數如實顯示，
+              使用者按確認鍵才真跑。失敗／被拒一律顯示原因，不假成功。 */}
+          {nextStep.id === "shot-audio" ? (
+            <>
+              {voiceover?.status === "quoting" ? (
+                <p className="mt-2 text-ios-footnote text-foreground/45">正在试算配音费用…</p>
+              ) : null}
+              {voiceover?.status === "applying" ? (
+                <p className="mt-2 text-ios-footnote text-foreground/45">正在生成配音…</p>
+              ) : null}
+              {voiceover?.status === "quoted" ? (
+                <>
+                  <p className="mt-2 text-ios-footnote tabular-nums text-foreground/60">
+                    共 {voiceover.lineCount} 句 · {voiceover.totalChars} 字 · 约 {voiceover.estimatedCoins} 币
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => onVoiceoverConfirm?.()}
+                    className="mt-2 flex min-h-[2rem] w-full cursor-pointer items-center justify-center rounded-lg bg-ios-blue px-3 py-1.5 text-[13px] font-medium text-white hover:bg-ios-blue/90"
+                  >
+                    确认生成（约 {voiceover.estimatedCoins} 币）
+                  </button>
+                </>
+              ) : null}
+              {voiceover?.status === "applied" ? (
+                <p className="mt-2 text-ios-footnote tabular-nums font-medium text-ios-green">
+                  已生成 · 共 {voiceover.lineCount} 句 · {voiceover.totalChars} 字 · 花费 {voiceover.costCoins} 币
+                </p>
+              ) : null}
+              {voiceover?.status === "refused" ? (
+                <p className="mt-2 text-ios-footnote leading-snug text-destructive">
+                  配音未生成：{voiceover.reason}
+                </p>
+              ) : null}
+              {voiceover?.status === "error" ? (
+                <p className="mt-2 text-ios-footnote leading-snug text-destructive">
+                  配音试算失败：{voiceover.reason}
+                </p>
+              ) : null}
+              {voiceover?.status === "idle" || voiceover?.status === undefined ? (
+                <button
+                  type="button"
+                  onClick={() => onNextAction?.(nextStep.surface, nextStep.id)}
+                  className="mt-2 flex min-h-[2rem] w-full cursor-pointer items-center justify-center rounded-lg bg-ios-blue px-3 py-1.5 text-[13px] font-medium text-white hover:bg-ios-blue/90"
+                >
+                  {VOICEOVER_QUOTE_LABEL}
+                </button>
+              ) : null}
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => onNextAction?.(nextStep.surface)}
+              className="mt-2 flex min-h-[2rem] w-full cursor-pointer items-center justify-center rounded-lg bg-ios-blue px-3 py-1.5 text-[13px] font-medium text-white hover:bg-ios-blue/90"
+            >
+              {NEXT_ACTION_LABEL[nextStep.surface]}
+            </button>
+          )}
+          {nextStep.pipelineStep ? (
+            <p className="mt-1.5 text-ios-caption2 text-foreground/45">
+              流程第 {nextStep.pipelineStep.value} 步 · {nextStep.pipelineStep.label}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       {!configured ? (
         <p className="px-3.5 py-3 text-ios-footnote leading-relaxed text-foreground/45">

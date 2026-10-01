@@ -3,17 +3,27 @@
  * 本組件必須「無條件掛載」：<style> 的 .ce-embed-* 選擇器同時作用於組件殼的頂欄/根容器，
  * 浮層全關時仍渲染樣式塊，否則殼層樣式失效。
  */
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import type { UseCanvasChatReturn } from "@/hooks/use-canvas-chat";
-import { summarizeCreationFlow } from "@/lib/canvas/creation-flow-panel";
+import {
+  deriveNextStep,
+  summarizeCreationFlow,
+  type CreationFlowSnapshot,
+  type CreationFlowSummary,
+  type CreationNextStepId,
+  type CreationNextSurface,
+} from "@/lib/canvas/creation-flow-panel";
+import { shotMediaReadiness } from "@/lib/canvas/storyboard-shots";
+import type { CanvasNode } from "@/lib/canvas/types";
 import { cn } from "@/lib/utils";
 import { LineageDrawer } from "@/components/lineage/LineageDrawer";
 import { cardToLineageView } from "@/lib/lineage-view";
 import { CHARACTER_CARD_KIND_LABEL } from "@/lib/character-cards";
-import { CreationFlowPanel } from "./CreationFlowPanel";
+import { CreationFlowPanel, type VoiceoverFlowView } from "./CreationFlowPanel";
 import { formatRelative, toDvh } from "./embed-helpers";
 import type { ReviewPanelKind } from "@/components/assets/AssetReviewPanel";
+import { openReviewPanel } from "@/components/assets/AssetReviewPanel";
 
 interface CanvasEmbedOverlaysProps {
   /** embed 高度（.ce-embed-root 動態样式）。 */
@@ -49,6 +59,199 @@ interface CanvasEmbedOverlaysProps {
   setSelectedIds: Dispatch<SetStateAction<Set<string>>>;
 }
 
+/**
+ * 分鏡媒體現況計數（引導面板 snapshot 的分母／分子）。
+ *
+ * 真源＝凍結介面 `shotMediaReadiness`（`@/lib/canvas/storyboard-shots`，W5a 2026-09-30）：
+ * 逐鏡投影**分鏡節點自己**的 metadata，本層不另立第二套判準、不往外撈連線鄰居。
+ * 「哪些節點算一鏡」＝`metadata.storyboardShot` 非空，與 `countStoryboardProgress`
+ * （面板「已落画布 N 镜」）同一把尺，分子分母不會漂移。
+ */
+function shotMediaCounts(nodes: readonly CanvasNode[]): {
+  shots: number;
+  withImage: number;
+  withVideo: number;
+  withAudio: number;
+} {
+  let shots = 0;
+  let withImage = 0;
+  let withVideo = 0;
+  let withAudio = 0;
+  for (const node of nodes) {
+    if (!node.metadata?.storyboardShot) continue;
+    shots += 1;
+    const readiness = shotMediaReadiness((node.metadata ?? {}) as Record<string, unknown>);
+    if (readiness.hasImage) withImage += 1;
+    if (readiness.hasVideo) withVideo += 1;
+    if (readiness.hasAudio) withAudio += 1;
+  }
+  return { shots, withImage, withVideo, withAudio };
+}
+
+/**
+ * 引導面板的現況快照（`CreationFlowSnapshot`）：全部由**當前真實資料**推導，
+ * 零持久化 onboarding 標記。推不出來的欄位一律不填（fail-closed：`deriveNextStep`
+ * 回 `unknown`，不補假進度）。
+ *
+ * `hasCut`：本站無剪輯產物欄位、也無任何產生剪輯的路徑 ⇒ 成片恆不存在（站點能力事實，
+ * 非猜測）。取保守值 `false`——永不冒充「已完成」；`deriveNextStep` 的 cut 分支正為此現況而寫。
+ */
+function creationFlowSnapshot(
+  summary: CreationFlowSummary,
+  nodes: readonly CanvasNode[],
+): CreationFlowSnapshot {
+  const media = shotMediaCounts(nodes);
+  return {
+    // 與面板「已設定」同一把尺（作品類型／當前步驟／已有劇集任一成立）。
+    hasProject: Boolean(summary.projectTypeLabel || summary.currentStep || summary.episodeCount > 0),
+    episodes: summary.episodeCount,
+    shots: summary.storyboard.shots,
+    shotsWithImage: media.withImage,
+    shotsWithVideo: media.withVideo,
+    shotsWithAudio: media.withAudio,
+    hasCut: false,
+  };
+}
+
+/**
+ * 下一步主動作 → 既有入口（不另開通路）：
+ *   · `agent`：聚焦畫布 AI 助理的對話輸入框（`AgentComposer` 的固定 id）。
+ *     面板處於收合（rail）態時輸入框不在 DOM，此時聚焦落空——不假裝已開啟。
+ *   · `canvas-generation`：開啟既有分鏡審查面。`openReviewPanel` 是專為「步驟條」這類
+ *     CanvasEmbed 外呼叫端準備的既有外開介面（`AssetReviewPanel` 導出），不造第二個事件。
+ */
+function runNextStepAction(surface: CreationNextSurface): void {
+  if (surface === "agent") {
+    const input = document.getElementById("agent-composer-input");
+    if (input instanceof HTMLTextAreaElement) input.focus();
+    return;
+  }
+  if (surface === "canvas-generation") openReviewPanel({ panel: "shot" });
+}
+
+/** 下一步主動作的路由結果（純函式，供呼叫端與測試斷言分派，不改既有 `runNextStepAction` 行為）。 */
+export type NextActionRoute = "voiceover-quote" | "agent" | "review" | "none";
+
+/**
+ * 由（surface, id）決定主動作怎麼走。
+ *
+ * 唯一新增的路由是 `id === "shot-audio"` → `voiceover-quote`（補配音真的接上生成入口）；
+ * 其餘逐條照舊：`agent` → AI 助理輸入框、`canvas-generation` → 分鏡審查面、`none` → 無動作。
+ * `surface === "none"` 的面板本來就不渲染按鈕，這裡回 `none` 只是讓函式全值域誠實。
+ */
+export function nextActionRoute(surface: CreationNextSurface, id?: CreationNextStepId): NextActionRoute {
+  if (surface === "none") return "none";
+  if (id === "shot-audio") return "voiceover-quote";
+  if (surface === "agent") return "agent";
+  return "review";
+}
+
+/** 配音生成入口（姊妹路，`src/app/api/canvas/storyboard-voiceover/route.ts`）。 */
+export const VOICEOVER_ENDPOINT = "/api/canvas/storyboard-voiceover";
+
+/**
+ * 配音請求結果（伺服器回應的**忠實投影**，本層不加工、不算幣）。
+ * `quote` ＝ 乾跑報價（未扣費）、`applied` ＝ 真跑完成（`costCoins` 為實扣）、
+ * `refused` ＝ 伺服器明確拒收（附原因）、`error` ＝ 傳輸／回應不完整。
+ */
+export type VoiceoverOutcome =
+  | { status: "quote"; lineCount: number; totalChars: number; estimatedCoins: number }
+  | { status: "applied"; lineCount: number; totalChars: number; costCoins: number }
+  | { status: "refused"; reason: string }
+  | { status: "error"; reason: string };
+
+/** 非負有限數判據（伺服器回的幣數/字數；不合法＝不知道，不四捨五入、不補 0）。 */
+function asServerNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+/** 拒收原因的人話（形狀未凍結：字串或物件；讀不出就回一句誠實的通用話，不假成功）。 */
+function refusedReason(refused: unknown): string | null {
+  if (refused == null || refused === false) return null;
+  if (typeof refused === "string") return refused.trim() || "服务端拒绝（未附原因）";
+  if (typeof refused === "object") {
+    const bag = refused as { reason?: unknown; message?: unknown; code?: unknown };
+    for (const value of [bag.reason, bag.message, bag.code]) {
+      if (typeof value === "string" && value.trim()) return value.trim();
+    }
+  }
+  return "服务端拒绝（未附原因）";
+}
+
+/**
+ * 呼叫配音姊妹路（`POST`）。
+ *
+ * `dryRun: true` ＝**只報價不生成**（付費硬閘的第一段）；`dryRun: false` ＝ 真跑，
+ * 必須由使用者在看到報價後按確認鍵才會走到這裡。
+ * `fetchImpl` 可注入（測試全程用假 fetch，禁任何真實付費呼叫）。
+ */
+export async function requestVoiceover(
+  input: { projectId: string; dryRun: boolean },
+  fetchImpl: typeof fetch = fetch,
+): Promise<VoiceoverOutcome> {
+  let response: Response;
+  try {
+    response = await fetchImpl(VOICEOVER_ENDPOINT, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ projectId: input.projectId, dryRun: input.dryRun }),
+    });
+  } catch {
+    return { status: "error", reason: "无法连接配音服务（网络错误）" };
+  }
+  if (!response.ok) {
+    // 非 2xx 一律當失敗：不把錯誤回應當成功（HTTP 200 都 ≠ 可用，更何況非 200）。
+    return { status: "error", reason: `配音服务返回 ${response.status}` };
+  }
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    return { status: "error", reason: "配音服务返回的不是 JSON" };
+  }
+  if (!payload || typeof payload !== "object") return { status: "error", reason: "配音服务返回空回应" };
+  const data = payload as Record<string, unknown>;
+
+  const refused = refusedReason(data.refused);
+  if (refused) return { status: "refused", reason: refused };
+  if (data.ok === false) return { status: "error", reason: "服务端回报失败（未附原因）" };
+
+  const lineCount = Array.isArray(data.lines) ? data.lines.length : null;
+  const totalChars = asServerNumber(data.totalChars);
+  if (lineCount === null || totalChars === null) {
+    return { status: "error", reason: "服务端未回报完整的行数/字数" };
+  }
+  if (input.dryRun) {
+    const estimatedCoins = asServerNumber(data.estimatedCoins);
+    if (estimatedCoins === null) return { status: "error", reason: "服务端未回报报价币数" };
+    return { status: "quote", lineCount, totalChars, estimatedCoins };
+  }
+  const costCoins = asServerNumber(data.costCoins);
+  if (costCoins === null) return { status: "error", reason: "服务端未回报实扣币数" };
+  return { status: "applied", lineCount, totalChars, costCoins };
+}
+
+/** 伺服器結果 → 面板顯示狀態（唯一的映射點，面板不再自行解讀回應）。 */
+function voiceoverView(outcome: VoiceoverOutcome): VoiceoverFlowView {
+  if (outcome.status === "quote") {
+    return {
+      status: "quoted",
+      lineCount: outcome.lineCount,
+      totalChars: outcome.totalChars,
+      estimatedCoins: outcome.estimatedCoins,
+    };
+  }
+  if (outcome.status === "applied") {
+    return {
+      status: "applied",
+      lineCount: outcome.lineCount,
+      totalChars: outcome.totalChars,
+      costCoins: outcome.costCoins,
+    };
+  }
+  return { status: outcome.status, reason: outcome.reason };
+}
+
 export function CanvasEmbedOverlays({
   height,
   expanded,
@@ -74,6 +277,57 @@ export function CanvasEmbedOverlays({
   const lineageCard = lineageCardId
     ? canvas.characterCards.find((card) => card.id === lineageCardId) ?? null
     : null;
+
+  // 补齐配音（`shot-audio`）：主動作＝乾跑報價（不扣費），確認鍵才真跑；在途時鎖住防重複送出。
+  const [voiceover, setVoiceover] = useState<VoiceoverFlowView>({ status: "idle" });
+  const voiceoverBusyRef = useRef(false);
+
+  const startVoiceoverQuote = async () => {
+    if (voiceoverBusyRef.current) return;
+    const projectId = canvas.getProjectId();
+    if (!projectId) {
+      setVoiceover({ status: "error", reason: "画布还没有项目号，无法试算配音费用" });
+      return;
+    }
+    voiceoverBusyRef.current = true;
+    try {
+      setVoiceover({ status: "quoting" });
+      setVoiceover(voiceoverView(await requestVoiceover({ projectId, dryRun: true })));
+    } finally {
+      voiceoverBusyRef.current = false;
+    }
+  };
+
+  const confirmVoiceover = async () => {
+    if (voiceoverBusyRef.current) return;
+    const projectId = canvas.getProjectId();
+    if (!projectId) {
+      setVoiceover({ status: "error", reason: "画布还没有项目号，无法生成配音" });
+      return;
+    }
+    voiceoverBusyRef.current = true;
+    try {
+      setVoiceover({ status: "applying" });
+      setVoiceover(voiceoverView(await requestVoiceover({ projectId, dryRun: false })));
+    } finally {
+      voiceoverBusyRef.current = false;
+    }
+  };
+
+  const handleNextAction = (surface: CreationNextSurface, id?: CreationNextStepId) => {
+    switch (nextActionRoute(surface, id)) {
+      case "voiceover-quote":
+        void startVoiceoverQuote();
+        return;
+      case "agent":
+      case "review":
+        runNextStepAction(surface);
+        return;
+      default:
+        return;
+    }
+  };
+
   return (
     <>
       <style>{`
@@ -300,15 +554,29 @@ export function CanvasEmbedOverlays({
       {/* G2（2026-09-16）：作品/劇集面板——與角色卡同款左側彈層；資料全部取自
           hook 既有出口（projectType/currentStep/episodes/nodes），本層零新增狀態。 */}
       {creationFlowOpen && (
-        <CreationFlowPanel
-          summary={summarizeCreationFlow({
+        (() => {
+          // 面板打開才算（nodes 可能上百顆）：現況快照與下一步都由此推導，零新增狀態。
+          const summary = summarizeCreationFlow({
             projectType: canvas.projectType,
             currentStep: canvas.currentStep,
             episodes: canvas.episodes,
             nodes: canvas.nodes,
-          })}
-          onClose={onCloseCreationFlow}
-        />
+          });
+          return (
+            <CreationFlowPanel
+              summary={summary}
+              nextStep={deriveNextStep(creationFlowSnapshot(summary, canvas.nodes))}
+              onNextAction={handleNextAction}
+              voiceover={voiceover}
+              onVoiceoverConfirm={() => void confirmVoiceover()}
+              onClose={() => {
+                // 關閉即丟掉上一輪報價/結果（避免下次打開看到過期幣數）。
+                setVoiceover({ status: "idle" });
+                onCloseCreationFlow();
+              }}
+            />
+          );
+        })()
       )}
 
       {/* 歷史畫布下拉 */}

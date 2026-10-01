@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
+import { useStableHandlers } from "./embed/stable-handlers";
 import type { CanvasConnection, CanvasNode } from "@/lib/canvas/types";
 import { bezierPath, computeWorldBounds } from "@/lib/canvas/layout";
 
@@ -16,9 +17,11 @@ export interface CanvasConnectionsProps {
   onConnectionContextMenu?: (connectionId: string, clientX: number, clientY: number) => void;
   /** 連線拖拽中的預覽路徑（世界座標 SVG path d）；null = 沒在拖。 */
   pendingPath?: string | null;
+  /** 語義縮放：聚合中不可點（連線淡出時不攔截手勢）。缺省 true。 */
+  interactive?: boolean;
 }
 
-function CanvasConnections({
+function CanvasConnectionsView({
   nodes,
   connections,
   activeNodeId,
@@ -26,6 +29,7 @@ function CanvasConnections({
   selectedConnectionId = null,
   onConnectionContextMenu,
   pendingPath = null,
+  interactive = true,
 }: CanvasConnectionsProps) {
   const nodeMap = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
   const bounds = useMemo(() => computeWorldBounds(nodes, 200), [nodes]);
@@ -33,6 +37,7 @@ function CanvasConnections({
   return (
     <svg
       aria-hidden="true"
+      className="lod-conn"
       style={{
         position: "absolute",
         left: bounds.minX,
@@ -86,7 +91,7 @@ function CanvasConnections({
               fill="none"
               stroke="transparent"
               style={{
-                pointerEvents: "stroke",
+                pointerEvents: interactive ? "stroke" : "none",
                 cursor: "pointer",
                 strokeWidth: "calc(24px * var(--canvas-inverse-scale, 1))",
                 touchAction: "manipulation",
@@ -124,6 +129,13 @@ function CanvasConnections({
       )}
     </svg>
   );
+}
+
+const MemoCanvasConnections = memo(CanvasConnectionsView);
+
+/** memo＋穩定 on* 代理：平移/縮放每幀不重算所有連線路徑。 */
+function CanvasConnections(props: CanvasConnectionsProps) {
+  return <MemoCanvasConnections {...useStableHandlers(props)} />;
 }
 
 export { CanvasConnections };

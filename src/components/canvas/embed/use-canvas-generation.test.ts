@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { resolveEntityCardsOverride } from "./use-canvas-generation";
+import { resolveEntityCardsOverride, withProjectStyleId } from "./use-canvas-generation";
 import { applyCharacterCardsToPayload, type CharacterCard } from "@/lib/character-cards";
 
 /**
@@ -95,4 +95,57 @@ test("命中判定不被 name 影響：只認 id（同名不同卡各歸各）",
   const override = resolveEntityCardsOverride([HO, twin], ["card-ho-2"]);
   assert.ok(override);
   assert.deepEqual(override.cards, [twin]);
+});
+
+// ── 專案風格綁定注入（P1-8／對稱差 D34）──────────────────────────────────────
+//
+// 驗收立場：斷言**送出的請求物件真的帶了風格**。實際組裝路徑＝卡注入（真
+// applyCharacterCardsToPayload）→ LoRA merge → `withProjectStyleId`（本檔唯一 style 併入點）。
+// 這裡用真卡注入函式組出 payload，再過 style 併入，斷言端狀態；不用源碼字串斷言。
+
+test("有專案綁定：請求物件帶 style_id＝專案 styleId", () => {
+  const payload = { prompt: "海边日落", model: "seedream-4", reference_images: [] };
+  const finalPayload = withProjectStyleId(payload, "sai-anime");
+  assert.equal(finalPayload.style_id, "sai-anime");
+  assert.deepEqual(Object.keys(finalPayload).sort(), ["model", "prompt", "reference_images", "style_id"]);
+  // 既有欄位逐欄不變（不因注入風格而動到 prompt/model/參考圖）。
+  assert.equal(finalPayload.prompt, "海边日落");
+  assert.equal(finalPayload.model, "seedream-4");
+});
+
+test("無專案綁定：請求物件不含 style_id 鍵（不塞 undefined／空字串）", () => {
+  const payload = { prompt: "海边日落", model: "seedream-4" };
+  const noBinding = withProjectStyleId(payload, undefined);
+  assert.ok(!("style_id" in noBinding), "無綁定不得新增 style_id 鍵");
+  assert.equal(noBinding, payload, "無綁定＝原物件逐位不變");
+  // 空字串同款：不新增鍵。
+  assert.ok(!("style_id" in withProjectStyleId(payload, "")));
+});
+
+test("已帶 style_id（呼叫端顯式給定）：不覆寫", () => {
+  const payload = { prompt: "x", style_id: "ads-luxury" };
+  assert.equal(withProjectStyleId(payload, "sai-anime").style_id, "ads-luxury");
+});
+
+test("防回歸：卡注入與 LoRA 欄位逐欄不變，只多一個 style_id", () => {
+  const payload = {
+    prompt: "@[角色:霍辞渊] 特写",
+    model: "seedream-4",
+    reference_images: [] as { url: string; role: string; name: string }[],
+    loraModelVersionIds: ["lora-7"],
+    count: 1,
+  };
+  const afterCards = applyCharacterCardsToPayload(payload, [HO], { referenceScope: "referenced" });
+  const finalPayload = withProjectStyleId(afterCards, "sai-anime");
+
+  assert.equal(finalPayload.style_id, "sai-anime");
+  assert.deepEqual(finalPayload.loraModelVersionIds, ["lora-7"], "LoRA 欄位不被風格注入動到");
+  assert.equal(finalPayload.count, 1);
+  const urls = (finalPayload.reference_images ?? []).map((r) => r.url);
+  assert.deepEqual(urls, ["https://img/ho.png"], "卡注入結果逐欄不變");
+  // 卡注入帶來的片段前綴仍在（風格只是附加，不取代提示詞）。
+  assert.equal(typeof finalPayload.prompt, "string");
+  // 逐欄等價：除 style_id 外與卡注入結果一致。
+  const { style_id: _style, ...rest } = finalPayload as Record<string, unknown>;
+  assert.deepEqual(rest, afterCards);
 });

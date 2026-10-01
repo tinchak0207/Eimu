@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useRef } from "react";
 import type { Dispatch, SetStateAction } from "react";
-import { listCanvasProjects, postCanvasSnapshot, saveCanvasProject } from "@/lib/canvas/client";
+import { listCanvasProjectSummaries, postCanvasSnapshot, saveCanvasProject } from "@/lib/canvas/client";
 import type { CanvasReducerState } from "@/lib/canvas/reducer";
 import { toCanvasProject } from "@/lib/canvas/layout";
 import type { CanvasEpisode, CanvasProject, CanvasProjectType, CanvasViewport } from "@/lib/canvas/types";
@@ -21,6 +21,9 @@ import {
   type CanvasBudget,
   type CanvasProjectSummary,
 } from "./canvas-chat-types";
+
+/** 純視口變動的靜默存檔防抖（比內容存檔長：連續平移/縮放只落最後一筆）。 */
+const VIEWPORT_SAVE_DEBOUNCE_MS = 1500;
 
 /** useCanvasProjectSync 需要的共享 refs / 當前值 / setters（皆由主 hook 提供）。 */
 export interface UseCanvasProjectSyncParams {
@@ -98,7 +101,7 @@ export function useCanvasProjectSync(params: UseCanvasProjectSyncParams) {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const res = await listCanvasProjects();
+      const res = await listCanvasProjectSummaries();
       if (cancelled || !mountedRef.current) return;
       if (res.ok && res.data) {
         setSavedProjects(toProjectSummaries(res.data));
@@ -157,10 +160,28 @@ export function useCanvasProjectSync(params: UseCanvasProjectSyncParams) {
         else setSaveState(res.reason === "not_authenticated" ? "offline" : "error");
       });
     }, SAVE_DEBOUNCE_MS);
-    // 依賴畫布本體與視口/背景/標題/卡鎖定/作品劇集欄位 + 風格綁定：任何一項變化都該落盤。
+    // 依賴畫布本體與背景/標題/卡鎖定/作品劇集欄位 + 風格綁定：任何一項變化都該落盤（視口另走下方靜默存檔）。
     // saveState 刻意不進依賴 —— 它由這個 effect 自己寫，進去會變成自觸發循環。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canvas, viewport, backgroundMode, projectTitle, activeCardIds, projectType, currentStep, episodes, styleId, scriptType, narrationVoice, buildProject]);
+  }, [canvas, backgroundMode, projectTitle, activeCardIds, projectType, currentStep, episodes, styleId, scriptType, narrationVoice, buildProject]);
+
+  // 只動了視口（平移/縮放）：效能審計 P1-4（2026-10-01）——原本每次停手 400ms 就整份存檔＋兩次 setSaveState
+  // （＝宿主所在的整頁重渲染兩次）。視口只是「回來時停在哪」，靜默、拉長防抖；內容存檔照常帶最新視口（viewportRef）。
+  const viewportSaveTimerRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    if (saveState === "offline") return;
+    if (!everHadNodesRef.current) return;
+    if (viewportSaveTimerRef.current !== null) window.clearTimeout(viewportSaveTimerRef.current);
+    viewportSaveTimerRef.current = window.setTimeout(() => {
+      viewportSaveTimerRef.current = null;
+      // 內容存檔排隊中就不重複送（它會帶上同一份視口）。
+      if (saveTimerRef.current !== null) return;
+      void saveCanvasProject(buildProject());
+    }, VIEWPORT_SAVE_DEBOUNCE_MS);
+    // 不在 cleanup 清計時器：關掉畫布前的最後一次停手也要落盤（下一輪 effect 開頭會自行清舊計時器）。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewport]);
 
   // ─────────────────────── Wave C1：壓縮快照上行（agent 的眼睛）
   // 3s 尾隨防抖（第二輪就緒優化刀C，原 300ms）：sessionId 落地（AI 助理開場）

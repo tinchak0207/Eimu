@@ -23,6 +23,7 @@ import type { CardAwareGeneratePayload, CharacterCard } from "@/lib/character-ca
 import { createBatchChildNode } from "@/lib/canvas/batch-utils";
 import { resolveSceneDirectorReferences, sceneDirectorTraceMetadata } from "@/lib/canvas/scene-3d-reference";
 import { generationCapabilities } from "@/lib/generation-model-catalog";
+import { generatedImageMetadata, type CanvasGeneratedImage } from "@/lib/canvas/generated-image-metadata";
 import {
   extractFramesAtTimes,
   frameFileName,
@@ -62,6 +63,23 @@ export function resolveEntityCardsOverride(
   const picked = cards.filter((card) => entityCardIds.includes(card.id));
   if (!picked.length) return undefined;
   return { cards: picked, referenceScope: "referenced" };
+}
+
+/**
+ * 專案風格綁定注入（P1-8／對稱差 D34）：與同檔 LoRA 段同款 merge（`{ ...payload, key: value }`）。
+ *   - `payload` 尚未帶 `style_id` 且有專案綁定 → 帶上（值＝`CanvasProject.styleId`）；
+ *   - 無綁定（undefined／空字串）→ 原物件逐位不變，**不新增 `style_id` 鍵**（不得塞 undefined
+ *     或空字串；route 端「無 id ⇒ prompt 逐位零回歸」的契約靠這個保證）。
+ *   - 已帶 `style_id`（呼叫端顯式給定）→ 不覆寫。
+ * 抽成純函式：本檔的請求組裝只有這一條路徑，抽出後可對「請求真的帶了風格」作真行為斷言
+ * （本 repo 測試範式是 node:test + 純函式，無 React renderer）。行為與行內 merge 逐位等價。
+ */
+export function withProjectStyleId<T extends Record<string, unknown>>(
+  payload: T,
+  styleId: string | undefined,
+): T {
+  if (!styleId || payload.style_id !== undefined) return payload;
+  return { ...payload, style_id: styleId };
 }
 
 export interface UseCanvasGenerationInput {
@@ -139,6 +157,9 @@ export function useCanvasGeneration({
           finalPayload = { ...finalPayload, loraModelVersionIds: [lora.versionId] };
         }
       }
+      // 專案風格綁定注入（P1-8／對稱差 D34）：呼叫端帶 id 進 route（route 端只做 id→全文素材化，
+      // 不自行讀 CanvasProject.styleId，見 route:202-206）；無綁定＝不新增鍵（逐位零回歸）。
+      finalPayload = withProjectStyleId(finalPayload, canvasStateRef.current.styleId);
       const res = await fetch(`/api/canvas/generate`, {
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },
@@ -146,7 +167,7 @@ export function useCanvasGeneration({
         signal,
       });
       const data = (await res.json().catch(() => null)) as
-        | { ok?: boolean; images?: { url: string; cost_coins: number | null; natural_width: number | null; natural_height: number | null }[]; error?: string }
+        | { ok?: boolean; images?: CanvasGeneratedImage[]; error?: string }
         | null;
       if (!res.ok || !data?.ok || !data.images?.length) {
         throw new Error(data?.error || `生成失败（${res.status}）`);
@@ -213,9 +234,8 @@ export function useCanvasGeneration({
           {
             content: img.url,
             status: "success",
-            ...(typeof img.cost_coins === "number" ? { cost_coins: img.cost_coins } : {}),
-            ...(img.natural_width ? { naturalWidth: img.natural_width } : {}),
-            ...(img.natural_height ? { naturalHeight: img.natural_height } : {}),
+            // 含 imageTaskId（LOD3 工程透析的 job 指針）；legacy 無 job＝清掉舊指針。
+            ...generatedImageMetadata(img),
           },
           { history: false },
         );
@@ -305,9 +325,7 @@ export function useCanvasGeneration({
               prompt: finalPrompt,
               model: options.model,
               size: options.size,
-              ...(typeof img.cost_coins === "number" ? { cost_coins: img.cost_coins } : {}),
-              ...(img.natural_width ? { naturalWidth: img.natural_width } : {}),
-              ...(img.natural_height ? { naturalHeight: img.natural_height } : {}),
+              ...generatedImageMetadata(img),
               ...(refNodeIds.length > 0 ? { referenceNodeIds: [...refNodeIds] } : {}),
             },
           });

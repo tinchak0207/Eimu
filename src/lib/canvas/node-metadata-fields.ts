@@ -99,6 +99,14 @@ export const DURABLE_METADATA_FIELDS: readonly DurableFieldSpec[] = [
   { key: "shotId", cleaner: "trimmedString", note: "3D 舞台參考溯源：所屬鏡號（storyboard-contract shotId 口徑）" },
   { key: "episodeId", cleaner: "trimmedString", note: "分鏡的集歸屬（按集批次換模型的分組維度；缺＝不歸任何一集）" },
   { key: "storyboardShot", cleaner: "storyboardShot", note: "分鏡 AID 21 欄契約（shotNumber 為空即整包丟）" },
+  // ── 單鏡旁白文本 ＋ 對白／旁白雙音軌（2026-09-30；介面凍結四鍵）──
+  // 病灶：`audioAnchorId` 在分鏡生產契約（storyboard-contract.ts）裡是**無生產者的宣告**，
+  // 17 道門禁的 `audio_anchor_present`／`dialogue_alignment` 結構上永遠不可能過（
+  // shortdrama-domain/index.ts:448/450 逐鏡讀 `shot.audioAnchorId`）。本四鍵補上生產者。
+  { key: "narration", cleaner: "string", note: "單鏡旁白文本（旁白軌的文本；漏放行＝刷新後旁白消失，TTS 逐鏡合成無輸入）" },
+  { key: "dialogueAudioId", cleaner: "string", note: "該鏡對白音檔資產 id（audioAnchorId 的錨優先來源；漏放行＝重載後對白軌消失）" },
+  { key: "narrationAudioId", cleaner: "string", note: "該鏡旁白音檔資產 id（無對白軌時為錨；漏放行＝重載後旁白軌消失）" },
+  { key: "audioAnchorId", cleaner: "string", note: "音軌錨（相容鍵）＝dialogueAudioId || narrationAudioId；門禁 audio_anchor_present/dialogue_alignment 讀它" },
   { key: "shotCandidates", cleaner: "shotCandidates", note: "分鏡級抽卡候選集＋星標（id+prompt 缺一即丟該條；空集合＝省略鍵）" },
   { key: "storyboardScene", cleaner: "storyboardScene", note: "分鏡場景歸屬（sceneName 是唯一權威）" },
   { key: "characterCardIds", cleaner: "idList", note: "分鏡：角色卡引用 id 陣列" },
@@ -241,6 +249,11 @@ export const AGENT_METADATA_FIELDS: readonly AgentFieldSpec[] = [
   { key: "shotId", transform: "truthy", note: "3D 舞台參考溯源鏡號（漏傳＝還原後鏡號消失）" },
   { key: "episodeId", transform: "truthy", note: "集歸屬（漏傳＝還原後按集換模型漏掉這些格）" },
   { key: "storyboardShot", transform: "storyboardShot", note: "分鏡 21 欄整族透傳（逐欄截 STORYBOARD_SNAPSHOT_FIELD_CHARS）" },
+  // 單鏡旁白文本＋雙音軌（漏傳＝還原後旁白與音軌錨消失，門禁 audio_anchor_present/dialogue_alignment 卡死）
+  { key: "narration", transform: "truthy", note: "單鏡旁白文本" },
+  { key: "dialogueAudioId", transform: "truthy", note: "對白音檔資產 id（錨優先來源）" },
+  { key: "narrationAudioId", transform: "truthy", note: "旁白音檔資產 id" },
+  { key: "audioAnchorId", transform: "truthy", note: "音軌錨（相容鍵）＝dialogueAudioId || narrationAudioId" },
   { key: "shotCandidates", transform: "truthy", note: "分鏡候選集＋星標（漏傳＝還原後抽卡結果與採用稿消失）" },
   { key: "storyboardScene", transform: "truthy", note: "分鏡場景歸屬" },
   { key: "characterCardIds", transform: "idList", note: "分鏡卡引用（漏傳＝還原後卡引用消失）" },

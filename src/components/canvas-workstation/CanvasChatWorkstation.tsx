@@ -256,8 +256,8 @@ export function CanvasChatWorkstation({
               border: 1px solid rgba(0, 0, 0, 0.08);
               border-radius: 999px;
               box-shadow: 0 8px 32px rgba(0, 0, 0, 0.10);
-              backdrop-filter: blur(40px) saturate(180%);
               -webkit-backdrop-filter: blur(40px) saturate(180%);
+              backdrop-filter: blur(40px) saturate(180%);
             }
             /* FAB 入場彈現（首秒零回縮閘）：只在 settled 後、且不是「舊持久值
                rail 直接首幀載入」時播——用戶動作收合是過度，載入直出是終態。

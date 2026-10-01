@@ -15,7 +15,7 @@
 // 本檔保留節點殼：標題欄 / 狀態徽章 / hover 工具列 / 提示詞面板 / port / 縮放手柄綁定。
 // props 顯式轉發給 NodeBody（46 個 props 介面債就地償還，不引入 context——避免 memo 失效）。
 
-import { useEffect, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { X, RefreshCw, Edit2, ChevronDown, ChevronUp, Image as ImageIcon, Download, Wrench, ShieldCheck, Lightbulb, FileText, Type, User, Mountain, Boxes, Paperclip, AudioLines, Video as VideoIcon, SlidersHorizontal, Clapperboard } from "lucide-react";
 import { CanvasNodeHoverToolbar } from "./CanvasNodeHoverToolbar";
 import { CanvasNodePromptPanel } from "./CanvasNodePromptPanel";
@@ -27,8 +27,15 @@ import { toReferenceImageRole } from "@/lib/image-types";
 import type { ReferenceImageRole } from "@/lib/image-types";
 import { STATUS_LABEL, TYPE_LABEL, RESIZE_HANDLES } from "./node-view/constants";
 import { useNodeGestures } from "./node-view/use-node-gestures";
+import { useStableHandlers } from "./embed/stable-handlers";
 import { NodeBody } from "./node-view/NodeBody";
+import type { StoryboardShotAudioMetadata } from "@/lib/canvas/storyboard-shots";
 import { EntityThumbStack, entitiesInText } from "@/components/entities/entity-chip";
+import type { CanvasLod } from "@/lib/canvas/lod";
+import { inspectSections, type InspectInput } from "./node-view/node-inspect";
+import { NodeInspectBody } from "./node-view/NodeInspectBody";
+
+const NO_INPUTS: readonly InspectInput[] = [];
 
 export interface CanvasNodeViewProps {
   node: CanvasNode;
@@ -99,6 +106,8 @@ export interface CanvasNodeViewProps {
   onUpdateText?: (nodeId: string, text: string) => void;
   /** reference 節點角色切換（復用 ReferenceImageRole 枚舉）。 */
   onUpdateReferenceRole?: (nodeId: string, role: ReferenceImageRole) => void;
+  /** 分鏡音軌綁定的 metadata 寫入出口（原樣透傳給 NodeBody）。 */
+  onPatchMetadata?: (nodeId: string, patch: StoryboardShotAudioMetadata) => void;
   /** A12：失敗節點就地重試（沿用保存的生成參數）。 */
   onRetry?: (nodeId: string) => void;
   /** A2：乾淨點擊（選取且未拖動）——宿主用它「點選即開面板」。 */
@@ -106,6 +115,20 @@ export interface CanvasNodeViewProps {
   /** 內嵌 prompt 面板的透傳（W2 新增能力） */
   onStopGenerate?: () => void;
   onOpenPromptLibrary?: () => void;
+  /** 語義縮放層級（2026-09-30）：3 = 工程透析層，卡內疊工程條。缺省 = 2（現狀）。 */
+  lod?: CanvasLod;
+  /** 打開工程透析面板（LOD 3 工程條「透析」按鈕／Image·Video·Audio 雙擊）。 */
+  onOpenEngineering?: (nodeId: string) => void;
+  /** 語義縮放聚合位移（節點中心 → 所屬階段質心，世界座標）；寫成 --gx/--gy，由內容層 --lod-g 驅動。 */
+  gatherOffset?: { x: number; y: number };
+  /** 所屬階段（01–04）；供「飛向某階段時壓暗其他階段」的 CSS 選擇器用。 */
+  stageId?: number | null;
+  /** 透析帶內且節點在可視範圍：掛載拆機板，卡面（背板）隨 --lod-xray 掀開。 */
+  xrayVisible?: boolean;
+  /** 拆機內容的「输入」段＝入邊來源（宿主按連線算好、引用穩定）。 */
+  boardInputs?: readonly InspectInput[];
+  /** 正在被透析：卡片抬起（置頂、青色柔光）。 */
+  engineeringFocused?: boolean;
 }
 
 export function CanvasNodeView({
@@ -153,10 +176,18 @@ export function CanvasNodeView({
   onRename,
   onUpdateText,
   onUpdateReferenceRole,
+  onPatchMetadata,
   onRetry,
   onNodeClick,
   onStopGenerate,
   onOpenPromptLibrary,
+  lod = 2,
+  onOpenEngineering,
+  gatherOffset,
+  stageId,
+  xrayVisible = false,
+  boardInputs = NO_INPUTS,
+  engineeringFocused = false,
 }: CanvasNodeViewProps) {
   const [mounted, setMounted] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
@@ -235,13 +266,39 @@ export function CanvasNodeView({
     }
   };
 
+  // 透析中的節點自己把背板滑開（--lod-xray 過渡到 1），不跟畫布縮放走；關閉後保留 600ms 讓背板滑回。
+  const [engRelease, setEngRelease] = useState(false);
+  const wasFocusedRef = useRef(engineeringFocused);
+  useEffect(() => {
+    if (wasFocusedRef.current && !engineeringFocused) {
+      setEngRelease(true);
+      const t = window.setTimeout(() => setEngRelease(false), 600);
+      wasFocusedRef.current = engineeringFocused;
+      return () => window.clearTimeout(t);
+    }
+    wasFocusedRef.current = engineeringFocused;
+  }, [engineeringFocused]);
+  // LOD 3 拆機內容：只在透析帶內＋在視野裡、或正被透析時才算（節點/入邊變了才重算）。
+  const inspectOn = xrayVisible || engineeringFocused || engRelease;
+  const sections = useMemo(() => (inspectOn ? inspectSections(node, boardInputs) : null), [inspectOn, node, boardInputs]);
+  // 「還有 N 項」只需跟縮放粗粒度同步（0.1 一檔）。
+  const zoomKey = Math.round(scale * 10) / 10;
+  // 雙擊下鑽：Image/Video/Audio 卡體沒有既有雙擊行為（標題雙擊重命名自帶 stopPropagation；
+  // 文本類正文雙擊 = 就地編輯，故不綁）。
+  const dblOpensEngineering =
+    lod === 3 &&
+    !!onOpenEngineering &&
+    (node.type === CanvasNodeType.Image || node.type === CanvasNodeType.Video || node.type === CanvasNodeType.Audio);
+
   const showCostBadge =
+    !xrayVisible &&
     (node.type === CanvasNodeType.Image || node.type === CanvasNodeType.Video) &&
     typeof node.metadata?.cost_coins === "number";
 
   // C-FE：canvas.plan 的 cost_hint（预估花费）——实际 cost_coins 落地前显示
   // 「预估 N 币」角标（与实际角标同位同款、互斥接班），无值不显示（行为同现状）。
   const showCostHintBadge =
+    !xrayVisible &&
     !showCostBadge &&
     (node.type === CanvasNodeType.Image || node.type === CanvasNodeType.Video) &&
     typeof node.metadata?.cost_hint === "number";
@@ -249,10 +306,23 @@ export function CanvasNodeView({
   return (
     <div
       data-canvas-node={node.id}
+      data-lod-stage={stageId ?? undefined}
+      data-eng-focused={engineeringFocused ? "" : undefined}
+      data-eng-release={engRelease ? "" : undefined}
+      data-lod-xray={engineeringFocused || engRelease ? "" : undefined}
+      data-lod-xray-open={engineeringFocused ? "" : undefined}
       role="button"
       tabIndex={0}
       aria-label={`画布节点：${node.title}，${statusLabel}`}
       onKeyDown={handleKeyDown}
+      onDoubleClick={
+        dblOpensEngineering
+          ? (e) => {
+              e.stopPropagation();
+              onOpenEngineering?.(node.id);
+            }
+          : undefined
+      }
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={endDrag}
@@ -272,7 +342,7 @@ export function CanvasNodeView({
         onNodeContextMenu?.(node.id, e.clientX, e.clientY);
       }}
       className={cn(
-        "absolute touch-manipulation select-none transition-[opacity,transform] duration-300 ease-out",
+        "lod-node absolute touch-manipulation select-none transition-[opacity,transform] duration-300 ease-out",
         "[-webkit-tap-highlight-color:transparent]",
         "motion-reduce:translate-y-0 motion-reduce:transition-none",
         mounted ? "translate-y-0 opacity-100" : "translate-y-1 opacity-0",
@@ -283,6 +353,8 @@ export function CanvasNodeView({
         width: node.width,
         height: node.height,
         transitionDelay: `${enterDelay}ms`,
+        ...(gatherOffset ? ({ "--gx": gatherOffset.x, "--gy": gatherOffset.y } as React.CSSProperties) : null),
+        ...(engineeringFocused ? ({ "--lod-xray": 1 } as React.CSSProperties) : null),
       }}
     >
       {/* 批次收起態：堆疊視覺（卡片後方兩張錯位幽靈卡） */}
@@ -292,11 +364,13 @@ export function CanvasNodeView({
           <div className="pointer-events-none absolute inset-0 -z-20 translate-x-[12px] translate-y-[12px] rounded-2xl bg-white/45 shadow-sm" aria-hidden="true" />
         </>
       )}
+      {/* 拆機板：墊在卡面底下；卡面（背板）隨 --lod-xray 掀開後露出。 */}
       <div
         className={cn(
-          "lg-card relative flex h-full flex-col overflow-hidden rounded-2xl transition-shadow duration-150",
-          selected && "ring-2 ring-ios-blue/50",
-          !selected && adjacent && "ring-2 ring-ios-blue/20",
+          "lg-card lg-card-canvas relative flex h-full flex-col overflow-hidden rounded-2xl transition-shadow duration-300",
+          selected && !engineeringFocused && "ring-2 ring-ios-blue/50",
+          !selected && !engineeringFocused && adjacent && "ring-2 ring-ios-blue/20",
+          engineeringFocused && "shadow-[0_28px_70px_-12px_rgba(14,165,233,0.55),0_0_0_1.5px_rgba(56,189,248,0.9)]",
         )}
       >
         {/* 卡片上沿横线（2026-08-26 用户裁定）：类型色，与徽章同源——
@@ -456,7 +530,7 @@ export function CanvasNodeView({
         {node.type === CanvasNodeType.Reference && onUpdateReferenceRole && (
           <div
             data-canvas-interactive
-            className="absolute bottom-2 left-2 z-10"
+            className="lod-cover-overlay absolute bottom-2 left-2 z-10"
             onPointerDown={(e) => e.stopPropagation()}
           >
             <select
@@ -490,6 +564,12 @@ export function CanvasNodeView({
           </button>
         )}
         <div className="relative min-h-0 flex-1">
+          {/* 拆機：正文區底下墊著內部參數；原正文（lod-cover）像滑蓋一樣往上收，標題列與卡片外觀不動。 */}
+          {sections && (
+            <NodeInspectBody sections={sections} zoomKey={zoomKey} onOpen={onOpenEngineering ? () => onOpenEngineering(node.id) : undefined} />
+          )}
+          {sections && <div className="lod-lid-edge pointer-events-none absolute inset-x-0 z-[2] h-[12px]" aria-hidden="true" />}
+          <div className={cn("relative h-full", sections && "lod-cover flex flex-col bg-white")}>
           <NodeBody
             node={node}
             scale={scale}
@@ -498,12 +578,14 @@ export function CanvasNodeView({
             onRetry={onRetry}
             onEditPrompt={onEditPrompt}
             onUpdateText={onUpdateText}
+            onPatchMetadata={onPatchMetadata}
             onScrollAreaPointerDown={handleScrollAreaDown}
             onScrollAreaPointerMove={handleScrollAreaMove}
             onScrollAreaPointerEnd={handleScrollAreaEnd}
             onExtractVideoFrames={onExtractVideoFrames}
             extractingVideoFrames={extractingVideoFrames}
           />
+          </div>
         </div>
         {showCostBadge && (
           <span className="pointer-events-none absolute right-2 bottom-2 rounded-full bg-black/60 px-2 py-0.5 text-[12.5px] font-medium text-white">
@@ -629,4 +711,11 @@ export function CanvasNodeView({
         : null}
     </div>
   );
+}
+
+const MemoCanvasNodeView = memo(CanvasNodeView);
+
+/** 畫布用的節點（2026-10-01 效能）：memo＋穩定 on* 代理——平移/縮放時父層每幀重渲染，資料沒變的卡直接跳過。 */
+export function CanvasNodeViewMemo(props: CanvasNodeViewProps) {
+  return <MemoCanvasNodeView {...useStableHandlers(props)} />;
 }

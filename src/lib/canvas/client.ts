@@ -8,6 +8,7 @@
 import { getStoredToken, getStoredUser } from "@/lib/new-api-client";
 import { LOCAL_TEST_MODE } from "../local-test-mode";
 import type { CanvasProject } from "./types";
+import { parseCanvasProjectSummaries, toCanvasProjectSummaryWire, type CanvasProjectSummaryWire } from "./project-summary";
 
 export type CanvasClientFailure =
   | "not_authenticated"
@@ -82,6 +83,29 @@ export async function listCanvasProjects(): Promise<CanvasClientResult<CanvasPro
   return request<CanvasProject[]>("/api/canvas/projects", { method: "GET" }, (json) => {
     const arr = (json as { projects?: unknown })?.projects;
     return Array.isArray(arr) ? (arr as CanvasProject[]) : undefined;
+  });
+}
+
+/**
+ * 歷史清單摘要（效能審計 P0-B）：只拿標題/時間/節點數，不再整包下載全部專案。
+ * 舊服務端不認 `view=summary` 會回全量 `projects` → 這裡就地摘要（部署先後順序無關）。
+ */
+export async function listCanvasProjectSummaries(): Promise<CanvasClientResult<CanvasProjectSummaryWire[]>> {
+  return request<CanvasProjectSummaryWire[]>("/api/canvas/projects?view=summary", { method: "GET" }, (json) => {
+    const summaries = parseCanvasProjectSummaries((json as { summaries?: unknown })?.summaries);
+    if (summaries) return summaries;
+    const arr = (json as { projects?: unknown })?.projects;
+    return Array.isArray(arr) ? (arr as CanvasProject[]).map(toCanvasProjectSummaryWire) : undefined;
+  });
+}
+
+/** 讀單一畫布專案（打開歷史畫布用）。舊服務端回全量時就地挑出同 id 那張。 */
+export async function fetchCanvasProject(id: string): Promise<CanvasClientResult<CanvasProject>> {
+  return request<CanvasProject>(`/api/canvas/projects?id=${encodeURIComponent(id)}`, { method: "GET" }, (json) => {
+    const project = (json as { project?: unknown })?.project;
+    if (project && typeof project === "object" && (project as CanvasProject).id === id) return project as CanvasProject;
+    const arr = (json as { projects?: unknown })?.projects;
+    return Array.isArray(arr) ? (arr as CanvasProject[]).find((p) => p?.id === id) : undefined;
   });
 }
 

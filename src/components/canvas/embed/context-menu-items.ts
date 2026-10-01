@@ -47,6 +47,8 @@ export interface CanvasEmbedMenuItemsInput {
   downloadBatch: (parentId: string) => Promise<void>;
   handleDeleteNode: (nodeId: string) => void;
   deleteSelected: () => void;
+  /** 語義縮放 LOD 3（2026-09-30）：打開工程透析面板；缺省 = 不出該項。 */
+  openEngineering?: (nodeId: string) => void;
 }
 
 /** 變體母卡上限：超過即整個「存为角色变体卡」子選單不渲染（不造死按鈕、不靜默截斷）。 */
@@ -85,6 +87,7 @@ export function buildCanvasEmbedMenuItems({
   downloadBatch,
   handleDeleteNode,
   deleteSelected,
+  openEngineering,
 }: CanvasEmbedMenuItemsInput): (CanvasMenuItem | "separator")[] {
   if (!menu) return [];
   const state = canvasStateRef.current;
@@ -140,6 +143,9 @@ export function buildCanvasEmbedMenuItems({
     ...(isWorkflowNode ? ([{ id: "rerun", label: "重新生成（工作流）", onSelect: () => void handleRerun(node.id) }] as CanvasMenuItem[]) : []),
     ...(node.metadata?.status === "error" && node.metadata?.prompt
       ? ([{ id: "retry", label: "重试（沿用参数）", onSelect: () => retryNode(node.id) }] as CanvasMenuItem[])
+      : []),
+    ...(openEngineering && node.type !== CanvasNodeType.Group
+      ? ([{ id: "engineering", label: "工程透析", onSelect: () => openEngineering(node.id) }] as CanvasMenuItem[])
       : []),
     { id: "connect", label: "连线到其他节点", onSelect: () => setConnecting({ sourceId: node.id, cursor: null }) },
     { id: "rename", label: "重命名", onSelect: () => {

@@ -10,8 +10,9 @@
 // 的指針事件（否則拖滑桿 = 平移畫布）。
 
 import { useCallback, useRef, useState } from "react";
-import { ClipboardCheck, Keyboard, Map as MapIcon, Maximize, Minus, Plus } from "lucide-react";
+import { ClipboardCheck, Keyboard, LayoutGrid, Map as MapIcon, Maximize, Minus, Plus, ScanLine, Square, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { LOD_LABEL, LOD_TARGET_SCALE, type CanvasLod } from "@/lib/canvas/lod";
 
 export interface CanvasZoomControlsProps {
   /** 當前縮放 k（0.05–5） */
@@ -29,6 +30,12 @@ export interface CanvasZoomControlsProps {
   reviewActive?: boolean;
   reviewPendingCount?: number;
   onToggleReview?: () => void;
+  /** 語義縮放（2026-09-30）：當前層級；有值才渲染「鸟瞰/协作/工程」三段按鈕。 */
+  lod?: CanvasLod;
+  /** 是否提供工程層（窄螢幕 false → 不出「工程」鈕）。 */
+  allowEngineering?: boolean;
+  /** 三段按鈕的宿主接管（相機飛行轉場）；缺省＝onZoomTo(目標倍率) 瞬切。 */
+  onSelectLod?: (lod: CanvasLod) => void;
   className?: string;
 }
 
@@ -51,6 +58,9 @@ const tToScale = (t: number) =>
   MIN_SCALE * Math.pow(MAX_SCALE / MIN_SCALE, Math.min(1, Math.max(0, t)));
 
 /** 圓形小按鈕統一皮膚（28px 熱區 + hover 態）。 */
+/** 語義縮放三層的圖示（鳥瞰＝階段牌組、協作＝單卡、工程＝掃描透析）；文字進 title/aria。 */
+const LOD_ICON: Record<1 | 2 | 3, LucideIcon> = { 1: LayoutGrid, 2: Square, 3: ScanLine };
+
 const BUTTON_CLASS =
   "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-black/5 hover:text-foreground disabled:cursor-default disabled:opacity-35 disabled:hover:bg-transparent";
 
@@ -64,6 +74,9 @@ function CanvasZoomControls({
   reviewActive,
   reviewPendingCount = 0,
   onToggleReview,
+  lod,
+  allowEngineering = true,
+  onSelectLod,
   className,
 }: CanvasZoomControlsProps) {
   const trackRef = useRef<HTMLDivElement | null>(null);
@@ -178,6 +191,34 @@ function CanvasZoomControls({
       </button>
 
       <div className="my-0.5 h-px w-4 bg-black/10" />
+
+      {/* 語義縮放三段：點擊以中心為錨縮到該層目標倍率；高亮當前層。 */}
+      {lod !== undefined && (
+        <>
+          {([1, 2, 3] as const)
+            .filter((level) => level !== 3 || allowEngineering)
+            .map((level) => (
+              <button
+                key={level}
+                type="button"
+                className={cn(
+                  BUTTON_CLASS,
+                  lod === level && "bg-ios-blue/10 text-ios-blue hover:bg-ios-blue/15 hover:text-ios-blue",
+                )}
+                title={`${LOD_LABEL[level]}视图`}
+                aria-label={`${LOD_LABEL[level]}视图`}
+                aria-pressed={lod === level}
+                onClick={() => (onSelectLod ? onSelectLod(level) : onZoomTo(LOD_TARGET_SCALE[level]))}
+              >
+                {(() => {
+                  const Icon = LOD_ICON[level];
+                  return <Icon className="h-4 w-4" />;
+                })()}
+              </button>
+            ))}
+          <div className="my-0.5 h-px w-4 bg-black/10" />
+        </>
+      )}
 
       <button type="button" className={BUTTON_CLASS} title="适应视图" aria-label="适应视图" onClick={onFit}>
         <Maximize className="h-4 w-4" />

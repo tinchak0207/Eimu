@@ -24,6 +24,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { CanvasViewport } from "@/lib/canvas/types";
 import { screenRectToWorld, type WorldRect } from "@/lib/canvas/interaction";
 import { clampScale, gridBackground, zoomAtPoint } from "@/lib/canvas/layout";
+import { quantizeScale } from "@/lib/canvas/lod";
 import { cn } from "@/lib/utils";
 
 export interface InfiniteCanvasProps {
@@ -41,6 +42,12 @@ export interface InfiniteCanvasProps {
   /** 桌面雙擊空白：就地建節點（提供此 prop 後桌面雙擊不再放大；觸控不受影響）。 */
   onCanvasDoubleClick?: (screen: { x: number; y: number }, world: { x: number; y: number }) => void;
   className?: string;
+  /**
+   * 內容層（世界座標、隨 viewport 變換的那層）的附加樣式／data 屬性。
+   * 語義縮放用它每幀下發 CSS 變數（--lod-g / --lod-xray…）與狀態屬性，節點靠 CSS 反應、不多 render。
+   */
+  contentStyle?: React.CSSProperties;
+  contentData?: Record<`data-${string}`, string | undefined>;
   children: React.ReactNode;
 }
 
@@ -116,6 +123,8 @@ function InfiniteCanvas({
   onCanvasContextMenu,
   onCanvasDoubleClick,
   className,
+  contentStyle: extraContentStyle,
+  contentData,
   children,
 }: InfiniteCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -592,11 +601,33 @@ function InfiniteCanvas({
     };
   }, [getBounds]);
 
+  // 清晰度：will-change:transform 讓 Chrome 把內容層按「開始動時的倍率」柵格化後只做縮放合成——
+  // 放大後文字/髮絲線是被拉伸的舊點陣（糊）。只在視口變動中保留提示（合成器快），
+  // 停手 160ms 後撤掉並改用 2D transform，讓瀏覽器按當前倍率重新柵格化（清晰）。
+  const [settled, setSettled] = useState(true);
+  const lastViewportRef = useRef(viewport);
+  useEffect(() => {
+    const prev = lastViewportRef.current;
+    lastViewportRef.current = viewport;
+    if (prev.x === viewport.x && prev.y === viewport.y && prev.k === viewport.k) return;
+    setSettled(false);
+    const t = window.setTimeout(() => setSettled(true), 160);
+    return () => window.clearTimeout(t);
+  }, [viewport]);
+
+  // 反向補償變數掛在內容層、會被上千個子元素繼承：每幀改值＝整棵子樹 style recalc（審計 P0-2，佔主線程 28%）。
+  // 移動中按 6% 對數格量化（埠/把手/字級誤差 ≤3%），停手寫回精確值。
+  const varK = settled ? viewport.k : quantizeScale(viewport.k);
   const background = gridBackground(viewport, backgroundMode);
   const contentStyle = {
-    transform: `translate3d(${viewport.x}px, ${viewport.y}px, 0) scale(${viewport.k})`,
-    willChange: "transform",
-    "--canvas-inverse-scale": String(1 / viewport.k),
+    ...extraContentStyle,
+    transform: settled
+      ? `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.k})`
+      : `translate3d(${viewport.x}px, ${viewport.y}px, 0) scale(${viewport.k})`,
+    willChange: settled ? "auto" : "transform",
+    "--canvas-inverse-scale": String(1 / varK),
+    // 1/√k：拆機內容字級用——放大時字在螢幕上溫和變大（與卡片標題保持比例），世界字級仍縮小＝裝得下更多行。
+    "--canvas-inverse-sqrt": String(1 / Math.sqrt(varK)),
   } as React.CSSProperties;
 
   return (
@@ -622,7 +653,7 @@ function InfiniteCanvas({
       onLostPointerCapture={handleLostPointerCapture}
       onContextMenu={handleContextMenu}
     >
-      <div ref={contentRef} className="absolute origin-top-left" style={contentStyle}>
+      <div ref={contentRef} className="absolute origin-top-left" style={contentStyle} {...contentData}>
         {children}
       </div>
       {marqueeRect ? (

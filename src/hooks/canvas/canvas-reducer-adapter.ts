@@ -14,6 +14,7 @@ import {
 } from "@/lib/canvas/reducer";
 import { normalizeCanvasEvent } from "@/lib/canvas/layout";
 import { isNodeContentChange } from "@/lib/canvas/node-versions";
+import { clearShotMediaLinks, invalidatedShotMediaLinks } from "@/lib/canvas/storyboard-invalidation";
 import { CANVAS_NODE_DEFAULT_SIZE, CanvasNodeType } from "@/lib/canvas/types";
 import type {
   CanvasAgentOp,
@@ -277,7 +278,19 @@ export function canvasReducer(state: CanvasReducerState, action: CanvasAction): 
       // 要收緊的前提＝先把這些鍵加進 `layout.ts` 的 `toNodeMetadata`（白名單真源不在本檔）。
       const prev = state.nodes.find((n) => n.id === action.nodeId);
       if (!prev) return state;
-      const patched: CanvasNode = { ...prev, metadata: { ...prev.metadata, ...action.patch } };
+      // W2（2026-09-30）：分鏡內容變更 → 該鏡舊關聯媒體失效。本 op 是分鏡內容 patch 的
+      // **唯一寫入漏斗**（agent 走 agent_ops，進不到這裡）。before 取**合併前**現值；
+      // 要清哪些鍵的唯一依據＝`storyboard-invalidation` 的純函式輸出（不在此擴張範圍）。
+      // patch 顯式帶了新關聯 id 的欄位由該純函式讓路（規則⑤），先清後併不會清掉新值。
+      // 版本帳仍由既有節點版本機制承載（`recordCanvasNodeVersion`），此處只補關聯失效。
+      // 兩次寬化是形狀事實：`CanvasNodeMetadata` 是 interface，無 index signature，
+      // 音軌關聯鍵（dialogueAudioId/…）刻意不在其內（同 WS-審查 approval 的寫法）。
+      const mediaBefore = (prev.metadata ?? {}) as Record<string, unknown>;
+      const invalidated = invalidatedShotMediaLinks(mediaBefore, action.patch as Record<string, unknown>);
+      const patched: CanvasNode = {
+        ...prev,
+        metadata: { ...clearShotMediaLinks(mediaBefore, invalidated), ...action.patch } as CanvasNodeMetadata,
+      };
       const next: CanvasReducerState = {
         ...state,
         nodes: state.nodes.map((n) => (n.id === action.nodeId ? patched : n)),

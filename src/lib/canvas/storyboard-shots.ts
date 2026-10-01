@@ -26,6 +26,8 @@
 // `compactMetadataForAgent` 兩處白名單（真源＝`node-metadata-fields.ts`），漏一端＝
 // 刷新/回舊會話後候選集與星標憑空消失且不報錯（同 sceneCard / storyboardShot 家族病灶）。
 
+import { usableAudioUrl } from "@/lib/agent-output-cards";
+import { normalizeTaskVersions } from "./task-versions";
 import type { CanvasNode, CanvasNodeMetadata, CanvasNodeStatus } from "./types";
 
 // ─────────────────────────────────────────── 值域與上限
@@ -314,6 +316,163 @@ export function shotRerunRequest(node: CanvasNode | undefined): ShotRerunRequest
   const nodeModel = typeof node.metadata?.model === "string" ? node.metadata.model.trim() : "";
   const model = selected?.model ?? (nodeModel || undefined);
   return { nodeId: node.id, shotNumber, prompt, ...(model ? { model } : {}) };
+}
+
+// ─────────────────────────────────────────── 旁白文本 ＋ 對白／旁白雙音軌（2026-09-30）
+
+/**
+ * 分鏡音軌角色：**對白軌**（dialogue，台詞音檔）／**旁白軌**（narration，旁白音檔）。
+ * 兩軌各自獨立、互不覆蓋（同一鏡可同時有對白與旁白）。
+ */
+export type ShotAudioTrackRole = "dialogue" | "narration";
+
+/**
+ * 分鏡音軌綁定後的 metadata patch（鍵名與型別＝**介面凍結**，逐字照用，不改名不改型）。
+ *
+ * `narration` 是旁白**文本**（編劇/agent 寫入，本層只讀不覆蓋）；`dialogueAudioId`／
+ * `narrationAudioId` 是兩軌的**資產 id**；`audioAnchorId` 是**相容鍵**，其值恆等於
+ * `dialogueAudioId || narrationAudioId`（對白軌優先，否則旁白軌；兩軌皆空＝省略鍵）。
+ *
+ * 為何要有 `audioAnchorId`：分鏡生產契約（`storyboard-contract.ts`）宣告了它，17 道門禁的
+ * `audio_anchor_present`／`dialogue_alignment` 逐鏡讀它（`shortdrama-domain/index.ts:448/450`），
+ * 但全庫原本**無生產者**——本層就是它的生產者。四鍵皆為耐久鍵（雙白名單真源
+ * `node-metadata-fields.ts`），否則刷新/回舊會話後音軌與錨靜默消失、門禁永遠不可能過。
+ */
+export interface StoryboardShotAudioMetadata {
+  /** 單一鏡的旁白文本。 */
+  narration?: string;
+  /** 該鏡對白音檔的資產 id。 */
+  dialogueAudioId?: string;
+  /** 該鏡旁白音檔的資產 id。 */
+  narrationAudioId?: string;
+  /** 音軌錨（相容鍵）＝`dialogueAudioId || narrationAudioId`；兩軌皆空時缺席。 */
+  audioAnchorId?: string;
+}
+
+/**
+ * 一次音軌變更的結果（**誠實拒絕**，照 `ShotCandidateMutation` 的形）：
+ * `accepted:false` 時 `patch` ＝輸入狀態的等值新物件（呼叫端不會拿到可被誤改的舊參考）。
+ */
+export interface ShotAudioMutation {
+  patch: StoryboardShotAudioMetadata;
+  accepted: boolean;
+  /** 未被接受的原因（accepted=true 時缺席）。 */
+  reason?: "invalid-audio";
+}
+
+/** 讀出 metadata 上兩軌的**可用**音檔（判準＝既有輪子 `usableAudioUrl`，不另立第二套）。 */
+function readAudioTracks(metadata: CanvasNodeMetadata | undefined): {
+  dialogueAudioId?: string;
+  narrationAudioId?: string;
+} {
+  const bag = (metadata ?? {}) as Record<string, unknown>;
+  const dialogueAudioId = usableAudioUrl(bag.dialogueAudioId);
+  const narrationAudioId = usableAudioUrl(bag.narrationAudioId);
+  return {
+    ...(dialogueAudioId ? { dialogueAudioId } : {}),
+    ...(narrationAudioId ? { narrationAudioId } : {}),
+  };
+}
+
+/** 兩軌 → patch，並依規則重算錨（對白軌優先；兩軌皆空＝不寫 `audioAnchorId` 空殼鍵）。 */
+function audioPatchWithAnchor(tracks: { dialogueAudioId?: string; narrationAudioId?: string }): StoryboardShotAudioMetadata {
+  const anchor = tracks.dialogueAudioId || tracks.narrationAudioId;
+  return { ...tracks, ...(anchor ? { audioAnchorId: anchor } : {}) };
+}
+
+/**
+ * 綁定某軌音檔（純函式，**不動輸入**）。
+ *
+ * 契約：
+ *   · 值先過**既有輪子** `usableAudioUrl`（認 `.mp3/.m4a/.wav/...` 與 `data:audio/*`）；
+ *     非音頻值（`.png` 圖 URL／無副檔名裸 URL／空字串）→ `{ accepted:false, reason:"invalid-audio" }`
+ *     （**不冒充已綁定**，與「不建空殼音頻卡」同一姿態）。
+ *   · 綁定一軌不動另一軌；`audioAnchorId` 依 `dialogueAudioId || narrationAudioId` 重算。
+ */
+export function bindShotAudioTrack(
+  metadata: CanvasNodeMetadata | undefined,
+  role: ShotAudioTrackRole,
+  audio: string,
+): ShotAudioMutation {
+  const tracks = readAudioTracks(metadata);
+  const clean = usableAudioUrl(audio);
+  if (!clean) return { patch: audioPatchWithAnchor(tracks), accepted: false, reason: "invalid-audio" };
+  const next = role === "dialogue" ? { ...tracks, dialogueAudioId: clean } : { ...tracks, narrationAudioId: clean };
+  return { patch: audioPatchWithAnchor(next), accepted: true };
+}
+
+/**
+ * 清除某軌（純函式，**不動輸入**）：移除該軌後 `audioAnchorId` 依剩餘軌重算；
+ * 清除不存在的軌＝合法 no-op（`accepted:true`）；兩軌皆清空＝不寫 `audioAnchorId`。
+ * 錨**不再指向被清掉的那軌**，也不會留著懸空值。
+ */
+export function clearShotAudioTrack(
+  metadata: CanvasNodeMetadata | undefined,
+  role: ShotAudioTrackRole,
+): ShotAudioMutation {
+  const tracks = readAudioTracks(metadata);
+  if (role === "dialogue") delete tracks.dialogueAudioId;
+  else delete tracks.narrationAudioId;
+  return { patch: audioPatchWithAnchor(tracks), accepted: true };
+}
+
+// ─────────────────────────────────────────── 單鏡媒體就緒（引導面板進度推導，2026-09-30）
+
+/**
+ * 單一鏡的媒體就緒狀態：**純投影**，三條都只由「該鏡自己的 metadata 裡真的有的東西」
+ * 推導——**不往外撈別的節點**（節點本體圖、連線鄰居一律不看；那是審查面板
+ * `reviewShotsFromNodes` 的投影職責，本函式不越界、也不另立第二套狀態語義）。
+ */
+export interface ShotMediaReadiness {
+  readonly hasImage: boolean;
+  readonly hasVideo: boolean;
+  readonly hasAudio: boolean;
+}
+
+/** 值是否為 trim 後非空的字串（本檔既有的「空字串／純空白不算有值」紀律）。 */
+function hasNonEmptyText(v: unknown): boolean {
+  return typeof v === "string" && v.trim() !== "";
+}
+
+/**
+ * 單鏡媒體就緒（判準寫死在這裡，逐條說明為何這樣判）：
+ *
+ *   · `hasAudio` ← 三支**音軌鍵**（`dialogueAudioId`／`narrationAudioId`／`audioAnchorId`）
+ *     任一 trim 後非空。判準故意是「非空」而非音頻副檔名白名單：這三鍵在型別層是
+ *     **資產 id**（不保證是 URL），寫入側 `bindShotAudioTrack` 已用 `usableAudioUrl`
+ *     把過一次，讀取端再拿副檔名尺去卡會把合法資產 id 誤判成「沒配音」。
+ *     **`narration`（旁白文本）不算**——文本是編劇輸入、是 TTS 的原料，不是配音交付物，
+ *     拿文本冒充配音就是謊報（`tts-multiline-narration-p2-bug`：旁白必須逐鏡真的合成出音軌）。
+ *
+ *   · `hasVideo` ← `taskVersions`（`./task-versions.ts`）中任一條帶 `main_video` 標籤
+ *     **且 `url` 非空**的任務版本。這是本庫**唯一**的 per-shot 圖/影區分語義（`TASK_TAGS`
+ *     ＝`main_image`/`main_video`）⇒ 影片**只認有影片語義的欄位**。無 `url` 的版本＝只有
+ *     計畫值、尚無實際產物，不算就緒（計畫值不冒充實際產物）。**絕不用圖冒充影片**。
+ *     現場註記（與原任務假設不符，如實記錄）：本 repo **並非**「無 per-shot 影片就緒判據」
+ *     ——`main_video` 就是既有判據，缺的是**生產者**（全庫尚無 `taskVersions` 寫入者），
+ *     故 `hasVideo` 在有該版任務時會如實為 true，不是恆 false。
+ *
+ *   · `hasImage` ← 兩條**既有輪子**的並集：
+ *       ① `taskVersions` 任一條帶 `main_image` 標籤且 `url` 非空（真·圖交付物）；
+ *       ② `shotCandidates`（本檔）候選集**非空且有採用稿**（星標 `selectedId`）。
+ *     ②的理由：候選形狀（`StoryboardShotCandidate`）**本來就沒有圖/影之分**（`url` 欄的
+ *     註釋逐字＝「交付物 URL（視頻/圖）」）——**不發明新欄位**（禁自造輪子），退回本檔既有的
+ *     「星標＝採用稿」語義，只當「本鏡有採用稿」的證據；有候選但尚未星標（無採用稿）不算。
+ */
+export function shotMediaReadiness(metadata: Record<string, unknown>): ShotMediaReadiness {
+  const bag = metadata ?? {};
+  const hasAudio =
+    hasNonEmptyText(bag.dialogueAudioId) ||
+    hasNonEmptyText(bag.narrationAudioId) ||
+    hasNonEmptyText(bag.audioAnchorId);
+
+  const versions = normalizeTaskVersions(bag.taskVersions);
+  const hasDeliveredVersion = (tag: "main_image" | "main_video"): boolean =>
+    !!versions?.items.some((entry) => entry.tags.includes(tag) && hasNonEmptyText(entry.url));
+
+  const hasImage = hasDeliveredVersion("main_image") || !!selectedShotCandidate(normalizeShotCandidates(bag.shotCandidates));
+
+  return { hasImage, hasVideo: hasDeliveredVersion("main_video"), hasAudio };
 }
 
 // ─────────────────────────────────────────── 分鏡增刪複製重排

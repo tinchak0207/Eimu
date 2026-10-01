@@ -27,12 +27,13 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import { X } from "lucide-react";
 import type { UseCanvasChatReturn } from "@/hooks/use-canvas-chat";
-import { CanvasNodeType, type CanvasConnection, type CanvasNode } from "@/lib/canvas/types";
+import { CanvasNodeType, type CanvasConnection, type CanvasNode, type CanvasViewport } from "@/lib/canvas/types";
 import type { CanvasGenerationReference } from "@/lib/canvas/semantic-nodes";
 import { bezierPath } from "@/lib/canvas/layout";
 import { InfiniteCanvas } from "./InfiniteCanvas";
 import { CanvasConnections } from "./CanvasConnections";
-import { CanvasNodeView } from "./CanvasNodeView";
+import { CanvasNodeViewMemo } from "./CanvasNodeView";
+import { useLiveViewport } from "./embed/use-live-viewport";
 import { CanvasMiniMap } from "./CanvasMiniMap";
 import { CanvasContextMenu, type CanvasMenuItem } from "./CanvasContextMenu";
 import { CanvasImageEditorDialog, type CanvasImageEditMode, type CanvasImageEditResult } from "./CanvasImageEditorDialog";
@@ -71,6 +72,29 @@ import { buildCanvasEmbedMenuItems } from "./embed/context-menu-items";
 import { CanvasEmbedOverlays } from "./embed/CanvasEmbedOverlays";
 import { CHARACTER_CARD_KIND_LABEL } from "@/lib/character-cards";
 import { shotEntityCardIdsFromMetadata } from "./CanvasNodePromptPanel";
+import {
+  centerViewport,
+  easeOutCubic,
+  engineeringFocusViewport,
+  fitStageViewport,
+  gatherOffsets,
+  gatherVisuals,
+  GATHER_RANGE,
+  hudLayout,
+  LOD_TARGET_SCALE,
+  lodBlend,
+  quantizeScale,
+  nextLod,
+  summarizeStages,
+  zoomAroundCenter,
+  type CanvasLod,
+  type CanvasStageId,
+  type CanvasStageSummary,
+} from "@/lib/canvas/lod";
+import { useCameraFlight } from "./embed/use-camera-flight";
+import type { InspectInput } from "./node-view/node-inspect";
+import { CanvasStageOverview } from "./CanvasStageOverview";
+import { CanvasEngineeringPanel } from "./CanvasEngineeringPanel";
 
 export interface CanvasEmbedProps {
   /** useCanvasChat 的完整 return（chat 部分由宿主另外用，這裡只用畫布部分）。 */
@@ -102,7 +126,51 @@ function usePrefersReducedMotion(): boolean {
   return reduced;
 }
 
-export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false, onToggleExpand }: CanvasEmbedProps) {
+/** 語義縮放工程層只在 ≥768px 視窗開放（手機不出工程透析）。 */
+function useWideViewport(): boolean {
+  const [wide, setWide] = useState(true);
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mq = window.matchMedia("(min-width: 768px)");
+    const onChange = () => setWide(mq.matches);
+    setWide(mq.matches);
+    if (mq.addEventListener) mq.addEventListener("change", onChange);
+    else mq.addListener(onChange);
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener("change", onChange);
+      else mq.removeListener(onChange);
+    };
+  }, []);
+  return wide;
+}
+
+export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expanded = false, onToggleExpand }: CanvasEmbedProps) {
+  // 效能 P0-1（2026-10-01）：每幀視口只活在本地，停手才回寫宿主——宿主在 ImagePlayground 根，
+  // 每幀 setState 等於整站重渲染。下游一律讀這個 canvas（viewport/setViewport 是 live 版）。
+  const live = useLiveViewport(hostCanvas.viewport, hostCanvas.setViewport);
+  const { flush: flushViewport } = live;
+  const hostFitView = hostCanvas.fitView;
+  const hostCenterOn = hostCanvas.centerOn;
+  const liveFitView = useCallback<UseCanvasChatReturn["fitView"]>(
+    (width, height) => {
+      flushViewport();
+      hostFitView(width, height);
+    },
+    [flushViewport, hostFitView],
+  );
+  const liveCenterOn = useCallback<UseCanvasChatReturn["centerOn"]>(
+    (world, width, height) => {
+      flushViewport();
+      hostCenterOn(world, width, height);
+    },
+    [flushViewport, hostCenterOn],
+  );
+  const canvas = useMemo<UseCanvasChatReturn>(
+    () => ({ ...hostCanvas, viewport: live.viewport, setViewport: live.setViewport, fitView: liveFitView, centerOn: liveCenterOn }),
+    [hostCanvas, live.viewport, live.setViewport, liveFitView, liveCenterOn],
+  );
+  // 移動中給節點量化倍率（6% 一格）：memo 過的節點卡不必每幀重渲染；停手回到精確值（拖拽換算用）。
+  const nodeScale = live.moving ? quantizeScale(canvas.viewport.k) : canvas.viewport.k;
   const containerRef = useRef<HTMLDivElement>(null);
   const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
   const viewportSizeRef = useRef(viewportSize);
@@ -127,10 +195,160 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
   const [creationFlowOpen, setCreationFlowOpen] = useState(false);
   // REQ-B2 團隊資產空間：項目資產庫面板（右側滑入，同資源庫/角色卡同款彈層語彙）。
   const [projectAssetsOpen, setProjectAssetsOpen] = useState(false);
+  // 登入態只在面板打開時讀一次（buildAuthHeaders 讀 cookie＋localStorage，放 render 裡＝每幀一次）。
+  const isLoggedIn = useMemo(() => projectAssetsOpen && Boolean(buildAuthHeaders()), [projectAssetsOpen]);
+  const libraryLoggedIn = useMemo(() => libraryOpen && Boolean(buildAuthHeaders()), [libraryOpen]);
   // WS-審查（2026-09-24）：資產／分鏡審查面板（null＝關）。兩個面共用一顆畫布工具列入口。
   const [reviewPanel, setReviewPanel] = useState<ReviewPanelKind | null>(null);
   // 縮略圖預設收合（2026-09-27）：常駐會壓住縮放條與右側節點，入口在縮放膠囊。
   const [minimapOpen, setMinimapOpen] = useState(false);
+  // 語義縮放（2026-09-30）：k → LOD（帶遲滯）；ref 存上一層，只在換層時 setState。
+  const allowEngineering = useWideViewport();
+  const [lod, setLod] = useState<CanvasLod>(2);
+  const lodRef = useRef<CanvasLod>(2);
+  const [engineeringNodeId, setEngineeringNodeId] = useState<string | null>(null);
+  useEffect(() => {
+    const next = nextLod(lodRef.current, canvas.viewport.k, { allowEngineering });
+    if (next === lodRef.current) return;
+    lodRef.current = next;
+    setLod(next);
+    // 鳥瞰層不掛載節點：內嵌 prompt 面板跟著收掉。
+    if (next === 1) setPromptPanelNodeId(null);
+  }, [canvas.viewport.k, allowEngineering]);
+  const stageSummaries = useMemo(() => summarizeStages(canvas.nodes), [canvas.nodes]);
+  const gatherOffsetMap = useMemo(() => gatherOffsets(canvas.nodes, stageSummaries), [canvas.nodes, stageSummaries]);
+  // 連續轉場係數（k 是唯一真源）：每幀寫進內容層 CSS 變數，節點/連線靠 CSS 反應。
+  const blend = lodBlend(canvas.viewport.k);
+  const gatherRaw = blend.gather;
+  const gatherEased = easeOutCubic(gatherRaw);
+  const xray = allowEngineering ? blend.xray : 0;
+  const gatherLook = gatherVisuals(gatherRaw);
+  // 拆機內容「输入」段：每顆節點的入邊來源（連線/節點變了才重算；Map 值引用穩定）。
+  const boardInputMap = useMemo(() => {
+    const byId = new Map(canvas.nodes.map((n) => [n.id, n]));
+    const map = new Map<string, InspectInput[]>();
+    for (const c of canvas.connections) {
+      const src = byId.get(c.fromNodeId);
+      if (!src) continue;
+      const list = map.get(c.toNodeId) ?? [];
+      list.push({ id: src.id, label: src.title, type: src.type });
+      map.set(c.toNodeId, list);
+    }
+    return map;
+  }, [canvas.nodes, canvas.connections]);
+  // 只給「透析帶內＋在視野裡」的節點掛拆機內容：放大時視野裡本來就沒幾張卡，成本可控。
+  const xrayOn = xray > 0;
+  const boardNodeIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (!xrayOn || viewportSize.width <= 0) return ids;
+    const { x, y, k } = canvas.viewport;
+    const margin = 80 / k;
+    const wx0 = -x / k - margin;
+    const wy0 = -y / k - margin;
+    const wx1 = (viewportSize.width - x) / k + margin;
+    const wy1 = (viewportSize.height - y) / k + margin;
+    for (const n of canvas.nodes) {
+      if (n.position.x + n.width < wx0 || n.position.x > wx1 || n.position.y + n.height < wy0 || n.position.y > wy1) continue;
+      ids.add(n.id);
+    }
+    return ids;
+  }, [xrayOn, canvas.viewport, viewportSize, canvas.nodes]);
+  // 鳥瞰收束後節點會卸載；再散開時跳過首次進場的 stagger（不然節點會「排隊」出現）。
+  const nodesRemountedRef = useRef(false);
+  const fullyGathered = gatherRaw >= 1;
+  useEffect(() => {
+    if (fullyGathered) nodesRemountedRef.current = true;
+  }, [fullyGathered]);
+
+  // 相機飛行：三段按鈕／點階段卡／待審 CTA／透析全走這裡（飛行途中轉場自動發生）。
+  const viewportRef = live.viewportRef;
+  const { flyTo } = useCameraFlight({
+    setViewport: canvas.setViewport,
+    viewportRef,
+    sizeRef: viewportSizeRef,
+    containerRef,
+    reduceMotion,
+  });
+  // 飛向某階段途中：其他階段節點壓暗；落地後 300ms 恢復（被使用者中止也照時限恢復，不殘留）。
+  const [focusStage, setFocusStage] = useState<CanvasStageId | null>(null);
+  const focusStageTimerRef = useRef<number | null>(null);
+  const holdStageFocus = useCallback((stage: CanvasStageId, ms: number) => {
+    setFocusStage(stage);
+    if (focusStageTimerRef.current !== null) window.clearTimeout(focusStageTimerRef.current);
+    focusStageTimerRef.current = window.setTimeout(() => {
+      focusStageTimerRef.current = null;
+      setFocusStage(null);
+    }, ms);
+  }, []);
+  useEffect(
+    () => () => {
+      if (focusStageTimerRef.current !== null) window.clearTimeout(focusStageTimerRef.current);
+    },
+    [],
+  );
+  const STAGE_FLIGHT_MS = 820;
+  /** 三層按鈕的相機飛行：穿帶飛行有帶內減速，820ms 讓形變本身約 600ms。 */
+  const LOD_FLIGHT_MS = 820;
+  const handleSelectStage = useCallback(
+    (stage: CanvasStageSummary) => {
+      const size = viewportSizeRef.current;
+      if (!stage.bbox || size.width <= 0) return;
+      holdStageFocus(stage.id, STAGE_FLIGHT_MS + 300);
+      // 先無感對位：鳥瞰態畫布上只有週期點陣，把階段質心平移到被點的卡片中心底下（k 不變），
+      // 起飛後卡片沿直線收進質心、質心沿直線走到視口中心——不會先往節點真實位置繞一下。
+      // k 同時無感跳到聚合帶下緣（鳥瞰態 HUD 不隨 k 變）：省掉「卡片原地乾等 k 爬進帶」的空轉。
+      const current = viewportRef.current;
+      const slot = hudLayout(size).slots[stage.id - 1];
+      const k0 = Math.max(current.k, GATHER_RANGE.end - 0.004);
+      const from =
+        stage.centroid && slot
+          ? {
+              x: slot.x + slot.width / 2 - stage.centroid.x * k0,
+              y: slot.y + slot.height / 2 - stage.centroid.y * k0,
+              k: k0,
+            }
+          : undefined;
+      flyTo(fitStageViewport(stage.bbox, size), { duration: STAGE_FLIGHT_MS, from });
+    },
+    [flyTo, holdStageFocus],
+  );
+  const handleReviewStage = useCallback(
+    (stage: CanvasStageSummary) => {
+      const id = stage.firstPendingNodeId;
+      const target = id ? canvasStateRef.current.nodes.find((n) => n.id === id) : undefined;
+      const size = viewportSizeRef.current;
+      if (!target || size.width <= 0) return;
+      holdStageFocus(stage.id, STAGE_FLIGHT_MS + 300);
+      flyTo(
+        centerViewport({ x: target.position.x + target.width / 2, y: target.position.y + target.height / 2 }, 0.7, size),
+        { duration: STAGE_FLIGHT_MS, onDone: () => canvasStateRef.current.selectNode(target.id) },
+      );
+    },
+    [flyTo, holdStageFocus],
+  );
+  const handleSelectLod = useCallback(
+    (level: CanvasLod) => {
+      const size = viewportSizeRef.current;
+      if (size.width <= 0) return;
+      flyTo(zoomAroundCenter(viewportRef.current, LOD_TARGET_SCALE[level], size), { duration: LOD_FLIGHT_MS });
+    },
+    [flyTo],
+  );
+  // 透析：開面板＋把卡片飛到面板左側可見區正中，同時進 focus 模式。
+  const openEngineering = useCallback(
+    (nodeId: string) => {
+      setEngineeringNodeId(nodeId);
+      const target = canvasStateRef.current.nodes.find((n) => n.id === nodeId);
+      const size = viewportSizeRef.current;
+      if (!target || size.width <= 0) return;
+      // 面板 fixed 貼視窗右緣（w-[26rem]、right 0.75rem）：換算成畫布座標，卡片置中於面板左側可見區。
+      const rect = containerRef.current?.getBoundingClientRect();
+      const panelLeft = window.innerWidth - 12 - Math.min(416, window.innerWidth - 24);
+      const free = rect ? { left: 16, right: Math.max(160, Math.min(size.width, panelLeft - rect.left) - 28) } : undefined;
+      flyTo(engineeringFocusViewport(target, size, viewportRef.current.k, free), { duration: 560 });
+    },
+    [flyTo],
+  );
   // 互動檔位（決策 1/2）：只有協作檔才是停點；全自動檔下審查面板可看可改、不阻塞流程。
   const [interactionMode, setInteractionMode] = useState<AgentInteractionMode>(DEFAULT_AGENT_SETTINGS.interaction_mode);
   const [agentAutoApprove, setAgentAutoApprove] = useState(false);
@@ -499,6 +717,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
         downloadBatch,
         handleDeleteNode,
         deleteSelected,
+        openEngineering,
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [menu, nodeById, childToParent, visibleNodes, upscalingIds, saveNodeAsCard],
@@ -807,6 +1026,18 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
   }, [canvas.pendingAgentOps, agentAutoApprove, approveAgentOps]);
 
   const hasNodes = canvas.nodes.length > 0;
+  // 透析卡的即時螢幕矩形（client 座標）：面板 FLIP 起訖點與光束起點，飛行途中每幀跟著走。
+  const engineeringNode = engineeringNodeId ? nodeById.get(engineeringNodeId) ?? null : null;
+  const containerBox = engineeringNode ? containerRef.current?.getBoundingClientRect() : undefined;
+  const engineeringAnchor =
+    engineeringNode && containerBox
+      ? {
+          left: containerBox.left + canvas.viewport.x + engineeringNode.position.x * canvas.viewport.k,
+          top: containerBox.top + canvas.viewport.y + engineeringNode.position.y * canvas.viewport.k,
+          width: engineeringNode.width * canvas.viewport.k,
+          height: engineeringNode.height * canvas.viewport.k,
+        }
+      : null;
   const editorNode = editor ? nodeById.get(editor.nodeId) : undefined;
   const editorUrl = imageUrlOf(editorNode);
   const pendingOps = canvas.pendingAgentOps;
@@ -840,8 +1071,31 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
           onMarqueeSelect={handleMarqueeSelect}
           onCanvasContextMenu={openCanvasMenu}
           onCanvasDoubleClick={(screen, world) => setCreateMenu({ position: screen, world })}
+          contentStyle={
+            {
+              "--lod-g": String(gatherLook.move),
+              "--lod-node-scale": String(gatherLook.scale),
+              "--lod-node-opacity": String(gatherLook.opacity),
+              "--lod-blur": `${gatherLook.blur}px`,
+              "--lod-xray": String(xray),
+            } as React.CSSProperties
+          }
+          contentData={{
+            "data-lod-gathering": gatherEased > 0 ? "" : undefined,
+            "data-lod-blur": gatherLook.blur > 0 && canvas.nodes.length <= 150 ? "" : undefined,
+            "data-lod-inert": gatherEased > 0.35 ? "" : undefined,
+            "data-focus-stage": focusStage !== null ? String(focusStage) : undefined,
+            "data-eng-focus": engineeringNodeId ? "" : undefined,
+            // 拆機：卡面（背板）開始掀；過半後卡面不再吃指針，點擊落到板上。
+            "data-lod-xray": xray > 0 ? "" : undefined,
+            "data-lod-xray-open": xray > 0.6 ? "" : undefined,
+          }}
         >
+          {/* LOD 1 鳥瞰層：完全收束（gather=1）才卸載節點與連線；收束途中它們正往階段質心飛。 */}
+          {gatherRaw < 1 && (
+          <>
           <CanvasConnections
+            interactive={gatherEased === 0}
             nodes={canvas.nodes}
             connections={canvas.connections}
             activeNodeId={highlightNodeId}
@@ -863,10 +1117,10 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
             const isWorkflowNode = !!(node.metadata?.workflow_id && node.metadata?.session_id);
             const primaryChild = node.batchPrimaryImageId ? nodeById.get(node.batchPrimaryImageId) : undefined;
             return (
-              <CanvasNodeView
+              <CanvasNodeViewMemo
                 key={node.id}
                 node={node}
-                scale={canvas.viewport.k}
+                scale={nodeScale}
                 selected={selectedIds.has(node.id) || canvas.selectedNodeId === node.id}
                 adjacent={adjacentIds.has(node.id)}
                 onSelect={handleSelectNode}
@@ -878,7 +1132,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
                 onDelete={handleDeleteNode}
                 onRerun={isWorkflowNode ? (id) => void handleRerun(id) : undefined}
                 onEdit={isWorkflowNode ? (id, patch) => void handleEditWorkflowNode(id, patch) : undefined}
-                enterDelay={reduceMotion ? 0 : Math.min(index, 8) * ENTER_STAGGER_MS}
+                enterDelay={reduceMotion || nodesRemountedRef.current ? 0 : Math.min(index, 8) * ENTER_STAGGER_MS}
                 onEditPrompt={(nodeId) => setPromptPanelNodeId(nodeId)}
                 promptPanelOpen={promptPanelNodeId === node.id}
                 onClosePromptPanel={() => setPromptPanelNodeId(null)}
@@ -922,6 +1176,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
                 onRename={canvas.renameNode}
                 onUpdateText={(nid, text) => canvas.patchNodeMetadata(nid, { content: text })}
                 onUpdateReferenceRole={(nid, role) => canvas.patchNodeMetadata(nid, { referenceRole: role })}
+                onPatchMetadata={(nid, patch) => canvas.patchNodeMetadata(nid, patch)}
                 onRetry={
                   node.metadata?.status === "error"
                     ? isWorkflowNode
@@ -933,10 +1188,34 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
                         : undefined // 沒參數就不渲染按鈕，不出「必定失敗」的死按鈕
                     : undefined
                 }
+                lod={lod}
+                onOpenEngineering={openEngineering}
+                gatherOffset={gatherOffsetMap.get(node.id)}
+                stageId={gatherOffsetMap.get(node.id)?.stage ?? null}
+                xrayVisible={boardNodeIds.has(node.id)}
+                boardInputs={boardInputMap.get(node.id)}
+                engineeringFocused={engineeringNodeId === node.id}
               />
             );
           })}
+          </>
+          )}
         </InfiniteCanvas>
+
+        {hasNodes && (
+          <CanvasStageOverview
+            stages={stageSummaries}
+            gather={gatherRaw}
+            viewport={canvas.viewport}
+            size={viewportSize}
+            interactive={lod === 1}
+            wide={allowEngineering}
+            reduceMotion={reduceMotion}
+            projectTitle={canvas.projectTitle}
+            onSelectStage={handleSelectStage}
+            onReviewStage={handleReviewStage}
+          />
+        )}
 
         {canvas.nodes.length > 1 && expanded && minimapOpen && (
           <CanvasMiniMap
@@ -973,6 +1252,9 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
             reviewActive={reviewPanel !== null}
             reviewPendingCount={reviewPendingCount}
             onToggleReview={() => setReviewPanel((prev) => (prev === "asset" ? null : "asset"))}
+            lod={lod}
+            allowEngineering={allowEngineering}
+            onSelectLod={handleSelectLod}
             className="absolute right-[calc(1rem+env(safe-area-inset-right,0px))] top-1/2 z-10 -translate-y-1/2 max-md:hidden"
           />
         )}
@@ -1161,7 +1443,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
         open={projectAssetsOpen}
         onClose={() => setProjectAssetsOpen(false)}
         projectId={canvas.getProjectId()}
-        isLoggedIn={Boolean(buildAuthHeaders())}
+        isLoggedIn={isLoggedIn}
         onCopyChange={canvas.applyMountCopyChange}
       />
       {/* WS-審查（2026-09-24）：資產／分鏡審查面板（同一顆畫布入口 + 步驟條的外開介面；
@@ -1179,6 +1461,16 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
         onApproveAll={handleApproveAllAssets}
         onSwitchToShots={() => setReviewPanel("shot")}
       />
+      {/* 語義縮放 LOD 3：工程透析面板（節點被刪 → nodeById 取不到即不渲染） */}
+      {engineeringNode && (
+        <CanvasEngineeringPanel
+          key={engineeringNode.id}
+          node={engineeringNode}
+          anchor={engineeringAnchor}
+          reduceMotion={reduceMotion}
+          onClose={() => setEngineeringNodeId(null)}
+        />
+      )}
       <ShotReviewPanel
         open={reviewPanel === "shot"}
         onClose={() => setReviewPanel(null)}
@@ -1236,10 +1528,7 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
               }
             : undefined
         }
-        isLoggedIn={(() => {
-          const headers = buildAuthHeaders();
-          return Boolean(headers);
-        })()}
+        isLoggedIn={libraryLoggedIn}
       />
       {/* LoRA 庫（2026-08-27 自專業工作站遷入）：同款右側滑入面板，選中即注入生成 */}
       {loraPanelOpen && (
@@ -1291,3 +1580,4 @@ export function CanvasEmbed({ canvas, height = "100%", onClose, expanded = false
     </>
   );
 }
+

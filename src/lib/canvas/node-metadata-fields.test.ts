@@ -108,6 +108,12 @@ const SAMPLE_METADATA_BY_KEY: Record<string, Record<string, unknown>> = {
   directorStageId: { directorStageId: "stage-1" },
   shotId: { shotId: "001" },
   storyboardShot: { storyboardShot: SHOT },
+  // 2026-09-30 單鏡旁白文本＋對白／旁白雙音軌（介面凍結四鍵；audioAnchorId 是相容錨，
+  // 其生產者規則＝dialogueAudioId || narrationAudioId，樣本取單軌形故值取對白軌）。
+  narration: { narration: "她推开门，雨声灌进走廊。" },
+  dialogueAudioId: { dialogueAudioId: "https://cdn.example.com/line-007.mp3" },
+  narrationAudioId: { narrationAudioId: "https://cdn.example.com/vo-007.mp3" },
+  audioAnchorId: { audioAnchorId: "https://cdn.example.com/line-007.mp3" },
   storyboardScene: { storyboardScene: { sceneName: "旧宅", shotCount: 1 } },
   characterCardIds: { characterCardIds: ["card-a"] },
   sceneCardIds: { sceneCardIds: ["card-b"] },
@@ -347,6 +353,19 @@ test("分鏡欄族走 storyboard-contract 的壓縮（真值穿透：長欄被�
   assert.ok(shot, "分鏡整族必須存活（漏一端＝刷新後空殼）");
   assert.equal(shot.shotNumber, "001");
   assert.ok(typeof shot.scriptContent === "string" && (shot.scriptContent as string).length < long.length, "長欄真的被壓縮");
+});
+
+test("單鏡旁白＋雙音軌四鍵：真往復存活（漏一端＝刷新後音軌與錨消失，門禁 audio_anchor_present/dialogue_alignment 卡死）", () => {
+  const restored = roundTrip({
+    narration: "她推开门，雨声灌进走廊。",
+    dialogueAudioId: "https://cdn.example.com/line-007.mp3",
+    narrationAudioId: "https://cdn.example.com/vo-007.mp3",
+    audioAnchorId: "https://cdn.example.com/line-007.mp3",
+  });
+  assert.equal(restored.narration, "她推开门，雨声灌进走廊。");
+  assert.equal(restored.dialogueAudioId, "https://cdn.example.com/line-007.mp3");
+  assert.equal(restored.narrationAudioId, "https://cdn.example.com/vo-007.mp3");
+  assert.equal(restored.audioAnchorId, "https://cdn.example.com/line-007.mp3");
 });
 
 // ─────────────────────────────────────────── ⑤ 反向：排除清單不能吃掉活鍵

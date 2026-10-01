@@ -285,6 +285,26 @@ export interface CanvasNodeMetadata {
    * `canvas-chat-types.compactMetadataForAgent` 任一處＝刷新/回舊會話後版本史與採用稿消失。
    */
   taskVersions?: TaskVersionSet;
+  // ── 單鏡旁白文本 ＋ 對白／旁白雙音軌（2026-09-30；`audioAnchorId` 的生產者）──
+  /**
+   * 單鏡旁白**文本**（編劇/agent 寫入；`storyboard-shots.bindShotAudioTrack` 只讀不覆蓋）。
+   * **不是音檔**：它是 TTS 逐鏡合成的輸入，不構成「配音就緒」。
+   * **雙白名單**：與 `shotCandidates` 同族鐵律（真源 `node-metadata-fields.ts`）——
+   * 漏一端＝刷新/回舊會話後旁白文本消失，逐鏡 TTS 無輸入。
+   */
+  narration?: string;
+  /**
+   * 該鏡對白音檔的資產 id（音軌錨 `audioAnchorId` 的優先來源）。
+   * **雙白名單**：與 `narration` 同族——漏一端＝重載後對白軌消失。
+   */
+  dialogueAudioId?: string;
+  /** 該鏡旁白音檔的資產 id（無對白軌時為錨）。白名單規則同 `dialogueAudioId`。 */
+  narrationAudioId?: string;
+  /**
+   * 音軌錨（**相容鍵**）＝`dialogueAudioId || narrationAudioId`；門禁
+   * `audio_anchor_present`/`dialogue_alignment` 逐鏡讀它。白名單規則同 `dialogueAudioId`。
+   */
+  audioAnchorId?: string;
   // ── 分鏡實體（2026-09-15 刀 2；AID 21 欄契約，MIT）──
   /**
    * 一鏡（AID 21 欄契約，`src/lib/storyboard-contract.ts`）：掛在 Group 節點的子節點。

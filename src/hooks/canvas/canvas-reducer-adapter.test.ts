@@ -7,7 +7,8 @@ import assert from "node:assert/strict";
 import { canvasReducer } from "./canvas-reducer-adapter";
 import { CANVAS_INITIAL_STATE, type CanvasReducerState } from "@/lib/canvas/reducer";
 import type { AgentSseEvent } from "@/lib/agent-chat-types";
-import { CanvasNodeType, type CanvasNode } from "@/lib/canvas/types";
+import { normalizeStoryboardShot } from "@/lib/storyboard-contract";
+import { CanvasNodeType, type CanvasNode, type CanvasNodeMetadata } from "@/lib/canvas/types";
 
 // ── fixtures
 
@@ -292,6 +293,101 @@ test("patch_metadata：補丁合併進 metadata", () => {
   const m = s.nodes.find((n) => n.id === "a")?.metadata;
   assert.equal(m?.status, "loading");
   assert.deepEqual(m?.referenceNodeIds, ["b"]); // 既有欄位保留
+});
+
+// ── 19b. patch_metadata × 分鏡媒體關聯失效（W2，2026-09-30 接線到本漏斗）
+//
+// 真行為斷言：驅動 reducer 後看**結果 state 上實際存活哪些關聯鍵**（不是源碼字串掃描）。
+// 分鏡節點真形狀：內容在巢狀 `storyboardShot`（21 欄），關聯鍵（shotCandidates／
+// dialogueAudioId／narrationAudioId／audioAnchorId）在 metadata 頂層。
+
+/** 一顆「媒體已備妥」的分鏡節點（所有關聯都有值）。 */
+function shotNode(id: string, over: Record<string, unknown> = {}): CanvasNode {
+  return node(id, {
+    metadata: {
+      storyboardShot: normalizeStoryboardShot({
+        shotNumber: "001",
+        visualDescription: "wide establishing shot",
+        dialogue: "hello there",
+        shotSize: "WS",
+      }),
+      prompt: "painter prompt v1",
+      narration: "narration v1",
+      shotCandidates: { items: [{ id: "c1", prompt: "candidate prompt" }], selectedId: "c1" },
+      dialogueAudioId: "dlg-audio-1",
+      narrationAudioId: "nar-audio-1",
+      audioAnchorId: "anchor-1",
+      ...over,
+    } as CanvasNodeMetadata,
+  });
+}
+
+function shotState(over: Record<string, unknown> = {}): CanvasReducerState {
+  return { units: [], nodes: [shotNode("s", over)], connections: [] };
+}
+
+/** 結果 state 上該節點的 metadata（寬化袋子讀——音軌關聯鍵不在 interface 內）。 */
+function shotMetadata(s: CanvasReducerState): Record<string, unknown> {
+  const n = s.nodes.find((x) => x.id === "s");
+  assert.ok(n, "節點 s 應仍在");
+  return (n.metadata ?? {}) as Record<string, unknown>;
+}
+
+test("patch_metadata:改 dialogue 經漏斗後 dialogueAudioId 真的不見（未變更關聯原樣）", () => {
+  const s = canvasReducer(shotState(), {
+    type: "patch_metadata",
+    nodeId: "s",
+    patch: {
+      storyboardShot: normalizeStoryboardShot({
+        shotNumber: "001",
+        visualDescription: "wide establishing shot", // 畫面未變
+        dialogue: "hello there!", // 台詞真的變了
+        shotSize: "WS",
+      })!,
+    },
+  });
+  const m = shotMetadata(s);
+  // 台詞配音關聯真的被移除（不是「值變空」——鍵本身不在）
+  assert.ok(!("dialogueAudioId" in m), "dialogueAudioId 應已失效並自 metadata 移除");
+  // 音頻錨點（台詞變 → 錨點失效，對齊 routes.js:445-447）
+  assert.ok(!("audioAnchorId" in m), "audioAnchorId 應已失效");
+  // 旁白未變 → 旁白配音關聯一個都不能動
+  assert.equal(m.narrationAudioId, "nar-audio-1");
+  // 畫面未變 → 影像關聯不動
+  assert.deepEqual(m.shotCandidates, { items: [{ id: "c1", prompt: "candidate prompt" }], selectedId: "c1" });
+  // 而台詞本身真的有寫進去
+  assert.equal((m.storyboardShot as Record<string, unknown>).dialogue, "hello there!");
+});
+
+test("patch_metadata:只改無關欄位（status）→ 四個關聯全都不動", () => {
+  const s = canvasReducer(shotState(), { type: "patch_metadata", nodeId: "s", patch: { status: "loading" } });
+  const m = shotMetadata(s);
+  assert.equal(m.status, "loading");
+  assert.equal(m.dialogueAudioId, "dlg-audio-1");
+  assert.equal(m.narrationAudioId, "nar-audio-1");
+  assert.equal(m.audioAnchorId, "anchor-1");
+  assert.ok("shotCandidates" in m);
+});
+
+test("patch_metadata:patch 顯式帶新 dialogueAudioId → 該鍵以其為準（不被失效清掉）", () => {
+  const s = canvasReducer(shotState(), {
+    type: "patch_metadata",
+    nodeId: "s",
+    patch: {
+      storyboardShot: normalizeStoryboardShot({
+        shotNumber: "001",
+        visualDescription: "wide establishing shot",
+        dialogue: "hello there!", // 台詞變
+        shotSize: "WS",
+      })!,
+      // 同一 patch 顯式綁一顆新配音（caller 明確要換）→ 不得被失效清掉
+      dialogueAudioId: "dlg-audio-2",
+    } as Partial<CanvasNodeMetadata>,
+  });
+  const m = shotMetadata(s);
+  assert.equal(m.dialogueAudioId, "dlg-audio-2"); // 新值存活且是最新那顆
+  assert.ok(!("audioAnchorId" in m)); // 未顯式帶的錨點仍失效（審查：不擴張也不漏）
+  assert.equal(m.narrationAudioId, "nar-audio-1");
 });
 
 // ── 20. agent_ops：批量操作原子套用

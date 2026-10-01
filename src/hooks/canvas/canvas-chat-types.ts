@@ -63,14 +63,17 @@ export interface CanvasProjectSummary {
   nodeCount: number;
 }
 
-/** CanvasProject[] → 清單摘要，依 updatedAt 由新到舊。 */
-export function toProjectSummaries(projects: CanvasProject[]): CanvasProjectSummary[] {
+/** 服務端摘要（`?view=summary`）的最小形狀：已有節點數，不帶節點本體。 */
+type CanvasProjectSummaryLike = { id: string; title: string; updatedAt: string; nodeCount: number };
+
+/** CanvasProject[]／服務端摘要 → 清單摘要（濾掉空畫布），依 updatedAt 由新到舊。 */
+export function toProjectSummaries(projects: ReadonlyArray<CanvasProject | CanvasProjectSummaryLike>): CanvasProjectSummary[] {
   return projects
     .map((p) => ({
       id: p.id,
       title: p.title || "未命名画布",
       updatedAt: p.updatedAt,
-      nodeCount: Array.isArray(p.nodes) ? p.nodes.length : 0,
+      nodeCount: "nodes" in p ? (Array.isArray(p.nodes) ? p.nodes.length : 0) : p.nodeCount,
     }))
     .filter((p) => p.nodeCount > 0)
     .sort((a, b) => {

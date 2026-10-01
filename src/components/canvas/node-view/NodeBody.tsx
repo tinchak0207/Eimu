@@ -15,6 +15,7 @@ import { buildAuthHeaders } from "../embed/embed-helpers";
 import { Scene3dCardBody } from "./Scene3dCardBody";
 import { EntityText } from "@/components/entities/entity-chip";
 import { StoryboardSceneBody, StoryboardShotBody } from "./StoryboardShotBody";
+import type { StoryboardShotAudioMetadata } from "@/lib/canvas/storyboard-shots";
 import { STATUS_LABEL } from "./constants";
 
 function isUrl(value: string): boolean {
@@ -167,6 +168,11 @@ export interface NodeBodyProps {
   onExtractVideoFrames?: (nodeId: string, action: "current" | "sequence", atSec?: number) => void;
   /** 取幀進行中：按鈕停用（防重複提交）。 */
   extractingVideoFrames?: boolean;
+  /**
+   * 分鏡音軌綁定的 metadata 寫入出口（宿主注入＝`use-canvas-chat` 的 `patchNodeMetadata`）。
+   * `nodeId` 由本層綁定（同 `onUpdateText` 慣例）後轉給分鏡卡；省略＝分鏡卡不出綁定入口。
+   */
+  onPatchMetadata?: (nodeId: string, patch: StoryboardShotAudioMetadata) => void;
   /** 內容捲動手勢（use-node-gestures 的 scrollDrag 三件套，綁在正文捲動區上）。 */
   onScrollAreaPointerDown: (e: React.PointerEvent<HTMLDivElement>) => void;
   onScrollAreaPointerMove: (e: React.PointerEvent<HTMLDivElement>) => void;
@@ -183,6 +189,7 @@ export function NodeBody({
   onUpdateText,
   onExtractVideoFrames,
   extractingVideoFrames = false,
+  onPatchMetadata,
   onScrollAreaPointerDown,
   onScrollAreaPointerMove,
   onScrollAreaPointerEnd,
@@ -334,6 +341,7 @@ export function NodeBody({
       return (
         <StoryboardShotBody
           node={node}
+          onPatchMetadata={onPatchMetadata ? (patch) => onPatchMetadata(node.id, patch) : undefined}
           onScrollAreaPointerDown={onScrollAreaPointerDown}
           onScrollAreaPointerMove={onScrollAreaPointerMove}
           onScrollAreaPointerEnd={onScrollAreaPointerEnd}

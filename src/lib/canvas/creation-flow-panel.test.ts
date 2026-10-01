@@ -1,10 +1,12 @@
 // 作品/劇集面板資料層（G2）+ `set_project_meta` op 載荷清洗（G1）測試（2026-09-16）。
 //
-// 釘死四件事：
+// 釘死五件事：
 //   1. `normalizeProjectMetaPatch` 逐欄白名單：合法保留 / 非法丟棄 / 超上限截斷。
 //   2. `summarizeCreationFlow` 的取值規則（集數、步驟標籤、分鏡計數）。
 //   3. 面板 SSR 渲染：空態、集清單、步驟標籤真的印出來（不是只有型別能編譯）。
 //   4. 掛接契約（源碼級，倉庫既有模式）：chip + 面板真的掛在 CanvasEmbed / Overlays。
+//   5. `deriveNextStep` 由現況推導的下一步（2026-09-30）：每個階段一步一跳、缺資料回
+//      unknown 不補假進度、且**不讀任何持久化 onboarding 標記**。
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -18,7 +20,15 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { canvasProjectMeta, normalizeProjectMetaPatch, toCanvasProject } from "./layout";
 import { normalizeProject } from "./project-store";
-import { countStoryboardProgress, summarizeCreationFlow, projectTypeLabel } from "./creation-flow-panel";
+import {
+  countStoryboardProgress,
+  deriveNextStep,
+  summarizeCreationFlow,
+  projectTypeLabel,
+  type CreationFlowSnapshot,
+  type CreationNextStepId,
+  type CreationNextSurface,
+} from "./creation-flow-panel";
 import { MAX_EPISODES_PER_PROJECT } from "../creation-flow-steps";
 import { canvasReducer } from "@/hooks/canvas/canvas-reducer-adapter";
 import { CANVAS_INITIAL_STATE, type CanvasReducerState } from "./reducer";
@@ -363,4 +373,120 @@ test("掛接契約：面板不吃新資料源（不碰 metadata 欄位族、不�
   assert.match(hookTypes, /episodes: CanvasEpisode\[\];/);
   assert.equal(hookTypes.match(/setProjectMeta: /g)?.length, 1, "寫入口恆為一個（UI 與 agent 共用同一出口）");
   assert.doesNotMatch(panel, /storyboardShot|storyboardScene/, "面板只吃 summary，不直接讀節點 metadata（那是刀 2/G3 的地盤）");
+});
+
+// ─────────────── 9. 下一步引導：由當前現況推導（一步一跳）；不讀持久化 onboarding 標記
+
+/** 全齊的現況（各階段測試從它派生，只改要測的那幾格）。 */
+function snapshot(over: Partial<CreationFlowSnapshot> = {}): CreationFlowSnapshot {
+  return {
+    hasProject: true,
+    episodes: 1,
+    shots: 3,
+    shotsWithImage: 3,
+    shotsWithVideo: 3,
+    shotsWithAudio: 3,
+    hasCut: true,
+    ...over,
+  };
+}
+
+test("deriveNextStep：每個階段各回一條『唯一下一步』（無作品→建作品 … 全齊→終態）", () => {
+  const cases: Array<[CreationFlowSnapshot, CreationNextStepId, CreationNextSurface]> = [
+    [{ hasProject: false }, "project", "agent"],
+    [snapshot({ episodes: 0, shots: 0, shotsWithImage: 0, shotsWithVideo: 0, shotsWithAudio: 0, hasCut: false }), "episode", "agent"],
+    [snapshot({ shots: 0, shotsWithImage: 0, shotsWithVideo: 0, shotsWithAudio: 0, hasCut: false }), "storyboard", "agent"],
+    [snapshot({ shotsWithImage: 2, shotsWithVideo: 0, shotsWithAudio: 0, hasCut: false }), "shot-image", "canvas-generation"],
+    [snapshot({ shotsWithVideo: 1, shotsWithAudio: 0, hasCut: false }), "shot-video", "canvas-generation"],
+    [snapshot({ shotsWithAudio: 2, hasCut: false }), "shot-audio", "canvas-generation"],
+    [snapshot({ hasCut: false }), "cut", "agent"],
+    [snapshot(), "done", "none"],
+  ];
+  for (const [state, id, surface] of cases) {
+    const step = deriveNextStep(state);
+    assert.equal(step.id, id, `${JSON.stringify(state)} 應回 ${id}`);
+    assert.equal(step.surface, surface, `${id} 的動作面`);
+    assert.ok(step.label.length > 0, "必帶一句人話");
+    assert.doesNotMatch(step.label, /%|完成度|完成进度/, "本站無「一鏡完成」建模，不得合成百分比");
+  }
+});
+
+test("deriveNextStep：一步一跳——前一缺口沒補完前絕不跳報後面的步驟，全齊才回終態", () => {
+  const allMissing = snapshot({ shotsWithImage: 1, shotsWithVideo: 1, shotsWithAudio: 1, hasCut: false });
+  assert.equal(deriveNextStep(allMissing).id, "shot-image", "圖/影/配音都缺時先補圖（順序＝對手的 next if 鏈）");
+  assert.equal(deriveNextStep({ ...allMissing, shotsWithImage: 3 }).id, "shot-video");
+  assert.equal(deriveNextStep({ ...allMissing, shotsWithImage: 3, shotsWithVideo: 3 }).id, "shot-audio");
+  assert.equal(deriveNextStep(snapshot({ hasCut: false })).id, "cut", "素材齊但沒成片 → 還不是終態");
+  assert.equal(deriveNextStep(snapshot({ episodes: 0 })).id, "episode", "hasCut 不得短路前面缺的工序");
+});
+
+test("deriveNextStep：人話帶真實缺口數（缺口＝已落畫布總數−已有），場景計畫數不得混入", () => {
+  assert.match(
+    deriveNextStep(snapshot({ shots: 5, shotsWithImage: 2, shotsWithVideo: 0, shotsWithAudio: 0, hasCut: false })).label,
+    /3 个分镜还没有图/,
+  );
+  assert.match(deriveNextStep(snapshot({ shots: 4, shotsWithImage: 4, shotsWithVideo: 1, shotsWithAudio: 0, hasCut: false })).label, /3 个分镜还没有视频/);
+  assert.match(deriveNextStep(snapshot({ shots: 4, shotsWithImage: 4, shotsWithVideo: 4, shotsWithAudio: 1, hasCut: false })).label, /3 个分镜还没有配音/);
+  // 「已落畫布 / 場景計畫」是兩個數字：快照刻意沒有 plannedShots 這個輸入位，硬塞也不得影響推導。
+  const plannedBlob = { ...snapshot({ hasCut: false }), plannedShots: 99 } as CreationFlowSnapshot;
+  assert.equal(deriveNextStep(plannedBlob).id, "cut", "多餘欄位（場景計畫 99）不得當分母、不得改變結論");
+});
+
+test("deriveNextStep：缺資料/壞資料回 unknown（不知道 ≠ 沒問題），絕不補假進度", () => {
+  for (const bad of [
+    {}, // 什麼都不知道
+    { hasProject: true }, // 只知道作品在，工序數字全缺
+    snapshot({ episodes: Number.NaN }),
+    snapshot({ shots: -1 }),
+    snapshot({ shotsWithImage: 1.5 }),
+    snapshot({ shotsWithAudio: Number.POSITIVE_INFINITY }),
+    snapshot({ shots: 2, shotsWithImage: 3 }), // 帶圖鏡數多過分鏡總數＝矛盾
+    snapshot({ shots: 2, shotsWithVideo: 5 }),
+    snapshot({ hasCut: undefined }),
+  ]) {
+    const step = deriveNextStep(bad);
+    assert.equal(step.id, "unknown", `${JSON.stringify(bad)} 應回 unknown`);
+    assert.equal(step.pipelineStep, undefined, "unknown 不落 7 步流水線的任一步");
+  }
+  // hasProject=false 是「確定的現況」，不是不知道 → 建作品
+  assert.equal(deriveNextStep({ hasProject: false }).id, "project");
+  // 「計數為 0（確實都沒有）」與「不知道（欄位缺席）」是兩件事
+  assert.equal(
+    deriveNextStep({ hasProject: true, episodes: 0, shots: 0, shotsWithImage: 0, shotsWithVideo: 0, shotsWithAudio: 0, hasCut: false }).id,
+    "episode",
+  );
+});
+
+test("deriveNextStep：pipelineStep 只落 7 步裡真的對得上的步驟；分鏡圖不猜", () => {
+  assert.equal(deriveNextStep({ hasProject: false }).pipelineStep?.label, "项目配置");
+  assert.equal(deriveNextStep(snapshot({ episodes: 0 })).pipelineStep?.label, "剧本创作");
+  assert.equal(deriveNextStep(snapshot({ shots: 0, shotsWithImage: 0, shotsWithVideo: 0, shotsWithAudio: 0 })).pipelineStep?.label, "分镜设计");
+  assert.equal(
+    deriveNextStep(snapshot({ shotsWithImage: 0, shotsWithVideo: 0, shotsWithAudio: 0, hasCut: false })).pipelineStep,
+    undefined,
+    "「分鏡圖」在 AID 7 步無獨立步（素材準備 3 or 視頻生成 5）→ 不猜",
+  );
+  assert.equal(deriveNextStep(snapshot({ shotsWithVideo: 0, shotsWithAudio: 0, hasCut: false })).pipelineStep?.label, "视频生成");
+  assert.equal(deriveNextStep(snapshot({ shotsWithAudio: 0, hasCut: false })).pipelineStep?.label, "音画同步");
+  assert.equal(deriveNextStep(snapshot({ hasCut: false })).pipelineStep?.label, "成品预览");
+  assert.equal(deriveNextStep(snapshot()).pipelineStep?.label, "成品预览");
+});
+
+test("deriveNextStep：不依賴任何持久化 onboarding 標記（不吃『已引導』旗標、不碰儲存）", () => {
+  const state: CreationFlowSnapshot = snapshot({ shotsWithImage: 1, shotsWithVideo: 0, shotsWithAudio: 0, hasCut: false });
+  const a = deriveNextStep(state);
+  const b = deriveNextStep(state);
+  assert.deepEqual(a, b, "純函式：同一份現況兩次呼叫結果一致（無隱藏狀態）");
+  // 輸入凍結照樣算得出來 ⇒ 沒有就地改寫輸入（沒有把「已看過」寫回 state）
+  assert.doesNotThrow(() => deriveNextStep(Object.freeze({ ...state })));
+  // 就算有人硬塞一個「已引導/已略過」旗標進來，推導結果也不變 ⇒ 旗標不是輸入
+  const withFlags = { ...state, onboardingDone: true, setupSeen: true, dismissed: "2026-09-30" } as CreationFlowSnapshot;
+  assert.deepEqual(deriveNextStep(withFlags), a, "未知欄位不得影響推導（不讀任何持久化旗標）");
+  // 輸入與輸出都不得出現 onboarding/已引導類欄位
+  const flagLike = /onboard|seen|dismiss|firstRun|guided|tour|acknowledged/i;
+  assert.deepEqual(Object.keys(a).filter((k) => flagLike.test(k)), []);
+  assert.deepEqual(Object.keys(state).filter((k) => flagLike.test(k)), []);
+  // 模組源碼不得接觸任何瀏覽器端持久化（否則「當前資料推導」就會退化成落盤旗標）
+  const src = read("src/lib/canvas/creation-flow-panel.ts");
+  assert.doesNotMatch(src, /localStorage|sessionStorage|document\.cookie|indexedDB/);
 });

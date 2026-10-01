@@ -21,11 +21,14 @@ import {
   SHOT_FIELD_LABEL,
   StoryboardSceneBody,
   StoryboardShotBody,
+  shotAudioBindOutcome,
+  shotAudioClearOutcome,
   storyboardFilledCount,
   storyboardShotRows,
 } from "./StoryboardShotBody";
 import { STORYBOARD_SHOT_FIELDS, type StoryboardScriptShot } from "@/lib/storyboard-contract";
-import type { CanvasNode } from "@/lib/canvas/types";
+import { toNodeMetadata } from "@/lib/canvas/layout";
+import type { CanvasNode, CanvasNodeMetadata } from "@/lib/canvas/types";
 
 const SHOT: StoryboardScriptShot = {
   shotNumber: "007",
@@ -159,6 +162,35 @@ test("分镜卡：无 storyboardShot 时显空态，不抛错", () => {
   assert.match(html, /分镜 · 等待 agent 填充/);
 });
 
+test("分镜卡：旁白文本与双音轨状态（有/无）可见；无旁白无音轨时不冒出一排「无」", () => {
+  const node = shotNode(SHOT);
+  node.metadata = {
+    ...node.metadata,
+    narration: "旁白：屋檐下的积水映着路灯。",
+    dialogueAudioId: "https://cdn.example.com/line-007.mp3",
+  } as CanvasNodeMetadata;
+  const html = renderToStaticMarkup(createElement(StoryboardShotBody, { node }));
+  assert.match(html, /旁白：屋檐下的积水映着路灯。/);
+  assert.match(html, /音轨/);
+  assert.match(html, /对白轨/);
+  assert.match(html, /旁白轨/);
+  assert.match(html, /对白轨(?:<!-- -->)? 有/);
+  assert.match(html, /旁白轨(?:<!-- -->)? 无/);
+
+  // 基准 SHOT（无旁白无音轨）：不渲染音轨块，也不把「无」冒充成有欄位
+  const plain = renderToStaticMarkup(createElement(StoryboardShotBody, { node: shotNode(SHOT) }));
+  assert.doesNotMatch(plain, /音轨/);
+  assert.doesNotMatch(plain, /旁白/);
+});
+
+test("分镜卡：对话/音效皆空但有旁白时，「台词 · 音效」组仍成组（制作物不凭空消失）", () => {
+  const node = shotNode({ ...SHOT, dialogue: "", soundEffect: "" });
+  node.metadata = { ...node.metadata, narration: "旁白：屋檐下的积水映着路灯。" } as CanvasNodeMetadata;
+  const html = renderToStaticMarkup(createElement(StoryboardShotBody, { node }));
+  assert.match(html, /台词 · 音效/);
+  assert.match(html, /旁白：屋檐下的积水映着路灯。/);
+});
+
 test("分镜场景壳：sceneName + 镜数可见；无欄位时回落原 Group 虚线框", () => {
   const html = renderToStaticMarkup(
     createElement(StoryboardSceneBody, { node: sceneNode({ sceneName: "旧公寓走廊", shotCount: 4 }) }),
@@ -281,4 +313,224 @@ test("NodeBody 真渲染：Group + storyboardScene → 场景名+镜数；无该
 
   const plain = renderToStaticMarkup(createElement(NodeBody, { node: sceneNode(undefined), ...props }));
   assert.match(plain, /border-dashed/);
+});
+
+// ═══════════════════════════════════════════ 音軌綁定／解除（2026-09-30）
+//
+// 驗收立場（守門件不是 oracle）：主體是**行為斷言**——餵真 metadata 與真 URL 進
+// `shotAudioBindOutcome` / `shotAudioClearOutcome`（＝按鈕 onClick 實際呼叫的那兩支），
+// 斷言合併後的 metadata 逐鍵結果；末尾的源碼級斷言只算「變更探針」，不計入已驗證。
+
+const DIALOGUE_MP3 = "https://cdn.example.com/line-008.mp3";
+const NARRATION_WAV = "https://cdn.example.com/vo-008.wav";
+const NOOP_PATCH = () => {};
+
+/** 依 UI 的落盤語義合併（patch 直餵宿主 `patchNodeMetadata`）：{{...metadata, ...patch}}。 */
+function merged(base: CanvasNodeMetadata | undefined, patch: unknown): CanvasNodeMetadata {
+  return { ...(base ?? {}), ...((patch ?? {}) as CanvasNodeMetadata) };
+}
+
+/** 寬化袋子讀（音軌鍵在 interface 上，但測試要驗「鍵在不在」，故走袋子）。 */
+function bag(metadata: CanvasNodeMetadata | undefined): Record<string, unknown> {
+  return (metadata ?? {}) as Record<string, unknown>;
+}
+
+test("音轨：绑定对白 → dialogueAudioId 有值且 audioAnchorId 同步（过 bindShotAudioTrack 真路径）", () => {
+  const base = { narration: "旁白：屋檐下的积水映着路灯。" } as CanvasNodeMetadata;
+  const outcome = shotAudioBindOutcome(base, "dialogue", DIALOGUE_MP3);
+
+  assert.equal(outcome.accepted, true, "合法音频 URL 必须被接受");
+  assert.ok(outcome.patch, "接受时必须有 patch 可落盘");
+
+  const after = merged(base, outcome.patch);
+  assert.equal(after.dialogueAudioId, DIALOGUE_MP3);
+  assert.equal(after.audioAnchorId, DIALOGUE_MP3, "audioAnchorId 必须同步指向对白轨");
+  assert.equal(after.narrationAudioId, undefined, "绑定对白不得凭空生出旁白轨");
+  assert.equal(after.narration, "旁白：屋檐下的积水映着路灯。", "旁白文本（只读键）不得被覆盖");
+  // 纯函数不动输入：原 metadata 不得被写花
+  assert.equal(base.dialogueAudioId, undefined);
+});
+
+test("音轨：无对白时绑定旁白 → audioAnchorId 指向旁白轨", () => {
+  const outcome = shotAudioBindOutcome({}, "narration", NARRATION_WAV);
+  assert.equal(outcome.accepted, true);
+
+  const after = merged({}, outcome.patch);
+  assert.equal(after.narrationAudioId, NARRATION_WAV);
+  assert.equal(after.audioAnchorId, NARRATION_WAV, "只有旁白轨时锚必须落在旁白轨上");
+  assert.equal(after.dialogueAudioId, undefined);
+});
+
+test("音轨：两轨并存时锚取对白；解除对白后锚回退旁白、键在耐久层消失；全清不留悬空锚", () => {
+  const afterDialogue = merged({}, shotAudioBindOutcome({}, "dialogue", DIALOGUE_MP3).patch);
+  const both = merged(afterDialogue, shotAudioBindOutcome(afterDialogue, "narration", NARRATION_WAV).patch);
+  assert.equal(both.dialogueAudioId, DIALOGUE_MP3);
+  assert.equal(both.narrationAudioId, NARRATION_WAV);
+  assert.equal(both.audioAnchorId, DIALOGUE_MP3, "锚优先对白轨");
+
+  // 解除对白。宿主写入路径是**合并**语义（reducer `{...before, ...patch}`，合并不删键）：
+  // patch 必须以显式 undefined 盖掉旧值，否则「解除了旧值还在」＝按钮骗人。
+  const cleared = shotAudioClearOutcome(both, "dialogue");
+  assert.equal(cleared.accepted, true);
+  const afterClear = merged(both, cleared.patch);
+  assert.equal(afterClear.dialogueAudioId, undefined, "解除后该轨不得还有值");
+  assert.equal(afterClear.audioAnchorId, NARRATION_WAV, "锚回退到剩下的旁白轨，不留悬空值");
+  assert.equal(afterClear.narrationAudioId, NARRATION_WAV, "另一轨一个键都不能动");
+  assert.equal(afterClear.narration, undefined, "解除音轨不得碰旁白文本");
+
+  // 耐久层 oracle（独立轮子 `layout.toNodeMetadata` 的 string 清洗器）：重载后键真的不在
+  const durable = bag(toNodeMetadata(bag(afterClear)));
+  assert.equal("dialogueAudioId" in durable, false, "重载后该键必须真的不在（不是留一个空壳值）");
+  assert.equal(durable.audioAnchorId, NARRATION_WAV);
+
+  // 旁白也解除 → 锚必须被显式清掉（否则留一个指向已解除音轨的悬空锚，门禁会误判有音轨）
+  const fully = shotAudioClearOutcome(afterClear, "narration");
+  assert.equal(fully.accepted, true);
+  const afterAll = merged(afterClear, fully.patch);
+  assert.equal(afterAll.audioAnchorId, undefined, "两轨皆空后不得留悬空锚");
+  const durableAll = bag(toNodeMetadata(bag(afterAll)));
+  assert.equal("narrationAudioId" in durableAll, false);
+  assert.equal("dialogueAudioId" in durableAll, false);
+  assert.equal("audioAnchorId" in durableAll, false, "空壳锚不得落到耐久层");
+});
+
+test("音轨：非音频 URL（.png／无扩展名裸 URL／空串）→ 不写入且出明提示（不静默）", () => {
+  const cases: [string, string][] = [
+    ["图片 URL", "https://cdn.example.com/still-008.png"],
+    ["无扩展名裸 URL", "https://cdn.example.com/assets/abc123"],
+    ["空字符串", ""],
+    ["本地路径", "./audio/line.mp3"],
+  ];
+  for (const [label, bad] of cases) {
+    const outcome = shotAudioBindOutcome({}, "dialogue", bad);
+    assert.equal(outcome.accepted, false, `${label} 不该被接受`);
+    assert.equal(outcome.patch, undefined, `${label}：未写入时不得给 patch`);
+    assert.ok(outcome.message.trim().length > 0, `${label}：必须有明确提示，不许静默`);
+    assert.match(outcome.message, /音频/, `${label}：提示要说清是音频地址问题`);
+    // UI 的落盘语义：accepted=false 时不会调 onPatchMetadata → metadata 逐键不变
+    assert.deepEqual(merged({}, outcome.patch), {});
+  }
+});
+
+test("音轨：解除一条本来就没绑的轨 → accepted:false（不白推一格 undo 历史）", () => {
+  const outcome = shotAudioClearOutcome({ narrationAudioId: NARRATION_WAV } as CanvasNodeMetadata, "dialogue");
+  assert.equal(outcome.accepted, false);
+  assert.equal(outcome.patch, undefined);
+  assert.match(outcome.message, /尚未绑定/);
+});
+
+test("音轨入口 SSR：宿主注入写入出口时出「对白/旁白」两轨输入＋绑定按钮；空组也成组（入口不消失）", () => {
+  // 台词 · 音效 组全空的分镜：没有入口的话用户无处可绑
+  const node = shotNode({ ...SHOT, dialogue: "", soundEffect: "" });
+  const html = renderToStaticMarkup(createElement(StoryboardShotBody, { node, onPatchMetadata: NOOP_PATCH }));
+
+  assert.match(html, /台词 · 音效/, "空组也必须成组，否则绑定入口不存在");
+  assert.match(html, /对白音轨/);
+  assert.match(html, /旁白音轨/);
+  assert.match(html, /粘贴音频 URL/);
+  assert.match(html, /aria-label="对白音档 URL"/);
+  assert.match(html, /aria-label="旁白音档 URL"/);
+  assert.match(html, /绑定/);
+  assert.match(html, /data-canvas-interactive/, "控件必须让画布手势层放行");
+  assert.doesNotMatch(html, /解除/, "未绑定时不出解除按钮");
+  // 正文尺寸铁律：控件文字 ≥13px，无 10px 以下
+  assert.match(html, /text-\[13px\]/);
+  assert.doesNotMatch(html, /text-\[10px\]|text-\[9px\]/);
+});
+
+test("音轨入口 SSR：未注入写入出口 → 无绑定入口（卡片维持原唯读，既有渲染零改动）", () => {
+  const html = renderToStaticMarkup(createElement(StoryboardShotBody, { node: shotNode(SHOT) }));
+  assert.doesNotMatch(html, /粘贴音频 URL/);
+  assert.doesNotMatch(html, /绑定/);
+});
+
+test("音轨入口 SSR：已绑对白 → 出「已绑定」与「解除」按钮", () => {
+  const node = shotNode(SHOT);
+  node.metadata = { storyboardShot: SHOT, dialogueAudioId: DIALOGUE_MP3 } as CanvasNodeMetadata;
+  const html = renderToStaticMarkup(createElement(StoryboardShotBody, { node, onPatchMetadata: NOOP_PATCH }));
+  assert.match(html, /已绑定/);
+  assert.match(html, /解除/);
+  // 已绑定的轨仍然只有输入入口 + 解除，不新增第二套音轨状态显示（状态仍归 AudioTrackStatus）
+  assert.match(html, /对白轨(?:<!-- -->)? 有/);
+});
+
+// 变更探针（源码形状，不计入已验证）：判准单源 = storyboard-shots 的纯函数，禁第二套音频判准
+test("StoryboardShotBody 音轨入口不重写判准：值一律经 storyboard-shots 纯函数，不自造扩展名白名单", () => {
+  const source = read("src/components/canvas/node-view/StoryboardShotBody.tsx");
+  assert.match(source, /from "@\/lib\/canvas\/storyboard-shots"/);
+  assert.match(source, /bindShotAudioTrack\(/);
+  assert.match(source, /clearShotAudioTrack\(/);
+  assert.doesNotMatch(source, /AUDIO_URL_EXTENSIONS|AUDIO_EXTENSIONS|AUDIO_EXTS/);
+  // 不自己调判准（判定权在纯函数内，本档只做文案与落盘）
+  assert.doesNotMatch(source, /usableAudioUrl\(/);
+});
+
+// ── 真写入路径：patch 过**真 reducer**（宿主 patchNodeMetadata 的落盘漏斗），不是自己拼对象
+test("音轨：patch 过真 reducer 落盘——绑定后有值；解除后状态上值消失（含「只省略键」的反面对照）", async () => {
+  const { canvasReducer } = await import("@/hooks/canvas/canvas-reducer-adapter");
+  const { clearShotAudioTrack } = await import("@/lib/canvas/storyboard-shots");
+
+  type ReducerState = Parameters<typeof canvasReducer>[0];
+  const shot = shotNode(SHOT);
+  const patchAction = (patch: unknown) =>
+    ({ type: "patch_metadata", nodeId: shot.id, patch }) as unknown as Parameters<typeof canvasReducer>[1];
+  const stateAfter = (s: ReducerState, patch: unknown) => {
+    const next = canvasReducer(s, patchAction(patch));
+    const n = next.nodes.find((x) => x.id === shot.id);
+    assert.ok(n, "分镜节点应仍在");
+    return bag(n.metadata);
+  };
+  const initial = { units: [], nodes: [shot], connections: [] } as unknown as ReducerState;
+  const nextState = (s: ReducerState, patch: unknown) => canvasReducer(s, patchAction(patch));
+
+  // ① 绑定对白：真落盘
+  const boundState = nextState(initial, shotAudioBindOutcome(shot.metadata, "dialogue", DIALOGUE_MP3).patch);
+  const bound = stateAfter(boundState, {});
+  assert.equal(bound.dialogueAudioId, DIALOGUE_MP3);
+  assert.equal(bound.audioAnchorId, DIALOGUE_MP3);
+
+  // ② 反面对照：对**已绑定的状态**直喂纯函式的「省略键」patch → 旧值仍在（合并不删键）
+  //    证明「entry 层必须把删掉的键显式写成 undefined」不是多此一举
+  const rawPurePatch = clearShotAudioTrack({ dialogueAudioId: DIALOGUE_MP3 } as CanvasNodeMetadata, "dialogue").patch;
+  assert.equal("dialogueAudioId" in rawPurePatch, false, "纯函式靠省略键表达删除");
+  const stale = stateAfter(boundState, rawPurePatch);
+  assert.equal(stale.dialogueAudioId, DIALOGUE_MP3, "只省略键 ⇒ 合并后旧值还在（这就是必须显式 undefined 的原因）");
+
+  // ③ 走 entry 的 patch：对同一已绑定状态解除后，该轨的值真的没了
+  const cleared = stateAfter(boundState, shotAudioClearOutcome(boundState.nodes[0].metadata, "dialogue").patch);
+  assert.equal(cleared.dialogueAudioId, undefined);
+  assert.equal(cleared.audioAnchorId, undefined);
+  // 耐久层：重载清洗后键真的不在
+  const durable = bag(toNodeMetadata(cleared));
+  assert.equal("dialogueAudioId" in durable, false);
+  assert.equal("audioAnchorId" in durable, false);
+});
+
+// ── 转发断点（W5d 破口）：分镜卡已有出口，但宿主出口必须先经 NodeBody 转接到它。
+// 未接线时生产不渲染——本断言即该条链路的真实行为探针（注入→出入口；未注入→不出）。
+test("转发：NodeBody 注入 onPatchMetadata → 分镜卡出绑定入口；未注入 → 不出（出口未接＝生产不渲染）", async () => {
+  const { NodeBody } = await import("./NodeBody");
+  const node = shotNode(SHOT);
+  const gestures = {
+    onScrollAreaPointerDown: () => {},
+    onScrollAreaPointerMove: () => {},
+    onScrollAreaPointerEnd: () => {},
+  };
+  const injectedHtml = renderToStaticMarkup(
+    createElement(NodeBody, {
+      node,
+      scale: 1,
+      onEditPrompt: () => {},
+      onPatchMetadata: () => {},
+      ...gestures,
+    }),
+  );
+  assert.match(injectedHtml, /粘贴音频 URL/, "宿主注入出口时，分镜卡必须渲染绑定入口");
+  assert.match(injectedHtml, /对白音轨/);
+  assert.match(injectedHtml, /旁白音轨/);
+
+  const bareHtml = renderToStaticMarkup(
+    createElement(NodeBody, { node, scale: 1, onEditPrompt: () => {}, ...gestures }),
+  );
+  assert.doesNotMatch(bareHtml, /粘贴音频 URL/, "未注入出口时不得长出入口（维持原唯读）");
 });

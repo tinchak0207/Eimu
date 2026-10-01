@@ -390,8 +390,9 @@ function PipelineStepSelector({ steps, selected, onChange, onSubmit }: PipelineS
 }
 
 export function AgentTemplateCarousel({ templates, onUseTemplate }: AgentTemplateCarouselProps) {
-  /* 案例环数据：官方六例 + 本机发布的「用户投稿」案例（showcase-user-cases）。
-     用户案例合入后每格角度改变，由下方的 reset effect 把环拉回第一张。 */
+  /* 案例环数据：只吃官方模板（templates）。「用户投稿案例」为已裁定不做的能力
+     （不接受任何自定义用户发布内容，见 src/lib/showcase-user-cases.ts 档头警示），
+     本组件不读取、不合并任何用户发布内容。 */
   const cases = templates;
   const COUNT = cases.length;
   const STEP = 360 / COUNT;
