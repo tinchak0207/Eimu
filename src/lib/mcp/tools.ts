@@ -501,7 +501,7 @@ function defineTools(): ToolDefinition[] {
         properties: {
           input: { type: "string", description: "要朗读的文本，必填，最长 5000 字符。" },
           voice: { type: "string", description: "音色 id，默认 default。" },
-          model: { type: "string", description: "TTS 模型 id，默认 tts-default。" },
+          model: { type: "string", description: "TTS 模型 id，默认 tts-1。" },
           callback_url: { type: "string", description: "完成回调地址，可选。" },
         },
         required: ["input"],

@@ -1,6 +1,7 @@
 import { REGISTRY_CHANNELS } from "@/lib/supplier-channels.config";
 import { generateWithBlenderNode } from "./blender-node-upstream";
 import { generateWithFilmera, pollFilmeraTask } from "./filmera-upstream";
+import { generateWithHarnessTts } from "./harness-tts-upstream";
 import { generateWithMetaso, pollMetasoTask } from "./metaso-upstream";
 import { generateWithNewApiVideo, pollNewApiVideoTask } from "./newapi-video-upstream";
 import { requestOpenAiCompatibleSupplier } from "./openai-images-adapter";
@@ -94,6 +95,16 @@ const blenderBridgeAdapter: SupplyAdapter = {
   reconcileVia: "newapi_video",
 };
 
+// harness TTS（2026-10-01）：同步調用「harness 閘道既有 TTS 端點」`POST {base}/v1/tts`
+//（deploy-staging/gateway/router.ts:531 → media-internal-routes handleTts；上游自 2026-08-30
+// 指向本機 edge-tts-proxy）。同步 adapter：無 provider task id，不進異步對帳；見
+// harness-tts-upstream.ts 檔頭（為何既有生圖/視頻輪子不能用）。
+const harnessTtsAdapter: SupplyAdapter = {
+  protocol: "harness_tts",
+  submit: (supplier, input) => generateWithHarnessTts(supplier, input),
+  reconcileVia: "newapi_video",
+};
+
 // new-api 原生視頻任務內核（NEWAPI_VIDEO_KERNEL 影子期，見 newapi-video-upstream.ts）。
 // 提交不讀 supplier（渠道選擇由 new-api Distribute 承擔，V-05 另案）。
 const newapiVideoAdapter: SupplyAdapter = {
@@ -115,6 +126,7 @@ const BUILTIN_ADAPTERS: readonly SupplyAdapter[] = [
   openaiVideoAdapter,
   filmeraAdapter,
   blenderBridgeAdapter,
+  harnessTtsAdapter,
   newapiVideoAdapter,
 ];
 

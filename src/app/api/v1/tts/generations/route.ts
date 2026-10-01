@@ -8,6 +8,7 @@ import { IdempotencyConflictError } from "@/lib/generation-core/job-repository";
 import { GenerationModelUnavailableError } from "@/lib/generation-core/model-availability-gate";
 import { generationTaskResponse } from "@/lib/generation-core/task-response";
 import { ttsQuotaForChars } from "@/lib/generation-model-catalog/tts-pricing";
+import { TTS_1_MODEL_ID } from "@/lib/image-model-ids";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
 import { normalizeVoiceId } from "@/lib/voice-library";
 
@@ -62,7 +63,10 @@ export async function POST(req: NextRequest) {
     return errorResponse(400, "input 长度不能超过 5000 个字符。", "invalid_request_error", "input_too_long", traceId);
   }
 
-  const modelId = typeof body.model === "string" && body.model ? body.model : "tts-default";
+  // 默認模型＝catalog 真源 id `tts-1`（image-model-ids.js:129 TTS_1_MODEL_ID；
+  // catalog.ts:878 kind=audio/pipeline=tts）。舊值 "tts-default" 是 catalog 與任何
+  // supplier_capability 都不存在的幻影 id ⇒ 不帶 model 的請求必回 model_unsupported。
+  const modelId = typeof body.model === "string" && body.model ? body.model : TTS_1_MODEL_ID;
   // 音色（P1-11／D33）：值域收在語音庫（`GET /v1/tts/voices`）。
   // 為什麼要擋：上游 proxy 對無法辨識的 voice 是**靜默回退**的（edge 路徑回 DEFAULT_VOICE，
   // SF 路徑把不含 ":" 的值改寫成 `<model>:alex`）——呼叫端以為指定了音色、實際拿到另一顆。

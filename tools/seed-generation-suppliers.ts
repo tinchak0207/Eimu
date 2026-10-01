@@ -54,7 +54,7 @@ const CHANNEL_MODEL_ALIASES: Record<string, Record<string, string>> = {
 type Tier = "first_party" | "managed_pool" | "relay" | "fallback";
 type Capability = {
   modelId: string;
-  kind: "image_generate" | "image_edit" | "video_generate";
+  kind: "image_generate" | "image_edit" | "video_generate" | "tts";
   supplierModelId: string | null;
   ratios: string[];
   resolutions: string[];

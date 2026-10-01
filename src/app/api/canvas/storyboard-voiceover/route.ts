@@ -46,6 +46,7 @@ import {
 } from "@/lib/generation-core/job-repository";
 import { resolveTaskCostCoins, taskStatus } from "@/lib/generation-core/task-response";
 import { ttsQuotaForChars } from "@/lib/generation-model-catalog/tts-pricing";
+import { TTS_1_MODEL_ID } from "@/lib/image-model-ids";
 import { requireVerifiedUser } from "@/lib/server-user";
 
 export const runtime = "nodejs";
@@ -54,7 +55,7 @@ export const maxDuration = 300;
 export const preferredRegion = "sfo1"; // 上游（VPS：new-api／閘道／image-data-api blob／控制面）都在矽谷，同區省一趟橫跨美國（2026-10-01 效能審計）
 
 /** 逐行真 TTS 的模型 id：與既有 `POST /api/v1/tts/generations` 的默認值同一字串（不另立）。 */
-const VOICEOVER_TTS_MODEL_ID = "tts-default";
+const VOICEOVER_TTS_MODEL_ID = TTS_1_MODEL_ID;
 /** 單行任務的輪詢間隔與總預算（禁 retry＝只等待、不重送；逾時即該行失敗）。 */
 const TTS_POLL_INTERVAL_MS = 2_000;
 const TTS_POLL_BUDGET_MS = 60_000;

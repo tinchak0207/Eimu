@@ -14,7 +14,7 @@
 
 import type { SupplyAdapter } from "./generation-core/supply-registry";
 
-export type RegistryClaimKind = "image_generate" | "image_edit" | "video_generate";
+export type RegistryClaimKind = "image_generate" | "image_edit" | "video_generate" | "tts";
 
 export interface RegistryChannelClaim {
   modelId: string;                // 平台 catalog 模型 id
@@ -239,6 +239,25 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
         modelId: "agnes-image-2.5-flash",
         supplierModelId: null,
         kinds: ["image_generate"],
+      },
+    ],
+  },
+
+  {
+    label: "harness-tts",
+    baseUrlEnv: "HARNESS_TTS_BASE_URL",
+    apiKeyEnv: "HARNESS_TTS_API_KEY",
+    enabledEnv: "HARNESS_TTS_ENABLED",
+    tier: "relay",
+    seedPriority: 50,
+    sitePriority: 50,
+    chatImageModels: [],
+    adapterType: "harness_tts",
+    claims: [
+      {
+        modelId: "tts-1",
+        supplierModelId: null,
+        kinds: ["tts"],
       },
     ],
   },

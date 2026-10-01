@@ -31,7 +31,7 @@ const USAGE = `用法：
   <baseUrl>                  上游 base URL（例：https://relay.example/v1）
   --api-key-env <ENV>        API key 的環境變數名（同時作為 credentialRef）
   --models <list>            平台模型清單，逗號分隔；條目語法 platformId 或 platformId=upstreamId
-  --kinds <list>             認領的 kind（預設 image_generate；可選 image_generate,image_edit,video_generate）
+  --kinds <list>             認領的 kind（預設 image_generate；可選 image_generate,image_edit,video_generate,tts）
   --chat-models <list>       走 /chat/completions 生圖的上游模型名（逗號分隔，預設空）
   --adapter <a>              openai_images（預設）| metaso（自訂協議，見 metaso-upstream.ts）
   --tier <t>                 first_party | managed_pool | relay | fallback（預設 relay）
@@ -109,8 +109,8 @@ function parseArgs(argv: string[]): Args {
     .map((x) => x.trim())
     .filter(Boolean);
   for (const kind of kindsRaw) {
-    if (kind !== "image_generate" && kind !== "image_edit" && kind !== "video_generate") {
-      console.error(`錯誤：未知 kind "${kind}"（可選 image_generate / image_edit / video_generate）。`);
+    if (kind !== "image_generate" && kind !== "image_edit" && kind !== "video_generate" && kind !== "tts") {
+      console.error(`錯誤：未知 kind "${kind}"（可選 image_generate / image_edit / video_generate / tts）。`);
       process.exit(1);
     }
   }
