@@ -53,3 +53,18 @@ export function mergeGenerationTaskProjections(
   }
   return [...byId.values()].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
 }
+
+/** 任務列表指紋：id＋狀態＋更新時間＋完成數。同指紋＝伺服器端沒有任何變化，前端不必寫 state。 */
+export function generationTaskListSignature(tasks: readonly GenerationTaskProjection[]): string {
+  return tasks.map((t) => `${t.taskId}:${t.status}:${t.updatedAt}:${t.completedCount}`).join("|");
+}
+
+export const GENERATION_SYNC_LIVE_MS = 3_000;
+export const GENERATION_SYNC_IDLE_MS = 30_000;
+
+/** 下一次同步的延遲：分頁隱藏＝不排（回到前景再補）；有任務在跑 3s；閒置 30s（仍能發現別處提交的任務）。 */
+export function nextGenerationSyncDelay({ hidden, hasLiveTasks }: { hidden: boolean; hasLiveTasks: boolean }): number | null {
+  if (hidden) return null;
+  return hasLiveTasks ? GENERATION_SYNC_LIVE_MS : GENERATION_SYNC_IDLE_MS;
+}
+

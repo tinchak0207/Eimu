@@ -30,6 +30,8 @@ const EXPECTED_REWRITES = [
   { source: "/api/pixai/edit", destination: "https://o.example/image-control/api/pixai/edit" },
   { source: "/api/pixai/upscale", destination: "https://o.example/image-control/api/pixai/upscale" },
   { source: "/api/pixai/template-generations", destination: "https://o.example/image-control/api/pixai/template-generations" },
+  { source: "/api/canvas/storyboard-qc", destination: "https://o.example/image-control/api/canvas/storyboard-qc" },
+  { source: "/api/canvas/storyboard-voiceover", destination: "https://o.example/image-control/api/canvas/storyboard-voiceover" },
 ];
 
 test("controlPlaneRewrites：有 origin 時與改動前手寫清單逐條相等", () => {

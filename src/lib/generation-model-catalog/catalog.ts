@@ -886,6 +886,9 @@ export const GENERATION_MODEL_CATALOG: Record<string, GenerationModelDefinition>
     resolutions: [],
     defaultAspectRatio: "1:1",
     defaultResolution: "1k",
+    // TTS 不走 fixedCoins：計價維度是「字」（0.001 幣/字），本欄表達不了。
+    // 此 0 對應上游定價表的固定成分（`'tts-zh'.base_cost = 0`），非試運行價；
+    // 真實費率與扣費在 `generation-model-catalog/tts-pricing.ts`（站內唯一真源）。
     fixedCoins: 0,
     referenceImages: false,
   },

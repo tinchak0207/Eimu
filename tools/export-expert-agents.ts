@@ -22,9 +22,11 @@
 //                         對表與 critic 審核官的交付契約清單真源。
 //
 // 兩條 tools map 規則的差異與理由（2026-09-11 修補，片4 實彈暴露補集寫窄）：
-//   orchestrator = 只斷「Expert 域工具」（registry toolIds 聯集，固定 25 個）。
-//     刻意保留 image_generate / search_web / workflow_* 等「非 Expert 域工具」——
-//     AGENTS.md 路由表對它們仍有效，orchestrator 需要它們直調（野獸 playbook 軍團）。
+//   orchestrator = 只斷「Expert 域工具」（registry toolIds 聯集）。
+//     刻意保留 search_web / workflow_* 等「非 Expert 域工具」——AGENTS.md 路由表
+//     對它們仍有效，orchestrator 需要它們直調（野獸 playbook 軍團）；image_generate
+//     雖已併入 video-director 域（art-style 接线），orchestrator 仍經
+//     ORCHESTRATOR_KEPT_DOMAIN_TOOLS 例外保持默認開。
 //   expert = 全集（--tools-file 清單 / fallback）減去「該 expert 自己的 toolIds」→ 全部 false。
 //     舊規則「其他 6 行的 toolIds 聯集 → false」寫窄了：任何不屬於任何 Expert 的工具
 //     （如 image_generate）不會被列進 false，等於 leakage —— 白名單只部分物理化，
@@ -140,6 +142,13 @@ const DOMAIN_TOOLS: string[] = dedupePreserveOrder(
  * 禁用（野獸幀聲明「你沒有 workflow_* 工具」必須是物理事實）。 */
 const SHARED_WORKFLOW_TOOLS = new Set(["workflow_start", "workflow_update_node", "workflow_status"])
 
+/** orchestrator 保留的「Expert 域工具」例外（2026-10-01 art-style 接线回归修復）：
+ * image_generate 原為無歸屬工具（orchestrator 默認開、設計刻意保留直調生圖）；
+ * 併入 video-director 域以接通 art_style 模板後進入 DOMAIN_TOOLS 聯集，orchestrator
+ * 的「域工具全 false」規則會連帶把它物理禁用。修法＝顯式豁免（與 SHARED_WORKFLOW_TOOLS
+ * 反向對偶：那組 Expert 開/orchestrator 關，這組 Expert 開/orchestrator 也開）。 */
+const ORCHESTRATOR_KEPT_DOMAIN_TOOLS = new Set(["image_generate"]);
+
 function buildAgentsJson(universeTools: readonly string[]): string {
   // tools map 只寫 false 項（opencode 語義：未列 = 默認開）；鍵序 = 來源清單插入序，確定性輸出。
   const toolsFalse = (ids: readonly string[]): Record<string, boolean> => {
@@ -150,13 +159,19 @@ function buildAgentsJson(universeTools: readonly string[]): string {
 
   const agents: Record<string, unknown> = {};
   // orchestrator 在前：25 域工具全 false + question true（主會話保留提問內建）。
-  // 注意：orchestrator 只斷 Expert 域工具，非 Expert 域工具（image_generate 等）保持默認開；
-  // 例外＝SHARED_WORKFLOW_TOOLS 顯式 false（2026-09-21：野獸幀 beastTemplateFact 聲明
+  // 注意：orchestrator 只斷 Expert 域工具，非 Expert 域工具（search_web / workflow_* 等）保持默認開；
+  // 例外①＝SHARED_WORKFLOW_TOOLS 顯式 false（2026-09-21：野獸幀 beastTemplateFact 聲明
   // 「你沒有 workflow_* 工具」必須是物理事實，模板骨架由 Expert 建立）。
+  // 例外②＝ORCHESTRATOR_KEPT_DOMAIN_TOOLS 反向豁免（2026-10-01：image_generate 雖併入
+  // video-director 域，orchestrator 仍刻意保留直調生圖，不得被域工具全 false 規則連帶禁用）。
   agents["orchestrator"] = {
     mode: "all",
     description: ORCHESTRATOR_DESCRIPTION,
-    tools: { ...toolsFalse(DOMAIN_TOOLS), ...toolsFalse([...SHARED_WORKFLOW_TOOLS]), question: true },
+    tools: {
+      ...toolsFalse(DOMAIN_TOOLS.filter((id) => !ORCHESTRATOR_KEPT_DOMAIN_TOOLS.has(id))),
+      ...toolsFalse([...SHARED_WORKFLOW_TOOLS]),
+      question: true,
+    },
   };
   // 其後按 registry 插入序：每個 Expert false 掉「全集 − 自己域工具 − 共享工作流工具」
   // （含不屬於任何 Expert 的工具，如 image_generate）。

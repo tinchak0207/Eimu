@@ -56,6 +56,13 @@ export const CONTROL_PLANE_PROXY_SOURCES = [
   "/api/pixai/edit",
   "/api/pixai/upscale",
   "/api/pixai/template-generations",
+  // 分鏡門禁／逐鏡配音（2026-10-01）：兩條都走 `readCanvasProject`／
+  // `mutateCanvasProject`（canvas project-store 閉包觸 GENERATION_DATABASE_URL）。
+  // Vercel 側不持有該庫，留在本地即 500（讀畫布失敗）；且 voiceover 真跑本就走
+  // 控制面生成管線（`generationControlPlaneEnabled()` 未配置即 503）。控面同一
+  // 份 Next 應用（basePath /image-control）持有這兩條 route，故 beforeFiles 代理過去。
+  "/api/canvas/storyboard-qc",
+  "/api/canvas/storyboard-voiceover",
 ];
 
 /**

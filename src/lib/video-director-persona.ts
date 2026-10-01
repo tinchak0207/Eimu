@@ -59,7 +59,7 @@ export const VIDEO_DIRECTOR_PERSONA_DESCRIPTION =
 
 /**
  * 视频导演可调用的工具白名单（MOE Wave2b 钉死；禁给全工具面——视频导演
- * 不需要画图/跑 Blender/跑音乐）。
+ * 不需要跑 Blender/跑音乐）。
  *
  * 全部 id 经 harness-tool-registry.ts 逐行考古（2026-09-08）：
  * - video_quote：L99 登记，只列影片按秒报价清单（image_quote 刻意只列图片、
@@ -69,12 +69,27 @@ export const VIDEO_DIRECTOR_PERSONA_DESCRIPTION =
  * - last_frame_video_chain：L151 登记，尾帧续生视频链（站點 /v1/videos/generations
  *   计费链，seedance 实证）。
  * - image_quote：L76 登记，报价查询对偶（列图侧；域内只用于图片参考素材报价）。
+ *
+ * 2026-10-01 art-style 接线：新增「视觉资产生成/风格深研」六件（全在
+ * harness-tool-registry HARNESS_TOOL_IDS，实现真源见该档 2026-08-31 片3/片6 段）：
+ * image_generate（复用现成生图轮子，src/lib/agent-tool-contract.ts:182 → 站點
+ * /v1/images/generations）、canvas_get_state / canvas_apply_ops（art_style 模板
+ * 明列的回填画布工具）、style_dna_extract / style_aligned_batch /
+ * asset_provenance_archive（风格深研三件）。此前这些 id 不属任何 Expert，被
+ * tools/export-expert-agents.ts 的补集规则对全部 Expert 写 false，art_style
+ * 模板宣告的工具物理不可调；接入本行后由 video-director（视觉产出域）承接。
  */
 export const VIDEO_DIRECTOR_PERSONA_TOOL_IDS = [
   "video_quote",
   "video_upload",
   "last_frame_video_chain",
   "image_quote",
+  "image_generate",
+  "canvas_get_state",
+  "canvas_apply_ops",
+  "style_dna_extract",
+  "style_aligned_batch",
+  "asset_provenance_archive",
 ] as const;
 
 export type VideoDirectorPersonaToolId = (typeof VIDEO_DIRECTOR_PERSONA_TOOL_IDS)[number];

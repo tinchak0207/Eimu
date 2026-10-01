@@ -86,12 +86,19 @@ test("persona 形状：id/label 钉死、工具白名单逐 id 存在于 harness
       `工具 id "${toolId}" 不在 harness-tool-registry 真源集（幻影工具禁入白名单）`,
     );
   }
-  // 白名单钉死四件：三个视频域工具 + 报价对偶 image_quote
+  // 白名单钉死十件：三个视频域工具 + 报价对偶 image_quote；2026-10-01 art-style
+  // 接线新增六件视觉资产生成/风格深研工具（全在 harness-tool-registry 真源）。
   assert.deepEqual([...VIDEO_DIRECTOR_PERSONA_TOOL_IDS], [
     "video_quote",
     "video_upload",
     "last_frame_video_chain",
     "image_quote",
+    "image_generate",
+    "canvas_get_state",
+    "canvas_apply_ops",
+    "style_dna_extract",
+    "style_aligned_batch",
+    "asset_provenance_archive",
   ]);
 });
 
