@@ -33,7 +33,9 @@ import {
 } from "@/lib/generation-workflow";
 import { LOCAL_TEST_MODE } from "@/lib/local-test-mode";
 import {
+  generationTaskListSignature,
   mergeGenerationTaskProjections,
+  nextGenerationSyncDelay,
   type GenerationTaskProjection,
 } from "@/lib/generation-task-types";
 
@@ -255,6 +257,8 @@ export function useImageGeneration(options?: UseImageGenerationOptions): UseImag
   const [recentWorkflows, setRecentWorkflows] = useState<PersistedGenerationEntry[]>([]);
   const [tasks, setTasks] = useState<GenerationTaskProjection[]>([]);
   const serverHistorySyncedRef = useRef(false);
+  const lastSyncSignatureRef = useRef("");
+  const liveTasksRef = useRef(false);
   const taskCanvasHydratedRef = useRef(false);
 
   const upsertTask = useCallback((task: GenerationTaskProjection) => {
@@ -327,6 +331,11 @@ export function useImageGeneration(options?: UseImageGenerationOptions): UseImag
     if (!response.ok) return;
     const payload = await response.json().catch(() => null) as { success?: boolean; enabled?: boolean; data?: GenerationTaskProjection[] } | null;
     if (!payload?.success || !payload.enabled || !Array.isArray(payload.data)) return;
+    // 效能審計 P1-D（2026-10-01）：內容沒變就不寫 state——原本每 3s 換一批新陣列，整個首頁跟著重渲染。
+    liveTasksRef.current = payload.data.some((task) => task.status === "queued" || task.status === "running");
+    const signature = generationTaskListSignature(payload.data);
+    if (signature === lastSyncSignatureRef.current) return;
+    lastSyncSignatureRef.current = signature;
     setTasks((current) => mergeGenerationTaskProjections(current, payload.data ?? []));
     // 掛著未完成的任務（含離頁期間提交的）→ 恢復輪詢，結果直接落畫布
     resumeLiveTasks((payload.data ?? []).filter((task) =>
@@ -419,21 +428,44 @@ export function useImageGeneration(options?: UseImageGenerationOptions): UseImag
     return () => { cancelled = true; };
   }, [enableServerHistory]);
 
+  // 自排程輪詢（效能審計 P1-D）：有任務在跑才 3s 一拍；閒置 30s；分頁隱藏時停，回來（focus/可見）立刻補一次。
   useEffect(() => {
     if (!enableServerHistory) return;
     let cancelled = false;
-    const sync = () => {
-      if (!cancelled) void syncServerTasks();
+    let inFlight = false;
+    let timer: number | null = null;
+    const clear = () => {
+      if (timer !== null) window.clearTimeout(timer);
+      timer = null;
     };
-    sync();
-    const interval = window.setInterval(sync, 3_000);
-    window.addEventListener("focus", sync);
-    document.addEventListener("visibilitychange", sync);
+    const schedule = () => {
+      clear();
+      const delay = nextGenerationSyncDelay({
+        hidden: document.visibilityState === "hidden",
+        hasLiveTasks: liveTasksRef.current || resumePollersRef.current.size > 0,
+      });
+      if (!cancelled && delay !== null) timer = window.setTimeout(run, delay);
+    };
+    const run = () => {
+      if (cancelled || inFlight) return;
+      inFlight = true;
+      clear();
+      void syncServerTasks()
+        .catch(() => {})
+        .finally(() => {
+          inFlight = false;
+          schedule();
+        });
+    };
+    const onVisibility = () => (document.visibilityState === "hidden" ? clear() : run());
+    run();
+    window.addEventListener("focus", run);
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
       cancelled = true;
-      window.clearInterval(interval);
-      window.removeEventListener("focus", sync);
-      document.removeEventListener("visibilitychange", sync);
+      clear();
+      window.removeEventListener("focus", run);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [enableServerHistory, syncServerTasks]);
 

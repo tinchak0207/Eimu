@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import { Github } from "lucide-react";
-import { getStoredToken } from "@/lib/new-api-client";
 import { useAuth } from "@/hooks/use-auth";
+import { useWechatScanLogin } from "@/hooks/use-wechat-scan-login";
+import { WechatScanQr } from "@/components/WechatScanQr";
 
 /**
  * 宣傳片結尾送出時，從送出鈕上方長出來的登入小對話框（2026-09-27 暴君裁定）。
@@ -18,9 +19,9 @@ import { useAuth } from "@/hooks/use-auth";
  * ①GitHub＝同窗口跳轉 `/api/auth/github/start`——popup 在套殼/內嵌 webview 會
  *   變成停在 about:blank 的死窗（2026-09-05 教訓）；跳走前那句話已寫進
  *   sessionStorage，回來落 / 自動補送。
- * ②微信＝開既有 `/wechat-login` 彈窗頁（與 Navbar 同一個開窗參數）；完成信號
- *   雙路：postMessage 主通道 ＋ token 落地輪詢兜底（message 遺失但 token 已寫進
- *   共享 localStorage 時照樣收工）；popup 被擋則退回同窗口。
+ * ②微信＝小框原地換成掃碼二維碼（2026-09-30：取消驗證碼、掃到即登入；不再開
+ *   `/wechat-login` 新分頁——手機上新分頁＝人切去微信掃完回來找不到原頁、那句話
+ *   也就沒人補送）。輪詢拿到 token → refresh → 補送。
  * 登入態一翻真，ImagePlayground 的補送 effect 就把那句話送進真會話（這裡不重複做）。
  */
 
@@ -57,57 +58,22 @@ function WechatLogo({ className }: { className?: string }) {
 
 export function PromoLoginPopover({ onDismiss }: PromoLoginPopoverProps) {
   const { refresh } = useAuth();
-  const [waiting, setWaiting] = useState(false);
-  const popupRef = useRef<Window | null>(null);
-  const timersRef = useRef<number[]>([]);
+  /** 小框的兩頁：選登入方式／微信二維碼（原地換頁，不開新分頁）。 */
+  const [view, setView] = useState<"choose" | "wechat">("choose");
 
-  const stopWaiting = useCallback(() => {
-    timersRef.current.forEach((id) => window.clearInterval(id));
-    timersRef.current = [];
-    popupRef.current = null;
-    setWaiting(false);
-  }, []);
-
-  useEffect(() => stopWaiting, [stopWaiting]);
-
-  /** 登入態落地：刷新即可——待送的那句話由 ImagePlayground 的補送 effect 接手。 */
+  /**
+   * 登入態落地：刷新即可——待送的那句話由 ImagePlayground 的補送 effect 接手
+   * （登入態一翻真就關浮層、開新會話、把那句話送進去）。
+   */
   const finish = useCallback(async () => {
-    stopWaiting();
     await refresh();
-  }, [refresh, stopWaiting]);
+  }, [refresh]);
 
-  // postMessage 主通道：/wechat-login 成功後對 opener 發 wechat-auth-complete。
-  useEffect(() => {
-    const onMessage = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin) return;
-      if (event.data?.type === "wechat-auth-complete") void finish();
-    };
-    window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
-  }, [finish]);
+  const wechat = useWechatScanLogin({ enabled: view === "wechat", onDone: () => void finish() });
 
   const startGithub = useCallback(() => {
     window.location.href = "/api/auth/github/start";
   }, []);
-
-  const startWechat = useCallback(() => {
-    const popup = window.open("/wechat-login", "wechat_oauth", "popup,width=440,height=640");
-    if (!popup) {
-      window.location.href = "/wechat-login";
-      return;
-    }
-    popupRef.current = popup;
-    setWaiting(true);
-    const startedAt = Date.now();
-    const pollId = window.setInterval(() => {
-      if (getStoredToken()) {
-        void finish();
-        return;
-      }
-      if (popupRef.current?.closed && Date.now() - startedAt > 5000) stopWaiting();
-    }, 700);
-    timersRef.current.push(pollId);
-  }, [finish, stopWaiting]);
 
   return (
     <div
@@ -119,39 +85,59 @@ export function PromoLoginPopover({ onDismiss }: PromoLoginPopoverProps) {
       {/* 指向下方送出鈕的小尖角：位置＝對話框水平中心，鈕在畫面正中間那條線上。 */}
       <div className="pointer-events-none absolute -bottom-[6px] left-1/2 h-3 w-3 -translate-x-1/2 rotate-45 rounded-[2px] bg-[inherit] shadow-[3px_3px_8px_rgba(45,49,66,0.10)]" />
 
-      <p className="text-[14px] font-semibold text-foreground">登录后开拍</p>
-      <p className="mt-1 text-[12.5px] leading-relaxed text-muted-foreground">
-        你刚说的那句已经存好了，登录完成就开一个新对话、直接送进产线。
-      </p>
+      {view === "wechat" ? (
+        <>
+          <p className="text-[14px] font-semibold text-foreground">微信扫码，扫到就开拍</p>
+          <div className="mt-3">
+            <WechatScanQr login={wechat} size={168} />
+          </div>
+          <p className="mt-2.5 text-center text-[12.5px]">
+            <button
+              type="button"
+              onClick={() => setView("choose")}
+              className="cursor-pointer font-medium text-muted-foreground lg-transition hover:text-foreground"
+            >
+              换其他方式登录
+            </button>
+          </p>
+        </>
+      ) : (
+        <>
+          <p className="text-[14px] font-semibold text-foreground">登录后开拍</p>
+          <p className="mt-1 text-[12.5px] leading-relaxed text-muted-foreground">
+            你刚说的那句已经存好了，登录完成就开一个新对话、直接送进产线。
+          </p>
 
-      <div className="mt-3 flex flex-col gap-2">
-        <button
-          type="button"
-          onClick={startGithub}
-          className="flex h-10 w-full cursor-pointer items-center justify-center gap-2 rounded-full bg-[#1f2328] text-[13.5px] font-semibold text-white lg-transition hover:bg-[#16181c] active:scale-[0.99]"
-        >
-          <Github className="h-[17px] w-[17px]" aria-hidden="true" />
-          使用 GitHub 登录
-        </button>
-        <button
-          type="button"
-          onClick={startWechat}
-          className="flex h-10 w-full cursor-pointer items-center justify-center gap-2 rounded-full bg-[#07C160] text-[13.5px] font-semibold text-white lg-transition hover:bg-[#06AD56] active:scale-[0.99]"
-        >
-          <WechatLogo className="h-[18px] w-[18px]" />
-          使用微信登录
-        </button>
-      </div>
+          <div className="mt-3 flex flex-col gap-2">
+            <button
+              type="button"
+              onClick={startGithub}
+              className="flex h-10 w-full cursor-pointer items-center justify-center gap-2 rounded-full bg-[#1f2328] text-[13.5px] font-semibold text-white lg-transition hover:bg-[#16181c] active:scale-[0.99]"
+            >
+              <Github className="h-[17px] w-[17px]" aria-hidden="true" />
+              使用 GitHub 登录
+            </button>
+            <button
+              type="button"
+              onClick={() => setView("wechat")}
+              className="flex h-10 w-full cursor-pointer items-center justify-center gap-2 rounded-full bg-[#07C160] text-[13.5px] font-semibold text-white lg-transition hover:bg-[#06AD56] active:scale-[0.99]"
+            >
+              <WechatLogo className="h-[18px] w-[18px]" />
+              使用微信登录
+            </button>
+          </div>
 
-      <p className="mt-2.5 text-center text-[11.5px] text-muted-foreground">
-        {waiting ? "已打开微信扫码窗口，扫完自动开跑。" : <button
-          type="button"
-          onClick={onDismiss}
-          className="cursor-pointer font-medium text-muted-foreground lg-transition hover:text-foreground"
-        >
-          先不登录
-        </button>}
-      </p>
+          <p className="mt-2.5 text-center text-[11.5px] text-muted-foreground">
+            <button
+              type="button"
+              onClick={onDismiss}
+              className="cursor-pointer font-medium text-muted-foreground lg-transition hover:text-foreground"
+            >
+              先不登录
+            </button>
+          </p>
+        </>
+      )}
     </div>
   );
 }

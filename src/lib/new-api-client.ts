@@ -135,7 +135,7 @@ export function getStoredUser(): NewApiUser | null {
 export { QUOTA_PER_COIN };
 
 export function quotaToCoins(quota: number): number {
-  return Math.floor(quota / QUOTA_PER_COIN);
+  return Math.trunc(quota / QUOTA_PER_COIN);
 }
 
 export function hasEnoughQuota(user: NewApiUser, coins = 1): boolean {

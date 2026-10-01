@@ -62,7 +62,8 @@ test("workflow 分篇：模板转盘、画布手势与配方模板文案逐字",
   const workflow = read("src/app/docs/workflow/page.tsx");
 
   assert.match(workflow, /小说影视化/, "缺模板转盘卡面（小说影视化）");
-  assert.match(workflow, /勾选 = 全部执行/, "缺环节 chip 操作口径");
+  assert.match(workflow, /实心 = 执行，描边 = 跳过/, "缺环节 chip 操作口径");
+  assert.match(workflow, /按住一路拖过去批量开\/关/, "缺环节 chip 批量手势口径");
   assert.match(workflow, /配方模板/, "缺配方模板小节");
   assert.match(workflow, /六槽配方/, "缺六槽配方官方口径");
 });

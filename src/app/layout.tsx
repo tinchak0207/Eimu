@@ -153,6 +153,8 @@ export default function RootLayout({
             __html: `(function(){try{var w=Number(localStorage.getItem("canvas-chat-panel-width.v2"));if(Number.isInteger(w)&&w>=320&&w<=720){document.documentElement.style.setProperty("--ws-panel-w",w+"px");}}catch(_){}})();`,
           }}
         />
+        {/* 啟動自愈：水合沒發生＝清 SW／快取後刷新一次。2026-10-01 收緊觸發：6 秒未水合且已有啟動錯誤才動手，
+            沒有錯誤就等到 15 秒——慢機／慢網水合本來就久，不能把「慢」誤判成「壞」、反手清空快取再重載（只會更慢）。 */}
         <script
           dangerouslySetInnerHTML={{
             __html: `(function(){
@@ -161,9 +163,10 @@ window.__bootErrors=[];
 window.addEventListener("error",function(e){window.__bootErrors.push(String(e.message).slice(0,300));try{localStorage.setItem("eimu_boot_err",JSON.stringify({t:Date.now(),m:String(e.message).slice(0,300),src:(e.filename||"").slice(-60)}))}catch(_){}});
 
 window.addEventListener("unhandledrejection",function(e){window.__bootErrors.push("rej:"+String(e.reason).slice(0,200));});
-setTimeout(function(){
+var heal=function(late){
   var w=window;
   if(w.__eimuHydrated)return;
+  if(!late&&!(w.__bootErrors&&w.__bootErrors.length)){setTimeout(function(){heal(true)},9000);return;}
   if(sessionStorage.getItem("eimu_selfheal"))return;
   sessionStorage.setItem("eimu_selfheal","1");
   (async function(){
@@ -176,7 +179,8 @@ setTimeout(function(){
       location.reload();
     }catch(_){}
   })();
-},6000);
+};
+setTimeout(function(){heal(false)},6000);
 }catch(_){}
 })();`,
           }}

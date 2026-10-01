@@ -202,10 +202,12 @@ export function PromoIntroOverlay({
       event?.preventDefault();
       if (sending) return;
       const payload = text.trim() || PROMO_TRIAL_PROMPT;
-      if (!needsLogin) {
-        onTrial(payload);
-        return;
-      }
+      // 未登入也先交給上層：上層據登入態分流，未登入那條只把這句話存成 pending
+      // （ref ＋ sessionStorage）、不關浮層。以前這裡未登入直接跳過 onTrial ⇒ pending
+      // 從沒寫進去，微信登入成功後補送 effect 無話可送、停在「正在进入…」；GitHub
+      // 跳轉回來那句話也已經丟了（2026-09-30 E2E 實錘）。
+      onTrial(payload);
+      if (!needsLogin) return;
       setSending(true);
       if (sendTimerRef.current !== null) window.clearTimeout(sendTimerRef.current);
       sendTimerRef.current = window.setTimeout(() => {
@@ -377,18 +379,26 @@ export function PromoIntroOverlay({
             playsInline
             preload="auto"
             onTimeUpdate={handleTimeUpdate}
+            // 播放鈕的去留綁真實播放狀態：真的在播了就收掉。以前只在 play() 被擋時
+            // 設 true、從不復位，按下播放後那顆鈕就一直釘在畫面正中間擋片
+            // （2026-09-30 手機實錘）。
+            onPlaying={() => setNeedsTap(false)}
             onEnded={settle}
           />
 
-          {/* 自動播放被擋時唯一出路：一個真的能按的播放鈕。 */}
+          {/* 自動播放被擋時唯一出路：整屏都是播放鈕（手機上點哪都能播），
+              中間那顆只是視覺提示；一開始播就消失。 */}
           {needsTap && (
             <button
               type="button"
               onClick={replay}
-              className="lg-sheet relative flex items-center gap-2 rounded-full px-5 py-3 text-[15px] font-medium text-white lg-transition hover:scale-[1.02]"
+              aria-label="播放"
+              className="absolute inset-0 flex cursor-pointer items-center justify-center bg-black/30"
             >
-              <Play className="h-4 w-4" strokeWidth={2} aria-hidden="true" />
-              播放
+              <span className="lg-sheet flex items-center gap-2 rounded-full px-5 py-3 text-[15px] font-medium text-white">
+                <Play className="h-4 w-4" strokeWidth={2} aria-hidden="true" />
+                点击播放
+              </span>
             </button>
           )}
 

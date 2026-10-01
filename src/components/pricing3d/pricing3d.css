@@ -32,6 +32,28 @@
   transition: opacity 420ms var(--lg-ease, ease);
 }
 
+/* 低端機靜態場景圖（2026-10-01）：與畫布同框（透明底、同構圖，由 3D 引擎離線渲染），切档交叉淡入。 */
+.p3d-still {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  /* 四張都常駐合成層：切档時不必當場解碼／柵格化／上傳（核顯上那一下會卡 ~280ms）。 */
+  will-change: opacity;
+  transition: opacity 520ms var(--lg-ease, ease);
+}
+
+.p3d-still[data-on="true"] {
+  opacity: 1;
+}
+
+.p3d-still img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  user-select: none;
+}
+
 .p3d-canvas {
   position: absolute;
   inset: 0;
@@ -65,6 +87,9 @@
 .pricing-plan-carousel:not([data-pricing3d="off"]) .case-slab[data-front="true"] .case-surface,
 .pricing-plan-carousel:not([data-pricing3d="off"]) .case-slab[data-front="true"] > .case-side {
   opacity: 0;
+  /* 成為正面卡的那一刻立即隱去（2026-10-01）：原本跟著 .ppc-poster 的 420ms 淡出，換档時封面照在舞台中央
+     半透明閃一下（暴君「莫名其妙的東西跑出來」）。離開正面時仍走原本的淡入。 */
+  transition: none;
 }
 
 .pricing-plan-carousel:not([data-pricing3d="off"]) .case-slab[data-front="true"] .case-face {
@@ -98,6 +123,16 @@
 
 .pricing-plan-carousel .case-stage[data-rest="true"] .case-slab[data-front="false"]:hover .ppc-poster {
   filter: brightness(1.08) saturate(1.08);
+}
+
+/* ── 滾輪分檔換檔（2026-10-01）：不轉環，正面卡交叉淡入；位姿瞬間到位，非正面卡不飛過畫面。 */
+.pricing-plan-carousel .case-stage[data-switch="fade"] .case-slab {
+  transition: opacity 320ms var(--lg-ease, ease) !important;
+}
+
+/* 離開正面的那張立即隱去（不縮成選片條縮圖再淡出——那一下在舞台下緣是個莫名的小方塊）。 */
+.pricing-plan-carousel .case-stage[data-switch="fade"] .case-slab[data-front="false"] {
+  transition: none !important;
 }
 
 /* ── 音效開關（手機可關；偏好存 localStorage）── */

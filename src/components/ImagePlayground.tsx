@@ -139,6 +139,8 @@ export function ImagePlayground({ suggestions }: { suggestions: Suggestion[] }) 
   const [promoOpen, setPromoOpen] = useState(false);
   // 未登入時送不出去的那句話：存起來，登入態翻真就自動補送（見 promo-gate.ts）。
   const promoPendingRef = useRef<string | null>(null);
+  // 本次載入已替使用者補送過那句話（登入後）：新人禮彈窗讓路，別蓋住剛開的會話。
+  const pendingTrialSentRef = useRef(false);
   const { images, timings, failedProviders, isLoading, startGeneration, cancelTask, tasks } = useImageGeneration();
   // authLoading 必須與上面 useImageGeneration 的 isLoading 區分開：
   // 那是生圖忙碌態，不是登入態——拿它當水合判斷，等於對狀態不明的用戶插播。
@@ -557,6 +559,7 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
     if (!pending) return;
     promoPendingRef.current = null;
     clearPendingTrial(typeof window === "undefined" ? null : window.sessionStorage);
+    pendingTrialSentRef.current = true;
     // 登入成功＝宣傳片這條線走完：浮層收掉，然後真的開一個會話開跑。
     setPromoOpen(false);
     setMode("agent");
@@ -574,6 +577,10 @@ const [pixaiResultUrl, setPixaiResultUrl] = useState<string | null>(null);
   useEffect(() => {
     if (authLoading || !isLoggedIn || !user?.id) return;
     if (!welcomeGift?.pending) return;
+    // 這次登入是為了送出那句話（宣傳片結尾／首頁輸入框被登入擋下）：畫面要留給
+    // 剛開跑的真會話，新人禮彈窗不蓋上去（2026-09-30）。不回執、不本機關門，
+    // 服務端仍是 pending，下次進站照彈。
+    if (pendingTrialSentRef.current) return;
     if (welcomeGiftModalSeenLocally(user.id)) return;
     setWelcomeGiftOpen(true);
   }, [authLoading, isLoggedIn, user?.id, welcomeGift]);

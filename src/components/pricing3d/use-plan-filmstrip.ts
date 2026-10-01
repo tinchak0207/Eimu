@@ -1,7 +1,7 @@
 "use client";
 
 /* ╁━ 選片條：環與選片條是同一批卡的兩個狀態 ╁━
-   - 有輸入（拖曳 / 觸控板橫掃 / 滾動驅動 / 箭頭 / 圓點 / 鍵盤）→ 解除 data-rest，卡回到環上轉
+   - 有輸入（拖曳 / 觸控板橫掃 / 箭頭 / 圓點 / 鍵盤）→ 解除 data-rest，卡回到環上轉（縱向滾輪分檔不轉環，見 PricingPlanCarousel）
      （環的幾何、手勢、吸附、彈簧全由 PricingPlanCarousel 原樣負責，這裡一行不碰）；
    - 輸入停止、彈簧落定後 → stage[data-rest="true"]：非正面卡由 CSS 覆蓋位姿，縮成底部一排
      縮圖（pricing-plan-carousel.css 的選片條節）。
@@ -53,7 +53,6 @@ export function usePlanFilmstrip(stageRef: RefObject<HTMLDivElement | null>, fro
     if (!stage || !section) return;
     let timer = 0;
     let holding = false;
-    let engaged = false;
 
     const rest = () => {
       timer = 0;
@@ -104,18 +103,8 @@ export function usePlanFilmstrip(stageRef: RefObject<HTMLDivElement | null>, fro
     const onControlClick = (event: MouseEvent) => {
       if (event.target instanceof Element && event.target.closest(".case-arrow, .case-dot")) wake(true);
     };
-    /* 滾動驅動旋轉只在環段進入視野時生效（與 PricingPlanCarousel 同一 rootMargin）。 */
-    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const onScroll = () => {
-      if (engaged && !holding && !reduce.matches) wake(true);
-    };
-    const io = new IntersectionObserver(
-      ([entry]) => {
-        engaged = entry.isIntersecting;
-      },
-      { rootMargin: "-12% 0px -12% 0px" },
-    );
-    io.observe(section);
+    /* 2026-10-01：頁面滾動不再轉環（改為滾輪分檔、不轉環的淡入換檔），滾動時也不再把卡叫回環上——
+       原本這裡一滾就解除 data-rest，非正面卡（封面照）在頁面滾動途中滿場亂飛。 */
 
     stage.addEventListener("pointerdown", onDown, { passive: true });
     stage.addEventListener("pointermove", onMove, { passive: true });
@@ -124,12 +113,10 @@ export function usePlanFilmstrip(stageRef: RefObject<HTMLDivElement | null>, fro
     stage.addEventListener("wheel", onWheel, { passive: true });
     stage.addEventListener("keydown", onKey);
     section.addEventListener("click", onControlClick);
-    window.addEventListener("scroll", onScroll, { passive: true });
     timer = window.setTimeout(rest, REST_AFTER_MS);
 
     return () => {
       window.clearTimeout(timer);
-      io.disconnect();
       stage.removeEventListener("pointerdown", onDown);
       stage.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
@@ -137,7 +124,6 @@ export function usePlanFilmstrip(stageRef: RefObject<HTMLDivElement | null>, fro
       stage.removeEventListener("wheel", onWheel);
       stage.removeEventListener("keydown", onKey);
       section.removeEventListener("click", onControlClick);
-      window.removeEventListener("scroll", onScroll);
       delete stage.dataset.rest;
     };
   }, [stageRef]);

@@ -171,6 +171,24 @@ function autoGrow(el: HTMLTextAreaElement) {
   el.style.height = `${el.scrollHeight}px`;
 }
 
+/**
+ * 窄框用的短 placeholder（2026-09-30 手機截圖實錘）：390px 手機上 textarea 只有
+ * ~190px，長句折成兩行、第二行被一行高的空框裁掉一半（「／资产图拖进来」只剩上半截）。
+ * 手機也拖不了檔，「拖进来」那半句對它本來就是廢話。
+ */
+const DEFAULT_PLACEHOLDER = "描述你想做的，或把剧本／资产图拖进来";
+const COMPACT_PLACEHOLDER = "描述你想做的画面或影片";
+
+/** placeholder 在這個框寬下放不放得下一行（canvas 量字，與框同字型）。 */
+function placeholderFits(el: HTMLTextAreaElement, text: string): boolean {
+  const ctx = document.createElement("canvas").getContext("2d");
+  if (!ctx) return true;
+  const style = window.getComputedStyle(el);
+  ctx.font = style.font;
+  const inner = el.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+  return inner <= 0 || ctx.measureText(text).width <= inner;
+}
+
 /** 释放一条 chip 持有的所有 Object URL（原片 + 缩图）。 */
 function releaseUrls(att: PendingAttachment) {
   if (att.videoUrl) URL.revokeObjectURL(att.videoUrl);
@@ -225,7 +243,7 @@ let attachmentSeq = 0;
 function AgentComposerComponent({
   disabled,
   onSend,
-  placeholder = "描述你想做的，或把剧本／资产图拖进来",
+  placeholder = DEFAULT_PLACEHOLDER,
   sessionId,
   onEnsureSession,
   prefill,
@@ -265,6 +283,17 @@ function AgentComposerComponent({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // 键盘规避：composer 根元素需要被抬升/复位，所以给它一个 ref。
   const composerRef = useRef<HTMLDivElement>(null);
+  // 框寬放不下長 placeholder 時換短句；框寬變化（轉屏、面板拖寬）即重量。
+  const [compactPlaceholder, setCompactPlaceholder] = useState(false);
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const measure = (): void => setCompactPlaceholder(!placeholderFits(el, placeholder));
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [placeholder]);
   const trimmed = text.trim();
   /** 斜线菜单：查询词＝「/」之后的文字；两层闸门都真才显示（见上面 slashArmed）。 */
   const slashQuery = slashQueryOf(text);
@@ -896,11 +925,12 @@ function AgentComposerComponent({
           onPaste={handlePaste}
           enterKeyHint="send"
           disabled={disabled}
-          placeholder={placeholder}
+          placeholder={compactPlaceholder && placeholder === DEFAULT_PLACEHOLDER ? COMPACT_PLACEHOLDER : placeholder}
           rows={1}
           className={cn(
             "min-h-[2.5rem] max-h-[15rem] w-full resize-none bg-transparent px-1 py-1.5 text-[0.9375rem] leading-[1.375rem] text-foreground",
-            "placeholder:text-foreground/35 focus:outline-none",
+            // 空框只有一行高：placeholder 一律不折行（折了第二行必被裁半截），極窄時寧可截尾。
+            "placeholder:text-foreground/35 placeholder:whitespace-nowrap focus:outline-none",
             "touch-manipulation [-webkit-tap-highlight-color:transparent]",
             "disabled:cursor-not-allowed disabled:opacity-50",
           )}

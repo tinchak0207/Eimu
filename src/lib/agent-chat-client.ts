@@ -100,6 +100,7 @@ export interface AgentQuotaWire {
   balance_coins?: unknown;
   currency?: unknown;
   available?: unknown;
+  spendable?: unknown;
   reason?: unknown;
 }
 
@@ -733,6 +734,7 @@ export async function fetchAgentQuota(): Promise<AgentQuotaState> {
       typeof d.balance_coins === "number" && Number.isFinite(d.balance_coins) ? (d.balance_coins as number) : null,
     currency: typeof d.currency === "string" ? (d.currency as string) : "coins",
     available: d.available === true,
+    ...(typeof d.spendable === "boolean" ? { spendable: d.spendable as boolean } : {}),
     reason: typeof d.reason === "string" ? (d.reason as string) : undefined,
   };
 }

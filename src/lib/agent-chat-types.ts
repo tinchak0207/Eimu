@@ -265,6 +265,9 @@ export interface AgentQuotaChanged {
   balance_coins: number | null;
   currency: string;
   available: boolean;
+  /** R9-A（gateway quotaPayload）：balance > 0 才可消費；false＝欠費/零餘額，缺省＝未知。
+   *  available 只表示「餘額資料可取得」，負餘額時 available 仍為 true。 */
+  spendable?: boolean;
   reason?: string;
 }
 
@@ -699,6 +702,7 @@ export function parseAgentSseEvent(name: string, rawData: string): AgentSseEvent
           balance_coins: balance ?? null,
           currency: str(d.currency) ?? "coins",
           available: d.available === true,
+          ...(typeof d.spendable === "boolean" ? { spendable: d.spendable } : {}),
           reason: str(d.reason),
         },
       };
@@ -1189,6 +1193,8 @@ export interface AgentQuotaState {
   balanceCoins: number | null;
   currency: string;
   available: boolean;
+  /** false＝餘額 ≤ 0（欠費），可取得但不可消費；缺省＝未知（見 AgentQuotaChanged.spendable）。 */
+  spendable?: boolean;
   reason?: string;
 }
 

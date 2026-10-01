@@ -914,7 +914,11 @@ test("composer accepts pasted files (Ctrl+V) and dragged-in files, sharing the u
   // placeholder 明说可以把剧本/资产图拖进来（拖拽落点只支援拖进输入框，决策 19）。
   assert.match(code, /aria-label="添加素材"/);
   assert.match(code, /title="添加素材（剧本 \/ 图片 \/ 影片 \/ 文档）"/);
-  assert.match(code, /placeholder = "描述你想做的，或把剧本／资产图拖进来"/);
+  assert.match(code, /const DEFAULT_PLACEHOLDER = "描述你想做的，或把剧本／资产图拖进来"/);
+  assert.match(code, /placeholder = DEFAULT_PLACEHOLDER,/);
+  // 2026-09-30：窄框（手機）換短句且 placeholder 不折行——長句折兩行會被一行高的空框裁掉半截。
+  assert.match(code, /const COMPACT_PLACEHOLDER = "描述你想做的画面或影片"/);
+  assert.match(code, /placeholder:whitespace-nowrap/);
 
   // drop 复位高亮状态、有文件才 enqueue；无文件时不 preventDefault（文本拖入按默认插入）。
   assert.match(code, /handleDrop[\s\S]{0,120}setDragActive\(false\)/);

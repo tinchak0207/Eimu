@@ -15,6 +15,7 @@ import {
 } from "@/lib/plans";
 import type { PricingPlan } from "@/lib/plans";
 import { commitSteps, detent, undetent } from "@/lib/carousel-detent";
+import { createWheelStepper } from "@/lib/wheel-stepper";
 import { cn } from "@/lib/utils";
 import { PricingStage3D } from "@/components/pricing3d/PricingStage3D";
 import { usePlanFilmstrip } from "@/components/pricing3d/use-plan-filmstrip";
@@ -106,8 +107,8 @@ const DEPTH = 0.78;
 /** 越远越往上抬，环看起来像朝纵深「拱」起，而不是平铺一排。 */
 const LIFT = 26;
 /** 整段滚动对应的转角：宽屏一圈，窄屏收敛到 200°（手机上主要靠横滑）。 */
-const SWEEP_WIDE = 360;
-const SWEEP_COMPACT = 200;
+/** 换档淡入时长（与 CSS .case-stage[data-switch] 配对）。 */
+const SWITCH_FADE_MS = 420;
 /** 拖一张卡的宽度 ≈ 转过一格。 */
 /** 拖过「卡宽 × 这个比例」= 转过一格。0.62 让一次自然的滑动就足够跨过一格。 */
 const DRAG_CARD_RATIO = 0.62;
@@ -691,9 +692,7 @@ export function PricingPlanCarousel({
   const springRef = useRef(SPRING_SETTLE);
   const lastTsRef = useRef(0);
 
-  const engagedRef = useRef(false);
-  const lastScrollRef = useRef(0);
-  const degPerPxRef = useRef(0.3);
+  const switchTimerRef = useRef(0);
   const radiusRef = useRef(812);
   const cardWRef = useRef(520);
   const dragDegPerPxRef = useRef(0.14);
@@ -717,7 +716,6 @@ export function PricingPlanCarousel({
    *  环半径 = 卡宽 × 0.78 × RADIUS_SCALE，随卡宽等比缩放，物理量一个没动。 */
   const measure = useCallback(() => {
     const stage = stageRef.current;
-    const section = sectionRef.current;
     if (!stage) return;
 
     const stageWidth = stage.clientWidth || 1024;
@@ -744,8 +742,6 @@ export function PricingPlanCarousel({
     stage.style.setProperty("--case-radius", `${Math.round(radius)}px`);
     stage.style.height = `${Math.round(cardH * 1.2)}px`;
 
-    const travel = (section?.offsetHeight ?? 640) + window.innerHeight;
-    degPerPxRef.current = (compact ? SWEEP_COMPACT : SWEEP_WIDE) / Math.max(travel, 1);
   }, [STEP]);
 
   /** 每帧唯一的写 DOM 处。React 不参与：它只在「正面换人」时 render 一次。（模板廊原样） */
@@ -913,6 +909,35 @@ export function PricingPlanCarousel({
     snap(Math.round(targetRef.current / STEP) * STEP + dir * STEP);
   }, [snap, STEP]);
 
+  /** 不转环的换档（滚轮分档用）：直接落到目标角度，正面卡由 CSS 交叉淡入（stage[data-switch]），
+   *  非正面卡停在选片条（隐去）不露脸。 */
+  const fadeTo = useCallback((index: number) => {
+    const stage = stageRef.current;
+    if (index < 0 || index >= COUNT) return;
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = 0;
+    }
+    if (settleTimerRef.current) {
+      clearTimeout(settleTimerRef.current);
+      settleTimerRef.current = null;
+    }
+    const value = nearestAngleFor(index, targetRef.current, STEP);
+    if (stage) {
+      stage.dataset.switch = "fade";
+      window.clearTimeout(switchTimerRef.current);
+      switchTimerRef.current = window.setTimeout(() => {
+        delete stage.dataset.switch;
+      }, SWITCH_FADE_MS);
+    }
+    rawRef.current = value;
+    originRef.current = value;
+    targetRef.current = value;
+    angleRef.current = value;
+    velRef.current = 0;
+    paint(value);
+  }, [COUNT, STEP, paint]);
+
   useIsoLayoutEffect(() => {
     measure();
     glowRef.current?.style.setProperty("--case-glow-rgb", rgbTriple((cases[frontRef.current] ?? cases[0]).glow));
@@ -971,33 +996,38 @@ export function PricingPlanCarousel({
   }, [frontItem, onFrontChange]);
   usePlanFilmstrip(stageRef, front, COUNT);
 
-  /* 只在这一段进入视野时累计滚动量；离开视野后滚动与它无关。（模板廊原样） */
+  /* 滚轮分档（2026-10-01 暴君实机：「我的机子滚动灵敏度高，一滑就直接跑过四个阶段，根本没 regulate」；
+     中间态「一堆莫名其妙的东西跑出来」）。原本页面滚动量连续驱动转环：一次带惯性的触控板滑动 = 转过全部档位，
+     途中非正面卡回到环上露脸。改成：
+       - 首屏舞台完整在视野内时，纵向滚轮由环接管，一次手势（含触控板惯性尾巴）只换一档
+         （第二版 2026-10-01：判定移到 lib/wheel-stepper，修「滑几次失效」「往回滑无效」）；
+       - 到头（梦芽往上 / 自定义往下）或舞台不在视野内 → 放行页面滚动；
+       - 换档不转环：直接落到目标档，正面卡与舞台（3D / 静态图）交叉淡入，非正面卡全程不露脸。
+     页面普通滚动不再转环。 */
   useEffect(() => {
-    const section = sectionRef.current;
-    if (!section) return;
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        engagedRef.current = entry.isIntersecting;
-        if (entry.isIntersecting) lastScrollRef.current = window.scrollY;
-      },
-      { rootMargin: "-12% 0px -12% 0px" },
-    );
-    observer.observe(section);
-    return () => observer.disconnect();
-  }, []);
-
-  /* 滚动驱动旋转 —— passive 监听、纯读取 scrollY 增量，全程不 preventDefault。（模板廊原样） */
-  useEffect(() => {
-    const onScroll = () => {
-      const y = window.scrollY;
-      const delta = y - lastScrollRef.current;
-      lastScrollRef.current = y;
-      if (!engagedRef.current || draggingRef.current || reduceRef.current) return;
-      drive(delta * degPerPxRef.current);
+    const stage = stageRef.current;
+    if (!stage) return;
+    /* 手势判定（锁定、重新武装、到头放行）全在 wheel-stepper 状态机里，这里只接线。 */
+    const stepper = createWheelStepper();
+    const onWheel = (event: WheelEvent) => {
+      if (event.ctrlKey || draggingRef.current) return;
+      if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) return; // 横向交给下方的横扫接管
+      const scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? window.innerHeight : 1;
+      const decision = stepper.feed({ t: event.timeStamp, delta: event.deltaY * scale }, (dir) => {
+        /* 「在视野内」＝整段（含上方档位梯）与舞台都在屏内；且这个方向还有下一档。 */
+        const rect = stage.getBoundingClientRect();
+        const sectionTop = sectionRef.current?.getBoundingClientRect().top ?? rect.top;
+        const inView = sectionTop >= -8 && rect.top >= -8 && rect.bottom <= window.innerHeight + 8;
+        const current = frontRef.current;
+        return inView && (dir > 0 ? current < COUNT - 1 : current > 0);
+      });
+      if (decision === "pass") return;
+      event.preventDefault();
+      if (typeof decision === "object") fadeTo(frontRef.current + decision.step);
     };
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
-  }, [drive]);
+    window.addEventListener("wheel", onWheel, { passive: false });
+    return () => window.removeEventListener("wheel", onWheel);
+  }, [COUNT, fadeTo]);
 
   /* 触控板横扫 / Shift+滚轮。React 的 onWheel 是 passive 注册，preventDefault
      会被忽略，所以必须手动挂 { passive: false }。且只有横向分量占优时才接管，
@@ -1015,6 +1045,7 @@ export function PricingPlanCarousel({
   }, [drive]);
 
   useEffect(() => () => {
+    window.clearTimeout(switchTimerRef.current);
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
     if (panelTimerRef.current) clearTimeout(panelTimerRef.current);

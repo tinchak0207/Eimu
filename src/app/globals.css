@@ -145,8 +145,8 @@
       0 12px 40px rgba(0, 0, 0, 0.08),
       0 2px 8px rgba(0, 0, 0, 0.04),
       inset 0 1px 0 rgba(255, 255, 255, 0.90);
-    backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-saturate)) brightness(var(--lg-brightness));
     -webkit-backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-saturate)) brightness(var(--lg-brightness));
+    backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-saturate)) brightness(var(--lg-brightness));
   }
 
   /* Secondary material — floating pills, badges, secondary panels */
@@ -157,8 +157,8 @@
     border-right: 1px solid rgba(255, 255, 255, 0.38);
     border-bottom: 1px solid rgba(0, 0, 0, 0.04);
     box-shadow: var(--lg-shadow-ambient);
-    backdrop-filter: blur(28px) saturate(160%) brightness(1.06);
     -webkit-backdrop-filter: blur(28px) saturate(160%) brightness(1.06);
+    backdrop-filter: blur(28px) saturate(160%) brightness(1.06);
   }
 
   /* Tertiary material — dock, toolbar, bottom bar */
@@ -172,8 +172,8 @@
     /* 28px 是本设计语言里已验证的上限（.lg-float 同值）。半径越大，合成器
        每帧要回读并重模糊的背景区域就越大，中低端 Android 上是明确的掉帧来源；
        底色本身是 0.62 白，48px → 28px 的观感差异在这个不透明度下不可见。 */
-    backdrop-filter: blur(28px) saturate(200%) brightness(1.1);
     -webkit-backdrop-filter: blur(28px) saturate(200%) brightness(1.1);
+    backdrop-filter: blur(28px) saturate(200%) brightness(1.1);
   }
 
   /* Elevated material — modals, sheets, popovers */
@@ -187,8 +187,8 @@
     /* 60px 是全站最大的模糊半径，也是最贵的一层：sheet 通常铺满视口，
        合成器每帧要对整屏背景做一次 60px 半径的两遍高斯。底色已是 0.82 白，
        背景几乎全被遮住，28px 与 60px 在这个不透明度下肉眼无法区分。 */
-    backdrop-filter: blur(28px) saturate(200%) brightness(1.12);
     -webkit-backdrop-filter: blur(28px) saturate(200%) brightness(1.12);
+    backdrop-filter: blur(28px) saturate(200%) brightness(1.12);
   }
 
   /* ── Tinted glass variants (for status/accent states) ── */
@@ -198,8 +198,8 @@
     border-left: 1px solid rgba(0, 122, 255, 0.10);
     border-right: 1px solid rgba(0, 122, 255, 0.10);
     border-bottom: 1px solid rgba(0, 122, 255, 0.06);
-    backdrop-filter: blur(20px) saturate(180%);
     -webkit-backdrop-filter: blur(20px) saturate(180%);
+    backdrop-filter: blur(20px) saturate(180%);
   }
 
   .lg-tint-green {
@@ -208,8 +208,8 @@
     border-left: 1px solid rgba(52, 199, 89, 0.10);
     border-right: 1px solid rgba(52, 199, 89, 0.10);
     border-bottom: 1px solid rgba(52, 199, 89, 0.06);
-    backdrop-filter: blur(20px) saturate(180%);
     -webkit-backdrop-filter: blur(20px) saturate(180%);
+    backdrop-filter: blur(20px) saturate(180%);
   }
 
   .lg-tint-red {
@@ -218,8 +218,8 @@
     border-left: 1px solid rgba(255, 59, 48, 0.10);
     border-right: 1px solid rgba(255, 59, 48, 0.10);
     border-bottom: 1px solid rgba(255, 59, 48, 0.06);
-    backdrop-filter: blur(20px) saturate(180%);
     -webkit-backdrop-filter: blur(20px) saturate(180%);
+    backdrop-filter: blur(20px) saturate(180%);
   }
 
   .lg-tint-gold {
@@ -228,8 +228,8 @@
     border-left: 1px solid rgba(255, 179, 0, 0.10);
     border-right: 1px solid rgba(255, 179, 0, 0.10);
     border-bottom: 1px solid rgba(255, 179, 0, 0.06);
-    backdrop-filter: blur(20px) saturate(180%);
     -webkit-backdrop-filter: blur(20px) saturate(180%);
+    backdrop-filter: blur(20px) saturate(180%);
   }
 
   /* ── Active / selected fill (iOS "tinted fill") ── */
@@ -333,8 +333,8 @@
     border-left: 1px solid rgba(255, 179, 0, 0.12);
     border-right: 1px solid rgba(255, 179, 0, 0.12);
     border-bottom: 1px solid rgba(255, 179, 0, 0.06);
-    backdrop-filter: blur(20px) saturate(180%);
     -webkit-backdrop-filter: blur(20px) saturate(180%);
+    backdrop-filter: blur(20px) saturate(180%);
     transition: transform 0.3s var(--lg-spring);
   }
 
@@ -723,8 +723,8 @@ body::after {
     inset 0 1px 0 rgba(255, 255, 255, 0.96),
     inset 0 -24px 44px rgba(255, 255, 255, 0.16),
     0 18px 50px rgba(45, 49, 66, 0.10);
-  backdrop-filter: blur(42px) saturate(180%) brightness(1.08);
   -webkit-backdrop-filter: blur(42px) saturate(180%) brightness(1.08);
+  backdrop-filter: blur(42px) saturate(180%) brightness(1.08);
 }
 
 .generation-progress-glass::before {
@@ -1098,4 +1098,170 @@ body::after {
   .sea-waiting-hint {
     animation: none;
   }
+}
+
+/* 畫布節點卡（2026-10-01 效能審計 P1-3）：卡片浮在平坦的淺色點陣底上，40px 背景模糊在視覺上等於「近白」，
+   卻要求每幀為每張卡重取樣背景再模糊——Intel 核顯上平移/縮放掉到 30fps 的主因之一。
+   改用不透明近白（≈ 原玻璃壓在畫布底上的觀感）；描邊、亮線、陰影仍走 lg-card。 */
+.lg-card.lg-card-canvas {
+  background: rgba(255, 255, 255, 0.94);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* ─────────────────────────────────────────── 語義縮放（Semantic Zoom，2026-09-30 打磨）
+   k 是唯一真源：CanvasEmbed 每幀把 lodBlend(k) 寫進內容層 CSS 變數，節點不為轉場多 render。
+   --lod-g            聚合係數（easeOut 後，0＝協作、1＝鳥瞰）
+   --lod-node-scale   / --lod-node-opacity / --lod-blur  聚合態節點視覺
+   --lod-xray         透析係數（0→1）
+   節點自帶靜態 --gx/--gy（到階段質心的世界位移）。
+   聚合用獨立屬性 translate/scale＋filter:opacity，不碰既有 transform/opacity 過渡（無追尾延遲）。 */
+[data-lod-gathering] .lod-node {
+  translate: calc(var(--lod-g, 0) * var(--gx, 0) * 1px) calc(var(--lod-g, 0) * var(--gy, 0) * 1px);
+  scale: var(--lod-node-scale, 1);
+  filter: opacity(var(--lod-node-opacity, 1));
+}
+[data-lod-gathering][data-lod-blur] .lod-node {
+  filter: opacity(var(--lod-node-opacity, 1)) blur(var(--lod-blur, 0px));
+}
+[data-lod-inert] .lod-node {
+  pointer-events: none;
+}
+[data-lod-gathering] .lod-conn {
+  opacity: calc(1 - var(--lod-g, 0));
+}
+
+/* 點階段卡飛行途中：非目標階段節點壓暗（opacity 走節點既有 300ms 過渡，落地後柔和恢復）。 */
+[data-focus-stage="1"] .lod-node:not([data-lod-stage="1"]),
+[data-focus-stage="2"] .lod-node:not([data-lod-stage="2"]),
+[data-focus-stage="3"] .lod-node:not([data-lod-stage="3"]),
+[data-focus-stage="4"] .lod-node:not([data-lod-stage="4"]) {
+  opacity: 0.35;
+}
+
+/* 透析 focus 模式：被透析的卡抬起，其餘退成灰影。 */
+[data-eng-focus] .lod-node:not([data-eng-focused]) {
+  opacity: 0.25;
+  filter: grayscale(1);
+  transition: opacity 320ms ease-out, filter 320ms ease-out;
+}
+.lod-node[data-eng-focused] {
+  z-index: 40;
+}
+
+/* 拆機（LOD3）：卡面＝背板，隨 --lod-xray 掀起（上移、微放大、淡出），露出底下的電路板。
+   只在透析帶內掛規則（[data-lod-xray]），平常卡片不多出任何屬性。 */
+/* --lod-xray 註冊成可插值的數：透析中的節點把它過渡到 1（背板滑開），關閉後過渡回畫布值。
+   只有 focused/release 兩態的節點宣告 transition——一般節點仍逐幀跟畫布走，不被拖慢。 */
+@property --lod-xray {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+.lod-node[data-eng-focused],
+.lod-node[data-eng-release] {
+  transition: --lod-xray 560ms cubic-bezier(0.34, 1.2, 0.64, 1) 0ms !important;
+}
+[data-lod-xray] .lod-cover {
+  /* 正文區像滑蓋一樣從下往上收：每一點要嘛是原正文、要嘛是內部參數，不做半透明混色。 */
+  clip-path: inset(0 0 calc(var(--lod-xray, 0) * 100%) 0 round 0 0 16px 16px);
+}
+[data-lod-xray-open] .lod-cover {
+  pointer-events: none;
+}
+/* 蓋在原正文上的浮層控件（參考圖角色等）隨蓋子一起退場。 */
+[data-lod-xray] .lod-cover-overlay {
+  opacity: clamp(0, calc(1 - var(--lod-xray, 0) * 4), 1);
+}
+[data-lod-xray-open] .lod-cover-overlay {
+  pointer-events: none;
+}
+/* 滑蓋下緣：頂緣 specular 亮線＋投在內容上的淡陰影，跟著蓋子往上走；全開/全關時隱去。 */
+.lod-lid-edge {
+  top: calc((1 - var(--lod-xray, 0)) * 100% - 1px);
+  opacity: clamp(0, calc(min(var(--lod-xray, 0), 1 - var(--lod-xray, 0)) * 12), 1);
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.95) 0, rgba(255, 255, 255, 0.95) 1px, rgba(45, 49, 66, 0.12) 1px, rgba(45, 49, 66, 0) 12px);
+}
+/* 內部參數字級＝13px/√k（世界）：螢幕上 13×√k——進工程層時≈14px 與原正文銜接，
+   再放大字溫和變大、與卡片標題保持比例；世界字級持續縮小＝同一張卡裝得下更多行。 */
+.lod-inspect {
+  font-size: calc(13px * var(--canvas-inverse-sqrt, 1));
+  line-height: 1.45;
+}
+
+/* 狀態脈衝 / 骨架掃光 / 段落升起 / 光束流動 */
+@keyframes lod-pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 var(--pulse-color, rgba(0, 122, 255, 0.45));
+  }
+  100% {
+    box-shadow: 0 0 0 7px rgba(0, 0, 0, 0);
+  }
+}
+.lod-pulse {
+  animation: lod-pulse-ring 1.4s ease-out infinite;
+}
+@keyframes lod-skeleton {
+  from {
+    background-position: -200% 0;
+  }
+  to {
+    background-position: 200% 0;
+  }
+}
+.lod-skeleton {
+  background: linear-gradient(90deg, rgba(45, 49, 66, 0.05) 25%, rgba(45, 49, 66, 0.1) 50%, rgba(45, 49, 66, 0.05) 75%);
+  background-size: 200% 100%;
+  animation: lod-skeleton 1.2s linear infinite;
+}
+@keyframes lod-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.lod-rise {
+  animation: lod-rise 360ms cubic-bezier(0.2, 0.9, 0.2, 1) both;
+}
+@keyframes lod-beam-flow {
+  to {
+    stroke-dashoffset: -1;
+  }
+}
+.lod-beam-flow {
+  animation: lod-beam-flow 1.6s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lod-pulse,
+  .lod-skeleton,
+  .lod-beam-flow,
+  .lod-rise {
+    animation: none !important;
+  }
+}
+
+/* 鳥瞰卡 hover：上浮 4px、陰影加深（進行中卡保留階段色柔光）、縮圖輕推。 */
+.lod-stage-hover {
+  transition: translate 220ms cubic-bezier(0.2, 0.9, 0.2, 1), box-shadow 220ms ease-out;
+}
+.lod-stage-hover:hover {
+  translate: 0 -4px;
+}
+.lod-stage-hover:not([data-current]):hover {
+  box-shadow: 0 22px 48px -12px rgba(0, 0, 0, 0.24) !important;
+}
+.lod-stage-thumb {
+  transition: scale 420ms cubic-bezier(0.2, 0.9, 0.2, 1);
+}
+.lod-stage-hover:hover .lod-stage-thumb {
+  scale: 1.04;
+}
+[data-eng-focus] .lod-conn {
+  opacity: 0.3;
+  transition: opacity 320ms ease-out;
 }

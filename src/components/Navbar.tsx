@@ -207,10 +207,20 @@ export function Navbar({ className }: NavbarProps) {
   };
 
   const startWechatLogin = () => {
+    // 手機一律同窗口（2026-09-30）：新分頁＝人切去微信掃完回來停在登入頁，原頁
+    // 沒人通知；同窗口登入完 /wechat-login 自己回首頁，待送的那句話由首頁補送。
+    if (window.matchMedia("(pointer: coarse)").matches) {
+      window.location.href = "/wechat-login";
+      return;
+    }
     const popup = window.open("/wechat-login", "wechat_oauth", "popup,width=440,height=640");
     if (!popup) {
       window.location.href = "/wechat-login";
+      return;
     }
+    // postMessage 遺失時的兜底：token 一落共享 localStorage 就 refresh。
+    popupRef.current = popup;
+    pollForAuthComplete();
   };
 
   // postMessage 是主通道；輪詢是 fallback——message 遺失時，只要 popup 的

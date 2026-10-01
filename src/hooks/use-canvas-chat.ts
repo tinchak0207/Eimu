@@ -39,7 +39,7 @@ import {
   type CanvasHistory,
   type CanvasSnapshot,
 } from "@/lib/canvas/layout";
-import { listCanvasProjects, postCanvasOpsResult } from "@/lib/canvas/client";
+import { fetchCanvasProject, listCanvasProjectSummaries, postCanvasOpsResult } from "@/lib/canvas/client";
 // 風格 id 值域判據（＝STYLE_LIBRARY 註冊面），與落盤/生成端共用同一把尺。
 import { normalizeProjectStyleId } from "@/lib/canvas/project-style";
 // 解說劇設定（P1-5／D7）：型別值域＋旁白音色的判據（與落盤端同一份）。
@@ -267,16 +267,17 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
   }, []);
 
   const refreshSavedProjects = useCallback(async () => {
-    const res = await listCanvasProjects();
+    const res = await listCanvasProjectSummaries();
     if (!mountedRef.current) return;
     if (res.ok && res.data) setSavedProjects(toProjectSummaries(res.data));
     // 失敗時靜默保留舊值：清單是「順手看」，不值得為網路抖動清空畫面。
   }, []);
 
   const openSavedCanvas = useCallback(async (id: string) => {
-    const res = await listCanvasProjects();
+    // 只拉這一張（效能審計 P0-B）：原本為了打開一張畫布把全部專案整包下載。
+    const res = await fetchCanvasProject(id);
     if (!mountedRef.current) return;
-    const target = res.ok && res.data ? res.data.find((p) => p.id === id) : undefined;
+    const target = res.ok ? res.data : undefined;
     if (!target) return;
     // 指向舊專案身份：之後的存檔覆寫它，而不是另存一份新畫布。
     projectIdRef.current = target.id;

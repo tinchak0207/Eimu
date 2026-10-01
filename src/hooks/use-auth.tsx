@@ -92,9 +92,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [localTestMode]);
 
   useEffect(() => {
-    if (localTestMode) return;
     // 水合成功标记：启动自愈脚本据此判断「页面是否真的活了」。
+    // 必须在 localTestMode 早退之前写（2026-10-01）：原本本地测试模式永远不写，每次进页 6 秒后被自愈脚本强制刷新。
     (window as unknown as { __eimuHydrated?: boolean }).__eimuHydrated = true;
+    if (localTestMode) return;
     syncStoredAuthFromCookie();
     // Hydrate from localStorage on mount
     const storedUser = getStoredUser();

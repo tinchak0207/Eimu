@@ -760,7 +760,7 @@ function reduceConfirmResolved(state: AgentChatState, event: AgentSseEvent & { n
 }
 
 function reduceQuotaChanged(state: AgentChatState, event: AgentSseEvent & { name: "quota.changed" }): AgentChatState {
-  const { balance_coins, currency, available, reason } = event.data;
+  const { balance_coins, currency, available, spendable, reason } = event.data;
 
   // 整份替换，不保留旧数字。
   //
@@ -773,7 +773,10 @@ function reduceQuotaChanged(state: AgentChatState, event: AgentSseEvent & { name
   // 另外 parseAgentEvent 已把缺字段规约成 null（agent-chat-types.ts:196
   // `balance ?? null`），所以 reducer 这层分不出「没提到」和「明确未知」，
   // 想做更细的保留也没有依据。诚实优于好看：未知就显示未知。
-  return { ...state, quota: { balanceCoins: balance_coins, currency, available, reason } };
+  return {
+    ...state,
+    quota: { balanceCoins: balance_coins, currency, available, ...(spendable === undefined ? {} : { spendable }), reason },
+  };
 }
 
 function reduceSessionError(state: AgentChatState, event: AgentSseEvent & { name: "session.error" }): AgentChatState {

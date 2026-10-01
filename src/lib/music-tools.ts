@@ -40,6 +40,7 @@ import { spawn } from "node:child_process"
 import { createHash } from "node:crypto"
 import {
   FLOWMUSIC_MODELS,
+  flowMusic2ApiUrl,
   generateFlowMusicTrack,
   isFlowMusic2ApiEnabled,
   type GenerateFlowMusicTrackResult,
@@ -59,6 +60,7 @@ import {
   generateYue2Track,
   isYue2ModalEnabled,
   transcribeYue2Score,
+  yue2ModalUrl,
   type GenerateYue2TrackResult,
   type Yue2CotMode,
 } from "./music-yue2"
@@ -318,6 +320,214 @@ async function uploadAudio(
 
 // ── music_gen 工具 ───────────────────────────────────────────────────────────
 
+// ── 免費通路健康探針（2026-09-30 R9 修復 D）─────────────────────────────────
+//
+// 起因：yuri OP MV 評測（SSE 5578/6098）agent 先寫完歌詞、再撞 music_all_channels_failed
+// 三連敗（YuE2 OOM／FlowMusic OAuth 401／Lyria 403 SERVICE_DISABLED）。探針讓 agent 寫歌詞前
+// 就知道「歌做不做得出來、卡在誰手上」。鐵律：**不觸發任何生成、不花錢**——只打
+// /health、/v1/models、模型 metadata GET 與看門狗標記檔；憑證永不入回執。
+// 狀態分類：ready／needs_human_login（需暴君真人登入）／config_disabled（配置/帳號設定未啟用，
+// 需暴君改配置）／resource_insufficient（資源不足：顯存被佔、GPU 忙、配額耗盡）／
+// unreachable（服務不可達：筆電關機、隧道斷、容器掛）。
+
+export type MusicChannelProbeStatus =
+  | "ready"
+  | "needs_human_login"
+  | "config_disabled"
+  | "resource_insufficient"
+  | "unreachable"
+
+export interface MusicChannelProbe {
+  channel: "yue2_modal" | "flowmusic2api" | "lyria_gemini"
+  status: MusicChannelProbeStatus
+  /** 人話結論（簡體，給 agent/用戶看）。 */
+  label: string
+  /** 探得的原始證據摘要（HTTP 碼/上游錯誤 reason/顯存數字），不含任何憑證。 */
+  evidence: string
+  /** 通路能力備註（例：YuE2 8GB 卡單首時長上限）。 */
+  capability?: string
+}
+
+const PROBE_TIMEOUT_MS = 6_000
+/** YuE2 在 8GB 卡的實測峰值 ≈7.3GiB（2026-09-30 R9：peak_alloc 7.32GiB）；空閒顯存低於此＝被他人佔用。 */
+const YUE2_MIN_FREE_VRAM_MIB = 7_400
+/** FlowMusic 看門狗在 Supabase 鏈被連坐吊銷時寫的標記檔（/opt/flowmusic2api/watchdog.py DEAD_MARKER）。 */
+const FLOWMUSIC_CHAIN_DEAD_MARKER_DEFAULT = "/opt/flowmusic2api/CHAIN_DEAD"
+const LYRIA_MODELS_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
+
+const PROBE_STATUS_LABEL: Record<MusicChannelProbeStatus, string> = {
+  ready: "可用",
+  needs_human_login: "需人工登录",
+  config_disabled: "配置未启用",
+  resource_insufficient: "资源不足",
+  unreachable: "服务不可达",
+}
+
+async function probeFetch(
+  url: string,
+  init?: RequestInit,
+): Promise<{ status: number; body: unknown; text: string } | { error: string }> {
+  try {
+    const resp = await fetch(url, { ...init, signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) })
+    const text = await resp.text().catch(() => "")
+    let body: unknown = null
+    try {
+      body = JSON.parse(text)
+    } catch {
+      body = null
+    }
+    return { status: resp.status, body, text: text.slice(0, 300) }
+  } catch (e) {
+    return { error: (e as Error)?.name === "TimeoutError" ? `超时 ${PROBE_TIMEOUT_MS}ms` : String((e as Error)?.message ?? e) }
+  }
+}
+
+async function probeYue2(): Promise<MusicChannelProbe> {
+  const channel = "yue2_modal" as const
+  const base = yue2ModalUrl()
+  if (!base) {
+    return { channel, status: "config_disabled", label: "YuE2 通路未启用（YUE2_MODAL_ENDPOINT 未配置）", evidence: "env YUE2_MODAL_ENDPOINT 为空" }
+  }
+  if (!(process.env[YUE2_HMAC_SECRET_ENV] ?? "").trim()) {
+    return { channel, status: "config_disabled", label: "YuE2 通路缺少签名密钥（YUE2_HMAC_SECRET 未配置）", evidence: "env YUE2_HMAC_SECRET 为空" }
+  }
+  const r = await probeFetch(`${base}/health`)
+  if ("error" in r) {
+    return {
+      channel,
+      status: "unreachable",
+      label: "YuE2 服务不可达（笔电关机/休眠或反向隧道断开）",
+      evidence: `GET /health 失败：${r.error}`,
+    }
+  }
+  const h = (r.body ?? {}) as Record<string, unknown>
+  if (r.status !== 200 || h.ok !== true) {
+    return { channel, status: "unreachable", label: "YuE2 健康检查异常", evidence: `GET /health HTTP ${r.status}：${r.text}` }
+  }
+  if (h.hmac_key_set !== true) {
+    return { channel, status: "config_disabled", label: "YuE2 服务端未配置签名密钥", evidence: "health.hmac_key_set=false" }
+  }
+  const budget = typeof h.ar_token_budget === "number" ? h.ar_token_budget : null
+  const capability = budget
+    ? `8GB 显卡单首时长上限约 ${Math.round((budget - 1035) / 25)}–${Math.round((budget - 814) / 25)} 秒（歌词越长上限越短，超出部分在尾段截断并回报 truncated）；MV/片头曲请写 TV-size 歌词（Intro+Verse+Pre-Chorus+Chorus，约 250 字以内）`
+    : undefined
+  if (h.state !== "idle") {
+    return {
+      channel,
+      status: "resource_insufficient",
+      label: "YuE2 显卡正忙（本机一次一首，约 2.5 分钟后再试）",
+      evidence: `health.state=${String(h.state)}`,
+      capability,
+    }
+  }
+  const free = typeof h.gpu_mem_free_mib === "number" ? h.gpu_mem_free_mib : null
+  const total = typeof h.gpu_mem_total_mib === "number" ? h.gpu_mem_total_mib : null
+  if (free !== null && free < YUE2_MIN_FREE_VRAM_MIB) {
+    return {
+      channel,
+      status: "resource_insufficient",
+      label: `YuE2 显存不足（空闲 ${free}MiB < 需要 ${YUE2_MIN_FREE_VRAM_MIB}MiB，显卡被其他进程占用）`,
+      evidence: `gpu_mem_free_mib=${free} total=${total}`,
+      capability,
+    }
+  }
+  return {
+    channel,
+    status: "ready",
+    label: "YuE2 可用（带人声整歌，含可编辑 ABC 乐谱）",
+    evidence: `health idle，gpu=${String(h.gpu)}，显存空闲 ${free ?? "未知"}/${total ?? "未知"}MiB`,
+    capability,
+  }
+}
+
+async function probeFlowMusic(): Promise<MusicChannelProbe> {
+  const channel = "flowmusic2api" as const
+  const base = flowMusic2ApiUrl()
+  if (!base) {
+    return { channel, status: "config_disabled", label: "FlowMusic2API 通路未启用（FLOWMUSIC2API_URL 未配置）", evidence: "env FLOWMUSIC2API_URL 为空" }
+  }
+  const key = (process.env.FLOWMUSIC2API_KEY ?? "").trim()
+  if (!key) {
+    return { channel, status: "config_disabled", label: "FlowMusic2API 缺少 FLOWMUSIC2API_KEY", evidence: "env FLOWMUSIC2API_KEY 为空" }
+  }
+  const health = await probeFetch(`${base}/health`)
+  if ("error" in health || health.status !== 200) {
+    return {
+      channel,
+      status: "unreachable",
+      label: "FlowMusic2API 服务不可达（容器未运行）",
+      evidence: "error" in health ? `GET /health 失败：${health.error}` : `GET /health HTTP ${health.status}`,
+    }
+  }
+  const models = await probeFetch(`${base}/v1/models`, { headers: { Authorization: `Bearer ${key}` } })
+  if (!("error" in models) && (models.status === 401 || models.status === 403)) {
+    return { channel, status: "config_disabled", label: "FlowMusic2API 拒绝本机 API key", evidence: `GET /v1/models HTTP ${models.status}` }
+  }
+  // 上游帳號會話（Supabase 一次性 refresh token）的死活只有看門狗知道：鏈被吊銷時寫 CHAIN_DEAD。
+  const marker = (process.env.FLOWMUSIC_CHAIN_DEAD_MARKER ?? "").trim() || FLOWMUSIC_CHAIN_DEAD_MARKER_DEFAULT
+  const dead = await fsp.readFile(marker, "utf8").catch(() => null)
+  if (dead !== null) {
+    return {
+      channel,
+      status: "needs_human_login",
+      label: "FlowMusic 账号会话已失效，需要暴君在真实 Chrome 重新登录 flowmusic.app 并导出 cookie 换血",
+      evidence: `看门狗标记 ${marker}：${dead.replace(/\s+/g, " ").trim().slice(0, 160)}`,
+    }
+  }
+  return {
+    channel,
+    status: "ready",
+    label: "FlowMusic2API 可用（Lyria 3.5 整歌，带人声）",
+    evidence: "GET /health 200，/v1/models 鉴权通过，看门狗无 CHAIN_DEAD 标记（会话仅按看门狗 10 分钟巡检判定）",
+  }
+}
+
+async function probeLyria(): Promise<MusicChannelProbe> {
+  const channel = "lyria_gemini" as const
+  const key = (process.env.GEMINI_API_KEY ?? "").trim()
+  if (!key) {
+    return { channel, status: "config_disabled", label: "Gemini Lyria 通路未启用（GEMINI_API_KEY 未配置）", evidence: "env GEMINI_API_KEY 为空" }
+  }
+  const r = await probeFetch(`${LYRIA_MODELS_BASE_URL}/${LYRIA_MODELS.full}`, { headers: { "x-goog-api-key": key } })
+  if ("error" in r) {
+    return { channel, status: "unreachable", label: "Gemini API 不可达", evidence: `GET models/${LYRIA_MODELS.full} 失败：${r.error}` }
+  }
+  const err = ((r.body ?? {}) as { error?: { status?: string; message?: string; details?: Array<{ reason?: string }> } }).error
+  const reasons = (err?.details ?? []).map((d) => d?.reason).filter(Boolean).join(",")
+  const evidence = `GET models/${LYRIA_MODELS.full} HTTP ${r.status}${err ? ` ${err.status ?? ""} ${reasons}`.trimEnd() : ""}`
+  if (r.status === 200) {
+    return { channel, status: "ready", label: "Gemini Lyria 可用（按量付费）", evidence }
+  }
+  if (r.status === 403 && /SERVICE_DISABLED/.test(`${reasons} ${err?.message ?? ""}`)) {
+    const project = /project (\d+)/.exec(err?.message ?? "")?.[1]
+    return {
+      channel,
+      status: "config_disabled",
+      label: `Gemini API 未在 GCP 项目${project ? ` ${project}` : ""} 启用（需暴君在 Google Cloud 控制台启用 generativelanguage.googleapis.com）`,
+      evidence,
+    }
+  }
+  if (r.status === 429) {
+    return { channel, status: "resource_insufficient", label: "Gemini Lyria 配额/限流耗尽", evidence }
+  }
+  return { channel, status: "config_disabled", label: "Gemini API key 或项目权限异常", evidence }
+}
+
+/** 三通路並發探針（免費、不生成）。回執供 agent 開局決策：寫不寫歌詞、寫多長、要不要先找暴君。 */
+export async function probeMusicChannels(): Promise<{
+  channels: MusicChannelProbe[]
+  can_generate_vocal_song: boolean
+  first_ready: MusicChannelProbe["channel"] | null
+  human_actions: string[]
+}> {
+  const channels = await Promise.all([probeYue2(), probeFlowMusic(), probeLyria()])
+  const firstReady = channels.find((c) => c.status === "ready")?.channel ?? null
+  const humanActions = channels
+    .filter((c) => c.status === "needs_human_login" || c.status === "config_disabled")
+    .map((c) => `${c.channel}：${c.label}`)
+  return { channels, can_generate_vocal_song: firstReady !== null, first_ready: firstReady, human_actions: humanActions }
+}
+
 /**
  * 情緒契約 → prompt（工具層薄組裝：契約欄位從 prompt 文本解析不了，所以工具參數
  * 只收自由文本 prompt；結構標籤/時間戳由調用方寫進 prompt 文本。lyrics 缺省=純器樂）。
@@ -332,13 +542,20 @@ function buildToolPrompt(rawPrompt: string, hasLyrics: boolean): string {
 export const musicGenTool: MusicToolDef = {
   id: "music_gen",
   description:
-    "调用 Lyria／FlowMusic2API／YuE2 生成音乐（主题曲/插曲/配乐）。整歌或快速生成，返回音频 URL、时长与歌词回显；YuE2 通路另返回可编辑的白盒 ABC 乐谱 score_abc（可二次精修），且支持带谱重渲染——传入 abc（自备/已编辑的 ABC 乐谱）＋cot_mode 即以该乐谱为约束重新生成录音（乐谱编辑＝改和弦/改谱后重渲染出新版本，仅 YuE2 通路有效），或传入 source_audio（源音频 base64，可带 data: 前缀）走翻唱工作流——先自动扒谱（SheetSage2 提取旋律骨干）再以新风格重新演绎（cot_mode 缺省 melody＝官方翻唱模式，伴奏自由适配新风格；显式传 full 则保留原曲和声重渲染）。无歌词时按纯器乐处理；需要人声必须提供歌词。通路由环境配置固定（优先序 YuE2 > FlowMusic2API > Gemini Lyria 直连），三通路能力有差异，见各参数说明。",
+    "调用 Lyria／FlowMusic2API／YuE2 生成音乐（主题曲/插曲/配乐）。整歌或快速生成，返回音频 URL、时长与歌词回显；YuE2 通路另返回可编辑的白盒 ABC 乐谱 score_abc（可二次精修），且支持带谱重渲染——传入 abc（自备/已编辑的 ABC 乐谱）＋cot_mode 即以该乐谱为约束重新生成录音（乐谱编辑＝改和弦/改谱后重渲染出新版本，仅 YuE2 通路有效），或传入 source_audio（源音频 base64，可带 data: 前缀）走翻唱工作流——先自动扒谱（SheetSage2 提取旋律骨干）再以新风格重新演绎（cot_mode 缺省 melody＝官方翻唱模式，伴奏自由适配新风格；显式传 full 则保留原曲和声重渲染）。无歌词时按纯器乐处理；需要人声必须提供歌词。写歌词前先传 probe=true 做免费通路体检（不生成、不计费），确认 can_generate_vocal_song 再动笔。通路由环境配置固定（优先序 YuE2 > FlowMusic2API > Gemini Lyria 直连），三通路能力有差异，见各参数说明。",
   args: {
+    probe: {
+      type: "boolean",
+      required: false,
+      description:
+        "true=只做免费通路健康探针（不生成音乐、不花钱、不需要 prompt），返回每条通路状态：ready 可用／needs_human_login 需人工登录／config_disabled 配置未启用／resource_insufficient 资源不足（显存/GPU 忙/配额）／unreachable 服务不可达，以及 can_generate_vocal_song 与 YuE2 时长上限。写歌词前先调一次。",
+    },
     prompt: {
       type: "string",
-      required: true,
+      // 生成時必填（execute 內校驗並回 invalid_args）；schema 放寬是為了 probe=true 可單獨調用。
+      required: false,
       description:
-        "风格+情绪描述：genre/BPM/调性/编制/氛围。可写结构标签（[Verse]/[Chorus]）或时间戳结构（[0:00 - 0:10] Intro:）。例：cinematic orchestral, 90 BPM, key of D minor, mood: heroic and sweeping。注意：时间戳结构只对 Gemini Lyria 直连通路生效，FlowMusic2API 与 YuE2 通路不认时间戳（会被剥除并如实标注）。",
+        "生成时必填（probe=true 时可省略）。风格+情绪描述：genre/BPM/调性/编制/氛围。可写结构标签（[Verse]/[Chorus]）或时间戳结构（[0:00 - 0:10] Intro:）。例：cinematic orchestral, 90 BPM, key of D minor, mood: heroic and sweeping。注意：时间戳结构只对 Gemini Lyria 直连通路生效，FlowMusic2API 与 YuE2 通路不认时间戳（会被剥除并如实标注）。",
     },
     lyrics: {
       type: "string",
@@ -381,6 +598,19 @@ export const musicGenTool: MusicToolDef = {
   },
   async execute(rawArgs, context) {
     try {
+      if (rawArgs.probe === true || rawArgs.probe === "true") {
+        const report = await probeMusicChannels()
+        const summary = report.channels.map((c) => `${c.channel}=${PROBE_STATUS_LABEL[c.status]}`).join("，")
+        return ok({
+          title: report.can_generate_vocal_song ? `音乐通路可用（${report.first_ready}）` : "音乐通路全部不可用",
+          mode: "probe",
+          summary,
+          ...report,
+          hint: report.can_generate_vocal_song
+            ? `可以写歌：生成会先走 ${report.first_ready}。${report.channels.find((c) => c.channel === report.first_ready)?.capability ?? ""}`
+            : `现在做不出带人声的歌，先别写歌词；把 human_actions 原样告诉用户，等其处理后再探针。`,
+        })
+      }
       const prompt = asString(rawArgs.prompt)
       if (!prompt) {
         return fail("invalid_args", "缺少必填参数 prompt：需要风格+情绪描述（genre/BPM/调性/编制/氛围）。")

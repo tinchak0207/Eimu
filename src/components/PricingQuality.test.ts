@@ -12,7 +12,11 @@ import {
   planDiscountPercent,
   planUnitsForCoins,
 } from "../lib/plans.ts";
-import { generationCoins } from "../lib/generation-model-catalog.ts";
+import {
+  IMAGE_MODEL_IDS,
+  VIDEO_MODEL_IDS,
+  generationCoins,
+} from "../lib/generation-model-catalog.ts";
 
 function read(relPath: string) {
   return readFileSync(join(process.cwd(), relPath), "utf8");
@@ -71,10 +75,52 @@ test("pricing page has no 11px caption2 copy at all", () => {
 test("the invite link shown on screen is exactly what the copy button writes", () => {
   const source = read("src/components/PricingClient.tsx");
 
-  // 复制的是 ?ref=，展示的曾是 /ref= —— 手抄屏幕上那条会打不开。
-  assert.match(source, /\$\{window\.location\.origin\}\?ref=\$\{affCode\}/);
-  assert.match(source, /\?ref=\$\{affCode\}`\}/);
+  // 这条测试守的是「邀请链接只有一个真源」这个不变量，不是某一种拼接写法。
+  // 它诞生于一个真实 bug：展示用 /ref=<code>、复制用 ?ref=<code> 两套模板各写各的，
+  // 用户手抄屏幕上那条链接永远打不开——因为复制走的才是能用的那个。2026-09-28 邀请
+  // 换成服务端自签码（fetchInviteLink → inviteUrl state），代码形态变了，但这个 bug
+  // 的成因（展示与复制各持一个来源）没变，所以守门方式升级为直接盯那个来源：
+  //   1) 复制写入剪贴板的必须是 inviteUrl（不是就地拼出来的字符串）；
+  //   2) 屏幕上渲染的必须是同一个 inviteUrl（不是另一条模板算出来的）；
+  //   3) 不允许任何手拼链接模板残留——手拼是「第二个来源」的唯一出现形式。
+  // 只要展示侧和复制侧读的是同一个变量，两条链接在结构上不可能分叉。
+
+  // 1) 复制侧：写进剪贴板的真源是 inviteUrl。
+  assert.match(
+    source,
+    /navigator\.clipboard\.writeText\(inviteUrl\)/,
+    "复制按钮必须写入 inviteUrl——就地拼串会造出第二个链接来源",
+  );
+
+  // 2) 展示侧：屏幕上渲染的也是 inviteUrl。
+  assert.match(source, /\{inviteUrl\}/, "屏幕上展示的链接必须渲染同一个 inviteUrl");
+
+  // 3) 不得存在第二条链接来源（任何手拼模板）。原 /ref=${affCode} 那条原样保留：
+  // 它抓到的就是当年那个展示侧 bug 的签名，今天改回「展示 /ref=、复制 ?ref=」任何一半
+  // 都还会变红（另一半由下面 ?ref= 的断言管）。
   assert.doesNotMatch(source, /\/ref=\$\{affCode\}/);
+
+  // 原 `assert.match(source, /\$\{window\.location\.origin\}\?ref=\$\{affCode\}/)` 连同它后面的
+  // `\?ref=\$\{affCode\}` 验证的是「复制侧是前端 ?ref= 手拼模板」——那是 aff 时代的唯一形态。
+  // 服务端自签码落地后，这条在任意正确实现上都会恒假（链接由服务端签发，前端不再拼 query），
+  // 所以它不是在守 bug，只是在钉一个被替换掉的实现，按原样保留会把「已修复」读成「回归」。
+  // 去掉它之后，它抓的「手拼 ?ref= 当复制源」签名的覆盖不减反增：下面这条把 ?ref= 手拼
+  // 一律判红（无论出现在查询串还是路径），副作用是连旧的 aff 前端拼接路线也一并禁掉。
+  assert.doesNotMatch(
+    source,
+    /[?&]ref=\$\{/,
+    "不得再出现手拼的 ?ref= 链接模板（邀请链接只能由 fetchInviteLink 下发）",
+  );
+
+  // 4) 唯一真源必须是服务端的 fetchInviteLink：它既赋值 inviteUrl，且全页只有这一处
+  //    链接来源；前端不得自带任何第二套拼链接逻辑（window.location.origin 拼接即第二来源）。
+  assert.match(source, /fetchInviteLink/, "邀请链接必须来自服务端的 fetchInviteLink");
+  assert.match(source, /setInviteUrl\(res\.data\.url\)/);
+  assert.doesNotMatch(
+    source,
+    /window\.location\.origin/,
+    "页面内不得再出现前端手拼的链接来源（唯一来源是 fetchInviteLink 下发的 url）",
+  );
 });
 
 test("no user-facing surface uses a dead non-multiple-of-5 opacity modifier", () => {
@@ -116,7 +162,24 @@ test("model price table is derived from the billing catalog, never hand-written"
   // 换算展示的护身符：表里每一个数字都必须等于计费配置（catalog + 运行时覆写）
   // 计算值。手写静态表一旦与实收脱钩，比价页就变成虚假宣传。
   const rows = modelPriceRows();
-  assert.ok(rows.length >= 35, "模型单价表应覆盖全部上架模型（图像+视频），当前只有 " + rows.length + " 行");
+
+  // 覆盖率用「集合相等」表达，不用写死的行数下限：下限（曾写 >= 35）是个会自己
+  // 过期的魔法数字——模型收编到 30 个时它就恒假，而覆盖其实完好；反过来它又会
+  // 掩盖「新模型上架但漏行」的静默丢数据（下限够用就绿）。期望集合取自 catalog
+  // 自己的上架清单（IMAGE_MODEL_IDS + VIDEO_MODEL_IDS），双向断言：
+  assert.ok(rows.length > 0, "模型单价表不得为空");
+  const expectedIds = [...IMAGE_MODEL_IDS, ...VIDEO_MODEL_IDS];
+  assert.equal(
+    new Set(expectedIds).size,
+    expectedIds.length,
+    "catalog 上架清单里不应有重复 id",
+  );
+  const rowIds = rows.map((row) => row.id).sort();
+  assert.deepEqual(
+    rowIds,
+    [...expectedIds].sort(),
+    "单价表的 id 集合必须与 catalog 上架模型完全相等（每个上架模型都必须有行，且不得有 catalog 外的行）",
+  );
 
   const ids = new Set(rows.map((row) => row.id));
   assert.equal(ids.size, rows.length, "模型单价表不允许重复行");

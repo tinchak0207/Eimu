@@ -94,7 +94,10 @@ export async function createWechatLoginState(): Promise<WechatLoginState> {
   };
   memoryStore.set(memoryKey(state.code), state);
   stateIndex.set(state.state, state.code);
-  void blobPut(state);
+  // 必須 await（2026-09-30）：掃碼事件 /msg 與這裡多半落在不同 instance，只能靠
+  // blob 的 state 索引反查。fire-and-forget 時 serverless 回完響應就可能凍結，
+  // 索引沒寫上 → 掃碼事件查無此碼 → 使用者掃了卻永遠等不到登入。
+  await blobPut(state);
   return state;
 }
 

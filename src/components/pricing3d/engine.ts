@@ -32,6 +32,8 @@ export interface Pricing3DEngine {
   resize(width: number, height: number): void;
   setActive(active: boolean): void;
   setReducedMotion(reduced: boolean): void;
+  /** 以靜止解析度畫一幀並回傳畫面（產低端機靜態圖用；透明底）。 */
+  snapshot(type?: string, quality?: number): string;
   dispose(): void;
 }
 
@@ -44,6 +46,8 @@ export interface EngineInit {
   sound: PricingSound | null;
   onFirstFrame(): void;
   onFailure(): void;
+  /** 解析度已降到地板仍 < 24fps：宿主可改走靜態圖（不給就照舊減卡數）。 */
+  onSlow?(): void;
 }
 
 /* ── 導演參數（快慢在這裡調，不在物理裡）── */
@@ -83,7 +87,7 @@ const nearest = (angle: number, period: number) => Math.round(angle / period) * 
 export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
   const { canvas, compact, sound } = init;
   let reduced = init.reducedMotion;
-  let quality = 0; // 0 全效 / 1 關陰影降解析度 / 2 再減卡數
+  let quality = 0; // 0 全效 / 1 減卡數（解析度走動態解析度，陰影不再降）
   const CAP = compact ? 140 : 420;
   let cap = CAP;
 
@@ -95,6 +99,10 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
     preserveDrawingBuffer: false,
   });
   renderer.setClearColor(0x000000, 0);
+  /* 生產不查 shader 編譯日誌（2026-10-01 效能）：three 預設在 program 首次使用時呼叫 getShaderInfoLog／
+     getProgramInfoLog，Intel/Mesa 這類不支援平行編譯的驅動會在這裡同步等編譯完——實測滾動切档時主線程卡
+     1.2s。開發環境保留檢查，著色器寫錯照樣看得到報錯。 */
+  renderer.debug.checkShaderErrors = process.env.NODE_ENV !== "production";
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   /* Neutral（Khronos PBR Neutral）：不像 ACES 那樣把飽和色壓灰——作品要鮮，不要老照片。 */
   renderer.toneMapping = THREE.NeutralToneMapping;
@@ -294,7 +302,7 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
   function getRig(id: WorldId) {
     let r = rigs.get(id);
     if (!r) {
-      r = buildWorld(id, { compact, shadows: quality === 0 });
+      r = buildWorld(id, { compact, shadows: true });
       rigs.set(id, r);
     }
     return r;
@@ -701,24 +709,37 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
     return busy;
   }
 
+  /* 品質階梯（2026-10-01 改）：不再關陰影——實測對核顯幾乎沒幫助，卻會讓全場 shader 在互動中途重編（核顯上
+     最大的一次卡頓）。解析度交給下方「動態解析度」；只有降到地板仍 < 24fps 才砍卡數。 */
   function applyQuality(level: number) {
     quality = level;
     if (level >= 1) {
-      renderer.shadowMap.enabled = false;
-      scene.traverse((obj) => {
-        const mesh = obj as THREE.Mesh;
-        if (!mesh.isMesh) return;
-        const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-        for (const m of mats) m.needsUpdate = true;
-      });
-    }
-    if (level >= 2) {
-      /* 解析度是最後一張牌、且只降到地板的 75%（< 1 就是「糊」，永遠不回去）。 */
-      pixelRatio = Math.max(1.25, basePixelRatio * 0.75);
-      renderer.setPixelRatio(pixelRatio);
       cap = Math.min(CAP, 260);
       if (count > cap) setCount(cap, false);
     }
+  }
+
+  /* 動態解析度（2026-10-01）：超取樣地板只在「動」的時候讓步——動畫中按實測幀時一格 0.25 往下降（最低到裝置
+     dpr，不低於 1），快了再升回去；一靜下來最後一幀補回滿解析度，靜止畫面永遠是 1.75× 超取樣的清晰度。
+     改 pixelRatio 只是換畫布尺寸，不觸發 shader 重編。 */
+  const motionFloor = Math.max(1, Math.min(basePixelRatio, window.devicePixelRatio || 1));
+  let motionRatio = basePixelRatio;
+  let motionAcc = 0;
+  let motionN = 0;
+  function applyPixelRatio(next: number) {
+    if (next === pixelRatio) return;
+    pixelRatio = next;
+    renderer.setPixelRatio(next);
+  }
+  function tuneMotionRatio(raw: number) {
+    motionAcc += raw;
+    motionN += 1;
+    if (motionN < 12) return;
+    const avg = motionAcc / motionN;
+    motionAcc = 0;
+    motionN = 0;
+    if (avg > 1 / 45 && motionRatio > motionFloor) motionRatio = Math.max(motionFloor, motionRatio - 0.25);
+    else if (avg < 1 / 75 && motionRatio < basePixelRatio) motionRatio = Math.min(basePixelRatio, motionRatio + 0.25);
   }
 
   function frame(ts: number) {
@@ -728,6 +749,7 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
     const raw = lastTs ? (ts - lastTs) / 1000 : 0;
     lastTs = ts;
     const busy = update(dt);
+    applyPixelRatio(busy ? motionRatio : basePixelRatio);
     renderer.render(scene, camera);
     if (!firstFrame) {
       firstFrame = true;
@@ -736,16 +758,21 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
     }
     /* fps 偵測：只量連續動畫幀（切档那一幀的建場景成本不算），連續偏慢就降一級。 */
     if (raw > 0 && raw < 0.25 && busy) {
+      tuneMotionRatio(raw);
       frameAcc += raw;
       frameN += 1;
       if (frameN >= 90) {
         const avg = frameAcc / frameN;
         frameAcc = 0;
         frameN = 0;
-        /* 先砍效果（陰影/解析度），真的卡（< 24fps）才砍量——量就是額度，砍到比梦虹還少 =
+        /* 先讓動態解析度降到地板，仍然真的卡（< 24fps）才砍量——量就是額度，砍到比梦虹還少 =
            把「越大越失控」畫反。 */
-        if (quality === 0 && avg > 1 / 34) applyQuality(1);
-        else if (quality === 1 && avg > 1 / 24) applyQuality(2);
+        if (quality === 0 && motionRatio <= motionFloor && avg > 1 / 24) {
+          if (init.onSlow) {
+            quality = 1;
+            init.onSlow();
+          } else applyQuality(1);
+        }
       }
     }
     if (busy) raf = requestAnimationFrame(frame);
@@ -758,7 +785,39 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
   }
 
 
-  /** 其餘世界在閒時預建，切档硬剪接時不卡那一下（手機不預建，省記憶體）。 */
+  /**
+   * 預熱一個世界（2026-10-01 效能）：只預建物件不夠——shader 在「第一次被畫」時才在主線程編譯
+   * （實測滾動切档時 getProgramInfoLog 卡住主線程、單幀 733ms），貼圖也是第一次畫才上傳。
+   * 這裡把它暫時掛進場景、以切過去後的同一組燈光呼叫 compileAsync：program 的建立是同步的，
+   * 驅動端編譯走 KHR_parallel_shader_compile 在背景完成，不再阻塞；隨即摘下，下一幀照舊只畫當前世界。
+   */
+  function warmRig(r: WorldRig) {
+    if (r === rig || disposed) return;
+    const prev = rig;
+    const prevFog = scene.fog;
+    if (prev) scene.remove(prev.group);
+    scene.add(r.group);
+    /* 霧也決定 shader 變體（USE_FOG／霧型）：用該世界的霧編，否則預熱的是錯的變體、切過去照樣現編。 */
+    scene.fog = r.fog;
+    renderer.compileAsync(scene, camera).catch(() => {
+      /* 預熱失敗＝退回「第一次畫時編譯」，不影響正確性。 */
+    });
+    scene.fog = prevFog;
+    scene.remove(r.group);
+    if (prev) scene.add(prev.group);
+    r.group.traverse((obj) => {
+      const mesh = obj as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      for (const m of mats) {
+        for (const value of Object.values(m)) {
+          if ((value as THREE.Texture | null)?.isTexture) renderer.initTexture(value as THREE.Texture);
+        }
+      }
+    });
+  }
+
+  /** 其餘世界在閒時預建＋預熱（shader／貼圖），切档硬剪接時不卡那一下（手機不預建，省記憶體）。 */
   function prebuildOthers() {
     if (compact) return;
     const queue = WORLD_IDS.filter((id) => !rigs.has(id));
@@ -768,7 +827,7 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
       if (disposed) return;
       const id = queue.shift();
       if (!id) return;
-      getRig(id);
+      warmRig(getRig(id));
       idle(next);
     };
     idle(next);
@@ -871,6 +930,11 @@ export function createPricing3DEngine(init: EngineInit): Pricing3DEngine {
         sound?.knock(0.6);
       }
       kick();
+    },
+    snapshot(type = "image/webp", quality = 0.9) {
+      applyPixelRatio(basePixelRatio);
+      renderer.render(scene, camera);
+      return canvas.toDataURL(type, quality);
     },
     resize(width, height) {
       viewW = Math.max(2, Math.round(width));

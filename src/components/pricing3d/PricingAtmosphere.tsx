@@ -55,22 +55,39 @@ export function PricingAtmosphere({ world }: { world: string }) {
   }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* 滑鼠視差：底圖慢、氣泡快，寫 --mx/--my（-1..1），rAF 節流。觸控裝置不做。
-     寫在頁面根（.p3d-page）上：票面的虹彩鍍膜也跟著同一對變數轉。 */
+     效能（2026-10-01）：原本寫在頁面根（.p3d-page）上＝每次滑鼠移動整頁約 980 個元素重算樣式
+     （實測每秒 450ms style recalc）。只寫給真正用到的元素：底圖／氣泡兩層＋每張票面（虹彩細邊與全息鍍膜的
+     ::before/::after 從 .ppc-glass 繼承）。量化到 0.01（視差最大 38px×0.01＜0.4px，外加 CSS 過渡平滑），
+     慢移時不重寫。 */
   useEffect(() => {
-    const root = rootRef.current?.parentElement;
-    if (!root || !window.matchMedia("(hover: hover) and (pointer: fine)").matches) return;
+    const atmo = rootRef.current;
+    const root = atmo?.parentElement;
+    if (!atmo || !root || !window.matchMedia("(hover: hover) and (pointer: fine)").matches) return;
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     let raf = 0;
     let mx = 0;
     let my = 0;
+    let lastX = "";
+    let lastY = "";
     const onMove = (event: PointerEvent) => {
       mx = (event.clientX / window.innerWidth) * 2 - 1;
       my = (event.clientY / window.innerHeight) * 2 - 1;
       if (!raf) {
         raf = requestAnimationFrame(() => {
           raf = 0;
-          root.style.setProperty("--mx", mx.toFixed(3));
-          root.style.setProperty("--my", my.toFixed(3));
+          const x = mx.toFixed(2);
+          const y = my.toFixed(2);
+          if (x === lastX && y === lastY) return;
+          lastX = x;
+          lastY = y;
+          const targets = [
+            ...atmo.querySelectorAll<HTMLElement>(".dw-plate, .dw-bubbles"),
+            ...root.querySelectorAll<HTMLElement>(".ppc-glass"),
+          ];
+          for (const el of targets) {
+            el.style.setProperty("--mx", x);
+            el.style.setProperty("--my", y);
+          }
         });
       }
     };
