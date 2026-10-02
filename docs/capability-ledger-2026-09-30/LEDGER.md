@@ -68,8 +68,14 @@
 - **模型不可用時推薦替代模型** — 提交到已停用模型時被擋下，並直接告訴用戶「同介質成功率最高的另一個模型是哪個」 ｜ 證據: f009cf09
 - **模型目錄只列真正可用的模型** — 被斷路器停用或無供貨的模型不會出現在模型列表裡 ｜ 證據: f009cf09
 - **音樂生成多路自動回落** — 選的音樂通路失敗時自動改走下一條（YuE2→FlowMusic→Lyria），成片率明顯提高 ｜ 證據: e75a2e8e
+  > **2026-10-02 對賬更正（覆蓋先前錯誤事實；先前的「FlowMusic 只到 /test 綠」「直接 Lyria 仍 403 SERVICE_DISABLED」兩句已作廢）**：回落**碼**在場（`src/lib/music-tools.ts:777-827`，YuE2→flowmusic→lyria 順序嘗試，回執帶 `fallback_from`／`fallback_reason`）。
+  > - **YuE2 已實證出歌（2026-10-02）**：真單兩首 FLAC 51.40s／8,664,342B、67.84s／12,123,451B（`deploy-staging/yue2-modal/out_local/service/runs/yue2-ebd3791e-8db7-4d87-944a-f661f3a2144b-20261002-120745-264412-1/audio.flac`、`yue2-60772fcd-082a-4df0-a46b-b10fc2c85de8-20261002-121502-264412-3/audio.flac`，receipt `ok=true`），公網 Range 206＋magic `fLaC`。ABC token 上限原為我方 config 保守值 500，已恢復上游預設 4096（`deploy-staging/yue2-modal/local_service.py:102-106`）。**限制**：≥90 秒在 8GB 卡未達成（OOM `nar.py:149 _prefill`→`mlp.down_proj`，`…/yue2-20a21ec4-a774-488b-93a9-fdf789c5abeb-20261002-121020-264412-2/child.log:25`）；且筆電反向隧道**不能 24/7**，休眠即不可達並回落 FlowMusic。
+  > - **FlowMusic 已實證出歌（2026-10-02）**：真單 HTTP 200，clip 153.98s m4a，音訊 URL Range GET 驗為 206＋`content-type: audio/mp4`（magic `ftypM4A`），credits −10（帳號 `ujkanicina@gmail.com`）；看門狗已加第二消費者偵測（`CHAIN_DEAD.json`），換血配方固化為 skill `flowmusic-session-revival`。
+  > - **Lyria**：Vertex `lyria-002` 可出純器樂約 30s WAV（已驗 RIFF/WAVE 206）；**直接 Lyria 3.5 人聲整歌仍待打通**。舊「403 SERVICE_DISABLED／需暴君啟用 GCP」口徑已作廢；契約已換血為 `models/<id>:generateContent`（舊 `/v1beta/interactions` 端點 404），新 key 已注入（`GEMINI_STUDIO_API_KEY`）。**真正阻斷點＝該 GCP 專案未開帳單、生成配額為 0**（真單 429 RESOURCE_EXHAUSTED，`lyria-3-pro` limit 0），單價 $0.08/首，需暴君在 Google Cloud 開 billing。出處：`src/lib/music-lyria.ts:4-21,33-45,64-67`；記憶 `2026-10-02-lyria35-generatecontent-studio-key-1002`。
+  > ⇒ 三路中 **YuE2、FlowMusic 已實證出歌**，Lyria 目前僅純器樂；「成片率明顯提高」仍缺端到端統計證據。口徑已拍板：**主張保留＋本更正事實註**（對外語氣不動）。對賬表見 `docs/CAPABILITIES.md` 內部「对外宣称 vs 现场对账（2026-10-02）」。
 - **欠費無替補即時失敗並退款** — 上游額度用盡且無健康替代供應商時，2.4 秒內直接失敗退款，不再空等 25 分鐘 ｜ 證據: e75a2e8e
 - **字幕分屏** — 成片字幕每屏 7-12 字，優先切在換行／句末標點／句內停頓等語義邊界，不把一句話切斷 ｜ 證據: 51631bc1
+  > **2026-10-02 第二輪更正（覆蓋早前「接線施工中」判定）**：字幕燒錄＋標題字入畫**已上線**——`assembleFilmNode` 建 `subtitleCues` 並 `setHarnessState`（`deploy-staging/gateway/workflow-gw.ts:892-937`），`exportSelectedMainClips` 復用 `toAss`＋`subtitles=` 濾鏡（`deploy-staging/gateway/editor/composeEngine.ts:584-600`；輪子 `src/vendor-bridges/editor/composeEngine.ts:1021-1026,1106-1110`），本機與 VPS md5 相符。離線像素證據（對照組＝無字幕成片）：t=12 底部字幕帶 24.80% 像素被改動、上方 20% 區 0.000%；t=25 為 17.14%／0.000%（`eval-e2e-final-cut-1002/evidence/r2/`）。**仍缺**：真實 workflow 全流程（agent→workflow_generate→film）端到端跑一次。｜ 驗證方式: orchestrator 親驗（像素差）／待驗（真 workflow）
 - **生圖任務提交與結果查詢** — 提交生圖任務後可看任務狀態與成品結果 ｜ 證據: 4860f1ed
 - **生視頻提交** — 可直接提交視頻生成，指定時長／解析度／是否帶音頻 ｜ 證據: 4860f1ed
 - **畫布生成支援角色化參考圖與負面詞** — 畫布生成可帶多張帶角色（角色／風格等）的參考圖與負面詞 ｜ 證據: e19103a3
@@ -252,6 +258,7 @@
 - **雲端素材庫與提示詞庫面板** — 兩 tab：公共提示詞庫（可插入畫布／填節點／存素材庫）與我的雲端素材；未登入時誠實顯示登入提示 ｜ 證據: ec748a51
 - **畫布圖片三級載入與失敗占位** — 直鏈失敗自動切同源代理，仍失敗才顯示破圖占位並給「重新載入」，不冒充生成本身失敗 ｜ 證據: af3a9c4e
 - **確認閘尚未上生產（不假裝已生效）** — 資產／分鏡確認閘在生產需閘道端寫入才生效，本批未部署即明示，不宣稱已能攔 ｜ 證據: a7e169f3
+  > 2026-10-01 更正（覆蓋本條）：此出處是 commit `a7e169f3` 的**當下自述**，非勘驗。現場＝VPS 三檔與 repo md5 逐位元一致、符號在場（`markGateNodeState`/`resolveCollaborateGate`/`wfGateContinuations`/`awaitingApproval`）、模板三停點 `gate:` 齊、confirm 路由回 401（存在）。**從未攔下的真因＝閘只在 `interaction_mode==="collaborate"` arm，而 VPS `user_settings` 全表 0 筆 collaborate** ⇒ 屬「只差驗證（要先 arm）」，不是「缺實作」。停點本身零付費。
 - **非法值不毀使用者資料** — 模型傳錯一個 enum 時只省略該鍵，不清掉使用者已填的劇集清單 ｜ 證據: f603864c
 - **分鏡 QC 缺值不謊報可過** — 分鏡缺欄一律回 missing 並判未完成，空字串／純空白／NaN／空卡 id 都算缺，不補假值 ｜ 證據: b01a1c47, 49bffcd7
 - **無來源欄位誠實留空** — 沒有可靠來源的欄位（時長、場景 id、關鍵幀 id、音錨 id 等）一律留 missing，不臆造 ｜ 證據: 49bffcd7
@@ -304,6 +311,7 @@
 - **時裝域誠實標示 unsupported** — 8 支工具僅 1 支有真能力，其餘明示不支援，不宣稱試穿／修手模型存在 ｜ 證據: 06c6fdda
 - **3D 需求禁止用二維生成頂替** — 3D 需求必須走 3D 工具鏈，不准用二維生成假冒 ｜ 證據: 86b2584b
 - **音頻實體卡端到端未驗** — 音頻卡引用只驗到「真的展開才送上游」，上游 502（無可用帳號），不假裝已可用 ｜ 證據: 7f9dbe4e
+  > 2026-10-01 更正（覆蓋本條）：**502 是 FlowMusic2API（music 通路），與 TTS 無關**。TTS 上游自 2026-08-30 起已修好（VPS `/opt/edge-tts` 代理，edge-tts 免 key），2026-10-01 另有 6 行→6 個 distinct 音檔真跑。真正缺口是**扣費沒接**（站點 TTS 一律 0 額：`src/app/api/v1/tts/generations/route.ts:88`、`src/app/api/canvas/storyboard-voiceover/route.ts:109`、`generation-model-catalog/catalog.ts:889` `fixedCoins:0`）——設定真價屬產品決策（待裁）。
 
 ### 帳號與增長
 
@@ -483,10 +491,22 @@
 
 **聲明**：本檔證明「能力存在於 repo 歷史」，不等於已部署驗證。以下每條都只到「repo 裡有這個實作／宣告」的程度，缺的是生產端到端證據；凡三篩時已自陳未驗者，一律原樣保留，不升級為已驗。
 
+**2026-10-02 第二輪回核**：本節已按當日最終狀態**覆蓋**早前判定（尤以「字幕接線施工中」為代表——該句作廢，現為已上線）。每條末新增 `驗證方式` 欄，分級＝`orchestrator 親驗`／`代理實測`／`待驗`（源碼或字串斷言、檔案存在、調用次數只算變更探針，不計入已驗）。產品的對外語氣取捨另列於 `docs/CAPABILITIES.md`「待裁」，不在此改寫。
+
 缺什麼證據分述：
 
+- **成片自動裝配的字幕／標題字入畫（2026-10-02 第二輪：已上線；覆蓋早前「接線施工中」判定）** — `assembleFilmNode` 建 `subtitleCues` 並 `setHarnessState`（`deploy-staging/gateway/workflow-gw.ts:892-937`）；`exportSelectedMainClips` 復用 `toAss`＋`subtitles=` 濾鏡燒錄（`deploy-staging/gateway/editor/composeEngine.ts:584-600`；輪子 `src/vendor-bridges/editor/composeEngine.ts:1021-1026,1106-1110`），本機與 VPS md5 相符。離線像素證據（對照組＝無字幕成片）：t=12 底部字幕帶 24.80% 像素被改動、上方 20% 區 0.000%；t=25 為 17.14%／0.000%（`eval-e2e-final-cut-1002/evidence/r2/`）。**仍缺**：真實 workflow 全流程（agent→workflow_generate→film）跑一次。 ｜ 證據: 51631bc1 ｜ 驗證方式: orchestrator 親驗（像素差）／待驗（真 workflow）
+- **導出前質檢＝矯正器非阻擋門（2026-10-02 第二輪）** — `deploy-staging/gateway/film-qc.ts` 已掛導出前（`workflow-gw.ts:1008-1016`）做 -16 LUFS 響度兩遍＋尾凍結／黑幀修剪，對上輪 `final.mp4` 實測 -38.5→-16.1 LUFS、30.26→29.01s；設計為**永不拋錯**（內層異常→catch→交原片＋message 註明）。對外「must 項沒清完不許導出」的硬口徑與現場不符，屬產品定位，見 `docs/CAPABILITIES.md`「待裁」。**仍缺**：真會話複測。 ｜ 證據: 2890c923 ｜ 驗證方式: 代理實測（對 final.mp4）／待驗（真會話）
+- **音樂全鏈備援（2026-10-02 第二輪）** — YuE2、FlowMusic 已實證出歌；Lyria 契約已換血為 `models/<id>:generateContent`，但該 GCP 項目未開帳單、生成配額 0（真單 429，單價 $0.08/首）。仍缺：① YuE2 **24/7 穩定性**（筆電反向隧道休眠即不可達、回落 FlowMusic）；② Lyria 人聲整歌（待暴君開 billing）。 ｜ 證據: e75a2e8e ｜ 驗證方式: orchestrator 親驗（FlowMusic Range 206）／代理實測（YuE2 FLAC）／待驗（Lyria 人聲、YuE2 24/7）
+- **計費帳本對賬（2026-10-02 第二輪）** — 單價估算與扣費本來同源（同一 `generationCoins`）；E2E 391 vs 520 真因是孤兒鏡＋退款未入控面帳本，已改控面逐 job 實扣單一真源（`deploy-staging/gateway/workflow-gw.ts:503-558`、`:94-96`、`:425-429`，退款＝批准額−控面實扣−已退，孤兒鏡取消 `:453`）。VPS 12:01:52 曾對 `wf_muqfkhw7_1` 記出 **130.001 幣假退款且永不回沖**（控面帳本投影秒級延遲，舊版把「還沒查到」當「沒扣」）；已加未落帳 job 重試 8×5s＋`unresolved>0` 不記退款（`:518-530,553-554`），歷史兩筆假帳 append-only 反向沖銷留痕（未刪原行）。**仍缺**：真會話帳本驗收。 ｜ 證據: e19103a3, a0cf8147 ｜ 驗證方式: orchestrator 親驗
+- **繁體會話簡→繁輸出矯正（2026-10-02 第二輪：已上線）** — 此前只在本機、本輪補部署；VPS md5＝本機。`deploy-staging/gateway/outbound-sanitize.ts:184-187`（`bodyT2s`，`t2s===false` 走 `s2tLine`）、`:142-153`（`s2tLine`）、`:73-78`（`S2T_MAP` 由 R5-C 對照表反向導出，僅新增 export）。四情境真輸入通過：繁體會話全繁、JSON 柵欄與 URL 逐字不動、簡體會話無回退、含假名日文行原樣。 ｜ 驗證方式: 代理實測（用 VPS 部署後檔跑行為 harness）
+- **終態通報 replay 耐久化（2026-10-02 第二輪）** — 病灶＝N2 strip 依事件名一刀切剝所有 `message.delta`，把網關主動的終態通報連坐剝掉（`wf_muqfkhw7_1` 持久化 replay 內通報 0 次）。修法：網關主動幀默認 `strippable=false`（`sse-core.ts:80-86`、`replay-frame.ts:108-150`、`persistence.ts:209,249`），strip 只剝模型幀。探針 PROBE_OK＋線上 curl 取回真通報幀。**仍缺**：真實用戶晚重連（Last-Event-ID）取回。 ｜ 驗證方式: 代理實測（探針＋線上 curl）／待驗（真實晚重連）
+- **排隊換道與喚醒重試（2026-10-02 第二輪）** — 排隊／容量飽和超 5 分鐘先提示＋換同價位通道（`workflow-gw.ts:1371-1403`，`QUEUE_SWITCH_MS=300000` `:445-446`）；修復前 `capacity_saturated` 撞 fail-fast、零換道零提示＝未達成。喚醒恢復等待窗 180s（實測 OOM 恢復 85s）`:1762-1788`、四投耗盡 fallback 直推 `:1821-1856`、停滯判死後跑完重新登記 `:1750-1758`。**仍缺**：真實 `capacity_saturated` 換道成功樣本。 ｜ 驗證方式: 代理實測（提示幀原文含「5 分钟」）／待驗（真實換道）
+- **VPS OOM 限流與保護（2026-10-02 第二輪）** — 急性觸發＝13 個並行 ffmpeg（合 ~2.9GB）08:36 全域 OOM 殺 `opencode-server`（斷 85s）。已加 ffmpeg 全域信號量上限 2（`deploy-staging/gateway/ffmpeg-limiter.ts:16-29`）＋ opencode-server drop-in `OOMScoreAdjust=-500`／`MemoryMin=200M`；壓測 6 件實測外部 `pgrep ffmpeg` 恆為 2、全 exit=0。**未造真實 OOM，不得宣稱 OOM 已解決**。 ｜ 驗證方式: 代理實測（壓測＋`systemctl show`）／待驗（真實 OOM）
 - **音頻實體卡端到端未驗** — 只驗到「真的展開才送上游」，上游 502（無可用帳號）；缺一張真生成的音頻成品與帳本紀錄。 ｜ 證據: 7f9dbe4e
+  > 2026-10-01 更正：上游 502 是 FlowMusic2API（music），**非 TTS**；TTS 上游已修好且有真音檔。真正缺口＝扣費未接（0 額），屬產品決策，待裁。詳見上文「音頻實體卡」條更正。
 - **確認閘尚未上生產** — 資產／分鏡確認閘在生產需閘道端寫入才生效，本批未部署；缺生產環境實際攔下的證據。 ｜ 證據: a7e169f3
+  > 2026-10-01 更正：**已部署且從未 arm**；真因是閘只認 `interaction_mode==="collaborate"`，VPS `user_settings` 0 筆 collaborate ⇒ 屬「只差驗證（要先 arm）」。詳見上文「確認閘尚未上生產」條更正。
 - **席位計費尚未接通** — 席位查詢自陳「計費尚未接通」，且下單未接線前一律拒單；缺真實席位成交與入帳。 ｜ 證據: c4c895d3, c9696948
 - **席位價格未配置前的拒單語義** — 缺「配置後可成交」的正向證據。 ｜ 證據: c9696948
 - **showcase 案例僅發布者本機可見** — 用戶投稿可在首頁環展示，但目前只有發布者本機看得到；缺他人可見／審核後的發布證據。 ｜ 證據: 4557829f
@@ -494,6 +514,7 @@
 - **4K 超分未經真單校準** — 4K 倍率語義未實測前一律具名拒；缺校準後真單且帳本對得上的證據（同一閘聲明切新後端亦同）。 ｜ 證據: 329c4221, 0289ade9
 - **視頻秒數三元組由 catalog 生成** — 檔位由真實目錄自動生成，但缺每個檔位「核過價且真出片」的全量證據。 ｜ 證據: ed732c8e
 - **時裝域 8 支工具僅 1 支有真能力** — 其餘明示不支援；缺那 1 支的真效果驗收。 ｜ 證據: 06c6fdda
+  > 2026-10-01 更正（覆蓋本條）：此為 `src/lib/fashion-tryon-tools.ts`（2026-08-26 commit `06c6fdda`）**宣告層**的舊自述。現場＝VPS `/opt/agent-harness/workspace/.opencode/tools/` 8 檔全在且無 stub；其中 6 支零生圖扣費（rembg u2net＋VLM chat＋PIL），2 支是誠實替代（`virtual_tryon` 走站點 `/v1/images/edits`、`hand_contact_repair` 走 VLM 定位＋局部修復）。判準見 `src/lib/harness-tool-registry.ts:10-13`（宣告層自我認證不代表 harness 能執行）。
 - **3D 需求禁二維頂替** — 規則成立，但缺 3D 工具鏈端到端出片的完整鏈路證據。 ｜ 證據: 86b2584b
 - **行內 tag 未命中降級** — fail-open 與誠實降級已實作，缺生產流量下未命中比例與前端呈現的實證。 ｜ 證據: 2bd7217c, 50f7e436
 - **B 端參考圖控制面不可用時 501 fail-closed** — 缺控制面真的不可用時的生產演練證據。 ｜ 證據: 2bd7217c

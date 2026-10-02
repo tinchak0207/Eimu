@@ -67,7 +67,8 @@ const LYRIA_HEADER = `/**
  * 禁止手改本檔——改真源後跑 \`npx tsx tools/export-music-tools-staging.ts\` 重導出。
  *
  * 落位：/opt/agent-harness/workspace/.opencode/lib/music_lyria.ts
- * env：GEMINI_API_KEY（x-goog-api-key 鑑權，付費額度）。
+ * env：GEMINI_STUDIO_API_KEY（generativelanguage lyria-3.5 generateContent，帶人聲整歌，付費）；
+ *      GEMINI_API_KEY（無 studio key 時退回 Vertex lyria-002 :predict，純器樂 30s，degraded）。
  */
 
 `;
@@ -86,7 +87,9 @@ const TOOLS_HEADER = `/**
  *
  * 落位：/opt/agent-harness/workspace/.opencode/lib/music-tools-impl.ts
  * env：GATEWAY_URL（默認 http://127.0.0.1:8081）、HARNESS_API_KEY（fallback）、
- *      GEMINI_API_KEY（Lyria 鑑權，音頻落盤經 gateway 會話上傳存儲）。
+ *      GEMINI_STUDIO_API_KEY（lyria-3.5 generateContent 主 key，音頻落盤經 gateway 會話上傳存儲）、
+ *      GEMINI_API_KEY（Vertex lyria-002 降級）、FLOWMUSIC_ADMIN_USER／FLOWMUSIC_ADMIN_PASSWORD
+ *      （FlowMusic 真鑑權探針 /api/tokens/1/refresh-credits 用；缺失時探針降級為 unreachable 提示）。
  */
 
 `;
