@@ -2,26 +2,21 @@ import { tool } from "@opencode-ai/plugin/tool"
 import { readImageSource, VisionToolError } from "../lib/vision_impl"
 import { checkAgentPath } from "../lib/sandbox"
 
-// 原生「中性讀圖」工具（2026-09-29 審計修復）。
+// 原生「中性讀圖」工具（2026-09-29 審計修復；2026-10-02 改為把原圖交給當前模型自己看）。
 //
 // 背景：舊路徑是 agent 走 bash 跑 skills/read-image/read_image.py，該腳本要 NEWAPI_API_KEY
 // ＋外網。審計把 agent 的 bash/run_py 關進無秘密、無網路的沙箱後，那條 bash 路徑必然失效
-// （這正是防秘密外洩與 SSRF 的代價）。讀圖是常用能力，故上移為原生工具：跑在受信的
-// opencode 進程（有 env、有網），只經 new-api 中控通路（同 vision_analyze，暴君鐵律禁直連）。
+// （這正是防秘密外洩與 SSRF 的代價）。讀圖是常用能力，故上移為原生工具。
 //
-// 與 vision_analyze 的分工：vision_analyze 是「毒蛇評審」（打分＋逐維點評），本工具是
-// 「中性描述」（客觀說出畫面裡有什麼、風格/色彩/文字），對應舊 read-image 的職責。
+// 2026-10-02 起不再「另找一個視覺模型代看後回文字」：圖以 attachments 形式隨工具結果進
+// 當前模型自己的上下文（多模態模型直接看；無視覺模型由 gateway 端誠實告知不支援）。
+// 與 vision_analyze 的分工：vision_analyze 是「毒蛇評審」（打分＋逐維點評），本工具只負責
+// 把原圖帶進上下文。
 //
 // 路徑閘：只允許本會話可見範圍（uploads/<本會話 uuid>、workspace 內產物、/tmp）；
-// 讀圖前用 checkAgentPath 驗，擋跨租戶與系統路徑。公網 URL 亦可（下載在受信進程內）。
-
-const DESCRIBE_PROMPT =
-  "请客观描述这张图片，用简洁中文：\n" +
-  "1. 主体与场景：画面里有什么（人物/物体/环境/动作），布局与构图。\n" +
-  "2. 风格与媒介：写实/插画/3D/摄影等，艺术风格取向。\n" +
-  "3. 色彩与光线：主色调、光线方向与氛围。\n" +
-  "4. 可见文字：如实抄录画面中的文字（无则说无）。\n" +
-  "只描述能看到的事实，不臆测、不评分、不夸饰。"
+// 讀圖前用 checkAgentPath 驗，擋跨租戶與系統路徑。注意 owner 集合由 plugin 的
+// ensureSession 從 gateway 水合（PATH_TOOLS 必須列本工具，否則此閘拿空集合一律拒）。
+// 公網 URL 亦可（下載在受信進程內）。
 
 export default tool({
   description:

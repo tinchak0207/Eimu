@@ -95,6 +95,12 @@ const PATH_TOOLS: Record<string, { keys: string[]; listing: boolean }> = {
   glob: { keys: ["path"], listing: true },
   grep: { keys: ["path"], listing: true },
   lsp: { keys: ["filePath"], listing: false },
+  // 原生工具自己也會 checkAgentPath（read_image 的 image_path、run_py 的 stdin_path）——
+  // 必須列在這裡，plugin 的惰性 owner 水合（ensureSession）才會在它們之前跑。漏列＝那條
+  // 路徑拿到的是空集合，工具內的閘對**本會話自己的附件**也一律 fail-closed（2026-10-02
+  // 生產實錘：用戶上傳 my-image.png 後 read_image 回 path_denied）。
+  read_image: { keys: ["image_path"], listing: false },
+  run_py: { keys: ["stdin_path"], listing: false },
 }
 
 const DENY_MESSAGE: Record<string, string> = {
