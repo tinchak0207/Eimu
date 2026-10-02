@@ -7,6 +7,7 @@
 // 而不是让整个导出失败。
 
 import { exportShotsZip } from "./export-zip";
+import { downloadExtension } from "./image-helpers";
 import { formatAbsoluteTime, formatCoins, primaryModelId } from "./history-types";
 import type { HistoryEntry } from "./history-types";
 
@@ -20,20 +21,34 @@ export interface HistoryExportResult {
 /** 并发下载数。太高会被浏览器排队，也容易触发对象存储限流。 */
 const DOWNLOAD_CONCURRENCY = 4;
 
-function entrySrc(entry: HistoryEntry): string | null {
-  const result = entry.results.find((item) => item.image || item.imageUrl);
+/**
+ * 取这条记录里第一个可下载的媒体地址（导出为測試可見：批量 ZIP 的 skipped 判定就靠它）。
+ *
+ * 影片／音頻記錄的 results 裡只有 videoUrl／audioUrl（無 image/imageUrl），
+ * 也要能被打包下載；否則選中的影片／音樂記錄整批被判為「取不到媒體」而跳過。
+ */
+export function entrySrc(entry: HistoryEntry): string | null {
+  const result = entry.results.find(
+    (item) => item.image || item.imageUrl || item.videoUrl || item.audioUrl,
+  );
   if (!result) return null;
-  return result.image ? `data:image/png;base64,${result.image}` : result.imageUrl;
+  if (result.image) return `data:image/png;base64,${result.image}`;
+  // 與單筆下載（HistoryClient.handleDownload）同序：先圖、再影片、最後音頻。
+  return result.imageUrl ?? result.videoUrl ?? result.audioUrl ?? null;
 }
 
-/** 用提示词开头做文件名，取不到就退回时间戳。 */
-function entryFileName(entry: HistoryEntry): string {
+/** 用提示词开头做文件名，取不到就退回时间戳；副档名取自来源媒体 URL。 */
+export function entryFileName(entry: HistoryEntry): string {
   const prompt = entry.prompt.trim().replace(/\s+/g, " ").slice(0, 40);
   const stamp = new Date(entry.generatedAt)
     .toISOString()
     .replace(/[:.]/g, "-")
     .slice(0, 19);
-  return prompt ? `${stamp}-${prompt}` : stamp;
+  const base = prompt ? `${stamp}-${prompt}` : stamp;
+  // 来源媒体 URL 的副档名必须带进 zip 条目名，否则 export-zip 的
+  // ALLOWED_EXTENSIONS 认不出影片／音频，会把 <prompt>.mp4 误补成 <prompt>.mp4.png。
+  // 推不出（base64 图 / 无副档名）时回落 png，图片维持 .png。
+  return `${base}.${downloadExtension(entrySrc(entry) ?? "")}`;
 }
 
 async function fetchAsBlob(src: string): Promise<Blob | null> {

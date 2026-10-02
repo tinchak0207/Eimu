@@ -2,15 +2,25 @@
 
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, Coins, Download, Library, RotateCw, X } from "lucide-react";
+import { AlertTriangle, Coins, Download, Library, RotateCw, SlidersHorizontal, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AgentVideoItem } from "@/lib/agent-chat-types";
+import { AgentRerunMenu } from "./AgentRerunMenu";
 
 export interface AgentVideoCardProps {
   item: AgentVideoItem;
-  /** 存图库。尚未接线时为 undefined → 按钮保持 disabled，绝不伪造行为。 */
+  /** 存图库：由 AgentChatSurface 的 videoActions 接线（影片落 mediaUrl）。
+   *  回调缺席时仍保持 disabled，绝不伪造行为。 */
   onSaveToLibrary?: (item: AgentVideoItem) => void;
   onDownload?: (item: AgentVideoItem) => void;
+  /**
+   * 「再来 N 组」：會話級——把「再來 N 組」翻成一句話丟回對話，由助理重新決定參數
+   * 並走既有計費鏈。影片按秒計費，payload 級重跑的估價口徑不同
+   * （history-rerun.ts:53 註釋），所以不走 /api/generation-jobs 那條。
+   */
+  onRerun?: (item: AgentVideoItem, count: number) => void;
+  /** 「微调」：只把半句話預填進輸入框（不自動送出＝不替使用者開一輪扣費）。 */
+  onVariant?: (item: AgentVideoItem) => void;
 }
 
 /** 展示用的金币数：整数原样，浮点去掉多余尾巴。 */
@@ -150,7 +160,7 @@ function VideoLightbox({
   );
 }
 
-function AgentVideoCardComponent({ item, onSaveToLibrary, onDownload }: AgentVideoCardProps) {
+function AgentVideoCardComponent({ item, onSaveToLibrary, onDownload, onRerun, onVariant }: AgentVideoCardProps) {
   const [viewerOpen, setViewerOpen] = useState(false);
   const [failed, setFailed] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -278,6 +288,16 @@ function AgentVideoCardComponent({ item, onSaveToLibrary, onDownload }: AgentVid
         </VideoAction>
         <VideoAction label="下载" disabled={!onDownload} onClick={() => onDownload?.(item)}>
           <Download className="h-3.5 w-3.5" aria-hidden="true" />
+        </VideoAction>
+        {/* 影片走會話級重跑（見 props 註釋）：N 組檔位與歷史卡同源；回調缺席＝disabled。
+            選單本體是觸發鈕的兄弟（AgentRerunMenu 內部自有 relative 容器），不嵌套 button。 */}
+        <AgentRerunMenu
+          label="再来 N 组"
+          disabled={!onRerun}
+          onPick={(count) => onRerun?.(item, count)}
+        />
+        <VideoAction label="微调" disabled={!onVariant} onClick={() => onVariant?.(item)}>
+          <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
         </VideoAction>
       </div>
       {viewerOpen &&

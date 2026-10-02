@@ -10,6 +10,9 @@ import { GHOST_ASSET_SCOPE, isUsableAssetId, MAX_ASSET_ID_LENGTH, normalizeAsset
 import type { AssetScope } from "./asset-scope";
 import { normalizeLineageLinks } from "./lineage";
 import type { LineageLink } from "./lineage";
+// 交付物種類真源（./deliverable-kind，零依賴純函數檔）：資產側的媒體 item kind
+// （image/video/audio）與 URL 欄位（imageUrl/mediaUrl）全由它推導，不再各寫一份。
+import { DELIVERABLE_KINDS } from "./deliverable-kind";
 
 const PACK_SCHEMA_VERSION = 1;
 const INDEX_GENERATIONS_KEPT = 2;
@@ -26,21 +29,34 @@ export const MAX_DIGEST_LENGTH = 500;
  * 界線與字元邊界同源：一律走 asset-scope 的 isUsableAssetId。
  */
 export const MAX_PACK_ID_LENGTH = MAX_ASSET_ID_LENGTH;
-const MAX_TITLE_LENGTH = 200;
+export const MAX_TITLE_LENGTH = 200;
 const MAX_TAGS_PER_PACK = 20;
 const MAX_TAG_LENGTH = 50;
 const MAX_NOTE_LENGTH = 200;
 const MAX_SCENE_SUMMARY_LENGTH = 500;
 
-export type AssetPackItemKind =
-  | "prompt"
-  | "reference"
-  | "lora"
-  | "recipe"
-  | "image"
+/**
+ * 資產專屬 item kind（資產庫自身與配方/3D 等用途，不由歷史交付物直接產生）。
+ * 與下面的媒體段分開宣告：新增交付物種類只動 deliverable-kind 註冊表，這裡不動。
+ */
+export const ASSET_ONLY_ITEM_KINDS = [
+  "prompt",
+  "reference",
+  "lora",
+  "recipe",
   // 3D 資產（Astra P1-5）：scene_3d=.blend/.glb 產物；bpy_script=bpy 腳本模板。
-  | "scene_3d"
-  | "bpy_script";
+  "scene_3d",
+  "bpy_script",
+] as const;
+
+/**
+ * 資產包 item kind = 資產專屬六類 ∪ 交付物媒體種類（image/video/audio）。
+ * 兩段都由真源推導（第二段直接取 deliverable-kind 註冊表的 assetItemKind），
+ * 不手寫字串聯集；新增一種交付物＝在註冊表加一行，這裡自動跟上。
+ */
+export type AssetPackItemKind =
+  | (typeof ASSET_ONLY_ITEM_KINDS)[number]
+  | (typeof DELIVERABLE_KINDS)[number]["assetItemKind"];
 
 export interface AssetPackItem {
   kind: AssetPackItemKind;
@@ -49,6 +65,8 @@ export interface AssetPackItem {
   content?: string;
   /** reference / image 用：既有 URL（不複製位元組）。 */
   imageUrl?: string;
+  /** video / audio 用：影片/音樂產物 URL（與 imageUrl 並存不互斥）。 */
+  mediaUrl?: string;
   /** lora 用。 */
   loraVersionId?: string;
   loraWeight?: number;
@@ -137,22 +155,28 @@ async function listIndexBlobs(userId: number): Promise<BlobRef[]> {
   return blobs.sort((a, b) => b.uploadedAt.getTime() - a.uploadedAt.getTime());
 }
 
+/**
+ * kind 白名單＝與 AssetPackItemKind 同源推導（資產專屬六類 ＋ 交付物媒體種類），
+ * 消掉過去手抄的第二份清單；新增交付物種類這裡自動跟上。
+ */
 const ITEM_KINDS: readonly AssetPackItemKind[] = [
-  "prompt",
-  "reference",
-  "lora",
-  "recipe",
-  "image",
-  // 3D 資產（Astra P1-5）：同構追加，既有五類行為不動。
-  "scene_3d",
-  "bpy_script",
+  ...ASSET_ONLY_ITEM_KINDS,
+  ...DELIVERABLE_KINDS.map((kind) => kind.assetItemKind),
 ];
 
 /**
+ * 交付物媒體 kind → 資產 URL 欄位（由註冊表推導：image→imageUrl、video/audio→mediaUrl）。
+ * 資產專屬六類不在表內；reference 收 imageUrl 的既有語義單獨處理。
+ */
+const MEDIA_URL_FIELD_BY_KIND: ReadonlyMap<string, "imageUrl" | "mediaUrl"> = new Map(
+  DELIVERABLE_KINDS.map((kind) => [kind.assetItemKind, kind.assetUrlField] as const),
+);
+
+/**
  * 純函式：把不可信 item payload 正規化為 AssetPackItem。
- * 驗 kind/title；content/imageUrl 按 kind 才收；loraVersionId 僅 lora；
- * recipe 收 modelId/size/loraModelVersionIds；source 白名單 type + 必填 id。
- * 不合法回 null。
+ * 驗 kind/title；content/imageUrl/mediaUrl 按 kind 才收（媒體欄位由交付物註冊表推導）；
+ * loraVersionId 僅 lora；recipe 收 modelId/size/loraModelVersionIds；source 白名單 type + 必填 id。
+ * video/audio 缺 mediaUrl 回 null（媒體 item 無 URL 無意義）；其餘不合法回 null。
  */
 function normalizeItem(payload: unknown): AssetPackItem | null {
   if (!payload || typeof payload !== "object") return null;
@@ -169,8 +193,21 @@ function normalizeItem(payload: unknown): AssetPackItem | null {
   if (kind === "prompt" || kind === "recipe") {
     if (typeof p.content === "string") item.content = p.content;
   }
-  if (kind === "reference" || kind === "image") {
+  // reference 沿用既有 imageUrl 收法（資產專屬參考圖，不因新增媒體種類而動）。
+  if (kind === "reference") {
     if (typeof p.imageUrl === "string" && p.imageUrl.trim()) item.imageUrl = p.imageUrl.trim();
+  }
+  // 交付物媒體（image/video/audio）：收哪個 URL 欄位由註冊表推導（assetItemKind → assetUrlField）。
+  //   * image → imageUrl，維持既有尺度：缺 URL 仍保留 item（僅 trim 後非空才收）。
+  //   * video/audio → mediaUrl，**缺 mediaUrl 回 null**（無產物 URL 的媒體 item 無意義）。
+  // 長度上限與 imageUrl 現行做法對齊：只 trim、不另設上限（imageUrl 既有亦無長度常數）。
+  const mediaUrlField = MEDIA_URL_FIELD_BY_KIND.get(kind);
+  if (mediaUrlField === "imageUrl") {
+    if (typeof p.imageUrl === "string" && p.imageUrl.trim()) item.imageUrl = p.imageUrl.trim();
+  } else if (mediaUrlField === "mediaUrl") {
+    const mediaUrl = typeof p.mediaUrl === "string" ? p.mediaUrl.trim() : "";
+    if (!mediaUrl) return null;
+    item.mediaUrl = mediaUrl;
   }
   if (kind === "lora") {
     if (typeof p.loraVersionId === "string" && p.loraVersionId.trim()) item.loraVersionId = p.loraVersionId.trim();

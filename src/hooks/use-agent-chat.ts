@@ -270,6 +270,11 @@ export interface UseAgentChatReturn {
    *  与 send() 的 lazy 建号同源，复用 start() 串行化管线（在飞搭车，不并发第二条 POST）。 */
   ensureSession: () => Promise<string | null>;
   discardAndStartNew: () => Promise<void>;
+  /**
+   * 直接往 transcript 發一條系統通知（tone=info/error）。
+   * 給旁路回饋用：RerunDialog 完成訊息這類「不在對話流裡、但要留痕」的結果。
+   */
+  dispatchNotice: (tone: "info" | "error", text: string) => void;
 }
 
 export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn {
@@ -1373,5 +1378,6 @@ export function useAgentChat(options?: UseAgentChatOptions): UseAgentChatReturn 
     aborting,
     startingSession,
     discardAndStartNew,
+    dispatchNotice,
   };
 }

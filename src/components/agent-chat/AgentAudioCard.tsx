@@ -1,15 +1,25 @@
 "use client";
 
 import { memo, useEffect, useState, type ReactNode } from "react";
-import { AlertTriangle, Coins, Download, Library, RotateCw } from "lucide-react";
+import { AlertTriangle, Coins, Download, Library, RotateCw, SlidersHorizontal } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AgentAudioItem } from "@/lib/agent-chat-types";
+import { AgentRerunMenu } from "./AgentRerunMenu";
 
 export interface AgentAudioCardProps {
   item: AgentAudioItem;
-  /** 存图库。尚未接线时为 undefined → 按钮保持 disabled，绝不伪造行为。 */
+  /** 存图库：由 AgentChatSurface 的 audioActions 接线（音乐落 mediaUrl）。
+   *  回调缺席时仍保持 disabled，绝不伪造行为。 */
   onSaveToLibrary?: (item: AgentAudioItem) => void;
   onDownload?: (item: AgentAudioItem) => void;
+  /**
+   * 「再来 N 组」：會話級——音樂/音頻同樣按延遲出稿計費，payload 級重跑不開放
+   * （history-rerun.ts:53 註釋），只把「再來 N 組」翻成一句話丟回對話，
+   * 由助理重新決定參數並走既有計費鏈。
+   */
+  onRerun?: (item: AgentAudioItem, count: number) => void;
+  /** 「微调」：只把半句話預填進輸入框（不自動送出＝不替使用者開一輪扣費）。 */
+  onVariant?: (item: AgentAudioItem) => void;
 }
 
 /** 展示用的金币数：整数原样，浮点去掉多余尾巴。 */
@@ -51,7 +61,7 @@ function AudioAction({
   );
 }
 
-function AgentAudioCardComponent({ item, onSaveToLibrary, onDownload }: AgentAudioCardProps) {
+function AgentAudioCardComponent({ item, onSaveToLibrary, onDownload, onRerun, onVariant }: AgentAudioCardProps) {
   const [failed, setFailed] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
 
@@ -116,6 +126,16 @@ function AgentAudioCardComponent({ item, onSaveToLibrary, onDownload }: AgentAud
         </AudioAction>
         <AudioAction label="下载" disabled={!onDownload} onClick={() => onDownload?.(item)}>
           <Download className="h-3.5 w-3.5" aria-hidden="true" />
+        </AudioAction>
+        {/* 音頻走會話級重跑（見 props 註釋）：N 組檔位與歷史卡同源；回調缺席＝disabled。
+            選單本體是觸發鈕的兄弟（AgentRerunMenu 內部自有 relative 容器），不嵌套 button。 */}
+        <AgentRerunMenu
+          label="再来 N 组"
+          disabled={!onRerun}
+          onPick={(count) => onRerun?.(item, count)}
+        />
+        <AudioAction label="微调" disabled={!onVariant} onClick={() => onVariant?.(item)}>
+          <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
         </AudioAction>
       </div>
     </figure>

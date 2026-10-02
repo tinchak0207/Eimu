@@ -1,6 +1,11 @@
 // 基于 jszip 的打包下载，仅在浏览器中调用（依赖 document 与 URL.createObjectURL）。
 
-const ALLOWED_EXTENSIONS = [".png", ".jpg", ".webp"];
+import { MEDIA_EXTENSIONS } from "./image-helpers";
+
+// 图片、影片与音频产物都走同一个打包器：带已知副档名的保留，缺副档名的按图片补 .png。
+// 白名单从 image-helpers 的 MEDIA_EXTENSIONS 推导（单一真源）：两边不再各自维护，
+// 避免像 .jpeg/.gif 那样一边加了另一边没加，导致 `.jpeg` 被补成 `.jpeg.png`。
+const ALLOWED_EXTENSIONS = MEDIA_EXTENSIONS.map((ext) => `.${ext}`);
 
 function sanitizeFileName(name: string): string {
   // 去掉路径分隔符与 Windows 非法字符、控制字符，避免 zip 内出现目录穿越

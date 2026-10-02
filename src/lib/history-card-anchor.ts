@@ -11,16 +11,37 @@ import { toReferenceImageRole } from "./image-types";
 import type { ReferenceImageRole } from "./image-types";
 import { CHARACTER_CARD_KIND_LABEL, toCharacterCardKind } from "./character-cards";
 import type { CharacterCard, CharacterCardKind } from "./character-cards";
-import type { AssetPackItem } from "./asset-pack-store";
+import type { AssetPackItem, AssetPackItemKind } from "./asset-pack-store";
 import type { HistoryEntry } from "./history-types";
 import { historyEntryHandles, lineageTimestamp } from "./lineage";
 import type { LineageLink } from "./lineage";
+// 交付物種類真源（./deliverable-kind，零依賴，可安全進 client bundle）：
+// 歷史 → 資產庫的代表媒體種類與 URL 欄位全由註冊表推導。
+import {
+  assetItemKindOf,
+  assetUrlFieldOf,
+  deliverableKindLabel,
+  deliverableKindOfResult,
+  deliverableKindSpec,
+} from "./deliverable-kind";
+import type { DeliverableKind } from "./deliverable-kind";
 
 const MAX_ANCHOR_NAME_LENGTH = 100;
+/**
+ * 資產 item 標題上限：與 asset-pack-store.MAX_TITLE_LENGTH 同界。
+ * 該檔含 node 依賴（node:crypto / blob-backend），本檔被 client 元件（SaveCardDialog /
+ * HistoryCard）import，不可 runtime import 取常數，故照抄同一數值並由 normalizeAssetPack 兜底。
+ */
+const MAX_ITEM_TITLE_LENGTH = 200;
 
 /** 與站內一致的可用圖 URL 判定（http(s) 與 data:image）。 */
 function isUsableImageUrl(url: string): boolean {
   return url.startsWith("http") || url.startsWith("data:image/");
+}
+
+/** 可用產物 URL 判定（公網 http(s) 或 data:）——影片/音樂/圖片代表產物共用這把尺。 */
+function isUsableMediaUrl(url: string): boolean {
+  return url.startsWith("http") || url.startsWith("data:");
 }
 
 /**
@@ -36,6 +57,34 @@ export function anchorImageUrlOf(entry: HistoryEntry): string | null {
       const dataUrl = result.image.startsWith("data:image/") ? result.image : `data:image/png;base64,${result.image}`;
       if (isUsableImageUrl(dataUrl)) return dataUrl;
     }
+  }
+  return null;
+}
+
+/** 歷史記錄的代表交付物：種類（交付物註冊表）＋ 該種類的產物 URL。 */
+export interface AnchoredDeliverable {
+  kind: DeliverableKind;
+  url: string;
+}
+
+/**
+ * 取歷史記錄的「代表產物」（種類 + URL）——anchorImageUrlOf 的兄弟函式。
+ *
+ * 逐 result 由 deliverableKindOfResult 推種類，再按 deliverableKindSpec(kind).resultField
+ * 取對應 URL（不再只認 image/imageUrl），因此影片/音樂歷史條目也能取得代表產物。
+ * 取不到可用 URL 回 null。
+ *
+ * 為何不直接改 anchorImageUrlOf：後者語義是「錨定圖」（imageUrl 優先、base64 兜底），
+ * 仍被 cardFromHistoryEntry（存為角色卡）等既有消費者使用，故保留原語義不動。
+ */
+export function anchorDeliverableOf(entry: HistoryEntry): AnchoredDeliverable | null {
+  for (const result of entry.results) {
+    const kind = deliverableKindOfResult(result);
+    if (!kind) continue;
+    const raw = result[deliverableKindSpec(kind).resultField];
+    if (typeof raw !== "string") continue;
+    const url = raw.trim();
+    if (url && isUsableMediaUrl(url)) return { kind, url };
   }
   return null;
 }
@@ -121,10 +170,12 @@ function loraVersionIdOf(entry: HistoryEntry): string | null {
 
 /**
  * 從歷史記錄構造「資產包 payload」（存为资产）：歷史 → /api/assets 的 upsert 主體。
- * 與 cardFromHistoryEntry 用同一套歷史取數（第一張圖 URL / modelId / workflow size）。
- *  - 有 prompt → 存 prompt item（帶 modelId/size/首圖 URL）；無 prompt 但圖 → 只存 reference
+ * 與 cardFromHistoryEntry 用同一套歷史取數，但代表產物改由交付物註冊表推導：
+ *  - 有 prompt → 存 prompt item（帶 modelId/size/首圖 URL，既有語義不變）
+ *  - 代表交付物（image/video/audio，由 anchorDeliverableOf 推）→ 存對應 kind 的
+ *    媒體 item：image 收 imageUrl、video/audio 收 mediaUrl（種類與欄位皆由註冊表推導）
  *  - 條目頂層帶 loraModelVersionIds/lora → 加 lora item（無則省略）
- *  - 無 id 或不構成任何 item（無 prompt 也無圖）→ 回 null（不建空包）
+ *  - 無 id、或既無 prompt 又無代表產物 → 回 null（不建空包，計費日誌即此類）
  * 消費端：HistoryCard「存为资产」按鈕，upsert by 確定性 id `history-${entry.id}`。
  */
 export function assetPackPayloadFromHistoryEntry(
@@ -133,6 +184,7 @@ export function assetPackPayloadFromHistoryEntry(
   if (!entry || typeof entry.id !== "string" || !entry.id.trim()) return null;
 
   const imageUrl = anchorImageUrlOf(entry);
+  const anchor = anchorDeliverableOf(entry);
   const prompt = typeof entry.prompt === "string" ? entry.prompt.trim() : "";
   const modelId = entry.results?.[0]?.modelId;
   const size = entry.workflow?.imageSize;
@@ -150,8 +202,21 @@ export function assetPackPayloadFromHistoryEntry(
       ...(imageUrl ? { imageUrl } : {}),
       source,
     });
-  } else if (imageUrl) {
-    items.push({ kind: "reference", title: "生成图片", imageUrl, source });
+  }
+  // 代表媒體 item：種類與 URL 欄位全由交付物註冊表推導
+  // （image → {kind:"image", imageUrl}；video/audio → {kind, mediaUrl}）。
+  // title 用 prompt 截斷；prompt 為空時用「種類文案 + 真實生成時間」，不編造內容。
+  if (anchor) {
+    const title = prompt
+      ? prompt.slice(0, MAX_ITEM_TITLE_LENGTH)
+      : `${deliverableKindLabel(anchor.kind)} ${new Date(entry.generatedAt).toLocaleString("zh-CN")}`;
+    const urlField = assetUrlFieldOf(anchor.kind);
+    items.push({
+      kind: assetItemKindOf(anchor.kind) as AssetPackItemKind,
+      title,
+      ...(urlField === "imageUrl" ? { imageUrl: anchor.url } : { mediaUrl: anchor.url }),
+      source,
+    });
   }
   if (loraVersionId) {
     items.push({ kind: "lora", title: "LoRA", loraVersionId, source });

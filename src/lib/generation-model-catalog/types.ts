@@ -1,4 +1,14 @@
-export type MediaKind = "image" | "video" | "audio";
+import type { DeliverableKind } from "../deliverable-kind";
+
+/**
+ * 模型能產出的媒體種類（catalog 側的種類欄位）。
+ *
+ * 值域**由交付物種類註冊表推導**（`src/lib/deliverable-kind.ts` 的 DELIVERABLE_KINDS），
+ * 不再手寫字串聯集——新增一種交付物只在註冊表加一行，這裡自動跟上，編譯期即保證對齊。
+ * 保留 `MediaKind` 這個名字是因為有多個消費者（model-status-probe 等）以它為型別名；
+ * 改名只會製造無謂爆炸半徑。
+ */
+export type MediaKind = DeliverableKind;
 
 /**
  * 影片生成型別（P1-3 生成式後期；值逐字對齊上游 `AvailableGenerationType` 的

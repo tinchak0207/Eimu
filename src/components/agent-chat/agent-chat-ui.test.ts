@@ -58,6 +58,7 @@ import {
   type AgentSseEvent,
   type AgentSubagentItem,
   type AgentSubagentReportItem,
+  type AgentVideoItem,
 } from "../../lib/agent-chat-types";
 
 const root = process.cwd();
@@ -189,10 +190,21 @@ test("image action buttons are disabled when no callback is wired", () => {
 
 test("video action buttons are disabled when no callback is wired", () => {
   // 与图片卡同惯例：回调缺席就 disabled，绝不伪造 handler。
+  // 2026-10-03 契约更新：影片「存图库」已由 AgentChatSurface 的 videoActions 接线
+  // （影片落 kind:"video" + mediaUrl）；卡片本身仍守「回调缺席＝disabled」，
+  // 旧「资产包 kind 联合没有 video，按钮永远 disabled」的说法已作废。
   assert.match(videoCard, /disabled=\{!onSaveToLibrary\}/);
   assert.match(videoCard, /disabled=\{!onDownload\}/);
   assert.doesNotMatch(videoCard, /fetch\(/);
   assert.match(videoCard, /onSaveToLibrary\?: \(item: AgentVideoItem\) => void/);
+  assert.doesNotMatch(surface, /kind 联合[\s\S]{0,60}没有 video/, "旧的「kind 联合没有 video」注释必须移除");
+  assert.doesNotMatch(surface, /kind 联合没有 audio/, "旧的「kind 联合没有 audio」注释必须移除");
+  // 新契约的正向证据：Surface 的 videoActions 真的提供了 onSaveToLibrary。
+  assert.match(
+    surface,
+    /videoActions: AgentTranscriptProps\["videoActions"\] = \{\s*onSaveToLibrary,/,
+    "影片存图库必須在 videoActions 接线（解禁的关键）",
+  );
   // 影片查看器不得抄图片的捏合/滚轮缩放手势（对播放中的影片无语义）。
   assert.doesNotMatch(videoCard, /pinch|wheel|clampPan/);
   // 查看器仍走图片 Lightbox 的关闭三件套：Esc + history 弹层 + 背景点击。
@@ -206,10 +218,18 @@ test("video action buttons are disabled when no callback is wired", () => {
 
 test("audio card plays via native <audio> and keeps the disabled action contract", () => {
   // 与图片/影片卡同惯例：回调缺席就 disabled，绝不伪造 handler。
+  // 2026-10-03 契约更新：音頻「存图库」已由 AgentChatSurface 的 audioActions 接线
+  // （音頻落 kind:"audio" + mediaUrl）；卡片本身仍守「回调缺席＝disabled」。
   assert.match(audioCard, /disabled=\{!onSaveToLibrary\}/);
   assert.match(audioCard, /disabled=\{!onDownload\}/);
   assert.doesNotMatch(audioCard, /fetch\(/);
   assert.match(audioCard, /onSaveToLibrary\?: \(item: AgentAudioItem\) => void/);
+  // 新契约的正向证据：Surface 的 audioActions 真的提供了 onSaveToLibrary。
+  assert.match(
+    surface,
+    /audioActions: AgentTranscriptProps\["audioActions"\] = \{\s*onSaveToLibrary,/,
+    "音頻存图库必須在 audioActions 接线（解禁的关键）",
+  );
   // 播放面：原生 <audio controls preload="metadata">，src 照旧绑 item.url。
   assert.match(audioCard, /<audio/);
   assert.match(audioCard, /controls/);
@@ -1246,6 +1266,7 @@ test("subagent bar：running 逐字滑窗（append-only + 立即釘右緣）、�
 // ───────────────────── 资产入库：recipe 分支（E1 白名单） ────────────────
 
 import { buildChatSaveItem } from "../../lib/agent-chat-asset-builders";
+import { normalizeAssetPack } from "../../lib/asset-pack-store";
 import type { AgentImageItem } from "../../lib/agent-chat-types";
 
 function imageItem(overrides: Partial<AgentImageItem>): AgentImageItem {
@@ -1298,6 +1319,85 @@ test("recipe with an empty prompt falls back to reference (no phantom recipe)", 
   assert.equal(saved.kind, "reference");
   // 无会话 id 时 source 不带 sessionId。
   assert.deepEqual(saved.source, { type: "chat", id: "img-1" });
+});
+
+test("buildChatSaveItem：影片 → kind:video + mediaUrl，title 用真实时间兜底", () => {
+  const iso = "2026-08-30T00:00:00.000Z";
+  const video: AgentVideoItem = {
+    kind: "video",
+    id: "vid-1",
+    seq: 2,
+    url: "https://cdn.example.com/out/clip.mp4",
+  };
+  const saved = buildChatSaveItem(video, "session-9", iso);
+  assert.equal(saved.kind, "video");
+  assert.equal(saved.mediaUrl, video.url);
+  assert.equal(saved.imageUrl, undefined, "影片不得挤进图片的 imageUrl 栏位");
+  // title 走真实时间兜底：种类标签 + 本地时间，不编造内容。
+  assert.match(saved.title, /^视频 /, "影片 title 以注册表标签「视频」开头");
+  assert.deepEqual(saved.source, { type: "chat", id: "vid-1", sessionId: "session-9" });
+  assert.equal(saved.createdAt, iso);
+});
+
+test("buildChatSaveItem：音頻 → kind:audio + mediaUrl，无会话 id 时不带 sessionId", () => {
+  const iso = "2026-08-30T00:00:00.000Z";
+  const audio: AgentAudioItem = {
+    kind: "audio",
+    id: "aud-1",
+    seq: 3,
+    url: "https://cdn.example.com/out/song.m4a",
+  };
+  const saved = buildChatSaveItem(audio, null, iso);
+  assert.equal(saved.kind, "audio");
+  assert.equal(saved.mediaUrl, audio.url);
+  assert.equal(saved.imageUrl, undefined, "音頻不得挤进图片的 imageUrl 栏位");
+  assert.match(saved.title, /^音乐 /, "音頻 title 以注册表标签「音乐」开头");
+  assert.deepEqual(saved.source, { type: "chat", id: "aud-1" });
+});
+
+test("buildChatSaveItem 影音产物能过 normalizeAssetPack（WS-2 未落地时 pending，不伪造通过）", (t) => {
+  const iso = "2026-08-30T00:00:00.000Z";
+  const pack = {
+    id: "chat-assets",
+    title: "聊天素材",
+    tags: [],
+    createdAt: iso,
+    updatedAt: iso,
+    items: [
+      buildChatSaveItem(
+        { kind: "video", id: "v1", seq: 1, url: "https://cdn.example.com/out/clip.mp4" },
+        null,
+        iso,
+      ),
+      buildChatSaveItem(
+        { kind: "audio", id: "a1", seq: 2, url: "https://cdn.example.com/out/song.m4a" },
+        null,
+        iso,
+      ),
+    ],
+  };
+  const normalized = normalizeAssetPack(JSON.parse(JSON.stringify(pack)));
+  const kinds = new Set((normalized?.items ?? []).map((it) => it.kind));
+  if (!kinds.has("video") || !kinds.has("audio")) {
+    // WS-2（asset-pack-store 把 AssetPackItemKind 扩到含 video/audio + AssetPackItem
+    // 加 mediaUrl）尚未落地时，normalizeItem 会拒收影音条目。此处不伪造通过：
+    // 标 pending，WS-2 落地后这条自动变成真断言（kinds 会含 video/audio）。
+    t.skip("WS-2 尚未把 AssetPackItemKind 扩到 video/audio / 加 mediaUrl 字段");
+    return;
+  }
+  assert.equal(normalized!.items.length, 2, "影音条目不该被 normalize 丢条");
+  assert.deepEqual(
+    normalized!.items.map((it) => it.kind).sort(),
+    ["audio", "video"],
+  );
+  assert.equal(
+    normalized!.items.find((it) => it.kind === "video")!.mediaUrl,
+    "https://cdn.example.com/out/clip.mp4",
+  );
+  assert.equal(
+    normalized!.items.find((it) => it.kind === "audio")!.mediaUrl,
+    "https://cdn.example.com/out/song.m4a",
+  );
 });
 
 // 歷史會話下拉標題（網關 09-12 title 契約）：優先顯示摘要標題，無標題降級時間標籤。

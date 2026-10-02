@@ -47,7 +47,21 @@ import { createHandoffLogin, isStandalonePwa } from "@/lib/github-login";
 import type { AgentAudioItem, AgentImageItem, AgentVideoItem } from "@/lib/agent-chat-types";
 import type { AssetPack, AssetPackItem } from "@/lib/asset-pack-store";
 import type { AgentTranscriptProps } from "@/components/agent-chat/AgentTranscript";
-import { buildChatSaveItem, CHAT_ASSETS_PACK_ID } from "@/lib/agent-chat-asset-builders";
+import { assetUrlFieldOf } from "@/lib/deliverable-kind";
+import {
+  buildChatSaveItem,
+  CHAT_ASSETS_PACK_ID,
+  type AgentChatLibraryItem,
+} from "@/lib/agent-chat-asset-builders";
+import type { HistoryEntry } from "@/lib/history-types";
+import {
+  AGENT_MEDIA_HISTORY_MAX_ATTEMPTS,
+  agentHistoryEntryForMedia,
+  agentMediaItemIds,
+  planAgentMediaHistoryWrites,
+  saveAgentMediaToHistory,
+} from "@/lib/agent-media-history";
+import { RerunDialog, type HistoryRerunMode } from "@/components/history/RerunDialog";
 
 /** 登录类错误判定：客户端缺憑證（「尚未登录」）與服務端否定登入態的文案都算，
  *  這些不是重試能解決的，必須給登錄按鈕（2026-09-05：agent-session-guard 的
@@ -247,6 +261,8 @@ export function AgentChatSurface({
   const [draft, setDraft] = useState(initialPrompt.trim());
   // 交给输入区的续写信号（D-24）。输入区吃掉后回调清空，避免重复注入。
   const [prefill, setPrefill] = useState<{ text: string; nonce: number } | null>(null);
+  // 圖卡的 payload 級重跑對話框（entry 由媒體條目即時合成；null = 未開）。
+  const [rerunDialog, setRerunDialog] = useState<{ entry: HistoryEntry; mode: HistoryRerunMode } | null>(null);
   const chat = useAgentChat({
     // 09-12 建号权收归发送按钮：hook 的 autoStart 已撤——进助理挂载即空态，
     // 不预建会话；首条消息 send() 内部才 lazy 建号（深链的 switchSession
@@ -271,6 +287,7 @@ export function AgentChatSurface({
     switchSession,
     startNewSession,
     ensureSession,
+    dispatchNotice,
   } = chat;
   // D-26：已经问过锚定的那张图。问过就不再问——同一张图反复弹卡是骚扰。
   const [anchorAskedFor, setAnchorAskedFor] = useState<string | null>(null);
@@ -488,7 +505,7 @@ export function AgentChatSurface({
   const isActive = connection !== "idle" && connection !== "closed";
   const isInline = variant === "inline";
 
-  const onSaveToLibrary = useCallback(async (item: AgentImageItem): Promise<void> => {
+  const onSaveToLibrary = useCallback(async (item: AgentChatLibraryItem): Promise<void> => {
     // 客户端幂等：连点两下不该在资产包里躺两条一样的记录。
     if (savedIds.has(item.id)) return;
     try {
@@ -498,8 +515,10 @@ export function AgentChatSurface({
       const data = listRes.ok ? ((await listRes.json()) as { packs?: AssetPack[] }) : null;
       const packs = Array.isArray(data?.packs) ? data.packs : [];
       const existing = packs.find((p) => p.id === CHAT_ASSETS_PACK_ID);
-      // 2. 同 imageUrl 已存在 → 去重，直接标记已存（不重复写）。
-      if (existing?.items.some((it) => it.imageUrl === item.url)) {
+      // 2. 去重键按种类走各自的 URL 栏位（图→imageUrl，影片/音频→mediaUrl）：
+      //    不让影片拿图片的 imageUrl 去比，图片既有去重逻辑逐字不受影响。
+      const urlField = assetUrlFieldOf(item.kind);
+      if (existing?.items.some((it) => it[urlField] === item.url)) {
         setSavedIds((prev) => new Set([...prev, item.id]));
         return;
       }
@@ -548,15 +567,15 @@ export function AgentChatSurface({
   const onVideoDownload = useCallback(async (item: AgentVideoItem): Promise<void> => {
     await triggerDownload(item.url, `agent-${Date.now()}.mp4`);
   }, []);
-  // 影片「存图库」刻意不接：资产包 store 的 kind 联合（prompt/reference/lora/recipe/image）
-  // 没有 video，接了也只会静默丢条目——按钮保持 disabled，不伪造行为。
+  // 影片「存图库」已接线（见下方 videoActions）：item 经 assetItemKindOf/
+  // assetUrlFieldOf 落 kind:"video" + mediaUrl（agent-chat-asset-builders）。
   // 音頻下載：与影片同一条 triggerDownload 路径；副档名优先取 URL 自带者
   // （FlowMusic/lyria 出 m4a，TTS 出 mp3），取不到時回落 m4a。
   const onAudioDownload = useCallback(async (item: AgentAudioItem): Promise<void> => {
     const ext = /\.(m4a|mp3|wav|ogg|opus|aac|flac)(?:$|\?)/i.exec(item.url)?.[1] ?? "m4a";
     await triggerDownload(item.url, `agent-${Date.now()}.${ext}`);
   }, []);
-  // 音頻「存图库」同影片：資產包 store kind 联合没有 audio，按钮保持 disabled。
+  // 音頻「存图库」同影片已接线：kind:"audio" + mediaUrl（见下方 audioActions）。
 
   // D-12：盯住最新一条工具调用，把助理实际用的参数回流给工作台控件。
   // 用 ref 记住处理过的条目 id——重渲染不该把同一次调用回流两次，
@@ -613,6 +632,60 @@ export function AgentChatSurface({
       return;
     }
   }, [state.items, onImageResult]);
+
+  /*
+   * 自動落歷史：助理產出的圖／影片／音樂不需要使用者按鈕就進生成歷史（冪等 upsert）。
+   *
+   * 邊界＝「本會話連線就緒」那一刻：連線 open 時先把當下已存在的媒體條目記為基準
+   * （深鏈／歷史切換還原回放的舊作品在生成時早就寫過，這裡不補寫、不覆蓋），
+   * 之後才出現的才是本輪新產物。id 穩定（agent-<taskId>，無 taskId 用 url 雜湊），
+   * 同一媒體重複寫不會長第二條。寫失敗靜默——歷史是旁路，不占用戶的對話流。
+   */
+  const mediaHistoryProcessedRef = useRef<Set<string>>(new Set());
+  const mediaHistoryPrimedSessionRef = useRef<string | null>(null);
+  const mediaHistoryInFlightRef = useRef<Set<string>>(new Set());
+  const mediaHistoryAttemptsRef = useRef<Map<string, number>>(new Map());
+  useEffect(() => {
+    if (!sessionId || connection !== "open") return;
+    if (mediaHistoryPrimedSessionRef.current !== sessionId) {
+      // 切換會話（或深鏈還原落點）＝新基準點：同時重設 processed／in-flight／重試計數——
+      // 當下已存在的舊媒體一律視為「生成時早寫過」，不補寫；計數不跨會話累積。
+      mediaHistoryPrimedSessionRef.current = sessionId;
+      mediaHistoryProcessedRef.current = new Set(agentMediaItemIds(state.items));
+      mediaHistoryInFlightRef.current = new Set();
+      mediaHistoryAttemptsRef.current = new Map();
+      return;
+    }
+    const plan = planAgentMediaHistoryWrites(
+      state.items,
+      mediaHistoryProcessedRef.current,
+      mediaHistoryInFlightRef.current,
+      mediaHistoryAttemptsRef.current,
+    );
+    // 送出前只佔位本輪要送的 id（＋重試用盡判放棄者），不再把全部媒體一律標記；
+    // 失敗且未達上限者會在回調裡從 processed 撤回，下一輪效應觸發時重試。
+    mediaHistoryProcessedRef.current = new Set(plan.nextProcessedIds);
+    if (plan.writes.length === 0) return;
+    for (const { itemId, entry } of plan.writes) {
+      mediaHistoryInFlightRef.current.add(itemId);
+      const onFailure = (): void => {
+        const used = (mediaHistoryAttemptsRef.current.get(itemId) ?? 0) + 1;
+        mediaHistoryAttemptsRef.current.set(itemId, used);
+        // 未達上限 → 撤回佔位，放回 pending 供下次效應重試；
+        // 用盡上限 → 留在 processed（明確不可救的失敗才定案為已處理），不影響其他條目。
+        if (used < AGENT_MEDIA_HISTORY_MAX_ATTEMPTS) {
+          mediaHistoryProcessedRef.current.delete(itemId);
+        }
+      };
+      void saveAgentMediaToHistory(entry)
+        .then((ok) => {
+          if (!ok) onFailure();
+        }, onFailure)
+        .finally(() => {
+          mediaHistoryInFlightRef.current.delete(itemId);
+        });
+    }
+  }, [state.items, connection, sessionId]);
 
   /**
    * D-24 无缝续写：点药丸 = 把半句话搬进输入框，光标落末尾，人接着打。
@@ -725,19 +798,57 @@ export function AgentChatSurface({
     void abort();
   }, [abort]);
 
+  /*
+   * 三張卡的「再来 N 组／微调」：
+   *  - 圖：payload 級重跑（RerunDialog → /api/generation-jobs，逐任務帳本預檢、明碼計價）。
+   *  - 影片／音頻：會話級（payload 級對按秒計費不開放）——「再來 N 組」翻成一句話用
+   *    既有 send() 丟回對話，讓助理重新決定參數；「微調」只預填輸入框，不自動送出
+   *    （半句話直接送出去會立刻開一輪扣費生成）。
+   */
+  const onImageRerun = useCallback((item: AgentImageItem): void => {
+    setRerunDialog({ entry: agentHistoryEntryForMedia(item), mode: "rerun" });
+  }, []);
+  const onImageRerunVariant = useCallback((item: AgentImageItem): void => {
+    setRerunDialog({ entry: agentHistoryEntryForMedia(item), mode: "variant" });
+  }, []);
+  const onVideoRerun = useCallback((item: AgentVideoItem, count: number): void => {
+    const kind = item.mediaKind === "film" ? "成片" : "影片";
+    void send(`把上一条${kind}按原参数再来 ${count} 组（第 ${item.seq} 段，${item.url}）`);
+  }, [send]);
+  const onVideoVariant = useCallback((item: AgentVideoItem): void => {
+    const kind = item.mediaKind === "film" ? "成片" : "影片";
+    setPrefill({ text: `微调第 ${item.seq} 段${kind}（${item.url}）：`, nonce: Date.now() });
+  }, []);
+  const onAudioRerun = useCallback((item: AgentAudioItem, count: number): void => {
+    const kind = item.mediaKind === "music" ? "音乐" : "音频";
+    void send(`把上一条${kind}按原参数再来 ${count} 组（第 ${item.seq} 段，${item.url}）`);
+  }, [send]);
+  const onAudioVariant = useCallback((item: AgentAudioItem): void => {
+    const kind = item.mediaKind === "music" ? "音乐" : "音频";
+    setPrefill({ text: `微调第 ${item.seq} 段${kind}（${item.url}）：`, nonce: Date.now() });
+  }, []);
+
   const imageActions: AgentTranscriptProps["imageActions"] = {
     onSaveToLibrary,
     onEdit,
     onUpscale,
     onDownload,
+    onRerun: onImageRerun,
+    onRerunVariant: onImageRerunVariant,
   };
 
   const videoActions: AgentTranscriptProps["videoActions"] = {
+    onSaveToLibrary,
     onDownload: onVideoDownload,
+    onRerun: onVideoRerun,
+    onVariant: onVideoVariant,
   };
 
   const audioActions: AgentTranscriptProps["audioActions"] = {
+    onSaveToLibrary,
     onDownload: onAudioDownload,
+    onRerun: onAudioRerun,
+    onVariant: onAudioVariant,
   };
 
   return (
@@ -1067,6 +1178,20 @@ export function AgentChatSurface({
           onFirstUserMessage={onUserMessage}
         />
       </div>
+
+      {/* 圖卡「再来 N 组／微调变体」的 payload 級重跑對話框；完成訊息走既有 notice
+          通道落進 transcript（surface 無自有 toast，不另造一套）。 */}
+      {rerunDialog && (
+        <RerunDialog
+          entry={rerunDialog.entry}
+          mode={rerunDialog.mode}
+          onClose={() => setRerunDialog(null)}
+          onDone={(message) => {
+            setRerunDialog(null);
+            dispatchNotice("info", message);
+          }}
+        />
+      )}
     </div>
   );
 }

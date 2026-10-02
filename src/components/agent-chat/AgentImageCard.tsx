@@ -7,16 +7,19 @@ import {
   Coins,
   Download,
   ImagePlus,
+  Layers,
   Library,
   Maximize2,
   RotateCw,
   Share2,
+  SlidersHorizontal,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AgentImageItem } from "@/lib/agent-chat-types";
 import type { HistoryEntry } from "@/lib/history-types";
-import { agentHistoryEntry, saveAgentImageToHistory } from "@/lib/agent-image-share";
+import { agentHistoryEntryForMedia, saveAgentMediaToHistory } from "@/lib/agent-media-history";
+import { canHistoryEntryRerun } from "@/lib/history-rerun";
 import { ShareDialog } from "@/components/history/ShareDialog";
 
 export interface AgentImageCardProps {
@@ -26,6 +29,13 @@ export interface AgentImageCardProps {
   onEdit?: (item: AgentImageItem) => void;
   onUpscale?: (item: AgentImageItem) => void;
   onDownload?: (item: AgentImageItem) => void;
+  /**
+   * 「再来 N 组」：开 payload 級重跑對話框（RerunDialog 走 /api/generation-jobs，
+   * 每個任務獨立帳本預檢，明碼計價）。圖有完整配方（prompt/model/size）才放行。
+   */
+  onRerun?: (item: AgentImageItem) => void;
+  /** 「微调变体」：同一條 payload 級路徑，可改提示詞/模型/尺寸。 */
+  onRerunVariant?: (item: AgentImageItem) => void;
 }
 
 /** 展示用的金币数：整数原样，浮点去掉多余尾巴。 */
@@ -380,6 +390,8 @@ function AgentImageCardComponent({
   onEdit,
   onUpscale,
   onDownload,
+  onRerun,
+  onRerunVariant,
 }: AgentImageCardProps) {
   const [viewerOpen, setViewerOpen] = useState(false);
   const [shareEntry, setShareEntry] = useState<HistoryEntry | null>(null);
@@ -390,6 +402,9 @@ function AgentImageCardComponent({
   const triggerRef = useRef<HTMLDivElement>(null);
   // 上一次按压的时长（毫秒）。click 由它判定是否「长按唤菜单后松手」。
   const pressRef = useRef<{ dt: number; t: number } | null>(null);
+  // 「再来 N 组／微调变体」只在配方完整（有 prompt + 可计价图像模型）时渲染：
+  // payload 級重跑需要真實模型才推得出單價，推不出價格就不擺一顆按了會開空對話框的鈕。
+  const rerunnable = canHistoryEntryRerun(agentHistoryEntryForMedia(item));
 
   const closeViewer = useCallback(() => {
     setViewerOpen(false);
@@ -507,10 +522,10 @@ function AgentImageCardComponent({
           label="分享"
           disabled={sharing || failed}
           onClick={() => {
-            const entry = agentHistoryEntry(item);
+            const entry = agentHistoryEntryForMedia(item);
             setSharing(true);
             // 補寫失敗（未登入等）也照樣開框：ShareDialog 會把 /api/share 的真實錯誤講給用戶。
-            void saveAgentImageToHistory(entry).finally(() => {
+            void saveAgentMediaToHistory(entry).finally(() => {
               setSharing(false);
               setShareEntry(entry);
             });
@@ -518,6 +533,23 @@ function AgentImageCardComponent({
         >
           <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
         </ImageAction>
+        {/* 圖走 payload 級重跑（RerunDialog → /api/generation-jobs，逐任務帳本預檢、
+            明碼計價）；影片／音頻按秒計費、payload 級不開放，改走會話級（見兩張卡的註釋）。
+            配方可重跑才渲染；回調缺席＝disabled，絕不偽造行為。 */}
+        {rerunnable && (
+          <>
+            <ImageAction label="再来 N 组" disabled={!onRerun} onClick={() => onRerun?.(item)}>
+              <Layers className="h-3.5 w-3.5" aria-hidden="true" />
+            </ImageAction>
+            <ImageAction
+              label="微调变体"
+              disabled={!onRerunVariant}
+              onClick={() => onRerunVariant?.(item)}
+            >
+              <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
+            </ImageAction>
+          </>
+        )}
       </div>
       {shareEntry && <ShareDialog entry={shareEntry} onClose={() => setShareEntry(null)} />}
       {viewerOpen &&

@@ -2,12 +2,15 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import { groupHistoryByDay, inferEntryKind } from "@/lib/history-types";
-import type { HistoryEntry } from "@/lib/history-types";
+import type { HistoryEntry, HistoryEntryKind } from "@/lib/history-types";
 import { HistoryCard } from "./HistoryCard";
 import { HistorySkeleton } from "./HistorySkeleton";
 
-/** 记录类型档位；"all" 不过滤。与 HistoryFilterBar 的 Chip 一一对应。 */
-export type HistoryEntryKindFilter = "all" | "image" | "video" | "workflow";
+/**
+ * 記錄類型檔位；"all" 不過濾。與 HistoryFilterBar 的 Chip 一一對應，
+ * 值域由 history-types 的 HistoryEntryKind（交付物註冊表 ∪ 非交付種類）推導，不再手寫聯集。
+ */
+export type HistoryEntryKindFilter = "all" | HistoryEntryKind;
 
 export interface HistoryGridProps {
   entries: HistoryEntry[];

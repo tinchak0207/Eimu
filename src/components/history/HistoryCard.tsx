@@ -1,11 +1,12 @@
 "use client";
 
 import { memo, useCallback, useMemo, useState } from "react";
-import { AlertTriangle, Bot, Boxes, Check, Coins, CopyPlus, Download, FileQuestion, GitBranch, Loader2, Play, RotateCcw, Share2, SlidersHorizontal, Star, Trash2, Workflow } from "lucide-react";
+import { AlertTriangle, AudioLines, Bot, Boxes, Check, Coins, CopyPlus, Download, FileQuestion, GitBranch, Loader2, Play, RotateCcw, Share2, SlidersHorizontal, Star, Trash2, Workflow } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ParticleSeaWaiting } from "@/components/ParticleSeaWaiting";
 import { ShareDialog } from "@/components/history/ShareDialog";
 import { formatCoins, formatModelLabel, formatRelativeTime, inferEntryKind, primaryModelId } from "@/lib/history-types";
+import { deliverableKindLabel } from "@/lib/deliverable-kind";
 import { canHistoryEntryRerun } from "@/lib/history-rerun";
 import { assetPackPayloadFromHistoryEntry } from "@/lib/history-card-anchor";
 import { workflowDagThumbnailUrl } from "@/lib/history-workflow-view";
@@ -131,8 +132,14 @@ function HistoryCardComponent({
    * 一律显示「没有留存图片」，是既有缺口。
    */
   const dagThumbnailUrl = workflowDagThumbnailUrl(entry);
-  const result = entry.results.find((item) => item.image || item.imageUrl || item.videoUrl);
+  // 音频记录的结果里只有 audioUrl（无 image/imageUrl 也无 videoUrl），也必须被
+  // find 命中；否则卡片落回「没有留存图片」占位，音乐记录在历史里是一张死卡。
+  const result = entry.results.find((item) => item.image || item.imageUrl || item.videoUrl || item.audioUrl);
   const isVideo = !dagThumbnailUrl && !(result?.image || result?.imageUrl) && Boolean(result?.videoUrl);
+  /** 音频態：有 audioUrl 且没有任何可当 <img> 的媒体（图像/视频）。 */
+  const isAudio = !dagThumbnailUrl && !(result?.image || result?.imageUrl) && !result?.videoUrl && Boolean(result?.audioUrl);
+  // audioUrl 不进 src（src 只喂 <img>）；它走下面独立的可播放面分支，
+  // 这样 imageFailed 的破图判定不会被音频误触发。
   const src = dagThumbnailUrl
     ?? (result?.image ? `data:image/png;base64,${result.image}` : result?.imageUrl ?? result?.videoUrl ?? null);
   const model = primaryModelId(entry);
@@ -188,7 +195,7 @@ function HistoryCardComponent({
             handleActivate();
           }
         }}
-        aria-label={inProgress ? "生成中" : selectionMode ? (selected ? "取消选中" : "选中这张") : "查看大图"}
+        aria-label={inProgress ? "生成中" : selectionMode ? (selected ? "取消选中" : "选中这张") : isAudio ? "打开音频" : "查看大图"}
         className={cn(
           "block w-full text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.20)]",
           inProgress ? "cursor-default" : src && !imageFailed ? "cursor-zoom-in" : "cursor-pointer",
@@ -199,6 +206,31 @@ function HistoryCardComponent({
              父层必须 relative + 固定高度）。落地/失败后自动走下面正常分支。 */
           <div className="relative aspect-[4/3] w-full overflow-hidden rounded-none">
             <ParticleSeaWaiting visible startedAt={entry.generatedAt} />
+          </div>
+        ) : isAudio ? (
+          /* 音频態媒體面：icon + 曲目標題 + 原生播放器。點播放器不冒泡到卡片
+             （否則會同時開燈箱）；鍵盤同理，保住播放器的原生空白鍵行為。 */
+          <div className="hist-card-media flex aspect-[4/3] w-full flex-col items-center justify-center gap-3 px-4">
+            <span
+              className="lg-float flex h-12 w-12 items-center justify-center rounded-full text-[rgba(0,0,0,0.62)]"
+              aria-hidden="true"
+            >
+              <AudioLines className="h-5 w-5" />
+            </span>
+            <p className="line-clamp-2 text-center text-ios-caption1 leading-[1.35] text-[rgba(0,0,0,0.72)]">
+              {promptText || "未命名音频"}
+            </p>
+            {result?.audioUrl && (
+              <audio
+                src={result.audioUrl}
+                controls
+                preload="metadata"
+                aria-label="播放音频"
+                onClick={(event) => event.stopPropagation()}
+                onKeyDown={(event) => event.stopPropagation()}
+                className="w-full max-w-[240px]"
+              />
+            )}
           </div>
         ) : src && !imageFailed ? (
           <div className="hist-card-media">
@@ -308,6 +340,15 @@ function HistoryCardComponent({
         </span>
       )}
 
+      {/* 音乐徽章：与工作流徽章同族（lg-float 二级材质、右下角），说明这是音频
+          记录而非图片。音频记录不会是工作流，两个徽章不会冲突。 */}
+      {isAudio && (
+        <span className="lg-float pointer-events-none absolute bottom-3 right-3 z-10 inline-flex items-center gap-1 rounded-full px-2 py-1 text-ios-caption1 font-medium text-[rgba(0,0,0,0.62)]">
+          <AudioLines className="h-3 w-3" />
+          {deliverableKindLabel("audio")}
+        </span>
+      )}
+
       {/* 悬停浮出的操作条（生成中不渲染：图还没出来，任何动作都无从谈起） */}
       {!inProgress && (
       <div className="hist-card-actions absolute right-3 top-3 z-20 flex gap-1.5">
@@ -319,7 +360,7 @@ function HistoryCardComponent({
         >
           <Star className="h-3.5 w-3.5" fill={entry.starred ? "currentColor" : "none"} />
         </CardAction>
-        {src && !imageFailed && (
+        {((src && !imageFailed) || isAudio) && (
           <CardAction label="下载" disabled={downloadBusy} onClick={handleDownload}>
             {downloadBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
           </CardAction>

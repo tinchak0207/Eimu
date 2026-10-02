@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ChevronLeft, ChevronRight, Coins, Download, GitBranch, Layers, Loader2, RotateCcw, SlidersHorizontal, Star, Trash2, X } from "lucide-react";
+import { AudioLines, ChevronLeft, ChevronRight, Coins, Download, GitBranch, Layers, Loader2, RotateCcw, SlidersHorizontal, Star, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   formatAbsoluteTime,
@@ -43,6 +43,17 @@ function entrySrc(entry: HistoryEntry): string | null {
   const result = entry.results.find((item) => item.image || item.imageUrl || item.videoUrl);
   if (!result) return null;
   return result.image ? `data:image/png;base64,${result.image}` : result.imageUrl ?? result.videoUrl ?? null;
+}
+
+/**
+ * 音频產物 URL。音频不能當 <img> 的 src（餵進去只會是破圖），所以與 entrySrc
+ * 分開取：只收「沒有圖/視頻、只有 audioUrl」的結果，避免把圖片記錄判成音頻。
+ */
+function entryAudioSrc(entry: HistoryEntry): string | null {
+  for (const result of entry.results) {
+    if (!result.image && !result.imageUrl && !result.videoUrl && result.audioUrl) return result.audioUrl;
+  }
+  return null;
 }
 
 /** 工具栏按钮：44px 命中区，符合触摸目标下限。 */
@@ -211,6 +222,9 @@ export function HistoryLightbox({
   if (!mounted || !isOpen || !entry) return null;
 
   const src = entrySrc(entry);
+  /** 純音頻記錄：src 為 null 時才取 audioUrl，有圖/視頻記錄不受影響。 */
+  const audioSrc = src ? null : entryAudioSrc(entry);
+  const isAudioEntry = Boolean(audioSrc);
   const model = primaryModelId(entry);
   const promptText = entry.prompt.trim();
   const workflow = entry.workflow;
@@ -252,6 +266,7 @@ export function HistoryLightbox({
               {/* 工作流记录的主图是后端渲染的 DAG 缩略图，不是生成结果本身。
                   不说明的话用户会以为那就是跑出来的图。 */}
               {isDagThumbnail && " · 工作流结构图"}
+              {isAudioEntry && " · 音乐"}
             </p>
           </div>
 
@@ -264,7 +279,7 @@ export function HistoryLightbox({
             >
               <Star className="h-4 w-4" fill={entry.starred ? "currentColor" : "none"} />
             </ToolbarButton>
-            {src && (
+            {(src || audioSrc) && (
               <ToolbarButton
                 label="下载"
                 disabled={downloadBusy}
@@ -336,6 +351,26 @@ export function HistoryLightbox({
               decoding="async"
               className="hist-lightbox-figure max-h-full max-w-full rounded-ios-2xl object-contain shadow-[0_30px_80px_rgba(0,0,0,0.32)]"
             />
+          ) : audioSrc ? (
+            /* 音频條目：主區換成可播放面（autoPlay 由開啟燈箱的那次點擊提供使用者手勢，
+               瀏覽器不會擋）。關閉三件套（Esc／背景點擊／popstate）沿用既有監聽，未改。 */
+            <div className="hist-lightbox-figure w-full max-w-lg rounded-ios-2xl bg-white/10 px-8 py-10 text-center shadow-[0_30px_80px_rgba(0,0,0,0.32)]">
+              <span
+                className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-white/15 text-white/90"
+                aria-hidden="true"
+              >
+                <AudioLines className="h-6 w-6" />
+              </span>
+              <p className="mt-3 line-clamp-2 text-ios-footnote text-white/85">{promptText || "未命名音频"}</p>
+              <audio
+                src={audioSrc}
+                controls
+                autoPlay
+                preload="metadata"
+                aria-label="播放音频"
+                className="mt-4 w-full"
+              />
+            </div>
           ) : (
             <div className="rounded-ios-2xl bg-white/10 px-8 py-12 text-center">
               <p className="text-ios-footnote text-white/85">这条记录没有留存图片</p>
@@ -433,6 +468,7 @@ export function HistoryLightbox({
         >
           {entries.map((item, itemIndex) => {
             const thumb = entrySrc(item);
+            const itemIsAudio = !thumb && Boolean(entryAudioSrc(item));
             const isCurrent = itemIndex === index;
             return (
               <button
@@ -458,6 +494,12 @@ export function HistoryLightbox({
                     decoding="async"
                     className="h-full w-full object-cover"
                   />
+                ) : itemIsAudio ? (
+                  /* 音频条目的胶片位没有可当缩略图的图，用音频图标代替「无图」，
+                     否则一条真有产物的记录在胶片条上会被读成空记录。 */
+                  <span className="flex h-full w-full items-center justify-center bg-white/10 text-white/70">
+                    <AudioLines className="h-4 w-4" />
+                  </span>
                 ) : (
                   <span className="flex h-full w-full items-center justify-center bg-white/10 text-ios-caption1 text-white/60">
                     无图

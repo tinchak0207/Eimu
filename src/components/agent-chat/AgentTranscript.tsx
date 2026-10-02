@@ -18,12 +18,18 @@ export interface AgentTranscriptProps {
   /** 出图卡动作回调的预留通道：接线前缺省传入，按钮会保持 disabled。 */
   imageActions?: Pick<
     AgentImageCardProps,
-    "onSaveToLibrary" | "onEdit" | "onUpscale" | "onDownload"
+    "onSaveToLibrary" | "onEdit" | "onUpscale" | "onDownload" | "onRerun" | "onRerunVariant"
   >;
   /** 出片卡动作回调的预留通道：接线前缺省传入，按钮会保持 disabled。 */
-  videoActions?: Pick<AgentVideoCardProps, "onSaveToLibrary" | "onDownload">;
+  videoActions?: Pick<
+    AgentVideoCardProps,
+    "onSaveToLibrary" | "onDownload" | "onRerun" | "onVariant"
+  >;
   /** 出音频卡动作回调的预留通道：接线前缺省传入，按钮会保持 disabled。 */
-  audioActions?: Pick<AgentAudioCardProps, "onSaveToLibrary" | "onDownload">;
+  audioActions?: Pick<
+    AgentAudioCardProps,
+    "onSaveToLibrary" | "onDownload" | "onRerun" | "onVariant"
+  >;
   /** 网关暂态状态行（turn.status 事件）：新状态替换旧行，真实内容/turn.done 即清。 */
   turnStatus?: string;
   /** 当前会话 id：透传给用户气泡的附件卡铸读取票。 */

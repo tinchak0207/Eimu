@@ -1,3 +1,40 @@
+/** 能从 URL 尾端认出的媒体副档名；export-zip.ts 的接收端白名单由此推导（单一真源）。 */
+export const MEDIA_EXTENSIONS = [
+  "png",
+  "jpg",
+  "jpeg",
+  "webp",
+  "gif",
+  "mp4",
+  "webm",
+  "mov",
+  "mp3",
+  "m4a",
+  "wav",
+  "aac",
+  "ogg",
+  "opus",
+  "flac",
+] as const;
+
+/**
+ * 从媒体 URL 尾端推出副档名（忽略 ?query 与 #hash，大小写归一）。
+ * data:/blob: 这类没有路径语义的来源一律返回 null，呼叫端据此回落。
+ */
+export function mediaExtensionFromUrl(src: string): string | null {
+  if (!src || src.startsWith("data:") || src.startsWith("blob:")) return null;
+  const path = src.split(/[?#]/)[0];
+  const match = /\.([a-z0-9]+)$/i.exec(path);
+  if (!match) return null;
+  const ext = match[1].toLowerCase();
+  return (MEDIA_EXTENSIONS as readonly string[]).includes(ext) ? ext : null;
+}
+
+/** download 用的副档名：推得出真实副档名就用它，否则维持既有默认的 png。 */
+export function downloadExtension(src: string): string {
+  return mediaExtensionFromUrl(src) ?? "png";
+}
+
 export const imageHelpers = {
   base64ToBlob: (base64Data: string, type = "image/png"): Blob => {
     const byteString = atob(base64Data);
@@ -94,7 +131,8 @@ export const imageHelpers = {
     const blobUrl = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = blobUrl;
-    link.download = `${fileName}.png`;
+    // 副档名跟着来源 URL 走：音频/视频不再被硬写成 .png；推不出一律 png。
+    link.download = `${fileName}.${downloadExtension(imageSource)}`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

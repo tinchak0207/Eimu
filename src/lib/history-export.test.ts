@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildHistoryArchive } from "./history-export.ts";
+import { buildHistoryArchive, entryFileName, entrySrc } from "./history-export.ts";
 import type { HistoryEntry } from "./history-types.ts";
 
 function entry(overrides: Partial<HistoryEntry> & Pick<HistoryEntry, "id" | "generatedAt">): HistoryEntry {
@@ -53,4 +53,64 @@ test("buildHistoryArchive 对空输入返回空档案而不是抛错", () => {
   const archive = buildHistoryArchive([]);
   assert.equal(archive.count, 0);
   assert.deepEqual(archive.records, []);
+});
+
+test("entryFileName 把音频来源的副档名带进 zip 条目名", () => {
+  const audio = entry({
+    id: "audio",
+    generatedAt: 1_700_000_000_000,
+    prompt: "轻快的钢琴曲",
+    results: [
+      {
+        provider: "audio_tinchak",
+        modelId: "music-1",
+        image: null,
+        imageUrl: null,
+        audioUrl: "https://blob.example/song.mp3?token=abc",
+      },
+    ],
+  });
+  assert.match(entryFileName(audio), /\.mp3$/, "mp3 音频条目名必须以 .mp3 结尾，否则会被补成 .png");
+
+  const m4a = entry({
+    id: "m4a",
+    generatedAt: 1_700_000_000_000,
+    prompt: "旁白",
+    results: [
+      { provider: "audio_tinchak", modelId: "tts-1", image: null, imageUrl: null, audioUrl: "https://blob.example/voice.m4a" },
+    ],
+  });
+  assert.match(entryFileName(m4a), /\.m4a$/);
+});
+
+test("entryFileName 对图片沿用 .png（含 base64 无 URL）", () => {
+  const imageEntry = entry({
+    id: "img",
+    generatedAt: 1_700_000_000_000,
+    prompt: "一只猫",
+    results: [{ provider: "image_tinchak", modelId: "gpt-image-2", image: null, imageUrl: "https://blob.example/cat.png" }],
+  });
+  assert.match(entryFileName(imageEntry), /\.png$/);
+
+  const base64Entry = entry({
+    id: "b64",
+    generatedAt: 1_700_000_000_000,
+    prompt: "一只狗",
+    results: [{ provider: "image_tinchak", modelId: "gpt-image-2", image: "AAAA", imageUrl: null }],
+  });
+  assert.match(entryFileName(base64Entry), /\.png$/);
+});
+
+test("纯视频记录：entrySrc 认得 videoUrl（不再被判 skipped），条目名以 .mp4 结尾", () => {
+  const video = entry({
+    id: "video",
+    generatedAt: 1_700_000_000_000,
+    prompt: "海边日落",
+    results: [
+      { provider: "video_tinchak", modelId: "seedance-2.0", image: null, imageUrl: null, videoUrl: "https://blob.example/clip.mp4", mediaType: "video" },
+    ],
+  });
+  // entrySrc 返回非空即代表 exportHistoryZip 不会把它计入 skipped。
+  assert.equal(entrySrc(video), "https://blob.example/clip.mp4");
+  assert.match(entryFileName(video), /\.mp4$/);
 });

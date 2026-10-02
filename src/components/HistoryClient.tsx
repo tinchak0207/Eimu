@@ -12,6 +12,7 @@ import type { HistoryEntry, HistoryQuery } from "@/lib/history-types";
 import { exportHistoryCsv, exportHistoryJson, exportHistoryZip } from "@/lib/history-export";
 import { imageHelpers } from "@/lib/image-helpers";
 import { cn } from "@/lib/utils";
+import { ENTRY_KIND_VALUES, parseEntryKind } from "@/components/history/history-kind-filter";
 import {
   HistoryEmptyState,
   HistoryFilterBar,
@@ -50,16 +51,12 @@ const PARAM = {
   entryKind: "kind",
 } as const;
 
-/** URL 里只认这四个值；其它（含拼错）一律当作「全部」，不把非法值带进查询。 */
-const ENTRY_KIND_VALUES = ["image", "video", "workflow"] as const;
-type EntryKindFilter = (typeof ENTRY_KIND_VALUES)[number] | "all";
-
-function parseEntryKind(value: string | null): EntryKindFilter {
-  const trimmed = value?.trim();
-  return ENTRY_KIND_VALUES.includes(trimmed as (typeof ENTRY_KIND_VALUES)[number])
-    ? (trimmed as (typeof ENTRY_KIND_VALUES)[number])
-    : "all";
-}
+// 合法种类值不再手写：由交付物注册表 + 非交付种类清单推导
+//   [...DELIVERABLE_KIND_IDS, ...NON_DELIVERABLE_ENTRY_KINDS]
+// 推导与解析落在 history-kind-filter（纯模块）——本档带 history.css，node:test
+// 下无法 import，契约就测不到。这里消费同源结果，并转发导出供需要处取用：
+// 「URL 里只认哪些值」与「种类筛选器认哪些值」从此是同一份真源。
+export { ENTRY_KIND_VALUES, parseEntryKind };
 
 function queryFromSearchParams(params: URLSearchParams): HistoryQuery {
   const keyword = params.get(PARAM.keyword)?.trim();
@@ -285,13 +282,13 @@ export function HistoryClient() {
   }, [history.entries]);
 
   const handleDownload = useCallback(async (entry: HistoryEntry) => {
-    // 视频记录的结果里只有 videoUrl，没有 image/imageUrl。历史卡片既然已经把
-    // 视频缩略图显示出来了，下载钮就必须能把那段视频拿走，否则按下去只会得到
-    // 一句「没有可下载的图片」。
-    const result = entry.results.find((item) => item.image || item.imageUrl || item.videoUrl);
-    const src = result?.image ? result.image : result?.imageUrl ?? result?.videoUrl;
+    // 视频记录的结果里只有 videoUrl，音频记录里只有 audioUrl，都没有 image/imageUrl。
+    // 历史卡片既然已经把视频缩略图/音频播放面显示出来了，下载钮就必须能把那段视频/
+    // 音频拿走，否则按下去只会得到一句「没有可下载的图片」。
+    const result = entry.results.find((item) => item.image || item.imageUrl || item.videoUrl || item.audioUrl);
+    const src = result?.image ? result.image : result?.imageUrl ?? result?.videoUrl ?? result?.audioUrl;
     if (!src) {
-      setNotice("这条记录没有可下载的图片或视频。");
+      setNotice("这条记录没有可下载的图片、视频或音频。");
       return;
     }
     try {
@@ -331,9 +328,9 @@ export function HistoryClient() {
     setNotice(null);
     try {
       const result = await exportHistoryZip(selectedEntries);
-      if (result.exported === 0) setNotice("选中的记录都没有可下载的图片。");
-      else if (result.skipped > 0) setNotice(`已打包 ${result.exported} 张，${result.skipped} 张取不到图已跳过。`);
-      else setNotice(`已打包 ${result.exported} 张。`);
+      if (result.exported === 0) setNotice("选中的记录都没有可下载的图片、视频或音频。");
+      else if (result.skipped > 0) setNotice(`已打包 ${result.exported} 个文件，${result.skipped} 个取不到已跳过。`);
+      else setNotice(`已打包 ${result.exported} 个文件。`);
     } catch {
       setNotice("打包失败，请稍后重试。");
     } finally {

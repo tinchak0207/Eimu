@@ -15,6 +15,15 @@ import type { GenerationWorkflowMetadata } from "./image-types";
 import { QUOTA_PER_COIN } from "./quota-constants";
 import { normalizeLineageLinks } from "./lineage";
 import type { LineageLink } from "./lineage";
+// 交付物種類真源（./deliverable-kind，零依賴純函數檔）：
+// 歷史側的種類型別、mediaType 白名單、結果推斷、hasImage 全由註冊表推導。
+import {
+  DELIVERABLE_KINDS,
+  deliverableKindsByDetectPriority,
+  deliverableKindsOfResult,
+  isDeliverableKind,
+} from "./deliverable-kind";
+import type { DeliverableKind } from "./deliverable-kind";
 
 export { QUOTA_PER_COIN };
 
@@ -45,14 +54,24 @@ export const HISTORY_MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 export type HistorySource = "local" | "server" | "billing" | "workflow";
 
 /**
- * 记录类型：一条记录交付的是「一张图 / 一支视频 / 一次工作流跑批」。
+ * 非交付物的記錄種類。`"workflow"` 描述的是一次 DAG 跑批，不是某件可交付的媒體，
+ * 因此不進交付物註冊表；UI 需要「非交付種類有哪些」時取這份清單，不手寫字串。
+ */
+export const NON_DELIVERABLE_ENTRY_KINDS = ["workflow"] as const;
+export type NonDeliverableEntryKind = (typeof NON_DELIVERABLE_ENTRY_KINDS)[number];
+
+/**
+ * 记录类型：一条记录交付的是「一张图 / 一支视频 / 一段音频 / 一次工作流跑批」。
  *
  * 为什么要有这个字段而不是直接看 source：source 是存储面（同一条记录在 local
  * 与 server 两个面各有一份），entryKind 是内容种类，两者正交。工作流记录在
  * 归并时可能以 server 面为主记录，那时只看 source 会把「有 DAG 的工作流记录」
  * 与「单张图」混为一谈。缺省时用 inferEntryKind 推。
+ *
+ * 值域＝交付物種類（由 ./deliverable-kind 註冊表推導）∪ 非交付種類（workflow）。
+ * 新增一種交付物＝在註冊表加一行，這裡自動跟上，不再手寫字串聯集。
  */
-export type HistoryEntryKind = "image" | "video" | "workflow";
+export type HistoryEntryKind = DeliverableKind | NonDeliverableEntryKind;
 
 export interface HistoryResult {
   provider: string;
@@ -63,7 +82,10 @@ export interface HistoryResult {
   resultId?: string;
   taskId?: string;
   videoUrl?: string | null;
-  mediaType?: "image" | "video";
+  /** 音频产物 URL（音乐/TTS）；与 videoUrl 并列的第四类产物。 */
+  audioUrl?: string | null;
+  /** 媒体种类；值域＝交付物注册表（./deliverable-kind）。image 也会显式写入。 */
+  mediaType?: DeliverableKind;
 }
 
 export interface HistoryEntry {
@@ -119,7 +141,7 @@ export interface HistoryQuery {
   starredOnly?: boolean;
   /** 只看带图的记录（计费日志没有图）。 */
   withImageOnly?: boolean;
-  /** 只看某一类记录（图片 / 视频 / 工作流）。缺省不限。 */
+  /** 只看某一类记录（图片 / 视频 / 音频 / 工作流）。缺省不限。 */
   entryKind?: HistoryEntryKind;
   /** 闭区间，毫秒时间戳。 */
   since?: number;
@@ -207,7 +229,10 @@ function nonEmptyString(value: unknown): string | undefined {
 
 /** entryKind 白名單判定。写入口（POST /api/history）与推送端点共用同一把尺。 */
 function isEntryKind(value: unknown): value is HistoryEntryKind {
-  return value === "image" || value === "video" || value === "workflow";
+  return (
+    isDeliverableKind(value) ||
+    (NON_DELIVERABLE_ENTRY_KINDS as readonly unknown[]).includes(value)
+  );
 }
 
 /**
@@ -266,27 +291,57 @@ export function primaryModelId(entry: HistoryEntry): string {
  *   3. workflow 带 dagNodes —— 老工作流记录可能没有 entryKind 也没有
  *      workflow 这个 source（归并后主记录可能是 server 面），但 DAG 结构在，
  *      它就是工作流记录；
- *   4. results 里第一支视频（mediaType / videoUrl）→ "video"；
+ *   4. results 的媒體種類與產物 URL（由註冊表 resultField 驅動）判 media kind，
+ *      優先序由註冊表 detectPriority 決定（現況 video > audio > image）；
+ *      新增種類自動納入，不再硬編；一条记录同时带影音时，視頻是主產物；
  *   5. 其余（含无 results 的空记录）→ "image"。
  *
  * 第 5 条刻意兜底成 "image"：历史页绝大多数记录是图，把无结果记录判成
  * "video" 会让默认列表被空记录淹掉。没有任何一条分支会抛错。
  */
 export function inferEntryKind(entry: HistoryEntry): HistoryEntryKind {
-  if (entry.entryKind === "image" || entry.entryKind === "video" || entry.entryKind === "workflow") {
+  if (isEntryKind(entry.entryKind)) {
     return entry.entryKind;
   }
   if (entry.source === "workflow") return "workflow";
   if (Array.isArray(entry.workflow?.dagNodes) && entry.workflow.dagNodes.length > 0) return "workflow";
+
+  // 媒體分支：逐 result 收集種類（媒體宣告 mediaType ＋ 產物 URL 推斷），再按
+  // **註冊表 detectPriority 升序**取最高者（現況 video > audio > image）——
+  // 注意這與註冊表宣告序（image → video → audio）不同，因為同錄帶影音時視頻
+  // 是主產物（既有語義）；deliverableKindOfResult 只是「單一結果 → 單一 URL
+  // 種類」的投影，這裡跨所有結果取並集，確保 videoUrl 落在任一結果都能勝出。
+  // 沒有任何媒體種類命中時落到第 5 條的 "image" 兜底。
+  const mediaKinds = new Set<DeliverableKind>();
   for (const result of entry.results) {
-    if (result.mediaType === "video" || result.videoUrl) return "video";
+    if (isDeliverableKind(result.mediaType)) mediaKinds.add(result.mediaType);
+    // 逐欄位收集「這個 result 所有命中的種類」，而不是取單一投影
+    // （deliverableKindOfResult 按宣告序 image 先掃，會蓋掉同一 result 的 videoUrl）。
+    for (const kind of deliverableKindsOfResult(result)) mediaKinds.add(kind);
+  }
+  for (const kind of deliverableKindsByDetectPriority()) {
+    if (mediaKinds.has(kind)) return kind;
   }
   return "image";
 }
 
-/** 是否带图。计费日志永远没有图。 */
+/**
+ * 是否带「可留存媒体」。计费日志永远没有媒体。
+ *
+ * 判定：results 里任一结果带了 image 或註冊表任一 resultField（imageUrl /
+ * videoUrl / audioUrl）。欄位清單由 ./deliverable-kind 推導，新增交付物種類時
+ * 這裡自動納入，不再手寫欄位名。
+ * 注意它早就不只认「图」——videoUrl 从视频能力上线起就在里面，因此函数名
+ * 是历史遗留；实际语义是「有产物可看/可播」（UI 上「有图」chip 的用意也是
+ * 「不把无媒体的计费日志混进来」）。audioUrl 与 videoUrl 同级计入，保持同一
+ * 语义，否则音乐记录会在「有图」筛选下整批消失。
+ */
 export function hasImage(entry: HistoryEntry): boolean {
-  return entry.results.some((result) => Boolean(result.image || result.imageUrl || result.videoUrl));
+  return entry.results.some(
+    (result) =>
+      Boolean(result.image) ||
+      DELIVERABLE_KINDS.some((kind) => Boolean(result[kind.resultField])),
+  );
 }
 
 /** 精确去重键。 */
@@ -309,16 +364,21 @@ export function normalizeHistoryEntry(raw: unknown, source: HistorySource): Hist
         if (!isRecord(item)) return [];
         const modelId = nonEmptyString(item.modelId);
         if (!modelId) return [];
+        // mediaType 白名单由交付物注册表判定：image / video / audio 都放行
+        // （image 也显式写入 mediaType；未知值丢弃）。image 旧行为刻意不写是
+        // 为不新增字段，现改由注册表统一——见 deliverable-kind.ts。
+        const mediaType = isDeliverableKind(item.mediaType) ? item.mediaType : undefined;
         return [{
           provider: nonEmptyString(item.provider) ?? "image_tinchak",
           modelId,
           image: typeof item.image === "string" && item.image ? item.image : null,
-          imageUrl: typeof item.imageUrl === "string" && item.imageUrl ? item.imageUrl : null,
+          imageUrl: nonEmptyString(item.imageUrl) ?? null,
           ...(nonEmptyString(item.endpointLabel) ? { endpointLabel: nonEmptyString(item.endpointLabel) } : {}),
           ...(nonEmptyString(item.resultId) ? { resultId: nonEmptyString(item.resultId) } : {}),
           ...(nonEmptyString(item.taskId) ? { taskId: nonEmptyString(item.taskId) } : {}),
           ...(nonEmptyString(item.videoUrl) ? { videoUrl: nonEmptyString(item.videoUrl) } : {}),
-          ...(item.mediaType === "video" ? { mediaType: "video" as const } : {}),
+          ...(nonEmptyString(item.audioUrl) ? { audioUrl: nonEmptyString(item.audioUrl) } : {}),
+          ...(mediaType ? { mediaType } : {}),
         }];
       }).slice(0, HISTORY_MAX_RESULTS_PER_ENTRY)
     : [];

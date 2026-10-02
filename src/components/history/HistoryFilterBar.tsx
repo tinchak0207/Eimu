@@ -1,9 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { FileJson, Filter, Image as ImageIcon, Search, Sheet, Star, Video, Workflow, X } from "lucide-react";
+import { Boxes, FileJson, Filter, Image as ImageIcon, Music, Search, Sheet, Star, Video, Workflow, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { HistoryFacets, HistoryQuery } from "@/lib/history-types";
+import { filterableDeliverableKinds } from "@/lib/deliverable-kind";
+import type { DeliverableKind } from "@/lib/deliverable-kind";
+import { NON_DELIVERABLE_ENTRY_KINDS } from "@/lib/history-types";
+import type { HistoryEntryKind, HistoryFacets, HistoryQuery, NonDeliverableEntryKind } from "@/lib/history-types";
 
 export interface HistoryFilterBarProps {
   query: HistoryQuery;
@@ -71,14 +74,45 @@ export function HistoryFilterBar({ query, facets, stats, onExportCsv, onExportJs
   }, [keyword, query, onChange]);
 
   /**
+   * 交付物種類 → 圖示。註冊表（/lib/deliverable-kind）是零依賴純函數檔，不帶 React 節點，
+   * 故映射留在這裡；label 一律取註冊表（spec.label），不在本檔手寫。
+   *
+   * icon 映射在渲染期建立（不放在模組頂層）：node:test 走 classic runtime，
+   * 頂層 JSX 會在本檔被 import 時就執行，早於測試補的全局 React 樁而報
+   * "React is not defined"。
+   */
+  const kindIcons: Partial<Record<DeliverableKind, React.ReactNode>> = {
+    image: <ImageIcon className="h-3.5 w-3.5" />,
+    video: <Video className="h-3.5 w-3.5" />,
+    audio: <Music className="h-3.5 w-3.5" />,
+  };
+  /** 新交付物種類尚未補圖示時的兜底：仍要渲染該 chip，不得略過、不得崩。 */
+  const fallbackKindIcon = <Boxes className="h-3.5 w-3.5" />;
+  /** 非交付種類（workflow）的 chip 文案與圖示；交付物文案由註冊表提供，只有這裡需手寫。 */
+  const nonDeliverableLabels: Record<NonDeliverableEntryKind, string> = { workflow: "工作流" };
+  const nonDeliverableIcons: Record<NonDeliverableEntryKind, React.ReactNode> = {
+    workflow: <Workflow className="h-3.5 w-3.5" />,
+  };
+
+  /**
    * 记录类型档位。工作流是一种记录（一条 DAG 跑完的结果），不是「有图／没图」
    * 这类属性开关，所以和「有图」同属 kind 族：同一个 Chip 位只亮一个，不会出现
    * 「收藏 + 工作流 + 有图」三个高亮叠在一起的多选错觉。
+   *
+   * chip 清单一律由种类注册表推导（filterableDeliverableKinds）＋非交付种类清单，
+   * 不再手写「图片／视频／音乐／工作流」——新增一种交付物时这里自动多一颗，历史页不改。
    */
-  const kinds: ReadonlyArray<{ value: "image" | "video" | "workflow"; label: string; icon: React.ReactNode }> = [
-    { value: "image", label: "图片", icon: <ImageIcon className="h-3.5 w-3.5" /> },
-    { value: "video", label: "视频", icon: <Video className="h-3.5 w-3.5" /> },
-    { value: "workflow", label: "工作流", icon: <Workflow className="h-3.5 w-3.5" /> },
+  const kindOptions: ReadonlyArray<{ value: HistoryEntryKind; label: string; icon: React.ReactNode }> = [
+    ...filterableDeliverableKinds().map((kind) => {
+      // 注册表 spec.id 被声明为 string（DeliverableKindSpec），但只可能来自注册表成员。
+      const id = kind.id as DeliverableKind;
+      return { value: id, label: kind.label, icon: kindIcons[id] ?? fallbackKindIcon };
+    }),
+    ...NON_DELIVERABLE_ENTRY_KINDS.map((id) => ({
+      value: id,
+      label: nonDeliverableLabels[id],
+      icon: nonDeliverableIcons[id],
+    })),
   ];
 
   const patch = (next: Partial<HistoryQuery>) => onChange({ ...query, ...next });
@@ -88,7 +122,7 @@ export function HistoryFilterBar({ query, facets, stats, onExportCsv, onExportJs
    * withImageOnly，选了「有图」就把类型档位切回「全部」，避免两个筛选条件
    * 叠出「什么都没有」的空列表。
    */
-  const selectKind = (value: "image" | "video" | "workflow") => {
+  const selectKind = (value: HistoryEntryKind) => {
     const next = query.entryKind === value ? undefined : value;
     patch({ entryKind: next, withImageOnly: undefined });
   };
@@ -163,9 +197,9 @@ export function HistoryFilterBar({ query, facets, stats, onExportCsv, onExportJs
           <Star className="h-3.5 w-3.5" fill={query.starredOnly ? "currentColor" : "none"} />
           收藏
         </Chip>
-        {/* 类型档位：图片／视频／工作流。之前只有「有图」一颗，工作流记录混在
+        {/* 类型档位：图片／视频／音乐／工作流。之前只有「有图」一颗，工作流记录混在
             图片列表里没有出口；「有图」保留为「不看计费日志」的开关。 */}
-        {kinds.map((kind) => (
+        {kindOptions.map((kind) => (
           <Chip
             key={kind.value}
             active={query.entryKind === kind.value}

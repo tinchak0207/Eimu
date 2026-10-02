@@ -40,18 +40,109 @@ function makePack(overrides: Partial<AssetPack> = {}): AssetPack {
 
 // ── normalize 白名單 ─────────────────────────────────────────
 
-test("normalizeAssetPack：非法 kind 的 item 被拒絕（drop）", () => {
+test("normalizeAssetPack：video/audio 已進白名單，但缺 mediaUrl 仍被拒（drop）", () => {
+  // 舊契約：video 是「非法 kind」被 drop；新契約：video/audio 是合法交付物媒體，
+  // 缺 mediaUrl 才 drop（無產物 URL 的媒體 item 無意義）。此條反映新契約。
   const pack = normalizeAssetPack({
     id: "p1",
     title: "t",
     items: [
-      { kind: "video", title: "bad" }, // 不在白名單
+      { kind: "video", title: "no-url" }, // 合法 kind 但缺 mediaUrl → drop
+      { kind: "audio", title: "no-url" }, // 同上
       { kind: "prompt", title: "good" },
     ],
   });
   assert.ok(pack);
   assert.equal(pack.items.length, 1);
   assert.equal(pack.items[0].title, "good");
+});
+
+test("normalizeAssetPack：未知 / 近義 asset kind 一律被拒（item 被 drop，不靜默放行）", () => {
+  // 未知 kind（"garbage"）與近義詞（"movie" 而非 "video"）都不是註冊表白名單值，
+  // normalizeItem 回 null → 該 item 被 drop，不得因新增媒體種類而被放行。
+  const pack = normalizeAssetPack({
+    id: "p1",
+    title: "t",
+    items: [
+      { kind: "garbage", title: "x" },
+      { kind: "movie", title: "近義詞" },
+      { kind: "prompt", title: "good" },
+    ],
+  });
+  assert.ok(pack);
+  assert.equal(pack.items.length, 1);
+  assert.equal(pack.items[0].kind, "prompt");
+  assert.equal(pack.items[0].title, "good");
+
+  // 全部為未知 kind 時，item 層全被 drop（pack 本體仍成立、items 為空）。
+  const allBogus = normalizeAssetPack({
+    id: "p2",
+    title: "t",
+    items: [
+      { kind: "garbage", title: "x" },
+      { kind: "movie", title: "y" },
+    ],
+  });
+  assert.ok(allBogus);
+  assert.equal(allBogus.items.length, 0);
+});
+
+test("normalizeAssetPack：video 帶 mediaUrl → 收，kind/mediaUrl 保留", () => {
+  const pack = normalizeAssetPack({
+    id: "p1",
+    title: "t",
+    items: [
+      { kind: "video", title: "v", mediaUrl: "  https://x/a.mp4  ", imageUrl: "不收" },
+    ],
+  });
+  assert.ok(pack);
+  assert.equal(pack.items.length, 1);
+  assert.equal(pack.items[0].kind, "video");
+  assert.equal(pack.items[0].mediaUrl, "https://x/a.mp4");
+  assert.equal(pack.items[0].imageUrl, undefined);
+});
+
+test("normalizeAssetPack：audio 帶 mediaUrl → 收；缺 mediaUrl → drop", () => {
+  const pack = normalizeAssetPack({
+    id: "p1",
+    title: "t",
+    items: [
+      { kind: "audio", title: "a", mediaUrl: "https://x/a.mp3" },
+      { kind: "audio", title: "bad", mediaUrl: "   " },
+    ],
+  });
+  assert.ok(pack);
+  assert.equal(pack.items.length, 1);
+  assert.equal(pack.items[0].kind, "audio");
+  assert.equal(pack.items[0].mediaUrl, "https://x/a.mp3");
+});
+
+test("normalizeAssetPack：image 既有行為不變（有 imageUrl 收、缺 URL 仍保留 item）", () => {
+  const pack = normalizeAssetPack({
+    id: "p1",
+    title: "t",
+    items: [
+      { kind: "image", title: "with", imageUrl: "https://x/a.png", mediaUrl: "不收" },
+      { kind: "image", title: "without" },
+    ],
+  });
+  assert.ok(pack);
+  assert.equal(pack.items.length, 2);
+  assert.equal(pack.items[0].imageUrl, "https://x/a.png");
+  assert.equal(pack.items[0].mediaUrl, undefined);
+  assert.equal(pack.items[1].kind, "image");
+  assert.equal(pack.items[1].imageUrl, undefined);
+});
+
+test("normalizeAssetPack：reference 既有行為不變（收 imageUrl，不收 mediaUrl）", () => {
+  const pack = normalizeAssetPack({
+    id: "p1",
+    title: "t",
+    items: [{ kind: "reference", title: "r", imageUrl: "https://x/r.png", mediaUrl: "不收" }],
+  });
+  assert.ok(pack);
+  assert.equal(pack.items[0].imageUrl, "https://x/r.png");
+  assert.equal(pack.items[0].mediaUrl, undefined);
 });
 
 test("normalizeAssetPack：無 title 的 pack 拒絕", () => {

@@ -1,6 +1,11 @@
 // 資產包 API：list / upsert / delete。
 // 認證：requireVerifiedUser（上游 /api/user/self 驗證，不信任 x-user-id）。
 //
+// item kind 契約（由 src/lib/deliverable-kind.ts 註冊表推導，asset-pack-store 收口）：
+//   * 資產專屬：prompt / reference / lora / recipe / scene_3d / bpy_script；
+//   * 交付物媒體：image（有 imageUrl）/ video（有 mediaUrl）/ audio（有 mediaUrl）。
+//   video/audio 缺 mediaUrl 的 item 會在 normalizeAssetPack 被 drop（本路由只收乾淨包）。
+//
 // P0-2 資產團隊維度（寫入端閘）：PUT 接受 `scope.owner === "team"` —— 照
 // `src/lib/canvas/team-canvas-gate.ts` 的既有模式：用 `lookupTeamMembershipViaRelay`
 // 驗成員身份，並以**relay 回的權威 teamId 蓋章**（客戶端送來的 teamId 一律不採信）。

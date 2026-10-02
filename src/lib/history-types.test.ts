@@ -575,3 +575,217 @@ test("normalizeHistoryEntry 白名单收 entryKind（非法值丢弃），source
   const fromSource = normalizeHistoryEntry({ id: "b", generatedAt: 1 }, "workflow");
   assert.equal(fromSource?.entryKind, "workflow");
 });
+
+// ─────────────────────────────────────────── 音频记录（entryKind = audio）
+
+test("normalizeHistoryEntry 收 entryKind:audio 与 audioUrl/mediaType:audio", () => {
+  const normalized = normalizeHistoryEntry(
+    {
+      id: "music-1",
+      generatedAt: 1_700_000_000_000,
+      prompt: "帮我写首歌",
+      entryKind: "audio",
+      results: [
+        {
+          provider: "flowmusic",
+          modelId: "flowmusic-v1",
+          audioUrl: "https://x/song.mp3",
+          mediaType: "audio",
+        },
+      ],
+    },
+    "server",
+  );
+  assert.ok(normalized);
+  assert.equal(normalized.entryKind, "audio");
+  assert.equal(normalized.results[0].audioUrl, "https://x/song.mp3");
+  assert.equal(normalized.results[0].mediaType, "audio");
+  // 真行为断言：读回的 entry 经 inferEntryKind 仍判为 audio
+  assert.equal(inferEntryKind(normalized), "audio");
+});
+
+test("inferEntryKind 对旧式「只有 audioUrl」的记录也判 audio", () => {
+  // 旧记录没有 entryKind、也没有 mediaType，只有产物 URL —— 归并后主记录走 server 面
+  const legacy = entry({
+    id: "legacy-audio",
+    generatedAt: 1,
+    results: [{ provider: "flowmusic", modelId: "flowmusic-v1", image: null, imageUrl: null, audioUrl: "https://x/a.mp3" }],
+  });
+  assert.equal(legacy.entryKind, undefined);
+  assert.equal(inferEntryKind(legacy), "audio");
+
+  // 只有 mediaType:"audio"、没有 URL（旧记录/异常中间态）也判 audio
+  const byTypeOnly = entry({
+    id: "type-only-audio",
+    generatedAt: 1,
+    results: [{ provider: "flowmusic", modelId: "flowmusic-v1", image: null, imageUrl: null, mediaType: "audio" }],
+  });
+  assert.equal(inferEntryKind(byTypeOnly), "audio");
+});
+
+test("normalizeHistoryEntry 白名单丢弃非法 entryKind（garbage 回落推断）", () => {
+  const bogus = normalizeHistoryEntry({ id: "a", generatedAt: 1, entryKind: "garbage" }, "server");
+  assert.ok(bogus);
+  assert.equal(bogus.entryKind, undefined);
+  assert.ok(!("entryKind" in (bogus as object)));
+  // 没有合法 entryKind → 回落到 results 推断
+  assert.equal(inferEntryKind(bogus), "image");
+});
+
+test("inferEntryKind 同时带视频与音频时以视频为主（video 分支优先）", () => {
+  const both = entry({
+    id: "both",
+    generatedAt: 1,
+    results: [
+      { provider: "p", modelId: "m", image: null, imageUrl: null, videoUrl: "https://x/a.mp4" },
+      { provider: "p", modelId: "m", image: null, imageUrl: null, audioUrl: "https://x/a.mp3" },
+    ],
+  });
+  assert.equal(inferEntryKind(both), "video");
+});
+
+test("inferEntryKind：单一 result 同时带 imageUrl 与 videoUrl（无 mediaType）仍判 video", () => {
+  // 回退钉子：整改前 `result.videoUrl` 即判 video；整改后一度因只取
+  // deliverableKindOfResult 的单投影（按宣告序先扫 image）而退为 image。
+  // 媒体分支改为逐 result、逐注册表字段收集所有命中后，videoUrl 重新可见。
+  const posterPlusVideoNoType = entry({
+    id: "single-dual-url",
+    generatedAt: 1,
+    results: [
+      {
+        provider: "p",
+        modelId: "m",
+        image: null,
+        imageUrl: "https://x/poster.png",
+        videoUrl: "https://x/a.mp4",
+        // 刻意不带 mediaType —— 旧 server blob / 客户端历史正是这个形态。
+      },
+    ],
+  });
+  assert.equal(posterPlusVideoNoType.results[0].mediaType, undefined);
+  assert.equal(inferEntryKind(posterPlusVideoNoType), "video");
+
+  // 真实产物形态（显式 mediaType:video）不得回归。
+  const posterPlusVideo = entry({
+    id: "poster-video",
+    generatedAt: 1,
+    results: [
+      {
+        provider: "p",
+        modelId: "m",
+        image: null,
+        imageUrl: "https://x/poster.png",
+        videoUrl: "https://x/a.mp4",
+        mediaType: "video",
+      },
+    ],
+  });
+  assert.equal(inferEntryKind(posterPlusVideo), "video");
+
+  // 跨 result：imageUrl 与 videoUrl 落在不同结果，种类取并集后 video 仍胜出。
+  const splitAcrossResults = entry({
+    id: "split-video",
+    generatedAt: 1,
+    results: [
+      { provider: "p", modelId: "m", image: null, imageUrl: "https://x/poster.png" },
+      { provider: "p", modelId: "m", image: null, imageUrl: null, videoUrl: "https://x/a.mp4" },
+    ],
+  });
+  assert.equal(inferEntryKind(splitAcrossResults), "video");
+});
+
+test("inferEntryKind：单一 result 同时带 imageUrl 与 audioUrl（无 mediaType）判 audio（audio 胜 image）", () => {
+  const posterPlusAudioNoType = entry({
+    id: "single-audio-url",
+    generatedAt: 1,
+    results: [
+      {
+        provider: "p",
+        modelId: "m",
+        image: null,
+        imageUrl: "https://x/cover.png",
+        audioUrl: "https://x/a.mp3",
+      },
+    ],
+  });
+  assert.equal(posterPlusAudioNoType.results[0].mediaType, undefined);
+  assert.equal(inferEntryKind(posterPlusAudioNoType), "audio");
+});
+
+test("inferEntryKind：单产物各形态不回退（只有 audioUrl→audio、只有 imageUrl→image、无媒体→image）", () => {
+  const onlyAudio = entry({
+    id: "only-audio",
+    generatedAt: 1,
+    results: [{ provider: "p", modelId: "m", image: null, imageUrl: null, audioUrl: "https://x/a.mp3" }],
+  });
+  assert.equal(inferEntryKind(onlyAudio), "audio");
+
+  const onlyImage = entry({
+    id: "only-image",
+    generatedAt: 1,
+    results: [{ provider: "p", modelId: "m", image: null, imageUrl: "https://x/a.png" }],
+  });
+  assert.equal(inferEntryKind(onlyImage), "image");
+
+  const noMedia = entry({
+    id: "no-media",
+    generatedAt: 1,
+    results: [{ provider: "p", modelId: "m", image: null, imageUrl: null }],
+  });
+  assert.equal(inferEntryKind(noMedia), "image");
+  assert.equal(inferEntryKind(entry({ id: "empty", generatedAt: 1 })), "image");
+});
+
+test("filterHistoryEntries 支持按 entryKind:audio 过滤，且 audio 计入「有图」", () => {
+  const audioEntry = entry({
+    id: "audio",
+    generatedAt: 1,
+    results: [{ provider: "flowmusic", modelId: "flowmusic-v1", image: null, imageUrl: null, audioUrl: "https://x/a.mp3", mediaType: "audio" }],
+  });
+  const imageEntry = entry({
+    id: "image",
+    generatedAt: 2,
+    results: [{ provider: "p", modelId: "m", image: null, imageUrl: "https://x/a.png" }],
+  });
+  const billing = entry({ id: "billing", generatedAt: 3, source: "billing" });
+
+  assert.deepEqual(
+    filterHistoryEntries([audioEntry, imageEntry, billing], { entryKind: "audio" }).map((e) => e.id),
+    ["audio"],
+  );
+  // 音乐是有产物的记录，与视频同语义地计入 withImageOnly（该筛选的用意是排除无媒体计费日志）
+  assert.deepEqual(
+    filterHistoryEntries([audioEntry, imageEntry, billing], { withImageOnly: true }).map((e) => e.id),
+    ["audio", "image"],
+  );
+  assert.equal(buildHistoryFacets([audioEntry, imageEntry, billing]).withImageCount, 2);
+});
+
+test("normalizeHistoryEntry 现在也显式写入 mediaType:image（新契约）", () => {
+  // 舊行为刻意对 image 不写 mediaType（缺省即 image）；改由交付物注册表统一后，
+  // image 也显式落 mediaType，与 video/audio 同形。这不是放宽——是契约改变：
+  // mediaType 的值域与 deliverable-kind 注册表完全一致。
+  const normalized = normalizeHistoryEntry(
+    {
+      id: "img-1",
+      generatedAt: 1_700_000_000_000,
+      results: [{ provider: "p", modelId: "m", imageUrl: "https://x/a.png", mediaType: "image" }],
+    },
+    "server",
+  );
+  assert.ok(normalized);
+  assert.equal(normalized.results[0].mediaType, "image");
+  // 非法 mediaType 仍被白名单丢弃。
+  const bogus = normalizeHistoryEntry(
+    {
+      id: "img-2",
+      generatedAt: 1,
+      results: [{ provider: "p", modelId: "m", imageUrl: "https://x/a.png", mediaType: "garbage" }],
+    },
+    "server",
+  );
+  assert.ok(bogus);
+  assert.equal(bogus.results[0].mediaType, undefined);
+  // 有注册表 mediaType 时，推断仍以产物 URL / 型别为准（image 不因显式型别而误判）。
+  assert.equal(inferEntryKind(normalized), "image");
+});
