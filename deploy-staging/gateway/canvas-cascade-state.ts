@@ -10,7 +10,7 @@
 //  - 區內無 markDirty 實際呼叫（僅 7432–7433 註釋提及；呼叫點 3745/5464 等在區外），故未做 markDirty 注入。
 import { jsonError } from "./gw-lib.ts"
 import type { SessionState } from "./types-gateway.ts"
-import { resolveSession } from "./sessions-core.ts"
+import { resolveSession, markDirty } from "./sessions-core.ts"
 import { subagentParentState } from "./subagent.ts"
 import { emitToSession } from "./sse-core.ts"
 
@@ -261,11 +261,18 @@ export function validateCanvasOps(ops: unknown): { ok: true; ops: unknown[] } | 
 // ---- 用戶批准憑據＋偏離模板 token（2026-10-02）----
 // 模型自宣告 deviate_from_template=true 等於沒守；改成網關簽發 token：只有「本 session 內
 // 用戶真的回應過 question」（走既有 question/confirm 機制）才發；模型必須把 token 原樣帶回，
-// 自帶 deviate_from_template=true 不再放行。行程內 Map，gateway 重啟即失（同意屬短期互動狀態）。
+// 自帶 deviate_from_template=true 不再放行。
+// 2026-10-02：token 本體移住 session 狀態（persistence 白名單欄位 tplDeviateToken）＝
+// 跨 agent-gateway 重啟存活（過往行程內 Map，重啟即失＝用戶批准過的偏離出口被關上）。
+// userAnsweredQuestions 仍在行程內：它只決定「簽不簽」，token 本體在 session 狀態，單一真源。
 const userAnsweredQuestions = new Map<string, number>()
 const USER_ANSWERED_MAX = 2000
-const tplDeviateTokens = new Map<string, { token: string; at: number }>()
 const TPL_DEVIATE_TTL_MS = 15 * 60 * 1000
+// session 解析慣例同 canvasKeyFor：網關 id 優先，子代理（Expert）帶自己的 opencode id 時
+// 兜底回父會話（token 必須落在用戶會話上，落在子會話桶裡等於沒簽）。
+function sessionForToken(sessionId: string): SessionState | undefined {
+  return resolveSession(sessionId) ?? subagentParentState(sessionId)
+}
 export function markUserAnsweredQuestion(sessionId: string): void {
   if (!sessionId) return
   // 先刪再插：Map 迭代序即插入序，淘汰時刪最舊（隊首）。
@@ -276,21 +283,29 @@ export function markUserAnsweredQuestion(sessionId: string): void {
     if (oldest === undefined) break
     userAnsweredQuestions.delete(oldest)
   }
-  // 用戶真實批准 → 網關簽發偏離 token（模型下一回合才能拿到）。
+  // 用戶真實批准 → 網關簽發偏離 token（模型下一回合才能拿到），寫進 session 狀態（落盤）。
   const token = `tpl-dev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
-  tplDeviateTokens.set(sessionId, { token, at: Date.now() })
-  if (tplDeviateTokens.size > USER_ANSWERED_MAX) tplDeviateTokens.delete(tplDeviateTokens.keys().next().value as string)
-  console.log(`[gateway] template_guard: user answered question → deviate token issued session=${sessionId}`)
+  const st = sessionForToken(sessionId)
+  if (st) {
+    st.tplDeviateToken = { token, at: Date.now() }
+    markDirty(st)
+    console.log(`[gateway] template_guard: user answered question → deviate token issued session=${sessionId}`)
+  } else {
+    // 解析不到 session：只留 answered 標記，無行程內 token 後備（避免雙真源）。
+    console.warn(`[gateway] template_guard: cannot resolve session for deviate token session=${sessionId}`)
+  }
 }
 export function hasUserAnsweredQuestion(sessionId: string): boolean {
   return userAnsweredQuestions.has(sessionId)
 }
 // 取本 session 當前有效的偏離 token（無/過期回 null）——注入模型上下文用。
 export function getTemplateDeviateToken(sessionId: string): string | null {
-  const rec = tplDeviateTokens.get(sessionId)
-  if (!rec) return null
+  const st = sessionForToken(sessionId)
+  const rec = st?.tplDeviateToken
+  if (!st || !rec) return null
   if (Date.now() - rec.at > TPL_DEVIATE_TTL_MS) {
-    tplDeviateTokens.delete(sessionId)
+    st.tplDeviateToken = null
+    markDirty(st)
     return null
   }
   return rec.token
@@ -299,7 +314,11 @@ export function getTemplateDeviateToken(sessionId: string): string | null {
 export function consumeTemplateDeviateToken(sessionId: string, token: string): boolean {
   const cur = getTemplateDeviateToken(sessionId)
   if (cur && token && cur === token) {
-    tplDeviateTokens.delete(sessionId)
+    const st = sessionForToken(sessionId)
+    if (st) {
+      st.tplDeviateToken = null
+      markDirty(st)
+    }
     return true
   }
   return false

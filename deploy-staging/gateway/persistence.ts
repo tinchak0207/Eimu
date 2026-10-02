@@ -32,7 +32,7 @@ export interface PersistableState {
   apiKey: string
   opencodeSessionId: string
   eventCounter: number
-  replayBuffer: { id: number; frame: Uint8Array }[]
+  replayBuffer: { id: number; frame: Uint8Array; strippable?: boolean }[]
   lastActivityAt: number
   partTextEmitted: Map<string, { emittedLen: number }>
   announcedUrls: Set<string>
@@ -58,12 +58,15 @@ export interface PersistableState {
   /** 會話摘要標題（2026-09-12）：opencode 首條用戶消息後異步生成，gateway
    *  在 session.idle 鉤子抓取後鏡像進 state 並隨防抖落盤；null/undef=尚未生成。 */
   sessionTitle?: string | null
+  /** 2026-10-02：模板偏離 token（網關簽發、單次核銷、TTL 15 分）。落持久層＝跨
+   *  agent-gateway 重啟存活（否則用戶批准過的偏離出口會被重啟關上）。 */
+  tplDeviateToken?: { token: string; at: number } | null
 }
 
 /** DB row 的 data 欄位 JSON 形狀（Map/Set 均序列化為陣列）。 */
 interface PersistedData {
   eventCounter: number
-  replayBuffer: { id: number; frame: string; merge?: { name: string; ids: number[]; lens: number[] } }[]
+  replayBuffer: { id: number; frame: string; merge?: { name: string; ids: number[]; lens: number[] }; strippable?: boolean }[]
   lastActivityAt: number
   partTextEmitted: [string, { emittedLen: number }][]
   announcedUrls: string[]
@@ -83,6 +86,8 @@ interface PersistedData {
   lastTurnActiveAt?: number
   /** 會話摘要標題鏡像（2026-09-12）：null=尚未生成（佔位標題已在抓取側歸一化掉）。 */
   title?: string | null
+  /** 2026-10-02：模板偏離 token 鏡像（shape 防護在 hydrateRow，壞形狀一律還原為 null）。 */
+  tplDeviateToken?: { token: string; at: number } | null
 }
 
 export interface PersistedRow {
@@ -206,7 +211,7 @@ function serialize(state: PersistableState): PersistedData {
     replayBuffer: state.replayBuffer.map((f) =>
       f instanceof MergedReplayFrame
         ? { id: f.id, frame: textDecoder.decode(f.frame), merge: f.toPersisted() }
-        : { id: f.id, frame: textDecoder.decode(f.frame) },
+        : { id: f.id, frame: textDecoder.decode(f.frame), ...(f.strippable === false ? { strippable: false } : {}) },
     ),
     lastActivityAt: state.lastActivityAt,
     partTextEmitted: [...state.partTextEmitted.entries()],
@@ -226,6 +231,7 @@ function serialize(state: PersistableState): PersistedData {
     compact: state.compact,
     lastTurnActiveAt: state.lastTurnActiveAt,
     title: state.sessionTitle ?? null,
+    tplDeviateToken: state.tplDeviateToken ?? null,
   }
 }
 
@@ -245,7 +251,8 @@ export function hydrateRow(row: PersistedRow): Record<string, unknown> {
     resolvedConfirms: new Map(),
     eventCounter: typeof d.eventCounter === "number" ? d.eventCounter : 0,
     replayBuffer: (d.replayBuffer ?? []).map(
-      (f) => (f.merge && MergedReplayFrame.fromPersisted(f.frame, f.merge)) || { id: f.id, frame: textEncoder.encode(f.frame) },
+      (f) => (f.merge && MergedReplayFrame.fromPersisted(f.frame, f.merge)) ||
+        { id: f.id, frame: textEncoder.encode(f.frame), ...(f.strippable === false ? { strippable: false } : {}) },
     ),
     lastActivityAt: typeof d.lastActivityAt === "number" ? d.lastActivityAt : row.updatedAt,
     partTextEmitted: new Map(d.partTextEmitted ?? []),
@@ -269,6 +276,16 @@ export function hydrateRow(row: PersistedRow): Record<string, unknown> {
     compact: d.compact,
     lastTurnActiveAt: typeof d.lastTurnActiveAt === "number" ? d.lastTurnActiveAt : 0,
     sessionTitle: typeof d.title === "string" && d.title ? d.title : null,
+    // 2026-10-02：模板偏離 token 形狀防護——非物件/缺 token 字串 → null；
+    // at 非有限數 → 以當下時刻起算（保守：不因壞 at 讓 token 永不過期）。
+    tplDeviateToken: (() => {
+      const t = d.tplDeviateToken
+      if (!t || typeof t !== "object") return null
+      const token = (t as { token?: unknown }).token
+      if (typeof token !== "string" || !token) return null
+      const at = (t as { at?: unknown }).at
+      return { token, at: typeof at === "number" && Number.isFinite(at) ? at : Date.now() }
+    })(),
   }
 }
 

@@ -46,12 +46,16 @@ export interface SessionState {
   sessionId: string
   apiKey: string
   opencodeSessionId: string
+  // 2026-10-02：每會話的網關權威 nonce（12 位 hex）。由 messages-gw.ensureGatewayNonce
+  // 惰性產生／校驗（!gwNonce 或格式不符即重生成），用於 authorityRule 與
+  // TAIL_PAYLOAD_MARKER⟦gw:…⟧——故為可選（未產生前 undefined）。
+  gwNonce?: string
   clients: Set<SSEClient>
   pendingConfirms: Map<string, PendingConfirm>
   pendingQuestions: Map<string, PendingQuestion>
   resolvedConfirms: Map<string, ResolvedConfirm>
   eventCounter: number
-  replayBuffer: { id: number; frame: Uint8Array }[]
+  replayBuffer: { id: number; frame: Uint8Array; strippable?: boolean }[]
   // Touched by every lookup and every emitted event; drives the idle reaper.
   lastActivityAt: number
   // Per-session translation state for the /event fan-out. All bounded below.
@@ -60,7 +64,9 @@ export interface SessionState {
   //（pending = 扣住的未完成行；suppress = 正處於內部段中；fence/sawEnglish =
   // 程式碼柵欄狀態與英文壓制旗標，形狀同 outbound-sanitize 的 PartStripState）。
   // 生命週期同 partTextEmitted：session.idle 時 flush 並清空。
-  partStripState: Map<string, { pending: string; suppress: boolean; fence: boolean; sawEnglish: boolean }>
+  // t2s（2026-10-02 補型）：R9-B 用戶書寫體決定本 part 正文是否做繁→簡；唯一寫入點
+  // outbound-emit.ts:38 一律給布林值（shouldT2sForUserScript），故存進 map 的值必填。
+  partStripState: Map<string, { pending: string; suppress: boolean; fence: boolean; sawEnglish: boolean; t2s: boolean }>
   announcedUrls: Set<string>
   toolStatusSeen: Set<string>
   toolInvokeSeen: Set<string>
@@ -121,6 +127,8 @@ export interface SessionState {
   // 滾動摘要壓縮水位：上次 opencode summarize 後的訊息數與時間（持久化）。
   // 觸發條件 = 訊息數 ≥ SESSION_COMPACT_THRESHOLD 且自上次壓縮新增 ≥ 半個閾值。
   compact?: { lastCount: number; at: number }
+  /** 2026-10-02：模板偏離 token（網關簽發、單次核銷、TTL 15 分）。落持久層＝跨 agent-gateway 重啟存活。 */
+  tplDeviateToken?: { token: string; at: number } | null
   /** 已上報過 turn.status 的 compaction part id（2026-10-02 壓縮可見化去重，volatile）。 */
   compactionNotified?: Set<string>
   // ── PRD P0-4（2026-09-15）記憶 trace 與召回輔助（皆 volatile，不入持久化白名單）──
@@ -196,6 +204,15 @@ export interface SessionState {
   stepHasReasoning?: boolean
   /** 本 turn 是否已因空轉中止並補發動作導向提示（同 turn 僅一次）。 */
   idleNudgeSent?: boolean
+  /** 2026-10-02：自上次動作以來的 reasoning 累計（無工具長推理斷路器，見 reasoning-cap.ts）。 */
+  reasonSinceActionChars?: number
+  reasonSinceActionAt?: number
+  /** 2026-10-02：turn.plan 點名的專家 id + 本輪 subagent.started 計數（收盤對賬，見 plan-promise.ts）。 */
+  planExperts?: string[]
+  turnSubagentStarts?: number
+  /** 2026-10-02 C 方案：收盤記錄的「未兌現開場計畫」專家 id（計畫點名但整輪零派遣）。
+   *  下一輪 messages-gw 組 promptBody.system 時一次性注入事實並清除；volatile，不進持久化。 */
+  pendingUnfulfilledPlan?: string[]
   // 2026-08-31 failover：本轮上游模型错误原文（非 tool_error/非 Aborted）。
   // emitSessionError 记入，turn 起点清空；idle 收尾时非空即接管换模重试
   //（jitter 只管零正文轮，mid-turn 断线此前无人接手）。volatile，不持久化。
