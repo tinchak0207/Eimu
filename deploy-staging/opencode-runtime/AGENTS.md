@@ -34,7 +34,7 @@
 | 放大 | `image_upscale` | — |
 | 生影片（单镜） | `video_quote` 先报价（免费）→ `image_generate` 影片用 model（/v1/videos/generations，model-status 确认；**硬规则：严禁 <10 秒短档，按 attach/workflow-video-rules.md §4b 时长最大化，seedance-2.0 选用 10–15s、seedance-2.5 选用 10–30s**） | — |
 | 生影片（多镜/长片） | `workflow_*` 工具 → **先读 attach/workflow-video-rules.md** | — |
-| 看图/读图 | `read_image` 工具（原生，一步完成：传 image_path 相对路径或 image_url）；要打分/审美点评改用 `vision_analyze` | — |
+| 看图/读图 | `read_image` 工具（原生，一步完成：传 image_path 相对路径或 image_url，原图直接进你的上下文、由你自己看）；要打分/审美点评改用 `vision_analyze` | — |
 | 写真/人像摄影 | `skill nuyoah-xiezhen-prompt`（§2 六槽英文规则） | — |
 | 参考图反推 | 先用 `read_image` 工具提取可见事实，再 `skill nuyoah-image-reverse-prompt` | — |
 | 广告/UGC/产品 shot 提示词 | `skill ai-ad-prompt-guide` | — |
@@ -174,7 +174,7 @@
 ## 5. 附件处理（收到附件先读 attach/attachment-handbook.md）
 
 - 附件在 `uploads/<session_id>/`，讯息尾附 [ATTACHMENTS_BLOCK] 机器可读清单；先 `wc -c` / `pdfinfo` 看大小页数，再定点读，禁止整档入上下文。
-- 读图：必用 `read_image` 工具（原生，传 image_path 相对路径），一次一档；成功即交付，失败如实说「读图失败」并停，禁止改走 bash 反复试。
+- 读图：必用 `read_image` 工具（原生，传 image_path 相对路径），原图直接进你的上下文、由你自己看，一次一档；成功即交付，失败如实说「读图失败」并停，禁止改走 bash 反复试。
 - **影片附件是可剪辑原片**：用户上传的影片现在以真实文件落在 `uploads/<session>/<name>.mp4`（不再是抽好的截图）。要剪/裁/去片尾：会话有时间线或需要多步剪辑 → 走 `timeline_query`+`timeline_ops`（结构化、可回退、留决策日志），别用 run_py 手搓；只是一次性剪出一个片段文件 → 先 `ffprobe` 看时长，`run_py`（沙箱含 ffmpeg）直接剪；成片仍按「成片交付铁律」走 film 节点产平台 URL。要「看懂」影片内容时，先 `video_analyze`（场景切点+代表帧+台词），要看画面细节再对代表帧 read-image；别假设系统已给截图、更别回复「只收到截图」。
 - 多档上传全部读完再回复，按 §3.6 直接处理，不丢选择题。
 - 品牌文件：先抽参数卡（色票 hex/字型/风格词）展示确认，确认后才入 prompt。

@@ -1,13 +1,5 @@
 import { tool } from "@opencode-ai/plugin/tool"
-import {
-  readImageSource,
-  requireNewapiKey,
-  resolveVisionModel,
-  extractChatText,
-  VISION_NEWAPI_CHAT_URL,
-  VISION_TIMEOUT_MS,
-  VisionToolError,
-} from "../lib/vision_impl"
+import { readImageSource, VisionToolError } from "../lib/vision_impl"
 import { checkAgentPath } from "../lib/sandbox"
 
 // 原生「中性讀圖」工具（2026-09-29 審計修復）。
@@ -33,7 +25,7 @@ const DESCRIBE_PROMPT =
 
 export default tool({
   description:
-    "中性读图：读取一张图片（本地路径或公网 URL）并客观描述其内容（主体/场景/风格/色彩/光线/可见文字）。" +
+    "读图：把一张图片的原图（本地路径或公网 URL）直接交给当前模型查看，一步完成——原图以附件形式进入你的上下文，你自己看画面内容（主体/场景/风格/色彩/光线/可见文字）。" +
     "用户上传图片、问「这张图里有什么/描述这张图/是什么风格」等看图需求用它，一步完成。" +
     "只接受图片文件（png/jpeg/webp/gif/bmp/avif/heic），音频/视频会被人话报错。" +
     "要对图片打分/审美点评用 vision_analyze；要反推可生图的提示词另走反推 skill。",
@@ -49,7 +41,7 @@ export default tool({
     question: tool.schema
       .string()
       .optional()
-      .describe("可选：针对这张图想知道的具体问题（如「背景是什么建筑风格」），附加在客观描述之后回答。"),
+      .describe("可选：针对这张图你关注的要点（如「背景是什么建筑风格」），会作为 user_focus 写进返回文字，提醒你重点看画面哪里。"),
   },
   async execute(args, context) {
     const t0 = Date.now()
@@ -68,45 +60,29 @@ export default tool({
       }
     }
     try {
-      const key = requireNewapiKey()
-      const model = resolveVisionModel()
       const image = await readImageSource(imageUrl, imagePath)
+      if (image.bytes.byteLength > 20 * 1024 * 1024) {
+        return { title: "读图失败", output: JSON.stringify({ ok: false, error: { code: "image_too_large", hint: "图片超过 20MB，请先用 image_upscale 之外的方式压缩或改用 vision_analyze。" } }) }
+      }
+      const ext = image.mime.slice(image.mime.indexOf("/") + 1).replace(/[^a-z0-9]/gi, "") || "png"
+      const filename = imagePath ? imagePath.split(/[\\/]/).pop() || `image.${ext}` : `image.${ext}`
+      const label = imagePath ? filename : imageUrl!.startsWith("data:") ? `${image.mime} 数据` : imageUrl!.slice(0, 80)
+      const question = args.question && args.question.trim() ? args.question.trim() : undefined
       const base64 = Buffer.from(image.bytes).toString("base64")
-      const prompt = args.question && args.question.trim() ? `${DESCRIBE_PROMPT}\n\n用户额外想知道：${args.question.trim()}` : DESCRIBE_PROMPT
-      const payload = {
-        model,
-        messages: [
-          {
-            role: "user",
-            content: [
-              { type: "text", text: prompt },
-              { type: "image_url", image_url: { url: `data:${image.mime};base64,${base64}` } },
-            ],
-          },
-        ],
-        max_tokens: 2048,
+      return {
+        title: `读图：${label}`,
+        output: JSON.stringify({
+          ok: true,
+          attached: true,
+          mime: image.mime,
+          bytes: image.bytes.byteLength,
+          bytes_approx: `${(image.bytes.byteLength / 1024 / 1024).toFixed(2)} MB`,
+          note: "原图已随本次工具结果附上，请直接查看图像内容后作答。",
+          duration_ms: Date.now() - t0,
+          ...(question ? { user_focus: question } : {}),
+        }),
+        attachments: [{ type: "file", mime: image.mime, filename, url: `data:${image.mime};base64,${base64}` }],
       }
-      const res = await fetch(VISION_NEWAPI_CHAT_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-        body: JSON.stringify(payload),
-        signal: context.abort ?? AbortSignal.timeout(VISION_TIMEOUT_MS),
-      })
-      const bodyText = await res.text().catch(() => "")
-      if (!res.ok) {
-        return { title: "读图失败", output: JSON.stringify({ ok: false, error: { code: "newapi_http_error", hint: `读图上游返回 HTTP ${res.status}（模型 ${model}）。` }, body: bodyText.slice(0, 500) }) }
-      }
-      let parsed: unknown
-      try {
-        parsed = JSON.parse(bodyText)
-      } catch {
-        return { title: "读图失败", output: JSON.stringify({ ok: false, error: { code: "newapi_parse_error", hint: "读图上游响应无法解析。" } }) }
-      }
-      const desc = extractChatText(parsed)
-      if (!desc) {
-        return { title: "读图失败", output: JSON.stringify({ ok: false, error: { code: "empty_description", hint: "读图上游返回空描述。" } }) }
-      }
-      return { title: "读图完成", output: JSON.stringify({ ok: true, model, description: desc, duration_ms: Date.now() - t0 }) }
     } catch (e) {
       const hint = e instanceof VisionToolError ? e.message : e instanceof Error ? e.message : String(e)
       return { title: "读图失败", output: JSON.stringify({ ok: false, error: { code: "read_image_failed", hint } }) }
