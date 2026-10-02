@@ -47,13 +47,23 @@ test("M1 研究模板與 playbook 帶『不得填 critic』", () => {
   assert.match(readFileSync(`${dir}expert/orchestrator-dispatch-playbook.md`, "utf8"), /不得填 critic/)
 })
 
-test("M2 music 在途 → 分鏡擋下", () => {
-  const r = musicFirstBlockReason("按音樂節拍設計分鏡", "video-director", { musicInFlight: true, musicDelivered: false })
+test("M2 music 在途 → 依賴音樂的剪輯任務擋下", () => {
+  // 2026-10-02 M2 收緊後：需「音樂依賴詞」＋「生產動詞（剪輯/時間軸/混音…）」才構成依賴。
+  const r = musicFirstBlockReason("按音樂節拍剪輯 12 個鏡頭的分鏡", "video-director", { musicInFlight: true, musicDelivered: false })
   assert.match(r ?? "", /music-first/)
 })
 
+test("M2 純提節拍但無生產動詞 → 不擋（收緊後語義）", () => {
+  assert.equal(musicFirstBlockReason("按音樂節拍設計分鏡", "video-director", { musicInFlight: true, musicDelivered: false }), null)
+})
+
+test("M2 研究性質且明說不依賴音樂 → 豁免放行", () => {
+  const spec = "研究水墨圖動剪輯技法與節拍關係，本任務完全不依賴音樂產出。"
+  assert.equal(musicFirstBlockReason(spec, "editor", { musicInFlight: false, musicDelivered: false }), null)
+})
+
 test("M2 無 music 交付且無音訊檔 → 擋；有交付/有音訊檔/無依賴 → 放行", () => {
-  const dep = "根據音樂節拍做 12 個鏡頭的分鏡"
+  const dep = "根據音樂節拍剪輯 12 個鏡頭的分鏡"
   assert.ok(musicFirstBlockReason(dep, "video-director", { musicInFlight: false, musicDelivered: false }))
   assert.equal(musicFirstBlockReason(dep, "video-director", { musicInFlight: false, musicDelivered: true }), null)
   assert.equal(musicFirstBlockReason(dep + " 音訊 outputs/song.mp3", "video-director", { musicInFlight: false, musicDelivered: false }), null)

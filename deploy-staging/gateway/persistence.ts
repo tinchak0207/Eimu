@@ -99,7 +99,15 @@ export interface PersistedRow {
   data: PersistedData
 }
 
+// 注意：DB 路徑在模組載入時固定。bun test 會並行跑多個測試檔且共用本模組單例；
+// 若在 initPersistence() 重新讀 env，各檔會互相把 db 連線指向不同檔案（隔離競態，
+// 實測會打斷 steer-ledger-db 的持久層斷言）。故維持單一路徑、全進程共享。
 const DB_PATH = process.env.SESSIONS_DB_PATH || "/opt/agent-harness/gateway/sessions.db"
+
+/** 目前使用的 DB 檔路徑（診斷／測試讀回用；唯讀）。 */
+export function currentDbPath(): string {
+  return DB_PATH
+}
 
 let db: Database | null = null
 let warned = false
@@ -196,6 +204,55 @@ export function initPersistence(): void {
       )
     `)
     db.exec("CREATE INDEX IF NOT EXISTS idx_steer_commands_session ON steer_commands(session_id)")
+    // D7（2026-10-02）：品質量測基座。此前 critic_passes 只存 session_id/created_at、無 verdict，
+    // subagent_reworks 終局刪除無終身計數、無重問率——「品質」在系統裡完全不可觀測
+    // （ARCH-V4-DESIGN D7；LESSONS L8）。三張表皆復用同一 bun:sqlite 實例（不造第二套持久層）。
+    //   * critic_verdicts：每次審核的判決（pass/reject/unknown、判詞、judge 模型）。score 暫 null
+    //     （rubric 尚未存在；不偽造數字），留欄位給後續 rubric 上線。
+    //   * expert_lessons：失敗模式永久留存（交付閘門缺欄、審核退回等），供按 agent 累積。
+    //   * deliveries：交付事件（成功落盤的產物），重問率＝同 (session, agent, label) 再次出現的比例。
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS critic_verdicts (
+        id           TEXT PRIMARY KEY,
+        session_id   TEXT NOT NULL,
+        run_id       TEXT,
+        agent        TEXT,
+        label        TEXT,
+        verdict      TEXT NOT NULL,
+        score        REAL,
+        judge_model  TEXT,
+        verdict_text TEXT,
+        created_at   INTEGER NOT NULL
+      )
+    `)
+    db.exec("CREATE INDEX IF NOT EXISTS idx_critic_verdicts_session ON critic_verdicts(session_id)")
+    db.exec("CREATE INDEX IF NOT EXISTS idx_critic_verdicts_agent ON critic_verdicts(agent)")
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS expert_lessons (
+        id           TEXT PRIMARY KEY,
+        session_id   TEXT NOT NULL,
+        agent        TEXT NOT NULL,
+        run_id       TEXT,
+        source       TEXT NOT NULL,
+        failure_mode TEXT NOT NULL,
+        detail       TEXT,
+        created_at   INTEGER NOT NULL
+      )
+    `)
+    db.exec("CREATE INDEX IF NOT EXISTS idx_expert_lessons_agent ON expert_lessons(agent)")
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS deliveries (
+        id           TEXT PRIMARY KEY,
+        session_id   TEXT NOT NULL,
+        run_id       TEXT,
+        agent        TEXT,
+        label        TEXT,
+        rel_path     TEXT,
+        contract_ok  INTEGER,
+        created_at   INTEGER NOT NULL
+      )
+    `)
+    db.exec("CREATE INDEX IF NOT EXISTS idx_deliveries_session ON deliveries(session_id)")
     console.log(`[gateway] session persistence ready: ${DB_PATH}`)
   } catch (e) {
     degrade(e, "init")
@@ -575,6 +632,151 @@ export function deleteCriticPass(sessionId: string): void {
     db.query("DELETE FROM critic_passes WHERE session_id = ?").run(sessionId)
   } catch (e) {
     degrade(e, "deleteCriticPass")
+  }
+}
+
+// ---- D7（2026-10-02）：品質量測基座存取。全部 fail-open（量測不得影響交付主流程）----
+
+let d7Seq = 0
+function d7Id(prefix: string): string {
+  d7Seq = (d7Seq + 1) % 1_000_000
+  return `${prefix}-${Date.now().toString(36)}-${d7Seq.toString(36)}`
+}
+
+/** 記一筆審核判決（critic_verdicts）。score 未量測時傳 null，不得填 0 假值。 */
+export function saveCriticVerdict(v: {
+  sessionId: string
+  runId?: string
+  agent?: string
+  label?: string
+  verdict: "pass" | "reject" | "unknown"
+  score?: number | null
+  judgeModel?: string
+  verdictText?: string
+}): void {
+  if (!db || !v.sessionId) return
+  try {
+    db.query(
+      `INSERT OR REPLACE INTO critic_verdicts (id, session_id, run_id, agent, label, verdict, score, judge_model, verdict_text, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      v.runId ? `cv-${v.runId}` : d7Id("cv"),
+      v.sessionId,
+      v.runId ?? null,
+      v.agent ?? null,
+      v.label ?? null,
+      v.verdict,
+      typeof v.score === "number" ? v.score : null,
+      v.judgeModel ?? null,
+      (v.verdictText ?? "").slice(0, 4000),
+      Date.now(),
+    )
+  } catch (e) {
+    degrade(e, "saveCriticVerdict")
+  }
+}
+
+/** 讀一筆審核判決（診斷／驗收用；唯讀）。查無回 null。 */
+export function getCriticVerdictByRun(
+  runId: string,
+): { verdict: string; score: number | null; judge_model: string | null; verdict_text: string | null } | null {
+  if (!db || !runId) return null
+  try {
+    return (
+      (db
+        .query("SELECT verdict, score, judge_model, verdict_text FROM critic_verdicts WHERE run_id = ?")
+        .get(runId) as { verdict: string; score: number | null; judge_model: string | null; verdict_text: string | null } | null) ?? null
+    )
+  } catch (e) {
+    degrade(e, "getCriticVerdictByRun")
+    return null
+  }
+}
+
+/** 永久留存一個失敗模式（expert_lessons）。 */
+export function saveExpertLesson(l: {
+  sessionId: string
+  agent: string
+  runId?: string
+  source: string
+  failureMode: string
+  detail?: string
+}): void {
+  if (!db || !l.sessionId || !l.agent) return
+  try {
+    db.query(
+      `INSERT INTO expert_lessons (id, session_id, agent, run_id, source, failure_mode, detail, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      d7Id("el"),
+      l.sessionId,
+      l.agent,
+      l.runId ?? null,
+      l.source,
+      (l.failureMode || "").slice(0, 500),
+      (l.detail ?? "").slice(0, 4000),
+      Date.now(),
+    )
+  } catch (e) {
+    degrade(e, "saveExpertLesson")
+  }
+}
+
+/** 記一筆交付事件（deliveries）。重問率＝同 (session, agent, label) 重複出現的比例。 */
+export function saveDelivery(d: {
+  sessionId: string
+  runId?: string
+  agent?: string
+  label?: string
+  relPath?: string
+  contractOk?: boolean
+}): void {
+  if (!db || !d.sessionId) return
+  try {
+    db.query(
+      `INSERT OR REPLACE INTO deliveries (id, session_id, run_id, agent, label, rel_path, contract_ok, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      d.runId ? `dl-${d.runId}` : d7Id("dl"),
+      d.sessionId,
+      d.runId ?? null,
+      d.agent ?? null,
+      d.label ?? null,
+      d.relPath ?? null,
+      d.contractOk === undefined ? null : d.contractOk ? 1 : 0,
+      Date.now(),
+    )
+  } catch (e) {
+    degrade(e, "saveDelivery")
+  }
+}
+
+/** D7 量測讀數：品質訊號數量與重問率（供 EVAL 直接用；唯讀）。 */
+export function qualitySignalStats(): {
+  criticVerdicts: number
+  rejects: number
+  expertLessons: number
+  deliveries: number
+  reaskRate: number
+} {
+  const empty = { criticVerdicts: 0, rejects: 0, expertLessons: 0, deliveries: 0, reaskRate: 0 }
+  if (!db) return empty
+  try {
+    const cv = (db.query("SELECT COUNT(*) AS n FROM critic_verdicts").get() as { n: number } | null)?.n ?? 0
+    const rj = (db.query("SELECT COUNT(*) AS n FROM critic_verdicts WHERE verdict = 'reject'").get() as { n: number } | null)?.n ?? 0
+    const el = (db.query("SELECT COUNT(*) AS n FROM expert_lessons").get() as { n: number } | null)?.n ?? 0
+    const dl = (db.query("SELECT COUNT(*) AS n FROM deliveries").get() as { n: number } | null)?.n ?? 0
+    const dup = (
+      db
+        .query(
+          "SELECT COALESCE(SUM(c - 1), 0) AS n FROM (SELECT COUNT(*) AS c FROM deliveries GROUP BY session_id, agent, label HAVING c > 1)",
+        )
+        .get() as { n: number } | null
+    )?.n ?? 0
+    return { criticVerdicts: cv, rejects: rj, expertLessons: el, deliveries: dl, reaskRate: dl > 0 ? dup / dl : 0 }
+  } catch (e) {
+    degrade(e, "qualitySignalStats")
+    return empty
   }
 }
 

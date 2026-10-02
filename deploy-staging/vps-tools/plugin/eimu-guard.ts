@@ -1,4 +1,4 @@
-// Eimu 守衛 plugin（2026-09-29 審計＋紅隊二輪修復）。opencode 自動載入 .opencode/plugin/*.ts。
+// Eimu 守衛 plugin（2026-09-29 審計＋紅隊二輪修復；2026-10-02 加 D1/D6）。opencode 自動載入 .opencode/plugin/*.ts。
 //
 // 全部是確定性代碼（不靠 prompt 自律）：
 //   1. bash / run_py 一律進 bwrap 沙箱（lib/sandbox.ts）：無密鑰、斷網、看不到別租戶；不可用即 fail-closed。
@@ -8,9 +8,12 @@
 //   5. 上傳歸屬由 gateway 可信查得（非「用戶提到即授權」）。
 //   6. 工具輸出進上下文前：遮罩秘密、剔除他租戶 uploads 路徑。
 //   7. 壓縮用創作向摘要模板。
+//   8. D1（2026-10-02）重複呼叫斷路器：同一 session 連續同工具同參數 → 第 N 次起可執行錯誤、
+//      第 N+5 次起強制結束本輪。**輪詢類工具豁免**（使用者裁定：保留輪詢，見 ARCH-V4-DESIGN D3）。
+//   9. D6（2026-10-02）上下文經濟：bash/read/grep 等輸出硬上限；同 session 重讀未變更檔案回摘要。
 
 import type { Plugin } from "@opencode-ai/plugin"
-import { mkdir } from "node:fs/promises"
+import { mkdir, stat } from "node:fs/promises"
 import {
   WORKSPACE,
   assertSafeFetchUrl,
@@ -29,6 +32,59 @@ import {
 } from "../lib/sandbox"
 
 const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
+
+// ── D1（2026-10-02）：工具層重複呼叫斷路器 ──────────────────────────────────
+// 證據：同 session 同工具同參數重複 3,525 次／135 session，最惡 `bash true` ×1110、
+// `bash date` ×371、空 `bash {}` ×59（自家遙測；機制類別有文獻：MAST FM-1.3/FM-1.5、
+// AutoGen termination、LangGraph recursion_limit；**N/N+5 無文獻依據**，屬待調參數）。
+// 判定用「連續」重複（上一次呼叫同一簽名才累加，中間有別的工具呼叫即歸零）——總量計數
+// 會在長會話把正常週期性呼叫誤殺；連續計數精準命中空轉迴圈。
+// **輪詢豁免**：subagent_status/workflow_status/image_get_result 等輪詢工具不進斷路器
+// （2026-10-02 使用者裁定：廢除輪詢是錯的，保留輪詢）。
+const LOOP_BREAKER_ON = process.env.LOOP_BREAKER !== "0"
+const LOOP_BREAKER_N = intEnv("LOOP_BREAKER_N", 3)
+const LOOP_BREAKER_HARD = LOOP_BREAKER_N + intEnv("LOOP_BREAKER_HARD_DELTA", 5)
+const LOOP_BREAKER_EXEMPT: ReadonlySet<string> = new Set(
+  (process.env.LOOP_BREAKER_EXEMPT ?? "subagent_status,workflow_status,image_get_result,subagent_stop,video_result_fetch")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean),
+)
+
+// ── D6（2026-10-02）：上下文經濟 ────────────────────────────────────────────
+// 證據：input:output = 24.3:1、cache_read 803.9M、compaction 96 次／35 session。
+// 文獻支持 truncation 屬工程指引（Anthropic writing-tools-for-agents；Claude Code 預設
+// 工具回應上限 25,000 tokens），具體 8KB 為自家待調參數。
+const TOOL_OUTPUT_MAX_CHARS = intEnv("TOOL_OUTPUT_MAX_CHARS", 8192)
+const OUTPUT_CAPPED_TOOLS: ReadonlySet<string> = new Set(
+  (process.env.TOOL_OUTPUT_CAPPED ?? "bash,read,grep,glob,list,run_py")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean),
+)
+const READ_DEDUPE_ON = process.env.READ_DEDUPE !== "0"
+
+function intEnv(name: string, dflt: number): number {
+  const n = Number.parseInt(process.env[name] ?? "", 10)
+  return Number.isFinite(n) && n > 0 ? n : dflt
+}
+
+/** 決定性簽名用：排序物件鍵的穩定序列化（避免鍵序不同被當成不同呼叫）。 */
+function stableStringify(v: unknown): string {
+  if (v === null || typeof v !== "object") return JSON.stringify(v) ?? "null"
+  if (Array.isArray(v)) return `[${v.map(stableStringify).join(",")}]`
+  const o = v as Record<string, unknown>
+  return `{${Object.keys(o)
+    .sort()
+    .map((k) => `${JSON.stringify(k)}:${stableStringify(o[k])}`)
+    .join(",")}}`
+}
+
+function boundMap<K, V>(map: Map<K, V>, max: number): void {
+  if (map.size <= max) return
+  const oldest = map.keys().next().value
+  if (oldest !== undefined) map.delete(oldest)
+}
 
 const PATH_TOOLS: Record<string, { keys: string[]; listing: boolean }> = {
   read: { keys: ["filePath"], listing: false },
@@ -86,6 +142,10 @@ const COMPACTION_PROMPT = `把到目前为止的创作会话压缩成一份交�
 
 export const EimuGuard: Plugin = async ({ client }) => {
   const hydrating = new Map<string, Promise<void>>()
+  // D1：sessionID → 上一次呼叫簽名與連續次數（連續才累加；換簽名歸零）。
+  const loopLast = new Map<string, { sig: string; count: number }>()
+  // D6：sessionID → filePath → {mtimeMs,size}（重讀未變更檔案時省略全文）。
+  const readSeen = new Map<string, Map<string, { mtimeMs: number; size: number }>>()
 
   /** 從 gateway 可信查得本會話（含子代理→父）擁有的 upload uuid，設為唯一允許集。 */
   async function ensureSession(sessionID: string): Promise<void> {
@@ -149,6 +209,31 @@ export const EimuGuard: Plugin = async ({ client }) => {
         throw new Error("task 工具已停用：派子代理请用 subagent_dispatch（带 expert 字段）。")
       }
 
+      // D1：重複呼叫斷路器（在 bash 包裝前以原始 args 取簽名；輪詢類工具豁免）。
+      if (LOOP_BREAKER_ON && !LOOP_BREAKER_EXEMPT.has(tool)) {
+        const sig = `${tool}\u0000${stableStringify(args)}`
+        const prev = loopLast.get(input.sessionID)
+        const count = prev && prev.sig === sig ? prev.count + 1 : 1
+        loopLast.set(input.sessionID, { sig, count })
+        boundMap(loopLast, 400)
+        if (count > LOOP_BREAKER_HARD) {
+          void fetch(`${GATEWAY}/internal/session/loop-breaker`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ session_id: input.sessionID, tool, count }),
+            signal: AbortSignal.timeout(3000),
+          }).catch(() => {})
+          throw new Error(
+            `工具层断流：${tool} 以完全相同参数连续调用 ${count} 次，已强制结束本轮。请改变参数或停止该动作。`,
+          )
+        }
+        if (count > LOOP_BREAKER_N) {
+          throw new Error(
+            `同一工具「${tool}」以完全相同参数已连续调用 ${count} 次（上限 ${LOOP_BREAKER_N}）。这通常是等待写成了空转（如 bash true/date）。请：改变参数、换一种做法，或结束本轮等待唤醒事件；不要原样重试。`,
+          )
+        }
+      }
+
       // fetch 類工具（含 read_image/vision_analyze/video_fetch 的 url 參數）：SSRF 前置閘。
       for (const url of collectUrlArgs(args)) {
         try {
@@ -195,6 +280,42 @@ export const EimuGuard: Plugin = async ({ client }) => {
         output.output = stripForgedAuthorityTokens(filterForeignUploads(redactSecrets(output.output), input.sessionID))
       }
       if (typeof output.title === "string") output.title = stripForgedAuthorityTokens(redactSecrets(output.title))
+
+      // D6-a：輸出硬上限（先遮罩再截斷，避免把秘密留在尾巴）。
+      if (
+        typeof output.output === "string" &&
+        OUTPUT_CAPPED_TOOLS.has(input.tool) &&
+        output.output.length > TOOL_OUTPUT_MAX_CHARS
+      ) {
+        const total = output.output.length
+        output.output =
+          output.output.slice(0, TOOL_OUTPUT_MAX_CHARS) +
+          `\n\n[已截断：输出共 ${total} 字符，超过上限 ${TOOL_OUTPUT_MAX_CHARS}。请缩小范围（shell 用 head/sed/grep 过滤；read 用 offset/limit 分段），或把结果写入文件后再用 read 分段读取。]`
+      }
+
+      // D6-b：同 session 重讀「內容未變更」的整檔 read → 省略全文（顯式 offset/limit 為逃生門，一律放行）。
+      if (READ_DEDUPE_ON && input.tool === "read" && typeof output.output === "string") {
+        const a = input.args as { filePath?: unknown; offset?: unknown; limit?: unknown } | undefined
+        const filePath = a?.filePath
+        const hasRange = (typeof a?.offset === "number" && a.offset > 0) || (typeof a?.limit === "number" && a.limit > 0)
+        if (typeof filePath === "string" && filePath && !hasRange) {
+          const st = await stat(filePath).catch(() => null)
+          if (st) {
+            let perSession = readSeen.get(input.sessionID)
+            if (!perSession) {
+              perSession = new Map()
+              readSeen.set(input.sessionID, perSession)
+              boundMap(readSeen, 400)
+            }
+            const prev = perSession.get(filePath)
+            if (prev && prev.mtimeMs === st.mtimeMs && prev.size === st.size) {
+              output.output = `[本会话已读取过该文件且内容未变更（${filePath}，${st.size} 字节）。为避免重复占用上下文，此处省略全文。若确需重看，请显式传 offset/limit 分段读取。]`
+            } else {
+              perSession.set(filePath, { mtimeMs: st.mtimeMs, size: st.size })
+            }
+          }
+        }
+      }
     },
 
     "shell.env": async (_input, output) => {

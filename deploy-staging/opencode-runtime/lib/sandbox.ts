@@ -13,7 +13,7 @@
 //   4. bwrap 沙箱：清 env、斷網、unshare pid/ipc/uts、根唯讀、遮蔽內部/他租戶、/tmp 與 .run 按會話隔離（擋 L12）。
 //   5. redactSecrets / filterForeignUploads：工具輸出進上下文前的兜底。
 
-import { existsSync, mkdirSync, readdirSync, realpathSync, readFileSync, statSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, readdirSync, realpathSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { createHash } from "node:crypto"
 import { lookup as dnsLookup } from "node:dns/promises"
@@ -234,14 +234,15 @@ export function sandboxAvailable(): boolean {
   return existsSync(BWRAP)
 }
 
-export function sandboxPrefix(opts: { sessionID: string; cwd?: string }): string[] {
+/** bwrap argv（不含 --chdir）＋已正規化的 cwd；launcher 與 sandboxPrefix 共用同一份真源。 */
+function sandboxArgv(opts: { sessionID: string; cwd?: string }): { argv: string[]; cwd: string } {
   const tmp = sessionTmpDir(opts.sessionID)
   const run = sessionRunDir(opts.sessionID)
   const cwdReal = opts.cwd ? safeResolve(opts.cwd) : run
   const cwd = withinWorkspace(cwdReal) ? cwdReal : run
   const extraOpt: string[] = []
   for (const p of ["/opt/agent-harness/bin"]) if (existsSync(p)) extraOpt.push("--ro-bind", p, p)
-  return [
+  const argv = [
     BWRAP,
     "--die-with-parent",
     "--new-session",
@@ -263,12 +264,66 @@ export function sandboxPrefix(opts: { sessionID: string; cwd?: string }): string
     "--bind", tmp, "/tmp",
     "--bind", run, path.join(RUN_ROOT, sessionSlug(opts.sessionID), "run"),
     ...sandboxEnv(),
-    "--chdir", cwd,
   ]
+  return { argv, cwd }
+}
+
+export function sandboxPrefix(opts: { sessionID: string; cwd?: string }): string[] {
+  const { argv, cwd } = sandboxArgv(opts)
+  return [...argv, "--chdir", cwd]
 }
 
 export function shQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`
+}
+
+const LAUNCHER_NAME = "sandbox-exec.sh"
+
+/**
+ * launcher 落點：.run/<slug>/launcher/sandbox-exec.sh —— **刻意放在 run/ 之外**。
+ * 沙箱內 .run 被 maskArgs 以 tmpfs 遮罩、只把 run/ 綁回去，所以本檔在沙箱內不存在，
+ * 工具改不到它（若放在 run/ 內，agent 可改寫下一輪要執行的腳本＝逃逸後門）。
+ */
+export function sessionLauncherPath(sessionID: string): string {
+  return path.join(RUN_ROOT, sessionSlug(sessionID), "launcher", LAUNCHER_NAME)
+}
+
+/** shQuote 的逆運算掃描器：從 i 起讀一個單引號字串，支援 '\\'' 轉義。 */
+function readShQuoted(s: string, i: number): { value: string; next: number } | null {
+  if (s[i] !== "'") return null
+  let out = ""
+  i++
+  while (i < s.length) {
+    if (s[i] === "'") {
+      if (s.slice(i, i + 4) === `'\\''`) {
+        out += "'"
+        i += 4
+        continue
+      }
+      return { value: out, next: i + 1 }
+    }
+    out += s[i]
+    i++
+  }
+  return null
+}
+
+/** 反解 launcher 呼叫 `exec '<launcher>' '<cwd>' '<cmd>'`（模型複製回顯的第二形態）。 */
+function unwrapLauncherInvocation(command: string): string | null {
+  const head = /^\s*exec\s+/.exec(command)
+  if (!head) return null
+  let i = head[0].length
+  const a = readShQuoted(command, i)
+  if (!a || !a.value.endsWith(LAUNCHER_NAME)) return null
+  i = a.next
+  while (command[i] === " ") i++
+  const b = readShQuoted(command, i)
+  if (!b) return null
+  i = b.next
+  while (command[i] === " ") i++
+  const c = readShQuoted(command, i)
+  if (!c) return null
+  return c.value
 }
 
 const SELF_WRAP_RE = /(?:^|\s)exec\s+'(?:\/usr\/bin\/)?bwrap'|--die-with-parent/
@@ -276,20 +331,24 @@ const SELF_WRAP_RE = /(?:^|\s)exec\s+'(?:\/usr\/bin\/)?bwrap'|--die-with-parent/
 /**
  * 反解自家沙箱包裝層（2026-10-02 事故，子代理連環逾時的單一根因）。
  *
- * `tool.execute.before` 會把 args.command 改寫成
- *   exec '<bwrap>' --die-with-parent ... /bin/bash -c '<原始命令>'
- * 這段字串會落進工具輸入紀錄與回顯，模型看到後會把**整段**當成命令本體重送，
- * 形成 bwrap(...bwrap(...))：內層在已被外層 tmpfs 的 /opt 上再 --ro-bind / 與
- * 掛 /proc，並引用**舊會話**的 .run/<舊 slug>/{tmp,run}（新會話不存在）→
- * bwrap: Can't find source path；子代理診斷、換寫法、再試，最後撞逾時被殺。
- *
- * 修法：進來時若偵測到自家包裝層，剝回最內層原始命令再重新包一次。
- * 於是「複製回顯重送」正好等於使用者要的原始命令——巢狀在結構上不可能發生。
- * 只認自家簽名（exec '<bwrap>' 或 --die-with-parent），一般命令零影響。
+ * `tool.execute.before` 會把 args.command 改寫成包裝後的命令，而**改寫後的 args 就是
+ * 落進工具輸入紀錄、再被回放進模型上下文的那一份**，模型看到後會把整段當命令本體重送：
+ *   - 形態一（舊）：exec '<bwrap>' … /bin/bash -c '<命令>' → bwrap 包 bwrap，內層在已被
+ *     外層 tmpfs 的 /opt 上重 bind、並引用舊會話 .run/<舊 slug>/{tmp,run}（新會話不存在）
+ *     → `bwrap: Can't find source path`，子代理反覆試錯直到逾時被殺（DB 可見同調用重送 6×/16×）。
+ *   - 形態二（現）：exec '<launcher>' '<cwd>' '<命令>'（見 wrapShellCommand）。
+ * 兩種形態都剝回最內層原始命令再重新包一次，於是「複製回顯重送」正好等於使用者要的原始
+ * 命令——巢狀在結構上不可能發生。只認自家簽名，一般命令零影響。
  */
 export function unwrapShellCommand(command: string): string {
   let cur = command
-  for (let i = 0; i < 4 && SELF_WRAP_RE.test(cur); i++) {
+  for (let i = 0; i < 4; i++) {
+    const viaLauncher = unwrapLauncherInvocation(cur)
+    if (viaLauncher !== null) {
+      cur = viaLauncher
+      continue
+    }
+    if (!SELF_WRAP_RE.test(cur)) break
     const marker = "/bin/bash -c "
     const at = cur.lastIndexOf(marker)
     if (at < 0) break
@@ -300,13 +359,34 @@ export function unwrapShellCommand(command: string): string {
   return cur
 }
 
+/**
+ * 寫出（或更新）本會話沙箱啟動器。內容只依賴會話與當下檔案系統狀態（上傳白名單可能在
+ * 會話中途變動），故每次呼叫重寫；以 tmp+rename 原子替換，避免同會話並發 bash 讀到半截檔。
+ */
+function writeSessionLauncher(opts: { sessionID: string; cwd?: string }): { file: string; cwd: string; argv: string[] } {
+  const { argv, cwd } = sandboxArgv(opts)
+  const file = sessionLauncherPath(opts.sessionID)
+  mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 })
+  const script =
+    "#!/bin/sh\n" +
+    `# 自動生成（每次呼叫重寫）：會話 ${sessionSlug(opts.sessionID)} 的沙箱啟動器。\n` +
+    "# 沙箱內看不到本檔（.run 被 tmpfs 遮罩），故工具無法改寫它。\n" +
+    `exec ${argv.map(shQuote).join(" ")} --chdir "$1" /bin/bash -c "$2"\n`
+  const tmpFile = `${file}.${process.pid}.tmp`
+  writeFileSync(tmpFile, script)
+  chmodSync(tmpFile, 0o755)
+  renameSync(tmpFile, file)
+  return { file, cwd, argv }
+}
+
 export function wrapShellCommand(command: string, opts: { sessionID: string; cwd?: string }): string {
   // bwrap --bind 的來源必須先存在；不依賴呼叫端的 ensureDirs 順序（首呼競態）。
   for (const d of [sessionTmpDir(opts.sessionID), sessionRunDir(opts.sessionID)]) {
     try { mkdirSync(d, { recursive: true }) } catch { /* 交給後續 bwrap 報錯 */ }
   }
-  const prefix = sandboxPrefix({ sessionID: opts.sessionID, cwd: opts.cwd })
-  return `exec ${prefix.map(shQuote).join(" ")} /bin/bash -c ${shQuote(unwrapShellCommand(command))}`
+  const { file, cwd } = writeSessionLauncher(opts)
+  // 被記錄／回放的只有這一行的長度（~150 字元），bwrap 全文不再進模型上下文。
+  return `exec ${shQuote(file)} ${shQuote(cwd)} ${shQuote(unwrapShellCommand(command))}`
 }
 
 // ── 秘密值遮罩 ──

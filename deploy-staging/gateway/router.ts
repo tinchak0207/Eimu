@@ -19,7 +19,7 @@ import { openEventStream } from "./sse-core.ts"
 import { handleAttachmentUpload, sanitizeUploadName, contentTypeForExt } from "./uploads-media.ts"
 import { handleConfirmRequest, handleInternalEmit, handleTts, handleCanvasDispatchOps, handleCanvasOpsResultInternal, handleMediaUpload, handleCanvasStatePublic, handleCanvasStatePublicGet, handleCanvasOpsResultPublic } from "./media-internal-routes.ts"
 import { handleCanvasStateWrite, handleCanvasSnapshotRead } from "./canvas-cascade-state.ts"
-import { handleSubagentDispatch, handleSubagentStatus, handleSubagentStop, subagentParentState } from "./subagent.ts"
+import { handleSubagentDispatch, handleSubagentStatus, handleSubagentStop, subagentParentState, handleLoopBreaker } from "./subagent.ts"
 import { workflowServiceTemplates, handleWorkflowInternal, pushWorkflowCompletion } from "./workflow-gw.ts"
 import { handleDirectorRoutes } from "./director.ts"
 import { handleCreateSession, handleEventStream, handleConfirm } from "./session-lifecycle.ts"
@@ -193,6 +193,10 @@ export async function handleRequest(req: Request, srv: { requestIP: (r: Request)
       //   - all:true 或缺 subagent_id：停該會話名下全部在跑子代理
       if (req.method === "POST" && pathname === "/internal/subagent/stop") {
         return handleSubagentStop(req)
+      }
+      // D1（2026-10-02）：工具層重複呼叫斷路器的強制收尾（plugin eimu-guard 在 N+5 次時呼叫）。
+      if (req.method === "POST" && pathname === "/internal/session/loop-breaker") {
+        return handleLoopBreaker(req)
       }
       // ── 契約 §3.5：記憶批次手動觸發（每日 ticker 之外的運維入口）。──
       // 鑑權＝與現狀同構的 loopback-only 門（本 /internal/ 區塊上層已裁定：既有

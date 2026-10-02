@@ -9,7 +9,14 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import test from "node:test"
 import { analyzeFilm, parseEbur128, parseSegments, qcAndFixFilm, tailSegmentStart } from "./film-qc.ts"
-import { noteReasoningDelta, resetReasoningCap, REASONING_NOACTION_MAX_CHARS } from "./reasoning-cap.ts"
+import {
+  noteReasoningDelta,
+  resetReasoningCap,
+  REASONING_NOACTION_MAX_CHARS,
+  REASONING_NOACTION_MAX_MS,
+  REASONING_FIRST_GEN_MAX_CHARS,
+  type ReasoningCapState,
+} from "./reasoning-cap.ts"
 import { emitUnfulfilledPlanNotice, recordUnfulfilledPlan, takeUnfulfilledPlanInjection, unfulfilledPlanNotice, type PlanPromiseState } from "./plan-promise.ts"
 
 test("parseEbur128 / parseSegments / tailSegmentStart 純解析", () => {
@@ -44,14 +51,40 @@ test("集成：低響度+結尾凍結 → 正規化到 -16 LUFS 並剪掉凍結�
   assert.equal(miss.changed, false)
 })
 
-test("reasoning-cap：超字數/超時回報 true；動作歸零；零長度不計", () => {
-  const st: { reasonSinceActionChars?: number; reasonSinceActionAt?: number } = {}
-  assert.equal(noteReasoningDelta(st, 0, 1000), false)
-  assert.equal(noteReasoningDelta(st, 100, 1000), false)
-  assert.equal(noteReasoningDelta(st, REASONING_NOACTION_MAX_CHARS, 2000), true, "字數超限")
+test("reasoning-cap：零長不計；首回合超軟限回 soft（不 abort）；再破常規上限回 hard；reset 歸零", () => {
+  const st: ReasoningCapState = {}
+  // 零長度不計、不設時間窗。
+  assert.equal(noteReasoningDelta(st, 0, { now: 1000 }).kind, "none")
+  assert.equal(st.reasonSinceActionChars ?? 0, 0)
+  // 首回合（尚無工具調用與非空正文）：破首回合軟限 → soft（誠實上報，不中止）。
+  const first = noteReasoningDelta(st, REASONING_FIRST_GEN_MAX_CHARS, { now: 2000, ctx: { hasTool: false, hasText: false } })
+  assert.equal(first.kind, "soft")
+  assert.equal((first as { phase: string }).phase, "first-gen")
+  // 軟限用盡後視窗歸零（第二段以常規上限重計）：再破常規上限 → hard。
+  assert.equal(st.reasonSinceActionChars, 0)
+  const hard = noteReasoningDelta(st, REASONING_NOACTION_MAX_CHARS, { now: 3000, ctx: { hasTool: false, hasText: false } })
+  assert.equal(hard.kind, "hard")
+  // reset 後歸零，且階段回 0（重新給首回合寬限）。
   resetReasoningCap(st)
-  assert.equal(noteReasoningDelta(st, 10, 5000), false)
-  assert.equal(noteReasoningDelta(st, 10, 5000 + 100_001), true, "時間超限（3 分鐘空轉場景）")
+  assert.equal(st.reasonSinceActionChars, 0)
+  assert.equal(noteReasoningDelta(st, 10, { now: 4000, ctx: { hasTool: false, hasText: false } }).kind, "none")
+})
+
+test("reasoning-cap：本輪已有動作 → 無首回合寬限，超字數直接 hard", () => {
+  const st: ReasoningCapState = {}
+  // active 階段（已有工具/正文）以常規上限計，首回合的 24000 寬限不適用。
+  assert.equal(noteReasoningDelta(st, 100, { now: 1000, ctx: { hasTool: true, hasText: true } }).kind, "none")
+  const v = noteReasoningDelta(st, REASONING_NOACTION_MAX_CHARS, { now: 2000, ctx: { hasTool: true, hasText: true } })
+  assert.equal(v.kind, "hard")
+  assert.equal((v as { overChars: boolean }).overChars, true)
+})
+
+test("reasoning-cap：長時間空轉（超時）→ hard 且 overMs=true", () => {
+  const st: ReasoningCapState = {}
+  noteReasoningDelta(st, 10, { now: 5000, ctx: { hasTool: true, hasText: true } })
+  const v = noteReasoningDelta(st, 10, { now: 5000 + REASONING_NOACTION_MAX_MS + 1, ctx: { hasTool: true, hasText: true } })
+  assert.equal(v.kind, "hard")
+  assert.equal((v as { overMs: boolean }).overMs, true)
 })
 
 test("plan-promise：計畫點名專家但零 subagent.started → 誠實告知；有派或沒點名 → 不吭聲", () => {

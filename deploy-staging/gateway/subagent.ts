@@ -68,6 +68,10 @@ import {
   markCriticPass,
   hasCriticPass,
   deleteCriticPass,
+  // D7（2026-10-02）：品質量測基座寫入（fail-open；量測不得影響交付）。
+  saveCriticVerdict,
+  saveExpertLesson,
+  saveDelivery,
   type ReworkRecord,
 } from "./persistence"
 
@@ -158,6 +162,9 @@ interface SubagentRun {
   // 兌現給主會話（寫進 completed，工具輪詢立刻取件解鎖），run 不殺——降為 async
   // 續跑，完成後照樣走既有 wakeParent 回填通路。
   deadlineTimer?: ReturnType<typeof setTimeout>
+  // D5（2026-10-02）：心跳 + 逾時前部分交付計時器（見 armHeartbeat）。摘除時必須清。
+  heartbeatTimer?: ReturnType<typeof setInterval>
+  earlyPartialTimer?: ReturnType<typeof setTimeout>
   // 片 D（2026-09-15）：交付閘門機器化重派狀態。reworkCount=已重派次數（硬帽 1，
   // 防無限迴圈燒錢）；reworking=重派投遞在途護欄（舊子會話殘影事件不得提前收尾）；
   // reworkFailure=重派投遞失敗原因（非空=重派從未真正跑過，done 不得偽稱 reworked）。
@@ -194,6 +201,9 @@ interface SubagentResult {
   // R1（2026-09-11）：同步 deadline 超時的「部分結果」語義（工具側/前端契約欄位）。
   partial?: boolean
   reason?: string
+  // D4（2026-10-02）：所屬父會話（gateway session id）。此前 completed 記錄無歸屬，
+  // 「latest／最近 3 筆」查不到本會話的已完成 run。新寫入必帶；舊記錄無此欄＝不列入。
+  parent?: string
 }
 
 interface SubagentDeps {
@@ -325,7 +335,7 @@ export function stopSubagentRun(run: SubagentRun, by: "user" | "orchestrator", r
   // 修 1：停止也釋放槽位——補跑被擠掉的 critic。
   maybeDrainCriticQueue(run.parentGatewaySessionId)
   deleteReworkRecord(run.id)
-  completed.set(run.id, { status: "stopped" satisfies TaskStatus, summary, error: text, finishedAt: Date.now(), label: run.label })
+  completed.set(run.id, { status: "stopped" satisfies TaskStatus, summary, error: text, finishedAt: Date.now(), label: run.label, parent: run.parentGatewaySessionId })
   const state = parentStateOf(run)
   if (state && deps) {
     try {
@@ -393,6 +403,8 @@ function removeFromRegistries(run: SubagentRun): void {
   }
   if (run.timeoutTimer) clearTimeout(run.timeoutTimer)
   if (run.deadlineTimer) clearTimeout(run.deadlineTimer)
+  if (run.heartbeatTimer) clearInterval(run.heartbeatTimer)
+  if (run.earlyPartialTimer) clearTimeout(run.earlyPartialTimer)
 }
 
 /** 收尾：登记结果、摘除注册表、向父会话发 done、DELETE 子会话防堆积。 */
@@ -452,6 +464,15 @@ function finishRun(run: SubagentRun, status: "ok" | "error", fullText: string, e
       console.warn(
         `[gateway] delivery gate: id=${run.id} agent=${run.agent} status=FAIL missing=${verdict.missing.join(",")} — 触发机器化重派`,
       )
+      // D7（2026-10-02）：失敗模式永久留存（此前 subagent_reworks 終局刪除、無終身計數）。
+      saveExpertLesson({
+        sessionId: run.parentGatewaySessionId,
+        agent: run.agent ?? "unknown",
+        runId: run.id,
+        source: "delivery_gate",
+        failureMode: verdict.missing.join(",") || "delivery_gate_fail",
+        detail: typeof fullText === "string" ? fullText.slice(0, 2000) : "",
+      })
       void startRework(run, verdict, fullText)
       return
     }
@@ -499,6 +520,31 @@ ${summary}`
         `[gateway] machine critic pass: verdict=REJECT — 送回父会话 session=${run.parentGatewaySessionId} critic_run=${run.id}`,
       )
     }
+    // D7（2026-10-02）：判決落庫（此前 critic_passes 只有 session_id/created_at，verdict 不落地）。
+    // score 傳 null（rubric 尚未存在，不填 0 假值）；judge_model 記 critic 實際模型鏈。
+    saveCriticVerdict({
+      sessionId: run.parentGatewaySessionId,
+      runId: run.id,
+      agent: run.agent,
+      label: run.label,
+      verdict: run.machineCriticRejected ? "reject" : "pass",
+      score: null,
+      judgeModel: (() => {
+        const m = run.modelChain[run.attempt - 1]
+        return m ? `${m.providerID}/${m.modelID}` : "opencode-default"
+      })(),
+      verdictText: typeof fullText === "string" ? fullText : "",
+    })
+    if (run.machineCriticRejected) {
+      saveExpertLesson({
+        sessionId: run.parentGatewaySessionId,
+        agent: run.agent ?? "critic",
+        runId: run.id,
+        source: "critic_reject",
+        failureMode: "machine_critic_reject",
+        detail: typeof fullText === "string" ? fullText : "",
+      })
+    }
   }
   // 刀 2（2026-09-15）：Expert 交付登記為待審對象（machine critic pass 的輸入）。
   // 條件全成立才登記：正常終態（非孤兒路徑）、ok、beast、agent 在契約域內、非 critic 自身
@@ -523,7 +569,18 @@ ${summary}`
   // 修 1：本 run 釋放了一個槽位——若該父會話有被並發上限擠掉的 critic 待跑，補跑。
   maybeDrainCriticQueue(run.parentGatewaySessionId)
   deleteReworkRecord(run.id) // 刀 F：終態即清持久記錄（冪等；非 rework run 無記錄=no-op）
-  completed.set(run.id, { status, summary, error, finishedAt: Date.now(), label: run.label })
+  completed.set(run.id, { status, summary, error, finishedAt: Date.now(), label: run.label, parent: run.parentGatewaySessionId })
+  // D7（2026-10-02）：交付事件落庫——重問率＝同 (session, agent, label) 再次交付的比例。
+  if (status === "ok" && run.agent) {
+    saveDelivery({
+      sessionId: run.parentGatewaySessionId,
+      runId: run.id,
+      agent: run.agent,
+      label: run.label,
+      relPath: persist.relPath,
+      contractOk: deliveryGate ? deliveryGate.ok : undefined,
+    })
+  }
   const state = parentStateOf(run)
   if (state) {
     deps!.emitToSession(state, "subagent.done", {
@@ -611,6 +668,8 @@ async function startRework(run: SubagentRun, verdict: DeliveryGateResult, firstT
     run.reworking = false
     finishRun(run, "error", partialBodyOf(run), `子代理超时（${Math.round(hardMs / 60000)} 分钟），已强制结束`)
   }, hardMs)
+  // D5（2026-10-02）：重派段同樣有心跳／逾時前部分交付。
+  armHeartbeat(run, hardMs)
   const failure = await dispatchAttempt(run)
   if (failure) {
     run.reworking = false
@@ -695,11 +754,54 @@ function partialBodyOf(run: SubagentRun): string {
   return parts.join("\n").trim()
 }
 
+/** D5（2026-10-02）：心跳與逾時前部分交付。
+ *  證據：硬逾時 22 次、會話實錄「40 分鐘無任何存活訊號」、中止即全丟（REPORT A8）。
+ *  心跳間隔（60s）無文獻依據，屬待調參數（MCP progress / A2A 任務狀態機為機制類別依據）。
+ *  心跳不得抛錯、不得改變 run 狀態；計時器 unref，不阻擋進程退出。 */
+function armHeartbeat(run: SubagentRun, hardMs: number): void {
+  const hbMs = Number.parseInt(process.env.SUBAGENT_HEARTBEAT_MS || "", 10) || 60_000
+  const earlyMs = Number.parseInt(process.env.SUBAGENT_EARLY_PARTIAL_MS || "", 10) || 120_000
+  if (run.heartbeatTimer) clearInterval(run.heartbeatTimer)
+  if (run.earlyPartialTimer) clearTimeout(run.earlyPartialTimer)
+  run.heartbeatTimer = setInterval(() => {
+    if (run.status !== "running" || run.stopped) return
+    const state = deps?.resolveSession(run.parentGatewaySessionId) ?? deps?.findSessionByOpenCodeId(run.parentOpencodeSessionId)
+    if (!state) return
+    const elapsed = Math.round((Date.now() - run.startedAt) / 1000)
+    const body = partialBodyOf(run).replace(/\s+/g, " ")
+    const snippet = body ? body.slice(-120) : "（尚无正文产出）"
+    try {
+      deps?.emitToSession(state, "turn.status", {
+        text: `子代理「${run.label}」仍在运行（已 ${elapsed}s）… 最近：${snippet}`,
+      })
+    } catch {
+      /* 心跳失败不影响主流程 */
+    }
+  }, hbMs)
+  unrefTimer(run.heartbeatTimer)
+  if (hardMs > earlyMs + 30_000) {
+    run.earlyPartialTimer = setTimeout(() => {
+      if (run.status !== "running" || run.stopped) return
+      const body = partialBodyOf(run)
+      if (!body.trim()) return
+      // 早於硬頂落盤快照，不改變 run 狀態；run 真完成時 finishRun 以全文覆寫同一檔。
+      persistRunOutput(run, "timeout", body, "（逾时前部分产物快照；run 仍在续跑，完成后覆写同一档）", true)
+      console.warn(`[gateway] subagent early partial persisted: id=${run.id} label="${run.label}" chars=${body.length}`)
+    }, hardMs - earlyMs)
+    unrefTimer(run.earlyPartialTimer)
+  }
+}
+
+function unrefTimer(t: ReturnType<typeof setTimeout> | ReturnType<typeof setInterval> | undefined): void {
+  ;(t as unknown as { unref?: () => void } | undefined)?.unref?.()
+}
+
 function persistRunOutput(
   run: SubagentRun,
   status: "ok" | "error" | "timeout",
   body: string,
   errorText?: string,
+  forcePartial = false,
 ): PersistOutcome {
   const text = typeof body === "string" && body.trim().length > 0 ? body : ""
   const death = typeof errorText === "string" && errorText.trim().length > 0 ? errorText : ""
@@ -710,7 +812,7 @@ function persistRunOutput(
     mkdirSync(SUBAGENT_OUTPUT_DIR, { recursive: true })
     const model = run.modelChain[run.attempt - 1]
     // 修 3：partial 落盤時「状态」標 partial（檔名規則與終態一致）。
-    const effStatus = run.partialPersist ? "partial" : status
+    const effStatus = forcePartial || run.partialPersist ? "partial" : status
     const meta = [
       `# ${run.label}`,
       "",
@@ -1179,6 +1281,8 @@ export function maybeRunMachineCriticPass(parentState: any, unreviewedDeclared =
       run.partialPersist = true
       finishRun(run, "error", partialBodyOf(run), `子代理超时（${Math.round(hardMs / 60000)} 分钟），已强制结束`)
     }, hardMs)
+    // D5（2026-10-02）：機器 critic run 亦有心跳／逾時前部分交付。
+    armHeartbeat(run, hardMs)
 
     // ⑦ 復用既有輪子投遞（async 語義：立即返回，終態 wake）。
     void (async () => {
@@ -1250,7 +1354,7 @@ export function snapshotPendingCriticTargets(parentId: string): Array<{ agent: s
  * wakeParent 時 async 請求按同步處理，不裸奔）。
  */
 export async function handleSubagentDispatch(req: Request): Promise<Response> {
-  if (!deps) return Response.json({ ok: false, error: "subagent runtime not initialized" }, { status: 500 })
+  if (!deps) return Response.json({ ok: false, code: "runtime_not_initialized", error: "subagent runtime not initialized" }, { status: 500 })
   const body = (await req.json().catch(() => ({}))) as {
     sessionId?: string
     label?: string
@@ -1262,7 +1366,12 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
   // P2b 刀1：prompt 需可被自動補行改寫。
   let prompt = typeof body.prompt === "string" ? body.prompt : ""
   if (!body.sessionId || !label || !prompt) {
-    return Response.json({ ok: false, error: "sessionId/label/prompt 均为必填" }, { status: 400 })
+    // D2（2026-10-02）：空字串錯誤碼是反模式（歷史 717 次）——失敗一律帶 code 與缺哪欄。
+    const missing = [!body.sessionId ? "sessionId" : "", !label ? "label" : "", !prompt ? "prompt" : ""].filter(Boolean)
+    return Response.json(
+      { ok: false, code: "missing_required_args", error: `sessionId/label/prompt 均为必填；缺少：${missing.join("、")}`, missing },
+      { status: 400 },
+    )
   }
   // P2b 刀1：首行自動補死線行。已寫「预期/預期 N」= 原樣不動（避免雙補）。
   // 字符集與 R1 parseSyncDeadlineMs 對齊（简/繁皆認），確保不重複補。
@@ -1271,7 +1380,7 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
   }
   const parent = deps.resolveSession(body.sessionId)
   if (!parent) {
-    return Response.json({ ok: false, error: "父会话不存在或已过期" }, { status: 404 })
+    return Response.json({ ok: false, code: "session_not_found", error: "父会话不存在或已过期" }, { status: 404 })
   }
   // R6：async 開關。顯式 true 且 wakeParent 已注入才走異步；否則一律同步（默認路徑零變化）。
   // 刀3（2026-09-19）：async 三條件機器化（playbook 1.9 起 LLM 不再自判）——
@@ -1304,19 +1413,19 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
       allowed = (JSON.parse(readFileSync(`${import.meta.dir}/expert/expert-ids.json`, "utf8")) as { experts?: unknown })?.experts
     } catch (e) {
       return Response.json(
-        { ok: false, error: `expert 清單不可讀（gateway/expert/expert-ids.json：${e instanceof Error ? e.message : String(e)}）` },
+        { ok: false, code: "expert_registry_unavailable", error: `expert 清單不可讀（gateway/expert/expert-ids.json：${e instanceof Error ? e.message : String(e)}）` },
         { status: 503 },
       )
     }
     if (!Array.isArray(allowed)) {
       return Response.json(
-        { ok: false, error: "expert 清單不可讀（gateway/expert/expert-ids.json 形狀錯誤：缺 experts 陣列）" },
+        { ok: false, code: "expert_registry_unavailable", error: "expert 清單不可讀（gateway/expert/expert-ids.json 形狀錯誤：缺 experts 陣列）" },
         { status: 503 },
       )
     }
     const allowedList = allowed as string[]
     if (rawExpert && !allowedList.includes(rawExpert)) {
-      return Response.json({ ok: false, error: `未知 expert：${rawExpert}` }, { status: 400 })
+      return Response.json({ ok: false, code: "unknown_expert", error: `未知 expert：${rawExpert}`, allowed: allowedList }, { status: 400 })
     }
     // 刀3 權威路由（Jev 失敗回 null → fail-open 用點名值/空）。
     const routed = (await routeExpertAuthoritative(prompt, rawExpert)) ?? {
@@ -1348,7 +1457,7 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
       })
       if (reason) {
         console.log(`[gateway] jev_gate: MUSIC_FIRST_BLOCKED label="${label}" expert=${expertId || "-"} inflight=${musicInFlight}`)
-        return Response.json({ ok: false, error: reason, blocked: "music_first" }, { status: 409 })
+        return Response.json({ ok: false, code: "music_first", error: reason, blocked: "music_first" }, { status: 409 })
       }
     }
     // 刀 2（2026-09-15）：orchestrator **自行**派 critic = 本輪已有 critic 審核動作，
@@ -1435,10 +1544,15 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
     console.log(`[gateway] jev_gate: REWORK_LOCK injected label="${label}" original=${prior?.relPath || "-"}`)
   }
 
-  // 并发上限：第 4 个拒绝，文案原样给主代理。
+  // 并发上限：第 4 个拒绝，文案原样给主代理（附 code 与当前在跑清单，便于编排等待而非重试）。
   const list = byParent.get(parent.sessionId) ?? []
   if (list.length >= MAX_ACTIVE_PER_PARENT) {
-    return Response.json({ ok: false, error: SUBAGENT_BUSY_MESSAGE })
+    return Response.json({
+      ok: false,
+      code: "concurrency_limit",
+      error: SUBAGENT_BUSY_MESSAGE,
+      running: list.map((r) => ({ id: r.id, label: r.label, elapsed_ms: Date.now() - r.startedAt })),
+    })
   }
 
   // 模型链：父會話 persona 主模型 + registry fallbacks（空鏈 = 吃 opencode 預設，
@@ -1484,6 +1598,8 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
     run.partialPersist = true
     finishRun(run, "error", partialBodyOf(run), `子代理超时（${Math.round(hardMs / 60000)} 分钟），已强制结束`)
   }, hardMs)
+  // D5（2026-10-02）：心跳 + 逾時前 2 分鐘部分交付。
+  armHeartbeat(run, hardMs)
 
   // 投递任务书（第一次 attempt；後續上游錯誤換模重試走 retryWithNextModel）
   const failure = await dispatchAttempt(run)
@@ -1525,6 +1641,7 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
         label: run.label,
         partial: true,
         reason: "timeout",
+        parent: run.parentGatewaySessionId,
       })
       // E 片（2026-09-12）：超時放行這一刻的事實也落盤（無正文 → 寫死因事實）。此刻
       // 盤上不是交付物，**不掛「完整结果已落盘」指針**（掛了會誤導）；run 後續真完成
@@ -1552,15 +1669,72 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
   return Response.json({ ok: true, subagent_id: run.id })
 }
 
+/** D4（2026-10-02）：本會話最近 N 筆 run（運行中＋已完成，按時間倒序）。
+ *  completed 記錄自 2026-10-02 起帶 parent 歸屬；舊記錄無 parent＝不列入（誠實：不假裝知道歸屬）。 */
+function recentRunsForParent(
+  parentKey: string,
+  limit: number,
+): Array<{ id: string; label: string; status: string; running: boolean }> {
+  if (!parentKey) return []
+  const out: Array<{ id: string; label: string; status: string; running: boolean; at: number }> = []
+  for (const run of byParent.get(parentKey) ?? []) {
+    out.push({
+      id: run.id,
+      label: run.label,
+      status: run.status,
+      running: run.status === "running" && !run.stopped,
+      at: run.startedAt,
+    })
+  }
+  for (const [id, rec] of completed) {
+    if (rec.parent === parentKey) out.push({ id, label: rec.label ?? "", status: rec.status, running: false, at: rec.finishedAt })
+  }
+  return out
+    .sort((a, b) => b.at - a.at)
+    .slice(0, limit)
+    .map(({ at: _at, ...rest }) => rest)
+}
+
+/** D4：`latest` 別名 → 本會話最近一次 run 的 id（無記錄回 undefined）。 */
+function resolveLatestRunId(parentKey: string): string | undefined {
+  return recentRunsForParent(parentKey, 1)[0]?.id
+}
+
 /** POST /internal/subagent/status — body { session_id, subagent_id }。工具轮询取件。
- *  R6：async 派遣的主會話也可用同一端點主動查詢狀態（subagent_status 工具）。 */
+ *  R6：async 派遣的主會話也可用同一端點主動查詢狀態（subagent_status 工具）。
+ *  D4（2026-10-02）：支援 `latest` 別名；not_found 附最近 3 筆 run 供改用。 */
 export async function handleSubagentStatus(req: Request): Promise<Response> {
   pruneCompleted()
   const body = (await req.json().catch(() => ({}))) as { session_id?: string; subagent_id?: string }
-  if (!body.subagent_id) {
-    return Response.json({ ok: false, error: "subagent_id 必填" }, { status: 400 })
+  let wantId = typeof body.subagent_id === "string" ? body.subagent_id.trim() : ""
+  if (!wantId) {
+    return Response.json(
+      {
+        ok: false,
+        code: "missing_required_args",
+        error: 'subagent_id 必填：可傳完整 run id、"latest"（本會話最近一次）或 label 前綴。示例：{"subagent_id":"latest"}',
+      },
+      { status: 400 },
+    )
   }
-  const done = completed.get(body.subagent_id)
+  const sid = body.session_id?.trim()
+  const parent = sid ? (deps?.resolveSession(sid) ?? deps?.findSessionByOpenCodeId(sid)) : undefined
+  const parentKey = parent?.sessionId ?? sid ?? ""
+  if (wantId === "latest") {
+    const latestId = resolveLatestRunId(parentKey)
+    if (!latestId) {
+      return Response.json(
+        {
+          ok: false,
+          code: "not_found",
+          error: '本会话没有任何子代理记录（"latest" 无对象）。先 subagent_dispatch 派出后再查。',
+        },
+        { status: 404 },
+      )
+    }
+    wantId = latestId
+  }
+  const done = completed.get(wantId)
   if (done) {
     return Response.json({
       ok: true,
@@ -1574,10 +1748,13 @@ export async function handleSubagentStatus(req: Request): Promise<Response> {
     })
   }
   for (const run of byChildOc.values()) {
-    if (run.id === body.subagent_id) {
+    if (run.id === wantId) {
       return Response.json({
         ok: true,
         done: false,
+        // D4（2026-10-02）：回帶實際命中的 run id——`latest`／label 前綴查詢時，
+        // 呼叫端必須知道解析到哪一個 run，否則拿到狀態卻無 id 可用。
+        subagent_id: run.id,
         label: run.label,
         elapsed_ms: Date.now() - run.startedAt,
       })
@@ -1593,12 +1770,12 @@ export async function handleSubagentStatus(req: Request): Promise<Response> {
   // 僅真正零命中才落到 artifact/404。
   const cands: Array<{ runId: string; label: string; status: string; running: boolean; elapsed_ms?: number }> = []
   for (const run of byChildOc.values()) {
-    if (run.id !== body.subagent_id && run.label.startsWith(body.subagent_id)) {
+    if (run.id !== wantId && run.label.startsWith(wantId)) {
       cands.push({ runId: run.id, label: run.label, status: "running", running: true, elapsed_ms: Date.now() - run.startedAt })
     }
   }
   for (const [id, rec] of completed) {
-    if (id !== body.subagent_id && (rec.label ?? "").startsWith(body.subagent_id)) {
+    if (id !== wantId && (rec.label ?? "").startsWith(wantId)) {
       cands.push({ runId: id, label: rec.label ?? "", status: rec.status, running: false })
     }
   }
@@ -1621,7 +1798,7 @@ export async function handleSubagentStatus(req: Request): Promise<Response> {
       note: "label 前綴命中多筆，請用完整 runId 或更精確 label 重查。",
     })
   }
-  const artifact = findPersistedArtifact(body.subagent_id)
+  const artifact = findPersistedArtifact(wantId)
   if (artifact) {
     return Response.json({
       ok: true,
@@ -1634,7 +1811,22 @@ export async function handleSubagentStatus(req: Request): Promise<Response> {
       note: "run 記錄已過期但產物已落盤：直接 read 上述路徑驗收，勿重派。",
     })
   }
-  return Response.json({ ok: false, error: "subagent_id 不存在或已过期" }, { status: 404 })
+  // D4（2026-10-02）：not_found 不再是一句死話——附最近 3 筆 run（id/狀態/label），
+  // 讓 orchestrator 直接改用正確 id，或改傳 "latest"，而不是重派造成重複生成。
+  const recent = recentRunsForParent(parentKey, 3)
+  return Response.json(
+    {
+      ok: false,
+      code: "not_found",
+      error: recent.length
+        ? `subagent_id 不存在或已过期。本会话最近 3 笔 run：${recent
+            .map((r) => `${r.id}(${r.status}${r.label ? " " + r.label : ""})`)
+            .join("、")}。可改用上述完整 id，或传 "latest"。`
+        : "subagent_id 不存在或已过期，且本会话查无历史 run 记录。",
+      recent_runs: recent,
+    },
+    { status: 404 },
+  )
 }
 
 /**
@@ -1650,14 +1842,17 @@ export async function handleSubagentStop(req: Request): Promise<Response> {
   pruneCompleted()
   const body = (await req.json().catch(() => ({}))) as { session_id?: string; subagent_id?: string; all?: boolean }
   const sid = body.session_id?.trim()
-  if (!sid) return Response.json({ ok: false, error: "session_id 必填" }, { status: 400 })
+  if (!sid) return Response.json({ ok: false, code: "missing_required_args", error: "session_id 必填" }, { status: 400 })
   // session_id 接受 gateway id 或父 opencode id——與 status/dispatch 同語義。
   const parent = deps?.resolveSession(sid) ?? deps?.findSessionByOpenCodeId(sid)
   const parentKey = parent?.sessionId ?? sid
   if (body.subagent_id && body.all !== true) {
     const run = findRunningRun(parentKey, body.subagent_id.trim())
     if (!run) {
-      return Response.json({ ok: false, error: `找不到在跑的子代理：${body.subagent_id}` }, { status: 404 })
+      return Response.json(
+        { ok: false, code: "not_found", error: `找不到在跑的子代理：${body.subagent_id}`, recent_runs: recentRunsForParent(parentKey, 3) },
+        { status: 404 },
+      )
     }
     const label = run.label
     const id = run.id
@@ -1668,6 +1863,41 @@ export async function handleSubagentStop(req: Request): Promise<Response> {
   const ids = list.map((r) => r.id)
   const n = stopSubagentsForParent(parentKey, "orchestrator", "已按你的要求停止全部在跑子代理")
   return Response.json({ ok: true, stopped: n, subagent_ids: ids })
+}
+
+/**
+ * D1（2026-10-02）：工具層重複呼叫斷路器的強制收尾端點。
+ * 由 .opencode/plugin/eimu-guard.ts 在「同一 (session, tool, 正規化 args) 第 N+5 次」時呼叫：
+ * 中止該會話當前生成並回灌一則系統說明。**輪詢類工具不觸發**（2026-10-02 使用者裁定：保留輪詢）。
+ * body { session_id, tool, count }。
+ */
+export async function handleLoopBreaker(req: Request): Promise<Response> {
+  if (!deps) {
+    return Response.json({ ok: false, code: "runtime_not_initialized", error: "subagent runtime not initialized" }, { status: 500 })
+  }
+  const body = (await req.json().catch(() => ({}))) as { session_id?: string; tool?: string; count?: number }
+  const sid = typeof body.session_id === "string" ? body.session_id.trim() : ""
+  if (!sid) {
+    return Response.json({ ok: false, code: "missing_required_args", error: "session_id 必填" }, { status: 400 })
+  }
+  const state = deps.resolveSession(sid) ?? deps.findSessionByOpenCodeId(sid)
+  const ocId = state?.opencodeSessionId
+  if (ocId) {
+    void fetch(`${deps.openCodeUrl}/session/${ocId}/abort`, {
+      method: "POST",
+      headers: deps.openCodeHeaders(),
+      signal: AbortSignal.timeout(5000),
+    }).catch(() => {})
+  }
+  if (state) {
+    deps.emitToSession(state, "turn.status", {
+      text: `检测到工具「${body.tool ?? "?"}」以完全相同参数重复调用 ${body.count ?? 0} 次，已强制结束本轮：请改变参数或停止该动作。`,
+    })
+  }
+  console.warn(
+    `[gateway] loop-breaker abort: session=${state?.sessionId ?? sid} tool=${body.tool ?? "?"} count=${body.count ?? 0} aborted=${Boolean(ocId)}`,
+  )
+  return Response.json({ ok: true, aborted: Boolean(ocId), session_id: state?.sessionId ?? sid })
 }
 
 /** 刀1：掃 outputs/subagent/<runId前8碼>-*.md，取最新一筆（同前綴理論唯一，兜底取 mtime 最大）。 */
