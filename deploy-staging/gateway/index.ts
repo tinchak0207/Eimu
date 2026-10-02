@@ -19,6 +19,8 @@ import { loadAgentModelRegistry, bindingRef, personaModel } from "./model-regist
 import type { AgentModelRef } from "./model-registry.ts"
 import { normalizeUserSettings } from "./sessions-http.ts"
 import { PORT, HEARTBEAT_INTERVAL_MS, CONFIRM_RESOLVED_TTL_MS, SESSION_IDLE_TTL_MS, SESSION_SWEEP_DAYS, SESSION_REAP_INTERVAL_MS, UPLOADS_DIR, OPENCODE_URL } from "./constants-gateway.ts"
+// 2026-10-02：子代理喚醒同樣需要「opencode-server OOM/重啟後恢復等待」——輪子與 workflow 喚醒同源（workflow-gw）。
+import { waitForOpencodeReady, isConnectionRefused } from "./workflow-gw.ts"
 
 /**
  * agent-gateway — Bun TypeScript gateway between frontend clients and opencode serve.
@@ -236,6 +238,23 @@ async function wakeSessionForSubagent(
     }
     await deliver(parentState)
   } catch (e) {
+    // 2026-10-02：opencode-server 全域 OOM/重啟（127.0.0.1:4096 斷線）時單發喚醒會永久丟失。
+    // 遇 ECONNREFUSED 輪詢 /config 至恢復（上限 180s），恢復後補投一次（輪子同 workflow 喚醒）。
+    if (isConnectionRefused(e)) {
+      console.error(`[gateway] subagent wake connection refused; polling /config: session=${parentState.sessionId} sub=${shortId}`)
+      const ready = await waitForOpencodeReady()
+      if (ready) {
+        try {
+          await deliver(parentState)
+          return
+        } catch (e2) {
+          console.error(`[gateway] subagent wake after opencode recovery failed: session=${parentState.sessionId} sub=${shortId}:`, e2)
+          return
+        }
+      }
+      console.error(`[gateway] opencode not ready within recovery window; subagent wake abandoned: session=${parentState.sessionId} sub=${shortId}`)
+      return
+    }
     console.error(`[gateway] subagent wake dispatch failed: session=${parentState.sessionId} sub=${shortId}:`, e)
   }
 }

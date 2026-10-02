@@ -25,6 +25,9 @@
  * 未替身命令一律诚实抛错（对齐 fxRenderStub 的诚实边界风格）。
  */
 import { mkdir, access, rm, appendFile } from 'node:fs/promises';
+// ffmpeg/ffprobe 全域限流（VPS OOM 治本，2026-10-02）：所有經 invoke("execute_command")
+// 的 ffmpeg 執行共用一个進程級訊號量，滿載/記憶體不足時排隊而非全開。
+import { shouldThrottleFfmpeg, acquireFfmpegSlot, releaseFfmpegSlot } from '../../ffmpeg-limiter';
 
 interface CommandResult { stdout: string; stderr: string; exit_code: number }
 
@@ -74,34 +77,41 @@ async function executeCommand(args: {
   cwd?: string;
 }): Promise<CommandResult> {
   const timeoutMs = args.timeoutMs ?? 120_000;
-  const proc = Bun.spawn(['bash', '-lc', args.command], {
-    stdin: 'ignore', // vendor 继承；gateway 是 systemd 服务 stdin 为 null，显式 ignore 防挂起
-    stdout: 'pipe',
-    stderr: 'pipe',
-    ...(args.cwd ? { cwd: args.cwd } : {}),
-  });
-  const rid = args.requestId;
-  if (rid) activeProcs.set(rid, proc.pid);
-
-  let timedOut = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    killTree(proc.pid);
-  }, timeoutMs);
-
+  // ffmpeg 限流：取得執行槽後才 spawn（非 ffmpeg 指令不受影響）。
+  const throttled = shouldThrottleFfmpeg(args.command);
+  if (throttled) await acquireFfmpegSlot();
   try {
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
-    await proc.exited;
-    if (timedOut) throw new Error(`Command timed out after ${timeoutMs}ms`);
-    // vendor: result.status.code().unwrap_or(-1)——被信号杀（SIGKILL）时为 -1
-    const exit_code = proc.exitCode ?? -1;
-    return { stdout, stderr, exit_code };
+    const proc = Bun.spawn(['bash', '-lc', args.command], {
+      stdin: 'ignore', // vendor 继承；gateway 是 systemd 服务 stdin 为 null，显式 ignore 防挂起
+      stdout: 'pipe',
+      stderr: 'pipe',
+      ...(args.cwd ? { cwd: args.cwd } : {}),
+    });
+    const rid = args.requestId;
+    if (rid) activeProcs.set(rid, proc.pid);
+
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      killTree(proc.pid);
+    }, timeoutMs);
+
+    try {
+      const [stdout, stderr] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+      ]);
+      await proc.exited;
+      if (timedOut) throw new Error(`Command timed out after ${timeoutMs}ms`);
+      // vendor: result.status.code().unwrap_or(-1)——被信号杀（SIGKILL）时为 -1
+      const exit_code = proc.exitCode ?? -1;
+      return { stdout, stderr, exit_code };
+    } finally {
+      clearTimeout(timer);
+      if (rid) activeProcs.delete(rid);
+    }
   } finally {
-    clearTimeout(timer);
-    if (rid) activeProcs.delete(rid);
+    if (throttled) releaseFfmpegSlot();
   }
 }
 

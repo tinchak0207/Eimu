@@ -46,7 +46,7 @@ export function emitSanitizedDelta(state: SessionState, partId: string | undefin
     emitToSession(state, "turn.status", { text: "已自动略去一段英文内部思考，中文回复不受影响" })
   }
   if (safe) {
-    emitToSession(state, "message.delta", { text: safe })
+    emitToSession(state, "message.delta", { text: safe }, { strippable: true })
     // R8-B 工單 #5：模型正文到達 = 用戶可見輸出刷新（靜默通知判定依據）。
     state.lastUserVisibleAt = Date.now()
   }

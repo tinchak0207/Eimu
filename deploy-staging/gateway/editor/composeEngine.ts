@@ -563,7 +563,7 @@ export async function exportSelectedMainClips(
   const tmp = `${outDir}/.selected-export-${Date.now()}`;
   await ensureDir(outDir);
   await ensureDir(tmp);
-  const outPath = options.outputPath || `${outDir}/kunpeng_selected_${Date.now()}.mp4`;
+  let outPath = options.outputPath || `${outDir}/kunpeng_selected_${Date.now()}.mp4`;
   if (options.outputPath) await ensureDir(options.outputPath.split('/').slice(0, -1).join('/'));
 
   try {
@@ -580,6 +580,23 @@ export async function exportSelectedMainClips(
       const listFile = `${tmp}/concat.txt`;
       await writeTextViaShell(listFile, segPaths.map((p) => `file '${p}'`).join('\n'));
       await run(`${ffmpeg} -y -f concat -safe 0 -i ${shq(listFile)} -c copy -movflags +faststart ${shq(outPath)}`, 600000, options.signal, 'editor-selected-concat');
+    }
+    // 字幕烧录（2026-10-02 接线）：逐行复制 composeEditorTimeline 既有实现——
+    // ASS 生成（L1021-1026）＋ `subtitles=` 滤镜（L1106-1110）；无字幕时零行为变更。
+    // 复用同一 toAss 轮子与同一滤镜表达式，不新造字幕管线。
+    const subCues = s.subtitles.filter((x) => !x.disabled);
+    if (subCues.length > 0) {
+      options.onProgress?.({ stage: '烧录字幕', detail: `${subCues.length} 条`, percent: 88 });
+      const assPath = `${tmp}/subs.ass`;
+      await writeTextViaShell(assPath, toAss(subCues, s.aspect));
+      const burnedPath = `${tmp}/selected-sub.mp4`;
+      await run(
+        `${ffmpeg} -y -i ${shq(outPath)} -vf "subtitles='${assPath.replace(/'/g, "\\'")}'" -c:v libx264 -preset medium -crf 20 -pix_fmt yuv420p -c:a copy -movflags +faststart ${shq(burnedPath)}`,
+        600000,
+        options.signal,
+        'editor-selected-subtitle',
+      );
+      await run(`mv -f ${shq(burnedPath)} ${shq(outPath)}`, 30000, options.signal, 'editor-selected-subtitle-move');
     }
     options.onProgress?.({ stage: '导出所选片段', detail: '100%', percent: 100 });
     await appendArtifact({ path: outPath, type: 'video', prompt: `导出所选片段 ${selected.length} 段`, createdAt: Date.now(), size: 0 } as never);

@@ -10,11 +10,11 @@ import { loadUserSettings } from "./persistence"
 import { sessions, dirtySessions, markDirty } from "./sessions-core.ts"
 import { emitToSession } from "./sse-core.ts"
 import { opencodeHeaders } from "./opencode-client.ts"
-import { catalogUnitCoins, estimateNodeCoins, priceCatalogCache, resolveNodeModel, videoTierPerSecondSync } from "./pricing-gateway.ts"
+import { catalogUnitCoins, catalogVideoPerSecondCoins, estimateNodeCoins, priceCatalogCache, resolveNodeModel, videoTierPerSecondSync } from "./pricing-gateway.ts"
 import { TTS_UPSTREAM, probeTtsUpstream, settleConfirm } from "./media-internal-routes.ts"
 import { CONFIRM_THRESHOLD_COINS, CONFIRM_TIMEOUT_MS, OPENCODE_URL, PLATFORM_BASE, TTS_AUDIO_DIR, TTS_PUBLIC_BASE } from "./constants-gateway.ts"
 import { jsonError } from "./gw-lib.ts"
-import { VIDEO_FALLBACK_MODEL, pickVideoModel, videoDisqualifyReason, type ModelStatusEntryLike } from "./video-model-select.ts"
+import { VIDEO_FALLBACK_MODEL, pickVideoModel, rankVideoModels, videoDisqualifyReason, type ModelStatusEntryLike } from "./video-model-select.ts"
 import { normalizeUserSettings } from "./sessions-http.ts"
 import { applyCanvasNodeCreated, applyCanvasNodeConnected, applyCanvasNodeDisconnected, applyCanvasNodeUpdated } from "./canvas-cascade-state.ts"
 import { humanMessageFor } from "./humanize-gw.ts"
@@ -91,7 +91,9 @@ export const workflowService = new WorkflowService({
       // 修 3：節點幀 = 進度打點，刷新喚醒登記表的停滯時鐘。
       const d = (data ?? {}) as { unit_id?: unknown; patch?: { status?: unknown } }
       const wfid = typeof d.unit_id === "string" ? d.unit_id : ""
-      if (wfid && d.patch?.status === "error") recordWorkflowRefund(target, wfid)
+      // 2026-10-02 計費單一真源：節點失敗不再在此「按報價全額退」記帳（會與控面實扣不符，
+      // 評測實錘：harness 記退 390.005、控面零退款分錄）。退款留痕改在工作流終態
+      // （settleWorkflowCharges）按控面實扣差額記。
       if (wfid && workflowWake.has(wfid)) workflowWake.get(wfid)!.lastProgressAt = Date.now()
       try {
         reportNodeTerminalState(target, data as Parameters<typeof reportNodeTerminalState>[1])
@@ -388,6 +390,10 @@ export interface WorkflowBillingTruth {
   billing_status: "confirmed" | "refunded" | "settled"
   /** H13：逐次批准額明細（confirmed_coins = 其總和）。 */
   approvals?: number[]
+  /** 2026-10-02：控面實扣幣數（終態時由 settleWorkflowCharges 按控面 job 回填；單一真源）。 */
+  charged_coins?: number
+  /** 實扣 - 報價（正＝多扣；孤兒鏡等）。 */
+  deviation_coins?: number
 }
 export const workflowBilling = new Map<string, WorkflowBillingTruth>()
 
@@ -412,13 +418,14 @@ export function recordWorkflowApproval(wfid: string, amount: number): WorkflowBi
 }
 
 /** 修 2：節點失敗 → 該工作流退款留痕（每工作流只記一次）+ 餘額刷新。 */
-export function recordWorkflowRefund(state: SessionState, wfid: string): void {
+export function recordWorkflowRefund(state: SessionState, wfid: string, chargedCoins = 0): void {
   const billing = workflowBilling.get(wfid)
   if (!billing) return
   // H13：只退「已批准但尚未退」的部分；累加後 refunded 與 approve 總額對稱。
-  const toRefund = Math.round((billing.confirmed_coins - billing.refunded_coins) * 1e6) / 1e6
+  // 2026-10-02：chargedCoins＝控面實扣（終態傳入），退款＝批准額 − 實扣 − 已退；缺省 0＝舊語義（測試鎖）。
+  const toRefund = Math.round((billing.confirmed_coins - chargedCoins - billing.refunded_coins) * 1e6) / 1e6
   if (toRefund <= 0) return
-  billing.refunded_coins = billing.confirmed_coins
+  billing.refunded_coins = Math.round((billing.refunded_coins + toRefund) * 1e6) / 1e6
   billing.billing_status = "refunded"
   const wf = workflowService.get(wfid)
   void appendLedgerFor(state, {
@@ -432,6 +439,172 @@ export function recordWorkflowRefund(state: SessionState, wfid: string): void {
   console.log(`[gateway] workflow refund recorded: wf=${wfid} coins=${toRefund} total_refunded=${billing.confirmed_coins} approvals=${JSON.stringify(billing.approvals ?? [])} session=${state.sessionId}`)
 }
 
+// ── 2026-10-02 e2e 成片評測三死線：控面為準的實扣結算 / 排隊換道 / 孤兒鏡取消 / 直推通報 ──
+/** 每工作流提交過的上游 job（供終態向控面結算實扣、停滯/放棄時取消）。 */
+export const workflowJobs = new Map<string, Map<string, { nodeId: string; kind: "video" | "image" }>>()
+/** 排隊超過此時長提示並嘗試換同價通道（PM 死線：5 分鐘）。 */
+export const QUEUE_SWITCH_MS = Number.parseInt(process.env.WORKFLOW_QUEUE_SWITCH_MS || "300000", 10) || 300_000
+
+export function wfidFromNodeId(nodeId: string): string {
+  const m = nodeId.match(/^(.+)-[^-]+-\d+$/)
+  return m ? m[1] : ""
+}
+
+/** 取消控面 job（排隊/租約中全額退款，已在飛的由控面 reconcile 兜底）。永不拋。 */
+export async function cancelPlatformJob(apiKey: string, taskId: string): Promise<{ cancelled: boolean; note: string }> {
+  try {
+    const res = await fetch(`${PLATFORM_BASE}/api/generation-jobs/${encodeURIComponent(taskId)}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(10_000),
+    })
+    const body = (await res.json().catch(() => ({}))) as { previous_status?: string; refund?: unknown }
+    const note = `http=${res.status} previous=${body.previous_status ?? "-"} refund=${JSON.stringify(body.refund ?? null)}`
+    console.log(`[gateway] cancel platform job ${taskId}: ${note}`)
+    return { cancelled: res.ok, note }
+  } catch (e) {
+    console.error(`[gateway] cancel platform job ${taskId} failed:`, e)
+    return { cancelled: false, note: String((e as Error)?.message ?? e) }
+  }
+}
+
+/** 同價位（每秒幣價逐檔不高於當前）且活的備選視頻通道；無則 null（明確降級＝繼續排隊至預算耗盡後取消退款）。 */
+export async function pickSamePriceVideoAlternative(model: string, apiKey: string, node: CanvasNode): Promise<string | null> {
+  try {
+    const models = await fetchModelStatusCached(apiKey)
+    if (!models) return null
+    const tried = new Set<string>(Array.isArray(node.metadata?.__triedModels) ? (node.metadata!.__triedModels as string[]) : [])
+    tried.add(model)
+    const cur = await catalogVideoPerSecondCoins(model, apiKey)
+    if (!cur) return null
+    for (const cand of rankVideoModels(models as ModelStatusEntryLike[], tried)) {
+      const p = await catalogVideoPerSecondCoins(cand.id, apiKey)
+      if (!p) continue
+      const keys = Object.keys(p).filter((k) => k in cur)
+      if (keys.length && keys.every((k) => p[k] <= cur[k])) return cand.id
+    }
+  } catch (e) {
+    console.error("[gateway] pickSamePriceVideoAlternative failed:", e)
+  }
+  return null
+}
+
+export interface WorkflowChargeReport {
+  quoted: number | null
+  charged: number
+  orphanCoins: number
+  orphanJobs: string[]
+  source: "control_plane" | "gateway_nodecost"
+  /** 成功但控面帳本尚未落帳的 job 數（>0＝實扣為下限，結算中）。 */
+  unresolved: number
+}
+
+/**
+ * 計費單一真源：向控面逐 job 查實扣（succeeded 的 cost_coins＝account_ledger consumption），
+ * 孤兒＝成功扣費但節點最終沒用上的 job。回填 billing 真值並按「批准額 - 控面實扣」記退款留痕。
+ */
+export async function settleWorkflowCharges(state: SessionState, wfid: string): Promise<WorkflowChargeReport> {
+  const wf = workflowService.get(wfid)
+  const billing = workflowBilling.get(wfid)
+  const jobs = workflowJobs.get(wfid)
+  let charged = 0
+  let orphanCoins = 0
+  const orphanJobs: string[] = []
+  let unresolved = 0
+  let source: WorkflowChargeReport["source"] = "control_plane"
+  if (jobs && jobs.size > 0) {
+    for (const [taskId, j] of jobs) {
+      try {
+        // 控面帳本投影有秒級延遲：job 剛 succeeded 時 cost_coins 可能還是 null/0（實測 12:01:52 查到 0、35s 後 130）。
+        // 對「成功但費用未落帳」的 job 重試至多 8 次×5s；仍未落帳＝結算中，不記退款、不偽造實扣。
+        let d: { status?: string; cost_coins?: number | null } = {}
+        for (let attempt = 0; attempt < 8; attempt++) {
+          const r = await fetch(`${PLATFORM_BASE}/v1/${j.kind === "video" ? "videos" : "images"}/${encodeURIComponent(taskId)}`, {
+            headers: { Authorization: `Bearer ${state.apiKey}` },
+            signal: AbortSignal.timeout(10_000),
+          })
+          d = (await r.json().catch(() => ({}))) as typeof d
+          if (d.status !== "succeeded" || (typeof d.cost_coins === "number" && d.cost_coins > 0)) break
+          if (attempt < 7) await new Promise((res) => setTimeout(res, 5000))
+        }
+        if (d.status === "succeeded" && !(typeof d.cost_coins === "number" && d.cost_coins > 0)) unresolved++
+        if (d.status === "succeeded" && typeof d.cost_coins === "number") {
+          charged += d.cost_coins
+          const node = wf?.graph.nodes.find((n) => n.id === j.nodeId)
+          const used = node && node.metadata?.last_job_id === taskId && wf?.nodeStatus[j.nodeId] === "success"
+          if (!used) {
+            orphanCoins += d.cost_coins
+            orphanJobs.push(taskId.slice(0, 8))
+          }
+        }
+      } catch (e) {
+        console.error(`[gateway] settle charge query failed job=${taskId}:`, e)
+      }
+    }
+  } else if (wf) {
+    source = "gateway_nodecost"
+    for (const v of Object.values(wf.nodeCost)) if (typeof v === "number") charged += v
+  }
+  charged = Math.round(charged * 1e6) / 1e6
+  orphanCoins = Math.round(orphanCoins * 1e6) / 1e6
+  if (billing) {
+    billing.charged_coins = charged
+    billing.deviation_coins = Math.round((charged - billing.confirmed_coins) * 1e6) / 1e6
+    // 有 job 實扣尚未落帳時不記退款（否則把「還沒查到」當「沒扣」，退款偏大）；下一次結算補記。
+    if (unresolved === 0) recordWorkflowRefund(state, wfid, charged)
+  }
+  console.log(`[gateway] workflow charges settled: wf=${wfid} quoted=${billing?.confirmed_coins ?? "-"} charged=${charged} orphan=${orphanCoins}[${orphanJobs.join(",")}] source=${source}`)
+  return { quoted: billing?.confirmed_coins ?? null, charged, orphanCoins, orphanJobs, source, unresolved }
+}
+
+/** 已直推過通報的 key（wfid:kind）。 */
+export const workflowNoticeSent = new Set<string>()
+
+/**
+ * 工作流終態/停滯直推通報（不經 LLM、不依賴 4096 喚醒）：SSE message.delta，含成片連結與控面實扣。
+ * kind="final" 與 "stalled" 各發一次——停滯判死後仍跑完的工作流（評測 08:46 完成無人知）會再收到 final。
+ */
+export async function sendWorkflowNotice(state: SessionState, wfid: string, kind: "final" | "stalled"): Promise<void> {
+  const key = `${wfid}:${kind}`
+  if (workflowNoticeSent.has(key)) return
+  workflowNoticeSent.add(key)
+  try {
+    const wf = workflowService.get(wfid)
+    if (!wf) return
+    const report = await settleWorkflowCharges(state, wfid)
+    const status = wf.status as string
+    const filmNode = wf.graph.nodes.find((n) => n.kind === "film" && wf.nodeContent[n.id])
+    const videoUrls = wf.graph.nodes.filter((n) => n.kind === "video" && wf.nodeContent[n.id]).map((n) => wf.nodeContent[n.id])
+    const failed = wf.graph.nodes.filter((n) => wf.nodeStatus[n.id] === "error").map((n) => n.title || n.id)
+    const head =
+      kind === "stalled"
+        ? "工作流长时间无进度，已判定停滞并按失败处理"
+        : status === "success"
+          ? "工作流已完成"
+          : status === "partial"
+            ? "工作流部分完成"
+            : "工作流未能完成"
+    const lines = [`【${head}】`]
+    if (filmNode) lines.push(`成片：${wf.nodeContent[filmNode.id]}`)
+    else if (videoUrls.length) lines.push(`镜头产物：${videoUrls.join(" ")}`)
+    else {
+      const imageUrls = wf.graph.nodes.filter((n) => n.kind === "image" && wf.nodeContent[n.id]).map((n) => wf.nodeContent[n.id])
+      if (imageUrls.length) lines.push(`图片产物：${imageUrls.join(" ")}`)
+    }
+    if (failed.length) lines.push(`失败节点：${failed.join("、")}`)
+    const dev = report.quoted !== null ? Math.round((report.charged - report.quoted) * 1e6) / 1e6 : null
+    lines.push(
+      `费用（以控制面账本为准）：实扣 ${report.charged} 币` +
+        (report.quoted !== null ? `，报价 ${report.quoted} 币，偏差 ${dev! > 0 ? "+" : ""}${dev} 币` : "") +
+        (report.unresolved > 0 ? `；另有 ${report.unresolved} 个镜头的扣费仍在控制面结算中，此数为下限` : "") +
+        (report.orphanCoins > 0 ? `；其中 ${report.orphanCoins} 币来自未被成片采用的镜头（job ${report.orphanJobs.join("/")}），可联系客服核退` : ""),
+    )
+    emitToSession(state, "message.delta", { text: lines.join("\n") + "\n" })
+  } catch (e) {
+    console.error(`[gateway] sendWorkflowNotice failed wf=${wfid}:`, e)
+  }
+}
+
 // ── 修 3（2026-09-01）長任務交接：喚醒登記表 + 掃描器 ────��─────────��───
 // workflow_generate 提交後 turn 誠實結束；工作流到終態或停滯（15 分鐘無節點
 // 進度）時向原會話投 resume 喚醒（輪子 = handleResumeSession 的 prompt_async
@@ -439,7 +612,7 @@ export function recordWorkflowRefund(state: SessionState, wfid: string): void {
 // workflowService.generate 的 promise 在 runWfGenerate 手裡，poller 摸不到
 // 內存工作流狀態，故掛 gateway 不掛 poller（最小改動路徑）。
 export const workflowWake = new Map<string, { sessionId: string; lastProgressAt: number }>()
-export const WORKFLOW_STALL_MS = Number.parseInt(process.env.WORKFLOW_STALL_MS || "900000", 10) || 900_000
+export const WORKFLOW_STALL_MS = Number.parseInt(process.env.WORKFLOW_STALL_MS || "360000", 10) || 360_000
 export const WORKFLOW_WAKE_SCAN_MS = 60_000
 
 /** execute_command 工具回應形狀（waveform.ts/master.ts 同款；stage2 整合時改共用匯出）。 */
@@ -546,6 +719,15 @@ export function restoreWorkflowsFromSnapshot(state: SessionState): void {
   // 也能收到；不依賴任何人在線。
   if (interrupted.length > 0) {
     for (const nodeId of interrupted) {
+      // 2026-10-02：重啟中斷的節點其上游 job 仍在控面排隊/在飛；F1 續跑會另提交新 job，舊 job 日後成功
+      // 就是孤兒鏡（重複扣費）。先取消（排隊中全額退款），並登記進 job 表，終態結算時如實對賬。
+      const interruptedMeta = (graph.nodes as { id?: unknown; kind?: unknown; metadata?: Record<string, unknown> }[]).find((n) => n?.id === nodeId)
+      const oldJob = typeof interruptedMeta?.metadata?.last_job_id === "string" ? interruptedMeta.metadata.last_job_id : ""
+      if (oldJob) {
+        if (!workflowJobs.has(restored.workflowId)) workflowJobs.set(restored.workflowId, new Map())
+        workflowJobs.get(restored.workflowId)!.set(oldJob, { nodeId, kind: interruptedMeta?.kind === "video" ? "video" : "image" })
+        void cancelPlatformJob(state.apiKey, oldJob)
+      }
       const interruptPatch = {
         status: "error" satisfies TaskStatus,
         errorDetails: "服务重启导致任务中断",
@@ -607,9 +789,15 @@ export function restoreWorkflowsFromSnapshot(state: SessionState): void {
       // 離線恢復（重啟後無任何請求）時為 null → runNode 解析不到 session，image
       // 節點全滅 "no active session"。timer 內先補本 session 指針再續跑。
       stateForWorkflow = state
+      // 2026-10-02：續跑與 runWfGenerate 同樣登記喚醒 + 終態直推（此前 F1 續跑完成零通知——實測 wf_muqf0xbg_1）。
+      workflowWake.set(wfid, { sessionId: state.sessionId, lastProgressAt: Date.now() })
       void workflowService
         .generate(wfid)
-        .then((r) => console.log(`[gateway] F1 auto-resume finished: ${wfid} -> ${r.status}`))
+        .then((r) => {
+          console.log(`[gateway] F1 auto-resume finished: ${wfid} -> ${r.status}`)
+          void pushWorkflowCompletion(state)
+          void sendWorkflowNotice(state, wfid, "final")
+        })
         .catch((e) => console.error(`[gateway] F1 auto-resume failed: ${wfid}`, e))
     }, 1500)
     console.log(`[gateway] F1 auto-resume scheduled: ${wfid} (interrupted=${interrupted.length})`)
@@ -633,8 +821,8 @@ export async function assembleFilmNode(
     .map((from) => graph?.nodes.find((n) => n.id === from))
     .filter((n): n is VideoUpstream => Boolean(n) && typeof n.id === "string" && n.kind === "video")
   const sources = allVideoUpstream
-    .map((n) => ({ id: n.id, url: upstream.get(n.id) }))
-    .filter((s): s is { id: string; url: string } => Boolean(s.url))
+    .map((n) => ({ id: n.id, role: n.role, url: upstream.get(n.id) }))
+    .filter((s): s is { id: string; role: string; url: string } => Boolean(s.url))
   // 配音混流素材：上游 audio 節點（TTS mp3）的內容 URL，成片後自動混入音軌。
   const audioList = incoming
     .map((from) => graph?.nodes.find((n) => n.id === from))
@@ -701,6 +889,38 @@ export async function assembleFilmNode(
       clipIds.push(`h${i}`)
       clipSecs.push(sec)
     }
+    // 字幕轨 + 标题字（2026-10-02 接线）：字幕文本真源 = 各镜头上游分镜脚本 text 节点
+    // metadata.content（同 TTS 取文本口径 text→content→prompt，非新造抽取逻辑）；
+    // 时间轴 = 各镜头成片段时长累加。标题字真源 = 会话标题（项目标题，runNode 注入
+    // node.metadata.project_title）。交给 composeEngine 既有字幕烧录轮子（toAss +
+    // `subtitles=` 滤镜）落进画面。
+    const subTextOfShot = (videoRole: string): string => {
+      const shotRole = videoRole.replace(/_video$/, "")
+      const scriptNode = graph?.nodes.find((n) => n.role === shotRole && n.kind === "text")
+      const md = scriptNode?.metadata
+      const raw = typeof md?.content === "string" ? md.content : typeof md?.text === "string" ? md.text : typeof md?.prompt === "string" ? md.prompt : ""
+      return raw.trim()
+    }
+    // 标题字真源 = 会话标题（项目标题；opencode 首条消息后异步生成），
+    // 生产走 stateForWorkflow.sessionTitle；harness/测试可经 metadata.project_title 注入。
+    const projectTitle = String(
+      (node.metadata as Record<string, unknown>).project_title ?? stateForWorkflow?.sessionTitle ?? "",
+    ).trim()
+    const subtitleCues: { id: string; startSec: number; endSec: number; text: string }[] = []
+    {
+      let cursor = 0
+      for (let i = 0; i < sources.length; i += 1) {
+        const text = subTextOfShot(sources[i].role)
+        if (text) subtitleCues.push({ id: `sub_${i}`, startSec: cursor, endSec: cursor + clipSecs[i], text })
+        cursor += clipSecs[i]
+      }
+      if (projectTitle) {
+        const titleEnd = Math.min(3, Math.max(1, clipSecs[0] ?? 3))
+        subtitleCues.unshift({ id: "title", startSec: 0, endSec: titleEnd, text: projectTitle })
+        // 标题与首镜字幕同区不叠字：首镜字幕从标题退场后开始。
+        if (subtitleCues.length > 1) subtitleCues[1].startSec = Math.max(subtitleCues[1].startSec, titleEnd)
+      }
+    }
     setHarnessState({
       clips: sources.map((_, i) => ({
         id: `h${i}`,
@@ -713,6 +933,7 @@ export async function assembleFilmNode(
       })),
       aspect: "16:9",
       exportSettings: { ...DEFAULT_EXPORT_SETTINGS, resolution: "720p", fps: 24 },
+      subtitles: subtitleCues,
     })
     const outPath = await exportSelectedMainClips(clipIds)
     const probe = await probeRenderedVideo(ffmpeg, outPath)
@@ -782,6 +1003,17 @@ export async function assembleFilmNode(
         mixNote = "配音混流失敗，已交付無音軌版本"
         console.log(`[workflow] assembleFilm audio mix degraded: ${String((e as Error).message ?? e).slice(0, 200)}`)
       }
+    }
+    // 2026-10-02 成片質檢門（e2e 評測：-38.5 LUFS 未正規化、結尾 1.3s 凍結照樣導出）：
+    // 響度正規化到 -16 LUFS + 修剪結尾凍結/黑幀；修不了則交付原片並在 message 如實註明。永不拋錯。
+    try {
+      const { qcAndFixFilm } = await import("./film-qc")
+      const qc = await qcAndFixFilm(ffmpeg, mixedPath, path.join(workDir, "film-qc.mp4"))
+      mixedPath = qc.path
+      if (qc.notes.length) mixNote = [mixNote, ...qc.notes].filter(Boolean).join("；")
+      console.log(`[workflow] assembleFilm QC: changed=${qc.changed} lufs=${qc.before.lufs}->${qc.after?.lufs ?? "-"} dur=${qc.before.durationSec}->${qc.after?.durationSec ?? "-"} notes=${qc.notes.join("|").slice(0, 200)}`)
+    } catch (e) {
+      console.log(`[workflow] assembleFilm QC skipped: ${String((e as Error).message ?? e).slice(0, 160)}`)
     }
     const fileName = `film_${Date.now().toString(36)}.mp4`
     await mkdir(TTS_AUDIO_DIR, { recursive: true })
@@ -1063,6 +1295,9 @@ export async function submitWorkflowNode(
   // F1 修（2026-08-31）：聲明必須在函式級——原困在 poll 分支塊內，poll 預算耗盡後
   // 的 taskSubmitted 兜底引用它 → ReferenceError → 誤判 non-retryable → 死錯。
   let lastAttempt: Record<string, unknown> | undefined = undefined
+  let submittedTaskId = ""
+  let queuedSinceMs = 0
+  let queueHinted = false
   try {
     const res = await fetch(`${PLATFORM_BASE}/v1${endpoint}`, {
       method: "POST",
@@ -1079,6 +1314,15 @@ export async function submitWorkflowNode(
       try {
         ;(node.metadata as Record<string, unknown>).last_job_id = String(taskId)
       } catch {}
+      submittedTaskId = String(taskId)
+      {
+        // 2026-10-02：登記進工作流 job 表——終態向控面結算實扣、放棄/停滯時據此取消。
+        const jwf = workflowOwnerBySession.get(session.sessionId) ?? wfidFromNodeId(nodeId)
+        if (jwf) {
+          if (!workflowJobs.has(jwf)) workflowJobs.set(jwf, new Map())
+          workflowJobs.get(jwf)!.set(submittedTaskId, { nodeId, kind: node.kind === "video" ? "video" : "image" })
+        }
+      }
       // H11 補完：workflow 生成任務同樣登記進會話任務表（/internal/session-tasks、image_get_result 讀它）。
       registerWorkflowTask(session, String(taskId), node.id, "queued")
       const pollEndpoint = node.kind === "video" ? `/videos/${taskId}` : `/images/${taskId}`
@@ -1101,6 +1345,12 @@ export async function submitWorkflowNode(
             ...(wfIdMatch ? { workflow_id: wfIdMatch[1] } : {}),
             patch,
           })
+          // 2026-10-02：輪詢打點直發 emitToSession 繞過 emit hook，停滯時鐘不刷新 → 長排隊被誤判 stuck。
+          {
+            // 節點 id 形如 single_image-result-2（不含 wfid），故 wfIdMatch 對模板節點恆不命中；改按會話屬主工作流刷新。
+            const pw = workflowOwnerBySession.get(session.sessionId) ?? (wfIdMatch ? wfIdMatch[1] : "")
+            if (pw && workflowWake.has(pw)) workflowWake.get(pw)!.lastProgressAt = Date.now()
+          }
           applyCanvasNodeUpdated(session.sessionId, { node_id: nodeId, patch })
         }
         const poll = await fetch(`${PLATFORM_BASE}/v1${pollEndpoint}`, {
@@ -1110,6 +1360,51 @@ export async function submitWorkflowNode(
         const pd = (await poll.json().catch(() => ({}))) as Record<string, any>
         const pdAttempts = (pd as { attempts?: unknown })?.attempts
         if (Array.isArray(pdAttempts) && pdAttempts.length > 0) lastAttempt = pdAttempts[pdAttempts.length - 1] as Record<string, unknown>
+        // 2026-10-02：上游「並發/容量飽和」是可等待的背壓（status 仍是 queued/running），不是硬失敗。
+        // 提前辨識，讓下方排隊換道塊接手；只有超過換道門檻或明確硬失敗才在後面翻面。
+        const pdSig = pd as { failure_class?: unknown; failure_detail?: unknown; status?: unknown } | undefined
+        const upstreamFailSignal =
+          typeof pdSig?.failure_class === "string" && pdSig.failure_class
+            ? pdSig.failure_class
+            : typeof pdSig?.failure_detail === "string" && pdSig.failure_detail
+              ? pdSig.failure_detail
+              : ""
+        const saturationSignal = /capacity|saturat|overload|concurr|too many/i.test(upstreamFailSignal)
+        const queueLike = pd?.status === "queued" || (saturationSignal && pd?.status !== "succeeded" && pd?.status !== "failed")
+        // 2026-10-02 排隊超 5 分鐘（或容量飽和同樣視為排隊）：提示 + 換同價位通道
+        //（無則明確降級＝續等至預算耗盡後取消退款）。
+        if (node.kind === "video" && queueLike) {
+          if (!queuedSinceMs) queuedSinceMs = Date.now()
+          if (!queueHinted && Date.now() - queuedSinceMs > QUEUE_SWITCH_MS) {
+            queueHinted = true
+            const qMin = Math.round(QUEUE_SWITCH_MS / 60000)
+            const alt = (Number(meta.__queueSwitches ?? 0) < 1) ? await pickSamePriceVideoAlternative(model, session.apiKey, node) : null
+            const hintPatch = {
+              status: "running" satisfies TaskStatus,
+              human_message: alt
+                ? `上游通道排队已超过 ${qMin} 分钟，正在自动切换到同价位通道 ${alt}`
+                : `上游通道排队已超过 ${qMin} 分钟（当前无同价位的可用备选通道），继续等待；超过上限将自动取消并全额退款`,
+            }
+            emitToSession(session, "canvas.node.updated", { node_id: nodeId, ...(wfIdMatch ? { workflow_id: wfIdMatch[1] } : {}), patch: hintPatch })
+            applyCanvasNodeUpdated(session.sessionId, { node_id: nodeId, patch: hintPatch })
+            console.log(`[workflow] node ${nodeId} queued >${qMin}min model=${model} alt=${alt ?? "none"}`)
+            if (alt) {
+              const c = await cancelPlatformJob(session.apiKey, submittedTaskId)
+              if (c.cancelled) {
+                registerWorkflowTask(session, submittedTaskId, node.id, "failed")
+                const tried = new Set<string>(Array.isArray(meta.__triedModels) ? (meta.__triedModels as string[]) : [])
+                tried.add(model)
+                meta.__triedModels = [...tried]
+                meta.__queueSwitches = Number(meta.__queueSwitches ?? 0) + 1
+                meta.model = alt
+                meta.model_swap = { from: model, to: alt, reason: `queued>${qMin}min`, proven: true }
+                return await submitWorkflowNode(session, node, upstream, graph)
+              }
+            }
+          }
+        } else {
+          queuedSinceMs = 0
+        }
         if (pd?.status === "succeeded") {
           const rawUrl = pd?.data?.[0]?.url || pd?.result_url || pd?.url
           // 結果可能是相對 /v1/images/{id}/result，轉成絕對公開 URL（沿用 resolveResultUrl 語義）
@@ -1133,16 +1428,24 @@ export async function submitWorkflowNode(
         // failure_detail（如 "capacity_saturated: ..."）反覆重試、遲遲不到終態 failed；
         // 舊邏輯只認 status==="failed"，明知上游已報失敗信號仍繼續發 running 進度幀，
         // 直到輪詢預算耗盡才報假話術。收到失敗信號立即翻面，不再空轉。
-        const pdFail = pd as { failure_class?: unknown; failure_detail?: unknown; status?: unknown } | undefined
-        const failSignal =
-          typeof pdFail?.failure_class === "string" && pdFail.failure_class
-            ? pdFail.failure_class
-            : typeof pdFail?.failure_detail === "string" && pdFail.failure_detail
-              ? pdFail.failure_detail
-              : ""
+        const pdFail = pdSig
+        const failSignal = upstreamFailSignal
         if (failSignal && pdFail?.status !== "succeeded") {
+          // 2026-10-02：容量/並發飽和是可等待背壓——在 WORKFLOW_QUEUE_SWITCH_MS 換道窗口內
+          // 不翻面，讓上方排隊塊在門檻到達時「換同價位通道＋5 分鐘提示」；超過窗口或已換過
+          // 道仍飽和才 fail-fast（fail-fast 路徑同樣 cancelPlatformJob 全額退款，快速止損語義不變）。
+          const withinSwitchWindow = queuedSinceMs > 0 && Date.now() - queuedSinceMs <= QUEUE_SWITCH_MS
+          const alreadySwitched = Number(meta.__queueSwitches ?? 0) >= 1
+          if (saturationSignal && withinSwitchWindow && !alreadySwitched) {
+            console.warn(
+              `[workflow] node ${nodeId} saturation backpressure within ${Math.round(QUEUE_SWITCH_MS / 1000)}s switch window (${pdFail?.status}): ${failSignal}`,
+            )
+            continue
+          }
           console.error(`[workflow] node ${nodeId} upstream failure signal (${pdFail?.status}): ${failSignal}`)
           registerWorkflowTask(session, String(taskId), node.id, "failed")
+          // 放棄即取消：否則 job 在控面繼續排隊、日後成功扣費＝孤兒鏡（評測 4ea050fe 多扣 130 幣根因）。
+          if (pdFail?.status === "queued" || pdFail?.status === "running") await cancelPlatformJob(session.apiKey, String(taskId))
           return {
             nodeId: node.id,
             ok: false,
@@ -1166,6 +1469,8 @@ export async function submitWorkflowNode(
     if (res.ok && url) return { nodeId: node.id, ok: true, content: url, costCoins: data?.cost_coins }
     if (taskSubmitted) {
       console.error(`[workflow] node ${nodeId} poll timeout`)
+      // 放棄即取消（同上）：排隊中的 job 全額退款，避免遲到成功成孤兒鏡。
+      if (submittedTaskId) await cancelPlatformJob(session.apiKey, submittedTaskId)
       return {
         nodeId: node.id,
         ok: false,
@@ -1443,7 +1748,114 @@ export function runWfGenerate(state: SessionState, wfid: string): void {
     // 局部重跑，非整批完成）。fire-and-forget：pushWorkflowCompletion 自帶
     // try/catch 不拋，此處不 await，工作流收尾不受站點延遲影響。
     void pushWorkflowCompletion(state)
+    // 2026-10-02：終態直推（成片連結 + 控面實扣），不經 LLM/4096 喚醒；停滯判死後才跑完的也會收到。
+    void sendWorkflowNotice(state, wfid, "final")
+    // 2026-10-02：停滯掃描判死時已 delete 喚醒登記（評測 08:36:36），工作流之後才自行
+    // 跑完（08:46）時舊版只發 final 通報、不再喚 agent 收尾。重新登記，讓掃描器下一輪
+    // 以 final 喚醒 agent 補做匯報（sendWorkflowNotice 已去重，不會重複發 final 通報）。
+    if (!workflowWake.has(wfid)) {
+      workflowWake.set(wfid, { sessionId: state.sessionId, lastProgressAt: Date.now() })
+      console.log(`[gateway] workflow ${wfid} finished after stall-declared; re-registered wake for agent wrap-up`)
+    }
   })
+}
+
+/** 喚醒恢復等待上限：> 2026-10-02 實測 opencode-server OOM 後 85 秒恢復（08:36:33 掛、08:37:58 回）。 */
+export const WAKE_RECOVERY_WAIT_MS = Number.parseInt(process.env.WORKFLOW_WAKE_RECOVERY_MS || "180000", 10) || 180_000
+
+/** 連線被拒（opencode-server 重啟/OOM 斷線）判定——Bun fetch 拋 fetch failed 帶 code，Node 帶 cause.code。 */
+export function isConnectionRefused(e: unknown): boolean {
+  const err = e as { code?: unknown; cause?: { code?: unknown }; message?: unknown } | undefined
+  const code = typeof err?.code === "string" ? err.code : typeof err?.cause?.code === "string" ? err.cause.code : ""
+  return code === "ECONNREFUSED" || /ECONNREFUSED|connection refused/i.test(String(err?.message ?? e))
+}
+
+/**
+ * 2026-10-02：opencode-server 全域 OOM 斷線（127.0.0.1:4096）時輪詢 /config 至恢復。
+ * 舊版喚醒退避總窗口僅 65 秒（0/5/15/45）< 實測 85 秒斷線 → 喚醒全 miss 永久丟失。
+ * 改為：遇 ECONNREFUSED 時輪詢 /config 直到 200，上限 WAKE_RECOVERY_WAIT_MS（預設 180s）。
+ */
+export async function waitForOpencodeReady(maxMs = WAKE_RECOVERY_WAIT_MS, intervalMs = 3_000): Promise<boolean> {
+  const deadline = Date.now() + maxMs
+  for (;;) {
+    try {
+      const res = await fetch(`${OPENCODE_URL}/config`, { headers: opencodeHeaders(), signal: AbortSignal.timeout(5_000) })
+      if (res.ok) return true
+    } catch {
+      // 仍未起：繼續輪詢
+    }
+    if (Date.now() >= deadline) return false
+    await new Promise((r) => setTimeout(r, intervalMs))
+  }
+}
+
+/** 單次喚醒投遞（prompt_async）＋本輪狀態重置（逐行同 handleResumeSession 輪子）。 */
+async function postWorkflowWake(state: SessionState, wfid: string, content: string, attempt: number): Promise<void> {
+  const res = await fetch(`${OPENCODE_URL}/session/${state.opencodeSessionId}/prompt_async`, {
+    method: "POST",
+    headers: opencodeHeaders(),
+    body: JSON.stringify({ ...beastAgentField(state), parts: [{ type: "text", text: content }] }),
+    signal: AbortSignal.timeout(10000),
+  })
+  if (!res.ok) throw new Error(`status ${res.status}`)
+  state.lastPromptBody = { ...beastAgentField(state), parts: [{ type: "text", text: content }] }
+  state.turnGen = (state.turnGen ?? 0) + 1
+  state.turnTextChars = 0
+  state.turnReasoningChars = 0
+  state.turnRetries = 0
+  state.turnAborted = false
+  state.retryQueued = false
+  state.turnUpstreamError = null
+  state.turnToolStarted = false
+  state.watchdogRetried = false
+  state.questionAnsweredThisTurn = false
+  state.deathDeclared = false
+  // 2026-10-02 steer 誤判修復：workflow 喚醒輪同樣要打 lastTurnActiveAt
+  //（steer 受理閘唯一依據，漏點＝喚醒輪期間 steer 全被 409 誤判）。
+  state.lastTurnActiveAt = Date.now()
+  markDirty(state)
+  armWatchdogTimer(state)
+  console.log(`[gateway] workflow wake resumed: session=${state.sessionId} wf=${wfid} attempt=${attempt + 1}`)
+}
+
+/**
+ * 喚醒投遞（prompt_async）帶重試：4096 瞬斷（評測 08:36:40 ECONNREFUSED）不再一次即棄。
+ * 退避 0/5/15/45s；遇 ECONNREFUSED 額外輪詢 /config 至恢復（上限 180s），恢復後補投一次；
+ * 耗盡後直推通報兜底（sendWorkflowNotice 去重，已發則不重複）。
+ */
+export async function dispatchWorkflowWake(state: SessionState, wfid: string, content: string, kind: "final" | "stalled"): Promise<void> {
+  const delays = [0, 5_000, 15_000, 45_000]
+  let lastErr: unknown = null
+  for (let attempt = 0; attempt < delays.length; attempt++) {
+    if (delays[attempt] > 0) await new Promise((r) => setTimeout(r, delays[attempt]))
+    try {
+      await postWorkflowWake(state, wfid, content, attempt)
+      return
+    } catch (e) {
+      lastErr = e
+      const refused = isConnectionRefused(e)
+      console.error(
+        `[gateway] workflow wake dispatch failed: session=${state.sessionId} wf=${wfid} attempt=${attempt + 1}/${delays.length}${refused ? " (connection refused; polling /config)" : ""}:`,
+        e,
+      )
+      if (refused) {
+        const ready = await waitForOpencodeReady()
+        if (!ready) {
+          console.error(`[gateway] opencode not ready within ${Math.round(WAKE_RECOVERY_WAIT_MS / 1000)}s; stop wake retries: session=${state.sessionId} wf=${wfid}`)
+          break
+        }
+        try {
+          await postWorkflowWake(state, wfid, content, attempt)
+          return
+        } catch (e2) {
+          lastErr = e2
+          console.error(`[gateway] workflow wake after opencode recovery failed: session=${state.sessionId} wf=${wfid}:`, e2)
+        }
+      }
+    }
+  }
+  console.error(`[gateway] workflow wake exhausted, falling back to direct notice: session=${state.sessionId} wf=${wfid}`, lastErr)
+  await sendWorkflowNotice(state, wfid, kind)
 }
 
 // ── 修 3：長任務喚醒掃描器（60s 一輪）────────────────────────────────
@@ -1475,13 +1887,17 @@ setInterval(() => {
     // 停滯判死：卡在 running 的節點 patch 成畫布終態（error，與
     // workflow-service/emitImageFailed 的節點失敗形狀對稱）+ 走修 2 退款留痕。
     if (stalled) {
-      console.warn(`[gateway] workflow stall: wf=${wfid} no progress for ${(WORKFLOW_STALL_MS / 60000) | 0}min, declaring stuck nodes dead`)
+      const stallMin = Math.max(1, Math.round(WORKFLOW_STALL_MS / 60000))
+      console.warn(`[gateway] workflow stall: wf=${wfid} no progress for ${stallMin}min, declaring stuck nodes dead`)
       for (const n of wf.graph.nodes) {
         if (wf.nodeStatus[n.id] !== "running") continue
+        // 判死的節點其上游 job 仍可能排隊→日後成功扣費成孤兒鏡：先取消（排隊中全額退款）。
+        const stuckJob = typeof n.metadata?.last_job_id === "string" ? n.metadata.last_job_id : ""
+        if (stuckJob) void cancelPlatformJob(state.apiKey, stuckJob)
         const stallPatch = {
           status: "error" satisfies TaskStatus,
-          errorDetails: "停滞超时：超过 15 分钟无任何进度推进，系统已按失败处理",
-          human_message: "渲染停滞超过 15 分钟无推进，系统已将卡住的节点判死并按失败处理",
+          errorDetails: `停滞超时：超过 ${stallMin} 分钟无任何进度推进，系统已按失败处理`,
+          human_message: `渲染停滞超过 ${stallMin} 分钟无推进，系统已将卡住的节点判死并按失败处理`,
         }
         emitToSession(state, "canvas.node.updated", {
           unit_id: wfid,
@@ -1491,54 +1907,29 @@ setInterval(() => {
         // 2026-09-20 寫穿：直發路徑繞過 emit hook，快照同步在此補上（冪等）。
         applyCanvasNodeUpdated(state.sessionId, { node_id: n.id, patch: stallPatch })
       }
-      recordWorkflowRefund(state, wfid)
+      void sendWorkflowNotice(state, wfid, "stalled")
     }
     workflowWake.delete(wfid)
-    // 喚醒文案：節點終態摘要（用戶可見名稱）+ billing 真值，agent 只許照實轉述。
-    const money = workflowBilling.get(wfid)
-    const moneyText = money
-      ? `真实花费：已批准扣费 ${money.confirmed_coins} 币，${money.refunded_coins > 0 ? `失败部分已全额退回 ${money.refunded_coins} 币` : "无退款"}（billing_status=${money.billing_status}）。`
-      : "真实花费：本工作流未走批量扣费确认（billing_status=none）。"
-    const nodeList = wf.graph.nodes
-      .filter((n) => n.kind !== "text" && n.kind !== "config")
-      .map((n) => `${n.title || n.kind}：${wf.nodeStatus[n.id] ?? "未知"}`)
-      .join("；")
-    const head = stalled
-      ? "工作流停滞已判死，系统自动唤醒你收尾。"
-      : "工作流已到终态，系统自动唤醒你汇报。"
-    const content =
-      `${head}各节点终态：${nodeList || "无可执行节点"}。${moneyText}` +
-      `请立即向用户汇报本次工作流的最终结果（成功产物、失败原因、真实花费与退款情况——一律引用上面的真实状态与 billing 真值，禁止编造），然后结束回合。禁止再用 bash sleep 或反复 workflow_status 轮询。`
-    fetch(`${OPENCODE_URL}/session/${state.opencodeSessionId}/prompt_async`, {
-      method: "POST",
-      headers: opencodeHeaders(),
-      body: JSON.stringify({ ...beastAgentField(state), parts: [{ type: "text", text: content }] }),
-      signal: AbortSignal.timeout(10000),
-    })
-      .then((res) => {
-        if (!res.ok) throw new Error(`status ${res.status}`)
-        state.lastPromptBody = { ...beastAgentField(state), parts: [{ type: "text", text: content }] }
-        state.turnGen = (state.turnGen ?? 0) + 1
-        state.turnTextChars = 0
-        state.turnReasoningChars = 0
-        state.turnRetries = 0
-        state.turnAborted = false
-        state.retryQueued = false
-        state.turnUpstreamError = null
-        state.turnToolStarted = false
-        state.watchdogRetried = false
-        state.questionAnsweredThisTurn = false
-        state.deathDeclared = false
-        // 2026-10-02 steer 誤判修復：workflow 喚醒輪同樣要打 lastTurnActiveAt
-        //（steer 受理閘唯一依據，漏點＝喚醒輪期間 steer 全被 409 誤判）。
-        state.lastTurnActiveAt = Date.now()
-        markDirty(state)
-        armWatchdogTimer(state)
-        console.log(`[gateway] workflow wake resumed: session=${state.sessionId} wf=${wfid}`)
-      })
-      .catch((e: unknown) => {
-        console.error(`[gateway] workflow wake dispatch failed: session=${state.sessionId} wf=${wfid}:`, e)
-      })
+    void (async () => {
+      // 先向控面結算實扣（單一真源），喚醒文案才讀得到真值。
+      await settleWorkflowCharges(state, wfid).catch(() => null)
+      // 喚醒文案：節點終態摘要（用戶可見名稱）+ billing 真值，agent 只許照實轉述。
+      const money = workflowBilling.get(wfid)
+      const moneyText = money
+        ? `真实花费：报价 ${money.confirmed_coins} 币，控制面实扣 ${money.charged_coins ?? "未知"} 币${money.deviation_coins ? `（偏差 ${money.deviation_coins > 0 ? "+" : ""}${money.deviation_coins}）` : ""}，${money.refunded_coins > 0 ? `未使用部分已退 ${money.refunded_coins} 币` : "无退款"}（billing_status=${money.billing_status}）。`
+        : "真实花费：本工作流未走批量扣费确认（billing_status=none）。"
+      const nodeList = wf.graph.nodes
+        .filter((n) => n.kind !== "text" && n.kind !== "config")
+        .map((n) => `${n.title || n.kind}：${wf.nodeStatus[n.id] ?? "未知"}`)
+        .join("；")
+      const head = stalled
+        ? "工作流停滞已判死，系统自动唤醒你收尾。"
+        : "工作流已到终态，系统自动唤醒你汇报。"
+      const content =
+        `${head}各节点终态：${nodeList || "无可执行节点"}。${moneyText}` +
+        `系统已向用户直发一条含成片链接与控制面实扣币数的通报；你只需简要补充结果与失败原因（一律引用上面的真实状态与 billing 真值，禁止编造，不要重复贴链接/币数），然后结束回合。禁止再用 bash sleep 或反复 workflow_status 轮询。`
+      void dispatchWorkflowWake(state, wfid, content, stalled ? "stalled" : "final")
+    })()
   }
 }, WORKFLOW_WAKE_SCAN_MS)
 

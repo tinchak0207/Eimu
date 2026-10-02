@@ -4,10 +4,10 @@ import type { SessionState, SSEClient } from "./types-gateway.ts"
 import { REPLAY_BUFFER_SIZE } from "./constants-gateway.ts"
 import { declaresUnreviewed } from "./delivery-gate"
 import { markDirty } from "./sessions-core.ts"
-import { encoder, decoder, corsOriginFor, corsHeaders } from "./auth-gw.ts"
+import { encoder, corsOriginFor, corsHeaders } from "./auth-gw.ts"
 import { trackTurnNodeTerminal } from "./events-translate.ts"
 import { markTurnFirst } from "./metrics-gw.ts"
-import { appendReplayFrame, MergedReplayFrame } from "./replay-frame.ts"
+import { appendReplayFrame, MergedReplayFrame, isStrippableReplayEntry } from "./replay-frame.ts"
 import { finishTurnMetrics } from "./metrics-gw.ts"
 import { hydratePendingQuestions } from "./questions-gw.ts"
 // TODO(整合)：以下符號仍住 index.ts 且未 export（本任務禁改 index.ts；bun build 對未 export 的 named import 報錯，已實測 2026-09-19）。
@@ -32,7 +32,7 @@ export function isRevivalFrame(name: string): boolean {
   )
 }
 
-export function emitToSession(state: SessionState, name: string, data: unknown): void {
+export function emitToSession(state: SessionState, name: string, data: unknown, opts?: { strippable?: boolean }): void {
   // 修 1（2026-09-01）：死亡宣告可撤回。deathDeclared 期間第一條內容幀到達
   // → 先發一次性撤回幀（turn.status，與 watchdog 告警同通道，前端零改動），
   // 立即清位（防重複撤回/防遞歸），再放行原內容幀。
@@ -44,6 +44,7 @@ export function emitToSession(state: SessionState, name: string, data: unknown):
   // Agent-produced output counts as activity: a long generate with no client
   // polling must not look idle to the reaper while it is still working.
   state.lastActivityAt = Date.now()
+  if (name === "subagent.started") state.turnSubagentStarts = (state.turnSubagentStarts ?? 0) + 1
   // R4-A S3①：turn 進度打點——錯誤停滯看門狗判定「錯誤後 turn 是否還活著」
   // 的依據。只認模型/工具幀（正文、工具出入參）；canvas 等狀態幀不算進度。
   if (name === "message.delta" || name === "reasoning.delta" || name === "tool.invoke" || name === "tool.result") {
@@ -76,8 +77,13 @@ export function emitToSession(state: SessionState, name: string, data: unknown):
   if (name === "canvas.node.updated") trackTurnNodeTerminal(state, data)
   state.eventCounter += 1
   const frame = encoder.encode(serializeSse(name, data, state.eventCounter))
+  // 2026-10-02：只有模型產生的文字幀可被 N2 strip 剝除（見 stripStaleTurnTextFromReplay）。
+  // 網關主動發出的 message.delta（工作流終態通報、進度匯報、誠實收尾等）默認耐久，
+  // 必須能被晚重連的 client 取回——它們只是與模型正文共用事件名，不是模型輸出。
+  // reasoning.delta 只可能來自模型，維持可剝。
+  const strippable = opts?.strippable ?? name === "reasoning.delta"
   // 2026-10-01：文字幀在 replay 層合併（見 replay-frame.ts），直播仍逐幀。
-  appendReplayFrame(state.replayBuffer, name, data, state.eventCounter, frame)
+  appendReplayFrame(state.replayBuffer, name, data, state.eventCounter, frame, strippable)
   if (state.replayBuffer.length > REPLAY_BUFFER_SIZE) {
     state.replayBuffer.splice(0, state.replayBuffer.length - REPLAY_BUFFER_SIZE)
   }
@@ -107,21 +113,15 @@ export function emitToSession(state: SessionState, name: string, data: unknown):
 // 重發，且這些重放幀進了 replayBuffer——SSE 斷線重連（Last-Event-ID）時
 // 又整段重放一次（event 101-108+ 閃回）。
 // 修法：重投 prompt 成功後，把 replayBuffer 裡本輪 gen 標記之前的
-// message.delta / reasoning.delta 文本幀過濾掉（保留 canvas.* / confirm.* /
-// tool.* / quota.* 等狀態類事件——它們冪等且前端靠它們恢復畫布），並同步
-// persist 的 DB 行。新 turn 的文本從零開始計，斷線重連不會再看到舊文案。
+// **模型** message.delta / reasoning.delta 文本幀過濾掉（保留 canvas.* /
+// confirm.* / tool.* / quota.* 等狀態類事件——它們冪等且前端靠它們恢復畫布），
+// 並同步 persist 的 DB 行。新 turn 的文本從零開始計，斷線重連不會再看到舊文案。
+// 2026-10-02：網關主動發出的耐久幀（strippable=false，工作流終態通報等）不剝
+// ——它們與模型正文共用事件名，但不是模型輸出；剝掉就等於用「防重放」誤殺通報
+//（wf_muqfkhw7_1 事故根因）。判定收在 replay-frame.isStrippableReplayEntry（純函數）。
 export function stripStaleTurnTextFromReplay(state: SessionState): void {
   const before = state.replayBuffer.length
-  state.replayBuffer = state.replayBuffer.filter((f) => {
-    if (f instanceof MergedReplayFrame) return false // 合併條目只會是 message/reasoning.delta
-    // 幀文本形如 "id: N\nevent: NAME\ndata: {...}\n\n"——事件名在第二行。
-    const head = decoder.decode(f.frame.subarray(0, Math.min(f.frame.length, 64)))
-    const evMatch = head.match(/^id: \d+\nevent: ([a-z.]+)\n/)
-    if (!evMatch) return true
-    const ev = evMatch[1]
-    if (ev === "message.delta" || ev === "reasoning.delta") return false
-    return true
-  })
+  state.replayBuffer = state.replayBuffer.filter((f) => !isStrippableReplayEntry(f))
   if (state.replayBuffer.length !== before) {
     console.log(
       `[gateway] N2: stripped ${before - state.replayBuffer.length} stale text frame(s) from replay buffer before retry — session=${state.sessionId}`,

@@ -3,7 +3,7 @@
 // （vetting/memory/persona/beast 注入、compaction 閘、watchdog 佈哨）、滾動摘要壓縮
 // （SESSION_COMPACT_*/compactionJobs/maybeCompactSession）（原 index.ts 4594–5143 行）。
 import { createHash, randomBytes } from "node:crypto"
-import { readFileSync } from "node:fs"
+import { readFileSync, readdirSync } from "node:fs"
 import { loadUserSettings, listSessionRows } from "./persistence"
 import { gateUserInput, classifyDispatchMeta } from "./jev-gate"
 // 0920：首條訊息即建模板骨架（不等模型思考/不等 Expert）——見下方 PROMPT_SKELETON。
@@ -135,6 +135,17 @@ async function buildTemplateSkeletonForPrompt(state: SessionState, content: stri
       console.log(`[gateway] prompt skeleton skip (workflow exists): wf=${owned} session=${state.sessionId}`)
       return
     }
+    // A2（2026-10-02）：per-session 去重——一個會話最多一個骨架。舊碼只看 in-memory
+    // workflowOwnerBySession ＋ workflowService 存活；重啟後、或工作流已完結/被清時
+    // 前者為空、後者 undefined，於是同一會話反覆新建骨架（實測 ses_f04ea7abff… 共
+    // 14 個骨架：1 個 prompt ＋ 13 個 workflow）。session.workflowSnapshot 是已持久化
+    // 的「既存骨架標記」（workflow-gw onDirty 寫入、重啟 restore 回灌），據此復用不新建。
+    const snapWfId = (state.workflowSnapshot as { workflowId?: unknown } | undefined)?.workflowId
+    if (typeof snapWfId === "string" && snapWfId) {
+      if (owned !== snapWfId) workflowOwnerBySession.set(state.sessionId, snapWfId)
+      console.log(`[gateway] prompt skeleton skip (snapshot exists): wf=${snapWfId} session=${state.sessionId}`)
+      return
+    }
     const r = workflowService.startFast(
       meta.template.templateId,
       templatePlaceholderContent(meta.template.templateId) as never,
@@ -150,6 +161,214 @@ async function buildTemplateSkeletonForPrompt(state: SessionState, content: stri
     }
   } catch (e) {
     console.log(`[gateway] prompt skeleton build failed: ${e instanceof Error ? e.message : String(e)}`)
+  }
+}
+
+// ── A13（2026-10-02）：野獸幀階段化（stable core ＋ 4 階段模組）───────────────
+// 缺陷：舊單體幀＝《派遣手冊》全文＋Expert 註冊表＋三條優先序（約 12k 字元 /
+// 6k+ tokens）每輪注入；且每次壓縮後 lastTailPayloadHash 被清（見 maybeCompactSession）
+// → 同會話全量重送 ≥4 次（實測 tokens_input 808,107 vs output 50,387、4 次 compaction、
+// 147 parts 被 suppress）。對標 zcode.cjs 提示詞架構：模組形狀
+// {name, source, target, cacheHint, chars, tokens, content}；不適用回 null；
+// 按階段注入；每模組 chars 記帳。落地形態＝網關按階段注入的獨立文字塊（Expert 子代理的
+// 領域模板已由 subagent.ts 於派遣時注入，不在此幀；opencode 1.18 原生提供 skill 工具
+// 與預算化 skill 列表，故本幀預設不重複注入 skill 列表——BEAST_SKILL_LIST=1 才啟用）。
+// 開關：BEAST_FRAME_V2=0 → 回退舊單體幀；BEAST_STAGE_ALL=1 → 注入全部階段模組。
+export const BEAST_FRAME_V2 = process.env.BEAST_FRAME_V2 !== "0"
+export const BEAST_STAGE_ALL = process.env.BEAST_STAGE_ALL === "1"
+export const BEAST_SKILL_LIST = process.env.BEAST_SKILL_LIST === "1"
+
+/** A13 v3（2026-10-02）：階段知識外置為 opencode skill，幀只放指針（progressive
+ *  disclosure，對標 zcode：知識不進 context，agent 用 skill 工具按需拉正文）。
+ *  開關：BEAST_FRAME_V3=0 → 回退 v2（階段模組內嵌注入）。 */
+export const BEAST_FRAME_V3 = process.env.BEAST_FRAME_V3 !== "0"
+
+export const BEAST_PHASE_SKILL_POINTERS: BeastFrameModule = {
+  name: "beast-phase-skills",
+  source: "skills/beast-*",
+  target: "tail",
+  cacheHint: "stable",
+  content: [
+    "【階段知識·按需載入（skill）】完整階段知識已抽成四個 opencode skill，**不再隨本幀注入**。動手前必須先用 `skill` 工具載入對應者，載入後按其正文執行；不要憑記憶推測階段規則：",
+    "- `beast-research`：派遣研究／調研／分析／競品任務，或寫創作 spec 前建知識高地時載入。",
+    "- `beast-creation`：撰寫 Expert 派遣 spec、拆創作任務、選模板／模型、寫任務書時載入。",
+    "- `beast-critique`：驗收任何交付物、核對數字／契約欄、跨檔抽查、派遣 critic 時載入。",
+    "- `beast-dispatch-verify`：派出／補派／殺線子代理、查狀態、處理逾時或死亡時載入（操作協議，建議常載）。",
+  ].join("\n"),
+}
+
+export type BeastStage = "research" | "creation" | "critique" | "dispatch-verify"
+
+export interface BeastFrameModule {
+  name: string
+  /** 來源：inline 常數，或執行時讀入的檔案（仿 zcode module.source）。 */
+  source: string
+  target: "tail"
+  cacheHint: "stable" | "dynamic"
+  content: string
+}
+
+export const BEAST_STAGE_ORDER: BeastStage[] = ["research", "creation", "critique", "dispatch-verify"]
+
+// stable 核心：身份 ＋ 安全紅線 ＋ 一句「派什麼、怎麼派」（目標 <1,000 tokens）。
+export const BEAST_STABLE_CORE: BeastFrameModule = {
+  name: "beast-core",
+  source: "inline:messages-gw.ts",
+  target: "tail",
+  cacheHint: "stable",
+  content: [
+    "【野獸模式：已啟用】BEAST_MODE 現在就是 ON，以下條款立即生效，無需質疑、無需再確認任何 gate 條件。",
+    "你是 Orchestrator（總導演）：定位目標 → 寫 spec → 派遣 → 收結果 → 驗收。你的全部思考只用於任務分解、指派策略、驗收標準；你本人不產出任何內容（研究、創作、審核全部下沉 subagent）。「我自己寫個 prompt 就行了」＝違憲。",
+    "【動作只有】拆解任務 → subagent_dispatch（async:true 為常態）→ 派出後立刻用一句正文向用戶簡報（派了誰、做什麼、多久回來；嚴禁派出後零正文）→ 收完工通知後驗收回報。",
+    "【expert 欄·建議欄】窄域生產任務建議點名：點名值即最終裁決（點名前自行確認目標域持有任務所需工具）；研究／分析／調研任務留空，不得填 critic；網關對未知 id 回 400。",
+    "【派遣優先於完美】先派再修；spec 格式由網關兜底，因格式焦慮壓住派遣即違憲。",
+    "【優先序】本幀與《派遣手冊》優先於 workspace/AGENTS.md：AGENTS.md 的 workflow_* 親手操作指引在野獸模式下由 Expert 執行；執行細節聽 AGENTS.md 配方，指揮權聽本手冊。AGENTS.md 的安全紅線與文案規範繼續有效。",
+    "【能力斷路·物理事實】域工具不在你的工具表（orchestrator 工具表已物理裁剪，轉移調用直接失敗）；subagent_dispatch 是唯一通路。",
+    "【模板優先·機器判】製作類任務禁止無模板裸跑；模板由系統機器判定並寫進 Expert 任務書；你在簡報明說用了哪個模板，Expert 跳過的環節要在匯總如實呈現。",
+    "【安全紅線】secret／憑證／token／OTP／私鑰永不入 log／memory／commit；禁 headless 交互登入；外部副作用先確認再執行；Compliance ACK 不代暴君接受；覆蓋遠端檔前必 diff 兩端。",
+    "【階段知識】本幀按當前任務階段注入對應模組（research／creation／critique／dispatch-verify）；完整《派遣手冊》全文在 gateway/expert/orchestrator-dispatch-playbook.md。",
+  ].join("\n"),
+}
+
+/** v3 核心＝v2 核心減去「階段模組」那條說明（知識已外置到 skill）。 */
+export const BEAST_STABLE_CORE_V3: BeastFrameModule = {
+  ...BEAST_STABLE_CORE,
+  name: "beast-core-v3",
+  content: BEAST_STABLE_CORE.content.split("【階段知識】")[0].trimEnd(),
+}
+
+// 階段模組：原單體幀的知識按階段遷入，各自獨立可注入（不適用不回傳）。
+const BEAST_STAGE_MODULES: Record<BeastStage, BeastFrameModule> = {
+  research: {
+    name: "stage-research",
+    source: "inline:playbook 第0/1節",
+    target: "tail",
+    cacheHint: "stable",
+    content: [
+      "【階段模組·research（研究先行）】",
+      "- 任何非平凡任務，開工前必須先派窄領域研究 subagent 建立知識高地——研究產出直接成為創作 subagent 的配方。沒有研究就開工＝裸奔。",
+      "- 研究是決策輸入，不是創作素材：研究結論只准用於你自己的取捨判斷（選題材／定規格），禁止以「以下是研究發現／你必須吸收」打包逐字轉貼進 Expert spec。",
+      "- 禁止跨 Expert 字面同源：spec 中不得出現會被兩個以上 Expert 照抄的成句（結構名／論斷句／修辭標籤）；共同約束只寫規格參數（時長／格式／欄位／契約欄名）。違規判據：最終交付物出現與研究檔逐字相同的成句（專有名詞與契約欄名除外）＝本條違反，重寫 spec 並重派受影響 Expert。",
+      "- 彈藥嵌入原則：短素材（<100 行）全文逐字進 spec；長素材（≥100 行）嵌核心節＋檔案指針（供追源即可，VPS 無此樹不追）；依賴本機檔案樹／studio 樹的素材只嵌可獨立執行的檢查清單（規則精華），引用方式＝模板內「素材源」標註。",
+    ].join("\n"),
+  },
+  creation: {
+    name: "stage-creation",
+    source: "inline:playbook 第0/1節",
+    target: "tail",
+    cacheHint: "stable",
+    content: [
+      "【階段模組·creation（創作／派工 spec）】",
+      "- 世界第一標尺：「有點好看」不是終點；每個領域以人類歷史最高水準嚴格要求，沒有人會這麼認真、就是要這麼認真。",
+      "- 標準作戰範式：研究先行 → 以研究結論為配方創作 → 交叉契合／風險映射 → 多毒蛇並發評審（verdict<7 必返工）→ 返工打磨 → 成片終審；全 async 並發派。",
+      "- 三軍模板（研究／創作／毒蛇評審）與彈藥配方不再進你的上下文：網關在 subagent_dispatch 時按任務類型自動把對應模板骨架＋彈藥追加進子代理任務書頭部；你只寫任務意圖 spec，不需要知道模板內容，派完即忘。",
+      "- spec 七件套（標尺非閘門，漏項先派再補）：①預期時間（首行 预期 N 分钟，網關自動兜底，超 2x 殺線）；②輪子源檔＋白名單（cp 哪個檔、只准改哪些欄位、哪些一行不許動）；③必讀記憶節（memory_summary 路徑＋2-5 個 note 檔名各一句為何相關，引用前先驗檔存在）；④配方命令（copy-paste 貼進 spec，不讓 subagent 考古）；⑤時間預算＋2x 殺線；⑥文件所有權（擁有 X／Y／Z、禁碰 A／B／C）；⑦止損條款（同錯重試 2 次即停並回報事實）。",
+      "- 每個 subagent 的 spec 必須內嵌該領域專業知識與驗收標準（研究結論＝彈藥），目標讓 100 個不同領域專家拼命找不到問題。",
+      "- spec 必帶可驗收斷言（派工時就寫，不是收工補）：凡涉數字對帳的任務，spec 內嵌明確可驗證標準（算式或檢查清單）並要求 subagent 自證（附計算式／對照表）。spec 沒有可驗算斷言＝派工不合格，責任在你。",
+      "- 模型已知缺陷：Lyria（音樂）常完全不遵循指令，不得承諾「照 prompt 出」，交付如實回報落差；音樂與其他素材同步時先生成音樂，再以實際音樂（時長／節拍／段落）為準派生成／剪輯（機器前置斷言 M2：依賴音樂的任務在 music 交付前 dispatch 會被網關 409 blocked:music_first）；返工 spec 只寫「只改 X 欄」（網關自動注入內容鎖）。",
+    ].join("\n"),
+  },
+  critique: {
+    name: "stage-critique",
+    source: "inline:playbook 第2節 11-19",
+    target: "tail",
+    cacheHint: "stable",
+    content: [
+      "【階段模組·critique（驗收／獨立審核）】",
+      "- 驗收由你本人署名負責，結論以你的名義進簡報。驗收手段救濟：算式核對／契約對表／跨檔 grep 抽查全部由你本人直接做、不派遣；「不許內聯動手」指不代替生產，不是不許驗收動手。",
+      "- 凡交付物含數字，驗收必須算不能讀：每個數字親手代入算式核對，禁止「看起來對齊」放行（時長／拍點：段落秒數加總＝總長；每段秒數 ÷ (60÷BPM×4) 必為整數＝落在小節線）。算不出來／算式不成立／數字缺項＝退回並寫明哪一項哪個數。",
+      "- 交付契約對表（收工必做）：逐條核對該 Expert 契約 requiredFields，缺欄位＝未交付，不得標「部分成功」放行（契約真源 expert-delivery-contracts.json；缺檔時以註冊表 digest 每行「交付契约 …」欄為準）。",
+      "- 跨檔一致性抽查（多路交付必做）：同一設定（性別／名稱／色碼／數字）在多份交付物是否一致，不一致＝未交付；動作＝grep 該值逐檔點數比對。",
+      "- 交付閘門標記禁止覆蓋：summary 含「【交付閘門」時，最終交付前逐條羅列哪路 Expert、缺什麼欄、閘門裁決，禁止用「全部跑通／已完成」覆蓋任何 FAIL；重派後仍帶「重派後仍未達標」前綴者不得計入成品，如實列為缺口。",
+      "- critic 獨立審核＝成品前提：每個計入成品的 Expert 交付物必須過 critic（expert=critic，spec 帶被審文本＋契約欄清單，收 verdict／issues／evidence／qc 四欄）；critic 判退回按上條處理並重派原 Expert。僅 critic 派遣本身失敗才可自簽兜底，且最終回覆必須註明「未經獨立審核」。",
+      "- 寫 Expert spec 時，把註冊表該 Expert 行「交付契约」欄逐字抄進 spec 的驗收標準段。",
+    ].join("\n"),
+  },
+  "dispatch-verify": {
+    name: "stage-dispatch-verify",
+    source: "inline:playbook 第2節 1-10",
+    target: "tail",
+    cacheHint: "stable",
+    content: [
+      "【階段模組·dispatch-verify（並發派遣／驗收流程）】",
+      "- 常態保持 ≥3 路並發；完工一路立刻驗收並補派一路，等最慢的 subagent＝垃圾時間。",
+      "- async 派遣＝常態：帶 async:true 後台派出、立即返回、完成自動喚醒匯總（失敗也喚醒附死因）；派完即結束回合等喚醒，嚴禁輪詢／sleep 等待。sync／async 資格已機器化，你預設一律 async:true 即可（顯式 async:false 且非單一快速事實查詢時網關自動轉 async）。用 subagent_status 查狀態，不當等待用。",
+      "- 收到完工通知的動作順序：驗收 → 補派新片 → 再回報。上層決策／下層執行分離：你只讀回報＋抽查證據，不自己重跑。",
+      "- 驗屍先於重派：陣亡／中斷≠沒跑；重派前先看現場（產物存在性／mtime／diff／build 門禁），staged 檔驗收合格直接採納不重跑。派新批前清場三驗：無存活進程、工作目錄無新寫入、目標檔 mtime 無異動。",
+      "- 長任務一律後台：可 SendMessage 糾偏、可 TaskStop、完成自動通知。",
+      "- 可用性事實鐵律：不得憑探測標籤／記憶／舊文件宣稱模型或渠道可用；一律以當次實查（/v1/model-status 的 availability ＋近 24h 真實交付證據）為準；近 24h 無交付證據如實向用戶說明並給降級路線。",
+      "- 存貨復用：復用既有檔案／前輪產物必須先聲明來源與驗證結論（來源會話／檔名＋你如何驗證可用），不得直接標 completed。",
+      "- 首行時限與 2x 殺線：網關派遣時自動補；超 2x 你必須主動殺線（TaskStop／內聯接管／收窄重派），主動巡檢不被動等；async 子代理同理用 subagent_status 核對，超時喚醒會附死因。",
+    ].join("\n"),
+  },
+}
+
+/** 按本輪用戶訊息判當前階段（確定性關鍵詞，非 LLM）：只注入對應模組，不全量灌。
+ *  dispatch-verify 為常態操作協議，恆注入；research 為 creation 的前置（研究先行）。 */
+export function selectBeastStages(content: string): BeastStage[] {
+  const c = content || ""
+  const picks = new Set<BeastStage>(["dispatch-verify"])
+  const research = /研究|调研|調研|分析|竞品|競品|市场|市場|榜单|榜單|资料|資料|调查|調查|搜索|搜尋|reference|research/i.test(c)
+  const creation = /创作|創作|生成|画|畫|图片|圖片|影片|视频|視頻|分镜|分鏡|剪辑|剪輯|音乐|音樂|配音|角色|场景|場景|mv|成片|大片|宣传|宣傳|设计|設計|出图|出圖|重做|返工|做一|做一个|帮我|幫我/i.test(c)
+  const critique = /验收|驗收|评审|評審|审核|審核|检查|檢查|复核|複核|qc|退回|评测|評測|打分|verdict|质量|質量/i.test(c)
+  if (research || creation) picks.add("research")
+  if (creation) picks.add("creation")
+  if (critique) picks.add("critique")
+  return BEAST_STAGE_ORDER.filter((s) => picks.has(s))
+}
+
+/** 每模組 token 記帳（仿 zcode：name/source/target/cache/chars）。 */
+export function beastFrameAccounting(mods: BeastFrameModule[]): string {
+  // 粗略 CJK 估算：中文約 0.75 token／字（僅供日誌參考；chars 為權威值）。
+  const CJK_TOKENS_PER_CHAR = 0.75
+  return mods
+    .map(
+      (m) =>
+        `name=${m.name} source=${m.source} target=${m.target} cache=${m.cacheHint} chars=${m.content.length} tokens≈${Math.ceil(m.content.length * CJK_TOKENS_PER_CHAR)}`,
+    )
+    .join(" | ")
+}
+
+/** 預算化 skill 列表（name＋whenToUse＋path；超預算降級為 name＋path）。
+ *  opencode 1.18 原生已提供 skill 工具與列表（orchestrator tools 未禁用 skill），
+ *  故本模組預設關閉（BEAST_SKILL_LIST=1 才啟用），避免雙頭注入。失敗回 null。 */
+export function buildBudgetedSkillModule(
+  dir: string = process.env.BEAST_SKILLS_DIR || "/opt/agent-harness/workspace/.opencode/skills",
+  budgetChars = 1_200,
+): BeastFrameModule | null {
+  let names: string[] = []
+  try {
+    names = readdirSync(dir, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name)
+      .sort()
+  } catch {
+    return null
+  }
+  if (names.length === 0) return null
+  const rows = names.map((n) => {
+    const p = `${dir}/${n}/SKILL.md`
+    try {
+      const raw = readFileSync(p, "utf8")
+      const fm = /^---\r?\n([\s\S]*?)\r?\n---/.exec(raw)?.[1] ?? ""
+      const nm = (/^name:\s*(.+)$/m.exec(fm)?.[1] ?? n).trim()
+      const desc = ((/^description:\s*(.+)$/m.exec(fm)?.[1] ?? "").trim().split(/[。；;]/)[0] ?? "").slice(0, 120)
+      return { name: nm, when: desc, path: p }
+    } catch {
+      return { name: n, when: "", path: p }
+    }
+  })
+  const render = (withWhen: boolean): string =>
+    rows.map((r) => `- ${r.name}${withWhen && r.when ? `：${r.when}` : ""}（${r.path}）`).join("\n")
+  let body = render(true)
+  if (body.length > budgetChars) body = render(false) // 超預算降級：只有 name + path
+  if (body.length > budgetChars) body = `${body.slice(0, budgetChars)}\n（列表超 ${budgetChars} 字元，已截斷）`
+  return {
+    name: "skill-index",
+    source: `inline:${dir}`,
+    target: "tail",
+    cacheHint: "dynamic",
+    content: `【可用 skill（name＋whenToUse＋path；超預算降級為 name＋path）】\n${body}`,
   }
 }
 
@@ -365,7 +584,7 @@ export async function handleSendMessage(key: string, id: string, req: Request): 
         // 消除「你負責擴寫／親自操作 workflow_*」（AGENTS.md）vs「你本人不產出任何內容」
         // （派遣手冊第〇節）的語義分歧（R8 審計 E7；1204 秒零工具調用病灶實證）。
         const beastPrecedenceFact =
-          "【優先序·野獸模式】本幀與《派遣手冊》優先於 workspace/AGENTS.md。AGENTS.md 中「你負責擴寫／你親自寫 prompt／你親自操作 workflow_* 工具」等指示，在野獸模式下由你派遣的 Expert 執行；內容生產（寫分鏡 prompt、生成圖片影片）你一律不親手做。你的動作只有：拆解任務 → subagent_dispatch（必帶 expert 欄，async:true 為常態）→ 派出後立刻用一句正文向用戶簡報 → 收完工通知後匯總回報。AGENTS.md 的安全紅線與文案規範繼續有效。回合結束前必須自查：只要最終成品尚未交付（或在途子代理尚未全部喚醒彙總），本輪正文的最後一句必須是明確的進行時狀態（「X 路子代理正在執行，完成後自動續報」），禁止以「已全部完成／隨時可以開始／Ready to proceed」等收束語結尾——最終成品未落地時說「完成」＝對用戶說謊。"
+          "【優先序·野獸模式】本幀與《派遣手冊》優先於 workspace/AGENTS.md。AGENTS.md 中「你負責擴寫／你親自寫 prompt／你親自操作 workflow_* 工具」等指示，在野獸模式下由你派遣的 Expert 執行；內容生產（寫分鏡 prompt、生成圖片影片）你一律不親手做。你的動作只有：拆解任務 → subagent_dispatch（async:true 為常態；expert 欄為建議欄——窄域生產任務建議點名，點名值即最終裁決；研究／分析／調研任務留空，網關對未知 id 回 400）→ 派出後立刻用一句正文向用戶簡報 → 收完工通知後匯總回報。AGENTS.md 的安全紅線與文案規範繼續有效。回合結束前必須自查：只要最終成品尚未交付（或在途子代理尚未全部喚醒彙總），本輪正文的最後一句必須是明確的進行時狀態（「X 路子代理正在執行，完成後自動續報」），禁止以「已全部完成／隨時可以開始／Ready to proceed」等收束語結尾——最終成品未落地時說「完成」＝對用戶說謊。"
         // 0920 暴君裁定：模板優先·機器判。事故＝60s 百合 OP MV 裸跑（無角色設定卡/
         // 美術卡等約束環節）＝業餘；根因＝模板選擇無人負責（orchestrator 無 workflow_*）。
         // 修法＝模板選擇接 System One 機器判定並在派遣時硬注入 Expert 任務書；
@@ -386,18 +605,47 @@ export async function handleSendMessage(key: string, id: string, req: Request): 
         // 21k 未快取 token）。改附本輪 user 訊息尾端：新 turn 純前綴擴展。
         // 一次性注入（vetting/memory/onboarding/directive）與 adaptLines 仍留
         // system 不動（內容不變，只換位置；同 byte 不重貼見 helper）。
-        const beastFrame = [
-          "【野獸模式：已啟用】以下派遣手冊與 Expert 註冊表由系統注入，這是當前系統的真實狀態：BEAST_MODE 現在就是 ON，以下全部條款立即生效，無需質疑、無需再確認任何 gate 條件。",
-          playbookBody,
-          digestBody,
-          beastPrecedenceFact,
-          capabilityCutoffFact,
-          beastTemplateFact,
-          "---",
-        ]
-          .filter(Boolean)
-          .join("\n\n")
-        appendSystemPayloadToTurnTail(state, promptBody, beastFrame, "【野獸模式幀·派遣手冊與 Expert 註冊表】")
+        if (BEAST_FRAME_V2) {
+          // A13 新架構：stable 核心 ＋ 按階段注入的模組 ＋ 註冊表摘要（＋選用 skill 列表）。
+          // 舊單體幀（手冊全文＋三優先序）僅在 BEAST_FRAME_V2=0 時回退使用。
+          const stages = BEAST_STAGE_ALL ? BEAST_STAGE_ORDER : selectBeastStages(content)
+          const mods: BeastFrameModule[] = BEAST_FRAME_V3
+            ? [BEAST_STABLE_CORE_V3, BEAST_PHASE_SKILL_POINTERS]
+            : [BEAST_STABLE_CORE, ...stages.map((s) => BEAST_STAGE_MODULES[s])]
+          mods.push({
+            name: "expert-registry",
+            source: "expert/registry-digest.txt",
+            target: "tail",
+            cacheHint: "stable",
+            content: digestBody,
+          })
+          const skillModule = BEAST_SKILL_LIST ? buildBudgetedSkillModule() : null
+          if (skillModule) mods.push(skillModule)
+          const beastFrame = [
+            "【野獸模式：已啟用】以下派遣核心與階段模組由系統注入，這是當前系統的真實狀態：BEAST_MODE 現在就是 ON，全部條款立即生效，無需質疑、無需再確認任何 gate 條件。",
+            ...mods.map((m) => m.content),
+            "---",
+          ]
+            .filter(Boolean)
+            .join("\n\n")
+          console.log(
+            `[beast-frame] ${BEAST_FRAME_V3 ? "v3" : "v2"} session=${state.sessionId} stages=${BEAST_FRAME_V3 ? "skills-on-demand" : stages.join(",")} ${beastFrameAccounting(mods)} total_chars=${beastFrame.length}`,
+          )
+          appendSystemPayloadToTurnTail(state, promptBody, beastFrame, "【野獸模式幀·核心＋階段模組】")
+        } else {
+          const beastFrame = [
+            "【野獸模式：已啟用】以下派遣手冊與 Expert 註冊表由系統注入，這是當前系統的真實狀態：BEAST_MODE 現在就是 ON，以下全部條款立即生效，無需質疑、無需再確認任何 gate 條件。",
+            playbookBody,
+            digestBody,
+            beastPrecedenceFact,
+            capabilityCutoffFact,
+            beastTemplateFact,
+            "---",
+          ]
+            .filter(Boolean)
+            .join("\n\n")
+          appendSystemPayloadToTurnTail(state, promptBody, beastFrame, "【野獸模式幀·派遣手冊與 Expert 註冊表】")
+        }
         // 能力斷路：ON 輪主會話掛 orchestrator agent（域工具已從工具表物理移除，
         // playbook prompt 聲明＋工具表移除雙保險；見 opencode.json agent.orchestrator）。
         promptBody.agent = "orchestrator"

@@ -432,11 +432,11 @@ export async function classifyDispatchMeta(prompt: string): Promise<JevDispatchM
 /** 模板骨架注入聲明（機器閘）：跳過環節必須明說，靜默跳過＝違規。 */
 export function workflowTemplateDirective(templateId: string, confidence: number): string {
   return (
-    `【機器·模板骨架】System One 判定本任務屬製作類，生產骨架＝workflow 模板 \`${templateId}\`（信心 ${confidence.toFixed(2)}）。硬規則：\n` +
-    `1. 第一個動作＝呼叫 workflow_start（template_id=${templateId}），模板要求的每個 text 角色內容一次傳齊（缺角色後端會 400 並列出缺哪幾個，補齊後重呼）；後端自動展開節點與連線。\n` +
-    `2. 禁止用 workflow_add_node 自建骨架代替模板；模板是產品的真實生產線，自建流程產品看不見。\n` +
+    `【機器·模板骨架】System One 判定本任務屬製作類，生產骨架＝workflow 模板 \`${templateId}\`（信心 ${confidence.toFixed(2)}）。**該會話的骨架已由網關建立並執行**（本指令下發時骨架已在跑，判定即彈，不需 Expert 觸發）。規則：\n` +
+    `1. 你**不得也不需呼叫 \`workflow_*\` 工具**——它們不在你的工具表內，骨架的建立、展開節點與連線由網關負責，Expert 呼叫只會失敗。\n` +
+    `2. 你的職責＝在自己的交付物中**按模板角色逐項聲明內容**（每個 text 角色的實質內容寫進交付正文），網關會據此回填骨架節點。\n` +
     `3. 模板裡的約束環節（角色設定卡／美術卡／分鏡門禁等）就是防業餘化的欄位，預設必須保留。\n` +
-    `4. 若你判定某環節確實不適用，可以跳過，但必須在同一段回報裡明說「跳過 X 環，原因 Y」——靜默跳過＝違規。\n` +
+    `4. 若你判定某環節確實不適用，可以在交付中略過該環，但**必須在同一段回報裡明說「跳過 X 環，原因 Y」**——靜默跳過＝違規。\n` +
     `5. 若上級任務書已點名模板，以點名者為準（本判定僅在未點名時生效）；不一致時在回報中說明。`
   )
 }
@@ -556,6 +556,12 @@ export function guardExpertContent(prompt: string, expertId: string): ExpertGuar
 
 const MUSIC_DEP_RE =
   /(按|依|根據|根据|對齊|对齐|卡|踩|跟隨|跟随|配合|基於|基于|以|對準|对准)[^。\n]{0,14}(音樂|音乐|曲|節拍|节拍|BPM|beat|旋律|歌)|節拍|节拍|卡點|卡点|踩點|踩点|\bBPM\b|\bbeat/i
+// M2 收緊（2026-10-02）：純提「秒數/段落/BPM/節拍」不足以構成生產性依賴，
+// 需再命中剪輯/時間線類「生產動詞」才算「依賴音樂產出」。
+const MUSIC_PROD_DEP_RE = /剪輯|剪辑|剪片|時間軸|时间轴|拍點對齊|拍点对齐|混音|配樂同步|配乐同步|對拍|对拍/i
+// M2 豁免（2026-10-02）：研究/分析性質（非生產交付）且 task 明說不依賴音樂 → 放行。
+const MUSIC_RESEARCH_RE = /研究|調研|调研|知識庫|知识库|預研|预研/i
+const MUSIC_NO_DEP_RE = /不依赖音乐|不依賴音樂|无音乐依赖|無音樂依賴|完全不依赖|完全不依賴|纯技法|純技法|与音乐无关|與音樂無關/i
 const AUDIO_REF_RE = /\.(mp3|wav|m4a|flac|aac|ogg)\b|audio_url|音[頻频]路徑|音[頻频]路径|已有音[樂乐]|用戶(上傳|提供)的?音/i
 const MUSIC_DEP_EXPERTS = new Set(["video-director", "editor", "motion-director"])
 
@@ -575,9 +581,12 @@ export function musicFirstBlockReason(prompt: string, expertId: string, state: M
   const text = (prompt ?? "").slice(0, 6000)
   if (!text || expertId === "music" || expertId === "critic" || expertId === "screenwriter") return null
   const depByExpert = MUSIC_DEP_EXPERTS.has(expertId)
-  const depByText = MUSIC_DEP_RE.test(text)
+  const depByText = MUSIC_DEP_RE.test(text) && MUSIC_PROD_DEP_RE.test(text)
   if (!(depByText && (depByExpert || /分鏡|分镜|鏡頭|镜头|剪輯|剪辑|storyboard|shot/i.test(text)))) return null
   if (state.musicDelivered || AUDIO_REF_RE.test(text)) return null
+  // 豁免：研究/分析性質（非生產交付）且明說不依賴音樂 → 放行。
+  // 真正的剪輯/影片產出任務（editor/video-director/motion-director 且在做剪輯）不適用。
+  if (MUSIC_RESEARCH_RE.test(text) && MUSIC_NO_DEP_RE.test(text)) return null
   if (state.musicInFlight) {
     return "【機器閘·music-first】本任務依賴音樂（時長/節拍/段落），但 music 尚未交付。請先等 music 的完成事件，再以實際成曲（時長、節拍、段落）為準派本任務；禁止與音樂並發。"
   }

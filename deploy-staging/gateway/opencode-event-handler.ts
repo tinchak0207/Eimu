@@ -13,13 +13,15 @@ import type { SessionState } from "./types-gateway.ts"
 import { subagentHandlesSession, handleSubagentEvent, maybeRunMachineCriticPass, snapshotPendingCriticTargets } from "./subagent"
 import { runJevShadowGate } from "./jev-gate"
 import { emitSessionError } from "./emit-helpers.ts"
-import { eventSessionId, handleToolPartUpdate, finalizeIdleStep, isAssistantMessage, boundMap, boundSet } from "./events-translate.ts"
+import { eventSessionId, handleToolPartUpdate, finalizeIdleStep, triggerIdleStepBreaker, isAssistantMessage, boundMap, boundSet } from "./events-translate.ts"
 import { noteTurnUsage, noteTurnPromptDispatch } from "./metrics-gw.ts"
 import { noteAssistantHeadForRecall, scheduleMemoryRecallPrefetch } from "./memory-wiring.ts"
 import { clearWatchdogTimer, clearHeartbeatTimer, clearAckTimer, clearErrorStallTimer, clearMidturnStallTimer, armWatchdogTimer, emitTurnEndSummaryIfSilent, emitRecoveryClosingIfSilent, releasePendingVideoWorkflows } from "./timers-gw.ts"
 import { markProviderDegraded, isDeadAccountError, isDeadModelError, personaModelForAttempt } from "./model-registry.ts"
 import { loadUserSettings } from "./persistence.ts"
 import { normalizeUserSettings } from "./sessions-http.ts"
+import { noteReasoningDelta, resetReasoningCap, buildReasoningNudge } from "./reasoning-cap.ts"
+import { emitUnfulfilledPlanNotice, recordUnfulfilledPlan } from "./plan-promise.ts"
 import { maybeCompactSession } from "./messages-gw.ts"
 import { opencodeErrorCode, opencodeErrorMessage } from "./emit-helpers.ts"
 // REQ-D2（2026-09-22）：回合收尾投遞待投的 steer（空隊列＝零動作，無 steer 的回合逐位等價）。
@@ -51,7 +53,7 @@ export function markSystemWakeMessage(state: SessionState, messageID: unknown, t
 function emitOtherPartTails(state: SessionState, exceptPid?: string): void {
   const text = flushOtherPartTails(state.partStripState, exceptPid)
   if (text) {
-    emitToSession(state, "message.delta", { text })
+    emitToSession(state, "message.delta", { text }, { strippable: true })
     state.lastUserVisibleAt = Date.now()
   }
 }
@@ -118,12 +120,37 @@ export function handleOpencodeEvent(event: any): void {
         // reasoning.delta 事件（同 shape，前端 reducer 累積到 assistant.reasoning）。
         if (p.field === "text" && typeof p.delta === "string" && p.delta.length > 0 && isAssistantMessage(state, p.messageID)) {
           if (typeof p.partID === "string" && state.suppressedParts.has(p.partID)) {
-            emitToSession(state, "reasoning.delta", { text: p.delta })
+            emitToSession(state, "reasoning.delta", { text: p.delta.replace(/\uFFFD/g, "") }) // 2026-10-02 亂碼守門
             // 罪狀2 根因修復（2026-08-29）：思維鏈字數計入 turn 活動——
             // 讓 ack/心跳/看門狗/停滯哨（turnHasActivity）知道模型活著。
             state.turnReasoningChars = (state.turnReasoningChars ?? 0) + p.delta.length
             // P2b 刀2：非空 reasoning 文字 = 本 step 不空（trim 後才算）。
             if (p.delta.trim().length > 0) state.stepHasReasoning = true
+            // 2026-10-02：無工具長推理上限——兩段式（見 reasoning-cap.ts 檔頭）：
+            //   soft＝首回合軟限用盡：只誠實上報，不腰斬正在規劃的回合（修 46.5s 誤傷）；
+            //   hard＝達中止門檻：中止 + 動作導向、保留推理的 nudge 同輪重投。
+            {
+              const capVerdict = noteReasoningDelta(state, p.delta.length, {
+                text: p.delta,
+                ctx: { hasTool: state.turnToolStarted === true, hasText: (state.turnTextChars ?? 0) > 0 },
+              })
+              if (
+                capVerdict.kind !== "none" &&
+                !state.idleNudgeSent && !state.turnAborted && (state.lastTurnActiveAt ?? 0) > 0 && state.lastPromptBody
+              ) {
+                if (capVerdict.kind === "soft") {
+                  console.warn(`[gateway] reasoning-cap: first-gen soft budget used — session=${state.sessionId}`)
+                  emitToSession(state, "turn.status", { text: "首轮规划较长，已提示模型立即给出结论并开始行动。" })
+                } else {
+                  resetReasoningCap(state)
+                  console.warn(`[gateway] reasoning-cap: no-action reasoning exceeded — session=${state.sessionId}`)
+                  triggerIdleStepBreaker(
+                    state,
+                    buildReasoningNudge({ hasTool: state.turnToolStarted === true, tail: capVerdict.tail }),
+                  )
+                }
+              }
+            }
             break
           }
           // R9-B：新 part 開講前，先吐出前面 part 扣住的尾行（pid 口徑同 emitSanitizedDelta）。
@@ -135,7 +162,7 @@ export function handleOpencodeEvent(event: any): void {
           // §7 召回輔助：留本輪正文頭部（buildRecallQuery 只需前 200 字元）。
           noteAssistantHeadForRecall(state, p.delta)
           // P2b 刀2：非空正文 delta = 本 step 不空。
-          if (p.delta.trim().length > 0) state.stepHasText = true
+          if (p.delta.trim().length > 0) { state.stepHasText = true; resetReasoningCap(state) }
           if (typeof p.partID === "string") {
             const rec = state.partTextEmitted.get(p.partID)
             if (rec) {
@@ -220,7 +247,7 @@ export function handleOpencodeEvent(event: any): void {
               const _cmd = typeof _inp.command === "string" ? _inp.command.trim() : ""
               const _noop = part.tool === "bash" && (_cmd === "" || _cmd === "true" || _cmd === "date" || _cmd === ":")
               if (_noop) state.stepNoopTool = true
-              else state.stepHasTool = true
+              else { state.stepHasTool = true; resetReasoningCap(state) }
             }
             break
           case "step-finish": {
@@ -300,7 +327,7 @@ export function handleOpencodeEvent(event: any): void {
         // 已在下一段/工具起點當場吐出，殘留即過期旁白——丟棄留日誌，不接在答覆後補播。
         if (!state.turnAborted) {
           const { tail, dropped } = takeTurnEndTail(state.partStripState)
-          if (tail) emitToSession(state, "message.delta", { text: tail })
+          if (tail) emitToSession(state, "message.delta", { text: tail }, { strippable: true })
           if (dropped.length) {
             console.log(`[gateway] R9-B stale part tails dropped at idle: x${dropped.length} — session=${state.sessionId}`)
           }
@@ -554,6 +581,14 @@ export function handleOpencodeEvent(event: any): void {
         emitTurnEndSummaryIfSilent(state)
         // R5-C：恢復輪零小結零匯報時補強制結語（S8 讓位條件見函數註釋）。
         emitRecoveryClosingIfSilent(state)
+        {
+          // C 方案（2026-10-02）：把「未兌現的開場計畫」記進 state，下一輪 system 注入一行事實
+          //（recordUnfulfilledPlan 讀 planExperts，故必須在本行清 planExperts 之前）。
+          recordUnfulfilledPlan(state)
+          // 誠實告知改走耐久通道 message.delta（原 turn.status 暫態單行、緊接 turn.done 會一閃即逝）。
+          emitUnfulfilledPlanNotice(state, (name, data) => emitToSession(state, name, data))
+          state.planExperts = undefined
+        }
         emitToSession(state, "turn.done", {})
         // 刀 2（2026-09-15）：機器 critic pass —— 收盤判定點。
         // 四輪實錄證明「叫 orchestrator 派 critic」無效（playbook 第 18 條四輪在場、四輪零派遣），

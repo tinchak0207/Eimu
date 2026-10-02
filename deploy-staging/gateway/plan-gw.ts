@@ -247,6 +247,7 @@ export function startTurnPlan(state: SessionState, userText: string, gen: number
         source: "model",
         model: `${model.providerID}/${model.modelID}`,
       })
+      cur.planExperts = experts.length ? experts : undefined
       if (cur.planState && cur.planState.gen === gen) cur.planState.emittedAt = Date.now()
       // 讓位罐頭 ack：否則使用者先讀到真計畫、15 秒後又冒一句罐頭蓋掉它。
       cur.ackSent = true

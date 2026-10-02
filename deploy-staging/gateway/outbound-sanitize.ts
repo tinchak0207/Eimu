@@ -21,7 +21,7 @@ export const INTERNAL_SECTION_HEADING_RE = /^#{1,6}[ \t]*(objective|work state|n
 export const ANY_HEADING_RE = /^#{1,6}[ \t]/
 // R9-B（2026-09-30）：t2s = 本 part 正文是否做 R5-C 繁→簡（缺省/undefined ＝ 轉，舊行為）。
 // 由 outbound-emit 按會話用戶書寫體決定（shouldT2sForUserScript）；繁體用戶置 false。
-export type PartStripState = { pending: string; suppress: boolean; fence: boolean; sawEnglish: boolean; t2s?: boolean }
+export type PartStripState = { pending: string; suppress: boolean; fence: boolean; sawEnglish: boolean; t2s?: boolean; hi?: string }
 
 // ── R4-A S1（2026-08-28）：英文正文守門 ──
 // R4 實錘（死線一）：message.delta 出現成段英文 reasoning（event 5180 "The
@@ -52,9 +52,30 @@ export function isEnglishProseLine(line: string): boolean {
 // 一組串接；未收錄的罕用字原樣保留，不猜測不誤轉。
 export const T2S_PAIRS =
   "這这裡里裏里後后時时間间會会來来對对開开關关門门電电話话說说請请謝谢應应該该當当處处動动靜静聽听寫写讀读學学練练體体飛飞車车馬马鳥鸟魚鱼龍龙鳳凤樹树葉叶華华國国圖图書书畫画藝艺術术醫医藥药錢钱銀银買买賣卖貴贵質质費费資资億亿遠远運运進进過过達达選选邊边還还鄉乡長长麼么麗丽義义樂乐橋桥樣样檔档機机構构業业歷历歸归歲岁殘残湯汤溫温無无為为烏乌燒烧热热愛爱親亲個个價价儀仪兒儿內内冊册幾几廠厂廣广強强復复複复徵征憶忆懷怀戲戏掛挂揚扬揮挥擊击據据擴扩攝摄數数斷断舊旧顯显條条標标檢检欄栏權权歐欧濟济營营環环發发髮发眾众優优傳传傷伤僅仅儘尽務务勝胜匯汇區区協协單单嚴严圓圆壓压廢废從从執执場场塊块壯壮夢梦奮奋婦妇媽妈孫孙實实寧宁寶宝專专導导層层屬属島岛幣币幹干廳厅張张彈弹彎弯徑径戰战擔担擁拥攔拦敵敌於于顧顾鏡镜頭头繼继續续閒闲額额語语譯译課课論论護护議议訊讯記记講讲認认訓训設设訪访評评詞词試试詩诗調调談谈誠诚誤误誰谁諾诺變变讓让讚赞計计財财貨货貧贫賽赛贈赠跡迹軍军輕轻較较載载輸输辦办辭辞遲迟適适郵邮鄰邻鋼钢錄录錯错鍵键鎮镇鏈链鎖锁難难霧雾響响項项順顺須须領领頻频題题顏颜願愿類类顆颗風风飯饭養养館馆駐驻驗验鬆松鬧闹鳴鸣麥麦麵面點点黨党龜龟給给紐纽級级約约結结絕绝經经統统維维網网綜综線线緊紧總总縮缩織织紅红綠绿縣县紀纪純纯紙纸綱纲縱纵紛纷紹绍備备準准溝沟滅灭滾滚漢汉漸渐潔洁潑泼灑洒灣湾爺爷爾尔牆墙獲获獨独獸兽猶犹獻献產产畢毕殺杀殼壳毀毁滿满潛潜爛烂狀状獎奖禮礼筆笔稅税監监盡尽礙碍禍祸種种稱称穀谷穩稳窮穷竄窜節节範范簡简簽签籌筹糧粮臟脏與与艙舱萬万萊莱蓋盖蔣蒋蕭萧薦荐藍蓝蠻蛮褲裤視视覺觉覽览觸触誇夸誼谊誦诵諸诸謀谋謂谓謙谦謹谨證证豈岂貓猫賓宾賈贾賊贼賠赔賦赋賭赌賴赖贏赢趙赵趕赶躍跃軌轨軒轩軟软軸轴輛辆輩辈輪轮輯辑轉转農农迴回連连週周遊游遷迁遺遗遼辽醜丑釀酿釋释鐘钟鋪铺鍋锅鐵铁鑽钻閃闪閉闭闆板隊队際际隨随隱隐雖虽雙双雜杂雞鸡離离靈灵韓韩頂顶頃顷預预頑顽頒颁頗颇顛颠飄飘飲饮饅馒餅饼餓饿餘余餵喂饋馈饒饶驅驱驚惊鬍胡鬥斗魯鲁鮮鲜兩两嚇吓櫃柜桿杆棄弃極极榮荣樓楼橫横補补裝装製制臺台颱台隻只誌志嘆叹團团圍围壞坏聲声妝妆尋寻幫帮慶庆彌弥徹彻態态懼惧掃扫擬拟攏拢擇择擋挡報报堅坚壇坛爾尔榮荣團团"
+  + "測测現现沒没碼码戶户帶带確确換换號号別别並并啟启則则敗败帳帐註注錘锤幀帧參参見见決决庫库頁页組组規规問问閘闸刪删編编側侧腳脚審审盤盘終终併并鈕钮齊齐針针佔占聯联丟丢綁绑詢询觀观憑凭瀏浏綴缀釘钉異异劇剧創创糾纠識识們们錨锚寬宽淨净衛卫衝冲卻却倉仓冪幂階阶剝剥陣阵負负貼贴訂订險险疊叠邏逻員员繞绕紋纹銷销濾滤籤签鑑鉴凍冻鑰钥屍尸喚唤違违許许賬账積积驟骤憲宪緩缓診诊暫暂損损細细兌兑採采斂敛遞递緒绪競竞劃划燈灯蹤踪偽伪拋抛況况陰阴殭僵譜谱臨临減减檻槛熱热佈布氣气緣缘燼烬儲储恆恒偵侦陳陈膠胶舉举東东閱阅鉤钩亂乱謊谎澱淀臉脸雲云夾夹詳详潰溃敘叙樁桩沖冲搶抢緋绯剛刚慣惯託托責责鑄铸勢势煙烟懸悬頓顿嗎吗夠够螢萤彙汇捨舍撐撑兇凶腦脑騙骗佇伫師师洩泄虛虚欽钦縫缝繪绘閾阈癒愈髒脏坏坯頸颈湊凑礎础係系脫脱篩筛職职槓杠脈脉絡络棧栈屜屉滯滞擾扰虧亏撈捞懶懒撿捡陽阳輔辅罰罚嘗尝將将飾饰擺摆慮虑暈晕銅铜納纳豎竖聖圣禦御遙遥礦矿攤摊駁驳陸陆飽饱黃黄貫贯貢贡習习曉晓漲涨擠挤貝贝騰腾淺浅絲丝墊垫謎谜購购"
 export const T2S_MAP = new Map<string, string>()
 for (let i = 0; i + 1 < T2S_PAIRS.length; i += 2) T2S_MAP.set(T2S_PAIRS[i]!, T2S_PAIRS[i + 1]!)
 export const T2S_RE = new RegExp(`[${Array.from(T2S_MAP.keys()).join("")}]`, "g")
+
+// ── 2026-10-02：中文輸出「簡→繁」矯正（繁體會話的繁簡混雜兜底）──
+// 背景：R5-C 只做繁→簡（簡體/未判定會話）；繁體用戶走 t2s=false 原樣放行，
+// 模型漏出的簡體字（如「回來后」「视觉」→「视觉」）便直達用戶＝繁簡混雜。
+// 本段補反向矯正：由既有 R5-C 對照表反向導出（不另造大表），僅在 t2s===false
+// （已判定為繁體用戶）時生效。映射鍵全為 CJK，故英文／ASCII JSON 鍵／代碼符號
+// 天然不受影響；URL 段與含假名的日文行原樣放行（同 t2sLine）。
+//
+// 歧義排除：部分簡體字形同時是「正確的繁體字」（同形異義），逐字回轉會改壞合法
+// 繁體文——里(公里)、只(只有)、面(方面)、回(回來)、干(干涉)、志(志願)、復/複、
+// 並/併、盡/儘 等一律不轉，寧缺勿錯；其餘按表回轉。后/台/个/么 為高頻且幾乎必
+// 為簡體，允許回轉（與 OpenCC s2t 默認一致），僅皇后/台端等罕用詞可能被改，屬
+// 已知且可接受的上界（見 2026-10-02 本輪驗收）。
+export const S2T_SKIP = new Set(Array.from("里只面干志占布周游回冲丑范几松谷胡斗板征划云迹夸荐洒杆柜愿喂并复尽"))
+export const S2T_MAP = new Map<string, string>()
+for (const [trad, simp] of T2S_MAP) {
+  if (trad === simp || S2T_SKIP.has(simp) || S2T_MAP.has(simp)) continue
+  S2T_MAP.set(simp, trad) // 首見為準（T2S_PAIRS 順序＝決定性）
+}
+export const S2T_RE = new RegExp(`[${Array.from(S2T_MAP.keys()).join("")}]`, "g")
 
 // ── R9-B（2026-09-30）：R5-C 跟隨用戶書寫體 ──
 // R9 實錘（eval-yuri-op-mv-0930 SSE 9861–9887）：用戶以繁體書寫，出口仍按 R5-C
@@ -69,7 +90,7 @@ export const KANA_RE = /[\u3041-\u309F\u30A1-\u30FA\u30FD-\u30FF\u31F0-\u31FF\uF
 export type UserScript = "hant" | "hans" | "unknown"
 // 簡體證據字：映射表的簡體側，扣掉繁體文本裡同樣常見的共用字（后/台/只/面/余/于…），
 // 避免繁體用戶寫「皇后」「台北」被誤判為簡體。
-const T2S_SHARED = new Set(Array.from("里后发复干台只志谷松胡斗板周游回制征范丑面余于喂迹夸荐洒杆柜愿几个松尽"))
+const T2S_SHARED = new Set(Array.from("里后发复干台只志谷松胡斗板周游回制征范丑面余于喂迹夸荐洒杆柜愿几个松尽并占布冲云叙划"))
 const TRAD_EVIDENCE = new Set<string>()
 const SIMP_EVIDENCE = new Set<string>()
 for (const [t, sc] of T2S_MAP) {
@@ -116,6 +137,27 @@ export function t2sLine(line: string): string {
   return out
 }
 
+/** 正文行簡→繁矯正（繁體用戶出口）：只動 CJK，URL 段原樣；含假名的日文行原樣。
+ *  歧義字見 S2T_SKIP 註釋；有轉換時留 journal 證據行。 */
+export function s2tLine(line: string): string {
+  if (!line) return line
+  if (KANA_RE.test(line)) return line // 日文行不轉（同 t2sLine）
+  let converted = false
+  const out = line
+    .split(URL_SEGMENT_RE)
+    .map((part, i) =>
+      i % 2 === 1
+        ? part
+        : part.replace(S2T_RE, (c) => {
+            converted = true
+            return S2T_MAP.get(c) ?? c
+          }),
+    )
+    .join("")
+  if (converted) console.log(`[gateway] S2T s2t: line converted: ${out.slice(0, 60)}`)
+  return out
+}
+
 // ── R4-A S2（2026-08-28）：內部條款編號剝離 ──
 // R4 實錘：正文出現「按 §3.8.3」「按 §3.8.2 默認使用…」——內部手冊編號不得
 // 直達用戶。剝編號留語義：§\d+(\.\d+)* 整體替換為「内部规定」。
@@ -139,13 +181,29 @@ export function scrubInternalRefs(line: string): string {
     .join("")
 }
 
-/** R9-B：本 part 的正文轉換出口（t2s === false ＝ 繁體用戶會話，原樣）。 */
+/** R9-B：本 part 的正文轉換出口（t2s === false ＝ 繁體用戶會話 → 簡→繁矯正；
+ *  其餘 → R5-C 繁→簡）。 */
 function bodyT2s(st: PartStripState, line: string): string {
-  return st.t2s === false ? line : t2sLine(line)
+  return st.t2s === false ? s2tLine(line) : t2sLine(line)
+}
+
+// ── 2026-10-02 e2e 成片評測：UTF-8/UTF-16 邊界亂碼守門 ──
+// 實錘：SSE 出現「未��用」（多位元組字被上游在邊界切斷，解碼成 U+FFFD）。
+// 出口確定性兜底：① 剔除 U+FFFD（寧缺一字不外發方塊）；② 孤立代理項剔除，
+// 尾部高代理項扣留到下個 chunk 拼成完整碼點（emoji 跨 delta 不再變 �）。
+export function cleanUtf16Chunk(st: { hi?: string }, chunk: string, flush = false): string {
+  let s = (st.hi ?? "") + chunk
+  st.hi = undefined
+  if (!flush && s && /[\uD800-\uDBFF]/.test(s.slice(-1))) {
+    st.hi = s.slice(-1)
+    s = s.slice(0, -1)
+  }
+  return s.replace(/\uFFFD/g, "").replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "")
 }
 
 /** 餵入一個 chunk，回傳可安全外發的文本（行未完整時扣留，可能回空串）。 */
 export function stripOutboundFeed(st: PartStripState, chunk: string): string {
+  chunk = cleanUtf16Chunk(st, chunk)
   if (!chunk) return ""
   const lines = (st.pending + chunk).split("\n")
   st.pending = lines.pop() ?? "" // 最後一段是未完成行（無換行終結），扣留待判
@@ -187,7 +245,7 @@ export function stripOutboundFeed(st: PartStripState, chunk: string): string {
 
 /** 回合/部件結束：殘留尾行按當前抑制狀態一次性判定（無換行終結，不再扣留）。 */
 export function stripOutboundFlush(st: PartStripState): string {
-  const line = st.pending
+  const line = st.pending + cleanUtf16Chunk(st, "", true)
   st.pending = ""
   if (!line) return ""
   if (st.fence) return line // 柵欄未閉合：尾部原樣吐出

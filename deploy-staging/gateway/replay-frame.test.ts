@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { appendReplayFrame, MergedReplayFrame } from "./replay-frame.ts"
+import { appendReplayFrame, MergedReplayFrame, isStrippableReplayEntry } from "./replay-frame.ts"
 
 const enc = new TextEncoder()
 const dec = new TextDecoder()
@@ -47,4 +47,40 @@ test("持久化往返還原段界", () => {
   expect(back.id).toBe(2)
   expect(dataOf(back.suffixFrame(1)).text).toBe("世界")
   expect(MergedReplayFrame.fromPersisted(dec.decode(m.frame), { name: "reasoning.delta", ids: [1], lens: [9] })).toBeNull()
+})
+
+// ── 2026-10-02 工作流終態通報耐久化（wf_muqfkhw7_1 事故）──
+// 網關主動通報與模型正文共用 message.delta；N2 strip 曾把所有 message.delta 一律剝除，
+// 導致晚重連的 client 看不到含成片連結與實扣幣數的通報。以下鎖住修復契約。
+
+const durableNotice = "【工作流部分完成】\n成片：https://cdn.example/film.mp4\n费用（以控制面账本为准）：实扣 130 币\n"
+
+test("網關耐久幀（strippable=false）獨立成條目、不與模型文字合併、不被 strip 剝除", () => {
+  const buf: { id: number; frame: Uint8Array; strippable?: boolean }[] = []
+  appendReplayFrame(buf, "message.delta", { text: "模型前綴" }, 1, plain("message.delta", { text: "模型前綴" }, 1))
+  appendReplayFrame(buf, "message.delta", { text: durableNotice }, 2, plain("message.delta", { text: durableNotice }, 2), false)
+  appendReplayFrame(buf, "message.delta", { text: "模型後綴" }, 3, plain("message.delta", { text: "模型後綴" }, 3))
+  // 耐久幀自成條目：前後模型幀各自合併成獨立 MergedReplayFrame，通報不被併吞。
+  expect(buf.length).toBe(3)
+  expect((buf[0] as MergedReplayFrame).texts.join("")).toBe("模型前綴")
+  expect(buf[1].strippable).toBe(false)
+  expect(dec.decode(buf[1].frame)).toContain("以控制面账本为准")
+  expect(dec.decode(buf[1].frame)).toContain("film.mp4")
+  expect(buf[2]).toBeInstanceOf(MergedReplayFrame)
+
+  // strip 判定：模型幀可剝，耐久幀不可剝。
+  expect(isStrippableReplayEntry(buf[0])).toBe(true)
+  expect(isStrippableReplayEntry(buf[1])).toBe(false)
+  expect(isStrippableReplayEntry(buf[2])).toBe(true)
+})
+
+test("耐久通報經過 N2 strip 後仍在 replay 中（重連可取回）", () => {
+  const buf: { id: number; frame: Uint8Array; strippable?: boolean }[] = []
+  appendReplayFrame(buf, "reasoning.delta", { text: "舊思考" }, 1, plain("reasoning.delta", { text: "舊思考" }, 1))
+  appendReplayFrame(buf, "message.delta", { text: durableNotice }, 2, plain("message.delta", { text: durableNotice }, 2), false)
+  appendReplayFrame(buf, "message.delta", { text: "舊正文" }, 3, plain("message.delta", { text: "舊正文" }, 3))
+  const kept = buf.filter((f) => !isStrippableReplayEntry(f))
+  expect(kept.length).toBe(1)
+  expect(dec.decode(kept[0].frame)).toContain("以控制面账本为准")
+  expect(dec.decode(kept[0].frame)).toContain("实扣 130 币")
 })

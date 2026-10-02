@@ -35,6 +35,9 @@ import { access, mkdir, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { getTimeline, clipLength, type Timeline, type TimelineClip } from "./timeline"
 import { detectFfmpeg } from "./editor/canvas/videoCompose"
+// ffmpeg 全局限流（VPS OOM 治本，2026-10-02）：與 tauri-adapter 的 execute_command
+// 共用同一進程級訊號量，故 lint 的並發 ffmpeg 也計入全域上限。
+import { shouldThrottleFfmpeg, acquireFfmpegSlot, releaseFfmpegSlot } from "./ffmpeg-limiter"
 
 // 與 timeline.ts L28 / index.ts L446 同值；env 可覆蓋（測試用）。
 const WORKSPACE_DIR = process.env.WORKSPACE_DIR || "/opt/agent-harness/workspace"
@@ -132,33 +135,39 @@ interface FFRun {
 }
 
 /** spawn 執行 ffmpeg/ffprobe（args 數組，無 shell 引號問題），超時 SIGKILL */
-function runFF(bin: string, args: string[], timeoutMs: number): Promise<FFRun> {
-  return new Promise((resolve) => {
-    let child: ReturnType<typeof spawn>
-    try {
-      child = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"] })
-    } catch (e) {
-      resolve({ code: -1, stdout: "", stderr: e instanceof Error ? e.message : String(e), timedOut: false })
-      return
-    }
-    let stdout = ""
-    let stderr = ""
-    let timedOut = false
-    const to = setTimeout(() => {
-      timedOut = true
-      try { child.kill("SIGKILL") } catch { /* noop */ }
-    }, Math.max(1000, timeoutMs))
-    child.stdout?.on("data", (d) => { if (stdout.length < 4_000_000) stdout += String(d) })
-    child.stderr?.on("data", (d) => { if (stderr.length < 2_000_000) stderr += String(d) })
-    child.on("error", (e) => {
-      clearTimeout(to)
-      resolve({ code: -1, stdout, stderr: (e instanceof Error ? e.message : String(e)) + "\n" + stderr, timedOut })
+async function runFF(bin: string, args: string[], timeoutMs: number): Promise<FFRun> {
+  const throttled = shouldThrottleFfmpeg(bin)
+  if (throttled) await acquireFfmpegSlot()
+  try {
+    return await new Promise<FFRun>((resolve) => {
+      let child: ReturnType<typeof spawn>
+      try {
+        child = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"] })
+      } catch (e) {
+        resolve({ code: -1, stdout: "", stderr: e instanceof Error ? e.message : String(e), timedOut: false })
+        return
+      }
+      let stdout = ""
+      let stderr = ""
+      let timedOut = false
+      const to = setTimeout(() => {
+        timedOut = true
+        try { child.kill("SIGKILL") } catch { /* noop */ }
+      }, Math.max(1000, timeoutMs))
+      child.stdout?.on("data", (d) => { if (stdout.length < 4_000_000) stdout += String(d) })
+      child.stderr?.on("data", (d) => { if (stderr.length < 2_000_000) stderr += String(d) })
+      child.on("error", (e) => {
+        clearTimeout(to)
+        resolve({ code: -1, stdout, stderr: (e instanceof Error ? e.message : String(e)) + "\n" + stderr, timedOut })
+      })
+      child.on("close", (code) => {
+        clearTimeout(to)
+        resolve({ code, stdout, stderr, timedOut })
+      })
     })
-    child.on("close", (code) => {
-      clearTimeout(to)
-      resolve({ code, stdout, stderr, timedOut })
-    })
-  })
+  } finally {
+    if (throttled) releaseFfmpegSlot()
+  }
 }
 
 /** 素材解析：本地路徑直用；http(s) URL 下載到 $WORKSPACE_DIR/tmp（同款 B3 rhythm.ts 口徑） */
