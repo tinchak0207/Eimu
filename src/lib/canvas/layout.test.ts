@@ -6,6 +6,7 @@ import {
   CANVAS_MAX_SCALE,
   CANVAS_GRID_BASE,
   CANVAS_SUMMARY_MAX_NODES,
+  CANVAS_SUMMARY_MAX_CONNECTIONS,
   CANVAS_HISTORY_LIMIT,
   CANVAS_EMPTY_HISTORY,
   CANVAS_EXPORT_KIND,
@@ -199,6 +200,25 @@ test("summarizeCanvasState 節點上限：只留最後 60 個，懸空連線被�
     "連到被裁節點的連線要一併丟掉",
   );
   assert.equal(summary.connections.length, total - 1 - 5, "連線 n5..n63 存活共 59 條");
+});
+
+test("summarizeCanvasState 連線上限：稠密圖不得撐破中繼層 128KB 閘", () => {
+  const nodes: CanvasNode[] = [];
+  for (let i = 0; i < CANVAS_SUMMARY_MAX_NODES; i++) nodes.push(imageNode(`n${i}`, 0, 0));
+  // 實測事故形狀：53 個節點掛 676 條線（connections 單獨就 123KB），
+  // 這裡取更密的完全圖，確保任何連線拓樸都撐不破上限。
+  const connections: CanvasConnection[] = [];
+  for (let i = 0; i < CANVAS_SUMMARY_MAX_NODES; i++) {
+    for (let j = 0; j < CANVAS_SUMMARY_MAX_NODES; j++) {
+      if (i === j) continue;
+      connections.push({ id: `c-${i}-${j}`, fromNodeId: `n${i}`, toNodeId: `n${j}` });
+    }
+  }
+  const summary = summarizeCanvasState({ units: [], nodes, connections });
+  assert.equal(summary.connections.length, CANVAS_SUMMARY_MAX_CONNECTIONS);
+  assert.equal(summary.connections[summary.connections.length - 1].id, "c-59-58", "留最後 N 條（最新建立的在尾端）");
+  assert.notEqual(summary.connections[0].id, "c-0-1", "最早的連線被裁掉");
+  assert.ok(JSON.stringify(summary).length < 128 * 1024, "摘要須遠低於中繼層 128KB 上限");
 });
 
 // ─────────────────────────── 視口幾何

@@ -534,6 +534,14 @@ export interface CanvasStateSummary {
 export const CANVAS_SUMMARY_MAX_NODES = 60;
 
 /**
+ * 連線上限。連線數不受節點上限約束——實測 53 個節點掛了 676 條線，光 connections
+ * 就 123KB、整份摘要 128.8KB。而 send 的 canvas_state 在中繼層超過 128KB 會被擋成
+ * 400「画布摘要过大」，擋掉的是**整則訊息**：使用者每發必敗，會話就此發不出話。
+ * 與節點同理，只留最後 N 條。
+ */
+export const CANVAS_SUMMARY_MAX_CONNECTIONS = 120;
+
+/**
  * 純 metadata 摘要，**永不含圖片 base64／dataURL**。
  * content 一律不帶：圖節點的 content 是 URL、文本節點的 content 是整段 prompt，
  * 兩者都可能很長，而 gateway 要的只是「畫布上有什麼」。
@@ -553,6 +561,7 @@ export function summarizeCanvasState(state: CanvasReducerState): CanvasStateSumm
     nodes,
     connections: state.connections
       .filter((c) => kept.has(c.fromNodeId) && kept.has(c.toNodeId))
+      .slice(-CANVAS_SUMMARY_MAX_CONNECTIONS)
       .map((c) => ({ id: c.id, fromNodeId: c.fromNodeId, toNodeId: c.toNodeId })),
     units: state.units.map((u) => ({ unit_id: u.unitId, tool: u.tool, node_count: u.nodes.length })),
   };
