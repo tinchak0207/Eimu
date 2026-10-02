@@ -249,6 +249,15 @@ export async function handleSteer(key: string, id: string, req: Request): Promis
     turnAbortSource: state.turnAbortSource,
   })
   if (gate.kind === "reject") {
+    // 2026-10-02 觀測補口：被拒路徑從前**一行日誌都沒有**，所以「引導全部未能送達」
+    // 這種系統性症狀在生產上完全不可見（上一輪修復只能靠前端畫面反推）。這裡把閘門
+    // 的四個輸入原樣記下來，下一次同症狀可直接定位是打點沒打（lastTurnActiveAt=0）
+    // 還是用戶叫停（turnAborted）。
+    console.warn(
+      `[gateway] steer rejected (${gate.reason}): steer=${steerId} session=${state.sessionId} ` +
+        `lastTurnActiveAt=${state.lastTurnActiveAt ?? 0} turnAborted=${state.turnAborted === true} ` +
+        `turnAbortSource=${state.turnAbortSource ?? "none"} turnGen=${state.turnGen ?? 0}`,
+    )
     const message =
       gate.reason === "turn_aborted"
         ? "本轮已由用户停止，引导不会再生效，请直接发送消息"
