@@ -29,7 +29,7 @@ let mockCalls: Array<{ url: string; init: RequestInit }> = [];
 let mockResponder: (url: string, init: RequestInit) => MockResponse = () => ({ status: 500, body: "no responder" });
 
 const originalFetch = globalThis.fetch;
-const ENV_KEYS = [YUE2_MODAL_ENDPOINT_ENV, YUE2_HMAC_SECRET_ENV, "FLOWMUSIC2API_URL", "FLOWMUSIC2API_KEY", "GEMINI_API_KEY"] as const;
+const ENV_KEYS = [YUE2_MODAL_ENDPOINT_ENV, YUE2_HMAC_SECRET_ENV, "FLOWMUSIC2API_URL", "FLOWMUSIC2API_KEY", "GEMINI_API_KEY", "GEMINI_STUDIO_API_KEY"] as const;
 const originalEnv = new Map<string, string | undefined>(ENV_KEYS.map((key) => [key, process.env[key]]));
 
 function installFetchMock(responder: (url: string, init: RequestInit) => MockResponse): void {
@@ -49,6 +49,7 @@ beforeEach(() => {
   process.env.FLOWMUSIC2API_URL = "http://127.0.0.1:8000"; // 同時在場 → 驗優先序
   process.env.FLOWMUSIC2API_KEY = "test-key";
   delete process.env.GEMINI_API_KEY; // Lyria 回落入鏈與否由各用例顯式決定
+  delete process.env.GEMINI_STUDIO_API_KEY;
 });
 
 afterEach(() => {
@@ -107,12 +108,14 @@ function yue2DownResponder(url: string): MockResponse {
 }
 
 const CONTEXT = { sessionId: "sess-music-1" };
+/** 帶歌詞的委託（2026-10-02 起：無歌詞/無 abc 的委託在有其他通路時讓位，YuE2 是「歌詞→整歌」）。 */
+const LYRICS = "[Verse]\nla la la\n[Chorus]\nna na na";
 
 // ── 1. 通路優先序與 YuE2 回執 ────────────────────────────────────────────────
 
 test("優先序：YUE2_MODAL_ENDPOINT 非空即走 yue2（flowmusic env 同時在場也不搶）", async () => {
   installFetchMock(defaultResponder);
-  const result = await musicGenTool.execute({ prompt: "city pop, 105 BPM", duration_hint: "full" }, CONTEXT);
+  const result = await musicGenTool.execute({ prompt: "city pop, 105 BPM", duration_hint: "full", lyrics: LYRICS }, CONTEXT);
   const out = JSON.parse(result.output) as Record<string, unknown>;
   assert.equal(out.ok, true);
   assert.equal(out.channel, "yue2_modal");
@@ -133,7 +136,7 @@ test("優先序：YUE2_MODAL_ENDPOINT 非空即走 yue2（flowmusic env 同時�
 
 test("YuE2 落盤副檔名 .flac（MIME 表 additive：audio/flac→flac，否則檔名標籤說謊）", async () => {
   installFetchMock(defaultResponder);
-  await musicGenTool.execute({ prompt: "city pop, 105 BPM" }, CONTEXT);
+  await musicGenTool.execute({ prompt: "city pop, 105 BPM", lyrics: LYRICS }, CONTEXT);
   const upload = mockCalls.find((call) => call.url.includes("/internal/media/upload"));
   assert.ok(upload);
   const body = JSON.parse(String(upload.init.body)) as { filename: string };
@@ -142,7 +145,7 @@ test("YuE2 落盤副檔名 .flac（MIME 表 additive：audio/flac→flac，否�
 
 test("YuE2 無 sessionId：跳過上傳並如實帶 audio_base64（不偽造 URL）", async () => {
   installFetchMock(defaultResponder);
-  const result = await musicGenTool.execute({ prompt: "city pop, 105 BPM" }, {});
+  const result = await musicGenTool.execute({ prompt: "city pop, 105 BPM", lyrics: LYRICS }, {});
   const out = JSON.parse(result.output) as Record<string, unknown>;
   assert.equal(out.channel, "yue2_modal");
   assert.equal(out.upload, "skipped_no_session");
@@ -154,6 +157,8 @@ test("YuE2 無 sessionId：跳過上傳並如實帶 audio_base64（不偽造 URL
 
 test("YuE2 通路 clip30：如實報錯（unsupported_duration_hint），零上游請求", async () => {
   installFetchMock(defaultResponder);
+  // YuE2 為唯一通路時 clip30 才由 YuE2 前置拒絕（有其他通路在場時 clip30 讓位給它們）。
+  delete process.env.FLOWMUSIC2API_URL;
   const result = await musicGenTool.execute({ prompt: "city pop, 105 BPM", duration_hint: "clip30" }, CONTEXT);
   const out = JSON.parse(result.output) as { ok: boolean; error: { code: string; hint: string } };
   assert.equal(out.ok, false);
@@ -168,7 +173,7 @@ test("YuE2 通路 clip30：如實報錯（unsupported_duration_hint），零上�
 test("YuE2 通路 reference_images：不進上游 body、回執如實標注已忽略", async () => {
   installFetchMock(defaultResponder);
   const result = await musicGenTool.execute(
-    { prompt: "city pop, 105 BPM", reference_images: "data:image/png;base64,AAAA,data:image/png;base64,BBBB" },
+    { prompt: "city pop, 105 BPM", lyrics: LYRICS, reference_images: "data:image/png;base64,AAAA,data:image/png;base64,BBBB" },
     CONTEXT,
   );
   const out = JSON.parse(result.output) as Record<string, unknown>;
@@ -201,7 +206,7 @@ test("未配 YUE2_MODAL_ENDPOINT：回落 flowmusic2api，score_abc=null（欄�
 
 test("回落：yue2 網路層拋錯 → FlowMusic 已配置 → 完整重跑成功，回執 additive 帶 fallback_from/fallback_reason", async () => {
   installFetchMock(yue2DownResponder);
-  const result = await musicGenTool.execute({ prompt: "city pop, 105 BPM" }, CONTEXT);
+  const result = await musicGenTool.execute({ prompt: "city pop, 105 BPM", lyrics: LYRICS }, CONTEXT);
   const out = JSON.parse(result.output) as Record<string, unknown>;
   assert.equal(out.ok, true);
   // 通路如實回報實際生成通路（回落成功＝走 flowmusic）
@@ -243,8 +248,8 @@ test("回落：yue2 拋錯 → FlowMusic 未配置 → fail 帶 YuE2 原錯誤�
   assert.equal(urls.filter((url) => url.includes("generativelanguage")).length, 0);
 });
 
-test("全鏈回落：yue2 400（純器樂無歌詞）→ FlowMusic 鑑權 502 → GEMINI_API_KEY 在場 → Lyria 直連出曲", async () => {
-  process.env.GEMINI_API_KEY = "test-gemini-key";
+test("全鏈回落：yue2 400（帶歌詞）→ FlowMusic 鑑權 502 → GEMINI_STUDIO_API_KEY 在場 → Lyria 直連出曲", async () => {
+  process.env.GEMINI_STUDIO_API_KEY = "test-studio-key";
   installFetchMock((url) => {
     if (url.endsWith("/generate")) {
       return { status: 400, body: JSON.stringify({ ok: false, error: "bad_request", detail: "lyrics must be a non-empty string" }) };
@@ -257,7 +262,7 @@ test("全鏈回落：yue2 400（純器樂無歌詞）→ FlowMusic 鑑權 502 �
     }
     return defaultResponder(url);
   });
-  const result = await musicGenTool.execute({ prompt: "cinematic chinese orchestral, 90 BPM" }, CONTEXT);
+  const result = await musicGenTool.execute({ prompt: "cinematic chinese orchestral, 90 BPM", lyrics: LYRICS }, CONTEXT);
   const out = JSON.parse(result.output) as Record<string, unknown>;
   assert.equal(out.ok, true);
   assert.equal(out.channel, "lyria_gemini");
@@ -271,14 +276,14 @@ test("全鏈回落：yue2 400（純器樂無歌詞）→ FlowMusic 鑑權 502 �
 });
 
 test("全鏈失敗：每一路原因都寫進 hint（不只最後一路）", async () => {
-  process.env.GEMINI_API_KEY = "test-gemini-key";
+  process.env.GEMINI_STUDIO_API_KEY = "test-studio-key";
   installFetchMock((url) => {
     if (url.endsWith("/generate")) throw new Error("fetch failed: tunnel is down");
     if (url.includes("/v1/chat/completions")) return { status: 502, body: "flowmusic auth dead" };
     if (url.includes("generativelanguage")) return { status: 500, body: "lyria upstream exploded" };
     return defaultResponder(url);
   });
-  const result = await musicGenTool.execute({ prompt: "city pop, 105 BPM" }, CONTEXT);
+  const result = await musicGenTool.execute({ prompt: "city pop, 105 BPM", lyrics: LYRICS }, CONTEXT);
   const out = JSON.parse(result.output) as { ok: boolean; error: { code: string; hint: string } };
   assert.equal(out.ok, false);
   assert.equal(out.error.code, "music_all_channels_failed");
@@ -297,7 +302,7 @@ test("回落回執 additive-only：既有鍵零刪除（與非回落 flowmusic �
   // 回落版（env 恢復 beforeEach 設定的雙通路在場）
   installFetchMock(yue2DownResponder);
   process.env[YUE2_MODAL_ENDPOINT_ENV] = "https://yue2-modal.example";
-  const fallbackResult = await musicGenTool.execute({ prompt: "city pop, 105 BPM" }, CONTEXT);
+  const fallbackResult = await musicGenTool.execute({ prompt: "city pop, 105 BPM", lyrics: LYRICS }, CONTEXT);
   const fallbackOut = JSON.parse(fallbackResult.output) as Record<string, unknown>;
   const fallbackKeys = Object.keys(fallbackOut).sort();
 
@@ -307,6 +312,7 @@ test("回落回執 additive-only：既有鍵零刪除（與非回落 flowmusic �
 
 test("回落時 yue2 的 clip30 前置拒絕不觸發回落（參數性 fail ≠ 通路故障，flowmusic 的 clip30 語義照舊）", async () => {
   installFetchMock(yue2DownResponder);
+  delete process.env.FLOWMUSIC2API_URL; // YuE2 為唯一通路，clip30 才輪到它的前置拒絕
   const result = await musicGenTool.execute({ prompt: "city pop, 105 BPM", duration_hint: "clip30" }, CONTEXT);
   const out = JSON.parse(result.output) as { ok: boolean; error: { code: string } };
   // yue2 啟用 + clip30 → 我們在上游前自己拒的（unsupported_duration_hint），零上游請求零回落
@@ -393,7 +399,7 @@ test("帶 abc 時 yue2 拋錯不觸發回落：直接 fail 帶原文，零 FlowM
 test("樂譜編輯回執 additive-only：與不帶 abc 的 YuE2 回執鍵集合對照，只多不少（cot_mode/abc_sha256 additive）", async () => {
   // 基準＝不帶 abc 的 YuE2 常規生成回執鍵集合
   installFetchMock(defaultResponder);
-  const baselineResult = await musicGenTool.execute({ prompt: "city pop, 105 BPM" }, CONTEXT);
+  const baselineResult = await musicGenTool.execute({ prompt: "city pop, 105 BPM", lyrics: LYRICS }, CONTEXT);
   const baselineKeys = Object.keys(JSON.parse(baselineResult.output) as Record<string, unknown>).sort();
 
   // 帶譜版（同 mock、同 env）
@@ -579,7 +585,7 @@ test("翻唱 clip30：照既有 clip30 拒絕規則走（unsupported_duration_hi
 test("翻唱回執 additive-only：與不帶 source_audio 的 YuE2 回執鍵集合對照，只多不少", async () => {
   // 基準＝不帶 source_audio 的 YuE2 常規生成回執鍵集合
   installFetchMock(defaultResponder);
-  const baselineResult = await musicGenTool.execute({ prompt: "city pop, 105 BPM" }, CONTEXT);
+  const baselineResult = await musicGenTool.execute({ prompt: "city pop, 105 BPM", lyrics: LYRICS }, CONTEXT);
   const baselineKeys = Object.keys(JSON.parse(baselineResult.output) as Record<string, unknown>).sort();
 
   // 翻唱版（同 env）
@@ -593,4 +599,104 @@ test("翻唱回執 additive-only：與不帶 source_audio 的 YuE2 回執鍵集�
     "transcribe_warnings",
     "transcribed_abc_sha256",
   ]);
+});
+
+// ── 8. 多候選交付（2026-10-02）：audios[] additive ────────────────────────────
+//
+// 上游 FlowMusic2API 多數響應帶 2 個 clips（實測長度 1–2）。主候選照舊走既有單數
+// 欄位（url/upstream_url，向後兼容零改動），全部候選以 gateway 既已消費的 audios[]
+// 形狀 additive 帶出；次候選下載/上傳失敗只進 candidate_errors，不拖垮主候選交付。
+
+test("多候選：兩 clip → audios.length=2、兩個不同平台 URL，url/upstream_url 仍等於第一候選", async () => {
+  delete process.env[YUE2_MODAL_ENDPOINT_ENV]; // 強制走 flowmusic2api
+  let uploadSeq = 0;
+  installFetchMock((url: string) => {
+    if (url.includes("/internal/media/upload")) {
+      uploadSeq += 1;
+      return {
+        status: 200,
+        body: JSON.stringify({ ok: true, url: `https://store.example/image-data/files/uploads/music-${uploadSeq}.m4a` }),
+      };
+    }
+    if (url.includes("/v1/chat/completions")) {
+      return {
+        status: 200,
+        body: JSON.stringify({
+          clips: [
+            { audio_url: "https://cdn.example/a.m4a", audio: { format: "m4a" }, duration: 150, title: "Take A" },
+            { audio_url: "https://cdn.example/b.m4a", audio: { format: "m4a" }, duration: 148 },
+          ],
+        }),
+      };
+    }
+    if (url.includes("cdn.example")) return { status: 200, body: "FAKEAUDIO", headers: { "content-type": "audio/mp4" } };
+    return { status: 404, body: `unexpected url ${url}` };
+  });
+  const result = await musicGenTool.execute({ prompt: "city pop, 105 BPM" }, CONTEXT);
+  const out = JSON.parse(result.output) as Record<string, unknown>;
+  assert.equal(out.ok, true);
+  assert.equal(out.channel, "flowmusic2api");
+  // 既有單數欄位零改動：url＝主候選平台 URL、upstream_url＝主候選上游 URL
+  assert.equal(out.url, "https://store.example/image-data/files/uploads/music-1.m4a");
+  assert.equal(out.upstream_url, "https://cdn.example/a.m4a");
+  // 新 additive 欄位：兩筆、兩個不同平台 URL、index 0/1
+  const audios = out.audios as Array<{ url: string; upstream_url?: string; duration_seconds?: number; candidate_index: number }>;
+  assert.equal(audios.length, 2);
+  assert.equal(audios[0].candidate_index, 0);
+  assert.equal(audios[0].url, out.url);
+  assert.equal(audios[0].upstream_url, "https://cdn.example/a.m4a");
+  assert.equal(audios[1].candidate_index, 1);
+  assert.equal(audios[1].url, "https://store.example/image-data/files/uploads/music-2.m4a");
+  assert.equal(audios[1].upstream_url, "https://cdn.example/b.m4a");
+  assert.notEqual(audios[0].url, audios[1].url);
+  assert.equal(out.candidate_errors, undefined);
+  // 兩個候選都真的下載（兩次 cdn 請求）
+  assert.equal(mockCalls.filter((call) => call.url.includes("cdn.example")).length, 2);
+});
+
+test("多候選：單 clip → audios.length=1，既有欄位零改動", async () => {
+  delete process.env[YUE2_MODAL_ENDPOINT_ENV];
+  installFetchMock(defaultResponder);
+  const result = await musicGenTool.execute({ prompt: "city pop, 105 BPM" }, CONTEXT);
+  const out = JSON.parse(result.output) as Record<string, unknown>;
+  assert.equal(out.ok, true);
+  assert.equal(out.url, "https://store.example/image-data/files/uploads/music-gen.flac");
+  assert.equal(out.upstream_url, "https://cdn.example/a.m4a");
+  const audios = out.audios as Array<{ url: string; candidate_index: number }>;
+  assert.equal(audios.length, 1);
+  assert.equal(audios[0].candidate_index, 0);
+  assert.equal(audios[0].url, out.url);
+  assert.equal(mockCalls.filter((call) => call.url.includes("cdn.example")).length, 1);
+});
+
+test("多候選：次候選下載失敗 → 主候選照舊交付、candidate_errors 如實回報（非致命）", async () => {
+  delete process.env[YUE2_MODAL_ENDPOINT_ENV];
+  installFetchMock((url: string) => {
+    if (url.includes("/v1/chat/completions")) {
+      return {
+        status: 200,
+        body: JSON.stringify({
+          clips: [
+            { audio_url: "https://cdn.example/a.m4a", audio: { format: "m4a" }, duration: 150 },
+            { audio_url: "https://cdn.example/broken.m4a", audio: { format: "m4a" }, duration: 148 },
+          ],
+        }),
+      };
+    }
+    if (url.includes("cdn.example/a.m4a")) return { status: 200, body: "FAKEAUDIO", headers: { "content-type": "audio/mp4" } };
+    if (url.includes("cdn.example/broken.m4a")) return { status: 404, body: "gone" };
+    return defaultResponder(url);
+  });
+  const result = await musicGenTool.execute({ prompt: "city pop, 105 BPM" }, CONTEXT);
+  const out = JSON.parse(result.output) as Record<string, unknown>;
+  assert.equal(out.ok, true); // 非致命：主候選照舊交付
+  assert.equal(out.url, "https://store.example/image-data/files/uploads/music-gen.flac");
+  assert.equal(out.upstream_url, "https://cdn.example/a.m4a");
+  const audios = out.audios as Array<unknown>;
+  assert.equal(audios.length, 1);
+  const errors = out.candidate_errors as Array<{ candidate_index: number; upstream_url: string; error: string }>;
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0].candidate_index, 1);
+  assert.equal(errors[0].upstream_url, "https://cdn.example/broken.m4a");
+  assert.match(errors[0].error, /HTTP 404/);
 });

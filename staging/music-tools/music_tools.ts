@@ -12,7 +12,9 @@
  *
  * 落位：/opt/agent-harness/workspace/.opencode/lib/music-tools-impl.ts
  * env：GATEWAY_URL（默認 http://127.0.0.1:8081）、HARNESS_API_KEY（fallback）、
- *      GEMINI_API_KEY（Lyria 鑑權，音頻落盤經 gateway 會話上傳存儲）。
+ *      GEMINI_STUDIO_API_KEY（lyria-3.5 generateContent 主 key，音頻落盤經 gateway 會話上傳存儲）、
+ *      GEMINI_API_KEY（Vertex lyria-002 降級）、FLOWMUSIC_ADMIN_USER／FLOWMUSIC_ADMIN_PASSWORD
+ *      （FlowMusic 真鑑權探針 /api/tokens/1/refresh-credits 用；缺失時探針降級為 unreachable 提示）。
  */
 
 /**
@@ -64,6 +66,10 @@ import {
 } from "./music_flowmusic"
 import {
   LYRIA_MODELS,
+  LYRIA_VERTEX_URL,
+  LYRIA_VERTEX_MODEL,
+  isVertexExpressKey,
+  hasGeminiStudioApiKey,
   buildLyriaStylePrompt,
   generateLyriaTrack,
   type LyriaMusicContract,
@@ -383,9 +389,10 @@ const PROBE_STATUS_LABEL: Record<MusicChannelProbeStatus, string> = {
 async function probeFetch(
   url: string,
   init?: RequestInit,
+  timeoutMs: number = PROBE_TIMEOUT_MS,
 ): Promise<{ status: number; body: unknown; text: string } | { error: string }> {
   try {
-    const resp = await fetch(url, { ...init, signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) })
+    const resp = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) })
     const text = await resp.text().catch(() => "")
     let body: unknown = null
     try {
@@ -395,7 +402,7 @@ async function probeFetch(
     }
     return { status: resp.status, body, text: text.slice(0, 300) }
   } catch (e) {
-    return { error: (e as Error)?.name === "TimeoutError" ? `超时 ${PROBE_TIMEOUT_MS}ms` : String((e as Error)?.message ?? e) }
+    return { error: (e as Error)?.name === "TimeoutError" ? `超时 ${timeoutMs}ms` : String((e as Error)?.message ?? e) }
   }
 }
 
@@ -480,54 +487,119 @@ async function probeFlowMusic(): Promise<MusicChannelProbe> {
   if (!("error" in models) && (models.status === 401 || models.status === 403)) {
     return { channel, status: "config_disabled", label: "FlowMusic2API 拒绝本机 API key", evidence: `GET /v1/models HTTP ${models.status}` }
   }
-  // 上游帳號會話（Supabase 一次性 refresh token）的死活只有看門狗知道：鏈被吊銷時寫 CHAIN_DEAD。
+  // 真鑑權探針（2026-10-02 修假綠燈）：/health 200 與 /v1/models 只證明容器活著＋本機 API key 有效，
+  // 不證明上游帳號 session 還能出曲。真 oracle = 用 admin 帳號打 POST /api/tokens/1/refresh-credits：
+  // 唯讀、不生成、比 /test 更省（任務 3b）。失敗才判 unreachable/needs_human_login；CHAIN_DEAD 僅附加訊號。
+  const adminUser = (process.env.FLOWMUSIC_ADMIN_USER ?? "").trim()
+  const adminPass = (process.env.FLOWMUSIC_ADMIN_PASSWORD ?? "").trim()
   const marker = (process.env.FLOWMUSIC_CHAIN_DEAD_MARKER ?? "").trim() || FLOWMUSIC_CHAIN_DEAD_MARKER_DEFAULT
   const dead = await fsp.readFile(marker, "utf8").catch(() => null)
-  if (dead !== null) {
+  const deadEvidence = dead !== null ? `看门狗标记 ${marker}：${dead.replace(/\s+/g, " ").trim().slice(0, 120)}` : ""
+  if (!adminUser || !adminPass) {
     return {
       channel,
-      status: "needs_human_login",
-      label: "FlowMusic 账号会话已失效，需要暴君在真实 Chrome 重新登录 flowmusic.app 并导出 cookie 换血",
-      evidence: `看门狗标记 ${marker}：${dead.replace(/\s+/g, " ").trim().slice(0, 160)}`,
+      status: "unreachable",
+      label: "FlowMusic2API 无法做真鉴权探针（缺少 FLOWMUSIC_ADMIN_USER／FLOWMUSIC_ADMIN_PASSWORD）",
+      evidence: `GET /health 200，/v1/models 通过，但缺 admin 凭据无法验证上游账号会话${deadEvidence ? "；" + deadEvidence : ""}`,
+      capability: "配置 FLOWMUSIC_ADMIN_USER／FLOWMUSIC_ADMIN_PASSWORD 后探针会打 /api/tokens/1/refresh-credits 做真鉴权验证",
     }
   }
+  const login = await probeFetch(`${base}/api/admin/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username: adminUser, password: adminPass }),
+  })
+  const token = !("error" in login) && login.status === 200 ? (login.body as { token?: unknown })?.token : null
+  if (typeof token !== "string" || !token) {
+    return {
+      channel,
+      status: "config_disabled",
+      label: "FlowMusic2API admin 登录失败（FLOWMUSIC_ADMIN_USER／PASSWORD 不符）",
+      evidence: `POST /api/admin/login ${"error" in login ? `失败：${login.error}` : `HTTP ${login.status}`}${deadEvidence ? "；" + deadEvidence : ""}`,
+    }
+  }
+  const credits = await probeFetch(`${base}/api/tokens/1/refresh-credits`, { method: "POST", headers: { Authorization: `Bearer ${token}` } }, 20_000)
+  if ("error" in credits) {
+    return {
+      channel,
+      status: "unreachable",
+      label: "FlowMusic2API 真鉴权探针请求失败（服务/网络）",
+      evidence: `POST /api/tokens/1/refresh-credits 失败：${credits.error}${deadEvidence ? "；" + deadEvidence : ""}`,
+    }
+  }
+  const cr = (credits.body ?? {}) as { credits?: unknown; success?: unknown }
+  if (credits.status === 200 && typeof cr.credits === "number" && cr.credits >= 0) {
+    return {
+      channel,
+      status: "ready",
+      label: "FlowMusic2API 可用（Lyria 3.5 整歌，带人声）",
+      evidence: `GET /health 200，/v1/models 通过，真鉴权 POST /api/tokens/1/refresh-credits 200 credits=${cr.credits}${deadEvidence ? "；" + deadEvidence : ""}`,
+    }
+  }
+  // refresh-credits 非 200 ⇒ 上游账号会话失效（比 CHAIN_DEAD 更早、更真）；CHAIN_DEAD 只是附加证据。
   return {
     channel,
-    status: "ready",
-    label: "FlowMusic2API 可用（Lyria 3.5 整歌，带人声）",
-    evidence: "GET /health 200，/v1/models 鉴权通过，看门狗无 CHAIN_DEAD 标记（会话仅按看门狗 10 分钟巡检判定）",
+    status: "needs_human_login",
+    label: "FlowMusic 账号会话已失效，需要暴君在真实 Chrome 重新登录 flowmusic.app 并导出 cookie 换血",
+    evidence: `真鉴权 POST /api/tokens/1/refresh-credits HTTP ${credits.status}：${JSON.stringify(cr).slice(0, 200)}${deadEvidence ? "；" + deadEvidence : ""}`,
   }
 }
 
 async function probeLyria(): Promise<MusicChannelProbe> {
   const channel = "lyria_gemini" as const
-  const key = (process.env.GEMINI_API_KEY ?? "").trim()
-  if (!key) {
-    return { channel, status: "config_disabled", label: "Gemini Lyria 通路未启用（GEMINI_API_KEY 未配置）", evidence: "env GEMINI_API_KEY 为空" }
-  }
-  const r = await probeFetch(`${LYRIA_MODELS_BASE_URL}/${LYRIA_MODELS.full}`, { headers: { "x-goog-api-key": key } })
-  if ("error" in r) {
-    return { channel, status: "unreachable", label: "Gemini API 不可达", evidence: `GET models/${LYRIA_MODELS.full} 失败：${r.error}` }
-  }
-  const err = ((r.body ?? {}) as { error?: { status?: string; message?: string; details?: Array<{ reason?: string }> } }).error
-  const reasons = (err?.details ?? []).map((d) => d?.reason).filter(Boolean).join(",")
-  const evidence = `GET models/${LYRIA_MODELS.full} HTTP ${r.status}${err ? ` ${err.status ?? ""} ${reasons}`.trimEnd() : ""}`
-  if (r.status === 200) {
-    return { channel, status: "ready", label: "Gemini Lyria 可用（按量付费）", evidence }
-  }
-  if (r.status === 403 && /SERVICE_DISABLED/.test(`${reasons} ${err?.message ?? ""}`)) {
-    const project = /project (\d+)/.exec(err?.message ?? "")?.[1]
-    return {
-      channel,
-      status: "config_disabled",
-      label: `Gemini API 未在 GCP 项目${project ? ` ${project}` : ""} 启用（需暴君在 Google Cloud 控制台启用 generativelanguage.googleapis.com）`,
-      evidence,
+  const studioKey = (process.env.GEMINI_STUDIO_API_KEY ?? "").trim()
+  const vertexKey = (process.env.GEMINI_API_KEY ?? "").trim()
+  const vocalCap = "Gemini Lyria 3.5：带歌词人声整歌（lyria-3.5）；clip30 走 lyria-3-clip-preview"
+  if (studioKey) {
+    // Gemini Studio（generativelanguage）lyria-3.5：能出带歌词人声整歌。GET 模型元数据免费。
+    // 注意：GET 200 只证明 key/模型可达，不代表付费配额可用（无付费额度时真实生成才回 429 RESOURCE_EXHAUSTED）。
+    const r = await probeFetch(`${LYRIA_MODELS_BASE_URL}/${LYRIA_MODELS.full}`, { headers: { "x-goog-api-key": studioKey } })
+    if ("error" in r) {
+      return { channel, status: "unreachable", label: "Gemini API 不可达", evidence: `GET models/${LYRIA_MODELS.full} 失败：${r.error}`, capability: vocalCap }
     }
+    const err = ((r.body ?? {}) as { error?: { status?: string; message?: string; details?: Array<{ reason?: string }> } }).error
+    const reasons = (err?.details ?? []).map((d) => d?.reason).filter(Boolean).join(",")
+    const evidence = `GET models/${LYRIA_MODELS.full} HTTP ${r.status}${err ? ` ${err.status ?? ""} ${reasons}`.trimEnd() : ""}（元数据探针；付费配额需真实生成才可证）`
+    if (r.status === 200) {
+      return { channel, status: "ready", label: "Gemini Lyria 3.5 可用（lyria-3.5，带人声整歌，按量付费）", evidence, capability: vocalCap }
+    }
+    if (r.status === 403 && /SERVICE_DISABLED/.test(`${reasons} ${err?.message ?? ""}`)) {
+      const project = /project (\d+)/.exec(err?.message ?? "")?.[1]
+      return {
+        channel,
+        status: "config_disabled",
+        label: `Gemini API 未在 GCP 项目${project ? ` ${project}` : ""} 启用（需暴君在 Google Cloud 控制台启用 generativelanguage.googleapis.com）`,
+        evidence,
+        capability: vocalCap,
+      }
+    }
+    if (r.status === 429) return { channel, status: "resource_insufficient", label: "Gemini Lyria 配额/限流耗尽", evidence, capability: vocalCap }
+    return { channel, status: "config_disabled", label: "Gemini API key 或项目权限异常", evidence, capability: vocalCap }
   }
-  if (r.status === 429) {
-    return { channel, status: "resource_insufficient", label: "Gemini Lyria 配额/限流耗尽", evidence }
+  if (vertexKey && isVertexExpressKey(vertexKey)) {
+    // Vertex express：POST 空 instances 的免費探針——鑑權通過回 400 "Empty instances"（不生成不計費），
+    // key 無效回 401，限額回 429。注意 ready 只代表「純器樂 30s 可出」，不等於能唱歌（見 capability）。
+    const v = await probeFetch(LYRIA_VERTEX_URL, {
+      method: "POST",
+      headers: { "x-goog-api-key": vertexKey, "Content-Type": "application/json" },
+      body: JSON.stringify({ instances: [] }),
+    }, 25_000) // Vertex 對空請求的 400 實測也要 ~10s，6s 預設會把健康通路誤判不可達
+    const vcap = `Vertex ${LYRIA_VERTEX_MODEL}：仅纯器乐、约 30 秒、WAV；不支持歌词/人声/参考图（歌词会被忽略并在回执标注）`
+    if ("error" in v) return { channel, status: "unreachable", label: "Vertex AI 不可达", evidence: `POST ${LYRIA_VERTEX_MODEL}:predict 失败：${v.error}`, capability: vcap }
+    const verr = ((v.body ?? {}) as { error?: { status?: string } }).error
+    const vev = `POST ${LYRIA_VERTEX_MODEL}:predict(空 instances) HTTP ${v.status}${verr?.status ? ` ${verr.status}` : ""}`
+    if (v.status === 400 && verr?.status === "INVALID_ARGUMENT") {
+      return { channel, status: "ready", label: "Vertex Lyria-002 可用（仅纯器乐 30 秒，无人声）", evidence: vev, capability: vcap }
+    }
+    if (v.status === 429) return { channel, status: "resource_insufficient", label: "Vertex Lyria 配额/限流耗尽", evidence: vev, capability: vcap }
+    return { channel, status: "config_disabled", label: "Vertex express key 无效或项目权限异常", evidence: vev, capability: vcap }
   }
-  return { channel, status: "config_disabled", label: "Gemini API key 或项目权限异常", evidence }
+  return {
+    channel,
+    status: "config_disabled",
+    label: "Gemini Lyria 通路未启用（GEMINI_STUDIO_API_KEY 与 GEMINI_API_KEY 均未配置）",
+    evidence: "env GEMINI_STUDIO_API_KEY 与 GEMINI_API_KEY 均为空",
+  }
 }
 
 /** 三通路並發探針（免費、不生成）。回執供 agent 開局決策：寫不寫歌詞、寫多長、要不要先找暴君。 */
@@ -535,6 +607,7 @@ export async function probeMusicChannels(): Promise<{
   channels: MusicChannelProbe[]
   can_generate_vocal_song: boolean
   first_ready: MusicChannelProbe["channel"] | null
+  can_generate_instrumental: boolean
   human_actions: string[]
 }> {
   const channels = await Promise.all([probeYue2(), probeFlowMusic(), probeLyria()])
@@ -542,7 +615,18 @@ export async function probeMusicChannels(): Promise<{
   const humanActions = channels
     .filter((c) => c.status === "needs_human_login" || c.status === "config_disabled")
     .map((c) => `${c.channel}：${c.label}`)
-  return { channels, can_generate_vocal_song: firstReady !== null, first_ready: firstReady, human_actions: humanActions }
+  // 誠實：無 GEMINI_STUDIO_API_KEY 時 Lyria 只剩 Vertex lyria-002（純器樂 30s），不能算「能唱歌」。
+  const vocalCapable = (c: MusicChannelProbe) =>
+    c.status === "ready" && !(c.channel === "lyria_gemini" && !hasGeminiStudioApiKey())
+  const canVocal = channels.some(vocalCapable)
+  const canInstrumental = channels.some((c) => c.status === "ready")
+  return {
+    channels,
+    can_generate_vocal_song: canVocal,
+    can_generate_instrumental: canInstrumental,
+    first_ready: firstReady,
+    human_actions: humanActions,
+  }
 }
 
 /**
@@ -619,13 +703,19 @@ export const musicGenTool: MusicToolDef = {
         const report = await probeMusicChannels()
         const summary = report.channels.map((c) => `${c.channel}=${PROBE_STATUS_LABEL[c.status]}`).join("，")
         return ok({
-          title: report.can_generate_vocal_song ? `音乐通路可用（${report.first_ready}）` : "音乐通路全部不可用",
+          title: report.can_generate_vocal_song
+            ? `音乐通路可用（${report.first_ready}）`
+            : report.can_generate_instrumental
+              ? `仅纯器乐可用（${report.first_ready}），不能出人声歌曲`
+              : "音乐通路全部不可用",
           mode: "probe",
           summary,
           ...report,
           hint: report.can_generate_vocal_song
             ? `可以写歌：生成会先走 ${report.first_ready}。${report.channels.find((c) => c.channel === report.first_ready)?.capability ?? ""}`
-            : `现在做不出带人声的歌，先别写歌词；把 human_actions 原样告诉用户，等其处理后再探针。`,
+            : report.can_generate_instrumental
+              ? `现在只能出纯器乐（无人声）。需要人声歌曲先别写歌词；把 human_actions 原样告诉用户。纯器乐/BGM 需求可直接生成。`
+              : `现在做不出带人声的歌，先别写歌词；把 human_actions 原样告诉用户，等其处理后再探针。`,
         })
       }
       const prompt = asString(rawArgs.prompt)
@@ -685,7 +775,13 @@ export const musicGenTool: MusicToolDef = {
       // 2026-09-19 加失敗回落：YuE2 服務跑在筆電上（反向隧道進 VPS），筆電關機/隧道
       // 斷線時 generateYue2Track 拋錯（網路層/超時/非 2xx）→ 自動回落 FlowMusic 完整
       // 重跑一次，音樂管線不因單通路故障而壞（見下方生成段）。
-      const yue2Enabled = isYue2ModalEnabled()
+      // YuE2 是「歌詞→整歌」：純器樂（無歌詞）或 30 秒短檔它兌現不了（上游 400「lyrics must be
+      // a non-empty string」／無時長欄位）。有別的通路在場就讓位給它們，而不是先撞 YuE2 再報錯
+      //（2026-09-29 e2e：「咖啡店背景音樂 30 秒」兩種都撞牆）。abc／翻唱委託仍必走 YuE2。
+      const otherMusicChannel = isFlowMusic2ApiEnabled() || hasGeminiStudioApiKey() || Boolean(process.env.GEMINI_API_KEY?.trim())
+      const yue2Enabled =
+        isYue2ModalEnabled() &&
+        (abc !== undefined || sourceAudioRaw !== undefined || !otherMusicChannel || (Boolean(lyrics) && durationHintRaw !== "clip30"))
       const flowMusicEnabled = isFlowMusic2ApiEnabled()
       const flowMusicModel = FLOWMUSIC_MODELS[durationHintRaw === "clip30" ? "clip30" : "full"]
       const lyriaModel = durationHintRaw === "clip30" ? LYRIA_MODELS.clip30 : LYRIA_MODELS.full
@@ -731,9 +827,10 @@ export const musicGenTool: MusicToolDef = {
         : flowMusicEnabled
           ? "flowmusic"
           : "lyria"
-      let directed = directMusicPrompt(toolPrompt, {
+      const initialLyriaInstrumental = directorChannel === "lyria" && !hasGeminiStudioApiKey()
+      let directed = directMusicPrompt(initialLyriaInstrumental ? buildToolPrompt(prompt, false) : toolPrompt, {
         channel: directorChannel,
-        hasLyrics: Boolean(lyrics),
+        hasLyrics: initialLyriaInstrumental ? false : Boolean(lyrics),
         durationSeconds: durationHintRaw === "clip30" ? 30 : undefined,
       })
       let finalPrompt = directed.prompt
@@ -794,7 +891,7 @@ export const musicGenTool: MusicToolDef = {
       //（誠實鐵律：能力不匹配要如實報錯，絕不靜默降級）。
       // 2026-09-19 片 O 同款：帶 source_audio（翻唱）的委託拋錯同樣不回落。
       const hasScoreSemantics = abc !== undefined || sourceAudioRaw !== undefined
-      const lyriaEnabled = Boolean(process.env.GEMINI_API_KEY?.trim())
+      const lyriaEnabled = hasGeminiStudioApiKey() || Boolean(process.env.GEMINI_API_KEY?.trim())
       const channelChain: Array<"yue2" | "flowmusic" | "lyria"> = []
       if (yue2Enabled) channelChain.push("yue2")
       if (flowMusicEnabled) channelChain.push("flowmusic")
@@ -811,9 +908,12 @@ export const musicGenTool: MusicToolDef = {
         if (channel !== directorChannel) {
           // 換通路必須用該通路**重新過 director**（各通路規則層不同），director 是純函數可重複呼叫。
           directorChannel = channel
-          directed = directMusicPrompt(toolPrompt, {
+          // Vertex lyria-002 純器樂：含人聲/歌詞措辭的 prompt 會被上游 500「Could not generate audio」，
+          // 故落到它時按純器樂重組 prompt（歌詞丟棄會在回執 degraded/ignored_inputs 明說）。
+          const lyriaInstrumentalOnly = channel === "lyria" && !hasGeminiStudioApiKey()
+          directed = directMusicPrompt(lyriaInstrumentalOnly ? buildToolPrompt(prompt, false) : toolPrompt, {
             channel,
-            hasLyrics: Boolean(lyrics),
+            hasLyrics: lyriaInstrumentalOnly ? false : Boolean(lyrics),
             durationSeconds: durationHintRaw === "clip30" ? 30 : undefined,
           })
           finalPrompt = directed.prompt
@@ -848,7 +948,17 @@ export const musicGenTool: MusicToolDef = {
       }
       if (generated === undefined) throw new MusicToolError("music_tool_error", "音乐生成没有可用通路")
       const model: string =
-        activeChannel === "yue2" ? YUE2_MODEL_ID : activeChannel === "flowmusic" ? flowMusicModel : lyriaModel
+        activeChannel === "yue2"
+          ? YUE2_MODEL_ID
+          : activeChannel === "flowmusic"
+            ? flowMusicModel
+            : ((generated as GenerateLyriaTrackResult).effectiveModel ?? lyriaModel)
+      const lyriaVertex = activeChannel === "lyria" && (generated as GenerateLyriaTrackResult).backend === "vertex_express"
+      const lyriaIgnored = lyriaVertex ? ((generated as GenerateLyriaTrackResult).ignoredInputs ?? []) : []
+      // 誠實降級：要人聲(有歌詞)或要整歌(full)卻落到 Vertex lyria-002（純器樂 30s）＝降級交付，必須明說。
+      const degradedReasons: string[] = []
+      if (lyriaVertex && lyrics) degradedReasons.push("请求含歌词/人声，但最终通路 Vertex lyria-002 仅纯器乐，成品无人声、歌词未使用")
+      if (lyriaVertex && durationHintRaw !== "clip30") degradedReasons.push("请求整歌，但 lyria-002 仅出约 30 秒片段")
       const upstreamUrl =
         activeChannel === "flowmusic" ? (generated as unknown as { upstreamUrl: string }).upstreamUrl : null
 
@@ -894,7 +1004,7 @@ export const musicGenTool: MusicToolDef = {
             : 180
           : activeChannel === "flowmusic"
             ? ((generated as { upstreamDurationHint?: number }).upstreamDurationHint ?? 170)
-            : durationHintRaw === "clip30"
+            : durationHintRaw === "clip30" || lyriaVertex
               ? 30
               : 180
       const durationSeconds = measured ?? hintSeconds
@@ -905,13 +1015,58 @@ export const musicGenTool: MusicToolDef = {
             ? "upstream_reported"
             : "model_hint"
 
+      // 多候選交付（2026-10-02）：FlowMusic 上游多數回 2 個 clips。主候選照舊走既有
+      // url/upstream_url 單數欄位（向後兼容零改動），其餘候選經同一上傳通路落成平台
+      // URL，以 gateway 既已消費的 audios[] 形狀 additive 帶出（每筆一個 audio.done）。
+      // 誠實降級：次候選下載/上傳失敗只記進 candidate_errors，絕不拖垮主候選交付。
+      const flowResult = activeChannel === "flowmusic" ? (generated as GenerateFlowMusicTrackResult) : null
+      const candidateErrors: Array<{ candidate_index: number; upstream_url: string; error: string }> = (
+        flowResult?.candidateErrors ?? []
+      ).map((e) => ({ candidate_index: e.candidateIndex, upstream_url: e.upstreamUrl, error: e.error }))
+      const audios: Array<{ url: string; upstream_url?: string; duration_seconds?: number; candidate_index: number }> = []
+      if (flowResult && url) {
+        // 主候選（index 0）沿用既有 url：同一份位元組不重複上傳。
+        audios.push({
+          url,
+          ...(upstreamUrl ? { upstream_url: upstreamUrl } : {}),
+          duration_seconds: Math.round(durationSeconds * 100) / 100,
+          candidate_index: 0,
+        })
+        for (const candidate of flowResult.candidates.slice(1)) {
+          try {
+            const candidateUrl = await uploadAudio(
+              { bytes: Buffer.from(candidate.audioBase64, "base64"), mimeType: candidate.mimeType },
+              context,
+            )
+            audios.push({
+              url: candidateUrl,
+              upstream_url: candidate.upstreamUrl,
+              ...(candidate.upstreamDurationHint !== undefined
+                ? { duration_seconds: Math.round(candidate.upstreamDurationHint * 100) / 100 }
+                : {}),
+              candidate_index: candidate.candidateIndex,
+            })
+          } catch (e) {
+            candidateErrors.push({
+              candidate_index: candidate.candidateIndex,
+              upstream_url: candidate.upstreamUrl,
+              error: (e as Error)?.message ?? String(e),
+            })
+          }
+        }
+      }
+
       return ok({
         title: "音乐生成完成",
         ...(url ? { url, path_source: "gateway_uploads" } : { audio_base64: generated.audioBase64, upload: uploadCode }),
         ...(upstreamUrl ? { upstream_url: upstreamUrl } : {}),
+        ...(audios.length > 0 ? { audios } : {}),
+        ...(candidateErrors.length > 0 ? { candidate_errors: candidateErrors } : {}),
         // 通路如實回報實際生成通路（回落時 flowmusic2api＝真的走 flowmusic，不虛報 yue2）。
         channel: activeChannel === "yue2" ? "yue2_modal" : activeChannel === "flowmusic" ? "flowmusic2api" : "lyria_gemini",
         // 回落事實 additive 回報（只在真的發生回落時在場；既有鍵零改動）。
+        ...(degradedReasons.length > 0 ? { degraded: true, degraded_reason: degradedReasons.join("；") } : {}),
+        ...(lyriaIgnored.length > 0 ? { ignored_inputs: lyriaIgnored } : {}),
         ...(fallbackFrom !== null ? { fallback_from: fallbackFrom, fallback_reason: fallbackReason } : {}),
         duration_seconds: Math.round(durationSeconds * 100) / 100,
         duration_source: durationSource,
@@ -947,13 +1102,15 @@ export const musicGenTool: MusicToolDef = {
           layers: directed.layers,
         },
         reference_image_count:
-          activeChannel === "lyria" ? imagesBase64.filter((i) => i !== "").length : 0,
-        ...(activeChannel !== "lyria" && imagesBase64.some((i) => i !== "")
+          activeChannel === "lyria" && !lyriaVertex ? imagesBase64.filter((i) => i !== "").length : 0,
+        ...((activeChannel !== "lyria" || lyriaVertex) && imagesBase64.some((i) => i !== "")
           ? {
               reference_images_note:
                 activeChannel === "yue2"
                   ? "YuE2 通路不支持参考图（图生乐），本次已忽略"
-                  : "FlowMusic2API 通路暂不支持参考图（图生乐），本次已忽略",
+                  : activeChannel === "lyria"
+                    ? "Vertex lyria-002 通路不支持参考图（图生乐），本次已忽略"
+                    : "FlowMusic2API 通路暂不支持参考图（图生乐），本次已忽略",
             }
           : {}),
       })

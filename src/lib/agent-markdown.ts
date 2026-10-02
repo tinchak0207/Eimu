@@ -29,24 +29,64 @@ export type MdBlock =
   | { type: "table"; head: MdInline[][]; rows: MdInline[][][] };
 
 /**
+ * 平台自產媒體路徑的補判（2026-10-02）。
+ *
+ * 三支判定器原本只認副檔名。平台交付 URL 產出時多帶副檔名（見
+ * agent-output-cards.ts:221-231 對音頻 URL 的實查），但模型回覆裡仍會出現
+ * **缺副檔名**的平台直鏈，純擴展名判定會漏判、退化成裸連結。
+ *
+ * 補判只收「目錄語義釘死單一媒體」的形狀，且規則一律精確主機＋精確路徑前綴。
+ * 以下是生產中多種媒體混居的形狀，**故意不補判**，維持裸連結——寧可留連結，
+ * 也不畫無法證實的媒體卡（畫錯卡比裸連結更傷）：
+ *   - `image-data/files/generation/jobs/`：artifact-service.ts:454 同目錄落圖
+ *     （png/webp）與影片（mp4，實例見 eval-director-extreme 成片 URL），無法由路徑判型。
+ *   - `image-data/files/uploads/media-*`：media-internal-routes.ts:80 同時接受
+ *     image/*、video/*、audio/*（實測有 .png、.m4a、.wav、.flac）。
+ *   - `image-data/files/agent-batch3/`：實測同目錄有 .png（amx-landscape_169-*）
+ *     與 .wav（video-evidence-*），且此目錄由 agent 臨時寫入、無穩定命名契約。
+ *   - `image.tinchak0207.xyz/v1/images/<id>/result`：預設回 JSON、且須 bearer 金鑰
+ *     （app/api/v1/images/[id]/result/route.ts:29-45），<img> 送不出 Authorization。
+ */
+// 參考圖目錄：三個寫入點落盤前全過 validateImageBuffer，只存圖片
+// （biz-image-references.ts:90、app/api/generation-jobs/route.ts:147、
+//  generation-core/artifact-service.ts:482）。
+const PLATFORM_IMAGE_URL =
+  /^https?:\/\/store\.tinchak0207\.xyz\/image-data\/files\/generation\/references\/[A-Za-z0-9._-]+$/i;
+// 音樂生成器交付目錄：music-tools.ts 上傳，mime→ext 全為 audio/*（agent-output-cards.ts:225）。
+const PLATFORM_AUDIO_MUSIC_URL =
+  /^https?:\/\/store\.tinchak0207\.xyz\/image-data\/files\/uploads\/music-gen-[A-Za-z0-9._-]+$/i;
+// 網關 TTS 公網面：constants-gateway.ts:193 TTS_PUBLIC_BASE，路徑即音頻。
+const PLATFORM_AUDIO_TTS_URL =
+  /^https?:\/\/store\.tinchak0207\.xyz\/agent\/v1\/audio\/[A-Za-z0-9._-]+$/i;
+
+/**
  * 判断一个 URL 是否指向图片：平台生成的图（pixai / Vercel Blob / 任意直链）
- * 以扩展名判定。命中即由渲染层画成缩略图卡，而不是一串裸 URL 文本。
+ * 以扩展名判定，另加平台「只存图片」目录的补判（见上方 PLATFORM_*）。命中即由
+ * 渲染层画成缩略图卡，而不是一串裸 URL 文本。
  */
 export function isImageUrl(url: string): boolean {
   if (!/^https?:\/\//i.test(url)) return false;
-  return /\.(png|jpe?g|webp|gif)(\?\S*)?$/i.test(url.trim());
+  return /\.(png|jpe?g|webp|gif)(\?\S*)?$/i.test(url.trim()) || PLATFORM_IMAGE_URL.test(url.trim());
 }
 
-/** 影片直链（mp4/mov/webm/m4v）：命中即由渲染层画成播放器，不留裸 URL。 */
+/**
+ * 影片直链（mp4/mov/webm/m4v）：命中即由渲染层画成播放器，不留裸 URL。
+ * 无「extensionless 且能钉死是影片」的平台形状可补（generation/jobs 圖影混居），故不动。
+ */
 export function isVideoUrl(url: string): boolean {
   if (!/^https?:\/\//i.test(url)) return false;
   return /\.(mp4|mov|webm|m4v)(\?\S*)?$/i.test(url.trim());
 }
 
-/** 音频直链（m4a/mp3/wav/aac/ogg/flac/opus）：同上，画成音频播放器。 */
+/** 音频直链（m4a/mp3/wav/aac/ogg/flac/opus）：同上，画成音频播放器，另加平台「只存音频」前缀补判。 */
 export function isAudioUrl(url: string): boolean {
   if (!/^https?:\/\//i.test(url)) return false;
-  return /\.(m4a|mp3|wav|aac|ogg|flac|opus)(\?\S*)?$/i.test(url.trim());
+  const trimmed = url.trim();
+  return (
+    /\.(m4a|mp3|wav|aac|ogg|flac|opus)(\?\S*)?$/i.test(trimmed) ||
+    PLATFORM_AUDIO_MUSIC_URL.test(trimmed) ||
+    PLATFORM_AUDIO_TTS_URL.test(trimmed)
+  );
 }
 
 function inlineFromTokens(tokens: Token[] | undefined): MdInline[] {
