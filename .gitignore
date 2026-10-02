@@ -160,6 +160,10 @@ redteam-*
 # 例外：poller/ 是 /opt/agent-harness/poller（生產常駐輪詢程式）的唯一真源；此前無 repo 真源導致
 # 影片命名空間 bug 存活至今（2026-10-02 修）。純程式碼，不含憑證
 !/deploy-staging/poller/
+# 例外：flowmusic2api/ 是 FlowMusic 帳號池服務的 P1/P2 憑證鏈修復補丁＋看門狗的真源；
+# 此前補丁只在本機 /tmp、看門狗只在 VPS（同 agent-poller 的無真源陷阱）。
+# 純程式碼/補丁/測試，不含憑證
+!/deploy-staging/flowmusic2api/
 *.bak-*
 
 # ── 影片產物（本機渲染輸出，200MB 級，2026-09-27 commit 瘦身）──
