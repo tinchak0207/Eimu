@@ -159,7 +159,9 @@ cmd_release() {
   sha12="$(git -C "$REPO_ROOT" rev-parse --short=12 "$sha")"
   ts="$(date -u +%Y%m%dT%H%M%SZ)"
   stage="$(mktemp -d /tmp/oc-stage.XXXXXX)"; exp="$(mktemp /tmp/oc-exp.XXXXXX)"; tar_file="$(mktemp /tmp/oc-stage.XXXXXX.tar)"
-  trap 'rm -rf "$stage" "$exp" "$tar_file"' EXIT
+  # 用 ${x:-} 保險：trap 在 cmd_release 返回後才觸發，此時 local 變數已出作用域，
+  # `set -u` 下直接引用會噴 unbound variable（首發實測）。
+  trap 'rm -rf "${stage:-}" "${exp:-}" "${tar_file:-}"' EXIT
 
   log "== 發佈 .opencode @ $sha12 → $ts =="
   run_recon
