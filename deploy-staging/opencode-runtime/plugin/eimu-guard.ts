@@ -15,7 +15,6 @@
 import type { Plugin } from "@opencode-ai/plugin"
 import { mkdir, stat } from "node:fs/promises"
 import {
-  WORKSPACE,
   assertSafeFetchUrl,
   checkAgentPath,
   collectUrlArgs,
@@ -28,7 +27,8 @@ import {
   sessionTmpDir,
   setOwner,
   SsrfError,
-  wrapShellCommand,
+  ensureSessionLauncher,
+  unwrapShellCommand,
 } from "../lib/sandbox"
 
 const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081"
@@ -247,9 +247,15 @@ export const EimuGuard: Plugin = async ({ client }) => {
         if (!sandboxAvailable()) throw new Error("执行环境暂不可用，请改用原生工具完成。")
         await ensureSession(input.sessionID)
         await ensureDirs(input.sessionID)
-        const cmd = typeof args.command === "string" ? args.command : ""
-        const cwd = typeof args.workdir === "string" && args.workdir ? args.workdir : WORKSPACE
-        args.command = wrapShellCommand(cmd, { sessionID: input.sessionID, cwd })
+        // 方案 B（2026-10-02）：沙箱改在 spawn 當下由 shell 包裝器（lib/eimu-shell）注入，
+        // 這裡**不再改寫 args.command**——模型上下文只會有原始命令。
+        // 唯一例外：把「既有 DB 資料／舊版回放」裡我方舊包裝簽名剝回原始命令（防巢狀致死）。
+        // 對所有正常命令是逐字 no-op（unwrapped === raw），不產生任何上下文污染。
+        if (typeof args.command === "string") {
+          const raw = args.command
+          const unwrapped = unwrapShellCommand(raw)
+          if (unwrapped !== raw) args.command = unwrapped
+        }
         return
       }
 
@@ -318,9 +324,26 @@ export const EimuGuard: Plugin = async ({ client }) => {
       }
     },
 
-    "shell.env": async (_input, output) => {
+    "shell.env": async (input, output) => {
       for (const k of Object.keys(output.env ?? {})) {
         if (/(KEY|TOKEN|SECRET|PASSWORD|PASSWD|HMAC|CREDENTIAL|COOKIE|AUTH)/i.test(k)) delete output.env[k]
+      }
+      // 方案 B（2026-10-02）：沙箱由頂層 shell 包裝器（lib/eimu-shell，opencode.json 的
+      // top-level `shell`）在 spawn 當下注入。這裡負責：ensure session → 寫好本會話 launcher
+      // → 注入其絕對路徑（EIMU_LAUNCHER）。包裝器對「非使用者命令」的呼叫完全透明。
+      // 無 sessionID（opencode 內部把 shell 當工具用）＝不注入 ⇒ 包裝器透明，不影響內部呼叫。
+      const sessionID =
+        (input as unknown as { sessionID?: string } | undefined)?.sessionID ?? ""
+      if (sessionID && sandboxAvailable()) {
+        let launcher: string
+        try {
+          launcher = ensureSessionLauncher(sessionID)
+        } catch {
+          // 寫不出 launcher ＝ 該會話包不了沙箱 ⇒ fail-closed（包裝器見非可執行路徑即拒執行）。
+          launcher = "/nonexistent/eimu-launcher"
+        }
+        output.env ??= {}
+        output.env.EIMU_LAUNCHER = launcher
       }
     },
 

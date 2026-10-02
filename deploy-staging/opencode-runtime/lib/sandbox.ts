@@ -379,6 +379,18 @@ function writeSessionLauncher(opts: { sessionID: string; cwd?: string }): { file
   return { file, cwd, argv }
 }
 
+/**
+ * 方案 B（2026-10-02）用：只寫好本會話 launcher 並回傳其絕對路徑，不改寫任何命令。
+ * 由 plugin 的 `shell.env` hook 呼叫——沙箱改在 **spawn 當下** 由頂層 shell 包裝器
+ * （lib/eimu-shell）注入，args／模型上下文永遠只有原始命令。
+ *
+ * 註：launcher 內容用 `--chdir "$1"`（執行時由包裝器傳入的 cwd），故這裡的 cwd 不影響
+ * 沙箱 argv（保留參數是為了與 wrapShellCommand 共用同一份 sandboxArgv 真源）。
+ */
+export function ensureSessionLauncher(sessionID: string, cwd?: string): string {
+  return writeSessionLauncher({ sessionID, cwd }).file
+}
+
 export function wrapShellCommand(command: string, opts: { sessionID: string; cwd?: string }): string {
   // bwrap --bind 的來源必須先存在；不依賴呼叫端的 ensureDirs 順序（首呼競態）。
   for (const d of [sessionTmpDir(opts.sessionID), sessionRunDir(opts.sessionID)]) {
