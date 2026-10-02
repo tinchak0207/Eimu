@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { rmSync } from "node:fs"
 import { join } from "node:path"
 import { CRITIC_PASS_MARK } from "./delivery-gate"
+import { CONTINUATION_DIRECTIVE_MARK, ORPHAN_TOOL_USE_MARK } from "./error-classify.ts"
 import {
   handleSubagentDispatch,
   handleSubagentEvent,
@@ -15,6 +16,14 @@ import {
   maybeRunMachineCriticPass,
   handleLoopBreaker,
 } from "./subagent.ts"
+import { handleOpencodeEvent } from "./opencode-event-handler.ts"
+import { sessions } from "./sessions-core.ts"
+
+// ── 捕獲：子代理 done 幀（需求1）、主路徑 prompt_async 注入體（需求2）──────────
+const emitted: Array<{ name: string; data: any }> = []
+const promptBodies: Array<Record<string, unknown>> = []
+// 需求1 用：讓 /message 回一段可控的「多則 assistant＋tool 噪音」假執行結果。
+let messageFixture: unknown[] | null = null
 
 // ── mock fetch：/session 建會話、prompt_async 記角色、message 回文本 ──────────
 const realFetch = globalThis.fetch
@@ -50,17 +59,21 @@ globalThis.fetch = (async (input: unknown, init?: { method?: string; body?: stri
   if (url.includes("/prompt_async")) {
     const cid = childOf(url)
     let agent = ""
+    let parsed: Record<string, unknown> = {}
     try {
-      agent = (JSON.parse(init?.body ?? "{}") as { agent?: string }).agent ?? ""
+      parsed = JSON.parse(init?.body ?? "{}") as Record<string, unknown>
+      agent = (parsed.agent as string) ?? ""
     } catch {
       agent = ""
     }
+    promptBodies.push(parsed)
     if (cid) childKind.set(cid, agent)
     return json({})
   }
   if (url.includes("/abort")) return json({})
   if (method === "DELETE") return json({})
   if (url.includes("/message")) {
+    if (messageFixture) return json(messageFixture)
     const cid = childOf(url)
     return json([{ info: { role: "assistant" }, parts: [{ type: "text", text: assistantText(cid ? childKind.get(cid) : undefined) }] }])
   }
@@ -117,7 +130,9 @@ function safeLabel(label: string): string {
 
 beforeAll(() => {
   initSubagent({
-    emitToSession: () => {},
+    emitToSession: (_state: unknown, name: string, data: unknown) => {
+      emitted.push({ name, data })
+    },
     resolveSession: (id: string) => parents.get(id),
     findSessionByOpenCodeId: (oc: string) => [...parents.values()].find((p) => p.opencodeSessionId === oc),
     openCodeUrl: "http://gw.test",
@@ -338,5 +353,158 @@ describe("D1 loop-breaker 端點", () => {
     const body = (await res.json()) as { ok: boolean; aborted: boolean }
     expect(body.ok).toBe(true)
     expect(body.aborted).toBe(true)
+  })
+})
+
+// ── 需求1（2026-10-02 能力片）：子代理回傳契約收斂 ─────────────────────────────
+// 設計取自 Claude Code 同步子代理回傳（只取最後一則 assistant 的 text 區塊＋用量），
+// 未複製其程式碼。真值斷言：餵「多則 assistant＋中間 tool 噪音」的假執行結果；
+// 並驗明確字數上限（SUBAGENT_SUMMARY_MAX_CHARS=4000，換行邊界截斷＋「已截斷」提示）。
+// 從摘要中剝出「行內正文」：去落盤指標前綴、去截斷提示與用量行。
+function inlineOf(summary: string): string {
+  return summary
+    .replace(/^\[[^\]]*\]\s*/, "")
+    .split("\n\n[已截斷")[0]!
+    .split("\n\n[子代理用量]")[0]!
+}
+async function runChildAndGetDone(p: { sessionId: string }, label: string, fixture: unknown[]) {
+  const a = await dispatch(p, label)
+  messageFixture = fixture
+  emitted.length = 0
+  await handleSubagentEvent({ type: "session.idle" }, a.childId)
+  await settle(80)
+  messageFixture = null
+  const done = emitted.find((e) => e.name === "subagent.done")
+  expect(done).toBeTruthy()
+  const d = done!.data as {
+    id: string
+    status: string
+    summary: string
+    usage?: { tool_calls: number; duration_ms: number; tokens: number }
+  }
+  writtenFiles.push({ id: a.subagent_id, label })
+  return { a, d }
+}
+
+describe("需求1 子代理回傳契約：最後一則 assistant 文字＋用量計數", () => {
+  test("(a) 末則 200 字 → inline 摘要逐字等於它（非全文前 600）＋ usage；既有 done 欄不變", async () => {
+    const p = makeParent("gw-req1a")
+    const lastText = "Q".repeat(199) + "|END" // 200 字，< 上限 → 不截
+    const { a, d } = await runChildAndGetDone(p, "契約甲", [
+      // 第一則 assistant：有文字＋一個 tool（舊碼「全文」會把它拼進去）
+      { info: { role: "assistant", tokens: { input: 100, output: 50 } }, parts: [{ type: "text", text: "第一則：先做準備" }, { type: "tool", tool: "bash", callID: "c0" }] },
+      // 中間 tool 噪音：純 tool、零文字（loop 停在 tool_use 的形態 → 必須回退）
+      { info: { role: "assistant", tokens: { input: 1, output: 2 } }, parts: [{ type: "tool", tool: "read", callID: "c1" }] },
+      // 最後一則 assistant：真結果（200 字）
+      { info: { role: "assistant", tokens: { input: 7, output: 3, cache: { read: 5, write: 0 } } }, parts: [{ type: "text", text: lastText }] },
+    ])
+    // 既有欄語義一字不變
+    expect(d.id).toBe(a.subagent_id)
+    expect(d.status).toBe("ok")
+    // inline 摘要逐字等於末則訊息；未觸發截斷
+    expect(inlineOf(d.summary)).toBe(lastText)
+    expect(d.summary.includes("[已截斷")).toBe(false)
+    // 第一則文字與中間 tool 噪音不得被拼進摘要（取最後一則，不回顧拼接）
+    expect(d.summary.includes("第一則：先做準備")).toBe(false)
+    // 用量欄位：tool part 共 2 個；token＝最後一則 assistant 的 input+output+cache
+    expect(d.usage?.tool_calls).toBe(2)
+    expect(d.usage?.tokens).toBe(15)
+    expect(d.usage?.duration_ms).toBeGreaterThanOrEqual(0)
+    // 鍵集比對：既有三鍵必在；其餘只能是允許的新/可選鍵（一字不改既有欄名）
+    const keys = Object.keys(d)
+    expect(keys).toContain("id")
+    expect(keys).toContain("status")
+    expect(keys).toContain("summary")
+    for (const k of keys) expect(["id", "status", "summary", "delivery_gate", "usage"]).toContain(k)
+  })
+
+  test("(b) 末則 12,000+ 字 → inline 摘要 ≤4000＋截斷提示，且含該則開頭（證明取末則）", async () => {
+    const p = makeParent("gw-req1b")
+    // 每行 ~98 字、150 行 ≈ 14,700 字，遠超 4000；帶換行讓截斷發生在換行邊界。
+    const longText = Array.from({ length: 150 }, (_, i) => `LINE${i}-` + "X".repeat(90)).join("\n")
+    expect(longText.length).toBeGreaterThan(12000)
+    const { d } = await runChildAndGetDone(p, "契約乙", [
+      { info: { role: "assistant", tokens: { input: 10, output: 5 } }, parts: [{ type: "text", text: longText }] },
+    ])
+    const inline = inlineOf(d.summary)
+    expect(inline.length).toBeLessThanOrEqual(4000)
+    expect(d.summary.includes("[已截斷")).toBe(true)
+    // 取的是「末則」的開頭（不是別的訊息、不是尾部）
+    expect(inline.startsWith("LINE0-")).toBe(true)
+    expect(longText.startsWith(inline)).toBe(true)
+    // 截斷提示帶實際被截字數
+    expect(d.summary).toMatch(/\[已截斷 \d+ 字元；完整結果見落盤指標\]/)
+  })
+})
+
+// ── 需求2（2026-10-02 能力片）：錯誤訊息即模型上下文（真事件序列＋真 emit 路徑）────
+// 「模型可見 but 使用者不可見」的通道＝既有 prompt_async 文本 part（opencode 存成
+// user-role message）。此處驅動 handleOpencodeEvent 真序列，並用真 emitToSession 的
+// 客戶端 enqueue 驗證注入文本不會上使用者流。
+describe("需求2 failover 注入：串流中斷續寫＋孤兒 tool_use 補 is_error", () => {
+  test("中斷＋在跑工具 → prompt_async 注入續寫指示與孤兒補注；使用者流不含注入", async () => {
+    const oc = "ses_req2_main_1"
+    const clientFrames: string[] = []
+    const state: any = {
+      sessionId: "gw-req2-main",
+      opencodeSessionId: oc,
+      messageRole: new Map(),
+      replayBuffer: [],
+      clients: new Set([{ controller: { enqueue: (f: Uint8Array) => clientFrames.push(new TextDecoder().decode(f)) } }]),
+      eventCounter: 0,
+      suppressedParts: new Set(),
+      partTextEmitted: new Map(),
+      partStripState: new Map(),
+      toolStatusSeen: new Set(),
+      toolInvokeSeen: new Set(),
+      pendingQuestions: new Set(),
+      stepCostLogged: new Set(),
+      compactionNotified: new Set(),
+      turnTextChars: 0,
+      turnReasoningChars: 0,
+      turnRetries: 0,
+      turnAborted: false,
+      lastPromptBody: { parts: [{ type: "text", text: "原始任務" }] },
+    }
+    sessions.set(state.sessionId, state)
+
+    // (0) control：assistant 正文確實會上使用者流（證明後面的「不含」不是管線壞掉）
+    handleOpencodeEvent({ type: "message.updated", properties: { sessionID: oc, info: { id: "ma", role: "assistant" } } })
+    handleOpencodeEvent({ type: "message.part.updated", properties: { sessionID: oc, part: { type: "text", id: "pa", messageID: "ma", text: "可见正文\n" } } })
+    expect(clientFrames.some((f) => f.includes("event: message.delta") && f.includes("可见正文"))).toBe(true)
+
+    // (1) 真事件序列：assistant 起一個工具（running，未完成）→ 上游錯誤 → idle 收尾
+    handleOpencodeEvent({
+      type: "message.part.updated",
+      properties: {
+        sessionID: oc,
+        part: { type: "tool", id: "pt", callID: "call_x", tool: "bash", messageID: "ma", state: { status: "running", input: { command: "sleep 100" } } },
+      },
+    })
+    handleOpencodeEvent({ type: "session.error", properties: { sessionID: oc, error: { name: "APIError", data: { message: "upstream stream reset" } } } })
+    const before = promptBodies.length
+    handleOpencodeEvent({ type: "session.idle", properties: { sessionID: oc } })
+    // failover 走 TURN_RETRY_DELAY_MS（預設 1500ms）後才投遞 prompt_async
+    await settle(2300)
+
+    // (a) 注入內容正確（模型可見）
+    const injected = promptBodies.slice(before).find((b) => JSON.stringify(b).includes(CONTINUATION_DIRECTIVE_MARK))
+    expect(injected).toBeTruthy()
+    const injectedText = String((injected!.parts as Array<{ text?: string }>)[0]?.text ?? "")
+    expect(injectedText.includes(CONTINUATION_DIRECTIVE_MARK)).toBe(true)
+    expect(injectedText.includes(ORPHAN_TOOL_USE_MARK)).toBe(true)
+    expect(injectedText.includes("bash")).toBe(true)
+    expect(injectedText.includes("call_x")).toBe(true)
+
+    // (b) 使用者可見流不含它——餵入「注入訊息（user-role）」的真事件，真 emit 路徑必須擋掉
+    const framesBefore = clientFrames.length
+    handleOpencodeEvent({ type: "message.updated", properties: { sessionID: oc, info: { id: "inj", role: "user" } } })
+    handleOpencodeEvent({ type: "message.part.updated", properties: { sessionID: oc, part: { type: "text", id: "pi", messageID: "inj", text: injectedText } } })
+    handleOpencodeEvent({ type: "message.part.delta", properties: { sessionID: oc, field: "text", messageID: "inj", partID: "pi", delta: "续写中" } })
+    const frames = clientFrames.slice(framesBefore)
+    expect(frames.some((f) => f.includes("event: message.delta"))).toBe(false)
+    expect(clientFrames.some((f) => f.includes(CONTINUATION_DIRECTIVE_MARK))).toBe(false)
+
+    sessions.delete(state.sessionId)
   })
 })

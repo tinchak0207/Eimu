@@ -2,7 +2,7 @@
 // 預算常量、注入塊組裝、trace 三件、召回 prefetch、批次 deps 與 ticker、三個內部端點。
 // 逐行搬運自 /home/lenovo/Desktop/image-app/deploy-staging/gateway/index.ts，僅加 export 前綴＋本檔頭＋單行 import。
 // 注意：memoryBatch 單例與 ticker setInterval 是模組級副作用，原樣搬運（載入即生效）。
-import { CorpusCache, recallTop, buildRecallQuery, renderRecallPrefix, type RecallableDoc } from "./memory-recall"
+import { CorpusCache, recallTop, buildRecallQuery, renderRecallPrefix, clampRecallK, clipToUtf8Bytes, utf8ByteLength, RECALL_K_DEFAULT, RECALL_K_MAX, type RecallableDoc } from "./memory-recall"
 import { MEMORY_SIGNATURE_HEADER, signMemoryBytes, signEmptyMemoryBody, createMemoryBatch, type MemorySessionRecord } from "./memory-batch"
 import { MEMORY_INGEST_SECRET, MEMORY_INGEST_BASE_URL, MEMORY_BATCH_ENABLED, MEMORY_BATCH_HOUR_UTC, MEMORY_SHARED_ENABLED, MEMORY_RECALL_MIN_SCORE, MEMORY_RECALL_ENABLED, MEMORY_VERIFIER_MODEL, MEMORY_ORACLE_MODEL } from "./constants-gateway"
 import { bindingRef } from "./model-registry"
@@ -352,17 +352,69 @@ export interface MemoryRecallPrefetchEntry {
 export const memoryRecallPrefetch = new Map<string, MemoryRecallPrefetchEntry>()
 export const memoryRecallInflight = new Set<string>()
 
+// ── 單 session 召回注入位元組上限（2026-10-02）──────────────────────────────
+// 設計取自 Claude Code attachments.ts 的 RELEVANT_MEMORIES_CONFIG.MAX_SESSION_BYTES（60KB）——
+// 概念：單回合有上限，但長會話每回合持續注入不同記憶會累積灌爆上下文，故設 session 累計帽。
+// 我方實作：模組級 Map<sessionId, 已注入 bytes>，在 takeMemoryRecallPrefix（每次真正注入點）
+// 記帳；超限即「降級」——裁到剩餘額度或整段不注入，並以 warn 記 log，絕不拋錯。
+// 清理缺口：sessions-core 的 teardownSession 未接此 Map（該檔非本輪所有權），故以
+// 有界淘汰自我防漏（超上限條數丟最舊 session；session 重建後計數歸零，語義等同重置）。
+export const MEMORY_RECALL_SESSION_BYTE_BUDGET = 60 * 1024 // 60KB（≈3 次滿額注入）
+export const MEMORY_RECALL_SESSION_USAGE_MAX = 2000 // Map 條數上限（防跨 session 無界增長）
+export const memoryRecallSessionBytes = new Map<string, number>()
+
+/** 本 session 累計已注入的召回位元組。 */
+export function memoryRecallSessionUsed(sessionId: string): number {
+  return memoryRecallSessionBytes.get(sessionId) ?? 0
+}
+
+/** 記帳（有界：超條數丟最舊，Map 保留插入序）。 */
+function noteMemoryRecallSessionBytes(sessionId: string, bytes: number): void {
+  memoryRecallSessionBytes.set(sessionId, bytes)
+  if (memoryRecallSessionBytes.size > MEMORY_RECALL_SESSION_USAGE_MAX) {
+    const oldest = memoryRecallSessionBytes.keys().next().value
+    if (oldest !== undefined) memoryRecallSessionBytes.delete(oldest)
+  }
+}
+
+/** 歸零某 session 的累計（供 teardown 或壓縮後重置；目前未接呼叫端）。 */
+export function resetMemoryRecallSessionUsage(sessionId: string): void {
+  memoryRecallSessionBytes.delete(sessionId)
+}
+
 export function memoryRecallActive(): boolean {
   return MEMORY_RECALL_ENABLED && MEMORY_SHARED_ENABLED
 }
 
-/** 回合開始取預取候選（讀即棄：回合結束重算，防舊候選殭屍注入）。null=miss → 本回合不注入、異步補算。 */
+/**
+ * 回合開始取預取候選（讀即棄：回合結束重算，防舊候選殭屍注入）。null=miss → 本回合不注入、異步補算。
+ * 2026-10-02：此處即真正注入點，落實 session 累計位元組帽（超限降級不報錯）。
+ */
 export function takeMemoryRecallPrefix(sessionId: string): MemoryRecallPrefetchEntry | null {
   if (!memoryRecallActive()) return null
   const rec = memoryRecallPrefetch.get(sessionId)
   if (!rec) return null
   memoryRecallPrefetch.delete(sessionId)
   if (Date.now() - rec.at > MEMORY_RECALL_PREFETCH_TTL_MS) return null
+  if (!rec.prefix) return rec
+  const used = memoryRecallSessionUsed(sessionId)
+  const remaining = MEMORY_RECALL_SESSION_BYTE_BUDGET - used
+  const bytes = utf8ByteLength(rec.prefix)
+  if (remaining <= 0) {
+    console.warn(
+      `[memory-recall] session byte budget exhausted session=${sessionId} used=${used}/${MEMORY_RECALL_SESSION_BYTE_BUDGET} — skip injection`,
+    )
+    return { ...rec, prefix: "" }
+  }
+  if (bytes > remaining) {
+    const clipped = clipToUtf8Bytes(rec.prefix, remaining)
+    console.warn(
+      `[memory-recall] session byte budget exceeded session=${sessionId} prefix=${bytes}B remaining=${remaining}B — degraded to ${utf8ByteLength(clipped)}B`,
+    )
+    noteMemoryRecallSessionBytes(sessionId, used + utf8ByteLength(clipped))
+    return { ...rec, prefix: clipped }
+  }
+  noteMemoryRecallSessionBytes(sessionId, used + bytes)
   return rec
 }
 
@@ -374,7 +426,9 @@ export async function scheduleMemoryRecallPrefetch(state: SessionState): Promise
   try {
     const query = buildRecallQuery(state.lastUserMessage ?? "", state.turnAssistantHead ?? "")
     const docs = await memorySharedCorpus.get("shared")
-    const hits = recallTop(query, docs, { minScore: MEMORY_RECALL_MIN_SCORE }) // top-3 = BM25_DEFAULT_K 默認（§7）
+    // 上限可設定（env MEMORY_RECALL_K）且一律夾 ≤ RECALL_K_MAX；預設維持 §7 產品決策 top-3。
+    const k = clampRecallK(process.env.MEMORY_RECALL_K, RECALL_K_DEFAULT)
+    const hits = recallTop(query, docs, { minScore: MEMORY_RECALL_MIN_SCORE, k })
     memoryRecallPrefetch.set(state.sessionId, {
       prefix: renderRecallPrefix(hits.map((h) => h.doc)),
       docRefs: hits.map((h) => ({ domain: h.doc.domain, slug: h.doc.slug })),
@@ -656,7 +710,9 @@ export async function handleMemoryTrace(key: string, id: string): Promise<Respon
 /**
  * memory_recall 工具後端（PRD §6.2；【契約外新增路由】，已隨本片回報）。
  * 從共享語料跑 §7 召回，回 {results:[{doc:{slug,domain,description,body},score}],count}。
- * limit 默認 5、上限 10；minScore=MEMORY_RECALL_MIN_SCORE；共享關 → 空 results。
+ * limit 默認 3（§7）、上限 RECALL_K_MAX=5（2026-10-02 收緊，原 10；對齊工具層
+ * memory_recall_impl 的「默認 3、帽值 5」與 Claude Code 每次查詢最多 5 條的設計概念）；
+ * minScore=MEMORY_RECALL_MIN_SCORE；共享關 → 空 results。
  */
 export async function handleMemoryRecallSearch(key: string, req: Request): Promise<Response> {
   void key // 同族鑑權口徑：Bearer 閘門已在上游驗過，此端點無 session 維度，不需 key 數據面
@@ -680,13 +736,14 @@ export async function handleMemoryRecallSearch(key: string, req: Request): Promi
     const dm = body.domain.trim()
     docs = docs.filter((d) => d.domain === dm)
   }
-  const k = Math.min(Math.max(Number.parseInt(String(body.limit ?? ""), 10) || 5, 1), 10)
+  const k = clampRecallK(body.limit, RECALL_K_DEFAULT)
   const hits = recallTop(query, docs, { minScore: MEMORY_RECALL_MIN_SCORE, k })
-  const results = hits.map((h) => ({
+  const results = hits.slice(0, RECALL_K_MAX).map((h) => ({
     doc: { slug: h.doc.slug, domain: h.doc.domain, description: h.doc.description, body: h.doc.body },
     score: h.score,
   }))
   // 工具端 memory_recall_impl 解析 body.results ?? body.docs（頂層陣列=直接拋 upstream_bad_response）
+  // 不變量：results.length ≤ RECALL_K_MAX（recallTop 已夾帽，此處再 slice 兜底防未來改動漏接）。
   return Response.json({ results, count: results.length })
 }
 

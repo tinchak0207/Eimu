@@ -24,6 +24,10 @@ import { noteReasoningDelta, resetReasoningCap, buildReasoningNudge } from "./re
 import { emitUnfulfilledPlanNotice, recordUnfulfilledPlan } from "./plan-promise.ts"
 import { maybeCompactSession } from "./messages-gw.ts"
 import { opencodeErrorCode, opencodeErrorMessage } from "./emit-helpers.ts"
+// 2026-10-02 能力片：錯誤訊息即模型上下文。failover 重投時以既有 prompt_async 文本
+// part 通道注入「續寫指示」與「孤兒 tool_use 補 is_error」——模型可見、使用者不可見
+// （設計取自 Claude Code，未複製其程式碼；見 error-classify.ts 該節註解）。
+import { buildFailoverInjection, buildContinuationDirective, type OrphanToolUse } from "./error-classify.ts"
 // REQ-D2（2026-09-22）：回合收尾投遞待投的 steer（空隊列＝零動作，無 steer 的回合逐位等價）。
 // 方向與既有 maybeCompactSession 同款（本檔 → messages-gw 家族），不新增環。
 import { flushPendingSteers } from "./steer-gw.ts"
@@ -56,6 +60,41 @@ function emitOtherPartTails(state: SessionState, exceptPid?: string): void {
     emitToSession(state, "message.delta", { text }, { strippable: true })
     state.lastUserVisibleAt = Date.now()
   }
+}
+
+// ── 2026-10-02 能力片：孤兒 tool_use 追蹤（設計取自 Claude Code yieldMissingToolResultBlocks
+// ——換模型時替未收到結果的 tool_use 補 is_error，未複製程式碼）──────────────
+// 純讀觀測：記錄每個 session 目前 in-flight 的工具調用；工具 completed/error 即摘除。
+// turn 因上游錯誤中斷時，殘留在表裡的就是「孤兒」——換模型重投時注入 is_error 語義補注，
+// 讓接手模型知道這些工具沒跑完。只寫本模組私有 Map，不新增任何前端幀（使用者不可見）。
+const inFlightToolsBySession = new Map<string, Map<string, OrphanToolUse>>()
+const IN_FLIGHT_TOOLS_CAP = 64
+function noteToolInFlight(state: SessionState, part: any): void {
+  const callId = typeof part?.callID === "string" ? part.callID : ""
+  if (!callId) return
+  const status = typeof part?.state?.status === "string" ? part.state.status : ""
+  let m = inFlightToolsBySession.get(state.sessionId)
+  if (!m) {
+    m = new Map()
+    inFlightToolsBySession.set(state.sessionId, m)
+  }
+  if (status === "pending" || status === "running") {
+    m.set(callId, { id: callId, name: typeof part?.tool === "string" ? part.tool : "" })
+    boundMap(m, IN_FLIGHT_TOOLS_CAP)
+  } else if (status === "completed" || status === "error") {
+    m.delete(callId)
+  }
+}
+/** 取出並清空該 session 的孤兒候選（failover 消費一次；正常 turn 結束亦清，防洩漏）。 */
+function takeInFlightTools(state: SessionState): OrphanToolUse[] {
+  const m = inFlightToolsBySession.get(state.sessionId)
+  if (!m || m.size === 0) return []
+  const out = [...m.values()]
+  m.clear()
+  return out
+}
+function clearInFlightTools(state: SessionState): void {
+  inFlightToolsBySession.delete(state.sessionId)
 }
 
 export function handleOpencodeEvent(event: any): void {
@@ -238,6 +277,8 @@ export function handleOpencodeEvent(event: any): void {
             if (!state.turnAborted && (part.state?.status === "pending" || part.state?.status === "running")) {
               emitOtherPartTails(state)
             }
+            // 2026-10-02：孤兒 tool_use 追蹤（純讀，使用者不可見）。
+            noteToolInFlight(state, part)
             handleToolPartUpdate(state, part)
             // P2b 刀2：出現 tool = 本 step 不空。
             // 空轉補丁（2026-10-02）：裸 true/date/:/空 command 的 bash 不算「有動作」——
@@ -415,10 +456,26 @@ export function handleOpencodeEvent(event: any): void {
           if (deadAccount && degradedTarget) {
             markProviderDegraded(degradedTarget, upstreamErr.slice(0, 120))
           }
-          const retryBody: NonNullable<SessionState["lastPromptBody"]> =
-            hadOutput || !baseBody
-              ? { parts: [{ type: "text", text: "（系统提示：上一轮回复因上游模型错误中断，请从中断处继续完成任务，不要重复已完成的步骤或工具调用）" }] }
-              : { ...baseBody, parts: baseBody.parts.map((pt) => ({ ...pt })) }
+          // 2026-10-02 能力片：串流中斷/換模型時，以既有 prompt_async 文本通道注入
+          // 「續寫指示」＋「孤兒 tool_use is_error 補注」。僅 hadOutput（有中斷處可續）
+          // 時注入；零產出重投照原樣重放任務書。注入是 user-role message，模型可見、
+          // 使用者不可見（isAssistantMessage 閘擋掉）。
+          const orphanTools = hadOutput ? takeInFlightTools(state) : []
+          clearInFlightTools(state)
+          const retryInjection = buildFailoverInjection({ hadOutput, orphanTools })
+          const retryBody: NonNullable<SessionState["lastPromptBody"]> = hadOutput
+            ? // 有中斷處：注入續寫指示（＋孤兒工具補注），讓模型從斷點續跑。
+              { parts: [{ type: "text", text: retryInjection }] }
+            : baseBody
+              ? // 零產出：重放原任務書（沒有中斷處可續，不注入）。
+                { ...baseBody, parts: baseBody.parts.map((pt) => ({ ...pt })) }
+              : // 零產出且無原任務書可重放：仍須送非空文本（不可送空 prompt）。
+                { parts: [{ type: "text", text: buildContinuationDirective() }] }
+          if (orphanTools.length > 0) {
+            console.log(
+              `[gateway] turn failover: injected orphan tool_use is_error note (x${orphanTools.length}) — session=${state.sessionId} tools=${orphanTools.map((t) => t.name || t.id).join(",")}`,
+            )
+          }
           console.log(
             `[gateway] turn failover: upstream error, schedule retry #${attempt} (hadOutput=${hadOutput} deadAccount=${deadAccount}) — session=${state.sessionId} error=${upstreamErr.slice(0, 160)}`,
           )
@@ -473,6 +530,8 @@ export function handleOpencodeEvent(event: any): void {
         ) {
           if (state.retryQueued) break // 重試已排隊，等它接手
           state.retryQueued = true
+          // 零產出重投：本次無「中斷處」可續，孤兒候選直接清（防 Map 洩漏）。
+          clearInFlightTools(state)
           const gen = state.turnGen ?? 0
           const attempt = (state.turnRetries ?? 0) + 1
           emitToSession(state, "turn.status", { text: `重试中 (${attempt}/${TURN_MAX_RETRIES})` })
@@ -529,6 +588,8 @@ export function handleOpencodeEvent(event: any): void {
           break // 不發 turn.done：重試輪結束時自然會發
         }
         state.retryQueued = false
+        // 正常收尾：in-flight 工具追蹤清空（本輪結束，無孤兒語義跨輪）。
+        clearInFlightTools(state)
         // 黏性渠道（2026-09-21 暴君裁定）：本輪由重試模型接手（turnRetries>0）且產出真實正文
         // ＝該渠道實證可用，釘死本 session；personaModel() 下一輪直接用它。
         if (

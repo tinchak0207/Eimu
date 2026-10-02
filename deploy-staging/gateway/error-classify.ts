@@ -316,3 +316,53 @@ export function humanForError(message: string): string {
   }
   return ""
 }
+
+// ── 「錯誤訊息即模型上下文」（2026-10-02 能力片）────────────────────────────────
+// 設計取自 Claude Code 的三個概念（**未複製其程式碼**，僅取形態後我方式重寫）：
+//   ① max_output/串流中斷後注入隱藏續寫訊息（直接續寫、勿道歉、勿複述、拆小步驟）；
+//   ② 換模型（fallback）時替未收到結果的孤兒 tool_use 補 is_error 語義的補注，
+//      讓接手模型知道這些調用沒跑完、需重做。
+// 我方落地通道＝既有 prompt_async 文本 part（opencode 存成 user-role message）：
+// 模型可見；使用者不可見——message.part.updated / message.part.delta 的
+// isAssistantMessage 閘（opencode-event-handler.ts）不放行 user-role 文本。
+// 本模組只產出純字串，不發任何幀、不碰網路。
+
+/** 續寫指示（串流中斷／重投）。模型可見、使用者不可見。 */
+export const CONTINUATION_DIRECTIVE_MARK = "【系统续写指示】"
+export function buildContinuationDirective(): string {
+  return (
+    `${CONTINUATION_DIRECTIVE_MARK}上一轮回复因上游模型错误在流式传输中断（非你的错误）。` +
+    `请从中断处直接续写完成任务：不要道歉、不要复述已完成的内容、不要重新开始；` +
+    `若剩余工作较多，请把它拆成更小的步骤继续，不要重复已完成的步骤或工具调用。`
+  )
+}
+
+export interface OrphanToolUse {
+  id?: string
+  name?: string
+}
+
+/** 換模型時孤兒 tool_use 的補償：對每個未收到結果的工具調用，注入 is_error 語義的補注。 */
+export const ORPHAN_TOOL_USE_MARK = "【工具结果缺失·系统补注】"
+export function buildOrphanToolUseDirective(tools: OrphanToolUse[]): string {
+  const list = (tools ?? []).filter((t) => t && (t.name || t.id))
+  if (list.length === 0) return ""
+  const lines = list.map((t) => `- ${t.name || "未知工具"}${t.id ? `（调用 ${t.id}）` : ""}`)
+  return (
+    `${ORPHAN_TOOL_USE_MARK}以下工具调用因上游中断/换模型而未产生任何结果` +
+    `（语义等同 is_error=true，请勿假定它们成功）：\n${lines.join("\n")}\n` +
+    `如需其结果，请在续写时重新调用；不要凭记忆臆造它们的结果。`
+  )
+}
+
+/**
+ * failover 重投的模型可見注入文本：續寫指示 ＋（若有孤兒工具）補注。
+ * hadOutput=false（零產出重投）時不注入續寫指示——沒有「中斷處」可續，重投原任務書即可。
+ */
+export function buildFailoverInjection(opts: { hadOutput: boolean; orphanTools?: OrphanToolUse[] }): string {
+  const parts: string[] = []
+  if (opts.hadOutput) parts.push(buildContinuationDirective())
+  const orphan = buildOrphanToolUseDirective(opts.orphanTools ?? [])
+  if (orphan) parts.push(orphan)
+  return parts.join("\n\n")
+}

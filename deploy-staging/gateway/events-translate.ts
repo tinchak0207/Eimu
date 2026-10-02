@@ -1,6 +1,6 @@
 // events-translate.ts —— 自 index.ts 第二階段 Wave2 抽取：opencode 事件翻譯層——eventSessionId/boundMap/boundSet/isAssistantMessage/parseToolOutput、resolveResultUrl、emitImageDone/emitVideoDone/emitAudioDone、自動製畫布（canvasUnitId/readGenerateInput/autoCreateCanvasUnit/attachCanvasTask/emitCanvasResult）、toolErrorPayload、bash deny 歸因（bashDenyCache）、findUploadsByBasename/resolveInvisibleUploadPaths/deniedOperationLabel、trackTurnNodeTerminal、workflowStartSchemaHint、handleToolPartUpdate、idle-step breaker（finalizeIdleStep/triggerIdleStepBreaker）。
 // 原 index.ts 2708–3618 行，逐行原樣搬運（僅頂層宣告加 export 前綴）。
-import { readFileSync, readdirSync, statSync } from "node:fs"
+import { readFileSync, readdirSync, statSync, appendFileSync } from "node:fs"
 import path from "node:path"
 import type { SessionState } from "./types-gateway.ts"
 import { PLATFORM_BASE, WORKSPACE_DIR, UPLOADS_DIR, TURN_RETRY_DELAY_MS, IDLE_STEP_ABORT_THRESHOLD, IDLE_STEP_NUDGE, IMAGE_URL_DEDUP_CAP, TOOL_STATUS_DEDUP_CAP } from "./constants-gateway.ts"
@@ -472,20 +472,34 @@ export function toolErrorPayload(
 // 模型花 78s 人肉逆向權限表。修法：被拒 bash 命令對 permission.bash 的
 // deny glob 求匹配，error 幀附 matched_pattern + 一句替代寫法。
 export let bashDenyCache: { at: number; patterns: string[] } | null = null
+
+/** 從 opencode.json 原文解析 deny glob（純函式；載入路徑與測試共用同一解析，避免測試用假表）。 */
+export function parseBashDenyPatterns(raw: string): string[] {
+  try {
+    const cfg = JSON.parse(raw) as { permission?: { bash?: Record<string, string> } }
+    return Object.entries(cfg.permission?.bash ?? {})
+      .filter(([, v]) => v === "deny")
+      .map(([k]) => k)
+  } catch {
+    return []
+  }
+}
+
 export function loadBashDenyPatterns(): string[] {
   const now = Date.now()
   if (bashDenyCache && now - bashDenyCache.at < 60_000) return bashDenyCache.patterns
   let patterns: string[] = []
   try {
-    const raw = readFileSync(path.join(WORKSPACE_DIR, ".opencode", "opencode.json"), "utf-8")
-    const cfg = JSON.parse(raw) as { permission?: { bash?: Record<string, string> } }
-    patterns = Object.entries(cfg.permission?.bash ?? {})
-      .filter(([, v]) => v === "deny")
-      .map(([k]) => k)
+    // 路徑可 env 覆寫（測試餵真實表；生產不設即為既有 WORKSPACE_DIR 路徑）。
+    const cfgPath = process.env.BASH_DENY_CONFIG_PATH || path.join(WORKSPACE_DIR, ".opencode", "opencode.json")
+    const raw = readFileSync(cfgPath, "utf-8")
+    patterns = parseBashDenyPatterns(raw)
   } catch {
     // 配置讀不到就不歸因——報錯退回短句，不阻塞工具錯誤透傳
   }
   bashDenyCache = { at: now, patterns }
+  // 需求2（2026-10-02）：啟動／每次 60s 重載後做一次被遮蔽規則偵測並以結構化日誌告警。
+  logShadowedBashDenyRules(patterns)
   return patterns
 }
 
@@ -506,11 +520,12 @@ export function denyHintFor(pattern: string): string {
   return "请改用允许的命令（ls/cat/grep/sed -n/awk/find 等），或改用 run_py 工具写脚本"
 }
 
-/** 對 deny glob 求匹配；命中多條時取最具體的（非 * 字面量最長者），跳過全捕 *。 */
-export function bashDenyAttribution(cmd: string): { pattern: string; hint: string } | null {
+/** 對 deny glob 求匹配；命中多條時取最具體的（非 * 字面量最長者），跳過全捕 *。
+ *  patterns 可注入（測試直接餵真實 opencode.json 解析出的表）；省略時走 60s 快取載入。 */
+export function bashDenyAttribution(cmd: string, patterns?: string[]): { pattern: string; hint: string } | null {
   if (!cmd) return null
   let best: { pattern: string; score: number } | null = null
-  for (const p of loadBashDenyPatterns()) {
+  for (const p of patterns ?? loadBashDenyPatterns()) {
     if (p === "*") continue // 全捕規則不報因（零信息量）
     if (!denyGlobToRegExp(p).test(cmd)) continue
     const score = p.replace(/\*/g, "").length
@@ -518,6 +533,197 @@ export function bashDenyAttribution(cmd: string): { pattern: string; hint: strin
   }
   if (!best) return null
   return { pattern: best.pattern, hint: denyHintFor(best.pattern) }
+}
+
+// ── 需求1（2026-10-02）：拒絕決策的 provenance ──
+// 設計取自 Claude Code PermissionDecisionReason（帶型別聯合 rule/mode/hook/classifier/
+// sandboxOverride/safetyCheck，見 teacher-repo src/types/permissions.ts:271-324）；
+// **未複製任何程式碼**，只取其「拒絕原因須為結構化帶型別物件，而非自由字串」的設計。
+// 向下相容：既有 error 幀欄位 matched_pattern / hint 語義一字不改，只新增 deny_provenance。
+export type DenySource = "deny_glob" | "path_gate" | "sandbox_unavailable" | "unknown"
+
+export interface DenyProvenance {
+  /** 拒絕成因類別。當前網關此分支只會真正產生 deny_glob（與 unknown）；其餘為其他層預留。 */
+  source: DenySource
+  /** 命中的 deny glob 原文；無明確歸因時為 null。 */
+  pattern: string | null
+  /** 機器可讀的結構化理由。 */
+  reason: string
+  /** 給模型的可操作替代寫法；無則 null。 */
+  hint: string | null
+}
+
+/** 依 opencode 拒絕訊息判定成因類別（為 path gate / sandbox 層預留同一 provenance 型別）。 */
+export function classifyDenySource(message: string): DenySource {
+  if (/\bsandbox\b|bwrap|operation not permitted/i.test(message)) return "sandbox_unavailable"
+  if (/(^|[^A-Za-z])path([^A-Za-z]|$)|路径|不可见|outside the workspace/i.test(message)) return "path_gate"
+  if (/specified a rule which prevents|relevant rules/i.test(message)) return "deny_glob"
+  return "unknown"
+}
+
+/** 拒絕決策的結構化 provenance；與 bashDenyAttribution 同源，不改變其結果。 */
+export function bashDenyProvenance(cmd: string, patterns?: string[], message?: string): DenyProvenance | null {
+  const cls = message ? classifyDenySource(message) : "deny_glob"
+  const att = bashDenyAttribution(cmd, patterns)
+  if (!att) {
+    if (!cmd) return null
+    return {
+      source: cls === "deny_glob" ? "unknown" : cls,
+      pattern: null,
+      reason: "bash 被拒但未匹配到 deny 表任何具体 glob（表可能已漂移）",
+      hint: denyHintFor(""),
+    }
+  }
+  return {
+    source: cls === "unknown" ? "deny_glob" : cls,
+    pattern: att.pattern,
+    reason: `bash 命中${cls === "deny_glob" ? " deny 表规则" : cls} ${att.pattern}`,
+    hint: att.hint,
+  }
+}
+
+// 持久稽核：沿用既有日誌落點（gateway stdout → journald）＋ append-only jsonl；
+// 落盤失敗一律 fail-open，絕不阻塞拒單。路徑可用 env 覆寫（測試注入 tmp 檔）。
+export const DENY_AUDIT_PATH = process.env.DENY_AUDIT_PATH || "/opt/agent-harness/deny-audit.jsonl"
+
+export interface DenyAuditRecord {
+  ts: string
+  session_id: string
+  call_id: string
+  tool: string
+  operation: string
+  source: DenySource
+  pattern: string | null
+  reason: string
+  hint: string | null
+}
+
+export function appendDenyAudit(
+  record: DenyAuditRecord,
+  // 預設路徑於呼叫時解析（env 可於執行期覆寫，供測試把稽核導入 tmp；生產不設＝DENY_AUDIT_PATH）。
+  auditPath: string = process.env.DENY_AUDIT_PATH ?? DENY_AUDIT_PATH,
+): void {
+  let line: string
+  try {
+    line = JSON.stringify(record)
+  } catch {
+    return
+  }
+  console.log(`[gateway] deny-audit ${line}`)
+  if (auditPath === "") return
+  try {
+    appendFileSync(auditPath, line + "\n")
+  } catch {
+    // 稽核落盤失敗不得阻塞拒單
+  }
+}
+
+// ── 需求2（2026-10-02）：被遮蔽規則偵測 ──
+// 設計取自 Claude Code shadowedRuleDetection（偵測 tool-wide deny/ask 使更具體的 allow
+// 永不生效，見 teacher-repo src/utils/permissions/shadowedRuleDetection.ts:193-234）；
+// **未複製任何程式碼**。
+//
+// 語義界定（現場證據 opencode-runtime/opencode.json）：我方 permission.bash 是 deny-only
+// 表＝ 44 條 deny ＋ 唯一一條 tool-wide "*": "allow"。**沒有 allow/ask 分層**，故 teacher 的
+// 缺陷類（specific allow 被 tool-wide deny 遮蔽 ⇒ 有人意圖放行卻被永久擋住）在此形態下
+// **真空不成立**：不 deny 即 allow，不存在「意圖放行的 allow 規則」可被遮蔽。硬套 allow/deny
+// 對抗模型只會做出無意義的假缺陷。可計算的真實類比有兩類（皆為 lint 級，非安全缺陷）：
+//   (a) subsumed：更窄的 deny 規則其匹配集是某更寬 deny 規則的子集 ⇒ 該規則對拒絕覆蓋面
+//       零貢獻（冗餘），刪除不改變行為；
+//   (b) pathological_breadth：匹配面病態過寬的樣式（`*` 全捕，或 `*x*` 內容級子串掃描）——
+//       這是 08-29 橘貓事件的真實病灶（`*curl*` 掃描封死免費池）。
+export interface ShadowedRule {
+  rule: string
+  kind: "subsumed" | "pathological_breadth"
+  /** 遮蔽它的更寬規則（subsumed 時非 null；過寬類為 null）。 */
+  shadowedBy: string | null
+  reason: string
+}
+
+/** glob 首個 `*` 之前的字面前綴（首字元即 * 時為 ""）。 */
+function globLeadLiteral(glob: string): string {
+  const i = glob.indexOf("*")
+  return i < 0 ? glob : glob.slice(0, i)
+}
+
+/** 病態過寬判定（保守門檻，避免把常規短前綴誤報成缺陷）。 */
+function pathologicalBreadth(glob: string): string | null {
+  if (glob === "*") return "全捕规则（*）：覆盖全部命令，等于禁用 bash 工具"
+  if (glob.length > 2 && glob.startsWith("*") && glob.endsWith("*")) {
+    return `内容级子串扫描（${glob}）：任何命令参数含该子串即被拒——08-29 橘貓事件的病灶形态`
+  }
+  if (/^.\*$/.test(glob)) return `前綴仅 1 个字元的宽匹配（${glob}）：覆盖面极大，易误伤合法命令`
+  return null
+}
+
+/**
+ * 聲音式（不誤報）子集判定：規則 r 的匹配集 ⊆ 規則 b 的匹配集。
+ * 僅對「單尾星」寬規則（b = P*，匹配一切以 P 開頭的字串）做證明；其餘形態一律回 false
+ * （寧可漏報不可誤報——lint 警告不能造假缺陷）。
+ */
+function isPatternSubset(r: string, b: string): boolean {
+  if (r === b) return false
+  if (b === "*") return true
+  if (!b.endsWith("*") || b.indexOf("*") !== b.length - 1) return false
+  const prefix = b.slice(0, -1)
+  if (prefix === "") return true
+  if (r.startsWith("*")) return false // 首字元即 * ⇒ 可匹配不以 prefix 開頭的字串，無法證明
+  return globLeadLiteral(r).startsWith(prefix)
+}
+
+/**
+ * 偵測 deny 表中被遮蔽／病態過寬的規則。純函式，供載入路徑與測試共用。
+ * 回傳順序：先全部 pathological_breadth，再全部 subsumed（各自按輸入序）。
+ */
+export function detectShadowedBashDenyRules(patterns: string[]): ShadowedRule[] {
+  const uniq = [...new Set(patterns)]
+  const out: ShadowedRule[] = []
+  for (const p of uniq) {
+    const verdict = pathologicalBreadth(p)
+    if (verdict) out.push({ rule: p, kind: "pathological_breadth", shadowedBy: null, reason: verdict })
+  }
+  for (const p of uniq) {
+    let best: string | null = null
+    for (const q of uniq) {
+      if (q === p || !isPatternSubset(p, q)) continue
+      if (best === null) {
+        best = q
+        continue
+      }
+      const bq = globLeadLiteral(q).length
+      const bb = globLeadLiteral(best).length
+      if (bq < bb || (bq === bb && q < best)) best = q
+    }
+    if (best !== null) {
+      out.push({
+        rule: p,
+        kind: "subsumed",
+        shadowedBy: best,
+        reason: `规则 ${p} 的匹配集是 ${best} 的子集，对拒绝覆盖面零贡献（冗余规则，删除不改变行为）`,
+      })
+    }
+  }
+  return out
+}
+
+/** 載入／重載時呼叫：結構化日誌告警；回傳偵測結果供測試與呼叫方使用。 */
+export function logShadowedBashDenyRules(patterns: string[]): ShadowedRule[] {
+  const shadowed = detectShadowedBashDenyRules(patterns)
+  if (patterns.length === 0) return shadowed // 表讀不到：不報「0 findings」誤導（與 parse 失敗區分）
+  if (shadowed.length === 0) {
+    console.log(
+      "[gateway] shadowed-deny scan: 0 findings（deny-only 表無 allow 層，teacher 的 allow-shadowed 缺陷類真空）",
+    )
+    return shadowed
+  }
+  for (const s of shadowed) {
+    console.log(
+      `[gateway] shadowed-deny ${s.kind} rule=${JSON.stringify(s.rule)} shadowed_by=${JSON.stringify(
+        s.shadowedBy,
+      )} reason=${s.reason}`,
+    )
+  }
+  return shadowed
 }
 
 /** R8-B 工單 #5：uploads 目錄遞歸找同名文件，取 mtime 最新者。 */
@@ -858,15 +1064,32 @@ if (status === "pending" || status === "running") {
     // R8-B 工單 #2（2026-08-29）：再補命中規則（matched_pattern）與替代寫法——
     // R8 實錘模型花 78s 人肉逆向 deny 表，報因後此段歸零。
     let denyInfo: { pattern: string; hint: string } | null = null
+    let denyProv: DenyProvenance | null = null
     if (/specified a rule which prevents|relevant rules/i.test(message)) {
       const cmd =
         st.input && typeof st.input === "object" && typeof (st.input as { command?: unknown }).command === "string"
           ? (st.input as { command: string }).command
           : ""
       denyInfo = bashDenyAttribution(cmd)
+      // 需求1（2026-10-02）：結構化 provenance（向下相容，僅新增欄位）。
+      denyProv = bashDenyProvenance(cmd, undefined, message)
       message = `此操作不在允许范围内，已跳过${deniedOperationLabel(toolName, st.input)}${
         denyInfo ? `。命中规则：${denyInfo.pattern}；替代写法：${denyInfo.hint}` : ""
       }`
+      // 持久稽核：每次拒絕落一筆結構化記錄。
+      if (denyProv) {
+        appendDenyAudit({
+          ts: new Date().toISOString(),
+          session_id: state.sessionId,
+          call_id: callId,
+          tool: toolName,
+          operation: deniedOperationLabel(toolName, st.input),
+          source: denyProv.source,
+          pattern: denyProv.pattern,
+          reason: denyProv.reason,
+          hint: denyProv.hint,
+        })
+      }
     }
     // S2a：error 態的 tool.result 同樣補齊三欄位錯誤合同。
     emitToSession(state, "tool.result", {
@@ -877,6 +1100,7 @@ if (status === "pending" || status === "running") {
         message,
         human_message: isQuestionFreezeAbort ? message : humanMessageFor(message, undefined),
         ...(denyInfo ? { matched_pattern: denyInfo.pattern, hint: denyInfo.hint } : {}),
+        ...(denyProv ? { deny_provenance: denyProv } : {}),
       },
     })
     // question 凍結中止不是錯誤：不進 session.error 幀（避免 UI 紅卡）、

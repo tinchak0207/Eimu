@@ -87,6 +87,11 @@ const HARD_TIMEOUT_MS = 15 * 60 * 1000 // 单子代理硬顶
 // 硬頂放寬到 30 分鐘；超時同樣走 finishRun(error) → 喚醒父會話如實匯報。
 const ASYNC_HARD_TIMEOUT_MS = 30 * 60 * 1000
 const SUMMARY_MAX_CHARS = 600
+// 2026-10-02 能力片：ok 摘要（最後一則有文字的 assistant 訊息）的明確字數上限。子代理末則
+// 文字可能上萬字，若不設上限會讓 subagent.done 的 SSE 幀與注入父會話的喚醒文案膨脹——與本輪
+// 「控制上下文與工具結果大小」的目標直接矛盾（同輪工具結果已設 50,000 字上限，摘要口徑 4000）。
+// 超過即在換行邊界截斷並附「已截斷」提示；全文仍走既有落盤指標，不丟資訊。
+export const SUBAGENT_SUMMARY_MAX_CHARS = 4000
 // E 片（2026-09-12）缺陷一：行內 600 字帽保留，但完整結果先落盤再 DELETE 子會話。
 // 09-12 實案：數千字作曲規格文檔在行內被截到「m16 属…」，子會話隨即被 DELETE，
 // 全文不可恢復；同一次上游 502 的長死因也被切掉。落盤根 = gateway WORKSPACE_DIR
@@ -112,9 +117,31 @@ function parseSyncDeadlineMs(prompt: string): number {
   return Math.min(n * 2 * 60_000, SYNC_DEADLINE_MAX_MS)
 }
 
+/** ok 摘要截斷（2026-10-02 能力片）：超過 SUBAGENT_SUMMARY_MAX_CHARS 時在換行邊界斷開
+ *  （換行太靠前 <60% 則硬切），回傳保留文字與被截字元數。純函數。 */
+function truncateSummaryText(text: string): { text: string; truncated: number } {
+  if (typeof text !== "string" || text.length <= SUBAGENT_SUMMARY_MAX_CHARS) {
+    return { text: typeof text === "string" ? text : "", truncated: 0 }
+  }
+  const head = text.slice(0, SUBAGENT_SUMMARY_MAX_CHARS)
+  const nl = head.lastIndexOf("\n")
+  const cut = nl > SUBAGENT_SUMMARY_MAX_CHARS * 0.6 ? nl : SUBAGENT_SUMMARY_MAX_CHARS
+  const kept = text.slice(0, cut)
+  return { text: kept, truncated: text.length - kept.length }
+}
+
 interface SubagentModelRef {
   providerID: string
   modelID: string
+}
+
+// 2026-10-02 能力片：子代理回傳契約收斂的用量計數（設計取自 Claude Code 同步子代理
+// 回傳 {totalToolUseCount,totalDurationMs,totalTokens} 形態，未複製其程式碼）。
+// 只隨 subagent.done 以新欄位輸出，既有 id/status/summary 語義一字不動。
+export interface SubagentUsage {
+  tool_calls: number
+  duration_ms: number
+  tokens: number
 }
 
 interface SubagentRun {
@@ -157,6 +184,9 @@ interface SubagentRun {
   partText: Map<string, string>
   // 修 3：本 run 落盤標記 partial（persistRunOutput 據此把「状态」寫成 partial）。
   partialPersist?: boolean
+  // 2026-10-02 能力片：子代理用量計數（summarizeChild 從 opencode message 列表算出）。
+  // 只在 summarizeChild 路徑賦值；逾時/錯誤/重派回收路徑為 undefined（done 不帶 usage 欄）。
+  usage?: SubagentUsage
   timeoutTimer?: ReturnType<typeof setTimeout>
   // R1（2026-09-11）：同步 dispatch 硬 deadline 計時器。到點只把「超時」這一事實
   // 兌現給主會話（寫進 completed，工具輪詢立刻取件解鎖），run 不殺——降為 async
@@ -424,8 +454,25 @@ function finishRun(run: SubagentRun, status: "ok" | "error", fullText: string, e
     deliveredByParent.set(run.parentGatewaySessionId, arr)
     boundMap(deliveredByParent, 500)
   }
-  const inline = (error && status === "error" ? error : fullText).slice(0, SUMMARY_MAX_CHARS)
-  let summary = `${persist.pointer}${inline}`
+  // 2026-10-02 能力片：ok 摘要＝最後一則有文字的 assistant 訊息（語義取自 Claude Code
+  // 子代理回傳契約）+ 一行用量計數；**不是**「全文前 N 字」。子代理末則文字可能上萬字，
+  // 為避免 done 幀與注入父會話的喚醒文案膨脹（與本輪控上下文/工具結果大小的目標一致），
+  // 以 SUBAGENT_SUMMARY_MAX_CHARS 在換行邊界截斷並附「已截斷」提示；全文落盤照舊保留
+  // （persist.pointer / PERSIST_TAIL 不變）。error 摘要維持原 600 字死因帽（既有語義零回歸）。
+  const okTrunc = status === "ok" ? truncateSummaryText(fullText) : null
+  const inline =
+    error && status === "error"
+      ? error.slice(0, SUMMARY_MAX_CHARS)
+      : okTrunc
+        ? okTrunc.text
+        : fullText
+  const truncNote =
+    okTrunc && okTrunc.truncated > 0 ? `\n\n[已截斷 ${okTrunc.truncated} 字元；完整結果見落盤指標]` : ""
+  const usageNote =
+    status === "ok" && run.usage
+      ? `\n\n[子代理用量] 工具调用 ${run.usage.tool_calls} 次 · 耗时 ${Math.round(run.usage.duration_ms / 1000)}s · token ${run.usage.tokens}`
+      : ""
+  let summary = `${persist.pointer}${inline}${truncNote}${usageNote}`
   run.summary = summary
   run.error = error
   // 片 C（2026-09-15）刀2：交付閘門。病灶＝7 個 Expert 的 `*_DELIVERABLES` 契約只寫在
@@ -589,6 +636,8 @@ ${summary}`
       summary,
       // 片 C（2026-09-15）：新增欄位，不動既有 id/status/summary 語義；ok 時不加。
       ...(deliveryGate ? { delivery_gate: deliveryGate } : {}),
+      // 2026-10-02 能力片：用量計數（僅 summarizeChild 路徑有值；新欄位，不動既有鍵）。
+      ...(run.usage ? { usage: run.usage } : {}),
     })
     // R6 異步完成喚醒：async dispatch 的終態（成功與失敗皆喚）在 emit 幀之外
     // 直接續父會話 turn（輪子=deps.wakeParent）。finishRun 幂等守衛保喚醒不重複；
@@ -852,9 +901,60 @@ function isOpenCodeSessionId(id: unknown): id is string {
   return typeof id === "string" && id.startsWith("ses")
 }
 
+/** 2026-10-02 能力片：子代理文字區塊。設計取自 Claude Code 子代理回傳契約——
+ *  取「最後一則有文字的 assistant 訊息」的 text 區塊；loop 可能停在純 tool_use 的
+ *  assistant 訊息，此時回退到最近一則有文字的（未複製其程式碼）。 */
+function textBlocksOfMessage(m: { parts?: Array<{ type?: string; text?: string }> } | undefined): string {
+  return (m?.parts ?? [])
+    .filter((p) => p?.type === "text" && typeof p.text === "string")
+    .map((p) => p.text as string)
+    .join("\n")
+    .trim()
+}
+function lastAssistantTextWithFallback(
+  msgs: Array<{ info?: { role?: string }; parts?: Array<{ type?: string; text?: string }> }>,
+): string {
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i]
+    if (m?.info?.role !== "assistant") continue
+    const t = textBlocksOfMessage(m)
+    if (t) return t
+  }
+  return ""
+}
+
+/** 用量計數：tool part 計數 ＋ token（最後一則 assistant 的 input/output/cache）
+ *  ＋耗時。token 口徑 = input+output+cache.read+cache.write（對齊 Claude Code
+ *  getTokenCountFromUsage 的 input+cache_creation+cache_read+output 形態，未複製程式碼）。 */
+function computeSubagentUsage(
+  msgs: Array<{ info?: { role?: string; tokens?: unknown }; parts?: Array<{ type?: string }> }>,
+  startedAt: number,
+): SubagentUsage {
+  let toolCalls = 0
+  for (const m of msgs) for (const p of m?.parts ?? []) if (p?.type === "tool") toolCalls++
+  let tokens = 0
+  const lastAssistant = [...msgs].reverse().find((m) => m?.info?.role === "assistant")
+  const tk = lastAssistant?.info?.tokens
+  if (tk && typeof tk === "object") {
+    const t = tk as Record<string, unknown>
+    for (const k of ["input", "output"]) {
+      const v = t[k]
+      if (typeof v === "number" && Number.isFinite(v)) tokens += v
+    }
+    const c = t.cache
+    if (c && typeof c === "object") {
+      const cc = c as Record<string, unknown>
+      for (const k of ["read", "write"]) {
+        const v = cc[k]
+        if (typeof v === "number" && Number.isFinite(v)) tokens += v
+      }
+    }
+  }
+  return { tool_calls: toolCalls, duration_ms: Date.now() - startedAt, tokens }
+}
+
 /** 子会话 idle：取最后一条 assistant 文本作 summary。 */
-async function summarizeChild(run: SubagentRun): Promise<void> {
-  // 片 D（2026-09-15）：重派投遞在途——run 此刻仍掛在舊子會話 id 上（新會話尚未註冊），
+async function summarizeChild(run: SubagentRun): Promise<void> {  // 片 D（2026-09-15）：重派投遞在途——run 此刻仍掛在舊子會話 id 上（新會話尚未註冊），
   // 舊會話殘影事件（如重複 idle）不得把尚在重派鏈中的 run 提前收尾。
   if (run.reworking) return
   // E 片（2026-09-12）缺陷二防禦：無合法子會話 id 就不拼 URL，如實收尾（死因落盤）。
@@ -872,14 +972,15 @@ async function summarizeChild(run: SubagentRun): Promise<void> {
       signal: AbortSignal.timeout(10000),
     })
     if (res.ok) {
-      const msgs = (await res.json()) as Array<{ info?: { role?: string }; parts?: Array<{ type?: string; text?: string }> }>
+      const msgs = (await res.json()) as Array<{
+        info?: { role?: string; tokens?: unknown }
+        parts?: Array<{ type?: string; text?: string }>
+      }>
       if (Array.isArray(msgs)) {
-        const lastAssistant = [...msgs].reverse().find((m) => m?.info?.role === "assistant")
-        text = (lastAssistant?.parts ?? [])
-          .filter((p) => p?.type === "text" && typeof p.text === "string")
-          .map((p) => p.text as string)
-          .join("\n")
-          .trim()
+        // 2026-10-02 能力片：語義結果＝最後一則有文字的 assistant 訊息（loop 可能停在
+        // 純 tool_use 訊息，回退到最近有文字的一則）；非「全文前 600 字」。
+        text = lastAssistantTextWithFallback(msgs)
+        run.usage = computeSubagentUsage(msgs, run.startedAt)
       }
     }
   } catch (e) {

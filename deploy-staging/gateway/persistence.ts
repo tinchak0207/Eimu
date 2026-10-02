@@ -23,6 +23,7 @@
 import { Database } from "bun:sqlite"
 import { MergedReplayFrame } from "./replay-frame.ts"
 import type { SteerCommand, SteerLedgerStore } from "./steer-identity.ts"
+import { redactForLog } from "./analytics-meta.ts"
 
 // ---- 型別 ----
 
@@ -114,7 +115,7 @@ let warned = false
 
 function degrade(e: unknown, where: string): void {
   if (!warned) {
-    console.error(`[gateway] persistence degraded (${where}): ${e}`)
+    console.error(redactForLog(`[gateway] persistence degraded (${where}): ${e}`))
     warned = true
   }
 }
@@ -124,136 +125,261 @@ const textEncoder = new TextEncoder()
 
 // ---- 初始化 ----
 
+// ---- schema 版本化遷移（2026-10-02）----
+// 設計取自 Claude Code 的 `CURRENT_MIGRATION_VERSION` ＋ `runMigrations()`（main.tsx:326-352）
+// 與各 migrateXxx 檔「失敗只記 event、不 throw」的容錯（migrateEnableAllProjectMcpServersToSettings.ts:109-117）
+// ——只取設計概念，未複製其程式碼。
+// 我方差異（理由寫明）：
+//   * 版本載體＝SQLite `PRAGMA user_version`（不另立 config 檔；DB 自帶版本，備份/複製時版本跟著走）。
+//   * 版本只推進到**連續成功**處：SQL schema 有順序依賴，跳過失敗版會讓後續版跑在未升級的 schema 上；
+//     故失敗時**不越過它**，但**不 throw**——記結構化事件（journal ＋ 回傳 failures）後繼續嘗試後續
+//     版本（各版自身冪等、互不依賴），最後把 user_version 寫到連續成功的最後一版。fail-open 與本檔
+//     全局策略一致：遷移故障不得殺死 gateway。
+//   * 每個 migration 內部一律 `IF NOT EXISTS`／先檢查後動，故可安全重複執行（idempotent）。
+//
+// ⚠ 新增欄位的同步清單（現場清點，2026-10-02；漏一處即已踩過的雷）：
+//   一個「持久化到 sessions.data JSON」的新欄位必須同步改：
+//     A. PersistableState 介面（本檔）——記憶體狀態的持久化子集
+//     B. PersistedData 介面（本檔）——落盤 JSON 形狀
+//     C. serialize()（本檔）——寫盤白名單；漏加＝永遠不落盤
+//     D. hydrateRow()（本檔）——讀回還原；漏加＝重啟後旗標丟失（2026-10-02 replay strippable 已踩）
+//     E. PERSISTED_DATA_KEYS（本檔）——集合式守門清單，與 C 的輸出鍵集逐項相等
+//     F. types-gateway.ts 的 SessionState（不在本檔）——持久化欄位的上游宣告
+//     G. 若是**頂層 DB 欄**（非 data JSON 內）→ 另需在 baselineSchema 加欄，並新增一筆
+//        `ALTER TABLE ... ADD COLUMN` 的 migration（版本 +1）；舊庫才不會缺欄
+//     H. 命名別名：state 欄位與 JSON 欄位名不同處（如 sessionTitle ↔ title）兩邊必須各自對齊
+//     I. 只改單欄的 helper（如 setRowTitle）需評估是否也要處理新欄位
+//   守門測試：persistence-schema.test.ts 斷言 serialize() 輸出鍵集 == PERSISTED_DATA_KEYS，
+//   且每個落盤鍵在 hydrateRow() 輸出都能找到（含別名映射）——只改 A/C 忘改 D/E 即失敗。
+
+export const SCHEMA_VERSION = 2
+
+export interface Migration {
+  version: number
+  name: string
+  up(database: Database): void
+}
+
+export interface MigrationReport {
+  from: number
+  to: number
+  applied: number[]
+  failures: { version: number; name: string; error: string }[]
+}
+
+/** 讀 `PRAGMA user_version`（SQLite 內建版本載體）；壞掉/缺欄一律視為 0。 */
+export function readUserVersion(database: Database): number {
+  try {
+    const row = database.query("PRAGMA user_version").get() as { user_version?: number } | null
+    return typeof row?.user_version === "number" ? row.user_version : 0
+  } catch {
+    return 0
+  }
+}
+
+function writeUserVersion(database: Database, version: number): void {
+  database.exec(`PRAGMA user_version = ${Math.max(0, Math.floor(version))}`)
+}
+
+/**
+ * v1 baseline：完整初始 schema（全部 `IF NOT EXISTS`）。新庫與舊庫共用——舊庫已有部分表時
+ * 只補缺的，**不動既有資料**，故對 2026-10-02 前已上線的生產庫（user_version=0 但表已存在）
+ * 亦安全。此函數亦是把原本散在 initPersistence 的 DDL 收攏後的唯一建表處。
+ */
+function baselineSchema(database: Database): void {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS sessions (
+      id                 TEXT PRIMARY KEY,
+      owner_key          TEXT NOT NULL,
+      opencode_session_id TEXT NOT NULL,
+      created_at         INTEGER NOT NULL,
+      updated_at         INTEGER NOT NULL,
+      data               TEXT NOT NULL
+    )
+  `)
+  database.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_opencode ON sessions(opencode_session_id)")
+  // 用戶級 settings（2026-08-29）：key 維度，owner_key 與 sessions.owner_key
+  // 同一個 key（歸一化方式一致——都是 gateway 收到的原樣 Bearer key）。
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS user_settings (
+      owner_key  TEXT PRIMARY KEY,
+      data       TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `)
+  // 刀 F（2026-09-15）：in-flight rework run 持久化（重啟存活）。復用同一 bun:sqlite
+  // 實例（同一 DB 層、非自造第二套持久層）——重啟時啟動掃描據此判斷孤兒，
+  // finishRun 終態即刪。child_oc 為探針目標，run_id 主鍵保冪等。
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS subagent_reworks (
+      run_id     TEXT PRIMARY KEY,
+      parent_gw  TEXT NOT NULL,
+      parent_oc  TEXT NOT NULL,
+      child_oc   TEXT NOT NULL,
+      agent      TEXT NOT NULL,
+      label      TEXT NOT NULL,
+      beast      INTEGER NOT NULL,
+      async_mode INTEGER NOT NULL,
+      rework_count INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `)
+  // 刀 2（2026-09-15）：機器 critic pass 的每會話一次性旗標。同 subagent_reworks 慣例：
+  // 復用同一 bun:sqlite 實例（非自造第二套持久層），session_id 主鍵保冪等；寫入即
+  // 「本會話已用掉唯一一次 machine critic pass」，重啟後仍成立（防重啟繞過 ≤1 上限）。
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS critic_passes (
+      session_id TEXT PRIMARY KEY,
+      created_at INTEGER NOT NULL
+    )
+  `)
+  // REQ-D2b（2026-09-23）：steer 命令身份（tombstone）持久化。**復用同一 bun:sqlite 實例**
+  // （同一 DB 檔、同一連線，非自造第二套持久層，與 subagent_reworks / critic_passes 同慣例）。
+  //
+  // 為什麼要它：F-D2 的去重住在記憶體 pendingSteers（上限 3），重啟即失——同一條指引
+  // 可以被投遞第二次。這裡在**投遞之前**凍結 steer_id + payload_hash（含 content 與
+  // turn/session 標識），終態即 tombstone。
+  //
+  // tombstone 生命週期（刻意設計，勿「順手清理」）：
+  //   * 本表**不提供 delete**：沒有 deleteSteerCommand、也不進 sweepStaleRows。
+  //   * deleteSessionRow（clear/刪會話）只動 sessions 表 → tombstone 逐條存活。
+  //   * 終態 row 永不刪除：刪掉它就等於把「這條已經投遞過」的記憶抹去，重啟後又能重放。
+  //     代價是表單調成長（每會話 ≤ 用戶實際發過的指引條數），由 idx_steer_commands_session 支撐查詢。
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS steer_commands (
+      steer_id     TEXT PRIMARY KEY,
+      session_id   TEXT NOT NULL,
+      owner_key    TEXT NOT NULL,
+      alias_ids    TEXT NOT NULL,
+      payload_hash TEXT NOT NULL,
+      payload      TEXT NOT NULL,
+      state        TEXT NOT NULL,
+      created_at   INTEGER NOT NULL,
+      dispatched_at INTEGER,
+      settled_at   INTEGER,
+      reason       TEXT,
+      updated_at   INTEGER NOT NULL
+    )
+  `)
+  database.exec("CREATE INDEX IF NOT EXISTS idx_steer_commands_session ON steer_commands(session_id)")
+  // D7（2026-10-02）：品質量測基座。此前 critic_passes 只存 session_id/created_at、無 verdict，
+  // subagent_reworks 終局刪除無終身計數、無重問率——「品質」在系統裡完全不可觀測
+  // （ARCH-V4-DESIGN D7；LESSONS L8）。三張表皆復用同一 bun:sqlite 實例（不造第二套持久層）。
+  //   * critic_verdicts：每次審核的判決（pass/reject/unknown、判詞、judge 模型）。score 暫 null
+  //     （rubric 尚未存在；不偽造數字），留欄位給後續 rubric 上線。
+  //   * expert_lessons：失敗模式永久留存（交付閘門缺欄、審核退回等），供按 agent 累積。
+  //   * deliveries：交付事件（成功落盤的產物），重問率＝同 (session, agent, label) 再次出現的比例。
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS critic_verdicts (
+      id           TEXT PRIMARY KEY,
+      session_id   TEXT NOT NULL,
+      run_id       TEXT,
+      agent        TEXT,
+      label        TEXT,
+      verdict      TEXT NOT NULL,
+      score        REAL,
+      judge_model  TEXT,
+      verdict_text TEXT,
+      created_at   INTEGER NOT NULL
+    )
+  `)
+  database.exec("CREATE INDEX IF NOT EXISTS idx_critic_verdicts_session ON critic_verdicts(session_id)")
+  database.exec("CREATE INDEX IF NOT EXISTS idx_critic_verdicts_agent ON critic_verdicts(agent)")
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS expert_lessons (
+      id           TEXT PRIMARY KEY,
+      session_id   TEXT NOT NULL,
+      agent        TEXT NOT NULL,
+      run_id       TEXT,
+      source       TEXT NOT NULL,
+      failure_mode TEXT NOT NULL,
+      detail       TEXT,
+      created_at   INTEGER NOT NULL
+    )
+  `)
+  database.exec("CREATE INDEX IF NOT EXISTS idx_expert_lessons_agent ON expert_lessons(agent)")
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS deliveries (
+      id           TEXT PRIMARY KEY,
+      session_id   TEXT NOT NULL,
+      run_id       TEXT,
+      agent        TEXT,
+      label        TEXT,
+      rel_path     TEXT,
+      contract_ok  INTEGER,
+      created_at   INTEGER NOT NULL
+    )
+  `)
+  database.exec("CREATE INDEX IF NOT EXISTS idx_deliveries_session ON deliveries(session_id)")
+}
+
+/**
+ * v2：會話目錄查詢索引。`listSessionRows` 用 `WHERE owner_key = ? ORDER BY updated_at DESC`，
+ * 舊 schema 只有 opencode_session_id 的唯一索引，目錄查詢全表掃描。純索引、不動任何資料。
+ */
+function sessionsOwnerUpdatedIndex(database: Database): void {
+  database.exec("CREATE INDEX IF NOT EXISTS idx_sessions_owner_updated ON sessions(owner_key, updated_at DESC)")
+}
+
+/** 有序遷移清單。新增版本一律 append（version 必須連續遞增；已發佈版本禁止改動其 up 內容）。 */
+export const MIGRATIONS: Migration[] = [
+  { version: 1, name: "baseline-session-and-quality-schema", up: baselineSchema },
+  { version: 2, name: "sessions-owner-updated-index", up: sessionsOwnerUpdatedIndex },
+]
+
+/**
+ * 依序跑完所有未套用的 migration（idempotent、逐版執行）。
+ * - 先確保審計表 `schema_migrations` 存在（遷移清單之外，最先建立）。
+ * - 只跑 `version > from` 的版本；已套用者跳過（重複呼叫不再變更）。
+ * - 單一 migration 失敗：不 throw，記結構化事件（journal ＋ failures）後**繼續嘗試後續版本**；
+ *   user_version 只推進到「連續成功」的最後一版（不跳版，見檔頭理由）。
+ * - 回傳 MigrationReport 供測試與啟動日誌取用。
+ */
+export function runMigrations(database: Database): MigrationReport {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      version    INTEGER PRIMARY KEY,
+      name       TEXT NOT NULL,
+      applied_at INTEGER NOT NULL
+    )
+  `)
+  const from = readUserVersion(database)
+  const applied: number[] = []
+  const failures: MigrationReport["failures"] = []
+  let contiguous = from
+  let gap = false
+  for (const m of MIGRATIONS) {
+    if (m.version <= from) continue
+    try {
+      m.up(database)
+      database
+        .query("INSERT OR REPLACE INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)")
+        .run(m.version, m.name, Date.now())
+      applied.push(m.version)
+      if (!gap) contiguous = m.version
+    } catch (e) {
+      gap = true
+      const msg = e instanceof Error ? `${e.name}: ${e.message}` : String(e)
+      failures.push({ version: m.version, name: m.name, error: msg })
+      console.error(redactForLog(`[gateway] schema migration failed: version=${m.version} name=${m.name} err=${msg}`))
+    }
+  }
+  if (contiguous !== from) writeUserVersion(database, contiguous)
+  return { from, to: contiguous, applied, failures }
+}
+
 export function initPersistence(): void {
   try {
     db = new Database(DB_PATH, { create: true })
     db.exec("PRAGMA journal_mode=WAL")
     db.exec("PRAGMA synchronous=NORMAL")
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS sessions (
-        id                 TEXT PRIMARY KEY,
-        owner_key          TEXT NOT NULL,
-        opencode_session_id TEXT NOT NULL,
-        created_at         INTEGER NOT NULL,
-        updated_at         INTEGER NOT NULL,
-        data               TEXT NOT NULL
-      )
-    `)
-    db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_opencode ON sessions(opencode_session_id)")
-    // 用戶級 settings（2026-08-29）：key 維度，owner_key 與 sessions.owner_key
-    // 同一個 key（歸一化方式一致——都是 gateway 收到的原樣 Bearer key）。
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS user_settings (
-        owner_key  TEXT PRIMARY KEY,
-        data       TEXT NOT NULL,
-        updated_at INTEGER NOT NULL
-      )
-    `)
-    // 刀 F（2026-09-15）：in-flight rework run 持久化（重啟存活）。復用同一 bun:sqlite
-    // 實例（同一 DB 層、非自造第二套持久層）——重啟時啟動掃描據此判斷孤兒，
-    // finishRun 終態即刪。child_oc 為探針目標，run_id 主鍵保冪等。
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS subagent_reworks (
-        run_id     TEXT PRIMARY KEY,
-        parent_gw  TEXT NOT NULL,
-        parent_oc  TEXT NOT NULL,
-        child_oc   TEXT NOT NULL,
-        agent      TEXT NOT NULL,
-        label      TEXT NOT NULL,
-        beast      INTEGER NOT NULL,
-        async_mode INTEGER NOT NULL,
-        rework_count INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL
-      )
-    `)
-    // 刀 2（2026-09-15）：機器 critic pass 的每會話一次性旗標。同 subagent_reworks 慣例：
-    // 復用同一 bun:sqlite 實例（非自造第二套持久層），session_id 主鍵保冪等；寫入即
-    // 「本會話已用掉唯一一次 machine critic pass」，重啟後仍成立（防重啟繞過 ≤1 上限）。
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS critic_passes (
-        session_id TEXT PRIMARY KEY,
-        created_at INTEGER NOT NULL
-      )
-    `)
-    // REQ-D2b（2026-09-23）：steer 命令身份（tombstone）持久化。**復用同一 bun:sqlite 實例**
-    // （同一 DB 檔、同一連線，非自造第二套持久層，與 subagent_reworks / critic_passes 同慣例）。
-    //
-    // 為什麼要它：F-D2 的去重住在記憶體 pendingSteers（上限 3），重啟即失——同一條指引
-    // 可以被投遞第二次。這裡在**投遞之前**凍結 steer_id + payload_hash（含 content 與
-    // turn/session 標識），終態即 tombstone。
-    //
-    // tombstone 生命週期（刻意設計，勿「順手清理」）：
-    //   * 本表**不提供 delete**：沒有 deleteSteerCommand、也不進 sweepStaleRows。
-    //   * deleteSessionRow（clear/刪會話）只動 sessions 表 → tombstone 逐條存活。
-    //   * 終態 row 永不刪除：刪掉它就等於把「這條已經投遞過」的記憶抹去，重啟後又能重放。
-    //     代價是表單調成長（每會話 ≤ 用戶實際發過的指引條數），由 idx_steer_commands_session 支撐查詢。
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS steer_commands (
-        steer_id     TEXT PRIMARY KEY,
-        session_id   TEXT NOT NULL,
-        owner_key    TEXT NOT NULL,
-        alias_ids    TEXT NOT NULL,
-        payload_hash TEXT NOT NULL,
-        payload      TEXT NOT NULL,
-        state        TEXT NOT NULL,
-        created_at   INTEGER NOT NULL,
-        dispatched_at INTEGER,
-        settled_at   INTEGER,
-        reason       TEXT,
-        updated_at   INTEGER NOT NULL
-      )
-    `)
-    db.exec("CREATE INDEX IF NOT EXISTS idx_steer_commands_session ON steer_commands(session_id)")
-    // D7（2026-10-02）：品質量測基座。此前 critic_passes 只存 session_id/created_at、無 verdict，
-    // subagent_reworks 終局刪除無終身計數、無重問率——「品質」在系統裡完全不可觀測
-    // （ARCH-V4-DESIGN D7；LESSONS L8）。三張表皆復用同一 bun:sqlite 實例（不造第二套持久層）。
-    //   * critic_verdicts：每次審核的判決（pass/reject/unknown、判詞、judge 模型）。score 暫 null
-    //     （rubric 尚未存在；不偽造數字），留欄位給後續 rubric 上線。
-    //   * expert_lessons：失敗模式永久留存（交付閘門缺欄、審核退回等），供按 agent 累積。
-    //   * deliveries：交付事件（成功落盤的產物），重問率＝同 (session, agent, label) 再次出現的比例。
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS critic_verdicts (
-        id           TEXT PRIMARY KEY,
-        session_id   TEXT NOT NULL,
-        run_id       TEXT,
-        agent        TEXT,
-        label        TEXT,
-        verdict      TEXT NOT NULL,
-        score        REAL,
-        judge_model  TEXT,
-        verdict_text TEXT,
-        created_at   INTEGER NOT NULL
-      )
-    `)
-    db.exec("CREATE INDEX IF NOT EXISTS idx_critic_verdicts_session ON critic_verdicts(session_id)")
-    db.exec("CREATE INDEX IF NOT EXISTS idx_critic_verdicts_agent ON critic_verdicts(agent)")
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS expert_lessons (
-        id           TEXT PRIMARY KEY,
-        session_id   TEXT NOT NULL,
-        agent        TEXT NOT NULL,
-        run_id       TEXT,
-        source       TEXT NOT NULL,
-        failure_mode TEXT NOT NULL,
-        detail       TEXT,
-        created_at   INTEGER NOT NULL
-      )
-    `)
-    db.exec("CREATE INDEX IF NOT EXISTS idx_expert_lessons_agent ON expert_lessons(agent)")
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS deliveries (
-        id           TEXT PRIMARY KEY,
-        session_id   TEXT NOT NULL,
-        run_id       TEXT,
-        agent        TEXT,
-        label        TEXT,
-        rel_path     TEXT,
-        contract_ok  INTEGER,
-        created_at   INTEGER NOT NULL
-      )
-    `)
-    db.exec("CREATE INDEX IF NOT EXISTS idx_deliveries_session ON deliveries(session_id)")
-    console.log(`[gateway] session persistence ready: ${DB_PATH}`)
+    const report = runMigrations(db)
+    console.log(
+      redactForLog(
+        `[gateway] session persistence ready: ${DB_PATH} (schema v${report.to}/${SCHEMA_VERSION}` +
+          `${report.failures.length ? `, ${report.failures.length} migration failure(s)` : ""})`,
+      ),
+    )
   } catch (e) {
     degrade(e, "init")
     db = null
@@ -262,7 +388,37 @@ export function initPersistence(): void {
 
 // ---- 序列化 / 反序列化 ----
 
-function serialize(state: PersistableState): PersistedData {
+/**
+ * 持久化 `data` JSON 的欄位全集——**新增欄位必須同步更新的集合式守門清單**。
+ * 這份清單與 `serialize()` 的輸出鍵集逐項相等；`hydrateRow()` 對每個鍵都必須還原
+ * （別名映射見 persistence-schema.test.ts）。哪一天有人只改了 serialize 忘了清單/還原，
+ * 測試會直接紅。完整「新欄位需同步改哪幾處」清單見檔頭 runMigrations 上方註解。
+ */
+export const PERSISTED_DATA_KEYS = [
+  "eventCounter",
+  "replayBuffer",
+  "lastActivityAt",
+  "partTextEmitted",
+  "announcedUrls",
+  "toolStatusSeen",
+  "toolInvokeSeen",
+  "stepCostLogged",
+  "messageRole",
+  "suppressedParts",
+  "canvasSummary",
+  "canvasSummaryAt",
+  "canvasSnapshot",
+  "workflowSnapshot",
+  "vettingInjected",
+  "userMemory",
+  "profileOnboardingPending",
+  "compact",
+  "lastTurnActiveAt",
+  "title", // 別名：記憶體 sessionTitle ↔ 落盤 title（見 hydrateRow）
+  "tplDeviateToken",
+] as const
+
+export function serialize(state: PersistableState): PersistedData {
   return {
     eventCounter: state.eventCounter,
     replayBuffer: state.replayBuffer.map((f) =>

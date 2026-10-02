@@ -3,6 +3,20 @@
 // noteTurnUsage/finishTurnMetrics）、event-loop lag 取樣（含模組級 startEventLoopLagSampler()
 // 副作用呼叫，原樣搬）、percentile/stageStats/turnMetricsSnapshot（原 index.ts 4378–4592 行）。
 import type { SessionState, TurnMetricsEnd, TurnMetricsSnapshot } from "./types-gateway.ts"
+import { redactForLog, type LogSafeText } from "./analytics-meta.ts"
+
+// ── journal 出口（2026-10-02）：型別層簽核 ＋ 遮罩 ──────────────────────
+// 本檔所有落 console/journal 的行都只走這兩個函數（禁止直接 console.*）。參數型別是
+// `LogSafeText`（= never，見 analytics-meta.ts）——呼叫端必須傳 redactForLog() 的產物
+// （或明示 `as LogSafeText` 自負），否則編譯不過。這把「secret 進 journalctl」從
+// 靠自覺變成靠簽核。設計取自 Claude Code analytics brand type（未複製其程式碼）。
+function journalLine(line: LogSafeText): void {
+  console.log(line)
+}
+function journalError(line: LogSafeText): void {
+  console.error(line)
+}
+
 // ── Phase 0 觀測（2026-09-18）：per-turn 分段延遲打點 ────────────────────
 // 純觀測、行為中性：不新增/改寫任何 SSE 幀（前端 reducer 契約零改動），不動
 // prompt 內容/重試邏輯/逾時常數。目的＝把「一個 turn 的 109 秒花在哪」由推斷
@@ -42,7 +56,7 @@ export function beginTurnMetrics(state: SessionState, tAccept: number): void {
       cacheWrite: null,
     }
   } catch (e) {
-    console.error(`[gateway] turn.metrics begin failed: session=${state.sessionId}`, e)
+    journalError(redactForLog(`[gateway] turn.metrics begin failed: session=${state.sessionId} ${e}`))
   }
 }
 
@@ -142,9 +156,10 @@ export function finishTurnMetrics(state: SessionState, end: TurnMetricsEnd): voi
     if (turnMetricsRing.length > TURN_METRICS_RING) {
       turnMetricsRing.splice(0, turnMetricsRing.length - TURN_METRICS_RING)
     }
-    console.log(`[gateway] turn.metrics ${JSON.stringify(snap)}`)
+    // snap 的 provider/model 等欄位雖為識別字，仍可能夾帶上游回傳的自由文字；一律先遮罩再落盤。
+    journalLine(redactForLog(`[gateway] turn.metrics ${JSON.stringify(snap)}`))
   } catch (e) {
-    console.error(`[gateway] turn.metrics finish failed: session=${state.sessionId}`, e)
+    journalError(redactForLog(`[gateway] turn.metrics finish failed: session=${state.sessionId} ${e}`))
   }
 }
 

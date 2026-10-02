@@ -131,6 +131,8 @@ export interface SessionState {
   tplDeviateToken?: { token: string; at: number } | null
   /** 已上報過 turn.status 的 compaction part id（2026-10-02 壓縮可見化去重，volatile）。 */
   compactionNotified?: Set<string>
+  /** 已發過 context.compacted 邊界事件的摘要訊息去重鍵（2026-10-02 壓縮語義化，volatile）。
+   *  鍵＝摘要訊息 id，無 id 時退化成 trigger:preTokens；防止同一份摘要反覆重跑時重複上屏邊界事件。 */
   // ── PRD P0-4（2026-09-15）記憶 trace 與召回輔助（皆 volatile，不入持久化白名單）──
   /** §3.6 形狀：注入trace，供 GET /agent/v1/sessions/:id/memory-trace（R2 尺觀測點）。
    *  重啟即丟屬已知限制（持久化白名單在 persistence.ts，非本片工作對象）。 */
