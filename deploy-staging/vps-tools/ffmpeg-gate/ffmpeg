@@ -1,0 +1,55 @@
+#!/bin/bash
+# ============================================================================
+# ffmpeg 全域跨進程限流 shim（2026-10-02 VPS OOM 治本 — 擴充 opencode 工具路）
+#
+# 背景：2026-10-02 08:36 全域 OOM 的 12 個 ffmpeg 全為 uid 995（agentsvc，
+# 即 opencode-server 及其工具/沙箱），gateway（ubuntu, uid 1000）的進程內
+# 訊號量（gateway/ffmpeg-limiter.ts）覆蓋不到。本 shim 放在 ffmpeg 二進位
+# 真源路徑上，讓**所有** ffmpeg 呼叫（gateway 與 opencode 工具路皆走此路徑）
+# 共用同一組跨進程 slot。
+#
+# 語義複用 gateway/ffmpeg-limiter.ts（不另造判準）：
+#   1. 併發上限 FFMPEG_MAX_CONCURRENT（預設 2；0 = 關閉限流）
+#   2. 放行前 MemAvailable >= FFMPEG_MIN_MEM_MB（預設 400）
+# 以 flock 佔 N 個 slot 檔達成跨進程/跨使用者上限；放行後 exec 真二進位，
+# slot fd 續持，ffmpeg 結束即自動釋放。真二進位在 ./real/ffmpeg。
+# ============================================================================
+set -u
+
+REAL="/opt/agent-harness/bin/real/ffmpeg"
+GATE="/opt/agent-harness/bin/.ffmpeg-gate"
+MAX="${FFMPEG_MAX_CONCURRENT:-2}"
+MIN="${FFMPEG_MIN_MEM_MB:-400}"
+
+# 探測型旗標（detectFfmpeg 的 `ffmpeg -version` 等）不過閘，避免版本探測被編碼阻塞
+case "${1:-}" in
+  -version|-buildconf|-formats|-codecs|-decoders|-encoders|-filters|-pix_fmts|-layouts|-h|-help|--help|-L)
+    exec "$REAL" "$@";;
+esac
+
+case "$MAX" in ''|*[!0-9]*) MAX=2;; esac
+[ "$MAX" -eq 0 ] && exec "$REAL" "$@"
+[ -d "$GATE" ] || exec "$REAL" "$@"   # fail-open：gate 目錄缺失不阻斷可用性
+
+mem_ok() {
+  local m
+  m=$(awk '/^MemAvailable:/{print int($2/1024); exit}' /proc/meminfo 2>/dev/null)
+  [ -z "$m" ] && return 0             # 讀不到 → 不因記憶體條件阻塞
+  [ "$m" -ge "$MIN" ]
+}
+
+i=0
+while :; do
+  slot=$(( i % MAX )); i=$(( i + 1 ))
+  slotfile="$GATE/slot$slot.lock"
+  [ -r "$slotfile" ] || exec "$REAL" "$@"   # fail-open：slot 檔不可讀
+  exec 9<"$slotfile"
+  if flock -n 9 2>/dev/null; then
+    if mem_ok; then
+      exec "$REAL" "$@"               # fd 9 續持 → ffmpeg 結束自動釋放
+    fi
+    flock -u 9 2>/dev/null
+  fi
+  exec 9<&-
+  sleep 0.3
+done
