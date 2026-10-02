@@ -13,18 +13,17 @@
 //   9. D6（2026-10-02）上下文經濟：bash/read/grep 等輸出硬上限；同 session 重讀未變更檔案回摘要。
 
 import type { Plugin } from "@opencode-ai/plugin"
-import { mkdir, stat } from "node:fs/promises"
+import { stat } from "node:fs/promises"
 import {
   assertSafeFetchUrl,
   checkAgentPath,
   collectUrlArgs,
+  ensureSessionDirs,
   filterForeignUploads,
   hasOwner,
   redactSecrets,
   stripForgedAuthorityTokens,
   sandboxAvailable,
-  sessionRunDir,
-  sessionTmpDir,
   setOwner,
   SsrfError,
   ensureSessionLauncher,
@@ -195,10 +194,8 @@ export const EimuGuard: Plugin = async ({ client }) => {
     }
   }
 
-  async function ensureDirs(sessionID: string): Promise<void> {
-    await mkdir(sessionTmpDir(sessionID), { recursive: true }).catch(() => {})
-    await mkdir(sessionRunDir(sessionID), { recursive: true }).catch(() => {})
-  }
+  // 目錄建立收斂到 sandbox.ts 的 ensureSessionDirs（與 shell.env 的 ensureSessionLauncher 同一支），
+  // 不再於此維護第二份 mkdir 邏輯。
 
   return {
     "tool.execute.before": async (input, output) => {
@@ -246,7 +243,7 @@ export const EimuGuard: Plugin = async ({ client }) => {
       if (tool === "bash") {
         if (!sandboxAvailable()) throw new Error("执行环境暂不可用，请改用原生工具完成。")
         await ensureSession(input.sessionID)
-        await ensureDirs(input.sessionID)
+        ensureSessionDirs(input.sessionID)
         // 方案 B（2026-10-02）：沙箱改在 spawn 當下由 shell 包裝器（lib/eimu-shell）注入，
         // 這裡**不再改寫 args.command**——模型上下文只會有原始命令。
         // 唯一例外：把「既有 DB 資料／舊版回放」裡我方舊包裝簽名剝回原始命令（防巢狀致死）。

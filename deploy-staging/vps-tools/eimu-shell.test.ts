@@ -7,11 +7,11 @@
 // 另加 (d) launcher 已設但非 `-c` 形態 → 仍透明（保護 opencode 內部把 shell 當工具用的呼叫）。
 //
 // 跑法：bun test deploy-staging/vps-tools/eimu-shell.test.ts
-import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join, resolve } from "node:path"
+import { dirname, join, resolve } from "node:path"
 import { spawnSync } from "node:child_process"
-import { describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
 
 const SHELL = resolve(import.meta.dir, "../opencode-runtime/lib/eimu-shell")
 
@@ -92,5 +92,57 @@ describe("eimu-shell 三態真值", () => {
     const got = run(["-c", "echo hi"], { env: { EIMU_LAUNCHER: "" } })
     expect(got.status).toBe(0)
     expect(got.stdout).toBe("hi\n")
+  })
+})
+
+// ── 迴歸（2026-10-02 生產缺口）：ensureSessionLauncher 必須先建好 bwrap --bind 的宿主來源目錄 ──
+// 缺口：裸 POST /session/{id}/shell 不經 plugin tool.execute.before，而目錄建立舊版只長在
+// wrapShellCommand／ensureDirs 裡 → bwrap: Can't find source path .../.run/<slug>/tmp。
+// 隔離：sandbox.ts 的 WORKSPACE 支援 EIMU_WORKSPACE 覆寫（未設＝生產路徑逐字不變），
+// 故可在乾淨臨時根**真跑** launcher→bwrap，直接證明 source path 存在。
+// 臨時根刻意放 /var/tmp：/tmp 會被沙箱自身 `--bind tmp /tmp` 覆蓋，/home、/root、/opt 被 tmpfs 遮罩。
+const LAUNCH_ROOT = mkdtempSync(join("/var/tmp", "eimu-sandbox-"))
+process.env.EIMU_WORKSPACE = LAUNCH_ROOT
+const sandbox = await import("../opencode-runtime/lib/sandbox")
+const SID = "sess-launcher-dirs-regression"
+
+afterAll(() => {
+  rmSync(LAUNCH_ROOT, { recursive: true, force: true })
+})
+
+describe("ensureSessionLauncher 建立 bwrap --bind 宿主目錄（裸 shell 端點迴歸）", () => {
+  test("(a) launcher 存在且可執行；tmp/run/WORKSPACE/RUN_ROOT 等宿主來源都在", () => {
+    const file = sandbox.ensureSessionLauncher(SID)
+    expect(file).toBe(sandbox.sessionLauncherPath(SID))
+    expect(existsSync(file)).toBe(true)
+    expect(statSync(file).mode & 0o777).toBe(0o755)
+    // sandboxArgv 會 bind 的宿主來源（source 不存在即 bwrap fail-closed）
+    expect(existsSync(sandbox.sessionTmpDir(SID))).toBe(true)
+    expect(existsSync(sandbox.sessionRunDir(SID))).toBe(true)
+    expect(existsSync(sandbox.WORKSPACE)).toBe(true) // --bind WORKSPACE WORKSPACE
+    expect(existsSync(sandbox.RUN_ROOT)).toBe(true) // maskArgs: --tmpfs RUN_ROOT
+  })
+
+  test("(b) 冪等：連續兩次呼叫不報錯、回傳同一路徑", () => {
+    const a = sandbox.ensureSessionLauncher(SID)
+    const b = sandbox.ensureSessionLauncher(SID)
+    expect(a).toBe(b)
+    expect(existsSync(a)).toBe(true)
+  })
+
+  test("(c) 每會話目錄權限 0o700（tmp / run / launcher 目錄）", () => {
+    sandbox.ensureSessionLauncher(SID)
+    for (const d of [sandbox.sessionTmpDir(SID), sandbox.sessionRunDir(SID), dirname(sandbox.sessionLauncherPath(SID))]) {
+      expect(statSync(d).mode & 0o777).toBe(0o700)
+    }
+  })
+
+  test("(d) 真跑子程序：生成的 launcher 在 bwrap 內執行命令並回傳輸出（原缺口＝source path 不存在）", () => {
+    const launcher = sandbox.ensureSessionLauncher(SID)
+    const runDir = sandbox.sessionRunDir(SID)
+    const got = spawnSync(launcher, [runDir, "echo SANDBOX_OK"], { encoding: "utf8" })
+    expect(got.stderr ?? "").not.toContain("Can't find source path")
+    expect(got.status).toBe(0)
+    expect(got.stdout.trim()).toBe("SANDBOX_OK")
   })
 })

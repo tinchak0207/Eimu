@@ -15,9 +15,10 @@ const PERSIST_DIR = mkdtempSync(join(tmpdir(), "context-slim-"))
 process.env.CONTEXT_SLIM = "1"
 process.env.TOOL_RESULT_PERSIST_DIR = PERSIST_DIR
 
-const { ContextSlim, CLEARED_MARKER, slimMessages } = await import(
-  "../opencode-runtime/plugin/context-slim"
+const { CLEARED_MARKER, slimMessages } = await import(
+  "../opencode-runtime/lib/context-slim-core"
 )
+const { ContextSlim } = await import("../opencode-runtime/plugin/context-slim")
 
 afterAll(() => {
   rmSync(PERSIST_DIR, { recursive: true, force: true })
@@ -87,6 +88,21 @@ function toolState(msg: Msg, idx: number) {
   const p = msg.parts.filter((x) => x.type === "tool")[idx]
   return p.state as { output: string }
 }
+
+// ── loader 契約（2026-10-02 生產事故的守門真值斷言）────────────────────────────
+
+describe("loader 契約：plugin 檔的每個 export 都必須是 function", () => {
+  // 起因：plugin/context-slim.ts 曾把常數與函式一起 export，opencode plugin loader
+  // 逐個 export 檢查、遇到非函式即整檔載入失敗（`Plugin export is not a function`），
+  // 導致 microCompact 與工具結果安全網在生產全是死的。此斷言在舊版即為紅。
+  test("plugin/context-slim.ts 的所有 export 皆為 function，且唯一 export 為 ContextSlim", async () => {
+    const m = await import("../opencode-runtime/plugin/context-slim")
+    const bad = Object.entries(m).filter(([, v]) => typeof v !== "function")
+    expect(bad.map(([k]) => k)).toEqual([])
+    expect(Object.keys(m)).toEqual(["ContextSlim"])
+    expect(typeof (m as { ContextSlim?: unknown }).ContextSlim).toBe("function")
+  })
+})
 
 // ── 需求 A：microCompact ────────────────────────────────────────────────────
 

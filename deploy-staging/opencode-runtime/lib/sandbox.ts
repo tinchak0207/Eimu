@@ -18,7 +18,9 @@ import path from "node:path"
 import { createHash } from "node:crypto"
 import { lookup as dnsLookup } from "node:dns/promises"
 
-export const WORKSPACE = "/opt/agent-harness/workspace"
+// WORKSPACE 預設為生產落點；允許 EIMU_WORKSPACE 覆寫**僅為測試隔離**（可用乾淨臨時根真跑
+// bwrap，見 vps-tools/eimu-shell.test.ts）。未設時與舊版逐字相同，不改變任何 argv／可見性語義。
+export const WORKSPACE = process.env.EIMU_WORKSPACE || "/opt/agent-harness/workspace"
 export const UPLOADS = path.join(WORKSPACE, "uploads")
 export const RUN_ROOT = path.join(WORKSPACE, ".run")
 const BWRAP = "/usr/bin/bwrap"
@@ -360,13 +362,41 @@ export function unwrapShellCommand(command: string): string {
 }
 
 /**
+ * 建立 bwrap `--bind`／launcher 落點所需的宿主目錄。容忍已存在（recursive），
+ * 不因單一失敗而炸（單一失敗交給後續 bwrap 以明確錯誤收場，不在此吞掉整條路徑）。
+ * mode 0o700：.run 下每個會話目錄皆私有；此語義與原 writeSessionLauncher 的 launcher 目錄一致
+ * （原 wrapShellCommand 的 tmp/run 迴圈未給 mode，兩者在此收斂為同一份實作）。
+ */
+function ensureHostDir(dir: string): void {
+  try {
+    mkdirSync(dir, { recursive: true, mode: 0o700 })
+  } catch {
+    /* 交給後續 bwrap 報錯（fail-closed，不靜默成功） */
+  }
+}
+
+/**
+ * 確保 sandboxArgv 會 bind 的宿主來源（sessionTmpDir、sessionRunDir）與 launcher 目錄都存在。
+ * **單一真源**：plugin 的 tool.execute.before 與 writeSessionLauncher 都呼叫本函式——誰產生
+ * launcher／誰啟動 shell，誰就保證 launcher 執行時需要的宿主目錄都在（裸 shell 端點不經
+ * tool.execute.before，先前因目錄邏輯只長在那裡而全數失敗）。
+ * 必須在 sandboxArgv() 之前呼叫：maskArgs 依 RUN_ROOT 是否存在決定是否掛 `--tmpfs RUN_ROOT`。
+ */
+export function ensureSessionDirs(sessionID: string): void {
+  ensureHostDir(sessionTmpDir(sessionID))
+  ensureHostDir(sessionRunDir(sessionID))
+  ensureHostDir(path.dirname(sessionLauncherPath(sessionID)))
+}
+
+/**
  * 寫出（或更新）本會話沙箱啟動器。內容只依賴會話與當下檔案系統狀態（上傳白名單可能在
  * 會話中途變動），故每次呼叫重寫；以 tmp+rename 原子替換，避免同會話並發 bash 讀到半截檔。
  */
 function writeSessionLauncher(opts: { sessionID: string; cwd?: string }): { file: string; cwd: string; argv: string[] } {
+  // 誰產生 launcher，誰保證 launcher 執行時需要的所有宿主目錄（tmp / run / launcher 目錄）都在。
+  ensureSessionDirs(opts.sessionID)
   const { argv, cwd } = sandboxArgv(opts)
   const file = sessionLauncherPath(opts.sessionID)
-  mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 })
   const script =
     "#!/bin/sh\n" +
     `# 自動生成（每次呼叫重寫）：會話 ${sessionSlug(opts.sessionID)} 的沙箱啟動器。\n` +
@@ -386,16 +416,16 @@ function writeSessionLauncher(opts: { sessionID: string; cwd?: string }): { file
  *
  * 註：launcher 內容用 `--chdir "$1"`（執行時由包裝器傳入的 cwd），故這裡的 cwd 不影響
  * 沙箱 argv（保留參數是為了與 wrapShellCommand 共用同一份 sandboxArgv 真源）。
+ *
+ * 保證：本函式會先建好 launcher 執行時所需的所有宿主目錄（tmp / run / launcher 目錄，
+ * 見 ensureSessionDirs）——裸 shell 端點不經 tool.execute.before 也能直接執行，不再 fail-closed。
  */
 export function ensureSessionLauncher(sessionID: string, cwd?: string): string {
   return writeSessionLauncher({ sessionID, cwd }).file
 }
 
 export function wrapShellCommand(command: string, opts: { sessionID: string; cwd?: string }): string {
-  // bwrap --bind 的來源必須先存在；不依賴呼叫端的 ensureDirs 順序（首呼競態）。
-  for (const d of [sessionTmpDir(opts.sessionID), sessionRunDir(opts.sessionID)]) {
-    try { mkdirSync(d, { recursive: true }) } catch { /* 交給後續 bwrap 報錯 */ }
-  }
+  // 目錄建立已收斂進 writeSessionLauncher → ensureSessionDirs（單一真源，兩條路徑共用）。
   const { file, cwd } = writeSessionLauncher(opts)
   // 被記錄／回放的只有這一行的長度（~150 字元），bwrap 全文不再進模型上下文。
   return `exec ${shQuote(file)} ${shQuote(cwd)} ${shQuote(unwrapShellCommand(command))}`
