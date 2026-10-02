@@ -18,24 +18,67 @@
 
 ```
 lib/smartsearch/
-├── LICENSE                 # 上游 MIT
-├── UPSTREAM.md             # 本檔
-├── keyless.patch           # 最小補丁（可重放，見下）
-├── tenacity/               # 上游依賴（見「第三方依賴」）
-└── smart_search/           # 上游 package 本體（providers/ 子包保留）
+├── LICENSE                      # 上游 MIT
+├── UPSTREAM.md                  # 本檔
+├── keyless.patch                # 最小補丁（可重放，見下）
+├── requirements-vendored.txt    # vendored 第三方清單（版本＋sha256，可重現）
+├── tenacity/                    # vendored：上游依賴
+├── httpx/                       # vendored：執行期 HTTP client
+├── httpcore/                    # vendored：httpx 底層
+├── h11/                         # vendored：httpcore 依賴
+├── anyio/                       # vendored：httpx 非同步抽象
+├── sniffio/                     # vendored：anyio 依賴
+├── certifi/                     # vendored：CA bundle（含 cacert.pem 資料檔）
+├── idna/                        # vendored：httpx URL 解析依賴
+├── typing_extensions.py         # vendored：>=4.14（系統 4.10 缺 sentinel）
+└── smart_search/                # 上游 package 本體（providers/ 子包保留）
 ```
 
-`PYTHONPATH=<...>/lib/smartsearch` → `python3 -m smart_search.cli` 解析得到 package。
+`PYTHONPATH=<...>/lib/smartsearch` → `python3 -m smart_search.cli` 解析得到 package，
+且 httpx/typing_extensions 等一律從本目錄解析（**不依賴系統 dist-packages**）。
 
-## 第三方依賴（重要，與上游 `service.py` 的依賴盤點不同）
+## 第三方依賴（已全部自帶，無外部前置）
 
-- **httpx**：`service.py` / `sources.py` / `config.py` / 全體 `providers/`。VPS `python3` 3.12.3 已內建
-  `httpx 0.28.1`，靠系統套件即可，不需 vendor。
-- **tenacity**：`providers/context7.py` 頂部 import，且 `service.py` 頂部 import 它 ⇒ **CLI 整個 import 鏈
-  都需要它**，但 VPS 系統 python **沒有**（實測 `ModuleNotFoundError: No module named 'tenacity'`）。
-  故把純 Python 的 `tenacity==9.1.2`（PyPI wheel `tenacity-9.1.2-py3-none-any.whl`，無額外依賴）
-  解壓到本目錄 `tenacity/`，讓 PYTHONPATH 一併解析。**這是相對上游唯一新增的第三方依賴**。
-- **不需要**（僅 UI/CLI 選用路徑，非本工具走的路徑）：`rich`、`pyfiglet`、`InquirerPy`。
+**結論：`lib/smartsearch/` 自帶它需要的所有第三方 Python 套件；VPS 重建／換機不需任何手工 pip 安裝。**
+
+原本 `httpx` 曾被誤判為「VPS 已內建」（那是拿 `ubuntu` 身分驗的）；實際服務帳號 `agentsvc`
+的 `python3` 只有系統 dist-packages 可見（工具把子進程 `HOME` 指到臨時目錄，
+`~/.local` user-site 一律不可見），故 `httpx` 對服務帳號 `ModuleNotFoundError`。
+同理 Debian 自帶的 `typing_extensions 4.10` 缺 `sentinel`，CLI 會 `ImportError` 退出。
+**修法不是 `sudo pip install`（那只在活環境、重建即失效），而是把依賴逐檔 vendor 到本目錄。**
+
+依賴鏈（皆為純 Python wheel，`py3-none-any`，無 .so）：
+
+| 套件 | 版本 | 誰需要 | wheel |
+|---|---|---|---|
+| `httpx` | 0.28.1 | `service.py`/`sources.py`/`config.py`/全體 `providers/` | `httpx-0.28.1-py3-none-any.whl` |
+| `httpcore` | 1.0.9 | httpx | `httpcore-1.0.9-py3-none-any.whl` |
+| `h11` | 0.16.0 | httpcore | `h11-0.16.0-py3-none-any.whl` |
+| `anyio` | 4.15.1 | httpx | `anyio-4.15.1-py3-none-any.whl` |
+| `sniffio` | 1.3.1 | anyio | `sniffio-1.3.1-py3-none-any.whl` |
+| `certifi` | 2026.7.22 | httpx SSL（帶 `cacert.pem` 資料檔，照收） | `certifi-2026.7.22-py3-none-any.whl` |
+| `idna` | 3.20 | httpx URL 解析 | `idna-3.20-py3-none-any.whl` |
+| `typing_extensions` | 4.16.0 | 上下游共用（系統 4.10 缺 `sentinel`） | `typing_extensions-4.16.0-py3-none-any.whl` |
+| `tenacity` | 9.1.2 | `providers/context7.py`／`service.py` | `tenacity-9.1.2-py3-none-any.whl` |
+
+逐檔 sha256 與重現指令見同目錄 `requirements-vendored.txt`。vendor 目錄**不進任何安裝腳本**，
+只靠 `PYTHONPATH` 生效（工具已這樣做，見 `lib/smart_search_impl.ts` → `SMART_SEARCH_PACKAGE_DIR`）。
+因 PYTHONPATH 在 `sys.path` 中**先於** `/usr/lib/python3/dist-packages`，vendored 版本會 shadow 系統版本。
+
+驗證「自帶真的成立」（禁只看檔案存在；斷言解析路徑落在本目錄）：
+
+```bash
+# 1) 以 PYTHONPATH 直查解析路徑（兩者都必須是 lib/smartsearch/ 底下）
+PYTHONPATH=/opt/agent-harness/workspace/.opencode/lib/smartsearch python3 -c \
+  "import httpx,typing_extensions,sys;print(httpx.__file__);print(typing_extensions.__file__);print(typing_extensions.__version__)"
+#   期望：.../lib/smartsearch/httpx/__init__.py、.../lib/smartsearch/typing_extensions.py、4.16.0
+# 2) 只在 PYTHONPATH（禁用系統 site-packages）能跑整條 CLI import 鏈
+PYTHONPATH=lib/smartsearch python3 -S -c "import smart_search.cli"
+# 3) 真行為（免 Key 通路真出內容，非只看 exit 0）
+PYTHONPATH=lib/smartsearch python3 -m smart_search.cli fetch https://example.com --format json
+```
+
+- **不需要 vendor**（僅 UI/CLI 選用路徑，非本工具走的路徑）：`rich`、`pyfiglet`、`InquirerPy`。
 
 ## 保留 / 排除
 
