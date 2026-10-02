@@ -194,9 +194,6 @@ interface SubagentResult {
   // R1（2026-09-11）：同步 deadline 超時的「部分結果」語義（工具側/前端契約欄位）。
   partial?: boolean
   reason?: string
-  // D4（2026-10-02）：所屬父會話（gateway session id）。此前 completed 記錄無歸屬，
-  // 「latest／最近 3 筆」查不到本會話的已完成 run。新寫入必帶；舊記錄無此欄＝不列入。
-  parent?: string
 }
 
 interface SubagentDeps {
@@ -328,7 +325,7 @@ export function stopSubagentRun(run: SubagentRun, by: "user" | "orchestrator", r
   // 修 1：停止也釋放槽位——補跑被擠掉的 critic。
   maybeDrainCriticQueue(run.parentGatewaySessionId)
   deleteReworkRecord(run.id)
-  completed.set(run.id, { status: "stopped" satisfies TaskStatus, summary, error: text, finishedAt: Date.now(), label: run.label, parent: run.parentGatewaySessionId })
+  completed.set(run.id, { status: "stopped" satisfies TaskStatus, summary, error: text, finishedAt: Date.now(), label: run.label })
   const state = parentStateOf(run)
   if (state && deps) {
     try {
@@ -526,7 +523,7 @@ ${summary}`
   // 修 1：本 run 釋放了一個槽位——若該父會話有被並發上限擠掉的 critic 待跑，補跑。
   maybeDrainCriticQueue(run.parentGatewaySessionId)
   deleteReworkRecord(run.id) // 刀 F：終態即清持久記錄（冪等；非 rework run 無記錄=no-op）
-  completed.set(run.id, { status, summary, error, finishedAt: Date.now(), label: run.label, parent: run.parentGatewaySessionId })
+  completed.set(run.id, { status, summary, error, finishedAt: Date.now(), label: run.label })
   const state = parentStateOf(run)
   if (state) {
     deps!.emitToSession(state, "subagent.done", {
@@ -1528,7 +1525,6 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
         label: run.label,
         partial: true,
         reason: "timeout",
-        parent: run.parentGatewaySessionId,
       })
       // E 片（2026-09-12）：超時放行這一刻的事實也落盤（無正文 → 寫死因事實）。此刻
       // 盤上不是交付物，**不掛「完整结果已落盘」指針**（掛了會誤導）；run 後續真完成
@@ -1556,72 +1552,15 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
   return Response.json({ ok: true, subagent_id: run.id })
 }
 
-/** D4（2026-10-02）：本會話最近 N 筆 run（運行中＋已完成，按時間倒序）。
- *  completed 記錄自 2026-10-02 起帶 parent 歸屬；舊記錄無 parent＝不列入（誠實：不假裝知道歸屬）。 */
-function recentRunsForParent(
-  parentKey: string,
-  limit: number,
-): Array<{ id: string; label: string; status: string; running: boolean }> {
-  if (!parentKey) return []
-  const out: Array<{ id: string; label: string; status: string; running: boolean; at: number }> = []
-  for (const run of byParent.get(parentKey) ?? []) {
-    out.push({
-      id: run.id,
-      label: run.label,
-      status: run.status,
-      running: run.status === "running" && !run.stopped,
-      at: run.startedAt,
-    })
-  }
-  for (const [id, rec] of completed) {
-    if (rec.parent === parentKey) out.push({ id, label: rec.label ?? "", status: rec.status, running: false, at: rec.finishedAt })
-  }
-  return out
-    .sort((a, b) => b.at - a.at)
-    .slice(0, limit)
-    .map(({ at: _at, ...rest }) => rest)
-}
-
-/** D4：`latest` 別名 → 本會話最近一次 run 的 id（無記錄回 undefined）。 */
-function resolveLatestRunId(parentKey: string): string | undefined {
-  return recentRunsForParent(parentKey, 1)[0]?.id
-}
-
 /** POST /internal/subagent/status — body { session_id, subagent_id }。工具轮询取件。
- *  R6：async 派遣的主會話也可用同一端點主動查詢狀態（subagent_status 工具）。
- *  D4（2026-10-02）：支援 `latest` 別名；not_found 附最近 3 筆 run 供改用。 */
+ *  R6：async 派遣的主會話也可用同一端點主動查詢狀態（subagent_status 工具）。 */
 export async function handleSubagentStatus(req: Request): Promise<Response> {
   pruneCompleted()
   const body = (await req.json().catch(() => ({}))) as { session_id?: string; subagent_id?: string }
-  let wantId = typeof body.subagent_id === "string" ? body.subagent_id.trim() : ""
-  if (!wantId) {
-    return Response.json(
-      {
-        ok: false,
-        code: "missing_required_args",
-        error: 'subagent_id 必填：可傳完整 run id、"latest"（本會話最近一次）或 label 前綴。示例：{"subagent_id":"latest"}',
-      },
-      { status: 400 },
-    )
+  if (!body.subagent_id) {
+    return Response.json({ ok: false, error: "subagent_id 必填" }, { status: 400 })
   }
-  const sid = body.session_id?.trim()
-  const parent = sid ? (deps?.resolveSession(sid) ?? deps?.findSessionByOpenCodeId(sid)) : undefined
-  const parentKey = parent?.sessionId ?? sid ?? ""
-  if (wantId === "latest") {
-    const latestId = resolveLatestRunId(parentKey)
-    if (!latestId) {
-      return Response.json(
-        {
-          ok: false,
-          code: "not_found",
-          error: '本会话没有任何子代理记录（"latest" 无对象）。先 subagent_dispatch 派出后再查。',
-        },
-        { status: 404 },
-      )
-    }
-    wantId = latestId
-  }
-  const done = completed.get(wantId)
+  const done = completed.get(body.subagent_id)
   if (done) {
     return Response.json({
       ok: true,
@@ -1635,7 +1574,7 @@ export async function handleSubagentStatus(req: Request): Promise<Response> {
     })
   }
   for (const run of byChildOc.values()) {
-    if (run.id === wantId) {
+    if (run.id === body.subagent_id) {
       return Response.json({
         ok: true,
         done: false,
@@ -1654,12 +1593,12 @@ export async function handleSubagentStatus(req: Request): Promise<Response> {
   // 僅真正零命中才落到 artifact/404。
   const cands: Array<{ runId: string; label: string; status: string; running: boolean; elapsed_ms?: number }> = []
   for (const run of byChildOc.values()) {
-    if (run.id !== wantId && run.label.startsWith(wantId)) {
+    if (run.id !== body.subagent_id && run.label.startsWith(body.subagent_id)) {
       cands.push({ runId: run.id, label: run.label, status: "running", running: true, elapsed_ms: Date.now() - run.startedAt })
     }
   }
   for (const [id, rec] of completed) {
-    if (id !== wantId && (rec.label ?? "").startsWith(wantId)) {
+    if (id !== body.subagent_id && (rec.label ?? "").startsWith(body.subagent_id)) {
       cands.push({ runId: id, label: rec.label ?? "", status: rec.status, running: false })
     }
   }
@@ -1682,7 +1621,7 @@ export async function handleSubagentStatus(req: Request): Promise<Response> {
       note: "label 前綴命中多筆，請用完整 runId 或更精確 label 重查。",
     })
   }
-  const artifact = findPersistedArtifact(wantId)
+  const artifact = findPersistedArtifact(body.subagent_id)
   if (artifact) {
     return Response.json({
       ok: true,
@@ -1695,22 +1634,7 @@ export async function handleSubagentStatus(req: Request): Promise<Response> {
       note: "run 記錄已過期但產物已落盤：直接 read 上述路徑驗收，勿重派。",
     })
   }
-  // D4（2026-10-02）：not_found 不再是一句死話——附最近 3 筆 run（id/狀態/label），
-  // 讓 orchestrator 直接改用正確 id，或改傳 "latest"，而不是重派造成重複生成。
-  const recent = recentRunsForParent(parentKey, 3)
-  return Response.json(
-    {
-      ok: false,
-      code: "not_found",
-      error: recent.length
-        ? `subagent_id 不存在或已过期。本会话最近 3 笔 run：${recent
-            .map((r) => `${r.id}(${r.status}${r.label ? " " + r.label : ""})`)
-            .join("、")}。可改用上述完整 id，或传 "latest"。`
-        : "subagent_id 不存在或已过期，且本会话查无历史 run 记录。",
-      recent_runs: recent,
-    },
-    { status: 404 },
-  )
+  return Response.json({ ok: false, error: "subagent_id 不存在或已过期" }, { status: 404 })
 }
 
 /**
