@@ -1,59 +1,25 @@
+# ⚠️ 這份清單必須維持「黑名單制」。**不要**改回 `/*` + `!/dir/` 的根目錄白名單：
+# Vercel 端會把被 `/*` 忽略的目錄整棵剪掉、不再下探，寫 `!/src/` 或 `!/src/**` 都救不回來
+#（2026-10-02 實錘：遠端建置的 /vercel/path0 只剩根層檔案，src/、public/、db/、worker/ 全缺，
+#  next.config.mjs 因此找不到 ./src/lib/control-plane-proxy-routes.mjs，前端連 build 都進不去。
+#  同一份清單用 gitignore 語義的 ignore npm 套件判「不忽略」，所以本地驗不出來，只能靠遠端實測守）。
+# 白名單想解的「根層雜物」改用下面這幾條逐類排除；新增根層目錄請順手加一條。
+/eval-*/
+/.tools/
+/plugins/
+/.credentials*
+/*.mp4
+/*.bak
+/node_modules/
 # Vercel CLI only falls back to .gitignore when this file does NOT exist.
 # Because this file exists, every exclusion the deployment needs must be listed here.
 # Paths are gitignore syntax: a leading "/" anchors to the repo root.
 # Do NOT drop the leading slash on /docs/ or /output/ — unanchored "docs/" would
 # also match the real Next.js route src/app/docs/.
 
-# 根目錄白名單（2026-10-01）：黑名單制擋不住每天新冒出的 eval-*/、.tools/、plugins/、
-# 憑證備份、mp4 等——上傳集一天內 1167→2696 檔，構建 2m→4m，還把 .credentials.bak.yaml、
-# .vercel-cli-data（CLI token）推進部署源碼。改為先排除根目錄全部，只放行構建/執行期真正需要的。
-# 新增根目錄檔案若站點執行期要讀（process.cwd() + 路徑），必須在這裡加 ! 放行。
-/*
-# 目錄白名單必須寫成「目錄 + 目錄下全部」兩行：只寫 `!/dir/` 時 Vercel 端**只放行目錄項
-# 本身、不放行其下檔案**（2026-10-02 實錘：遠端建置的 /vercel/path0 只剩根層檔案，
-# 沒有 src/、public/、db/、worker/ → next.config.mjs 找不到 src/lib/*.mjs 而 build 失敗）。
-# 同一份清單用 gitignore 語義的 `ignore` npm 套件判是「不忽略」，所以這條只能靠遠端實測守。
-!/src/
-!/src/**
-!/public/
-!/public/**
-!/db/
-!/db/**
-!/worker/
-!/worker/**
-!/package.json
-!/package-lock.json
-!/pnpm-lock.yaml
-!/pnpm-workspace.yaml
-!/next.config.mjs
-!/next-env.d.ts
-!/tsconfig.json
-!/tailwind.config.ts
-!/postcss.config.mjs
-!/components.json
-!/vercel.json
-!/.eslintrc.json
-!/.node-version
-!/node_modules/
+（歷史：2026-10-01 曾改成 `/*` + `!/dir/` 的根目錄白名單，2026-10-02 因上述 Vercel 剪目錄行為全部回退為黑名單。）
 
-# Remote builds install dependencies themselves. Local `vercel build --prod` emits
-# filePathMap entries for these traced runtime packages, so prebuilt uploads must
-# include exactly this allowlist instead of dropping node_modules wholesale.
-node_modules/*
-!node_modules/@swc/
-node_modules/@swc/*
-!node_modules/@swc/helpers/
-!node_modules/@swc/helpers/**
-!node_modules/client-only/
-!node_modules/client-only/**
-!node_modules/next/
-!node_modules/next/**
-!node_modules/react/
-!node_modules/react/**
-!node_modules/react-dom/
-!node_modules/react-dom/**
-!node_modules/styled-jsx/
-!node_modules/styled-jsx/**
+（node_modules 整棵排除：remote build 會自己 install；本地 prebuilt 走的是另一條路。）
 
 # Prebuilt deployments need the traced .next runtime files referenced by
 # .vercel/output/functions/*/.vc-config.json. Keep only stale snapshots ignored.
