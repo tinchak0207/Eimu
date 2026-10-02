@@ -33,6 +33,10 @@ SRC_SUBDIR="deploy-staging/opencode-runtime"
 RECON_SCRIPT="$REPO_ROOT/deploy-staging/vps-tools/vps-opencode-recon.sh"
 SCOPE=(tools lib skills plugin)
 CONFIGS=(opencode.json package.json bun.lock package-lock.json)
+WORKSPACE_DIR="${OC_WORKSPACE_DIR:-$(dirname "$VPS_DIR")}"
+# workspace 根的手維護設定檔：repo 內放在鏡像根，但**部署目標是 workspace/ 而非 .opencode/**，
+# 故必須從主 tar 排除、單獨安裝，否則會被放到 .opencode/AGENTS.md（錯的位置）。
+ROOT_FILES=(AGENTS.md)
 
 DRY_RUN=0
 SKIP_RECON=0
@@ -159,6 +163,12 @@ cmd_plan() {
   join -j2 -o 0,1.1,2.1 "$tmp/head.md5" "$tmp/actual.md5" 2>/dev/null \
     | awk '$2!=$3{print "  DIFF " $1}' || true
   echo "（完整判定以 vps-opencode-recon.sh 為準）"
+  if [ -f "$tmp/stage/AGENTS.md" ]; then
+    local a b
+    a="$(md5sum "$tmp/stage/AGENTS.md" | awk '{print $1}')"
+    b="$(remote "sudo md5sum '$WORKSPACE_DIR/AGENTS.md' 2>/dev/null" | awk '{print $1}')"
+    if [ "$a" = "$b" ]; then echo "  $WORKSPACE_DIR/AGENTS.md 一致"; else echo "  DIFF $WORKSPACE_DIR/AGENTS.md（workspace 根）"; fi
+  fi
 }
 
 cmd_release() {
@@ -177,17 +187,23 @@ cmd_release() {
   run_recon
   stage_from_commit "$stage" "$exp" "$sha"
   log "  預期 $(wc -l < "$exp") 檔"
-  tar -C "$stage" -cf "$tar_file" .
+  tar -C "$stage" --exclude=./AGENTS.md -cf "$tar_file" .
   local bytes; bytes="$(wc -c < "$tar_file")"
-  log "  封裝 $bytes bytes"
+  log "  封裝 $bytes bytes（AGENTS.md 另行處理，不進 .opencode）"
 
   local r_tar="/tmp/oc-release-$sha12-$ts.tar" r_exp="/tmp/oc-exp-$sha12-$ts.txt" tag="opencode-$sha12-$ts"
+  local r_agents=""
   remote_binary "cat > $r_tar" < "$tar_file"
   remote_stdin "cat > $r_exp" < "$exp"
+  if [ -f "$stage/AGENTS.md" ]; then
+    r_agents="/tmp/oc-agents-$sha12-$ts.md"
+    remote_binary "cat > $r_agents" < "$stage/AGENTS.md"
+    log "  另傳 AGENTS.md → $WORKSPACE_DIR/AGENTS.md"
+  fi
 
-  remote_stdin bash -s -- "$VPS_DIR" "$BACKUP_DIR" "$SERVICE" "$HEALTH_URL" "$HISTORY_LOG" "$OWNER" "$tag" "$sha" "$r_tar" "$r_exp" <<'REMOTE'
+  remote_stdin bash -s -- "$VPS_DIR" "$BACKUP_DIR" "$SERVICE" "$HEALTH_URL" "$HISTORY_LOG" "$OWNER" "$tag" "$sha" "$r_tar" "$r_exp" "$WORKSPACE_DIR" "$r_agents" <<'REMOTE'
 set -euo pipefail
-VPS_DIR="$1"; BACKUP_DIR="$2"; SERVICE="$3"; HEALTH_URL="$4"; HISTORY_LOG="$5"; OWNER="$6"; tag="$7"; sha="$8"; r_tar="$9"; r_exp="${10}"
+VPS_DIR="$1"; BACKUP_DIR="$2"; SERVICE="$3"; HEALTH_URL="$4"; HISTORY_LOG="$5"; OWNER="$6"; tag="$7"; sha="$8"; r_tar="$9"; r_exp="${10}"; WORKSPACE_DIR="${11}"; r_agents="${12:-}"
 SCOPE=(tools lib skills plugin)
 CONFIGS=(opencode.json package.json bun.lock package-lock.json)
 
@@ -196,6 +212,10 @@ sudo mkdir -p "$BACKUP_DIR" "$(dirname "$HISTORY_LOG")"
 # 1) 發佈前備份手維護子集（vendored 與狀態不需備份，它們不在同步範圍、也不會被動到）
 sudo tar -czf "$BACKUP_DIR/$tag-pre.tgz" -C "$VPS_DIR" "${SCOPE[@]}" "${CONFIGS[@]}" 2>/dev/null || true
 echo "BACKUP $BACKUP_DIR/$tag-pre.tgz"
+if [ -n "$r_agents" ] && sudo test -f "$WORKSPACE_DIR/AGENTS.md"; then
+  sudo cp -a "$WORKSPACE_DIR/AGENTS.md" "$BACKUP_DIR/$tag-pre-AGENTS.md"
+  echo "BACKUP $BACKUP_DIR/$tag-pre-AGENTS.md"
+fi
 
 # 2) 落地（只覆蓋／新增；不刪——刪除語義下一步用清單補）
 sudo tar -C "$VPS_DIR" -xf "$r_tar"
@@ -214,6 +234,16 @@ echo "REMOVED $n 個生產多出檔"
 # 4) 權限與服務
 sudo chown -R "$OWNER" $(for d in "${SCOPE[@]}"; do echo "$VPS_DIR/$d"; done) 2>/dev/null || true
 for c in "${CONFIGS[@]}"; do sudo chown "$OWNER" "$VPS_DIR/$c" 2>/dev/null || true; done
+# workspace 根設定檔（位置在 .opencode 之外，單獨安裝＋逐 byte 驗證）
+if [ -n "$r_agents" ]; then
+  sudo install -o "${OWNER%%:*}" -g "${OWNER##*:}" -m 644 "$r_agents" "$WORKSPACE_DIR/AGENTS.md"
+  if cmp -s "$r_agents" "$WORKSPACE_DIR/AGENTS.md"; then
+    echo "AGENTS_OK $WORKSPACE_DIR/AGENTS.md"
+  else
+    echo "AGENTS_MISMATCH"; exit 1
+  fi
+  rm -f "$r_agents"
+fi
 sudo systemctl restart "$SERVICE"
 sleep 2
 state="$(systemctl is-active "$SERVICE" || true)"
@@ -242,6 +272,12 @@ sudo rm -rf $(for d in "${SCOPE[@]}"; do echo "$VPS_DIR/$d"; done)
 sudo tar -xzf "$latest" -C "$VPS_DIR"
 sudo chown -R "$OWNER" $(for d in "${SCOPE[@]}"; do echo "$VPS_DIR/$d"; done) 2>/dev/null || true
 for c in "${CONFIGS[@]}"; do sudo chown "$OWNER" "$VPS_DIR/$c" 2>/dev/null || true; done
+# workspace 根設定檔隨同一版備份還原
+agents_bak="${latest%-pre.tgz}-pre-AGENTS.md"
+if sudo test -f "$agents_bak"; then
+  sudo install -o "${OWNER%%:*}" -g "${OWNER##*:}" -m 644 "$agents_bak" "$(dirname "$VPS_DIR")/AGENTS.md"
+  echo "AGENTS_RESTORED $(dirname "$VPS_DIR")/AGENTS.md"
+fi
 sudo systemctl restart "$SERVICE"; sleep 2
 state="$(systemctl is-active "$SERVICE" || true)"
 code="$(curl -s -o /dev/null -w '%{http_code}' "$HEALTH_URL" || echo ERR)"

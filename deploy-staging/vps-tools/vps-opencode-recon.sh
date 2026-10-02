@@ -25,6 +25,9 @@ trap cleanup EXIT
 
 SCOPE=(tools lib skills plugin)
 CONFIGS=(opencode.json package.json bun.lock package-lock.json)
+WORKSPACE_DIR="$(dirname "$VPS_DIR")"
+# workspace 根的手維護設定檔：repo 內放在鏡像根，但**部署目標是 workspace/ 而非 .opencode/**
+ROOT_FILES=(AGENTS.md)
 
 # 1. 只拉手維護子集
 "${SSH_CMD[@]}" "sudo tar -C $VPS_DIR \
@@ -70,6 +73,26 @@ while read -r f; do
     echo "DIFF $f"; drift=1
   fi
 done < "$TMP_DIR/head-files.txt"
+
+# 4. workspace 根的手維護設定檔（位置與 .opencode/ 不同，故獨立比對）
+for rf in "${ROOT_FILES[@]}"; do
+  if [ -f "$HEAD_DIR/$rf" ]; then
+    "${SSH_CMD[@]}" "sudo cat '$WORKSPACE_DIR/$rf'" > "$TMP_DIR/root-$rf" 2>/dev/null || true
+    if [ -s "$TMP_DIR/root-$rf" ]; then
+      cmp -s "$HEAD_DIR/$rf" "$TMP_DIR/root-$rf" || { echo "DIFF $rf（workspace 根）"; drift=1; }
+    else
+      echo "ONLY_LOCAL $rf（workspace 根：repo 有、生產缺）"; drift=1
+    fi
+  elif "${SSH_CMD[@]}" "sudo test -f '$WORKSPACE_DIR/$rf'" 2>/dev/null; then
+    # 基準版沒有、但 repo 的 HEAD 有 → 這是「本次導入一條新的受管路徑」，不是漂移；
+    # 否則會出現雞生蛋：生產那份待修的檔案反而擋住修它的發佈。
+    if git -C "$GIT_DIR" cat-file -e "HEAD:deploy-staging/opencode-runtime/$rf" 2>/dev/null; then
+      echo "INFO $rf（workspace 根）：repo 已納管、基準版尚無 → 視為導入，不計漂移"
+    else
+      echo "ONLY_VPS $rf（workspace 根：生產有、repo 缺）"; drift=1
+    fi
+  fi
+done
 
 if [ "$drift" -eq 0 ]; then
   echo "RECON_OK: .opencode 生產與基準 $BASE 一致（$(wc -l < "$TMP_DIR/head-files.txt") 檔）"
