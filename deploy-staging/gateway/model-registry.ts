@@ -149,3 +149,29 @@ export function personaModelForAttempt(state: SessionState, attempt: number): Ag
   const pool = usable.length > 0 ? usable : chain
   return pool[(attempt - 1) % pool.length] ?? pool[0] ?? primary
 }
+
+// ---- 2026-10-02 視覺能力判定：圖能不能直接進模型上下文 ----
+// 產品負責人逐字確認可看圖的模型（用 modelID 比對，不分 provider：同一 modelID 在哪家渠道
+// 都假設同能力）。白名單外的模型一律當「不能直接看圖」處理——寧可走 vision_analyze 文字描述，
+// 也不把圖塞進會失敗的請求。
+export const VISION_MODEL_IDS = new Set(["deepseek-v4.1-flash", "glm-5.3-flash", "glm-5.3"])
+
+/**
+ * 該模型能否直接接收圖像輸入（image/* content block）。
+ * 兩條來源，任一命中即真：
+ *  ① VISION_MODEL_IDS 硬編碼白名單：產品負責人確認的當下能力，改它＝產品決策。
+ *  ② registry（agent-models.json）`providers[providerID].models[modelID].vision === true`：
+ *     以後擴充視覺模型只需改 JSON，不用改碼。
+ * 為何保留硬編碼（呼應 runbook「硬編碼＝回退默認」既有慣例）：registry 檔讀不到
+ * （loadAgentModelRegistry 回 null）時仍需一組可信答案；registry 旗標是正式擴充點，
+ * 硬編碼只是離線/缺檔時的退路。registry 讀取一律走既有 loadAgentModelRegistry()，不另開第二套。
+ */
+export function isVisionModel(ref: { providerID: string; modelID: string } | null | undefined): boolean {
+  if (!ref || typeof ref.modelID !== "string" || ref.modelID.length === 0) return false
+  if (VISION_MODEL_IDS.has(ref.modelID)) return true
+  const providers = loadAgentModelRegistry()?.providers as
+    | Record<string, { models?: Record<string, { vision?: unknown }> } | undefined>
+    | undefined
+  const flagged = providers?.[ref.providerID]?.models?.[ref.modelID]?.vision
+  return flagged === true
+}

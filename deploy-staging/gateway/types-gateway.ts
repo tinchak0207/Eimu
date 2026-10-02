@@ -2,6 +2,14 @@
 // 內容：會話/確認/問題/SSE/記憶 型別（原 index.ts 95–369）＋ turn metrics 型別（原 5125–5176）
 import type { PendingSteer } from "./steer-core.ts"
 
+/** prompt_async 的 content part：文字（type:"text"）或檔案（type:"file"）。
+ *  2026-10-02 圖片入上下文：image/* 以 file part 帶 data: URL 進同一請求；
+ *  文字成員刻意寫成 `{ type: string; text: string }`（非字面量 "text"），
+ *  讓既有只會產文字 part 的呼叫端與測試型別繼續可賦值。 */
+export type GatewayPromptPart =
+  | { type: string; text: string }
+  | { type: "file"; mime: string; filename: string; url: string }
+
 export interface PendingConfirm {
   timer: ReturnType<typeof setTimeout>
   ledger?: { amount_coins: number; task_id?: string; model?: string }
@@ -152,7 +160,7 @@ export interface SessionState {
   // 抖動重試（2026-08-22）：turn 結束但零文本輸出 = 上游模型抖動死亡的特徵，
   // gateway 自動重發同一條 prompt（上限 TURN_MAX_RETRIES）。volatile，不持久化；
   // revive 後為 undefined，讀取處一律帶 ?? 預設值。
-  lastPromptBody?: { parts: { type: string; text: string }[]; system?: string; model?: { providerID: string; modelID: string } } | null
+  lastPromptBody?: { parts: GatewayPromptPart[]; system?: string; model?: { providerID: string; modelID: string } } | null
   // 修復1（2026-09-19 cn:deepseek-v4.1-flash 死鏈事故）：本輪「實際 dispatch 出去」
   // 的模型（prompt 首投與 failover/jitter 重投都更新）。volatile。降權判定必須用它——
   // lastPromptBody.model 是 turn 起點模型，failover 換模後不回寫，用舊值會把死帳戶

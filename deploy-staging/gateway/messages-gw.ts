@@ -18,13 +18,16 @@ import { opencodeFetch } from "./opencode-client.ts"
 import { startTurnPlan } from "./plan-gw.ts"
 import { takeUnfulfilledPlanInjection } from "./plan-promise.ts"
 import { beginTurnMetrics, noteTurnDeferred, noteTurnPromptDispatch } from "./metrics-gw.ts"
-import type { SessionState } from "./types-gateway.ts"
+import type { SessionState, GatewayPromptPart } from "./types-gateway.ts"
 import { resolveInvisibleUploadPaths } from "./events-translate.ts"
 import { hasTemplateNodes, buildTemplateSlotsFact, templateLandingFact, getTemplateDeviateToken } from "./canvas-cascade-state.ts"
 import { settleQuestion } from "./questions-gw.ts"
 import { clearQuestionHeartbeat, armAckTimer, armHeartbeatTimer, armWatchdogTimer, clearErrorStallTimer } from "./timers-gw.ts"
 import { buildMemoryInjectionBlocks, ensureMemoryTrace, appendMemoryRecallTrace, takeMemoryRecallPrefix, scheduleMemoryRecallPrefetch, isFreshCreativeRequest, FRESH_CREATIVE_TURN_DIRECTIVE, buildFirstTurnContinuityLines } from "./memory-wiring.ts"
-import { personaModel } from "./model-registry.ts"
+import { personaModel, isVisionModel } from "./model-registry.ts"
+// 2026-10-02 圖片入上下文：把本輪附件清單裡的圖片轉成 opencode prompt 的 file part
+// （純函式，見 turn-image-parts.ts）。只組資料，不碰 network/session state。
+import { buildTurnImageParts } from "./turn-image-parts.ts"
 // TODO(整合)：以下符號仍住 index.ts 且未 export（本任務禁改 index.ts；bun build 對未 export
 // 的 named import 報錯，已實測 2026-09-19）。依第一階段佔位符法（記憶
 // gateway-index-refactor-stage1-0919）：declare 佔位可過 bun build；整合 subagent 統一換真 import。
@@ -214,7 +217,7 @@ export function sanitizeUserContent(text: string): string {
 
 export function appendSystemPayloadToTurnTail(
   state: SessionState,
-  promptBody: { parts: { type: string; text: string }[]; system?: string },
+  promptBody: { parts: GatewayPromptPart[]; system?: string },
   payload: string,
   label: string,
 ): void {
@@ -550,9 +553,13 @@ export async function handleSendMessage(key: string, id: string, req: Request): 
   // 首次訊息時夾帶 system 欄位注入「意圖審查」政策：要求 agent 對用戶意圖
   // 信度不足時先反覆驗證、主動用 question 工具澄清，不可擅自揣測意圖產出。
   // system 欄位會記入 opencode user message 的 info.system，實際影響模型輸出。
-  const promptBody: { parts: { type: string; text: string }[]; system?: string; model?: { providerID: string; modelID: string }; agent?: string } = {
+  const promptBody: { parts: GatewayPromptPart[]; system?: string; model?: { providerID: string; modelID: string }; agent?: string } = {
     parts: [{ type: "text", text: pathNote ? `${pathNote}\n\n${content}` : content }],
   }
+  // parts[0] 恆為本輪的文字 part（後續召回前綴/尾端塊都併進這一條；圖片 file part 只在
+  // 全部文字注入完成後才 append，見下方「本輪圖片附件入上下文」）。捕一個具型別的參考，
+  // 避免每次都要在 union 上做窄化。
+  const headTextPart = promptBody.parts[0] as { type: string; text: string }
   // 靜態／動態分界：system 各段先收進有序 section 陣列，最後一次組裝（見下方
   // assembleSystemPromptSections），以顯式標記「可快取靜態前綴」到哪裡結束。
   const systemSections: SystemPromptSection[] = []
@@ -591,11 +598,11 @@ export async function handleSendMessage(key: string, id: string, req: Request): 
     if (recall === null) {
       void scheduleMemoryRecallPrefetch(state)
     } else if (recall.prefix && !freshCreative) {
-      promptBody.parts[0].text = `${recall.prefix}\n\n${promptBody.parts[0].text}`
+      headTextPart.text = `${recall.prefix}\n\n${headTextPart.text}`
       appendMemoryRecallTrace(state, recall.docRefs)
     }
     if (freshCreative) {
-      promptBody.parts[0].text = `${FRESH_CREATIVE_TURN_DIRECTIVE}\n\n${promptBody.parts[0].text}`
+      headTextPart.text = `${FRESH_CREATIVE_TURN_DIRECTIVE}\n\n${headTextPart.text}`
     }
   }
   // 2026-08-25 模板隱形注入：站點隨訊息上送 session_directive（點模板卡產生）。
@@ -848,6 +855,37 @@ export async function handleSendMessage(key: string, id: string, req: Request): 
   // prompt 待壓縮落地後再投（期間用戶若發下一條，本條讓位）；計時器在
   // 實際投遞成功後才布，看門狗全程兜底。不在途 → 原路直投。
   const compactionJob = compactionJobs.get(state.sessionId)
+  // ── 2026-10-02：本輪圖片附件入上下文（對齊 Claude Code：圖以 content block 進同一請求）──
+  // 前端在訊息尾端附 [ATTACHMENTS_BLOCK]（既是路徑可視性、也是無視覺模型時的文字後備）；
+  // 此處只在模型支援圖像輸入時，把 image/* 讀成 data: URL 的 file part，append 到全部文字
+  // part 之後（上面召回前綴/野獸幀/模板事實都已在同一文字 part 內）。非視覺模型且確有圖片
+  // 時不附圖，改在該輪 turn tail 注入一行誠實提示（沿用既有 appendSystemPayloadToTurnTail）。
+  try {
+    const vision = isVisionModel(promptBody.model)
+    const img = await buildTurnImageParts({ sessionId: state.sessionId, content, vision })
+    if (vision && img.parts.length > 0) {
+      promptBody.parts.push(...img.parts)
+    }
+    if (!vision && img.skipped.length > 0) {
+      const paths = img.skipped.map((s) => s.path).join("、")
+      appendSystemPayloadToTurnTail(
+        state,
+        promptBody,
+        `本轮模型不支持图像输入：用户上传了图片但你无法直接查看，请用 vision_analyze 工具（传 image_path）取得文字描述后再作答，不要假装看过图。可用 image_path：${paths}`,
+        "【本轮图片附件·无法直接查看】",
+      )
+    }
+    if (img.parts.length > 0 || img.skipped.length > 0) {
+      const reasons = [...new Set(img.skipped.map((s) => s.reason))].join(",") || "-"
+      console.log(
+        `[gateway] turn image parts: attached=${img.parts.length} skipped=${img.skipped.length} reason=${reasons} model=${promptBody.model?.providerID ?? "?"}/${promptBody.model?.modelID ?? "?"}`,
+      )
+    }
+  } catch (e) {
+    // 異常路徑一定要有日誌（2026-10-02 steer 教訓：沒有日誌的分支＝盲修）。組裝失敗
+    // 絕不能靜默，也不能擋本輪發送——圖進不去就退回純文字路徑（附件清單仍在正文裡）。
+    console.warn(`[gateway] turn image parts failed — session=${state.sessionId}:`, e instanceof Error ? e.message : e)
+  }
   // 抖動重試記賬：本輪起點。零文本結束時用 lastPromptBody 重放。
   state.lastPromptBody = promptBody
   state.turnGen = (state.turnGen ?? 0) + 1
