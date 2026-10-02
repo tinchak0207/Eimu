@@ -1,0 +1,93 @@
+diff -ruN a/smart_search/service.py b/smart_search/service.py
+--- a/smart_search/service.py	2026-10-03 02:54:46.545008865 +0800
++++ b/smart_search/service.py	2026-10-03 02:54:46.548388114 +0800
+@@ -1201,7 +1201,7 @@
+     if provider == "openai-compatible":
+         return bool(config.openai_compatible_api_url and config.openai_compatible_api_key)
+     if provider == "context7":
+-        return bool(config.context7_api_key)
++        return True  # keyless-patch: 免 Key 通路，provider 啟用即算配置
+     if provider == "exa":
+         return bool(config.exa_api_key)
+     if provider == "zhipu":
+@@ -1211,15 +1211,15 @@
+     if provider == "tavily":
+         return _tavily_is_enabled()
+     if provider == "jina":
+-        return bool(config.jina_api_key)
++        return True  # keyless-patch: 免 Key 通路，provider 啟用即算配置
+     if provider == "zhipu-mcp-reader":
+         return bool(config.zhipu_mcp_api_key)
+     if provider == "firecrawl":
+-        return bool(config.firecrawl_api_key)
++        return True  # keyless-patch: 免 Key 通路，provider 啟用即算配置
+     if provider == "tinyfish":
+         return bool(config.tinyfish_api_key)
+     if provider == "anysearch":
+-        return bool(config.anysearch_api_key)
++        return True  # keyless-patch: 免 Key 通路，provider 啟用即算配置
+     if provider == "sciverse":
+         return bool(config.sciverse_api_token)
+     if provider == "main-search":
+@@ -2719,11 +2719,11 @@
+ async def call_firecrawl_search(query: str, limit: int = 14) -> list[dict] | None:
+     if not config.provider_enabled("firecrawl"):
+         return None
+-    api_key = config.firecrawl_api_key
+-    if not api_key:
+-        return None
++    api_key = config.firecrawl_api_key or ""  # keyless-patch: 允許匿名呼叫
+     endpoint = f"{config.firecrawl_api_url.rstrip('/')}/search"
+-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
++    headers = {"Content-Type": "application/json"}  # keyless-patch: 無 key 時不送 Authorization
++    if api_key:
++        headers["Authorization"] = f"Bearer {api_key}"
+     body = {"query": query, "limit": limit}
+     try:
+         async with httpx.AsyncClient(timeout=90.0) as client:
+@@ -2758,11 +2758,11 @@
+ async def call_firecrawl_scrape(url: str, ctx=None) -> str | None:
+     if not config.provider_enabled("firecrawl"):
+         return None
+-    api_key = config.firecrawl_api_key
+-    if not api_key:
+-        return None
++    api_key = config.firecrawl_api_key or ""  # keyless-patch: 允許匿名呼叫
+     endpoint = f"{config.firecrawl_api_url.rstrip('/')}/scrape"
+-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
++    headers = {"Content-Type": "application/json"}  # keyless-patch: 無 key 時不送 Authorization
++    if api_key:
++        headers["Authorization"] = f"Bearer {api_key}"
+     for attempt in range(config.retry_max_attempts):
+         body = {
+             "url": url,
+@@ -4429,13 +4429,7 @@
+ async def context7_library(name: str, query: str = "") -> dict[str, Any]:
+     if disabled := _provider_disabled_result("context7"):
+         return disabled
+-    api_key = config.context7_api_key
+-    if not api_key:
+-        return {
+-            "ok": False,
+-            "error_type": "config_error",
+-            "error": source_message('CONTEXT7_API_KEY 未配置。请运行 `smart-search setup`，或使用 `smart-search config set CONTEXT7_API_KEY <key>`。'),
+-        }
++    api_key = config.context7_api_key or ""  # keyless-patch: 允許匿名呼叫
+     provider = Context7Provider(config.context7_base_url, api_key, config.context7_timeout)
+     activity.progress("provider_request", "context7")
+     raw = await provider.library(name, query)
+@@ -4451,13 +4445,7 @@
+ async def context7_docs(library_id: str, query: str) -> dict[str, Any]:
+     if disabled := _provider_disabled_result("context7"):
+         return disabled
+-    api_key = config.context7_api_key
+-    if not api_key:
+-        return {
+-            "ok": False,
+-            "error_type": "config_error",
+-            "error": source_message('CONTEXT7_API_KEY 未配置。请运行 `smart-search setup`，或使用 `smart-search config set CONTEXT7_API_KEY <key>`。'),
+-        }
++    api_key = config.context7_api_key or ""  # keyless-patch: 允許匿名呼叫
+     provider = Context7Provider(config.context7_base_url, api_key, config.context7_timeout)
+     activity.progress("provider_request", "context7")
+     raw = await provider.docs(library_id, query)
