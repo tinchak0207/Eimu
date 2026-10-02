@@ -1,1 +1,16 @@
 node_modules/
+
+# 執行時狀態（不進版控）：release 會以 symlink 指向 /opt/agent-harness/state/，
+# 若這些檔未列入 ignore，一次 `git add -A` 就會把 41MB 的 sessions.db 提交進 repo。
+sessions.db
+sessions.db-shm
+sessions.db-wal
+memory-cursor.json
+memory-batches/
+
+# 現場手工備份殘檔（不是源碼）
+*.bak*
+index.r?.ts
+index.ts.redteam-*
+index.ts.*-staged
+index.ts.patched-cache-*

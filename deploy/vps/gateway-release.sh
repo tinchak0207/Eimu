@@ -53,6 +53,9 @@ RELEASES_DIR="${GW_RELEASES_DIR:-$HARNESS_ROOT/releases/gateway}"
 DEPLOY_GATE="${GW_DEPLOY_GATE:-sudo $HARNESS_ROOT/deploy.sh}"
 HEALTH_URL="${GW_HEALTH_URL:-http://127.0.0.1:8081/healthz}"
 OWNER="${GW_OWNER:-ubuntu:ubuntu}"
+# 執行時狀態（SQLite 會話庫、記憶游標/批次）不屬於任何 commit，必須與代碼目錄分離。
+# release 目錄只放 symlink 指向此處，否則每次發佈都會把 41MB 的 sessions.db 換掉。
+STATE_DIR="${GW_STATE_DIR:-$HARNESS_ROOT/state}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -217,9 +220,10 @@ cmd_adopt() {
   log "⚠️ 一次性、對生產有實質影響的操作；本腳本從未對生產驗證過，請人工確認後再跑。"
   local -a RA
   mapfile -t RA < <(remote_args)
-  run_remote_stdin bash -s -- "${RA[@]}" "$rel" <<'REMOTE'
+  run_remote_stdin bash -s -- "${RA[@]}" "$rel" "$STATE_DIR" <<'REMOTE'
 set -euo pipefail
-HARNESS_ROOT="$1"; GATEWAY_PATH="$2"; RELEASES_DIR="$3"; OWNER="$4"; HEALTH_URL="$5"; rel="$6"
+HARNESS_ROOT="$1"; GATEWAY_PATH="$2"; RELEASES_DIR="$3"; OWNER="$4"; HEALTH_URL="$5"; rel="$6"; STATE_DIR="$7"
+STATE_ITEMS=(sessions.db sessions.db-shm sessions.db-wal memory-cursor.json memory-batches)
 if [ -L "$GATEWAY_PATH" ]; then echo "ALREADY_ADOPTED"; exit 0; fi
 [ -d "$GATEWAY_PATH" ] || { echo "NO_GATEWAY_DIR: $GATEWAY_PATH"; exit 1; }
 sudo mkdir -p "$RELEASES_DIR/$rel"
@@ -227,6 +231,21 @@ sudo mv "$GATEWAY_PATH" "$RELEASES_DIR/$rel/files"
 sudo ln -s "$RELEASES_DIR/$rel/files" "$GATEWAY_PATH"
 sudo chown -h "$OWNER" "$GATEWAY_PATH" 2>/dev/null || true
 sudo chown -R "$OWNER" "$RELEASES_DIR/$rel" 2>/dev/null || true
+
+# 狀態與代碼分離：把執行時狀態集中到 $STATE_DIR，release 目錄只留 symlink。
+# 首次（此處）＝遷移；之後每次 release 只是重建同一組 symlink，資料不隨版本搬移，
+# 因此回滾到 baseline 也仍讀到同一份會話庫，不會回退成空庫。
+sudo mkdir -p "$STATE_DIR"
+for it in "${STATE_ITEMS[@]}"; do
+  if [ -e "$RELEASES_DIR/$rel/files/$it" ] && [ ! -e "$STATE_DIR/$it" ]; then
+    sudo mv "$RELEASES_DIR/$rel/files/$it" "$STATE_DIR/$it"
+  fi
+  if [ -e "$STATE_DIR/$it" ]; then
+    sudo ln -sfn "$STATE_DIR/$it" "$RELEASES_DIR/$rel/files/$it"
+  fi
+done
+sudo chown -R "$OWNER" "$STATE_DIR" 2>/dev/null || true
+
 cd "$RELEASES_DIR/$rel/files"
 find . -type f -print0 | sort -z | xargs -0 md5sum > "../manifest.md5"
 {
@@ -287,10 +306,11 @@ cmd_release() {
 
   local -a RA
   mapfile -t RA < <(remote_args)
-  run_remote_stdin bash -s -- "${RA[@]}" "$rel" "$sha_full" "$sha_short" "$stage_tar" "$stage_dir" <<'REMOTE'
+  run_remote_stdin bash -s -- "${RA[@]}" "$rel" "$sha_full" "$sha_short" "$stage_tar" "$stage_dir" "$STATE_DIR" <<'REMOTE'
 set -euo pipefail
 HARNESS_ROOT="$1"; GATEWAY_PATH="$2"; RELEASES_DIR="$3"; OWNER="$4"; HEALTH_URL="$5"
-rel="$6"; sha_full="$7"; sha_short="$8"; stage_tar="$9"; stage_dir="${10}"
+rel="$6"; sha_full="$7"; sha_short="$8"; stage_tar="$9"; stage_dir="${10}"; STATE_DIR="${11}"
+STATE_ITEMS=(sessions.db sessions.db-shm sessions.db-wal memory-cursor.json memory-batches)
 
 if [ ! -L "$GATEWAY_PATH" ]; then
   echo "NOT_ADOPTED: $GATEWAY_PATH 不是 symlink → 先跑 adopt（見腳本頭部假設 A）"
@@ -310,6 +330,20 @@ while IFS= read -r -d '' f; do
 done < <(find . -type f -print0)
 cd /
 rm -rf "$stage_dir" "$stage_tar"
+
+# 狀態與代碼分離：新 release 目錄不放真實狀態檔，只放指向 $STATE_DIR 的 symlink。
+# 若 $STATE_DIR 尚無該項（例如 adopt 前就已存在的舊狀態），從當前 release 目錄遷移一次。
+CUR_DIR="$(readlink -f "$GATEWAY_PATH" 2>/dev/null || true)"
+sudo mkdir -p "$STATE_DIR"
+for it in "${STATE_ITEMS[@]}"; do
+  if [ ! -e "$STATE_DIR/$it" ] && [ -n "$CUR_DIR" ] && [ -e "$CUR_DIR/$it" ]; then
+    sudo mv "$CUR_DIR/$it" "$STATE_DIR/$it"
+  fi
+  if [ -e "$STATE_DIR/$it" ]; then
+    sudo ln -sfn "$STATE_DIR/$it" "$REL_DIR/files/$it"
+  fi
+done
+sudo chown -R "$OWNER" "$STATE_DIR" 2>/dev/null || true
 
 cd "$REL_DIR/files"
 find . -type f -print0 | sort -z | xargs -0 md5sum > "$REL_DIR/manifest.md5"

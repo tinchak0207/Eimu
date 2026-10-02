@@ -12,8 +12,10 @@ LOCAL_DIR="$(cd "$(dirname "$0")/../gateway" && pwd)"
 TMP_DIR=$(mktemp -d /tmp/vps-recon.XXXXXX)
 trap 'rm -rf "$TMP_DIR"' EXIT
 
-# 1. 拉取 VPS 生產源碼（排除備份/依賴/測試；root-owned 需 sudo tar）
-"${SSH_CMD[@]}" "sudo tar -C $VPS_DIR --exclude='*.bak*' --exclude='*.test.ts' --exclude='node_modules' --exclude='index.r?.ts' -cf - ." | tar -C "$TMP_DIR" -xf -
+# 1. 拉取 VPS 生產源碼（排除備份/依賴/測試/執行時狀態；root-owned 需 sudo tar）
+#    --exclude='*.db*' 是必要的：sessions.db-wal 由服務持續寫入，tar 讀到一半變動會回
+#    退出碼 1，配合 set -o pipefail 會讓整支 recon 直接死掉、連判決都印不出來。
+"${SSH_CMD[@]}" "sudo tar -C $VPS_DIR --exclude='*.bak*' --exclude='*.test.ts' --exclude='node_modules' --exclude='index.r?.ts' --exclude='*.db' --exclude='*.db-wal' --exclude='*.db-shm' --exclude='memory-batches' --exclude='memory-cursor.json' -cf - ." | tar -C "$TMP_DIR" -xf -
 if ! ls "$TMP_DIR"/*.ts >/dev/null 2>&1; then
   echo "RECON_FAIL: VPS 拉取失敗或為空（連線/權限問題）"; exit 2
 fi
