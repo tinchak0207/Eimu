@@ -40,6 +40,10 @@ import { templatePlaceholderContent } from "./workflow-templates"
 // （此路徑輸出與注入前逐字元等價）。reverse import 與 canvas-cascade-state→subagent 的既有
 // 循環同型，兩端均在呼叫期使用綁定（非模組頂層求值），bun ESM 循環安全。
 import { buildTemplateSlotsFact, getTemplateDeviateToken } from "./canvas-cascade-state.ts"
+// FIX-A（2026-10-02）：子代理工具結果的媒體成品出卡——共用主路徑的成品 URL 提取器與
+// emitVideoDone/emitAudioDone（不另造第二套）。events-translate↔sessions-core↔subagent 的
+// 循環與 canvas-cascade-state↔subagent 同型，兩端均在呼叫期使用綁定，bun ESM 循環安全。
+import { parseToolOutput, collectToolOutputMediaUrls, emitVideoDone, emitAudioDone } from "./events-translate.ts"
 // 片 C（2026-09-15）：Expert 交付契約的機器強制點。純函數模組，零 gateway 內部依賴。
 // 片 D（2026-09-15）：追加 REWORK_FAIL_MARK/buildReworkDirective——FAIL 時機器化重派一次。
 import {
@@ -264,6 +268,14 @@ let deps: SubagentDeps | undefined
 const byParent = new Map<string, SubagentRun[]>()
 // 子 opencode session id → run（全局 tap 按 sessionID 命中）
 const byChildOc = new Map<string, SubagentRun>()
+// FIX-B（2026-10-02）：子會話→父會話映射的耐久性。byChildOc 在 run 收尾（finishRun/
+// stopSubagentRun/換模）會被 delete，但 poller 可能在子代理結束後才把成品經 /internal/emit
+// 用子會話 id 發出 → subagentParentState 解析不到父會話 → 404 → 卡丟失。於綁定點
+// （dispatchAttempt）額外寫一張有界（≤200）TTL（2h）表，byChildOc 未命中時回退查。
+// **只在綁定處寫**，不改任何 byChildOc.has()/delete() 語義（subagent_stop/status 依賴它們）。
+const RECENT_CHILD_PARENT_CAP = 200
+const RECENT_CHILD_PARENT_TTL_MS = 2 * 60 * 60 * 1000
+const recentChildParent = new Map<string, { parentGatewaySessionId: string; parentOpencodeSessionId: string; at: number }>()
 // 子代理 id → 结果（工具轮询取件；TTL 后清）
 const completed = new Map<string, SubagentResult>()
 
@@ -318,11 +330,18 @@ export function subagentParentApiKey(opencodeSessionId: string): string | undefi
  */
 export function subagentParentState(opencodeSessionId: string): any | undefined {
   const run = byChildOc.get(opencodeSessionId)
-  if (!run) return undefined
-  return (
-    deps?.resolveSession(run.parentGatewaySessionId) ??
-    deps?.findSessionByOpenCodeId(run.parentOpencodeSessionId)
-  )
+  if (run) {
+    return (
+      deps?.resolveSession(run.parentGatewaySessionId) ??
+      deps?.findSessionByOpenCodeId(run.parentOpencodeSessionId)
+    )
+  }
+  // FIX-B（2026-10-02）：run 已收尾（byChildOc 已刪）但 poller 仍可能用子會話 id 晚到取件
+  // → 回退查有界 TTL 表（lazy prune 過期項），解析方式與上面逐字相同。
+  pruneRecentChildParent(Date.now())
+  const rec = recentChildParent.get(opencodeSessionId)
+  if (!rec) return undefined
+  return deps?.resolveSession(rec.parentGatewaySessionId) ?? deps?.findSessionByOpenCodeId(rec.parentOpencodeSessionId)
 }
 
 function parentStateOf(run: SubagentRun): any {
@@ -420,6 +439,27 @@ function pruneCompleted(): void {
   const now = Date.now()
   for (const [id, rec] of completed) {
     if (now - rec.finishedAt > COMPLETED_TTL_MS) completed.delete(id)
+  }
+}
+
+// FIX-B：記住子會話→父會話綁定（有界）；byChildOc 收尾刪除後仍能解析父 state 供晚到取件。
+function rememberChildParent(childId: string, run: SubagentRun): void {
+  recentChildParent.set(childId, {
+    parentGatewaySessionId: run.parentGatewaySessionId,
+    parentOpencodeSessionId: run.parentOpencodeSessionId,
+    at: Date.now(),
+  })
+  while (recentChildParent.size > RECENT_CHILD_PARENT_CAP) {
+    const oldest = recentChildParent.keys().next().value
+    if (oldest === undefined) break
+    recentChildParent.delete(oldest)
+  }
+}
+
+// FIX-B：lazy prune 過期項（TTL 2h），隨每次回退查詢順手清（只在 subagentParentState miss 時呼叫）。
+function pruneRecentChildParent(now: number): void {
+  for (const [k, v] of recentChildParent) {
+    if (now - v.at > RECENT_CHILD_PARENT_TTL_MS) recentChildParent.delete(k)
   }
 }
 
@@ -1051,6 +1091,8 @@ async function dispatchAttempt(run: SubagentRun): Promise<string | undefined> {
   }
   run.opencodeSessionId = childId
   byChildOc.set(childId, run)
+  // FIX-B：綁定點同時寫入耐久映射（只在此寫，不動 byChildOc 的 delete/has 語義）。
+  rememberChildParent(childId, run)
 
   const model = run.modelChain[run.attempt - 1]
   // 野獸模式 ON：任務書頭部注入 Expert 憲法（誠實鐵律/工具域斷路/配方優先/
@@ -1222,6 +1264,17 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
       case "message.part.updated": {
         const part = event?.properties?.part
         if (!part) break
+        // FIX-A（2026-10-02）：子代理工具結果的媒體成品 → 父會話出卡。野獸模式下音樂/影片
+        // 只能在 Expert 子代理裡產生，而其 tool part 此前整類被丟棄 ⇒ 子代理做出的影片/音樂
+        // 永遠不出卡（暴君抱怨「影片／音樂不主動彈出」的真主因）。只認 completed；去重交給
+        // emitVideoDone/emitAudioDone 的 state.announcedUrls（同一 part 可能多次 updated、
+        // completed 可能重複觸發）。刻意**不處理 image**：子代理（如 video-director）會產大量
+        // 中間關鍵幀，一併發 image.done 會把聊天框灌爆——只放行成片類媒體，刻意的不對稱。
+        if (part.type === "tool" && part.state?.status === "completed") {
+          const media = collectToolOutputMediaUrls(parseToolOutput(part.state.output))
+          for (const c of media.video) void emitVideoDone(parentState, c.url, c.cost_coins, undefined, "video")
+          for (const c of media.audio) void emitAudioDone(parentState, c.url, c.cost_coins, undefined, "audio")
+        }
         if (part.type !== "text" && part.type !== "reasoning") {
           // step-start 与未知类型不可达前端：记 partID，其 delta 一并丢弃
           //（delta 事件自身不带类型，与主路径 suppressedParts 同语义）。

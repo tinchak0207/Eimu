@@ -41,8 +41,12 @@ const isFullUuid = (id: string): boolean => id.length >= 36 && id.includes("-")
 async function fetchOnce(id: string, context: any) {
   let resp = await platformFetch(`/images/${id}`, {}, context.sessionID, context.abort)
   let body = await resp.json().catch(() => ({}))
-  // 影片作業 id 不在 /images 命名空間（404）：回落 /videos/{id}，同一把 key 同一張帳。
-  // 否則已完成的影片（submit_only 提交的）永遠取不回，用戶看不到成品。
+  // 404 回落 /videos/{id}（保留：兼容舊版站點）。根因更正 2026-10-02，原假設已推翻：
+  // 站點 /v1/images/{id} 與 /v1/videos/{id} 共用同一條 tenant-scoped 查詢
+  // (getGenerationJobForTenant(id,"biz:"+key.id) → SELECT ... WHERE id=? AND tenant_id=? LIMIT 1，
+  // 無 kind 過濾)，故同一把 key 的影片 id 打 /images 一樣回 200；真正的 404 來自 tenant
+  // 不匹配（換了 key／fallback HARNESS_API_KEY），不是命名空間。此回落在現行站點不會被觸發。
+  // 本輪真正修好的那一半在 poller：成功事件名 image.done → video.done，否則 .mp4 進 <img> 變破圖。
   if (resp.status === 404) {
     const vresp = await platformFetch(`/videos/${id}`, {}, context.sessionID, context.abort)
     const vbody = await vresp.json().catch(() => ({}))
