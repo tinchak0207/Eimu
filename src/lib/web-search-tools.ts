@@ -132,7 +132,9 @@ export function extractExaResults(body: unknown): {
 export const webSearchTool: WebToolDef = {
   id: "search_web",
   description:
-    "联网搜索最新资料（search_web，Exa 上游）：返回网页结果列表（标题/链接/高亮片段）。研究类任务的实证弹药——结论必须带 URL 出处，禁止只凭内部知识作答。",
+    "联网搜索最新资料的**预设通用网页搜索工具**（search_web，Exa 上游）：人物／新闻／公司／概念／事实查证／一般资料都先用本工具；返回网页结果列表（标题/链接/高亮片段），研究类任务的实证弹药——结论必须带 URL 出处，禁止只凭内部知识作答。" +
+    "**除非使用者明确要求某平台（B站／GitHub／Reddit）的站内内容，否则不要优先挑平台工具。**" +
+    "要 B站中文影音／GitHub 开源专案／Reddit 英文社群口碑的站内内容 → 改用 search_aggregate；要某一页的全文内容或程式库/框架文档 → 改用 smart_search。",
   args: {
     query: {
       type: "string",
@@ -238,6 +240,7 @@ export const webSearchTool: WebToolDef = {
         search_depth: depthRaw,
         max_results: maxResults,
         result_count: picked.results.length,
+        coverage_notice: "已用通用网页搜索；若要 B站／GitHub／Reddit 的站内内容请用 search_aggregate。",
         results: picked.results,
         ...(requestId ? { requestId } : {}),
         ...(costDollars !== undefined ? { costDollars } : {}),

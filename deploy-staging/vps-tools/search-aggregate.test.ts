@@ -67,6 +67,15 @@ const oneFailPy = writePy(
     "{'platform': 'reddit', 'ok': False, 'results': [], 'error': 'reddit 是英文平台，中文关键词搜不到内容'}" +
     "]}, ensure_ascii=False))\n",
 )
+// 全部平台 ok:false（模拟查询语种/平台全不匹配，脚本逐平台失败）。
+const allFailPy = writePy(
+  "allfail.py",
+  "import json\n" +
+    "print(json.dumps({'query': 'q', 'platforms': [" +
+    "{'platform': 'bilibili', 'ok': False, 'results': [], 'error': 'x'}, " +
+    "{'platform': 'github', 'ok': False, 'results': [], 'error': 'y'}" +
+    "]}, ensure_ascii=False))\n",
+)
 
 afterAll(() => {
   rmSync(FIX, { recursive: true, force: true })
@@ -255,5 +264,54 @@ describe("脚本路径由模块自身位置推导且真的可跑", () => {
     })
     expect(r.status).toBe(0)
     expect(r.stdout).toContain("bilibili")
+  })
+})
+
+// ── 8. coverage_notice（输出内在场提示，本輪分流培訓的验收点）────────────────
+describe("coverage_notice 使用当下纠错提示", () => {
+  test("成功路径恒带 coverage_notice，含实际 platforms 与 search_web", async () => {
+    const res = await runAggregateTool(
+      { query: "q", platforms: "github" },
+      { scriptPath: validPy, timeoutMs: 10_000, envSource: ENV },
+    )
+    const parsed = out<{ ok: boolean; coverage_notice: string }>(res)
+    expect(parsed.ok).toBe(true)
+    expect(typeof parsed.coverage_notice).toBe("string")
+    expect(parsed.coverage_notice).toContain("github")
+    expect(parsed.coverage_notice).toContain("search_web")
+    // 单平台情境：notice 不得提到未查询的平台（必须反映实际 platforms，不是固定文案）
+    expect(parsed.coverage_notice).not.toContain("bilibili")
+  })
+
+  test("省略 platforms 时 notice 反映实际的默认平台集", async () => {
+    const res = await runAggregateTool({ query: "q" }, { scriptPath: validPy, timeoutMs: 10_000, envSource: ENV })
+    const parsed = out<{ coverage_notice: string }>(res)
+    expect(parsed.coverage_notice).toContain("bilibili,github")
+    expect(parsed.coverage_notice).toContain("search_web")
+  })
+
+  test("全部平台 ok:false 时仍带 coverage_notice，hint 也含 search_web", async () => {
+    const res = await runAggregateTool(
+      { query: "q", platforms: "bilibili,github" },
+      { scriptPath: allFailPy, timeoutMs: 10_000, envSource: ENV },
+    )
+    const parsed = out<{ ok: boolean; coverage_notice: string; hint: string }>(res)
+    expect(parsed.ok).toBe(true)
+    expect(parsed.coverage_notice).toContain("bilibili,github")
+    expect(parsed.coverage_notice).toContain("search_web")
+    expect(parsed.hint).toContain("search_web")
+  })
+
+  test("既有字段名称与语义不变（platforms_requested/raw 原样）", async () => {
+    const res = await runAggregateTool(
+      { query: "q", platforms: "github" },
+      { scriptPath: validPy, timeoutMs: 10_000, envSource: ENV },
+    )
+    const parsed = out<{ platforms_requested: string; raw: unknown }>(res)
+    expect(parsed.platforms_requested).toBe("github")
+    expect(parsed.raw).toEqual({
+      query: "q",
+      platforms: [{ platform: "github", ok: true, results: [{ title: "t", url: "u" }] }],
+    })
   })
 })

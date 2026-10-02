@@ -419,14 +419,16 @@ export async function runSmartSearchTool(rawArgs: Record<string, unknown>, deps:
 export const smartSearchTool: WebToolDef = {
   id: "smart_search",
   description:
-    "多來源研究工具（smart_search，smartsearch 免 Key 通路）：抓取網頁、查函式庫文檔、社群/垂直檢索，返回真內容＋真連結。" +
+    "多來源研究工具（smart_search，smartsearch 免 Key 通路）：**適用「讀某一頁的全文內容」與「查某個程式庫／框架的官方文檔」，不是通用網頁搜尋。** " +
+    "抓取網頁、查函式庫文檔、社群/垂直檢索，返回真內容＋真連結。" +
     "**結論必須帶 URL 出處，禁止只憑內部知識作答。** " +
     "三種 intent：" +
     "`page`＝抓取「已知 URL」的正文（免 Key，走 Jina/Firecrawl；參數用 url）；" +
     "`docs`＝查函式庫/框架/API 文檔（免 Key，走 Context7；參數用 query，可選 library_id 指定庫，不給則自動選庫）；" +
-    "`web`＝通用網頁搜尋（先走 CLI `search`，需 main-search 憑證；憑證缺失或失敗時**自動免 Key 回落**至 vendored `anysearch-search`，回報以 served_by 標明實際通路）。" +
-    "分流：通用網頁搜尋優先 `search_web`（Exa）；社群口碑（Reddit）、B站中文內容、開源專案/代碼用 `search_aggregate`；" +
-    "已知 URL 要正文用本工具的 `page`；查框架/API 文檔用本工具的 `docs`。",
+    "`web`＝通用網頁搜尋（先走 CLI `search`，需 main-search 憑證；憑證缺失或失敗時**自動免 Key 回落**至 vendored `anysearch-search`，回報以 served_by 標明實際通路）。**通用網頁搜尋首選是 `search_web`，不是本工具。**" +
+    "檢索分流：人物／新聞／公司／概念／事實查證／一般資料用 `search_web`（通用網頁，預設）；" +
+    "B站中文影音／GitHub 開源專案／Reddit 英文社群口碑（必須指名平台）用 `search_aggregate`；" +
+    "要某一頁的全文內容用本工具的 `page`；要某個程式庫／框架的官方文檔用本工具的 `docs`。",
   args: {
     intent: {
       type: "string",

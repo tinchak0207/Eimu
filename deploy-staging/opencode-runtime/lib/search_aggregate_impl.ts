@@ -103,6 +103,14 @@ export function resolveTimeoutMs(platforms: string): number {
   return platformsIncludeReddit(platforms) ? AGGREGATE_TIMEOUT_REDDIT_MS : AGGREGATE_TIMEOUT_MS
 }
 
+/**
+ * 輸出內恆在的覆蓋範圍提示（本輪分流培訓的關鍵設計）：讓模型在使用當下就看見
+ * 自己查的宇宙有多小，通用網頁意圖當場被糾正回 search_web。純加法欄位。
+ */
+export function aggregateCoverageNotice(platforms: string): string {
+  return `本工具只查了 ${platforms}；不涵盖通用网页。人物／新闻／公司／概念类查询请改用 search_web。`
+}
+
 // ── 子進程 env 白名單 ────────────────────────────────────────────────────────
 
 /**
@@ -267,11 +275,24 @@ export async function runAggregateTool(
   }
 
   // 原樣透傳腳本 JSON：單一平台 ok:false 是設計正確行為，不因此判整體失敗。
+  // 但「全部平台都 ok:false」要另帶 hint，讓模型當場看到覆蓋範圍與替代工具。
+  const rawPlatforms = (raw as { platforms?: unknown })?.platforms
+  const allPlatformsFailed =
+    Array.isArray(rawPlatforms) &&
+    rawPlatforms.length > 0 &&
+    rawPlatforms.every(
+      (p) => typeof p === "object" && p !== null && (p as { ok?: unknown }).ok === false,
+    )
+  const coverageNotice = aggregateCoverageNotice(platforms)
   return ok({
     title: "搜索完成",
     query,
     platforms_requested: platforms,
     elapsed_ms: run.elapsedMs,
+    coverage_notice: coverageNotice,
+    ...(allPlatformsFailed
+      ? { hint: `${coverageNotice} 本次所有平台均未返回结果，可考虑改用 search_web 做通用网页检索。` }
+      : {}),
     raw,
   })
 }
@@ -279,16 +300,19 @@ export async function runAggregateTool(
 export const aggregateSearchTool: WebToolDef = {
   id: "search_aggregate",
   description:
-    "跨平台聚合检索（search_aggregate，aggregate-search 免 Key 通路）：一次检索多平台，返回真标题＋真链接。" +
+    "平台站内聚合检索（search_aggregate，aggregate-search 免 Key 通路）：一次检索多个**平台站内**内容，返回真标题＋真链接。" +
+    "**只涵盖 bilibili / github / reddit 三个平台的站内内容，不涵盖通用网页。**" +
+    "**不要用的情况：人物／新闻／公司／概念／一般事实查证 → 改用 search_web（通用网页搜索）。**" +
     "结论必须带 URL 出处，禁止只凭内部知识作答。" +
-    "platforms 合法值只有 bilibili / github / reddit 三个。平台与语言纪律：" +
-    "bilibili＝B站中文内容（用中文关键词）；" +
-    "github＝开源专案（必须用英文关键词，脚本会硬拦中文）；" +
-    "reddit＝英文社群口碑/真实使用体验（必须用英文关键词；单次可达 3 分钟，非必要不要加入）。" +
+    "平台与语言纪律（要依查询意图挑平台）：" +
+    "bilibili＝B站中文影音内容（用中文关键词）；" +
+    "github＝GitHub 开源专案（必须用英文关键词，脚本会硬拦中文）；" +
+    "reddit＝Reddit 英文社群口碑/真实使用体验（必须用英文关键词；单次可达 3 分钟，非必要不要加入）。" +
     "多平台时按各平台语言分别给关键词（例：bilibili: 猫粮推荐 + github/reddit: cat food recommendation），" +
-    "英文平台用中文关键词会被拒并回错误提示。platforms 默认 \"bilibili,github\"；" +
+    "英文平台用中文关键词会被拒并回错误提示。" +
+    "platforms 默认 \"bilibili,github\" **只是预设值，不代表查询涵盖这两个平台**；" +
     "可用逗号清单、\"all\"、\"all,-xhs\" 等（透传给脚本）。" +
-    "通用网页搜索不要用本工具，改用 search_web。",
+    "查某一个网页/一般资料不要用本工具，改用 search_web；抓某一页全文或程式库文档用 smart_search。",
   args: {
     query: {
       type: "string",
@@ -300,7 +324,7 @@ export const aggregateSearchTool: WebToolDef = {
       type: "string",
       required: false,
       description:
-        "逗号分隔平台清单，默认 \"bilibili,github\"（不含 reddit）。合法值只有 bilibili/github/reddit；可用 \"all\"（含 reddit）、\"all,-xhs\"。",
+        "逗号分隔平台清单。默认 \"bilibili,github\" 只是预设值，不代表查询涵盖这两个平台；要依查询意图挑平台（B站中文影音→bilibili／GitHub 开源专案→github／Reddit 英文社群口碑→reddit）。合法值只有 bilibili/github/reddit；可用 \"all\"（含 reddit）、\"all,-xhs\"。",
     },
     max: {
       type: "number",
