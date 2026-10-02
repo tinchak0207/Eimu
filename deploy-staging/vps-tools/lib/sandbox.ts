@@ -13,7 +13,7 @@
 //   4. bwrap 沙箱：清 env、斷網、unshare pid/ipc/uts、根唯讀、遮蔽內部/他租戶、/tmp 與 .run 按會話隔離（擋 L12）。
 //   5. redactSecrets / filterForeignUploads：工具輸出進上下文前的兜底。
 
-import { existsSync, readdirSync, realpathSync, readFileSync, statSync } from "node:fs"
+import { existsSync, mkdirSync, readdirSync, realpathSync, readFileSync, statSync } from "node:fs"
 import path from "node:path"
 import { createHash } from "node:crypto"
 import { lookup as dnsLookup } from "node:dns/promises"
@@ -271,9 +271,42 @@ export function shQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`
 }
 
+const SELF_WRAP_RE = /(?:^|\s)exec\s+'(?:\/usr\/bin\/)?bwrap'|--die-with-parent/
+
+/**
+ * 反解自家沙箱包裝層（2026-10-02 事故，子代理連環逾時的單一根因）。
+ *
+ * `tool.execute.before` 會把 args.command 改寫成
+ *   exec '<bwrap>' --die-with-parent ... /bin/bash -c '<原始命令>'
+ * 這段字串會落進工具輸入紀錄與回顯，模型看到後會把**整段**當成命令本體重送，
+ * 形成 bwrap(...bwrap(...))：內層在已被外層 tmpfs 的 /opt 上再 --ro-bind / 與
+ * 掛 /proc，並引用**舊會話**的 .run/<舊 slug>/{tmp,run}（新會話不存在）→
+ * bwrap: Can't find source path；子代理診斷、換寫法、再試，最後撞逾時被殺。
+ *
+ * 修法：進來時若偵測到自家包裝層，剝回最內層原始命令再重新包一次。
+ * 於是「複製回顯重送」正好等於使用者要的原始命令——巢狀在結構上不可能發生。
+ * 只認自家簽名（exec '<bwrap>' 或 --die-with-parent），一般命令零影響。
+ */
+export function unwrapShellCommand(command: string): string {
+  let cur = command
+  for (let i = 0; i < 4 && SELF_WRAP_RE.test(cur); i++) {
+    const marker = "/bin/bash -c "
+    const at = cur.lastIndexOf(marker)
+    if (at < 0) break
+    const payload = cur.slice(at + marker.length).trim()
+    if (!/^'[\s\S]*'$/.test(payload)) break
+    cur = payload.slice(1, -1).replace(/'\\''/g, "'")
+  }
+  return cur
+}
+
 export function wrapShellCommand(command: string, opts: { sessionID: string; cwd?: string }): string {
+  // bwrap --bind 的來源必須先存在；不依賴呼叫端的 ensureDirs 順序（首呼競態）。
+  for (const d of [sessionTmpDir(opts.sessionID), sessionRunDir(opts.sessionID)]) {
+    try { mkdirSync(d, { recursive: true }) } catch { /* 交給後續 bwrap 報錯 */ }
+  }
   const prefix = sandboxPrefix({ sessionID: opts.sessionID, cwd: opts.cwd })
-  return `exec ${prefix.map(shQuote).join(" ")} /bin/bash -c ${shQuote(command)}`
+  return `exec ${prefix.map(shQuote).join(" ")} /bin/bash -c ${shQuote(unwrapShellCommand(command))}`
 }
 
 // ── 秘密值遮罩 ──
