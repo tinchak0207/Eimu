@@ -9,10 +9,18 @@
 # .vercel-cli-data（CLI token）推進部署源碼。改為先排除根目錄全部，只放行構建/執行期真正需要的。
 # 新增根目錄檔案若站點執行期要讀（process.cwd() + 路徑），必須在這裡加 ! 放行。
 /*
+# 目錄白名單必須寫成「目錄 + 目錄下全部」兩行：只寫 `!/dir/` 時 Vercel 端**只放行目錄項
+# 本身、不放行其下檔案**（2026-10-02 實錘：遠端建置的 /vercel/path0 只剩根層檔案，
+# 沒有 src/、public/、db/、worker/ → next.config.mjs 找不到 src/lib/*.mjs 而 build 失敗）。
+# 同一份清單用 gitignore 語義的 `ignore` npm 套件判是「不忽略」，所以這條只能靠遠端實測守。
 !/src/
+!/src/**
 !/public/
+!/public/**
 !/db/
+!/db/**
 !/worker/
+!/worker/**
 !/package.json
 !/package-lock.json
 !/pnpm-lock.yaml
