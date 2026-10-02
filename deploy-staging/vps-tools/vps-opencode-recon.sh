@@ -48,12 +48,18 @@ BASE="${RECON_BASE:-HEAD}"
 git -C "$GIT_DIR" worktree add --quiet --detach "$WORKTREE" "$BASE" || { echo "RECON_FAIL: 無法解析基準 $BASE"; exit 2; }
 HEAD_DIR="$WORKTREE/deploy-staging/opencode-runtime"
 
+# 漂移比對排除清單（不影響發佈安裝）：
+#   opencode.json 由 gateway 的 gen-opencode.ts 於執行期從 model registry 重新生成（單一寫者），
+#   與 opencode 軌基準 commit 恆不相符 → 不納入漂移比對（2026-10-03）。
+#   注意：此處只排除「比對」；發佈安裝清單仍由 opencode-release.sh 的 CONFIGS 決定，行為不變。
+DRIFT_EXCLUDE=(opencode.json)
+
 list_of() {
   local root="$1"
   ( cd "$root"
     find "${SCOPE[@]}" -type f ! -path '*/__pycache__/*' 2>/dev/null
     for c in "${CONFIGS[@]}"; do [ -f "$c" ] && echo "$c"; done
-  ) | sort
+  ) | grep -vxF -e "${DRIFT_EXCLUDE[@]}" | sort
 }
 list_of "$HEAD_DIR" > "$TMP_DIR/head-files.txt"
 list_of "$TMP_DIR"  > "$TMP_DIR/vps-files.txt"
