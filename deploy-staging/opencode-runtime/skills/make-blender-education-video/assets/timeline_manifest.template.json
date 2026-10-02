@@ -1,0 +1,79 @@
+{
+  "version": 1,
+  "canvas": {
+    "width": 3840,
+    "height": 2160,
+    "fps": 30,
+    "total_frames": 900,
+    "background": "0x090D12",
+    "color": "bt709_limited"
+  },
+  "chapters": [
+    {
+      "id": "hook",
+      "start_frame": 0,
+      "output_frames": 90,
+      "shots": [
+        {
+          "id": "opening_context",
+          "kind": "video",
+          "path": "renders/opening_context.mp4",
+          "source_in_seconds": "0.0",
+          "source_out_seconds": "3.0",
+          "output_frames": 90,
+          "color_assumption": "bt709_limited"
+        }
+      ]
+    },
+    {
+      "id": "explanation",
+      "start_frame": 90,
+      "output_frames": 600,
+      "shots": [
+        {
+          "id": "system_context",
+          "kind": "video",
+          "path": "renders/system_context.mp4",
+          "source_in_seconds": "0.0",
+          "source_out_seconds": "6.0",
+          "output_frames": 180,
+          "color_assumption": "bt709_limited"
+        },
+        {
+          "id": "detail_or_step",
+          "kind": "video",
+          "path": "renders/detail_or_step.mp4",
+          "source_in_seconds": "0.0",
+          "source_out_seconds": "7.0",
+          "output_frames": 210,
+          "color_assumption": "bt709_limited"
+        },
+        {
+          "id": "cause_effect_or_flow",
+          "kind": "video",
+          "path": "renders/cause_effect_or_flow.mp4",
+          "source_in_seconds": "0.0",
+          "source_out_seconds": "7.0",
+          "output_frames": 210,
+          "color_assumption": "bt709_limited"
+        }
+      ]
+    },
+    {
+      "id": "summary",
+      "start_frame": 690,
+      "output_frames": 210,
+      "shots": [
+        {
+          "id": "final_system_view",
+          "kind": "video",
+          "path": "renders/final_system_view.mp4",
+          "source_in_seconds": "0.0",
+          "source_out_seconds": "7.0",
+          "output_frames": 210,
+          "color_assumption": "bt709_limited"
+        }
+      ]
+    }
+  ]
+}

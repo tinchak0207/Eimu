@@ -1,0 +1,48 @@
+{
+  "fallback_positive_concepts": ["portrait_prompt"],
+  "positive_concepts": {
+    "portrait_prompt": {
+      "weight": 1.0,
+      "phrases": [
+        "写真提示词",
+        "人像提示词",
+        "系列母版",
+        "同系列变体",
+        "写真关键词",
+        "妆造、构图、动作和光线",
+        "网页抽卡",
+        "完整提示词",
+        "更新南鸢写真提示词 skill",
+        "检查南鸢写真提示词 skill 版本"
+      ]
+    }
+  },
+  "negative_concepts": {
+    "direct_generation_or_edit": {
+      "weight": 1.0,
+      "exclusive": true,
+      "phrases": [
+        "直接生成一张",
+        "不要提示词",
+        "抠出来",
+        "替换背景",
+        "直接修改",
+        "不需要文字提示词"
+      ]
+    },
+    "different_workflow": {
+      "weight": 0.9,
+      "exclusive": true,
+      "phrases": [
+        "文化元素",
+        "扩展灵感",
+        "商品海报",
+        "公众号文章",
+        "视觉原子词",
+        "更新所有 skill",
+        "更新另一个图片反推 skill",
+        "不要更新任何东西"
+      ]
+    }
+  }
+}

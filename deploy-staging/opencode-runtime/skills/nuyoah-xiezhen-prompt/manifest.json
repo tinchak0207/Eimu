@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "name": "nuyoah-xiezhen-prompt",
+  "displayName": "南鸢写真提示词",
+  "version": "0.1.0",
+  "license": "MIT",
+  "source": "https://github.com/nuyoah-ai-works/nuyoah-xiezhen-prompt",
+  "sourceCommit": "8777e6ec0d3451c274fcfb17ec3795ae7ee0e267",
+  "releaseDigest": "57392af8db55e7ffae09d73603d98f94e3b4c3d6bcd37e4cbe88bb8646fbbffd",
+  "publishedAt": "2026-07-29T06:52:22Z",
+  "homepage": "https://knowledge.nuyoahonline.com/skills/nuyoah-xiezhen-prompt",
+  "installCommand": "npx skills add nuyoah-ai-works/nuyoah-xiezhen-prompt -g -y",
+  "updateCommand": "npx skills update nuyoah-xiezhen-prompt -g -y",
+  "files": [
+    {
+      "path": ".gitignore",
+      "bytes": 10,
+      "sha256": "cf237c7aff44efbe6e502e645c3e06da03a69d7bdeb43392108ef3348143417e"
+    },
+    {
+      "path": "LICENSE",
+      "bytes": 1070,
+      "sha256": "b5fde44b81590f0f06dd9d1af6a13a79eb322ba219c2578369f5b258fdf07e9b"
+    },
+    {
+      "path": "README.md",
+      "bytes": 1199,
+      "sha256": "bb5881e35a0a8810d7ecabaef9bc42701d8619e93b612a23badd6f6332fe42f3"
+    },
+    {
+      "path": "SKILL.md",
+      "bytes": 5924,
+      "sha256": "44131ae9aabf3bba618c150875af598cbe95fcee16d51a35f3303db5ad1c8e4f"
+    },
+    {
+      "path": "SOURCE.md",
+      "bytes": 283,
+      "sha256": "018454810e3cb26c6b6a7600c0873e3bf290f46d366c49dee632ca1fa1675724"
+    },
+    {
+      "path": "agents/interface.yaml",
+      "bytes": 600,
+      "sha256": "39a434e1b40327bc307d3af3ea2fea1967966c4d91193dcdafeb094497f00b53"
+    },
+    {
+      "path": "agents/openai.yaml",
+      "bytes": 336,
+      "sha256": "0c341359775124fcbdc23f3e8d09e765b377d81b8bea1bda662d262f4d833b36"
+    },
+    {
+      "path": "evals/semantic_config.json",
+      "bytes": 1138,
+      "sha256": "592b9a6389de026753e390b146643ba07809c36b757740638a9f5b26f0251063"
+    },
+    {
+      "path": "evals/skin_reflection_cases.json",
+      "bytes": 1632,
+      "sha256": "74d2d4dc9968070a8ceb463fabc840b6f259aa5c96b1a317fc28a4d2c8c0720b"
+    },
+    {
+      "path": "evals/trigger_cases.json",
+      "bytes": 1498,
+      "sha256": "564aaf46a138515cd747638d320f403e46941c47653c9997045128454227b40f"
+    },
+    {
+      "path": "references/prompt-logic.md",
+      "bytes": 57378,
+      "sha256": "a3aecaf95285a9cf44a67aa5179f91f089aa82a62f7c6a1f8bdcbb1ab18eb7b3"
+    }
+  ]
+}

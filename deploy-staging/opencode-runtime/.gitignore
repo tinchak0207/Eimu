@@ -1,0 +1,9 @@
+# 這是 /opt/agent-harness/workspace/.opencode 的「手維護子集」鏡像（單一來源）。
+# 以下為 vendored 負載與執行時狀態，永不進版控、也永不被 release 觸碰：
+node_modules/
+services/
+opencode.db
+opencode.db-shm
+opencode.db-wal
+*.redteam-*
+*.bak*
