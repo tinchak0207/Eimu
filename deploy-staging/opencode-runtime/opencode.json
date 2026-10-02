@@ -83,6 +83,16 @@
         "glm-5.3-flash": {
           "options": {
             "reasoningEffort": "high"
+          },
+          "attachment": true,
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
           }
         },
         "qwen3.8-flash": {},
@@ -108,9 +118,31 @@
         "deepseek-v4-flash": {},
         "deepseek-v4-pro": {},
         "gemini-3.7-flash": {},
-        "glm-5.3-flash": {},
+        "glm-5.3-flash": {
+          "attachment": true,
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          }
+        },
         "qwen3.8-flash": {},
-        "deepseek-v4.1-flash": {},
+        "deepseek-v4.1-flash": {
+          "attachment": true,
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          }
+        },
         "cn:deepseek-v4.1-flash": {}
       }
     },
@@ -192,6 +224,16 @@
         "glm-5.3-flash": {
           "options": {
             "reasoningEffort": "high"
+          },
+          "attachment": true,
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
           }
         },
         "qwen3.8-flash": {},
@@ -250,9 +292,42 @@
         "apiKey": "sk-Vu0wFUQXw0VNQt0B2n1NwHg8QqntafYoLlwwMFt62yzqr5xb"
       },
       "models": {
-        "deepseek-v4.1-flash": {},
-        "glm-5.3-flash": {},
-        "glm-5.3": {}
+        "deepseek-v4.1-flash": {
+          "attachment": true,
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          }
+        },
+        "glm-5.3-flash": {
+          "attachment": true,
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          }
+        },
+        "glm-5.3": {
+          "attachment": true,
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          }
+        }
       }
     }
   },
