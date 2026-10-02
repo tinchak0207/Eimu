@@ -100,9 +100,46 @@ try {
   process.exit(1)
 }
 
+// ── registry 的產品真相 → opencode 認得的能力欄位（2026-10-02 實錘）──
+// registry 每個 model 可以寫 `"vision": true`（產品負責人確認這顆模型看得到圖）。
+// opencode 本身不認這個鍵，它認 `attachment` 與 `modalities.input`；圖能不能活著送到上游
+// 完全由 opencode 這一關決定——模型物件留空 `{}` ＝ opencode 當它是純文字模型，image part
+// 在送上游前被靜默丟掉：工具回「原圖已附上」、模型卻說自己看不到圖（生產實錘，逃過所有既有驗證，
+// 因為 gateway 側 isVisionModel 讀的是 registry 旗標、兩邊不同步）。
+// 故：有 `vision: true` 就補 attachment/modalities，並把 registry 專用的 vision 鍵剝掉
+// （不把自家欄位塞進 opencode 設定）。
+const VISION_MODALITIES_INPUT = ["text", "image"]
+
+function withVisionCapabilities(providers: unknown): unknown {
+  if (!providers || typeof providers !== "object") return providers
+  const out: Record<string, unknown> = {}
+  for (const [providerId, providerValue] of Object.entries(providers as Record<string, unknown>)) {
+    const provider = providerValue as { models?: Record<string, unknown> } | null
+    if (!provider || typeof provider !== "object" || !provider.models || typeof provider.models !== "object") {
+      out[providerId] = providerValue
+      continue
+    }
+    const models: Record<string, unknown> = {}
+    for (const [modelId, modelValue] of Object.entries(provider.models)) {
+      const model = modelValue as Record<string, unknown> | null
+      if (!model || typeof model !== "object" || model.vision !== true) {
+        models[modelId] = modelValue
+        continue
+      }
+      const { vision: _visionFlag, ...rest } = model
+      const modalities = { ...((rest.modalities as Record<string, unknown> | undefined) ?? {}) }
+      modalities.input = VISION_MODALITIES_INPUT
+      if (!modalities.output) modalities.output = ["text"]
+      models[modelId] = { ...rest, attachment: true, modalities }
+    }
+    out[providerId] = { ...provider, models }
+  }
+  return out
+}
+
 // 只替換三個鍵，其餘原樣保留；鍵順序跟隨原檔。
 const next: Record<string, unknown> = { ...target }
-next.provider = registry.providers
+next.provider = withVisionCapabilities(registry.providers)
 next.model = defaultBinding
 next.small_model = smallModelBinding
 
