@@ -187,6 +187,12 @@ cmd_release() {
   run_recon
   stage_from_commit "$stage" "$exp" "$sha"
   log "  預期 $(wc -l < "$exp") 檔"
+  # 目錄模式不可由 stage 決定（2026-10-02 事故，已實錘）：stage 是 mktemp -d（0700），tar 會把
+  # "./" 的 0700 記進壓縮檔，遠端 sudo tar -x 再把它蓋到生產 .opencode 上 → opencode-server
+  # （agentsvc，systemd PrivateTmp）失去 traverse，沙箱對 skills/lib/node_modules 的 ro-bind 與
+  # plugin/tool 載入全失敗，而 systemd 仍顯示 active（假綠燈）。這裡先把目錄正規化。
+  find "$stage" -type d -exec chmod 755 {} + 2>/dev/null || true
+  chmod 755 "$stage"
   tar -C "$stage" --exclude=./AGENTS.md -cf "$tar_file" .
   local bytes; bytes="$(wc -c < "$tar_file")"
   log "  封裝 $bytes bytes（AGENTS.md 另行處理，不進 .opencode）"
@@ -219,6 +225,12 @@ fi
 
 # 2) 落地（只覆蓋／新增；不刪——刪除語義下一步用清單補）
 sudo tar -C "$VPS_DIR" -xf "$r_tar"
+# 2b) 目錄不變式：不信任壓縮檔帶來的模式。.opencode 與同步範圍內的目錄一律 2755（可 traverse），
+#     否則服務帳號讀不到工具鏈（2026-10-02 事故：被打成 0700 → 整條工具鏈 fail-closed 而服務顯示 active）。
+sudo chmod 2755 "$VPS_DIR"
+for d in "${SCOPE[@]}"; do
+  sudo find "$VPS_DIR/$d" -type d -exec chmod 2755 {} + 2>/dev/null || true
+done
 
 # 3) 刪除生產多出、而 commit 沒有的檔（含舊的 node_modules 之外的殘檔）；
 #    vendored(node_modules/services) 與 opencode.db 不在 walk 範圍，永不誤刪。
@@ -244,6 +256,18 @@ if [ -n "$r_agents" ]; then
   fi
   rm -f "$r_agents"
 fi
+
+# 4b) 斷言：服務帳號必須讀得到工具鏈。讀不到＝重啟後整條工具鏈 fail-closed（沙箱 ro-bind 失敗、
+#     plugin/tool 載入失敗），而 systemd 仍會顯示 active（假綠燈）——所以這裡 fail-closed 擋下發佈。
+SVC_USER="$(systemctl show -p User --value "$SERVICE" 2>/dev/null || true)"
+[ -n "$SVC_USER" ] || SVC_USER="agentsvc"
+for probe in "$VPS_DIR" "$VPS_DIR/lib" "$VPS_DIR/plugin" "$VPS_DIR/tools" "$VPS_DIR/skills"; do
+  if ! sudo -u "$SVC_USER" test -r "$probe"; then
+    echo "PERM_FAIL $probe 服務帳號 $SVC_USER 不可讀（目錄模式或上層 traverse 不足）"; exit 1
+  fi
+done
+echo "PERM_OK $SVC_USER 可讀 .opencode 工具鏈"
+
 sudo systemctl restart "$SERVICE"
 sleep 2
 state="$(systemctl is-active "$SERVICE" || true)"
