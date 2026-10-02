@@ -12,7 +12,7 @@ process.env.LOOP_BREAKER_HARD_DELTA = "5" // 第 9 次（>8）觸發強制收尾
 process.env.TOOL_OUTPUT_MAX_CHARS = "100"
 process.env.READ_DEDUPE = "1"
 
-const { EimuGuard } = await import("./eimu-guard")
+const { EimuGuard } = await import("../opencode-runtime/plugin/eimu-guard")
 
 const loopBreakerCalls: unknown[] = []
 const realFetch = globalThis.fetch
