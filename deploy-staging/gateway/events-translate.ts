@@ -1196,6 +1196,11 @@ export function triggerIdleStepBreaker(state: SessionState, nudgeText: string = 
       console.error(`[gateway] idle-step breaker: nudge resend failed:`, e)
       cur.turnAborted = false
       cur.turnAbortSource = undefined
+      // 2026-10-02 steer 誤判修復：nudge 沒發出去＝本輪真的結束了，清 in-flight 打點。
+      // 必須與 turn.done 同點——idle 不再清了（見 opencode-event-handler.emitTurnDone），
+      // 這裡漏清會留下「假在途」：之後的引導被受理閘放行、收進隊列，卻再也等不到投遞。
+      cur.lastTurnActiveAt = 0
+      markDirty(cur)
       emitToSession(cur, "turn.done", {})
     }
   }, TURN_RETRY_DELAY_MS)

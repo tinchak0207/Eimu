@@ -957,7 +957,14 @@ export async function handleSendMessage(key: string, id: string, req: Request): 
         console.error(`[gateway] deferred prompt dispatch failed: session=${cur.sessionId}:`, e)
         emitToSession(cur, "message.delta", { text: "消息投递失败（后端正忙），请稍后重发。\n" })
         // R9-4：deferred 失敗路徑同樣尊重 question 凍結，pending 期間不發 turn.done。
-        if (cur.pendingQuestions.size === 0) emitToSession(cur, "turn.done", {})
+        if (cur.pendingQuestions.size === 0) {
+          // 2026-10-02 steer 誤判修復：投遞沒發出去＝本輪沒有起跑，清 in-flight 打點
+          //（與 turn.done 同點）。不清＝受理閘永遠以為有在途回合，之後的引導照收進隊列，
+          // 卻永遠等不到投遞。
+          cur.lastTurnActiveAt = 0
+          markDirty(cur)
+          emitToSession(cur, "turn.done", {})
+        }
       }
     }
     let deferTimer: ReturnType<typeof setTimeout> | null = null

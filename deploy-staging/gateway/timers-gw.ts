@@ -394,6 +394,11 @@ export function armWatchdogTimer(state: SessionState): void {
               text: "你刚才的消息可能未处理完成，稍后重新发送即可继续。\n",
             })
             emitToSession(cur, "turn.done", {})
+            // 2026-10-02 steer 誤判修復：終局宣告＝本輪真的結束，清 in-flight 打點。
+            // 不清會留下「假在途」（受理閘照收引導、卻永遠等不到投遞）；此路徑是本輪
+            // 唯一出口（沒有 idle 會再來），所以清點必須落在這裡。
+            cur.lastTurnActiveAt = 0
+            markDirty(cur)
             // 置位必須在終局話術發完之後（2026-09-28 評測實錘：先置位＝自己的死亡宣告被當成
             // 「還魂幀」，緊接著發「刚才是误判，已自动恢复」，兩句互相打臉）。
             cur.deathDeclared = true

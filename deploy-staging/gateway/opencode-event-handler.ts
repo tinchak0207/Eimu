@@ -62,6 +62,23 @@ function emitOtherPartTails(state: SessionState, exceptPid?: string): void {
   }
 }
 
+/**
+ * 回合真正收尾的唯一出口：清 in-flight 打點，再發 turn.done。
+ *
+ * 2026-10-02 steer 誤判修復：`lastTurnActiveAt` 是 steer 受理閘（steer-gw.turnInFlight）
+ * 判「現在有沒有可引導的回合」的唯一依據，語義必須是「上游真的有一個在途回合」。
+ * 舊版把它掛在 session.idle 一到就清，但 idle **不等於**回合結束：下面 failover／jitter
+ * 兩台重試機在同一輪內會再送一次 prompt_async，且刻意**不發 turn.done**（前端維持
+ * 進行中）。打點先被清、重投腿又不補 ⇒ 整條重投輪的 steer 全被回 409 no_active_turn，
+ * 使用者在「進行中」的回合裡追加的引導一律被判「引導未能送達（未生效）」。
+ * 所以清點與 turn.done 綁死成同一個出口（三個落點全走本函數），重投腿自然跳過。
+ */
+function emitTurnDone(state: SessionState): void {
+  state.lastTurnActiveAt = 0
+  markDirty(state)
+  emitToSession(state, "turn.done", {})
+}
+
 // ── 2026-10-02 能力片：孤兒 tool_use 追蹤（設計取自 Claude Code yieldMissingToolResultBlocks
 // ——換模型時替未收到結果的 tool_use 補 is_error，未複製程式碼）──────────────
 // 純讀觀測：記錄每個 session 目前 in-flight 的工具調用；工具 completed/error 即摘除。
@@ -406,9 +423,12 @@ export function handleOpencodeEvent(event: any): void {
         clearErrorStallTimer(state)
         // R5-C：中段停滯哨同撤（turn 已收尾）。
         clearMidturnStallTimer(state)
-        // N1 規格3：turn 正常結束（turn.done 即將發出）——清 in-flight 打點。
-        state.lastTurnActiveAt = 0
-        markDirty(state)
+        // N1 規格3：in-flight 打點的清除**不在這裡**（2026-10-02 steer 誤判修復）。
+        // 這一格只是「idle 到了」，還不是「回合結束了」——下面 failover／jitter 兩條
+        // 重投腿會在同一輪內再送 prompt_async（語義＝同一回合的下一跳，故刻意不發
+        // turn.done）。舊版先在這裡清 lastTurnActiveAt、重投腿又不補，整條重投輪的
+        // steer 受理閘就一律回 409 no_active_turn（用戶看到「引導未能送達（未生效）＋
+        // 当前没有进行中的回合」，正是該日回報的誤判）。清點改由 emitTurnDone 獨佔。
         // §7 prefetch（2026-09-15 PRD P0-4）：回合收尾後台預算下一回合的召回候選
         //（用戶路徑零新增延遲；query = 本回合用戶消息 + 本輪 assistant 頭部）。
         void scheduleMemoryRecallPrefetch(state)
@@ -483,7 +503,15 @@ export function handleOpencodeEvent(event: any): void {
             const cur = sessions.get(state.sessionId)
             // 不看 turnTextChars（旧轮文本已计入，作让位条件会自杀）：
             // 只看会话拆除/进入下一轮/用户打断三种让位。
-            if (!cur || (cur.turnGen ?? 0) !== gen || cur.turnAborted) return
+            if (!cur || (cur.turnGen ?? 0) !== gen) return
+            // 用戶叫停：重投不發車。abort 端不碰打點，若這張 idle（＝排定本重投的那一張）
+            // 走完才叫停，這裡就是唯一的收口點——不清會留下「假在途」，之後的引導全被
+            // 收進隊列卻等不到投遞。
+            if (cur.turnAborted) {
+              cur.lastTurnActiveAt = 0
+              markDirty(cur)
+              return
+            }
             try {
               // 刀1：死賬戶取「降權過濾後鏈首」＝下一個活 provider（attempt=1 → pool[0]，
               // 剛被打死的一家已不在 pool）；一般錯誤（含修復4死模型——不降權，鏈未變）
@@ -517,7 +545,7 @@ export function handleOpencodeEvent(event: any): void {
             } catch (e) {
               console.error(`[gateway] turn failover #${attempt} failed:`, e)
               cur.retryQueued = false
-              emitToSession(cur, "turn.done", {}) // 重试发不出去：放弃，别留前端挂着
+              emitTurnDone(cur) // 重试发不出去：放弃，别留前端挂着
             }
           }, deadFast ? 0 : TURN_RETRY_DELAY_MS)
           break // 不发 turn.done：重试轮结束自然会发
@@ -539,8 +567,16 @@ export function handleOpencodeEvent(event: any): void {
           console.log(`[gateway] turn jitter: schedule retry #${attempt} for ${state.sessionId}`)
           setTimeout(async () => {
             const cur = sessions.get(state.sessionId)
-            // 只看 turnTextChars（語義保留見上方注釋）：重投窗口內模型開口說正文才讓位。
-            if (!cur || (cur.turnGen ?? 0) !== gen || cur.turnAborted || (cur.turnTextChars ?? 0) > 0) return
+            if (!cur || (cur.turnGen ?? 0) !== gen) return
+            // 用戶叫停：同 failover 腿，清打點收口（重投不發車，也不發 turn.done）。
+            if (cur.turnAborted) {
+              cur.lastTurnActiveAt = 0
+              markDirty(cur)
+              return
+            }
+            // 只看 turnTextChars（語義保留見上方注釋）：重投窗口內模型開口說正文才讓位
+            //（那是回合仍活著的證據，打點照舊不清）。
+            if ((cur.turnTextChars ?? 0) > 0) return
             try {
               // 跨渠道 failover（2026-08-29）：重投前按 attempt 從鏈
               // [persona 主模型, ...registry.bindings.fallbacks[persona]] 取模換模型，
@@ -582,7 +618,7 @@ export function handleOpencodeEvent(event: any): void {
             } catch (e) {
               console.error(`[gateway] turn retry #${attempt} failed:`, e)
               cur.retryQueued = false
-              emitToSession(cur, "turn.done", {}) // 重試發不出去：放棄，別讓前端掛著
+              emitTurnDone(cur) // 重試發不出去：放棄，別讓前端掛著
             }
           }, TURN_RETRY_DELAY_MS)
           break // 不發 turn.done：重試輪結束時自然會發
@@ -650,7 +686,7 @@ export function handleOpencodeEvent(event: any): void {
           emitUnfulfilledPlanNotice(state, (name, data) => emitToSession(state, name, data))
           state.planExperts = undefined
         }
-        emitToSession(state, "turn.done", {})
+        emitTurnDone(state)
         // 刀 2（2026-09-15）：機器 critic pass —— 收盤判定點。
         // 四輪實錄證明「叫 orchestrator 派 critic」無效（playbook 第 18 條四輪在場、四輪零派遣），
         // 改由 gateway 在此直接派。判據門檻與有界性全在 maybeRunMachineCriticPass 內：
