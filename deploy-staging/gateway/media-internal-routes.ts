@@ -11,7 +11,7 @@ import { loadUserSettings } from "./persistence"
 import { normalizeUserSettings } from "./sessions-http.ts"
 import type { SessionState, ConfirmOutcome } from "./types-gateway.ts"
 import { INTERNAL_EMIT_ALLOWED, CANVAS_EMIT_ALLOWED, CONFIRM_TIMEOUT_MS, CONFIRM_RESOLVED_CAP, TTS_AUDIO_DIR, TTS_PUBLIC_BASE } from "./constants-gateway.ts"
-import { resolveCanvasOps, sanitizeOpsResult, storeCanvasState, getCanvasState, validateCanvasOps, dispatchCanvasOps, applyCanvasNodeUpdated, CANVAS_OPS_TIMEOUT_MS } from "./canvas-cascade-state.ts"
+import { resolveCanvasOps, sanitizeOpsResult, storeCanvasState, getCanvasState, validateCanvasOps, dispatchCanvasOps, checkTemplateGuard, canvasResultNodeId, applyCanvasNodeUpdated, CANVAS_OPS_TIMEOUT_MS } from "./canvas-cascade-state.ts"
 import { resolveSession, getOwnedSession } from "./sessions-core.ts"
 import { emitToSession } from "./sse-core.ts"
 import { emitImageDone } from "./events-translate.ts"
@@ -132,9 +132,9 @@ export async function handleMediaUpload(req: Request): Promise<Response> {
 // POST /internal/canvas/dispatch-ops — opencode canvas_* 工具的下發入口。
 // 阻塞至前端回執或逾時；timeout_ms 僅供測試縮短，上限即預設值。
 export async function handleCanvasDispatchOps(req: Request): Promise<Response> {
-  let body: { session_id?: unknown; ops?: unknown; label?: unknown; timeout_ms?: unknown }
+  let body: { session_id?: unknown; ops?: unknown; label?: unknown; timeout_ms?: unknown; deviate_from_template?: unknown; deviate_reason?: unknown; deviate_token?: unknown }
   try {
-    body = (await req.json()) as { session_id?: unknown; ops?: unknown; label?: unknown; timeout_ms?: unknown }
+    body = (await req.json()) as typeof body
   } catch {
     return jsonError(400, "invalid json body", "bad_request", "bad_request")
   }
@@ -145,6 +145,15 @@ export async function handleCanvasDispatchOps(req: Request): Promise<Response> {
   if (!state) return jsonError(404, "session not found", "not_found", "not_found")
   const v = validateCanvasOps(body.ops)
   if ("message" in v) return jsonError(400, v.message, "bad_request", "bad_request")
+  // 模板節點守衛：守接線契約與防平行重複生成（見 checkTemplateGuard）；偏離只認網關簽發 token。
+  const tplBlock = checkTemplateGuard(state.sessionId, v.ops, {
+    declared: body.deviate_from_template === true,
+    reason: typeof body.deviate_reason === "string" ? body.deviate_reason : "",
+    token: typeof body.deviate_token === "string" ? body.deviate_token : "",
+  })
+  if (tplBlock) {
+    return Response.json({ ok: false, code: "TEMPLATE_SLOT_OPEN", error: tplBlock }, { status: 409 })
+  }
   const label = typeof body.label === "string" && body.label ? body.label.slice(0, 200) : undefined
   const rawTimeout = typeof body.timeout_ms === "number" && Number.isFinite(body.timeout_ms) ? body.timeout_ms : CANVAS_OPS_TIMEOUT_MS
   const timeoutMs = Math.max(1_000, Math.min(CANVAS_OPS_TIMEOUT_MS, rawTimeout))
@@ -527,11 +536,11 @@ function emitImageFailed(
     const failPatch = { status: "error", errorDetails: reason, human_message: human }
     emitToSession(state, "canvas.node.updated", {
       unit_id: unitId,
-      node_id: `${unitId}-image`,
+      node_id: canvasResultNodeId(state.sessionId, unitId),
       patch: failPatch,
     })
     // 2026-09-20 寫穿：失敗 patch 同步落 canvasStates（快照無該節點時靜默跳過）。
-    applyCanvasNodeUpdated(state.sessionId, { unit_id: unitId, node_id: `${unitId}-image`, patch: failPatch })
+    applyCanvasNodeUpdated(state.sessionId, { unit_id: unitId, node_id: canvasResultNodeId(state.sessionId, unitId), patch: failPatch })
   }
   void appendLedgerFor(state, {
     kind: "image",

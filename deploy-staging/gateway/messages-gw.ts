@@ -16,9 +16,11 @@ import { emitToSession } from "./sse-core.ts"
 import { normalizeUserSettings, PROFILE_ONBOARDING_DIRECTIVE } from "./sessions-http.ts"
 import { opencodeFetch } from "./opencode-client.ts"
 import { startTurnPlan } from "./plan-gw.ts"
+import { takeUnfulfilledPlanInjection } from "./plan-promise.ts"
 import { beginTurnMetrics, noteTurnDeferred, noteTurnPromptDispatch } from "./metrics-gw.ts"
 import type { SessionState } from "./types-gateway.ts"
 import { resolveInvisibleUploadPaths } from "./events-translate.ts"
+import { hasTemplateNodes, buildTemplateSlotsFact, templateLandingFact, getTemplateDeviateToken } from "./canvas-cascade-state.ts"
 import { settleQuestion } from "./questions-gw.ts"
 import { clearQuestionHeartbeat, armAckTimer, armHeartbeatTimer, armWatchdogTimer, clearErrorStallTimer } from "./timers-gw.ts"
 import { buildMemoryInjectionBlocks, ensureMemoryTrace, appendMemoryRecallTrace, takeMemoryRecallPrefix, scheduleMemoryRecallPrefetch, isFreshCreativeRequest, FRESH_CREATIVE_TURN_DIRECTIVE, buildFirstTurnContinuityLines } from "./memory-wiring.ts"
@@ -166,6 +168,9 @@ export async function handleSendMessage(key: string, id: string, req: Request): 
   if (!rawContent) return jsonError(400, "content is required", "bad_request", "bad_request")
   // 2026-09-29 審計修復：入口就把冒充系統/網關權威的標題繳械（見 sanitizeUserContent）。
   const content = sanitizeUserContent(rawContent)
+  // C 方案（2026-10-02）：上一輪收盤記錄的「未兌現開場計畫」一次性取出（取出即清，
+  // 杜絕跨輪殘留誤導）；於下方組 promptBody.system 時注入一行事實（非命令）。
+  const priorPlanFact = takeUnfulfilledPlanInjection(state)
   // R9-2（2026-08-30）：question 卡 pending 時用戶直接發新消息 —— opencode 當前
   // turn 卡在 question tool call 上，新 prompt 排隊等 turn 結束，而 question 永遠
   // 等不到回答 → 會話掛死（smoke 實錘 14 分鐘零推進）。進入 turn 流程前先用
@@ -213,7 +218,18 @@ export async function handleSendMessage(key: string, id: string, req: Request): 
   // 0920 壓縮垃圾時間：模板骨架判定與注入閘**並行**發起（兩者都是對同一條用戶
   // prompt 的獨立 Jev 呼叫，加題不加延遲；串行會讓骨架白等閘門的 2s 預算）。
   const beastOn = loadUserSettings(key)?.beast_mode === true
-  const skeletonTask = beastOn ? buildTemplateSkeletonForPrompt(state, content) : Promise.resolve()
+  // 2026-10-02 模板權威：用戶已從模板庫配上模板（session_directive / 畫布已有 tpl-* 節點）時，
+  // 網關不得再按 prompt 另起一套 workflow 骨架（實錘：單圖提示詞命中 single_image，
+  // 在用戶的 tpl 模板旁平白多出 6 個節點，模板被架空）。
+  const userTemplateAttached =
+    (typeof body.session_directive === "string" && body.session_directive.trim().length > 0) ||
+    !!state.sessionDirective ||
+    hasTemplateNodes(state.sessionId) ||
+    (body.canvas_state !== undefined && JSON.stringify(body.canvas_state).includes('"tpl-'))
+  if (beastOn && userTemplateAttached) {
+    console.log(`[gateway] template_guard: PROMPT_SKELETON skipped (user template attached) session=${state.sessionId}`)
+  }
+  const skeletonTask = beastOn && !userTemplateAttached ? buildTemplateSkeletonForPrompt(state, content) : Promise.resolve()
   if (await gateUserInput(`user:${state.sessionId}`, content)) {
     return jsonError(400, "该请求包含无法执行的指令注入内容", "injection_blocked", "bad_request")
   }
@@ -403,6 +419,26 @@ export async function handleSendMessage(key: string, id: string, req: Request): 
       "【打断提示】上一轮你的执行被用户中止。直接回应这条新消息：不要重复上一轮已说过的话，不要重新开场或重新规划，即刻按要求干活。",
     ].filter(Boolean).join("\n\n")
   }
+  // C 方案（2026-10-02）：上一輪「未兌現開場計畫」注入一行事實——讓主模型知道自己的
+  // 開場計畫點名了誰卻整輪沒派。純事實陳述、非命令；只在本輪有該事實時多一行。
+  if (priorPlanFact) {
+    promptBody.system = [promptBody.system, priorPlanFact].filter(Boolean).join("\n\n")
+  }
+  // 2026-10-02 模板空位事實：畫布快照不進模型上下文（見上），模型看不到用戶配的模板節點，
+  // 才會無視模板另造生成節點。有模板節點時每回合附（拓撲＋空位＋插入配方；若本會話已獲用戶
+  // 批准偏離則帶 deviate_token；另附網關落位回灌，避免模型重複嘗試同一交付物）。
+  {
+    const landing = templateLandingFact(state.sessionId)
+    const tplFact = buildTemplateSlotsFact(state.sessionId, getTemplateDeviateToken(state.sessionId) ?? undefined)
+    const combined = [tplFact, landing].filter(Boolean).join("\n")
+    if (combined) {
+      const block = `${TAIL_PAYLOAD_MARKER}⟦gw:${ensureGatewayNonce(state)}⟧ 【畫布模板·系統事實】\n${combined}`
+      const parts = promptBody.parts
+      const last = parts.length > 0 ? parts[parts.length - 1] : undefined
+      if (last && last.type === "text") last.text = `${last.text}${block}`
+      else parts.push({ type: "text", text: block })
+    }
+  }
   // R2-A 根因修復（壓縮競態）：summarize 在途時 prompt_async 可能被
   // opencode 靜默丟棄——壓縮寫盤中途收到新 turn 是「turn 永不啟動」的
   // 高危窗口（評測會話三次壓縮後實錘）。壓縮在途 → 202 先回，記賬先落，
@@ -454,6 +490,10 @@ export async function handleSendMessage(key: string, id: string, req: Request): 
   state.stepHasText = false
   state.stepHasReasoning = false
   state.idleNudgeSent = false
+  state.reasonSinceActionChars = 0
+  state.reasonSinceActionAt = 0
+  state.planExperts = undefined
+  state.turnSubagentStarts = 0
   // R1（2026-09-11）刀2：回合起始 ack。評測 P0：發送後 45 秒才出現第一個事件、
   // 651 秒死寂期正文 0 字。turn 起點即應一聲，用戶 5 秒內有反饋。
   emitToSession(state, "turn.status", { text: "已收到，正在解析任務…" })

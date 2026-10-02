@@ -240,12 +240,24 @@ export async function gatewayDispatchOps(
   sessionID: string,
   ops: unknown[],
   label?: string,
+  deviation?: { deviate_from_template?: boolean; deviate_reason?: string; deviate_token?: string },
 ): Promise<DispatchOutcome> {
   try {
     const res = await fetch(`${gateway}/internal/canvas/dispatch-ops`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: sessionID, ops, ...(label ? { label } : {}) }),
+      body: JSON.stringify({
+        session_id: sessionID,
+        ops,
+        ...(label ? { label } : {}),
+        ...(deviation?.deviate_from_template === true
+          ? { deviate_from_template: true, deviate_reason: deviation.deviate_reason ?? "" }
+          : {}),
+        // 2026-10-02：網關簽發的偏離 token——模型原樣帶回才放行。
+        ...(typeof deviation?.deviate_token === "string" && deviation.deviate_token
+          ? { deviate_token: deviation.deviate_token }
+          : {}),
+      }),
       signal: AbortSignal.timeout(35_000),
     })
     const data = (await res.json().catch(() => ({}))) as Record<string, unknown>

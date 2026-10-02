@@ -8,7 +8,7 @@ import { sessions, markDirty } from "./sessions-core.ts"
 import { opencodeFetch, revertDeadTail } from "./opencode-client.ts"
 import { emitToSession, stripStaleTurnTextFromReplay } from "./sse-core.ts"
 import { estimateNodeCoins } from "./pricing-gateway.ts"
-import { applyCanvasNodeCreated, applyCanvasNodeConnected, applyCanvasNodeUpdated } from "./canvas-cascade-state.ts"
+import { applyCanvasNodeCreated, applyCanvasNodeConnected, applyCanvasNodeUpdated, claimTemplateSlot, canvasResultNodeId } from "./canvas-cascade-state.ts"
 import { humanMessageFor, summarizeArgs } from "./humanize-gw.ts"
 import { emitQuotaChanged, appendLedgerFor } from "./quota-ledger.ts"
 import { emitSessionError } from "./emit-helpers.ts"
@@ -308,6 +308,21 @@ export async function autoCreateCanvasUnit(
     cost_hint: costHint,
   })
 
+  // 模板權威（2026-10-02）：畫布上有用戶配的模板且還有同類型空位 → 這次生成落在模板節點，不另鋪 cu_* 單元。
+  if (toolName === "image_generate") {
+    const slot = claimTemplateSlot(state.sessionId, unitId, cfg.kind === "video" ? "video" : "image")
+    if (slot) {
+      const patch = { status: "loading", prompt: cfg.prompt, model: cfg.model, size: cfg.size, count: cfg.n }
+      emitToSession(state, "canvas.node.updated", { unit_id: unitId, node_id: slot.id, patch })
+      applyCanvasNodeUpdated(state.sessionId, { node_id: slot.id, patch })
+      console.log(`[gateway] template_guard: generation bound to template slot ${slot.id} (skip cu_ unit) session=${state.sessionId} call=${callID}`)
+      state.canvasUnitByCall.set(callID, unitId)
+      boundMap(state.canvasUnitByCall, TOOL_STATUS_DEDUP_CAP)
+      markDirty(state)
+      return unitId
+    }
+  }
+
   // 文本節點：承載 prompt（source_image 存在時併���提示，編輯語義）。
   const textNode = {
     id: `${unitId}-text`,
@@ -411,12 +426,12 @@ export function emitCanvasResult(
   const patch = { status: "success", content: url, ...(typeof cost_coins === "number" ? { cost_coins } : {}) }
   emitToSession(state, "canvas.node.updated", {
     unit_id: unitId,
-    node_id: `${unitId}-image`,
+    node_id: canvasResultNodeId(state.sessionId, unitId),
     patch,
     url,
     cost_coins,
   })
-  applyCanvasNodeUpdated(state.sessionId, { node_id: `${unitId}-image`, patch })
+  applyCanvasNodeUpdated(state.sessionId, { node_id: canvasResultNodeId(state.sessionId, unitId), patch })
   return true
 }
 
@@ -707,6 +722,13 @@ if (status === "pending" || status === "running") {
         ...(toolErr ? { error: toolErr } : {}),
         cost_coins: typeof parsed?.cost_coins === "number" ? parsed.cost_coins : undefined,
         ...(artifactPending ? { task_id: parsed.task_id, artifact_pending: true } : {}),
+        // 落位回灌（2026-10-02）：若這次生成被綁到模板節點，如實回報落在哪顆 tpl-node
+        // （前端 tool 卡可見；模型側由 messages-gw 的 templateLandingFact 下一回合注入）。
+        ...((): Record<string, string> => {
+          const uid = state.canvasUnitByCall.get(callId)
+          const nodeId = uid ? canvasResultNodeId(state.sessionId, uid) : ""
+          return nodeId.startsWith("tpl-") ? { tpl_landing_node_id: nodeId } : {}
+        })(),
       })
       if (ok && typeof parsed?.url === "string" && parsed.url.length > 0) {
         // P1-E1：image.done 附帶真實配方（prompt/model/size/lora），前端
@@ -894,17 +916,17 @@ export function finalizeIdleStep(state: SessionState): void {
   }
 }
 
-export function triggerIdleStepBreaker(state: SessionState): void {
+export function triggerIdleStepBreaker(state: SessionState, nudgeText: string = IDLE_STEP_NUDGE): void {
   const body = state.lastPromptBody
   if (!body) return
   state.idleNudgeSent = true
   const gen = state.turnGen ?? 0
   const nudgeBody = {
     ...body,
-    parts: [...body.parts.map((pt) => ({ ...pt })), { type: "text", text: IDLE_STEP_NUDGE }],
+    parts: [...body.parts.map((pt) => ({ ...pt })), { type: "text", text: nudgeText }],
   }
   console.warn(
-    `[gateway] idle-step breaker: ${IDLE_STEP_ABORT_THRESHOLD} empty steps, abort+nudge — session=${state.sessionId} gen=${gen}`,
+    `[gateway] idle-step breaker: ${IDLE_STEP_ABORT_THRESHOLD} empty steps (or reasoning-cap), abort+nudge — session=${state.sessionId} gen=${gen}`,
   )
   // ① 中止當前 turn（與用戶中止同一後端路徑）。
   void opencodeFetch(`/session/${state.opencodeSessionId}/abort`, {

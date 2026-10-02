@@ -35,6 +35,11 @@ import type { TaskStatus } from "./types-gateway.ts"
 // workflow-gw 不 import subagent，無循環風險。
 import { workflowService, workflowOwnerBySession } from "./workflow-gw"
 import { templatePlaceholderContent } from "./workflow-templates"
+// 2026-10-02：派工時把「畫布模板空位」當系統事實注入子代理任務書（專家看不到畫布，
+// 只能憑印象另起爐灶 → 模板被架空）。buildTemplateSlotsFact 為純讀函式，無值回 null
+// （此路徑輸出與注入前逐字元等價）。reverse import 與 canvas-cascade-state→subagent 的既有
+// 循環同型，兩端均在呼叫期使用綁定（非模組頂層求值），bun ESM 循環安全。
+import { buildTemplateSlotsFact, getTemplateDeviateToken } from "./canvas-cascade-state.ts"
 // 片 C（2026-09-15）：Expert 交付契約的機器強制點。純函數模組，零 gateway 內部依賴。
 // 片 D（2026-09-15）：追加 REWORK_FAIL_MARK/buildReworkDirective——FAIL 時機器化重派一次。
 import {
@@ -824,7 +829,12 @@ async function dispatchAttempt(run: SubagentRun): Promise<string | undefined> {
   // 非 Expert/非 beast → renderContractDirective 回空字串 → 零注入、零回歸。重派鏈的
   // run.prompt 已含 buildReworkDirective（自我標註「自动重派」），此段與之共存於尾部不衝突。
   const contractDirective = run.beastMode === true ? renderContractDirective(run.agent, DELIVERY_CONTRACTS) : ""
-  const body: Record<string, unknown> = { parts: [{ type: "text", text: `${constitutionNote}${run.prompt}${contractDirective}` }] }
+  // 2026-10-02：模板空位事實注入。父 sessionId 用 run.parentGatewaySessionId（派工發起端
+  // 的 gateway 會話 id，= canvasStates 的 key；**禁用子會話 opencodeSessionId**，那會指到
+  // 子會話畫布桶）。有值才插，無值時輸出與注入前逐字元等價。
+  const tplFact = buildTemplateSlotsFact(run.parentGatewaySessionId, getTemplateDeviateToken(run.parentGatewaySessionId) ?? undefined)
+  const templateSlotsNote = tplFact ? `【畫布模板·系統事實】\n${tplFact}\n\n` : ""
+  const body: Record<string, unknown> = { parts: [{ type: "text", text: `${constitutionNote}${run.prompt}${templateSlotsNote}${contractDirective}` }] }
   if (model) body.model = model
   // R8 修復片2（2026-09-10）：Expert agent 欄（prompt_async 吃 agent 欄；
   // POST /session 不支持，08-08 實錘）。帶上 = 子會話掛對應 Expert agent

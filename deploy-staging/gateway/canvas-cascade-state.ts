@@ -258,6 +258,343 @@ export function validateCanvasOps(ops: unknown): { ok: true; ops: unknown[] } | 
   return { ok: true, ops }
 }
 
+// ---- 用戶批准憑據＋偏離模板 token（2026-10-02）----
+// 模型自宣告 deviate_from_template=true 等於沒守；改成網關簽發 token：只有「本 session 內
+// 用戶真的回應過 question」（走既有 question/confirm 機制）才發；模型必須把 token 原樣帶回，
+// 自帶 deviate_from_template=true 不再放行。行程內 Map，gateway 重啟即失（同意屬短期互動狀態）。
+const userAnsweredQuestions = new Map<string, number>()
+const USER_ANSWERED_MAX = 2000
+const tplDeviateTokens = new Map<string, { token: string; at: number }>()
+const TPL_DEVIATE_TTL_MS = 15 * 60 * 1000
+export function markUserAnsweredQuestion(sessionId: string): void {
+  if (!sessionId) return
+  // 先刪再插：Map 迭代序即插入序，淘汰時刪最舊（隊首）。
+  userAnsweredQuestions.delete(sessionId)
+  userAnsweredQuestions.set(sessionId, Date.now())
+  while (userAnsweredQuestions.size > USER_ANSWERED_MAX) {
+    const oldest = userAnsweredQuestions.keys().next().value
+    if (oldest === undefined) break
+    userAnsweredQuestions.delete(oldest)
+  }
+  // 用戶真實批准 → 網關簽發偏離 token（模型下一回合才能拿到）。
+  const token = `tpl-dev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+  tplDeviateTokens.set(sessionId, { token, at: Date.now() })
+  if (tplDeviateTokens.size > USER_ANSWERED_MAX) tplDeviateTokens.delete(tplDeviateTokens.keys().next().value as string)
+  console.log(`[gateway] template_guard: user answered question → deviate token issued session=${sessionId}`)
+}
+export function hasUserAnsweredQuestion(sessionId: string): boolean {
+  return userAnsweredQuestions.has(sessionId)
+}
+// 取本 session 當前有效的偏離 token（無/過期回 null）——注入模型上下文用。
+export function getTemplateDeviateToken(sessionId: string): string | null {
+  const rec = tplDeviateTokens.get(sessionId)
+  if (!rec) return null
+  if (Date.now() - rec.at > TPL_DEVIATE_TTL_MS) {
+    tplDeviateTokens.delete(sessionId)
+    return null
+  }
+  return rec.token
+}
+// 單次核銷：token 相符即消耗（一批 ops 一次授權），否則 false。
+export function consumeTemplateDeviateToken(sessionId: string, token: string): boolean {
+  const cur = getTemplateDeviateToken(sessionId)
+  if (cur && token && cur === token) {
+    tplDeviateTokens.delete(sessionId)
+    return true
+  }
+  return false
+}
+
+// ---- 模板節點守衛（2026-10-02 v2：守「接線契約」，不禁止建節點）----
+// v1 病灶：用「type 黑名單 + 任一空位未填＝全鎖」攔 add_node，把模板靈活性一起殺掉——
+// 模板步驟頭卡本身就是 config 型 ⇒ 加一步＝加 config＝一律 409；character_card/scene_card 同病；
+// 反而 text 型不在名單 ⇒ 未接線的漂浮節點照樣放行（守錯方向）。
+// v2 只守兩個結果面不變量（守衛要教不要禁，見 feedback-guard-teaches-not-bans）：
+//   I1 模板產出必須落在模板槽位（防平行重複生成＝防重複扣費）：新增生成類節點若與某未填空位
+//      同 (type, role)，或未宣告 role 而對同型別空位直接 run_generation ⇒ 攔。
+//   I2 新增節點必須是圖上的一環：同批 connect_nodes 至少有一條 inbound 來自既有節點（整批錨定），
+//      且不得有漂浮新節點（每顆新節點至少一條 inbound，來自既有或同批新節點）。
+// 409 文案一律附精確接線修法（哪個 id 連哪個 id）＋模板拓撲，不是「不要建」。
+const TPL_GEN_NODE_TYPES = new Set(["image", "video", "audio", "director", "character_card", "scene_card", "config"])
+
+export interface TemplateOpenSlot {
+  id: string
+  title: string
+  type: string
+  /** 槽位語義角色（role/slot_hint/stepName/deliverable），供 (type, role) 重複判定。 */
+  role: string
+  stepIndex: number | null
+  stepName: string
+  /** 模板拓撲中這顆生成卡的前驅節點 id（無則 null）。 */
+  prevId: string | null
+}
+
+function isTplGenNode(n: Record<string, unknown>): boolean {
+  const id = typeof n.id === "string" ? n.id : ""
+  return /^tpl-/.test(id) && /-gen$/.test(id)
+}
+
+function readCanvas(sessionId: string): { nodes: Record<string, unknown>[]; connections: Record<string, unknown>[] } {
+  const state = getCanvasState(sessionId)?.state as { nodes?: unknown; connections?: unknown } | null | undefined
+  const nodes = Array.isArray(state?.nodes) ? (state!.nodes as Record<string, unknown>[]) : []
+  const connections = Array.isArray(state?.connections) ? (state!.connections as Record<string, unknown>[]) : []
+  return { nodes, connections }
+}
+
+function normalizeRole(v: string): string {
+  return v.trim().toLowerCase().replace(/\s+/g, "")
+}
+
+function slotRoleFromMeta(meta: Record<string, unknown>, fallback = ""): string {
+  for (const key of ["role", "slot_hint", "slotRole", "stepName", "deliverable"]) {
+    const v = meta[key]
+    if (typeof v === "string" && v.trim()) return v.trim()
+  }
+  return fallback.trim()
+}
+
+// 所有模板生成卡（含已填/在途），帶拓撲（stepIndex/stepName/前驅 id）。
+export function listTemplateGenNodes(sessionId: string): TemplateOpenSlot[] {
+  const { nodes, connections } = readCanvas(sessionId)
+  const out: TemplateOpenSlot[] = []
+  for (const n of nodes) {
+    if (!isTplGenNode(n)) continue
+    const meta = (n.metadata && typeof n.metadata === "object" ? n.metadata : {}) as Record<string, unknown>
+    const id = String(n.id)
+    const prev = connections.find((c) => c?.toNodeId === id && typeof c?.fromNodeId === "string")
+    const title = typeof n.title === "string" ? n.title : ""
+    out.push({
+      id,
+      title,
+      type: typeof n.type === "string" ? n.type : "",
+      role: slotRoleFromMeta(meta, title),
+      stepIndex: typeof meta.stepIndex === "number" ? meta.stepIndex : null,
+      stepName: typeof meta.stepName === "string" ? meta.stepName : "",
+      prevId: prev ? String(prev.fromNodeId) : null,
+    })
+  }
+  return out
+}
+
+// 模板生成卡中尚未回填結果（metadata.content 為空）的空位。
+export function listTemplateOpenSlots(sessionId: string, excludeLoading = false): TemplateOpenSlot[] {
+  const { nodes } = readCanvas(sessionId)
+  const out: TemplateOpenSlot[] = []
+  for (const slot of listTemplateGenNodes(sessionId)) {
+    const raw = nodes.find((n) => String(n.id) === slot.id)
+    const meta = (raw?.metadata && typeof raw.metadata === "object" ? raw.metadata : {}) as Record<string, unknown>
+    const content = typeof meta.content === "string" ? meta.content.trim() : ""
+    if (content) continue
+    if (excludeLoading && meta.status === "loading") continue
+    out.push(slot)
+  }
+  return out
+}
+
+function templateNodeStatus(sessionId: string, slot: TemplateOpenSlot): "open" | "loading" | "filled" {
+  const { nodes } = readCanvas(sessionId)
+  const raw = nodes.find((n) => String(n.id) === slot.id)
+  const meta = (raw?.metadata && typeof raw.metadata === "object" ? raw.metadata : {}) as Record<string, unknown>
+  if (typeof meta.content === "string" && meta.content.trim()) return "filled"
+  if (meta.status === "loading") return "loading"
+  return "open"
+}
+
+// 模板拓撲（每步 stepIndex/stepName/前驅 id/下游 id/生成卡 id/落位狀態）——注入模型＋附在 409 文案。
+export function renderTemplateTopology(sessionId: string): string | null {
+  const slots = listTemplateGenNodes(sessionId)
+  if (slots.length === 0) return null
+  const { connections } = readCanvas(sessionId)
+  return slots
+    .slice(0, 16)
+    .map((s) => {
+      const step = s.stepIndex !== null ? `第${s.stepIndex + 1}步 ` : ""
+      const name = s.stepName || s.title || s.id
+      const next = connections.find((c) => c?.fromNodeId === s.id && typeof c?.toNodeId === "string")
+      return `- ${step}${name} | 前驅=${s.prevId ?? "(無)"} | 下游=${next ? String(next.toNodeId) : "(無)"} | 生成卡=${s.id}(${s.type}) | ${templateNodeStatus(sessionId, s)}`
+    })
+    .join("\n")
+}
+
+// 生成工具（image_generate 等）出圖時網關會自動鋪一組 cu_* 節點（autoCreateCanvasUnit），
+// 與用戶的模板節點完全無關 → 模板被架空。模板有同類型空位時，改為把這次生成「綁定」到空位：
+// 不新建 unit，結果事件改寫在模板節點上（unit_id → 模板節點 id 的映射）。
+const tplBoundUnits = new Map<string, string>() // `${sessionId}|${unitId}` → 模板節點 id
+// 落位回灌：最近一次生成被網關改寫落在哪個 tpl 節點（下一回合注入模型上下文，見 templateLandingFact）。
+const tplLastLandings = new Map<string, { slotId: string; at: number }>()
+export function claimTemplateSlot(sessionId: string, unitId: string, kind: "image" | "video"): TemplateOpenSlot | null {
+  // 選位：同 kind、未 loading、未被其他 unit 佔用 的空位中，取 metadata.stepIndex 最小者
+  // （缺省視為很大）；同 stepIndex 依快照順序。多步模板不再錯位到第一步。
+  const { nodes } = readCanvas(sessionId)
+  const claimed = new Set<string>()
+  const prefix = `${sessionId}|`
+  for (const [k, v] of tplBoundUnits) if (k.startsWith(prefix)) claimed.add(v)
+  let best: TemplateOpenSlot | null = null
+  let bestStep = Number.POSITIVE_INFINITY
+  for (const slot of listTemplateGenNodes(sessionId)) {
+    if (slot.type !== kind) continue
+    if (claimed.has(slot.id)) continue
+    const raw = nodes.find((n) => String(n.id) === slot.id)
+    const meta = (raw?.metadata && typeof raw.metadata === "object" ? raw.metadata : {}) as Record<string, unknown>
+    if (typeof meta.content === "string" && meta.content.trim()) continue
+    if (meta.status === "loading") continue
+    const si = slot.stepIndex !== null && Number.isFinite(slot.stepIndex) ? slot.stepIndex : Number.POSITIVE_INFINITY
+    if (best === null || si < bestStep) {
+      best = slot
+      bestStep = si
+    }
+  }
+  if (best === null) return null
+  tplBoundUnits.set(`${sessionId}|${unitId}`, best.id)
+  if (tplBoundUnits.size > 2000) tplBoundUnits.delete(tplBoundUnits.keys().next().value as string)
+  tplLastLandings.set(sessionId, { slotId: best.id, at: Date.now() })
+  if (tplLastLandings.size > 2000) tplLastLandings.delete(tplLastLandings.keys().next().value as string)
+  return best
+}
+// 結果節點 id：綁定了模板空位 → 模板節點；否則沿用自動 unit 的 `${unitId}-image`。
+export function canvasResultNodeId(sessionId: string, unitId: string): string {
+  return tplBoundUnits.get(`${sessionId}|${unitId}`) ?? `${unitId}-image`
+}
+// 落位回灌事實：模型不知道網關把落點改寫到哪顆 tpl 節點（v1 病灶④）。下一回合明說。
+export function templateLandingFact(sessionId: string): string | null {
+  const last = tplLastLandings.get(sessionId)
+  if (!last) return null
+  if (Date.now() - last.at > 30 * 60 * 1000) return null
+  return `你上一筆生成已被網關落位到模板節點「${last.slotId}」（結果會回填在該節點，不要為同一交付物再重複生成／不要另建平行節點）。`
+}
+
+// 畫布快照裡是否已有用戶配上的模板節點（任一 tpl-* 節點即算）。
+export function hasTemplateNodes(sessionId: string): boolean {
+  const nodes = (getCanvasState(sessionId)?.state as { nodes?: unknown } | null | undefined)?.nodes
+  return Array.isArray(nodes) && nodes.some((n) => typeof (n as { id?: unknown })?.id === "string" && /^tpl-/.test((n as { id: string }).id))
+}
+
+// 每回合注入模型上下文的事實：模板拓撲＋空位＋插入配方＋（若已批准）偏離 token。
+export function buildTemplateSlotsFact(sessionId: string, deviateToken?: string): string | null {
+  const topology = renderTemplateTopology(sessionId)
+  if (!topology) return null
+  const open = listTemplateOpenSlots(sessionId)
+  const loadingIds = listTemplateGenNodes(sessionId)
+    .filter((s) => templateNodeStatus(sessionId, s) === "loading")
+    .map((s) => s.id)
+  const lines: string[] = [
+    "畫布上已配好用戶選定的模板（生成卡＝交付落地位）。拓撲：",
+    topology,
+  ]
+  if (loadingIds.length > 0) lines.push(`已在跑（勿重複提交）：${loadingIds.join("、")}`)
+  lines.push(
+    open.length > 0
+      ? `未填空位 ${open.length} 個。生成既有交付物 → 落在 open 生成卡：canvas_apply_ops update_node {id:"<gen-id>", patch:{metadata:{prompt,model,size}}} 後 run_generation {node_id:"<gen-id>"}。`
+      : "模板生成卡已全部落位。",
+    "要新增步驟/角色/節點 → 必須同批帶 connect_nodes 接進圖（至少一條 inbound 來自既有節點），例：{\"type\":\"connect_nodes\",\"connections\":[{\"fromNodeId\":\"<既有 id>\",\"toNodeId\":\"<新 id>\"}]}；跨欄扇入是合法的。新節點若與某空位同 (type, role) ＝平行重複生成，會被攔；額外一步/額外角色請宣告不同 role（metadata.role 或 slot_hint）。",
+  )
+  if (deviateToken) lines.push(`已獲用戶批准偏離模板：重試時帶 deviate_token=${deviateToken}（自帶 deviate_from_template=true 無效）。`)
+  else lines.push("確需偏離模板 → 先用 question 向用戶說明並取得真實同意；網關批准後才簽發 token，自帶 deviate_from_template=true 無效。")
+  let out = lines.join("\n")
+  if (out.length > 1400) out = out.slice(0, 1399) + "…"
+  return out
+}
+
+export interface TemplateDeviation {
+  declared: boolean
+  reason: string
+  /** 模型帶回的偏離 token。 */
+  token?: string
+}
+
+// 返回攔截訊息（人話）；null = 放行。
+export function checkTemplateGuard(sessionId: string, ops: unknown[], deviation: TemplateDeviation): string | null {
+  if (!hasTemplateNodes(sessionId)) return null
+  const adds = ops.filter((o) => (o as { type?: unknown })?.type === "add_node") as Array<{
+    type: "add_node"
+    node: Record<string, unknown>
+  }>
+  if (adds.length === 0) return null
+
+  // 偏離：只認網關簽發 token（模型自宣告無效）。
+  if (consumeTemplateDeviateToken(sessionId, deviation.token ?? "")) {
+    console.log(`[gateway] template_guard: deviation token accepted session=${sessionId} ops=${ops.length}`)
+    return null
+  }
+  if (deviation.declared) {
+    console.log(`[gateway] template_guard: declared deviation REJECTED (no gateway token) session=${sessionId}`)
+  }
+
+  const { nodes: existingNodes } = readCanvas(sessionId)
+  const existingIds = new Set(existingNodes.map((n) => String(n.id)))
+  const newIds = new Set(adds.map((a) => String(a.node?.id ?? "")))
+  const batchEdges: Array<{ from: string; to: string }> = []
+  for (const op of ops) {
+    const o = op as { type?: unknown; connections?: unknown }
+    if (o?.type !== "connect_nodes") continue
+    for (const c of Array.isArray(o.connections) ? o.connections : []) {
+      const cc = c as { fromNodeId?: unknown; toNodeId?: unknown }
+      if (typeof cc.fromNodeId === "string" && typeof cc.toNodeId === "string") batchEdges.push({ from: cc.fromNodeId, to: cc.toNodeId })
+    }
+  }
+
+  const openSlots = listTemplateOpenSlots(sessionId)
+  // 模板已全部落位（無空位）＝無保護標的 → 維持舊行為放行（不做圖完整性守衛）。
+  if (openSlots.length === 0) return null
+
+  // I2a 漂浮節點：新節點沒有任何 inbound（來自既有或同批新節點）。
+  const floating = adds.filter((a) => {
+    const id = String(a.node?.id ?? "")
+    return !batchEdges.some((e) => e.to === id && e.from !== id && (existingIds.has(e.from) || newIds.has(e.from)))
+  })
+  // I2b 整批錨定：至少一條邊「既有 → 新」。
+  const anchored = batchEdges.some((e) => existingIds.has(e.from) && newIds.has(e.to))
+
+  // I1 平行重複生成：同 type 且（未宣告 role＝無法證明是額外物，或宣告的 role 與空位相同）。
+  const dupes = adds.filter((a) => {
+    const node = a.node ?? {}
+    const type = typeof node.type === "string" ? node.type : ""
+    const meta = (node.metadata && typeof node.metadata === "object" ? node.metadata : {}) as Record<string, unknown>
+    const role = slotRoleFromMeta(meta)
+    return openSlots.some(
+      (s) => s.type === type && (!role || (!!s.role && normalizeRole(s.role) === normalizeRole(role))),
+    )
+  })
+
+  const problems: string[] = []
+  if (dupes.length) problems.push(`平行重複生成 x${dupes.length}`)
+  if (floating.length) problems.push(`漂浮節點 x${floating.length}`)
+  if (!anchored) problems.push("未接入既有圖")
+  if (problems.length === 0) return null
+
+  const anchor =
+    openSlots[0]?.prevId ?? openSlots[0]?.id ?? listTemplateGenNodes(sessionId)[0]?.id ?? [...existingIds][0] ?? ""
+
+  const msg: string[] = [`模板守衛：這批 ops 的接線不合法（新節點必須是模板圖的一環），已攔下（未落位、未扣費）。問題：${problems.join("、")}。`]
+  if (dupes.length) {
+    const d = dupes[0]
+    const type = typeof d.node?.type === "string" ? d.node.type : ""
+    const meta = (d.node?.metadata && typeof d.node.metadata === "object" ? d.node.metadata : {}) as Record<string, unknown>
+    const role = slotRoleFromMeta(meta)
+    const slot = openSlots.find((s) => s.type === type && (!role || (!!s.role && normalizeRole(s.role) === normalizeRole(role))))
+    msg.push(
+      slot
+        ? `• 新增節點「${String(d.node?.id)}」與未填空位「${slot.id}」同型別(${type})同角色(${role || slot.role})＝平行重複生成。修法二選一：` +
+            `(a) 直接填既有空位：{"type":"update_node","id":"${slot.id}","patch":{"metadata":{"prompt":"…","model":"…","size":"…"}}} 再 {"type":"run_generation","node_id":"${slot.id}"}；` +
+            `(b) 若確實是「額外一步/額外角色」，在 add_node 的 node.metadata.role 寫明不同角色（例 "額外角色：反派"），並用 connect_nodes 把新節點接進圖。`
+        : `• 新增節點「${String(d.node?.id)}」與模板未填空位同型別且直接 run_generation＝平行重複生成。請改填既有空位，或宣告不同 role（metadata.role）後再 connect_nodes 接線。`,
+    )
+  }
+  if (floating.length) {
+    const f = String(floating[0].node?.id)
+    msg.push(`• 漂浮節點 ${floating.map((a) => String(a.node?.id)).join("、")} 沒有任何 inbound（未接線）。修法：同批補 connect_nodes，例：{"type":"connect_nodes","connections":[{"fromNodeId":"${anchor}","toNodeId":"${f}"}]}。`)
+  }
+  if (!anchored) {
+    const first = String(adds[0].node?.id)
+    msg.push(`• 這批新節點沒有任何一條 inbound 來自既有節點（整批未錨定＝未接線到模板圖）。修法：從最接近的前驅接出，例：{"type":"connect_nodes","connections":[{"fromNodeId":"${anchor}","toNodeId":"${first}"}]}。跨欄扇入（多上游匯入同一節點）是合法的。`)
+  }
+  const topology = renderTemplateTopology(sessionId)
+  if (topology) msg.push(`模板拓撲（前驅/生成卡/落位狀態）：\n${topology}`)
+  msg.push("確需偏離模板 → 先用 question 向用戶說明並取得真實同意；網關批准後簽發 deviate_token，重試時帶上（自帶 deviate_from_template=true 無效）。")
+  console.log(`[gateway] template_guard: BLOCKED session=${sessionId} adds=${adds.length} problems=${problems.join("|")}`)
+  return msg.join("\n")
+}
+
 // 下發一批畫布操作：經 SSE 對該 session 發 canvas.ops，掛起等前端回執。
 // 前端暫時斷線也照發（事件進 replay buffer，重連即補），靠逾時兜底。
 export function dispatchCanvasOps(

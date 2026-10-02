@@ -212,7 +212,14 @@ export const AGENT_TOOL_DEFINITIONS: readonly AgentToolDefinition[] = [
   {
     id: "canvas_apply_ops",
     domain: "canvas",
-    description: "Dispatch existing CanvasAgentOp operations and await the frontend result callback.",
+    description:
+      "Dispatch existing CanvasAgentOp operations and await the frontend result callback. " +
+      "INSERTION RECIPE: to add a step/role/node, put add_node AND connect_nodes in the SAME batch, wiring the new node into the existing template graph " +
+      '(at least one inbound edge from an existing node), e.g. {"type":"add_node","node":{"id":"n1","type":"config","metadata":{"role":"额外步骤：配音"}}}, ' +
+      '{"type":"connect_nodes","connections":[{"fromNodeId":"<existing id>","toNodeId":"n1"}]}. ' +
+      "FAN-IN IS LEGAL: connecting several existing upstream nodes into one node (cross-lane fan-in) needs no prior delete_connections. " +
+      "Parallel duplicate generation is blocked: a new node that shares (type, role) with an open template slot, or an un-wired floating node, is rejected with the exact wiring fix. " +
+      "DEVIATION: deviate_from_template=true is ignored unless accompanied by deviate_token issued by the gateway after the user actually approved via the question tool.",
     inputSchema: {
       type: "object",
       required: ["request_id", "ops"],
@@ -221,6 +228,9 @@ export const AGENT_TOOL_DEFINITIONS: readonly AgentToolDefinition[] = [
         request_id: { type: "string", minLength: 1 },
         ops: { type: "array", items: { type: "object" } },
         label: { type: "string", maxLength: 200 },
+        deviate_from_template: { type: "boolean", description: "Only honored together with a gateway-issued deviate_token." },
+        deviate_reason: { type: "string", maxLength: 500 },
+        deviate_token: { type: "string", description: "Gateway-issued token, returned after the user approved deviation via the question tool." },
       },
     },
     outputArtifact: {

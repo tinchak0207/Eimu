@@ -5,6 +5,11 @@ import { emitToSession } from "./sse-core.ts"
 import { opencodeFetch } from "./opencode-client.ts"
 import { jsonError } from "./gw-lib.ts"
 import { armQuestionHeartbeat, armQuestionAssumeTimer, clearQuestionHeartbeat, armMidturnStallTimer } from "./timers-gw.ts"
+// 2026-10-02：記錄「用戶真的答覆過 question」。此紀錄是模板偏離（deviate_from_template）
+// 的「用戶同意憑據」——模型自宣告不等於有用戶同意，須以網關記錄的用戶真答覆為準。
+// 只在 handleQuestion（用戶真答覆）路徑記；settleQuestion 的自動跳過代答與 3 分鐘超時
+// 自動代答**都不是用戶同意**，一律不記（見下方 handleQuestion 成功分支）。
+import { markUserAnsweredQuestion } from "./canvas-cascade-state.ts"
 // TODO(整合 Wave3): timers 同波 W13 在建 timers-gw.ts（armAckTimer/armHeartbeatTimer/... ），落地後換成真 import（bun build 硬查 named import）。
 export function normalizeQuestionOptions(raw: unknown): Array<{ label: string; description?: string }> {
   if (!Array.isArray(raw)) return []
@@ -202,6 +207,10 @@ export async function handleQuestion(key: string, id: string, req: Request): Pro
         //（emitRecoveryClosingIfSilent 讓位），並把哨兵打點刷新到恢復段起點。
         state.questionAnsweredThisTurn = true
         state.turnFrozenByQuestion = false
+        // 2026-10-02：這是「用戶真答覆」路徑（用戶在 question 卡上實際作答）→ 記錄同意憑據，
+        // 供模板偏離（deviate_from_template）當「用戶同意」的機器可驗事實。settleQuestion 的
+        // 自動跳過代答與 3 分鐘超時自動代答不走這裡，故不會被誤記為同意。
+        markUserAnsweredQuestion(state.sessionId)
         if (state.pendingQuestions.size === 0) clearQuestionHeartbeat(state)
         state.turnLastFrameAt = Date.now()
         state.turnProgressAt = Date.now()
