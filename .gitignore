@@ -27,6 +27,8 @@
 # misc
 .DS_Store
 *.pem
+# 例外：vendored certifi 的 CA bundle 是套件資料檔，必須隨 vendor 一起進版控／部署
+!deploy-staging/opencode-runtime/lib/smartsearch/certifi/cacert.pem
 
 # debug
 npm-debug.log*

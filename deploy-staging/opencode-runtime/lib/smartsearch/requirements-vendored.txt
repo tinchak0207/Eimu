@@ -11,6 +11,13 @@
 #   rm -rf lib/smartsearch/*.dist-info
 #   find lib/smartsearch -type d \( -name __pycache__ -o -name tests \) -prune -exec rm -rf {} +
 #
+# ⚠ 漏檔檢查（曾實際踩到）：certifi 的 cacert.pem 是套件資料檔，會被 repo 根 .gitignore
+#   的 `*.pem` 規則擋掉，導致部署後 `certifi.where()` 指向不存在的檔 → httpx TLS
+#   初始化 FileNotFoundError。已於 .gitignore 加例外
+#   `!deploy-staging/opencode-runtime/lib/smartsearch/certifi/cacert.pem`。
+#   重現後務必確認底下沒有被忽略的檔：
+#     git status --ignored --porcelain -- lib/smartsearch | grep '^!!'   # 期望：無輸出
+#
 # 驗證（必須全部落在 lib/smartsearch/ 內，不得是 /usr/lib/python3/dist-packages）：
 #   PYTHONPATH=lib/smartsearch python3 -c \
 #     "import httpx,typing_extensions;print(httpx.__file__);print(typing_extensions.__file__)"
