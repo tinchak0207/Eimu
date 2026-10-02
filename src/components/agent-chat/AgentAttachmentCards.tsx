@@ -190,16 +190,22 @@ function useUploadsTicket(sessionId: string | null, needed: boolean): TicketStat
 
 // ─────────────────────────── 卡片
 
-/** 文档式横条卡：也是 image 加载失败的统一降级壳。不可点。 */
+/** 文档式横条卡：也是 image 加载失败的统一降级壳。不可点。
+ *
+ * 宿主表面是用户气泡的 .lg-float（--lg-bg-secondary = 白 0.56 浅色玻璃），
+ * 所以卡内文字必须用深色 token（text-foreground / text-muted-foreground），
+ * 卡片填充用 bg-foreground/[0.08] 这类「深色低透明度」。切勿改回 text-white /
+ * bg-white/1x —— 白字叠浅色玻璃的对比度约 1.0，整张卡会彻底看不见。
+ */
 function DocumentCard({ attRef }: { attRef: AgentAttachmentRef }) {
   return (
-    <div className="flex items-center gap-2 rounded-ios-xl bg-white/[0.15] px-3 py-2">
-      <FileText className="h-4 w-4 shrink-0 text-white/80" aria-hidden="true" />
-      <span className="min-w-0 flex-1 truncate text-ios-footnote font-medium text-white" title={attRef.name}>
+    <div className="flex items-center gap-2 rounded-ios-xl bg-foreground/[0.08] px-3 py-2">
+      <FileText className="h-4 w-4 shrink-0 text-foreground/60" aria-hidden="true" />
+      <span className="min-w-0 flex-1 truncate text-ios-footnote font-medium text-foreground" title={attRef.name}>
         {attRef.name ?? "附件"}
       </span>
       {typeof attRef.size === "number" && Number.isFinite(attRef.size) && (
-        <span className="shrink-0 text-ios-caption1 tabular-nums text-white/70">{formatBytes(attRef.size)}</span>
+        <span className="shrink-0 text-ios-caption1 tabular-nums text-muted-foreground">{formatBytes(attRef.size)}</span>
       )}
     </div>
   );
@@ -238,7 +244,7 @@ function AttachmentThumb({
 
   if (minting) {
     // 票在途：等高骨架占位，票到了原图顶上来，不跳版。
-    return <div className={cn("animate-pulse rounded-ios-lg bg-white/20", wrapperClassName, imgClassName)} aria-hidden="true" />;
+    return <div className={cn("animate-pulse rounded-ios-lg bg-foreground/10", wrapperClassName, imgClassName)} aria-hidden="true" />;
   }
 
   return (
@@ -287,7 +293,7 @@ export function VideoBubble({
 
   if (minting) {
     // 票在途：等高骨架占位，票到了原片顶上来，不跳版。
-    return <div className="h-32 w-full max-w-xs animate-pulse rounded-ios-lg bg-white/20" aria-hidden="true" />;
+    return <div className="h-32 w-full max-w-xs animate-pulse rounded-ios-lg bg-foreground/10" aria-hidden="true" />;
   }
 
   return (
@@ -322,13 +328,13 @@ function AgentAttachmentCardsComponent({ refs, sessionId }: AgentAttachmentCards
       {groups.map((group, i) => {
         if (group.kind === "video-group") {
           return (
-            <div key={`video-${group.name}-${i}`} className="rounded-ios-xl bg-white/[0.12] p-2">
+            <div key={`video-${group.name}-${i}`} className="rounded-ios-xl bg-foreground/[0.06] p-2">
               <div className="flex items-center gap-1.5 px-0.5 pb-1.5">
-                <Film className="h-3.5 w-3.5 shrink-0 text-white/80" aria-hidden="true" />
-                <span className="min-w-0 flex-1 truncate text-ios-footnote font-semibold text-white" title={group.name}>
+                <Film className="h-3.5 w-3.5 shrink-0 text-foreground/60" aria-hidden="true" />
+                <span className="min-w-0 flex-1 truncate text-ios-footnote font-semibold text-foreground" title={group.name}>
                   {group.name}
                 </span>
-                <span className="shrink-0 rounded-full bg-white/20 px-2 py-0.5 text-ios-caption1 font-medium text-white/85">
+                <span className="shrink-0 rounded-full bg-foreground/10 px-2 py-0.5 text-ios-caption1 font-medium text-foreground/80">
                   视频
                 </span>
               </div>
