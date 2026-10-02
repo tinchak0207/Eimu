@@ -198,10 +198,11 @@
 bash 與 run_py 一律跑在隔離沙箱裡：**無網路、無任何密鑰、只看得到本會話的檔案（workspace 產物、本會話 uploads、/tmp）**。可用於本地文本/資料加工、ffmpeg 本地媒體處理（二進制在 PATH 內，免費不扣費）；複雜加工優先 run_py。
 - **禁止用 bash 做需要網路或密鑰的事**（下載素材、呼叫任何 API、curl 上游）——沙箱裡一定失敗。要生成/改圖/放大/影片/讀圖/上傳/檢索，一律用對應原生工具（image_*/video_*/read_image/vision_analyze/search_web/asset_* 等），它們跑在受信進程、由系統代管密鑰與計費。
 - 看不到別人的檔案、看不到系統目錄與內部設定，是設計如此（多租戶隔離＋防洩密），不是故障；別繞路探測。
+- **路徑跨邊界鐵律（硬規則，2026-10-02）**：沙箱的 `/tmp` 是**本會話私有目錄**——受信工具（`video_upload`/`image_upload`/`video_evidence`/`video_analyze` 等）與宿主都看不到它，你傳 `/tmp/...` 給工具必定失敗；反過來，工具回傳的路徑也可能不在你的 `/tmp` 裡。兩邊唯一的共同交換區＝**workspace 內的同一條絕對路徑**（例如 `<workspace>/out/final.mp4`）。所以凡要交給工具處理或入庫的中間產物，一律 `ffmpeg -y ... <workspace>/out/final.mp4` 寫進 workspace 再把該絕對路徑傳給工具；`/tmp` 只放不需要跨邊界的暫存檔。
 
 ## 自主剪接（film 节点；配方在 attach/film-delivery-handbook.md）
 
-成片交付鐵律一句版：剪接成片一律走 film 節點（免費、產平台 URL、聊天框自動出影片卡）；嚴禁 ffmpeg 本地路徑當交付；本地中間產物用 `video_upload` 入庫拿平台 URL 再交付。節點配方/素材注入/配音混軌/時長門細則 → 做剪接前必讀 `attach/film-delivery-handbook.md`。
+成片交付鐵律一句版：剪接成片一律走 film 節點（免費、產平台 URL、聊天框自動出影片卡）；嚴禁 ffmpeg 本地路徑當交付；本地中間產物**寫進 workspace（如 `<workspace>/out/final.mp4`，勿用沙箱 /tmp）** 再用 `video_upload` 入庫拿平台 URL 交付。節點配方/素材注入/配音混軌/時長門細則 → 做剪接前必讀 `attach/film-delivery-handbook.md`。
 
 ## 5.5 分鏡交付閘門（機器閘，硬規則）
 

@@ -3,6 +3,7 @@ import { existsSync } from "node:fs"
 import { mkdir, readFile } from "node:fs/promises"
 import { isAbsolute } from "node:path"
 import { fail, ok } from "../lib/client"
+import { explainMissingPath } from "../lib/agent-paths"
 import { blobPath, uploadBlob } from "../lib/img-composite"
 import { analyzeVideo, vlmProbe, type AnalyzeResult } from "../lib/video-analyze"
 
@@ -95,7 +96,7 @@ export default tool({
       }
       if (typeof args.source !== "string" || !isAbsolute(args.source)) throw new Error("source 必須是絕對路徑")
       if (typeof args.frames_dir !== "string" || !isAbsolute(args.frames_dir)) throw new Error("frames_dir 必須是絕對路徑")
-      if (!existsSync(args.source)) throw new Error(`cannot read ${args.source}: 來源檔案不存在`)
+      if (!existsSync(args.source)) throw new Error(`cannot read ${args.source}: 來源檔案不存在${explainMissingPath(args.source) ?? ""}`)
       await mkdir(args.frames_dir, { recursive: true })
 
       const result: AnalyzeResult = await analyzeVideo(args.source, {

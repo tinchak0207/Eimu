@@ -4,6 +4,7 @@ import { readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { extname, join, resolve } from "node:path"
 import { fail, ok } from "../lib/client"
+import { explainMissingPath } from "../lib/agent-paths"
 import { blobPath, uploadBlob } from "../lib/img-composite"
 import {
   TILE_COLUMNS,
@@ -115,7 +116,7 @@ export default tool({
     + "產物落工作區並（可用時）回公網 url；目的地已存在一律拒絕覆寫（code=destination_exists）。"
     + "逐格回傳的 at 是**實際解到的來源時間**，不是請求值。",
   args: {
-    source: tool.schema.string().describe("本機絕對路徑或 http(s) URL（URL 會先落地暫存再處理；yt-dlp 專屬路徑仍走 action=fetch）"),
+    source: tool.schema.string().describe("本機絕對路徑或 http(s) URL（URL 會先落地暫存再處理；yt-dlp 專屬路徑仍走 action=fetch）。本機路徑請給 workspace 內絕對路徑——沙箱的 /tmp 是會話私有目錄，工具端看不到"),
     action: tool.schema
       .enum(["probe", "cut", "frames", "tile", "tiles", "boundaries", "fetch"])
       .describe("probe=探測；cut=剪輯/拼接；frames=逐格；tile=單張拼板；tiles=分頁拼板；boundaries=機械式變化候選；fetch=連結轉檔案"),
@@ -310,7 +311,7 @@ async function materialize(source: string, cwd: string): Promise<{ path: string;
   if (!isVideoUrl(source)) {
     const path = resolve(cwd, source)
     const isFile = await stat(path).then((item) => item.isFile(), () => false)
-    if (!isFile) throw new Error(`cannot read ${path}`)
+    if (!isFile) throw new Error(`cannot read ${path}${explainMissingPath(path) ?? ""}`)
     return { path, temp: false }
   }
   const response = await fetch(source, { signal: AbortSignal.timeout(120_000) })

@@ -1,5 +1,6 @@
 import { tool } from "@opencode-ai/plugin/tool"
 import { classifyError, ok, fail, uploadImageBytes } from "../lib/client"
+import { LOCAL_PATH_HINT } from "../lib/agent-paths"
 
 export default tool({
   description:
@@ -7,7 +8,7 @@ export default tool({
   args: {
     image_url: tool.schema
       .string()
-      .describe("圖片 URL 或本地絕對路徑，將讀取/下載後上傳，回傳 mediaId"),
+      .describe(`圖片 URL 或本地絕對路徑，將讀取/下載後上傳，回傳 mediaId。${LOCAL_PATH_HINT}`),
   },
   async execute(args, context) {
     try {
