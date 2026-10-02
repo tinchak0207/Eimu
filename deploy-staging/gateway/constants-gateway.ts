@@ -183,7 +183,11 @@ export const CANVAS_EMIT_ALLOWED = new Set([
   "canvas.budget.updated",
 ])
 
-export const INTERNAL_EMIT_ALLOWED = new Set(["image.done", "video.done", "image.failed", "session.error", "quota.changed", "tool.result", "tool.progress"])
+// 2026-10-02 補齊遺漏：audio.done 與 video.done 同類事件、同一條內部路由，本就該並列放行——
+// 此前不在白名單＝遺漏（opencode 工具鏈 emitEvent 端已放行 audio.done，網關這頭不放行會讓
+// 工具推的事件在路由層被 400 丟棄＝no-op）。非新增攻擊面：/internal/emit 只綁 127.0.0.1:8081
+// 內網（VPS ufw 8081/tcp ALLOW 172.16.0.0/12，非公網可達）。
+export const INTERNAL_EMIT_ALLOWED = new Set(["image.done", "video.done", "audio.done", "image.failed", "session.error", "quota.changed", "tool.result", "tool.progress"])
 
 export const WORKSPACE_DIR = "/opt/agent-harness/workspace"
 export const UPLOADS_DIR = path.join(WORKSPACE_DIR, "uploads")

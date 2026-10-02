@@ -995,35 +995,59 @@ if (status === "pending" || status === "running") {
           }
         }
       }
-      // 影片安全網（2026-08-31）：任何非 image_ 工具結果帶平台影片 URL（video_upload 回
-      // {ok,url,content_type:video/*}、run_py 裁後上傳、workflow 工具回 {url} 為影片）→ 發
-      // video.done，聊天框出影片卡。對稱於上面 image.done；dedup 由 emitVideoDone 的
-      // announcedUrls 兜底，與 film 節點 runNode 出口不重複。
+      // 影片／音頻安全網（2026-08-31；2026-10-02 擴掃描巢狀成品形狀）：任何非 image_ 工具結果
+      // 帶平台影片／音頻 URL（video_upload 回 {ok,url}、run_py 裁後上傳、workflow 工具回 {url}）→
+      // 發 video.done／audio.done，聊天框出卡。對稱於上面的 image.done；dedup 由
+      // emitVideoDone／emitAudioDone 的 announcedUrls 兜底，與 film 節點 runNode 出口不重複。
+      //
+      // 2026-10-02 缺口 2：真實取件工具回的是**巢狀**形狀，舊版只認頂層 url/video_url/audio_url
+      // 與字面 videos[]/audios[]，兩個都不命中——video_result_fetch 回 {jobs:[{video_url}]}、
+      // last_frame_video_chain 回 {shots:[{mp4_url}]}。模型手動查到成品、把 URL 貼進文字時，
+      // 網關不發卡，用戶只看到泡泡裡一條純文字連結（暴君抱怨的真身）。
+      // 修法＝保留原行為、只擴掃描：有界走訪（深度 ≤3、節點 ≤200，防病態大 payload），
+      // 逐層認候選鍵；判定仍只認既有副檔名正則，不因工具名放寬（不猜）。
       if (parsed !== null && typeof parsed === "object") {
         const isVideoUrl = (u: unknown): u is string =>
           typeof u === "string" && u.length > 0 && /\.(mp4|mov|webm|m4v)(\?|$)/i.test(u)
-        const vidUrls: string[] = []
-        if (isVideoUrl((parsed as { url?: unknown }).url)) vidUrls.push((parsed as { url: string }).url)
-        if (isVideoUrl((parsed as { video_url?: unknown }).video_url)) vidUrls.push((parsed as { video_url: string }).video_url)
-        if (Array.isArray((parsed as { videos?: unknown }).videos)) {
-          for (const v of (parsed as { videos: { url?: unknown }[] }).videos) if (isVideoUrl(v?.url)) vidUrls.push(v.url as string)
-        }
-        for (const vu of vidUrls) void emitVideoDone(state, vu, typeof parsed?.cost_coins === "number" ? parsed.cost_coins : undefined, undefined, "video")
-      }
-      // 音頻安全網（2026-09-11）：任何非 image_ 工具結果帶平台音頻 URL（music_gen 回
-      // {ok,url:...m4a}、video_upload 收 audio/* 後回 {url}、TTS 落盤 URL）→ 發
-      // audio.done，聊天框出音頻卡。與上面影片安全網逐字對稱（同一 dedup 集合
-      // announcedUrls，由 emitAudioDone 兜底，不與其他出口重複）。
-      if (parsed !== null && typeof parsed === "object") {
         const isAudioUrl = (u: unknown): u is string =>
           typeof u === "string" && u.length > 0 && /\.(m4a|mp3|wav|aac|ogg|flac|opus)(\?|$)/i.test(u)
-        const audUrls: string[] = []
-        if (isAudioUrl((parsed as { url?: unknown }).url)) audUrls.push((parsed as { url: string }).url)
-        if (isAudioUrl((parsed as { audio_url?: unknown }).audio_url)) audUrls.push((parsed as { audio_url: string }).audio_url)
-        if (Array.isArray((parsed as { audios?: unknown }).audios)) {
-          for (const a of (parsed as { audios: { url?: unknown }[] }).audios) if (isAudioUrl(a?.url)) audUrls.push(a.url as string)
+        // 候選鍵：頂層 url/video_url/audio_url 保留，新增 mp4_url/output_url；容器項再收 file_url。
+        const CANDIDATE_URL_KEYS = new Set(["url", "video_url", "mp4_url", "output_url", "audio_url", "file_url"])
+        const MAX_SCAN_DEPTH = 3
+        const MAX_SCAN_NODES = 200
+        const vidCands: { url: string; cost_coins?: number }[] = []
+        const audCands: { url: string; cost_coins?: number }[] = []
+        let visited = 0
+        const walk = (node: unknown, depth: number): void => {
+          if (node === null || depth > MAX_SCAN_DEPTH || visited >= MAX_SCAN_NODES) return
+          if (Array.isArray(node)) {
+            visited++
+            for (const el of node) {
+              if (visited >= MAX_SCAN_NODES) break
+              walk(el, depth + 1)
+            }
+            return
+          }
+          if (typeof node !== "object") return
+          visited++
+          const obj = node as Record<string, unknown>
+          for (const [k, v] of Object.entries(obj)) {
+            if (v === null || typeof v !== "object") {
+              if (CANDIDATE_URL_KEYS.has(k) && typeof v === "string" && v.length > 0) {
+                // cost_coins 優先用候選項自己那顆物件的，沒有才退回頂層（照現有寫法）。
+                const cc = typeof obj.cost_coins === "number" ? obj.cost_coins : undefined
+                if (isVideoUrl(v)) vidCands.push({ url: v, cost_coins: cc })
+                if (isAudioUrl(v)) audCands.push({ url: v, cost_coins: cc })
+              }
+              continue
+            }
+            walk(v, depth + 1)
+          }
         }
-        for (const au of audUrls) void emitAudioDone(state, au, typeof parsed?.cost_coins === "number" ? parsed.cost_coins : undefined, undefined, "audio")
+        walk(parsed, 0)
+        const topCost = typeof parsed?.cost_coins === "number" ? parsed.cost_coins : undefined
+        for (const c of vidCands) void emitVideoDone(state, c.url, c.cost_coins ?? topCost, undefined, "video")
+        for (const c of audCands) void emitAudioDone(state, c.url, c.cost_coins ?? topCost, undefined, "audio")
       }
     }
   } else if (status === "error") {

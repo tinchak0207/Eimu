@@ -504,7 +504,7 @@ async function postInternal(
   }
 }
 
-/** 推送前端事件（白名單：image.done / session.error / canvas.*）。fire-and-forget，失敗不外拋。 */
+/** 推送前端事件（白名單：image.done / session.error / tool.progress / video.done / audio.done / canvas.*）。fire-and-forget，失敗不外拋。 */
 const CANVAS_EMIT_EVENTS = new Set([
   "canvas.plan",
   "canvas.node.created",
@@ -521,7 +521,7 @@ export async function emitEvent(
   data: unknown,
   signal?: AbortSignal,
 ): Promise<void> {
-  if (event !== "image.done" && event !== "session.error" && event !== "tool.progress" && !CANVAS_EMIT_EVENTS.has(event)) return
+  if (event !== "image.done" && event !== "session.error" && event !== "tool.progress" && event !== "video.done" && event !== "audio.done" && !CANVAS_EMIT_EVENTS.has(event)) return
   try {
     await fetch(`${GATEWAY}/internal/emit`, {
       method: "POST",

@@ -1,5 +1,5 @@
 import { tool } from "@opencode-ai/plugin/tool"
-import { ok, fail, platformFetch, classifyError } from "../lib/client"
+import { ok, fail, platformFetch, classifyError, registerTask } from "../lib/client"
 
 // 首尾帧视频链（2026-08-31 片4）：關鍵幀清單 → 逐鏡提交視頻 job（站點計費鏈）→ 輪詢 → 按鏡 mp4。
 // 【契約實證】站點 B 端 /v1/videos/generations 的 VideoRequestBody 只收
@@ -232,6 +232,10 @@ export default tool({
       }
       if (submitOnly) {
         results.push({ ...base, status: "submitted", poll_url: `/v1/videos/${jobId}`, elapsed_ms: Date.now() - t0 })
+        // 註冊給 poller 自動輪詢；best-effort，失敗不影響主流程（registerTask 本體已吞錯回 {ok:false}）。
+        // 只在 submit_only 分支註冊：輪詢分支已拿到終態，再註冊會讓 poller 對已完成 job 再輪一次並多發 resume。
+        // cost_coins 不帶：submit 當下尚無真實扣費，poller 用平台回傳值或退回估算。
+        if (jobId) void registerTask(jobId, context.sessionID, "video", context.abort, { model: work[i].model })
         continue
       }
       const poll = await pollJob(jobId, context.sessionID, context.abort, args.poll_timeout_ms ?? 300_000)

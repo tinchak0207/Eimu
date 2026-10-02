@@ -14,7 +14,7 @@ import { INTERNAL_EMIT_ALLOWED, CANVAS_EMIT_ALLOWED, CONFIRM_TIMEOUT_MS, CONFIRM
 import { resolveCanvasOps, sanitizeOpsResult, storeCanvasState, getCanvasState, validateCanvasOps, dispatchCanvasOps, checkTemplateGuard, canvasResultNodeId, applyCanvasNodeUpdated, CANVAS_OPS_TIMEOUT_MS } from "./canvas-cascade-state.ts"
 import { resolveSession, getOwnedSession } from "./sessions-core.ts"
 import { emitToSession } from "./sse-core.ts"
-import { emitImageDone } from "./events-translate.ts"
+import { emitImageDone, emitVideoDone, emitAudioDone } from "./events-translate.ts"
 import { emitSessionError } from "./emit-helpers.ts"
 import { emitQuotaChanged, appendLedgerFor } from "./quota-ledger.ts"
 import { humanMessageFor } from "./humanize-gw.ts"
@@ -573,6 +573,17 @@ export async function handleInternalEmit(req: Request): Promise<Response> {
     // resolution completes before the poller gets its 200 and resumes the
     // session — otherwise the agent could describe an image the UI lacks.
     await emitImageDone(state, d.url ?? "", d.cost_coins, d.task_id)
+  } else if (event === "video.done") {
+    // 缺口 1（2026-10-02）：INTERNAL_EMIT_ALLOWED 早已放行 video.done，但 if 鏈
+    // 無此分支 → 通過白名單後掉到鏈尾，什麼都不發卻回 {ok:true}（靜默丟幀=假成功）。
+    // 與 image.done 同構：共用 emitVideoDone（dedup 走 state.announcedUrls），
+    // await 讓 redirect/落帳在 poller 收到 200 前完成，poller 復活時 UI 不會缺卡。
+    const d = (data ?? {}) as { url?: string; cost_coins?: number; task_id?: string; media_kind?: "video" | "film" }
+    await emitVideoDone(state, d.url ?? "", d.cost_coins, d.task_id, d.media_kind)
+  } else if (event === "audio.done") {
+    // 同 video.done：放行卻靜默丟幀。共用 emitAudioDone，語義與前端 audio.done 卡對齊。
+    const d = (data ?? {}) as { url?: string; cost_coins?: number; task_id?: string; media_kind?: "audio" }
+    await emitAudioDone(state, d.url ?? "", d.cost_coins, d.task_id, d.media_kind)
   } else if (event === "image.failed") {
     const d = (data ?? {}) as { task_id?: string; reason?: string; refunded?: boolean }
     if (d.task_id) emitImageFailed(state, d.task_id, d.reason ?? "生成失敗", d.refunded === true)

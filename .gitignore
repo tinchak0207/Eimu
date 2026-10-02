@@ -157,6 +157,9 @@ redteam-*
 # 例外：opencode-runtime/ 是 /opt/agent-harness/workspace/.opencode 手維護子集（tools/lib/skills/plugin
 # ＋設定檔）的單一真源；vendored 的 node_modules/services 與執行時 opencode.db 已排除（見該目錄 .gitignore）
 !/deploy-staging/opencode-runtime/
+# 例外：poller/ 是 /opt/agent-harness/poller（生產常駐輪詢程式）的唯一真源；此前無 repo 真源導致
+# 影片命名空間 bug 存活至今（2026-10-02 修）。純程式碼，不含憑證
+!/deploy-staging/poller/
 *.bak-*
 
 # ── 影片產物（本機渲染輸出，200MB 級，2026-09-27 commit 瘦身）──
