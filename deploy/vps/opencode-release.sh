@@ -86,12 +86,22 @@ assert_tree_clean() {
   [ -z "$dirty" ] || { printf '%s\n' "$dirty" >&2; die "$SRC_SUBDIR 有未 commit 改動 → 拒絕發佈。先 commit。"; }
 }
 
+# 上次發佈的 sha（recon 的正確基準：生產是否仍等於上次發出的那一版）
+last_release_sha() {
+  [ "$DRY_RUN" -eq 1 ] && return 0
+  ssh -i "$SSH_KEY" -p "$SSH_PORT" -o ConnectTimeout=10 "$SSH_TARGET" \
+    "sudo tail -1 '$HISTORY_LOG' 2>/dev/null | awk '{print \$2}'" 2>/dev/null | head -1
+}
+
 run_recon() {
   [ "$SKIP_RECON" -eq 1 ] && { log "SKIP recon（--skip-recon）"; return 0; }
   [ -f "$RECON_SCRIPT" ] || die "找不到 recon 腳本：$RECON_SCRIPT"
   if [ "$DRY_RUN" -eq 1 ]; then log "DRY-RUN local: bash $RECON_SCRIPT"; return 0; fi
-  log "== recon 對賬（擋漂移）=="
-  bash "$RECON_SCRIPT" || die "recon 未通過（漂移或故障）→ 先 diff 收編再發佈"
+  local base
+  base="$(last_release_sha)"
+  [ -n "$base" ] || base="HEAD"
+  log "== recon 對賬（擋漂移；基準 $base）=="
+  RECON_BASE="$base" bash "$RECON_SCRIPT" || die "recon 未通過（生產被手改或故障）→ 先收編再發佈"
 }
 
 # 把 commit 的鏡像展開到 $1；印出預期檔案清單到 $2

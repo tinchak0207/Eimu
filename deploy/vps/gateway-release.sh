@@ -162,13 +162,23 @@ assert_gateway_tree_clean() {
 }
 
 # 既有輪子：部署前 recon 對賬（0=一致 1=漂移 2=故障）
+# 現行 release 的 GIT_SHA（recon 的正確基準：生產是否仍等於上次發出的那一版）
+current_release_sha() {
+  [ "$DRY_RUN" -eq 1 ] && return 0
+  ssh -i "$SSH_KEY" -p "$SSH_PORT" -o ConnectTimeout=10 "$SSH_TARGET" \
+    "m=\$(dirname \$(readlink -f '$GATEWAY_PATH' 2>/dev/null))/meta.env; sed -n 's/^GIT_SHA=//p' \"\$m\" 2>/dev/null" 2>/dev/null | head -1
+}
+
 run_recon() {
   [ "$SKIP_RECON" -eq 1 ] && { log "SKIP recon（--skip-recon）"; return 0; }
   [ -f "$RECON_SCRIPT" ] || die "找不到 recon 腳本：$RECON_SCRIPT"
   if [ "$DRY_RUN" -eq 1 ]; then log "DRY-RUN local: bash $RECON_SCRIPT"; return 0; fi
-  log "== 既有 recon 對賬（擋漂移）=="
-  if ! bash "$RECON_SCRIPT"; then
-    die "recon 未通過（漂移或連線故障）→ 先 diff 收編再發佈（deploy-staging/vps-tools/vps-gateway-recon.sh）"
+  local base
+  base="$(current_release_sha)"
+  case "$base" in ""|unknown-baseline) base="HEAD";; esac
+  log "== 既有 recon 對賬（擋漂移；基準 $base）=="
+  if ! RECON_BASE="$base" bash "$RECON_SCRIPT"; then
+    die "recon 未通過（生產被手改或連線故障）→ 先 diff 收編再發佈（deploy-staging/vps-tools/vps-gateway-recon.sh）"
   fi
 }
 

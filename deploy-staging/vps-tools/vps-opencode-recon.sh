@@ -36,10 +36,13 @@ if [ ! -d "$TMP_DIR/tools" ]; then
   echo "RECON_FAIL: VPS 拉取失敗或為空（連線/權限問題）"; exit 2
 fi
 
-# 2. 以 git HEAD 為基準（不是工作區——未 commit 的改動本身就是要抓的漂移）
+# 2. 基準＝RECON_BASE（預設 HEAD）。發佈流程應傳「上次已發佈的 commit」：
+#    比對「生產 vs HEAD」會在正常要發佈新 commit 時一律誤判為漂移，逼人 --skip-recon 繞過閘門。
+#    正確語義是「生產是否仍等於我們上次發出去的那一版」。
 GIT_DIR=$(git -C "$LOCAL_DIR" rev-parse --show-toplevel)
 WORKTREE=$(mktemp -d /tmp/vps-oc-recon-head.XXXXXX)
-git -C "$GIT_DIR" worktree add --quiet --detach "$WORKTREE" HEAD
+BASE="${RECON_BASE:-HEAD}"
+git -C "$GIT_DIR" worktree add --quiet --detach "$WORKTREE" "$BASE" || { echo "RECON_FAIL: 無法解析基準 $BASE"; exit 2; }
 HEAD_DIR="$WORKTREE/deploy-staging/opencode-runtime"
 
 list_of() {
@@ -69,8 +72,8 @@ while read -r f; do
 done < "$TMP_DIR/head-files.txt"
 
 if [ "$drift" -eq 0 ]; then
-  echo "RECON_OK: .opencode 生產與 git HEAD 一致（$(wc -l < "$TMP_DIR/head-files.txt") 檔）"
+  echo "RECON_OK: .opencode 生產與基準 $BASE 一致（$(wc -l < "$TMP_DIR/head-files.txt") 檔）"
 else
-  echo "RECON_DRIFT: .opencode 生產與 HEAD 有實質漂移——先收編 commit 再部署"
+  echo "RECON_DRIFT: .opencode 生產與基準 $BASE 有實質漂移——先收編 commit 再部署"
 fi
 exit $drift
