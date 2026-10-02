@@ -495,7 +495,7 @@ test("端到端：推導後的輸入餵 storyboardQc()，門禁確實收到推�
   const production = {
     "001": {
       sceneId: "S01",
-      durationSeconds: 3,
+      durationSeconds: 12,
       keyframeId: "kf-1",
       lastFrameId: "lf-1",
       audioAnchorId: "a-1",
@@ -507,7 +507,7 @@ test("端到端：推導後的輸入餵 storyboardQc()，門禁確實收到推�
     cards: cards(),
     lockedCharacterCardIds: ["card-lin", "card-chen"],
     lockedSceneCardIds: ["card-house"],
-    segmentDurationSeconds: 3,
+    segmentDurationSeconds: 12,
   });
   // 卡 id 全部由 referenceAssets 名稱解析而來（非呼叫端手填）
   assert.deepEqual(args.sources["001"].characterCardIds, "referenceAssets");
@@ -672,8 +672,8 @@ test("端到端（專案接線）：專案鎖定卡 + 節點比例經接線真�
   const { context, unresolvedCardIds } = storyboardQcContextFromProject(project, { cards: cards() });
   assert.deepEqual(unresolvedCardIds, []);
   const production = {
-    "001": { sceneId: "S01", durationSeconds: 3, keyframeId: "kf-1", lastFrameId: "lf-1", audioAnchorId: "a-1" },
-    "002": { sceneId: "S01", durationSeconds: 4, keyframeId: "kf-2", lastFrameId: "lf-2", audioAnchorId: "a-2" },
+    "001": { sceneId: "S01", durationSeconds: 12, keyframeId: "kf-1", lastFrameId: "lf-1", audioAnchorId: "a-1" },
+    "002": { sceneId: "S01", durationSeconds: 15, keyframeId: "kf-2", lastFrameId: "lf-2", audioAnchorId: "a-2" },
   };
   const args = storyboardQcGateArgs(
     [fullShot({ shotNumber: "001" }), fullShot({ shotNumber: "002" })],
@@ -909,7 +909,7 @@ test("productionFieldsFromContext 第 ④ 條推導：道具名 → propCardIds�
 
 test("行為斷言：帶道具的推導結果餵本地門禁，門禁判定與無道具時逐項相同（道具不改變任何一門）", () => {
   const production = {
-    "001": { sceneId: "S01", durationSeconds: 3, keyframeId: "kf-1", lastFrameId: "lf-1", audioAnchorId: "a-1" },
+    "001": { sceneId: "S01", durationSeconds: 12, keyframeId: "kf-1", lastFrameId: "lf-1", audioAnchorId: "a-1" },
   };
   const shots = [fullShot({ referenceAssets: `场景:[旧宅_主视] 角色:[林昭_正面] 道具:[${PROP_NAME}]` })];
   const withPropArgs = storyboardQcGateArgs(shots, {
@@ -918,7 +918,7 @@ test("行為斷言：帶道具的推導結果餵本地門禁，門禁判定與�
     shotMetadata: { "001": { size: "9:16" } },
     lockedCharacterCardIds: ["card-lin"],
     lockedSceneCardIds: ["card-house"],
-    segmentDurationSeconds: 3,
+    segmentDurationSeconds: 12,
   });
   // 道具名稱真的走完了「名稱 → 卡 id」解析鏈（來源記在審計跡上）
   assert.deepEqual(withPropArgs.input.shots[0].propCardIds, ["card-prop-book"]);
@@ -1165,7 +1165,7 @@ test("護城河回歸（最重要）：全自動兩檔＋未給 mode → 未批�
   const production = {
     "001": {
       sceneId: "S01",
-      durationSeconds: 3,
+      durationSeconds: 12,
       keyframeId: "kf-1",
       lastFrameId: "lf-1",
       audioAnchorId: "a-1",
