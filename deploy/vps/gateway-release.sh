@@ -319,6 +319,10 @@ fi
 
 REL_DIR="$RELEASES_DIR/$rel"
 sudo mkdir -p "$REL_DIR/files" "$stage_dir"
+# $REL_DIR 由 sudo mkdir 建立＝root 所有，但 manifest.md5／meta.env 是後續「非 sudo」寫入
+# （adopt 沒踩到，因為它是 mv 進來的目錄、保有原 owner；release 是新建目錄）。
+# 先把 $REL_DIR 交給 ubuntu，寫入與後續 rollback 的讀取都一致。
+sudo chown "$OWNER" "$REL_DIR"
 # --strip-components=2：tar 內路徑為 deploy-staging/gateway/<檔>，剝掉兩層後 files/ 即 gateway 根
 sudo tar -xf "$stage_tar" -C "$stage_dir" --strip-components=2
 sudo chown -R "$OWNER" "$stage_dir"
