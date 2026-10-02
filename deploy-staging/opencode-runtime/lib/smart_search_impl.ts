@@ -10,8 +10,11 @@
  * `python3 -m smart_search.cli <subcommand> ... --format json`，**不另寫 driver**。
  *
  * 免 Key 通路（實測可通）：fetch=Jina Reader、docs=Context7、vertical=AnySearch、
- * 部分 web_search=fircrawl 匿名。`web` intent 走 CLI `search`（需 main-search 憑證），
- * 憑證缺失時 CLI 回 ok:false config_error，本工具據此回 fail 並給可操作 hint。
+ * 部分 web_search=fircrawl 匿名。`web` intent 先走 CLI `search`（需 main-search 憑證）；
+ * 若回 ok:false（含憑證缺失的 config_error/main_search），**自動免 Key 回落**改跑 vendored
+ * smartsearch 自己的 `anysearch-search`（通用網頁搜尋，免 Key），外層以 served_by 標明實際
+ * 由哪條通路服務（`smartsearch:search` / `smartsearch:anysearch-search`）。兩條皆失敗才回 fail，
+ * hint 同時列出兩條錯誤與可操作替代（search_web / search_aggregate）。
  *
  * 落位：/opt/agent-harness/workspace/.opencode/lib/smart_search_impl.ts
  * env：子進程只帶 PATH/HOME/LANG/LC_ALL/PYTHONPATH（指向 vendored package 父目錄）
@@ -42,6 +45,12 @@ export const SMART_SEARCH_TIMEOUT_DOCS_MS = 60_000
 
 /** 逾時：web（通用網頁搜尋，較慢）。 */
 export const SMART_SEARCH_TIMEOUT_WEB_MS = 120_000
+
+/**
+ * web 免 Key 回落（anysearch-search）的最低剩餘預算（ms）：主通路失敗後若剩餘預算低於此值，
+ * 寧可如實回報（upstream_timeout）也不靜默截斷。
+ */
+export const SMART_SEARCH_MIN_FALLBACK_MS = 10_000
 
 /** 錯誤訊息攜帶原文的上限（同 search_aggregate_impl.ts 口徑）。 */
 const OUTPUT_EXCERPT_MAX_CHARS = 2000
@@ -227,6 +236,80 @@ const WEB_MISSING_CREDS_HINT =
   "请改用 search_web（Exa，通用网页搜索）或 search_aggregate（B站/GitHub/Reddit 社群口碑），" +
   "亦可指定 provider 子命令（如 anysearch-search / context7-library）。"
 
+/** 兩條通路皆失敗時的可操作 hint（web intent）。 */
+const WEB_BOTH_FAILED_HINT =
+  "两条通路均失败，可操作建议：改用 search_web（Exa，通用网页搜索）或 search_aggregate" +
+  "（B站/GitHub/Reddit 社群口碑），亦可稍后重试。"
+
+// ── 單次子進程結果歸類（逾時/啟動失敗/非零退出/非 JSON → error；否則 parsed） ──
+
+type RunOutcome =
+  | { kind: "parsed"; obj: Record<string, unknown>; elapsedMs: number }
+  | { kind: "error"; code: string; message: string; elapsedMs: number }
+
+function classifyRunOutcome(run: SmartSearchRunResult, intent: SmartSearchIntent, timeoutMs: number): RunOutcome {
+  if (run.timedOut) {
+    return {
+      kind: "error",
+      code: "upstream_timeout",
+      message:
+        `smart_search ${intent} 超时：已等待 ${run.elapsedMs} ms（上限 ${timeoutMs} ms），已 SIGKILL 终止子进程。` +
+        (run.stderr.trim() ? ` stderr 前 ${OUTPUT_EXCERPT_MAX_CHARS} 字：${run.stderr.slice(0, OUTPUT_EXCERPT_MAX_CHARS)}` : ""),
+      elapsedMs: run.elapsedMs,
+    }
+  }
+  if (run.spawnError) {
+    return {
+      kind: "error",
+      code: "upstream_exit",
+      message: `无法启动 python3（-m ${SMART_SEARCH_CLI_MODULE}）：${run.spawnError}`,
+      elapsedMs: run.elapsedMs,
+    }
+  }
+
+  // 先嘗試解析 stdout：smartsearch CLI 對 config_error 會回**非零退出**（實測 exit 3，
+  // 見 cli.py `_exit_code`：auth_error/config_error → EXIT_CONFIG_ERROR=3），但仍印出
+  // 合法 JSON `{ok:false, error_type:config_error, ...}`。若死板地「非零退出即失敗」，
+  // web 免 Key 回落永遠不會觸發。因此非零退出時只要 stdout 是合法 JSON 且 ok:false，
+  // 就當作上游 ok:false 交由呼叫端處理（回落/對帳）；否則維持既有 upstream_exit。
+  let parsed: unknown
+  let parseOk = true
+  try {
+    parsed = JSON.parse(run.stdout)
+  } catch {
+    parseOk = false
+  }
+  const parsedObj = parseOk && parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : undefined
+
+  if (run.code !== 0) {
+    if (parsedObj && parsedObj.ok === false) {
+      return { kind: "parsed", obj: parsedObj, elapsedMs: run.elapsedMs }
+    }
+    return {
+      kind: "error",
+      code: "upstream_exit",
+      message: `smart_search ${intent} 非零退出（exit ${run.code}）。stderr 前 ${OUTPUT_EXCERPT_MAX_CHARS} 字：${run.stderr.slice(0, OUTPUT_EXCERPT_MAX_CHARS) || "(空)"}`,
+      elapsedMs: run.elapsedMs,
+    }
+  }
+  if (!parseOk || !parsedObj) {
+    return {
+      kind: "error",
+      code: "bad_output",
+      message: `CLI 输出不是合法 JSON。stdout 前 ${OUTPUT_EXCERPT_MAX_CHARS} 字：${run.stdout.slice(0, OUTPUT_EXCERPT_MAX_CHARS) || "(空)"}`,
+      elapsedMs: run.elapsedMs,
+    }
+  }
+  return { kind: "parsed", obj: parsedObj, elapsedMs: run.elapsedMs }
+}
+
+/** 把上游 ok:false 物件轉成「error_type + 訊息」的一行描述（供兩條通路對帳）。 */
+function describeUpstreamError(obj: Record<string, unknown>): string {
+  const type = asString(obj.error_type) ?? "upstream_error"
+  const msg = asString(obj.error) ?? "上游返回 ok:false"
+  return `error_type=${type}；${msg}`
+}
+
 /**
  * 工具主體（execute 與測試共用）。deps 僅測試注入用，execute 傳空物件。
  */
@@ -246,7 +329,7 @@ export async function runSmartSearchTool(rawArgs: Record<string, unknown>, deps:
   }
 
   const subcommand = resolveSubcommand(intent, { query, url, library_id: asString(rawArgs.library_id) })
-  const timeoutMs = deps.timeoutMs ?? resolveTimeoutMs(intent)
+  const totalTimeoutMs = deps.timeoutMs ?? resolveTimeoutMs(intent)
 
   let homeDir: string
   try {
@@ -257,56 +340,80 @@ export async function runSmartSearchTool(rawArgs: Record<string, unknown>, deps:
   }
   const env = buildChildEnv(deps.envSource ?? process.env, homeDir, deps.pythonPath ?? SMART_SEARCH_PACKAGE_DIR)
 
-  const run = await runSmartSearchProcess({
-    // 使用者輸入一律單一 argv 元素；flag 與值亦分開成陣列元素。
-    argv: [...subcommand, "--format", "json"],
-    timeoutMs,
-    env,
-    pythonBin: deps.pythonBin,
-    cliModule: deps.cliModule,
-  })
+  const runOnce = (argv: string[], timeoutMs: number) =>
+    runSmartSearchProcess({ argv, timeoutMs, env, pythonBin: deps.pythonBin, cliModule: deps.cliModule })
 
-  if (run.timedOut) {
+  // ── 主通路：intent 映射出的子命令（web → `search`） ──
+  // 使用者輸入一律單一 argv 元素；flag 與值亦分開成陣列元素。
+  const firstRun = await runOnce([...subcommand, "--format", "json"], totalTimeoutMs)
+  const first = classifyRunOutcome(firstRun, intent, totalTimeoutMs)
+
+  if (first.kind === "error") {
+    return fail(first.code, first.message)
+  }
+  if (first.obj.ok !== false) {
+    // 成功路徑：既有欄位（title/intent/elapsed_ms/result）不變，僅新增 served_by 標明通路。
+    return ok({
+      title: "检索完成",
+      intent,
+      served_by: `smartsearch:${subcommand[0]}`,
+      elapsed_ms: first.elapsedMs,
+      result: first.obj,
+    })
+  }
+
+  // ── 主通路 ok:false ──
+  // 非 web：維持原行為（單條 fail，hint = 上游原文）。
+  if (intent !== "web") {
+    return fail(asString(first.obj.error_type) ?? "upstream_error", asString(first.obj.error) ?? "上游返回 ok:false", {
+      intent,
+      upstream: first.obj,
+    })
+  }
+
+  // web 免 Key 回落：改跑 vendored smartsearch 自己的 `anysearch-search`（通用網頁搜尋）。
+  const primaryError = describeUpstreamError(first.obj)
+  const remainingMs = totalTimeoutMs - firstRun.elapsedMs
+  if (remainingMs < SMART_SEARCH_MIN_FALLBACK_MS) {
     return fail(
       "upstream_timeout",
-      `smart_search ${intent} 超时：已等待 ${run.elapsedMs} ms（上限 ${timeoutMs} ms），已 SIGKILL 终止子进程。` +
-        (run.stderr.trim() ? ` stderr 前 ${OUTPUT_EXCERPT_MAX_CHARS} 字：${run.stderr.slice(0, OUTPUT_EXCERPT_MAX_CHARS)}` : ""),
-    )
-  }
-  if (run.spawnError) {
-    return fail("upstream_exit", `无法启动 python3（-m ${deps.cliModule ?? SMART_SEARCH_CLI_MODULE}）：${run.spawnError}`)
-  }
-  if (run.code !== 0) {
-    return fail(
-      "upstream_exit",
-      `smart_search ${intent} 非零退出（exit ${run.code}）。stderr 前 ${OUTPUT_EXCERPT_MAX_CHARS} 字：${run.stderr.slice(0, OUTPUT_EXCERPT_MAX_CHARS) || "(空)"}`,
+      `smart_search web：主通路 search 失败后仅剩 ${remainingMs} ms 预算` +
+        `（总 ${totalTimeoutMs} ms，回落下限 ${SMART_SEARCH_MIN_FALLBACK_MS} ms），不足以执行免 Key 回落` +
+        ` anysearch-search，已如实终止（未静默截断）。主通路错误：${primaryError}`,
+      { intent, served_by: "smartsearch:search", upstream: first.obj },
     )
   }
 
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(run.stdout)
-  } catch {
-    return fail(
-      "bad_output",
-      `CLI 输出不是合法 JSON。stdout 前 ${OUTPUT_EXCERPT_MAX_CHARS} 字：${run.stdout.slice(0, OUTPUT_EXCERPT_MAX_CHARS) || "(空)"}`,
-    )
+  const secondRun = await runOnce(["anysearch-search", query as string, "--format", "json"], remainingMs)
+  const second = classifyRunOutcome(secondRun, intent, remainingMs)
+
+  if (second.kind === "parsed" && second.obj.ok !== false) {
+    return ok({
+      title: "检索完成（免 Key 回落）",
+      intent,
+      served_by: "smartsearch:anysearch-search",
+      elapsed_ms: firstRun.elapsedMs + secondRun.elapsedMs,
+      fallback: { from: "smartsearch:search", reason: primaryError, primary_elapsed_ms: firstRun.elapsedMs },
+      result: second.obj,
+    })
   }
 
-  const obj = (parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {}) as Record<string, unknown>
-  if (obj.ok === false) {
-    const upstreamError = asString(obj.error) ?? "上游返回 ok:false"
-    const code = asString(obj.error_type) ?? "upstream_error"
-    const hint = intent === "web" ? `${upstreamError}｜${WEB_MISSING_CREDS_HINT}` : upstreamError
-    return fail(code, hint, { intent, upstream: obj })
-  }
-
-  return ok({
-    title: "检索完成",
-    intent,
-    elapsed_ms: run.elapsedMs,
-    result: obj,
-  })
+  const fallbackError = second.kind === "parsed" ? describeUpstreamError(second.obj) : `error_type=${second.code}；${second.message}`
+  return fail(
+    asString(first.obj.error_type) ?? "upstream_error",
+    `两条通路均失败。① smartsearch:search → ${primaryError}；② smartsearch:anysearch-search → ${fallbackError}。` +
+      `${WEB_BOTH_FAILED_HINT}${WEB_MISSING_CREDS_HINT}`,
+    {
+      intent,
+      served_by: "smartsearch:anysearch-search",
+      fallback_attempted: true,
+      attempts: [
+        { served_by: "smartsearch:search", error: primaryError },
+        { served_by: "smartsearch:anysearch-search", error: fallbackError },
+      ],
+      upstream: first.obj,
+    },
+  )
 }
 
 export const smartSearchTool: WebToolDef = {
@@ -317,7 +424,7 @@ export const smartSearchTool: WebToolDef = {
     "三種 intent：" +
     "`page`＝抓取「已知 URL」的正文（免 Key，走 Jina/Firecrawl；參數用 url）；" +
     "`docs`＝查函式庫/框架/API 文檔（免 Key，走 Context7；參數用 query，可選 library_id 指定庫，不給則自動選庫）；" +
-    "`web`＝通用網頁搜尋（走 CLI search，**需 main-search 憑證**；憑證缺失會回 fail 並提示替代）。" +
+    "`web`＝通用網頁搜尋（先走 CLI `search`，需 main-search 憑證；憑證缺失或失敗時**自動免 Key 回落**至 vendored `anysearch-search`，回報以 served_by 標明實際通路）。" +
     "分流：通用網頁搜尋優先 `search_web`（Exa）；社群口碑（Reddit）、B站中文內容、開源專案/代碼用 `search_aggregate`；" +
     "已知 URL 要正文用本工具的 `page`；查框架/API 文檔用本工具的 `docs`。",
   args: {
@@ -325,7 +432,7 @@ export const smartSearchTool: WebToolDef = {
       type: "string",
       required: true,
       enum: SMART_SEARCH_INTENTS,
-      description: "检索类型：web＝通用网页搜索（需 main-search 凭证）；page＝抓取已知 URL 正文（用 url）；docs＝函式库/API 文档（用 query，可带 library_id）。",
+      description: "检索类型：web＝通用网页搜索（search 失败时自动免 Key 回落 anysearch-search）；page＝抓取已知 URL 正文（用 url）；docs＝函式库/API 文档（用 query，可带 library_id）。",
     },
     query: {
       type: "string",

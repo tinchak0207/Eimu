@@ -7,12 +7,16 @@
 //      （未被 shell 解析执行）。
 //   4. 子进程 env 白名单：EXA_API_KEY 透传、SECRET_TOKEN 不传、HOME/PYTHONPATH 已设。
 //   5. 解析路径：合法 JSON 透传 / 非 JSON=bad_output / 非零退出=upstream_exit。
-//   6. web intent 因缺 main-search 凭证回 ok:false 时 → 工具 fail(config_error) 且 hint 可操作
-//      （含 search_web 替代指引）。
+//   6. web intent 因缺 main-search 凭证回 ok:false 时 → 工具自动免 Key 回落 anysearch-search；
+//      若两條都失败才 fail（hint 含两條错误 + search_web 替代指引）。
+//   7. web 免 Key 回落真行为：search ok:false → 确实改跑 anysearch-search（fixture 回显被调用
+//      子命令序列证明）；search ok:true → 只跑一次；剩余预算不足 → 如实回报不静默截断。
+//   8. 真实 CLI 非零退出（config_error → exit 3）但 stdout 为合法 JSON ok:false → 仍据 JSON
+//      判成敗并触发回落（不对 exit code 死板判死）。
 //
 // 跑法：bun test deploy-staging/vps-tools/smart-search.test.ts
 //   或：bash deploy-staging/vps-tools/run-tests.sh ../vps-tools/smart-search.test.ts
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterAll, describe, expect, test } from "bun:test"
@@ -82,6 +86,88 @@ writePy(
     "'home': os.environ.get('HOME', ''), " +
     "'pythonpath': os.environ.get('PYTHONPATH', '')}))\n",
 )
+
+// ── web 免 Key 回落探针：把「实际被调用的子命令 argv」逐条追加到 rec 文件 ──
+// 断言「确实改跑了 anysearch-search」必须读这个 rec（真行为证据），不是只看最终输出。
+
+/** web 回落探针：search → ok:false(config_error/main_search)；anysearch-search → ok:true。 */
+const WEB_FALLBACK = "web_fallback_probe"
+const REC_FALLBACK = join(FIX, "web_fallback.rec")
+writePy(
+  `${WEB_FALLBACK}.py`,
+  "import sys, json\n" +
+    `REC = ${JSON.stringify(REC_FALLBACK)}\n` +
+    "args = sys.argv[1:]\n" +
+    "open(REC, 'a').write(json.dumps(args, ensure_ascii=False) + '\\n')\n" +
+    "sub = args[0] if args else ''\n" +
+    "if sub == 'search':\n" +
+    "    print(json.dumps({'ok': False, 'error_type': 'config_error', 'error': 'The minimum profile requires at least one provider for each of main_search, docs_search, and web_fetch. Missing capabilities: main_search'}, ensure_ascii=False))\n" +
+    "else:\n" +
+    "    print(json.dumps({'ok': True, 'provider': 'anysearch', 'query': args[1] if len(args) > 1 else '', 'results': [{'title': 'Exa API', 'url': 'https://exa.ai/docs'}]}, ensure_ascii=False))\n",
+)
+
+/** web 成功探针：无论哪条子命令都 ok:true（用于断言成功时**不**多跑第二条）。 */
+const WEB_OK = "web_ok_probe"
+const REC_OK = join(FIX, "web_ok.rec")
+writePy(
+  `${WEB_OK}.py`,
+  "import sys, json\n" +
+    `REC = ${JSON.stringify(REC_OK)}\n` +
+    "args = sys.argv[1:]\n" +
+    "open(REC, 'a').write(json.dumps(args, ensure_ascii=False) + '\\n')\n" +
+    "print(json.dumps({'ok': True, 'provider': args[0] if args else 'search', 'query': args[1] if len(args) > 1 else ''}, ensure_ascii=False))\n",
+)
+
+/** web 双失败探针：search → config_error/main_search；anysearch-search → ok:false(upstream_error 503)。 */
+const WEB_BOTH_FAIL = "web_both_fail_probe"
+const REC_BOTH = join(FIX, "web_both.rec")
+writePy(
+  `${WEB_BOTH_FAIL}.py`,
+  "import sys, json\n" +
+    `REC = ${JSON.stringify(REC_BOTH)}\n` +
+    "args = sys.argv[1:]\n" +
+    "open(REC, 'a').write(json.dumps(args, ensure_ascii=False) + '\\n')\n" +
+    "sub = args[0] if args else ''\n" +
+    "if sub == 'search':\n" +
+    "    print(json.dumps({'ok': False, 'error_type': 'config_error', 'error': 'Missing capabilities: main_search'}, ensure_ascii=False))\n" +
+    "else:\n" +
+    "    print(json.dumps({'ok': False, 'error_type': 'upstream_error', 'error': 'anysearch upstream 503 service unavailable'}, ensure_ascii=False))\n",
+)
+
+/**
+ * 真实 CLI 行为探针：config_error 时 CLI **非零退出**（cli.py `_exit_code`: config_error→EXIT_CONFIG_ERROR=3），
+ * 但仍印合法 JSON ok:false。工具必须据 JSON（而非 exit code）判成敗并触发回落。
+ */
+const WEB_NONZERO = "web_nonzero_probe"
+const REC_NONZERO = join(FIX, "web_nonzero.rec")
+writePy(
+  `${WEB_NONZERO}.py`,
+  "import sys, json\n" +
+    `REC = ${JSON.stringify(REC_NONZERO)}\n` +
+    "args = sys.argv[1:]\n" +
+    "open(REC, 'a').write(json.dumps(args, ensure_ascii=False) + '\\n')\n" +
+    "sub = args[0] if args else ''\n" +
+    "if sub == 'search':\n" +
+    "    print(json.dumps({'ok': False, 'error_type': 'config_error', 'error': 'Missing capabilities: main_search'}, ensure_ascii=False))\n" +
+    "    sys.exit(3)\n" +
+    "else:\n" +
+    "    print(json.dumps({'ok': True, 'provider': 'anysearch', 'results': [{'title': 'Exa', 'url': 'https://exa.ai/'}]}, ensure_ascii=False))\n",
+)
+
+/** 读 rec（每行一个 JSON 数组＝一次调用的 argv）；不存在＝空。 */
+function readRec(path: string): string[][] {
+  if (!existsSync(path)) return []
+  return readFileSync(path, "utf8")
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as string[])
+}
+
+/** 每个场景开始前清空 rec，确保断言的是本次调用。 */
+function resetRec(path: string): void {
+  rmSync(path, { force: true })
+}
 
 afterAll(() => {
   rmSync(FIX, { recursive: true, force: true })
@@ -245,5 +331,82 @@ describe("smart_search：参数校验", () => {
   })
   test("registry id = 档名 smart_search", () => {
     expect([...SMART_SEARCH_HARNESS_TOOL_IDS]).toEqual(["smart_search"])
+  })
+})
+
+describe("smart_search：web intent 免 Key 回落（search → anysearch-search）", () => {
+  test("真实 CLI 非零退出(exit 3)但 stdout 合法 JSON ok:false(config_error) → 仍触发回落", async () => {
+    resetRec(REC_NONZERO)
+    const res = await runWithFixture(WEB_NONZERO, { intent: "web", query: "exa api" }, { envSource: BASE_ENV })
+    const o = out<{ ok: boolean; served_by: string; result: { provider: string } }>(res)
+    const rec = readRec(REC_NONZERO)
+    expect(rec.length).toBe(2)
+    expect(rec[0][0]).toBe("search")
+    expect(rec[1][0]).toBe("anysearch-search")
+    expect(o.ok).toBe(true)
+    expect(o.served_by).toBe("smartsearch:anysearch-search")
+    expect(o.result.provider).toBe("anysearch")
+  })
+
+  test("search 回 ok:false(config_error/main_search) → 确实改跑 anysearch-search，served_by 标回落通路", async () => {
+    resetRec(REC_FALLBACK)
+    const res = await runWithFixture(WEB_FALLBACK, { intent: "web", query: "exa api" }, { envSource: BASE_ENV })
+    const o = out<{ ok: boolean; served_by: string; result: { provider: string; results: Array<{ url: string }> } }>(res)
+    // 真行为证据：fixture 回显的被调用子命令序列。
+    const rec = readRec(REC_FALLBACK)
+    expect(rec.length).toBe(2)
+    expect(rec[0][0]).toBe("search")
+    expect(rec[1][0]).toBe("anysearch-search")
+    expect(rec[1]).toContain("exa api")
+    expect(rec[1]).toContain("--format")
+    // 外层回报标明实际通路 + 真结果。
+    expect(o.ok).toBe(true)
+    expect(o.served_by).toBe("smartsearch:anysearch-search")
+    expect(o.result.provider).toBe("anysearch")
+    expect(o.result.results[0].url).toContain("https://")
+  })
+
+  test("search 回 ok:true → 不得多跑第二条（fixture 只被调用一次），served_by 标 search", async () => {
+    resetRec(REC_OK)
+    const res = await runWithFixture(WEB_OK, { intent: "web", query: "exa api" }, { envSource: BASE_ENV })
+    const o = out<{ ok: boolean; served_by: string }>(res)
+    const rec = readRec(REC_OK)
+    expect(rec.length).toBe(1)
+    expect(rec[0][0]).toBe("search")
+    expect(o.ok).toBe(true)
+    expect(o.served_by).toBe("smartsearch:search")
+  })
+
+  test("两條都失败 → fail 且 hint 同时含两條错误与可操作建议", async () => {
+    resetRec(REC_BOTH)
+    const res = await runWithFixture(WEB_BOTH_FAIL, { intent: "web", query: "exa api" }, { envSource: BASE_ENV })
+    const o = out<{ ok: boolean; error: { code: string; hint: string }; attempts: Array<{ served_by: string }> }>(res)
+    const rec = readRec(REC_BOTH)
+    expect(rec.length).toBe(2)
+    expect(rec[1][0]).toBe("anysearch-search")
+    expect(o.ok).toBe(false)
+    // ① 两條通路各自的 error_type／訊息。
+    expect(o.error.hint).toContain("config_error")
+    expect(o.error.hint).toContain("main_search")
+    expect(o.error.hint).toContain("upstream_error")
+    expect(o.error.hint).toContain("anysearch upstream 503")
+    // ② 可操作建议。
+    expect(o.error.hint).toContain("search_web")
+    expect(o.error.hint).toContain("search_aggregate")
+    expect(o.attempts.map((a) => a.served_by)).toEqual(["smartsearch:search", "smartsearch:anysearch-search"])
+  })
+
+  test("主通路失败后剩余预算不足 → 如实回报（不静默截断，不发起第二条）", async () => {
+    resetRec(REC_FALLBACK)
+    const res = await runWithFixture(WEB_FALLBACK, { intent: "web", query: "exa api" }, { timeoutMs: 5_000, envSource: BASE_ENV })
+    const o = out<{ ok: boolean; error: { code: string; hint: string } }>(res)
+    const rec = readRec(REC_FALLBACK)
+    // 真行为证据：只跑过主通路，未发起回落。
+    expect(rec.length).toBe(1)
+    expect(rec[0][0]).toBe("search")
+    expect(o.ok).toBe(false)
+    expect(o.error.code).toBe("upstream_timeout")
+    expect(o.error.hint).toContain("仅剩")
+    expect(o.error.hint).toContain("anysearch-search")
   })
 })
