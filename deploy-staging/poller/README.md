@@ -13,11 +13,27 @@
 - `docs/` 與 `deploy/CHECKLIST.md` 也沒有任何 poller 部署說明
 
 正因為沒有真源，一個致命 bug 得以在生產存活至今（2026-10-02 修）：poller 對
-**所有** kind 都去輪詢 `/v1/images/{task_id}` 並無條件發 `image.done`。影片 job id
-**不在 images 命名空間**，所以影片任務每輪 404 → backoff → 撐滿 30 分鐘 TTL 才死，
-**全程零幀**、成品永遠不會自動彈出。同 repo 的
-`deploy-staging/opencode-runtime/tools/image_get_result.ts:47-56` 早就在 404 時回落
-`/videos/{id}`，但 poller 從未拿到這個修復——因為它不在庫裡，沒人能修它。
+**所有** kind 都無條件發 `image.done`（成功事件名寫死）。影片成品是 .mp4，被推成
+`image.done` 後前端把它塞進 `<img>`，卡片變破圖、成品永遠不會正確彈出。
+**這才是本輪真正修好的那一半**：成功事件名由 `image.done` 改為 `video.done`
+（`doneEventFor(kind)`，影片另帶 `media_kind:"video"`）。
+
+> **根因更正（2026-10-02；原假設已推翻）。** 本檔與 `media-endpoints.ts` 曾記載
+> 「影片 job id **不在 images 命名空間**，所以每輪 404」。此說法**已被現場推翻**：
+> - `src/app/api/v1/images/[id]/route.ts:45` 與 `src/app/api/v1/videos/[id]/route.ts:24`
+>   呼叫的是**同一個** `getGenerationJobForTenant(id, 'biz:'+key.id)`；
+> - `src/lib/generation-core/job-repository.ts:200-202` 的查詢是
+>   `SELECT * FROM generation_job WHERE id = ? AND tenant_id = ? LIMIT 1`，
+>   **沒有任何 kind 過濾**；
+> - 因此 `/v1/images/{影片id}` 對**擁有該 job 的同一把 key** 一樣回 200。真正的
+>   404 來源是 **tenant 不匹配**（換了 key／用了 fallback 的 `HARNESS_API_KEY`），
+>   不是命名空間。生產 nginx access log 佐證：舊碼對 video-kind 任務打
+>   `/v1/images/<id>` 得到過 200。
+>
+> 結論：poller 改走 `/v1/videos/{id}` 在現行站點實作下是 **no-op**（方向沒錯、
+> 不是必要修復）。同 repo 的 `opencode-runtime/tools/image_get_result.ts`
+> 那份「404 → 回落 `/videos/{id}`」同理，在現行站點下不會被觸發（保留是為兼容
+> 舊版站點）。**不要把命名空間當成 404 根因。**
 
 **自本目錄起，`deploy-staging/poller/` 是本程式的唯一真源。** VPS 上的
 `/opt/agent-harness/poller/` 是部署目標（活本），不是真源。任何對 poller 的修改
@@ -35,9 +51,12 @@
 ## 本次修復（僅四處 + 一行 import）
 
 1. `pollTask` 的 URL 改用 `pollPathFor(task.kind, task.task_id)`：影片走
-   `/v1/videos/{id}`，不再所有 kind 都打 `/v1/images/`。
-2. 成功分支事件名改用 `doneEventFor(task.kind)`（影片發 `video.done`，圖片維持
-   `image.done`）；影片帶 `emitData.media_kind = "video"`（圖片不帶）。
+   `/v1/videos/{id}`，不再所有 kind 都打 `/v1/images/`。**更正（2026-10-02）：
+   這一改在現行站點是 no-op**——兩端點共用同一條 tenant-scoped 查詢、無 kind
+   過濾（見上方根因更正），方向正確但非必要修復；保留是為語義清晰與對舊版站點兼容。
+2. **本輪真正有效的一處**：成功分支事件名改用 `doneEventFor(task.kind)`（影片發
+   `video.done`，圖片維持 `image.done`）；影片帶 `emitData.media_kind = "video"`
+   （圖片不帶）。舊碼對影片也發 `image.done`，會讓 .mp4 被前端塞進 `<img>` 變破圖卡。
 3. refunded 文案：`kind === "video"` 時「這張圖」→「這部影片」。
 4. 逾時文案：同上。
 
@@ -89,8 +108,9 @@ node .dsh-ssh/exec-443.js "sudo journalctl -u agent-poller -n 50 --no-pager"
 ```
 
 **真正的行為驗收**（由 orchestrator 在生產做）：拿一個**既有已成功的影片 job**
-（免費、不重新生成）註冊進 poller，確認 poller 對它不再 404、且會發出
-`video.done`（含 `media_kind:"video"`）而非 `image.done`。
+（免費、不重新生成）註冊進 poller，確認 poller 發出 `video.done`
+（含 `media_kind:"video"`）而非 `image.done`。（更正 2026-10-02：不要以「不再 404」
+為驗收點——對同一把 key，`/v1/images/{影片id}` 與 `/v1/videos/{影片id}` 都會回 200。）
 
 ## 版本控制注意
 

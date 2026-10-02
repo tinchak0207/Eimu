@@ -2,24 +2,203 @@
 # Vercel 端會把被 `/*` 忽略的目錄整棵剪掉、不再下探，寫 `!/src/` 或 `!/src/**` 都救不回來
 #（2026-10-02 實錘：遠端建置的 /vercel/path0 只剩根層檔案，src/、public/、db/、worker/ 全缺，
 #  next.config.mjs 因此找不到 ./src/lib/control-plane-proxy-routes.mjs，前端連 build 都進不去。
-#  同一份清單用 gitignore 語義的 ignore npm 套件判「不忽略」，所以本地驗不出來，只能靠遠端實測守）。
-# 白名單想解的「根層雜物」改用下面這幾條逐類排除；新增根層目錄請順手加一條。
-/eval-*/
+#  同一份清單用 gitignore 語義的 ignore npm 套件判「不忽略」，本地驗不出來，只能靠遠端實測守）。
+# 建議發佈走乾淨 worktree（只有 tracked 檔，天生無雜物）；下面這段是「從主工作區直接發佈」的兜底。
+
+# ── 根層逐項排除（＝白名單的等價表達：除下列清單外，根層其餘項目全部排除）──
+# 新增根層目錄/檔案若「建置或執行期」需要（站點會 process.cwd()+路徑讀它），把對應那行刪掉。
+/.agent-notes/
+/.agent-runs/
+/.agents-fix/
+/.asset-cache/
+/.av-implementation-spec.md
+/.batch-e2e-body.json
+/.batch-too-big.json
+/.blender-work/
+/.build-final-p3.log
+/.build-p2.log
+/.build-phase1.log
+/.build-phase2.log
+/.build.log
+/.card-test.log
+/.demo2.mjs
+/.dockerignore
+/.dsh-adobe-pool/
+/.dsh-mem/
+/.dsh-ssh/
+/.dsh-vision-router/
+/.env.biz-key
+/.env.jev
+/.env.local
+/.env.pulled
+/.env.resend
+/.flowmusic-creds.json
+/.gateway-work/
+/.github/
+/.gitignore
+/.next/
+/.next-start-pricing-3002.err.log
+/.next-start-pricing-3002.log
+/.next-start.log
+/.pixai-refresh/
+/.probe-write-test.txt
+/.test-final-p3.log
+/.test-full-p2.log
+/.test-full-p3.log
+/.test-full.log
+/.test-phase1.log
+/.test-phase2.log
+/.tmp-ad.dec
+/.tmp-gateway/
+/.tmp-gw.txt
+/.tmp-home/
+/.tmp-home.html
+/.tmp-nginx-default.conf
+/.tmp-sp.err
+/.tmp-sx.py
+/.tmp-vercel-cache/
+/.tmp-vercel-cache.bak-0914/
+/.tmp-vercel-config/
+/.tmp-vercel-data/
+/.tmp-vps-src/
 /.tools/
-/plugins/
-/.credentials*
-/*.mp4
-/*.bak
+/.tsdeps/
+/.vercel/
+/.vercel-cli-cache/
+/.vercel-cli-cache.bak-0914/
+/.vercel-cli-data/
+/.vercel-deploy.log
+/.vercel-home/
+/.vercel.bak-link/
+/.vercel.bak-owner/
+/.xdg-cache/
+/.zcode/
+/.zcodeignore
+/AGENTS.md
+/CLAUDE.md
+/Cap 2026-09-24 at 23.26.49.mp4
+/DEPLOYMENT.md
+/DESIGN.md
+/PRODUCT.md
+/README.md
+/THIRD-PARTY-NOTICES.md
+/artifacts/
+/audit-tpl.mjs
+/batch-poll.json
+/batch-too-big-body.json
+/bridge/
+/browser-probe/
+/browser-screenshots/
+/chapters.tsv
+/chat-history-export-v2.zip
+/deploy/
+/deploy-staging/
+/design-system/
+/desktop/
+/diag-desktop-height.mjs
+/diag-desktop-height2.mjs
+/diag-desktop-height3.mjs
+/diag-desktop-height4.mjs
+/diag-desktop-height5.mjs
+/diag-desktop-height6.mjs
+/diag-desktop-height7.mjs
+/diag-desktop-height8.mjs
+/diag-desktop-height9.mjs
+/diag-mobile-scroll.mjs
+/diag.mjs
+/docs/
+/dreamina_output.webp
+/eval-2026-op-theme/
+/eval-anime-mv-0911/
+/eval-asset-packs/
+/eval-blender-director/
+/eval-breakpoint-film/
+/eval-daming-film/
+/eval-director-extreme/
+/eval-e2e-final-cut-1002/
+/eval-moe-beast/
+/eval-op-mv/
+/eval-qinshihuang-polarbear/
+/eval-studio-minute-0928/
+/eval-template-art-curation/
+/eval-video-incident-0830/
+/eval-visual-replay/
+/eval-yuri-op-mv-0930/
+/fix-system.sh
+/gh_repo.json
+/interact-test.mjs
+/light-shot.mjs
+/marketing-battle-pack/
+/mcp-server/
+/mob-deeplink.mjs
+/mob-deeplink2.mjs
+/mob-hydration.mjs
+/mob-probe.mjs
+/mob-probe2.mjs
+/mob-probe3.mjs
+/mob-slab-diag.mjs
+/mobile-diag.mjs
+/mobile.mjs
 /node_modules/
+/pelican.svg
+/pixai-pool/
+/pixai-pool-new.json
+/plugins/
+/probe.mjs
+/prod-mobile.mjs
+/prod-mobile2.mjs
+/prod-verify.mjs
+/promo-video/
+/reddit-miner-output.md
+/redteam-gen-payload.mjs
+/redteam-jitter-burst.mjs
+/redteam-smoke.mjs
+/redteam-t1-events.json
+/redteam-t2-events.json
+/redteam-t4-events.json
+/redteam-test1.mjs
+/redteam-test2.mjs
+/redteam-test3.mjs
+/redteam-test4.mjs
+/render.yaml
+/rt4b-log.md
+/server-a.log
+/server.out.log
+/shot-canvas.mjs
+/shot.mjs
+/shot2.mjs
+/shot3.mjs
+/single-shot.mjs
+/skills/
+/slab-rects.mjs
+/staging/
+/sudo.conf.backup
+/surgery/
+/tmp/
+/tools/
+/tpl-review.mjs
+/tsconfig.dagcheck.tsbuildinfo
+/tsconfig.tmp-typecheck-tests.tsbuildinfo
+/tsconfig.tsbuildinfo
+/tsconfig.verify-new.tsbuildinfo
+/vendor/
+/verification/
+/verify-bugfixes.mjs
+/vitest.config.mts
+/workbuddy-linux/
+/始皇帝的北境征途.mp4
+
+# ── 路徑樣式排除（與根層無關，原樣保留）──
 # Vercel CLI only falls back to .gitignore when this file does NOT exist.
 # Because this file exists, every exclusion the deployment needs must be listed here.
 # Paths are gitignore syntax: a leading "/" anchors to the repo root.
 # Do NOT drop the leading slash on /docs/ or /output/ — unanchored "docs/" would
 # also match the real Next.js route src/app/docs/.
 
-（歷史：2026-10-01 曾改成 `/*` + `!/dir/` 的根目錄白名單，2026-10-02 因上述 Vercel 剪目錄行為全部回退為黑名單。）
+（歷史：2026-10-01 曾改成 `/*` + `!/dir/` 根目錄白名單；2026-10-02 因 Vercel 剪目錄行為回退為黑名單。）
 
-（node_modules 整棵排除：remote build 會自己 install；本地 prebuilt 走的是另一條路。）
+（node_modules 整棵排除：remote build 自己 install；本地 prebuilt 走另一條路。）
+node_modules/@swc/*
 
 # Prebuilt deployments need the traced .next runtime files referenced by
 # .vercel/output/functions/*/.vc-config.json. Keep only stale snapshots ignored.
