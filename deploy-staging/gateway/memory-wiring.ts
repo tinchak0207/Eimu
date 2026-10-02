@@ -445,7 +445,7 @@ export async function scheduleMemoryRecallPrefetch(state: SessionState): Promise
 // ── 批次接線（契約 §3.5/§8；輪子表 §10）──────────────────────────────────
 
 // PRD §5.2 條件③：知識型（外部信息攝入）工具集，排序加權用。
-export const KNOWLEDGE_TOOL_NAMES = new Set(["search_web", "vision_analyze", "asset_search", "image_get_result"])
+export const KNOWLEDGE_TOOL_NAMES = new Set(["search_web", "search_aggregate", "vision_analyze", "asset_search", "image_get_result"])
 
 /** transcriptOf：複用 handleTranscript 的 fetch 形狀（opencode GET /session/:id/message），渲染成純文本。 */
 export async function memoryTranscriptOf(opencodeSessionId: string): Promise<string> {
