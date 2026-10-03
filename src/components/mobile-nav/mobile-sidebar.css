@@ -1,7 +1,9 @@
 /* 手機端左側整屏側欄（MobileSidebar）。只在 <sm 掛載，桌面不受影響。
-   材質配方沿用本專案已定案的彈層底 `.agent-pop`（0.96 白＋blur(40)：
-   彈層要讀字，不用半透 lg-sheet，否則底下頁面的字會透上來疊字）
-   ——刻意不 import agent-chat.css，字面配方寫在這裡，避免跨檔耦合。 */
+   底色＝不透明純白（#fff），由內層 .mobile-sidebar-bg 承載；面板本體不掛
+   backdrop-filter——滿屏抽屜下面是 0.28 黑遮罩，半透只會把灰吸上來（實測渲成
+   250,250,250），且底下的字本來就看不見；Safari 對「backdrop-filter＋transform
+   動畫」另有合成怪癖會把位移吞掉。刻意不 import agent-chat.css，字面配方寫在
+   這裡，避免跨檔耦合。 */
 
 .mobile-sidebar-scrim {
   position: fixed;
@@ -12,7 +14,7 @@
   background: rgba(0, 0, 0, 0.28);
   -webkit-backdrop-filter: blur(2px);
   backdrop-filter: blur(2px);
-  animation: mobile-sidebar-scrim-in 0.2s ease-out both;
+  animation: mobile-sidebar-scrim-in 0.24s ease-out both;
 }
 
 .mobile-sidebar-panel {
@@ -22,14 +24,24 @@
   width: 100%;
   height: 100%;
   padding-top: env(safe-area-inset-top, 0px);
-  background: rgba(255, 255, 255, 0.96);
-  -webkit-backdrop-filter: blur(40px) saturate(180%);
-  backdrop-filter: blur(40px) saturate(180%);
+  /* 底色改由內層 .mobile-sidebar-bg 承載；本體只留版面與動畫（見檔首註解）。 */
   border-right: 1px solid rgba(0, 0, 0, 0.06);
   box-shadow: 18px 0 48px rgba(45, 49, 66, 0.16);
   overscroll-behavior: contain;
   touch-action: manipulation;
-  animation: mobile-sidebar-panel-in 0.26s cubic-bezier(0.32, 0.72, 0, 1) both;
+  /* 入場曲線：前段平緩、中段最快、後段收斂。舊值 cubic-bezier(0.32,0.72,0,1)
+     是前重曲線，實測 90ms 就滑完約九成 ⇒ 肉眼＝硬切。 */
+  animation: mobile-sidebar-panel-in 0.34s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+/* 內層材質：絕對定位鋪滿，承載不透明純白底。面板內容（header／捲動區／dock）
+   各自 position:relative＋z-index 疊在它之上，否則 absolute 的它會蓋住內文。 */
+.mobile-sidebar-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: #fff;
+  pointer-events: none;
 }
 
 /* 面板內唯一的捲動容器：導覽＋「对话」清單＋退出/QQ 一起捲（清單不再自開第二條
@@ -67,11 +79,20 @@
   }
 }
 
-/* 位移入場對暈動症不友好：關掉位移與淡入，面板直接到位、遮罩直接顯示。 */
+@keyframes mobile-sidebar-panel-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* 位移入場對暈動症不友好：保留柔和淡入、去掉大位移（不是硬切）。scrim 本來就
+   只淡入、無位移，維持它自己的淡入即可。 */
 @media (prefers-reduced-motion: reduce) {
-  .mobile-sidebar-scrim,
   .mobile-sidebar-panel {
-    animation: none;
+    animation: mobile-sidebar-panel-fade-in 0.18s ease-out both;
   }
 }
 

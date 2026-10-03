@@ -314,8 +314,10 @@ export function Navbar({ className }: NavbarProps) {
               ? "ml-[var(--ws-navbar-inset,calc(var(--ws-panel-w,420px)_+_0.75rem))] w-[calc(100%_-_var(--ws-navbar-inset,calc(var(--ws-panel-w,420px)_+_0.75rem)))]"
               : "ml-0 w-full",
             "max-md:ml-0 max-md:w-full",
-            // 手機 ≤639.98px 平铺：去圆角/浮岛阴影，不透明白底，底部 1px 发丝分隔线。
-            "max-sm:rounded-none max-sm:border-x-0 max-sm:border-t-0 max-sm:border-b-black/[0.08] max-sm:bg-white/95 max-sm:shadow-none max-sm:px-3",
+            // 手機 ≤639.98px 平铺：去圆角/浮岛阴影、底部 1px 发丝分隔线。底色用不透明
+            // 純白並關掉 backdrop-filter——半透＋模糊會從底下捲過的內容吸色（實機上渲成
+            // 中性灰），不透明純白則恆為白。
+            "max-sm:rounded-none max-sm:border-x-0 max-sm:border-t-0 max-sm:border-b-black/[0.08] max-sm:bg-white max-sm:[backdrop-filter:none] max-sm:[-webkit-backdrop-filter:none] max-sm:shadow-none max-sm:px-3",
           )}
           aria-label="主导航"
         >
@@ -408,7 +410,7 @@ export function Navbar({ className }: NavbarProps) {
                       type="button"
                       aria-label="API 密钥"
                       title="API 密钥"
-                      className="lg-float hidden h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[#007AFF] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:flex sm:h-9 sm:w-9"
+                      className="lg-float flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[#007AFF] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:flex sm:h-9 sm:w-9"
                     >
                       <KeyRound className="h-3.5 w-3.5" aria-hidden="true" />
                     </button>
@@ -441,9 +443,9 @@ export function Navbar({ className }: NavbarProps) {
 
                 {/* 用户名 + 退出（2026-08-27 暴君裁定：右侧按钮只承担退出）。
                     桌面端（≥sm）照旧：用户名文字在 ≥lg 显示、退出图标常驻。
-                    手机端（<sm）整颗胶囊移进左側側欄（MobileSidebar 底部「退出登录」）
-                    ——帳戶出口不消失，只是換位置。 */}
-                <div className="lg-float hidden shrink-0 items-center gap-1 rounded-full py-1 pl-2.5 pr-1 lg:pl-3 sm:flex">
+                    手机端（<sm）只出退出图标：帳戶出口留在 top bar，用户名文字仍
+                    鎖在 lg:inline 不出現。 */}
+                <div className="lg-float flex shrink-0 items-center gap-1 rounded-full py-1 pl-2.5 pr-1 lg:pl-3 sm:flex">
                   <span className="hidden max-w-[4.5rem] truncate text-ios-footnote font-medium text-[rgba(0,0,0,0.56)] lg:inline xl:max-w-[5.5rem]">
                     {user.display_name || user.username}
                   </span>
@@ -452,7 +454,7 @@ export function Navbar({ className }: NavbarProps) {
                     onClick={() => logout()}
                     aria-label="退出登录"
                     title="退出登录"
-                    className="flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-full text-[rgba(0,0,0,0.44)] transition-colors duration-200 hover:bg-[rgba(255,59,48,0.10)] hover:text-[#D92E2E] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(255,59,48,0.30)]"
+                    className="flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-full text-[rgba(0,0,0,0.44)] transition-colors duration-200 hover:bg-[rgba(255,59,48,0.10)] hover:text-[#D92E2E] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(255,59,48,0.30)] max-sm:h-11 max-sm:w-11"
                   >
                     <LogOut className="h-3.5 w-3.5" aria-hidden="true" />
                   </button>

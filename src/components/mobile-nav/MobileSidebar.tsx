@@ -22,9 +22,9 @@
 // containing block），留在 Navbar 子樹裡的 `position: fixed; inset: 0` 只會覆蓋
 // 那顆膠囊。所以側欄一律 createPortal 到 document.body。
 //
-// 材質沿用本專案已定案的彈層底 `.agent-pop`（0.96 白＋blur，彈層要讀字）；
-// 這裡不 import agent-chat.css（那支會被另一路 agent 改），字面配方寫進
-// mobile-sidebar.css 的 .mobile-sidebar-panel。
+// 材質：底色為不透明純白（#fff），由面板內層 .mobile-sidebar-bg 承載，面板本體
+// 不掛 backdrop-filter；這裡不 import agent-chat.css（那支會被另一路 agent 改），
+// 字面配方寫進 mobile-sidebar.css。
 
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
@@ -34,8 +34,6 @@ import {
   BadgeDollarSign,
   History,
   Images,
-  KeyRound,
-  LogOut,
   Menu,
   Search,
   Settings,
@@ -175,8 +173,6 @@ export interface MobileSidebarPanelProps {
   userName: string;
   /** 身份副標（Grok 的 Premium 位置）：已登入顯示 email／「已登录」，否則「未登录」。 */
   userSubtitle: string;
-  isLoggedIn: boolean;
-  onLogout: () => void;
   /** 會話目錄：null＝載入中，[]＝已載入但為空。 */
   sessions: AgentSessionSummary[] | null;
   /** 當前會話（＝活躍會話的唯讀鏡像，見 @/lib/agent-current-session；agent 面未掛載
@@ -211,8 +207,6 @@ export function MobileSidebarPanel({
   pathname,
   userName,
   userSubtitle,
-  isLoggedIn,
-  onLogout,
   sessions,
   currentSessionId,
   formatLabel,
@@ -232,8 +226,12 @@ export function MobileSidebarPanel({
       aria-label="主导航"
       className="mobile-sidebar-panel"
     >
+      {/* 內層材質：絕對定位鋪滿，承載不透明純白底；面板本體不掛 backdrop-filter
+          （Safari 對 backdrop-filter＋transform 動畫有合成怪癖會吞掉位移）。
+          內容（header／捲動區／dock）各以 z-index 疊在它之上。 */}
+      <div className="mobile-sidebar-bg" aria-hidden="true" />
       {/* 頂部身份：頭像＋名稱＋副標（Grok 的 avatar + handle + Premium）。 */}
-      <header className="flex shrink-0 items-center gap-3 px-4 pb-1">
+      <header className="relative z-[1] flex shrink-0 items-center gap-3 px-4 pb-1">
         <div className="lg-float flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/icon.png" alt="" width={44} height={44} className="h-full w-full object-cover" />
@@ -258,7 +256,7 @@ export function MobileSidebarPanel({
       {/* 單一捲動容器：導覽＋「对话」清單＋退出/QQ 一起捲（清單不再自開第二條捲軸，
           避免巢狀捲動）。底部浮動玻璃條改絕對定位浮在最下（.mobile-sidebar-dock），
           這裡留出等高 padding-bottom，最後一列不會被蓋住。 */}
-      <div className="mobile-sidebar-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain px-2">
+      <div className="mobile-sidebar-scroll relative z-[1] min-h-0 flex-1 overflow-y-auto overscroll-contain px-2">
         {/* 導覽列（第三輪瘦身 4 列）：有動作橋的列渲染成 button（把動作交給助理面，
             沒宿主才退回 href），純連結列維持 Link。標籤字級（text-ios-body＝17px）
             掛在內層 span 的**純字串 className** 上，不進 cn()：cn＝twMerge(clsx(...))，
@@ -341,32 +339,10 @@ export function MobileSidebarPanel({
           </div>
         </div>
 
-        {/* 底部帳號動作：隨內容一起捲（浮動玻璃條另為絕對定位的 .mobile-sidebar-dock）。 */}
+        {/* 底部帳號動作：隨內容一起捲（浮動玻璃條另為絕對定位的 .mobile-sidebar-dock）。
+            「账号设置」「退出登录」已移除（2026-10-03 暴君裁定回歸 header，另一路在
+            手機端 header 顯出那兩顆）；帳號設置仍可經 dock 齒輪的 fallback 到達。 */}
         <div className="pt-1">
-          {/* 账号设置（第三輪補）：連既有 /settings/api-keys；圖示用 KeyRound，
-              與底部 dock 齒輪（Settings／助理设定動作橋）不撞同一視覺語意。 */}
-          <div className="flex flex-col">
-            <Link
-              href="/settings/api-keys"
-              onClick={onClose}
-              className="flex min-h-[52px] touch-manipulation items-center gap-3.5 rounded-[14px] px-3 text-ios-body font-medium text-[rgba(0,0,0,0.72)] transition-colors hover:bg-black/[0.04] hover:text-[rgba(0,0,0,0.88)] active:bg-black/[0.07] motion-reduce:transition-none [-webkit-tap-highlight-color:transparent]"
-            >
-              <KeyRound className="h-5 w-5 shrink-0" aria-hidden="true" />
-              <span className="truncate">账号设置</span>
-            </Link>
-          </div>
-          {isLoggedIn && (
-            <div className="flex flex-col">
-              <button
-                type="button"
-                onClick={onLogout}
-                className="flex min-h-[52px] cursor-pointer touch-manipulation items-center gap-3.5 rounded-[14px] px-3 text-ios-body font-medium text-[rgba(0,0,0,0.72)] transition-colors hover:bg-black/[0.04] hover:text-[#D92E2E] active:bg-black/[0.07] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(255,59,48,0.30)] motion-reduce:transition-none [-webkit-tap-highlight-color:transparent]"
-              >
-                <LogOut className="h-5 w-5 shrink-0" aria-hidden="true" />
-                <span className="truncate">退出登录</span>
-              </button>
-            </div>
-          )}
           <div className="flex flex-col">
             <a
               href={QQ_GROUP_SHARE_URL}
@@ -399,12 +375,13 @@ export function MobileSidebarPanel({
         </div>
       </div>
 
-      {/* 底部浮動玻璃條（齒輪／搜尋／黑色新對話 FAB）：絕對定位浮在最下，不參與捲動。 */}
+      {/* 底部浮動玻璃條（齒輪／黑色新對話 FAB）：絕對定位浮在最下，不參與捲動。
+          「搜索」鈕已移除（2026-10-03）：與「对话」分節的搜尋框重複，該框是唯一入口。 */}
       <div className="mobile-sidebar-dock">
-        <div className="lg-bar flex items-center gap-2 rounded-full p-2">
+        <div className="lg-bar flex items-center justify-between gap-2 rounded-full p-2">
           {/* 齒輪＝情境感知（第三輪）：助理面在時叫動它的「助理设定」（我的技能＋
-              互動模式）；助理面沒掛載（回 false）才退回帳號設置 /settings/api-keys
-              （帳號設置另有帳號區那一列，不會遺失）。aria-label 契約維持「设置」。 */}
+              互動模式）；助理面沒掛載（回 false）才退回帳號設置 /settings/api-keys。
+              aria-label 契約維持「设置」。 */}
           <button
             type="button"
             onClick={() => onSurfaceAction("settings", "/settings/api-keys")}
@@ -414,14 +391,6 @@ export function MobileSidebarPanel({
             className="flex h-11 w-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full bg-black/[0.05] text-[rgba(0,0,0,0.62)] transition-colors hover:bg-black/[0.09] hover:text-[rgba(0,0,0,0.88)] active:bg-black/[0.13] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] [-webkit-tap-highlight-color:transparent]"
           >
             <Settings className="h-5 w-5" aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            onClick={() => searchInputRef?.current?.focus()}
-            className="flex h-11 min-w-0 flex-1 cursor-pointer touch-manipulation items-center gap-2 rounded-full bg-black/[0.05] px-4 text-left text-ios-body text-[rgba(0,0,0,0.45)] transition-colors hover:bg-black/[0.08] active:bg-black/[0.11] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] motion-reduce:transition-none [-webkit-tap-highlight-color:transparent]"
-          >
-            <Search className="h-4 w-4 shrink-0" aria-hidden="true" />
-            <span className="truncate">搜索</span>
           </button>
           <button
             type="button"
@@ -453,7 +422,7 @@ export function MobileSidebar({ open, onClose, triggerRef }: MobileSidebarProps)
   const router = useRouter();
   const pathname = usePathname();
   const narrow = useIsNarrow();
-  const { user, isLoggedIn, logout } = useAuth();
+  const { user } = useAuth();
   const [sessions, setSessions] = useState<AgentSessionSummary[] | null>(null);
   // 當前會話（當前高亮用）：開側欄時讀既有 localStorage 存檔，不用第三套狀態。
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
@@ -546,11 +515,6 @@ export function MobileSidebar({ open, onClose, triggerRef }: MobileSidebarProps)
     if (!active) setQuery("");
   }, [active]);
 
-  const handleLogout = (): void => {
-    onClose();
-    logout();
-  };
-
   const handleStartNew = (): void => {
     onClose();
     router.push("/?agent=1");
@@ -587,8 +551,6 @@ export function MobileSidebar({ open, onClose, triggerRef }: MobileSidebarProps)
         pathname={pathname}
         userName={displayName}
         userSubtitle={subtitle}
-        isLoggedIn={Boolean(isLoggedIn && user)}
-        onLogout={handleLogout}
         sessions={sessions}
         currentSessionId={currentSessionId}
         formatLabel={formatLabel ?? fallbackSessionLabel}

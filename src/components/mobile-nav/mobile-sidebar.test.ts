@@ -25,6 +25,7 @@ const {
   MOBILE_SIDEBAR_FOOTER_LINKS,
   isSidebarNavActive,
   readPersistedSessionId,
+  QQ_GROUP_SHARE_URL,
 } = requireHere("./MobileSidebar.tsx") as {
   MobileSidebarPanel: (props: Record<string, unknown>) => React.ReactElement;
   MobileNavHamburger: (props: { onClick: () => void; expanded: boolean }) => React.ReactElement;
@@ -37,6 +38,7 @@ const {
   MOBILE_SIDEBAR_FOOTER_LINKS: ReadonlyArray<{ href: string; label: string }>;
   isSidebarNavActive: (pathname: string, href: string) => boolean;
   readPersistedSessionId: () => string | null;
+  QQ_GROUP_SHARE_URL: string;
 };
 
 const root = process.cwd();
@@ -95,8 +97,6 @@ function renderPanel(overrides: Record<string, unknown> = {}): El[] {
     pathname: "/",
     userName: "阿甲",
     userSubtitle: "a@b.com",
-    isLoggedIn: true,
-    onLogout: noop,
     sessions: [],
     currentSessionId: null,
     formatLabel: (it: { title?: string | null }) => it.title ?? "",
@@ -111,6 +111,36 @@ function renderPanel(overrides: Record<string, unknown> = {}): El[] {
     ...overrides,
   });
   return collect(tree);
+}
+
+/** 取某個元素的子孫元素（用於把 dock 內的按鈕隔離出來）。 */
+function descendants(el: El): El[] {
+  return collect(el.props.children);
+}
+
+/** 取一個元素下所有可按子孫（button／帶 href 的連結）。 */
+function clickables(el: El): El[] {
+  return descendants(el).filter(
+    (n) => n.type === "button" || typeof n.props.href === "string",
+  );
+}
+
+/** 元素內所有可見文字（遞迴 span／純字串）。 */
+function textOf(el: El): string {
+  let out = "";
+  const walk = (node: unknown): void => {
+    if (typeof node === "string" || typeof node === "number") {
+      out += String(node);
+      return;
+    }
+    if (Array.isArray(node)) {
+      for (const c of node) walk(c);
+      return;
+    }
+    if (node && typeof node === "object" && (node as El).props) walk((node as El).props.children);
+  };
+  walk(el.props.children);
+  return out;
 }
 
 /** 取某一列（Link／button）內層標籤 span 的文字。 */
@@ -208,14 +238,20 @@ test("導覽逐列：有動作橋＝button（帶動作字串＋fallback href）�
   }
 });
 
-test("側欄元素樹含剩餘純連結路由與設定路由，且無發明路由", () => {
+test("側欄元素樹含剩餘純連結路由，且無發明路由", () => {
   const els = renderPanel();
   const hrefs = new Set(
     els.map((el) => el.props.href).filter((h): h is string => typeof h === "string"),
   );
   assert.ok(hrefs.has("/history"));
   assert.ok(hrefs.has("/pricing"));
-  assert.ok(hrefs.has("/settings/api-keys"), "帳號區「账号设置」必須接既有設定路由");
+  // 「账号设置」列已移除（回歸 header）；帳號設置仍可經 dock 齒輪 fallback 到達。
+  assert.ok(
+    els.some(
+      (el) => el.props["aria-label"] === "设置" && el.props["data-fallback-href"] === "/settings/api-keys",
+    ),
+    "dock 齒輪 fallback 必須仍接 /settings/api-keys",
+  );
   // 動作橋列的 href 落在 data-fallback-href 上（不是 Link），逐條對得上是真路由。
   for (const el of els) {
     const fb = el.props["data-fallback-href"];
@@ -252,12 +288,77 @@ test("頁尾連結帶含技能/工作流/状态/帮助 4 條真路由連結", ()
 
 // ── ③c 帳號區補「账号设置」＋底部齒輪情境感知 ──────────────────────────────
 
-test("帳號區含『账号设置』連 /settings/api-keys，圖示用 KeyRound（不撞 dock 齒輪）", () => {
-  const link = renderPanel().find(
-    (el) => el.props.href === "/settings/api-keys" && rowLabel(el) === "账号设置",
+test("④ 捲動區已無『账号设置』『退出登录』列，『加入 QQ 群』保留", () => {
+  const els = renderPanel();
+  assert.equal(
+    els.find((el) => rowLabel(el) === "账号设置"),
+    undefined,
+    "『账号设置』列應已移除（回歸 header）",
   );
-  assert.ok(link, "帳號區缺「账号设置」列");
-  assert.match(sidebarCode, /<KeyRound\b/, "账号设置 應使用 KeyRound");
+  assert.equal(
+    els.find((el) => rowLabel(el) === "退出登录"),
+    undefined,
+    "『退出登录』列應已移除（回歸 header）",
+  );
+  // 兩個圖示 import 若不再使用就會是死碼：KeyRound／LogOut 不應再出現在元件源碼。
+  assert.doesNotMatch(sidebarCode, /\bKeyRound\b/, "KeyRound 已無使用者，import 應移除");
+  assert.doesNotMatch(sidebarCode, /\bLogOut\b/, "LogOut 已無使用者，import 應移除");
+  // 死 prop：onLogout / isLoggedIn 不再出現在元件源碼（已從 props 與容器移除）。
+  assert.doesNotMatch(sidebarCode, /\bonLogout\b/, "onLogout 已是死 prop，應移除");
+  assert.doesNotMatch(sidebarCode, /\bisLoggedIn\b/, "isLoggedIn 已是死 prop，應移除");
+  // 「加入 QQ 群」保留（外部連結）。
+  const qq = els.find((el) => el.props.href === QQ_GROUP_SHARE_URL);
+  assert.ok(qq, "『加入 QQ 群』列必須保留");
+  assert.equal(rowLabel(qq), "加入 QQ 群");
+});
+
+test("① dock 已無『搜索』鈕，只剩齒輪＋黑色新對話 FAB（justify-between）", () => {
+  const dock = renderPanel().find((el) => String(el.props.className ?? "").includes("mobile-sidebar-dock"));
+  assert.ok(dock, "缺 .mobile-sidebar-dock");
+  const bar = descendants(dock).find((el) => String(el.props.className ?? "").includes("lg-bar"));
+  assert.ok(bar, "dock 缺 lg-bar 內層");
+  assert.match(String(bar.props.className), /justify-between/, "dock 兩端對齊（justify-between）");
+  const buttons = descendants(dock).filter((el) => el.type === "button");
+  assert.equal(buttons.length, 2, `dock 應只剩 2 顆按鈕（齒輪＋FAB），實得 ${buttons.length}`);
+  const labels = buttons.map((b) => b.props["aria-label"]);
+  assert.ok(labels.includes("设置"), "dock 缺齒輪");
+  assert.ok(labels.includes("新对话"), "dock 缺黑色 FAB");
+  assert.ok(
+    !buttons.some((b) => textOf(b).includes("搜索")),
+    "dock 不應再有『搜索』字樣的按鈕",
+  );
+  // 不再有任何地方呼叫 searchInputRef.focus()（那是被刪的搜索鈕唯一作用）。
+  assert.doesNotMatch(sidebarCode, /searchInputRef\?\.current\?\.focus\(\)/, "dock 搜索鈕的 focus 呼叫應已移除");
+});
+
+test("③「对话」分節的搜尋框（唯一入口）仍在，且 searchInputRef 仍掛在它上", () => {
+  const els = renderPanel();
+  const input = els.find((el) => el.type === "input" && el.props["aria-label"] === "搜索对话");
+  assert.ok(input, "『对话』分節的搜索框（唯一入口）不得移除");
+  assert.equal(input.props.placeholder, "搜索对话");
+  // searchInputRef 仍掛在對話搜尋框上（ref 不落在 element.props，用源碼確認）。
+  assert.match(sidebarCode, /ref=\{searchInputRef\}/, "searchInputRef 必須仍接在對話搜尋框上");
+});
+
+test("④ 面板內有承載底色的內層（.mobile-sidebar-bg），面板本體不含 backdrop-filter", () => {
+  // 元素樹：面板內真的渲染出承載底色的內層。
+  const bg = renderPanel().find(
+    (el) => String(el.props.className ?? "") === "mobile-sidebar-bg",
+  );
+  assert.ok(bg, "面板內缺承載底色的 .mobile-sidebar-bg 內層");
+  // 面板本體規則：不得再有 backdrop-filter（材質已移到內層）。
+  const panelBlock = /\.mobile-sidebar-panel\s*\{([^}]*)\}/.exec(sidebarCss)?.[1] ?? "";
+  assert.ok(panelBlock, "找不到 .mobile-sidebar-panel 規則");
+  assert.doesNotMatch(panelBlock, /backdrop-filter/, "面板本體不得再掛 backdrop-filter");
+  // 內層＝不透明純白（不是半透 0.96）。
+  const bgBlock = /\.mobile-sidebar-bg\s*\{([^}]*)\}/.exec(sidebarCss)?.[1] ?? "";
+  assert.ok(bgBlock, "找不到 .mobile-sidebar-bg 規則");
+  assert.match(bgBlock, /position:\s*absolute/);
+  assert.match(bgBlock, /inset:\s*0/);
+  assert.match(bgBlock, /background:\s*(#fff|rgb\(255,\s*255,\s*255\))/, "內層底色＝不透明純白");
+  // scrim 的 blur(2px) 保留。
+  const scrimBlock = /\.mobile-sidebar-scrim\s*\{([^}]*)\}/.exec(sidebarCss)?.[1] ?? "";
+  assert.match(scrimBlock, /backdrop-filter:\s*blur\(2px\)/, "scrim 的 blur 保留");
 });
 
 test("底部 dock 齒輪＝button（情境感知動作橋），aria-label 仍是『设置』", () => {
@@ -396,7 +497,8 @@ test("側欄內每個可按元素觸控目標 ≥44px（頁尾細字連結帶為
     const isLink = typeof el.props.href === "string";
     return isButton || isLink;
   });
-  assert.ok(interactive.length >= 10, `可按元素太少（${interactive.length}），側欄沒接上`);
+  // 第四輪刪掉「账号设置／退出登录／dock 搜索」三顆 ⇒ 常駐可按元素由 11 降為 8。
+  assert.ok(interactive.length >= 8, `可按元素太少（${interactive.length}），側欄沒接上`);
   for (const el of interactive) {
     const cls = String(el.props.className ?? "");
     assert.match(
