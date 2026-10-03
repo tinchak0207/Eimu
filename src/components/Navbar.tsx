@@ -22,30 +22,14 @@ import { PwaHandoffPanel } from "@/components/PwaHandoffPanel";
 import { QqGroupDialog } from "@/components/QqGroupDialog";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
 import { AnnouncementSurfaces } from "@/components/notifications/AnnouncementSurfaces";
+import {
+  MobileNavHamburger,
+  MobileSidebar,
+  QqLogo,
+} from "@/components/mobile-nav/MobileSidebar";
 
 interface NavbarProps {
   className?: string;
-}
-
-/** QQ 官方加群分享页（手机端点击直达 QQ 加入群聊）。 */
-const QQ_GROUP_SHARE_URL =
-  "https://qun.qq.com/universal-share/share?ac=1&authKey=9xurH8dNqoFL3AWNrbML8MG1zuxUY%2Blh2FnXaFJfMefKeuWvLYDkPmxvM%2BF%2FxMn8&busi_data=eyJncm91cENvZGUiOiI5ODAxMjIxNzUiLCJ0b2tlbiI6IldYSHVmYXZzU0NmK05IMFVnNXM5cDE2amM0YzBjUGxhUHhvTUx5VDAwcmpXQUtKMWtNSk9HMnA1QmFXVTVHdlMiLCJ1aW4iOiIxNDY1Njg3MDc5In0%3D&data=NUunOBhKAsWIJULcoBA6QFyTGfPWRPd0kWwWxRnxURNQs18QrZFUb2LLJOLhQlOdOveuWXfmT64NqyzIiFtqLA&svctype=4&tempid=h5_group_info";
-
-/** QQ 企鹅徽标：官方 Simple Icons 剪影（品牌蓝 #12B7F5），内嵌无外部依赖。 */
-function QqLogo({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      xmlns="http://www.w3.org/2000/svg"
-      aria-hidden="true"
-    >
-      <path
-        fill="#12B7F5"
-        d="M21.395 15.035a40 40 0 0 0-.803-2.264l-1.079-2.695c.001-.032.014-.562.014-.836C19.526 4.632 17.351 0 12 0S4.474 4.632 4.474 9.241c0 .274.013.804.014.836l-1.08 2.695a39 39 0 0 0-.802 2.264c-1.021 3.283-.69 4.643-.438 4.673.54.065 2.103-2.472 2.103-2.472 0 1.469.756 3.387 2.394 4.771-.612.188-1.363.479-1.845.835-.434.32-.379.646-.301.778.343.578 5.883.369 7.482.189 1.6.18 7.14.389 7.483-.189.078-.132.132-.458-.301-.778-.483-.356-1.233-.646-1.846-.836 1.637-1.384 2.393-3.302 2.393-4.771 0 0 1.563 2.537 2.103 2.472.251-.03.581-1.39-.438-4.673"
-      />
-    </svg>
-  );
 }
 
 /** auth_error 代碼 → 人話（callback 失敗原因碼見 /api/auth/github|google/callback）。 */
@@ -76,8 +60,11 @@ export function Navbar({ className }: NavbarProps) {
   const [copyingKey, setCopyingKey] = useState(false);
   const [pwaHandoffUrl, setPwaHandoffUrl] = useState<string | null>(null);
   const [qqOpen, setQqOpen] = useState(false);
+  // 手機端（<sm）左側漢堡 → 整屏側欄（歷史／帳號動作在手機上的唯一入口）。
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const popupRef = useRef<Window | null>(null);
   const headerRef = useRef<HTMLElement | null>(null);
+  const mobileHamburgerRef = useRef<HTMLButtonElement | null>(null);
 
   useLayoutEffect(() => {
     const el = headerRef.current;
@@ -329,9 +316,16 @@ export function Navbar({ className }: NavbarProps) {
           )}
           aria-label="主导航"
         >
-          {/* 左组：Eimu Logo + QQ 群入口。justify-between 下子元素多于两个会把
-              中间的孩子顶到正中——Logo 与 QQ 钮必须包进同一个左组容器。 */}
+          {/* 左组：漢堡（僅 <sm）＋ Eimu Logo ＋ QQ 群入口。justify-between 下子元素
+              多于两个会把中间的孩子顶到正中——Logo 与 QQ 钮必须包进同一个左组容器。 */}
           <div className="flex min-w-0 shrink-0 items-center gap-2 sm:gap-2.5">
+            {/* 漢堡鈕：手機端最左邊的側欄入口（歷史／退出／QQ 群都在側欄裡）。
+              桌面 ≥sm 由元件自身的 sm:hidden 隱藏，右側桌面按鈕一個 pixel 不動。 */}
+            <MobileNavHamburger
+              onClick={() => setMobileNavOpen(true)}
+              expanded={mobileNavOpen}
+              buttonRef={mobileHamburgerRef}
+            />
             <Link
               href="/"
               className="flex min-w-0 shrink items-center gap-2 rounded-full lg-transition hover:opacity-70 focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:gap-2.5"
@@ -348,15 +342,9 @@ export function Navbar({ className }: NavbarProps) {
             </Link>
 
             {/* QQ 群入口（2026-09-21 暴君特许，紧贴 Logo）：
-                手机端（<sm）直达 QQ 加群分享页；桌面端（≥sm）像余额胶囊一样
-                带文字「售后/交流群组」，点击弹出群二维码扫码入群。 */}
-            <a
-              href={QQ_GROUP_SHARE_URL}
-              aria-label="售后/交流群组"
-              className="lg-float flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[rgba(0,0,0,0.78)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:hidden"
-            >
-              <QqLogo className="h-4 w-4" />
-            </a>
+                桌面端（≥sm）像余额胶囊一样带文字「售后/交流群组」，点击弹出群二维码
+                扫码入群。手机端（<sm）原本是直跳 QQ 加群页的图标——已移进左側側欄
+                （MobileSidebar 底部），手機 top bar 收乾淨。 */}
             <button
               type="button"
               onClick={() => setQqOpen(true)}
@@ -392,7 +380,7 @@ export function Navbar({ className }: NavbarProps) {
                     「文档」只在 ≥sm 显示：手机端导航留给核心动作。 */}
                 <Link
                   href="/history"
-                  className="lg-float flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[rgba(0,0,0,0.78)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:h-9 sm:w-9"
+                  className="lg-float hidden h-11 w-11 shrink-0 items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[rgba(0,0,0,0.78)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:flex sm:h-9 sm:w-9"
                   aria-label="历史"
                 >
                   <History className="h-3.5 w-3.5" aria-hidden="true" />
@@ -449,9 +437,10 @@ export function Navbar({ className }: NavbarProps) {
                 </DropdownMenu>
 
                 {/* 用户名 + 退出（2026-08-27 暴君裁定：右侧按钮只承担退出）。
-                    手机端（<sm）也必须显示：用户名文字隐藏、退出图标保留——
-                    账户出口在手机上消失 = 用户无法登出。 */}
-                <div className="lg-float flex shrink-0 items-center gap-1 rounded-full py-1 pl-2.5 pr-1 lg:pl-3">
+                    桌面端（≥sm）照旧：用户名文字在 ≥lg 显示、退出图标常驻。
+                    手机端（<sm）整颗胶囊移进左側側欄（MobileSidebar 底部「退出登录」）
+                    ——帳戶出口不消失，只是換位置。 */}
+                <div className="lg-float hidden shrink-0 items-center gap-1 rounded-full py-1 pl-2.5 pr-1 lg:pl-3 sm:flex">
                   <span className="hidden max-w-[4.5rem] truncate text-ios-footnote font-medium text-[rgba(0,0,0,0.56)] lg:inline xl:max-w-[5.5rem]">
                     {user.display_name || user.username}
                   </span>
@@ -480,6 +469,13 @@ export function Navbar({ className }: NavbarProps) {
 
       {/* QQ 群二维码弹窗（仅桌面端入口会打开；手机端走直跳链接）。 */}
       <QqGroupDialog open={qqOpen} onClose={() => setQqOpen(false)} />
+
+      {/* 手機端整屏側欄（portal 到 body；桌面 <sm 不掛載）。 */}
+      <MobileSidebar
+        open={mobileNavOpen}
+        onClose={() => setMobileNavOpen(false)}
+        triggerRef={mobileHamburgerRef}
+      />
     </>
   );
 }

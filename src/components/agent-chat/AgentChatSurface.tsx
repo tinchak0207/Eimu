@@ -35,6 +35,7 @@ import {
 import { cn } from "@/lib/utils";
 import { listAgentSessions, type AgentSessionSummary } from "@/lib/agent-chat-client";
 import { useAgentChat } from "@/hooks/use-agent-chat";
+import { setCurrentAgentSession } from "@/lib/agent-current-session";
 import {
   buildAnchorMessage,
   buildReanchorMessage,
@@ -293,6 +294,12 @@ export function AgentChatSurface({
     ensureSession,
     dispatchNotice,
   } = chat;
+  // 活躍會話唯讀鏡像（src/lib/agent-current-session.ts）：真源是本 hook 的 sessionId，
+  // 這裡只把它同步給另一棵元件樹（MobileSidebar 的當前高亮）讀取；不碰既有
+  // localStorage 存檔（存檔會被還原／開新路徑 consume 掉，見 use-agent-chat）。
+  useEffect(() => {
+    setCurrentAgentSession(sessionId ?? null);
+  }, [sessionId]);
   // D-26：已经问过锚定的那张图。问过就不再问——同一张图反复弹卡是骚扰。
   const [anchorAskedFor, setAnchorAskedFor] = useState<string | null>(null);
   const [anchorBusy, setAnchorBusy] = useState(false);
@@ -912,7 +919,12 @@ export function AgentChatSurface({
 
   return (
     <div
-      className={isInline ? cn("flex min-h-0 flex-1 flex-col overflow-hidden pb-1") : "page-shell flex flex-col pb-4 pt-3"}
+      className={cn(
+        // agent-chat-surface：手机端字级阶梯（agent-chat.css 的 ≤639.98px 块）的
+        // 唯一锚点，桌面 ≥640px 无任何规则挂它，pixel-identical 不破。
+        "agent-chat-surface",
+        isInline ? "flex min-h-0 flex-1 flex-col overflow-hidden pb-1" : "page-shell flex flex-col pb-4 pt-3",
+      )}
       style={isInline ? undefined : { minHeight: "calc(100dvh - 5rem)", height: "calc(100dvh - 5rem)" }}
     >
       {/*

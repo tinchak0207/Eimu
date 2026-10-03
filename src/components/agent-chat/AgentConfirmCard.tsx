@@ -98,7 +98,7 @@ function AgentConfirmCardComponent({ confirm, onConfirm, contextText, busy = fal
           `text-ios-footnote font-medium text-[#b8860b]` 小字「N 币」；
           金额的第二处落在主钮文案「确认 · N 币」上。 */}
       <div className={cn("flex items-baseline justify-between gap-3", interpret && "mt-3")}>
-        <p className="min-w-0 text-[0.9375rem] leading-snug text-foreground">
+        <p className="agent-turn-text min-w-0 text-[0.9375rem] leading-snug text-foreground">
           {summary}
         </p>
         <span className="shrink-0 text-ios-footnote font-medium text-[#b8860b]">

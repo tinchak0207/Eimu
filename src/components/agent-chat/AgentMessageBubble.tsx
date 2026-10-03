@@ -125,7 +125,9 @@ function AgentMessageBubbleComponent({ item, sessionId }: AgentMessageBubbleProp
           // 長文提早折行、右側空出一條，畫面像卡片沒排滿。用戶氣泡維持 85%——右對齊的
           // 短氣泡才是對話的視覺語言。
           // 助理正文走 Markdown 渲染，版式由塊級元素接管，不用 pre-wrap。
-          "min-w-0 break-words [overflow-wrap:anywhere] text-[0.9375rem]",
+          // agent-turn-text：手机正文阶梯锚点（agent-chat.css ≤639.98px → 17px/25px），
+          // 桌面 text-[0.9375rem]/leading 一律不动。
+          "agent-turn-text min-w-0 break-words [overflow-wrap:anywhere] text-[0.9375rem]",
           item.kind === "user" ? "whitespace-pre-wrap max-w-[85%]" : "w-full",
           isUser
             ? "ml-auto rounded-[20px] rounded-br-[6px] lg-float px-3.5 py-2.5 text-foreground leading-[1.45]"

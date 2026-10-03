@@ -106,7 +106,13 @@ function BlockNode({ block, onOpenImage }: { block: MdBlock; onOpenImage: (src: 
         </p>
       );
     case "h": {
-      const size = block.level <= 1 ? "text-base font-bold" : block.level === 2 ? "text-[0.9375rem] font-bold" : "text-[0.9375rem] font-semibold";
+      // 手机端阶梯锚点（agent-chat.css ≤639.98px）：h1 → 18px/26px（.agent-turn-title），
+      // h2/h3 → 17px/25px（.agent-turn-text）。桌面原 class 序列不动（text-base / text-[0.9375rem]）。
+      const size = block.level <= 1
+        ? "text-base font-bold agent-turn-title"
+        : block.level === 2
+          ? "text-[0.9375rem] font-bold agent-turn-text"
+          : "text-[0.9375rem] font-semibold agent-turn-text";
       return <p className={cn("mt-2 mb-1 first:mt-0", size)}>{block.children.map((c, i) => <InlineSpan key={i} span={c} onOpenImage={onOpenImage} />)}</p>;
     }
     case "code":

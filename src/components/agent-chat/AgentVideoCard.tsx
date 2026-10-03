@@ -109,7 +109,7 @@ function VideoLightbox({
       role="dialog"
       aria-modal="true"
       aria-label="影片查看器"
-      className="fixed inset-0 z-[95] flex min-h-[100dvh] select-none items-center justify-center bg-[rgba(18,20,28,0.92)] backdrop-blur-xl [-webkit-tap-highlight-color:transparent] motion-safe:animate-lg-appear motion-reduce:animate-none"
+      className="agent-chat-surface fixed inset-0 z-[95] flex min-h-[100dvh] select-none items-center justify-center bg-[rgba(18,20,28,0.92)] backdrop-blur-xl [-webkit-tap-highlight-color:transparent] motion-safe:animate-lg-appear motion-reduce:animate-none"
       onClick={onClose}
     >
       <button

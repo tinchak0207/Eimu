@@ -1,0 +1,91 @@
+/* 手機端左側整屏側欄（MobileSidebar）。只在 <sm 掛載，桌面不受影響。
+   材質配方沿用本專案已定案的彈層底 `.agent-pop`（0.96 白＋blur(40)：
+   彈層要讀字，不用半透 lg-sheet，否則底下頁面的字會透上來疊字）
+   ——刻意不 import agent-chat.css，字面配方寫在這裡，避免跨檔耦合。 */
+
+.mobile-sidebar-scrim {
+  position: fixed;
+  inset: 0;
+  /* Navbar header 是 z-[80]、既有抽屜是 z-90；側欄要蓋過兩者。 */
+  z-index: 95;
+  display: flex;
+  background: rgba(0, 0, 0, 0.28);
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+  animation: mobile-sidebar-scrim-in 0.2s ease-out both;
+}
+
+.mobile-sidebar-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  padding-top: env(safe-area-inset-top, 0px);
+  background: rgba(255, 255, 255, 0.96);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  backdrop-filter: blur(40px) saturate(180%);
+  border-right: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 18px 0 48px rgba(45, 49, 66, 0.16);
+  overscroll-behavior: contain;
+  touch-action: manipulation;
+  animation: mobile-sidebar-panel-in 0.26s cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
+/* 面板內唯一的捲動容器：導覽＋「对话」清單＋退出/QQ 一起捲（清單不再自開第二條
+   捲軸＝無巢狀捲動）。底部浮動玻璃條是絕對定位的 .mobile-sidebar-dock，這裡留出
+   等高 padding-bottom（dock 高 48＋底距 8＋間隔 16 ＝ 5.5rem）讓最後一列不被蓋住。 */
+.mobile-sidebar-scroll {
+  padding-bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px));
+}
+
+/* 底部浮動玻璃條：絕對定位浮在最下、不隨內容捲動（內容從它下面穿過）。 */
+.mobile-sidebar-dock {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px));
+  z-index: 1;
+  padding: 0 0.5rem;
+}
+
+@keyframes mobile-sidebar-scrim-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes mobile-sidebar-panel-in {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+/* 位移入場對暈動症不友好：關掉位移與淡入，面板直接到位、遮罩直接顯示。 */
+@media (prefers-reduced-motion: reduce) {
+  .mobile-sidebar-scrim,
+  .mobile-sidebar-panel {
+    animation: none;
+  }
+}
+
+/* ── 側欄內字級地板（2026-10-03，只作用 ≤639.98px）─────────────────────
+   側欄內共用的 AgentSessionList 不在 `.agent-chat-surface` / `.agent-pop` 作用域
+   （那是助理面與寬屏下拉的字級階梯所在，見 agent-chat.css 的窄屏塊），它的
+   13px 日期行（`text-ios-footnote`）在側欄裡仍走原 token。本輪定的手機地板是
+   14px：在側欄作用域內把 footnote 層抬到 14px。
+   同一個 13px 層在側欄裡還有身份副標（email／「已登录」），一併抬到地板，避免
+   側欄殘留 <14px 文字。只覆寫 font-size（line-height 沿用 token 的 18px，零版面
+   位移），**不動** agent-chat/AgentSessionList.tsx 的基礎 class（助理面與寬屏
+   下拉不受影響）。`.mobile-sidebar-panel` 只在 <sm 掛載，仍包 media 確保桌面一字不動。 */
+@media (max-width: 639.98px) {
+  .mobile-sidebar-panel .text-ios-footnote {
+    font-size: 14px;
+  }
+}

@@ -345,7 +345,7 @@ function ImageLightbox({ src, alt, onClose }: { src: string; alt: string; onClos
       role="dialog"
       aria-modal="true"
       aria-label="图片查看器"
-      className="fixed inset-0 z-[95] flex min-h-[100dvh] cursor-zoom-out select-none items-center justify-center bg-[rgba(18,20,28,0.86)] backdrop-blur-xl [touch-action:none] [-webkit-tap-highlight-color:transparent] motion-safe:animate-lg-appear motion-reduce:animate-none"
+      className="agent-chat-surface fixed inset-0 z-[95] flex min-h-[100dvh] cursor-zoom-out select-none items-center justify-center bg-[rgba(18,20,28,0.86)] backdrop-blur-xl [touch-action:none] [-webkit-tap-highlight-color:transparent] motion-safe:animate-lg-appear motion-reduce:animate-none"
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerEnd}
