@@ -41,8 +41,10 @@ test("MODEL_ROUTES：registry 直連步驟必須有對應 claim（否則 seed �
   }
 });
 
-test("生產校準：gpt-image-2 順序＝adobe2api > newapi > yyds（2026-10-01 VPS 實查的生效順序，合併 new-api 假渠道後）", () => {
-  assert.deepEqual([...MODEL_ROUTES["gpt-image-2"]], ["adobe2api", "newapi", "yyds"]);
+test("生產校準：gpt-image-2 系順序＝yyds > adobe2api > newapi（2026-10-03 改：yyds 1K/2K/4K 統一 0.016 元/次為最低價）", () => {
+  assert.deepEqual([...MODEL_ROUTES["gpt-image-2"]], ["yyds", "adobe2api", "newapi"]);
+  assert.deepEqual([...MODEL_ROUTES["gpt-image-2.5-flare"]], ["yyds", "adobe2api", "newapi"]);
+  assert.deepEqual([...MODEL_ROUTES["gpt-image-2.5-sunburst"]], ["yyds", "adobe2api", "newapi"]);
   assert.ok(modelsRoutedTo(NEWAPI_ROUTE_LABEL).includes("pixai-tsubaki2"));
   assert.equal(routeSupplierId("newapi"), "env:newapi");
 });

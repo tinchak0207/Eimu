@@ -35,9 +35,11 @@ export const NEWAPI_SUPERSEDED_LABELS: ReadonlySet<string> = new Set(["hublinuxd
 
 export const MODEL_ROUTES: Record<string, readonly string[]> = {
   // ── 圖片：GPT 系 ──
-  "gpt-image-2": ["adobe2api", "newapi", "yyds"],
-  "gpt-image-2.5-flare": ["adobe2api", "newapi"],
-  "gpt-image-2.5-sunburst": ["adobe2api", "newapi"],
+  // yyds 放首位＝1K/2K/4K 統一 0.016 元/次（站方公開價目 /api/v1/model-plaza 2026-10-03 實查），
+  // 比 adobe2api（自有額度，常枯竭）與 newapi 便宜；yyds 失敗照陣列順序往下落。
+  "gpt-image-2": ["yyds", "adobe2api", "newapi"],
+  "gpt-image-2.5-flare": ["yyds", "adobe2api", "newapi"],
+  "gpt-image-2.5-sunburst": ["yyds", "adobe2api", "newapi"],
   "gpt-image-1.5": ["adobe2api", "newapi"],
   "gpt-image": ["adobe2api"],
 
