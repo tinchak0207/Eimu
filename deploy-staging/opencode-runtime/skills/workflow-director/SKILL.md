@@ -111,14 +111,15 @@ content: {
 | 动作 | 工具 | 说明 |
 |---|---|---|
 | 读声明与版本史 | `canvas_get_state`（摘要带 `dsl`／`workflow_versions`）或 `workflow_history` | `dsl` 是 `WorkflowDslSource[]`（`{ workflow, title?, steps }`）；`workflow_versions` 是各节点版本史（`reason` ∈ created／generated／edited／metadata／revert） |
-| 改整条产线 | `workflow_write` | 读 `dsl` → 改 `steps`（增/删/改步、用 `needs` 改依赖）→ **整份 source 交回**。先过全图校验（id 重复／needs 悬空／依赖成环／tool 非法 → 整份拒绝、画布不动、错误自带修复提示），过了才确定性编译成 ops 原子落图；`dry_run:true` 可只编译预览 |
+| 改整条产线 | `workflow_write` | 读 `dsl` → 改 `steps`（改结构或改单步内容；用 `needs` 改依赖）→ **整份 source 交回**。先过全图校验（id 重复／needs 悬空／依赖成环／tool 非法 → 整份拒绝、画布不动、错误自带修复提示），过了才确定性编译成 ops 原子落图；`dry_run:true` 可只编译预览 |
 | 退回某步内容 | `workflow_history` 查 `version` → `workflow_rollback` | 只还原内容（title+metadata），不动位置/尺寸；回滚本身也落一版（`reason=revert`），可再回滚回去 |
 
 `steps` 形状：`{ id, title, kind?, prompt?, needs?, model?, size?, count?, gate?, tool?, meta? }`（`id` 小写字母开头 `[a-z0-9_]`、档内唯一，**同 id 同节点＝幂等更新**；`needs` 驱动画布连线；`kind` ∈ image／text／video／audio／director，缺省 image）。
 
 **负面案例（禁止）**：
-- 改**整条产线结构**（加/删步骤、重排依赖）一律用 `workflow_write`；**禁止**用 `canvas_apply_ops` 手拼 `add_node` + `connect_nodes` 搭流程——手拼绕过编译器（坐标/增量/连线去重/确定性节点 id 全在编译器里），会破坏「声明 ⇄ 图」的可逆性，也和人工拖过的坐标打架。
-- 只改**单个节点的参数/标题**，或**手工调一条连线**，才用 `canvas_apply_ops` 的 `update_node`／`connect_nodes`（单点编辑，不碰产线结构）。
+- **改畫布產線（節點在 `dsl` 裡）→ 一律 `workflow_write`**（冪等；讀 `dsl`→改 `steps`→整份交回）。單步或多步、改 prompt 或改結構，都是它。——改**整条产线结构**（加/删步骤、重排依赖）固然用它，**单步微调也走它**：同 id 同节点＝幂等更新（读了整份 `dsl`、只动第 2 步的 prompt、整份交回，就是正确做法）。
+- **節點不在 `dsl` 裡，或 DSL 表達不到的欄位（位置／尺寸／手調連線）→ 才用 `canvas_apply_ops`**（`update_node`／`connect_nodes`／`delete_connections`）。
+- **禁手拼 `add_node`＋`connect_nodes` 搭整條產線結構**（繞過編譯器、破壞可逆性）——手拼绕过编译器（坐标/增量/连线去重/确定性节点 id 全在编译器里），也和人工拖过的坐标打架。
 - **人拖过的节点位置不会被覆盖**：落图时节点位置由画布排布，人工编辑优先。
 - **v0 不删节点**：`source` 里移除的步骤只回 warnings，不会真删画布上已有节点。
 

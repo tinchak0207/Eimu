@@ -20,7 +20,8 @@ export default tool({
     "· tool：必须是 harness 工具 id（image_generate / image_edit / …），不确定就省略。\n" +
     "· gate: true = 人工批准门禁步。meta 是自由透传键值（≤4KB）。steps 1..24 个。\n\n" +
     "语义保证：①全图校验（id 重复/needs 悬空/依赖成环/tool 非法）不过则整份拒绝、画布不动，错误里带修复提示；②合法则原子落图，增节点/改节点/连线的位置由画布排布，人拖过的节点位置不会被覆盖（人工编辑优先）；③v0 不删节点：源码里移除的步骤只回 warnings。\n\n" +
-    "改产线一律用本工具，不要用 canvas_apply_ops 手拼 add_node/connect_nodes 来搭流程。",
+    "**改画布产线上任何东西（改单步 prompt／改结构）都用本工具**——它按 step id 幂等（同 id 同节点＝更新），先读 `dsl` 再整份交回即可；只有节点不在 `dsl` 里、或要动位置/尺寸/手调连线时，才用 `canvas_apply_ops`。**禁**手拼 `add_node`+`connect_nodes` 搭流程。\n\n" +
+    "**改畫布產線（節點在 `dsl` 裡）→ 一律 `workflow_write`**（冪等；讀 `dsl`→改 `steps`→整份交回）。單步或多步、改 prompt 或改結構，都是它。**節點不在 `dsl` 裡，或 DSL 表達不到的欄位（位置／尺寸／手調連線）→ 才用 `canvas_apply_ops`**（`update_node`／`connect_nodes`／`delete_connections`）。**禁手拼 `add_node`＋`connect_nodes` 搭整條產線結構**（繞過編譯器、破壞可逆性）。",
   args: {
     source: tool.schema
       .object({
