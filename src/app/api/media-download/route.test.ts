@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { isAllowedMediaUrl } from "./route";
+import { isAllowedMediaUrl } from "./media-url";
 
 // 值域獨立於實作：以下合法主機字面值是生產 agent 媒體真源（gateway origin），
 // 不是從 isAllowedMediaUrl 內部推導出來的，因此能反證「主機比對」的語義。
