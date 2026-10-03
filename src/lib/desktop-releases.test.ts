@@ -6,15 +6,24 @@ import { DESKTOP_RELEASES, detectDesktopPlatform, resolveDesktopDownload } from 
 /** 發佈檔一律託管在 Vercel Blob 的 desktop/ 目錄，且必須是 https。 */
 const BLOB_HOST = /^[a-z0-9-]+\.public\.blob\.vercel-storage\.com$/;
 
-test("desktop releases expose the 0.3.0 version", () => {
+test("desktop releases expose a non-empty version string", () => {
   assert.equal(typeof DESKTOP_RELEASES.version, "string");
   assert.ok(DESKTOP_RELEASES.version.trim().length > 0, "version 不可為空");
-  assert.equal(DESKTOP_RELEASES.version, "0.3.0");
 });
 
-test("both platform URLs pin the 0.3.0 artifact", () => {
+test("each platform URL pins its own versioned artifact", () => {
   for (const key of ["linux", "windows"] as const) {
-    assert.match(DESKTOP_RELEASES[key].url, /Eimu-0\.3\.0/, `${key} url 必須含 Eimu-0.3.0`);
+    const release = DESKTOP_RELEASES[key];
+    assert.equal(typeof release.version, "string", `${key} version 必須是字串`);
+    assert.ok(release.version.trim().length > 0, `${key} version 不可為空`);
+    // 檔名必須帶「該平台自己的」版本，而非任何寫死或他平台的版本。
+    const escaped = release.version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    assert.match(release.url, new RegExp(`Eimu-${escaped}`), `${key} url 必須含 Eimu-${release.version}`);
+    const filename = release.url.split("/").pop() ?? "";
+    assert.ok(
+      filename.includes(release.version),
+      `${key} 檔名必須含該平台 version（${release.version}）`,
+    );
   }
 });
 
@@ -27,7 +36,7 @@ test("linux and windows release URLs are https, on the blob desktop/ path, and v
     assert.match(url.hostname, BLOB_HOST, `${key} 必須在 Vercel Blob 主機`);
     assert.ok(url.pathname.startsWith("/desktop/"), `${key} pathname 必須以 /desktop/ 開頭`);
     const filename = url.pathname.split("/").pop() ?? "";
-    assert.match(filename, /0\.3\.0/, `${key} 檔名必須含 0.3.0`);
+    assert.ok(filename.includes(release.version), `${key} 檔名必須含該平台 version（${release.version}）`);
     assert.doesNotMatch(release.url, /^http:\/\//, "不得使用明文 http");
   }
 });

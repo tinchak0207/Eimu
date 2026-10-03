@@ -1,7 +1,7 @@
 {
   "name": "eimu-desktop",
   "productName": "Eimu",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "Eimu 桌面客户端",
   "author": "Eimu",
@@ -32,6 +32,7 @@
       "local-worker.js",
       "device-bridge-client.js",
       "lib/**",
+      "!lib/**/*.test.js",
       "build/icon.png"
     ],
     "linux": {
