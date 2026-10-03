@@ -173,7 +173,7 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
     apiKeyEnv: "YYDS_API_KEY",
     enabledEnv: null,
     tier: "managed_pool",
-    sitePriority: 13,
+    sitePriority: 11,
     chatImageModels: [],
     claims: [
       {
@@ -184,6 +184,25 @@ export const REGISTRY_CHANNELS: RegistryChannel[] = [
         // image_generate，使 gpt-image-2 的 edit 能力表只剩死渠道
         // （adobe2api 403 額度枯竭、sub2api 524），改圖全軍覆沒。
         kinds: ["image_generate", "image_edit"],
+        unitPriceCny: 0.016,
+        priceSource: "GET https://yyds.chybenzun.top/api/v1/model-plaza 2026-10-03 (group #75/#159, 1K/2K/4K 統一 0.016 元/次; 免 key 唯讀實查)",
+      },
+      // 0.016＝1K/2K/4K 統一價，來源與日期見 priceSource（站點公開價目，免 key 唯讀實查）。
+      // 上游模型名與我方同名，`GET /v1/models` 實證無分組後綴（非 -g75 等變體），故 supplierModelId=null 直傳。
+      // edit 未實測，故這兩條只宣告 image_generate；上游 hub 對同兩模型亦只宣告 generate。
+      {
+        modelId: "gpt-image-2.5-flare",
+        supplierModelId: null,
+        kinds: ["image_generate"],
+        unitPriceCny: 0.016,
+        priceSource: "GET https://yyds.chybenzun.top/api/v1/model-plaza 2026-10-03 (group #75/#159, 1K/2K/4K 統一 0.016 元/次; 免 key 唯讀實查)",
+      },
+      {
+        modelId: "gpt-image-2.5-sunburst",
+        supplierModelId: null,
+        kinds: ["image_generate"],
+        unitPriceCny: 0.016,
+        priceSource: "GET https://yyds.chybenzun.top/api/v1/model-plaza 2026-10-03 (group #75/#159, 1K/2K/4K 統一 0.016 元/次; 免 key 唯讀實查)",
       },
     ],
   },
