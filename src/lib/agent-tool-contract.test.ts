@@ -66,7 +66,7 @@ test("generation adapter delegates to the existing generation command owner", as
   assert.equal(result.audit.artifactKind, "generation_job");
 });
 
-test("canvas mutation is gated before the existing dispatch owner is called", async () => {
+test("canvas mutation dispatches immediately without an approval gate", async () => {
   let called = false;
   const registry = createCoreAgentToolRegistry({
     canvas: {
@@ -78,13 +78,12 @@ test("canvas mutation is gated before the existing dispatch owner is called", as
     },
   });
   const input = { request_id: "ops-1", ops: [{ type: "select_nodes", ids: [] }] };
-  const result = await registry.execute("canvas_apply_ops", input, capabilities("canvas.write", "canvas.confirm"));
-  assert.equal(result.status, "rejected");
-  assert.equal(result.error?.code, "approval_required");
-  assert.equal(called, false);
+  const result = await registry.execute("canvas_apply_ops", input, capabilities("canvas.write"));
+  assert.equal(result.status, "succeeded");
+  assert.equal(called, true);
 });
 
-test("canvas mutation returns the existing canvas ops artifact after explicit approval", async () => {
+test("canvas mutation returns the existing canvas ops artifact", async () => {
   const registry = createCoreAgentToolRegistry({
     canvas: {
       readState: async () => ({ nodes: [] }),
@@ -94,7 +93,7 @@ test("canvas mutation returns the existing canvas ops artifact after explicit ap
   const result = await registry.execute(
     "canvas_apply_ops",
     { request_id: "ops-1", ops: [{ type: "select_nodes", ids: [] }] },
-    { ...capabilities("canvas.write", "canvas.confirm"), approved: true },
+    capabilities("canvas.write"),
   );
   assert.equal(result.status, "succeeded");
   assert.equal(result.artifact?.kind, "canvas_ops");

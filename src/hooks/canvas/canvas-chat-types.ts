@@ -237,7 +237,7 @@ export interface UseCanvasChatReturn {
   patchNodeMetadata: (nodeId: string, patch: Partial<CanvasNodeMetadata>, opts?: { history?: boolean }) => void;
   // ── B2：飛行聚焦
   flyTo: (world: CanvasPosition, viewportWidth: number, viewportHeight: number, targetK?: number) => void;
-  // ── Wave C：agent 操作畫布（確認閘）
+  // ── Wave C：agent 操作畫布（自動執行；可 undo/redo 撤銷）
   pendingAgentOps: CanvasAgentOpsEvent | null;
   applyAgentOps: () => { runGeneration: { nodeId: string; prompt?: string; model?: string; size?: string; count?: number }[] };
   dismissAgentOps: (reason?: string) => void;

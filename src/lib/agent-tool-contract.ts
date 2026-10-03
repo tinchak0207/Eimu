@@ -239,6 +239,7 @@ export const AGENT_TOOL_DEFINITIONS: readonly AgentToolDefinition[] = [
       canvas: { eventNames: ["canvas.ops"], resultTarget: "none", metadataFields: ["request_id", "created_node_ids", "ok"] },
     },
     requiredCapabilities: ["canvas.write"],
-    gate: { approval: "required", approvalCapability: "canvas.confirm", reason: "Canvas mutations require an explicit user gate." },
+    // Canvas mutation automation is a product mainline: no human approval gate. Undo/redo covers reverts.
+    gate: { approval: "none" },
   },
 ];

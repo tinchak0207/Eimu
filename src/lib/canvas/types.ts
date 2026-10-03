@@ -591,7 +591,7 @@ export interface CanvasProjectMetaPatch {
 
 /**
  * Agent 批量畫布操作：gateway 的 canvas_apply_ops 工具經 SSE 下發，
- * 前端執行（可先過確認閘）後把結果 POST 回 gateway resolve 該工具調用。
+ * 前端一到即自動執行（畫布操作自動化，無人工確認閘）後把結果 POST 回 gateway resolve 該工具調用。
  * 與 infinite-canvas 的 8-op DSL 對齊，執行語義全在前端 reducer。
  *
  * 唯一例外：`set_project_meta`（2026-09-16 G1）改的是**專案級**欄位，不是畫布結構，
@@ -625,7 +625,7 @@ export type CanvasAgentOp =
 export interface CanvasAgentOpsEvent {
   request_id: string;
   ops: CanvasAgentOp[];
-  /** 給確認閘顯示的一句話意圖（agent 提供）。 */
+  /** 一句話意圖（agent 提供）。 */
   label?: string;
 }
 

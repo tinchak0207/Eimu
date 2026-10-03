@@ -12,8 +12,6 @@ export const ENTER_STAGGER_MS = 110;
 export const CULL_MARGIN_PX = 280;
 /** 拖圖/多檔導入的階梯錯位（px）。 */
 export const IMPORT_STAGGER = 40;
-/** agent 自動允許的 localStorage key（會話級信任開關）。 */
-export const AGENT_AUTO_APPROVE_KEY = "canvas-agent-auto-approve";
 
 export function toDvh(height: string): string {
   return height.replace(/vh/g, "dvh");

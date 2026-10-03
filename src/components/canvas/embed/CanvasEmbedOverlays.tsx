@@ -29,11 +29,8 @@ interface CanvasEmbedOverlaysProps {
   /** embed 高度（.ce-embed-root 動態样式）。 */
   height: string;
   expanded: boolean;
-  /** Wave C：agent 操作確認閘。 */
+  /** Wave C：agent 畫布操作自動化狀態提示（ops 一到由宿主自動執行）。 */
   pendingOps: UseCanvasChatReturn["pendingAgentOps"];
-  agentAutoApprove: boolean;
-  onToggleAgentAutoApprove: (checked: boolean) => void;
-  onApproveAgentOps: () => void;
   /** P2：角色/場景卡面板。 */
   cardsOpen: boolean;
   /** G2（2026-09-16）：作品/劇集面板。 */
@@ -256,9 +253,6 @@ export function CanvasEmbedOverlays({
   height,
   expanded,
   pendingOps,
-  agentAutoApprove,
-  onToggleAgentAutoApprove,
-  onApproveAgentOps,
   cardsOpen,
   creationFlowOpen,
   onCloseCreationFlow,
@@ -392,44 +386,10 @@ export function CanvasEmbedOverlays({
         }
       `}</style>
 
-      {/* Wave C：agent 操作確認閘 */}
-      {pendingOps && !agentAutoApprove && (
-        <div className="pointer-events-auto absolute bottom-16 left-1/2 z-40 w-[min(92%,460px)] -translate-x-1/2 rounded-2xl lg-sheet p-3.5" data-canvas-interactive>
-          <p className="text-[13.5px] font-semibold text-foreground">AI 助理想操作画布</p>
-          <p className="mt-0.5 text-[12.5px] leading-relaxed text-muted-foreground">
-            {pendingOps.label || `共 ${pendingOps.ops.length} 步操作`}
-            {" · "}
-            {pendingOps.ops.map((op) => op.type).join("、")}
-          </p>
-          <div className="mt-2.5 flex items-center gap-2">
-            <button
-              type="button"
-              onClick={onApproveAgentOps}
-              className="flex-1 rounded-lg bg-primary px-3 py-2 text-ios-footnote font-medium text-primary-foreground hover:opacity-90"
-            >
-              允许
-            </button>
-            <button
-              type="button"
-              onClick={() => canvas.dismissAgentOps()}
-              className="flex-1 rounded-lg bg-black/5 px-3 py-2 text-ios-footnote font-medium text-muted-foreground hover:bg-black/10"
-            >
-              拒绝
-            </button>
-          </div>
-          <label className="mt-2 flex cursor-pointer items-center gap-1.5 text-[11.5px] text-foreground/45">
-            <input
-              type="checkbox"
-              checked={agentAutoApprove}
-              onChange={(e) => onToggleAgentAutoApprove(e.target.checked)}
-            />
-            本设备自动允许画布操作（可随时取消）
-          </label>
-        </div>
-      )}
-      {agentAutoApprove && pendingOps && (
+      {/* Wave C：agent 畫布操作自動化——非阻塞狀態提示（ops 一到即由宿主自動落地）。 */}
+      {pendingOps && (
         <div className="pointer-events-none absolute bottom-16 left-1/2 z-40 -translate-x-1/2 rounded-full bg-black/75 px-3 py-1.5 text-ios-caption1 text-white">
-          正在执行 AI 画布操作…
+          AI 正在操作画布…
         </div>
       )}
 

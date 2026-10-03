@@ -156,16 +156,16 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
   const [loading, setLoading] = useState(true);
   const [saveState, setSaveState] = useState<UseCanvasChatReturn["saveState"]>("idle");
   const [savedProjects, setSavedProjects] = useState<CanvasProjectSummary[]>([]);
-  // Wave C：agent 下發、待確認/執行的批量畫布操作。
+  // Wave C：agent 下發、即時執行的批量畫布操作（畫布操作自動化，無人工確認閘）。
   //
   // 內部用佇列存（見 canvas-agent-ops-queue.ts）：CanvasAgentOpsEvent 沒有
   // session_id，原先單一 nullable slot 在第二個 canvas.ops 事件於第一個尚未
   // resolve 時抵達會直接覆蓋掉它，該 request_id 就再也等不到 postCanvasOpsResult
   // （gateway 端工具調用卡到超時）。修法：Map<request_id, entry> 保序佇列，
   // 每筆各自捕獲「事件抵達當下」的 session id（resolve 時用這個，不用
-  // sessionIdRef.current，否則使用者在確認前切 session 會報錯 sid）。
-  // 對外仍只暴露佇列頭給 UI（Option A：確認閘 UI 一次顯示一批，resolve 後
-  // 自動前進到下一筆）——CanvasEmbed.tsx/CanvasEmbedOverlays.tsx 零改動。
+  // sessionIdRef.current，否則使用者在操作落地前切 session 會報錯 sid）。
+  // 對外仍只暴露佇列頭（一次只處理一批，resolve 後
+  // 自動前進到下一筆）——宿主 CanvasEmbed.tsx 的 effect 一到即自動執行。
   const [agentOpsQueue, setAgentOpsQueue] = useState<AgentOpsQueue>(createAgentOpsQueue);
   const pendingAgentOps = getQueueHeadEvent(agentOpsQueue);
 
@@ -450,7 +450,7 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
 
   const handleCanvasEvent = useCallback(
     (event: AgentSseEvent) => {
-      // Wave C：agent 批量操作先落確認閘（不直接進 reducer）。入隊而非覆蓋——
+      // Wave C：agent 批量操作入佇列後由宿主自動執行（CanvasEmbed 的 effect 一到即 approveAgentOps）。入隊而非覆蓋——
       // 不同 request_id 各自排隊，同 request_id 重入視為合法重放（見 queue 模組註解）。
       // 捕獲當下 session id：事件本身沒有 session_id 欄位，resolve 時要用「抵達
       // 當下」而非「resolve 當下」的 session，否則使用者切 session 後回報會錯 sid。
@@ -913,10 +913,10 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
     flyRafRef.current = requestAnimationFrame(step);
   }, []);
 
-  // ─────────────────────── Wave C：agent 操作的確認/執行/拒絕
+  // ─────────────────────── Wave C：agent 操作的執行/回報（自動執行；可 undo/redo 撤銷）
 
   /**
-   * 批准並執行 agent 待審操作。回傳 run_generation 清單交宿主觸發生成。
+   * 執行 agent 佇列頭操作（自動執行，無人工確認）。回傳 run_generation 清單交宿主觸發生成。
    * 用佇列頭自己捕獲的 session id 回報結果（不是 sessionIdRef.current 當下值）——
    * 這是本次修的 bug 本體：舊版讀當下 session，使用者切過 session 就報錯 sid。
    * resolve 後從佇列摘除該筆，UI 綁的 pendingAgentOps（佇列頭）自動前進到下一筆。
@@ -960,7 +960,7 @@ export function useCanvasChat(sessionId?: string | null): UseCanvasChatReturn {
   }, [pushHistory]);
 
   /**
-   * 拒絕 agent 待審操作（結果回報 gateway，讓工具調用拿到明確拒絕而非超時）。
+   * 拒絕 agent 佇列頭操作（結果回報 gateway，讓工具調用拿到明確拒絕而非超時）。
    * 同樣用該筆捕獲的 session id，不用 sessionIdRef.current。
    */
   const dismissAgentOps = useCallback((reason?: string) => {

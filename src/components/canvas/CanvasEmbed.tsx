@@ -11,7 +11,7 @@
 //   A7 鄰接高亮：hover/選中 → 上下游連線與節點同時點亮
 //   A5 連線可選可刪；A9 縮放控件+快捷鍵幫助；A12 失敗就地重試（參數不丟）
 //   B1 視口裁剪（±280px 才渲染）；B2 節點清單+450ms 飛行聚焦；B3 縮略圖降採樣
-//   C  agent 操作確認閘：canvas.ops 先彈卡（允许/拒绝/本次会话自动允许），
+//   C  agent 畫布操作自動化：canvas.ops 一到即自動落地（無人工確認閘；可 undo/redo 撤銷），
 //      執行後結果回流 gateway；run_generation 由本層代跑
 //   D  提示詞庫/雲端素材庫面板接線；編輯器角度重繪/AI 重繪回調接生成管線
 //
@@ -63,7 +63,7 @@ import { DEFAULT_IMAGE_MODEL_ID } from "@/lib/image-model-ids.js";
 import { LoraLibraryPanel, type SelectedLora } from "@/components/canvas-workstation/panels/LoraLibraryPanel";
 import "@/components/canvas-workstation/panels/panels.css";
 import { cn } from "@/lib/utils";
-import { AGENT_AUTO_APPROVE_KEY, CULL_MARGIN_PX, ENTER_STAGGER_MS, buildAuthHeaders, fileToDataUrl, imageUrlOf } from "./embed/embed-helpers";
+import { CULL_MARGIN_PX, ENTER_STAGGER_MS, buildAuthHeaders, fileToDataUrl, imageUrlOf } from "./embed/embed-helpers";
 import { useCanvasInteraction } from "./embed/use-canvas-interaction";
 import { useCanvasGeneration } from "./embed/use-canvas-generation";
 import { useCanvasShortcuts } from "./embed/use-canvas-shortcuts";
@@ -350,7 +350,6 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
   );
   // 互動檔位（決策 1/2）：只有協作檔才是停點；全自動檔下審查面板可看可改、不阻塞流程。
   const [interactionMode, setInteractionMode] = useState<AgentInteractionMode>(DEFAULT_AGENT_SETTINGS.interaction_mode);
-  const [agentAutoApprove, setAgentAutoApprove] = useState(false);
 
   // ── 最新值 refs（組件殼域）
   const canvasStateRef = useRef(canvas);
@@ -381,10 +380,6 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [historyOpen]);
-
-  useEffect(() => {
-    setAgentAutoApprove(window.localStorage.getItem(AGENT_AUTO_APPROVE_KEY) === "1");
-  }, []);
 
   /** 檔位回讀（網關為準，失敗靜默落預設——與 getAgentSettings 自身契約一致，永不 reject）。 */
   useEffect(() => {
@@ -1007,22 +1002,18 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
     [generateIntoNode, canvasStateRef],
   );
 
-  // ── Wave C：agent 操作確認閘
+  // ── Wave C：agent 畫布操作自動化
   const approveAgentOps = useCallback(() => {
     const { runGeneration } = canvasStateRef.current.applyAgentOps();
     runAgentGeneration(runGeneration);
   }, [runAgentGeneration, canvasStateRef]);
 
-  const handleToggleAgentAutoApprove = useCallback((checked: boolean) => {
-    setAgentAutoApprove(checked);
-    window.localStorage.setItem(AGENT_AUTO_APPROVE_KEY, checked ? "1" : "0");
-  }, []);
-
-  // 自動允許開啟時：ops 一到即執行（信任已由用戶顯式授予並可隨時關閉）。
+  // 畫布操作自動化是產品主線：agent 下發的 ops 一到即執行，不設人工確認閘。
+  // 使用者仍可用 undo/redo 撤銷（approveAgentOps → applyAgentOps 內已 pushHistory）。
   useEffect(() => {
-    if (!canvas.pendingAgentOps || !agentAutoApprove) return;
+    if (!canvas.pendingAgentOps) return;
     approveAgentOps();
-  }, [canvas.pendingAgentOps, agentAutoApprove, approveAgentOps]);
+  }, [canvas.pendingAgentOps, approveAgentOps]);
 
   const hasNodes = canvas.nodes.length > 0;
   // 透析卡的即時螢幕矩形（client 座標）：面板 FLIP 起訖點與光束起點，飛行途中每幀跟著走。
@@ -1378,14 +1369,11 @@ export function CanvasEmbed({ canvas: hostCanvas, height = "100%", onClose, expa
           </div>
         )}
 
-        {/* 浮層（agent 確認閘 / 角色卡 / 歷史畫布 / 節點清單）+ .ce-embed-* 樣式塊（須無條件掛載，殼層頂欄樣式依賴它） */}
+        {/* 浮層（agent 狀態提示 / 角色卡 / 歷史畫布 / 節點清單）+ .ce-embed-* 樣式塊（須無條件掛載，殼層頂欄樣式依賴它） */}
         <CanvasEmbedOverlays
           height={height}
           expanded={expanded}
           pendingOps={pendingOps}
-          agentAutoApprove={agentAutoApprove}
-          onToggleAgentAutoApprove={handleToggleAgentAutoApprove}
-          onApproveAgentOps={approveAgentOps}
           cardsOpen={cardsOpen}
           creationFlowOpen={creationFlowOpen}
           onCloseCreationFlow={() => setCreationFlowOpen(false)}

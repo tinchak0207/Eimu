@@ -1,19 +1,19 @@
-// Wave C 確認閘的佇列純函式（自 use-canvas-chat.ts 外圍搬遷，2026-08-31 修 bug）。
+// Wave C agent 畫布操作佇列的純函式（自 use-canvas-chat.ts 外圍搬遷，2026-08-31 修 bug）；
+// ops 一到即自動執行（畫布操作自動化，無人工確認閘）。
 //
 // 背景：CanvasAgentOpsEvent 沒有 session_id 欄位，原先用單一 nullable slot
-// （setPendingAgentOps）存「待確認的一批操作」——第二個 canvas.ops 事件在第一個
-// 還沒被確認/拒絕前抵達時會直接覆蓋掉它，該 request_id 永遠等不到
+// （setPendingAgentOps）存「待執行的一批操作」——第二個 canvas.ops 事件在第一個
+// 還沒被執行前抵達時會直接覆蓋掉它，該 request_id 永遠等不到
 // postCanvasOpsResult，gateway 那頭的工具調用只能等超時。且 resolve 時讀的是
 // sessionIdRef.current（呼叫當下的 session），不是事件抵達當下的 session ——
-// 若使用者在確認前切了 session，回報會用錯的 sid。
+// 若使用者在操作落地前切了 session，回報會用錯的 sid。
 //
 // 修法：Map<request_id, entry> 保序佇列（JS Map 迭代序 = 插入序），每筆 entry
 // 帶上「事件抵達當下」捕獲的 session id。resolve（apply/dismiss）用 entry 自己
 // 捕獲的 sid，不用當下的 sessionIdRef。
 //
-// 對外仍只暴露佇列頭（單一 CanvasAgentOpsEvent | null）給 UI ——確認閘一次只
-// 顯示一批，resolve 後自動前進到下一筆，UI 兩檔（CanvasEmbed/CanvasEmbedOverlays）
-// 零改動（Option A，見 use-canvas-chat.ts 的狀態宣告註解）。
+// 對外仍只暴露佇列頭（單一 CanvasAgentOpsEvent | null）——一次只處理一批，
+// resolve 後自動前進到下一筆（CanvasEmbed 的 effect 一到即自動執行）。
 
 import type { CanvasAgentOpsEvent } from "@/lib/canvas/types";
 
@@ -63,7 +63,7 @@ export function getQueueHead(
   return { requestId, entry };
 }
 
-/** 給 UI 用的便捷讀法：佇列頭的事件本體（給確認閘顯示的單一 pendingAgentOps）。 */
+/** 便捷讀法：佇列頭的事件本體（單一 pendingAgentOps，供宿主自動執行）。 */
 export function getQueueHeadEvent(queue: AgentOpsQueue): CanvasAgentOpsEvent | null {
   return getQueueHead(queue)?.entry.event ?? null;
 }
