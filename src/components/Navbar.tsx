@@ -32,6 +32,11 @@ interface NavbarProps {
   className?: string;
 }
 
+/** 手機 <640px 的 header 按鈕用「只有圖示」的極簡態：lg-float 的底/描邊/陰影/模糊全部歸零，
+    ≥640px 桌面島上的 chip 原樣。 */
+const FLAT_MOBILE_CHROME =
+  "max-sm:border-0 max-sm:bg-transparent max-sm:shadow-none max-sm:[backdrop-filter:none] max-sm:[-webkit-backdrop-filter:none]";
+
 /** auth_error 代碼 → 人話（callback 失敗原因碼見 /api/auth/github|google/callback）。 */
 function describeAuthError(code: string): string {
   if (code === "github_state") return "登录窗口状态过期或同时开了多个登录窗，请重新点登录。";
@@ -91,6 +96,31 @@ export function Navbar({ className }: NavbarProps) {
     return () => {
       observer.disconnect();
       window.removeEventListener("resize", apply);
+    };
+  }, []);
+
+  // 手機 ≤639.98px 的「捲動才上毛玻璃」：靜止態全透明（與頁面底色無縫），
+  // 但捲動時卡片內容會從圖示底下穿過去，故 window.scrollY > 4 才把 nav 標成
+  // data-nav-scrolled="true"（材質規則見 globals.css）。直接寫 DOM 屬性 + rAF
+  // 節流、不 setState——捲動每幀都不該觸發 React 重渲染。首頁內容在自身容器滾、
+  // window 不捲動，屬性恆 false，首頁永遠維持全透明。
+  useEffect(() => {
+    const nav = headerRef.current?.querySelector("nav");
+    if (!nav) return;
+    let frame = 0;
+    const apply = () => {
+      frame = 0;
+      nav.dataset.navScrolled = window.scrollY > 4 ? "true" : "false";
+    };
+    const onScroll = () => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(apply);
+    };
+    apply();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      if (frame) window.cancelAnimationFrame(frame);
     };
   }, []);
 
@@ -314,10 +344,10 @@ export function Navbar({ className }: NavbarProps) {
               ? "ml-[var(--ws-navbar-inset,calc(var(--ws-panel-w,420px)_+_0.75rem))] w-[calc(100%_-_var(--ws-navbar-inset,calc(var(--ws-panel-w,420px)_+_0.75rem)))]"
               : "ml-0 w-full",
             "max-md:ml-0 max-md:w-full",
-            // 手機 ≤639.98px 平铺：去圆角/浮岛阴影、底部 1px 发丝分隔线。底色用不透明
-            // 純白並關掉 backdrop-filter——半透＋模糊會從底下捲過的內容吸色（實機上渲成
-            // 中性灰），不透明純白則恆為白。
-            "max-sm:rounded-none max-sm:border-x-0 max-sm:border-t-0 max-sm:border-b-black/[0.08] max-sm:bg-white max-sm:[backdrop-filter:none] max-sm:[-webkit-backdrop-filter:none] max-sm:shadow-none max-sm:px-3",
+            // 手機 ≤639.98px 完全融入頁面：無底/無框/無 blur/無陰影——底色即頁面底色，
+            // 在任何頁面（首頁白卡、/pricing 的 #f5fbff…）都不會出現一條帶狀色差；
+            // 半透＋模糊的「白」在實機又會渲成中性灰，故 blur 一併關閉。
+            "max-sm:rounded-none max-sm:border-0 max-sm:bg-transparent max-sm:shadow-none max-sm:[backdrop-filter:none] max-sm:[-webkit-backdrop-filter:none] max-sm:px-3",
           )}
           aria-label="主导航"
         >
@@ -336,8 +366,15 @@ export function Navbar({ className }: NavbarProps) {
               className="flex min-w-0 shrink items-center gap-2 rounded-full lg-transition hover:opacity-70 focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:gap-2.5"
               aria-label="回到首页"
             >
-              {/* Eimu app icon */}
-              <div className="lg-float flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-ios-lg sm:h-8 sm:w-8">
+              {/* Eimu app icon。手機端同樣走極簡態：icon.png 四角是透明的，
+                 底下那層 lg-float 的白圓角塊會透成一塊多餘的淺色方塊（header 已經
+                  全透明了，它就成了唯一的殘留底色），故 <640px 一併歸零。 */}
+              <div
+                className={cn(
+                  "lg-float flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-ios-lg sm:h-8 sm:w-8",
+                  FLAT_MOBILE_CHROME,
+                )}
+              >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src="/icon.png" alt="Eimu" width={44} height={44} className="h-full w-full object-cover" />
               </div>
@@ -410,7 +447,10 @@ export function Navbar({ className }: NavbarProps) {
                       type="button"
                       aria-label="API 密钥"
                       title="API 密钥"
-                      className="lg-float flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[#007AFF] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:flex sm:h-9 sm:w-9"
+                      className={cn(
+                        "lg-float flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition sm:hover:text-[#007AFF] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:flex sm:h-9 sm:w-9",
+                        FLAT_MOBILE_CHROME,
+                      )}
                     >
                       <KeyRound className="h-3.5 w-3.5" aria-hidden="true" />
                     </button>
@@ -445,7 +485,12 @@ export function Navbar({ className }: NavbarProps) {
                     桌面端（≥sm）照旧：用户名文字在 ≥lg 显示、退出图标常驻。
                     手机端（<sm）只出退出图标：帳戶出口留在 top bar，用户名文字仍
                     鎖在 lg:inline 不出現。 */}
-                <div className="lg-float flex shrink-0 items-center gap-1 rounded-full py-1 pl-2.5 pr-1 lg:pl-3 sm:flex">
+                <div
+                  className={cn(
+                    "lg-float flex shrink-0 items-center gap-1 rounded-full py-1 pl-2.5 pr-1 lg:pl-3 sm:flex",
+                    FLAT_MOBILE_CHROME,
+                  )}
+                >
                   <span className="hidden max-w-[4.5rem] truncate text-ios-footnote font-medium text-[rgba(0,0,0,0.56)] lg:inline xl:max-w-[5.5rem]">
                     {user.display_name || user.username}
                   </span>
@@ -454,7 +499,7 @@ export function Navbar({ className }: NavbarProps) {
                     onClick={() => logout()}
                     aria-label="退出登录"
                     title="退出登录"
-                    className="flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-full text-[rgba(0,0,0,0.44)] transition-colors duration-200 hover:bg-[rgba(255,59,48,0.10)] hover:text-[#D92E2E] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(255,59,48,0.30)] max-sm:h-11 max-sm:w-11"
+                    className="flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-full text-[rgba(0,0,0,0.44)] transition-colors duration-200 sm:hover:bg-[rgba(255,59,48,0.10)] sm:hover:text-[#D92E2E] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(255,59,48,0.30)] max-sm:h-11 max-sm:w-11"
                   >
                     <LogOut className="h-3.5 w-3.5" aria-hidden="true" />
                   </button>

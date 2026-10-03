@@ -586,7 +586,7 @@ export function MobileNavHamburger({
       aria-label="打开导航"
       aria-haspopup="dialog"
       aria-expanded={expanded}
-      className="lg-float flex h-11 w-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full text-[rgba(0,0,0,0.62)] lg-transition hover:text-[rgba(0,0,0,0.88)] active:bg-black/[0.06] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:hidden [-webkit-tap-highlight-color:transparent]"
+      className="flex h-11 w-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full text-[rgba(0,0,0,0.62)] lg-transition active:bg-black/[0.06] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:hidden [-webkit-tap-highlight-color:transparent]"
     >
       <Menu className="h-5 w-5" aria-hidden="true" />
     </button>

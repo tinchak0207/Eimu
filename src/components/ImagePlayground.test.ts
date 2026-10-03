@@ -171,12 +171,16 @@ test("canvas workstation chat panel keeps the composer inside the panel", () => 
   //    :has() 空態分流作廢，空態內容置中改由 transcript 內部 justify-center 負責
   //  - 非 lg-card 兄弟（如 agentBaseline 撤回条）shrink-0，不抢高度
   //  - composer 锚点 shrink-0，永不被 flex 压没
-  //  - 面板吃滿天花板（2026-09-24 暴君裁定）：top 固定 0.75rem、max-height 只扣
-  //    上下 0.75rem 留白＋底部安全區，不再從 --site-header-offset 起算；
+  //  - 面板吃滿天花板（2026-09-24 暴君裁定／2026-10-03 對齊修訂）：top 固定
+  //    0.5rem（與右側導覽島頂 8px 同高起跑）、max-height 只扣上下留白
+  //    1.25rem＋底部安全區，不再從 --site-header-offset 起算；
   //    navbar 改經 --ws-navbar-inset 右退讓位（跨檔契約見下）。
   //    FAB 態 navbar 全寬，.canvas-chat-rail 的 top 仍從 --site-header-offset
   //    起算不被擋。
-  assert.match(source, /\.canvas-chat-panel \{[^}]*top: 0\.75rem;[^}]*min-height: 0;[^}]*max-height: calc\(100dvh - 1\.5rem - env\(safe-area-inset-bottom, 0px\)\)/);
+  assert.match(source, /\.canvas-chat-panel \{[^}]*top: 0\.5rem;[^}]*min-height: 0;[^}]*max-height: calc\(100dvh - 1\.25rem - env\(safe-area-inset-bottom, 0px\)\)/);
+  // 2026-10-03 桌面按鈕 y 對齊：卡片頂內距收回 4px＋消掉 space-y-4 幽靈外距，
+  // 兩條都必須在 ≥768px 媒體查詢內（≤767px 全螢幕版佈局不得被動到）。
+  assert.match(source, /@media \(min-width: 768px\) \{\s*\.canvas-chat-scroll-fill > section\.lg-card \{\s*padding-top: 0\.25rem;\s*\}[\s\S]*?\.canvas-chat-scroll-fill > section\.lg-card > div > div\.dust-transition \{\s*margin-top: 0;\s*\}\s*\}/);
   assert.match(source, /\.canvas-chat-rail \{[^}]*top: calc\(var\(--site-header-offset, 4\.25rem\) \+ 0\.75rem\)/);
   // 跨檔契約：navbar 右退變數兩端都必須在場——工作站 useEffect 寫入、
   // Navbar 的 <nav> 以 margin-left/寬度 calc 消費。缺任何一端＝面板吃頂後

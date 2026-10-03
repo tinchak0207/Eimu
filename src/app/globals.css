@@ -187,6 +187,33 @@
     backdrop-filter: blur(28px) saturate(200%) brightness(1.1);
   }
 
+  /* ≤639.98px：頂欄預設完全透明（與頁面底色無縫，見 Navbar 的 max-sm: 覆寫）；只有頁面捲動
+     之後才補一層毛玻璃，否則內容會從圖示底下穿過去。桌面島狀不受影響。
+     ID＋屬性選擇器的特異度蓋過同層的 max-sm:bg-transparent / max-sm:[backdrop-filter:none]，
+     所以捲動態不需動 JSX 的 utility；未捲動時不命中此規則＝仍全透明。
+     只給毛玻璃本身，不補 border / box-shadow——分隔線在手機上很刺眼。 */
+  @media (max-width: 639.98px) {
+    #global-navbar nav[aria-label="主导航"][data-nav-scrolled="true"] {
+      background: rgba(255, 255, 255, 0.72);
+      -webkit-backdrop-filter: blur(20px) saturate(180%);
+      backdrop-filter: blur(20px) saturate(180%);
+    }
+  }
+
+  /* ≥768px 桌面島：與左側助理卡同一滴玻璃。2026-10-03 暴君「桌面端兩個大組件背景顏色
+     不對齊，以左邊為基準」——島原本吃 .lg-bar（0.62 白／blur28／saturate200／brightness1.1），
+     而面板卡（.canvas-chat-scroll-fill > section.lg-card）是 0.56 白／blur40／saturate180／
+     brightness1.08；同一螢幕並排就是一深一淺。這裡把島降級到卡面同一組數值（blur 半徑不是
+     新增的上限，卡面本來就是 40px）。特異度（ID＋屬性）蓋過同層 .lg-bar。
+     行動版完全不受影響：<640 由上方規則接管，640–767 保持原樣。 */
+  @media (min-width: 768px) {
+    #global-navbar nav[aria-label="主导航"] {
+      background: rgba(255, 255, 255, 0.56);
+      -webkit-backdrop-filter: blur(40px) saturate(180%) brightness(1.08);
+      backdrop-filter: blur(40px) saturate(180%) brightness(1.08);
+    }
+  }
+
   /* Elevated material — modals, sheets, popovers */
   .lg-sheet {
     background: rgba(255, 255, 255, 0.82);

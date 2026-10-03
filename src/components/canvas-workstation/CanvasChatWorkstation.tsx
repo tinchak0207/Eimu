@@ -204,11 +204,13 @@ export function CanvasChatWorkstation({
             .canvas-chat-panel {
               position: fixed;
               z-index: 60;
-              /* 2026-09-24 暴君裁定：面板吃滿天花板——頂部只留 0.75rem 呼吸位，
-                 不再從導覽列下緣起算； navbar 改由 --ws-navbar-inset 右退讓位
-                 （見組件頂部 useEffect 與 Navbar.tsx）。bottom 與 max-height
-                 上下對稱留 0.75rem，max-height 是 bottom 定界外的雙保險。 */
-              top: 0.75rem;
+              /* 2026-09-24 暴君裁定：面板吃滿天花板——不再從導覽列下緣起算；
+                 navbar 改由 --ws-navbar-inset 右退讓位（見組件頂部 useEffect 與
+                 Navbar.tsx）。bottom 留 0.75rem，max-height 是 bottom 定界外的雙保險。
+                 2026-10-03 暴君「桌面端兩個大組件頂部沒對齊，以右邊為基準」：
+                 右側導覽島頂 = 8px（header 的 pt-2），故面板頂 0.75rem → 0.5rem，
+                 max-height 同步改 1.25rem——兩面同高起跑，且面板仍吃滿天花板。 */
+              top: 0.5rem;
               bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
               left: var(--site-shell-left, 0.75rem);
               /* 寬度讀單一真相源：:root 默認 clamp 或 JS（use-chat-panel）在
@@ -218,7 +220,7 @@ export function CanvasChatWorkstation({
               display: flex;
               flex-direction: column;
               min-height: 0;
-              max-height: calc(100dvh - 1.5rem - env(safe-area-inset-bottom, 0px));
+              max-height: calc(100dvh - 1.25rem - env(safe-area-inset-bottom, 0px));
               max-width: calc(100vw - 1.5rem);
               /* 殼退為形狀宿主：底色/邊框交給內層 section.lg-card 的玻璃材質
                  （0.72 白玻璃＋blur＋specular 亮線），畫布在背後可折射。 */
@@ -309,6 +311,24 @@ export function CanvasChatWorkstation({
               background: rgba(255, 255, 255, 0.56);
             }
             .canvas-chat-scroll-fill > :not(section.lg-card) { flex-shrink: 0; }
+            /* 2026-10-03 暴君「桌面端按鈕 y 座標沒對齊，以右邊為基準」：
+               右側導覽島（頂 8px、高 62px）上按鈕列的中心 = 39px 就是基準線。
+               卡片 sm:p-6 的 24px 頂內距之外，描述框在 agent 態是用 class="hidden"
+               （display:none）而非 [hidden] 屬性，Tailwind space-y-4 的
+               "> :not([hidden]) ~ :not([hidden])" 照樣把 16px 外距套給下一列
+               ——兩者合計把 AgentChatSurface 的圖示列推到 y=57（中心 79），比基準低 40。
+               這裡把卡片頂內距收回 4px、消掉那段幽靈外距，圖示列頂 =
+               8(卡頂) + 1(卡框) + 4 + 4(AgentChatSurface 自帶 pt-1) = 17px（中心 39）。
+               只在 ≥768px（= 工作站展開面板的桌面態）與 ≥xl 首頁生效；≤767px 由下方
+               媒體查詢全螢幕接管，手機版佈局一字不動。 */
+            @media (min-width: 768px) {
+              .canvas-chat-scroll-fill > section.lg-card {
+                padding-top: 0.25rem;
+              }
+              .canvas-chat-scroll-fill > section.lg-card > div > div.dust-transition {
+                margin-top: 0;
+              }
+            }
             .agent-composer-anchor { flex-shrink: 0; }
             .canvas-chat-resize {
               position: absolute;

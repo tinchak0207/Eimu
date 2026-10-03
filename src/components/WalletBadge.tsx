@@ -98,7 +98,7 @@ export function WalletBadge({ className, showTopUp = true, showCheckin = true }:
       {/* 余额 + 「+」合体胶囊：币值一段、加号一段，同一颗圆角外壳。
           「+」恆為加號入口；已簽態只在菜單項裡表達。 */}
       <div
-        className="inline-flex max-w-full shrink items-stretch overflow-hidden rounded-full bg-[rgba(0,0,0,0.05)] select-none"
+        className="inline-flex max-w-full shrink items-stretch overflow-hidden rounded-full bg-[rgba(0,0,0,0.05)] max-sm:bg-transparent select-none"
         aria-label={`余额 ${coins} 币`}
       >
         <div className="flex min-w-0 items-center gap-1 whitespace-nowrap px-3 py-1.5 text-ios-footnote font-semibold text-[rgba(120,90,20,0.85)] cursor-default">
@@ -113,7 +113,7 @@ export function WalletBadge({ className, showTopUp = true, showCheckin = true }:
             aria-expanded={plusOpen}
             aria-haspopup="menu"
             aria-label="余额操作"
-            className="flex w-7 shrink-0 cursor-pointer items-center justify-center text-[rgba(120,90,20,0.85)] transition-colors duration-200 hover:bg-[rgba(0,0,0,0.06)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)]"
+            className="flex w-7 shrink-0 cursor-pointer items-center justify-center text-[rgba(120,90,20,0.85)] transition-colors duration-200 sm:hover:bg-[rgba(0,0,0,0.06)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)]"
           >
             {/* 2026-09-05 暴君裁定：「+」是充值/签到入口，恆為加號——
                 簽到完成態只反映在菜單項裡，不侵占入口圖標。 */}
