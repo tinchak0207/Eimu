@@ -62,6 +62,11 @@
 | 工作流某个节点不满意/连错线 | 改参数 `workflow_update_node` → 只重跑该节点 `workflow_rerun_node`；断开错连 `workflow_disconnect` | — |
 | 画布产线：改步骤/加环节/改依赖/退回旧版（像改代码一样改工作流） | `canvas_get_state` 读 `dsl`（产线的**可逆声明**）→ 改 `steps` → `workflow_write` 整份交回（全图校验→原子落图，人拖过的位置不动）；退回某步内容：`workflow_history` 查该节点版本 → `workflow_rollback` 指定 version | 只改单个节点参数/连线仍用 `canvas_apply_ops`（`update_node`/`connect_nodes`）；**禁**手拼 `add_node`+`connect_nodes` 搭整条产线——那会绕过编译器，破坏「声明⇄图」可逆性 |
 
+> **`workflow_*` 前綴橫跨兩個真相世界，不可混用**：
+> - **world2 後端執行圖**（打 `/internal/workflow/*`）：`workflow_start`／`workflow_add_node`／`workflow_connect`／`workflow_generate`／`workflow_status`／`workflow_update_node`／`workflow_rerun_node`／`workflow_disconnect`——「某節點不滿意／連錯線」走這族。
+> - **world1 畫布產線**（畫布上看得到的產線，節點 id 形如 `wf-…`／`tpl-…`）：改步驟／加環節／改依賴／退版走 DSL 三件——`canvas_get_state` 讀 `dsl` → `workflow_write`；退版 `workflow_history` → `workflow_rollback`。**雖掛 `workflow_` 前綴，屬 world1，別拿 world2 的 `add_node` 去改它。**
+> - **禁手拼 `add_node`＋`connect_nodes` 搭整條產線結構**（繞過編譯器、破壞「宣告⇄圖」可逆性）；單節點參數／單條連線才用 `canvas_apply_ops`。
+
 **工具优先级**：原生工具（image_* / canvas_* / workflow_* / tts_speak / timeline_*）> bash curl。原生工具自带探测与扣费，不用 bash 重造。剪辑纪律：改动时间线一律 query→ops→回读 diff，禁止凭记忆猜时间线状态；多步变更加进同一 ops 批次（原子语义，锁定片段整批拒绝是保护不是故障）。节奏/lint 报告只动手修 must/should 且 clip_id 明确的项；越轴/动作连续性/运动追踪/口型同步是诚实 unsupported，不许承诺。交付前必过 `timeline_lint`，`qc` 栏须为 lint/master 真实结论。**执行者**：时间线十件套只有 `editor` Expert 持有（主会话工具表已显式禁用 timeline_*），剪辑域任务一律经 `subagent_dispatch` 的 `expert: "editor"` 派下去，主会话不得用 bash+ffmpeg 代办。
 
 ## 1.5 检索分流（先看这张表）

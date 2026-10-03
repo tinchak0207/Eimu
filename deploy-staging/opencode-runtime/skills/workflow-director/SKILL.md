@@ -11,6 +11,8 @@ metadata:
 
 接到任务先 `asset_search` 查 video-gen-prompts/seedance-prompts/nano-banana-prompts 包（免费），命中先复用原文再进 workflow_*，查空才自编 prompt。
 
+> **改已有画布产线（world1）先看这里**：画布上看得见的产线（节点 id 形如 `wf-…`／`tpl-…`）的读写回滚走 **DSL 三件**——`canvas_get_state` 读 `dsl` → `workflow_write` 整份交回；要退回某步内容用 `workflow_history` → `workflow_rollback`（详见「像改代码一样改画布产线」节）。这是 **world1 画布链**；`workflow_start`／`workflow_add_node`／`workflow_connect`／`workflow_generate` 打的是 **world2 后端执行图**（`/internal/workflow/*`），两者不是同一张图，别混用。
+
 ## 心智模型（只需要懂这些）
 - **工作流** = 一组节点 + 连线。节点是「要什么资产」：text(脚本/提示词)、config(生成设定)、image(图)、video(影片)。
 - **连线** = 「这个的输出喂给那个」（例如角色图 → 影片，就是让影片参考角色）。
@@ -102,7 +104,27 @@ content: {
 
 静态描述节点（角色描述、场景描述、故事脚本）不需要镜头语言——照旧填 content 字串。**只有会变成影片的镜头节点用 shot JSON。**
 
+## 像改代码一样改画布产线（world1 画布链，2026-10-03 人机共笔）
+
+画布上看得见的产线（节点 id 形如 `wf-…`／`tpl-…`）由前端画布（world1）拥有真相。改它**不是**逐节点手拼，而是读写它的**可逆声明（DSL）**：
+
+| 动作 | 工具 | 说明 |
+|---|---|---|
+| 读声明与版本史 | `canvas_get_state`（摘要带 `dsl`／`workflow_versions`）或 `workflow_history` | `dsl` 是 `WorkflowDslSource[]`（`{ workflow, title?, steps }`）；`workflow_versions` 是各节点版本史（`reason` ∈ created／generated／edited／metadata／revert） |
+| 改整条产线 | `workflow_write` | 读 `dsl` → 改 `steps`（增/删/改步、用 `needs` 改依赖）→ **整份 source 交回**。先过全图校验（id 重复／needs 悬空／依赖成环／tool 非法 → 整份拒绝、画布不动、错误自带修复提示），过了才确定性编译成 ops 原子落图；`dry_run:true` 可只编译预览 |
+| 退回某步内容 | `workflow_history` 查 `version` → `workflow_rollback` | 只还原内容（title+metadata），不动位置/尺寸；回滚本身也落一版（`reason=revert`），可再回滚回去 |
+
+`steps` 形状：`{ id, title, kind?, prompt?, needs?, model?, size?, count?, gate?, tool?, meta? }`（`id` 小写字母开头 `[a-z0-9_]`、档内唯一，**同 id 同节点＝幂等更新**；`needs` 驱动画布连线；`kind` ∈ image／text／video／audio／director，缺省 image）。
+
+**负面案例（禁止）**：
+- 改**整条产线结构**（加/删步骤、重排依赖）一律用 `workflow_write`；**禁止**用 `canvas_apply_ops` 手拼 `add_node` + `connect_nodes` 搭流程——手拼绕过编译器（坐标/增量/连线去重/确定性节点 id 全在编译器里），会破坏「声明 ⇄ 图」的可逆性，也和人工拖过的坐标打架。
+- 只改**单个节点的参数/标题**，或**手工调一条连线**，才用 `canvas_apply_ops` 的 `update_node`／`connect_nodes`（单点编辑，不碰产线结构）。
+- **人拖过的节点位置不会被覆盖**：落图时节点位置由画布排布，人工编辑优先。
+- **v0 不删节点**：`source` 里移除的步骤只回 warnings，不会真删画布上已有节点。
+
 ## 标准流程：自订工作流（无模板）
+
+> **world 判定（2026-10-03）**：本节的 `workflow_start`／`workflow_add_node`／`workflow_connect`／`workflow_generate` **全部打 world2 后端执行图**（`/internal/workflow/*`；依据 `tools/workflow_start.ts:49`、`workflow_add_node.ts:21`、`workflow_connect.ts:17`、`workflow_generate.ts:17`）。**若用户要改的是画布上看得见的那条产线（节点 id 形如 `wf-…`／`tpl-…`，world1）**，不要走本节手拼路径，改走上一节的 DSL 路径（`canvas_get_state` 读 `dsl` → `workflow_write`；退版用 `workflow_history`／`workflow_rollback`）。
 
 用户要的不是模板位场景时：
 
