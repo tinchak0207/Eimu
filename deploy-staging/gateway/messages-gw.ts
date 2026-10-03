@@ -28,6 +28,20 @@ import { personaModel, isVisionModel } from "./model-registry.ts"
 // 2026-10-02 圖片入上下文：把本輪附件清單裡的圖片轉成 opencode prompt 的 file part
 // （純函式，見 turn-image-parts.ts）。只組資料，不碰 network/session state。
 import { buildTurnImageParts } from "./turn-image-parts.ts"
+// 2026-10-04 環境事實抽離：本回合掛載的 agent／工具表／能力斷路／沙箱／工作目錄／
+// 本機檔案通道由真源推導後動態注入（見 environment-facts.ts），不再寫死散文常量。
+import {
+  collectRuntimeEnvironment,
+  environmentSectionStability,
+  renderEnvironmentSection,
+  renderCapabilityCutoffFact,
+  type CollectEnvironmentInputs,
+  type RuntimeEnvironment,
+} from "./environment-facts.ts"
+// 2026-10-04 接線：環境事實段的 localBridge 需要「本回合使用者 id」。既有唯一路徑＝
+// auth-gw 的正典化身分解析（router 已用 resolveCanonicalKey 做同一件事；此處複用它取
+// userId，不自造第二套身分查詢）。
+import { resolveCanonicalIdentity } from "./auth-gw.ts"
 // TODO(整合)：以下符號仍住 index.ts 且未 export（本任務禁改 index.ts；bun build 對未 export
 // 的 named import 報錯，已實測 2026-09-19）。依第一階段佔位符法（記憶
 // gateway-index-refactor-stage1-0919）：declare 佔位可過 bun build；整合 subagent 統一換真 import。
@@ -201,6 +215,66 @@ export function unfreezeSystemStaticSections(state: object): void {
   systemSectionLatch.delete(state)
 }
 
+/**
+ * 產生本回合的「環境事實段」（唯一組裝點，2026-10-04）。
+ *
+ * 為什麼抽成函式：環境段的穩定度決策（latch vs 每輪重算）與 userId 取用必須是**同一個
+ * 可測接線**——localBridge 只有拿到 userId 才會從 `unknown` 變成具體態，進而使整段轉
+ * `turn`（不得黏著）。把「解析 userId → 蒐集事實 → 依穩定度選段型」收在這裡，測試可注入
+ * 假 resolver 證明 userId 真的流進 `collectRuntimeEnvironment`（見
+ * system-prompt-static-dynamic.test.ts 的接線斷言）。
+ *
+ * userId 來源＝既有正典化身分路徑 `resolveCanonicalIdentity`（router 既有 `resolveCanonicalKey`
+ * 同源），不自造第二套。取不到（回 null／拋錯）一律維持 `null` ⇒ environment-facts 判
+ * `unknown`，**不得猜**。
+ *
+ * 穩定度契約（見 environmentSectionStability）：
+ *   - localBridge 非 `unknown` ⇒ 整段 `turn` ⇒ dangerousUncachedSystemSection（每輪重算，不黏著）。
+ *   - localBridge `unknown` ⇒ `session` ⇒ 才可 latch（讀不到事實，不是「沒有」）。
+ */
+export async function buildEnvironmentSection(input: {
+  /** latch 的凍結載體（session state）。 */
+  state: object
+  /** 正典化後的 session API key（router 傳入的 key）。 */
+  key: string
+  /** 本回合掛載 agent。 */
+  plane: string
+  /** 客戶端上報（未淨化）；缺＝undefined ⇒ client=null。 */
+  clientEnvironmentReport?: unknown
+  /** 依賴注入（測試用）：userId 解析；預設走既有正典化身分路徑。 */
+  resolveUserId?: (key: string) => Promise<number | null>
+  /** 依賴注入（測試用）：環境蒐集；預設 collectRuntimeEnvironment。 */
+  collect?: (inputs: CollectEnvironmentInputs) => RuntimeEnvironment
+}): Promise<SystemPromptSection> {
+  const resolveUserId = input.resolveUserId ?? (async (k) => (await resolveCanonicalIdentity(k)).userId)
+  const collect = input.collect ?? collectRuntimeEnvironment
+  let userId: number | null = null
+  try {
+    userId = await resolveUserId(input.key)
+  } catch {
+    userId = null // fail-safe：取不到身分 ⇒ unknown，不得猜
+  }
+  const runtimeEnv = collect({
+    plane: input.plane,
+    clientEnvironmentReport: input.clientEnvironmentReport,
+    userId,
+  })
+  if (environmentSectionStability(runtimeEnv) === "turn") {
+    // 每輪可變（localBridge 有值／客戶端本機能力有上報）⇒ 不黏著，須即時生效。
+    return dangerousUncachedSystemSection(
+      "environment",
+      renderEnvironmentSection(runtimeEnv),
+      "localBridge 本机文件通道状态每轮可变（装置上下线/授权根/凭据可用性），须即时生效（不可黏着到 session 起点）",
+    )
+  }
+  // session 內穩定（localBridge=unknown 且無具體客戶端上報）⇒ 可黏著省 token。
+  // latch key 帶 plane：beast_mode 可在會話中途切換 → 同一 plane 內黏著、plane 一變即重算。
+  return systemSessionSection(
+    "environment",
+    latchSystemSection(input.state, `environment:${runtimeEnv.plane}`, () => renderEnvironmentSection(runtimeEnv)),
+  )
+}
+
 const GW_TOKEN_RE = /⟦\s*gw\s*:[^⟧]*⟧/gi
 
 // 用戶輸入淨化：抹除用戶偽造的網關憑證 token，並把冒充系統/網關的方括號標題繳械。
@@ -348,7 +422,6 @@ export const BEAST_STABLE_CORE: BeastFrameModule = {
     "【expert 欄·建議欄】窄域生產任務建議點名：點名值即最終裁決（點名前自行確認目標域持有任務所需工具）；研究／分析／調研任務留空，不得填 critic；網關對未知 id 回 400。",
     "【派遣優先於完美】先派再修；spec 格式由網關兜底，因格式焦慮壓住派遣即違憲。",
     "【優先序】本幀與《派遣手冊》優先於 workspace/AGENTS.md：AGENTS.md 的 workflow_* 親手操作指引在野獸模式下由 Expert 執行；執行細節聽 AGENTS.md 配方，指揮權聽本手冊。AGENTS.md 的安全紅線與文案規範繼續有效。",
-    "【能力斷路·物理事實】域工具不在你的工具表（orchestrator 工具表已物理裁剪，轉移調用直接失敗）；subagent_dispatch 是唯一通路。",
     "【模板優先·機器判】製作類任務禁止無模板裸跑；模板由系統機器判定並寫進 Expert 任務書；你在簡報明說用了哪個模板，Expert 跳過的環節要在匯總如實呈現。",
     "【安全紅線】secret／憑證／token／OTP／私鑰永不入 log／memory／commit；禁 headless 交互登入；外部副作用先確認再執行；Compliance ACK 不代暴君接受；覆蓋遠端檔前必 diff 兩端。",
     "【階段知識】本幀按當前任務階段注入對應模組（research／creation／critique／dispatch-verify）；完整《派遣手冊》全文在 gateway/expert/orchestrator-dispatch-playbook.md。",
@@ -502,7 +575,7 @@ export async function handleSendMessage(key: string, id: string, req: Request): 
   const tAcceptAt = Date.now()
   const state = getOwnedSession(key, id)
   if (!state) return jsonError(404, "session not found", "not_found", "not_found")
-  let body: { content?: string; canvas_state?: unknown; session_directive?: string }
+  let body: { content?: string; canvas_state?: unknown; session_directive?: string; client_environment?: unknown }
   try {
     body = (await req.json()) as { content?: string; canvas_state?: unknown }
   } catch {
@@ -728,12 +801,12 @@ export async function handleSendMessage(key: string, id: string, req: Request): 
           text.replace(/^\s*<!--[\s\S]*?-->\s*/, "").trimStart()
         const playbookBody = stripProvenanceHeader(playbook).trimEnd()
         const digestBody = stripProvenanceHeader(digest).trimEnd()
-        // R8 修復片2（2026-09-10）：能力斷路·物理事實——R7 狀態聲明之上的補丁句
-        // （R7 遺留#2 的宣告升級）。orchestrator agent 工具表已物理裁剪
-        // （opencode.json agent.orchestrator.tools），digest 的「能力断路」聲明
-        // 由此升級為物理事實；subagent_dispatch（帶 expert 欄）是域工具唯一通路。
-        const capabilityCutoffFact =
-          "【能力斷路·物理事實】上列註冊表宣告的域工具不在你的工具表裡（orchestrator agent 工具表已物理裁剪，轉移調用會直接失敗）。經 subagent_dispatch（帶 expert 欄）派遣對應 Expert 是執行它們的唯一通路。AGENTS.md 路由表中對應這些工具的行，由你派遣的 Expert 代為執行；其餘工具（image_generate 等）的直調路由仍按 AGENTS.md 執行。"
+        // R8 修復片2（2026-09-10）→ 2026-10-04 抽離：能力斷路·物理事實不再寫死——
+        // 由 environment-facts 從真源 expert/opencode-agents.json 的 orchestrator
+        // 工具表推導（清單與數字從事實來），語義不變（域工具已物理移除、
+        // subagent_dispatch 帶 expert 欄是唯一通路）。legacy v1 幀與環境段共用同一函式。
+        const beastEnv = collectRuntimeEnvironment({ plane: "orchestrator" })
+        const capabilityCutoffFact = renderCapabilityCutoffFact(beastEnv)
         // R5 修復片（2026-09-11）：優先序聲明——野獸幀＋派遣手冊優先於 workspace/AGENTS.md，
         // 消除「你負責擴寫／親自操作 workflow_*」（AGENTS.md）vs「你本人不產出任何內容」
         // （派遣手冊第〇節）的語義分歧（R8 審計 E7；1204 秒零工具調用病灶實證）。
@@ -744,7 +817,7 @@ export async function handleSendMessage(key: string, id: string, req: Request): 
         // 修法＝模板選擇接 System One 機器判定並在派遣時硬注入 Expert 任務書；
         // 本幀只聲明職責：你在簡報裡要交代用了哪個模板、跳過了哪些環節與原因。
         const beastTemplateFact =
-          "【模板優先·機器判】製作類任務（MV／影片／多鏡／成片／長片／角色／場景／OP）禁止無模板裸跑——模板是產品的真實生產線，角色設定卡／美術卡／分鏡門禁等約束環節是防業餘化的欄位（沒有它們＝業餘水平）。模板選擇由系統（System One）機器判定，派遣時網關會把「生產骨架＝模板 X」自動寫進 Expert 任務書；你沒有 workflow_* 工具（能力斷路），模板骨架由 Expert 用 workflow_start 建立。你的職責：①在派遣簡報裡明說用哪個模板；②Expert 若跳過某環節，交付裡必須有「跳過 X 環，原因 Y」，你要在匯總裡照抄如實呈現，不得靜默略過。"
+          "【模板優先·機器判】製作類任務（MV／影片／多鏡／成片／長片／角色／場景／OP）禁止無模板裸跑——模板是產品的真實生產線，角色設定卡／美術卡／分鏡門禁等約束環節是防業餘化的欄位（沒有它們＝業餘水平）。模板選擇由系統（System One）機器判定，派遣時網關會把「生產骨架＝模板 X」自動寫進 Expert 任務書；你沒有 workflow_* 工具（工具面事實見 system 的【环境事实·运行时】段，此處不再各自宣告），模板骨架由 Expert 用 workflow_start 建立。你的職責：①在派遣簡報裡明說用哪個模板；②Expert 若跳過某環節，交付裡必須有「跳過 X 環，原因 Y」，你要在匯總裡照抄如實呈現，不得靜默略過。"
         if (!playbookBody || !digestBody) {
           return jsonError(
             503,
@@ -811,6 +884,22 @@ export async function handleSendMessage(key: string, id: string, req: Request): 
       }
     }
   }
+  // ── 環境事實段（2026-10-04）：本回合掛載的 agent／工具表／能力斷路／沙箱／工作目錄／
+  // 本機檔案通道／客戶端上報的本機環境事實，由真源與 body 動態推導後注入 system。穩定度
+  // 由 environmentSectionStability 決定：session 內穩定的格子（plane/toolSurface/surface）
+  // 黏著 latch；每輪可變者（localBridge、客戶端本機能力、renderHost）一旦有具體值即整段
+  // 轉 turn，不黏著。此段是「能力斷路」事實的單一宣告真源（BEAST_STABLE_CORE 內舊句已移除）。
+  // 2026-10-04：此處把本回合 userId 傳進環境蒐集（否則 localBridge 永遠 unknown）——userId
+  // 走既有正典化身分路徑 resolveCanonicalIdentity（見 buildEnvironmentSection），取不到即 unknown。
+  systemSections.push(
+    await buildEnvironmentSection({
+      state,
+      key,
+      plane: promptBody.agent ?? "unknown",
+      // 客戶端上報（可選）：未帶＝undefined ⇒ client=null（全部語義 unknown），行為與舊版逐位元組相同。
+      clientEnvironmentReport: body.client_environment,
+    }),
+  )
   // R8-C（2026-08-29）：steer 打斷語義——上一輪被用戶中止後緊接的新消息，
   // 明確告知模型「被打斷、直接回應、別重複開場白」。消除同一句開場白反覆
   // 出現（用戶視角像 agent 沒記憶、原地踏步）。turnAborted 在此尚未被重置，

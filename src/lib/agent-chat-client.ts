@@ -518,6 +518,57 @@ async function attemptDirectSend(
 }
 
 /**
+ * 客户端環境上報（型別化白名單；閘道側 sanitizeClientEnvironmentReport 逐值白名單淨化）。
+ *
+ * 只有客戶端知道的事實隨訊息上報，閘道據此生成環境段。只從**可實證的訊號**推導，
+ * 推不出的一律不送（閘道語義＝unknown），絕不送猜測值：
+ *   - surface：globalThis.eimuLocal 是否存在（桌面殼 preload 注入）→ desktop-shell / web。
+ *   - window_eimu_local / local_save：存在性檢查。
+ *   - ffmpeg / ffprobe：僅桌面殼內向 capabilities() 探測（有界等待；失敗／超時即不送）。
+ *   - renderHost：客戶端無可信訊號（由部署/伺服器決定）⇒ 不上報，閘道語義 unknown。
+ *
+ * 回傳值直接作為 POST body 的頂層 client_environment；不含任何自由文字。
+ */
+const LOCAL_CAPABILITY_PROBE_TIMEOUT_MS = 1500;
+
+async function probeLocalCapabilities(
+  g: Record<string, unknown>,
+): Promise<{ ffmpeg?: unknown; ffprobe?: unknown } | undefined> {
+  const api = g.eimuLocal as { capabilities?: () => Promise<{ ffmpeg?: unknown; ffprobe?: unknown }> };
+  if (!api || typeof api.capabilities !== "function") return undefined;
+  try {
+    return await Promise.race([
+      api.capabilities(),
+      new Promise<undefined>((resolve) => {
+        setTimeout(() => resolve(undefined), LOCAL_CAPABILITY_PROBE_TIMEOUT_MS);
+      }),
+    ]);
+  } catch {
+    return undefined;
+  }
+}
+
+export async function collectClientEnvironment(): Promise<Record<string, unknown>> {
+  const g = globalThis as unknown as Record<string, unknown>;
+  const eimu = g.eimuLocal as { capabilities?: unknown } | undefined;
+  const hasEimu = !!eimu && typeof eimu.capabilities === "function";
+  const capabilities: Record<string, boolean> = {
+    window_eimu_local: hasEimu,
+    local_save:
+      typeof g.showSaveFilePicker === "function" || typeof g.showDirectoryPicker === "function",
+  };
+  if (hasEimu) {
+    const probed = await probeLocalCapabilities(g);
+    if (typeof probed?.ffmpeg === "boolean") capabilities.ffmpeg = probed.ffmpeg;
+    if (typeof probed?.ffprobe === "boolean") capabilities.ffprobe = probed.ffprobe;
+  }
+  return {
+    surface: hasEimu ? "desktop-shell" : "web",
+    local_capabilities: capabilities,
+  };
+}
+
+/**
  * 送一条对话消息。网道回 202 即算已收。
  *
  * 09-12 起帶可選第 4 參數 direct：有現任 SSE 票且未閂鎖 → 先直連網關；
@@ -539,6 +590,9 @@ export async function sendAgentMessage(
   if (typeof options?.sessionDirective === "string" && options.sessionDirective.trim().length > 0) {
     body.session_directive = options.sessionDirective;
   }
+  // 客戶端環境上報（本包）：與 content/canvas_state/session_directive 同一 payload，
+  // 直連與中繼兩條腿共用同一 body，閘道據此生成環境段（欄位缺失時閘道行為不變）。
+  body.client_environment = await collectClientEnvironment();
   if (direct && !direct.capability.rejected) {
     const messagesUrl = deriveMessagesUrl(direct.ticket.events_url);
     if (messagesUrl && directSendEligible(trimmed, options)) {

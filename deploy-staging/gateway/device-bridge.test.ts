@@ -34,6 +34,7 @@ import {
   DeviceBridge,
   ConsentTokenStore,
   deviceBridgeEnabled,
+  deviceBridgeRuntimeState,
   finalizeDeviceResult,
   sanitizeToolArgs,
   handleDeviceBridgeRoutes,
@@ -588,4 +589,39 @@ test("H2: 裝置自報遞迴觸碰敏感 → 整筆拒絕 sensitive_path，結�
   const out = await pending
   assert.equal(out.ok, false)
   if (!out.ok) assert.equal(out.code, "sensitive_path")
+})
+
+// ────────────────── 唯讀查詢（環境事實層 localBridge 來源）──────────────────
+
+test("deviceBridgeRuntimeState: 唯讀快照（在線/裝置數/授權根數），總開關 OFF → enabled=false", () => {
+  const T = 1_000_000
+  const bridge = new DeviceBridge({ heartbeatTtlMs: 90_000 })
+  bridge.register({ tenant: "u:1", userId: 1, apiKeyHash: "h1", roots: ["/home/u/project", "/home/u/docs"], now: T })
+  const before = bridge.stats()
+
+  // env 未開 → enabled=false，且不查註冊表
+  const off = deviceBridgeRuntimeState(1, { bridge, env: {}, now: T })
+  assert.deepEqual(off, { enabled: false, online: false, deviceCount: 0, authorizedRootCount: 0 })
+
+  // env 開、心跳未過期 → 在線且已授權根
+  const on = deviceBridgeRuntimeState(1, { bridge, env: { EIMU_DEVICE_BRIDGE: "1" }, now: T + 1_000 })
+  assert.deepEqual(on, { enabled: true, online: true, deviceCount: 1, authorizedRootCount: 2 })
+
+  // 心跳逾時 → online=false（裝置仍算已註冊）
+  const stale = deviceBridgeRuntimeState(1, { bridge, env: { EIMU_DEVICE_BRIDGE: "1" }, now: T + 90_001 })
+  assert.deepEqual(stale, { enabled: true, online: false, deviceCount: 1, authorizedRootCount: 0 })
+
+  // 別的使用者看不到這台裝置
+  const other = deviceBridgeRuntimeState(2, { bridge, env: { EIMU_DEVICE_BRIDGE: "1" }, now: T + 1_000 })
+  assert.deepEqual(other, { enabled: true, online: false, deviceCount: 0, authorizedRootCount: 0 })
+
+  // 唯讀：不改動註冊表狀態（裝置數/待辦/票）
+  assert.deepEqual(bridge.stats(), before)
+
+  // 在線但未授權任何根 → authorizedRootCount=0（據此判 no_authorized_roots）
+  const noRoots = new DeviceBridge()
+  noRoots.register({ tenant: "u:9", userId: 9, apiKeyHash: "h9", roots: [], now: T })
+  const nr = deviceBridgeRuntimeState(9, { bridge: noRoots, env: { EIMU_DEVICE_BRIDGE: "1" }, now: T + 1 })
+  assert.equal(nr.online, true)
+  assert.equal(nr.authorizedRootCount, 0)
 })

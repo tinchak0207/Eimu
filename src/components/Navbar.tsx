@@ -22,6 +22,7 @@ import { DesktopDownloadButton } from "@/components/DesktopDownloadButton";
 import { WindowControls } from "@/components/WindowControls";
 import { useEimuShell } from "@/hooks/use-eimu-shell";
 import { PwaHandoffPanel } from "@/components/PwaHandoffPanel";
+import { ShellUpdatePrompt } from "@/components/ShellUpdatePrompt";
 import { QqGroupDialog } from "@/components/QqGroupDialog";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
 import { AnnouncementSurfaces } from "@/components/notifications/AnnouncementSurfaces";
@@ -547,6 +548,9 @@ export function Navbar({ className }: NavbarProps) {
           </div>
         </nav>
       </header>
+
+      {/* 舊桌面殼更新提示（渲染 null，只跑 useEffect；全站生效，見 ShellUpdatePrompt.tsx）。 */}
+      <ShellUpdatePrompt />
 
       {/* QQ 群二维码弹窗（仅桌面端入口会打开；手机端走直跳链接）。 */}
       <QqGroupDialog open={qqOpen} onClose={() => setQqOpen(false)} />

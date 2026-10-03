@@ -76,6 +76,8 @@ const SHELL_CHANNELS = {
   close: "eimu-shell:close",
   isMaximized: "eimu-shell:is-maximized",
   state: "eimu-shell:state",
+  updateReady: "eimu-shell:update-ready",
+  applyUpdate: "eimu-shell:apply-update",
 };
 
 contextBridge.exposeInMainWorld("eimuShell", {
@@ -95,4 +97,17 @@ contextBridge.exposeInMainWorld("eimuShell", {
     ipcRenderer.on(SHELL_CHANNELS.state, listener);
     return () => ipcRenderer.removeListener(SHELL_CHANNELS.state, listener);
   },
+
+  // 0.3.2：自動更新。訂閱「更新已下載、待重啟套用」，回傳取消訂閱函式
+  // （比照 onMaximizeChange）。payload 為 { version }。
+  onUpdateReady: (cb) => {
+    if (typeof cb !== "function") return () => {};
+    const listener = (_event, payload) =>
+      cb(payload && typeof payload === "object" ? payload : {});
+    ipcRenderer.on(SHELL_CHANNELS.updateReady, listener);
+    return () => ipcRenderer.removeListener(SHELL_CHANNELS.updateReady, listener);
+  },
+
+  // 0.3.2：套用已下載的更新並重啟（主進程 updater.js applyUpdate）。
+  applyUpdate: () => ipcRenderer.send(SHELL_CHANNELS.applyUpdate),
 });

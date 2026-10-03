@@ -32,10 +32,13 @@
 const { app, BrowserWindow, shell, session, dialog, Menu, screen, ipcMain } = require("electron");
 const path = require("node:path");
 const { startDeviceBridge, stopDeviceBridge } = require("./device-bridge-client.js");
+const { readCredentialStore } = require("./lib/bridge-credential.js");
 const {
   registerWindowControlsIpc,
   attachWindowStateBroadcast,
 } = require("./window-controls.js");
+// 0.3.2：自動更新（electron-updater + generic provider）。見 desktop/updater.js。
+const { initUpdater, applyUpdate } = require("./updater.js");
 
 const APP_ORIGIN = "https://www.eimu.dev";
 // eimu.dev（無 www）會 308 到 www，但導航判斷一律以最終 host 為準，兩者都收。
@@ -303,15 +306,31 @@ if (!gotLock) {
     // 登記一次即可；目標視窗以 event.sender 反查，非全域 mainWindow。
     registerWindowControlsIpc(ipcMain);
 
+    // 0.3.2：自動更新接入點（另一條工作流請留意，勿重排）。
+    //   - initUpdater：開發模式自動 no-op；打包後延遲 15s 檢查、每 6h 一次，
+    //     下載完成時向主視窗送 eimu-shell:update-ready。
+    //   - eimu-shell:apply-update：頁面按下「重啟並套用」時觸發。
+    //     放在 main.js（組合根）而非 window-controls.js，讓後者維持單一職責。
+    initUpdater({ getWindow: () => mainWindow });
+    ipcMain.on("eimu-shell:apply-update", () => {
+      applyUpdate();
+    });
+
     // W6b：device bridge（雲端 agent 經本機**出站**連線讀已授權檔案）。
-    // 預設 OFF（EIMU_DEVICE_BRIDGE 未設＝不連）。本殼載入遠端頁面、只有 session，
-    // 沒有既有 Bearer sk-biz-* 憑證；因此 credentialProvider 誠實回 null ——
-    // 即使被開啟也只會得到 credentials_unavailable，不在殼內硬編任何 key。
-    // 缺口與建議補法見 desktop/DEVICE-BRIDGE.md。
+    // 預設 OFF（EIMU_DEVICE_BRIDGE 未設＝不連）。
+    //
+    // 憑證**不由頁面注入**——殼載入的是遠端頁面，讓頁面能把憑證交給主進程等於多開
+    // 一條 remote→local 信任路徑。改讀使用者自己放在 <userData>/device-bridge.json
+    // 的檔案（必須 0600）：沒有那個檔、JSON 壞、權限過寬，一律回 null ⇒ 橋停在
+    // credentials_unavailable，行為與從前完全相同。讀取規則見 lib/bridge-credential.js，
+    // 缺口與啟用步驟見 desktop/DEVICE-BRIDGE.md。
+    const bridgeCredential = readCredentialStore(path.join(app.getPath("userData"), "device-bridge.json"), {
+      onWarn: (reason) => console.warn(`[device-bridge] ${reason}`),
+    });
     void startDeviceBridge({
-      gatewayBaseUrl: process.env.EIMU_GATEWAY_BASE_URL,
+      gatewayBaseUrl: process.env.EIMU_GATEWAY_BASE_URL || bridgeCredential?.gatewayBaseUrl,
       enabled: process.env.EIMU_DEVICE_BRIDGE === "1",
-      credentialProvider: () => null,
+      credentialProvider: () => (bridgeCredential ? bridgeCredential.apiKey : null),
       onStatus: (s) => {
         bridgeState = s;
         applyBridgeIndicator();

@@ -9,6 +9,7 @@
  */
 import { expect, test, describe } from "bun:test"
 import type { SessionState } from "./types-gateway.ts"
+import { collectRuntimeEnvironment, type CollectEnvironmentInputs } from "./environment-facts.ts"
 import {
   authorityRule,
   authorityRuleStaticHead,
@@ -21,6 +22,7 @@ import {
   latchSystemSection,
   unfreezeSystemStaticSections,
   appendSystemPayloadToTurnTail,
+  buildEnvironmentSection,
   TAIL_PAYLOAD_MARKER,
   type SystemPromptSection,
 } from "./messages-gw.ts"
@@ -177,5 +179,128 @@ describe("尾端注入塊（appendSystemPayloadToTurnTail）格式與位置不�
     const before = pb.parts[0].text
     appendSystemPayloadToTurnTail(state, pb, "PAYLOAD", "【標籤】")
     expect(pb.parts[0].text).toBe(before)
+  })
+})
+
+// ── 環境事實段接線（2026-10-04）：userId 真的流進 collectRuntimeEnvironment ──────
+//
+// 缺口：messages-gw 的組裝處過去呼叫 collectRuntimeEnvironment 沒傳 userId ⇒ 生產永遠
+// 落到 localBridge=unknown（且 unknown 穩定度=session，會被 latch 黏住）。本組斷言證明
+// userId 由 resolver 拿到的**實際值**被傳進蒐集（用假的 env 狀態當獨立 oracle），並證明
+// 穩定度契約真的生效（非 unknown ⇒ turn 不黏著；unknown ⇒ session 可黏著）。
+describe("(d) 環境事實段接線：userId 進 collectRuntimeEnvironment，穩定度據此生效", () => {
+  /** 注入假 resolver 與蒐集 spy；collect 收到真實 inputs 後用受控裝置橋狀態跑真蒐集。 */
+  function harness(opts: { roots?: number; online?: boolean }) {
+    const seen: CollectEnvironmentInputs[] = []
+    const collect = (inputs: CollectEnvironmentInputs) => {
+      seen.push(inputs)
+      return collectRuntimeEnvironment({
+        ...inputs,
+        pathExists: () => false,
+        workspaceDir: "/ws",
+        uploadsDir: "/ws/uploads",
+        deviceBridgeOn: () => true,
+        deviceBridgeState: (u) => ({
+          enabled: true,
+          online: opts.online ?? true,
+          deviceCount: 1,
+          // roots 依 userId 事實回報：證明查詢吃的是傳進來的 userId，而非常數。
+          authorizedRootCount: u === 42 ? (opts.roots ?? 1) : 0,
+        }),
+      })
+    }
+    return { seen, collect }
+  }
+
+  test("有 userId ⇒ 值真的傳進蒐集；localBridge 具體 ⇒ 整段 turn，不黏著", async () => {
+    const { seen, collect } = harness({ roots: 1 })
+    let calledWith: string | null = null
+    const section = await buildEnvironmentSection({
+      state: {},
+      key: "sk-biz-canonical",
+      plane: "creator",
+      resolveUserId: async (k) => {
+        calledWith = k
+        return 42
+      },
+      collect,
+    })
+    // resolver 被以本回合 key 呼叫（既有正典化身分路徑）
+    expect(calledWith).toBe("sk-biz-canonical")
+    // 核心接線斷言：resolver 回傳的 42 真的進了蒐集輸入（值來自獨立 stub，非被測實作）
+    expect(seen.length).toBe(1)
+    expect(seen[0].userId).toBe(42)
+    // 具體 localBridge ⇒ turn（每輪重算），不得走 session latch
+    expect(section.stability).toBe("turn")
+    expect(section.cacheBreakReason).toBeTruthy()
+    expect(section.text).toContain("本机文件通道：在线可用")
+  })
+
+  test("取不到 userId ⇒ 維持 unknown（不得猜）且回落 session latch", async () => {
+    const { seen, collect } = harness({ roots: 3 })
+    const section = await buildEnvironmentSection({
+      state: {},
+      key: "k",
+      plane: "creator",
+      resolveUserId: async () => null,
+      collect,
+    })
+    expect(seen[0].userId).toBeNull()
+    // 即使裝置橋會回報 online，缺身分一律 unknown（unknown ≠ 沒有）
+    expect(section.stability).toBe("session")
+    expect(section.cacheBreakReason).toBeUndefined()
+    expect(section.text).toContain("本机文件通道：未知（本轮无法判定）")
+  })
+
+  test("resolver 拋錯 ⇒ fail-safe 維持 unknown，不得猜", async () => {
+    const { seen, collect } = harness({ roots: 3 })
+    const section = await buildEnvironmentSection({
+      state: {},
+      key: "k",
+      plane: "creator",
+      resolveUserId: async () => {
+        throw new Error("resolve-owner unavailable")
+      },
+      collect,
+    })
+    expect(seen[0].userId).toBeNull()
+    expect(section.stability).toBe("session")
+    expect(section.text).toContain("本机文件通道：未知（本轮无法判定）")
+  })
+
+  test("端點：unknown 先被黏著，一有 userId 即轉 turn 端出即時事實（不被舊 latch 黏死）", async () => {
+    const state = {}
+    const unknownHarness = harness({})
+    const unknownSec = await buildEnvironmentSection({
+      state,
+      key: "k",
+      plane: "creator",
+      resolveUserId: async () => null,
+      collect: unknownHarness.collect,
+    })
+    expect(unknownSec.stability).toBe("session")
+    // 同一 state 下一輪拿到 userId：必須走 turn、端出線上事實，而非回舊的 unknown 快取
+    const onlineHarness = harness({ roots: 2 })
+    const onlineSec = await buildEnvironmentSection({
+      state,
+      key: "k",
+      plane: "creator",
+      resolveUserId: async () => 42,
+      collect: onlineHarness.collect,
+    })
+    expect(onlineSec.stability).toBe("turn")
+    expect(onlineSec.text).not.toBe(unknownSec.text)
+    expect(onlineSec.text).toContain("本机文件通道：在线可用")
+    // 且裝置授權根數改變（2→0）會改變渲染（證明來源是查詢，非常數）
+    const noRootsHarness = harness({ roots: 0 })
+    const noRootsSec = await buildEnvironmentSection({
+      state,
+      key: "k",
+      plane: "creator",
+      resolveUserId: async () => 42,
+      collect: noRootsHarness.collect,
+    })
+    expect(noRootsSec.text).toContain("本机文件通道：在线，但未授权任何本机根目录")
+    expect(noRootsSec.text).not.toBe(onlineSec.text)
   })
 })

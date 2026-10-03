@@ -9,27 +9,26 @@
  * 兩平台可以不同（不同平台的打包時程／機器受限，不強制同步）。top-level `version`
  * 只是「已存在的最新版本」的標記，供外部標註與排序，**不是**兩平台共用版號。
  *
- * 現況：Linux 已重建為 0.3.1（含本輪本地能力與安全修補）；Windows 仍是 0.3.0，
- * 待 Windows 建置 VM 空檔後再重建為 0.3.1，屆時只改 `windows` 物件的 version/url/size/sha256。
+ * 現況：Linux 與 Windows 皆已重建為 0.3.2（含本輪本地能力與安全修補），同步上傳。
  */
 export const DESKTOP_RELEASES = {
   // 已存在的最新版本（＝兩平台目前較新者），非兩平台共用版號。
-  version: "0.3.1",
+  version: "0.3.2",
   linux: {
-    // 該平台產物版本：0.3.1，於 2026-10-04 重建並上傳（下載回本地逐位元組對帳一致）。
-    version: "0.3.1",
-    url: "https://gfy3gwthv6oa8bb7.public.blob.vercel-storage.com/desktop/Eimu-0.3.1-linux-x86_64.AppImage",
-    size: 125441135,
+    // 該平台產物版本：0.3.2，於 2026-10-04 重建並上傳（下載回本地逐位元組對帳一致）。
+    version: "0.3.2",
+    url: "https://gfy3gwthv6oa8bb7.public.blob.vercel-storage.com/desktop/Eimu-0.3.2-linux-x86_64.AppImage",
+    size: 125953601,
     ext: "AppImage",
-    sha256: "40f830498e9eef68ee8e3ed6904acfb9261335f3cafc81827814264b526e9037",
+    sha256: "fd6bcff68ded3b52f372adde0bc6c6b7a3e8f60dc884037038d62bbaa8849fb2",
   },
   windows: {
-    // 該平台產物版本：0.3.0（仍可下載安裝）；0.3.1 待 Windows VM 空檔後重建。
-    version: "0.3.0",
-    url: "https://gfy3gwthv6oa8bb7.public.blob.vercel-storage.com/desktop/Eimu-0.3.0-windows-x64-setup.exe",
-    size: 111809843,
+    // 該平台產物版本：0.3.2，於 2026-10-04 同批重建並上傳。
+    version: "0.3.2",
+    url: "https://gfy3gwthv6oa8bb7.public.blob.vercel-storage.com/desktop/Eimu-0.3.2-windows-x64-setup.exe",
+    size: 112069345,
     ext: "exe",
-    sha256: "af2b4e3888caa07403f0bf80193977cb1c9b80d83ceb32ecd5781d03d62b0426",
+    sha256: "61533498832c6c31e33f57b3fe0596b312ea1fcdec481a94446348e5c67afdaa",
   },
 } as const;
 

@@ -11,6 +11,14 @@ test("desktop releases expose a non-empty version string", () => {
   assert.ok(DESKTOP_RELEASES.version.trim().length > 0, "version 不可為空");
 });
 
+test("desktop releases are pinned to 0.3.2 on both platforms", () => {
+  assert.equal(DESKTOP_RELEASES.version, "0.3.2");
+  for (const key of ["linux", "windows"] as const) {
+    assert.equal(DESKTOP_RELEASES[key].version, "0.3.2", `${key} version`);
+    assert.match(DESKTOP_RELEASES[key].url, /Eimu-0\.3\.2/, `${key} url 必須含 Eimu-0.3.2`);
+  }
+});
+
 test("each platform URL pins its own versioned artifact", () => {
   for (const key of ["linux", "windows"] as const) {
     const release = DESKTOP_RELEASES[key];

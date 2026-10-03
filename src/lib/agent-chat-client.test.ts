@@ -470,3 +470,35 @@ test("思考级别持久化：显式记录优先；无记录反推；反推不�
     assert.equal(readCachedAgentThinkingLevel(), null, "反推失败不私自记一个级别");
   });
 });
+
+// ─── 客戶端環境上報（本包）：真實發送方 ───
+// 型別化白名單欄位；閘道側 sanitizeClientEnvironmentReport 逐值淨化。
+test("client_environment 发送方：web 送 surface=web；桌面壳由 window.eimuLocal 推導並探 ffmpeg", async () => {
+  const g = globalThis as Record<string, unknown>;
+  // A) 純瀏覽器（無 eimuLocal）→ surface=web，不探 ffmpeg（不送猜測值）
+  const rec = recorder(async () => ok202());
+  await withClientEnv(rec.fetchImpl as typeof fetch, async () => {
+    delete g.eimuLocal;
+    await sendAgentMessage("ses_abc", "hello", undefined);
+  });
+  const body = JSON.parse(rec.calls[0].body!);
+  assert.equal(body.client_environment.surface, "web");
+  assert.equal(body.client_environment.local_capabilities.window_eimu_local, false);
+  assert.equal("ffmpeg" in body.client_environment.local_capabilities, false, "非桌面壳不探 ffmpeg（未上報≠沒有）");
+  assert.equal(JSON.stringify(body.client_environment).includes("忽略"), false, "不得夾帶自由文字");
+
+  // B) 桌面壳（window.eimuLocal 存在）→ surface=desktop-shell，capabilities() 探到 ffmpeg
+  const rec2 = recorder(async () => ok202());
+  await withClientEnv(rec2.fetchImpl as typeof fetch, async () => {
+    g.eimuLocal = { capabilities: async () => ({ ffmpeg: true }) };
+    try {
+      await sendAgentMessage("ses_abc", "hi", undefined);
+    } finally {
+      delete g.eimuLocal;
+    }
+  });
+  const body2 = JSON.parse(rec2.calls[0].body!);
+  assert.equal(body2.client_environment.surface, "desktop-shell");
+  assert.equal(body2.client_environment.local_capabilities.window_eimu_local, true);
+  assert.equal(body2.client_environment.local_capabilities.ffmpeg, true);
+});

@@ -85,6 +85,20 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     sessionDirective = rawDirective;
   }
 
+  // 客戶端環境上報（型別化白名單）：只做形狀/體積校驗後原樣透傳，語義與淨化全在閘道
+  // （sanitizeClientEnvironmentReport）；這裡只擋形狀明顯不對與超大的 payload。
+  const rawClientEnvironment = (body as { client_environment?: unknown })?.client_environment;
+  let clientEnvironment: unknown;
+  if (rawClientEnvironment !== undefined && rawClientEnvironment !== null) {
+    if (typeof rawClientEnvironment !== "object" || Array.isArray(rawClientEnvironment)) {
+      return fail(400, "客户端环境上报格式无效。", "invalid_client_environment");
+    }
+    if (JSON.stringify(rawClientEnvironment).length > 8 * 1024) {
+      return fail(400, "客户端环境上报过大。", "client_environment_too_large");
+    }
+    clientEnvironment = rawClientEnvironment;
+  }
+
   let resp: AgentGatewayResponse;
   try {
     resp = await callAgentGateway(`/agent/v1/sessions/${id}/messages`, {
@@ -94,6 +108,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
         content,
         ...(canvasState !== undefined ? { canvas_state: canvasState } : {}),
         ...(sessionDirective !== undefined ? { session_directive: sessionDirective } : {}),
+        ...(clientEnvironment !== undefined ? { client_environment: clientEnvironment } : {}),
       },
     });
   } catch {

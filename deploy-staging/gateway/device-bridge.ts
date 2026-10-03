@@ -562,6 +562,29 @@ export class DeviceBridge {
     return { ok: true }
   }
 
+  /**
+   * 唯讀快照：某 userId 的裝置在線概況。**不改動任何狀態**（不刷 lastSeenAt、不動
+   * 待辦／票），供環境事實層回答「本回合的裝置橋是否可用」。`now` 可注入以便測試逾時。
+   */
+  runtimeStateFor(userId: number | null, now: number = Date.now()): {
+    online: boolean
+    deviceCount: number
+    authorizedRootCount: number
+  } {
+    let deviceCount = 0
+    let onlineCount = 0
+    let authorizedRootCount = 0
+    for (const rec of this.devices.values()) {
+      if (rec.userId !== userId) continue
+      deviceCount++
+      if (this.isOnline(rec, now)) {
+        onlineCount++
+        authorizedRootCount += rec.authorizedRoots.length
+      }
+    }
+    return { online: onlineCount > 0, deviceCount, authorizedRootCount }
+  }
+
   /** 測試/運維用：裝置數、待辦數。 */
   stats(): { devices: number; pending: number; consentTokens: number } {
     return { devices: this.devices.size, pending: this.pending.size, consentTokens: this.tokens.size() }
@@ -570,6 +593,41 @@ export class DeviceBridge {
 
 /** 閘道進程單例（記憶體狀態）。 */
 export const deviceBridge = new DeviceBridge()
+
+// ── 唯讀查詢（環境事實層用）──────────────────────────────────────────────
+
+/**
+ * 本機檔案通道的執行期狀態快照（環境事實層 localBridge 的來源）。
+ * `enabled`＝總開關（env）；`online`＝該使用者此刻有在線裝置；`deviceCount`＝該使用者
+ * 已註冊裝置數（含離線）；`authorizedRootCount`＝在線裝置合計已授權根數（0＝在線但未授權）。
+ */
+export interface DeviceBridgeRuntimeState {
+  enabled: boolean
+  online: boolean
+  deviceCount: number
+  authorizedRootCount: number
+}
+
+/**
+ * 回答「某個 userId 目前是否有在線裝置、該裝置是否已授權根」。純讀、零副作用、零網路。
+ *
+ * 契約：
+ *   - 總開關未開 → `{ enabled:false, ... }`（呼叫端據此判 `off`）。
+ *   - `userId === null` ＝取不到使用者身分；本函式仍會回報（只匹配 null-tenant 裝置），
+ *     但環境事實層對 null 一律維持 `unknown`（不得猜），不採用本回報判定通道狀態。
+ *   - 查詢本身不會拋（記憶體 map 遍歷）；呼叫端仍應 try/catch 以求 fail-safe（→ unknown）。
+ * 絕不改動註冊／心跳／invoke／同意票的任何行為。
+ */
+export function deviceBridgeRuntimeState(
+  userId: number | null,
+  opts: { bridge?: DeviceBridge; env?: NodeJS.ProcessEnv; now?: number } = {},
+): DeviceBridgeRuntimeState {
+  const enabled = deviceBridgeEnabled(opts.env ?? process.env)
+  if (!enabled) return { enabled: false, online: false, deviceCount: 0, authorizedRootCount: 0 }
+  const bridge = opts.bridge ?? deviceBridge
+  const snapshot = bridge.runtimeStateFor(userId, opts.now)
+  return { enabled: true, ...snapshot }
+}
 
 // ── HTTP 路由（僅在 deviceBridgeEnabled() 為真時由 router 呼叫）──────────
 
