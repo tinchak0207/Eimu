@@ -28,7 +28,8 @@
   - 工作流与画布：https://eimu.dev/docs/workflow
   - 历史素材复用：https://eimu.dev/docs/history
   - 充值与计费：https://eimu.dev/docs/billing
-  - 把助理带走（MCP 接入）：https://eimu.dev/docs/mcp
+  - 把助理带走（MCP 接入，远端端点＋逐客户端配置）：https://eimu.dev/mcp
+  - 本机自架 MCP server（需仓库权限）：https://eimu.dev/docs/mcp
   - 开发进阶（B 端 API）：https://eimu.dev/docs/api
 - 技能库（133 条内建技能，按 10 个题材家族分类，每条有独立页）：https://eimu.dev/skills
 - 定价：https://eimu.dev/pricing

@@ -65,6 +65,7 @@ bearer_token_env_var = "EIMU_BIZ_KEY"`,
     title: "Claude Code",
     note: "一条命令注册 HTTP 传输的远端服务；用户级配置加 --scope user。",
     blocks: [
+      `export EIMU_BIZ_KEY=${KEY_PLACEHOLDER}`,
       `claude mcp add --transport http eimu ${MCP_ENDPOINT} \\
   --header "Authorization: Bearer $EIMU_BIZ_KEY"`,
     ],
@@ -263,15 +264,18 @@ const PLUGIN_TREE = `plugin/
         ├── character-consistency/SKILL.md      # 角色一致性
         └── camera-motion/SKILL.md              # 运镜与镜头运动`;
 
-const PLUGIN_INSTALL_PROMPT = `1) 添加插件目录（待我方公开市集仓发布后可用；今天先走上面的手动配置）
-   codex plugin marketplace add <eimu-marketplace-git-url>
-
-2) 安装插件
-   codex plugin add eimu@eimu
-
-3) 授权
+const PLUGIN_INSTALL_PROMPT = `1) 手动接入远端 MCP（今天就能用；完整片段见上方各客户端分区）
+   URL:    ${MCP_ENDPOINT}
+   Header: Authorization: Bearer $EIMU_BIZ_KEY
    export EIMU_BIZ_KEY=${KEY_PLACEHOLDER}
-   # 密钥在 ${SITE_URL}/settings/api-keys 自助签发，只显示一次`;
+   # 密钥在 ${SITE_URL}/settings/api-keys 自助签发，只显示一次
+
+2) （可选）用插件包：把 .mcp.json 与三个随包技能加进你的客户端
+   # 文件直接取自 ${SITE_URL}/plugin/，不需要市集
+
+3) 市集一键装（待发布，今天跑不通）
+   codex plugin marketplace add <eimu-marketplace-git-url>
+   codex plugin add eimu@eimu`;
 
 export default function McpPage() {
   return (
@@ -397,10 +401,10 @@ export default function McpPage() {
                 给 agent 的安装指令
               </h3>
               <p className="mt-1.5 text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.58)]">
-                三步：加目录 → 装插件 → 授权。第 1 步依赖一个 Eimu 公开的插件市集仓，
+                三步：先手动接入远端 MCP（今天就能用），再选装插件包，最后才是市集一键装。市集一键装依赖一个
+                Eimu 公开的插件市集仓，
                 <span className="font-semibold text-[rgba(0,0,0,0.68)]">该仓尚未发布，这一步现在跑不通</span>
-                ；今天要装请走上面的手动配置，或用包内 <InlineCode>README.md</InlineCode>{" "}
-                里的本地目录装法。把下面这段整段发给你本机的 agent 即可。
+                ；今天要装请走第 1、2 步。把下面这段整段发给你本机的 agent 即可。
               </p>
               <div className="mt-3">
                 <CodeBlock>{PLUGIN_INSTALL_PROMPT}</CodeBlock>

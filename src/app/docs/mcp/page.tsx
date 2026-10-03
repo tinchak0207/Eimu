@@ -31,10 +31,23 @@ const MCP_TOOLS: Array<{ name: string; description: string }> = [
   },
 ];
 
+// 远端 MCP 端点：真正「今天就能用」的那条路，作为本页一等公民。
+const REMOTE_MCP_ENDPOINT = `${SITE_URL}/api/mcp`;
+
+const REMOTE_MCP_CONFIG = `{
+  "mcpServers": {
+    "eimu": {
+      "type": "http",
+      "url": "${REMOTE_MCP_ENDPOINT}",
+      "headers": { "Authorization": "Bearer sk-biz-你的密钥" }
+    }
+  }
+}`;
+
 const MCP_CONFIG = `  "mcpServers": {
     "image-studio": {
       "command": "node",
-      "args": ["/absolute/path/to/github-image-json-new-api-https/mcp-server/dist/index.js"],
+      "args": ["/absolute/path/to/你的仓库副本/mcp-server/dist/index.js"],
       "env": {
         "IMAGE_STUDIO_API_BASE": "https://eimu.dev/api/v1",
         "IMAGE_STUDIO_BIZ_KEY": "sk-biz-你的密钥"
@@ -42,8 +55,11 @@ const MCP_CONFIG = `  "mcpServers": {
     }
   }`;
 
-const MCP_BUILD = `git clone <仓库地址> github-image-json-new-api-https
-cd github-image-json-new-api-https/mcp-server
+// 本机自架路线：本仓库未公开发布，外部使用者拿不到克隆地址，
+// 因此这里不写任何照抄会失败的仓库 URL，只说明「从你有权限的副本取 mcp-server/」。
+const MCP_BUILD = `# 本机自架需要本仓库的存取权限（仓库未公开发布）。
+# 从你有权限的仓库副本中取出 mcp-server/ 目录，然后：
+cd mcp-server
 npm install
 npm run build`;
 
@@ -64,16 +80,20 @@ export default function DocsMcpPage() {
           助理不只会在这站网页里干活，也能装进你已有的 AI 工具——通过 MCP（Model Context Protocol），Claude、Codex、Cursor 里的
           agent 说一句话，就能出图、出视频并拿到成品 URL，背后走的是同一套计费与队列。
         </p>
-        <p className="mt-2 max-w-2xl text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.58)]">
-          最省事的是远程 MCP：不用克隆仓库，一段配置直接连 eimu.dev，工具更全——
-          <a href="/mcp" className="font-semibold text-[#007AFF] lg-transition hover:underline">
-            查看各客户端的一键安装写法
-          </a>
-          。下面是自建本地 server 的做法。
-        </p>
-        <div className="mt-4 grid gap-4 sm:grid-cols-2">
-          <KeyCard icon={TerminalSquare} title="接入你的 AI 工具（MCP）">
+        {/* ---- 远端接入：一等公民，今天就能用 ---- */}
+        <div className="mt-4">
+          <KeyCard icon={Plug} title="远程接入（推荐，今天就能用）">
             <p>
+              不用克隆仓库、不用构建：直接连 eimu.dev 的远端 MCP 端点{" "}
+              <InlineCode>POST {REMOTE_MCP_ENDPOINT}</InlineCode>，认证走{" "}
+              <InlineCode>Authorization: Bearer sk-biz-…</InlineCode>。工具比本机 server 更全，Codex、
+              Claude Code、Cursor、OpenClaw 与任意 MCP 客户端逐份可复制的配置都在{" "}
+              <a href="/mcp" className="font-semibold text-[#007AFF] lg-transition hover:underline">
+                /mcp 接入页
+              </a>
+              。
+            </p>
+            <p className="mt-3">
               先在{" "}
               <a
                 href="/settings/api-keys"
@@ -81,7 +101,31 @@ export default function DocsMcpPage() {
               >
                 登录 eimu.dev → 设置 → API 密钥
               </a>{" "}
-              自助签发一把 <InlineCode>sk-biz-…</InlineCode> 密钥（只显示一次，妥善保存），再克隆仓库构建 MCP server：
+              自助签发一把 <InlineCode>sk-biz-…</InlineCode> 密钥（只显示一次，妥善保存），再把下面这段并进你客户端的 MCP
+              配置：
+            </p>
+            <div className="mt-3">
+              <CodeBlock>{REMOTE_MCP_CONFIG}</CodeBlock>
+            </div>
+            <p className="mt-3">
+              密钥只存在你本机的配置或环境变量里，不会上传给我们；网页、REST API 与 MCP 共用同一本账，生成走真实计费，失败自动退回。
+            </p>
+          </KeyCard>
+        </div>
+
+        {/* ---- 本机自架：保留但诚实降级 ---- */}
+        <h3 className="mt-6 text-ios-callout font-semibold text-[rgba(0,0,0,0.85)]">
+          进阶：本机自架 MCP server（需仓库权限）
+        </h3>
+        <p className="mt-1.5 max-w-3xl text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.52)]">
+          本机路线要自己跑一个 stdio MCP server：
+          <span className="font-semibold text-[rgba(0,0,0,0.68)]">需要本仓库的存取权限（仓库未公开发布）</span>
+          ，外部使用者拿不到克隆地址，所以下面只说明做法，不提供可直接照抄的仓库 URL。
+        </p>
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <KeyCard icon={TerminalSquare} title="本机自架：构建与配置">
+            <p>
+              拿到密钥后，从你有权限的仓库副本取出 <InlineCode>mcp-server/</InlineCode> 并本地构建：
             </p>
             <div className="mt-3">
               <CodeBlock>{MCP_BUILD}</CodeBlock>
@@ -89,7 +133,7 @@ export default function DocsMcpPage() {
             <p className="mt-3">
               把下面这段并入你常用的 MCP 配置（路径与密钥换成你的；常见位置：Claude 的{" "}
               <InlineCode>claude_desktop_config.json</InlineCode>、项目根目录的 <InlineCode>.mcp.json</InlineCode>），重启客户端后
-              agent 就能发现这四个工具：
+              agent 就能发现本机 server 的这 4 个工具：
             </p>
             <div className="mt-3">
               <CodeBlock>{MCP_CONFIG}</CodeBlock>
@@ -98,7 +142,14 @@ export default function DocsMcpPage() {
               密钥只存在你本机的 MCP 配置里，不会上传给我们；生成走真实计费，每次调用按模型单价扣金币，失败自动退回。
             </p>
           </KeyCard>
-          <KeyCard icon={ListChecks} title="四个可用工具">
+          <KeyCard icon={ListChecks} title="本机 server 提供的 4 个工具">
+            <p className="mb-3">
+              远端 MCP 的工具清单（16 个）见{" "}
+              <a href="/mcp" className="font-semibold text-[#007AFF] lg-transition hover:underline">
+                /mcp 接入页
+              </a>
+              ；本机 server 只提供下面这 4 个。
+            </p>
             <ul className="space-y-2.5">
               {MCP_TOOLS.map((tool) => (
                 <li key={tool.name} className="rounded-ios-2xl bg-[rgba(0,0,0,0.04)] px-4 py-3">
