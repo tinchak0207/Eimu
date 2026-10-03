@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
-import { Loader2, RotateCcw } from "lucide-react";
+import { ArrowDown, Loader2, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AgentAssistantTextItem, AgentChatState } from "@/lib/agent-chat-types";
 import type { BatchAnchor } from "@/lib/agent-batch-anchor";
@@ -110,6 +110,57 @@ export function exampleChipState(
   return sendPending ? "disabled" : "idle";
 }
 
+/*
+ * 2026-10-03 手機排版刀 3：「回到底部」浮動鈕。
+ * 判定與動作抽成純函數，node --test 可直接灌數字斷行為（jsdom 沒有真滾動）。
+ * 閾值複用 scroll-threshold.ts 的 NEAR_BOTTOM_PX（與自動貼底同一條線：
+ * 離底超過它＝使用者已往上翻，才值得浮出這顆鈕）。
+ */
+
+/** 使用者是否已往上翻離底部（距底 ≥ NEAR_BOTTOM_PX）。 */
+export function isScrolledUp(scrollHeight: number, scrollTop: number, clientHeight: number): boolean {
+  return scrollHeight - scrollTop - clientHeight >= NEAR_BOTTOM_PX;
+}
+
+/** 捲到底：預設 smooth；prefers-reduced-motion 時 instant（不強迫看位移動畫）。 */
+export function scrollTranscriptToBottom(
+  el: { scrollHeight: number; scrollTo: (options: { top: number; behavior: ScrollBehavior }) => void },
+  reduceMotion: boolean,
+): void {
+  el.scrollTo({ top: el.scrollHeight, behavior: reduceMotion ? "auto" : "smooth" });
+}
+
+/**
+ * 回到底部圓鈕（僅窄屏渲染：sm:hidden，桌面 DOM 存在但不渲染＝像素零變化）。
+ * 44×44 觸控靶、lg-float 玻璃、active 壓感；進出場 140ms 淡入淡出用
+ * opacity 切換（absolute 定位不佈局，開關零 layout shift）。
+ */
+export function AgentBackToBottomButton({
+  scrolledUp,
+  onClick,
+}: {
+  scrolledUp: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label="回到底部"
+      aria-hidden={scrolledUp ? undefined : true}
+      tabIndex={scrolledUp ? 0 : -1}
+      onClick={onClick}
+      className={cn(
+        "agent-back-to-bottom lg-float absolute bottom-3 right-4 z-20 flex h-11 w-11 items-center justify-center rounded-full text-foreground/60",
+        "transition-opacity duration-[140ms] hover:text-foreground active:scale-95",
+        "touch-manipulation [-webkit-tap-highlight-color:transparent] sm:hidden",
+        scrolledUp ? "opacity-100" : "pointer-events-none opacity-0",
+      )}
+    >
+      <ArrowDown className="h-5 w-5" aria-hidden="true" />
+    </button>
+  );
+}
+
 const CONNECTION_META: Record<AgentChatPanelProps["connection"], { label: string; dotClass: string }> = {
   // 2026-09-20 色彩纪律（预览验收语汇）：灰阶 + ios-blue accent + 红仅错误。
   // 连接状态点全部收灰阶；「等你选择」用蓝（accent）。
@@ -157,6 +208,8 @@ function AgentChatPanelComponent({
   // 用户是否停在列表底部附近。串流/新条目只在「本来就在底部」时自动贴底，
   // 往上翻历史时不许把滚动条强拉回底部（「往上翻不強拉」）。
   const isNearBottomRef = useRef(true);
+  // 刀 3：往上翻離底 ≥NEAR_BOTTOM_PX 才浮出「回到底部」鈕（僅窄屏可見）。
+  const [scrolledUp, setScrolledUp] = useState(false);
 
   // 推荐语连点保险：同一 frame 内两次点击时 re-render 还没到，靠 ref 同步上锁。
   // 不锁＝两条消息、两次计费（空态并发 send 是已记录的竞态）。
@@ -279,8 +332,22 @@ function AgentChatPanelComponent({
   const handleTranscriptScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
-    isNearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
+    const up = isScrolledUp(el.scrollHeight, el.scrollTop, el.clientHeight);
+    isNearBottomRef.current = !up;
+    setScrolledUp(up);
   };
+
+  // 刀 3：點了回到底部——立刻把自己標回「貼底」（串流繼續跟隨），再捲動。
+  const handleBackToBottom = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    isNearBottomRef.current = true;
+    setScrolledUp(false);
+    const reduceMotion =
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    scrollTranscriptToBottom(el, reduceMotion);
+  }, []);
 
   // 虚拟键盘 / 捏合缩放：视觉视口被吃掉后，底部输入区可能被键盘盖住。
   // visualViewport 的 resize/scroll 是唯一可靠的信号——部分浏览器（键盘 overlay
@@ -340,7 +407,7 @@ function AgentChatPanelComponent({
    * 契約只有這一份，不許出現第二份拷貝。
    */
   const composerNode = (
-    <div ref={composerAnchorRef} className="agent-composer-anchor">
+    <div ref={composerAnchorRef} className="agent-composer-anchor max-sm:px-1">
       {decisionPending ? (
         <div className="mx-3 mb-2 h-[2px] rounded-full bg-ios-blue/70" aria-hidden="true" />
       ) : null}
@@ -391,7 +458,7 @@ function AgentChatPanelComponent({
           呼吸绿点承担，这里只在需要人做决定/知晓时出现——等待二选一、
           断线可重试、会话关闭带原因。 */}
       {(awaitingChoice || connection === "reconnecting" || (closed && closedReason)) && (
-        <div className="agent-panel-status flex items-center gap-2 px-0.5 pb-2 pt-1">
+        <div className="agent-panel-status flex items-center gap-2 px-0.5 pb-2 pt-1 max-sm:px-1">
           <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", meta.dotClass)} aria-hidden="true" />
           <span className="text-ios-caption1 font-medium text-foreground/45">{meta.label}</span>
           {connection === "reconnecting" && (
@@ -415,13 +482,16 @@ function AgentChatPanelComponent({
         </div>
       )}
 
-      {/* D-26：批量愿望的燃烧进度常驻在顶部，不用点开才知道烧到哪。 */}
-      <div className="pb-1">
+      {/* D-26：批量愿望的燃烧进度常驻在顶部，不用点开才知道烧到哪。
+          窄屏 gutter（2026-10-03）：父層卡片只給 12px，這裡補 4px 湊成 16px
+          設計 gutter；桌面一字不動（max-sm 只在 ≤639.98px 生效）。 */}
+      <div className="pb-1 max-sm:px-1">
         <AgentBatchProgress items={items} onStop={onStopGeneration} stopPending={stopPending} />
       </div>
 
-      {/* 罪状 4：子代理状态栏，置顶于转录区之上、从上到下堆叠（至多 3 张）。 */}
-      <div className="pb-1">
+      {/* 罪状 4：子代理状态栏，置顶于转录区之上、从上到下堆叠（至多 3 张）。
+          窄屏 gutter 同上：12px（父卡）+4px＝16px。 */}
+      <div className="pb-1 max-sm:px-1">
         <AgentSubagentBar items={subagentItems} />
       </div>
 
@@ -431,11 +501,14 @@ function AgentChatPanelComponent({
           overflow-x:visible 會被規範計算成 auto，一條超寬子項就是一條帶箭頭的
           原生橫向滾動條。內容側仍各自負責換行/截斷（氣泡=break-words、
           行內 code=break-all、表格/pre=自滾），防護層只是最後一道。 */}
+      {/* 刀 3：relative 錨點層——「回到底部」鈕掛在捲動容器旁（absolute 不跟
+          內容捲）；flex-1 + flex-col 與原單層結構幾何等價，桌面像素零變化。 */}
+      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
       <div
         ref={scrollRef}
         aria-live="polite"
         onScroll={handleTranscriptScroll}
-        className="agent-transcript min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-0.5 pb-2 pt-0"
+        className="agent-transcript min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-0.5 pb-2 pt-0 max-sm:px-1"
       >
         {/* 第二輪就緒優化刀A：空態（歡迎語）不再等 SSE open —— idle/connecting/open
             都顯示（「沒內容且沒壞」）。建號+ticket+SSE 握手在背後接，error 態仍由
@@ -518,7 +591,7 @@ function AgentChatPanelComponent({
           回合一结束 turnActive 落下，泡泡跟着消失，不用另外清理。
         */}
         {turnActive && items[items.length - 1]?.kind !== "assistant" && (
-          <div className="agent-thinking flex items-center gap-2 px-1 py-2" role="status" aria-label="助手正在思考">
+          <div className="agent-thinking flex items-center gap-2 px-1 py-2 max-sm:px-0" role="status" aria-label="助手正在思考">
             <span className="flex items-end gap-[3px]" aria-hidden="true">
               {[0, 160, 320].map((delay) => (
                 <span
@@ -531,6 +604,13 @@ function AgentChatPanelComponent({
             <span className="text-ios-caption1 text-foreground/45">正在思考…</span>
           </div>
         )}
+      </div>
+
+      {/* 刀 3：回到底部浮動鈕（僅窄屏可見，元件內 sm:hidden）。空態沒有
+          歷史可翻，不掛。 */}
+      {items.length > 0 ? (
+        <AgentBackToBottomButton scrolledUp={scrolledUp} onClick={handleBackToBottom} />
+      ) : null}
       </div>
 
       {/* 串流状态的无障碍宣告：画面本身已用光标呈现，这里补屏幕阅读器播报。 */}
@@ -567,7 +647,7 @@ function AgentChatPanelComponent({
         // 溢出防護層 + 細滾動條（可見性）：overflow-x-hidden 讓超寬卡片永遠
         // 撐不出橫向滾動條；agent-scroll-thin 是 agent-chat.css 抽出的共用配方
         // （與轉錄區同一份），讓「這裡可以滾」看得出來。
-        <div className="agent-scroll-thin min-h-0 min-w-0 max-h-[min(62dvh,30rem)] shrink-0 overflow-x-hidden overflow-y-auto overscroll-contain px-0.5 pb-1.5">
+        <div className="agent-scroll-thin min-h-0 min-w-0 max-h-[min(62dvh,30rem)] shrink-0 overflow-x-hidden overflow-y-auto overscroll-contain px-0.5 pb-1.5 max-sm:px-1">
           <div className="flex flex-col gap-2">
             {confirmGroups.map((group) => {
               const merged = group.count > 1;
@@ -597,7 +677,7 @@ function AgentChatPanelComponent({
 
       {pendingConfirms.length === 0 && pendingQuestions.length > 0 && (
         // 問答卡容器：與確認卡容器同一套溢出防護 + 細滾動條配方（見上）。
-        <div className="agent-scroll-thin min-h-0 min-w-0 max-h-[min(62dvh,30rem)] shrink-0 overflow-x-hidden overflow-y-auto overscroll-contain px-0.5 pb-1.5">
+        <div className="agent-scroll-thin min-h-0 min-w-0 max-h-[min(62dvh,30rem)] shrink-0 overflow-x-hidden overflow-y-auto overscroll-contain px-0.5 pb-1.5 max-sm:px-1">
           {/* 問題卡串行：一次只出一張，答完（reducer 移除該 requestId）再浮出下一張，
               不讓多張疊在一起同時逼用戶做決定。 */}
           <div className="flex flex-col gap-2">

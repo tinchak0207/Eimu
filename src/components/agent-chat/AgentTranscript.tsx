@@ -75,7 +75,9 @@ function AgentTranscriptComponent({ items, imageActions, videoActions, audioActi
   }, []);
 
   return (
-    <ol ref={listRef} className="flex flex-col gap-2.5">
+    // 2026-10-03 手機排版刀 2：窄屏輪間距 10px→20px（訊息與卡片貼成一片、
+    // 輪與輪分不清）；桌面 ≥640px 維持 gap-2.5，一字不動。
+    <ol ref={listRef} className="flex flex-col gap-5 sm:gap-2.5">
       {items.map((item) => {
         switch (item.kind) {
           case "user":

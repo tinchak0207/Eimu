@@ -2,6 +2,22 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import * as React from "react";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+
+// 與 agent-chat-ui.test.ts 同一個坑：tsconfig jsx=preserve 讓 tsx 對 .tsx 退回
+// classic runtime（React.createElement），元件源碼不 import React。SSR 渲染前
+// 補全局 React 樁，否則一渲染就 ReferenceError: React is not defined。
+(globalThis as unknown as Record<string, unknown>).React ??= React;
+
+// 觸控 placeholder 的真行為斷言（決策純函數）＋ SSR 真渲染斷言用的元件本體。
+import {
+  AgentComposer,
+  PLACEHOLDER_SAFETY_PX,
+  placeholderFitsWidth,
+  resolveBasePlaceholder,
+} from "./AgentComposer";
 
 /**
  * AgentComposer 输入区三颗按钮的回归锁：IME 组字守卫、送出连点锁、中止进行中态。
@@ -229,4 +245,59 @@ test("attachFilesRef：可選介面把既有附件入口註冊出去（不傳＝
   assert.match(composer, /void enqueueFiles\(files\);/);
   // 卸載歸 null。
   assert.match(composer, /attachFilesRef\.current = null;/);
+});
+
+test("觸控裝置 placeholder：coarse 換「传上来」版，fine/桌面保留「拖进来」（決策函數真行為斷言）", () => {
+  // 獨立 oracle：期望字串由本測試自帶，不從實作模組取（禁同源斷言）。
+  const DESKTOP_LONG = "描述你想做的，或把剧本／资产图拖进来";
+  // coarse pointer（手機/平板）→ 上傳語彙；手機拖不了檔，「拖进来」是做不到的動作。
+  const touch = resolveBasePlaceholder(DESKTOP_LONG, true);
+  assert.ok(touch.includes("传上来"), "coarse pointer 必須換「传上来」版");
+  assert.ok(!touch.includes("拖进来"), "觸控裝置不得再說「拖进来」");
+  // fine pointer（桌面）→ 原值一字不動。
+  assert.equal(resolveBasePlaceholder(DESKTOP_LONG, false), DESKTOP_LONG);
+  // 呼叫端自訂 placeholder 永不被換——coarse 只作用內建長句。
+  assert.equal(resolveBasePlaceholder("自訂提示", true), "自訂提示");
+});
+
+test("placeholder SSR/首幀＝桌面長句（hydration 安全），掛載後 effect 才按 matchMedia 切觸控版", () => {
+  // 真渲染斷言：SSR 與首幀同路徑（effect 未跑，coarse=false）→ textarea 帶「拖进来」。
+  const markup = renderToStaticMarkup(
+    createElement(AgentComposer, { disabled: false, onSend: () => {} }),
+  );
+  assert.match(markup, /placeholder="[^"]*拖进来[^"]*"/);
+  // 切換點探針（變更探針，非行為斷言）：掛載後一次性 matchMedia("(pointer: coarse)") 判定，
+  // 選中的基礎句走 resolveBasePlaceholder，DEFAULT_PLACEHOLDER 原值保留（桌面/源碼釘不動）。
+  assert.match(code, /matchMedia\("\(pointer: coarse\)"\)/);
+  assert.match(code, /resolveBasePlaceholder\(placeholder, coarsePointer\)/);
+  assert.match(code, /const DEFAULT_PLACEHOLDER = "描述你想做的，或把剧本／资产图拖进来"/);
+});
+
+test("placeholderFits 边界：measured == clientWidth 与 clientWidth-4 都回落 compact（纯函数注入量测）", () => {
+  // 2026-10-03 手机实锤：390px 下 textarea clientWidth=284，同字型 canvas 量到长句
+  // 288px → nowrap 直接裁尾。placeholderFitsWidth 是注入式纯函数（measured,
+  // availableWidth），无需真 DOM。独立 oracle：边界值由本测试自备，不向实现取。
+  const clientWidth = 284;
+  // 临界值与 4px 之差（本刀真凶）都必须回落 COMPACT_PLACEHOLDER。
+  assert.equal(placeholderFitsWidth(clientWidth, clientWidth), false, "measured == clientWidth 必须回落 compact");
+  assert.equal(
+    placeholderFitsWidth(clientWidth - 4, clientWidth),
+    false,
+    "measured == clientWidth - 4 必须回落 compact",
+  );
+  // 加了 8px 安全边際后刚好塞得下 → 才显示长句；有余量当然显示。
+  assert.equal(placeholderFitsWidth(clientWidth - PLACEHOLDER_SAFETY_PX, clientWidth), true);
+  assert.equal(placeholderFitsWidth(200, clientWidth), true);
+  // 量不到内容宽（availableWidth ≤ 0）时不误切短句（沿用原行为）。
+  assert.equal(placeholderFitsWidth(999, 0), true);
+  assert.equal(placeholderFitsWidth(999, -1), true);
+  // 安全边際必须是 ≥8 的正值：改回 0px 边界就是回到「临界值赌命」的老坑。
+  assert.ok(PLACEHOLDER_SAFETY_PX >= 8, "安全边際须 ≥8px");
+  // 变更探针：量字用的 font 不再直接取 style.font（textarea 上会回空串，ctx.font
+  // 落回 10px sans-serif 量成 180px → 永远「放得下」）。
+  assert.match(code, /function resolveMeasureFont\(/);
+  assert.match(code, /if \(style\.font\) return style\.font;/);
+  assert.match(code, /ctx\.font = resolveMeasureFont\(window\.getComputedStyle\(el\)\)/);
+  // 决策纯函数比对的是 clientWidth（与 spec/测试注入口径一致）。
+  assert.match(code, /placeholderFitsWidth\(ctx\.measureText\(text\)\.width, el\.clientWidth\)/);
 });

@@ -215,13 +215,15 @@ function DocumentCard({ attRef }: { attRef: AgentAttachmentRef }) {
  * 图片缩略（主图与大帧共用）。降级链路：
  * 铸票中 → 骨架；铸票失败 / 无票 / <img> 挂掉 → 文档式横条卡，绝不破图。
  */
-function AttachmentThumb({
+export function AttachmentThumb({
   sessionId,
   attRef,
   ticket,
   minting,
   imgClassName,
   wrapperClassName,
+  chromeClassName,
+  skeletonClassName,
 }: {
   sessionId: string | null;
   attRef: AgentAttachmentRef;
@@ -230,6 +232,10 @@ function AttachmentThumb({
   mintFailed: boolean;
   imgClassName: string;
   wrapperClassName?: string;
+  /** 只上在成功态 <a> 上的视觉壳（圆角/描边/按压缩放）——降级成文档卡时不能带。 */
+  chromeClassName?: string;
+  /** 铸票中骨架的完整类名。不给则沿用 wrapper+img 的旧拼法（抽帧横排）。 */
+  skeletonClassName?: string;
 }) {
   const [broken, setBroken] = useState(false);
   const url = ticket !== null && attRef.path ? buildAssetUrl(sessionId ?? "", attRef.path, ticket) : null;
@@ -243,8 +249,16 @@ function AttachmentThumb({
   }
 
   if (minting) {
-    // 票在途：等高骨架占位，票到了原图顶上来，不跳版。
-    return <div className={cn("animate-pulse rounded-ios-lg bg-foreground/10", wrapperClassName, imgClassName)} aria-hidden="true" />;
+    // 票在途：骨架占位，票到了原图顶上来，不跳版。
+    return (
+      <div
+        className={
+          skeletonClassName ??
+          cn("animate-pulse rounded-ios-lg bg-foreground/10", wrapperClassName, imgClassName)
+        }
+        aria-hidden="true"
+      />
+    );
   }
 
   return (
@@ -253,7 +267,7 @@ function AttachmentThumb({
       target="_blank"
       rel="noopener noreferrer"
       title={`打开原图：${attRef.name ?? "附件"}`}
-      className={cn("block overflow-hidden rounded-ios-lg", wrapperClassName)}
+      className={cn("block overflow-hidden", wrapperClassName, chromeClassName)}
     >
       {/* eslint-disable-next-line @next/next/no-img-element -- 網關簽票 URL（帶 ticket，必要時經本站 proxy），next/image 無法優化且 fill／寬高推導會綁死附件自適應版面 */}
       <img
@@ -262,6 +276,7 @@ function AttachmentThumb({
         loading="lazy"
         onError={() => setBroken(true)}
         className={imgClassName}
+        draggable={false}
       />
     </a>
   );
@@ -348,6 +363,7 @@ function AgentAttachmentCardsComponent({ refs, sessionId }: AgentAttachmentCards
                     minting={minting}
                     mintFailed={failed}
                     wrapperClassName="h-20 min-w-0 flex-1"
+                    chromeClassName="rounded-ios-lg"
                     imgClassName="h-20 w-full object-cover"
                   />
                 ))}
@@ -369,6 +385,9 @@ function AgentAttachmentCardsComponent({ refs, sessionId }: AgentAttachmentCards
           );
         }
         if (ref.kind === "image") {
+          // 单图附件＝真图缩略（Grok 式）：右对齐跟用户泡泡同侧，高约 240px、
+          // 宽约 260px（≈65% 移动端正文流宽），1px 淡描边让白图也有边界；
+          // 宿主是 .lg-float 浅色玻璃，骨架/垫底一律深色低透明度 token。
           return (
             <AttachmentThumb
               key={ref.path ?? `img-${i}`}
@@ -377,8 +396,10 @@ function AgentAttachmentCardsComponent({ refs, sessionId }: AgentAttachmentCards
               ticket={ticket !== null ? ticket.ticket : null}
               minting={minting}
               mintFailed={failed}
-              wrapperClassName="max-w-full"
-              imgClassName="max-h-40 w-auto max-w-full rounded-ios-lg"
+              wrapperClassName="w-fit max-w-full self-end"
+              chromeClassName="rounded-[18px] border border-black/[0.06] bg-black/[0.04] transition-transform active:scale-[0.98]"
+              skeletonClassName="h-60 w-48 animate-pulse self-end rounded-[18px] border border-black/[0.06] bg-black/[0.04]"
+              imgClassName="block max-h-60 w-auto max-w-[min(100%,260px)] object-cover"
             />
           );
         }

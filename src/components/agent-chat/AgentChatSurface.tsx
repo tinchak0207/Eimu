@@ -14,17 +14,18 @@
 // agent 聊天区在两个模式下是同一套东西」——所以这里只有一套组件。
 
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { createPortal } from "react-dom";
 import {
   Bot,
   Boxes,
   History,
   Loader2,
   LogIn,
-  MessageSquarePlus,
   Search,
   Settings,
   SlidersHorizontal,
   SquarePen,
+  X,
 } from "lucide-react";
 import {
   hasReflectedParams,
@@ -41,7 +42,9 @@ import {
   shouldOfferBatchAnchor,
 } from "@/lib/agent-batch-anchor";
 import { AgentChatPanel } from "@/components/agent-chat/AgentChatPanel";
+import { AgentSessionList } from "@/components/agent-chat/AgentSessionList";
 import { AgentSettingsPopover } from "@/components/agent-chat/AgentSettingsPopover";
+import { useIsNarrow } from "@/hooks/use-is-narrow";
 import { PwaHandoffPanel } from "@/components/PwaHandoffPanel";
 import { createHandoffLogin, isStandalonePwa } from "@/lib/github-login";
 import type { AgentAudioItem, AgentImageItem, AgentVideoItem } from "@/lib/agent-chat-types";
@@ -90,21 +93,12 @@ async function startLoginThenRetry(_onDone: () => Promise<void>): Promise<void> 
   window.location.href = "/api/auth/github/start";
 }
 
-function formatSavedAt(savedAt: number): string {
-  const diff = Date.now() - savedAt;
-  if (!Number.isFinite(diff) || diff < 0) return "刚刚";
-  const minutes = Math.floor(diff / 60_000);
-  if (minutes < 1) return "刚刚";
-  if (minutes < 60) return `${minutes} 分钟前`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours} 小时前`;
-  return new Date(savedAt).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" });
-}
-
 /** 会话目录条目标题（双轨）：优先显示网关摘要标题（09-12 契约，opencode 首轮
  *  生成的 title，有值即用）；无标题（null/缺栏/全空白）时降级为创建时间合成的
- *  可读时间标签兜底。 */
-function formatSessionLabel(it: AgentSessionSummary): string {
+ *  可读时间标签兜底。
+ *  唯一實作留在本檔（agent-chat-ui.test.ts 對它有源碼錨點）；AgentSessionList
+ *  透過 formatLabel prop 受注入，不複製第二份。 */
+export function formatSessionLabel(it: AgentSessionSummary): string {
   const t = typeof it.title === 'string' ? it.title.trim() : '';
   if (t) return t;
   const d = new Date(it.created_at);
@@ -112,20 +106,6 @@ function formatSessionLabel(it: AgentSessionSummary): string {
   const time = d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
   return `${date} ${time} 的对话`;
 }
-
-/**
- * 历史会话状态点（网关 sessions.status 契约：running | waiting | idle）。
- * 三态都渲染圆点（含 idle 淡灰），行首宽度恒定不抖动；缺字段按 idle 处理。
- * 颜色只用 DESIGN.md 的 iOS 系统色 token，状态文案与站内 agent 文案一致走简体。
- */
-const SESSION_STATUS_META: Record<
-  NonNullable<AgentSessionSummary["status"]>,
-  { dotClass: string; label: string }
-> = {
-  running: { dotClass: "bg-ios-blue animate-pulse", label: "运转中" },
-  waiting: { dotClass: "bg-ios-orange", label: "等待回答" },
-  idle: { dotClass: "bg-foreground/15", label: "已静置" },
-};
 
 /**
  * 真下載：走站內同源代理 /api/media-download（帶既有鑑權標頭）把位元組取回，
@@ -238,6 +218,20 @@ export interface AgentChatSurfaceProps {
   prefillRequest?: { text: string; nonce: number } | null;
 }
 
+/**
+ * outside-click 放行判定（純函數，可直測，無須 DOM）：目標節點落在寬屏下拉的
+ * anchor（historyRef）或 portal 到 document.body 的窄屏抽屜（historyDrawerRef）
+ * 內，都算「浮層裡面」。抽屜 portal 出去後不再被 historyRef 涵蓋，這個 ref 是
+ * 它唯一的放行來源；窄屏抽屜內點搜尋框、點列，全靠它不被誤收。
+ */
+export function isInsideHistorySurface(
+  anchor: { contains: (node: Node | null) => boolean } | null,
+  drawer: { contains: (node: Node | null) => boolean } | null,
+  target: Node | null,
+): boolean {
+  return Boolean(anchor?.contains(target) || drawer?.contains(target));
+}
+
 export function AgentChatSurface({
   variant = "page",
   embedded = false,
@@ -320,6 +314,17 @@ export function AgentChatSurface({
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
   const [startingNew, setStartingNew] = useState(false);
   const historyRef = useRef<HTMLDivElement | null>(null);
+  // 窄屏歷史抽屜（portal 到 document.body）：卡片 section.lg-card 有 backdrop-filter，
+  // 會成為 fixed 後代的 containing block，把 inset:0 的 scrim 縮成卡片大小
+  // （2026-10-03 實錘：390px 下 scrim top 90/left 12/w 366/h 742）。portal 出去後
+  // 抽屜節點不在 historyRef 子樹內，outside-click 需另外放行這個 ref。
+  const historyDrawerRef = useRef<HTMLDivElement | null>(null);
+  // 窄屏（≤639.98px，與 sm: 斷點同源）：歷史從下拉換成底部抽屜（D-23 同款
+  // agent-param-drawer 輪子），並帶受控搜尋詞；寬屏行為不變。
+  const isNarrow = useIsNarrow();
+  const [historyQuery, setHistoryQuery] = useState("");
+  const historyTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const historyCloseRef = useRef<HTMLButtonElement | null>(null);
   // PWA standalone 登录交接面板（null = 未开启）。storage 与常用浏览器隔离，
   // popup 链路在 standalone 视窗里拿不回登录态，必须走 handoff。
   const [handoffLogin, setHandoffLogin] = useState<{ ticket: string; loginUrl: string } | null>(null);
@@ -349,15 +354,46 @@ export function AgentChatSurface({
   }, [retry]);
 
   // 開著的 dropdown：點外面就收——浮層不該把人鎖在原地。
+  // （窄屏抽屜已 portal 到 document.body，節點不在 historyRef 子樹內，所以
+  //   列與搜尋框的點擊改由 historyDrawerRef 放行，不誤收；
+  //   抽屜自己的 scrim onClick 負責點遮罩關閉。）
   useEffect(() => {
     if (!showHistory) return;
     const onDocPointerDown = (ev: PointerEvent): void => {
-      if (historyRef.current && !historyRef.current.contains(ev.target as Node)) {
+      if (!isInsideHistorySurface(historyRef.current, historyDrawerRef.current, ev.target as Node)) {
         setShowHistory(false);
       }
     };
     document.addEventListener("pointerdown", onDocPointerDown);
     return () => document.removeEventListener("pointerdown", onDocPointerDown);
+  }, [showHistory]);
+
+  // 歷史抽屜（僅窄屏掛載）：Esc 關閉＋背景鎖滾動＋焦點進出——逐條抄
+  // AgentParamDisclosure 的 D-23 抽屜輪子（存原 overflow 再還原，與全出血
+  // 頁面的 html/body 滾動鎖共存；關閉後焦點還給觸發鈕）。
+  const historyDrawerOpen = showHistory && isNarrow;
+  useEffect(() => {
+    if (!historyDrawerOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        setShowHistory(false);
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    historyCloseRef.current?.focus();
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = previousOverflow;
+      historyTriggerRef.current?.focus();
+    };
+  }, [historyDrawerOpen]);
+
+  // 收起歷史時清掉搜尋詞：下次打開看到的是全量目錄，不是上次打一半的詞。
+  useEffect(() => {
+    if (!showHistory) setHistoryQuery("");
   }, [showHistory]);
 
   // 「我的资产」面板同样点外即收。
@@ -893,10 +929,14 @@ export function AgentChatSurface({
         embedded（工作站面板態）：外層面板已有把手，這裡的把手省掉——單層。
       */}
       <header className={cn("flex shrink-0 flex-col", embedded ? "mb-1" : "pb-2")}>
-        <div className="flex flex-wrap items-center gap-x-1 gap-y-1">
+        {/* 窄屏走廊修復（2026-10-03）：桌面上 ml-auto 把右簇頂到最右是對的；
+            窄屏上中間那條是死空白走廊。兩個簇在窄屏改 display:contents（子按鈕
+            提升為外層 flex item），外層 justify-between——五顆 44px 鈕等距分布
+            整行，零 DOM 搬動；5×44=220px 在 320px 寬也不換行。桌面渲染不變。 */}
+        <div className="flex flex-wrap items-center gap-x-1 gap-y-1 max-sm:justify-between">
           {/* 資產／歷史：就是原本標題那塊位置，點外即收的浮層機制沿用各自原本的
               outside-click；圖示即「logo」，不再掛文字標籤。 */}
-          <div className="flex items-center gap-0.5">
+          <div className="flex items-center gap-0.5 max-sm:contents">
             <button
               type="button"
               onClick={() => void toggleAssets()}
@@ -910,6 +950,7 @@ export function AgentChatSurface({
               <Boxes className="h-[1.125rem] w-[1.125rem]" aria-hidden="true" />
             </button>
             <button
+              ref={historyTriggerRef}
               type="button"
               onClick={() => void toggleHistory()}
               onPointerEnter={prefetchHistory}
@@ -922,8 +963,9 @@ export function AgentChatSurface({
               <History className="h-[1.125rem] w-[1.125rem]" aria-hidden="true" />
             </button>
           </div>
-          {/* 右簇靠 ml-auto 頂到最右（中間沒有 flex-1 的標題塊可撐了）。 */}
-          <div className="ml-auto flex items-center gap-0.5">
+          {/* 右簇靠 ml-auto 頂到最右（中間沒有 flex-1 的標題塊可撐了）。
+              窄屏 contents 後 ml-auto 自動失效，由外層 justify-between 接管。 */}
+          <div className="ml-auto flex items-center gap-0.5 max-sm:contents">
             <button
               type="button"
               onClick={() => void onStartNewSession()}
@@ -967,84 +1009,103 @@ export function AgentChatSurface({
             <div ref={settingsTriggerWrapRef} className="absolute h-0 w-0 overflow-hidden" aria-hidden="true">
               <AgentSettingsPopover />
             </div>
-            {/* 历史下拉浮层：触发钮＝顶栏那颗「历史」，fixed 定位与 outside-click 机制沿用。 */}
-            <div ref={historyRef} className="relative">
-        {showHistory && (
-          <div className="agent-pop agent-pop-in fixed left-1/2 top-[var(--agent-pop-top,5rem)] z-50 w-56 -translate-x-1/2 rounded-[18px] p-1.5">
-            {historyList === null ? (
-              <p className="px-2.5 py-3 text-center text-ios-caption1 text-foreground/45">
-                正在加载历史会话…
-              </p>
-            ) : historyList.length === 0 ? (
-              /* 2026-08-22 完美主義審視：空狀態不只是宣告「沒有」——左對齊 +
-                 引導文案 + 一顆 inline 開新對話，讓第一次打開 dropdown 的人
-                 知道下一步做什麼。 */
-              <div className="flex flex-col items-start gap-1.5 px-2.5 py-3">
-                <MessageSquarePlus className="h-4 w-4 text-foreground/45" aria-hidden="true" />
-                <p className="text-left text-ios-caption1 leading-relaxed text-foreground/45">
-                  还没有历史对话
-                </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowHistory(false);
-                    void onStartNewSession();
-                  }}
-                  disabled={startingNew}
-                  className="cursor-pointer text-left text-ios-caption1 font-medium text-ios-blue transition-colors hover:text-ios-blue/80 disabled:cursor-wait"
-                >
-                  {startingNew ? "正在开启…" : "开始新对话 →"}
-                </button>
-              </div>
-            ) : (
-              <div className="agent-pop-scroll max-h-64 overflow-y-auto overscroll-contain">
-                {historyList.map((it) => {
-                  const active = it.session_id === sessionId;
-                  const statusMeta = SESSION_STATUS_META[it.status ?? "idle"];
-                  return (
-                    <button
-                      key={it.session_id}
-                      type="button"
-                      disabled={switchingTo !== null}
-                      onClick={() => void onPickSession(it.session_id)}
-                      className={cn(
-                        "flex w-full cursor-pointer items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left leading-normal transition-colors",
-                        active
-                          ? "bg-ios-blue/10"
-                          : "hover:bg-black/5",
-                        switchingTo === it.session_id && "opacity-50",
-                      )}
+            {/* 历史浮层：触发钮＝顶栏那颗「历史」。宽屏＝agent-pop 下拉（fixed 定位与
+                outside-click 机制沿用）；窄屏＝底部抽屉（agent-param-drawer 轮子，
+                与参数抽屉同一份 CSS，不新造）。
+                窄屏抽屉 portal 到 document.body：卡片 section.lg-card 的 backdrop-filter
+                会当 fixed 后代的 containing block，留在卡片内抽屉会被缩到卡片大小
+                （不是全屏）；portal 后节点不在 historyRef 子树内，列与搜索框的
+                pointerdown 改由 historyDrawerRef 放行。
+                抽屉材质用 agent-pop（不透明弹层材质，兄弟历史/资产弹层同款），
+                不用半透 lg-sheet——底下消息流的字会透上来和列表字叠在一起。 */}
+            <div ref={historyRef} className="relative max-sm:contents">
+              {showHistory &&
+                (isNarrow ? (
+                  typeof document !== "undefined" &&
+                  createPortal(
+                    <div
+                      className="agent-param-scrim"
+                      ref={historyDrawerRef}
+                      role="presentation"
+                      onClick={(event) => {
+                        if (event.target === event.currentTarget) setShowHistory(false);
+                      }}
                     >
-                      {/* 行首状态点：aria-hidden 的视觉点 + sr-only 状态文字。 */}
-                      <span
-                        aria-hidden="true"
-                        title={statusMeta.label}
-                        className={cn("h-2 w-2 shrink-0 rounded-full", statusMeta.dotClass)}
+                      <div
+                        role="dialog"
+                        aria-modal="true"
+                        aria-label="对话历史"
+                        className="agent-param-drawer agent-pop"
+                      >
+                      {/* 抓手是可见的可抓性提示；真正的关闭靠右上角按钮与点遮罩。 */}
+                      <span className="agent-param-drawer-grip" aria-hidden="true" />
+                      <div className="flex items-center gap-2 px-4 pb-2">
+                        <p className="min-w-0 flex-1 text-ios-subhead font-semibold text-foreground">对话</p>
+                        <button
+                          ref={historyCloseRef}
+                          type="button"
+                          onClick={() => setShowHistory(false)}
+                          aria-label="关闭历史"
+                          className="flex h-11 w-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full bg-black/5 text-muted-foreground transition-colors hover:bg-black/[0.09] hover:text-foreground active:bg-black/[0.13] focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 motion-reduce:transition-none [-webkit-tap-highlight-color:transparent]"
+                        >
+                          <X className="h-5 w-5" aria-hidden="true" />
+                        </button>
+                      </div>
+                      {/* 搜索（仅窄屏抽屉；宽屏 w-56 放不下）：lg-float 框＋放大镜，
+                          16px 字级防 iOS 聚焦自动放大。 */}
+                      <div className="px-4 pb-2">
+                        <div className="lg-float flex h-11 items-center gap-2 rounded-[14px] px-3">
+                          <Search className="h-4 w-4 shrink-0 text-foreground/45" aria-hidden="true" />
+                          <input
+                            value={historyQuery}
+                            onChange={(e) => setHistoryQuery(e.target.value)}
+                            placeholder="搜索对话"
+                            aria-label="搜索对话"
+                            className="min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-foreground/40"
+                          />
+                        </div>
+                      </div>
+                      <div className="agent-param-drawer-body">
+                        <AgentSessionList
+                          sessions={historyList}
+                          currentSessionId={sessionId}
+                          switchingTo={switchingTo}
+                          startingNew={startingNew}
+                          query={historyQuery}
+                          formatLabel={formatSessionLabel}
+                          onPick={(id) => void onPickSession(id)}
+                          onStartNew={() => {
+                            setShowHistory(false);
+                            void onStartNewSession();
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>,
+                  document.body,
+                )
+              ) : (
+                  <div className="agent-pop agent-pop-in fixed left-1/2 top-[var(--agent-pop-top,5rem)] z-50 w-56 -translate-x-1/2 rounded-[18px] p-1.5">
+                    <div className="agent-pop-scroll max-h-64 overflow-y-auto overscroll-contain">
+                      <AgentSessionList
+                        sessions={historyList}
+                        currentSessionId={sessionId}
+                        switchingTo={switchingTo}
+                        startingNew={startingNew}
+                        formatLabel={formatSessionLabel}
+                        onPick={(id) => void onPickSession(id)}
+                        onStartNew={() => {
+                          setShowHistory(false);
+                          void onStartNewSession();
+                        }}
                       />
-                      <span className="sr-only">{statusMeta.label}</span>
-                      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                        <span className="block truncate text-ios-caption1 font-medium text-muted-foreground">
-                          {formatSessionLabel(it)}
-                        </span>
-                        <span className="block truncate text-ios-caption2 text-foreground/45">
-                          最后活动 {formatSavedAt(it.last_activity_at)}
-                        </span>
-                      </span>
-                      {active ? (
-                        <span className="shrink-0 text-ios-caption2 font-medium text-ios-blue">当前</span>
-                      ) : switchingTo === it.session_id ? (
-                        <Loader2 className="h-3 w-3 shrink-0 animate-spin text-foreground/45" aria-hidden="true" />
-                      ) : null}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
+                    </div>
+                  </div>
+                ))}
             </div>
-            {/* 资产下拉浮层：触发钮已收进 ⋯ 菜单，fixed 定位与 outside-click 机制沿用。 */}
-            <div ref={assetPanelRef} className="relative">
+            {/* 资产下拉浮层：触发钮已收进 ⋯ 菜单，fixed 定位与 outside-click 机制沿用。
+                ref wrapper 窄屏 contents 化的理由同历史浮层（不参与工具列分布计数）。 */}
+            <div ref={assetPanelRef} className="relative max-sm:contents">
               {showAssets && (
                 <div className="agent-pop agent-pop-in fixed left-1/2 top-[var(--agent-pop-top,5rem)] z-50 w-64 -translate-x-1/2 rounded-[18px] p-1.5">
                   <p className="px-2.5 pt-2 pb-1 text-ios-caption1 font-medium text-foreground/60">我的资产</p>

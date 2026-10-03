@@ -23,6 +23,8 @@ import { AgentToolCard, toolArgPreview, toolDisplayName } from "./AgentToolCard"
 import { AgentAudioCard } from "./AgentAudioCard";
 import { AgentBatchProgress } from "./AgentBatchProgress";
 import { AgentMessageBubble } from "./AgentMessageBubble";
+import { AgentTranscript } from "./AgentTranscript";
+import { NEAR_BOTTOM_PX } from "./scroll-threshold";
 import { reportPreview } from "./AgentSubagentReportCard";
 import { nextSendBusy, AgentComposer } from "./AgentComposer";
 import Module, { createRequire } from "node:module";
@@ -38,7 +40,13 @@ import Module, { createRequire } from "node:module";
   (m as { exports: unknown }).exports = {};
 };
 const requireHere = createRequire(import.meta.url);
-const { exampleChipState } = requireHere("./AgentChatPanel.tsx") as {
+const {
+  exampleChipState,
+  isScrolledUp,
+  scrollTranscriptToBottom,
+  AgentBackToBottomButton,
+  AgentChatPanel,
+} = requireHere("./AgentChatPanel.tsx") as {
   resolveConfirmGroup: (
     requestIds: string[],
     approved: boolean,
@@ -49,6 +57,13 @@ const { exampleChipState } = requireHere("./AgentChatPanel.tsx") as {
     pendingExample: string | null,
     sendPending: boolean,
   ) => "pending" | "disabled" | "idle";
+  isScrolledUp: (scrollHeight: number, scrollTop: number, clientHeight: number) => boolean;
+  scrollTranscriptToBottom: (
+    el: { scrollHeight: number; scrollTo: (options: { top: number; behavior: ScrollBehavior }) => void },
+    reduceMotion: boolean,
+  ) => void;
+  AgentBackToBottomButton: (props: { scrolledUp: boolean; onClick: () => void }) => React.ReactElement;
+  AgentChatPanel: React.ComponentType<Record<string, unknown>>;
 };
 import { agentChatReducer, appendUserTurn, lastNonEmptyLine } from "../../lib/agent-chat-reducer";
 import {
@@ -1456,4 +1471,89 @@ test("批量进度「已用 N 币」不把报价类工具的估价、失败工�
   );
   assert.match(html, /已用 3 币/);
   assert.doesNotMatch(html, /614|619/);
+});
+
+// ───────────────────── 2026-10-03 手機排版三刀（窄屏 ≤639.98px） ─────────────────────
+
+test("刀1 窄屏 gutter：訊息流與輸入區補 max-sm:px-1（父卡 12px＋4px＝16px 設計 gutter，桌面不動）", () => {
+  // 真渲染整個面板（空態），斷言 class 真的出現在序列化 DOM 上——
+  // 不是源碼字串探針，是 React 產出的 class 屬性。
+  const markup: string = renderToStaticMarkup(
+    createElement(AgentChatPanel, {
+      state: EMPTY_AGENT_CHAT_STATE,
+      connection: "open",
+      onSend: () => {},
+      onConfirm: async () => true,
+      onAnswerQuestion: async () => true,
+      onRetryConnection: () => {},
+    }),
+  );
+  assert.match(markup, /class="agent-transcript [^"]*max-sm:px-1"/, "訊息捲動容器窄屏補 4px");
+  assert.match(markup, /class="agent-composer-anchor max-sm:px-1"/, "輸入區窄屏補 4px");
+});
+
+test("刀2 窄屏輪間距：轉錄 ol 真渲染 gap-5 sm:gap-2.5（窄 20px／桌面 10px 不動）", () => {
+  const markup = renderToStaticMarkup(
+    createElement(AgentTranscript, {
+      items: [{ kind: "user", id: "u1", seq: 1, text: "嗨" }],
+    }),
+  );
+  assert.match(
+    markup,
+    /<ol class="flex flex-col gap-5 sm:gap-2\.5"/,
+    "窄屏輪間距 20px、≥640px 回落 10px",
+  );
+});
+
+test("刀3 scrolledUp 判定：離底距離 ≥NEAR_BOTTOM_PX 才算往上翻（閾值與自動貼底同源）", () => {
+  // 行為斷言：純函數直接灌數字（測試進程沒有真滾動）。距離由 NEAR_BOTTOM_PX
+  // 推導，閾值改了就連這條一起改，不許漂移成兩個數。
+  const height = 1000;
+  const client = 500;
+  const atDistance = (d: number) => isScrolledUp(height, height - client - d, client);
+  assert.equal(atDistance(0), false, "貼底＝沒往上翻");
+  assert.equal(atDistance(NEAR_BOTTOM_PX - 1), false, "離底差 1px 到閾值仍算在底部");
+  assert.equal(atDistance(NEAR_BOTTOM_PX), true, "到閾值＝往上翻（鈕該出現）");
+  assert.equal(atDistance(NEAR_BOTTOM_PX * 4), true, "翻進歷史深處＝往上翻");
+});
+
+test("刀3 點擊回到底部：scrollTo 收到 top=scrollHeight；reduced-motion 時 instant", () => {
+  // 行為斷言：用記錄型假元素直接調面板導出的動作函數（點擊 handler 的唯一 callee）。
+  const calls: Array<{ top: number; behavior: string }> = [];
+  const fakeEl = {
+    scrollHeight: 4321,
+    scrollTo: (options: { top: number; behavior: ScrollBehavior }) => {
+      calls.push(options);
+    },
+  };
+  scrollTranscriptToBottom(fakeEl, false);
+  scrollTranscriptToBottom(fakeEl, true);
+  assert.deepEqual(calls, [
+    { top: 4321, behavior: "smooth" },
+    { top: 4321, behavior: "auto" },
+  ]);
+});
+
+test("刀3 回到底部鈕：44×44 玻璃圓鈕、僅窄屏渲染、顯隱兩態（真渲染斷言）", () => {
+  const shown = renderToStaticMarkup(
+    createElement(AgentBackToBottomButton, { scrolledUp: true, onClick: () => {} }),
+  );
+  assert.match(shown, /aria-label="回到底部"/);
+  assert.match(shown, /h-11 w-11/, "44×44 觸控靶");
+  assert.match(shown, /rounded-full/);
+  assert.match(shown, /lg-float/, "沿用 lg-float 玻璃，不新造材質");
+  assert.match(shown, /sm:hidden/, "桌面不渲染（pixel-identical 的保證）");
+  assert.match(shown, /opacity-100/);
+  assert.match(shown, /lucide-arrow-down/, "向下箭頭真渲染（lucide ArrowDown）");
+  assert.match(shown, /active:scale-95/, "active 壓感回饋");
+  assert.match(shown, /duration-\[140ms\]/, "140ms 淡入淡出");
+
+  // 隱藏態：透明＋不吃事件＋不可聚焦（隱形鈕不許被 Tab 到、不許擋點擊）。
+  const hidden = renderToStaticMarkup(
+    createElement(AgentBackToBottomButton, { scrolledUp: false, onClick: () => {} }),
+  );
+  assert.match(hidden, /opacity-0/);
+  assert.match(hidden, /pointer-events-none/);
+  assert.match(hidden, /tabindex="-1"/);
+  assert.match(hidden, /aria-hidden="true"/);
 });

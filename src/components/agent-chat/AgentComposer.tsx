@@ -194,15 +194,59 @@ function autoGrow(el: HTMLTextAreaElement) {
  */
 const DEFAULT_PLACEHOLDER = "描述你想做的，或把剧本／资产图拖进来";
 const COMPACT_PLACEHOLDER = "描述你想做的画面或影片";
+/**
+ * 觸控裝置（coarse pointer）用的長 placeholder（2026-10-03 手機端）：手機拖不了檔，
+ * 「拖进来」對它是做不到的動作，換「传上来」。DEFAULT_PLACEHOLDER 原值不動
+ * （桌面繼續用，且 agent-chat-ui.test.ts 源碼釘死了它）。
+ */
+const TOUCH_PLACEHOLDER = "描述你想做的，或把剧本／资产图传上来";
+
+/**
+ * 基礎 placeholder 決策（純函數，可直測）：內建長句＋觸控裝置 → 「传上来」版；
+ * 其餘（桌面、呼叫端自訂 placeholder）原樣通過。後續 placeholderFits 量字與
+ * COMPACT fallback 都對這份被選中的基礎句做，邏輯不變。
+ */
+export function resolveBasePlaceholder(placeholder: string, coarsePointer: boolean): string {
+  return coarsePointer && placeholder === DEFAULT_PLACEHOLDER ? TOUCH_PLACEHOLDER : placeholder;
+}
+
+/**
+ * placeholder 量測的臨界安全邊際（px）。canvas 量字與實際排版間會有一兩 px 的
+ * 舍入差，量到「剛好等於框寬」時瀏覽器仍會把 nowrap 的尾巴裁掉（2026-10-03
+ * 390px 實錘：長句量到 288px、clientWidth 284px）。留 8px 讓臨界值一律回落
+ * COMPACT_PLACEHOLDER，不再賭 0px 邊界。
+ */
+export const PLACEHOLDER_SAFETY_PX = 8;
+
+/**
+ * 純函數決策（可直測，無須 DOM）：量得的字寬加安全邊際後是否放得進 clientWidth。
+ * clientWidth ≤ 0 時無從判量，回 true（沿用原行為：量不到就不誤切短句）。
+ */
+export function placeholderFitsWidth(measured: number, clientWidth: number): boolean {
+  return clientWidth <= 0 || measured + PLACEHOLDER_SAFETY_PX <= clientWidth;
+}
+
+/**
+ * canvas 量字用的字串。getComputedStyle(el).font 在部分瀏覽器對 textarea 會回
+ * 空字串（2026-10-03 Chromium 手機實錘：回 ""），此時 ctx.font 落回預設 10px，
+ * 量到 180px → 永遠「放得下」→ 長 placeholder 被 nowrap 裁尾（真凶）。
+ * shorthand 非空時沿用；空時用長度屬性拼出可靠字串（桌面寬框仍量得出長句、不切短）。
+ */
+function resolveMeasureFont(style: CSSStyleDeclaration): string {
+  if (style.font) return style.font;
+  const stylePart = style.fontStyle && style.fontStyle !== "normal" ? `${style.fontStyle} ` : "";
+  const weightPart = style.fontWeight ? `${style.fontWeight} ` : "";
+  const sizePart = style.fontSize || "16px";
+  const family = style.fontFamily || "sans-serif";
+  return `${stylePart}${weightPart}${sizePart} ${family}`;
+}
 
 /** placeholder 在這個框寬下放不放得下一行（canvas 量字，與框同字型）。 */
 function placeholderFits(el: HTMLTextAreaElement, text: string): boolean {
   const ctx = document.createElement("canvas").getContext("2d");
   if (!ctx) return true;
-  const style = window.getComputedStyle(el);
-  ctx.font = style.font;
-  const inner = el.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
-  return inner <= 0 || ctx.measureText(text).width <= inner;
+  ctx.font = resolveMeasureFont(window.getComputedStyle(el));
+  return placeholderFitsWidth(ctx.measureText(text).width, el.clientWidth);
 }
 
 /** 释放一条 chip 持有的所有 Object URL（原片 + 缩图）。 */
@@ -333,7 +377,9 @@ function ThinkingLevelMenu({ disabled }: { disabled: boolean }) {
           // 2026-10-03 暴君定案：收起態＝腦圖標＋級別字＋小 chevron，零框零底零影零膠囊，
           // 與同排「+」「↑」同一套無框語彙（舊的白底細邊玻璃膠囊已刪）。
           // 只換顏色/透明度，無尺寸或位移變化——hover 零 layout shift。
-          "flex w-max shrink-0 items-center gap-1 whitespace-nowrap leading-none text-foreground/60",
+          // 2026-10-03 手機端：窄屏補 44px 觸控高度（max-sm:min-h-11），桌面維持原行高。
+          // 只加最小高度、不改寬/字級/位移——hover 與展開零 layout shift，items-center 保垂直置中。
+          "flex w-max max-sm:min-h-11 shrink-0 items-center gap-1 whitespace-nowrap leading-none text-foreground/60",
           "transition-colors hover:text-[#7d6ee0] active:opacity-70",
           "focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
           "disabled:cursor-not-allowed disabled:opacity-40",
@@ -445,15 +491,23 @@ function AgentComposerComponent({
   const composerRef = useRef<HTMLDivElement>(null);
   // 框寬放不下長 placeholder 時換短句；框寬變化（轉屏、面板拖寬）即重量。
   const [compactPlaceholder, setCompactPlaceholder] = useState(false);
+  // 觸控裝置判定（2026-10-03）：SSR 與首幀一律 false（=桌面長句，避免 hydration
+  // mismatch），掛載後用 matchMedia("(pointer: coarse)") 判定一次再切「传上来」版。
+  const [coarsePointer, setCoarsePointer] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    setCoarsePointer(window.matchMedia("(pointer: coarse)").matches);
+  }, []);
+  const basePlaceholder = resolveBasePlaceholder(placeholder, coarsePointer);
   useEffect(() => {
     const el = textareaRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
-    const measure = (): void => setCompactPlaceholder(!placeholderFits(el, placeholder));
+    const measure = (): void => setCompactPlaceholder(!placeholderFits(el, basePlaceholder));
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [placeholder]);
+  }, [basePlaceholder]);
   const trimmed = text.trim();
   /** 斜线菜单：查询词＝「/」之后的文字；两层闸门都真才显示（见上面 slashArmed）。 */
   const slashQuery = slashQueryOf(text);
@@ -1087,7 +1141,7 @@ function AgentComposerComponent({
           onPaste={handlePaste}
           enterKeyHint="send"
           disabled={disabled}
-          placeholder={compactPlaceholder && placeholder === DEFAULT_PLACEHOLDER ? COMPACT_PLACEHOLDER : placeholder}
+          placeholder={compactPlaceholder && placeholder === DEFAULT_PLACEHOLDER ? COMPACT_PLACEHOLDER : basePlaceholder}
           rows={1}
           className={cn(
             "block min-h-[1.875rem] max-h-[15rem] w-full resize-none bg-transparent px-1.5 pb-1 pt-1 text-[0.9375rem] leading-[1.375rem] text-foreground",
@@ -1139,7 +1193,10 @@ function AgentComposerComponent({
             title="添加素材（剧本 / 图片 / 影片 / 文档）"
             className={cn(
               // 2026-10-01 暴君：纯图标、不包圆形边——只有一个「+」。36px 是隐形触控区，不画底不画框。
-              "flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-foreground/50",
+              // 2026-10-03 手機端：窄屏（<640px）補 44px 觸控區（max-sm:h-11 w-11），桌面維持 36px。
+              // 走 JSX className 而非 agent-chat.css：該檔的 44px 補丁選擇器只打工具行直接子級，
+              // 打不到包在 relative 容器裡的這顆鈕。工具行 items-center 已在，加高不跑置中。
+              "flex h-9 w-9 max-sm:h-11 max-sm:w-11 shrink-0 items-center justify-center rounded-full text-foreground/50",
               "touch-manipulation [-webkit-tap-highlight-color:transparent]",
               "transition-colors hover:text-[#7d6ee0] active:scale-[0.92] focus:outline-none focus-visible:text-[#7d6ee0]",
               "disabled:cursor-not-allowed disabled:text-foreground/25",

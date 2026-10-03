@@ -177,6 +177,10 @@
   .agent-panel .animate-bounce {
     animation: none !important;
   }
+  /* 「回到底部」鈕的 140ms 淡入淡出也讓位（JS 側捲動同時改 instant）。 */
+  .agent-back-to-bottom {
+    transition: none !important;
+  }
 }
 
 /* ── 行動端適配 ─────────────────────────────────────────────
