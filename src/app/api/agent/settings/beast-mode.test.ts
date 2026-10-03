@@ -4,7 +4,7 @@
 // 1. 存储读取（expert-registry.readBeastMode）：缺字段/脏数据一律 false（默认 OFF，
 //    零迁移零破坏）；写 true 读 true 的往返。
 // 2. settings route：POST 转交前对 beast_mode 做布尔把关（=== true，否则 false）。
-// 3. 设定 UI：野兽模式行存在、复用 IosSwitch、副文案锁定。
+// 3. 设定 UI：四列开关已撤出弹层，野兽模式由输入区思考级别菜单的「极限」档承载。
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -47,35 +47,42 @@ test("settings route 在转交网关前把 beast_mode 规整为布尔（非 true
   assert.match(route, /\[BEAST_MODE_SETTINGS_KEY\] === true/);
 });
 
-// ── 设定 UI：野兽模式行 ──────────────────────────────────────
+// ── 设定 UI：野兽模式已收拢进思考级别菜单 ──────────────────────
 
-test("设定弹层新增野兽模式开关（默认关 + 复用 IosSwitch + 状态字与双态副文案）", () => {
+test("设定弹层撤出四列开关；野兽模式改由输入区思考级别菜单「极限」档承载", () => {
   const ui = read("src/components/agent-chat/AgentSettingsPopover.tsx");
-  assert.match(ui, /野兽模式/);
-  // 关闭态：状态字「常规」+ 副文案（留给硬核点子）。
-  assert.match(ui, /beastMode \? "极限" : "常规"/);
-  assert.match(ui, /大部分场合不需要开启，留给真正硬核的点子/);
-  // 开启态：状态字「极限」（紫色）+ 副文案（拼尽全力）。
-  assert.match(ui, /模型使用所有工具协助，拼尽全力达到最完美的效果，满足追求极限的你/);
-  // 开启态：状态字「极限」转紫并加粗（关闭态与其他行状态字同款灰、同字号）。
-  assert.match(ui, /beastMode && "font-medium text-purple-600"/);
-  assert.match(ui, /<IosSwitch checked=\{beastMode\} onChange=\{updateBeastMode\}/);
-  assert.match(ui, /useState<boolean>\(false\)/, "野兽模式默认 OFF");
-  // Wave1-C 后半起 beast_mode 已转正进 sanitize 白名单：开关改走
-  // saveAgentSettings 标准链路（裸 fetch 透传退役）。
-  assert.match(ui, /saveAgentSettings\(\{ \[BEAST_MODE_SETTINGS_KEY\]: next \}\)/, "开关走标准链路持久化");
+  // 断言去注释后的源码——头注释里解释「四列已撤」是合法的，不是渲染出来的 UI。
+  const uiCode = ui.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+  // 2026-10-03 暴君定案：中途输入 / 模型性格 / 成本需求 / 野兽模式 四列 UI 全撤，
+  // 只留「我的技能」与「互动模式」；旧行名与开关组件一律不得回魂。
+  assert.doesNotMatch(uiCode, /中途输入/, "中途输入行已撤出设定弹层");
+  assert.doesNotMatch(uiCode, /模型性格/, "模型性格行已撤出设定弹层");
+  assert.doesNotMatch(uiCode, /成本需求/, "成本需求行已撤出设定弹层");
+  assert.doesNotMatch(uiCode, /野兽模式/, "野兽模式行已撤出设定弹层");
+  assert.doesNotMatch(uiCode, /IosSwitch/, "开关组件随四列一起退役");
+  assert.doesNotMatch(uiCode, /BEAST_MODE_SETTINGS_KEY/, "镜像键随野兽模式行一起退役");
+  // 保留行仍在（互动模式那一列不动）。
+  assert.match(ui, /互动模式/);
+  assert.match(ui, /我的技能/);
+
+  // 新承载点：思考级别菜单经既有唯一写入者 saveAgentSettings 落三栏 patch
+  // （extreme → beast_mode:true 由 AGENT_THINKING_LEVEL_SETTINGS 真源定义，
+  //  见 agent-chat-client.test.ts 的逐档断言）。
+  const composer = read("src/components/agent-chat/AgentComposer.tsx");
+  assert.match(composer, /function ThinkingLevelMenu/, "思考级别菜单必须落在输入区");
+  assert.match(composer, /saveAgentSettings\(agentThinkingLevelPatch\(next\)\)/, "改档走既有设置写入链路");
 });
 
-test("client 弹层的 beast_mode 键与 expert-registry 常量同值（镜像守卫）", () => {
-  // expert-registry 含 node:child_process 链，client 组件只能镜像字面量；
-  // 该守卫防两处字面量漂移。
+test("client 侧 beast_mode 键与 expert-registry 常量同值（镜像守卫）", () => {
+  // expert-registry 含 node:child_process 链，client 模块只能镜像字面量；
+  // 该守卫防两处字面量漂移，并守 client 不吞 server-only 链。
   const registry = read("src/lib/expert-registry.ts");
-  const ui = read("src/components/agent-chat/AgentSettingsPopover.tsx");
+  const client = read("src/lib/agent-chat-client.ts");
   const registryKey = registry.match(/export const BEAST_MODE_SETTINGS_KEY = "([^"]+)" as const/);
-  const uiKey = ui.match(/const BEAST_MODE_SETTINGS_KEY = "([^"]+)" as const/);
   assert.ok(registryKey, "expert-registry.ts 必须导出 BEAST_MODE_SETTINGS_KEY 字面量");
-  assert.ok(uiKey, "弹层必须定义镜像常量");
-  assert.equal(uiKey[1], registryKey[1]);
-  assert.equal(uiKey[1], "beast_mode");
-  assert.doesNotMatch(ui, /from "@\/lib\/expert-registry"/, "client 严禁 import server-only 链");
+  assert.equal(registryKey[1], "beast_mode");
+  // 思考级别映射真源以 beast_mode 为键（三档 false / 极限 true）。
+  assert.match(client, /beast_mode: false/);
+  assert.match(client, /beast_mode: true/);
+  assert.doesNotMatch(client, /from "@\/lib\/expert-registry"/, "client 严禁 import server-only 链");
 });

@@ -158,7 +158,7 @@ export async function ingestMasterExport(
   const requestHash = createHash("sha256").update(requestJson).digest("hex");
   const promptCiphertext = encryptGenerationPrompt(requestJson);
 
-  return sql.begin(async (tx) => {
+  const result = await sql.begin(async (tx) => {
     const inserted = await tx<{ id: string }[]>`
       INSERT INTO generation_job (
         id, tenant_id, source, idempotency_key, request_hash, kind, model_id, ratio,
@@ -217,4 +217,32 @@ export async function ingestMasterExport(
 
     return { jobId, artifactId: artifact.id, jobDeduped, artifactInserted: artifact.inserted };
   });
+
+  // 事後產物硬檢（加法、預設 OFF）：只有 MEDIA_QUALITY_GATE=1 才啟用；fire-and-forget，
+  // 只寫 log，任何情況不得 throw／阻斷入庫（見下方 helper 註解）。
+  if (process.env.MEDIA_QUALITY_GATE === "1") {
+    void runMediaQualityGateAfterIngest(result, input);
+  }
+  return result;
+}
+
+/**
+ * 成片入庫後的**確定性**事後硬檢（parity-gap 第 1 格）：對既有 deliveryUrl 跑
+ * ffprobe/ffmpeg 量測（解析度/時長/音軌/非空），把 verdict 寫進 log。**純觀測**：
+ * 不呼叫任何模型或付費上游、不動 DB、失敗吞掉；絕不 throw、絕不阻斷生成流程。
+ */
+async function runMediaQualityGateAfterIngest(
+  result: { jobId: string; artifactId: string; jobDeduped: boolean; artifactInserted: boolean },
+  input: MasterIngestPayload,
+): Promise<void> {
+  try {
+    const { probeMedia, evaluateMediaQuality, QUALITY_POLICIES } = await import("../media-quality-gate");
+    const probe = await probeMedia(input.deliveryUrl, 30_000);
+    const verdict = evaluateMediaQuality(probe, QUALITY_POLICIES.video_default);
+    console.log(
+      `[media-quality-gate] job=${result.jobId} artifact=${result.artifactId} policy=${verdict.policyId} ok=${verdict.ok} failures=${JSON.stringify(verdict.failures)} measured=${JSON.stringify(verdict.measured)}`,
+    );
+  } catch (e) {
+    console.log(`[media-quality-gate] 量測未完成（不影響入庫）：${e instanceof Error ? e.message : String(e)}`);
+  }
 }

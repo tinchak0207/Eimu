@@ -2,17 +2,17 @@
 
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { AlertTriangle, Coins, Download, Library, RotateCw, SlidersHorizontal, X } from "lucide-react";
+import { AlertTriangle, Check, Coins, Download, Library, Loader2, RotateCw, SlidersHorizontal, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AgentVideoItem } from "@/lib/agent-chat-types";
 import { AgentRerunMenu } from "./AgentRerunMenu";
 
 export interface AgentVideoCardProps {
   item: AgentVideoItem;
-  /** 存图库：由 AgentChatSurface 的 videoActions 接线（影片落 mediaUrl）。
-   *  回调缺席时仍保持 disabled，绝不伪造行为。 */
-  onSaveToLibrary?: (item: AgentVideoItem) => void;
-  onDownload?: (item: AgentVideoItem) => void;
+  /** 存图库：true＝已存入／本來就在；false＝失敗（卡片顯示短暫「未存入」）。回調缺席＝disabled。 */
+  onSaveToLibrary?: (item: AgentVideoItem) => Promise<boolean>;
+  /** 下载：true＝已觸發下載；false/拋錯＝按鈕短暫「失败」。 */
+  onDownload?: (item: AgentVideoItem) => Promise<boolean>;
   /**
    * 「再来 N 组」：會話級——把「再來 N 組」翻成一句話丟回對話，由助理重新決定參數
    * 並走既有計費鏈。影片按秒計費，payload 級重跑的估價口徑不同
@@ -35,11 +35,13 @@ function VideoAction({
   disabled,
   onClick,
   children,
+  tone,
 }: {
   label: string;
   disabled: boolean;
   onClick: () => void;
   children: ReactNode;
+  tone?: "danger";
 }) {
   return (
     <button
@@ -52,6 +54,7 @@ function VideoAction({
         "flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-ios-footnote text-muted-foreground transition-colors",
         "enabled:hover:bg-white/60 enabled:hover:text-foreground/70",
         "disabled:cursor-not-allowed disabled:text-foreground/45",
+        tone === "danger" && "text-destructive enabled:hover:text-destructive enabled:hover:bg-destructive/10",
         "focus:outline-none focus:ring-2 focus:ring-ios-blue/30",
         "[touch-action:manipulation] [-webkit-tap-highlight-color:transparent]",
       )}
@@ -165,6 +168,9 @@ function AgentVideoCardComponent({ item, onSaveToLibrary, onDownload, onRerun, o
   const [failed, setFailed] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
+  const [saveState, setSaveState] = useState<"idle" | "loading" | "saved" | "failed">("idle");
+  const [downState, setDownState] = useState<"idle" | "loading" | "failed">("idle");
+  const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const triggerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   // 上一次按压的时长（毫秒）。click 由它判定是否「长按唤菜单后松手」。
@@ -180,6 +186,49 @@ function AgentVideoCardComponent({ item, onSaveToLibrary, onDownload, onRerun, o
     videoRef.current?.pause();
     setViewerOpen(true);
   }, []);
+
+  const flash = useCallback((apply: () => void, revert: () => void, delayMs: number) => {
+    apply();
+    timersRef.current.push(setTimeout(revert, delayMs));
+  }, []);
+  useEffect(() => {
+    const timers = timersRef.current;
+    return () => {
+      timers.forEach(clearTimeout);
+    };
+  }, []);
+
+  const handleSave = useCallback(async () => {
+    if (!onSaveToLibrary || saveState === "loading" || saveState === "saved") return;
+    setSaveState("loading");
+    let ok = false;
+    try {
+      ok = await onSaveToLibrary(item);
+    } catch {
+      ok = false;
+    }
+    if (ok) {
+      setSaveState("saved");
+      return;
+    }
+    flash(() => setSaveState("failed"), () => setSaveState((s) => (s === "failed" ? "idle" : s)), 2000);
+  }, [item, onSaveToLibrary, saveState, flash]);
+
+  const handleDownload = useCallback(async () => {
+    if (!onDownload || downState === "loading") return;
+    setDownState("loading");
+    let ok = false;
+    try {
+      ok = await onDownload(item);
+    } catch {
+      ok = false;
+    }
+    if (ok) {
+      setDownState("idle");
+      return;
+    }
+    flash(() => setDownState("failed"), () => setDownState((s) => (s === "failed" ? "idle" : s)), 2000);
+  }, [item, onDownload, downState, flash]);
 
   // item.url 变化（同实例换片）时重置加载态，避免旧片的 loaded/failed 串台。
   useEffect(() => {
@@ -283,11 +332,31 @@ function AgentVideoCardComponent({ item, onSaveToLibrary, onDownload, onRerun, o
         </figcaption>
       )}
       <div className="mt-1 flex flex-wrap gap-1 px-3.5 pb-3">
-        <VideoAction label="存图库" disabled={!onSaveToLibrary} onClick={() => onSaveToLibrary?.(item)}>
-          <Library className="h-3.5 w-3.5" aria-hidden="true" />
+        <VideoAction
+          label={saveState === "saved" ? "已存" : saveState === "failed" ? "未存入" : "存图库"}
+          disabled={!onSaveToLibrary || saveState === "loading" || saveState === "saved"}
+          tone={saveState === "failed" ? "danger" : undefined}
+          onClick={() => void handleSave()}
+        >
+          {saveState === "loading" ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+          ) : saveState === "saved" ? (
+            <Check className="h-3.5 w-3.5" aria-hidden="true" />
+          ) : (
+            <Library className="h-3.5 w-3.5" aria-hidden="true" />
+          )}
         </VideoAction>
-        <VideoAction label="下载" disabled={!onDownload} onClick={() => onDownload?.(item)}>
-          <Download className="h-3.5 w-3.5" aria-hidden="true" />
+        <VideoAction
+          label={downState === "failed" ? "失败" : "下载"}
+          disabled={!onDownload || downState === "loading"}
+          tone={downState === "failed" ? "danger" : undefined}
+          onClick={() => void handleDownload()}
+        >
+          {downState === "loading" ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+          ) : (
+            <Download className="h-3.5 w-3.5" aria-hidden="true" />
+          )}
         </VideoAction>
         {/* 影片走會話級重跑（見 props 註釋）：N 組檔位與歷史卡同源；回調缺席＝disabled。
             選單本體是觸發鈕的兄弟（AgentRerunMenu 內部自有 relative 容器），不嵌套 button。 */}

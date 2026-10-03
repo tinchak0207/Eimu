@@ -29,6 +29,9 @@
  */
 
 import { readFileSync } from "node:fs"
+// 「評審可計量」（v3，2026-10-03）：分數來源型別的真源在 persistence.ts（欄位所在）。type-only
+// import 在編譯期即被抹除，不會把 persistence 的執行期模組（bun:sqlite）拉進本純函數模組。
+import type { CriticScoreSource } from "./persistence.ts"
 
 /** 單一 Expert 的交付契約（與 src/lib/expert-registry.ts deliverableContract 同形）。 */
 export interface ExpertDeliveryContract {
@@ -356,6 +359,68 @@ export function criticVerdictRejected(text: string): boolean {
   const head = (m ? m[1] : src.slice(0, 400)).toLowerCase()
   if (CRITIC_REJECT_WORDS.some((w) => head.includes(w.toLowerCase()))) return true
   return !CRITIC_PASS_WORDS.some((w) => head.includes(w.toLowerCase()))
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// 「評審可計量」數值閾值政策（v3，2026-10-03）
+//
+// 病灶：critic 閘門此前只有布林（criticVerdictRejected 詞表判讀）——「verdict<7 必返工」
+// 只住在 messages-gw.ts 的提示詞裡，代碼內零數值強制；critic_verdicts.score 恆 NULL；
+// 與人工接受/拒絕無 join。本節把「閾值」搬進代碼，並釘死它只對**獨立量測**生效。
+//
+// 紅線（禁同源斷言）：模型自評（model_self）是「同族模型評自己」，不是驗收 oracle；
+// 數值閾值只在 scoreSource==='measured'（存在獨立於被測模型的量測來源）時 enforce。
+// 人工標籤（human）另存 human_labels，是外生 label，不是數值量測，亦不套用本閾值。
+// 沒有分數 → 不 enforce（維持 null 的誠實狀態，不得填 0 假值充數）。
+// ─────────────────────────────────────────────────────────────────────────
+
+/** 集中可調的閾值政策（唯一真源；改口徑只改這裡）。 */
+export interface CriticScoreThresholdPolicy {
+  /** 分數低於此值 → 判定必須返工（條件為 value < reworkBelow，邊界值本身通過）。 */
+  reworkBelow: number
+  /** 唯一可被閾值約束的來源；其餘來源只記錄、不 enforce。 */
+  enforcedSource: CriticScoreSource
+}
+
+/** 預設政策：對齊 messages-gw.ts 提示詞「verdict<7 必返工」，且只對 measured 生效。 */
+export const CRITIC_SCORE_THRESHOLD_POLICY: CriticScoreThresholdPolicy = {
+  reworkBelow: 7,
+  enforcedSource: "measured",
+}
+
+/**
+ * 一條 critic 分數樣本。值與來源**始終綁定在一個物件**內，避免「拿掉來源後把自評當量測」。
+ * 無量測時 value/source 皆為 null（誠實狀態）。
+ */
+export interface CriticScoreSample {
+  value: number | null
+  source: CriticScoreSource | null
+}
+
+/**
+ * 純函數：數值閾值的**代碼強制**判定。回 { enforce, reason }。
+ * enforce=true 僅當三個條件同時成立：有有限數值、source===policy.enforcedSource、value<reworkBelow。
+ * 其餘一律 false（無分數／來源不符／已達標），並給人話 reason 說明為何未強制（可審計）。
+ */
+export function evaluateCriticScoreThreshold(
+  score: CriticScoreSample,
+  policy: CriticScoreThresholdPolicy = CRITIC_SCORE_THRESHOLD_POLICY,
+): { enforce: boolean; reason: string } {
+  const value = typeof score?.value === "number" && Number.isFinite(score.value) ? score.value : null
+  const source = score?.source ?? null
+  if (value === null) {
+    return { enforce: false, reason: "无分数样本（score 为 null），不套用数值阈值。" }
+  }
+  if (source !== policy.enforcedSource) {
+    return {
+      enforce: false,
+      reason: `分数来源=${source ?? "null"}，非 ${policy.enforcedSource}——模型自评/人工标签不构成验收 oracle，不强制返工。`,
+    }
+  }
+  if (value < policy.reworkBelow) {
+    return { enforce: true, reason: `量测分数 ${value} < ${policy.reworkBelow}，代码强制返工。` }
+  }
+  return { enforce: false, reason: `量测分数 ${value} ≥ ${policy.reworkBelow}，通过数值阈值。` }
 }
 
 /**

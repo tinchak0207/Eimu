@@ -262,6 +262,9 @@ export function assembleMusicDirectorPrompt(
     // 无该交付栏时该词零出现）。
     `编辑路径：effect_description 性质为改编/翻唱/二次精修（判据：要求基于既有歌曲改风格/改和声/换语言，而非从零新写）时，music_gen 走 YuE2 通路带 abc＋cot_mode 重渲染（编辑用 cot=full 重渲染，翻唱用 cot=melody＋chord-free abc），编辑不变量与版本对比规约见 skills/music-director/SKILL.md「乐谱编辑与翻唱工作流」节。`,
     `参考素材：${delegation.reference_refs && delegation.reference_refs.length > 0 ? delegation.reference_refs.join("、") : "无"}`,
+    // 2026-10-03 多版本偏好闸（additive）：music_gen 回执带 preference_question 时的处置契约。
+    // 音檔已随 audios[] 各自发一张 audio.done 卡，问题卡只指认版本；label→url 对照见 optionTakeUrls。
+    "多版本偏好闸：music_gen 回执带 preference_question 字段时——asked: true 必须立刻用 question 工具把它抬给用户，question/header/options 逐字照抄回执字段，不得改写、不得增删选项（「都不行，重写」与「你替我定」两条退路已在 options 内）；拿到答复后，用回执里的 optionTakeUrls（label → url）把选中的 label 翻译成对应的音频 URL 作为定版，并在交付说明里写明「用户选定的版本」。asked: false 时不要弹卡，直接采用 suggestedIndex 指向的那一版（索引对齐 audios[]），并在交付说明里用 entropy.reason 的一句话解释为什么不问。",
   ].join("\n");
 
   if (context.beastMode !== true) {

@@ -50,6 +50,25 @@ const handleSendRegion = code.slice(
   code.indexOf("const consumedNonceRef"),
 );
 
+/**
+ * 思考级别徽章 button 的开标签（用于「不再被包着」的反面断言）。
+ * 以 aria-haspopup="listbox" 唯一定位；从它往前找最近的 <button，再取该标签的收尾 >。
+ * 标签内 className 的 cn(...) 不含 > 字元，故第一个 > 即标签收尾。
+ */
+const badgeTagAnchor = code.indexOf('aria-haspopup="listbox"');
+const badgeButtonTag = code.slice(
+  code.lastIndexOf("<button", badgeTagAnchor),
+  code.indexOf(">", badgeTagAnchor) + 1,
+);
+
+/**
+ * 思考级别 chip 根 div 的开标签：从 function ThinkingLevelMenu 往下找第一个 <div，
+ * 取该标签的收尾 >。用于「chip 容器不得挂 relative」的反面断言（锚定链约束）。
+ */
+const chipRootAnchor = code.indexOf("function ThinkingLevelMenu");
+const chipDivAt = code.indexOf("<div", chipRootAnchor);
+const chipRootTag = code.slice(chipDivAt, code.indexOf(">", chipDivAt) + 1);
+
 test("IME 组字中的 Enter 不送出：isComposing 判定在 preventDefault 之前", () => {
   assert.ok(keyDownRegion.length > 0, "handleKeyDown 必须能定位到");
   const composingAt = keyDownRegion.indexOf("event.nativeEvent.isComposing");
@@ -137,4 +156,77 @@ test("中止钮停止进行中态：stopPending 默认 false 时行为与今天�
   assert.match(stopRegion, /<Square className="h-3\.5 w-3\.5" aria-hidden="true" \/>/);
   // 极简纪律：圆钮旁不加文字胶囊/徽章。
   assert.doesNotMatch(stopRegion, /正在中止，请稍候…<\/span>|中止中<\/span>|\{stopPending && \(/);
+});
+
+test("思考级别菜单：工具行同排、「+」右边、收起态 iconX、键盘/外部点击/焦点环齐备", () => {
+  const popover = read("src/components/agent-chat/AgentSettingsPopover.tsx");
+  // 四列已撤：设定弹层不得再出现中途输入 / 模型性格 / 成本需求 / 野兽模式。
+  // 断言去注释后的源码——注释里解释「这些行已移除」是合法的，不是渲染出来的 UI。
+  assert.doesNotMatch(readCode(popover), /中途输入|模型性格|成本需求|野兽模式/);
+
+  // 菜单落在输入区（AgentComposer），工具行流内、「+」右边（暴君 2026-10-03 三选一定案）。
+  assert.match(code, /function ThinkingLevelMenu/);
+  // 定位锁定：chip 容器**不得**再挂 relative（挂了面板会贴着 chip 往上开、
+  // 下半压在输入框上）；展开面板的 containing block 回到 composer 根，
+  // 其 class 逐字对齐同档 SkillSlashMenu 的同名定位语汇。
+  assert.match(code, /shrink-0 ml-0\.5/, "chip 在工具行流内、「+」右边（非悬浮）");
+  assert.doesNotMatch(chipRootTag, /relative/, "chip 容器不得挂 relative（面板锚在 composer 根）");
+  assert.match(
+    code,
+    /absolute bottom-full left-1\.5 z-50 mb-2 w-max/,
+    "面板逐字对齐 SkillSlashMenu：bottom-full + left-1.5 + mb-2",
+  );
+  // 徽章折行/溢出回归锁：chip 是工具行 flex 子项，必须靠 w-max（按内容定宽）
+  // ＋ whitespace-nowrap（文字永不折行）保住单行胶囊。
+  assert.match(code, /whitespace-nowrap/);
+  assert.match(code, /w-max/);
+  assert.match(code, /<ThinkingLevelMenu disabled=\{!canAttach\} \/>/);
+  // 收起态＝lucide Brain + 级别字 + 尾端 ChevronDown：emoji 与自绘 SVG 都彻底移除
+  // （PRODUCT.md「UI 禁用 emoji 圖示」；图标家族统一走 lucide）。
+  // 用码点的转义写死（而非字面 emoji），让整个 src/ 不再出现该字元。
+  assert.doesNotMatch(code, /\u{1F9E0}/u);
+  assert.match(code, /<Brain /);
+  assert.match(code, /ChevronDown/);
+  assert.match(code, /aria-hidden="true"/);
+  // 反面锁：徽章 button 不再被包着——class 不含任何胶囊语汇（无框/无底/无影/无圆胶囊）。
+  assert.ok(badgeButtonTag.length > 0, "徽章 button 开标签必须能定位到");
+  assert.doesNotMatch(
+    badgeButtonTag,
+    /border(-|\/|"|\s)|bg-white\/|backdrop-blur|rounded-full/,
+  );
+  // 收起态锚点仍在工具行流内，「+」右边（缩小范围到已被 <button> 收尾截断的开标签）。
+  assert.match(badgeButtonTag, /flex w-max/);
+  assert.match(code, /AGENT_THINKING_LEVEL_LABELS\[level\]/);
+  // 可 Tab 到、Enter/Space 可開（真 button）＋ Esc 可關 ＋ 點擊外部收起。
+  assert.match(code, /aria-haspopup="listbox"/);
+  assert.match(code, /aria-expanded=\{open\}/);
+  assert.match(code, /aria-label=\{`思考级别：\$\{label\}（低\/中\/高\/极限）`\}/);
+  assert.match(code, /event\.key === "Escape"/);
+  assert.match(code, /addEventListener\("pointerdown"/);
+  // 焦點環走 --ring 主題 token。
+  assert.match(code, /focus-visible:ring-2 focus-visible:ring-ring\/40/);
+  // 展開後四檔：說明行已刪，說明字串改掛每列 title（真源仍是 AGENT_THINKING_LEVEL_HINTS）。
+  assert.match(code, /title=\{AGENT_THINKING_LEVEL_HINTS\[lv\]\}/);
+  // 當前檔右端一顆勾。
+  assert.match(code, /<Check /);
+  // 寫入：顯式級別 localStorage ＋ 既有唯一寫入者 saveAgentSettings（三欄 patch）。
+  assert.match(code, /writeCachedAgentThinkingLevel\(next\)/);
+  assert.match(code, /saveAgentSettings\(agentThinkingLevelPatch\(next\)\)/);
+  // 面板不得再用會帶 translateX(-50%) 的 agent-pop-in（配 left-0 會左移半個寬度、
+  // 內容滑出面板外＝生產上「級別名跑到面板左緣之外」的根因）。
+  assert.doesNotMatch(code, /agent-pop/);
+});
+
+test("attachFilesRef：可選介面把既有附件入口註冊出去（不傳＝不變）", () => {
+  // prop 存在且型別正確（可選）。
+  assert.match(
+    composer,
+    /attachFilesRef\?: MutableRefObject<\(\(files: File\[\]\) => void\) \| null>;/,
+  );
+  // effect 只在傳了 ref 時註冊；註冊的是既有 enqueueFiles（不另寫一份入隊邏輯）。
+  assert.match(composer, /if \(!attachFilesRef\) return;/);
+  assert.match(composer, /attachFilesRef\.current = \(files: File\[\]\) => \{/);
+  assert.match(composer, /void enqueueFiles\(files\);/);
+  // 卸載歸 null。
+  assert.match(composer, /attachFilesRef\.current = null;/);
 });

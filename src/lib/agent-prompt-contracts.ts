@@ -166,7 +166,10 @@ export const AGENT_PROMPT_CONTRACTS: readonly AgentPromptContract[] = [
     // transcribed_abc_sha256／transcribe_warnings（2026-09-19 片 O 收錄）：翻唱工作流
     //（source_audio 扒譜）的回執 additive 鍵——前者＝扒譜產物的樂譜指紋（＝送入生成
     // 的旋律骨幹），後者＝扒譜警告如實透傳（可為空數組）。
-    topLevelKeys: ["ok", "url", "duration_source", "score_abc", "channel", "fallback_from", "fallback_reason", "cot_mode", "abc_sha256", "transcribed_abc_sha256", "transcribe_warnings"],
+    // preference_question（2026-10-03 多版本偏好闸收錄）：≥2 個候選（audios）時在場的回執層
+    // additive 鍵——熵決策層輸出的偏好問題（含 optionTakeUrls：label → 音頻 URL 對照），
+    // 導演用既有 question 工具抬給使用者；<2 候選時缺席（選填故不入 frozenConstants）。
+    topLevelKeys: ["ok", "url", "duration_source", "score_abc", "channel", "fallback_from", "fallback_reason", "cot_mode", "abc_sha256", "transcribed_abc_sha256", "transcribe_warnings", "preference_question"],
     fields: [
       FIELD_OK,
       { name: "url", type: "string", required: true, meaning: "音頻公網 URL（music-delegate.ts:338；上游未上傳 gateway 即 missing_deliverables）→ payload.audio_url。" },
@@ -179,6 +182,7 @@ export const AGENT_PROMPT_CONTRACTS: readonly AgentPromptContract[] = [
       { name: "abc_sha256", type: "string", required: false, meaning: "帶譜委託的 ABC 樂譜指紋（music-tools.ts 回執層，有傳 abc 時在場；hex sha256）：長樂譜不重複回傳，比對指紋即知送入重渲染的樂譜版本。" },
       { name: "transcribed_abc_sha256", type: "string", required: false, meaning: "翻唱工作流（source_audio）的扒譜產物指紋（music-tools.ts 回執層，帶 source_audio 時在場；hex sha256）：＝送入生成的旋律骨幹 ABC——比對指紋即知本次翻唱沿用的旋律骨幹；與 abc_sha256（委託自備譜）互斥不同時在場。" },
       { name: "transcribe_warnings", type: "string[]", required: false, meaning: "扒譜警告（music-tools.ts 回執層，帶 source_audio 時在場，可為空數組）：SheetSage2 對源音頻的如實警告（如截斷提示），導演可引用說明扒譜品質；不粉飾不吞掉。" },
+      { name: "preference_question", type: "object", required: false, meaning: "多版本偏好闸（music-tools.ts 回执层，仅 audios.length>=2 时在场）：熵决策层（music-take-entropy.ts）输出的偏好问题对象——asked/question/header/options/optionTakeUrls/entropy/suggestedIndex。asked=true 时导演用既有 question 工具把 question/header/options 逐字抬给用户，拿到答复后用 optionTakeUrls（label → 音频 URL）把选中 label 翻成定版 URL；asked=false 时不弹卡、直接采 suggestedIndex（索引对齐 audios[]）。音频已随各 take 的 audio.done 卡交付，问题卡只指认版本。" },
       { name: "duration_seconds", type: "number", required: false, meaning: "時長秒（music-delegate.ts:354-357，>0 才取用）→ evidence.durationSec。" },
       { name: "audio_bytes", type: "number", required: false, meaning: "音頻字節數（music-delegate.ts:353）→ evidence.bytes。" },
       { name: "mime_type", type: "string", required: false, meaning: "音頻 MIME（music-delegate.ts:366，進 qc 欄）。" },
@@ -198,6 +202,7 @@ export const AGENT_PROMPT_CONTRACTS: readonly AgentPromptContract[] = [
       "score_abc 是回執層欄非導演義務欄：非 YuE2 通路固定 null，勿手拼 ABC 樂譜回填（閘門只認導演正文的 melody_notation 欄）。",
       "樂譜編輯工作流（帶 abc 重渲染）僅 YuE2 通路有效：cot_mode／abc_sha256 只在 YuE2 回執在場；帶 abc 委託在 YuE2 拋錯時直接失敗不回落（FlowMusic 不認樂譜，回落會靜默丟失編輯語義）——導演引用時如實說明，勿把回落版本當編輯結果。",
       "翻唱工作流（source_audio 扒譜＋重演繹）僅 YuE2 通路有效：transcribed_abc_sha256／transcribe_warnings 只在帶 source_audio 的回執在場；source_audio 與 abc 互斥（同傳即 invalid_args）；扒譜 422 abc_missing 是確定性失敗（源音頻無可提取旋律）勿重試同一份音頻；扒譜/生成失敗直接報錯不回落——翻唱語義不可被無譜通路頂替。",
+      "多版本偏好闸（preference_question）只在 audios.length>=2 时在场（单 clip 回执不含此键，勿误判为缺栏）：asked=true 必须立刻用 question 工具把 question/header/options 逐字抬给用户，不得改写或增删选项；选项只带文字，音频对照靠 optionTakeUrls（label → url），禁止把音频塞进 question 选项。asked=false 不弹卡，直接采 suggestedIndex（索引对齐 audios[]），并用 entropy.reason 说明为何不问。",
     ],
   },
   {

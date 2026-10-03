@@ -146,3 +146,93 @@ describe("新增欄位同步集合檢查（需求 3）", () => {
     expect(new TextDecoder().decode(replay[0].frame)).toBe("data: {}\n\n")
   })
 })
+
+// ── v2 → v3 增量升級：真實的舊生產庫（2026-10-03）──────────────────────────────
+// 為何另造一個庫：上面那個 fixture 是 user_version=0 的最舊庫，一路 0→3；本節專門覆蓋
+// 「已上線的 v2 生產庫（user_version=2）升到 v3」這條真實路徑，v3 產物（human_labels 表、
+// critic_verdicts.score_source 欄）在此才有專屬斷言。
+//
+// 造庫方式＝真實：直接呼叫本模組既有的 migration 函式（MIGRATIONS[0]/[1].up）把 v1/v2 的
+// schema 逐步建出來，再把 user_version 設成 2——不手抄一份可能與實作漂移的假 DDL。
+// 註：DB_PATH 在模組載入時固定（persistence.ts:106），同進程無法對第二個路徑再跑
+// initPersistence()；此處改用 initPersistence 內部**唯一實際執行遷移的入口** runMigrations()，
+// 與 initPersistence 走的是同一段遷移代碼（initPersistence = open db + runMigrations）。
+const v2Dir = mkdtempSync(join(tmpdir(), "schema-v2-"))
+const v2Path = join(v2Dir, "sessions.db")
+const v2Build = new Database(v2Path, { create: true })
+const v2Migrations = persistence.MIGRATIONS.filter((m) => m.version <= 2)
+for (const m of v2Migrations) m.up(v2Build)
+// 真實 v2 庫的審計表：runMigrations 套用 v1/v2 時會寫入這兩列（照抄同一段語句，讓 fixture
+// 與真庫等價——否則升級後 schema_migrations 只有 v3，與生產庫狀態不符）
+v2Build.exec(`
+  CREATE TABLE IF NOT EXISTS schema_migrations (
+    version    INTEGER PRIMARY KEY,
+    name       TEXT NOT NULL,
+    applied_at INTEGER NOT NULL
+  )
+`)
+for (const m of v2Migrations) {
+  v2Build
+    .query("INSERT OR REPLACE INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)")
+    .run(m.version, m.name, Date.now())
+}
+v2Build.exec("PRAGMA user_version = 2")
+// 前置事實：v2 庫的 critic_verdicts 尚無 score_source，也還沒有 human_labels 表
+const v2ColsBefore = (v2Build.query("PRAGMA table_info(critic_verdicts)").all() as { name: string }[]).map((c) => c.name)
+if (v2ColsBefore.includes("score_source")) throw new Error("fixture 不真實：v2 庫不該已有 score_source")
+if (v2Build.query("SELECT name FROM sqlite_master WHERE type='table' AND name='human_labels'").get()) {
+  throw new Error("fixture 不真實：v2 庫不該已有 human_labels")
+}
+// 塞一筆真實的 v2 時代審核判決（升級後必須仍在、且 score_source 維持 null）
+v2Build
+  .query(
+    "INSERT INTO critic_verdicts (id, session_id, run_id, agent, label, verdict, score, judge_model, verdict_text, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  )
+  .run("cv-legacy", "sess-legacy", "run-legacy", "expert", "cut-1", "pass", 4.25, "judge-x", "舊庫判詞", 111)
+v2Build.close()
+
+const v2db = new Database(v2Path)
+const v2Report = persistence.runMigrations(v2db)
+
+describe("v2 → v3 增量升級（真實舊庫）", () => {
+  test("runMigrations 把 v2 升到 v3：只套用 v3、user_version==3", () => {
+    expect(v2Report.from).toBe(2)
+    expect(v2Report.to).toBe(3)
+    expect(v2Report.applied).toEqual([3])
+    expect(v2Report.failures).toEqual([])
+    const v = (v2db.query("PRAGMA user_version").get() as { user_version: number }).user_version
+    expect(v).toBe(persistence.SCHEMA_VERSION)
+    expect(v).toBe(3)
+  })
+
+  test("v3 產物齊備：human_labels 表存在、critic_verdicts 有 score_source 欄", () => {
+    const hl = v2db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='human_labels'").get()
+    expect(hl).not.toBeNull()
+    const cols = (v2db.query("PRAGMA table_info(critic_verdicts)").all() as { name: string }[]).map((c) => c.name)
+    expect(cols).toContain("score_source")
+  })
+
+  test("舊資料無損：該筆 critic_verdicts 仍在、score 保留、score_source 為 null（未偽造成 measured）", () => {
+    const row = v2db
+      .query("SELECT score, score_source, verdict, judge_model FROM critic_verdicts WHERE id = 'cv-legacy'")
+      .get() as { score: number; score_source: string | null; verdict: string; judge_model: string } | null
+    expect(row).not.toBeNull()
+    expect(row!.score).toBe(4.25)
+    expect(row!.score_source).toBeNull()
+    expect(row!.verdict).toBe("pass")
+    expect(row!.judge_model).toBe("judge-x")
+  })
+
+  test("v3 對「欄已存在」的庫冪等：可重跑、不重複 ALTER、審計表不長新列", () => {
+    const report = persistence.runMigrations(v2db)
+    expect(report.from).toBe(3)
+    expect(report.applied).toEqual([])
+    expect(report.failures).toEqual([])
+    const n = (v2db.query("PRAGMA table_info(critic_verdicts)").all() as { name: string }[]).filter(
+      (c) => c.name === "score_source",
+    ).length
+    expect(n).toBe(1)
+    const audits = v2db.query("SELECT version FROM schema_migrations ORDER BY version").all() as { version: number }[]
+    expect(audits.map((a) => a.version)).toEqual([1, 2, 3])
+  })
+})

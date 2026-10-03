@@ -4,10 +4,11 @@
  * 本檔由 tools/export-music-tools-staging.ts 從行為真源 src/lib/music-tools.ts
  * 機械導出：真源全文逐行保留（工具定義/ok-fail/resolveKey/ffprobe 時長/上傳通路
  * 全在），除「環境適配」外與真源逐行等價。
- * 白名單 diff 僅五處：① 本注釋頭；②③④⑤ 真源 `from "./music-lyria"` → `from "./music_lyria"`、
+ * 白名單 diff 僅六處：① 本注釋頭；②③④⑤⑥ 真源 `from "./music-lyria"` → `from "./music_lyria"`、
  * `from "./music-flowmusic"` → `from "./music_flowmusic"`、
- * `from "./music-prompt-director"` → `from "./music_prompt_director"` 與
- * `from "./music-yue2"` → `from "./music_yue2"`（同目錄落位檔名慣例）。
+ * `from "./music-prompt-director"` → `from "./music_prompt_director"`、
+ * `from "./music-yue2"` → `from "./music_yue2"` 與
+ * `from "./music-take-entropy"` → `from "./music_take_entropy"`（同目錄落位檔名慣例）。
  * 禁止手改本檔——改真源後跑 `npx tsx tools/export-music-tools-staging.ts` 重導出。
  *
  * 落位：/opt/agent-harness/workspace/.opencode/lib/music-tools-impl.ts
@@ -88,6 +89,10 @@ import {
   type Yue2CotMode,
 } from "./music_yue2"
 import { directMusicPrompt } from "./music_prompt_director"
+import {
+  buildMusicPreferenceQuestion,
+  type MusicTakeFeature,
+} from "./music_take_entropy"
 
 // ── plumbing（ok/fail/resolveKey 同構 director-common.ts） ───────────────────
 
@@ -1023,14 +1028,27 @@ export const musicGenTool: MusicToolDef = {
       const candidateErrors: Array<{ candidate_index: number; upstream_url: string; error: string }> = (
         flowResult?.candidateErrors ?? []
       ).map((e) => ({ candidate_index: e.candidateIndex, upstream_url: e.upstreamUrl, error: e.error }))
-      const audios: Array<{ url: string; upstream_url?: string; duration_seconds?: number; candidate_index: number }> = []
+      // title/sound_prompt（2026-10-03 多 take 偏好闸 additive）：上游 clips[].title 與
+      // 回吐的 clips[].sound_prompt 逐候選帶出（缺省不帶鍵，既有鍵零改動），供熵決策層
+      // 判「這幾版聽起來一不一樣」。
+      const audios: Array<{
+        url: string
+        upstream_url?: string
+        duration_seconds?: number
+        candidate_index: number
+        title?: string
+        sound_prompt?: string
+      }> = []
       if (flowResult && url) {
+        const primaryCandidate = flowResult.candidates[0]
         // 主候選（index 0）沿用既有 url：同一份位元組不重複上傳。
         audios.push({
           url,
           ...(upstreamUrl ? { upstream_url: upstreamUrl } : {}),
           duration_seconds: Math.round(durationSeconds * 100) / 100,
           candidate_index: 0,
+          ...(primaryCandidate?.title !== undefined ? { title: primaryCandidate.title } : {}),
+          ...(primaryCandidate?.soundPrompt !== undefined ? { sound_prompt: primaryCandidate.soundPrompt } : {}),
         })
         for (const candidate of flowResult.candidates.slice(1)) {
           try {
@@ -1045,6 +1063,8 @@ export const musicGenTool: MusicToolDef = {
                 ? { duration_seconds: Math.round(candidate.upstreamDurationHint * 100) / 100 }
                 : {}),
               candidate_index: candidate.candidateIndex,
+              ...(candidate.title !== undefined ? { title: candidate.title } : {}),
+              ...(candidate.soundPrompt !== undefined ? { sound_prompt: candidate.soundPrompt } : {}),
             })
           } catch (e) {
             candidateErrors.push({
@@ -1056,11 +1076,30 @@ export const musicGenTool: MusicToolDef = {
         }
       }
 
+      // 多版本偏好闸（2026-10-03 additive）：≥2 個候選時呼叫熵決策層，把偏好問題帶進
+      // 回執（鍵名 preference_question，只在 ≥2 候選時在場；< 2 時回執形狀零變化）。
+      // 音檔已隨各 take 的 audio.done 卡交付，問題卡只「指認」；label → 音頻 URL 的
+      // 對照見 optionTakeUrls，供導演在拿到答覆後翻譯成定版 URL。
+      const preferenceQuestion =
+        audios.length >= 2
+          ? buildMusicPreferenceQuestion(
+              audios.map((audio): MusicTakeFeature => ({
+                url: audio.url,
+                candidateIndex: audio.candidate_index,
+                durationSeconds: audio.duration_seconds,
+                title: audio.title,
+                soundPrompt: audio.sound_prompt,
+                lyricsEcho: flowResult?.lyricsEcho,
+              })),
+            )
+          : undefined
+
       return ok({
         title: "音乐生成完成",
         ...(url ? { url, path_source: "gateway_uploads" } : { audio_base64: generated.audioBase64, upload: uploadCode }),
         ...(upstreamUrl ? { upstream_url: upstreamUrl } : {}),
         ...(audios.length > 0 ? { audios } : {}),
+        ...(preferenceQuestion !== undefined ? { preference_question: preferenceQuestion } : {}),
         ...(candidateErrors.length > 0 ? { candidate_errors: candidateErrors } : {}),
         // 通路如實回報實際生成通路（回落時 flowmusic2api＝真的走 flowmusic，不虛報 yue2）。
         channel: activeChannel === "yue2" ? "yue2_modal" : activeChannel === "flowmusic" ? "flowmusic2api" : "lyria_gemini",

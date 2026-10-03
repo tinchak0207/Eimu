@@ -43,7 +43,7 @@ const DOC_CARDS: Array<{
   {
     href: "/docs/assistant",
     title: "助理设定",
-    desc: "右上角齿轮里每行管什么，以及野兽模式什么时候开。",
+    desc: "右上角齿轮与「+」右上角的思考级别各管什么，以及野兽模式什么时候开。",
     icon: Settings2,
   },
   {

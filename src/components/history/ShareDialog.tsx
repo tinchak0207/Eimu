@@ -14,7 +14,7 @@ import { useCallback, useEffect, useId, useState } from "react";
 import { createPortal } from "react-dom";
 import { Check, Copy, EyeOff, Link2, Loader2, Share2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { getStoredToken, getStoredUser } from "@/lib/new-api-client";
+import { createShareLink, stationAuthHeaders } from "@/lib/agent-image-share";
 import { firstShareableIndex } from "@/lib/share-remix";
 import type { HistoryEntry } from "@/lib/history-types";
 
@@ -27,16 +27,6 @@ interface SharePayload {
   shareId: string;
   url: string;
   hidePrompt: boolean;
-}
-
-/** 與站內其它讀寫路由同一套身分標頭（RerunDialog / use-history 同款）。 */
-function authHeaders(): Record<string, string> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  const token = getStoredToken();
-  if (token) headers.Authorization = `Bearer ${token}`;
-  const user = getStoredUser();
-  if (user?.id) headers["x-user-id"] = String(user.id);
-  return headers;
 }
 
 export function ShareDialog({ entry, onClose }: ShareDialogProps) {
@@ -62,41 +52,20 @@ export function ShareDialog({ entry, onClose }: ShareDialogProps) {
 
   /**
    * 建立（或取回）。POST /api/share 是冪等的——同一件作品再點一次回同一條連結，
-   * 使用者貼出去的舊連結不會被悄悄換掉。
+   * 使用者貼出去的舊連結不會被悄悄換掉。請求與文案真源都在 createShareLink（媒體卡共用）。
    */
   const create = useCallback(async () => {
-    if (resultIndex < 0) {
-      setError("这件作品没有可分享的图片。");
-      return;
-    }
-    if (!getStoredToken()) {
-      setError("请先登录后再分享。");
-      return;
-    }
     setBusy(true);
     setError(null);
-    try {
-      const res = await fetch("/api/share", {
-        method: "POST",
-        headers: authHeaders(),
-        body: JSON.stringify({ entryId: entry.id, resultIndex, hidePrompt: false }),
-      });
-      const payload = (await res.json().catch(() => ({}))) as {
-        success?: boolean;
-        message?: string;
-        data?: SharePayload;
-      };
-      if (!res.ok || payload.success !== true || !payload.data) {
-        setError(payload.message ?? "生成分享链接失败，请稍后重试。");
-        return;
-      }
-      setShare(payload.data);
-    } catch {
-      setError("网络异常，分享链接没有生成。");
-    } finally {
+    const result = await createShareLink(entry, { resultIndex });
+    if (!result.ok) {
+      setError(result.message);
       setBusy(false);
+      return;
     }
-  }, [entry.id, resultIndex]);
+    setShare({ shareId: result.shareId, url: result.url, hidePrompt: result.hidePrompt });
+    setBusy(false);
+  }, [entry, resultIndex]);
 
   useEffect(() => {
     void create();
@@ -110,7 +79,7 @@ export function ShareDialog({ entry, onClose }: ShareDialogProps) {
     try {
       const res = await fetch("/api/share", {
         method: "PATCH",
-        headers: authHeaders(),
+        headers: stationAuthHeaders(),
         body: JSON.stringify({ shareId: share.shareId, hidePrompt: next }),
       });
       const payload = (await res.json().catch(() => ({}))) as {
@@ -148,7 +117,7 @@ export function ShareDialog({ entry, onClose }: ShareDialogProps) {
     try {
       const res = await fetch("/api/share", {
         method: "DELETE",
-        headers: authHeaders(),
+        headers: stationAuthHeaders(),
         body: JSON.stringify({ shareId: share.shareId }),
       });
       const payload = (await res.json().catch(() => ({}))) as { success?: boolean; message?: string };

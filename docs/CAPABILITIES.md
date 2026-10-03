@@ -167,7 +167,7 @@ Claude Code、Cursor、Codex，复制一行指令，就能直接调用 Eimu—�
 > - **同步出图。** `POST /openai/v1/images/generations` 等到图出来才回 200，返回 OpenAI 原样的 `url` 或 `b64_json`——现成 SDK 不用改一行轮询代码。
 > - **对话式出图，支持串流。** `chat/completions` 取最后一句话出图，等待期间每 10 秒保活，出图后以 markdown 推回。
 > - **重复请求不重复扣费。** 带上 `Idempotency-Key`，同一个 key 重发回的是同一个任务；给 `callback_url`，任务完成主动回调，不用轮询。
-> - **Remote MCP，10 个工具。** `POST /api/mcp` 是标准 MCP server：生图、改图、生影片、配音、放大、查额度、取结果，与站内同一本账。
+> - **Remote MCP，16 个工具。** `POST /api/mcp` 是标准 MCP server：生图、改图、生影片、配音、放大、查额度、取结果，以及画布产线的读取/写入/回滚（`list_canvas_projects` / `canvas_get_state` / `workflow_read` / `workflow_history` / `workflow_write` / `workflow_rollback`），与站内同一本账。
 > - **Codex 插件包。** 一键安装，随包附影片制作、角色一致性、运镜三个技能；安装链接里不夹带密钥。
 > - **拿到 key 就能跑。** 建 key 的弹窗直接给两段可复制的 curl（通用模型、二次元各一段），模型与尺寸从真实目录推导，粘上就出图。
 > - **先看再打。** `/v1/model-status` 一次查所有模型当前是否可用，以及近 24 小时的成功、失败、退款数；只读，不扣费。

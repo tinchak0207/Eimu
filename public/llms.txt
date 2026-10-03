@@ -127,6 +127,13 @@ Tools exposed by `tools/list` (source of truth: `src/lib/mcp/tools.ts`):
 | upscale | eimu:image:write | Upscale an image with idempotent reserve and refund on failure |
 | get_quota | eimu:quota:read | Read the balance and currency of the account bound to this key (same ledger as /v1/quota) |
 | get_result | eimu:tasks:read | Fetch an async result by id: kind = image / video / tts |
+| list_canvas_projects | eimu:canvas:read | List the canvas projects owned by this key's account (id, title, timestamps, node count); use the returned id as project_id for the workflow tools |
+| canvas_get_state | eimu:canvas:read | Read the current canvas snapshot of one agent session (nodes / connections / selection / viewport, plus the reversible `dsl` and node version index) |
+| workflow_read | eimu:canvas:read | Project only the reversible workflow `dsl` and node version index of a session's canvas; use canvas_get_state for full node geometry |
+| workflow_history | eimu:canvas:read | Read per-node version history (version / created_at / reason / title) of a session's canvas; pass node_id to filter one node |
+| workflow_write | eimu:canvas:write | Compile a full workflow declaration (`dsl`) into canvas ops; with a project_id owned by this account the ops are applied to that canvas, without it the tool only compiles |
+| workflow_rollback | eimu:canvas:write | Roll a canvas node's content back to a version (or the previous one); restores title and metadata only, never positions |
 
 Recommended agent flow: `get_quota` → `list_models` → `generate_image` / `generate_video` / `tts` → `get_result`.
+Canvas workflow flow: `list_canvas_projects` → `canvas_get_state` / `workflow_read` → `workflow_write` (with project_id) → `workflow_history` → `workflow_rollback`.
 Billing: web, REST API and MCP share one ledger — reserve on submit, commit on success, auto-refund on failure.

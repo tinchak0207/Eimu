@@ -9,7 +9,7 @@ description: 从一句话、一段剧本或一张参考图走到可交付成片�
 
 - 任何付费调用（`generate_image` / `edit_image` / `generate_video` / `tts` / `upscale`）之前先 `get_quota` 看余额，并把这次的费用范围讲清楚；用户对上一镜的授权不等于对下一镜重跑的授权。
 - 模型 id 一律先用 `list_models` 取，不要凭记忆写模型名；报价用返回里的 `x_coins_per_image` / `x_coins_per_second`。
-- 本流程的每一步都在对话里交付文本与链接。Eimu 的 MCP 没有画布节点、没有连线与分组、没有成片导出工具，不要向用户承诺这些动作，也不要向他要「画布上的节点」。
+- 本流程的每一步都在对话里交付文本与链接。Eimu 的 MCP 没有成片导出工具；画布产线虽有声明式读写工具（`list_canvas_projects` / `canvas_get_state` / `workflow_read` / `workflow_history` / `workflow_write` / `workflow_rollback`），但本流程不依赖它们，也不要向用户要「画布上的节点」。
 - 素材是否符合要求由用户判定；不要用静态帧宣称运动、口型或音画同步已经合格。
 
 ## 步骤

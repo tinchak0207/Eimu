@@ -178,14 +178,20 @@ test("composer has a real label, Enter sends and Shift+Enter newlines", () => {
 });
 
 test("image action buttons are disabled when no callback is wired", () => {
-  // wiring 阶段之前四个动作一律 disabled，不允许伪造 handler。
-  assert.match(imageCard, /disabled=\{!onSaveToLibrary\}/);
-  assert.match(imageCard, /disabled=\{!onEdit\}/);
-  assert.match(imageCard, /disabled=\{!onUpscale\}/);
-  assert.match(imageCard, /disabled=\{!onDownload\}/);
+  // wiring 阶段之前动作一律 disabled，不允许伪造 handler。
+  // 2026-10-03 契約更新：存图库／改图／下载改为「回調缺席 OR 進行中」的複合 disabled
+  // （async 狀態機）；放大改走卡片內全屏查看器（無 onUpscale，僅損壞時 disabled）。
+  assert.match(
+    imageCard,
+    /disabled=\{!onSaveToLibrary \|\| saveState === "loading" \|\| saveState === "saved"\}/,
+  );
+  assert.match(imageCard, /disabled=\{!onEdit \|\| editState === "loading"\}/);
+  assert.doesNotMatch(imageCard, /onUpscale/, "AI 放大語義已從媒體卡撤除");
+  assert.match(imageCard, /label="放大" disabled=\{failed\}/);
+  assert.match(imageCard, /disabled=\{!onDownload \|\| downState === "loading"\}/);
   assert.doesNotMatch(imageCard, /fetch\(/);
   // 回调以可选 props 形式接收，供后续步骤直接接上。
-  assert.match(imageCard, /onSaveToLibrary\?: \(item: AgentImageItem\) => void/);
+  assert.match(imageCard, /onSaveToLibrary\?: \(item: AgentImageItem\) => Promise<boolean>/);
 });
 
 test("video action buttons are disabled when no callback is wired", () => {
@@ -193,10 +199,13 @@ test("video action buttons are disabled when no callback is wired", () => {
   // 2026-10-03 契约更新：影片「存图库」已由 AgentChatSurface 的 videoActions 接线
   // （影片落 kind:"video" + mediaUrl）；卡片本身仍守「回调缺席＝disabled」，
   // 旧「资产包 kind 联合没有 video，按钮永远 disabled」的说法已作废。
-  assert.match(videoCard, /disabled=\{!onSaveToLibrary\}/);
-  assert.match(videoCard, /disabled=\{!onDownload\}/);
+  assert.match(
+    videoCard,
+    /disabled=\{!onSaveToLibrary \|\| saveState === "loading" \|\| saveState === "saved"\}/,
+  );
+  assert.match(videoCard, /disabled=\{!onDownload \|\| downState === "loading"\}/);
   assert.doesNotMatch(videoCard, /fetch\(/);
-  assert.match(videoCard, /onSaveToLibrary\?: \(item: AgentVideoItem\) => void/);
+  assert.match(videoCard, /onSaveToLibrary\?: \(item: AgentVideoItem\) => Promise<boolean>/);
   assert.doesNotMatch(surface, /kind 联合[\s\S]{0,60}没有 video/, "旧的「kind 联合没有 video」注释必须移除");
   assert.doesNotMatch(surface, /kind 联合没有 audio/, "旧的「kind 联合没有 audio」注释必须移除");
   // 新契约的正向证据：Surface 的 videoActions 真的提供了 onSaveToLibrary。
@@ -220,10 +229,13 @@ test("audio card plays via native <audio> and keeps the disabled action contract
   // 与图片/影片卡同惯例：回调缺席就 disabled，绝不伪造 handler。
   // 2026-10-03 契约更新：音頻「存图库」已由 AgentChatSurface 的 audioActions 接线
   // （音頻落 kind:"audio" + mediaUrl）；卡片本身仍守「回调缺席＝disabled」。
-  assert.match(audioCard, /disabled=\{!onSaveToLibrary\}/);
-  assert.match(audioCard, /disabled=\{!onDownload\}/);
+  assert.match(
+    audioCard,
+    /disabled=\{!onSaveToLibrary \|\| saveState === "loading" \|\| saveState === "saved"\}/,
+  );
+  assert.match(audioCard, /disabled=\{!onDownload \|\| downState === "loading"\}/);
   assert.doesNotMatch(audioCard, /fetch\(/);
-  assert.match(audioCard, /onSaveToLibrary\?: \(item: AgentAudioItem\) => void/);
+  assert.match(audioCard, /onSaveToLibrary\?: \(item: AgentAudioItem\) => Promise<boolean>/);
   // 新契约的正向证据：Surface 的 audioActions 真的提供了 onSaveToLibrary。
   assert.match(
     surface,

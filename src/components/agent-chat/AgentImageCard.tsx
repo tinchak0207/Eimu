@@ -4,12 +4,14 @@ import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "
 import { createPortal } from "react-dom";
 import {
   AlertTriangle,
+  Check,
   Coins,
   Download,
+  Expand,
   ImagePlus,
   Layers,
   Library,
-  Maximize2,
+  Loader2,
   RotateCw,
   Share2,
   SlidersHorizontal,
@@ -17,18 +19,19 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AgentImageItem } from "@/lib/agent-chat-types";
-import type { HistoryEntry } from "@/lib/history-types";
 import { agentHistoryEntryForMedia, saveAgentMediaToHistory } from "@/lib/agent-media-history";
+import { createShareLink } from "@/lib/agent-image-share";
+import { firstShareableIndex } from "@/lib/share-remix";
 import { canHistoryEntryRerun } from "@/lib/history-rerun";
-import { ShareDialog } from "@/components/history/ShareDialog";
 
 export interface AgentImageCardProps {
   item: AgentImageItem;
-  /** 存图库。尚未接线时为 undefined → 按钮保持 disabled，绝不伪造行为。 */
-  onSaveToLibrary?: (item: AgentImageItem) => void;
-  onEdit?: (item: AgentImageItem) => void;
-  onUpscale?: (item: AgentImageItem) => void;
-  onDownload?: (item: AgentImageItem) => void;
+  /** 存图库：true＝已存入／本來就在；false＝失敗（卡片顯示短暫「未存入」）。尚未接线时 undefined → disabled。 */
+  onSaveToLibrary?: (item: AgentImageItem) => Promise<boolean>;
+  /** 改图：把圖抓回並加進輸入框附件（true＝已交付附件）。false/拋錯＝顯示短暫「失败」。 */
+  onEdit?: (item: AgentImageItem) => Promise<boolean>;
+  /** 下载：true＝已觸發下載；false/拋錯＝按鈕短暫「失败」。 */
+  onDownload?: (item: AgentImageItem) => Promise<boolean>;
   /**
    * 「再来 N 组」：开 payload 級重跑對話框（RerunDialog 走 /api/generation-jobs，
    * 每個任務獨立帳本預檢，明碼計價）。圖有完整配方（prompt/model/size）才放行。
@@ -52,11 +55,14 @@ function ImageAction({
   disabled,
   onClick,
   children,
+  tone,
 }: {
   label: string;
   disabled: boolean;
   onClick: () => void;
   children: ReactNode;
+  /** "danger"：失敗瞬時態（未存入／失败）走紅字，與常態灰字分開。 */
+  tone?: "danger";
 }) {
   return (
     <button
@@ -69,6 +75,7 @@ function ImageAction({
         "flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-ios-footnote text-muted-foreground transition-colors",
         "enabled:hover:bg-white/60 enabled:hover:text-foreground/70",
         "disabled:cursor-not-allowed disabled:text-foreground/45",
+        tone === "danger" && "text-destructive enabled:hover:text-destructive enabled:hover:bg-destructive/10",
         "focus:outline-none focus:ring-2 focus:ring-ios-blue/30",
         "[touch-action:manipulation] [-webkit-tap-highlight-color:transparent]",
       )}
@@ -388,17 +395,21 @@ function AgentImageCardComponent({
   item,
   onSaveToLibrary,
   onEdit,
-  onUpscale,
   onDownload,
   onRerun,
   onRerunVariant,
 }: AgentImageCardProps) {
   const [viewerOpen, setViewerOpen] = useState(false);
-  const [shareEntry, setShareEntry] = useState<HistoryEntry | null>(null);
-  const [sharing, setSharing] = useState(false);
   const [failed, setFailed] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
+  // 每顆動作鈕各自的瞬時態：idle → loading →（成功定案／失敗短暫閃字後回 idle）。
+  // 「已存」本次會話內持續（不自動回落）；失敗態由 2s 計時器收回 idle。
+  const [saveState, setSaveState] = useState<"idle" | "loading" | "saved" | "failed">("idle");
+  const [editState, setEditState] = useState<"idle" | "loading" | "failed">("idle");
+  const [downState, setDownState] = useState<"idle" | "loading" | "failed">("idle");
+  const [shareState, setShareState] = useState<"idle" | "loading" | "copied" | "needLogin" | "failed">("idle");
+  const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const triggerRef = useRef<HTMLDivElement>(null);
   // 上一次按压的时长（毫秒）。click 由它判定是否「长按唤菜单后松手」。
   const pressRef = useRef<{ dt: number; t: number } | null>(null);
@@ -409,6 +420,18 @@ function AgentImageCardComponent({
   const closeViewer = useCallback(() => {
     setViewerOpen(false);
     triggerRef.current?.focus();
+  }, []);
+
+  // 失敗閃字計時器：卸載時清掉，別讓 setTimeout 攥著已卸載元件。
+  const flash = useCallback((apply: () => void, revert: () => void, delayMs: number) => {
+    apply();
+    timersRef.current.push(setTimeout(revert, delayMs));
+  }, []);
+  useEffect(() => {
+    const timers = timersRef.current;
+    return () => {
+      timers.forEach(clearTimeout);
+    };
   }, []);
 
   // item.url 变化（同实例换图）时重置加载态，避免旧图的 loaded/failed 串台。
@@ -422,6 +445,80 @@ function AgentImageCardComponent({
     setLoaded(false);
     setRetryKey((k) => k + 1);
   };
+
+  const handleSave = useCallback(async () => {
+    if (!onSaveToLibrary || saveState === "loading" || saveState === "saved") return;
+    setSaveState("loading");
+    let ok = false;
+    try {
+      ok = await onSaveToLibrary(item);
+    } catch {
+      ok = false;
+    }
+    if (ok) {
+      setSaveState("saved");
+      return;
+    }
+    flash(() => setSaveState("failed"), () => setSaveState((s) => (s === "failed" ? "idle" : s)), 2000);
+  }, [item, onSaveToLibrary, saveState, flash]);
+
+  // 改图＝把圖抓回加進輸入框附件（不發任何訊息）；輸入框出現 chip 就是回饋。
+  const handleEdit = useCallback(async () => {
+    if (!onEdit || editState === "loading") return;
+    setEditState("loading");
+    let ok = false;
+    try {
+      ok = await onEdit(item);
+    } catch {
+      ok = false;
+    }
+    if (ok) {
+      setEditState("idle");
+      return;
+    }
+    flash(() => setEditState("failed"), () => setEditState((s) => (s === "failed" ? "idle" : s)), 2000);
+  }, [item, onEdit, editState, flash]);
+
+  const handleDownload = useCallback(async () => {
+    if (!onDownload || downState === "loading") return;
+    setDownState("loading");
+    let ok = false;
+    try {
+      ok = await onDownload(item);
+    } catch {
+      ok = false;
+    }
+    if (ok) {
+      setDownState("idle");
+      return;
+    }
+    flash(() => setDownState("failed"), () => setDownState((s) => (s === "failed" ? "idle" : s)), 2000);
+  }, [item, onDownload, downState, flash]);
+
+  // 分享＝建立／取回歷史 entry 的公開連結並複製；不彈任何遮擋層。
+  const handleShare = useCallback(async () => {
+    if (shareState === "loading") return;
+    setShareState("loading");
+    const entry = agentHistoryEntryForMedia(item);
+    // 分享只認歷史 entry：先補寫（未登入＝false，下面的 createShareLink 會給人話原因）。
+    await saveAgentMediaToHistory(entry);
+    const result = await createShareLink(entry, { resultIndex: firstShareableIndex(entry) });
+    if (result.ok) {
+      try {
+        await navigator.clipboard.writeText(result.url);
+        flash(() => setShareState("copied"), () => setShareState("idle"), 1600);
+      } catch {
+        flash(() => setShareState("failed"), () => setShareState("idle"), 2000);
+      }
+      return;
+    }
+    if (result.message.includes("请先登录")) {
+      flash(() => setShareState("needLogin"), () => setShareState("idle"), 2000);
+      return;
+    }
+    flash(() => setShareState("failed"), () => setShareState("idle"), 2000);
+  }, [item, shareState, flash]);
+
 
   return (
     <figure className="agent-rise">
@@ -506,32 +603,74 @@ function AgentImageCardComponent({
         </figcaption>
       )}
       <div className="mt-1 flex flex-wrap gap-1 px-3.5 pb-3">
-        <ImageAction label="存图库" disabled={!onSaveToLibrary} onClick={() => onSaveToLibrary?.(item)}>
-          <Library className="h-3.5 w-3.5" aria-hidden="true" />
-        </ImageAction>
-        <ImageAction label="改图" disabled={!onEdit} onClick={() => onEdit?.(item)}>
-          <ImagePlus className="h-3.5 w-3.5" aria-hidden="true" />
-        </ImageAction>
-        <ImageAction label="放大" disabled={!onUpscale} onClick={() => onUpscale?.(item)}>
-          <Maximize2 className="h-3.5 w-3.5" aria-hidden="true" />
-        </ImageAction>
-        <ImageAction label="下载" disabled={!onDownload} onClick={() => onDownload?.(item)}>
-          <Download className="h-3.5 w-3.5" aria-hidden="true" />
-        </ImageAction>
+        {/* 存图库三態：idle「存图库」／loading 轉圈／已存（Check＋「已存」，本次會話持續）／
+            失敗（2s 紅字「未存入」）。回調缺席＝disabled，絕不偽造行為。 */}
         <ImageAction
-          label="分享"
-          disabled={sharing || failed}
-          onClick={() => {
-            const entry = agentHistoryEntryForMedia(item);
-            setSharing(true);
-            // 補寫失敗（未登入等）也照樣開框：ShareDialog 會把 /api/share 的真實錯誤講給用戶。
-            void saveAgentMediaToHistory(entry).finally(() => {
-              setSharing(false);
-              setShareEntry(entry);
-            });
-          }}
+          label={saveState === "saved" ? "已存" : saveState === "failed" ? "未存入" : "存图库"}
+          disabled={!onSaveToLibrary || saveState === "loading" || saveState === "saved"}
+          tone={saveState === "failed" ? "danger" : undefined}
+          onClick={() => void handleSave()}
         >
-          <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
+          {saveState === "loading" ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+          ) : saveState === "saved" ? (
+            <Check className="h-3.5 w-3.5" aria-hidden="true" />
+          ) : (
+            <Library className="h-3.5 w-3.5" aria-hidden="true" />
+          )}
+        </ImageAction>
+        {/* 改图＝加進輸入框附件（不送 prompt）；抓取中轉圈、失敗短暫「失败」。 */}
+        <ImageAction
+          label={editState === "failed" ? "失败" : "改图"}
+          disabled={!onEdit || editState === "loading"}
+          tone={editState === "failed" ? "danger" : undefined}
+          onClick={() => void handleEdit()}
+        >
+          {editState === "loading" ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+          ) : (
+            <ImagePlus className="h-3.5 w-3.5" aria-hidden="true" />
+          )}
+        </ImageAction>
+        {/* 放大＝開卡片內既有的全屏查看器（不是 AI 放大語義）。 */}
+        <ImageAction label="放大" disabled={failed} onClick={() => !failed && setViewerOpen(true)}>
+          <Expand className="h-3.5 w-3.5" aria-hidden="true" />
+        </ImageAction>
+        {/* 下載＝真下載（同源代理 → blob → <a download>）；失敗短暫「失败」。 */}
+        <ImageAction
+          label={downState === "failed" ? "失败" : "下载"}
+          disabled={!onDownload || downState === "loading"}
+          tone={downState === "failed" ? "danger" : undefined}
+          onClick={() => void handleDownload()}
+        >
+          {downState === "loading" ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+          ) : (
+            <Download className="h-3.5 w-3.5" aria-hidden="true" />
+          )}
+        </ImageAction>
+        {/* 分享＝建立／取回公開連結並複製（不彈遮擋層）；成功「已复制」1.6s。 */}
+        <ImageAction
+          label={
+            shareState === "copied"
+              ? "已复制"
+              : shareState === "needLogin"
+                ? "请先登录"
+                : shareState === "failed"
+                  ? "失败"
+                  : "分享"
+          }
+          disabled={shareState === "loading"}
+          tone={shareState === "failed" ? "danger" : undefined}
+          onClick={() => void handleShare()}
+        >
+          {shareState === "loading" ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+          ) : shareState === "copied" ? (
+            <Check className="h-3.5 w-3.5" aria-hidden="true" />
+          ) : (
+            <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
+          )}
         </ImageAction>
         {/* 圖走 payload 級重跑（RerunDialog → /api/generation-jobs，逐任務帳本預檢、
             明碼計價）；影片／音頻按秒計費、payload 級不開放，改走會話級（見兩張卡的註釋）。
@@ -551,7 +690,6 @@ function AgentImageCardComponent({
           </>
         )}
       </div>
-      {shareEntry && <ShareDialog entry={shareEntry} onClose={() => setShareEntry(null)} />}
       {viewerOpen &&
         createPortal(
           <ImageLightbox src={item.url} alt="智能体生成的图片" onClose={closeViewer} />,

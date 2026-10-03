@@ -152,7 +152,7 @@ const textEncoder = new TextEncoder()
 //   守門測試：persistence-schema.test.ts 斷言 serialize() 輸出鍵集 == PERSISTED_DATA_KEYS，
 //   且每個落盤鍵在 hydrateRow() 輸出都能找到（含別名映射）——只改 A/C 忘改 D/E 即失敗。
 
-export const SCHEMA_VERSION = 2
+export const SCHEMA_VERSION = 3
 
 export interface Migration {
   version: number
@@ -321,10 +321,42 @@ function sessionsOwnerUpdatedIndex(database: Database): void {
   database.exec("CREATE INDEX IF NOT EXISTS idx_sessions_owner_updated ON sessions(owner_key, updated_at DESC)")
 }
 
+/**
+ * v3（2026-10-03）：「評審可計量」——把 critic 閘門從布林＋詞表升級為可入庫的數值＋代碼強制閾值
+ * ＋人工標籤 join。基座（critic_verdicts 表 / delivery-gate.ts 詞表）已存在，本版只補缺的兩件事：
+ *   * critic_verdicts 增 `score_source`（分數來源：measured｜model_self｜human；無分數時 null）。
+ *     語義釘死：數值閾值**只對 measured 生效**，模型自評（model_self）／人工標籤（human）永不構成
+ *     驗收 oracle（禁同源斷言）。沒有獨立量測來源時 score 與 score_source 皆維持 null，不填 0 假值。
+ *   * human_labels 新表：人工 accept/reject 標籤，join 進 qualitySignalStats 的 acceptRate。
+ * 為什麼獨立在 v3 而非改 v1 baseline：v1 已發佈，舊庫 user_version>=1 時 v1 不再重跑；
+ * 新表/新欄必須靠新版本遷移補上（否則舊庫永遠缺欄）。全部 idempotent（PRAGMA 先檢查、IF NOT EXISTS）。
+ */
+function qualityMeasurableSchema(database: Database): void {
+  const cols = database.query("PRAGMA table_info(critic_verdicts)").all() as { name: string }[]
+  if (!cols.some((c) => c.name === "score_source")) {
+    database.exec("ALTER TABLE critic_verdicts ADD COLUMN score_source TEXT")
+  }
+  // 人工標籤：一筆 = 一個交付被人工接受或拒絕。run_id 為主鍵後綴，同 run 重複標註＝覆寫。
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS human_labels (
+      id         TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      run_id     TEXT,
+      agent      TEXT,
+      label      TEXT NOT NULL,
+      note       TEXT,
+      created_at INTEGER NOT NULL
+    )
+  `)
+  database.exec("CREATE INDEX IF NOT EXISTS idx_human_labels_session ON human_labels(session_id)")
+  database.exec("CREATE INDEX IF NOT EXISTS idx_human_labels_run ON human_labels(run_id)")
+}
+
 /** 有序遷移清單。新增版本一律 append（version 必須連續遞增；已發佈版本禁止改動其 up 內容）。 */
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: "baseline-session-and-quality-schema", up: baselineSchema },
   { version: 2, name: "sessions-owner-updated-index", up: sessionsOwnerUpdatedIndex },
+  { version: 3, name: "quality-measurable-score-and-human-labels", up: qualityMeasurableSchema },
 ]
 
 /**
@@ -793,13 +825,30 @@ export function deleteCriticPass(sessionId: string): void {
 
 // ---- D7（2026-10-02）：品質量測基座存取。全部 fail-open（量測不得影響交付主流程）----
 
+/**
+ * critic 分數來源（v3，2026-10-03）。
+ *   * `measured`：存在**獨立於被測模型**的量測來源（如對成品跑硬檢）→ 唯一可套用數值閾值者。
+ *   * `model_self`：同族模型自評 → 只作便宜、快、可當篩子的訊號，永不構成驗收 oracle（禁同源斷言）。
+ *   * `human`：人工接受/拒絕 → 外生標籤，另存 human_labels，不是數值量測。
+ * 沒有分數時 score 為 null、不得填 0 假值。score_source 是「這列分數訊號的來源」：
+ * `model_self`／`human` 允許與 null score 並存（分類判決本就沒有數值）；`measured` 則必須有數值，
+ * 否則不落來源（宣告了量測就必須有數字，不得製造假量測）。
+ */
+export type CriticScoreSource = "measured" | "model_self" | "human"
+
 let d7Seq = 0
 function d7Id(prefix: string): string {
   d7Seq = (d7Seq + 1) % 1_000_000
   return `${prefix}-${Date.now().toString(36)}-${d7Seq.toString(36)}`
 }
 
-/** 記一筆審核判決（critic_verdicts）。score 未量測時傳 null，不得填 0 假值。 */
+/**
+ * 記一筆審核判決（critic_verdicts）。score 未量測時傳 null，不得填 0 假值。
+ * v3：支援 `scoreSource` 記錄分數**來源**。反偽造不變式：
+ *   * 有 score 但沒標來源 → 來源留 null（不猜，不把自評冒充量測）；
+ *   * 標 `measured` 卻沒有數值 → 來源強制 null（宣告了量測就必須有數值，否則不落 provenance）；
+ *   * `model_self` / `human` 允許與 null score 並存（分類判決沒有數值），但永不通過數值閾值。
+ */
 export function saveCriticVerdict(v: {
   sessionId: string
   runId?: string
@@ -807,14 +856,18 @@ export function saveCriticVerdict(v: {
   label?: string
   verdict: "pass" | "reject" | "unknown"
   score?: number | null
+  scoreSource?: CriticScoreSource | null
   judgeModel?: string
   verdictText?: string
 }): void {
   if (!db || !v.sessionId) return
   try {
+    const scoreNum = typeof v.score === "number" && Number.isFinite(v.score) ? v.score : null
+    const declared = v.scoreSource ?? null
+    const scoreSource = declared === "measured" && scoreNum === null ? null : declared
     db.query(
-      `INSERT OR REPLACE INTO critic_verdicts (id, session_id, run_id, agent, label, verdict, score, judge_model, verdict_text, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT OR REPLACE INTO critic_verdicts (id, session_id, run_id, agent, label, verdict, score, score_source, judge_model, verdict_text, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       v.runId ? `cv-${v.runId}` : d7Id("cv"),
       v.sessionId,
@@ -822,7 +875,8 @@ export function saveCriticVerdict(v: {
       v.agent ?? null,
       v.label ?? null,
       v.verdict,
-      typeof v.score === "number" ? v.score : null,
+      scoreNum,
+      scoreSource,
       v.judgeModel ?? null,
       (v.verdictText ?? "").slice(0, 4000),
       Date.now(),
@@ -833,18 +887,76 @@ export function saveCriticVerdict(v: {
 }
 
 /** 讀一筆審核判決（診斷／驗收用；唯讀）。查無回 null。 */
-export function getCriticVerdictByRun(
-  runId: string,
-): { verdict: string; score: number | null; judge_model: string | null; verdict_text: string | null } | null {
+export function getCriticVerdictByRun(runId: string): {
+  verdict: string
+  score: number | null
+  score_source: CriticScoreSource | null
+  judge_model: string | null
+  verdict_text: string | null
+} | null {
   if (!db || !runId) return null
   try {
     return (
       (db
-        .query("SELECT verdict, score, judge_model, verdict_text FROM critic_verdicts WHERE run_id = ?")
-        .get(runId) as { verdict: string; score: number | null; judge_model: string | null; verdict_text: string | null } | null) ?? null
+        .query("SELECT verdict, score, score_source, judge_model, verdict_text FROM critic_verdicts WHERE run_id = ?")
+        .get(runId) as {
+        verdict: string
+        score: number | null
+        score_source: CriticScoreSource | null
+        judge_model: string | null
+        verdict_text: string | null
+      } | null) ?? null
     )
   } catch (e) {
     degrade(e, "getCriticVerdictByRun")
+    return null
+  }
+}
+
+/**
+ * 記一筆人工驗收標籤（human_labels）。`label` ∈ accept|reject。
+ * 冪等：同 run_id 重複標註＝INSERT OR REPLACE（最後一次為準，不長第二列）。
+ * 這是「評審外生」的落點：人工接受/拒絕 join 進 qualitySignalStats 的 acceptRate。
+ */
+export function saveHumanLabel(h: {
+  sessionId: string
+  runId?: string
+  agent?: string
+  label: "accept" | "reject"
+  note?: string
+}): void {
+  if (!db || !h.sessionId) return
+  try {
+    db.query(
+      `INSERT OR REPLACE INTO human_labels (id, session_id, run_id, agent, label, note, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      h.runId ? `hl-${h.runId}` : d7Id("hl"),
+      h.sessionId,
+      h.runId ?? null,
+      h.agent ?? null,
+      h.label,
+      (h.note ?? "").slice(0, 4000),
+      Date.now(),
+    )
+  } catch (e) {
+    degrade(e, "saveHumanLabel")
+  }
+}
+
+/** 讀某 run 的人工標籤（診斷／驗收用；唯讀）。查無回 null。 */
+export function getHumanLabelByRun(
+  runId: string,
+): { label: string; agent: string | null; note: string | null } | null {
+  if (!db || !runId) return null
+  try {
+    return (
+      (db
+        .query("SELECT label, agent, note FROM human_labels WHERE run_id = ?")
+        .get(runId) as { label: string; agent: string | null; note: string | null } | null) ?? null
+    )
+  } catch (e) {
+    degrade(e, "getHumanLabelByRun")
     return null
   }
 }
@@ -914,8 +1026,26 @@ export function qualitySignalStats(): {
   expertLessons: number
   deliveries: number
   reaskRate: number
+  /** 人工標籤數（每列 = 一個已標註交付）。 */
+  labeledDeliveries: number
+  /** accept / labeledDeliveries；零標籤時 null（不得回 0 假值——零樣本的比例未定義）。 */
+  acceptRate: number | null
+  /** 有數值分數的樣本數（score IS NOT NULL）。 */
+  scoreSamples: number
+  /** 有分數樣本的平均；零樣本時 null（不得回 0 假值）。 */
+  meanScore: number | null
 } {
-  const empty = { criticVerdicts: 0, rejects: 0, expertLessons: 0, deliveries: 0, reaskRate: 0 }
+  const empty = {
+    criticVerdicts: 0,
+    rejects: 0,
+    expertLessons: 0,
+    deliveries: 0,
+    reaskRate: 0,
+    labeledDeliveries: 0,
+    acceptRate: null as number | null,
+    scoreSamples: 0,
+    meanScore: null as number | null,
+  }
   if (!db) return empty
   try {
     const cv = (db.query("SELECT COUNT(*) AS n FROM critic_verdicts").get() as { n: number } | null)?.n ?? 0
@@ -929,7 +1059,26 @@ export function qualitySignalStats(): {
         )
         .get() as { n: number } | null
     )?.n ?? 0
-    return { criticVerdicts: cv, rejects: rj, expertLessons: el, deliveries: dl, reaskRate: dl > 0 ? dup / dl : 0 }
+    // 人工接受/拒絕：一列一交付，比例只在有樣本時定義。
+    const hl = (db.query("SELECT COUNT(*) AS n FROM human_labels").get() as { n: number } | null)?.n ?? 0
+    const acc = (db.query("SELECT COUNT(*) AS n FROM human_labels WHERE label = 'accept'").get() as { n: number } | null)?.n ?? 0
+    // score 樣本：COUNT(score)/AVG(score) 天然忽略 NULL。零樣本 → AVG 為 NULL，不得回 0。
+    const sc = db.query("SELECT COUNT(score) AS n, AVG(score) AS avg FROM critic_verdicts").get() as
+      | { n: number; avg: number | null }
+      | null
+    const scoreSamples = sc?.n ?? 0
+    const meanScore = scoreSamples > 0 && typeof sc?.avg === "number" ? sc.avg : null
+    return {
+      criticVerdicts: cv,
+      rejects: rj,
+      expertLessons: el,
+      deliveries: dl,
+      reaskRate: dl > 0 ? dup / dl : 0,
+      labeledDeliveries: hl,
+      acceptRate: hl > 0 ? acc / hl : null,
+      scoreSamples,
+      meanScore,
+    }
   } catch (e) {
     degrade(e, "qualitySignalStats")
     return empty

@@ -74,6 +74,13 @@ FlowMusic2API 通路的硬約束（實測，詳見該 DATA 檔）：**無歌詞�
 - **每版本獨立保存**：源 ABC、編輯後 ABC、style、歌詞、音頻逐版本留檔，禁止只留最終版。
 - **編輯 brief 有界**：無不變量契約的編輯請求＝不可驗收，先補契約再動刀。
 
+## 多版本偏好闸（2026-10-03 收錄）
+
+**多版本偏好闸**：`music_gen` 回执带 `preference_question` 字段时——`asked: true` 必须立刻用 `question` 工具把它抬给用户，`question`/`header`/`options` **逐字照抄**回执字段，不得改写、不得增删选项（`都不行，重写` 与 `你替我定` 两条退路已在 options 内）；拿到答复后，用回执里的 `optionTakeUrls`（label → url）把选中的 label 翻译成对应的音频 URL 作为定版，并在交付说明里写明「用户选定的版本」。`asked: false` 时**不要**弹卡，直接采用 `suggestedIndex` 指向的那一版（索引对齐 `audios[]`），并在交付说明里用 `entropy.reason` 的一句话解释为什么不问。
+
+- 每个 take 的音频已随 `audios[]` 各自发一张带播放器的音档卡（`audio.done`），问题卡只**指认**版本（选项 label A/B 对应 take），真正的音档对照靠回执里的 `optionTakeUrls`（label → url）；**禁止**试图把音档塞进 `question` 选项（选项只带 `{label, description}` 文字）。
+- `preference_question` 只在 `audios.length >= 2` 时在场；单 clip 回执不含此字段，无需处理。
+
 ## 使用規則
 
 1. 音樂生成任務必先載對應 CORE 檔（寫 style 載 01、寫詞載 02、產出可疑載 03）＋對應平台 DATA 檔。

@@ -60,6 +60,10 @@ import {
   REWORK_FAIL_MARK,
   ORPHANED_GATE_MARK,
   DELIVERY_CONTRACTS,
+  // 2026-10-03：數值閾值判定的代碼強制入口（純函數；政策＝CRITIC_SCORE_THRESHOLD_POLICY）。
+  evaluateCriticScoreThreshold,
+  CRITIC_SCORE_THRESHOLD_POLICY,
+  type CriticScoreSample,
   type DeliveryGateResult,
   type CriticPassTarget,
 } from "./delivery-gate"
@@ -78,6 +82,9 @@ import {
   saveDelivery,
   type ReworkRecord,
 } from "./persistence"
+// 2026-10-03：事後產物硬檢（確定性量測；gateway 側移植，見 media-quality.ts 檔頭）。
+// 只回技術分（非審美）；量測失敗一律 null，絕不讓交付主流程受阻。
+import { measureMediaScore, MEDIA_QUALITY_MEASURED_MARK, type MeasuredMediaResult } from "./media-quality.ts"
 
 // P2b（2026-09-11）刀1：任務書首行自動補「预期 N 分钟」死線行。
 // 任何派遣若首行沒有「预期 N」，補上 5 分鐘 → R1 parseSyncDeadlineMs 得
@@ -214,6 +221,9 @@ interface SubagentRun {
   machineCriticPass?: boolean
   // 刀 2：機器 pass 的 critic run 專用——其終態 verdict 判讀結果（false=通過）。
   machineCriticRejected?: boolean
+  // 2026-10-03：機器 critic run 被派時所審的那批 Expert 交付（跨 finishRun 需要它們的
+  // 正文抽取可量測媒體 URL）。只在 maybeRunMachineCriticPass 建立 run 時賦值一次。
+  criticReviewed?: CriticPassTarget[]
   // 0920 暴君裁定（停止閘）：用戶／orchestrator 主動停止。置位後：
   //   ① killSwitch 已 abort+DELETE 子會話；② 所有事件與重投路徑一律早退
   //   （stopCheck 見 stopped 即 return），含換模重試與交付閘門重派；
@@ -477,8 +487,88 @@ function removeFromRegistries(run: SubagentRun): void {
   if (run.earlyPartialTimer) clearTimeout(run.earlyPartialTimer)
 }
 
-/** 收尾：登记结果、摘除注册表、向父会话发 done、DELETE 子会话防堆积。 */
-function finishRun(run: SubagentRun, status: "ok" | "error", fullText: string, error?: string): void {
+/**
+ * 2026-10-03（v3 接線）：開關 `CRITIC_SCORE_ENFORCE`。真值＝**必須字面 "1"**。
+ * 刻意不接受 "true"/"on"/"yes"：本閘門一旦啟用，measured 低分會被當成「退回」，
+ * 經既有重派鏈讓上游 Expert 重跑＝再一次模型呼叫＝花錢，故用最不易誤開的形式。
+ * 未設／其他值 → false：與接線前**逐位元組相同**（零 I/O、零 await、零重派）。
+ */
+export function criticScoreEnforcementEnabled(): boolean {
+  return process.env.CRITIC_SCORE_ENFORCE === "1"
+}
+
+/**
+ * 純函數（可單測）：measured 樣本 + 開關 → 是否以數值閾值強制退回。
+ * 三條件缺一不可：開關 true；來源＝policy.enforcedSource（measured）；分數 < reworkBelow。
+ * 無分數（null）／model_self／human → 一律 false（未知≠失敗；模型自評非驗收 oracle）。
+ * 判定邏輯全在 evaluateCriticScoreThreshold（唯一真源），本函數只加 env 閘門、不另立閾值。
+ */
+export function shouldForceCriticRejectByScore(
+  sample: CriticScoreSample,
+  enabled: boolean = criticScoreEnforcementEnabled(),
+): boolean {
+  if (!enabled) return false
+  return evaluateCriticScoreThreshold(sample).enforce
+}
+
+/**
+ * 2026-10-03：對機器 critic run 所審 Expert 交付做**事後產物硬檢**，只算不寫。
+ * 全程 try/catch，永不 throw；量測回 null（開關 OFF／ffprobe 不可用／無媒體／量測失敗）
+ * → 回 null，呼叫端據此維持 null 分數（未知≠通過，絕不填 0/滿分冒充）。寫入交由呼叫端
+ * 一次性完成（persistMeasuredVerdict），避免第二套寫入路徑。
+ */
+async function measureReviewedMedia(run: SubagentRun): Promise<MeasuredMediaResult | null> {
+  try {
+    const targets = run.criticReviewed ?? []
+    if (targets.length === 0) return null
+    return await measureMediaScore(targets.map((t) => t.text))
+  } catch (e) {
+    console.warn(`[gateway] media-quality-gate: measured 旁路失败已忽略（交付不受影响）run=${run.id}`, e)
+    return null
+  }
+}
+
+/** 以同一 runId 覆寫 critic_verdicts 的 measured 分欄（唯一寫入形狀＝persistence.saveCriticVerdict）。 */
+function persistMeasuredVerdict(run: SubagentRun, measured: MeasuredMediaResult, criticVerdictText: string): void {
+  try {
+    saveCriticVerdict({
+      sessionId: run.parentGatewaySessionId,
+      runId: run.id,
+      agent: run.agent,
+      label: run.label,
+      // verdict 沿用 critic 判讀（硬檢不翻判方向，只補數值分；兩者不混為一談）。
+      verdict: run.machineCriticRejected ? "reject" : "pass",
+      score: measured.score,
+      // measured 有數值才算（saveCriticVerdict 內另有「measured 無數值→來源強制 null」不變式）。
+      scoreSource: "measured",
+      judgeModel: "hardcheck/ffprobe",
+      // 量測細節置前（保留 provenance），其後附 critic 判詞（saveCriticVerdict 統一截 4000）。
+      verdictText: `${MEDIA_QUALITY_MEASURED_MARK}${measured.detail}\n\n${criticVerdictText}`,
+    })
+    console.log(
+      `[gateway] media-quality-gate: measured 技术分=${measured.score} 件数=${measured.artifacts} run=${run.id}（覆盖 model_self 分栏；仅技术正确性，非审美）`,
+    )
+  } catch (e) {
+    console.warn(`[gateway] media-quality-gate: measured 旁路失败已忽略（交付不受影响）run=${run.id}`, e)
+  }
+}
+
+/**
+ * 2026-10-03：fire-and-forget 旁路（**僅在閘門關閉時使用**）。量測成功 → 以同一 runId
+ * 覆寫 critic_verdicts 的 measured 分欄（供觀測）；失敗 → 不寫。終態收尾**不被阻斷**。
+ * 閘門開啟時改走 finishRun 內的 await 路徑（量測結果要先參與判決），本函數不再被呼叫。
+ */
+async function applyMeasuredMediaVerdict(run: SubagentRun, criticVerdictText: string): Promise<void> {
+  const measured = await measureReviewedMedia(run)
+  if (!measured) return
+  persistMeasuredVerdict(run, measured, criticVerdictText)
+}
+
+/** 收尾：登记结果、摘除注册表、向父会话发 done、DELETE 子会话防堆积。
+ *  2026-10-03：改 async——僅在「critic-score 閘門開啟且本 run 是機器 critic」時才會 await
+ *  一次量測（要在判決前拿到 measured 分）。閘門未設時無任何 await：副作用與時序與接線前
+ *  完全相同（呼叫端皆忽略回傳值）。 */
+async function finishRun(run: SubagentRun, status: "ok" | "error", fullText: string, error?: string): Promise<void> {
   if (run.status !== "running") return // 幂等：idle 与超时硬顶可能竞态
   // 0920 停止閘：停止已由 stopSubagentRun 收尾（已 done/已摘表）；此處不得再走
   // 交付閘門或 wakeParent——否則停止後仍會把父會話喚醒重跑（「刹不住」病灶①）。
@@ -593,7 +683,25 @@ function finishRun(run: SubagentRun, status: "ok" | "error", fullText: string, e
   // orchestrator 據此依 playbook 第 16-18 條重派原 Expert 修正（原 Expert 若再失敗，其自帶
   // 的 rework 鏈硬帽 1 次仍然生效）。
   if (run.machineCriticPass === true && status === "ok") {
-    run.machineCriticRejected = criticVerdictRejected(fullText)
+    // 2026-10-03（v3 接線）：閘門開啟時，**先**對本 critic 所審交付取得 measured 樣本，
+    // 再與既有詞表判讀併成同一條「拒/過」決策。閘門未設＝不做任何 I/O、不 await，
+    // 落到下方既有 fire-and-forget 旁路 → 行為與接線前逐位元組相同。
+    const scoreEnforced = criticScoreEnforcementEnabled()
+    let measured: MeasuredMediaResult | null = null
+    if (scoreEnforced) measured = await measureReviewedMedia(run)
+    // 既有決策（詞表判讀 criticVerdictRejected）＋新的數值閾值併入同一處：
+    // 來源只在真有量測時才是 "measured"，無量測給 null → 恆不 enforce
+    // （未知≠失敗；model_self/human 非驗收 oracle）。
+    const forcedByScore = shouldForceCriticRejectByScore(
+      { value: measured?.score ?? null, source: measured ? "measured" : null },
+      scoreEnforced,
+    )
+    run.machineCriticRejected = criticVerdictRejected(fullText) || forcedByScore
+    if (forcedByScore) {
+      console.warn(
+        `[gateway] critic-score-gate: measured 技术分=${measured!.score} < ${CRITIC_SCORE_THRESHOLD_POLICY.reworkBelow} → 判退回（沿用既有重派链；critic_run=${run.id}）`,
+      )
+    }
     // 修 1（2026-10-02）：PASS 也以前綴標記判決方向，讓 summary/emit/wake 三出口一致回灌。
     if (!run.machineCriticRejected) {
       summary = `${CRITIC_PASS_MARK}机器审核判定「通过」，无退回项（逐项核验见落盘全文）。\n${summary}`
@@ -607,20 +715,29 @@ ${summary}`
         `[gateway] machine critic pass: verdict=REJECT — 送回父会话 session=${run.parentGatewaySessionId} critic_run=${run.id}`,
       )
     }
-    // D7（2026-10-02）：判決落庫（此前 critic_passes 只有 session_id/created_at，verdict 不落地）。
-    // score 傳 null（rubric 尚未存在，不填 0 假值）；judge_model 記 critic 實際模型鏈。
+    // D7（2026-10-02）／v3（2026-10-03）：判決落庫（此前 critic_passes 只有 session_id/created_at）。
+    // 無量測 → score=null、source=model_self（同族模型自評，只作便宜篩子，永不通過數值閾值）。
+    // 有量測 → score+source="measured"、judge_model=hardcheck/ffprobe（獨立於被測模型的量測
+    // 來源，才可被 evaluateCriticScoreThreshold enforce）。絕不填 0 假值、不從文字硬解析假分數。
     saveCriticVerdict({
       sessionId: run.parentGatewaySessionId,
       runId: run.id,
       agent: run.agent,
       label: run.label,
       verdict: run.machineCriticRejected ? "reject" : "pass",
-      score: null,
-      judgeModel: (() => {
-        const m = run.modelChain[run.attempt - 1]
-        return m ? `${m.providerID}/${m.modelID}` : "opencode-default"
-      })(),
-      verdictText: typeof fullText === "string" ? fullText : "",
+      score: measured?.score ?? null,
+      scoreSource: measured ? "measured" : "model_self",
+      judgeModel: measured
+        ? "hardcheck/ffprobe"
+        : (() => {
+            const m = run.modelChain[run.attempt - 1]
+            return m ? `${m.providerID}/${m.modelID}` : "opencode-default"
+          })(),
+      verdictText: measured
+        ? `${MEDIA_QUALITY_MEASURED_MARK}${measured.detail}\n\n${typeof fullText === "string" ? fullText : ""}`
+        : typeof fullText === "string"
+          ? fullText
+          : "",
     })
     if (run.machineCriticRejected) {
       saveExpertLesson({
@@ -631,6 +748,11 @@ ${summary}`
         failureMode: "machine_critic_reject",
         detail: typeof fullText === "string" ? fullText : "",
       })
+    }
+    // 閘門關閉時維持既有 fire-and-forget 旁路：量測成功 → 以同一 runId 覆寫上面的 model_self
+    // 列（供觀測）；失敗不寫。閘門開啟時上面已 await 出 measured 並落庫，此處不再重複量測/寫入。
+    if (!scoreEnforced) {
+      void applyMeasuredMediaVerdict(run, typeof fullText === "string" ? fullText : "")
     }
   }
   // 刀 2（2026-09-15）：Expert 交付登記為待審對象（machine critic pass 的輸入）。
@@ -1406,6 +1528,9 @@ export function maybeRunMachineCriticPass(parentState: any, unreviewedDeclared =
       agent: "critic",
       asyncMode: typeof deps.wakeParent === "function", // async 語義沿用；deps 未注入則降級同步
       machineCriticPass: true,
+      // 2026-10-03：把被審的那批交付正文帶進 run，供終態事后硬檢抽取媒體 URL（見
+      // applyMeasuredMediaVerdict）。此處 batch 即將被 pendingCriticTargets.delete 清掉。
+      criticReviewed: batch,
       messageRole: new Map(),
       partEmitted: new Map(),
       partKind: new Map(),

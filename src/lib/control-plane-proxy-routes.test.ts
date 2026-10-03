@@ -139,6 +139,7 @@ const KNOWN_VERCEL_LOCAL: Record<string, string> = {
   "/api/log/self/stat": "閉包只經 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直連 DB",
   "/api/lora-preferences": "lora-user-state 以 generationDatabaseConfigured() 閘，Vercel 走 Blob",
   "/api/mcp": "biz-api-key-store 以 bizKeyDatabaseEnabled() 閘 DB，Vercel 走 Blob 鏡像＋BIZ_API_KEY_HASHES 兜底",
+  "/api/media-download": "閉包只經 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直連 DB；只做上游媒體 fetch 代理，不觸庫",
   "/api/models": "閉包只經 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直連 DB",
   "/api/notifications": "閉包只經 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直連 DB",
   "/api/notifications/active-modal": "閉包只經 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直連 DB",

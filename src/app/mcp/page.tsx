@@ -179,6 +179,36 @@ const MCP_TOOLS: Array<{ name: string; scope: string; description: string }> = [
     scope: "eimu:tasks:read",
     description: "按任务 id 取异步结果：kind = image / video / tts。",
   },
+  {
+    name: "list_canvas_projects",
+    scope: "eimu:canvas:read",
+    description: "列出本密钥账号自己的畫布项目摘要（id / 名称 / 时间 / 节点数）；拿到 project_id 才能写画布产线。",
+  },
+  {
+    name: "canvas_get_state",
+    scope: "eimu:canvas:read",
+    description: "读取某个 agent 会话当前的画布快照（节点 / 连线 / 选中 / 视口，含可逆声明 dsl 与节点版本索引）。",
+  },
+  {
+    name: "workflow_read",
+    scope: "eimu:canvas:read",
+    description: "只投影某会话画布的可逆声明 dsl 与节点版本索引（像读代码一样读产线）；要完整节点坐标用 canvas_get_state。",
+  },
+  {
+    name: "workflow_history",
+    scope: "eimu:canvas:read",
+    description: "读取画布节点的版本史（每节点的 version / 时间 / 原因 / 标题）；给 node_id 只回该节点。",
+  },
+  {
+    name: "workflow_write",
+    scope: "eimu:canvas:write",
+    description: "把整份工作流声明（dsl）编译成画布操作；给了属于本账号的 project_id 才真的落图，否则只编译回 ops。",
+  },
+  {
+    name: "workflow_rollback",
+    scope: "eimu:canvas:write",
+    description: "把某节点的内容回滚到指定版本（省略 version = 上一版）；只还原 title 与 metadata，不动坐标。",
+  },
 ];
 
 const STEPS: Array<{ n: string; title: string; body: React.ReactNode }> = [
@@ -225,7 +255,7 @@ const PLUGIN_TREE = `plugin/
 ├── marketplace.json                    # 市集索引：只声明 eimu 这一个插件
 └── eimu/
     ├── .codex-plugin/plugin.json       # 插件元数据：名称、描述、logo、默认提问
-    ├── .mcp.json                       # MCP 端点，只有 URL，不含任何密钥
+    ├── .mcp.json                       # MCP 端点 + Authorization 头（引用 \${EIMU_BIZ_KEY} 环境变量，不含任何密钥）
     ├── assets/eimu-icon.svg            # 图标
     ├── README.md                       # 安装说明
     └── skills/                         # 三个随包技能
@@ -354,7 +384,7 @@ export default function McpPage() {
             <div className="lg-card scroll-mt-28 rounded-ios-3xl p-5 sm:p-6">
               <h3 className="text-ios-callout font-semibold text-[rgba(0,0,0,0.85)]">包内文件</h3>
               <p className="mt-1.5 text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.58)]">
-                三个技能的正文只引用本页列出的 10 个工具，没有我们做不到的能力宣言；包内不含任何密钥，只有端点
+                三个技能的正文只引用本页列出的工具，没有我们做不到的能力宣言；包内不含任何密钥，只有端点
                 URL。
               </p>
               <div className="mt-3">

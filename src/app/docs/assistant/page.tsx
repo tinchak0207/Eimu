@@ -10,32 +10,17 @@ export const metadata: Metadata = {
   alternates: { canonical: `${SITE_URL}/docs/assistant` },
 };
 
-// ---- 教学文案数据（现场逐字：与助理设定弹层 AgentSettingsPopover 同文案）----
+// ---- 教学文案数据（现场逐字：与助理设定弹层 / 输入区思考级别菜单同文案）----
 
 const SETTING_ROWS: Array<{ name: string; plain: string; options: Array<{ k: string; v: string }> }> = [
   {
-    name: "中途输入",
-    plain: "助理正在干活时你又发了消息，怎么处理。",
+    name: "思考级别",
+    plain: "在输入框左下角「+」的右上角切换：一句话要多想、多省、是否开启野兽模式。",
     options: [
-      { k: "打断", v: "打断：新消息立即接管当前回合" },
-      { k: "排队", v: "排队：新消息在本轮结束后执行" },
-    ],
-  },
-  {
-    name: "模型性格",
-    plain: "助理说话和做事的节奏。",
-    options: [
-      { k: "高效（默认）", v: "高效：快速行动，先给结果" },
-      { k: "沉稳", v: "沉稳：先充分思考再行动，回复更慢更全面" },
-    ],
-  },
-  {
-    name: "成本需求",
-    plain: "同一句话，愿意花多少钱办。",
-    options: [
-      { k: "经济", v: "经济：单图低成本，不自动放大" },
-      { k: "均衡", v: "均衡：常规质量，速度与成本兼顾" },
-      { k: "高质", v: "高质：允许多候选与高清放大" },
+      { k: "低", v: "更快、更省，适合简单需求" },
+      { k: "中（默认）", v: "速度与质量兼顾" },
+      { k: "高", v: "先充分思考再动手，更全面" },
+      { k: "极限", v: "最高质量、开启野兽模式（见下）" },
     ],
   },
   {
@@ -61,9 +46,9 @@ export default function DocsAssistantPage() {
 
       {/* ================= 助理设定 ================= */}
       <section id="settings" className="scroll-mt-28">
-        <SectionTitle icon={Settings2}>助理设定（右上角齿轮）</SectionTitle>
+        <SectionTitle icon={Settings2}>助理设定与思考级别</SectionTitle>
         <p className="mt-3 max-w-2xl text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.58)]">
-          聊天界面右上角的齿轮里一共五行，逐行讲清楚每行在管什么：
+          设定分两处：右上角齿轮里有「我的技能」和「互动模式」；输入框左下角「+」的右上角是「思考级别」。逐项讲清楚各在管什么：
         </p>
         <div className="mt-4 grid gap-4 sm:grid-cols-2">
           {SETTING_ROWS.map((row) => (
@@ -93,27 +78,27 @@ export default function DocsAssistantPage() {
                 <Zap className="h-4 w-4 text-[#9B3FBF]" />
                 <h3 className="text-ios-title3 font-semibold text-[rgba(0,0,0,0.85)]">野兽模式</h3>
                 <span className="rounded-full bg-[rgba(0,0,0,0.05)] px-2.5 py-0.5 text-ios-caption1 font-semibold text-[rgba(0,0,0,0.62)]">
-                  状态字：常规 / 极限
+                  思考级别选到「极限」时开启
                 </span>
               </div>
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 <p className="rounded-ios-2xl bg-[rgba(0,0,0,0.04)] p-4 text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.58)]">
-                  <span className="mb-1 block text-ios-caption1 font-semibold text-[rgba(0,0,0,0.44)]">关着的它，只是轻声建议：</span>
+                  <span className="mb-1 block text-ios-caption1 font-semibold text-[rgba(0,0,0,0.44)]">常规档（低/中/高）的它，只是轻声建议：</span>
                   「大部分场合不需要开启，留给真正硬核的点子」
                 </p>
                 <p className="rounded-ios-2xl bg-[rgba(175,82,222,0.08)] p-4 text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.66)]">
-                  <span className="mb-1 block text-ios-caption1 font-semibold text-[#9B3FBF]">开了以后：</span>
+                  <span className="mb-1 block text-ios-caption1 font-semibold text-[#9B3FBF]">选到极限档以后：</span>
                   「模型使用所有工具协助，拼尽全力达到最完美的效果，满足追求极限的你」
                 </p>
               </div>
               <p className="mt-5 text-ios-callout font-semibold text-[rgba(0,0,0,0.85)]">它到底干了什么</p>
               <ol className="mt-2.5 space-y-2.5">
                 <li className="rounded-ios-2xl bg-[rgba(0,0,0,0.04)] p-4 text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.58)]">
-                  <span className="mr-1.5 font-semibold text-[rgba(0,0,0,0.72)]">关着（常规）：</span>
+                  <span className="mr-1.5 font-semibold text-[rgba(0,0,0,0.72)]">常规档（低/中/高）：</span>
                   一位全能工匠独立干活——选模型、写提示词、生成、交付都它自己来，快、便宜，适合一张图、一段视频、微调。
                 </li>
                 <li className="rounded-ios-2xl bg-[rgba(175,82,222,0.06)] p-4 text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.66)]">
-                  <span className="mr-1.5 font-semibold text-[#9B3FBF]">开了（极限）：</span>
+                  <span className="mr-1.5 font-semibold text-[#9B3FBF]">极限档：</span>
                   助理放下工具改当<strong className="font-semibold text-[rgba(0,0,0,0.78)]">导演</strong>——先把愿望拆成工序并写成任务书，派给编剧、视觉、音乐、剪辑等
                   <strong className="font-semibold text-[rgba(0,0,0,0.78)]">专家子助理</strong>
                   并行施工，回收每件产出逐件验收，不达标返工；右侧画布从聊天气泡长成一条
@@ -133,7 +118,7 @@ export default function DocsAssistantPage() {
               </p>
               <p className="mt-3 rounded-ios-2xl bg-[rgba(255,149,0,0.1)] p-3.5 text-ios-footnote leading-relaxed text-[rgba(0,0,0,0.66)]">
                 <strong className="font-semibold text-[#C76A00]">建议：</strong>
-                先拿示例句「生成秦始皇骑北极熊的大电影」试一次极限档，看看它全力干活的样子。
+                先在思考级别里选到「极限」，拿示例句「生成秦始皇骑北极熊的大电影」试一次，看看它全力干活的样子。
               </p>
             </div>
           </div>

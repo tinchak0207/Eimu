@@ -135,16 +135,16 @@ export default function DocsWorkflowPage() {
                     href="/docs/assistant"
                     className="font-semibold text-[#007AFF] lg-transition hover:underline"
                   >
-                    助理设定
+                    思考级别
                   </a>
-                  里的
+                  选到
                   <a
                     href="/docs/assistant#beast-mode"
                     className="font-semibold text-[#007AFF] lg-transition hover:underline"
                   >
-                    野兽模式
+                    「极限」档
                   </a>
-                  打开，它会自动套成熟模板的工序结构当导演派活（详见
+                  ，它会自动套成熟模板的工序结构当导演派活（详见
                   <a
                     href="/docs/assistant#beast-mode"
                     className="font-semibold text-[#007AFF] lg-transition hover:underline"

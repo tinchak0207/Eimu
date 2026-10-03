@@ -21,6 +21,17 @@
  * 一律 HTTP 200 + JSON-RPC `error`（客戶端 SDK 按 `response.ok` 判斷傳輸成敗，
  * 用 4xx 回協議錯誤會讓 SDK 拋「網路錯誤」而看不到真正原因）。
  *
+ * 兩個 origin，不是同一個（2026-10-03 實測事故後拆開）：
+ * - **公開 origin**（`resolvePublicOrigin`）：使用者看得見的站點域名（生產＝`https://eimu.dev`，
+ *   Cloudflare 前置）。只餵 401 的 `WWW-Authenticate: resource_metadata`——發現文件要指向
+ *   客戶端實際連的域名。
+ * - **轉發 origin**（`resolveDispatchUrl`）：工具把請求轉發到哪裡。**不能**用公開 origin：
+ *   MCP 函式跑在 Vercel，Vercel 出口流量被 Cloudflare 判為機器人、發 managed challenge，
+ *   所有轉發型 `tools/call` 收到的都是 `Just a moment...` 的 403 挑戰頁而非業務結果
+ *   （同 URL 從本機與 VPS curl 都正常，已排除 UA/header 觸發）。故轉發改走**不掛 CF** 的
+ *   控制面 origin（`GENERATION_CONTROL_PLANE_PROXY_ORIGIN`，nginx 直出），路徑表沿用
+ *   `control-plane-proxy-routes.mjs` 這一份單一真源；未命中者才回落公開 origin（行為回歸保護）。
+ *
  * 紅線：`Authorization` 的值不得進任何 log、回應或錯誤訊息（本檔只把它交給
  * 認證函式與工具轉發層）。
  */
@@ -43,6 +54,7 @@ import {
   type McpInitializeResult,
 } from "@/lib/mcp/protocol";
 import { MCP_TOOLS, callTool, createHttpDispatcher } from "@/lib/mcp/tools";
+import { controlPlaneRewrites } from "@/lib/control-plane-proxy-routes.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -79,12 +91,49 @@ function rpcOk(traceId: string, id: JsonRpcId, result: unknown) {
 const PROTECTED_RESOURCE_METADATA_PATH = "/.well-known/oauth-protected-resource";
 
 /**
- * 站點 origin 的**唯一**取得方式（認證挑戰與工具轉發共用，不得各自硬編）：
+ * **公開站點 origin**（只餵 401 的 `WWW-Authenticate: resource_metadata`）：
  * 顯式配置優先（反向代理/自訂域名下最穩），否則用本次請求的 origin。
+ * 注意：這是「使用者連進來的域名」，生產＝Cloudflare 前置的 `https://eimu.dev`；
+ * **不可**拿它當工具轉發目標（Vercel 出口會被 CF 挑戰，見檔頭）。
  */
-function resolveOrigin(req: NextRequest): string {
+function resolvePublicOrigin(req: NextRequest): string {
   const configured = process.env.MCP_SELF_ORIGIN?.trim().replace(/\/+$/, "");
   return configured || new URL(req.url).origin;
+}
+
+/** 控制面 origin（已 trim、去尾斜線；未配置回空字串）。 */
+function controlPlaneOrigin(): string {
+  return process.env.GENERATION_CONTROL_PLANE_PROXY_ORIGIN?.trim().replace(/\/+$/, "") ?? "";
+}
+
+/**
+ * **轉發 origin**：把站內 `path` 解析成工具轉發用的完整絕對 URL。
+ *
+ * 順序（越前面越優先）：
+ * 1. `MCP_DISPATCH_ORIGIN` 顯式指定 → `${該值}${path}`（測試與臨時改道用）。
+ * 2. 對 `controlPlaneRewrites(cpOrigin)` 做匹配：命中控制面路徑表（唯一真源＝
+ *    `src/lib/control-plane-proxy-routes.mjs`）→ 走不掛 CF 的控制面 origin。
+ *    匹配規則：source 形如 `/api/v1/:path*` 者做「前綴 + 捕獲剩餘段」；其餘 source 精確相等。
+ * 3. 都未命中 → `${公開 origin}${path}`（維持拆分前的行為，回歸保護）。
+ *
+ * 為什麼要拆：公開域名經 Cloudflare，Vercel 出口被發 managed challenge；控制面
+ * （`GENERATION_CONTROL_PLANE_PROXY_ORIGIN`）是 nginx 直出、不掛 CF，同一條路徑表
+ * 在生產被 `next.config.mjs` beforeFiles 改寫過去，帳本/worker 也都在那邊。
+ */
+function resolveDispatchUrl(req: NextRequest, path: string): string {
+  const override = process.env.MCP_DISPATCH_ORIGIN?.trim().replace(/\/+$/, "");
+  if (override) return `${override}${path}`;
+
+  for (const { source, destination } of controlPlaneRewrites(controlPlaneOrigin())) {
+    if (source.endsWith("/:path*")) {
+      const prefix = source.slice(0, -"/:path*".length);
+      if (!path.startsWith(`${prefix}/`)) continue;
+      return destination.replace(":path*", path.slice(prefix.length + 1));
+    }
+    if (path === source) return destination;
+  }
+
+  return `${resolvePublicOrigin(req)}${path}`;
 }
 
 /** GET：本版沒有 SSE 通道，回 405 + 說明（不是 404，讓客戶端知道端點存在但方法不對）。 */
@@ -108,7 +157,8 @@ export function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const traceId = getOrCreateTraceId(req);
-  const origin = resolveOrigin(req);
+  // 公開 origin 只服務 401 挑戰；工具轉發另由 resolveDispatchUrl 逐請求決定（見檔頭）。
+  const publicOrigin = resolvePublicOrigin(req);
 
   // ── 認證：逐字複用 B 端那把閘（不新增第二套驗 key）────────────────
   const auth = await authenticateBizApiKey(readBearerToken(req.headers.get("authorization")));
@@ -120,7 +170,7 @@ export async function POST(req: NextRequest) {
       // 而本端點在 `/api/mcp` 之下——不分岔指路的話，嚴格客戶端會去拼
       // `…/oauth-protected-resource/api/mcp` 而 404，整條發現鏈就斷在這裡。
       headers["WWW-Authenticate"] =
-        `Bearer realm="eimu-mcp", resource_metadata="${origin}${PROTECTED_RESOURCE_METADATA_PATH}"`;
+        `Bearer realm="eimu-mcp", resource_metadata="${publicOrigin}${PROTECTED_RESOURCE_METADATA_PATH}"`;
     }
     if (auth.retryAfterSeconds) headers["Retry-After"] = String(auth.retryAfterSeconds);
     return noStore(
@@ -191,12 +241,12 @@ export async function POST(req: NextRequest) {
         return rpcError(traceId, id, JSON_RPC_ERROR_CODES.invalidParams, "tools/call 缺少參數 name。");
       }
 
-      // 轉發 origin 與 401 挑戰共用同一真源（見 resolveOrigin）。
+      // 轉發目標逐請求解析：公開 origin（CF 前置）不能當出口，見 resolveDispatchUrl。
       try {
         const result = await callTool(toolName, params.arguments, {
           authorization: req.headers.get("authorization"),
           traceId,
-          dispatcher: createHttpDispatcher(origin),
+          dispatcher: createHttpDispatcher((path) => resolveDispatchUrl(req, path)),
         });
         return rpcOk(traceId, id, result);
       } catch (error) {

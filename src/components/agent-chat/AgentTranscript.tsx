@@ -18,7 +18,7 @@ export interface AgentTranscriptProps {
   /** 出图卡动作回调的预留通道：接线前缺省传入，按钮会保持 disabled。 */
   imageActions?: Pick<
     AgentImageCardProps,
-    "onSaveToLibrary" | "onEdit" | "onUpscale" | "onDownload" | "onRerun" | "onRerunVariant"
+    "onSaveToLibrary" | "onEdit" | "onDownload" | "onRerun" | "onRerunVariant"
   >;
   /** 出片卡动作回调的预留通道：接线前缺省传入，按钮会保持 disabled。 */
   videoActions?: Pick<

@@ -8,10 +8,19 @@ import {
   isSteerReplayRejected,
   isSteerUnavailableError,
   readCachedAgentSettings,
+  readCachedAgentThinkingLevel,
+  resolveAgentThinkingLevel,
+  inferAgentThinkingLevel,
+  agentThinkingLevelPatch,
+  AGENT_THINKING_LEVELS,
+  AGENT_THINKING_LEVEL_SETTINGS,
+  AGENT_THINKING_LEVEL_LABELS,
+  AGENT_THINKING_LEVEL_STORAGE_KEY,
   steerReplayStatus,
   sendAgentMessage,
   steerAgentSession,
   writeCachedAgentSettings,
+  writeCachedAgentThinkingLevel,
   DEFAULT_AGENT_SETTINGS,
 } from "./agent-chat-client";
 
@@ -405,4 +414,59 @@ test("D2b 状态兜底：带不出真实状态时一律 uncertain，绝不回 qu
   assert.equal(steerReplayStatus(new AgentChatError("steer_replay_rejected", "x", 409, "queued")), "uncertain");
   assert.equal(steerReplayStatus(new AgentChatError("steer_replay_rejected", "x", 409, "injected")), "injected");
   assert.equal(isSteerReplayRejected(new AgentChatError("no_active_turn", "x", 409)), false);
+});
+
+// ─── 思考级别（2026-10-03）：mapping 唯一真源 + 持久化/反推 ───
+
+test("思考级别 → AgentSettings 三栏 mapping：四档 × 三栏逐条钉死", () => {
+  // 这张表是输入框「+」右上角菜单的唯一真源；四档必须各自可被直接断言。
+  assert.deepEqual(AGENT_THINKING_LEVELS, ["low", "medium", "high", "extreme"]);
+  const expected = {
+    low: { persona: "efficient", cost_mode: "economy", beast_mode: false },
+    medium: { persona: "efficient", cost_mode: "balanced", beast_mode: false },
+    high: { persona: "thoughtful", cost_mode: "balanced", beast_mode: false },
+    extreme: { persona: "thoughtful", cost_mode: "premium", beast_mode: true },
+  } as const;
+  for (const level of AGENT_THINKING_LEVELS) {
+    assert.deepEqual(AGENT_THINKING_LEVEL_SETTINGS[level], expected[level], `档位 ${level} 的三栏映射`);
+  }
+  // patch 只带三栏，绝不把 interrupt_mode 塞进思考级别（它保持用户原值）。
+  for (const level of AGENT_THINKING_LEVELS) {
+    assert.deepEqual(Object.keys(agentThinkingLevelPatch(level)).sort(), ["beast_mode", "cost_mode", "persona"]);
+    assert.ok(!("interrupt_mode" in agentThinkingLevelPatch(level)));
+  }
+  // 显示名逐一对应（简体中文）。
+  assert.deepEqual(AGENT_THINKING_LEVEL_LABELS, { low: "低", medium: "中", high: "高", extreme: "极限" });
+});
+
+test("思考级别反推：四档 settings 各自反推回本档；映射覆盖不到的组合回 null", () => {
+  for (const level of AGENT_THINKING_LEVELS) {
+    const settings = { ...DEFAULT_AGENT_SETTINGS, ...AGENT_THINKING_LEVEL_SETTINGS[level] };
+    assert.equal(inferAgentThinkingLevel(settings), level, `${level} 的 settings 应反推回 ${level}`);
+  }
+  // 非满射证据：premium + efficient（mapping 表达不出）→ null。
+  const unroutable = { ...DEFAULT_AGENT_SETTINGS, persona: "efficient" as const, cost_mode: "premium" as const, beast_mode: false };
+  assert.equal(inferAgentThinkingLevel(unroutable), null);
+});
+
+test("思考级别持久化：显式记录优先；无记录反推；反推不到显示「中」且不改写 settings", () => {
+  withLocalStorage(() => {
+    // ① 显式记录优先：即使 settings 是别的档，也按记录显示。
+    writeCachedAgentThinkingLevel("extreme");
+    const extreme = { ...DEFAULT_AGENT_SETTINGS, ...AGENT_THINKING_LEVEL_SETTINGS.extreme };
+    assert.equal(readCachedAgentThinkingLevel(), "extreme");
+    assert.equal(resolveAgentThinkingLevel(extreme), "extreme");
+
+    // ② 清掉记录后改由 settings 反推。
+    globalThis.window!.localStorage.removeItem(AGENT_THINKING_LEVEL_STORAGE_KEY);
+    assert.equal(resolveAgentThinkingLevel(extreme), "extreme", "无记录时由 settings 反推");
+
+    // ③ 反推不到：显示「中」，且不得改写用户的 settings / 不留级别记录。
+    const unroutable = { ...DEFAULT_AGENT_SETTINGS, persona: "efficient" as const, cost_mode: "premium" as const, beast_mode: false };
+    writeCachedAgentSettings(unroutable);
+    assert.equal(inferAgentThinkingLevel(readCachedAgentSettings()), null, "premium+efficient 反推不到");
+    assert.equal(resolveAgentThinkingLevel(readCachedAgentSettings()), "medium", "反推不到显示中");
+    assert.deepEqual(readCachedAgentSettings(), unroutable, "反推失败绝不改写 settings");
+    assert.equal(readCachedAgentThinkingLevel(), null, "反推失败不私自记一个级别");
+  });
 });

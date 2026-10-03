@@ -848,6 +848,103 @@ export async function saveAgentSettings(patch: Partial<AgentSettings>): Promise<
   }
 }
 
+// ─────────────────────────── 思考级别（2026-10-03）
+//
+// 输入框「+」右上角的四档菜单：低 / 中 / 高 / 极限，收成一格给用户。
+// 它是 persona / cost_mode / beast_mode 三栏的联合快捷档——本表是**唯一真源**，
+// 组件与测试都直接读它，不许各自再抄一份 mapping。
+// interrupt_mode 不属于这个 mapping（与思考级别正交）：改档时由 saveAgentSettings
+// 的「合并现有缓存 + patch」语义原样保留用户当前值（默认 steer）。
+
+/** 思考级别四档（显示名：低/中/高/极限）。 */
+export type AgentThinkingLevel = "low" | "medium" | "high" | "extreme";
+
+export const AGENT_THINKING_LEVELS: readonly AgentThinkingLevel[] = ["low", "medium", "high", "extreme"];
+
+/** 级別 → AgentSettings 三栏映射（唯一真源，逐档 × 三栏可被测试直接断言）。 */
+export const AGENT_THINKING_LEVEL_SETTINGS: Record<
+  AgentThinkingLevel,
+  Pick<AgentSettings, "persona" | "cost_mode" | "beast_mode">
+> = {
+  low: { persona: "efficient", cost_mode: "economy", beast_mode: false },
+  medium: { persona: "efficient", cost_mode: "balanced", beast_mode: false },
+  high: { persona: "thoughtful", cost_mode: "balanced", beast_mode: false },
+  extreme: { persona: "thoughtful", cost_mode: "premium", beast_mode: true },
+};
+
+/** 显示名（简体中文）。 */
+export const AGENT_THINKING_LEVEL_LABELS: Record<AgentThinkingLevel, string> = {
+  low: "低",
+  medium: "中",
+  high: "高",
+  extreme: "极限",
+};
+
+/** 展开后每个选项的简短说明（不含档名，档名单独占一列）。 */
+export const AGENT_THINKING_LEVEL_HINTS: Record<AgentThinkingLevel, string> = {
+  low: "更快、更省，适合简单需求",
+  medium: "速度与质量兼顾",
+  high: "先充分思考再动手，更全面",
+  extreme: "最高质量、开启野兽模式",
+};
+
+/**
+ * 显式选择的思考级别 key：mapping 非满射（如 premium + efficient 无法由四档表达），
+ * 所以级别本身另存一份；载入时无记录才由 settings 反推。
+ */
+export const AGENT_THINKING_LEVEL_STORAGE_KEY = "agent-thinking-level-v1";
+
+/** 级別 → 写入 AgentSettings 的 patch（经 saveAgentSettings 既有链路落地）。 */
+export function agentThinkingLevelPatch(level: AgentThinkingLevel): Partial<AgentSettings> {
+  return { ...AGENT_THINKING_LEVEL_SETTINGS[level] };
+}
+
+/** 由 settings 反推级別：mapping 覆盖不到的組合（如 premium + efficient）回 null。 */
+export function inferAgentThinkingLevel(settings: AgentSettings): AgentThinkingLevel | null {
+  for (const level of AGENT_THINKING_LEVELS) {
+    const spec = AGENT_THINKING_LEVEL_SETTINGS[level];
+    if (
+      settings.persona === spec.persona &&
+      settings.cost_mode === spec.cost_mode &&
+      settings.beast_mode === spec.beast_mode
+    ) {
+      return level;
+    }
+  }
+  return null;
+}
+
+/** 读取显式保存的思考级别（无记录 / 脏数据 → null）。 */
+export function readCachedAgentThinkingLevel(): AgentThinkingLevel | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(AGENT_THINKING_LEVEL_STORAGE_KEY);
+    return (AGENT_THINKING_LEVELS as readonly string[]).includes(raw ?? "")
+      ? (raw as AgentThinkingLevel)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 只写本地 localStorage（不触网）：改档立即生效，跨重载保留。 */
+export function writeCachedAgentThinkingLevel(level: AgentThinkingLevel): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(AGENT_THINKING_LEVEL_STORAGE_KEY, level);
+  } catch {
+    // 隐私模式等写入失败：只影响下次冷启动的初值，不挡聊天。
+  }
+}
+
+/**
+ * 解析要显示的思考级别：显式记录优先；无记录才由 settings 反推；反推不到显示「中」。
+ * **纯读取**——反推不到时绝不改写用户的 settings（只影响显示，用户的真实三栏原样保留）。
+ */
+export function resolveAgentThinkingLevel(settings: AgentSettings): AgentThinkingLevel {
+  return readCachedAgentThinkingLevel() ?? inferAgentThinkingLevel(settings) ?? "medium";
+}
+
 /** 取 SSE 只读票。 */
 export async function requestSseTicket(sessionId: string): Promise<AgentSseTicket> {
   const data = await agentFetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}/sse-ticket`, {

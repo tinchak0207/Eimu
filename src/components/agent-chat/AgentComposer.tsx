@@ -10,13 +10,23 @@ import {
   type ClipboardEvent,
   type DragEvent,
   type KeyboardEvent,
+  type MutableRefObject,
 } from "react";
-import { ArrowUp, Loader2, Navigation, Plus, Square, X } from "lucide-react";
+import { ArrowUp, Brain, Check, ChevronDown, Loader2, Navigation, Plus, Square, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
+  AGENT_THINKING_LEVEL_HINTS,
+  AGENT_THINKING_LEVEL_LABELS,
+  AGENT_THINKING_LEVELS,
+  agentThinkingLevelPatch,
+  readCachedAgentSettings,
+  resolveAgentThinkingLevel,
+  saveAgentSettings,
+  writeCachedAgentThinkingLevel,
   toAgentAttachmentRef,
   uploadAgentAttachments,
   type AgentAttachment,
+  type AgentThinkingLevel,
 } from "@/lib/agent-chat-client";
 import { MAX_VIDEO_BYTES, uploadVideoDirect } from "@/lib/agent-uploads";
 import type { AgentAttachmentRef } from "@/lib/agent-chat-types";
@@ -93,6 +103,12 @@ export interface AgentComposerProps {
    * 逐位元一致。
    */
   externalSendPending?: boolean;
+  /**
+   * 可選介面（2026-10-03）：把「把檔案加進附件列」的既有入口（enqueueFiles，
+   * 拖拽／貼上／選檔三條入口共用的同一條管道）註冊給外部呼叫。只暴露、不改入隊
+   * 邏輯（多檔逐個處理、lazy 建號、狀態機都在既有函式裡）。不傳＝行為逐位元不變。
+   */
+  attachFilesRef?: MutableRefObject<((files: File[]) => void) | null>;
 }
 
 /** 允许选择的文件类型；列表与网关约定一致，避免上传后无法解析的格式。 */
@@ -240,6 +256,149 @@ export function nextSendBusy(
 
 let attachmentSeq = 0;
 
+/**
+ * 思考级别菜单（2026-10-03）：工具行同排、「+」右边的极简控件（暴君 2026-10-03
+ * 三次退回悬浮形态后三选一定案，2026-10-03 二次定案改为无框语汇）。收起态＝
+ * lucide `Brain` 图标 + 级别字（低/中/高/极限）+ 小 chevron，零框零底零影，
+ * 与同排「+」「↑」同一套无框语言；展开态＝极简四列（级别名 + 当前档右端勾，
+ * 说明文字挂每列 title），不再有长说明行。
+ *
+ * 状态归属：沿用设定既有的 localStorage 缓存 + 网关持久化链路——
+ *   · 读：显式级別记录（agent-thinking-level-v1）优先，无记录由 settings 反推（resolve）。
+ *   · 写：writeCachedAgentThinkingLevel（跨重载保留）+ saveAgentSettings(三栏 patch)
+ *     （既有唯一写入者；interrupt_mode 由合并语义原样保留）。不另开 store。
+ *
+ * 交互：真 button 元素（Tab 可达 / Enter / Space 可開），Esc 關，焦點環走 --ring 主題，
+ * 點擊外部收起（與历史 dropdown / 设定弹层同一條 outside-click 規矩）。
+ */
+function ThinkingLevelMenu({ disabled }: { disabled: boolean }) {
+  // SSR 與首帧一律「中」：localStorage 只在挂载后读，避免 hydration 不一致。
+  const [level, setLevel] = useState<AgentThinkingLevel>("medium");
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    // 挂载后解析：显式记录优先，否则由缓存 settings 反推，反推不到顯示「中」。
+    setLevel(resolveAgentThinkingLevel(readCachedAgentSettings()));
+  }, []);
+
+  // 开着时点外面就收——与历史 dropdown / 设定弹层同一条规矩（pointerdown + contains）。
+  useEffect(() => {
+    if (!open) return;
+    const onDocPointerDown = (ev: PointerEvent): void => {
+      if (rootRef.current && !rootRef.current.contains(ev.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", onDocPointerDown);
+    return () => document.removeEventListener("pointerdown", onDocPointerDown);
+  }, [open]);
+
+  const pick = useCallback((next: AgentThinkingLevel): void => {
+    setLevel(next);
+    writeCachedAgentThinkingLevel(next);
+    // 既有唯一写入者：saveAgentSettings 合并当前缓存 + 三栏 patch（interrupt_mode 不动）。
+    void saveAgentSettings(agentThinkingLevelPatch(next));
+    setOpen(false);
+  }, []);
+
+  const onKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>): void => {
+      if (event.key === "Escape" && open) {
+        event.stopPropagation();
+        setOpen(false);
+      }
+    },
+    [open],
+  );
+
+  const label = AGENT_THINKING_LEVEL_LABELS[level];
+
+  return (
+    // 工具行同排、「+」右邊（暴君 2026-10-03 三選一定案）：控件進工具行流內，
+    // 右邊緊跟「+」，與「+」和「↑」同一條基線。
+    // 錨定鏈：展開面板（absolute bottom-full）的 containing block ＝ composer 根
+    // （relative，與同檔 SkillSlashMenu 同一條鏈）。此 chip 容器**不得**再掛 relative，
+    // 否則面板會貼著這個小盒往上開、下半壓在輸入框上。
+    <div ref={rootRef} onKeyDown={onKeyDown} className="shrink-0 ml-0.5">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        disabled={disabled}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={`思考级别：${label}（低/中/高/极限）`}
+        title={`思考级别：${label}（低/中/高/极限）`}
+        className={cn(
+          // 2026-10-03 暴君定案：收起態＝腦圖標＋級別字＋小 chevron，零框零底零影零膠囊，
+          // 與同排「+」「↑」同一套無框語彙（舊的白底細邊玻璃膠囊已刪）。
+          // 只換顏色/透明度，無尺寸或位移變化——hover 零 layout shift。
+          "flex w-max shrink-0 items-center gap-1 whitespace-nowrap leading-none text-foreground/60",
+          "transition-colors hover:text-[#7d6ee0] active:opacity-70",
+          "focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+          "disabled:cursor-not-allowed disabled:opacity-40",
+          // 絕對定位盒走 shrink-to-fit；含塊是工具行 flex。w-max＋nowrap 鎖死單行不斷行。
+          "touch-manipulation [-webkit-tap-highlight-color:transparent]",
+        )}
+      >
+        {/* lucide Brain（与同排 Plus / ArrowUp 同一套家族图标，风格统一）。装饰用，对辅助技术隐藏。 */}
+        <Brain className="h-4 w-4 shrink-0" strokeWidth={2} aria-hidden="true" />
+        <span className="whitespace-nowrap text-ios-footnote font-medium">{label}</span>
+        {/* 尾端小 chevron：展開時 rotate-180（純 transform，零 layout shift）。 */}
+        <ChevronDown
+          className={cn(
+            "h-3.5 w-3.5 shrink-0 opacity-60 transition-transform",
+            open && "rotate-180",
+          )}
+          aria-hidden="true"
+        />
+      </button>
+      {open && (
+        <div
+          role="listbox"
+          aria-label="思考级别"
+          /*
+            定位／容器寫法照抄同檔 SkillSlashMenu（lg-float + absolute bottom-full，
+            貼在控件正上方、不進流＝零 layout shift）。containing block ＝ composer 根
+            （relative，與 SkillSlashMenu 同一條鏈）：chip 容器**不得**再掛 relative，
+            否則面板會貼著 chip 往上開、下半壓在輸入框上。**不得**再用 agent-pop-in：
+            它的 keyframes 帶 translateX(-50%)（給「left-1/2 置中彈層」用的），
+            配 left-0 會把整個面板左移半個寬度、內容滑出面板外——那正是生產上
+            「級別名跑到面板左緣之外、四列只剩說明行」的根因。
+            寬度＝內容自適應（w-max）：四列只有級別名＋勾，不寫死 w-52 造成空曠或裁切。
+          */
+          className="lg-float absolute bottom-full left-1.5 z-50 mb-2 w-max min-w-0 rounded-ios-xl p-1"
+        >
+          <div className="pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-[inherit] bg-gradient-to-r from-transparent via-white to-transparent opacity-80" />
+          {AGENT_THINKING_LEVELS.map((lv) => (
+            <button
+              key={lv}
+              type="button"
+              role="option"
+              aria-selected={lv === level}
+              onClick={() => pick(lv)}
+              /* 极简：说明行删掉，说明字串改挂 title（真源仍是 AGENT_THINKING_LEVEL_HINTS）。 */
+              title={AGENT_THINKING_LEVEL_HINTS[lv]}
+              className={cn(
+                "flex w-full items-center gap-2 rounded-[12px] px-2.5 py-2 text-left transition-colors",
+                "hover:bg-black/[0.05] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+                lv === level && "bg-ios-blue/[0.10]",
+              )}
+            >
+              <span className="whitespace-nowrap text-ios-footnote font-medium text-foreground">
+                {AGENT_THINKING_LEVEL_LABELS[lv]}
+              </span>
+              {lv === level && (
+                <Check className="ml-auto h-3.5 w-3.5 shrink-0 text-ios-blue" aria-hidden="true" />
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AgentComposerComponent({
   disabled,
   onSend,
@@ -252,6 +411,7 @@ function AgentComposerComponent({
   steerActive = false,
   stopPending = false,
   externalSendPending = false,
+  attachFilesRef,
 }: AgentComposerProps) {
   const [text, setText] = useState("");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
@@ -432,6 +592,21 @@ function AgentComposerComponent({
     },
     [enqueueFiles],
   );
+
+  /**
+   * A-3（2026-10-03）：把既有附件入口 enqueueFiles 注册给外部 ref。只注册，
+   * 不改任何入队逻辑（多档逐个处理、lazy 建号、状态机都在既有函数里）；卸载时
+   * 归 null。不传 ref ＝不注册，行为逐位元不变。
+   */
+  useEffect(() => {
+    if (!attachFilesRef) return;
+    attachFilesRef.current = (files: File[]) => {
+      void enqueueFiles(files);
+    };
+    return () => {
+      attachFilesRef.current = null;
+    };
+  }, [attachFilesRef, enqueueFiles]);
 
   const removeAttachment = useCallback((id: string) => {
     setAttachments((prev) => {
@@ -952,22 +1127,30 @@ function AgentComposerComponent({
         上传中的 chip 显示 spinner，失败显示错误态（可移除重传或删除）。
         2026-10-01：纯「+」（ImagePlus 的加号挂右上角，字形重心偏）；与发送箭头同基线。
       */}
-      <button
-        type="button"
-        onClick={handlePick}
-        disabled={!canAttach}
-        aria-label="添加素材"
-        title="添加素材（剧本 / 图片 / 影片 / 文档）"
-        className={cn(
-          // 2026-10-01 暴君：纯图标、不包圆形边——只有一个「+」。36px 是隐形触控区，不画底不画框。
-          "flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-foreground/50",
-          "touch-manipulation [-webkit-tap-highlight-color:transparent]",
-          "transition-colors hover:text-[#7d6ee0] active:scale-[0.92] focus:outline-none focus-visible:text-[#7d6ee0]",
-          "disabled:cursor-not-allowed disabled:text-foreground/25",
-        )}
-      >
-        <Plus className="h-5 w-5" strokeWidth={2} aria-hidden="true" />
-      </button>
+      {/* 左上角：素材「+」＋工具行同排、「+」右边的思考级别菜单（暴君 2026-10-03
+          三选一定案）。左組＝「+」容器＋chip，chip 是工具行流內的標準子項。 */}
+      <div className="flex items-center">
+        <div className="relative shrink-0">
+          <button
+            type="button"
+            onClick={handlePick}
+            disabled={!canAttach}
+            aria-label="添加素材"
+            title="添加素材（剧本 / 图片 / 影片 / 文档）"
+            className={cn(
+              // 2026-10-01 暴君：纯图标、不包圆形边——只有一个「+」。36px 是隐形触控区，不画底不画框。
+              "flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-foreground/50",
+              "touch-manipulation [-webkit-tap-highlight-color:transparent]",
+              "transition-colors hover:text-[#7d6ee0] active:scale-[0.92] focus:outline-none focus-visible:text-[#7d6ee0]",
+              "disabled:cursor-not-allowed disabled:text-foreground/25",
+            )}
+          >
+            <Plus className="h-5 w-5" strokeWidth={2} aria-hidden="true" />
+          </button>
+        </div>
+        {/* 思考级别菜单：工具行流內、「+」右邊（暴君 2026-10-03 三選一定案）。 */}
+        <ThinkingLevelMenu disabled={!canAttach} />
+      </div>
 
       {onStop && !canSend && !sending ? (
             /*

@@ -19,7 +19,7 @@
   "interface": {
     "displayName": "Eimu",
     "shortDescription": "图片、视频与配音，对话里直接出",
-    "longDescription": "把 Eimu 接到你的 coding agent 里，用一个远端 MCP 端点完成创作类调用：按提示词生成图像，对已有图片做指令编辑，提交视频生成任务，把文本转成语音，放大图像分辨率；也能列出公开技能库条目、列出当前密钥可用的模型与计价、查询余额、轮询异步任务结果。生成类调用与网页端共用同一本账：提交预扣、成功结算、失败自动退回。密钥只存在你本机的配置或环境变量里，不会上传给我们。本插件不包含画布节点编排、分镜时间线工程或成片导出能力。",
+    "longDescription": "把 Eimu 接到你的 coding agent 里，用一个远端 MCP 端点完成创作类调用：按提示词生成图像，对已有图片做指令编辑，提交视频生成任务，把文本转成语音，放大图像分辨率；也能列出公开技能库条目、列出当前密钥可用的模型与计价、查询余额、轮询异步任务结果，以及读取与回滚本账号的画布产线（list_canvas_projects / canvas_get_state / workflow_read / workflow_history / workflow_write / workflow_rollback）。生成类调用与网页端共用同一本账：提交预扣、成功结算、失败自动退回。密钥只存在你本机的配置或环境变量里，不会上传给我们。本插件不包含成片导出、分镜时间线剪辑、预置运镜库与角色库/跨工程素材引用。",
     "developerName": "Eimu",
     "category": "Creativity",
     "websiteURL": "https://eimu.dev",

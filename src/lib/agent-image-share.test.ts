@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { agentHistoryEntry } from "./agent-image-share";
+import { agentHistoryEntry, imageExtensionFromUrl } from "./agent-image-share";
 import { normalizeHistoryEntry } from "./history-types";
 import { firstShareableIndex } from "./share-remix";
 
@@ -28,4 +28,13 @@ test("無 taskId 時以 url 雜湊作穩定 id", () => {
   const b = agentHistoryEntry({ ...item, taskId: undefined });
   assert.equal(a.id, b.id);
   assert.match(a.id, /^agent-u[0-9a-z]+$/);
+});
+
+test("imageExtensionFromUrl：從 URL 路徑推副檔名，剝 query/fragment，推不到落 png", () => {
+  assert.equal(imageExtensionFromUrl("https://store.tinchak0207.xyz/a/b/cat.jpeg"), "jpeg");
+  assert.equal(imageExtensionFromUrl("https://store.tinchak0207.xyz/a/b/cat.PNG"), "png");
+  assert.equal(imageExtensionFromUrl("https://store.tinchak0207.xyz/a/b/cat.webp?v=2"), "webp");
+  assert.equal(imageExtensionFromUrl("https://store.tinchak0207.xyz/a/b/cat#frag"), "png");
+  assert.equal(imageExtensionFromUrl("https://store.tinchak0207.xyz/image-data/files/jobs/abc"), "png");
+  assert.equal(imageExtensionFromUrl(""), "png");
 });

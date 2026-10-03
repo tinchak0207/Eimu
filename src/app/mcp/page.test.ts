@@ -30,8 +30,17 @@ const EXPECTED_TOOL_NAMES = [
   "upscale",
   "get_quota",
   "get_result",
+  "list_canvas_projects",
+  "canvas_get_state",
+  "workflow_read",
+  "workflow_history",
+  "workflow_write",
+  "workflow_rollback",
 ] as const;
 
+// 這份清單是「scope 真值」的漂移探針：/mcp 頁與 well-known 發現文件都必須完整宣告它。
+// 目前 scope 真源落在 src/app/mcp/page.tsx 的 MCP_TOOLS（tools.ts 只承載工具名，不帶 scope）；
+// 新增工具帶新 scope 而未同步本清單、頁面或發現文件，任一處漏掉都會在這裡紅。
 const EXPECTED_SCOPES = [
   "eimu:models:read",
   "eimu:skills:read",
@@ -40,6 +49,8 @@ const EXPECTED_SCOPES = [
   "eimu:audio:write",
   "eimu:tasks:read",
   "eimu:quota:read",
+  "eimu:canvas:read",
+  "eimu:canvas:write",
 ] as const;
 
 // 像真密钥的值：sk-biz- 或 sk- 后面接一长串 ASCII 键字符。页面只准出现中文件占位（sk-biz-你的密钥）。

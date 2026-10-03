@@ -61,6 +61,7 @@ import {
   planAgentMediaHistoryWrites,
   saveAgentMediaToHistory,
 } from "@/lib/agent-media-history";
+import { imageExtensionFromUrl, stationAuthHeaders } from "@/lib/agent-image-share";
 import { RerunDialog, type HistoryRerunMode } from "@/components/history/RerunDialog";
 
 /** 登录类错误判定：客户端缺憑證（「尚未登录」）與服務端否定登入態的文案都算，
@@ -126,9 +127,17 @@ const SESSION_STATUS_META: Record<
   idle: { dotClass: "bg-foreground/15", label: "已静置" },
 };
 
-async function triggerDownload(url: string, filename: string): Promise<void> {
+/**
+ * 真下載：走站內同源代理 /api/media-download（帶既有鑑權標頭）把位元組取回，
+ * blob → objectURL → `<a download>`。**不再有 window.open 那條 fallback**——
+ * 打開附件連結不是下載（暴君點名的病徵）。成功回 true，失敗回 false（卡片據此閃「失败」）。
+ */
+async function triggerDownload(url: string, filename: string): Promise<boolean> {
   try {
-    const res = await fetch(url);
+    const res = await fetch(`/api/media-download?url=${encodeURIComponent(url)}`, {
+      headers: stationAuthHeaders(),
+    });
+    if (!res.ok) return false;
     const blob = await res.blob();
     const href = URL.createObjectURL(blob);
     const a = Object.assign(document.createElement("a"), { href, download: filename });
@@ -136,8 +145,9 @@ async function triggerDownload(url: string, filename: string): Promise<void> {
     a.click();
     a.remove();
     URL.revokeObjectURL(href);
+    return true;
   } catch {
-    window.open(url, "_blank", "noopener,noreferrer");
+    return false;
   }
 }
 
@@ -505,9 +515,9 @@ export function AgentChatSurface({
   const isActive = connection !== "idle" && connection !== "closed";
   const isInline = variant === "inline";
 
-  const onSaveToLibrary = useCallback(async (item: AgentChatLibraryItem): Promise<void> => {
-    // 客户端幂等：连点两下不该在资产包里躺两条一样的记录。
-    if (savedIds.has(item.id)) return;
+  const onSaveToLibrary = useCallback(async (item: AgentChatLibraryItem): Promise<boolean> => {
+    // 客户端幂等：连点两下不该在资产包里躺两条一样的记录；去重命中也算「已存入」。
+    if (savedIds.has(item.id)) return true;
     try {
       const now = new Date().toISOString();
       // 1. 拉取现有资产包，找「聊天素材」确定性包（不存在则构造空包）。
@@ -520,7 +530,7 @@ export function AgentChatSurface({
       const urlField = assetUrlFieldOf(item.kind);
       if (existing?.items.some((it) => it[urlField] === item.url)) {
         setSavedIds((prev) => new Set([...prev, item.id]));
-        return;
+        return true;
       }
       const newItem: AssetPackItem = buildChatSaveItem(item, sessionId, now);
       const pack: AssetPack = existing
@@ -539,41 +549,55 @@ export function AgentChatSurface({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(pack),
       });
-      if (res.ok) {
-        setSavedIds((prev) => new Set([...prev, item.id]));
-      }
+      if (!res.ok) return false;
+      setSavedIds((prev) => new Set([...prev, item.id]));
+      return true;
     } catch {
-      // 静默失败：图还在，用户仍可下载。不弹错打断对话流。
+      // 回 false＝卡片顯示短暫「未存入」；圖還在，用戶仍可下載。
+      return false;
     }
   }, [savedIds, sessionId]);
 
-  // D-9：往聊天注入一句话的捷径，不是离开聊天的逃生门。
-  // image_generate 是异步的，tool.result 里只有 task_id 没有 URL；
-  // 把实际 URL 附在消息里，agent 收到后可直接传给 image_edit / image_upscale，
-  // 无需再用 bash 或 image_get_result 查询一次。
-  const onEdit = useCallback((item: AgentImageItem): void => {
-    void send(`在第 ${item.seq} 张图的基础上继续改图（image_url: ${item.url}）`);
-  }, [send]);
+  // 媒體卡「改图」把圖加進輸入框附件的既有入口（AgentComposer.enqueueFiles 經此上拋）。
+  const attachFilesRef = useRef<((files: File[]) => void) | null>(null);
 
-  const onUpscale = useCallback((item: AgentImageItem): void => {
-    void send(`把第 ${item.seq} 张图放大（image_url: ${item.url}）`);
-  }, [send]);
+  // D-9：改圖＝把圖抓回、組 File 加進附件列（走既有附件上傳狀態機），**不送任何消息**。
+  // 輸入框出現 chip 就是回饋；抓取中/失敗由卡片按鈕自身呈現。
+  const onEdit = useCallback(async (item: AgentImageItem): Promise<boolean> => {
+    const attach = attachFilesRef.current;
+    if (!attach) return false;
+    try {
+      const res = await fetch(`/api/media-download?url=${encodeURIComponent(item.url)}`, {
+        headers: stationAuthHeaders(),
+      });
+      if (!res.ok) return false;
+      const blob = await res.blob();
+      const ext = imageExtensionFromUrl(item.url);
+      const file = new File([blob], `agent-image-${item.seq}.${ext}`, {
+        type: blob.type || "image/png",
+      });
+      attach([file]);
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
 
-  const onDownload = useCallback(async (item: AgentImageItem): Promise<void> => {
-    await triggerDownload(item.url, `agent-${Date.now()}.png`);
+  const onDownload = useCallback(async (item: AgentImageItem): Promise<boolean> => {
+    return triggerDownload(item.url, `agent-${Date.now()}.png`);
   }, []);
 
   // 影片下载：与图片同一条 triggerDownload 路径，副档名换 mp4。
-  const onVideoDownload = useCallback(async (item: AgentVideoItem): Promise<void> => {
-    await triggerDownload(item.url, `agent-${Date.now()}.mp4`);
+  const onVideoDownload = useCallback(async (item: AgentVideoItem): Promise<boolean> => {
+    return triggerDownload(item.url, `agent-${Date.now()}.mp4`);
   }, []);
   // 影片「存图库」已接线（见下方 videoActions）：item 经 assetItemKindOf/
   // assetUrlFieldOf 落 kind:"video" + mediaUrl（agent-chat-asset-builders）。
   // 音頻下載：与影片同一条 triggerDownload 路径；副档名优先取 URL 自带者
   // （FlowMusic/lyria 出 m4a，TTS 出 mp3），取不到時回落 m4a。
-  const onAudioDownload = useCallback(async (item: AgentAudioItem): Promise<void> => {
+  const onAudioDownload = useCallback(async (item: AgentAudioItem): Promise<boolean> => {
     const ext = /\.(m4a|mp3|wav|ogg|opus|aac|flac)(?:$|\?)/i.exec(item.url)?.[1] ?? "m4a";
-    await triggerDownload(item.url, `agent-${Date.now()}.${ext}`);
+    return triggerDownload(item.url, `agent-${Date.now()}.${ext}`);
   }, []);
   // 音頻「存图库」同影片已接线：kind:"audio" + mediaUrl（见下方 audioActions）。
 
@@ -831,7 +855,6 @@ export function AgentChatSurface({
   const imageActions: AgentTranscriptProps["imageActions"] = {
     onSaveToLibrary,
     onEdit,
-    onUpscale,
     onDownload,
     onRerun: onImageRerun,
     onRerunVariant: onImageRerunVariant,
@@ -1176,6 +1199,7 @@ export function AgentChatSurface({
           prefill={prefill}
           onPrefillConsumed={clearPrefill}
           onFirstUserMessage={onUserMessage}
+          attachFilesRef={attachFilesRef}
         />
       </div>
 

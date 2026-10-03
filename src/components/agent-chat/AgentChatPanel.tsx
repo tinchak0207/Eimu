@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { Loader2, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AgentAssistantTextItem, AgentChatState } from "@/lib/agent-chat-types";
@@ -60,6 +60,11 @@ export interface AgentChatPanelProps {
   /** D-24 无缝续写：透传给输入区，把半句话填进框里而不是直接送出。 */
   prefill?: AgentComposerProps["prefill"];
   onPrefillConsumed?: () => void;
+  /**
+   * 2026-10-03：把输入区「附件入隊」的既有入口（AgentComposer.enqueueFiles）透傳出去。
+   * 媒體卡「改图」把抓回的圖組 File 經它加進附件列（不另造第二條上傳管道）。
+   */
+  attachFilesRef?: MutableRefObject<((files: File[]) => void) | null>;
   /**
    * D-17：外面正在问「继续上次还是开新的」，此时还没有会话。
    * 这不是连接故障，状态行要说在等你选，而不是亮一颗「未连接」的灯。
@@ -138,6 +143,7 @@ function AgentChatPanelComponent({
   anchorBusy = false,
   prefill,
   onPrefillConsumed,
+  attachFilesRef,
   awaitingChoice = false,
   onFirstUserMessage,
 }: AgentChatPanelProps) {
@@ -364,6 +370,7 @@ function AgentChatPanelComponent({
         onEnsureSession={onEnsureSession}
         prefill={prefill}
         onPrefillConsumed={onPrefillConsumed}
+        attachFilesRef={attachFilesRef}
         /* D-26 补全：生成中（turnActive）把中止信号送进输入区——
            输入框为空时送出钮位置变停止钮，不再只能乾等。 */
         onStop={turnActive ? onStopGeneration : undefined}

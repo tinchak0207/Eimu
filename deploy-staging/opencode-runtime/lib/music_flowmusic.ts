@@ -92,6 +92,11 @@ export interface FlowMusicAudioCandidate {
   durationHint?: number
   /** 上游標題（clips[].title，缺省即無）。 */
   title?: string
+  /**
+   * 上游回吐的風格字串（clips[].sound_prompt，實測 Lyria 會把模糊需求擴寫成
+   * 完整英文 Sound Prompt 後回吐；缺省不帶此鍵）。多 take 熵決策的 soundPrompt 軸來源。
+   */
+  soundPrompt?: string
 }
 
 /** 已下載的候選音頻（供工具層逐個上傳為平台 URL）。 */
@@ -102,6 +107,10 @@ export interface FlowMusicDownloadedCandidate {
   candidateIndex: number
   /** 上游自報時長提示（秒）。 */
   upstreamDurationHint?: number
+  /** 上游 clips[].title（供工具層帶進 audios[] 與熵決策；缺省不帶鍵）。 */
+  title?: string
+  /** 上游 clips[].sound_prompt（供工具層帶進 audios[] 與熵決策；缺省不帶鍵）。 */
+  soundPrompt?: string
 }
 
 /** 與 generateLyriaTrack 返回形狀同構，另帶 upstreamUrl（音頻原始公網 URL，交付兜底用）。 */
@@ -166,12 +175,17 @@ export function extractFlowMusicAudioCandidates(body: unknown): FlowMusicAudioCa
       const duration = typeof entry.duration === "number" ? entry.duration : undefined
       const title =
         typeof entry.title === "string" && entry.title.trim() ? entry.title.trim() : undefined
+      const soundPrompt =
+        typeof entry.sound_prompt === "string" && entry.sound_prompt.trim()
+          ? entry.sound_prompt.trim()
+          : undefined
       out.push({
         url,
         candidateIndex: index,
         ...(format !== undefined ? { mimeHint: String(format) } : {}),
         ...(duration !== undefined ? { durationHint: duration } : {}),
         ...(title !== undefined ? { title } : {}),
+        ...(soundPrompt !== undefined ? { soundPrompt } : {}),
       })
     })
     if (out.length > 0) return out
@@ -278,6 +292,8 @@ export async function generateFlowMusicTrack(
       upstreamUrl: primary.url,
       candidateIndex: primary.candidateIndex,
       ...(primary.durationHint !== undefined ? { upstreamDurationHint: primary.durationHint } : {}),
+      ...(primary.title !== undefined ? { title: primary.title } : {}),
+      ...(primary.soundPrompt !== undefined ? { soundPrompt: primary.soundPrompt } : {}),
     },
   ]
   const candidateErrors: Array<{ candidateIndex: number; upstreamUrl: string; error: string }> = []
@@ -290,6 +306,8 @@ export async function generateFlowMusicTrack(
         upstreamUrl: candidate.url,
         candidateIndex: candidate.candidateIndex,
         ...(candidate.durationHint !== undefined ? { upstreamDurationHint: candidate.durationHint } : {}),
+        ...(candidate.title !== undefined ? { title: candidate.title } : {}),
+        ...(candidate.soundPrompt !== undefined ? { soundPrompt: candidate.soundPrompt } : {}),
       })
     } catch (e) {
       candidateErrors.push({

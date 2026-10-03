@@ -1,17 +1,17 @@
 "use client";
 
-import { memo, useEffect, useState, type ReactNode } from "react";
-import { AlertTriangle, Coins, Download, Library, RotateCw, SlidersHorizontal } from "lucide-react";
+import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { AlertTriangle, Check, Coins, Download, Library, Loader2, RotateCw, SlidersHorizontal } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AgentAudioItem } from "@/lib/agent-chat-types";
 import { AgentRerunMenu } from "./AgentRerunMenu";
 
 export interface AgentAudioCardProps {
   item: AgentAudioItem;
-  /** 存图库：由 AgentChatSurface 的 audioActions 接线（音乐落 mediaUrl）。
-   *  回调缺席时仍保持 disabled，绝不伪造行为。 */
-  onSaveToLibrary?: (item: AgentAudioItem) => void;
-  onDownload?: (item: AgentAudioItem) => void;
+  /** 存图库：true＝已存入／本來就在；false＝失敗（卡片顯示短暫「未存入」）。回調缺席＝disabled。 */
+  onSaveToLibrary?: (item: AgentAudioItem) => Promise<boolean>;
+  /** 下载：true＝已觸發下載；false/拋錯＝按鈕短暫「失败」。 */
+  onDownload?: (item: AgentAudioItem) => Promise<boolean>;
   /**
    * 「再来 N 组」：會話級——音樂/音頻同樣按延遲出稿計費，payload 級重跑不開放
    * （history-rerun.ts:53 註釋），只把「再來 N 組」翻成一句話丟回對話，
@@ -34,11 +34,13 @@ function AudioAction({
   disabled,
   onClick,
   children,
+  tone,
 }: {
   label: string;
   disabled: boolean;
   onClick: () => void;
   children: ReactNode;
+  tone?: "danger";
 }) {
   return (
     <button
@@ -51,6 +53,7 @@ function AudioAction({
         "flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-ios-footnote text-muted-foreground transition-colors",
         "enabled:hover:bg-white/60 enabled:hover:text-foreground/70",
         "disabled:cursor-not-allowed disabled:text-foreground/45",
+        tone === "danger" && "text-destructive enabled:hover:text-destructive enabled:hover:bg-destructive/10",
         "focus:outline-none focus:ring-2 focus:ring-ios-blue/30",
         "[touch-action:manipulation] [-webkit-tap-highlight-color:transparent]",
       )}
@@ -64,16 +67,62 @@ function AudioAction({
 function AgentAudioCardComponent({ item, onSaveToLibrary, onDownload, onRerun, onVariant }: AgentAudioCardProps) {
   const [failed, setFailed] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
+  const [saveState, setSaveState] = useState<"idle" | "loading" | "saved" | "failed">("idle");
+  const [downState, setDownState] = useState<"idle" | "loading" | "failed">("idle");
+  const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   // item.url 變化（同實例換曲）時重置加載態，避免舊曲的 failed 串台。
   useEffect(() => {
     setFailed(false);
   }, [item.url]);
 
+  const flash = useCallback((apply: () => void, revert: () => void, delayMs: number) => {
+    apply();
+    timersRef.current.push(setTimeout(revert, delayMs));
+  }, []);
+  useEffect(() => {
+    const timers = timersRef.current;
+    return () => {
+      timers.forEach(clearTimeout);
+    };
+  }, []);
+
   const handleRetry = () => {
     setFailed(false);
     setRetryKey((k) => k + 1);
   };
+
+  const handleSave = useCallback(async () => {
+    if (!onSaveToLibrary || saveState === "loading" || saveState === "saved") return;
+    setSaveState("loading");
+    let ok = false;
+    try {
+      ok = await onSaveToLibrary(item);
+    } catch {
+      ok = false;
+    }
+    if (ok) {
+      setSaveState("saved");
+      return;
+    }
+    flash(() => setSaveState("failed"), () => setSaveState((s) => (s === "failed" ? "idle" : s)), 2000);
+  }, [item, onSaveToLibrary, saveState, flash]);
+
+  const handleDownload = useCallback(async () => {
+    if (!onDownload || downState === "loading") return;
+    setDownState("loading");
+    let ok = false;
+    try {
+      ok = await onDownload(item);
+    } catch {
+      ok = false;
+    }
+    if (ok) {
+      setDownState("idle");
+      return;
+    }
+    flash(() => setDownState("failed"), () => setDownState((s) => (s === "failed" ? "idle" : s)), 2000);
+  }, [item, onDownload, downState, flash]);
 
   return (
     <figure className="agent-rise">
@@ -121,11 +170,31 @@ function AgentAudioCardComponent({ item, onSaveToLibrary, onDownload, onRerun, o
         </figcaption>
       )}
       <div className="mt-1 flex flex-wrap gap-1 px-3.5 pb-3">
-        <AudioAction label="存图库" disabled={!onSaveToLibrary} onClick={() => onSaveToLibrary?.(item)}>
-          <Library className="h-3.5 w-3.5" aria-hidden="true" />
+        <AudioAction
+          label={saveState === "saved" ? "已存" : saveState === "failed" ? "未存入" : "存图库"}
+          disabled={!onSaveToLibrary || saveState === "loading" || saveState === "saved"}
+          tone={saveState === "failed" ? "danger" : undefined}
+          onClick={() => void handleSave()}
+        >
+          {saveState === "loading" ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+          ) : saveState === "saved" ? (
+            <Check className="h-3.5 w-3.5" aria-hidden="true" />
+          ) : (
+            <Library className="h-3.5 w-3.5" aria-hidden="true" />
+          )}
         </AudioAction>
-        <AudioAction label="下载" disabled={!onDownload} onClick={() => onDownload?.(item)}>
-          <Download className="h-3.5 w-3.5" aria-hidden="true" />
+        <AudioAction
+          label={downState === "failed" ? "失败" : "下载"}
+          disabled={!onDownload || downState === "loading"}
+          tone={downState === "failed" ? "danger" : undefined}
+          onClick={() => void handleDownload()}
+        >
+          {downState === "loading" ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+          ) : (
+            <Download className="h-3.5 w-3.5" aria-hidden="true" />
+          )}
         </AudioAction>
         {/* 音頻走會話級重跑（見 props 註釋）：N 組檔位與歷史卡同源；回調缺席＝disabled。
             選單本體是觸發鈕的兄弟（AgentRerunMenu 內部自有 relative 容器），不嵌套 button。 */}

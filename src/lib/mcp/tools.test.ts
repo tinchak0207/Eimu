@@ -14,6 +14,7 @@ import { NextRequest } from "next/server";
 import { hashBizApiKey } from "@/lib/biz-api-keys";
 import { __resetBizKeyStoreForTests } from "@/lib/biz-api-key-store";
 import { listPublicSkills, registerUserSkillSource, searchPublicSkills, type AgentSkillView } from "@/lib/agent-skills/registry";
+import { compileWorkflow, workflowNodeId } from "@/lib/workflow-dsl/compile";
 import { JSON_RPC_ERROR_CODES, McpRpcError, type McpToolCallResult } from "./protocol";
 import {
   MCP_TOOLS,
@@ -83,6 +84,16 @@ const VALID_ARGS: Record<string, Record<string, unknown>> = {
   upscale: { image: "https://cdn.example/a.png", factor: 2, size: "1k" },
   get_quota: {},
   get_result: { kind: "video", id: "task-1" },
+  list_canvas_projects: {},
+  canvas_get_state: { session_id: "sess-1" },
+  workflow_read: { session_id: "sess-1" },
+  workflow_history: { session_id: "sess-1", node_id: "wf-a" },
+  workflow_write: {
+    source: { workflow: "demo", steps: [{ id: "script", title: "脚本" }] },
+    current: { nodes: [], connections: [] },
+    label: "改成 2 步",
+  },
+  workflow_rollback: { node_id: "wf-a", project_id: "proj-1", version: 1 },
 };
 
 // ─────────────────────────────────────────── 1. 工具表
@@ -122,6 +133,11 @@ test("工具表：必填欄位缺一不可——空物件對有 required 的工�
     tts: "arguments.input",
     upscale: "arguments.image",
     get_result: "arguments.kind",
+    canvas_get_state: "arguments.session_id",
+    workflow_read: "arguments.session_id",
+    workflow_history: "arguments.session_id",
+    workflow_write: "arguments.source",
+    workflow_rollback: "arguments.node_id",
   };
   for (const tool of MCP_TOOLS) {
     const problem = validateToolArguments(__getToolSchemaForTests(tool.name)!, {});
@@ -150,6 +166,15 @@ test("參數驗證：型別、值域、額外欄位都要被拒（不是靜默�
     ["upscale", { image: "u", factor: 99 }, /factor 不得大於 4/],
     ["get_result", { kind: "audio", id: "x" }, /kind 只能是/],
     ["tts", { input: "x", voice: 1 }, /voice 必須是字串/],
+    // 工作流族（2026-10-03 新增）：每支的參數校驗失敗路徑
+    ["list_canvas_projects", { nope: 1 }, /nope 不是本工具支援的參數/],
+    ["canvas_get_state", { session_id: 1 }, /session_id 必須是字串/],
+    ["canvas_get_state", { session_id: "s", nope: 1 }, /nope 不是本工具支援的參數/],
+    ["workflow_read", { session_id: "s", extra: true }, /extra 不是本工具支援的參數/],
+    ["workflow_history", { session_id: "s", node_id: 7 }, /node_id 必須是字串/],
+    ["workflow_write", { source: "not-an-object" }, /source 必須是物件/],
+    ["workflow_rollback", { node_id: "n", project_id: "p", version: 0 }, /version 不得小於 1/],
+    ["workflow_rollback", { node_id: "n", project_id: "p", version: 1.5 }, /version 必須是整數/],
   ];
   for (const [name, args, pattern] of cases) {
     const problem = validateToolArguments(__getToolSchemaForTests(name)!, args);
@@ -303,6 +328,39 @@ test("私有 skill 隔離：註冊一把私有技能後，公開面（list/get�
   }
 });
 
+// ─────────────────────────────────────────── 2c. 畫布專案列舉（2026-10-03 探索面）
+
+test("list_canvas_projects：真列在工具表裡（可列舉），且轉發契約正確（GET、無 body、Authorization 原樣透傳）", async () => {
+  // 可列舉斷言：工具真的進了 tools/list 的單一真源（不是只寫在發現面頁面）。
+  assert.ok(listToolNames().includes("list_canvas_projects"), "listToolNames 缺 list_canvas_projects");
+  assert.ok(
+    MCP_TOOLS.some((tool) => tool.name === "list_canvas_projects"),
+    "MCP_TOOLS 缺 list_canvas_projects",
+  );
+  assert.equal(
+    validateToolArguments(__getToolSchemaForTests("list_canvas_projects")!, {}),
+    null,
+    "list_canvas_projects 無參數，空物件必須通過",
+  );
+
+  const { calls, dispatcher } = fakeDispatcher({
+    text: JSON.stringify({ success: true, count: 1, projects: [{ id: "proj-1", title: "画布" }] }),
+  });
+  const result = await callTool("list_canvas_projects", {}, ctx(dispatcher));
+  assert.notEqual(result.isError, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].method, "GET");
+  assert.equal(calls[0].path, "/api/v1/canvas/projects");
+  assert.equal(calls[0].body, undefined, "GET 不得帶 body");
+  assert.equal(calls[0].authorization, `Bearer ${VALID_KEY}`, "必須原樣透傳 Authorization");
+
+  // 上游失敗：原樣 isError 並附原文（與其他轉發工具同語義）。
+  const failed = fakeDispatcher({ status: 401, text: '{"error":"missing key"}' });
+  const failedResult = await callTool("list_canvas_projects", {}, ctx(failed.dispatcher));
+  assert.equal(failedResult.isError, true);
+  assert.match(failedResult.content[0].text, /HTTP 401/);
+});
+
 // ─────────────────────────────────────────── 3. 轉發契約（Authorization 透傳 + traceId）
 
 test("轉發契約：路徑/方法/body 投影/Authorization 透傳/traceId 進 X-Request-Id", async () => {
@@ -384,6 +442,189 @@ test("轉發契約：get_result 依 kind 走對應端點並對 id 做 URL 編碼
     ["/api/v1/images/img%201%2F2/result", "/api/v1/videos/vid-1/result", "/api/v1/tts/tts-1"],
   );
   assert.ok(calls.every((call) => call.method === "GET"));
+});
+
+// ─────────────────────────────────────────── 2b. 工作流族（2026-10-03 MCP 暴露）
+
+test("工作流族轉發契約：read/history 走畫布快照端點、rollback 走節點回退端點（Authorization 原樣透傳）", async () => {
+  const statePayload = JSON.stringify({
+    ok: true,
+    has_state: true,
+    updated_at: "2026-10-03T00:00:00.000Z",
+    state: {
+      nodes: [{ id: "wf-a" }, { id: "wf-b" }],
+      connections: [],
+      dsl: [{ workflow: "demo", steps: [{ id: "script" }] }],
+      node_versions: [
+        { node_id: "wf-a", title: "A", versions: [{ version: 1, reason: "created" }] },
+        { node_id: "wf-b", title: "B", versions: [] },
+      ],
+    },
+  });
+
+  // 讀面：session_id 進路徑且逐段 URL 編碼
+  const read = fakeDispatcher({ text: statePayload });
+  await callTool("canvas_get_state", { session_id: "s 1/2" }, ctx(read.dispatcher));
+  assert.equal(read.calls.length, 1);
+  assert.equal(read.calls[0].method, "GET");
+  assert.equal(read.calls[0].path, "/api/agent/biz/sessions/s%201%2F2/canvas/state");
+  assert.equal(read.calls[0].authorization, `Bearer ${VALID_KEY}`, "必須原樣透傳 Authorization");
+  assert.equal(read.calls[0].body, undefined, "GET 不得帶 body");
+
+  // 回滾面：node_id 進路徑、projectId/version 進 body
+  const rollback = fakeDispatcher({ text: '{"success":true}' });
+  await callTool("workflow_rollback", { node_id: "wf-a", project_id: "proj-1", version: 2 }, ctx(rollback.dispatcher));
+  assert.equal(rollback.calls[0].method, "POST");
+  assert.equal(rollback.calls[0].path, "/api/v1/canvas/nodes/wf-a/revert");
+  assert.deepEqual(rollback.calls[0].body, { projectId: "proj-1", version: 2 });
+
+  // 省略 version：body 不得塞 null（上游據 undefined 走「上一版」語義）
+  const rollbackPrev = fakeDispatcher({ text: '{"success":true}' });
+  await callTool("workflow_rollback", { node_id: "wf-a", project_id: "proj-1" }, ctx(rollbackPrev.dispatcher));
+  assert.deepEqual(rollbackPrev.calls[0].body, { projectId: "proj-1" });
+});
+
+test("workflow_read / workflow_history：只投影 dsl 與版本索引（非原文照抄），node_id 是真過濾", async () => {
+  const statePayload = JSON.stringify({
+    ok: true,
+    has_state: true,
+    updated_at: "2026-10-03T00:00:00.000Z",
+    state: {
+      nodes: [{ id: "wf-a" }, { id: "wf-b" }],
+      connections: [],
+      dsl: [{ workflow: "demo", steps: [{ id: "script" }] }],
+      node_versions: [
+        { node_id: "wf-a", title: "A", versions: [{ version: 1, reason: "created" }] },
+        { node_id: "wf-b", title: "B", versions: [] },
+      ],
+    },
+  });
+
+  const read = parseResult(
+    await callTool("workflow_read", { session_id: "sess-1" }, ctx(fakeDispatcher({ text: statePayload }).dispatcher)),
+  ) as { has_state: boolean; dsl: unknown[]; workflow_versions: Array<{ node_id: string }>; nodes?: unknown };
+  assert.equal(read.has_state, true);
+  assert.equal(read.dsl.length, 1);
+  assert.equal(read.dsl[0] && (read.dsl[0] as { workflow: string }).workflow, "demo");
+  assert.deepEqual(read.workflow_versions.map((e) => e.node_id), ["wf-a", "wf-b"]);
+  assert.equal("nodes" in read, false, "讀面不得回節點座標（那是 canvas_get_state 的職責）");
+
+  const filtered = parseResult(
+    await callTool("workflow_history", { session_id: "sess-1", node_id: "wf-b" }, ctx(fakeDispatcher({ text: statePayload }).dispatcher)),
+  ) as { node_id: string; workflow_versions: Array<{ node_id: string }> };
+  assert.equal(filtered.node_id, "wf-b");
+  assert.deepEqual(filtered.workflow_versions.map((e) => e.node_id), ["wf-b"]);
+});
+
+test("workflow_read：上游無快照（has_state=false）原樣投影，不假裝有內容", async () => {
+  const empty = JSON.stringify({ ok: true, has_state: false, state: null, updated_at: null });
+  const read = parseResult(
+    await callTool("workflow_read", { session_id: "sess-x" }, ctx(fakeDispatcher({ text: empty }).dispatcher)),
+  ) as { has_state: boolean; dsl: unknown[]; workflow_versions: unknown[] };
+  assert.equal(read.has_state, false);
+  assert.deepEqual(read.dsl, []);
+  assert.deepEqual(read.workflow_versions, []);
+});
+
+test("workflow_write 真行為：參數餵給真編譯器，回傳 ops 帶確定性 wf- 節點 id（不是 schema 探針）", async () => {
+  const seen: McpDispatchRequest[] = [];
+  // 注入的 dispatcher 直接呼叫真實現 compileWorkflow（= /v1/workflow/compile 的核心），
+  // 讓斷言來自被測實現之外的真源（編譯器本身），而非 tools.ts 的輸出字串。
+  const dispatcher: McpDispatcher = async (request) => {
+    seen.push(request);
+    const body = (request.body ?? {}) as { source?: unknown; current?: { nodes?: unknown[]; connections?: unknown[] }; label?: unknown };
+    const result = compileWorkflow(body.source as never, {
+      nodes: (body.current?.nodes ?? []) as never,
+      connections: (body.current?.connections ?? []) as never,
+    });
+    if (!result.ok) {
+      return {
+        status: 422,
+        contentType: "application/json",
+        text: JSON.stringify({ success: false, code: "workflow_dsl_invalid", errors: result.errors }),
+      };
+    }
+    return {
+      status: 200,
+      contentType: "application/json",
+      text: JSON.stringify({ success: true, ops: result.ops, summary: result.summary, label: body.label ?? null }),
+    };
+  };
+
+  const source = {
+    workflow: "demo",
+    title: "两步产线",
+    steps: [
+      { id: "script", title: "脚本", kind: "text", prompt: "写一个三幕短片大纲" },
+      { id: "shot1", title: "镜头一", needs: ["script"], prompt: "夕阳海面", size: "1024x1024" },
+    ],
+  };
+  const result = await callTool("workflow_write", { source, label: "起两条" }, ctx(dispatcher));
+  assert.notEqual(result.isError, true, result.content[0].text);
+
+  const payload = JSON.parse(result.content[0].text) as {
+    success: boolean;
+    ops: Array<Record<string, unknown>>;
+    summary: { added: number };
+  };
+  assert.equal(payload.success, true);
+  const nodeIds = payload.ops
+    .filter((op) => op.type === "add_node")
+    .map((op) => (op.node as Record<string, unknown>).id as string);
+  // oracle = 編譯器自己的確定性 id 函式（獨立於 tools.ts）
+  assert.ok(nodeIds.includes(workflowNodeId("demo", "script")), `ops 缺 script 節點：${JSON.stringify(nodeIds)}`);
+  assert.ok(nodeIds.includes(workflowNodeId("demo", "shot1")), `ops 缺 shot1 節點：${JSON.stringify(nodeIds)}`);
+  assert.ok(payload.summary.added >= 2, `summary.added=${payload.summary.added}`);
+  assert.ok(payload.ops.some((op) => op.type === "connect_nodes"), "needs 應編出連線");
+
+  // 轉發契約：真打純編譯端點、source 原樣透傳、label 帶上
+  assert.equal(seen[0].method, "POST");
+  assert.equal(seen[0].path, "/api/v1/workflow/compile");
+  assert.deepEqual((seen[0].body as Record<string, unknown>).source, source);
+  assert.equal((seen[0].body as Record<string, unknown>).label, "起两条");
+});
+
+test("workflow_write 帶 project_id 時改走落圖端點（參數映射成 projectId，不帶則維持純編譯端點）", async () => {
+  const compileOnly = fakeDispatcher({ text: '{"success":true,"ops":[],"summary":{}}' });
+  await callTool("workflow_write", { source: { workflow: "demo", steps: [{ id: "a", title: "A" }] } }, ctx(compileOnly.dispatcher));
+  assert.equal(compileOnly.calls[0].path, "/api/v1/workflow/compile");
+  assert.deepEqual(compileOnly.calls[0].body, { source: { workflow: "demo", steps: [{ id: "a", title: "A" }] } });
+
+  const apply = fakeDispatcher({ text: '{"success":true,"applied":2,"projectId":"proj-1"}' });
+  await callTool(
+    "workflow_write",
+    { source: { workflow: "demo", steps: [{ id: "a", title: "A" }] }, project_id: "proj-1", label: "改成一步" },
+    ctx(apply.dispatcher),
+  );
+  assert.equal(apply.calls[0].method, "POST");
+  assert.equal(apply.calls[0].path, "/api/v1/canvas/workflow");
+  assert.deepEqual(apply.calls[0].body, {
+    projectId: "proj-1",
+    source: { workflow: "demo", steps: [{ id: "a", title: "A" }] },
+    label: "改成一步",
+  });
+  assert.equal(apply.calls[0].authorization, `Bearer ${VALID_KEY}`, "落圖呼叫同樣原樣透傳 Authorization");
+});
+
+test("workflow_write：DSL 非法時上游 422 原樣透傳 errors（isError，畫布不動）", async () => {
+  const dispatcher: McpDispatcher = async (request) => {
+    const body = (request.body ?? {}) as { source?: unknown };
+    const result = compileWorkflow(body.source as never, { nodes: [], connections: [] });
+    return {
+      status: result.ok ? 200 : 422,
+      contentType: "application/json",
+      text: JSON.stringify(
+        result.ok
+          ? { success: true, ops: result.ops, summary: result.summary }
+          : { success: false, code: "workflow_dsl_invalid", errors: result.errors },
+      ),
+    };
+  };
+  // 空 steps 必然校驗失敗（steps 1..24）
+  const result = await callTool("workflow_write", { source: { workflow: "demo", steps: [] } }, ctx(dispatcher));
+  assert.equal(result.isError, true, "非法 DSL 必須標成工具錯誤");
+  assert.match(result.content[0].text, /HTTP 422/);
+  assert.match(result.content[0].text, /workflow_dsl_invalid/);
 });
 
 test("上游失敗：4xx/5xx 回 isError 並附上游原文，不是 JSON-RPC 錯誤", async () => {
@@ -494,6 +735,25 @@ async function callMcp(body: unknown, options: { auth?: string | null; raw?: str
 
 function rpcBody(text: string): { result?: Record<string, unknown>; error?: { code: number; message: string } } {
   return JSON.parse(text) as { result?: Record<string, unknown>; error?: { code: number; message: string } };
+}
+
+/**
+ * 攔截全域 fetch，記錄真發出的 URL 與 init（**真行為斷言**，不是源碼字串掃描）。
+ * route.ts 的 dispatcher 用預設 fetchImpl＝呼叫當下的全域 fetch，故在此換掉即可。
+ */
+function stubFetch(): { calls: Array<{ url: string; init: RequestInit }>; restore: () => void } {
+  const original = globalThis.fetch;
+  const calls: Array<{ url: string; init: RequestInit }> = [];
+  globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    calls.push({ url: String(url), init: init ?? {} });
+    return new Response('{"ok":true}', { status: 200, headers: { "content-type": "application/json" } });
+  }) as unknown as typeof fetch;
+  return { calls, restore: () => { globalThis.fetch = original; } };
+}
+
+function clearDispatchEnv() {
+  delete process.env.MCP_DISPATCH_ORIGIN;
+  delete process.env.GENERATION_CONTROL_PLANE_PROXY_ORIGIN;
 }
 
 test.beforeEach(() => {
@@ -668,6 +928,94 @@ test("tools/call 正向對照：list_skills 經真 handler 回公開庫真子集
   assert.equal(data.total, registryIds.size);
   assert.equal(data.skills.length, 3);
   for (const skill of data.skills) assert.ok(registryIds.has(skill.id), `${skill.id} 不在公開庫`);
+});
+
+// ─────────────────────────────────────────── 5. 轉發 origin 拆分（2026-10-03 CF 403）
+
+test("轉發 origin：get_quota 走不掛 CF 的控制面 origin（真 fetch URL、Authorization 逐字透傳）", async () => {
+  clearDispatchEnv();
+  // 尾斜線刻意留著：驗 resolve 時的 trim/去尾斜線。
+  process.env.GENERATION_CONTROL_PLANE_PROXY_ORIGIN = "https://store.tinchak0207.xyz/";
+  const { calls, restore } = stubFetch();
+  try {
+    const response = await callMcp(
+      { jsonrpc: "2.0", id: 21, method: "tools/call", params: { name: "get_quota", arguments: {} } },
+      { auth: `Bearer ${VALID_KEY}` },
+    );
+    assert.equal(response.status, 200);
+    const payload = rpcBody(response.text).result as { isError?: boolean; content: Array<{ text: string }> };
+    assert.notEqual(payload.isError, true, payload.content[0].text);
+
+    assert.equal(calls.length, 1, "get_quota 應恰好轉發一次");
+    assert.equal(calls[0].url, "https://store.tinchak0207.xyz/image-control/api/v1/quota");
+    assert.equal(calls[0].init.method, "GET");
+    const headers = calls[0].init.headers as Record<string, string>;
+    assert.equal(headers.Authorization, `Bearer ${VALID_KEY}`, "Authorization 必須逐字透傳");
+    assert.ok(headers["Idempotency-Key"], "必須帶 MCP 冪等鍵");
+  } finally {
+    restore();
+    clearDispatchEnv();
+  }
+});
+
+test("轉發 origin：非控制面路徑（canvas_get_state）回落公開 origin", async () => {
+  clearDispatchEnv();
+  const { calls, restore } = stubFetch();
+  try {
+    const response = await callMcp(
+      { jsonrpc: "2.0", id: 22, method: "tools/call", params: { name: "canvas_get_state", arguments: { session_id: "s1" } } },
+      { auth: `Bearer ${VALID_KEY}` },
+    );
+    assert.equal(response.status, 200);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, "http://localhost/api/agent/biz/sessions/s1/canvas/state");
+  } finally {
+    restore();
+    clearDispatchEnv();
+  }
+});
+
+test("轉發 origin：MCP_DISPATCH_ORIGIN 覆寫一切（控制面路徑與回落路徑都改道）", async () => {
+  clearDispatchEnv();
+  process.env.MCP_DISPATCH_ORIGIN = "https://dispatch.example/";
+  process.env.GENERATION_CONTROL_PLANE_PROXY_ORIGIN = "https://store.tinchak0207.xyz";
+  const { calls, restore } = stubFetch();
+  try {
+    await callMcp(
+      { jsonrpc: "2.0", id: 23, method: "tools/call", params: { name: "get_quota", arguments: {} } },
+      { auth: `Bearer ${VALID_KEY}` },
+    );
+    await callMcp(
+      { jsonrpc: "2.0", id: 24, method: "tools/call", params: { name: "canvas_get_state", arguments: { session_id: "s1" } } },
+      { auth: `Bearer ${VALID_KEY}` },
+    );
+    assert.deepEqual(
+      calls.map((call) => call.url),
+      [
+        "https://dispatch.example/api/v1/quota",
+        "https://dispatch.example/api/agent/biz/sessions/s1/canvas/state",
+      ],
+    );
+  } finally {
+    restore();
+    clearDispatchEnv();
+  }
+});
+
+test("轉發 origin：未配置控制面 origin 時 get_quota 回落公開 origin（回歸保護）", async () => {
+  clearDispatchEnv();
+  const { calls, restore } = stubFetch();
+  try {
+    await callMcp(
+      { jsonrpc: "2.0", id: 25, method: "tools/call", params: { name: "get_quota", arguments: {} } },
+      { auth: `Bearer ${VALID_KEY}` },
+    );
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, "http://localhost/api/v1/quota");
+  } finally {
+    restore();
+    clearDispatchEnv();
+  }
 });
 
 test("GET 只回 405 + Allow: POST（本版無 SSE 通道）", async () => {

@@ -222,7 +222,7 @@ const EMPTY_FORM: SkillFormState = {
   tags: "",
 };
 
-const INPUT_CLASS =
+export const INPUT_CLASS =
   "w-full rounded-lg border border-input bg-black/5 px-2.5 py-1.5 text-ios-caption1 outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-ios-blue";
 
 /** 一行欄位：標籤在上、控件在下（標籤固定占位，hover/focus 不改尺寸）。 */

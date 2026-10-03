@@ -2,10 +2,12 @@
  * MCP 工具表與執行層——**只做轉發與投影，零業務、零計費**。
  *
  * 硬規則（改本檔前先讀，這是本檔存在的理由）：
- * 1. **不重寫任何業務**。10 條工具裡，8 條是「把參數原樣交給既有 `/api/v1/**` 端點」
- *    （帳本、冪等、配額預檢、退款、上游路由全在那些端點裡），2 條是對既有 skill 註冊表
- *    的唯讀投影。本檔**沒有**任何金額、模型白名單、配額或扣費判斷。
- * 2. **鑑權逐字複用**。工具自身不驗 key；呼叫者的 `Authorization` 頭原樣透傳給 `/v1`，
+ * 1. **不重寫任何業務**。生成/查詢類工具「把參數原樣交給既有 `/api/v1/**` 端點」
+ *    （帳本、冪等、配額預檢、退款、上游路由全在那些端點裡）；skill 族是對既有註冊表的
+ *    唯讀投影；工作流族（`workflow_write/history/read/rollback`＋`canvas_get_state`）
+ *    是既有編譯器/畫布端點的薄轉發（讀面只挑欄位投影）。本檔**沒有**任何金額、
+ *    模型白名單、配額、扣費或編譯/回滾語義的判斷。
+ * 2. **鑑權逐字複用**。工具自身不驗 key；呼叫者的 `Authorization` 頭原樣透傳，
  *    由同一支 `authenticateBizApiKey` 決定身分與計費主體（見 `src/app/api/mcp/route.ts`）。
  * 3. **私有 skill 永不外露**。只用 registry 的公開族函式（`listPublicSkills` 等），
  *    絕不調 `listMySkills` / `getMySkillById`，也不接受任何 owner 參數。
@@ -174,12 +176,22 @@ const DISPATCH_TIMEOUT_MS = 280_000;
  * - 呼叫者的 `Authorization` 逐字透傳 ⇒ 計費主體與配額判斷與 `/v1` 完全一致。
  *
  * 不變式：任何 log / 錯誤訊息都不得包含 `authorization` 的值（本函式只把它放進請求頭）。
+ *
+ * `origin` 兩種形態：
+ * - **字串**：站點 origin，URL = `origin（去尾斜線） + path`（既有行為，逐字不變）。
+ * - **函式**：`(path) => 完整絕對 URL`。route.ts 用它為**每個請求**挑轉發目標——
+ *   公開站點 origin（Cloudflare 前置）與不掛 CF 的控制面 origin 不是同一個
+ *   （見 `src/app/api/mcp/route.ts` 的 `resolveDispatchUrl`）。函式回傳值即最終 URL，
+ *   本函式不再拼一次 path。
  */
 export function createHttpDispatcher(
-  origin: string,
+  origin: string | ((path: string) => string),
   fetchImpl: typeof fetch = fetch,
 ): McpDispatcher {
-  const base = origin.replace(/\/+$/, "");
+  const urlFor =
+    typeof origin === "function"
+      ? origin
+      : (path: string) => `${origin.replace(/\/+$/, "")}${path}`;
   return async (request) => {
     const headers: Record<string, string> = {
       Accept: "application/json",
@@ -196,7 +208,7 @@ export function createHttpDispatcher(
       payload = JSON.stringify(request.body ?? {});
     }
 
-    const response = await fetchImpl(`${base}${request.path}`, {
+    const response = await fetchImpl(urlFor(request.path), {
       method: request.method,
       headers,
       body: payload,
@@ -290,6 +302,52 @@ async function runForward(
   const text = truncateToolText(response.text);
   if (response.status >= 200 && response.status < 300) return textResult(text);
   return textResult(`上游 ${spec.method} ${path} 回應 HTTP ${response.status}：\n${text}`, true);
+}
+
+/**
+ * 讀面轉發：錯誤語義與 `runForward` 逐字一致（上游非 2xx 回原文 isError），
+ * 差別只在成功時把上游 JSON **投影**出需要的欄位（只挑欄位/過濾，不重算、不改語義——
+ * 與 `runListSkills`/`runGetSkill` 同層）。投影或解析失敗一律回原文，絕不把上游回應弄丟。
+ */
+async function runForwardProjected(
+  spec: ForwardSpec,
+  toolName: string,
+  args: Record<string, unknown>,
+  ctx: McpToolContext,
+  project: (payload: unknown) => unknown,
+): Promise<McpToolCallResult> {
+  const path = typeof spec.path === "function" ? spec.path(args) : spec.path;
+  const response = await ctx.dispatcher({
+    method: spec.method,
+    path,
+    authorization: ctx.authorization,
+    traceId: ctx.traceId,
+    toolName,
+    body: spec.body ? spec.body(args) : undefined,
+  });
+
+  const text = truncateToolText(response.text);
+  if (response.status < 200 || response.status >= 300) {
+    return textResult(`上游 ${spec.method} ${path} 回應 HTTP ${response.status}：\n${text}`, true);
+  }
+  try {
+    return textResult(JSON.stringify(project(JSON.parse(response.text)), null, 2));
+  } catch {
+    return textResult(text);
+  }
+}
+
+/** 畫布快照端點（B 端 key 經 `/api/agent/biz` 代理到 agent 閘道）的站內路徑。 */
+function canvasStatePath(args: Record<string, unknown>): string {
+  const sessionId = pickString(args, "session_id") ?? "";
+  return `/api/agent/biz/sessions/${encodeURIComponent(sessionId)}/canvas/state`;
+}
+
+/** 從閘道快照回應挑出 `state`（快照本體）；非物件回空物件。 */
+function snapshotState(payload: unknown): Record<string, unknown> {
+  if (!isPlainObject(payload)) return {};
+  const state = (payload as { state?: unknown }).state;
+  return isPlainObject(state) ? state : {};
 }
 
 async function runListSkills(args: Record<string, unknown>): Promise<McpToolCallResult> {
@@ -563,6 +621,181 @@ function defineTools(): ToolDefinition[] {
         const path = kind === "image" ? `/api/v1/images/${id}/result` : kind === "tts" ? `/api/v1/tts/${id}` : `/api/v1/videos/${id}/result`;
         return runForward({ method: "GET", path }, "get_result", args, ctx);
       },
+    },
+    {
+      name: "list_canvas_projects",
+      title: "列出画布项目",
+      description: bilingual(
+        "列出本 API key 所属账号的畫布项目摘要（id／名称／创建与更新时间／节点数），按更新时间由新到旧。只回本密钥账号自己的项目，不回他人项目。拿到 project_id 后才能用 workflow_write 落图、用 workflow_rollback 回退——改画布产线前先调它找到目标项目。",
+        "List canvas projects owned by the current API key's account (id, title, timestamps, node count). Use the returned id as project_id for workflow_write / workflow_rollback.",
+      ),
+      inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      run: (args, ctx) =>
+        runForward({ method: "GET", path: "/api/v1/canvas/projects" }, "list_canvas_projects", args, ctx),
+    },
+    {
+      name: "canvas_get_state",
+      title: "读取画布快照",
+      description: bilingual(
+        "读取某个 agent 会话当前画布快照（节点/连线/选中/视口，以及画布产线的可逆声明 dsl 与节点版本索引 node_versions）。改动画布产线前先读它拿 session_id 对应的现状。会话无快照时上游回 has_state=false。",
+        "Read the current canvas snapshot (nodes/connections/dsl/node_versions) of an agent session.",
+      ),
+      inputSchema: {
+        type: "object",
+        properties: {
+          session_id: { type: "string", description: "agent 会话 id（画布由该会话持有）。" },
+        },
+        required: ["session_id"],
+        additionalProperties: false,
+      },
+      run: (args, ctx) => runForward({ method: "GET", path: (a) => canvasStatePath(a) }, "canvas_get_state", args, ctx),
+    },
+    {
+      name: "workflow_read",
+      title: "读取工作流声明",
+      description: bilingual(
+        "读取画布产线的可逆声明（dsl = 工作流 DSL 源码数组）与当前节点版本索引，供「像改代码一样改工作流」：读 dsl → 改 steps → 用 workflow_write 整份交回。只投影 dsl 与版本索引，不含节点坐标。要完整画布用 canvas_get_state。",
+        "Read the reversible workflow declarations (dsl) and node version index of an agent session's canvas.",
+      ),
+      inputSchema: {
+        type: "object",
+        properties: {
+          session_id: { type: "string", description: "agent 会话 id（画布由该会话持有）。" },
+        },
+        required: ["session_id"],
+        additionalProperties: false,
+      },
+      run: (args, ctx) =>
+        runForwardProjected(
+          { method: "GET", path: (a) => canvasStatePath(a) },
+          "workflow_read",
+          args,
+          ctx,
+          (payload) => {
+            const state = snapshotState(payload);
+            const p = isPlainObject(payload) ? (payload as Record<string, unknown>) : {};
+            return {
+              has_state: p.has_state === true,
+              updated_at: p.updated_at ?? null,
+              dsl: Array.isArray(state.dsl) ? state.dsl : [],
+              workflow_versions: Array.isArray(state.node_versions) ? state.node_versions : [],
+            };
+          },
+        ),
+    },
+    {
+      name: "workflow_history",
+      title: "读取工作流版本史",
+      description: bilingual(
+        "读取画布节点的版本史（node_versions：每节点的 version/created_at/reason/title）。给 node_id 只回该节点；拿 version 号去 workflow_rollback 回退。只回内容史（title+metadata），不含坐标。",
+        "Read per-node version history from an agent session's canvas; pass node_id to filter one node.",
+      ),
+      inputSchema: {
+        type: "object",
+        properties: {
+          session_id: { type: "string", description: "agent 会话 id（画布由该会话持有）。" },
+          node_id: { type: "string", description: "只回该节点的版本史；省略回全部节点。" },
+        },
+        required: ["session_id"],
+        additionalProperties: false,
+      },
+      run: (args, ctx) =>
+        runForwardProjected(
+          { method: "GET", path: (a) => canvasStatePath(a) },
+          "workflow_history",
+          args,
+          ctx,
+          (payload) => {
+            const state = snapshotState(payload);
+            const p = isPlainObject(payload) ? (payload as Record<string, unknown>) : {};
+            const all = Array.isArray(state.node_versions) ? state.node_versions : [];
+            const nodeId = pickString(args, "node_id");
+            const versions = nodeId
+              ? all.filter((entry) => isPlainObject(entry) && (entry as { node_id?: unknown }).node_id === nodeId)
+              : all;
+            return {
+              has_state: p.has_state === true,
+              node_id: nodeId ?? null,
+              workflow_versions: versions,
+            };
+          },
+        ),
+    },
+    {
+      name: "workflow_write",
+      title: "写入工作流声明",
+      description: bilingual(
+        "把整份工作流声明（DSL）编译成画布操作，落图与否看是否给了 project_id。用法：先 canvas_get_state / workflow_read 读 dsl，按需增删改 steps，整份 source 交回本工具。\n· 给了 project_id：编译后原子套用到该画布项目（B 端密钥所属账号的画布；跨账号的 project_id 找不到，画布不动）——这是外部 coding agent 端到端写产线的通道。\n· 没给 project_id：只编译，回 ops 与 summary（纯函数端点 /v1/workflow/compile）。\n校验失败一律回 workflow_dsl_invalid 与逐条 errors；同 id 同节点＝幂等更新（重放不重复建节点）。",
+        "Compile a full workflow declaration (DSL) into canvas ops. With project_id it applies the ops atomically to that canvas project (owned by the key's account); without it, compile-only.",
+      ),
+      inputSchema: {
+        type: "object",
+        properties: {
+          source: {
+            type: "object",
+            description:
+              "整份工作流声明：{ workflow, title?, steps: [{ id, title, kind?, prompt?, needs?, model?, size?, count?, gate?, tool?, meta? }] }（steps 1..24，从 dsl 读出后修改）。",
+          },
+          current: {
+            type: "object",
+            description: "画布当前真相 { nodes, connections }；省略＝用 project_id 项目的现况（推荐）或按空图编译。",
+          },
+          project_id: {
+            type: "string",
+            description: "画布项目 id（给了才真的套用到画布；项目必须属于本密钥账号）。",
+          },
+          dry_run: { type: "boolean", description: "true＝只编译回 ops 与 summary，不落图（给了 project_id 时可用）。" },
+          label: { type: "string", description: "给用户看的一句话操作意图，如「把分镜从 3 步扩到 5 步」。" },
+        },
+        required: ["source"],
+        additionalProperties: false,
+      },
+      run: (args, ctx) =>
+        runForward(
+          {
+            method: "POST",
+            // 帶 project_id → 落圖端點（編譯＋套用到 owner 畫布）；不帶 → 既有純編譯端點。
+            path: (a) => (pickString(a, "project_id") ? "/api/v1/canvas/workflow" : "/api/v1/workflow/compile"),
+            body: (a) => {
+              const projectId = pickString(a, "project_id");
+              return projectId
+                ? compact({ projectId, source: a.source, current: a.current, label: a.label, dry_run: a.dry_run })
+                : compact({ source: a.source, current: a.current, label: a.label });
+            },
+          },
+          "workflow_write",
+          args,
+          ctx,
+        ),
+    },
+    {
+      name: "workflow_rollback",
+      title: "回滚工作流节点",
+      description: bilingual(
+        "把画布某个节点的内容回滚到指定版本（先 workflow_history 查 version）。version 省略＝回上一版；只还原内容（title+metadata），不动坐标/尺寸；回滚本身也落一版（reason=revert），可再回滚回去。要改出新内容用 workflow_write。走 B 端密钥鉴权的画布回退端点：project_id 所属项目必须在本密钥账号名下（跨账号的 project_id 一律拒绝，画布不动）。",
+        "Roll a canvas node's content back to a version (or the previous one) via the B-key canvas revert endpoint; the project must belong to the key's account.",
+      ),
+      inputSchema: {
+        type: "object",
+        properties: {
+          node_id: { type: "string", description: "要回滚的节点 id（画布节点 id，如 wf-…）。" },
+          project_id: { type: "string", description: "画布项目 id（node 所属 project）。" },
+          version: { type: "integer", minimum: 1, description: "目标版本号；省略＝上一版。" },
+        },
+        required: ["node_id", "project_id"],
+        additionalProperties: false,
+      },
+      run: (args, ctx) =>
+        runForward(
+          {
+            method: "POST",
+            path: (a) => `/api/v1/canvas/nodes/${encodeURIComponent(pickString(a, "node_id") ?? "")}/revert`,
+            body: (a) => compact({ projectId: a.project_id, version: a.version }),
+          },
+          "workflow_rollback",
+          args,
+          ctx,
+        ),
     },
   ];
 }
