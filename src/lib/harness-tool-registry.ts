@@ -13,8 +13,10 @@
  * VPS 背書「可跑」，只表示「id 已定形、模板可以引用」。已知**未登記**（VPS 有、本檔無）：
  * character_card_list / character_card_save / director_manage_group / memory_recall /
  * search_web / subagent_status / subagent_stop / vision_analyze。
- * 另有族前綴未逐支登記：subagent_*（現 3 支：dispatch/status/stop）、
- * workflow_*（本檔已登 9 支，VPS 現場同 9 支）。補齊清單留給下一輪稽核，
+ * 另有族前綴未逐支登記：subagent_*（現 3 支：dispatch/status/stop）。
+ * workflow_*：2026-10-03 人機共筆三件（write/history/rollback）加入後本檔登 11 支；
+ * **誠實標注**：VPS 現場並未同步——2026-10-03 現場實測僅 8 支（無 write/history/rollback），
+ * 本檔登記的是「已定形可引用」，不是「現場可跑」。補齊清單留給下一輪稽核，
  * 不在此一次灌滿（登記面一旦摻水就失去判定價值）。
  *
  * 實裝判定（2026-08-31 源碼逐檔核對，非實彈調用）：
@@ -128,6 +130,11 @@ export const HARNESS_TOOL_ID_LIST = [
   //   管轄範圍=畫布工作流（world 1）；執行圖（world 2：模板 workflow_start/
   //   素材注入 workflow_add_node/update_node/film 成片）不在 DSL 管轄內，原工具原樣保留。
   "workflow_write",
+  // ↓ 2026-10-03 人機共筆收口（讀／改／回滾三件）：讀面＝canvas_get_state 回 dsl；
+  //   寫面＝workflow_write（上）；版本面＝workflow_history（讀版本史）＋
+  //   workflow_rollback（revert_node op 回退單節點內容）。前綴族現 11 支。
+  "workflow_history",
+  "workflow_rollback",
   "world_bible_extract",
   // ↓ 2026-08-31 片3 實裝（確定性排版/風格 6 工具：VPS .opencode/tools/ 落位 +
   //   lib/img-composite.ts + lib/imgops.py 共用 PIL 編排鏈（零生圖扣費，僅 VLM chat）+

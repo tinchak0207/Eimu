@@ -16,9 +16,9 @@
 
 | 角色 | 權威位置 | 說明 |
 |---|---|---|
-| 契約真源 | `src/lib/canvas/types.ts` 的 `CanvasAgentOp` | 8 op：`add_node`／`update_node`／`delete_nodes`／`connect_nodes`／`delete_connections`／`select_nodes`／`set_viewport`／`run_generation`；2026-09-16（G1）加第 9 個 `set_project_meta`（專案級欄位補丁，唯一能改 `CanvasProject` 頂層的 agent 入口） |
+| 契約真源 | `src/lib/canvas/types.ts` 的 `CanvasAgentOp` | 8 op：`add_node`／`update_node`／`delete_nodes`／`connect_nodes`／`delete_connections`／`select_nodes`／`set_viewport`／`run_generation`；2026-09-16（G1）加第 9 個 `set_project_meta`（專案級欄位補丁，唯一能改 `CanvasProject` 頂層的 agent 入口）；2026-10-03 加第 10 個 `revert_node`（節點版本回退＝人機共筆回滾面，執行端＝adapter agent_ops → reducer 既有 `revert_node`；閘道白名單另在 `deploy-staging/gateway/canvas-op-types.ts`） |
 | 執行語義 | `src/lib/canvas/reducer.ts`、`src/lib/canvas/layout.ts` | **執行語義全在前端 reducer**（types.ts 註記）；`layout.ts` 另負責節點／metadata 的白名單清洗 |
-| AI 的筆 | `src/lib/workflow-dsl/schema.ts` → `compile.ts` → `decompile.ts` | 暴君裁定 2026-09-02：**AI 不直接吐 `CanvasAgentOp`**，只吐 `WorkflowDslSource`，由 `compile.ts` 確定性編譯成 8-op；`decompile.ts` 支援回讀（round-trip 冪等） |
+| AI 的筆 | `src/lib/workflow-dsl/schema.ts` → `compile.ts` → `decompile.ts` | 暴君裁定 2026-09-02：**AI 不直接吐 `CanvasAgentOp`**，只吐 `WorkflowDslSource`，由 `compile.ts` 確定性編譯成 op；`decompile.ts` 支援回讀（round-trip 冪等）。**2026-10-03 讀改回滾三件接通**：讀面＝前端 `src/hooks/canvas/canvas-agent-snapshot.ts` 從全量 state 反推 `dsl`＋`node_versions` 塞快照（gateway `canvas-flow.compactCanvasState`／`canvas-state-summary.buildCanvasReceipt` 透傳）；寫面＝harness `deploy-staging/opencode-runtime/tools/workflow_write.ts`（站點 `/v1/workflow/compile` → `canvas_apply_ops` 通道）；回滾面＝`workflow_history`＋`workflow_rollback`（`revert_node` op） |
 | agent 入場 | gateway 工具 `canvas_apply_ops` → SSE `canvas.ops` → `src/hooks/use-canvas-chat.ts` 的待確認佇列（`canvas-agent-ops-queue.ts`）→ reducer | 人可先審再執行；結果回報 gateway 讓工具調用拿到明確結果而非超時 |
 | 失敗語義 | `compile.ts` 的教學式報錯、環路整份拒絕、`layout.ts` 逐欄白名單 | 非法值**省略該鍵**（＝不動該欄），不寫預設值冒充用戶設定 |
 

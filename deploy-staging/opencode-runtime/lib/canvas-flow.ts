@@ -37,6 +37,14 @@ export interface CompactCanvasState {
   connections: unknown[]
   selected_node_ids: unknown[]
   viewport: unknown
+  /**
+   * 人機共筆讀面（2026-10-03）：前端從**全量** reducer state 反推的
+   * `WorkflowDslSource[]`（圖＝聲明的可逆表達）。agent 靠它「像改代碼一樣」讀回自己
+   * 鋪的產線；本層只透傳、不重算（重算會用到被壓縮掉的 workflow_ns/stepId）。
+   */
+  dsl?: unknown[]
+  /** 節點版本索引（node_id/title/versions[]）：agent 讀版本並經 revert_node 回退。 */
+  node_versions?: unknown[]
 }
 
 /** 壓縮快照：每節點只留 id/type/title/position/width/height/metadata 摘要。 */
@@ -65,6 +73,10 @@ export function compactCanvasState(state: unknown): CompactCanvasState {
         ? (s.selected_node_ids as unknown[])
         : [],
     viewport: s.viewport ?? null,
+    // 讀面透傳（2026-10-03）：dsl/node_versions 原樣帶過（不截斷——它們已是緊湊形態，
+    // dsl 是 agent 改圖的唯一輸入，截斷＝把可逆聲明變殘檔）。
+    ...(Array.isArray(s.dsl) ? { dsl: s.dsl } : {}),
+    ...(Array.isArray(s.node_versions) ? { node_versions: s.node_versions } : {}),
   }
 }
 

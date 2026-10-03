@@ -104,17 +104,19 @@ test("persona 工具白名单 id 与 harness 真源行号逐一对账（源码�
   // 2026-09-28 行号整体位移（+10 档头诚实註記、world_bible_extract 再 +7 因新增 4 支
   // 影片工具）：这是**登记面自愿增行**造成的位移，不是 id 被搬走；数值按现场重测更新，
   // 判定语义（id 在登记表里的位置 = 防重排/防幻影）不变。
+  // 2026-10-03：人机共笔三件（workflow_write/history/rollback）登记 + 档头註記更新，
+  // 再次自愿增行 → 全表 +2（world_bible_extract 另 +6，因新 id 排在它之前）。同样按现场重测。
   const lines = readFileSync(nodePath.resolve(process.cwd(), "src/lib/harness-tool-registry.ts"), "utf8").split("\n");
   const lineOf = (id: string): number =>
     lines.findIndex((l) => l.includes(`"${id}"`)) + 1;
   const expected: Record<string, number> = {
-    script_scene_parse: 96,
-    story_sequence_consistency: 97,
-    storyboard_qc_17: 98,
-    canvas_apply_ops: 47,
-    doc_struct: 79,
-    world_bible_extract: 131,
-    image_quote: 86,
+    script_scene_parse: 98,
+    story_sequence_consistency: 99,
+    storyboard_qc_17: 100,
+    canvas_apply_ops: 49,
+    doc_struct: 81,
+    world_bible_extract: 138,
+    image_quote: 88,
   };
   for (const [id, line] of Object.entries(expected)) {
     assert.ok(

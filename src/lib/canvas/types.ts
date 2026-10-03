@@ -612,7 +612,15 @@ export type CanvasAgentOp =
    * （PRD 全鏈定義「agent 調用 canvas_apply_ops 寫入 episode 節點成功」的缺口）。
    * 執行端 = hook 層 `setProjectMeta`；載荷清洗 = `normalizeProjectMetaPatch`。
    */
-  | { type: "set_project_meta"; patch: CanvasProjectMetaPatch };
+  | { type: "set_project_meta"; patch: CanvasProjectMetaPatch }
+  /**
+   * 節點版本回退（2026-10-03，人機共筆「版本回退」落地）：把該節點內容還原到指定版
+   * （`version` 省略＝回上一版）。語義完全復用 reducer 的 `revert_node`（`applyNodeVersion`
+   * 只還原 title+metadata，座標/尺寸不動；回退本身也 append 一版 reason="revert"，可再被回退）。
+   * 與 `update_node` 的分工：update_node 寫新值；本 op 回到舊值——版本史住在畫布端，
+   * agent 不必先把舊 metadata 抄進上下文。執行端＝adapter 的 agent_ops 分派（同一次 dispatch）。
+   */
+  | { type: "revert_node"; nodeId: string; version?: number };
 
 export interface CanvasAgentOpsEvent {
   request_id: string;

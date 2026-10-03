@@ -380,6 +380,12 @@ export function canvasReducer(state: CanvasReducerState, action: CanvasAction): 
             // viewport）——由 hook 層 applyAgentOps 呼叫 setProjectMeta 執行。
             // 這裡顯式列出而非落 default：新增 op 時若誤以為 reducer 會處理，行為會靜默消失。
             break;
+          case "revert_node":
+            // 版本回退（2026-10-03）：直接復用 reducer 既有回退語義（只還原 title+metadata，
+            // 座標/尺寸不動；回退本身 append 一版 reason="revert"）。agent 讀 node_versions
+            // 索引後指名版本即可，不必把舊 metadata 抄進上下文。
+            next = revertCanvasNodeToVersion(next, op.nodeId, op.version);
+            break;
           default:
             // select_nodes / set_viewport / run_generation 不是畫布結構，hook 層處理。
             break;

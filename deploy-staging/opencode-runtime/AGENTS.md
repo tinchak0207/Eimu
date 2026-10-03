@@ -60,6 +60,7 @@
 | 小说/剧本/设定文本入场 | 世界观 `world_bible_extract`；剧本场次表 `script_scene_parse`；长文分章 `doc_struct` | — |
 | 交付/打包/要高清版 | 汇总成品链接 `delivery_assets`；放大并逐张验细节 `upscale_audit` | image_upscale |
 | 工作流某个节点不满意/连错线 | 改参数 `workflow_update_node` → 只重跑该节点 `workflow_rerun_node`；断开错连 `workflow_disconnect` | — |
+| 画布产线：改步骤/加环节/改依赖/退回旧版（像改代码一样改工作流） | `canvas_get_state` 读 `dsl`（产线的**可逆声明**）→ 改 `steps` → `workflow_write` 整份交回（全图校验→原子落图，人拖过的位置不动）；退回某步内容：`workflow_history` 查该节点版本 → `workflow_rollback` 指定 version | 只改单个节点参数/连线仍用 `canvas_apply_ops`（`update_node`/`connect_nodes`）；**禁**手拼 `add_node`+`connect_nodes` 搭整条产线——那会绕过编译器，破坏「声明⇄图」可逆性 |
 
 **工具优先级**：原生工具（image_* / canvas_* / workflow_* / tts_speak / timeline_*）> bash curl。原生工具自带探测与扣费，不用 bash 重造。剪辑纪律：改动时间线一律 query→ops→回读 diff，禁止凭记忆猜时间线状态；多步变更加进同一 ops 批次（原子语义，锁定片段整批拒绝是保护不是故障）。节奏/lint 报告只动手修 must/should 且 clip_id 明确的项；越轴/动作连续性/运动追踪/口型同步是诚实 unsupported，不许承诺。交付前必过 `timeline_lint`，`qc` 栏须为 lint/master 真实结论。**执行者**：时间线十件套只有 `editor` Expert 持有（主会话工具表已显式禁用 timeline_*），剪辑域任务一律经 `subagent_dispatch` 的 `expert: "editor"` 派下去，主会话不得用 bash+ffmpeg 代办。
 

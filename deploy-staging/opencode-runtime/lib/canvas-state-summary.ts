@@ -69,10 +69,16 @@ export function buildCanvasReceipt(
     const node = nodes.find((n) => n?.id === opts.nodeId)
     if (!node) return { found: false, node_id: opts.nodeId, hint: "node not found；用不帶 node_id 的 canvas_get_state 看節點清單" }
     const compact = compactCanvasState({ nodes: [node] }).nodes[0]
+    const versionsEntry = (Array.isArray(s.node_versions) ? s.node_versions : []).find(
+      (e: any) => e?.node_id === opts.nodeId,
+    )
     return {
       node: compact,
       upstream: conns.filter((c) => c?.to === opts.nodeId || c?.target === opts.nodeId).map((c) => c.from ?? c.source),
       downstream: conns.filter((c) => c?.from === opts.nodeId || c?.source === opts.nodeId).map((c) => c.to ?? c.target),
+      // 版本史（人機共筆回滾面，2026-10-03）：單點查詢時附上該節點的版本清單，agent 可直接
+      // 指定 version 走 workflow_rollback；不帶 metadata（回退由畫布端還原，agent 不必抄）。
+      ...(versionsEntry ? { versions: versionsEntry.versions } : {}),
     }
   }
   const byType: Record<string, number> = {}
@@ -100,7 +106,11 @@ export function buildCanvasReceipt(
     selected_node_ids: selected,
     viewport: s.viewport ?? null,
     ...(Number.isFinite(x0) ? { bounds: { min_x: Math.round(x0), min_y: Math.round(y0), max_x: Math.round(x1), max_y: Math.round(y1) } } : {}),
+    // 人機共筆讀面（2026-10-03）：dsl＝agent 讀回的可逆聲明（原樣，是改圖的唯一輸入）；
+    // workflow_versions＝節點版本索引（回退面）。兩者缺席＝畫布上還沒有可編譯的產線/版本。
+    ...(Array.isArray(s.dsl) ? { dsl: s.dsl } : {}),
+    ...(Array.isArray(s.node_versions) ? { workflow_versions: s.node_versions } : {}),
     nodes: nodes.map(summarizeCanvasNode),
-    hint: "摘要視圖：連線只回數量、content/metadata 已截短（失敗資訊完整）。單點完整資料（含位置/尺寸）+上下游用 node_id；bounds 為全部節點包圍盒，擺放新節點用；全量用 view=full（很大會被截斷，落盤檔請用 read 按 offset/limit 讀）。",
+    hint: "摘要視圖：連線只回數量、content/metadata 已截短（失敗資訊完整）。單點完整資料（含位置/尺寸/版本史）+上下游用 node_id；bounds 為全部節點包圍盒，擺放新節點用；全量用 view=full（很大會被截斷，落盤檔請用 read 按 offset/limit 讀）。dsl＝當前產線的可逆聲明：要改產線就讀它、改它、用 workflow_write 編譯回圖（不要手拼 ops）；workflow_versions 供 workflow_rollback 回退。",
   }
 }

@@ -15,12 +15,12 @@ import type { CanvasScriptType } from "@/lib/canvas/project-narration";
 import type { CharacterCard } from "@/lib/character-cards";
 import {
   SAVE_DEBOUNCE_MS,
-  compactMetadataForAgent,
   toProjectSummaries,
   type CanvasBackgroundMode,
   type CanvasBudget,
   type CanvasProjectSummary,
 } from "./canvas-chat-types";
+import { buildAgentCanvasSnapshot } from "./canvas-agent-snapshot";
 
 /** 純視口變動的靜默存檔防抖（比內容存檔長：連續平移/縮放只落最後一筆）。 */
 const VIEWPORT_SAVE_DEBOUNCE_MS = 1500;
@@ -192,42 +192,26 @@ export function useCanvasProjectSync(params: UseCanvasProjectSyncParams) {
   useEffect(() => {
     if (!sessionId) return;
     const t = window.setTimeout(() => {
-      void postCanvasSnapshot(sessionId, {
-        nodes: canvas.nodes.map((n) => ({
-          id: n.id,
-          type: String(n.type),
-          title: n.title,
-          position: n.position,
-          width: n.width,
-          height: n.height,
-          ...(compactMetadataForAgent(n.metadata) ? { metadata: compactMetadataForAgent(n.metadata) } : {}),
-        })),
-        connections: canvas.connections,
-        selectedNodeIds: selectedNodeId ? [selectedNodeId] : [],
-        viewport,
-        // 作品/劇集三欄的上行（2026-09-15 刀 1）：這是 restoreAgentSnapshot 唯一資料源，
-        // 不帶則「回舊會話」時三欄恆為空（= 白名單漏一處 → 刷新後空殼的同型病灶）。
-        // 刻意只帶 projectType/currentStep 兩個純量指針，**不帶 episodes**：
-        //   1. 劇集數上限 200、script 是長文，會頂爆快照 512KB 上限（route 回 413）；
-        //   2. 快照上行是壓縮態（見 director SVG 前例），若帶去頭去尾的 episodes，
-        //      還原後 debounce 存檔會把截斷版寫回 Blob —— 靜默吃掉劇本原文。
-        //   episodes 的持久化走 Blob 正規路徑（saveCanvasProject / openSavedCanvas）。
-        ...(projectType ? { projectType } : {}),
-        ...(currentStep !== undefined ? { currentStep } : {}),
-        // P2：鎖定卡進快照（agent 的 canvas_get_state 讀這份）。
-        character_cards: activeCharacterCards.map((c) => ({
-          id: c.id,
-          kind: c.kind,
-          name: c.name,
-          prompt: c.prompt,
-          ...(c.negativePrompt ? { negative_prompt: c.negativePrompt } : {}),
-          reference_count: c.references.length,
-          ...(c.loraIds?.length ? { lora_ids: c.loraIds } : {}),
-        })),
-      });
+      // 上行載荷唯一建構子（canvas-agent-snapshot）：節點壓縮白名單 ＋ `dsl`（全量 state
+      // 反推的可逆聲明）＋ `node_versions`（版本索引）。作品/劇集三欄只帶純量指針、
+      // **不帶 episodes**：劇集上限 200、script 長文會頂爆 512KB（route 413），且截斷版
+      // 回寫 Blob 會靜默吃掉劇本原文——episodes 走 saveCanvasProject 正規路徑。
+      void postCanvasSnapshot(
+        sessionId,
+        buildAgentCanvasSnapshot({
+          nodes: canvas.nodes,
+          connections: canvas.connections,
+          selectedNodeIds: selectedNodeId ? [selectedNodeId] : [],
+          viewport,
+          ...(projectType ? { projectType } : {}),
+          ...(currentStep !== undefined ? { currentStep } : {}),
+          characterCards: activeCharacterCards,
+          ...(canvas.nodeVersions ? { nodeVersions: canvas.nodeVersions } : {}),
+        }),
+      );
     }, 3000);
     return () => window.clearTimeout(t);
-  }, [sessionId, canvas.nodes, canvas.connections, selectedNodeId, viewport, activeCharacterCards, projectType, currentStep]);
+  }, [sessionId, canvas.nodes, canvas.connections, canvas.nodeVersions, selectedNodeId, viewport, activeCharacterCards, projectType, currentStep]);
 
   return { projectIdRef, createdAtRef, saveTimerRef, everHadNodesRef, buildProject };
 }

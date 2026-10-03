@@ -29,18 +29,9 @@ import { emitToSession } from "./sse-core.ts"
 const CANVAS_STATE_MAX_BYTES = 512 * 1024
 const CANVAS_STATE_TTL_MS = 24 * 60 * 60 * 1000 // 2026-08-29：30min → 24h（保存線對齊「至少 24h」；重啟另有 DB 鏡像回灌）
 export const CANVAS_OPS_TIMEOUT_MS = Number.parseInt(process.env.CANVAS_OPS_TIMEOUT_MS || "30000", 10) || 30_000
-const CANVAS_OPS_MAX = 100
-const CANVAS_OP_TYPES = new Set([
-  "add_node",
-  "update_node",
-  "delete_nodes",
-  "connect_nodes",
-  "delete_connections",
-  "select_nodes",
-  "set_viewport",
-  "run_generation",
-  "set_project_meta",
-])
+// op 型別白名單抽到零依賴模組（2026-10-03）：本檔 import 鏈會拉起 sessions-core，
+// 白名單自身要能獨立跑真行為斷言。此處 re-export 保持既有呼叫端不變。
+export { CANVAS_OP_TYPES, validateCanvasOps } from "./canvas-op-types.ts"
 
 export interface CanvasSnapshotEntry {
   state: unknown
@@ -245,18 +236,6 @@ interface PendingCanvasOps {
 }
 
 const pendingCanvasOps = new Map<string, PendingCanvasOps>()
-
-export function validateCanvasOps(ops: unknown): { ok: true; ops: unknown[] } | { ok: false; message: string } {
-  if (!Array.isArray(ops) || ops.length === 0) return { ok: false, message: "ops must be a non-empty array" }
-  if (ops.length > CANVAS_OPS_MAX) return { ok: false, message: `too many ops (max ${CANVAS_OPS_MAX})` }
-  for (const op of ops) {
-    const type = op && typeof op === "object" ? (op as { type?: unknown }).type : undefined
-    if (typeof type !== "string" || !CANVAS_OP_TYPES.has(type)) {
-      return { ok: false, message: `invalid op type: ${String(type)}` }
-    }
-  }
-  return { ok: true, ops }
-}
 
 // ---- 用戶批准憑據＋偏離模板 token（2026-10-02）----
 // 模型自宣告 deviate_from_template=true 等於沒守；改成網關簽發 token：只有「本 session 內

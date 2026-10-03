@@ -451,3 +451,22 @@ test("agent_ops：select_nodes 等非結構 op 不改 state", () => {
   });
   assert.equal(s.nodes, before.nodes);
 });
+
+test("agent_ops：revert_node 把內容回到指定版（座標不動、回退本身 append 一版）", () => {
+  const state: CanvasReducerState = {
+    units: [],
+    nodes: [node("a", { title: "第二版", position: { x: 99, y: 88 }, metadata: { content: "new" } })],
+    connections: [],
+    nodeVersions: [
+      { version: 1, nodeId: "a", createdAt: "2026-10-03T00:00:00.000Z", reason: "created", title: "第一版", metadata: { content: "old" } },
+    ],
+  };
+  const s = canvasReducer(state, { type: "agent_ops", ops: [{ type: "revert_node", nodeId: "a", version: 1 }] });
+  const a = s.nodes.find((n) => n.id === "a");
+  assert.equal(a?.title, "第一版");
+  assert.equal((a?.metadata as Record<string, unknown> | undefined)?.content, "old");
+  assert.deepEqual(a?.position, { x: 99, y: 88 }, "版本＝內容歷史，座標不動");
+  const versions = s.nodeVersions ?? [];
+  assert.equal(versions.length, 2, "回退本身也落一版");
+  assert.equal(versions[versions.length - 1].reason, "revert");
+});
