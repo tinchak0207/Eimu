@@ -45,6 +45,17 @@ export function downloadExtension(src: string): string {
  */
 export const IMAGE_FETCH_TIMEOUT_MS = 30_000;
 
+/**
+ * 剪贴板 PNG 重编码的硬上限（毫秒）。
+ *
+ * `canvas.toBlob` 是回调式 API，且没有任何事件或错误通道：回调不触发就永久 pending
+ * （不是 reject、不是 resolve）。非 PNG 图要进剪贴板必须先重绘成 PNG，一旦 toBlob 卡住，
+ * `copyToClipboard` 的 ClipboardItem promise 永远不 settle，按钮永久转圈。画一帧再 PNG
+ * 编码是纯 CPU 工作，正常毫秒级；上限对齐 video-frames 的取帧/定位档（10s），既远超任何
+ * 合理耗时又短到让卡死可观测。逾时具名 reject 后由调用端（剪贴板失败 → 自动退回下载）落地。
+ */
+export const PNG_REENCODE_TIMEOUT_MS = 10_000;
+
 export const imageHelpers = {
   base64ToBlob: (base64Data: string, type = "image/png"): Blob => {
     const byteString = atob(base64Data);
@@ -111,7 +122,8 @@ export const imageHelpers = {
 
   // ClipboardItem 的最大兼容 MIME 是 image/png：Safari 只收 PNG，Chrome 也仅
   // 支持少数几种。非 PNG blob 先经 canvas 重绘转 PNG 再进剪贴板。
-  reencodeAsPng: (blob: Blob): Promise<Blob> => {
+  // timeoutMs 仅供测试注入缩短值；生产走 PNG_REENCODE_TIMEOUT_MS。
+  reencodeAsPng: (blob: Blob, timeoutMs: number = PNG_REENCODE_TIMEOUT_MS): Promise<Blob> => {
     return new Promise((resolve, reject) => {
       const objectUrl = URL.createObjectURL(blob);
       const image = new Image();
@@ -126,7 +138,18 @@ export const imageHelpers = {
             return;
           }
           context.drawImage(image, 0, 0);
+          // toBlob 无错误通道：回调不触发就永久 pending。形态对齐 video-frames.captureFrame
+          // （settled 标志 → timer 具名 reject → clearTimeout），逾时不再永久卡死。
+          let settled = false;
+          const timer = setTimeout(() => {
+            if (settled) return;
+            settled = true;
+            reject(new Error("图片转 PNG 超时，请重试。"));
+          }, timeoutMs);
           canvas.toBlob((pngBlob) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
             if (pngBlob) resolve(pngBlob);
             else reject(new Error("PNG re-encode failed"));
           }, "image/png");

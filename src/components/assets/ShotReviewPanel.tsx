@@ -28,6 +28,7 @@ import { normalizeStoryboardShot } from "@/lib/storyboard-contract";
 import type { CanvasConnection, CanvasNode } from "@/lib/canvas/types";
 import { imageUrlOf } from "@/components/canvas/embed/embed-helpers";
 import { exportShotsZip } from "@/lib/export-zip";
+import { IMAGE_FETCH_TIMEOUT_MS, imageHelpers } from "@/lib/image-helpers";
 import { csvCell, triggerDownload } from "@/lib/history-export";
 import { cn } from "@/lib/utils";
 
@@ -199,10 +200,17 @@ export function shotZipPlan(shots: readonly ReviewShot[]): { fileName: string; u
   );
 }
 
-/** 取圖成 blob；失敗回 null（跳過並計數，同 `exportHistoryZip` 語義）。 */
-async function shotBlob(url: string): Promise<Blob | null> {
+/**
+ * 取图成 blob；失败回 null（跳过并计数，同 `exportHistoryZip` 语义）。
+ *
+ * 2026-10-04（禁造轮子＋永久 pending 族）：不再自拼 `fetch(url)`——那条链缺
+ * ?dl=1/no-store 的 CORS 修复、也没有 timeout，上游半开连线会让整包永久 pending。
+ * 直接复用 `imageHelpers.fetchImageResponse`（单一真源：换缓存键＋no-store＋
+ * AbortController 上限）。失败/逾时照旧吞成 null → 该张 skipped，不炸整包。
+ */
+async function shotBlob(url: string, timeoutMs: number): Promise<Blob | null> {
   try {
-    const response = await fetch(url);
+    const response = await imageHelpers.fetchImageResponse(url, timeoutMs);
     if (!response.ok) return null;
     return await response.blob();
   } catch {
@@ -214,12 +222,14 @@ async function shotBlob(url: string): Promise<Blob | null> {
 export async function exportShotReviewZip(
   shots: readonly ReviewShot[],
   at: Date = new Date(),
+  // 仅由测试注入缩短值（模拟逾时）；生产走 fetchImageResponse 的默认上限。
+  fetchTimeoutMs: number = IMAGE_FETCH_TIMEOUT_MS,
 ): Promise<{ exported: number; skipped: number }> {
   const plan = shotZipPlan(shots);
   if (!plan.length) return { exported: 0, skipped: 0 };
   const fetched = await Promise.all(
     plan.map(async (item) => {
-      const blob = await shotBlob(item.url);
+      const blob = await shotBlob(item.url, fetchTimeoutMs);
       return blob ? { name: item.fileName, blob } : null;
     }),
   );

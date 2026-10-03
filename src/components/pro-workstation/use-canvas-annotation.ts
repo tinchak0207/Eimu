@@ -11,6 +11,49 @@ import {
   useEventCallback,
 } from "./workstation-constants";
 
+/**
+ * 标注图层导出成 PNG 的硬上限（毫秒）。
+ *
+ * `canvas.toBlob` 是回调式 API、没有任何事件或错误通道：回调不触发就永久 pending。
+ * `exportAnnotationToReference` 依靠它把标注合成成参考图，一旦 toBlob 卡住，用户点了
+ * 「设为参考图」就永远没有下文（也没有错误可 catch）。形态对齐 `video-frames.captureFrame`：
+ * settled 标志 + timer 具名 reject + clearTimeout。上限取 10s，与取帧/视频定位同档。
+ */
+export const ANNOTATION_EXPORT_TIMEOUT_MS = 10_000;
+
+/**
+ * 把 canvas 导出成 PNG blob；toBlob 永不回调时隔 `timeoutMs` 具名 reject（不留永久 pending）。
+ * 导出以便 node:test 注入缩短值复现「toBlob 永不回调」。逾时/空白由调用端 catch 落成
+ * 「标注保存失败，请重试。」
+ */
+export function canvasToBlob(
+  canvas: HTMLCanvasElement,
+  timeoutMs: number = ANNOTATION_EXPORT_TIMEOUT_MS,
+): Promise<Blob> {
+  return new Promise<Blob>((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new Error("导出标注图超时，请重试。"));
+    }, timeoutMs);
+    try {
+      canvas.toBlob((blob) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (blob) resolve(blob);
+        else reject(new Error("标注图导出失败：空白图像。"));
+      }, "image/png");
+    } catch (error) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(error);
+    }
+  });
+}
+
 export interface CanvasAnnotationApi {
   /** 原图模式的容器 ref：滚轮缩放要拿到真实 DOM 才能绑非 passive 监听。 */
   canvasViewportRef: React.RefObject<HTMLDivElement | null>;
@@ -340,15 +383,6 @@ export function useCanvasAnnotation(options: {
     setHasAnnotation(false);
     setCanvasNotice("已清空标注。");
   };
-
-  const canvasToBlob = (canvas: HTMLCanvasElement) =>
-    new Promise<Blob>((resolve, reject) => {
-      try {
-        canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("empty blob"))), "image/png");
-      } catch (error) {
-        reject(error);
-      }
-    });
 
   const exportAnnotationToReference = async () => {
     const canvas = annotationCanvasRef.current;

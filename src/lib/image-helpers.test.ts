@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   IMAGE_FETCH_TIMEOUT_MS,
+  PNG_REENCODE_TIMEOUT_MS,
   downloadExtension,
   imageHelpers,
   mediaExtensionFromUrl,
@@ -131,4 +132,70 @@ test("fetchImageResponse：非逾时的网络失败原样透传（不吞成逾�
 test("IMAGE_FETCH_TIMEOUT_MS 是秒级上限（单张图不该等太久，也不短到误杀慢网）", () => {
   assert.ok(IMAGE_FETCH_TIMEOUT_MS >= 10_000, "上限不得短于 10 秒");
   assert.ok(IMAGE_FETCH_TIMEOUT_MS <= 60_000, "上限不得长于 60 秒");
+});
+
+// 2026-10-04「永久 pending」族（同 captureFrame 形态）：reencodeAsPng 的 canvas.toBlob
+// 无事件/错误通道，回调不触发就永久 pending → copyToClipboard 永不 settle。以下先用
+// 窗口内 settle 逼出「未 settle」红，再看 timeout 具名 reject。
+function stubBrowserForReencode(): {
+  canvas: { toBlob: (...args: unknown[]) => void };
+  restore: () => void;
+} {
+  const globals = globalThis as unknown as Record<string, unknown>;
+  const saved = {
+    Image: globals.Image,
+    document: globals.document,
+    create: URL.createObjectURL,
+    revoke: URL.revokeObjectURL,
+  };
+  globals.Image = class {
+    naturalWidth = 4;
+    naturalHeight = 4;
+    onload: (() => void) | null = null;
+    onerror: ((event: unknown) => void) | null = null;
+    set src(_value: string) {
+      this.onload?.();
+    }
+  };
+  // toBlob 故意不回调：复现「回调永不触发」。
+  const canvas = { toBlob: () => {} };
+  globals.document = {
+    createElement: () => ({ width: 0, height: 0, getContext: () => ({ drawImage() {} }), toBlob: canvas.toBlob }),
+  };
+  URL.createObjectURL = (() => "blob:stub") as typeof URL.createObjectURL;
+  URL.revokeObjectURL = (() => {}) as typeof URL.revokeObjectURL;
+  return {
+    canvas,
+    restore: () => {
+      if (saved.Image === undefined) delete globals.Image;
+      else globals.Image = saved.Image;
+      if (saved.document === undefined) delete globals.document;
+      else globals.document = saved.document;
+      URL.createObjectURL = saved.create;
+      URL.revokeObjectURL = saved.revoke;
+    },
+  };
+}
+
+test("reencodeAsPng：canvas.toBlob 永不回调 → timeout 落人话错误（限时内 settle，不永久 pending）", async () => {
+  const stub = stubBrowserForReencode();
+  try {
+    const started = Date.now();
+    await assert.rejects(
+      settlesWithin(imageHelpers.reencodeAsPng(new Blob(["x"], { type: "image/jpeg" }), 40), 400),
+      (err: unknown) => {
+        assert.ok(err instanceof Error);
+        assert.equal((err as Error).message, "图片转 PNG 超时，请重试。");
+        return true;
+      },
+    );
+    assert.ok(Date.now() - started < 400, "逾时必须限时生效");
+  } finally {
+    stub.restore();
+  }
+});
+
+test("PNG_REENCODE_TIMEOUT_MS 是秒级上限（不长到掩盖卡死，也不短到误杀）", () => {
+  assert.ok(PNG_REENCODE_TIMEOUT_MS >= 5_000);
+  assert.ok(PNG_REENCODE_TIMEOUT_MS <= 30_000);
 });

@@ -1,6 +1,6 @@
 // desktop/scripts/e2e/browser-fallback.mjs
 //
-// 瀏覽器回落 E2E（A25 漸進增強全回落 / A21 無 File System Access API 回落）。
+// 瀏覽器回落 E2E（A25 漸進增強：無殼仍走衍生檔 / A21 無 File System Access API 回落）。
 // 用一般 Playwright Chromium（**無** window.eimuLocal、**無** Electron preload）打生產
 // https://eimu.dev。
 //
@@ -256,12 +256,16 @@ async function main() {
 
         const noExceptions = consoleErrors.length === 0 && pageErrors.length === 0;
         const eimuLocalUndefined = boot.eimuLocal === "undefined";
-        // 期望（任務口徑）：走舊行為 → 不出現本機衍生檔。實測為準。
-        const fallbackHonored = eimuLocalUndefined && !derivedSeen;
-        const pass = eimuLocalUndefined && noExceptions && derivedSeen === false;
+        // 正確口徑（2026-10-04 修正）：一般瀏覽器沒有 window.eimuLocal，仍**刻意**走
+        // canvas 抽幀的衍生檔路徑（漸進增強：有殼才用殼、沒殼仍在本機抽幀，不上傳原檔），
+        // 這不是「回落舊行為」。判準＝可用、無錯誤、不上傳原檔，而非要求「不出現衍生檔」。
+        const derivedPathUsable =
+          derivedSeen && attachments.length > 0 && attachments.every((e) => !e.failed);
+        const originalNotUploaded = !originalSeen;
+        const pass = eimuLocalUndefined && noExceptions && derivedPathUsable && originalNotUploaded;
         saveCase("A25", {
           status: pass ? "pass" : "fail",
-          title: "一般 Chromium（無 window.eimuLocal）打生產：全回落舊行為、無 JS 例外",
+          title: "一般 Chromium（無 window.eimuLocal）打生產：走 canvas 抽幀衍生檔（刻意設計）、無 JS 例外、不上傳原檔",
           observations: {
             eimuLocalType: boot.eimuLocal,
             composerPresent: boot.hasComposer,
@@ -273,20 +277,20 @@ async function main() {
             attachmentURLs: attachments.map((e) => e.url),
             derivedParts,
             derivedSeen,
+            derivedPathUsable,
             videoUploadRequests: videoUpload.length,
             videoUploadURLs: videoUpload.map((e) => e.url),
             originalUploadSeen: originalSeen,
-            fallbackHonoredExpectedOldBehavior: fallbackHonored,
+            originalNotUploaded,
             consoleErrors,
             pageErrors,
-            note: derivedSeen
-              ? "生產在一般瀏覽器仍走『本機抽取衍生檔』（W1 未以 window.eimuLocal 閘門）⇒ 與『漸進增強全回落』口徑不符"
-              : "未見衍生檔，符合舊行為回落",
+            note:
+              "瀏覽器走衍生檔＝刻意設計（漸進增強），非回落舊行為：window.eimuLocal 缺席時仍本機抽幀、以衍生檔上傳、原檔不上傳。",
             whyComplex: "此路徑（非桌面殼）與殼內共用同一 production bundle；差異只在 preload 注入與否，簡單本地案例不會走這條",
           },
           networkEvidence: { attachments: attachments.map(netLine), videoUpload: videoUpload.map(netLine) },
           artifacts: { screenshot: shot, afterUpload: uploadShot },
-          error: pass ? undefined : "A25 判準未達（見 observations：derivedSeen / consoleErrors）",
+          error: pass ? undefined : "A25 判準未達（見 observations：derivedPathUsable / originalNotUploaded / consoleErrors）",
         });
       } finally {
         await ctx.close().catch(() => {});

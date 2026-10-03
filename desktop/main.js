@@ -41,17 +41,32 @@ const {
 const { initUpdater, applyUpdate } = require("./updater.js");
 
 // 可測性改造（E2E 基建用）：EIMU_APP_ORIGIN 可覆寫殼要載入的站點。
-// 未設＝沿用生產站，值就是同一個字串，行為與過往逐位元組相同。
-// 只在 E2E／本機測試時設定（例如 EIMU_APP_ORIGIN=http://localhost:3997）。
-const APP_ORIGIN = process.env.EIMU_APP_ORIGIN || "https://www.eimu.dev";
+//
+// 安全閘（2026-10-04）：覆寫 origin 是「測試基建」，不是產品能力 —— 正式出貨的
+// 殼若無條件吃 EIMU_APP_ORIGIN，任何能控制本機環境變數的程序就能把殼指去任意
+// 站點（含把該站 host 併進 APP_HOSTS 導航白名單）。故兩個閘門（本檔的
+// EIMU_APP_ORIGIN 與 local-worker.js 的 EIMU_E2E_PICK_FILES）一律要求**顯式
+// 開關 `EIMU_E2E === "1"`**：未設＝完全忽略這兩個變數，行為與生產逐位元組相同。
+// 正式產物預設不帶這個開關 ⇒ 預設關閉。
+//
+// 為什麼仍讓打包產物可開（不用 `!app.isPackaged` 直接鎖死）：E2E harness 跑的
+// 就是**打包後**的 dist-e2e/linux-unpacked/eimu-desktop（app.isPackaged === true），
+// 它靠 EIMU_APP_ORIGIN 指向本機 dev server；若加 `!app.isPackaged`，harness 會一起
+// 被鎖死。權衡：以單一顯式 opt-in 開關取代 isPackaged 硬門，能同時滿足「正式產物
+// 預設關閉」與「harness 仍可運作」。要讓閘門**連代碼都不進正式產物**，需在建置期
+// 用 define／strip 剔除，那要動 package.json/electron-builder 設定（本輪紅線外）。
+const E2E_ENABLED = process.env.EIMU_E2E === "1";
+const APP_ORIGIN = (E2E_ENABLED && process.env.EIMU_APP_ORIGIN) || "https://www.eimu.dev";
 // eimu.dev（無 www）會 308 到 www，但導航判斷一律以最終 host 為準，兩者都收。
 const APP_HOSTS = new Set(["www.eimu.dev", "eimu.dev"]);
 // 覆寫 origin 時把它自己的 host 併入導航白名單：isAppUrl 依 APP_HOSTS 判斷，
-// 不併入的話殼會把自己的首頁當外部連結轉去系統瀏覽器。未設時這段不執行，
-// 白名單維持上面兩筆，既有導航／外鏈／下載政策完全不受影響。
-if (process.env.EIMU_APP_ORIGIN) {
+// 不併入的話殼會把自己的首頁當外部連結轉去系統瀏覽器。未設（或未開 E2E 閘）時
+// 這段不執行，白名單維持上面兩筆，既有導航／外鏈／下載政策完全不受影響。
+if (E2E_ENABLED && process.env.EIMU_APP_ORIGIN) {
   try {
     APP_HOSTS.add(new URL(process.env.EIMU_APP_ORIGIN).host);
+    // 可審計：只在顯式 EIMU_E2E=1 且真的覆寫時輸出；生產不會有。
+    console.warn(`[eimu-shell] E2E origin 覆寫生效（EIMU_E2E=1）：APP_ORIGIN=${APP_ORIGIN}`);
   } catch {
     /* 非法 URL：忽略覆寫，維持預設白名單 */
   }

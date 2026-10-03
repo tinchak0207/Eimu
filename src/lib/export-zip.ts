@@ -8,6 +8,11 @@ import { saveBlobLocally } from "./local-save";
 // 避免像 .jpeg/.gif 那样一边加了另一边没加，导致 `.jpeg` 被补成 `.jpeg.png`。
 const ALLOWED_EXTENSIONS = MEDIA_EXTENSIONS.map((ext) => `.${ext}`);
 
+// 与媒体产物同路打包、但本身已自带合法副档名的非媒体结构档（历史导出 zip 里的清单）。
+// 这类文件名不该被当成「缺副档名的图片」补成 `manifest.json.png`——它带的是 .json，
+// 与图片/影片无关。清单刻意保持极小：目前只有 exportHistoryZip 会带这一类文件。
+const PASSTHROUGH_EXTENSIONS = [".json"];
+
 function sanitizeFileName(name: string): string {
   // 去掉路径分隔符与 Windows 非法字符、控制字符，避免 zip 内出现目录穿越
   const cleaned = name
@@ -21,9 +26,11 @@ function sanitizeFileName(name: string): string {
 
 function ensureExtension(name: string): string {
   const lower = name.toLowerCase();
-  return ALLOWED_EXTENSIONS.some((ext) => lower.endsWith(ext))
-    ? name
-    : `${name}.png`;
+  // 只对「缺副档名的产物」补 .png（当它是图片）；已带合法副档名的原样保留：
+  // 媒体白名单（.png/.mp4/…）或非媒体结构档（.json，如 manifest）。
+  const hasLegalExtension = ALLOWED_EXTENSIONS.some((ext) => lower.endsWith(ext))
+    || PASSTHROUGH_EXTENSIONS.some((ext) => lower.endsWith(ext));
+  return hasLegalExtension ? name : `${name}.png`;
 }
 
 function dedupeName(name: string, used: Set<string>): string {

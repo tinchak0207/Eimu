@@ -126,7 +126,7 @@ set -euo pipefail
 VPS_DIR="$1"; SERVICE="$2"; HEALTH_URL="$3"; BACKUP_DIR="$4"; HISTORY_LOG="$5"
 echo "vps_dir=$VPS_DIR"
 echo "service=$([ "$(systemctl is-active "$SERVICE")" = active ] && echo active || echo "$(systemctl is-active "$SERVICE")")"
-code="$(curl -s -o /dev/null -w '%{http_code}' "$HEALTH_URL" || echo ERR)"
+code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$HEALTH_URL" || echo ERR)"
 echo "opencode_http=$code（200/401 皆代表服務在線並回應）"
 echo "--- 手維護子集檔案數 ---"
 sudo find "$VPS_DIR"/tools "$VPS_DIR"/lib "$VPS_DIR"/skills "$VPS_DIR"/plugin -type f 2>/dev/null | wc -l
@@ -142,7 +142,9 @@ cmd_plan() {
   local sha tmp
   sha="$(git -C "$REPO_ROOT" rev-parse --verify "${SHA:-HEAD}^{commit}")" || die "無法解析 commit"
   tmp="$(mktemp -d /tmp/oc-plan.XXXXXX)"
-  trap 'rm -rf "$tmp"' RETURN
+  # RETURN trap 觸發時 local 已出作用域，set -u 下直接引用 $tmp 會噴 unbound
+  # （與 cmd_release 同因，見其 EXIT trap 註解）——用 ${tmp:-} 保險。
+  trap 'rm -rf "${tmp:-}"' RETURN
   mkdir -p "$tmp/stage"
   stage_from_commit "$tmp/stage" "$tmp/exp" "$sha"
   log "== plan @ $(git -C "$REPO_ROOT" rev-parse --short=12 "$sha")：commit 端 $(wc -l < "$tmp/exp") 檔 =="
@@ -151,10 +153,13 @@ cmd_plan() {
   remote "cd '$VPS_DIR' && { sudo find tools lib skills plugin -type f ! -path '*/__pycache__/*' 2>/dev/null; for c in opencode.json package.json bun.lock package-lock.json; do sudo test -f \"\$c\" && echo \"\$c\"; done; } | sort" > "$tmp/actual.txt"
   remote "cd '$VPS_DIR' && { sudo find tools lib skills plugin -type f ! -path '*/__pycache__/*' -exec md5sum {} + 2>/dev/null; for c in opencode.json package.json bun.lock package-lock.json; do sudo test -f \"\$c\" && sudo md5sum \"\$c\"; done; } | sort -k2" > "$tmp/actual.md5"
   ( cd "$tmp/stage"
-    { find tools lib skills plugin -type f ! -path '*/__pycache__/*' 2>/dev/null
-      for c in opencode.json package.json bun.lock package-lock.json; do [ -f "$c" ] && echo "$c"; done
-    } | sort > "$tmp/head-list.txt"
-    md5sum $(cat "$tmp/head-list.txt") 2>/dev/null
+    # 檔名可能含空白（例：skills/higgsfield/docs/Seedance 2 Skill.md）——用 NUL
+    # 分隔（-print0 / sort -z / xargs -0），否則 `md5sum $(cat 清單)` 會被
+    # word-split 成多個假檔名而 exit 1（實測）。
+    { find tools lib skills plugin -type f ! -path '*/__pycache__/*' -print0 2>/dev/null
+      for c in opencode.json package.json bun.lock package-lock.json; do [ -f "$c" ] && printf '%s\0' "$c"; done
+    } | sort -z > "$tmp/head-list.txt"
+    xargs -0 -r md5sum < "$tmp/head-list.txt" 2>/dev/null
   ) | sort -k2 > "$tmp/head.md5"
 
   echo "--- 生產多出（release 會刪）---"; comm -13 "$tmp/exp" "$tmp/actual.txt" | sed 's/^/  DEL /'
@@ -271,7 +276,7 @@ echo "PERM_OK $SVC_USER 可讀 .opencode 工具鏈"
 sudo systemctl restart "$SERVICE"
 sleep 2
 state="$(systemctl is-active "$SERVICE" || true)"
-code="$(curl -s -o /dev/null -w '%{http_code}' "$HEALTH_URL" || echo ERR)"
+code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$HEALTH_URL" || echo ERR)"
 echo "$tag $sha $(date -u +%s) release files=$(wc -l < "$r_exp") service=$state http=$code" | sudo tee -a "$HISTORY_LOG" >/dev/null
 if [ "$state" != "active" ]; then echo "SERVICE_NOT_ACTIVE state=$state"; sudo journalctl -u "$SERVICE" -n 20 --no-pager >&2; exit 1; fi
 case "$code" in 200|401) echo "VERIFY_OK service=active http=$code files=$(wc -l < "$r_exp")";; *) echo "HEALTH_UNEXPECTED http=$code"; exit 1;; esac
@@ -304,7 +309,7 @@ if sudo test -f "$agents_bak"; then
 fi
 sudo systemctl restart "$SERVICE"; sleep 2
 state="$(systemctl is-active "$SERVICE" || true)"
-code="$(curl -s -o /dev/null -w '%{http_code}' "$HEALTH_URL" || echo ERR)"
+code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$HEALTH_URL" || echo ERR)"
 echo "rollback $latest $(date -u +%s) service=$state http=$code" | sudo tee -a "$HISTORY_LOG" >/dev/null
 [ "$state" = active ] || { echo "SERVICE_NOT_ACTIVE"; exit 1; }
 echo "ROLLBACK_OK from=$latest service=active http=$code"

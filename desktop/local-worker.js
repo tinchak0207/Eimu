@@ -259,17 +259,31 @@ async function handleCapabilities(event) {
 // transcode），但 pickFiles 開的是原生對話框，自動化無法驅動（本機無
 // xdotool/ydotool/wtype 可用）。
 //
-// 因此提供一個**環境變數閘**：只有殼的**啟動環境**（process.env）設了
-// `EIMU_E2E_PICK_FILES` 時才生效。其值為分號分隔的絕對路徑，命中時直接
-// 當成「使用者剛挑選」的結果回傳並授權，完全不開對話框。
+// 因此提供一個**受顯式開關約束的環境變數閘**：只有殼的**啟動環境**（process.env）
+// 同時設了 `EIMU_E2E === "1"`（顯式 opt-in）與 `EIMU_E2E_PICK_FILES` 時才生效。
+// 其值為分號分隔的絕對路徑，命中時直接當成「使用者剛挑選」的結果回傳並授權，
+// 完全不開對話框。**只設 EIMU_E2E_PICK_FILES 而沒有 EIMU_E2E=1 ⇒ 一律忽略**。
 //
-// 安全性：遠端頁面（renderer / 遠端內容）碰不到 process.env，無法自行開啟
-// 這個閘；只有啟動殼的人（測試 harness）能設定。
+// 為什麼要這個開關（同意機制旁路風險）：pickFiles 的對話框就是「使用者授權哪些
+// 根目錄」的同意動作；授權後 authorizedRoots 才成立，device bridge 的 H1 白名單
+// 才成立。若這個閘門隨正式產物無條件生效，任何能控制本機環境變數的程序都能在不
+// 經使用者同意的情況下預先授權任意根目錄。加上顯式開關後，正式產物**預設關閉**。
 //
-// 行為不變保證：未設此 env（生產預設）時，下方 handlePickFiles 逐位元組走
-// 原本的 dialog.showOpenDialog 路徑，行為與過往完全相同。
+// 為什麼不用 `!app.isPackaged` 直接鎖死：E2E harness 跑的就是**打包後**的
+// dist-e2e（app.isPackaged === true）；硬門會把 harness 一起鎖死。改以單一顯式
+// opt-in 開關取代，兼顧「正式產物預設關閉」與「harness 可運作」（harness 啟動時
+// 需一併帶 EIMU_E2E=1；harness.mjs 會把 process.env 透傳給子進程）。
+//
+// 安全性：遠端頁面（renderer / 遠端內容）碰不到 process.env，無法自行開啟這個閘；
+// 只有啟動殼的人（測試 harness）能設定。
+//
+// 行為不變保證：未設此 env（生產預設）時，下方 handlePickFiles 逐位元組走原本的
+// dialog.showOpenDialog 路徑，行為與過往完全相同。
 // ===========================================================================
+const E2E_ENABLED = process.env.EIMU_E2E === "1";
+
 function e2ePickOverride() {
+  if (!E2E_ENABLED) return null;
   const raw = process.env.EIMU_E2E_PICK_FILES;
   if (typeof raw !== "string" || raw.length === 0) return null;
   const paths = raw
@@ -284,6 +298,8 @@ async function handlePickFiles(event, opts) {
   const e2ePaths = e2ePickOverride();
   if (e2ePaths) {
     // E2E 專用（見上方註解）：不開對話框，直接授權並回傳這些路徑。
+    // 留一行可審計的日誌（只在顯式 EIMU_E2E=1 且指定路徑時出現；生產不會有）。
+    console.warn(`[eimu-local] E2E 授權閘生效（EIMU_E2E=1）：略過對話框，直接授權 ${e2ePaths.length} 條路徑`);
     return authorizeRoots(e2ePaths).map((entry) => entry.input);
   }
   const clean = policy.sanitizePickOptions(opts);

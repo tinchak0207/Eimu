@@ -286,6 +286,72 @@ test("exportAssetReviewZip：真跑 exportShotsZip，JSZip 解回的檔名/張�
   }
 });
 
+test("exportAssetReviewZip：上游永不回应 → 逾时落终态（该张 skipped，不永久 pending）", async () => {
+  const savedFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.startsWith("data:")) return new Response(new Blob(["img"], { type: "image/png" }), { status: 200 });
+    return await new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () =>
+        reject(new DOMException("The operation was aborted.", "AbortError")),
+      );
+    });
+  }) as typeof fetch;
+
+  const doc = {
+    createElement: () => ({ style: {} as Record<string, string>, download: "", href: "", click() {} }),
+    body: { appendChild() {}, removeChild() {} },
+  };
+  const globals = globalThis as unknown as Record<string, unknown>;
+  const savedDoc = globals.document;
+  const savedCreate = URL.createObjectURL;
+  const savedRevoke = URL.revokeObjectURL;
+  const savedFileReader = globals.FileReader;
+  globals.document = doc;
+  globals.FileReader = class {
+    onload: ((event: { target: { result: ArrayBuffer } }) => void) | null = null;
+    onerror: ((error: unknown) => void) | null = null;
+    readAsArrayBuffer(blob: Blob) {
+      void blob
+        .arrayBuffer()
+        .then((buffer) => this.onload?.({ target: { result: buffer } }))
+        .catch((error: unknown) => this.onerror?.(error));
+    }
+  };
+  URL.createObjectURL = (() => "blob:test") as typeof URL.createObjectURL;
+  URL.revokeObjectURL = (() => {}) as typeof URL.revokeObjectURL;
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const gate = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error("did not settle within 600ms")), 600);
+  });
+  try {
+    const started = Date.now();
+    const result = await Promise.race([
+      exportAssetReviewZip(
+        [card({ name: "霍辞渊", references: [{ url: PNG_1PX, role: "character", name: "正面" }] }),
+         card({ id: "card-2", name: "雨夜街", kind: "scene", references: [{ url: "https://store.tinchak0207.xyz/never.png", role: "scene", name: "街" }] })],
+        new Date("2026-09-24T00:00:00.000Z"),
+        50,
+      ),
+      gate,
+    ]);
+    const elapsed = Date.now() - started;
+    assert.equal(result.skipped, 1, "逾时那张落 skipped（面板提示「跳过 N 张取不到的」）");
+    assert.equal(result.exported, 1, "data: 好图不受影响");
+    assert.ok(elapsed < 600, `不得永久 pending（实测 ${elapsed}ms）`);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    globalThis.fetch = savedFetch;
+    if (savedDoc === undefined) delete globals.document;
+    else globals.document = savedDoc;
+    if (savedFileReader === undefined) delete globals.FileReader;
+    else globals.FileReader = savedFileReader;
+    URL.createObjectURL = savedCreate;
+    URL.revokeObjectURL = savedRevoke;
+  }
+});
+
 // ─────────────────────────────────────────── SSR 真渲染（用戶看到什麼）
 
 const noopAsync = async () => null;

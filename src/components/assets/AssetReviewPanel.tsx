@@ -34,6 +34,7 @@ import type { AgentInteractionMode } from "@/lib/agent-chat-client";
 import { DEFAULT_IMAGE_MODEL_ID } from "@/lib/image-model-ids.js";
 import { modelPriceLabel } from "@/lib/generation-model-catalog";
 import { exportShotsZip } from "@/lib/export-zip";
+import { IMAGE_FETCH_TIMEOUT_MS, imageHelpers } from "@/lib/image-helpers";
 import { csvCell, triggerDownload } from "@/lib/history-export";
 import { cn } from "@/lib/utils";
 
@@ -177,10 +178,15 @@ export function assetZipPlan(records: readonly CharacterCard[]): { fileName: str
   );
 }
 
-/** 取圖成 blob；失敗回 null（取不到的圖跳過並計數，不讓整包失敗——與 `exportHistoryZip` 同語義）。 */
-async function referenceBlob(url: string): Promise<Blob | null> {
+/** 取圖成 blob；失敗回 null（取不到的圖跳過並計數，不讓整包失敗——與 `exportHistoryZip` 同語義）。
+ *
+ * 2026-10-04（禁造輪子＋永久 pending 族）：不再自拼 `fetch(url)`（缺 ?dl=1/no-store
+ * 的 CORS 修復、無 timeout，上游半開連線會永久 pending），改用單一真源
+ * `imageHelpers.fetchImageResponse`。失敗／逾時仍吞成 null → skipped，UI 行為不變。
+ */
+async function referenceBlob(url: string, timeoutMs: number): Promise<Blob | null> {
   try {
-    const response = await fetch(url);
+    const response = await imageHelpers.fetchImageResponse(url, timeoutMs);
     if (!response.ok) return null;
     return await response.blob();
   } catch {
@@ -192,12 +198,14 @@ async function referenceBlob(url: string): Promise<Blob | null> {
 export async function exportAssetReviewZip(
   records: readonly CharacterCard[],
   at: Date = new Date(),
+  // 僅由測試注入縮短值（模擬逾時）；生產走 fetchImageResponse 的預設上限。
+  fetchTimeoutMs: number = IMAGE_FETCH_TIMEOUT_MS,
 ): Promise<{ exported: number; skipped: number }> {
   const plan = assetZipPlan(records);
   if (!plan.length) return { exported: 0, skipped: 0 };
   const fetched = await Promise.all(
     plan.map(async (item) => {
-      const blob = await referenceBlob(item.url);
+      const blob = await referenceBlob(item.url, fetchTimeoutMs);
       return blob ? { name: item.fileName, blob } : null;
     }),
   );

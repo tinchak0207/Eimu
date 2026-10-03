@@ -88,3 +88,15 @@ test("exportShotsZip 同名去重對新副檔名仍正確", async () => {
   ]);
   assert.deepEqual(names, ["a-2.jpeg", "a.jpeg"]);
 });
+
+// 清单档 manifest.json 与图片同路打包：它已自带合法副档名 .json，不该被当成
+// 「缺副档名的图片」补成 manifest.json.png（严格相等断言，非 startsWith）。
+test("exportShotsZip 不把 manifest.json 补成 manifest.json.png；媒体副档名仍正确", async () => {
+  const names = await buildZipEntryNames([
+    { name: "manifest.json", blob: new Blob(["{}"], { type: "application/json" }) },
+    { name: "镜S01-01", blob: new Blob(["x"]) },
+    { name: "b.mp4", blob: new Blob(["y"]) },
+  ]);
+  assert.deepEqual(names, ["b.mp4", "manifest.json", "镜S01-01.png"]);
+  assert.equal(names.includes("manifest.json.png"), false, "清单档名不得被补 .png");
+});
