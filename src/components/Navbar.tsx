@@ -295,7 +295,8 @@ export function Navbar({ className }: NavbarProps) {
           // pt-2 而非 mt-2：body 无 border/padding 时子元素 margin-top 会折叠
           // 穿透，把整页推高 8px（html scrollHeight 恒 = 100vh + 8px）。
           // padding 不参与折叠，位置不变（nav 距页顶同为 8px）。
-          "page-shell pointer-events-none sticky top-0 z-[80] pt-2",
+          // 手機 ≤639.98px 改平铺满血条：page-shell 的左右留白与顶部悬空一并归零。
+          "page-shell pointer-events-none sticky top-0 z-[80] pt-2 max-sm:pt-0 max-sm:px-0",
           className,
         )}
       >
@@ -313,6 +314,8 @@ export function Navbar({ className }: NavbarProps) {
               ? "ml-[var(--ws-navbar-inset,calc(var(--ws-panel-w,420px)_+_0.75rem))] w-[calc(100%_-_var(--ws-navbar-inset,calc(var(--ws-panel-w,420px)_+_0.75rem)))]"
               : "ml-0 w-full",
             "max-md:ml-0 max-md:w-full",
+            // 手機 ≤639.98px 平铺：去圆角/浮岛阴影，不透明白底，底部 1px 发丝分隔线。
+            "max-sm:rounded-none max-sm:border-x-0 max-sm:border-t-0 max-sm:border-b-black/[0.08] max-sm:bg-white/95 max-sm:shadow-none max-sm:px-3",
           )}
           aria-label="主导航"
         >

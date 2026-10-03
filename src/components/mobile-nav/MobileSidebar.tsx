@@ -31,19 +31,16 @@ import { createPortal } from "react-dom";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  Activity,
   BadgeDollarSign,
-  CircleHelp,
   History,
   Images,
-  LifeBuoy,
+  KeyRound,
   LogOut,
   Menu,
   Search,
   Settings,
-  Sparkles,
+  SlidersHorizontal,
   SquarePen,
-  Workflow,
   X,
 } from "lucide-react";
 import { AgentSessionList } from "@/components/agent-chat/AgentSessionList";
@@ -52,6 +49,10 @@ import { useIsNarrow } from "@/hooks/use-is-narrow";
 import { listAgentSessions, type AgentSessionSummary } from "@/lib/agent-chat-client";
 import { loadPersisted } from "@/lib/agent-chat-persistence";
 import { getCurrentAgentSession } from "@/lib/agent-current-session";
+import {
+  requestAgentSurfaceAction,
+  type AgentSurfaceAction,
+} from "@/lib/agent-surface-actions";
 import { cn } from "@/lib/utils";
 import "./mobile-sidebar.css";
 
@@ -122,27 +123,43 @@ export interface MobileSidebarNavItem {
   href: string;
   label: string;
   icon: typeof History;
+  /**
+   * 動作橋（2026-10-03 第三輪）：有值＝這一列渲染成 button 元素（不是 Link），
+   * 點擊把動作交給助理面（見 @/lib/agent-surface-actions）；助理面沒掛載時才退回
+   * href 導航。無值＝純 Link 導航列。有動作橋的列一律不做 active 高亮。
+   */
+  action?: AgentSurfaceAction;
+  /** 永不冒充當前頁（如「直接生成」/ 的 href 就是首頁，否則在首頁會誤亮）。 */
+  neverActive?: boolean;
 }
 
 /**
- * 導覽列：只接「現場存在」的路由，逐條附出處。
- *   生成历史 /history      — src/app/history/page.tsx；Navbar 原有 /history 入口
- *   我的资产 /?agent=1     — 全站沒有獨立的資產路由，資產面板住在首頁 agent 面
- *                            （AgentChatSurface 的「我的资产」）；不發明 /assets 之類的新路由
- *   技能     /skills       — src/app/skills/page.tsx；SkillSlashMenu 同款連結
- *   工作流   /workflows    — src/app/workflows/page.tsx；UseCaseLinks 同款連結
- *   定价     /pricing      — src/app/pricing/page.tsx；WalletBadge 同款連結
- *   状态     /status       — src/app/status/page.tsx（Gatus 探針頁）
- *   帮助     /use-cases    — src/app/use-cases/page.tsx（站內既有內容入口）
+ * 導覽列（第三輪瘦身：7 列 → 4 列）。手機端不需要的四頁（技能／工作流／狀態／
+ * 幫助）下放成頁尾細字連結帶（見 MOBILE_SIDEBAR_FOOTER_LINKS），不讓它們變孤兒。
+ * 留下的四列逐條附出處：
+ *   直接生成 /            — src/app/page.tsx；動作橋 "exit"（助理面在時直接退出助理面）
+ *   生成历史 /history      — src/app/history/page.tsx；純連結
+ *   我的资产 /?agent=1     — 全站沒有獨立資產路由，資產面板住在首頁 agent 面
+ *                            （AgentChatSurface 的「我的资产」）；動作橋 "assets"
+ *   定价     /pricing      — src/app/pricing/page.tsx；純連結
  */
 export const MOBILE_SIDEBAR_NAV: readonly MobileSidebarNavItem[] = [
+  { href: "/", label: "直接生成", icon: SlidersHorizontal, action: "exit", neverActive: true },
   { href: "/history", label: "生成历史", icon: History },
-  { href: "/?agent=1", label: "我的资产", icon: Images },
-  { href: "/skills", label: "技能", icon: Sparkles },
-  { href: "/workflows", label: "工作流", icon: Workflow },
+  { href: "/?agent=1", label: "我的资产", icon: Images, action: "assets" },
   { href: "/pricing", label: "定价", icon: BadgeDollarSign },
-  { href: "/status", label: "状态", icon: Activity },
-  { href: "/use-cases", label: "帮助", icon: CircleHelp },
+];
+
+/**
+ * 被移出主導覽的四頁（第三輪）：降級為捲動區最底部的頁尾細字連結帶，
+ * 不是 52px 導覽列、不佔列高預算。逐條對上既有路由檔。
+ *   /skills /workflows /status /use-cases
+ */
+export const MOBILE_SIDEBAR_FOOTER_LINKS: readonly { href: string; label: string }[] = [
+  { href: "/skills", label: "技能" },
+  { href: "/workflows", label: "工作流" },
+  { href: "/status", label: "状态" },
+  { href: "/use-cases", label: "帮助" },
 ];
 
 /** 只認「不帶 query 的路徑連結」的 active 態；`/?agent=1` 這類入口不冒充當前頁。 */
@@ -175,6 +192,12 @@ export interface MobileSidebarPanelProps {
   onPickSession: (sessionId: string) => void;
   /** 新對話（FAB 與空態 CTA 共用）＝既有入口 /?agent=1。 */
   onStartNew: () => void;
+  /**
+   * 動作橋派發（第三輪）：導覽列「直接生成／我的资产」與底部齒輪共用。
+   * 容器實作：先 onClose() 關側欄 → requestAgentSurfaceAction(action)；
+   * 助理面沒掛載（回 false）才 router.push(fallbackHref) 退回導航。
+   */
+  onSurfaceAction: (action: AgentSurfaceAction, fallbackHref: string) => void;
   onClose: () => void;
   closeButtonRef?: RefObject<HTMLButtonElement | null>;
   searchInputRef?: RefObject<HTMLInputElement | null>;
@@ -197,6 +220,7 @@ export function MobileSidebarPanel({
   onQueryChange,
   onPickSession,
   onStartNew,
+  onSurfaceAction,
   onClose,
   closeButtonRef,
   searchInputRef,
@@ -231,38 +255,53 @@ export function MobileSidebarPanel({
         </button>
       </header>
 
-      {/* 導覽列：icon 20px＋標籤 17px，列高 ≥52px。
-          標籤字級（text-ios-body＝17px）掛在內層 span 的**純字串 className** 上，
-          不進 cn()：cn＝twMerge(clsx(...))，tailwind-merge 認不得自訂 token
-          `text-ios-body`，會把它歸到 text-color 群組，然後被同一串後面的
-          `text-[rgba(…)]` 顏色 class 吃掉（實測 twMerge 直接移除該 class）——
-          之前掛在 cn 的 anchor 上，17px 從未生效、實際繼承 body 的 15px。
-          span 走純 className 就繞過這個合併陷阱（見 mobile-sidebar.test.ts 探針）。 */}
       {/* 單一捲動容器：導覽＋「对话」清單＋退出/QQ 一起捲（清單不再自開第二條捲軸，
           避免巢狀捲動）。底部浮動玻璃條改絕對定位浮在最下（.mobile-sidebar-dock），
           這裡留出等高 padding-bottom，最後一列不會被蓋住。 */}
       <div className="mobile-sidebar-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain px-2">
-        {/* 導覽列：icon 20px＋標籤 17px，列高 ≥52px。 */}
+        {/* 導覽列（第三輪瘦身 4 列）：有動作橋的列渲染成 button（把動作交給助理面，
+            沒宿主才退回 href），純連結列維持 Link。標籤字級（text-ios-body＝17px）
+            掛在內層 span 的**純字串 className** 上，不進 cn()：cn＝twMerge(clsx(...))，
+            tailwind-merge 認不得自訂 token `text-ios-body`，會把它歸到 text-color
+            群組，然後被同一串後面的 `text-[rgba(…)]` 顏色 class 吃掉（實測 twMerge
+            直接移除該 class）——之前掛在 cn 的 anchor 上，17px 從未生效。
+            span 走純 className 就繞過這個合併陷阱（見 mobile-sidebar.test.ts 探針）。 */}
         <nav aria-label="主导航链接" className="pt-1">
           <ul className="flex flex-col">
-            {MOBILE_SIDEBAR_NAV.map(({ href, label, icon: Icon }) => {
-              const active = isSidebarNavActive(pathname, href);
+            {MOBILE_SIDEBAR_NAV.map(({ href, label, icon: Icon, action, neverActive }) => {
+              // 有動作橋的列不做 active 高亮；`neverActive`（如「直接生成」/ 就是首頁）
+              // 也永不冒充當前頁。
+              const active = !neverActive && !action && isSidebarNavActive(pathname, href);
+              const rowClass = cn(
+                "flex min-h-[52px] items-center gap-3.5 rounded-[14px] px-3 font-medium touch-manipulation transition-colors [-webkit-tap-highlight-color:transparent] motion-reduce:transition-none",
+                active
+                  ? "bg-black/[0.05] text-[rgba(0,0,0,0.85)]"
+                  : "text-[rgba(0,0,0,0.72)] hover:bg-black/[0.04] hover:text-[rgba(0,0,0,0.88)] active:bg-black/[0.07]",
+              );
               return (
                 <li key={href}>
-                  <Link
-                    href={href}
-                    onClick={onClose}
-                    aria-current={active ? "page" : undefined}
-                    className={cn(
-                      "flex min-h-[52px] items-center gap-3.5 rounded-[14px] px-3 font-medium touch-manipulation transition-colors [-webkit-tap-highlight-color:transparent] motion-reduce:transition-none",
-                      active
-                        ? "bg-black/[0.05] text-[rgba(0,0,0,0.85)]"
-                        : "text-[rgba(0,0,0,0.72)] hover:bg-black/[0.04] hover:text-[rgba(0,0,0,0.88)] active:bg-black/[0.07]",
-                    )}
-                  >
-                    <Icon className="h-5 w-5 shrink-0" aria-hidden="true" />
-                    <span className="truncate text-ios-body">{label}</span>
-                  </Link>
+                  {action ? (
+                    <button
+                      type="button"
+                      onClick={() => onSurfaceAction(action, href)}
+                      data-agent-action={action}
+                      data-fallback-href={href}
+                      className={cn(rowClass, "w-full cursor-pointer text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)]")}
+                    >
+                      <Icon className="h-5 w-5 shrink-0" aria-hidden="true" />
+                      <span className="truncate text-ios-body">{label}</span>
+                    </button>
+                  ) : (
+                    <Link
+                      href={href}
+                      onClick={onClose}
+                      aria-current={active ? "page" : undefined}
+                      className={rowClass}
+                    >
+                      <Icon className="h-5 w-5 shrink-0" aria-hidden="true" />
+                      <span className="truncate text-ios-body">{label}</span>
+                    </Link>
+                  )}
                 </li>
               );
             })}
@@ -304,6 +343,18 @@ export function MobileSidebarPanel({
 
         {/* 底部帳號動作：隨內容一起捲（浮動玻璃條另為絕對定位的 .mobile-sidebar-dock）。 */}
         <div className="pt-1">
+          {/* 账号设置（第三輪補）：連既有 /settings/api-keys；圖示用 KeyRound，
+              與底部 dock 齒輪（Settings／助理设定動作橋）不撞同一視覺語意。 */}
+          <div className="flex flex-col">
+            <Link
+              href="/settings/api-keys"
+              onClick={onClose}
+              className="flex min-h-[52px] touch-manipulation items-center gap-3.5 rounded-[14px] px-3 text-ios-body font-medium text-[rgba(0,0,0,0.72)] transition-colors hover:bg-black/[0.04] hover:text-[rgba(0,0,0,0.88)] active:bg-black/[0.07] motion-reduce:transition-none [-webkit-tap-highlight-color:transparent]"
+            >
+              <KeyRound className="h-5 w-5 shrink-0" aria-hidden="true" />
+              <span className="truncate">账号设置</span>
+            </Link>
+          </div>
           {isLoggedIn && (
             <div className="flex flex-col">
               <button
@@ -325,20 +376,45 @@ export function MobileSidebarPanel({
               <span className="truncate">加入 QQ 群</span>
             </a>
           </div>
+          {/* 被移出主導覽的四頁降級入口（第三輪）：頁尾細字連結帶，14px／可折行，
+              不是 52px 導覽列；只求不變孤兒，不佔列高預算。 */}
+          <nav
+            aria-label="更多入口"
+            className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 pb-2 pt-3 text-[14px] text-[rgba(0,0,0,0.42)]"
+          >
+            {MOBILE_SIDEBAR_FOOTER_LINKS.map((item, index) => (
+              <span key={item.href} className="flex items-center gap-x-2">
+                {index > 0 && <span aria-hidden="true">·</span>}
+                <Link
+                  href={item.href}
+                  onClick={onClose}
+                  data-mobile-footer-link="true"
+                  className="hover:text-[rgba(0,0,0,0.7)] [-webkit-tap-highlight-color:transparent]"
+                >
+                  {item.label}
+                </Link>
+              </span>
+            ))}
+          </nav>
         </div>
       </div>
 
       {/* 底部浮動玻璃條（齒輪／搜尋／黑色新對話 FAB）：絕對定位浮在最下，不參與捲動。 */}
       <div className="mobile-sidebar-dock">
         <div className="lg-bar flex items-center gap-2 rounded-full p-2">
-          <Link
-            href="/settings/api-keys"
-            onClick={onClose}
+          {/* 齒輪＝情境感知（第三輪）：助理面在時叫動它的「助理设定」（我的技能＋
+              互動模式）；助理面沒掛載（回 false）才退回帳號設置 /settings/api-keys
+              （帳號設置另有帳號區那一列，不會遺失）。aria-label 契約維持「设置」。 */}
+          <button
+            type="button"
+            onClick={() => onSurfaceAction("settings", "/settings/api-keys")}
+            data-agent-action="settings"
+            data-fallback-href="/settings/api-keys"
             aria-label="设置"
-            className="flex h-11 w-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full bg-black/[0.05] text-[rgba(0,0,0,0.62)] transition-colors hover:bg-black/[0.09] hover:text-[rgba(0,0,0,0.88)] active:bg-black/[0.13] [-webkit-tap-highlight-color:transparent]"
+            className="flex h-11 w-11 shrink-0 cursor-pointer touch-manipulation items-center justify-center rounded-full bg-black/[0.05] text-[rgba(0,0,0,0.62)] transition-colors hover:bg-black/[0.09] hover:text-[rgba(0,0,0,0.88)] active:bg-black/[0.13] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] [-webkit-tap-highlight-color:transparent]"
           >
             <Settings className="h-5 w-5" aria-hidden="true" />
-          </Link>
+          </button>
           <button
             type="button"
             onClick={() => searchInputRef?.current?.focus()}
@@ -485,6 +561,15 @@ export function MobileSidebar({ open, onClose, triggerRef }: MobileSidebarProps)
     router.push(`/?agent=1&session=${encodeURIComponent(sessionId)}`);
   };
 
+  /**
+   * 動作橋派發（第三輪）：先關側欄（不擋住助理面的浮層），再呼叫助理面；
+   * 只有助理面沒掛載（回 false）才退回該列自己的 href。
+   */
+  const handleSurfaceAction = (action: AgentSurfaceAction, fallbackHref: string): void => {
+    onClose();
+    if (!requestAgentSurfaceAction(action)) router.push(fallbackHref);
+  };
+
   if (!active || typeof document === "undefined") return null;
 
   const displayName = user ? user.display_name || user.username : "未登录";
@@ -511,6 +596,7 @@ export function MobileSidebar({ open, onClose, triggerRef }: MobileSidebarProps)
         onQueryChange={setQuery}
         onPickSession={handlePickSession}
         onStartNew={handleStartNew}
+        onSurfaceAction={handleSurfaceAction}
         onClose={onClose}
         closeButtonRef={closeButtonRef}
         searchInputRef={searchInputRef}

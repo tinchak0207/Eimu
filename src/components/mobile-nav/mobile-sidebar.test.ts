@@ -22,12 +22,19 @@ const {
   MobileSidebarPanel,
   MobileNavHamburger,
   MOBILE_SIDEBAR_NAV,
+  MOBILE_SIDEBAR_FOOTER_LINKS,
   isSidebarNavActive,
   readPersistedSessionId,
 } = requireHere("./MobileSidebar.tsx") as {
   MobileSidebarPanel: (props: Record<string, unknown>) => React.ReactElement;
   MobileNavHamburger: (props: { onClick: () => void; expanded: boolean }) => React.ReactElement;
-  MOBILE_SIDEBAR_NAV: ReadonlyArray<{ href: string; label: string }>;
+  MOBILE_SIDEBAR_NAV: ReadonlyArray<{
+    href: string;
+    label: string;
+    action?: string;
+    neverActive?: boolean;
+  }>;
+  MOBILE_SIDEBAR_FOOTER_LINKS: ReadonlyArray<{ href: string; label: string }>;
   isSidebarNavActive: (pathname: string, href: string) => boolean;
   readPersistedSessionId: () => string | null;
 };
@@ -97,12 +104,24 @@ function renderPanel(overrides: Record<string, unknown> = {}): El[] {
     onQueryChange: noop,
     onPickSession: noop,
     onStartNew: noop,
+    onSurfaceAction: noop,
     onClose: noop,
     closeButtonRef: ref,
     searchInputRef: SEARCH_INPUT_REF,
     ...overrides,
   });
   return collect(tree);
+}
+
+/** 取某一列（Link／button）內層標籤 span 的文字。 */
+function rowLabel(el: El): string | null {
+  const kids = Array.isArray(el.props.children) ? el.props.children : [el.props.children];
+  for (const kid of kids) {
+    if (kid && typeof kid === "object" && (kid as El).type === "span") {
+      return String((kid as El).props.children);
+    }
+  }
+  return null;
 }
 
 // ── ① 漢堡鈕：窄屏存在（sm:hidden 契約） ────────────────────────────────────
@@ -135,7 +154,7 @@ test("側欄用 createPortal 掛到 document.body（否則被 lg-bar 祖先含�
   assert.match(sidebarCss, /\.mobile-sidebar-scrim\s*\{[^}]*inset:\s*0/s);
 });
 
-// ── ③ 側欄含既有路由連結逐條（不准出現發明的路由） ──────────────────────────
+// ── ③ 側欄導覽瘦身成 4 列：逐列驗標籤／href／button-or-link／動作橋 ────────────
 
 /** 獨立 oracle：把 href 映射回檔案系統路由，確認它真的存在（不與元件同源）。 */
 function routeFileExists(href: string): boolean {
@@ -144,37 +163,130 @@ function routeFileExists(href: string): boolean {
   return existsSync(join(root, `src/app${path}/page.tsx`));
 }
 
-test("每一條導覽連結都對得上現場存在的路由檔", () => {
+/** 第三輪定案的 4 列（順序固定）；bridge＝null 表示純連結。 */
+const NAV_TABLE = [
+  { href: "/", label: "直接生成", bridge: "exit", tag: "button" },
+  { href: "/history", label: "生成历史", bridge: null, tag: "link" },
+  { href: "/?agent=1", label: "我的资产", bridge: "assets", tag: "button" },
+  { href: "/pricing", label: "定价", bridge: null, tag: "link" },
+] as const;
+
+test("導覽列只剩 4 列且順序固定（技能/工作流/状态/帮助已下放頁尾）", () => {
+  assert.equal(MOBILE_SIDEBAR_NAV.length, 4, "第三輪：7 列 → 4 列");
+  assert.deepEqual(
+    MOBILE_SIDEBAR_NAV.map((it) => it.href),
+    NAV_TABLE.map((it) => it.href),
+  );
+  assert.deepEqual(
+    MOBILE_SIDEBAR_NAV.map((it) => it.label),
+    NAV_TABLE.map((it) => it.label),
+  );
+  // 逐條 href 仍對得上現場存在的路由檔（/=首頁；/?agent=1 取路徑前段）。
   for (const { href } of MOBILE_SIDEBAR_NAV) {
     assert.ok(routeFileExists(href), `${href} 在 src/app 下找不到對應 page.tsx（疑似發明路由）`);
   }
-  const hrefs = MOBILE_SIDEBAR_NAV.map((it) => it.href);
-  assert.deepEqual(hrefs, [
-    "/history",
-    "/?agent=1",
-    "/skills",
-    "/workflows",
-    "/pricing",
-    "/status",
-    "/use-cases",
-  ]);
 });
 
-test("側欄元素樹逐條含既有路由連結（含設定齒輪）", () => {
-  const hrefs = new Set(
-    renderPanel()
-      .map((el) => el.props.href)
-      .filter((h): h is string => typeof h === "string"),
-  );
-  for (const { href } of MOBILE_SIDEBAR_NAV) {
-    assert.ok(hrefs.has(href), `側欄缺 ${href}`);
+test("導覽逐列：有動作橋＝button（帶動作字串＋fallback href）；純連結＝Link", () => {
+  const els = renderPanel();
+  for (const row of NAV_TABLE) {
+    if (row.tag === "button") {
+      const btn = els.find((el) => el.props["data-agent-action"] === row.bridge);
+      assert.ok(btn, `缺動作橋列 ${row.label}（action=${row.bridge}）`);
+      assert.equal(btn.type, "button", `${row.label} 有動作橋必須渲染成 <button>`);
+      assert.equal(btn.props.href, undefined, `${row.label} 不可是 <Link>（不得帶 href）`);
+      assert.equal(btn.props["data-fallback-href"], row.href, `${row.label} fallback href 不符`);
+      assert.equal(rowLabel(btn), row.label, `${row.label} 標籤不符`);
+      assert.equal(btn.props["aria-current"], undefined, `${row.label} 有動作橋不得做 active 高亮`);
+    } else {
+      const link = els.find((el) => el.props.href === row.href);
+      assert.ok(link, `缺純連結列 ${row.label}（href=${row.href}）`);
+      assert.notEqual(link.type, "button", `${row.label} 無動作橋應維持 <Link>`);
+      assert.equal(link.props["data-agent-action"], undefined, `${row.label} 不應帶動作橋`);
+      assert.equal(rowLabel(link), row.label, `${row.label} 標籤不符`);
+    }
   }
-  assert.ok(hrefs.has("/settings/api-keys"), "設定齒輪必須接既有設定路由 /settings/api-keys");
+});
+
+test("側欄元素樹含剩餘純連結路由與設定路由，且無發明路由", () => {
+  const els = renderPanel();
+  const hrefs = new Set(
+    els.map((el) => el.props.href).filter((h): h is string => typeof h === "string"),
+  );
+  assert.ok(hrefs.has("/history"));
+  assert.ok(hrefs.has("/pricing"));
+  assert.ok(hrefs.has("/settings/api-keys"), "帳號區「账号设置」必須接既有設定路由");
+  // 動作橋列的 href 落在 data-fallback-href 上（不是 Link），逐條對得上是真路由。
+  for (const el of els) {
+    const fb = el.props["data-fallback-href"];
+    if (typeof fb === "string") assert.ok(routeFileExists(fb), `${fb} 不是既有路由`);
+  }
   // 不准出現沒落地的路由（例如 /assets、/settings、/agent 這些現場不存在的）。
   for (const href of hrefs) {
     if (href.startsWith("http")) continue; // QQ 群外鏈
     assert.ok(routeFileExists(href), `${href} 不是既有路由`);
   }
+});
+
+// ── ③b 被砍的 4 頁降級頁尾細字連結帶（不變孤兒） ─────────────────────────────
+
+test("頁尾連結帶含技能/工作流/状态/帮助 4 條真路由連結", () => {
+  // 常數逐條對得上真路由檔（不與元件同源的 oracle）。
+  assert.deepEqual(
+    MOBILE_SIDEBAR_FOOTER_LINKS.map((it) => it.href),
+    ["/skills", "/workflows", "/status", "/use-cases"],
+  );
+  for (const { href } of MOBILE_SIDEBAR_FOOTER_LINKS) {
+    assert.ok(routeFileExists(href), `頁尾連結 ${href} 不是既有路由`);
+  }
+  // 元素樹裡真的渲染出這 4 條（標記 data-mobile-footer-link）。
+  const footerLinks = renderPanel().filter(
+    (el) => el.props["data-mobile-footer-link"] === "true",
+  );
+  assert.equal(footerLinks.length, 4, "頁尾連結帶應有 4 條");
+  assert.deepEqual(
+    footerLinks.map((el) => el.props.href).sort(),
+    ["/skills", "/status", "/use-cases", "/workflows"],
+  );
+});
+
+// ── ③c 帳號區補「账号设置」＋底部齒輪情境感知 ──────────────────────────────
+
+test("帳號區含『账号设置』連 /settings/api-keys，圖示用 KeyRound（不撞 dock 齒輪）", () => {
+  const link = renderPanel().find(
+    (el) => el.props.href === "/settings/api-keys" && rowLabel(el) === "账号设置",
+  );
+  assert.ok(link, "帳號區缺「账号设置」列");
+  assert.match(sidebarCode, /<KeyRound\b/, "账号设置 應使用 KeyRound");
+});
+
+test("底部 dock 齒輪＝button（情境感知動作橋），aria-label 仍是『设置』", () => {
+  const gear = renderPanel().find((el) => el.props["aria-label"] === "设置");
+  assert.ok(gear, "dock 缺 aria-label 為「设置」的齒輪");
+  assert.equal(gear.type, "button", "齒輪應改為 <button>（動作橋派發）");
+  assert.equal(gear.props.href, undefined, "齒輪不應再是 <Link>");
+  assert.equal(gear.props["data-fallback-href"], "/settings/api-keys", "齒輪 fallback 應回帳號設置");
+  // 容器：先關側欄 → 派動作 → 沒宿主才 router.push fallback。
+  assert.match(sidebarCode, /requestAgentSurfaceAction\(action\)/);
+  assert.match(sidebarCode, /if \(!requestAgentSurfaceAction\(action\)\) router\.push\(fallbackHref\)/);
+  // 不准靜態 import AgentChatSurface 取助理面動作（仍走動作橋）。
+  assert.match(
+    sidebarCode,
+    /import \{\s*requestAgentSurfaceAction,\s*type AgentSurfaceAction,\s*\} from "@\/lib\/agent-surface-actions"/,
+  );
+});
+
+test("『直接生成』/ 不冒充當前頁（neverActive），只有不帶 query 的純連結才亮", () => {
+  const navItem = MOBILE_SIDEBAR_NAV.find((it) => it.href === "/");
+  assert.equal(navItem?.neverActive, true, "/ 這列必須標 neverActive");
+  // 純函式語意不變：/ 對 / 仍回 true（元件端靠 neverActive 關掉）。
+  assert.equal(isSidebarNavActive("/", "/"), true);
+  // 首頁渲染：直接生成那顆 button 不得亮 aria-current。
+  const exitBtn = renderPanel({ pathname: "/" }).find(
+    (el) => el.props["data-agent-action"] === "exit",
+  );
+  assert.ok(exitBtn);
+  assert.equal(exitBtn.props["aria-current"], undefined, "首頁不得亮『直接生成』");
 });
 
 test("active 態只認不帶 query 的路徑連結", () => {
@@ -276,8 +388,10 @@ test("body 滾動鎖存原值再還原（與全出血鎖共存）", () => {
 
 // ── ⑥ 44px 觸控目標 ＋ 無嵌套 button ────────────────────────────────────────
 
-test("側欄內每個可按元素觸控目標 ≥44px", () => {
+test("側欄內每個可按元素觸控目標 ≥44px（頁尾細字連結帶為既定例外）", () => {
   const interactive = renderPanel().filter((el) => {
+    // 頁尾「技能·工作流·状态·帮助」是刻意的小字連結帶，不是 52px 列，排除。
+    if (el.props["data-mobile-footer-link"] === "true") return false;
     const isButton = el.type === "button";
     const isLink = typeof el.props.href === "string";
     return isButton || isLink;

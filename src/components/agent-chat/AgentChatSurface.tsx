@@ -36,6 +36,7 @@ import { cn } from "@/lib/utils";
 import { listAgentSessions, type AgentSessionSummary } from "@/lib/agent-chat-client";
 import { useAgentChat } from "@/hooks/use-agent-chat";
 import { setCurrentAgentSession } from "@/lib/agent-current-session";
+import { subscribeAgentSurfaceActions } from "@/lib/agent-surface-actions";
 import {
   buildAnchorMessage,
   buildReanchorMessage,
@@ -553,6 +554,34 @@ export function AgentChatSurface({
     }
   }, [startingNew, startNewSession]);
 
+  // 跨元件動作橋（窄屏側欄叫動本面頂欄鈕）：側欄與本面不住同一棵元件樹，
+  // 走 window CustomEvent。回 true＝本面處理掉了，橋會 preventDefault，讓
+  // 側欄知道不必退回導航；"exit" 無 onExit 時回 false，側欄自行導航。
+  useEffect(() => {
+    return subscribeAgentSurfaceActions((action) => {
+      switch (action) {
+        case "assets":
+          void toggleAssets();
+          return true;
+        case "history":
+          void toggleHistory();
+          return true;
+        case "settings":
+          openSettings();
+          return true;
+        case "new-session":
+          void onStartNewSession();
+          return true;
+        case "exit":
+          if (!onExit) return false;
+          onExit();
+          return true;
+        default:
+          return false;
+      }
+    });
+  }, [toggleAssets, toggleHistory, openSettings, onStartNewSession, onExit]);
+
   // quota 字段保留在 hook state 里但不再展示——余额端点缺失是已知稳态，
   // 展示「余额未知」只浪费布局空间，扣费仍正常记账。
   const isActive = connection !== "idle" && connection !== "closed";
@@ -957,7 +986,7 @@ export function AgentChatSurface({
               aria-expanded={showAssets}
               aria-label="我的资产"
               title="我的资产"
-              className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:bg-black/[0.06] aria-expanded:bg-black/[0.06] aria-expanded:text-foreground/80 touch-manipulation"
+              className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:bg-black/[0.06] aria-expanded:bg-black/[0.06] aria-expanded:text-foreground/80 touch-manipulation max-sm:hidden"
             >
               <Boxes className="h-[1.125rem] w-[1.125rem]" aria-hidden="true" />
             </button>
@@ -970,7 +999,7 @@ export function AgentChatSurface({
               aria-expanded={showHistory}
               aria-label="对话历史"
               title="对话历史"
-              className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:bg-black/[0.06] aria-expanded:bg-black/[0.06] aria-expanded:text-foreground/80 touch-manipulation"
+              className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:bg-black/[0.06] aria-expanded:bg-black/[0.06] aria-expanded:text-foreground/80 touch-manipulation max-sm:hidden"
             >
               <History className="h-[1.125rem] w-[1.125rem]" aria-hidden="true" />
             </button>
@@ -984,7 +1013,7 @@ export function AgentChatSurface({
               disabled={startingNew}
               aria-label="开新对话"
               title="开新对话（当前对话保留在历史里）"
-              className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:bg-black/[0.06] aria-expanded:bg-black/[0.06] aria-expanded:text-foreground/80 touch-manipulation disabled:cursor-wait"
+              className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:bg-black/[0.06] aria-expanded:bg-black/[0.06] aria-expanded:text-foreground/80 touch-manipulation max-sm:hidden disabled:cursor-wait"
             >
               {startingNew ? (
                 <Loader2 className="h-[1.125rem] w-[1.125rem] animate-spin text-ios-blue" aria-hidden="true" />
@@ -998,7 +1027,7 @@ export function AgentChatSurface({
                 onClick={onExit}
                 aria-label="直接生成"
                 title="直接生成：自己选模型和参数出图"
-                className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:bg-black/[0.06] aria-expanded:bg-black/[0.06] aria-expanded:text-foreground/80 touch-manipulation"
+                className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:bg-black/[0.06] aria-expanded:bg-black/[0.06] aria-expanded:text-foreground/80 touch-manipulation max-sm:hidden"
               >
                 <SlidersHorizontal className="h-[1.125rem] w-[1.125rem]" aria-hidden="true" />
               </button>
@@ -1012,7 +1041,7 @@ export function AgentChatSurface({
               onClick={openSettings}
               aria-label="设置"
               title="助理设定"
-              className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:bg-black/[0.06] aria-expanded:bg-black/[0.06] aria-expanded:text-foreground/80 touch-manipulation"
+              className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-foreground/45 outline-none transition-colors hover:bg-[rgba(0,122,255,0.12)] hover:text-foreground/75 active:scale-95 focus:outline-none focus-visible:bg-black/[0.06] aria-expanded:bg-black/[0.06] aria-expanded:text-foreground/80 touch-manipulation max-sm:hidden"
             >
               <Settings className="h-[1.125rem] w-[1.125rem]" aria-hidden="true" />
             </button>
