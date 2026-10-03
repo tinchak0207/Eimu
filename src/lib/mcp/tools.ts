@@ -26,6 +26,12 @@ import {
   searchPublicSkills,
   type AgentSkillView,
 } from "@/lib/agent-skills/registry";
+import { EXPERT_IDS } from "@/lib/expert-contract";
+import {
+  buildGenerationRequestHeaders,
+  mcpGenerationIdempotencyKey,
+} from "@/lib/generation-request-headers";
+import { QUALITY_POLICIES } from "@/lib/media-quality-gate";
 import {
   JSON_RPC_ERROR_CODES,
   MAX_TOOL_TEXT_LENGTH,
@@ -160,6 +166,13 @@ export interface McpToolContext {
   /** 貫穿本次 MCP 呼叫的 trace id（同時當上游 `X-Request-Id`）。 */
   traceId: string;
   dispatcher: McpDispatcher;
+  /**
+   * 輪詢用睡眠；預設 `setTimeout`。**可注入**：測試傳 no-op，避免真的等秒
+   * （照 `openai-compat/generation.ts` 的 `input.sleep ?? defaultSleep` 慣例）。
+   */
+  sleep?: (ms: number) => Promise<void>;
+  /** 時鐘；預設 `Date.now`。**可注入**：測試用假時鐘驅動 `run_agent` 的逾時路徑。 */
+  now?: () => number;
 }
 
 /** 轉發逾時：與 `/v1` 路由的 maxDuration 同量級，生圖/生視頻是長請求。 */
@@ -193,14 +206,15 @@ export function createHttpDispatcher(
       ? origin
       : (path: string) => `${origin.replace(/\/+$/, "")}${path}`;
   return async (request) => {
-    const headers: Record<string, string> = {
-      Accept: "application/json",
-      // 沿用既有 trace 慣例：上游路由的 getOrCreateTraceId 會原樣回聲。
-      "X-Request-Id": request.traceId,
-      // 同一次 MCP 呼叫重送不會重複扣費；鍵與 traceId 綁定，不會跨呼叫誤命中。
-      "Idempotency-Key": `mcp:${request.toolName}:${request.traceId}`,
-    };
-    if (request.authorization) headers.Authorization = request.authorization;
+    // 生成型請求的 trace / 冪等鍵紀律收斂在 generation-request-headers（R5）：
+    // `X-Request-Id` 沿用本次 MCP 呼叫的 traceId（上游 getOrCreateTraceId 會原樣回聲），
+    // 冪等鍵與 traceId 綁定（同一次呼叫重送不重複扣費，不跨呼叫誤命中）。
+    const headers = buildGenerationRequestHeaders({
+      traceId: request.traceId,
+      idempotencyKey: mcpGenerationIdempotencyKey(request.toolName, request.traceId),
+      authorization: request.authorization,
+      accept: "application/json",
+    });
 
     let payload: string | undefined;
     if (request.method === "POST") {
@@ -254,6 +268,9 @@ function pickString(args: Record<string, unknown>, key: string): string | undefi
 const SKILL_FAMILIES = Object.keys(AGENT_SKILL_FAMILY_LABELS) as string[];
 const DEFAULT_SKILL_LIMIT = 30;
 const MAX_SKILL_LIMIT = 200;
+
+/** 媒體硬檢政策的鍵（單一真源＝`media-quality-gate` 的 `QUALITY_POLICIES`，不另抄一份）。 */
+const QUALITY_POLICY_IDS = Object.keys(QUALITY_POLICIES) as string[];
 
 function skillSummary(skill: AgentSkillView) {
   return {
@@ -348,6 +365,238 @@ function snapshotState(payload: unknown): Record<string, unknown> {
   if (!isPlainObject(payload)) return {};
   const state = (payload as { state?: unknown }).state;
   return isPlainObject(state) ? state : {};
+}
+
+// ─────────────────────────────────────────── Eimu agent 閘道（B 端密鑰 → /api/agent/biz 代理）
+//
+// 這條線早已存在：`/api/agent/biz/[...path]` 用**呼叫者自己的 B 端密鑰**鑑權，換發成業主派生 key
+// 後轉發 VPS 閘道 `/agent/v1/<subPath>`，身分空間與網頁版 AI 助理完全相同（同 settings、
+// 同 orchestrator、beast_mode 為帳號級設定）。本節只把它投影到工具面，不重寫任何業務。
+// 硬限制：該代理的 JSON 路徑有 10s 逾時（`BIZ_PROXY_JSON_TIMEOUT_MS`），故 `run_agent`
+// 必須「送一輪快回、之後反覆輪詢」，絕不能在一個請求裡等完整回合。
+
+/** agent 會話站內路徑前綴（經 `/api/agent/biz` 代理到閘道 `/agent/v1/sessions`）。 */
+const AGENT_SESSIONS_PATH = "/api/agent/biz/sessions";
+/** agent 帳號級設定路徑（含 beast_mode）。 */
+const AGENT_SETTINGS_PATH = "/api/agent/biz/settings";
+/** `run_agent` 輪詢間隔；每次輪詢一律走簡化端點 `/sessions/{id}`（單次必須 <10s）。 */
+const RUN_AGENT_POLL_INTERVAL_MS = 2_000;
+const RUN_AGENT_DEFAULT_TIMEOUT_SECONDS = 180;
+/** 上限同時硬編在 schema（maximum）；執行層再夾一次當防禦。 */
+const RUN_AGENT_MAX_TIMEOUT_SECONDS = 300;
+
+function agentSessionPath(sessionId: string, suffix = ""): string {
+  return `${AGENT_SESSIONS_PATH}/${encodeURIComponent(sessionId)}${suffix}`;
+}
+
+/** 預設睡眠（測試以 `ctx.sleep` 注入 no-op，不真的等秒）。 */
+function defaultSleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function parseJsonLoose(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
+/** 上游非 2xx：與 `runForward` 同語義的工具錯誤（附已消毒原文）。 */
+function agentUpstreamFailure(method: string, path: string, response: McpDispatchResponse): McpToolCallResult {
+  return textResult(
+    `上游 ${method} ${path} 回應 HTTP ${response.status}：\n${truncateToolText(response.text)}`,
+    true,
+  );
+}
+
+/** 從 POST /sessions 回包取 `session_id`（形狀未實測：容忍頂層與 `session.session_id`，取不到回 undefined）。 */
+function extractSessionId(payload: unknown): string | undefined {
+  if (!isPlainObject(payload)) return undefined;
+  const direct = payload.session_id;
+  if (typeof direct === "string" && direct.trim() !== "") return direct.trim();
+  const nested = payload.session;
+  if (isPlainObject(nested)) {
+    const id = nested.session_id;
+    if (typeof id === "string" && id.trim() !== "") return id.trim();
+  }
+  return undefined;
+}
+
+interface AgentMessage {
+  role: string;
+  text: string;
+  created_at?: unknown;
+}
+
+/** 簡化 transcript 的 `messages`（非陣列/非物件一律略過，不假裝有內容）。 */
+function readAgentMessages(payload: unknown): AgentMessage[] {
+  if (!isPlainObject(payload) || !Array.isArray(payload.messages)) return [];
+  const out: AgentMessage[] = [];
+  for (const entry of payload.messages) {
+    if (!isPlainObject(entry)) continue;
+    out.push({
+      role: typeof entry.role === "string" ? entry.role : "",
+      text: typeof entry.text === "string" ? entry.text : "",
+      ...(entry.created_at !== undefined ? { created_at: entry.created_at } : {}),
+    });
+  }
+  return out;
+}
+
+/** 上游 `message_count`（缺欄位回 null，由呼叫方回退成 `messages.length`）。 */
+function readAgentMessageCount(payload: unknown): number | null {
+  if (!isPlainObject(payload)) return null;
+  const count = payload.message_count;
+  return typeof count === "number" && Number.isFinite(count) ? count : null;
+}
+
+// ── artifacts 抽取（「透傳」的核心）：抽媒體 URL 的同時保留原文 reply ──
+
+const ARTIFACT_IMAGE_EXTENSION = /\.(webp|png|jpe?g)(?:[?#]|$)/i;
+const ARTIFACT_VIDEO_EXTENSION = /\.(mp4|webm|mov)(?:[?#]|$)/i;
+const ARTIFACT_URL_PATTERN = /https?:\/\/[^\s"'<>()[\]{}]+/g;
+const ARTIFACT_MARKDOWN_IMAGE_PATTERN = /!\[[^\]]*\]\(\s*(https?:\/\/[^)\s]+)\s*\)/g;
+/** 既知媒體目錄：即使無副檔名也當產物（kind=file）。 */
+const ARTIFACT_MEDIA_PATH = "/image-data/files/";
+
+function artifactKind(url: string): "image" | "video" | "file" {
+  if (ARTIFACT_VIDEO_EXTENSION.test(url)) return "video";
+  if (ARTIFACT_IMAGE_EXTENSION.test(url)) return "image";
+  return "file";
+}
+
+/**
+ * 從回覆文字抽出成品媒體 URL：`/image-data/files/…` 的圖片/影片，以及 markdown 圖片
+ * `![alt](url)`（作者已宣告是圖）。非媒體的普通連結不列入。保持出現順序、同 URL 去重，
+ * kind 以「更明確者優先」（image/video 不被 file 覆蓋）。
+ */
+function extractAgentArtifacts(text: string): Array<{ url: string; kind: "image" | "video" | "file" }> {
+  const found = new Map<string, "image" | "video" | "file">();
+  const consider = (raw: string, viaMarkdownImage: boolean) => {
+    const url = raw.replace(/[.,;:!?]+$/, "");
+    if (!/^https?:\/\//i.test(url)) return;
+    const kind = artifactKind(url);
+    // 原始 URL 只收媒體（已知副檔名或 /image-data/files/）；markdown 圖片一律收。
+    if (!viaMarkdownImage && kind === "file" && !url.includes(ARTIFACT_MEDIA_PATH)) return;
+    const resolved = viaMarkdownImage && kind === "file" ? "image" : kind;
+    const existing = found.get(url);
+    if (existing === "image" || existing === "video") return;
+    found.set(url, resolved);
+  };
+  for (const match of text.matchAll(ARTIFACT_MARKDOWN_IMAGE_PATTERN)) consider(match[1], true);
+  for (const match of text.matchAll(ARTIFACT_URL_PATTERN)) consider(match[0], false);
+  return [...found.entries()].map(([url, kind]) => ({ url, kind }));
+}
+
+/**
+ * 把任務交給 Eimu 的 agent orchestrator，並以**反覆輪詢**取回覆（單次請求一律 <10s）。
+ *
+ * 完成判準：基線（送訊息前的 `message_count`）之後出現 role=assistant 且 text 非空的訊息。
+ * （規格裡的判準②「`/sessions` 列表 status=idle 且已有新 assistant 訊息」與①等價——
+ * 兩者都要求「已有新 assistant 訊息」，故以①為單一判準，不多打一次列表請求。）
+ *
+ * 逾時不丟錯：回 status:"running" 與目前最後一則回覆，讓呼叫方自行用 `get_agent_session` 續查。
+ */
+async function runAgent(args: Record<string, unknown>, ctx: McpToolContext): Promise<McpToolCallResult> {
+  const prompt = pickString(args, "prompt") ?? "";
+  const directive = pickString(args, "session_directive");
+  const requestedTimeout =
+    typeof args.timeout_seconds === "number" ? args.timeout_seconds : RUN_AGENT_DEFAULT_TIMEOUT_SECONDS;
+  const timeoutSeconds = Math.min(Math.max(1, requestedTimeout), RUN_AGENT_MAX_TIMEOUT_SECONDS);
+  const now = ctx.now ?? (() => Date.now());
+  const sleep = ctx.sleep ?? defaultSleep;
+  const startedAt = now();
+  const deadlineAt = startedAt + timeoutSeconds * 1000;
+
+  let sessionId = pickString(args, "session_id") ?? "";
+  if (!sessionId) {
+    const created = await ctx.dispatcher({
+      method: "POST",
+      path: AGENT_SESSIONS_PATH,
+      authorization: ctx.authorization,
+      traceId: ctx.traceId,
+      toolName: "run_agent",
+      body: {},
+    });
+    if (created.status < 200 || created.status >= 300) {
+      return agentUpstreamFailure("POST", AGENT_SESSIONS_PATH, created);
+    }
+    sessionId = extractSessionId(parseJsonLoose(created.text)) ?? "";
+    if (!sessionId) {
+      throw new Error("建立 agent 会话失败：上游回包没有 session_id（可用 list_agent_sessions 确认会话列表）。");
+    }
+  }
+
+  // 基線：送訊息前的 message_count（判準靠它區分新舊回覆；讀不到就退回 0）。
+  const before = await ctx.dispatcher({
+    method: "GET",
+    path: agentSessionPath(sessionId),
+    authorization: ctx.authorization,
+    traceId: ctx.traceId,
+    toolName: "run_agent",
+  });
+  const baselinePayload = before.status >= 200 && before.status < 300 ? parseJsonLoose(before.text) : undefined;
+  const baseline = readAgentMessageCount(baselinePayload) ?? readAgentMessages(baselinePayload).length;
+
+  // 送一輪（快回 accepted；確切 status/body 未實測，容忍 2xx 空 body）。
+  const sent = await ctx.dispatcher({
+    method: "POST",
+    path: agentSessionPath(sessionId, "/messages"),
+    authorization: ctx.authorization,
+    traceId: ctx.traceId,
+    toolName: "run_agent",
+    body: compact({ content: prompt, session_directive: directive }),
+  });
+  if (sent.status < 200 || sent.status >= 300) {
+    return agentUpstreamFailure("POST", agentSessionPath(sessionId, "/messages"), sent);
+  }
+
+  // 輪詢：每 2s 一次簡化端點（絕不用 /messages——回包大又不保證 <10s）。
+  let reply = "";
+  let fresh: AgentMessage[] = [];
+  for (;;) {
+    const detail = await ctx.dispatcher({
+      method: "GET",
+      path: agentSessionPath(sessionId),
+      authorization: ctx.authorization,
+      traceId: ctx.traceId,
+      toolName: "run_agent",
+    });
+    if (detail.status >= 200 && detail.status < 300) {
+      const messages = readAgentMessages(parseJsonLoose(detail.text));
+      fresh = baseline < messages.length ? messages.slice(baseline) : [];
+      const assistant = fresh.filter((message) => message.role === "assistant" && message.text.trim() !== "");
+      if (assistant.length > 0) {
+        reply = assistant[assistant.length - 1].text;
+        break;
+      }
+    }
+    const remaining = deadlineAt - now();
+    if (remaining <= 0) break;
+    await sleep(Math.min(RUN_AGENT_POLL_INTERVAL_MS, remaining));
+  }
+
+  const completed = reply !== "";
+  return textResult(
+    JSON.stringify(
+      {
+        session_id: sessionId,
+        status: completed ? "completed" : "running",
+        reply,
+        artifacts: extractAgentArtifacts(reply),
+        ...(fresh.length > 0 ? { messages: fresh } : {}),
+        elapsed_ms: now() - startedAt,
+        ...(completed
+          ? {}
+          : {
+              hint: `未在 ${timeoutSeconds}s 内等到回覆；任务可能仍在跑，用 get_agent_session（session_id=${sessionId}）续查。`,
+            }),
+      },
+      null,
+      2,
+    ),
+  );
 }
 
 async function runListSkills(args: Record<string, unknown>): Promise<McpToolCallResult> {
@@ -793,6 +1042,223 @@ function defineTools(): ToolDefinition[] {
             body: (a) => compact({ projectId: a.project_id, version: a.version }),
           },
           "workflow_rollback",
+          args,
+          ctx,
+        ),
+    },
+    {
+      name: "list_agent_sessions",
+      title: "列出 agent 会话",
+      description: bilingual(
+        "列出本 API key 所属账号的 Eimu agent 会话（session_id / status / title / updated_at），按最近活动由新到旧。这些会话与网页版 AI 助理是同一个账户空间（同一 settings）。拿到 session_id 后可用 get_agent_session 读对话与产物、用 run_agent 继续下任务。",
+        "List Eimu agent sessions owned by the current API key's account (id / status / title / updated_at), newest first. Same account space as the web AI assistant.",
+      ),
+      inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      run: (args, ctx) =>
+        runForwardProjected({ method: "GET", path: AGENT_SESSIONS_PATH }, "list_agent_sessions", args, ctx, (payload) => {
+          const sessions = isPlainObject(payload) && Array.isArray(payload.sessions) ? payload.sessions : [];
+          return {
+            object: "agent.session.list",
+            count: sessions.length,
+            sessions: sessions.filter(isPlainObject).map((session) => ({
+              session_id: session.session_id ?? null,
+              status: session.status ?? null,
+              title: session.title ?? null,
+              updated_at: session.updated_at ?? null,
+            })),
+          };
+        }),
+    },
+    {
+      name: "get_agent_session",
+      title: "读取 agent 会话",
+      description: bilingual(
+        "读取一个 Eimu agent 会话的内容：view=summary（默认，会话摘要与消息计数）、view=transcript（角色/部件级对话）、view=raw（网关原始消息，体积大）。assistant 的最终文字里含成品图片/影片 URL（用 run_agent 也可直接拿到结构化 artifacts）。会话属于本密钥账号，跨账号一律找不到。",
+        "Read one Eimu agent session: view=summary (default) | transcript | raw. The assistant's final text carries finished image/video URLs.",
+      ),
+      inputSchema: {
+        type: "object",
+        properties: {
+          session_id: { type: "string", description: "agent 会话 id（来自 list_agent_sessions）。" },
+          view: {
+            type: "string",
+            enum: ["summary", "transcript", "raw"],
+            description: "视图：summary（默认）| transcript | raw。",
+          },
+        },
+        required: ["session_id"],
+        additionalProperties: false,
+      },
+      run: (args, ctx) => {
+        const view = pickString(args, "view") ?? "summary";
+        const path = (a: Record<string, unknown>) => {
+          const id = encodeURIComponent(pickString(a, "session_id") ?? "");
+          if (view === "transcript") return `${AGENT_SESSIONS_PATH}/${id}/transcript`;
+          if (view === "raw") return `${AGENT_SESSIONS_PATH}/${id}/messages`;
+          return `${AGENT_SESSIONS_PATH}/${id}`;
+        };
+        return runForward({ method: "GET", path }, "get_agent_session", args, ctx);
+      },
+    },
+    {
+      name: "get_agent_settings",
+      title: "读取 agent 设置",
+      description: bilingual(
+        "读取本 API key 所属账号的 Eimu agent 设置（interrupt_mode / persona / cost_mode / interaction_mode / beast_mode）。beast_mode（野獸模式）是账号级开关，由 agent orchestrator 即时读取；本工具纯读，不产生费用。",
+        "Read the account-level Eimu agent settings (including beast_mode). Read-only, no charge.",
+      ),
+      inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      run: (args, ctx) =>
+        runForward({ method: "GET", path: AGENT_SETTINGS_PATH }, "get_agent_settings", args, ctx),
+    },
+    {
+      name: "run_agent",
+      title: "运行 agent 任务",
+      description: bilingual(
+        "把一个任务交给 Eimu 的 agent orchestrator 执行，返回最终回复与成品 URL（artifacts）。注意：这会真实消耗账号额度——orchestrator 会依任务自行使用生成类工具（可能扣费）；纯文本问答不要用它。它会自动建会话（或续用你给的 session_id）、快回 accepted 后由本工具反复轮询取结果；超时返回 status=running，可用 get_agent_session 续查。",
+        "Hand a task to Eimu's agent orchestrator and return its final reply plus artifact URLs. This really consumes account credits because the orchestrator may call billed generation tools itself; do not use it for plain text Q&A.",
+      ),
+      inputSchema: {
+        type: "object",
+        properties: {
+          prompt: { type: "string", description: "任务指令，必填，最长 8000 字符。" },
+          session_id: { type: "string", description: "续用既有会话；省略则新建一个会话。" },
+          timeout_seconds: {
+            type: "integer",
+            minimum: 1,
+            maximum: RUN_AGENT_MAX_TIMEOUT_SECONDS,
+            description: `等待上限（秒），默认 ${RUN_AGENT_DEFAULT_TIMEOUT_SECONDS}，上限 ${RUN_AGENT_MAX_TIMEOUT_SECONDS}。`,
+          },
+          session_directive: { type: "string", description: "本次会话的额外指令（可选，最长 4000 字符）。" },
+        },
+        required: ["prompt"],
+        additionalProperties: false,
+      },
+      run: (args, ctx) => runAgent(args, ctx),
+    },
+    {
+      name: "abort_agent_session",
+      title: "中止 agent 会话",
+      description: bilingual(
+        "中止一个正在运行的 Eimu agent 会话（中断当前回合）。会话必须属于本密钥账号；上游回包原样返回。",
+        "Abort a running Eimu agent session (interrupt the current turn); returns the upstream response verbatim.",
+      ),
+      inputSchema: {
+        type: "object",
+        properties: {
+          session_id: { type: "string", description: "要中止的 agent 会话 id。" },
+        },
+        required: ["session_id"],
+        additionalProperties: false,
+      },
+      run: (args, ctx) =>
+        runForward(
+          { method: "POST", path: (a) => agentSessionPath(pickString(a, "session_id") ?? "", "/abort"), body: () => ({}) },
+          "abort_agent_session",
+          args,
+          ctx,
+        ),
+    },
+    // ─────────────────────────────────────────── 閘門工具（2026-10-03 MCP 暴露）
+    //
+    // 這兩支是給外部 agent 對**自己的產物**做確定性自檢的閘門：不重寫任何業務，
+    // 只把參數原樣交給站內 `/api/harness/**` 端點（契約校驗真源＝expert-contract.ts，
+    // 媒體硬檢真源＝media-quality-gate.ts），回包原樣透傳。
+    // 刻意**不**放在 `/api/v1/**`：該前綴被 next.config.mjs 的 beforeFiles 整包代理給控面，
+    // 控面沒有這兩條 route ⇒ 直打會 404（2026-10-03 線上缺陷）。`/api/harness/**` 未被代理，
+    // 由本 Vercel 部署直接服務。漂移探針見 tools.test.ts 的「MCP 工具目標路由漂移」。
+    {
+      name: "check_delivery_contract",
+      title: "校验交付契约",
+      description: bilingual(
+        "对 Expert 交付物做**契约栏位层**的确定性校验，逐条检查：① expert_id 是合法 Expert；② kind 非空、payload 是非空物件；③ evidence 至少一项可核验指针（url／artifact_path／bytes／duration_sec 任一非空）；④ qc_signature 与内容相符（computeQcSignature 重算比对）；⑤ **该域契约的必填栏位每一栏在 payload 中必须存在且值非空**（undefined／null／空字符串／空白字符串／空数组／空对象一律算缺，缺栏按契约顺序点名）。**这不是品质评分**——它不判断作品好不好，只判断交付物合不合契约；ok:true 只代表「栏位层合格」，不代表成品可用（成品品质请用 evaluate_media_quality）。注意：站内还有一个同名交付闸门，但判据不同——它是在**自由文本**里做栏位名子字符串命中（栏名出现即算过，空值也命中），本工具是**结构化物件**检查（栏位必须在 payload 里且值非空），两者读同一份契约档但**判据不等价**。返回 { ok, errors[], qc_signature }：qc_signature 恒回对本次输入重算出的**期望值**（sha256 校验和，无密钥、无秘密），便于修正或比对。",
+        "Deterministic contract-field validation of an Expert deliverable. It checks: (1) expert_id is a known Expert; (2) kind non-empty and payload is a non-empty object; (3) evidence has at least one verifiable pointer (url/artifact_path/bytes/duration_sec); (4) qc_signature matches the content (recomputed via computeQcSignature); (5) **every required field of that domain's contract exists in payload with a non-empty value** (undefined/null/empty or whitespace string/empty array/empty object all count as missing, and missing ones are named in contract order). This is NOT a quality score: ok:true means the contract shape is valid, not that the artifact is good — use evaluate_media_quality for the artifact. Note the in-house gate of the same name has DIFFERENT criteria: it does substring matching of field NAMES in free text (a name's presence passes even with an empty value), whereas this tool inspects a structured object (the field must exist in payload with a non-empty value); both read the same contract file but the criteria are NOT equivalent. Returns { ok, errors[], qc_signature } where qc_signature is always the expected checksum recomputed over the submitted input (sha256, no key, no secret).",
+      ),
+      inputSchema: {
+        type: "object",
+        properties: {
+          expert_id: {
+            type: "string",
+            enum: EXPERT_IDS,
+            description: "Expert 身份 id（决定允许的交付域与该域的必填契约栏位）。",
+          },
+          kind: {
+            type: "string",
+            description: "交付物种类（如 scene_3d / music_track）。",
+          },
+          payload: {
+            type: "object",
+            description: "交付物本体（按域 schema；必须含该域契约 requiredFields 的每一栏且值非空）。",
+          },
+          evidence: {
+            type: "object",
+            description: bilingual(
+              "可核验指针，至少一项非空。**键名两种拼法都接受**：snake_case（`artifact_path`／`duration_sec`）与 camelCase（`artifactPath`／`durationSec`）皆可，**两者同时给时以 camelCase 为准**；`url`／`bytes` 本就同名。",
+              "Verifiable pointer, at least one non-empty. BOTH key spellings are accepted: snake_case (`artifact_path`/`duration_sec`) and camelCase (`artifactPath`/`durationSec`); when both are given, camelCase takes precedence. `url`/`bytes` are identical in both spellings.",
+            ),
+          },
+          qc_signature: {
+            type: "string",
+            description: "QC 签名（computeQcSignature 产出的 sha256 hex）；缺或不符会随 errors 一并回报期望值。",
+          },
+        },
+        required: ["expert_id", "kind", "payload"],
+        additionalProperties: false,
+      },
+      run: (args, ctx) =>
+        runForward(
+          {
+            method: "POST",
+            path: "/api/harness/expert/deliverable/validate",
+            body: (a) =>
+              compact({
+                expert_id: a.expert_id,
+                kind: a.kind,
+                payload: a.payload,
+                evidence: a.evidence,
+                qc_signature: a.qc_signature,
+              }),
+          },
+          "check_delivery_contract",
+          args,
+          ctx,
+        ),
+    },
+    {
+      name: "evaluate_media_quality",
+      title: "媒体硬检",
+      description: bilingual(
+        "对已生成完成的影片/图片/音频做确定性硬检（分辨率/时长/文件大小/音轨/非静音等），套用我方政策阈值。三条诚实契约：① 量测在**我们的服务器**上执行（本机 ffprobe/ffmpeg）；本部署环境（Vercel serverless）**不保证有 ffprobe/ffmpeg**，量测失败会**原样回** { ok:false, failures:[{ code:\"probe_unavailable\" }] }——**probe_unavailable ≠ 通过**，它代表「量测没有发生」，不是「检查通过」；② 呼叫方也可以自己 ffprobe 后把 probe 传进来，我们只负责套用**我们的政策与阈值**；③ 给了 probe 就不再执行服务器量测。返回 { ok, failures[], measured, policyId }。",
+        "Deterministic hard check of a finished video/image/audio against our policy thresholds. Honesty contract: measurement runs on OUR server and this deployment (Vercel serverless) may lack ffprobe/ffmpeg, in which case it returns ok:false with a probe_unavailable failure — probe_unavailable is NOT a pass, it means nothing was measured. Alternatively pass your own ffprobe `probe` and we only apply our policy/thresholds. Returns { ok, failures[], measured, policyId }.",
+      ),
+      inputSchema: {
+        type: "object",
+        properties: {
+          media_url: {
+            type: "string",
+            description: "要量测的媒体地址（http(s) URL）或服务器可读路径；省略时必须给 probe。",
+          },
+          probe: {
+            type: "object",
+            description:
+              "呼叫方自行 ffprobe 的结果（MediaProbe 形状：status / container / durationSec / sizeBytes / video / audio）；给了它我们只套政策，不做服务器量测。",
+          },
+          policy: {
+            type: "string",
+            enum: QUALITY_POLICY_IDS,
+            description: `政策 id，默认 video_default（可选：${QUALITY_POLICY_IDS.join(" / ")}）。`,
+          },
+        },
+        additionalProperties: false,
+      },
+      run: (args, ctx) =>
+        runForward(
+          {
+            method: "POST",
+            path: "/api/harness/media/quality",
+            body: (a) => compact({ media_url: a.media_url, probe: a.probe, policy: a.policy }),
+          },
+          "evaluate_media_quality",
           args,
           ctx,
         ),

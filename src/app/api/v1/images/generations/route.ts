@@ -71,6 +71,7 @@ type OpenAIErrorType =
   | "permission_error"
   | "rate_limit_error"
   | "insufficient_balance"
+  | "task_budget_exceeded"
   | "api_error";
 
 /**
@@ -90,6 +91,40 @@ function errorResponse(
   const response = NextResponse.json(
     { error: { message, type, code, param: null, trace_id: traceId } },
     { status, ...(headers ? { headers } : {}) },
+  );
+  return withTraceId(response, traceId);
+}
+
+/**
+ * 預算超限（W5b）專用 402：在標準錯誤體上追加 `estimated_coins`/`cap_coins`。
+ * 刻意不併進 errorResponse——那個函式的形狀被 v1 contract-lock 釘死
+ * （`{message,type,code,param:null,trace_id}` 逐字），不得改寫；本支是新出口，
+ * 只在 gate 回 `task_budget_exceeded` 時走。
+ */
+function budgetExceededResponse(
+  gate: {
+    status: number;
+    message: string;
+    type: OpenAIErrorType;
+    code: string;
+    estimated_coins?: number;
+    cap_coins?: number;
+  },
+  traceId: string,
+) {
+  const response = NextResponse.json(
+    {
+      error: {
+        message: gate.message,
+        type: gate.type,
+        code: gate.code,
+        param: null,
+        trace_id: traceId,
+        estimated_coins: gate.estimated_coins,
+        cap_coins: gate.cap_coins,
+      },
+    },
+    { status: gate.status },
   );
   return withTraceId(response, traceId);
 }
@@ -118,6 +153,12 @@ interface ImageRequestBody {
    */
   resolution?: unknown;
   output_resolution?: unknown;
+  /**
+   * 單次任務預算上限（**幣**，W5b）：客戶宣告後，本次任務估算幣值超過它即
+   * 402 `task_budget_exceeded`（硬停，不扣費）。未給＝預算閘不啟用，行為不變。
+   * 非有限數（NaN/Infinity）或非 number 一律視為未宣告（不因壞輸入誤擋）。
+   */
+  cap_coins?: unknown;
 }
 
 export async function POST(req: NextRequest) {
@@ -295,12 +336,21 @@ async function handleGeneration(req: NextRequest, rejection: RejectionContext): 
     // 跳過（計費交事後投影）；額度不足 → 按現契約 402；上游不可達 → 原樣回落
     // 下方 reserve 路徑。env 未設 = 金額原樣，路徑一字不變。
     const baseBillingAmount = imageGenerationCoins(modelId, qualityMode, submitResolution) * QUOTA_PER_COIN * rawN;
+    // 單次任務預算（幣，W5b）：客戶宣告才啟用；非法/非有限數視為未宣告（不誤擋）。
+    // 判定（估算 vs cap）在 quota-precheck 內走 task-budget 的 exceedsBudget 單一真源。
+    const budgetCapCoins =
+      typeof body.cap_coins === "number" && Number.isFinite(body.cap_coins) ? body.cap_coins : undefined;
     const gate = await enforceQuotaGate({
       bizKeyId: apiKey.id,
       billingUserId: apiKey.userId,
       baseBillingAmount,
+      budgetCapCoins,
     });
     if (!gate.ok) {
+      // 預算超限：帶上估算與上限（其餘錯誤碼走標準錯誤體，行為逐位不變）。
+      if (gate.code === "task_budget_exceeded") {
+        return budgetExceededResponse(gate, traceId);
+      }
       return errorResponse(gate.status, gate.message, gate.type, gate.code, traceId);
     }
 

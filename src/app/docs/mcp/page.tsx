@@ -39,7 +39,7 @@ const REMOTE_MCP_CONFIG = `{
     "eimu": {
       "type": "http",
       "url": "${REMOTE_MCP_ENDPOINT}",
-      "headers": { "Authorization": "Bearer sk-biz-你的密钥" }
+      "headers": { "Authorization": "Bearer \${EIMU_BIZ_KEY}" }
     }
   }
 }`;
@@ -108,6 +108,20 @@ export default function DocsMcpPage() {
               <CodeBlock>{REMOTE_MCP_CONFIG}</CodeBlock>
             </div>
             <p className="mt-3">
+              片段里的 <InlineCode>{"${EIMU_BIZ_KEY}"}</InlineCode> 是
+              <span className="font-semibold text-[rgba(0,0,0,0.68)]">字面引用</span>，不是要你填的值：客户端需支持{" "}
+              <InlineCode>{"${VAR}"}</InlineCode> 插值，并且这个环境变量要持久化在 shell 启动文件里（只 export
+              一次的话，重开终端客户端就读不到，会送出空 `Bearer ` 并拿到 401）。完整步骤见{" "}
+              <a href="/mcp" className="font-semibold text-[#007AFF] lg-transition hover:underline">
+                /mcp 接入页
+              </a>
+              {" "}的「一键安装指令」第 3 步。
+            </p>
+            <p className="mt-3">
+              下面「本机自架」配置里的 <InlineCode>IMAGE_STUDIO_BIZ_KEY</InlineCode>{" "}
+              看起来是明文密钥，那是给本机子进程读的字面值（客户端启动该子进程时注入），与这里的远端引用写法不同，两者不矛盾。
+            </p>
+            <p className="mt-3">
               密钥只存在你本机的配置或环境变量里，不会上传给我们；网页、REST API 与 MCP 共用同一本账，生成走真实计费，失败自动退回。
             </p>
           </KeyCard>
@@ -144,7 +158,7 @@ export default function DocsMcpPage() {
           </KeyCard>
           <KeyCard icon={ListChecks} title="本机 server 提供的 4 个工具">
             <p className="mb-3">
-              远端 MCP 的工具清单（16 个）见{" "}
+              远端 MCP 的工具清单（23 个）见{" "}
               <a href="/mcp" className="font-semibold text-[#007AFF] lg-transition hover:underline">
                 /mcp 接入页
               </a>

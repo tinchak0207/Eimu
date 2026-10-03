@@ -9,9 +9,12 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readdirSync, statSync } from "node:fs";
+import path from "node:path";
 import { NextRequest } from "next/server";
 
 import { hashBizApiKey } from "@/lib/biz-api-keys";
+import { CONTROL_PLANE_PROXY_SOURCES } from "../control-plane-proxy-routes.mjs";
 import { __resetBizKeyStoreForTests } from "@/lib/biz-api-key-store";
 import { listPublicSkills, registerUserSkillSource, searchPublicSkills, type AgentSkillView } from "@/lib/agent-skills/registry";
 import { compileWorkflow, workflowNodeId } from "@/lib/workflow-dsl/compile";
@@ -25,6 +28,7 @@ import {
   validateToolArguments,
   type McpDispatchRequest,
   type McpDispatcher,
+  type McpToolContext,
 } from "./tools";
 import { GET, POST } from "../../app/api/mcp/route";
 
@@ -50,8 +54,17 @@ function fakeDispatcher(response: { status?: number; text?: string } = {}): Fake
   return { calls, dispatcher };
 }
 
-function ctx(dispatcher: McpDispatcher, authorization: string | null = `Bearer ${VALID_KEY}`) {
-  return { authorization, traceId: TRACE_ID, dispatcher };
+function ctx(
+  dispatcher: McpDispatcher,
+  authorization: string | null = `Bearer ${VALID_KEY}`,
+  extras: Partial<Pick<McpToolContext, "sleep" | "now">> = {},
+) {
+  return { authorization, traceId: TRACE_ID, dispatcher, ...extras };
+}
+
+/** `run_agent` 的測試專用 ctx：假時鐘（預設固定 0）＋ no-op sleep，永不真的等秒。 */
+function agentCtx(dispatcher: McpDispatcher, now: () => number = () => 0) {
+  return ctx(dispatcher, `Bearer ${VALID_KEY}`, { sleep: async () => {}, now });
 }
 
 function parseResult(result: McpToolCallResult): unknown {
@@ -94,6 +107,26 @@ const VALID_ARGS: Record<string, Record<string, unknown>> = {
     label: "改成 2 步",
   },
   workflow_rollback: { node_id: "wf-a", project_id: "proj-1", version: 1 },
+  list_agent_sessions: {},
+  get_agent_session: { session_id: "sess-1", view: "transcript" },
+  get_agent_settings: {},
+  run_agent: { prompt: "画一只猫", session_id: "sess-1", timeout_seconds: 30, session_directive: "简短回复" },
+  abort_agent_session: { session_id: "sess-1" },
+  check_delivery_contract: {
+    expert_id: "music",
+    kind: "music_track",
+    payload: {
+      emotion_contract: "平静",
+      lyrics: "la la la",
+      melody_notation: "C4 D4 E4",
+      audio_url: "https://cdn.example/a.mp3",
+      duration_source: "measured",
+      qc: "逐栏核对通过",
+    },
+    evidence: { url: "https://cdn.example/a.mp3" },
+    qc_signature: "deadbeef",
+  },
+  evaluate_media_quality: { media_url: "https://cdn.example/a.mp4", policy: "video_default" },
 };
 
 // ─────────────────────────────────────────── 1. 工具表
@@ -138,6 +171,10 @@ test("工具表：必填欄位缺一不可——空物件對有 required 的工�
     workflow_history: "arguments.session_id",
     workflow_write: "arguments.source",
     workflow_rollback: "arguments.node_id",
+    get_agent_session: "arguments.session_id",
+    run_agent: "arguments.prompt",
+    abort_agent_session: "arguments.session_id",
+    check_delivery_contract: "arguments.expert_id",
   };
   for (const tool of MCP_TOOLS) {
     const problem = validateToolArguments(__getToolSchemaForTests(tool.name)!, {});
@@ -175,6 +212,25 @@ test("參數驗證：型別、值域、額外欄位都要被拒（不是靜默�
     ["workflow_write", { source: "not-an-object" }, /source 必須是物件/],
     ["workflow_rollback", { node_id: "n", project_id: "p", version: 0 }, /version 不得小於 1/],
     ["workflow_rollback", { node_id: "n", project_id: "p", version: 1.5 }, /version 必須是整數/],
+    // agent 族（2026-10-03 新增）
+    ["list_agent_sessions", { nope: 1 }, /nope 不是本工具支援的參數/],
+    ["get_agent_session", { session_id: 1 }, /session_id 必須是字串/],
+    ["get_agent_session", { session_id: "s", view: "full" }, /view 只能是/],
+    ["get_agent_session", { session_id: "s", nope: 1 }, /nope 不是本工具支援的參數/],
+    ["get_agent_settings", { nope: 1 }, /nope 不是本工具支援的參數/],
+    ["run_agent", { prompt: "x", timeout_seconds: 0 }, /timeout_seconds 不得小於 1/],
+    ["run_agent", { prompt: "x", timeout_seconds: 999 }, /timeout_seconds 不得大於 300/],
+    ["run_agent", { timeout_seconds: 10 }, /prompt 是必填參數/],
+    ["abort_agent_session", { session_id: 1 }, /session_id 必須是字串/],
+    // 閘門工具（2026-10-03 新增）
+    ["check_delivery_contract", { kind: "music_track", payload: {} }, /expert_id 是必填參數/],
+    ["check_delivery_contract", { expert_id: "not-an-expert", kind: "music_track", payload: {} }, /expert_id 只能是/],
+    ["check_delivery_contract", { expert_id: "music", payload: {} }, /kind 是必填參數/],
+    ["check_delivery_contract", { expert_id: "music", kind: "music_track", payload: [] }, /payload 必須是物件/],
+    ["check_delivery_contract", { expert_id: "music", kind: "music_track", payload: {}, nope: 1 }, /nope 不是本工具支援的參數/],
+    ["evaluate_media_quality", { media_url: 1 }, /media_url 必須是字串/],
+    ["evaluate_media_quality", { policy: "not-a-policy" }, /policy 只能是/],
+    ["evaluate_media_quality", { nope: 1 }, /nope 不是本工具支援的參數/],
   ];
   for (const [name, args, pattern] of cases) {
     const problem = validateToolArguments(__getToolSchemaForTests(name)!, args);
@@ -627,6 +683,309 @@ test("workflow_write：DSL 非法時上游 422 原樣透傳 errors（isError，�
   assert.match(result.content[0].text, /workflow_dsl_invalid/);
 });
 
+// ─────────────────────────────────────────── 2d. Eimu agent 閘道族（2026-10-03 MCP 暴露）
+//
+// 這條線＝B 端密鑰 → `/api/agent/biz/**` 站內代理 → VPS 閘道 `/agent/v1/**`（與網頁版 AI 助理
+// 同一身分空間）。全部用假 dispatcher 斷言真行為（路徑/方法/呼叫序列/產物抽取），不打真端點。
+
+const AGENT_OLD_MESSAGES = [
+  { role: "user", text: "旧问题" },
+  { role: "assistant", text: "旧答" },
+  { role: "system", text: "sys" },
+  { role: "user", text: "旧问题二" },
+];
+
+function jsonResponse(payload: unknown, status = 200) {
+  return { status, contentType: "application/json", text: JSON.stringify(payload) };
+}
+
+/** 依 `"METHOD /path"` 腳本化的 dispatcher；未預期路徑直接拋錯（防假通過）。 */
+function scriptedDispatcher(
+  routes: Record<string, () => { status?: number; contentType?: string; text?: string }>,
+): { calls: McpDispatchRequest[]; dispatcher: McpDispatcher } {
+  const calls: McpDispatchRequest[] = [];
+  const dispatcher: McpDispatcher = async (request) => {
+    calls.push(request);
+    const handler = routes[`${request.method} ${request.path}`];
+    assert.ok(handler, `未預期的轉發：${request.method} ${request.path}`);
+    const response = handler!();
+    return {
+      status: response.status ?? 200,
+      contentType: response.contentType ?? "application/json",
+      text: response.text ?? "{}",
+    };
+  };
+  return { calls, dispatcher };
+}
+
+test("agent 讀面：list_agent_sessions / get_agent_settings 打對端點（GET、Authorization 原樣透傳、清單欄位投影）", async () => {
+  const list = fakeDispatcher({
+    text: JSON.stringify({
+      object: "agent.session.list",
+      sessions: [
+        {
+          session_id: "sess-1",
+          status: "idle",
+          title: "标题",
+          updated_at: "2026-10-03T00:00:00Z",
+          created_at: "2026-10-02T00:00:00Z",
+          secret_field: "不应出现",
+        },
+      ],
+    }),
+  });
+  const listed = parseResult(await callTool("list_agent_sessions", {}, ctx(list.dispatcher))) as {
+    object: string;
+    count: number;
+    sessions: Array<Record<string, unknown>>;
+  };
+  assert.equal(list.calls.length, 1);
+  assert.equal(list.calls[0].method, "GET");
+  assert.equal(list.calls[0].path, "/api/agent/biz/sessions");
+  assert.equal(list.calls[0].body, undefined, "GET 不得帶 body");
+  assert.equal(list.calls[0].authorization, `Bearer ${VALID_KEY}`, "必須原樣透傳 Authorization");
+  assert.equal(listed.object, "agent.session.list");
+  assert.equal(listed.count, 1);
+  assert.deepEqual(
+    listed.sessions,
+    [{ session_id: "sess-1", status: "idle", title: "标题", updated_at: "2026-10-03T00:00:00Z" }],
+    "清單只投影 session_id/status/title/updated_at",
+  );
+
+  const settings = fakeDispatcher({
+    text: JSON.stringify({
+      interrupt_mode: "steer",
+      persona: "efficient",
+      cost_mode: "balanced",
+      interaction_mode: "preset",
+      beast_mode: true,
+    }),
+  });
+  const settingsResult = parseResult(await callTool("get_agent_settings", {}, ctx(settings.dispatcher))) as {
+    beast_mode: boolean;
+  };
+  assert.equal(settings.calls.length, 1);
+  assert.equal(settings.calls[0].method, "GET");
+  assert.equal(settings.calls[0].path, "/api/agent/biz/settings");
+  assert.equal(settings.calls[0].authorization, `Bearer ${VALID_KEY}`);
+  assert.equal(settingsResult.beast_mode, true);
+});
+
+test("get_agent_session：三種 view 各打對子路徑（session_id 逐段 URL 編碼、皆 GET 帶 Authorization）", async () => {
+  const summary = fakeDispatcher({ text: JSON.stringify({ session_id: "s", message_count: 2, messages: [] }) });
+  await callTool("get_agent_session", { session_id: "s 1/2" }, ctx(summary.dispatcher));
+  const transcript = fakeDispatcher({ text: JSON.stringify({ messages: [] }) });
+  await callTool("get_agent_session", { session_id: "s 1/2", view: "transcript" }, ctx(transcript.dispatcher));
+  const raw = fakeDispatcher({ text: JSON.stringify({ messages: [], event_counter: 3 }) });
+  await callTool("get_agent_session", { session_id: "s 1/2", view: "raw" }, ctx(raw.dispatcher));
+
+  assert.deepEqual(
+    [summary.calls[0], transcript.calls[0], raw.calls[0]].map((call) => `${call.method} ${call.path}`),
+    [
+      "GET /api/agent/biz/sessions/s%201%2F2",
+      "GET /api/agent/biz/sessions/s%201%2F2/transcript",
+      "GET /api/agent/biz/sessions/s%201%2F2/messages",
+    ],
+  );
+  for (const call of [summary.calls[0], transcript.calls[0], raw.calls[0]]) {
+    assert.equal(call.method, "GET");
+    assert.equal(call.authorization, `Bearer ${VALID_KEY}`);
+    assert.equal(call.toolName, "get_agent_session");
+  }
+});
+
+test("run_agent：無 session_id 時先建會話→取基線→送訊息→輪詢（第一輪未完成、第二輪完成，斷言呼叫序列）", async () => {
+  let detailHits = 0;
+  const { calls, dispatcher } = scriptedDispatcher({
+    "POST /api/agent/biz/sessions": () => jsonResponse({ object: "agent.session", session_id: "sess-new", unknown_field: 1 }),
+    "GET /api/agent/biz/sessions/sess-new": () => {
+      detailHits += 1;
+      if (detailHits === 1) return jsonResponse({ message_count: 4, messages: AGENT_OLD_MESSAGES });
+      if (detailHits === 2) {
+        // 輪詢第一輪：只有我們送出的使用者訊息，尚無 assistant 文字 ⇒ 未完成
+        return jsonResponse({ message_count: 5, messages: [...AGENT_OLD_MESSAGES, { role: "user", text: "画猫" }] });
+      }
+      // 輪詢第二輪：出現新 assistant 文字 ⇒ 完成
+      return jsonResponse({
+        message_count: 6,
+        messages: [
+          ...AGENT_OLD_MESSAGES,
+          { role: "user", text: "画猫" },
+          { role: "assistant", text: "画好了 https://cdn.test/image-data/files/a.webp", created_at: "t2" },
+        ],
+      });
+    },
+    "POST /api/agent/biz/sessions/sess-new/messages": () => ({ status: 202, contentType: "application/json", text: "" }),
+  });
+
+  const result = await callTool("run_agent", { prompt: "画猫" }, agentCtx(dispatcher));
+  assert.notEqual(result.isError, true, result.content[0].text);
+
+  assert.deepEqual(
+    calls.map((call) => `${call.method} ${call.path}`),
+    [
+      "POST /api/agent/biz/sessions",
+      "GET /api/agent/biz/sessions/sess-new",
+      "POST /api/agent/biz/sessions/sess-new/messages",
+      "GET /api/agent/biz/sessions/sess-new",
+      "GET /api/agent/biz/sessions/sess-new",
+    ],
+    "呼叫序列必須是 建會話→基線→送訊息→輪詢×2（證明輪詢存在）",
+  );
+  assert.deepEqual(calls[0].body, {}, "建立會話 body 必須是空物件");
+  assert.deepEqual(calls[2].body, { content: "画猫" }, "送訊息只帶 content");
+  assert.ok(calls.every((call) => call.authorization === `Bearer ${VALID_KEY}`), "每一跳都必須帶 Authorization");
+
+  const payload = parseResult(result) as {
+    session_id: string;
+    status: string;
+    reply: string;
+    artifacts: Array<{ url: string; kind: string }>;
+    messages: Array<{ role: string }>;
+  };
+  assert.equal(payload.session_id, "sess-new");
+  assert.equal(payload.status, "completed");
+  assert.equal(payload.reply, "画好了 https://cdn.test/image-data/files/a.webp", "取基線之後最後一則 assistant 文字");
+  assert.deepEqual(payload.artifacts, [{ url: "https://cdn.test/image-data/files/a.webp", kind: "image" }]);
+  assert.deepEqual(payload.messages.map((message) => message.role), ["user", "assistant"]);
+});
+
+test("run_agent：帶 session_id 時不建會話（第一跳是基線讀取，且無 POST /sessions）", async () => {
+  const calls: McpDispatchRequest[] = [];
+  let detailHits = 0;
+  const dispatcher: McpDispatcher = async (request) => {
+    calls.push(request);
+    if (request.method === "POST" && request.path === "/api/agent/biz/sessions/sess-x/messages") {
+      return { status: 200, contentType: "application/json", text: '{"accepted":true}' };
+    }
+    if (request.method === "GET" && request.path === "/api/agent/biz/sessions/sess-x") {
+      detailHits += 1;
+      if (detailHits === 1) return jsonResponse({ message_count: 0, messages: [] });
+      return jsonResponse({
+        message_count: 2,
+        messages: [
+          { role: "user", text: "hi" },
+          { role: "assistant", text: "你好" },
+        ],
+      });
+    }
+    throw new Error(`unexpected ${request.method} ${request.path}`);
+  };
+
+  const result = await callTool("run_agent", { prompt: "hi", session_id: "sess-x", timeout_seconds: 30 }, agentCtx(dispatcher));
+  assert.notEqual(result.isError, true, result.content[0].text);
+  assert.equal(
+    calls.some((call) => call.method === "POST" && call.path === "/api/agent/biz/sessions"),
+    false,
+    "帶了 session_id 就不該再建會話",
+  );
+  assert.equal(calls[0].method, "GET");
+  assert.equal(calls[0].path, "/api/agent/biz/sessions/sess-x", "第一跳必須是基線讀取");
+  const payload = parseResult(result) as { session_id: string; status: string; reply: string };
+  assert.equal(payload.session_id, "sess-x");
+  assert.equal(payload.status, "completed");
+  assert.equal(payload.reply, "你好");
+});
+
+test("run_agent：artifacts 抽出圖片與影片 URL（kind 正確），原文 reply 完整保留", async () => {
+  const reply = [
+    "已完成！",
+    "![预览](https://cdn.test/image-data/files/pic.webp)",
+    "视频：https://cdn.test/image-data/files/clip.mp4",
+    "文档：https://cdn.test/docs/readme.txt",
+    "扩展名带查询串：https://cdn.test/image-data/files/raw.png?x=1",
+  ].join("\n");
+  let detailHits = 0;
+  const dispatcher: McpDispatcher = async (request) => {
+    if (request.method === "POST" && request.path === "/api/agent/biz/sessions/sess-a/messages") {
+      return { status: 202, contentType: "application/json", text: "" };
+    }
+    if (request.method === "GET" && request.path === "/api/agent/biz/sessions/sess-a") {
+      detailHits += 1;
+      if (detailHits === 1) return jsonResponse({ message_count: 0, messages: [] });
+      return jsonResponse({
+        message_count: 2,
+        messages: [
+          { role: "user", text: "hi" },
+          { role: "assistant", text: reply },
+        ],
+      });
+    }
+    throw new Error(`unexpected ${request.method} ${request.path}`);
+  };
+
+  const result = await callTool("run_agent", { prompt: "hi", session_id: "sess-a" }, agentCtx(dispatcher));
+  const payload = parseResult(result) as { status: string; reply: string; artifacts: Array<{ url: string; kind: string }> };
+  assert.equal(payload.status, "completed");
+  assert.equal(payload.reply, reply, "reply 必須保留原文，不得只回 URL");
+  assert.deepEqual(payload.artifacts, [
+    { url: "https://cdn.test/image-data/files/pic.webp", kind: "image" },
+    { url: "https://cdn.test/image-data/files/clip.mp4", kind: "video" },
+    { url: "https://cdn.test/image-data/files/raw.png?x=1", kind: "image" },
+  ]);
+});
+
+test("run_agent：逾時回 status=running 且不拋錯（附 get_agent_session 續查提示）", async () => {
+  const calls: McpDispatchRequest[] = [];
+  const dispatcher: McpDispatcher = async (request) => {
+    calls.push(request);
+    if (request.method === "POST" && request.path === "/api/agent/biz/sessions/sess-t/messages") {
+      return { status: 202, contentType: "application/json", text: "" };
+    }
+    if (request.method === "GET" && request.path === "/api/agent/biz/sessions/sess-t") {
+      // 永遠只有使用者訊息，沒有 assistant 文字 ⇒ 永遠不完成
+      return jsonResponse({ message_count: 1, messages: [{ role: "user", text: "hi" }] });
+    }
+    throw new Error(`unexpected ${request.method} ${request.path}`);
+  };
+  let tick = 0;
+  const now = () => (tick += 100_000);
+  const result = await callTool("run_agent", { prompt: "hi", session_id: "sess-t", timeout_seconds: 5 }, agentCtx(dispatcher, now));
+
+  assert.notEqual(result.isError, true, "逾時不得是工具錯誤");
+  const payload = parseResult(result) as {
+    session_id: string;
+    status: string;
+    reply: string;
+    artifacts: unknown[];
+    hint: string;
+  };
+  assert.equal(payload.status, "running");
+  assert.equal(payload.session_id, "sess-t");
+  assert.equal(typeof payload.reply, "string", "逾時仍回目前最後一則回覆（可為空字串）");
+  assert.deepEqual(payload.artifacts, []);
+  assert.match(payload.hint, /get_agent_session/, "必須告訴呼叫方可用 get_agent_session 續查");
+  assert.ok(calls.length >= 3, "必須真的走過 基線＋送訊息＋至少一輪輪詢");
+});
+
+test("abort_agent_session：POST 到 abort 路徑、body 為空物件、上游回包原樣", async () => {
+  const abort = fakeDispatcher({ text: '{"object":"agent.session.aborted","ok":true}' });
+  const result = await callTool("abort_agent_session", { session_id: "s 1/2" }, ctx(abort.dispatcher));
+  assert.notEqual(result.isError, true);
+  assert.equal(abort.calls.length, 1);
+  assert.equal(abort.calls[0].method, "POST");
+  assert.equal(abort.calls[0].path, "/api/agent/biz/sessions/s%201%2F2/abort");
+  assert.deepEqual(abort.calls[0].body, {}, "abort body 必須是空物件");
+  assert.equal(abort.calls[0].authorization, `Bearer ${VALID_KEY}`);
+  assert.deepEqual(parseResult(result), { object: "agent.session.aborted", ok: true });
+});
+
+test("agent 族：五個工具都在單一真源裡（可列舉）", () => {
+  for (const name of [
+    "list_agent_sessions",
+    "get_agent_session",
+    "get_agent_settings",
+    "run_agent",
+    "abort_agent_session",
+  ]) {
+    assert.ok(listToolNames().includes(name), `listToolNames 缺 ${name}`);
+    assert.ok(
+      MCP_TOOLS.some((tool) => tool.name === name),
+      `MCP_TOOLS 缺 ${name}`,
+    );
+  }
+});
+
 test("上游失敗：4xx/5xx 回 isError 並附上游原文，不是 JSON-RPC 錯誤", async () => {
   const upstreamBody = '{"error":{"message":"insufficient quota","code":"insufficient_quota"}}';
   const { dispatcher } = fakeDispatcher({ status: 402, text: upstreamBody });
@@ -844,7 +1203,9 @@ test("initialize：回聲客戶端認識的版本，不認識則回我方版本�
   assert.equal(echo.status, 200);
   const echoed = rpcBody(echo.text).result as Record<string, unknown>;
   assert.equal(echoed.protocolVersion, "2024-11-05");
-  assert.deepEqual(echoed.capabilities, { tools: {} });
+  // 能力面自 2026-10-03 起除 tools 外還宣告 resources / prompts（harness 指南與模板；
+  // 對應 route.ts 的 resources/list、prompts/list）。仍是逐項精確比對，不是弱化。
+  assert.deepEqual(echoed.capabilities, { tools: {}, resources: {}, prompts: {} });
   assert.deepEqual(echoed.serverInfo, { name: "eimu", version: "0.1.0" });
 
   const fallback = await callMcp(
@@ -1025,4 +1386,327 @@ test("GET 只回 405 + Allow: POST（本版無 SSE 通道）", async () => {
   const body = (await response.json()) as { transport: string; allowed_methods: string[] };
   assert.equal(body.transport, "streamable-http");
   assert.deepEqual(body.allowed_methods, ["POST"]);
+});
+
+// ─────────────────────────────────────────── 6. 閘門工具（2026-10-03 交付契約＋媒體硬檢）
+
+test("check_delivery_contract：POST 到交付契約端點、body 原樣帶 snake_case、回包原樣", async () => {
+  // 可列舉斷言：真的進了 tools/list 的單一真源。
+  assert.ok(listToolNames().includes("check_delivery_contract"), "listToolNames 缺 check_delivery_contract");
+  assert.ok(
+    MCP_TOOLS.some((tool) => tool.name === "check_delivery_contract"),
+    "MCP_TOOLS 缺 check_delivery_contract",
+  );
+
+  const upstream = JSON.stringify({
+    ok: false,
+    errors: ["qcSignature 與交付物內容不符（签名被篡改或计算口径不一致）：请用 computeQcSignature 对 expertId/kind/payload 原文重算后重交。"],
+    qc_signature: "cafebabe",
+  });
+  const args = {
+    expert_id: "music",
+    kind: "music_track",
+    payload: { audio_url: "https://cdn.example/a.mp3", qc: "逐栏核对通过" },
+    evidence: { url: "https://cdn.example/a.mp3" },
+    qc_signature: "deadbeef",
+  };
+  const { calls, dispatcher } = fakeDispatcher({ text: upstream });
+  const result = await callTool("check_delivery_contract", args, ctx(dispatcher));
+
+  assert.notEqual(result.isError, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].method, "POST");
+  assert.equal(calls[0].path, "/api/harness/expert/deliverable/validate");
+  assert.equal(calls[0].authorization, `Bearer ${VALID_KEY}`, "必須原樣透傳 Authorization");
+  assert.equal(calls[0].traceId, TRACE_ID);
+  assert.deepEqual(
+    calls[0].body,
+    {
+      expert_id: "music",
+      kind: "music_track",
+      payload: { audio_url: "https://cdn.example/a.mp3", qc: "逐栏核对通过" },
+      evidence: { url: "https://cdn.example/a.mp3" },
+      qc_signature: "deadbeef",
+    },
+    "body 必須原樣帶 snake_case（expert_id/kind/payload/evidence/qc_signature）",
+  );
+  assert.deepEqual(parseResult(result), JSON.parse(upstream), "回包必須原樣透傳（含 ok:false / errors / qc_signature）");
+
+  // 上游失敗：與其他轉發工具同語義（isError + 原文）。
+  const failed = fakeDispatcher({ status: 400, text: '{"error":{"code":"invalid_expert_id"}}' });
+  const failedResult = await callTool("check_delivery_contract", args, ctx(failed.dispatcher));
+  assert.equal(failedResult.isError, true);
+  assert.match(failedResult.content[0].text, /HTTP 400/);
+});
+
+test("evaluate_media_quality：POST 到媒體硬檢端點、probe/policy 原樣轉發，probe_unavailable 誠實透傳", async () => {
+  assert.ok(listToolNames().includes("evaluate_media_quality"), "listToolNames 缺 evaluate_media_quality");
+  assert.ok(
+    MCP_TOOLS.some((tool) => tool.name === "evaluate_media_quality"),
+    "MCP_TOOLS 缺 evaluate_media_quality",
+  );
+
+  // 誠實路徑：伺服器量測不可用 ⇒ 回 ok:false + probe_unavailable；工具必須原樣透傳，
+  // 不得改成 isError（量測沒發生不是工具錯誤）、更不得改成 ok:true（假通過）。
+  const verdict = {
+    ok: false,
+    measured: { status: "probe_unavailable", container: null, width: null, duration_sec: null },
+    failures: [{ code: "probe_unavailable", detail: "ffprobe 不存在（系統未安裝）" }],
+    policyId: "video_default",
+  };
+  const { calls, dispatcher } = fakeDispatcher({ text: JSON.stringify(verdict) });
+  const result = await callTool(
+    "evaluate_media_quality",
+    { media_url: "https://cdn.example/a.mp4", policy: "video_default" },
+    ctx(dispatcher),
+  );
+  assert.equal(result.isError, undefined, "量測沒發生是誠實的 verdict，不是 isError");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].method, "POST");
+  assert.equal(calls[0].path, "/api/harness/media/quality");
+  assert.equal(calls[0].authorization, `Bearer ${VALID_KEY}`);
+  assert.deepEqual(calls[0].body, { media_url: "https://cdn.example/a.mp4", policy: "video_default" });
+  const payload = parseResult(result) as { ok: boolean; failures: Array<{ code: string }> };
+  assert.equal(payload.ok, false, "probe_unavailable 不得被透傳成 ok:true");
+  assert.equal(payload.failures[0].code, "probe_unavailable");
+
+  // 呼叫方自帶 probe：原樣轉發；省略的 media_url 不得被塞成 null/預設值。
+  const withProbe = fakeDispatcher({ text: JSON.stringify({ ok: true, measured: {}, failures: [], policyId: "audio_default" }) });
+  const probe = {
+    status: "ok",
+    error: null,
+    container: "mp3",
+    durationSec: 3,
+    sizeBytes: 4096,
+    video: null,
+    audio: { codec: "mp3", meanVolumeDb: -18, maxVolumeDb: -3 },
+  };
+  await callTool("evaluate_media_quality", { probe, policy: "audio_default" }, ctx(withProbe.dispatcher));
+  assert.deepEqual(withProbe.calls[0].body, { probe, policy: "audio_default" }, "省略的 media_url 不得憑空補欄位");
+});
+
+// ─────────────────────────────────────────── 7. MCP 工具目標路由漂移探針
+//
+// 病（2026-10-03 線上事故）：閘門工具把轉發目標宣告成 `/api/v1/expert/deliverable/validate`
+// 與 `/api/v1/media/quality`。`/api/v1/:path*` 被 `next.config.mjs` 的 beforeFiles **整包**
+// 代理給控制面（`/image-control/api/v1/:path*`），而控面沒有這兩條 route ⇒ 工具在生產永遠
+// 收到 404 HTML，且**沒有任何測試會咬**（路徑字串斷言照樣全綠）。
+//
+// 本探針補上兩條正交的不變式（不改弱任何既有斷言）：
+//
+//  A. **落地不變式（route 必須存在）**：每支工具的轉發目標在站內（`src/app/api/**`）都必須
+//     有對應的 `route.ts`。判準之所以成立：控面是**同一份 Next 應用**（basePath
+//     `/image-control`，同一 repo 部署），故「本地有 mirror route」正是「控面也有」的證據；
+//     本地沒有、目標又落在代理前綴內 ⇒ 控面也沒有 ⇒ 生產 404。這是事故的**結果形狀**，
+//     也覆蓋「忘了建 route 就把工具接上去」。
+//  B. **代理棘輪（不得被遮蔽）**：工具目標落在代理清單內＝交付給控面執行，只有**刻意代理**
+//     的 B 端 API 面（`DELEGATED_TOOL_TARGETS`）才安全；其餘命中代理清單的目標一律紅
+//     ——那正是事故的**成因形狀**（路由寫在代理前綴下、本地看似有、生產永遠跑不到）。
+//
+// 抽取方式刻意用**真行為**而非源碼正則：以假 dispatcher 逐支跑工具（含各分支變體），捕獲
+// `runForward` 真正解析出的路徑——函式路徑、模板插值、encodeURIComponent 都如實落地，
+// 不會因重寫成別種字串寫法而漏檢或誤報。
+
+const MCP_TEST_API_DIR = path.resolve(__dirname, "..", "..", "app", "api");
+
+/** 收集 `src/app/api/**` 下所有 `route.ts`。 */
+function collectRouteFiles(dir: string, out: string[] = []): string[] {
+  for (const name of readdirSync(dir)) {
+    const full = path.join(dir, name);
+    if (statSync(full).isDirectory()) collectRouteFiles(full, out);
+    else if (name === "route.ts") out.push(full);
+  }
+  return out;
+}
+
+/** route.ts 的路徑 → URL 段（去掉 Next 的 route group `(x)`）。 */
+function routeUrlSegments(file: string): string[] {
+  return path
+    .relative(MCP_TEST_API_DIR, path.dirname(file))
+    .split(path.sep)
+    .filter((seg) => !(seg.startsWith("(") && seg.endsWith(")")));
+}
+
+/** 站內 URL 路徑 → 相對 `src/app/api` 的段（去掉前導 `api`）；route 段同口徑。 */
+function urlPathSegments(urlPath: string): string[] {
+  const segs = urlPath.replace(/^\/+/, "").split("/").filter((seg) => seg !== "");
+  return segs[0] === "api" ? segs.slice(1) : segs;
+}
+
+/**
+ * Next 動態段語義：`[x]` 匹配恰好一段、`[...x]` 匹配 1+ 段、`[[...x]]` 匹配 0+ 段。
+ * 段數與字面段必須完全對上（不做尾綴鬆散匹配），否則 `/api/harness/media` 會被
+ * `/api/harness/media/quality` 誤判為存在。
+ */
+function routeSegmentsMatch(pathSegs: string[], routeSegs: string[]): boolean {
+  let pi = 0;
+  for (let ri = 0; ri < routeSegs.length; ri += 1) {
+    const routeSeg = routeSegs[ri];
+    if (routeSeg.startsWith("[[...") && routeSeg.endsWith("]]")) return true; // 0+ 段，吃掉剩餘
+    if (routeSeg.startsWith("[...") && routeSeg.endsWith("]")) return pathSegs.length - pi >= 1; // 1+ 段
+    if (pi >= pathSegs.length) return false;
+    if (routeSeg.startsWith("[") && routeSeg.endsWith("]")) {
+      pi += 1; // 單段動態
+      continue;
+    }
+    if (routeSeg !== pathSegs[pi]) return false;
+    pi += 1;
+  }
+  return pi === pathSegs.length;
+}
+
+const ROUTE_URL_SEGMENTS: string[][] = collectRouteFiles(MCP_TEST_API_DIR).map(routeUrlSegments);
+
+function hasLocalRoute(urlPath: string): boolean {
+  const segs = urlPathSegments(urlPath);
+  return ROUTE_URL_SEGMENTS.some((route) => routeSegmentsMatch(segs, route));
+}
+
+/** 命中控面代理清單則回該條 source（`:path*` 前綴語義，其餘精確相等），否則 null。 */
+function matchedProxySource(urlPath: string): string | null {
+  for (const source of CONTROL_PLANE_PROXY_SOURCES as readonly string[]) {
+    if (source.endsWith("/:path*")) {
+      const prefix = source.slice(0, -"/:path*".length);
+      if (urlPath.startsWith(`${prefix}/`) && urlPath.length > prefix.length + 1) return source;
+    } else if (urlPath === source) {
+      return source;
+    }
+  }
+  return null;
+}
+
+/**
+ * 刻意的控面代理目標（棘輪基線，只准縮不准漲）。
+ *
+ * 這些是工具面真正要交給控面執行的 B 端 API 端點（帳本／worker／畫布庫都在控面）。
+ * 不在基線內、卻又命中代理清單的工具目標一律紅——因為控面不一定有那條 route，
+ * 而本地 route 也永遠跑不到（遮蔽）。新增合法代理目標時，必須在此登記並寫明理由。
+ * 動態段寫成 `[x]`。**`/api/harness/**` 這類本地執行的目標不在此列**（它們不命中代理）。
+ */
+const DELEGATED_TOOL_TARGETS: Record<string, string> = {
+  "/api/v1/models": "list_models：模型能力面/熔斷讀控面 generation DB",
+  "/api/v1/images/generations": "generate_image：帳本/worker 在控面",
+  "/api/v1/images/edits": "edit_image：帳本/worker 在控面",
+  "/api/v1/videos/generations": "generate_video：帳本/worker 在控面",
+  "/api/v1/tts/generations": "tts：帳本/worker 在控面",
+  "/api/v1/upscale": "upscale：帳本/worker 在控面",
+  "/api/v1/quota": "get_quota：餘額帳本在控面",
+  "/api/v1/images/[id]/result": "get_result(kind=image)：任務結果讀控面帳本",
+  "/api/v1/videos/[id]/result": "get_result(kind=video)：任務結果讀控面帳本",
+  "/api/v1/tts/[id]": "get_result(kind=tts)：任務結果讀控面帳本",
+  "/api/v1/canvas/projects": "list_canvas_projects：畫布 project-store 觸控面庫",
+  "/api/v1/workflow/compile": "workflow_write（純編譯）：畫布編譯在控面",
+  "/api/v1/canvas/workflow": "workflow_write（落圖）：畫布專案在控面庫",
+  "/api/v1/canvas/nodes/[id]/revert": "workflow_rollback：畫布節點版本在控面庫",
+};
+
+const DELEGATED_TOOL_TARGET_SEGMENTS: string[][] = Object.keys(DELEGATED_TOOL_TARGETS).map(urlPathSegments);
+
+function isDelegatedToolTarget(urlPath: string): boolean {
+  const segs = urlPathSegments(urlPath);
+  return DELEGATED_TOOL_TARGET_SEGMENTS.some((pattern) => routeSegmentsMatch(segs, pattern));
+}
+
+/**
+ * 逐支工具跑一次（含分支變體），用假 dispatcher 捕獲**真實解析出的**站內轉發路徑。
+ * 回傳 `路徑 → 宣告該路徑的工具名集合`。
+ */
+async function captureToolTargetPaths(): Promise<Map<string, Set<string>>> {
+  const byPath = new Map<string, Set<string>>();
+  const variantsFor = (name: string): Array<Record<string, unknown>> => {
+    if (name === "get_result") {
+      return [
+        { kind: "image", id: "cap-1" },
+        { kind: "video", id: "cap-1" },
+        { kind: "tts", id: "cap-1" },
+      ];
+    }
+    if (name === "get_agent_session") {
+      return [
+        { session_id: "cap-1", view: "summary" },
+        { session_id: "cap-1", view: "transcript" },
+        { session_id: "cap-1", view: "raw" },
+      ];
+    }
+    if (name === "workflow_write") {
+      return [
+        { source: { workflow: "cap", steps: [{ id: "a", title: "A" }] } },
+        { source: { workflow: "cap", steps: [{ id: "a", title: "A" }] }, project_id: "cap-proj" },
+      ];
+    }
+    return [VALID_ARGS[name] ?? {}];
+  };
+
+  for (const tool of MCP_TOOLS) {
+    for (const args of variantsFor(tool.name)) {
+      const hitsThisRun = new Map<string, number>();
+      const dispatcher: McpDispatcher = async (request) => {
+        const owners = byPath.get(request.path) ?? new Set<string>();
+        owners.add(tool.name);
+        byPath.set(request.path, owners);
+        // run_agent 的輪詢：第二輪必須給出 assistant 訊息才會結束（否則假時鐘無限輪詢）。
+        if (request.method === "GET" && /^\/api\/agent\/biz\/sessions\/[^/]+$/.test(request.path)) {
+          const hits = (hitsThisRun.get(request.path) ?? 0) + 1;
+          hitsThisRun.set(request.path, hits);
+          return {
+            status: 200,
+            contentType: "application/json",
+            text: JSON.stringify(
+              hits === 1
+                ? { message_count: 0, messages: [] }
+                : { message_count: 1, messages: [{ role: "assistant", text: "cap" }] },
+            ),
+          };
+        }
+        return { status: 200, contentType: "application/json", text: "{}" };
+      };
+      let tick = 0;
+      const now = () => (tick += 1_000);
+      await callTool(tool.name, args, ctx(dispatcher, `Bearer ${VALID_KEY}`, { sleep: async () => {}, now }));
+    }
+  }
+  return byPath;
+}
+
+test("漂移探針：每支 MCP 工具的轉發目標都能落地，且沒有被控面代理遮蔽的目標", async () => {
+  const captured = await captureToolTargetPaths();
+  assert.ok(captured.size >= 15, `只捕獲 ${captured.size} 條目標路徑，捕獲器可能失效`);
+
+  const missingRoute: string[] = [];
+  const shadowed: string[] = [];
+
+  for (const [urlPath, owners] of [...captured.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    const tools = [...owners].sort().join(" / ");
+    const source = matchedProxySource(urlPath);
+    const local = hasLocalRoute(urlPath);
+
+    // A. 落地不變式：目標必須有對應 route.ts（控面是同 repo 的 mirror，本地即是控面證據）。
+    if (!urlPath.startsWith("/api/")) {
+      missingRoute.push(`工具 ${tools} 的目標 ${urlPath} 不是站內絕對路徑（/api/...），無法判定（一律紅）`);
+    } else if (!local) {
+      const why = source
+        ? `命中控面代理（${source}）但本地沒有對應 route.ts——控面是同一份 repo，沒有 mirror 即控面也沒有`
+        : "既不在控面代理清單、本地也沒有 route.ts";
+      missingRoute.push(`工具 ${tools} 的目標 ${urlPath} ${why}（生產會 404）`);
+    }
+
+    // B. 代理棘輪：命中代理清單卻不在刻意代理基線內 ⇒ 被遮蔽（本地 route 生產永遠跑不到）。
+    if (source && local && !isDelegatedToolTarget(urlPath)) {
+      shadowed.push(
+        `工具 ${tools} 的目標 ${urlPath} 既被控面代理（${source}）又在本地存在 route.ts——該 route 生產永遠跑不到。` +
+          `要嘛把工具改到未被代理的路徑（如 /api/harness/**），要嘛在 DELEGATED_TOOL_TARGETS 登記並寫明控面確有該 route。`,
+      );
+    }
+  }
+
+  assert.deepEqual(
+    missingRoute,
+    [],
+    `MCP 工具目標指向不存在的站內路由（生產會 404）：\n  ${missingRoute.join("\n  ")}`,
+  );
+  assert.deepEqual(
+    shadowed,
+    [],
+    `MCP 工具目標被控面代理遮蔽（路由寫了卻跑不到）：\n  ${shadowed.join("\n  ")}`,
+  );
 });

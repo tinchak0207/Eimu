@@ -33,9 +33,16 @@ import type { AgentAttachmentRef } from "@/lib/agent-chat-types";
 import {
   FRAME_COUNT,
   extractFramesFromFile,
+  formatFrameTime,
   isVideoFile,
   type FrameTimestamp,
 } from "@/lib/video-frames";
+import {
+  ingestMediaLocally,
+  isIngestUsable,
+  toDerivedFiles,
+  type LocalMediaIngest,
+} from "@/lib/local-media-ingest";
 import {
   SkillSlashMenu,
   applySkillPick,
@@ -172,7 +179,7 @@ interface PendingAttachment {
   refs?: AgentAttachmentRef[];
   /** 影片专用：原片的 Object URL（预览可播，D-16）。移除／送出时必须 revoke。 */
   videoUrl?: string;
-  /** 影片专用：4 张缩图的 Object URL 与时间点文案。 */
+  /** 影片专用：關鍵幀縮圖的 Object URL 與時間點文案（本機 ingest 或降級抽幀皆會填）。 */
   frames?: { url: string; label: string }[];
   /** 抽帧进度（0…FRAME_COUNT），仅 extracting 期间有意义。 */
   framesDone?: number;
@@ -534,25 +541,65 @@ function AgentComposerComponent({
   );
 
   /**
-   * 影片（D-16 + 原片直传网关）：优先把原片直传网关（绕开 Vercel 4.5MB 体上限），
-   * 成功后一条 chip 只有一个 video ref，聊天框渲染成一个可播影片气泡，agent 也能
-   * 按 path 取回原片剪辑。直传失败（无票 / 401 / 413 / 415 / 网络）静默降级为
-   * 旧抽帧路径：抽 4 张 JPEG 上传，行为与今天一致；原片 Object URL 留在本地供预览。
-   * 超限（60 秒 / 100 MB）由 extractFramesFromFile 抛错，原因直接显示在 chip 上。
+   * 影片（D-16 + 本機前處理 W1）：**先把原檔在本機抽出衍生檔**（關鍵幀 JPEG＋poster
+   * ＋probe JSON），只把衍生檔送上行，原片留在本機當預覽——不再把原片傳上雲端讓 agent 看。
+   *
+   * 漸進增強（任何一步失敗都回到今天的行為，不得弄壞既有附件流程）：
+   *   1. 本機 ingest 可用 → 只上行衍生檔（載入關鍵幀縮圖，聊天框渲染原檔可播 + 關鍵幀列）。
+   *   2. ingest 降級／失敗，或衍生檔上傳失敗 → 原片直傳網關（uploadVideoDirect，繞開
+   *      Vercel 4.5MB 體上限）。
+   *   3. 直傳失敗（無票 / 401 / 413 / 415 / 網絡）→ 舊抽幀路徑：抽 4 張 JPEG 上傳。
+   * 上限（**600 秒** / 100 MB，以 video-frames.MAX_VIDEO_DURATION_SECONDS 為準）由抽幀
+   * 與 ingest 的計劃層把關，原因直接顯示在 chip 上。
    */
   const uploadVideoFile = useCallback(
     async (session: string, id: string, file: File) => {
       const videoUrl = URL.createObjectURL(file);
-      // 直传期间就是普通「上传中」态；「抽帧 x/4」只在降级态有意义。
+      // 任何路徑下原檔預覽都先可見；上傳中態與今天一致。
       patchAttachment(id, { status: "uploading", videoUrl });
+
+      // 1) 本機前處理：契約上永不拋；這裡仍兜底成 null 走回退路徑。
+      let ingested: LocalMediaIngest | null = null;
+      try {
+        ingested = await ingestMediaLocally(file);
+      } catch {
+        ingested = null;
+      }
+
+      if (isIngestUsable(ingested)) {
+        const frameUrls = ingested.keyframes.map((frame) => URL.createObjectURL(frame.blob));
+        try {
+          const frames = ingested.keyframes.map((frame, i) => ({
+            url: frameUrls[i],
+            label: formatFrameTime(frame.tSec),
+          }));
+          patchAttachment(id, { status: "uploading", frames, framesDone: frames.length });
+          const uploaded = await uploadAgentAttachments(session, toDerivedFiles(ingested, file.name));
+          if (uploaded.length === 0) throw new Error("衍生檔上傳結果為空。");
+          patchAttachment(id, {
+            status: "ready",
+            refs: uploaded.map(toAgentAttachmentRef),
+            videoUrl,
+            frames,
+          });
+          return;
+        } catch {
+          // 衍生檔上行失敗：釋放本機縮圖並清掉 frames，落回原檔路徑（不顯示錯誤）。
+          frameUrls.forEach((url) => URL.revokeObjectURL(url));
+          patchAttachment(id, { frames: undefined });
+        }
+      }
+
+      // 2) 回退：今天的第一條路——原片直傳網關。
       try {
         const ref = await uploadVideoDirect(session, file);
         patchAttachment(id, { status: "ready", refs: [ref], videoUrl });
         return;
       } catch {
-        // 直传失败：静默落抽帧降级路径，不把直传错误抛给用户。
+        // 直傳失敗：靜默落抽幀降級路徑，不把直傳錯誤拋給用戶。
       }
 
+      // 3) 直傳也失敗：既有抽幀降級路徑（行為與今天逐位一致）。
       let extracted: { files: File[]; timestamps: FrameTimestamp[] };
       try {
         patchAttachment(id, { status: "extracting", framesDone: 0 });
@@ -560,7 +607,7 @@ function AgentComposerComponent({
           patchAttachment(id, { framesDone: done }),
         );
       } catch (err) {
-        // 抽帧失败／超限：原片 URL 立刻释放，别把 100 MB 挂在内存里等用户删 chip。
+        // 抽幀失敗／超限：原片 URL 立刻釋放，別把 100 MB 掛在記憶體裡等用戶刪 chip。
         URL.revokeObjectURL(videoUrl);
         patchAttachment(id, { videoUrl: undefined });
         throw err;
@@ -568,12 +615,12 @@ function AgentComposerComponent({
 
       const frames = extracted.files.map((f, i) => ({
         url: URL.createObjectURL(f),
-        label: extracted.timestamps[i]?.label ?? `第 ${i + 1} 帧`,
+        label: extracted.timestamps[i]?.label ?? `第 ${i + 1} 幀`,
       }));
       patchAttachment(id, { status: "uploading", frames, framesDone: extracted.files.length });
 
       const uploaded = await uploadAgentAttachments(session, extracted.files);
-      if (uploaded.length === 0) throw new Error("抽帧上传结果为空。");
+      if (uploaded.length === 0) throw new Error("抽幀上傳結果為空。");
       patchAttachment(id, { status: "ready", refs: uploaded.map(toAgentAttachmentRef) });
     },
     [patchAttachment],
@@ -1081,7 +1128,8 @@ function AgentComposerComponent({
         )}
 
         {/*
-          影片预览（D-16）：原片可播；4 张缩图列仅在降级抽帧态出现（直传态无 frames）。
+          影片预览（D-16）：原片可播（本機 ingest 成功時也只在本機播、不上行）；
+          關鍵幀縮圖列在本機 ingest 成功或降級抽幀態出現（原片直傳態無 frames）。
           放在 chip 行下方而不是塞进 chip 里 —— chip 是一行文字的量级，
           缩图列需要自己的高度，挤进去两者都会变形。
         */}

@@ -16,6 +16,7 @@ import { createPortal } from "react-dom";
 import { Coins, Layers, SlidersHorizontal, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getStoredToken, getStoredUser } from "@/lib/new-api-client";
+import { GENERATION_TRACE_ID_HEADER, newGenerationTraceId } from "@/lib/generation-request-headers";
 import { formatModelLabel, coinsFromQuota, primaryModelId } from "@/lib/history-types";
 import type { HistoryEntry } from "@/lib/history-types";
 import { extractPromptSection } from "@/lib/workflow-recall";
@@ -171,6 +172,7 @@ export function RerunDialog({ entry, mode, onClose, onDone }: RerunDialogProps) 
             ...(user?.id ? { "x-user-id": String(user.id) } : {}),
             "Content-Type": "application/json",
             "Idempotency-Key": `rerun-${keyBase}-${i}`,
+            [GENERATION_TRACE_ID_HEADER]: newGenerationTraceId(),
           },
           body: JSON.stringify({
             prompt: plan.prompt,

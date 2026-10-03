@@ -31,8 +31,7 @@
  * 文案一律简体（记忆 agent-gateway-copy-rules）。
  */
 
-import { readFileSync } from "node:fs";
-import * as nodePath from "node:path";
+import { loadBundledExpertConstitution } from "./expert-gateway-assets";
 import { DELEGATION_TOKEN_BUDGET, estimateTokens } from "./blender-delegate";
 import {
   computeQcSignature,
@@ -266,9 +265,13 @@ export type VideoPromptAssemblyResult =
   | { ok: true; prompt: string }
   | { ok: false; code: "constitution_unavailable"; hint: string };
 
-/** 缺省宪法载入：fs 读落位稿（cwd = repo 根；VPS 侧可经 loadConstitution 整体替换）。 */
+/**
+ * 缺省宪法载入：读静态 import 的 src/lib/expert-gateway-assets.json 镜像
+ * （Vercel 拿不到 deploy-staging/，见该 JSON 生成注释；VPS 侧可经 loadConstitution
+ * 整体替换）。镜像空资产抛错，由下方 catch 转 constitution_unavailable。
+ */
 function defaultLoadConstitution(): string {
-  return readFileSync(nodePath.resolve(process.cwd(), EXPERT_CONSTITUTION_PATH), "utf8");
+  return loadBundledExpertConstitution();
 }
 
 /**
@@ -300,7 +303,13 @@ export function assembleVideoDirectorPrompt(
 
   let constitution: string;
   try {
-    constitution = (context.loadConstitution ?? defaultLoadConstitution)();
+    const raw = (context.loadConstitution ?? defaultLoadConstitution)();
+    // 空值視為不可用（跟隨 blender-director-persona 同款範式）：空字串／全空白
+    // 不得視為「已注入憲法」，否則產出無憲法派遣（裸奔，誠實鐵律禁止）。
+    if (raw.trim() === "") {
+      throw new Error("载入器回傳空內容（空或全空白）");
+    }
+    constitution = raw;
   } catch (e) {
     return {
       ok: false,

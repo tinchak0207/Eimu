@@ -23,14 +23,12 @@
  * 本檔先在本地交付契約 + 測試釘死形狀，VPS 落位走後續部署片。
  */
 
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-
+import { loadBundledOrchestratorPlaybook } from "./expert-gateway-assets";
 import { EXPERT_REGISTRY, readBeastMode, type ExpertDef } from "./expert-registry";
 import { estimateTokens } from "./blender-delegate";
 
-/** playbook 單一真源（repo 相對路徑；運行時 readFileSync 讀取，同憲法注入）。 */
+/** playbook 單一真源（repo 相對路徑，聲明部署來源位置；內容經静态 import 的
+ *  src/lib/expert-gateway-assets.json 鏡像讀取——Vercel 拿不到 deploy-staging/）。 */
 export const ORCHESTRATOR_DISPATCH_PLAYBOOK_PATH =
   "deploy-staging/expert-gateway/orchestrator-dispatch-playbook.md" as const;
 
@@ -120,14 +118,13 @@ export async function buildOrchestratorFrame(
     return { ok: true, frame: basePrompt, injected: false, estimated_tokens: estimateTokens(basePrompt) };
   }
 
-  // 野獸模式 ON：fs 讀 playbook（靜態 node:fs + ESM import.meta.url 相對定位；
-  // 本檔經 expert-registry → blender-tools 鏈本就 server-only，與憲法注入同款
-  // 讀法；死因留痕進 hint，不進 log——secret 衛生鐵律）。
+  // 野獸模式 ON：读静态 import 的 bundle 镜像（Vercel 拿不到 deploy-staging/，
+  // 见 src/lib/expert-gateway-assets.ts 檔頭；死因留痕進 hint，不進 log——secret
+  // 衛生鐵律）。空资产抛错由下 catch 转 playbook_unavailable。
   let playbook: string | undefined;
   let playbookError: string | undefined;
   try {
-    const abs = resolve(fileURLToPath(import.meta.url), "../../..", ORCHESTRATOR_DISPATCH_PLAYBOOK_PATH);
-    const raw = readFileSync(abs, "utf8");
+    const raw = loadBundledOrchestratorPlaybook();
     if (raw.trim() !== "") playbook = raw;
   } catch (err) {
     playbookError = err instanceof Error ? err.message : String(err);

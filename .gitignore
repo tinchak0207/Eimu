@@ -176,3 +176,6 @@ redteam-*
 # 宣傳片渲染用的 CJK 字型（兩支 NotoSerifSC OTF 共 23MB）：本機工具鏈的輸入，
 # 不是產品資產，且體積等同半個倉庫 ⇒ 不入庫（重跑渲染前先自行放回 promo-video/fonts/）。
 /promo-video/fonts/
+
+# ── 產品發展史（史官編撰，本地留存，不入庫）──
+/PRODUCT-HISTORY.md

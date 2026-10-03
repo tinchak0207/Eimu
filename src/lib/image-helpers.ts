@@ -1,3 +1,5 @@
+import { saveBlobLocally } from "./local-save";
+
 /** 能从 URL 尾端认出的媒体副档名；export-zip.ts 的接收端白名单由此推导（单一真源）。 */
 export const MEDIA_EXTENSIONS = [
   "png",
@@ -128,11 +130,18 @@ export const imageHelpers = {
   ): Promise<void> => {
     const fileName = imageHelpers.generateImageFileName(provider);
     const blob = await imageHelpers.fetchImageBlob(imageSource);
+    // 副档名跟着来源 URL 走：音频/视频不再被硬写成 .png；推不出一律 png。
+    const downloadName = `${fileName}.${downloadExtension(imageSource)}`;
+
+    // 渐进增强：有 File System Access API 就直接写进用户选定目录。
+    // 使用者取消（"cancelled"）不重复下载；只有 "unsupported" 才走原本的 blob 下载。
+    const localResult = await saveBlobLocally(blob, downloadName, { mimeType: blob.type });
+    if (localResult !== "unsupported") return;
+
     const blobUrl = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = blobUrl;
-    // 副档名跟着来源 URL 走：音频/视频不再被硬写成 .png；推不出一律 png。
-    link.download = `${fileName}.${downloadExtension(imageSource)}`;
+    link.download = downloadName;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

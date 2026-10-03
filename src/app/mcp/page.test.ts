@@ -36,6 +36,13 @@ const EXPECTED_TOOL_NAMES = [
   "workflow_history",
   "workflow_write",
   "workflow_rollback",
+  "list_agent_sessions",
+  "get_agent_session",
+  "get_agent_settings",
+  "run_agent",
+  "abort_agent_session",
+  "check_delivery_contract",
+  "evaluate_media_quality",
 ] as const;
 
 // 這份清單是「scope 真值」的漂移探針：/mcp 頁與 well-known 發現文件都必須完整宣告它。
@@ -51,6 +58,9 @@ const EXPECTED_SCOPES = [
   "eimu:quota:read",
   "eimu:canvas:read",
   "eimu:canvas:write",
+  "eimu:agent:read",
+  "eimu:agent:write",
+  "eimu:harness:read",
 ] as const;
 
 // 像真密钥的值：sk-biz- 或 sk- 后面接一长串 ASCII 键字符。页面只准出现中文件占位（sk-biz-你的密钥）。
@@ -179,4 +189,46 @@ test("llms.txt 只加节：MCP 端点、认证、工具名与新页链接都在�
   assert.ok(llms.includes("## For developers & agents（B 端 API）"), "既有 API 段落被动了");
   assert.ok(llms.includes("Base URL: https://eimu.dev/v1"), "既有 API base URL 被动了");
   assert.ok(llms.includes("## Eimu 是什么（给回答引擎的事实，2026-09-27 核对）"), "既有产品段落被动了");
+});
+
+// AGENT_INSTALL_PROMPT 是 template literal，最容易交坏货的地方在转义：
+// 写错一处 \${…} 就会被模板吞成空、curl 续行 \\ 写成 \ 会吃掉换行。
+// 这里对「渲染输出」断言骨架行（不是源码字串扫描），掉了就红。
+// renderToStaticMarkup 会把文本节点的 ' 转义成 &#x27;、" 转义成 &quot;、
+// > 转义成 &gt;、< 转义成 &lt;、& 转义成 &amp;；断言前先还原这些实体，
+// 测的是「这行字在不在」，而不是 React 的转义表。&amp; 必须最后还原。
+test("/mcp 页真渲染：一键安装指令的承载体行与锚点都在", () => {
+  const html = renderPage();
+  const text = html
+    .replace(/&#x27;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&gt;/g, ">")
+    .replace(/&lt;/g, "<")
+    .replace(/&amp;/g, "&");
+
+  assert.ok(html.includes("agent-prompt"), "缺新区块锚点 #agent-prompt");
+  assert.ok(
+    text.includes("Bearer ${EIMU_BIZ_KEY}"),
+    "缺字面 ${EIMU_BIZ_KEY}——同时是模板转义（\\${）正确的 oracle",
+  );
+  assert.ok(
+    text.includes("claude mcp add --transport http --scope user eimu"),
+    "缺 Claude Code 一键注册命令",
+  );
+  assert.ok(
+    text.includes("grep -v '^export EIMU_BIZ_KEY='"),
+    "缺写进 shell 启动文件、清旧行的持久/可重跑那行",
+  );
+  assert.ok(
+    text.includes('[ "${#EIMU_BIZ_KEY}" -gt 20 ]'),
+    "缺长度自查断言 [ ${#EIMU_BIZ_KEY} -gt 20 ]",
+  );
+  assert.ok(
+    text.includes("grep -c '^export EIMU_BIZ_KEY=' \"$RC\""),
+    "缺「文件里真有那行」的持久性自查断言 grep -c '^export EIMU_BIZ_KEY=' \"$RC\"",
+  );
+  assert.ok(text.includes("balance_coins"), "缺 get_quota 成功判准 balance_coins");
+  assert.ok(text.includes("--header 'Authorization: Bearer"), "缺 --header 'Authorization: Bearer 交付行");
+  assert.ok(text.includes("不要看退出码"), "缺「不要看退出码」判据");
+  assert.ok(text.includes("✔ Connected"), "缺健康状态判据 ✔ Connected");
 });

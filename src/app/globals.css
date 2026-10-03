@@ -355,6 +355,19 @@
     transition: all 0.25s var(--lg-ease);
   }
 
+  /* ── Eimu 桌面殼視窗拖曳區（Electron only） ──
+     外殼移除了原生 overlay，視窗只能靠這組 CSS 拖動：header 的玻璃島（nav）標 drag，
+     其左組／右簇兩個直接子容器標 no-drag（按鈕全在裡面，不必逐顆標），
+     justify-between 之下的中間空帶即拖曳把手。普通瀏覽器對這兩個屬性完全 inert。 */
+  .app-region-drag {
+    -webkit-app-region: drag;
+    app-region: drag;
+  }
+  .app-region-no-drag {
+    -webkit-app-region: no-drag;
+    app-region: no-drag;
+  }
+
   /* ── Coin / wallet badge ── */
   .coin-badge {
     display: inline-flex;

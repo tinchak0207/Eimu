@@ -68,6 +68,13 @@ export function validateScene3dUpload(input: {
   name: string;
   size: number;
   head?: Uint8Array | null;
+  /**
+   * 覆寫體積上限（bytes）。預設＝`MAX_SCENE_3D_BYTES`（站內代理路的平台真值）。
+   * 前端要「先驗形狀、體積交給別的通道」時傳 `Number.POSITIVE_INFINITY`：
+   * 體積的真實上限由該通道自己把關（例如兩段式直傳取回應的 `maxBytes`），
+   * 這裡就只負責副檔名與容器魔數。
+   */
+  maxBytes?: number;
 }): Scene3dImportValidation {
   const extension = scene3dExtensionOf(input.name);
   if (!SCENE_3D_EXTENSIONS.includes(extension as Scene3dExtension)) {
@@ -81,7 +88,8 @@ export function validateScene3dUpload(input: {
   if (size <= 0) {
     return { ok: false, reason: "empty_file", message: "文件是空的，请重新选择。" };
   }
-  if (size > MAX_SCENE_3D_BYTES) {
+  const cap = typeof input.maxBytes === "number" && input.maxBytes > 0 ? input.maxBytes : MAX_SCENE_3D_BYTES;
+  if (size > cap) {
     return {
       ok: false,
       reason: "too_large",

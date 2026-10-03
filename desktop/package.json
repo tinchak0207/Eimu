@@ -1,7 +1,7 @@
 {
   "name": "eimu-desktop",
   "productName": "Eimu",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Eimu 桌面客户端",
   "author": "Eimu",
@@ -14,7 +14,7 @@
     "dist:win": "electron-builder --win"
   },
   "devDependencies": {
-    "electron": "^38.2.2",
+    "electron": "^44.5.1",
     "electron-builder": "^26.0.12"
   },
   "build": {
@@ -27,6 +27,11 @@
     },
     "files": [
       "main.js",
+      "preload.js",
+      "window-controls.js",
+      "local-worker.js",
+      "device-bridge-client.js",
+      "lib/**",
       "build/icon.png"
     ],
     "linux": {

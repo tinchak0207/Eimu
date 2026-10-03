@@ -66,8 +66,8 @@ const DOC_CARDS: Array<{
   },
   {
     href: "/docs/mcp",
-    title: "把助理带走",
-    desc: "用 MCP 把生成能力装进 Claude、Codex、Cursor。",
+    title: "本机自架 MCP（进阶）",
+    desc: "在本地跑 stdio server，需仓库权限，面向进阶用户。要远程免克隆的一键安装（推荐），见 /mcp。",
     icon: Plug,
   },
   {

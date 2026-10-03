@@ -24,6 +24,7 @@ import {
 } from "@/lib/generation-core/video-post-production";
 import { publicObjectUrl } from "@/lib/two-phase-upload";
 import { getOrCreateTraceId, withTraceId } from "@/lib/request-trace";
+import { GENERATION_TRACE_ID_HEADER } from "@/lib/generation-request-headers";
 import { syncModelPricing } from "@/lib/pricing-runtime";
 
 export const runtime = "nodejs";
@@ -44,8 +45,12 @@ type OpenAIErrorType =
   | "permission_error"
   | "rate_limit_error"
   | "insufficient_balance"
+  | "task_budget_exceeded"
   | "api_error";
 
+/**
+ * OpenAI 風格錯誤體（形狀被 v1 contract-lock 釘死，不得改寫）。
+ */
 function errorResponse(
   status: number,
   message: string,
@@ -57,6 +62,38 @@ function errorResponse(
   const response = NextResponse.json(
     { error: { message, type, code, param: null, trace_id: traceId } },
     { status, ...(headers ? { headers } : {}) },
+  );
+  return withTraceId(response, traceId);
+}
+
+/**
+ * 預算超限（W5b）專用 402：標準錯誤體 + `estimated_coins`/`cap_coins`。
+ * 獨立於 errorResponse（後者形狀被 contract-lock 逐字鎖死，不得改寫）。
+ */
+function budgetExceededResponse(
+  gate: {
+    status: number;
+    message: string;
+    type: OpenAIErrorType;
+    code: string;
+    estimated_coins?: number;
+    cap_coins?: number;
+  },
+  traceId: string,
+) {
+  const response = NextResponse.json(
+    {
+      error: {
+        message: gate.message,
+        type: gate.type,
+        code: gate.code,
+        param: null,
+        trace_id: traceId,
+        estimated_coins: gate.estimated_coins,
+        cap_coins: gate.cap_coins,
+      },
+    },
+    { status: gate.status },
   );
   return withTraceId(response, traceId);
 }
@@ -77,6 +114,12 @@ interface VideoRequestBody {
    * 不帶＝普通生成（零行為變化）。不支援的模型 ⇒ 400 video_generation_type_unsupported。
    */
   video_post_production?: unknown;
+  /**
+   * 單次任務預算上限（**幣**，W5b）：客戶宣告後，本次任務估算幣值超過它即
+   * 402 `task_budget_exceeded`（硬停，不扣費）。未給＝預算閘不啟用，行為不變。
+   * 非有限數（NaN/Infinity）或非 number 一律視為未宣告（不因壞輸入誤擋）。
+   */
+  cap_coins?: unknown;
 }
 
 function optionalBoolean(value: unknown): boolean | undefined {
@@ -225,6 +268,7 @@ export async function POST(req: NextRequest) {
         headers: {
           "Content-Type": "application/json",
           Authorization: req.headers.get("authorization") ?? "",
+          [GENERATION_TRACE_ID_HEADER]: traceId,
           ...(req.headers.get("idempotency-key")
             ? { "Idempotency-Key": req.headers.get("idempotency-key")! }
             : {}),
@@ -274,12 +318,21 @@ export async function POST(req: NextRequest) {
     durationSeconds: normalized.config.durationSeconds,
     generateAudio: normalized.config.generateAudio,
   }) * QUOTA_PER_COIN * rawN;
+  // 單次任務預算（幣，W5b）：客戶宣告才啟用；非法/非有限數視為未宣告（不誤擋）。
+  // 判定（估算 vs cap）在 quota-precheck 內走 task-budget 的 exceedsBudget 單一真源。
+  const budgetCapCoins =
+    typeof body.cap_coins === "number" && Number.isFinite(body.cap_coins) ? body.cap_coins : undefined;
   const gate = await enforceQuotaGate({
     bizKeyId: apiKey.id,
     billingUserId: apiKey.userId,
     baseBillingAmount,
+    budgetCapCoins,
   });
   if (!gate.ok) {
+    // 預算超限：帶上估算與上限（其餘錯誤碼走標準錯誤體，行為逐位不變）。
+    if (gate.code === "task_budget_exceeded") {
+      return budgetExceededResponse(gate, traceId);
+    }
     return errorResponse(gate.status, gate.message, gate.type, gate.code, traceId);
   }
 

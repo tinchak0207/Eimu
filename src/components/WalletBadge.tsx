@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import Link from "next/link";
 import { Coins, CreditCard, Gift, CheckCircle2, Plus } from "lucide-react";
 import { quotaToRewardCount } from "@/lib/checkin-copy";
+import { describeQuota, type QuotaDisplayState } from "@/lib/quota-display";
 import { useAuth } from "@/hooks/use-auth";
 import { quotaToCoins, fetchCheckinStatus, doCheckin } from "@/lib/new-api-client";
 import { cn } from "@/lib/utils";
@@ -13,6 +14,11 @@ interface WalletBadgeProps {
   className?: string;
   showTopUp?: boolean;
   showCheckin?: boolean;
+  /**
+   * 呼叫端若已從更權威的來源取得額度狀態（例如未來直接讀 `/v1/quota` 的元件），
+   * 可傳入覆寫；省略時由本元件從 auth session 推導。純顯示層入口，不觸發任何 IO。
+   */
+  quotaState?: QuotaDisplayState;
 }
 
 /**
@@ -21,7 +27,7 @@ interface WalletBadgeProps {
  * 2026-09-05 修正：「+」入口图标恒定不变——已签到状态只体现在菜单项里
  * （不可选 + 「已签到 · 明日再来」），不再把「+」换成绿勾。
  */
-export function WalletBadge({ className, showTopUp = true, showCheckin = true }: WalletBadgeProps) {
+export function WalletBadge({ className, showTopUp = true, showCheckin = true, quotaState }: WalletBadgeProps) {
   const { user, token, isLoggedIn, refresh } = useAuth();
   const [plusOpen, setPlusOpen] = useState(false);
   const [canCheckin, setCanCheckin] = useState(false);
@@ -73,9 +79,37 @@ export function WalletBadge({ className, showTopUp = true, showCheckin = true }:
     };
   }, [plusOpen, measureAnchor]);
 
+  // 額度顯示語義（R3）：把 auth session 的讀數收斂成 describeQuota 的三態。
+  //   有有限讀數 ⇒ authoritative（帳本權威值，直接顯示，包含真實的 0）；
+  //   讀不到／非有限 ⇒ 有上次成功的讀數就標 estimated（約值 + 時效），否則
+  //   unavailable（顯示「暂不可用」，永不畫假 0）。
+  // 這只在顯示層收斂語義，不改任何取餘額的 API／資料層。
+  const liveCoins =
+    isLoggedIn && user && Number.isFinite(user.quota) ? quotaToCoins(user.quota) : null;
+  const lastGoodQuotaRef = useRef<{ coins: number; asOf: number } | null>(null);
+  useEffect(() => {
+    if (liveCoins !== null) lastGoodQuotaRef.current = { coins: liveCoins, asOf: Date.now() };
+  }, [liveCoins]);
+
   if (!isLoggedIn || !user) return null;
 
-  const coins = quotaToCoins(user.quota);
+  const derivedQuotaState: QuotaDisplayState =
+    liveCoins !== null
+      ? { kind: "authoritative", balanceCoins: liveCoins }
+      : lastGoodQuotaRef.current
+        ? {
+            kind: "estimated",
+            balanceCoins: lastGoodQuotaRef.current.coins,
+            asOf: lastGoodQuotaRef.current.asOf,
+          }
+        : { kind: "unavailable", reason: "auth session has no finite balance" };
+  const quotaDisplay = describeQuota(quotaState ?? derivedQuotaState, Date.now());
+  const quotaToneClass =
+    quotaDisplay.tone === "ok"
+      ? "text-[rgba(120,90,20,0.85)]"
+      : quotaDisplay.tone === "warn"
+        ? "text-[rgba(150,90,10,0.90)]"
+        : "text-[rgba(0,0,0,0.44)]";
 
   const handleCheckin = async () => {
     if (!token || checkinLoading || !canCheckin) return;
@@ -99,11 +133,17 @@ export function WalletBadge({ className, showTopUp = true, showCheckin = true }:
           「+」恆為加號入口；已簽態只在菜單項裡表達。 */}
       <div
         className="inline-flex max-w-full shrink items-stretch overflow-hidden rounded-full bg-[rgba(0,0,0,0.05)] max-sm:bg-transparent select-none"
-        aria-label={`余额 ${coins} 币`}
+        aria-label={`余额 ${quotaDisplay.label}${quotaDisplay.stale ? "（数据可能已过期）" : ""}`}
+        title={quotaDisplay.stale ? "数据可能已过期" : undefined}
       >
-        <div className="flex min-w-0 items-center gap-1 whitespace-nowrap px-3 py-1.5 text-ios-footnote font-semibold text-[rgba(120,90,20,0.85)] cursor-default">
+        <div
+          className={cn(
+            "flex min-w-0 items-center gap-1 whitespace-nowrap px-3 py-1.5 text-ios-footnote font-semibold cursor-default",
+            quotaToneClass,
+          )}
+        >
           <Coins className="h-3.5 w-3.5 text-[rgba(160,120,30,0.80)]" aria-hidden="true" />
-          <span className="min-w-0 truncate tabular-nums">{coins.toLocaleString()}</span>
+          <span className="min-w-0 truncate tabular-nums">{quotaDisplay.label}</span>
         </div>
         {(showTopUp || showCheckin) && (
           <button

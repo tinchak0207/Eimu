@@ -54,6 +54,7 @@ import {
   type McpInitializeResult,
 } from "@/lib/mcp/protocol";
 import { MCP_TOOLS, callTool, createHttpDispatcher } from "@/lib/mcp/tools";
+import { HARNESS_PROMPTS, HARNESS_RESOURCES, type HarnessPrompt } from "@/lib/mcp/harness-guide";
 import { controlPlaneRewrites } from "@/lib/control-plane-proxy-routes.mjs";
 
 export const runtime = "nodejs";
@@ -64,6 +65,7 @@ const SERVER_INSTRUCTIONS = [
   "Eimu 提供图像生成/编辑、视频生成、文本转语音、放大，以及公开技能库检索。",
   "生成类工具会真实扣费：先用 get_quota 看余额、用 list_models 取 model id 再生成。",
   "异步任务（generate_video / tts）返回 id，用 get_result 轮询。",
+  "本 server 另提供 harness 指南（资源 eimu://harness/guide 与 prompt eimu-harness），用于提升生成质量的交付契约与验收纪律。",
 ].join(" ");
 
 function noStore(status: number, body: unknown, traceId: string, headers?: Record<string, string>) {
@@ -85,6 +87,27 @@ function rpcError(traceId: string, id: JsonRpcId, code: number, message: string,
 
 function rpcOk(traceId: string, id: JsonRpcId, result: unknown) {
   return noStore(200, jsonRpcOk(id, result), traceId);
+}
+
+/**
+ * 逆注入防護（安全鐵律）——`prompts/get` 的 `arguments` 是**外部客戶端可控輸入**。
+ *
+ * 契約：arguments 只能原樣交給 `HarnessPrompt.build()`，由 build **在文案尾端**附加成
+ * 「本次任務描述」；本函式與整個 route **不得**拿 arguments 與本 server 提供的契約／規則
+ * 文字做任何拼接、替換或模板插值——否則使用者一句「忽略以上所有規則」就能改寫規則區塊。
+ * 具體守則：① 未知 argument 名一律丟棄（不進 build、也不回聲到任何文字）；
+ * ② 非字串值一律丟棄。確保 build 收到的永遠是「宣告過的名字 + 純字串」。
+ */
+function sanitizePromptArguments(prompt: HarnessPrompt, raw: unknown): Record<string, string> {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
+  const allowed = new Set(prompt.arguments.map((argument) => argument.name));
+  const result: Record<string, string> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!allowed.has(key)) continue;
+    if (typeof value !== "string") continue;
+    result[key] = value;
+  }
+  return result;
 }
 
 /** RFC 9728 的發現文件路徑（resource metadata 住在站根，不在 `/api/mcp` 之下）。 */
@@ -223,8 +246,8 @@ export async function POST(req: NextRequest) {
         : {};
       const result: McpInitializeResult = {
         protocolVersion: negotiateProtocolVersion(params.protocolVersion),
-        // 只宣告 tools；未宣告的 resources/prompts 客戶端不該調。
-        capabilities: { tools: {} },
+        // tools 既有能力不動；本版新增宣告 resources / prompts（harness 指南與模板）。
+        capabilities: { tools: {}, resources: {}, prompts: {} },
         serverInfo: { name: MCP_SERVER_NAME, version: MCP_SERVER_VERSION },
         instructions: SERVER_INSTRUCTIONS,
       };
@@ -262,6 +285,73 @@ export async function POST(req: NextRequest) {
         console.error(`[mcp] tools/call ${toolName} 未預期失敗`, error instanceof Error ? error.message : error);
         return rpcError(traceId, id, JSON_RPC_ERROR_CODES.internalError, "工具執行發生未預期錯誤。");
       }
+    }
+
+    case "resources/list":
+      // 只露「有什麼」：投影掉 text 全文，全文交給 resources/read 按 uri 取。
+      return rpcOk(traceId, id, {
+        resources: HARNESS_RESOURCES.map(({ uri, name, description, mimeType }) => ({
+          uri,
+          name,
+          description,
+          mimeType,
+        })),
+      });
+
+    case "resources/read": {
+      const params = typeof parsed.params === "object" && parsed.params !== null
+        ? (parsed.params as Record<string, unknown>)
+        : {};
+      const uri = typeof params.uri === "string" ? params.uri : "";
+      const resource = HARNESS_RESOURCES.find((candidate) => candidate.uri === uri);
+      if (!resource) {
+        // 未知 uri 走 invalidParams，並把可用清單寫進訊息（客戶端可自我修正）。
+        return rpcError(
+          traceId,
+          id,
+          JSON_RPC_ERROR_CODES.invalidParams,
+          `resources/read 未知的 uri：${uri || "(空)"}。可用 uri：${HARNESS_RESOURCES.map((r) => r.uri).join("、")}。`,
+        );
+      }
+      return rpcOk(traceId, id, {
+        contents: [{ uri: resource.uri, mimeType: resource.mimeType, text: resource.text }],
+      });
+    }
+
+    case "prompts/list":
+      // 投影掉 build 函式：清單是純資料，必須可 JSON 序列化。
+      return rpcOk(traceId, id, {
+        prompts: HARNESS_PROMPTS.map(({ name, title, description, arguments: args }) => ({
+          name,
+          title,
+          description,
+          arguments: args,
+        })),
+      });
+
+    case "prompts/get": {
+      const params = typeof parsed.params === "object" && parsed.params !== null
+        ? (parsed.params as Record<string, unknown>)
+        : {};
+      const promptName = typeof params.name === "string" ? params.name.trim() : "";
+      if (!promptName) {
+        return rpcError(traceId, id, JSON_RPC_ERROR_CODES.invalidParams, "prompts/get 缺少參數 name。");
+      }
+      const prompt = HARNESS_PROMPTS.find((candidate) => candidate.name === promptName);
+      if (!prompt) {
+        return rpcError(
+          traceId,
+          id,
+          JSON_RPC_ERROR_CODES.invalidParams,
+          `prompts/get 未知的 prompt：${promptName}。可用 name：${HARNESS_PROMPTS.map((p) => p.name).join("、")}。`,
+        );
+      }
+      // 見 sanitizePromptArguments 的逆注入契約：參數只交給 build 附加在尾端，本處零插值。
+      const text = prompt.build(sanitizePromptArguments(prompt, params.arguments));
+      return rpcOk(traceId, id, {
+        description: prompt.description,
+        messages: [{ role: "user", content: { type: "text", text } }],
+      });
     }
 
     default:

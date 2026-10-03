@@ -40,6 +40,7 @@ import {
   type AppliedStyleSource,
 } from "@/lib/canvas/project-style";
 import { syncModelPricing } from "@/lib/pricing-runtime";
+import { GENERATION_TRACE_ID_HEADER, resolveGenerationTraceId } from "@/lib/generation-request-headers";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -294,9 +295,13 @@ export async function POST(req: NextRequest) {
     costCoins = null;
   }
 
+  // R5：站內生成呼叫沿用同一個 trace id。inbound 有合法 X-Request-Id 就原樣沿用，
+  // 否則新生成——下游 legacy /api/generate-images、/api/generation-jobs 提交與輪詢
+  // 共用這一個 id，整條鏈在日誌與帳本裡可串；重試同一邏輯請求時 id 不變。
   const forwardHeaders: Record<string, string> = {
     Authorization: authorization,
     "x-user-id": userId,
+    [GENERATION_TRACE_ID_HEADER]: resolveGenerationTraceId(req),
   };
 
   /** 單次呼叫 legacy generate-images（僅限檔頭列出的 durable 不支援情境）：有參考圖走 multipart（File 每次重建），否則 JSON。 */

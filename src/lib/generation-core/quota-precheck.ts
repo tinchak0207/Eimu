@@ -35,6 +35,8 @@
 // KEY 永不入 log：這裡只記 biz key id（非密鑰本體）、user id 與金額。
 
 import { fetchGatewayUser } from "@/lib/gateway-admin";
+import { QUOTA_PER_COIN } from "@/lib/quota-constants";
+import { exceedsBudget } from "@/lib/task-budget";
 import { accountLedgerStoreEnabled, ensureAccountOpening, readAvailableQuota } from "./account-ledger";
 import type { GenerationSql } from "./database";
 import {
@@ -65,6 +67,23 @@ export const INSUFFICIENT_BALANCE_ERROR = {
   message: "余额不足，本次未扣费。充值：https://eimu.dev/pricing",
 } as const;
 
+/**
+ * 單次任務預算超限的 402 契約（W5b）。
+ *
+ * 與 insufficient_balance 同族（都是 402、都保證「本次未扣費」），但碼不同：
+ * 這是**客戶自己在請求體宣告的上限**被判超，不是帳戶餘額不足，故不導向充值頁。
+ * 具體數字（`estimated_coins` / `cap_coins`）由呼叫端在 decision 上一併回傳，
+ * route 放進 402 body 供前端顯示；本常數只固定碼與文案（對齊 insufficient_balance
+ * 的中文句式，不另立格式）。
+ */
+export const TASK_BUDGET_EXCEEDED_ERROR = {
+  ok: false,
+  status: 402,
+  type: "task_budget_exceeded",
+  code: "task_budget_exceeded",
+  message: "本次生成费用超过单次任务预算上限，本次未扣费。",
+} as const;
+
 /** 成員配額讀數（預檢注入點；默認讀 new-api 成員 user 的 users.quota）。 */
 type MemberQuotaReader = (memberUserId: number) => Promise<MemberQuotaSnapshot | null>;
 
@@ -89,9 +108,15 @@ export type QuotaGateDecision =
   | {
       ok: false;
       status: 402 | 503;
-      type: "insufficient_balance" | "api_error";
-      code: "insufficient_balance" | "control_plane_unavailable";
+      type: "insufficient_balance" | "api_error" | "task_budget_exceeded";
+      code: "insufficient_balance" | "control_plane_unavailable" | "task_budget_exceeded";
       message: string;
+      /**
+       * 僅 task_budget_exceeded 攜帶（W5b）：本次任務的估算幣值與客戶宣告的上限。
+       * route 據此填進 402 body 的 `estimated_coins` / `cap_coins`。
+       */
+      estimated_coins?: number;
+      cap_coins?: number;
     };
 
 /** 手術開關：僅字面 "1" 生效（未設/"0"/其他值 = 原路徑）。 */
@@ -236,7 +261,16 @@ async function withQuotaTimeout<T>(promise: Promise<T | null>, timeoutMs: number
  * 返回 ok=false 時攜帶現契約錯誤碼，路由原樣轉成 OpenAI 風格錯誤體。
  */
 export async function enforceQuotaGate(
-  input: { bizKeyId: string; billingUserId: number; baseBillingAmount: number },
+  input: {
+    bizKeyId: string;
+    billingUserId: number;
+    baseBillingAmount: number;
+    /**
+     * 單次任務預算上限（**幣**，W5b）：呼叫端（route）從請求體宣告值透傳。
+     * 未給（undefined）⇒ 預算閘完全不啟用，本函式行為與今天逐位元組相同（零回歸）。
+     */
+    budgetCapCoins?: number;
+  },
   deps: {
     fetchUser?: GatewayUserReader;
     sql?: GenerationSql;
@@ -250,6 +284,28 @@ export async function enforceQuotaGate(
     readAvailableQuota?: AvailableQuotaReader;
   } = {},
 ): Promise<QuotaGateDecision> {
+  // ── W5b 單次任務預算硬停 ────────────────────────────────────────────────────
+  // 客戶在請求體宣告 budgetCapCoins 才啟用；沒宣告 = 下面流程一字不動（零回歸）。
+  // 刻意放在 SURGERY_QUOTA_PRECHECK 開關之前：宣告上限是客戶自負的硬天花板，與
+  // 配額預檢是否處於影子期無關——開關關掉不該讓一個已宣告的安全上限靜默失效。
+  //
+  // 估價 = 本次 baseBillingAmount 換算回幣（route 端是 `幣 × QUOTA_PER_COIN` 算出來
+  // 的，這裡忠實取其逆）；判定一律交 task-budget 的 exceedsBudget（單一真源），
+  // 本檔不另寫一份比較邏輯。非有限數（NaN/Infinity）由 exceedsBudget 判為不觸發。
+  if (input.budgetCapCoins !== undefined) {
+    const estimatedCoins = input.baseBillingAmount / QUOTA_PER_COIN;
+    if (exceedsBudget(estimatedCoins, input.budgetCapCoins)) {
+      console.log(
+        `[quota-precheck] task budget exceeded bizKey=${input.bizKeyId} userId=${input.billingUserId} estimated_coins=${estimatedCoins} cap_coins=${input.budgetCapCoins}`,
+      );
+      return {
+        ...TASK_BUDGET_EXCEEDED_ERROR,
+        estimated_coins: estimatedCoins,
+        cap_coins: input.budgetCapCoins,
+      };
+    }
+  }
+
   const env = deps.env ?? process.env;
   if (!surgeryQuotaPrecheckEnabled(env) || input.baseBillingAmount <= 0) {
     return { ok: true, billingAmount: input.baseBillingAmount };

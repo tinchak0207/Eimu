@@ -1,0 +1,26 @@
+-- ⚠️ 未套用（UNAPPLIED）— 草稿，禁止自動套用。
+--
+-- 檔名刻意以 `.sql.pending` 結尾：migration runner（tools/migrate-generation-db.ts:9）
+-- 只收「檔名以 .sql 結尾」的檔案，故本檔放在 db/migrations/ 也不會被掃到、更不會被套用。
+-- 為什麼不放成 `036_*.sql`：本輪硬性約束「不得連任何真實 DB、禁止對任何真實 DB 執行
+-- migration」；若命名成 .sql，下一次部署跑 migration 就會自動 ALTER 生產表，等於變相
+-- 執行了 migration。故用 .pending 保留在目錄裡供 review，但不觸發。
+--
+-- 目的（R3/E）：讓 generation_attempt 記錄「這次嘗試來自哪個呼叫面」（web/desktop/mcp/bridge），
+-- 使本地化後新增的呼叫來源可切分統計/排障。
+--
+-- 加法式確認：
+--   * ADD COLUMN IF NOT EXISTS + 可為 NULL + 無 DEFAULT ⇒ 既有列不受影響（source=null）。
+--   * 不新增 NOT NULL / 不改既有欄位 / 不動任何 CHECK。
+--   * 無索引（低基數、暫無查詢需求）；日後要按來源聚合再另開遷移建 partial index。
+--
+-- 寫入端建議（本輪未實作、未驗證）：`beginGenerationAttempt`（src/lib/generation-core/job-repository.ts:413）
+-- 的 INSERT（同檔 :431-438）——把 `source` 一併寫入。值可取自 generation_job.source
+-- （command.source 已存在：web/biz/canary），或由 beginGenerationAttempt 的 input 帶入，
+-- 再把 'biz' 依呼叫面細分為 mcp/bridge/desktop。**未接線，欄位先空著不影響任何現有行為。**
+
+ALTER TABLE generation_attempt
+  ADD COLUMN IF NOT EXISTS source text;
+
+COMMENT ON COLUMN generation_attempt.source IS
+  '呼叫來源面（web/desktop/mcp/bridge）；NULL = 欄位引入前的歷史列或未標註來源。';

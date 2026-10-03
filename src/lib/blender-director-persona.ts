@@ -44,6 +44,7 @@ import {
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadBundledExpertConstitution } from "./expert-gateway-assets";
 import { BLENDER_HARNESS_TOOL_IDS, type BlenderExecuteSuccess } from "./blender-tools";
 import {
   blenderArtifactToEvidence,
@@ -355,14 +356,15 @@ export async function composeDirectorDelegationPrompt(
   let constitution: string | undefined;
   let constitutionError: string | undefined;
   try {
-    // 靜態 import 的內建模組（node:fs/path/url）無模組環；讀檔範式與
-    // persona 測試 ③ 同款（fileURLToPath(import.meta.url) 定位 repo 根）。
-    const abs = path.resolve(
-      fileURLToPath(import.meta.url),
-      "../../..",
-      opts.constitutionPath ?? DIRECTOR_EXPERT_CONSTITUTION_PATH,
-    );
-    const raw = readFileSync(abs, "utf8");
+    // 顯式 override（opts.constitutionPath）仍走 fs 讀該檔（保留既有注入 seam 與
+    // 測試：指向不存在／空檔時結構化拒絕）；未給才走靜態 import 的 bundle 鏡像
+    // （Vercel 拿不到 deploy-staging/，見 src/lib/expert-gateway-assets.ts 檔頭）。
+    const raw = opts.constitutionPath
+      ? readFileSync(
+          path.resolve(fileURLToPath(import.meta.url), "../../..", opts.constitutionPath),
+          "utf8",
+        )
+      : loadBundledExpertConstitution();
     if (raw.trim() !== "") constitution = raw;
   } catch (err) {
     // 死因留痕（誠實鐵律）：讀取異常進結構化 hint，不進 log（secret 衛生鐵律）。

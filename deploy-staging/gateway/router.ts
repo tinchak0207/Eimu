@@ -32,6 +32,8 @@ import { handleTranscript, handleAbortSession } from "./session-read.ts"
 import { handleQuota } from "./quota-ledger.ts"
 import { handleCanvasStateRead, handleTimelineRoutes, handleConfirmStatus, handleResumeSession, handleSessionKey, handleSessionTasks, handleOptimizePrompt, handleExtractLessons } from "./internal-http.ts"
 import { handleMemoryBatchRunInternal, handleMemoryTrace, handleMemoryRecallSearch, MEMORY_PRIVATE_DOCS_MAX } from "./memory-wiring.ts"
+// W6a（2026-10-04）：裝置橋雲端側（本機 daemon 出站註冊／取件）。總開關 EIMU_DEVICE_BRIDGE，預設 OFF。
+import { deviceBridgeEnabled, handleDeviceBridgeRoutes } from "./device-bridge.ts"
 // TODO(整合 Wave3)：以下符號同波在建（questions-gw/session-read/quota-ledger/internal-http/
 // memory-wiring.ts），bun build 對 named import 硬查（未 export 即報錯），故先 declare 佔位
 // （第一階段佔位符法，記憶 gateway-index-refactor-stage1-0919）；整合 subagent 統一換真 import。
@@ -366,6 +368,13 @@ export async function handleRequest(req: Request, srv: { requestIP: (r: Request)
     // 身份空間（settings/sessions/野獸開關一致）。解析失敗一律 fallback rawKey：
     // 站点抖动不能变成网关故障（负缓存防风暴）。
     const key = canonicalKey
+
+    // W6a：裝置橋（雲端側閘道，掛在既有 Bearer sk-biz-* 閘門之後）。
+    // 硬性約束：預設 OFF——EIMU_DEVICE_BRIDGE 未開時，這行只是一次前綴判定，
+    // 路由照舊落到既有 404，對既有生產行為零影響。開啟：EIMU_DEVICE_BRIDGE=1。
+    if (pathname.startsWith("/agent/v1/device-bridge/") && deviceBridgeEnabled()) {
+      return handleDeviceBridgeRoutes(req, { rawKey, pathname })
+    }
 
     if (req.method === "GET" && pathname === "/agent/v1/quota") {
       return handleQuota(key)

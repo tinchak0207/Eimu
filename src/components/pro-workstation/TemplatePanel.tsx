@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Check, ChevronDown, Loader2, Play } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
+import { GENERATION_TRACE_ID_HEADER, newGenerationTraceId } from "@/lib/generation-request-headers";
 
 /** 与 RATIO_SIZES 对应的比例 → 尺寸映射。 */
 const RATIO_TO_SIZE: Record<string, string> = {
@@ -124,6 +125,7 @@ export default function TemplatePanel({ token, onSubmit }: TemplatePanelProps) {
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
             "X-User-Id": String(user?.id ?? 0),
+            [GENERATION_TRACE_ID_HEADER]: newGenerationTraceId(),
           },
           body: JSON.stringify({
             image: config.mediaId,

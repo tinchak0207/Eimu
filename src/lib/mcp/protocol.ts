@@ -153,6 +153,64 @@ export interface McpToolsListResult {
   tools: McpToolDescriptor[];
 }
 
+// ─────────────────────────────────────────── resources / prompts（MCP 2025）
+
+/**
+ * `resources/list` 的單筆資源描述。**不含 `text` 全文**——清單只做「有什麼」的發現，
+ * 全文由 `resources/read` 按 `uri` 取；把整份指南塞進清單會灌爆 agent 上下文。
+ */
+export interface McpResourceDescriptor {
+  /** 唯一定位符（本 server 用自訂 scheme `eimu://`）。 */
+  uri: string;
+  /** 穩定機讀名（kebab-case）。 */
+  name: string;
+  /** 人類可讀描述（簡體中文，對齊工具描述風格）。 */
+  description: string;
+  /** MIME 型別（指南類一律 `text/markdown`）。 */
+  mimeType: string;
+}
+
+/** `resources/read` 回傳的單一內容區塊（text 型資源，故只給 `text`）。 */
+export interface McpResourceContents {
+  uri: string;
+  mimeType: string;
+  text: string;
+}
+
+export interface McpResourceReadResult {
+  contents: McpResourceContents[];
+}
+
+/** prompt 的可帶參數宣告；`required` 缺席視為 false（與官方 SDK 形狀一致）。 */
+export interface McpPromptArgumentDescriptor {
+  name: string;
+  description: string;
+  required?: boolean;
+}
+
+/** `prompts/list` 的單筆 prompt 描述（**不含** `build` 函式——純資料，可安全序列化）。 */
+export interface McpPromptDescriptor {
+  /** snake/kebab 混合名稱，對模型穩定；改名等於破壞性變更。 */
+  name: string;
+  /** 人類可讀短標題（簡體中文）。 */
+  title: string;
+  /** 簡體中文描述。 */
+  description: string;
+  arguments: McpPromptArgumentDescriptor[];
+}
+
+/** `prompts/get` 的訊息（本版只回 user 訊息、只回 text 內容）。 */
+export interface McpPromptMessage {
+  role: "user";
+  content: McpTextContent;
+}
+
+export interface McpPromptGetResult {
+  /** 本次 prompt 的說明（回填 `prompts/list` 的同名描述）。 */
+  description: string;
+  messages: McpPromptMessage[];
+}
+
 export interface McpServerInfo {
   name: string;
   version: string;
@@ -160,8 +218,16 @@ export interface McpServerInfo {
 
 export interface McpInitializeResult {
   protocolVersion: string;
-  /** 本版只宣告 tools 能力；不宣告 resources / prompts，故客戶端不該調它們。 */
-  capabilities: { tools: Record<string, never> };
+  /**
+   * 能力宣告。`tools` 恆存在（既有欄位不動）；`resources` / `prompts` 為本版新增，
+   * 宣告後客戶端才會去調 `resources/*` 與 `prompts/*`（空物件＝「有這能力、無子選項」，
+   * 對齊 MCP 2025 規範的形狀）。
+   */
+  capabilities: {
+    tools: Record<string, never>;
+    resources?: Record<string, never>;
+    prompts?: Record<string, never>;
+  };
   serverInfo: McpServerInfo;
   /** 給 agent 的用法提示（可選欄位，客戶端可忽略）。 */
   instructions?: string;

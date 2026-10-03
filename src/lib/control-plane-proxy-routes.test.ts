@@ -120,6 +120,12 @@ const KNOWN_VERCEL_LOCAL: Record<string, string> = {
   "/api/data/self": "閉包只經 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直連 DB",
   "/api/generate-videos": "閉包只經 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直連 DB",
   "/api/generation-gates/stats": "閉包只經 new-api-auth-server 取 ensureNewApiSessionTokenViaRelay（HMAC relay 打控面），本地不直連 DB",
+  // MCP 閘門工具（2026-10-03 從 /api/v1 搬來，避免被 beforeFiles 整包代理到控面而 404）：
+  // 兩條 route 本身是純函式（契約校驗／媒體硬檢），不觸 generation DB；只經
+  // authenticateBizApiKey→biz-api-key-store，該 store 以 bizKeyDatabaseEnabled() 閘 DB，
+  // Vercel 走 Blob 鏡像＋BIZ_API_KEY_HASHES 兜底（與 /api/mcp 同源安全）。
+  "/api/harness/expert/deliverable/validate": "biz-api-key-store 以 bizKeyDatabaseEnabled() 閘 DB，Vercel 走 Blob 鏡像＋BIZ_API_KEY_HASHES 兜底（同 /api/mcp）；本體為純函式契約校驗，不觸 generation DB",
+  "/api/harness/media/quality": "biz-api-key-store 以 bizKeyDatabaseEnabled() 閘 DB，Vercel 走 Blob 鏡像＋BIZ_API_KEY_HASHES 兜底（同 /api/mcp）；本體為純函式硬檢（ffprobe 不可用時誠實回 probe_unavailable）",
   "/api/history": "以 generationControlPlaneEnabled() 分流，Vercel 走 Blob 歷史",
   "/api/history/[id]": "server-history-store 只取 artifact-service 純函式 validateAndDescribeBase64Image，走 Blob",
   "/api/history/stats": "以 generationControlPlaneEnabled() 分流，Vercel 不觸庫",

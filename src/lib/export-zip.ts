@@ -1,6 +1,7 @@
 // 基于 jszip 的打包下载，仅在浏览器中调用（依赖 document 与 URL.createObjectURL）。
 
 import { MEDIA_EXTENSIONS } from "./image-helpers";
+import { saveBlobLocally } from "./local-save";
 
 // 图片、影片与音频产物都走同一个打包器：带已知副档名的保留，缺副档名的按图片补 .png。
 // 白名单从 image-helpers 的 MEDIA_EXTENSIONS 推导（单一真源）：两边不再各自维护，
@@ -59,6 +60,12 @@ export async function exportShotsZip(
   }
 
   const zipBlob = await zip.generateAsync({ type: "blob" });
+
+  // 渐进增强：有 File System Access API 就把打包好的 zip 直接写进用户选定目录。
+  // 取消（"cancelled"）不重复下载；只有 "unsupported" 才回落 <a download>。
+  const localResult = await saveBlobLocally(zipBlob, zipName, { mimeType: "application/zip" });
+  if (localResult !== "unsupported") return;
+
   const url = URL.createObjectURL(zipBlob);
   try {
     const anchor = document.createElement("a");

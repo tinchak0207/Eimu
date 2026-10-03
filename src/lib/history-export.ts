@@ -8,6 +8,7 @@
 
 import { exportShotsZip } from "./export-zip";
 import { downloadExtension } from "./image-helpers";
+import { saveManyLocally } from "./local-save";
 import { formatAbsoluteTime, formatCoins, primaryModelId } from "./history-types";
 import type { HistoryEntry } from "./history-types";
 
@@ -107,6 +108,12 @@ export async function exportHistoryZip(
     name: "manifest.json",
     blob: new Blob([manifest], { type: "application/json" }),
   });
+
+  // 渐进增强：有 showDirectoryPicker 时一次授权把逐张产物连同 manifest 写进
+  // 用户选定目录（不打包 ZIP）。取消不重复下载；只有 "unsupported" 才回落 ZIP。
+  const localResult = await saveManyLocally(items, { directoryName: "生成历史" });
+  if (localResult === "saved") return { exported: items.length - 1, skipped };
+  if (localResult === "cancelled") return { exported: 0, skipped };
 
   await exportShotsZip(items, zipName);
   return { exported: items.length - 1, skipped };

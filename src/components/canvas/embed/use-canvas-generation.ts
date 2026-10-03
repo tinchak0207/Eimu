@@ -133,7 +133,7 @@ export function useCanvasGeneration({
       signal: AbortSignal,
       cardsOverride?: { cards: CharacterCard[]; referenceScope: "all" | "referenced" },
     ) => {
-      const headers = buildAuthHeaders();
+      const headers = buildAuthHeaders(true);
       if (!headers) throw new Error("请先登录再生成图片");
       const baseCards = cardsOverride?.cards ?? canvasStateRef.current.activeCharacterCards ?? [];
       // 本段提示詞 token 就地解析（2026-09-25）：卡在庫即可被 @ 引用，不必先手動鎖定——
@@ -389,7 +389,7 @@ export function useCanvasGeneration({
         showError("本地编辑结果暂不支持高清放大（需要先生成为在线图片）");
         return;
       }
-      const headers = buildAuthHeaders();
+      const headers = buildAuthHeaders(true);
       if (!headers) {
         showError("请先登录再使用高清放大");
         return;
@@ -459,7 +459,7 @@ export function useCanvasGeneration({
         showError("该视频没有可用的在线地址，无法取帧（仅支持 https 视频）");
         return;
       }
-      const headers = buildAuthHeaders();
+      const headers = buildAuthHeaders(true);
       if (!headers) {
         showError("请先登录再取帧");
         return;

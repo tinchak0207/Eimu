@@ -1,0 +1,95 @@
+{
+  "$comment": "device-bridge-policy 的輸入→期望判定向量表（H2, 2026-10-04）。雲端側測試逐條斷言實作符合本表；本機側（desktop/，另一包）應載入同一份檔案使兩側 denylist/根夾制語義對齊。載入方式見 device-bridge.test.ts：fs.readFileSync(new URL('./device-bridge-policy.vectors.json', import.meta.url), 'utf8')。",
+  "version": 1,
+  "sensitive": [
+    { "path": "~/.ssh/id_rsa", "expected": true, "category": "home-sensitive" },
+    { "path": "~/.aws/credentials", "expected": true, "category": "home-sensitive" },
+    { "path": "/home/u/.ssh/id_ed25519", "expected": true, "category": "home-sensitive" },
+    { "path": "/root/.aws/config", "expected": true, "category": "home-sensitive" },
+    { "path": "~/.npmrc", "expected": true, "category": "home-sensitive-file" },
+    { "path": "~/.bash_history", "expected": true, "category": "home-sensitive-file" },
+    { "path": "~/.config/google-chrome/Default/Cookies", "expected": true, "category": "browser-profile" },
+    { "path": "~/Library/Application Support/Google/Chrome/Default/Login Data", "expected": true, "category": "browser-profile" },
+
+    { "path": "/tmp/a.txt", "expected": false, "category": "outside-home-ok" },
+    { "path": "/etc/hosts", "expected": false, "category": "outside-home-ok" },
+    { "path": "/home/u/project/main.ts", "expected": false, "category": "inside-home-ok" },
+    { "path": "~/projects/app.ts", "expected": false, "category": "inside-home-ok" },
+
+    { "path": "/opt/.ssh/id_rsa", "expected": true, "category": "outside-home-sensitive-segment" },
+    { "path": "/var/lib/.aws/credentials", "expected": true, "category": "outside-home-sensitive-segment" },
+
+    { "path": "~/.ssh/../../etc/passwd", "expected": true, "category": "dotdot-escape" },
+    { "path": "/tmp/../.ssh/id_rsa", "expected": true, "category": "dotdot-escape" },
+    { "path": "/home/u/proj/../.aws/credentials", "expected": true, "category": "dotdot-escape" },
+    { "path": "a/../../.gnupg/secring.gpg", "expected": true, "category": "dotdot-escape" },
+
+    { "path": "~/.sshfoo/id_rsa", "expected": false, "category": "prefix-confusion" },
+    { "path": "~/.ssh-backup/keys", "expected": false, "category": "prefix-confusion" },
+    { "path": "~/.ssh2/id", "expected": false, "category": "prefix-confusion" },
+    { "path": "/home/u/notes.ssh.md", "expected": false, "category": "prefix-confusion" },
+    { "path": "~/.netrc.bak", "expected": false, "category": "prefix-confusion" },
+
+    { "path": "~/.SSH/id_rsa", "expected": true, "category": "case-fold" },
+    { "path": "/home/u/.Aws/credentials", "expected": true, "category": "case-fold" },
+    { "path": "C:\\Users\\me\\.Ssh\\id_rsa", "expected": true, "category": "windows-case" },
+    { "path": "C:\\Users\\me\\.ssh\\id_rsa", "expected": true, "category": "windows-backslash" },
+    { "path": "C:\\Users\\me\\project\\a.ts", "expected": false, "category": "windows-ok" },
+
+    { "path": "/", "expected": false, "category": "filesystem-root" },
+    { "path": "C:\\", "expected": false, "category": "windows-drive-root" },
+
+    { "path": "/home/u/prøject/日本語.txt", "expected": false, "category": "unicode-ok" },
+    { "path": "/home/u/.ssh/秘密鍵", "expected": true, "category": "unicode-sensitive" },
+    { "path": "/home/u/.ssh\u200b/id_rsa", "expected": false, "category": "unicode-zero-width-not-folded" },
+    { "path": "/home/u/.ＡＷＳ/credentials", "expected": false, "category": "unicode-fullwidth-not-folded" },
+
+    { "path": "", "expected": true, "category": "empty-fail-closed" },
+    { "path": "   ", "expected": true, "category": "blank-fail-closed" },
+    { "path": null, "expected": true, "category": "type-bad-fail-closed" },
+    { "path": 123, "expected": true, "category": "type-bad-fail-closed" }
+  ],
+  "filesystemRoot": [
+    { "path": "/", "expected": true, "category": "posix-root" },
+    { "path": "//", "expected": false, "category": "double-slash-not-root-but-containment-denies" },
+    { "path": "/./", "expected": false, "category": "dot-root" },
+    { "path": "C:\\", "expected": true, "category": "windows-drive" },
+    { "path": "C:/", "expected": true, "category": "windows-drive-forward" },
+    { "path": "c:", "expected": true, "category": "windows-drive-bare" },
+    { "path": "\\\\?\\C:\\", "expected": true, "category": "windows-extended-length-drive-root" },
+    { "path": "\\\\.\\C:\\", "expected": true, "category": "windows-device-drive-root" },
+    { "path": "\\\\?\\C:\\Users\\me", "expected": false, "category": "windows-extended-length-not-root" },
+    { "path": "\\\\server\\share", "expected": true, "category": "unc-share-root" },
+    { "path": "/tmp", "expected": false, "category": "not-root" },
+    { "path": "/home/u/project", "expected": false, "category": "not-root" },
+    { "path": "C:\\Users\\me", "expected": false, "category": "not-root" },
+    { "path": "~", "expected": false, "category": "tilde-not-root" },
+    { "path": "", "expected": false, "category": "empty-not-root" }
+  ],
+  "containment": [
+    { "root": "/home/u/project", "path": "/home/u/project", "expected": true, "category": "equal" },
+    { "root": "/home/u/project", "path": "/home/u/project/src/a.ts", "expected": true, "category": "descendant" },
+    { "root": "/home/u/project", "path": "/home/u", "expected": false, "category": "parent-dir" },
+    { "root": "/home/u/project", "path": "/home", "expected": false, "category": "parent-dir" },
+    { "root": "/home/u/project", "path": "/", "expected": false, "category": "filesystem-root" },
+    { "root": "/home/u/project", "path": "/home/u/project-evil/a", "expected": false, "category": "prefix-confusion" },
+    { "root": "/home/u/project", "path": "/home/u/projectX", "expected": false, "category": "prefix-confusion" },
+    { "root": "/home/u/project", "path": "/home/u/project/../.ssh/x", "expected": false, "category": "dotdot-escape" },
+    { "root": "/home/u/project", "path": "~/project/a", "expected": false, "category": "relative-tilde-denied" },
+    { "root": "/home/u/project", "path": "home/u/project/a", "expected": false, "category": "relative-denied" },
+    { "root": "/Home/U/Project", "path": "/home/u/project/a", "expected": true, "category": "case-fold" },
+    { "root": "C:\\Users\\me\\project", "path": "C:/Users/me/project/a.txt", "expected": true, "category": "windows" },
+    { "root": "C:\\Users\\me\\project", "path": "\\\\?\\C:\\Users\\me\\project\\a.txt", "expected": true, "category": "windows-extended-length-under" },
+    { "root": "~/.ssh", "path": "~/.ssh/id_rsa", "expected": false, "category": "sensitive-root-rejected" },
+    { "root": "/home/u/project", "path": "/home/u/項目/檔.txt", "expected": false, "category": "unicode-not-under" },
+    { "root": "/home/u/專案", "path": "/home/u/專案/檔.txt", "expected": true, "category": "unicode-under" }
+  ],
+  "recursiveRoot": [
+    { "path": "/", "roots": ["/home/u/project"], "reason": "filesystem_root", "category": "root-rejected" },
+    { "path": "C:\\", "roots": ["C:\\Users\\me\\project"], "reason": "filesystem_root", "category": "windows-root-rejected" },
+    { "path": "/home/u/project", "roots": [], "reason": "no_authorized_root", "category": "no-root-fail-closed" },
+    { "path": "/home/u", "roots": ["/home/u/project"], "reason": "not_within_authorized_root", "category": "parent-rejected" },
+    { "path": "/home/u/project/src", "roots": ["/home/u/project"], "reason": null, "category": "allowed" },
+    { "path": "/home/u/.ssh/project", "roots": ["/home/u/.ssh/project"], "reason": "not_within_authorized_root", "category": "sensitive-root-not-authorized" }
+  ]
+}

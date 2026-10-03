@@ -5,6 +5,7 @@
 import { CanvasNodeType, type CanvasConnection, type CanvasNode, type CanvasPosition } from "@/lib/canvas/types";
 import type { CanvasImageEditMode } from "../CanvasImageEditorDialog";
 import { getStoredToken, getStoredUser } from "@/lib/new-api-client";
+import { GENERATION_TRACE_ID_HEADER, newGenerationTraceId } from "@/lib/generation-request-headers";
 
 /** 同一批節點進場的間隔（ms）。 */
 export const ENTER_STAGGER_MS = 110;
@@ -68,11 +69,18 @@ export function triggerDownload(blob: Blob, filename: string) {
   window.setTimeout(() => URL.revokeObjectURL(objectUrl), 4000);
 }
 
-export function buildAuthHeaders(): Record<string, string> | null {
+/**
+ * 生成/超分認證頭（Bearer + x-user-id）。R5：生成型呼叫可傳 `withTraceId=true`
+ * 多帶一個 `X-Request-Id`，讓這條請求在其下游（route → 控制面）有一致的 trace id；
+ * 非生成的畫布/資產查詢呼叫維持不帶（預設 false，逐位不變）。
+ */
+export function buildAuthHeaders(withTraceId = false): Record<string, string> | null {
   const token = getStoredToken();
   const user = getStoredUser();
   if (!token || !user?.id) return null;
-  return { Authorization: `Bearer ${token}`, "x-user-id": String(user.id) };
+  const headers: Record<string, string> = { Authorization: `Bearer ${token}`, "x-user-id": String(user.id) };
+  if (withTraceId) headers[GENERATION_TRACE_ID_HEADER] = newGenerationTraceId();
+  return headers;
 }
 
 /** 本地圖片檔 → 壓縮 dataURL（browser-image-compression，1600px/1.5MB 上限）。 */

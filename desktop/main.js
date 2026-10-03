@@ -17,19 +17,49 @@
 //
 // 明確不做：本地起 Next server。那會引入 standalone 打包、sharp、雙份 API
 // 語義等一整套維護面，與「不雙端維護」的前提衝突。
+//
+// preload（2026-10-04 更新）：主視窗確實註冊了 desktop/preload.js，因為殼需要
+// 提供網頁兩個「網頁做不到的事」的窄介面：
+//   - window.eimuLocal（W3）：本機媒體能力（探測/挑檔/probe/抽幀/轉碼），
+//     安全判斷全在主進程 local-worker.js。
+//   - window.eimuShell（0.3.0）：自繪視窗控制鈕 —— 只暴露 minimize /
+//     toggleMaximize / close / isMaximized / onMaximizeChange（外加 platform），
+//     目標視窗由主進程以 event.sender 反查。titleBarOverlay 已移除。
+// 兩組都不暴露 ipcRenderer / node / fs / shell 原物件。導航政策仍只允許
+// eimu.dev 留在視窗內（will-navigate / will-redirect，見 applyNavigationPolicy），
+// preload 不放寬任何導航或檔案能力；子視窗不繼承本 preload（見 webPreferences 註釋）。
 
-const { app, BrowserWindow, shell, session, dialog, Menu, screen } = require("electron");
+const { app, BrowserWindow, shell, session, dialog, Menu, screen, ipcMain } = require("electron");
 const path = require("node:path");
+const { startDeviceBridge, stopDeviceBridge } = require("./device-bridge-client.js");
+const {
+  registerWindowControlsIpc,
+  attachWindowStateBroadcast,
+} = require("./window-controls.js");
 
 const APP_ORIGIN = "https://www.eimu.dev";
 // eimu.dev（無 www）會 308 到 www，但導航判斷一律以最終 host 為準，兩者都收。
 const APP_HOSTS = new Set(["www.eimu.dev", "eimu.dev"]);
 
+// W6b：device bridge 殼內指示。連線**預設 OFF**；只有使用者明確開啟
+// （EIMU_DEVICE_BRIDGE=1 且能取得憑證）才連。開啟狀態以視窗標題可見化。
+let bridgeState = { status: "off", enabled: false };
+const BRIDGE_ACTIVE = new Set(["online", "reconnecting"]);
+
+function applyBridgeIndicator() {
+  if (!mainWindow) return;
+  const on = BRIDGE_ACTIVE.has(bridgeState.status);
+  mainWindow.setTitle(on ? "Eimu · 本機檔案橋接已開啟" : "Eimu");
+}
+
 let mainWindow = null;
 
 function isAppUrl(rawUrl) {
   try {
-    return APP_HOSTS.has(new URL(rawUrl).host);
+    const url = new URL(rawUrl);
+    // M1：必須同時鎖 protocol，否則 file://www.eimu.dev/x 會以 host 冒充 App。
+    if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+    return APP_HOSTS.has(url.host);
   } catch {
     return false;
   }
@@ -47,6 +77,8 @@ function isAppUrl(rawUrl) {
 function isAppAuthUrl(rawUrl) {
   try {
     const url = new URL(rawUrl);
+    // M1：同 isAppUrl，protocol 必須是 http/https（擋 file://www.eimu.dev/api/auth/*）。
+    if (url.protocol !== "http:" && url.protocol !== "https:") return false;
     return APP_HOSTS.has(url.host) && url.pathname.startsWith("/api/auth/");
   } catch {
     return false;
@@ -143,6 +175,10 @@ function applyWindowOpenPolicy(win) {
   win.webContents.on("did-create-window", (child) => {
     applyNavigationPolicy(child);
     applyWindowOpenPolicy(child);
+    // 0.3.0：子視窗不需要自繪控制鈕，但同樣掛狀態廣播（掛著不會壞，
+    // 且與主視窗行為一致）。子視窗不繼承本 preload，故頁面多半收不到，
+    // 這是刻意的（更嚴）。
+    attachWindowStateBroadcast(child);
   });
 }
 
@@ -171,20 +207,21 @@ function createWindow() {
     autoHideMenuBar: true,
     // 標題列交給頁面自己的頁首（Chrome 式 CSD）。KDE 預設深色標題列與
     // 淺色頁面衝突且吃掉一整條高度（2026-09-17 暴君回報「其他 app 不這樣」）。
-    // titleBarOverlay 嘗試保住視窗控制鈕；Linux 上若不支援會靜默退回
-    // 純 frameless（關閉走 Alt+F4、移動走 Alt+拖曳）。
+    // 0.3.0：移除 titleBarOverlay —— 原生 overlay 按鈕的形狀由系統決定、
+    // 無法做到「看得出精心設計、完美融入 Eimu」。改為純 frameless，三顆
+    // 視窗控制鈕由遠端頁面自繪，經 window.eimuShell → window-controls.js 操作。
     titleBarStyle: "hidden",
-    titleBarOverlay: {
-      color: "#f3f5f9",
-      symbolColor: "#1e2024",
-      height: 36,
-    },
     webPreferences: {
-      // 網頁是遠端內容，主進程能力一律不暴露：預設關閉 node，不註冊 preload。
+      // 網頁是遠端內容，主進程能力一律不暴露：node 關閉，仍不注入 Node。
       nodeIntegration: false,
       contextIsolation: true,
       // 保留 Chromium 既有的同源限制即可；殼不需要放寬。
       webSecurity: true,
+      // W3：唯一的本地能力通道。preload 只在隔離世界以 contextBridge 暴露
+      // 「極窄」的 window.eimuLocal（探測/挑檔/probe/抽幀/轉碼），不含
+      // exec/spawn/shell/fs。真正的授權閘在主進程 local-worker.js（含
+      // origin 驗證與逐次路徑授權）。子視窗不繼承本 preload（更嚴）。
+      preload: path.join(__dirname, "preload.js"),
     },
   });
 
@@ -202,6 +239,18 @@ function createWindow() {
   // 不因是彈窗而放寬）。
   applyNavigationPolicy(mainWindow);
   applyWindowOpenPolicy(mainWindow);
+
+  // 0.3.0：主視窗的最大化狀態變化推給頁面（自繪控制鈕的還原/最大化圖標）。
+  attachWindowStateBroadcast(mainWindow);
+
+  // W6b：bridge 開啟時，避免遠端頁面的 <title> 覆蓋掉殼內的「已開啟」指示。
+  // 未開啟時不攔（既有行為完全不變）。
+  mainWindow.on("page-title-updated", (event) => {
+    if (BRIDGE_ACTIVE.has(bridgeState.status)) {
+      event.preventDefault();
+      applyBridgeIndicator();
+    }
+  });
 
   // 下載：blob:/data: 的 <a download> 在 Chromium 預設會靜默存到預設目錄。
   // 這裡攔下來開原生存檔對話框，並用建議檔名。
@@ -246,6 +295,31 @@ if (!gotLock) {
       callback(allowedPermissions.has(permission));
     });
 
+    // W3：註冊本機媒體工人（preload 暴露的 window.eimuLocal 之主進程側）。
+    // 每個 handler 自行驗 senderFrame origin 與逐次路徑授權；未授權路徑一律拒。
+    require("./local-worker").registerLocalWorker({ appHosts: APP_HOSTS });
+
+    // 0.3.0：自繪視窗控制鈕的 IPC（preload 暴露的 window.eimuShell 之主進程側）。
+    // 登記一次即可；目標視窗以 event.sender 反查，非全域 mainWindow。
+    registerWindowControlsIpc(ipcMain);
+
+    // W6b：device bridge（雲端 agent 經本機**出站**連線讀已授權檔案）。
+    // 預設 OFF（EIMU_DEVICE_BRIDGE 未設＝不連）。本殼載入遠端頁面、只有 session，
+    // 沒有既有 Bearer sk-biz-* 憑證；因此 credentialProvider 誠實回 null ——
+    // 即使被開啟也只會得到 credentials_unavailable，不在殼內硬編任何 key。
+    // 缺口與建議補法見 desktop/DEVICE-BRIDGE.md。
+    void startDeviceBridge({
+      gatewayBaseUrl: process.env.EIMU_GATEWAY_BASE_URL,
+      enabled: process.env.EIMU_DEVICE_BRIDGE === "1",
+      credentialProvider: () => null,
+      onStatus: (s) => {
+        bridgeState = s;
+        applyBridgeIndicator();
+      },
+    }).catch(() => {
+      /* 啟動失敗不得影響殼啟動 */
+    });
+
     // 去掉預設選單列（File/Edit/View/Window/Help），它是桌面殼裡最突兀的
     // 非產品元素；剪貼簿快捷鍵由 Chromium 內建處理，不依賴選單。
     Menu.setApplicationMenu(null);
@@ -258,4 +332,9 @@ if (!gotLock) {
 
   // 視窗全關就退出（連 macOS 一起，本殼不做 dock 常駐）。
   app.on("window-all-closed", () => app.quit());
+
+  // W6b：退出時停掉 bridge（清計時器、中止 in-flight 請求、丟棄憑證）。
+  app.on("before-quit", () => {
+    stopDeviceBridge();
+  });
 }

@@ -18,6 +18,9 @@ import { getStoredToken } from "@/lib/new-api-client";
 import { LOCAL_TEST_MODE } from "@/lib/local-test-mode";
 import { cn } from "@/lib/utils";
 import { isStandalonePwa, createHandoffLogin } from "@/lib/github-login";
+import { DesktopDownloadButton } from "@/components/DesktopDownloadButton";
+import { WindowControls } from "@/components/WindowControls";
+import { useEimuShell } from "@/hooks/use-eimu-shell";
 import { PwaHandoffPanel } from "@/components/PwaHandoffPanel";
 import { QqGroupDialog } from "@/components/QqGroupDialog";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
@@ -36,6 +39,12 @@ interface NavbarProps {
     ≥640px 桌面島上的 chip 原樣。 */
 const FLAT_MOBILE_CHROME =
   "max-sm:border-0 max-sm:bg-transparent max-sm:shadow-none max-sm:[backdrop-filter:none] max-sm:[-webkit-backdrop-filter:none]";
+
+/** 桌面＋手機一律極簡態（2026-10-04 header 降噪）：與 FLAT_MOBILE_CHROME 同一組
+    utility，只是不限 max-sm——header 內的按鈕／連結全部玻璃底、描邊、陰影、模糊歸零，
+    只剩圖示與文字；WalletBadge／logo／漢堡各有自己的材質，不套這組。 */
+const FLAT_CHROME =
+  "border-0 bg-transparent shadow-none [backdrop-filter:none] [-webkit-backdrop-filter:none]";
 
 /** auth_error 代碼 → 人話（callback 失敗原因碼見 /api/auth/github|google/callback）。 */
 function describeAuthError(code: string): string {
@@ -56,6 +65,10 @@ function describeAuthError(code: string): string {
 export function Navbar({ className }: NavbarProps) {
   const { user, isLoggedIn, logout, refresh } = useAuth();
   const { toast } = useToast();
+  // 桌面殼偵測（單一真相來源，與 WindowControls 共用）：殼內＝使用者已在 App 裡，
+  // 「下載桌面版」是冗餘入口，且三顆視窗控制鈕需要這條右簇的寬度（首頁玻璃島被助理
+  // 面板退縮後，1440/1280 下載鈕與右簇會重疊）。殼內隱藏它，換取控制鈕放得下。
+  const eimuShell = useEimuShell();
   // 2026-09-24 首秒零回縮：導覽列退縮只屬首頁（助理工作站面）。--ws-navbar-inset
   // 的 fallback 在首頁指向「面板寬+12px」終態，其他頁恆 0——否則直接 reload
   // 非首頁時工作站未掛載、無人寫該變數，fallback 會把膠囊無緣無故退縮一格。
@@ -340,6 +353,10 @@ export function Navbar({ className }: NavbarProps) {
         <nav
           className={cn(
             "lg-bar pointer-events-auto flex items-center justify-between gap-2 overflow-hidden rounded-ios-3xl px-2.5 py-2 sm:px-4 sm:py-2.5",
+            // 桌面殼拖曳區：外殼移除原生 overlay 後，整條玻璃島＝拖曳把手；左右兩個
+            // 直接子容器標 no-drag（按鈕都在裡面），justify-between 的中間空帶即可拖。
+            // 普通瀏覽器對這組屬性 inert。詳見 globals.css .app-region-*。
+            "app-region-drag",
             isHome
               ? "ml-[var(--ws-navbar-inset,calc(var(--ws-panel-w,420px)_+_0.75rem))] w-[calc(100%_-_var(--ws-navbar-inset,calc(var(--ws-panel-w,420px)_+_0.75rem)))]"
               : "ml-0 w-full",
@@ -353,7 +370,7 @@ export function Navbar({ className }: NavbarProps) {
         >
           {/* 左组：漢堡（僅 <sm）＋ Eimu Logo ＋ QQ 群入口。justify-between 下子元素
               多于两个会把中间的孩子顶到正中——Logo 与 QQ 钮必须包进同一个左组容器。 */}
-          <div className="flex min-w-0 shrink-0 items-center gap-2 sm:gap-2.5">
+          <div className={cn("flex min-w-0 shrink-0 items-center gap-2 sm:gap-2.5", "app-region-no-drag")}>
             {/* 漢堡鈕：手機端最左邊的側欄入口（歷史／退出／QQ 群都在側欄裡）。
               桌面 ≥sm 由元件自身的 sm:hidden 隱藏，右側桌面按鈕一個 pixel 不動。 */}
             <MobileNavHamburger
@@ -384,25 +401,34 @@ export function Navbar({ className }: NavbarProps) {
             </Link>
 
             {/* QQ 群入口（2026-09-21 暴君特许，紧贴 Logo）：
-                桌面端（≥sm）像余额胶囊一样带文字「售后/交流群组」，点击弹出群二维码
+                桌面端（≥sm）像余额胶囊一样带文字「交流群」，点击弹出群二维码
                 扫码入群。手机端（<sm）原本是直跳 QQ 加群页的图标——已移进左側側欄
                 （MobileSidebar 底部），手機 top bar 收乾淨。 */}
             <button
               type="button"
               onClick={() => setQqOpen(true)}
-              aria-label="售后/交流群组"
-              title="售后/交流群组"
-              className="lg-float hidden min-w-0 shrink cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full bg-[rgba(0,0,0,0.05)] px-2.5 py-1.5 text-ios-footnote font-semibold text-[rgba(0,0,0,0.60)] select-none lg-transition hover:bg-[rgba(0,0,0,0.08)] hover:text-[rgba(0,0,0,0.85)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:inline-flex lg:px-3"
+              aria-label="交流群"
+              title="交流群"
+              className={`hidden min-w-0 shrink cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1.5 text-ios-footnote font-semibold text-[rgba(0,0,0,0.60)] select-none lg-transition hover:text-[rgba(0,0,0,0.85)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:inline-flex lg:px-3 ${FLAT_CHROME}`}
             >
               <QqLogo className="h-3.5 w-3.5" />
-              <span className="hidden lg:inline">售后/交流群组</span>
+              <span className="hidden xl:inline">交流群</span>
             </button>
+
+            {/* 桌面版下載（2026-10-04，2026-10-04 二版）：一鍵直接識別平台並下載，
+                不再開選單（暴君：「搞弹窗就有点蠢了」）。平台判定與下載動作全在
+                DesktopDownloadButton／resolveDesktopDownload 內，這裡只放位置。
+                macOS 仍只 toast 婉拒，行動裝置（unknown）因 <xl 斷點本來就看不到。
+                殼內（eimuShell）隱藏——使用者已在桌面 App 裡，下載入口冗餘，
+                且右簇要讓位給三顆視窗控制鈕（見上方 eimuShell 註）。 */}
+            {!eimuShell && <DesktopDownloadButton variant="icon" className={FLAT_CHROME} />}
           </div>
 
           {/* Right side */}
           <div
             className={cn(
               "mobile-nav-actions flex min-w-0 flex-1 items-center justify-end gap-1.5 sm:gap-2 lg:gap-3",
+              "app-region-no-drag",
               isLoggedIn && user
                 ? ""
                 : "flex-none gap-2",
@@ -422,7 +448,7 @@ export function Navbar({ className }: NavbarProps) {
                     「文档」只在 ≥sm 显示：手机端导航留给核心动作。 */}
                 <Link
                   href="/history"
-                  className="lg-float hidden h-11 w-11 shrink-0 items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[rgba(0,0,0,0.78)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:flex sm:h-9 sm:w-9"
+                  className={`hidden h-11 w-11 shrink-0 items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[rgba(0,0,0,0.78)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:flex sm:h-9 sm:w-9 ${FLAT_CHROME}`}
                   aria-label="历史"
                 >
                   <History className="h-3.5 w-3.5" aria-hidden="true" />
@@ -433,7 +459,7 @@ export function Navbar({ className }: NavbarProps) {
                     导航栏摆个入口会把人带离卡片，正好是使用者不要的那种交互。 */}
                 <Link
                   href="/docs"
-                  className="lg-float hidden h-11 w-11 shrink-0 items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[rgba(0,0,0,0.78)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:flex sm:h-9 sm:w-9"
+                  className={`hidden h-11 w-11 shrink-0 items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition hover:text-[rgba(0,0,0,0.78)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:flex sm:h-9 sm:w-9 ${FLAT_CHROME}`}
                   aria-label="文档"
                 >
                   <BookOpen className="h-3.5 w-3.5" aria-hidden="true" />
@@ -448,8 +474,8 @@ export function Navbar({ className }: NavbarProps) {
                       aria-label="API 密钥"
                       title="API 密钥"
                       className={cn(
-                        "lg-float flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition sm:hover:text-[#007AFF] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:flex sm:h-9 sm:w-9",
-                        FLAT_MOBILE_CHROME,
+                        "flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-[rgba(0,0,0,0.52)] lg-transition sm:hover:text-[#007AFF] focus:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(0,122,255,0.30)] sm:flex sm:h-9 sm:w-9",
+                        FLAT_CHROME,
                       )}
                     >
                       <KeyRound className="h-3.5 w-3.5" aria-hidden="true" />
@@ -487,8 +513,8 @@ export function Navbar({ className }: NavbarProps) {
                     鎖在 lg:inline 不出現。 */}
                 <div
                   className={cn(
-                    "lg-float flex shrink-0 items-center gap-1 rounded-full py-1 pl-2.5 pr-1 lg:pl-3 sm:flex",
-                    FLAT_MOBILE_CHROME,
+                    "flex shrink-0 items-center gap-1 rounded-full py-1 pl-2.5 pr-1 lg:pl-3 sm:flex",
+                    FLAT_CHROME,
                   )}
                 >
                   <span className="hidden max-w-[4.5rem] truncate text-ios-footnote font-medium text-[rgba(0,0,0,0.56)] lg:inline xl:max-w-[5.5rem]">
@@ -513,6 +539,11 @@ export function Navbar({ className }: NavbarProps) {
                 githubBusy={loginPhase === "drawing" ? "正在连接 GitHub…" : null}
               />
             )}
+
+            {/* 桌面殼自訂視窗控制（最小化／最大化·還原／關閉），右簇最末端——
+                與原生視窗鈕原位置語義一致。僅殼內渲染（window.eimuShell 存在時），
+                普通瀏覽器回 null。詳見 WindowControls.tsx。 */}
+            <WindowControls />
           </div>
         </nav>
       </header>

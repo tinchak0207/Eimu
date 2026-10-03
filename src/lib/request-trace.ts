@@ -4,8 +4,6 @@
 // and echo it back — but only if it looks like a plausible id, so an attacker
 // can't smuggle arbitrary header content into logs/responses under this key.
 
-import { randomUUID } from "node:crypto";
-
 export const TRACE_ID_HEADER = "X-Request-Id";
 const INBOUND_TRACE_ID_HEADER = "x-request-id";
 
@@ -13,6 +11,27 @@ const INBOUND_TRACE_ID_HEADER = "x-request-id";
 const TRACE_ID_PATTERN = /^[A-Za-z0-9._-]{8,128}$/;
 
 type HeadersSource = Headers | { headers: Headers };
+
+/**
+ * True for ids this module is willing to trust as an inbound `X-Request-Id`.
+ * Exported so downstream helpers (generation request headers) reuse the exact
+ * same rule instead of re-implementing a second allowlist.
+ */
+export function isValidTraceId(value: string): boolean {
+  return TRACE_ID_PATTERN.test(value);
+}
+
+/**
+ * Fresh trace id. Prefers the Web Crypto global (`globalThis.crypto.randomUUID`,
+ * present in Node 18+ and every browser) rather than importing `node:crypto`, so
+ * this module stays importable from client components too — the R5 generation
+ * header helper is shared by server routes and the browser bundle.
+ */
+function randomTraceId(): string {
+  const webCrypto = (globalThis as { crypto?: Crypto }).crypto;
+  if (webCrypto && typeof webCrypto.randomUUID === "function") return webCrypto.randomUUID();
+  throw new Error("crypto.randomUUID is unavailable in this runtime");
+}
 
 function resolveHeaders(source: HeadersSource): Headers {
   return source instanceof Headers ? source : source.headers;
@@ -27,7 +46,7 @@ export function getOrCreateTraceId(headersOrRequest: HeadersSource): string {
   const headers = resolveHeaders(headersOrRequest);
   const inbound = headers.get(INBOUND_TRACE_ID_HEADER)?.trim();
   if (inbound && TRACE_ID_PATTERN.test(inbound)) return inbound;
-  return randomUUID();
+  return randomTraceId();
 }
 
 /**

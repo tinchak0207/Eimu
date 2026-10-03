@@ -134,6 +134,17 @@ Tools exposed by `tools/list` (source of truth: `src/lib/mcp/tools.ts`):
 | workflow_history | eimu:canvas:read | Read per-node version history (version / created_at / reason / title) of a session's canvas; pass node_id to filter one node |
 | workflow_write | eimu:canvas:write | Compile a full workflow declaration (`dsl`) into canvas ops; with a project_id owned by this account the ops are applied to that canvas, without it the tool only compiles |
 | workflow_rollback | eimu:canvas:write | Roll a canvas node's content back to a version (or the previous one); restores title and metadata only, never positions |
+| list_agent_sessions | eimu:agent:read | List your Eimu AI assistant (agent) sessions: title, time and status |
+| get_agent_session | eimu:agent:read | Read one agent session's conversation and artifacts (generated image/video URLs are in the reply text); optional view = summary / transcript / raw |
+| get_agent_settings | eimu:agent:read | Read this account's agent settings, including the beast_mode switch; same settings the web AI assistant uses |
+| run_agent | eimu:agent:write | Hand a whole task to Eimu's agent orchestrator and get back a reply (it creates the session and polls to completion); this really consumes account quota and may trigger billed generation |
+| abort_agent_session | eimu:agent:write | Abort a running agent session; already-produced output is kept |
+| check_delivery_contract | eimu:harness:read | Deterministic contract-field validation of an Expert deliverable: required fields present and qc signature matching content. NOT a quality score — ok:true means the field layer is valid, not that the artifact is good (use evaluate_media_quality for the artifact) |
+| evaluate_media_quality | eimu:harness:read | Deterministic hard check of a finished video/image/audio against our policy thresholds (resolution/duration/size/audio track; no model calls). Measurement runs on our server, and when ffprobe/ffmpeg is unavailable it honestly returns `probe_unavailable` — which is NOT a pass. You may pass your own ffprobe `probe` and we only apply the policy |
+
+Resources and prompt: besides tools, the server exposes two read-only resources (`eimu://harness/guide`, `eimu://harness/delivery-contracts`) and one prompt (`eimu-harness`, optional `task` argument) for the generation-quality harness; `initialize` advertises `capabilities: { tools, resources, prompts }`. Resources and prompts are pulled on demand by the user/client — they are not auto-injected as a system prompt.
+
+Agent delegation: an MCP-connected agent can hand a whole task to Eimu's agent orchestrator and get back a reply with deliverable URLs — entry point is `run_agent`. It shares the same orchestrator and account settings (including `beast_mode`) as the web AI assistant; `run_agent` really consumes account quota and may trigger billed generation.
 
 Recommended agent flow: `get_quota` → `list_models` → `generate_image` / `generate_video` / `tts` → `get_result`.
 Canvas workflow flow: `list_canvas_projects` → `canvas_get_state` / `workflow_read` → `workflow_write` (with project_id) → `workflow_history` → `workflow_rollback`.

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowUp, Loader2, Play, Volume2, VolumeX } from "lucide-react";
 import { PROMO_TRIAL_PROMPT } from "./promo-gate";
 import { PromoLoginPopover } from "./PromoLoginPopover";
+import { DesktopDownloadButton } from "@/components/DesktopDownloadButton";
 
 /**
  * 未登入新訪客的進站宣傳片浮層（2026-09-27 暴君裁定落地）。
@@ -347,6 +348,11 @@ export function PromoIntroOverlay({
                 <PromoLoginPopover onDismiss={dismissLogin} />
               </div>
             )}
+
+            {/* 結尾畫面的大下載鈕（暴君：2026.08.29 那行下方放一顆大的、內容自動識別）：
+                座標在 DesktopDownloadButton 內以封面畫布為準（cqh()/pct()），與本容器同一個
+                `container-type: size` 座標系；落在 .prompt 與 .cap 之下、不重疊。 */}
+            <DesktopDownloadButton variant="hero" />
           </div>
 
           {/* 兩個退路固定在螢幕上（不隨封面縮放跑掉）。 */}

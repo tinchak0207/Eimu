@@ -15,7 +15,9 @@ import {
   type Scene3dCardMetadata,
 } from "@/lib/canvas/types";
 import { authHeaders } from "@/lib/canvas/client";
+import { uploadDirect } from "@/lib/direct-upload-client";
 import {
+  MAX_SCENE_3D_BYTES,
   SCENE_3D_MAGIC_BYTES,
   SCENE_3D_SIZE_HINT,
   scene3dImportCardMetadata,
@@ -503,7 +505,16 @@ export function useCanvasInteraction({ canvasStateRef, containerRef, visibleNode
     async (file: File, world: CanvasPosition) => {
       try {
         const head = new Uint8Array(await file.slice(0, SCENE_3D_MAGIC_BYTES).arrayBuffer());
-        const checked = validateScene3dUpload({ name: file.name, size: file.size, head });
+        // 形狀（副檔名／魔數）一律先用同一支契約函式驗；體積不在此定死：
+        //  ≤ MAX_SCENE_3D_BYTES → 既有站內代理路（原狀不變）；
+        //  > MAX_SCENE_3D_BYTES → 兩段式直傳（瀏覽器直傳物件存儲），
+        //    真實上限取直傳憑證回應的 maxBytes（不是常數）。
+        const checked = validateScene3dUpload({
+          name: file.name,
+          size: file.size,
+          head,
+          maxBytes: Number.POSITIVE_INFINITY,
+        });
         if (!checked.ok) {
           showError(checked.message);
           return;
@@ -511,6 +522,20 @@ export function useCanvasInteraction({ canvasStateRef, containerRef, visibleNode
         const headers = authHeaders();
         if (!headers) {
           showError("请先登录再导入 3D 模型");
+          return;
+        }
+        if (file.size > MAX_SCENE_3D_BYTES) {
+          // 大檔：站內代理路受平台 ~4.5MB 請求體硬頂，改走兩段式直傳；
+          // 拿回 downloadUrl 餵給下面同一條建卡流程（下游只吃 URL，不變）。
+          try {
+            const uploaded = await uploadDirect(file, { title: scene3dImportTitle(file.name), headers });
+            createNodeAt("scene3d", world, {
+              title: scene3dImportTitle(file.name),
+              sceneCard: scene3dImportCardMetadata({ url: uploaded.downloadUrl, fileName: file.name }),
+            });
+          } catch (error) {
+            showError(error instanceof Error ? error.message : "模型导入失败");
+          }
           return;
         }
         const form = new FormData();
