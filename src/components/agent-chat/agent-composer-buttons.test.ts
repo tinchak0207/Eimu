@@ -14,9 +14,13 @@ import { renderToStaticMarkup } from "react-dom/server";
 // 觸控 placeholder 的真行為斷言（決策純函數）＋ SSR 真渲染斷言用的元件本體。
 import {
   AgentComposer,
+  PLAIN_UPLOAD_TIMEOUT_MS,
   PLACEHOLDER_SAFETY_PX,
+  UploadTimeoutError,
+  VIDEO_UPLOAD_TIMEOUT_MS,
   placeholderFitsWidth,
   resolveBasePlaceholder,
+  withUploadDeadline,
 } from "./AgentComposer";
 
 /**
@@ -300,4 +304,75 @@ test("placeholderFits 边界：measured == clientWidth 与 clientWidth-4 都回�
   assert.match(code, /ctx\.font = resolveMeasureFont\(window\.getComputedStyle\(el\)\)/);
   // 决策纯函数比对的是 clientWidth（与 spec/测试注入口径一致）。
   assert.match(code, /placeholderFitsWidth\(ctx\.measureText\(text\)\.width, el\.clientWidth\)/);
+});
+
+// 2026-10-04 缺陷 A：直传/上传等待必须有 deadline，逾时落 UploadTimeoutError
+// 让人话终态（不得永久停在 uploading）。行为断言，不靠源码字面。
+test("withUploadDeadline：限时内完成原样返回，不误杀", async () => {
+  const value = await withUploadDeadline(Promise.resolve("ok"), 1_000);
+  assert.equal(value, "ok");
+});
+
+test("withUploadDeadline：逾时抛 UploadTimeoutError 且带人话", async () => {
+  const never = new Promise<never>(() => {});
+  await assert.rejects(
+    withUploadDeadline(never, 10),
+    (err: unknown) => {
+      assert.ok(err instanceof UploadTimeoutError);
+      assert.equal((err as Error).message, "上传超时，请重试。");
+      return true;
+    },
+  );
+});
+
+test("withUploadDeadline：底层先失败时原样透传错误（不吞成逾时）", async () => {
+  await assert.rejects(withUploadDeadline(Promise.reject(new Error("网络失败")), 1_000), /网络失败/);
+});
+
+test("VIDEO_UPLOAD_TIMEOUT_MS 是数分钟级（不短于数十 MB 的正常上传）", () => {
+  assert.ok(VIDEO_UPLOAD_TIMEOUT_MS >= 120_000, "原片直传上限不得短于 2 分钟");
+});
+
+// 2026-10-04「永久 pending」族残餘：uploadPlainFile（非影片附件）原本裸 await
+// uploadAgentAttachments，站内代理卡死时 chip 永久停在 uploading、连 job.catch 都不落。
+test("uploadPlainFile：经 withUploadDeadline + PLAIN_UPLOAD_TIMEOUT_MS 收口（逾时必落明确失败）", async () => {
+  // 行为：非影片附件上限必须比原片 180s 短（几 MB 档，站内代理直传）。
+  assert.ok(PLAIN_UPLOAD_TIMEOUT_MS > 0, "上限必须为正");
+  assert.ok(
+    PLAIN_UPLOAD_TIMEOUT_MS < VIDEO_UPLOAD_TIMEOUT_MS,
+    "非影片附件上限应短于原片直传（档更小、路径更短）",
+  );
+  // 行为：套上 deadline 后，永不 settle 的上传必落 UploadTimeoutError 人话。
+  // 用缩短的注入值（20ms），不靠等真实的 PLAIN_UPLOAD_TIMEOUT_MS。
+  const started = Date.now();
+  await assert.rejects(
+    withUploadDeadline(new Promise<never>(() => {}), 20),
+    (err: unknown) => {
+      assert.ok(err instanceof UploadTimeoutError);
+      assert.equal((err as Error).message, "上传超时，请重试。");
+      return true;
+    },
+  );
+  assert.ok(Date.now() - started < 1_000, "逾时必须由注入的缩短值触发，不靠等真实上限");
+});
+
+test("uploadPlainFile 组合探针：deadline 包住 uploadAgentAttachments，逾时经 job.catch 落 error chip", () => {
+  // 组合探针（非行为 oracle）：确认 uploadPlainFile 真的把 deadline 套在这条路径上，
+  // 且逾时错误最终由 enqueueFiles 的 job.catch 写成带 message 的 error 终态。
+  const plainRegion = code.slice(
+    code.indexOf("const uploadPlainFile = useCallback"),
+    code.indexOf("const uploadVideoFile = useCallback"),
+  );
+  assert.ok(plainRegion.length > 0, "uploadPlainFile 本体必须能定位到");
+  assert.match(
+    plainRegion,
+    /withUploadDeadline\(\s*uploadAgentAttachments\(session, \[file\]\),\s*PLAIN_UPLOAD_TIMEOUT_MS,\s*\)/,
+    "非影片附件路径必须用 withUploadDeadline + PLAIN_UPLOAD_TIMEOUT_MS 包住上传",
+  );
+  // enqueueFiles 的失败收口：任何 reject（含 UploadTimeoutError 的人话）写成 error 终态。
+  assert.match(
+    code,
+    /job\.catch\(\(err\) => \{\s*const message = err instanceof Error \? err\.message : "上传失败。";\s*patchAttachment\(id, \{ status: "error", errorMessage: message \}\);/,
+    "job.catch 必须把逾时错误落成带人话的 error chip（不得静默消失）",
+  );
 });

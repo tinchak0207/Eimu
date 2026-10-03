@@ -15,7 +15,7 @@ import {
   type Scene3dCardMetadata,
 } from "@/lib/canvas/types";
 import { authHeaders } from "@/lib/canvas/client";
-import { uploadDirect } from "@/lib/direct-upload-client";
+import { DirectUploadError, uploadDirect } from "@/lib/direct-upload-client";
 import {
   MAX_SCENE_3D_BYTES,
   SCENE_3D_MAGIC_BYTES,
@@ -534,7 +534,9 @@ export function useCanvasInteraction({ canvasStateRef, containerRef, visibleNode
               sceneCard: scene3dImportCardMetadata({ url: uploaded.downloadUrl, fileName: file.name }),
             });
           } catch (error) {
-            showError(error instanceof Error ? error.message : "模型导入失败");
+            // DirectUploadError 的 message 已是給用戶看的人話（超限/後端不支援/網路失敗）；
+            // 其餘（例如瀏覽器原生的 TypeError）不外洩原文，統一給人話。
+            showError(error instanceof DirectUploadError ? error.message : "模型导入失败：请检查网络后重试");
           }
           return;
         }

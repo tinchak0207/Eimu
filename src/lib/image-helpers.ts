@@ -37,6 +37,14 @@ export function downloadExtension(src: string): string {
   return mediaExtensionFromUrl(src) ?? "png";
 }
 
+/**
+ * http(s) 取图的硬上限（毫秒）。单张图下载不该无限等：上游半开连线（headers 永不
+ * 到达）时裸 fetch 会永久 pending，单张下载永不落错误、批量导出那一路的 skipped
+ * 判定也永不发生。30 秒远超一张图在任意合理带宽下的下载时间，又短到让病态连线
+ * 落成明确失败。逾时经 AbortController abort，转成具人话的 Error 抛出。
+ */
+export const IMAGE_FETCH_TIMEOUT_MS = 30_000;
+
 export const imageHelpers = {
   base64ToBlob: (base64Data: string, type = "image/png"): Blob => {
     const byteString = atob(base64Data);
@@ -61,14 +69,44 @@ export const imageHelpers = {
   // cached copy without Access-Control-Allow-Origin (Chromium's simple cache
   // ignores Vary: Origin) and gets blocked. Bust the cache key and skip the
   // HTTP cache so the fetch always takes a fresh CORS-eligible response.
-  fetchImageBlob: async (imageSource: string): Promise<Blob> => {
+  //
+  // ?dl=1 的机制真相（2026-10-04 缺陷 B 追查）：CDN(store.tinchak0207.xyz)
+  // 的 /image-data/ 由 nginx 按 $http_origin 白名单回 Access-Control-Allow-Origin
+  // （见 deploy/imagesite/nginx/default.conf），?dl=1 本身不被上游读取——它的作用
+  // 是换掉 URL 缓存键；配合 cache:"no-store" 让本次 CORS fetch 不复用 <img>
+  // no-cors 渲染留下的无 ACAO 缓存体。因此任何人取这批图都必须走这一条链。
+  //
+  // fetchImageResponse 暴露原始 Response，供需要状态码的调用端（历史批量导出的
+  // skipped 判定）复用同一条链，不再自拼第二套 URL（禁造轮子）。
+  //
+  // 2026-10-04（同「永久 pending」族）：取图等待原本无界。加 AbortController + timeout，
+  // 逾时统一抛人话 Error（单张下载据此显示错误；批量导出的 fetchAsBlob 会 catch 成
+  // null → skipped，一次逾时不炸整包 zip）。?dl=1 与 cache:"no-store" 原样保留。
+  fetchImageResponse: async (
+    imageSource: string,
+    timeoutMs: number = IMAGE_FETCH_TIMEOUT_MS,
+  ): Promise<Response> => {
     const isHttpSource = imageSource.startsWith("http");
     const fetchUrl = isHttpSource
       ? `${imageSource}${imageSource.includes("?") ? "&" : "?"}dl=1`
       : imageSource;
-    return isHttpSource || imageSource.startsWith("data:") || imageSource.startsWith("blob:")
-      ? await fetch(fetchUrl, { cache: "no-store" }).then((response) => response.blob())
-      : imageHelpers.base64ToBlob(imageSource);
+    if (isHttpSource || imageSource.startsWith("data:") || imageSource.startsWith("blob:")) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        return await fetch(fetchUrl, { cache: "no-store", signal: controller.signal });
+      } catch (error) {
+        if (controller.signal.aborted) throw new Error("图片下载超时，请重试。");
+        throw error;
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    return new Response(imageHelpers.base64ToBlob(imageSource));
+  },
+
+  fetchImageBlob: async (imageSource: string): Promise<Blob> => {
+    return await imageHelpers.fetchImageResponse(imageSource).then((response) => response.blob());
   },
 
   // ClipboardItem 的最大兼容 MIME 是 image/png：Safari 只收 PNG，Chrome 也仅

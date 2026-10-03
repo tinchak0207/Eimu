@@ -42,6 +42,13 @@ export const LOCAL_KEYFRAME_SECONDS_PER_FRAME = 15;
  */
 export const MAX_DERIVED_UPLOAD_BYTES = 4 * 1024 * 1024;
 
+/**
+ * 整條 ingest 的總上限（毫秒）。全流程皆為本機記憶體解碼（無網路）：最多 12 張關鍵幀
+ * 各一次 seek（約 3-4 秒）＋海報，30 秒遠超任何合理耗時。它只在「某一階段異常卡死」
+ * 時兜底，保證 `ingestMediaLocally` 絕不永久 pending，讓呼叫端能落到原檔降級路徑。
+ */
+export const INGEST_TIMEOUT_MS = 30_000;
+
 /** 海報取樣時間點（秒）。取首幀（關鍵幀用等分中點，不含 0，故不重複）。 */
 export const POSTER_TIME_SECONDS = 0;
 
@@ -100,6 +107,11 @@ export interface LocalMediaIngestOptions {
   signal?: AbortSignal;
   /** 進度回報：stage ∈ metadata|frames|poster|done，pct ∈ [0,1]。永不因回報失敗而中斷。 */
   onProgress?: (stage: string, pct: number) => void;
+  /**
+   * 整條 ingest 的總上限（毫秒）。預設 `INGEST_TIMEOUT_MS`；逾時回 `degraded`（絕不
+   * 永久 pending）。主要供測試縮短等待，生產用預設即可。
+   */
+  timeoutMs?: number;
 }
 
 export interface LocalMediaMetadata {
@@ -378,6 +390,9 @@ function createBrowserMediaSession(file: File): LocalMediaSession {
   video.src = objectUrl;
 
   let metadataReady = false;
+  // 失敗同樣要記住：<video> 的 error 只發一次，失敗後**絕不重掛監聽**，
+  // 後續任何呼叫直接回同一個失敗（否則第二次等待會永久 pending、整條 ingest 卡死）。
+  let metadataError: Error | null = null;
 
   const sample = (): VideoElementSample => ({
     video,
@@ -392,8 +407,15 @@ function createBrowserMediaSession(file: File): LocalMediaSession {
 
   const ensureMetadata = async (): Promise<void> => {
     if (metadataReady) return;
-    await waitForMetadata(video);
-    metadataReady = true;
+    // 已失敗：直接回同一失敗，不重掛監聽（該 <video> 的 error 不會再發）。
+    if (metadataError) throw metadataError;
+    try {
+      await waitForMetadata(video);
+      metadataReady = true;
+    } catch (e) {
+      metadataError = e instanceof Error ? e : new Error(String(e));
+      throw metadataError;
+    }
   };
 
   return {
@@ -442,13 +464,35 @@ export async function ingestMediaLocally(
   opts: LocalMediaIngestOptions = {},
 ): Promise<LocalMediaIngest> {
   const sourceBytes = Number.isFinite(file.size) ? file.size : 0;
+  const timeoutMs = Number.isFinite(opts.timeoutMs) && (opts.timeoutMs as number) > 0
+    ? (opts.timeoutMs as number)
+    : INGEST_TIMEOUT_MS;
+  // 逾時對外只是一個保險：以內部 controller 通知 run 停止後續階段（合作式中斷），
+  // 同時用 race 硬性保證「回傳」——任一步卡在 await 也絕不讓呼叫端永久 pending。
+  const controller = new AbortController();
+  const externalSignal = opts.signal;
+  const onExternalAbort = (): void => controller.abort();
+  if (externalSignal) {
+    if (externalSignal.aborted) controller.abort();
+    else externalSignal.addEventListener("abort", onExternalAbort, { once: true });
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
   let session: LocalMediaSession | null = null;
   try {
     session = createBrowserMediaSession(file);
-    return await runLocalMediaIngest(file, session, opts);
+    const runOpts: LocalMediaIngestOptions = { ...opts, signal: controller.signal };
+    const timeout = new Promise<LocalMediaIngest>((resolve) => {
+      timer = setTimeout(() => {
+        controller.abort();
+        resolve(degradedResult(sourceBytes, `timeout: ingest 超過 ${timeoutMs}ms 未完成`));
+      }, timeoutMs);
+    });
+    return await Promise.race([runLocalMediaIngest(file, session, runOpts), timeout]);
   } catch (e) {
     return degradedResult(sourceBytes, `session: ${errText(e)}`);
   } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    externalSignal?.removeEventListener("abort", onExternalAbort);
     try {
       session?.dispose();
     } catch {

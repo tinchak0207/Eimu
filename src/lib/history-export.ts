@@ -2,12 +2,14 @@
 
 // 历史记录的导出：ZIP（图片 + 清单）、JSON（完整档案）、CSV（表格）。
 //
-// 图片下载走浏览器 fetch，因此只能拿到同源或允许跨域的资源 ——
-// Vercel Blob 的公开 URL 满足条件。取不到的那几张会被跳过并计入 skipped，
-// 而不是让整个导出失败。
+// 媒体取字节走浏览器 fetch，因此必须拿「允许跨域」的响应：本站 CDN
+// (store.tinchak0207.xyz) 的 /image-data/ 由 nginx 按 Origin 回 CORS 头，但被
+// <img> no-cors 渲染过的同 URL 会命中无 CORS 的浏览器缓存。取图统一走
+// image-helpers.fetchImageResponse（?dl=1 换缓存键 + no-store），见 fetchAsBlob。
+// 仍取不到的那几张会被跳过并计入 skipped，而不是让整个导出失败。
 
 import { exportShotsZip } from "./export-zip";
-import { downloadExtension } from "./image-helpers";
+import { IMAGE_FETCH_TIMEOUT_MS, downloadExtension, imageHelpers } from "./image-helpers";
 import { saveManyLocally } from "./local-save";
 import { formatAbsoluteTime, formatCoins, primaryModelId } from "./history-types";
 import type { HistoryEntry } from "./history-types";
@@ -52,9 +54,24 @@ export function entryFileName(entry: HistoryEntry): string {
   return `${base}.${downloadExtension(entrySrc(entry) ?? "")}`;
 }
 
-async function fetchAsBlob(src: string): Promise<Blob | null> {
+/**
+ * 取图。2026-10-04 缺陷 B：本站 CDN(store.tinchak0207.xyz) 的图被 <img> no-cors
+ * 渲染后进了浏览器缓存，裸 fetch(URL) 会复用那份没有 Access-Control-Allow-Origin
+ * 的缓存体 → 跨域被拦（net::ERR_FAILED），整个 zip 的媒体全被 skipped。这里不再
+ * 自拼请求，直接走 image-helpers.fetchImageResponse——它补 ?dl=1 换缓存键并带
+ * cache:"no-store"，与单张下载（imageHelpers.download）同一条已知可用的链。
+ * 非 2xx 仍回 null，保持 skipped 判定语义不变。
+ *
+ * 2026-10-04（同「永久 pending」族）：取图逾时（fetchImageResponse 的 AbortController）
+ * 会在这里被同一个 catch 吞成 null —— 一次逾时只让该张 skipped，不炸整包 zip。
+ * timeoutMs 仅由测试注入缩短值；生产走 fetchImageResponse 的默认上限。
+ */
+export async function fetchAsBlob(
+  src: string,
+  timeoutMs: number = IMAGE_FETCH_TIMEOUT_MS,
+): Promise<Blob | null> {
   try {
-    const response = await fetch(src);
+    const response = await imageHelpers.fetchImageResponse(src, timeoutMs);
     if (!response.ok) return null;
     return await response.blob();
   } catch {
@@ -87,13 +104,14 @@ async function mapWithConcurrency<T, R>(
 export async function exportHistoryZip(
   entries: HistoryEntry[],
   zipName = `生成历史-${new Date().toISOString().slice(0, 10)}.zip`,
+  fetchTimeoutMs: number = IMAGE_FETCH_TIMEOUT_MS,
 ): Promise<HistoryExportResult> {
   if (!entries.length) return { exported: 0, skipped: 0 };
 
   const downloaded = await mapWithConcurrency(entries, DOWNLOAD_CONCURRENCY, async (entry) => {
     const src = entrySrc(entry);
     if (!src) return null;
-    const blob = await fetchAsBlob(src);
+    const blob = await fetchAsBlob(src, fetchTimeoutMs);
     return blob ? { name: entryFileName(entry), blob } : null;
   });
 

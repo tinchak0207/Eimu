@@ -474,18 +474,42 @@ export async function extractVideoFrames(
   const { video, sample: s } = sample;
 
   // 1) 关键坑：不能依赖 duration 提前可读，必须在 loadedmetadata 之后再动手。
+  //
+  // 2026-10-04（同 BUG-1 族，就地补硬）：与 `waitForMetadata` 同形——终态快查优先、
+  // 事件其次、timeout 兜底、所有出口清监听。此前只有一发式 error/loadedmetadata 监听、
+  // 无终态快查也无 timeout：元素若「既不 error 也不 loadedmetadata」，这里会永久 pending。
+  // 上传路径的调用端（AgentComposer）靠本函数返回才会推进/降级，故必须有限。
   if (video.readyState < 1) {
+    // 终态快查：元素已经死了（error 事件早已被前次消费、不会再发），立即具名失败。
+    if (video.error) throw new Error("视频解码失败，无法读取。");
     await new Promise<void>((resolve, reject) => {
-      const onLoaded = () => {
+      let settled = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const cleanup = (): void => {
         video.removeEventListener("loadedmetadata", onLoaded);
+        video.removeEventListener("error", onError);
+        if (timer !== undefined) clearTimeout(timer);
+      };
+      const onLoaded = (): void => {
+        if (settled) return;
+        settled = true;
+        cleanup();
         resolve();
       };
-      const onError = () => {
-        video.removeEventListener("error", onError);
+      const onError = (): void => {
+        if (settled) return;
+        settled = true;
+        cleanup();
         reject(new Error("视频解码失败，无法读取。"));
       };
       video.addEventListener("loadedmetadata", onLoaded);
       video.addEventListener("error", onError);
+      timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(new Error("读取视频信息超时。"));
+      }, METADATA_WAIT_TIMEOUT_MS);
     });
   }
 
@@ -618,64 +642,172 @@ export async function extractFramesFromFile(
 }
 
 /**
+ * 读取 metadata 的硬上限（毫秒）。本机 Object URL 的字节就在内存里、metadata 在档首，
+ * 正常应近乎即时（远小于 1 秒）；10 秒已远超任何合理的本地解码等待，又短到让
+ * 「真的卡住的解码」在可容忍时间内落成失败（chip 不再永久转圈）。
+ */
+export const METADATA_WAIT_TIMEOUT_MS = 10_000;
+
+/**
  * 等 loadedmetadata（读 duration / seek 前必须）。
  *
- * extractVideoFrames 内联着同一段（上传统路径依赖它，硬约束禁改其行为），
- * 这里独立一份给节点动作的 extractFramesAtTimes 用；两段语义逐字相同。
+ * extractVideoFrames 内联着同一段（上传路径依赖它），本轮（2026-10-04）已就地把内联那份
+ * 补成与这里同形（终态快查／事件／timeout／清监听）；这里独立一份给节点动作的
+ * extractFramesAtTimes 用。两段语义逐字相同，改动时须同步。
  *
  * 2026-09-28 导出给画布节点动作（video-frames 路由的呼叫方）：节点动作要**先读 duration
  * 再算计划**（planFrameExtraction 需要时长），所以要在自己的离屏 <video> 上等 metadata，
  * 与该函数在 extractFramesAtTimes 内的用途同源，不另写第二份。
+ *
+ * 2026-10-04（BUG-1）：进入时先看元素是否**已处于终态**——不能只靠事件。
+ * `<video>` 的 `error` 事件整个生命周期**只发一次**；若前一次等待已把它消费掉，
+ * 第二次再挂监听将永远等不到事件（readyState 停在 0），promise 永久 pending。
+ * 因此：已 error → 立即失败；已 HAVE_METADATA 以上 → 立即成功。timeout 只是外层保险。
  */
-export async function waitForMetadata(video: HTMLVideoElement): Promise<void> {
+export async function waitForMetadata(
+  video: HTMLVideoElement,
+  timeoutMs: number = METADATA_WAIT_TIMEOUT_MS,
+): Promise<void> {
+  // 终态快查：已解碼就直接成功（不再重挂监听）。
   if (video.readyState >= 1) return;
+  // 终态快查：元素已经死了（MEDIA_ERR_* / src 不支援）就直接失败，
+  // 不重挂监听——否则第二次等待会永久 pending。
+  if (video.error) throw new Error("视频解码失败，无法读取。");
   await new Promise<void>((resolve, reject) => {
-    const onLoaded = () => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const cleanup = (): void => {
       video.removeEventListener("loadedmetadata", onLoaded);
+      video.removeEventListener("error", onError);
+      if (timer !== undefined) clearTimeout(timer);
+    };
+    const onLoaded = (): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
       resolve();
     };
-    const onError = () => {
-      video.removeEventListener("error", onError);
+    const onError = (): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
       reject(new Error("视频解码失败，无法读取。"));
     };
     video.addEventListener("loadedmetadata", onLoaded);
     video.addEventListener("error", onError);
+    timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error("读取视频信息超时。"));
+    }, timeoutMs);
   });
 }
 
-/** 等待 video 跳到指定时间（等 seeked，否则 draw 到的是上一帧）。 */
-async function seekTo(video: HTMLVideoElement, time: number): Promise<void> {
-  return new Promise<void>((resolve) => {
-    let done = false;
-    const finish = () => {
-      if (done) return;
-      done = true;
+/**
+ * 单次 seek 的硬上限（毫秒）。
+ *
+ * 本机 Object URL 的字节就在内存里，正常 seek 是毫秒级；画布节点动作的远端 https
+ * 视频（`use-canvas-generation.ts` 直接调用本函数，**没有** `local-media-ingest` 的
+ * 总 timeout 兜底）可能要先把目标关键帧拉过网络再解码。15 秒已远超任何合理耗时的
+ * 百倍，又短到让「真的卡住的 seek」落成可观测失败——节点动作不会永远停在「取帧中…」。
+ * 与 metadata 等待（10 秒）同族同形，只是因远端多给一点网络余量。
+ */
+export const SEEK_TIMEOUT_MS = 15_000;
+
+/**
+ * 等待 video 跳到指定时间（等 seeked，否则 draw 到的是上一帧）。
+ *
+ * 2026-10-04（同 BUG-1 族）：进入时先看是否**已处于终态**，事件其次，timeout 兜底，
+ * 所有出口清监听。此前只等 seeked/error 且 error 也 resolve：元素若「永不 seeked」
+ * 且 `readyState < 2`（没有 data 可解码）就**永久 pending**——画布节点动作因此会永远
+ * 停在「取帧中…」。现在 error 直接 reject（具名原因），永不 settle 则由 timeout 兜底
+ * reject，调用端的 `try/catch → showError` 与 `finally` 才能落到明确终态。
+ *
+ * 导出：`extractFramesAtTimes` 与上传路径共用同一原语；另供 node:test 直接注入缩短的
+ * timeoutMs 复现「永不 seeked」（见同目录测试）。
+ */
+export async function seekTo(
+  video: HTMLVideoElement,
+  time: number,
+  timeoutMs: number = SEEK_TIMEOUT_MS,
+): Promise<void> {
+  // 终态快查 1：元素已经死了（解码失败 / src 不支援），立即具名失败，不重挂监听。
+  if (video.error) throw new Error("视频解码失败，无法读取。");
+  // 终态快查 2：已经停在目标时间且已有当前帧（HAVE_CURRENT_DATA 以上），不必再等
+  // seeked（部分浏览器对「已在目标点」的 seek 不触发 seeked）。
+  if (video.readyState >= 2 && Math.abs(video.currentTime - time) <= 0.001) return;
+
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // 老 Safari 对「已经在这个时间点」的 seek 不触发 seeked，会给一拍确认后自己 resolve。
+    let confirmTimer: ReturnType<typeof setTimeout> | undefined;
+    const cleanup = (): void => {
       video.removeEventListener("seeked", onSeeked);
       video.removeEventListener("error", onError);
+      if (timer !== undefined) clearTimeout(timer);
+      if (confirmTimer !== undefined) clearTimeout(confirmTimer);
+    };
+    const onSeeked = (): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
       resolve();
     };
-    const onSeeked = () => finish();
-    const onError = () => finish();
+    const onError = (): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error("视频解码失败，无法读取。"));
+    };
     video.addEventListener("seeked", onSeeked);
     video.addEventListener("error", onError);
+    timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error("视频定位超时，无法读取该时间点的画面。"));
+    }, timeoutMs);
     video.currentTime = time;
-    // 老 Safari 对「已经在这个时间点」的 seek 不触发 seeked，会永远等下去。
-    // 延迟一拍确认位置已到，再自己 resolve；仍要等这一拍，否则 drawImage 读到上一帧。
+    // 仍要等这一拍，否则 drawImage 读到上一帧。
     if (video.readyState >= 2) {
-      setTimeout(() => {
-        if (!done && Math.abs(video.currentTime - time) <= 0.001) finish();
+      confirmTimer = setTimeout(() => {
+        if (!settled && Math.abs(video.currentTime - time) <= 0.001) {
+          settled = true;
+          cleanup();
+          resolve();
+        }
       }, 64);
     }
   });
 }
 
 /**
+ * 单帧 canvas 导出的硬上限（毫秒）。
+ *
+ * `canvas.toBlob` 是回调式 API，且**没有任何事件或错误通道**：回调不触发就永久
+ * pending（不是 reject、不是 resolve）。canvas 节点取帧路径（`extractFramesAtTimes`
+ * → `captureFrame`）没有外层的总 timeout 兜底，一旦 toBlob 卡住节点会永远停在
+ * 「取帧中…」。画一帧再 JPEG 编码是纯 CPU 工作，正常在毫秒级；10 秒与 metadata
+ * 等待同档，远超任何合理耗时又短到让卡死可观测。逾时具名 reject 后，调用端
+ * `use-canvas-generation.ts` 的 `try/catch → showError("取帧失败：" + message)` 才能落地。
+ */
+export const FRAME_CAPTURE_TIMEOUT_MS = 10_000;
+
+/**
  * 单帧 capture：canvas 缩到长边 512、按原始宽高比，导出 JPEG。
  * 真实坑：canvas 只能画同源/可跨域资源，Object URL 是同源的；另外
  * canvas 的尺寸是 CSS 像素，与视频的 internal 分辨率不同时，只要
  * drawImage 用 video element 本身即可拿到完整的解码帧。
+ *
+ * 导出：供 `extractFramesAtTimes`（含画布节点动作）与上传路径共用；另供 node:test
+ * 注入缩短的 timeoutMs 复现「toBlob 永不回调」。
  */
-async function captureFrame(video: HTMLVideoElement): Promise<Blob> {
+export async function captureFrame(
+  video: HTMLVideoElement,
+  timeoutMs: number = FRAME_CAPTURE_TIMEOUT_MS,
+): Promise<Blob> {
   const raw = video.videoWidth;
   const rawH = video.videoHeight;
   if (!raw || !rawH) throw new Error("取帧失败：视频没有画面尺寸。");
@@ -696,11 +828,24 @@ async function captureFrame(video: HTMLVideoElement): Promise<Blob> {
   ctx.drawImage(video, 0, 0, width, height);
 
   // 质量 0.8：视觉模型够看，体积又只有 1.0 的一半左右。
-  return new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob((blob) => {
-      if (!blob) return reject(new Error("取帧失败：无法导出图像。"));
-      resolve(blob);
-    }, "image/jpeg", 0.8);
+  return await new Promise<Blob>((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new Error("取帧超时，请重试。"));
+    }, timeoutMs);
+    canvas.toBlob(
+      (blob) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (!blob) return reject(new Error("取帧失败：无法导出图像。"));
+        resolve(blob);
+      },
+      "image/jpeg",
+      0.8,
+    );
   });
 }
 

@@ -15,6 +15,7 @@ import {
   detectHasAudio,
   estimateProbeJsonBytes,
   frameEdgePx,
+  ingestMediaLocally,
   isIngestUsable,
   planKeyframeCount,
   planKeyframeTimes,
@@ -366,3 +367,147 @@ test("runLocalMediaIngest：onProgress 拋錯不弄壞管線", async () => {
   assert.equal(result.degraded, undefined);
   assert.equal(result.keyframes.length, 4);
 });
+
+// ─────────────────────── BUG-1 端到端（假 DOM）：ingestMediaLocally 絕不永久 pending
+//
+// 這裡用最小假 <video>/<canvas> 與假 document/URL 走真正的 createBrowserMediaSession，
+// 精確重現「error 只發一次、第二次等待」的原始卡死情境。
+
+type VideoDomMode = "error-once" | "seek-hang";
+
+interface FakeDomVideo {
+  readyState: number;
+  error: { code: number } | null;
+  duration: number;
+  videoWidth: number;
+  videoHeight: number;
+  preload: string;
+  muted: boolean;
+  playsInline: boolean;
+  currentTime: number;
+  addEventListener(type: string, cb: () => void): void;
+  removeEventListener(type: string, cb: () => void): void;
+  removeAttribute(): void;
+  load(): void;
+  listenerCount(type: string): number;
+  fire(type: string): void;
+}
+
+function makeFakeVideo(mode: VideoDomMode): FakeDomVideo {
+  const listeners = new Map<string, Set<() => void>>();
+  const v = {
+    readyState: 0,
+    error: null as { code: number } | null,
+    duration: Number.NaN,
+    videoWidth: 0,
+    videoHeight: 0,
+    preload: "",
+    muted: false,
+    playsInline: false,
+    currentTime: 0,
+    _src: "",
+    addEventListener(type: string, cb: () => void): void {
+      let set = listeners.get(type);
+      if (!set) {
+        set = new Set();
+        listeners.set(type, set);
+      }
+      set.add(cb);
+    },
+    removeEventListener(type: string, cb: () => void): void {
+      listeners.get(type)?.delete(cb);
+    },
+    listenerCount(type: string): number {
+      return listeners.get(type)?.size ?? 0;
+    },
+    fire(type: string): void {
+      for (const cb of [...(listeners.get(type) ?? [])]) cb();
+    },
+    removeAttribute(): void {},
+    load(): void {},
+  };
+  Object.defineProperty(v, "src", {
+    get(): string {
+      return v._src;
+    },
+    set(val: string): void {
+      v._src = val;
+      if (mode === "error-once") {
+        // 真實瀏覽器：error 只發一次，且發前先設 video.error（readyState 停在 0）。
+        queueMicrotask(() => {
+          v.error = { code: 4 };
+          v.fire("error");
+        });
+      } else {
+        // seek-hang：metadata 正常（readyState=HAVE_METADATA），但不發 seeked。
+        v.readyState = 1;
+        v.duration = 10;
+        v.videoWidth = 640;
+        v.videoHeight = 480;
+      }
+    },
+  });
+  return v as unknown as FakeDomVideo;
+}
+
+function installFakeVideoDom(mode: VideoDomMode): () => void {
+  const g = globalThis as unknown as { document?: unknown };
+  const origDoc = g.document;
+  const origCreate = URL.createObjectURL;
+  const origRevoke = URL.revokeObjectURL;
+  const canvas = {
+    width: 0,
+    height: 0,
+    getContext: () => ({ drawImage(): void {} }),
+    toBlob: (cb: (b: Blob | null) => void): void => cb(new Blob([], { type: "image/jpeg" })),
+  };
+  g.document = { createElement: (tag: string) => (tag === "video" ? makeFakeVideo(mode) : canvas) };
+  URL.createObjectURL = () => "blob:fake";
+  URL.revokeObjectURL = () => {};
+  return () => {
+    if (origDoc === undefined) delete g.document;
+    else g.document = origDoc;
+    URL.createObjectURL = origCreate;
+    URL.revokeObjectURL = origRevoke;
+  };
+}
+
+test(
+  "BUG-1：不可解碼檔（error 只發一次）→ ingestMediaLocally 立即回 degraded，絕不永久 pending",
+  { timeout: 5000 },
+  async () => {
+    const restore = installFakeVideoDom("error-once");
+    try {
+      const started = Date.now();
+      const result = await ingestMediaLocally(makeFile(1500));
+      const elapsed = Date.now() - started;
+      assert.ok(result.degraded, "壞檔必須帶 degraded，呼叫端才知道退回原檔路徑");
+      assert.match(result.degraded!, /metadata/);
+      assert.equal(result.keyframes.length, 0);
+      assert.ok(
+        elapsed < 1000,
+        `必須立即回（實測 ${elapsed}ms）；不得靠 10s timeout 才 settle，更不能無限 pending`,
+      );
+    } finally {
+      restore();
+    }
+  },
+);
+
+test(
+  "BUG-1：某一階段卡死（永不 seeked）→ 總 timeout 兜底回 degraded，不永久 pending",
+  { timeout: 5000 },
+  async () => {
+    const restore = installFakeVideoDom("seek-hang");
+    try {
+      const started = Date.now();
+      const result = await ingestMediaLocally(makeFile(1500), { timeoutMs: 40 });
+      const elapsed = Date.now() - started;
+      assert.ok(result.degraded, "逾時必須帶 degraded");
+      assert.match(result.degraded!, /timeout/);
+      assert.ok(elapsed >= 30 && elapsed < 2000, `應在 timeout 附近回（實測 ${elapsed}ms）`);
+    } finally {
+      restore();
+    }
+  },
+);

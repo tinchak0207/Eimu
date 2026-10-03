@@ -252,8 +252,40 @@ async function handleCapabilities(event) {
   return { ffmpeg: r.code === 0, version: ffmpegVersionLine(r.stdout || r.stderr), platform: process.platform };
 }
 
+// ===========================================================================
+// E2E 專用授權閘（**僅測試用；不得用於生產**）
+// ---------------------------------------------------------------------------
+// 真桌面殼的 E2E 測試需要走完 pickFiles 之後的整條鏈路（probe / extractFrames /
+// transcode），但 pickFiles 開的是原生對話框，自動化無法驅動（本機無
+// xdotool/ydotool/wtype 可用）。
+//
+// 因此提供一個**環境變數閘**：只有殼的**啟動環境**（process.env）設了
+// `EIMU_E2E_PICK_FILES` 時才生效。其值為分號分隔的絕對路徑，命中時直接
+// 當成「使用者剛挑選」的結果回傳並授權，完全不開對話框。
+//
+// 安全性：遠端頁面（renderer / 遠端內容）碰不到 process.env，無法自行開啟
+// 這個閘；只有啟動殼的人（測試 harness）能設定。
+//
+// 行為不變保證：未設此 env（生產預設）時，下方 handlePickFiles 逐位元組走
+// 原本的 dialog.showOpenDialog 路徑，行為與過往完全相同。
+// ===========================================================================
+function e2ePickOverride() {
+  const raw = process.env.EIMU_E2E_PICK_FILES;
+  if (typeof raw !== "string" || raw.length === 0) return null;
+  const paths = raw
+    .split(";")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  return paths.length ? paths : null;
+}
+
 async function handlePickFiles(event, opts) {
   assertTrustedSender(event);
+  const e2ePaths = e2ePickOverride();
+  if (e2ePaths) {
+    // E2E 專用（見上方註解）：不開對話框，直接授權並回傳這些路徑。
+    return authorizeRoots(e2ePaths).map((entry) => entry.input);
+  }
   const clean = policy.sanitizePickOptions(opts);
   const win = BrowserWindow.fromWebContents(event.sender) || undefined;
   const properties = clean.kind === "directory" ? ["openDirectory"] : ["openFile"];

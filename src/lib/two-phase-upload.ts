@@ -40,7 +40,7 @@ export const MAX_UPLOAD_BYTES = 512 * 1024 * 1024;
 /** 物件鍵命名空間（與 asset-packs/ 、generation/ 分開，互不干擾）。 */
 export const UPLOAD_OBJECT_KEY_PREFIX = "uploads";
 
-/** 內容型別白名單：媒體檔，不收 `application/octet-stream`（逼呼叫端講清楚是什麼）。 */
+/** 內容型別白名單：媒體檔＋3D 模型，不收 `application/octet-stream`（逼呼叫端講清楚是什麼）。 */
 export const ALLOWED_UPLOAD_CONTENT_TYPES: readonly string[] = [
   "image/png",
   "image/jpeg",
@@ -54,6 +54,10 @@ export const ALLOWED_UPLOAD_CONTENT_TYPES: readonly string[] = [
   "audio/wav",
   "audio/mp4",
   "audio/aac",
+  // 3D 模型（畫布 3D 場景卡導入；實際呼叫端只送 .glb/.gltf，見
+  // `src/lib/canvas/scene-3d-import.ts` 的 SCENE_3D_EXTENSIONS）。型別是標準 IANA 註冊。
+  "model/gltf-binary",
+  "model/gltf+json",
 ];
 
 /** 第一段直傳憑證的後端判定結果。 */
@@ -118,15 +122,44 @@ const EXTENSION_BY_CONTENT_TYPE: Record<string, string> = {
   "audio/wav": "wav",
   "audio/mp4": "m4a",
   "audio/aac": "aac",
+  "model/gltf-binary": "glb",
+  "model/gltf+json": "gltf",
 };
+
+/**
+ * 已知 3D 副檔名 → 內容型別。**只在** contentType 為空或 `application/octet-stream` 時當推導依據：
+ * 瀏覽器對 .glb/.gltf 常回空 type 或 octet-stream（尤其非 Chromium 內建映射時），此時靠副檔名補正。
+ * **不**對影像／影片放行 octet-stream —— 白名單「逼呼叫端講清楚」的意圖只對 3D 開這個有界缺口。
+ */
+const CONTENT_TYPE_BY_3D_EXTENSION: Record<string, string> = {
+  glb: "model/gltf-binary",
+  gltf: "model/gltf+json",
+};
+
+function contentTypeFrom3DExtension(filename?: string): string | null {
+  const name = typeof filename === "string" ? filename.trim().toLowerCase() : "";
+  const dot = name.lastIndexOf(".");
+  if (dot < 0) return null;
+  return CONTENT_TYPE_BY_3D_EXTENSION[name.slice(dot + 1)] ?? null;
+}
 
 function fail(status: number, code: string, message: string): never {
   throw new UploadSignError(status, code, message);
 }
 
-/** 內容型別必須在白名單內（`; charset=` 等參數先剝掉）。 */
-export function normalizeUploadContentType(raw: unknown): string {
+/**
+ * 內容型別必須在白名單內（`; charset=` 等參數先剝掉）。
+ *
+ * `filename` 為**可選**：僅當 `contentType` 為空或 `application/octet-stream` 時，
+ * 用來對**已知 3D 副檔名**（.glb/.gltf）推導正確型別。其他情況一律走白名單，
+ * 不把 octet-stream 全域放行。
+ */
+export function normalizeUploadContentType(raw: unknown, filename?: string): string {
   const value = typeof raw === "string" ? raw.trim().toLowerCase().split(";")[0].trim() : "";
+  if (!value || value === "application/octet-stream") {
+    const implied = contentTypeFrom3DExtension(filename);
+    if (implied) return implied;
+  }
   if (!value) fail(400, "missing_content_type", "contentType 必填（例如 image/png、video/mp4）。");
   if (!ALLOWED_UPLOAD_CONTENT_TYPES.includes(value)) {
     fail(415, "unsupported_content_type", `不支援的內容型別 ${value}（可用：${ALLOWED_UPLOAD_CONTENT_TYPES.join(" / ")}）。`);
@@ -143,7 +176,7 @@ export function buildUploadObjectKey(input: {
   token?: string;
 }): string {
   if (!Number.isFinite(input.userId)) fail(401, "invalid_user", "使用者身分無效。");
-  const contentType = normalizeUploadContentType(input.contentType);
+  const contentType = normalizeUploadContentType(input.contentType, input.filename);
   const ext = EXTENSION_BY_CONTENT_TYPE[contentType] ?? "bin";
   const rawName = typeof input.filename === "string" ? input.filename.trim() : "";
   const base = sanitizeBlobSegment(rawName.replace(/\.[A-Za-z0-9]{1,8}$/, ""), "upload").slice(0, 48);
@@ -329,7 +362,7 @@ export async function issueDirectUploadCredential(input: {
     );
   }
 
-  const contentType = normalizeUploadContentType(input.contentType);
+  const contentType = normalizeUploadContentType(input.contentType, input.filename);
   if (typeof input.size === "number" && Number.isFinite(input.size)) {
     if (input.size <= 0) fail(400, "invalid_size", "size 必須大於 0。");
     if (input.size > MAX_UPLOAD_BYTES) {

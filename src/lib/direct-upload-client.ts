@@ -147,7 +147,11 @@ async function requestCredential(input: {
     ? { type: "blob.generate-client-token", payload: { pathname: input.objectKey }, contentType: input.contentType }
     : { filename: input.filename, contentType: input.contentType, size: input.size };
 
-  const response = await input.fetchFn(SIGN_PATH, {
+  // `input.fetchFn(...)` 是**方法呼叫**，會把 `this` 綁成 `input`；瀏覽器原生 fetch 要求
+  // receiver 是 global，否則在發出任何請求前就拋 `Illegal invocation`（Node undici 不看
+  // receiver，故單元測試抓不到）。先取出成裸變數再呼叫，receiver 回歸 `undefined`。
+  const callFetch = input.fetchFn;
+  const response = await callFetch(SIGN_PATH, {
     method: "POST",
     headers: { ...input.authHeaders, "content-type": "application/json", [TRACE_HEADER]: input.traceId },
     body: JSON.stringify(body),
@@ -214,7 +218,9 @@ async function commitObject(input: {
   traceId: string;
   signal?: AbortSignal;
 }): Promise<UploadDirectResult> {
-  const response = await input.fetchFn(COMMIT_PATH, {
+  // 同 `requestCredential`：取出成裸變數，避免把 fetch 當 `input` 的方法呼叫。
+  const callFetch = input.fetchFn;
+  const response = await callFetch(COMMIT_PATH, {
     method: "POST",
     headers: { ...input.authHeaders, "content-type": "application/json", [TRACE_HEADER]: input.traceId },
     body: JSON.stringify(input.title ? { objectKey: input.objectKey, title: input.title } : { objectKey: input.objectKey }),

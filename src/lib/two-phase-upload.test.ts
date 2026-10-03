@@ -205,6 +205,83 @@ test("回寫授權：宣告別人的 pathname 一律 403（不因後端分岔而
   }
 });
 
+test("3D 型別在白名單內：model/gltf-binary 與 model/gltf+json 都能簽發，物件鍵尾碼正確", async () => {
+  const { issueDirectUploadCredential } = await import("./two-phase-upload");
+  const stub = stubPresign({ status: 200, body: { url: `${VPS_BASE}/api/blob/x`, ticket: "t" } });
+  const cases = [
+    ["scene.glb", "model/gltf-binary", "glb"],
+    ["scene.gltf", "model/gltf+json", "gltf"],
+  ] as const;
+  try {
+    for (const [filename, contentType, ext] of cases) {
+      const credential = await issueDirectUploadCredential({
+        userId: 7,
+        filename,
+        contentType,
+        size: 8 * 1024 * 1024,
+        request: jsonRequest(),
+      });
+      assert.equal(credential.contentType, contentType);
+      assert.ok(
+        credential.objectKey.endsWith(`.${ext}`),
+        `${contentType} 的物件鍵尾碼應為 .${ext}，實得 ${credential.objectKey}`,
+      );
+    }
+  } finally {
+    stub.restore();
+  }
+});
+
+test("octet-stream／空 type ＋已知 3D 副檔名 ⇒ 由副檔名推導正確型別（不再 415）", async () => {
+  const { issueDirectUploadCredential } = await import("./two-phase-upload");
+  const stub = stubPresign({ status: 200, body: { url: `${VPS_BASE}/api/blob/x`, ticket: "t" } });
+  try {
+    const binary = await issueDirectUploadCredential({
+      userId: 7,
+      filename: "model.glb",
+      contentType: "application/octet-stream",
+      request: jsonRequest(),
+    });
+    assert.equal(binary.contentType, "model/gltf-binary");
+    assert.ok(binary.objectKey.endsWith(".glb"));
+
+    const json = await issueDirectUploadCredential({
+      userId: 7,
+      filename: "scene.gltf",
+      contentType: "",
+      request: jsonRequest(),
+    });
+    assert.equal(json.contentType, "model/gltf+json");
+    assert.ok(json.objectKey.endsWith(".gltf"));
+  } finally {
+    stub.restore();
+  }
+});
+
+test("octet-stream 僅對 3D 推導：.txt 的 octet-stream／白名單外型別仍 415；空型別＋未知副檔名仍 400", async () => {
+  const { issueDirectUploadCredential, UploadSignError } = await import("./two-phase-upload");
+  const stub = stubPresign({ status: 200, body: { url: `${VPS_BASE}/api/blob/x`, ticket: "t" } });
+  const cases = [
+    ["notes.txt", "application/octet-stream", 415],
+    ["notes.txt", "text/plain", 415],
+    ["archive.bin", "", 400],
+  ] as const;
+  try {
+    for (const [filename, contentType, status] of cases) {
+      await assert.rejects(
+        () => issueDirectUploadCredential({ userId: 7, filename, contentType, request: jsonRequest() }),
+        (error: unknown) => {
+          assert.ok(error instanceof UploadSignError);
+          assert.equal(error.status, status, `${filename} / "${contentType}" 應 ${status}`);
+          return true;
+        },
+      );
+    }
+  } finally {
+    stub.restore();
+  }
+});
+
 test("內容型別白名單：不在名單內一律 415", async () => {
   const { issueDirectUploadCredential, UploadSignError } = await import("./two-phase-upload");
   const stub = stubPresign({ status: 200, body: { url: `${VPS_BASE}/api/blob/x`, ticket: "t" } });

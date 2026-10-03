@@ -152,6 +152,56 @@ type PendingAttachmentStatus = "extracting" | "uploading" | "ready" | "error";
  */
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
 
+/**
+ * 上传等待的硬上限（缺陷 A 修复）。底层 fetch（原片直传 agent-uploads、站内
+ * 代理 agent-chat-client）都没有 timeout、也没有 signal：高负载下请求可以一直
+ * 在途不结束，附件 chip 就永久停在 uploading（实测 38MB 影片直传 150s+ 不落地）。
+ * 到点视为逾时，让 chip 落明确终态。
+ *
+ * 值：原片可能数十 MB，取 3 分钟——38MB 在 0.25MB/s（约 2Mbps）的悲观上行也只要
+ * ~152s，正常上传不会被误杀；同时把病态「永不完成」的请求挡在 180s。衍生档／
+ * 关键帧只有几 MB 且走站内代理，60s 已极宽裕。
+ */
+export const VIDEO_UPLOAD_TIMEOUT_MS = 180_000;
+const DERIVED_UPLOAD_TIMEOUT_MS = 60_000;
+
+/**
+ * 非影片附件（普通文件）的等待硬上限。这条路走站内代理 `uploadAgentAttachments`，
+ * 没有直传/抽帧降级链，卡住就只能永久停在 uploading。文件经 4MB 站内上限闸
+ * （MAX_FILE_BYTES，见 enqueueFiles），几 MB 的档在悲观上行也只需数十秒；60s
+ * 与衍生档同档，足够正常上传又不让病态请求无限挂起。逾时落 UploadTimeoutError，
+ * 由 enqueueFiles 的 job.catch 写成带人话的 error chip（不静默消失）。
+ */
+export const PLAIN_UPLOAD_TIMEOUT_MS = 60_000;
+
+/** 逾时专用错误：调用端据此区分「网络失败（可静默降级）」与「逾时（必须给人话）」。 */
+export class UploadTimeoutError extends Error {
+  constructor() {
+    super("上传超时，请重试。");
+    this.name = "UploadTimeoutError";
+  }
+}
+
+/**
+ * 给没有 signal 的等待加 deadline：到点 reject(UploadTimeoutError)，晚到的结果被丢弃。
+ * 与 SEND_HARD_TIMEOUT_MS 同一姿势——时到必解锁，宁可让用户重试也不做假死状态。
+ */
+export function withUploadDeadline<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new UploadTimeoutError()), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 /** 字节数 → 展示 MB（一位小数，四舍五入）。 */
 function formatMb(bytes: number): string {
   return (Math.round((bytes / (1024 * 1024)) * 10) / 10).toFixed(1);
@@ -529,10 +579,13 @@ function AgentComposerComponent({
     setAttachments((prev) => prev.map((a) => (a.id === id ? { ...a, ...patch } : a)));
   }, []);
 
-  /** 普通文件：原样上传。 */
+  /** 普通文件：原样上传。无降级链，逾时必须落明确错误终态给人话（不得永久 uploading）。 */
   const uploadPlainFile = useCallback(
     async (session: string, id: string, file: File) => {
-      const uploaded: AgentAttachment[] = await uploadAgentAttachments(session, [file]);
+      const uploaded: AgentAttachment[] = await withUploadDeadline(
+        uploadAgentAttachments(session, [file]),
+        PLAIN_UPLOAD_TIMEOUT_MS,
+      );
       const first = uploaded[0];
       if (!first) throw new Error("上传结果为空。");
       patchAttachment(id, { status: "ready", refs: [toAgentAttachmentRef(first)] });
@@ -574,7 +627,10 @@ function AgentComposerComponent({
             label: formatFrameTime(frame.tSec),
           }));
           patchAttachment(id, { status: "uploading", frames, framesDone: frames.length });
-          const uploaded = await uploadAgentAttachments(session, toDerivedFiles(ingested, file.name));
+          const uploaded = await withUploadDeadline(
+            uploadAgentAttachments(session, toDerivedFiles(ingested, file.name)),
+            DERIVED_UPLOAD_TIMEOUT_MS,
+          );
           if (uploaded.length === 0) throw new Error("衍生檔上傳結果為空。");
           patchAttachment(id, {
             status: "ready",
@@ -592,11 +648,16 @@ function AgentComposerComponent({
 
       // 2) 回退：今天的第一條路——原片直傳網關。
       try {
-        const ref = await uploadVideoDirect(session, file);
+        const ref = await withUploadDeadline(
+          uploadVideoDirect(session, file),
+          VIDEO_UPLOAD_TIMEOUT_MS,
+        );
         patchAttachment(id, { status: "ready", refs: [ref], videoUrl });
         return;
-      } catch {
-        // 直傳失敗：靜默落抽幀降級路徑，不把直傳錯誤拋給用戶。
+      } catch (err) {
+        // 逾時必須落明確終態並給人話（不得留在 uploading）；其他直傳失敗
+        // （無票/401/413/415/網絡）照舊靜默落抽幀降級路徑，不把錯誤拋給用戶。
+        if (err instanceof UploadTimeoutError) throw err;
       }
 
       // 3) 直傳也失敗：既有抽幀降級路徑（行為與今天逐位一致）。
@@ -619,7 +680,10 @@ function AgentComposerComponent({
       }));
       patchAttachment(id, { status: "uploading", frames, framesDone: extracted.files.length });
 
-      const uploaded = await uploadAgentAttachments(session, extracted.files);
+      const uploaded = await withUploadDeadline(
+        uploadAgentAttachments(session, extracted.files),
+        DERIVED_UPLOAD_TIMEOUT_MS,
+      );
       if (uploaded.length === 0) throw new Error("抽幀上傳結果為空。");
       patchAttachment(id, { status: "ready", refs: uploaded.map(toAgentAttachmentRef) });
     },

@@ -81,6 +81,24 @@ function glb(size: number): Blob {
   return new Blob([new Uint8Array(size)], { type: "model/gltf-binary" });
 }
 
+/**
+ * 模擬**瀏覽器原生 fetch** 的 receiver 要求：`fetch` 是 global 物件的方法，
+ * 只有 `this === undefined`（裸呼叫，會被替換成 global）或 `this === globalThis`
+ * 才合法；一旦被當成別的物件的方法呼叫（`obj.fetchFn(...)`）就拋
+ * `Failed to execute 'fetch' on 'Window': Illegal invocation`。
+ *
+ * 為什麼要這條：Node 的 undici fetch 完全不看 receiver，所以「測試全綠、只有真瀏覽器爆」
+ * ——本替身把那個隱形契約顯式化，修復前 sign/commit 兩處必紅。
+ */
+function receiverStrictFetch(backend: { fetchFn: typeof fetch }): typeof fetch {
+  return function (this: unknown, input: RequestInfo | URL, init?: RequestInit) {
+    if (this !== undefined && this !== globalThis) {
+      throw new TypeError("Failed to execute 'fetch' on 'Window': Illegal invocation");
+    }
+    return backend.fetchFn(input, init);
+  } as unknown as typeof fetch;
+}
+
 test("happy path：sign → PUT（帶 credential.headers）→ commit 的順序與參數", async () => {
   const backend = createBackend({});
   const progress: number[] = [];
@@ -178,6 +196,24 @@ test("commit 回 alreadyCommitted:true：不重複上傳，結果忠實回報", 
   assert.equal(result.alreadyCommitted, true);
   assert.equal(backend.counts.put, 1, "alreadyCommitted 不觸發第二次上傳");
   assert.equal(backend.counts.commit, 1);
+});
+
+test("receiver：fetchFn 不得被當方法呼叫——模擬真瀏覽器 Illegal invocation，sign/PUT/commit 三條都必須成功", async () => {
+  const backend = createBackend({});
+  const result = await uploadDirect(glb(1024), {
+    title: "模型 B",
+    headers: { Authorization: "Bearer tok", "x-user-id": "7" },
+    fetchFn: receiverStrictFetch(backend),
+  });
+
+  assert.equal(backend.counts.sign, 1, "sign 必須真的發出（修復前在 input.fetchFn(...) 就拋）");
+  assert.equal(backend.counts.put, 1, "PUT 必須真的發出");
+  assert.equal(backend.counts.commit, 1, "commit 必須真的發出（修復前在 input.fetchFn(...) 就拋）");
+  assert.deepEqual(
+    backend.calls.map((c) => `${c.method} ${c.url}`),
+    ["POST /api/uploads/sign", `PUT ${CREDENTIAL.uploadUrl}`, "POST /api/uploads/commit"],
+  );
+  assert.equal(result.objectKey, OBJECT_KEY);
 });
 
 test("PUT 首次失敗＋重試仍失敗：拋出具名 PUT 失敗錯誤（不吞）", async () => {

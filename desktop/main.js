@@ -40,9 +40,22 @@ const {
 // 0.3.2：自動更新（electron-updater + generic provider）。見 desktop/updater.js。
 const { initUpdater, applyUpdate } = require("./updater.js");
 
-const APP_ORIGIN = "https://www.eimu.dev";
+// 可測性改造（E2E 基建用）：EIMU_APP_ORIGIN 可覆寫殼要載入的站點。
+// 未設＝沿用生產站，值就是同一個字串，行為與過往逐位元組相同。
+// 只在 E2E／本機測試時設定（例如 EIMU_APP_ORIGIN=http://localhost:3997）。
+const APP_ORIGIN = process.env.EIMU_APP_ORIGIN || "https://www.eimu.dev";
 // eimu.dev（無 www）會 308 到 www，但導航判斷一律以最終 host 為準，兩者都收。
 const APP_HOSTS = new Set(["www.eimu.dev", "eimu.dev"]);
+// 覆寫 origin 時把它自己的 host 併入導航白名單：isAppUrl 依 APP_HOSTS 判斷，
+// 不併入的話殼會把自己的首頁當外部連結轉去系統瀏覽器。未設時這段不執行，
+// 白名單維持上面兩筆，既有導航／外鏈／下載政策完全不受影響。
+if (process.env.EIMU_APP_ORIGIN) {
+  try {
+    APP_HOSTS.add(new URL(process.env.EIMU_APP_ORIGIN).host);
+  } catch {
+    /* 非法 URL：忽略覆寫，維持預設白名單 */
+  }
+}
 
 // W6b：device bridge 殼內指示。連線**預設 OFF**；只有使用者明確開啟
 // （EIMU_DEVICE_BRIDGE=1 且能取得憑證）才連。開啟狀態以視窗標題可見化。
