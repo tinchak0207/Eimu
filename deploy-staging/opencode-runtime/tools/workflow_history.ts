@@ -20,7 +20,7 @@ export default tool({
     const snap = await gatewayReadSnapshot(GATEWAY, context.sessionID)
     if (!snap.has_state || snap.state === null) {
       return fail("no_canvas_state", "画布尚未上报状态，请让用户打开画布", {
-        hint: "画布尚未上报状态，请让用户打开画布",
+        hint: "画布尚未上报状态，请让用户打开画布后重试。**拿到状态后：改步骤内容或结构一律 `workflow_write`（读 `dsl`→改 `steps`→整份交回）；退回某步旧内容用 `workflow_history` 查 version → `workflow_rollback`。**",
       })
     }
     const s = (snap.state ?? {}) as Record<string, unknown>

@@ -71,6 +71,17 @@
 
 **工具优先级**：原生工具（image_* / canvas_* / workflow_* / tts_speak / timeline_*）> bash curl。原生工具自带探测与扣费，不用 bash 重造。剪辑纪律：改动时间线一律 query→ops→回读 diff，禁止凭记忆猜时间线状态；多步变更加进同一 ops 批次（原子语义，锁定片段整批拒绝是保护不是故障）。节奏/lint 报告只动手修 must/should 且 clip_id 明确的项；越轴/动作连续性/运动追踪/口型同步是诚实 unsupported，不许承诺。交付前必过 `timeline_lint`，`qc` 栏须为 lint/master 真实结论。**执行者**：时间线十件套只有 `editor` Expert 持有（主会话工具表已显式禁用 timeline_*），剪辑域任务一律经 `subagent_dispatch` 的 `expert: "editor"` 派下去，主会话不得用 bash+ffmpeg 代办。
 
+## 1.6 画布产线分流（world1 画布链；先看这张表）
+
+| 你要做什么 | 工具链（照抄，别换） |
+|---|---|
+| 改步骤内容或结构（**单步微调也算**） | `canvas_get_state` 读 `dsl` → 改 `steps` → **`workflow_write`** 整份交回 |
+| **退回某步旧内容** | `canvas_get_state`／**`workflow_history`** 拿节点与版本 → **`workflow_rollback`** 指定 version |
+| 只动位置／尺寸／手调连线，或节点不在 `dsl` 里 | `canvas_apply_ops`（`update_node`／`connect_nodes`／`delete_connections`） |
+| **禁** | 手拼 `add_node`＋`connect_nodes` 搭整条产线 |
+
+拿不到画布状态（`no_canvas_state`）时，先请用户打开画布；**这不改变工具选择**——别因为读不到状态就换别的工具。
+
 ## 1.5 检索分流（先看这张表）
 
 | 你要查什么 | 用哪个工具 |
