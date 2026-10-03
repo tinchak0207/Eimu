@@ -110,7 +110,12 @@ function controlPlaneOrigin(): string {
  * **轉發 origin**：把站內 `path` 解析成工具轉發用的完整絕對 URL。
  *
  * 順序（越前面越優先）：
- * 1. `MCP_DISPATCH_ORIGIN` 顯式指定 → `${該值}${path}`（測試與臨時改道用）。
+ * 1. `MCP_DISPATCH_ORIGIN` 顯式指定 → `${該值}${path}`。**生產必需，不可移除**：
+ *    `/api/agent/biz/**` 族（`canvas_get_state` / `workflow_read` / `workflow_history`，
+ *    站內只有 Vercel 有這條 route）在本函式沒有其他順位可救，少了它就落到第 3 點、
+ *    被 Cloudflare 發 managed challenge（`Just a moment` 403）。生產值＝
+ *    `https://image.tinchak0207.xyz`（同 Vercel 專案、`server: Vercel`、不掛 CF 的自訂域名）；
+ *    換值**必須**是不掛 Cloudflare 的 origin——換回公開域名（`eimu.dev`）等於復發。
  * 2. 對 `controlPlaneRewrites(cpOrigin)` 做匹配：命中控制面路徑表（唯一真源＝
  *    `src/lib/control-plane-proxy-routes.mjs`）→ 走不掛 CF 的控制面 origin。
  *    匹配規則：source 形如 `/api/v1/:path*` 者做「前綴 + 捕獲剩餘段」；其餘 source 精確相等。
