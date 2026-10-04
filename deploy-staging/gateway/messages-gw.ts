@@ -379,8 +379,12 @@ export const BEAST_SKILL_LIST = process.env.BEAST_SKILL_LIST === "1"
 
 /** A13 v3（2026-10-02）：階段知識外置為 opencode skill，幀只放指針（progressive
  *  disclosure，對標 zcode：知識不進 context，agent 用 skill 工具按需拉正文）。
- *  開關：BEAST_FRAME_V3=0 → 回退 v2（階段模組內嵌注入）。 */
-export const BEAST_FRAME_V3 = process.env.BEAST_FRAME_V3 !== "0"
+ *
+ *  2026-10-04 行為退化回報（生產日誌 session f942102e）：v3 只注入 skill 指標，實測
+ *  模型不主動用 skill 工具載入階段知識 ⇒ 硬條文（≥3 路並發／critic 獨立審核）落空，
+ *  行為退化為只派 1 路、自評自審。故 v3 改為**預設 OFF**（opt-in）：只有要省 token
+ *  時才顯式設 BEAST_FRAME_V3=1；預設走 v2（階段模組內嵌注入，行為強制優先）。 */
+export const BEAST_FRAME_V3 = process.env.BEAST_FRAME_V3 === "1"
 
 export const BEAST_PHASE_SKILL_POINTERS: BeastFrameModule = {
   name: "beast-phase-skills",
