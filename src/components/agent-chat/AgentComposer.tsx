@@ -4,6 +4,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore,
@@ -13,6 +14,7 @@ import {
   type KeyboardEvent,
   type MutableRefObject,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   ArrowUp,
   Brain,
@@ -405,6 +407,10 @@ function ThinkingLevelMenu({ disabled }: { disabled: boolean }) {
   const [level, setLevel] = useState<AgentThinkingLevel>("medium");
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  // 展開面板搬到 createPortal(document.body)：另持一個 ref 供 outside-click 與定位量測。
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  // 面板 fixed 座標（相對視窗）。null ＝尚未量到，首frame 以 visibility:hidden 佔位量尺寸。
+  const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
 
   useEffect(() => {
     // 挂载后解析：显式记录优先，否则由缓存 settings 反推，反推不到顯示「中」。
@@ -412,15 +418,88 @@ function ThinkingLevelMenu({ disabled }: { disabled: boolean }) {
   }, []);
 
   // 开着时点外面就收——与历史 dropdown / 设定弹层同一条规矩（pointerdown + contains）。
+  // 面板在 portal（document.body）内、不在 rootRef 子樹，所以兩棵樹都要算「裡面」。
   useEffect(() => {
     if (!open) return;
     const onDocPointerDown = (ev: PointerEvent): void => {
-      if (rootRef.current && !rootRef.current.contains(ev.target as Node)) {
-        setOpen(false);
-      }
+      const target = ev.target as Node;
+      if (rootRef.current?.contains(target) || panelRef.current?.contains(target)) return;
+      setOpen(false);
     };
     document.addEventListener("pointerdown", onDocPointerDown);
     return () => document.removeEventListener("pointerdown", onDocPointerDown);
+  }, [open]);
+
+  /*
+   * 面板定位（2026-10-04 改版）：以觸發鈕 rect 為錨，fixed 開在按鈕**正下方**、左緣對齊。
+   *
+   * 為什麼是 portal + fixed，而不是晶片容器內 absolute top-full（原定寫法）：
+   * 助理頁＝PromptInput 卡片內的 AgentChatSurface，其 inline 態根節點帶
+   * `overflow-hidden`，而 composer 根帶 `backdrop-filter`（lg-float）＝fixed 子元素的
+   * containing block。absolute／fixed 留在樹內都會被祖先裁掉——本機 Playwright 實測
+   * （1280×900，composer 貼 surface 底緣）：面板只從 surface 底部露出約 8px，其餘全被
+   * overflow-hidden 切掉、點不到。搬到 document.body 的 portal 才不受該裁切，
+   * 也才能保證面板四邊都在視窗內。
+   *
+   * 定位規則：預設在鈕下方（top = 鈕底 + 8px）；下方裝不下（面板高＋邊距超過視窗）才
+   * 翻到鈕上方——「必要的翻轉」，不是預設。左右以鈕左緣對齊，靠到右邊界時往內收。
+   */
+  const place = useCallback((): void => {
+    const trigger = rootRef.current;
+    if (!trigger) return;
+    const r = trigger.getBoundingClientRect();
+    const panel = panelRef.current;
+    const pw = panel ? panel.offsetWidth : 0;
+    const ph = panel ? panel.offsetHeight : 0;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const GAP = 8;
+    const MARGIN = 8;
+    let top = r.bottom + GAP; // 預設：按鈕正下方
+    if (ph > 0 && top + ph > vh - MARGIN && r.top - GAP - ph >= MARGIN) {
+      top = r.top - GAP - ph; // 下方不足才翻到上方
+    }
+    if (ph > 0) top = Math.min(top, Math.max(MARGIN, vh - MARGIN - ph));
+    let left = r.left; // 左緣與按鈕左緣對齊
+    if (pw > 0) left = Math.min(left, Math.max(MARGIN, vw - MARGIN - pw));
+    setCoords({ top, left });
+  }, []);
+
+  // 開面板：先量尺寸再入座（useLayoutEffect 在 paint 前跑，不會閃）。
+  useLayoutEffect(() => {
+    if (!open) {
+      setCoords(null);
+      return;
+    }
+    place();
+  }, [open, place]);
+
+  // 開著時視窗尺寸／任何祖先捲動（capture）都重新貼合錨點，面板不飄走。
+  useEffect(() => {
+    if (!open) return;
+    const onMove = (): void => place();
+    window.addEventListener("resize", onMove);
+    window.addEventListener("scroll", onMove, true);
+    const vv = window.visualViewport;
+    vv?.addEventListener("resize", onMove);
+    vv?.addEventListener("scroll", onMove);
+    return () => {
+      window.removeEventListener("resize", onMove);
+      window.removeEventListener("scroll", onMove, true);
+      vv?.removeEventListener("resize", onMove);
+      vv?.removeEventListener("scroll", onMove);
+    };
+  }, [open, place]);
+
+  // Esc 收起（語義與舊版一致：只收起，不選、不清輸入框）。焦點在按鈕（rootRef 內）時
+  // 走 root 的 onKeyDown；焦點若落進 portal 的選項，root 收不到，故另掛一支 window keydown。
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: globalThis.KeyboardEvent): void => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, [open]);
 
   const pick = useCallback((next: AgentThinkingLevel): void => {
@@ -446,9 +525,10 @@ function ThinkingLevelMenu({ disabled }: { disabled: boolean }) {
   return (
     // 工具行同排、「+」右邊（暴君 2026-10-03 三選一定案）：控件進工具行流內，
     // 右邊緊跟「+」，與「+」和「↑」同一條基線。
-    // 錨定鏈：展開面板（absolute bottom-full）的 containing block ＝ composer 根
-    // （relative，與同檔 SkillSlashMenu 同一條鏈）。此 chip 容器**不得**再掛 relative，
-    // 否則面板會貼著這個小盒往上開、下半壓在輸入框上。
+    // 面板錨定改版（2026-10-04）：展開面板已搬到 createPortal(document.body) + fixed，
+    // 以本容器的 getBoundingClientRect() 定位（rootRef 只當錨點量測與 outside-click 判定）。
+    // 舊禁令「面板 absolute bottom-full 貼 composer 根、此容器不得 relative」整條作廢——
+    // 它只服務 upward 開法；現在面板在按鈕下方、且必須離開被 overflow-hidden 裁切的樹。
     <div ref={rootRef} onKeyDown={onKeyDown} className="shrink-0 ml-0.5">
       <button
         type="button"
@@ -484,48 +564,64 @@ function ThinkingLevelMenu({ disabled }: { disabled: boolean }) {
           aria-hidden="true"
         />
       </button>
-      {open && (
-        <div
-          role="listbox"
-          aria-label="思考级别"
-          /*
-            定位／容器寫法照抄同檔 SkillSlashMenu（lg-float + absolute bottom-full，
-            貼在控件正上方、不進流＝零 layout shift）。containing block ＝ composer 根
-            （relative，與 SkillSlashMenu 同一條鏈）：chip 容器**不得**再掛 relative，
-            否則面板會貼著 chip 往上開、下半壓在輸入框上。**不得**再用 agent-pop-in：
-            它的 keyframes 帶 translateX(-50%)（給「left-1/2 置中彈層」用的），
-            配 left-0 會把整個面板左移半個寬度、內容滑出面板外——那正是生產上
-            「級別名跑到面板左緣之外、四列只剩說明行」的根因。
-            寬度＝內容自適應（w-max）：四列只有級別名＋勾，不寫死 w-52 造成空曠或裁切。
-          */
-          className="lg-float absolute bottom-full left-1.5 z-50 mb-2 w-max min-w-0 rounded-ios-xl p-1"
-        >
-          <div className="pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-[inherit] bg-gradient-to-r from-transparent via-white to-transparent opacity-80" />
-          {AGENT_THINKING_LEVELS.map((lv) => (
-            <button
-              key={lv}
-              type="button"
-              role="option"
-              aria-selected={lv === level}
-              onClick={() => pick(lv)}
-              /* 极简：说明行删掉，说明字串改挂 title（真源仍是 AGENT_THINKING_LEVEL_HINTS）。 */
-              title={AGENT_THINKING_LEVEL_HINTS[lv]}
-              className={cn(
-                "flex w-full items-center gap-2 rounded-[12px] px-2.5 py-2 text-left transition-colors",
-                "hover:bg-black/[0.05] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
-                lv === level && "bg-ios-blue/[0.10]",
-              )}
+      {/*
+        展開面板：createPortal 到 document.body + fixed 定位（座標由 place() 以按鈕 rect
+        算出，預設在按鈕**正下方**、左緣與按鈕左緣對齊）。搬出樹才不被助理頁
+        .agent-chat-surface（inline 態帶 overflow-hidden）裁掉；不進流＝零 layout shift。
+        **不得**用 agent-pop-in：它的 keyframes 帶 translateX(-50%)（給「left-1/2 置中彈層」
+        用的），配 left 會把整個面板左移半個寬度、內容滑出面板外——那正是生產上「級別名跑到
+        面板左緣之外、四列只剩說明行」的根因。
+        樣式逐字複用助理頁既有浮層語彙：agent-pop 彈層材質 + rounded-[18px] + p-1 + 頂緣
+        specular 高光線（來源＝歷史下拉 AgentChatSurface.tsx:1129、設定彈層
+        AgentSettingsPopover.tsx:102）。選 agent-pop 而非 lg-float 的理由：①本面板已 portal
+        到 body，agent-chat.css 的 ≤639.98px 手機字級階梯正是以 `.agent-pop`（「DOM 已搬離
+        根容器」的彈層）為錨點，選它手機字才抬到 15px 地板；②面板浮在輸入框之外的頁面內容
+        上，0.96 白比 lg-float 的 0.56 白好讀。
+        寬度＝內容自適應（w-max）：四列只有級別名＋勾，不寫死 w-52 造成空曠或裁切。
+        底緣保護：max-h + 內部可滾（overscroll-contain），空間不足時面板自己滾，底部不被裁掉。
+        首frame coords 未量到＝visibility:hidden 佔位量尺寸，paint 前 place() 定位，不閃。
+      */}
+      {open && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              ref={panelRef}
+              role="listbox"
+              aria-label="思考级别"
+              style={{
+                top: coords?.top ?? 0,
+                left: coords?.left ?? 0,
+                visibility: coords ? "visible" : "hidden",
+              }}
+              className="agent-pop fixed z-50 w-max min-w-0 max-h-[min(60dvh,18rem)] overflow-y-auto overscroll-contain rounded-[18px] p-1"
             >
-              <span className="whitespace-nowrap text-ios-footnote font-medium text-foreground">
-                {AGENT_THINKING_LEVEL_LABELS[lv]}
-              </span>
-              {lv === level && (
-                <Check className="ml-auto h-3.5 w-3.5 shrink-0 text-ios-blue" aria-hidden="true" />
-              )}
-            </button>
-          ))}
-        </div>
-      )}
+              <div className="pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-[inherit] bg-gradient-to-r from-transparent via-white to-transparent opacity-80" />
+              {AGENT_THINKING_LEVELS.map((lv) => (
+                <button
+                  key={lv}
+                  type="button"
+                  role="option"
+                  aria-selected={lv === level}
+                  onClick={() => pick(lv)}
+                  /* 极简：说明行删掉，说明字串改挂 title（真源仍是 AGENT_THINKING_LEVEL_HINTS）。 */
+                  title={AGENT_THINKING_LEVEL_HINTS[lv]}
+                  className={cn(
+                    "flex w-full items-center gap-2 rounded-[12px] px-2.5 py-2 text-left transition-colors",
+                    "hover:bg-black/[0.05] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+                    lv === level && "bg-ios-blue/[0.10]",
+                  )}
+                >
+                  <span className="whitespace-nowrap text-ios-footnote font-medium text-foreground">
+                    {AGENT_THINKING_LEVEL_LABELS[lv]}
+                  </span>
+                  {lv === level && (
+                    <Check className="ml-auto h-3.5 w-3.5 shrink-0 text-ios-blue" aria-hidden="true" />
+                  )}
+                </button>
+              ))}
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }
@@ -581,12 +677,13 @@ export function LocalFileModeMenuView({
   const currentSpec = LOCAL_FILE_MODES.find((m) => m.id === mode) ?? LOCAL_FILE_MODES[0];
   const current = describeLocalFileMode(mode);
   const CurrentIcon = known ? LOCAL_FILE_MODE_ICONS[currentSpec.icon] : HardDrive;
-  const label = known ? current.title : "本機檔案";
+  const label = known ? current.title : "本机文件";
   const disabled = !supported;
 
   return (
-    // 定位鏈與 ThinkingLevelMenu 相同：chip 容器**不得**掛 relative，否則面板會貼著
-    // 這顆小盒往上開、下半壓在輸入框上（containing block 必須回到 composer 根）。
+    // 定位鏈（本控件仍走舊寫法）：面板 absolute bottom-full，containing block ＝
+    // composer 根（此 chip 容器不掛 relative）。相鄰 ThinkingLevelMenu 已改為容器
+    // relative + top-full 開在按鈕下方，兩者定位語彙不同，勿再宣稱「相同」。
     <div
       className="shrink-0 ml-1"
       onKeyDown={(event) => {
@@ -602,8 +699,8 @@ export function LocalFileModeMenuView({
         disabled={disabled}
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-label={`本機檔案權限：${label}`}
-        title={disabled ? "本機檔案權限：需更新桌面版" : `本機檔案權限：${label}`}
+        aria-label={`本机文件权限：${label}`}
+        title={disabled ? "本机文件权限：需更新桌面版" : `本机文件权限：${label}`}
         className={cn(
           // 與同排「+」「↑」「思考級別」同一套無框語彙：只換顏色/透明度，零 layout shift。
           "flex w-max max-sm:min-h-11 shrink-0 items-center gap-1 whitespace-nowrap leading-none text-foreground/60",
@@ -624,9 +721,9 @@ export function LocalFileModeMenuView({
       {open && !disabled && (
         <div
           role="listbox"
-          aria-label="本機檔案權限"
-          // 定位語彙逐字對齊同檔 ThinkingLevelMenu / SkillSlashMenu：
-          // absolute bottom-full left-1.5 mb-2，貼控件正上方、不進流＝零 layout shift。
+          aria-label="本机文件权限"
+          // 定位語彙沿用舊寫法（與同檔 SkillSlashMenu 同款）：absolute bottom-full left-1.5 mb-2，
+          // 貼控件正上方、不進流＝零 layout shift（ThinkingLevelMenu 已改開按鈕下方，勿再對齊它）。
           className="lg-float absolute bottom-full left-1.5 z-50 mb-2 w-max min-w-0 rounded-ios-xl p-1"
         >
           <div className="pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-[inherit] bg-gradient-to-r from-transparent via-white to-transparent opacity-80" />
@@ -664,7 +761,7 @@ export function LocalFileModeMenuView({
           })}
           {/* 已授權數量：只「檢視」；授權入口在對話裡（本控件不做選擇資料夾按鈕）。 */}
           <p className="mt-1 border-t border-black/[0.06] px-2.5 pb-1.5 pt-2 text-ios-caption2 text-foreground/45">
-            {rootsCount > 0 ? `已授權 ${rootsCount} 個資料夾` : "尚未授權任何資料夾"}
+            {rootsCount > 0 ? `已授权 ${rootsCount} 个文件夹` : "尚未授权任何文件夹"}
           </p>
         </div>
       )}
@@ -901,7 +998,7 @@ function AgentComposerComponent({
 
       const frames = extracted.files.map((f, i) => ({
         url: URL.createObjectURL(f),
-        label: extracted.timestamps[i]?.label ?? `第 ${i + 1} 幀`,
+        label: extracted.timestamps[i]?.label ?? `第 ${i + 1} 帧`,
       }));
       patchAttachment(id, { status: "uploading", frames, framesDone: extracted.files.length });
 
@@ -934,7 +1031,7 @@ function AgentComposerComponent({
               id: `att-${++attachmentSeq}`,
               fileName: file.name,
               status: "error",
-              errorMessage: "未能建立會話，請先登入或稍後重試。",
+              errorMessage: "未能建立会话，请先登录或稍后重试。",
             },
           ]);
         });
