@@ -33,13 +33,18 @@ type TokenResult = {
 // [riskclose 2026-09-27] TLS channel: nginx store vhost rewrites /newapi/* -> new-api.
 // The old bare-IP plaintext gateway (http://43.172.85.76) had its /api management
 // surface closed with 444; only this TLS path is reachable by the Vercel site.
-const PROD_GATEWAY_BASE = "https://store.tinchak0207.xyz/newapi";
-
+// [riskclose 2026-10-04] 生产环境**必须**显式配置 GATEWAY_BASE_URL：旧实现在 env 缺失时
+// 静默回退到硬编码默认值——钱路上任何「env ?? 硬编码」的静默回退都是定时炸弹
+// （2026-09-19 IMGMU7UH9SFF9A21D 每笔实单被打成 500）。缺配置要大声失败，不再静默。
 export function getGatewayBaseUrl() {
-  return (process.env.GATEWAY_BASE_URL
-    ?? (process.env.NODE_ENV === "production" ? PROD_GATEWAY_BASE : "http://localhost:3001"))
-    .replace(/^\uFEFF+/, "")
-    .trim();
+  const configured = process.env.GATEWAY_BASE_URL?.replace(/^\uFEFF+/, "").trim();
+  if (configured) return configured;
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "Missing GATEWAY_BASE_URL：生产环境不得回退到硬编码网关默认值（钱路必须显式配置网关地址）。",
+    );
+  }
+  return "http://localhost:3001";
 }
 
 async function parseJson<T>(response: Response): Promise<T> {

@@ -35,7 +35,17 @@ export type MapayRedemptionPlan = {
 
 function gatewayBaseUrl(env: EnvLike): string {
   // [riskclose 2026-09-27] TLS gateway channel (bare-IP plaintext /api closed).
-  return env.GATEWAY_BASE_URL ?? (env.NODE_ENV === "production" ? "https://store.tinchak0207.xyz/newapi" : "http://localhost:3001");
+  // [riskclose 2026-10-04] 生产环境**必须**显式配置 GATEWAY_BASE_URL：旧实现在 env 缺失时
+  // 静默回退到硬编码默认值，2026-09-19 真实订单 IMGMU7UH9SFF9A21D 就是走到一条已死的
+  // 默认 URL 被支付商推送 6 次全回 500（钱路定时炸弹）。钱路不得静默回退。
+  const configured = env.GATEWAY_BASE_URL?.trim();
+  if (configured) return configured;
+  if (env.NODE_ENV === "production") {
+    throw new Error(
+      "Missing GATEWAY_BASE_URL：生产环境 mPay 兑换码履约必须显式配置网关地址，禁止回退到硬编码默认值。",
+    );
+  }
+  return "http://localhost:3001";
 }
 
 function bearer(value: string): string {

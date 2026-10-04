@@ -35,3 +35,38 @@ endpoints:
       badge:
         response-time:
           thresholds: [10000, 30000, 60000, 120000, 300000]
+
+  # 風控絆線（金絲雀／異常註冊）：此前只存在於 VPS `/opt/image-gatus/config/config.yaml`，
+  # repo 沒有這一段 ⇒ 拿 repo 單向覆蓋會把它整條沖掉。2026-10-04 依「雙向 diff 取並集」
+  # 併回 repo，repo 從此是兩條探針的唯一天源。
+  - name: 风控绊线（金丝雀/异常注册）
+    group: Risk
+    url: https://store.tinchak0207.xyz/risk/status.json
+    interval: 5m
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].alert == false"
+    ui:
+      hide-hostname: true
+      hide-port: true
+      hide-errors: false
+
+  # 付款對帳探針：用支付商自己的資料對帳「已付款 vs 已履約」。
+  # 端點由控制面承載（需要控制面 DB + 支付商憑證），故走 /image-control/ 前綴
+  # （與 deploy/vps/deploy-control-plane.sh 的 PUBLIC_HEALTHZ 同一族）。
+  # 有 paid_unfulfilled > 0（付了錢沒履約）→ 端點回 503 → 探針紅燈；這正是不許
+  # 用假 200 假裝健康的那條。修好前刻意紅著，逼履約。
+  - name: mPay 付款對帳（已付款 vs 已履約）
+    group: Production
+    url: https://store.tinchak0207.xyz/image-control/api/payments/mapay/health
+    interval: 30m
+    client:
+      timeout: 60s
+    conditions:
+      - "[STATUS] == 200"
+      - "[BODY].paid_unfulfilled == 0"
+      - "[BODY].configured == true"
+    ui:
+      hide-hostname: true
+      hide-port: true
+      hide-errors: false

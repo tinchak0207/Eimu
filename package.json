@@ -16,7 +16,10 @@
     "generation:bootstrap": "tsx tools/control-plane-bootstrap.ts",
     "generation:migrate": "tsx tools/migrate-generation-db.ts",
     "generation:seed": "tsx tools/seed-generation-suppliers.ts",
-    "generation:worker": "tsx worker/generation-worker.ts"
+    "generation:worker": "tsx worker/generation-worker.ts",
+    "ops:deploy-freshness": "tsx tools/check-deploy-freshness.ts",
+    "ops:migrate": "tsx tools/apply-migrations.ts",
+    "ops:mapay-order": "tsx tools/inspect-mapay-order.ts"
   },
   "dependencies": {
     "@atlaskit/pragmatic-drag-and-drop": "^1.8.1",

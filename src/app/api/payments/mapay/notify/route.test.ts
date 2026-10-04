@@ -27,6 +27,7 @@ import {
   type MapayCreditRecord,
   type MapayCreditStore,
 } from "@/lib/mapay-credit";
+import { MAPAY_INTAKE_RELAY_SIGNATURE_DOMAIN } from "@/lib/mapay-intake";
 import {
   FIRST_CHARGE_FULL_QUOTA,
   FIRST_CHARGE_FALLBACK_QUOTA,
@@ -57,6 +58,8 @@ type FakeState = {
   hasRechargeRow: boolean;
   /** 首充名額（user_id → out_trade_no），與 first_charge_claim 主鍵同語義。 */
   firstChargeClaims: Map<number, string>;
+  /** A1 落地存證（假 mapay_order_intake）：out_trade_no → {state, delivery, userId}。 */
+  intakeRows: Map<string, { state: string; delivery: string | null; userId: number | null }>;
 };
 
 let server: Server | null = null;
@@ -78,6 +81,7 @@ function freshState(): FakeState {
     rows: new Map(),
     hasRechargeRow: false,
     firstChargeClaims: new Map(),
+    intakeRows: new Map(),
   };
 }
 
@@ -194,6 +198,44 @@ test.before(async () => {
             });
             reply = json({ ok: true, outcome });
           }
+        } else if (url.pathname === "/image-control/api/internal/mapay-intake") {
+          const verified = verifyBizKeySync({
+            secret: RELAY_SECRET,
+            timestamp: req.headers[BIZ_KEY_SYNC_TIMESTAMP_HEADER.toLowerCase()] as string | undefined,
+            signature: req.headers[BIZ_KEY_SYNC_SIGNATURE_HEADER.toLowerCase()] as string | undefined,
+            rawBody,
+            signatureDomain: MAPAY_INTAKE_RELAY_SIGNATURE_DOMAIN,
+          });
+          if (!verified) reply = json({ ok: false, message: "签名校验失败。" }, 401);
+          else {
+            const body = JSON.parse(rawBody) as {
+              op: string;
+              orderId: string;
+              userId: number | null;
+              delivery?: string | null;
+            };
+            const existing = state.intakeRows.get(body.orderId);
+            if (body.op === "record") {
+              // upsert 不降级：已 fulfilled/parked 的保持原状（与控面 DDL 同语义）。
+              if (!existing || existing.state === "received") {
+                state.intakeRows.set(body.orderId, {
+                  state: "received",
+                  delivery: null,
+                  userId: body.userId ?? null,
+                });
+              }
+              reply = json({ ok: true, outcome: "recorded" });
+            } else if (body.op === "fulfilled") {
+              state.intakeRows.set(body.orderId, {
+                state: "fulfilled",
+                delivery: body.delivery ?? existing?.delivery ?? null,
+                userId: existing?.userId ?? null,
+              });
+              reply = json({ ok: true, outcome: "fulfilled" });
+            } else {
+              reply = json({ ok: false, message: "未知的操作。" }, 400);
+            }
+          }
         } else if (url.pathname === "/image-control/api/internal/first-charge") {
           state.eligibilityRequests += 1;
           const verified = verifyBizKeySync({
@@ -289,6 +331,10 @@ test("bound order is credited directly and no redemption code is created", async
   assert.equal(state.ledgerCalls, 1, "帐本记一笔");
   assert.deepEqual(state.redemptionCreates, [], "不再生成兑换码");
   assert.equal(state.rows.get("IMG-BOUND-1")?.status, "applied");
+  // A1 存證：驗簽成功後先落地，履約成功後回標 fulfilled + delivery。
+  assert.equal(state.intakeRows.get("IMG-BOUND-1")?.state, "fulfilled");
+  assert.equal(state.intakeRows.get("IMG-BOUND-1")?.delivery, "direct_credit");
+  assert.equal(state.intakeRows.get("IMG-BOUND-1")?.userId, 253);
 });
 
 test("replaying the same notify credits only once and still creates no code", async () => {
@@ -324,6 +370,10 @@ test("legacy param (not logged in) never touches the credit channel", async () =
   assert.equal(state.creditRequests, 0, "旧格式不走直达入帐");
   assert.deepEqual(state.redemptionCreates, ["MPIMG-LEGACY"], "行为与从前一致：只发码");
   assert.equal(state.quota, BASE_QUOTA);
+  // 未登入舊格式也存證（userId=null、通道＝兌換碼）。
+  assert.equal(state.intakeRows.get("IMG-LEGACY")?.state, "fulfilled");
+  assert.equal(state.intakeRows.get("IMG-LEGACY")?.delivery, "redemption_code");
+  assert.equal(state.intakeRows.get("IMG-LEGACY")?.userId, null);
 });
 
 test("tampered userId never reaches the credit channel (rejected like any unresolvable param)", async () => {

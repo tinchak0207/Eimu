@@ -9,8 +9,10 @@ import {
 } from "@/lib/mapay";
 import { fulfillMapayRedemption, type MapayRedemptionPlan } from "@/lib/mapay-redemption";
 import { creditMapayOrderViaRelay, mapayDeliveryFor } from "@/lib/mapay-credit";
+import { markMapayIntakeFulfilledViaRelay, recordMapayIntakeViaRelay, type MapayIntakeDelivery } from "@/lib/mapay-intake";
 import { readFirstChargeEligibilityViaRelay } from "@/lib/first-charge";
 import { resolveMapayOrderBinding } from "@/lib/mapay-order-param";
+import { parseSeatOrderParam } from "@/lib/team-seat-order";
 import { fulfillSeatOrder } from "@/lib/team-seat-fulfillment";
 
 export const runtime = "nodejs";
@@ -21,6 +23,21 @@ function response(text: string, status = 200) {
     status,
     headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
   });
+}
+
+/**
+ * 履约落地后回标 intake=fulfilled（带 delivery）。回标失败不改履约结果——
+ * cron sweep 会按幂等键补；只记一条结构化告警。
+ */
+async function markIntake(orderId: string, delivery: MapayIntakeDelivery, detail: string): Promise<void> {
+  const outcome = await markMapayIntakeFulfilledViaRelay({ orderId, delivery, detail });
+  if (outcome !== "fulfilled") {
+    console.error("[mapay notify] intake mark fulfilled failed（不改履约结果，sweep 会幂等补）", {
+      out_trade_no: orderId,
+      delivery,
+      outcome,
+    });
+  }
 }
 
 /**
@@ -81,6 +98,29 @@ async function handleNotify(req: NextRequest) {
       return response("success");
     }
 
+    // A1 落地存證：驗簽通過且支付成功之後、**任何履約副作用之前**先寫一筆 intake。
+    // 2026-09-19 真實訂單 IMGMU7UH9SFF9A21D 被推送 6 次全回 500——旧流程履约前
+    // 零落地记录，履约一炸订单在库里零痕迹，只能靠支付商后台才发现。存證失敗**不得**
+    // 阻擋履約（錢必兌現優先），但必須留一條結構化告警（沿用既有 console.error 告警風格）。
+    const bound = resolveMapayOrderBinding(params.param);
+    const seatIdentity = parseSeatOrderParam(params.param);
+    const intake = await recordMapayIntakeViaRelay({
+      orderId: params.out_trade_no,
+      rawParams: params,
+      money: params.money,
+      planId: bound?.planId ?? params.param,
+      param: params.param,
+      userId: seatIdentity?.teamUserId ?? bound?.userId ?? null,
+    });
+    if (intake !== "recorded") {
+      console.error("[mapay notify] intake record failed（继续履约，钱必兑现优先）", {
+        out_trade_no: params.out_trade_no,
+        money: params.money,
+        param: params.param,
+        outcome: intake,
+      });
+    }
+
     // 席位訂單不走 plan 流程：`seat:` 前綴者走席位履約分支（同源價表重算 → 比對 money
     // → 記下席位意圖並把配額加到團隊主帳，冪等鍵＝out_trade_no）。金額不符/參數不合法
     // → 拒且不履約。**絕不**落 fulfillMapayRedemption（那條發金幣兌換碼，席位不是金幣套餐）。
@@ -112,12 +152,13 @@ async function handleNotify(req: NextRequest) {
       });
       // 錢必落地：已入帳（credited/already_credited）→ success；通道不可用/結果未定
       // → fail 讓網關重投（不發兌換碼兜底——席位沒有兌換碼可發）。
+      if (seat.credited) await markIntake(params.out_trade_no, "direct_credit", "seat");
       return seat.credited ? response("success") : response("fail", 500);
     }
 
     // param 有兩種：已登入下單的三段自簽值（planId.userId.hmac8，可直達入帳），
     // 以及未登入的舊格式（只有 planId，只能發兌換碼）。驗簽失敗／舊格式＝完全走舊流程。
-    const bound = resolveMapayOrderBinding(params.param);
+    // （bound / seatIdentity 已在存證段解析，見上。）
 
     // 自定义档（custom:<coins>）与静态档共用一个解析器：价格一律服务端重算，
     // 回调里的 money 只用于比对，客户端传价不参与任何计价。
@@ -149,6 +190,7 @@ async function handleNotify(req: NextRequest) {
           user_id: bound.userId,
           credit: outcome,
         });
+        await markIntake(params.out_trade_no, "direct_credit", `direct:${outcome}`);
         return response("success");
       }
 
@@ -189,6 +231,7 @@ async function handleNotify(req: NextRequest) {
       type: params.type,
       redemption_created: redemption.created,
     });
+    await markIntake(params.out_trade_no, "redemption_code", `cdk:${redemption.key}`);
     return response("success");
   } catch (error) {
     console.error("[mapay notify]", error);

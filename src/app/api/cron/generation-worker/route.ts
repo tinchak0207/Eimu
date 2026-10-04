@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runGenerationMaintenanceOnce, runGenerationWorkerOnce } from "@/lib/generation-core/worker-service";
-import { generationControlPlaneEnabled } from "@/lib/generation-core/database";
+import { runMapayOrderReconciliationOnce } from "@/lib/generation-core/mapay-order-reconciliation";
+import { generationControlPlaneEnabled, getGenerationSql } from "@/lib/generation-core/database";
+import { sweepMapayIntakeOnce, type MapayIntakeSweepResult } from "@/lib/mapay-intake";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -54,11 +56,51 @@ export async function GET(req: NextRequest) {
       maintenance = { ok: false, error: maintenanceError instanceof Error ? maintenanceError.message : String(maintenanceError) };
     }
 
+    // 付款對帳（獨立函式，B2）：用**支付商自己的資料**對帳「已付款 vs 已履約」，
+    // 抓出我方帳本吞掉的實單（2026-09-19 IMGMU7UH9SFF9A21D 同族事故）。自帶節流
+    // （默認 30 分鐘一次，MAPAY_RECONCILE_INTERVAL_MS 可調）⇒ 不與其他 sweep 搶程式碼、
+    // 也不每分鐘打爆支付商 API。只讀；失敗只記日誌，不擋本輪派單回報。
+    let mapayReconciliation: Record<string, unknown>;
+    try {
+      const report = await runMapayOrderReconciliationOnce();
+      mapayReconciliation = report
+        ? {
+            ok: true,
+            checked: report.checked,
+            fulfilled: report.fulfilled,
+            paid_unfulfilled: report.paidUnfulfilled.length,
+            unknown: report.unknown.length,
+          }
+        : { ok: true, skipped: "interval_or_unconfigured" };
+    } catch (reconcileError) {
+      console.error("[generation-worker-cron] mapay order reconciliation failed（下一輪重試）", reconcileError);
+      mapayReconciliation = {
+        ok: false,
+        error: reconcileError instanceof Error ? reconcileError.message : String(reconcileError),
+      };
+    }
+
+    // mPay 落地存證自癒（A2）：挑 state='received' 且落地超過 10 分鐘的 intake 行，
+    // 用既有冪等路径重投履约（bound→直達入帳；未綁→兌換碼；席位→席位通道）。
+    // 不新建 scheduler：复用本 cron 每分鐘心跳。失敗只記日誌，不擋本輪派單回報。
+    let mapayIntakeSweep: MapayIntakeSweepResult | { ok: false; error: string };
+    try {
+      mapayIntakeSweep = await sweepMapayIntakeOnce(getGenerationSql());
+    } catch (sweepError) {
+      console.error("[generation-worker-cron] mapay intake sweep failed（下一輪重試）", sweepError);
+      mapayIntakeSweep = {
+        ok: false,
+        error: sweepError instanceof Error ? sweepError.message : String(sweepError),
+      };
+    }
+
     return NextResponse.json({
       ok: true,
       worker_enabled: true,
       processed,
       maintenance,
+      mapay_reconciliation: mapayReconciliation,
+      mapay_intake_sweep: mapayIntakeSweep,
       cron_id: cronId ?? "local",
       timestamp: new Date().toISOString(),
     });
