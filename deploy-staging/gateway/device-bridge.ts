@@ -492,15 +492,59 @@ export function sanitizeToolArgs(
   }
 }
 
-/** 把裝置回傳的結構化結果套上 256KB 硬上限與截斷標記。 */
+/** U+FFFD（替換字元）佔比門檻：與前端 detectBinaryText 同值（0.5%）。 */
+const BINARY_FFFD_RATIO = 0.005
+/** 二進位讀取的人話指引（裝置回的是位元組被 utf8 解碼後的結果，閘道據此判定）。 */
+const BINARY_READ_NOTE =
+  "这是二进制文件（图片/压缩/可执行等），无法当文字读取；请改用附件/下载路径获取原始内容。"
+
+/**
+ * 二進位判定（可證標準）：文字含 NUL 位元組（`\u0000`，純文字不可能有）＝二進位；
+ * 或 U+FFFD 佔比 ≥ 0.5%（二進位被 utf8 解碼的典型指紋；真殼實測 64KB 有 21,386 個）。
+ */
+export function isBinaryTextPayload(text: unknown): boolean {
+  if (typeof text !== "string" || text.length === 0) return false
+  if (text.includes("\u0000")) return true
+  let fffd = 0
+  for (let i = 0; i < text.length; i += 1) if (text.charCodeAt(i) === 0xfffd) fffd += 1
+  return fffd / text.length >= BINARY_FFFD_RATIO
+}
+
+/**
+ * 把裝置回傳的結構化結果套上 256KB 硬上限與截斷標記。
+ *
+ * read_file 家族另做兩件事（2026-10-04 缺陷 B，只動閘道）：
+ *  1. 二進位偵測：命中即清空 text、標 `binary:true` 並附人話指引，**不得**把 21k 個
+ *     U+FFFD 的亂碼當成功文字回。
+ *  2. `truncated` 改由「實際讀到的 bytes（offset+bytes_read）對比檔案 size」決定，
+ *     不再只看 256KB 容量截斷（真殼實錘 64KB/4.4MB 卻回 truncated=false）。
+ */
 export function finalizeDeviceResult(raw: unknown): { result: Record<string, unknown>; truncated: boolean; bytes: number } {
   const obj = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : { value: raw }
   // read_file 家族：直接夾其中的 text 欄位，保留 offset 等後設欄位。
   if (typeof obj.text === "string") {
+    const offset = typeof obj.offset === "number" && Number.isFinite(obj.offset) && obj.offset >= 0 ? obj.offset : 0
+    const size = typeof obj.size === "number" && Number.isFinite(obj.size) ? obj.size : null
+    const bytesRead = typeof obj.bytes_read === "number" && Number.isFinite(obj.bytes_read) ? obj.bytes_read : null
+    const sizeTruncated = size !== null && bytesRead !== null ? offset + bytesRead < size : false
+    if (isBinaryTextPayload(obj.text)) {
+      const result: Record<string, unknown> = { ...obj, binary: true, text: "", note: BINARY_READ_NOTE }
+      // 拿不到 size 時保守視為「還有後續」（不得宣稱讀完整份二進位檔）。
+      const truncated = size !== null && bytesRead !== null ? sizeTruncated : true
+      if (truncated) {
+        result.truncated = true
+        if (size !== null && bytesRead !== null) result.truncated_bytes = Math.max(0, size - (offset + bytesRead))
+      }
+      return { result, truncated, bytes: bytesRead ?? 0 }
+    }
     const t = truncateWithMarker(obj.text, MAX_READ_BYTES)
-    const result: Record<string, unknown> = { ...obj, text: t.text, truncated: t.truncated }
-    if (t.truncated) result.truncated_bytes = t.originalBytes - t.keptBytes
-    return { result, truncated: t.truncated, bytes: t.keptBytes }
+    const truncated = t.truncated || sizeTruncated
+    const result: Record<string, unknown> = { ...obj, text: t.text, truncated }
+    if (truncated) {
+      result.truncated_bytes =
+        size !== null && bytesRead !== null ? Math.max(0, size - (offset + bytesRead)) : t.originalBytes - t.keptBytes
+    }
+    return { result, truncated, bytes: bytesRead ?? t.keptBytes }
   }
   const serialized = JSON.stringify(obj)
   const t = truncateWithMarker(serialized, MAX_READ_BYTES)

@@ -529,6 +529,15 @@ export function toolErrorPayload(
   return { code, message, human_message: humanMessageFor(message, code) }
 }
 
+/**
+ * 取第一個非空字串。本機檔案授權的附帶欄位（root／reason）可能落在頂層或 error 內
+ * （不同上游版本形狀不同），統一收斂。
+ */
+function firstNonEmptyString(...values: unknown[]): string {
+  for (const v of values) if (typeof v === "string" && v.length > 0) return v
+  return ""
+}
+
 // ── R8-B 工單 #2（2026-08-29）：拒單報因 ──
 // R8 實錘：grep BRE 交替 \| 撞 deny 的 *|* 被拒，報錯不說命中哪條規則，
 // 模型花 78s 人肉逆向權限表。修法：被拒 bash 命令對 permission.bash 的
@@ -970,12 +979,45 @@ if (status === "pending" || status === "running") {
     const parsed = parseToolOutput(st.output)
     // 只認明確帶 ok 欄位的結構化輸出；沒有 ok 欄位（原生工具文字輸出）一律視為成功。
     const hasOkFlag = parsed !== null && typeof parsed === "object" && typeof (parsed as { ok?: unknown }).ok === "boolean"
-    const ok = hasOkFlag ? (parsed as { ok: boolean }).ok === true : true
+    // 缺陷 A（2026-10-04 本機檔案橋，真殼實錘）：未授權路徑的讀取**不是成功**。凍結契約下
+    // gateway 對 needs_authorization 回 HTTP 200，local_files 把它包成
+    // {ok:true, action_required:"authorize_local_files", root, reason, options}（授權發生在對話裡）。
+    // 舊碼只看 bool ok ⇒ 折成 ok:true 並丟掉 action_required／options／root ⇒ 前端卡片顯示
+    // 「完成」（實錘：助手文字「读取被拦下了」而卡片「读取本机文件 完成」）。此處把它正規化為
+    // needs_authorization，並把 code／root／reason／options 原樣帶進 SSE。裝置橋原生
+    // {ok:false,error:{code:"needs_authorization",…}} 亦收斂到同一條路。
+    const parsedRecord = parsed !== null && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null
+    const parsedErrorRecord =
+      parsedRecord && parsedRecord.error && typeof parsedRecord.error === "object"
+        ? (parsedRecord.error as Record<string, unknown>)
+        : null
+    const authActionRequired =
+      typeof parsedRecord?.action_required === "string" ? (parsedRecord.action_required as string) : ""
+    const needsAuthorization =
+      authActionRequired === "authorize_local_files" ||
+      parsedErrorRecord?.code === "needs_authorization" ||
+      parsedRecord?.code === "needs_authorization"
+    const authRoot = firstNonEmptyString(parsedRecord?.root, parsedRecord?.auth_root, parsedErrorRecord?.root)
+    const authReason = firstNonEmptyString(parsedRecord?.reason, parsedRecord?.auth_reason, parsedErrorRecord?.reason)
+    const authOptionsRaw = parsedRecord?.options ?? parsedRecord?.auth_options ?? parsedErrorRecord?.options
+    const ok = needsAuthorization ? false : hasOkFlag ? (parsed as { ok: boolean }).ok === true : true
     // S2a（2026-08-27）：ok 語義收緊為「已執行且成功」。失敗必落
     // {ok:false, error:{code,message,human_message}}——human_message 中文短句必填。
     // 舊代碼非 image_ 工具無條件回 ok:true，導致 workflow_rerun_node 等失敗工具
     // 在 SSE 上偽成功（評測 event 687-690 實錘）。
-    const toolErr = !ok ? toolErrorPayload(parsed, "tool failed") : null
+    const toolErr = needsAuthorization
+      ? {
+          code: "needs_authorization",
+          message: authReason || "此路径尚未授权。",
+          human_message: firstNonEmptyString(parsedErrorRecord?.human_message) || "读取此路径需要你的授权，请选择授权范围。",
+          action_required: "authorize_local_files",
+          ...(authRoot ? { root: authRoot } : {}),
+          ...(authReason ? { reason: authReason } : {}),
+          ...(Array.isArray(authOptionsRaw) ? { options: authOptionsRaw } : {}),
+        }
+      : !ok
+        ? toolErrorPayload(parsed, "tool failed")
+        : null
     // artifact_pending：已提交、成品未到——回包给了 task_id 但还没有成品 url。
     const artifactPending =
       ok && typeof parsed?.task_id === "string" && !!parsed.task_id && !(typeof parsed?.url === "string" && parsed.url.length > 0)
@@ -1011,6 +1053,27 @@ if (status === "pending" || status === "running") {
       // 工具再帶一句 summary 短文案；同步子代理 deadline 超時補 partial/reason。
       const parsedObj =
         parsed !== null && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null
+      // 缺陷 B（2026-10-04 本機檔案橋）：local_files 的 read_file 結果把裝置/閘道算好的
+      // binary／bytes_read／size／truncated 放在 result 內；這裡原樣帶進 SSE，前端據此
+      // 顯示「这是二进制文件」並正確報「已读 X / 文件 Y 字节（已截断）」。成功判定不變
+      // （仍由 ok 決定），只是把後設欄位補齊，不改其他工具語義。
+      const readFileResult =
+        toolName === "local_files" &&
+        parsedObj?.op === "read_file" &&
+        parsedObj.result !== null &&
+        typeof parsedObj.result === "object"
+          ? (parsedObj.result as Record<string, unknown>)
+          : null
+      const readBinary = readFileResult ? readFileResult.binary === true || parsedObj?.binary === true : false
+      const readBytesTotal = readFileResult && typeof readFileResult.size === "number" ? readFileResult.size : undefined
+      const readBytesRead = readFileResult
+        ? typeof readFileResult.bytes_read === "number"
+          ? readFileResult.bytes_read
+          : typeof parsedObj?.bytes === "number"
+            ? parsedObj.bytes
+            : undefined
+        : undefined
+      const readTruncated = readFileResult ? parsedObj?.truncated === true : undefined
       const costCoins =
         parsedObj && typeof parsedObj.cost_coins === "number"
           ? parsedObj.cost_coins
@@ -1045,6 +1108,24 @@ if (status === "pending" || status === "running") {
         ...(quoteSummary ? { summary: quoteSummary } : {}),
         ...(subagentTimeout ? { partial: true, reason: "timeout" } : {}),
         ...(artifactPending ? { task_id: parsed.task_id, artifact_pending: true } : {}),
+        // 缺陷 A：授權請求的载荷原樣帶進 SSE（前端 needs_auth 態渲染三選一）。
+        ...(needsAuthorization
+          ? {
+              action_required: "authorize_local_files",
+              ...(authRoot ? { auth_root: authRoot } : {}),
+              ...(authReason ? { auth_reason: authReason } : {}),
+              ...(Array.isArray(authOptionsRaw) ? { auth_options: authOptionsRaw } : {}),
+            }
+          : {}),
+        // 缺陷 B：二進位／截斷後設欄位（前端 binary 面板與 bytes 顯示）。
+        ...(readFileResult
+          ? {
+              ...(readBinary ? { binary: true } : {}),
+              ...(readBytesRead !== undefined ? { bytes_read: readBytesRead } : {}),
+              ...(readBytesTotal !== undefined ? { bytes_total: readBytesTotal } : {}),
+              ...(readTruncated === true ? { truncated: true } : {}),
+            }
+          : {}),
       })
       // 原生工具（bash 等）可能回傳的是「含圖片 URL 的 JSON」——例如引擎用
       // bash 呼叫 kotone-bridge 生圖，輸出 {text, images:[{url,...}]}。這類
