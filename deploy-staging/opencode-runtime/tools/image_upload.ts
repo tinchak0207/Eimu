@@ -12,15 +12,33 @@ export default tool({
   },
   async execute(args, context) {
     try {
-      const { mediaId, url: platformUrl } = await uploadImageBytes(args.image_url, context.sessionID, context.abort)
-      // 平台 /v1/uploads 只回 mediaId（不回公網 url）——本地/工作區路徑再複用
-      // publicImageUrl（網關 /internal/media/upload，與 image_edit 同一輪子）換出公網 URL；
-      // http(s)/data 來源本身即是可用地址，原樣回傳，不做多餘上傳。
+      // mediaId 來自平台 /v1/uploads（best-effort）：它只保證回 mediaId，不保證回公網 url，
+      // 且該上游端點可能暫時故障（實測 HTTP 502）。任一種都不得讓「取得公網 URL」失敗。
+      let mediaId: string | null = null
+      let platformUrl: string | null = null
+      let mediaErr: string | null = null
+      try {
+        const r = await uploadImageBytes(args.image_url, context.sessionID, context.abort)
+        mediaId = r.mediaId || null
+        platformUrl = r.url
+      } catch (e: any) {
+        mediaErr = e?.message || String(e)
+      }
+      // 公網 URL 一律以 publicImageUrl 兜底（與 image_edit 同一輪子：本地/工作區路徑讀位元組 →
+      // 網關 /internal/media/upload → 公網 URL；http(s)/data 來源原樣放行）。平台 /uploads
+      // 不回 url 或直接故障時，這條仍能給出可直接餵給 reference_images / image_url 的地址。
       const url =
         platformUrl && /^https?:\/\//i.test(platformUrl)
           ? platformUrl
           : await publicImageUrl(args.image_url, context.sessionID, context.abort)
-      return ok({ title: "上傳完成", media_id: mediaId, url })
+      return ok({
+        title: "上傳完成",
+        media_id: mediaId,
+        url,
+        ...(mediaErr
+          ? { note: `平台 /uploads 未回可用位址（${mediaErr}），已改用网关上传播取公网 URL。` }
+          : {}),
+      })
     } catch (e: any) {
       const err = await classifyError(null, e)
       return fail(err.code, err.hint, { title: "上傳失敗" })
