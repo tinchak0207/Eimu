@@ -20,9 +20,7 @@ import { cn } from "@/lib/utils";
 import { isStandalonePwa, createHandoffLogin } from "@/lib/github-login";
 import { DesktopDownloadButton } from "@/components/DesktopDownloadButton";
 import { WindowControls } from "@/components/WindowControls";
-import { useEimuShell } from "@/hooks/use-eimu-shell";
 import { PwaHandoffPanel } from "@/components/PwaHandoffPanel";
-import { ShellUpdatePrompt } from "@/components/ShellUpdatePrompt";
 import { QqGroupDialog } from "@/components/QqGroupDialog";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
 import { AnnouncementSurfaces } from "@/components/notifications/AnnouncementSurfaces";
@@ -66,10 +64,6 @@ function describeAuthError(code: string): string {
 export function Navbar({ className }: NavbarProps) {
   const { user, isLoggedIn, logout, refresh } = useAuth();
   const { toast } = useToast();
-  // 桌面殼偵測（單一真相來源，與 WindowControls 共用）：殼內＝使用者已在 App 裡，
-  // 「下載桌面版」是冗餘入口，且三顆視窗控制鈕需要這條右簇的寬度（首頁玻璃島被助理
-  // 面板退縮後，1440/1280 下載鈕與右簇會重疊）。殼內隱藏它，換取控制鈕放得下。
-  const eimuShell = useEimuShell();
   // 2026-09-24 首秒零回縮：導覽列退縮只屬首頁（助理工作站面）。--ws-navbar-inset
   // 的 fallback 在首頁指向「面板寬+12px」終態，其他頁恆 0——否則直接 reload
   // 非首頁時工作站未掛載、無人寫該變數，fallback 會把膠囊無緣無故退縮一格。
@@ -420,9 +414,8 @@ export function Navbar({ className }: NavbarProps) {
                 不再開選單（暴君：「搞弹窗就有点蠢了」）。平台判定與下載動作全在
                 DesktopDownloadButton／resolveDesktopDownload 內，這裡只放位置。
                 macOS 仍只 toast 婉拒，行動裝置（unknown）因 <xl 斷點本來就看不到。
-                殼內（eimuShell）隱藏——使用者已在桌面 App 裡，下載入口冗餘，
-                且右簇要讓位給三顆視窗控制鈕（見上方 eimuShell 註）。 */}
-            {!eimuShell && <DesktopDownloadButton variant="icon" className={FLAT_CHROME} />}
+                殼內由 DesktopDownloadButton 自我隱藏（單一真源，見該檔）。 */}
+            <DesktopDownloadButton variant="icon" className={FLAT_CHROME} />
           </div>
 
           {/* Right side */}
@@ -548,9 +541,6 @@ export function Navbar({ className }: NavbarProps) {
           </div>
         </nav>
       </header>
-
-      {/* 舊桌面殼更新提示（渲染 null，只跑 useEffect；全站生效，見 ShellUpdatePrompt.tsx）。 */}
-      <ShellUpdatePrompt />
 
       {/* QQ 群二维码弹窗（仅桌面端入口会打开；手机端走直跳链接）。 */}
       <QqGroupDialog open={qqOpen} onClose={() => setQqOpen(false)} />

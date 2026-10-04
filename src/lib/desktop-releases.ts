@@ -9,18 +9,21 @@
  * 兩平台可以不同（不同平台的打包時程／機器受限，不強制同步）。top-level `version`
  * 只是「已存在的最新版本」的標記，供外部標註與排序，**不是**兩平台共用版號。
  *
- * 現況：Linux 與 Windows 皆已重建為 0.3.2（含本輪本地能力與安全修補），同步上傳。
+ * 現況：Linux 已發行 0.3.3（2026-10-04，含網頁端「殼內不再顯示任何下載入口」的改動，
+ * 下載入口改由 DesktopDownloadButton 在 window.eimuShell 存在時自我隱藏）。
+ * Windows 仍為 0.3.2：Blob store 已超出 Hobby 方案 1 GiB 配額上限，新版 Windows 安裝檔
+ * 被上游拒絕上傳，待配額解決後補發（逐平台版本語義允許兩平台不同步）。
  */
 export const DESKTOP_RELEASES = {
   // 已存在的最新版本（＝兩平台目前較新者），非兩平台共用版號。
-  version: "0.3.2",
+  version: "0.3.3",
   linux: {
-    // 該平台產物版本：0.3.2，於 2026-10-04 重建並上傳（下載回本地逐位元組對帳一致）。
-    version: "0.3.2",
-    url: "https://gfy3gwthv6oa8bb7.public.blob.vercel-storage.com/desktop/Eimu-0.3.2-linux-x86_64.AppImage",
-    size: 125953601,
+    // 該平台產物版本：0.3.3，於 2026-10-04 重建並上傳（下載回本地逐位元組對帳一致）。
+    version: "0.3.3",
+    url: "https://gfy3gwthv6oa8bb7.public.blob.vercel-storage.com/desktop/Eimu-0.3.3-linux-x86_64.AppImage",
+    size: 125978340,
     ext: "AppImage",
-    sha256: "fd6bcff68ded3b52f372adde0bc6c6b7a3e8f60dc884037038d62bbaa8849fb2",
+    sha256: "b635f08a7342e5a920cb48ba02c948219b3b0fea05493863060a4fe545c31597",
   },
   windows: {
     // 該平台產物版本：0.3.2，於 2026-10-04 同批重建並上傳。

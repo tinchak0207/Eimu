@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Download } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useEimuShell } from "@/hooks/use-eimu-shell";
 import { cn } from "@/lib/utils";
 import { resolveDesktopDownload, type DesktopDownload } from "@/lib/desktop-releases";
 
@@ -16,6 +17,12 @@ import { resolveDesktopDownload, type DesktopDownload } from "@/lib/desktop-rele
  *
  * 判定邏輯一律走 `resolveDesktopDownload`（`@/lib/desktop-releases`），此檔不另寫一份。
  * 平台判定放 useEffect：SSR 沒有 navigator，先渲染中性文字，避免 hydration 不一致。
+ *
+ * 殼內一律不渲染（單一真源）：跑在 Eimu 桌面殼內（`window.eimuShell` 存在）時，使用者
+ * 已在桌面 App 裡，任何「下載桌面版」入口都是冗餘；而 0.3.2+ 殼已內建 electron-updater
+ * 背景靜默更新（退出時自動安裝），站內不該再有任何「叫使用者去下載」的 UI。
+ * `useEimuShell()` 的值在 effect 後才有，故用 `checked` 閘門讓「判定尚未完成」的
+ * 首幀也回 null——瀏覽器端 mount 後照常渲染，殼內永遠不渲染，避免第一幀閃現。
  */
 
 export interface DesktopDownloadButtonProps {
@@ -54,11 +61,19 @@ function triggerDownload(url: string): void {
 
 export function DesktopDownloadButton({ variant, className }: DesktopDownloadButtonProps) {
   const { toast } = useToast();
+  const shell = useEimuShell();
   const [download, setDownload] = useState<DesktopDownload | null>(null);
+  // `useEimuShell()` 在 effect 後才有值：用 checked 閘門讓判定完成前也回 null，
+  // 殼內首幀不閃現下載鈕（瀏覽器端 mount 後照常渲染）。
+  const [checked, setChecked] = useState(false);
 
   useEffect(() => {
     setDownload(resolveDesktopDownload(navigator.userAgent));
+    setChecked(true);
   }, []);
+
+  // 殼內不渲染任何 variant（單一真源）；判定尚未完成也不渲染，避免首幀閃現。
+  if (!checked || shell) return null;
 
   const handleActivate = (event?: React.MouseEvent) => {
     // 結尾封面父層 onClick 會關登入小框；下載鈕不是那個意思，擋掉冒泡。
