@@ -34,7 +34,7 @@ const path = require("node:path");
 const fs = require("node:fs");
 const localWorker = require("./local-worker.js");
 const { PERMISSION_MODES } = require("./lib/permission-rules.js");
-const { startDeviceBridge, stopDeviceBridge, getDeviceBridgeState } = require("./device-bridge-client.js");
+const { startDeviceBridge, stopDeviceBridge, getDeviceBridgeState, resolveStableDeviceId } = require("./device-bridge-client.js");
 const { readCredentialStore } = require("./lib/bridge-credential.js");
 const {
   registerWindowControlsIpc,
@@ -110,6 +110,8 @@ let mainWindow = null;
 //   - deviceBridgeEnabled: boolean        使用者是否開啟本機檔案授權
 //   - deviceBridgeMode: "off"|"ask"|"auto"|"full"  權限模式（W6c；非法值忽略回預設）
 //   - deviceBridgeGatewayBaseUrl: string  使用者顯式設定的閘道位址（可選）
+//   - deviceBridgeDeviceId: string        本安裝的穩定裝置識別（非機密，可下發閘道；
+//                                         缺＝首次啟動產生一次並寫回，之後沿用不重生）
 // **不**持久化 apiKey：憑證只從 <userData>/device-bridge.json（0600）讀，
 // 頁面不可寫（見上方 bridge 註解與 lib/bridge-credential.js）。
 function settingsFilePath() {
@@ -132,6 +134,10 @@ function readSettings() {
   }
   if (typeof parsed.deviceBridgeGatewayBaseUrl === "string") {
     out.deviceBridgeGatewayBaseUrl = parsed.deviceBridgeGatewayBaseUrl;
+  }
+  // 穩定安裝裝置識別（缺陷修復）：非機密、可下發閘道；空/非字串一律忽略（呼叫端會重生）。
+  if (typeof parsed.deviceBridgeDeviceId === "string" && parsed.deviceBridgeDeviceId.trim()) {
+    out.deviceBridgeDeviceId = parsed.deviceBridgeDeviceId.trim().slice(0, 128);
   }
   return out;
 }
@@ -405,6 +411,18 @@ if (!gotLock) {
       onWarn: (reason) => console.warn(`[device-bridge] ${reason}`),
     });
     const settings = readSettings();
+    // 穩定安裝裝置識別（缺陷修復）：同一安裝的每次 register 必須帶同一 device_id，否則
+    // 閘道對每次重連都配新 deviceId，同 tenant 累積多台 online ⇒ device_ambiguous／逾時
+    // （見 device-bridge-client.js 檔頭 helper 註解）。讀 settings.json 白名單欄位
+    // deviceBridgeDeviceId；缺值＝這裡產生一次並寫回（resolveStableDeviceId → write →
+    // writeSettings），之後每次啟動沿用同一值、不重生。值非機密（≠憑證），可下發閘道。
+    const stableDeviceId = resolveStableDeviceId({
+      read: () => settings.deviceBridgeDeviceId,
+      write: (id) => {
+        settings.deviceBridgeDeviceId = id;
+        writeSettings(settings);
+      },
+    });
     // 閘道位址優先序：env 覆寫 > 使用者設定 > 憑證檔自帶 > 客戶端預設。
     const resolveGatewayBaseUrl = () =>
       process.env.EIMU_GATEWAY_BASE_URL || settings.deviceBridgeGatewayBaseUrl || bridgeCredential?.gatewayBaseUrl;
@@ -413,7 +431,7 @@ if (!gotLock) {
     // 好處：「授權根變更→以新 roots 重註冊」可在純 node 下以間諜 client 驗（*.test.js），
     // 不必啟動 Electron（本檔頂層呼叫 app API，無法在 node 下 require）。
     const bridgeController = localWorker.createBridgeController({
-      startBridge: (opts) => startDeviceBridge(opts),
+      startBridge: (opts) => startDeviceBridge({ ...opts, deviceIdProvider: () => stableDeviceId }),
       stopBridge: () => stopDeviceBridge(),
       getClientState: () => getDeviceBridgeState(),
       readEnabled: () => settings.deviceBridgeEnabled === true,

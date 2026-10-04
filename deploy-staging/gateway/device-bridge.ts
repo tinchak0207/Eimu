@@ -364,6 +364,20 @@ interface PendingRequest {
   resolve: (r: InvokeResult) => void
 }
 
+/**
+ * 長輪詢 waiter。**必須綁 connectionId**：同 deviceKey 重連（換連線）時舊 waiter 仍留在
+ * `pollWaiters` 內，若只在進入等待前驗一次 connectionId，它醒後會把新連線的請求 shift 走、
+ * 回給已 abort 的舊 HTTP（幽靈 waiter 吞第一發）。喚醒後一律重驗連線，不符者不得取件
+ * （已取則 re-queue），並以 `device_connection_stale` 收場。
+ */
+interface PollWaiter {
+  tenant: string
+  deviceId: string
+  connectionId: string
+  timer: ReturnType<typeof setTimeout> | null
+  wake: () => void
+}
+
 // ── 參數淨化（每個工具的最小白名單欄位 + 夾制）─────────────────────────
 
 export interface SanitizeOk { ok: true; args: Record<string, unknown> }
@@ -472,7 +486,7 @@ export class DeviceBridge {
   private readonly byConnection = new Map<string, string>()
   private readonly pending = new Map<string, PendingRequest>()
   private readonly queue = new Map<string, string[]>()
-  private readonly pollWaiters = new Set<() => void>()
+  private readonly pollWaiters = new Set<PollWaiter>()
   readonly tokens = new ConsentTokenStore()
   readonly grants = new OnceGrantStore()
   /** session 級規則（記憶體，key＝tenant；只存在本進程，**不持久化到共享庫**）。 */
@@ -561,7 +575,12 @@ export class DeviceBridge {
     const deviceId = input.deviceId && input.deviceId.trim() ? input.deviceId.trim().slice(0, 128) : randomId("dev")
     const key = this.deviceKey(input.tenant, deviceId)
     const prev = this.devices.get(key)
-    if (prev) this.byConnection.delete(prev.connectionId)
+    if (prev) {
+      this.byConnection.delete(prev.connectionId)
+      // 換連線＝舊連線關閉：喚醒並清掉它殘留的長輪詢 waiter。它醒後重驗 connectionId 會回
+      // stale，不會取走新連線的請求（否則幽靈 waiter 會吞掉重連後的第一發 invoke）。
+      this.dropWaitersForConnection(prev.connectionId)
+    }
     const connectionId = randomId("conn")
     // 相容策略：只有呼叫端**明確**給了 mode 或 rules 才啟用新決策引擎；否則維持升級前
     // 行為（denylist ＋ 遞迴根夾制）。缺省 mode 的「語義預設」仍為 `ask`（status 回報）。
@@ -628,8 +647,9 @@ export class DeviceBridge {
     if (rec.connectionId !== input.connectionId) return { ok: false, code: "device_connection_stale" }
     rec.lastSeenAt = now
 
+    const key = this.deviceKey(input.tenant, input.deviceId)
     const take = (): DeviceRequestMessage | null => {
-      const q = this.queue.get(this.deviceKey(input.tenant, input.deviceId))
+      const q = this.queue.get(key)
       while (q && q.length > 0) {
         const requestId = q.shift()!
         const p = this.pending.get(requestId)
@@ -637,29 +657,65 @@ export class DeviceBridge {
       }
       return null
     }
+    // 本條長輪詢此刻是否仍綁在有效連線上；重連＝換 connectionId ⇒ false。
+    const connectionValid = (): boolean => {
+      const r = this.getDevice(input.tenant, input.deviceId)
+      return !!r && r.connectionId === input.connectionId
+    }
 
     const first = take()
     if (first) return { ok: true, request: first }
     const waitMs = Math.max(0, Math.min(input.waitMs ?? 0, DEVICE_POLL_MAX_WAIT_MS))
     if (waitMs === 0) return { ok: true, request: null }
 
+    const waiter: PollWaiter = {
+      tenant: input.tenant,
+      deviceId: input.deviceId,
+      connectionId: input.connectionId,
+      timer: null,
+      wake: () => {},
+    }
     await new Promise<void>((resolve) => {
       let done = false
       const wake = () => {
         if (done) return
         done = true
-        this.pollWaiters.delete(wake)
-        if (timer) clearTimeout(timer)
+        this.pollWaiters.delete(waiter)
+        if (waiter.timer) clearTimeout(waiter.timer)
         resolve()
       }
-      const timer = setTimeout(wake, waitMs)
-      this.pollWaiters.add(wake)
+      waiter.wake = wake
+      waiter.timer = setTimeout(wake, waitMs)
+      this.pollWaiters.add(waiter)
     })
-    return { ok: true, request: take() }
+
+    // 喚醒後**重驗連線**：被重連取代的舊 waiter 不得把新連線剛下發的請求 shift 走、回給已
+    // abort 的舊 HTTP。已取到件但連線已失效＝放回佇列頭（re-queue，不吞件），回 stale。
+    const taken = take()
+    if (!connectionValid()) {
+      if (taken) this.requeueRequest(input.tenant, input.deviceId, taken.request_id)
+      return { ok: false, code: "device_connection_stale" }
+    }
+    return { ok: true, request: taken }
+  }
+
+  /** 喚醒並清掉某連線殘留的長輪詢 waiter（連線關閉／被取代時呼叫；醒後重驗會回 stale）。 */
+  private dropWaitersForConnection(connectionId: string): void {
+    for (const w of [...this.pollWaiters]) {
+      if (w.connectionId === connectionId) w.wake()
+    }
+  }
+
+  /** 把已取出的請求放回該 deviceKey 佇列頭（waiter 醒後連線已失效時不得吞件）。 */
+  private requeueRequest(tenant: string, deviceId: string, requestId: string): void {
+    const key = this.deviceKey(tenant, deviceId)
+    const q = this.queue.get(key) ?? []
+    q.unshift(requestId)
+    this.queue.set(key, q)
   }
 
   private notifyPoll(): void {
-    for (const wake of [...this.pollWaiters]) wake()
+    for (const w of [...this.pollWaiters]) w.wake()
   }
 
   /** 逾時取消：清待辦與票，回明確錯誤碼。 */

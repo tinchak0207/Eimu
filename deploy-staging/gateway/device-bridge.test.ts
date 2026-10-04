@@ -391,6 +391,46 @@ test("poll：waitMs=0 無待辦 → request:null", async () => {
   assert.deepEqual(out, { ok: true, request: null })
 })
 
+// 重連幽靈 waiter（2026-10-04）：舊連線的長輪詢 waiter 未清理時，新連線的第一發 invoke
+// 會被它 shift 走、回給已 abort 的舊 HTTP ⇒ 請求憑空消失、吃滿 timeout。waiter 必須綁
+// connectionId 並在喚醒後重驗；不符者不得取件（已取則 re-queue）。
+test("重連幽靈 waiter：舊連線殘留長輪詢不得吞掉新連線的第一發 invoke", async () => {
+  const bridge = new DeviceBridge({ requestTimeoutMs: 1_500 })
+  const reg1 = bridge.register({ tenant: "u:1", userId: 1, apiKeyHash: "h1", deviceId: "dev_stable", roots: ["/home/u/project"] })
+  // 舊連線掛起一個長輪詢（真實世界其 HTTP 已因重連被 abort，但 waiter 尚未清理）。
+  const oldPoll = bridge.poll({ tenant: "u:1", deviceId: "dev_stable", connectionId: reg1.connectionId, waitMs: 5_000 })
+  // 裝置重連：同 deviceId（同 deviceKey）⇒ 舊連線作廢。
+  const reg2 = bridge.register({ tenant: "u:1", userId: 1, apiKeyHash: "h1", deviceId: "dev_stable", roots: ["/home/u/project"] })
+  assert.notEqual(reg2.connectionId, reg1.connectionId)
+
+  const pending = bridge.invoke({ tenant: "u:1", deviceId: "dev_stable", tool: "stat", args: { path: "/home/u/project/a.txt" } })
+  // 讓被 notifyPoll 喚醒的幽靈 waiter（若有）的 microtask 先有機會跑。
+  await new Promise((r) => setTimeout(r, 20))
+
+  const polled2 = await bridge.poll({ tenant: "u:1", deviceId: "dev_stable", connectionId: reg2.connectionId, waitMs: 0 })
+  assert.equal(polled2.ok, true)
+  if (!polled2.ok) return
+  assert.ok(polled2.request, "新連線的第一次 poll 必須拿到請求（不可被幽靈 waiter 吞掉）")
+  const msg = polled2.request!
+  const sub = bridge.submitResult({
+    tenant: "u:1",
+    deviceId: "dev_stable",
+    connectionId: reg2.connectionId,
+    requestId: msg.request_id,
+    consentToken: msg.consent_token,
+    result: { path: "/home/u/project/a.txt", size: 3 },
+  })
+  assert.equal(sub.ok, true)
+  const out = await pending
+  assert.equal(out.ok, true)
+  if (out.ok) assert.equal(out.result.size, 3)
+
+  // 舊連線的長輪詢必須以 stale 收場（不得回出任何請求）。
+  const oldOut = await oldPoll
+  assert.equal(oldOut.ok, false)
+  if (!oldOut.ok) assert.equal(oldOut.code, "device_connection_stale")
+})
+
 // ───────────────────────── 預設 OFF ─────────────────────────
 
 test("deviceBridgeEnabled: 預設 OFF，僅 truthy 開啟", () => {

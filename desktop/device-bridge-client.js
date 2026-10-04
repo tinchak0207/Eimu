@@ -37,6 +37,8 @@
 
 "use strict";
 
+const crypto = require("node:crypto");
+
 const proto = require("./lib/bridge-protocol.js");
 const { createBridgeExecutor, BridgeError } = require("./lib/bridge-executor.js");
 const { PERMISSION_MODES } = require("./lib/permission-rules.js");
@@ -46,6 +48,47 @@ const PREFIX = "/agent/v1/device-bridge";
 const DEFAULT_GATEWAY_BASE_URL = "https://image.tinchak0207.xyz";
 const DEFAULT_POLL_WAIT_MS = 20000; // <= 閘道 DEVICE_POLL_MAX_WAIT_MS(25000)
 const DEFAULT_HEARTBEAT_MS = 30000;
+
+// ── 穩定「安裝」裝置識別（缺陷修復；純函式、零 IO）───────────────────────
+// 病因：register 不帶 device_id ⇒ 閘道對每次重連都 randomId("dev") 配一個**新的**
+// deviceId；同一 tenant 的註冊表在 heartbeat TTL 內累積多筆 online ⇒
+// pickDeviceForTenant 回 `device_ambiguous`（閘道「多台不猜」是刻意的安全語義，**不動**），
+// 或把請求送到已死那台 ⇒ 同一殼內第二發 invoke 起吃滿 30s 的 device_request_timeout。
+// 正解在裝置端：同一安裝回報**穩定** deviceId，讓重註冊取代同一筆
+// `deviceKey(tenant, deviceId)` 紀錄（閘道 register 收 body.device_id，見
+// deploy-staging/gateway/device-bridge.ts:1038、:561）。
+//
+// 產生與持久化由 host（main.js）負責：本 helper 只做「讀 store → 有值沿用／無值產生
+// 一次並寫回」的純語義，store 由 main.js 以 <userData>/settings.json 的白名單欄位
+// deviceBridgeDeviceId 適配（比照 deviceBridgeEnabled/deviceBridgeMode 的讀寫慣例）。
+// 形狀對齊閘道 randomId("dev")：`dev_` + 32 hex（36 字元，遠低於閘道 128 上限）。
+
+/** 產生一枚安裝識別（非機密，可下發閘道）。 */
+function generateStableDeviceId() {
+  return `dev_${crypto.randomUUID().replace(/-/g, "")}`;
+}
+
+/**
+ * 讀取持久化的安裝 deviceId；沒有（或非法）才產生一次並寫回 store。
+ * @param {{read?:()=>unknown, write?:(id:string)=>void}} store
+ * @returns {string} 非空 deviceId（同一 store 第二次呼叫回同一值、不重生）
+ */
+function resolveStableDeviceId(store) {
+  let existing;
+  try {
+    existing = store && typeof store.read === "function" ? store.read() : undefined;
+  } catch {
+    existing = undefined;
+  }
+  if (typeof existing === "string" && existing.trim().length > 0) return existing.trim().slice(0, 128);
+  const id = generateStableDeviceId();
+  try {
+    if (store && typeof store.write === "function") store.write(id);
+  } catch {
+    /* 寫入失敗仍回本次 id（下次啟動會重生，但不致命、不影響本次連線） */
+  }
+  return id;
+}
 
 // 單一授權來源：直接讀 local-worker 的 authorizedRoots（pickFiles 顯式挑選）。
 // 不另造第二套授權機制；空集 ⇒ bridge 拒絕服務（見 startDeviceBridge）。
@@ -78,6 +121,12 @@ const runtime = {
   // W6c 權限模式與規則（register 下發；未提供＝null/undefined，不下發欄位）。
   mode: null,
   rules: undefined,
+  // H(roots 缺陷)：register 必須下發的已授權根（string[]）。由 startDeviceBridge
+  // 從 rootsProvider/localWorker.authorizedRoots 取值存入；null＝未設定（不下發）。
+  roots: null,
+  // 穩定安裝識別（缺陷修復）：register body.device_id。由 startDeviceBridge 從
+  // deviceIdProvider 取值存入；null＝未設定（不下發，回退閘道自行配 id）。
+  installDeviceId: null,
 };
 
 function snapshot() {
@@ -203,9 +252,20 @@ function stopHeartbeat() {
 async function registerOnce() {
   // W6c：register body 帶上權限模式與規則（未設定＝不下發欄位，維持既有呼叫端行為）。
   // 閘道契約：mode ∈ off/ask/auto/full，缺＝ask；rules 為三桶/扁平規則陣列。
+  // roots（缺陷修復）：閘道以 body.roots 建立 authorizedRoots（device-bridge.ts:1048
+  // → register() 的 sanitizeAuthorizedRoots(input.roots)）；缺＝空集 ⇒ list_dir/grep
+  // 恆 403 `no_authorized_root`。務必下發，形狀＝string[]（與閘道契約逐欄一致）。
+  // 空值處理：startDeviceBridge 對空授權根已先拒絕服務（no_authorized_roots、根本不會
+  // 走到 register），故此處正常必為非空陣列；防禦上仍照實下發陣列（閘道對「缺欄位」與
+  // 「空陣列」同視為空集，且裝置身分由 deviceKey(tenant,deviceId) 決定、與 roots 無關，
+  // 不會被誤判成「無裝置」）——明確空陣列比省欄位更能讓閘道端對帳。
   const body = {};
+  // 穩定安裝識別（缺陷修復）：帶上即「同裝置重註冊＝換連線、舊連線作廢」，閘道以
+  // deviceKey(tenant,deviceId) 取代同一筆紀錄，不會累積多台 online（見檔頭 helper 註解）。
+  if (typeof runtime.installDeviceId === "string" && runtime.installDeviceId) body.device_id = runtime.installDeviceId;
   if (runtime.mode !== null && runtime.mode !== undefined) body.mode = runtime.mode;
   if (runtime.rules !== undefined) body.rules = runtime.rules;
+  if (Array.isArray(runtime.roots)) body.roots = runtime.roots;
   const reg = await postOk(`${PREFIX}/register`, body);
   runtime.deviceId = typeof reg.device_id === "string" ? reg.device_id : null;
   runtime.connectionId = typeof reg.connection_id === "string" ? reg.connection_id : null;
@@ -324,6 +384,7 @@ async function startDeviceBridge(opts = {}) {
   // modeProvider 必須是 function 且回白名單值；否則視為未設定（不下發、執行器回退 auto）。
   runtime.mode = null;
   runtime.rules = undefined;
+  runtime.roots = null;
   if (typeof opts.modeProvider === "function") {
     try {
       const m = opts.modeProvider();
@@ -341,6 +402,19 @@ async function startDeviceBridge(opts = {}) {
     }
   }
 
+  // 穩定安裝識別（缺陷修復）：main.js 以 settings.json 白名單欄位（deviceBridgeDeviceId）
+  // 適配的 provider 注入；型別/值錯一律視為未設定（不下發 device_id，回退閘道自行配 id
+  // 的既有行為，與 modeProvider 注入點同規矩）。
+  runtime.installDeviceId = null;
+  if (typeof opts.deviceIdProvider === "function") {
+    try {
+      const v = opts.deviceIdProvider();
+      runtime.installDeviceId = typeof v === "string" && v.trim() ? v.trim().slice(0, 128) : null;
+    } catch {
+      runtime.installDeviceId = null;
+    }
+  }
+
   if (!runtime.enabled) {
     setStatus("off");
     return snapshot();
@@ -354,6 +428,8 @@ async function startDeviceBridge(opts = {}) {
     setStatus("no_authorized_roots", "no_authorized_roots");
     return snapshot();
   }
+  // 存入 runtime 供 registerOnce 下發（H：此前只做本機前置閘，從未上報閘道）。
+  runtime.roots = roots;
 
   let credential = null;
   try {
@@ -418,6 +494,8 @@ module.exports = {
   stopDeviceBridge,
   getDeviceBridgeState,
   authorizeDeviceBridgeRoots,
+  resolveStableDeviceId,
+  generateStableDeviceId,
   PREFIX,
   DEFAULT_GATEWAY_BASE_URL,
   __test: {
