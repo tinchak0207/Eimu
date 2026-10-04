@@ -100,18 +100,31 @@ export function buildAssetUrl(sessionId: string, path: string, ticket: string): 
 }
 
 /**
- * 影片原片直传网关（绕开 Vercel 站内代理的单请求体 4.5MB 硬顶）。
+ * 影片原片直傳網關（繞開 Vercel 站內代理的單請求體 4.5MB 硬頂）。
  *
- * 链路：浏览器 → 网关公网 origin 的 POST /agent/v1/sessions/<id>/video-upload，
- * multipart 单栏位 `file`，票走 query（?t=，读票 = 写票同一张）。
- * 成功回 { ok:true, path, name, size, mime }，path 直接进 [附件] 区块，
- * 渲染端用 buildAssetUrl 拼读回 URL 播原片。
+ * 鏈路：瀏覽器 → 網關公網 origin 的 POST /agent/v1/sessions/<id>/video-upload，
+ * multipart 單欄位 `file`，票走 query（?t=，讀票 = 寫票同一張）。
+ * 成功回 { ok:true, path, name, size, mime }，path 直接進 [附件] 區塊，
+ * 渲染端用 buildAssetUrl 拼讀回 URL 播原片。
  *
- * 不設 Content-Type：FormData 要由浏览器补 multipart boundary（对齐 uploadAgentAttachments）。
- * 任何失败（无票 / 401 / 413 / 415 / 网络 / 响应不合契约）一律抛错带状态语义，
- * 由调用端决定降级（抽帧上传），这里不吞错也不静默。
+ * 不設 Content-Type：FormData 要由瀏覽器補 multipart boundary（對齊 uploadAgentAttachments）。
+ * 任何失敗（無票 / 401 / 413 / 415 / 網路 / 回應不合契約）一律拋錯帶狀態語義，
+ * 由呼叫端決定降級（抽幀上傳），這裡不吞錯也不靜默。
  */
-export async function uploadVideoDirect(sessionId: string, file: File): Promise<AgentAttachmentRef> {
+interface GatewayDirectUploadSpec {
+  /** 前端 ref 的 kind（音頻無獨立 kind，沿用 document，見 toAgentAttachmentRef 同款映射）。 */
+  kind: AgentAttachmentRef["kind"];
+  /** 回應未帶 mime 時的型別兜底。 */
+  defaultMime: string;
+  /** 人話錯誤文案的主語（「视频」/「音频」）。 */
+  noun: string;
+}
+
+async function uploadMediaDirect(
+  sessionId: string,
+  file: File,
+  spec: GatewayDirectUploadSpec,
+): Promise<AgentAttachmentRef> {
   const { ticket } = await mintUploadsTicket(sessionId);
 
   const form = new FormData();
@@ -124,31 +137,45 @@ export async function uploadVideoDirect(sessionId: string, file: File): Promise<
       { method: "POST", body: form },
     );
   } catch {
-    throw new Error("视频直传网络连接失败。");
+    throw new Error(`${spec.noun}直传网络连接失败。`);
   }
 
   if (!res.ok) {
-    if (res.status === 413) throw new Error("视频超过 100 MB 上限。");
-    if (res.status === 415) throw new Error("网关不接受该视频格式。");
-    if (res.status === 401) throw new Error("上传票失效，无法直传视频。");
-    throw new Error(`视频直传失败（HTTP ${res.status}）。`);
+    if (res.status === 413) throw new Error(`${spec.noun}超过 100 MB 上限。`);
+    if (res.status === 415) throw new Error(`网关不接受该${spec.noun}格式。`);
+    if (res.status === 401) throw new Error(`上传票失效，无法直传${spec.noun}。`);
+    throw new Error(`${spec.noun}直传失败（HTTP ${res.status}）。`);
   }
 
   let data: unknown;
   try {
     data = await res.json();
   } catch {
-    throw new Error("视频直传响应格式错误。");
+    throw new Error(`${spec.noun}直传响应格式错误。`);
   }
   const record = (data ?? {}) as { ok?: unknown; path?: unknown; name?: unknown; size?: unknown; mime?: unknown };
   if (record.ok !== true || typeof record.path !== "string" || record.path.length === 0) {
-    throw new Error("视频直传响应缺少 path。");
+    throw new Error(`${spec.noun}直传响应缺少 path。`);
   }
   return {
-    kind: "video",
+    kind: spec.kind,
     path: record.path,
     name: typeof record.name === "string" && record.name.length > 0 ? record.name : file.name,
-    mime: typeof record.mime === "string" && record.mime.length > 0 ? record.mime : "video/mp4",
+    mime: typeof record.mime === "string" && record.mime.length > 0 ? record.mime : spec.defaultMime,
     size: typeof record.size === "number" && Number.isFinite(record.size) ? record.size : file.size,
   };
+}
+
+/** 影片原片直傳（大檔，走網關票券路由；見上方 uploadMediaDirect）。 */
+export function uploadVideoDirect(sessionId: string, file: File): Promise<AgentAttachmentRef> {
+  return uploadMediaDirect(sessionId, file, { kind: "video", defaultMime: "video/mp4", noun: "视频" });
+}
+
+/**
+ * 音頻原片直傳（真歌等本地參考素材）：與影片**同一條**網關票券大檔路徑，非另造
+ * 第二套——差別只在 kind（audio/* 依 toAgentAttachmentRef 同款落 "document"）。
+ * 繞開 Vercel 4.5MB 體上限，上限同網關 100MB。
+ */
+export function uploadAudioDirect(sessionId: string, file: File): Promise<AgentAttachmentRef> {
+  return uploadMediaDirect(sessionId, file, { kind: "document", defaultMime: "audio/mpeg", noun: "音频" });
 }

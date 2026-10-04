@@ -47,7 +47,7 @@ import {
   type AgentAttachment,
   type AgentThinkingLevel,
 } from "@/lib/agent-chat-client";
-import { MAX_VIDEO_BYTES, uploadVideoDirect } from "@/lib/agent-uploads";
+import { MAX_VIDEO_BYTES, uploadAudioDirect, uploadVideoDirect } from "@/lib/agent-uploads";
 import type { AgentAttachmentRef } from "@/lib/agent-chat-types";
 import {
   LOCAL_FILE_MODES,
@@ -184,10 +184,23 @@ type PendingAttachmentStatus = "extracting" | "uploading" | "ready" | "error";
  * 罪状 2b：上传 413 无声标红。单请求体上限 = Vercel 平台硬顶 4.5MB
  * （attachments 路由只是透传代理，代码层无法调高平台限制），留出 multipart
  * 边界等开销后按 4MB 预检。超限文件在上传前就地给出人话错误，不再等 413。
- * 影片豁免此闸：原片走网关直传（uploadVideoDirect，绕开 Vercel），
- * 上限改用网关的 100MB（MAX_VIDEO_BYTES）。
+ * 影片／音頻豁免此闸：原片走网关直传（uploadVideoDirect / uploadAudioDirect，
+ * 绕开 Vercel），上限改用网关的 100MB（MAX_VIDEO_BYTES）。
  */
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
+
+/**
+ * 音頻副檔名（本地參考素材，如一首真歌當翻唱 source_audio）。與閘道
+ * `ALLOWED_UPLOAD_EXTS` 的音頻項同一份語義、與 `ACCEPTED_TYPES` 對齊；
+ * MIME 優先、副檔名兜底（部分系統給空 MIME）。這類檔走大檔直傳而非小檔路。
+ */
+const AUDIO_FILE_EXTS = /\.(mp3|wav|m4a|aac|flac|ogg)$/i;
+
+/** 判断一个 File 是否要走音頻大檔直傳路徑（與 isVideoFile 同款 MIME 優先、副檔名兜底）。 */
+function isAudioFile(file: { type?: string; name?: string }): boolean {
+  if (file.type?.startsWith("audio/")) return true;
+  return AUDIO_FILE_EXTS.test(file.name ?? "");
+}
 
 /**
  * 上传等待的硬上限（缺陷 A 修复）。底层 fetch（原片直传 agent-uploads、站内
@@ -1020,6 +1033,23 @@ function AgentComposerComponent({
   );
 
   /**
+   * 音頻（真歌等本地參考素材）：原檔走**與影片同一條**網關票券直傳大檔路徑
+   * （uploadAudioDirect → POST /agent/v1/sessions/<id>/video-upload），繞開 Vercel
+   * 4.5MB 體上限，上限同網關 100MB。不做本機抽幀／降級鏈——音頻沒有可抽的幀；
+   * 失敗（無票／401／413／415／網路／逾時）由 enqueueFiles 的 job.catch 落人話錯誤 chip。
+   */
+  const uploadAudioFile = useCallback(
+    async (session: string, id: string, file: File) => {
+      const ref = await withUploadDeadline(
+        uploadAudioDirect(session, file),
+        VIDEO_UPLOAD_TIMEOUT_MS,
+      );
+      patchAttachment(id, { status: "ready", refs: [ref] });
+    },
+    [patchAttachment],
+  );
+
+  /**
    * 公共入队函数：把一批 File 逐个加入 chip 行并触发上传。
    * 拖拽、Ctrl+V 粘贴、隐式文件选择三条入口共用这一条管道。
    */
@@ -1049,8 +1079,9 @@ function AgentComposerComponent({
       Array.from(files).forEach((file) => {
         const id = `att-${++attachmentSeq}`;
         // 罪状 2b：超限文件不上传，直接落一颗带人话文案的错误 chip。
-        // 影片豁免 4MB 站内代理闸（原片走网关直传），改用网关的 100MB 上限。
-        const maxBytes = isVideoFile(file) ? MAX_VIDEO_BYTES : MAX_FILE_BYTES;
+        // 影片／音頻豁免 4MB 站内代理闸（原片走网关直传），改用网关的 100MB 上限。
+        const directUpload = isVideoFile(file) || isAudioFile(file);
+        const maxBytes = directUpload ? MAX_VIDEO_BYTES : MAX_FILE_BYTES;
         if (file.size > maxBytes) {
           setAttachments((prev) => [
             ...prev,
@@ -1067,7 +1098,9 @@ function AgentComposerComponent({
 
         const job = isVideoFile(file)
           ? uploadVideoFile(session, id, file)
-          : uploadPlainFile(session, id, file);
+          : isAudioFile(file)
+            ? uploadAudioFile(session, id, file)
+            : uploadPlainFile(session, id, file);
 
         job.catch((err) => {
           const message = err instanceof Error ? err.message : "上传失败。";
@@ -1075,7 +1108,7 @@ function AgentComposerComponent({
         });
       });
     },
-    [disabled, sessionId, onEnsureSession, uploadPlainFile, uploadVideoFile, patchAttachment],
+    [disabled, sessionId, onEnsureSession, uploadPlainFile, uploadVideoFile, uploadAudioFile, patchAttachment],
   );
 
   const handleFileInput = useCallback(

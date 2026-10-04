@@ -325,7 +325,7 @@ export async function handleRequest(req: Request, srv: { requestIP: (r: Request)
       }
     }
 
-    // 瀏覽器原片直傳影片（票據鑑權，與上方附件靜態直讀同理：瀏覽器帶不了
+    // 瀏覽器原片直傳影片／音頻（票據鑑權，與上方附件靜態直讀同理：瀏覽器帶不了
     // Authorization 頭，且原片超過站內代理 body 上限，前端繞開 Vercel 直連網關
     // origin）。讀票復用（redeemUploadTicket 非一次性）；落盤進同一 UPLOADS_DIR
     // 會話目錄，上傳後讀票路由即可直接讀回。不動 4MB attachments 端點。
@@ -353,11 +353,21 @@ export async function handleRequest(req: Request, srv: { requestIP: (r: Request)
           if (files.length === 0) return jsonError(400, "no file field", "bad_request", "bad_request")
           const file = files[0]
           if (file.size > VIDEO_UPLOAD_MAX_BYTES) {
-            return jsonError(413, "video exceeds 100MB limit", "payload_too_large", "payload_too_large")
+            return jsonError(413, "media exceeds 100MB limit", "payload_too_large", "payload_too_large")
           }
           const ext = path.extname(file.name).toLowerCase()
-          if (!file.type.startsWith("video/") && !VIDEO_UPLOAD_EXTS.has(ext)) {
-            return jsonError(415, "only video files accepted", "unsupported_media_type", "unsupported_media_type")
+          // 大檔直傳接受**影片或音頻**（音頻＝本地參考素材，如翻唱 source_audio）。
+          // 擴展名語義不另立白名單：音頻一律經 contentTypeForExt 推導，最終落盤仍由
+          // 下方 sanitizeUploadName 依 ALLOWED_UPLOAD_EXTS 把關；非媒體（.pdf/.zip…）
+          // 在此即 415，不因大檔路由放寬型別。
+          const extMime = contentTypeForExt(ext)
+          const isMediaUpload =
+            file.type.startsWith("video/") ||
+            file.type.startsWith("audio/") ||
+            VIDEO_UPLOAD_EXTS.has(ext) ||
+            extMime.startsWith("audio/")
+          if (!isMediaUpload) {
+            return jsonError(415, "only video or audio files accepted", "unsupported_media_type", "unsupported_media_type")
           }
           const safeName = sanitizeUploadName(file.name)
           if (!safeName) {
@@ -372,10 +382,13 @@ export async function handleRequest(req: Request, srv: { requestIP: (r: Request)
             return jsonError(400, "invalid path", "bad_request", "bad_request")
           }
           await Bun.write(dest, await file.arrayBuffer())
-          return Response.json({ ok: true, path: `uploads/${sessionId}/${finalName}`, name: finalName, size: file.size, mime: file.type || "video/mp4" })
+          // 回傳 mime 優先信瀏覽器；空 MIME 時用副檔名推導（音頻 .flac/.ogg 等），
+          // 推不出媒體型別才落回 video/mp4（維持既有契約）。
+          const fallbackMime = extMime.startsWith("video/") || extMime.startsWith("audio/") ? extMime : "video/mp4"
+          return Response.json({ ok: true, path: `uploads/${sessionId}/${finalName}`, name: finalName, size: file.size, mime: file.type || fallbackMime })
         } catch (e) {
-          console.error("[gateway] video-upload error:", e)
-          return jsonError(500, "video upload failed", "server_error", "server_error")
+          console.error("[gateway] media-upload error:", e)
+          return jsonError(500, "media upload failed", "server_error", "server_error")
         }
       }
     }
