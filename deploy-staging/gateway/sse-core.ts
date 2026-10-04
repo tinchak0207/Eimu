@@ -2,7 +2,7 @@
 // 原 index.ts 1251–1376 行；openEventStream 原 index.ts 2668–2707 行。
 import type { SessionState, SSEClient } from "./types-gateway.ts"
 import { REPLAY_BUFFER_SIZE } from "./constants-gateway.ts"
-import { declaresUnreviewed } from "./delivery-gate"
+import { declaresUnreviewed, scrubVisibleFrame } from "./delivery-gate"
 import { markDirty } from "./sessions-core.ts"
 import { encoder, corsOriginFor, corsHeaders } from "./auth-gw.ts"
 import { trackTurnNodeTerminal } from "./events-translate.ts"
@@ -85,7 +85,11 @@ export function emitToSession(state: SessionState, name: string, data: unknown, 
   // stripOutboundFeed/stripOutboundFlush 里过一次 T2S，此处跳过以免对代码栅栏
   // 二次转换；其余全部（reasoning.delta、网关固定文案、结构化帧白名单字段、
   // subagent/timers/messages 等所有经本函数出口的帧）在此收口为简体。
-  const outData = name === "message.delta" && (opts?.strippable ?? false) ? data : t2sVisibleData(data)
+  const sanitized = name === "message.delta" && (opts?.strippable ?? false) ? data : t2sVisibleData(data)
+  // 2026-10-04 F6：用户可见帧的单一咽喉点——按帧名剥离内审/契约内部文字（subagent.done 摘要、
+  // subagent.delta 正文）。同类剥离已在源头（subagent.ts run.summary）与唤醒路径（index.ts）做过，
+  // 此处是任何漏网帧的最后一道收口；非目标帧原样返回（零误伤、零额外分配）。
+  const outData = scrubVisibleFrame(name, sanitized)
   const frame = encoder.encode(serializeSse(name, outData, state.eventCounter))
   // 2026-10-02：只有模型产生的文字帧可被 N2 strip 剥除（见 stripStaleTurnTextFromReplay）。
   // 网关主动发出的 message.delta（工作流终态通报、进度汇报、诚实收尾等）默认耐久，

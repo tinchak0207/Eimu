@@ -517,7 +517,7 @@ const WAKE_MARK_REWRITES: Array<[RegExp, string]> = [
   [/【交付闸门·进程中断未复原】[^\n]*/g, "（这一路任务中断未完成，需补派。）"],
 ]
 
-/** 整行丢弃：内部栏名行 / 审核身份行 / 内部源档行号行 / 落盘指针行。 */
+/** 整行丢弃：内部栏名行 / 审核身份行 / 内部源档行号行 / 落盘指针行 / 内部字段赋值行。 */
 const WAKE_DROP_LINE_RES: RegExp[] = [
   /^\[子代理用量\]/,
   /^\[已截断/,
@@ -525,6 +525,19 @@ const WAKE_DROP_LINE_RES: RegExp[] = [
   /\b(?:verdict|issues|evidence|qc)\s*[:：]/i,
   /(审核官|\bCritic\b|独立审核|runId\s*[:：]?\s*[A-Za-z0-9])/i,
   /(?:\.opencode|gateway)\/[\w./-]+\.(?:ts|js|mjs|py)/,
+  // F6：内部字段赋值 / 内审判词 / 内审正文编号行（markdown 标题形态的栏名一并拦）。
+  /^\s*\*\*[ \t]*(?:verdict|issues|evidence|qc)[ \t]*\*\*\s*$/i,
+  /审核已完成/,
+  /^\s*\d+[.、]\s*【交付/,
+]
+
+/** F6：内部字段赋值的整行丢弃——只在**非 URL 段**判命中（产品链接的查询串如
+ *  `?channel=…` 不得被当内部赋值删行）。 */
+const WAKE_DROP_LINE_OUTSIDE_URL_RES: RegExp[] = [
+  /prompt_used/i,
+  /qcSignature/i,
+  /score_abc/i,
+  /\bchannel\s*=/i,
 ]
 
 /** 残余 token 清洗（栏名、用量计数、runId/UUID、内部路径、行号）。 */
@@ -542,32 +555,173 @@ const WAKE_TOKEN_RES: Array<[RegExp, string]> = [
   [/\[(?:完整|部分)结果(?:已落盘|落盘失败)[^\]]*\]\s*/g, ""],
 ]
 
+// ── F6（2026-10-04）：内审/契约正文不再上桌——收口层 ───────────────────────────
+// 病灶（eval-music-r2/EVAL-R3-retest.md 判据 1）：F3 只治了唤醒消息，R3 复测证明
+// `subagent.done` 帧原样携带 critic 全文、`subagent.delta` 通道把子代理正文按帧流给
+// 父会话、`/messages` 的 system 载体（＝同一份唤醒文本，读时由 session-read 重标 role）
+// 仍把契约栏与编号审稿正文端到用户面前。F6 把剥离收口到**用户可见帧的单一咽喉点**
+// （sse-core.emitToSession，按帧名限定），并把源头摘要（subagent.ts）与唤醒文本
+// （index.ts）也过同一层。三层职责见各调用点注释；本段提供全部纯函数。
+
+/** 本机/回环地址的内部端点 URL——永远不是给用户的产品链接，直接删。 */
+const INTERNAL_ENDPOINT_URL_RE =
+  /https?:\/\/(?:127\.0\.0\.1|localhost|0\.0\.0\.0|\[::1\])(?::\d+)?[^\s，。；、）)】"'`]*/gi
+
+/** URL 段切分（URL 段原样保留——产品链接与其查询串不得被当内部赋值误删）。
+ *  与 outbound-sanitize.ts 的 URL_SEGMENT_RE 同款；该轮子未 export，故此处各存一份单行正则。 */
+const VISIBLE_URL_SEGMENT_RE = /(https?:\/\/[^\s)）\]」>`"']+)/
+
+/** 只在**非 URL 段**做 token 清洗（URL 段原样返回）。 */
+function scrubOutsideUrls(s: string, fn: (chunk: string) => string): string {
+  return s
+    .split(VISIBLE_URL_SEGMENT_RE)
+    .map((part, i) => (i % 2 === 1 ? part : fn(part)))
+    .join("")
+}
+
+/** 内部契约栏/自检栏的 markdown 标题（`**qc**` / `**emotion_contract**`…）：整块（标题→下一个标题）丢弃。 */
+const INTERNAL_FIELD_HEADING_RE =
+  /^[ \t]*(?:\*\*|__)[ \t]*(?:verdict|issues|evidence|qc|prompt_used|emotion_contract|melody_notation|duration_source|自检行|内审)[ \t]*(?:\*\*|__)[ \t]*$/i
+
+/** 任意 markdown 标题行（`**…**` 前缀 或 `#…`）：内部区块的结束锚。 */
+const ANY_MD_HEADING_LINE_RE = /^[ \t]*(?:\*\*[^*\n]+\*\*|#{1,6}[ \t]+\S)/
+
+/** 内审正文的开头特征（其后全为判词/栏名/引用原文，整段丢弃）。 */
+const CRITIC_BODY_START_RE = /(?:^|\n)[ \t]*(?:审核已完成|结论如下|\d+[.、][ \t]*【交付)/
+
+/** 内部字段赋值 token（只在非 URL 段清洗，见 scrubOutsideUrls）。 */
+const INTERNAL_ASSIGN_RES: Array<[RegExp, string]> = [
+  [/[ \t]*\bqcSignature\s*=\s*\S+/gi, ""],
+  [/[ \t]*\bscore_abc\s*=\s*\S+/gi, ""],
+  [/\bprompt_used\b/gi, ""],
+  [/[ \t]*\bchannel\s*=\s*\S+/gi, ""],
+]
+
+/** F6：整行清洗辅助——只对行内**非 URL 段**逐段判定（URL 段原样跳过）。 */
+function anyUrlPartMatches(line: string, re: RegExp): boolean {
+  const parts = line.split(VISIBLE_URL_SEGMENT_RE)
+  for (let i = 0; i < parts.length; i += 2) if (re.test(parts[i]!)) return true
+  return false
+}
+
+/** F6：丢弃内部契约栏区块（标题行起，到下一个 markdown 标题行为止）。 */
+function dropInternalFieldBlocks(s: string): string {
+  const out: string[] = []
+  let suppress = false
+  for (const line of s.split("\n")) {
+    if (suppress) {
+      if (!ANY_MD_HEADING_LINE_RE.test(line)) continue // 仍在内部区块内 → 丢
+      suppress = false // 下一个标题到达 → 结束抑制，按常规处理本行
+    }
+    if (INTERNAL_FIELD_HEADING_RE.test(line)) {
+      suppress = true
+      continue
+    }
+    out.push(line)
+  }
+  return out.join("\n")
+}
+
 /**
  * 纯函数：子代理唤醒/落盘摘要 → 用户可见文字白名单。
- * 输入 run.summary（或 run.error）；输出只含成品与落差，内部字段/身份/计数/路径全消失。
+ * 输入 run.summary（或 run.error，或 index.ts 组出的唤醒 payload）；输出只含
+ * 「完成了什么 / 成品在哪（URL）/ 落差」，内部字段/身份/计数/路径/内审正文全消失。
  * 无可用内容 → 回空字串（呼叫端给中性兜底句）。
  */
 export function scrubSubagentWakeText(raw: unknown): string {
   if (typeof raw !== "string" || raw.length === 0) return ""
   let s = raw.replace(/\r\n?/g, "\n")
 
-  // 1) 落盘指针 / 截断提示 / 用量计数：结构段先行剥离（指针无换行，只删 token 不删整行）。
+  // 0) F6：本机端点 URL 先删（不是产品链接，且不被 URL 段保护）。
+  s = s.replace(INTERNAL_ENDPOINT_URL_RE, "")
+
+  // 1) 落盘指针 / 截断提示 / 用量计数：结构段先行剥离（F3 原有）。
   s = s.replace(/\[(?:完整|部分)结果(?:已落盘|落盘失败)[^\]]*\]\s*/g, "")
   s = s.replace(/\n*\[已截断[^\]]*\]\s*/g, "\n")
   s = s.replace(/\n*\[子代理用量\][^\n]*/g, "")
 
-  // 2) 内部判决标记：整段替换为产品语言（判词与内部重派指令随行带走）。
+  // 2) 内部判决标记：整段替换为产品语言（F3 原有；判词与内部重派指令随行带走）。
   for (const [re, rep] of WAKE_MARK_REWRITES) s = s.replace(re, rep)
 
-  // 3) 逐行：丢掉仍带内部栏名/审核身份/内部路径行号的行。
+  // 3) F6：内审正文整段截断——critic 交付正文以「审核已完成…」或编号「N. 【交付…】」起头，
+  //    其后为判词/栏名/引用原文；一并丢弃，只留其前的产品语言句（R3 病灶：编号审稿正文整段外泄）。
+  const cut = CRITIC_BODY_START_RE.exec(s)
+  if (cut) s = s.slice(0, cut.index)
+
+  // 4) F6：内部契约栏区块（**qc** / **emotion_contract**…）整块丢弃。
+  s = dropInternalFieldBlocks(s)
+
+  // 5) 逐行：丢掉仍带内部栏名/审核身份/内部路径行号的行（F3 原有 + F6 扩充）。
   s = s
     .split("\n")
-    .filter((line) => !WAKE_DROP_LINE_RES.some((re) => re.test(line)))
+    .filter(
+      (line) =>
+        !WAKE_DROP_LINE_RES.some((re) => re.test(line)) &&
+        !WAKE_DROP_LINE_OUTSIDE_URL_RES.some((re) => anyUrlPartMatches(line, re)),
+    )
     .join("\n")
 
-  // 4) 残余 token 清洗。
+  // 6) 残余 token 清洗（F3 原有）；F6：内部字段赋值只在非 URL 段清洗（保产品链接）。
   for (const [re, rep] of WAKE_TOKEN_RES) s = s.replace(re, rep)
+  s = scrubOutsideUrls(s, (chunk) => {
+    let c = chunk
+    for (const [re, rep] of INTERNAL_ASSIGN_RES) c = c.replace(re, rep)
+    return c
+  })
 
-  // 5) 收尾：压空行、trim。
+  // 7) 收尾：压空行、trim。
   return s.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim()
+}
+
+/**
+ * F6：子代理流式增量（subagent.delta）的**片段级**清洗。
+ * 增量是无完整行的分片，只做 token 级剥离（内部栏名与赋值/审核身份/内部路径行号/用量
+ * 计数），不做整行或整段判断（跨帧拼接的判断不可靠）。URL 段原样保留。
+ */
+export function scrubDeltaText(text: unknown): string {
+  if (typeof text !== "string" || text.length === 0) return ""
+  let s = text.replace(INTERNAL_ENDPOINT_URL_RE, "")
+  s = scrubOutsideUrls(s, (chunk) => {
+    let c = chunk
+    c = c.replace(/\*\*[ \t]*(?:verdict|issues|evidence|qc)[ \t]*\*\*/gi, "")
+    // verdict 的**值**（退回/通过…）随栏名一起去——R3 实测 subagent.delta 含「退回」。
+    c = c.replace(
+      /\bverdict\s*[:：=]\s*(?:退回|驳回|不通过|未通过|通过|reject(?:ed)?|pass(?:ed)?|approve(?:d)?)/gi,
+      "",
+    )
+    c = c.replace(/\b(?:verdict|issues|evidence|qc)\s*[:：=]\s*/gi, "")
+    // 编号审稿条目的栏目标记（`1. 【交付 1｜melody_notation】…` 的 【交付 N｜X】 段）。
+    c = c.replace(/【交付\s*\d+[｜|][^】]*】/g, "")
+    for (const [re, rep] of INTERNAL_ASSIGN_RES) c = c.replace(re, rep)
+    return c
+  })
+  s = s.replace(/(审核官|\bCritic\b|独立审核|机器审核|runId\s*[:：]?\s*[A-Za-z0-9._-]*)/gi, "")
+  s = s.replace(/(?:\.opencode|gateway|outputs|runs)\/[\w./-]+/g, "")
+  s = s.replace(/\bL\d+(?:\s*[–—~-]\s*L?\d+)?\b/g, "")
+  s = s.replace(/\btoken\s*[:：]?\s*\d+/gi, "")
+  s = s.replace(/工具调用\s*\d+\s*次/g, "")
+  s = s.replace(/耗时\s*\d+\s*(?:s|秒)/g, "")
+  return s
+}
+
+/**
+ * F6：用户可见 SSE 帧的单一咽喉点清洗，按**帧名**限定（不是无差别全文替换）。
+ * 只处理携带子代理内部摘要/正文的帧；用户正常内容（message.delta/reasoning.delta/
+ * session.* 状态帧等）一律不碰 → 零误伤。职责＝下游兜底：即使源头已产出干净摘要，
+ * 任何漏网帧在此最后收口。无改动时原样回传（零额外分配）。
+ */
+export function scrubVisibleFrame(name: string, data: unknown): unknown {
+  if (data === null || typeof data !== "object" || Array.isArray(data)) return data
+  const d = data as Record<string, unknown>
+  if (name === "subagent.done") {
+    if (typeof d.summary !== "string") return data
+    const cleaned = scrubSubagentWakeText(d.summary)
+    return cleaned === d.summary ? data : { ...d, summary: cleaned }
+  }
+  if (name === "subagent.delta") {
+    if (typeof d.text !== "string") return data
+    const cleaned = scrubDeltaText(d.text)
+    return cleaned === d.text ? data : { ...d, text: cleaned }
+  }
+  return data
 }

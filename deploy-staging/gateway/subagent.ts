@@ -63,6 +63,8 @@ import {
   // 2026-10-03：数值阈值判定的代码强制入口（纯函数；政策＝CRITIC_SCORE_THRESHOLD_POLICY）。
   evaluateCriticScoreThreshold,
   CRITIC_SCORE_THRESHOLD_POLICY,
+  // 2026-10-04 F6：done 摘要从源头过用户可见白名单（内审/契约内部文字不上桌）。
+  scrubSubagentWakeText,
   type CriticScoreSample,
   type DeliveryGateResult,
   type CriticPassTarget,
@@ -97,6 +99,26 @@ const HARD_TIMEOUT_MS = 15 * 60 * 1000 // 单子代理硬顶
 // R6（2026-09-10）：async 子代理无工具轮询死线顶著，军团研究/创作任务合法更长，
 // 硬顶放宽到 30 分钟；超时同样走 finishRun(error) → 唤醒父会话如实汇报。
 const ASYNC_HARD_TIMEOUT_MS = 30 * 60 * 1000
+// F8（2026-10-04）断面 B：async 子代理「子会话孤儿」活性检测。
+// 病灶（F7 取证）：部署重启 opencode-server 会把在途子会话原地杀死并孤儿化，gateway
+// 无「子会话丢失」检测 → 一路静默等到 30 分钟硬顶（ASYNC_HARD_TIMEOUT_MS）才收束，
+// 用户体感 4 分钟 → 30 分钟。判据见 evaluateRunLiveness：async run 在「无在途工具 +
+// 超过阈值无任何子会话事件/part 写入」时判 stale → 立即 finishRun(error) 走既有唤醒链
+// 收束父会话。阈值默认 120s（SUBAGENT_STALE_MS 覆写）；30 分钟硬顶保留为最后兜底，不删。
+const SUBAGENT_STALE_DEFAULT_MS = 120_000
+const SUBAGENT_LIVENESS_POLL_DEFAULT_MS = 15_000
+function subagentStaleMs(): number {
+  const n = Number.parseInt(process.env.SUBAGENT_STALE_MS || "", 10)
+  return Number.isFinite(n) && n >= 30_000 ? n : SUBAGENT_STALE_DEFAULT_MS
+}
+function subagentLivenessPollMs(): number {
+  const n = Number.parseInt(process.env.SUBAGENT_LIVENESS_POLL_MS || "", 10)
+  return Number.isFinite(n) && n >= 3_000 ? n : SUBAGENT_LIVENESS_POLL_DEFAULT_MS
+}
+// 用户可见层文案（简体、无栏名/runId/token/内部路径）：经 finishRun → wakeParent 的
+// scrubSubagentWakeText 白名单后上桌。
+const SUBAGENT_STALE_MESSAGE =
+  "这一路子代理中途断开了（长时间没有任何进展），结果没有取回。已中断这一路并通知主流程，请重新派一次。"
 const SUMMARY_MAX_CHARS = 600
 // 2026-10-02 能力片：ok 摘要（最后一则有文字的 assistant 讯息）的明确字数上限。子代理末则
 // 文字可能上万字，若不设上限会让 subagent.done 的 SSE 帧与注入父会话的唤醒文案膨胀——与本轮
@@ -139,6 +161,45 @@ function truncateSummaryText(text: string): { text: string; truncated: number } 
   const cut = nl > SUBAGENT_SUMMARY_MAX_CHARS * 0.6 ? nl : SUBAGENT_SUMMARY_MAX_CHARS
   const kept = text.slice(0, cut)
   return { text: kept, truncated: text.length - kept.length }
+}
+
+/**
+ * F8（2026-10-04）断面 B：async 子代理活性判定（纯函数，探针/单测可直接喂输入）。
+ *
+ * 病灶（F7 取证）：部署重启 opencode-server 把在途子会话原地杀死并孤儿化，gateway
+ * 无「子会话丢失」检测 → 静默等到 30 分钟硬顶才收束（用户 4 分钟体感 → 30 分钟）。
+ *
+ * 判「失活(stale)」需同时满足（缺一即放行）：
+ *   ① status==="running" 且非 stopped、非重派在途（reworking）；
+ *   ② async 模式（同步 run 有 deadlineTimer 先放行、主会话有工具轮询解锁，不在此判）；
+ *   ③ **无在途工具**（pendingToolCount===0）——防误杀的关键：正在跑的工具（如
+ *      music_gen 真生成 150-180s）长时间不产生新 part 属正常，必须放行；
+ *   ④ 距最近一次子会话事件（lastActivityAt）已 ≥ staleMs。
+ * 正常流式生成每个 delta/part 都会刷新 lastActivityAt（handleSubagentEvent 首行打点）；
+ * 只有「子会话已被孤儿化、永不再写入」才会同时满足 ③④。30 分钟硬顶保留为最后兜底。
+ */
+export interface RunLivenessInput {
+  status: string
+  stopped?: boolean
+  asyncMode: boolean
+  reworking?: boolean
+  now: number
+  lastActivityAt: number
+  pendingToolCount: number
+  staleMs: number
+}
+export interface RunLivenessVerdict {
+  stale: boolean
+  reason?: "silent_no_pending_tool"
+}
+export function evaluateRunLiveness(input: RunLivenessInput): RunLivenessVerdict {
+  if (input.status !== "running") return { stale: false }
+  if (input.stopped === true) return { stale: false }
+  if (input.asyncMode !== true) return { stale: false }
+  if (input.reworking === true) return { stale: false }
+  if (input.pendingToolCount > 0) return { stale: false }
+  if (input.now - input.lastActivityAt >= input.staleMs) return { stale: true, reason: "silent_no_pending_tool" }
+  return { stale: false }
 }
 
 interface SubagentModelRef {
@@ -206,6 +267,12 @@ interface SubagentRun {
   // D5（2026-10-02）：心跳 + 逾时前部分交付计时器（见 armHeartbeat）。摘除时必须清。
   heartbeatTimer?: ReturnType<typeof setInterval>
   earlyPartialTimer?: ReturnType<typeof setTimeout>
+  // F8（2026-10-04）断面 B：活性检测状态。
+  //   lastActivityAt：最近一次子会话事件（任何 type，含 part 写入/工具状态变更）时间戳。
+  //   pendingTools：在途工具 callID 集（state.status 为 pending/running 登记，completed/error 摘除）。
+  //   「有在途工具」＝合法的长期静默（长生成），活性检测必须放行，不得误杀。
+  lastActivityAt: number
+  pendingTools: Set<string>
   // 片 D（2026-09-15）：交付闸门机器化重派状态。reworkCount=已重派次数（硬帽 1，
   // 防无限回圈烧钱）；reworking=重派投递在途护栏（旧子会话残影事件不得提前收尾）；
   // reworkFailure=重派投递失败原因（非空=重派从未真正跑过，done 不得伪称 reworked）。
@@ -312,6 +379,7 @@ const criticRetryQueue = new Map<string, CriticPassTarget[]>()
 
 export function initSubagent(d: SubagentDeps): void {
   deps = d
+  startLivenessWatch()
 }
 
 /** 全局 tap 用：该 opencode 会话是否是本运行时的子会话。 */
@@ -443,6 +511,12 @@ function boundMap<T>(map: Map<string, T>, max: number): void {
   if (map.size <= max) return
   const oldest = map.keys().next().value
   if (oldest !== undefined) map.delete(oldest)
+}
+
+function boundSet<T>(set: Set<T>, max: number): void {
+  if (set.size <= max) return
+  const oldest = set.values().next().value
+  if (oldest !== undefined) set.delete(oldest)
 }
 
 function pruneCompleted(): void {
@@ -775,10 +849,17 @@ ${summary}`
 
   const asyncMode = run.asyncMode === true
   removeFromRegistries(run)
+  // 2026-10-04 F6：done 摘要从**源头**改为用户可读——内部落盘指针、契约栏名（verdict/issues/
+  // evidence/qc）、审核身份与 runId、内审判词与编号审稿正文、用量计数一律剥离。三个出口
+  // （subagent.done 帧 / completed 取件 / wakeParent 唤醒）本来共用同一 summary 变数，这里
+  // 换成清洗后的版本即三处同时干净；咽喉点（sse-core.emitToSession）与唤醒路径（index.ts）
+  // 复用同一纯函数做下游兜底，此处是让出口天生干净的第一层。
+  const visibleSummary = scrubSubagentWakeText(summary)
+  run.summary = visibleSummary
   // 修 1：本 run 释放了一个槽位——若该父会话有被并发上限挤掉的 critic 待跑，补跑。
   maybeDrainCriticQueue(run.parentGatewaySessionId)
   deleteReworkRecord(run.id) // 刀 F：终态即清持久记录（幂等；非 rework run 无记录=no-op）
-  completed.set(run.id, { status, summary, error, finishedAt: Date.now(), label: run.label, parent: run.parentGatewaySessionId })
+  completed.set(run.id, { status, summary: visibleSummary, error, finishedAt: Date.now(), label: run.label, parent: run.parentGatewaySessionId })
   // D7（2026-10-02）：交付事件落库——重问率＝同 (session, agent, label) 再次交付的比例。
   if (status === "ok" && run.agent) {
     saveDelivery({
@@ -795,7 +876,7 @@ ${summary}`
     deps!.emitToSession(state, "subagent.done", {
       id: run.id,
       status,
-      summary,
+      summary: visibleSummary,
       // 片 C（2026-09-15）：新增栏位，不动既有 id/status/summary 语义；ok 时不加。
       ...(deliveryGate ? { delivery_gate: deliveryGate } : {}),
       // 2026-10-02 能力片：用量计数（仅 summarizeChild 路径有值；新栏位，不动既有键）。
@@ -809,7 +890,7 @@ ${summary}`
       // 修 1（2026-10-02）：verdict（PASS 与 REJECT）一律以正常完成仪式回灌父会话——
       // PASS 不再只写 journal（实锤：判决从未送达，orchestrator 两小时后手动 read 才发现）。
       try {
-        deps!.wakeParent(state, { id: run.id, label: run.label, status, summary, error })
+        deps!.wakeParent(state, { id: run.id, label: run.label, status, summary: visibleSummary, error })
       } catch (e) {
         console.error(`[gateway] subagent wake failed: id=${run.id}`, e)
       }
@@ -822,7 +903,7 @@ ${summary}`
           id: run.id,
           label: run.label,
           status,
-          summary,
+          summary: visibleSummary,
           error,
         })
       } catch (e) {
@@ -1022,6 +1103,49 @@ function armHeartbeat(run: SubagentRun, hardMs: number): void {
 
 function unrefTimer(t: ReturnType<typeof setTimeout> | ReturnType<typeof setInterval> | undefined): void {
   ;(t as unknown as { unref?: () => void } | undefined)?.unref?.()
+}
+
+// ── F8（2026-10-04）断面 B：async 子代理活性看门狗 ────────────────────────────
+// 单一定时器扫全部在跑 run（刻意不用 per-run 计时器——避免与既有 timeout/heartbeat/
+// earlyPartial 计时器的生命周期互相牵连）；unref，不阻挡进程退出；finishRun 的
+// status 幂等守卫保证不会与硬顶/收尾路径双终态。
+// 命中 stale 的处置：走既有 finishRun(error) → subagent.done + wakeParent（唤醒文案过
+// 用户可见白名单 scrubSubagentWakeText），父会话据此收束/重派。
+let livenessTimer: ReturnType<typeof setInterval> | undefined
+
+function startLivenessWatch(): void {
+  if (livenessTimer) return
+  livenessTimer = setInterval(livenessTick, subagentLivenessPollMs())
+  unrefTimer(livenessTimer)
+}
+
+function livenessTick(): void {
+  const staleMs = subagentStaleMs()
+  const now = Date.now()
+  // 快照遍历：finishRun 会同步/异步改动 byParent，先拷贝一份防迭代期增删。
+  const runs: SubagentRun[] = []
+  for (const list of byParent.values()) for (const r of list) runs.push(r)
+  for (const run of runs) {
+    if (run.status !== "running") continue
+    const verdict = evaluateRunLiveness({
+      status: run.status,
+      stopped: run.stopped,
+      asyncMode: run.asyncMode === true,
+      reworking: run.reworking === true,
+      now,
+      lastActivityAt: run.lastActivityAt,
+      pendingToolCount: run.pendingTools.size,
+      staleMs,
+    })
+    if (!verdict.stale) continue
+    const silentS = Math.round((now - run.lastActivityAt) / 1000)
+    console.warn(
+      `[gateway] subagent stale detected (no child activity ${silentS}s, no in-flight tool): id=${run.id} label="${run.label}" child=${run.opencodeSessionId}`,
+    )
+    // 逾时先落盘已累积的 partial（同一行为与硬顶路径一致），再 error 收尾。
+    run.partialPersist = true
+    void finishRun(run, "error", partialBodyOf(run), SUBAGENT_STALE_MESSAGE)
+  }
 }
 
 function persistRunOutput(
@@ -1281,6 +1405,9 @@ async function dispatchAttempt(run: SubagentRun): Promise<string | undefined> {
     byChildOc.delete(childId)
     return `任务投递失败：${(e as Error).message}`
   }
+  // F8（断面 B）：新子会话投递成功＝活性起点；清上一 attempt 的在途工具残留。
+  run.lastActivityAt = Date.now()
+  run.pendingTools.clear()
   console.log(
     `[gateway] subagent attempt: id=${run.id} label="${run.label}" attempt=${run.attempt}/${Math.max(run.modelChain.length, 1)} model=${model ? `${model.providerID}/${model.modelID}` : "opencode-default"} child=${childId} agent=${run.agent ?? "-"}`,
   )
@@ -1308,6 +1435,9 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
   // 0920 停止闸：停止后子会话已 DELETE，残影事件一律丢弃（否则又推进卡片状态、
   // 甚至触发换模重投把 run 复活）。
   if (run.stopped) return
+  // F8（断面 B）：任何子会话事件都刷新活性时间戳——这是活性检测「子会话仍在写入/
+  // 仍在发事件」的唯一证据来源（含 part 增量、工具状态、session.idle 等）。
+  run.lastActivityAt = Date.now()
   try {
     // 上游错误（session.error 或任意带 properties.error 的事件）→ 换模重试或 done error。
     const err = event?.properties?.error
@@ -1360,6 +1490,10 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
 
     const parentState = parentStateOf(run)
     if (!parentState) return // 父会话已被回收：不再发帧，等 idle/超时收尾
+    // 2026-10-04 F6：机器内审 run（critic pass）的推理/正文一律不上屏——内审正文对用户零价值，
+    // 且是 R3 实测最大的外泄通道（subagent.delta 把子代理正文按帧流给父会话，实测含
+    // evidence/qc/verdict/退回）。此处按 run 身份整体抑制；非内审子代理照常流，咽喉点再做 token 级兜底。
+    const hideBody = run.machineCriticPass === true
 
     switch (event?.type) {
       case "message.updated": {
@@ -1388,11 +1522,13 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
           // S3（2026-09-11）：reasoning 增量一并转发（跑马灯要让用户感知「子代理在
           // 工作」），用 kind 与正文区分；正文 payload 维持原样不带 kind（零回归）。
           const kind = typeof p.partID === "string" ? run.partKind.get(p.partID) : undefined
-          deps.emitToSession(
-            parentState,
-            "subagent.delta",
-            kind === "reasoning" ? { id: run.id, text: p.delta, kind } : { id: run.id, text: p.delta },
-          )
+          if (!hideBody) {
+            deps.emitToSession(
+              parentState,
+              "subagent.delta",
+              kind === "reasoning" ? { id: run.id, text: p.delta, kind } : { id: run.id, text: p.delta },
+            )
+          }
           if (typeof p.partID === "string") {
             run.partEmitted.set(p.partID, (run.partEmitted.get(p.partID) ?? 0) + p.delta.length)
             boundMap(run.partEmitted, 200)
@@ -1403,6 +1539,20 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
       case "message.part.updated": {
         const part = event?.properties?.part
         if (!part) break
+        // F8（断面 B）：工具在途登记/摘除。「有在途工具」时长期静默是正常的（长生成，
+        // 如 music_gen 真生成 150-180s），活性检测据此放行、绝不误杀。
+        if (part.type === "tool") {
+          const callId = typeof part.callID === "string" ? part.callID : typeof part.id === "string" ? part.id : ""
+          const st = typeof part.state?.status === "string" ? part.state.status : ""
+          if (callId && st) {
+            if (st === "pending" || st === "running") {
+              run.pendingTools.add(callId)
+              boundSet(run.pendingTools, 200)
+            } else if (st === "completed" || st === "error") {
+              run.pendingTools.delete(callId)
+            }
+          }
+        }
         // FIX-A（2026-10-02）：子代理工具结果的媒体成品 → 父会话出卡。野兽模式下音乐/影片
         // 只能在 Expert 子代理里产生，而其 tool part 此前整类被丢弃 ⇒ 子代理做出的影片/音乐
         // 永远不出卡（暴君抱怨「影片／音乐不主动弹出」的真主因）。只认 completed；去重交给
@@ -1438,11 +1588,13 @@ export function handleSubagentEvent(event: any, opencodeSessionId: string): void
         const emittedLen = run.partEmitted.get(id) ?? 0
         if (part.text.length > emittedLen) {
           const suffix = part.text.slice(emittedLen)
-          deps.emitToSession(
-            parentState,
-            "subagent.delta",
-            part.type === "reasoning" ? { id: run.id, text: suffix, kind: "reasoning" } : { id: run.id, text: suffix },
-          )
+          if (!hideBody) {
+            deps.emitToSession(
+              parentState,
+              "subagent.delta",
+              part.type === "reasoning" ? { id: run.id, text: suffix, kind: "reasoning" } : { id: run.id, text: suffix },
+            )
+          }
           run.partEmitted.set(id, part.text.length)
           boundMap(run.partEmitted, 200)
         }
@@ -1553,6 +1705,8 @@ export function maybeRunMachineCriticPass(parentState: any, unreviewedDeclared =
       partKind: new Map(),
       suppressedParts: new Set(),
       partText: new Map(),
+      lastActivityAt: Date.now(),
+      pendingTools: new Set(),
     }
 
     // 注册进 byParent：与 handleSubagentDispatch 同语义——critic run 占一个并发位、
@@ -1881,6 +2035,8 @@ export async function handleSubagentDispatch(req: Request): Promise<Response> {
     partKind: new Map(),
     suppressedParts: new Set(),
     partText: new Map(),
+    lastActivityAt: Date.now(),
+    pendingTools: new Set(),
   }
   list.push(run)
   byParent.set(parent.sessionId, list)
@@ -2252,6 +2408,8 @@ function runFromReworkRecord(rec: ReworkRecord): SubagentRun {
     agent: rec.agent || undefined,
     asyncMode: rec.asyncMode,
     reworkCount: rec.reworkCount || 1,
+    lastActivityAt: Date.now(),
+    pendingTools: new Set(),
   }
 }
 

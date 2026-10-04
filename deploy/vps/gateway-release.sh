@@ -4,9 +4,15 @@
 #
 # 用法：
 #   bash deploy/vps/gateway-release.sh status            # 看生产现在跑哪一版（唯读）
-#   bash deploy/vps/gateway-release.sh release [--sha <commit>] [--files <路径>...] [--skip-recon] [--dry-run]
-#   bash deploy/vps/gateway-release.sh rollback [--dry-run]
+#   bash deploy/vps/gateway-release.sh release [--sha <commit>] [--files <路径>...] [--skip-recon] [--dry-run] [--force]
+#   bash deploy/vps/gateway-release.sh rollback [--dry-run] [--force]
 #   bash deploy/vps/gateway-release.sh adopt [--dry-run]  # 一次性：把实体目录改成受管 symlink
+#
+# F8（2026-10-04）断面 A｜重启前 drain（默认开启；release / rollback 生效）：
+#   调用远端 deploy.sh（重启 agent-gateway）之前先只读探测在途回合/子代理，有则轮询等
+#   到清空（上界 180s）；到上界仍未清空 → 默认中止，加 --force 跳过。判据与
+#   opencode-release.sh 完全同套（gateway sessions.db lastTurnActiveAt / subagent_reworks
+#   ＋ opencode.db 未 completed 的流式 assistant 讯息）。
 #
 # 为什么存在：过去「生产跑的是哪一版」只能事后取证（Vercel files API 比 md5、逐 chunk grep），
 #   而 alias 曾 34 小时未更新、跑的是旧部署（memory mapay-fee-rejection-fix-0920），
@@ -64,6 +70,7 @@ RECON_SCRIPT="$REPO_ROOT/deploy-staging/vps-tools/vps-gateway-recon.sh"
 
 DRY_RUN=0
 SKIP_RECON=0
+FORCE=0
 SHA=""
 EXPLICIT_FILES=()
 
@@ -108,16 +115,68 @@ run_remote_binary() {
   ssh -i "$SSH_KEY" -p "$SSH_PORT" -o ConnectTimeout=10 "$SSH_TARGET" "$@"
 }
 
+# ── F8（2026-10-04）断面 A：agent-gateway 重启前的 drain（只读）─────────────
+# 与 opencode-release.sh 同一套判据/上界（见该脚本 F8 段注释；三路只读信号）。
+# gateway 重启虽由会话 N1 自动重投主 turn（sessions-core.ts），但会杀掉 async 子代理
+# watcher（孤儿化，需断面 B 兜底），故同样在 deploy.sh 闸门前先 drain。
+# 命中在途 → 轮询到清空；上界后仍非空 → 回传码 3（呼叫端中止；--force 跳过）。
+run_drain_gate() {
+  if [ "$DRY_RUN" -eq 1 ]; then log "DRY-RUN drain gate（跳过远端只读探测）"; return 0; fi
+  run_remote_stdin bash -s -- "$FORCE" \
+    "${OC_DRAIN_MAX_SECS:-180}" "${OC_DRAIN_POLL_SECS:-5}" "${OC_DRAIN_WINDOW_MS:-180000}" \
+    "${OC_DRAIN_SESSIONS_DB:-/opt/agent-harness/state/sessions.db}" \
+    "${OC_DRAIN_OPENCODE_DB:-/opt/agent-harness/workspace/.local/share/opencode/opencode.db}" <<'REMOTE'
+set -euo pipefail
+DRAIN_FORCE="${1:-0}"
+DRAIN_MAX_SECS="${2:-180}"
+DRAIN_POLL_SECS="${3:-5}"
+DRAIN_WINDOW_MS="${4:-180000}"
+DRAIN_SESSIONS_DB="${5:-/opt/agent-harness/state/sessions.db}"
+DRAIN_OPENCODE_DB="${6:-/opt/agent-harness/workspace/.local/share/opencode/opencode.db}"
+drain_inflight_count() {
+  local now a b c v
+  now=$(( $(date +%s) * 1000 ))
+  a="$(sudo sqlite3 -cmd '.timeout 3000' "$DRAIN_SESSIONS_DB" \
+    "SELECT COUNT(*) FROM sessions WHERE json_extract(data,'\$.lastTurnActiveAt') > 0 AND ($now - json_extract(data,'\$.lastTurnActiveAt')) < $DRAIN_WINDOW_MS;" 2>/dev/null || echo ERR)"
+  b="$(sudo sqlite3 -cmd '.timeout 3000' "$DRAIN_SESSIONS_DB" "SELECT COUNT(*) FROM subagent_reworks;" 2>/dev/null || echo ERR)"
+  c="$(sudo sqlite3 -cmd '.timeout 3000' "$DRAIN_OPENCODE_DB" \
+    "SELECT COUNT(*) FROM message WHERE json_extract(data,'\$.role')='assistant' AND json_extract(data,'\$.time.completed') IS NULL AND ($now - time_updated) < $DRAIN_WINDOW_MS;" 2>/dev/null || echo ERR)"
+  for v in "$a" "$b" "$c"; do case "$v" in ''|*[!0-9]*) echo ERR; return 0;; esac; done
+  echo $(( a + b + c ))
+}
+if [ "$DRAIN_FORCE" = "1" ]; then
+  echo "DRAIN_SKIPPED (--force)"
+else
+  drain_waited=0
+  while :; do
+    drain_n="$(drain_inflight_count)"
+    if [ "$drain_n" = "ERR" ]; then
+      echo "DRAIN_PROBE_ERR 只读探测失败（sqlite/DB 不可读）→ 保守放行（fail-open，请人工确认）"; break
+    fi
+    if [ "$drain_n" = "0" ]; then echo "DRAIN_CLEAR waited=${drain_waited}s"; break; fi
+    if [ "$drain_waited" -ge "$DRAIN_MAX_SECS" ]; then
+      echo "DRAIN_TIMEOUT inflight=$drain_n waited=${drain_waited}s limit=${DRAIN_MAX_SECS}s — 默认中止部署；确需立即重启请加 --force"
+      exit 3
+    fi
+    echo "DRAIN_WAIT inflight=$drain_n waited=${drain_waited}s / ${DRAIN_MAX_SECS}s"
+    sleep "$DRAIN_POLL_SECS"; drain_waited=$(( drain_waited + DRAIN_POLL_SECS ))
+  done
+fi
+REMOTE
+}
+
 usage() {
-  sed -n '2,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,15p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
   cat <<'EOF'
 
 子命令：
   status                  唯读：印出生产目前指向的 release、meta、manifest 校验结果、healthz
-  release [--sha C] [--files F...] [--skip-recon] [--dry-run]
+  release [--sha C] [--files F...] [--skip-recon] [--dry-run] [--force]
                           发布：git archive 该 commit 的 deploy-staging/gateway → release 目录
-                          → md5 manifest → 原子切 symlink → deploy.sh 闸门 → 验证
-  rollback [--dry-run]    回滚：切 symlink 回上一个 release → 同一道 deploy.sh 闸门 → 验证
+                          → md5 manifest → 原子切 symlink → drain 闸门 + deploy.sh 闸门 → 验证
+                          --force：跳过重启前 drain（仍有在途会话时也立即重启）
+  rollback [--dry-run] [--force]
+                          回滚：切 symlink 回上一个 release → drain + 同一道 deploy.sh 闸门 → 验证
   adopt [--dry-run]       一次性：把实体 /opt/agent-harness/gateway 封存成 baseline release
                           并换成受管 symlink（此后 release/rollback 才可用）
 
@@ -132,6 +191,7 @@ parse_flags() {
     case "$1" in
       --dry-run) DRY_RUN=1 ;;
       --skip-recon) SKIP_RECON=1 ;;
+      --force) FORCE=1 ;;
       --sha) shift; SHA="${1:-}"; [ -n "$SHA" ] || die "--sha 需要值" ;;
       --files)
         shift
@@ -383,6 +443,7 @@ REMOTE
 
   if [ "$DRY_RUN" -eq 0 ]; then
     log "== 既有服务闸门：$DEPLOY_GATE =="
+    if ! run_drain_gate; then die "部署前 drain 未通过：仍有在途会话（等它收束后重试，或加 --force 立即重启）"; fi
     run_remote "$DEPLOY_GATE"
     verify_release "$RELEASES_DIR/$rel/files"
   fi
@@ -454,6 +515,7 @@ echo "ROLLED_BACK current=$(readlink -f "$GATEWAY_PATH")"
 REMOTE
 
   log "== 既有服务闸门：$DEPLOY_GATE =="
+  if ! run_drain_gate; then die "回滚前 drain 未通过：仍有在途会话（等它收束后重试，或加 --force 立即重启）"; fi
   run_remote "$DEPLOY_GATE"
   verify_release "$RELEASES_DIR/$prev/files"
   log "rollback 完成：$prev"

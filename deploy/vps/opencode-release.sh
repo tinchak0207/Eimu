@@ -5,8 +5,13 @@
 # 用法：
 #   bash deploy/vps/opencode-release.sh status            # 唯读：现况＋健康
 #   bash deploy/vps/opencode-release.sh plan [--sha C]    # 唯读：列出将变更的档
-#   bash deploy/vps/opencode-release.sh release [--sha C] [--skip-recon] [--dry-run]
-#   bash deploy/vps/opencode-release.sh rollback [--dry-run]   # 回复最新备份
+#   bash deploy/vps/opencode-release.sh release [--sha C] [--skip-recon] [--dry-run] [--force]
+#   bash deploy/vps/opencode-release.sh rollback [--dry-run] [--force]   # 回复最新备份
+#
+# F8（2026-10-04）断面 A｜重启前 drain（默认开启）：
+#   restart 之前先只读探测「有没有在途回合/子代理」，有则轮询等到清空（上界 180s，
+#   DRAIN_MAX_SECS 可覆写）；到上界仍未清空 → **默认中止部署并明确告知**，不再静默
+#   杀在途会话。确需立即重启（例：生产已坏需紧急回滚）→ 加 --force 跳过等待。
 #
 # 为什么不是 gateway-release.sh 那套 symlink 模型（刻意差异，非疏漏）：
 #   .opencode 内含 vendored 的 services/(898M) 与 node_modules/(93M) 及执行时 opencode.db，
@@ -40,6 +45,7 @@ ROOT_FILES=(AGENTS.md)
 
 DRY_RUN=0
 SKIP_RECON=0
+FORCE=0
 SHA=""
 
 log() { printf '%s\n' "$*" >&2; }
@@ -62,7 +68,7 @@ remote_binary() {
 }
 
 usage() {
-  sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '2,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 parse_flags() {
@@ -70,6 +76,7 @@ parse_flags() {
     case "$1" in
       --dry-run) DRY_RUN=1 ;;
       --skip-recon) SKIP_RECON=1 ;;
+      --force) FORCE=1 ;;
       --sha) shift; SHA="${1:-}"; [ -n "$SHA" ] || die "--sha 需要值" ;;
       -h|--help) usage; exit 0 ;;
       *) die "未知参数：$1" ;;
@@ -212,9 +219,9 @@ cmd_release() {
     log "  另传 AGENTS.md → $WORKSPACE_DIR/AGENTS.md"
   fi
 
-  remote_stdin bash -s -- "$VPS_DIR" "$BACKUP_DIR" "$SERVICE" "$HEALTH_URL" "$HISTORY_LOG" "$OWNER" "$tag" "$sha" "$r_tar" "$r_exp" "$WORKSPACE_DIR" "$r_agents" <<'REMOTE'
+  remote_stdin bash -s -- "$VPS_DIR" "$BACKUP_DIR" "$SERVICE" "$HEALTH_URL" "$HISTORY_LOG" "$OWNER" "$tag" "$sha" "$r_tar" "$r_exp" "$WORKSPACE_DIR" "$r_agents" "$FORCE" <<'REMOTE'
 set -euo pipefail
-VPS_DIR="$1"; BACKUP_DIR="$2"; SERVICE="$3"; HEALTH_URL="$4"; HISTORY_LOG="$5"; OWNER="$6"; tag="$7"; sha="$8"; r_tar="$9"; r_exp="${10}"; WORKSPACE_DIR="${11}"; r_agents="${12:-}"
+VPS_DIR="$1"; BACKUP_DIR="$2"; SERVICE="$3"; HEALTH_URL="$4"; HISTORY_LOG="$5"; OWNER="$6"; tag="$7"; sha="$8"; r_tar="$9"; r_exp="${10}"; WORKSPACE_DIR="${11}"; r_agents="${12:-}"; DRAIN_FORCE="${13:-0}"
 SCOPE=(tools lib skills plugin)
 CONFIGS=(opencode.json package.json bun.lock package-lock.json)
 
@@ -273,6 +280,52 @@ for probe in "$VPS_DIR" "$VPS_DIR/lib" "$VPS_DIR/plugin" "$VPS_DIR/tools" "$VPS_
 done
 echo "PERM_OK $SVC_USER 可读 .opencode 工具链"
 
+# ── F8（2026-10-04）断面 A：重启前 drain——不得杀在途会话 ─────────────────────
+# 根因（F7 取证）：裸 restart 会把正在流式生成中的子代理会话原地杀死并孤儿化。
+# 只读判据（三路信号，命中任一即视为「有在途」）：
+#   ① gateway sessions.db：主会话在途 turn——lastTurnActiveAt 非零且在窗口内
+#      （与 gateway N1 重投判据同源：turn 开始打点、正常结束清零，sessions-core.ts:74-83）。
+#   ② gateway sessions.db：在途 rework 子代理（subagent_reworks 表非空）。
+#   ③ opencode.db：流式中的 assistant 讯息（time.completed 为空且 time_updated 在窗口内）
+#      —— 覆盖 ①② 抓不到的普通在途子代理会话（F7 病灶即此类）。
+# 命中 → 轮询等到清空，上界 DRAIN_MAX_SECS（默认 180s）；到上界仍未清空 → DRAIN_TIMEOUT
+# 退出码 3（中止部署，不静默强杀）。--force ⇒ DRAIN_FORCE=1 跳过。
+# 探测本身只读；路径/窗口可用 env 覆写（OC_DRAIN_*，验证探针亦复用）。
+DRAIN_MAX_SECS="${OC_DRAIN_MAX_SECS:-180}"
+DRAIN_POLL_SECS="${OC_DRAIN_POLL_SECS:-5}"
+DRAIN_WINDOW_MS="${OC_DRAIN_WINDOW_MS:-180000}"
+DRAIN_SESSIONS_DB="${OC_DRAIN_SESSIONS_DB:-/opt/agent-harness/state/sessions.db}"
+DRAIN_OPENCODE_DB="${OC_DRAIN_OPENCODE_DB:-/opt/agent-harness/workspace/.local/share/opencode/opencode.db}"
+drain_inflight_count() {
+  local now a b c v
+  now=$(( $(date +%s) * 1000 ))
+  a="$(sudo sqlite3 -cmd '.timeout 3000' "$DRAIN_SESSIONS_DB" \
+    "SELECT COUNT(*) FROM sessions WHERE json_extract(data,'\$.lastTurnActiveAt') > 0 AND ($now - json_extract(data,'\$.lastTurnActiveAt')) < $DRAIN_WINDOW_MS;" 2>/dev/null || echo ERR)"
+  b="$(sudo sqlite3 -cmd '.timeout 3000' "$DRAIN_SESSIONS_DB" "SELECT COUNT(*) FROM subagent_reworks;" 2>/dev/null || echo ERR)"
+  c="$(sudo sqlite3 -cmd '.timeout 3000' "$DRAIN_OPENCODE_DB" \
+    "SELECT COUNT(*) FROM message WHERE json_extract(data,'\$.role')='assistant' AND json_extract(data,'\$.time.completed') IS NULL AND ($now - time_updated) < $DRAIN_WINDOW_MS;" 2>/dev/null || echo ERR)"
+  for v in "$a" "$b" "$c"; do case "$v" in ''|*[!0-9]*) echo ERR; return 0;; esac; done
+  echo $(( a + b + c ))
+}
+if [ "$DRAIN_FORCE" = "1" ]; then
+  echo "DRAIN_SKIPPED (--force)"
+else
+  drain_waited=0
+  while :; do
+    drain_n="$(drain_inflight_count)"
+    if [ "$drain_n" = "ERR" ]; then
+      echo "DRAIN_PROBE_ERR 只读探测失败（sqlite/DB 不可读）→ 保守放行（fail-open，请人工确认）"; break
+    fi
+    if [ "$drain_n" = "0" ]; then echo "DRAIN_CLEAR waited=${drain_waited}s"; break; fi
+    if [ "$drain_waited" -ge "$DRAIN_MAX_SECS" ]; then
+      echo "DRAIN_TIMEOUT inflight=$drain_n waited=${drain_waited}s limit=${DRAIN_MAX_SECS}s — 默认中止部署；确需立即重启请加 --force"
+      exit 3
+    fi
+    echo "DRAIN_WAIT inflight=$drain_n waited=${drain_waited}s / ${DRAIN_MAX_SECS}s"
+    sleep "$DRAIN_POLL_SECS"; drain_waited=$(( drain_waited + DRAIN_POLL_SECS ))
+  done
+fi
+
 sudo systemctl restart "$SERVICE"
 sleep 2
 state="$(systemctl is-active "$SERVICE" || true)"
@@ -288,9 +341,9 @@ REMOTE
 cmd_rollback() {
   preflight_local
   log "== rollback：回复最新一份 opencode-*-pre.tgz =="
-  remote_stdin bash -s -- "$VPS_DIR" "$BACKUP_DIR" "$SERVICE" "$HEALTH_URL" "$HISTORY_LOG" "$OWNER" <<'REMOTE'
+  remote_stdin bash -s -- "$VPS_DIR" "$BACKUP_DIR" "$SERVICE" "$HEALTH_URL" "$HISTORY_LOG" "$OWNER" "$FORCE" <<'REMOTE'
 set -euo pipefail
-VPS_DIR="$1"; BACKUP_DIR="$2"; SERVICE="$3"; HEALTH_URL="$4"; HISTORY_LOG="$5"; OWNER="$6"
+VPS_DIR="$1"; BACKUP_DIR="$2"; SERVICE="$3"; HEALTH_URL="$4"; HISTORY_LOG="$5"; OWNER="$6"; DRAIN_FORCE="${7:-0}"
 SCOPE=(tools lib skills plugin)
 CONFIGS=(opencode.json package.json bun.lock package-lock.json)
 latest="$(sudo ls -1t "$BACKUP_DIR"/opencode-*-pre.tgz 2>/dev/null | head -1 || true)"
@@ -306,6 +359,41 @@ agents_bak="${latest%-pre.tgz}-pre-AGENTS.md"
 if sudo test -f "$agents_bak"; then
   sudo install -o "${OWNER%%:*}" -g "${OWNER##*:}" -m 644 "$agents_bak" "$(dirname "$VPS_DIR")/AGENTS.md"
   echo "AGENTS_RESTORED $(dirname "$VPS_DIR")/AGENTS.md"
+fi
+# F8（2026-10-04）断面 A：回滚重启同样先 drain（同 release 的只读判据与上界；--force 跳过）。
+DRAIN_MAX_SECS="${OC_DRAIN_MAX_SECS:-180}"
+DRAIN_POLL_SECS="${OC_DRAIN_POLL_SECS:-5}"
+DRAIN_WINDOW_MS="${OC_DRAIN_WINDOW_MS:-180000}"
+DRAIN_SESSIONS_DB="${OC_DRAIN_SESSIONS_DB:-/opt/agent-harness/state/sessions.db}"
+DRAIN_OPENCODE_DB="${OC_DRAIN_OPENCODE_DB:-/opt/agent-harness/workspace/.local/share/opencode/opencode.db}"
+drain_inflight_count() {
+  local now a b c v
+  now=$(( $(date +%s) * 1000 ))
+  a="$(sudo sqlite3 -cmd '.timeout 3000' "$DRAIN_SESSIONS_DB" \
+    "SELECT COUNT(*) FROM sessions WHERE json_extract(data,'\$.lastTurnActiveAt') > 0 AND ($now - json_extract(data,'\$.lastTurnActiveAt')) < $DRAIN_WINDOW_MS;" 2>/dev/null || echo ERR)"
+  b="$(sudo sqlite3 -cmd '.timeout 3000' "$DRAIN_SESSIONS_DB" "SELECT COUNT(*) FROM subagent_reworks;" 2>/dev/null || echo ERR)"
+  c="$(sudo sqlite3 -cmd '.timeout 3000' "$DRAIN_OPENCODE_DB" \
+    "SELECT COUNT(*) FROM message WHERE json_extract(data,'\$.role')='assistant' AND json_extract(data,'\$.time.completed') IS NULL AND ($now - time_updated) < $DRAIN_WINDOW_MS;" 2>/dev/null || echo ERR)"
+  for v in "$a" "$b" "$c"; do case "$v" in ''|*[!0-9]*) echo ERR; return 0;; esac; done
+  echo $(( a + b + c ))
+}
+if [ "$DRAIN_FORCE" = "1" ]; then
+  echo "DRAIN_SKIPPED (--force)"
+else
+  drain_waited=0
+  while :; do
+    drain_n="$(drain_inflight_count)"
+    if [ "$drain_n" = "ERR" ]; then
+      echo "DRAIN_PROBE_ERR 只读探测失败（sqlite/DB 不可读）→ 保守放行（fail-open，请人工确认）"; break
+    fi
+    if [ "$drain_n" = "0" ]; then echo "DRAIN_CLEAR waited=${drain_waited}s"; break; fi
+    if [ "$drain_waited" -ge "$DRAIN_MAX_SECS" ]; then
+      echo "DRAIN_TIMEOUT inflight=$drain_n waited=${drain_waited}s limit=${DRAIN_MAX_SECS}s — 默认中止回滚；确需立即重启请加 --force"
+      exit 3
+    fi
+    echo "DRAIN_WAIT inflight=$drain_n waited=${drain_waited}s / ${DRAIN_MAX_SECS}s"
+    sleep "$DRAIN_POLL_SECS"; drain_waited=$(( drain_waited + DRAIN_POLL_SECS ))
+  done
 fi
 sudo systemctl restart "$SERVICE"; sleep 2
 state="$(systemctl is-active "$SERVICE" || true)"
