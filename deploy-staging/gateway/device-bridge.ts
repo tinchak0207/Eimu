@@ -485,6 +485,7 @@ export function sanitizeToolArgs(
       return { ok: true, args }
     }
     case "stat":
+      // stat 僅需 path（無額外凍結欄位）；denylist 已於函式開頭套用。
       return { ok: true, args: { path: p } }
     default:
       return { ok: false, code: "tool_not_allowed", message: `tool not allowed: ${String(tool)}` }
@@ -1326,7 +1327,7 @@ function mapInternalDeviceError(code: DeviceBridgeErrorCode): { status: number; 
 
 /**
  * 凍結 body → 既有 `sanitizeToolArgs` 的 args 白名單（欄位名映射，語義沿用既有淨化）。
- * 只放行凍結契約列出的欄位：path / pattern / max_bytes / limit（+ list_dir 的 max_entries）。
+ * 只放行凍結契約列出的欄位：path / pattern / max_bytes / limit / offset（+ list_dir 的 max_entries）。
  * 夾制全在 sanitizeToolArgs。
  */
 function buildInternalDeviceArgs(tool: DeviceBridgeTool, body: Record<string, unknown>): Record<string, unknown> {
@@ -1342,6 +1343,9 @@ function buildInternalDeviceArgs(tool: DeviceBridgeTool, body: Record<string, un
     case "read_file": {
       const args: Record<string, unknown> = { path }
       if (body.limit !== undefined) args.limit = body.limit
+      // 凍結欄位名 offset：裝置端既有參數（bridge-executor 已讀 args.offset），
+      // ≥0 整數夾制仍在 sanitizeToolArgs（唯一夾制點）；缺省時不下發，裝置沿用既有預設 0。
+      if (body.offset !== undefined) args.offset = body.offset
       return args
     }
     case "grep": {

@@ -103,7 +103,7 @@ export default tool({
   description:
     "读取**使用者自己电脑上**的档案（本机档案桥）。这不是云端工作区、也不是站内素材库；" +
     "档案实际躺在使用者的电脑里，只能读取他**明确授权过的资料夹**（在对话中同意授权，或在桌面版授权），" +
-    "范围外一律被拒。四个 op：list_dir＝列出目录内容；read_file＝读取单一档案内容（有大小上限，过长会截断）；" +
+    "范围外一律被拒。四个 op：list_dir＝列出目录内容；read_file＝读取单一档案内容（有大小上限，过长会截断，回传 offset 时可用它分段续读整份）；" +
     "grep＝在档案内容里搜寻文字；stat＝取得单一档案或目录的资讯（大小、时间、型别）。" +
     "当使用者说「看一下我 Downloads 里的东西」「读我电脑上那个档案」「帮我在本机某个资料夹找…」时用本工具。" +
     "若回传显示装置未连线或路径未授权，请把回传里的引导语**照实转达**给使用者（例如请他在对话中同意授权、或在桌面版授权资料夹），" +
@@ -121,7 +121,16 @@ export default tool({
     "③ 若回传带 incomplete=true，必须**明白告诉使用者清单不完整**（把 note 照实转达），" +
     "不得把不完整清单当成全部交付。" +
     "④ needs_authorization 的三段式 options 必须**连标点原样**照抄，尤其「永久允许（加入本机授权清单）」" +
-    "的全形括号与字句不可改成破折号或半形括号。",
+    "的全形括号与字句不可改成破折号或半形括号。" +
+    "【读大档的硬规矩（read_file / offset）】" +
+    "① read_file 单次有大小上限，档案过长只会回传第一段；回传会带 offset（本次起点）、bytes（本次实际读到的位元组数）、" +
+    "next_offset（下一段起点＝offset+bytes）、has_more（是否还有后续）。" +
+    "② has_more=true 时**必须**再呼叫 read_file 并把 offset 设为回传的 next_offset，反复续读直到 has_more=false，或改用 op=grep；" +
+    "**不得**只读到第一段就宣称「已读完整份」「档案只有这些内容」。" +
+    "③ 回报「所有」符合的项（例如所有含某关键字的段落／档案）时，必须说明依据：是分段读完（可列出各段 offset）还是 grep 的真实结果；" +
+    "未读完或不完整时必须明说，不得当成全部。" +
+    "④ has_more=null 表示装置未回报档案大小、无法判断是否读完；此时请自行比对回传的 size 与 offset+bytes 的大小，" +
+    "或再带 offset=next_offset 读一次，直到回传内容为空。",
   args: {
     op: tool.schema
       .enum(["list_dir", "read_file", "grep", "stat"])
@@ -150,6 +159,12 @@ export default tool({
       .number()
       .optional()
       .describe("read_file 的最大读取位元组数，超过会截断并标记。仅 op=read_file 适用。"),
+    offset: tool.schema
+      .number()
+      .optional()
+      .describe(
+        "read_file 的起始位元组位移（非负整数），用于分段续读大档：回传 has_more=true 时，把 offset 设为回传的 next_offset 再读。仅 op=read_file 适用。",
+      ),
   },
   async execute(args, context) {
     const op = args.op;
@@ -172,6 +187,8 @@ export default tool({
     if (args.pattern !== undefined) body.pattern = args.pattern;
     if (args.max_bytes !== undefined) body.max_bytes = args.max_bytes;
     if (args.limit !== undefined) body.limit = args.limit;
+    // offset：分段續讀的起點（非負整數）。夾制仍在閘道 sanitizeToolArgs（唯一夾制點）。
+    if (args.offset !== undefined) body.offset = args.offset;
     // 帶 name_glob（＝要「列出所有」）時把 list_dir 的 max_entries 拉到裝置既有上限 2000，
     // 以免預設 200 筆上限造成靜默漏列；不超過裝置上限，也不改裝置端上限。
     if (useGlob) body.max_entries = DEVICE_LIST_MAX_ENTRIES;
@@ -273,6 +290,42 @@ export default tool({
         // 內容過大被閘道截斷、拿不到 entries 陣列：不得靜默給清單。
         payload.incomplete = true;
         payload.note = `清单不完整：装置回传内容过大被截断，无法完整列出符合「${nameGlob}」的项目；请缩小目录范围后再试。`;
+      }
+    } else if (op === "read_file") {
+      // 分段續讀：裝置端回 {offset, limit, size, bytes_read, text}，閘道原樣保留這些後設欄位。
+      const rawResult =
+        data.result && typeof data.result === "object" ? (data.result as Record<string, unknown>) : {};
+      const startOffset =
+        typeof rawResult.offset === "number"
+          ? rawResult.offset
+          : typeof args.offset === "number"
+            ? args.offset
+            : 0;
+      // 本次實際讀到長度（位元組）：優先用裝置回報的 bytes_read，退回閘道回報的 bytes。
+      const readBytes =
+        typeof rawResult.bytes_read === "number"
+          ? rawResult.bytes_read
+          : typeof data.bytes === "number"
+            ? data.bytes
+            : null;
+      const size = typeof rawResult.size === "number" ? rawResult.size : null;
+      payload.offset = startOffset;
+      if (readBytes !== null) payload.bytes = readBytes;
+      payload.next_offset = readBytes !== null ? startOffset + readBytes : null;
+      // 是否還有後續：以「起點＋本次長度 < 檔案大小」為準；資訊不足時退回閘道 truncated；
+      // 兩者都無法判斷則 null（模型依 description 指示自行比對 size 與 offset+bytes，或再讀一次）。
+      if (size !== null && readBytes !== null) {
+        payload.has_more = startOffset + readBytes < size;
+      } else if (truncated) {
+        payload.has_more = true;
+      } else {
+        payload.has_more = null;
+      }
+      if (payload.has_more === true) {
+        payload.note =
+          `本次只读到第 ${startOffset} 位元组起共 ${readBytes ?? "未知"} 位元组` +
+          `（档案共 ${size ?? "未知"} 位元组），还有后续内容；**必须**再呼叫 read_file 带 ` +
+          `offset=${payload.next_offset} 续读，直到 has_more=false，或改用 grep，才能宣称「已读完整份」／「所有符合项」。`;
       }
     } else if (truncated) {
       payload.note = "内容超过单次读取上限，已截断；如需更多内容请缩小范围或分段读取。";
