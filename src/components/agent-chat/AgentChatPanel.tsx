@@ -3,7 +3,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { ArrowDown, Loader2, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { AgentAssistantTextItem, AgentChatState } from "@/lib/agent-chat-types";
+import type { AgentAssistantTextItem, AgentChatState, AgentToolAuthScope } from "@/lib/agent-chat-types";
 import type { BatchAnchor } from "@/lib/agent-batch-anchor";
 import { describeGroup, groupPendingConfirms } from "@/lib/agent-confirm-groups";
 import { AgentTranscript, type AgentTranscriptProps } from "./AgentTranscript";
@@ -171,6 +171,18 @@ const CONNECTION_META: Record<AgentChatPanelProps["connection"], { label: string
   closed: { label: "会话已结束", dotClass: "bg-destructive" },
 };
 
+/**
+ * 本機檔案授權回傳（缺陷 C）：把工具卡三選一翻成一句帶 scope＋root 的授權指令，
+ * 走既有 onSend 管道送進對話——授權本就發生在對話裡（與網關凍結契約一致），
+ * 因此不新增端點、不另造授權 API。純函式，可直測文案。
+ */
+export function buildLocalFilesAuthorizationMessage(scope: AgentToolAuthScope, root?: string): string {
+  const label =
+    scope === "once" ? "允许一次" : scope === "session" ? "本会话允许此目录" : "永久允许（加入本机授权清单）";
+  const rootPart = root ? `，root=${root}` : "";
+  return `授权本机文件访问：scope=${scope}${rootPart}（我选择「${label}」）。请调用 local_files_authorize 记录该授权，然后继续读取。`;
+}
+
 function AgentChatPanelComponent({
   state,
   connection,
@@ -201,6 +213,12 @@ function AgentChatPanelComponent({
   const scrollRef = useRef<HTMLDivElement>(null);
   // 输入区锚点：虚拟键盘弹起后，拿它判断「输入区是不是被键盘盖住了」。
   const composerAnchorRef = useRef<HTMLDivElement>(null);
+
+  // 本机文件授权（缺陷 C）：工具卡三选一点击 → 经既有 onSend 送授权指令进对话。
+  const authorizeLocalFiles = useCallback(
+    (scope: AgentToolAuthScope, root?: string) => onSend(buildLocalFilesAuthorizationMessage(scope, root)),
+    [onSend],
+  );
 
   /** 空态快捷示例：点一下就发送（ChatGPT 同款模式），当回合结束后输入区自动沉到底部。
    *  清单真源抽到 lib/agent-example-prompts.ts（新人礼弹窗要预填第一条，两处共引用一份）。 */
@@ -577,7 +595,7 @@ function AgentChatPanelComponent({
             </div>
           </div>
         ) : (
-          <AgentTranscript items={items} imageActions={imageActions} videoActions={videoActions} audioActions={audioActions} sessionId={sessionId} turnStatus={turnStatus} />
+          <AgentTranscript items={items} imageActions={imageActions} videoActions={videoActions} audioActions={audioActions} sessionId={sessionId} turnStatus={turnStatus} onAuthorizeLocalFiles={authorizeLocalFiles} />
         )}
 
         {/*

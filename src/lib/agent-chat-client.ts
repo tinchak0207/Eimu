@@ -20,6 +20,7 @@ import type {
 } from "./agent-chat-types";
 import { AGENT_STEER_STATUSES } from "./agent-chat-types";
 import { LOCAL_TEST_MODE } from "./local-test-mode";
+import { UploadAbortedError, xhrUploadForm } from "./agent-uploads";
 
 /** 网道附件清单：download/attachment 解析后可转成 AgentAttachmentRef。 */
 export interface AgentAttachment {
@@ -630,34 +631,42 @@ export function toAgentAttachmentRef(a: AgentAttachment): AgentAttachmentRef {
  * 网道回 `{ attachments: [...] }`。走的不是 agentFetch —— 它会把 body 当 JSON
  * 再蓋 Content-Type，multipart 必須保留 boundary。
  */
-export async function uploadAgentAttachments(sessionId: string, files: File[]): Promise<AgentAttachment[]> {
+export async function uploadAgentAttachments(
+  sessionId: string,
+  files: File[],
+  opts: { onProgress?: (loaded: number, total: number) => void; signal?: AbortSignal } = {},
+): Promise<AgentAttachment[]> {
   const form = new FormData();
   for (const file of files) form.append("file", file);
 
   // 不设 Content-Type：FormData 要由浏览器补 multipart boundary。
   const headers = authHeaders("尚未登录，无法上传附件。");
 
-  let res: Response;
+  // 缺陷 A（2026-10-04）：改用带进度的 XHR（xhrUploadForm）而非裸 fetch——
+  // 大档上传期间给得出真实字节进度，且能经 signal 取消。错误语义与旧 fetch 版逐条对齐。
+  let status: number;
+  let text: string;
   try {
-    res = await fetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}/attachments`, {
-      method: "POST",
-      headers,
-      body: form,
-    });
-  } catch {
+    ({ status, text } = await xhrUploadForm(
+      `/api/agent/sessions/${encodeURIComponent(sessionId)}/attachments`,
+      form,
+      { headers, onProgress: opts.onProgress, signal: opts.signal },
+    ));
+  } catch (err) {
+    if (err instanceof UploadAbortedError) throw err;
     throw new AgentChatError("network_error", "网络连接失败，请检查网络后再试。");
   }
 
   let data: unknown;
   try {
-    data = await res.json();
+    data = JSON.parse(text);
   } catch {
-    if (!res.ok) throw new AgentChatError(mapHttpStatus(res.status), fallbackMessage(res.status), res.status);
-    throw new AgentChatError("parse_error", "服务器回应格式错误。", res.status);
+    if (status < 200 || status >= 300) throw new AgentChatError(mapHttpStatus(status), fallbackMessage(status), status);
+    throw new AgentChatError("parse_error", "服务器回应格式错误。", status);
   }
 
-  if (!res.ok) {
-    throw new AgentChatError(mapErrorCode(data, res.status), extractMessage(data, res.status), res.status);
+  if (status < 200 || status >= 300) {
+    throw new AgentChatError(mapErrorCode(data, status), extractMessage(data, status), status);
   }
   const arr = (data as { attachments?: unknown })?.attachments;
   if (!Array.isArray(arr)) {

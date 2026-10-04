@@ -120,36 +120,124 @@ interface GatewayDirectUploadSpec {
   noun: string;
 }
 
+/**
+ * 上傳進度／取消的共用選項（缺陷 A 修復，2026-10-04）。
+ *
+ * 底層 fetch 有兩個硬傷：① 拿不到上行進度（4.4MB 音頻 47–50s 期間 UI 全黑，
+ * 使用者以為當掉）；② 沒有取消手段（載錯大檔只能等或重新整理）。改用
+ * XMLHttpRequest —— `upload.onprogress` 是**真實位元組計數**（非假動畫），
+ * `abort()` 是真取消。signal 供呼叫端（chip 的取消鈕／移除鈕）中斷在途請求。
+ */
+export interface UploadProgressOptions {
+  /** 上行真實進度：loaded/total 皆為位元組；total=0 時不呼叫（無法誠實報百分比）。 */
+  onProgress?: (loaded: number, total: number) => void;
+  /** 取消信號：abort 時 XHR.abort() → reject(UploadAbortedError)。 */
+  signal?: AbortSignal;
+}
+
+/** 使用者主動取消上傳（區別於網路失敗）：呼叫端據此落「已取消」而非「失敗」語義。 */
+export class UploadAbortedError extends Error {
+  constructor() {
+    super("已取消上传。");
+    this.name = "UploadAbortedError";
+  }
+}
+
+/**
+ * 用 XMLHttpRequest 送出 multipart，回 { status, text }；**不因 HTTP 狀態 reject**
+ * （狀態交由呼叫端判讀，與 fetch 語義一致）。僅網路錯誤／取消 reject。
+ * 這是全站唯一一支帶進度的上傳器：原片直傳與站內代理上傳都復用它，不另造第二套。
+ */
+export function xhrUploadForm(
+  url: string,
+  form: FormData,
+  opts: { headers?: Record<string, string> } & UploadProgressOptions = {},
+): Promise<{ status: number; text: string }> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    let settled = false;
+    const cleanup = () => {
+      if (opts.signal) opts.signal.removeEventListener("abort", onAbort);
+    };
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      xhr.abort();
+      reject(new UploadAbortedError());
+    };
+    if (opts.signal) {
+      if (opts.signal.aborted) {
+        reject(new UploadAbortedError());
+        return;
+      }
+      opts.signal.addEventListener("abort", onAbort);
+    }
+    xhr.open("POST", url);
+    if (opts.headers) {
+      for (const [key, value] of Object.entries(opts.headers)) xhr.setRequestHeader(key, value);
+    }
+    if (opts.onProgress && xhr.upload) {
+      xhr.upload.onprogress = (event: ProgressEvent) => {
+        if (event.lengthComputable && event.total > 0) opts.onProgress?.(event.loaded, event.total);
+      };
+    }
+    xhr.onload = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve({ status: xhr.status, text: xhr.responseText ?? "" });
+    };
+    xhr.onerror = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error("network_error"));
+    };
+    xhr.onabort = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new UploadAbortedError());
+    };
+    xhr.send(form);
+  });
+}
+
 async function uploadMediaDirect(
   sessionId: string,
   file: File,
   spec: GatewayDirectUploadSpec,
+  opts: UploadProgressOptions = {},
 ): Promise<AgentAttachmentRef> {
   const { ticket } = await mintUploadsTicket(sessionId);
 
   const form = new FormData();
   form.append("file", file);
 
-  let res: Response;
+  let status: number;
+  let text: string;
   try {
-    res = await fetch(
+    ({ status, text } = await xhrUploadForm(
       `${AGENT_UPLOADS_ORIGIN}/agent/v1/sessions/${encodeURIComponent(sessionId)}/video-upload?t=${encodeURIComponent(ticket)}`,
-      { method: "POST", body: form },
-    );
-  } catch {
+      form,
+      opts,
+    ));
+  } catch (err) {
+    if (err instanceof UploadAbortedError) throw err;
     throw new Error(`${spec.noun}直传网络连接失败。`);
   }
 
-  if (!res.ok) {
-    if (res.status === 413) throw new Error(`${spec.noun}超过 100 MB 上限。`);
-    if (res.status === 415) throw new Error(`网关不接受该${spec.noun}格式。`);
-    if (res.status === 401) throw new Error(`上传票失效，无法直传${spec.noun}。`);
-    throw new Error(`${spec.noun}直传失败（HTTP ${res.status}）。`);
+  if (status < 200 || status >= 300) {
+    if (status === 413) throw new Error(`${spec.noun}超过 100 MB 上限。`);
+    if (status === 415) throw new Error(`网关不接受该${spec.noun}格式。`);
+    if (status === 401) throw new Error(`上传票失效，无法直传${spec.noun}。`);
+    throw new Error(`${spec.noun}直传失败（HTTP ${status}）。`);
   }
 
   let data: unknown;
   try {
-    data = await res.json();
+    data = JSON.parse(text);
   } catch {
     throw new Error(`${spec.noun}直传响应格式错误。`);
   }
@@ -167,8 +255,12 @@ async function uploadMediaDirect(
 }
 
 /** 影片原片直傳（大檔，走網關票券路由；見上方 uploadMediaDirect）。 */
-export function uploadVideoDirect(sessionId: string, file: File): Promise<AgentAttachmentRef> {
-  return uploadMediaDirect(sessionId, file, { kind: "video", defaultMime: "video/mp4", noun: "视频" });
+export function uploadVideoDirect(
+  sessionId: string,
+  file: File,
+  opts: UploadProgressOptions = {},
+): Promise<AgentAttachmentRef> {
+  return uploadMediaDirect(sessionId, file, { kind: "video", defaultMime: "video/mp4", noun: "视频" }, opts);
 }
 
 /**
@@ -176,6 +268,10 @@ export function uploadVideoDirect(sessionId: string, file: File): Promise<AgentA
  * 第二套——差別只在 kind（audio/* 依 toAgentAttachmentRef 同款落 "document"）。
  * 繞開 Vercel 4.5MB 體上限，上限同網關 100MB。
  */
-export function uploadAudioDirect(sessionId: string, file: File): Promise<AgentAttachmentRef> {
-  return uploadMediaDirect(sessionId, file, { kind: "document", defaultMime: "audio/mpeg", noun: "音频" });
+export function uploadAudioDirect(
+  sessionId: string,
+  file: File,
+  opts: UploadProgressOptions = {},
+): Promise<AgentAttachmentRef> {
+  return uploadMediaDirect(sessionId, file, { kind: "document", defaultMime: "audio/mpeg", noun: "音频" }, opts);
 }

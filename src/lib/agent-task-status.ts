@@ -19,7 +19,8 @@ export type AgentTaskStatus =
   | "error"
   | "failed"
   | "interrupted"
-  | "stopped";
+  | "stopped"
+  | "needs_auth";
 
 export type AgentTaskStatusTone = "success" | "failure" | "neutral" | "pending";
 
@@ -38,6 +39,9 @@ export const AGENT_TASK_STATUS_TABLE: Record<AgentTaskStatus, AgentTaskStatusMet
   failed: { label: "失败", tone: "failure", isFailure: true },
   interrupted: { label: "已中止", tone: "neutral", isFailure: false },
   stopped: { label: "已停止", tone: "neutral", isFailure: false },
+  // 需要授權（2026-10-04 缺陷 C）：action 態，不是成功也不是失敗——等使用者在
+  // 卡片上選授權範圍。tone=pending（進行中語義，不標紅、不轉圈由元件自理）。
+  needs_auth: { label: "需要授权", tone: "pending", isFailure: false },
 };
 
 /**

@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useEffect, useRef } from "react";
-import type { AgentChatState } from "@/lib/agent-chat-types";
+import type { AgentChatState, AgentToolAuthScope } from "@/lib/agent-chat-types";
 import { AgentMessageBubble } from "./AgentMessageBubble";
 import { AgentToolCard } from "./AgentToolCard";
 import { AgentImageCard, type AgentImageCardProps } from "./AgentImageCard";
@@ -34,6 +34,8 @@ export interface AgentTranscriptProps {
   turnStatus?: string;
   /** 当前会话 id：透传给用户气泡的附件卡铸读取票。 */
   sessionId?: string | null;
+  /** 本机文件授权回传（缺陷 C）：工具卡三选一点击后带 scope＋root 走授权。 */
+  onAuthorizeLocalFiles?: (scope: AgentToolAuthScope, root?: string) => void | Promise<void>;
 }
 
 /** 從某元素往上找最近的滾動容器（overflow-y 可滾且內容超出）。 */
@@ -51,7 +53,7 @@ function findScrollParent(el: HTMLElement): HTMLElement | null {
   return null;
 }
 
-function AgentTranscriptComponent({ items, imageActions, videoActions, audioActions, sessionId, turnStatus }: AgentTranscriptProps) {
+function AgentTranscriptComponent({ items, imageActions, videoActions, audioActions, sessionId, turnStatus, onAuthorizeLocalFiles }: AgentTranscriptProps) {
   const listRef = useRef<HTMLOListElement>(null);
   // 滾動容器緩存：找到後不再每次 getComputedStyle 向上找。
   const scrollerRef = useRef<HTMLElement | null>(null);
@@ -90,7 +92,7 @@ function AgentTranscriptComponent({ items, imageActions, videoActions, audioActi
           case "tool":
             return (
               <li key={item.id}>
-                <AgentToolCard item={item} />
+                <AgentToolCard item={item} onAuthorize={onAuthorizeLocalFiles} />
               </li>
             );
           case "image":

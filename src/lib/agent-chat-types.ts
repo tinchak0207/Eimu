@@ -116,9 +116,45 @@ export interface AgentToolResult {
    * 处理，行为与旧格式逐位元一致（不带 = 照旧直接结算 ok，不是生成中）。
    */
   artifact_pending?: boolean;
+  /**
+   * 本機檔案授權請求（2026-10-04 缺陷 C）。`local_files` 讀取未授權路徑时，
+   * 裝置橋回 `{ok:false,error:{code:"needs_authorization",root,reason,options}}`；
+   * 这份载荷**必须**一路带到前端，否则卡片只能看到 ok 而误报「完成」。
+   */
+  action_required?: string;
+  /** 授权根（目录）；选项点击后带它回传。 */
+  auth_root?: string;
+  /** 三选一选项（允许一次／本会话允许此目录／永久允许）。 */
+  auth_options?: AgentToolAuthScope[];
+  /** 授权成因（人话，如「尚未授权」「安全文件受保护」）。 */
+  auth_reason?: string;
+  /**
+   * 二進位讀取偵測（2026-10-04 缺陷 D）：`read_file` 對二進位檔回 200 + 有損文字
+   * （含大量 U+FFFD）時，上游若帶這些欄位，前端據此**不得把亂碼當成功內容**呈現。
+   * 欄位缺席時前端另用 preview 的 U+FFFD 比例自行判定（見 detectBinaryText）。
+   */
+  binary?: boolean;
+  truncated?: boolean;
+  bytes_read?: number;
+  bytes_total?: number;
+  /** 內容片段（可選；有才拿來做二進位特徵偵測）。 */
+  preview?: string;
   /** gateway 附带的人类可读错误（G-FE 合同：中文短句优先渲染）。 */
-  error?: { code?: string; message?: string; human_message?: string };
+  error?: {
+    code?: string;
+    message?: string;
+    human_message?: string;
+    /** 结构化动作标记；`authorize_local_files` = 需要用户在卡片上选授权范围。 */
+    action_required?: string;
+    /** `needs_authorization` 时的授权根与三选一选项。 */
+    root?: string;
+    reason?: string;
+    options?: unknown;
+  };
 }
+
+/** 本机文件授权范围（与桌面/网关冻结契约逐字对齐）。 */
+export type AgentToolAuthScope = "once" | "session" | "permanent";
 
 /**
  * gateway —— 长耗时工具执行中进度（逐镜/逐项）。由工具每完成一个单元旁路上报，
@@ -443,6 +479,43 @@ function num(v: unknown): number | undefined {
   return typeof v === "number" && Number.isFinite(v) ? v : undefined;
 }
 
+/** 授权范围白名单（与桌面/网关冻结契约逐字对齐）。 */
+const AUTH_SCOPES: readonly AgentToolAuthScope[] = ["once", "session", "permanent"];
+
+/**
+ * 宽松解析授权三选一选项。上游可能送 `[{scope:"once"},…]`、`["once",…]` 或
+ * `{options:[{scope}]}`。只收白名单 scope、去重、保持契约顺序；解析不出 →
+ * 回预设三项（宁可让用户看到标准三选一，也不给一个点无可点的空壳）。
+ */
+export function parseAuthOptions(v: unknown): AgentToolAuthScope[] {
+  const raw = Array.isArray(v)
+    ? v
+    : v && typeof v === "object" && Array.isArray((v as { options?: unknown }).options)
+      ? ((v as { options: unknown[] }).options)
+      : [];
+  const seen = new Set<AgentToolAuthScope>();
+  for (const item of raw) {
+    const scope = typeof item === "string" ? item : str((item as { scope?: unknown })?.scope);
+    if (scope && (AUTH_SCOPES as readonly string[]).includes(scope)) seen.add(scope as AgentToolAuthScope);
+  }
+  return seen.size > 0 ? AUTH_SCOPES.filter((s) => seen.has(s)) : [];
+}
+
+/**
+ * 二進位偵測（2026-10-04 缺陷 D，純函式）：文字樣本中 U+FFFD（替換字元）比例。
+ * 二進位檔被當文字解碼 → 大量位元組落成 U+FFFD（實測 64KB 有 21,386 個）。
+ * 只要替換字元占比 ≥ 0.5%（且樣本 ≥ 64 字元）即判為二進位，**不得當成功內容呈現**。
+ * 這是呈現層的最後一道閘；真正的治本在 read_file（gateway/desktop）側。
+ */
+export function detectBinaryText(preview: string | undefined): boolean {
+  if (typeof preview !== "string" || preview.length < 64) return false;
+  let fffd = 0;
+  for (let i = 0; i < preview.length; i += 1) {
+    if (preview.charCodeAt(i) === 0xfffd) fffd += 1;
+  }
+  return fffd / preview.length >= 0.005;
+}
+
 /**
  * 寬鬆解析 string[]（turn.plan.experts）。非陣列 / 過濾後為空 → undefined
  * （呼叫方據此決定「不畫晶片」）；逐項非字串或空字串一律剔除，絕不 throw。
@@ -574,11 +647,26 @@ export function parseAgentSseEvent(name: string, rawData: string): AgentSseEvent
     case "tool.result": {
       const tool = str(d.tool);
       if (!tool) return null;
-      const rawErr = d.error as { human_message?: unknown; message?: unknown } | undefined;
+      const rawErr = d.error as
+        | { code?: unknown; human_message?: unknown; message?: unknown; action_required?: unknown; root?: unknown; reason?: unknown; options?: unknown }
+        | undefined;
       const error =
         rawErr && typeof rawErr === "object"
-          ? { code: str((rawErr as { code?: unknown }).code), message: str(rawErr.message), human_message: str(rawErr.human_message) }
+          ? {
+              code: str((rawErr as { code?: unknown }).code),
+              message: str(rawErr.message),
+              human_message: str(rawErr.human_message),
+              action_required: str((rawErr as { action_required?: unknown }).action_required),
+              root: str((rawErr as { root?: unknown }).root),
+              reason: str((rawErr as { reason?: unknown }).reason),
+              options: (rawErr as { options?: unknown }).options,
+            }
           : undefined;
+      // 授權載荷可能在 error 內，也可能在頂層（不同上游版本）；兩處都收。
+      const actionRequired = str(d.action_required) ?? error?.action_required;
+      const authRoot = str(d.auth_root) ?? error?.root;
+      const authReason = str(d.auth_reason) ?? error?.reason;
+      const authOptions = parseAuthOptions(d.auth_options ?? error?.options);
       return {
         name,
         event_id: eventId,
@@ -589,6 +677,15 @@ export function parseAgentSseEvent(name: string, rawData: string): AgentSseEvent
           task_id: str(d.task_id),
           artifact_pending: d.artifact_pending === true,
           error,
+          ...(actionRequired ? { action_required: actionRequired } : {}),
+          ...(authRoot ? { auth_root: authRoot } : {}),
+          ...(authReason ? { auth_reason: authReason } : {}),
+          ...(authOptions.length > 0 ? { auth_options: authOptions } : {}),
+          ...(d.binary === true ? { binary: true } : {}),
+          ...(d.truncated === true ? { truncated: true } : {}),
+          ...(num(d.bytes_read) !== undefined ? { bytes_read: num(d.bytes_read) } : {}),
+          ...(num(d.bytes_total) !== undefined ? { bytes_total: num(d.bytes_total) } : {}),
+          ...(str(d.preview) !== undefined ? { preview: str(d.preview) } : {}),
         },
       };
     }
@@ -1048,8 +1145,11 @@ export interface AgentToolCallItem extends TranscriptItemBase {
    * 卡片状态。`pending` 是**中继態：已提交、成品未到**（tool.result.artifact_pending）
    * —— 提交型生圖/生片工具在任務交出去的那一刻不再假報「已完成」，等
    * image/video/audio.done 或 image.failed 到了才转终态。
+   *
+   * `needs_auth`（2026-10-04 缺陷 C）＝**需要授权**的 action 態：`local_files`
+   * 未授權路徑回 needs_authorization，卡片必須停在「等用户选授权范围」，絕非「完成」。
    */
-  status: "running" | "pending" | "ok" | "failed";
+  status: "running" | "pending" | "ok" | "failed" | "needs_auth";
   /** 提交型工具的任務 id（tool.result.task_id 回填）：成品/失敗事件用它精確配對 pending 卡。 */
   taskId?: string;
   costCoins?: number;
@@ -1057,6 +1157,25 @@ export interface AgentToolCallItem extends TranscriptItemBase {
   error?: string;
   /** 执行中进度（tool.progress 回填）。仅 running 期有意义，终态后忽略。 */
   progress?: { done: number; total: number; label?: string };
+  /** 本機檔案授權請求载荷（status==="needs_auth" 时必填，供卡片渲染三选一）。 */
+  authorization?: AgentToolAuthorization;
+  /**
+   * 二進位讀取偵測（缺陷 D）：true 时卡片顯「这是二进制文件，无法当文字读」，
+   * 指向附件下載路徑，**不把乱码当成功内容**。
+   */
+  binary?: boolean;
+  /** 截斷資訊（依實際讀到的 bytes 與檔案 size 對比；上游帶才有）。 */
+  readBytes?: number;
+  totalBytes?: number;
+  truncated?: boolean;
+}
+
+/** 本機檔案授權請求载荷。 */
+export interface AgentToolAuthorization {
+  root?: string;
+  reason?: string;
+  actionRequired?: string;
+  options: AgentToolAuthScope[];
 }
 
 /** 出图结果。step 6 会在这张卡上挂「存图库／改图／放大／下载」。 */

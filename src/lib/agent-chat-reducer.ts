@@ -37,6 +37,7 @@ import {
   type AgentUserTurnItem,
   type AgentVideoItem,
 } from "./agent-chat-types";
+import { detectBinaryText, parseAuthOptions } from "./agent-chat-types";
 // 状态值域的唯一权威（0920 收口）：reducer 只在类型层引用该 union，分支逻辑不变。
 import type { AgentTaskStatus } from "./agent-task-status";
 
@@ -183,11 +184,37 @@ function reduceToolProgress(state: AgentChatState, event: AgentSseEvent & { name
 
 function reduceToolResult(state: AgentChatState, event: AgentSseEvent & { name: "tool.result" }): AgentChatState {
   const { tool, ok, cost_coins, task_id, artifact_pending, error } = event.data;
-  const errText = !ok ? error?.human_message ?? error?.message ?? undefined : undefined;
+  // 缺陷 C（2026-10-04）：本機檔案讀取未授權 ＝ needs_authorization。這**不是**
+  // 成功，也不是一般失敗——是等使用者在卡片上選授權範圍的 action 態。判定同時看
+  // error.code 與 action_required，避免上游只帶其一時語義寫反成「完成」。
+  const needsAuth =
+    error?.code === "needs_authorization" ||
+    error?.action_required === "authorize_local_files" ||
+    event.data.action_required === "authorize_local_files";
+  const authOptions = parseAuthOptions(event.data.auth_options);
+  const authorization = needsAuth
+    ? {
+        root: event.data.auth_root ?? error?.root,
+        reason: event.data.auth_reason ?? error?.reason,
+        actionRequired: error?.action_required ?? event.data.action_required,
+        options: authOptions,
+      }
+    : undefined;
+  // 缺陷 D（2026-10-04）：二進位讀取偵測——上游帶 binary 旗標或 preview 的
+  // U+FFFD 比例超標，都不得把乱码当成功内容呈現。
+  const binary = event.data.binary === true || detectBinaryText(event.data.preview);
+  const errText = !ok && !needsAuth ? error?.human_message ?? error?.message ?? undefined : undefined;
   // 终态映射（2026-09-18 契约）：ok + artifact_pending = 任務已提交、成品未到 →
   // 中继态 pending，绝不报「已完成」；成品/失敗事件到达时由 settlePendingToolItems
   // 结算成 ok/failed。缺 artifact_pending 的旧格式逐位元照旧走 ok。
-  const status: AgentToolCallItem["status"] = !ok ? "failed" : artifact_pending ? "pending" : "ok";
+  // needs_auth 优先于 ok：授权请求即使被上游标成 ok 也不得显示「完成」。
+  const status: AgentToolCallItem["status"] = needsAuth
+    ? "needs_auth"
+    : !ok
+      ? "failed"
+      : artifact_pending
+        ? "pending"
+        : "ok";
   // 卡片上只有 task_id 有值时才写：旧格式不凭空长出 taskId 栏位。
   const taskPatch = task_id !== undefined ? { taskId: task_id } : {};
   const items = state.items.slice();
@@ -204,7 +231,18 @@ function reduceToolResult(state: AgentChatState, event: AgentSseEvent & { name: 
   if (target >= 0) {
     const existing = items[target];
     if (existing.kind === "tool") {
-      items[target] = { ...existing, status, costCoins: cost_coins, error: errText, ...taskPatch };
+      items[target] = {
+        ...existing,
+        status,
+        costCoins: cost_coins,
+        error: errText,
+        ...(authorization ? { authorization } : {}),
+        ...(binary ? { binary: true } : {}),
+        ...(event.data.bytes_read !== undefined ? { readBytes: event.data.bytes_read } : {}),
+        ...(event.data.bytes_total !== undefined ? { totalBytes: event.data.bytes_total } : {}),
+        ...(event.data.truncated !== undefined ? { truncated: event.data.truncated } : {}),
+        ...taskPatch,
+      };
     }
   } else {
     items.push({
@@ -216,6 +254,11 @@ function reduceToolResult(state: AgentChatState, event: AgentSseEvent & { name: 
       status,
       costCoins: cost_coins,
       error: errText,
+      ...(authorization ? { authorization } : {}),
+      ...(binary ? { binary: true } : {}),
+      ...(event.data.bytes_read !== undefined ? { readBytes: event.data.bytes_read } : {}),
+      ...(event.data.bytes_total !== undefined ? { totalBytes: event.data.bytes_total } : {}),
+      ...(event.data.truncated !== undefined ? { truncated: event.data.truncated } : {}),
       ...taskPatch,
     });
   }

@@ -47,7 +47,7 @@ import {
   type AgentAttachment,
   type AgentThinkingLevel,
 } from "@/lib/agent-chat-client";
-import { MAX_VIDEO_BYTES, uploadAudioDirect, uploadVideoDirect } from "@/lib/agent-uploads";
+import { MAX_VIDEO_BYTES, UploadAbortedError, uploadAudioDirect, uploadVideoDirect } from "@/lib/agent-uploads";
 import type { AgentAttachmentRef } from "@/lib/agent-chat-types";
 import {
   LOCAL_FILE_MODES,
@@ -283,6 +283,16 @@ interface PendingAttachment {
   frames?: { url: string; label: string }[];
   /** 抽帧进度（0…FRAME_COUNT），仅 extracting 期间有意义。 */
   framesDone?: number;
+  /**
+   * 上行真实进度（0…1，来自 XHR upload.onprogress），仅 uploading 期间有意义。
+   * undefined＝尚无可信真值（如本机 ingest 阶段），此时不假造百分比。
+   */
+  progress?: number;
+  /**
+   * 原始 File 引用：错误／取消后「重试」要能原样重送，不必使用者重新选档。
+   * 只在 chip 生命周期内持有，不序列化、不进 [附件] 区块。
+   */
+  file?: File;
 }
 
 /**
@@ -928,18 +938,39 @@ function AgentComposerComponent({
     setAttachments((prev) => prev.map((a) => (a.id === id ? { ...a, ...patch } : a)));
   }, []);
 
+  /**
+   * 每颗 chip 在途上传的取消句柄（2026-10-04 缺陷 A）。取消钮／移除钮／重试都会
+   * abort 对应请求；结算（成功或失败）后清掉，避免泄漏。
+   */
+  const uploadAbortsRef = useRef<Map<string, AbortController>>(new Map());
+  const beginUpload = useCallback((id: string): AbortController => {
+    const controller = new AbortController();
+    uploadAbortsRef.current.set(id, controller);
+    return controller;
+  }, []);
+  const endUpload = useCallback((id: string): void => {
+    uploadAbortsRef.current.delete(id);
+  }, []);
+  /** 真实进度回调工厂：total>0 才报，绝不假造百分比。 */
+  const progressReporter = useCallback(
+    (id: string) => (loaded: number, total: number) => {
+      if (total > 0) patchAttachment(id, { progress: Math.min(1, loaded / total) });
+    },
+    [patchAttachment],
+  );
+
   /** 普通文件：原样上传。无降级链，逾时必须落明确错误终态给人话（不得永久 uploading）。 */
   const uploadPlainFile = useCallback(
-    async (session: string, id: string, file: File) => {
+    async (session: string, id: string, file: File, signal: AbortSignal) => {
       const uploaded: AgentAttachment[] = await withUploadDeadline(
-        uploadAgentAttachments(session, [file]),
+        uploadAgentAttachments(session, [file], { onProgress: progressReporter(id), signal }),
         PLAIN_UPLOAD_TIMEOUT_MS,
       );
       const first = uploaded[0];
       if (!first) throw new Error("上传结果为空。");
-      patchAttachment(id, { status: "ready", refs: [toAgentAttachmentRef(first)] });
+      patchAttachment(id, { status: "ready", refs: [toAgentAttachmentRef(first)], progress: 1 });
     },
-    [patchAttachment],
+    [patchAttachment, progressReporter],
   );
 
   /**
@@ -955,18 +986,19 @@ function AgentComposerComponent({
    * 與 ingest 的計劃層把關，原因直接顯示在 chip 上。
    */
   const uploadVideoFile = useCallback(
-    async (session: string, id: string, file: File) => {
+    async (session: string, id: string, file: File, signal: AbortSignal) => {
       const videoUrl = URL.createObjectURL(file);
-      // 任何路徑下原檔預覽都先可見；上傳中態與今天一致。
+      // 任何路径下原档预览都先可见；上传中态与今天一致。
       patchAttachment(id, { status: "uploading", videoUrl });
 
-      // 1) 本機前處理：契約上永不拋；這裡仍兜底成 null 走回退路徑。
+      // 1) 本机前处理：契约上永不抛；这里仍兜底成 null 走回退路径。
       let ingested: LocalMediaIngest | null = null;
       try {
         ingested = await ingestMediaLocally(file);
       } catch {
         ingested = null;
       }
+      if (signal.aborted) throw new UploadAbortedError();
 
       if (isIngestUsable(ingested)) {
         const frameUrls = ingested.keyframes.map((frame) => URL.createObjectURL(frame.blob));
@@ -977,39 +1009,52 @@ function AgentComposerComponent({
           }));
           patchAttachment(id, { status: "uploading", frames, framesDone: frames.length });
           const uploaded = await withUploadDeadline(
-            uploadAgentAttachments(session, toDerivedFiles(ingested, file.name)),
+            uploadAgentAttachments(session, toDerivedFiles(ingested, file.name), {
+              onProgress: progressReporter(id),
+              signal,
+            }),
             DERIVED_UPLOAD_TIMEOUT_MS,
           );
-          if (uploaded.length === 0) throw new Error("衍生檔上傳結果為空。");
+          if (uploaded.length === 0) throw new Error("衍生档上传结果为空。");
           patchAttachment(id, {
             status: "ready",
             refs: uploaded.map(toAgentAttachmentRef),
             videoUrl,
             frames,
+            progress: 1,
           });
           return;
-        } catch {
-          // 衍生檔上行失敗：釋放本機縮圖並清掉 frames，落回原檔路徑（不顯示錯誤）。
+        } catch (err) {
+          if (err instanceof UploadAbortedError) {
+            frameUrls.forEach((url) => URL.revokeObjectURL(url));
+            throw err;
+          }
+          // 衍生档上行失败：释放本机缩图并清掉 frames，落回原档路径（不显示错误）。
           frameUrls.forEach((url) => URL.revokeObjectURL(url));
           patchAttachment(id, { frames: undefined });
         }
       }
 
-      // 2) 回退：今天的第一條路——原片直傳網關。
+      // 2) 回退：今天的第一条路——原片直传网关。
       try {
         const ref = await withUploadDeadline(
-          uploadVideoDirect(session, file),
+          uploadVideoDirect(session, file, { onProgress: progressReporter(id), signal }),
           VIDEO_UPLOAD_TIMEOUT_MS,
         );
-        patchAttachment(id, { status: "ready", refs: [ref], videoUrl });
+        patchAttachment(id, { status: "ready", refs: [ref], videoUrl, progress: 1 });
         return;
       } catch (err) {
-        // 逾時必須落明確終態並給人話（不得留在 uploading）；其他直傳失敗
-        // （無票/401/413/415/網絡）照舊靜默落抽幀降級路徑，不把錯誤拋給用戶。
-        if (err instanceof UploadTimeoutError) throw err;
+        // 逾時必須落明確終態並給人話（不得留在 uploading）；取消同理直接上抛。
+        // 其他直傳失敗（無票/401/413/415/網絡）照舊靜默落抽幀降級路徑。
+        if (err instanceof UploadTimeoutError || err instanceof UploadAbortedError) throw err;
       }
 
       // 3) 直傳也失敗：既有抽幀降級路徑（行為與今天逐位一致）。
+      if (signal.aborted) {
+        URL.revokeObjectURL(videoUrl);
+        patchAttachment(id, { videoUrl: undefined });
+        throw new UploadAbortedError();
+      }
       let extracted: { files: File[]; timestamps: FrameTimestamp[] };
       try {
         patchAttachment(id, { status: "extracting", framesDone: 0 });
@@ -1030,30 +1075,30 @@ function AgentComposerComponent({
       patchAttachment(id, { status: "uploading", frames, framesDone: extracted.files.length });
 
       const uploaded = await withUploadDeadline(
-        uploadAgentAttachments(session, extracted.files),
+        uploadAgentAttachments(session, extracted.files, { onProgress: progressReporter(id), signal }),
         DERIVED_UPLOAD_TIMEOUT_MS,
       );
-      if (uploaded.length === 0) throw new Error("抽幀上傳結果為空。");
-      patchAttachment(id, { status: "ready", refs: uploaded.map(toAgentAttachmentRef) });
+      if (uploaded.length === 0) throw new Error("抽帧上传结果为空。");
+      patchAttachment(id, { status: "ready", refs: uploaded.map(toAgentAttachmentRef), progress: 1 });
     },
-    [patchAttachment],
+    [patchAttachment, progressReporter],
   );
 
   /**
-   * 音頻（真歌等本地參考素材）：原檔走**與影片同一條**網關票券直傳大檔路徑
-   * （uploadAudioDirect → POST /agent/v1/sessions/<id>/video-upload），繞開 Vercel
-   * 4.5MB 體上限，上限同網關 100MB。不做本機抽幀／降級鏈——音頻沒有可抽的幀；
-   * 失敗（無票／401／413／415／網路／逾時）由 enqueueFiles 的 job.catch 落人話錯誤 chip。
+   * 音频（真歌等本地参考素材）：原档走**与视频同一条**网关票券直传大档路径
+   * （uploadAudioDirect → POST /agent/v1/sessions/<id>/video-upload），绕开 Vercel
+   * 4.5MB 体上限，上限同网关 100MB。不做本机抽帧／降级链——音频没有可抽的帧；
+   * 失败（无票／401／413／415／网络／逾时／取消）由 enqueueFiles 的 job.catch 落人话错误 chip。
    */
   const uploadAudioFile = useCallback(
-    async (session: string, id: string, file: File) => {
+    async (session: string, id: string, file: File, signal: AbortSignal) => {
       const ref = await withUploadDeadline(
-        uploadAudioDirect(session, file),
+        uploadAudioDirect(session, file, { onProgress: progressReporter(id), signal }),
         VIDEO_UPLOAD_TIMEOUT_MS,
       );
-      patchAttachment(id, { status: "ready", refs: [ref] });
+      patchAttachment(id, { status: "ready", refs: [ref], progress: 1 });
     },
-    [patchAttachment],
+    [patchAttachment, progressReporter],
   );
 
   /**
@@ -1076,14 +1121,32 @@ function AgentComposerComponent({
               fileName: file.name,
               status: "error",
               errorMessage: "未能建立会话，请先登录或稍后重试。",
+              file,
             },
           ]);
         });
         return;
       }
 
+      // 缺陷 B 修复（2026-10-04）：重复附件去重。重复注入同一档会留下永远
+      // uploading 的第二颗 chip（上游幂等重送／同会话同档第二次直传不落地），
+      // hasPendingAttachments 因此永久为真 → 送出键永久 disabled（状态机死角）。
+      // 去重键＝文件名＋位元组数＋最后修改时刻（同名不同内容、同大小不同档都不会
+      // 被误合并）。已在途／已就绪的同键 chip 直接跳过；error／已取消的允许重加。
+      const existingKeys = new Set(
+        attachmentsRef.current
+          .filter((a) => a.status === "ready" || a.status === "uploading" || a.status === "extracting")
+          .map((a) => `${a.fileName}\u0000${a.file?.size ?? ""}\u0000${a.file?.lastModified ?? ""}`),
+      );
+      const batchKeys = new Set<string>();
+
       // 每个文件独立处理，各自的失败不拖累其他文件。
       Array.from(files).forEach((file) => {
+        // 去重：与既有在途/就绪 chip 或本批已受理的同键档重复 → 静默跳过。
+        const dedupKey = `${file.name}\u0000${file.size}\u0000${file.lastModified}`;
+        if (existingKeys.has(dedupKey) || batchKeys.has(dedupKey)) return;
+        batchKeys.add(dedupKey);
+
         const id = `att-${++attachmentSeq}`;
         // 罪状 2b：超限文件不上传，直接落一颗带人话文案的错误 chip。
         // 影片／音頻豁免 4MB 站内代理闸（原片走网关直传），改用网关的 100MB 上限。
@@ -1097,25 +1160,45 @@ function AgentComposerComponent({
               fileName: file.name,
               status: "error",
               errorMessage: `文件 ${formatMb(file.size)} MB 超过上限 ${formatMb(maxBytes)} MB，请压缩或拆分后再上传`,
+              file,
             },
           ]);
           return;
         }
-        setAttachments((prev) => [...prev, { id, fileName: file.name, status: "uploading" }]);
+        setAttachments((prev) => [...prev, { id, fileName: file.name, status: "uploading", progress: 0, file }]);
 
+        const controller = beginUpload(id);
         const job = isVideoFile(file)
-          ? uploadVideoFile(session, id, file)
+          ? uploadVideoFile(session, id, file, controller.signal)
           : isAudioFile(file)
-            ? uploadAudioFile(session, id, file)
-            : uploadPlainFile(session, id, file);
+            ? uploadAudioFile(session, id, file, controller.signal)
+            : uploadPlainFile(session, id, file, controller.signal);
 
-        job.catch((err) => {
-          const message = err instanceof Error ? err.message : "上传失败。";
-          patchAttachment(id, { status: "error", errorMessage: message });
-        });
+        job
+          .catch((err) => {
+            // 取消（使用者按取消／移除）＝中性「已取消」，不是失败红字；chip 留在
+            // 可重送态（不阻塞送出，有重试入口）。
+            if (err instanceof UploadAbortedError) {
+              patchAttachment(id, { status: "error", errorMessage: "已取消上传", progress: undefined });
+              return;
+            }
+            const message = err instanceof Error ? err.message : "上传失败。";
+            patchAttachment(id, { status: "error", errorMessage: message, progress: undefined });
+          })
+          .finally(() => endUpload(id));
       });
     },
-    [disabled, sessionId, onEnsureSession, uploadPlainFile, uploadVideoFile, uploadAudioFile, patchAttachment],
+    [
+      disabled,
+      sessionId,
+      onEnsureSession,
+      uploadPlainFile,
+      uploadVideoFile,
+      uploadAudioFile,
+      patchAttachment,
+      beginUpload,
+      endUpload,
+    ],
   );
 
   const handleFileInput = useCallback(
@@ -1143,12 +1226,44 @@ function AgentComposerComponent({
   }, [attachFilesRef, enqueueFiles]);
 
   const removeAttachment = useCallback((id: string) => {
+    // 移除＝取消在途请求（若还在传），否则 XHR 会在 chip 消失后继续跑。
+    uploadAbortsRef.current.get(id)?.abort();
+    uploadAbortsRef.current.delete(id);
     setAttachments((prev) => {
       const gone = prev.find((a) => a.id === id);
       if (gone) releaseUrls(gone);
       return prev.filter((a) => a.id !== id);
     });
   }, []);
+
+  /**
+   * 取消上传（缺陷 A）：中止在途 XHR，chip 落中性「已取消上传」态——不阻塞送出，
+   * 且因为 chip 保留 file 引用，带「重试」入口，chip 回到可重送状态。
+   */
+  const cancelAttachment = useCallback(
+    (id: string) => {
+      uploadAbortsRef.current.get(id)?.abort();
+      uploadAbortsRef.current.delete(id);
+      patchAttachment(id, { status: "error", errorMessage: "已取消上传", progress: undefined });
+    },
+    [patchAttachment],
+  );
+
+  /** 重试：拿 chip 上保留的原 File 重走同一条入队管道（不新增上传器）。 */
+  const retryAttachment = useCallback(
+    (id: string) => {
+      const gone = attachmentsRef.current.find((a) => a.id === id);
+      if (!gone?.file) return;
+      const file = gone.file;
+      setAttachments((prev) => {
+        const target = prev.find((a) => a.id === id);
+        if (target) releaseUrls(target);
+        return prev.filter((a) => a.id !== id);
+      });
+      void enqueueFiles([file]);
+    },
+    [enqueueFiles],
+  );
 
   // 罪状 2a：只附文件不打字，发送链路也要通——有已传成功的附件即具备发送资格。
   const readyRefs = attachments
@@ -1267,7 +1382,7 @@ function AgentComposerComponent({
 
   // 卸载时兜底释放：用户直接关掉聊天面板时不会走 removeAttachment。
   // 依赖空数组 + ref 读最新值，避免每次 attachments 变化都重挂 effect。
-  const attachmentsRef = useRef(attachments);
+  const attachmentsRef = useRef<PendingAttachment[]>([]);
   attachmentsRef.current = attachments;
   useEffect(() => {
     return () => {
@@ -1521,42 +1636,104 @@ function AgentComposerComponent({
         {/* 待发送附件 chip 行：成功 / 上传中 / 错误 三种状态都带移除按钮。 */}
         {attachments.length > 0 && (
           <div className="mb-1 flex flex-wrap gap-1.5">
-            {attachments.map((att) => (
-              <span
-                key={att.id}
-                className={cn(
-                  "inline-flex max-w-[14rem] items-center gap-1.5 rounded-full px-2.5 py-1 text-ios-caption1",
-                  att.status === "error" && "bg-destructive/10 text-destructive",
-                  att.status === "ready" &&
-                    "bg-ios-blue/10 text-muted-foreground",
-                  (att.status === "uploading" || att.status === "extracting") &&
-                    "bg-black/5 text-foreground/45",
-                )}
-              >
-                {(att.status === "uploading" || att.status === "extracting") && (
-                  <Loader2 className="h-3 w-3 shrink-0 animate-spin" aria-hidden="true" />
-                )}
-                <span className="truncate" title={att.errorMessage ?? att.fileName}>
-                  {att.status === "error" && att.errorMessage
-                    ? `${att.fileName}：${att.errorMessage}`
-                    : att.fileName}
-                </span>
-                {/* 抽帧进度用文字给，不另起进度条：一行 chip 装不下也没必要。 */}
-                {att.status === "extracting" && (
-                  <span className="shrink-0 tabular-nums" aria-live="polite">
-                    抽帧 {att.framesDone ?? 0}/{FRAME_COUNT}
-                  </span>
-                )}
-                <button
-                  type="button"
-                  onClick={() => removeAttachment(att.id)}
-                  aria-label={`移除 ${att.fileName}`}
-                  className="shrink-0 rounded-full p-2 text-current transition-colors hover:bg-black/[0.08] active:bg-black/[0.14] focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 touch-manipulation [-webkit-tap-highlight-color:transparent]"
+            {attachments.map((att) => {
+              const inFlight = att.status === "uploading" || att.status === "extracting";
+              const pct =
+                att.status === "uploading" && att.progress !== undefined
+                  ? Math.round(att.progress * 100)
+                  : null;
+              return (
+                <span
+                  key={att.id}
+                  className={cn(
+                    "inline-flex max-w-[14rem] items-center gap-1.5 rounded-full px-2.5 py-1 text-ios-caption1",
+                    att.status === "error" && "bg-destructive/10 text-destructive",
+                    att.status === "ready" &&
+                      "bg-ios-blue/10 text-muted-foreground",
+                    inFlight && "bg-black/5 text-foreground/45",
+                  )}
                 >
-                  <X className="h-3.5 w-3.5" aria-hidden="true" />
-                </button>
-              </span>
-            ))}
+                  {inFlight && (
+                    <Loader2 className="h-3 w-3 shrink-0 animate-spin" aria-hidden="true" />
+                  )}
+                  <span className="truncate" title={att.errorMessage ?? att.fileName}>
+                    {att.status === "error" && att.errorMessage
+                      ? `${att.fileName}：${att.errorMessage}`
+                      : att.fileName}
+                  </span>
+                  {/* 上传真实进度（XHR upload.onprogress 位元组真值）：拿不到真值就不编数字。 */}
+                  {pct !== null && (
+                    <span className="shrink-0 tabular-nums" aria-live="polite">
+                      {pct}%
+                    </span>
+                  )}
+                  {/* 抽帧进度用文字给：一行 chip 装不下也没必要另起进度条。 */}
+                  {att.status === "extracting" && (
+                    <span className="shrink-0 tabular-nums" aria-live="polite">
+                      抽帧 {att.framesDone ?? 0}/{FRAME_COUNT}
+                    </span>
+                  )}
+                  {/* 失败／取消且有原档 → 重试入口（重走同一条上传管道）。 */}
+                  {att.status === "error" && att.file && (
+                    <button
+                      type="button"
+                      onClick={() => retryAttachment(att.id)}
+                      className="shrink-0 rounded-full px-1.5 py-0.5 font-medium text-ios-blue transition-colors hover:bg-ios-blue/[0.12] focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 touch-manipulation [-webkit-tap-highlight-color:transparent]"
+                    >
+                      重试
+                    </button>
+                  )}
+                  {/* 在途 → 取消钮：中止请求，chip 回可重送态、送出键恢复。 */}
+                  {inFlight && (
+                    <button
+                      type="button"
+                      onClick={() => cancelAttachment(att.id)}
+                      aria-label={`取消上传 ${att.fileName}`}
+                      className="shrink-0 rounded-full px-1.5 py-0.5 font-medium text-foreground/60 transition-colors hover:bg-black/[0.08] focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 touch-manipulation [-webkit-tap-highlight-color:transparent]"
+                    >
+                      取消
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => removeAttachment(att.id)}
+                    aria-label={`移除 ${att.fileName}`}
+                    className="shrink-0 rounded-full p-2 text-current transition-colors hover:bg-black/[0.08] active:bg-black/[0.14] focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30 touch-manipulation [-webkit-tap-highlight-color:transparent]"
+                  >
+                    <X className="h-3.5 w-3.5" aria-hidden="true" />
+                  </button>
+                </span>
+              );
+            })}
+          </div>
+        )}
+
+        {/*
+          真实上传进度条（缺陷 A）：细 3px 灰轨 + 蓝填充，宽度＝XHR 真实位元组比例
+          （绝不用假动画时间条）。只对拿得到真值的 uploading 项渲染；role=progressbar
+          带真实 valuenow/valuemax，不虚报。
+        */}
+        {attachments.some((att) => att.status === "uploading" && att.progress !== undefined) && (
+          <div className="mb-1.5 flex flex-col gap-1">
+            {attachments
+              .filter((att) => att.status === "uploading" && att.progress !== undefined)
+              .map((att) => {
+                const pct = Math.round((att.progress ?? 0) * 100);
+                return (
+                  <div key={`progress-${att.id}`} className="flex min-w-0 flex-col gap-0.5">
+                    <div
+                      className="h-[3px] w-full overflow-hidden rounded-full bg-black/[0.06]"
+                      role="progressbar"
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={pct}
+                      aria-label={`${att.fileName} 上传进度`}
+                    >
+                      <div className="lg-transition h-full rounded-full bg-ios-blue" style={{ width: pct + "%" }} />
+                    </div>
+                  </div>
+                );
+              })}
           </div>
         )}
 

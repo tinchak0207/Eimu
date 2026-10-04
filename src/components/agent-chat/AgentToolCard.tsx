@@ -1,24 +1,31 @@
 "use client";
 
-import { memo, type ComponentType, type ReactNode } from "react";
+import { memo, useState, type ComponentType, type ReactNode } from "react";
 import {
   Bot,
   Check,
   Clapperboard,
   Coins,
+  FileWarning,
   Image as ImageIcon,
   LayoutGrid,
   Loader2,
+  Lock,
   Search,
   Wrench,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { AgentToolCallItem } from "@/lib/agent-chat-types";
+import type { AgentToolAuthScope, AgentToolCallItem } from "@/lib/agent-chat-types";
 import { taskStatusTone } from "@/lib/agent-task-status";
 import { AgentParamDisclosure } from "./AgentParamDisclosure";
 
 export interface AgentToolCardProps {
   item: AgentToolCallItem;
+  /**
+   * 本機檔案授權回傳（缺陷 C）：使用者點選三選一後，帶 scope＋root 走授權。
+   * 未接線時按鈕保持 disabled（與 imageActions 同款漸進增強契約）。
+   */
+  onAuthorize?: (scope: AgentToolAuthScope, root?: string) => void | Promise<void>;
 }
 
 type RowIcon = ComponentType<{ className?: string; "aria-hidden"?: boolean | "true" | "false" }>;
@@ -108,6 +115,9 @@ const STATUS_META: Record<AgentToolCallItem["status"], ToolRowStatusMeta> = {
   // 失败没有状态图标：红色状态词 + 行下的错误原文（error）已经说清楚，
   // 再来一个红叉是同一句话说三遍。
   failed: { word: "失败", wordTone: "text-ios-red" },
+  // 需要授权（缺陷 C）：action 態——不是成功也不是失败。锁图标（不转圈）＋蓝字，
+  // 卡片下方列出三选一供点击；绝不显示「完成」。
+  needs_auth: { word: "需要授权", wordTone: "text-ios-blue", Icon: Lock, iconTone: "text-ios-blue/70" },
 };
 
 /** 展示用的金币数：整数原样，浮点去掉多余尾巴。 */
@@ -134,6 +144,8 @@ const TOOL_TITLES: Record<string, string> = {
   todowrite: "更新任务清单",
   todoread: "查看任务清单",
   question: "向你提问",
+  local_files: "读取本机文件",
+  local_files_authorize: "授权本机文件",
   skill: "载入技能",
   task: "派发子任务",
   patch: "应用补丁",
@@ -289,23 +301,31 @@ export function toolArgPreview(args: string): string | undefined {
   return humanize(t.split("\n")[0]);
 }
 
-function AgentToolCardComponent({ item }: AgentToolCardProps) {
+const AUTH_SCOPE_LABELS: Record<AgentToolAuthScope, string> = {
+  once: "允许一次",
+  session: "本会话允许此目录",
+  permanent: "永久允许（加入本机授权清单）",
+};
+
+function AgentToolCardComponent({ item, onAuthorize }: AgentToolCardProps) {
   const status = STATUS_META[item.status];
   const running = item.status === "running";
   // 图标转圈：running（工具自身在执行）与 pending（任务已提交、成品在路上）
   // 都是「还在跑」，都转 —— 停在静止图标上等于谎报已结束。转不转由语义表的
   // pending 色调（进行中）裁决，不再各自字面比较。
-  const spinning = taskStatusTone(item.status).tone === "pending";
+  // needs_auth 例外：它是 action 態（等用户选），不是还在跑，锁图标不转圈。
+  const spinning = taskStatusTone(item.status).tone === "pending" && item.status !== "needs_auth";
   // 执行中进度：只有 running 且网关回了 tool.progress 才有。终态后忽略（不冒充还在跑）。
   // pending 没有进度帧（进度是工具内部的计数，提交出去后由成品事件定案），不得假造。
   const progress = running ? item.progress : undefined;
   const pct = progress ? Math.min(100, Math.round((progress.done / progress.total) * 100)) : 0;
   // F2：默认渲染只有人话——人话标题；函数名与完整参数进展开抽屉。
-  // 参数摘要与币数都不在行内：行只说「哪个动作、什么状态」，细节点行进抽屉
-  // （2026-09-20 對版預覽，币数与 key-value 细目同住展开面板）。
   const displayName = toolDisplayName(item.tool);
   const ToolIcon = toolRowIcon(item.tool);
   const StatusIcon = status.Icon;
+  // 授权三选一：按下后短转圈，防连点／防重复授权。
+  const [authBusy, setAuthBusy] = useState<AgentToolAuthScope | null>(null);
+  const options = item.authorization?.options ?? [];
   // 没有参数 = 没有抽屉。这时候已结算的币数仍然要看得见：网关可能把
   // tool.invoke 弄丢（只补发 tool.result），花出去的钱不许凭空消失。
   const panelMounted = item.argsSummary !== undefined;
@@ -418,6 +438,79 @@ function AgentToolCardComponent({ item }: AgentToolCardProps) {
         <p className="ml-[22px] break-words rounded-xl bg-destructive/10 px-2.5 py-1.5 text-ios-caption1 leading-relaxed text-destructive [overflow-wrap:anywhere]">
           {item.error}
         </p>
+      )}
+
+      {/* 需要授权（缺陷 C）：把 needs_authorization 渲染成 action 態，列出三选一供点击。
+          三件事必须同时成立：① 语义说「需要授权」而非「完成」；② 明说尚未读到文件；
+          ③ 三个 scope 选项可点，点击带 scope＋root 走授权。 */}
+      {item.status === "needs_auth" && (
+        <div className="ml-[22px] flex flex-col gap-2 rounded-[12px] bg-ios-blue/[0.06] p-2.5">
+          <div className="flex items-start gap-2">
+            <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ios-blue" aria-hidden="true" />
+            <div className="min-w-0 flex-1">
+              <p className="text-ios-footnote font-medium text-foreground/75">需要授权才能读取本机文件</p>
+              {item.authorization?.root && (
+                <p className="mt-0.5 break-words text-ios-caption1 text-foreground/55 [overflow-wrap:anywhere]">
+                  路径：{item.authorization.root}
+                </p>
+              )}
+              {item.authorization?.reason && (
+                <p className="mt-0.5 break-words text-ios-caption1 text-foreground/55 [overflow-wrap:anywhere]">
+                  {item.authorization.reason}
+                </p>
+              )}
+              <p className="mt-0.5 text-ios-caption1 text-foreground/45">尚未读取任何文件；选择授权范围后才会读取。</p>
+            </div>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            {(options.length > 0 ? options : (["once", "session", "permanent"] as AgentToolAuthScope[])).map((scope) => (
+              <button
+                key={scope}
+                type="button"
+                disabled={onAuthorize === undefined || authBusy !== null}
+                onClick={() => {
+                  if (onAuthorize === undefined || authBusy !== null) return;
+                  setAuthBusy(scope);
+                  Promise.resolve(onAuthorize(scope, item.authorization?.root)).catch(() => {
+                    setAuthBusy(null);
+                  });
+                }}
+                className={cn(
+                  "flex min-h-9 w-full items-center justify-center gap-1.5 rounded-full border border-ios-blue/30 bg-white/60 px-3 text-ios-footnote font-medium text-ios-blue transition-colors",
+                  "hover:bg-ios-blue/[0.10] active:scale-[0.99]",
+                  "focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/30",
+                  "disabled:cursor-not-allowed disabled:opacity-50",
+                  "touch-manipulation [-webkit-tap-highlight-color:transparent]",
+                )}
+              >
+                {authBusy === scope && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
+                {AUTH_SCOPE_LABELS[scope]}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 二進位读取（缺陷 D）：绝不把亂碼当成功内容呈現——明说是二进制、指向下载路径。
+          truncated 依「实际读到 bytes vs 文件 size」对比，不虚报未截断。 */}
+      {item.binary && (
+        <div className="ml-[22px] flex flex-col gap-1 rounded-[12px] bg-amber-500/[0.10] p-2.5">
+          <div className="flex items-start gap-2">
+            <FileWarning className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" aria-hidden="true" />
+            <div className="min-w-0 flex-1">
+              <p className="text-ios-footnote font-medium text-foreground/80">这是二进制文件，无法当文字读取</p>
+              <p className="mt-0.5 break-words text-ios-caption1 text-foreground/55 [overflow-wrap:anywhere]">
+                请改用附件下载查看原始内容；直接按文字读只会得到乱码。
+              </p>
+              {(item.readBytes !== undefined || item.totalBytes !== undefined) && (
+                <p className="mt-0.5 text-ios-caption1 tabular-nums text-foreground/45">
+                  已读 {item.readBytes ?? "?"} / 文件 {item.totalBytes ?? "?"} 字节
+                  {item.truncated === true ? "（已截断）" : item.truncated === false ? "" : ""}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
