@@ -93,6 +93,7 @@ import {
   buildMusicPreferenceQuestion,
   type MusicTakeFeature,
 } from "./music_take_entropy"
+import { WORKSPACE, checkAgentPath, looksLikeAgentPath } from "./sandbox"
 
 // ── plumbing（ok/fail/resolveKey 同構 director-common.ts） ───────────────────
 
@@ -204,6 +205,122 @@ function asString(v: unknown): string | undefined {
 function stripDataUrlPrefix(raw: string): string {
   const commaIndex = raw.lastIndexOf(",")
   return commaIndex >= 0 ? raw.slice(commaIndex + 1).trim() : raw.trim()
+}
+
+// ── source_audio 輸入解析：接受工作區檔案路徑（2026-10-04 本地參考音檔接線）─────────
+//
+// 背景：source_audio 原本只吃 base64／data: 前綴，模型得把幾 MB 音檔塞進工具參數，實務上
+// 做不到。使用者附件其實已落盤在 agent 工作區 uploads/<session>/，工具端本來就能讀檔
+// （既有流程已把 base64 寫成暫存檔餵 ffprobe）。故在此把「路徑」統一解析成純 base64，
+// 下游扒譜／生成／計費流程一行不動。
+//
+// 判定順序 fail-loud（不靜默忽略）：
+//   ① data: 前綴 → 剝前綴當 base64；
+//   ② http(s):// → 本輪不支援，明確報錯（不靜默忽略）；
+//   ③ 看似路徑 → **必須**經 checkAgentPath 沙箱白名單（realpath 落 workspace 子樹＋
+//      uploads 只放行本會話），通過才讀檔；越權路徑一律 path_denied；
+//   ④ 其餘 → 視為裸 base64。
+// 檔案大小上限沿用既有讀檔/音訊上限語義（20MB，同 read_image）；超限明確報錯並說出
+// 實際大小與上限，**絕不靜默截斷**（截斷後的音訊＝扒譜垃圾）。
+
+/** 源音檔檔案大小上限（同 read_image 的 20MB 讀檔口徑）。 */
+export const MAX_SOURCE_AUDIO_BYTES = 20 * 1024 * 1024
+
+export type SourceAudioResolution = {
+  /** 純 base64（無 data: 前綴，餵 transcribeYue2Score）。 */
+  base64: string
+  /** 來源種類（除錯/回執用，非契約欄位）。 */
+  source: "base64" | "data_url" | "workspace_file"
+  /** 讀檔時的音檔位元組數（base64/data: 來源為 undefined）。 */
+  bytes?: number
+  /** 讀檔時的原始路徑（僅 workspace_file）。 */
+  path?: string
+}
+
+export type SourceAudioResolveResult =
+  | { ok: true; value: SourceAudioResolution }
+  | { ok: false; code: string; message: string }
+
+/**
+ * 把 source_audio 的原始輸入（base64／data:／工作區路徑）解析成純 base64。
+ * 純函數語義外的唯一副作用＝讀檔（路徑分支時，且已過沙箱閘）。錯誤一律回結構化 code/message，
+ * 由呼叫端轉 fail()（不 throw，保持工具 ok/fail 契約）。
+ */
+export async function resolveSourceAudio(raw: string, sessionId: string | undefined): Promise<SourceAudioResolveResult> {
+  const s = raw.trim()
+  if (/^https?:\/\//i.test(s)) {
+    return {
+      ok: false,
+      code: "invalid_args",
+      message:
+        "source_audio 本轮不支持 http(s) 音频 URL。请改用工作区内的音频文件路径（用户上传的参考音频就在 uploads/<session>/ 下，直接传该路径即可），或直接传音频 base64／data: 前缀。",
+    }
+  }
+  if (/^data:/i.test(s)) {
+    return { ok: true, value: { base64: stripDataUrlPrefix(s), source: "data_url" } }
+  }
+  if (!looksLikeAgentPath(s)) {
+    return { ok: true, value: { base64: stripDataUrlPrefix(s), source: "base64" } }
+  }
+  // 看似路徑 → 必須經沙箱白名單閘（不得繞過、不得讀工作區外的檔）。
+  const verdict = checkAgentPath(s, sessionId ?? "")
+  if (!verdict.ok) {
+    const reasonText: Record<string, string> = {
+      outside_workspace: "路径不在创作工作区内",
+      internal_state: "路径是平台内部状态目录，不对创作任务开放",
+      internal_config: "路径是平台内部配置文件，不对创作任务开放",
+      uploads_root: "不能指向全部上传目录",
+      foreign_upload: "该附件不属于当前会话",
+    }
+    return {
+      ok: false,
+      code: "path_denied",
+      message: `source_audio 路径被沙箱拒绝（${reasonText[verdict.reason] ?? verdict.reason}）：${s}。只能读本会话可见的音频文件（推荐 uploads/<session>/ 下的附件），或直接传音频 base64。`,
+    }
+  }
+  const absPath = nodePath.resolve(WORKSPACE, s)
+  const limitMb = MAX_SOURCE_AUDIO_BYTES / 1024 / 1024
+  let stat: Awaited<ReturnType<typeof fsp.stat>>
+  try {
+    stat = await fsp.stat(absPath)
+  } catch (e) {
+    const errno = (e as NodeJS.ErrnoException)?.code ?? (e as Error)?.message ?? String(e)
+    return {
+      ok: false,
+      code: "source_audio_read_failed",
+      message: `source_audio 读取失败：无法访问文件 ${s}（${errno}）。请确认路径存在且是音频文件，或改传音频 base64。`,
+    }
+  }
+  if (!stat.isFile()) {
+    return {
+      ok: false,
+      code: "source_audio_read_failed",
+      message: `source_audio 读取失败：${s} 不是文件（是目录或其他类型）。请指向具体音频文件。`,
+    }
+  }
+  if (stat.size > MAX_SOURCE_AUDIO_BYTES) {
+    return {
+      ok: false,
+      code: "source_audio_too_large",
+      message: `source_audio 文件过大：${(stat.size / 1024 / 1024).toFixed(2)} MB，上限 ${limitMb} MB。请先压缩或裁剪源音频后再传（本工具绝不静默截断——截断后的音频会让扒谱失真）。`,
+    }
+  }
+  let buf: Buffer
+  try {
+    buf = await fsp.readFile(absPath)
+  } catch (e) {
+    const errno = (e as NodeJS.ErrnoException)?.code ?? (e as Error)?.message ?? String(e)
+    return { ok: false, code: "source_audio_read_failed", message: `source_audio 读取失败：${s}（${errno}）。` }
+  }
+  if (buf.byteLength > MAX_SOURCE_AUDIO_BYTES) {
+    // stat 與 read 之間檔案變大（競態）；讀後複核同樣 fail-loud。
+    return {
+      ok: false,
+      code: "source_audio_too_large",
+      message: `source_audio 文件过大：${(buf.byteLength / 1024 / 1024).toFixed(2)} MB，上限 ${limitMb} MB（读取后复核，绝不静默截断）。`,
+    }
+  }
+  return { ok: true, value: { base64: buf.toString("base64"), source: "workspace_file", bytes: buf.byteLength, path: s } }
 }
 
 // ── 時長實測（ffprobe；同 audio_first_timeline 片4 先例） ─────────────────────
@@ -648,7 +765,7 @@ function buildToolPrompt(rawPrompt: string, hasLyrics: boolean): string {
 export const musicGenTool: MusicToolDef = {
   id: "music_gen",
   description:
-    "调用 Lyria／FlowMusic2API／YuE2 生成音乐（主题曲/插曲/配乐）。整歌或快速生成，返回音频 URL、时长与歌词回显；YuE2 通路另返回可编辑的白盒 ABC 乐谱 score_abc（可二次精修），且支持带谱重渲染——传入 abc（自备/已编辑的 ABC 乐谱）＋cot_mode 即以该乐谱为约束重新生成录音（乐谱编辑＝改和弦/改谱后重渲染出新版本，仅 YuE2 通路有效），或传入 source_audio（源音频 base64，可带 data: 前缀）走翻唱工作流——先自动扒谱（SheetSage2 提取旋律骨干）再以新风格重新演绎（cot_mode 缺省 melody＝官方翻唱模式，伴奏自由适配新风格；显式传 full 则保留原曲和声重渲染）。无歌词时按纯器乐处理；需要人声必须提供歌词。写歌词前先传 probe=true 做免费通路体检（不生成、不计费），确认 can_generate_vocal_song 再动笔。通路由环境配置固定（优先序 YuE2 > FlowMusic2API > Gemini Lyria 直连），三通路能力有差异，见各参数说明。",
+    "调用 Lyria／FlowMusic2API／YuE2 生成音乐（主题曲/插曲/配乐）。整歌或快速生成，返回音频 URL、时长与歌词回显；YuE2 通路另返回可编辑的白盒 ABC 乐谱 score_abc（可二次精修），且支持带谱重渲染——传入 abc（自备/已编辑的 ABC 乐谱）＋cot_mode 即以该乐谱为约束重新生成录音（乐谱编辑＝改和弦/改谱后重渲染出新版本，仅 YuE2 通路有效），或传入 source_audio（源音频：base64／data: 前缀／工作区文件路径——推荐直接传附件路径 uploads/<session>/ref.mp3）走翻唱工作流——先自动扒谱（SheetSage2 提取旋律骨干）再以新风格重新演绎（cot_mode 缺省 melody＝官方翻唱模式，伴奏自由适配新风格；显式传 full 则保留原曲和声重渲染）。无歌词时按纯器乐处理；需要人声必须提供歌词。写歌词前先传 probe=true 做免费通路体检（不生成、不计费），确认 can_generate_vocal_song 再动笔。通路由环境配置固定（优先序 YuE2 > FlowMusic2API > Gemini Lyria 直连），三通路能力有差异，见各参数说明。",
   args: {
     probe: {
       type: "boolean",
@@ -699,7 +816,7 @@ export const musicGenTool: MusicToolDef = {
       type: "string",
       required: false,
       description:
-        "翻唱工作流：源音频 base64（可选，可带 data: 前缀，仅 YuE2 通路有效）。传入即走翻唱——先自动扒谱（SheetSage2 从源音频提取旋律骨干 ABC，回执 transcribed_abc_sha256/transcribe_warnings 如实回报），再以 prompt 描述的新风格重新演绎（cot_mode 缺省 melody＝官方翻唱模式：只保留旋律骨干，伴奏自由适配新风格）。与 abc 参数互斥（一个要现扒谱、一个已自备乐谱，同传报错）。其他通路（FlowMusic2API／Gemini Lyria）不支持翻唱，传了会直接报错（不静默忽略）；扒谱/生成失败也直接报错不回落（翻唱语义不可被无谱通路顶替）。",
+        "翻唱工作流：源音频（可选，仅 YuE2 通路有效）。三种给法：①工作区内的音频文件路径（推荐——用户上传的参考音频就在 uploads/<session>/ 下，直接传该路径即可，无需自己读成几 MB 的 base64）；②音频 base64；③data: 前缀的 base64（data:audio/mpeg;base64,…）。本轮不支持 http(s) 音频 URL（传了会明确报错）。传入即走翻唱——先自动扒谱（SheetSage2 从源音频提取旋律骨干 ABC，回执 transcribed_abc_sha256/transcribe_warnings 如实回报），再以 prompt 描述的新风格重新演绎（cot_mode 缺省 melody＝官方翻唱模式：只保留旋律骨干，伴奏自由适配新风格）。源音频文件上限 20MB（超限明确报错并说明实际大小，绝不静默截断）；路径必须落在工作区内并经沙箱白名单校验（越权路径报 path_denied）。传 source_audio 前建议先 probe=true 做免费通路体检，确认 YuE2 可用再动。与 abc 参数互斥（一个要现扒谱、一个已自备乐谱，同传报错）。其他通路（FlowMusic2API／Gemini Lyria）不支持翻唱，传了会直接报错（不静默忽略）；扒谱/生成失败也直接报错不回落（翻唱语义不可被无谱通路顶替）。",
     },
   },
   async execute(rawArgs, context) {
@@ -750,6 +867,14 @@ export const musicGenTool: MusicToolDef = {
           "invalid_args",
           "source_audio 与 abc 互斥：source_audio＝现场扒谱（从源音频提取旋律骨干），abc＝已自备/已编辑的乐谱，两者同传语义冲突。请只传其一。",
         )
+      }
+      // 本地參考音檔接線（2026-10-04）：base64／data:／工作區檔案路徑統一解析成純 base64。
+      // 越權路徑（沙箱閘拒）、http(s) URL、超限檔在此 fail-loud，之後流程零改動。
+      let sourceAudioBase64: string | undefined
+      if (sourceAudioRaw) {
+        const resolved = await resolveSourceAudio(sourceAudioRaw, context?.sessionId)
+        if (!resolved.ok) return fail(resolved.code, resolved.message)
+        sourceAudioBase64 = resolved.value.base64
       }
       // cot_mode 缺省：常規＝full；翻唱（帶 source_audio）＝melody（官方翻唱模式：
       // 只保留旋律骨幹、伴奏自由適配新風格）；顯式傳 full 也允許＝保留原和聲的重渲染。
@@ -856,7 +981,7 @@ export const musicGenTool: MusicToolDef = {
         let transcribed: Awaited<ReturnType<typeof transcribeYue2Score>>
         try {
           transcribed = await transcribeYue2Score({
-            audioBase64: stripDataUrlPrefix(sourceAudioRaw),
+            audioBase64: sourceAudioBase64 ?? stripDataUrlPrefix(sourceAudioRaw),
             melodyOnly: true,
           })
         } catch (e) {

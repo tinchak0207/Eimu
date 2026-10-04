@@ -21,6 +21,7 @@ import {
   ensureSessionDirs,
   filterForeignUploads,
   hasOwner,
+  looksLikeAgentPath,
   redactSecrets,
   stripForgedAuthorityTokens,
   sandboxAvailable,
@@ -85,7 +86,7 @@ function boundMap<K, V>(map: Map<K, V>, max: number): void {
   if (oldest !== undefined) map.delete(oldest)
 }
 
-const PATH_TOOLS: Record<string, { keys: string[]; listing: boolean }> = {
+const PATH_TOOLS: Record<string, { keys: string[]; listing: boolean; pathLike?: boolean }> = {
   read: { keys: ["filePath"], listing: false },
   write: { keys: ["filePath"], listing: false },
   edit: { keys: ["filePath"], listing: false },
@@ -101,6 +102,11 @@ const PATH_TOOLS: Record<string, { keys: string[]; listing: boolean }> = {
   // 生產實錘：用戶上傳 my-image.png 後 read_image 回 path_denied）。
   read_image: { keys: ["image_path"], listing: false },
   run_py: { keys: ["stdin_path"], listing: false },
+  // music_gen 的 source_audio 自 2026-10-04 起也可传工作区文件路径（本地参考音档直接喂翻唱），
+  // 故同樣要在這裡水合 owner，否則工具內的 checkAgentPath 對本會話自己的附件也一律 fail-closed。
+  // pathLike=true：該參數可同時是 base64（不是路徑），只對「看似路徑」的值跑閘——避免對 MB 級
+  // base64 做逐段 realpath/existsSync 解析（性能）與無謂拒收。工具內仍會再跑一次 checkAgentPath。
+  music_gen: { keys: ["source_audio"], listing: false, pathLike: true },
 }
 
 const DENY_MESSAGE: Record<string, string> = {
@@ -269,6 +275,8 @@ export const EimuGuard: Plugin = async ({ client }) => {
           const v = args[k]
           if (k === "path" && (v === undefined || v === "")) continue // 空 path = 工作區根：放行（輸出端再剔除他租戶）
           if (typeof v !== "string") continue
+          // pathLike 參數（music_gen.source_audio）可能是 base64——只對看似路徑的值跑閘。
+          if (spec.pathLike && !looksLikeAgentPath(v)) continue
           const verdict = checkAgentPath(v, input.sessionID, { listing: spec.listing })
           if (!verdict.ok) throw new Error(DENY_MESSAGE[verdict.reason] ?? "该路径不可访问。")
         }

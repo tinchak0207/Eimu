@@ -113,6 +113,22 @@ export function checkAgentPath(rawPath: string | undefined, sessionID: string, o
   return { ok: true }
 }
 
+/**
+ * 值是否「看似檔案路徑」——供同時可收 base64／URL／路徑的參數（music_gen.source_audio，
+ * 2026-10-04 本地參考音檔接線）決定是否進 checkAgentPath。純 base64 字母表的值（含 + / =）
+ * 不算路徑：避免對 MB 級 base64 逐段 realpath/existsSync 解析（性能）與無謂拒收；
+ * data:/http(s) 前綴同樣不是檔案路徑（各自走 base64／明確報錯分支）。
+ * 注意：本函數只做**分類**，不是路徑安全閘——真正放行/拒絕一律仍由 checkAgentPath 決定。
+ */
+export function looksLikeAgentPath(v: string): boolean {
+  const s = (v ?? "").trim()
+  if (!s) return false
+  if (/^data:/i.test(s) || /^https?:\/\//i.test(s)) return false
+  if (s.startsWith("/") || s.startsWith("./") || s.startsWith("../") || s.startsWith("~/") || s.startsWith("uploads/")) return true
+  if (/^[A-Za-z0-9+/=\r\n]+$/.test(s)) return false
+  return true
+}
+
 // ── SSRF 閘（C2）：擋私網/loopback/link-local/雲 metadata；只允許 http(s) 公網 ──
 // 各雲 metadata 主機名（Tencent/Ali/Azure 用主機名而非 169.254 字面量，字串黑名單必須顯式列）。
 const BLOCKED_HOST_RE =
