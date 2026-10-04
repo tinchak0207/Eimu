@@ -18,6 +18,16 @@ export interface EimuShellApi {
   isMaximized(): Promise<boolean>;
   /** 订阅最大化状态变化，回传退订函式（卸载时务必呼叫）。 */
   onMaximizeChange(callback: (maximized: boolean) => void): () => void;
+  /**
+   * 0.3.2+：订阅「更新已下载、待重启套用」，回传退订函式。payload 为 `{ version }`。
+   * 旧壳（0.1.0～0.3.1）没有此方法 ⇒ 逐次判 `typeof` 存在再呼叫。
+   */
+  onUpdateReady?(callback: (info: { version?: string }) => void): () => void;
+  /**
+   * 0.3.2+：套用已下载的更新并重启（主进程 updater.js applyUpdate）。
+   * 旧壳没有此方法 ⇒ 逐次判 `typeof` 存在再呼叫。
+   */
+  applyUpdate?(): void;
 }
 
 declare global {

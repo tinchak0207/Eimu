@@ -20,6 +20,7 @@ import { cn } from "@/lib/utils";
 import { isStandalonePwa, createHandoffLogin } from "@/lib/github-login";
 import { DesktopDownloadButton } from "@/components/DesktopDownloadButton";
 import { WindowControls } from "@/components/WindowControls";
+import { ShellUpdatePrompt } from "@/components/ShellUpdatePrompt";
 import { PwaHandoffPanel } from "@/components/PwaHandoffPanel";
 import { QqGroupDialog } from "@/components/QqGroupDialog";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
@@ -533,6 +534,11 @@ export function Navbar({ className }: NavbarProps) {
                 githubBusy={loginPhase === "drawing" ? "正在连接 GitHub…" : null}
               />
             )}
+
+            {/* 桌面壳「更新已就绪」提示（0.3.2+ 壳才有 update-ready）：下载完成后
+                以产品语言告知并给一个「重启更新」动作，点击即 applyUpdate。仅壳内、
+                且壳暴露了更新 API 时渲染；普通浏览器／旧壳回 null。详见 ShellUpdatePrompt.tsx。 */}
+            <ShellUpdatePrompt />
 
             {/* 桌面壳自订视窗控制（最小化／最大化·还原／关闭），右簇最末端——
                 与原生视窗钮原位置语义一致。仅壳内渲染（window.eimuShell 存在时），
