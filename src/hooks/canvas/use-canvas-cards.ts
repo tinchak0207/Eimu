@@ -23,6 +23,7 @@ import type { CharacterCard } from "@/lib/character-cards";
 import { CARD_NAME_KEYS, toCardMetadataName } from "@/lib/canvas/layout";
 import { emittedCardsForNodes, emittedEntityOf, entityCardIdForNode } from "@/lib/agent-output-cards";
 import type { AgentOutputNodeRef, EmittedCardsResult, ShotEntityBackfill } from "@/lib/agent-output-cards";
+import { invalidateEntityCardIndex } from "@/components/entities/entity-chip";
 
 export interface UseCanvasCardsInput {
   /**
@@ -383,6 +384,12 @@ export function useCanvasCards(options: UseCanvasCardsInput = {}) {
         const res = await fetchCharacterCardsRemote();
         if (res.ok && res.data) setCharacterCards(res.data);
       }
+      // 掛用與解除掛用共用這條出口，兩者都在伺服器端動了卡庫：
+      // `mountProjectAsset` 以伺服器端 saveCharacterCard 建出副本卡、`unmountProjectAsset` 刪掉它。
+      // 這個出口是面板在伺服器回應成功後才呼叫的（失敗分支不會走到這裡），故在此發號；
+      // 否則剛掛用的副本卡名以 `@[角色:名]` 引用時膠囊會顯示紅虛線「未找到」，
+      // 而解除掛用後已刪的副本卡膠囊會停在「已解析」（該紅卻不紅）。
+      invalidateEntityCardIndex();
       setActiveCardIds((prev) => applyCopyLockChange(prev, { locked, unlocked }));
     },
     [],

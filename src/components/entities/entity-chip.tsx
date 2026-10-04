@@ -17,13 +17,16 @@
 import { useEffect, useState } from "react";
 import { AudioLines, Box, HelpCircle, Mountain, Palette, UserRound } from "lucide-react";
 import { listCharacterCards } from "@/lib/character-card-client";
+import { bumpCharacterCardIndexRevision, getCharacterCardIndexRevision } from "@/lib/character-card-index";
 import { CHARACTER_CARD_KIND_LABEL, type CharacterCard, type CharacterCardKind } from "@/lib/character-cards";
 import { parseEntityTokens, resolveEntityTokenKind } from "@/lib/entity-tokens";
 import { cn } from "@/lib/utils";
 
 // ─────────────────────────── 卡庫索引（模組級一次載入，跨元件共用）
 
-let cardIndexPromise: Promise<Map<string, CharacterCard>> | null = null;
+// 帶修訂號的快取：號碼與資料層現值不同 = 快取過期，重載。
+// 呼叫端不必記得失效——資料層存/刪成功後自動發號，這裡憑號碼判斷。
+let cardIndexCache: { revision: number; promise: Promise<Map<string, CharacterCard>> } | null = null;
 
 function indexKey(kind: CharacterCardKind, name: string): string {
   return `${kind}\u0000${name.trim()}`;
@@ -32,19 +35,33 @@ function indexKey(kind: CharacterCardKind, name: string): string {
 /**
  * 卡庫索引：`kind|name` → 卡。整頁只載一次（promise 去重），失敗靜默降級成空索引——
  * 卡是「順手引用」的增強，載不到不該讓聊天或畫布壞掉。
+ * 快取連同當下的修訂號一起記下；號碼變了（資料層存/刪過卡）就重新發請求。
  */
 function loadCardIndex(): Promise<Map<string, CharacterCard>> {
-  if (!cardIndexPromise) {
-    cardIndexPromise = (async () => {
-      const res = await listCharacterCards();
-      const map = new Map<string, CharacterCard>();
-      // CanvasClientResult 的 ok 不是 discriminated union：成功分支仍要自證 data 存在。
-      const cards = res.ok ? res.data : undefined;
-      if (cards) for (const card of cards) map.set(indexKey(card.kind, card.name), card);
-      return map;
-    })().catch(() => new Map<string, CharacterCard>());
-  }
-  return cardIndexPromise;
+  const revision = getCharacterCardIndexRevision();
+  const cached = cardIndexCache;
+  if (cached && cached.revision === revision) return cached.promise;
+
+  const attempt = (async () => {
+    const res = await listCharacterCards();
+    const cards = res.ok ? res.data : undefined;
+    // CanvasClientResult 的 ok 不是 discriminated union：成功分支仍要自證 data 存在。
+    if (!cards) throw new Error("card_index_unavailable");
+    const map = new Map<string, CharacterCard>();
+    for (const card of cards) map.set(indexKey(card.kind, card.name), card);
+    return map;
+  })();
+
+  const promise = attempt.catch(() => new Map<string, CharacterCard>());
+  // 先同步賦值（在任何 await 之前），保留「同一 tick 多顆膠囊只發一次請求」的同步去重。
+  cardIndexCache = { revision, promise };
+  // 失敗（未登入／網路／伺服器）不留在快取：留著的話，空索引會連同當前修訂號被鎖死，
+  // 掃碼登入這種「不換頁就換身分」的路徑會一路顯示未找到，直到存/刪卡或整頁重載。
+  // attempt 與 promise 各自掛 handler：attempt 的 rejection 由 promise 消化，故不會 unhandled。
+  void attempt.catch(() => {
+    if (cardIndexCache?.promise === promise) cardIndexCache = null;
+  });
+  return promise;
 }
 
 /** 訂閱卡庫索引（首次載入後全樹共用同一份 map）。 */
@@ -62,9 +79,14 @@ function useEntityCardIndex(): Map<string, CharacterCard> {
   return index;
 }
 
-/** 卡庫變動後（存卡/刪卡）呼叫，讓下次渲染重載——不強制即刻重繪既有膠囊。 */
+/**
+ * 強制下次載入重取卡庫索引（不強制即刻重繪既有膠囊）。
+ *
+ * 資料層（character-card-client）存/刪成功後已會自動發號，展示層憑號碼判定過期，
+ * 一般呼叫端因此不必再手動失效；這個名字只保留給「需要立刻作廢目前快取」的場合。
+ */
 export function invalidateEntityCardIndex(): void {
-  cardIndexPromise = null;
+  bumpCharacterCardIndexRevision();
 }
 
 // ─────────────────────────── 種類視覺（左側那一格）
@@ -149,7 +171,7 @@ export function EntityChip({ kindLabel, name, className }: EntityChipProps) {
       }
       className={cn(
         "lg-float mx-[1px] inline-flex max-w-[200px] items-center gap-1 rounded-full px-1.5 py-[1px] align-[-3px]",
-        "text-[12.5px] leading-[1.5]",
+        "text-ios-caption1 leading-[1.5]",
         unresolved && "border-dashed border-ios-red/35",
         className,
       )}
@@ -232,7 +254,7 @@ export function EntityThumbStack({ entities, className }: { entities: { kindLabe
           </span>
         );
       })}
-      {rest > 0 ? <span className="ml-1 text-[10.5px] font-medium text-foreground/45">+{rest}</span> : null}
+      {rest > 0 ? <span className="ml-1 text-ios-caption2 font-medium text-foreground/45">+{rest}</span> : null}
     </span>
   );
 }

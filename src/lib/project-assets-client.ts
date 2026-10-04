@@ -3,6 +3,7 @@
 // 認證頭復用 canvas/client 的 authHeaders，行為模式對齊 character-card-client：
 // 不 throw 認證錯，回 { ok:false, reason }——資產庫面板未登入時安靜降級。
 import { authHeaders, type CanvasClientResult } from "@/lib/canvas/client";
+import { invalidateEntityCardIndex } from "@/components/entities/entity-chip";
 import type { AssetKind, AssetLibraryItem, AssetShareRecord } from "@/lib/asset-scope";
 import type { AssetPack } from "@/lib/asset-pack-store";
 import type { CharacterCard } from "@/lib/character-cards";
@@ -203,9 +204,13 @@ export async function assignAssetScope(input: {
   if (!listed.ok) return { ok: false, reason: listed.reason, message: listed.message };
   const card = (listed.data ?? []).find((c) => c.id === input.assetId);
   if (!card) return { ok: false, reason: "server", message: "资产卡不存在" };
-  return request<true>(
+  const saved = await request<true>(
     "/api/character-cards",
     { method: "POST", body: JSON.stringify({ ...card, scope }) },
     (json) => ((json as { success?: unknown })?.success === true ? true : undefined),
   );
+  // 這支改的是卡的 scope（卡庫內容變了），但不經 character-card-client，故不會自動發號；
+  // 成功才發（失敗分支已由上面的 listed 檢查與這裡的 !ok 提早返回）。
+  if (saved.ok) invalidateEntityCardIndex();
+  return saved;
 }

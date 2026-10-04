@@ -79,7 +79,7 @@ export function SaveCardDialog({ entry, onClose, onDone }: SaveCardDialogProps) 
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(31,34,48,0.45)] p-4 backdrop-blur-md"
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-[rgba(31,34,48,0.45)] p-4 backdrop-blur-md"
       onClick={onClose}
     >
       <div
@@ -103,7 +103,7 @@ export function SaveCardDialog({ entry, onClose, onDone }: SaveCardDialogProps) 
             type="button"
             onClick={onClose}
             aria-label="关闭"
-            className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-[rgba(0,0,0,0.44)] transition-colors hover:bg-black/5 hover:text-[rgba(0,0,0,0.72)] focus:outline-none focus:ring-2 focus:ring-[rgba(0,122,255,0.20)]"
+            className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-[rgba(0,0,0,0.44)] transition-colors hover:bg-black/5 hover:text-[rgba(0,0,0,0.72)] focus:outline-none focus:ring-2 focus:ring-ring/20"
           >
             <X className="h-4 w-4" />
           </button>
@@ -123,7 +123,7 @@ export function SaveCardDialog({ entry, onClose, onDone }: SaveCardDialogProps) 
                 className={cn(
                   "flex cursor-pointer flex-col items-center gap-0.5 rounded-ios-xl px-2 py-2.5",
                   "text-ios-footnote font-medium transition-colors duration-200",
-                  "focus:outline-none focus:ring-2 focus:ring-[rgba(0,122,255,0.20)]",
+                  "focus:outline-none focus:ring-2 focus:ring-ring/20",
                   active
                     ? "bg-ios-blue/[0.12] text-[#007AFF]"
                     : "bg-[rgba(0,0,0,0.05)] text-[rgba(0,0,0,0.62)] hover:bg-[rgba(0,0,0,0.09)]",
@@ -150,7 +150,7 @@ export function SaveCardDialog({ entry, onClose, onDone }: SaveCardDialogProps) 
               if (event.key === "Enter") void handleSubmit();
             }}
             placeholder="给这张卡起个名字"
-            className="mt-1.5 w-full rounded-ios-xl border border-black/10 bg-white/70 px-3 py-2.5 text-ios-footnote text-foreground placeholder:text-[rgba(0,0,0,0.35)] focus:border-[rgba(0,122,255,0.45)] focus:outline-none focus:ring-2 focus:ring-[rgba(0,122,255,0.20)]"
+            className="mt-1.5 w-full rounded-ios-xl border border-black/10 bg-white/70 px-3 py-2.5 text-ios-footnote text-foreground placeholder:text-[rgba(0,0,0,0.35)] focus:border-[rgba(0,122,255,0.45)] focus:outline-none focus:ring-2 focus:ring-ring/20"
           />
         </label>
 
@@ -164,7 +164,7 @@ export function SaveCardDialog({ entry, onClose, onDone }: SaveCardDialogProps) 
           <button
             type="button"
             onClick={onClose}
-            className="cursor-pointer rounded-ios-xl bg-[rgba(0,0,0,0.05)] px-4 py-2.5 text-ios-footnote font-medium text-[rgba(0,0,0,0.62)] transition-colors hover:bg-[rgba(0,0,0,0.09)] focus:outline-none focus:ring-2 focus:ring-[rgba(0,122,255,0.20)]"
+            className="cursor-pointer rounded-ios-xl bg-[rgba(0,0,0,0.05)] px-4 py-2.5 text-ios-footnote font-medium text-[rgba(0,0,0,0.62)] transition-colors hover:bg-[rgba(0,0,0,0.09)] focus:outline-none focus:ring-2 focus:ring-ring/20"
           >
             取消
           </button>
@@ -175,7 +175,7 @@ export function SaveCardDialog({ entry, onClose, onDone }: SaveCardDialogProps) 
             className={cn(
               "rounded-ios-xl bg-[#007AFF] px-4 py-2.5 text-ios-footnote font-medium text-white",
               "shadow-[0_4px_12px_rgba(0,122,255,0.32)] transition-all duration-200",
-              "hover:bg-[#0066D6] active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-[rgba(0,122,255,0.30)]",
+              "hover:bg-[#0066D6] active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-ring/30",
               saving && "cursor-wait opacity-70 active:scale-100",
               !saving && "cursor-pointer",
             )}

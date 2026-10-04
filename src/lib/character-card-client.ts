@@ -4,6 +4,7 @@
 // 行為模式對齊 canvas/client：不 throw 認證錯，回 { ok:false, reason }——
 // 卡是「順手鎖定」的配置，未登入時安靜降級，不擋畫布創作。
 import { authHeaders, type CanvasClientResult } from "@/lib/canvas/client";
+import { bumpCharacterCardIndexRevision } from "@/lib/character-card-index";
 import type { CharacterCard } from "@/lib/character-cards";
 
 async function request<T>(
@@ -49,17 +50,19 @@ export function listCharacterCards(): Promise<CanvasClientResult<CharacterCard[]
 }
 
 /** 存一張卡（upsert by id）。 */
-export function saveCharacterCard(card: CharacterCard): Promise<CanvasClientResult<true>> {
-  return request<true>(
+export async function saveCharacterCard(card: CharacterCard): Promise<CanvasClientResult<true>> {
+  const res = await request<true>(
     "/api/character-cards",
     { method: "POST", body: JSON.stringify(card) },
     (json) => ((json as { success?: unknown })?.success === true ? true : undefined),
   );
+  if (res.ok) bumpCharacterCardIndexRevision();
+  return res;
 }
 
 /** 刪若干卡。 */
-export function deleteCharacterCards(ids: string[]): Promise<CanvasClientResult<number>> {
-  return request<number>(
+export async function deleteCharacterCards(ids: string[]): Promise<CanvasClientResult<number>> {
+  const res = await request<number>(
     "/api/character-cards",
     { method: "DELETE", body: JSON.stringify({ ids }) },
     (json) => {
@@ -67,4 +70,6 @@ export function deleteCharacterCards(ids: string[]): Promise<CanvasClientResult<
       return typeof n === "number" ? n : 0;
     },
   );
+  if (res.ok) bumpCharacterCardIndexRevision();
+  return res;
 }
