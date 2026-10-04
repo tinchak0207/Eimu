@@ -10,7 +10,7 @@ import { mkdir } from "node:fs/promises"
 import type { MemoryDocLite } from "./types-gateway.ts"
 import { WORKSPACE_DIR, TTS_AUDIO_DIR, UPLOADS_DIR, VIDEO_UPLOAD_MAX_BYTES, VIDEO_UPLOAD_EXTS } from "./constants-gateway.ts"
 import { jsonError, getBearer } from "./gw-lib.ts"
-import { isLoopback, validateApiKey, resolveCanonicalKey, redeemUploadTicket, issueUploadTicket, UPLOAD_TICKET_TTL_MS, SSE_TICKET_TTL_MS } from "./auth-gw.ts"
+import { isLoopback, validateApiKey, resolveCanonicalKey, resolveCanonicalIdentity, redeemUploadTicket, issueUploadTicket, UPLOAD_TICKET_TTL_MS, SSE_TICKET_TTL_MS } from "./auth-gw.ts"
 import { sessions, markDirty, getOwnedSession, resolveSession, issueSseTicket, redeemSseTicket, handleDeleteSession } from "./sessions-core.ts"
 import { normalizeUserSettings, USER_SETTINGS_ENUMS, handleGetSession, handleGetSessionMessages, type UserSettingsShape } from "./sessions-http.ts"
 import { loadUserSettings, saveUserSettings, listSessionRows, setRowTitle } from "./persistence.ts"
@@ -33,7 +33,7 @@ import { handleQuota } from "./quota-ledger.ts"
 import { handleCanvasStateRead, handleTimelineRoutes, handleConfirmStatus, handleResumeSession, handleSessionKey, handleSessionTasks, handleOptimizePrompt, handleExtractLessons } from "./internal-http.ts"
 import { handleMemoryBatchRunInternal, handleMemoryTrace, handleMemoryRecallSearch, MEMORY_PRIVATE_DOCS_MAX } from "./memory-wiring.ts"
 // W6a（2026-10-04）：裝置橋雲端側（本機 daemon 出站註冊／取件）。總開關 EIMU_DEVICE_BRIDGE，預設 OFF。
-import { deviceBridgeEnabled, handleDeviceBridgeRoutes } from "./device-bridge.ts"
+import { deviceBridgeEnabled, handleDeviceBridgeRoutes, handleInternalDeviceInvoke, handleInternalDeviceStatus } from "./device-bridge.ts"
 // TODO(整合 Wave3)：以下符號同波在建（questions-gw/session-read/quota-ledger/internal-http/
 // memory-wiring.ts），bun build 對 named import 硬查（未 export 即報錯），故先 declare 佔位
 // （第一階段佔位符法，記憶 gateway-index-refactor-stage1-0919）；整合 subagent 統一換真 import。
@@ -54,6 +54,21 @@ import { deviceBridgeEnabled, handleDeviceBridgeRoutes } from "./device-bridge.t
 // TODO(來自 memory-wiring.ts；原 index.ts:7351) handleMemoryRecallSearch
 // TODO(整合)：MEMORY_PRIVATE_DOCS_MAX 仍住 index.ts:6883（const 未 export，補 export 後改真 import，
 // session-lifecycle.ts 已用同款佔位）。
+
+/**
+ * W6a（2026-10-04）：裝置橋內部路由的 session → 租戶解析。
+ * 與 `/internal/media/upload` **同源**的 session 解析（`resolveSession` → `subagentParentState`
+ * 兜底子會話），owner 由既有正典化身分路徑 `resolveCanonicalIdentity(session.apiKey)` 取得
+ * （與裝置註冊時 `tenant = u:<userId>` 的推導同源，不自造第二套）。解析不到回 `null`。
+ */
+async function internalDeviceResolveTenant(sessionId: string): Promise<string | null> {
+  const state = resolveSession(sessionId) ?? subagentParentState(sessionId)
+  if (!state) return null
+  const key = typeof state.apiKey === "string" ? state.apiKey : ""
+  if (!key) return null
+  const identity = await resolveCanonicalIdentity(key)
+  return identity.userId == null ? null : `u:${identity.userId}`
+}
 
 export async function handleRequest(req: Request, srv: { requestIP: (r: Request) => { address: string } | null }): Promise<Response> {
   {
@@ -181,6 +196,16 @@ export async function handleRequest(req: Request, srv: { requestIP: (r: Request)
       // 素材入庫：opencode video_upload 工具經此把外部影片/音頻下載進平台存儲。
       if (req.method === "POST" && pathname === "/internal/media/upload") {
         return handleMediaUpload(req)
+      }
+      // W6a（2026-10-04）：裝置橋**內部**入口。agent 工具跑在 opencode-server（同機
+      // loopback），只知道 session_id、不持有裝置憑證；由 session 解析租戶 → 挑該租戶
+      // 唯一在線裝置 → 轉發既有 invoke。本路由只**尋址與轉發**，denylist／授權根／
+      // 工具白名單三道防線全在既有 invoke/sanitizeToolArgs 內，不放寬任何檢查。
+      if (req.method === "POST" && pathname === "/internal/device/invoke") {
+        return handleInternalDeviceInvoke(req, { resolveTenant: internalDeviceResolveTenant })
+      }
+      if (req.method === "GET" && pathname === "/internal/device/status") {
+        return handleInternalDeviceStatus(req, { resolveTenant: internalDeviceResolveTenant })
       }
       // 子代理运行时：派发 + 工具轮询取件（loopback，鉴权同其他 internal 端点）。
       if (req.method === "POST" && pathname === "/internal/subagent/dispatch") {

@@ -31,7 +31,9 @@
 
 const { app, BrowserWindow, shell, session, dialog, Menu, screen, ipcMain } = require("electron");
 const path = require("node:path");
-const { startDeviceBridge, stopDeviceBridge } = require("./device-bridge-client.js");
+const fs = require("node:fs");
+const localWorker = require("./local-worker.js");
+const { startDeviceBridge, stopDeviceBridge, getDeviceBridgeState } = require("./device-bridge-client.js");
 const { readCredentialStore } = require("./lib/bridge-credential.js");
 const {
   registerWindowControlsIpc,
@@ -72,18 +74,72 @@ if (E2E_ENABLED && process.env.EIMU_APP_ORIGIN) {
   }
 }
 
-// W6b：device bridge 殼內指示。連線**預設 OFF**；只有使用者明確開啟
-// （EIMU_DEVICE_BRIDGE=1 且能取得憑證）才連。開啟狀態以視窗標題可見化。
-let bridgeState = { status: "off", enabled: false };
-const BRIDGE_ACTIVE = new Set(["online", "reconnecting"]);
+// W6b／W6c：device bridge 殼內指示。連線**預設 OFF**；只有使用者明確開啟
+// （持久化設定 deviceBridgeEnabled，或以 EIMU_DEVICE_BRIDGE=1 操作者覆寫）
+// 且已有授權根、能取得憑證才連。開啟狀態以視窗標題可見化，並把狀態推給頁面
+// （window.eimuLocal.onBridgeStatus 訂閱 eimu-local:bridge-state）。
+let bridgeState = { enabled: false, state: "off", roots: [], deviceId: null };
+// 控制器已把客戶端的 "reconnecting" 正規化為 "connecting"，故這裡收 connecting。
+const BRIDGE_ACTIVE = new Set(["online", "connecting"]);
 
 function applyBridgeIndicator() {
   if (!mainWindow) return;
-  const on = BRIDGE_ACTIVE.has(bridgeState.status);
+  const on = BRIDGE_ACTIVE.has(bridgeState.state);
   mainWindow.setTitle(on ? "Eimu · 本機檔案橋接已開啟" : "Eimu");
 }
 
+/** 狀態變更：更新標題指示，並推給所有視窗的頁面。 */
+function broadcastBridgeStatus(status) {
+  if (status && typeof status === "object") bridgeState = status;
+  applyBridgeIndicator();
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win || win.isDestroyed()) continue;
+    try {
+      win.webContents.send(localWorker.CHANNELS.bridgeEvent, bridgeState);
+    } catch {
+      /* 單一視窗傳送失敗不影響其他視窗 */
+    }
+  }
+}
+
 let mainWindow = null;
+
+// ── 使用者設定持久化（<userData>/settings.json）─────────────────────────
+// 只讀寫白名單欄位：
+//   - deviceBridgeEnabled: boolean        使用者是否開啟本機檔案授權
+//   - deviceBridgeGatewayBaseUrl: string  使用者顯式設定的閘道位址（可選）
+// **不**持久化 apiKey：憑證只從 <userData>/device-bridge.json（0600）讀，
+// 頁面不可寫（見上方 bridge 註解與 lib/bridge-credential.js）。
+function settingsFilePath() {
+  return path.join(app.getPath("userData"), "settings.json");
+}
+
+function readSettings() {
+  const out = {};
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(settingsFilePath(), "utf8"));
+  } catch {
+    return out; // 不存在／壞 JSON＝預設（橋 OFF），不影響殼啟動
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return out;
+  if (typeof parsed.deviceBridgeEnabled === "boolean") out.deviceBridgeEnabled = parsed.deviceBridgeEnabled;
+  if (typeof parsed.deviceBridgeGatewayBaseUrl === "string") {
+    out.deviceBridgeGatewayBaseUrl = parsed.deviceBridgeGatewayBaseUrl;
+  }
+  return out;
+}
+
+function writeSettings(next) {
+  try {
+    fs.mkdirSync(path.dirname(settingsFilePath()), { recursive: true });
+    fs.writeFileSync(settingsFilePath(), JSON.stringify(next, null, 2), { mode: 0o600 });
+    return true;
+  } catch (err) {
+    console.warn(`[eimu-shell] 設定寫入失敗：${err && err.code ? err.code : "error"}`);
+    return false;
+  }
+}
 
 function isAppUrl(rawUrl) {
   try {
@@ -277,7 +333,7 @@ function createWindow() {
   // W6b：bridge 開啟時，避免遠端頁面的 <title> 覆蓋掉殼內的「已開啟」指示。
   // 未開啟時不攔（既有行為完全不變）。
   mainWindow.on("page-title-updated", (event) => {
-    if (BRIDGE_ACTIVE.has(bridgeState.status)) {
+    if (BRIDGE_ACTIVE.has(bridgeState.state)) {
       event.preventDefault();
       applyBridgeIndicator();
     }
@@ -296,6 +352,12 @@ function createWindow() {
       return;
     }
     item.setSavePath(savePath);
+  });
+
+  // W6c：頁面載入完成時補推一次當前 bridge 狀態，避免頁面訂閱（onBridgeStatus）
+  // 晚於啟動推送而永遠收不到初始狀態。用既有廣播（含標題指示）即可。
+  mainWindow.webContents.on("did-finish-load", () => {
+    broadcastBridgeStatus(bridgeState);
   });
 
   void mainWindow.loadURL(APP_ORIGIN);
@@ -326,9 +388,54 @@ if (!gotLock) {
       callback(allowedPermissions.has(permission));
     });
 
-    // W3：註冊本機媒體工人（preload 暴露的 window.eimuLocal 之主進程側）。
-    // 每個 handler 自行驗 senderFrame origin 與逐次路徑授權；未授權路徑一律拒。
-    require("./local-worker").registerLocalWorker({ appHosts: APP_HOSTS });
+    // W6b／W6c：device bridge（雲端 agent 經本機**出站**連線讀已授權檔案）。
+    //
+    // 憑證**不由頁面注入**——殼載入的是遠端頁面，讓頁面能把憑證交給主進程等於多開
+    // 一條 remote→local 信任路徑。改讀使用者自己放在 <userData>/device-bridge.json
+    // 的檔案（必須 0600）：沒有那個檔、JSON 壞、權限過寬，一律回 null ⇒ 橋停在
+    // credentials_unavailable。讀取規則見 lib/bridge-credential.js，啟用步驟見
+    // desktop/DEVICE-BRIDGE.md。
+    const bridgeCredential = readCredentialStore(path.join(app.getPath("userData"), "device-bridge.json"), {
+      onWarn: (reason) => console.warn(`[device-bridge] ${reason}`),
+    });
+    const settings = readSettings();
+    // 閘道位址優先序：env 覆寫 > 使用者設定 > 憑證檔自帶 > 客戶端預設。
+    const resolveGatewayBaseUrl = () =>
+      process.env.EIMU_GATEWAY_BASE_URL || settings.deviceBridgeGatewayBaseUrl || bridgeCredential?.gatewayBaseUrl;
+
+    // 生命週期編排（可重入）在 local-worker.createBridgeController：這裡只做依賴注入。
+    // 好處：「授權根變更→以新 roots 重註冊」可在純 node 下以間諜 client 驗（*.test.js），
+    // 不必啟動 Electron（本檔頂層呼叫 app API，無法在 node 下 require）。
+    const bridgeController = localWorker.createBridgeController({
+      startBridge: (opts) => startDeviceBridge(opts),
+      stopBridge: () => stopDeviceBridge(),
+      getClientState: () => getDeviceBridgeState(),
+      readEnabled: () => settings.deviceBridgeEnabled === true,
+      writeEnabled: (v) => {
+        settings.deviceBridgeEnabled = v === true;
+        writeSettings(settings);
+      },
+      getGatewayBaseUrl: resolveGatewayBaseUrl,
+      credentialProvider: () => (bridgeCredential ? bridgeCredential.apiKey : null),
+      onStatusChange: (s) => broadcastBridgeStatus(s),
+    });
+
+    // W3／W6c：註冊本機媒體工人（preload 暴露的 window.eimuLocal 之主進程側，含
+    // device bridge 四個新 API）。每個 handler 自行驗 senderFrame origin 與逐次路徑授權。
+    localWorker.registerLocalWorker({ appHosts: APP_HOSTS, bridgeController });
+
+    // W6b 啟動：以持久化設定（或 EIMU_DEVICE_BRIDGE=1 操作者覆寫）決定「已開啟意圖」。
+    // env 覆寫保留既有 E2E／操作者路徑，且**不**寫回設定檔。無授權根時控制器停在
+    // no_authorized_roots；之後 pickFiles 授權新根會自動以新 roots 重註冊（見 local-worker）。
+    const envBridgeOverride = process.env.EIMU_DEVICE_BRIDGE === "1";
+    bridgeController.setEnabledSilently(envBridgeOverride || settings.deviceBridgeEnabled === true);
+    if (envBridgeOverride || settings.deviceBridgeEnabled === true) {
+      void bridgeController.restart().catch(() => {
+        /* 啟動失敗不得影響殼啟動 */
+      });
+    } else {
+      broadcastBridgeStatus(bridgeController.status()); // 讓頁面收到初始 off 狀態
+    }
 
     // 0.3.0：自繪視窗控制鈕的 IPC（preload 暴露的 window.eimuShell 之主進程側）。
     // 登記一次即可；目標視窗以 event.sender 反查，非全域 mainWindow。
@@ -342,29 +449,6 @@ if (!gotLock) {
     initUpdater({ getWindow: () => mainWindow });
     ipcMain.on("eimu-shell:apply-update", () => {
       applyUpdate();
-    });
-
-    // W6b：device bridge（雲端 agent 經本機**出站**連線讀已授權檔案）。
-    // 預設 OFF（EIMU_DEVICE_BRIDGE 未設＝不連）。
-    //
-    // 憑證**不由頁面注入**——殼載入的是遠端頁面，讓頁面能把憑證交給主進程等於多開
-    // 一條 remote→local 信任路徑。改讀使用者自己放在 <userData>/device-bridge.json
-    // 的檔案（必須 0600）：沒有那個檔、JSON 壞、權限過寬，一律回 null ⇒ 橋停在
-    // credentials_unavailable，行為與從前完全相同。讀取規則見 lib/bridge-credential.js，
-    // 缺口與啟用步驟見 desktop/DEVICE-BRIDGE.md。
-    const bridgeCredential = readCredentialStore(path.join(app.getPath("userData"), "device-bridge.json"), {
-      onWarn: (reason) => console.warn(`[device-bridge] ${reason}`),
-    });
-    void startDeviceBridge({
-      gatewayBaseUrl: process.env.EIMU_GATEWAY_BASE_URL || bridgeCredential?.gatewayBaseUrl,
-      enabled: process.env.EIMU_DEVICE_BRIDGE === "1",
-      credentialProvider: () => (bridgeCredential ? bridgeCredential.apiKey : null),
-      onStatus: (s) => {
-        bridgeState = s;
-        applyBridgeIndicator();
-      },
-    }).catch(() => {
-      /* 啟動失敗不得影響殼啟動 */
     });
 
     // 去掉預設選單列（File/Edit/View/Window/Help），它是桌面殼裡最突兀的

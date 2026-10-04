@@ -193,6 +193,24 @@ export type InvokeResult =
   | { ok: true; requestId: string; tool: DeviceBridgeTool; result: Record<string, unknown>; truncated: boolean; bytes: number }
   | { ok: false; code: DeviceBridgeErrorCode; message: string; requestId?: string }
 
+/**
+ * 依租戶挑一台裝置（內部路由的**尋址**步驟）。語義刻意保守、**不猜**：
+ *   - 該租戶 0 台已註冊裝置 → `no_device_registered`
+ *   - 恰好 1 台：在線 → 回它；離線 → `device_offline`
+ *   - 多台：恰 1 台在線 → 回那台；0 台或 >1 台在線（含全部離線）→ `device_ambiguous`
+ * 在線判定沿用既有心跳 TTL（`DEVICE_HEARTBEAT_TTL_MS`／建構子覆寫）。
+ */
+export type PickDeviceResult =
+  | { ok: true; deviceId: string }
+  | { ok: false; code: "no_device_registered" | "device_offline" | "device_ambiguous"; message: string }
+
+/** 唯讀裝置概況（/internal/device/status 用）。 */
+export interface TenantDeviceDescription {
+  online: boolean
+  roots: string[]
+  lastHeartbeatMs: number
+}
+
 interface PendingRequest {
   requestId: string
   tenant: string
@@ -585,6 +603,45 @@ export class DeviceBridge {
     return { online: onlineCount > 0, deviceCount, authorizedRootCount }
   }
 
+  /**
+   * 依租戶挑一台裝置（內部路由尋址）。**不做任何動作、不改狀態**。
+   * 見 `PickDeviceResult` 的五態語義。
+   */
+  pickDeviceForTenant(tenant: string, now: number = Date.now()): PickDeviceResult {
+    const mine = [...this.devices.values()].filter((r) => r.tenant === tenant)
+    if (mine.length === 0) {
+      return { ok: false, code: "no_device_registered", message: "no device registered for this tenant" }
+    }
+    const online = mine.filter((r) => this.isOnline(r, now))
+    if (mine.length === 1) {
+      const only = mine[0]
+      return this.isOnline(only, now)
+        ? { ok: true, deviceId: only.deviceId }
+        : { ok: false, code: "device_offline", message: "the registered device is offline" }
+    }
+    if (online.length === 1) return { ok: true, deviceId: online[0].deviceId }
+    return {
+      ok: false,
+      code: "device_ambiguous",
+      message: `multiple devices registered for tenant (${mine.length}), ${online.length} online`,
+    }
+  }
+
+  /**
+   * 唯讀裝置概況：該租戶的代表裝置（見下）的 online／roots／lastHeartbeat。
+   * 0 台已註冊 → null。代表裝置＝`pickDeviceForTenant` 可判斷時取之，否則取最近心跳者
+   * （唯讀查詢，不涉及動作選擇，故可回報「最近看到的那台」；**不**用於 invoke 尋址）。
+   */
+  describeTenantDevices(tenant: string, now: number = Date.now()): TenantDeviceDescription | null {
+    const mine = [...this.devices.values()].filter((r) => r.tenant === tenant)
+    if (mine.length === 0) return null
+    const picked = this.pickDeviceForTenant(tenant, now)
+    const rep = picked.ok
+      ? mine.find((r) => r.deviceId === picked.deviceId) ?? mine[0]
+      : mine.slice().sort((a, b) => (b.lastSeenAt - a.lastSeenAt) || a.deviceId.localeCompare(b.deviceId))[0]
+    return { online: this.isOnline(rep, now), roots: [...rep.authorizedRoots], lastHeartbeatMs: rep.lastSeenAt }
+  }
+
   /** 測試/運維用：裝置數、待辦數。 */
   stats(): { devices: number; pending: number; consentTokens: number } {
     return { devices: this.devices.size, pending: this.pending.size, consentTokens: this.tokens.size() }
@@ -735,4 +792,160 @@ export async function handleDeviceBridgeRoutes(req: Request, ctx: DeviceBridgeRo
     default:
       return errorResponse(404, "not_found", "unknown device-bridge route")
   }
+}
+
+// ── 內部路由（/internal/device/*）──────────────────────────────────────
+//
+// 為什麼需要（第一性原理）：agent 工具跑在 **opencode-server 服務內**（同一台 VPS、
+// loopback），它只知道 `session_id`，不知道裝置憑證／`device_id`；也不該拿到裝置憑證。
+// 既有 `/agent/v1/device-bridge/invoke` 需要呼叫方帶 `device_id` 且經 Bearer 閘門，
+// 工具端拿不到。此處補一條**只做尋址與轉發**的內部入口：由 `session_id` 解析出租戶
+// （`u:<userId>`），挑該租戶唯一在線裝置，再交給既有 `DeviceBridge.invoke`。
+//
+// 三道防線（denylist `isSensitivePath`／授權根 `path_not_authorized`／工具白名單）
+// 全在既有 `invoke` → `sanitizeToolArgs` 內，本路由**不新增、不放寬**任何檢查。
+// 保護層＝router 的 `/internal/` loopback 門（與 `/internal/media/upload` 同一層）。
+
+/** 內部裝置路由的依賴注入（測試免真會話/真網路；生產由 router 提供真 resolver）。 */
+export interface InternalDeviceRouteDeps {
+  /**
+   * `session_id` → 租戶（`u:<userId>`）。解析不到回 `null` ⇒ `session_unknown`。
+   * 生產實作＝與 `/internal/media/upload` 同源的 session 解析（`resolveSession` →
+   * `subagentParentState`）＋既有正典化 `resolveCanonicalIdentity(session.apiKey)`。
+   */
+  resolveTenant: (sessionId: string) => Promise<string | null>
+  /** 裝置橋實例（測試注入）；預設製程單例 `deviceBridge`。 */
+  bridge?: DeviceBridge
+}
+
+/** op → 既有 `DeviceBridgeTool` 的**一對一**映射（不得新增／改名工具）。 */
+const INTERNAL_DEVICE_OPS: readonly DeviceBridgeTool[] = ["list_dir", "read_file", "grep", "stat"]
+
+function isInternalDeviceOp(v: string): v is DeviceBridgeTool {
+  return (INTERNAL_DEVICE_OPS as readonly string[]).includes(v)
+}
+
+function internalDeviceError(status: number, code: string, message: string): Response {
+  return Response.json({ ok: false, error: { code, message } }, { status })
+}
+
+/**
+ * 內部契約錯誤碼（凍結）：把既有 `DeviceBridgeErrorCode` 收斂到凍結清單。
+ * `device_request_timeout` → `device_timeout`；`bad_request` 保留；
+ * 其餘（含 device_op_failed／consent_token_*／device_request_not_found）→ `internal_error`。
+ */
+function mapInternalDeviceError(code: DeviceBridgeErrorCode): { status: number; code: string } {
+  switch (code) {
+    case "device_request_timeout":
+      return { status: 504, code: "device_timeout" }
+    case "bad_request":
+      return { status: 400, code: "bad_request" }
+    case "tool_not_allowed":
+      return { status: 403, code: "tool_not_allowed" }
+    case "sensitive_path":
+      return { status: 403, code: "sensitive_path" }
+    case "path_not_authorized":
+      return { status: 403, code: "path_not_authorized" }
+    case "device_offline":
+    case "device_connection_stale":
+      return { status: 404, code: "device_offline" }
+    default:
+      return { status: 502, code: "internal_error" }
+  }
+}
+
+/**
+ * 凍結 body → 既有 `sanitizeToolArgs` 的 args 白名單（欄位名映射，語義沿用既有淨化）。
+ * 只放行凍結契約列出的欄位：path / pattern / max_bytes / limit。夾制全在 sanitizeToolArgs。
+ */
+function buildInternalDeviceArgs(tool: DeviceBridgeTool, body: Record<string, unknown>): Record<string, unknown> {
+  const path = typeof body.path === "string" ? body.path : ""
+  switch (tool) {
+    case "list_dir":
+      return { path }
+    case "read_file": {
+      const args: Record<string, unknown> = { path }
+      if (body.limit !== undefined) args.limit = body.limit
+      return args
+    }
+    case "grep": {
+      const args: Record<string, unknown> = { path, pattern: typeof body.pattern === "string" ? body.pattern : "" }
+      // 凍結欄位名 `max_bytes` → 既有淨化欄位 `max_file_bytes`（不改語義）。
+      if (body.max_bytes !== undefined) args.max_file_bytes = body.max_bytes
+      return args
+    }
+    default:
+      return { path }
+  }
+}
+
+/**
+ * POST /internal/device/invoke?session_id=… — 雲端 agent 工具讀本機檔的**內部**入口。
+ * 只尋址＋轉發；逾時由既有 `invoke` 的 `DEVICE_REQUEST_TIMEOUT_MS` 保證（不永久 pending）。
+ */
+export async function handleInternalDeviceInvoke(req: Request, deps: InternalDeviceRouteDeps): Promise<Response> {
+  const bridge = deps.bridge ?? deviceBridge
+  const sessionId = new URL(req.url).searchParams.get("session_id") ?? ""
+  if (!sessionId) return internalDeviceError(400, "bad_request", "session_id is required")
+  const body = await readJsonBody(req)
+  if (body === null) return internalDeviceError(400, "bad_request", "invalid json body")
+  const op = typeof body.op === "string" ? body.op : ""
+  if (!op) return internalDeviceError(400, "bad_request", "op is required")
+
+  let tenant: string | null = null
+  try {
+    tenant = await deps.resolveTenant(sessionId)
+  } catch {
+    tenant = null
+  }
+  if (!tenant) return internalDeviceError(404, "session_unknown", "session_id could not be resolved to an owner")
+
+  if (!isInternalDeviceOp(op)) return internalDeviceError(403, "tool_not_allowed", `op not allowed: ${op}`)
+  const tool: DeviceBridgeTool = op
+  const args = buildInternalDeviceArgs(tool, body)
+
+  const pick = bridge.pickDeviceForTenant(tenant)
+  if (!pick.ok) {
+    // gateway tsconfig strict:false ⇒ boolean 字面量判別式不窄化，顯式轉型（本檔既有同款）。
+    const perr = pick as { ok: false; code: "no_device_registered" | "device_offline" | "device_ambiguous"; message: string }
+    return internalDeviceError(perr.code === "device_ambiguous" ? 409 : 404, perr.code, perr.message)
+  }
+
+  const out = await bridge.invoke({ tenant, deviceId: (pick as { ok: true; deviceId: string }).deviceId, tool, args })
+  if (!out.ok) {
+    const oerr = out as { ok: false; code: DeviceBridgeErrorCode; message: string }
+    const mapped = mapInternalDeviceError(oerr.code)
+    return internalDeviceError(mapped.status, mapped.code, oerr.message)
+  }
+  const ores = out as { ok: true; requestId: string; tool: DeviceBridgeTool; result: Record<string, unknown>; truncated: boolean; bytes: number }
+  return Response.json({
+    ok: true,
+    request_id: ores.requestId,
+    tool: ores.tool,
+    result: ores.result,
+    truncated: ores.truncated,
+    bytes: ores.bytes,
+  })
+}
+
+/**
+ * GET /internal/device/status?session_id=… — 本會話租戶的裝置概況（唯讀）。
+ * 無已註冊裝置 → `device: null`（不是錯誤）。
+ */
+export async function handleInternalDeviceStatus(req: Request, deps: InternalDeviceRouteDeps): Promise<Response> {
+  const bridge = deps.bridge ?? deviceBridge
+  const sessionId = new URL(req.url).searchParams.get("session_id") ?? ""
+  if (!sessionId) return internalDeviceError(400, "bad_request", "session_id is required")
+  let tenant: string | null = null
+  try {
+    tenant = await deps.resolveTenant(sessionId)
+  } catch {
+    tenant = null
+  }
+  if (!tenant) return internalDeviceError(404, "session_unknown", "session_id could not be resolved to an owner")
+  const desc = bridge.describeTenantDevices(tenant)
+  return Response.json({
+    ok: true,
+    device: desc ? { online: desc.online, roots: desc.roots, last_heartbeat_ms: desc.lastHeartbeatMs } : null,
+  })
 }

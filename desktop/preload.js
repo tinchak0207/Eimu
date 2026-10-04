@@ -2,9 +2,11 @@
 //
 // 以 contextBridge 暴露兩組「極窄」能力給 www.eimu.dev 頁面：
 //
-//   1. window.eimuLocal（W3）：本機媒體能力，5 個具名方法，各自對應一個
-//      固定 eimu-local:* channel。真正的安全判斷（origin / 路徑授權 /
-//      denylist / argv 白名單）全在主進程 local-worker.js，preload 不是信任邊界。
+//   1. window.eimuLocal（W3／W6c）：本機媒體能力（5 個），加上 device bridge
+//      的使用者面（authorizedRoots / bridge.{status,enable,disable} / onBridgeStatus）。
+//      每個方法各自對應一個固定 eimu-local:* channel，逐一白名單、無通用 invoke。
+//      真正的安全判斷（origin / 路徑授權 / denylist / argv 白名單 / 啟停授權）
+//      全在主進程 local-worker.js，preload 不是信任邊界。
 //
 //   2. window.eimuShell（0.3.0）：自繪視窗控制鈕。只暴露三個視窗動作
 //      （minimize / toggleMaximize / close）、一個狀態查詢 isMaximized，
@@ -27,6 +29,12 @@ const CHANNELS = {
   probe: "eimu-local:probe",
   extractFrames: "eimu-local:extract-frames",
   transcode: "eimu-local:transcode",
+  // W6c：device bridge（本機檔案授權）——三個 invoke + 一個 event，逐一明列。
+  authorizedRoots: "eimu-local:authorized-roots",
+  bridgeStatus: "eimu-local:bridge-status",
+  bridgeEnable: "eimu-local:bridge-enable",
+  bridgeDisable: "eimu-local:bridge-disable",
+  bridgeEvent: "eimu-local:bridge-state",
 };
 
 /**
@@ -66,6 +74,26 @@ contextBridge.exposeInMainWorld("eimuLocal", {
   // opts: { format?, videoCodec?, preset?, crf?, audioCodec?, audioBitrateKbps?, maxWidth?, maxHeight?, copy?, faststart?, outputPath?, timeoutMs? }
   transcode: (filePath, opts) =>
     call(CHANNELS.transcode, String(filePath), opts && typeof opts === "object" ? opts : {}),
+
+  // W6c：目前已授權的根目錄（絕對路徑 realpath）。由 pickFiles 累積。
+  authorizedRoots: () => call(CHANNELS.authorizedRoots),
+
+  // W6c：device bridge（讓雲端 agent 讀本機**已授權**檔案）。三個具名方法各自對應
+  // 一個固定 channel；真正的啟停與授權判斷在主進程 local-worker.js／main.js。
+  // 契約：status/enable/disable 皆回 { enabled, state, roots, deviceId, lastError? }。
+  bridge: {
+    status: () => call(CHANNELS.bridgeStatus),
+    enable: () => call(CHANNELS.bridgeEnable),
+    disable: () => call(CHANNELS.bridgeDisable),
+  },
+
+  // W6c：訂閱 bridge 狀態變化，回傳取消訂閱函式（比照 eimuShell.onMaximizeChange）。
+  onBridgeStatus: (cb) => {
+    if (typeof cb !== "function") return () => {};
+    const listener = (_event, payload) => cb(payload && typeof payload === "object" ? payload : {});
+    ipcRenderer.on(CHANNELS.bridgeEvent, listener);
+    return () => ipcRenderer.removeListener(CHANNELS.bridgeEvent, listener);
+  },
 });
 
 // 0.3.0：自繪視窗控制鈕。只做視窗動作與狀態查詢，不接受任何目標視窗參數

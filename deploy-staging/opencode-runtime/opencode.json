@@ -373,7 +373,8 @@
         "search_web": false,
         "question": true,
         "subagent_stop": true,
-        "task": false
+        "task": false,
+        "local_files": true
       }
     },
     "director3d": {
@@ -475,7 +476,8 @@
         "workflow_status": false,
         "workflow_update_node": false,
         "world_bible_extract": false,
-        "task": false
+        "task": false,
+        "local_files": true
       }
     },
     "music": {
@@ -681,7 +683,8 @@
         "workflow_status": false,
         "workflow_update_node": false,
         "world_bible_extract": false,
-        "task": false
+        "task": false,
+        "local_files": true
       }
     },
     "editor": {
@@ -776,7 +779,8 @@
         "workflow_status": false,
         "workflow_update_node": false,
         "world_bible_extract": false,
-        "task": false
+        "task": false,
+        "local_files": true
       }
     },
     "screenwriter": {

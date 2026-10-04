@@ -13,26 +13,41 @@
   `lib/denylist-vectors.json`（已刪）。`policy.test.js` 以 `fs.readFileSync` 直接載入雲端那份的
   `sensitive` 段落逐條斷言；本機刻意更嚴的加固項顯式列在測試內。
 - `lib/policy.test.js` / `lib/bridge-protocol.test.js`：純函式層測試。
+- `preload.js`（`window.eimuLocal.bridge.{status,enable,disable}` / `authorizedRoots` /
+  `onBridgeStatus` 逐一白名單，無通用 invoke）＋ `local-worker.js`（四個 IPC handler 與可重入
+  生命週期 `createBridgeController`）。
+- `local-worker-bridge.test.js`：`node --test`，覆蓋 status 三態、`enable()` 無授權根不啟動、
+  `disable()`、**授權根變更 → 以新 roots 重註冊**、憑證 fail-closed、來源非白名單拒絕。
 
 
 ## 端點（逐欄對齊 `deploy-staging/gateway/device-bridge.ts`）
 `POST /agent/v1/device-bridge/{register,heartbeat,poll,result}`，鑑權＝既有 Bearer `sk-biz-*`。
 `/invoke` 是雲端 agent 發起，本客戶端不呼叫。
 
-## 預設 OFF
-`main.js` 以 `enabled: process.env.EIMU_DEVICE_BRIDGE === "1"` 啟動；未設＝停在 `off`，
-一個位元組不出網。開啟且 `online`/`reconnecting` 時，視窗標題顯示
-「Eimu · 本機檔案橋接已開啟」（`page-title-updated` 期間維持，避免被遠端 `<title>` 蓋掉）。
+## 啟用（使用者路徑 ＋ 操作者覆寫）
+啟用狀態持久化在 `<userData>/settings.json` 的 `deviceBridgeEnabled`：使用者按
+`window.eimuLocal.bridge.enable()` 時寫入 true、`disable()` 寫回 false。操作者可設
+`EIMU_DEVICE_BRIDGE=1` **覆寫**為「啟動即開啟」（保留既有 E2E／操作者路徑）；此覆寫**不**寫回
+設定檔，使用者仍可在執行期 `disable()`。未設且設定為 false ⇒ 停在 `off`，一個位元組不出網。
+開啟且 `online`/`reconnecting` 時，視窗標題顯示「Eimu · 本機檔案橋接已開啟」
+（`page-title-updated` 期間維持，避免被遠端 `<title>` 蓋掉），並以 `eimu-local:bridge-state`
+把狀態推給所有視窗（頁面用 `window.eimuLocal.onBridgeStatus` 訂閱）。
 
-**開啟後仍會被授權根閘擋下**：allowlist 必填（見下）。目前殼內尚無「為 bridge 挑選根目錄」
-的 UI，且 bridge 與 W3 共用同一份 `authorizedRoots`（由 `window.eimuLocal.pickFiles` 登記）。
-故在尚未 pickFiles 前開啟 bridge，狀態會停在 `no_authorized_roots` 並**拒絕服務**——
-這是刻意、正確的結果（寧可不可用，也不退回「只驗 denylist」的危險語義）。
+**開啟後仍會被授權根閘擋下**：allowlist 必填（見下）。授權根來自
+`window.eimuLocal.pickFiles({ kind: "directory" })`——這是唯一授權入口。使用者要開 bridge 的
+流程：① 先 pickFiles 挑資料夾 ② 再 `bridge.enable()`。若先 `enable()` 而尚無授權根，狀態停在
+`no_authorized_roots` 並**拒絕服務**（**不**自動授權任何路徑）；之後 pickFiles 授權新根時，已啟用
+的 bridge 會**自動以新 roots 重註冊**（stop→start，見 `local-worker.js` 的 `onRootsAuthorized`，
+由 `handlePickFiles` → `applyPickAuthorization` 觸發）。這是刻意、正確的結果（寧可不可用，也不退回
+「只驗 denylist」的危險語義）。
 
-## 憑證缺口（未解，如實記錄）
+## 憑證來源（缺口未解，如實記錄）
 閘道鑑權沿用既有 `sk-biz-*`（`auth-gw.ts`）。桌面殼載入遠端頁面、**只有 session，沒有 biz key**；
-本模組**不**自造鑑權、**不**在殼內硬編任何 key。憑證由 `credentialProvider()` 注入；回
-`null`/空字串時 bridge **不啟動**，狀態回報 `credentials_unavailable`。`main.js` 目前恆回 `null`。
+本模組**不**自造鑑權、**不**在殼內硬編任何 key。憑證**不由頁面注入**：主進程讀使用者自己放在
+`<userData>/device-bridge.json`（必須 0600）的檔案；缺檔／JSON 壞／權限過寬一律回 `null` ⇒
+bridge **不啟動**、狀態回報 `credentials_unavailable`（讀取規則見 `lib/bridge-credential.js`）。
+`gatewayBaseUrl` 優先序：`EIMU_GATEWAY_BASE_URL`（env） > `settings.json` 的
+`deviceBridgeGatewayBaseUrl` > 憑證檔自帶 > 客戶端預設；**apiKey 只從 0600 憑證檔讀，頁面不可寫**。
 
 **建議補法（尚未實作，勿當已存在）**：由「已登入的網頁」向服務端換一張**短效、限 device-bridge
 scope 的 device token**（TTL 分鐘級、可撤銷），經窄 IPC 交給主進程當 Bearer 用；或維持由使用者
@@ -72,3 +87,8 @@ fail-closed）。兩者跨 runtime（Electron CJS ↔ bun TS）無法共用模�
 `bridge-executor.test.js` 覆蓋**（空 allowlist、家目錄外敏感、遞迴剪枝、單檔上限、`path="/"`）。
 連線迴圈（register/heartbeat/poll/result）與 `main.js` 的 protocol 閘僅經 `node --check` 語法檢與
 `tsc`；未做真閘道 E2E。
+
+W6c（使用者面四個 IPC）已在純 node 以注入間諜 client 驗過（`local-worker-bridge.test.js`），但
+**真殼端到端未驗**：真 `pickFiles` 對話框、真 `bridge.enable()` → 真閘道註冊，以及「狀態推送到
+`onBridgeStatus`」都需真 Electron。且新增 IPC **必須重建桌面產物**才會出貨（目前對外 0.3.2 不含
+這些 channel）；未重建前 `window.eimuLocal.bridge` 不存在。

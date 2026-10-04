@@ -33,15 +33,17 @@
 //     editor 子代理仍能直調 image_generate 生成圖片（違反憲法第二條「域外工具不在你工具表」）。
 //   builtin（bash/read/glob/grep/edit/write/question/task/webfetch/todowrite/websearch/
 //     skill/apply_patch/invalid）不在工具檔清單內，天然不受影響，不列入 map。
-// 第三條（2026-09-21 e2e 事故修補）：workflow_start / workflow_update_node /
-//   workflow_status 是「共享工作流操作工具」＝生產線基礎設施，不是任何 Expert 的
-//   域工具。事故實錘：jev-gate workflowTemplateDirective 向被 Jev 判為製作類的
-//   Expert 任務書注入硬規則「第一個動作＝呼叫 workflow_start」，但本導出器的
-//   補集規則把這三個對全部 Expert 顯式 false（＝物理禁用），screenwriter 子代理
-//   回報「工具白名單未提供 workflow_start，無法依模板建立生產流程，任務 FAILED」
-//   ——系統指令叫子代理調一個被系統物理禁用的工具。修法＝SHARED_WORKFLOW_TOOLS
-//   豁免集：全部 Expert 默認開（不列進 false）；orchestrator 顯式 false（野獸幀
-//   beastTemplateFact 聲明「你沒有 workflow_* 工具」必須是物理事實）。
+// 第三條（2026-09-21 e2e 事故修補；2026-10-04 local_files 併入）：workflow_start /
+//   workflow_update_node / workflow_status 是「共享工作流操作工具」＝生產線基礎設施，
+//   不是任何 Expert 的域工具。事故實錘：jev-gate 向被 Jev 判為製作類的 Expert 任務書
+//   注入硬規則「第一個動作＝呼叫 workflow_start」，但本導出器的補集規則把這三個對
+//   全部 Expert 顯式 false（＝物理禁用），screenwriter 子代理回報「工具白名單未提供
+//   workflow_start，任務 FAILED」——系統指令叫子代理調一個被系統物理禁用的工具。
+//   修法＝SHARED_TOOLS 共享工具豁免集：全部 Expert 默認開（不列進 false）。
+//   orchestrator 側只對子集 ORCHESTRATOR_DISABLED_SHARED_TOOLS（workflow_* 三個）顯式
+//   false（野獸幀 beastTemplateFact 聲明「你沒有 workflow_* 工具」必須是物理事實）；
+//   local_files 2026-10-04 併入 SHARED_TOOLS 但不在禁用子集——部署 opencode.json 對
+//   orchestrator/editor/video-director/director3d 皆 local_files:true，兩邊不得矛盾。
 //
 // 用法：
 //   npx tsx tools/export-expert-agents.ts                          # fallback 近似全集
@@ -136,17 +138,26 @@ const DOMAIN_TOOLS: string[] = dedupePreserveOrder(
   Object.values(EXPERT_REGISTRY).flatMap((expert) => [...expert.toolIds]),
 );
 
-/** 共享工作流操作工具（2026-09-21 e2e 實錘）：workflowTemplateDirective 指令要求
- * 任意 Expert 都可能被 Jev 判為製作類而必須調 workflow_start/update_node——
- * 這三個是生產線基礎設施不是域工具，全部 Expert 默認開；orchestrator 仍顯式
- * 禁用（野獸幀聲明「你沒有 workflow_* 工具」必須是物理事實）。 */
-const SHARED_WORKFLOW_TOOLS = new Set(["workflow_start", "workflow_update_node", "workflow_status"])
+/** 共享工具豁免集（2026-09-21 e2e 實錘；2026-10-04 加入 local_files）：不屬任何 Expert
+ * 域工具，全部 Expert 默認開（不列進 false）。子集 ORCHESTRATOR_DISABLED_SHARED_TOOLS
+ * 才是 orchestrator 側必須物理禁用的（野獸幀聲明「你沒有 workflow_* 工具」必須是物理事實）。
+ * local_files 加入的理由：部署 opencode.json 對 orchestrator/editor/video-director/director3d
+ * 皆顯式 local_files:true；它不屬任何 Expert 域工具，若落入「域外工具全 false」規則就會被
+ * 寫成 false，使 editor/video-director/director3d 的提示詞宣告「local_files 已被移除」，
+ * 與同一份部署的 opencode.json 直接矛盾。 */
+const SHARED_TOOLS = new Set(["workflow_start", "workflow_update_node", "workflow_status", "local_files"])
+
+/** SHARED_TOOLS 中 orchestrator 亦須顯式禁用的子集：野獸幀 beastTemplateFact 聲明
+ * 「你沒有 workflow_* 工具」，必須是物理事實。local_files 不在此列——opencode.json 對
+ * orchestrator 顯式 local_files:true，必須保持默認開（不得被斷路）。 */
+const ORCHESTRATOR_DISABLED_SHARED_TOOLS = new Set(["workflow_start", "workflow_update_node", "workflow_status"])
 
 /** orchestrator 保留的「Expert 域工具」例外（2026-10-01 art-style 接线回归修復）：
  * image_generate 原為無歸屬工具（orchestrator 默認開、設計刻意保留直調生圖）；
  * 併入 video-director 域以接通 art_style 模板後進入 DOMAIN_TOOLS 聯集，orchestrator
- * 的「域工具全 false」規則會連帶把它物理禁用。修法＝顯式豁免（與 SHARED_WORKFLOW_TOOLS
- * 反向對偶：那組 Expert 開/orchestrator 關，這組 Expert 開/orchestrator 也開）。 */
+ * 的「域工具全 false」規則會連帶把它物理禁用。修法＝顯式豁免（與
+ * ORCHESTRATOR_DISABLED_SHARED_TOOLS 反向對偶：那組 Expert 開/orchestrator 關，
+ * 這組 Expert 開/orchestrator 也開）。 */
 const ORCHESTRATOR_KEPT_DOMAIN_TOOLS = new Set(["image_generate"]);
 
 function buildAgentsJson(universeTools: readonly string[]): string {
@@ -160,8 +171,9 @@ function buildAgentsJson(universeTools: readonly string[]): string {
   const agents: Record<string, unknown> = {};
   // orchestrator 在前：25 域工具全 false + question true（主會話保留提問內建）。
   // 注意：orchestrator 只斷 Expert 域工具，非 Expert 域工具（search_web / workflow_* 等）保持默認開；
-  // 例外①＝SHARED_WORKFLOW_TOOLS 顯式 false（2026-09-21：野獸幀 beastTemplateFact 聲明
-  // 「你沒有 workflow_* 工具」必須是物理事實，模板骨架由 Expert 建立）。
+  // 例外①＝ORCHESTRATOR_DISABLED_SHARED_TOOLS 顯式 false（2026-09-21：野獸幀 beastTemplateFact
+  // 聲明「你沒有 workflow_* 工具」必須是物理事實，模板骨架由 Expert 建立；local_files 不在
+  // 此列，orchestrator 保持默認開——opencode.json 對它顯式 true）。
   // 例外②＝ORCHESTRATOR_KEPT_DOMAIN_TOOLS 反向豁免（2026-10-01：image_generate 雖併入
   // video-director 域，orchestrator 仍刻意保留直調生圖，不得被域工具全 false 規則連帶禁用）。
   agents["orchestrator"] = {
@@ -169,15 +181,15 @@ function buildAgentsJson(universeTools: readonly string[]): string {
     description: ORCHESTRATOR_DESCRIPTION,
     tools: {
       ...toolsFalse(DOMAIN_TOOLS.filter((id) => !ORCHESTRATOR_KEPT_DOMAIN_TOOLS.has(id))),
-      ...toolsFalse([...SHARED_WORKFLOW_TOOLS]),
+      ...toolsFalse([...ORCHESTRATOR_DISABLED_SHARED_TOOLS]),
       question: true,
     },
   };
-  // 其後按 registry 插入序：每個 Expert false 掉「全集 − 自己域工具 − 共享工作流工具」
+  // 其後按 registry 插入序：每個 Expert false 掉「全集 − 自己域工具 − 共享工具」
   // （含不屬於任何 Expert 的工具，如 image_generate）。
   for (const expert of Object.values(EXPERT_REGISTRY)) {
     const own = new Set(expert.toolIds);
-    const foreign = universeTools.filter((id) => !own.has(id) && !SHARED_WORKFLOW_TOOLS.has(id));
+    const foreign = universeTools.filter((id) => !own.has(id) && !SHARED_TOOLS.has(id));
     agents[expert.id] = {
       mode: "all",
       description: `${expert.description}${EXPERT_DESCRIPTION_SUFFIX}`,

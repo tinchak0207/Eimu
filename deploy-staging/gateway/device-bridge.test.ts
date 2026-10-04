@@ -38,6 +38,9 @@ import {
   finalizeDeviceResult,
   sanitizeToolArgs,
   handleDeviceBridgeRoutes,
+  handleInternalDeviceInvoke,
+  handleInternalDeviceStatus,
+  type InternalDeviceRouteDeps,
 } from "./device-bridge.ts"
 
 // ───────────────────────── denylist ─────────────────────────
@@ -624,4 +627,295 @@ test("deviceBridgeRuntimeState: 唯讀快照（在線/裝置數/授權根數）�
   const nr = deviceBridgeRuntimeState(9, { bridge: noRoots, env: { EIMU_DEVICE_BRIDGE: "1" }, now: T + 1 })
   assert.equal(nr.online, true)
   assert.equal(nr.authorizedRootCount, 0)
+})
+
+// ───────────── W6a 內部路由：pickDeviceForTenant（尋址）─────────────
+//
+// agent 工具只知道 session_id；/internal/device/invoke 由租戶挑裝置。挑選必須**不猜**：
+// 多台且多台在線（或全部離線且 >1）＝ ambiguous，不得任選一台。
+
+test("pickDeviceForTenant: 0 台（從未註冊）→ no_device_registered", () => {
+  const bridge = new DeviceBridge()
+  const r = bridge.pickDeviceForTenant("u:1")
+  assert.equal(r.ok, false)
+  if (!r.ok) assert.equal(r.code, "no_device_registered")
+})
+
+test("pickDeviceForTenant: 1 台 online → 回它", () => {
+  const T = 1_000_000
+  const bridge = new DeviceBridge({ heartbeatTtlMs: 90_000 })
+  const reg = bridge.register({ tenant: "u:1", userId: 1, apiKeyHash: "h1", now: T })
+  const r = bridge.pickDeviceForTenant("u:1", T + 1_000)
+  assert.equal(r.ok, true)
+  if (r.ok) assert.equal(r.deviceId, reg.deviceId)
+})
+
+test("pickDeviceForTenant: 1 台 offline（心跳逾時）→ device_offline", () => {
+  const T = 1_000_000
+  const bridge = new DeviceBridge({ heartbeatTtlMs: 90_000 })
+  bridge.register({ tenant: "u:1", userId: 1, apiKeyHash: "h1", now: T })
+  const r = bridge.pickDeviceForTenant("u:1", T + 90_001)
+  assert.equal(r.ok, false)
+  if (!r.ok) assert.equal(r.code, "device_offline")
+})
+
+test("pickDeviceForTenant: 多台只有 1 台 online → 回那台", () => {
+  const T = 1_000_000
+  const bridge = new DeviceBridge({ heartbeatTtlMs: 90_000 })
+  bridge.register({ tenant: "u:1", userId: 1, apiKeyHash: "ha", deviceId: "devA", now: T - 200_000 }) // offline
+  bridge.register({ tenant: "u:1", userId: 1, apiKeyHash: "hb", deviceId: "devB", now: T }) // online
+  const r = bridge.pickDeviceForTenant("u:1", T)
+  assert.equal(r.ok, true)
+  if (r.ok) assert.equal(r.deviceId, "devB")
+})
+
+test("pickDeviceForTenant: 多台多台 online → device_ambiguous（不猜）", () => {
+  const T = 1_000_000
+  const bridge = new DeviceBridge({ heartbeatTtlMs: 90_000 })
+  bridge.register({ tenant: "u:1", userId: 1, apiKeyHash: "ha", deviceId: "devA", now: T })
+  bridge.register({ tenant: "u:1", userId: 1, apiKeyHash: "hb", deviceId: "devB", now: T })
+  const r = bridge.pickDeviceForTenant("u:1", T)
+  assert.equal(r.ok, false)
+  if (!r.ok) assert.equal(r.code, "device_ambiguous")
+})
+
+test("pickDeviceForTenant: 多台全部 offline（>1）→ device_ambiguous（不猜）", () => {
+  const T = 1_000_000
+  const bridge = new DeviceBridge({ heartbeatTtlMs: 90_000 })
+  bridge.register({ tenant: "u:1", userId: 1, apiKeyHash: "ha", deviceId: "devA", now: T })
+  bridge.register({ tenant: "u:1", userId: 1, apiKeyHash: "hb", deviceId: "devB", now: T })
+  const r = bridge.pickDeviceForTenant("u:1", T + 90_001)
+  assert.equal(r.ok, false)
+  if (!r.ok) assert.equal(r.code, "device_ambiguous")
+})
+
+test("pickDeviceForTenant: 租戶隔離（別的租戶的裝置不算）", () => {
+  const T = 1_000_000
+  const bridge = new DeviceBridge({ heartbeatTtlMs: 90_000 })
+  bridge.register({ tenant: "u:2", userId: 2, apiKeyHash: "h2", now: T })
+  const r = bridge.pickDeviceForTenant("u:1", T)
+  assert.equal(r.ok, false)
+  if (!r.ok) assert.equal(r.code, "no_device_registered")
+})
+
+test("describeTenantDevices: 0 台 → null；1 台 → online/roots/lastHeartbeat", () => {
+  const T = 1_000_000
+  const bridge = new DeviceBridge({ heartbeatTtlMs: 90_000 })
+  assert.equal(bridge.describeTenantDevices("u:1", T), null)
+  bridge.register({ tenant: "u:1", userId: 1, apiKeyHash: "h1", roots: ["/home/u/project"], now: T })
+  const d = bridge.describeTenantDevices("u:1", T + 1_000)
+  assert.deepEqual(d, { online: true, roots: ["/home/u/project"], lastHeartbeatMs: T })
+  const stale = bridge.describeTenantDevices("u:1", T + 90_001)
+  assert.equal(stale?.online, false)
+})
+
+// ───────────── W6a 內部路由：/internal/device/invoke 與 /status ─────────────
+
+function internalDeps(bridge: DeviceBridge, tenants: Record<string, string | null> = { sess_ok: "u:1" }): InternalDeviceRouteDeps {
+  return { bridge, resolveTenant: async (sid) => (sid in tenants ? tenants[sid] : null) }
+}
+
+test("/internal/device/invoke: happy path（mock 裝置走完 poll→result）回凍結契約形狀", async () => {
+  const bridge = new DeviceBridge({ requestTimeoutMs: 2_000 })
+  const reg = bridge.register({ tenant: "u:1", userId: 1, apiKeyHash: "h1", roots: ["/home/u/project"] })
+  const req = new Request("http://gw.internal/internal/device/invoke?session_id=sess_ok", {
+    method: "POST",
+    body: JSON.stringify({ op: "read_file", path: "/home/u/project/a.txt", limit: 32 }),
+  })
+  const pending = handleInternalDeviceInvoke(req, internalDeps(bridge))
+
+  const polled = await bridge.poll({ tenant: "u:1", deviceId: reg.deviceId, connectionId: reg.connectionId, waitMs: 3_000 })
+  if (!polled.ok || !polled.request) throw new Error("expected a request")
+  assert.equal(polled.request.tool, "read_file")
+  assert.equal(polled.request.args.path, "/home/u/project/a.txt")
+  assert.equal(polled.request.args.limit, 32)
+
+  const sub = bridge.submitResult({
+    tenant: "u:1",
+    deviceId: reg.deviceId,
+    connectionId: reg.connectionId,
+    requestId: polled.request.request_id,
+    consentToken: polled.request.consent_token,
+    result: { path: "/home/u/project/a.txt", text: "hello" },
+  })
+  assert.equal(sub.ok, true)
+
+  const res = await pending
+  assert.equal(res.status, 200)
+  const body = (await res.json()) as Record<string, unknown>
+  assert.equal(body.ok, true)
+  assert.equal(body.tool, "read_file")
+  assert.equal(typeof body.request_id, "string")
+  assert.equal(body.truncated, false)
+  assert.equal(typeof body.bytes, "number")
+  // finalizeDeviceResult 對含 text 的結果會補 `truncated` 後設欄位（既有語義，非本路由）。
+  const result = body.result as { path: string; text: string }
+  assert.equal(result.path, "/home/u/project/a.txt")
+  assert.equal(result.text, "hello")
+})
+
+test("/internal/device/invoke: session 解析不到 → session_unknown", async () => {
+  const bridge = new DeviceBridge()
+  const req = new Request("http://gw.internal/internal/device/invoke?session_id=nope", { method: "POST", body: JSON.stringify({ op: "stat", path: "/tmp/a" }) })
+  const res = await handleInternalDeviceInvoke(req, internalDeps(bridge))
+  assert.equal(res.status, 404)
+  const body = (await res.json()) as { ok: boolean; error: { code: string } }
+  assert.equal(body.ok, false)
+  assert.equal(body.error.code, "session_unknown")
+})
+
+test("/internal/device/invoke: resolver 拋錯 → session_unknown（fail-closed，不外洩）", async () => {
+  const bridge = new DeviceBridge()
+  const req = new Request("http://gw.internal/internal/device/invoke?session_id=sess_ok", { method: "POST", body: JSON.stringify({ op: "stat", path: "/tmp/a" }) })
+  const res = await handleInternalDeviceInvoke(req, { bridge, resolveTenant: async () => { throw new Error("db down") } })
+  assert.equal(res.status, 404)
+  const body = (await res.json()) as { error: { code: string } }
+  assert.equal(body.error.code, "session_unknown")
+})
+
+test("/internal/device/invoke: 租戶無裝置 → no_device_registered", async () => {
+  const bridge = new DeviceBridge()
+  const req = new Request("http://gw.internal/internal/device/invoke?session_id=sess_ok", { method: "POST", body: JSON.stringify({ op: "stat", path: "/tmp/a" }) })
+  const res = await handleInternalDeviceInvoke(req, internalDeps(bridge))
+  assert.equal(res.status, 404)
+  const body = (await res.json()) as { error: { code: string } }
+  assert.equal(body.error.code, "no_device_registered")
+})
+
+test("/internal/device/invoke: 裝置離線 → device_offline", async () => {
+  const bridge = new DeviceBridge({ heartbeatTtlMs: 90_000 })
+  bridge.register({ tenant: "u:1", userId: 1, apiKeyHash: "h1", now: Date.now() - 200_000 })
+  const req = new Request("http://gw.internal/internal/device/invoke?session_id=sess_ok", { method: "POST", body: JSON.stringify({ op: "stat", path: "/tmp/a" }) })
+  const res = await handleInternalDeviceInvoke(req, internalDeps(bridge))
+  assert.equal(res.status, 404)
+  const body = (await res.json()) as { error: { code: string } }
+  assert.equal(body.error.code, "device_offline")
+})
+
+test("/internal/device/invoke: 多台多 online → device_ambiguous", async () => {
+  const bridge = new DeviceBridge()
+  bridge.register({ tenant: "u:1", userId: 1, apiKeyHash: "ha", deviceId: "devA" })
+  bridge.register({ tenant: "u:1", userId: 1, apiKeyHash: "hb", deviceId: "devB" })
+  const req = new Request("http://gw.internal/internal/device/invoke?session_id=sess_ok", { method: "POST", body: JSON.stringify({ op: "stat", path: "/tmp/a" }) })
+  const res = await handleInternalDeviceInvoke(req, internalDeps(bridge))
+  assert.equal(res.status, 409)
+  const body = (await res.json()) as { error: { code: string } }
+  assert.equal(body.error.code, "device_ambiguous")
+})
+
+test("/internal/device/invoke: 非白名單 op → tool_not_allowed", async () => {
+  const bridge = new DeviceBridge()
+  bridge.register({ tenant: "u:1", userId: 1, apiKeyHash: "h1" })
+  const req = new Request("http://gw.internal/internal/device/invoke?session_id=sess_ok", { method: "POST", body: JSON.stringify({ op: "write_file", path: "/tmp/a" }) })
+  const res = await handleInternalDeviceInvoke(req, internalDeps(bridge))
+  assert.equal(res.status, 403)
+  const body = (await res.json()) as { error: { code: string } }
+  assert.equal(body.error.code, "tool_not_allowed")
+})
+
+test("/internal/device/invoke: denylist 仍生效（敏感路徑 → sensitive_path）", async () => {
+  const bridge = new DeviceBridge()
+  bridge.register({ tenant: "u:1", userId: 1, apiKeyHash: "h1", roots: ["/home/u/project"] })
+  const req = new Request("http://gw.internal/internal/device/invoke?session_id=sess_ok", {
+    method: "POST",
+    body: JSON.stringify({ op: "read_file", path: "/home/u/.ssh/id_rsa" }),
+  })
+  const res = await handleInternalDeviceInvoke(req, internalDeps(bridge))
+  assert.equal(res.status, 403)
+  const body = (await res.json()) as { error: { code: string } }
+  assert.equal(body.error.code, "sensitive_path")
+})
+
+test("/internal/device/invoke: 授權根仍生效（授權根外 → path_not_authorized）", async () => {
+  const bridge = new DeviceBridge()
+  bridge.register({ tenant: "u:1", userId: 1, apiKeyHash: "h1", roots: ["/home/u/project"] })
+  // 註：共享 denylist 不含裸 `/etc/passwd`（見向量表；兩端一致，非缺口）——
+  // 這裡要驗的是**授權根**這道防線，故以授權根外的 grep 遞迴根證明。
+  const req = new Request("http://gw.internal/internal/device/invoke?session_id=sess_ok", {
+    method: "POST",
+    body: JSON.stringify({ op: "grep", path: "/etc", pattern: "root" }),
+  })
+  const res = await handleInternalDeviceInvoke(req, internalDeps(bridge))
+  assert.equal(res.status, 403)
+  const body = (await res.json()) as { error: { code: string } }
+  assert.equal(body.error.code, "path_not_authorized")
+})
+
+test("/internal/device/invoke: 缺 session_id / 缺 op / 壞 body → bad_request", async () => {
+  const bridge = new DeviceBridge()
+  const noSid = await handleInternalDeviceInvoke(
+    new Request("http://gw.internal/internal/device/invoke", { method: "POST", body: "{}" }),
+    internalDeps(bridge),
+  )
+  assert.equal(noSid.status, 400)
+  const noOp = await handleInternalDeviceInvoke(
+    new Request("http://gw.internal/internal/device/invoke?session_id=sess_ok", { method: "POST", body: "{}" }),
+    internalDeps(bridge),
+  )
+  assert.equal(noOp.status, 400)
+  const badBody = await handleInternalDeviceInvoke(
+    new Request("http://gw.internal/internal/device/invoke?session_id=sess_ok", { method: "POST", body: "not-json" }),
+    internalDeps(bridge),
+  )
+  assert.equal(badBody.status, 400)
+})
+
+test("/internal/device/invoke: 裝置在線但不回 result → device_timeout（不 hang）", async () => {
+  const bridge = new DeviceBridge({ requestTimeoutMs: 60 })
+  bridge.register({ tenant: "u:1", userId: 1, apiKeyHash: "h1" })
+  const req = new Request("http://gw.internal/internal/device/invoke?session_id=sess_ok", {
+    method: "POST",
+    body: JSON.stringify({ op: "stat", path: "/tmp/a" }),
+  })
+  const started = Date.now()
+  const res = await handleInternalDeviceInvoke(req, internalDeps(bridge))
+  const elapsed = Date.now() - started
+  assert.equal(res.status, 504)
+  const body = (await res.json()) as { error: { code: string } }
+  assert.equal(body.error.code, "device_timeout")
+  // 必須在逾時附近就返回（不永久 pending）；給足餘裕以免 CI 抖動誤判。
+  assert.ok(elapsed < 5_000, `elapsed=${elapsed}ms`)
+  assert.equal(bridge.stats().pending, 0)
+})
+
+test("/internal/device/status: 無裝置 → device:null；有裝置 → 凍結形狀", async () => {
+  const T = 1_000_000
+  const bridge = new DeviceBridge({ heartbeatTtlMs: 90_000 })
+  const none = await handleInternalDeviceStatus(
+    new Request("http://gw.internal/internal/device/status?session_id=sess_ok", { method: "GET" }),
+    internalDeps(bridge, { sess_ok: "u:1" }),
+  )
+  assert.equal(none.status, 200)
+  assert.deepEqual(await none.json(), { ok: true, device: null })
+
+  bridge.register({ tenant: "u:1", userId: 1, apiKeyHash: "h1", roots: ["/home/u/project"], now: Date.now() })
+  const has = await handleInternalDeviceStatus(
+    new Request("http://gw.internal/internal/device/status?session_id=sess_ok", { method: "GET" }),
+    internalDeps(bridge, { sess_ok: "u:1" }),
+  )
+  assert.equal(has.status, 200)
+  const body = (await has.json()) as { ok: boolean; device: { online: boolean; roots: string[]; last_heartbeat_ms: number } }
+  assert.equal(body.ok, true)
+  assert.equal(body.device.online, true)
+  assert.deepEqual(body.device.roots, ["/home/u/project"])
+  assert.equal(typeof body.device.last_heartbeat_ms, "number")
+})
+
+test("/internal/device/status: session 解析不到 → session_unknown", async () => {
+  const bridge = new DeviceBridge()
+  const res = await handleInternalDeviceStatus(
+    new Request("http://gw.internal/internal/device/status?session_id=nope", { method: "GET" }),
+    internalDeps(bridge),
+  )
+  assert.equal(res.status, 404)
+  const body = (await res.json()) as { error: { code: string } }
+  assert.equal(body.error.code, "session_unknown")
+})
+
+test("內部路由不放寬既有 denylist／白名單：op 白名單與 policy 工具集一致", () => {
+  // 一對一映射的守門：內部 op 集合必須恰好等於既有 DeviceBridgeTool 白名單。
+  const tools = ["list_dir", "read_file", "grep", "stat"]
+  for (const t of tools) assert.equal(isToolAllowed(t), true, t)
+  assert.equal(isToolAllowed("write_file"), false)
+  assert.equal(isToolAllowed("delete"), false)
 })
