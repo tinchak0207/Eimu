@@ -16,6 +16,35 @@ const GATEWAY = process.env.GATEWAY_URL || "http://127.0.0.1:8081";
 
 const DEVICE_OPS = ["list_dir", "read_file", "grep", "stat"] as const;
 
+/** 裝置端 list_dir 的既有硬上限（desktop bridge-protocol MAX_LIST_ENTRIES＝閘道 max_entries 上界）。 */
+const DEVICE_LIST_MAX_ENTRIES = 2000;
+/** 裝置端未帶 max_entries 時的預設筆數（desktop bridge-executor MAX_LIST_DEFAULT）。 */
+const DEVICE_LIST_DEFAULT_ENTRIES = 200;
+
+/**
+ * 把簡易 glob（僅 `*`、`?`）轉成整串錨定的 RegExp；其餘字元逐一轉義，
+ * 避免使用者輸入被當成任意正則（不含 `/`，只比對 basename）。
+ */
+function globToRegExp(glob: string): RegExp {
+  let pattern = "^";
+  for (const ch of glob) {
+    if (ch === "*") pattern += ".*";
+    else if (ch === "?") pattern += ".";
+    else pattern += ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+  return new RegExp(pattern + "$");
+}
+
+/**
+ * `name_glob` 匹配器（runtime 端過濾，裝置呼叫完全不變）：
+ * 只比對檔名（basename）、**大小寫敏感**（Linux 真實語義），支援 `*`（任意長度）與
+ * `?`（單一字元）；不得含 `/`。
+ */
+export function nameGlobMatcher(nameGlob: string): (name: string) => boolean {
+  const re = globToRegExp(nameGlob);
+  return (name) => re.test(name);
+}
+
 /**
  * 錯誤碼 → 面向使用者的引導語（繁中）。只在這些碼用引導語；
  * 其餘（session_unknown／bad_request／tool_not_allowed／internal_error）原樣帶出。
@@ -83,7 +112,16 @@ export default tool({
     "**不要**當成失敗，必須把回傳的 options 三段式選項**逐字**列給使用者（允許一次／本會話允許此目錄／永久允許），" +
     "等他明確選一個之後，再用 local_files_authorize 帶入**他選的那個 scope 原樣**授權；" +
     "不得自行替他決定，尤其**不得未經同意選 permanent**。" +
-    "若錯誤碼是 sensitive_path，那是硬性禁止位置，**不能授權**，不要引導使用者去授權它。",
+    "若錯誤碼是 sensitive_path，那是硬性禁止位置，**不能授權**，不要引導使用者去授權它。" +
+    "【列出檔名的硬規矩】" +
+    "① 列出的 name 一律**逐字原樣照抄**：不得簡繁轉換、不得改寫、不得省略括號／空白／大小寫，" +
+    "任何字都不得自行美化或補充。" +
+    "② 使用者說「列出**所有** X（例如所有 .pdf）」時，必須用 op=list_dir 帶 name_glob（例：*.pdf）讓機制過濾，" +
+    "並以回傳的 count 當作數量**直接引用**——**不得自己數**，也不得憑印象增刪清單。" +
+    "③ 若回傳帶 incomplete=true，必須**明白告訴使用者清單不完整**（把 note 照實轉達），" +
+    "不得把不完整清單當成全部交付。" +
+    "④ needs_authorization 的三段式 options 必須**連標點原樣**照抄，尤其「永久允許（加入本機授權清單）」" +
+    "的全形括號與字句不可改成破折號或半形括號。",
   args: {
     op: tool.schema
       .enum(["list_dir", "read_file", "grep", "stat"])
@@ -93,6 +131,13 @@ export default tool({
     path: tool.schema
       .string()
       .describe("使用者電腦上的絕對路徑，必須位於他在桌面版已授權的資料夾內。"),
+    name_glob: tool.schema
+      .string()
+      .optional()
+      .describe(
+        "僅 op=list_dir 適用：在雲端以檔名樣式過濾（支援 * 與 ?，例：*.pdf、*.txt、報告*）。" +
+          "只比對檔名（basename）、大小寫敏感；不可含 /。要「列出所有 X」時必須用它，並引用回傳的 count 當數量。",
+      ),
     pattern: tool.schema
       .string()
       .optional()
@@ -112,11 +157,24 @@ export default tool({
       return fail("bad_request", `不支援的本機檔案操作：${String(op)}（僅限 list_dir/read_file/grep/stat）。`);
     }
 
+    // name_glob 只在雲端 runtime 過濾，**不下發**給閘道／裝置（凍結契約欄位不得增改）。
+    const nameGlob = typeof args.name_glob === "string" ? args.name_glob : "";
+    const useGlob = nameGlob.length > 0;
+    if (useGlob && op !== "list_dir") {
+      return fail("bad_request", `name_glob 僅支援 op=list_dir，不能用於 ${op}。`);
+    }
+    if (useGlob && nameGlob.includes("/")) {
+      return fail("bad_request", "name_glob 只比對檔名（basename），不可包含路徑分隔符號（/）。");
+    }
+
     // 只放行凍結契約欄位；undefined 不下發，讓閘道用自己的預設上限。
     const body: Record<string, unknown> = { op, path: args.path };
     if (args.pattern !== undefined) body.pattern = args.pattern;
     if (args.max_bytes !== undefined) body.max_bytes = args.max_bytes;
     if (args.limit !== undefined) body.limit = args.limit;
+    // 帶 name_glob（＝要「列出所有」）時把 list_dir 的 max_entries 拉到裝置既有上限 2000，
+    // 以免預設 200 筆上限造成靜默漏列；不超過裝置上限，也不改裝置端上限。
+    if (useGlob) body.max_entries = DEVICE_LIST_MAX_ENTRIES;
 
     let res: Response;
     try {
@@ -179,7 +237,44 @@ export default tool({
       truncated,
     };
     if (typeof data.bytes === "number") payload.bytes = data.bytes;
-    if (truncated) {
+
+    if (op === "list_dir") {
+      const rawResult =
+        data.result && typeof data.result === "object" ? (data.result as Record<string, unknown>) : {};
+      if (Array.isArray(rawResult.entries)) {
+        const rawEntries = (rawResult.entries as unknown[]).filter(
+          (e): e is { name: string } =>
+            typeof e === "object" && e !== null && typeof (e as { name?: unknown }).name === "string",
+        );
+        const total = rawEntries.length; // 裝置回的總項數（過濾前）
+        const entries = useGlob
+          ? rawEntries.filter((e) => nameGlobMatcher(nameGlob)(e.name))
+          : rawEntries;
+        const count = entries.length; // 本次回傳的 entries 數（過濾後＝匹配數）
+        // 把機制算好的過濾清單與計數寫回 result，模型只需照抄。
+        payload.result = { ...rawResult, entries, count };
+        payload.count = count;
+        payload.total = total;
+        // 截斷痕跡：閘道已標 truncated，或裝置回滿列舉上限（請求 2000；另防閘道未下發
+        // max_entries、裝置沿用預設 200 造成的漏列）。只在 name_glob 有給時報 incomplete。
+        const capHit = total >= DEVICE_LIST_MAX_ENTRIES || total === DEVICE_LIST_DEFAULT_ENTRIES;
+        if (useGlob && (truncated || capHit)) {
+          payload.incomplete = true;
+          payload.note =
+            `清單不完整：裝置只回傳 ${total} 項` +
+            (truncated ? "（內容超過單次傳輸上限）" : "（已達單次列舉上限）") +
+            `，可能還有符合「${nameGlob}」的項目未列出；請縮小目錄範圍或改列子目錄後再試。`;
+        } else if (useGlob) {
+          payload.note =
+            `檔名符合「${nameGlob}」的項目共 ${count} 項（裝置回傳 ${total} 項）。` +
+            "列出時請逐字照抄 name，不得改寫、轉換或省略。";
+        }
+      } else if (useGlob) {
+        // 內容過大被閘道截斷、拿不到 entries 陣列：不得靜默給清單。
+        payload.incomplete = true;
+        payload.note = `清單不完整：裝置回傳內容過大被截斷，無法完整列出符合「${nameGlob}」的項目；請縮小目錄範圍後再試。`;
+      }
+    } else if (truncated) {
       payload.note = "內容超過單次讀取上限，已截斷；如需更多內容請縮小範圍或分段讀取。";
     }
     return ok(payload);
